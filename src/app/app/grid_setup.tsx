@@ -366,8 +366,28 @@ export function StagesGate({
 
       <div className="grid gap-2">
         <span className="text-[11px] font-semibold uppercase tracking-wide text-ink-3">
-          All stages - the recommended set is ticked; keep any others that fit
+          All stages - the recommended set is ticked
         </span>
+        <div className="rounded-lg border border-line bg-surface-1 px-3.5 py-2.5 grid gap-1.5 text-[12px] text-ink-2 leading-relaxed max-w-3xl">
+          <p>
+            The ticked stages are the decision moments your category&apos;s buyers
+            actually reach. You can keep a stage the rules skipped if your own
+            judgement says buyers get there - the rules are a starting point, not a
+            limit.
+          </p>
+          <p>
+            Ticking everything is not free, even when cost isn&apos;t the concern. A
+            stage that doesn&apos;t exist for your buyers still gets answered by every
+            engine, and the result looks like measurement without being one: it
+            dilutes your layer scores and funnel, buries real gaps under rows nobody
+            asks about, and adds noise to your trend. Comparison and &quot;Is premium
+            worth it&quot; are two versions of the same moment - keep one.
+          </p>
+          <p className="text-ink-3">
+            If a skipped stage looks wrong, the category read above is usually what&apos;s
+            off - change the read and the whole set recomposes consistently.
+          </p>
+        </div>
         <div className="grid gap-3 sm:grid-cols-3">
           {LAYERS.map((layer) => {
             const stages = state.stages.filter((s) => s.layer === layer);
@@ -381,7 +401,11 @@ export function StagesGate({
                   const kept = state.keptStages.includes(s.key);
                   const rec = s.recommended !== false;
                   return (
-                    <label key={s.key} className="flex items-center gap-2 text-[13px]">
+                    <label
+                      key={s.key}
+                      className="flex items-center gap-2 text-[13px]"
+                      title={rec ? undefined : "Skipped by the rules for this category - keep it only if your buyers really reach this moment"}
+                    >
                       <input
                         type="checkbox"
                         checked={kept}
