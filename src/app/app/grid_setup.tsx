@@ -705,17 +705,20 @@ export function ScenariosGate({
   );
 }
 
-/** Step "Coverage map": the base read (context only - it is set on the
- * scenarios step) and the stage × scenario matrix. Columns are read-only
- * here - scenarios are the previous step; stage ticks are the only control
- * (A8: no dot painting, participation stays derived). */
+/** Step "Coverage map": the base read (home is the scenarios step, but it
+ * stays editable here too - this is where a change shows its consequences
+ * in the mask) and the stage × scenario matrix. Columns are read-only
+ * here - scenarios are the previous step; stage ticks are the only other
+ * control (A8: no dot painting, participation stays derived). */
 export function CoverageGate({
-  state, setState, busy,
+  state, setState, onRecompose, busy,
 }: {
   state: GridState;
   setState: (s: GridState) => void;
+  onRecompose: (base: GridState["moderators"], rows: ScenarioRow[]) => void;
   busy: boolean;
 }) {
+  const [editRead, setEditRead] = useState(false);
   const [showSkipped, setShowSkipped] = useState(false);
   const rows = scenarioRows(state);
   const active = rows.filter((r) => r.on);
@@ -793,8 +796,44 @@ export function CoverageGate({
         <span className="text-[11px] font-semibold uppercase tracking-wide text-ink-3">
           Your market buys:
         </span>
-        <span className="text-ink-2">{readSentence}</span>
-        <span className="text-[11px] text-ink-3">(set on the previous step)</span>
+        {!editRead ? (
+          <>
+            <span className="text-ink-2">{readSentence}</span>
+            <button
+              type="button"
+              onClick={() => setEditRead(true)}
+              className="text-[13px] font-medium text-primary hover:opacity-80"
+            >
+              change
+            </button>
+          </>
+        ) : (
+          <span className="flex flex-wrap items-center gap-1.5">
+            {MODERATOR_FIELDS.map((f) => (
+              <select
+                key={f.key}
+                aria-label={f.key.replace("_", " ")}
+                value={String(state.moderators[f.key] ?? "")}
+                disabled={busy}
+                onChange={(e) =>
+                  onRecompose({ ...state.moderators, [f.key]: e.target.value }, rows)
+                }
+                className="rounded-full bg-primary-soft px-2 py-0.5 text-[11px] font-medium text-primary border-0 cursor-pointer"
+              >
+                {f.options.map(([k, label]) => (
+                  <option key={k} value={k}>{label}</option>
+                ))}
+              </select>
+            ))}
+            <button
+              type="button"
+              onClick={() => setEditRead(false)}
+              className="text-[13px] font-medium text-ink-3 hover:text-ink"
+            >
+              done
+            </button>
+          </span>
+        )}
       </div>
 
       <div className="overflow-x-auto rounded-lg border border-line">
