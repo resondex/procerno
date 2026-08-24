@@ -73,11 +73,18 @@ export interface ScenarioRow {
   suggested: boolean;
   /** Whether this column is in the grid. */
   on: boolean;
-  /** The suggestion as generated, for "reset to suggested". */
+  /** The suggestion as generated, for "reset to suggested" and for telling
+   * an edited row from an untouched one. */
   original?: { label: string; description: string };
+  /** Near-neighbor draws used on this card (capped at MAX_VARIANTS). */
+  variants?: number;
+  /** Earlier versions of this card, excluded from later draws. */
+  tried?: { label: string; description: string }[];
 }
 
 export const MAX_SCENARIOS = 4;
+/** Near-neighbor draws per card before we ask the user to write their own. */
+export const MAX_VARIANTS = 3;
 
 export interface GridState {
   step: "compose" | "cells" | "phrasings";
@@ -359,6 +366,51 @@ export function useGridSetup(a: GridSetupArgs) {
     }
   }
 
+  /** Gate 1 helper: a near variant of one card - same circumstance, one
+   * detail moved. Replaces the card in place; earlier versions go to its
+   * `tried` list so successive draws keep moving. */
+  async function nearScenario(i: number): Promise<void> {
+    if (!a.state) return;
+    const rows = scenarioRows(a.state);
+    const row = rows[i];
+    if (!row?.label.trim() || (row.variants ?? 0) >= MAX_VARIANTS) return;
+    a.setBusy("Finding a near neighbor…");
+    a.setError(null);
+    const exclude = [
+      ...rows.map(({ label, description }) => ({ label, description })),
+      ...(row.tried ?? []),
+    ].filter((s) => s.label.trim()).slice(-24);
+    const data = await post<{ scenario: { label: string; description: string } }>(
+      "/api/setup/grid/scenario",
+      {
+        category: a.category,
+        audience: a.audience || undefined,
+        decisionUnit: a.state.moderators.decision_unit,
+        exclude,
+        nearTo: { label: row.label, description: row.description },
+      }
+    );
+    a.setBusy(null);
+    if (!data) return;
+    const nextRows = rows.map((r, j) =>
+      j === i
+        ? {
+            ...r,
+            label: data.scenario.label,
+            description: data.scenario.description,
+            original: { ...data.scenario },
+            variants: (r.variants ?? 0) + 1,
+            tried: [...(r.tried ?? []), { label: r.label, description: r.description }],
+          }
+        : r
+    );
+    if (row.on) {
+      await compose({ base: a.state.moderators, rows: nextRows });
+    } else {
+      a.setState(withScenarioRows(a.state, nextRows));
+    }
+  }
+
   /** Gate 2: one seed prompt per masked cell. */
   async function writeCells(): Promise<GridState | null> {
     if (!a.state) return null;
@@ -434,7 +486,7 @@ export function useGridSetup(a: GridSetupArgs) {
     return next;
   }
 
-  return { compose, writeCells, writePhrasings, suggestScenario };
+  return { compose, writeCells, writePhrasings, suggestScenario, nearScenario };
 }
 
 /* -------------------------------- views --------------------------------- */
@@ -469,12 +521,14 @@ function TagChip({ tag }: { tag: GridStage["tag"] }) {
 /** Step "Buying scenarios": one card per scenario - tick, label,
  * description, and the journey. Nothing else competes for the screen. */
 export function ScenariosGate({
-  state, setState, onRecompose, onSuggestScenario, busy,
+  state, setState, onRecompose, onSuggestScenario, onNearScenario, busy,
 }: {
   state: GridState;
   setState: (s: GridState) => void;
   onRecompose: (base: GridState["moderators"], rows: ScenarioRow[]) => void;
   onSuggestScenario: () => void;
+  /** Draw a near variant of card i - same circumstance, one detail moved. */
+  onNearScenario: (i: number) => void;
   busy: boolean;
 }) {
   const [editRead, setEditRead] = useState(false);
@@ -636,6 +690,29 @@ export function ScenariosGate({
                 placeholder="one sentence describing the circumstance"
                 onChange={(e) => updateRow(i, { description: e.target.value })}
               />
+              {sc.label.trim() !== "" &&
+                ((sc.variants ?? 0) < MAX_VARIANTS ? (
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      disabled={busy}
+                      onClick={() => onNearScenario(i)}
+                      title="Right idea, wrong details? Draw a close variant of this scenario"
+                      className="text-[11px] font-medium text-primary hover:opacity-80 disabled:opacity-50"
+                    >
+                      ≈ Near neighbor
+                    </button>
+                    {(sc.variants ?? 0) > 0 && (
+                      <span className="text-[10px] text-ink-3">
+                        {MAX_VARIANTS - (sc.variants ?? 0)} left
+                      </span>
+                    )}
+                  </div>
+                ) : (
+                  <span className="text-[10px] text-ink-3">
+                    {MAX_VARIANTS} variations tried - edit the text above to make it yours
+                  </span>
+                ))}
               {sc.journey && sc.on && (
                 <div className="flex flex-wrap items-center gap-1.5">
                   <span className="text-[10px] uppercase tracking-wide text-warning font-semibold">this buyer:</span>
@@ -708,6 +785,81 @@ export function ScenariosGate({
         >
           Reset to suggested
         </button>
+      </div>
+    </div>
+  );
+}
+
+/** One flagged scenario in the pre-advance quality check. */
+export interface ScenarioReviewItem {
+  /** Row index in the scenario table. */
+  index: number;
+  current: { label: string; description: string };
+  reason: string;
+  suggestion: { label: string; description: string };
+  choice: "suggestion" | "mine";
+}
+
+/** Overlay shown when the gate-confirm quality check flags user-authored
+ * scenarios: each gets the reviewer's reason and a side-by-side choice
+ * between the suggested edit (default) and the user's own wording. */
+export function ScenarioReviewModal({
+  items, onChoice, onBack, onContinue, busy,
+}: {
+  items: ScenarioReviewItem[];
+  onChoice: (k: number, choice: ScenarioReviewItem["choice"]) => void;
+  onBack: () => void;
+  onContinue: () => void;
+  busy: boolean;
+}) {
+  const option = (
+    k: number, it: ScenarioReviewItem,
+    choice: ScenarioReviewItem["choice"], title: string,
+    s: { label: string; description: string }
+  ) => (
+    <button
+      type="button"
+      onClick={() => onChoice(k, choice)}
+      className={`flex-1 rounded-lg border px-3 py-2 text-left grid gap-1 ${
+        it.choice === choice ? "border-primary bg-primary-soft/40" : "border-line bg-surface hover:border-ink-3"
+      }`}
+    >
+      <span className="text-[10px] font-semibold uppercase tracking-wide text-ink-3">{title}</span>
+      <span className="text-[13px] font-medium">{s.label}</span>
+      <span className="text-[12px] text-ink-3">{s.description}</span>
+    </button>
+  );
+  return (
+    <div className="absolute inset-0 z-20 grid place-items-center bg-black/30 p-6">
+      <div className="w-full max-w-2xl max-h-full overflow-y-auto rounded-xl border border-line bg-surface p-5 grid gap-4 shadow-lg">
+        <div className="grid gap-1">
+          <h3 className="text-[15px] font-semibold">A quick check on your scenarios</h3>
+          <p className="text-[12px] text-ink-3">
+            These are yours to call - pick either side and continue.
+          </p>
+        </div>
+        {items.map((it, k) => (
+          <div key={it.index} className="grid gap-2">
+            <p className="text-[12px] text-warning">{it.reason}</p>
+            <div className="flex flex-col sm:flex-row gap-2">
+              {option(k, it, "suggestion", "Suggested edit", it.suggestion)}
+              {option(k, it, "mine", "Keep mine", it.current)}
+            </div>
+          </div>
+        ))}
+        <div className="flex items-center justify-end gap-4">
+          <button
+            type="button"
+            onClick={onBack}
+            disabled={busy}
+            className="text-[13px] font-medium text-ink-3 hover:text-ink disabled:opacity-50"
+          >
+            Back to editing
+          </button>
+          <button type="button" onClick={onContinue} disabled={busy} className="btn-primary">
+            Continue
+          </button>
+        </div>
       </div>
     </div>
   );

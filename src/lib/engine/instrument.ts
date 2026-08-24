@@ -569,6 +569,171 @@ export async function suggestScenario(input: {
   return fresh;
 }
 
+/**
+ * A near variant of one scenario: same general circumstance, one concrete
+ * detail moved. The card's "Near neighbor" draw - the user likes the idea
+ * but wants it slightly different. Cached by what it varied and what it
+ * had to avoid, so each successive draw (growing avoid list) is a new
+ * variant and repeat categories hit the cache.
+ */
+export async function nearScenario(input: {
+  category: string;
+  audience: string | null;
+  of: Situation;
+  exclude: Situation[];
+}): Promise<Situation | null> {
+  const avoid = input.exclude.map((s) => s.label.trim().toLowerCase()).filter(Boolean).sort();
+  const key = cacheKey("scenario_near", [
+    input.category, input.audience, input.of.label, input.of.description, avoid.join("|"),
+  ]);
+  const hit = await store.cacheGet(key, CACHE_TTL_MS);
+  if (hit) return JSON.parse(hit) as Situation;
+  const res = await openaiClient().chat.completions.create({
+    model: MODEL,
+    messages: [
+      {
+        role: "system",
+        content:
+          "Propose exactly ONE near variant of a given buyer situation for " +
+          "a research instrument. Keep its general circumstance - the same " +
+          "axis - and move ONE concrete detail (scale, constraint, occasion, " +
+          "composition, use-case) so it reads noticeably but not radically " +
+          "different. It must still change what a competent advisor would " +
+          "recommend, stay about the decision (never the speaker), and " +
+          "differ from everything already listed. Label 2-4 plain words; " +
+          "description one short sentence.",
+      },
+      {
+        role: "user",
+        content:
+          `Category: ${input.category}\nAudience: ${input.audience ?? "unknown"}\n` +
+          `Vary this situation:\n- ${input.of.label}: ${input.of.description}\n` +
+          `Already listed (avoid all of these):\n${input.exclude.map((s) => `- ${s.label}: ${s.description}`).join("\n") || "- (none)"}`,
+      },
+    ],
+    response_format: {
+      type: "json_schema",
+      json_schema: { name: "situations", strict: true, schema: SITUATIONS_SCHEMA },
+    },
+  });
+  const parsed = JSON.parse(res.choices[0]?.message?.content ?? "{}") as {
+    situations: Situation[];
+  };
+  const fresh = (parsed.situations ?? []).find(
+    (s) => s.label.trim() && !avoid.includes(s.label.trim().toLowerCase())
+  );
+  if (!fresh) return null;
+  await store.cacheSet(key, JSON.stringify(fresh));
+  return fresh;
+}
+
+export interface ScenarioVerdict {
+  ok: boolean;
+  /** One plain-language sentence addressed to the user; empty when ok. */
+  reason: string;
+  /** Minimal edit preserving the user's intent; repeats the input when ok. */
+  suggestion: Situation;
+}
+
+const REVIEW_SCHEMA = {
+  type: "object",
+  additionalProperties: false,
+  properties: {
+    verdicts: {
+      type: "array",
+      items: {
+        type: "object",
+        additionalProperties: false,
+        properties: {
+          ok: { type: "boolean" },
+          reason: { type: "string" },
+          suggestion: {
+            type: "object",
+            additionalProperties: false,
+            properties: {
+              label: { type: "string" },
+              description: { type: "string" },
+            },
+            required: ["label", "description"],
+          },
+        },
+        required: ["ok", "reason", "suggestion"],
+      },
+    },
+  },
+  required: ["verdicts"],
+} as const;
+
+/**
+ * Quality check on user-written or user-edited scenarios, run once at the
+ * gate confirm. Same admission test the generator works to; a failed
+ * candidate comes back with a one-sentence reason and a minimal suggested
+ * edit that preserves the user's evident intent.
+ */
+export async function reviewScenarios(input: {
+  category: string;
+  audience: string | null;
+  candidates: Situation[];
+  others: Situation[];
+}): Promise<ScenarioVerdict[]> {
+  const fp = (s: Situation) => `${s.label.trim()}|${s.description.trim()}`;
+  const key = cacheKey("scenario_review", [
+    input.category, input.audience,
+    input.candidates.map(fp).join("~"), input.others.map(fp).sort().join("~"),
+  ]);
+  const hit = await store.cacheGet(key, CACHE_TTL_MS);
+  if (hit) return JSON.parse(hit) as ScenarioVerdict[];
+  const res = await openaiClient().chat.completions.create({
+    model: MODEL,
+    messages: [
+      {
+        role: "system",
+        content:
+          "Quality-check buying scenarios a user wrote for a research " +
+          "instrument over a category's buying decision. A good scenario: " +
+          "describes a buyer circumstance that changes what a competent " +
+          "advisor would recommend; is about the decision, never about the " +
+          "speaker's identity or the product itself; is ONE axis of " +
+          "circumstance; stays inside the category (a different product or " +
+          "market is not a scenario); is distinct from the other scenarios " +
+          "on the table; label 2-4 plain words; description one short " +
+          "sentence in plain buyer language. Judge each candidate. Accept " +
+          "anything reasonable - this is a safety net for confused or empty " +
+          "entries, not a style gate. When ok is false, give reason as ONE " +
+          "sentence in plain language addressed to the user, and suggestion " +
+          "as the MINIMAL edit that keeps the user's evident intent. When " +
+          "ok is true, reason is an empty string and suggestion repeats the " +
+          "candidate verbatim. Return verdicts in the candidates' order, " +
+          "one per candidate.",
+      },
+      {
+        role: "user",
+        content:
+          `Category: ${input.category}\nAudience: ${input.audience ?? "unknown"}\n` +
+          `Other scenarios already on the table:\n${input.others.map((s) => `- ${s.label}: ${s.description}`).join("\n") || "- (none)"}\n` +
+          `Candidates to check:\n${input.candidates.map((s, i) => `${i + 1}. ${s.label}: ${s.description}`).join("\n")}`,
+      },
+    ],
+    response_format: {
+      type: "json_schema",
+      json_schema: { name: "scenario_review", strict: true, schema: REVIEW_SCHEMA },
+    },
+  });
+  const parsed = JSON.parse(res.choices[0]?.message?.content ?? "{}") as {
+    verdicts: ScenarioVerdict[];
+  };
+  // A missing or malformed verdict never blocks the user.
+  const verdicts = input.candidates.map((c, i) => {
+    const v = (parsed.verdicts ?? [])[i];
+    if (!v || typeof v.ok !== "boolean" || !v.suggestion?.label?.trim()) {
+      return { ok: true, reason: "", suggestion: c };
+    }
+    return v;
+  });
+  await store.cacheSet(key, JSON.stringify(verdicts));
+  return verdicts;
+}
+
 /* -------------------------------- cells --------------------------------- */
 
 export interface GridCell {
