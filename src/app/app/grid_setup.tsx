@@ -499,7 +499,7 @@ export function ScenariosGate({
     setRows(rows.map((r, j) => (j === i ? { ...r, ...patch } : r)), recompose);
 
   return (
-    <div className="grid gap-3 max-w-2xl">
+    <div className="grid gap-3 max-w-4xl">
       <div className="flex flex-wrap items-baseline gap-2 text-[13px]">
         <span className="text-[11px] font-semibold uppercase tracking-wide text-ink-3">
           Your market buys:
@@ -549,7 +549,11 @@ export function ScenariosGate({
         exactly what each will be asked. Every scenario is asked in the
         buying style above unless it is marked as buying differently - a
         different style means that buyer goes through different stages, so
-        its column gets its own set of questions.
+        its column gets its own set of questions. One scenario per
+        Landscape can buy differently: a second buyer with its own style
+        isn&apos;t an exception, it&apos;s a second market - and gets its
+        own Landscape, so each grid stays readable and every result traces
+        to one kind of buyer.
       </p>
       {rows.map((sc, i) => (
         <div
@@ -604,7 +608,11 @@ export function ScenariosGate({
                       )
                     }
                   />
-                  buys differently
+                  {deviatingLabel !== null && deviatingLabel !== sc.label ? (
+                    <span className="opacity-60">buys differently · one per Landscape</span>
+                  ) : (
+                    "buys differently"
+                  )}
                 </label>
                 {sc.suggested ? (
                   <span className="w-5 text-center text-[10px] font-medium uppercase tracking-wide text-primary/70" title="suggested - untick to leave it out">
