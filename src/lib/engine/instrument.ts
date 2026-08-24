@@ -22,6 +22,10 @@ import { store } from "../store";
  */
 
 const MODEL = process.env.SUGGEST_MODEL ?? "gpt-5-mini";
+/** The market read runs on the full model: it is one cached call per
+ * category carrying the most leverage in the pipeline - mini's economy
+ * is for the high-volume mechanical calls (cells, phrasings, variants). */
+const READ_MODEL = process.env.READ_MODEL ?? "gpt-5";
 const CACHE_TTL_MS = 183 * 24 * 3600 * 1000;
 // Version the cache: composer-rule or prompt-style changes must not serve
 // grids built under old rules.
@@ -421,13 +425,13 @@ export async function readScenarios(input: {
   category: string;
   audience: string | null;
 }): Promise<{ base: Moderators; scenarios: ScenarioSpec[]; reserve: ScenarioSpec[] }> {
-  // "scenarios_journeys5": deviation-coherence rules + plain-language label
+  // "scenarios_journeys6": deviation-coherence rules + plain-language label
   // rule (no methodology words) changed the read.
-  const key = cacheKey("scenarios_journeys5", [input.category, input.audience]);
+  const key = cacheKey("scenarios_journeys6", [input.category, input.audience]);
   const hit = await store.cacheGet(key, CACHE_TTL_MS);
   if (hit) return JSON.parse(hit) as { base: Moderators; scenarios: ScenarioSpec[]; reserve: ScenarioSpec[] };
   const res = await openaiClient().chat.completions.create({
-    model: MODEL,
+    model: READ_MODEL,
     messages: [
       {
         role: "system",
@@ -468,7 +472,20 @@ export async function readScenarios(input: {
           "not a small team. The DEFAULT is no deviation: most " +
           "markets have ZERO deviating scenarios; at most one, and only " +
           "among the first four. When " +
-          "deviates is false, journey just repeats the base values.",
+          "deviates is false, journey just repeats the base values.\n" +
+          "What good looks like - each scenario is a room the client's " +
+          "brand has to win, vivid enough that a strategist would present " +
+          "it by name. For 'email marketing platforms / e-commerce brands' " +
+          "the core set might be: 'First store setup' (a shop owner wiring " +
+          "up email before launch weekend), 'Agency managing brands' (one " +
+          "team running campaigns for a dozen clients), 'Outgrowing the " +
+          "starter tool' (lists too big, automations too crude, " +
+          "deliverability slipping), 'Marketing team consolidation' " +
+          "(email, SMS and reviews pulled into one stack under one budget " +
+          "owner). Notice: concrete moments, different axes, each changes " +
+          "what an advisor recommends, none is a demographic. Write YOUR " +
+          "category at that standard - the example is a bar for quality, " +
+          "never a template for content.",
       },
       {
         role: "user",
