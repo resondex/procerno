@@ -2,32 +2,46 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { requireAuth } from "@/lib/auth";
 import { apiKeyConfigured } from "@/lib/engine/providers";
-import { mergedStageLibrary, generateGrid, type MarketMode, type Moderators } from "@/lib/engine/instrument";
+import {
+  generateGrid,
+  participationMask,
+  type Journey,
+  type Moderators,
+  type ScenarioSpec,
+} from "@/lib/engine/instrument";
 
 export const maxDuration = 120;
+
+const JourneyShape = z.object({
+  involvement: z.enum(["considered", "habitual"]),
+  verifiability: z.enum(["spec", "taste", "trust"]),
+  think_feel: z.enum(["think", "feel"]),
+  decision_unit: z.enum(["solo", "household", "committee"]),
+});
 
 const Body = z.object({
   brand: z.string().trim().min(1).max(80),
   category: z.string().trim().min(1).max(120),
   competitors: z.array(z.string().trim().min(1).max(80)).max(8),
   audience: z.string().trim().max(160).optional(),
-  moderators: z.record(z.string(), z.unknown()),
-  /** The market's buyer modes as confirmed at gate 1; falls back to the
-   * single moderators read for older clients. */
-  modes: z
-    .array(z.object({ label: z.string().trim().max(40), moderators: z.record(z.string(), z.unknown()) }))
-    .min(1)
-    .max(2)
-    .optional(),
-  /** Stage keys the user kept at gate 1; composition is recomputed server
-   * side from the modes so stage hints never leave the engine. */
-  stageKeys: z.array(z.string().trim().min(1)).min(1).max(30),
+  base: z.record(z.string(), z.unknown()),
+  /** The ACTIVE scenarios as confirmed at gate 1, with their journeys. */
   scenarios: z
-    .array(z.object({ label: z.string().trim().min(1).max(60), description: z.string().trim().max(240) }))
+    .array(
+      z.object({
+        label: z.string().trim().min(1).max(60),
+        description: z.string().trim().max(240),
+        journey: JourneyShape.nullable(),
+      })
+    )
+    .min(1)
     .max(4),
+  /** Stage keys the user kept at gate 1; the mask is recomputed server
+   * side from the journeys so stage hints never leave the engine. */
+  stageKeys: z.array(z.string().trim().min(1)).min(1).max(30),
 });
 
-/** Gate 2: write one seed prompt per cell for the confirmed stages and scenarios. */
+/** Gate 2: write one seed prompt per masked cell for the confirmed read. */
 export async function POST(req: Request) {
   const auth = await requireAuth();
   if (auth instanceof NextResponse) return auth;
@@ -38,14 +52,11 @@ export async function POST(req: Request) {
   if (!parsed.success) {
     return NextResponse.json({ error: "bad request" }, { status: 400 });
   }
-  const { brand, category, competitors, audience, stageKeys, scenarios } = parsed.data;
-  const moderators = parsed.data.moderators as unknown as Moderators;
-  const modes: MarketMode[] = parsed.data.modes
-    ? (parsed.data.modes as unknown as MarketMode[])
-    : [{ label: "Buyers", moderators }];
+  const { brand, category, competitors, audience, stageKeys } = parsed.data;
+  const base = parsed.data.base as unknown as Moderators;
+  const scenarios = parsed.data.scenarios as unknown as (ScenarioSpec & { journey: Journey | null })[];
   const kept = new Set(stageKeys);
-  // Merged rows keep their mode tag; the planner stamps it onto every cell.
-  const stages = mergedStageLibrary(modes).filter((s) => kept.has(s.key));
+  const stages = participationMask(base, scenarios).filter((s) => kept.has(s.key));
   if (stages.length === 0) {
     return NextResponse.json({ error: "keep at least one stage" }, { status: 400 });
   }
@@ -54,10 +65,9 @@ export async function POST(req: Request) {
     category,
     competitors,
     audience: audience || null,
-    moderators: modes[0].moderators,
-    modes,
+    base,
+    scenarios,
     stages,
-    situations: scenarios,
   });
   return NextResponse.json({ cells });
 }

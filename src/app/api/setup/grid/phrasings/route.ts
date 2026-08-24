@@ -2,23 +2,40 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { requireAuth } from "@/lib/auth";
 import { apiKeyConfigured } from "@/lib/engine/providers";
-import { generatePhrasings, type MarketMode, type Moderators } from "@/lib/engine/instrument";
+import {
+  generatePhrasings,
+  type Journey,
+  type Moderators,
+  type ScenarioSpec,
+} from "@/lib/engine/instrument";
 
 export const maxDuration = 120;
+
+const JourneyShape = z.object({
+  involvement: z.enum(["considered", "habitual"]),
+  verifiability: z.enum(["spec", "taste", "trust"]),
+  think_feel: z.enum(["think", "feel"]),
+  decision_unit: z.enum(["solo", "household", "committee"]),
+});
 
 const Body = z.object({
   brand: z.string().trim().min(1).max(80),
   category: z.string().trim().min(1).max(120),
   competitors: z.array(z.string().trim().min(1).max(80)).max(8),
   audience: z.string().trim().max(160).optional(),
-  moderators: z.record(z.string(), z.unknown()),
-  modes: z
-    .array(z.object({ label: z.string().trim().max(40), moderators: z.record(z.string(), z.unknown()) }))
+  base: z.record(z.string(), z.unknown()),
+  scenarios: z
+    .array(
+      z.object({
+        label: z.string().trim().min(1).max(60),
+        description: z.string().trim().max(240),
+        journey: JourneyShape.nullable(),
+      })
+    )
     .min(1)
-    .max(2)
-    .optional(),
-  /** One layer's worth of confirmed cells - the UI calls this once per
-   * layer so no request runs near the platform limit. */
+    .max(4),
+  /** One small batch of confirmed cells - the UI calls this repeatedly so
+   * no request runs near the platform limit. */
   cells: z
     .array(
       z.object({
@@ -52,8 +69,8 @@ export async function POST(req: Request) {
     category,
     competitors,
     audience: audience || null,
-    moderators: parsed.data.moderators as unknown as Moderators,
-    modes: parsed.data.modes as unknown as MarketMode[] | undefined,
+    base: parsed.data.base as unknown as Moderators,
+    scenarios: parsed.data.scenarios as unknown as (ScenarioSpec & { journey: Journey | null })[],
     cells,
     count,
     force,
