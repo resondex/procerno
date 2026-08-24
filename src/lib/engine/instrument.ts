@@ -687,14 +687,19 @@ const REVIEW_SCHEMA = {
 export async function reviewScenarios(input: {
   category: string;
   audience: string | null;
-  candidates: Situation[];
+  /** `original` is the version the user started from, when there was one -
+   * the diff lets the reviewer tell an accidental slip from a deliberate
+   * change. */
+  candidates: (Situation & { original?: Situation | null })[];
   others: Situation[];
 }): Promise<ScenarioVerdict[]> {
-  const fp = (s: Situation) => `${s.label.trim()}|${s.description.trim()}`;
-  // "scenario_review6": verdicts carry ALL flags, not just the top one.
-  const key = cacheKey("scenario_review6", [
+  const fp = (s: Situation & { original?: Situation | null }) =>
+    `${s.label.trim()}|${s.description.trim()}` +
+    (s.original ? `<${s.original.label.trim()}|${s.original.description.trim()}` : "");
+  // "scenario_review7": originals in the contract, minimal-edit rules.
+  const key = cacheKey("scenario_review7", [
     input.category, input.audience,
-    input.candidates.map(fp).join("~"), input.others.map(fp).sort().join("~"),
+    input.candidates.map(fp).join("~"), input.others.map((s) => fp(s)).sort().join("~"),
   ]);
   const hit = await store.cacheGet(key, CACHE_TTL_MS);
   if (hit) return JSON.parse(hit) as ScenarioVerdict[];
@@ -729,20 +734,32 @@ export async function reviewScenarios(input: {
           "factor and drops the rest.\n" +
           "On substance beyond these three, accept anything reasonable - " +
           "a safety net for confused or empty entries, not a taste gate. " +
-          "When any answer is yes: reason is ONE sentence in plain " +
-          "language addressed to the user covering every yes, and " +
-          "suggestion is an edit that keeps the user's evident intent and " +
-          "fixes EVERY yes at once, spelling included. When all three are " +
-          "no: reason is an empty string and suggestion repeats the " +
-          "candidate verbatim. Return verdicts in the candidates' order, " +
-          "one per candidate.",
+          "Some candidates note the version the user started from " +
+          "('edited from'). Use the diff: a change that looks accidental " +
+          "(e.g. 'Startup first-choice' -> 'Startup first-choicer') is a " +
+          "typo whose fix restores those words; a deliberate change is " +
+          "judged on the new text's own merits, never reverted. When any " +
+          "answer is yes: reason is ONE sentence in plain language " +
+          "addressed to the user covering every yes, and suggestion is " +
+          "the SMALLEST edit that fixes every yes at once, spelling " +
+          "included - change only the words involved, and never rename or " +
+          "reframe the scenario beyond what the flags require. When all " +
+          "three are no: reason is an empty string and suggestion repeats " +
+          "the candidate verbatim. Return verdicts in the candidates' " +
+          "order, one per candidate.",
       },
       {
         role: "user",
         content:
           `Category: ${input.category}\nAudience: ${input.audience ?? "unknown"}\n` +
           `Other scenarios already on the table:\n${input.others.map((s) => `- ${s.label}: ${s.description}`).join("\n") || "- (none)"}\n` +
-          `Candidates to check:\n${input.candidates.map((s, i) => `${i + 1}. ${s.label}: ${s.description}`).join("\n")}`,
+          `Candidates to check:\n${input.candidates
+            .map(
+              (s, i) =>
+                `${i + 1}. ${s.label}: ${s.description}` +
+                (s.original ? `\n   (edited from: ${s.original.label}: ${s.original.description})` : "")
+            )
+            .join("\n")}`,
       },
     ],
     response_format: {

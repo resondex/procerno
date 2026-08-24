@@ -15,8 +15,13 @@ const Situation = z.object({
 const Body = z.object({
   category: z.string().trim().min(1).max(120),
   audience: z.string().trim().max(160).optional(),
-  /** The user-written or user-edited scenarios to check. */
-  candidates: z.array(Situation).min(1).max(8),
+  /** The user-written or user-edited scenarios to check; `original` is the
+   * pre-edit version when there was one, so the reviewer can tell a slip
+   * from a deliberate change. */
+  candidates: z
+    .array(Situation.extend({ original: Situation.nullable().optional() }))
+    .min(1)
+    .max(8),
   /** The rest of the table, for the distinctness test. */
   others: z.array(Situation).max(12),
 });
