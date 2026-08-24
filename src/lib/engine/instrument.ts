@@ -133,6 +133,10 @@ export interface ComposedStage {
   tag: StageTag;
   /** Guidance handed to the cell generator for this stage. */
   hint: string;
+  /** One plain sentence for the user: why the rules recommend this stage
+   * for this market - or, when they skip it, why they skip it. Authored
+   * per rule branch, no model call (spec: templated rule-derived hover). */
+  why: string;
 }
 
 export type LibraryStage = ComposedStage & {
@@ -154,38 +158,51 @@ export function stageLibrary(m: Moderators): LibraryStage[] {
       key: "problem_recognition", label: "Problem recognition", layer: "awareness",
       situational: true, rivals: "none", tag: "rules", recommended: true,
       hint: "Pain-phrased and pre-category: the buyer describes the problem without knowing the category exists. Never name the category, a brand, or a product type.",
+      why: "Every journey starts here - buyers describe the pain before they know the category exists.",
     },
     {
       key: "category_education", label: "Category education", layer: "awareness",
       situational: false, rivals: "none", tag: "rules",
       recommended: m.think_feel === "think" && considered,
       hint: "The buyer asks what the category is or does ('what does a X actually do').",
+      why: m.think_feel === "think" && considered
+        ? "A considered, rational market studies the category before shortlisting."
+        : m.think_feel !== "think"
+          ? "Identity-led buyers don't pause to study the category definition."
+          : "Habitual buyers don't stop to learn what the category is.",
     },
     {
       key: "discovery", label: "Discovery", layer: "awareness",
       situational: true, rivals: "none", tag: "picks", recommended: true,
       hint: "Open category discovery: 'best X for ...' style asks, no brands named.",
+      why: "'Best X for ...' is the front door of AI-assisted buying in every market.",
     },
     {
       key: "shortlist", label: "Shortlist", layer: "consideration",
       situational: true, rivals: "none", tag: "picks", recommended: true,
       hint: "The buyer asks for a small set of options to consider.",
+      why: "Every buyer narrows to a few options - this cut is where brands live or die.",
     },
     {
       key: "criteria", label: "Criteria formation", layer: "consideration",
       situational: false, rivals: "none", tag: "rules", recommended: true,
       hint: "The buyer asks what to look for / what matters when choosing.",
+      why: "Assistants teach buyers what to value before any brand is named.",
     },
     {
       key: "feature_screening", label: "Feature screening", layer: "consideration",
       situational: true, rivals: "none", tag: "picks",
       recommended: m.verifiability === "spec",
       hint: "Attribute-first asks: which options have a specific capability.",
+      why: m.verifiability === "spec"
+        ? "A spec-driven market shops by capability, so attribute asks decide who makes the cut."
+        : `Your market verifies by ${m.verifiability}, not specs - buyers don't shop from an attribute checklist.`,
     },
     {
       key: "use_case", label: "Use-case fit", layer: "consideration",
       situational: true, rivals: "none", tag: "picks", recommended: true,
       hint: "Situation-first asks describing a concrete need or workflow.",
+      why: "Concrete-need asks are where assistants match options to situations.",
     },
     {
       key: "social_validation", label: "Social validation", layer: "consideration",
@@ -193,6 +210,7 @@ export function stageLibrary(m: Moderators): LibraryStage[] {
       hint: m.think_feel === "feel"
         ? "What people love, compliment, or identify with - social proof in identity terms."
         : "What people actually use and rate well - reviews, communities, popularity.",
+      why: "Proof from other people moves every market.",
     },
     {
       key: "comparison",
@@ -202,6 +220,9 @@ export function stageLibrary(m: Moderators): LibraryStage[] {
       hint: m.verifiability === "taste"
         ? "Head-to-head and 'similar to X but cheaper/different' asks naming the rival."
         : "Head-to-head asks naming the client brand against the rival.",
+      why: considered
+        ? "A considered market weighs finalists head-to-head before committing."
+        : "Habitual buyers don't run head-to-heads - the shelf question (Premium vs. basic) carries this moment.",
     },
     {
       // The habitual journey's comparison moment: the shelf question where
@@ -213,72 +234,96 @@ export function stageLibrary(m: Moderators): LibraryStage[] {
       layer: "decision", situational: false, rivals: "none", tag: "picks",
       recommended: !considered,
       hint: "Across brands, not tiers: whether the premium maker genuinely beats the basic/store option - asked from both sides (is the expensive one worth it, is the cheap one good enough).",
+      why: !considered
+        ? "A habitual market compresses comparison into one shelf question: is the premium maker worth it."
+        : "Your considered market decomposes this moment into Shortlist, Comparison, and Pricing instead.",
     },
     {
       key: "objections", label: "Objections / risk", layer: "decision",
       situational: true, rivals: "none", tag: "judges", recommended: true,
       hint: `The buyer voices the category's dominant worry (${m.risk}) about the client brand by name.`,
+      why: `Every market has a dominant worry - here it's ${m.risk} risk, voiced about you by name.`,
     },
     {
       key: "pricing", label: "Pricing / value", layer: "decision",
       situational: true, rivals: "none", tag: "judges", recommended: true,
       hint: "Cost and value-for-money asks; some generic to the category (including paid-vs-free where free options exist), some naming the client brand (including its own tiers).",
+      why: "Cost and value questions reach every buyer, whatever the journey.",
     },
     {
       key: "business_case", label: "Business case", layer: "decision",
       situational: false, rivals: "none", tag: "judges",
       recommended: m.decision_unit === "committee",
       hint: "The buyer asks for help justifying the client brand internally ('make the case to my CFO').",
+      why: m.decision_unit === "committee"
+        ? "Committee-bought: someone has to justify the pick internally, and assistants write that case."
+        : `A ${m.decision_unit === "household" ? "household" : "solo"} buyer doesn't have to sell the decision internally.`,
     },
     {
       key: "churn_triggers", label: "Churn triggers", layer: "retention",
       situational: false, rivals: "none", tag: "steers", recommended: true,
       hint: "An existing customer wonders whether the client brand is still the right choice.",
+      why: "Every install base has doubters - this is where assistant-induced churn starts.",
     },
     {
       key: "alternatives", label: "Alternatives", layer: "retention",
       situational: false, rivals: "defensive_offensive", tag: "picks", recommended: true,
       hint: "'Alternatives to X' asks - one for the client brand (defensive) and one per rival (offensive).",
+      why: "'Alternatives to X' is the most-typed switching ask - defensive for you, offensive against each rival.",
     },
     {
       key: "renewal", label: "Renewal", layer: "retention",
       situational: false, rivals: "none", tag: "judges",
       recommended: m.rhythm === "subscription",
       hint: "At renewal: is the client brand worth keeping, are there cheaper options.",
+      why: m.rhythm === "subscription"
+        ? "A subscription market re-decides at every renewal."
+        : m.rhythm === "replenishment"
+          ? "Your market buys on replenishment - Repertoire carries the repeat decision."
+          : "A one-shot market has no renewal moment.",
     },
     {
       key: "problem_resolution", label: "Problem resolution", layer: "retention",
       situational: false, rivals: "none", tag: "steers", recommended: true,
       hint: "A support-style ask: something about the client brand is broken or messy, how to fix it.",
+      why: "Support moments are where satisfied customers quietly become switchers.",
     },
     {
       key: "expansion", label: "Expansion", layer: "loyalty",
       situational: false, rivals: "none", tag: "steers", recommended: true,
       hint: "A happy customer considers using the client brand for more ('roll it out further', 'use it for Y too').",
+      why: "Happy customers ask whether to use you for more - growth the assistant can steer.",
     },
     {
       key: "ecosystem", label: "Ecosystem", layer: "loyalty",
       situational: false, rivals: "none", tag: "steers", recommended: true,
       hint: "What works well WITH the client brand - add-ons, companions, integrations.",
+      why: "What-works-with-you asks show whether assistants place you at the center of a stack.",
     },
     {
       key: "advocacy", label: "Advocacy", layer: "loyalty",
       situational: false, rivals: "none", tag: "steers", recommended: true,
       hint: "A customer asks how to defend or recommend the client brand to someone else.",
+      why: "Customers recruiting others is your cheapest funnel - if the assistant backs them.",
     },
     {
       key: "repertoire", label: "Repertoire", layer: "loyalty",
       situational: false, rivals: "none", tag: "steers",
       recommended: m.rhythm === "replenishment",
       hint: "Deepening the habit: more from the same brand, or is it worth switching from the usual.",
+      why: m.rhythm === "replenishment"
+        ? "A replenishment market re-asks the habit question at every purchase."
+        : m.rhythm === "subscription"
+          ? "Your market buys on subscription - Renewal carries the repeat decision."
+          : "A one-shot market has no repeat habit to deepen.",
     },
   ];
 }
 
 /** A library entry without the verdict - what the cell planner consumes. */
 export function stripVerdict(s: LibraryStage): ComposedStage {
-  const { key, label, layer, situational, rivals, tag, hint } = s;
-  return { key, label, layer, situational, rivals, tag, hint };
+  const { key, label, layer, situational, rivals, tag, hint, why } = s;
+  return { key, label, layer, situational, rivals, tag, hint, why };
 }
 
 /** The composed skeleton for a single journey, in order. */

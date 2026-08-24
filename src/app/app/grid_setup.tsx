@@ -62,6 +62,10 @@ export interface GridStage {
   recommended: boolean;
   /** Labels of the scenarios (as last composed) whose journeys reach it. */
   columns: string[];
+  /** What the stage asks - shown on hover. Absent on older drafts. */
+  hint?: string;
+  /** Why the rules recommend or skip it for this market - shown on hover. */
+  why?: string;
 }
 
 export interface ScenarioRow {
@@ -933,7 +937,21 @@ export function CoverageGate({
                 })
               }
             />
-            <span className={isKept ? "text-ink" : "text-ink-3"}>{s.label}</span>
+            <span
+              className={`${isKept ? "text-ink" : "text-ink-3"}${s.hint || s.why ? " cursor-help underline decoration-dotted decoration-line underline-offset-2" : ""}`}
+              title={
+                [
+                  s.hint,
+                  s.why
+                    ? `${s.recommended ? "Recommended" : "Skipped"}: ${s.why}`
+                    : undefined,
+                ]
+                  .filter(Boolean)
+                  .join("\n\n") || undefined
+              }
+            >
+              {s.label}
+            </span>
             <TagChip tag={s.tag} />
             {!s.recommended && (
               <span className="text-[9px] uppercase tracking-wide text-ink-3" title="No journey reaches this stage - keep it only if your buyers really do">

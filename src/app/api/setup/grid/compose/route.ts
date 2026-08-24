@@ -86,6 +86,8 @@ export async function POST(req: Request) {
       tag: s.tag,
       recommended: s.recommended,
       columns: s.columns,
+      hint: s.hint,
+      why: s.why,
     })),
   });
 }
