@@ -25,7 +25,7 @@ const MODEL = process.env.SUGGEST_MODEL ?? "gpt-5-mini";
 const CACHE_TTL_MS = 183 * 24 * 3600 * 1000;
 // Version the cache: composer-rule or prompt-style changes must not serve
 // grids built under old rules.
-const INSTRUMENT_VERSION = "g5";
+const INSTRUMENT_VERSION = "g6";
 
 function cacheKey(prefix: string, parts: (string | null)[]): string {
   const normalized = parts.map((p) => (p ?? "").trim().toLowerCase()).join("|");
@@ -184,8 +184,12 @@ export function stageLibrary(m: Moderators): LibraryStage[] {
       why: "Every buyer narrows to a few options - this cut is where brands live or die.",
     },
     {
+      // Situational since 2026-08-24: the taught criteria differ by
+      // circumstance (an assistant weights simplicity/price for a startup,
+      // SSO/compliance for an enterprise) - substantive advice, not a
+      // standing verdict.
       key: "criteria", label: "Criteria formation", layer: "consideration",
-      situational: false, rivals: "none", tag: "rules", recommended: true,
+      situational: true, rivals: "none", tag: "rules", recommended: true,
       hint: "The buyer asks what to look for / what matters when choosing.",
       why: "Assistants teach buyers what to value before any brand is named.",
     },
@@ -251,8 +255,12 @@ export function stageLibrary(m: Moderators): LibraryStage[] {
       why: "Cost and value questions reach every buyer, whatever the journey.",
     },
     {
+      // Situational since 2026-08-24: the justification an assistant writes
+      // is built from the circumstance (price/speed for a startup, security
+      // review and consolidation for an enterprise) - one cell per
+      // committee-reaching column, not one shared case.
       key: "business_case", label: "Business case", layer: "decision",
-      situational: false, rivals: "none", tag: "judges",
+      situational: true, rivals: "none", tag: "judges",
       recommended: m.decision_unit === "committee",
       hint: "The buyer asks for help justifying the client brand internally ('make the case to my CFO').",
       why: m.decision_unit === "committee"
