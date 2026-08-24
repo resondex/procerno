@@ -17,7 +17,7 @@ const Body = z.object({
       z.object({
         current: Situation,
         suggestion: Situation,
-        flag: z.enum(["typo", "phrasing", "mixed"]),
+        flags: z.array(z.enum(["typo", "phrasing", "mixed"])).min(1).max(3),
         reason: z.string().max(400),
         choice: z.enum(["suggestion", "mine"]),
       })

@@ -628,20 +628,25 @@ export async function nearScenario(input: {
 }
 
 /** Why a scenario was flagged: mechanics, clarity, or bundled axes. */
-export type ScenarioFlag = "none" | "typo" | "phrasing" | "mixed";
+export type ScenarioFlag = "typo" | "phrasing" | "mixed";
 
 export interface ScenarioVerdict {
   ok: boolean;
-  /** The primary problem when not ok ("none" when ok): "typo" = spelling or
-   * grammar only; "phrasing" = substance fine, could be said clearer or more
-   * precisely; "mixed" = bundles more than one decision factor. */
-  kind: ScenarioFlag;
+  /** Every problem found, most serious first (a check can have several):
+   * "mixed" = bundles more than one decision factor; "phrasing" =
+   * substance fine, could be said clearer or more precisely; "typo" =
+   * spelling or grammar. Empty when ok. */
+  flags: ScenarioFlag[];
   /** One plain-language sentence addressed to the user; empty when ok. */
   reason: string;
-  /** Minimal edit preserving the user's intent; repeats the input when ok. */
+  /** One edit fixing every flag while keeping the user's intent; repeats
+   * the input when ok. */
   suggestion: Situation;
 }
 
+/** The model answers each problem as its own yes/no - a single kind label
+ * lets it skip questions and wobble between runs; three explicit booleans
+ * force every axis to be evaluated. Kind and ok are computed in code. */
 const REVIEW_SCHEMA = {
   type: "object",
   additionalProperties: false,
@@ -652,8 +657,9 @@ const REVIEW_SCHEMA = {
         type: "object",
         additionalProperties: false,
         properties: {
-          ok: { type: "boolean" },
-          kind: { type: "string", enum: ["none", "typo", "phrasing", "mixed"] },
+          typo: { type: "boolean" },
+          unclear: { type: "boolean" },
+          mixed: { type: "boolean" },
           reason: { type: "string" },
           suggestion: {
             type: "object",
@@ -665,7 +671,7 @@ const REVIEW_SCHEMA = {
             required: ["label", "description"],
           },
         },
-        required: ["ok", "kind", "reason", "suggestion"],
+        required: ["typo", "unclear", "mixed", "reason", "suggestion"],
       },
     },
   },
@@ -685,8 +691,8 @@ export async function reviewScenarios(input: {
   others: Situation[];
 }): Promise<ScenarioVerdict[]> {
   const fp = (s: Situation) => `${s.label.trim()}|${s.description.trim()}`;
-  // "scenario_review3": the three-flag verdict contract (typo/phrasing/mixed).
-  const key = cacheKey("scenario_review3", [
+  // "scenario_review6": verdicts carry ALL flags, not just the top one.
+  const key = cacheKey("scenario_review6", [
     input.category, input.audience,
     input.candidates.map(fp).join("~"), input.others.map(fp).sort().join("~"),
   ]);
@@ -706,30 +712,30 @@ export async function reviewScenarios(input: {
           "circumstance; stays inside the category (a different product or " +
           "market is not a scenario); is distinct from the other scenarios " +
           "on the table; label 2-4 plain words; description one short " +
-          "sentence in plain buyer language. Judge each candidate and flag " +
-          "problems of exactly three kinds (kind field):\n" +
-          "- 'typo': spelling, casing, or grammar errors in the label or " +
-          "description - these words appear verbatim in a client " +
-          "deliverable. Suggestion = the same text with the errors fixed " +
-          "and NOTHING else changed.\n" +
-          "- 'phrasing': the substance is fine but a strategist would say " +
-          "it clearer or more precisely - vague wording, buried subject, a " +
-          "label that doesn't say what the circumstance is. Suggestion = " +
-          "the same circumstance said clearly. Flag this only when the " +
-          "rewrite is a real improvement, not a lateral rewording.\n" +
-          "- 'mixed': the candidate bundles more than one decision factor " +
+          "sentence in plain buyer language. For EACH candidate answer " +
+          "three yes/no questions, each judged on its own:\n" +
+          "- typo: are there spelling, casing, or grammar errors in the " +
+          "label or description? (These words appear verbatim in a client " +
+          "deliverable.)\n" +
+          "- unclear: would a strategist say it clearer or more precisely " +
+          "- vague wording, a label that doesn't say what the circumstance " +
+          "is - OR does it contain irrelevant or nonsensical content " +
+          "(test text, asides that are not part of the circumstance)? " +
+          "Answer yes only when the rewrite is a real improvement, not a " +
+          "lateral rewording.\n" +
+          "- mixed: does it bundle more than one distinct decision factor " +
           "(two axes of circumstance in one scenario, e.g. company size " +
-          "AND budget constraint). Suggestion = keep the dominant factor, " +
-          "drop the rest.\n" +
-          "If several apply, pick the most serious: mixed > phrasing > " +
-          "typo (fold smaller fixes into the suggestion). On substance " +
-          "beyond these, accept anything reasonable - a safety net for " +
-          "confused or empty entries, not a taste gate. When ok is false, " +
-          "reason is ONE sentence in plain language addressed to the user " +
-          "and suggestion keeps the user's evident intent. When ok is " +
-          "true, kind is 'none', reason is an empty string, and suggestion " +
-          "repeats the candidate verbatim. Return verdicts in the " +
-          "candidates' order, one per candidate.",
+          "AND budget constraint)? If yes, the fix keeps the dominant " +
+          "factor and drops the rest.\n" +
+          "On substance beyond these three, accept anything reasonable - " +
+          "a safety net for confused or empty entries, not a taste gate. " +
+          "When any answer is yes: reason is ONE sentence in plain " +
+          "language addressed to the user covering every yes, and " +
+          "suggestion is an edit that keeps the user's evident intent and " +
+          "fixes EVERY yes at once, spelling included. When all three are " +
+          "no: reason is an empty string and suggestion repeats the " +
+          "candidate verbatim. Return verdicts in the candidates' order, " +
+          "one per candidate.",
       },
       {
         role: "user",
@@ -745,19 +751,29 @@ export async function reviewScenarios(input: {
     },
   });
   const parsed = JSON.parse(res.choices[0]?.message?.content ?? "{}") as {
-    verdicts: ScenarioVerdict[];
+    verdicts: {
+      typo: boolean; unclear: boolean; mixed: boolean;
+      reason: string; suggestion: Situation;
+    }[];
   };
-  // A missing or malformed verdict never blocks the user.
+  // Flags are derived, most serious first - the model only answers the
+  // three questions. A missing or malformed verdict never blocks the user.
   const verdicts: ScenarioVerdict[] = input.candidates.map((c, i) => {
     const v = (parsed.verdicts ?? [])[i];
-    if (!v || typeof v.ok !== "boolean" || !v.suggestion?.label?.trim()) {
-      return { ok: true, kind: "none", reason: "", suggestion: c };
+    if (!v || typeof v.typo !== "boolean" || !v.suggestion?.label?.trim()) {
+      return { ok: true, flags: [], reason: "", suggestion: c };
     }
+    const flags: ScenarioFlag[] = [
+      ...(v.mixed ? ["mixed" as const] : []),
+      ...(v.unclear ? ["phrasing" as const] : []),
+      ...(v.typo ? ["typo" as const] : []),
+    ];
     return {
-      ...v,
-      kind: v.ok ? "none" : (v.kind ?? "phrasing"),
+      ok: flags.length === 0,
+      flags,
       // House style: no em dashes in user-facing text.
-      reason: (v.reason ?? "").replace(/\s*[—–]\s*/g, " - "),
+      reason: flags.length === 0 ? "" : (v.reason ?? "").replace(/\s*[—–]\s*/g, " - "),
+      suggestion: flags.length === 0 ? c : v.suggestion,
     };
   });
   await store.cacheSet(key, JSON.stringify(verdicts));

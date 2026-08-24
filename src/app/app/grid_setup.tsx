@@ -100,6 +100,11 @@ export interface GridState {
    * draws from here first (instant); the model is only asked once the pool
    * runs dry. Reserve scenarios inherit the base journey. */
   reserve?: { label: string; description: string }[];
+  /** Fingerprints (label|description) of user-authored scenarios that
+   * PASSED the quality check, persisted with the draft so unchanged rows
+   * are never rechecked. Deliberately excludes "keep mine" choices - a
+   * declined suggestion pops up again on the next confirm. */
+  reviewedScenarios?: string[];
   cells: GridCellUi[];
 }
 
@@ -293,8 +298,10 @@ export function useGridSetup(a: GridSetupArgs) {
         stages: data.stages,
         keptStages: data.stages.filter((s) => s.recommended).map((s) => s.key),
         scenarios: [],
-        // An edited recompose returns no reserve; the pool carries over.
+        // An edited recompose returns no reserve; the pool carries over,
+        // as do the already-checked scenario fingerprints.
         reserve: data.reserve ?? a.state?.reserve,
+        reviewedScenarios: a.state?.reviewedScenarios,
         cells: [],
       },
       rows
@@ -795,14 +802,14 @@ export interface ScenarioReviewItem {
   /** Row index in the scenario table. */
   index: number;
   current: { label: string; description: string };
-  /** What kind of problem the reviewer saw. */
-  flag: "typo" | "phrasing" | "mixed";
+  /** Every problem the reviewer saw, most serious first. */
+  flags: ("typo" | "phrasing" | "mixed")[];
   reason: string;
   suggestion: { label: string; description: string };
   choice: "suggestion" | "mine";
 }
 
-const FLAG_INFO: Record<ScenarioReviewItem["flag"], { label: string; cls: string }> = {
+const FLAG_INFO: Record<ScenarioReviewItem["flags"][number], { label: string; cls: string }> = {
   typo: { label: "typo", cls: "bg-surface-1 text-ink-3 border border-line" },
   phrasing: { label: "clearer phrasing", cls: "bg-primary-soft text-primary" },
   mixed: { label: "mixed decision factors", cls: "bg-warning/10 text-warning" },
@@ -843,14 +850,23 @@ export function ScenarioReviewModal({
         <div className="grid gap-1">
           <h3 className="text-[15px] font-semibold">A quick check on your scenarios</h3>
           <p className="text-[12px] text-ink-3">
-            These are yours to call - pick either side and continue.
+            These are yours to call - pick either and continue.
           </p>
         </div>
         {items.map((it, k) => (
-          <div key={it.index} className="grid gap-2">
+          <div key={it.index} className={`grid gap-2 ${k > 0 ? "border-t border-line pt-4" : ""}`}>
+            {items.length > 1 && (
+              <span className="text-[11px] font-semibold uppercase tracking-wide text-ink-3">
+                {it.current.label}
+              </span>
+            )}
             <div className="flex items-start gap-2">
-              <span className={`shrink-0 rounded-full px-2 py-px text-[10px] font-medium whitespace-nowrap ${FLAG_INFO[it.flag].cls}`}>
-                {FLAG_INFO[it.flag].label}
+              <span className="flex shrink-0 gap-1.5">
+                {it.flags.map((f) => (
+                  <span key={f} className={`rounded-full px-2 py-px text-[10px] font-medium whitespace-nowrap ${FLAG_INFO[f].cls}`}>
+                    {FLAG_INFO[f].label}
+                  </span>
+                ))}
               </span>
               <p className="text-[12px] text-ink-2">{it.reason}</p>
             </div>
