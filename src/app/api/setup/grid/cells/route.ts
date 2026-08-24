@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { requireAuth } from "@/lib/auth";
 import { apiKeyConfigured } from "@/lib/engine/providers";
-import { stageLibrary, stripVerdict, generateGrid, type Moderators } from "@/lib/engine/instrument";
+import { mergedStageLibrary, generateGrid, type MarketMode, type Moderators } from "@/lib/engine/instrument";
 
 export const maxDuration = 120;
 
@@ -12,8 +12,15 @@ const Body = z.object({
   competitors: z.array(z.string().trim().min(1).max(80)).max(8),
   audience: z.string().trim().max(160).optional(),
   moderators: z.record(z.string(), z.unknown()),
+  /** The market's buyer modes as confirmed at gate 1; falls back to the
+   * single moderators read for older clients. */
+  modes: z
+    .array(z.object({ label: z.string().trim().max(40), moderators: z.record(z.string(), z.unknown()) }))
+    .min(1)
+    .max(2)
+    .optional(),
   /** Stage keys the user kept at gate 1; composition is recomputed server
-   * side from the moderators so stage hints never leave the engine. */
+   * side from the modes so stage hints never leave the engine. */
   stageKeys: z.array(z.string().trim().min(1)).min(1).max(30),
   scenarios: z
     .array(z.object({ label: z.string().trim().min(1).max(60), description: z.string().trim().max(240) }))
@@ -33,8 +40,12 @@ export async function POST(req: Request) {
   }
   const { brand, category, competitors, audience, stageKeys, scenarios } = parsed.data;
   const moderators = parsed.data.moderators as unknown as Moderators;
+  const modes: MarketMode[] = parsed.data.modes
+    ? (parsed.data.modes as unknown as MarketMode[])
+    : [{ label: "Buyers", moderators }];
   const kept = new Set(stageKeys);
-  const stages = stageLibrary(moderators).filter((s) => kept.has(s.key)).map(stripVerdict);
+  // Merged rows keep their mode tag; the planner stamps it onto every cell.
+  const stages = mergedStageLibrary(modes).filter((s) => kept.has(s.key));
   if (stages.length === 0) {
     return NextResponse.json({ error: "keep at least one stage" }, { status: 400 });
   }
@@ -43,7 +54,8 @@ export async function POST(req: Request) {
     category,
     competitors,
     audience: audience || null,
-    moderators,
+    moderators: modes[0].moderators,
+    modes,
     stages,
     situations: scenarios,
   });

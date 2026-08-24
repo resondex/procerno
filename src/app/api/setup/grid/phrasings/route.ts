@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { requireAuth } from "@/lib/auth";
 import { apiKeyConfigured } from "@/lib/engine/providers";
-import { generatePhrasings, type Moderators } from "@/lib/engine/instrument";
+import { generatePhrasings, type MarketMode, type Moderators } from "@/lib/engine/instrument";
 
 export const maxDuration = 120;
 
@@ -12,6 +12,11 @@ const Body = z.object({
   competitors: z.array(z.string().trim().min(1).max(80)).max(8),
   audience: z.string().trim().max(160).optional(),
   moderators: z.record(z.string(), z.unknown()),
+  modes: z
+    .array(z.object({ label: z.string().trim().max(40), moderators: z.record(z.string(), z.unknown()) }))
+    .min(1)
+    .max(2)
+    .optional(),
   /** One layer's worth of confirmed cells - the UI calls this once per
    * layer so no request runs near the platform limit. */
   cells: z
@@ -20,6 +25,7 @@ const Body = z.object({
         stage: z.string().trim().min(1),
         situation: z.string().trim().nullable(),
         angle: z.string().trim().min(1),
+        mode: z.string().trim().nullable().optional(),
         text: z.string().trim().min(1),
       })
     )
@@ -47,6 +53,7 @@ export async function POST(req: Request) {
     competitors,
     audience: audience || null,
     moderators: parsed.data.moderators as unknown as Moderators,
+    modes: parsed.data.modes as unknown as MarketMode[] | undefined,
     cells,
     count,
     force,

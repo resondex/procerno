@@ -155,6 +155,14 @@ function createDb(): Database.Database {
     CREATE INDEX IF NOT EXISTS idx_mentions_response ON mentions(response_id);
   `);
   // Databases created before these columns existed need the ALTERs.
+  const intentCols = db.prepare("PRAGMA table_info(intents)").all() as { name: string }[];
+  if (intentCols.length > 0 && !intentCols.some((c) => c.name === "mode")) {
+    db.exec("ALTER TABLE intents ADD COLUMN mode TEXT");
+  }
+  const promptColsForAsker = db.prepare("PRAGMA table_info(prompts)").all() as { name: string }[];
+  if (!promptColsForAsker.some((c) => c.name === "asker")) {
+    db.exec("ALTER TABLE prompts ADD COLUMN asker TEXT");
+  }
   const draftCols = db.prepare("PRAGMA table_info(setup_drafts)").all() as { name: string }[];
   if (!draftCols.some((c) => c.name === "wizard")) {
     db.exec("ALTER TABLE setup_drafts ADD COLUMN wizard TEXT");
@@ -202,6 +210,7 @@ function createDb(): Database.Database {
     layer TEXT NOT NULL,
     situation TEXT,
     angle TEXT NOT NULL,
+    mode TEXT,
     text TEXT NOT NULL
   )`);
   db.exec("CREATE INDEX IF NOT EXISTS idx_intents_project ON intents (project_id)");
@@ -907,11 +916,11 @@ export const sqliteStore: Store = {
   async insertPrompts(projectId, prompts) {
     const db = getDb();
     const stmt = db.prepare(
-      "INSERT INTO prompts (id, project_id, text, theme, intent_id) VALUES (?, ?, ?, ?, ?)"
+      "INSERT INTO prompts (id, project_id, text, theme, intent_id, asker) VALUES (?, ?, ?, ?, ?, ?)"
     );
     const insertAll = db.transaction(() => {
       for (const p of prompts) {
-        stmt.run(crypto.randomUUID(), projectId, p.text, p.theme, p.intentId ?? null);
+        stmt.run(crypto.randomUUID(), projectId, p.text, p.theme, p.intentId ?? null, p.asker ?? null);
       }
     });
     insertAll();
@@ -921,11 +930,11 @@ export const sqliteStore: Store = {
   async insertIntents(projectId, intents) {
     const db = getDb();
     const stmt = db.prepare(
-      "INSERT INTO intents (id, project_id, stage, layer, situation, angle, text) VALUES (?, ?, ?, ?, ?, ?, ?)"
+      "INSERT INTO intents (id, project_id, stage, layer, situation, angle, mode, text) VALUES (?, ?, ?, ?, ?, ?, ?, ?)"
     );
     const insertAll = db.transaction(() => {
       for (const i of intents) {
-        stmt.run(crypto.randomUUID(), projectId, i.stage, i.layer, i.situation, i.angle, i.text);
+        stmt.run(crypto.randomUUID(), projectId, i.stage, i.layer, i.situation, i.angle, i.mode ?? null, i.text);
       }
     });
     insertAll();

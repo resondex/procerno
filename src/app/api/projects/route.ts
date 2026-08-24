@@ -50,10 +50,19 @@ const createSchema = z.object({
             layer: z.string().trim().min(1),
             situation: z.string().trim().nullable(),
             angle: z.string().trim().min(1),
+            mode: z.string().trim().nullable().optional(),
             text: z.string().trim().min(1),
             /** The confirmed paraphrase set for this cell; each becomes its
-             * own prompt under the same intent. */
-            phrasings: z.array(z.string().trim().min(1)).max(20).optional(),
+             * own prompt under the same intent, carrying its buyer voice. */
+            phrasings: z
+              .array(
+                z.object({
+                  text: z.string().trim().min(1),
+                  asker: z.string().trim().optional(),
+                })
+              )
+              .max(20)
+              .optional(),
           })
         )
         .min(4)
@@ -156,17 +165,21 @@ export async function POST(req: Request) {
     const intents = await store.insertIntents(
       project.id,
       grid.cells.map((c) => ({
-        stage: c.stage, layer: c.layer, situation: c.situation, angle: c.angle, text: c.text,
+        stage: c.stage, layer: c.layer, situation: c.situation, angle: c.angle,
+        mode: c.mode ?? null, text: c.text,
       }))
     );
     await store.insertPrompts(
       project.id,
       grid.cells.flatMap((c, i) =>
-        [c.text, ...(c.phrasings ?? [])].map((text) => ({
-          text,
-          theme: namesAnyBrand(text, brand, competitors) ? "branded" : c.stage,
-          intentId: intents[i]?.id ?? null,
-        }))
+        [{ text: c.text, asker: null as string | null }, ...(c.phrasings ?? []).map((p) => ({ text: p.text, asker: (p.asker || null) as string | null }))].map(
+          ({ text, asker }) => ({
+            text,
+            theme: namesAnyBrand(text, brand, competitors) ? "branded" : c.stage,
+            intentId: intents[i]?.id ?? null,
+            asker,
+          })
+        )
       )
     );
   } else {

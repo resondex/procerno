@@ -82,6 +82,8 @@ export interface Intent {
   layer: string;
   situation: string | null;
   angle: string;
+  /** Buyer mode this cell serves; null = every mode. */
+  mode: string | null;
   text: string;
   seq: number;
 }
@@ -155,6 +157,8 @@ export interface Prompt {
   theme: PromptTheme;
   /** Grid-built prompts link to their intent; null for classic batteries. */
   intent_id: string | null;
+  /** The buyer voice this phrasing is written in; null for seeds/classic. */
+  asker: string | null;
   /** Set by the post-first-run health check when a prompt looks defective. */
   flagged: number;
   flag_reason: string | null;
@@ -657,13 +661,14 @@ export interface Store {
       layer: string;
       situation: string | null;
       angle: string;
+      mode?: string | null;
       text: string;
     }[]
   ): Promise<Intent[]>;
   listIntents(projectId: string): Promise<Intent[]>;
   insertPrompts(
     projectId: string,
-    prompts: { text: string; theme: PromptTheme; intentId?: string | null }[]
+    prompts: { text: string; theme: PromptTheme; intentId?: string | null; asker?: string | null }[]
   ): Promise<Prompt[]>;
   listPrompts(projectId: string): Promise<Prompt[]>;
   setPromptFlag(

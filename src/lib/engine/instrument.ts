@@ -18,7 +18,7 @@ const MODEL = process.env.SUGGEST_MODEL ?? "gpt-5-mini";
 const CACHE_TTL_MS = 183 * 24 * 3600 * 1000;
 // Version the cache: composer-rule or prompt-style changes must not serve
 // grids built under old rules.
-const INSTRUMENT_VERSION = "g2";
+const INSTRUMENT_VERSION = "g3";
 
 function cacheKey(prefix: string, parts: (string | null)[]): string {
   const normalized = parts.map((p) => (p ?? "").trim().toLowerCase()).join("|");
@@ -100,6 +100,112 @@ export async function classifyModerators(input: {
   const parsed = JSON.parse(res.choices[0]?.message?.content ?? "{}") as Moderators;
   await store.cacheSet(key, JSON.stringify(parsed));
   return parsed;
+}
+
+/* ------------------------------ market read ----------------------------- */
+
+export interface MarketMode {
+  /** Short buyer-facing name for the mode, e.g. "Enthusiast". */
+  label: string;
+  moderators: Moderators;
+}
+
+const MARKET_SCHEMA = {
+  type: "object",
+  additionalProperties: false,
+  properties: {
+    modes: {
+      type: "array",
+      items: {
+        type: "object",
+        additionalProperties: false,
+        properties: {
+          label: { type: "string" },
+          ...MODERATOR_SCHEMA.properties,
+        },
+        required: ["label", ...MODERATOR_SCHEMA.required],
+      },
+    },
+  },
+  required: ["modes"],
+} as const;
+
+/** The dimensions on which two buyer modes must differ to be two journeys
+ * rather than one journey wearing two demographic names. */
+function journeyKey(m: Moderators): string {
+  return [m.involvement, m.verifiability, m.think_feel, m.decision_unit].join("|");
+}
+
+/**
+ * The market read: 1-2 buyer MODES, each with its own full category read.
+ * A buying journey is a property of the mode, not the category - the old
+ * single read was the dominant-mode shorthand. A mode is a journey type,
+ * never a demographic: a second mode exists only when a substantial buyer
+ * group traverses a different decision structure. Most markets come back
+ * unimodal, and for them nothing downstream changes.
+ */
+export async function readMarket(input: {
+  category: string;
+  audience: string | null;
+}): Promise<MarketMode[]> {
+  const key = cacheKey("market", [input.category, input.audience]);
+  const hit = await store.cacheGet(key, CACHE_TTL_MS);
+  if (hit) return JSON.parse(hit) as MarketMode[];
+  const res = await openaiClient().chat.completions.create({
+    model: MODEL,
+    messages: [
+      {
+        role: "system",
+        content:
+          "Classify a purchase market's BUYER MODES for designing a research " +
+          "instrument over its buying decision. A mode is a kind of buying " +
+          "journey, not a demographic. Most markets have ONE mode. Return a " +
+          "second mode ONLY when a substantial group of buyers genuinely " +
+          "traverses a different decision structure - it must differ from the " +
+          "first mode on involvement, verifiability, think_feel, or " +
+          "decision_unit (e.g. headphones: considered spec-driven enthusiasts " +
+          "AND habitual taste-driven everyday buyers). Never invent a second " +
+          "mode for a market that decides one way. Dominant mode first; " +
+          "label is 1-2 plain words naming the buyer kind.\n" +
+          "Per mode, classify seven decision-structure dimensions:\n" +
+          "- verifiability: bought on checkable specs, on taste/experience, " +
+          "or on trust (credence - quality unverifiable even after use).\n" +
+          "- involvement: a considered purchase, or habitual/impulse.\n" +
+          "- think_feel: decided mostly rationally, or by identity/emotion.\n" +
+          "- decision_unit: one person, a household, or a committee/team.\n" +
+          "- rhythm: one-shot purchase, replenishment, or subscription.\n" +
+          "- risk: the buyer's dominant worry - performance, financial, " +
+          "social (how it looks), or physical (safety).\n" +
+          "- channel_retail: true when where-to-buy is a real question.\n" +
+          "- rationale: ONE sentence justifying that mode's read, in plain " +
+          "buyer language.",
+      },
+      {
+        role: "user",
+        content: `Category: ${input.category}\nAudience: ${input.audience ?? "unknown"}`,
+      },
+    ],
+    response_format: {
+      type: "json_schema",
+      json_schema: { name: "market", strict: true, schema: MARKET_SCHEMA },
+    },
+  });
+  const parsed = JSON.parse(res.choices[0]?.message?.content ?? "{}") as {
+    modes: ({ label: string } & Moderators)[];
+  };
+  let modes: MarketMode[] = (parsed.modes ?? []).slice(0, 2).map((m) => {
+    const { label, ...moderators } = m;
+    return { label: label.trim() || "Buyers", moderators: moderators as Moderators };
+  });
+  // Two modes that share a journey are one mode wearing two names.
+  if (modes.length === 2 && journeyKey(modes[0].moderators) === journeyKey(modes[1].moderators)) {
+    modes = [modes[0]];
+  }
+  if (modes.length === 0) {
+    modes = [{ label: "Buyers", moderators: await classifyModerators(input) }];
+  }
+  await store.cacheSet(key, JSON.stringify(modes));
+  return modes;
 }
 
 /* ------------------------------- composer ------------------------------- */
@@ -258,6 +364,32 @@ export function composeStages(m: Moderators): ComposedStage[] {
   return stageLibrary(m).filter((s) => s.recommended).map(stripVerdict);
 }
 
+/** A library row merged across the market's modes: recommended when any
+ * mode reaches it, tagged with the one mode that does when they differ.
+ * mode = null means the stage serves every mode (or none recommends it).
+ * Shared stages are measured ONCE - the point of merging instead of
+ * running one instrument per mode. */
+export interface MergedStage extends ComposedStage {
+  recommended: boolean;
+  mode: string | null;
+}
+
+export function mergedStageLibrary(modes: MarketMode[]): MergedStage[] {
+  const libs = modes.map((m) => stageLibrary(m.moderators));
+  return libs[0].map((_, i) => {
+    const variants = libs.map((lib) => lib[i]);
+    const rec = variants.map((v, j) => (v.recommended ? j : -1)).filter((j) => j >= 0);
+    // Wording (label/hint) follows the first mode that recommends the stage,
+    // the dominant mode otherwise.
+    const src = stripVerdict(variants[rec[0] ?? 0]);
+    return {
+      ...src,
+      recommended: rec.length > 0,
+      mode: modes.length > 1 && rec.length === 1 ? modes[rec[0]].label : null,
+    };
+  });
+}
+
 /* ------------------------------ situations ------------------------------ */
 
 export interface Situation {
@@ -397,6 +529,8 @@ export interface GridCell {
   situation: string | null;
   /** "generic", "defensive", or the rival's name. */
   angle: string;
+  /** Buyer mode this cell serves; null = every mode. */
+  mode: string | null;
   /** The prompt as a user would type it. */
   text: string;
 }
@@ -435,36 +569,42 @@ export async function generateGrid(input: {
   competitors: string[];
   audience: string | null;
   moderators: Moderators;
-  stages: ComposedStage[];
+  /** The market's buyer modes; unimodal markets pass one (or omit). */
+  modes?: MarketMode[];
+  stages: (ComposedStage & { mode?: string | null })[];
   situations: Situation[];
 }): Promise<GridCell[]> {
   const rivals = input.competitors.slice(0, 4);
+  type PlanStage = ComposedStage & { mode?: string | null };
   // The cell plan: generic stages get one cell per situation (situational)
   // or a single cell; rival stages cross with each rival plus defensive.
-  const plan: { stage: ComposedStage; situation: string | null; angle: string }[] = [];
+  // Cells inherit their stage's buyer mode (null = serves every mode).
+  const plan: { stage: PlanStage; situation: string | null; angle: string; mode: string | null }[] = [];
   for (const st of input.stages) {
+    const mode = st.mode ?? null;
     if (st.rivals === "each") {
       const sits = st.situational
         ? input.situations.map((s) => s.label)
         : [null as string | null];
       rivals.forEach((r, i) => {
-        plan.push({ stage: st, situation: sits[i % sits.length] ?? null, angle: r });
+        plan.push({ stage: st, situation: sits[i % sits.length] ?? null, angle: r, mode });
       });
     } else if (st.rivals === "defensive_offensive") {
-      plan.push({ stage: st, situation: null, angle: "defensive" });
-      rivals.forEach((r) => plan.push({ stage: st, situation: null, angle: r }));
+      plan.push({ stage: st, situation: null, angle: "defensive", mode });
+      rivals.forEach((r) => plan.push({ stage: st, situation: null, angle: r, mode }));
     } else if (st.situational) {
       for (const s of input.situations) {
-        plan.push({ stage: st, situation: s.label, angle: "generic" });
+        plan.push({ stage: st, situation: s.label, angle: "generic", mode });
       }
     } else {
-      plan.push({ stage: st, situation: null, angle: "generic" });
+      plan.push({ stage: st, situation: null, angle: "generic", mode });
     }
   }
 
   const key = cacheKey("grid", [
     input.brand, input.category, rivals.join(","), input.audience,
-    JSON.stringify(input.moderators), input.stages.map((s) => s.key).join(","),
+    JSON.stringify(input.modes ?? input.moderators),
+    input.stages.map((s) => `${s.key}:${s.mode ?? ""}`).join(","),
     input.situations.map((s) => s.label).join(","),
   ]);
   const hit = await store.cacheGet(key, CACHE_TTL_MS);
@@ -473,9 +613,15 @@ export async function generateGrid(input: {
   const planText = plan
     .map(
       (p, i) =>
-        `${i + 1}. stage=${p.stage.key} situation=${p.situation ?? "-"} angle=${p.angle}\n   guidance: ${p.stage.hint}`
+        `${i + 1}. stage=${p.stage.key} situation=${p.situation ?? "-"} angle=${p.angle}${p.mode ? ` mode=${p.mode}` : ""}\n   guidance: ${p.stage.hint}`
     )
     .join("\n");
+  const modesText =
+    input.modes && input.modes.length > 1
+      ? `Buyer modes: ${input.modes
+          .map((m) => `${m.label} (${m.moderators.involvement}, ${m.moderators.verifiability}-driven, ${m.moderators.think_feel})`)
+          .join("; ")}\n`
+      : "";
   const res = await openaiClient().chat.completions.create({
     model: MODEL,
     messages: [
@@ -498,6 +644,8 @@ export async function generateGrid(input: {
           "- Retention and loyalty stages speak as an existing customer and " +
           "name the client brand where the guidance says so.\n" +
           "- situation: weave the circumstance in naturally; do not label it.\n" +
+          "- mode: a cell marked mode=<name> is asked by that kind of buyer - " +
+          "write it in that buyer's register; unmarked cells serve every buyer.\n" +
           "Return one cell object per plan line, same stage/situation/angle " +
           "values, in order.",
       },
@@ -505,8 +653,9 @@ export async function generateGrid(input: {
         role: "user",
         content:
           `Client brand: ${input.brand}\nCategory: ${input.category}\n` +
-          `Rivals: ${rivals.join(", ")}\nAudience: ${input.audience ?? "unknown"}\n\n` +
-          `Cell plan:\n${planText}`,
+          `Rivals: ${rivals.join(", ")}\nAudience: ${input.audience ?? "unknown"}\n` +
+          modesText +
+          `\nCell plan:\n${planText}`,
       },
     ],
     response_format: {
@@ -537,6 +686,7 @@ export async function generateGrid(input: {
       layer: st.layer,
       situation,
       angle: c.angle,
+      mode: st.mode ?? null,
       text: c.text.trim(),
     });
   }
@@ -599,7 +749,7 @@ export interface Phrasing {
 
 // Bump when the paraphrase prompt or filters change: cached sets written
 // under old instructions must not be served as if they were new.
-const PHRASINGS_VERSION = "p2";
+const PHRASINGS_VERSION = "p3";
 // Over-generate so the overlap filter can be strict and still fill the set.
 const PHRASINGS_EXTRA = 3;
 
@@ -619,7 +769,9 @@ export async function generatePhrasings(input: {
   competitors: string[];
   audience: string | null;
   moderators: Moderators;
-  cells: { stage: string; situation: string | null; angle: string; text: string }[];
+  /** The market's buyer modes; unimodal markets pass one (or omit). */
+  modes?: MarketMode[];
+  cells: { stage: string; situation: string | null; angle: string; mode?: string | null; text: string }[];
   /** Total phrasings wanted per cell including the seed. */
   count: number;
   /** Skip the cache read: the user asked for a fresh set. */
@@ -632,7 +784,7 @@ export async function generatePhrasings(input: {
   const rivals = input.competitors.slice(0, 4);
   const key = cacheKey("phrasings", [
     PHRASINGS_VERSION, input.brand, rivals.join(","), input.audience, String(input.count),
-    input.cells.map((c) => c.text).join("\n"),
+    input.cells.map((c) => `${c.mode ?? ""}|${c.text}`).join("\n"),
   ]);
   const hit = input.force ? null : await store.cacheGet(key, CACHE_TTL_MS);
   if (hit) return JSON.parse(hit) as Phrasing[][];
@@ -644,9 +796,15 @@ export async function generatePhrasings(input: {
     const cellText = subset
       .map(
         (c, i) =>
-          `${i}. [stage=${c.stage} situation=${c.situation ?? "-"} angle=${c.angle}] ${c.text}`
+          `${i}. [stage=${c.stage} situation=${c.situation ?? "-"} angle=${c.angle}${c.mode ? ` mode=${c.mode}` : ""}] ${c.text}`
       )
       .join("\n");
+    const modesText =
+      input.modes && input.modes.length > 1
+        ? `Buyer modes: ${input.modes
+            .map((m) => `${m.label} (${m.moderators.involvement}, ${m.moderators.verifiability}-driven, ${m.moderators.think_feel})`)
+            .join("; ")}\n`
+        : "";
     const res = await openaiClient().chat.completions.create({
       model: MODEL,
       messages: [
@@ -679,6 +837,9 @@ export async function generatePhrasings(input: {
             "add a new constraint the seed does not have.\n" +
             "- No verbatim repeats, no trivial reorderings; each paraphrase " +
             "should be something a different person would plausibly type.\n" +
+            "- A seed marked mode=<name> is asked only by that kind of buyer: " +
+            "every asker and register must fit that mode. Unmarked seeds serve " +
+            "every buyer mode - draw voices from all of them.\n" +
             `Decision unit: ${input.moderators.decision_unit}. ` +
             "Return one object per seed with its index and its paraphrases, in order.",
         },
@@ -686,8 +847,9 @@ export async function generatePhrasings(input: {
           role: "user",
           content:
             `Client brand: ${input.brand}\nCategory: ${input.category}\n` +
-            `Rivals: ${rivalsList.join(", ")}\nAudience: ${input.audience ?? "unknown"}\n\n` +
-            `Seeds:\n${cellText}`,
+            `Rivals: ${rivalsList.join(", ")}\nAudience: ${input.audience ?? "unknown"}\n` +
+            modesText +
+            `\nSeeds:\n${cellText}`,
         },
       ],
       response_format: {
@@ -779,26 +941,34 @@ function humanize(t: string): string {
 
 /* ------------------------------ orchestrator ---------------------------- */
 
-/** Gate 1 of setup: the category read, the composed stages, and the
- * scenarios - everything the user confirms before any prompt is written. */
+/** Gate 1 of setup: the market read (1-2 buyer modes), the merged stage
+ * library, and the scenarios - everything the user confirms before any
+ * prompt is written. `moderators` is the dominant mode's read, kept for
+ * the parts of the app that store a single read. */
 export async function composeInstrument(input: {
   category: string;
   audience: string | null;
-}): Promise<{ moderators: Moderators; stages: ComposedStage[]; situations: Situation[] }> {
-  const moderators = await classifyModerators(input);
-  const stages = composeStages(moderators);
+}): Promise<{
+  modes: MarketMode[];
+  moderators: Moderators;
+  stages: MergedStage[];
+  situations: Situation[];
+}> {
+  const modes = await readMarket(input);
+  const stages = mergedStageLibrary(modes);
   const situations = await generateSituations({
     category: input.category,
     audience: input.audience,
-    decisionUnit: moderators.decision_unit,
+    decisionUnit: modes[0].moderators.decision_unit,
   });
-  return { moderators, stages, situations };
+  return { modes, moderators: modes[0].moderators, stages, situations };
 }
 
 
 export interface Instrument {
+  modes: MarketMode[];
   moderators: Moderators;
-  stages: ComposedStage[];
+  stages: MergedStage[];
   situations: Situation[];
   cells: GridCell[];
 }
@@ -809,18 +979,18 @@ export async function buildInstrument(input: {
   competitors: string[];
   audience: string | null;
 }): Promise<Instrument> {
-  const moderators = await classifyModerators({
+  const { modes, moderators, stages, situations } = await composeInstrument({
     category: input.category,
     audience: input.audience,
   });
-  const stages = composeStages(moderators);
-  const situations = await generateSituations({
-    category: input.category,
-    audience: input.audience,
-    decisionUnit: moderators.decision_unit,
+  const cells = await generateGrid({
+    ...input,
+    moderators,
+    modes,
+    stages: stages.filter((st) => st.recommended),
+    situations,
   });
-  const cells = await generateGrid({ ...input, moderators, stages, situations });
-  return { moderators, stages, situations, cells };
+  return { modes, moderators, stages, situations, cells };
 }
 
 /** True when a prompt names the brand or any competitor - such prompts are

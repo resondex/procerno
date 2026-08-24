@@ -20,14 +20,22 @@ export const LAYERS = [
   "loyalty",
 ] as const;
 
+export interface GridPhrasing {
+  text: string;
+  /** The buyer voice this phrasing is written in. */
+  asker: string;
+}
+
 export interface GridCellUi {
   stage: string;
   layer: string;
   situation: string | null;
   angle: string;
+  /** Buyer mode this cell serves; null = every mode. */
+  mode?: string | null;
   text: string;
   /** Paraphrases beyond the seed text; empty until gate 3. */
-  phrasings: string[];
+  phrasings: GridPhrasing[];
 }
 
 export interface GridStage {
@@ -38,6 +46,13 @@ export interface GridStage {
   rivals: "none" | "each" | "defensive_offensive";
   /** The composer's verdict; the user can keep a stage it skipped. */
   recommended?: boolean;
+  /** The one buyer mode that reaches this stage; null = every mode. */
+  mode?: string | null;
+}
+
+export interface GridModeUi {
+  label: string;
+  moderators: Record<string, unknown> & { rationale?: string };
 }
 
 export interface ScenarioRow {
@@ -56,6 +71,8 @@ export const MAX_SCENARIOS = 4;
 
 export interface GridState {
   step: "compose" | "cells" | "phrasings";
+  /** The market's buyer modes (1-2); moderators mirrors the dominant one. */
+  modes?: GridModeUi[];
   moderators: Record<string, unknown> & { rationale?: string };
   stages: GridStage[];
   keptStages: string[];
@@ -64,6 +81,28 @@ export interface GridState {
   scenarios: { label: string; description: string }[];
   scenarioRows?: ScenarioRow[];
   cells: GridCellUi[];
+}
+
+/** The market's modes; older drafts only carry the single dominant read. */
+export function gridModes(g: GridState): GridModeUi[] {
+  return g.modes ?? [{ label: "", moderators: g.moderators }];
+}
+
+/** Older drafts saved phrasings as bare strings and no modes; normalize so
+ * everything downstream sees one shape. */
+export function normalizeGrid(g: GridState | null): GridState | null {
+  if (!g) return null;
+  return {
+    ...g,
+    modes: gridModes(g),
+    cells: (g.cells ?? []).map((c) => ({
+      ...c,
+      mode: c.mode ?? null,
+      phrasings: (c.phrasings ?? []).map((ph) =>
+        typeof ph === "string" ? { text: ph, asker: "" } : ph
+      ),
+    })),
+  };
 }
 
 /** The editable scenario table; older drafts only carry the active list. */
@@ -93,7 +132,7 @@ export function gridPromptCount(g: GridState | null): number {
   if (!g) return 0;
   return g.cells
     .filter((c) => c.text.trim())
-    .reduce((n, c) => n + 1 + c.phrasings.filter((p) => p.trim()).length, 0);
+    .reduce((n, c) => n + 1 + c.phrasings.filter((p) => p.text.trim()).length, 0);
 }
 
 /** Cells the kept stages and scenarios will produce - the same expansion
@@ -165,28 +204,30 @@ export function useGridSetup(a: GridSetupArgs) {
     return data as T;
   }
 
-  /** Gate 1. With `moderators`, recompose from an edited category read. */
-  async function compose(moderators?: GridState["moderators"]): Promise<GridState | null> {
-    a.setBusy(moderators ? "Recomposing…" : "Reading your category…");
+  /** Gate 1. With `modes`, recompose from an edited market read. */
+  async function compose(modes?: GridModeUi[]): Promise<GridState | null> {
+    a.setBusy(modes ? "Recomposing…" : "Reading your market…");
     a.setError(null);
     const data = await post<{
+      modes: GridModeUi[];
       moderators: GridState["moderators"];
       stages: GridStage[];
       scenarios: GridState["scenarios"];
     }>("/api/setup/grid/compose", {
       category: a.category,
       audience: a.audience || undefined,
-      moderators,
+      modes,
     });
     a.setBusy(null);
     if (!data) return null;
-    // An edited read keeps the user's scenario table unless the decision
-    // unit changed, which changes what a scenario even is.
+    // An edited read keeps the user's scenario table unless the dominant
+    // decision unit changed, which changes what a scenario even is.
     const keepRows =
-      moderators && a.state && a.state.moderators.decision_unit === data.moderators.decision_unit;
+      modes && a.state && a.state.moderators.decision_unit === data.moderators.decision_unit;
     const next: GridState = withScenarioRows(
       {
         step: "compose",
+        modes: data.modes,
         moderators: data.moderators,
         stages: data.stages,
         keptStages: data.stages.filter((s) => s.recommended !== false).map((s) => s.key),
@@ -236,6 +277,7 @@ export function useGridSetup(a: GridSetupArgs) {
         brand: a.brand, category: a.category, competitors: a.competitors,
         audience: a.audience || undefined,
         moderators: a.state.moderators,
+        modes: gridModes(a.state),
         stageKeys: a.state.keptStages,
         scenarios: a.state.scenarios,
       }
@@ -267,16 +309,18 @@ export function useGridSetup(a: GridSetupArgs) {
     let done = 0;
     for (const { layer, idx } of batches) {
       a.setBusy(`Writing paraphrases… ${layer} (${done}/${cells.length})`);
-      const data = await post<{ phrasings: { text: string; asker: string }[][] }>(
+      const data = await post<{ phrasings: GridPhrasing[][] }>(
         "/api/setup/grid/phrasings",
         {
           brand: a.brand, category: a.category, competitors: a.competitors,
           audience: a.audience || undefined,
           moderators: a.state.moderators,
+          modes: gridModes(a.state),
           cells: idx.map((i) => ({
             stage: merged[i].stage,
             situation: merged[i].situation,
             angle: merged[i].angle,
+            mode: merged[i].mode ?? null,
             text: merged[i].text,
           })),
           count: PHRASING_COUNT,
@@ -288,7 +332,7 @@ export function useGridSetup(a: GridSetupArgs) {
         return null;
       }
       idx.forEach((i, k) => {
-        merged[i] = { ...merged[i], phrasings: (data.phrasings[k] ?? []).map((p) => p.text) };
+        merged[i] = { ...merged[i], phrasings: data.phrasings[k] ?? [] };
       });
       done += idx.length;
     }
@@ -313,7 +357,8 @@ export function cellMeta(state: GridState, c: GridCellUi): string {
     (c.situation ? ` · ${c.situation}` : "") +
     (c.angle !== "generic"
       ? ` · ${c.angle === "defensive" ? "your churn moment" : `vs ${c.angle}`}`
-      : "")
+      : "") +
+    (c.mode ? ` · ${c.mode}` : "")
   );
 }
 
@@ -323,7 +368,7 @@ export function StagesGate({
 }: {
   state: GridState;
   setState: (s: GridState) => void;
-  onRecompose: (m: GridState["moderators"]) => void;
+  onRecompose: (modes: GridModeUi[]) => void;
   onSuggestScenario: () => void;
   busy: boolean;
 }) {
@@ -332,36 +377,62 @@ export function StagesGate({
   const setRows = (next: ScenarioRow[]) => setState(withScenarioRows(state, next));
   const updateRow = (i: number, patch: Partial<ScenarioRow>) =>
     setRows(rows.map((r, j) => (j === i ? { ...r, ...patch } : r)));
+  const modes = gridModes(state);
+  const recomposeMode = (mi: number, key: string, value: string) =>
+    onRecompose(
+      modes.map((m, j) => (j === mi ? { ...m, moderators: { ...m.moderators, [key]: value } } : m))
+    );
   return (
     <div className="grid gap-5">
-      <div className="rounded-lg border border-line bg-surface-1 px-4 py-3 grid gap-2">
-        <div className="flex flex-wrap items-center gap-1.5">
-          <span className="text-[11px] font-semibold uppercase tracking-wide text-ink-3 mr-1">
-            We read your category as
-          </span>
-          {MODERATOR_FIELDS.map((f) => (
-            <select
-              key={f.key}
-              aria-label={f.key.replace("_", " ")}
-              value={String(state.moderators[f.key] ?? "")}
-              disabled={busy}
-              onChange={(e) =>
-                onRecompose({ ...state.moderators, [f.key]: e.target.value })
-              }
-              className="rounded-full bg-primary-soft px-2 py-0.5 text-[11px] font-medium text-primary border-0 cursor-pointer"
-            >
-              {f.options.map(([k, label]) => (
-                <option key={k} value={k}>{label}</option>
+      {modes.length > 1 && (
+        <p className="text-[12px] text-ink-2 max-w-3xl">
+          Your market has two kinds of buyers with genuinely different
+          journeys. Stages they share are measured once; stages only one of
+          them reaches are tagged with that buyer below.
+        </p>
+      )}
+      <div className={`grid gap-3 ${modes.length > 1 ? "sm:grid-cols-2" : ""}`}>
+        {modes.map((m, mi) => (
+          <div key={mi} className="rounded-lg border border-line bg-surface-1 px-4 py-3 grid gap-2 content-start">
+            <div className="flex flex-wrap items-center gap-1.5">
+              <span className="text-[11px] font-semibold uppercase tracking-wide text-ink-3 mr-1">
+                {modes.length > 1
+                  ? `${m.label || `Mode ${mi + 1}`}${mi === 0 ? " · dominant" : ""}`
+                  : "We read your market as"}
+              </span>
+              {MODERATOR_FIELDS.map((f) => (
+                <select
+                  key={f.key}
+                  aria-label={`${m.label || "mode"} ${f.key.replace("_", " ")}`}
+                  value={String(m.moderators[f.key] ?? "")}
+                  disabled={busy}
+                  onChange={(e) => recomposeMode(mi, f.key, e.target.value)}
+                  className="rounded-full bg-primary-soft px-2 py-0.5 text-[11px] font-medium text-primary border-0 cursor-pointer"
+                >
+                  {f.options.map(([k, label]) => (
+                    <option key={k} value={k}>{label}</option>
+                  ))}
+                </select>
               ))}
-            </select>
-          ))}
-        </div>
-        {typeof state.moderators.rationale === "string" && (
-          <p className="text-[12px] text-ink-3">
-            {state.moderators.rationale} Change any read above and the stages
-            recompose.
-          </p>
-        )}
+            </div>
+            {typeof m.moderators.rationale === "string" && (
+              <p className="text-[12px] text-ink-3">
+                {m.moderators.rationale} Change any read and the stages
+                recompose.
+              </p>
+            )}
+            {modes.length > 1 && (
+              <button
+                type="button"
+                disabled={busy}
+                onClick={() => onRecompose([{ ...modes[mi] }])}
+                className="text-[12px] font-medium text-ink-3 hover:text-ink text-left w-fit disabled:opacity-50"
+              >
+                These are our only buyers - use just this mode
+              </button>
+            )}
+          </div>
+        ))}
       </div>
 
       <div className="grid gap-2">
@@ -424,6 +495,11 @@ export function StagesGate({
                       {rec && (
                         <span className="text-[10px] font-medium uppercase tracking-wide text-primary/70">
                           recommended
+                        </span>
+                      )}
+                      {modes.length > 1 && rec && (
+                        <span className="rounded-full bg-primary-soft px-1.5 text-[10px] font-medium text-primary">
+                          {s.mode ?? "both"}
                         </span>
                       )}
                     </label>
@@ -596,7 +672,7 @@ export function PhrasingsGate({
       <div className="grid gap-1.5">
         {state.cells.map((c, i) => {
           const open = openCell === i;
-          const n = 1 + c.phrasings.filter((p) => p.trim()).length;
+          const n = 1 + c.phrasings.filter((p) => p.text.trim()).length;
           return (
             <div key={i} className="rounded-lg border border-line">
               <button
@@ -624,18 +700,23 @@ export function PhrasingsGate({
                       <textarea
                         className="input w-full resize-none field-sizing-content text-sm"
                         rows={1}
-                        value={p}
+                        value={p.text}
                         onChange={(e) =>
                           setState({
                             ...state,
                             cells: state.cells.map((q, j) =>
                               j === i
-                                ? { ...q, phrasings: q.phrasings.map((x, m) => (m === k ? e.target.value : x)) }
+                                ? { ...q, phrasings: q.phrasings.map((x, m) => (m === k ? { ...x, text: e.target.value } : x)) }
                                 : q
                             ),
                           })
                         }
                       />
+                      {p.asker && (
+                        <span className="w-24 shrink-0 pt-1.5 text-[10px] leading-tight text-ink-3 truncate" title={p.asker}>
+                          {p.asker}
+                        </span>
+                      )}
                       <button
                         type="button"
                         aria-label="remove paraphrase"
@@ -659,7 +740,7 @@ export function PhrasingsGate({
                       setState({
                         ...state,
                         cells: state.cells.map((q, j) =>
-                          j === i ? { ...q, phrasings: [...q.phrasings, ""] } : q
+                          j === i ? { ...q, phrasings: [...q.phrasings, { text: "", asker: "" }] } : q
                         ),
                       })
                     }

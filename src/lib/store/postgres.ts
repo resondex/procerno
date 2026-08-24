@@ -76,7 +76,9 @@ function ensureSchema(): Promise<void> {
         seq SERIAL
       )`;
       await sql`CREATE INDEX IF NOT EXISTS idx_intents_project ON intents (project_id)`;
+      await sql`ALTER TABLE intents ADD COLUMN IF NOT EXISTS mode TEXT`;
       await sql`ALTER TABLE prompts ADD COLUMN IF NOT EXISTS intent_id TEXT`;
+      await sql`ALTER TABLE prompts ADD COLUMN IF NOT EXISTS asker TEXT`;
       await sql`CREATE TABLE IF NOT EXISTS answer_labels (
         id TEXT PRIMARY KEY,
         project_id TEXT NOT NULL,
@@ -708,9 +710,10 @@ export const pgStore: Store = {
       text: p.text,
       theme: p.theme,
       intent_id: p.intentId ?? null,
+      asker: p.asker ?? null,
     }));
     if (rows.length > 0) {
-      await sql`INSERT INTO prompts ${sql(rows, "id", "project_id", "text", "theme", "intent_id")}`;
+      await sql`INSERT INTO prompts ${sql(rows, "id", "project_id", "text", "theme", "intent_id", "asker")}`;
     }
     return this.listPrompts(projectId);
   },
@@ -724,10 +727,11 @@ export const pgStore: Store = {
       layer: i.layer,
       situation: i.situation,
       angle: i.angle,
+      mode: i.mode ?? null,
       text: i.text,
     }));
     if (rows.length > 0) {
-      await sql`INSERT INTO intents ${sql(rows, "id", "project_id", "stage", "layer", "situation", "angle", "text")}`;
+      await sql`INSERT INTO intents ${sql(rows, "id", "project_id", "stage", "layer", "situation", "angle", "mode", "text")}`;
     }
     return this.listIntents(projectId);
   },
@@ -741,7 +745,7 @@ export const pgStore: Store = {
   async listPrompts(projectId) {
     const sql = await db();
     const rows =
-      await sql`SELECT id, project_id, text, theme, intent_id, flagged, flag_reason, suggested_alternatives, retired
+      await sql`SELECT id, project_id, text, theme, intent_id, asker, flagged, flag_reason, suggested_alternatives, retired
         FROM prompts WHERE project_id = ${projectId} ORDER BY seq`;
     return rows.map(
       (r) =>
