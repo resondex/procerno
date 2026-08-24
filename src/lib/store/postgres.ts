@@ -77,6 +77,15 @@ function ensureSchema(): Promise<void> {
       )`;
       await sql`CREATE INDEX IF NOT EXISTS idx_intents_project ON intents (project_id)`;
       await sql`ALTER TABLE intents ADD COLUMN IF NOT EXISTS mode TEXT`;
+      await sql`CREATE TABLE IF NOT EXISTS setup_feedback (
+        id TEXT PRIMARY KEY,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+        email TEXT,
+        category TEXT NOT NULL,
+        audience TEXT,
+        kind TEXT NOT NULL,
+        payload TEXT NOT NULL
+      )`;
       await sql`ALTER TABLE prompts ADD COLUMN IF NOT EXISTS intent_id TEXT`;
       await sql`ALTER TABLE prompts ADD COLUMN IF NOT EXISTS asker TEXT`;
       await sql`CREATE TABLE IF NOT EXISTS answer_labels (
@@ -613,6 +622,12 @@ export const pgStore: Store = {
       ...r,
       created_at: new Date(r.created_at as string).toISOString(),
     })) as HumanCode[];
+  },
+
+  async feedbackAdd(e) {
+    const sql = await db();
+    await sql`INSERT INTO setup_feedback (id, email, category, audience, kind, payload)
+      VALUES (${crypto.randomUUID()}, ${e.email}, ${e.category}, ${e.audience}, ${e.kind}, ${JSON.stringify(e.payload)})`;
   },
 
   async cacheSet(key, value) {

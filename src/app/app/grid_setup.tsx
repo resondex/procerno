@@ -795,10 +795,18 @@ export interface ScenarioReviewItem {
   /** Row index in the scenario table. */
   index: number;
   current: { label: string; description: string };
+  /** What kind of problem the reviewer saw. */
+  flag: "typo" | "phrasing" | "mixed";
   reason: string;
   suggestion: { label: string; description: string };
   choice: "suggestion" | "mine";
 }
+
+const FLAG_INFO: Record<ScenarioReviewItem["flag"], { label: string; cls: string }> = {
+  typo: { label: "typo", cls: "bg-surface-1 text-ink-3 border border-line" },
+  phrasing: { label: "clearer phrasing", cls: "bg-primary-soft text-primary" },
+  mixed: { label: "mixed decision factors", cls: "bg-warning/10 text-warning" },
+};
 
 /** Overlay shown when the gate-confirm quality check flags user-authored
  * scenarios: each gets the reviewer's reason and a side-by-side choice
@@ -840,7 +848,12 @@ export function ScenarioReviewModal({
         </div>
         {items.map((it, k) => (
           <div key={it.index} className="grid gap-2">
-            <p className="text-[12px] text-warning">{it.reason}</p>
+            <div className="flex items-start gap-2">
+              <span className={`shrink-0 rounded-full px-2 py-px text-[10px] font-medium whitespace-nowrap ${FLAG_INFO[it.flag].cls}`}>
+                {FLAG_INFO[it.flag].label}
+              </span>
+              <p className="text-[12px] text-ink-2">{it.reason}</p>
+            </div>
             <div className="grid gap-2">
               {option(k, it, "suggestion", "Suggested edit", it.suggestion)}
               {option(k, it, "mine", "Keep mine", it.current)}

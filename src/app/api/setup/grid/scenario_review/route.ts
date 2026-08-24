@@ -3,6 +3,7 @@ import { z } from "zod";
 import { requireAuth } from "@/lib/auth";
 import { apiKeyConfigured } from "@/lib/engine/providers";
 import { reviewScenarios } from "@/lib/engine/instrument";
+import { store } from "@/lib/store";
 
 export const maxDuration = 60;
 
@@ -39,5 +40,20 @@ export async function POST(req: Request) {
     candidates: parsed.data.candidates,
     others: parsed.data.others,
   });
+  const flagged = verdicts
+    .map((v, i) => ({ candidate: parsed.data.candidates[i], verdict: v }))
+    .filter((x) => !x.verdict.ok);
+  if (flagged.length > 0) {
+    // Visibility only - never read back into generation.
+    await store
+      .feedbackAdd({
+        email: auth.email,
+        category: parsed.data.category,
+        audience: parsed.data.audience || null,
+        kind: "review_flagged",
+        payload: { items: flagged },
+      })
+      .catch(() => {});
+  }
   return NextResponse.json({ verdicts });
 }

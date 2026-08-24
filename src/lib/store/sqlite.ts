@@ -214,6 +214,15 @@ function createDb(): Database.Database {
     text TEXT NOT NULL
   )`);
   db.exec("CREATE INDEX IF NOT EXISTS idx_intents_project ON intents (project_id)");
+  db.exec(`CREATE TABLE IF NOT EXISTS setup_feedback (
+    id TEXT PRIMARY KEY,
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    email TEXT,
+    category TEXT NOT NULL,
+    audience TEXT,
+    kind TEXT NOT NULL,
+    payload TEXT NOT NULL
+  )`);
   db.exec(`CREATE TABLE IF NOT EXISTS answer_labels (
     id TEXT PRIMARY KEY,
     project_id TEXT NOT NULL,
@@ -734,6 +743,15 @@ export const sqliteStore: Store = {
          ON CONFLICT(key) DO UPDATE SET value = excluded.value, created_at = datetime('now')`
       )
       .run(key, value);
+  },
+
+  async feedbackAdd(e) {
+    getDb()
+      .prepare(
+        `INSERT INTO setup_feedback (id, email, category, audience, kind, payload)
+         VALUES (?, ?, ?, ?, ?, ?)`
+      )
+      .run(crypto.randomUUID(), e.email, e.category, e.audience, e.kind, JSON.stringify(e.payload));
   },
 
   async cachePurge(prefix, keep) {

@@ -638,6 +638,16 @@ export interface Store {
   /** Cached value no older than maxAgeMs, else null. */
   cacheGet(key: string, maxAgeMs: number): Promise<string | null>;
   cacheSet(key: string, value: string): Promise<void>;
+  /** Append-only setup feedback log (rejected variants, review verdicts and
+   * choices). For OUR visibility only - it is never read back into
+   * generation: one user's rejections say nothing about quality. */
+  feedbackAdd(e: {
+    email: string | null;
+    category: string;
+    audience: string | null;
+    kind: string;
+    payload: unknown;
+  }): Promise<void>;
   /** Delete cache rows matching prefix except those matching keep — used to
    * drop a run's stale slice snapshots when its cache key generation moves. */
   cachePurge(prefix: string, keep: string): Promise<void>;
