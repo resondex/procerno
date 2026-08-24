@@ -421,9 +421,9 @@ export async function readScenarios(input: {
   category: string;
   audience: string | null;
 }): Promise<{ base: Moderators; scenarios: ScenarioSpec[]; reserve: ScenarioSpec[] }> {
-  // "scenarios_journeys2": the deviation-coherence rules (habitual needs an
-  // established default; solo needs a one-person scenario) changed the read.
-  const key = cacheKey("scenarios_journeys2", [input.category, input.audience]);
+  // "scenarios_journeys4": deviation-coherence rules + plain-language label
+  // rule (no methodology words) changed the read.
+  const key = cacheKey("scenarios_journeys4", [input.category, input.audience]);
   const hit = await store.cacheGet(key, CACHE_TTL_MS);
   if (hit) return JSON.parse(hit) as { base: Moderators; scenarios: ScenarioSpec[]; reserve: ScenarioSpec[] };
   const res = await openaiClient().chat.completions.create({
@@ -443,7 +443,11 @@ export async function readScenarios(input: {
           "might swap in. A scenario earns its place " +
           "ONLY if it changes what a competent advisor would recommend - " +
           "facts about the decision, never facts about the speaker. Labels " +
-          "are 2-4 plain words; descriptions one short sentence. Spend the " +
+          "are 2-4 plain words naming the buyer or the circumstance the " +
+          "way a strategist would title a slide ('Solo founder pick', " +
+          "'Enterprise procurement') - never analytical or methodology " +
+          "words like 'default', 'habitual', 'segment', 'use case'. " +
+          "Descriptions one short sentence. Scenarios describe circumstances, never a specific brand or product - 'migrating from a legacy tracker', not 'migrating from X'. Spend the " +
           "slots on DIFFERENT axes of circumstance (scale, composition, " +
           "constraint, occasion, recipient), not variants of one.\n" +
           "3) per scenario, deviates: true ONLY if that scenario's buyer " +
@@ -589,7 +593,7 @@ export async function suggestScenario(input: {
   exclude: Situation[];
 }): Promise<Situation | null> {
   const avoid = input.exclude.map((s) => s.label.trim().toLowerCase()).filter(Boolean).sort();
-  const key = cacheKey("scenario_more", [
+  const key = cacheKey("scenario_more3", [
     input.category, input.audience, input.decisionUnit, avoid.join("|"),
   ]);
   const hit = await store.cacheGet(key, CACHE_TTL_MS);
@@ -605,8 +609,11 @@ export async function suggestScenario(input: {
           "competent advisor would recommend - facts about the decision, never " +
           "facts about the speaker. It must be genuinely different from every " +
           "situation already listed (a different axis of circumstance, not a " +
-          "variant of one). Use " + SITUATION_TEMPLATE[input.decisionUnit] +
-          "Label 2-4 plain words; description one short sentence.",
+          "variant of one). Scenarios describe circumstances, never a specific brand or product - 'migrating from a legacy tracker', not 'migrating from X'. Use " + SITUATION_TEMPLATE[input.decisionUnit] +
+          "Label 2-4 plain words naming the buyer or the circumstance the " +
+          "way a strategist would title a slide - never analytical or " +
+          "methodology words like 'default', 'habitual', 'segment', 'use " +
+          "case'. Description one short sentence.",
       },
       {
         role: "user",
@@ -645,7 +652,7 @@ export async function nearScenario(input: {
   exclude: Situation[];
 }): Promise<Situation | null> {
   const avoid = input.exclude.map((s) => s.label.trim().toLowerCase()).filter(Boolean).sort();
-  const key = cacheKey("scenario_near", [
+  const key = cacheKey("scenario_near3", [
     input.category, input.audience, input.of.label, input.of.description, avoid.join("|"),
   ]);
   const hit = await store.cacheGet(key, CACHE_TTL_MS);
@@ -662,8 +669,11 @@ export async function nearScenario(input: {
           "composition, use-case) so it reads noticeably but not radically " +
           "different. It must still change what a competent advisor would " +
           "recommend, stay about the decision (never the speaker), and " +
-          "differ from everything already listed. Label 2-4 plain words; " +
-          "description one short sentence.",
+          "differ from everything already listed. Scenarios describe circumstances, never a specific brand or product - 'migrating from a legacy tracker', not 'migrating from X'. Label 2-4 plain words " +
+          "naming the buyer or the circumstance the way a strategist would " +
+          "title a slide - never analytical or methodology words like " +
+          "'default', 'habitual', 'segment', 'use case'. Description one " +
+          "short sentence.",
       },
       {
         role: "user",
