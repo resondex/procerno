@@ -51,6 +51,9 @@ export async function POST(req: Request) {
 
   let base: Moderators;
   let scenarios: ScenarioSpec[];
+  /** Cached alternates for instant "Suggest another"; only the fresh read
+   * produces them - an edited recompose leaves the client's pool alone. */
+  let reserve: ScenarioSpec[] | undefined;
   let stages;
   if (parsed.data.base && parsed.data.scenarios) {
     base = parsed.data.base as unknown as Moderators;
@@ -64,7 +67,7 @@ export async function POST(req: Request) {
     });
     stages = participationMask(base, scenarios);
   } else {
-    ({ base, scenarios, stages } = await composeInstrument({
+    ({ base, scenarios, reserve, stages } = await composeInstrument({
       category: parsed.data.category,
       audience: parsed.data.audience || null,
     }));
@@ -73,6 +76,7 @@ export async function POST(req: Request) {
     base,
     moderators: base,
     scenarios,
+    reserve: reserve?.map(({ label, description }) => ({ label, description })),
     stages: stages.map((s) => ({
       key: s.key,
       label: s.label,

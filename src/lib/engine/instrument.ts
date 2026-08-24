@@ -25,7 +25,7 @@ const MODEL = process.env.SUGGEST_MODEL ?? "gpt-5-mini";
 const CACHE_TTL_MS = 183 * 24 * 3600 * 1000;
 // Version the cache: composer-rule or prompt-style changes must not serve
 // grids built under old rules.
-const INSTRUMENT_VERSION = "g4";
+const INSTRUMENT_VERSION = "g5";
 
 function cacheKey(prefix: string, parts: (string | null)[]): string {
   const normalized = parts.map((p) => (p ?? "").trim().toLowerCase()).join("|");
@@ -352,18 +352,25 @@ const READ_SCHEMA = {
   required: ["base", "scenarios"],
 } as const;
 
+/** Scenarios the fresh grid opens with; the rest are the reserve pool that
+ * makes "Suggest another" instantaneous. */
+const CORE_SCENARIOS = 4;
+
 /**
- * The market read, in one call: the base journey plus 3-4 buying scenarios,
- * each either inheriting the base or carrying its own journey. Deltas are
- * rare by instruction (A3) and capped at one per grid in code (A4).
+ * The market read, in one call: the base journey plus 8 buying scenarios,
+ * ordered most to least central. The first 4 are the core set (columns of a
+ * fresh grid); the rest are the reserve pool, cached so "Suggest another"
+ * costs nothing. Deltas are rare by instruction (A3), capped at one per
+ * grid in code (A4), and granted only in the core set - reserve scenarios
+ * always inherit the base journey, like user suggestions.
  */
 export async function readScenarios(input: {
   category: string;
   audience: string | null;
-}): Promise<{ base: Moderators; scenarios: ScenarioSpec[] }> {
+}): Promise<{ base: Moderators; scenarios: ScenarioSpec[]; reserve: ScenarioSpec[] }> {
   const key = cacheKey("scenarios_journeys", [input.category, input.audience]);
   const hit = await store.cacheGet(key, CACHE_TTL_MS);
-  if (hit) return JSON.parse(hit) as { base: Moderators; scenarios: ScenarioSpec[] };
+  if (hit) return JSON.parse(hit) as { base: Moderators; scenarios: ScenarioSpec[]; reserve: ScenarioSpec[] };
   const res = await openaiClient().chat.completions.create({
     model: MODEL,
     messages: [
@@ -375,11 +382,14 @@ export async function readScenarios(input: {
           "1) base: the market's dominant decision-structure read on seven " +
           "dimensions:\n" + DIMENSION_GUIDE +
           "- rationale: ONE sentence in plain buyer language.\n" +
-          "2) scenarios: 3 or 4 buying scenarios. A scenario earns its place " +
+          "2) scenarios: EIGHT buying scenarios, ordered most to least " +
+          "central to the market - the first 4 are the core set a " +
+          "strategist would field; the rest are credible alternates a user " +
+          "might swap in. A scenario earns its place " +
           "ONLY if it changes what a competent advisor would recommend - " +
           "facts about the decision, never facts about the speaker. Labels " +
           "are 2-4 plain words; descriptions one short sentence. Spend the " +
-          "3-4 slots on DIFFERENT axes of circumstance (scale, composition, " +
+          "slots on DIFFERENT axes of circumstance (scale, composition, " +
           "constraint, occasion, recipient), not variants of one.\n" +
           "3) per scenario, deviates: true ONLY if that scenario's buyer " +
           "DECIDES BY A DIFFERENT PROCESS than the base - differing on " +
@@ -388,7 +398,8 @@ export async function readScenarios(input: {
           "while the base is considered and spec-driven). A circumstance " +
           "that changes the answer but not the process - tight budget, " +
           "compliance constraint, gift deadline - NEVER deviates. Most " +
-          "markets have ZERO deviating scenarios; at most one. When " +
+          "markets have ZERO deviating scenarios; at most one, and only " +
+          "among the first four. When " +
           "deviates is false, journey just repeats the base values.",
       },
       {
@@ -407,11 +418,12 @@ export async function readScenarios(input: {
   };
   const base = parsed.base;
   let deltaGranted = false;
-  const scenarios: ScenarioSpec[] = (parsed.scenarios ?? [])
-    .slice(0, 4)
-    .map((s) => {
-      // A3/A4 in code: a delta must really differ, and only one is granted.
-      const wants = s.deviates && !sameJourney(base, s.journey);
+  const all: ScenarioSpec[] = (parsed.scenarios ?? [])
+    .slice(0, 8)
+    .map((s, i) => {
+      // A3/A4 in code: a delta must really differ, only one is granted,
+      // and only in the core set (reserve rows inherit like suggestions).
+      const wants = i < CORE_SCENARIOS && s.deviates && !sameJourney(base, s.journey);
       const granted = wants && !deltaGranted;
       if (granted) deltaGranted = true;
       return {
@@ -421,8 +433,12 @@ export async function readScenarios(input: {
       };
     })
     .filter((s) => s.label);
-  const out = { base, scenarios };
-  if (scenarios.length > 0) await store.cacheSet(key, JSON.stringify(out));
+  const out = {
+    base,
+    scenarios: all.slice(0, CORE_SCENARIOS),
+    reserve: all.slice(CORE_SCENARIOS),
+  };
+  if (out.scenarios.length > 0) await store.cacheSet(key, JSON.stringify(out));
   return out;
 }
 
@@ -996,11 +1012,12 @@ export async function composeInstrument(input: {
   base: Moderators;
   moderators: Moderators;
   scenarios: ScenarioSpec[];
+  reserve: ScenarioSpec[];
   stages: MaskedStage[];
 }> {
-  const { base, scenarios } = await readScenarios(input);
+  const { base, scenarios, reserve } = await readScenarios(input);
   const stages = participationMask(base, scenarios);
-  return { base, moderators: base, scenarios, stages };
+  return { base, moderators: base, scenarios, reserve, stages };
 }
 
 export interface Instrument {

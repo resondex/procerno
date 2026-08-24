@@ -89,6 +89,10 @@ export interface GridState {
    * Kept in sync with scenarioRows by withScenarioRows(). */
   scenarios: { label: string; description: string; journey: Journey | null }[];
   scenarioRows?: ScenarioRow[];
+  /** Alternates from the market read, not yet shown - "Suggest another"
+   * draws from here first (instant); the model is only asked once the pool
+   * runs dry. Reserve scenarios inherit the base journey. */
+  reserve?: { label: string; description: string }[];
   cells: GridCellUi[];
 }
 
@@ -250,6 +254,7 @@ export function useGridSetup(a: GridSetupArgs) {
     const data = await post<{
       base: GridState["moderators"];
       scenarios: { label: string; description: string; journey: Journey | null }[];
+      reserve?: { label: string; description: string }[];
       stages: GridStage[];
     }>("/api/setup/grid/compose", {
       category: a.category,
@@ -281,6 +286,8 @@ export function useGridSetup(a: GridSetupArgs) {
         stages: data.stages,
         keptStages: data.stages.filter((s) => s.recommended).map((s) => s.key),
         scenarios: [],
+        // An edited recompose returns no reserve; the pool carries over.
+        reserve: data.reserve ?? a.state?.reserve,
         cells: [],
       },
       rows
@@ -306,35 +313,49 @@ export function useGridSetup(a: GridSetupArgs) {
   }
 
   /** Gate 1 helper: one more scenario, distinct from everything listed.
+   * Drawn from the market read's cached reserve pool when one remains
+   * (instant); the model is only asked once the pool runs dry.
    * Suggestions always inherit the base journey. */
   async function suggestScenario(): Promise<void> {
     if (!a.state) return;
     const rows = scenarioRows(a.state);
-    a.setBusy("Thinking of another scenario…");
-    a.setError(null);
-    const data = await post<{ scenario: { label: string; description: string } }>(
-      "/api/setup/grid/scenario",
-      {
-        category: a.category,
-        audience: a.audience || undefined,
-        decisionUnit: a.state.moderators.decision_unit,
-        exclude: rows.map(({ label, description }) => ({ label, description })),
-      }
-    );
-    a.setBusy(null);
-    if (!data) return;
+    const listed = new Set(rows.map((r) => r.label.trim().toLowerCase()));
+    const pool = (a.state.reserve ?? []).filter((s) => !listed.has(s.label.trim().toLowerCase()));
+    let scenario: { label: string; description: string };
+    let reserve = a.state.reserve;
+    if (pool.length > 0) {
+      scenario = pool[0];
+      reserve = (a.state.reserve ?? []).filter((s) => s.label !== scenario.label);
+    } else {
+      a.setBusy("Thinking of another scenario…");
+      a.setError(null);
+      const data = await post<{ scenario: { label: string; description: string } }>(
+        "/api/setup/grid/scenario",
+        {
+          category: a.category,
+          audience: a.audience || undefined,
+          decisionUnit: a.state.moderators.decision_unit,
+          exclude: rows.map(({ label, description }) => ({ label, description })),
+        }
+      );
+      a.setBusy(null);
+      if (!data) return;
+      scenario = data.scenario;
+    }
     const active = rows.filter((r) => r.on).length;
     const nextRows: ScenarioRow[] = [
       ...rows,
       {
-        ...data.scenario, journey: null, suggested: true, on: active < MAX_SCENARIOS,
-        original: { ...data.scenario },
+        ...scenario, journey: null, suggested: true, on: active < MAX_SCENARIOS,
+        original: { ...scenario },
       },
     ];
+    const drawn: GridState = { ...a.state, reserve };
     if (active < MAX_SCENARIOS) {
-      await compose({ base: a.state.moderators, rows: nextRows });
+      a.setState(drawn);
+      await compose({ base: drawn.moderators, rows: nextRows });
     } else {
-      a.setState(withScenarioRows(a.state, nextRows));
+      a.setState(withScenarioRows(drawn, nextRows));
     }
   }
 
@@ -459,6 +480,12 @@ export function ScenariosGate({
   const rows = scenarioRows(state);
   const active = rows.filter((r) => r.on);
   const deviatingLabel = active.find((r) => r.journey !== null)?.label ?? null;
+  const displayOf = (key: string, value: unknown) =>
+    JOURNEY_FIELDS.find((f) => f.key === key)?.options.find(([k]) => k === String(value))?.[1] ??
+    String(value ?? "");
+  const marketStyle = JOURNEY_FIELDS
+    .map((f) => displayOf(f.key, state.moderators[f.key]))
+    .join(" · ");
   const setRows = (next: ScenarioRow[], recompose = false) => {
     if (recompose) onRecompose(state.moderators, next);
     else setState(withScenarioRows(state, next));
@@ -472,6 +499,13 @@ export function ScenariosGate({
         The circumstances that change the right answer. Each one becomes a
         column of your Landscape - the coverage map on the next step shows
         exactly what each will be asked.
+      </p>
+      <p className="text-[12px] text-ink-3">
+        All of them are asked in your market&apos;s buying style -{" "}
+        <span className="font-medium text-ink">{marketStyle}</span> - unless
+        one is marked as buying differently. A different style means that
+        buyer goes through different stages, so its column gets its own set
+        of questions.
       </p>
       {rows.map((sc, i) => (
         <div
@@ -502,7 +536,7 @@ export function ScenariosGate({
                   title={
                     deviatingLabel && deviatingLabel !== sc.label
                       ? `Only one scenario per grid can buy differently (currently: ${deviatingLabel})`
-                      : "This scenario's buyer decides by a different process than the market"
+                      : `This scenario's buyer decides by a different process than the rest of your market (${marketStyle})`
                   }
                 >
                   <input
@@ -553,22 +587,38 @@ export function ScenariosGate({
               {sc.journey && sc.on && (
                 <div className="flex flex-wrap items-center gap-1.5">
                   <span className="text-[10px] uppercase tracking-wide text-warning font-semibold">this buyer:</span>
-                  {JOURNEY_FIELDS.map((f) => (
-                    <select
-                      key={f.key}
-                      aria-label={`${sc.label} ${f.key.replace("_", " ")}`}
-                      value={String(sc.journey?.[f.key as keyof Journey] ?? "")}
-                      disabled={busy}
-                      onChange={(e) =>
-                        updateRow(i, { journey: { ...sc.journey!, [f.key]: e.target.value } }, true)
-                      }
-                      className="rounded-full bg-warning/10 px-2 py-0.5 text-[11px] font-medium text-warning border-0 cursor-pointer"
-                    >
-                      {f.options.map(([k, label]) => (
-                        <option key={k} value={k}>{label}</option>
-                      ))}
-                    </select>
-                  ))}
+                  {JOURNEY_FIELDS.map((f) => {
+                    const value = String(sc.journey?.[f.key as keyof Journey] ?? "");
+                    const differs = value !== String(state.moderators[f.key] ?? "");
+                    return (
+                      <select
+                        key={f.key}
+                        aria-label={`${sc.label} ${f.key.replace("_", " ")}`}
+                        title={
+                          differs
+                            ? `Differs from your market (${displayOf(f.key, state.moderators[f.key])})`
+                            : "Same as your market"
+                        }
+                        value={value}
+                        disabled={busy}
+                        onChange={(e) =>
+                          updateRow(i, { journey: { ...sc.journey!, [f.key]: e.target.value } }, true)
+                        }
+                        className={`rounded-full px-2 py-0.5 text-[11px] font-medium border-0 cursor-pointer ${
+                          differs
+                            ? "bg-warning/10 text-warning"
+                            : "bg-surface-1 text-ink-3"
+                        }`}
+                      >
+                        {f.options.map(([k, label]) => (
+                          <option key={k} value={k}>{label}</option>
+                        ))}
+                      </select>
+                    );
+                  })}
+                  <span className="text-[10px] text-ink-3">
+                    highlighted = differs from your market
+                  </span>
                 </div>
               )}
             </div>
