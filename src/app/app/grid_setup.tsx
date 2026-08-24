@@ -469,17 +469,15 @@ function TagChip({ tag }: { tag: GridStage["tag"] }) {
 /** Step "Buying scenarios": one card per scenario - tick, label,
  * description, and the journey. Nothing else competes for the screen. */
 export function ScenariosGate({
-  state, setState, onRecompose, onSuggestScenario, onEditBase, busy,
+  state, setState, onRecompose, onSuggestScenario, busy,
 }: {
   state: GridState;
   setState: (s: GridState) => void;
   onRecompose: (base: GridState["moderators"], rows: ScenarioRow[]) => void;
   onSuggestScenario: () => void;
-  /** Jump to the coverage step with the base-read expander open - the
-   * market style is stated here but edited there. */
-  onEditBase: () => void;
   busy: boolean;
 }) {
+  const [editRead, setEditRead] = useState(false);
   const rows = scenarioRows(state);
   const active = rows.filter((r) => r.on);
   const deviatingLabel = active.find((r) => r.journey !== null)?.label ?? null;
@@ -489,6 +487,10 @@ export function ScenariosGate({
   const marketStyle = JOURNEY_FIELDS
     .map((f) => displayOf(f.key, state.moderators[f.key]))
     .join(" · ");
+  const readSentence = MODERATOR_FIELDS.map((f) => {
+    const v = String(state.moderators[f.key] ?? "");
+    return f.options.find(([k]) => k === v)?.[1];
+  }).filter(Boolean).join(" · ");
   const setRows = (next: ScenarioRow[], recompose = false) => {
     if (recompose) onRecompose(state.moderators, next);
     else setState(withScenarioRows(state, next));
@@ -498,24 +500,56 @@ export function ScenariosGate({
 
   return (
     <div className="grid gap-3 max-w-2xl">
+      <div className="flex flex-wrap items-baseline gap-2 text-[13px]">
+        <span className="text-[11px] font-semibold uppercase tracking-wide text-ink-3">
+          Your market buys:
+        </span>
+        {!editRead ? (
+          <>
+            <span className="text-ink-2">{readSentence}</span>
+            <button
+              type="button"
+              onClick={() => setEditRead(true)}
+              className="text-[13px] font-medium text-primary hover:opacity-80"
+            >
+              change
+            </button>
+          </>
+        ) : (
+          <span className="flex flex-wrap items-center gap-1.5">
+            {MODERATOR_FIELDS.map((f) => (
+              <select
+                key={f.key}
+                aria-label={f.key.replace("_", " ")}
+                value={String(state.moderators[f.key] ?? "")}
+                disabled={busy}
+                onChange={(e) =>
+                  onRecompose({ ...state.moderators, [f.key]: e.target.value }, rows)
+                }
+                className="rounded-full bg-primary-soft px-2 py-0.5 text-[11px] font-medium text-primary border-0 cursor-pointer"
+              >
+                {f.options.map(([k, label]) => (
+                  <option key={k} value={k}>{label}</option>
+                ))}
+              </select>
+            ))}
+            <button
+              type="button"
+              onClick={() => setEditRead(false)}
+              className="text-[13px] font-medium text-ink-3 hover:text-ink"
+            >
+              done
+            </button>
+          </span>
+        )}
+      </div>
       <p className="text-[12px] text-ink-3">
         The circumstances that change the right answer. Each one becomes a
         column of your Landscape - the coverage map on the next step shows
-        exactly what each will be asked.
-      </p>
-      <p className="text-[12px] text-ink-3">
-        All of them are asked in your market&apos;s buying style -{" "}
-        <button
-          type="button"
-          onClick={onEditBase}
-          title="Not how your market buys? Change it on the coverage map"
-          className="font-medium text-ink underline decoration-dotted decoration-ink-3 underline-offset-2 hover:text-primary"
-        >
-          {marketStyle}
-        </button>{" "}
-        - unless one is marked as buying differently. A different style means that
-        buyer goes through different stages, so its column gets its own set
-        of questions.
+        exactly what each will be asked. Every scenario is asked in the
+        buying style above unless it is marked as buying differently - a
+        different style means that buyer goes through different stages, so
+        its column gets its own set of questions.
       </p>
       {rows.map((sc, i) => (
         <div
@@ -671,22 +705,17 @@ export function ScenariosGate({
   );
 }
 
-/** Step "Coverage map": the base read (collapsed to a sentence) and the
- * stage × scenario matrix. Columns are read-only here - scenarios are the
- * previous step; stage ticks are the only control (A8: no dot painting,
- * participation stays derived). */
+/** Step "Coverage map": the base read (context only - it is set on the
+ * scenarios step) and the stage × scenario matrix. Columns are read-only
+ * here - scenarios are the previous step; stage ticks are the only control
+ * (A8: no dot painting, participation stays derived). */
 export function CoverageGate({
-  state, setState, onRecompose, busy, editReadInitially = false,
+  state, setState, busy,
 }: {
   state: GridState;
   setState: (s: GridState) => void;
-  onRecompose: (base: GridState["moderators"], rows: ScenarioRow[]) => void;
   busy: boolean;
-  /** Arriving via the scenarios step's market-style link opens the
-   * base-read expander so the correction happens where the objection was. */
-  editReadInitially?: boolean;
 }) {
-  const [editRead, setEditRead] = useState(editReadInitially);
   const [showSkipped, setShowSkipped] = useState(false);
   const rows = scenarioRows(state);
   const active = rows.filter((r) => r.on);
@@ -764,44 +793,8 @@ export function CoverageGate({
         <span className="text-[11px] font-semibold uppercase tracking-wide text-ink-3">
           Your market buys:
         </span>
-        {!editRead ? (
-          <>
-            <span className="text-ink-2">{readSentence}</span>
-            <button
-              type="button"
-              onClick={() => setEditRead(true)}
-              className="text-[13px] font-medium text-primary hover:opacity-80"
-            >
-              change
-            </button>
-          </>
-        ) : (
-          <span className="flex flex-wrap items-center gap-1.5">
-            {MODERATOR_FIELDS.map((f) => (
-              <select
-                key={f.key}
-                aria-label={f.key.replace("_", " ")}
-                value={String(state.moderators[f.key] ?? "")}
-                disabled={busy}
-                onChange={(e) =>
-                  onRecompose({ ...state.moderators, [f.key]: e.target.value }, rows)
-                }
-                className="rounded-full bg-primary-soft px-2 py-0.5 text-[11px] font-medium text-primary border-0 cursor-pointer"
-              >
-                {f.options.map(([k, label]) => (
-                  <option key={k} value={k}>{label}</option>
-                ))}
-              </select>
-            ))}
-            <button
-              type="button"
-              onClick={() => setEditRead(false)}
-              className="text-[13px] font-medium text-ink-3 hover:text-ink"
-            >
-              done
-            </button>
-          </span>
-        )}
+        <span className="text-ink-2">{readSentence}</span>
+        <span className="text-[11px] text-ink-3">(set on the previous step)</span>
       </div>
 
       <div className="overflow-x-auto rounded-lg border border-line">
