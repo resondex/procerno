@@ -469,12 +469,15 @@ function TagChip({ tag }: { tag: GridStage["tag"] }) {
 /** Step "Buying scenarios": one card per scenario - tick, label,
  * description, and the journey. Nothing else competes for the screen. */
 export function ScenariosGate({
-  state, setState, onRecompose, onSuggestScenario, busy,
+  state, setState, onRecompose, onSuggestScenario, onEditBase, busy,
 }: {
   state: GridState;
   setState: (s: GridState) => void;
   onRecompose: (base: GridState["moderators"], rows: ScenarioRow[]) => void;
   onSuggestScenario: () => void;
+  /** Jump to the coverage step with the base-read expander open - the
+   * market style is stated here but edited there. */
+  onEditBase: () => void;
   busy: boolean;
 }) {
   const rows = scenarioRows(state);
@@ -502,8 +505,15 @@ export function ScenariosGate({
       </p>
       <p className="text-[12px] text-ink-3">
         All of them are asked in your market&apos;s buying style -{" "}
-        <span className="font-medium text-ink">{marketStyle}</span> - unless
-        one is marked as buying differently. A different style means that
+        <button
+          type="button"
+          onClick={onEditBase}
+          title="Not how your market buys? Change it on the coverage map"
+          className="font-medium text-ink underline decoration-dotted decoration-ink-3 underline-offset-2 hover:text-primary"
+        >
+          {marketStyle}
+        </button>{" "}
+        - unless one is marked as buying differently. A different style means that
         buyer goes through different stages, so its column gets its own set
         of questions.
       </p>
@@ -666,14 +676,17 @@ export function ScenariosGate({
  * previous step; stage ticks are the only control (A8: no dot painting,
  * participation stays derived). */
 export function CoverageGate({
-  state, setState, onRecompose, busy,
+  state, setState, onRecompose, busy, editReadInitially = false,
 }: {
   state: GridState;
   setState: (s: GridState) => void;
   onRecompose: (base: GridState["moderators"], rows: ScenarioRow[]) => void;
   busy: boolean;
+  /** Arriving via the scenarios step's market-style link opens the
+   * base-read expander so the correction happens where the objection was. */
+  editReadInitially?: boolean;
 }) {
-  const [editRead, setEditRead] = useState(false);
+  const [editRead, setEditRead] = useState(editReadInitially);
   const [showSkipped, setShowSkipped] = useState(false);
   const rows = scenarioRows(state);
   const active = rows.filter((r) => r.on);
