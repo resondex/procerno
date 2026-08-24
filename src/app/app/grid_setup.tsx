@@ -820,7 +820,7 @@ export function ScenarioReviewModal({
     <button
       type="button"
       onClick={() => onChoice(k, choice)}
-      className={`flex-1 rounded-lg border px-3 py-2 text-left grid gap-1 ${
+      className={`w-full rounded-lg border px-3 py-2 text-left grid gap-1 ${
         it.choice === choice ? "border-primary bg-primary-soft/40" : "border-line bg-surface hover:border-ink-3"
       }`}
     >
@@ -841,7 +841,7 @@ export function ScenarioReviewModal({
         {items.map((it, k) => (
           <div key={it.index} className="grid gap-2">
             <p className="text-[12px] text-warning">{it.reason}</p>
-            <div className="flex flex-col sm:flex-row gap-2">
+            <div className="grid gap-2">
               {option(k, it, "suggestion", "Suggested edit", it.suggestion)}
               {option(k, it, "mine", "Keep mine", it.current)}
             </div>

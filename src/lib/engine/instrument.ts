@@ -677,7 +677,8 @@ export async function reviewScenarios(input: {
   others: Situation[];
 }): Promise<ScenarioVerdict[]> {
   const fp = (s: Situation) => `${s.label.trim()}|${s.description.trim()}`;
-  const key = cacheKey("scenario_review", [
+  // "scenario_review2": the typo clause changed the verdict contract.
+  const key = cacheKey("scenario_review2", [
     input.category, input.audience,
     input.candidates.map(fp).join("~"), input.others.map(fp).sort().join("~"),
   ]);
@@ -697,9 +698,14 @@ export async function reviewScenarios(input: {
           "circumstance; stays inside the category (a different product or " +
           "market is not a scenario); is distinct from the other scenarios " +
           "on the table; label 2-4 plain words; description one short " +
-          "sentence in plain buyer language. Judge each candidate. Accept " +
-          "anything reasonable - this is a safety net for confused or empty " +
-          "entries, not a style gate. When ok is false, give reason as ONE " +
+          "sentence in plain buyer language. Judge each candidate. On " +
+          "substance, accept anything reasonable - this is a safety net for " +
+          "confused or empty entries, not a style gate. Mechanics are " +
+          "different: a typo, misspelling, or broken grammar in the label " +
+          "or description is NOT ok - these words appear verbatim in a " +
+          "client deliverable. For a mechanics-only problem the suggestion " +
+          "is the same text with the errors fixed and nothing else changed. " +
+          "When ok is false, give reason as ONE " +
           "sentence in plain language addressed to the user, and suggestion " +
           "as the MINIMAL edit that keeps the user's evident intent. When " +
           "ok is true, reason is an empty string and suggestion repeats the " +
