@@ -894,30 +894,22 @@ export function ScenarioReviewModal({
   );
 }
 
-/** Step "Coverage map": the base read (home is the scenarios step, but it
- * stays editable here too - this is where a change shows its consequences
- * in the mask) and the stage × scenario matrix. Columns are read-only
- * here - scenarios are the previous step; stage ticks are the only other
- * control (A8: no dot painting, participation stays derived). */
+/** Step "Coverage map": the stage × scenario matrix. The base read lives
+ * on the scenarios step; columns are read-only here - scenarios are the
+ * previous step; stage ticks are the only control (A8: no dot painting,
+ * participation stays derived). */
 export function CoverageGate({
-  state, setState, onRecompose, busy,
+  state, setState, busy,
 }: {
   state: GridState;
   setState: (s: GridState) => void;
-  onRecompose: (base: GridState["moderators"], rows: ScenarioRow[]) => void;
   busy: boolean;
 }) {
-  const [editRead, setEditRead] = useState(false);
   const [showSkipped, setShowSkipped] = useState(false);
   const rows = scenarioRows(state);
   const active = rows.filter((r) => r.on);
   const activeLabels = active.map((r) => r.label);
-  const readSentence = MODERATOR_FIELDS.map((f) => {
-    const v = String(state.moderators[f.key] ?? "");
-    return f.options.find(([k]) => k === v)?.[1];
-  }).filter(Boolean).join(" · ");
   const kept = new Set(state.keptStages);
-  const visible = state.stages.filter((s) => s.recommended || kept.has(s.key));
   const hidden = state.stages.filter((s) => !s.recommended && !kept.has(s.key));
 
   const renderRow = (s: GridStage) => {
@@ -981,50 +973,6 @@ export function CoverageGate({
 
   return (
     <div className="grid gap-4">
-      <div className="flex flex-wrap items-baseline gap-2 text-[13px]">
-        <span className="text-[11px] font-semibold uppercase tracking-wide text-ink-3">
-          Your market buys:
-        </span>
-        {!editRead ? (
-          <>
-            <span className="text-ink-2">{readSentence}</span>
-            <button
-              type="button"
-              onClick={() => setEditRead(true)}
-              className="text-[13px] font-medium text-primary hover:opacity-80"
-            >
-              change
-            </button>
-          </>
-        ) : (
-          <span className="flex flex-wrap items-center gap-1.5">
-            {MODERATOR_FIELDS.map((f) => (
-              <select
-                key={f.key}
-                aria-label={f.key.replace("_", " ")}
-                value={String(state.moderators[f.key] ?? "")}
-                disabled={busy}
-                onChange={(e) =>
-                  onRecompose({ ...state.moderators, [f.key]: e.target.value }, rows)
-                }
-                className="rounded-full bg-primary-soft px-2 py-0.5 text-[11px] font-medium text-primary border-0 cursor-pointer"
-              >
-                {f.options.map(([k, label]) => (
-                  <option key={k} value={k}>{label}</option>
-                ))}
-              </select>
-            ))}
-            <button
-              type="button"
-              onClick={() => setEditRead(false)}
-              className="text-[13px] font-medium text-ink-3 hover:text-ink"
-            >
-              done
-            </button>
-          </span>
-        )}
-      </div>
-
       <div className="overflow-x-auto rounded-lg border border-line">
         <table className="w-full border-collapse text-[12px]">
           <thead>
@@ -1042,7 +990,14 @@ export function CoverageGate({
           </thead>
           <tbody>
             {LAYERS.map((layer) => {
-              const stages = visible.filter((s) => s.layer === layer);
+              // Skipped stages render inside their own layer group, in
+              // library order - lumping them after the last section made
+              // decision-layer stages look like loyalty stages.
+              const stages = state.stages.filter(
+                (s) =>
+                  s.layer === layer &&
+                  (s.recommended || kept.has(s.key) || showSkipped)
+              );
               if (stages.length === 0) return null;
               return [
                 <tr key={`${layer}-head`}>
@@ -1053,8 +1008,6 @@ export function CoverageGate({
                 ...stages.map(renderRow),
               ];
             })}
-            {showSkipped &&
-              hidden.map((s) => renderRow(s))}
           </tbody>
         </table>
       </div>
