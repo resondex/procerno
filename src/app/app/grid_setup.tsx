@@ -928,6 +928,9 @@ export function CoverageGate({
   busy: boolean;
 }) {
   const [showSkipped, setShowSkipped] = useState(false);
+  /** Instant hover card for stage explanations - the native title tooltip
+   * sits behind a ~1s OS delay, too slow for scanning a map. */
+  const [tip, setTip] = useState<{ x: number; y: number; hint: string; verdict: string } | null>(null);
   const rows = scenarioRows(state);
   const active = rows.filter((r) => r.on);
   const activeLabels = active.map((r) => r.label);
@@ -957,23 +960,26 @@ export function CoverageGate({
             />
             <span
               className={`${isKept ? "text-ink" : "text-ink-3"}${s.hint || s.why ? " cursor-help underline decoration-dotted decoration-line underline-offset-2" : ""}`}
-              title={
-                [
-                  s.hint,
-                  s.why
-                    ? `${s.recommended ? "Recommended" : "Skipped"}: ${s.why}`
-                    : undefined,
-                ]
-                  .filter(Boolean)
-                  .join("\n\n") || undefined
-              }
+              onMouseEnter={(e) => {
+                if (!s.hint && !s.why) return;
+                const r = e.currentTarget.getBoundingClientRect();
+                setTip({
+                  x: Math.min(r.left, window.innerWidth - 340),
+                  y: r.bottom + 6,
+                  hint: s.hint ?? "",
+                  verdict: s.why
+                    ? `${s.recommended ? "Recommended" : "Not recommended"}: ${s.why}`
+                    : "",
+                });
+              }}
+              onMouseLeave={() => setTip(null)}
             >
               {s.label}
             </span>
             <TagChip tag={s.tag} />
             {!s.recommended && (
               <span className="text-[9px] uppercase tracking-wide text-ink-3" title="No journey reaches this stage - keep it only if your buyers really do">
-                skipped
+                not recommended
               </span>
             )}
           </label>
@@ -1054,16 +1060,27 @@ export function CoverageGate({
           className="text-[13px] font-medium text-primary hover:opacity-80 w-fit"
         >
           {showSkipped
-            ? "Hide skipped stages"
-            : `+ ${hidden.length} skipped stage${hidden.length === 1 ? "" : "s"} available (${hidden.map((s) => s.label).join(", ")})`}
+            ? "Hide not-recommended stages"
+            : `+ ${hidden.length} not-recommended stage${hidden.length === 1 ? "" : "s"} available (${hidden.map((s) => s.label).join(", ")})`}
         </button>
       )}
       <p className="text-[12px] text-ink-3 max-w-3xl">
         Each scenario walks the stages its buyer actually walks - a missing
         dot is a question that buyer never asks, and a cell that never costs
-        anything. Keep a skipped stage only if your judgement says buyers
-        reach it; if the map looks wrong, the reads are usually what&apos;s off.
+        anything. Keep a not-recommended stage only if your judgement says
+        buyers reach it; if the map looks wrong, the reads are usually
+        what&apos;s off.
       </p>
+      {tip && (
+        <div
+          data-stage-tip
+          className="fixed z-50 w-80 rounded-lg border border-line bg-surface p-3 shadow-lg text-[12px] grid gap-1.5 pointer-events-none"
+          style={{ left: tip.x, top: Math.min(tip.y, window.innerHeight - 150) }}
+        >
+          {tip.hint && <p className="text-ink-2">{tip.hint}</p>}
+          {tip.verdict && <p className="text-ink font-medium">{tip.verdict}</p>}
+        </div>
+      )}
     </div>
   );
 }
