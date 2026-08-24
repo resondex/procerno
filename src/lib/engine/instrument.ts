@@ -421,7 +421,9 @@ export async function readScenarios(input: {
   category: string;
   audience: string | null;
 }): Promise<{ base: Moderators; scenarios: ScenarioSpec[]; reserve: ScenarioSpec[] }> {
-  const key = cacheKey("scenarios_journeys", [input.category, input.audience]);
+  // "scenarios_journeys2": the deviation-coherence rules (habitual needs an
+  // established default; solo needs a one-person scenario) changed the read.
+  const key = cacheKey("scenarios_journeys2", [input.category, input.audience]);
   const hit = await store.cacheGet(key, CACHE_TTL_MS);
   if (hit) return JSON.parse(hit) as { base: Moderators; scenarios: ScenarioSpec[]; reserve: ScenarioSpec[] };
   const res = await openaiClient().chat.completions.create({
@@ -450,7 +452,14 @@ export async function readScenarios(input: {
           "headphones: a daily-commuter scenario buys habitually on taste " +
           "while the base is considered and spec-driven). A circumstance " +
           "that changes the answer but not the process - tight budget, " +
-          "compliance constraint, gift deadline - NEVER deviates. Most " +
+          "compliance constraint, gift deadline - NEVER deviates. A " +
+          "deviating journey must COHERE with the scenario's own words: " +
+          "'habitual' requires an established default the buyer reaches " +
+          "for without deliberating (one person grabbing the tool they " +
+          "always use) - a FIRST-TIME adoption is never habitual, however " +
+          "quick, and 'moving fast' alone is not a different process; " +
+          "'solo' requires the scenario to describe ONE person deciding, " +
+          "not a small team. Most " +
           "markets have ZERO deviating scenarios; at most one, and only " +
           "among the first four. When " +
           "deviates is false, journey just repeats the base values.",
