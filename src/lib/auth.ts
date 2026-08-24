@@ -159,8 +159,20 @@ export async function getPlanFor(auth: AuthContext): Promise<Plan> {
 
 export const PLAN_TRACKER_LIMITS: Record<Plan, number> = {
   free: 1,
+  starter: 1,
+  growth: 3,
   pro: 5,
   enterprise: Number.POSITIVE_INFINITY,
+};
+
+/** Buying scenarios included per tier (price sheet: Starter and Growth run
+ * 3; the 4th arrives at Pro). Free mirrors Starter. */
+export const PLAN_SCENARIO_CAPS: Record<Plan, number> = {
+  free: 3,
+  starter: 3,
+  growth: 3,
+  pro: 4,
+  enterprise: 4,
 };
 
 /** Auth context, or a ready-to-return 401 when auth is on and nobody's in. */

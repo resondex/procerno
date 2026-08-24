@@ -18,7 +18,7 @@ export type Framing = "recommended" | "mentioned" | "negative";
 
 export type RunSchedule = "none" | "weekly" | "monthly";
 
-export type Plan = "free" | "pro" | "enterprise";
+export type Plan = "free" | "starter" | "growth" | "pro" | "enterprise";
 
 export type OrgRole = "admin" | "editor" | "viewer";
 

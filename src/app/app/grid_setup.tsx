@@ -86,6 +86,8 @@ export interface ScenarioRow {
   tried?: { label: string; description: string }[];
 }
 
+/** Absolute scenario-column maximum; a plan's cap can be lower
+ * (PLAN_SCENARIO_CAPS - Starter and Growth include 3, Pro the 4th). */
 export const MAX_SCENARIOS = 4;
 /** Near-neighbor draws per card before we ask the user to write their own. */
 export const MAX_VARIANTS = 3;
@@ -143,9 +145,12 @@ export function withScenarioRows(g: GridState, rows: ScenarioRow[]): GridState {
   };
 }
 
-function rowsFromSuggested(list: { label: string; description: string; journey: Journey | null }[]): ScenarioRow[] {
+function rowsFromSuggested(
+  list: { label: string; description: string; journey: Journey | null }[],
+  cap: number
+): ScenarioRow[] {
   return list.map((s, i) => ({
-    ...s, suggested: true, on: i < MAX_SCENARIOS,
+    ...s, suggested: true, on: i < cap,
     original: { label: s.label, description: s.description },
   }));
 }
@@ -237,6 +242,8 @@ export interface GridSetupArgs {
   category: string;
   competitors: string[];
   audience: string;
+  /** The plan's scenario cap; defaults to the absolute maximum. */
+  maxScenarios?: number;
   state: GridState | null;
   setState: (s: GridState | null) => void;
   setBusy: (b: string | null) => void;
@@ -244,6 +251,7 @@ export interface GridSetupArgs {
 }
 
 export function useGridSetup(a: GridSetupArgs) {
+  const cap = a.maxScenarios ?? MAX_SCENARIOS;
   async function post<T>(path: string, body: unknown): Promise<T | null> {
     const res = await fetch(path, {
       method: "POST",
@@ -293,7 +301,7 @@ export function useGridSetup(a: GridSetupArgs) {
         r.on && byLabel.has(r.label) ? { ...r, journey: byLabel.get(r.label) ?? null } : r
       );
     } else {
-      rows = rowsFromSuggested(data.scenarios);
+      rows = rowsFromSuggested(data.scenarios, cap);
     }
     const next: GridState = withScenarioRows(
       {
@@ -364,12 +372,12 @@ export function useGridSetup(a: GridSetupArgs) {
     const nextRows: ScenarioRow[] = [
       ...rows,
       {
-        ...scenario, journey: null, suggested: true, on: active < MAX_SCENARIOS,
+        ...scenario, journey: null, suggested: true, on: active < cap,
         original: { ...scenario },
       },
     ];
     const drawn: GridState = { ...a.state, reserve };
-    if (active < MAX_SCENARIOS) {
+    if (active < cap) {
       a.setState(drawn);
       await compose({ base: drawn.moderators, rows: nextRows });
     } else {
@@ -533,6 +541,7 @@ function TagChip({ tag }: { tag: GridStage["tag"] }) {
  * description, and the journey. Nothing else competes for the screen. */
 export function ScenariosGate({
   state, setState, onRecompose, onSuggestScenario, onNearScenario, busy,
+  maxScenarios = MAX_SCENARIOS,
 }: {
   state: GridState;
   setState: (s: GridState) => void;
@@ -541,8 +550,11 @@ export function ScenariosGate({
   /** Draw a near variant of card i - same circumstance, one detail moved. */
   onNearScenario: (i: number) => void;
   busy: boolean;
+  /** The plan's scenario cap (PLAN_SCENARIO_CAPS). */
+  maxScenarios?: number;
 }) {
   const [editRead, setEditRead] = useState(false);
+  const cap = maxScenarios;
   const rows = scenarioRows(state);
   const active = rows.filter((r) => r.on);
   const deviatingLabel = active.find((r) => r.journey !== null)?.label ?? null;
@@ -620,6 +632,12 @@ export function ScenariosGate({
         own Landscape, so each grid stays readable and every result traces
         to one kind of buyer.
       </p>
+      {cap < MAX_SCENARIOS && (
+        <p className="text-[12px] text-ink-3">
+          Your plan runs <span className="font-medium text-ink">{cap} buying
+          scenarios</span> - the {cap + 1}th column unlocks on the Pro plan.
+        </p>
+      )}
       {rows.map((sc, i) => (
         <div
           key={i}
@@ -631,7 +649,7 @@ export function ScenariosGate({
               aria-label={sc.on ? "remove from grid" : "add to grid"}
               className="mt-2.5"
               checked={sc.on}
-              disabled={busy || (!sc.on && active.length >= MAX_SCENARIOS)}
+              disabled={busy || (!sc.on && active.length >= cap)}
               onChange={(e) => updateRow(i, { on: e.target.checked }, true)}
             />
             <div className="grid gap-1.5 w-full">
@@ -768,7 +786,7 @@ export function ScenariosGate({
       <div className="flex flex-wrap items-center gap-4">
         <button
           type="button"
-          onClick={() => setRows([...rows, { label: "", description: "", journey: null, suggested: false, on: active.length < MAX_SCENARIOS }])}
+          onClick={() => setRows([...rows, { label: "", description: "", journey: null, suggested: false, on: active.length < cap }])}
           className="text-[13px] font-medium text-primary hover:opacity-80"
         >
           + Add your own
@@ -788,7 +806,7 @@ export function ScenariosGate({
             setRows(
               rows
                 .filter((r) => r.suggested)
-                .map((r, i) => ({ ...r, ...(r.original ?? {}), journey: null, on: i < MAX_SCENARIOS })),
+                .map((r, i) => ({ ...r, ...(r.original ?? {}), journey: null, on: i < cap })),
               true
             )
           }
