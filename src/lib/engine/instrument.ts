@@ -25,7 +25,7 @@ const MODEL = process.env.SUGGEST_MODEL ?? "gpt-5-mini";
 const CACHE_TTL_MS = 183 * 24 * 3600 * 1000;
 // Version the cache: composer-rule or prompt-style changes must not serve
 // grids built under old rules.
-const INSTRUMENT_VERSION = "g6";
+const INSTRUMENT_VERSION = "g7";
 
 function cacheKey(prefix: string, parts: (string | null)[]): string {
   const normalized = parts.map((p) => (p ?? "").trim().toLowerCase()).join("|");
@@ -974,8 +974,10 @@ export async function generateGrid(input: {
           "and terse, some with backstory; never survey-speak, never a " +
           "requirements list.\n" +
           "Rules:\n" +
-          "- angle=generic: NEVER name the client brand or any competitor. " +
-          "Blind prompts are the measurement.\n" +
+          "- angle=generic: never name any brand - blind prompts are the " +
+          "measurement - UNLESS the cell's stage guidance says the buyer " +
+          "names the client brand (objections about it, its pricing, the " +
+          "case for it): there, name the CLIENT brand only, never a rival.\n" +
           "- angle=<rival name>: for comparison-type stages, name the client " +
           "brand AND that rival; for alternatives-type stages, ask for " +
           "alternatives to that rival (client brand NOT named).\n" +
