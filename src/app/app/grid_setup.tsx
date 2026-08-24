@@ -445,9 +445,9 @@ function TagChip({ tag }: { tag: GridStage["tag"] }) {
   );
 }
 
-/** Gate 1: the coverage map - base read, scenario table with journeys, and
- * the stage × scenario mask. */
-export function CoverageMap({
+/** Step "Buying scenarios": one card per scenario - tick, label,
+ * description, and the journey. Nothing else competes for the screen. */
+export function ScenariosGate({
   state, setState, onRecompose, onSuggestScenario, busy,
 }: {
   state: GridState;
@@ -458,7 +458,6 @@ export function CoverageMap({
 }) {
   const rows = scenarioRows(state);
   const active = rows.filter((r) => r.on);
-  const activeLabels = active.map((r) => r.label);
   const deviatingLabel = active.find((r) => r.journey !== null)?.label ?? null;
   const setRows = (next: ScenarioRow[], recompose = false) => {
     if (recompose) onRecompose(state.moderators, next);
@@ -468,79 +467,82 @@ export function CoverageMap({
     setRows(rows.map((r, j) => (j === i ? { ...r, ...patch } : r)), recompose);
 
   return (
-    <div className="grid gap-5">
-      {/* explainer */}
-      <div className="rounded-lg border border-line bg-surface-1 px-3.5 py-2.5 grid gap-1.5 text-[12px] text-ink-2 leading-relaxed max-w-3xl">
-        <p>
-          Rows are the stages of your buyer&apos;s decision; columns are their
-          buying scenarios; each scenario walks the stages its buyer actually
-          walks. The ticked stages are the recommended set - keep any the
-          rules skipped if your judgement says buyers reach them, but a stage
-          that doesn&apos;t exist for your buyers still gets answered by every
-          engine, and the result looks like measurement without being one.
-        </p>
-        <p className="text-ink-3">
-          If something looks wrong, the reads below are usually what&apos;s off -
-          change them and the whole map recomposes instantly.
-        </p>
-      </div>
-
-      {/* base read */}
-      <div className="rounded-lg border border-line bg-surface-1 px-4 py-3 grid gap-2">
-        <div className="flex flex-wrap items-center gap-1.5">
-          <span className="text-[11px] font-semibold uppercase tracking-wide text-ink-3 mr-1">
-            Your market decides
-          </span>
-          {MODERATOR_FIELDS.map((f) => (
-            <select
-              key={f.key}
-              aria-label={f.key.replace("_", " ")}
-              value={String(state.moderators[f.key] ?? "")}
-              disabled={busy}
-              onChange={(e) =>
-                onRecompose({ ...state.moderators, [f.key]: e.target.value }, rows)
-              }
-              className="rounded-full bg-primary-soft px-2 py-0.5 text-[11px] font-medium text-primary border-0 cursor-pointer"
-            >
-              {f.options.map(([k, label]) => (
-                <option key={k} value={k}>{label}</option>
-              ))}
-            </select>
-          ))}
-        </div>
-        {typeof state.moderators.rationale === "string" && (
-          <p className="text-[12px] text-ink-3">{state.moderators.rationale}</p>
-        )}
-      </div>
-
-      {/* scenario table */}
-      <div className="grid gap-2">
-        <div className="flex items-baseline justify-between gap-3">
-          <span className="text-[11px] font-semibold uppercase tracking-wide text-ink-3">
-            Buying scenarios - the circumstances that change the right answer
-          </span>
-          <span className="text-[11px] text-ink-3">
-            {active.length} of {MAX_SCENARIOS} in the grid
-          </span>
-        </div>
-        {rows.map((sc, i) => (
-          <div key={i} className={`grid gap-1.5 ${sc.on ? "" : "opacity-60"}`}>
-            <div className="flex items-start gap-2">
-              <input
-                type="checkbox"
-                aria-label={sc.on ? "remove from grid" : "add to grid"}
-                className="mt-2.5"
-                checked={sc.on}
-                disabled={busy || (!sc.on && active.length >= MAX_SCENARIOS)}
-                onChange={(e) => updateRow(i, { on: e.target.checked }, true)}
-              />
-              <input
-                className="input w-48 shrink-0 text-sm"
-                value={sc.label}
-                placeholder="label"
-                onChange={(e) => updateRow(i, { label: e.target.value })}
-                onBlur={() => sc.on && onRecompose(state.moderators, rows)}
-              />
+    <div className="grid gap-3 max-w-2xl">
+      <p className="text-[12px] text-ink-3">
+        The circumstances that change the right answer. Each one becomes a
+        column of your Landscape - the coverage map on the next step shows
+        exactly what each will be asked.
+      </p>
+      {rows.map((sc, i) => (
+        <div
+          key={i}
+          className={`rounded-lg border border-line bg-surface px-4 py-3 grid gap-2 ${sc.on ? "" : "opacity-60"}`}
+        >
+          <div className="flex items-start gap-2.5">
+            <input
+              type="checkbox"
+              aria-label={sc.on ? "remove from grid" : "add to grid"}
+              className="mt-2.5"
+              checked={sc.on}
+              disabled={busy || (!sc.on && active.length >= MAX_SCENARIOS)}
+              onChange={(e) => updateRow(i, { on: e.target.checked }, true)}
+            />
+            <div className="grid gap-1.5 w-full">
+              <div className="flex items-center gap-2">
+                <input
+                  className="input w-56 shrink-0 text-sm font-medium"
+                  value={sc.label}
+                  placeholder="label"
+                  onChange={(e) => updateRow(i, { label: e.target.value })}
+                  onBlur={() => sc.on && onRecompose(state.moderators, rows)}
+                />
+                <span className="flex-1" />
+                <label
+                  className="flex items-center gap-1.5 text-[11px] text-ink-3 whitespace-nowrap"
+                  title={
+                    deviatingLabel && deviatingLabel !== sc.label
+                      ? `Only one scenario per grid can buy differently (currently: ${deviatingLabel})`
+                      : "This scenario's buyer decides by a different process than the market"
+                  }
+                >
+                  <input
+                    type="checkbox"
+                    checked={sc.journey !== null}
+                    disabled={busy || !sc.on || (deviatingLabel !== null && deviatingLabel !== sc.label)}
+                    onChange={(e) =>
+                      updateRow(
+                        i,
+                        {
+                          journey: e.target.checked
+                            ? {
+                                involvement: String(state.moderators.involvement ?? "considered"),
+                                verifiability: String(state.moderators.verifiability ?? "spec"),
+                                think_feel: String(state.moderators.think_feel ?? "think"),
+                                decision_unit: String(state.moderators.decision_unit ?? "solo"),
+                              }
+                            : null,
+                        },
+                        true
+                      )
+                    }
+                  />
+                  buys differently
+                </label>
+                {sc.suggested ? (
+                  <span className="w-5 text-center text-[10px] font-medium uppercase tracking-wide text-primary/70" title="suggested - untick to leave it out">
+                    ✓
+                  </span>
+                ) : (
+                  <button
+                    type="button"
+                    aria-label="delete scenario"
+                    onClick={() => setRows(rows.filter((_, j) => j !== i), true)}
+                    className="w-5 text-ink-3 hover:text-danger text-lg leading-none"
+                  >
+                    ×
+                  </button>
+                )}
+              </div>
               <textarea
                 className="input w-full resize-none field-sizing-content text-sm"
                 rows={1}
@@ -548,203 +550,247 @@ export function CoverageMap({
                 placeholder="one sentence describing the circumstance"
                 onChange={(e) => updateRow(i, { description: e.target.value })}
               />
-              <label
-                className="flex items-center gap-1.5 shrink-0 pt-2 text-[11px] text-ink-3"
-                title={
-                  deviatingLabel && deviatingLabel !== sc.label
-                    ? `Only one scenario per grid can buy differently (currently: ${deviatingLabel})`
-                    : "This scenario's buyer decides by a different process than the market"
-                }
-              >
-                <input
-                  type="checkbox"
-                  checked={sc.journey !== null}
-                  disabled={busy || !sc.on || (deviatingLabel !== null && deviatingLabel !== sc.label)}
-                  onChange={(e) =>
-                    updateRow(
-                      i,
-                      {
-                        journey: e.target.checked
-                          ? {
-                              involvement: String(state.moderators.involvement ?? "considered"),
-                              verifiability: String(state.moderators.verifiability ?? "spec"),
-                              think_feel: String(state.moderators.think_feel ?? "think"),
-                              decision_unit: String(state.moderators.decision_unit ?? "solo"),
-                            }
-                          : null,
-                      },
-                      true
-                    )
-                  }
-                />
-                buys differently
-              </label>
-              {sc.suggested ? (
-                <span className="w-6 shrink-0 pt-2 text-center text-[10px] font-medium uppercase tracking-wide text-primary/70" title="suggested - untick to leave it out">
-                  ✓
-                </span>
-              ) : (
-                <button
-                  type="button"
-                  aria-label="delete scenario"
-                  onClick={() => setRows(rows.filter((_, j) => j !== i), true)}
-                  className="w-6 shrink-0 text-ink-3 hover:text-danger text-lg leading-none"
-                >
-                  ×
-                </button>
+              {sc.journey && sc.on && (
+                <div className="flex flex-wrap items-center gap-1.5">
+                  <span className="text-[10px] uppercase tracking-wide text-warning font-semibold">this buyer:</span>
+                  {JOURNEY_FIELDS.map((f) => (
+                    <select
+                      key={f.key}
+                      aria-label={`${sc.label} ${f.key.replace("_", " ")}`}
+                      value={String(sc.journey?.[f.key as keyof Journey] ?? "")}
+                      disabled={busy}
+                      onChange={(e) =>
+                        updateRow(i, { journey: { ...sc.journey!, [f.key]: e.target.value } }, true)
+                      }
+                      className="rounded-full bg-warning/10 px-2 py-0.5 text-[11px] font-medium text-warning border-0 cursor-pointer"
+                    >
+                      {f.options.map(([k, label]) => (
+                        <option key={k} value={k}>{label}</option>
+                      ))}
+                    </select>
+                  ))}
+                </div>
               )}
             </div>
-            {sc.journey && sc.on && (
-              <div className="flex flex-wrap items-center gap-1.5 pl-7">
-                <span className="text-[10px] uppercase tracking-wide text-warning font-semibold">this buyer:</span>
-                {JOURNEY_FIELDS.map((f) => (
-                  <select
-                    key={f.key}
-                    aria-label={`${sc.label} ${f.key.replace("_", " ")}`}
-                    value={String(sc.journey?.[f.key as keyof Journey] ?? "")}
-                    disabled={busy}
-                    onChange={(e) =>
-                      updateRow(i, { journey: { ...sc.journey!, [f.key]: e.target.value } }, true)
-                    }
-                    className="rounded-full bg-warning/10 px-2 py-0.5 text-[11px] font-medium text-warning border-0 cursor-pointer"
-                  >
-                    {f.options.map(([k, label]) => (
-                      <option key={k} value={k}>{label}</option>
-                    ))}
-                  </select>
-                ))}
-              </div>
-            )}
           </div>
-        ))}
-        <div className="flex flex-wrap items-center gap-4">
-          <button
-            type="button"
-            onClick={() => setRows([...rows, { label: "", description: "", journey: null, suggested: false, on: active.length < MAX_SCENARIOS }])}
-            className="text-[13px] font-medium text-primary hover:opacity-80"
-          >
-            + Add your own
-          </button>
-          <button
-            type="button"
-            onClick={onSuggestScenario}
-            disabled={busy}
-            className="text-[13px] font-medium text-primary hover:opacity-80 disabled:opacity-50"
-          >
-            Suggest another
-          </button>
-          <span className="flex-1" />
-          <button
-            type="button"
-            onClick={() =>
-              setRows(
-                rows
-                  .filter((r) => r.suggested)
-                  .map((r, i) => ({ ...r, ...(r.original ?? {}), journey: null, on: i < MAX_SCENARIOS })),
-                true
-              )
-            }
-            className="text-[13px] font-medium text-ink-3 hover:text-ink"
-          >
-            Reset to suggested
-          </button>
         </div>
+      ))}
+      <div className="flex flex-wrap items-center gap-4">
+        <button
+          type="button"
+          onClick={() => setRows([...rows, { label: "", description: "", journey: null, suggested: false, on: active.length < MAX_SCENARIOS }])}
+          className="text-[13px] font-medium text-primary hover:opacity-80"
+        >
+          + Add your own
+        </button>
+        <button
+          type="button"
+          onClick={onSuggestScenario}
+          disabled={busy}
+          className="text-[13px] font-medium text-primary hover:opacity-80 disabled:opacity-50"
+        >
+          Suggest another
+        </button>
+        <span className="flex-1" />
+        <button
+          type="button"
+          onClick={() =>
+            setRows(
+              rows
+                .filter((r) => r.suggested)
+                .map((r, i) => ({ ...r, ...(r.original ?? {}), journey: null, on: i < MAX_SCENARIOS })),
+              true
+            )
+          }
+          className="text-[13px] font-medium text-ink-3 hover:text-ink"
+        >
+          Reset to suggested
+        </button>
+      </div>
+    </div>
+  );
+}
+
+/** Step "Coverage map": the base read (collapsed to a sentence) and the
+ * stage × scenario matrix. Columns are read-only here - scenarios are the
+ * previous step; stage ticks are the only control (A8: no dot painting,
+ * participation stays derived). */
+export function CoverageGate({
+  state, setState, onRecompose, busy,
+}: {
+  state: GridState;
+  setState: (s: GridState) => void;
+  onRecompose: (base: GridState["moderators"], rows: ScenarioRow[]) => void;
+  busy: boolean;
+}) {
+  const [editRead, setEditRead] = useState(false);
+  const [showSkipped, setShowSkipped] = useState(false);
+  const rows = scenarioRows(state);
+  const active = rows.filter((r) => r.on);
+  const activeLabels = active.map((r) => r.label);
+  const readSentence = MODERATOR_FIELDS.map((f) => {
+    const v = String(state.moderators[f.key] ?? "");
+    return f.options.find(([k]) => k === v)?.[1];
+  }).filter(Boolean).join(" · ");
+  const kept = new Set(state.keptStages);
+  const visible = state.stages.filter((s) => s.recommended || kept.has(s.key));
+  const hidden = state.stages.filter((s) => !s.recommended && !kept.has(s.key));
+
+  const renderRow = (s: GridStage) => {
+    const isKept = kept.has(s.key);
+    const cols = stageColumns(s, activeLabels);
+    const effective = cols.length > 0 ? cols : activeLabels;
+    return (
+      <tr key={s.key} className={isKept ? "" : "opacity-50"}>
+        <td className="px-3 py-1 whitespace-nowrap">
+          <label className="flex items-center gap-2">
+            <input
+              type="checkbox"
+              checked={isKept}
+              disabled={busy}
+              onChange={(e) =>
+                setState({
+                  ...state,
+                  keptStages: e.target.checked
+                    ? [...state.keptStages, s.key]
+                    : state.keptStages.filter((k) => k !== s.key),
+                })
+              }
+            />
+            <span className={isKept ? "text-ink" : "text-ink-3"}>{s.label}</span>
+            <TagChip tag={s.tag} />
+            {!s.recommended && (
+              <span className="text-[9px] uppercase tracking-wide text-ink-3" title="No journey reaches this stage - keep it only if your buyers really do">
+                skipped
+              </span>
+            )}
+          </label>
+        </td>
+        {s.situational || s.rivals !== "none" ? (
+          active.map((sc) => {
+            const inCol = isKept && effective.includes(sc.label);
+            return (
+              <td key={sc.label} className="px-2 py-1 text-center">
+                <span
+                  className={`inline-block h-2.5 w-2.5 rounded-full ${
+                    inCol ? "bg-primary" : "border border-dashed border-line"
+                  }`}
+                  title={inCol ? `${s.label} runs in ${sc.label}` : `${sc.label}'s buyer doesn't reach ${s.label}`}
+                />
+              </td>
+            );
+          })
+        ) : (
+          <td colSpan={active.length} className="px-2 py-1 text-center">
+            <span className={`text-[10px] ${isKept ? "text-primary" : "text-ink-3"}`}>
+              {isKept
+                ? cols.length > 0 && cols.length < activeLabels.length
+                  ? `1 cell · asked by: ${cols.join(", ")}`
+                  : "1 cell · every scenario"
+                : "-"}
+            </span>
+          </td>
+        )}
+      </tr>
+    );
+  };
+
+  return (
+    <div className="grid gap-4">
+      <div className="flex flex-wrap items-baseline gap-2 text-[13px]">
+        <span className="text-[11px] font-semibold uppercase tracking-wide text-ink-3">
+          Your market buys:
+        </span>
+        {!editRead ? (
+          <>
+            <span className="text-ink-2">{readSentence}</span>
+            <button
+              type="button"
+              onClick={() => setEditRead(true)}
+              className="text-[13px] font-medium text-primary hover:opacity-80"
+            >
+              change
+            </button>
+          </>
+        ) : (
+          <span className="flex flex-wrap items-center gap-1.5">
+            {MODERATOR_FIELDS.map((f) => (
+              <select
+                key={f.key}
+                aria-label={f.key.replace("_", " ")}
+                value={String(state.moderators[f.key] ?? "")}
+                disabled={busy}
+                onChange={(e) =>
+                  onRecompose({ ...state.moderators, [f.key]: e.target.value }, rows)
+                }
+                className="rounded-full bg-primary-soft px-2 py-0.5 text-[11px] font-medium text-primary border-0 cursor-pointer"
+              >
+                {f.options.map(([k, label]) => (
+                  <option key={k} value={k}>{label}</option>
+                ))}
+              </select>
+            ))}
+            <button
+              type="button"
+              onClick={() => setEditRead(false)}
+              className="text-[13px] font-medium text-ink-3 hover:text-ink"
+            >
+              done
+            </button>
+          </span>
+        )}
       </div>
 
-      {/* coverage map */}
-      <div className="grid gap-2">
-        <span className="text-[11px] font-semibold uppercase tracking-wide text-ink-3">
-          The coverage map - every stage, and who walks it
-        </span>
-        <div className="overflow-x-auto rounded-lg border border-line">
-          <table className="w-full border-collapse text-[12px]">
-            <thead>
-              <tr className="bg-surface-1">
-                <th className="px-3 py-2 text-left font-medium text-ink-3 whitespace-nowrap">stage</th>
-                {active.map((sc) => (
-                  <th key={sc.label} className="px-2 py-2 text-center font-medium whitespace-nowrap">
-                    <span className={sc.journey ? "text-warning" : "text-ink"}>{sc.label}</span>
-                    <span className="block text-[9px] font-normal text-ink-3">
-                      {sc.journey ? "buys differently" : "buys like the market"}
-                    </span>
-                  </th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              {LAYERS.map((layer) => {
-                const stages = state.stages.filter((s) => s.layer === layer);
-                if (stages.length === 0) return null;
-                return [
-                  <tr key={`${layer}-head`}>
-                    <td colSpan={1 + active.length} className="px-3 pt-2 pb-1 text-[10px] font-semibold uppercase tracking-wide text-primary border-t border-line">
-                      {layer}
-                    </td>
-                  </tr>,
-                  ...stages.map((s) => {
-                    const kept = state.keptStages.includes(s.key);
-                    const cols = stageColumns(s, activeLabels);
-                    const effective = cols.length > 0 ? cols : activeLabels;
-                    return (
-                      <tr key={s.key} className={kept ? "" : "opacity-50"}>
-                        <td className="px-3 py-1 whitespace-nowrap">
-                          <label className="flex items-center gap-2">
-                            <input
-                              type="checkbox"
-                              checked={kept}
-                              disabled={busy}
-                              onChange={(e) =>
-                                setState({
-                                  ...state,
-                                  keptStages: e.target.checked
-                                    ? [...state.keptStages, s.key]
-                                    : state.keptStages.filter((k) => k !== s.key),
-                                })
-                              }
-                            />
-                            <span className={kept ? "text-ink" : "text-ink-3"}>{s.label}</span>
-                            <TagChip tag={s.tag} />
-                            {!s.recommended && (
-                              <span className="text-[9px] uppercase tracking-wide text-ink-3" title="No journey reaches this stage - keep it only if your buyers really do">
-                                skipped
-                              </span>
-                            )}
-                          </label>
-                        </td>
-                        {s.situational || s.rivals !== "none" ? (
-                          active.map((sc) => {
-                            const inCol = kept && effective.includes(sc.label);
-                            return (
-                              <td key={sc.label} className="px-2 py-1 text-center">
-                                <span
-                                  className={`inline-block h-2.5 w-2.5 rounded-full ${
-                                    inCol ? "bg-primary" : "border border-dashed border-line"
-                                  }`}
-                                  title={inCol ? `${s.label} runs in ${sc.label}` : `${sc.label}'s buyer doesn't reach ${s.label}`}
-                                />
-                              </td>
-                            );
-                          })
-                        ) : (
-                          <td colSpan={active.length} className="px-2 py-1 text-center">
-                            <span className={`text-[10px] ${kept ? "text-primary" : "text-ink-3"}`}>
-                              {kept
-                                ? cols.length > 0 && cols.length < activeLabels.length
-                                  ? `1 cell · asked by: ${cols.join(", ")}`
-                                  : "1 cell · every scenario"
-                                : "-"}
-                            </span>
-                          </td>
-                        )}
-                      </tr>
-                    );
-                  }),
-                ];
-              })}
-            </tbody>
-          </table>
-        </div>
+      <div className="overflow-x-auto rounded-lg border border-line">
+        <table className="w-full border-collapse text-[12px]">
+          <thead>
+            <tr className="bg-surface-1">
+              <th className="px-3 py-2 text-left font-medium text-ink-3 whitespace-nowrap">stage</th>
+              {active.map((sc) => (
+                <th key={sc.label} className="px-2 py-2 text-center font-medium whitespace-nowrap">
+                  <span className={sc.journey ? "text-warning" : "text-ink"}>{sc.label}</span>
+                  <span className="block text-[9px] font-normal text-ink-3">
+                    {sc.journey ? "buys differently" : "buys like the market"}
+                  </span>
+                </th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {LAYERS.map((layer) => {
+              const stages = visible.filter((s) => s.layer === layer);
+              if (stages.length === 0) return null;
+              return [
+                <tr key={`${layer}-head`}>
+                  <td colSpan={1 + active.length} className="px-3 pt-2 pb-1 text-[10px] font-semibold uppercase tracking-wide text-primary border-t border-line">
+                    {layer}
+                  </td>
+                </tr>,
+                ...stages.map(renderRow),
+              ];
+            })}
+            {showSkipped &&
+              hidden.map((s) => renderRow(s))}
+          </tbody>
+        </table>
       </div>
+      {hidden.length > 0 && (
+        <button
+          type="button"
+          onClick={() => setShowSkipped((v) => !v)}
+          className="text-[13px] font-medium text-primary hover:opacity-80 w-fit"
+        >
+          {showSkipped
+            ? "Hide skipped stages"
+            : `+ ${hidden.length} skipped stage${hidden.length === 1 ? "" : "s"} available (${hidden.map((s) => s.label).join(", ")})`}
+        </button>
+      )}
+      <p className="text-[12px] text-ink-3 max-w-3xl">
+        Each scenario walks the stages its buyer actually walks - a missing
+        dot is a question that buyer never asks, and a cell that never costs
+        anything. Keep a skipped stage only if your judgement says buyers
+        reach it; if the map looks wrong, the reads are usually what&apos;s off.
+      </p>
     </div>
   );
 }
