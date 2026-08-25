@@ -1416,7 +1416,11 @@ function useFolds() {
   };
 }
 
-/** Gate 2: one seed prompt per cell - layers and stages both fold. */
+/** Gate 2 (option D): layers as slim separators, each stage a closed
+ * accordion bar carrying its tag and blind/branded stats - the resting
+ * page is a per-stage checklist. Opening a stage renders its cells as
+ * cards with the prompt as the body and the New-prompt / cycle / remove
+ * controls in the footer. */
 export function CellsGate({
   state, setState, brandNames, onRegenerate, onCycle, busy,
 }: {
@@ -1429,110 +1433,141 @@ export function CellsGate({
   onCycle: (i: number, dir: 1 | -1) => void;
   busy: boolean;
 }) {
-  const folds = useFolds();
+  const [open, setOpen] = useState<ReadonlySet<string>>(new Set());
+  const toggle = (k: string) =>
+    setOpen((prev) => {
+      const next = new Set(prev);
+      if (next.has(k)) next.delete(k);
+      else next.add(k);
+      return next;
+    });
   return (
-    <div className="grid gap-4">
+    <div className="grid gap-4 max-w-4xl">
       {LAYERS.map((layer) => {
         const cells = state.cells.map((c, i) => ({ ...c, i })).filter((c) => c.layer === layer);
         if (cells.length === 0) return null;
-        const lk = `l:${layer}`;
         const stages = [...new Set(cells.map((c) => c.stage))];
         return (
-          <div key={layer} className="grid gap-1.5">
-            <FoldHeader
-              open={folds.open(lk)} onToggle={() => folds.toggle(lk)} kind="layer"
-              title={layer} count={`${cells.length} cell${cells.length === 1 ? "" : "s"}`}
-            />
-            {folds.open(lk) &&
-              stages.map((stage) => {
-                const scells = cells.filter((c) => c.stage === stage);
-                const sk = `s:${layer}|${stage}`;
-                return (
-                  <div key={stage} className="grid gap-1.5 pl-4">
-                    <FoldHeader
-                      open={folds.open(sk)} onToggle={() => folds.toggle(sk)} kind="stage"
-                      title={stageOf(state, stage)?.label ?? stage}
-                      count={`${scells.length} cell${scells.length === 1 ? "" : "s"}`}
-                    />
-                    {folds.open(sk) && scells.map((c) => (
-              <div key={c.i} className="flex items-start gap-2">
-                <span className="w-44 shrink-0 pt-1.5 text-[11px] leading-tight text-ink-3">
-                  {cellSubMeta(c)}
-                  <span className={`ml-1 ${namesAny(c.text, brandNames) ? "text-warning" : "text-primary"}`}>
-                    · {namesAny(c.text, brandNames) ? "branded" : "blind"}
-                  </span>
-                </span>
-                <div className="flex-1 grid gap-1">
-                  <textarea
-                    className="input w-full resize-none field-sizing-content text-sm"
-                    rows={1}
-                    value={c.text}
-                    onChange={(e) =>
-                      setState({
-                        ...state,
-                        cells: state.cells.map((q, j) =>
-                          j === c.i ? { ...q, text: e.target.value } : q
-                        ),
-                      })
-                    }
-                  />
-                  <div className="flex items-center gap-3 text-[11px]">
-                    {(c.regens ?? 0) < MAX_REGENS ? (
-                      <button
-                        type="button"
-                        disabled={busy}
-                        onClick={() => onRegenerate(c.i)}
-                        title="Ask this cell's question a different way - not a paraphrase"
-                        className="font-medium text-primary hover:opacity-80 disabled:opacity-50"
-                      >
-                        ↻ New prompt
-                        {(c.regens ?? 0) > 0 && (
-                          <span className="font-normal text-ink-3"> · {MAX_REGENS - (c.regens ?? 0)} left</span>
-                        )}
-                      </button>
-                    ) : (
-                      <span className="text-ink-3">{MAX_REGENS} rewrites used - edit it to taste</span>
-                    )}
-                    {(c.alts?.length ?? 1) > 1 && (
-                      <span className="flex items-center gap-1 text-ink-3">
-                        <button
-                          type="button"
-                          aria-label="previous offered prompt"
-                          disabled={busy}
-                          onClick={() => onCycle(c.i, -1)}
-                          className="px-1 hover:text-ink disabled:opacity-50"
-                        >
-                          ‹
-                        </button>
-                        {Math.min((c.altIdx ?? 0) + 1, c.alts!.length)}/{c.alts!.length}
-                        <button
-                          type="button"
-                          aria-label="next offered prompt"
-                          disabled={busy}
-                          onClick={() => onCycle(c.i, 1)}
-                          className="px-1 hover:text-ink disabled:opacity-50"
-                        >
-                          ›
-                        </button>
-                      </span>
-                    )}
-                  </div>
+          <div key={layer} className="grid gap-2">
+            <span className="text-[10.5px] font-semibold uppercase tracking-wide text-primary">
+              {layer}
+            </span>
+            {stages.map((stage) => {
+              const scells = cells.filter((c) => c.stage === stage);
+              const branded = scells.filter((c) => namesAny(c.text, brandNames)).length;
+              const blind = scells.length - branded;
+              const isOpen = open.has(stage);
+              return (
+                <div key={stage}>
+                  <button
+                    type="button"
+                    onClick={() => toggle(stage)}
+                    className={`w-full flex items-center gap-2.5 rounded-lg border bg-surface px-3.5 py-2.5 text-left ${
+                      isOpen ? "border-primary rounded-b-none" : "border-line"
+                    }`}
+                  >
+                    <span aria-hidden="true" className="text-[11px] text-ink-3">
+                      {isOpen ? "▾" : "▸"}
+                    </span>
+                    <span className="text-[13px] font-medium">
+                      {stageOf(state, stage)?.label ?? stage}
+                    </span>
+                    <TagChip tag={stageOf(state, stage)?.tag ?? "picks"} />
+                    <span className="ml-auto flex gap-3 text-[11px] text-ink-3 whitespace-nowrap">
+                      <span>{scells.length} prompt{scells.length === 1 ? "" : "s"}</span>
+                      {blind > 0 && <span>{blind} blind</span>}
+                      {branded > 0 && <span className="text-warning">{branded} branded</span>}
+                    </span>
+                  </button>
+                  {isOpen && (
+                    <div className="grid gap-2.5 rounded-b-lg border border-t-0 border-primary bg-primary-soft/15 px-3.5 py-3">
+                      {scells.map((c) => (
+                        <div key={c.i} className="grid gap-1.5 rounded-lg border border-line bg-surface px-3.5 py-2.5">
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <span className="text-[11px] font-medium text-ink-2">
+                              {cellSubMeta(c)}
+                            </span>
+                            <span
+                              className={`rounded-full px-2 py-px text-[9.5px] font-medium ${
+                                namesAny(c.text, brandNames)
+                                  ? "bg-warning/10 text-warning"
+                                  : "bg-primary-soft text-primary"
+                              }`}
+                            >
+                              {namesAny(c.text, brandNames) ? "branded" : "blind"}
+                            </span>
+                          </div>
+                          <textarea
+                            className="input w-full resize-none field-sizing-content text-sm"
+                            rows={1}
+                            value={c.text}
+                            onChange={(e) =>
+                              setState({
+                                ...state,
+                                cells: state.cells.map((q, j) =>
+                                  j === c.i ? { ...q, text: e.target.value } : q
+                                ),
+                              })
+                            }
+                          />
+                          <div className="flex items-center gap-3 border-t border-dashed border-line pt-1.5 text-[11px]">
+                            {(c.regens ?? 0) < MAX_REGENS ? (
+                              <button
+                                type="button"
+                                disabled={busy}
+                                onClick={() => onRegenerate(c.i)}
+                                title="Ask this cell's question a different way - not a paraphrase"
+                                className="font-medium text-primary hover:opacity-80 disabled:opacity-50"
+                              >
+                                ↻ New prompt
+                                {(c.regens ?? 0) > 0 && (
+                                  <span className="font-normal text-ink-3"> · {MAX_REGENS - (c.regens ?? 0)} left</span>
+                                )}
+                              </button>
+                            ) : (
+                              <span className="text-ink-3">{MAX_REGENS} rewrites used - edit it to taste</span>
+                            )}
+                            {(c.alts?.length ?? 1) > 1 && (
+                              <span className="flex items-center gap-1 text-ink-3">
+                                <button
+                                  type="button"
+                                  aria-label="previous offered prompt"
+                                  disabled={busy}
+                                  onClick={() => onCycle(c.i, -1)}
+                                  className="px-1 hover:text-ink disabled:opacity-50"
+                                >
+                                  ‹
+                                </button>
+                                {Math.min((c.altIdx ?? 0) + 1, c.alts!.length)}/{c.alts!.length}
+                                <button
+                                  type="button"
+                                  aria-label="next offered prompt"
+                                  disabled={busy}
+                                  onClick={() => onCycle(c.i, 1)}
+                                  className="px-1 hover:text-ink disabled:opacity-50"
+                                >
+                                  ›
+                                </button>
+                              </span>
+                            )}
+                            <button
+                              type="button"
+                              aria-label="remove cell"
+                              onClick={() =>
+                                setState({ ...state, cells: state.cells.filter((_, j) => j !== c.i) })
+                              }
+                              className="ml-auto text-ink-3 hover:text-danger text-[15px] leading-none"
+                            >
+                              ×
+                            </button>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
                 </div>
-                <button
-                  type="button"
-                  aria-label="remove cell"
-                  onClick={() =>
-                    setState({ ...state, cells: state.cells.filter((_, j) => j !== c.i) })
-                  }
-                  className="text-ink-3 hover:text-danger text-lg leading-none px-1"
-                >
-                  ×
-                </button>
-              </div>
-                    ))}
-                  </div>
-                );
-              })}
+              );
+            })}
           </div>
         );
       })}
