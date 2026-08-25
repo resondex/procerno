@@ -988,14 +988,18 @@ export async function reviewCells(input: {
 }): Promise<CellVerdict[]> {
   const fp = (c: CellReviewCandidate) =>
     [c.stage, c.situation ?? "", c.angle, c.text.trim(), c.original?.trim() ?? ""].join("|");
-  const key = cacheKey("cell_review1", [
+  // "cell_review2": unclear-flag suggestions rewrite the incoherent parts.
+  const key = cacheKey("cell_review2", [
     input.brand, input.category, input.audience, input.competitors.join(","),
     input.candidates.map(fp).join("~"),
   ]);
   const hit = await store.cacheGet(key, CACHE_TTL_MS);
   if (hit) return JSON.parse(hit) as CellVerdict[];
   const brandRule = (c: CellReviewCandidate) =>
-    c.angle === "generic"
+    // "open" is the classic battery: no per-cell brand design to enforce.
+    c.angle === "open"
+      ? "no restriction - the prompt may name brands where its ask calls for it"
+      : c.angle === "generic"
       ? c.tag === "judges"
         ? `blind except the client brand: may name ${input.brand} (the stage is a verdict on it), never a rival`
         : "blind: must not name any brand"
@@ -1039,7 +1043,10 @@ export async function reviewCells(input: {
           "user covering every yes, and suggestion is the SMALLEST edit " +
           "that fixes every yes while keeping the user's own words, " +
           "register, and length - as typed by a real person, never an em " +
-          "dash, never the tilde character. When all three are no: " +
+          "dash, never the tilde character. Smallest never means keeping " +
+          "nonsense: when the text is incoherent, replace the parts that " +
+          "make no sense with a plain ask that fits the cell, rather " +
+          "than patching around them. When all three are no: " +
           "reason is an empty string and suggestion repeats the " +
           "candidate verbatim. Return verdicts in the candidates' order, " +
           "one per candidate.",

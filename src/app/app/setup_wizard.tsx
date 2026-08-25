@@ -103,9 +103,13 @@ function reviewRequest(g: GridState, category: string, audience: string) {
 }
 
 /** The prompt fingerprint the Prompts-gate quality check caches passes
- * under - cell identity plus the exact wording. */
-function cellFp(c: { stage: string; situation: string | null; angle: string; text: string }): string {
-  return [c.stage, c.situation ?? "", c.angle, c.text.trim()].join("|");
+ * under - cell identity plus the exact wording (a paraphrase fingerprints
+ * with its own text under the same cell identity). */
+function cellFp(
+  c: { stage: string; situation: string | null; angle: string },
+  text: string
+): string {
+  return [c.stage, c.situation ?? "", c.angle, text.trim()].join("|");
 }
 
 /** The cells the Prompts-gate quality check must judge - live, edited away
@@ -121,28 +125,35 @@ function cellReviewRequest(
   const done = new Set(g.reviewedCells ?? []);
   const stageBy = new Map(g.stages.map((s) => [s.key, s]));
   const scDesc = new Map(g.scenarios.map((s) => [s.label, s.description]));
-  const authored = g.cells
-    .map((c, i) => ({ c, i }))
-    .filter(
-      ({ c }) =>
-        c.text.trim() &&
-        c.text.trim() !== (c.original ?? "").trim() &&
-        !done.has(cellFp(c))
-    )
-    // The reviewer takes at most 24 - more edits than that between
-    // confirms would be extraordinary; the rest pass this round and get
-    // caught on the next confirm.
-    .slice(0, 24);
+  // Seeds and edited paraphrases alike - each entry is one prompt text
+  // judged against its cell's design.
+  const all: { c: (typeof g.cells)[number]; i: number; phr?: number; text: string; original: string | null }[] = [];
+  g.cells.forEach((c, i) => {
+    if (!c.text.trim()) return;
+    if (c.text.trim() !== (c.original ?? "").trim() && !done.has(cellFp(c, c.text))) {
+      all.push({ c, i, text: c.text, original: c.original ?? null });
+    }
+    c.phrasings.forEach((ph, k) => {
+      if (!ph.text.trim()) return;
+      if (ph.text.trim() !== (ph.original ?? "").trim() && !done.has(cellFp(c, ph.text))) {
+        all.push({ c, i, phr: k, text: ph.text, original: ph.original ?? null });
+      }
+    });
+  });
+  // The reviewer takes at most 24 - more edits than that between
+  // confirms would be extraordinary; the rest pass this round and get
+  // caught on the next confirm.
+  const authored = all.slice(0, 24);
   const body = {
     brand,
     category,
     competitors,
     audience: audience || undefined,
-    candidates: authored.map(({ c }) => {
+    candidates: authored.map(({ c, text, original }) => {
       const st = stageBy.get(c.stage);
       return {
-        text: c.text,
-        original: c.original ?? null,
+        text,
+        original,
         stage: st?.label ?? c.stage,
         hint: st?.hint ?? null,
         tag: st?.tag ?? null,
@@ -163,12 +174,29 @@ interface DraftPrompt {
 
 const THEMES: PromptTheme[] = ["discovery", "recommendation", "comparison", "use_case", "branded"];
 
+/** What each classic theme asks - the reviewer's drift test needs to know
+ * what territory a prompt belongs to. Classic prompts have no per-cell
+ * brand design, so they review under the open brand rule. */
+const THEME_HINTS: Record<PromptTheme, string> = {
+  discovery: "an open look at what's out there in the category",
+  recommendation: "asks what to pick for a need",
+  comparison: "weighs named options against each other",
+  use_case: "asks whether or how the category serves a specific job",
+  branded: "asks directly about the brand by name",
+};
+
 interface WizardDraft {
   mode: SetupMode;
   step: StepKey;
   studyName: string;
   grid: GridState | null;
   engineSet: string[];
+  /** Classic mode's machine baselines: prompts whose text is in this list
+   * were drafted by the model; anything else is user-written and gets the
+   * quality check at confirm. */
+  machinePrompts?: string[];
+  /** Classic-mode fingerprints (theme|text) that PASSED the check. */
+  reviewedPrompts?: string[];
 }
 
 interface Props {
@@ -204,6 +232,14 @@ export function SetupWizard({ mode, brand, draft, engineOptions, onClose, onCrea
   const [review, setReview] = useState<ScenarioReviewItem[] | null>(null);
   /** Flagged user-edited prompts awaiting a keep/suggestion choice. */
   const [cellReview, setCellReview] = useState<CellReviewItem[] | null>(null);
+  // Classic-mode review baselines. Same-turn saves pass fresh values to
+  // goTo explicitly, since a setter hasn't landed yet when persist runs.
+  // Legacy drafts without baselines treat their saved battery as
+  // machine-written, so nothing is retroactively flagged.
+  const [machinePrompts, setMachinePrompts] = useState<string[]>(
+    saved?.machinePrompts ?? (draft?.prompts?.map((p) => p.text) ?? [])
+  );
+  const [reviewedPrompts, setReviewedPrompts] = useState<string[]>(saved?.reviewedPrompts ?? []);
   /** What the last "Your market buys" edit changed downstream. */
   const [readDelta, setReadDelta] = useState<string | null>(null);
   const [chosenEngines, setChosenEngines] = useState<string[] | null>(saved?.engineSet ?? null);
@@ -220,8 +256,11 @@ export function SetupWizard({ mode, brand, draft, engineOptions, onClose, onCrea
   const [error, setError] = useState<string | null>(null);
   // The market the current battery was composed from; a changed market
   // means a deliberate trip back, and a recompose on re-confirm.
-  const [servedMarket, setServedMarket] = useState<string | null>(
-    draft ? marketKey(draft.category, draft.competitors, draft.audience ?? "") : null
+  const [servedRead, setServedRead] = useState<string | null>(
+    draft ? readKey(draft.category, draft.audience ?? "") : null
+  );
+  const [servedRivals, setServedRivals] = useState<string | null>(
+    draft ? (draft.competitors ?? []).join("|") : null
   );
 
   /** The plan's buying-scenario cap (PLAN_SCENARIO_CAPS); 4 until the
@@ -256,8 +295,10 @@ export function SetupWizard({ mode, brand, draft, engineOptions, onClose, onCrea
     // eslint-disable-next-line react-hooks/exhaustive-deps -- mount-only
   }, []);
 
-  function marketKey(c: string, comps: string[], a: string): string {
-    return [c.trim(), comps.join("|"), a.trim()].join(" ");
+  /** What the market read depends on - competitors deliberately excluded:
+   * they shape only the rival cells, never the scenarios or the mask. */
+  function readKey(c: string, a: string): string {
+    return `${c.trim()}|${a.trim()}`;
   }
 
   function allCompetitors(): string[] {
@@ -295,9 +336,19 @@ export function SetupWizard({ mode, brand, draft, engineOptions, onClose, onCrea
 
   /* ------------------------------ persistence ----------------------------- */
 
-  async function persist(at: StepKey, g: GridState | null = grid, p: DraftPrompt[] | null = prompts) {
+  async function persist(
+    at: StepKey,
+    g: GridState | null = grid,
+    p: DraftPrompt[] | null = prompts,
+    mp: string[] = machinePrompts,
+    rp: string[] = reviewedPrompts
+  ) {
     setSaving(true);
-    const wizard: WizardDraft = { mode, step: at, studyName, grid: g, engineSet };
+    const wizard: WizardDraft = {
+      mode, step: at, studyName, grid: g, engineSet,
+      machinePrompts: mp,
+      reviewedPrompts: rp,
+    };
     const res = await fetch("/api/drafts", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -319,12 +370,18 @@ export function SetupWizard({ mode, brand, draft, engineOptions, onClose, onCrea
     }
   }
 
-  function goTo(k: StepKey, g: GridState | null = grid, p: DraftPrompt[] | null = prompts) {
+  function goTo(
+    k: StepKey,
+    g: GridState | null = grid,
+    p: DraftPrompt[] | null = prompts,
+    mp: string[] = machinePrompts,
+    rp: string[] = reviewedPrompts
+  ) {
     setReadDelta(null);
     setStep(k);
     setReached((r) => Math.max(r, steps.findIndex((s) => s.key === k)));
     setError(null);
-    void persist(k, g, p);
+    void persist(k, g, p, mp, rp);
     // Landing on a gate warms the NEXT gate's work in the background -
     // pools for scenario draws, cells while the map is reviewed,
     // paraphrases while the seeds are reviewed. Silent; failures cost
@@ -383,12 +440,23 @@ export function SetupWizard({ mode, brand, draft, engineOptions, onClose, onCrea
     const comps = allCompetitors();
     setCompetitors(comps);
     setCompDraft("");
-    const key = marketKey(category, comps, audience);
-    const unchanged = servedMarket === key;
-    setServedMarket(key);
+    const readChanged = servedRead !== readKey(category, audience);
+    const rivalsChanged = servedRivals !== comps.join("|");
+    setServedRead(readKey(category, audience));
+    setServedRivals(comps.join("|"));
     if (mode === "grid") {
-      if (unchanged && grid) {
-        goTo(grid.step === "compose" ? "scenarios" : "prompts");
+      if (!readChanged && grid) {
+        if (!rivalsChanged) {
+          goTo(grid.step === "compose" ? "scenarios" : "prompts");
+          return;
+        }
+        // Rivals changed: the scenarios and the mask hold - only the
+        // written questions go stale (rival cells name rivals). Keep the
+        // table, drop the cells, land on the coverage map with the new
+        // rival count.
+        const kept: GridState = { ...grid, step: "compose", cells: [] };
+        setGrid(kept);
+        goTo("stages", kept);
         return;
       }
       setGrid(null);
@@ -396,7 +464,7 @@ export function SetupWizard({ mode, brand, draft, engineOptions, onClose, onCrea
       if (next) goTo("scenarios", next);
       return;
     }
-    if (unchanged && prompts) {
+    if (!readChanged && !rivalsChanged && prompts) {
       goTo("prompts");
       return;
     }
@@ -424,8 +492,11 @@ export function SetupWizard({ mode, brand, draft, engineOptions, onClose, onCrea
       return;
     }
     setPrompts(data.prompts);
+    const machine = (data.prompts as DraftPrompt[]).map((p) => p.text);
+    setMachinePrompts(machine);
+    setReviewedPrompts([]);
     setEditing(false);
-    goTo("prompts", grid, data.prompts);
+    goTo("prompts", grid, data.prompts, machine, []);
   }
 
   /** Confirm the scenarios gate: user-written or user-edited rows get one
@@ -539,12 +610,22 @@ export function SetupWizard({ mode, brand, draft, engineOptions, onClose, onCrea
     }
   }
 
+  /** The last payload each warm sent - blur fires on every field exit,
+   * but an unchanged payload has nothing new to warm. */
+  const lastWarm = useRef<{ scenario: string | null; cell: string | null }>({
+    scenario: null,
+    cell: null,
+  });
+
   /** Silent warm of the confirm-time scenario check: same request the
    * confirm will make, fired on field blur, cached server-side. */
   function warmScenarioReview() {
     if (!grid) return;
     const { authored, body } = reviewRequest(grid, category, audience);
     if (authored.length === 0) return;
+    const payload = JSON.stringify(body);
+    if (lastWarm.current.scenario === payload) return;
+    lastWarm.current.scenario = payload;
     void fetch("/api/setup/grid/scenario_review", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -628,19 +709,22 @@ export function SetupWizard({ mode, brand, draft, engineOptions, onClose, onCrea
     }
     const flagged: CellReviewItem[] = [];
     const passed: string[] = [];
-    authored.forEach(({ c, i }, k) => {
+    authored.forEach(({ c, i, phr, text }, k) => {
       const v = data.verdicts?.[k];
       if (!v || v.ok) {
-        passed.push(cellFp(c));
+        passed.push(cellFp(c, text));
       } else {
         const stage = grid.stages.find((s) => s.key === c.stage);
         flagged.push({
           index: i,
-          meta: `${stage?.label ?? c.stage} · ${cellSubMeta(c)}`,
-          current: c.text,
+          phr,
+          meta:
+            `${stage?.label ?? c.stage} · ${cellSubMeta(c)}` +
+            (phr != null ? ` · paraphrase ${phr + 2}` : ""),
+          current: text,
           flags: Array.isArray(v.flags) && v.flags.length > 0 ? v.flags : ["unclear"],
           reason: v.reason || "This one may not ask what its cell measures.",
-          suggestion: v.suggestion || c.text,
+          suggestion: v.suggestion || text,
           choice: "suggestion",
         });
       }
@@ -660,14 +744,27 @@ export function SetupWizard({ mode, brand, draft, engineOptions, onClose, onCrea
    * cell is left as-is on purpose - it gets flagged again next confirm. */
   function resolveCellReview() {
     if (!grid || !cellReview) return;
-    const byIndex = new Map(cellReview.map((it) => [it.index, it]));
-    const cells = grid.cells.map((c, i) => {
-      const it = byIndex.get(i);
-      if (!it || it.choice !== "suggestion") return c;
-      // The old wording's set is banked, not thrown away - cycling back
-      // to it later restores its paraphrases for free.
-      return { ...c, text: it.suggestion, original: it.suggestion, ...swapPhrasings(c, it.suggestion) };
-    });
+    // Paraphrase fixes land before their cell's seed fix: a seed change
+    // banks the (now corrected) set under the old wording.
+    const ordered = [...cellReview].sort((a, b) => (a.phr == null ? 1 : 0) - (b.phr == null ? 1 : 0));
+    const cells = [...grid.cells];
+    for (const it of ordered) {
+      if (it.choice !== "suggestion") continue;
+      const c = cells[it.index];
+      if (!c) continue;
+      if (it.phr == null) {
+        // The old wording's set is banked, not thrown away - cycling back
+        // to it later restores its paraphrases for free.
+        cells[it.index] = { ...c, text: it.suggestion, original: it.suggestion, ...swapPhrasings(c, it.suggestion) };
+      } else {
+        cells[it.index] = {
+          ...c,
+          phrasings: c.phrasings.map((ph, m) =>
+            m === it.phr ? { ...ph, text: it.suggestion, original: it.suggestion } : ph
+          ),
+        };
+      }
+    }
     const next: GridState = { ...grid, cells };
     // Log what the user chose - visibility only, fire and forget.
     void fetch("/api/setup/grid/feedback", {
@@ -687,12 +784,117 @@ export function SetupWizard({ mode, brand, draft, engineOptions, onClose, onCrea
     proceedPrompts(next);
   }
 
+  /** Classic-mode confirm: user-written prompts get the same quality
+   * check under the open brand rule (the classic battery has no per-cell
+   * brand design) - drift and incoherence still get caught. */
+  async function confirmClassicPrompts() {
+    if (!prompts) return;
+    const machine = new Set(machinePrompts.map((t) => t.trim()));
+    const done = new Set(reviewedPrompts);
+    const fpOf = (q: DraftPrompt) => `${q.theme}|${q.text.trim()}`;
+    const authored = prompts
+      .map((q, i) => ({ q, i }))
+      .filter(({ q }) => q.text.trim() && !machine.has(q.text.trim()) && !done.has(fpOf(q)))
+      .slice(0, 24);
+    if (authored.length === 0) {
+      goTo("engines");
+      return;
+    }
+    setBusy("Checking your prompts…");
+    setError(null);
+    const res = await fetch("/api/setup/grid/cell_review", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        brand,
+        category,
+        competitors: allCompetitors(),
+        audience: audience || undefined,
+        candidates: authored.map(({ q }) => ({
+          text: q.text,
+          original: null,
+          stage: q.theme.replace("_", " "),
+          hint: THEME_HINTS[q.theme],
+          tag: null,
+          situation: null,
+          situationDescription: null,
+          angle: "open",
+          mode: null,
+        })),
+      }),
+    });
+    const data = await res.json().catch(() => ({}));
+    setBusy(null);
+    if (!res.ok) {
+      goTo("engines");
+      return;
+    }
+    const flagged: CellReviewItem[] = [];
+    const passed: string[] = [];
+    authored.forEach(({ q, i }, k) => {
+      const v = data.verdicts?.[k];
+      if (!v || v.ok) {
+        passed.push(fpOf(q));
+      } else {
+        flagged.push({
+          index: i,
+          meta: q.theme.replace("_", " "),
+          current: q.text,
+          flags: Array.isArray(v.flags) && v.flags.length > 0 ? v.flags : ["unclear"],
+          reason: v.reason || "This one may not ask what its theme covers.",
+          suggestion: v.suggestion || q.text,
+          choice: "suggestion",
+        });
+      }
+    });
+    const nextReviewed = [...reviewedPrompts, ...passed];
+    if (passed.length > 0) setReviewedPrompts(nextReviewed);
+    if (flagged.length === 0) goTo("engines", grid, prompts, machinePrompts, nextReviewed);
+    else setCellReview(flagged);
+  }
+
+  /** Apply the classic review choices; accepted suggestions join the
+   * machine baseline, keep-mine re-flags next confirm. */
+  function resolveClassicReview() {
+    if (!prompts || !cellReview) return;
+    const byIndex = new Map(
+      cellReview.filter((it) => it.choice === "suggestion").map((it) => [it.index, it])
+    );
+    const next = prompts.map((q, i) => {
+      const it = byIndex.get(i);
+      return it ? { ...q, text: it.suggestion } : q;
+    });
+    const nextMachine = [
+      ...machinePrompts,
+      ...[...byIndex.values()].map((it) => it.suggestion),
+    ];
+    setMachinePrompts(nextMachine);
+    void fetch("/api/setup/grid/feedback", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        category,
+        audience: audience || undefined,
+        kind: "cell_review_choice",
+        items: cellReview.map(({ current, suggestion, flags, reason, choice }) => ({
+          current, suggestion, flags, reason, choice,
+        })),
+      }),
+    }).catch(() => {});
+    setCellReview(null);
+    setPrompts(next);
+    goTo("engines", grid, next, nextMachine, reviewedPrompts);
+  }
+
   /** Silent warm of the confirm-time prompt check: same request the
    * confirm will make, fired on field blur, cached server-side. */
   function warmCellReview() {
     if (!grid) return;
     const { authored, body } = cellReviewRequest(grid, brand, allCompetitors(), category, audience);
     if (authored.length === 0) return;
+    const payload = JSON.stringify(body);
+    if (lastWarm.current.cell === payload) return;
+    lastWarm.current.cell = payload;
     void fetch("/api/setup/grid/cell_review", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -846,8 +1048,8 @@ export function SetupWizard({ mode, brand, draft, engineOptions, onClose, onCrea
   } else if (step === "prompts" && mode === "classic") {
     footerLeft = `${promptCount} prompts`;
     footerAction = {
-      label: "These are my prompts",
-      onClick: () => goTo("engines"),
+      label: busy ?? "These are my prompts",
+      onClick: () => void confirmClassicPrompts(),
       disabled: busy !== null || promptCount < 4,
     };
   } else if (step === "engines") {
@@ -1058,7 +1260,7 @@ export function SetupWizard({ mode, brand, draft, engineOptions, onClose, onCrea
                 setCellReview((r) => r && r.map((it, j) => (j === k ? { ...it, choice } : it)))
               }
               onBack={() => setCellReview(null)}
-              onContinue={resolveCellReview}
+              onContinue={() => (mode === "classic" ? resolveClassicReview() : resolveCellReview())}
             />
           )}
 

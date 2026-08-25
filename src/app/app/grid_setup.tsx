@@ -28,6 +28,9 @@ export interface GridPhrasing {
   text: string;
   /** The buyer voice this phrasing is written in. */
   asker: string;
+  /** The machine wording - a paraphrase whose text differs from this was
+   * edited by the user, and gets the quality check at confirm. */
+  original?: string;
 }
 
 export interface GridCellUi {
@@ -179,7 +182,27 @@ export function normalizeGrid(g: GridState | null): GridState | null {
       // Drafts from before the prompt review carry no machine baseline -
       // treat the saved text as it, so nothing is retroactively flagged.
       original: scrubPrompt(c.original ?? c.text),
-      phrasings: c.phrasings.map((ph) => ({ ...ph, text: scrubPrompt(ph.text) })),
+      // The cycling history and the bank keys get the same scrub as the
+      // live text, so cycling to a draft-frozen wording can't reintroduce
+      // banned punctuation and bank lookups keep matching.
+      alts: c.alts?.map(scrubPrompt),
+      phrasings: c.phrasings.map((ph) => ({
+        ...ph,
+        text: scrubPrompt(ph.text),
+        original: scrubPrompt(ph.original ?? ph.text),
+      })),
+      phrasingsByText: c.phrasingsByText
+        ? Object.fromEntries(
+            Object.entries(c.phrasingsByText).map(([k, set]) => [
+              scrubPrompt(k).trim(),
+              set.map((ph) => ({
+                ...ph,
+                text: scrubPrompt(ph.text),
+                original: scrubPrompt(ph.original ?? ph.text),
+              })),
+            ])
+          )
+        : undefined,
     })),
   };
 }
@@ -653,7 +676,12 @@ export function useGridSetup(a: GridSetupArgs) {
         );
         if (!data) return false;
         idx.forEach((i, k) => {
-          merged[i] = { ...merged[i], phrasings: data.phrasings[k] ?? [] };
+          merged[i] = {
+            ...merged[i],
+            // Each paraphrase carries its machine wording as the baseline
+            // the edit-review compares against.
+            phrasings: (data.phrasings[k] ?? []).map((ph) => ({ ...ph, original: ph.text })),
+          };
         });
         done += idx.length;
         a.setBusy(`Writing paraphrases… (${done}/${total})`);
@@ -682,7 +710,9 @@ export function useGridSetup(a: GridSetupArgs) {
 
   /** Gate 2 helper: a genuinely new prompt for one cell (not a paraphrase),
    * avoiding everything already offered. On-demand only - no prefetch - but
-   * each draw is cached server-side, so revisits and other users are free. */
+   * each draw is cached server-side, so revisits and other users are free.
+   * Once the paraphrases have been written, the draw brings its own set
+   * along too - the new prompt arrives complete, no missing-fill dance. */
   async function regenerateCell(i: number): Promise<void> {
     if (!a.state) return;
     const c = a.state.cells[i];
@@ -700,24 +730,39 @@ export function useGridSetup(a: GridSetupArgs) {
       avoid: alts,
     });
     if (!data) return;
+    let generated: GridPhrasing[] = [];
+    if (a.state.step === "phrasings") {
+      const pd = await post<{ phrasings: GridPhrasing[][] }>("/api/setup/grid/phrasings", {
+        brand: a.brand, category: a.category, competitors: a.competitors,
+        audience: a.audience || undefined,
+        base: a.state.moderators,
+        scenarios: a.state.scenarios,
+        cells: [{ stage: c.stage, situation: c.situation, angle: c.angle, mode: c.mode ?? null, text: data.text }],
+        count: PHRASING_COUNT,
+      });
+      // A failed set is not fatal - the missing-paraphrases gate catches it.
+      generated = (pd?.phrasings?.[0] ?? []).map((ph) => ({ ...ph, original: ph.text }));
+    }
     const nextAlts = [...alts, data.text];
     a.setState({
       ...a.state,
-      cells: a.state.cells.map((q, j) =>
-        j === i
-          ? {
-              ...q,
-              text: data.text,
-              original: data.text,
-              alts: nextAlts,
-              altIdx: nextAlts.length - 1,
-              regens: (q.regens ?? 0) + 1,
-              // A different question means different paraphrases - the old
-              // set is banked under the old wording, not thrown away.
-              ...swapPhrasings(q, data.text),
-            }
-          : q
-      ),
+      cells: a.state.cells.map((q, j) => {
+        if (j !== i) return q;
+        // The old set is banked under the old wording, not thrown away;
+        // the freshly generated set (when the write already ran) wins
+        // over whatever the bank holds for the new text.
+        const swap = swapPhrasings(q, data.text);
+        return {
+          ...q,
+          text: data.text,
+          original: data.text,
+          alts: nextAlts,
+          altIdx: nextAlts.length - 1,
+          regens: (q.regens ?? 0) + 1,
+          phrasingsByText: swap.phrasingsByText,
+          phrasings: generated.length > 0 ? generated : swap.phrasings,
+        };
+      }),
     });
   }
 
@@ -1602,7 +1647,12 @@ export function CellsGate({
                   {isOpen && (
                     <div className="grid gap-2.5 rounded-b-lg border border-t-0 border-primary bg-primary-soft/15 px-3.5 py-3">
                       {scells.map((c) => (
-                        <div key={c.i} className="grid gap-1.5 rounded-lg border border-line bg-surface px-3.5 py-2.5">
+                        <div
+                          key={c.i}
+                          className={`grid gap-1.5 rounded-lg border border-line bg-surface px-3.5 py-2.5 ${
+                            pending === c.i ? "opacity-50 pointer-events-none" : ""
+                          }`}
+                        >
                           <div className="flex items-center gap-2 flex-wrap">
                             <span className="text-[11px] font-medium text-ink-2">
                               {cellSubMeta(c)}
@@ -1632,6 +1682,7 @@ export function CellsGate({
                             className="input w-full resize-none field-sizing-content text-sm"
                             rows={1}
                             value={c.text}
+                            readOnly={pending === c.i}
                             onChange={(e) =>
                               setState({
                                 ...state,
@@ -1649,7 +1700,7 @@ export function CellsGate({
                                   aria-hidden="true"
                                   className="h-3 w-3 rounded-full border-2 border-primary/30 border-t-primary animate-spin"
                                 />
-                                Writing a new prompt…
+                                {written ? "Writing a new prompt and its paraphrases…" : "Writing a new prompt…"}
                               </span>
                             ) : (c.regens ?? 0) < MAX_REGENS ? (
                               <button
@@ -1729,6 +1780,7 @@ export function CellsGate({
                                         ),
                                       })
                                     }
+                                    onBlur={() => onWarmReview?.()}
                                   />
                                   {ph.asker && (
                                     <span className="w-24 shrink-0 pt-1.5 text-[10px] leading-tight text-ink-3 truncate" title={ph.asker}>
@@ -1784,8 +1836,11 @@ export function CellsGate({
 
 /** One flagged prompt in the Prompts-gate quality check. */
 export interface CellReviewItem {
-  /** Cell index in the grid. */
+  /** Cell index in the grid (prompt index, in classic mode). */
   index: number;
+  /** Set when the flagged text is a paraphrase: its index in the cell's
+   * set. Absent = the seed prompt itself. */
+  phr?: number;
   /** Where the prompt lives - stage plus the cell's sub-meta. */
   meta: string;
   current: string;
