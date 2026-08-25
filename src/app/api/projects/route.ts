@@ -4,6 +4,7 @@ import { store } from "@/lib/store";
 import {
   getPlanFor,
   isStaff,
+  PLAN_SCENARIO_CAPS,
   PLAN_TRACKER_LIMITS,
   requireAuth,
 } from "@/lib/auth";
@@ -116,10 +117,25 @@ export async function POST(req: Request) {
     if (existing.length >= PLAN_TRACKER_LIMITS[plan]) {
       return NextResponse.json(
         {
-          error: `The ${plan} plan includes ${PLAN_TRACKER_LIMITS[plan]} tracker${PLAN_TRACKER_LIMITS[plan] === 1 ? "" : "s"} — upgrade for more`,
+          error: `The ${plan} plan includes ${PLAN_TRACKER_LIMITS[plan]} tracker${PLAN_TRACKER_LIMITS[plan] === 1 ? "" : "s"} - upgrade for more`,
         },
         { status: 403 }
       );
+    }
+    // The wizard enforces the scenario cap too; this is the authority.
+    if (parsed.data.grid) {
+      const scenarios = new Set(
+        parsed.data.grid.cells.map((c) => c.situation).filter(Boolean)
+      ).size;
+      const cap = PLAN_SCENARIO_CAPS[plan];
+      if (scenarios > cap) {
+        return NextResponse.json(
+          {
+            error: `The ${plan} plan includes ${cap} buying scenarios - this Landscape has ${scenarios}; untick ${scenarios - cap} and try again`,
+          },
+          { status: 403 }
+        );
+      }
     }
   }
 

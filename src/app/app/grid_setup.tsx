@@ -575,7 +575,12 @@ export function useGridSetup(a: GridSetupArgs) {
   async function writePhrasings(force = false, onlyMissing = false): Promise<GridState | null> {
     if (!a.state) return null;
     a.setError(null);
-    const cells = a.state.cells.filter((c) => c.text.trim());
+    // Blanked cards keep their place in the grid - the write just skips
+    // them (they ship nothing either way; create() filters on text).
+    const liveIdx = a.state.cells
+      .map((c, i) => (c.text.trim() ? i : -1))
+      .filter((i) => i >= 0);
+    const cells = liveIdx.map((i) => a.state!.cells[i]);
     // onlyMissing fills gaps (cells whose prompt changed after the first
     // write) without touching sets the user may have edited by hand.
     const merged: GridCellUi[] = cells.map((c) =>
@@ -626,7 +631,11 @@ export function useGridSetup(a: GridSetupArgs) {
     );
     a.setBusy(null);
     if (outcomes.some((ok) => !ok)) return null;
-    const next: GridState = { ...a.state, step: "phrasings", cells: merged };
+    const nextCells = a.state.cells.map((c, i) => {
+      const k = liveIdx.indexOf(i);
+      return k >= 0 ? merged[k] : c;
+    });
+    const next: GridState = { ...a.state, step: "phrasings", cells: nextCells };
     a.setState(next);
     return next;
   }
@@ -1297,7 +1306,18 @@ export function CoverageGate({
                   className={`inline-block h-2.5 w-2.5 rounded-full ${
                     inCol ? "bg-primary" : "border border-dashed border-line"
                   }`}
-                  title={inCol ? `${s.label} runs in ${sc.label}` : `${sc.label}'s buyer doesn't reach ${s.label}`}
+                  onMouseEnter={(e) => {
+                    const r = e.currentTarget.getBoundingClientRect();
+                    setTip({
+                      x: Math.min(r.left, window.innerWidth - 340),
+                      y: r.bottom + 6,
+                      hint: inCol
+                        ? `${s.label} runs in ${sc.label}`
+                        : `${sc.label}'s buyer doesn't reach ${s.label}`,
+                      verdict: "",
+                    });
+                  }}
+                  onMouseLeave={() => setTip(null)}
                 />
               </td>
             );
@@ -1500,10 +1520,13 @@ export function CellsGate({
             </span>
             {stages.map((stage) => {
               const scells = cells.filter((c) => c.stage === stage);
-              const branded = scells.filter((c) => namesAny(c.text, brandNames)).length;
-              const blind = scells.length - branded;
-              const prompts = scells.reduce((n, c) => n + countOf(c), 0);
-              const short = scells.filter((c) => countOf(c) < PHRASING_COUNT).length;
+              // Stats count only cells with text - a blanked card still
+              // shows for editing, but ships nothing (matching the footer).
+              const live = scells.filter((c) => c.text.trim());
+              const branded = live.filter((c) => namesAny(c.text, brandNames)).length;
+              const blind = live.length - branded;
+              const prompts = live.reduce((n, c) => n + countOf(c), 0);
+              const short = live.filter((c) => countOf(c) < PHRASING_COUNT).length;
               const isOpen = open.has(stage);
               return (
                 <div key={stage}>
@@ -1522,7 +1545,7 @@ export function CellsGate({
                     </span>
                     <TagChip tag={stageOf(state, stage)?.tag ?? "picks"} />
                     <span className="ml-auto flex gap-3 text-[11px] text-ink-3 whitespace-nowrap">
-                      <span>{scells.length} question{scells.length === 1 ? "" : "s"}</span>
+                      <span>{live.length} question{live.length === 1 ? "" : "s"}</span>
                       {written ? (
                         <>
                           <span>{prompts} prompts</span>
