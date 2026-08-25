@@ -38,28 +38,28 @@ const MODE_INFO: Record<
   instinct: {
     title: "Instinct",
     blurb:
-      "The model answers from its trained knowledge — no web access. What the AI believes about your category on its own.",
+      "The model answers from its trained knowledge - no web access. What the AI believes about your category on its own.",
     pros: [
-      "Stable, reproducible baseline — changes only when the model changes",
+      "Stable, reproducible baseline - changes only when the model changes",
       "Measures brand equity inside the AI itself",
       "Cheapest to sample",
     ],
     cons: [
       "Consumer apps often search on buyer questions, so this can differ from what buyers see",
-      "No citations — source and owned-vs-earned analysis impossible here",
+      "No citations - source and owned-vs-earned analysis impossible here",
     ],
   },
   search: {
     title: "Search-enabled",
     blurb:
-      "The assistant may search the web mid-answer — how the consumer apps behave. The engine decides per answer whether to search, and that choice is recorded.",
+      "The assistant may search the web mid-answer - how the consumer apps behave. The engine decides per answer whether to search, and that choice is recorded.",
     pros: [
       "Closest mirror of what buyers actually see",
-      "Answers carry citations — unlocks source landscape and owned vs earned",
+      "Answers carry citations - unlocks source landscape and owned vs earned",
       "Content work can move these answers within weeks",
     ],
     cons: [
-      "Results shift with the live web — a trend move can mean the web changed, not the model",
+      "Results shift with the live web - a trend move can mean the web changed, not the model",
       "Slightly noisier run to run; small per-search cost",
     ],
   },
@@ -196,7 +196,7 @@ export function EnginePicker({
             </button>
           ))}
           <span className="text-[12px] text-ink-3">
-            — presets the panel; fine-tune below
+            presets the panel - fine-tune below
           </span>
         </div>
       )}

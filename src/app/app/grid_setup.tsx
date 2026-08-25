@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
 
 /**
  * Buyer Landscape setup pieces: the state shape, the gate API calls, and
@@ -874,18 +874,29 @@ export function ScenariosGate({
       {readDelta && (
         <p className="text-[12px] text-primary font-medium">{readDelta}</p>
       )}
-      <p className="text-[12px] text-ink-3">
-        The circumstances that change the right answer. Each one becomes a
-        column of your Landscape - the coverage map on the next step shows
-        exactly what each will be asked. Every scenario is asked in the
-        buying style above unless it is marked as buying differently - a
-        different style means that buyer goes through different stages, so
-        its column gets its own set of questions. One scenario per
-        Landscape can buy differently: a second buyer with its own style
-        isn&apos;t an exception, it&apos;s a second market - and gets its
-        own Landscape, so each grid stays readable and every result traces
-        to one kind of buyer.
+      <p className="text-[12px] text-ink-2">
+        Tick the scenarios worth measuring - each becomes a column of your
+        Landscape.
       </p>
+      <HowItWorks>
+        <p className="m-0">
+          A scenario is a circumstance that changes the right answer. The
+          coverage map on the next step shows exactly what each will be
+          asked.
+        </p>
+        <p className="m-0">
+          Every scenario is asked in the buying style above unless it is
+          marked as buying differently - a different style means that buyer
+          goes through different stages, so its column gets its own set of
+          questions.
+        </p>
+        <p className="m-0">
+          One scenario per Landscape can buy differently: a second buyer
+          with its own style isn&apos;t an exception, it&apos;s a second
+          market - and gets its own Landscape, so each grid stays readable
+          and every result traces to one kind of buyer.
+        </p>
+      </HowItWorks>
       {cap < MAX_SCENARIOS && (
         <p className="text-[12px] text-ink-3">
           Your plan runs <span className="font-medium text-ink">{cap} buying
@@ -1078,6 +1089,24 @@ export function ScenariosGate({
           Reset to suggested
         </button>
       </div>
+    </div>
+  );
+}
+
+/** A one-click fold for conceptual teaching, so every gate can lead with
+ * a single directive line and keep the theory out of the way. */
+function HowItWorks({ children }: { children: ReactNode }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <div className="grid gap-1.5">
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        className="w-fit text-[12px] font-medium text-ink-3 hover:text-ink"
+      >
+        {open ? "▾" : "▸"} How this works
+      </button>
+      {open && <div className="grid gap-2 text-[12px] text-ink-3 max-w-2xl">{children}</div>}
     </div>
   );
 }
@@ -1279,6 +1308,10 @@ export function CoverageGate({
 
   return (
     <div className="grid gap-4">
+      <p className="m-0 text-[12px] text-ink-2">
+        Untick any stage your buyers skip - a missing dot is a question that
+        buyer never asks, and a question that never costs anything.
+      </p>
       <div className="overflow-x-auto rounded-lg border border-line">
         <table className="w-full border-collapse text-[12px]">
           <thead>
@@ -1341,13 +1374,18 @@ export function CoverageGate({
             : `+ ${hidden.length} not-recommended stage${hidden.length === 1 ? "" : "s"} available (${hidden.map((s) => s.label).join(", ")})`}
         </button>
       )}
-      <p className="text-[12px] text-ink-3">
-        Each scenario walks the stages its buyer actually walks - a missing
-        dot is a question that buyer never asks, and a cell that never costs
-        anything. Keep a not-recommended stage only if your judgement says
-        buyers reach it; if the map looks wrong, the reads are usually
-        what&apos;s off.
-      </p>
+      <HowItWorks>
+        <p className="m-0">
+          Each scenario walks the stages its buyer actually walks - the map
+          is derived from how your market buys, never hand-drawn. Keep a
+          not-recommended stage only if your judgement says buyers reach it;
+          if the map looks wrong, the reads are usually what&apos;s off.
+        </p>
+        <p className="m-0">
+          Hover any stage name for what it asks and why it&apos;s in or out
+          for this market.
+        </p>
+      </HowItWorks>
       {tip && (
         <div
           data-stage-tip
@@ -1419,6 +1457,10 @@ export function CellsGate({
     });
   return (
     <div className="grid gap-4 max-w-4xl">
+      <p className="m-0 text-[12px] text-ink-2">
+        Open each stage and read its questions - rewrite, cycle, or draw a
+        new one for anything that doesn&apos;t sound like your buyers.
+      </p>
       {LAYERS.map((layer) => {
         const cells = state.cells.map((c, i) => ({ ...c, i })).filter((c) => c.layer === layer);
         if (cells.length === 0) return null;
@@ -1450,7 +1492,7 @@ export function CellsGate({
                     </span>
                     <TagChip tag={stageOf(state, stage)?.tag ?? "picks"} />
                     <span className="ml-auto flex gap-3 text-[11px] text-ink-3 whitespace-nowrap">
-                      <span>{scells.length} prompt{scells.length === 1 ? "" : "s"}</span>
+                      <span>{scells.length} question{scells.length === 1 ? "" : "s"}</span>
                       {blind > 0 && <span>{blind} blind</span>}
                       {branded > 0 && <span className="text-warning">{branded} branded</span>}
                     </span>
@@ -1574,10 +1616,9 @@ export function PhrasingsGate({
   const countOf = (c: GridCellUi) => 1 + c.phrasings.filter((p) => p.text.trim()).length;
   return (
     <div className="grid gap-4 max-w-4xl">
-      <p className="text-[12px] text-ink-3">
-        Each prompt is asked {PHRASING_COUNT} ways - the same question in the
-        wordings real buyers use. Open a stage, then a cell, to edit or
-        remove any of them.
+      <p className="m-0 text-[12px] text-ink-2">
+        Each question is asked {PHRASING_COUNT} ways, in the wordings real
+        buyers use - open a stage to spot-check or edit any of them.
       </p>
       {LAYERS.map((layer) => {
         const lcells = indexed.filter(({ c }) => c.layer === layer);
@@ -1610,7 +1651,7 @@ export function PhrasingsGate({
                     </span>
                     <TagChip tag={stageOf(state, stage)?.tag ?? "picks"} />
                     <span className="ml-auto flex gap-3 text-[11px] text-ink-3 whitespace-nowrap">
-                      <span>{scells.length} cell{scells.length === 1 ? "" : "s"}</span>
+                      <span>{scells.length} question{scells.length === 1 ? "" : "s"}</span>
                       <span>{prompts} prompts</span>
                       {short > 0 && <span className="text-warning">{short} short</span>}
                     </span>
@@ -1629,7 +1670,7 @@ export function PhrasingsGate({
                                   n >= PHRASING_COUNT ? "bg-primary-soft text-primary" : "bg-warning/10 text-warning"
                                 }`}
                               >
-                                {n} phrasings
+                                {n} paraphrases
                               </span>
                             </div>
                             <p className="m-0 text-sm text-ink-2">{c.text}</p>
@@ -1639,7 +1680,7 @@ export function PhrasingsGate({
                                 onClick={() => setOpenCell(open ? null : i)}
                                 className="font-medium text-primary hover:opacity-80"
                               >
-                                {open ? "Hide phrasings ▴" : "Show phrasings ▾"}
+                                {open ? "Hide paraphrases ▴" : "Show paraphrases ▾"}
                               </button>
                             </div>
                             {open && (
