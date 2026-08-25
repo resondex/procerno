@@ -641,7 +641,8 @@ export function useGridSetup(a: GridSetupArgs) {
     const c = a.state.cells[i];
     if (!c || (c.regens ?? 0) >= MAX_REGENS) return;
     const { alts } = cellHistory(c);
-    a.setBusy("Writing a new prompt…");
+    // No global busy: the card shows its own writing state, the rest of
+    // the gate stays usable.
     a.setError(null);
     const data = await post<{ text: string }>("/api/setup/grid/cell", {
       brand: a.brand, category: a.category, competitors: a.competitors,
@@ -651,7 +652,6 @@ export function useGridSetup(a: GridSetupArgs) {
       cell: { stage: c.stage, situation: c.situation, angle: c.angle, mode: c.mode ?? null },
       avoid: alts,
     });
-    a.setBusy(null);
     if (!data) return;
     const nextAlts = [...alts, data.text];
     a.setState({
@@ -908,143 +908,143 @@ export function ScenariosGate({
           key={i}
           className={`rounded-lg border border-line bg-surface px-4 py-3 grid gap-2 ${sc.on ? "" : "opacity-60"}`}
         >
-          <div className="flex items-start gap-2.5">
+          <div className="flex items-center gap-2.5">
             <input
               type="checkbox"
               aria-label={sc.on ? "remove from grid" : "add to grid"}
-              className="mt-2.5"
               checked={sc.on}
               disabled={busy || (!sc.on && active.length >= cap)}
               onChange={(e) => updateRow(i, { on: e.target.checked }, true)}
             />
-            <div className="grid gap-1.5 w-full">
-              <div className="flex items-center gap-2">
-                <input
-                  className="input w-56 shrink-0 text-sm font-medium"
-                  value={sc.label}
-                  placeholder="label"
-                  onChange={(e) => updateRow(i, { label: e.target.value })}
-                  onBlur={() => sc.on && onRecompose(state.moderators, rows)}
-                />
-                <span className="flex-1" />
-                <label
-                  className="flex items-center gap-1.5 text-[11px] text-ink-3 whitespace-nowrap"
-                  title={
-                    deviatingLabel && deviatingLabel !== sc.label
-                      ? `Only one scenario per grid can buy differently (currently: ${deviatingLabel})`
-                      : `This scenario's buyer decides by a different process than the rest of your market (${marketStyle})`
-                  }
-                >
-                  <input
-                    type="checkbox"
-                    checked={sc.journey !== null}
-                    disabled={busy || !sc.on || (deviatingLabel !== null && deviatingLabel !== sc.label)}
-                    onChange={(e) =>
-                      updateRow(
-                        i,
-                        {
-                          journey: e.target.checked
-                            ? {
-                                involvement: String(state.moderators.involvement ?? "considered"),
-                                verifiability: String(state.moderators.verifiability ?? "spec"),
-                                think_feel: String(state.moderators.think_feel ?? "think"),
-                                decision_unit: String(state.moderators.decision_unit ?? "solo"),
-                              }
-                            : null,
-                        },
-                        true
-                      )
+            <input
+              className="input w-56 shrink-0 text-sm font-medium"
+              value={sc.label}
+              placeholder="label"
+              onChange={(e) => updateRow(i, { label: e.target.value })}
+              onBlur={() => sc.on && onRecompose(state.moderators, rows)}
+            />
+            {sc.suggested && (
+              <span
+                className="rounded-full bg-primary-soft px-2 py-px text-[9.5px] font-medium text-primary"
+                title="suggested - untick to leave it out"
+              >
+                suggested
+              </span>
+            )}
+          </div>
+          <textarea
+            className="input w-full resize-none field-sizing-content text-sm"
+            rows={1}
+            value={sc.description}
+            placeholder="one sentence describing the circumstance"
+            onChange={(e) => updateRow(i, { description: e.target.value })}
+          />
+          {sc.journey && sc.on && (
+            <div className="flex flex-wrap items-center gap-1.5">
+              <span className="text-[10px] uppercase tracking-wide text-warning font-semibold">this buyer:</span>
+              {JOURNEY_FIELDS.map((f) => {
+                const value = String(sc.journey?.[f.key as keyof Journey] ?? "");
+                const differs = value !== String(state.moderators[f.key] ?? "");
+                return (
+                  <select
+                    key={f.key}
+                    aria-label={`${sc.label} ${f.key.replace("_", " ")}`}
+                    title={
+                      differs
+                        ? `Differs from your market (${displayOf(f.key, state.moderators[f.key])})`
+                        : "Same as your market"
                     }
-                  />
-                  {deviatingLabel !== null && deviatingLabel !== sc.label ? (
-                    <span className="opacity-60">buys differently · one per Landscape</span>
-                  ) : (
-                    "buys differently"
-                  )}
-                </label>
-                {sc.suggested ? (
-                  <span className="w-5 text-center text-[10px] font-medium uppercase tracking-wide text-primary/70" title="suggested - untick to leave it out">
-                    ✓
-                  </span>
-                ) : (
+                    value={value}
+                    disabled={busy}
+                    onChange={(e) =>
+                      updateRow(i, { journey: { ...sc.journey!, [f.key]: e.target.value } }, true)
+                    }
+                    className={`rounded-full px-2 py-0.5 text-[11px] font-medium border-0 cursor-pointer ${
+                      differs
+                        ? "bg-warning/10 text-warning"
+                        : "bg-surface-1 text-ink-3"
+                    }`}
+                  >
+                    {f.options.map(([k, label]) => (
+                      <option key={k} value={k}>{label}</option>
+                    ))}
+                  </select>
+                );
+              })}
+              <span className="text-[10px] text-ink-3">
+                highlighted = differs from your market
+              </span>
+            </div>
+          )}
+          <div className="flex items-center gap-4 border-t border-dashed border-line pt-1.5 text-[11px]">
+            {sc.label.trim() !== "" &&
+              ((sc.variants ?? 0) < MAX_VARIANTS ? (
+                <span className="flex items-center gap-2">
                   <button
                     type="button"
-                    aria-label="delete scenario"
-                    onClick={() => setRows(rows.filter((_, j) => j !== i), true)}
-                    className="w-5 text-ink-3 hover:text-danger text-lg leading-none"
+                    disabled={busy}
+                    onClick={() => onNearScenario(i)}
+                    title="Right idea, wrong details? Draw a close variant of this scenario"
+                    className="font-medium text-primary hover:opacity-80 disabled:opacity-50"
                   >
-                    ×
+                    ≈ Near neighbor
                   </button>
-                )}
-              </div>
-              <textarea
-                className="input w-full resize-none field-sizing-content text-sm"
-                rows={1}
-                value={sc.description}
-                placeholder="one sentence describing the circumstance"
-                onChange={(e) => updateRow(i, { description: e.target.value })}
+                  {(sc.variants ?? 0) > 0 && (
+                    <span className="text-[10px] text-ink-3">
+                      {MAX_VARIANTS - (sc.variants ?? 0)} left
+                    </span>
+                  )}
+                </span>
+              ) : (
+                <span className="text-[10px] text-ink-3">
+                  {MAX_VARIANTS} variations tried - edit the text above to make it yours
+                </span>
+              ))}
+            <label
+              className="flex items-center gap-1.5 text-ink-3 whitespace-nowrap"
+              title={
+                deviatingLabel && deviatingLabel !== sc.label
+                  ? `Only one scenario per grid can buy differently (currently: ${deviatingLabel})`
+                  : `This scenario's buyer decides by a different process than the rest of your market (${marketStyle})`
+              }
+            >
+              <input
+                type="checkbox"
+                checked={sc.journey !== null}
+                disabled={busy || !sc.on || (deviatingLabel !== null && deviatingLabel !== sc.label)}
+                onChange={(e) =>
+                  updateRow(
+                    i,
+                    {
+                      journey: e.target.checked
+                        ? {
+                            involvement: String(state.moderators.involvement ?? "considered"),
+                            verifiability: String(state.moderators.verifiability ?? "spec"),
+                            think_feel: String(state.moderators.think_feel ?? "think"),
+                            decision_unit: String(state.moderators.decision_unit ?? "solo"),
+                          }
+                        : null,
+                    },
+                    true
+                  )
+                }
               />
-              {sc.label.trim() !== "" &&
-                ((sc.variants ?? 0) < MAX_VARIANTS ? (
-                  <div className="flex items-center gap-2">
-                    <button
-                      type="button"
-                      disabled={busy}
-                      onClick={() => onNearScenario(i)}
-                      title="Right idea, wrong details? Draw a close variant of this scenario"
-                      className="text-[11px] font-medium text-primary hover:opacity-80 disabled:opacity-50"
-                    >
-                      ≈ Near neighbor
-                    </button>
-                    {(sc.variants ?? 0) > 0 && (
-                      <span className="text-[10px] text-ink-3">
-                        {MAX_VARIANTS - (sc.variants ?? 0)} left
-                      </span>
-                    )}
-                  </div>
-                ) : (
-                  <span className="text-[10px] text-ink-3">
-                    {MAX_VARIANTS} variations tried - edit the text above to make it yours
-                  </span>
-                ))}
-              {sc.journey && sc.on && (
-                <div className="flex flex-wrap items-center gap-1.5">
-                  <span className="text-[10px] uppercase tracking-wide text-warning font-semibold">this buyer:</span>
-                  {JOURNEY_FIELDS.map((f) => {
-                    const value = String(sc.journey?.[f.key as keyof Journey] ?? "");
-                    const differs = value !== String(state.moderators[f.key] ?? "");
-                    return (
-                      <select
-                        key={f.key}
-                        aria-label={`${sc.label} ${f.key.replace("_", " ")}`}
-                        title={
-                          differs
-                            ? `Differs from your market (${displayOf(f.key, state.moderators[f.key])})`
-                            : "Same as your market"
-                        }
-                        value={value}
-                        disabled={busy}
-                        onChange={(e) =>
-                          updateRow(i, { journey: { ...sc.journey!, [f.key]: e.target.value } }, true)
-                        }
-                        className={`rounded-full px-2 py-0.5 text-[11px] font-medium border-0 cursor-pointer ${
-                          differs
-                            ? "bg-warning/10 text-warning"
-                            : "bg-surface-1 text-ink-3"
-                        }`}
-                      >
-                        {f.options.map(([k, label]) => (
-                          <option key={k} value={k}>{label}</option>
-                        ))}
-                      </select>
-                    );
-                  })}
-                  <span className="text-[10px] text-ink-3">
-                    highlighted = differs from your market
-                  </span>
-                </div>
+              {deviatingLabel !== null && deviatingLabel !== sc.label ? (
+                <span className="opacity-60">buys differently · one per Landscape</span>
+              ) : (
+                "buys differently"
               )}
-            </div>
+            </label>
+            {!sc.suggested && (
+              <button
+                type="button"
+                aria-label="delete scenario"
+                onClick={() => setRows(rows.filter((_, j) => j !== i), true)}
+                className="ml-auto text-ink-3 hover:text-danger text-[15px] leading-none"
+              >
+                ×
+              </button>
+            )}
           </div>
         </div>
       ))}
@@ -1236,8 +1236,8 @@ export function CoverageGate({
     const effective = cols.length > 0 ? cols : activeLabels;
     return (
       <tr key={s.key} className={isKept ? "" : "opacity-50"}>
-        <td className="px-3 py-1 whitespace-nowrap">
-          <label className="flex items-center gap-2">
+        <td className="px-3 py-1">
+          <label className="flex flex-wrap items-center gap-x-2 gap-y-0.5">
             <input
               type="checkbox"
               checked={isKept}
@@ -1442,12 +1442,23 @@ export function CellsGate({
   setState: (s: GridState) => void;
   brandNames: string[];
   /** Draw a genuinely new prompt for cell i (max MAX_REGENS). */
-  onRegenerate: (i: number) => void;
+  onRegenerate: (i: number) => Promise<void> | void;
   /** Step cell i through its offered prompts. */
   onCycle: (i: number, dir: 1 | -1) => void;
   busy: boolean;
 }) {
   const [open, setOpen] = useState<ReadonlySet<string>>(new Set());
+  /** The one cell currently writing a new prompt - only its card waits. */
+  const [pending, setPending] = useState<number | null>(null);
+  const regenerate = async (i: number) => {
+    if (pending !== null) return;
+    setPending(i);
+    try {
+      await onRegenerate(i);
+    } finally {
+      setPending(null);
+    }
+  };
   const toggle = (k: string) =>
     setOpen((prev) => {
       const next = new Set(prev);
@@ -1529,11 +1540,19 @@ export function CellsGate({
                             }
                           />
                           <div className="flex items-center gap-3 border-t border-dashed border-line pt-1.5 text-[11px]">
-                            {(c.regens ?? 0) < MAX_REGENS ? (
+                            {pending === c.i ? (
+                              <span className="flex items-center gap-1.5 font-medium text-primary">
+                                <span
+                                  aria-hidden="true"
+                                  className="h-3 w-3 rounded-full border-2 border-primary/30 border-t-primary animate-spin"
+                                />
+                                Writing a new prompt…
+                              </span>
+                            ) : (c.regens ?? 0) < MAX_REGENS ? (
                               <button
                                 type="button"
-                                disabled={busy}
-                                onClick={() => onRegenerate(c.i)}
+                                disabled={busy || pending !== null}
+                                onClick={() => void regenerate(c.i)}
                                 title="Ask this cell's question a different way - not a paraphrase"
                                 className="font-medium text-primary hover:opacity-80 disabled:opacity-50"
                               >
