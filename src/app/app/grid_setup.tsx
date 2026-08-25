@@ -828,7 +828,7 @@ export function ScenariosGate({
 
   return (
     <div className="grid gap-3 max-w-4xl">
-      <span className="text-[10.5px] font-semibold uppercase tracking-wide text-primary">
+      <span className="text-sm font-semibold uppercase tracking-wide text-primary">
         How they generally decide
       </span>
       <div className="flex flex-wrap items-baseline gap-2 text-[13px]">
@@ -874,7 +874,7 @@ export function ScenariosGate({
       {readDelta && (
         <p className="text-[12px] text-primary font-medium">{readDelta}</p>
       )}
-      <span className="mt-3 text-[10.5px] font-semibold uppercase tracking-wide text-primary">
+      <span className="mt-3 text-sm font-semibold uppercase tracking-wide text-primary">
         Who&apos;s generally buying
       </span>
       <p className="text-[12px] text-ink-2">
@@ -1348,7 +1348,7 @@ export function CoverageGate({
                     <button
                       type="button"
                       onClick={() => folds.toggle(layer)}
-                      className="flex items-center gap-1.5 px-3 pt-2 pb-1 text-[10px] font-semibold uppercase tracking-wide text-primary w-full text-left"
+                      className="flex items-center gap-1.5 px-3 pt-2 pb-1 text-sm font-semibold uppercase tracking-wide text-primary w-full text-left"
                     >
                       <span aria-hidden="true" className="text-ink-3">{open ? "▾" : "▸"}</span>
                       {layer}
@@ -1481,7 +1481,7 @@ export function CellsGate({
         const stages = [...new Set(cells.map((c) => c.stage))];
         return (
           <div key={layer} className="grid gap-2">
-            <span className="text-[10.5px] font-semibold uppercase tracking-wide text-primary">
+            <span className="text-sm font-semibold uppercase tracking-wide text-primary">
               {layer}
             </span>
             {stages.map((stage) => {
@@ -1648,7 +1648,7 @@ export function PhrasingsGate({
         const stages = [...new Set(lcells.map(({ c }) => c.stage))];
         return (
           <div key={layer} className="grid gap-2">
-            <span className="text-[10.5px] font-semibold uppercase tracking-wide text-primary">
+            <span className="text-sm font-semibold uppercase tracking-wide text-primary">
               {layer}
             </span>
             {stages.map((stage) => {

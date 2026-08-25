@@ -138,7 +138,7 @@ export function EnginePicker({
     if (list.length === 0) return null;
     return (
       <div key={mode} className="grid gap-1">
-        <span className="flex items-center gap-1.5 text-[10.5px] font-semibold uppercase tracking-wide text-primary">
+        <span className="flex items-center gap-1.5 text-sm font-semibold uppercase tracking-wide text-primary">
           {MODE_INFO[mode].title}
           <ModeInfoDot mode={mode} />
         </span>
