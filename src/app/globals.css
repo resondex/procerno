@@ -87,6 +87,12 @@ body {
   background: var(--surface);
   padding: 0.5rem 0.75rem;
   font-size: 0.875rem;
+  /* Self-contained: never inherit color, weight, casing, or tracking from
+   * a styled label wrapping the control. */
+  color: var(--ink);
+  font-weight: 400;
+  letter-spacing: normal;
+  text-transform: none;
   transition: border-color 120ms ease;
   outline: none;
 }
