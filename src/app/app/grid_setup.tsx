@@ -572,37 +572,41 @@ export function useGridSetup(a: GridSetupArgs) {
         batches.push({ layer, idx: idx.slice(k, k + PHRASING_BATCH) });
       }
     }
+    // All batches in flight at once - each is its own serverless call, so
+    // wall time is the slowest batch, not the sum.
     let done = 0;
-    for (const { layer, idx } of batches) {
-      a.setBusy(`Writing paraphrases… ${layer} (${done}/${cells.length})`);
-      const data = await post<{ phrasings: GridPhrasing[][] }>(
-        "/api/setup/grid/phrasings",
-        {
-          brand: a.brand, category: a.category, competitors: a.competitors,
-          audience: a.audience || undefined,
-          base: a.state.moderators,
-          scenarios: a.state.scenarios,
-          cells: idx.map((i) => ({
-            stage: merged[i].stage,
-            situation: merged[i].situation,
-            angle: merged[i].angle,
-            mode: merged[i].mode ?? null,
-            text: merged[i].text,
-          })),
-          count: PHRASING_COUNT,
-          force,
-        }
-      );
-      if (!data) {
-        a.setBusy(null);
-        return null;
-      }
-      idx.forEach((i, k) => {
-        merged[i] = { ...merged[i], phrasings: data.phrasings[k] ?? [] };
-      });
-      done += idx.length;
-    }
+    a.setBusy(`Writing paraphrases… (0/${cells.length})`);
+    const outcomes = await Promise.all(
+      batches.map(async ({ idx }) => {
+        const data = await post<{ phrasings: GridPhrasing[][] }>(
+          "/api/setup/grid/phrasings",
+          {
+            brand: a.brand, category: a.category, competitors: a.competitors,
+            audience: a.audience || undefined,
+            base: a.state!.moderators,
+            scenarios: a.state!.scenarios,
+            cells: idx.map((i) => ({
+              stage: merged[i].stage,
+              situation: merged[i].situation,
+              angle: merged[i].angle,
+              mode: merged[i].mode ?? null,
+              text: merged[i].text,
+            })),
+            count: PHRASING_COUNT,
+            force,
+          }
+        );
+        if (!data) return false;
+        idx.forEach((i, k) => {
+          merged[i] = { ...merged[i], phrasings: data.phrasings[k] ?? [] };
+        });
+        done += idx.length;
+        a.setBusy(`Writing paraphrases… (${done}/${cells.length})`);
+        return true;
+      })
+    );
     a.setBusy(null);
+    if (outcomes.some((ok) => !ok)) return null;
     const next: GridState = { ...a.state, step: "phrasings", cells: merged };
     a.setState(next);
     return next;

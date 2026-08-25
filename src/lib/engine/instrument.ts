@@ -26,11 +26,15 @@ const MODEL = process.env.SUGGEST_MODEL ?? "gpt-5-mini";
  * category carrying the most leverage in the pipeline - mini's economy
  * is for the high-volume mechanical calls (cells, phrasings, variants). */
 const READ_MODEL = process.env.READ_MODEL ?? "gpt-5";
+/** The cell writer also runs on the full model: the 52-odd seeds are the
+ * DESIGNED questions every paraphrase imitates - one-time, cached, cheap.
+ * Paraphrase volume stays on mini. */
+const CELLS_MODEL = process.env.CELLS_MODEL ?? "gpt-5";
 const CACHE_TTL_MS = 183 * 24 * 3600 * 1000;
 /** Versions the WRITING STYLE of cells and phrasings independently of the
  * instrument rules - a style change regenerates prompt text without
  * discarding scenario reads. */
-const STYLE_VERSION = "s2";
+const STYLE_VERSION = "s3";
 // Version the cache: composer-rule or prompt-style changes must not serve
 // grids built under old rules.
 const INSTRUMENT_VERSION = "g7";
@@ -1015,18 +1019,23 @@ export async function generateGrid(input: {
   const journeyBySituation = new Map(
     input.scenarios.map((s) => [s.label, journeyNote(input.base, s)] as const)
   );
-  const planText = plan
-    .map((p, i) => {
-      const jn = p.situation ? journeyBySituation.get(p.situation) : null;
-      return (
-        `${i + 1}. stage=${p.stage.key} situation=${p.situation ?? "-"} angle=${p.angle}` +
-        `${p.scope ? ` reach=${p.scope}` : ""}${jn ? ` journey(${jn})` : ""}` +
-        `\n   guidance: ${p.stage.hint}`
-      );
-    })
-    .join("\n");
+  const planLine = (p: (typeof plan)[number], i: number) => {
+    const jn = p.situation ? journeyBySituation.get(p.situation) : null;
+    return (
+      `${i + 1}. stage=${p.stage.key} situation=${p.situation ?? "-"} angle=${p.angle}` +
+      `${p.scope ? ` reach=${p.scope}` : ""}${jn ? ` journey(${jn})` : ""}` +
+      `\n   guidance: ${p.stage.hint}`
+    );
+  };
+  // Slices run in parallel: the full-model writer reasons hard enough that
+  // one 50-cell call would flirt with the route's time budget.
+  const CELL_CHUNK = 13;
+  const slices: (typeof plan)[] = [];
+  for (let i = 0; i < plan.length; i += CELL_CHUNK) slices.push(plan.slice(i, i + CELL_CHUNK));
+  const writeSlice = async (sl: typeof plan) => {
+  const planText = sl.map(planLine).join("\n");
   const res = await openaiClient().chat.completions.create({
-    model: MODEL,
+    model: CELLS_MODEL,
     messages: [
       {
         role: "system",
@@ -1081,11 +1090,14 @@ export async function generateGrid(input: {
   const parsed = JSON.parse(res.choices[0]?.message?.content ?? "{}") as {
     cells: { stage: string; situation: string | null; angle: string; text: string }[];
   };
+  return parsed.cells ?? [];
+  };
+  const parsedCells = (await Promise.all(slices.map(writeSlice))).flat();
   const scopeByPlan = new Map(plan.map((p, i) => [i, p.scope] as const));
   const byKey = new Map(input.stages.map((s) => [s.key, s]));
   const seen = new Set<string>();
   const cells: GridCell[] = [];
-  (parsed.cells ?? []).forEach((c, idx) => {
+  parsedCells.forEach((c, idx) => {
     const st = byKey.get(c.stage);
     if (!st || !c.text?.trim()) return;
     const norm = c.text.trim().toLowerCase().replace(/\s+/g, " ");
