@@ -15,6 +15,7 @@ import {
   namesAny,
   normalizeGrid,
   scenarioRows,
+  swapPhrasings,
   useGridSetup,
   type CellReviewItem,
   type GridState,
@@ -663,7 +664,9 @@ export function SetupWizard({ mode, brand, draft, engineOptions, onClose, onCrea
     const cells = grid.cells.map((c, i) => {
       const it = byIndex.get(i);
       if (!it || it.choice !== "suggestion") return c;
-      return { ...c, text: it.suggestion, original: it.suggestion, phrasings: [] };
+      // The old wording's set is banked, not thrown away - cycling back
+      // to it later restores its paraphrases for free.
+      return { ...c, text: it.suggestion, original: it.suggestion, ...swapPhrasings(c, it.suggestion) };
     });
     const next: GridState = { ...grid, cells };
     // Log what the user chose - visibility only, fire and forget.

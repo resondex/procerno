@@ -52,6 +52,23 @@ export interface GridCellUi {
   original?: string;
   /** Paraphrases beyond the seed text; empty until gate 3. */
   phrasings: GridPhrasing[];
+  /** Paraphrase sets already written for wordings this cell has moved off
+   * of, keyed by exact prompt text - cycling back to a wording restores
+   * its set instead of regenerating it. */
+  phrasingsByText?: Record<string, GridPhrasing[]>;
+}
+
+/** Bank the cell's written paraphrases under its current wording, and pull
+ * the set banked for `nextText` if there is one - the swap that makes
+ * returning to a wording you already paid for free. */
+export function swapPhrasings(
+  c: GridCellUi,
+  nextText: string
+): Pick<GridCellUi, "phrasings" | "phrasingsByText"> {
+  const bank = c.phrasings.some((p) => p.text.trim())
+    ? { ...(c.phrasingsByText ?? {}), [c.text.trim()]: c.phrasings }
+    : c.phrasingsByText;
+  return { phrasings: bank?.[nextText.trim()] ?? [], phrasingsByText: bank };
 }
 
 export interface Journey {
@@ -695,8 +712,9 @@ export function useGridSetup(a: GridSetupArgs) {
               alts: nextAlts,
               altIdx: nextAlts.length - 1,
               regens: (q.regens ?? 0) + 1,
-              // A different question invalidates the old paraphrases.
-              phrasings: [],
+              // A different question means different paraphrases - the old
+              // set is banked under the old wording, not thrown away.
+              ...swapPhrasings(q, data.text),
             }
           : q
       ),
@@ -717,7 +735,9 @@ export function useGridSetup(a: GridSetupArgs) {
         j === i
           // A cycled-to wording becomes the accepted baseline: machine-
           // offered, or the user's own wording deliberately returned to.
-          ? { ...q, text: alts[next], original: alts[next], alts, altIdx: next, phrasings: [] }
+          // Its paraphrases come back from the bank when it has been
+          // written before - cycling back is free.
+          ? { ...q, text: alts[next], original: alts[next], alts, altIdx: next, ...swapPhrasings(q, alts[next]) }
           : q
       ),
     });
