@@ -8,23 +8,34 @@ const Situation = z.object({
   description: z.string().trim().max(240),
 });
 
-const Body = z.object({
+const Base = z.object({
   category: z.string().trim().min(1).max(120),
   audience: z.string().trim().max(160).optional(),
-  kind: z.literal("review_choice"),
-  items: z
-    .array(
-      z.object({
-        current: Situation,
-        suggestion: Situation,
-        flags: z.array(z.enum(["typo", "phrasing", "mixed"])).min(1).max(3),
-        reason: z.string().max(400),
-        choice: z.enum(["suggestion", "mine"]),
-      })
-    )
-    .min(1)
-    .max(8),
 });
+
+const Body = z.discriminatedUnion("kind", [
+  Base.extend({
+    kind: z.literal("review_choice"),
+    items: z
+      .array(
+        z.object({
+          current: Situation,
+          suggestion: Situation,
+          flags: z.array(z.enum(["typo", "phrasing", "mixed"])).min(1).max(3),
+          reason: z.string().max(400),
+          choice: z.enum(["suggestion", "mine"]),
+        })
+      )
+      .min(1)
+      .max(8),
+  }),
+  // A near-neighbor draw: the user swapped `rejected` for `drawn`.
+  Base.extend({
+    kind: z.literal("near_draw"),
+    rejected: Situation,
+    drawn: Situation,
+  }),
+]);
 
 /** Append-only setup feedback from the client (what the user chose in the
  * scenario review overlay). For OUR visibility only - nothing here is ever
@@ -37,13 +48,17 @@ export async function POST(req: Request) {
   if (!parsed.success) {
     return NextResponse.json({ error: "bad request" }, { status: 400 });
   }
+  const d = parsed.data;
   await store
     .feedbackAdd({
       email: auth.email,
-      category: parsed.data.category,
-      audience: parsed.data.audience || null,
-      kind: parsed.data.kind,
-      payload: { items: parsed.data.items },
+      category: d.category,
+      audience: d.audience || null,
+      kind: d.kind,
+      payload:
+        d.kind === "review_choice"
+          ? { items: d.items }
+          : { rejected: d.rejected, drawn: d.drawn },
     })
     .catch(() => {});
   return NextResponse.json({ ok: true });

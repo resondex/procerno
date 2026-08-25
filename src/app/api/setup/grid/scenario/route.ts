@@ -2,8 +2,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { requireAuth } from "@/lib/auth";
 import { apiKeyConfigured } from "@/lib/engine/providers";
-import { nearScenario, suggestScenario, type Moderators } from "@/lib/engine/instrument";
-import { store } from "@/lib/store";
+import { nearScenarios, suggestScenario, type Moderators } from "@/lib/engine/instrument";
 
 export const maxDuration = 60;
 
@@ -32,34 +31,29 @@ export async function POST(req: Request) {
   if (!parsed.success) {
     return NextResponse.json({ error: "bad request" }, { status: 400 });
   }
-  const scenario = parsed.data.nearTo
-    ? await nearScenario({
-        category: parsed.data.category,
-        audience: parsed.data.audience || null,
-        of: parsed.data.nearTo,
-        exclude: parsed.data.exclude.filter((s) => s.label),
-      })
-    : await suggestScenario({
-        category: parsed.data.category,
-        audience: parsed.data.audience || null,
-        decisionUnit: parsed.data.decisionUnit as Moderators["decision_unit"],
-        exclude: parsed.data.exclude.filter((s) => s.label),
-      });
+  if (parsed.data.nearTo) {
+    // The variant POOL for one scenario - prefetched at gate landing so
+    // draws are instant; the actual draw/rejection events are logged from
+    // the client via /api/setup/grid/feedback.
+    const variants = await nearScenarios({
+      category: parsed.data.category,
+      audience: parsed.data.audience || null,
+      of: parsed.data.nearTo,
+      exclude: parsed.data.exclude.filter((s) => s.label),
+    });
+    if (variants.length === 0) {
+      return NextResponse.json({ error: "no variants came back - try again" }, { status: 502 });
+    }
+    return NextResponse.json({ variants });
+  }
+  const scenario = await suggestScenario({
+    category: parsed.data.category,
+    audience: parsed.data.audience || null,
+    decisionUnit: parsed.data.decisionUnit as Moderators["decision_unit"],
+    exclude: parsed.data.exclude.filter((s) => s.label),
+  });
   if (!scenario) {
     return NextResponse.json({ error: "no new scenario came back - try again" }, { status: 502 });
-  }
-  if (parsed.data.nearTo) {
-    // Drawing a neighbor is the rejection signal for the current wording.
-    // Logged for OUR visibility only - never read back into generation.
-    await store
-      .feedbackAdd({
-        email: auth.email,
-        category: parsed.data.category,
-        audience: parsed.data.audience || null,
-        kind: "near_draw",
-        payload: { rejected: parsed.data.nearTo, drawn: scenario },
-      })
-      .catch(() => {});
   }
   return NextResponse.json({ scenario });
 }

@@ -77,13 +77,17 @@ export interface ScenarioRow {
   suggested: boolean;
   /** Whether this column is in the grid. */
   on: boolean;
-  /** The suggestion as generated, for "reset to suggested" and for telling
-   * an edited row from an untouched one. */
+  /** The wording as last machine-generated (suggestion or drawn variant) -
+   * an edited row is one whose text differs from this. */
   original?: { label: string; description: string };
+  /** The compose-time original, immutable - "Reset to suggested" returns
+   * here and re-opens the variant walk. */
+  first?: { label: string; description: string };
+  /** The precomputed near-variant pool for this card (3 alternates of
+   * `first`), prefetched at gate landing and kept through resets. */
+  pool?: { label: string; description: string }[];
   /** Near-neighbor draws used on this card (capped at MAX_VARIANTS). */
   variants?: number;
-  /** Earlier versions of this card, excluded from later draws. */
-  tried?: { label: string; description: string }[];
 }
 
 /** Absolute scenario-column maximum; a plan's cap can be lower
@@ -152,6 +156,7 @@ function rowsFromSuggested(
   return list.map((s, i) => ({
     ...s, suggested: true, on: i < cap,
     original: { label: s.label, description: s.description },
+    first: { label: s.label, description: s.description },
   }));
 }
 
@@ -245,7 +250,7 @@ export interface GridSetupArgs {
   /** The plan's scenario cap; defaults to the absolute maximum. */
   maxScenarios?: number;
   state: GridState | null;
-  setState: (s: GridState | null) => void;
+  setState: (s: GridState | null | ((prev: GridState | null) => GridState | null)) => void;
   setBusy: (b: string | null) => void;
   setError: (e: string | null) => void;
 }
@@ -373,7 +378,7 @@ export function useGridSetup(a: GridSetupArgs) {
       ...rows,
       {
         ...scenario, journey: null, suggested: true, on: active < cap,
-        original: { ...scenario },
+        original: { ...scenario }, first: { ...scenario },
       },
     ];
     const drawn: GridState = { ...a.state, reserve };
@@ -385,41 +390,105 @@ export function useGridSetup(a: GridSetupArgs) {
     }
   }
 
-  /** Gate 1 helper: a near variant of one card - same circumstance, one
-   * detail moved. Replaces the card in place; earlier versions go to its
-   * `tried` list so successive draws keep moving. */
-  async function nearScenario(i: number): Promise<void> {
-    if (!a.state) return;
-    const rows = scenarioRows(a.state);
-    const row = rows[i];
-    if (!row?.label.trim() || (row.variants ?? 0) >= MAX_VARIANTS) return;
-    a.setBusy("Finding a near neighbor…");
-    a.setError(null);
-    const exclude = [
-      ...rows.map(({ label, description }) => ({ label, description })),
-      ...(row.tried ?? []),
-    ].filter((s) => s.label.trim()).slice(-24);
-    const data = await post<{ scenario: { label: string; description: string } }>(
+  /** The identity a card's variant pool is keyed on: the compose-time
+   * original when there is one. */
+  function poolAnchor(r: ScenarioRow): { label: string; description: string } {
+    return r.first ?? r.original ?? { label: r.label, description: r.description };
+  }
+
+  async function fetchPool(
+    anchor: { label: string; description: string },
+    exclude: { label: string; description: string }[]
+  ): Promise<{ label: string; description: string }[] | null> {
+    const data = await post<{ variants: { label: string; description: string }[] }>(
       "/api/setup/grid/scenario",
       {
         category: a.category,
         audience: a.audience || undefined,
-        decisionUnit: a.state.moderators.decision_unit,
-        exclude,
-        nearTo: { label: row.label, description: row.description },
+        decisionUnit: a.state?.moderators.decision_unit,
+        exclude: exclude.filter((s) => s.label.trim()).slice(-24),
+        nearTo: anchor,
       }
     );
-    a.setBusy(null);
-    if (!data) return;
+    return data?.variants ?? null;
+  }
+
+  /** Prefetch the near-variant pool for every suggested card that lacks
+   * one - fired when the scenarios gate lands, silent, in parallel, so
+   * every draw afterwards is instant. Merges into the freshest state.
+   * `fresh` covers callers holding a newer state than this closure. */
+  async function prefetchNearPools(fresh?: GridState | null): Promise<void> {
+    const st = fresh ?? a.state;
+    if (!st) return;
+    const rows = scenarioRows(st);
+    const targets = rows.filter((r) => r.suggested && r.label.trim() && !r.pool);
+    if (targets.length === 0) return;
+    const exclude = rows.map(({ label, description }) => ({ label, description }));
+    const results = await Promise.all(
+      targets.map(async (r) => ({
+        key: poolAnchor(r).label,
+        pool: await fetchPool(poolAnchor(r), exclude).catch(() => null),
+      }))
+    );
+    const byKey = new Map(results.filter((x) => x.pool?.length).map((x) => [x.key, x.pool!]));
+    if (byKey.size === 0) return;
+    a.setState((prev) => {
+      if (!prev) return prev;
+      return withScenarioRows(
+        prev,
+        scenarioRows(prev).map((r) =>
+          !r.pool && byKey.has(poolAnchor(r).label)
+            ? { ...r, pool: byKey.get(poolAnchor(r).label) }
+            : r
+        )
+      );
+    });
+  }
+
+  /** Gate 1 helper: a near variant of one card - same circumstance, one
+   * detail moved. Draws walk the card's precomputed pool (instant); the
+   * pool is fetched on demand only if the prefetch hasn't landed yet. */
+  async function nearScenario(i: number): Promise<void> {
+    if (!a.state) return;
+    const rows = scenarioRows(a.state);
+    const row = rows[i];
+    if (!row?.label.trim()) return;
+    const used = row.variants ?? 0;
+    if (used >= MAX_VARIANTS) return;
+    let pool = row.pool;
+    if (!pool || pool.length === 0) {
+      a.setBusy("Finding a near neighbor…");
+      a.setError(null);
+      pool = (await fetchPool(
+        poolAnchor(row),
+        rows.map(({ label, description }) => ({ label, description }))
+      )) ?? undefined;
+      a.setBusy(null);
+      if (!pool || pool.length === 0) return;
+    }
+    const variant = pool[Math.min(used, pool.length - 1)];
+    // The draw is the rejection signal for the current wording - logged
+    // for OUR visibility only, never read back into generation.
+    void fetch("/api/setup/grid/feedback", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        category: a.category,
+        audience: a.audience || undefined,
+        kind: "near_draw",
+        rejected: { label: row.label, description: row.description },
+        drawn: variant,
+      }),
+    }).catch(() => {});
     const nextRows = rows.map((r, j) =>
       j === i
         ? {
             ...r,
-            label: data.scenario.label,
-            description: data.scenario.description,
-            original: { ...data.scenario },
-            variants: (r.variants ?? 0) + 1,
-            tried: [...(r.tried ?? []), { label: r.label, description: r.description }],
+            label: variant.label,
+            description: variant.description,
+            original: { ...variant },
+            variants: used + 1,
+            pool,
           }
         : r
     );
@@ -505,7 +574,7 @@ export function useGridSetup(a: GridSetupArgs) {
     return next;
   }
 
-  return { compose, writeCells, writePhrasings, suggestScenario, nearScenario };
+  return { compose, writeCells, writePhrasings, suggestScenario, nearScenario, prefetchNearPools };
 }
 
 /* -------------------------------- views --------------------------------- */
@@ -804,9 +873,18 @@ export function ScenariosGate({
           type="button"
           onClick={() =>
             setRows(
+              // Back to the compose-time originals; pools survive so the
+              // three near-neighbor draws are available again, instantly.
               rows
                 .filter((r) => r.suggested)
-                .map((r, i) => ({ ...r, ...(r.original ?? {}), journey: null, on: i < cap })),
+                .map((r, i) => {
+                  const home = r.first ?? r.original ?? { label: r.label, description: r.description };
+                  return {
+                    ...r, ...home,
+                    original: { ...home },
+                    journey: null, on: i < cap, variants: 0,
+                  };
+                }),
               true
             )
           }

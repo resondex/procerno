@@ -668,41 +668,44 @@ export async function suggestScenario(input: {
 }
 
 /**
- * A near variant of one scenario: same general circumstance, one concrete
- * detail moved. The card's "Near neighbor" draw - the user likes the idea
- * but wants it slightly different. Cached by what it varied and what it
- * had to avoid, so each successive draw (growing avoid list) is a new
- * variant and repeat categories hit the cache.
+ * The near-variant POOL for one scenario: three alternates of the original,
+ * each moving a different concrete detail. Prefetched when the scenarios
+ * gate lands so every "Near neighbor" draw is instant, and cached by the
+ * original scenario - "Reset to suggested" walks the same pool again.
  */
-export async function nearScenario(input: {
+export async function nearScenarios(input: {
   category: string;
   audience: string | null;
   of: Situation;
   exclude: Situation[];
-}): Promise<Situation | null> {
+}): Promise<Situation[]> {
   const avoid = input.exclude.map((s) => s.label.trim().toLowerCase()).filter(Boolean).sort();
-  const key = cacheKey("scenario_near3", [
+  const key = cacheKey("scenario_near_pool", [
     input.category, input.audience, input.of.label, input.of.description, avoid.join("|"),
   ]);
   const hit = await store.cacheGet(key, CACHE_TTL_MS);
-  if (hit) return JSON.parse(hit) as Situation;
+  if (hit) return JSON.parse(hit) as Situation[];
   const res = await openaiClient().chat.completions.create({
     model: MODEL,
     messages: [
       {
         role: "system",
         content:
-          "Propose exactly ONE near variant of a given buyer situation for " +
-          "a research instrument. Keep its general circumstance - the same " +
-          "axis - and move ONE concrete detail (scale, constraint, occasion, " +
-          "composition, use-case) so it reads noticeably but not radically " +
-          "different. It must still change what a competent advisor would " +
-          "recommend, stay about the decision (never the speaker), and " +
-          "differ from everything already listed. Scenarios describe circumstances, never a specific brand or product - 'migrating from a legacy tracker', not 'migrating from X'. Label 2-4 plain words " +
-          "naming the buyer or the circumstance the way a strategist would " +
-          "title a slide - never analytical or methodology words like " +
-          "'default', 'habitual', 'segment', 'use case'. Description one " +
-          "short sentence.",
+          "Propose exactly THREE near variants of a given buyer situation " +
+          "for a research instrument. Each keeps its general circumstance " +
+          "- the same axis - and moves ONE concrete detail (scale, " +
+          "constraint, occasion, composition, use-case), a DIFFERENT " +
+          "detail per variant, so each reads noticeably but not radically " +
+          "different. Order them closest-first. Every variant must still " +
+          "change what a competent advisor would recommend, stay about " +
+          "the decision (never the speaker), and differ from the others " +
+          "and from everything already listed. Scenarios describe " +
+          "circumstances, never a specific brand or product - 'migrating " +
+          "from a legacy tracker', not 'migrating from X'. Labels 2-4 " +
+          "plain words naming the buyer or the circumstance the way a " +
+          "strategist would title a slide - never analytical or " +
+          "methodology words like 'default', 'habitual', 'segment', 'use " +
+          "case'. Descriptions one short sentence.",
       },
       {
         role: "user",
@@ -720,12 +723,17 @@ export async function nearScenario(input: {
   const parsed = JSON.parse(res.choices[0]?.message?.content ?? "{}") as {
     situations: Situation[];
   };
-  const fresh = (parsed.situations ?? []).find(
-    (s) => s.label.trim() && !avoid.includes(s.label.trim().toLowerCase())
-  );
-  if (!fresh) return null;
-  await store.cacheSet(key, JSON.stringify(fresh));
-  return fresh;
+  const seen = new Set(avoid);
+  const pool: Situation[] = [];
+  for (const s of parsed.situations ?? []) {
+    const k = s.label.trim().toLowerCase();
+    if (!k || seen.has(k)) continue;
+    seen.add(k);
+    pool.push({ label: s.label.trim(), description: s.description.trim() });
+    if (pool.length === 3) break;
+  }
+  if (pool.length > 0) await store.cacheSet(key, JSON.stringify(pool));
+  return pool;
 }
 
 /** Why a scenario was flagged: mechanics, clarity, or bundled axes. */
