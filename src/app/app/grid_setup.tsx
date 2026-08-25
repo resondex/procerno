@@ -47,6 +47,9 @@ export interface GridCellUi {
   altIdx?: number;
   /** "New prompt" draws used (capped at MAX_REGENS). */
   regens?: number;
+  /** The last machine-offered wording - a cell whose text differs from
+   * this was edited by the user, and gets the quality check at confirm. */
+  original?: string;
   /** Paraphrases beyond the seed text; empty until gate 3. */
   phrasings: GridPhrasing[];
 }
@@ -124,6 +127,9 @@ export interface GridState {
    * are never rechecked. Deliberately excludes "keep mine" choices - a
    * declined suggestion pops up again on the next confirm. */
   reviewedScenarios?: string[];
+  /** Same contract for edited prompts: fingerprints that PASSED the
+   * Prompts-gate quality check; "keep mine" is never recorded. */
+  reviewedCells?: string[];
   cells: GridCellUi[];
 }
 
@@ -153,6 +159,9 @@ export function normalizeGrid(g: GridState | null): GridState | null {
     cells: g.cells.map((c) => ({
       ...c,
       text: scrubPrompt(c.text),
+      // Drafts from before the prompt review carry no machine baseline -
+      // treat the saved text as it, so nothing is retroactively flagged.
+      original: scrubPrompt(c.original ?? c.text),
       phrasings: c.phrasings.map((ph) => ({ ...ph, text: scrubPrompt(ph.text) })),
     })),
   };
@@ -565,22 +574,27 @@ export function useGridSetup(a: GridSetupArgs) {
     const next: GridState = {
       ...a.state,
       step: "cells",
-      cells: data.cells.map((c) => ({ ...c, phrasings: [] })),
+      cells: data.cells.map((c) => ({ ...c, original: c.text, phrasings: [] })),
     };
     a.setState(next);
     return next;
   }
 
-  /** Gate 3: paraphrase sets, in small batches so no request runs long. */
-  async function writePhrasings(force = false, onlyMissing = false): Promise<GridState | null> {
-    if (!a.state) return null;
+  /** Gate 3: paraphrase sets, in small batches so no request runs long.
+   * `from` lets a caller holding a newer state (a just-applied review)
+   * write from it instead of this closure's render-time snapshot. */
+  async function writePhrasings(
+    force = false, onlyMissing = false, from?: GridState
+  ): Promise<GridState | null> {
+    const st = from ?? a.state;
+    if (!st) return null;
     a.setError(null);
     // Blanked cards keep their place in the grid - the write just skips
     // them (they ship nothing either way; create() filters on text).
-    const liveIdx = a.state.cells
+    const liveIdx = st.cells
       .map((c, i) => (c.text.trim() ? i : -1))
       .filter((i) => i >= 0);
-    const cells = liveIdx.map((i) => a.state!.cells[i]);
+    const cells = liveIdx.map((i) => st.cells[i]);
     // onlyMissing fills gaps (cells whose prompt changed after the first
     // write) without touching sets the user may have edited by hand.
     const merged: GridCellUi[] = cells.map((c) =>
@@ -607,8 +621,8 @@ export function useGridSetup(a: GridSetupArgs) {
           {
             brand: a.brand, category: a.category, competitors: a.competitors,
             audience: a.audience || undefined,
-            base: a.state!.moderators,
-            scenarios: a.state!.scenarios,
+            base: st.moderators,
+            scenarios: st.scenarios,
             cells: idx.map((i) => ({
               stage: merged[i].stage,
               situation: merged[i].situation,
@@ -631,11 +645,11 @@ export function useGridSetup(a: GridSetupArgs) {
     );
     a.setBusy(null);
     if (outcomes.some((ok) => !ok)) return null;
-    const nextCells = a.state.cells.map((c, i) => {
+    const nextCells = st.cells.map((c, i) => {
       const k = liveIdx.indexOf(i);
       return k >= 0 ? merged[k] : c;
     });
-    const next: GridState = { ...a.state, step: "phrasings", cells: nextCells };
+    const next: GridState = { ...st, step: "phrasings", cells: nextCells };
     a.setState(next);
     return next;
   }
@@ -677,6 +691,7 @@ export function useGridSetup(a: GridSetupArgs) {
           ? {
               ...q,
               text: data.text,
+              original: data.text,
               alts: nextAlts,
               altIdx: nextAlts.length - 1,
               regens: (q.regens ?? 0) + 1,
@@ -700,7 +715,9 @@ export function useGridSetup(a: GridSetupArgs) {
       ...a.state,
       cells: a.state.cells.map((q, j) =>
         j === i
-          ? { ...q, text: alts[next], alts, altIdx: next, phrasings: [] }
+          // A cycled-to wording becomes the accepted baseline: machine-
+          // offered, or the user's own wording deliberately returned to.
+          ? { ...q, text: alts[next], original: alts[next], alts, altIdx: next, phrasings: [] }
           : q
       ),
     });
@@ -1432,7 +1449,7 @@ export function CoverageGate({
 
 /** A cell's meta without its stage - for rows already sitting under a
  * stage header. */
-function cellSubMeta(c: GridCellUi): string {
+export function cellSubMeta(c: GridCellUi): string {
   return (
     [
       c.situation,
@@ -1468,7 +1485,7 @@ function useFolds() {
  * cards grow a prompt-count pill and a paraphrases fold - there is no
  * separate paraphrases step. */
 export function CellsGate({
-  state, setState, brandNames, onRegenerate, onCycle, busy,
+  state, setState, brandNames, onRegenerate, onCycle, onWarmReview, busy,
 }: {
   state: GridState;
   setState: (s: GridState) => void;
@@ -1477,6 +1494,9 @@ export function CellsGate({
   onRegenerate: (i: number) => Promise<void> | void;
   /** Step cell i through its offered prompts. */
   onCycle: (i: number, dir: 1 | -1) => void;
+  /** Silent cache warm for the confirm-time quality check - fired on
+   * field blur so the confirm usually lands on a cached verdict. */
+  onWarmReview?: () => void;
   busy: boolean;
 }) {
   const [open, setOpen] = useState<ReadonlySet<string>>(new Set());
@@ -1600,6 +1620,7 @@ export function CellsGate({
                                 ),
                               })
                             }
+                            onBlur={() => onWarmReview?.()}
                           />
                           <div className="flex items-center gap-3 border-t border-dashed border-line pt-1.5 text-[11px]">
                             {pending === c.i ? (
@@ -1737,6 +1758,101 @@ export function CellsGate({
           </div>
         );
       })}
+    </div>
+  );
+}
+
+/** One flagged prompt in the Prompts-gate quality check. */
+export interface CellReviewItem {
+  /** Cell index in the grid. */
+  index: number;
+  /** Where the prompt lives - stage plus the cell's sub-meta. */
+  meta: string;
+  current: string;
+  /** Every problem the reviewer saw, most serious first. */
+  flags: ("target" | "branding" | "unclear")[];
+  reason: string;
+  suggestion: string;
+  choice: "suggestion" | "mine";
+}
+
+const CELL_FLAG_INFO: Record<CellReviewItem["flags"][number], { label: string; cls: string }> = {
+  target: { label: "asks a different question", cls: "bg-warning/10 text-warning" },
+  branding: { label: "blind/branded broken", cls: "bg-warning/10 text-warning" },
+  unclear: { label: "hard to follow", cls: "bg-primary-soft text-primary" },
+};
+
+/** Overlay shown when the Prompts-gate quality check flags user-edited
+ * prompts: each gets the reviewer's reason and a side-by-side choice
+ * between the suggested edit (default) and the user's own wording. */
+export function CellReviewModal({
+  items, onChoice, onBack, onContinue, busy,
+}: {
+  items: CellReviewItem[];
+  onChoice: (k: number, choice: CellReviewItem["choice"]) => void;
+  onBack: () => void;
+  onContinue: () => void;
+  busy: boolean;
+}) {
+  const option = (
+    k: number, it: CellReviewItem,
+    choice: CellReviewItem["choice"], title: string, text: string
+  ) => (
+    <button
+      type="button"
+      onClick={() => onChoice(k, choice)}
+      className={`w-full rounded-lg border px-3 py-2 text-left grid gap-1 ${
+        it.choice === choice ? "border-primary bg-primary-soft/40" : "border-line bg-surface hover:border-ink-3"
+      }`}
+    >
+      <span className="text-[10px] font-semibold uppercase tracking-wide text-ink-3">{title}</span>
+      <span className="text-[13px]">{text}</span>
+    </button>
+  );
+  return (
+    <div className="absolute inset-0 z-20 grid place-items-center bg-black/30 p-6">
+      <div className="w-full max-w-2xl max-h-full overflow-y-auto rounded-xl border border-line bg-surface p-5 grid gap-4 shadow-lg">
+        <div className="grid gap-1">
+          <h3 className="text-[15px] font-semibold">A quick check on your prompts</h3>
+          <p className="text-[12px] text-ink-3">
+            These are yours to call - pick either and continue.
+          </p>
+        </div>
+        {items.map((it, k) => (
+          <div key={it.index} className={`grid gap-2 ${k > 0 ? "border-t border-line pt-4" : ""}`}>
+            <span className="text-[11px] font-semibold uppercase tracking-wide text-ink-3">
+              {it.meta}
+            </span>
+            <div className="flex items-start gap-2">
+              <span className="flex shrink-0 gap-1.5">
+                {it.flags.map((f) => (
+                  <span key={f} className={`rounded-full px-2 py-px text-[10px] font-medium whitespace-nowrap ${CELL_FLAG_INFO[f].cls}`}>
+                    {CELL_FLAG_INFO[f].label}
+                  </span>
+                ))}
+              </span>
+              <p className="text-[12px] text-ink-2">{it.reason}</p>
+            </div>
+            <div className="grid gap-2">
+              {option(k, it, "suggestion", "Suggested edit", it.suggestion)}
+              {option(k, it, "mine", "Keep mine", it.current)}
+            </div>
+          </div>
+        ))}
+        <div className="flex items-center justify-end gap-4">
+          <button
+            type="button"
+            onClick={onBack}
+            disabled={busy}
+            className="text-[13px] font-medium text-ink-3 hover:text-ink disabled:opacity-50"
+          >
+            Back to editing
+          </button>
+          <button type="button" onClick={onContinue} disabled={busy} className="btn-primary">
+            Continue
+          </button>
+        </div>
+      </div>
     </div>
   );
 }

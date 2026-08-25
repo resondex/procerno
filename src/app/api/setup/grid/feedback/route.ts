@@ -35,6 +35,22 @@ const Body = z.discriminatedUnion("kind", [
     rejected: Situation,
     drawn: Situation,
   }),
+  // What the user chose in the prompt review overlay.
+  Base.extend({
+    kind: z.literal("cell_review_choice"),
+    items: z
+      .array(
+        z.object({
+          current: z.string().max(2000),
+          suggestion: z.string().max(2000),
+          flags: z.array(z.enum(["target", "branding", "unclear"])).min(1).max(3),
+          reason: z.string().max(400),
+          choice: z.enum(["suggestion", "mine"]),
+        })
+      )
+      .min(1)
+      .max(24),
+  }),
 ]);
 
 /** Append-only setup feedback from the client (what the user chose in the
@@ -56,9 +72,9 @@ export async function POST(req: Request) {
       audience: d.audience || null,
       kind: d.kind,
       payload:
-        d.kind === "review_choice"
-          ? { items: d.items }
-          : { rejected: d.rejected, drawn: d.drawn },
+        d.kind === "near_draw"
+          ? { rejected: d.rejected, drawn: d.drawn }
+          : { items: d.items },
     })
     .catch(() => {});
   return NextResponse.json({ ok: true });

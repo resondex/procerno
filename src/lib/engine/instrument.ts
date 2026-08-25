@@ -917,6 +917,193 @@ export async function reviewScenarios(input: {
   return verdicts;
 }
 
+/** Why a prompt edit was flagged: drift, brand design, or coherence. */
+export type CellFlag = "target" | "branding" | "unclear";
+
+export interface CellVerdict {
+  ok: boolean;
+  /** Every problem found, most serious first: "target" = asks a different
+   * question than the cell measures; "branding" = breaks the cell's
+   * blind/branded design; "unclear" = a reader couldn't tell what's being
+   * asked (typos and casual grammar are fine). Empty when ok. */
+  flags: CellFlag[];
+  /** One plain-language sentence addressed to the user; empty when ok. */
+  reason: string;
+  /** One edit fixing every flag while keeping the user's wording and
+   * register; repeats the input when ok. */
+  suggestion: string;
+}
+
+const CELL_REVIEW_SCHEMA = {
+  type: "object",
+  additionalProperties: false,
+  properties: {
+    verdicts: {
+      type: "array",
+      items: {
+        type: "object",
+        additionalProperties: false,
+        properties: {
+          target: { type: "boolean" },
+          branding: { type: "boolean" },
+          unclear: { type: "boolean" },
+          reason: { type: "string" },
+          suggestion: { type: "string" },
+        },
+        required: ["target", "branding", "unclear", "reason", "suggestion"],
+      },
+    },
+  },
+  required: ["verdicts"],
+} as const;
+
+export interface CellReviewCandidate {
+  /** The prompt as the user left it. */
+  text: string;
+  /** The last machine-offered wording, when there was one - the diff lets
+   * the reviewer tell a slip from a deliberate rewrite. */
+  original: string | null;
+  /** Stage label, what it asks, and its market-effect tag. */
+  stage: string;
+  hint: string | null;
+  tag: string | null;
+  situation: string | null;
+  situationDescription: string | null;
+  angle: string;
+  mode: string | null;
+}
+
+/**
+ * Quality check on user-edited or user-written prompts, run at the Prompts
+ * gate confirm. Judges against the cell's DESIGN - what the stage measures
+ * and its blind/branded rules - not against polish: prompts are supposed
+ * to read like real typing, so typos and casual grammar pass.
+ */
+export async function reviewCells(input: {
+  brand: string;
+  category: string;
+  competitors: string[];
+  audience: string | null;
+  candidates: CellReviewCandidate[];
+}): Promise<CellVerdict[]> {
+  const fp = (c: CellReviewCandidate) =>
+    [c.stage, c.situation ?? "", c.angle, c.text.trim(), c.original?.trim() ?? ""].join("|");
+  const key = cacheKey("cell_review1", [
+    input.brand, input.category, input.audience, input.competitors.join(","),
+    input.candidates.map(fp).join("~"),
+  ]);
+  const hit = await store.cacheGet(key, CACHE_TTL_MS);
+  if (hit) return JSON.parse(hit) as CellVerdict[];
+  const brandRule = (c: CellReviewCandidate) =>
+    c.angle === "generic"
+      ? c.tag === "judges"
+        ? `blind except the client brand: may name ${input.brand} (the stage is a verdict on it), never a rival`
+        : "blind: must not name any brand"
+      : c.angle === "defensive"
+        ? `must ask for alternatives to ${input.brand} by name`
+        : `about the rival ${c.angle} (comparison with ${input.brand}, or alternatives to ${c.angle})`;
+  const res = await openaiClient().chat.completions.create({
+    model: MODEL,
+    // A safety net, not a deep thinker - low effort roughly halves the
+    // wait at the gate confirm.
+    reasoning_effort: "low",
+    messages: [
+      {
+        role: "system",
+        content:
+          "Quality-check prompts a user edited in a research instrument " +
+          "that measures a brand's standing in AI assistant answers. Each " +
+          "prompt belongs to one CELL: a stage of the buying decision " +
+          "(what the prompt must ask about), sometimes a buying scenario " +
+          "(a circumstance woven in naturally), and a brand rule (blind " +
+          "or naming specific brands - the measurement design). Prompts " +
+          "are written the way real people type into a chat assistant: " +
+          "typos, lowercase, fragments, and casual grammar are GOOD - " +
+          "never flag them. For EACH candidate answer three yes/no " +
+          "questions, each judged on its own:\n" +
+          "- target: does it ask a materially different question than its " +
+          "cell measures - drifted to another stage's territory, or lost " +
+          "its scenario's circumstance entirely?\n" +
+          "- branding: does it break the cell's brand rule (stated per " +
+          "candidate) - naming a brand where it must be blind, or missing " +
+          "a brand it must name?\n" +
+          "- unclear: is it garbled or self-contradictory enough that a " +
+          "reader couldn't tell what's being asked? (Not typos, not " +
+          "informality - only genuine incoherence.)\n" +
+          "On everything else, accept: this is a safety net for edits " +
+          "that silently break the measurement, not a style gate. Some " +
+          "candidates note the wording the user started from ('edited " +
+          "from'). Use the diff: judge the new text on its own merits, " +
+          "never revert a deliberate change. When any answer is yes: " +
+          "reason is ONE sentence in plain language addressed to the " +
+          "user covering every yes, and suggestion is the SMALLEST edit " +
+          "that fixes every yes while keeping the user's own words, " +
+          "register, and length - as typed by a real person, never an em " +
+          "dash, never the tilde character. When all three are no: " +
+          "reason is an empty string and suggestion repeats the " +
+          "candidate verbatim. Return verdicts in the candidates' order, " +
+          "one per candidate.",
+      },
+      {
+        role: "user",
+        content:
+          `Client brand: ${input.brand}\nCategory: ${input.category}\n` +
+          `Audience: ${input.audience ?? "unknown"}\nRivals: ${input.competitors.join(", ") || "(none)"}\n` +
+          `Candidates to check:\n${input.candidates
+            .map((c, i) => {
+              const lines = [
+                `${i + 1}. "${c.text}"`,
+                `   stage: ${c.stage}${c.hint ? ` - ${c.hint}` : ""}`,
+                `   brand rule: ${brandRule(c)}`,
+              ];
+              if (c.situation) {
+                lines.push(
+                  `   scenario: ${c.situation}${c.situationDescription ? ` - ${c.situationDescription}` : ""}`
+                );
+              }
+              if (c.mode) lines.push(`   asked by buyers in: ${c.mode}`);
+              if (c.original && c.original.trim() !== c.text.trim()) {
+                lines.push(`   (edited from: "${c.original}")`);
+              }
+              return lines.join("\n");
+            })
+            .join("\n")}`,
+      },
+    ],
+    response_format: {
+      type: "json_schema",
+      json_schema: { name: "cell_review", strict: true, schema: CELL_REVIEW_SCHEMA },
+    },
+  });
+  const parsed = JSON.parse(res.choices[0]?.message?.content ?? "{}") as {
+    verdicts: {
+      target: boolean; branding: boolean; unclear: boolean;
+      reason: string; suggestion: string;
+    }[];
+  };
+  // Flags are derived, most serious first - the model only answers the
+  // three questions. A missing or malformed verdict never blocks the user.
+  const verdicts: CellVerdict[] = input.candidates.map((c, i) => {
+    const v = (parsed.verdicts ?? [])[i];
+    if (!v || typeof v.target !== "boolean" || !v.suggestion?.trim()) {
+      return { ok: true, flags: [], reason: "", suggestion: c.text };
+    }
+    const flags: CellFlag[] = [
+      ...(v.target ? ["target" as const] : []),
+      ...(v.branding ? ["branding" as const] : []),
+      ...(v.unclear ? ["unclear" as const] : []),
+    ];
+    return {
+      ok: flags.length === 0,
+      flags,
+      reason: flags.length === 0 ? "" : humanize(v.reason ?? ""),
+      suggestion: flags.length === 0 ? c.text : humanize(v.suggestion),
+    };
+  });
+  await store.cacheSet(key, JSON.stringify(verdicts));
+  return verdicts;
+}
+
 /* -------------------------------- cells --------------------------------- */
 
 const CELL_WRITER_SYSTEM =
