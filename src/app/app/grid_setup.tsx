@@ -1108,7 +1108,7 @@ function HowItWorks({ children }: { children: ReactNode }) {
       >
         {open ? "▾" : "▸"} How this works
       </button>
-      {open && <div className="grid gap-2 text-[12px] text-ink-3 max-w-2xl">{children}</div>}
+      {open && <div className="grid gap-2 text-[12px] text-ink-3">{children}</div>}
     </div>
   );
 }
