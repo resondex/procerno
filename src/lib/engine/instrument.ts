@@ -27,6 +27,10 @@ const MODEL = process.env.SUGGEST_MODEL ?? "gpt-5-mini";
  * is for the high-volume mechanical calls (cells, phrasings, variants). */
 const READ_MODEL = process.env.READ_MODEL ?? "gpt-5";
 const CACHE_TTL_MS = 183 * 24 * 3600 * 1000;
+/** Versions the WRITING STYLE of cells and phrasings independently of the
+ * instrument rules - a style change regenerates prompt text without
+ * discarding scenario reads. */
+const STYLE_VERSION = "s2";
 // Version the cache: composer-rule or prompt-style changes must not serve
 // grids built under old rules.
 const INSTRUMENT_VERSION = "g7";
@@ -996,6 +1000,7 @@ export async function generateGrid(input: {
   }
 
   const key = cacheKey("grid", [
+    STYLE_VERSION,
     input.brand, input.category, rivals.join(","), input.audience,
     JSON.stringify(input.base),
     JSON.stringify(input.scenarios),
@@ -1032,6 +1037,13 @@ export async function generateGrid(input: {
           "into a chat assistant - varied length and register, some lowercase " +
           "and terse, some with backstory; never survey-speak, never a " +
           "requirements list.\n" +
+          "Typing, not prose: real asks are often short and get to the " +
+          "question fast; fragments happen; details are specific but " +
+          "unpolished. NEVER ad-copy patterns - no parallel lists of " +
+          "three, no balanced drama ('X is impossible and Y is a " +
+          "nightmare'), no polished metaphors, no rhetorical closers " +
+          "('get everyone on the same page'). If it would read well on a " +
+          "landing page, rewrite it until it reads like a chat message.\n" +
           "Rules:\n" +
           "- angle=generic: never name any brand - blind prompts are the " +
           "measurement - UNLESS the cell's stage guidance says the buyer " +
@@ -1186,7 +1198,7 @@ export async function generatePhrasings(input: {
   if (want === 0 || input.cells.length === 0) return input.cells.map(() => []);
   const rivals = input.competitors.slice(0, 4);
   const key = cacheKey("phrasings", [
-    PHRASINGS_VERSION, input.brand, rivals.join(","), input.audience, String(input.count),
+    PHRASINGS_VERSION, STYLE_VERSION, input.brand, rivals.join(","), input.audience, String(input.count),
     input.cells.map((c) => `${c.situation ?? ""}|${c.mode ?? ""}|${c.text}`).join("\n"),
   ]);
   const hit = input.force ? null : await store.cacheGet(key, CACHE_TTL_MS);
@@ -1244,7 +1256,10 @@ export async function generatePhrasings(input: {
             "- No verbatim repeats, no trivial reorderings; each paraphrase " +
             "should be something a different person would plausibly type.\n" +
             "- Punctuation people actually type: never an em dash, never the " +
-            "tilde character - write 'about 10', not '~10'.\n" +
+            "tilde character - write 'about 10', not '~10'.\n" +            "- Typing, not prose: fragments happen, specifics are unpolished; " +
+            "never ad-copy patterns (parallel lists of three, balanced " +
+            "drama, rhetorical closers). If it would read well on a landing " +
+            "page, it is wrong.\n" +
             "- A seed whose situation matches a differing buyer journey is " +
             "asked by that kind of buyer: every asker and register must fit. " +
             "A seed marked reach=<scenarios> is asked only by buyers in those " +
@@ -1341,7 +1356,7 @@ function jaccard(a: Set<string>, b: Set<string>): number {
 
 /** Real people type hyphens and straight quotes; model output leans on em
  * dashes and curly quotes, which reads as machine-written to the engines. */
-function humanize(t: string): string {
+export function humanize(t: string): string {
   return t
     .replace(/\s*[—–]\s*/g, " - ")
     .replace(/~\s*(?=\d)/g, "about ")

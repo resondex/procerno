@@ -9,7 +9,7 @@ import {
 } from "@/lib/auth";
 import { generatePromptBattery } from "@/lib/engine/prompts";
 import { getReasonTaxonomy, seedDictionary } from "@/lib/engine/suggest";
-import { namesAnyBrand } from "@/lib/engine/instrument";
+import { humanize, namesAnyBrand } from "@/lib/engine/instrument";
 import { apiKeyConfigured, availableEngines, getEngine } from "@/lib/engine/providers";
 
 const createSchema = z.object({
@@ -166,7 +166,9 @@ export async function POST(req: Request) {
       project.id,
       grid.cells.map((c) => ({
         stage: c.stage, layer: c.layer, situation: c.situation, angle: c.angle,
-        mode: c.mode ?? null, text: c.text,
+        // House punctuation on the way in - covers text frozen in drafts
+        // that predate the humanize coverage.
+        mode: c.mode ?? null, text: humanize(c.text),
       }))
     );
     await store.insertPrompts(
@@ -174,7 +176,7 @@ export async function POST(req: Request) {
       grid.cells.flatMap((c, i) =>
         [{ text: c.text, asker: null as string | null }, ...(c.phrasings ?? []).map((p) => ({ text: p.text, asker: (p.asker || null) as string | null }))].map(
           ({ text, asker }) => ({
-            text,
+            text: humanize(text),
             theme: namesAnyBrand(text, brand, competitors) ? "branded" : c.stage,
             intentId: intents[i]?.id ?? null,
             asker,

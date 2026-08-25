@@ -118,9 +118,20 @@ export interface GridState {
   cells: GridCellUi[];
 }
 
+/** House punctuation for prompt text - mirror of the engine's humanize().
+ * Applied on draft load so text frozen in old drafts complies too. */
+function scrubPrompt(t: string): string {
+  return t
+    .replace(/\s*[\u2014\u2013]\s*/g, " - ")
+    .replace(/~\s*(?=\d)/g, "about ")
+    .replace(/~/g, "")
+    .replace(/  +/g, " ");
+}
+
 /** Drafts from before the participation mask (mode-era or phrasing-string
  * era) don't carry mask columns; they restart at compose rather than risk
- * a half-translated grid. */
+ * a half-translated grid. Prompt text is scrubbed to house punctuation on
+ * the way in. */
 export function normalizeGrid(g: GridState | null): GridState | null {
   if (!g) return null;
   const legacy =
@@ -128,7 +139,14 @@ export function normalizeGrid(g: GridState | null): GridState | null {
     g.stages.length === 0 ||
     (g.stages[0] as { columns?: unknown }).columns === undefined;
   if (legacy) return null;
-  return g;
+  return {
+    ...g,
+    cells: g.cells.map((c) => ({
+      ...c,
+      text: scrubPrompt(c.text),
+      phrasings: c.phrasings.map((ph) => ({ ...ph, text: scrubPrompt(ph.text) })),
+    })),
+  };
 }
 
 /** The editable scenario table; derived from the active list when absent. */
@@ -1172,7 +1190,7 @@ export function CoverageGate({
             : `+ ${hidden.length} not-recommended stage${hidden.length === 1 ? "" : "s"} available (${hidden.map((s) => s.label).join(", ")})`}
         </button>
       )}
-      <p className="text-[12px] text-ink-3 max-w-3xl">
+      <p className="text-[12px] text-ink-3">
         Each scenario walks the stages its buyer actually walks - a missing
         dot is a question that buyer never asks, and a cell that never costs
         anything. Keep a not-recommended stage only if your judgement says
