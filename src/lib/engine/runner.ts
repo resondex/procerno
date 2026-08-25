@@ -8,6 +8,7 @@ import {
 import { analyzePromptHealth } from "./prompt_health";
 import { classifyNonBrands } from "./suggest";
 import { getDictionarySuggestions } from "./dict_suggest";
+import { batchableEngine, hasOpenBatches, pollRunBatches } from "./batch";
 
 // Sized when a run sampled one engine from one vendor. A six-engine panel
 // spreads across four vendors, so 4 global slots left each vendor running
@@ -31,7 +32,14 @@ interface Task {
   model: string;
 }
 
-export type ChunkOutcome = "complete" | "continue" | "failed" | "finalize";
+export type ChunkOutcome =
+  | "complete"
+  | "continue"
+  | "failed"
+  | "finalize"
+  /** Batch-pipeline run with vendor batches still out: nothing to do live
+   * right now; the batch poller resumes the run. */
+  | "waiting";
 
 /**
  * Process as much of a run as fits in budgetMs, then report whether work
@@ -63,7 +71,7 @@ export async function driveRunChunk(
 
   // Engines whose vendor key is missing would fail every task; drop them and
   // measure what we can rather than failing the whole run.
-  const engines = (run.models.length > 0 ? run.models : [run.model]).filter(
+  let engines = (run.models.length > 0 ? run.models : [run.model]).filter(
     (m) => engineAvailable(m)
   );
   if (engines.length === 0) {
@@ -73,6 +81,14 @@ export async function driveRunChunk(
       `no API key configured for any requested engine (${run.models.join(", ")})`
     );
     return "failed";
+  }
+
+  // Batch-pipeline runs: while vendor batches are out, the live driver only
+  // collects the engines batches can't cover; the mop-up (any batch lines
+  // that failed) happens live once every batch is terminal.
+  const batchesOpen = run.pipeline === "batch" && (await hasOpenBatches(runId));
+  if (batchesOpen) {
+    engines = engines.filter((m) => !batchableEngine(m));
   }
 
   const doneKeys = new Set(
@@ -97,7 +113,8 @@ export async function driveRunChunk(
     }
   }
 
-  if (pending.length === 0) return "finalize";
+  if (pending.length === 0) return batchesOpen ? "waiting" : "finalize";
+  if (engines.length === 0) return "waiting";
 
   const deadline = Date.now() + budgetMs;
   let cursor = 0;
@@ -153,6 +170,7 @@ export async function driveRunChunk(
   }
 
   const remaining = pending.length - inserted;
+  if (remaining === 0 && batchesOpen) return "waiting";
   if (remaining === 0) {
     // Collection is done, but the run is NOT complete: the dictionary and
     // the health check still have to land. They used to run here, in whatever
@@ -162,6 +180,7 @@ export async function driveRunChunk(
     return "finalize";
   }
   if (inserted > 0) return "continue";
+  if (batchesOpen) return "waiting";
   // A full chunk with zero progress: either every request errors (bad key,
   // bad model) or only permanently-failing tasks remain.
   const doneCount = total - remaining;
@@ -315,7 +334,12 @@ export async function finalizeRun(runId: string): Promise<void> {
 export function runInBackground(runId: string): Promise<void> {
   return (async () => {
     let outcome = await driveRunChunk(runId, 7 * 24 * 3600 * 1000);
-    while (outcome === "continue") {
+    while (outcome === "continue" || outcome === "waiting") {
+      if (outcome === "waiting") {
+        // Local driver doubles as the batch poller.
+        const { open } = await pollRunBatches(runId);
+        if (open > 0) await new Promise((r) => setTimeout(r, 60_000));
+      }
       // loop — retries tasks that failed transiently
       outcome = await driveRunChunk(runId, 7 * 24 * 3600 * 1000);
     }
@@ -351,6 +375,9 @@ export async function driveAndChain(
       } catch {
         await finalizeRun(runId);
       }
+    } else if (outcome === "waiting") {
+      // Vendor batches are out; the hourly batch cron resumes this run.
+      return;
     } else if (outcome === "continue") {
       // Server-to-server hop carries no session cookies; the continue route
       // accepts the cron secret as chain credentials.

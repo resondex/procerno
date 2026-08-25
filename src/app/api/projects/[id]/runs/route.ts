@@ -5,6 +5,7 @@ import { store } from "@/lib/store";
 import { requireAuth, requireProject } from "@/lib/auth";
 import { apiKeyConfigured, engineAvailable } from "@/lib/engine/providers";
 import { driveAndChain, runInBackground } from "@/lib/engine/runner";
+import { batchableEngine, submitRunBatches } from "@/lib/engine/batch";
 
 // Vercel: runs execute as a chain of budgeted chunks — each invocation
 // processes what fits under maxDuration, then hands off via /continue.
@@ -59,12 +60,29 @@ export async function POST(
       { status: 503 }
     );
   }
+  // Enterprise customers take the batch pipeline (50% collection cost) on
+  // user-triggered runs too, first run included; everyone else runs live.
+  // Dev mode and staff read as enterprise elsewhere, so the check is the
+  // stored plan, not getPlanFor's fallbacks.
+  const paidPlan = auth.userId ? await store.getPlan(auth.userId) : "free";
+  const pipeline =
+    paidPlan === "enterprise" && models.some(batchableEngine) ? "batch" : "live";
   const run = await store.createRun({
     projectId: id,
     model: models[0],
     models,
     repeats: parsed.data.repeats,
+    pipeline,
   });
+  if (pipeline === "batch") {
+    try {
+      await submitRunBatches(run.id);
+    } catch (err) {
+      // Submission failing must not strand the run: the live driver covers
+      // everything the batches would have.
+      console.error(`batch submission failed for run ${run.id}:`, err);
+    }
+  }
   if (process.env.VERCEL) {
     waitUntil(driveAndChain(run.id, new URL(req.url).origin));
   } else {

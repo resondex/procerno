@@ -3,6 +3,7 @@ import { waitUntil } from "@vercel/functions";
 import { store } from "@/lib/store";
 import { apiKeyConfigured } from "@/lib/engine/providers";
 import { driveAndChain, runInBackground } from "@/lib/engine/runner";
+import { batchableEngine, hasOpenBatches, pollRunBatches, submitRunBatches } from "@/lib/engine/batch";
 
 export const maxDuration = 300;
 
@@ -41,12 +42,25 @@ export async function GET(req: Request) {
 
   const origin = new URL(req.url).origin;
   const launched: string[] = [];
+  const polled: string[] = [];
   const projects = await store.listProjects();
 
   for (const project of projects) {
+    const runs = await store.listRuns(project.id);
+    // Batch-pipeline runs waiting on vendor batches: poll, ingest what's
+    // ready, and let the driver mop up / finalize.
+    for (const r of runs) {
+      if (r.status !== "running" || r.pipeline !== "batch") continue;
+      if (!(await hasOpenBatches(r.id))) continue;
+      polled.push(r.id);
+      if (process.env.VERCEL) {
+        waitUntil(pollRunBatches(r.id).then(() => driveAndChain(r.id, origin)));
+      } else {
+        void pollRunBatches(r.id).then(() => runInBackground(r.id));
+      }
+    }
     const intervalDays = INTERVAL_DAYS[project.schedule];
     if (!intervalDays) continue;
-    const runs = await store.listRuns(project.id);
     if (runs.some((r) => r.status === "pending" || r.status === "running")) {
       continue;
     }
@@ -59,12 +73,23 @@ export async function GET(req: Request) {
     // consistency is what makes the trend line a trend.
     const engineSet =
       project.engine_set.length > 0 ? project.engine_set : [CRON_MODEL];
+    // Scheduled runs take the batch pipeline whenever any engine supports
+    // it - a scheduled job trades latency for the 50% collection discount.
+    const pipeline = engineSet.some(batchableEngine) ? "batch" : "live";
     const run = await store.createRun({
       projectId: project.id,
       model: engineSet[0],
       models: engineSet,
       repeats: CRON_REPEATS,
+      pipeline,
     });
+    if (pipeline === "batch") {
+      try {
+        await submitRunBatches(run.id);
+      } catch (err) {
+        console.error(`batch submission failed for run ${run.id}:`, err);
+      }
+    }
     if (process.env.VERCEL) {
       waitUntil(driveAndChain(run.id, origin));
     } else {
@@ -73,5 +98,5 @@ export async function GET(req: Request) {
     launched.push(project.name);
   }
 
-  return NextResponse.json({ ok: true, launched });
+  return NextResponse.json({ ok: true, launched, polled });
 }

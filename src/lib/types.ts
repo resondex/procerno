@@ -177,8 +177,26 @@ export interface Run {
   repeats: number;
   status: RunStatus;
   error: string | null;
+  /** "live" collects via the streaming drivers; "batch" submits batchable
+   * engines to the vendors' 50%-discount batch APIs (scheduled runs, and
+   * enterprise first runs) with live mop-up for the rest. */
+  pipeline: "live" | "batch";
   started_at: string | null;
   completed_at: string | null;
+  created_at: string;
+}
+
+/** One vendor batch job belonging to a batch-pipeline run. */
+export interface RunBatch {
+  id: string;
+  run_id: string;
+  vendor: "openai" | "anthropic";
+  /** Provider endpoint the batch targets ("messages" for Anthropic). */
+  endpoint: string;
+  provider_batch_id: string;
+  status: "submitted" | "ingested" | "failed";
+  /** custom_id "i<n>" resolves to manifest[n]. */
+  manifest: { promptId: string; repeatIdx: number; engine: string }[];
   created_at: string;
 }
 
@@ -691,7 +709,17 @@ export interface Store {
     model: string;
     models?: string[];
     repeats: number;
+    pipeline?: "live" | "batch";
   }): Promise<Run>;
+  insertRunBatch(input: {
+    runId: string;
+    vendor: RunBatch["vendor"];
+    endpoint: string;
+    providerBatchId: string;
+    manifest: RunBatch["manifest"];
+  }): Promise<RunBatch>;
+  listRunBatches(runId: string): Promise<RunBatch[]>;
+  updateRunBatchStatus(id: string, status: RunBatch["status"]): Promise<void>;
   getRun(id: string): Promise<Run | null>;
   listRuns(projectId: string): Promise<Run[]>;
   updateRunStatus(

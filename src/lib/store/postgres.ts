@@ -77,6 +77,17 @@ function ensureSchema(): Promise<void> {
       )`;
       await sql`CREATE INDEX IF NOT EXISTS idx_intents_project ON intents (project_id)`;
       await sql`ALTER TABLE intents ADD COLUMN IF NOT EXISTS mode TEXT`;
+      await sql`ALTER TABLE runs ADD COLUMN IF NOT EXISTS pipeline TEXT NOT NULL DEFAULT 'live'`;
+      await sql`CREATE TABLE IF NOT EXISTS run_batches (
+        id TEXT PRIMARY KEY,
+        run_id TEXT NOT NULL,
+        vendor TEXT NOT NULL,
+        endpoint TEXT NOT NULL,
+        provider_batch_id TEXT NOT NULL,
+        status TEXT NOT NULL DEFAULT 'submitted',
+        manifest TEXT NOT NULL,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+      )`;
       await sql`CREATE TABLE IF NOT EXISTS setup_feedback (
         id TEXT PRIMARY KEY,
         created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
@@ -334,6 +345,7 @@ function rowToRun(r: Record<string, unknown>): Run {
     })(),
     repeats: r.repeats as number,
     status: r.status as Run["status"],
+    pipeline: ((r.pipeline as Run["pipeline"]) ?? "live"),
     error: (r.error as string | null) ?? null,
     started_at: iso(r.started_at),
     completed_at: iso(r.completed_at),
@@ -624,6 +636,34 @@ export const pgStore: Store = {
     })) as HumanCode[];
   },
 
+  async insertRunBatch(input) {
+    const sql = await db();
+    const id = crypto.randomUUID();
+    await sql`INSERT INTO run_batches (id, run_id, vendor, endpoint, provider_batch_id, manifest)
+      VALUES (${id}, ${input.runId}, ${input.vendor}, ${input.endpoint}, ${input.providerBatchId}, ${JSON.stringify(input.manifest)})`;
+    return (await this.listRunBatches(input.runId)).find((b) => b.id === id)!;
+  },
+
+  async listRunBatches(runId) {
+    const sql = await db();
+    const rows = await sql`SELECT * FROM run_batches WHERE run_id = ${runId} ORDER BY created_at`;
+    return rows.map((r) => ({
+      id: r.id as string,
+      run_id: r.run_id as string,
+      vendor: r.vendor as "openai" | "anthropic",
+      endpoint: r.endpoint as string,
+      provider_batch_id: r.provider_batch_id as string,
+      status: r.status as "submitted" | "ingested" | "failed",
+      manifest: JSON.parse((r.manifest as string) ?? "[]"),
+      created_at: String(r.created_at),
+    }));
+  },
+
+  async updateRunBatchStatus(id, status) {
+    const sql = await db();
+    await sql`UPDATE run_batches SET status = ${status} WHERE id = ${id}`;
+  },
+
   async feedbackAdd(e) {
     const sql = await db();
     await sql`INSERT INTO setup_feedback (id, email, category, audience, kind, payload)
@@ -793,8 +833,8 @@ export const pgStore: Store = {
     const id = crypto.randomUUID();
     const models =
       input.models && input.models.length > 0 ? input.models : [input.model];
-    await sql`INSERT INTO runs (id, project_id, model, models, repeats, status)
-      VALUES (${id}, ${input.projectId}, ${models[0]}, ${JSON.stringify(models)}, ${input.repeats}, 'pending')`;
+    await sql`INSERT INTO runs (id, project_id, model, models, repeats, status, pipeline)
+      VALUES (${id}, ${input.projectId}, ${models[0]}, ${JSON.stringify(models)}, ${input.repeats}, 'pending', ${input.pipeline ?? "live"})`;
     return (await this.getRun(id))!;
   },
 

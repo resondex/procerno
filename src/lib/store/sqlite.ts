@@ -214,6 +214,21 @@ function createDb(): Database.Database {
     text TEXT NOT NULL
   )`);
   db.exec("CREATE INDEX IF NOT EXISTS idx_intents_project ON intents (project_id)");
+  try {
+    db.exec("ALTER TABLE runs ADD COLUMN pipeline TEXT NOT NULL DEFAULT 'live'");
+  } catch {
+    /* exists */
+  }
+  db.exec(`CREATE TABLE IF NOT EXISTS run_batches (
+    id TEXT PRIMARY KEY,
+    run_id TEXT NOT NULL,
+    vendor TEXT NOT NULL,
+    endpoint TEXT NOT NULL,
+    provider_batch_id TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'submitted',
+    manifest TEXT NOT NULL,
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+  )`);
   db.exec(`CREATE TABLE IF NOT EXISTS setup_feedback (
     id TEXT PRIMARY KEY,
     created_at TEXT NOT NULL DEFAULT (datetime('now')),
@@ -378,6 +393,7 @@ function parseRun(row: Record<string, unknown>): Run {
   return {
     ...(row as unknown as Run),
     models: models.length > 0 ? models : [row.model as string],
+    pipeline: (row.pipeline as Run["pipeline"]) ?? "live",
   };
 }
 
@@ -745,6 +761,32 @@ export const sqliteStore: Store = {
       .run(key, value);
   },
 
+  async insertRunBatch(input) {
+    const id = crypto.randomUUID();
+    getDb()
+      .prepare(
+        `INSERT INTO run_batches (id, run_id, vendor, endpoint, provider_batch_id, manifest)
+         VALUES (?, ?, ?, ?, ?, ?)`
+      )
+      .run(id, input.runId, input.vendor, input.endpoint, input.providerBatchId, JSON.stringify(input.manifest));
+    return (await this.listRunBatches(input.runId)).find((b) => b.id === id)!;
+  },
+
+  async listRunBatches(runId) {
+    return (
+      getDb()
+        .prepare("SELECT * FROM run_batches WHERE run_id = ? ORDER BY created_at")
+        .all(runId) as Record<string, unknown>[]
+    ).map((r) => ({
+      ...(r as unknown as import("../types").RunBatch),
+      manifest: JSON.parse((r.manifest as string) ?? "[]"),
+    }));
+  },
+
+  async updateRunBatchStatus(id, status) {
+    getDb().prepare("UPDATE run_batches SET status = ? WHERE id = ?").run(status, id);
+  },
+
   async feedbackAdd(e) {
     getDb()
       .prepare(
@@ -998,8 +1040,8 @@ export const sqliteStore: Store = {
     const id = crypto.randomUUID();
     getDb()
       .prepare(
-        `INSERT INTO runs (id, project_id, model, models, repeats, status)
-         VALUES (?, ?, ?, ?, ?, 'pending')`
+        `INSERT INTO runs (id, project_id, model, models, repeats, status, pipeline)
+         VALUES (?, ?, ?, ?, ?, 'pending', ?)`
       )
       .run(
         id,
@@ -1008,7 +1050,8 @@ export const sqliteStore: Store = {
         JSON.stringify(
           input.models && input.models.length > 0 ? input.models : [input.model]
         ),
-        input.repeats
+        input.repeats,
+        input.pipeline ?? "live"
       );
     return (await this.getRun(id))!;
   },
