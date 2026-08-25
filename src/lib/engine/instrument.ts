@@ -1002,7 +1002,10 @@ export async function generateGrid(input: {
     input.stages.map((s) => `${s.key}:${s.columns.join("+")}`).join(","),
   ]);
   const hit = await store.cacheGet(key, CACHE_TTL_MS);
-  if (hit) return JSON.parse(hit) as GridCell[];
+  if (hit) {
+    const cached = JSON.parse(hit) as GridCell[];
+    return cached.map((c) => ({ ...c, text: humanize(c.text) }));
+  }
 
   const journeyBySituation = new Map(
     input.scenarios.map((s) => [s.label, journeyNote(input.base, s)] as const)
@@ -1045,6 +1048,8 @@ export async function generateGrid(input: {
           "prompt in that buyer's register.\n" +
           "- reach=<scenarios>: this single cell is asked by buyers in those " +
           "scenarios only - voice it for them.\n" +
+          "- Punctuation people actually type: never an em dash, never the " +
+          "tilde character - write 'about 10', not '~10'.\n" +
           "Return one cell object per plan line, same stage/situation/angle " +
           "values, in order.",
       },
@@ -1086,7 +1091,7 @@ export async function generateGrid(input: {
       situation,
       angle: c.angle,
       mode: scopeByPlan.get(idx) ?? null,
-      text: c.text.trim(),
+      text: humanize(c.text.trim()),
     });
   });
   await store.cacheSet(key, JSON.stringify(cells));
@@ -1185,7 +1190,10 @@ export async function generatePhrasings(input: {
     input.cells.map((c) => `${c.situation ?? ""}|${c.mode ?? ""}|${c.text}`).join("\n"),
   ]);
   const hit = input.force ? null : await store.cacheGet(key, CACHE_TTL_MS);
-  if (hit) return JSON.parse(hit) as Phrasing[][];
+  if (hit) {
+    const cached = JSON.parse(hit) as Phrasing[][];
+    return cached.map((cell) => cell.map((ph) => ({ ...ph, text: humanize(ph.text) })));
+  }
 
   const rivalsList = rivals;
   const journeyLines = input.scenarios
@@ -1235,6 +1243,8 @@ export async function generatePhrasings(input: {
             "add a new constraint the seed does not have.\n" +
             "- No verbatim repeats, no trivial reorderings; each paraphrase " +
             "should be something a different person would plausibly type.\n" +
+            "- Punctuation people actually type: never an em dash, never the " +
+            "tilde character - write 'about 10', not '~10'.\n" +
             "- A seed whose situation matches a differing buyer journey is " +
             "asked by that kind of buyer: every asker and register must fit. " +
             "A seed marked reach=<scenarios> is asked only by buyers in those " +
@@ -1334,9 +1344,13 @@ function jaccard(a: Set<string>, b: Set<string>): number {
 function humanize(t: string): string {
   return t
     .replace(/\s*[—–]\s*/g, " - ")
+    .replace(/~\s*(?=\d)/g, "about ")
+    .replace(/~/g, "")
     .replace(/[‘’]/g, "'")
     .replace(/[“”]/g, '"')
-    .replace(/…/g, "...");
+    .replace(/…/g, "...")
+    .replace(/  +/g, " ")
+    .trim();
 }
 
 /* ------------------------------ orchestrator ---------------------------- */

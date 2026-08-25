@@ -1022,6 +1022,7 @@ export function CoverageGate({
   busy: boolean;
 }) {
   const [showSkipped, setShowSkipped] = useState(false);
+  const folds = useFolds();
   /** Instant hover card for stage explanations - the native title tooltip
    * sits behind a ~1s OS delay, too slow for scanning a map. */
   const [tip, setTip] = useState<{ x: number; y: number; hint: string; verdict: string } | null>(null);
@@ -1135,13 +1136,26 @@ export function CoverageGate({
                   (s.recommended || kept.has(s.key) || showSkipped)
               );
               if (stages.length === 0) return null;
+              const open = folds.open(layer);
               return [
                 <tr key={`${layer}-head`}>
-                  <td colSpan={1 + active.length} className="px-3 pt-2 pb-1 text-[10px] font-semibold uppercase tracking-wide text-primary border-t border-line">
-                    {layer}
+                  <td colSpan={1 + active.length} className="border-t border-line">
+                    <button
+                      type="button"
+                      onClick={() => folds.toggle(layer)}
+                      className="flex items-center gap-1.5 px-3 pt-2 pb-1 text-[10px] font-semibold uppercase tracking-wide text-primary w-full text-left"
+                    >
+                      <span aria-hidden="true" className="text-ink-3">{open ? "▾" : "▸"}</span>
+                      {layer}
+                      {!open && (
+                        <span className="font-normal normal-case tracking-normal text-ink-3">
+                          · {stages.length} stage{stages.length === 1 ? "" : "s"}
+                        </span>
+                      )}
+                    </button>
                   </td>
                 </tr>,
-                ...stages.map(renderRow),
+                ...(open ? stages.map(renderRow) : []),
               ];
             })}
           </tbody>
@@ -1179,7 +1193,69 @@ export function CoverageGate({
   );
 }
 
-/** Gate 2: one seed prompt per cell, grouped by layer. */
+/** A cell's meta without its stage - for rows already sitting under a
+ * stage header. */
+function cellSubMeta(c: GridCellUi): string {
+  return (
+    [
+      c.situation,
+      c.angle !== "generic"
+        ? c.angle === "defensive" ? "your churn moment" : `vs ${c.angle}`
+        : null,
+      c.mode ? `asked by: ${c.mode}` : null,
+    ]
+      .filter(Boolean)
+      .join(" · ") || "all buyers"
+  );
+}
+
+/** Collapsible section header - a chevron, a title, and a count that shows
+ * while collapsed. */
+function FoldHeader({
+  open, onToggle, title, count, kind,
+}: {
+  open: boolean;
+  onToggle: () => void;
+  title: string;
+  count: string;
+  kind: "layer" | "stage";
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onToggle}
+      className={`flex items-center gap-1.5 text-left w-fit ${
+        kind === "layer"
+          ? "text-[11px] font-semibold uppercase tracking-wide text-primary"
+          : "text-[12px] font-medium text-ink"
+      }`}
+    >
+      <span aria-hidden="true" className="text-ink-3">{open ? "▾" : "▸"}</span>
+      {title}
+      {!open && (
+        <span className="text-[11px] font-normal normal-case tracking-normal text-ink-3">
+          · {count}
+        </span>
+      )}
+    </button>
+  );
+}
+
+function useFolds() {
+  const [closed, setClosed] = useState<ReadonlySet<string>>(new Set());
+  return {
+    open: (k: string) => !closed.has(k),
+    toggle: (k: string) =>
+      setClosed((prev) => {
+        const next = new Set(prev);
+        if (next.has(k)) next.delete(k);
+        else next.add(k);
+        return next;
+      }),
+  };
+}
+
+/** Gate 2: one seed prompt per cell - layers and stages both fold. */
 export function CellsGate({
   state, setState, brandNames,
 }: {
@@ -1187,20 +1263,35 @@ export function CellsGate({
   setState: (s: GridState) => void;
   brandNames: string[];
 }) {
+  const folds = useFolds();
   return (
     <div className="grid gap-4">
       {LAYERS.map((layer) => {
         const cells = state.cells.map((c, i) => ({ ...c, i })).filter((c) => c.layer === layer);
         if (cells.length === 0) return null;
+        const lk = `l:${layer}`;
+        const stages = [...new Set(cells.map((c) => c.stage))];
         return (
           <div key={layer} className="grid gap-1.5">
-            <span className="text-[11px] font-semibold uppercase tracking-wide text-primary">
-              {layer}
-            </span>
-            {cells.map((c) => (
+            <FoldHeader
+              open={folds.open(lk)} onToggle={() => folds.toggle(lk)} kind="layer"
+              title={layer} count={`${cells.length} cell${cells.length === 1 ? "" : "s"}`}
+            />
+            {folds.open(lk) &&
+              stages.map((stage) => {
+                const scells = cells.filter((c) => c.stage === stage);
+                const sk = `s:${layer}|${stage}`;
+                return (
+                  <div key={stage} className="grid gap-1.5 pl-4">
+                    <FoldHeader
+                      open={folds.open(sk)} onToggle={() => folds.toggle(sk)} kind="stage"
+                      title={stageOf(state, stage)?.label ?? stage}
+                      count={`${scells.length} cell${scells.length === 1 ? "" : "s"}`}
+                    />
+                    {folds.open(sk) && scells.map((c) => (
               <div key={c.i} className="flex items-start gap-2">
-                <span className="w-48 shrink-0 pt-1.5 text-[11px] leading-tight text-ink-3">
-                  {cellMeta(state, c)}
+                <span className="w-44 shrink-0 pt-1.5 text-[11px] leading-tight text-ink-3">
+                  {cellSubMeta(c)}
                   <span className={`ml-1 ${namesAny(c.text, brandNames) ? "text-warning" : "text-primary"}`}>
                     · {namesAny(c.text, brandNames) ? "branded" : "blind"}
                   </span>
@@ -1229,7 +1320,10 @@ export function CellsGate({
                   ×
                 </button>
               </div>
-            ))}
+                    ))}
+                  </div>
+                );
+              })}
           </div>
         );
       })}
@@ -1245,25 +1339,50 @@ export function PhrasingsGate({
   setState: (s: GridState) => void;
 }) {
   const [openCell, setOpenCell] = useState<number | null>(null);
+  const folds = useFolds();
+  const indexed = state.cells.map((c, i) => ({ c, i }));
   return (
     <div className="grid gap-3">
       <p className="text-[12px] text-ink-3">
         Each prompt is asked {PHRASING_COUNT} ways - the same question in the
         wordings real buyers use. Open a cell to edit or remove any of them.
       </p>
-      <div className="grid gap-1.5">
-        {state.cells.map((c, i) => {
-          const open = openCell === i;
-          const n = 1 + c.phrasings.filter((p) => p.text.trim()).length;
-          return (
+      {LAYERS.map((layer) => {
+        const lcells = indexed.filter(({ c }) => c.layer === layer);
+        if (lcells.length === 0) return null;
+        const lk = `l:${layer}`;
+        const stages = [...new Set(lcells.map(({ c }) => c.stage))];
+        return (
+          <div key={layer} className="grid gap-1.5">
+            <FoldHeader
+              open={folds.open(lk)} onToggle={() => folds.toggle(lk)} kind="layer"
+              title={layer} count={`${lcells.length} cell${lcells.length === 1 ? "" : "s"}`}
+            />
+            {folds.open(lk) &&
+              stages.map((stage) => {
+                const scells = lcells.filter(({ c }) => c.stage === stage);
+                const sk = `s:${layer}|${stage}`;
+                return (
+                  <div key={stage} className="grid gap-1.5 pl-4">
+                    <FoldHeader
+                      open={folds.open(sk)} onToggle={() => folds.toggle(sk)} kind="stage"
+                      title={stageOf(state, stage)?.label ?? stage}
+                      count={`${scells.length} cell${scells.length === 1 ? "" : "s"}`}
+                    />
+                    {folds.open(sk) && (
+                      <div className="grid gap-1.5">
+                        {scells.map(({ c, i }) => {
+                          const open = openCell === i;
+                          const n = 1 + c.phrasings.filter((p) => p.text.trim()).length;
+                          return (
             <div key={i} className="rounded-lg border border-line">
               <button
                 type="button"
                 onClick={() => setOpenCell(open ? null : i)}
                 className="w-full flex items-start gap-3 px-3 py-2 text-left"
               >
-                <span className="w-48 shrink-0 text-[11px] leading-tight text-ink-3 pt-0.5">
-                  {cellMeta(state, c)}
+                <span className="w-44 shrink-0 text-[11px] leading-tight text-ink-3 pt-0.5">
+                  {cellSubMeta(c)}
                 </span>
                 <span className="flex-1 text-sm text-ink-2">{c.text}</span>
                 <span
@@ -1333,9 +1452,16 @@ export function PhrasingsGate({
                 </div>
               )}
             </div>
-          );
-        })}
-      </div>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+          </div>
+        );
+      })}
     </div>
   );
 }
