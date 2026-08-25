@@ -572,22 +572,29 @@ export function useGridSetup(a: GridSetupArgs) {
   }
 
   /** Gate 3: paraphrase sets, in small batches so no request runs long. */
-  async function writePhrasings(force = false): Promise<GridState | null> {
+  async function writePhrasings(force = false, onlyMissing = false): Promise<GridState | null> {
     if (!a.state) return null;
     a.setError(null);
     const cells = a.state.cells.filter((c) => c.text.trim());
-    const merged: GridCellUi[] = cells.map((c) => ({ ...c, phrasings: [] }));
+    // onlyMissing fills gaps (cells whose prompt changed after the first
+    // write) without touching sets the user may have edited by hand.
+    const merged: GridCellUi[] = cells.map((c) =>
+      onlyMissing && c.phrasings.some((p) => p.text.trim()) ? c : { ...c, phrasings: [] }
+    );
     const batches: { layer: string; idx: number[] }[] = [];
     for (const layer of LAYERS) {
-      const idx = merged.map((c, i) => (c.layer === layer ? i : -1)).filter((i) => i >= 0);
+      const idx = merged
+        .map((c, i) => (c.layer === layer && !c.phrasings.some((p) => p.text.trim()) ? i : -1))
+        .filter((i) => i >= 0);
       for (let k = 0; k < idx.length; k += PHRASING_BATCH) {
         batches.push({ layer, idx: idx.slice(k, k + PHRASING_BATCH) });
       }
     }
     // All batches in flight at once - each is its own serverless call, so
     // wall time is the slowest batch, not the sum.
+    const total = batches.reduce((n, b) => n + b.idx.length, 0);
     let done = 0;
-    a.setBusy(`Writing paraphrases… (0/${cells.length})`);
+    a.setBusy(`Writing paraphrases… (0/${total})`);
     const outcomes = await Promise.all(
       batches.map(async ({ idx }) => {
         const data = await post<{ phrasings: GridPhrasing[][] }>(
@@ -613,7 +620,7 @@ export function useGridSetup(a: GridSetupArgs) {
           merged[i] = { ...merged[i], phrasings: data.phrasings[k] ?? [] };
         });
         done += idx.length;
-        a.setBusy(`Writing paraphrases… (${done}/${cells.length})`);
+        a.setBusy(`Writing paraphrases… (${done}/${total})`);
         return true;
       })
     );
@@ -725,6 +732,8 @@ export function useGridSetup(a: GridSetupArgs) {
     if (!st) return;
     const cells = st.cells.filter((c) => c.text.trim());
     if (cells.length === 0) return;
+    // Once every question has its set, there is nothing left to warm.
+    if (cells.every((c) => c.phrasings.some((p) => p.text.trim()))) return;
     for (const layer of LAYERS) {
       const idx = cells.map((c, i) => (c.layer === layer ? i : -1)).filter((i) => i >= 0);
       for (let k = 0; k < idx.length; k += PHRASING_BATCH) {
@@ -1435,7 +1444,9 @@ function useFolds() {
  * accordion bar carrying its tag and blind/branded stats - the resting
  * page is a per-stage checklist. Opening a stage renders its cells as
  * cards with the prompt as the body and the New-prompt / cycle / remove
- * controls in the footer. */
+ * controls in the footer. Once the paraphrases are written the same
+ * cards grow a prompt-count pill and a paraphrases fold - there is no
+ * separate paraphrases step. */
 export function CellsGate({
   state, setState, brandNames, onRegenerate, onCycle, busy,
 }: {
@@ -1451,6 +1462,10 @@ export function CellsGate({
   const [open, setOpen] = useState<ReadonlySet<string>>(new Set());
   /** The one cell currently writing a new prompt - only its card waits. */
   const [pending, setPending] = useState<number | null>(null);
+  /** The one cell whose paraphrases fold is open. */
+  const [openPhr, setOpenPhr] = useState<number | null>(null);
+  const written = state.step === "phrasings";
+  const countOf = (c: GridCellUi) => 1 + c.phrasings.filter((p) => p.text.trim()).length;
   const regenerate = async (i: number) => {
     if (pending !== null) return;
     setPending(i);
@@ -1470,8 +1485,9 @@ export function CellsGate({
   return (
     <div className="grid gap-4 max-w-4xl">
       <p className="m-0 text-[12px] text-ink-2">
-        Open each stage and read its questions - rewrite, cycle, or draw a
-        new one for anything that doesn&apos;t sound like your buyers.
+        {written
+          ? `Each question is asked ${PHRASING_COUNT} ways, in the wordings real buyers use - open a stage to spot-check or edit any of them.`
+          : "Open each stage and read its questions - rewrite, cycle, or draw a new one for anything that doesn't sound like your buyers."}
       </p>
       {LAYERS.map((layer) => {
         const cells = state.cells.map((c, i) => ({ ...c, i })).filter((c) => c.layer === layer);
@@ -1486,6 +1502,8 @@ export function CellsGate({
               const scells = cells.filter((c) => c.stage === stage);
               const branded = scells.filter((c) => namesAny(c.text, brandNames)).length;
               const blind = scells.length - branded;
+              const prompts = scells.reduce((n, c) => n + countOf(c), 0);
+              const short = scells.filter((c) => countOf(c) < PHRASING_COUNT).length;
               const isOpen = open.has(stage);
               return (
                 <div key={stage}>
@@ -1505,8 +1523,17 @@ export function CellsGate({
                     <TagChip tag={stageOf(state, stage)?.tag ?? "picks"} />
                     <span className="ml-auto flex gap-3 text-[11px] text-ink-3 whitespace-nowrap">
                       <span>{scells.length} question{scells.length === 1 ? "" : "s"}</span>
-                      {blind > 0 && <span>{blind} blind</span>}
-                      {branded > 0 && <span className="text-warning">{branded} branded</span>}
+                      {written ? (
+                        <>
+                          <span>{prompts} prompts</span>
+                          {short > 0 && <span className="text-warning">{short} short</span>}
+                        </>
+                      ) : (
+                        <>
+                          {blind > 0 && <span>{blind} blind</span>}
+                          {branded > 0 && <span className="text-warning">{branded} branded</span>}
+                        </>
+                      )}
                     </span>
                   </button>
                   {isOpen && (
@@ -1526,6 +1553,17 @@ export function CellsGate({
                             >
                               {namesAny(c.text, brandNames) ? "branded" : "blind"}
                             </span>
+                            {written && (
+                              <span
+                                className={`rounded-full px-2 py-px text-[9.5px] font-medium ${
+                                  countOf(c) >= PHRASING_COUNT
+                                    ? "bg-primary-soft text-primary"
+                                    : "bg-warning/10 text-warning"
+                                }`}
+                              >
+                                {countOf(c)} prompts
+                              </span>
+                            )}
                           </div>
                           <textarea
                             className="input w-full resize-none field-sizing-content text-sm"
@@ -1588,6 +1626,15 @@ export function CellsGate({
                                 </button>
                               </span>
                             )}
+                            {written && (
+                              <button
+                                type="button"
+                                onClick={() => setOpenPhr(openPhr === c.i ? null : c.i)}
+                                className="font-medium text-primary hover:opacity-80"
+                              >
+                                {openPhr === c.i ? "Hide paraphrases ▴" : "Show paraphrases ▾"}
+                              </button>
+                            )}
                             <button
                               type="button"
                               aria-label="remove cell"
@@ -1599,171 +1646,66 @@ export function CellsGate({
                               ×
                             </button>
                           </div>
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                </div>
-              );
-            })}
-          </div>
-        );
-      })}
-    </div>
-  );
-}
-
-/** Gate 3 (card idiom, matching the Prompts step): layers as slim
- * separators, stages as closed accordion bars with cell and prompt
- * counts (short cells flagged), open stage = cell cards - seed as the
- * body, a phrasings fold in the footer for editing the set. */
-export function PhrasingsGate({
-  state, setState,
-}: {
-  state: GridState;
-  setState: (s: GridState) => void;
-}) {
-  const [openStages, setOpenStages] = useState<ReadonlySet<string>>(new Set());
-  const [openCell, setOpenCell] = useState<number | null>(null);
-  const toggleStage = (k: string) =>
-    setOpenStages((prev) => {
-      const next = new Set(prev);
-      if (next.has(k)) next.delete(k);
-      else next.add(k);
-      return next;
-    });
-  const indexed = state.cells.map((c, i) => ({ c, i })).filter(({ c }) => c.text.trim());
-  const countOf = (c: GridCellUi) => 1 + c.phrasings.filter((p) => p.text.trim()).length;
-  return (
-    <div className="grid gap-4 max-w-4xl">
-      <p className="m-0 text-[12px] text-ink-2">
-        Each question is asked {PHRASING_COUNT} ways, in the wordings real
-        buyers use - open a stage to spot-check or edit any of them.
-      </p>
-      {LAYERS.map((layer) => {
-        const lcells = indexed.filter(({ c }) => c.layer === layer);
-        if (lcells.length === 0) return null;
-        const stages = [...new Set(lcells.map(({ c }) => c.stage))];
-        return (
-          <div key={layer} className="grid gap-2">
-            <span className="text-sm font-semibold uppercase tracking-wide text-primary">
-              {layer}
-            </span>
-            {stages.map((stage) => {
-              const scells = lcells.filter(({ c }) => c.stage === stage);
-              const prompts = scells.reduce((n, { c }) => n + countOf(c), 0);
-              const short = scells.filter(({ c }) => countOf(c) < PHRASING_COUNT).length;
-              const isOpen = openStages.has(stage);
-              return (
-                <div key={stage}>
-                  <button
-                    type="button"
-                    onClick={() => toggleStage(stage)}
-                    className={`w-full flex items-center gap-2.5 rounded-lg border bg-surface px-3.5 py-2.5 text-left ${
-                      isOpen ? "border-primary rounded-b-none" : "border-line"
-                    }`}
-                  >
-                    <span aria-hidden="true" className="text-[11px] text-ink-3">
-                      {isOpen ? "▾" : "▸"}
-                    </span>
-                    <span className="text-[13px] font-medium">
-                      {stageOf(state, stage)?.label ?? stage}
-                    </span>
-                    <TagChip tag={stageOf(state, stage)?.tag ?? "picks"} />
-                    <span className="ml-auto flex gap-3 text-[11px] text-ink-3 whitespace-nowrap">
-                      <span>{scells.length} question{scells.length === 1 ? "" : "s"}</span>
-                      <span>{prompts} prompts</span>
-                      {short > 0 && <span className="text-warning">{short} short</span>}
-                    </span>
-                  </button>
-                  {isOpen && (
-                    <div className="grid gap-2.5 rounded-b-lg border border-t-0 border-primary bg-primary-soft/15 px-3.5 py-3">
-                      {scells.map(({ c, i }) => {
-                        const open = openCell === i;
-                        const n = countOf(c);
-                        return (
-                          <div key={i} className="grid gap-1.5 rounded-lg border border-line bg-surface px-3.5 py-2.5">
-                            <div className="flex items-center gap-2 flex-wrap">
-                              <span className="text-[11px] font-medium text-ink-2">{cellSubMeta(c)}</span>
-                              <span
-                                className={`rounded-full px-2 py-px text-[9.5px] font-medium ${
-                                  n >= PHRASING_COUNT ? "bg-primary-soft text-primary" : "bg-warning/10 text-warning"
-                                }`}
-                              >
-                                {n} paraphrases
-                              </span>
-                            </div>
-                            <p className="m-0 text-sm text-ink-2">{c.text}</p>
-                            <div className="flex items-center gap-3 border-t border-dashed border-line pt-1.5 text-[11px]">
+                          {written && openPhr === c.i && (
+                            <div className="grid gap-1.5 pt-1">
+                              {c.phrasings.map((ph, k) => (
+                                <div key={k} className="flex items-start gap-2">
+                                  <span className="w-5 shrink-0 pt-1.5 text-[11px] text-ink-3">{k + 2}.</span>
+                                  <textarea
+                                    className="input w-full resize-none field-sizing-content text-sm"
+                                    rows={1}
+                                    value={ph.text}
+                                    onChange={(e) =>
+                                      setState({
+                                        ...state,
+                                        cells: state.cells.map((q, j) =>
+                                          j === c.i
+                                            ? { ...q, phrasings: q.phrasings.map((x, m) => (m === k ? { ...x, text: e.target.value } : x)) }
+                                            : q
+                                        ),
+                                      })
+                                    }
+                                  />
+                                  {ph.asker && (
+                                    <span className="w-24 shrink-0 pt-1.5 text-[10px] leading-tight text-ink-3 truncate" title={ph.asker}>
+                                      {ph.asker}
+                                    </span>
+                                  )}
+                                  <button
+                                    type="button"
+                                    aria-label="remove paraphrase"
+                                    onClick={() =>
+                                      setState({
+                                        ...state,
+                                        cells: state.cells.map((q, j) =>
+                                          j === c.i ? { ...q, phrasings: q.phrasings.filter((_, m) => m !== k) } : q
+                                        ),
+                                      })
+                                    }
+                                    className="text-ink-3 hover:text-danger text-lg leading-none px-1"
+                                  >
+                                    ×
+                                  </button>
+                                </div>
+                              ))}
                               <button
                                 type="button"
-                                onClick={() => setOpenCell(open ? null : i)}
-                                className="font-medium text-primary hover:opacity-80"
+                                onClick={() =>
+                                  setState({
+                                    ...state,
+                                    cells: state.cells.map((q, j) =>
+                                      j === c.i ? { ...q, phrasings: [...q.phrasings, { text: "", asker: "" }] } : q
+                                    ),
+                                  })
+                                }
+                                className="text-[13px] font-medium text-primary hover:opacity-80 w-fit"
                               >
-                                {open ? "Hide paraphrases ▴" : "Show paraphrases ▾"}
+                                + Add paraphrase
                               </button>
                             </div>
-                            {open && (
-                              <div className="grid gap-1.5 pt-1">
-                                {c.phrasings.map((ph, k) => (
-                                  <div key={k} className="flex items-start gap-2">
-                                    <span className="w-5 shrink-0 pt-1.5 text-[11px] text-ink-3">{k + 2}.</span>
-                                    <textarea
-                                      className="input w-full resize-none field-sizing-content text-sm"
-                                      rows={1}
-                                      value={ph.text}
-                                      onChange={(e) =>
-                                        setState({
-                                          ...state,
-                                          cells: state.cells.map((q, j) =>
-                                            j === i
-                                              ? { ...q, phrasings: q.phrasings.map((x, m) => (m === k ? { ...x, text: e.target.value } : x)) }
-                                              : q
-                                          ),
-                                        })
-                                      }
-                                    />
-                                    {ph.asker && (
-                                      <span className="w-24 shrink-0 pt-1.5 text-[10px] leading-tight text-ink-3 truncate" title={ph.asker}>
-                                        {ph.asker}
-                                      </span>
-                                    )}
-                                    <button
-                                      type="button"
-                                      aria-label="remove paraphrase"
-                                      onClick={() =>
-                                        setState({
-                                          ...state,
-                                          cells: state.cells.map((q, j) =>
-                                            j === i ? { ...q, phrasings: q.phrasings.filter((_, m) => m !== k) } : q
-                                          ),
-                                        })
-                                      }
-                                      className="text-ink-3 hover:text-danger text-lg leading-none px-1"
-                                    >
-                                      ×
-                                    </button>
-                                  </div>
-                                ))}
-                                <button
-                                  type="button"
-                                  onClick={() =>
-                                    setState({
-                                      ...state,
-                                      cells: state.cells.map((q, j) =>
-                                        j === i ? { ...q, phrasings: [...q.phrasings, { text: "", asker: "" }] } : q
-                                      ),
-                                    })
-                                  }
-                                  className="text-[13px] font-medium text-primary hover:opacity-80 w-fit"
-                                >
-                                  + Add paraphrase
-                                </button>
-                              </div>
-                            )}
-                          </div>
-                        );
-                      })}
+                          )}
+                        </div>
+                      ))}
                     </div>
                   )}
                 </div>
