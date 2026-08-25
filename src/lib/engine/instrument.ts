@@ -44,6 +44,84 @@ function cacheKey(prefix: string, parts: (string | null)[]): string {
   return `${prefix}:${INSTRUMENT_VERSION}:${createHash("sha256").update(normalized).digest("hex")}`;
 }
 
+/* --------------------------- in-flight coalescing ------------------------
+ * The first request for a key claims it with a pending marker and
+ * generates; an identical concurrent request waits for that result instead
+ * of repeating the work. Background warms (noWait) never sit blocking on
+ * someone else's work. A marker left by a dead generator is taken over
+ * once it goes stale - and the wait budget is capped BELOW the routes'
+ * time budget, so a takeover still fits inside it. */
+
+/** How long a pending marker is trusted before its generator is presumed
+ * dead. Also the wait budget: a waiter that outlives a FRESH marker does
+ * not start a duplicate generation - it reports "still cooking" and the
+ * caller retries, landing on the finished result. Only a STALE marker
+ * (dead generator) is taken over. */
+const COALESCE_PENDING_TTL_MS = 100_000;
+const COALESCE_POLL_MS = 2_000;
+
+function pendingMarkerAt(raw: string | null): number | null {
+  if (!raw) return null;
+  try {
+    const v = JSON.parse(raw) as { __pending?: number } | unknown[];
+    if (Array.isArray(v)) return null;
+    return typeof v.__pending === "number" ? v.__pending : null;
+  } catch {
+    return null;
+  }
+}
+
+async function coalesced<T>(
+  key: string,
+  opts: { force?: boolean; noWait?: boolean },
+  generate: () => Promise<T | null>
+): Promise<T | null> {
+  const readValue = (raw: string | null): T | null => {
+    if (!raw || pendingMarkerAt(raw) !== null) return null;
+    try {
+      return JSON.parse(raw) as T;
+    } catch {
+      return null;
+    }
+  };
+  const claimAndRun = async (): Promise<T | null> => {
+    await store.cacheSet(key, JSON.stringify({ __pending: Date.now() }));
+    const out = await generate();
+    // A failed generation stamps the key retryable (a zero marker reads
+    // as stale) instead of caching emptiness or leaving waiters hanging.
+    await store.cacheSet(
+      key,
+      out !== null ? JSON.stringify(out) : JSON.stringify({ __pending: 0 })
+    );
+    return out;
+  };
+  if (opts.force) return claimAndRun();
+  let raw = await store.cacheGet(key, CACHE_TTL_MS);
+  const first = readValue(raw);
+  if (first !== null) return first;
+  let at = pendingMarkerAt(raw);
+  if (at !== null && Date.now() - at < COALESCE_PENDING_TTL_MS) {
+    if (opts.noWait) return null;
+    const deadline = Date.now() + COALESCE_PENDING_TTL_MS;
+    let orphaned = false;
+    while (Date.now() < deadline) {
+      await new Promise((r) => setTimeout(r, COALESCE_POLL_MS));
+      raw = await store.cacheGet(key, CACHE_TTL_MS);
+      const v = readValue(raw);
+      if (v !== null) return v;
+      at = pendingMarkerAt(raw);
+      if (at === null || Date.now() - at >= COALESCE_PENDING_TTL_MS) {
+        orphaned = true;
+        break;
+      }
+    }
+    // Deadline with the generator still alive: never start a duplicate -
+    // report null and let the caller retry onto the finished result.
+    if (!orphaned) return null;
+  }
+  return claimAndRun();
+}
+
 /* ------------------------------ moderators ------------------------------ */
 
 export interface Moderators {
@@ -432,12 +510,13 @@ const CORE_SCENARIOS = 4;
 export async function readScenarios(input: {
   category: string;
   audience: string | null;
-}): Promise<{ base: Moderators; scenarios: ScenarioSpec[]; reserve: ScenarioSpec[] }> {
+  /** Background warm: never wait on another request's in-flight read. */
+  noWait?: boolean;
+}): Promise<{ base: Moderators; scenarios: ScenarioSpec[]; reserve: ScenarioSpec[] } | null> {
   // "scenarios_journeys8": deviation-coherence rules + plain-language label
   // rule (no methodology words) changed the read.
   const key = cacheKey("scenarios_journeys8", [input.category, input.audience]);
-  const hit = await store.cacheGet(key, CACHE_TTL_MS);
-  if (hit) return JSON.parse(hit) as { base: Moderators; scenarios: ScenarioSpec[]; reserve: ScenarioSpec[] };
+  return coalesced(key, { noWait: input.noWait }, async () => {
   const res = await openaiClient().chat.completions.create({
     model: READ_MODEL,
     messages: [
@@ -541,8 +620,8 @@ export async function readScenarios(input: {
     scenarios: all.slice(0, CORE_SCENARIOS),
     reserve: all.slice(CORE_SCENARIOS),
   };
-  if (out.scenarios.length > 0) await store.cacheSet(key, JSON.stringify(out));
-  return out;
+  return out.scenarios.length > 0 ? out : null;
+  });
 }
 
 /* -------------------------- participation mask -------------------------- */
@@ -1205,7 +1284,9 @@ export async function generateGrid(input: {
   base: Moderators;
   scenarios: ScenarioSpec[];
   stages: MaskedStage[];
-}): Promise<GridCell[]> {
+  /** Background warm: never wait on another request's in-flight write. */
+  noWait?: boolean;
+}): Promise<GridCell[] | null> {
   const rivals = input.competitors.slice(0, 4);
   const allLabels = input.scenarios.map((s) => s.label);
   const plan: { stage: MaskedStage; situation: string | null; angle: string; scope: string | null }[] = [];
@@ -1240,12 +1321,7 @@ export async function generateGrid(input: {
     JSON.stringify(input.scenarios),
     input.stages.map((s) => `${s.key}:${s.columns.join("+")}`).join(","),
   ]);
-  const hit = await store.cacheGet(key, CACHE_TTL_MS);
-  if (hit) {
-    const cached = JSON.parse(hit) as GridCell[];
-    return cached.map((c) => ({ ...c, text: humanize(c.text) }));
-  }
-
+  const built = await coalesced<GridCell[]>(key, { noWait: input.noWait }, async () => {
   const journeyBySituation = new Map(
     input.scenarios.map((s) => [s.label, journeyNote(input.base, s)] as const)
   );
@@ -1317,8 +1393,9 @@ export async function generateGrid(input: {
       text: humanize(c.text.trim()),
     });
   });
-  await store.cacheSet(key, JSON.stringify(cells));
-  return cells;
+  return cells.length > 0 ? cells : null;
+  });
+  return built === null ? null : built.map((c) => ({ ...c, text: humanize(c.text) }));
 }
 
 /**
@@ -1459,6 +1536,9 @@ const PHRASINGS_EXTRA = 3;
  * the generator died and takes the cell over. Fits inside the route's
  * 120s budget with room for the takeover generation. */
 const PHRASINGS_PENDING_TTL_MS = 100_000;
+/** Wait budget on someone else's in-flight work - capped below the
+ * route's 120s so a takeover generation still fits inside it. */
+const PHRASINGS_WAIT_MS = 70_000;
 const PHRASINGS_POLL_MS = 2_000;
 
 /**
@@ -1698,7 +1778,7 @@ export async function generatePhrasings(input: {
   const waitForTheirs = async (): Promise<void> => {
     if (theirs.length === 0 || input.noWait) return;
     const open = new Set(theirs);
-    const deadline = Date.now() + PHRASINGS_PENDING_TTL_MS;
+    const deadline = Date.now() + PHRASINGS_WAIT_MS;
     while (open.size > 0 && Date.now() < deadline) {
       await new Promise((r) => setTimeout(r, PHRASINGS_POLL_MS));
       const pend = [...open];
@@ -1771,16 +1851,28 @@ export function humanize(t: string): string {
 export async function composeInstrument(input: {
   category: string;
   audience: string | null;
+  noWait?: boolean;
 }): Promise<{
   base: Moderators;
   moderators: Moderators;
   scenarios: ScenarioSpec[];
   reserve: ScenarioSpec[];
   stages: MaskedStage[];
-}> {
-  const { base, scenarios, reserve } = await readScenarios(input);
-  const stages = participationMask(base, scenarios);
-  return { base, moderators: base, scenarios, reserve, stages };
+} | null> {
+  const read = await readScenarios(input);
+  // Ternary, not an if-guard: Turbopack's compile-time evaluation folds
+  // `if (!read) return null` here as "unreachable" (it wrongly concludes
+  // the same-module coalesced call can't resolve null) and ships the
+  // destructure against null. The expression form survives compilation.
+  return read === null
+    ? null
+    : {
+        base: read.base,
+        moderators: read.base,
+        scenarios: read.scenarios,
+        reserve: read.reserve,
+        stages: participationMask(read.base, read.scenarios),
+      };
 }
 
 export interface Instrument {
@@ -1797,16 +1889,19 @@ export async function buildInstrument(input: {
   competitors: string[];
   audience: string | null;
 }): Promise<Instrument> {
-  const { base, scenarios, stages } = await composeInstrument({
+  const composed = await composeInstrument({
     category: input.category,
     audience: input.audience,
   });
+  if (!composed) throw new Error("the market read came back empty");
+  const { base, scenarios, stages } = composed;
   const cells = await generateGrid({
     ...input,
     base,
     scenarios,
     stages: stages.filter((st) => st.recommended),
   });
+  if (!cells) throw new Error("the cell write came back empty");
   return { base, moderators: base, scenarios, stages, cells };
 }
 

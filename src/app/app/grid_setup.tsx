@@ -65,6 +65,21 @@ export interface GridCellUi {
   phrasingsByText?: Record<string, GridPhrasing[]>;
 }
 
+/** Loose word-overlap similarity, mirroring the server's dedup filter -
+ * enough to keep a top-up from re-adding a near-twin of a kept line. */
+function similarText(a: string, b: string): boolean {
+  const words = (t: string) =>
+    new Set(
+      t.trim().toLowerCase().replace(/[^a-z0-9 ]+/g, "").split(/\s+/).filter((w) => w.length > 2)
+    );
+  const A = words(a);
+  const B = words(b);
+  if (A.size === 0 || B.size === 0) return false;
+  let inter = 0;
+  for (const w of A) if (B.has(w)) inter++;
+  return inter / (A.size + B.size - inter) > 0.5;
+}
+
 /** Bank the cell's written paraphrases under its current wording, and pull
  * the set banked for `nextText` if there is one - the swap that makes
  * returning to a wording you already paid for free. */
@@ -193,7 +208,10 @@ export function normalizeGrid(g: GridState | null): GridState | null {
       // Drafts from before the prompt review carry no machine baseline -
       // treat the saved text as it, so nothing is retroactively flagged.
       original: scrubPrompt(c.original ?? c.text),
-      phrasedFor: c.phrasedFor !== undefined ? scrubPrompt(c.phrasedFor) : undefined,
+      // Pre-phrasedFor drafts: assume the set belongs to the current text
+      // (same assumption `original` makes), so the edit-after-write flow
+      // works on legacy drafts instead of silently no-opping.
+      phrasedFor: scrubPrompt(c.phrasedFor ?? c.text),
       // The cycling history and the bank keys get the same scrub as the
       // live text, so cycling to a draft-frozen wording can't reintroduce
       // banned punctuation and bank lookups keep matching.
@@ -713,6 +731,59 @@ export function useGridSetup(a: GridSetupArgs) {
     return next;
   }
 
+  /** Top up cells sitting below the quota without touching what they
+   * hold: a fresh force draw per short cell, merged in minus near-twins
+   * of anything kept. Cells at zero are the missing-fill's job, not
+   * this one's. */
+  async function topUpPhrasings(from?: GridState): Promise<GridState | null> {
+    const st = from ?? a.state;
+    if (!st) return null;
+    const countIn = (c: GridCellUi) => 1 + c.phrasings.filter((p) => p.text.trim()).length;
+    const idx = st.cells
+      .map((c, i) =>
+        c.text.trim() && c.phrasings.some((p) => p.text.trim()) && countIn(c) < PHRASING_COUNT
+          ? i
+          : -1
+      )
+      .filter((i) => i >= 0);
+    if (idx.length === 0) return st;
+    a.setError(null);
+    let done = 0;
+    a.setBusy(`Topping up paraphrases… (0/${idx.length})`);
+    const merged = [...st.cells];
+    await Promise.all(
+      idx.map(async (i) => {
+        const c = st.cells[i];
+        const data = await post<{ phrasings: GridPhrasing[][] }>("/api/setup/grid/phrasings", {
+          brand: a.brand, category: a.category, competitors: a.competitors,
+          audience: a.audience || undefined,
+          base: st.moderators, scenarios: st.scenarios,
+          cells: [{ stage: c.stage, situation: c.situation, angle: c.angle, mode: c.mode ?? null, text: c.text }],
+          count: PHRASING_COUNT,
+          // Without force the cache would return the same short set that
+          // created the gap.
+          force: true,
+        });
+        if (data) {
+          const kept = [...c.phrasings];
+          const have = () => [c.text, ...kept.filter((p) => p.text.trim()).map((p) => p.text)];
+          for (const ph of data.phrasings[0] ?? []) {
+            if (1 + kept.filter((p) => p.text.trim()).length >= PHRASING_COUNT) break;
+            if (have().some((t) => similarText(t, ph.text))) continue;
+            kept.push({ ...ph, original: ph.text });
+          }
+          merged[i] = { ...merged[i], phrasings: kept, phrasedFor: merged[i].text };
+        }
+        done++;
+        a.setBusy(`Topping up paraphrases… (${done}/${idx.length})`);
+      })
+    );
+    a.setBusy(null);
+    const next: GridState = { ...st, cells: merged };
+    a.setState(next);
+    return next;
+  }
+
   /** The cell's offered-prompt history, capturing a live manual edit into
    * its current slot so cycling never loses the user's wording. */
   function cellHistory(c: GridCellUi): { alts: string[]; idx: number } {
@@ -814,7 +885,7 @@ export function useGridSetup(a: GridSetupArgs) {
     void fetch("/api/setup/grid/compose", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ category: cat, audience: (audience ?? a.audience) || undefined }),
+      body: JSON.stringify({ category: cat, audience: (audience ?? a.audience) || undefined, warm: true }),
     }).catch(() => {});
   }
 
@@ -829,6 +900,7 @@ export function useGridSetup(a: GridSetupArgs) {
         brand: a.brand, category: a.category, competitors: a.competitors,
         audience: a.audience || undefined,
         base: st.moderators, scenarios: st.scenarios, stageKeys: st.keptStages,
+        warm: true,
       }),
     })
       .then(async (r) => {
@@ -874,7 +946,7 @@ export function useGridSetup(a: GridSetupArgs) {
   }
 
   return {
-    compose, writeCells, writePhrasings, suggestScenario, nearScenario,
+    compose, writeCells, writePhrasings, topUpPhrasings, suggestScenario, nearScenario,
     prefetchNearPools, warmRead, warmCells, warmPhrasings,
     regenerateCell, cycleCell,
   };

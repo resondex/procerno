@@ -39,6 +39,9 @@ const Body = z.object({
   /** Stage keys the user kept at gate 1; the mask is recomputed server
    * side from the journeys so stage hints never leave the engine. */
   stageKeys: z.array(z.string().trim().min(1)).min(1).max(30),
+  /** Background warm: fill the cache but never wait on another request's
+   * in-flight write - the confirm that needs results does the waiting. */
+  warm: z.boolean().optional(),
 });
 
 /** Gate 2: write one seed prompt per masked cell for the confirmed read. */
@@ -68,6 +71,15 @@ export async function POST(req: Request) {
     base,
     scenarios,
     stages,
+    noWait: parsed.data.warm,
   });
+  if (!cells) {
+    return parsed.data.warm
+      ? NextResponse.json({ pending: true })
+      : NextResponse.json(
+          { error: "the prompts are still being written - try again in a moment" },
+          { status: 502 }
+        );
+  }
   return NextResponse.json({ cells });
 }

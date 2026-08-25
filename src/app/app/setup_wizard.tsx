@@ -6,6 +6,7 @@ import { EnginePicker, defaultEnginesFor, type EngineOption } from "@/app/compon
 import {
   CellReviewModal,
   CellsGate,
+  PHRASING_COUNT,
   cellSubMeta,
   CoverageGate,
   ScenarioReviewModal,
@@ -680,8 +681,23 @@ export function SetupWizard({ mode, brand, draft, engineOptions, onClose, onCrea
     const written = g.step === "phrasings";
     const missing = written && live.some((c) => !c.phrasings.some((p) => p.text.trim()));
     if (!written) void writePhrasings(false, false, g);
-    else if (missing) void writePhrasings(false, true, g);
+    else if (missing) void fillParaphrases(g);
     else goTo("engines", g);
+  }
+
+  /** The missing-fill also tops up below-quota sets: empty cells get full
+   * sets, short cells get just their shortfall - nothing kept is touched. */
+  async function fillParaphrases(g: GridState) {
+    const filled = await gridApi.writePhrasings(false, true, g);
+    const topped = await gridApi.topUpPhrasings(filled ?? g);
+    goTo("prompts", topped ?? filled ?? g);
+  }
+
+  /** The standalone top-up, for short-but-nonzero sets (they never block
+   * the gate, so they need their own affordance). */
+  async function topUpShortSets() {
+    const topped = await gridApi.topUpPhrasings();
+    if (topped) goTo("prompts", topped);
   }
 
   /** Confirm the Prompts gate: edited prompts get one quality check first
@@ -1228,16 +1244,33 @@ export function SetupWizard({ mode, brand, draft, engineOptions, onClose, onCrea
               {/* Busy stays inline so the gate never unmounts - open stages
                   and folds survive a paraphrase write. */}
               {(busy !== null || grid.step === "phrasings") && (
-                <div className="flex justify-end">
+                <div className="flex justify-end gap-4">
                   {busy !== null ? (
                     <span className="flex items-center gap-2 text-[13px] font-medium text-primary">
                       <span aria-hidden="true" className="h-3.5 w-3.5 rounded-full border-2 border-primary/30 border-t-primary animate-spin" />
                       {busy}
                     </span>
                   ) : (
-                    <button type="button" onClick={() => void writePhrasings(true)} className="text-[13px] font-medium text-primary hover:opacity-80">
-                      Rewrite all paraphrases
-                    </button>
+                    <>
+                      {grid.cells.some(
+                        (c) =>
+                          c.text.trim() &&
+                          c.phrasings.some((p) => p.text.trim()) &&
+                          1 + c.phrasings.filter((p) => p.text.trim()).length < PHRASING_COUNT
+                      ) && (
+                        <button
+                          type="button"
+                          onClick={() => void topUpShortSets()}
+                          title="Fill each short set back to quota - what's there stays"
+                          className="text-[13px] font-medium text-primary hover:opacity-80"
+                        >
+                          Top up short sets
+                        </button>
+                      )}
+                      <button type="button" onClick={() => void writePhrasings(true)} className="text-[13px] font-medium text-primary hover:opacity-80">
+                        Rewrite all paraphrases
+                      </button>
+                    </>
                   )}
                 </div>
               )}

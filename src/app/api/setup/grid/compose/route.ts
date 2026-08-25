@@ -31,6 +31,9 @@ const Body = z.object({
   /** Edited read: recompute the mask from these - pure code, no model. */
   base: z.record(z.string(), z.unknown()).optional(),
   scenarios: z.array(ScenarioShape).min(1).max(4).optional(),
+  /** Background warm: fill the cache but never wait on another request's
+   * in-flight read - the confirm that needs results does the waiting. */
+  warm: z.boolean().optional(),
 });
 
 /**
@@ -67,10 +70,22 @@ export async function POST(req: Request) {
     });
     stages = participationMask(base, scenarios);
   } else {
-    ({ base, scenarios, reserve, stages } = await composeInstrument({
+    const composed = await composeInstrument({
       category: parsed.data.category,
       audience: parsed.data.audience || null,
-    }));
+      noWait: parsed.data.warm,
+    });
+    if (!composed) {
+      // A warm that found the read already cooking has nothing to add; a
+      // real request only lands here when generation failed outright.
+      return parsed.data.warm
+        ? NextResponse.json({ pending: true })
+        : NextResponse.json(
+            { error: "the market read is still being written - try again in a moment" },
+            { status: 502 }
+          );
+    }
+    ({ base, scenarios, reserve, stages } = composed);
   }
   return NextResponse.json({
     base,
