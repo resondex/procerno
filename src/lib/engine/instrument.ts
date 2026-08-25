@@ -516,7 +516,11 @@ export async function readScenarios(input: {
   // "scenarios_journeys8": deviation-coherence rules + plain-language label
   // rule (no methodology words) changed the read.
   const key = cacheKey("scenarios_journeys8", [input.category, input.audience]);
-  return coalesced(key, { noWait: input.noWait }, async () => {
+  const read = await coalesced<{
+    base: Moderators;
+    scenarios: ScenarioSpec[];
+    reserve: ScenarioSpec[];
+  }>(key, { noWait: input.noWait }, async () => {
   const res = await openaiClient().chat.completions.create({
     model: READ_MODEL,
     messages: [
@@ -622,6 +626,23 @@ export async function readScenarios(input: {
   };
   return out.scenarios.length > 0 ? out : null;
   });
+  // Serve-time scrub, cache hits included: the model's labels and
+  // descriptions arrive with em dashes and non-breaking hyphens the
+  // house style bans. (Ternary, not an if-guard - see composeInstrument.)
+  const clean = (sc: ScenarioSpec): ScenarioSpec => ({
+    ...sc,
+    label: humanize(sc.label),
+    description: humanize(sc.description),
+  });
+  return read === null
+    ? null
+    : {
+        base: read.base.rationale
+          ? { ...read.base, rationale: humanize(read.base.rationale) }
+          : read.base,
+        scenarios: read.scenarios.map(clean),
+        reserve: read.reserve.map(clean),
+      };
 }
 
 /* -------------------------- participation mask -------------------------- */
@@ -713,7 +734,10 @@ export async function suggestScenario(input: {
     input.category, input.audience, input.decisionUnit, avoid.join("|"),
   ]);
   const hit = await store.cacheGet(key, CACHE_TTL_MS);
-  if (hit) return JSON.parse(hit) as Situation;
+  if (hit) {
+    const cached = JSON.parse(hit) as Situation;
+    return { label: humanize(cached.label), description: humanize(cached.description) };
+  }
   const res = await openaiClient().chat.completions.create({
     model: MODEL,
     messages: [
@@ -751,7 +775,7 @@ export async function suggestScenario(input: {
   );
   if (!fresh) return null;
   await store.cacheSet(key, JSON.stringify(fresh));
-  return fresh;
+  return { label: humanize(fresh.label), description: humanize(fresh.description) };
 }
 
 /**
@@ -771,7 +795,12 @@ export async function nearScenarios(input: {
     input.category, input.audience, input.of.label, input.of.description, avoid.join("|"),
   ]);
   const hit = await store.cacheGet(key, CACHE_TTL_MS);
-  if (hit) return JSON.parse(hit) as Situation[];
+  if (hit) {
+    return (JSON.parse(hit) as Situation[]).map((s) => ({
+      label: humanize(s.label),
+      description: humanize(s.description),
+    }));
+  }
   const res = await openaiClient().chat.completions.create({
     model: MODEL,
     messages: [
@@ -816,7 +845,7 @@ export async function nearScenarios(input: {
     const k = s.label.trim().toLowerCase();
     if (!k || seen.has(k)) continue;
     seen.add(k);
-    pool.push({ label: s.label.trim(), description: s.description.trim() });
+    pool.push({ label: humanize(s.label.trim()), description: humanize(s.description.trim()) });
     if (pool.length === 3) break;
   }
   if (pool.length > 0) await store.cacheSet(key, JSON.stringify(pool));
@@ -1314,14 +1343,44 @@ export async function generateGrid(input: {
     }
   }
 
-  const key = cacheKey("grid", [
+  // Per-STAGE cache units: a coverage tick re-buys only the stages it
+  // changes, never the whole grid. The base read, journeys, and rivals
+  // stay in every key - the same structural cell voiced under a different
+  // read is a different prompt. Missing units are grouped into ~13-cell
+  // model calls, so the writer still varies register across a real batch;
+  // in-flight units coalesce across requests exactly like the paraphrases.
+  const ctx = [
     STYLE_VERSION,
     input.brand, input.category, rivals.join(","), input.audience,
     JSON.stringify(input.base),
     JSON.stringify(input.scenarios),
-    input.stages.map((s) => `${s.key}:${s.columns.join("+")}`).join(","),
-  ]);
-  const built = await coalesced<GridCell[]>(key, { noWait: input.noWait }, async () => {
+  ];
+  const units: (typeof plan)[] = [];
+  for (const row of plan) {
+    const last = units[units.length - 1];
+    if (last && last[0].stage.key === row.stage.key) last.push(row);
+    else units.push([row]);
+  }
+  const unitOf = new Map<(typeof plan)[number], number>();
+  units.forEach((rows, u) => rows.forEach((r) => unitOf.set(r, u)));
+  const unitKeys = units.map((rows) =>
+    cacheKey("grid_unit", [
+      ...ctx,
+      rows.map((r) => `${r.stage.key}|${r.situation ?? ""}|${r.angle}|${r.scope ?? ""}`).join("\n"),
+    ])
+  );
+  const resolved: (GridCell[] | null)[] = units.map(() => null);
+  const scrub = (cells: GridCell[]): GridCell[] =>
+    cells.map((c) => ({ ...c, text: humanize(c.text) }));
+  const valueOf = (raw: string): GridCell[] | null => {
+    try {
+      const v = JSON.parse(raw) as { __pending?: number } | GridCell[];
+      return Array.isArray(v) ? v : null;
+    } catch {
+      return null;
+    }
+  };
+
   const journeyBySituation = new Map(
     input.scenarios.map((s) => [s.label, journeyNote(input.base, s)] as const)
   );
@@ -1333,69 +1392,177 @@ export async function generateGrid(input: {
       `\n   guidance: ${p.stage.hint}`
     );
   };
-  // Slices run in parallel: the full-model writer reasons hard enough that
-  // one 50-cell call would flirt with the route's time budget.
-  const CELL_CHUNK = 13;
-  const slices: (typeof plan)[] = [];
-  for (let i = 0; i < plan.length; i += CELL_CHUNK) slices.push(plan.slice(i, i + CELL_CHUNK));
-  const writeSlice = async (sl: typeof plan) => {
-  const planText = sl.map(planLine).join("\n");
-  const res = await openaiClient().chat.completions.create({
-    model: CELLS_MODEL,
-    messages: [
-      {
-        role: "system",
-        content: CELL_WRITER_SYSTEM +
-          "Return one cell object per plan line, same stage/situation/angle " +
-          "values, in order.",
-      },
-      {
-        role: "user",
-        content:
-          `Client brand: ${input.brand}\nCategory: ${input.category}\n` +
-          `Rivals: ${rivals.join(", ")}\nAudience: ${input.audience ?? "unknown"}\n\n` +
-          `Cell plan:\n${planText}`,
-      },
-    ],
-    response_format: {
-      type: "json_schema",
-      json_schema: { name: "grid_cells", strict: true, schema: CELLS_SCHEMA },
-    },
-  });
-  const parsed = JSON.parse(res.choices[0]?.message?.content ?? "{}") as {
-    cells: { stage: string; situation: string | null; angle: string; text: string }[];
-  };
-  return parsed.cells ?? [];
-  };
-  const parsedCells = (await Promise.all(slices.map(writeSlice))).flat();
-  const scopeByPlan = new Map(plan.map((p, i) => [i, p.scope] as const));
   const byKey = new Map(input.stages.map((s) => [s.key, s]));
-  const seen = new Set<string>();
-  const cells: GridCell[] = [];
-  parsedCells.forEach((c, idx) => {
-    const st = byKey.get(c.stage);
-    if (!st || !c.text?.trim()) return;
-    const norm = c.text.trim().toLowerCase().replace(/\s+/g, " ");
-    if (seen.has(norm)) return; // cheap dedupe; no embeddings needed at this scale
-    seen.add(norm);
-    // The plan writes "-" for invariant cells; models echo it back as a
-    // string rather than null.
-    const situation =
-      c.situation && c.situation.trim() && c.situation.trim() !== "-"
-        ? c.situation.trim()
-        : null;
-    cells.push({
-      stage: st.key,
-      layer: st.layer,
-      situation,
-      angle: c.angle,
-      mode: scopeByPlan.get(idx) ?? null,
-      text: humanize(c.text.trim()),
+  // One 50-cell call would flirt with the route's time budget; calls of
+  // ~this many cells run in parallel instead.
+  const CELL_CHUNK = 13;
+
+  /** Generate the given units, grouped into ~CELL_CHUNK-cell model calls
+   * (a unit never splits), and cache each unit on its own key. Markers are
+   * claimed FIRST so concurrent identical requests join this work. */
+  const generate = async (idxs: number[], seen: Set<string>): Promise<void> => {
+    if (idxs.length === 0) return;
+    await Promise.all(
+      idxs.map((u) => store.cacheSet(unitKeys[u], JSON.stringify({ __pending: Date.now() })))
+    );
+    const groups: number[][] = [];
+    let cur: number[] = [];
+    let count = 0;
+    for (const u of idxs) {
+      if (count > 0 && count + units[u].length > CELL_CHUNK) {
+        groups.push(cur);
+        cur = [];
+        count = 0;
+      }
+      cur.push(u);
+      count += units[u].length;
+    }
+    if (cur.length > 0) groups.push(cur);
+    await Promise.all(
+      groups.map(async (group) => {
+        const rows = group.flatMap((u) => units[u]);
+        const planText = rows.map(planLine).join("\n");
+        const res = await openaiClient().chat.completions.create({
+          model: CELLS_MODEL,
+          messages: [
+            {
+              role: "system",
+              content: CELL_WRITER_SYSTEM +
+                "Return one cell object per plan line, same stage/situation/angle " +
+                "values, in order.",
+            },
+            {
+              role: "user",
+              content:
+                `Client brand: ${input.brand}\nCategory: ${input.category}\n` +
+                `Rivals: ${rivals.join(", ")}\nAudience: ${input.audience ?? "unknown"}\n\n` +
+                `Cell plan:\n${planText}`,
+            },
+          ],
+          response_format: {
+            type: "json_schema",
+            json_schema: { name: "grid_cells", strict: true, schema: CELLS_SCHEMA },
+          },
+        });
+        const parsed = JSON.parse(res.choices[0]?.message?.content ?? "{}") as {
+          cells: { stage: string; situation: string | null; angle: string; text: string }[];
+        };
+        const produced = new Map<number, GridCell[]>();
+        (parsed.cells ?? []).forEach((c, i) => {
+          // Positional alignment: answer row i belongs to plan row i.
+          const row = rows[i];
+          const st = byKey.get(c.stage);
+          if (!row || !st || !c.text?.trim()) return;
+          const norm = c.text.trim().toLowerCase().replace(/\s+/g, " ");
+          if (seen.has(norm)) return; // cheap dedupe; no embeddings needed at this scale
+          seen.add(norm);
+          // The plan writes "-" for invariant cells; models echo it back
+          // as a string rather than null.
+          const situation =
+            c.situation && c.situation.trim() && c.situation.trim() !== "-"
+              ? c.situation.trim()
+              : null;
+          const u = unitOf.get(row);
+          if (u === undefined) return;
+          const cell: GridCell = {
+            stage: st.key,
+            layer: st.layer,
+            situation,
+            angle: c.angle,
+            mode: row.scope ?? null,
+            text: humanize(c.text.trim()),
+          };
+          const list = produced.get(u);
+          if (list) list.push(cell);
+          else produced.set(u, [cell]);
+        });
+        await Promise.all(
+          group.map((u) => {
+            const cells = produced.get(u) ?? [];
+            resolved[u] = cells;
+            // An empty unit stamps itself retryable instead of caching
+            // the failure.
+            return store.cacheSet(
+              unitKeys[u],
+              cells.length > 0 ? JSON.stringify(cells) : JSON.stringify({ __pending: 0 })
+            );
+          })
+        );
+      })
+    );
+  };
+
+  const mine: number[] = [];
+  const theirs: number[] = [];
+  {
+    const raws = await Promise.all(unitKeys.map((k) => store.cacheGet(k, CACHE_TTL_MS)));
+    raws.forEach((raw, u) => {
+      if (raw) {
+        const at = pendingMarkerAt(raw);
+        if (at === null) {
+          const v = valueOf(raw);
+          if (v && v.length > 0) {
+            resolved[u] = scrub(v);
+            return;
+          }
+        } else if (Date.now() - at < COALESCE_PENDING_TTL_MS) {
+          theirs.push(u);
+          return;
+        }
+      }
+      mine.push(u);
     });
-  });
-  return cells.length > 0 ? cells : null;
-  });
-  return built === null ? null : built.map((c) => ({ ...c, text: humanize(c.text) }));
+  }
+  // Seed the dedupe with everything already cached, so a fresh unit can't
+  // duplicate a cached one's text.
+  const seen = new Set<string>();
+  for (const cells of resolved) {
+    for (const c of cells ?? []) seen.add(c.text.trim().toLowerCase().replace(/\s+/g, " "));
+  }
+
+  /** Poll for units another request claimed; a stale marker (its
+   * generator died) is taken over. On deadline with generators still
+   * alive nothing duplicates - the caller retries onto their result. */
+  const waitForTheirs = async (): Promise<void> => {
+    if (theirs.length === 0 || input.noWait) return;
+    const open = new Set(theirs);
+    const deadline = Date.now() + COALESCE_PENDING_TTL_MS;
+    while (open.size > 0 && Date.now() < deadline) {
+      await new Promise((r) => setTimeout(r, COALESCE_POLL_MS));
+      const pend = [...open];
+      const raws = await Promise.all(pend.map((u) => store.cacheGet(unitKeys[u], CACHE_TTL_MS)));
+      const orphaned: number[] = [];
+      raws.forEach((raw, k) => {
+        const u = pend[k];
+        const at = pendingMarkerAt(raw);
+        if (raw && at === null) {
+          const v = valueOf(raw);
+          if (v && v.length > 0) {
+            resolved[u] = scrub(v);
+            open.delete(u);
+            return;
+          }
+        }
+        if (at === null || Date.now() - at >= COALESCE_PENDING_TTL_MS) {
+          orphaned.push(u);
+          open.delete(u);
+        }
+      });
+      if (orphaned.length > 0) await generate(orphaned, seen);
+    }
+  };
+
+  await Promise.all([generate(mine, seen), waitForTheirs()]);
+  const all = resolved.flatMap((r) => r ?? []);
+  // Ternaries, not if-guards - see composeInstrument. Unresolved units
+  // (someone else still generating) mean an incomplete grid: a real
+  // request reports retry-shortly rather than shipping holes; a warm
+  // returns the partial set for the phrasings chain.
+  return resolved.some((r) => r === null) && !input.noWait
+    ? null
+    : all.length > 0
+      ? all
+      : null;
 }
 
 /**
@@ -1833,6 +2000,7 @@ function jaccard(a: Set<string>, b: Set<string>): number {
  * dashes and curly quotes, which reads as machine-written to the engines. */
 export function humanize(t: string): string {
   return t
+    .replace(/[\u2010\u2011]/g, "-")
     .replace(/\s*[—–]\s*/g, " - ")
     .replace(/~\s*(?=\d)/g, "about ")
     .replace(/~/g, "")
