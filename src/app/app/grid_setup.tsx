@@ -398,19 +398,32 @@ export function useGridSetup(a: GridSetupArgs) {
 
   async function fetchPool(
     anchor: { label: string; description: string },
-    exclude: { label: string; description: string }[]
+    exclude: { label: string; description: string }[],
+    decisionUnit: string,
+    silent: boolean
   ): Promise<{ label: string; description: string }[] | null> {
-    const data = await post<{ variants: { label: string; description: string }[] }>(
-      "/api/setup/grid/scenario",
-      {
-        category: a.category,
-        audience: a.audience || undefined,
-        decisionUnit: a.state?.moderators.decision_unit,
-        exclude: exclude.filter((s) => s.label.trim()).slice(-24),
-        nearTo: anchor,
+    try {
+      const res = await fetch("/api/setup/grid/scenario", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          category: a.category,
+          audience: a.audience || undefined,
+          decisionUnit,
+          exclude: exclude.filter((s) => s.label.trim()).slice(-24),
+          nearTo: anchor,
+        }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        // A background warm-up must never paint the gate red.
+        if (!silent) a.setError(data.error ?? "something went wrong");
+        return null;
       }
-    );
-    return data?.variants ?? null;
+      return (data.variants as { label: string; description: string }[]) ?? null;
+    } catch {
+      return null;
+    }
   }
 
   /** Prefetch the near-variant pool for every suggested card that lacks
@@ -424,10 +437,11 @@ export function useGridSetup(a: GridSetupArgs) {
     const targets = rows.filter((r) => r.suggested && r.label.trim() && !r.pool);
     if (targets.length === 0) return;
     const exclude = rows.map(({ label, description }) => ({ label, description }));
+    const du = String(st.moderators.decision_unit ?? "committee");
     const results = await Promise.all(
       targets.map(async (r) => ({
         key: poolAnchor(r).label,
-        pool: await fetchPool(poolAnchor(r), exclude).catch(() => null),
+        pool: await fetchPool(poolAnchor(r), exclude, du, true).catch(() => null),
       }))
     );
     const byKey = new Map(results.filter((x) => x.pool?.length).map((x) => [x.key, x.pool!]));
@@ -461,7 +475,9 @@ export function useGridSetup(a: GridSetupArgs) {
       a.setError(null);
       pool = (await fetchPool(
         poolAnchor(row),
-        rows.map(({ label, description }) => ({ label, description }))
+        rows.map(({ label, description }) => ({ label, description })),
+        String(a.state.moderators.decision_unit ?? "committee"),
+        false
       )) ?? undefined;
       a.setBusy(null);
       if (!pool || pool.length === 0) return;
