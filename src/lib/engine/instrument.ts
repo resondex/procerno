@@ -425,9 +425,9 @@ export async function readScenarios(input: {
   category: string;
   audience: string | null;
 }): Promise<{ base: Moderators; scenarios: ScenarioSpec[]; reserve: ScenarioSpec[] }> {
-  // "scenarios_journeys6": deviation-coherence rules + plain-language label
+  // "scenarios_journeys7": deviation-coherence rules + plain-language label
   // rule (no methodology words) changed the read.
-  const key = cacheKey("scenarios_journeys6", [input.category, input.audience]);
+  const key = cacheKey("scenarios_journeys7", [input.category, input.audience]);
   const hit = await store.cacheGet(key, CACHE_TTL_MS);
   if (hit) return JSON.parse(hit) as { base: Moderators; scenarios: ScenarioSpec[]; reserve: ScenarioSpec[] };
   const res = await openaiClient().chat.completions.create({
@@ -485,7 +485,15 @@ export async function readScenarios(input: {
           "owner). Notice: concrete moments, different axes, each changes " +
           "what an advisor recommends, none is a demographic. Write YOUR " +
           "category at that standard - the example is a bar for quality, " +
-          "never a template for content.",
+          "never a template for content, and never a template for SHAPE: " +
+          "your market's rooms are its own.\n" +
+          "Before returning, audit the core four for coverage: rank this " +
+          "market's buying rooms by how much revenue moves through them " +
+          "and check none of the biggest is missing. In categories sold " +
+          "to organizations, the large-organization purchase (procurement, " +
+          "security review, formal vendor evaluation) is almost always " +
+          "one of them; if a top room is absent it replaces the weakest " +
+          "scenario in the core set.",
       },
       {
         role: "user",
