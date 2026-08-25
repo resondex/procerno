@@ -1,6 +1,16 @@
 import { NextResponse } from "next/server";
+import { waitUntil } from "@vercel/functions";
 import { store } from "@/lib/store";
 import { requireAuth, requireRun } from "@/lib/auth";
+import { hasOpenBatches, pollRunBatches } from "@/lib/engine/batch";
+import { driveAndChain } from "@/lib/engine/runner";
+
+/** Per-run throttle for the opportunistic batch poll below (Hobby-plan
+ * crons are daily, so the dashboard's own progress polling stands in as
+ * the fast path). In-memory per instance is fine: worst case a second
+ * instance polls too, and ingest skips already-stored answers. */
+const lastPoll = new Map<string, number>();
+const POLL_EVERY_MS = 60_000;
 
 export async function GET(
   _req: Request,
@@ -12,6 +22,17 @@ export async function GET(
   const loaded = await requireRun(id, auth);
   if (loaded instanceof NextResponse) return loaded;
   const { run } = loaded;
+  // A batch-pipeline run being watched from the dashboard: check its
+  // vendor batches opportunistically so ingestion tracks completion time
+  // rather than the daily cron.
+  if (run.status === "running" && run.pipeline === "batch") {
+    const last = lastPoll.get(run.id) ?? 0;
+    if (Date.now() - last > POLL_EVERY_MS && (await hasOpenBatches(run.id))) {
+      lastPoll.set(run.id, Date.now());
+      const origin = new URL(_req.url).origin;
+      waitUntil(pollRunBatches(run.id).then(() => driveAndChain(run.id, origin)));
+    }
+  }
   const [prompts, completed, byModel] = await Promise.all([
     store.listPrompts(run.project_id),
     store.countResponses(id),
