@@ -916,6 +916,39 @@ export async function reviewScenarios(input: {
 
 /* -------------------------------- cells --------------------------------- */
 
+const CELL_WRITER_SYSTEM =
+  "You write the prompts for a research instrument that measures a " +
+          "brand's standing in AI assistant answers. For EACH cell in the " +
+          "plan, write exactly one prompt as a real person would type it " +
+          "into a chat assistant - varied length and register, some lowercase " +
+          "and terse, some with backstory; never survey-speak, never a " +
+          "requirements list.\n" +
+          "Typing, not prose: real asks are often short and get to the " +
+          "question fast; fragments happen; details are specific but " +
+          "unpolished. NEVER ad-copy patterns - no parallel lists of " +
+          "three, no balanced drama ('X is impossible and Y is a " +
+          "nightmare'), no polished metaphors, no rhetorical closers " +
+          "('get everyone on the same page'). If it would read well on a " +
+          "landing page, rewrite it until it reads like a chat message.\n" +
+          "Rules:\n" +
+          "- angle=generic: never name any brand - blind prompts are the " +
+          "measurement - UNLESS the cell's stage guidance says the buyer " +
+          "names the client brand (objections about it, its pricing, the " +
+          "case for it): there, name the CLIENT brand only, never a rival.\n" +
+          "- angle=<rival name>: for comparison-type stages, name the client " +
+          "brand AND that rival; for alternatives-type stages, ask for " +
+          "alternatives to that rival (client brand NOT named).\n" +
+          "- angle=defensive: ask for alternatives to the client brand by name.\n" +
+          "- Retention and loyalty stages speak as an existing customer and " +
+          "name the client brand where the guidance says so.\n" +
+          "- situation: weave the circumstance in naturally; do not label it.\n" +
+          "- journey(...): that cell's buyer decides that way - write the " +
+          "prompt in that buyer's register.\n" +
+          "- reach=<scenarios>: this single cell is asked by buyers in those " +
+          "scenarios only - voice it for them.\n" +
+          "- Punctuation people actually type: never an em dash, never the " +
+          "tilde character - write 'about 10', not '~10'.\n";
+
 export interface GridCell {
   stage: string;
   layer: Layer;
@@ -1039,38 +1072,7 @@ export async function generateGrid(input: {
     messages: [
       {
         role: "system",
-        content:
-          "You write the prompts for a research instrument that measures a " +
-          "brand's standing in AI assistant answers. For EACH cell in the " +
-          "plan, write exactly one prompt as a real person would type it " +
-          "into a chat assistant - varied length and register, some lowercase " +
-          "and terse, some with backstory; never survey-speak, never a " +
-          "requirements list.\n" +
-          "Typing, not prose: real asks are often short and get to the " +
-          "question fast; fragments happen; details are specific but " +
-          "unpolished. NEVER ad-copy patterns - no parallel lists of " +
-          "three, no balanced drama ('X is impossible and Y is a " +
-          "nightmare'), no polished metaphors, no rhetorical closers " +
-          "('get everyone on the same page'). If it would read well on a " +
-          "landing page, rewrite it until it reads like a chat message.\n" +
-          "Rules:\n" +
-          "- angle=generic: never name any brand - blind prompts are the " +
-          "measurement - UNLESS the cell's stage guidance says the buyer " +
-          "names the client brand (objections about it, its pricing, the " +
-          "case for it): there, name the CLIENT brand only, never a rival.\n" +
-          "- angle=<rival name>: for comparison-type stages, name the client " +
-          "brand AND that rival; for alternatives-type stages, ask for " +
-          "alternatives to that rival (client brand NOT named).\n" +
-          "- angle=defensive: ask for alternatives to the client brand by name.\n" +
-          "- Retention and loyalty stages speak as an existing customer and " +
-          "name the client brand where the guidance says so.\n" +
-          "- situation: weave the circumstance in naturally; do not label it.\n" +
-          "- journey(...): that cell's buyer decides that way - write the " +
-          "prompt in that buyer's register.\n" +
-          "- reach=<scenarios>: this single cell is asked by buyers in those " +
-          "scenarios only - voice it for them.\n" +
-          "- Punctuation people actually type: never an em dash, never the " +
-          "tilde character - write 'about 10', not '~10'.\n" +
+        content: CELL_WRITER_SYSTEM +
           "Return one cell object per plan line, same stage/situation/angle " +
           "values, in order.",
       },
@@ -1120,6 +1122,81 @@ export async function generateGrid(input: {
   });
   await store.cacheSet(key, JSON.stringify(cells));
   return cells;
+}
+
+/**
+ * ONE fresh prompt for a single cell - the "New prompt" button. Not a
+ * paraphrase: a different way to ask the cell's question, avoiding every
+ * previously offered text. Cached by cell identity + avoid list, so the
+ * new and previous draws are all cache-backed and cycling costs nothing.
+ */
+export async function regenerateCell(input: {
+  brand: string;
+  category: string;
+  competitors: string[];
+  audience: string | null;
+  base: Moderators;
+  scenarios: ScenarioSpec[];
+  cell: { stage: string; situation: string | null; angle: string; mode: string | null };
+  /** Every text already offered for this cell, newest last. */
+  avoid: string[];
+}): Promise<string | null> {
+  const rivals = input.competitors.slice(0, 4);
+  const stages = participationMask(input.base, input.scenarios);
+  const st = stages.find((x) => x.key === input.cell.stage);
+  if (!st) return null;
+  const avoidNorm = input.avoid.map((t) => t.trim()).filter(Boolean);
+  const key = cacheKey("cell_alt", [
+    STYLE_VERSION, input.brand, rivals.join(","), input.audience,
+    JSON.stringify(input.base), JSON.stringify(input.scenarios),
+    `${input.cell.stage}|${input.cell.situation ?? ""}|${input.cell.angle}|${input.cell.mode ?? ""}`,
+    avoidNorm.map((t) => t.toLowerCase()).sort().join("~"),
+  ]);
+  const hit = await store.cacheGet(key, CACHE_TTL_MS);
+  if (hit) return humanize(JSON.parse(hit) as string);
+  const jn = input.cell.situation
+    ? journeyNote(input.base, input.scenarios.find((sc) => sc.label === input.cell.situation) ?? { label: "", description: "", journey: null })
+    : null;
+  const planText =
+    `1. stage=${st.key} situation=${input.cell.situation ?? "-"} angle=${input.cell.angle}` +
+    `${input.cell.mode ? ` reach=${input.cell.mode}` : ""}${jn ? ` journey(${jn})` : ""}` +
+    `\n   guidance: ${st.hint}`;
+  const res = await openaiClient().chat.completions.create({
+    model: CELLS_MODEL,
+    messages: [
+      {
+        role: "system",
+        content: CELL_WRITER_SYSTEM +
+          "Write exactly ONE prompt for the single cell below. It must ask " +
+          "the cell's question a genuinely DIFFERENT WAY than every " +
+          "previous prompt listed - a different angle of attack, different " +
+          "concrete specifics, a different kind of asker - never a " +
+          "paraphrase or reordering of one. Return one cell object.",
+      },
+      {
+        role: "user",
+        content:
+          `Client brand: ${input.brand}\nCategory: ${input.category}\n` +
+          `Rivals: ${rivals.join(", ")}\nAudience: ${input.audience ?? "unknown"}\n\n` +
+          `Cell plan:\n${planText}\n\n` +
+          `Previous prompts for this cell (write something DIFFERENT):\n` +
+          (avoidNorm.map((t, i) => `${i + 1}. ${t}`).join("\n") || "- (none)"),
+      },
+    ],
+    response_format: {
+      type: "json_schema",
+      json_schema: { name: "grid_cells", strict: true, schema: CELLS_SCHEMA },
+    },
+  });
+  const parsed = JSON.parse(res.choices[0]?.message?.content ?? "{}") as {
+    cells: { text?: string }[];
+  };
+  const text = humanize((parsed.cells?.[0]?.text ?? "").trim());
+  if (!text) return null;
+  const dup = avoidNorm.some((t) => t.toLowerCase() === text.toLowerCase());
+  if (dup) return null;
+  await store.cacheSet(key, JSON.stringify(text));
+  return text;
 }
 
 /* ------------------------------ phrasings ------------------------------- */

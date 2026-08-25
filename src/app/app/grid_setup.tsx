@@ -40,6 +40,13 @@ export interface GridCellUi {
    * reach this stage, when not universal. */
   mode?: string | null;
   text: string;
+  /** Every prompt offered for this cell, oldest first ([0] = the composed
+   * seed); the user cycles through these. Absent = just the seed. */
+  alts?: string[];
+  /** Which entry of `alts` the card is showing. */
+  altIdx?: number;
+  /** "New prompt" draws used (capped at MAX_REGENS). */
+  regens?: number;
   /** Paraphrases beyond the seed text; empty until gate 3. */
   phrasings: GridPhrasing[];
 }
@@ -95,6 +102,8 @@ export interface ScenarioRow {
 export const MAX_SCENARIOS = 4;
 /** Near-neighbor draws per card before we ask the user to write their own. */
 export const MAX_VARIANTS = 3;
+/** "New prompt" draws per cell before we ask the user to write their own. */
+export const MAX_REGENS = 3;
 
 export interface GridState {
   step: "compose" | "cells" | "phrasings";
@@ -615,6 +624,72 @@ export function useGridSetup(a: GridSetupArgs) {
     return next;
   }
 
+  /** The cell's offered-prompt history, capturing a live manual edit into
+   * its current slot so cycling never loses the user's wording. */
+  function cellHistory(c: GridCellUi): { alts: string[]; idx: number } {
+    const alts = c.alts && c.alts.length > 0 ? [...c.alts] : [c.text];
+    const idx = Math.min(c.altIdx ?? 0, alts.length - 1);
+    if (c.text.trim() && c.text !== alts[idx]) alts[idx] = c.text;
+    return { alts, idx };
+  }
+
+  /** Gate 2 helper: a genuinely new prompt for one cell (not a paraphrase),
+   * avoiding everything already offered. On-demand only - no prefetch - but
+   * each draw is cached server-side, so revisits and other users are free. */
+  async function regenerateCell(i: number): Promise<void> {
+    if (!a.state) return;
+    const c = a.state.cells[i];
+    if (!c || (c.regens ?? 0) >= MAX_REGENS) return;
+    const { alts } = cellHistory(c);
+    a.setBusy("Writing a new prompt…");
+    a.setError(null);
+    const data = await post<{ text: string }>("/api/setup/grid/cell", {
+      brand: a.brand, category: a.category, competitors: a.competitors,
+      audience: a.audience || undefined,
+      base: a.state.moderators,
+      scenarios: a.state.scenarios,
+      cell: { stage: c.stage, situation: c.situation, angle: c.angle, mode: c.mode ?? null },
+      avoid: alts,
+    });
+    a.setBusy(null);
+    if (!data) return;
+    const nextAlts = [...alts, data.text];
+    a.setState({
+      ...a.state,
+      cells: a.state.cells.map((q, j) =>
+        j === i
+          ? {
+              ...q,
+              text: data.text,
+              alts: nextAlts,
+              altIdx: nextAlts.length - 1,
+              regens: (q.regens ?? 0) + 1,
+              // A different question invalidates the old paraphrases.
+              phrasings: [],
+            }
+          : q
+      ),
+    });
+  }
+
+  /** Cycle a cell through its offered prompts (pure client, instant). */
+  function cycleCell(i: number, dir: 1 | -1): void {
+    if (!a.state) return;
+    const c = a.state.cells[i];
+    if (!c) return;
+    const { alts, idx } = cellHistory(c);
+    if (alts.length < 2) return;
+    const next = (idx + dir + alts.length) % alts.length;
+    a.setState({
+      ...a.state,
+      cells: a.state.cells.map((q, j) =>
+        j === i
+          ? { ...q, text: alts[next], alts, altIdx: next, phrasings: [] }
+          : q
+      ),
+    });
+  }
+
   /* ------------------------- cache warmers ------------------------------
    * Fire-and-forget copies of the requests the NEXT gate will make, sent
    * while the user is still reading the current one - the click then hits
@@ -675,6 +750,7 @@ export function useGridSetup(a: GridSetupArgs) {
   return {
     compose, writeCells, writePhrasings, suggestScenario, nearScenario,
     prefetchNearPools, warmRead, warmCells, warmPhrasings,
+    regenerateCell, cycleCell,
   };
 }
 
@@ -1342,11 +1418,16 @@ function useFolds() {
 
 /** Gate 2: one seed prompt per cell - layers and stages both fold. */
 export function CellsGate({
-  state, setState, brandNames,
+  state, setState, brandNames, onRegenerate, onCycle, busy,
 }: {
   state: GridState;
   setState: (s: GridState) => void;
   brandNames: string[];
+  /** Draw a genuinely new prompt for cell i (max MAX_REGENS). */
+  onRegenerate: (i: number) => void;
+  /** Step cell i through its offered prompts. */
+  onCycle: (i: number, dir: 1 | -1) => void;
+  busy: boolean;
 }) {
   const folds = useFolds();
   return (
@@ -1381,19 +1462,62 @@ export function CellsGate({
                     · {namesAny(c.text, brandNames) ? "branded" : "blind"}
                   </span>
                 </span>
-                <textarea
-                  className="input w-full resize-none field-sizing-content text-sm"
-                  rows={1}
-                  value={c.text}
-                  onChange={(e) =>
-                    setState({
-                      ...state,
-                      cells: state.cells.map((q, j) =>
-                        j === c.i ? { ...q, text: e.target.value } : q
-                      ),
-                    })
-                  }
-                />
+                <div className="flex-1 grid gap-1">
+                  <textarea
+                    className="input w-full resize-none field-sizing-content text-sm"
+                    rows={1}
+                    value={c.text}
+                    onChange={(e) =>
+                      setState({
+                        ...state,
+                        cells: state.cells.map((q, j) =>
+                          j === c.i ? { ...q, text: e.target.value } : q
+                        ),
+                      })
+                    }
+                  />
+                  <div className="flex items-center gap-3 text-[11px]">
+                    {(c.regens ?? 0) < MAX_REGENS ? (
+                      <button
+                        type="button"
+                        disabled={busy}
+                        onClick={() => onRegenerate(c.i)}
+                        title="Ask this cell's question a different way - not a paraphrase"
+                        className="font-medium text-primary hover:opacity-80 disabled:opacity-50"
+                      >
+                        ↻ New prompt
+                        {(c.regens ?? 0) > 0 && (
+                          <span className="font-normal text-ink-3"> · {MAX_REGENS - (c.regens ?? 0)} left</span>
+                        )}
+                      </button>
+                    ) : (
+                      <span className="text-ink-3">{MAX_REGENS} rewrites used - edit it to taste</span>
+                    )}
+                    {(c.alts?.length ?? 1) > 1 && (
+                      <span className="flex items-center gap-1 text-ink-3">
+                        <button
+                          type="button"
+                          aria-label="previous offered prompt"
+                          disabled={busy}
+                          onClick={() => onCycle(c.i, -1)}
+                          className="px-1 hover:text-ink disabled:opacity-50"
+                        >
+                          ‹
+                        </button>
+                        {Math.min((c.altIdx ?? 0) + 1, c.alts!.length)}/{c.alts!.length}
+                        <button
+                          type="button"
+                          aria-label="next offered prompt"
+                          disabled={busy}
+                          onClick={() => onCycle(c.i, 1)}
+                          className="px-1 hover:text-ink disabled:opacity-50"
+                        >
+                          ›
+                        </button>
+                      </span>
+                    )}
+                  </div>
+                </div>
                 <button
                   type="button"
                   aria-label="remove cell"
