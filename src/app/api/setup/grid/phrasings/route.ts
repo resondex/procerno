@@ -50,6 +50,9 @@ const Body = z.object({
     .max(30),
   count: z.number().int().min(2).max(20).default(10),
   force: z.boolean().optional(),
+  /** Background warm: fill the cache but never wait on another request's
+   * in-flight work - the confirm that needs results does the waiting. */
+  warm: z.boolean().optional(),
 });
 
 /** Gate 3: the paraphrase set for each confirmed seed prompt. */
@@ -74,6 +77,7 @@ export async function POST(req: Request) {
     cells,
     count,
     force,
+    noWait: parsed.data.warm,
   });
   return NextResponse.json({ phrasings });
 }

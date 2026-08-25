@@ -55,6 +55,10 @@ export interface GridCellUi {
   original?: string;
   /** Paraphrases beyond the seed text; empty until gate 3. */
   phrasings: GridPhrasing[];
+  /** The wording the current set was generated for. When the live text
+   * drifts from this (a post-write edit), the set is stale: it gets
+   * banked on blur and the missing-paraphrases gate takes over. */
+  phrasedFor?: string;
   /** Paraphrase sets already written for wordings this cell has moved off
    * of, keyed by exact prompt text - cycling back to a wording restores
    * its set instead of regenerating it. */
@@ -67,11 +71,18 @@ export interface GridCellUi {
 export function swapPhrasings(
   c: GridCellUi,
   nextText: string
-): Pick<GridCellUi, "phrasings" | "phrasingsByText"> {
+): Pick<GridCellUi, "phrasings" | "phrasingsByText" | "phrasedFor"> {
+  // The set is banked under the wording it was GENERATED for - the live
+  // text may have drifted since (a post-write edit).
+  const owner = (c.phrasedFor ?? c.text).trim();
   const bank = c.phrasings.some((p) => p.text.trim())
-    ? { ...(c.phrasingsByText ?? {}), [c.text.trim()]: c.phrasings }
+    ? { ...(c.phrasingsByText ?? {}), [owner]: c.phrasings }
     : c.phrasingsByText;
-  return { phrasings: bank?.[nextText.trim()] ?? [], phrasingsByText: bank };
+  return {
+    phrasings: bank?.[nextText.trim()] ?? [],
+    phrasingsByText: bank,
+    phrasedFor: nextText,
+  };
 }
 
 export interface Journey {
@@ -182,6 +193,7 @@ export function normalizeGrid(g: GridState | null): GridState | null {
       // Drafts from before the prompt review carry no machine baseline -
       // treat the saved text as it, so nothing is retroactively flagged.
       original: scrubPrompt(c.original ?? c.text),
+      phrasedFor: c.phrasedFor !== undefined ? scrubPrompt(c.phrasedFor) : undefined,
       // The cycling history and the bank keys get the same scrub as the
       // live text, so cycling to a draft-frozen wording can't reintroduce
       // banned punctuation and bank lookups keep matching.
@@ -679,8 +691,10 @@ export function useGridSetup(a: GridSetupArgs) {
           merged[i] = {
             ...merged[i],
             // Each paraphrase carries its machine wording as the baseline
-            // the edit-review compares against.
+            // the edit-review compares against; the cell remembers which
+            // seed wording this set belongs to.
             phrasings: (data.phrasings[k] ?? []).map((ph) => ({ ...ph, original: ph.text })),
+            phrasedFor: merged[i].text,
           };
         });
         done += idx.length;
@@ -761,6 +775,7 @@ export function useGridSetup(a: GridSetupArgs) {
           regens: (q.regens ?? 0) + 1,
           phrasingsByText: swap.phrasingsByText,
           phrasings: generated.length > 0 ? generated : swap.phrasings,
+          phrasedFor: data.text,
         };
       }),
     });
@@ -815,7 +830,17 @@ export function useGridSetup(a: GridSetupArgs) {
         audience: a.audience || undefined,
         base: st.moderators, scenarios: st.scenarios, stageKeys: st.keptStages,
       }),
-    }).catch(() => {});
+    })
+      .then(async (r) => {
+        if (!r.ok) return;
+        // The cells exist the moment this warm returns - start their
+        // paraphrases cooking too, buying the write the whole coverage-
+        // review window on top of the prompts-review window.
+        const data = (await r.json().catch(() => null)) as { cells?: GridCellUi[] } | null;
+        if (!data?.cells?.length) return;
+        warmPhrasings({ ...st, cells: data.cells.map((c) => ({ ...c, phrasings: [] })) });
+      })
+      .catch(() => {});
   }
 
   function warmPhrasings(fresh?: GridState | null): void {
@@ -841,6 +866,7 @@ export function useGridSetup(a: GridSetupArgs) {
               angle: cells[i].angle, mode: cells[i].mode ?? null, text: cells[i].text,
             })),
             count: PHRASING_COUNT,
+            warm: true,
           }),
         }).catch(() => {});
       }
@@ -1611,7 +1637,6 @@ export function CellsGate({
               const branded = live.filter((c) => namesAny(c.text, brandNames)).length;
               const blind = live.length - branded;
               const prompts = live.reduce((n, c) => n + countOf(c), 0);
-              const short = live.filter((c) => countOf(c) < PHRASING_COUNT).length;
               const isOpen = open.has(stage);
               return (
                 <div key={stage}>
@@ -1630,12 +1655,13 @@ export function CellsGate({
                     </span>
                     <TagChip tag={stageOf(state, stage)?.tag ?? "picks"} />
                     <span className="ml-auto flex gap-3 text-[11px] text-ink-3 whitespace-nowrap">
-                      <span>{live.length} question{live.length === 1 ? "" : "s"}</span>
+                      <span className={live.length < scells.length ? "text-warning" : ""}>
+                        {live.length}/{scells.length} questions
+                      </span>
                       {written ? (
-                        <>
-                          <span>{prompts} prompts</span>
-                          {short > 0 && <span className="text-warning">{short} short</span>}
-                        </>
+                        <span className={prompts < scells.length * PHRASING_COUNT ? "text-warning" : ""}>
+                          {prompts}/{scells.length * PHRASING_COUNT} prompts
+                        </span>
                       ) : (
                         <>
                           {blind > 0 && <span>{blind} blind</span>}
@@ -1674,9 +1700,19 @@ export function CellsGate({
                                     : "bg-warning/10 text-warning"
                                 }`}
                               >
-                                {countOf(c)} prompts
+                                {countOf(c)}/{PHRASING_COUNT} prompts
                               </span>
                             )}
+                            <button
+                              type="button"
+                              aria-label="remove cell"
+                              onClick={() =>
+                                setState({ ...state, cells: state.cells.filter((_, j) => j !== c.i) })
+                              }
+                              className="ml-auto text-ink-3 hover:text-danger text-[15px] leading-none"
+                            >
+                              ×
+                            </button>
                           </div>
                           <textarea
                             className="input w-full resize-none field-sizing-content text-sm"
@@ -1691,7 +1727,26 @@ export function CellsGate({
                                 ),
                               })
                             }
-                            onBlur={() => onWarmReview?.()}
+                            onBlur={() => {
+                              // A post-write edit orphans the set: bank it
+                              // under the wording it was written for and
+                              // let the missing-paraphrases gate take over.
+                              // The reverse also holds - retyping a banked
+                              // wording restores its set on the spot.
+                              const hasSet = c.phrasings.some((p) => p.text.trim());
+                              const drifted = c.text.trim() !== (c.phrasedFor ?? c.text).trim();
+                              const restorable =
+                                !hasSet && (c.phrasingsByText?.[c.text.trim()]?.length ?? 0) > 0;
+                              if (written && ((hasSet && drifted) || restorable)) {
+                                setState({
+                                  ...state,
+                                  cells: state.cells.map((q, j) =>
+                                    j === c.i ? { ...q, ...swapPhrasings(q, q.text) } : q
+                                  ),
+                                });
+                              }
+                              onWarmReview?.();
+                            }}
                           />
                           <div className="flex items-center gap-3 border-t border-dashed border-line pt-1.5 text-[11px]">
                             {pending === c.i ? (
@@ -1750,16 +1805,6 @@ export function CellsGate({
                                 {openPhr === c.i ? "Hide paraphrases ▴" : "Show paraphrases ▾"}
                               </button>
                             )}
-                            <button
-                              type="button"
-                              aria-label="remove cell"
-                              onClick={() =>
-                                setState({ ...state, cells: state.cells.filter((_, j) => j !== c.i) })
-                              }
-                              className="ml-auto text-ink-3 hover:text-danger text-[15px] leading-none"
-                            >
-                              ×
-                            </button>
                           </div>
                           {written && openPhr === c.i && (
                             <div className="grid gap-1.5 pt-1">
@@ -1806,6 +1851,8 @@ export function CellsGate({
                               ))}
                               <button
                                 type="button"
+                                disabled={countOf(c) >= PHRASING_COUNT}
+                                title={countOf(c) >= PHRASING_COUNT ? `The set is full at ${PHRASING_COUNT} - remove one to add your own` : undefined}
                                 onClick={() =>
                                   setState({
                                     ...state,
@@ -1814,7 +1861,7 @@ export function CellsGate({
                                     ),
                                   })
                                 }
-                                className="text-[13px] font-medium text-primary hover:opacity-80 w-fit"
+                                className="text-[13px] font-medium text-primary hover:opacity-80 disabled:opacity-40 w-fit"
                               >
                                 + Add paraphrase
                               </button>

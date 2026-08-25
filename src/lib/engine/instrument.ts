@@ -1451,9 +1451,15 @@ export interface Phrasing {
 
 // Bump when the paraphrase prompt or filters change: cached sets written
 // under old instructions must not be served as if they were new.
-const PHRASINGS_VERSION = "p4";
+// "p5": per-cell cache entries with in-flight pending markers.
+const PHRASINGS_VERSION = "p5";
 // Over-generate so the overlap filter can be strict and still fill the set.
 const PHRASINGS_EXTRA = 3;
+/** How long a pending marker is trusted before another request concludes
+ * the generator died and takes the cell over. Fits inside the route's
+ * 120s budget with room for the takeover generation. */
+const PHRASINGS_PENDING_TTL_MS = 100_000;
+const PHRASINGS_POLL_MS = 2_000;
 
 /**
  * Paraphrase sets: for each (confirmed) cell, write the other wordings real
@@ -1477,27 +1483,48 @@ export async function generatePhrasings(input: {
   count: number;
   /** Skip the cache read: the user asked for a fresh set. */
   force?: boolean;
+  /** A background warm: generate what nobody else is generating, but never
+   * sit waiting on another request's in-flight work. */
+  noWait?: boolean;
   /** Diagnostic hook: receives the raw parsed model output. */
   onRaw?: (raw: unknown) => void;
 }): Promise<Phrasing[][]> {
   const want = Math.max(0, input.count - 1);
   if (want === 0 || input.cells.length === 0) return input.cells.map(() => []);
   const rivals = input.competitors.slice(0, 4);
-  const key = cacheKey("phrasings", [
+  // Per-cell cache entries: one edited question re-buys only itself, any
+  // batch slicing hits the same entries, and the single-cell fill shares
+  // them. The base read and journeys stay in the key - a read edit that
+  // leaves a cell's text identical must not serve paraphrases voiced
+  // under the old read.
+  const ctx = [
     PHRASINGS_VERSION, STYLE_VERSION, input.brand, rivals.join(","), input.audience, String(input.count),
-    // The base read voices the paraphrases (decision unit picks the asker
-    // roles) and deviating journeys voice their columns - both belong in
-    // the key, or a read edit that leaves a cell's text identical would
-    // serve paraphrases voiced under the old read.
     JSON.stringify(input.base),
     input.scenarios.map((sc) => `${sc.label}:${JSON.stringify(sc.journey)}`).join("|"),
-    input.cells.map((c) => `${c.situation ?? ""}|${c.mode ?? ""}|${c.text}`).join("\n"),
-  ]);
-  const hit = input.force ? null : await store.cacheGet(key, CACHE_TTL_MS);
-  if (hit) {
-    const cached = JSON.parse(hit) as Phrasing[][];
-    return cached.map((cell) => cell.map((ph) => ({ ...ph, text: humanize(ph.text) })));
-  }
+  ];
+  const keys = input.cells.map((c) =>
+    cacheKey("phrasings", [...ctx, `${c.situation ?? ""}|${c.mode ?? ""}|${c.text}`])
+  );
+  const out: Phrasing[][] = input.cells.map(() => []);
+
+  /** A pending marker's claim time, or null for a real value / no entry. */
+  const pendingAt = (raw: string | null): number | null => {
+    if (!raw) return null;
+    try {
+      const v = JSON.parse(raw) as { __pending?: number } | Phrasing[];
+      return Array.isArray(v) ? null : typeof v.__pending === "number" ? v.__pending : null;
+    } catch {
+      return null;
+    }
+  };
+  const valueOf = (raw: string): Phrasing[] | null => {
+    try {
+      const v = JSON.parse(raw) as { __pending?: number } | Phrasing[];
+      return Array.isArray(v) ? v.map((ph) => ({ ...ph, text: humanize(ph.text) })) : null;
+    } catch {
+      return null;
+    }
+  };
 
   const rivalsList = rivals;
   const journeyLines = input.scenarios
@@ -1608,21 +1635,97 @@ export async function generatePhrasings(input: {
     return result;
   }
 
-  const out = await pass(input.cells);
-  // Reasoning models occasionally return a degenerate, near-empty set for a
-  // whole batch. One retry on the cells that came up short (under half the
-  // target) fills the gap without re-running what already worked.
-  const deficient = out.map((k, i) => (k.length < want / 2 ? i : -1)).filter((i) => i >= 0);
-  if (deficient.length > 0) {
-    const again = await pass(deficient.map((i) => input.cells[i]));
-    deficient.forEach((i, k) => {
-      if (again[k].length > out[i].length) out[i] = again[k];
+  /** Generate the given cells in one pass (plus the degenerate-set retry)
+   * and cache each cell on its own key. Markers are claimed FIRST so a
+   * concurrent identical request joins this work instead of repeating it. */
+  const generate = async (idx: number[]): Promise<void> => {
+    if (idx.length === 0) return;
+    await Promise.all(
+      idx.map((i) => store.cacheSet(keys[i], JSON.stringify({ __pending: Date.now() })))
+    );
+    const subset = idx.map((i) => input.cells[i]);
+    const got = await pass(subset);
+    // Reasoning models occasionally return a degenerate, near-empty set
+    // for a whole batch. One retry on the cells that came up short fills
+    // the gap without re-running what already worked.
+    const deficient = got.map((k, j) => (k.length < want / 2 ? j : -1)).filter((j) => j >= 0);
+    if (deficient.length > 0) {
+      const again = await pass(deficient.map((j) => subset[j]));
+      deficient.forEach((j, k) => {
+        if (again[k].length > got[j].length) got[j] = again[k];
+      });
+    }
+    await Promise.all(
+      idx.map((i, j) => {
+        out[i] = got[j];
+        // Never cache an empty set as real - that would make a transient
+        // failure sticky. A zero-stamped marker reads as stale, so waiters
+        // stop waiting and the next request retries.
+        return store.cacheSet(
+          keys[i],
+          got[j].length > 0 ? JSON.stringify(got[j]) : JSON.stringify({ __pending: 0 })
+        );
+      })
+    );
+  };
+
+  const mine: number[] = [];
+  const theirs: number[] = [];
+  if (input.force) {
+    input.cells.forEach((_, i) => mine.push(i));
+  } else {
+    const raws = await Promise.all(keys.map((k) => store.cacheGet(k, CACHE_TTL_MS)));
+    raws.forEach((raw, i) => {
+      if (raw) {
+        const at = pendingAt(raw);
+        if (at === null) {
+          const v = valueOf(raw);
+          if (v && v.length > 0) {
+            out[i] = v;
+            return;
+          }
+        } else if (Date.now() - at < PHRASINGS_PENDING_TTL_MS) {
+          theirs.push(i);
+          return;
+        }
+      }
+      mine.push(i);
     });
   }
-  // Never cache an all-empty result: that would make a transient failure sticky.
-  if (out.some((k) => k.length > 0)) {
-    await store.cacheSet(key, JSON.stringify(out));
-  }
+
+  /** Poll for cells another request claimed; a cell whose marker goes
+   * stale (its generator died) is taken over here. */
+  const waitForTheirs = async (): Promise<void> => {
+    if (theirs.length === 0 || input.noWait) return;
+    const open = new Set(theirs);
+    const deadline = Date.now() + PHRASINGS_PENDING_TTL_MS;
+    while (open.size > 0 && Date.now() < deadline) {
+      await new Promise((r) => setTimeout(r, PHRASINGS_POLL_MS));
+      const pend = [...open];
+      const raws = await Promise.all(pend.map((i) => store.cacheGet(keys[i], CACHE_TTL_MS)));
+      const orphaned: number[] = [];
+      raws.forEach((raw, k) => {
+        const i = pend[k];
+        const at = pendingAt(raw);
+        if (raw && at === null) {
+          const v = valueOf(raw);
+          if (v && v.length > 0) {
+            out[i] = v;
+            open.delete(i);
+            return;
+          }
+        }
+        if (at === null || Date.now() - at >= PHRASINGS_PENDING_TTL_MS) {
+          orphaned.push(i);
+          open.delete(i);
+        }
+      });
+      if (orphaned.length > 0) await generate(orphaned);
+    }
+    if (open.size > 0) await generate([...open]);
+  };
+
+  await Promise.all([generate(mine), waitForTheirs()]);
   return out;
 }
 
