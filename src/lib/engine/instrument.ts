@@ -1288,6 +1288,12 @@ export async function generatePhrasings(input: {
   const rivals = input.competitors.slice(0, 4);
   const key = cacheKey("phrasings", [
     PHRASINGS_VERSION, STYLE_VERSION, input.brand, rivals.join(","), input.audience, String(input.count),
+    // The base read voices the paraphrases (decision unit picks the asker
+    // roles) and deviating journeys voice their columns - both belong in
+    // the key, or a read edit that leaves a cell's text identical would
+    // serve paraphrases voiced under the old read.
+    JSON.stringify(input.base),
+    input.scenarios.map((sc) => `${sc.label}:${JSON.stringify(sc.journey)}`).join("|"),
     input.cells.map((c) => `${c.situation ?? ""}|${c.mode ?? ""}|${c.text}`).join("\n"),
   ]);
   const hit = input.force ? null : await store.cacheGet(key, CACHE_TTL_MS);

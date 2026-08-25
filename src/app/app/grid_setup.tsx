@@ -786,18 +786,23 @@ function TagChip({ tag }: { tag: GridStage["tag"] }) {
 /** Step "Buying scenarios": one card per scenario - tick, label,
  * description, and the journey. Nothing else competes for the screen. */
 export function ScenariosGate({
-  state, setState, onRecompose, onSuggestScenario, onNearScenario, busy,
-  maxScenarios = MAX_SCENARIOS,
+  state, setState, onRecompose, onRecomposeBase, onSuggestScenario, onNearScenario, busy,
+  maxScenarios = MAX_SCENARIOS, readDelta,
 }: {
   state: GridState;
   setState: (s: GridState) => void;
   onRecompose: (base: GridState["moderators"], rows: ScenarioRow[]) => void;
+  /** A "Your market buys" edit - same recompose, but the wizard narrates
+   * what changed via `readDelta`. */
+  onRecomposeBase: (base: GridState["moderators"], rows: ScenarioRow[]) => void;
   onSuggestScenario: () => void;
   /** Draw a near variant of card i - same circumstance, one detail moved. */
   onNearScenario: (i: number) => void;
   busy: boolean;
   /** The plan's scenario cap (PLAN_SCENARIO_CAPS). */
   maxScenarios?: number;
+  /** What the last base-read edit changed downstream, or null. */
+  readDelta?: string | null;
 }) {
   const [editRead, setEditRead] = useState(false);
   const cap = maxScenarios;
@@ -847,7 +852,7 @@ export function ScenariosGate({
                 value={String(state.moderators[f.key] ?? "")}
                 disabled={busy}
                 onChange={(e) =>
-                  onRecompose({ ...state.moderators, [f.key]: e.target.value }, rows)
+                  onRecomposeBase({ ...state.moderators, [f.key]: e.target.value }, rows)
                 }
                 className="rounded-full bg-primary-soft px-2 py-0.5 text-[11px] font-medium text-primary border-0 cursor-pointer"
               >
@@ -866,6 +871,9 @@ export function ScenariosGate({
           </span>
         )}
       </div>
+      {readDelta && (
+        <p className="text-[12px] text-primary font-medium">{readDelta}</p>
+      )}
       <p className="text-[12px] text-ink-3">
         The circumstances that change the right answer. Each one becomes a
         column of your Landscape - the coverage map on the next step shows
