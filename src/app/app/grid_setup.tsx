@@ -828,10 +828,10 @@ export function ScenariosGate({
 
   return (
     <div className="grid gap-3 max-w-4xl">
+      <span className="text-[10.5px] font-semibold uppercase tracking-wide text-primary">
+        How they generally decide
+      </span>
       <div className="flex flex-wrap items-baseline gap-2 text-[13px]">
-        <span className="text-[11px] font-semibold uppercase tracking-wide text-ink-3">
-          Your market buys:
-        </span>
         {!editRead ? (
           <>
             <span className="text-ink-2">{readSentence}</span>
@@ -874,6 +874,9 @@ export function ScenariosGate({
       {readDelta && (
         <p className="text-[12px] text-primary font-medium">{readDelta}</p>
       )}
+      <span className="mt-3 text-[10.5px] font-semibold uppercase tracking-wide text-primary">
+        Who&apos;s generally buying
+      </span>
       <p className="text-[12px] text-ink-2">
         Tick the scenarios worth measuring - each becomes a column of your
         Landscape.
