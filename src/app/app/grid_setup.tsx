@@ -294,8 +294,11 @@ export function useGridSetup(a: GridSetupArgs) {
   async function compose(edit?: {
     base: GridState["moderators"];
     rows: ScenarioRow[];
+    /** Caller owns the busy indicator (it is running this alongside
+     * something else); errors still surface. */
+    silent?: boolean;
   }): Promise<GridState | null> {
-    a.setBusy(edit ? "Recomposing…" : "Reading your market…");
+    if (!edit?.silent) a.setBusy(edit ? "Recomposing…" : "Reading your market…");
     a.setError(null);
     const activeRows = edit?.rows.filter((r) => r.on && r.label.trim()) ?? [];
     const data = await post<{
@@ -313,7 +316,7 @@ export function useGridSetup(a: GridSetupArgs) {
           }
         : {}),
     });
-    a.setBusy(null);
+    if (!edit?.silent) a.setBusy(null);
     if (!data) return null;
     let rows: ScenarioRow[];
     if (edit) {
@@ -612,7 +615,67 @@ export function useGridSetup(a: GridSetupArgs) {
     return next;
   }
 
-  return { compose, writeCells, writePhrasings, suggestScenario, nearScenario, prefetchNearPools };
+  /* ------------------------- cache warmers ------------------------------
+   * Fire-and-forget copies of the requests the NEXT gate will make, sent
+   * while the user is still reading the current one - the click then hits
+   * the server cache. Silent by design: a failed warm costs nothing. */
+
+  function warmRead(category?: string, audience?: string): void {
+    const cat = (category ?? a.category).trim();
+    if (!cat) return;
+    void fetch("/api/setup/grid/compose", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ category: cat, audience: (audience ?? a.audience) || undefined }),
+    }).catch(() => {});
+  }
+
+  function warmCells(fresh?: GridState | null): void {
+    const st = fresh ?? a.state;
+    if (!st || st.keptStages.length === 0 || st.scenarios.length === 0) return;
+    if (st.scenarios.some((s) => !s.label.trim())) return;
+    void fetch("/api/setup/grid/cells", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        brand: a.brand, category: a.category, competitors: a.competitors,
+        audience: a.audience || undefined,
+        base: st.moderators, scenarios: st.scenarios, stageKeys: st.keptStages,
+      }),
+    }).catch(() => {});
+  }
+
+  function warmPhrasings(fresh?: GridState | null): void {
+    const st = fresh ?? a.state;
+    if (!st) return;
+    const cells = st.cells.filter((c) => c.text.trim());
+    if (cells.length === 0) return;
+    for (const layer of LAYERS) {
+      const idx = cells.map((c, i) => (c.layer === layer ? i : -1)).filter((i) => i >= 0);
+      for (let k = 0; k < idx.length; k += PHRASING_BATCH) {
+        const slice = idx.slice(k, k + PHRASING_BATCH);
+        void fetch("/api/setup/grid/phrasings", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            brand: a.brand, category: a.category, competitors: a.competitors,
+            audience: a.audience || undefined,
+            base: st.moderators, scenarios: st.scenarios,
+            cells: slice.map((i) => ({
+              stage: cells[i].stage, situation: cells[i].situation,
+              angle: cells[i].angle, mode: cells[i].mode ?? null, text: cells[i].text,
+            })),
+            count: PHRASING_COUNT,
+          }),
+        }).catch(() => {});
+      }
+    }
+  }
+
+  return {
+    compose, writeCells, writePhrasings, suggestScenario, nearScenario,
+    prefetchNearPools, warmRead, warmCells, warmPhrasings,
+  };
 }
 
 /* -------------------------------- views --------------------------------- */
