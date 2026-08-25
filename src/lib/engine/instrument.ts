@@ -425,9 +425,9 @@ export async function readScenarios(input: {
   category: string;
   audience: string | null;
 }): Promise<{ base: Moderators; scenarios: ScenarioSpec[]; reserve: ScenarioSpec[] }> {
-  // "scenarios_journeys7": deviation-coherence rules + plain-language label
+  // "scenarios_journeys8": deviation-coherence rules + plain-language label
   // rule (no methodology words) changed the read.
-  const key = cacheKey("scenarios_journeys7", [input.category, input.audience]);
+  const key = cacheKey("scenarios_journeys8", [input.category, input.audience]);
   const hit = await store.cacheGet(key, CACHE_TTL_MS);
   if (hit) return JSON.parse(hit) as { base: Moderators; scenarios: ScenarioSpec[]; reserve: ScenarioSpec[] };
   const res = await openaiClient().chat.completions.create({
@@ -488,12 +488,14 @@ export async function readScenarios(input: {
           "never a template for content, and never a template for SHAPE: " +
           "your market's rooms are its own.\n" +
           "Before returning, audit the core four for coverage: rank this " +
-          "market's buying rooms by how much revenue moves through them " +
-          "and check none of the biggest is missing. In categories sold " +
-          "to organizations, the large-organization purchase (procurement, " +
-          "security review, formal vendor evaluation) is almost always " +
-          "one of them; if a top room is absent it replaces the weakest " +
-          "scenario in the core set.",
+          "market's buying rooms by how much revenue moves through them, " +
+          "ensuring a diverse sampling, and check none of the biggest is " +
+          "missing. In categories sold to organizations, the " +
+          "large-organization purchase is almost always one of them; if a " +
+          "top room is absent it replaces the weakest scenario in the " +
+          "core set. If the market genuinely has a second decision " +
+          "process - a scenario whose buyer decides differently - its " +
+          "room stays in the core set alongside the revenue-ranked ones.",
       },
       {
         role: "user",
