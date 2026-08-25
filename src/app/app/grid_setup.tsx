@@ -786,7 +786,7 @@ function TagChip({ tag }: { tag: GridStage["tag"] }) {
 /** Step "Buying scenarios": one card per scenario - tick, label,
  * description, and the journey. Nothing else competes for the screen. */
 export function ScenariosGate({
-  state, setState, onRecompose, onRecomposeBase, onSuggestScenario, onNearScenario, busy,
+  state, setState, onRecompose, onRecomposeBase, onSuggestScenario, onNearScenario, onWarmReview, busy,
   maxScenarios = MAX_SCENARIOS, readDelta,
 }: {
   state: GridState;
@@ -798,6 +798,9 @@ export function ScenariosGate({
   onSuggestScenario: () => void;
   /** Draw a near variant of card i - same circumstance, one detail moved. */
   onNearScenario: (i: number) => void;
+  /** Silent cache warm for the confirm-time quality check - fired on
+   * field blur so the confirm usually lands on a cached verdict. */
+  onWarmReview?: () => void;
   busy: boolean;
   /** The plan's scenario cap (PLAN_SCENARIO_CAPS). */
   maxScenarios?: number;
@@ -924,16 +927,11 @@ export function ScenariosGate({
               value={sc.label}
               placeholder="label"
               onChange={(e) => updateRow(i, { label: e.target.value })}
-              onBlur={() => sc.on && onRecompose(state.moderators, rows)}
+              onBlur={() => {
+                if (sc.on) onRecompose(state.moderators, rows);
+                onWarmReview?.();
+              }}
             />
-            {sc.suggested && (
-              <span
-                className="rounded-full bg-primary-soft px-2 py-px text-[9.5px] font-medium text-primary"
-                title="suggested - untick to leave it out"
-              >
-                suggested
-              </span>
-            )}
           </div>
           <textarea
             className="input w-full resize-none field-sizing-content text-sm"
@@ -941,6 +939,7 @@ export function ScenariosGate({
             value={sc.description}
             placeholder="one sentence describing the circumstance"
             onChange={(e) => updateRow(i, { description: e.target.value })}
+            onBlur={() => onWarmReview?.()}
           />
           {sc.journey && sc.on && (
             <div className="flex flex-wrap items-center gap-1.5">
@@ -1315,6 +1314,18 @@ export function CoverageGate({
         Untick any stage your buyers skip - a missing dot is a question that
         buyer never asks, and a question that never costs anything.
       </p>
+      <HowItWorks>
+        <p className="m-0">
+          Each scenario walks the stages its buyer actually walks - the map
+          is derived from how your market buys, never hand-drawn. Keep a
+          not-recommended stage only if your judgement says buyers reach it;
+          if the map looks wrong, the reads are usually what&apos;s off.
+        </p>
+        <p className="m-0">
+          Hover any stage name for what it asks and why it&apos;s in or out
+          for this market.
+        </p>
+      </HowItWorks>
       <div className="overflow-x-auto rounded-lg border border-line">
         <table className="w-full border-collapse text-[12px]">
           <thead>
@@ -1350,7 +1361,6 @@ export function CoverageGate({
                       onClick={() => folds.toggle(layer)}
                       className="flex items-center gap-1.5 px-3 pt-2 pb-1 text-sm font-semibold uppercase tracking-wide text-primary w-full text-left"
                     >
-                      <span aria-hidden="true" className="text-ink-3">{open ? "▾" : "▸"}</span>
                       {layer}
                       {!open && (
                         <span className="font-normal normal-case tracking-normal text-ink-3">
@@ -1377,18 +1387,6 @@ export function CoverageGate({
             : `+ ${hidden.length} not-recommended stage${hidden.length === 1 ? "" : "s"} available (${hidden.map((s) => s.label).join(", ")})`}
         </button>
       )}
-      <HowItWorks>
-        <p className="m-0">
-          Each scenario walks the stages its buyer actually walks - the map
-          is derived from how your market buys, never hand-drawn. Keep a
-          not-recommended stage only if your judgement says buyers reach it;
-          if the map looks wrong, the reads are usually what&apos;s off.
-        </p>
-        <p className="m-0">
-          Hover any stage name for what it asks and why it&apos;s in or out
-          for this market.
-        </p>
-      </HowItWorks>
       {tip && (
         <div
           data-stage-tip

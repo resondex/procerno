@@ -822,6 +822,9 @@ export async function reviewScenarios(input: {
   if (hit) return JSON.parse(hit) as ScenarioVerdict[];
   const res = await openaiClient().chat.completions.create({
     model: MODEL,
+    // A safety net, not a deep thinker - low effort roughly halves the
+    // wait at the gate confirm.
+    reasoning_effort: "low",
     messages: [
       {
         role: "system",
