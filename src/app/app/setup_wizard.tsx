@@ -174,9 +174,9 @@ function cellReviewRequest(
 const READ_STAGES: [number, string][] = [
   [0, "Reading how this market buys…"],
   [8, "Classifying the decision - involvement, proof, who decides…"],
-  [22, "Finding the buying rooms - circumstances that change the answer…"],
-  [45, "Ranking the rooms by revenue and writing the scenarios…"],
-  [75, "Writing each buyer's journey and checking coherence…"],
+  [22, "Finding the buyers…"],
+  [45, "Examining the buyers…"],
+  [75, "Finalizing your market…"],
   [105, "Still thinking - a hard market can take about two minutes…"],
 ];
 
@@ -194,9 +194,6 @@ function ReadProgress() {
     <div className="grid gap-4 py-16 text-center justify-items-center">
       <span aria-hidden="true" className="h-7 w-7 rounded-full border-[3px] border-line border-t-primary animate-spin" />
       <p className="m-0 text-sm font-medium">{msg}</p>
-      <p className="m-0 text-[13px] text-ink-3">
-        a one-time full-model read of this market - cached for everyone after · {secs}s
-      </p>
     </div>
   );
 }
