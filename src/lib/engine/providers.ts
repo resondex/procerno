@@ -117,7 +117,11 @@ export function getProvider(): CompletionProvider {
 
 let _client: OpenAI | null = null;
 export function openaiClient(): OpenAI {
-  if (!_client) _client = new OpenAI();
+  // The SDK default timeout is 600s - a stalled call occupies a request
+  // for ten minutes before its retries even start. The slowest legitimate
+  // call (the gpt-5 market read) runs ~100-120s; 150s bounds a stall
+  // while leaving headroom, and the SDK's retries then get a fresh start.
+  if (!_client) _client = new OpenAI({ timeout: 150_000 });
   return _client;
 }
 const client = openaiClient;

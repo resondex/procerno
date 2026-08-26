@@ -364,11 +364,20 @@ export interface GridSetupArgs {
 export function useGridSetup(a: GridSetupArgs) {
   const cap = a.maxScenarios ?? MAX_SCENARIOS;
   async function post<T>(path: string, body: unknown): Promise<T | null> {
+    // A hard client-side bound: without it one stalled request freezes the
+    // gate's busy state forever (Promise.all never resolves). The server
+    // keeps working past this and caches its result, so a retry after the
+    // timeout usually lands instantly.
     const res = await fetch(path, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(body),
-    });
+      signal: AbortSignal.timeout(180_000),
+    }).catch(() => null);
+    if (!res) {
+      a.setError("that took too long - try again (finished work is kept)");
+      return null;
+    }
     const data = await res.json().catch(() => ({}));
     if (!res.ok) {
       a.setError(data.error ?? "something went wrong");

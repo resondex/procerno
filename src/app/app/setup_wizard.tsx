@@ -484,9 +484,14 @@ export function SetupWizard({ mode, brand, draft, engineOptions, onClose, onCrea
         competitors: allCompetitors(),
         force,
       }),
-    });
-    const data = await res.json().catch(() => ({}));
+      signal: AbortSignal.timeout(180_000),
+    }).catch(() => null);
     setBusy(null);
+    if (!res) {
+      setError("that took too long - try again");
+      return;
+    }
+    const data = await res.json().catch(() => ({}));
     if (!res.ok) {
       setError(data.error ?? "prompt generation failed");
       return;
@@ -530,19 +535,22 @@ export function SetupWizard({ mode, brand, draft, engineOptions, onClose, onCrea
     }
     setBusy("Checking your scenarios…");
     setError(null);
+    // Bounded and null-safe: a stalled or aborted check must never strand
+    // the gate in busy - the reviewer is a safety net, not a gatekeeper.
     const resP = fetch("/api/setup/grid/scenario_review", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(body),
-    });
+      signal: AbortSignal.timeout(90_000),
+    }).catch(() => null);
     const [composed, res] = await Promise.all([recomposing, resP]);
     if (composed) g = composed;
-    const data = await res.json().catch(() => ({}));
     setBusy(null);
-    if (!res.ok) {
+    if (!res || !res.ok) {
       goTo("stages", g);
       return;
     }
+    const data = await res.json().catch(() => ({}));
     const flagged: ScenarioReviewItem[] = [];
     const passed: string[] = [];
     authored.forEach(({ r, i }, k) => {
@@ -715,13 +723,14 @@ export function SetupWizard({ mode, brand, draft, engineOptions, onClose, onCrea
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(body),
-    });
-    const data = await res.json().catch(() => ({}));
+      signal: AbortSignal.timeout(90_000),
+    }).catch(() => null);
     setBusy(null);
-    if (!res.ok) {
+    if (!res || !res.ok) {
       proceedPrompts(grid);
       return;
     }
+    const data = await res.json().catch(() => ({}));
     const flagged: CellReviewItem[] = [];
     const passed: string[] = [];
     authored.forEach(({ c, i, phr, text }, k) => {
@@ -837,13 +846,14 @@ export function SetupWizard({ mode, brand, draft, engineOptions, onClose, onCrea
           mode: null,
         })),
       }),
-    });
-    const data = await res.json().catch(() => ({}));
+      signal: AbortSignal.timeout(90_000),
+    }).catch(() => null);
     setBusy(null);
-    if (!res.ok) {
+    if (!res || !res.ok) {
       goTo("engines");
       return;
     }
+    const data = await res.json().catch(() => ({}));
     const flagged: CellReviewItem[] = [];
     const passed: string[] = [];
     authored.forEach(({ q, i }, k) => {
