@@ -168,6 +168,39 @@ function cellReviewRequest(
   return { authored, body };
 }
 
+/** The market read narrated: elapsed-driven captions matching the order
+ * the model actually works in, so a two-minute read on a hard market
+ * reads as deliberate progress instead of a stuck spinner. */
+const READ_STAGES: [number, string][] = [
+  [0, "Reading how this market buys…"],
+  [8, "Classifying the decision - involvement, proof, who decides…"],
+  [22, "Finding the buying rooms - circumstances that change the answer…"],
+  [45, "Ranking the rooms by revenue and writing the scenarios…"],
+  [75, "Writing each buyer's journey and checking coherence…"],
+  [105, "Still thinking - a hard market can take about two minutes…"],
+];
+
+function ReadProgress() {
+  const [secs, setSecs] = useState(0);
+  useEffect(() => {
+    // Elapsed from the clock, not tick-counting: background tabs throttle
+    // timers, and the narration must not fall behind the actual read.
+    const started = Date.now();
+    const iv = setInterval(() => setSecs(Math.round((Date.now() - started) / 1000)), 1000);
+    return () => clearInterval(iv);
+  }, []);
+  const msg = [...READ_STAGES].reverse().find(([at]) => secs >= at)?.[1] ?? READ_STAGES[0][1];
+  return (
+    <div className="grid gap-4 py-16 text-center justify-items-center">
+      <span aria-hidden="true" className="h-7 w-7 rounded-full border-[3px] border-line border-t-primary animate-spin" />
+      <p className="m-0 text-sm font-medium">{msg}</p>
+      <p className="m-0 text-[13px] text-ink-3">
+        a one-time full-model read of this market - cached for everyone after · {secs}s
+      </p>
+    </div>
+  );
+}
+
 interface DraftPrompt {
   text: string;
   theme: PromptTheme;
@@ -1225,6 +1258,8 @@ export function SetupWizard({ mode, brand, draft, engineOptions, onClose, onCrea
                 <p className="text-sm font-medium">Estimating your market…</p>
                 <p className="text-[13px] text-ink-3">category · competitors · audience</p>
               </div>
+            ) : busy?.startsWith("Reading") ? (
+              <ReadProgress />
             ) : busy ? (
               <div className="grid gap-4 py-16 text-center justify-items-center">
                 <span aria-hidden="true" className="h-7 w-7 rounded-full border-[3px] border-line border-t-primary animate-spin" />

@@ -372,7 +372,7 @@ export function useGridSetup(a: GridSetupArgs) {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(body),
-      signal: AbortSignal.timeout(180_000),
+      signal: AbortSignal.timeout(240_000),
     }).catch(() => null);
     if (!res) {
       a.setError("that took too long - try again (finished work is kept)");

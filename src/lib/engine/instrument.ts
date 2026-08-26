@@ -56,8 +56,10 @@ function cacheKey(prefix: string, parts: (string | null)[]): string {
  * dead. Also the wait budget: a waiter that outlives a FRESH marker does
  * not start a duplicate generation - it reports "still cooking" and the
  * caller retries, landing on the finished result. Only a STALE marker
- * (dead generator) is taken over. */
-const COALESCE_PENDING_TTL_MS = 100_000;
+ * (dead generator) is taken over. MUST exceed the slowest legitimate
+ * generation (a hard market read runs up to ~120s) or waiters abandon
+ * live generators and duplicate the spend - the AmEx failure. */
+const COALESCE_PENDING_TTL_MS = 180_000;
 const COALESCE_POLL_MS = 2_000;
 
 function pendingMarkerAt(raw: string | null): number | null {
@@ -1550,6 +1552,9 @@ export async function generateGrid(input: {
       });
       if (orphaned.length > 0) await generate(orphaned, seen);
     }
+    // Deadline with generators still alive: never duplicate their work -
+    // unresolved units stay empty and the caller's retry lands on the
+    // finished, cached result.
   };
 
   await Promise.all([generate(mine, seen), waitForTheirs()]);
@@ -1706,10 +1711,10 @@ const PHRASINGS_EXTRA_RETRY = 6;
 /** How long a pending marker is trusted before another request concludes
  * the generator died and takes the cell over. Fits inside the route's
  * 120s budget with room for the takeover generation. */
-const PHRASINGS_PENDING_TTL_MS = 100_000;
-/** Wait budget on someone else's in-flight work - capped below the
- * route's 120s so a takeover generation still fits inside it. */
-const PHRASINGS_WAIT_MS = 70_000;
+const PHRASINGS_PENDING_TTL_MS = 180_000;
+/** Wait budget on someone else's in-flight work; the 300s route leaves
+ * room to wait out a slow write plus its retry pass. */
+const PHRASINGS_WAIT_MS = 150_000;
 const PHRASINGS_POLL_MS = 2_000;
 
 /**
@@ -2005,7 +2010,9 @@ export async function generatePhrasings(input: {
       });
       if (orphaned.length > 0) await generate(orphaned);
     }
-    if (open.size > 0) await generate([...open]);
+    // Deadline with generators still alive: never duplicate their work -
+    // unresolved cells come back empty and the missing-paraphrases gate
+    // heals them from the by-then-finished cache.
   };
 
   await Promise.all([generate(mine), waitForTheirs()]);

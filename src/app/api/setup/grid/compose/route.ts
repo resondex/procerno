@@ -10,7 +10,10 @@ import {
   type ScenarioSpec,
 } from "@/lib/engine/instrument";
 
-export const maxDuration = 120;
+// 300, not 120: a hard category's market read alone runs 90-120s of
+// gpt-5 reasoning - the old budget killed first reads at the wall and
+// greeted fresh categories with an error. Fluid Compute allows 300.
+export const maxDuration = 300;
 
 const JourneyShape = z.object({
   involvement: z.enum(["considered", "habitual"]),
