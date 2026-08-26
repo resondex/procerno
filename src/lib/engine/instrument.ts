@@ -1695,10 +1695,14 @@ export interface Phrasing {
 
 // Bump when the paraphrase prompt or filters change: cached sets written
 // under old instructions must not be served as if they were new.
-// "p5": per-cell cache entries with in-flight pending markers.
-const PHRASINGS_VERSION = "p5";
+// "p6": any-shortfall retry with a wider margin and worn-out-word
+// steering, merged on top of the first pass's keepers.
+const PHRASINGS_VERSION = "p6";
 // Over-generate so the overlap filter can be strict and still fill the set.
 const PHRASINGS_EXTRA = 3;
+/** The retry's wider margin: a cell that came up short is fighting the
+ * overlap filter, so give it more candidates to survive it. */
+const PHRASINGS_EXTRA_RETRY = 6;
 /** How long a pending marker is trusted before another request concludes
  * the generator died and takes the cell over. Fits inside the route's
  * 120s budget with room for the takeover generation. */
@@ -1782,11 +1786,27 @@ export async function generatePhrasings(input: {
 
   /** One model pass over a subset of cells; returns kept phrasings per
    * subset position. Filtering happens here so a retry sees real gaps. */
-  async function pass(subset: typeof input.cells): Promise<Phrasing[][]> {
+  async function pass(
+    subset: typeof input.cells,
+    opts?: {
+      /** Wider candidate margin for retry passes. */
+      extra?: number;
+      /** Keepers from an earlier pass, per subset position: the filter
+       * seeds from them so only NEW compatible phrasings come back. */
+      have?: Phrasing[][];
+      /** Worn-out content words per subset position - the writer is told
+       * to find other ways into the ask. */
+      avoidWords?: string[][];
+    }
+  ): Promise<Phrasing[][]> {
+    const extra = opts?.extra ?? PHRASINGS_EXTRA;
     const cellText = subset
       .map(
         (c, i) =>
-          `${i}. [stage=${c.stage} situation=${c.situation ?? "-"} angle=${c.angle}${c.mode ? ` reach=${c.mode}` : ""}] ${c.text}`
+          `${i}. [stage=${c.stage} situation=${c.situation ?? "-"} angle=${c.angle}${c.mode ? ` reach=${c.mode}` : ""}] ${c.text}` +
+          (opts?.avoidWords?.[i]?.length
+            ? `\n   [overused: ${opts.avoidWords[i].join(", ")}]`
+            : "")
       )
       .join("\n");
     const res = await openaiClient().chat.completions.create({
@@ -1798,7 +1818,7 @@ export async function generatePhrasings(input: {
             "You write paraphrase sets for a research instrument that measures " +
             "a brand's standing in AI assistant answers. Each seed prompt below " +
             "is one designed question. For EACH seed, write exactly " +
-            `${want + PHRASINGS_EXTRA} additional DISTINCT ways a real buyer would ask the SAME ` +
+            `${want + extra} additional DISTINCT ways a real buyer would ask the SAME ` +
             "question - same circumstance, same intent, same brands named - in " +
             "the wordings people actually type into a chat assistant.\n" +
             "Each paraphrase is a DIFFERENT PERSON in the same circumstance " +
@@ -1822,7 +1842,11 @@ export async function generatePhrasings(input: {
             "- No verbatim repeats, no trivial reorderings; each paraphrase " +
             "should be something a different person would plausibly type.\n" +
             "- Punctuation people actually type: never an em dash, never the " +
-            "tilde character - write 'about 10', not '~10'.\n" +            "- Typing, not prose: fragments happen, specifics are unpolished; " +
+            "tilde character - write 'about 10', not '~10'.\n" +
+            "- A seed may carry [overused: ...]: content words its existing " +
+            "phrasings already lean on. Do not build new phrasings around " +
+            "those words - find other angles into the same ask (different " +
+            "details, different framing, different vocabulary).\n" +            "- Typing, not prose: fragments happen, specifics are unpolished; " +
             "never ad-copy patterns (parallel lists of three, balanced " +
             "drama, rhetorical closers). If it would read well on a landing " +
             "page, it is wrong.\n" +
@@ -1857,8 +1881,9 @@ export async function generatePhrasings(input: {
       const seed = subset[c.index];
       if (!seed) continue;
       const sig = brandSignature(seed.text, input.brand, rivalsList);
-      const seen = new Set<string>([norm(seed.text)]);
-      const keptWords: Set<string>[] = [wordSet(seed.text)];
+      const prior = opts?.have?.[c.index] ?? [];
+      const seen = new Set<string>([norm(seed.text), ...prior.map((p) => norm(p.text))]);
+      const keptWords: Set<string>[] = [wordSet(seed.text), ...prior.map((p) => wordSet(p.text))];
       const kept: Phrasing[] = [];
       for (const p of c.phrasings ?? []) {
         const text = humanize((p.text ?? "").trim());
@@ -1875,7 +1900,7 @@ export async function generatePhrasings(input: {
         seen.add(n);
         keptWords.push(ws);
         kept.push({ text, asker: (p.asker ?? "").trim() });
-        if (kept.length >= want) break;
+        if (prior.length + kept.length >= want) break;
       }
       result[c.index] = kept;
     }
@@ -1895,11 +1920,22 @@ export async function generatePhrasings(input: {
     // Reasoning models occasionally return a degenerate, near-empty set
     // for a whole batch. One retry on the cells that came up short fills
     // the gap without re-running what already worked.
-    const deficient = got.map((k, j) => (k.length < want / 2 ? j : -1)).filter((j) => j >= 0);
+    // Any shortfall retries (not just the degenerate case): the retry gets
+    // a wider candidate margin, is told which words the keepers already
+    // wore out, and its filter seeds from those keepers - so it returns
+    // only NEW compatible phrasings, merged on top.
+    const deficient = got.map((k, j) => (k.length < want ? j : -1)).filter((j) => j >= 0);
     if (deficient.length > 0) {
-      const again = await pass(deficient.map((j) => subset[j]));
+      const subs = deficient.map((j) => subset[j]);
+      const have = deficient.map((j) => got[j]);
+      const avoidWords = deficient.map((j) => {
+        const words = new Set<string>(wordSet(subset[j].text));
+        for (const ph of got[j]) for (const w of wordSet(ph.text)) words.add(w);
+        return [...words].slice(0, 18);
+      });
+      const again = await pass(subs, { extra: PHRASINGS_EXTRA_RETRY, have, avoidWords });
       deficient.forEach((j, k) => {
-        if (again[k].length > got[j].length) got[j] = again[k];
+        got[j] = [...got[j], ...again[k]].slice(0, want);
       });
     }
     await Promise.all(

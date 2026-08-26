@@ -701,9 +701,35 @@ export function SetupWizard({ mode, brand, draft, engineOptions, onClose, onCrea
     const live = g.cells.filter((c) => c.text.trim());
     const written = g.step === "phrasings";
     const missing = written && live.some((c) => !c.phrasings.some((p) => p.text.trim()));
-    if (!written) void writePhrasings(false, false, g);
-    else if (missing) void fillParaphrases(g);
-    else goTo("engines", g);
+    // Demo guests never see a short set: the write chains straight into a
+    // top-up, and the hop to engines tops up first when anything is short.
+    const short = (cells: GridState["cells"]) =>
+      cells.some(
+        (c) =>
+          c.text.trim() &&
+          c.phrasings.some((p) => p.text.trim()) &&
+          1 + c.phrasings.filter((p) => p.text.trim()).length < PHRASING_COUNT
+      );
+    if (!written) {
+      if (demo) {
+        void (async () => {
+          const w = await gridApi.writePhrasings(false, false, g);
+          const t = await gridApi.topUpPhrasings(w ?? g);
+          goTo("prompts", t ?? w ?? g);
+        })();
+      } else {
+        void writePhrasings(false, false, g);
+      }
+    } else if (missing) {
+      void fillParaphrases(g);
+    } else if (demo && short(g.cells)) {
+      void (async () => {
+        const t = await gridApi.topUpPhrasings(g);
+        goTo("engines", t ?? g);
+      })();
+    } else {
+      goTo("engines", g);
+    }
   }
 
   /** The missing-fill also tops up below-quota sets: empty cells get full
