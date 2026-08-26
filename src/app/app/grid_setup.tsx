@@ -33,7 +33,20 @@ export interface GridPhrasing {
   original?: string;
 }
 
+/** Stable per-cell id for async completions: a 60s draw must land on
+ * THIS cell whatever was edited, added, or deleted meanwhile - and cell
+ * identity (stage x scenario x angle) stopped being unique the moment
+ * custom questions could share one. */
+function cellUid(): string {
+  return Math.random().toString(36).slice(2, 10);
+}
+
 export interface GridCellUi {
+  /** Stable client id - see cellUid(). */
+  uid?: string;
+  /** User-added question (Add your own / Suggest another): survives a
+   * coverage recompose and counts against the custom allowance. */
+  custom?: boolean;
   stage: string;
   layer: string;
   /** Scenario label, or null for invariant single cells. */
@@ -210,6 +223,7 @@ export function normalizeGrid(g: GridState | null): GridState | null {
     baselineCellCount: g.baselineCellCount ?? g.cells.length,
     cells: g.cells.map((c) => ({
       ...c,
+      uid: c.uid ?? cellUid(),
       text: scrubPrompt(c.text),
       // Drafts from before the prompt review carry no machine baseline -
       // treat the saved text as it, so nothing is retroactively flagged.
@@ -664,11 +678,30 @@ export function useGridSetup(a: GridSetupArgs) {
     );
     a.setBusy(null);
     if (!data) return null;
+    const composed: GridCellUi[] = data.cells.map((c) => ({
+      ...c, uid: cellUid(), original: c.text, phrasings: [],
+    }));
+    // Custom questions survive the recompose: re-append each after its
+    // stage's fresh cells, dropping only those whose stage was unticked
+    // or whose scenario no longer exists.
+    const keptStages = new Set(a.state.keptStages);
+    const activeLabels = new Set(a.state.scenarios.map((sc) => sc.label));
+    const customs = a.state.cells.filter(
+      (c) =>
+        c.custom &&
+        keptStages.has(c.stage) &&
+        (c.situation === null || activeLabels.has(c.situation))
+    );
+    const cells = [...composed];
+    for (const c of customs) {
+      const last = cells.map((q, j) => (q.stage === c.stage ? j : -1)).reduce((m, j) => Math.max(m, j), -1);
+      cells.splice(last >= 0 ? last + 1 : cells.length, 0, c);
+    }
     const next: GridState = {
       ...a.state,
       step: "cells",
-      baselineCellCount: data.cells.length,
-      cells: data.cells.map((c) => ({ ...c, original: c.text, phrasings: [] })),
+      baselineCellCount: composed.length,
+      cells,
     };
     a.setState(next);
     return next;
@@ -746,13 +779,32 @@ export function useGridSetup(a: GridSetupArgs) {
     );
     a.setBusy(null);
     if (outcomes.some((ok) => !ok)) return null;
+    // Land ONLY what this run generated, functionally by uid: edits made
+    // to other cells (or other sets) during the write survive, and a
+    // set written for a since-edited cell carries phrasedFor so the
+    // stale-edit machinery treats it honestly.
+    const generatedIdx = new Set(batches.flatMap((b) => b.idx));
+    const writtenByUid = new Map<string, { phrasings: GridPhrasing[]; text: string }>();
+    for (const k of generatedIdx) {
+      const m = merged[k];
+      if (m.uid) writtenByUid.set(m.uid, { phrasings: m.phrasings, text: m.text });
+    }
+    a.setState((prev) => {
+      if (!prev) return prev;
+      return {
+        ...prev,
+        step: "phrasings",
+        cells: prev.cells.map((q) => {
+          const w = q.uid ? writtenByUid.get(q.uid) : undefined;
+          return w ? { ...q, phrasings: w.phrasings, phrasedFor: w.text } : q;
+        }),
+      };
+    });
     const nextCells = st.cells.map((c, i) => {
       const k = liveIdx.indexOf(i);
       return k >= 0 ? merged[k] : c;
     });
-    const next: GridState = { ...st, step: "phrasings", cells: nextCells };
-    a.setState(next);
-    return next;
+    return { ...st, step: "phrasings", cells: nextCells };
   }
 
   /** Top up cells sitting below the quota without touching what they
@@ -803,9 +855,23 @@ export function useGridSetup(a: GridSetupArgs) {
       })
     );
     a.setBusy(null);
-    const next: GridState = { ...st, cells: merged };
-    a.setState(next);
-    return next;
+    // Functional by uid, so edits elsewhere during the top-up survive.
+    const toppedByUid = new Map<string, GridCellUi>();
+    idx.forEach((i) => {
+      const m = merged[i];
+      if (m !== st.cells[i] && m.uid) toppedByUid.set(m.uid, m);
+    });
+    a.setState((prev) => {
+      if (!prev) return prev;
+      return {
+        ...prev,
+        cells: prev.cells.map((q) => {
+          const m = q.uid ? toppedByUid.get(q.uid) : undefined;
+          return m ? { ...q, phrasings: m.phrasings, phrasedFor: m.phrasedFor } : q;
+        }),
+      };
+    });
+    return { ...st, cells: merged };
   }
 
   /** The cell's offered-prompt history, capturing a live manual edit into
@@ -855,28 +921,36 @@ export function useGridSetup(a: GridSetupArgs) {
       // A failed set is not fatal - the missing-paraphrases gate catches it.
       generated = (pd?.phrasings?.[0] ?? []).map((ph) => ({ ...ph, original: ph.text }));
     }
-    const nextAlts = [...alts, data.text];
-    a.setState({
-      ...a.state,
-      cells: a.state.cells.map((q, j) => {
-        if (j !== i) return q;
-        // The old set is banked under the old wording, not thrown away;
-        // the freshly generated set (when the write already ran) wins
-        // over whatever the bank holds for the new text.
-        const swap = swapPhrasings(q, data.text);
-        return {
-          ...q,
-          text: data.text,
-          original: data.text,
-          alts: nextAlts,
-          altIdx: nextAlts.length - 1,
-          regens: near ? q.regens : (q.regens ?? 0) + 1,
-          nears: near ? (q.nears ?? 0) + 1 : q.nears,
-          phrasingsByText: swap.phrasingsByText,
-          phrasings: generated.length > 0 ? generated : swap.phrasings,
-          phrasedFor: data.text,
-        };
-      }),
+    // Functional, keyed by uid: the draw lands on THIS cell in whatever
+    // state the grid is in by now - edits, adds, and deletions made
+    // during the generation survive, and a deleted cell is a no-op.
+    const uid = c.uid;
+    a.setState((prev) => {
+      if (!prev) return prev;
+      return {
+        ...prev,
+        cells: prev.cells.map((q) => {
+          if (q.uid !== uid) return q;
+          const { alts } = cellHistory(q);
+          const nextAlts = [...alts, data.text];
+          // The old set is banked under the old wording, not thrown away;
+          // the freshly generated set (when the write already ran) wins
+          // over whatever the bank holds for the new text.
+          const swap = swapPhrasings(q, data.text);
+          return {
+            ...q,
+            text: data.text,
+            original: data.text,
+            alts: nextAlts,
+            altIdx: nextAlts.length - 1,
+            regens: near ? q.regens : (q.regens ?? 0) + 1,
+            nears: near ? (q.nears ?? 0) + 1 : q.nears,
+            phrasingsByText: swap.phrasingsByText,
+            phrasings: generated.length > 0 ? generated : swap.phrasings,
+            phrasedFor: data.text,
+          };
+        }),
+      };
     });
   }
 
@@ -889,7 +963,16 @@ export function useGridSetup(a: GridSetupArgs) {
     const stage = a.state.stages.find((x) => x.key === stageKey);
     if (!stage) return;
     const existing = a.state.cells.filter((c) => c.stage === stageKey);
-    const avoid = existing.map((c) => c.text.trim()).filter(Boolean).slice(-8);
+    // Avoid everything this stage has ever shown - including wordings the
+    // user cycled away from - so a suggestion can't re-mint a rejected ask.
+    const avoid = [
+      ...new Set(
+        existing
+          .flatMap((c) => (c.alts?.length ? c.alts : [c.text]))
+          .map((t) => t.trim())
+          .filter(Boolean)
+      ),
+    ].slice(-8);
     a.setError(null);
     const data = await post<{ text: string }>("/api/setup/grid/cell", {
       brand: a.brand, category: a.category, competitors: a.competitors,
@@ -913,6 +996,8 @@ export function useGridSetup(a: GridSetupArgs) {
       generated = (pd?.phrasings?.[0] ?? []).map((ph) => ({ ...ph, original: ph.text }));
     }
     const cell: GridCellUi = {
+      uid: cellUid(),
+      custom: true,
       stage: stageKey,
       layer: stage.layer,
       situation,
@@ -923,10 +1008,14 @@ export function useGridSetup(a: GridSetupArgs) {
       phrasedFor: data.text,
       phrasings: generated,
     };
-    const cells = [...a.state.cells];
-    const last = cells.map((c, j) => (c.stage === stageKey ? j : -1)).reduce((m, j) => Math.max(m, j), -1);
-    cells.splice(last >= 0 ? last + 1 : cells.length, 0, cell);
-    a.setState({ ...a.state, cells });
+    // Functional insert: concurrent edits made during the generation stay.
+    a.setState((prev) => {
+      if (!prev) return prev;
+      const cells = [...prev.cells];
+      const last = cells.map((c, j) => (c.stage === stageKey ? j : -1)).reduce((m, j) => Math.max(m, j), -1);
+      cells.splice(last >= 0 ? last + 1 : cells.length, 0, cell);
+      return { ...prev, cells };
+    });
   }
 
   /** Insert an empty user-written question into a stage (pure client). */
@@ -934,6 +1023,8 @@ export function useGridSetup(a: GridSetupArgs) {
     const stage = state.stages.find((x) => x.key === stageKey);
     if (!stage) return state;
     const cell: GridCellUi = {
+      uid: cellUid(),
+      custom: true,
       stage: stageKey,
       layer: stage.layer,
       situation,
@@ -1771,19 +1862,22 @@ export function CellsGate({
   busy: boolean;
 }) {
   const [open, setOpen] = useState<ReadonlySet<string>>(new Set());
-  /** The one cell currently writing - only its card waits. */
-  const [pending, setPending] = useState<{ i: number; kind: "new" | "near" } | null>(null);
+  /** The one cell currently writing - only its card waits. Keyed by uid
+   * so deletions elsewhere can't shift the wait onto the wrong card. */
+  const [pending, setPending] = useState<{ uid: string; kind: "new" | "near" } | null>(null);
   /** A stage-level add in progress: picking a scenario, or generating. */
   const [adding, setAdding] = useState<{ stage: string; kind: "own" | "suggest" } | null>(null);
   const [stagePending, setStagePending] = useState<string | null>(null);
   const atCap = customUsed >= customAllowance;
-  /** The one cell whose paraphrases fold is open. */
-  const [openPhr, setOpenPhr] = useState<number | null>(null);
+  /** The one cell whose paraphrases fold is open (by uid). */
+  const [openPhr, setOpenPhr] = useState<string | null>(null);
   const written = state.step === "phrasings";
   const countOf = (c: GridCellUi) => 1 + c.phrasings.filter((p) => p.text.trim()).length;
   const draw = async (i: number, kind: "new" | "near") => {
     if (pending !== null) return;
-    setPending({ i, kind });
+    const uid = state.cells[i]?.uid;
+    if (!uid) return;
+    setPending({ uid, kind });
     try {
       await (kind === "near" ? onNearCell(i) : onRegenerate(i));
     } finally {
@@ -1876,9 +1970,9 @@ export function CellsGate({
                     <div className="grid gap-2.5 rounded-b-lg border border-t-0 border-primary bg-primary-soft/15 px-3.5 py-3">
                       {scells.map((c) => (
                         <div
-                          key={c.i}
+                          key={c.uid ?? c.i}
                           className={`grid gap-1.5 rounded-lg border border-line bg-surface px-3.5 py-2.5 ${
-                            pending?.i === c.i ? "opacity-50 pointer-events-none" : ""
+                            pending !== null && pending.uid === c.uid ? "opacity-50 pointer-events-none" : ""
                           }`}
                         >
                           <div className="flex items-center gap-2 flex-wrap">
@@ -1920,7 +2014,8 @@ export function CellsGate({
                             className="input w-full resize-none field-sizing-content text-sm"
                             rows={1}
                             value={c.text}
-                            readOnly={pending?.i === c.i}
+                            readOnly={pending !== null && pending.uid === c.uid}
+                            autoFocus={Boolean(c.custom) && c.text === ""}
                             onChange={(e) =>
                               setState({
                                 ...state,
@@ -1951,7 +2046,7 @@ export function CellsGate({
                             }}
                           />
                           <div className="flex items-center gap-3 border-t border-dashed border-line pt-1.5 text-[11px]">
-                            {pending?.i === c.i ? (
+                            {pending !== null && pending.uid === c.uid ? (
                               <span className="flex items-center gap-1.5 font-medium text-primary">
                                 <span
                                   aria-hidden="true"
@@ -2024,14 +2119,14 @@ export function CellsGate({
                             {written && (
                               <button
                                 type="button"
-                                onClick={() => setOpenPhr(openPhr === c.i ? null : c.i)}
+                                onClick={() => setOpenPhr(openPhr === c.uid ? null : c.uid ?? null)}
                                 className="font-medium text-primary hover:opacity-80"
                               >
-                                {openPhr === c.i ? "Hide paraphrases ▴" : "Show paraphrases ▾"}
+                                {openPhr === c.uid ? "Hide paraphrases ▴" : "Show paraphrases ▾"}
                               </button>
                             )}
                           </div>
-                          {written && openPhr === c.i && (
+                          {written && openPhr != null && openPhr === c.uid && (
                             <div className="grid gap-1.5 pt-1">
                               {c.phrasings.map((ph, k) => (
                                 <div key={k} className="flex items-start gap-2">

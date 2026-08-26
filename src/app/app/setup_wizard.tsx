@@ -303,8 +303,10 @@ export function SetupWizard({ mode, brand, draft, engineOptions, onClose, onCrea
    * plan loads, then Starter/Growth tighten to 3. */
   const [scenarioCap, setScenarioCap] = useState(4);
   /** Custom questions the plan may add net of deletions (provisional
-   * allotment - the per-tier numbers are still to be decided). */
-  const [customAllowance, setCustomAllowance] = useState(6);
+   * allotment - the per-tier numbers are still to be decided). Defaults
+   * to the most generous tier so the moment before the plan loads can
+   * never falsely block; it only tightens downward. */
+  const [customAllowance, setCustomAllowance] = useState(12);
 
   const gridApi = useGridSetup({
     brand, category, competitors: allCompetitors(), audience,
