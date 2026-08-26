@@ -50,6 +50,8 @@ export interface GridCellUi {
   altIdx?: number;
   /** "New prompt" draws used (capped at MAX_REGENS). */
   regens?: number;
+  /** Near-neighbor draws used (capped at MAX_VARIANTS). */
+  nears?: number;
   /** The last machine-offered wording - a cell whose text differs from
    * this was edited by the user, and gets the quality check at confirm. */
   original?: string;
@@ -176,6 +178,9 @@ export interface GridState {
   /** Same contract for edited prompts: fingerprints that PASSED the
    * Prompts-gate quality check; "keep mine" is never recorded. */
   reviewedCells?: string[];
+  /** Cell count as composed - the custom-question allowance measures NET
+   * additions against this, so deleting any question frees a slot. */
+  baselineCellCount?: number;
   cells: GridCellUi[];
 }
 
@@ -202,6 +207,7 @@ export function normalizeGrid(g: GridState | null): GridState | null {
   if (legacy) return null;
   return {
     ...g,
+    baselineCellCount: g.baselineCellCount ?? g.cells.length,
     cells: g.cells.map((c) => ({
       ...c,
       text: scrubPrompt(c.text),
@@ -661,6 +667,7 @@ export function useGridSetup(a: GridSetupArgs) {
     const next: GridState = {
       ...a.state,
       step: "cells",
+      baselineCellCount: data.cells.length,
       cells: data.cells.map((c) => ({ ...c, original: c.text, phrasings: [] })),
     };
     a.setState(next);
@@ -815,10 +822,11 @@ export function useGridSetup(a: GridSetupArgs) {
    * each draw is cached server-side, so revisits and other users are free.
    * Once the paraphrases have been written, the draw brings its own set
    * along too - the new prompt arrives complete, no missing-fill dance. */
-  async function regenerateCell(i: number): Promise<void> {
+  async function regenerateCell(i: number, near = false): Promise<void> {
     if (!a.state) return;
     const c = a.state.cells[i];
-    if (!c || (c.regens ?? 0) >= MAX_REGENS) return;
+    if (!c) return;
+    if (near ? (c.nears ?? 0) >= MAX_VARIANTS : (c.regens ?? 0) >= MAX_REGENS) return;
     const { alts } = cellHistory(c);
     // No global busy: the card shows its own writing state, the rest of
     // the gate stays usable.
@@ -830,6 +838,8 @@ export function useGridSetup(a: GridSetupArgs) {
       scenarios: a.state.scenarios,
       cell: { stage: c.stage, situation: c.situation, angle: c.angle, mode: c.mode ?? null },
       avoid: alts,
+      // Near mode keeps this prompt's ask and moves one detail.
+      nearTo: near ? c.text : undefined,
     });
     if (!data) return;
     let generated: GridPhrasing[] = [];
@@ -860,13 +870,82 @@ export function useGridSetup(a: GridSetupArgs) {
           original: data.text,
           alts: nextAlts,
           altIdx: nextAlts.length - 1,
-          regens: (q.regens ?? 0) + 1,
+          regens: near ? q.regens : (q.regens ?? 0) + 1,
+          nears: near ? (q.nears ?? 0) + 1 : q.nears,
           phrasingsByText: swap.phrasingsByText,
           phrasings: generated.length > 0 ? generated : swap.phrasings,
           phrasedFor: data.text,
         };
       }),
     });
+  }
+
+  /** Mint one NEW question in a stage (the "Suggest another" of the
+   * Prompts step): generic/blind identity, distinct from the stage's
+   * existing prompts, inserted after them - and in phase 2 it arrives
+   * with its paraphrase set, like every other draw. */
+  async function suggestCell(stageKey: string, situation: string | null): Promise<void> {
+    if (!a.state) return;
+    const stage = a.state.stages.find((x) => x.key === stageKey);
+    if (!stage) return;
+    const existing = a.state.cells.filter((c) => c.stage === stageKey);
+    const avoid = existing.map((c) => c.text.trim()).filter(Boolean).slice(-8);
+    a.setError(null);
+    const data = await post<{ text: string }>("/api/setup/grid/cell", {
+      brand: a.brand, category: a.category, competitors: a.competitors,
+      audience: a.audience || undefined,
+      base: a.state.moderators,
+      scenarios: a.state.scenarios,
+      cell: { stage: stageKey, situation, angle: "generic", mode: null },
+      avoid: avoid.length > 0 ? avoid : ["(no prompts yet)"],
+    });
+    if (!data) return;
+    let generated: GridPhrasing[] = [];
+    if (a.state.step === "phrasings") {
+      const pd = await post<{ phrasings: GridPhrasing[][] }>("/api/setup/grid/phrasings", {
+        brand: a.brand, category: a.category, competitors: a.competitors,
+        audience: a.audience || undefined,
+        base: a.state.moderators,
+        scenarios: a.state.scenarios,
+        cells: [{ stage: stageKey, situation, angle: "generic", mode: null, text: data.text }],
+        count: PHRASING_COUNT,
+      });
+      generated = (pd?.phrasings?.[0] ?? []).map((ph) => ({ ...ph, original: ph.text }));
+    }
+    const cell: GridCellUi = {
+      stage: stageKey,
+      layer: stage.layer,
+      situation,
+      angle: "generic",
+      mode: null,
+      text: data.text,
+      original: data.text,
+      phrasedFor: data.text,
+      phrasings: generated,
+    };
+    const cells = [...a.state.cells];
+    const last = cells.map((c, j) => (c.stage === stageKey ? j : -1)).reduce((m, j) => Math.max(m, j), -1);
+    cells.splice(last >= 0 ? last + 1 : cells.length, 0, cell);
+    a.setState({ ...a.state, cells });
+  }
+
+  /** Insert an empty user-written question into a stage (pure client). */
+  function addOwnCell(state: GridState, stageKey: string, situation: string | null): GridState {
+    const stage = state.stages.find((x) => x.key === stageKey);
+    if (!stage) return state;
+    const cell: GridCellUi = {
+      stage: stageKey,
+      layer: stage.layer,
+      situation,
+      angle: "generic",
+      mode: null,
+      text: "",
+      phrasings: [],
+    };
+    const cells = [...state.cells];
+    const last = cells.map((c, j) => (c.stage === stageKey ? j : -1)).reduce((m, j) => Math.max(m, j), -1);
+    cells.splice(last >= 0 ? last + 1 : cells.length, 0, cell);
+    return { ...state, cells };
   }
 
   /** Cycle a cell through its offered prompts (pure client, instant). */
@@ -964,6 +1043,7 @@ export function useGridSetup(a: GridSetupArgs) {
 
   return {
     compose, writeCells, writePhrasings, topUpPhrasings, suggestScenario, nearScenario,
+    suggestCell, addOwnCell,
     prefetchNearPools, warmRead, warmCells, warmPhrasings,
     regenerateCell, cycleCell,
   };
@@ -1665,35 +1745,68 @@ function useFolds() {
  * cards grow a prompt-count pill and a paraphrases fold - there is no
  * separate paraphrases step. */
 export function CellsGate({
-  state, setState, brandNames, onRegenerate, onCycle, onWarmReview, busy,
+  state, setState, brandNames, onRegenerate, onNearCell, onSuggestCell, onAddOwn, onCycle, onWarmReview,
+  customUsed, customAllowance, busy,
 }: {
   state: GridState;
   setState: (s: GridState) => void;
   brandNames: string[];
   /** Draw a genuinely new prompt for cell i (max MAX_REGENS). */
   onRegenerate: (i: number) => Promise<void> | void;
+  /** Draw a near variant of cell i's prompt - same ask, one detail moved
+   * (max MAX_VARIANTS). */
+  onNearCell: (i: number) => Promise<void> | void;
+  /** Mint a machine-suggested NEW question in a stage. */
+  onSuggestCell: (stageKey: string, situation: string | null) => Promise<void> | void;
+  /** Insert an empty user-written question in a stage. */
+  onAddOwn: (stageKey: string, situation: string | null) => void;
   /** Step cell i through its offered prompts. */
   onCycle: (i: number, dir: 1 | -1) => void;
   /** Silent cache warm for the confirm-time quality check - fired on
    * field blur so the confirm usually lands on a cached verdict. */
   onWarmReview?: () => void;
+  /** Custom-question allowance, net of deletions. */
+  customUsed: number;
+  customAllowance: number;
   busy: boolean;
 }) {
   const [open, setOpen] = useState<ReadonlySet<string>>(new Set());
-  /** The one cell currently writing a new prompt - only its card waits. */
-  const [pending, setPending] = useState<number | null>(null);
+  /** The one cell currently writing - only its card waits. */
+  const [pending, setPending] = useState<{ i: number; kind: "new" | "near" } | null>(null);
+  /** A stage-level add in progress: picking a scenario, or generating. */
+  const [adding, setAdding] = useState<{ stage: string; kind: "own" | "suggest" } | null>(null);
+  const [stagePending, setStagePending] = useState<string | null>(null);
+  const atCap = customUsed >= customAllowance;
   /** The one cell whose paraphrases fold is open. */
   const [openPhr, setOpenPhr] = useState<number | null>(null);
   const written = state.step === "phrasings";
   const countOf = (c: GridCellUi) => 1 + c.phrasings.filter((p) => p.text.trim()).length;
-  const regenerate = async (i: number) => {
+  const draw = async (i: number, kind: "new" | "near") => {
     if (pending !== null) return;
-    setPending(i);
+    setPending({ i, kind });
     try {
-      await onRegenerate(i);
+      await (kind === "near" ? onNearCell(i) : onRegenerate(i));
     } finally {
       setPending(null);
     }
+  };
+  const commitAdd = async (stageKey: string, situation: string | null, kind: "own" | "suggest") => {
+    setAdding(null);
+    if (kind === "own") {
+      onAddOwn(stageKey, situation);
+      return;
+    }
+    setStagePending(stageKey);
+    try {
+      await onSuggestCell(stageKey, situation);
+    } finally {
+      setStagePending(null);
+    }
+  };
+  const beginAdd = (stageKey: string, kind: "own" | "suggest") => {
+    const st = stageOf(state, stageKey);
+    if (st?.situational) setAdding({ stage: stageKey, kind });
+    else void commitAdd(stageKey, null, kind);
   };
   const toggle = (k: string) =>
     setOpen((prev) => {
@@ -1765,7 +1878,7 @@ export function CellsGate({
                         <div
                           key={c.i}
                           className={`grid gap-1.5 rounded-lg border border-line bg-surface px-3.5 py-2.5 ${
-                            pending === c.i ? "opacity-50 pointer-events-none" : ""
+                            pending?.i === c.i ? "opacity-50 pointer-events-none" : ""
                           }`}
                         >
                           <div className="flex items-center gap-2 flex-wrap">
@@ -1807,7 +1920,7 @@ export function CellsGate({
                             className="input w-full resize-none field-sizing-content text-sm"
                             rows={1}
                             value={c.text}
-                            readOnly={pending === c.i}
+                            readOnly={pending?.i === c.i}
                             onChange={(e) =>
                               setState({
                                 ...state,
@@ -1838,29 +1951,52 @@ export function CellsGate({
                             }}
                           />
                           <div className="flex items-center gap-3 border-t border-dashed border-line pt-1.5 text-[11px]">
-                            {pending === c.i ? (
+                            {pending?.i === c.i ? (
                               <span className="flex items-center gap-1.5 font-medium text-primary">
                                 <span
                                   aria-hidden="true"
                                   className="h-3 w-3 rounded-full border-2 border-primary/30 border-t-primary animate-spin"
                                 />
-                                {written ? "Writing a new prompt and its paraphrases…" : "Writing a new prompt…"}
+                                {pending.kind === "near"
+                                  ? written ? "Writing a near variant and its paraphrases…" : "Writing a near variant…"
+                                  : written ? "Writing a new prompt and its paraphrases…" : "Writing a new prompt…"}
                               </span>
-                            ) : (c.regens ?? 0) < MAX_REGENS ? (
-                              <button
-                                type="button"
-                                disabled={busy || pending !== null}
-                                onClick={() => void regenerate(c.i)}
-                                title="Ask this cell's question a different way - not a paraphrase"
-                                className="font-medium text-primary hover:opacity-80 disabled:opacity-50"
-                              >
-                                ↻ New prompt
-                                {(c.regens ?? 0) > 0 && (
-                                  <span className="font-normal text-ink-3"> · {MAX_REGENS - (c.regens ?? 0)} left</span>
-                                )}
-                              </button>
                             ) : (
-                              <span className="text-ink-3">{MAX_REGENS} rewrites used - edit it to taste</span>
+                              <>
+                                {(c.regens ?? 0) < MAX_REGENS ? (
+                                  <button
+                                    type="button"
+                                    disabled={busy || pending !== null}
+                                    onClick={() => void draw(c.i, "new")}
+                                    title="Ask this cell's question a different way - not a paraphrase"
+                                    className="font-medium text-primary hover:opacity-80 disabled:opacity-50"
+                                  >
+                                    ↻ New prompt
+                                    {(c.regens ?? 0) > 0 && (
+                                      <span className="font-normal text-ink-3"> · {MAX_REGENS - (c.regens ?? 0)} left</span>
+                                    )}
+                                  </button>
+                                ) : (
+                                  <span className="text-ink-3">{MAX_REGENS} rewrites used</span>
+                                )}
+                                {c.text.trim() !== "" &&
+                                  ((c.nears ?? 0) < MAX_VARIANTS ? (
+                                    <button
+                                      type="button"
+                                      disabled={busy || pending !== null}
+                                      onClick={() => void draw(c.i, "near")}
+                                      title="Right ask, wrong details? Same question with one detail moved"
+                                      className="font-medium text-primary hover:opacity-80 disabled:opacity-50"
+                                    >
+                                      ≈ Near neighbor
+                                      {(c.nears ?? 0) > 0 && (
+                                        <span className="font-normal text-ink-3"> · {MAX_VARIANTS - (c.nears ?? 0)} left</span>
+                                      )}
+                                    </button>
+                                  ) : (
+                                    <span className="text-ink-3">{MAX_VARIANTS} variants tried</span>
+                                  ))}
+                              </>
                             )}
                             {(c.alts?.length ?? 1) > 1 && (
                               <span className="flex items-center gap-1 text-ink-3">
@@ -1956,6 +2092,64 @@ export function CellsGate({
                           )}
                         </div>
                       ))}
+                      <div className="flex flex-wrap items-center gap-4 pt-0.5 text-[13px]">
+                        {stagePending === stage ? (
+                          <span className="flex items-center gap-1.5 text-[11px] font-medium text-primary">
+                            <span
+                              aria-hidden="true"
+                              className="h-3 w-3 rounded-full border-2 border-primary/30 border-t-primary animate-spin"
+                            />
+                            {written ? "Writing a suggested question and its paraphrases…" : "Writing a suggested question…"}
+                          </span>
+                        ) : adding?.stage === stage ? (
+                          <span className="flex flex-wrap items-center gap-1.5 text-[11px] text-ink-2">
+                            Who asks it:
+                            {state.scenarios.map((sc) => (
+                              <button
+                                key={sc.label}
+                                type="button"
+                                onClick={() => void commitAdd(stage, sc.label, adding.kind)}
+                                className="rounded-full bg-primary-soft px-2.5 py-0.5 font-medium text-primary hover:opacity-80"
+                              >
+                                {sc.label}
+                              </button>
+                            ))}
+                            <button
+                              type="button"
+                              onClick={() => setAdding(null)}
+                              className="text-ink-3 hover:text-ink"
+                            >
+                              cancel
+                            </button>
+                          </span>
+                        ) : (
+                          <>
+                            <button
+                              type="button"
+                              disabled={atCap || busy}
+                              onClick={() => beginAdd(stage, "own")}
+                              title={atCap ? "Custom-question allowance used - delete a question to free a slot" : "Write a question of your own for this stage"}
+                              className="font-medium text-primary hover:opacity-80 disabled:opacity-40"
+                            >
+                              + Add your own
+                            </button>
+                            <button
+                              type="button"
+                              disabled={atCap || busy || pending !== null}
+                              onClick={() => beginAdd(stage, "suggest")}
+                              title={atCap ? "Custom-question allowance used - delete a question to free a slot" : "Have another question written for this stage"}
+                              className="font-medium text-primary hover:opacity-80 disabled:opacity-40"
+                            >
+                              Suggest another
+                            </button>
+                            {atCap && (
+                              <span className="text-[11px] text-ink-3">
+                                custom limit reached - deleting a question frees a slot
+                              </span>
+                            )}
+                          </>
+                        )}
+                      </div>
                     </div>
                   )}
                 </div>

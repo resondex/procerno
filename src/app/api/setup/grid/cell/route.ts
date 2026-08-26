@@ -41,6 +41,8 @@ const Body = z.object({
   }),
   /** Every text already offered for this cell. */
   avoid: z.array(z.string().trim().min(1).max(2000)).min(1).max(8),
+  /** Near-variant mode: keep this prompt's ask, move one detail. */
+  nearTo: z.string().trim().min(1).max(2000).optional(),
 });
 
 /** Gate 2 helper: one fresh prompt for a single cell, different from every
@@ -64,6 +66,7 @@ export async function POST(req: Request) {
     scenarios: parsed.data.scenarios as ScenarioSpec[],
     cell: parsed.data.cell,
     avoid: parsed.data.avoid,
+    nearTo: parsed.data.nearTo,
   });
   if (!text) {
     return NextResponse.json({ error: "no new prompt came back - try again" }, { status: 502 });

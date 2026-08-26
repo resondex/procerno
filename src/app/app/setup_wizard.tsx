@@ -302,6 +302,9 @@ export function SetupWizard({ mode, brand, draft, engineOptions, onClose, onCrea
   /** The plan's buying-scenario cap (PLAN_SCENARIO_CAPS); 4 until the
    * plan loads, then Starter/Growth tighten to 3. */
   const [scenarioCap, setScenarioCap] = useState(4);
+  /** Custom questions the plan may add net of deletions (provisional
+   * allotment - the per-tier numbers are still to be decided). */
+  const [customAllowance, setCustomAllowance] = useState(6);
 
   const gridApi = useGridSetup({
     brand, category, competitors: allCompetitors(), audience,
@@ -317,6 +320,7 @@ export function SetupWizard({ mode, brand, draft, engineOptions, onClose, onCrea
       .then((r) => (r.ok ? r.json() : null))
       .then((d) => {
         if (alive && typeof d?.scenarioCap === "number") setScenarioCap(d.scenarioCap);
+        if (alive && typeof d?.customCellAllowance === "number") setCustomAllowance(d.customCellAllowance);
       })
       .catch(() => {});
     // A draft resumed directly onto the scenarios gate never passes goTo;
@@ -1075,6 +1079,11 @@ export function SetupWizard({ mode, brand, draft, engineOptions, onClose, onCrea
   const passes = mode === "grid" ? 1 : FIRST_RUN_REPEATS;
   const answers = promptCount * passes * (engineSet.length || 1);
   const stepIndex = steps.findIndex((s) => s.key === step);
+  /** Net additions over the composed grid - deleting ANY question frees
+   * a slot, so a swap (delete composed, add custom) costs nothing. */
+  const customUsed = grid
+    ? Math.max(0, grid.cells.length - (grid.baselineCellCount ?? grid.cells.length))
+    : 0;
   /** Whether the battery is complete enough to pick engines - the same
    * conditions the Prompts footer enforces, so the rail can't jump past
    * a question left without its paraphrases. */
@@ -1129,7 +1138,9 @@ export function SetupWizard({ mode, brand, draft, engineOptions, onClose, onCrea
     // proceedPrompts then picks the same action each label promises.
     if (!written) {
       const branded = live.filter((c) => namesAny(c.text, brandNames)).length;
-      footerLeft = `${live.length} questions · ${live.length - branded} blind · ${branded} branded`;
+      footerLeft = `${live.length} questions · ${live.length - branded} blind · ${branded} branded${
+        customUsed > 0 ? ` · ${customUsed}/${customAllowance} custom` : ""
+      }`;
       footerAction = {
         label: busy ?? "These are my questions",
         onClick: () => void confirmPrompts(),
@@ -1143,7 +1154,9 @@ export function SetupWizard({ mode, brand, draft, engineOptions, onClose, onCrea
         disabled: busy !== null || live.length < 4,
       };
     } else {
-      footerLeft = `${promptCount} prompts across ${live.length} questions`;
+      footerLeft = `${promptCount} prompts across ${live.length} questions${
+        customUsed > 0 ? ` · ${customUsed}/${customAllowance} custom` : ""
+      }`;
       footerAction = {
         label: busy ?? "These are my prompts",
         onClick: () => void confirmPrompts(),
@@ -1385,6 +1398,11 @@ export function SetupWizard({ mode, brand, draft, engineOptions, onClose, onCrea
                 brandNames={brandNames}
                 busy={busy !== null}
                 onRegenerate={(i) => gridApi.regenerateCell(i)}
+                onNearCell={(i) => gridApi.regenerateCell(i, true)}
+                onSuggestCell={(k, sit) => gridApi.suggestCell(k, sit)}
+                onAddOwn={(k, sit) => setGrid((g) => (g ? gridApi.addOwnCell(g, k, sit) : g))}
+                customUsed={customUsed}
+                customAllowance={customAllowance}
                 onCycle={(i, dir) => gridApi.cycleCell(i, dir)}
                 onWarmReview={warmCellReview}
               />

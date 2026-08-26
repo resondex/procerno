@@ -165,6 +165,17 @@ export const PLAN_TRACKER_LIMITS: Record<Plan, number> = {
   enterprise: Number.POSITIVE_INFINITY,
 };
 
+/** Custom questions a tracker may ADD on top of its composed grid,
+ * net of deletions - deleting a question frees a slot. PROVISIONAL
+ * numbers; the per-tier allotment is still to be decided. */
+export const PLAN_CUSTOM_CELL_ALLOWANCE: Record<Plan, number> = {
+  free: 3,
+  starter: 3,
+  growth: 3,
+  pro: 6,
+  enterprise: 12,
+};
+
 /** Buying scenarios included per tier (price sheet: Starter and Growth run
  * 3; the 4th arrives at Pro). Free mirrors Starter. */
 export const PLAN_SCENARIO_CAPS: Record<Plan, number> = {

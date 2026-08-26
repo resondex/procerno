@@ -1586,6 +1586,9 @@ export async function regenerateCell(input: {
   cell: { stage: string; situation: string | null; angle: string; mode: string | null };
   /** Every text already offered for this cell, newest last. */
   avoid: string[];
+  /** Near-variant mode: keep THIS prompt's ask, move one concrete detail -
+   * the prompts-card sibling of the scenario near neighbor. */
+  nearTo?: string;
 }): Promise<string | null> {
   const rivals = input.competitors.slice(0, 4);
   const stages = participationMask(input.base, input.scenarios);
@@ -1597,6 +1600,7 @@ export async function regenerateCell(input: {
     JSON.stringify(input.base), JSON.stringify(input.scenarios),
     `${input.cell.stage}|${input.cell.situation ?? ""}|${input.cell.angle}|${input.cell.mode ?? ""}`,
     avoidNorm.map((t) => t.toLowerCase()).sort().join("~"),
+    input.nearTo ? `near:${input.nearTo.trim().toLowerCase()}` : "",
   ]);
   const hit = await store.cacheGet(key, CACHE_TTL_MS);
   if (hit) return humanize(JSON.parse(hit) as string);
@@ -1613,11 +1617,18 @@ export async function regenerateCell(input: {
       {
         role: "system",
         content: CELL_WRITER_SYSTEM +
-          "Write exactly ONE prompt for the single cell below. It must ask " +
-          "the cell's question a genuinely DIFFERENT WAY than every " +
-          "previous prompt listed - a different angle of attack, different " +
-          "concrete specifics, a different kind of asker - never a " +
-          "paraphrase or reordering of one. Return one cell object.",
+          (input.nearTo
+            ? "Write exactly ONE NEAR VARIANT of the given prompt for the " +
+              "cell below: the SAME designed ask, with ONE concrete detail " +
+              "moved (a number, a constraint, a context detail, who is " +
+              "affected) - noticeably different, never radically different, " +
+              "and never a mere rewording. It must also differ from every " +
+              "previous prompt listed. Return one cell object."
+            : "Write exactly ONE prompt for the single cell below. It must ask " +
+              "the cell's question a genuinely DIFFERENT WAY than every " +
+              "previous prompt listed - a different angle of attack, different " +
+              "concrete specifics, a different kind of asker - never a " +
+              "paraphrase or reordering of one. Return one cell object."),
       },
       {
         role: "user",
@@ -1625,6 +1636,7 @@ export async function regenerateCell(input: {
           `Client brand: ${input.brand}\nCategory: ${input.category}\n` +
           `Rivals: ${rivals.join(", ")}\nAudience: ${input.audience ?? "unknown"}\n\n` +
           `Cell plan:\n${planText}\n\n` +
+          (input.nearTo ? `The prompt to vary:\n${input.nearTo.trim()}\n\n` : "") +
           `Previous prompts for this cell (write something DIFFERENT):\n` +
           (avoidNorm.map((t, i) => `${i + 1}. ${t}`).join("\n") || "- (none)"),
       },
