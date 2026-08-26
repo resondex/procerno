@@ -278,7 +278,7 @@ export function SetupWizard({ mode, brand, draft, engineOptions, onClose, onCrea
 
   useEffect(() => {
     let alive = true;
-    void fetch("/api/plan")
+    void fetch("/api/plan", { signal: AbortSignal.timeout(15_000) })
       .then((r) => (r.ok ? r.json() : null))
       .then((d) => {
         if (alive && typeof d?.scenarioCap === "number") setScenarioCap(d.scenarioCap);
@@ -319,9 +319,14 @@ export function SetupWizard({ mode, brand, draft, engineOptions, onClose, onCrea
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ brand, skipBattery: true }),
-    });
-    const data = await res.json().catch(() => ({}));
+      signal: AbortSignal.timeout(120_000),
+    }).catch(() => null);
     setSuggesting(false);
+    if (!res) {
+      setError("estimation timed out - fill in the details manually");
+      return;
+    }
+    const data = await res.json().catch(() => ({}));
     if (!res.ok) {
       setError((data.error ?? "estimation failed") + " - fill in the details manually");
       return;
@@ -350,6 +355,8 @@ export function SetupWizard({ mode, brand, draft, engineOptions, onClose, onCrea
       machinePrompts: mp,
       reviewedPrompts: rp,
     };
+    // Bounded, never-throwing: a stalled save must not wedge the "Saving"
+    // label or hang requestClose - the next step transition saves again.
     const res = await fetch("/api/drafts", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -362,9 +369,10 @@ export function SetupWizard({ mode, brand, draft, engineOptions, onClose, onCrea
         prompts: p,
         wizard,
       }),
-    });
+      signal: AbortSignal.timeout(30_000),
+    }).catch(() => null);
     setSaving(false);
-    if (res.ok) {
+    if (res?.ok) {
       const data = await res.json().catch(() => ({}));
       if (data.draft?.id) setDraftId(data.draft.id);
       onDraftsChanged();
@@ -934,6 +942,7 @@ export function SetupWizard({ mode, brand, draft, engineOptions, onClose, onCrea
     const res = await fetch("/api/projects", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
+      signal: AbortSignal.timeout(120_000),
       body: JSON.stringify({
         name: studyName.trim() || undefined,
         brand, category,
@@ -957,15 +966,23 @@ export function SetupWizard({ mode, brand, draft, engineOptions, onClose, onCrea
             }
           : { prompts: prompts!.filter((p) => p.text.trim()) }),
       }),
-    });
-    const data = await res.json().catch(() => ({}));
+    }).catch(() => null);
     setSubmitting(false);
+    if (!res) {
+      setError("that took too long - check your trackers before retrying (it may have been created)");
+      return;
+    }
+    const data = await res.json().catch(() => ({}));
     if (!res.ok) {
       setError(data.error ?? "something went wrong");
       return;
     }
     if (draftId) {
-      await fetch(`/api/drafts/${draftId}`, { method: "DELETE" });
+      // Best effort - a stale draft chip beats a hung create.
+      await fetch(`/api/drafts/${draftId}`, {
+        method: "DELETE",
+        signal: AbortSignal.timeout(15_000),
+      }).catch(() => {});
       onDraftsChanged();
     }
     const panel: string[] = data.project.engine_set?.length ? data.project.engine_set : engineSet;
@@ -973,6 +990,7 @@ export function SetupWizard({ mode, brand, draft, engineOptions, onClose, onCrea
       await fetch(`/api/projects/${data.project.id}/runs`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
+        signal: AbortSignal.timeout(45_000),
         body: JSON.stringify({
           model: panel[0] ?? "gpt-5-mini",
           ...(panel.length > 0 ? { models: panel } : {}),

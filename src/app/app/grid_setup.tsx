@@ -524,6 +524,7 @@ export function useGridSetup(a: GridSetupArgs) {
       const res = await fetch("/api/setup/grid/scenario", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
+        signal: AbortSignal.timeout(60_000),
         body: JSON.stringify({
           category: a.category,
           audience: a.audience || undefined,
