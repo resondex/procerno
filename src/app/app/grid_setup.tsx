@@ -1899,11 +1899,9 @@ export function CellsGate({
                                     }
                                     onBlur={() => onWarmReview?.()}
                                   />
-                                  {ph.asker && (
-                                    <span className="w-24 shrink-0 pt-1.5 text-[10px] leading-tight text-ink-3 truncate" title={ph.asker}>
-                                      {ph.asker}
-                                    </span>
-                                  )}
+                                  {/* ph.asker stays in the data (voice metadata,
+                                      rides into the tracker) but is not shown -
+                                      it means nothing to the user here. */}
                                   <button
                                     type="button"
                                     aria-label="remove paraphrase"
