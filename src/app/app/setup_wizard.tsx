@@ -420,9 +420,8 @@ export function SetupWizard({ mode, brand, draft, engineOptions, onClose, onCrea
         setReview(null);
         return;
       }
-      // Mid-write, closing would lose the write - ignore, matching the
-      // disabled Save & close.
-      if (busy !== null) return;
+      // Closing mid-write is safe: nothing aborts on unmount, and the
+      // completion handler persists the finished result to the draft.
       void requestClose();
     };
   });
@@ -1118,12 +1117,16 @@ export function SetupWizard({ mode, brand, draft, engineOptions, onClose, onCrea
         <button
           type="button"
           onClick={() => void requestClose()}
-          disabled={busy !== null || submitting}
+          disabled={submitting}
           className="text-left text-[13px] font-medium text-primary hover:opacity-80 disabled:opacity-50 px-2"
         >
-          {saving ? "Saving…" : "Save & close"}
+          {saving ? "Saving…" : busy !== null ? "Close" : "Save & close"}
         </button>
-        <span className="px-2 text-[11px] text-ink-3">Progress saves at every step.</span>
+        <span className="px-2 text-[11px] text-ink-3">
+          {busy !== null
+            ? "Safe to close - the writing continues and saves itself."
+            : "Progress saves at every step."}
+        </span>
       </nav>
 
       {/* stage */}
