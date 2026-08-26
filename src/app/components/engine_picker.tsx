@@ -65,17 +65,17 @@ const MODE_INFO: Record<
   },
 };
 
-function ModeInfoDot({ mode }: { mode: "instinct" | "search" }) {
+function ModeInfoLabel({ mode }: { mode: "instinct" | "search" }) {
   const info = MODE_INFO[mode];
   return (
     <span className="group relative inline-flex">
       <span
-        className="flex h-4 w-4 cursor-help items-center justify-center rounded-full border border-line text-[10px] font-semibold text-ink-3"
+        className="cursor-help underline decoration-dotted decoration-line underline-offset-2"
         aria-label={`About ${info.title}`}
       >
-        i
+        {info.title}
       </span>
-      <span className="pointer-events-none absolute left-1/2 top-5 z-30 hidden w-72 -translate-x-1/2 rounded-lg border border-line bg-surface p-3 text-left normal-case tracking-normal shadow-lg group-hover:block">
+      <span className="pointer-events-none absolute left-0 top-5 z-30 hidden w-72 rounded-lg border border-line bg-surface p-3 text-left normal-case tracking-normal shadow-lg group-hover:block">
         <span className="block text-[13px] font-semibold">{info.title}</span>
         <span className="mt-1 block text-[12px] font-normal leading-snug text-ink-2">
           {info.blurb}
@@ -139,8 +139,7 @@ export function EnginePicker({
     return (
       <div key={mode} className="grid gap-1">
         <span className="flex items-center gap-1.5 text-sm font-semibold uppercase tracking-wide text-primary">
-          {MODE_INFO[mode].title}
-          <ModeInfoDot mode={mode} />
+          <ModeInfoLabel mode={mode} />
         </span>
         <div className="grid gap-1 sm:grid-cols-2">
           {list.map((e) => (

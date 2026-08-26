@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
-import { requireAuth } from "@/lib/auth";
+import { requireAuthOrDemo } from "@/lib/auth";
 import { apiKeyConfigured } from "@/lib/engine/providers";
 import { reviewCells } from "@/lib/engine/instrument";
 import { store } from "@/lib/store";
@@ -36,7 +36,7 @@ const Body = z.object({
  * confirm - verdicts in candidate order, each with a minimal suggested
  * edit when not ok. */
 export async function POST(req: Request) {
-  const auth = await requireAuth();
+  const auth = await requireAuthOrDemo();
   if (auth instanceof NextResponse) return auth;
   if (!apiKeyConfigured()) {
     return NextResponse.json({ error: "OPENAI_API_KEY is not configured" }, { status: 503 });

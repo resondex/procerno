@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
-import { requireAuth } from "@/lib/auth";
+import { requireAuthOrDemo } from "@/lib/auth";
 import { apiKeyConfigured } from "@/lib/engine/providers";
 import {
   generatePhrasings,
@@ -57,7 +57,7 @@ const Body = z.object({
 
 /** Gate 3: the paraphrase set for each confirmed seed prompt. */
 export async function POST(req: Request) {
-  const auth = await requireAuth();
+  const auth = await requireAuthOrDemo();
   if (auth instanceof NextResponse) return auth;
   if (!apiKeyConfigured()) {
     return NextResponse.json({ error: "OPENAI_API_KEY is not configured" }, { status: 503 });

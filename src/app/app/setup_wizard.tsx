@@ -208,9 +208,12 @@ interface Props {
   onClose: () => void;
   onCreated: (projectId: string) => void;
   onDraftsChanged: () => void;
+  /** Demo mode: the full setup experience, but nothing persists - no
+   * drafts saved, no tracker created, no run started. */
+  demo?: boolean;
 }
 
-export function SetupWizard({ mode, brand, draft, engineOptions, onClose, onCreated, onDraftsChanged }: Props) {
+export function SetupWizard({ mode, brand, draft, engineOptions, onClose, onCreated, onDraftsChanged, demo = false }: Props) {
   const steps = STEPS[mode];
   const saved = (draft?.wizard ?? null) as WizardDraft | null;
 
@@ -233,6 +236,8 @@ export function SetupWizard({ mode, brand, draft, engineOptions, onClose, onCrea
   const [review, setReview] = useState<ScenarioReviewItem[] | null>(null);
   /** Flagged user-edited prompts awaiting a keep/suggestion choice. */
   const [cellReview, setCellReview] = useState<CellReviewItem[] | null>(null);
+  /** Demo mode's end state: the walk is complete, nothing was created. */
+  const [demoDone, setDemoDone] = useState(false);
   // Classic-mode review baselines. Same-turn saves pass fresh values to
   // goTo explicitly, since a setter hasn't landed yet when persist runs.
   // Legacy drafts without baselines treat their saved battery as
@@ -349,6 +354,7 @@ export function SetupWizard({ mode, brand, draft, engineOptions, onClose, onCrea
     mp: string[] = machinePrompts,
     rp: string[] = reviewedPrompts
   ) {
+    if (demo) return;
     setSaving(true);
     const wizard: WizardDraft = {
       mode, step: at, studyName, grid: g, engineSet,
@@ -1099,11 +1105,19 @@ export function SetupWizard({ mode, brand, draft, engineOptions, onClose, onCrea
     footerLeft = `First run: ${promptCount.toLocaleString()} prompts × ${
       passes > 1 ? `${passes} repeats × ` : ""
     }${engineSet.length || 1} engine${engineSet.length === 1 ? "" : "s"} = ${answers.toLocaleString()} answers`;
-    footerAction = {
-      label: submitting ? "Starting your first run…" : "Create tracker & run",
-      onClick: () => void create(),
-      disabled: submitting || engineSet.length === 0 || promptCount < 4,
-    };
+    footerAction = demo
+      ? demoDone
+        ? { label: "Close demo", onClick: onClose, disabled: false }
+        : {
+            label: "Finish demo",
+            onClick: () => setDemoDone(true),
+            disabled: engineSet.length === 0 || promptCount < 4,
+          }
+      : {
+          label: submitting ? "Starting your first run…" : "Create tracker & run",
+          onClick: () => void create(),
+          disabled: submitting || engineSet.length === 0 || promptCount < 4,
+        };
   }
 
   /* --------------------------------- render -------------------------------- */
@@ -1148,12 +1162,14 @@ export function SetupWizard({ mode, brand, draft, engineOptions, onClose, onCrea
           disabled={submitting}
           className="text-left text-[13px] font-medium text-primary hover:opacity-80 disabled:opacity-50 px-2"
         >
-          {saving ? "Saving…" : busy !== null ? "Close" : "Save & close"}
+          {demo ? "Close" : saving ? "Saving…" : busy !== null ? "Close" : "Save & close"}
         </button>
         <span className="px-2 text-[11px] text-ink-3">
-          {busy !== null
-            ? "Safe to close - the writing continues and saves itself."
-            : "Progress saves at every step."}
+          {demo
+            ? "Demo - nothing is saved or created."
+            : busy !== null
+              ? "Safe to close - the writing continues and saves itself."
+              : "Progress saves at every step."}
         </span>
       </nav>
 
@@ -1376,6 +1392,23 @@ export function SetupWizard({ mode, brand, draft, engineOptions, onClose, onCrea
             </div>
           )}
 
+          {step === "engines" && demo && demoDone && (
+            <div className="mb-4 grid gap-2 max-w-2xl rounded-xl border border-primary bg-primary-soft/30 p-5">
+              <span className="text-sm font-semibold uppercase tracking-wide text-primary">
+                That&apos;s the whole setup
+              </span>
+              <p className="m-0 text-sm text-ink-2">
+                In the live product this last click creates the tracker and
+                launches the first run - {promptCount.toLocaleString()} prompts ×{" "}
+                {engineSet.length || 1} engine{engineSet.length === 1 ? "" : "s"} ={" "}
+                {answers.toLocaleString()} answers - and every scheduled run after
+                it builds the trend.
+              </p>
+              <p className="m-0 text-[13px] text-ink-3">
+                Nothing was created or run in this demo.
+              </p>
+            </div>
+          )}
           {step === "engines" && (
             <div className="grid gap-3 max-w-2xl">
               <span className="text-sm font-semibold uppercase tracking-wide text-primary">

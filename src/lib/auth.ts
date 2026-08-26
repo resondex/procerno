@@ -184,6 +184,25 @@ export async function requireAuth(): Promise<AuthContext | NextResponse> {
   return auth;
 }
 
+const DEMO_COOKIE = "ap_demo";
+
+/** Auth, or a demo session: the unlisted /demo page sets this cookie
+ * (checked against DEMO_ACCESS_KEY) so a friend can walk the setup wizard
+ * without an account. Only setup-time routes accept it - nothing that
+ * creates a tracker, stores a draft, or runs. */
+export async function requireAuthOrDemo(): Promise<AuthContext | NextResponse> {
+  const auth = await getAuth();
+  if (auth) return auth;
+  const key = process.env.DEMO_ACCESS_KEY;
+  if (key) {
+    const cookieStore = await cookies();
+    if (cookieStore.get(DEMO_COOKIE)?.value === key) {
+      return { userId: null, email: "demo" };
+    }
+  }
+  return NextResponse.json({ error: "sign in required" }, { status: 401 });
+}
+
 /** Load a project the caller may access, or a 404 (no existence leaks).
  * Pass {write:true} for mutating routes — read-only members get a 403. */
 export async function requireProject(

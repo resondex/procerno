@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
-import { requireAuth } from "@/lib/auth";
+import { requireAuthOrDemo } from "@/lib/auth";
 import { store } from "@/lib/store";
 
 const Situation = z.object({
@@ -58,7 +58,7 @@ const Body = z.discriminatedUnion("kind", [
  * read back into generation: one user's rejections say nothing about
  * quality. */
 export async function POST(req: Request) {
-  const auth = await requireAuth();
+  const auth = await requireAuthOrDemo();
   if (auth instanceof NextResponse) return auth;
   const parsed = Body.safeParse(await req.json().catch(() => null));
   if (!parsed.success) {

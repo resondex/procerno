@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
-import { requireAuth } from "@/lib/auth";
+import { requireAuthOrDemo } from "@/lib/auth";
 import { apiKeyConfigured } from "@/lib/engine/providers";
 import { getBrandProfile, getBattery } from "@/lib/engine/suggest";
 
@@ -19,7 +19,7 @@ export const maxDuration = 120;
  * ~6-month TTL, returned together.
  */
 export async function POST(req: Request) {
-  const auth = await requireAuth();
+  const auth = await requireAuthOrDemo();
   if (auth instanceof NextResponse) return auth;
   if (!apiKeyConfigured()) {
     return NextResponse.json(
