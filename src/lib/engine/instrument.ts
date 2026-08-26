@@ -1647,6 +1647,17 @@ export async function regenerateCell(input: {
 
 /* ------------------------------ phrasings ------------------------------- */
 
+/** True when `text` names `brand` as a WORD, never as a substring of a
+ * longer word - "purchases" must not read as the rival "Chase", nor
+ * "discovering" as Discover. Boundaries are non-alphanumeric, so
+ * "jira's" and "Chase Sapphire" match while "purchase" cannot. */
+export function namesBrandWord(text: string, brand: string): boolean {
+  const b = brand.trim();
+  if (!b) return false;
+  const esc = b.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  return new RegExp(`(?:^|[^a-z0-9])${esc}(?:$|[^a-z0-9])`, "i").test(text);
+}
+
 /** The brands (client + rivals) a text names, lowercased and sorted - the
  * blind/branded signature a paraphrase must preserve from its seed. */
 export function brandSignature(
@@ -1654,10 +1665,9 @@ export function brandSignature(
   brand: string,
   competitors: string[]
 ): string {
-  const t = text.toLowerCase();
   return [brand, ...competitors]
     .map((b) => b.trim().toLowerCase())
-    .filter((b) => b && t.includes(b))
+    .filter((b) => b && namesBrandWord(text, b))
     .sort()
     .join("|");
 }
@@ -1700,14 +1710,18 @@ export interface Phrasing {
 
 // Bump when the paraphrase prompt or filters change: cached sets written
 // under old instructions must not be served as if they were new.
-// "p6": any-shortfall retry with a wider margin and worn-out-word
-// steering, merged on top of the first pass's keepers.
-const PHRASINGS_VERSION = "p6";
+// "p7": word-boundary brand signatures (the "purchases"-reads-as-Chase
+// poisoning) and the init retry loops until quota - short sets from the
+// poisoned filter must not be served.
+const PHRASINGS_VERSION = "p7";
 // Over-generate so the overlap filter can be strict and still fill the set.
 const PHRASINGS_EXTRA = 3;
 /** The retry's wider margin: a cell that came up short is fighting the
  * overlap filter, so give it more candidates to survive it. */
 const PHRASINGS_EXTRA_RETRY = 6;
+/** Retry rounds during the initial write: the served batch arrives full
+ * instead of getting healed later by a visible top-up. */
+const PHRASINGS_RETRY_ROUNDS = 2;
 /** How long a pending marker is trusted before another request concludes
  * the generator died and takes the cell over. Fits inside the route's
  * 120s budget with room for the takeover generation. */
@@ -1925,12 +1939,14 @@ export async function generatePhrasings(input: {
     // Reasoning models occasionally return a degenerate, near-empty set
     // for a whole batch. One retry on the cells that came up short fills
     // the gap without re-running what already worked.
-    // Any shortfall retries (not just the degenerate case): the retry gets
-    // a wider candidate margin, is told which words the keepers already
-    // wore out, and its filter seeds from those keepers - so it returns
-    // only NEW compatible phrasings, merged on top.
-    const deficient = got.map((k, j) => (k.length < want ? j : -1)).filter((j) => j >= 0);
-    if (deficient.length > 0) {
+    // Top up DURING init: short cells retry - wider margin, worn-word
+    // steering, filter seeded from the keepers so only NEW compatible
+    // phrasings come back, merged on top - and the retry LOOPS until
+    // every cell reaches quota or a round stops helping. The batch is
+    // served full; no visible after-the-fact healing.
+    for (let round = 0; round < PHRASINGS_RETRY_ROUNDS; round++) {
+      const deficient = got.map((k, j) => (k.length < want ? j : -1)).filter((j) => j >= 0);
+      if (deficient.length === 0) break;
       const subs = deficient.map((j) => subset[j]);
       const have = deficient.map((j) => got[j]);
       const avoidWords = deficient.map((j) => {
@@ -1939,9 +1955,12 @@ export async function generatePhrasings(input: {
         return [...words].slice(0, 18);
       });
       const again = await pass(subs, { extra: PHRASINGS_EXTRA_RETRY, have, avoidWords });
+      let progressed = false;
       deficient.forEach((j, k) => {
+        if (again[k].length > 0) progressed = true;
         got[j] = [...got[j], ...again[k]].slice(0, want);
       });
+      if (!progressed) break;
     }
     await Promise.all(
       idx.map((i, j) => {
@@ -2123,8 +2142,7 @@ export function namesAnyBrand(
   brand: string,
   competitors: string[]
 ): boolean {
-  const t = text.toLowerCase();
   return [brand, ...competitors]
     .filter(Boolean)
-    .some((b) => t.includes(b.trim().toLowerCase()));
+    .some((b) => namesBrandWord(text, b));
 }

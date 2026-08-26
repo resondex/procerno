@@ -303,8 +303,15 @@ export function gridCellCount(g: GridState | null, rivalCount: number): number {
 }
 
 export function namesAny(text: string, names: string[]): boolean {
-  const t = text.toLowerCase();
-  return names.some((n) => n.trim() && t.includes(n.trim().toLowerCase()));
+  // Word-boundary match, mirroring the engine's namesBrandWord: the pill
+  // must not call a blind prompt "branded" because "purchases" contains
+  // the rival Chase.
+  return names.some((n) => {
+    const b = n.trim();
+    if (!b) return false;
+    const esc = b.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    return new RegExp(`(?:^|[^a-z0-9])${esc}(?:$|[^a-z0-9])`, "i").test(text);
+  });
 }
 
 /** The base read, as editable dimensions. Changing one recomposes the mask
