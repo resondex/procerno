@@ -15,6 +15,7 @@ import {
   gridPromptCount,
   namesAny,
   normalizeGrid,
+  rebindSituation,
   scenarioRows,
   swapPhrasings,
   useGridSetup,
@@ -635,10 +636,14 @@ export function SetupWizard({ mode, brand, draft, engineOptions, onClose, onCrea
     if (!grid || !review) return;
     const byIndex = new Map(review.map((it) => [it.index, it]));
     let changed = false;
+    let cellsAcc = grid.cells;
     const rows = scenarioRows(grid).map((r, i) => {
       const it = byIndex.get(i);
       if (!it || it.choice !== "suggestion") return r;
       changed = true;
+      if (it.suggestion.label.trim() !== r.label.trim()) {
+        cellsAcc = rebindSituation(cellsAcc, r.label, it.suggestion.label);
+      }
       return {
         ...r,
         label: it.suggestion.label,
@@ -661,7 +666,11 @@ export function SetupWizard({ mode, brand, draft, engineOptions, onClose, onCrea
     }).catch(() => {});
     setReview(null);
     if (changed) {
-      const next = await gridApi.compose({ base: grid.moderators, rows });
+      const next = await gridApi.compose({
+        base: grid.moderators,
+        rows,
+        cells: cellsAcc.filter((c) => c.custom),
+      });
       if (next) goTo("stages", next);
     } else {
       goTo("stages");
@@ -1149,7 +1158,9 @@ export function SetupWizard({ mode, brand, draft, engineOptions, onClose, onCrea
         disabled: busy !== null || live.length < 4,
       };
     } else if (missing) {
-      footerLeft = `${promptCount} prompts across ${live.length} questions - some questions still need paraphrases`;
+      footerLeft = `${promptCount} prompts across ${live.length} questions${
+        customUsed > 0 ? ` · ${customUsed}/${customAllowance} custom` : ""
+      } - some questions still need paraphrases`;
       footerAction = {
         label: busy ?? "Write the missing paraphrases",
         onClick: () => void confirmPrompts(),
@@ -1329,9 +1340,9 @@ export function SetupWizard({ mode, brand, draft, engineOptions, onClose, onCrea
               busy={busy !== null}
               readDelta={readDelta}
               onRecomposeBase={(base, rows) => void recomposeBase(base, rows)}
-              onRecompose={(base, rows) => {
+              onRecompose={(base, rows, cells) => {
                 setReadDelta(null);
-                void gridApi.compose({ base, rows });
+                void gridApi.compose({ base, rows, cells });
               }}
               onSuggestScenario={() => void gridApi.suggestScenario()}
               onNearScenario={(i) => void gridApi.nearScenario(i)}
@@ -1401,8 +1412,8 @@ export function SetupWizard({ mode, brand, draft, engineOptions, onClose, onCrea
                 busy={busy !== null}
                 onRegenerate={(i) => gridApi.regenerateCell(i)}
                 onNearCell={(i) => gridApi.regenerateCell(i, true)}
-                onSuggestCell={(k, sit) => gridApi.suggestCell(k, sit)}
-                onAddOwn={(k, sit) => setGrid((g) => (g ? gridApi.addOwnCell(g, k, sit) : g))}
+                onSuggestCell={(k, sit, angle) => gridApi.suggestCell(k, sit, angle)}
+                onAddOwn={(k, sit, angle) => setGrid((g) => (g ? gridApi.addOwnCell(g, k, sit, angle) : g))}
                 customUsed={customUsed}
                 customAllowance={customAllowance}
                 onCycle={(i, dir) => gridApi.cycleCell(i, dir)}

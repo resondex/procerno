@@ -95,6 +95,16 @@ function similarText(a: string, b: string): boolean {
   return inter / (A.size + B.size - inter) > 0.5;
 }
 
+/** A scenario rename follows through to the cells that reference it -
+ * custom questions must not be orphaned (and later silently dropped)
+ * because their buyer's label changed wording. */
+export function rebindSituation(cells: GridCellUi[], from: string, to: string): GridCellUi[] {
+  const f = from.trim();
+  const t = to.trim();
+  if (!f || !t || f === t) return cells;
+  return cells.map((c) => (c.situation === f ? { ...c, situation: t } : c));
+}
+
 /** Bank the cell's written paraphrases under its current wording, and pull
  * the set banked for `nextText` if there is one - the swap that makes
  * returning to a wording you already paid for free. */
@@ -418,6 +428,10 @@ export function useGridSetup(a: GridSetupArgs) {
   async function compose(edit?: {
     base: GridState["moderators"];
     rows: ScenarioRow[];
+    /** Cells to carry through the recompose (already rebound if a
+     * scenario was renamed); defaults to the current grid's. Only the
+     * CUSTOM ones survive - composed cells are the recompose's to remake. */
+    cells?: GridCellUi[];
     /** Caller owns the busy indicator (it is running this alongside
      * something else); errors still surface. */
     silent?: boolean;
@@ -461,10 +475,12 @@ export function useGridSetup(a: GridSetupArgs) {
         keptStages: data.stages.filter((s) => s.recommended).map((s) => s.key),
         scenarios: [],
         // An edited recompose returns no reserve; the pool carries over,
-        // as do the already-checked scenario fingerprints.
+        // as do the already-checked scenario fingerprints. Custom
+        // questions survive the recompose (a fresh read wipes everything).
         reserve: data.reserve ?? a.state?.reserve,
         reviewedScenarios: a.state?.reviewedScenarios,
-        cells: [],
+        baselineCellCount: edit ? 0 : undefined,
+        cells: edit ? (edit.cells ?? a.state?.cells ?? []).filter((c) => c.custom) : [],
       },
       rows
     );
@@ -654,10 +670,15 @@ export function useGridSetup(a: GridSetupArgs) {
           }
         : r
     );
+    const rebound = rebindSituation(a.state.cells, row.label, variant.label);
     if (row.on) {
-      await compose({ base: a.state.moderators, rows: nextRows });
+      await compose({
+        base: a.state.moderators,
+        rows: nextRows,
+        cells: rebound.filter((c) => c.custom),
+      });
     } else {
-      a.setState(withScenarioRows(a.state, nextRows));
+      a.setState(withScenarioRows({ ...a.state, cells: rebound }, nextRows));
     }
   }
 
@@ -958,7 +979,11 @@ export function useGridSetup(a: GridSetupArgs) {
    * Prompts step): generic/blind identity, distinct from the stage's
    * existing prompts, inserted after them - and in phase 2 it arrives
    * with its paraphrase set, like every other draw. */
-  async function suggestCell(stageKey: string, situation: string | null): Promise<void> {
+  async function suggestCell(
+    stageKey: string,
+    situation: string | null,
+    angle = "generic"
+  ): Promise<void> {
     if (!a.state) return;
     const stage = a.state.stages.find((x) => x.key === stageKey);
     if (!stage) return;
@@ -979,7 +1004,7 @@ export function useGridSetup(a: GridSetupArgs) {
       audience: a.audience || undefined,
       base: a.state.moderators,
       scenarios: a.state.scenarios,
-      cell: { stage: stageKey, situation, angle: "generic", mode: null },
+      cell: { stage: stageKey, situation, angle, mode: null },
       avoid: avoid.length > 0 ? avoid : ["(no prompts yet)"],
     });
     if (!data) return;
@@ -990,7 +1015,7 @@ export function useGridSetup(a: GridSetupArgs) {
         audience: a.audience || undefined,
         base: a.state.moderators,
         scenarios: a.state.scenarios,
-        cells: [{ stage: stageKey, situation, angle: "generic", mode: null, text: data.text }],
+        cells: [{ stage: stageKey, situation, angle, mode: null, text: data.text }],
         count: PHRASING_COUNT,
       });
       generated = (pd?.phrasings?.[0] ?? []).map((ph) => ({ ...ph, original: ph.text }));
@@ -1001,7 +1026,7 @@ export function useGridSetup(a: GridSetupArgs) {
       stage: stageKey,
       layer: stage.layer,
       situation,
-      angle: "generic",
+      angle,
       mode: null,
       text: data.text,
       original: data.text,
@@ -1019,7 +1044,12 @@ export function useGridSetup(a: GridSetupArgs) {
   }
 
   /** Insert an empty user-written question into a stage (pure client). */
-  function addOwnCell(state: GridState, stageKey: string, situation: string | null): GridState {
+  function addOwnCell(
+    state: GridState,
+    stageKey: string,
+    situation: string | null,
+    angle = "generic"
+  ): GridState {
     const stage = state.stages.find((x) => x.key === stageKey);
     if (!stage) return state;
     const cell: GridCellUi = {
@@ -1028,7 +1058,7 @@ export function useGridSetup(a: GridSetupArgs) {
       stage: stageKey,
       layer: stage.layer,
       situation,
-      angle: "generic",
+      angle,
       mode: null,
       text: "",
       phrasings: [],
@@ -1177,7 +1207,7 @@ export function ScenariosGate({
 }: {
   state: GridState;
   setState: (s: GridState) => void;
-  onRecompose: (base: GridState["moderators"], rows: ScenarioRow[]) => void;
+  onRecompose: (base: GridState["moderators"], rows: ScenarioRow[], cells?: GridCellUi[]) => void;
   /** A "Your market buys" edit - same recompose, but the wizard narrates
    * what changed via `readDelta`. */
   onRecomposeBase: (base: GridState["moderators"], rows: ScenarioRow[]) => void;
@@ -1208,12 +1238,17 @@ export function ScenariosGate({
     const v = String(state.moderators[f.key] ?? "");
     return f.options.find(([k]) => k === v)?.[1];
   }).filter(Boolean).join(" · ");
-  const setRows = (next: ScenarioRow[], recompose = false) => {
-    if (recompose) onRecompose(state.moderators, next);
-    else setState(withScenarioRows(state, next));
+  const setRows = (next: ScenarioRow[], recompose = false, cells?: GridCellUi[]) => {
+    if (recompose) onRecompose(state.moderators, next, (cells ?? state.cells).filter((c) => c.custom));
+    else setState(withScenarioRows(cells ? { ...state, cells } : state, next));
   };
-  const updateRow = (i: number, patch: Partial<ScenarioRow>, recompose = false) =>
-    setRows(rows.map((r, j) => (j === i ? { ...r, ...patch } : r)), recompose);
+  const updateRow = (i: number, patch: Partial<ScenarioRow>, recompose = false) => {
+    // A label edit renames the scenario - custom questions bound to it
+    // follow the new wording instead of being orphaned.
+    const cells =
+      patch.label !== undefined ? rebindSituation(state.cells, rows[i].label, patch.label) : undefined;
+    setRows(rows.map((r, j) => (j === i ? { ...r, ...patch } : r)), recompose, cells);
+  };
 
   return (
     <div className="grid gap-3 max-w-4xl">
@@ -1455,23 +1490,24 @@ export function ScenariosGate({
         <span className="flex-1" />
         <button
           type="button"
-          onClick={() =>
-            setRows(
-              // Back to the compose-time originals; pools survive so the
-              // three near-neighbor draws are available again, instantly.
-              rows
-                .filter((r) => r.suggested)
-                .map((r, i) => {
-                  const home = r.first ?? r.original ?? { label: r.label, description: r.description };
-                  return {
-                    ...r, ...home,
-                    original: { ...home },
-                    journey: null, on: i < cap, variants: 0,
-                  };
-                }),
-              true
-            )
-          }
+          onClick={() => {
+            // Back to the compose-time originals; pools survive so the
+            // three near-neighbor draws are available again, instantly.
+            // Custom questions follow each reverting label.
+            let cells = state.cells;
+            const nextRows = rows
+              .filter((r) => r.suggested)
+              .map((r, i) => {
+                const home = r.first ?? r.original ?? { label: r.label, description: r.description };
+                if (home.label !== r.label) cells = rebindSituation(cells, r.label, home.label);
+                return {
+                  ...r, ...home,
+                  original: { ...home },
+                  journey: null, on: i < cap, variants: 0,
+                };
+              });
+            setRows(nextRows, true, cells);
+          }}
           className="text-[13px] font-medium text-ink-3 hover:text-ink"
         >
           Reset to suggested
@@ -1835,6 +1871,11 @@ function useFolds() {
  * controls in the footer. Once the paraphrases are written the same
  * cards grow a prompt-count pill and a paraphrases fold - there is no
  * separate paraphrases step. */
+/** Cells that already received their arrival autofocus - a Set outside
+ * React so an accordion remount can't steal focus back to a card the
+ * user has since blanked. */
+const focusedOnce = new Set<string>();
+
 export function CellsGate({
   state, setState, brandNames, onRegenerate, onNearCell, onSuggestCell, onAddOwn, onCycle, onWarmReview,
   customUsed, customAllowance, busy,
@@ -1848,9 +1889,9 @@ export function CellsGate({
    * (max MAX_VARIANTS). */
   onNearCell: (i: number) => Promise<void> | void;
   /** Mint a machine-suggested NEW question in a stage. */
-  onSuggestCell: (stageKey: string, situation: string | null) => Promise<void> | void;
+  onSuggestCell: (stageKey: string, situation: string | null, angle: string) => Promise<void> | void;
   /** Insert an empty user-written question in a stage. */
-  onAddOwn: (stageKey: string, situation: string | null) => void;
+  onAddOwn: (stageKey: string, situation: string | null, angle: string) => void;
   /** Step cell i through its offered prompts. */
   onCycle: (i: number, dir: 1 | -1) => void;
   /** Silent cache warm for the confirm-time quality check - fired on
@@ -1865,8 +1906,12 @@ export function CellsGate({
   /** The one cell currently writing - only its card waits. Keyed by uid
    * so deletions elsewhere can't shift the wait onto the wrong card. */
   const [pending, setPending] = useState<{ uid: string; kind: "new" | "near" } | null>(null);
-  /** A stage-level add in progress: picking a scenario, or generating. */
-  const [adding, setAdding] = useState<{ stage: string; kind: "own" | "suggest" } | null>(null);
+  /** A stage-level add in progress: picking a rival and/or scenario. */
+  const [adding, setAdding] = useState<{
+    stage: string;
+    kind: "own" | "suggest";
+    phase: "rival" | "scenario";
+  } | null>(null);
   const [stagePending, setStagePending] = useState<string | null>(null);
   const atCap = customUsed >= customAllowance;
   /** The one cell whose paraphrases fold is open (by uid). */
@@ -1884,24 +1929,35 @@ export function CellsGate({
       setPending(null);
     }
   };
-  const commitAdd = async (stageKey: string, situation: string | null, kind: "own" | "suggest") => {
+  const commitAdd = async (
+    stageKey: string,
+    situation: string | null,
+    angle: string,
+    kind: "own" | "suggest"
+  ) => {
     setAdding(null);
     if (kind === "own") {
-      onAddOwn(stageKey, situation);
+      onAddOwn(stageKey, situation, angle);
       return;
     }
     setStagePending(stageKey);
     try {
-      await onSuggestCell(stageKey, situation);
+      await onSuggestCell(stageKey, situation, angle);
     } finally {
       setStagePending(null);
     }
   };
+  /** Identity comes from where you click; what's left to ask is decided
+   * by the stage's mechanics: brand-structured stages pick a rival (or
+   * blind) first, situational stages pick the buyer. */
   const beginAdd = (stageKey: string, kind: "own" | "suggest") => {
     const st = stageOf(state, stageKey);
-    if (st?.situational) setAdding({ stage: stageKey, kind });
-    else void commitAdd(stageKey, null, kind);
+    if (st && st.rivals !== "none") setAdding({ stage: stageKey, kind, phase: "rival" });
+    else if (st?.situational) setAdding({ stage: stageKey, kind, phase: "scenario" });
+    else void commitAdd(stageKey, null, "generic", kind);
   };
+  /** Rivals for the picker - the brand list minus the client brand. */
+  const rivalNames = brandNames.slice(1, 7).filter((b) => b.trim());
   const toggle = (k: string) =>
     setOpen((prev) => {
       const next = new Set(prev);
@@ -2015,7 +2071,12 @@ export function CellsGate({
                             rows={1}
                             value={c.text}
                             readOnly={pending !== null && pending.uid === c.uid}
-                            autoFocus={Boolean(c.custom) && c.text === ""}
+                            ref={(el) => {
+                              if (el && c.custom && c.text === "" && c.uid && !focusedOnce.has(c.uid)) {
+                                focusedOnce.add(c.uid);
+                                el.focus();
+                              }
+                            }}
                             onChange={(e) =>
                               setState({
                                 ...state,
@@ -2196,6 +2257,38 @@ export function CellsGate({
                             />
                             {written ? "Writing a suggested question and its paraphrases…" : "Writing a suggested question…"}
                           </span>
+                        ) : adding?.stage === stage && adding.phase === "rival" ? (
+                          <span className="flex flex-wrap items-center gap-1.5 text-[11px] text-ink-2">
+                            About which rival:
+                            {rivalNames.map((r) => (
+                              <button
+                                key={r}
+                                type="button"
+                                onClick={() => void commitAdd(stage, null, r, adding.kind)}
+                                className="rounded-full bg-warning/10 px-2.5 py-0.5 font-medium text-warning hover:opacity-80"
+                              >
+                                {r}
+                              </button>
+                            ))}
+                            <button
+                              type="button"
+                              onClick={() => {
+                                const st = stageOf(state, stage);
+                                if (st?.situational) setAdding({ stage, kind: adding.kind, phase: "scenario" });
+                                else void commitAdd(stage, null, "generic", adding.kind);
+                              }}
+                              className="rounded-full bg-primary-soft px-2.5 py-0.5 font-medium text-primary hover:opacity-80"
+                            >
+                              no brand (blind)
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => setAdding(null)}
+                              className="text-ink-3 hover:text-ink"
+                            >
+                              cancel
+                            </button>
+                          </span>
                         ) : adding?.stage === stage ? (
                           <span className="flex flex-wrap items-center gap-1.5 text-[11px] text-ink-2">
                             Who asks it:
@@ -2203,7 +2296,7 @@ export function CellsGate({
                               <button
                                 key={sc.label}
                                 type="button"
-                                onClick={() => void commitAdd(stage, sc.label, adding.kind)}
+                                onClick={() => void commitAdd(stage, sc.label, "generic", adding.kind)}
                                 className="rounded-full bg-primary-soft px-2.5 py-0.5 font-medium text-primary hover:opacity-80"
                               >
                                 {sc.label}
