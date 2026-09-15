@@ -1802,6 +1802,19 @@ export async function generatePhrasings(input: {
   const want = Math.max(0, input.count - 1);
   if (want === 0 || input.cells.length === 0) return input.cells.map(() => []);
   const rivals = input.competitors.slice(0, 4);
+  // Brand names are MANDATORY vocabulary in branded cells (the same-brands
+  // rule), so counting them in the overlap filter or the worn-words list
+  // punishes candidates for obeying the rules. Narrow-lexicon stages
+  // (pricing/value: brand + worth/cost/price is most of the ask) plateaued
+  // at ~5-6/10 because every pair shared the brand tokens by construction.
+  const brandTokens = new Set(
+    [input.brand, ...rivals].flatMap((b) => [...wordSet(b)])
+  );
+  const contentWords = (t: string): Set<string> => {
+    const s = wordSet(t);
+    for (const b of brandTokens) s.delete(b);
+    return s;
+  };
   // Per-cell cache entries: one edited question re-buys only itself, any
   // batch slicing hits the same entries, and the single-cell fill shares
   // them. The base read and journeys stay in the key - a read edit that
@@ -1942,7 +1955,7 @@ export async function generatePhrasings(input: {
       const sig = brandSignature(seed.text, input.brand, rivalsList);
       const prior = opts?.have?.[c.index] ?? [];
       const seen = new Set<string>([norm(seed.text), ...prior.map((p) => norm(p.text))]);
-      const keptWords: Set<string>[] = [wordSet(seed.text), ...prior.map((p) => wordSet(p.text))];
+      const keptWords: Set<string>[] = [contentWords(seed.text), ...prior.map((p) => contentWords(p.text))];
       const kept: Phrasing[] = [];
       for (const p of c.phrasings ?? []) {
         const text = humanize((p.text ?? "").trim());
@@ -1953,8 +1966,9 @@ export async function generatePhrasings(input: {
         const n = norm(text);
         if (seen.has(n)) continue;
         // A paraphrase that shares most of its words with the seed or a sibling
-        // is a thesaurus pass, not another person asking; drop it.
-        const ws = wordSet(text);
+        // is a thesaurus pass, not another person asking; drop it. Brand
+        // tokens are excluded - required words can't count as copying.
+        const ws = contentWords(text);
         if (keptWords.some((k) => jaccard(k, ws) > MAX_OVERLAP)) continue;
         seen.add(n);
         keptWords.push(ws);
@@ -1990,9 +2004,20 @@ export async function generatePhrasings(input: {
       const subs = deficient.map((j) => subset[j]);
       const have = deficient.map((j) => got[j]);
       const avoidWords = deficient.map((j) => {
-        const words = new Set<string>(wordSet(subset[j].text));
-        for (const ph of got[j]) for (const w of wordSet(ph.text)) words.add(w);
-        return [...words].slice(0, 18);
+        // Only genuinely WORN words (used in 2+ texts) steer the retry.
+        // Banning every word ever used - the old build - outlawed the
+        // ask's essential vocabulary on narrow-lexicon cells, so retries
+        // returned candidates that failed the signature or drifted the
+        // circumstance. Brand tokens never appear (contentWords).
+        const counts = new Map<string, number>();
+        for (const t of [subset[j].text, ...got[j].map((p) => p.text)]) {
+          for (const w of contentWords(t)) counts.set(w, (counts.get(w) ?? 0) + 1);
+        }
+        return [...counts.entries()]
+          .filter(([, n]) => n >= 2)
+          .sort((a, b) => b[1] - a[1])
+          .map(([w]) => w)
+          .slice(0, 18);
       });
       const again = await pass(subs, { extra: PHRASINGS_EXTRA_RETRY, have, avoidWords });
       let progressed = false;
