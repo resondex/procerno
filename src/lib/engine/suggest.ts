@@ -35,7 +35,7 @@ export async function getBrandProfile(brand: string): Promise<BrandProfile> {
   const hit = await store.cacheGet(key, CACHE_TTL_MS);
   if (hit) return JSON.parse(hit) as BrandProfile;
   const profile = await suggestBrandProfile(brand);
-  await store.cacheSet(key, JSON.stringify(profile));
+  await store.cacheSet(key, JSON.stringify(profile), { brand });
   return profile;
 }
 
@@ -62,7 +62,10 @@ export async function getBattery(
     if (hit) return JSON.parse(hit) as PromptSpec[];
   }
   const battery = await generateBatteryAi(input);
-  await store.cacheSet(key, JSON.stringify(battery));
+  await store.cacheSet(key, JSON.stringify(battery), {
+    brand: input.brand,
+    category: input.category,
+  });
   return battery;
 }
 
@@ -123,7 +126,7 @@ export async function getReasonTaxonomy(input: {
         .filter(Boolean)
     ),
   ].slice(0, 24);
-  await store.cacheSet(key, JSON.stringify(codes));
+  await store.cacheSet(key, JSON.stringify(codes), { category: input.category });
   return codes;
 }
 

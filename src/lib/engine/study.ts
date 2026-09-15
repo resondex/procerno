@@ -518,7 +518,11 @@ async function executiveSummary(
     });
     const text = res.choices[0]?.message?.content?.trim();
     if (!text) return fallback;
-    await store.cacheSet(cacheKey, text);
+    await store.cacheSet(cacheKey, text, {
+      brand: project.brand,
+      category: project.category,
+      projectId: project.id,
+    });
     return text;
   } catch {
     return fallback;

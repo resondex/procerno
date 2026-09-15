@@ -1,6 +1,7 @@
 import { createHash } from "crypto";
 import { openaiClient } from "./providers";
 import { store } from "../store";
+import type { CacheMeta } from "../types";
 
 /**
  * The instrument designer: brand → market read (base journey + scenarios,
@@ -44,6 +45,22 @@ function cacheKey(prefix: string, parts: (string | null)[]): string {
   return `${prefix}:${INSTRUMENT_VERSION}:${createHash("sha256").update(normalized).digest("hex")}`;
 }
 
+/** Attribution stamp for llm_cache rows - metadata only, never keyed on.
+ * Local brand/category win; the caller's meta fills in source/projectId
+ * (and brand for the category-keyed functions that don't take one). */
+function stampOf(input: {
+  brand?: string;
+  category?: string;
+  meta?: CacheMeta;
+}): CacheMeta {
+  return {
+    brand: input.brand ?? input.meta?.brand ?? null,
+    category: input.category ?? input.meta?.category ?? null,
+    source: input.meta?.source ?? null,
+    projectId: input.meta?.projectId ?? null,
+  };
+}
+
 /* --------------------------- in-flight coalescing ------------------------
  * The first request for a key claims it with a pending marker and
  * generates; an identical concurrent request waits for that result instead
@@ -75,7 +92,7 @@ function pendingMarkerAt(raw: string | null): number | null {
 
 async function coalesced<T>(
   key: string,
-  opts: { force?: boolean; noWait?: boolean },
+  opts: { force?: boolean; noWait?: boolean; meta?: CacheMeta },
   generate: () => Promise<T | null>
 ): Promise<T | null> {
   const readValue = (raw: string | null): T | null => {
@@ -87,13 +104,14 @@ async function coalesced<T>(
     }
   };
   const claimAndRun = async (): Promise<T | null> => {
-    await store.cacheSet(key, JSON.stringify({ __pending: Date.now() }));
+    await store.cacheSet(key, JSON.stringify({ __pending: Date.now() }), opts.meta);
     const out = await generate();
     // A failed generation stamps the key retryable (a zero marker reads
     // as stale) instead of caching emptiness or leaving waiters hanging.
     await store.cacheSet(
       key,
-      out !== null ? JSON.stringify(out) : JSON.stringify({ __pending: 0 })
+      out !== null ? JSON.stringify(out) : JSON.stringify({ __pending: 0 }),
+      opts.meta
     );
     return out;
   };
@@ -174,6 +192,7 @@ const DIMENSION_GUIDE =
 export async function classifyModerators(input: {
   category: string;
   audience: string | null;
+  meta?: CacheMeta;
 }): Promise<Moderators> {
   const key = cacheKey("moderators", [input.category, input.audience]);
   const hit = await store.cacheGet(key, CACHE_TTL_MS);
@@ -201,7 +220,7 @@ export async function classifyModerators(input: {
     },
   });
   const parsed = JSON.parse(res.choices[0]?.message?.content ?? "{}") as Moderators;
-  await store.cacheSet(key, JSON.stringify(parsed));
+  await store.cacheSet(key, JSON.stringify(parsed), stampOf(input));
   return parsed;
 }
 
@@ -514,6 +533,7 @@ export async function readScenarios(input: {
   audience: string | null;
   /** Background warm: never wait on another request's in-flight read. */
   noWait?: boolean;
+  meta?: CacheMeta;
 }): Promise<{ base: Moderators; scenarios: ScenarioSpec[]; reserve: ScenarioSpec[] } | null> {
   // "scenarios_journeys8": deviation-coherence rules + plain-language label
   // rule (no methodology words) changed the read.
@@ -522,7 +542,7 @@ export async function readScenarios(input: {
     base: Moderators;
     scenarios: ScenarioSpec[];
     reserve: ScenarioSpec[];
-  }>(key, { noWait: input.noWait }, async () => {
+  }>(key, { noWait: input.noWait, meta: stampOf(input) }, async () => {
   const res = await openaiClient().chat.completions.create({
     model: READ_MODEL,
     messages: [
@@ -730,6 +750,7 @@ export async function suggestScenario(input: {
   audience: string | null;
   decisionUnit: Moderators["decision_unit"];
   exclude: Situation[];
+  meta?: CacheMeta;
 }): Promise<Situation | null> {
   const avoid = input.exclude.map((s) => s.label.trim().toLowerCase()).filter(Boolean).sort();
   const key = cacheKey("scenario_more3", [
@@ -776,7 +797,7 @@ export async function suggestScenario(input: {
     (s) => s.label.trim() && !avoid.includes(s.label.trim().toLowerCase())
   );
   if (!fresh) return null;
-  await store.cacheSet(key, JSON.stringify(fresh));
+  await store.cacheSet(key, JSON.stringify(fresh), stampOf(input));
   return { label: humanize(fresh.label), description: humanize(fresh.description) };
 }
 
@@ -791,6 +812,7 @@ export async function nearScenarios(input: {
   audience: string | null;
   of: Situation;
   exclude: Situation[];
+  meta?: CacheMeta;
 }): Promise<Situation[]> {
   const avoid = input.exclude.map((s) => s.label.trim().toLowerCase()).filter(Boolean).sort();
   const key = cacheKey("scenario_near_pool", [
@@ -850,7 +872,7 @@ export async function nearScenarios(input: {
     pool.push({ label: humanize(s.label.trim()), description: humanize(s.description.trim()) });
     if (pool.length === 3) break;
   }
-  if (pool.length > 0) await store.cacheSet(key, JSON.stringify(pool));
+  if (pool.length > 0) await store.cacheSet(key, JSON.stringify(pool), stampOf(input));
   return pool;
 }
 
@@ -919,6 +941,7 @@ export async function reviewScenarios(input: {
    * change. */
   candidates: (Situation & { original?: Situation | null })[];
   others: Situation[];
+  meta?: CacheMeta;
 }): Promise<ScenarioVerdict[]> {
   const fp = (s: Situation & { original?: Situation | null }) =>
     `${s.label.trim()}|${s.description.trim()}` +
@@ -1023,7 +1046,7 @@ export async function reviewScenarios(input: {
       suggestion: flags.length === 0 ? c : v.suggestion,
     };
   });
-  await store.cacheSet(key, JSON.stringify(verdicts));
+  await store.cacheSet(key, JSON.stringify(verdicts), stampOf(input));
   return verdicts;
 }
 
@@ -1095,6 +1118,7 @@ export async function reviewCells(input: {
   competitors: string[];
   audience: string | null;
   candidates: CellReviewCandidate[];
+  meta?: CacheMeta;
 }): Promise<CellVerdict[]> {
   const fp = (c: CellReviewCandidate) =>
     [c.stage, c.situation ?? "", c.angle, c.text.trim(), c.original?.trim() ?? ""].join("|");
@@ -1217,7 +1241,7 @@ export async function reviewCells(input: {
       suggestion: flags.length === 0 ? c.text : humanize(v.suggestion),
     };
   });
-  await store.cacheSet(key, JSON.stringify(verdicts));
+  await store.cacheSet(key, JSON.stringify(verdicts), stampOf(input));
   return verdicts;
 }
 
@@ -1317,6 +1341,7 @@ export async function generateGrid(input: {
   stages: MaskedStage[];
   /** Background warm: never wait on another request's in-flight write. */
   noWait?: boolean;
+  meta?: CacheMeta;
 }): Promise<GridCell[] | null> {
   const rivals = input.competitors.slice(0, 4);
   const allLabels = input.scenarios.map((s) => s.label);
@@ -1405,7 +1430,7 @@ export async function generateGrid(input: {
   const generate = async (idxs: number[], seen: Set<string>): Promise<void> => {
     if (idxs.length === 0) return;
     await Promise.all(
-      idxs.map((u) => store.cacheSet(unitKeys[u], JSON.stringify({ __pending: Date.now() })))
+      idxs.map((u) => store.cacheSet(unitKeys[u], JSON.stringify({ __pending: Date.now() }), stampOf(input)))
     );
     const groups: number[][] = [];
     let cur: number[] = [];
@@ -1486,7 +1511,8 @@ export async function generateGrid(input: {
             // the failure.
             return store.cacheSet(
               unitKeys[u],
-              cells.length > 0 ? JSON.stringify(cells) : JSON.stringify({ __pending: 0 })
+              cells.length > 0 ? JSON.stringify(cells) : JSON.stringify({ __pending: 0 }),
+              stampOf(input)
             );
           })
         );
@@ -1589,6 +1615,7 @@ export async function regenerateCell(input: {
   /** Near-variant mode: keep THIS prompt's ask, move one concrete detail -
    * the prompts-card sibling of the scenario near neighbor. */
   nearTo?: string;
+  meta?: CacheMeta;
 }): Promise<string | null> {
   const rivals = input.competitors.slice(0, 4);
   const stages = participationMask(input.base, input.scenarios);
@@ -1653,7 +1680,7 @@ export async function regenerateCell(input: {
   if (!text) return null;
   const dup = avoidNorm.some((t) => t.toLowerCase() === text.toLowerCase());
   if (dup) return null;
-  await store.cacheSet(key, JSON.stringify(text));
+  await store.cacheSet(key, JSON.stringify(text), stampOf(input));
   return text;
 }
 
@@ -1770,6 +1797,7 @@ export async function generatePhrasings(input: {
   noWait?: boolean;
   /** Diagnostic hook: receives the raw parsed model output. */
   onRaw?: (raw: unknown) => void;
+  meta?: CacheMeta;
 }): Promise<Phrasing[][]> {
   const want = Math.max(0, input.count - 1);
   if (want === 0 || input.cells.length === 0) return input.cells.map(() => []);
@@ -1944,7 +1972,7 @@ export async function generatePhrasings(input: {
   const generate = async (idx: number[]): Promise<void> => {
     if (idx.length === 0) return;
     await Promise.all(
-      idx.map((i) => store.cacheSet(keys[i], JSON.stringify({ __pending: Date.now() })))
+      idx.map((i) => store.cacheSet(keys[i], JSON.stringify({ __pending: Date.now() }), stampOf(input)))
     );
     const subset = idx.map((i) => input.cells[i]);
     const got = await pass(subset);
@@ -1982,7 +2010,8 @@ export async function generatePhrasings(input: {
         // stop waiting and the next request retries.
         return store.cacheSet(
           keys[i],
-          got[j].length > 0 ? JSON.stringify(got[j]) : JSON.stringify({ __pending: 0 })
+          got[j].length > 0 ? JSON.stringify(got[j]) : JSON.stringify({ __pending: 0 }),
+          stampOf(input)
         );
       })
     );
@@ -2094,6 +2123,7 @@ export async function composeInstrument(input: {
   category: string;
   audience: string | null;
   noWait?: boolean;
+  meta?: CacheMeta;
 }): Promise<{
   base: Moderators;
   moderators: Moderators;
@@ -2130,10 +2160,12 @@ export async function buildInstrument(input: {
   category: string;
   competitors: string[];
   audience: string | null;
+  meta?: CacheMeta;
 }): Promise<Instrument> {
   const composed = await composeInstrument({
     category: input.category,
     audience: input.audience,
+    meta: { brand: input.brand, ...input.meta },
   });
   if (!composed) throw new Error("the market read came back empty");
   const { base, scenarios, stages } = composed;

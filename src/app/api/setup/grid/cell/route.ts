@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
-import { requireAuthOrDemo } from "@/lib/auth";
+import { cacheSource, requireAuthOrDemo } from "@/lib/auth";
 import { apiKeyConfigured } from "@/lib/engine/providers";
 import {
   regenerateCell,
@@ -67,6 +67,7 @@ export async function POST(req: Request) {
     cell: parsed.data.cell,
     avoid: parsed.data.avoid,
     nearTo: parsed.data.nearTo,
+    meta: { source: cacheSource(auth) },
   });
   if (!text) {
     return NextResponse.json({ error: "no new prompt came back - try again" }, { status: 502 });

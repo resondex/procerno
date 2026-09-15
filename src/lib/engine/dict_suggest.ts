@@ -195,6 +195,9 @@ async function suggestBatch(
       };
     })
     .filter((s): s is DictSuggestion => s !== null);
-  await store.cacheSet(key, JSON.stringify(suggestions));
+  await store.cacheSet(key, JSON.stringify(suggestions), {
+    category,
+    projectId,
+  });
   return suggestions;
 }

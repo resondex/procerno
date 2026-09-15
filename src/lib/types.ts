@@ -20,6 +20,18 @@ export type RunSchedule = "none" | "weekly" | "monthly";
 
 export type Plan = "free" | "starter" | "growth" | "pro" | "enterprise";
 
+/** Attribution stamped on llm_cache rows at write time. Metadata only -
+ * never part of the cache key, so cross-tenant dedup keeps working. Enables
+ * clean eviction (DELETE WHERE brand = x) and spend attribution; absent
+ * fields leave any existing stamp on the row untouched. */
+export type CacheMeta = {
+  brand?: string | null;
+  category?: string | null;
+  /** "user:<id>" | "demo" | "warm" - who caused the generation. */
+  source?: string | null;
+  projectId?: string | null;
+};
+
 export type OrgRole = "admin" | "editor" | "viewer";
 
 export interface Org {
@@ -655,7 +667,7 @@ export interface Store {
   getPlan(userId: string): Promise<Plan>;
   /** Cached value no older than maxAgeMs, else null. */
   cacheGet(key: string, maxAgeMs: number): Promise<string | null>;
-  cacheSet(key: string, value: string): Promise<void>;
+  cacheSet(key: string, value: string, meta?: CacheMeta): Promise<void>;
   /** Append-only setup feedback log (rejected variants, review verdicts and
    * choices). For OUR visibility only - it is never read back into
    * generation: one user's rejections say nothing about quality. */

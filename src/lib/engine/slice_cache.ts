@@ -105,7 +105,13 @@ export async function computeSlicesCached(
     }
     // Persist new slices, then drop this run's rows from older generations.
     await Promise.all(
-      misses.map((q) => store.cacheSet(fullKey(q), JSON.stringify(out[q.key])))
+      misses.map((q) =>
+        store.cacheSet(fullKey(q), JSON.stringify(out[q.key]), {
+          brand: project.brand,
+          category: project.category,
+          projectId: project.id,
+        })
+      )
     );
     await store.cachePurge(runPrefix, generation);
   }

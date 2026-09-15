@@ -186,6 +186,13 @@ function ensureSchema(): Promise<void> {
         value TEXT NOT NULL,
         created_at TIMESTAMPTZ NOT NULL DEFAULT now()
       )`;
+      // Attribution metadata (never part of the key): eviction + spend
+      // accounting per brand/source without breaking cross-tenant dedup.
+      await sql`ALTER TABLE llm_cache ADD COLUMN IF NOT EXISTS brand TEXT`;
+      await sql`ALTER TABLE llm_cache ADD COLUMN IF NOT EXISTS category TEXT`;
+      await sql`ALTER TABLE llm_cache ADD COLUMN IF NOT EXISTS source TEXT`;
+      await sql`ALTER TABLE llm_cache ADD COLUMN IF NOT EXISTS project_id TEXT`;
+      await sql`CREATE INDEX IF NOT EXISTS idx_llm_cache_brand ON llm_cache (brand)`;
       await sql`CREATE TABLE IF NOT EXISTS setup_drafts (
         id TEXT PRIMARY KEY,
         user_id TEXT,
@@ -670,11 +677,21 @@ export const pgStore: Store = {
       VALUES (${crypto.randomUUID()}, ${e.email}, ${e.category}, ${e.audience}, ${e.kind}, ${JSON.stringify(e.payload)})`;
   },
 
-  async cacheSet(key, value) {
+  async cacheSet(key, value, meta) {
     const sql = await db();
-    await sql`INSERT INTO llm_cache (key, value, created_at)
-      VALUES (${key}, ${value}, now())
-      ON CONFLICT (key) DO UPDATE SET value = ${value}, created_at = now()`;
+    const brand = meta?.brand?.trim().toLowerCase() || null;
+    const category = meta?.category?.trim().toLowerCase() || null;
+    const source = meta?.source || null;
+    const projectId = meta?.projectId || null;
+    // COALESCE keeps an existing stamp when a later write omits meta (e.g.
+    // a value overwriting its own pending marker, or a legacy call site).
+    await sql`INSERT INTO llm_cache (key, value, created_at, brand, category, source, project_id)
+      VALUES (${key}, ${value}, now(), ${brand}, ${category}, ${source}, ${projectId})
+      ON CONFLICT (key) DO UPDATE SET value = ${value}, created_at = now(),
+        brand = COALESCE(${brand}, llm_cache.brand),
+        category = COALESCE(${category}, llm_cache.category),
+        source = COALESCE(${source}, llm_cache.source),
+        project_id = COALESCE(${projectId}, llm_cache.project_id)`;
   },
 
   async saveSetupDraft(input) {

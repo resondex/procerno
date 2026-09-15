@@ -64,6 +64,13 @@ export async function shareLinkFor(
   }
 }
 
+/** llm_cache attribution string for this requester: who caused a
+ * generation's spend. Metadata only - never part of a cache key. */
+export function cacheSource(auth: { userId: string | null; email: string | null }): string {
+  if (auth.userId) return `user:${auth.userId}`;
+  return auth.email === "demo" ? "demo" : "anon";
+}
+
 /** Current auth context, or null when auth is on and nobody is signed in. */
 export async function getAuth(): Promise<AuthContext | null> {
   if (!authEnabled()) return { userId: null, email: null };

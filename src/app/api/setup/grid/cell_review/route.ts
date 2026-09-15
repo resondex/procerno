@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
-import { requireAuthOrDemo } from "@/lib/auth";
+import { cacheSource, requireAuthOrDemo } from "@/lib/auth";
 import { apiKeyConfigured } from "@/lib/engine/providers";
 import { reviewCells } from "@/lib/engine/instrument";
 import { store } from "@/lib/store";
@@ -61,6 +61,7 @@ export async function POST(req: Request) {
       angle: c.angle,
       mode: c.mode ?? null,
     })),
+    meta: { source: cacheSource(auth) },
   });
   const flagged = verdicts
     .map((v, i) => ({ candidate: parsed.data.candidates[i], verdict: v }))

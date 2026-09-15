@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
-import { requireAuthOrDemo } from "@/lib/auth";
+import { cacheSource, requireAuthOrDemo } from "@/lib/auth";
 import { apiKeyConfigured } from "@/lib/engine/providers";
 import { nearScenarios, suggestScenario, type Moderators } from "@/lib/engine/instrument";
 
@@ -40,6 +40,7 @@ export async function POST(req: Request) {
       audience: parsed.data.audience || null,
       of: parsed.data.nearTo,
       exclude: parsed.data.exclude.filter((s) => s.label),
+      meta: { source: cacheSource(auth) },
     });
     if (variants.length === 0) {
       return NextResponse.json({ error: "no variants came back - try again" }, { status: 502 });
@@ -51,6 +52,7 @@ export async function POST(req: Request) {
     audience: parsed.data.audience || null,
     decisionUnit: parsed.data.decisionUnit as Moderators["decision_unit"],
     exclude: parsed.data.exclude.filter((s) => s.label),
+    meta: { source: cacheSource(auth) },
   });
   if (!scenario) {
     return NextResponse.json({ error: "no new scenario came back - try again" }, { status: 502 });

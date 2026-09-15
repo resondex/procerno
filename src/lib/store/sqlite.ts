@@ -69,7 +69,11 @@ function createDb(): Database.Database {
     CREATE TABLE IF NOT EXISTS llm_cache (
       key TEXT PRIMARY KEY,
       value TEXT NOT NULL,
-      created_at TEXT NOT NULL DEFAULT (datetime('now'))
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      brand TEXT,
+      category TEXT,
+      source TEXT,
+      project_id TEXT
     );
     CREATE TABLE IF NOT EXISTS setup_drafts (
       id TEXT PRIMARY KEY,
@@ -162,6 +166,12 @@ function createDb(): Database.Database {
   const promptColsForAsker = db.prepare("PRAGMA table_info(prompts)").all() as { name: string }[];
   if (!promptColsForAsker.some((c) => c.name === "asker")) {
     db.exec("ALTER TABLE prompts ADD COLUMN asker TEXT");
+  }
+  const cacheCols = db.prepare("PRAGMA table_info(llm_cache)").all() as { name: string }[];
+  for (const col of ["brand", "category", "source", "project_id"]) {
+    if (!cacheCols.some((c) => c.name === col)) {
+      db.exec(`ALTER TABLE llm_cache ADD COLUMN ${col} TEXT`);
+    }
   }
   const draftCols = db.prepare("PRAGMA table_info(setup_drafts)").all() as { name: string }[];
   if (!draftCols.some((c) => c.name === "wizard")) {
@@ -751,14 +761,22 @@ export const sqliteStore: Store = {
     return row?.value ?? null;
   },
 
-  async cacheSet(key, value) {
+  async cacheSet(key, value, meta) {
+    const brand = meta?.brand?.trim().toLowerCase() || null;
+    const category = meta?.category?.trim().toLowerCase() || null;
+    // COALESCE keeps an existing stamp when a later write omits meta (e.g.
+    // a value overwriting its own pending marker, or a legacy call site).
     getDb()
       .prepare(
-        `INSERT INTO llm_cache (key, value, created_at)
-         VALUES (?, ?, datetime('now'))
-         ON CONFLICT(key) DO UPDATE SET value = excluded.value, created_at = datetime('now')`
+        `INSERT INTO llm_cache (key, value, created_at, brand, category, source, project_id)
+         VALUES (?, ?, datetime('now'), ?, ?, ?, ?)
+         ON CONFLICT(key) DO UPDATE SET value = excluded.value, created_at = datetime('now'),
+           brand = COALESCE(excluded.brand, brand),
+           category = COALESCE(excluded.category, category),
+           source = COALESCE(excluded.source, source),
+           project_id = COALESCE(excluded.project_id, project_id)`
       )
-      .run(key, value);
+      .run(key, value, brand, category, meta?.source ?? null, meta?.projectId ?? null);
   },
 
   async insertRunBatch(input) {

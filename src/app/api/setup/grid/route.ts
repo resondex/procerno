@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
-import { requireAuth } from "@/lib/auth";
+import { cacheSource, requireAuth } from "@/lib/auth";
 import { apiKeyConfigured } from "@/lib/engine/providers";
 import { buildInstrument } from "@/lib/engine/instrument";
 
@@ -38,6 +38,7 @@ export async function POST(req: Request) {
     category,
     competitors,
     audience: audience || null,
+    meta: { source: cacheSource(auth) },
   });
   return NextResponse.json({ instrument });
 }

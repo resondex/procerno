@@ -516,6 +516,10 @@ export async function buildRunInsights(
     runId,
     dictionaryVersion: metrics.dictionaryVersion,
   };
-  await store.cacheSet(key, JSON.stringify(bundle));
+  await store.cacheSet(key, JSON.stringify(bundle), {
+    brand: project.brand,
+    category: project.category,
+    projectId: project.id,
+  });
   return bundle;
 }

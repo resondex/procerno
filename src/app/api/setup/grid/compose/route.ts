@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
-import { requireAuthOrDemo } from "@/lib/auth";
+import { cacheSource, requireAuthOrDemo } from "@/lib/auth";
 import { apiKeyConfigured } from "@/lib/engine/providers";
 import {
   composeInstrument,
@@ -29,6 +29,8 @@ const ScenarioShape = z.object({
 });
 
 const Body = z.object({
+  /** Cache-attribution only - the read is keyed on category+audience. */
+  brand: z.string().trim().max(80).optional(),
   category: z.string().trim().min(1).max(120),
   audience: z.string().trim().max(160).optional(),
   /** Edited read: recompute the mask from these - pure code, no model. */
@@ -77,6 +79,7 @@ export async function POST(req: Request) {
       category: parsed.data.category,
       audience: parsed.data.audience || null,
       noWait: parsed.data.warm,
+      meta: { brand: parsed.data.brand || null, source: cacheSource(auth) },
     });
     if (!composed) {
       // A warm that found the read already cooking has nothing to add; a

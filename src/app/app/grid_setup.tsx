@@ -445,6 +445,7 @@ export function useGridSetup(a: GridSetupArgs) {
       reserve?: { label: string; description: string }[];
       stages: GridStage[];
     }>("/api/setup/grid/compose", {
+      brand: a.brand,
       category: a.category,
       audience: a.audience || undefined,
       ...(edit && activeRows.length > 0
@@ -1102,7 +1103,7 @@ export function useGridSetup(a: GridSetupArgs) {
     void fetch("/api/setup/grid/compose", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ category: cat, audience: (audience ?? a.audience) || undefined, warm: true }),
+      body: JSON.stringify({ brand: a.brand, category: cat, audience: (audience ?? a.audience) || undefined, warm: true }),
     }).catch(() => {});
   }
 

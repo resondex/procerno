@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
-import { requireAuthOrDemo } from "@/lib/auth";
+import { cacheSource, requireAuthOrDemo } from "@/lib/auth";
 import { apiKeyConfigured } from "@/lib/engine/providers";
 import {
   generatePhrasings,
@@ -81,6 +81,7 @@ export async function POST(req: Request) {
     count,
     force,
     noWait: parsed.data.warm,
+    meta: { source: cacheSource(auth) },
   });
   return NextResponse.json({ phrasings });
 }
