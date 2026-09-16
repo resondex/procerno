@@ -16,6 +16,14 @@ export default function DemoPage() {
   const [denied, setDenied] = useState(false);
   const [open, setOpen] = useState(false);
 
+  /** The golden-fixture roster - reviewed setups with warm caches, so
+   * every step lands instantly. Deliberately a fixed list: brands people
+   * merely typed into the demo are never surfaced here. */
+  const GOLDEN = [
+    "jira", "Sephora", "Google Pixel", "Google Nest", "Netflix", "Purple",
+    "AG1", "American Express", "Doritos", "athenahealth", "PwC",
+  ];
+
   useEffect(() => {
     fetch("/api/engines", { signal: AbortSignal.timeout(15_000) })
       .then(async (r) => {
@@ -72,6 +80,26 @@ export default function DemoPage() {
             >
               Start Buyer Landscape
             </button>
+            <div className="grid gap-1.5 border-t border-line pt-3">
+              <span className="text-[11px] font-semibold uppercase tracking-wide text-ink-2">
+                Or open an example
+              </span>
+              <div className="flex flex-wrap gap-1.5">
+                {GOLDEN.map((g) => (
+                  <button
+                    key={g}
+                    type="button"
+                    onClick={() => {
+                      setBrand(g);
+                      setOpen(true);
+                    }}
+                    className="rounded-full bg-primary-soft px-2.5 py-1 text-[12px] font-medium text-primary hover:opacity-80"
+                  >
+                    {g}
+                  </button>
+                ))}
+              </div>
+            </div>
           </div>
         )}
       </div>
