@@ -1152,13 +1152,21 @@ export async function reviewScenarioFit(input: {
     missing_core?: { label: string; description: string; reason: string } | null;
   };
   const labels = new Set(input.scenarios.map((s) => s.label.trim().toLowerCase()));
+  // House style: no em dashes in user-facing text.
+  const plain = (t: string) => humanize((t ?? "").replace(/\s*[—–]\s*/g, " - "));
   const fit: ScenarioFit = {
     // Only flags that name a real scenario survive - a hallucinated label
     // would render as advice about nothing.
-    offPortfolio: (parsed.off_portfolio ?? []).filter((f) =>
-      labels.has((f.label ?? "").trim().toLowerCase())
-    ),
-    missingCore: parsed.missing_core ?? null,
+    offPortfolio: (parsed.off_portfolio ?? [])
+      .filter((f) => labels.has((f.label ?? "").trim().toLowerCase()))
+      .map((f) => ({ label: f.label, reason: plain(f.reason) })),
+    missingCore: parsed.missing_core
+      ? {
+          label: plain(parsed.missing_core.label),
+          description: plain(parsed.missing_core.description),
+          reason: plain(parsed.missing_core.reason),
+        }
+      : null,
   };
   await store.cacheSet(key, JSON.stringify(fit), stampOf(input));
   return fit;
