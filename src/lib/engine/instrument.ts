@@ -531,13 +531,22 @@ const CORE_SCENARIOS = 4;
 export async function readScenarios(input: {
   category: string;
   audience: string | null;
+  /** Brand-aware read: scenarios must be occasions THIS brand competes
+   * in. Off by default - the shared category read is the cost model -
+   * and keyed separately, so tenants sharing a category still share the
+   * default read. Offered when the fit advisory finds the shared read
+   * handed a multi-product brand rooms it cannot win (Google Nest got
+   * robot vacuums; its thermostats got nothing). */
+  forBrand?: string | null;
   /** Background warm: never wait on another request's in-flight read. */
   noWait?: boolean;
   meta?: CacheMeta;
 }): Promise<{ base: Moderators; scenarios: ScenarioSpec[]; reserve: ScenarioSpec[] } | null> {
-  // "scenarios_journeys8": deviation-coherence rules + plain-language label
-  // rule (no methodology words) changed the read.
-  const key = cacheKey("scenarios_journeys8", [input.category, input.audience]);
+  // "scenarios_journeys9": occasion-frequency weighting in the coverage
+  // audit + the optional brand-aware mode changed the read.
+  const key = cacheKey("scenarios_journeys9", [
+    input.category, input.audience, input.forBrand ?? "",
+  ]);
   const read = await coalesced<{
     base: Moderators;
     scenarios: ScenarioSpec[];
@@ -601,18 +610,31 @@ export async function readScenarios(input: {
           "never a template for content, and never a template for SHAPE: " +
           "your market's rooms are its own.\n" +
           "Before returning, audit the core four for coverage: rank this " +
-          "market's buying rooms by how much revenue moves through them, " +
-          "ensuring a diverse sampling, and check none of the biggest is " +
-          "missing. In categories sold to organizations, the " +
+          "market's buying rooms by how much revenue moves through them " +
+          "AND how often buyers are in them - a flagship, frequently " +
+          "bought occasion outranks a niche corner of the category, " +
+          "however real the corner is. Ensure a diverse sampling and " +
+          "check none of the biggest rooms is missing. In categories " +
+          "sold to organizations, the " +
           "large-organization purchase is almost always one of them; if a " +
           "top room is absent it replaces the weakest scenario in the " +
           "core set. If the market genuinely has a second decision " +
           "process - a scenario whose buyer decides differently - its " +
-          "room stays in the core set alongside the revenue-ranked ones.",
+          "room stays in the core set alongside the revenue-ranked ones." +
+          (input.forBrand
+            ? "\nThis instrument is fielded FOR ONE BRAND, named below. " +
+              "Every scenario must be an occasion where that brand " +
+              "genuinely competes - centered on product types it actually " +
+              "sells today - and its flagship line's occasion must be in " +
+              "the core four. The wording stays brand-blind as ever: " +
+              "describe the circumstance, never name any brand."
+            : ""),
       },
       {
         role: "user",
-        content: `Category: ${input.category}\nAudience: ${input.audience ?? "unknown"}`,
+        content:
+          `Category: ${input.category}\nAudience: ${input.audience ?? "unknown"}` +
+          (input.forBrand ? `\nFielded for brand: ${input.forBrand}` : ""),
       },
     ],
     response_format: {
@@ -2306,6 +2328,8 @@ export function humanize(t: string): string {
 export async function composeInstrument(input: {
   category: string;
   audience: string | null;
+  /** Brand-aware read - see readScenarios.forBrand. */
+  forBrand?: string | null;
   noWait?: boolean;
   meta?: CacheMeta;
 }): Promise<{

@@ -29,8 +29,11 @@ const ScenarioShape = z.object({
 });
 
 const Body = z.object({
-  /** Cache-attribution only - the read is keyed on category+audience. */
+  /** Cache attribution, and the brand for a forBrand read. */
   brand: z.string().trim().max(80).optional(),
+  /** Brand-aware read: scenarios constrained to occasions `brand`
+   * competes in, keyed separately from the shared category read. */
+  forBrand: z.boolean().optional(),
   category: z.string().trim().min(1).max(120),
   audience: z.string().trim().max(160).optional(),
   /** Edited read: recompute the mask from these - pure code, no model. */
@@ -78,6 +81,7 @@ export async function POST(req: Request) {
     const composed = await composeInstrument({
       category: parsed.data.category,
       audience: parsed.data.audience || null,
+      forBrand: parsed.data.forBrand && parsed.data.brand ? parsed.data.brand : null,
       noWait: parsed.data.warm,
       meta: { brand: parsed.data.brand || null, source: cacheSource(auth) },
     });

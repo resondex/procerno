@@ -447,8 +447,12 @@ export function useGridSetup(a: GridSetupArgs) {
     /** Caller owns the busy indicator (it is running this alongside
      * something else); errors still surface. */
     silent?: boolean;
-  }): Promise<GridState | null> {
-    if (!edit?.silent) a.setBusy(edit ? "Recomposing…" : "Reading your market…");
+  }, forBrand = false): Promise<GridState | null> {
+    if (!edit?.silent) {
+      a.setBusy(
+        edit ? "Recomposing…" : forBrand ? `Rebuilding scenarios for ${a.brand}…` : "Reading your market…"
+      );
+    }
     a.setError(null);
     const activeRows = edit?.rows.filter((r) => r.on && r.label.trim()) ?? [];
     const data = await post<{
@@ -460,6 +464,7 @@ export function useGridSetup(a: GridSetupArgs) {
       brand: a.brand,
       category: a.category,
       audience: a.audience || undefined,
+      ...(forBrand && !edit ? { forBrand: true } : {}),
       ...(edit && activeRows.length > 0
         ? {
             base: edit.base,
@@ -1218,7 +1223,7 @@ function TagChip({ tag }: { tag: GridStage["tag"] }) {
  * description, and the journey. Nothing else competes for the screen. */
 export function ScenariosGate({
   state, setState, onRecompose, onRecomposeBase, onSuggestScenario, onNearScenario, onWarmReview, busy,
-  maxScenarios = MAX_SCENARIOS, readDelta, fitBrand, fitCategory,
+  maxScenarios = MAX_SCENARIOS, readDelta, fitBrand, fitCategory, onRebuildForBrand,
 }: {
   state: GridState;
   setState: (s: GridState) => void;
@@ -1240,6 +1245,9 @@ export function ScenariosGate({
   /** Brand + category for the portfolio-fit advisory; omit to disable. */
   fitBrand?: string;
   fitCategory?: string;
+  /** Rebuild the scenario read brand-aware - offered when the advisory
+   * finds the shared category read gave this brand rooms it can't win. */
+  onRebuildForBrand?: () => void;
 }) {
   const [editRead, setEditRead] = useState(false);
   const [fit, setFit] = useState<ScenarioFitUi | null>(null);
@@ -1388,6 +1396,20 @@ export function ScenariosGate({
               it, or swap it for a scenario {fitBrand} can win.
             </p>
           ))}
+          {fitFlags.length >= 2 && onRebuildForBrand && (
+            <p className="m-0">
+              Half this set misses {fitBrand}.{" "}
+              <button
+                type="button"
+                disabled={busy}
+                onClick={onRebuildForBrand}
+                className="font-semibold text-primary hover:opacity-80 disabled:opacity-40"
+              >
+                Rebuild the scenarios around {fitBrand}
+              </button>{" "}
+              - a fresh read constrained to occasions it competes in.
+            </p>
+          )}
           {fitMissing && (
             <p className="m-0">
               <span className="font-medium">Nothing covers {fitMissing.label.toLowerCase()}:</span>{" "}
