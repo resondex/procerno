@@ -100,11 +100,12 @@ export async function POST(req: Request) {
     ({ base, scenarios, reserve, stages } = composed);
   }
   // The fit advisory ships WITH the compose so the scenarios gate never
-  // renders before its advice exists (it used to pop in seconds later).
-  // A warm skips it (nobody is looking), and a failure ships null advice
-  // rather than an error - it is advice, not measurement.
+  // renders before its advice exists. The WARM path computes it too -
+  // that is the whole point of the estimate-time warm: by the time the
+  // user reaches the gate, read AND advice are cached, zero lag. A
+  // failure ships null advice rather than an error.
   let fit: ScenarioFit | null = null;
-  if (parsed.data.brand && !parsed.data.warm) {
+  if (parsed.data.brand) {
     fit = await reviewScenarioFit({
       brand: parsed.data.brand,
       category: parsed.data.category,
