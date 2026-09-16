@@ -1129,10 +1129,10 @@ export async function reviewScenarioFit(input: {
 }): Promise<ScenarioFit> {
   const empty: ScenarioFit = { offPortfolio: [], missingCore: null };
   if (input.scenarios.length === 0) return empty;
-  // "scenario_fit3": bar softened to "would recommend adding" - fit2
-  // ("would insist") suppressed suggestions users would take (Doritos
-  // on-the-go), fit1 suggested on every brand.
-  const key = cacheKey("scenario_fit3", [
+  // "scenario_fit4": tentative voice - advice reads as "you may want
+  // to", never a verdict. fit3 softened the bar; fit2 over-suppressed;
+  // fit1 suggested on every brand.
+  const key = cacheKey("scenario_fit4", [
     input.brand, input.category,
     input.scenarios.map((s) => `${s.label.trim()}|${s.description.trim()}`).join("~"),
   ]);
@@ -1161,7 +1161,10 @@ export async function reviewScenarioFit(input: {
           "storming - if nothing clearly earns a place, null. Many scenario " +
           "sets are complete; null is a normal answer.\n" +
           "Be conservative on off_portfolio: empty is the common, correct " +
-          "answer.",
+          "answer.\n" +
+          "Voice: this is ADVICE the user weighs, never a verdict. Write " +
+          "every reason tentatively - 'appears to', 'may not', 'does not " +
+          "seem to' - and never declare the set wrong or incomplete.",
       },
       {
         role: "user",

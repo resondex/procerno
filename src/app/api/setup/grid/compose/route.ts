@@ -5,8 +5,10 @@ import { apiKeyConfigured } from "@/lib/engine/providers";
 import {
   composeInstrument,
   participationMask,
+  reviewScenarioFit,
   type Journey,
   type Moderators,
+  type ScenarioFit,
   type ScenarioSpec,
 } from "@/lib/engine/instrument";
 
@@ -97,7 +99,21 @@ export async function POST(req: Request) {
     }
     ({ base, scenarios, reserve, stages } = composed);
   }
+  // The fit advisory ships WITH the compose so the scenarios gate never
+  // renders before its advice exists (it used to pop in seconds later).
+  // A warm skips it (nobody is looking), and a failure ships null advice
+  // rather than an error - it is advice, not measurement.
+  let fit: ScenarioFit | null = null;
+  if (parsed.data.brand && !parsed.data.warm) {
+    fit = await reviewScenarioFit({
+      brand: parsed.data.brand,
+      category: parsed.data.category,
+      scenarios: scenarios.map((s) => ({ label: s.label, description: s.description })),
+      meta: { source: cacheSource(auth) },
+    }).catch(() => null);
+  }
   return NextResponse.json({
+    fit,
     base,
     moderators: base,
     scenarios,

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 
 /**
  * Buyer Landscape setup pieces: the state shape, the gate API calls, and
@@ -199,6 +199,9 @@ export interface GridState {
    * draws from here first (instant); the model is only asked once the pool
    * runs dry. Reserve scenarios inherit the base journey. */
   reserve?: { label: string; description: string }[];
+  /** Portfolio-fit advisory computed WITH the compose, so the scenarios
+   * gate never renders before its advice exists (edits refetch async). */
+  fit?: ScenarioFitUi | null;
   /** Fingerprints (label|description) of user-authored scenarios that
    * PASSED the quality check, persisted with the draft so unchanged rows
    * are never rechecked. Deliberately excludes "keep mine" choices - a
@@ -460,6 +463,7 @@ export function useGridSetup(a: GridSetupArgs) {
       scenarios: { label: string; description: string; journey: Journey | null }[];
       reserve?: { label: string; description: string }[];
       stages: GridStage[];
+      fit?: ScenarioFitUi | null;
     }>("/api/setup/grid/compose", {
       brand: a.brand,
       category: a.category,
@@ -491,6 +495,7 @@ export function useGridSetup(a: GridSetupArgs) {
         moderators: data.base,
         stages: data.stages,
         keptStages: data.stages.filter((s) => s.recommended).map((s) => s.key),
+        fit: data.fit ?? a.state?.fit ?? null,
         scenarios: [],
         // An edited recompose returns no reserve; the pool carries over,
         // as do the already-checked scenario fingerprints. Custom
@@ -1250,8 +1255,11 @@ export function ScenariosGate({
   onRebuildForBrand?: () => void;
 }) {
   const [editRead, setEditRead] = useState(false);
-  const [fit, setFit] = useState<ScenarioFitUi | null>(null);
+  // Seeded from the compose response - the gate never renders before its
+  // advice exists; the effect below refetches only after edits.
+  const [fit, setFit] = useState<ScenarioFitUi | null>(state.fit ?? null);
   const [fitDismissed, setFitDismissed] = useState(false);
+  const seededFitFp = useRef<string | null>(null);
   const cap = maxScenarios;
   const rows = scenarioRows(state);
   const active = rows.filter((r) => r.on);
@@ -1283,8 +1291,12 @@ export function ScenariosGate({
   // win or miss its core line. Advice only - fetched cache-first, silent
   // on failure, re-fetched when the active set's wording changes.
   const fitFp = active.map((r) => `${r.label.trim()}|${r.description.trim()}`).join("~");
+  if (seededFitFp.current === null && state.fit !== undefined) seededFitFp.current = fitFp;
   useEffect(() => {
     if (!fitBrand || !fitCategory || active.length === 0) return;
+    // The compose-time advice covers the set as composed; only an edited
+    // set needs a refetch (which is a cache hit server-side thereafter).
+    if (fitFp === seededFitFp.current) return;
     let stale = false;
     fetch("/api/setup/grid/scenario_fit", {
       method: "POST",
@@ -1298,7 +1310,10 @@ export function ScenariosGate({
     })
       .then((r) => (r.ok ? r.json() : null))
       .then((d) => {
-        if (!stale && d?.fit) setFit(d.fit as ScenarioFitUi);
+        if (!stale && d?.fit) {
+          setFit(d.fit as ScenarioFitUi);
+          seededFitFp.current = fitFp;
+        }
       })
       .catch(() => {});
     return () => {
@@ -1379,7 +1394,7 @@ export function ScenariosGate({
         <div className="rounded-lg border border-amber-300/60 bg-amber-50 p-3 text-[12px] text-amber-900 grid gap-1.5 dark:bg-amber-950/30 dark:text-amber-200 dark:border-amber-700/50">
           <div className="flex items-start justify-between gap-2">
             <span className="font-semibold">
-              Worth a look before you confirm
+              A few things you may want to look at
             </span>
             <button
               type="button"
@@ -1392,32 +1407,35 @@ export function ScenariosGate({
           </div>
           {fitFlags.map((f) => (
             <p key={f.label} className="m-0">
-              <span className="font-medium">{f.label}:</span> {f.reason} Untick
-              it, or swap it for a scenario {fitBrand} can win.
+              <span className="font-medium">{f.label}:</span> {f.reason} You
+              may want to swap this for a scenario {fitBrand} is stronger in.
             </p>
           ))}
           {fitFlags.length >= 2 && onRebuildForBrand && (
             <p className="m-0">
-              Half this set misses {fitBrand}.{" "}
+              If this set feels off for {fitBrand}, you could{" "}
               <button
                 type="button"
                 disabled={busy}
                 onClick={onRebuildForBrand}
                 className="font-semibold text-primary hover:opacity-80 disabled:opacity-40"
               >
-                Rebuild the scenarios around {fitBrand}
+                rebuild the scenarios around {fitBrand}
               </button>{" "}
-              - a fresh read constrained to occasions it competes in.
+              - a fresh read focused on occasions it competes in.
             </p>
           )}
           {fitMissing && (
             <p className="m-0">
-              <span className="font-medium">Nothing covers {fitMissing.label.toLowerCase()}:</span>{" "}
+              <span className="font-medium">You may wish to consider a {fitMissing.label.toLowerCase()} scenario:</span>{" "}
               {fitMissing.reason}{" "}
               <button
                 type="button"
-                disabled={busy || active.length >= cap}
+                disabled={busy}
                 onClick={() =>
+                  // At the cap the row is added UNCHECKED - it joins the
+                  // table for the user to weigh, never displacing a
+                  // choice they made. Under the cap it goes live.
                   setRows(
                     [
                       ...rows,
@@ -1426,15 +1444,15 @@ export function ScenariosGate({
                         description: fitMissing.description,
                         journey: null,
                         suggested: true,
-                        on: true,
+                        on: active.length < cap,
                       },
                     ],
-                    true
+                    active.length < cap
                   )
                 }
                 className="font-semibold text-primary hover:opacity-80 disabled:opacity-40"
               >
-                Add it
+                {active.length < cap ? "Add it" : "Add it unchecked"}
               </button>
             </p>
           )}
