@@ -30,6 +30,7 @@ import {
   generateGrid,
   namesAnyBrand,
 } from "../src/lib/engine/instrument";
+import { getBrandProfile } from "../src/lib/engine/suggest";
 
 const ROSTER = [
   { brand: "jira", category: "project management tools", audience: "software development teams", competitors: ["Asana", "Monday.com", "Trello", "ClickUp", "GitHub Issues", "Azure DevOps"] },
@@ -150,6 +151,36 @@ async function main() {
     process.exit(1);
   }
   mkdirSync(DIR, { recursive: true });
+  // CONSISTENCY GATE: the roster freezes each brand's estimate inputs, but
+  // the PRODUCT derives them from the live estimate cache. If the two
+  // diverge (an estimate-prompt change, a cleared profile), every fixture
+  // downstream describes inputs no user can reach - which is exactly how
+  // three "warm" brands turned out cold in the demo on 2026-09-16. Refuse
+  // to run on drift; reconcile the roster first (GOLDEN_ALLOW_DRIFT=1
+  // overrides, for intentional migrations only).
+  let drift = 0;
+  for (const entry of ROSTER) {
+    const live = await getBrandProfile(entry.brand);
+    const mismatches: string[] = [];
+    if (live.category.trim() !== entry.category) {
+      mismatches.push(`category: roster "${entry.category}" vs live "${live.category}"`);
+    }
+    if ((live.audience ?? "").trim() !== entry.audience) {
+      mismatches.push(`audience: roster "${entry.audience}" vs live "${live.audience}"`);
+    }
+    if (live.competitors.join("|") !== entry.competitors.join("|")) {
+      mismatches.push(`rivals: roster [${entry.competitors.join(", ")}] vs live [${live.competitors.join(", ")}]`);
+    }
+    if (mismatches.length > 0) {
+      drift++;
+      console.log(`DRIFT ${entry.brand}:`);
+      for (const m of mismatches) console.log(`   ${m}`);
+    }
+  }
+  if (drift > 0 && process.env.GOLDEN_ALLOW_DRIFT !== "1") {
+    console.log(`\n${drift} brand(s) drifted from the live estimate - reconcile the roster before running.`);
+    process.exit(4);
+  }
   let drifted = 0;
   let failed = 0;
   for (const entry of ROSTER) {
