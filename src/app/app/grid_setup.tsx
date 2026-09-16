@@ -341,12 +341,18 @@ export function gridCellCount(g: GridState | null, rivalCount: number): number {
 export function namesAny(text: string, names: string[]): boolean {
   // Word-boundary match, mirroring the engine's namesBrandWord: the pill
   // must not call a blind prompt "branded" because "purchases" contains
-  // the rival Chase.
+  // the rival Chase. A parenthetical label ("Amazon (beauty)") also
+  // matches its speakable name ("Amazon") - the parenthetical is display
+  // only and never occurs in natural text.
   return names.some((n) => {
     const b = n.trim();
     if (!b) return false;
-    const esc = b.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-    return new RegExp(`(?:^|[^a-z0-9])${esc}(?:$|[^a-z0-9])`, "i").test(text);
+    const primary = b.replace(/\s*\([^)]*\)/g, " ").replace(/\s+/g, " ").trim();
+    const forms = primary && primary !== b ? [b, primary] : [b];
+    return forms.some((f) => {
+      const esc = f.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+      return new RegExp(`(?:^|[^a-z0-9])${esc}(?:$|[^a-z0-9])`, "i").test(text);
+    });
   });
 }
 

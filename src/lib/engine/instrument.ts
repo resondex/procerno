@@ -1311,7 +1311,7 @@ export async function reviewCells(input: {
         role: "user",
         content:
           `Client brand: ${input.brand}\nCategory: ${input.category}\n` +
-          `Audience: ${input.audience ?? "unknown"}\nRivals: ${input.competitors.join(", ") || "(none)"}\n` +
+          `Audience: ${input.audience ?? "unknown"}\nRivals: ${input.competitors.map(primaryBrandName).join(", ") || "(none)"}\n` +
           `Candidates to check:\n${input.candidates
             .map((c, i) => {
               const lines = [
@@ -1536,7 +1536,7 @@ export async function generateGrid(input: {
   const planLine = (p: (typeof plan)[number], i: number) => {
     const jn = p.situation ? journeyBySituation.get(p.situation) : null;
     return (
-      `${i + 1}. stage=${p.stage.key} situation=${p.situation ?? "-"} angle=${p.angle}` +
+      `${i + 1}. stage=${p.stage.key} situation=${p.situation ?? "-"} angle=${primaryBrandName(p.angle)}` +
       `${p.scope ? ` reach=${p.scope}` : ""}${jn ? ` journey(${jn})` : ""}` +
       `\n   guidance: ${p.stage.hint}`
     );
@@ -1584,7 +1584,7 @@ export async function generateGrid(input: {
               role: "user",
               content:
                 `Client brand: ${input.brand}\nCategory: ${input.category}\n` +
-                `Rivals: ${rivals.join(", ")}\nAudience: ${input.audience ?? "unknown"}\n\n` +
+                `Rivals: ${rivals.map(primaryBrandName).join(", ")}\nAudience: ${input.audience ?? "unknown"}\n\n` +
                 `Cell plan:\n${planText}`,
             },
           ],
@@ -1757,7 +1757,7 @@ export async function regenerateCell(input: {
     ? journeyNote(input.base, input.scenarios.find((sc) => sc.label === input.cell.situation) ?? { label: "", description: "", journey: null })
     : null;
   const planText =
-    `1. stage=${st.key} situation=${input.cell.situation ?? "-"} angle=${input.cell.angle}` +
+    `1. stage=${st.key} situation=${input.cell.situation ?? "-"} angle=${primaryBrandName(input.cell.angle)}` +
     `${input.cell.mode ? ` reach=${input.cell.mode}` : ""}${jn ? ` journey(${jn})` : ""}` +
     `\n   guidance: ${st.hint}`;
   const res = await openaiClient().chat.completions.create({
@@ -1783,7 +1783,7 @@ export async function regenerateCell(input: {
         role: "user",
         content:
           `Client brand: ${input.brand}\nCategory: ${input.category}\n` +
-          `Rivals: ${rivals.join(", ")}\nAudience: ${input.audience ?? "unknown"}\n\n` +
+          `Rivals: ${rivals.map(primaryBrandName).join(", ")}\nAudience: ${input.audience ?? "unknown"}\n\n` +
           `Cell plan:\n${planText}\n\n` +
           (input.nearTo ? `The prompt to vary:\n${input.nearTo.trim()}\n\n` : "") +
           `Previous prompts for this cell (write something DIFFERENT):\n` +
@@ -1812,11 +1812,26 @@ export async function regenerateCell(input: {
  * longer word - "purchases" must not read as the rival "Chase", nor
  * "discovering" as Discover. Boundaries are non-alphanumeric, so
  * "jira's" and "Chase Sapphire" match while "purchase" cannot. */
+/** A brand label's speakable name: "Amazon (beauty)" -> "Amazon". The
+ * parenthetical is a DISPLAY disambiguator - buyers never type it and
+ * engines never say it, so any text shown to a model uses this form. */
+export function primaryBrandName(brand: string): string {
+  return brand.replace(/\s*\([^)]*\)/g, " ").replace(/\s+/g, " ").trim();
+}
+
 export function namesBrandWord(text: string, brand: string): boolean {
   const b = brand.trim();
   if (!b) return false;
-  const esc = b.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-  return new RegExp(`(?:^|[^a-z0-9])${esc}(?:$|[^a-z0-9])`, "i").test(text);
+  // Match the full label OR its speakable primary name: a rival stored as
+  // "Amazon (beauty)" is named by text that says "Amazon" - the literal
+  // parenthetical never occurs in natural writing, and matching only it
+  // made the blind/branded signature blind to these rivals (and discarded
+  // every paraphrase whenever a model copied the label verbatim).
+  const forms = [b, primaryBrandName(b)].filter((f, i, a) => f && a.indexOf(f) === i);
+  return forms.some((f) => {
+    const esc = f.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    return new RegExp(`(?:^|[^a-z0-9])${esc}(?:$|[^a-z0-9])`, "i").test(text);
+  });
 }
 
 /** The brands (client + rivals) a text names, lowercased and sorted - the
@@ -1977,7 +1992,9 @@ export async function generatePhrasings(input: {
     }
   };
 
-  const rivalsList = rivals;
+  // The model reads speakable names; the signature checks the stored
+  // labels (the matcher accepts either form, so both sides agree).
+  const rivalsShown = rivals.map(primaryBrandName);
   const journeyLines = input.scenarios
     .map((s) => journeyNote(input.base, s))
     .filter((n): n is string => n !== null);
@@ -2007,7 +2024,7 @@ export async function generatePhrasings(input: {
     const cellText = subset
       .map(
         (c, i) =>
-          `${i}. [stage=${c.stage} situation=${c.situation ?? "-"} angle=${c.angle}${c.mode ? ` reach=${c.mode}` : ""}] ${c.text}` +
+          `${i}. [stage=${c.stage} situation=${c.situation ?? "-"} angle=${primaryBrandName(c.angle)}${c.mode ? ` reach=${c.mode}` : ""}] ${c.text}` +
           (opts?.avoidWords?.[i]?.length
             ? `\n   [overused: ${opts.avoidWords[i].join(", ")}]`
             : "")
@@ -2066,7 +2083,7 @@ export async function generatePhrasings(input: {
           role: "user",
           content:
             `Client brand: ${input.brand}\nCategory: ${input.category}\n` +
-            `Rivals: ${rivalsList.join(", ")}\nAudience: ${input.audience ?? "unknown"}\n` +
+            `Rivals: ${rivalsShown.join(", ")}\nAudience: ${input.audience ?? "unknown"}\n` +
             journeysText +
             `\nSeeds:\n${cellText}`,
         },
@@ -2084,7 +2101,7 @@ export async function generatePhrasings(input: {
     for (const c of parsed.cells ?? []) {
       const seed = subset[c.index];
       if (!seed) continue;
-      const sig = brandSignature(seed.text, input.brand, rivalsList);
+      const sig = brandSignature(seed.text, input.brand, rivals);
       const prior = opts?.have?.[c.index] ?? [];
       const seen = new Set<string>([norm(seed.text), ...prior.map((p) => norm(p.text))]);
       const keptWords: Set<string>[] = [contentWords(seed.text), ...prior.map((p) => contentWords(p.text))];
@@ -2094,7 +2111,7 @@ export async function generatePhrasings(input: {
         if (!text) continue;
         // The signature check is the blind/branded discipline: a paraphrase of
         // a blind seed that names a brand is not a paraphrase, it is a leak.
-        if (brandSignature(text, input.brand, rivalsList) !== sig) continue;
+        if (brandSignature(text, input.brand, rivals) !== sig) continue;
         const n = norm(text);
         if (seen.has(n)) continue;
         // A paraphrase that shares most of its words with the seed or a sibling

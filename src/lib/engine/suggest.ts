@@ -1,6 +1,7 @@
 import { createHash } from "crypto";
 import { openaiClient } from "./providers";
 import { store } from "../store";
+import { primaryBrandName } from "./instrument";
 import { generatePromptBattery, type PromptSpec } from "./prompts";
 import { matchKey } from "./metrics";
 
@@ -206,8 +207,15 @@ export async function seedDictionary(
         s.aliases.some((a) => matchKey(a) === key)
     );
     // A renamed canonical ("Jira" → "Atlassian Jira") is itself just another
-    // alias of the brand as the user typed it.
-    const raw = [...(hit?.aliases ?? []), ...(hit ? [hit.canonical] : [])];
+    // alias of the brand as the user typed it. A parenthetical label's
+    // speakable name ("Amazon (beauty)" -> "amazon") is guaranteed as an
+    // alias - engines say the plain name, never the disambiguator, and
+    // the model can't be trusted to volunteer it.
+    const raw = [
+      ...(hit?.aliases ?? []),
+      ...(hit ? [hit.canonical] : []),
+      primaryBrandName(b),
+    ];
     const aliases = [
       ...new Set(
         raw
