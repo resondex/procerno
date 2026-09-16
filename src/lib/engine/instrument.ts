@@ -1055,9 +1055,11 @@ export interface ScenarioFit {
    * category-level scenario the client can never win (Nest asked about
    * robot vacuums). Advisory only; the user decides. */
   offPortfolio: { label: string; reason: string }[];
-  /** A core product line of the brand with NO scenario covering it
-   * (Nest's thermostats), phrased as a suggested scenario; null if the
-   * set covers the portfolio. */
+  /** A scenario the set is INCOMPLETE without - a flagship product line
+   * with no scenario (Nest's thermostats) or a major buying occasion
+   * central to how this brand is bought (Doritos's single-serve). Null is
+   * the expected answer; the bar is "a strategist would insist", never
+   * "would also be plausible". */
   missingCore: { label: string; description: string; reason: string } | null;
 }
 
@@ -1107,7 +1109,9 @@ export async function reviewScenarioFit(input: {
 }): Promise<ScenarioFit> {
   const empty: ScenarioFit = { offPortfolio: [], missingCore: null };
   if (input.scenarios.length === 0) return empty;
-  const key = cacheKey("scenario_fit1", [
+  // "scenario_fit2": missing_core reframed as a missing SCENARIO (line or
+  // occasion) with a strong null prior - fit1 suggested on every brand.
+  const key = cacheKey("scenario_fit2", [
     input.brand, input.category,
     input.scenarios.map((s) => `${s.label.trim()}|${s.description.trim()}`).join("~"),
   ]);
@@ -1127,11 +1131,16 @@ export async function reviewScenarioFit(input: {
           "does not sell at all (the brand cannot win that buyer). Only " +
           "flag a clear mismatch - a scenario the brand serves indirectly " +
           "or partially is FINE. reason: one plain sentence.\n" +
-          "- missing_core: if one of the brand's flagship product lines has " +
-          "NO scenario, propose one (label 2-4 plain words, description one " +
-          "short sentence in buyer language); else null. At most one.\n" +
-          "Be conservative: an empty off_portfolio and null missing_core is " +
-          "the common, correct answer for single-line brands.",
+          "- missing_core: a scenario this set is INCOMPLETE without - a " +
+          "flagship product line with no scenario, or a buying occasion so " +
+          "central to how THIS brand is bought that a competent strategist " +
+          "would insist the study is wrong without it. Propose at most one " +
+          "(label 2-4 plain words, description one short sentence in buyer " +
+          "language). The bar is 'the study is incomplete', never 'this " +
+          "would also be plausible' - a merely reasonable addition is null. " +
+          "MOST scenario sets are complete: null is the expected answer.\n" +
+          "Be conservative on both fields: empty and null is the common, " +
+          "correct answer.",
       },
       {
         role: "user",
