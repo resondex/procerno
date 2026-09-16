@@ -1348,6 +1348,8 @@ export function SetupWizard({ mode, brand, draft, engineOptions, onClose, onCrea
               onNearScenario={(i) => void gridApi.nearScenario(i)}
               onWarmReview={warmScenarioReview}
               maxScenarios={scenarioCap}
+              fitBrand={brand}
+              fitCategory={category}
             />
           )}
           {step === "scenarios" && review && (

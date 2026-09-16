@@ -1,0 +1,226 @@
+{
+ "brand": "Doritos",
+ "category": "tortilla chips",
+ "audience": "grocery shoppers buying savory snacks",
+ "competitors": [
+  "Tostitos",
+  "Takis",
+  "Late July",
+  "Santitas",
+  "Great Value (Walmart)"
+ ],
+ "capturedAt": "2026-09-16",
+ "reviewedBy": "Claude (walk review 2026-09-15); not yet reviewed by Tyler",
+ "base": {
+  "verifiability": "taste",
+  "involvement": "habitual",
+  "think_feel": "feel",
+  "decision_unit": "solo",
+  "rhythm": "replenishment",
+  "risk": "performance",
+  "channel_retail": true,
+  "rationale": "I grab the tortilla chips we know taste good, often whatever size or brand is a good deal."
+ },
+ "scenarios": [
+  {
+   "label": "Household stock-up",
+   "description": "Routine grocery trip refilling the usual chips for the week.",
+   "deviates": false
+  },
+  {
+   "label": "Hosting for a crowd",
+   "description": "Buying multiple crowd-pleasing bags for a party or game day.",
+   "deviates": true
+  },
+  {
+   "label": "Dip-driven choice",
+   "description": "Picking chip style and sturdiness to match salsa, guac, queso, or nachos tonight.",
+   "deviates": false
+  },
+  {
+   "label": "Promo-driven swap",
+   "description": "Endcap deal or coupon prompts switching brand or sizing up.",
+   "deviates": false
+  }
+ ],
+ "stages": [
+  {
+   "key": "problem_recognition",
+   "label": "Problem recognition",
+   "recommended": true
+  },
+  {
+   "key": "category_education",
+   "label": "Category education",
+   "recommended": true
+  },
+  {
+   "key": "discovery",
+   "label": "Discovery",
+   "recommended": true
+  },
+  {
+   "key": "shortlist",
+   "label": "Shortlist",
+   "recommended": true
+  },
+  {
+   "key": "criteria",
+   "label": "Criteria formation",
+   "recommended": true
+  },
+  {
+   "key": "feature_screening",
+   "label": "Feature screening",
+   "recommended": false
+  },
+  {
+   "key": "use_case",
+   "label": "Use-case fit",
+   "recommended": true
+  },
+  {
+   "key": "social_validation",
+   "label": "Social validation",
+   "recommended": true
+  },
+  {
+   "key": "comparison",
+   "label": "Dupes & alternatives",
+   "recommended": true
+  },
+  {
+   "key": "premium_worth",
+   "label": "Splurge or save",
+   "recommended": true
+  },
+  {
+   "key": "objections",
+   "label": "Objections / risk",
+   "recommended": true
+  },
+  {
+   "key": "pricing",
+   "label": "Pricing / value",
+   "recommended": true
+  },
+  {
+   "key": "business_case",
+   "label": "Business case",
+   "recommended": false
+  },
+  {
+   "key": "churn_triggers",
+   "label": "Churn triggers",
+   "recommended": true
+  },
+  {
+   "key": "alternatives",
+   "label": "Alternatives",
+   "recommended": true
+  },
+  {
+   "key": "renewal",
+   "label": "Renewal",
+   "recommended": false
+  },
+  {
+   "key": "problem_resolution",
+   "label": "Problem resolution",
+   "recommended": true
+  },
+  {
+   "key": "expansion",
+   "label": "Expansion",
+   "recommended": true
+  },
+  {
+   "key": "ecosystem",
+   "label": "Ecosystem",
+   "recommended": true
+  },
+  {
+   "key": "advocacy",
+   "label": "Advocacy",
+   "recommended": true
+  },
+  {
+   "key": "repertoire",
+   "label": "Repertoire",
+   "recommended": true
+  }
+ ],
+ "cells": {
+  "count": 46,
+  "blind": 30,
+  "branded": 16,
+  "byStage": {
+   "problem_recognition": 4,
+   "category_education": 1,
+   "discovery": 4,
+   "shortlist": 4,
+   "criteria": 4,
+   "use_case": 4,
+   "social_validation": 1,
+   "comparison": 4,
+   "premium_worth": 1,
+   "objections": 4,
+   "pricing": 4,
+   "churn_triggers": 1,
+   "alternatives": 5,
+   "problem_resolution": 1,
+   "expansion": 1,
+   "ecosystem": 1,
+   "advocacy": 1,
+   "repertoire": 1
+  }
+ },
+ "cellTexts": [
+  "[problem_recognition|Household stock-up|generic] pantry's empty of anything salty and crunchy again. kids want something to munch after school that isn't spicy, isn't super messy, and won't go stale in two days. what should I grab that won't blow the budget?",
+  "[problem_recognition|Hosting for a crowd|generic] Hosting game night and need an easy thing people can graze on that plays nice with spicy, tangy, and mild stuff, stays crisp on a platter, and doesn't taste oily. How do I cover that without overspending?",
+  "[problem_recognition|Dip-driven choice|generic] I made chunky guac and a thick queso, and whatever I used last time kept snapping and getting soggy. What should I serve that can handle scooping and still taste fresh?",
+  "[problem_recognition|Promo-driven swap|generic] Trying to stretch the grocery budget. There's a 2-for deal on something salty and crunchy this week, but I don't want to bring home anything bland or stale-tasting. How do I pick a good swap from what's on promo?",
+  "[category_education|-|generic] quick primer please: what exactly are tortilla chips for at a party, and how are the different styles supposed to be used?",
+  "[discovery|Household stock-up|generic] best tortilla chips for a weekly pantry stock-up for a family? not spicy, sturdy crunch, good with simple salsa, budget friendly.",
+  "[discovery|Hosting for a crowd|generic] For a mixed crowd, what are the best tortilla chips for pairing with salsa, guac, and queso? I'm looking for toasty corn flavor, medium salt, and enough structure for scooping without being too hard.",
+  "[discovery|Dip-driven choice|generic] best tortilla chips for thick guac and queso blanco? need scoop-friendly, light to medium salt, prefer triangles over strips.",
+  "[discovery|Promo-driven swap|generic] If I'm grabbing what's on sale, which tortilla chips are safe value picks under about 4 dollars a bag that still have real corn flavor and crunch?",
+  "[shortlist|Household stock-up|generic] Give me 3 to 5 tortilla chip options to keep on hand this week, kid friendly, not spicy, decent with basic salsa, and good price per ounce.",
+  "[shortlist|Hosting for a crowd|generic] Shortlist me 3 tortilla chip picks for a crowd: great corn flavor, balanced salt, sturdy enough for scoops with queso and guac, plus one thinner crispy option for casual nibbling.",
+  "[shortlist|Dip-driven choice|generic] I've got chunky pico and queso blanco. Recommend 3 tortilla chips that won't break in the bowl, lightly salted, no extra flavors.",
+  "[shortlist|Promo-driven swap|generic] sale aisle help: list 3 good-value tortilla chips I can swap in without regret, around 10 to 13 ounces per bag, under 4 dollars.",
+  "[criteria|Household stock-up|generic] Stocking the pantry. What should I look for in tortilla chips that everyone will snack on all week?",
+  "[criteria|Hosting for a crowd|generic] Hosting 15 for game night. What should I prioritize in tortilla chips so they taste great with a few dips and don't shatter?",
+  "[criteria|Dip-driven choice|generic] Getting chips for guac and queso. What matters most so they dip well without overpowering the dip?",
+  "[criteria|Promo-driven swap|generic] If I swap to whatever's on sale, what should I check on the bag so I don't regret it later?",
+  "[use_case|Household stock-up|generic] Weekly stock-up: need chips kids will eat plain and that can handle quick sheet-pan nachos. What bag size and style would you grab?",
+  "[use_case|Hosting for a crowd|generic] Doing a taco bar for 20. I want chips with real corn flavor, sturdy crunch, good with salsa flights. How many bags and what style should I buy?",
+  "[use_case|Dip-driven choice|generic] Got a thick queso and a chunky pico. Need chips that can scoop without breaking. Triangles, strips, or scoops?",
+  "[use_case|Promo-driven swap|generic] Store has a buy one get one on a brand I don't usually buy. I want to swap in and keep the family happy. What should I look for before tossing two in the cart?",
+  "[social_validation|-|generic] What do people love about their go-to tortilla chips, beyond taste? Crunch sound, dip game, party vibe?",
+  "[comparison|Hosting for a crowd|Tostitos] Hosting a crowd: Doritos or Tostitos? I'm weighing bolder flavor vs a neutral chip for dips. Which plays better for mixed tastes, and how many bags for 20?",
+  "[comparison|Hosting for a crowd|Takis] Backyard hang with teens who like heat: Doritos or Takis? Want big flavor but not blow out palates for salsa and guac. What would you put out?",
+  "[comparison|Hosting for a crowd|Late July] Small plates night: Doritos or Late July? Looking for great corn taste, solid crunch, good with fresh salsa. Which is the safer bet for varied palates?",
+  "[comparison|Hosting for a crowd|Santitas] Big party on a budget: Doritos or Santitas? Which keeps people happy, holds up to dips, and stretches the dollars best?",
+  "[premium_worth|-|generic] Stocking up for the house. Are the pricier tortilla chips actually better, or is the store brand fine for salsa and queso? I only want to pay extra if it matters.",
+  "[objections|Household stock-up|generic] For stocking the pantry, do Doritos just end up too salty and messy for the kids, and kind of clash with salsa? I want chips that hold up and don't turn everything orange.",
+  "[objections|Hosting for a crowd|generic] Hosting a mixed crowd. Are Doritos a bad call because the flavor dust overpowers dips and not everyone likes that taste? I need something most people will eat.",
+  "[objections|Dip-driven choice|generic] For guac and queso specifically, do Doritos break in the bowl or make the dip taste weird because of the seasoning?",
+  "[objections|Promo-driven swap|generic] Doritos are on sale this week. Am I going to regret swapping from plain tortilla chips because they're too salty and don't work with salsa night?",
+  "[pricing|Household stock-up|generic] Doing a big grocery run: better value to grab party-size Doritos or a cheaper store-brand family bag? Price per ounce is one thing, but do they actually get eaten before going stale?",
+  "[pricing|Hosting for a crowd|generic] For a party, is it worth spending more on a couple flavored bags, or should I just get a big value bag of plain tortilla chips and nicer salsa? What stretches the budget better for guests?",
+  "[pricing|Dip-driven choice|generic] Chip for dip math: paying more for name-brand flavored chips vs a sturdy store-brand tortilla chip - any real difference once you're dunking in guac and queso?",
+  "[pricing|Promo-driven swap|generic] BOGO on Doritos - does that beat my usual cheaper plain chips after you factor bag weight and how fast people tear through them?",
+  "[churn_triggers|-|generic] I've been buying Doritos forever, but lately they taste saltier and the bags feel smaller. Should I switch to a plain tortilla chip for dips, or stick with Doritos?",
+  "[alternatives|-|defensive] Looking for alternatives to Doritos, same big flavor crunch, maybe a little less salty. What should I try?",
+  "[alternatives|-|Tostitos] I always grab Tostitos for dips. What other tortilla chips hold up to salsa and queso without breaking?",
+  "[alternatives|-|Takis] if i can't find Takis, what else gives that super tangy spicy rolled chip vibe?",
+  "[alternatives|-|Late July] Can't find Late July lime tortilla chips. Any close alternatives with that light, crisp texture?",
+  "[alternatives|-|Santitas] What can I buy instead of Santitas when I want a big cheap bag of tortilla chips that aren't crazy salty?",
+  "[problem_resolution|-|generic] My flavored tortilla chips were soft right after opening, not stale-date yet. Can I crisp them back up or is this a storage issue? Oven trick? Or just return the bag?",
+  "[expansion|-|generic] We go through these bold flavored tortilla chips like crazy. Thinking beyond snacking, can I use them for things like taco casserole, breading chicken, topping chili? What actually works well?",
+  "[ecosystem|-|generic] Got a bag of heavy-seasoned tortilla chips. What store dips pair best, queso vs guac vs salsa? Any sleeper combos?",
+  "[advocacy|-|generic] I want to recommend my go-to flavored tortilla chips for our office snack stash, but a couple coworkers think they're junky and messy. How do I make the case without sounding salesy?",
+  "[repertoire|-|generic] I usually buy the same nacho cheese tortilla chips every week. Stick with it or mix in other flavors or plain for dips? What rotation keeps it interesting without wasting money?"
+ ]
+}

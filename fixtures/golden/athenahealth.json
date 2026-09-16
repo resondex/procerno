@@ -1,0 +1,234 @@
+{
+ "brand": "athenahealth",
+ "category": "ambulatory EHR software",
+ "audience": "ambulatory practice administrators",
+ "competitors": [
+  "Epic",
+  "Cerner",
+  "eClinicalWorks",
+  "NextGen Healthcare",
+  "Allscripts",
+  "Practice Fusion"
+ ],
+ "capturedAt": "2026-09-16",
+ "reviewedBy": "Claude (walk review 2026-09-15); not yet reviewed by Tyler",
+ "base": {
+  "verifiability": "spec",
+  "involvement": "considered",
+  "think_feel": "think",
+  "decision_unit": "committee",
+  "rhythm": "subscription",
+  "risk": "performance",
+  "channel_retail": false,
+  "rationale": "Pick the EHR that fits workflows, meets compliance, protects revenue, and is reliable at a sustainable total cost with strong vendor support."
+ },
+ "scenarios": [
+  {
+   "label": "Multi-site standardization",
+   "description": "A growing ambulatory group unifies all clinics on one EHR to streamline operations, reporting, and governance.",
+   "deviates": false
+  },
+  {
+   "label": "Replacing legacy EHR",
+   "description": "A mid-sized practice migrates off an aging or ill-fitting system to improve usability, billing performance, and interoperability.",
+   "deviates": false
+  },
+  {
+   "label": "Health system alignment",
+   "description": "An acquired or affiliated practice moves onto the parent health system's chosen EHR to integrate clinical and revenue operations.",
+   "deviates": false
+  },
+  {
+   "label": "RCM partner bundle",
+   "description": "A practice outsourcing billing adopts the EHR preferred by its revenue cycle vendor to align workflows and accountability.",
+   "deviates": true
+  }
+ ],
+ "stages": [
+  {
+   "key": "problem_recognition",
+   "label": "Problem recognition",
+   "recommended": true
+  },
+  {
+   "key": "category_education",
+   "label": "Category education",
+   "recommended": true
+  },
+  {
+   "key": "discovery",
+   "label": "Discovery",
+   "recommended": true
+  },
+  {
+   "key": "shortlist",
+   "label": "Shortlist",
+   "recommended": true
+  },
+  {
+   "key": "criteria",
+   "label": "Criteria formation",
+   "recommended": true
+  },
+  {
+   "key": "feature_screening",
+   "label": "Feature screening",
+   "recommended": true
+  },
+  {
+   "key": "use_case",
+   "label": "Use-case fit",
+   "recommended": true
+  },
+  {
+   "key": "social_validation",
+   "label": "Social validation",
+   "recommended": true
+  },
+  {
+   "key": "comparison",
+   "label": "Comparison",
+   "recommended": true
+  },
+  {
+   "key": "premium_worth",
+   "label": "Premium vs. basic brands",
+   "recommended": false
+  },
+  {
+   "key": "objections",
+   "label": "Objections / risk",
+   "recommended": true
+  },
+  {
+   "key": "pricing",
+   "label": "Pricing / value",
+   "recommended": true
+  },
+  {
+   "key": "business_case",
+   "label": "Business case",
+   "recommended": true
+  },
+  {
+   "key": "churn_triggers",
+   "label": "Churn triggers",
+   "recommended": true
+  },
+  {
+   "key": "alternatives",
+   "label": "Alternatives",
+   "recommended": true
+  },
+  {
+   "key": "renewal",
+   "label": "Renewal",
+   "recommended": true
+  },
+  {
+   "key": "problem_resolution",
+   "label": "Problem resolution",
+   "recommended": true
+  },
+  {
+   "key": "expansion",
+   "label": "Expansion",
+   "recommended": true
+  },
+  {
+   "key": "ecosystem",
+   "label": "Ecosystem",
+   "recommended": true
+  },
+  {
+   "key": "advocacy",
+   "label": "Advocacy",
+   "recommended": true
+  },
+  {
+   "key": "repertoire",
+   "label": "Repertoire",
+   "recommended": false
+  }
+ ],
+ "cells": {
+  "count": 52,
+  "blind": 28,
+  "branded": 24,
+  "byStage": {
+   "problem_recognition": 4,
+   "category_education": 1,
+   "discovery": 4,
+   "shortlist": 4,
+   "criteria": 4,
+   "feature_screening": 3,
+   "use_case": 4,
+   "social_validation": 1,
+   "comparison": 4,
+   "objections": 4,
+   "pricing": 4,
+   "business_case": 4,
+   "churn_triggers": 1,
+   "alternatives": 5,
+   "renewal": 1,
+   "problem_resolution": 1,
+   "expansion": 1,
+   "ecosystem": 1,
+   "advocacy": 1
+  }
+ },
+ "cellTexts": [
+  "[problem_recognition|Multi-site standardization|generic] we've got 6 clinics all doing the same visit types 6 different ways. templates, orders, even rooming steps are different. providers float between locations and hate relearning the flow every day. how do i get everyone aligned without blowing up what already works locally?",
+  "[problem_recognition|Replacing legacy EHR|generic] running on a 12-year-old charting and scheduling system that keeps freezing and doesn't talk to half our newer tools. staff are duct-taping workarounds, docs are double documenting, and reports are a mess. if we need to move off this thing, how do we do it without wrecking clinic schedules or losing historical data or AR?",
+  "[problem_recognition|Health system alignment|generic] our parent health system wants tighter alignment this year. they want shared quality measures, smoother referrals, and cleaner data exchange. right now we fax too much, meds and problem lists don't sync, and their care managers can't see what happened in our visits. what's the practical path to get in step with them without slowing our clinics down?",
+  "[problem_recognition|RCM partner bundle|generic] our billing partner is pitching a bundle that would tie front desk, coding, and claims together. finance likes the idea, clinical leads are worried it'll add clicks and break charge capture. denials are creeping up and we don't trust our current reports. as a team, how do we evaluate this without getting sold something that looks good on paper but tanks operations?",
+  "[category_education|-|generic] plain english please: what does an ambulatory EHR actually do for a medical practice, and how is it different from the big hospital systems' platforms?",
+  "[discovery|Multi-site standardization|generic] what's the best ambulatory EHR for standardizing workflows across multiple clinics while still letting each site keep some local tweaks? needs strong role-based permissions and easy template governance.",
+  "[discovery|Replacing legacy EHR|generic] best ambulatory EHR for moving off an old system with minimal downtime? looking for painless data migration (charts, problem lists, meds, schedules), hands-on training, and realistic go-live support.",
+  "[discovery|Health system alignment|generic] which ambulatory EHRs are best for aligning an independent practice with a larger health system? priority is reliable interoperability for referrals, labs, and shared patient summaries, plus support for the system's quality programs.",
+  "[discovery|RCM partner bundle|generic] we're deciding as a team with our outsourced billing group: what ambulatory EHRs pair tightly with an RCM partner so clinical and revenue workflows are one thread? want shared dashboards, denial workflows, and clear ownership between us and the vendor.",
+  "[shortlist|Multi-site standardization|generic] short list me 4 or 5 ambulatory EHRs that handle multi-site standardization well: central governance with site-level flexibility, providers floating between locations, and cross-site scheduling.",
+  "[shortlist|Replacing legacy EHR|generic] can you give me a short list of 3 to 5 ambulatory EHRs known for smooth migrations off older systems, with strong training and realistic downtime planning?",
+  "[shortlist|Health system alignment|generic] need a small set of ambulatory EHR options that play nicely with big health systems: easy referrals, dependable data exchange, support for shared measures. 3 to 5 names, please.",
+  "[shortlist|RCM partner bundle|generic] we're evaluating with finance and our RCM partner: give us 3 to 5 ambulatory EHR options that bundle tightly with revenue cycle services, have shared KPI reporting, and make charge capture to claim less error-prone across teams.",
+  "[criteria|Multi-site standardization|generic] We're consolidating four clinics onto one EHR. What should I prioritize to standardize workflows across sites but allow some local tweaks? thinking governance, shared templates, role permissions, reporting, change control, training, downtime plans. what else really matters?",
+  "[criteria|Replacing legacy EHR|generic] Pulling the plug on a 10 year old system. What matters most in picking a replacement so we don't get burned on data migration, interfaces, downtime, retraining, and hidden costs? top gotchas to check before we sign?",
+  "[criteria|Health system alignment|generic] Independent practices under a health system umbrella here. We need to align tech. What should we look for in an ambulatory EHR to integrate with the hospital side for ADT, orders and results, single sign on, patient matching, care quality reporting, and shared referrals?",
+  "[criteria|RCM partner bundle|generic] Our admin, finance, and clinical leads are vetting an EHR bundled with outsourced RCM. What selection criteria would you use to gauge trust and long term performance? thinking fee model, SLAs, denial work, coding quality, transparency, data access, references, exit terms. what else goes on the scorecard?",
+  "[feature_screening|Multi-site standardization|generic] which ambulatory ehr platforms support enterprise template governance with site level overrides, centralized user provisioning, location aware scheduling, and unified reporting across locations?",
+  "[feature_screening|Replacing legacy EHR|generic] For a legacy swap, which systems have proven bulk data migration for discrete clinical data plus scanned docs, native tooling for mapping and validation, a read only archive, and a clear cutover plan?",
+  "[feature_screening|Health system alignment|generic] Which ambulatory EHRs offer out of the box FHIR APIs, participate in Carequality or CommonWell, and can interface ADT, orders, and results with a hospital system, including single sign on?",
+  "[use_case|Multi-site standardization|generic] We're rolling a standardized annual wellness visit across six clinics. I need central templates and orders, site specific rooming checklists, and a way to lock changes but still allow local tweaks with audit history. Also want a dashboard to track completion and quality gaps by site and provider. How would you set that up?",
+  "[use_case|Replacing legacy EHR|generic] Replacing a legacy system with about 8 years of data. We plan a two week parallel run. How do we handle migration of meds, allergies, problems, immunizations, lab results, scanned PDFs, and future appointments, keep billing flowing, and train staff so go live downtime stays under an hour?",
+  "[use_case|Health system alignment|generic] PCP clinic aligning with a hospital. We want closed loop referrals and orders, results flowing back to the ordering provider, med rec after discharge, and shared care gap data. What interfaces and EHR configuration typically make that work cleanly?",
+  "[use_case|RCM partner bundle|generic] Our team is evaluating an EHR plus outsourced RCM for two locations now, three more next quarter. Concrete need: eligibility and auths before visit, clean charge capture from the visit, scrubbing, claim submission, denial routing, and weekly payer level dashboards by provider and site. How would you structure a 90 day pilot and what reports should we require to decide as a group?",
+  "[social_validation|-|generic] For ambulatory groups, which EHRs are actually well rated by admins and clinicians right now, and where can I see that? Point me to current sources like KLAS or G2 or AAFP survey results, and any active communities or forums where practice managers compare notes.",
+  "[comparison|Multi-site standardization|Epic] multi-site standardization: athenahealth vs Epic for ambulatory only. who makes it easier to lock down templates, scheduling rules, and user permissions across 12 clinics? any gotchas on cross-site reporting?",
+  "[comparison|Replacing legacy EHR|Cerner] We're moving off a legacy Cerner build in our ambulatory practices. Head to head, what would we gain or lose going to athenahealth vs sticking with Cerner? Focus on data migration effort, interface lift, downtime during cutover, and retraining scope.",
+  "[comparison|Health system alignment|eClinicalWorks] Our independent clinics are aligning with a hospital network. Between athenahealth and eClinicalWorks, which integrates better for ambulatory when we need solid orders/results, ADT, referral management, and maybe SSO into the system's tools? Looking for real-world interop and care coordination, not brochureware.",
+  "[comparison|RCM partner bundle|NextGen Healthcare] Our admin and billing leads are evaluating an EHR + outsourced RCM bundle. Can you compare athenahealth vs NextGen Healthcare on the RCM side specifically: pricing model, denial prevention and work queues, coding support, transparency into A/R, and SLAs? We decide as a team, so call out tradeoffs and questions we should press each vendor on.",
+  "[objections|Multi-site standardization|generic] Honest question: does athenahealth bog down at peak clinic hours? We hear about page load lag and spinning during check-in and note signing. Rolling this out to 14 sites, I cannot afford slowdowns. What does real uptime and performance look like and how is it monitored?",
+  "[objections|Replacing legacy EHR|generic] Cutover week worries me. With athenahealth, do interface queues or claim submission slow to a crawl during migration? Any known latency with large chart conversions or during first-batch eRx and lab traffic?",
+  "[objections|Health system alignment|generic] If we add a bunch of hospital interfaces, will athenahealth performance take a hit? I am concerned about delays on ADT, result posting, and opening big charts for shared patients when the health system is feeding a lot of data.",
+  "[objections|RCM partner bundle|generic] As a team we are wary of black boxes. With athenahealth's EHR + RCM bundle, do work queues and claim scrubbing ever backlog at month end? What are typical response times, hold times, and A/R aging to expect in the first 90 days, and how is performance reported back to us?",
+  "[pricing|Multi-site standardization|generic] For ambulatory EHRs at multi-site groups, what is typical all-in pricing per provider per month, plus implementation and training fees? Any discounts for 10+ locations, and what do data migration and interface costs usually run?",
+  "[pricing|Replacing legacy EHR|generic] Budgeting a move off our legacy system. How does athenahealth price for ambulatory: per provider, per location, or revenue share? What should I plan for migration, historical chart import, interface build, and decommissioning/archive costs?",
+  "[pricing|Health system alignment|generic] If we need tight connectivity with a hospital, what do ambulatory EHRs usually charge for HL7 or FHIR interfaces, HIE connections, and ongoing maintenance? Any pass-through fees to the hospital or the HISP I should factor in?",
+  "[pricing|RCM partner bundle|generic] For an athenahealth EHR + RCM bundle, what is the revenue share range, any monthly minimums, and carve-outs for certain payers or services? As a team we also want clarity on included vs add-on fees for coding, prior auths, eligibility, statement printing, and clearinghouse.",
+  "[business_case|Multi-site standardization|generic] I need to make a CFO case to standardize our 8 clinics on athenahealth. Help me frame ROI, hard savings from vendor and support consolidation, expected gains in scheduling throughput and quality incentives, and what 12 to 24 month metrics to commit to.",
+  "[business_case|Replacing legacy EHR|generic] We're retiring a 10 year old on prem EHR. Can you help me build a TCO and risk case for moving to athenahealth for our ambulatory group, including migration effort, training time, downtime reduction, and 5 year cost vs keeping servers?",
+  "[business_case|Health system alignment|generic] Our physician group is aligning with a health system, but we need to keep ambulatory agility. Help me make a CFO case for choosing athenahealth while integrating tightly with the hospital, covering interface costs, referral capture, care coordination, and measurable compliance outcomes.",
+  "[business_case|RCM partner bundle|generic] We're evaluating bundling RCM with athenahealth across 12 providers. I need a calm, team-ready case for our CFO that shows expected net collections lift, days in A/R impact, staffing changes, fee structure, and transition risks so the group can sanity check the assumptions.",
+  "[churn_triggers|-|generic] We've been on athenahealth 5 years. Support feels slower this year and pricing crept up. Before I start vendor calls, help me pressure test whether we should stay or switch, what benchmarks to pull, and what I should push athenahealth to fix first.",
+  "[alternatives|-|defensive] If we decide to move off athenahealth, what ambulatory EHR/PM alternatives should we shortlist, and what tradeoffs to expect on implementation effort, interfaces, and RCM performance?",
+  "[alternatives|-|Epic] Alternatives to Epic for a multi site independent practice that needs strong ambulatory workflows, solid hospital interoperability, and reasonable cost to implement and maintain?",
+  "[alternatives|-|Cerner] What are good ambulatory EHR/PM alternatives to Cerner for a 20 provider group, preferably cloud based with strong scheduling, charge capture, and analytics?",
+  "[alternatives|-|eClinicalWorks] Looking for alternatives to eClinicalWorks. Mid sized multi specialty, need reliable eRx, configurable templates, and better reporting. Who should we look at and what gotchas?",
+  "[alternatives|-|NextGen Healthcare] Alternatives to NextGen Healthcare for a multispecialty ambulatory group. Priorities are ease of use for front desk, provider charting efficiency, and pop health.",
+  "[renewal|-|generic] athenahealth renewal is in 90 days. Is it worth staying or are there cheaper options that won't wreck our workflows and reporting? Help me weigh switching costs vs savings and give me price benchmarks to negotiate.",
+  "[problem_resolution|-|generic] In athenahealth our charge review isn't flagging missing 50 or 59 modifiers on certain bilateral procedures, leading to denials. How do I set up the right rules, test them safely, and report on impact before we push to production?",
+  "[expansion|-|generic] We run athenahealth in two primary care sites and it's gone well. Thinking about rolling it out to our behavioral health clinic and adding telehealth and pop health. What should I check on licensing, workflows, and 42 CFR Part 2 data segmentation before we green light?",
+  "[ecosystem|-|generic] we're on a cloud ambulatory EHR in a 10-provider primary care group. what add-ons tend to integrate cleanly without months of interface work? looking for patient texting/reminders, telehealth, digital intake, AI scribe, referral management, analytics/MIPS dashboards, online payments, and check-in kiosks. prefer API/FHIR-based connections and SSO. any gotchas to watch for with provisioning or data mapping?",
+  "[advocacy|-|generic] We use athenahealth in a 12-provider clinic. I need a tight way to recommend sticking with it to a skeptical partner. What are the strongest practical points to make for athenahealth, with metrics we can pull (claim acceptance, days in A/R, no-shows, portal usage, support response), and how to answer the usual cost and change-fatigue pushback?"
+ ]
+}

@@ -1,0 +1,227 @@
+{
+ "brand": "PwC",
+ "category": "professional services firms",
+ "audience": "CFOs and senior executives at large enterprises",
+ "competitors": [
+  "Deloitte",
+  "EY (Ernst & Young)",
+  "KPMG",
+  "Accenture",
+  "McKinsey & Company"
+ ],
+ "capturedAt": "2026-09-16",
+ "reviewedBy": "Claude (walk review 2026-09-15); not yet reviewed by Tyler",
+ "base": {
+  "verifiability": "trust",
+  "involvement": "considered",
+  "think_feel": "think",
+  "decision_unit": "committee",
+  "rhythm": "one_shot",
+  "risk": "performance",
+  "channel_retail": false,
+  "rationale": "Pick the firm most likely to deliver the promised outcome on time with accountability at acceptable risk."
+ },
+ "scenarios": [
+  {
+   "label": "Enterprise transformation partner",
+   "description": "Selecting the lead consulting/SI firm for a multi-year finance/ERP or digital transformation program.",
+   "deviates": false
+  },
+  {
+   "label": "Finance operations outsourcing",
+   "description": "Choosing a provider to run F&A processes (AP, AR, record-to-report) via a managed services/GBS model.",
+   "deviates": false
+  },
+  {
+   "label": "External audit tender",
+   "description": "Running a board-governed rotation or competitive re-appointment of the external auditor.",
+   "deviates": false
+  },
+  {
+   "label": "Cost takeout program",
+   "description": "Hiring a performance-improvement firm to deliver enterprise-wide savings with measured outcomes.",
+   "deviates": false
+  }
+ ],
+ "stages": [
+  {
+   "key": "problem_recognition",
+   "label": "Problem recognition",
+   "recommended": true
+  },
+  {
+   "key": "category_education",
+   "label": "Category education",
+   "recommended": true
+  },
+  {
+   "key": "discovery",
+   "label": "Discovery",
+   "recommended": true
+  },
+  {
+   "key": "shortlist",
+   "label": "Shortlist",
+   "recommended": true
+  },
+  {
+   "key": "criteria",
+   "label": "Criteria formation",
+   "recommended": true
+  },
+  {
+   "key": "feature_screening",
+   "label": "Feature screening",
+   "recommended": false
+  },
+  {
+   "key": "use_case",
+   "label": "Use-case fit",
+   "recommended": true
+  },
+  {
+   "key": "social_validation",
+   "label": "Social validation",
+   "recommended": true
+  },
+  {
+   "key": "comparison",
+   "label": "Comparison",
+   "recommended": true
+  },
+  {
+   "key": "premium_worth",
+   "label": "Premium vs. basic brands",
+   "recommended": false
+  },
+  {
+   "key": "objections",
+   "label": "Objections / risk",
+   "recommended": true
+  },
+  {
+   "key": "pricing",
+   "label": "Pricing / value",
+   "recommended": true
+  },
+  {
+   "key": "business_case",
+   "label": "Business case",
+   "recommended": true
+  },
+  {
+   "key": "churn_triggers",
+   "label": "Churn triggers",
+   "recommended": true
+  },
+  {
+   "key": "alternatives",
+   "label": "Alternatives",
+   "recommended": true
+  },
+  {
+   "key": "renewal",
+   "label": "Renewal",
+   "recommended": false
+  },
+  {
+   "key": "problem_resolution",
+   "label": "Problem resolution",
+   "recommended": true
+  },
+  {
+   "key": "expansion",
+   "label": "Expansion",
+   "recommended": true
+  },
+  {
+   "key": "ecosystem",
+   "label": "Ecosystem",
+   "recommended": true
+  },
+  {
+   "key": "advocacy",
+   "label": "Advocacy",
+   "recommended": true
+  },
+  {
+   "key": "repertoire",
+   "label": "Repertoire",
+   "recommended": false
+  }
+ ],
+ "cells": {
+  "count": 48,
+  "blind": 25,
+  "branded": 23,
+  "byStage": {
+   "problem_recognition": 4,
+   "category_education": 1,
+   "discovery": 4,
+   "shortlist": 4,
+   "criteria": 4,
+   "use_case": 4,
+   "social_validation": 1,
+   "comparison": 4,
+   "objections": 4,
+   "pricing": 4,
+   "business_case": 4,
+   "churn_triggers": 1,
+   "alternatives": 5,
+   "problem_resolution": 1,
+   "expansion": 1,
+   "ecosystem": 1,
+   "advocacy": 1
+  }
+ },
+ "cellTexts": [
+  "[problem_recognition|Enterprise transformation partner|generic] We are trying to pivot to more recurring revenue, consolidate 12 regions, and replace core systems at the same time. Too many workstreams, decisions are slow, data is a mess, and nothing sticks across functions. I need a way to align strategy, operating model, tech, and change so it actually moves. Where do I even start?",
+  "[problem_recognition|Finance operations outsourcing|generic] Month end is slipping to day 8 or 9, AP backlog keeps growing, billing errors are up, and attrition in our shared services team is ugly. Controllers are stuck firefighting instead of analysis. How do I take volume work off the team without losing control or breaking compliance?",
+  "[problem_recognition|External audit tender|generic] Our board wants us to rotate the firm that signs our financials this year. NYSE listed, 40 countries, complex revenue and JVs, tight timeline. I need independence, global coverage, and minimal conflicts. How do companies run this search and what should I watch out for?",
+  "[problem_recognition|Cost takeout program|generic] Margins are getting squeezed and I have to pull about 15 percent out of SG&A in the next 12 months without hurting growth or weakening controls. Internal teams are tapped and the change management will be rough. How do I structure this so savings stick?",
+  "[category_education|-|generic] In plain English, what do large professional services firms actually do for a CFO? Where do they add real value versus work we should keep in house?",
+  "[discovery|Enterprise transformation partner|generic] who are the best global firms to lead an enterprise wide transformation for a Fortune 500 manufacturer moving to S4, redesigning the target operating model, and driving data and change across 25 countries?",
+  "[discovery|Finance operations outsourcing|generic] Best providers for large scale finance operations managed services for a public company. Scope would include record to report, procure to pay, order to cash, and some FP&A support, with SOX rigor and an offshore mix.",
+  "[discovery|External audit tender|generic] Best firms to handle external audit for a US listed multinational with heavy manufacturing, multiple ERPs, and operations in about 60 countries. Need strong PCAOB experience and tight global coordination.",
+  "[discovery|Cost takeout program|generic] who actually does enterprise cost takeout well? looking for firms that can hit run rate savings inside a year across IT, supply chain, and G&A, not just slideware.",
+  "[shortlist|Enterprise transformation partner|generic] Shortlist 4 firms to interview for a multi year enterprise transformation in a global bank. Needs: target operating model design, core systems replacement, data modernization, and hard core change management at 50k+ employee scale.",
+  "[shortlist|Finance operations outsourcing|generic] Give me 3 to 5 candidates for finance operations outsourcing for a 10 billion revenue company. Mix of onshore and offshore delivery, strong controllership, automation at scale, and proven transition playbooks.",
+  "[shortlist|External audit tender|generic] I need a shortlist of 3 external auditors for a US filer with complex consolidations, carve outs, and cross border tax. Must have a global footprint in 50 plus countries and low conflicts with our advisory vendors.",
+  "[shortlist|Cost takeout program|generic] name 3 firms worth a first call for an aggressive cost program targeting 12 to 18 percent opex reduction across corporate functions in 9 months. execution capability matters more than slides.",
+  "[criteria|Enterprise transformation partner|generic] What should I actually vet when picking a partner for a multi-year enterprise transformation? Global footprint matters, but I care more about delivery track record, program governance, industry depth, and change management. Anything else that separates a safe pair of hands from slideware?",
+  "[criteria|Finance operations outsourcing|generic] Looking at outsourcing chunks of finance (record-to-report, order-to-cash, procure-to-pay). What should be on the shortlist criteria beyond rate cards? Controls, transition risk, tooling, data security, multi-geo coverage, outcome-based pricing?",
+  "[criteria|External audit tender|generic] We're starting an external audit tender for a US-listed multinational. What should I weigh most: PCAOB inspection history, sector expertise, component auditor management, independence constraints, tech-enabled audit, proposed fees, transition plan? Anything CFOs regret not asking?",
+  "[criteria|Cost takeout program|generic] I need a partner for a cost takeout program without kneecapping growth. What do you look for in a firm to make savings stick - operator DNA vs slideware, speed to impact, incentives, capability building, works council savvy, digital levers, hard benefits tracking?",
+  "[use_case|Enterprise transformation partner|generic] We're consolidating 12 ERPs into S/4HANA, moving to a single global operating model, and have to hit synergy targets from a merger. I need a partner to run the program, stand up the PMO, own change and data, and land benefits by quarter. What would that engagement look like and what should I insist goes into the SOW?",
+  "[use_case|Finance operations outsourcing|generic] CFO here. Considering outsourcing AP, collections, cash app, fixed assets, and the monthly close across the Americas and EMEA. I need SLAs, controls that pass SOX, a clean carve-out of the retained team, and a 120-day transition. How would you structure scope, pricing, and governance so this doesn't blow up?",
+  "[use_case|External audit tender|generic] Launching an audit RFP for a calendar-year filer with operations in 30 countries, US GAAP with one IFRS subsidiary, material weakness just remediated, and a carve-out planned next year. What info will firms ask for up front, how to structure management presentations, and what a realistic first-year transition plan looks like?",
+  "[use_case|Cost takeout program|generic] We have to pull out about 12 percent opex in 9 months, no mass layoffs if we can help it. Looking for a playbook: where to hunt (procurement, G&A, apps rationalization, cloud), how to track savings, cadence for the PMO, and how to keep commercial teams from stalling.",
+  "[social_validation|-|generic] Where do CFOs actually compare experiences with big consulting firms? Any credible review sources or practitioner communities with unvarnished takes on transformation and outsourcing delivery, not just analyst quadrants?",
+  "[comparison|Enterprise transformation partner|Deloitte] Head-to-head for a global transformation (ERP, operating model, data): PwC vs Deloitte - strengths, typical team makeup, delivery risk, industry chops, change management, and what references say. Any patterns on value delivered vs fees?",
+  "[comparison|Finance operations outsourcing|EY (Ernst & Young)] For finance ops outsourcing (P2P, O2C, R2R) at a Fortune 100, how do PwC and EY compare on transition approach, control environment that passes SOX, global delivery footprint, platforms they bring, and pricing models? Any traps in the contracts I should watch for?",
+  "[comparison|External audit tender|KPMG] Choosing between PwC and KPMG for external audit of a multinational SEC registrant. What are the real differences in audit quality track record, PCAOB findings, technology they use, handling of component auditors, independence constraints, and year-one transition effort and fees?",
+  "[comparison|Cost takeout program|Accenture] Cost takeout partner choice: PwC or Accenture? We need fast savings without breaking the business. Compare playbooks (zero-based vs pragmatic), procurement and SG&A depth, digital/automation levers, speed to impact, sustainability of savings, and how fees are structured.",
+  "[objections|Enterprise transformation partner|generic] We're looking at PwC for a global transformation. My worry is execution: great strategy deck, then a rotating cast on delivery and missed milestones. How do I pressure test whether PwC will actually land outcomes on time?",
+  "[objections|Finance operations outsourcing|generic] If we outsource F&A to PwC, what's the real risk to service levels after the first 90 days? I keep hearing about SLA misses, ticket backlogs, and knowledge drain post-transition. How do I know PwC can keep performance stable?",
+  "[objections|External audit tender|generic] PwC is on our audit shortlist. Candidly, will we get enough partner time and a clean first-year close, or is ramp pain and staff turnover going to spike our timelines and control issues?",
+  "[objections|Cost takeout program|generic] Thinking about PwC for a cost takeout push. Concerned we'll get playbooks and workshops but not bankable savings, and whatever we cut snaps back. How do I vet PwC's ability to deliver hard dollars fast without breaking ops?",
+  "[pricing|Enterprise transformation partner|generic] Ballpark what a large enterprise should budget for a top-tier transformation partner on a multi-year program. What's a sane range, and when does it make more sense to lean on internal teams and free or low-cost tooling instead?",
+  "[pricing|Finance operations outsourcing|generic] What does PwC actually charge to take over AP, AR, and monthly close? Is pricing FTE-based or per transaction, do they offer starter vs full managed tiers, and what would a 10,000-invoices-per-month footprint roughly cost?",
+  "[pricing|External audit tender|generic] For a US-listed company around $3B revenue, what's a typical external audit fee and what drives the spread between proposals? How do I compare bids apples-to-apples on scope, hours, and rate cards?",
+  "[pricing|Cost takeout program|generic] If we hire PwC for a 12 to 16 week cost takeout sprint, what's the usual fee structure? Do they do success fees or value-based pricing, and how are verified savings calculated for payment?",
+  "[business_case|Enterprise transformation partner|generic] I need to brief my CFO on why PwC is the right partner for our enterprise transformation. Help me frame the value, risks, governance, milestones, and the success metrics we'll hold them to.",
+  "[business_case|Finance operations outsourcing|generic] I have to make the case to my CFO to move finance operations to PwC. Draft the argument around cost-to-serve reduction, SLA commitments, SOX/control comfort, transition risk mitigation, and exit options.",
+  "[business_case|External audit tender|generic] We're recommending PwC in our audit tender. Help me justify it to the audit committee: expected audit quality, partner and manager continuity, first-year transition plan, fee rationale, and how their tech reduces PBC headaches.",
+  "[business_case|Cost takeout program|generic] I need talking points for my CFO on hiring PwC to run a cost takeout program: ROI model, 90-day wins vs longer plays, implementation support, and safeguards so we don't damage growth or controls.",
+  "[churn_triggers|-|generic] We've used PwC for years across audit and projects. Fees keep creeping, turnarounds feel slower, and I'm seeing more team churn. How do I tell if it's time to rebid the work or push for a reset with them?",
+  "[alternatives|-|defensive] If we can't use PwC this cycle, who are the credible alternatives for a global finance transformation and controls program? Fortune 100 scale, SAP S/4, SOX, cyber.",
+  "[alternatives|-|Deloitte] Not thrilled with Deloitte's proposal on our S/4 program. If I want two or three serious alternatives to compare, who should I look at for a global rollout and controls design?",
+  "[alternatives|-|EY (Ernst & Young)] EY is conflicted on our deal. Need alternatives for carve out support, TS, and Day 1 planning. Who actually does this well for companies our size?",
+  "[alternatives|-|KPMG] KPMG has our audit, so independence blocks them from advisory. Who else should I tap for SOX modernization and controls automation at global scale?",
+  "[alternatives|-|Accenture] accenture feels heavy for our data platform build. if I want a couple of credible alternatives for Snowflake + dbt + governance, who would you shortlist for a Fortune 500?",
+  "[problem_resolution|-|generic] PwC engagement is drifting: scope creep, junior-heavy team, and missed milestones on our controls redesign. How do I reset this fast without blowing up the relationship? Specific steps to escalate and tighten the SOW would help.",
+  "[expansion|-|generic] PwC nailed our global tax compliance transition this year. Thinking about extending them into transfer pricing ops and managed services for indirect tax. Anything I should watch for on separation of duties and cost model before I greenlight?",
+  "[ecosystem|-|generic] We're using PwC for SOX and controls remediation. What tech pairs well with their approach so my team isn't living in spreadsheets? Looking for platforms for risk/control libraries, testing workflows, and evidence management that PwC works smoothly with.",
+  "[advocacy|-|generic] I need talking points for the audit committee on staying with PwC for our finance transformation. Keep it pragmatic: what they have shipped for us so far, how they keep delivery risk down, and what proof points I can quote."
+ ]
+}

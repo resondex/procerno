@@ -1,0 +1,234 @@
+{
+ "brand": "jira",
+ "category": "project management tools",
+ "audience": "software development teams",
+ "competitors": [
+  "Asana",
+  "Monday.com",
+  "Trello",
+  "ClickUp",
+  "GitHub Issues",
+  "Azure DevOps"
+ ],
+ "capturedAt": "2026-09-16",
+ "reviewedBy": "Claude (walk review 2026-09-15); not yet reviewed by Tyler",
+ "base": {
+  "verifiability": "spec",
+  "involvement": "considered",
+  "think_feel": "think",
+  "decision_unit": "committee",
+  "rhythm": "subscription",
+  "risk": "performance",
+  "channel_retail": false,
+  "rationale": "We need a project tool our dev team will actually use that fits our workflows, integrates with our stack, and scales without slowing delivery."
+ },
+ "scenarios": [
+  {
+   "label": "Enterprise standardization",
+   "description": "Engineering leadership and IT consolidate multiple trackers into one platform for all teams, prioritizing governance, SSO, permissions, and portfolio visibility.",
+   "deviates": false
+  },
+  {
+   "label": "Program portfolio coordination",
+   "description": "Multiple squads need shared planning, dependency mapping, and reporting across releases and products inside one workflow.",
+   "deviates": false
+  },
+  {
+   "label": "Scale-up outgrowing starter",
+   "description": "A fast-growing engineering org replaces a lightweight board as work volume, permissions, and reporting needs exceed its limits, requiring migration and training.",
+   "deviates": false
+  },
+  {
+   "label": "Squad quick start",
+   "description": "A team lead spins up a tool for a single squad to manage sprints and issues immediately, expecting low-friction onboarding and opinionated defaults.",
+   "deviates": true
+  }
+ ],
+ "stages": [
+  {
+   "key": "problem_recognition",
+   "label": "Problem recognition",
+   "recommended": true
+  },
+  {
+   "key": "category_education",
+   "label": "Category education",
+   "recommended": true
+  },
+  {
+   "key": "discovery",
+   "label": "Discovery",
+   "recommended": true
+  },
+  {
+   "key": "shortlist",
+   "label": "Shortlist",
+   "recommended": true
+  },
+  {
+   "key": "criteria",
+   "label": "Criteria formation",
+   "recommended": true
+  },
+  {
+   "key": "feature_screening",
+   "label": "Feature screening",
+   "recommended": true
+  },
+  {
+   "key": "use_case",
+   "label": "Use-case fit",
+   "recommended": true
+  },
+  {
+   "key": "social_validation",
+   "label": "Social validation",
+   "recommended": true
+  },
+  {
+   "key": "comparison",
+   "label": "Comparison",
+   "recommended": true
+  },
+  {
+   "key": "premium_worth",
+   "label": "Premium vs. basic brands",
+   "recommended": false
+  },
+  {
+   "key": "objections",
+   "label": "Objections / risk",
+   "recommended": true
+  },
+  {
+   "key": "pricing",
+   "label": "Pricing / value",
+   "recommended": true
+  },
+  {
+   "key": "business_case",
+   "label": "Business case",
+   "recommended": true
+  },
+  {
+   "key": "churn_triggers",
+   "label": "Churn triggers",
+   "recommended": true
+  },
+  {
+   "key": "alternatives",
+   "label": "Alternatives",
+   "recommended": true
+  },
+  {
+   "key": "renewal",
+   "label": "Renewal",
+   "recommended": true
+  },
+  {
+   "key": "problem_resolution",
+   "label": "Problem resolution",
+   "recommended": true
+  },
+  {
+   "key": "expansion",
+   "label": "Expansion",
+   "recommended": true
+  },
+  {
+   "key": "ecosystem",
+   "label": "Ecosystem",
+   "recommended": true
+  },
+  {
+   "key": "advocacy",
+   "label": "Advocacy",
+   "recommended": true
+  },
+  {
+   "key": "repertoire",
+   "label": "Repertoire",
+   "recommended": false
+  }
+ ],
+ "cells": {
+  "count": 52,
+  "blind": 33,
+  "branded": 19,
+  "byStage": {
+   "problem_recognition": 4,
+   "category_education": 1,
+   "discovery": 4,
+   "shortlist": 4,
+   "criteria": 4,
+   "feature_screening": 4,
+   "use_case": 4,
+   "social_validation": 1,
+   "comparison": 4,
+   "objections": 4,
+   "pricing": 4,
+   "business_case": 3,
+   "churn_triggers": 1,
+   "alternatives": 5,
+   "renewal": 1,
+   "problem_resolution": 1,
+   "expansion": 1,
+   "ecosystem": 1,
+   "advocacy": 1
+  }
+ },
+ "cellTexts": [
+  "[problem_recognition|Enterprise standardization|generic] We've got 25+ engineering teams all tracking work differently - spreadsheets, ad hoc boards, slide decks. Rollups take days, compliance asks are painful, and nothing lines up. How do we get everyone onto one consistent way of working without bottlenecking teams?",
+  "[problem_recognition|Program portfolio coordination|generic] Multiple teams building pieces of the same release. Dependencies keep surprising us, dates slip, leadership wants one view of risk and progress. How do we coordinate across programs without adding three more meetings a week?",
+  "[problem_recognition|Scale-up outgrowing starter|generic] We jumped from a tiny team to dozens of devs. Our simple board setup can't handle epics, approvals, or real reporting. Work gets lost, no history, no way to slice by team. How do growing teams fix this?",
+  "[problem_recognition|Squad quick start|generic] spinning up a new squad this week. need a clean way to capture stories, estimate, run 2 week sprints, and link to PRs without a day of setup. what's the minimum process that keeps us organized and measurable?",
+  "[category_education|-|generic] For software teams, what does project management software actually do beyond a shared board? I run sprints but haven't used one of these before.",
+  "[discovery|Enterprise standardization|generic] Best enterprise-ready tools for standardizing how 20+ engineering teams plan, track, and report work, with strong permissions, SSO, and audit trails?",
+  "[discovery|Program portfolio coordination|generic] What are the best options for coordinating a product portfolio across many dev teams, managing cross-team dependencies, quarterly planning, and rollup reporting to execs?",
+  "[discovery|Scale-up outgrowing starter|generic] best tool for a fast-growing engineering org moving off basic boards, needs epics, roadmaps, approvals, real reporting, and won't kill velocity.",
+  "[discovery|Squad quick start|generic] Looking for the best option for a small dev squad starting this week: backlog, sprint board, story points, burndown, easy Git integration, minimal admin. What fits that?",
+  "[shortlist|Enterprise standardization|generic] Please give me 4 or 5 strong options to evaluate for company-wide standardization of engineering planning and tracking, with templates, role-based access, audit logs, and SSO.",
+  "[shortlist|Program portfolio coordination|generic] Shortlist 3 options that excel at multi-team software delivery: cross-team dependency mapping, program boards, PI planning support, and portfolio dashboards.",
+  "[shortlist|Scale-up outgrowing starter|generic] We're scaling from 1 team to 8. Can you list 3 or 4 good choices that support epics, capacity planning, approvals, and real-time reports, and won't take weeks to roll out?",
+  "[shortlist|Squad quick start|generic] Need 3 lightweight options for a new squad: sprint planning, backlog, WIP limits, simple automation, quick GitHub linking. Prefer something we can stand up in an afternoon.",
+  "[criteria|Enterprise standardization|generic] We have to pick one project tracking platform for the whole company, security and compliance heavy. What should be on our must-check list so we don't regret the standard a year from now?",
+  "[criteria|Program portfolio coordination|generic] Coordinating several product programs with multiple squads. For choosing a tool, what actually matters for portfolio planning, cross-team dependencies, and exec rollups?",
+  "[criteria|Scale-up outgrowing starter|generic] We're moving from a simple kanban board to something that can handle 50+ engineers and multiple teams. What criteria should we weigh so we pick a system that scales without drowning us in admin?",
+  "[criteria|Squad quick start|generic] small dev squad spinning up a tracker this week. i want a spec: backlog hierarchy, sprinting, WIP limits, story points, git integration, automations, API/webhooks, alerts. which of these are must-haves vs nice-to-haves for a clean, fast setup?",
+  "[feature_screening|Enterprise standardization|generic] Which project management platforms support enterprise SAML SSO plus SCIM user provisioning and deprovisioning across multiple identity providers?",
+  "[feature_screening|Program portfolio coordination|generic] Which tools include a real program board for cross-team dependency mapping and PI planning with capacity by team?",
+  "[feature_screening|Scale-up outgrowing starter|generic] Which options support epics > stories > sub-tasks with roll-up of estimates and status from children to parents?",
+  "[feature_screening|Squad quick start|generic] which tools can auto-link branches, commits, pull requests, and deployments to issues without extra plugins, and update issue status from PR state?",
+  "[use_case|Enterprise standardization|generic] We're consolidating about 900 engineers across US and EU into one tracking system. Need enforced workflows, granular permissions, audit logs, regional data residency, and a sandbox for change management. How should we approach this and what capabilities are non-negotiable?",
+  "[use_case|Program portfolio coordination|generic] Quarterly planning across 7 squads: we need a portfolio view that rolls up epics, highlights cross-team dependencies, does capacity planning, and tracks delivery against OKRs. How would you model that in a tool so the data stays trustworthy?",
+  "[use_case|Scale-up outgrowing starter|generic] We've grown to 5 teams and the simple board is breaking down. Need one backlog fed by multiple projects, epics that span teams, and reporting on cycle time and throughput. What setup would you recommend and what traps should we avoid in the migration?",
+  "[use_case|Squad quick start|generic] two-week sprints, trunk-based dev, story points, minimal ceremony. we need something we can stand up in a day: backlog grooming, sprint board, issue templates, auto status from our git host, low admin. what features and default config would you start with for a squad of 8?",
+  "[social_validation|-|generic] What are dev teams actually using and rating highly for backlog and sprint management right now? Any recent community surveys or review data that show satisfaction, not just market share?",
+  "[comparison|Enterprise standardization|Asana] We're consolidating on one tool for engineering. Jira vs Asana for enterprise standardization: SSO/SCIM, permissions at scale, audit/compliance, performance with about 10k users, and Git/Slack integrations. Which holds up better?",
+  "[comparison|Program portfolio coordination|Monday.com] We run 6 programs across 20+ teams and need clean portfolio rollups. How do Jira and Monday.com compare for cross-team dependency tracking, capacity planning, exec dashboards, and roadmap hierarchy?",
+  "[comparison|Scale-up outgrowing starter|Trello] We're outgrowing Trello with 30 devs. If we switch, does Jira materially improve sprinting, workflows, permissions, and reporting, or can Trello power-ups get us close?",
+  "[comparison|Squad quick start|ClickUp] New squad starting next sprint, choosing Jira or ClickUp. Need story points, sprint boards with WIP limits, custom workflows, git integration, automations, and a usable API. Any setup-time or roadmap gotchas that tip the scales?",
+  "[objections|Enterprise standardization|generic] I keep hearing Jira gets sluggish at enterprise scale. If we put the whole company on it, are we going to be dealing with slow boards, long JQL searches, and dashboards timing out?",
+  "[objections|Program portfolio coordination|generic] For portfolio rollups, we'll be aggregating hundreds of epics and multiple team boards. Does Jira performance hold up on big cross-project dashboards, or do those views crawl?",
+  "[objections|Scale-up outgrowing starter|generic] We're moving up from a lightweight tool but I'm worried about speed. With tens of thousands of issues, is Jira still snappy for daily standups and backlog grooming, or does it lag?",
+  "[objections|Squad quick start|generic] For a small squad starting fresh, what does Jira Cloud performance look like in practice: board load times, backlog scrolling, and JQL latency on a new project vs after a few thousand issues?",
+  "[pricing|Enterprise standardization|generic] If we standardize on Jira company-wide, how do Cloud Standard vs Premium vs Enterprise price out for about 3,000 users, and which features actually justify the jump?",
+  "[pricing|Program portfolio coordination|generic] For coordinating multiple programs, do we really need the top-tier plans in these tools to get cross-project roadmaps and dependency views, or can mid-tier plans cover it without blowing the budget?",
+  "[pricing|Scale-up outgrowing starter|generic] We're graduating from a free starter board. Is there a free or low-cost plan in this space that still gives us sprints, role-based permissions, and basic reports, or do we hit a paywall fast?",
+  "[pricing|Squad quick start|generic] Single squad of 10-12 engineers for the next 6 months: what's the most cost-effective Jira Cloud setup? Monthly vs annual, and which tier gets us automations and Advanced Roadmaps without overpaying?",
+  "[business_case|Enterprise standardization|generic] Need to pitch our CFO on standardizing engineering, product, and QA on Jira company-wide. Can you help me frame the business case in plain numbers: license and admin consolidation, stronger auditability, reduced delivery risk, and a realistic payback for an 800-person org?",
+  "[business_case|Program portfolio coordination|generic] I need to brief our CFO on why adding Jira for portfolio coordination is worth it. We've got 20+ squads, shared platforms, and ugly dependency blind spots. Help me make the case in outcomes and dollars, not fluff.",
+  "[business_case|Scale-up outgrowing starter|generic] We've outgrown our starter board tool going from 15 to 120 engineers. Write me the CFO-facing argument for moving to Jira now - ROI we can defend, migration effort and risk, and what it buys us in predictability.",
+  "[churn_triggers|-|generic] We're 60 devs, 4 years on the same tracker. It's sluggish and the workflows got messy. How do I tell if we should double down and fix it or switch to something else?",
+  "[alternatives|-|defensive] If we move off Jira, what else should a 50-engineer team consider that handles real backlogs, sprints, release tracking, and a solid API?",
+  "[alternatives|-|Asana] Asana isn't working well for our software teams. What alternatives fit engineers better for issue tracking, sprint boards, and dev-heavy workflows?",
+  "[alternatives|-|Monday.com] What are good Monday.com alternatives for an engineering org running scrum and kanban with strict permissions and lots of automation?",
+  "[alternatives|-|Trello] Trello was fine when we were 8 people. We're 70 now and need proper workflows, reports, and controls - what should we switch to?",
+  "[alternatives|-|ClickUp] ClickUp alternatives for a dev org that cares about source control integration, sprinting, and flexible fields without getting bogged down?",
+  "[renewal|-|generic] Our project tracker renewal is up for 140 seats. Is it worth keeping at the current tier, or are there cheaper options that won't wreck our reporting or workflows?",
+  "[problem_resolution|-|generic] Our issue tracker is a mess: duplicated workflows, too many fields, filters hiding tickets. How do I clean this up and set guardrails without breaking teams' boards?",
+  "[expansion|-|generic] We're happy with our tracker for scrum and kanban. Should we roll it out to support and change management too, or is that going to create more pain than value?",
+  "[ecosystem|-|generic] For a software team, what add-ons or integrations pair best with a project tracker to tie in repos, CI/CD, chat, and docs without slowing developers down?",
+  "[advocacy|-|generic] we're on Jira now but a few teammates want to move off. 8 devs + 1 qa, two-week sprints, github + ci. can you help me make the case to keep Jira to our eng leads? i need a short slack blurb i can paste, a handful of talking points that matter to dev teams (code-linked workflow, sprint/kanban boards, release tracking, automation), and quick replies to \"it's too complex\" and \"it slows us down.\" also tips to keep it lean so it doesn't feel like paperwork."
+ ]
+}

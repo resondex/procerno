@@ -1,0 +1,229 @@
+{
+ "brand": "American Express",
+ "category": "credit cards",
+ "audience": "consumers and small businesses looking for credit cards",
+ "competitors": [
+  "Visa",
+  "Mastercard",
+  "Chase",
+  "Capital One",
+  "Discover"
+ ],
+ "capturedAt": "2026-09-16",
+ "reviewedBy": "Claude (walk review 2026-09-15); not yet reviewed by Tyler",
+ "base": {
+  "verifiability": "spec",
+  "involvement": "considered",
+  "think_feel": "think",
+  "decision_unit": "solo",
+  "rhythm": "subscription",
+  "risk": "financial",
+  "channel_retail": false,
+  "rationale": "Get approved for a card that fits my credit and spending, maximizes rewards or financing, and avoids costly surprises."
+ },
+ "scenarios": [
+  {
+   "label": "Everyday cashback card",
+   "description": "Broad consumer looking for simple, no-hassle cashback with no or low annual fee.",
+   "deviates": false
+  },
+  {
+   "label": "Frequent travel perks",
+   "description": "Traveler prioritizing travel earn rates, transfer partners, lounge access, and no foreign fees.",
+   "deviates": false
+  },
+  {
+   "label": "Balance transfer move",
+   "description": "Borrower moving an existing balance to a long 0% intro APR to cut interest and pay down debt.",
+   "deviates": false
+  },
+  {
+   "label": "Small business setup",
+   "description": "Owner picking a primary business card with employee cards, category bonuses, and bookkeeping integrations.",
+   "deviates": false
+  }
+ ],
+ "stages": [
+  {
+   "key": "problem_recognition",
+   "label": "Problem recognition",
+   "recommended": true
+  },
+  {
+   "key": "category_education",
+   "label": "Category education",
+   "recommended": true
+  },
+  {
+   "key": "discovery",
+   "label": "Discovery",
+   "recommended": true
+  },
+  {
+   "key": "shortlist",
+   "label": "Shortlist",
+   "recommended": true
+  },
+  {
+   "key": "criteria",
+   "label": "Criteria formation",
+   "recommended": true
+  },
+  {
+   "key": "feature_screening",
+   "label": "Feature screening",
+   "recommended": true
+  },
+  {
+   "key": "use_case",
+   "label": "Use-case fit",
+   "recommended": true
+  },
+  {
+   "key": "social_validation",
+   "label": "Social validation",
+   "recommended": true
+  },
+  {
+   "key": "comparison",
+   "label": "Comparison",
+   "recommended": true
+  },
+  {
+   "key": "premium_worth",
+   "label": "Premium vs. basic brands",
+   "recommended": false
+  },
+  {
+   "key": "objections",
+   "label": "Objections / risk",
+   "recommended": true
+  },
+  {
+   "key": "pricing",
+   "label": "Pricing / value",
+   "recommended": true
+  },
+  {
+   "key": "business_case",
+   "label": "Business case",
+   "recommended": false
+  },
+  {
+   "key": "churn_triggers",
+   "label": "Churn triggers",
+   "recommended": true
+  },
+  {
+   "key": "alternatives",
+   "label": "Alternatives",
+   "recommended": true
+  },
+  {
+   "key": "renewal",
+   "label": "Renewal",
+   "recommended": true
+  },
+  {
+   "key": "problem_resolution",
+   "label": "Problem resolution",
+   "recommended": true
+  },
+  {
+   "key": "expansion",
+   "label": "Expansion",
+   "recommended": true
+  },
+  {
+   "key": "ecosystem",
+   "label": "Ecosystem",
+   "recommended": true
+  },
+  {
+   "key": "advocacy",
+   "label": "Advocacy",
+   "recommended": true
+  },
+  {
+   "key": "repertoire",
+   "label": "Repertoire",
+   "recommended": false
+  }
+ ],
+ "cells": {
+  "count": 49,
+  "blind": 28,
+  "branded": 21,
+  "byStage": {
+   "problem_recognition": 4,
+   "category_education": 1,
+   "discovery": 4,
+   "shortlist": 4,
+   "criteria": 4,
+   "feature_screening": 4,
+   "use_case": 4,
+   "social_validation": 1,
+   "comparison": 4,
+   "objections": 4,
+   "pricing": 4,
+   "churn_triggers": 1,
+   "alternatives": 5,
+   "renewal": 1,
+   "problem_resolution": 1,
+   "expansion": 1,
+   "ecosystem": 1,
+   "advocacy": 1
+  }
+ },
+ "cellTexts": [
+  "[problem_recognition|Everyday cashback card|generic] feels like i'm overpaying on life basics. groceries, gas, coffee runs... nothing comes back to me. is there some way to get a little back on the stuff i buy all the time?",
+  "[problem_recognition|Frequent travel perks|generic] I'm on planes a lot and keep paying bag fees and sitting at the gate forever. how do people get lounge access or occasional upgrades without spending a ton?",
+  "[problem_recognition|Balance transfer move|generic] I've got a balance that's growing because the interest is rough. is there a legit way to move what I owe somewhere that gives me a breather for a while?",
+  "[problem_recognition|Small business setup|generic] Just started a small business. need a simple way to keep business purchases separate, set spending limits for two employees, and not choke cash flow. what do folks use for that?",
+  "[category_education|-|generic] Super basic: what does a credit card actually do, how do interest, limits, and minimum payments work, and what's the deal with rewards?",
+  "[discovery|Everyday cashback card|generic] best credit cards for simple everyday cash back on groceries, gas, and dining? prefer no annual fee and easy redemptions.",
+  "[discovery|Frequent travel perks|generic] What are the best credit cards for frequent flyers who want lounge access, free checked bags, and solid travel protections for domestic and Europe trips?",
+  "[discovery|Balance transfer move|generic] looking for the best credit cards to move an existing balance with the longest 0 percent intro period. low or no transfer fee if possible.",
+  "[discovery|Small business setup|generic] Best small business credit cards to start building business credit, manage employee spend, and earn rewards on office supplies and online ads?",
+  "[shortlist|Everyday cashback card|generic] Can you narrow it to 3 - 5 top everyday cash back credit cards with no annual fee and strong grocery categories?",
+  "[shortlist|Frequent travel perks|generic] Give me a short list of a few travel cards that actually include decent lounge access and a free checked bag.",
+  "[shortlist|Balance transfer move|generic] Shortlist a handful of strong balance transfer options with the longest 0 percent window and low fees.",
+  "[shortlist|Small business setup|generic] I need just a few small business cards to compare for a new LLC with about 10k monthly spend and two employees. prefer expense controls and basic rewards.",
+  "[criteria|Everyday cashback card|generic] looking for a simple cash back card for daily spend. what should I actually care about - flat rate vs categories, caps, annual fee, foreign fees, redemption hoops? any gotchas people miss?",
+  "[criteria|Frequent travel perks|generic] i'm on planes twice a month. if i'm picking a travel rewards card, which perks matter and which are fluff? airport lounges, point transfers, travel insurance, no foreign fees, partner networks... how do you weigh this stuff?",
+  "[criteria|Balance transfer move|generic] I need to move a balance to a 0% intro card. what should I look for besides the promo months? transfer fee math, go-to APR after, credit limit risk, timing rules, any traps if I pay late?",
+  "[criteria|Small business setup|generic] setting up my first small business card. what matters most: employee cards and spend controls, rewards on ads/shipping, accounting exports, statement terms, purchase protections, credit limit flexibility? anything else owners wish they checked?",
+  "[feature_screening|Everyday cashback card|generic] which cash back cards give a flat 2% or better with no annual fee, no foreign transaction fees, and easy automatic redemption?",
+  "[feature_screening|Frequent travel perks|generic] which travel cards include airport lounge access for the primary holder, strong trip delay/cancellation coverage, no foreign transaction fees, and the ability to transfer points to multiple airline and hotel programs?",
+  "[feature_screening|Balance transfer move|generic] which cards offer at least 15 months of 0% on balance transfers, a transfer fee of 3% or less, and let you request the transfer online right after approval?",
+  "[feature_screening|Small business setup|generic] which small business cards let me issue employee cards with per-card limits, create virtual card numbers, earn extra on online ads and shipping, and export transactions to common accounting software?",
+  "[use_case|Everyday cashback card|generic] family of four, monthly spend about 900 on groceries, 250 gas, 350 dining, 120 streaming, rest is random. I pay in full, don't want to juggle rotating categories. which cash back setup would be simplest and solid?",
+  "[use_case|Frequent travel perks|generic] fly 6 to 8 times a year, mostly domestic with one international trip. want no foreign fees, decent lounges for long layovers, primary rental car coverage, and points I can move to different airlines. which type of travel card fits that?",
+  "[use_case|Balance transfer move|generic] I've got about 6,500 at 24% APR and can put 400 a month toward it. aiming for a 0% balance transfer long enough to wipe it out. how should I choose the card and calculate the transfer fee vs promo length so I actually save money?",
+  "[use_case|Small business setup|generic] new LLC, first business card. spend is roughly 10k a month on online ads, 2k on shipping, few flights a quarter. need a handful of employee cards with limits, receipt capture, and clean reporting separate from personal. what would you recommend I apply for first?",
+  "[social_validation|-|generic] what are people actually happy with right now for cash back and for travel? point me to current, trustworthy roundups and where users compare notes, and tell me which cards are consistently rated top.",
+  "[comparison|Everyday cashback card|Visa] For everyday cash back, is American Express or a Visa card better? I spend about 600 a month on groceries, 200 on gas, 300 other. Factor in annual fees and where each is accepted.",
+  "[comparison|Frequent travel perks|Mastercard] American Express vs a World Elite Mastercard for travel perks: which gives more value on flights and hotels if I take 6 to 8 trips a year? I care about lounge access and travel protections.",
+  "[comparison|Balance transfer move|Chase] Moving 5,000 from a high APR card. Better to do a balance transfer to American Express or to Chase? Compare intro APR length, transfer fees, and any gotchas if I miss a payment.",
+  "[comparison|Small business setup|Capital One] New LLC, first business card. American Express or Capital One for spend categories, employee cards, and accounting integrations? We do about 20k a month, lots of online ads and SaaS.",
+  "[objections|Everyday cashback card|generic] I keep hearing American Express cash back cards have high annual fees and you end up paying more than you earn unless you really hit the categories. Is that going to be a money sink for a normal household?",
+  "[objections|Frequent travel perks|generic] Are American Express travel cards actually worth it after year one? With the big annual fee, airline credits I might not use, and transfer costs, I'm worried I'll lose money.",
+  "[objections|Balance transfer move|generic] Does moving a balance to American Express really save anything? The transfer fee plus a promo APR that jumps later feels risky if cash flow is tight.",
+  "[objections|Small business setup|generic] For my small business, will American Express end up costing more with employee card fees, late fees, and a high APR if we sometimes carry a balance?",
+  "[pricing|Everyday cashback card|generic] For everyday cash back, is a no annual fee card better long term than paying an annual fee for a higher grocery rate? Break even point if I spend about 800 a month on groceries.",
+  "[pricing|Frequent travel perks|generic] Can you sanity check the math on American Express travel cards? Between Gold and Platinum, what annual spend on flights, dining, and hotels makes the higher fee actually pay off after credits?",
+  "[pricing|Balance transfer move|generic] What fees should I expect on a balance transfer card right now? Typical transfer percent, any annual fee, and how those stack with a 0 percent intro APR.",
+  "[pricing|Small business setup|generic] For small business, how do American Express business cards price out on annual fees and employee card costs, and is there a no annual fee option that still earns decent points?",
+  "[churn_triggers|-|generic] I've had American Express for years, but the annual fee and fewer places taking it near me are bugging me. Should I stick with Amex or switch to something simpler if I barely travel now?",
+  "[alternatives|-|defensive] Not loving American Express lately. What other credit cards would you pick instead for a small business that spends mostly on ads and travel, no foreign fees if possible?",
+  "[alternatives|-|Visa] I don't want another Visa. What are good alternatives for strong cash back and solid car rental coverage?",
+  "[alternatives|-|Mastercard] Mastercard keeps getting declined at a couple local shops. What non-Mastercard cards are good for groceries and gas?",
+  "[alternatives|-|Chase] Thinking of moving away from Chase credit cards. Which cards have good travel transfer partners and airport lounge access?",
+  "[alternatives|-|Capital One] Capital One feels complicated to redeem. What cards are easier for miles or points and still have decent travel perks?",
+  "[renewal|-|generic] My American Express annual fee is coming up. Still worth keeping if I fly about 10 times a year and spend around 1,500 a month on dining, or is there a cheaper card that makes more sense?",
+  "[problem_resolution|-|generic] American Express airline incidental credit didn't post after I paid for seat upgrades and checked bags. It's been 8 weeks. How do I get this fixed or credited?",
+  "[expansion|-|generic] Liking my American Express so far. Thinking about adding a business card for my LLC and a couple employee cards. Which one pairs well and any gotchas with tracking spend limits?",
+  "[ecosystem|-|generic] What plays nicely with American Express for a small business stack? Accounting apps it syncs well with, receipt tools that auto match charges, that kind of thing.",
+  "[advocacy|-|generic] Friend keeps saying American Express isn't worth it because acceptance is spotty and fees are high. How do I make a fair case for it to our team for travel and client dinners?"
+ ]
+}

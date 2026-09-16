@@ -1,0 +1,222 @@
+{
+ "brand": "Purple",
+ "category": "mattress brands",
+ "audience": "online mattress shoppers",
+ "competitors": [
+  "Casper",
+  "Tempur-Pedic",
+  "Saatva",
+  "Nectar",
+  "Leesa"
+ ],
+ "capturedAt": "2026-09-16",
+ "reviewedBy": "Claude (walk review 2026-09-15); not yet reviewed by Tyler",
+ "base": {
+  "verifiability": "taste",
+  "involvement": "considered",
+  "think_feel": "think",
+  "decision_unit": "household",
+  "rhythm": "one_shot",
+  "risk": "performance",
+  "channel_retail": true,
+  "rationale": "I want a comfortable, durable mattress that fits my budget and is easy to get and return if it doesn't sleep right."
+ },
+ "scenarios": [
+  {
+   "label": "Worn-out replacement",
+   "description": "Replacing a sagging or old mattress with the same size, aiming for better sleep without surprises.",
+   "deviates": false
+  },
+  {
+   "label": "New home setup",
+   "description": "Coordinating an online mattress purchase to arrive with move-in and work with a new bed frame.",
+   "deviates": false
+  },
+  {
+   "label": "Couple upsizing",
+   "description": "Moving to a larger size to improve space and motion isolation for two sleepers.",
+   "deviates": false
+  },
+  {
+   "label": "Budget-capped buy",
+   "description": "Choosing the best-value mattress under a strict price ceiling, prioritizing essentials over extras.",
+   "deviates": false
+  }
+ ],
+ "stages": [
+  {
+   "key": "problem_recognition",
+   "label": "Problem recognition",
+   "recommended": true
+  },
+  {
+   "key": "category_education",
+   "label": "Category education",
+   "recommended": true
+  },
+  {
+   "key": "discovery",
+   "label": "Discovery",
+   "recommended": true
+  },
+  {
+   "key": "shortlist",
+   "label": "Shortlist",
+   "recommended": true
+  },
+  {
+   "key": "criteria",
+   "label": "Criteria formation",
+   "recommended": true
+  },
+  {
+   "key": "feature_screening",
+   "label": "Feature screening",
+   "recommended": false
+  },
+  {
+   "key": "use_case",
+   "label": "Use-case fit",
+   "recommended": true
+  },
+  {
+   "key": "social_validation",
+   "label": "Social validation",
+   "recommended": true
+  },
+  {
+   "key": "comparison",
+   "label": "Dupes & alternatives",
+   "recommended": true
+  },
+  {
+   "key": "premium_worth",
+   "label": "Premium vs. basic brands",
+   "recommended": false
+  },
+  {
+   "key": "objections",
+   "label": "Objections / risk",
+   "recommended": true
+  },
+  {
+   "key": "pricing",
+   "label": "Pricing / value",
+   "recommended": true
+  },
+  {
+   "key": "business_case",
+   "label": "Business case",
+   "recommended": false
+  },
+  {
+   "key": "churn_triggers",
+   "label": "Churn triggers",
+   "recommended": true
+  },
+  {
+   "key": "alternatives",
+   "label": "Alternatives",
+   "recommended": true
+  },
+  {
+   "key": "renewal",
+   "label": "Renewal",
+   "recommended": false
+  },
+  {
+   "key": "problem_resolution",
+   "label": "Problem resolution",
+   "recommended": true
+  },
+  {
+   "key": "expansion",
+   "label": "Expansion",
+   "recommended": true
+  },
+  {
+   "key": "ecosystem",
+   "label": "Ecosystem",
+   "recommended": true
+  },
+  {
+   "key": "advocacy",
+   "label": "Advocacy",
+   "recommended": true
+  },
+  {
+   "key": "repertoire",
+   "label": "Repertoire",
+   "recommended": false
+  }
+ ],
+ "cells": {
+  "count": 44,
+  "blind": 24,
+  "branded": 20,
+  "byStage": {
+   "problem_recognition": 4,
+   "category_education": 1,
+   "discovery": 4,
+   "shortlist": 4,
+   "criteria": 4,
+   "use_case": 4,
+   "social_validation": 1,
+   "comparison": 4,
+   "objections": 4,
+   "pricing": 4,
+   "churn_triggers": 1,
+   "alternatives": 5,
+   "problem_resolution": 1,
+   "expansion": 1,
+   "ecosystem": 1,
+   "advocacy": 1
+  }
+ },
+ "cellTexts": [
+  "[problem_recognition|Worn-out replacement|generic] i'm waking up stiff and the spot i sleep on has a dip. is there a fix or do i need to swap out part of my sleep setup?",
+  "[problem_recognition|New home setup|generic] just moved into a new place and i've been crashing on a loaner that leaves my hips numb. how do i set up something decent to sleep on without spending a lot?",
+  "[problem_recognition|Couple upsizing|generic] two of us are crammed on a too small thing and we keep waking each other up. it gets hot, too. what should we be looking at to make nights tolerable?",
+  "[problem_recognition|Budget-capped buy|generic] i've got about 500 to fix my lousy sleep situation, sore shoulders every morning and a saggy spot where i lie. what's the smartest way to improve this without blowing the budget?",
+  "[category_education|-|generic] what does a mattress actually do besides feel soft or firm? break down the types and how you tell quality.",
+  "[discovery|Worn-out replacement|generic] best mattress to replace an old saggy one? side sleeper, 180 lb, lower back gets cranky.",
+  "[discovery|New home setup|generic] setting up a new bedroom from scratch. what size and type of mattress works for a small room, medium firm feel, under 1000 if possible?",
+  "[discovery|Couple upsizing|generic] best mattresses for couples who toss and turn. need strong edge support, low motion transfer, and it has to sleep cool. sizing up to king.",
+  "[discovery|Budget-capped buy|generic] what are the best queen mattresses under 700 that still hold up and feel comfy? would like free shipping and a real trial period.",
+  "[shortlist|Worn-out replacement|generic] can you give me 3 or 4 solid options to replace a 10 year old sagging mattress for a side sleeper with shoulder pain?",
+  "[shortlist|New home setup|generic] new place, need something fast. shortlist a few mattresses that are easy to unbox and set up, not too tall, fine for a simple platform.",
+  "[shortlist|Couple upsizing|generic] we're upgrading to a king. name three mattresses that stay cool, have low motion transfer, and solid edges.",
+  "[shortlist|Budget-capped buy|generic] budget cap 700 delivered, queen. shortlist a few options that do not feel cheap and will not sag in a year.",
+  "[criteria|Worn-out replacement|generic] my 8-year-old mattress is shot, sagging. what actually matters when replacing so I don't end up with another dud?",
+  "[criteria|New home setup|generic] New place, starting fresh. Need a queen. What should I prioritize so it fits a small room and feels medium-firm without sleeping hot?",
+  "[criteria|Couple upsizing|generic] we're moving up to a king for two. what specs matter most for couples - motion isolation, edge support, cooling?",
+  "[criteria|Budget-capped buy|generic] Budget cap about 600. What should I look for at that price and what can I skip?",
+  "[use_case|Worn-out replacement|generic] Old mattress has dips, wake up with sore hips and shoulder. Side sleeper, 180 lb. Want pressure relief that doesn't trap heat. Where should I start?",
+  "[use_case|New home setup|generic] Setting up a new apartment. Need a bed-in-a-box queen I can get up two flights, for a platform frame. Light combo sleeper. Can you walk me through shortlisting?",
+  "[use_case|Couple upsizing|generic] Two of us upgrading to a king. I'm restless, partner wakes easy. We both run warm. Need edges you can sit on. How do we pick firmness and materials?",
+  "[use_case|Budget-capped buy|generic] Tight budget, under 800 for a queen. Needs to last a few years, good for back and side sleeping. I can wait for holiday sales. How do I narrow it down?",
+  "[social_validation|-|generic] What do people actually like after a year or two? Which mattress brands show up with solid reviews and few warranty headaches in real-world forums?",
+  "[comparison|Worn-out replacement|Casper] Old bed is done. Between Purple and Casper, which is kinder to side-sleeper shoulders and stays cooler? Any durability differences worth paying for?",
+  "[comparison|New home setup|Tempur-Pedic] New house, want one great mattress. How does Purple compare to Tempur-Pedic on pressure relief and motion transfer? If I hate the heavy, sunk-in feel, would Purple be a better fit?",
+  "[comparison|Couple upsizing|Saatva] Upsizing to a king for two. Purple vs Saatva: which has better edge support and less motion for couples, and how do their trial/return policies differ?",
+  "[comparison|Budget-capped buy|Nectar] Max 900 for a queen. Is Purple worth stretching for over Nectar, or is Nectar the smarter value at that price? Want medium-firm, decent cooling, won't sag fast.",
+  "[objections|Worn-out replacement|generic] my old mattress is shot. thinking Purple, but does that grid actually hold up past a couple years or does it start to sag? i need real back support, not mushy.",
+  "[objections|New home setup|generic] new place, hot sleeper here. if I go with Purple, how cool does it actually sleep and is there any off-gassing smell the first week?",
+  "[objections|Couple upsizing|generic] we're moving to a king. if we pick Purple, how is motion transfer and edge support for two people? one of us is 230 lbs, other is 140, worried about dips or roll-together.",
+  "[objections|Budget-capped buy|generic] tight budget. is the entry-level Purple actually supportive for side sleepers, or do you basically have to step up a tier to avoid pressure points and early sag?",
+  "[pricing|Worn-out replacement|generic] what's a fair out-the-door price for a decent queen mattress online right now? do they haul away the old one for free or is that an extra fee, and any catches with \"free\" returns?",
+  "[pricing|New home setup|generic] for a new house setup: what do Purple's different tiers run for queen vs king, and are the bundle deals with pillows and sheets worth it or just markup?",
+  "[pricing|Couple upsizing|generic] we're upgrading to a king. how much more should I expect going queen to king, and what's a normal upcharge for a split king with an adjustable base? any hidden delivery or setup fees?",
+  "[pricing|Budget-capped buy|generic] budget is about 1200 total. is there a Purple that comes in under that after tax and shipping, or better to wait for a holiday sale? how big do their discounts usually get?",
+  "[churn_triggers|-|generic] i've had a Purple for 4 years and my hips are starting to ache in the morning. should I try fixes like rotating it or checking the base, or is it time to replace? is Purple still the right fit for me or should I switch?",
+  "[alternatives|-|defensive] Not totally sold on Purple. If I want that pressure relief without sinking, who else should I be looking at? queen, under 1500, hot sleeper.",
+  "[alternatives|-|Casper] Casper is kinda meh for me. What are good alternatives with a similar medium feel and decent motion isolation? need fast shipping to NYC.",
+  "[alternatives|-|Tempur-Pedic] Love the Tempur-Pedic feel in store but the price is brutal. What mattresses give a close memory-foam hug without the sticker shock?",
+  "[alternatives|-|Saatva] I like that Saatva hybrid vibe but my budget won't stretch. Any coil or hybrid options with strong edge support that don't run hot?",
+  "[alternatives|-|Nectar] Nectar too soft for me on my back. What firmer all-foam or hybrid picks should I try instead, around 1000?",
+  "[problem_resolution|-|generic] Got a Purple mattress last month and the cover zipper jams halfway, plus one corner feels lumpy. Can I fix this at home or is this a warranty thing? what pics do they need?",
+  "[expansion|-|generic] We love our Purple in the primary. Thinking of getting another for the guest room and maybe one for my teenager. Which model holds up best for mixed sleepers and heavier use?",
+  "[ecosystem|-|generic] What works best with a Purple mattress? sheets that actually fit the grid, a protector that doesn't make it swampy, and do I need a specific frame or slats?",
+  "[advocacy|-|generic] My brother says Purple is just a gimmick. How do I explain why it's been good for my shoulders and stays cooler than the foam bed he's pushing?"
+ ]
+}

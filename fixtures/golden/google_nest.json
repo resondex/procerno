@@ -1,0 +1,227 @@
+{
+ "brand": "Google Nest",
+ "category": "smart home devices",
+ "audience": "homeowners and renters buying smart home devices",
+ "competitors": [
+  "Amazon",
+  "Ecobee",
+  "Arlo",
+  "Wyze",
+  "Philips Hue"
+ ],
+ "capturedAt": "2026-09-16",
+ "reviewedBy": "Claude (walk review 2026-09-15); not yet reviewed by Tyler",
+ "base": {
+  "verifiability": "spec",
+  "involvement": "considered",
+  "think_feel": "think",
+  "decision_unit": "household",
+  "rhythm": "one_shot",
+  "risk": "performance",
+  "channel_retail": true,
+  "rationale": "I want a device that works reliably with my setup, fits my ecosystem, is easy to install, and feels worth the price."
+ },
+ "scenarios": [
+  {
+   "label": "DIY security build",
+   "description": "Assembling doorbell, cameras, and sensors for self-monitoring or cloud storage at home.",
+   "deviates": false
+  },
+  {
+   "label": "Voice assistant hub pick",
+   "description": "Choosing a smart speaker or display to control devices and anchor the home's ecosystem.",
+   "deviates": false
+  },
+  {
+   "label": "Smart lighting expansion",
+   "description": "Outfitting multiple rooms with bulbs, switches, and dimmers for scenes and schedules.",
+   "deviates": false
+  },
+  {
+   "label": "Robot vacuum upgrade",
+   "description": "Buying or replacing a robot vacuum with mapping and auto-empty that fits the home's layout and pets.",
+   "deviates": false
+  }
+ ],
+ "stages": [
+  {
+   "key": "problem_recognition",
+   "label": "Problem recognition",
+   "recommended": true
+  },
+  {
+   "key": "category_education",
+   "label": "Category education",
+   "recommended": true
+  },
+  {
+   "key": "discovery",
+   "label": "Discovery",
+   "recommended": true
+  },
+  {
+   "key": "shortlist",
+   "label": "Shortlist",
+   "recommended": true
+  },
+  {
+   "key": "criteria",
+   "label": "Criteria formation",
+   "recommended": true
+  },
+  {
+   "key": "feature_screening",
+   "label": "Feature screening",
+   "recommended": true
+  },
+  {
+   "key": "use_case",
+   "label": "Use-case fit",
+   "recommended": true
+  },
+  {
+   "key": "social_validation",
+   "label": "Social validation",
+   "recommended": true
+  },
+  {
+   "key": "comparison",
+   "label": "Comparison",
+   "recommended": true
+  },
+  {
+   "key": "premium_worth",
+   "label": "Premium vs. basic brands",
+   "recommended": false
+  },
+  {
+   "key": "objections",
+   "label": "Objections / risk",
+   "recommended": true
+  },
+  {
+   "key": "pricing",
+   "label": "Pricing / value",
+   "recommended": true
+  },
+  {
+   "key": "business_case",
+   "label": "Business case",
+   "recommended": false
+  },
+  {
+   "key": "churn_triggers",
+   "label": "Churn triggers",
+   "recommended": true
+  },
+  {
+   "key": "alternatives",
+   "label": "Alternatives",
+   "recommended": true
+  },
+  {
+   "key": "renewal",
+   "label": "Renewal",
+   "recommended": false
+  },
+  {
+   "key": "problem_resolution",
+   "label": "Problem resolution",
+   "recommended": true
+  },
+  {
+   "key": "expansion",
+   "label": "Expansion",
+   "recommended": true
+  },
+  {
+   "key": "ecosystem",
+   "label": "Ecosystem",
+   "recommended": true
+  },
+  {
+   "key": "advocacy",
+   "label": "Advocacy",
+   "recommended": true
+  },
+  {
+   "key": "repertoire",
+   "label": "Repertoire",
+   "recommended": false
+  }
+ ],
+ "cells": {
+  "count": 48,
+  "blind": 29,
+  "branded": 19,
+  "byStage": {
+   "problem_recognition": 4,
+   "category_education": 1,
+   "discovery": 4,
+   "shortlist": 4,
+   "criteria": 4,
+   "feature_screening": 4,
+   "use_case": 4,
+   "social_validation": 1,
+   "comparison": 4,
+   "objections": 4,
+   "pricing": 4,
+   "churn_triggers": 1,
+   "alternatives": 5,
+   "problem_resolution": 1,
+   "expansion": 1,
+   "ecosystem": 1,
+   "advocacy": 1
+  }
+ },
+ "cellTexts": [
+  "[problem_recognition|DIY security build|generic] renting a first-floor apartment. couple weird knocks lately and packages disappearing. i just want to know if someone's poking around and get a ping if a door opens, but i can't drill or run wires. what's a simple way to keep tabs from my phone, especially at night?",
+  "[problem_recognition|Voice assistant hub pick|generic] My lights, music, thermostat, and plugs are all in different apps. I just want to say it and have it happen, and let my partner use it too. Also not super into always-listening mics. How do people set this up without it being creepy or flaky?",
+  "[problem_recognition|Smart lighting expansion|generic] old bungalow, weird wiring. i want the lights to follow a schedule, dim after sunset, and still work from the wall so guests don't break everything. some boxes don't have a neutral. how do i expand this without rewiring the house?",
+  "[problem_recognition|Robot vacuum upgrade|generic] the puck-shaped floor thing i own keeps eating cords and getting stuck on the rug tassels. two dogs shedding like crazy. i need whatever will actually keep the floors clean daily without me rescuing it every 10 minutes. what should i be looking for?",
+  "[category_education|-|generic] be honest: what does a 'smart home' actually do, and why would a regular person want one?",
+  "[discovery|DIY security build|generic] best DIY-friendly home security setup for a renter: no drilling, quick phone alerts, easy to add more later?",
+  "[discovery|Voice assistant hub pick|generic] what's the best voice-control hub for a small house that plays nice with lots of devices, has strong privacy options, supports multiple users, and can do reliable whole-home audio?",
+  "[discovery|Smart lighting expansion|generic] best system to expand lighting control across several rooms in a rental (no neutral in some spots), mix of lamps and ceiling fixtures, needs rock-solid schedules, dimming, scenes, and physical controls guests can use.",
+  "[discovery|Robot vacuum upgrade|generic] best robot vacuum for 2 cats, mostly hardwood with a few rugs, low couches, solid mapping, avoids cords, and doesn't freak out at dark floors. budget about 500-700.",
+  "[shortlist|DIY security build|generic] give me 3 to 5 renter-friendly home security options to compare, with door/window alerts, a way to see who's at the door, battery power, and no long contracts.",
+  "[shortlist|Voice assistant hub pick|generic] can you shortlist a few voice-control hubs with great privacy controls, reliable automations, and good sound, so I can compare?",
+  "[shortlist|Smart lighting expansion|generic] short list a few whole-home lighting solutions that work in older houses without a neutral, handle both plug-in lamps and hardwired lights, have dependable automations, and real wall controls.",
+  "[shortlist|Robot vacuum upgrade|generic] shortlist a few robot vacuums worth upgrading to for pet hair on hard floors plus rugs, under-sofa clearance, accurate mapping, and easy maintenance in the mid price range.",
+  "[criteria|DIY security build|generic] i'm piecing together my own DIY home security setup. what actually matters when choosing cameras/sensors/hub so I don't end up with lag, false alerts, or a subscription I regret?",
+  "[criteria|Voice assistant hub pick|generic] Choosing a smart home voice assistant hub: what should I prioritize so it plays nice with lots of devices now and in a couple years?",
+  "[criteria|Smart lighting expansion|generic] Expanding smart lighting around the house. What should I look for so scenes are fast, colors are accurate, and it still works if someone flips the wall switch?",
+  "[criteria|Robot vacuum upgrade|generic] Upgrading an older robot vac. Which specs actually matter in real use: mapping quality, obstacle avoidance, brush type, self-empty, noise?",
+  "[feature_screening|DIY security build|generic] Which security cameras support on-device person detection and let me store 24/7 video locally without a paid plan?",
+  "[feature_screening|Voice assistant hub pick|generic] Show me voice assistant hubs that can act as a Thread border router and support multi-user voice recognition.",
+  "[feature_screening|Smart lighting expansion|generic] Which smart dimmer switches work without a neutral wire and handle 3-way circuits without flicker?",
+  "[feature_screening|Robot vacuum upgrade|generic] Which robot vacuums reliably avoid cords and pet poop using vision or AI, not just bump sensors?",
+  "[use_case|DIY security build|generic] Renting a small house and want DIY security without drilling. Need a doorbell cam, a couple outdoor cams, and door/window sensors that tie into automations. Wi-Fi is decent, outdoor outlets are limited. How would you set this up and what should I buy to make it work smoothly?",
+  "[use_case|Voice assistant hub pick|generic] Family of four, mixed accents. Want to control lights, thermostat, and the front door by voice, and keep basics working if the internet drops. Also need whole-home audio. Which hub fits that and what tradeoffs should I expect?",
+  "[use_case|Smart lighting expansion|generic] Old house, no neutral in some boxes. I want motion-activated hall lights at night, sunrise wake-up in bedrooms, and still have wall switches that guests can use. Lamps plus recessed cans. How should I expand lighting so it's reliable and not annoying?",
+  "[use_case|Robot vacuum upgrade|generic] 1,200 sq ft place with two shedding dogs. Hardwood with a few rugs and kid toys. Looking to upgrade to a vac that maps well, avoids cords, runs quiet at night, and only mops the kitchen. What features should I target and how would you set no-go zones and the schedule?",
+  "[social_validation|-|generic] What are people actually using and rating well for smart home gear lately? Any communities or review sources that feel trustworthy and not just ads?",
+  "[comparison|DIY security build|Amazon] Building a DIY home security setup: Google Nest or Amazon? Which gives faster alerts and fewer app glitches once you add a doorbell, 2 cams, and a couple sensors?",
+  "[comparison|Voice assistant hub pick|Ecobee] Picking a voice hub for the house: Google Nest Hub vs Ecobee SmartThermostat as the main brain. Which one hears commands better and keeps automations stable?",
+  "[comparison|Smart lighting expansion|Arlo] expanding smart lighting across rooms. better to center it on Google Nest with Google Home automations, or lean on Arlo gear and tie lights to their camera motion? what holds up day to day?",
+  "[comparison|Robot vacuum upgrade|Wyze] Upgrading the robot vac. If the rest is Google Nest, should I stay Nest-centric for control or go with the Wyze vacuum and use their app? I care about reliable voice start and schedules.",
+  "[objections|DIY security build|generic] I've heard Google Nest cameras miss motion or send late alerts. True when you've got a few devices going, or has the reliability improved enough for a DIY setup?",
+  "[objections|Voice assistant hub pick|generic] Does Google Nest still feel sluggish on basic voice commands? I'm tired of wait times just to turn lights on.",
+  "[objections|Smart lighting expansion|generic] I'm about to add like 12 bulbs and 4 switches. Is Google Nest going to drop routines or get out of sync, or will sunrise/sunset and room scenes actually run on time?",
+  "[objections|Robot vacuum upgrade|generic] Planning to trigger a robot vacuum off Google Nest Home/Away and voice. Does it actually fire consistently, or do commands time out and routines fail when Wi-Fi hiccups?",
+  "[pricing|DIY security build|generic] What's the real monthly if I build around Google Nest for security? Cams + doorbell + a couple sensors. Do I need Nest Aware, and which tier is worth it vs going without?",
+  "[pricing|Voice assistant hub pick|generic] for a voice assistant hub, what are the ongoing costs, if any? are routines and multi-room audio free or do i end up paying for music and extras anyway?",
+  "[pricing|Smart lighting expansion|generic] Budget question: for about 10 lights, is it cheaper over a year to buy a hub with cheaper bulbs, or skip the hub and use Wi-Fi bulbs?",
+  "[pricing|Robot vacuum upgrade|generic] Robot vac upgrade: are the under-300 models good enough for mapping and room cleanup, or do you really need to spend 500-plus? Any hidden ongoing costs besides bags, filters, brushes?",
+  "[churn_triggers|-|generic] I've been on Google Nest for years. Routines and camera alerts feel slower lately. Do I stick with it or start moving off?",
+  "[alternatives|-|defensive] if i don't go with Google Nest, what are the best alternatives for a smart thermostat and a couple cameras? renter friendly, easy setup",
+  "[alternatives|-|Amazon] looking for alternatives to Amazon smart home gear. want a doorbell cam and a few plugs, but not tied to Alexa",
+  "[alternatives|-|Ecobee] Alternatives to Ecobee for a thermostat? Need remote room sensors and solid heat pump support, low hassle install",
+  "[alternatives|-|Arlo] Instead of Arlo, what should I look at for battery outdoor cameras with decent night vision and maybe local storage? No wires to run",
+  "[alternatives|-|Wyze] Wyze is giving me fits. What cheap but reliable indoor cam alternatives should I try, under about 50 each if possible?",
+  "[problem_resolution|-|generic] Switched to a new router and now my Google Nest Doorbell keeps going offline. The Home app just loops on connecting. How do I get it reconnected without taking it off the mount, and will I lose my video history?",
+  "[expansion|-|generic] I've got a Google Nest thermostat and doorbell and I'm happy with them. Thinking about expanding to cover a detached garage and add smoke alarms and maybe a couple window sensors. What's the smart way to roll this out without overcomplicating it?",
+  "[ecosystem|-|generic] What plays nicely with Google Nest right now? Smart locks, shades, garage controller, leak sensors... I want stuff that plugs into routines without flaky workarounds",
+  "[advocacy|-|generic] I'm happy with Google Nest but a friend thinks it's overhyped. How do I make the case for it without sounding like a fanboy?"
+ ]
+}

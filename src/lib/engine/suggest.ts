@@ -457,7 +457,12 @@ export async function suggestBrandProfile(
           "'companies'.\n" +
           "- competitors: the 4 to 6 brands buyers most often weigh against it. " +
           "Lead with the mainstream market leaders in the category, not niche " +
-          "or same-subculture alternatives.\n" +
+          "or same-subculture alternatives - but ALWAYS include a fast-rising " +
+          "challenger if AI assistants increasingly recommend one (the rival " +
+          "eating recommendations matters more than a fading incumbent).\n" +
+          "The category label must be broad enough to contain every " +
+          "competitor listed - never name a category that excludes one of " +
+          "them (e.g. not 'Android smartphones' with iPhone as a rival).\n" +
           "- audience: the primary buyer audience in a short phrase.\n" +
           "If the brand is ambiguous or unknown, pick the most likely commercial " +
           "interpretation and answer anyway.",

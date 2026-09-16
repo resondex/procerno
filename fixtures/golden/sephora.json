@@ -1,0 +1,226 @@
+{
+ "brand": "Sephora",
+ "category": "beauty retailers",
+ "audience": "makeup and skincare shoppers",
+ "competitors": [
+  "Ulta Beauty",
+  "Amazon (beauty)",
+  "Target (beauty)",
+  "Macy's (beauty)",
+  "Nordstrom (beauty)"
+ ],
+ "capturedAt": "2026-09-16",
+ "reviewedBy": "Claude (walk review 2026-09-15); not yet reviewed by Tyler",
+ "base": {
+  "verifiability": "taste",
+  "involvement": "habitual",
+  "think_feel": "feel",
+  "decision_unit": "solo",
+  "rhythm": "replenishment",
+  "risk": "performance",
+  "channel_retail": true,
+  "rationale": "I grab the products that already work for me from a trusted, convenient store with fair prices and easy returns."
+ },
+ "scenarios": [
+  {
+   "label": "Staple restock",
+   "description": "Buy known everyday items from the usual retailer, in store or online.",
+   "deviates": false
+  },
+  {
+   "label": "Seasonal sale stock-up",
+   "description": "Build a larger basket of familiar products during an event sale to save and earn points.",
+   "deviates": false
+  },
+  {
+   "label": "Holiday gifting sets",
+   "description": "Pick retailer gift sets for easy presents, leaning on brand reputation and value.",
+   "deviates": false
+  },
+  {
+   "label": "Routine overhaul consult",
+   "description": "Shopper with a skin concern seeks advice and buys a rebuilt regimen across several products.",
+   "deviates": true
+  }
+ ],
+ "stages": [
+  {
+   "key": "problem_recognition",
+   "label": "Problem recognition",
+   "recommended": true
+  },
+  {
+   "key": "category_education",
+   "label": "Category education",
+   "recommended": true
+  },
+  {
+   "key": "discovery",
+   "label": "Discovery",
+   "recommended": true
+  },
+  {
+   "key": "shortlist",
+   "label": "Shortlist",
+   "recommended": true
+  },
+  {
+   "key": "criteria",
+   "label": "Criteria formation",
+   "recommended": true
+  },
+  {
+   "key": "feature_screening",
+   "label": "Feature screening",
+   "recommended": false
+  },
+  {
+   "key": "use_case",
+   "label": "Use-case fit",
+   "recommended": true
+  },
+  {
+   "key": "social_validation",
+   "label": "Social validation",
+   "recommended": true
+  },
+  {
+   "key": "comparison",
+   "label": "Comparison",
+   "recommended": true
+  },
+  {
+   "key": "premium_worth",
+   "label": "Splurge or save",
+   "recommended": true
+  },
+  {
+   "key": "objections",
+   "label": "Objections / risk",
+   "recommended": true
+  },
+  {
+   "key": "pricing",
+   "label": "Pricing / value",
+   "recommended": true
+  },
+  {
+   "key": "business_case",
+   "label": "Business case",
+   "recommended": false
+  },
+  {
+   "key": "churn_triggers",
+   "label": "Churn triggers",
+   "recommended": true
+  },
+  {
+   "key": "alternatives",
+   "label": "Alternatives",
+   "recommended": true
+  },
+  {
+   "key": "renewal",
+   "label": "Renewal",
+   "recommended": false
+  },
+  {
+   "key": "problem_resolution",
+   "label": "Problem resolution",
+   "recommended": true
+  },
+  {
+   "key": "expansion",
+   "label": "Expansion",
+   "recommended": true
+  },
+  {
+   "key": "ecosystem",
+   "label": "Ecosystem",
+   "recommended": true
+  },
+  {
+   "key": "advocacy",
+   "label": "Advocacy",
+   "recommended": true
+  },
+  {
+   "key": "repertoire",
+   "label": "Repertoire",
+   "recommended": true
+  }
+ ],
+ "cells": {
+  "count": 46,
+  "blind": 29,
+  "branded": 17,
+  "byStage": {
+   "problem_recognition": 4,
+   "category_education": 1,
+   "discovery": 4,
+   "shortlist": 4,
+   "criteria": 4,
+   "use_case": 4,
+   "social_validation": 1,
+   "comparison": 4,
+   "premium_worth": 1,
+   "objections": 4,
+   "pricing": 4,
+   "churn_triggers": 1,
+   "alternatives": 5,
+   "problem_resolution": 1,
+   "expansion": 1,
+   "ecosystem": 1,
+   "advocacy": 1,
+   "repertoire": 1
+  }
+ },
+ "cellTexts": [
+  "[problem_recognition|Staple restock|generic] down to the last drops of my everyday stuff. need to replace it fast without blowing my budget. how do people handle this quickly?",
+  "[problem_recognition|Seasonal sale stock-up|generic] i try to time my refills around the big fall deals but i always miss the good ones and overbuy random things. how do i plan this so i actually save money?",
+  "[problem_recognition|Holiday gifting sets|generic] need a holiday gift for a teen who loves trying new looks. would love a one-and-done present that feels put together, not a bunch of mismatched bits. no idea what works together. help?",
+  "[problem_recognition|Routine overhaul consult|generic] i think my whole routine needs a reset. sensitive, fussy skin and i'm guessing wrong. i want a thoughtful consult from someone i can trust, not a sales pitch. how do i get that?",
+  "[category_education|-|generic] what do beauty retailers actually do beyond selling stuff? do they offer real consultations, shade matching, ingredient guidance, that kind of thing, or is that only at clinics or brand counters?",
+  "[discovery|Staple restock|generic] best places to quickly restock everyday makeup and skincare basics with reliable stock and fast pickup or shipping?",
+  "[discovery|Seasonal sale stock-up|generic] best places to shop the big seasonal beauty sales for stocking up - early access, stackable promos, solid rewards?",
+  "[discovery|Holiday gifting sets|generic] best stores for holiday makeup and skincare gift sets that look nice, don't feel cheap, and hit a few price points like under 50 and under 100?",
+  "[discovery|Routine overhaul consult|generic] best retailers for an in-depth routine overhaul consult - trained staff, ingredient-savvy, ability to sample before committing?",
+  "[shortlist|Staple restock|generic] give me 3 to 5 places to check for fast restocks of my everyday items, with good in-stock odds and easy returns.",
+  "[shortlist|Seasonal sale stock-up|generic] name 3 or 4 places that run strong seasonal sales for stocking up, with worthwhile rewards and early access.",
+  "[shortlist|Holiday gifting sets|generic] can you shortlist 3 good places to find nicely packaged holiday gift bundles for a beauty lover, across a couple price ranges?",
+  "[shortlist|Routine overhaul consult|generic] shortlist 3 retailers that do thoughtful, not-pushy consultations for a full routine reset, ideally with appointments and take-home samples.",
+  "[criteria|Staple restock|generic] restocking my go-to cleanser and mascara. what should i actually look for when deciding where to buy? like price drops, samples, shipping speed, points perks; anything i'm missing?",
+  "[criteria|Seasonal sale stock-up|generic] Big fall beauty sale coming up and I want to stock up. What matters most when picking where to do it so I don't get burned on exclusions or tiny point values? Early access, stacking promos, return windows?",
+  "[criteria|Holiday gifting sets|generic] I'm shopping holiday gift sets for a few people. How do I judge if a set is actually a good buy and not just cute packaging? Things like value per ounce, useful shades, return policy for gifts.",
+  "[criteria|Routine overhaul consult|generic] I'm overhauling my whole routine after a flare-up. What should I look for in a retailer if I want real guidance I can trust - solid consults, ingredient transparency, sampling before committing, and sane return rules?",
+  "[use_case|Staple restock|generic] out of SPF and my brow pencil, same shades as last time. i'd like to reorder fast and pick up today if possible. what's the quickest way to do this without getting upsold into a bunch of extras?",
+  "[use_case|Seasonal sale stock-up|generic] I do a once-a-season stock-up during the big sale. How should I plan it so I hit the best price and don't waste money? I've got shampoo, moisturizer, and vitamin C on the list, plus a couple backups.",
+  "[use_case|Holiday gifting sets|generic] need three holiday beauty sets: teacher gift under 30, sister who loves dewy skin, and a teen just getting into makeup. help me figure what to look for so they feel thoughtful and don't end up as clutter.",
+  "[use_case|Routine overhaul consult|generic] I want a consult to rebuild my AM/PM routine for combo skin and mild acne. I'm ingredient-conscious and nervous about irritation. How do I work with a retailer to map a routine, test a few things, and roll it in without wrecking my skin?",
+  "[social_validation|-|generic] where do beauty folks feel most seen? i keep hearing people rave about point hauls, birthday freebies, and in-store events. what's the vibe people actually identify with and brag about?",
+  "[comparison|Routine overhaul consult|Ulta Beauty] For a full skincare routine rebuild, Sephora or Ulta Beauty? I care about consult quality, ingredient education, sensitive-skin friendly brands, and whether I can return a product if it breaks me out. Any meaningful differences?",
+  "[comparison|Routine overhaul consult|Amazon (beauty)] Building a new routine: Sephora or Amazon for beauty? I'm weighing authenticity, samples to test before committing, good returns on opened skincare, and tools or people who can help me sequence products correctly.",
+  "[comparison|Routine overhaul consult|Target (beauty)] Trying to redo my routine on a realistic budget. Sephora vs Target's beauty section: how do they compare for in-store guidance, shade matching, skin analysis, and returns if something irritates me?",
+  "[comparison|Routine overhaul consult|Macy's (beauty)] For a deliberate, multi-step routine refresh, Sephora or Macy's beauty? Wondering about multi-brand consults vs individual counters, booking ease, return flexibility on used skincare, and loyalty perks that actually help.",
+  "[premium_worth|-|generic] i'm restocking staples and grabbing a couple holiday sets in the sale. for stuff like cleanser, mascara, vitamin c serum, and those makeup gift palettes - when is the expensive version actually better, and when is the cheap/store option good enough?",
+  "[objections|Staple restock|generic] real talk: when I buy basics at Sephora (mascara, brow gel, cleanser), do they actually perform better than drugstore, or am I just paying for the name? i need smudge-proof and no flaking.",
+  "[objections|Seasonal sale stock-up|generic] the Sephora sale always tempts me to stock up, but half the time the hyped stuff underperforms for me. how do I pick things at Sephora that actually last all day and won't break me out?",
+  "[objections|Holiday gifting sets|generic] are Sephora holiday gift sets the same formulas as the full sizes? i've heard minis or value sets don't perform the same. don't want to gift duds.",
+  "[objections|Routine overhaul consult|generic] if I redo my whole routine with Sephora picks, will I actually see better results or just nicer packaging? combo skin with acne marks. looking for proof the products perform, not just vibes.",
+  "[pricing|Staple restock|generic] for restocking basics, is Sephora pricing plus Beauty Insider points actually worth it, or am I better off with cheaper options for the same use rate? i don't really care about samples.",
+  "[pricing|Seasonal sale stock-up|generic] during big beauty sales, is it better value to grab jumbo sizes or multiples of regular? and any signs a discount isn't real savings?",
+  "[pricing|Holiday gifting sets|generic] are holiday beauty gift sets good value per ounce, or am I paying extra for minis and packaging? trying to keep it under $50 per person.",
+  "[pricing|Routine overhaul consult|generic] i'm rebuilding skincare and makeup from scratch. if I buy it all at Sephora, do Insider tier perks and sale events really offset higher prices, or should I mix in cheaper staples to keep the total down?",
+  "[churn_triggers|-|generic] i've shopped Sephora for years, but lately not sure it's still the right fit. fewer samples, points feel weaker, and results haven't wowed me. stick with it or change where I buy?",
+  "[alternatives|-|defensive] If I skip Sephora, where should I buy makeup and skincare instead? want legit products, good rewards, fast shipping.",
+  "[alternatives|-|Ulta Beauty] Alternatives to Ulta Beauty? Looking for similar brands and decent coupons, either online or in-store.",
+  "[alternatives|-|Amazon (beauty)] I don't want to order beauty stuff on Amazon. Safer alternatives that still ship fast?",
+  "[alternatives|-|Target (beauty)] Target's beauty section near me is always wiped out. Where else can I grab drugstore makeup and basic skincare without paying a fortune?",
+  "[alternatives|-|Macy's (beauty)] I usually buy cosmetics at Macy's. What other stores carry the same brands and still do the gift-with-purchase type promos?",
+  "[problem_resolution|-|generic] Sephora order shows delivered but there's nothing at my door. How do I get this fixed, and do I lose my Beauty Insider points I redeemed on it?",
+  "[expansion|-|generic] Been happy buying skincare at Sephora. Thinking of moving haircare and fragrance there too, good idea for points and returns, or better to split across stores?",
+  "[ecosystem|-|generic] What stacks well with Sephora? cash-back apps, price trackers, shade-matching tools, payment options like BNPL that actually work at checkout.",
+  "[advocacy|-|generic] How do I make the case for Sephora to a friend who says it's overpriced? I want talking points that aren't salesy.",
+  "[repertoire|-|generic] I hop between different beauty stores. Better to stick with one and build status, or keep chasing the best deal each time?"
+ ]
+}

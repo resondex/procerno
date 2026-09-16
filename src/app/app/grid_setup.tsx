@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, type ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 
 /**
  * Buyer Landscape setup pieces: the state shape, the gate API calls, and
@@ -147,6 +147,12 @@ export interface GridStage {
   hint?: string;
   /** Why the rules recommend or skip it for this market - shown on hover. */
   why?: string;
+}
+
+/** Client mirror of the engine's ScenarioFit advisory. */
+interface ScenarioFitUi {
+  offPortfolio: { label: string; reason: string }[];
+  missingCore: { label: string; description: string; reason: string } | null;
 }
 
 export interface ScenarioRow {
@@ -1206,7 +1212,7 @@ function TagChip({ tag }: { tag: GridStage["tag"] }) {
  * description, and the journey. Nothing else competes for the screen. */
 export function ScenariosGate({
   state, setState, onRecompose, onRecomposeBase, onSuggestScenario, onNearScenario, onWarmReview, busy,
-  maxScenarios = MAX_SCENARIOS, readDelta,
+  maxScenarios = MAX_SCENARIOS, readDelta, fitBrand, fitCategory,
 }: {
   state: GridState;
   setState: (s: GridState) => void;
@@ -1225,8 +1231,13 @@ export function ScenariosGate({
   maxScenarios?: number;
   /** What the last base-read edit changed downstream, or null. */
   readDelta?: string | null;
+  /** Brand + category for the portfolio-fit advisory; omit to disable. */
+  fitBrand?: string;
+  fitCategory?: string;
 }) {
   const [editRead, setEditRead] = useState(false);
+  const [fit, setFit] = useState<ScenarioFitUi | null>(null);
+  const [fitDismissed, setFitDismissed] = useState(false);
   const cap = maxScenarios;
   const rows = scenarioRows(state);
   const active = rows.filter((r) => r.on);
@@ -1252,6 +1263,48 @@ export function ScenariosGate({
       patch.label !== undefined ? rebindSituation(state.cells, rows[i].label, patch.label) : undefined;
     setRows(rows.map((r, j) => (j === i ? { ...r, ...patch } : r)), recompose, cells);
   };
+
+  // Portfolio-fit advisory: the read is brand-blind by design (shared per
+  // category), so a multi-product brand can be handed a scenario it can't
+  // win or miss its core line. Advice only - fetched cache-first, silent
+  // on failure, re-fetched when the active set's wording changes.
+  const fitFp = active.map((r) => `${r.label.trim()}|${r.description.trim()}`).join("~");
+  useEffect(() => {
+    if (!fitBrand || !fitCategory || active.length === 0) return;
+    let stale = false;
+    fetch("/api/setup/grid/scenario_fit", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        brand: fitBrand,
+        category: fitCategory,
+        scenarios: active.map((r) => ({ label: r.label, description: r.description })),
+      }),
+      signal: AbortSignal.timeout(60_000),
+    })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => {
+        if (!stale && d?.fit) setFit(d.fit as ScenarioFitUi);
+      })
+      .catch(() => {});
+    return () => {
+      stale = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [fitBrand, fitCategory, fitFp]);
+  const fitFlags = fit
+    ? [
+        ...fit.offPortfolio.filter((f) =>
+          active.some((r) => r.label.trim().toLowerCase() === f.label.trim().toLowerCase())
+        ),
+      ]
+    : [];
+  const fitMissing =
+    fit?.missingCore &&
+    !rows.some((r) => r.label.trim().toLowerCase() === fit.missingCore!.label.trim().toLowerCase())
+      ? fit.missingCore
+      : null;
+  const showFit = !fitDismissed && (fitFlags.length > 0 || fitMissing !== null);
 
   return (
     <div className="grid gap-3 max-w-4xl">
@@ -1308,6 +1361,57 @@ export function ScenariosGate({
         Tick the scenarios worth measuring - each becomes a column of your
         Landscape.
       </p>
+      {showFit && (
+        <div className="rounded-lg border border-amber-300/60 bg-amber-50 p-3 text-[12px] text-amber-900 grid gap-1.5 dark:bg-amber-950/30 dark:text-amber-200 dark:border-amber-700/50">
+          <div className="flex items-start justify-between gap-2">
+            <span className="font-semibold">
+              Worth a look before you confirm
+            </span>
+            <button
+              type="button"
+              onClick={() => setFitDismissed(true)}
+              aria-label="Dismiss"
+              className="leading-none opacity-60 hover:opacity-100"
+            >
+              ×
+            </button>
+          </div>
+          {fitFlags.map((f) => (
+            <p key={f.label} className="m-0">
+              <span className="font-medium">{f.label}:</span> {f.reason} Untick
+              it, or swap it for a scenario {fitBrand} can win.
+            </p>
+          ))}
+          {fitMissing && (
+            <p className="m-0">
+              <span className="font-medium">Nothing covers {fitMissing.label.toLowerCase()}:</span>{" "}
+              {fitMissing.reason}{" "}
+              <button
+                type="button"
+                disabled={busy || active.length >= cap}
+                onClick={() =>
+                  setRows(
+                    [
+                      ...rows,
+                      {
+                        label: fitMissing.label,
+                        description: fitMissing.description,
+                        journey: null,
+                        suggested: true,
+                        on: true,
+                      },
+                    ],
+                    true
+                  )
+                }
+                className="font-semibold text-primary hover:opacity-80 disabled:opacity-40"
+              >
+                Add it
+              </button>
+            </p>
+          )}
+        </div>
+      )}
       <HowItWorks>
         <p className="m-0">
           A scenario is a circumstance that changes the right answer. The

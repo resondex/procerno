@@ -1,0 +1,227 @@
+{
+ "brand": "Google Pixel",
+ "category": "Android smartphones",
+ "audience": "Android-focused smartphone buyers",
+ "competitors": [
+  "Apple (iPhone)",
+  "Samsung (Galaxy)",
+  "OnePlus",
+  "Xiaomi (Mi/Redmi)",
+  "Motorola (Moto)"
+ ],
+ "capturedAt": "2026-09-16",
+ "reviewedBy": "Claude (walk review 2026-09-15); not yet reviewed by Tyler",
+ "base": {
+  "verifiability": "spec",
+  "involvement": "considered",
+  "think_feel": "think",
+  "decision_unit": "solo",
+  "rhythm": "one_shot",
+  "risk": "performance",
+  "channel_retail": true,
+  "rationale": "I want the best Android phone for my budget that will last, run fast, take great photos, and work reliably with my carrier and apps."
+ },
+ "scenarios": [
+  {
+   "label": "Carrier upgrade cycle",
+   "description": "Individual renewing a line through a carrier with trade-in and financing options.",
+   "deviates": false
+  },
+  {
+   "label": "Family plan renewal",
+   "description": "Household choosing multiple Android phones together to optimize shared discounts and mixed needs.",
+   "deviates": true
+  },
+  {
+   "label": "Premium flagship buy",
+   "description": "Buyer seeking top-tier Android performance, cameras, and longevity at a high price point.",
+   "deviates": false
+  },
+  {
+   "label": "Midrange value unlocked",
+   "description": "Price-savvy shopper comparing unlocked midrange models for best specs and software support per dollar.",
+   "deviates": false
+  }
+ ],
+ "stages": [
+  {
+   "key": "problem_recognition",
+   "label": "Problem recognition",
+   "recommended": true
+  },
+  {
+   "key": "category_education",
+   "label": "Category education",
+   "recommended": true
+  },
+  {
+   "key": "discovery",
+   "label": "Discovery",
+   "recommended": true
+  },
+  {
+   "key": "shortlist",
+   "label": "Shortlist",
+   "recommended": true
+  },
+  {
+   "key": "criteria",
+   "label": "Criteria formation",
+   "recommended": true
+  },
+  {
+   "key": "feature_screening",
+   "label": "Feature screening",
+   "recommended": true
+  },
+  {
+   "key": "use_case",
+   "label": "Use-case fit",
+   "recommended": true
+  },
+  {
+   "key": "social_validation",
+   "label": "Social validation",
+   "recommended": true
+  },
+  {
+   "key": "comparison",
+   "label": "Comparison",
+   "recommended": true
+  },
+  {
+   "key": "premium_worth",
+   "label": "Premium vs. basic brands",
+   "recommended": false
+  },
+  {
+   "key": "objections",
+   "label": "Objections / risk",
+   "recommended": true
+  },
+  {
+   "key": "pricing",
+   "label": "Pricing / value",
+   "recommended": true
+  },
+  {
+   "key": "business_case",
+   "label": "Business case",
+   "recommended": false
+  },
+  {
+   "key": "churn_triggers",
+   "label": "Churn triggers",
+   "recommended": true
+  },
+  {
+   "key": "alternatives",
+   "label": "Alternatives",
+   "recommended": true
+  },
+  {
+   "key": "renewal",
+   "label": "Renewal",
+   "recommended": false
+  },
+  {
+   "key": "problem_resolution",
+   "label": "Problem resolution",
+   "recommended": true
+  },
+  {
+   "key": "expansion",
+   "label": "Expansion",
+   "recommended": true
+  },
+  {
+   "key": "ecosystem",
+   "label": "Ecosystem",
+   "recommended": true
+  },
+  {
+   "key": "advocacy",
+   "label": "Advocacy",
+   "recommended": true
+  },
+  {
+   "key": "repertoire",
+   "label": "Repertoire",
+   "recommended": false
+  }
+ ],
+ "cells": {
+  "count": 48,
+  "blind": 34,
+  "branded": 14,
+  "byStage": {
+   "problem_recognition": 4,
+   "category_education": 1,
+   "discovery": 4,
+   "shortlist": 4,
+   "criteria": 4,
+   "feature_screening": 4,
+   "use_case": 4,
+   "social_validation": 1,
+   "comparison": 4,
+   "objections": 4,
+   "pricing": 4,
+   "churn_triggers": 1,
+   "alternatives": 5,
+   "problem_resolution": 1,
+   "expansion": 1,
+   "ecosystem": 1,
+   "advocacy": 1
+  }
+ },
+ "cellTexts": [
+  "[problem_recognition|Carrier upgrade cycle|generic] my carrier says I'm up for an upgrade. this thing barely makes it to dinner, pics are mushy, and it freezes when I open maps. how do I fix this mess?",
+  "[problem_recognition|Family plan renewal|generic] Renewing a family plan and trying to be methodical. 4 lines. Current devices are laggy, storage warnings nonstop, and cracked screens. We need better battery life, solid cameras for school events, clear calls, and long security updates. What specs should I prioritize so we don't replace these in 2 years?",
+  "[problem_recognition|Premium flagship buy|generic] I want something truly high-end. My current unit stutters, low light shots look like watercolor, and the screen is too dim outside. I'm after blazing speed, a super bright display, steady video, and years of updates. What should top tier actually mean right now?",
+  "[problem_recognition|Midrange value unlocked|generic] Going unlocked for an MVNO, budget about 400. Need all-day battery, a camera that doesn't smear faces, NFC, decent haptics, and clean software with multi-year updates. Is that realistic at this price?",
+  "[category_education|-|generic] What does an Android smartphone actually do, and how is it different from other kinds of phones?",
+  "[discovery|Carrier upgrade cycle|generic] best Android phones to use a carrier upgrade on right now? priorities: great battery, point-and-shoot camera for kids/pets, not huge, and under 30 a month if possible.",
+  "[discovery|Family plan renewal|generic] Family plan renewal: which Android models are best for 4 lines if we care about 128 GB+, strong reception and Wi-Fi calling, durable build, good low-light photos, and at least 5 years of security updates?",
+  "[discovery|Premium flagship buy|generic] What are the best Android flagships this year for camera quality, a bright 120 Hz screen, fast performance, and useful on-device AI features? Price is secondary.",
+  "[discovery|Midrange value unlocked|generic] Best unlocked Android around 350-500: clean software, long updates, reliable battery, decent ultrawide, and works on US carriers including MVNOs. What should I look at?",
+  "[shortlist|Carrier upgrade cycle|generic] Give me 3-5 Android phones worth using an upgrade on: strong battery, great camera, not a brick.",
+  "[shortlist|Family plan renewal|generic] For a careful family plan renewal, shortlist 4 Android models that are durable, 128 GB or more, good cameras, Wi-Fi calling, at least 5 years of security support, and under 800 each.",
+  "[shortlist|Premium flagship buy|generic] Shortlist the top 3 Android flagships to consider for camera and display quality plus long software support.",
+  "[shortlist|Midrange value unlocked|generic] Give me 3-5 unlocked Android options around 400, with clean software, good battery, and 3+ years of updates.",
+  "[criteria|Carrier upgrade cycle|generic] upgrade time on my line. sticking with android. what should I actually prioritize this year so I don't regret it later? cameras vs battery vs update policy vs 5g bands, anything people overlook?",
+  "[criteria|Family plan renewal|generic] renewing a family plan with 4 lines soon. want to decide by specs, not hype. what should I compare across models (chip, ram/storage, camera system, battery/charging, update window, 5g bands, wifi version, durability) for mixed ages?",
+  "[criteria|Premium flagship buy|generic] shopping top-end android. beyond camera and screen buzz, what really separates true flagships right now? thinking longevity, ai features, thermal performance, usb speeds, uwb, satellite, haptics, call quality.",
+  "[criteria|Midrange value unlocked|generic] looking for best value unlocked midrange around $300-$500. which trade-offs matter most and which specs move the needle (display/refresh, main sensor size, chipset tier, battery + charging, update years, ip rating, storage expandability)?",
+  "[feature_screening|Carrier upgrade cycle|generic] Which current Android phones sold by carriers support dual eSIM (DSDS) and Wi-Fi calling, with solid sub-6 and mmWave coverage?",
+  "[feature_screening|Family plan renewal|generic] For a family setup, which Android models offer at least 5 years of security updates and built-in parental controls with per-app time limits and location sharing?",
+  "[feature_screening|Premium flagship buy|generic] Which current flagships have LTPO OLED that does 120 Hz at QHD, peak brightness over 2000 nits, a 5x (or longer) periscope, and USB 3 or better?",
+  "[feature_screening|Midrange value unlocked|generic] Unlocked midrange around $400: which phones include wireless charging and an IP rating, plus a genuinely good main camera and 2-day battery?",
+  "[use_case|Carrier upgrade cycle|generic] I drive through a lot of rural dead zones. need an Android that holds calls well, strong low-band 5g, loud clear earpiece, and all-day battery. what should I get on upgrade?",
+  "[use_case|Family plan renewal|generic] Renewing a family plan: 4 Androids. two for kids (durable, great parental controls), one for a parent who shoots lots of photos/videos, one for a senior who needs loud speaker, big text, and easy SOS. what mix would you suggest without overspending?",
+  "[use_case|Premium flagship buy|generic] I travel a lot and shoot 4K60, edit RAW on the phone, and tether a laptop. need top-tier cameras with reliable HDR, good stabilization, big storage options, fast USB for offloading, and broad international 5g bands. which flagship fits?",
+  "[use_case|Midrange value unlocked|generic] Need an unlocked Android under $350 for a college student: long battery, clean UI, decent night photos, NFC for transit, and at least 3 years of updates. what should I be looking at?",
+  "[social_validation|-|generic] Which Android phones are owners actually happiest with right now? looking for models that rate high with users over time, few common issues, and strong community feedback - not just launch-day reviews.",
+  "[comparison|Carrier upgrade cycle|Apple (iPhone)] Eligible for a carrier upgrade. If I switch to iPhone or stick with Google Pixel, which is the smarter move for someone living in Gmail, Photos, and Maps? Thinking camera, battery life, eSIM, and messaging quirks on a 36-month plan.",
+  "[comparison|Family plan renewal|Samsung (Galaxy)] Family plan renewal time. Can you lay out a spec-by-spec on Google Pixel 8 Pro vs Samsung Galaxy S24+ for a shared plan: years of OS and security support, modem and 5G bands, battery life on 5G, Wi-Fi 7, repair costs, and storage speeds? I want the more future proof pick.",
+  "[comparison|Premium flagship buy|OnePlus] Going unlocked and premium. Google Pixel 8 Pro vs OnePlus 12: which actually feels faster day to day, how do cameras compare in low light and video, any thermal throttling, and how long are updates guaranteed?",
+  "[comparison|Midrange value unlocked|Xiaomi (Mi/Redmi)] Shopping midrange unlocked: Google Pixel 8a vs Xiaomi Redmi Note 13 Pro - how do they stack up for US 5G bands, update policy, camera quality, performance, battery life, and any ads or bloat in the UI?",
+  "[objections|Carrier upgrade cycle|generic] About to use my carrier upgrade but I'm wary: do recent Google Pixel phones still lag or get hot under load? I don't want stutters a year in.",
+  "[objections|Family plan renewal|generic] We're renewing a family plan and want one model across the board. Is Google Pixel performance stable over 3 years - throttling, gaming for teens, camera processing time, and 5G impact on heat?",
+  "[objections|Premium flagship buy|generic] If I'm paying flagship money, I can't deal with jank. Be honest: do the newest Google Pixel models have any lag or overheating when shooting long 4K video or multitasking?",
+  "[objections|Midrange value unlocked|generic] Looking at a midrange unlock, probably the a-series. Will a Google Pixel feel slow in a year or two with maps, podcasts, photos, and occasional gaming, or is the chip strong enough?",
+  "[pricing|Carrier upgrade cycle|generic] On a carrier upgrade, is it usually cheaper to finance the phone for 36 months or buy it outright and keep my current plan? How do trade-in credits and early payoff penalties actually work if I might switch next year?",
+  "[pricing|Family plan renewal|generic] For a 4-line renewal, assume we pick Google Pixel across all lines. Can you estimate total cost of ownership over 36 months - device payments, promos and credits timing, insurance, taxes, and likely resale - so I can compare per-line cost?",
+  "[pricing|Premium flagship buy|generic] Trying to price out a premium. Is a Google Pixel Pro good value at MSRP or should I wait for seasonal deals? I want 256 GB and device protection - what's the realistic out-the-door and 12-month depreciation?",
+  "[pricing|Midrange value unlocked|generic] Unlocked midrange around 400: better to buy new or refurb? Factor in warranty, battery health, import fees, and band compatibility for US carriers - at what point do the savings stop making sense?",
+  "[churn_triggers|-|generic] Long-time Google Pixel user here (since the 3). Lately I'm wondering if I should stick with Pixel for my next upgrade. Are the cameras, updates, and day-to-day performance still a strong reason to stay, or has anything slipped?",
+  "[alternatives|-|defensive] If I skip Google Pixel, what Android phones should I look at instead? I care most about camera quality and long software support.",
+  "[alternatives|-|Apple (iPhone)] Not getting an iPhone. What are the best alternatives that are easy to use, great camera, and get updates for years?",
+  "[alternatives|-|Samsung (Galaxy)] Galaxy S alternatives? I want Android phones without heavy skins, strong battery life, and a good camera.",
+  "[alternatives|-|OnePlus] what should i look at instead of oneplus this year? want fast performance, smooth android, and a solid main camera.",
+  "[alternatives|-|Xiaomi (Mi/Redmi)] Alternatives to Xiaomi/Redmi in the same price range as the Note series, ideally with good global 5G bands and less bloat?",
+  "[problem_resolution|-|generic] Now Playing on my lock screen stopped recognizing songs. I tried toggling it off and on and rebooting. Any other fixes, or do I need to retrain it?",
+  "[expansion|-|generic] Really happy with the clean Android on my phone. Thinking of getting the same line for my parents too. Anything to watch for with setup, data transfer, and ongoing updates?",
+  "[ecosystem|-|generic] What accessories pair best with a clean-Android phone? looking for a reliable 30W+ USB-C charger, a sturdy car mount that works with wireless charging, and earbuds with rock solid multipoint.",
+  "[advocacy|-|generic] I've been on Google Pixel for a while and it's been solid. How do I make the case for it to a skeptical friend without sounding preachy?"
+ ]
+}

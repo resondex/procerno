@@ -1050,6 +1050,120 @@ export async function reviewScenarios(input: {
   return verdicts;
 }
 
+export interface ScenarioFit {
+  /** Scenarios that fall OUTSIDE what the brand actually sells - a
+   * category-level scenario the client can never win (Nest asked about
+   * robot vacuums). Advisory only; the user decides. */
+  offPortfolio: { label: string; reason: string }[];
+  /** A core product line of the brand with NO scenario covering it
+   * (Nest's thermostats), phrased as a suggested scenario; null if the
+   * set covers the portfolio. */
+  missingCore: { label: string; description: string; reason: string } | null;
+}
+
+const SCENARIO_FIT_SCHEMA = {
+  type: "object",
+  additionalProperties: false,
+  properties: {
+    off_portfolio: {
+      type: "array",
+      items: {
+        type: "object",
+        additionalProperties: false,
+        properties: {
+          label: { type: "string" },
+          reason: { type: "string" },
+        },
+        required: ["label", "reason"],
+      },
+    },
+    missing_core: {
+      type: ["object", "null"],
+      additionalProperties: false,
+      properties: {
+        label: { type: "string" },
+        description: { type: "string" },
+        reason: { type: "string" },
+      },
+      required: ["label", "description", "reason"],
+    },
+  },
+  required: ["off_portfolio", "missing_core"],
+} as const;
+
+/**
+ * Portfolio-fit advisory over the composed scenarios. The market read is
+ * deliberately brand-blind (keyed on category+audience so tenants share
+ * it), which means a multi-product brand can be handed a category-true
+ * scenario it can never win, or miss its core line entirely. This check
+ * layers brand knowledge ON TOP of the shared read - it never changes
+ * the scenarios, it only advises.
+ */
+export async function reviewScenarioFit(input: {
+  brand: string;
+  category: string;
+  scenarios: Situation[];
+  meta?: CacheMeta;
+}): Promise<ScenarioFit> {
+  const empty: ScenarioFit = { offPortfolio: [], missingCore: null };
+  if (input.scenarios.length === 0) return empty;
+  const key = cacheKey("scenario_fit1", [
+    input.brand, input.category,
+    input.scenarios.map((s) => `${s.label.trim()}|${s.description.trim()}`).join("~"),
+  ]);
+  const hit = await store.cacheGet(key, CACHE_TTL_MS);
+  if (hit) return JSON.parse(hit) as ScenarioFit;
+  const res = await openaiClient().chat.completions.create({
+    model: MODEL,
+    reasoning_effort: "low",
+    messages: [
+      {
+        role: "system",
+        content:
+          "You check whether buying scenarios fit a specific brand's actual " +
+          "product portfolio. The scenarios were written for the CATEGORY; " +
+          "the brand may sell only part of it.\n" +
+          "- off_portfolio: scenarios centered on a product type the brand " +
+          "does not sell at all (the brand cannot win that buyer). Only " +
+          "flag a clear mismatch - a scenario the brand serves indirectly " +
+          "or partially is FINE. reason: one plain sentence.\n" +
+          "- missing_core: if one of the brand's flagship product lines has " +
+          "NO scenario, propose one (label 2-4 plain words, description one " +
+          "short sentence in buyer language); else null. At most one.\n" +
+          "Be conservative: an empty off_portfolio and null missing_core is " +
+          "the common, correct answer for single-line brands.",
+      },
+      {
+        role: "user",
+        content: JSON.stringify({
+          brand: input.brand,
+          category: input.category,
+          scenarios: input.scenarios.map((s) => ({ label: s.label, description: s.description })),
+        }),
+      },
+    ],
+    response_format: {
+      type: "json_schema",
+      json_schema: { name: "scenario_fit", strict: true, schema: SCENARIO_FIT_SCHEMA },
+    },
+  });
+  const parsed = JSON.parse(res.choices[0]?.message?.content ?? "{}") as {
+    off_portfolio?: { label: string; reason: string }[];
+    missing_core?: { label: string; description: string; reason: string } | null;
+  };
+  const labels = new Set(input.scenarios.map((s) => s.label.trim().toLowerCase()));
+  const fit: ScenarioFit = {
+    // Only flags that name a real scenario survive - a hallucinated label
+    // would render as advice about nothing.
+    offPortfolio: (parsed.off_portfolio ?? []).filter((f) =>
+      labels.has((f.label ?? "").trim().toLowerCase())
+    ),
+    missingCore: parsed.missing_core ?? null,
+  };
+  await store.cacheSet(key, JSON.stringify(fit), stampOf(input));
+  return fit;
+}
+
 /** Why a prompt edit was flagged: drift, brand design, or coherence. */
 export type CellFlag = "target" | "branding" | "unclear";
 
@@ -1755,6 +1869,12 @@ export interface Phrasing {
 const PHRASINGS_VERSION = "p7";
 // Over-generate so the overlap filter can be strict and still fill the set.
 const PHRASINGS_EXTRA = 3;
+/** Blind cells get a wider first-pass margin: with no brand tokens to
+ * exempt, a narrow-vocabulary blind ask (beauty retail's "where should I
+ * shop for makeup", detergent's "best detergent") loses more candidates
+ * to the overlap filter - Sephora and Tide both ran short ONLY on blind
+ * picks-a-brand stages. Output tokens are the cheap side of the call. */
+const PHRASINGS_EXTRA_BLIND = 5;
 /** The retry's wider margin: a cell that came up short is fighting the
  * overlap filter, so give it more candidates to survive it. */
 const PHRASINGS_EXTRA_RETRY = 6;
@@ -1871,7 +1991,11 @@ export async function generatePhrasings(input: {
       avoidWords?: string[][];
     }
   ): Promise<Phrasing[][]> {
-    const extra = opts?.extra ?? PHRASINGS_EXTRA;
+    const extra =
+      opts?.extra ??
+      (subset.some((c) => brandSignature(c.text, input.brand, rivals) === "")
+        ? PHRASINGS_EXTRA_BLIND
+        : PHRASINGS_EXTRA);
     const cellText = subset
       .map(
         (c, i) =>
