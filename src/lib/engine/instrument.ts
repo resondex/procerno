@@ -542,9 +542,10 @@ export async function readScenarios(input: {
   noWait?: boolean;
   meta?: CacheMeta;
 }): Promise<{ base: Moderators; scenarios: ScenarioSpec[]; reserve: ScenarioSpec[] } | null> {
-  // "scenarios_journeys9": occasion-frequency weighting in the coverage
-  // audit + the optional brand-aware mode changed the read.
-  const key = cacheKey("scenarios_journeys9", [
+  // "scenarios_journeys10": v9 minus the occasion-frequency weighting
+  // (A/B vs v9); the brand-aware forBrand mode stays. v10 category-read
+  // prompt matches v8 exactly, so v8-vs-v10 diffs are pure re-roll noise.
+  const key = cacheKey("scenarios_journeys10", [
     input.category, input.audience, input.forBrand ?? "",
   ]);
   const read = await coalesced<{
@@ -610,12 +611,9 @@ export async function readScenarios(input: {
           "never a template for content, and never a template for SHAPE: " +
           "your market's rooms are its own.\n" +
           "Before returning, audit the core four for coverage: rank this " +
-          "market's buying rooms by how much revenue moves through them " +
-          "AND how often buyers are in them - a flagship, frequently " +
-          "bought occasion outranks a niche corner of the category, " +
-          "however real the corner is. Ensure a diverse sampling and " +
-          "check none of the biggest rooms is missing. In categories " +
-          "sold to organizations, the " +
+          "market's buying rooms by how much revenue moves through them, " +
+          "ensuring a diverse sampling, and check none of the biggest is " +
+          "missing. In categories sold to organizations, the " +
           "large-organization purchase is almost always one of them; if a " +
           "top room is absent it replaces the weakest scenario in the " +
           "core set. If the market genuinely has a second decision " +

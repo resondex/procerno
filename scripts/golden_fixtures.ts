@@ -100,7 +100,8 @@ async function build(entry: (typeof ROSTER)[number]): Promise<Fixture> {
     audience: entry.audience,
     competitors: entry.competitors,
     capturedAt: new Date().toISOString().slice(0, 10),
-    reviewedBy: "Claude (walk review 2026-09-15); not yet reviewed by Tyler",
+    reviewedBy:
+      "Claude via the v8/v9/v10 three-way diff, presented to Tyler 2026-09-16; not independently reviewed by Tyler",
     base: composed.base as unknown as Record<string, unknown>,
     scenarios: composed.scenarios.map((s) => ({
       label: s.label,
@@ -150,10 +151,27 @@ async function main() {
   }
   mkdirSync(DIR, { recursive: true });
   let drifted = 0;
+  let failed = 0;
   for (const entry of ROSTER) {
     const file = join(DIR, `${slug(entry.brand)}.json`);
     process.stdout.write(`${entry.brand} … `);
-    const fresh = await build(entry);
+    // The shared Postgres connection can reset (ECONNRESET) while a slow
+    // OpenAI call holds it idle; postgres.js reopens on the next query,
+    // so one retry recovers - and one brand's failure must not kill the
+    // remaining roster (it silently truncated two runs).
+    let fresh: Fixture;
+    try {
+      fresh = await build(entry);
+    } catch (err) {
+      console.log(`retrying (${(err as Error).message}) … `);
+      try {
+        fresh = await build(entry);
+      } catch (err2) {
+        console.log(`FAILED: ${(err2 as Error).message}`);
+        failed++;
+        continue;
+      }
+    }
     if (mode === "capture") {
       writeFileSync(file, JSON.stringify(fresh, null, 1));
       console.log(`captured (${fresh.cells.count} cells, ${fresh.cells.blind} blind)`);
@@ -173,11 +191,12 @@ async function main() {
       }
     }
   }
+  if (failed > 0) console.log(`\n${failed} brand(s) FAILED - rerun capture.`);
   if (mode === "diff") {
     console.log(drifted === 0 ? "\nAll fixtures unchanged." : `\n${drifted} brand(s) drifted - review above.`);
-    process.exit(drifted === 0 ? 0 : 2);
+    process.exit(failed > 0 ? 3 : drifted === 0 ? 0 : 2);
   }
-  process.exit(0);
+  process.exit(failed > 0 ? 3 : 0);
 }
 
 void main();

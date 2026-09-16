@@ -10,36 +10,36 @@
   "Motorola (Moto)"
  ],
  "capturedAt": "2026-09-16",
- "reviewedBy": "Claude (walk review 2026-09-15); not yet reviewed by Tyler",
+ "reviewedBy": "Claude via the v8/v9/v10 three-way diff, presented to Tyler 2026-09-16; not independently reviewed by Tyler",
  "base": {
   "verifiability": "spec",
   "involvement": "considered",
   "think_feel": "think",
   "decision_unit": "solo",
-  "rhythm": "one_shot",
+  "rhythm": "replenishment",
   "risk": "performance",
   "channel_retail": true,
-  "rationale": "I want the best Android phone for my budget that will last, run fast, take great photos, and work reliably with my carrier and apps."
+  "rationale": "I want the best Android phone I can afford that will be fast, take great photos, and last a few years on my carrier."
  },
  "scenarios": [
   {
-   "label": "Carrier upgrade cycle",
-   "description": "Individual renewing a line through a carrier with trade-in and financing options.",
+   "label": "Midrange value hunt",
+   "description": "Picking the best feature mix under a midrange budget from online and big-box options.",
    "deviates": false
   },
   {
-   "label": "Family plan renewal",
-   "description": "Household choosing multiple Android phones together to optimize shared discounts and mixed needs.",
+   "label": "Carrier upgrade deal",
+   "description": "Replacing a phone via carrier trade-in and financing tied to plan promos.",
+   "deviates": false
+  },
+  {
+   "label": "Enterprise device rollout",
+   "description": "IT standardizes an Android fleet with management, security, and support contracts.",
    "deviates": true
   },
   {
-   "label": "Premium flagship buy",
-   "description": "Buyer seeking top-tier Android performance, cameras, and longevity at a high price point.",
-   "deviates": false
-  },
-  {
-   "label": "Midrange value unlocked",
-   "description": "Price-savvy shopper comparing unlocked midrange models for best specs and software support per dollar.",
+   "label": "Flagship camera seeker",
+   "description": "Buying a premium Android for top camera, display, and long-term performance.",
    "deviates": false
   }
  ],
@@ -107,7 +107,7 @@
   {
    "key": "business_case",
    "label": "Business case",
-   "recommended": false
+   "recommended": true
   },
   {
    "key": "churn_triggers",
@@ -147,13 +147,13 @@
   {
    "key": "repertoire",
    "label": "Repertoire",
-   "recommended": false
+   "recommended": true
   }
  ],
  "cells": {
-  "count": 48,
-  "blind": 34,
-  "branded": 14,
+  "count": 50,
+  "blind": 31,
+  "branded": 19,
   "byStage": {
    "problem_recognition": 4,
    "category_education": 1,
@@ -166,62 +166,66 @@
    "comparison": 4,
    "objections": 4,
    "pricing": 4,
+   "business_case": 1,
    "churn_triggers": 1,
    "alternatives": 5,
    "problem_resolution": 1,
    "expansion": 1,
    "ecosystem": 1,
-   "advocacy": 1
+   "advocacy": 1,
+   "repertoire": 1
   }
  },
  "cellTexts": [
-  "[problem_recognition|Carrier upgrade cycle|generic] my carrier says I'm up for an upgrade. this thing barely makes it to dinner, pics are mushy, and it freezes when I open maps. how do I fix this mess?",
-  "[problem_recognition|Family plan renewal|generic] Renewing a family plan and trying to be methodical. 4 lines. Current devices are laggy, storage warnings nonstop, and cracked screens. We need better battery life, solid cameras for school events, clear calls, and long security updates. What specs should I prioritize so we don't replace these in 2 years?",
-  "[problem_recognition|Premium flagship buy|generic] I want something truly high-end. My current unit stutters, low light shots look like watercolor, and the screen is too dim outside. I'm after blazing speed, a super bright display, steady video, and years of updates. What should top tier actually mean right now?",
-  "[problem_recognition|Midrange value unlocked|generic] Going unlocked for an MVNO, budget about 400. Need all-day battery, a camera that doesn't smear faces, NFC, decent haptics, and clean software with multi-year updates. Is that realistic at this price?",
-  "[category_education|-|generic] What does an Android smartphone actually do, and how is it different from other kinds of phones?",
-  "[discovery|Carrier upgrade cycle|generic] best Android phones to use a carrier upgrade on right now? priorities: great battery, point-and-shoot camera for kids/pets, not huge, and under 30 a month if possible.",
-  "[discovery|Family plan renewal|generic] Family plan renewal: which Android models are best for 4 lines if we care about 128 GB+, strong reception and Wi-Fi calling, durable build, good low-light photos, and at least 5 years of security updates?",
-  "[discovery|Premium flagship buy|generic] What are the best Android flagships this year for camera quality, a bright 120 Hz screen, fast performance, and useful on-device AI features? Price is secondary.",
-  "[discovery|Midrange value unlocked|generic] Best unlocked Android around 350-500: clean software, long updates, reliable battery, decent ultrawide, and works on US carriers including MVNOs. What should I look at?",
-  "[shortlist|Carrier upgrade cycle|generic] Give me 3-5 Android phones worth using an upgrade on: strong battery, great camera, not a brick.",
-  "[shortlist|Family plan renewal|generic] For a careful family plan renewal, shortlist 4 Android models that are durable, 128 GB or more, good cameras, Wi-Fi calling, at least 5 years of security support, and under 800 each.",
-  "[shortlist|Premium flagship buy|generic] Shortlist the top 3 Android flagships to consider for camera and display quality plus long software support.",
-  "[shortlist|Midrange value unlocked|generic] Give me 3-5 unlocked Android options around 400, with clean software, good battery, and 3+ years of updates.",
-  "[criteria|Carrier upgrade cycle|generic] upgrade time on my line. sticking with android. what should I actually prioritize this year so I don't regret it later? cameras vs battery vs update policy vs 5g bands, anything people overlook?",
-  "[criteria|Family plan renewal|generic] renewing a family plan with 4 lines soon. want to decide by specs, not hype. what should I compare across models (chip, ram/storage, camera system, battery/charging, update window, 5g bands, wifi version, durability) for mixed ages?",
-  "[criteria|Premium flagship buy|generic] shopping top-end android. beyond camera and screen buzz, what really separates true flagships right now? thinking longevity, ai features, thermal performance, usb speeds, uwb, satellite, haptics, call quality.",
-  "[criteria|Midrange value unlocked|generic] looking for best value unlocked midrange around $300-$500. which trade-offs matter most and which specs move the needle (display/refresh, main sensor size, chipset tier, battery + charging, update years, ip rating, storage expandability)?",
-  "[feature_screening|Carrier upgrade cycle|generic] Which current Android phones sold by carriers support dual eSIM (DSDS) and Wi-Fi calling, with solid sub-6 and mmWave coverage?",
-  "[feature_screening|Family plan renewal|generic] For a family setup, which Android models offer at least 5 years of security updates and built-in parental controls with per-app time limits and location sharing?",
-  "[feature_screening|Premium flagship buy|generic] Which current flagships have LTPO OLED that does 120 Hz at QHD, peak brightness over 2000 nits, a 5x (or longer) periscope, and USB 3 or better?",
-  "[feature_screening|Midrange value unlocked|generic] Unlocked midrange around $400: which phones include wireless charging and an IP rating, plus a genuinely good main camera and 2-day battery?",
-  "[use_case|Carrier upgrade cycle|generic] I drive through a lot of rural dead zones. need an Android that holds calls well, strong low-band 5g, loud clear earpiece, and all-day battery. what should I get on upgrade?",
-  "[use_case|Family plan renewal|generic] Renewing a family plan: 4 Androids. two for kids (durable, great parental controls), one for a parent who shoots lots of photos/videos, one for a senior who needs loud speaker, big text, and easy SOS. what mix would you suggest without overspending?",
-  "[use_case|Premium flagship buy|generic] I travel a lot and shoot 4K60, edit RAW on the phone, and tether a laptop. need top-tier cameras with reliable HDR, good stabilization, big storage options, fast USB for offloading, and broad international 5g bands. which flagship fits?",
-  "[use_case|Midrange value unlocked|generic] Need an unlocked Android under $350 for a college student: long battery, clean UI, decent night photos, NFC for transit, and at least 3 years of updates. what should I be looking at?",
-  "[social_validation|-|generic] Which Android phones are owners actually happiest with right now? looking for models that rate high with users over time, few common issues, and strong community feedback - not just launch-day reviews.",
-  "[comparison|Carrier upgrade cycle|Apple (iPhone)] Eligible for a carrier upgrade. If I switch to iPhone or stick with Google Pixel, which is the smarter move for someone living in Gmail, Photos, and Maps? Thinking camera, battery life, eSIM, and messaging quirks on a 36-month plan.",
-  "[comparison|Family plan renewal|Samsung (Galaxy)] Family plan renewal time. Can you lay out a spec-by-spec on Google Pixel 8 Pro vs Samsung Galaxy S24+ for a shared plan: years of OS and security support, modem and 5G bands, battery life on 5G, Wi-Fi 7, repair costs, and storage speeds? I want the more future proof pick.",
-  "[comparison|Premium flagship buy|OnePlus] Going unlocked and premium. Google Pixel 8 Pro vs OnePlus 12: which actually feels faster day to day, how do cameras compare in low light and video, any thermal throttling, and how long are updates guaranteed?",
-  "[comparison|Midrange value unlocked|Xiaomi (Mi/Redmi)] Shopping midrange unlocked: Google Pixel 8a vs Xiaomi Redmi Note 13 Pro - how do they stack up for US 5G bands, update policy, camera quality, performance, battery life, and any ads or bloat in the UI?",
-  "[objections|Carrier upgrade cycle|generic] About to use my carrier upgrade but I'm wary: do recent Google Pixel phones still lag or get hot under load? I don't want stutters a year in.",
-  "[objections|Family plan renewal|generic] We're renewing a family plan and want one model across the board. Is Google Pixel performance stable over 3 years - throttling, gaming for teens, camera processing time, and 5G impact on heat?",
-  "[objections|Premium flagship buy|generic] If I'm paying flagship money, I can't deal with jank. Be honest: do the newest Google Pixel models have any lag or overheating when shooting long 4K video or multitasking?",
-  "[objections|Midrange value unlocked|generic] Looking at a midrange unlock, probably the a-series. Will a Google Pixel feel slow in a year or two with maps, podcasts, photos, and occasional gaming, or is the chip strong enough?",
-  "[pricing|Carrier upgrade cycle|generic] On a carrier upgrade, is it usually cheaper to finance the phone for 36 months or buy it outright and keep my current plan? How do trade-in credits and early payoff penalties actually work if I might switch next year?",
-  "[pricing|Family plan renewal|generic] For a 4-line renewal, assume we pick Google Pixel across all lines. Can you estimate total cost of ownership over 36 months - device payments, promos and credits timing, insurance, taxes, and likely resale - so I can compare per-line cost?",
-  "[pricing|Premium flagship buy|generic] Trying to price out a premium. Is a Google Pixel Pro good value at MSRP or should I wait for seasonal deals? I want 256 GB and device protection - what's the realistic out-the-door and 12-month depreciation?",
-  "[pricing|Midrange value unlocked|generic] Unlocked midrange around 400: better to buy new or refurb? Factor in warranty, battery health, import fees, and band compatibility for US carriers - at what point do the savings stop making sense?",
-  "[churn_triggers|-|generic] Long-time Google Pixel user here (since the 3). Lately I'm wondering if I should stick with Pixel for my next upgrade. Are the cameras, updates, and day-to-day performance still a strong reason to stay, or has anything slipped?",
-  "[alternatives|-|defensive] If I skip Google Pixel, what Android phones should I look at instead? I care most about camera quality and long software support.",
-  "[alternatives|-|Apple (iPhone)] Not getting an iPhone. What are the best alternatives that are easy to use, great camera, and get updates for years?",
-  "[alternatives|-|Samsung (Galaxy)] Galaxy S alternatives? I want Android phones without heavy skins, strong battery life, and a good camera.",
-  "[alternatives|-|OnePlus] what should i look at instead of oneplus this year? want fast performance, smooth android, and a solid main camera.",
-  "[alternatives|-|Xiaomi (Mi/Redmi)] Alternatives to Xiaomi/Redmi in the same price range as the Note series, ideally with good global 5G bands and less bloat?",
-  "[problem_resolution|-|generic] Now Playing on my lock screen stopped recognizing songs. I tried toggling it off and on and rebooting. Any other fixes, or do I need to retrain it?",
-  "[expansion|-|generic] Really happy with the clean Android on my phone. Thinking of getting the same line for my parents too. Anything to watch for with setup, data transfer, and ongoing updates?",
-  "[ecosystem|-|generic] What accessories pair best with a clean-Android phone? looking for a reliable 30W+ USB-C charger, a sturdy car mount that works with wireless charging, and earbuds with rock solid multipoint.",
-  "[advocacy|-|generic] I've been on Google Pixel for a while and it's been solid. How do I make the case for it to a skeptical friend without sounding preachy?"
+  "[problem_recognition|Midrange value hunt|generic] mine is laggy, camera goes mushy, battery dies by 4pm. budget about 350-400. want something that won't be junk in a year. where do i even start?",
+  "[problem_recognition|Carrier upgrade deal|generic] my carrier keeps texting about an upgrade with bill credits and a 36-month lock. my bill is already high and my trade-in is cracked. i just want lower cost and not a headache. what am i missing?",
+  "[problem_recognition|Enterprise device rollout|generic] we need to refresh about 500 employee units this quarter. must enroll cleanly with our MDM, dual SIM/eSIM, 5 years of security updates, good cameras for site photos, and bulk availability. finance wants predictable total cost, ops wants low breakage. what should we even be looking at?",
+  "[problem_recognition|Flagship camera seeker|generic] i shoot my toddler indoors and at night and everything turns into grainy blur. want natural skin tones, great stabilization, real zoom, and still pocketable. ready to splurge if it actually nails photos and video. what solves this?",
+  "[category_education|-|generic] what does an Android phone actually do, and why choose Android over other platforms?",
+  "[discovery|Midrange value hunt|generic] best Android phones under 400 that don't feel cheap? priorities: battery life, decent camera, 5G, and updates that won't stop in a year.",
+  "[discovery|Carrier upgrade deal|generic] best Android picks if I'm doing a carrier upgrade with bill credits? want to keep the monthly low and avoid unlock hassles later.",
+  "[discovery|Enterprise device rollout|generic] for a company rollout, what are the best Android models for 300-800 units? need long update support, easy MDM enrollment, eSIM, solid coverage, and good bulk pricing.",
+  "[discovery|Flagship camera seeker|generic] best Android camera phone right now for low light, fast autofocus, realistic skin tones? photos and 4K video both matter.",
+  "[shortlist|Midrange value hunt|generic] can you narrow it to 3-5 Android phones around 350-450 that give the most for the money?",
+  "[shortlist|Carrier upgrade deal|generic] shortlist a few Android models that work well with carrier trade-in credits and keep payments down.",
+  "[shortlist|Enterprise device rollout|generic] we're meeting with procurement tomorrow. give me a short list of Android devices suited for a 500-unit rollout with 4-5 years of updates, zero-touch setup, and a solid accessory ecosystem.",
+  "[shortlist|Flagship camera seeker|generic] top 3 Android phones if I care almost only about camera quality (stills and video) and reliable autofocus?",
+  "[criteria|Midrange value hunt|generic] shopping midrange android, about 300-500. what actually matters vs spec sheet fluff?",
+  "[criteria|Carrier upgrade deal|generic] my carrier has a free-with-bill-credits upgrade on a bunch of phones. for someone who cares about value, what should i look for when choosing among them? stuff that matters long term, not just the promo headline.",
+  "[criteria|Enterprise device rollout|generic] We need to standardize on one Android handset for a team rollout. Trying to set decision criteria thoughtfully: support window, patch cadence, management compatibility, radios and call quality, durability, service options, total cost. Anything we're missing, and how would you weight these as a team?",
+  "[criteria|Flagship camera seeker|generic] camera-first buyer. on high-end android phones, which specs/features actually translate to better photos and video? sensor size vs megapixels, lens quality, OIS/EIS, HDR, computational processing, video bitrates... what should I prioritize?",
+  "[feature_screening|Midrange value hunt|generic] Which current Android phones under 400 have an OLED 120 Hz screen, a main camera with OIS, NFC, and at least 3 years of OS updates?",
+  "[feature_screening|Carrier upgrade deal|generic] On an upgrade promo, I need a phone that supports mmWave 5G, eSIM plus a physical SIM, Wi-Fi calling, and broad band support for rural coverage. Which models usually check those boxes?",
+  "[feature_screening|Enterprise device rollout|generic] For a fleet purchase, which Android devices offer at least 5 years of security updates, monthly patches, automated enrollment with a work profile, hardware-backed biometrics, and USB-C DisplayPort output for desk docking?",
+  "[feature_screening|Flagship camera seeker|generic] Which Android phones can shoot 4K60 on all rear lenses, 10-bit HDR, a usable log/flat profile, strong stabilization, and have a real 5x or longer optical telephoto? Bonus if autofocus stays reliable in low light.",
+  "[use_case|Midrange value hunt|generic] I mostly message, browse, use maps, and take lots of daylight photos of my kid and dog. Not a gamer. Want 2-day battery, decent speakers, some water resistance, and to keep it 3 years. Budget about 400. What should I be looking at?",
+  "[use_case|Carrier upgrade deal|generic] Line is due and there's an upgrade with trade-in credits spread over 36 months. I travel for work, tether my laptop a lot, and need rock-solid reception on highways. I also want it to still feel quick in year 3. How would you pick from the carrier list without getting burned by the fine print?",
+  "[use_case|Enterprise device rollout|generic] Rolling out about 300 phones to field techs. They need clear calls in noisy places, accurate location for nav and check-ins, all-day battery, glove-friendly touch, and easy swap if one breaks. IT needs automated enrollment, work/personal separation, and fast security patches. How would you structure a pilot and choose the device?",
+  "[use_case|Flagship camera seeker|generic] I shoot kids sports indoors and night city scenes when I travel. Need sharp stills for fast motion and clean 4K60 with solid audio. I edit on the phone and share right away. Which features and settings should I target to get the best results?",
+  "[social_validation|-|generic] What are people actually happy with in the Android world right now? I'm looking for patterns from long-term reviews and user forums on reliability, camera consistency, battery health, and software support. Any clear crowd favorites or red flags?",
+  "[comparison|Midrange value hunt|Apple] stuck between Google Pixel 7a and iPhone SE 3 for a budget buy. which one's the smarter pick right now for camera, battery, and how long it stays fast?",
+  "[comparison|Carrier upgrade deal|Samsung] Upgrade deal choices: Google Pixel 8 for 5 bucks/month or Samsung Galaxy S24 for 10 with my trade. Which should I pick if I care most about reception, battery life, and Android updates?",
+  "[comparison|Enterprise device rollout|OnePlus] Team eval for a 400-device rollout: Google Pixel 8 vs OnePlus 12. We need a straight spec/practical read on OS support window, security patch cadence, MDM compatibility, eSIM at scale, 5G bands, sustained performance, and repair logistics. What would tip a committee decision?",
+  "[comparison|Flagship camera seeker|Xiaomi] Pixel 8 Pro vs Xiaomi 14 Ultra for travel photos and video. Low light, portraits, 4K60 reliability, autofocus, and how quick the camera launches from pocket. Which way would you go?",
+  "[objections|Midrange value hunt|generic] Be straight with me: do Google Pixels slow down? I'm eyeing the 7a but keep seeing posts about stutter, app reloads, and gaming lag after a year. True or overblown?",
+  "[objections|Carrier upgrade deal|generic] Carrier's offering a free Google Pixel 8 with trade-in, but I'm worried about performance. Does the Tensor chip throttle on 5G or during long navigation sessions, or is it smooth day to day?",
+  "[objections|Enterprise device rollout|generic] We're shortlisting Google Pixel for our fleet, but the team's concerned about sustained performance under work profile, always-on VPN, and heavy multitasking. Any real-world data showing whether Pixels bog down over 18 - 24 months?",
+  "[objections|Flagship camera seeker|generic] Considering Google Pixel 8 Pro for the camera, but does it choke on long 4K video, heat up, or drop frames? Also, any general lag I should expect outside the camera?",
+  "[pricing|Midrange value hunt|generic] Best value in Android around 400 - 500 right now - new midrange vs last year's flagship vs refurbished? What actually holds up better over two years?",
+  "[pricing|Carrier upgrade deal|generic] My carrier has bill-credit promos on Google Pixel 8 and 8 Pro. After taxes/fees and required plan tiers, what's the real 36 months cost compared to buying unlocked upfront?",
+  "[pricing|Enterprise device rollout|generic] For a 300-device Android rollout, what's a realistic per-unit TCO over 3 years by tier (midrange vs flagship)? Include accessories, extended coverage, accidental damage, spares pool, and typical replacement rate.",
+  "[pricing|Flagship camera seeker|generic] Is the Google Pixel 8 Pro worth the extra over the Pixel 8 if I mainly care about cameras? I shoot kids' sports and travel - does the added RAM/telephoto/storage actually justify the price jump?",
+  "[business_case|Enterprise device rollout|generic] I need to justify standardizing on Google Pixel to our CFO. Can you frame the ROI - purchase price vs lifespan, security update window, admin overhead, user satisfaction, and key risks to note?",
+  "[churn_triggers|-|generic] been on google pixel since the 3. bluetooth dropouts and some camera quirks on my 7a have me second-guessing. if I want clean android and fast updates, is sticking with Google Pixel still the move?",
+  "[alternatives|-|defensive] What are the best alternatives to Google Pixel if I want stock-like Android, great still photos, and long OS/security support?",
+  "[alternatives|-|Apple] Skipping the iPhone this year - what Android phones feel just as polished and get long updates?",
+  "[alternatives|-|Samsung] What are good alternatives to the Samsung Galaxy S24 for someone who wants top cameras and clean Android with quick updates?",
+  "[alternatives|-|OnePlus] I was about to grab a OnePlus 12 for the price to performance. What other Android phones around that budget beat it on cameras and software support?",
+  "[alternatives|-|Xiaomi] Looking for non-Xiaomi options in the same price range as the Redmi/Note series. Solid cameras, 5G bands that work in the US, minimal bloat. What should I check out?",
+  "[problem_resolution|-|generic] My Google Pixel is overheating and throttling after the Android 14 update when I record 4K video. Battery drops fast too. Any fixes I can try before doing a factory reset?",
+  "[expansion|-|generic] Loving my Google Pixel 8. Thinking about getting Pixels for the rest of the family and maybe adding a Pixel Watch. Any gotchas with mixed carriers or moving data from older Android phones?",
+  "[ecosystem|-|generic] What pairs best with a Google Pixel? Need earbuds with clear calls, a watch that won't kill battery, a safe fast charger, and any must-have camera apps or photo backup tips.",
+  "[advocacy|-|generic] Friend keeps asking why I chose Google Pixel over other Androids. How do I explain the real everyday wins without sounding preachy? Thinking camera, call screening, update cadence, that kind of stuff.",
+  "[repertoire|-|generic] I usually rebuy the same Android line every upgrade. Stick with my usual, or switch it up this time for better cameras and longer OS support?"
  ]
 }

@@ -10,7 +10,7 @@
   "Vibrant Health (Green Vibrance)"
  ],
  "capturedAt": "2026-09-16",
- "reviewedBy": "Claude (walk review 2026-09-15); not yet reviewed by Tyler",
+ "reviewedBy": "Claude via the v8/v9/v10 three-way diff, presented to Tyler 2026-09-16; not independently reviewed by Tyler",
  "base": {
   "verifiability": "trust",
   "involvement": "considered",
@@ -19,28 +19,28 @@
   "rhythm": "subscription",
   "risk": "performance",
   "channel_retail": true,
-  "rationale": "I want one daily greens powder I can stick with that actually makes me feel a difference, tastes okay, and is worth the price."
+  "rationale": "I want one daily greens I can trust to actually help, tastes fine, and is worth the monthly cost."
  },
  "scenarios": [
   {
-   "label": "DTC subscription start",
-   "description": "Starting a greens habit via a brand's website, comparing formulas, certifications, flavor and price-per-serving before beginning a subscription.",
+   "label": "Direct subscription setup",
+   "description": "Buyer compares formulas and certifications on brand sites and starts auto-ship.",
    "deviates": false
   },
   {
-   "label": "In-store shelf compare",
-   "description": "Choosing a tub from a retail aisle by scanning labels, claims, scoops and price, with limited time to decide.",
+   "label": "Amazon review-led buy",
+   "description": "Buyer filters by rating, price per serving, and Subscribe & Save to choose a top-reviewed option.",
    "deviates": false
   },
   {
-   "label": "Taste-driven switcher",
-   "description": "Leaving a current greens powder due to flavor or mixability and prioritizing better taste, texture and sample options.",
+   "label": "Health store shelf choice",
+   "description": "In-store comparison of a few tubs on label, flavor options, and price before picking one.",
    "deviates": false
   },
   {
-   "label": "Auto-refill maintenance",
-   "description": "Ongoing subscription refills where the default is to let shipments continue unless something triggers a change.",
-   "deviates": true
+   "label": "Upgrading from current greens",
+   "description": "Already using greens, they seek better taste, gentler digestion, or a fuller formula and switch brands.",
+   "deviates": false
   }
  ],
  "stages": [
@@ -91,8 +91,8 @@
   },
   {
    "key": "premium_worth",
-   "label": "Splurge or save",
-   "recommended": true
+   "label": "Premium vs. basic brands",
+   "recommended": false
   },
   {
    "key": "objections",
@@ -151,8 +151,8 @@
   }
  ],
  "cells": {
-  "count": 46,
-  "blind": 25,
+  "count": 45,
+  "blind": 24,
   "branded": 21,
   "byStage": {
    "problem_recognition": 4,
@@ -163,7 +163,6 @@
    "use_case": 4,
    "social_validation": 1,
    "comparison": 4,
-   "premium_worth": 1,
    "objections": 4,
    "pricing": 4,
    "churn_triggers": 1,
@@ -176,51 +175,50 @@
   }
  },
  "cellTexts": [
-  "[problem_recognition|DTC subscription start|generic] I keep trying to eat clean but weekdays wreck me. Veggies are hit or miss, energy dips by 2 pm, and I don't want to juggle a bunch of different things. Is there a simple daily routine I can stick to that covers the basics?",
-  "[problem_recognition|In-store shelf compare|generic] At the store staring at a bunch of tubs with vague health claims. I want better digestion and to cover veggie gaps without adding a million steps. How do I even pick?",
-  "[problem_recognition|Taste-driven switcher|generic] what i'm using now tastes like pond water and ruins my morning. i still want the same benefits for gut and steady energy, just without the gross aftertaste. what else could i do instead?",
-  "[problem_recognition|Auto-refill maintenance|generic] I have a bunch of health stuff on auto-ship but it's piecemeal and I skip half of it. I'd rather have one dependable daily habit that helps with micronutrient gaps and digestion. Ideas that actually stick?",
-  "[category_education|-|generic] What do daily greens powders actually do? Are they mainly for filling nutrient gaps, gut support, energy, or what?",
-  "[discovery|DTC subscription start|generic] best daily greens powder for an all-in-one routine with easy monthly delivery? decent taste, broad nutrients, not a sugar bomb.",
-  "[discovery|In-store shelf compare|generic] In store now. What's the best greens powder to grab off the shelf, and what should I check on the label so I don't buy junk?",
-  "[discovery|Taste-driven switcher|generic] Need the best-tasting greens powder that still has real nutrition. Not cloying stevia, not bitter. Which ones are worth trying?",
-  "[discovery|Auto-refill maintenance|generic] I want a trustworthy greens powder I can put on auto-refill for long-term daily use. Priorities are third-party testing and consistency. Which options fit?",
-  "[shortlist|DTC subscription start|generic] Can you narrow it to 3 or 4 daily greens powders that cover the bases and are simple to subscribe to?",
-  "[shortlist|In-store shelf compare|generic] I'm in the aisle right now. Give me a short list of 3 solid greens powders to consider and what to verify on the label.",
-  "[shortlist|Taste-driven switcher|generic] shortlist 3-5 greens powders that people actually finish, good taste without junky sweeteners, still effective.",
-  "[shortlist|Auto-refill maintenance|generic] I decide by routine and trust. Can you give me 3 greens powders that hold up for daily use and are easy to keep on a recurring order?",
-  "[criteria|DTC subscription start|generic] about to start a daily greens subscription. what actually matters when picking one online? formula quality, testing, absorbability, or is it mostly marketing?",
-  "[criteria|In-store shelf compare|generic] standing in the supplement aisle staring at a wall of green tubs. how do i quickly tell which greens powder is legit just from the label?",
-  "[criteria|Taste-driven switcher|generic] switching because my current greens tastes like lawn clippings. what should i prioritize so the next one actually tastes good without a sugar bomb?",
-  "[criteria|Auto-refill maintenance|generic] i'm on auto-refill for a greens powder and it's become part of my morning. before I let it ride another year, what criteria would you use to feel good about sticking with the same one? testing, sourcing, effective doses, cost per serving?",
-  "[use_case|DTC subscription start|generic] new to greens powders. i want one scoop first thing in the morning to cover gaps and not juggle a bunch of pills. planning to set up a subscription. how would you set the routine and cadence so it's easy to stick with, including travel?",
-  "[use_case|In-store shelf compare|generic] need a greens powder i can grab today for morning shakes and sometimes just water at work. in the store right now - what should I look for so it mixes well and doesn't wreck my stomach?",
-  "[use_case|Taste-driven switcher|generic] looking to swap to a greens that i can actually drink with just cold water. minimal stevia, no gritty mouthfeel. how do i find one like that and avoid the usual swamp taste?",
-  "[use_case|Auto-refill maintenance|generic] already taking a scoop every morning on auto-refill. any tweaks to make the habit smoother? storage, timing with coffee, travel packs, skip timing. i want to keep compliance high without thinking about it.",
-  "[social_validation|-|generic] which daily greens powders do real people actually stick with and rate well? any non-sponsored review sources or communities I should check before I commit?",
-  "[comparison|DTC subscription start|Garden of Life] starting a subscription: how does AG1 stack up against Garden of Life's greens on formula strength, testing, taste, and cost per serving? worth going AG1 or not?",
-  "[comparison|In-store shelf compare|Organifi] i can grab Organifi off the shelf today or order AG1. if you've tried both, what's the meaningful difference? taste in just water, mixability, ingredient quality, price?",
-  "[comparison|Taste-driven switcher|Amazing Grass] i'm switching mainly for taste. between AG1 and Amazing Grass, which one actually goes down easier in plain water, less aftertaste, less grit?",
-  "[comparison|DTC subscription start|KOS] debating a subscription: AG1 vs KOS greens. what's the smarter pick for an all-in-one daily scoop if I care about nutrient density, third-party testing, probiotics/enzymes, and overall value?",
-  "[premium_worth|-|generic] be honest: is the pricey greens powder actually better than the cheap grocery store tub? i'm on auto-refill and wondering if i could just switch to a basic one and not notice a difference.",
-  "[objections|DTC subscription start|generic] Before I start a subscription, does AG1 actually move the needle? like real energy, digestion, labs getting better, or is it just expensive green water?",
-  "[objections|In-store shelf compare|generic] I'm standing in the aisle right now. If I pick AG1 over the other tubs, will I actually feel a difference, or are the doses so light that it won't do much?",
-  "[objections|Taste-driven switcher|generic] Thinking of switching to AG1 because people say it tastes better, but does it actually perform? I don't want to trade flavor for weaker results.",
-  "[objections|Auto-refill maintenance|generic] I've been on AG1 auto-refill for months. If I paused for a few weeks, would I notice any drop in performance? Just sanity checking that it's doing what I think it is.",
-  "[pricing|DTC subscription start|generic] AG1 feels pricey. Is it better value than piecing together a multivitamin, probiotic, vitamin D, and a greens blend on my own? Any discount for annual vs month-to-month?",
-  "[pricing|In-store shelf compare|generic] At the store I'm seeing greens powders from about 30 to over 100. For daily use, what are you actually paying extra for, and where's the best value per serving?",
-  "[pricing|Taste-driven switcher|generic] switching mostly for taste. what's a good value-for-money greens powder that doesn't taste like lawn clippings but won't blow the budget?",
-  "[pricing|Auto-refill maintenance|generic] I'm on AG1 auto-ship. Keep it or build a cheaper stack? Over a year, is the total cost worth it compared to buying the key pieces separately?",
-  "[churn_triggers|-|generic] I've been using AG1 daily for a year. not sure I still need it. how do I tell if it's worth staying on vs cycling off or replacing it with a simpler setup?",
-  "[alternatives|-|defensive] AG1 is getting pricey. What other daily greens powders hit the same all-in-one vibe (greens, probiotics, adaptogens) without tasting awful?",
-  "[alternatives|-|Garden of Life] If I skip Garden of Life greens powder, what are solid alternatives that actually cover a daily all-in-one? Ideally not crazy sweet.",
-  "[alternatives|-|Organifi] Organifi green juice alternatives? Looking for a once-a-day greens mix with probiotics and vitamins, not too grassy.",
-  "[alternatives|-|Amazing Grass] Not loving Amazing Grass. What else should I try for an all-in-one greens powder that mixes clean?",
-  "[alternatives|-|KOS] KOS greens just isn't agreeing with me. Any comparable daily greens blends you'd recommend instead?",
-  "[renewal|-|generic] My AG1 subscription renews next week. Still worth keeping, or are there cheaper greens powders that deliver similar nutrition?",
-  "[problem_resolution|-|generic] AG1 made me a bit nauseous on an empty stomach. How should I time it or adjust scoop size to avoid that? Also ok to mix with almond milk?",
-  "[expansion|-|generic] Really happy with AG1 so far. Thinking of adding travel packs and getting my partner on it too. What's the smartest way to set that up without doubling the cost?",
-  "[ecosystem|-|generic] What pairs well with AG1? I take creatine and omega-3 already. Anything else worth stacking, and when should I take each so they don't interfere?",
-  "[advocacy|-|generic] How do I make the case for AG1 to my trainer who says greens powders are pointless? Quick, factual points I can share."
+  "[problem_recognition|Direct subscription setup|generic] My diet is all over the place lately and I can feel it - brain fog by noon, bathroom is unpredictable, and I rarely hit veggies. Is there a simple daily thing I can set to auto-deliver so I stop falling off?",
+  "[problem_recognition|Amazon review-led buy|generic] Scrolling Amazon reviews and folks keep raving about some daily thing that helped their energy and digestion. What are they even using, and is that legit or just hype?",
+  "[problem_recognition|Health store shelf choice|generic] At the health store staring at a wall of tubs and bottles claiming immune and gut support. I travel a ton and skip greens most days. How do I figure out what would actually help without wasting money?",
+  "[problem_recognition|Upgrading from current greens|generic] I've been doing spinach/kale smoothies every morning but it's a hassle and I still feel bloated and tired by the afternoon. Is there a simpler daily habit that covers the same bases without the blender?",
+  "[category_education|-|generic] What do greens powders actually do? Are they just veggie dust, or do they meaningfully help with micronutrients, digestion, and energy?",
+  "[discovery|Direct subscription setup|generic] best greens powder for a daily routine with easy subscription or auto-ship, minimal prep, good gut support, not too sweet. what should i look at?",
+  "[discovery|Amazon review-led buy|generic] Best greens powders on Amazon right now for energy and digestion? Want clean ingredients, decent taste, and solid reviews, nothing gritty.",
+  "[discovery|Health store shelf choice|generic] In a health food store today, what's the best greens powder to grab that mixes well, low sugar, clear label, no shady proprietary blends?",
+  "[discovery|Upgrading from current greens|generic] I already use a basic greens powder and want to upgrade to a more complete formula - good micronutrient coverage, probiotics, adaptogens, maybe minerals - without fairy dusting. Top picks?",
+  "[shortlist|Direct subscription setup|generic] Can you give me 3-5 solid greens powders that offer direct subscriptions and reliable monthly delivery, good nutrient breadth, and gut support?",
+  "[shortlist|Amazon review-led buy|generic] Can you narrow it to 3 greens powders with strong Amazon reviews and consistent quality? Bonus if they taste decent and aren't sugary.",
+  "[shortlist|Health store shelf choice|generic] Walking into a natural foods store. Which 3 greens powders are usually on the shelf that are actually worth buying?",
+  "[shortlist|Upgrading from current greens|generic] Shortlist 3 upgrade options from a basic greens powder to more complete daily formulas: broad nutrients, third-party tested, not overly sweet.",
+  "[criteria|Direct subscription setup|generic] about to set up a subscription for a daily greens powder on the brand site. what actually matters before I commit? ingredients quality, third-party testing, cancel/skip terms, cost per serving, taste?",
+  "[criteria|Amazon review-led buy|generic] i'm shopping greens powders on Amazon and drowning in reviews. what should I look for in the reviews and product pages to tell if it's legit vs hype?",
+  "[criteria|Health store shelf choice|generic] I'm in the supplement aisle staring at a wall of greens tubs. What label details and certifications actually matter for a solid daily all-in-one?",
+  "[criteria|Upgrading from current greens|generic] I've been using a basic greens mix and want to upgrade. What should be better in a higher-quality option - ingredient forms, dosages, absorption, testing, anything else?",
+  "[use_case|Direct subscription setup|generic] Morning routine is one scoop with water before coffee, no blender, sensitive stomach, travel twice a month. If I subscribe direct, what specs and add-ons (like travel packs) should I choose so this sticks?",
+  "[use_case|Amazon review-led buy|generic] Goal: one-and-done greens for energy and gut support, easy in a shaker at work. How do I use Amazon reviews and Q&A to zero in on a non-chalky option without tons of sweeteners?",
+  "[use_case|Health store shelf choice|generic] At the health store with 10 minutes. Need a daily greens I can throw in a water bottle after workouts, low sugar, not too grassy. How do I spot the right tub or packets fast?",
+  "[use_case|Upgrading from current greens|generic] My current greens taste like lawn clippings and bloat me. Budget about 90 a month. I want smoother taste, third-party tested, with enzymes or probiotics that don't wreck my gut. What should I switch to?",
+  "[social_validation|-|generic] What daily greens do people actually stick with for 6+ months? Any that rack up strong ratings and community praise without constant complaints about taste or stomach issues?",
+  "[comparison|Direct subscription setup|Garden of Life] Debating a subscription: AG1 vs Garden of Life greens. For daily use and convenience, which is better on taste, mixability, testing, and cancel/skip flexibility?",
+  "[comparison|Amazon review-led buy|Organifi] I'm reading Amazon reviews and torn between AG1 and Organifi. For an all-in-one morning greens, what real day-to-day differences should I expect?",
+  "[comparison|Health store shelf choice|Amazing Grass] In the aisle now: I can grab Amazing Grass right this minute or order AG1. For a once-a-day mix that doesn't clump and tastes okay, is it worth waiting for AG1 or just buy Amazing Grass?",
+  "[comparison|Upgrading from current greens|KOS] I'm upgrading my greens and looking at AG1 vs KOS. If I want something gentler on the stomach and truly one scoop per day, which would you pick and why?",
+  "[objections|Direct subscription setup|generic] About to set up a subscription for AG1. Does it actually do anything? Will I feel a difference in energy or gut, or is it more of a long game with no noticeable change?",
+  "[objections|Amazon review-led buy|generic] Reading a bunch of reviews and I'm still unsure. With AG1 specifically, do people actually notice real benefits after a few weeks, or is it mostly placebo vibes?",
+  "[objections|Health store shelf choice|generic] I'm standing in the store holding AG1. Is there good reason to think it performs better than a basic greens powder, or am I unlikely to notice a difference?",
+  "[objections|Upgrading from current greens|generic] I already take a budget greens daily. If I switch to AG1, will I actually see better results, or is it mostly nicer branding and flavor?",
+  "[pricing|Direct subscription setup|generic] If I subscribe to AG1 monthly vs annual, what's the real per serving cost after any starter kit or travel pack stuff, and is it replacing enough other supplements to make the math add up?",
+  "[pricing|Amazon review-led buy|generic] Reviews keep saying this greens powder is pricey. Is the per serving premium actually worth it versus just taking a basic multivitamin and eating more greens at home?",
+  "[pricing|Health store shelf choice|generic] At the store looking at this greens tub that costs a lot. For a daily greens, what am I paying for vs a standard one that's half the price, and how many true servings are in the bag?",
+  "[pricing|Upgrading from current greens|generic] I pay about 40 a month for my current greens. If I switch to AG1, what extra value am I getting for the higher price, and is there a cheaper combo that covers the same bases?",
+  "[churn_triggers|-|generic] Been on AG1 every morning for 9 months. Not really feeling much now. Keep it going or cancel and try a different approach?",
+  "[alternatives|-|defensive] If I stop using AG1, what are solid all-in-one greens powders to try instead?",
+  "[alternatives|-|Garden of Life] garden of life greens powder isn't agreeing with me. what are comparable all-in-one greens to switch to?",
+  "[alternatives|-|Organifi] Organifi green juice feels pricey. Any legit alternatives with a similar nutrient spread?",
+  "[alternatives|-|Amazing Grass] If Amazing Grass greens tastes too grassy to me, what other daily greens powders are smoother but still comprehensive?",
+  "[alternatives|-|KOS] KOS greens is out of stock near me. What are good substitutes that cover similar bases?",
+  "[renewal|-|generic] My AG1 subscription is up for renewal. Keep it or are there cheaper greens that are close enough for daily use?",
+  "[problem_resolution|-|generic] AG1 keeps clumping and getting foamy in my shaker, even with cold water. How do I mix it so it dissolves better and is easier on my stomach?",
+  "[expansion|-|generic] Been on AG1 for 6 months and like it. Thinking about getting my partner on it and keeping some at the office. Any issues with taking it later in the day or blending it into a smoothie?",
+  "[ecosystem|-|generic] What pairs well with AG1 without doubling up too much? Considering vitamin D, magnesium, maybe a probiotic, plus a better shaker or small blender.",
+  "[advocacy|-|generic] Friend says AG1 is just expensive spinach water. How do I make a fair case for it without sounding salesy, and what proof points actually matter?"
  ]
 }

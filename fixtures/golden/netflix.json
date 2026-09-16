@@ -10,7 +10,7 @@
   "Apple TV+"
  ],
  "capturedAt": "2026-09-16",
- "reviewedBy": "Claude (walk review 2026-09-15); not yet reviewed by Tyler",
+ "reviewedBy": "Claude via the v8/v9/v10 three-way diff, presented to Tyler 2026-09-16; not independently reviewed by Tyler",
  "base": {
   "verifiability": "taste",
   "involvement": "considered",
@@ -19,28 +19,28 @@
   "rhythm": "subscription",
   "risk": "financial",
   "channel_retail": false,
-  "rationale": "We subscribe to the service with the shows our household wants right now at a monthly price that feels worth it."
+  "rationale": "We pay for the streaming mix that gives our household the shows, movies, and sports we actually watch at a monthly price that feels worth it."
  },
  "scenarios": [
   {
-   "label": "Chasing a hit",
-   "description": "Subscribing to watch a buzzy new show or season everyone is talking about.",
+   "label": "Household core lineup",
+   "description": "A home decides which two or three services to keep year-round for everyday viewing.",
    "deviates": false
   },
   {
-   "label": "Household first setup",
-   "description": "A new household or cord-cutter decides which main services to start with.",
+   "label": "Family with kids",
+   "description": "Parents choose services anchored on children's programming, profiles, and controls that keep kids happy and safe.",
    "deviates": false
   },
   {
-   "label": "Price hike retention",
-   "description": "An existing subscriber weighs whether to keep or cancel after a price increase or plan change.",
+   "label": "Carrier bundle activation",
+   "description": "A household activates a streaming service that comes included or discounted with a mobile/ISP plan and decides whether to keep it long term.",
+   "deviates": false
+  },
+  {
+   "label": "Live sports season",
+   "description": "Fans subscribe for a league or event window and verify exact game rights, blackouts, and device support.",
    "deviates": true
-  },
-  {
-   "label": "Bundle deal choice",
-   "description": "Choosing a discounted bundle through a carrier, device, or multi-service offer.",
-   "deviates": false
   }
  ],
  "stages": [
@@ -52,7 +52,7 @@
   {
    "key": "category_education",
    "label": "Category education",
-   "recommended": true
+   "recommended": false
   },
   {
    "key": "discovery",
@@ -72,7 +72,7 @@
   {
    "key": "feature_screening",
    "label": "Feature screening",
-   "recommended": false
+   "recommended": true
   },
   {
    "key": "use_case",
@@ -152,14 +152,14 @@
  ],
  "cells": {
   "count": 45,
-  "blind": 25,
-  "branded": 20,
+  "blind": 23,
+  "branded": 22,
   "byStage": {
    "problem_recognition": 4,
-   "category_education": 1,
    "discovery": 4,
    "shortlist": 4,
    "criteria": 4,
+   "feature_screening": 1,
    "use_case": 4,
    "social_validation": 1,
    "comparison": 4,
@@ -175,50 +175,50 @@
   }
  },
  "cellTexts": [
-  "[problem_recognition|Chasing a hit|generic] everyone at work is obsessed with this one show and i can't seem to get it anywhere i already have. is there a simple way to watch just that without loading up on a bunch of extras?",
-  "[problem_recognition|Household first setup|generic] just moved in with my partner and two kids. the tv is smart but i have no idea how to set things up so everyone finds their own stuff, keep the kid content locked down, and not turn me into 24-7 tech support. where do i start?",
-  "[problem_recognition|Price hike retention|generic] My monthly entertainment bill jumped again even though I only keep up with a couple shows. How do I figure out if keeping it is worth it, or if there's a smarter, cheaper way to just get what I actually watch?",
-  "[problem_recognition|Bundle deal choice|generic] Got offered a discount if I add some entertainment thing to my phone plan. Feels like I'll end up paying for fluff. How can I tell if that bundle is truly a deal for me?",
-  "[category_education|-|generic] what does a streaming service actually do? like, what's typically included, how many screens, do they pull titles, and why do prices seem to creep up?",
-  "[discovery|Chasing a hit|generic] best streaming option to watch the big new drama everyone's talking about this month, ideally with fast access and easy cancel if it's not the right one",
-  "[discovery|Household first setup|generic] best streaming services for a household with kids and teens: strong parental controls, multiple profiles, works well on a smart tv",
-  "[discovery|Price hike retention|generic] I mostly watch international films, stand-up, and one big sci-fi or fantasy series at a time. what's the best-value streaming plan for that without the price spiking after promos?",
-  "[discovery|Bundle deal choice|generic] best bundle deals that pair mobile or home internet with a streaming plan and actually save money if you want prestige dramas, kids shows, and an occasional live event",
-  "[shortlist|Chasing a hit|generic] give me 3 places to check first for a buzzy limited series, with the simplest sign up and easy cancel if it's not there",
-  "[shortlist|Household first setup|generic] shortlist 3 or 4 family-friendly streaming services with strong kids libraries, multiple profiles, and downloads for trips",
-  "[shortlist|Price hike retention|generic] can you name 3 services that fit me: big on international films and documentaries, plus one or two standout series, and won't blow up the monthly cost?",
-  "[shortlist|Bundle deal choice|generic] what are 3 bundle options worth considering if I want TV and movies together, minimal ads, and a real discount when tied to my phone or internet plan?",
-  "[criteria|Chasing a hit|generic] Trying to catch that one buzzy series everyone is talking about. What should I look for in a streaming service so I can actually watch it right away and not waste a month?",
-  "[criteria|Household first setup|generic] first time setting up streaming for the house: two adults, a tween, a grandma. what should i prioritize when picking a service so it works for everyone without tech drama?",
-  "[criteria|Price hike retention|generic] My subscription just went up. Before I cancel, what are the smart criteria to weigh based on my taste? I mainly watch international dramas and documentaries, plus a few quirky comedies. How do I judge catalog depth vs new releases vs how well it recommends stuff to me?",
-  "[criteria|Bundle deal choice|generic] I get a phone plan bundle that lets me pick a streamer. What actually matters in choosing which one goes in the bundle besides headline price? Stuff like ads, 4K, number of screens?",
-  "[use_case|Chasing a hit|generic] I only want to binge one hit show this weekend in 4K, then drop the sub. Walk me through the cleanest way to sign up, find it, download episodes for a flight, and cancel on time.",
-  "[use_case|Household first setup|generic] New place, mixed devices: Samsung TV in the living room, an old Fire Stick in the bedroom, two iPads for the kids. We need morning cartoons, evening dramas, strict parental controls, and offline downloads for road trips. How would you set this up with one streaming service?",
-  "[use_case|Price hike retention|generic] Price hike just hit. Can you help me do a quick keep-or-cancel audit? I want to pull my watch history, check what new sci-fi and true crime are landing in the next 2 months, estimate my weekly hours, and decide if I rotate months instead of staying subscribed.",
-  "[use_case|Bundle deal choice|generic] My carrier offers a bundle with a couple of streamers for a small add-on. I mostly want ad-free movies and occasional reality binges. How do I pick which service to include now, and set it up so swapping later will not nuke my watchlists?",
-  "[social_validation|-|generic] Which streaming service people vibe with the most these days? Not just ratings; I mean the one folks claim as part of their identity, the memes, the group-watch energy.",
-  "[comparison|Chasing a hit|Disney+] I only care about one big new show right now. For a one-month grab-and-go, is Netflix or Disney+ more likely to have the hot release and let me binge fast with easy cancel?",
-  "[comparison|Household first setup|Amazon Prime Video] Setting up streaming for the whole household: easier life if I choose Netflix or Amazon Prime Video? Thinking multiple TVs, solid kids profiles, and minimal app weirdness.",
-  "[comparison|Price hike retention|Hulu] My price went up. If I keep only one, how do Netflix and Hulu stack up for someone into non-English dramas, documentaries, and the occasional offbeat comedy? I care about recommendation quality and steady new drops over the next 6 months.",
-  "[comparison|Bundle deal choice|Max (HBO)] Choosing a premium to pair with a bundle: Netflix or Max (HBO)? Priorities are strong movies and limited series, ad-free and 4K options, and not getting nickeled and dimed when I add it to a bundle.",
-  "[objections|Chasing a hit|generic] Thinking about grabbing Netflix just to watch one show everyone's talking about. Feels dumb to pay a full month for that. Any way to do it cheap without getting stuck?",
-  "[objections|Household first setup|generic] Setting up streaming for the whole house. With Netflix and the new rules on sharing, am I going to have to pay extra for an extra member or more screens? Trying to keep the bill sane.",
-  "[objections|Price hike retention|generic] Netflix just bumped my price again. I mostly watch indie films and docs in bursts. Is it still worth keeping it month to month, or smarter to pause until something I really want drops?",
-  "[objections|Bundle deal choice|generic] My phone plan bundle has a version that adds Netflix for a few bucks more. If I mostly watch on weekends, is that add-on likely to be worth it or just inflate the bill?",
-  "[pricing|Chasing a hit|generic] For a one-show binge, what's the cheapest Netflix plan right now? Is the ad tier fine for a month and then cancel, or do I need Standard to get HD?",
-  "[pricing|Household first setup|generic] Family of 5, 2 TVs, 3 phones. What's the most cost-effective legit setup for streaming movies and kids stuff? Need 4K on the main TV and downloads for trips. Any free-with-ads options that aren't terrible?",
-  "[pricing|Price hike retention|generic] My Netflix Standard plan went up. I watch about 3 hours a week and rarely rewatch. Better value to drop to the ad plan, rotate off for a couple months, or just keep it as is?",
-  "[pricing|Bundle deal choice|generic] Those wireless-and-streaming bundles look cheaper on paper. Is that usually better value than picking one ad plan and adding others month to month? Trying not to pay for stuff I won't watch.",
-  "[churn_triggers|-|generic] I've had Netflix for years but lately I scroll more than I watch. Be honest - should I keep it, pause it for a bit, or am I overlooking what makes it worth staying?",
-  "[alternatives|-|defensive] Thinking about pausing Netflix for a bit, what are the best alternatives with lots of new shows and movies?",
-  "[alternatives|-|Disney+] If I cancel Disney+, what services cover family-friendly stuff but also have things for adults?",
-  "[alternatives|-|Amazon Prime Video] I mostly watch random movies on Amazon Prime Video. What else should I try if I drop it?",
-  "[alternatives|-|Hulu] Hulu alternatives for current-season TV and next day episodes?",
-  "[alternatives|-|Max (HBO)] If I leave Max, the HBO one, what services feel closest for prestige series and recent films?",
-  "[renewal|-|generic] My Netflix renews next month. Still worth keeping at the new price, or are there cheaper options that cover the basics?",
-  "[problem_resolution|-|generic] Netflix says too many devices even though we only use two. How do I sign out old devices and stop the error?",
-  "[expansion|-|generic] Loving Netflix on the living room TV. Thinking of upgrading to 4K and adding an extra member for my dad. Smart move or overkill?",
-  "[ecosystem|-|generic] what pairs well with Netflix? apps or tools to track what I've watched, find what's expiring soon, and plan a watchlist on phone and laptop.",
-  "[advocacy|-|generic] Friend says Netflix isn't worth it anymore. How do I make the case for keeping it without sounding like a salesperson?"
+  "[problem_recognition|Household core lineup|generic] we keep flipping around at night and end up renting random movies or rewatching the same shows. want one dependable place the whole house uses, not five bills and three remotes. what should i be doing differently?",
+  "[problem_recognition|Family with kids|generic] my 7 and 10 year old keep clicking into stuff i don't want them seeing. i need a safe corner with age limits and lots of kid shows, but also something decent for parents after bedtime. how do people set this up?",
+  "[problem_recognition|Carrier bundle activation|generic] my phone plan says it includes some video perk i never turned on. is it even worth it, and how do i activate it without getting surprise charges?",
+  "[problem_recognition|Live sports season|generic] season starts soon and i'm going to miss games if i don't sort this. need near-live feeds (minimal delay), 4k when available, and a way to watch on the living room tv and my phone. what do fans use for this?",
+  "[discovery|Household core lineup|generic] what's the best streaming option for a household core lineup - weeknight series plus weekend movies, easy on a living room tv, not a mess of add-ons?",
+  "[discovery|Family with kids|generic] best family-friendly streaming for kids under 10 with strong parental controls, downloads for trips, and enough grownup shows for us too?",
+  "[discovery|Carrier bundle activation|generic] best streaming choices that often come bundled with phone plans, and how to get the most value from a free or discounted perk?",
+  "[discovery|Live sports season|generic] best streaming setup for live sports season with low latency, 4k when offered, solid dvr, and reliable apps on a smart tv and phone. what should i look at?",
+  "[shortlist|Household core lineup|generic] can you give me 3 or 4 top options to anchor our household lineup for series and movies, with quick pros and cons?",
+  "[shortlist|Family with kids|generic] shortlist 3 kid-friendly options with strong parental controls and lots of animated shows, but still enough adult series for parents.",
+  "[shortlist|Carrier bundle activation|generic] i have a carrier perk to activate. give me a short list of a few common bundled subscriptions worth using for series and movies, plus what to check in the fine print when i turn it on.",
+  "[shortlist|Live sports season|generic] for this season, can you list 3 or 4 ways to watch most games without cable, prioritized for low delay, 4k availability, and device support for a living room tv and a phone?",
+  "[criteria|Household core lineup|generic] trying to pick a couple streamers for our home base. what should I actually weigh besides price? stuff like catalog depth, profiles, 4K, downloads, simultaneous streams, app reliability?",
+  "[criteria|Family with kids|generic] Kids are 4 and 8. What matters most for a family streaming service so I am not constantly policing it? solid parental controls, real kids profiles by age, disable autoplay, easy downloads for trips?",
+  "[criteria|Carrier bundle activation|generic] My phone plan includes a streaming perk. Before I activate it, what should I look for? is it tied to my number, can I link an existing account, which tier it unlocks, any traps with billing if I change carriers later?",
+  "[criteria|Live sports season|generic] Setting up for the season. What should I prioritize in a sports streamer? blackout rules and local access, 4K at 60fps, low latency, DVR depth, multiview, and honestly the feel of the broadcasts and pregame shows matter too.",
+  "[feature_screening|Live sports season|generic] Which streaming options actually support multiview (3-4 live games at once) and true 4K 60fps, plus a cloud DVR that lets me start from the beginning and fast forward through commercials on TV apps?",
+  "[use_case|Household core lineup|generic] Cutting cable. I want a simple setup: one main service for new series and movies, maybe one add-on for occasional sports, must work on two TVs and a couple iPads, easy for parents to use, and keep it under about 30 a month. How would you build that?",
+  "[use_case|Family with kids|generic] Road trips and after school screen time. Need a service where I can lock kids profiles to a 5-8 age range, turn off autoplay, download a bunch of episodes to tablets, and keep mature stuff off the home screen. What settings or picks make this painless?",
+  "[use_case|Carrier bundle activation|generic] I already pay for a streaming account, and my wireless plan now offers the same service free. How do I activate through the carrier without losing my watchlist or getting double billed, and can I switch it back if I change carriers?",
+  "[use_case|Live sports season|generic] Hosting watch nights this season. Two TVs inside plus a projector outside. I want low delay streams, multiview for early games, and a DVR that records every game for my team and lets me skip ads. Needs to work on a set-top box and a streaming stick. Walk me through the setup and settings to make that smooth.",
+  "[social_validation|-|generic] What do people actually rave about in their go-to streaming service right now? not specs on paper, the stuff that makes them feel good keeping it month after month.",
+  "[comparison|Household core lineup|Disney+] netflix or disney+ for our main household lineup? adults + occasional family night. where do they really differ, especially on originals and day-to-day stuff?",
+  "[comparison|Family with kids|Amazon Prime Video] For kids 6 and 9 plus parents, how does Netflix stack up against Amazon Prime Video? I care about kids profiles, parental controls, offline downloads for tablets, dubs/subs on cartoons, and how deep the kids library actually is.",
+  "[comparison|Carrier bundle activation|Hulu] My phone plan includes Hulu. If I activate it, do I still need Netflix or would Hulu cover most of our watching? What would I actually miss from Netflix that might make paying for both worth it?",
+  "[comparison|Live sports season|Max] Locking in my setup for the season. Between Netflix and Max, which fits better for sports nights and sports-adjacent stuff? Thinking live games vs shoulder programming, 4K availability, stream limits, latency feel on a big screen, and overall vibe for watch parties.",
+  "[objections|Household core lineup|generic] Netflix keeps creeping up in price and it's our most expensive app now. For a core household lineup, is it really earning its keep or should we rotate it off for a while?",
+  "[objections|Family with kids|generic] We mostly use Netflix for a couple kids shows and a weekend movie. Price is getting high for that. Is keeping Netflix for the kids a bad spend if we barely touch the rest?",
+  "[objections|Carrier bundle activation|generic] I just got a carrier bundle discounting our streaming. Keeping Netflix on top of that feels like I'm double paying. Is there a solid reason not to drop Netflix right now?",
+  "[objections|Live sports season|generic] I'm budgeting for the season and prices are up everywhere. If my priority is games and pregame shows, is Netflix worth keeping during the sports months or is that money better pushed to more sports-heavy options?",
+  "[pricing|Household core lineup|generic] What's a sensible monthly budget for a core streaming mix without overpaying, and do ad tiers usually come out cheaper than ad-free for a couple that watches about 10 hours a week?",
+  "[pricing|Family with kids|generic] For a family of 4 with two kid profiles, what's the cheapest Netflix plan that still allows two streams at once, 4K if possible, and downloads for a road trip? Do kids profiles show ads on the ad plan?",
+  "[pricing|Carrier bundle activation|generic] My wireless plan already covers one streaming service. If I add Netflix, is it cheaper to bill through the carrier or direct, and are there gotchas with promos or losing discounts later?",
+  "[pricing|Live sports season|generic] I only want subscriptions during the season. How low can I keep costs if I rotate month to month, and where does Netflix land on monthly price, 4K add-ons, and pausing or canceling without extra fees?",
+  "[churn_triggers|-|generic] I've had Netflix forever, but lately we finish one show then it just sits. Should I pause or cancel Netflix for a bit, or is there a smarter way to keep it without paying for weeks we don't use it?",
+  "[alternatives|-|defensive] thinking about canceling Netflix this month. if I bail, what services should I try instead so I'm not missing too much?",
+  "[alternatives|-|Disney+] If I drop Disney+, what should I get instead for family movies and some sci-fi and animated series?",
+  "[alternatives|-|Amazon Prime Video] I barely use Amazon Prime Video anymore. If I cancel it, what's a better service for movies and a few big original shows?",
+  "[alternatives|-|Hulu] My Hulu promo's ending and the price jumps. What should I switch to that covers current TV and lots of comedies?",
+  "[alternatives|-|Max] I'm pausing Max now that I finished the big HBO shows. What other service would scratch that prestige drama plus blockbuster movie vibe?",
+  "[renewal|-|generic] My Netflix renews next week. Is it still worth keeping at this price, or should I drop to the ad plan or swap to something cheaper for a bit?",
+  "[problem_resolution|-|generic] Netflix keeps throwing a \"too many people are watching\" error even when it's just me at home after that household change. How do I fix this so it works on my TV and my phone?",
+  "[expansion|-|generic] I'm happy with Netflix and thinking about upgrading to 4K and adding an extra member for my sister. Any gotchas, or a smarter way to set this up across two homes?",
+  "[ecosystem|-|generic] What apps or gadgets pair well with Netflix to make finding stuff easier and do watch parties? I've got a Roku in the living room, an older Samsung TV in the bedroom, and a laptop.",
+  "[advocacy|-|generic] My friend keeps saying Netflix isn't worth it anymore. How do I make a solid case for keeping it without sounding salesy? What points actually land?"
  ]
 }

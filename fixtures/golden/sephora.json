@@ -10,37 +10,37 @@
   "Nordstrom (beauty)"
  ],
  "capturedAt": "2026-09-16",
- "reviewedBy": "Claude (walk review 2026-09-15); not yet reviewed by Tyler",
+ "reviewedBy": "Claude via the v8/v9/v10 three-way diff, presented to Tyler 2026-09-16; not independently reviewed by Tyler",
  "base": {
-  "verifiability": "taste",
+  "verifiability": "spec",
   "involvement": "habitual",
-  "think_feel": "feel",
+  "think_feel": "think",
   "decision_unit": "solo",
   "rhythm": "replenishment",
   "risk": "performance",
   "channel_retail": true,
-  "rationale": "I grab the products that already work for me from a trusted, convenient store with fair prices and easy returns."
+  "rationale": "I buy where my products are in stock and authentic at a fair price, with strong rewards, fast delivery, and easy returns."
  },
  "scenarios": [
   {
-   "label": "Staple restock",
-   "description": "Buy known everyday items from the usual retailer, in store or online.",
+   "label": "Loyalty replenishment run",
+   "description": "Refills routine skincare and makeup at the usual retailer to earn points and use familiar perks.",
    "deviates": false
   },
   {
-   "label": "Seasonal sale stock-up",
-   "description": "Build a larger basket of familiar products during an event sale to save and earn points.",
+   "label": "Sale event stock-up",
+   "description": "Builds a basket during a major retailer promotion to maximize discounts and thresholds.",
    "deviates": false
   },
   {
-   "label": "Holiday gifting sets",
-   "description": "Pick retailer gift sets for easy presents, leaning on brand reputation and value.",
-   "deviates": false
-  },
-  {
-   "label": "Routine overhaul consult",
-   "description": "Shopper with a skin concern seeks advice and buys a rebuilt regimen across several products.",
+   "label": "In-store shade consult",
+   "description": "Goes to a store to test and match complexion shades with help or tools, then buys on the spot.",
    "deviates": true
+  },
+  {
+   "label": "New brand adoption",
+   "description": "Starts buying a newly discovered brand and chooses the retailer with availability, rewards, and returns they trust.",
+   "deviates": false
   }
  ],
  "stages": [
@@ -72,7 +72,7 @@
   {
    "key": "feature_screening",
    "label": "Feature screening",
-   "recommended": false
+   "recommended": true
   },
   {
    "key": "use_case",
@@ -86,7 +86,7 @@
   },
   {
    "key": "comparison",
-   "label": "Comparison",
+   "label": "Dupes & alternatives",
    "recommended": true
   },
   {
@@ -151,15 +151,16 @@
   }
  ],
  "cells": {
-  "count": 46,
-  "blind": 29,
-  "branded": 17,
+  "count": 49,
+  "blind": 28,
+  "branded": 21,
   "byStage": {
    "problem_recognition": 4,
    "category_education": 1,
    "discovery": 4,
    "shortlist": 4,
    "criteria": 4,
+   "feature_screening": 3,
    "use_case": 4,
    "social_validation": 1,
    "comparison": 4,
@@ -176,51 +177,54 @@
   }
  },
  "cellTexts": [
-  "[problem_recognition|Staple restock|generic] down to the last drops of my everyday stuff. need to replace it fast without blowing my budget. how do people handle this quickly?",
-  "[problem_recognition|Seasonal sale stock-up|generic] i try to time my refills around the big fall deals but i always miss the good ones and overbuy random things. how do i plan this so i actually save money?",
-  "[problem_recognition|Holiday gifting sets|generic] need a holiday gift for a teen who loves trying new looks. would love a one-and-done present that feels put together, not a bunch of mismatched bits. no idea what works together. help?",
-  "[problem_recognition|Routine overhaul consult|generic] i think my whole routine needs a reset. sensitive, fussy skin and i'm guessing wrong. i want a thoughtful consult from someone i can trust, not a sales pitch. how do i get that?",
-  "[category_education|-|generic] what do beauty retailers actually do beyond selling stuff? do they offer real consultations, shade matching, ingredient guidance, that kind of thing, or is that only at clinics or brand counters?",
-  "[discovery|Staple restock|generic] best places to quickly restock everyday makeup and skincare basics with reliable stock and fast pickup or shipping?",
-  "[discovery|Seasonal sale stock-up|generic] best places to shop the big seasonal beauty sales for stocking up - early access, stackable promos, solid rewards?",
-  "[discovery|Holiday gifting sets|generic] best stores for holiday makeup and skincare gift sets that look nice, don't feel cheap, and hit a few price points like under 50 and under 100?",
-  "[discovery|Routine overhaul consult|generic] best retailers for an in-depth routine overhaul consult - trained staff, ingredient-savvy, ability to sample before committing?",
-  "[shortlist|Staple restock|generic] give me 3 to 5 places to check for fast restocks of my everyday items, with good in-stock odds and easy returns.",
-  "[shortlist|Seasonal sale stock-up|generic] name 3 or 4 places that run strong seasonal sales for stocking up, with worthwhile rewards and early access.",
-  "[shortlist|Holiday gifting sets|generic] can you shortlist 3 good places to find nicely packaged holiday gift bundles for a beauty lover, across a couple price ranges?",
-  "[shortlist|Routine overhaul consult|generic] shortlist 3 retailers that do thoughtful, not-pushy consultations for a full routine reset, ideally with appointments and take-home samples.",
-  "[criteria|Staple restock|generic] restocking my go-to cleanser and mascara. what should i actually look for when deciding where to buy? like price drops, samples, shipping speed, points perks; anything i'm missing?",
-  "[criteria|Seasonal sale stock-up|generic] Big fall beauty sale coming up and I want to stock up. What matters most when picking where to do it so I don't get burned on exclusions or tiny point values? Early access, stacking promos, return windows?",
-  "[criteria|Holiday gifting sets|generic] I'm shopping holiday gift sets for a few people. How do I judge if a set is actually a good buy and not just cute packaging? Things like value per ounce, useful shades, return policy for gifts.",
-  "[criteria|Routine overhaul consult|generic] I'm overhauling my whole routine after a flare-up. What should I look for in a retailer if I want real guidance I can trust - solid consults, ingredient transparency, sampling before committing, and sane return rules?",
-  "[use_case|Staple restock|generic] out of SPF and my brow pencil, same shades as last time. i'd like to reorder fast and pick up today if possible. what's the quickest way to do this without getting upsold into a bunch of extras?",
-  "[use_case|Seasonal sale stock-up|generic] I do a once-a-season stock-up during the big sale. How should I plan it so I hit the best price and don't waste money? I've got shampoo, moisturizer, and vitamin C on the list, plus a couple backups.",
-  "[use_case|Holiday gifting sets|generic] need three holiday beauty sets: teacher gift under 30, sister who loves dewy skin, and a teen just getting into makeup. help me figure what to look for so they feel thoughtful and don't end up as clutter.",
-  "[use_case|Routine overhaul consult|generic] I want a consult to rebuild my AM/PM routine for combo skin and mild acne. I'm ingredient-conscious and nervous about irritation. How do I work with a retailer to map a routine, test a few things, and roll it in without wrecking my skin?",
-  "[social_validation|-|generic] where do beauty folks feel most seen? i keep hearing people rave about point hauls, birthday freebies, and in-store events. what's the vibe people actually identify with and brag about?",
-  "[comparison|Routine overhaul consult|Ulta Beauty] For a full skincare routine rebuild, Sephora or Ulta Beauty? I care about consult quality, ingredient education, sensitive-skin friendly brands, and whether I can return a product if it breaks me out. Any meaningful differences?",
-  "[comparison|Routine overhaul consult|Amazon (beauty)] Building a new routine: Sephora or Amazon for beauty? I'm weighing authenticity, samples to test before committing, good returns on opened skincare, and tools or people who can help me sequence products correctly.",
-  "[comparison|Routine overhaul consult|Target (beauty)] Trying to redo my routine on a realistic budget. Sephora vs Target's beauty section: how do they compare for in-store guidance, shade matching, skin analysis, and returns if something irritates me?",
-  "[comparison|Routine overhaul consult|Macy's (beauty)] For a deliberate, multi-step routine refresh, Sephora or Macy's beauty? Wondering about multi-brand consults vs individual counters, booking ease, return flexibility on used skincare, and loyalty perks that actually help.",
-  "[premium_worth|-|generic] i'm restocking staples and grabbing a couple holiday sets in the sale. for stuff like cleanser, mascara, vitamin c serum, and those makeup gift palettes - when is the expensive version actually better, and when is the cheap/store option good enough?",
-  "[objections|Staple restock|generic] real talk: when I buy basics at Sephora (mascara, brow gel, cleanser), do they actually perform better than drugstore, or am I just paying for the name? i need smudge-proof and no flaking.",
-  "[objections|Seasonal sale stock-up|generic] the Sephora sale always tempts me to stock up, but half the time the hyped stuff underperforms for me. how do I pick things at Sephora that actually last all day and won't break me out?",
-  "[objections|Holiday gifting sets|generic] are Sephora holiday gift sets the same formulas as the full sizes? i've heard minis or value sets don't perform the same. don't want to gift duds.",
-  "[objections|Routine overhaul consult|generic] if I redo my whole routine with Sephora picks, will I actually see better results or just nicer packaging? combo skin with acne marks. looking for proof the products perform, not just vibes.",
-  "[pricing|Staple restock|generic] for restocking basics, is Sephora pricing plus Beauty Insider points actually worth it, or am I better off with cheaper options for the same use rate? i don't really care about samples.",
-  "[pricing|Seasonal sale stock-up|generic] during big beauty sales, is it better value to grab jumbo sizes or multiples of regular? and any signs a discount isn't real savings?",
-  "[pricing|Holiday gifting sets|generic] are holiday beauty gift sets good value per ounce, or am I paying extra for minis and packaging? trying to keep it under $50 per person.",
-  "[pricing|Routine overhaul consult|generic] i'm rebuilding skincare and makeup from scratch. if I buy it all at Sephora, do Insider tier perks and sale events really offset higher prices, or should I mix in cheaper staples to keep the total down?",
-  "[churn_triggers|-|generic] i've shopped Sephora for years, but lately not sure it's still the right fit. fewer samples, points feel weaker, and results haven't wowed me. stick with it or change where I buy?",
-  "[alternatives|-|defensive] If I skip Sephora, where should I buy makeup and skincare instead? want legit products, good rewards, fast shipping.",
-  "[alternatives|-|Ulta Beauty] Alternatives to Ulta Beauty? Looking for similar brands and decent coupons, either online or in-store.",
-  "[alternatives|-|Amazon (beauty)] I don't want to order beauty stuff on Amazon. Safer alternatives that still ship fast?",
-  "[alternatives|-|Target (beauty)] Target's beauty section near me is always wiped out. Where else can I grab drugstore makeup and basic skincare without paying a fortune?",
-  "[alternatives|-|Macy's (beauty)] I usually buy cosmetics at Macy's. What other stores carry the same brands and still do the gift-with-purchase type promos?",
-  "[problem_resolution|-|generic] Sephora order shows delivered but there's nothing at my door. How do I get this fixed, and do I lose my Beauty Insider points I redeemed on it?",
-  "[expansion|-|generic] Been happy buying skincare at Sephora. Thinking of moving haircare and fragrance there too, good idea for points and returns, or better to split across stores?",
-  "[ecosystem|-|generic] What stacks well with Sephora? cash-back apps, price trackers, shade-matching tools, payment options like BNPL that actually work at checkout.",
-  "[advocacy|-|generic] How do I make the case for Sephora to a friend who says it's overpriced? I want talking points that aren't salesy.",
-  "[repertoire|-|generic] I hop between different beauty stores. Better to stick with one and build status, or keep chasing the best deal each time?"
+  "[problem_recognition|Loyalty replenishment run|generic] i'm down to the last drops of my everyday stuff and timing it wrong. i just want to refill quickly without getting gouged or waiting forever. where do i even start?",
+  "[problem_recognition|Sale event stock-up|generic] there's a sale coming and every time I either miss the deals or panic buy junk. need a way to stock up smart, not get stuck with backorders or pointless freebies.",
+  "[problem_recognition|In-store shade consult|generic] i cannot figure out what color actually looks right on my face. store lights say one thing, daylight says another, and those undertone labels make no sense. how do i choose with actual reasoning, not vibes?",
+  "[problem_recognition|New brand adoption|generic] seeing a new label everywhere and i'm tempted, but my skin throws tantrums. i don't want to waste money or risk a bad reaction. how do people try something new safely?",
+  "[category_education|-|generic] what is an in-store shade consultation, exactly? do they measure somehow or just eyeball it? how does it work, how long, and what do you walk out with?",
+  "[discovery|Loyalty replenishment run|generic] best place to restock my everyday skincare and makeup fast? looking for reliable inventory, quick pickup or shipping, and rewards that don't play games.",
+  "[discovery|Sale event stock-up|generic] best places to do a big beauty sale stock-up. i want real discounts, bundles that actually save money, and sane checkout, online or in person.",
+  "[discovery|In-store shade consult|generic] best spots for in-person shade matching that actually nail undertones. i care about consistent lighting, trained people who explain their reasoning, and an easy exchange if it looks off outside.",
+  "[discovery|New brand adoption|generic] where's the best place to try a new skincare brand for the first time? want sample sizes, clear ingredient info, and painless returns if my skin gets mad.",
+  "[shortlist|Loyalty replenishment run|generic] give me 3 or 4 places I can count on to refill my go-to items this week. fast shipping or easy pickup, decent rewards, minimal out-of-stock drama.",
+  "[shortlist|Sale event stock-up|generic] shortlist a few places worth hitting for a big sale weekend. need legit savings, useful gifts-with-purchase, and a checkout that doesn't crash.",
+  "[shortlist|In-store shade consult|generic] narrow it to a handful of stores for doing an in-person shade match. want folks who walk me through the why, good lighting, and a no-hassle exchange if the color misses.",
+  "[shortlist|New brand adoption|generic] name a few places to test-drive a new brand. ideally samples or travel sizes and easy returns, plus reviews that aren't obviously fake.",
+  "[criteria|Loyalty replenishment run|generic] restocking my go-to cleanser + SPF. what should i prioritize when picking where to buy - price, points, shipping speed, samples, return ease?",
+  "[criteria|Sale event stock-up|generic] big beauty sale coming up. when you're stocking up, what actually matters to compare? exclusions, stackable codes, price match, gifts with purchase, anything else?",
+  "[criteria|In-store shade consult|generic] heading in for a foundation shade consult. I'm picky about undertones and finish. what criteria help me choose the right counter - lighting quality, artist skill, shade range on the floor, return policy if it oxidizes?",
+  "[criteria|New brand adoption|generic] Trying a skincare brand I haven't used before. what should I weigh when picking where to buy - authenticity, sample options, ingredient info, return policy if I react?",
+  "[feature_screening|Loyalty replenishment run|generic] Which retailers let you set up auto-replenish on skincare and still earn full loyalty points, with the option to skip a shipment?",
+  "[feature_screening|Sale event stock-up|generic] Which places allow stacking: sale price + coupon + points redemption during beauty events, and show the final tally before checkout?",
+  "[feature_screening|New brand adoption|generic] Looking for stores that offer free returns on opened makeup within 30 days when trying a new brand, plus shade-matching tools (photo upload). who does that?",
+  "[use_case|Loyalty replenishment run|generic] I replace the same moisturizer every 8 weeks. I want it on a predictable cadence, keep my loyalty tier, and avoid stockouts. How should I set this up?",
+  "[use_case|Sale event stock-up|generic] Goal: stock up for six months during a beauty sale - vitamin C, cleanser, mascara. I want to dodge exclusions and max out freebies. How would you build the cart and timing?",
+  "[use_case|In-store shade consult|generic] Going in-store to get matched for a neutral-olive foundation. I want a natural-light check and to test for oxidation. How do I brief the artist, which swatches to do, and what to ask for in samples to compare at home?",
+  "[use_case|New brand adoption|generic] Sensitive skin, curious about a new retinol line. I want to try without committing. How do I use a retailer to do this - minis, patch-test samples, clear ingredient info, and a safe return window?",
+  "[social_validation|-|generic] Where are beauty shoppers actually buying skincare and makeup right now that consistently has tons of real reviews and high satisfaction? Any subreddits or communities I should scan before I pick a retailer?",
+  "[comparison|In-store shade consult|Ulta Beauty] For an in-store foundation match, Sephora vs Ulta Beauty: which tends to nail undertones better for olive combo skin? If Ulta is similar but cheaper on the same items, tell me; I care more about accuracy than perks.",
+  "[comparison|In-store shade consult|Amazon] I can pop into Sephora for a shade consult, but Amazon is fast. If I get matched at Sephora, any reason not to order on Amazon after, like shade consistency or third party seller issues? Which path gives me the most reliable result plus easy returns?",
+  "[comparison|In-store shade consult|Target] Target vs Sephora for in-person shade help: who actually swatches and talks undertones, and are there comparable products to test at Target to mimic what I'd try at Sephora? I want satin finish, medium coverage.",
+  "[comparison|In-store shade consult|Macy's] Sephora consult or Macy's counter for foundation match: which is better for neutral-cool undertones and avoiding oxidation in daylight? Any real advantage one way if I want to compare similar long wear formulas side by side?",
+  "[premium_worth|-|generic] Restocking staples and eyeing a sale to try something new: do premium moisturizers and serums truly outperform store brand versions in real use, or is the cheaper option fine if the actives and texture suit me? Combo skin, a bit sensitive.",
+  "[objections|Loyalty replenishment run|generic] I shop Sephora a lot, but performance-wise I've been let down by a few staff picks. Before I rebuy, how do I tell if a Sephora recommendation will actually deliver results versus just being trendy? Last cleanser left me tight and flaky.",
+  "[objections|Sale event stock-up|generic] About to stock up during the Sephora sale, but I'm worried I'm paying for hype that won't perform. Are the bestsellers there reliably effective, or should I only grab things I've already tested and seen work on my skin?",
+  "[objections|In-store shade consult|generic] My Sephora shade matches look perfect under store lights, then turn orange outside. How do I get a match there that actually holds in daylight and with formulas that oxidize? Olive neutral undertone.",
+  "[objections|New brand adoption|generic] Thinking of adopting a new line from Sephora, but I'm not convinced it will perform for the price. Fast way to vet whether it actually works before I commit to a full routine?",
+  "[pricing|Loyalty replenishment run|generic] I'm VIB at Sephora. For routine restocks, is the value better to buy there for points and the occasional 15 percent, or go direct where there are bundled gifts? Assume 2 skincare items a month and shipping thresholds matter.",
+  "[pricing|Sale event stock-up|generic] Sephora sale math: if I'm stocking up on moisturizer and concealer, is one jumbo with the discount better value than two regulars, and do holiday sets usually beat cost per ounce? Trying not to overpay for minis.",
+  "[pricing|In-store shade consult|generic] If I go in for a shade match, am I paying any premium to buy the foundation there versus ordering online later? Better value to grab samples, wear test, then wait for a sale before I commit?",
+  "[pricing|New brand adoption|generic] New brand trial: what's the most cost effective way to test, travel sizes or discovery sets, or just buy full size somewhere with easy returns? I care about cost per use and not wasting money.",
+  "[churn_triggers|-|generic] i've shopped Sephora for years but lately the points feel weaker and a bunch of my staples are out of stock online. is it still the smartest place to buy or should i rethink it?",
+  "[alternatives|-|defensive] If I stop buying from Sephora, where else is good for authentic makeup and skincare with solid shade range, easy returns, and decent rewards?",
+  "[alternatives|-|Ulta Beauty] Not into Ulta Beauty. What are good alternatives for wide beauty selection, testers in-store, and a rewards program that actually pays off?",
+  "[alternatives|-|Amazon] I want to stop ordering beauty on Amazon. Where should I buy makeup and skincare instead for authentic products, fast shipping, and simple returns?",
+  "[alternatives|-|Target] target's beauty aisle feels picked over lately. what are better places for affordable everyday makeup and skincare, with curbside or quick pickup?",
+  "[alternatives|-|Macy's] Macy's beauty counters aren't doing it for me. Who else carries similar prestige brands, decent gift-with-purchase, and reliable shipping?",
+  "[problem_resolution|-|generic] My Sephora in-store purchase didn't show up in my Beauty Insider points. How do I get the points added after the fact, and what proof do they need?",
+  "[expansion|-|generic] I mainly buy makeup at Sephora and it's been great. Thinking about moving skincare and hair there too. Does consolidating everything actually boost the value I get from rewards, samples, and auto-replenish?",
+  "[ecosystem|-|generic] What stacks well with shopping at Sephora? Looking for ways to combine cashback portals, credit card categories, browser extensions, and price alerts without making checkout a headache.",
+  "[advocacy|-|generic] A friend says Sephora is overpriced and the perks aren't worth it. How would you make a fair case for sticking with Sephora without sounding salesy?",
+  "[repertoire|-|generic] I split my beauty shopping: basics at the drugstore, splurges at Sephora. Is it worth moving more of the routine stuff to Sephora to level up rewards, or better to keep mixing where I buy?"
  ]
 }
