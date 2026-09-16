@@ -837,12 +837,12 @@ export function useGridSetup(a: GridSetupArgs) {
     const st = from ?? a.state;
     if (!st) return null;
     const countIn = (c: GridCellUi) => 1 + c.phrasings.filter((p) => p.text.trim()).length;
+    // Empty cells are included: a cell with ZERO paraphrases is almost
+    // always one whose write RESPONSE was lost while the server finished
+    // and cached the set ("finished work is kept") - excluding them left
+    // the footer's only button unable to heal exactly that cell.
     const idx = st.cells
-      .map((c, i) =>
-        c.text.trim() && c.phrasings.some((p) => p.text.trim()) && countIn(c) < PHRASING_COUNT
-          ? i
-          : -1
-      )
+      .map((c, i) => (c.text.trim() && countIn(c) < PHRASING_COUNT ? i : -1))
       .filter((i) => i >= 0);
     if (idx.length === 0) return st;
     a.setError(null);
@@ -858,9 +858,11 @@ export function useGridSetup(a: GridSetupArgs) {
           base: st.moderators, scenarios: st.scenarios,
           cells: [{ stage: c.stage, situation: c.situation, angle: c.angle, mode: c.mode ?? null, text: c.text }],
           count: PHRASING_COUNT,
-          // Without force the cache would return the same short set that
-          // created the gap.
-          force: true,
+          // A SHORT set must force: the cache holds the same short set that
+          // created the gap. An EMPTY cell must NOT force: its completed
+          // set is (almost always) already cached from the write whose
+          // response was lost - the non-forced read retrieves it for free.
+          force: c.phrasings.some((p) => p.text.trim()),
         });
         if (data) {
           const kept = [...c.phrasings];
