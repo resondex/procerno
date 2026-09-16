@@ -1109,9 +1109,10 @@ export async function reviewScenarioFit(input: {
 }): Promise<ScenarioFit> {
   const empty: ScenarioFit = { offPortfolio: [], missingCore: null };
   if (input.scenarios.length === 0) return empty;
-  // "scenario_fit2": missing_core reframed as a missing SCENARIO (line or
-  // occasion) with a strong null prior - fit1 suggested on every brand.
-  const key = cacheKey("scenario_fit2", [
+  // "scenario_fit3": bar softened to "would recommend adding" - fit2
+  // ("would insist") suppressed suggestions users would take (Doritos
+  // on-the-go), fit1 suggested on every brand.
+  const key = cacheKey("scenario_fit3", [
     input.brand, input.category,
     input.scenarios.map((s) => `${s.label.trim()}|${s.description.trim()}`).join("~"),
   ]);
@@ -1131,16 +1132,16 @@ export async function reviewScenarioFit(input: {
           "does not sell at all (the brand cannot win that buyer). Only " +
           "flag a clear mismatch - a scenario the brand serves indirectly " +
           "or partially is FINE. reason: one plain sentence.\n" +
-          "- missing_core: a scenario this set is INCOMPLETE without - a " +
-          "flagship product line with no scenario, or a buying occasion so " +
-          "central to how THIS brand is bought that a competent strategist " +
-          "would insist the study is wrong without it. Propose at most one " +
-          "(label 2-4 plain words, description one short sentence in buyer " +
-          "language). The bar is 'the study is incomplete', never 'this " +
-          "would also be plausible' - a merely reasonable addition is null. " +
-          "MOST scenario sets are complete: null is the expected answer.\n" +
-          "Be conservative on both fields: empty and null is the common, " +
-          "correct answer.",
+          "- missing_core: a scenario a competent strategist would " +
+          "RECOMMEND adding - a flagship product line with no scenario, or " +
+          "a buying occasion central to how THIS brand is bought that the " +
+          "set does not cover. Propose at most one (label 2-4 plain words, " +
+          "description one short sentence in buyer language). The bar is a " +
+          "real recommendation the strategist would defend, never brain" +
+          "storming - if nothing clearly earns a place, null. Many scenario " +
+          "sets are complete; null is a normal answer.\n" +
+          "Be conservative on off_portfolio: empty is the common, correct " +
+          "answer.",
       },
       {
         role: "user",
