@@ -361,13 +361,13 @@ export function namesAny(text: string, names: string[]): boolean {
 
 /** The base read, as editable dimensions. Changing one recomposes the mask
  * - pure code on the server, so it is instant. */
-export const MODERATOR_FIELDS: { key: string; options: [string, string][] }[] = [
-  { key: "verifiability", options: [["spec", "spec-driven"], ["taste", "taste-driven"], ["trust", "trust-driven"]] },
-  { key: "involvement", options: [["considered", "considered"], ["habitual", "habitual"]] },
-  { key: "think_feel", options: [["think", "rational"], ["feel", "identity-led"]] },
-  { key: "decision_unit", options: [["solo", "solo buyer"], ["household", "household"], ["committee", "committee-bought"]] },
-  { key: "rhythm", options: [["one_shot", "one-shot"], ["replenishment", "replenishment"], ["subscription", "subscription"]] },
-  { key: "risk", options: [["performance", "performance risk"], ["financial", "financial risk"], ["social", "social risk"], ["physical", "physical risk"]] },
+export const MODERATOR_FIELDS: { key: string; header: string; options: [string, string][] }[] = [
+  { key: "verifiability", header: "How they judge", options: [["spec", "spec-driven"], ["taste", "taste-driven"], ["trust", "trust-driven"]] },
+  { key: "involvement", header: "How much thought", options: [["considered", "considered"], ["habitual", "habitual"]] },
+  { key: "think_feel", header: "Head or heart", options: [["think", "rational"], ["feel", "identity-led"]] },
+  { key: "decision_unit", header: "Who decides", options: [["solo", "solo buyer"], ["household", "household"], ["committee", "committee-bought"]] },
+  { key: "rhythm", header: "How often", options: [["one_shot", "one-shot"], ["replenishment", "replenishment"], ["subscription", "subscription"]] },
+  { key: "risk", header: "Biggest worry", options: [["performance", "performance risk"], ["financial", "financial risk"], ["social", "social risk"], ["physical", "physical risk"]] },
 ];
 
 /** The four structural dimensions a scenario's journey can override. */
@@ -1308,7 +1308,9 @@ export function ScenariosGate({
       <div className="flex flex-wrap gap-2">
         {MODERATOR_FIELDS.map((f) => (
           <fieldset key={f.key} className="m-0 flex flex-col gap-1 border-0 p-0">
-            <legend className="sr-only">{f.key.replace("_", " ")}</legend>
+            <legend className="mb-0.5 px-1 text-[10px] font-semibold uppercase tracking-wide text-ink-3">
+              {f.header}
+            </legend>
             {f.options.map(([k, label]) => {
               const selected = String(state.moderators[f.key] ?? "") === k;
               return (
