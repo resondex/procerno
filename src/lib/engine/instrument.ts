@@ -1192,7 +1192,11 @@ export async function reviewJourneyFit(input: {
   meta?: CacheMeta;
 }): Promise<JourneyFit> {
   const dims = ["verifiability", "involvement", "think_feel", "decision_unit", "rhythm", "risk"] as const;
-  const key = cacheKey("journey_fit1", [
+  // "journey_fit2": reasons framed against the market norm and hinged on
+  // audience width - the read isn't wrong, it's the category's; whether
+  // to depart depends on whether the user measures the brand's own
+  // buyers or the market at large.
+  const key = cacheKey("journey_fit2", [
     input.brand, input.category,
     dims.map((d) => String(input.base[d])).join("|"),
   ]);
@@ -1218,7 +1222,15 @@ export async function reviewJourneyFit(input: {
           "or big; only when its buyers' PROCESS differs. At most TWO " +
           "suggestions; MOST brands match their category, and an empty " +
           "list is the common, correct answer. suggested must be a valid " +
-          "value for that dimension. reason: one plain sentence.\n" +
+          "value for that dimension.\n" +
+          "reason: one plain sentence framed against the MARKET NORM - " +
+          "the current setting is the category's norm, not a mistake, so " +
+          "say what the brand's buyers do differently and make clear the " +
+          "choice depends on whether the user is measuring this brand's " +
+          "own buyers or the category at large. Example shape: 'X appears " +
+          "to sell mostly by subscription, so if you are measuring X's " +
+          "own buyers rather than the wider market, subscription may fit " +
+          "better than the market-norm replenishment.'\n" +
           "Voice: this is ADVICE the user weighs, never a verdict. Write " +
           "every reason tentatively - 'appears to', 'may', 'tends to' - " +
           "and never declare the read wrong.",

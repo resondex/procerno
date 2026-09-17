@@ -1399,48 +1399,6 @@ export function ScenariosGate({
       <span className="text-sm font-semibold uppercase tracking-wide text-primary">
         How they generally decide
       </span>
-      {/* Always visible: one COLUMN per dimension, its options stacked
-       * vertically as uniform pills - the unselected never hide, and the
-       * read is edited in place. */}
-      <div className="flex flex-wrap gap-2">
-        {MODERATOR_FIELDS.map((f) => (
-          <fieldset key={f.key} className="m-0 flex flex-col gap-1 border-0 p-0">
-            <legend className="mb-0.5 w-32 text-center text-[10px] font-semibold uppercase tracking-wide text-ink-3">
-              {f.header}
-            </legend>
-            {f.options.map(([k, label]) => {
-              const selected = String(state.moderators[f.key] ?? "") === k;
-              return (
-                <label
-                  key={k}
-                  className={
-                    "w-32 cursor-pointer rounded-full px-2 py-1 text-center text-[11px] font-medium " +
-                    (selected
-                      ? "bg-primary text-white"
-                      : "bg-primary-soft text-primary hover:opacity-80")
-                  }
-                >
-                  <input
-                    type="radio"
-                    name={`read-${f.key}`}
-                    value={k}
-                    checked={selected}
-                    disabled={busy}
-                    onChange={() =>
-                      onRecomposeBase({ ...state.moderators, [f.key]: k }, rows)
-                    }
-                    className="sr-only"
-                  />
-                  {label}
-                </label>
-              );
-            })}
-          </fieldset>
-        ))}
-      </div>
-      {readDelta && (
-        <p className="text-[12px] text-primary font-medium">{readDelta}</p>
-      )}
       {(() => {
         // Only suggestions still pointing away from the current read - an
         // applied (or hand-set) one disappears on its own.
@@ -1483,6 +1441,48 @@ export function ScenariosGate({
           </div>
         );
       })()}
+      {/* Always visible: one COLUMN per dimension, its options stacked
+       * vertically as uniform pills - the unselected never hide, and the
+       * read is edited in place. */}
+      <div className="flex flex-wrap gap-2">
+        {MODERATOR_FIELDS.map((f) => (
+          <fieldset key={f.key} className="m-0 flex flex-col gap-1 border-0 p-0">
+            <legend className="mb-0.5 w-32 text-center text-[10px] font-semibold uppercase tracking-wide text-ink-3">
+              {f.header}
+            </legend>
+            {f.options.map(([k, label]) => {
+              const selected = String(state.moderators[f.key] ?? "") === k;
+              return (
+                <label
+                  key={k}
+                  className={
+                    "w-32 cursor-pointer rounded-full px-2 py-1 text-center text-[11px] font-medium " +
+                    (selected
+                      ? "bg-primary text-white"
+                      : "bg-primary-soft text-primary hover:opacity-80")
+                  }
+                >
+                  <input
+                    type="radio"
+                    name={`read-${f.key}`}
+                    value={k}
+                    checked={selected}
+                    disabled={busy}
+                    onChange={() =>
+                      onRecomposeBase({ ...state.moderators, [f.key]: k }, rows)
+                    }
+                    className="sr-only"
+                  />
+                  {label}
+                </label>
+              );
+            })}
+          </fieldset>
+        ))}
+      </div>
+      {readDelta && (
+        <p className="text-[12px] text-primary font-medium">{readDelta}</p>
+      )}
       <span className="mt-3 text-sm font-semibold uppercase tracking-wide text-primary">
         Who&apos;s generally buying
       </span>
