@@ -212,6 +212,11 @@ export interface GridState {
   /** Journey-fit advisory, same contract - suggestions self-resolve once
    * applied (the recomposed base matches, so the server drops them). */
   journeyFit?: JourneyFitUi | null;
+  /** The scenario view in hand before a forBrand rebuild - "Back to the
+   * category view" restores it (rows AND reserve, so "Suggest another"
+   * draws from the right pool). The base read is never part of this:
+   * a rebuild changes scenarios only. */
+  preRebuild?: { rows: ScenarioRow[]; reserve?: { label: string; description: string }[] } | null;
   /** Fingerprints (label|description) of user-authored scenarios that
    * PASSED the quality check, persisted with the draft so unchanged rows
    * are never rechecked. Deliberately excludes "keep mine" choices - a
@@ -460,6 +465,11 @@ export function useGridSetup(a: GridSetupArgs) {
     /** Caller owns the busy indicator (it is running this alongside
      * something else); errors still surface. */
     silent?: boolean;
+    /** Restore path: the reserve pool to reinstate alongside the rows. */
+    reserve?: { label: string; description: string }[];
+    /** undefined = carry the current view's preRebuild through the edit;
+     * null = clear it (restoring the category view). */
+    preRebuild?: GridState["preRebuild"];
   }, forBrand = false): Promise<GridState | null> {
     if (!edit?.silent) {
       a.setBusy(
@@ -487,8 +497,55 @@ export function useGridSetup(a: GridSetupArgs) {
           }
         : {}),
     });
+    if (!data) {
+      if (!edit?.silent) a.setBusy(null);
+      return null;
+    }
+    // A brand rebuild changes SCENARIOS ONLY. "How they generally decide"
+    // is the market's decision structure - and may carry the user's own
+    // pill edits - so the forBrand read's re-rolled base is discarded and
+    // the mask is recomposed against the base in hand (pure code,
+    // instant). The view being replaced is kept for "Back to the
+    // category view"; the journey advisory stays one-shot.
+    if (forBrand && !edit && a.state) {
+      const keptBase = a.state.moderators;
+      const masked = await post<{
+        scenarios: { label: string; description: string; journey: Journey | null }[];
+        stages: GridStage[];
+      }>("/api/setup/grid/compose", {
+        brand: a.brand,
+        category: a.category,
+        audience: a.audience || undefined,
+        base: keptBase,
+        scenarios: data.scenarios.map(({ label, description, journey }) => ({ label, description, journey })),
+      });
+      a.setBusy(null);
+      if (!masked) return null;
+      const next: GridState = withScenarioRows(
+        {
+          step: "compose",
+          moderators: keptBase,
+          stages: masked.stages,
+          keptStages: masked.stages.filter((s) => s.recommended).map((s) => s.key),
+          // Fit advises on the AWARE set (the fresh read computed it);
+          // journey advice never refreshes here - the base didn't move.
+          fit: data.fit ?? a.state.fit ?? null,
+          journeyFit: a.state.journeyFit ?? null,
+          scenarios: [],
+          reserve: data.reserve,
+          reviewedScenarios: a.state.reviewedScenarios,
+          cells: [],
+          preRebuild: a.state.preRebuild ?? {
+            rows: scenarioRows(a.state),
+            reserve: a.state.reserve,
+          },
+        },
+        rowsFromSuggested(masked.scenarios, cap)
+      );
+      a.setState(next);
+      return next;
+    }
     if (!edit?.silent) a.setBusy(null);
-    if (!data) return null;
     let rows: ScenarioRow[];
     if (edit) {
       // Keep the user's table (ticks, custom rows, off rows); take the
@@ -509,10 +566,18 @@ export function useGridSetup(a: GridSetupArgs) {
         fit: data.fit ?? a.state?.fit ?? null,
         journeyFit: data.journeyFit ?? a.state?.journeyFit ?? null,
         scenarios: [],
-        // An edited recompose returns no reserve; the pool carries over,
-        // as do the already-checked scenario fingerprints. Custom
-        // questions survive the recompose (a fresh read wipes everything).
-        reserve: data.reserve ?? a.state?.reserve,
+        // An edited recompose returns no reserve; the pool carries over
+        // (or the restore's explicit pool), as do the already-checked
+        // scenario fingerprints. Custom questions survive the recompose
+        // (a fresh read wipes everything).
+        reserve: data.reserve ?? edit?.reserve ?? a.state?.reserve,
+        // A pill edit inside the brand view keeps the way back; a fresh
+        // read (or an explicit null from the restore) clears it.
+        preRebuild: edit
+          ? edit.preRebuild !== undefined
+            ? edit.preRebuild
+            : a.state?.preRebuild ?? null
+          : null,
         reviewedScenarios: a.state?.reviewedScenarios,
         baselineCellCount: edit ? 0 : undefined,
         cells: edit ? (edit.cells ?? a.state?.cells ?? []).filter((c) => c.custom) : [],
@@ -1199,11 +1264,26 @@ export function useGridSetup(a: GridSetupArgs) {
     }
   }
 
+  /** Undo a forBrand rebuild: reinstate the scenario view (rows and
+   * reserve pool) that was in hand before it. Pure-code recompose - the
+   * base was never changed by the rebuild, so nothing else moves. */
+  function restoreCategoryView(): void {
+    const pr = a.state?.preRebuild;
+    if (!a.state || !pr) return;
+    void compose({
+      base: a.state.moderators,
+      rows: pr.rows,
+      cells: a.state.cells,
+      reserve: pr.reserve,
+      preRebuild: null,
+    });
+  }
+
   return {
     compose, writeCells, writePhrasings, topUpPhrasings, suggestScenario, nearScenario,
     suggestCell, addOwnCell,
     prefetchNearPools, warmRead, warmCells, warmPhrasings,
-    regenerateCell, cycleCell,
+    regenerateCell, cycleCell, restoreCategoryView,
   };
 }
 
@@ -1241,6 +1321,7 @@ function TagChip({ tag }: { tag: GridStage["tag"] }) {
 export function ScenariosGate({
   state, setState, onRecompose, onRecomposeBase, onSuggestScenario, onNearScenario, onWarmReview, busy,
   maxScenarios = MAX_SCENARIOS, readDelta, fitBrand, fitCategory, onRebuildForBrand,
+  onBackToCategory,
 }: {
   state: GridState;
   setState: (s: GridState) => void;
@@ -1265,6 +1346,8 @@ export function ScenariosGate({
   /** Rebuild the scenario read brand-aware - offered when the advisory
    * finds the shared category read gave this brand rooms it can't win. */
   onRebuildForBrand?: () => void;
+  /** Undo a forBrand rebuild - restores the category scenario view. */
+  onBackToCategory?: () => void;
 }) {
   // ONE-SHOT advisory: computed with the compose, shown for the set as
   // composed, never refetched on edits - accepting its suggestion must
@@ -1411,8 +1494,23 @@ export function ScenariosGate({
        * flags - the blind-vs-aware comparison (2026-09-16) showed the
        * brand-aware read finds rooms the category read cannot (Nest's
        * thermostats, Netflix's win-back). The banner keeps its own copy
-       * of the link for the case where the set is clearly off. */}
-      {onRebuildForBrand && fitBrand && (
+       * of the link for the case where the set is clearly off. Inside the
+       * brand view the line turns into the way back, so trying the
+       * rebuild is a peek, never a commitment. */}
+      {state.preRebuild && onBackToCategory ? (
+        <p className="m-0 text-[12px] text-ink-3">
+          These scenarios are rebuilt around {fitBrand} - occasions it
+          competes in.{" "}
+          <button
+            type="button"
+            disabled={busy}
+            onClick={onBackToCategory}
+            className="font-semibold text-primary hover:opacity-80 disabled:opacity-40"
+          >
+            Back to the category view
+          </button>
+        </p>
+      ) : onRebuildForBrand && fitBrand ? (
         <p className="m-0 text-[12px] text-ink-3">
           These scenarios describe the category at large. You can also{" "}
           <button
@@ -1425,7 +1523,7 @@ export function ScenariosGate({
           </button>{" "}
           - a fresh read focused on occasions it competes in.
         </p>
-      )}
+      ) : null}
       {showFit && (
         <div className="rounded-lg border border-amber-300/60 bg-amber-50 p-3 text-[12px] text-amber-900 grid gap-1.5 dark:bg-amber-950/30 dark:text-amber-200 dark:border-amber-700/50">
           <div className="flex items-start justify-between gap-2">

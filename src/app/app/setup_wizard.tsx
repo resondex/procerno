@@ -1351,6 +1351,7 @@ export function SetupWizard({ mode, brand, draft, engineOptions, onClose, onCrea
               fitBrand={brand}
               fitCategory={category}
               onRebuildForBrand={() => void gridApi.compose(undefined, true)}
+              onBackToCategory={() => gridApi.restoreCategoryView()}
             />
           )}
           {step === "scenarios" && review && (
