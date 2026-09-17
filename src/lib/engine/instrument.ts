@@ -1,5 +1,5 @@
 import { createHash } from "crypto";
-import { openaiClient } from "./providers";
+import { anthropicClient, openaiClient } from "./providers";
 import { store } from "../store";
 import type { CacheMeta } from "../types";
 
@@ -27,6 +27,14 @@ const MODEL = process.env.SUGGEST_MODEL ?? "gpt-5-mini";
  * category carrying the most leverage in the pipeline - mini's economy
  * is for the high-volume mechanical calls (cells, phrasings, variants). */
 const READ_MODEL = process.env.READ_MODEL ?? "gpt-5";
+/** The base-journey CLASSIFICATION runs on Claude Opus, split from the
+ * scenario write: a 108-call cross-model matrix (2026-09-16, the four
+ * contested walks x v8/v10/v11 x haiku/sonnet/opus) showed Claude the
+ * stronger dimension classifier (Opus 23/24 rep-consistent under v11,
+ * unanimous on the athena and Pixel boundary cases) while its scenario
+ * labels run too vivid for client-facing copy - so Claude classifies,
+ * gpt-5 keeps writing. One cached call per category, cost-negligible. */
+const JOURNEY_MODEL = process.env.JOURNEY_MODEL ?? "claude-opus-5";
 /** The cell writer also runs on the full model: the 52-odd seeds are the
  * DESIGNED questions every paraphrase imitates - one-time, cached, cheap.
  * Paraphrase volume stays on mini. */
@@ -501,11 +509,12 @@ function sameJourney(base: Moderators, j: Journey): boolean {
   );
 }
 
-const READ_SCHEMA = {
+/** The scenario write's schema - the base journey is classified
+ * separately (classifyJourney) and given to the writer, not returned. */
+const SCENARIOS_SCHEMA = {
   type: "object",
   additionalProperties: false,
   properties: {
-    base: MODERATOR_SCHEMA,
     scenarios: {
       type: "array",
       items: {
@@ -531,7 +540,7 @@ const READ_SCHEMA = {
       },
     },
   },
-  required: ["base", "scenarios"],
+  required: ["scenarios"],
 } as const;
 
 /** Scenarios the fresh grid opens with; the rest are the reserve pool that
@@ -546,6 +555,47 @@ const CORE_SCENARIOS = 4;
  * grid in code (A4), and granted only in the core set - reserve scenarios
  * always inherit the base journey, like user suggestions.
  */
+/** The base journey, classified by Claude (see JOURNEY_MODEL). Opus 5
+ * takes adaptive thinking, which cannot be combined with a FORCED tool
+ * call - so the tool stays auto with a hard instruction, and a JSON
+ * fallback parse covers the rare prose reply. */
+async function classifyJourney(input: {
+  category: string;
+  audience: string | null;
+}): Promise<Moderators> {
+  const a = await anthropicClient();
+  const res = await a.messages.create({
+    model: JOURNEY_MODEL,
+    max_tokens: 16000,
+    thinking: { type: "adaptive" },
+    output_config: { effort: "high" },
+    system:
+      "Classify a purchase category on seven decision-structure " +
+      "dimensions, for designing a research instrument over its buying " +
+      "decision.\n" + DIMENSION_GUIDE +
+      "- rationale: ONE sentence justifying the overall read, in plain " +
+      "buyer language.\n" +
+      "Respond ONLY by calling the base_journey tool - no prose.",
+    tools: [{
+      name: "base_journey",
+      description: "Return the category's base decision-structure read.",
+      input_schema: MODERATOR_SCHEMA as never,
+    }],
+    tool_choice: { type: "auto" },
+    messages: [{
+      role: "user",
+      content: `Category: ${input.category}\nAudience: ${input.audience ?? "unknown"}`,
+    }],
+  } as never);
+  const blocks = (res as { content: { type: string; input?: unknown; text?: string }[] }).content;
+  const tool = blocks.find((b) => b.type === "tool_use");
+  if (tool?.input) return tool.input as Moderators;
+  const text = blocks.filter((b) => b.type === "text").map((b) => b.text ?? "").join("");
+  const m = text.match(/\{[\s\S]*\}/);
+  if (m) return JSON.parse(m[0]) as Moderators;
+  throw new Error("journey classification returned no tool call");
+}
+
 export async function readScenarios(input: {
   category: string;
   audience: string | null;
@@ -560,10 +610,11 @@ export async function readScenarios(input: {
   noWait?: boolean;
   meta?: CacheMeta;
 }): Promise<{ base: Moderators; scenarios: ScenarioSpec[]; reserve: ScenarioSpec[] } | null> {
-  // "scenarios_journeys11": tightened verifiability/rhythm boundary rules
-  // in DIMENSION_GUIDE (the athena trust/spec/taste split). v10 dropped
-  // the frequency rule; forBrand mode unchanged.
-  const key = cacheKey("scenarios_journeys11", [
+  // "scenarios_journeys12": the read is SPLIT - Claude Opus classifies
+  // the base journey (see JOURNEY_MODEL), gpt-5 writes the scenarios
+  // against that given base. v11 tightened the guide boundaries; the
+  // guide and scenario rules are unchanged here.
+  const key = cacheKey("scenarios_journeys12", [
     input.category, input.audience, input.forBrand ?? "",
   ]);
   const read = await coalesced<{
@@ -571,6 +622,7 @@ export async function readScenarios(input: {
     scenarios: ScenarioSpec[];
     reserve: ScenarioSpec[];
   }>(key, { noWait: input.noWait, meta: stampOf(input) }, async () => {
+  const base = await classifyJourney(input);
   const res = await openaiClient().chat.completions.create({
     model: READ_MODEL,
     messages: [
@@ -578,11 +630,10 @@ export async function readScenarios(input: {
         role: "system",
         content:
           "Read a purchase market for a research instrument over its buying " +
-          "decision. Return:\n" +
-          "1) base: the market's dominant decision-structure read on seven " +
-          "dimensions:\n" + DIMENSION_GUIDE +
-          "- rationale: ONE sentence in plain buyer language.\n" +
-          "2) scenarios: EIGHT buying scenarios, ordered most to least " +
+          "decision. The market's base decision-structure read is GIVEN " +
+          "below - take it as fixed. Its dimensions:\n" + DIMENSION_GUIDE +
+          "Return:\n" +
+          "1) scenarios: EIGHT buying scenarios, ordered most to least " +
           "central to the market - the first 4 are the core set a " +
           "strategist would field; the rest are credible alternates a user " +
           "might swap in. A scenario earns its place " +
@@ -595,7 +646,7 @@ export async function readScenarios(input: {
           "Descriptions one short sentence. Scenarios describe circumstances, never a specific brand or product - 'migrating from a legacy tracker', not 'migrating from X'. Spend the " +
           "slots on DIFFERENT axes of circumstance (scale, composition, " +
           "constraint, occasion, recipient), not variants of one.\n" +
-          "3) per scenario, deviates: true ONLY if that scenario's buyer " +
+          "2) per scenario, deviates: true ONLY if that scenario's buyer " +
           "DECIDES BY A DIFFERENT PROCESS than the base - differing on " +
           "involvement, verifiability, think_feel, or decision_unit. " +
           "Judge each scenario fresh from its own facts, dimension by " +
@@ -650,19 +701,18 @@ export async function readScenarios(input: {
         role: "user",
         content:
           `Category: ${input.category}\nAudience: ${input.audience ?? "unknown"}` +
+          `\nBase read (given): ${JSON.stringify(base)}` +
           (input.forBrand ? `\nFielded for brand: ${input.forBrand}` : ""),
       },
     ],
     response_format: {
       type: "json_schema",
-      json_schema: { name: "market_read", strict: true, schema: READ_SCHEMA },
+      json_schema: { name: "market_read", strict: true, schema: SCENARIOS_SCHEMA },
     },
   });
   const parsed = JSON.parse(res.choices[0]?.message?.content ?? "{}") as {
-    base: Moderators;
     scenarios: { label: string; description: string; deviates: boolean; journey: Journey }[];
   };
-  const base = parsed.base;
   let deltaGranted = false;
   const all: ScenarioSpec[] = (parsed.scenarios ?? [])
     .slice(0, 8)
