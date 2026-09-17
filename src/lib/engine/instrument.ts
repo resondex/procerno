@@ -2423,7 +2423,31 @@ export async function generatePhrasings(input: {
     for (const c of parsed.cells ?? []) {
       const seed = subset[c.index];
       if (!seed) continue;
-      const sig = brandSignature(seed.text, input.brand, rivals);
+      // The signature matcher for the cell's OWN angle brand also accepts
+      // the label's distinctive first word: a seed written "Sephora or
+      // Ulta" never registered "Ulta Beauty", so every candidate that
+      // named the rival properly carried a bigger signature and ALL were
+      // discarded (the cell served 1/10 through every dial). Scoped to
+      // the angle brand - where context makes the shorthand unambiguous -
+      // and applied to seed and candidate alike, a stray match can only
+      // add a brand both sides already carry. Blind counting elsewhere
+      // keeps the strict matcher.
+      const angle = seed.angle.trim().toLowerCase();
+      const namesForSig = (text: string, b: string) => {
+        if (namesBrandWord(text, b)) return true;
+        if (b.trim().toLowerCase() !== angle) return false;
+        const first = primaryBrandName(b).split(/\s+/)[0] ?? "";
+        if (first.length < 4 || first.toLowerCase() === b.trim().toLowerCase()) return false;
+        const esc = first.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+        return new RegExp(`(?:^|[^a-z0-9])${esc}(?:$|[^a-z0-9])`, "i").test(text);
+      };
+      const sigOf = (text: string) =>
+        [input.brand, ...rivals]
+          .map((b) => b.trim().toLowerCase())
+          .filter((b, i) => b && namesForSig(text, [input.brand, ...rivals][i]))
+          .sort()
+          .join("|");
+      const sig = sigOf(seed.text);
       const prior = opts?.have?.[c.index] ?? [];
       const seen = new Set<string>([norm(seed.text), ...prior.map((p) => norm(p.text))]);
       const keptWords: Set<string>[] = [contentWords(seed.text), ...prior.map((p) => contentWords(p.text))];
@@ -2433,7 +2457,7 @@ export async function generatePhrasings(input: {
         if (!text) continue;
         // The signature check is the blind/branded discipline: a paraphrase of
         // a blind seed that names a brand is not a paraphrase, it is a leak.
-        if (brandSignature(text, input.brand, rivals) !== sig) continue;
+        if (sigOf(text) !== sig) continue;
         const n = norm(text);
         if (seen.has(n)) continue;
         // A paraphrase that shares most of its words with the seed or a sibling
