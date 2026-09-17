@@ -2434,7 +2434,21 @@ export async function generatePhrasings(input: {
       // keeps the strict matcher.
       const angle = seed.angle.trim().toLowerCase();
       const namesForSig = (text: string, b: string) => {
-        if (namesBrandWord(text, b)) return true;
+        // A single short capitalized brand form ("Max", "Visa", "Citi")
+        // is also an ordinary English word, and the case-blind matcher
+        // poisoned signatures with it: a blind seed saying "2-3 services
+        // max" carried sig {Max (HBO)}, so every honest blind candidate
+        // was discarded for not naming Max - this cell lived at 2/10 for
+        // its whole history. Such forms match case-SENSITIVELY here;
+        // longer or lowercase-branded forms (Purple, jira) keep the
+        // insensitive match so casual typing still registers. Signature
+        // scope only - blind counting elsewhere is unchanged.
+        const forms = [b, primaryBrandName(b)].filter((f, i, a) => f && a.indexOf(f) === i);
+        for (const f of forms) {
+          const esc = f.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+          const caseSensitive = /^[A-Z][a-z]{1,4}$/.test(f);
+          if (new RegExp(`(?:^|[^a-z0-9])${esc}(?:$|[^a-z0-9])`, caseSensitive ? "" : "i").test(text)) return true;
+        }
         if (b.trim().toLowerCase() !== angle) return false;
         const first = primaryBrandName(b).split(/\s+/)[0] ?? "";
         if (first.length < 4 || first.toLowerCase() === b.trim().toLowerCase()) return false;
