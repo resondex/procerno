@@ -226,6 +226,11 @@ export interface GridState {
    * draws from the right pool). The base read is never part of this:
    * a rebuild changes scenarios only. */
   preRebuild?: { rows: ScenarioRow[]; reserve?: { label: string; description: string }[] } | null;
+  /** Stage keys added via the journey advisory's "keep the market view"
+   * action, per dimension. Powers the banner's Undo AND the coverage
+   * map: these stages are a brand-level recommendation, never labeled
+   * "not recommended" (the rules' skip is about the market at large). */
+  journeyStageAdds?: Record<string, { key: string; label: string }[]>;
   /** Fingerprints (label|description) of user-authored scenarios that
    * PASSED the quality check, persisted with the draft so unchanged rows
    * are never rechecked. Deliberately excludes "keep mine" choices - a
@@ -548,6 +553,7 @@ export function useGridSetup(a: GridSetupArgs) {
             rows: scenarioRows(a.state),
             reserve: a.state.reserve,
           },
+          journeyStageAdds: a.state.journeyStageAdds,
         },
         rowsFromSuggested(masked.scenarios, cap)
       );
@@ -587,6 +593,8 @@ export function useGridSetup(a: GridSetupArgs) {
             ? edit.preRebuild
             : a.state?.preRebuild ?? null
           : null,
+        // Advisory stage-adds ride through edits; a fresh read resets.
+        journeyStageAdds: edit ? a.state?.journeyStageAdds : undefined,
         reviewedScenarios: a.state?.reviewedScenarios,
         baselineCellCount: edit ? 0 : undefined,
         cells: edit ? (edit.cells ?? a.state?.cells ?? []).filter((c) => c.custom) : [],
@@ -1367,10 +1375,10 @@ export function ScenariosGate({
   const [fitDismissed, setFitDismissed] = useState(false);
   const journeyFit = state.journeyFit ?? null;
   const [journeyFitDismissed, setJourneyFitDismissed] = useState(false);
-  /** Stage keys added via the advisory's "keep the market view" action,
-   * per dimension - the line's Undo removes exactly these and no more
-   * (a coverage-map tick the user made themselves is never touched). */
-  const [journeyStageAdds, setJourneyStageAdds] = useState<Record<string, { key: string; label: string }[]>>({});
+  // Advisory stage-adds live in GridState (survive step changes and
+  // recomposes); Undo removes exactly these and no more - a coverage-map
+  // tick the user made themselves is never touched.
+  const journeyStageAdds = state.journeyStageAdds ?? {};
   const cap = maxScenarios;
   const rows = scenarioRows(state);
   const active = rows.filter((r) => r.on);
@@ -1464,10 +1472,10 @@ export function ScenariosGate({
                 // map offers, so it survives recomposes. No model call,
                 // no read change; remembered per dimension for Undo.
                 const added = addable.filter((st) => !state.keptStages.includes(st.key));
-                setJourneyStageAdds((prev) => ({ ...prev, [s.dimension]: added }));
                 setState({
                   ...state,
                   keptStages: [...state.keptStages, ...added.map((st) => st.key)],
+                  journeyStageAdds: { ...journeyStageAdds, [s.dimension]: added },
                 });
               };
               return (
@@ -1511,14 +1519,12 @@ export function ScenariosGate({
                     disabled={busy}
                     onClick={() => {
                       const keys = new Set(added.map((st) => st.key));
-                      setJourneyStageAdds((prev) => {
-                        const next = { ...prev };
-                        delete next[s.dimension];
-                        return next;
-                      });
+                      const next = { ...journeyStageAdds };
+                      delete next[s.dimension];
                       setState({
                         ...state,
                         keptStages: state.keptStages.filter((k) => !keys.has(k)),
+                        journeyStageAdds: next,
                       });
                     }}
                     className="rounded-full border border-amber-400/70 px-2 py-0.5 font-medium hover:bg-amber-100 dark:hover:bg-amber-900/40"
@@ -2030,9 +2036,16 @@ export function CoverageGate({
   const activeLabels = active.map((r) => r.label);
   const kept = new Set(state.keptStages);
   const hidden = state.stages.filter((s) => !s.recommended && !kept.has(s.key));
+  // Stages the journey advisory added are a BRAND-level recommendation:
+  // the rules' "not recommended" is about the market at large, so these
+  // rows carry their own positive label instead.
+  const advisoryKeys = new Set(
+    Object.values(state.journeyStageAdds ?? {}).flat().map((a) => a.key)
+  );
 
   const renderRow = (s: GridStage) => {
     const isKept = kept.has(s.key);
+    const brandAdd = advisoryKeys.has(s.key) && isKept;
     const cols = stageColumns(s, activeLabels);
     const effective = cols.length > 0 ? cols : activeLabels;
     return (
@@ -2061,9 +2074,11 @@ export function CoverageGate({
                   x: Math.min(r.left, window.innerWidth - 340),
                   y: r.bottom + 6,
                   hint: s.hint ?? "",
-                  verdict: s.why
-                    ? `${s.recommended ? "Recommended" : "Not recommended"}: ${s.why}`
-                    : "",
+                  verdict: brandAdd
+                    ? "Recommended for your brand: added from the buyer-difference advisory - your brand's buyers reach this stage even though the market at large decides without it."
+                    : s.why
+                      ? `${s.recommended ? "Recommended" : "Not recommended"}: ${s.why}`
+                      : "",
                 });
               }}
               onMouseLeave={() => setTip(null)}
@@ -2071,11 +2086,15 @@ export function CoverageGate({
               {s.label}
             </span>
             <TagChip tag={s.tag} />
-            {!s.recommended && (
+            {brandAdd ? (
+              <span className="text-[9px] uppercase tracking-wide text-primary" title="Added from the buyer-difference advisory - your brand's buyers reach this stage">
+                added for your brand
+              </span>
+            ) : !s.recommended ? (
               <span className="text-[9px] uppercase tracking-wide text-ink-3" title="No journey reaches this stage - keep it only if your buyers really do">
                 not recommended
               </span>
-            )}
+            ) : null}
           </label>
         </td>
         {s.situational || s.rivals !== "none" ? (
