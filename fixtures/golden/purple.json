@@ -1,15 +1,16 @@
 {
  "brand": "Purple",
- "category": "mattress brands",
+ "category": "mattresses",
  "audience": "online mattress shoppers",
  "competitors": [
   "Casper",
   "Tempur-Pedic",
+  "Serta",
+  "Sealy",
   "Saatva",
-  "Nectar",
-  "Leesa"
+  "Nectar"
  ],
- "capturedAt": "2026-09-16",
+ "capturedAt": "2026-09-17",
  "reviewedBy": "Claude via the v8/v9/v10 three-way diff, presented to Tyler 2026-09-16; not independently reviewed by Tyler",
  "base": {
   "verifiability": "taste",
@@ -19,28 +20,28 @@
   "rhythm": "one_shot",
   "risk": "performance",
   "channel_retail": true,
-  "rationale": "I want a mattress we'll sleep great on, at a fair price, with a hassle-free trial and return if it isn't right."
+  "rationale": "We compare options online to get a comfortable mattress at our budget with the right firmness, solid reviews, and an easy home trial/return."
  },
  "scenarios": [
   {
-   "label": "Couple main replacement",
-   "description": "A couple replacing a sagging queen/king and seeking an all-rounder with motion isolation and a safe trial.",
+   "label": "Couple main-bed upgrade",
+   "description": "Replacing a worn queen/king used nightly, researched online and bought for comfort and durability.",
    "deviates": false
   },
   {
-   "label": "Upsizing to king",
-   "description": "Moving to a larger bedroom or growing family and upgrading to a king/Cal king for space and edge support.",
-   "deviates": false
-  },
-  {
-   "label": "First apartment budget",
-   "description": "Setting up a first place on a tight budget and needing fast delivery and good-enough comfort under a price cap.",
-   "deviates": false
-  },
-  {
-   "label": "Organic materials buyer",
-   "description": "Prioritizing certified non-toxic, natural materials and willing to pay more for verified eco credentials.",
+   "label": "Solo first setup",
+   "description": "One person furnishing a first apartment on a budget with fast delivery and simple setup.",
    "deviates": true
+  },
+  {
+   "label": "Back-pain relief pick",
+   "description": "Buying to address back/neck pain, prioritizing support, zoning, and firmness choice.",
+   "deviates": false
+  },
+  {
+   "label": "Holiday deal hunt",
+   "description": "Timing purchase for Memorial Day/Black Friday to maximize discounts on a mid-tier model.",
+   "deviates": false
   }
  ],
  "stages": [
@@ -152,8 +153,8 @@
  ],
  "cells": {
   "count": 44,
-  "blind": 24,
-  "branded": 20,
+  "blind": 22,
+  "branded": 22,
   "byStage": {
    "problem_recognition": 4,
    "category_education": 1,
@@ -174,49 +175,49 @@
   }
  },
  "cellTexts": [
-  "[problem_recognition|Couple main replacement|generic] we keep rolling into a saggy dip in the middle and taking turns waking each other up. i'm hot all night, he's stiff by morning. this is our main sleep spot. how do we make it not miserable?",
-  "[problem_recognition|Upsizing to king|generic] both of us are tall, plus the dog claims the middle, so we are constantly elbowing each other. want more room and less bumping when one of us moves. where do we even start?",
-  "[problem_recognition|First apartment budget|generic] moving into my first place. whatever i sleep on now kills my back and i have about 500 to spend. how do i get something comfy that is not trash in six months?",
-  "[problem_recognition|Organic materials buyer|generic] new stuff that smells like chemicals gives me headaches. i want to sleep on natural materials, no sketchy coatings, and i care where it is sourced. sensitive skin. how do i avoid the off-gassing plastics route?",
-  "[category_education|-|generic] basic question. what is a mattress supposed to do, exactly? support, pressure relief, keeping two people from smashing into the middle, staying cool, sizing. how do these pieces fit together?",
-  "[discovery|Couple main replacement|generic] best mattress for a couple that keeps rolling to the middle. we need strong motion isolation, sleeps cool, and a medium to medium-firm feel for side plus back sleepers.",
-  "[discovery|Upsizing to king|generic] looking for the best king mattress for two tall people and a dog. solid edge support, not a heat trap, around 2k. what should be on my radar?",
-  "[discovery|First apartment budget|generic] best affordable mattress for a first apartment. budget 400 to 700, side sleeper, small room, would like it to last a few years.",
-  "[discovery|Organic materials buyer|generic] best non toxic, natural-material mattress with real certifications. latex or wool and cotton is fine, low VOC, not greenwashed. medium feel for combo sleeper.",
-  "[shortlist|Couple main replacement|generic] can you narrow it to 3 or 4 good options for a couple replacing the main sleep setup? we fight a mid-line dip, need great motion control, and i sleep hot.",
-  "[shortlist|Upsizing to king|generic] please give me a short list of 3 king options with strong edges and cooling, good for two tall people and a dog, target budget about 2k.",
-  "[shortlist|First apartment budget|generic] i have 500 to 700, first apartment, side sleeper, not heavy. can you give me three solid options that will not fall apart in a year or two?",
-  "[shortlist|Organic materials buyer|generic] i want a small set to compare. organic and natural materials only, real third-party certifications, medium feel, low VOC, no polyurethane foam. can you give me 3 picks?",
-  "[criteria|Couple main replacement|generic] we're replacing our main bed as a couple. what should we actually look for so we both sleep well? i'm a side sleeper, he moves a lot.",
-  "[criteria|Upsizing to king|generic] Upsizing to a king for a bigger room. what matters most when picking a king mattress besides just price? anything about split vs one piece, edge support, bases?",
-  "[criteria|First apartment budget|generic] first apartment, tight budget. what specs matter so I don't end up with a saggy rock? side sleeper, 140 lb, NYC walk-up.",
-  "[criteria|Organic materials buyer|generic] I want a mattress that feels clean and aligns with my values. what should I look for in truly organic or natural builds and certifications, and what red flags scream greenwash?",
-  "[use_case|Couple main replacement|generic] Need a new main mattress for two: I'm a side sleeper who runs hot, partner is back sleeper and wakes if I move. We need good motion control and cooling without feeling stuck. What types fit this?",
-  "[use_case|Upsizing to king|generic] Moving next month and going king. Narrow staircase, dog sleeps with us, prefer medium-firm. How should I pick between one-piece king, split king, thickness, and base so delivery and nightly use aren't a pain?",
-  "[use_case|First apartment budget|generic] Got about 600 for a queen, first place. 3rd-floor walk-up, mostly side sleeping, occasional back pain. Need something I can unbox myself that won't crater in a year. Point me to the right kind of build?",
-  "[use_case|Organic materials buyer|generic] Looking for a bed that feels natural: latex, wool, cotton, low smell. I like a buoyant, not memory-foam sink. How do I spec this out and avoid hidden synthetics in layers or glue?",
-  "[social_validation|-|generic] Where do shoppers actually rave or complain about mattresses? any places to see real-world ratings over time, not just store sites, like Reddit threads, owner surveys, return rates?",
-  "[comparison|Couple main replacement|Casper] For a couple replacing our main bed, how does Purple stack up against Casper on motion transfer, edge support, cooling, and long-term durability? which one handles a side-plus-back combo better?",
-  "[comparison|Upsizing to king|Tempur-Pedic] Upsizing to a king. Is Purple a legit alternative to Tempur-Pedic if I want that pressure relief feel without the super deep slow sink? budget is under 2500, open to split king if it helps.",
-  "[comparison|First apartment budget|Saatva] First apartment budget but I want something that will last. Between Purple and Saatva entry models, which is the smarter buy for a queen under 1200, and what do I give up either way?",
-  "[comparison|Organic materials buyer|Nectar] Values-first buyer here. Between Purple and Nectar, which lines up better on low VOC, certifications, and minimal off-gassing, and what does each actually feel like day 1 vs after a month?",
-  "[objections|Couple main replacement|generic] We're replacing our main bed. For a couple, is Purple actually supportive long term? I'm worried the grid will sag in the middle, motion transfer will bug us, and the edges feel soft. We both sleep warm.",
-  "[objections|Upsizing to king|generic] Upsizing to a king. Does Purple keep even support edge to edge at that size, or does the middle get squishy and bouncy? I need solid motion isolation and sturdy edges.",
-  "[objections|First apartment budget|generic] First apartment budget here. If I go with the basic Purple to save money, am I giving up real support? I don't want back pain or that stuck-in-the-grid feel.",
-  "[objections|Organic materials buyer|generic] I usually buy natural latex and wool beds and care a lot about feel and trust. Purple's synthetic grid has me nervous. Is the performance there day to day, good pressure relief without a plasticky vibe or heat, or will it feel off to me?",
-  "[pricing|Couple main replacement|generic] For a couple, is there real value stepping up within Purple's lineup? Like from the entry model to one of their pricier hybrids, do you actually get better motion isolation and support, or is the base one fine? Any delivery or return fees I should expect?",
-  "[pricing|Upsizing to king|generic] Going from queen to king, what's the typical price jump for decent online mattresses? Do most brands charge extra for shipping, old mattress haul-away, or returns on a king?",
-  "[pricing|First apartment budget|generic] Tight budget for my first place. Can I get a solid queen under about 700 all in with promos, or is that asking for sag and bad sleep? Where do people actually save without buying junk?",
-  "[pricing|Organic materials buyer|generic] I care about natural materials but I'm eyeing Purple too. If I spend more, is Purple's higher-end build actually better performance for the money, or would a latex-forward mattress at the same price make more sense? And once you add a base and protector, how does Purple pricing really shake out?",
-  "[churn_triggers|-|generic] I've had a Purple for a few years and I'm waking up stiff and seeing a dip. Do I try fixes like rotating and checking the base, or is it time to change models? If I stay with Purple, which version would feel firmer and hold up better?",
-  "[alternatives|-|defensive] If I don't go with Purple, what mattresses feel similar? Side sleeper, want medium-firm and good cooling, under 1500.",
-  "[alternatives|-|Casper] Casper felt a bit soft to me. What other mattresses have a similar foam feel but slightly firmer?",
-  "[alternatives|-|Tempur-Pedic] I like the slow sink and pressure relief of Tempur-Pedic but can't swing that price. What are solid alternatives with a similar feel?",
-  "[alternatives|-|Saatva] Considering Saatva for that hotel-style innerspring feel. What other options give strong edge support and a buoyant feel?",
-  "[alternatives|-|Nectar] Nectar keeps popping up. If I want a comparable memory foam bed that sleeps cooler, what else should I look at?",
-  "[problem_resolution|-|generic] My Purple just arrived and it looks a little lopsided after unboxing, plus the cover has stubborn wrinkles. Do I just wait it out or is there a way to fix it? When should I contact support?",
-  "[expansion|-|generic] We love our Purple in the primary. Thinking of getting one for the guest room and maybe our kid. Which Purple model makes sense for lighter sleepers and occasional use?",
-  "[ecosystem|-|generic] What pairs well with a Purple mattress? Looking for sheets that won't bunch on the grid, a breathable protector, and an adjustable base that fits right.",
-  "[advocacy|-|generic] Friend says Purple is a gimmick. How do I explain the grid's pressure relief and cooling in normal-people terms, especially for side sleepers?"
+  "[problem_recognition|Couple main-bed upgrade|generic] we're not sleeping well. there's a dip in the middle so we roll into each other, and every time my partner moves it wakes me up. hips ache, shoulders go numb, and it gets hot. what could actually fix this for both of us?",
+  "[problem_recognition|Solo first setup|generic] setting up my first place - been sleeping on a stopgap and my shoulders hate me. i'm picky: want support without that stuck-in-the-mud feel, cooler nights, no weird chemical smell, clean look. what should i be aiming for to get real sleep?",
+  "[problem_recognition|Back-pain relief pick|generic] lower back is angry every morning, worse after side sleeping. i need a way to keep my spine neutral without feeling like i'm on a rock. what should i change so this stops?",
+  "[problem_recognition|Holiday deal hunt|generic] trying to use holiday sales to finally fix my awful sleep. budget about 1200, need cooler nights and way better support, and it has to arrive fast. what should i watch for so i don't blow the sale window?",
+  "[category_education|-|generic] basic question: what does a mattress actually do besides soft vs firm? how is it supposed to support you and keep you comfortable?",
+  "[discovery|Couple main-bed upgrade|generic] best mattress for couples who like different firmness levels? need strong motion isolation, good edge support, sleeps cool, king size, around 2k. what should be on my radar?",
+  "[discovery|Solo first setup|generic] first place, being picky: best mattress for a 150 lb solo sleeper, medium-firm, neutral (not sinky), breathable, low off-gassing, solid value under 1200, and holds up over time?",
+  "[discovery|Back-pain relief pick|generic] best mattress for lower-back pain that keeps hips from sagging, gives pressure relief for side sleeping, and doesn't sleep hot. budget up to 1800. what should I look at?",
+  "[discovery|Holiday deal hunt|generic] holiday sale targets: what are the best mattresses actually worth grabbing on Black Friday/Cyber Monday? want reliable build, easy returns, quick shipping, queen or king.",
+  "[shortlist|Couple main-bed upgrade|generic] can you shortlist 3-4 mattresses for couples with different firmness needs? priorities: motion isolation, cooling, sturdy edges, king size, under 2k.",
+  "[shortlist|Solo first setup|generic] first apartment setup: give me 3 smart mattress picks with a medium-firm, balanced feel, breathable, low-VOC, good trial/warranty, under 1200 for a 150 lb solo sleeper.",
+  "[shortlist|Back-pain relief pick|generic] i need 3 mattresses that actually help with back pain for a 180 lb side sleeper - keeps lumbar supported, good shoulder relief, not too soft, doesn't run hot. under 1500.",
+  "[shortlist|Holiday deal hunt|generic] black friday shortlist: 3 mattresses worth grabbing if the price drops - solid quality, easy returns, quick shipping. aiming for queen under 1000 if possible.",
+  "[criteria|Couple main-bed upgrade|generic] We're replacing our main bed as a couple. Different sleep temps, I'm a side sleeper, he's back, and we share with a cat. What should we actually look for so it works for both of us?",
+  "[criteria|Solo first setup|generic] first time buying for myself. I want to decide on feel and design with a clear head, not hype. I sleep alone, like a slightly buoyant medium feel, and care about materials and longevity. How should I weigh firmness, construction, durability, and price?",
+  "[criteria|Back-pain relief pick|generic] Chronic lower back tightness, 180 lb combo sleeper. What matters most in a mattress to help with alignment and morning stiffness, and what should I avoid?",
+  "[criteria|Holiday deal hunt|generic] Holiday mattress sales everywhere. How do I spot a real deal vs fake MSRP slashes, and which specs and policies should matter more than the discount percent?",
+  "[use_case|Couple main-bed upgrade|generic] Our queen is done. We need strong motion isolation, solid edges for sitting, not too hot, minimal off-gassing. Budget about 1500, open to foam or hybrid. What would you point us toward for a shared main bed?",
+  "[use_case|Solo first setup|generic] new studio, slatted platform, I read and work in bed sometimes. Prefer medium-firm with a little bounce, sensitive to smells, want a clean look without a super tall profile. What should I get and what thickness makes sense?",
+  "[use_case|Back-pain relief pick|generic] Desk job and mild sciatica. Waking up sore on an old spring mattress. Mostly side sleeper, sometimes back. Want supportive but pressure relieving under 2k. How should I narrow and test options?",
+  "[use_case|Holiday deal hunt|generic] Trying to snag a king over the holidays. Flexible on brand, want a solid warranty, easy returns, and real savings not fluff. Can you help me time it and spot which bundles are actually worth it?",
+  "[social_validation|-|generic] Where do real owners talk about their mattresses, and which options have been rating consistently high lately for side sleepers and hot sleepers? Looking for credible review sources and patterns, not ads.",
+  "[comparison|Couple main-bed upgrade|Casper] Couple upgrading our main bed: Purple vs Casper, which one handles motion transfer and edge support better, and which sleeps cooler? Any durability differences we should know about?",
+  "[comparison|Solo first setup|Tempur-Pedic] I love the slow, contouring feel of Tempur-Pedic but I'm price sensitive. How does Purple compare on pressure relief, spinal alignment, off-gassing, and long-term durability for a solo sleeper who cares a lot about feel?",
+  "[comparison|Back-pain relief pick|Serta] Lower back pain, 190 lb combo sleeper. Between Purple and Serta, which lines do better for lumbar support and keeping the spine neutral? Any firmness starting points you'd suggest?",
+  "[comparison|Holiday deal hunt|Sealy] Holiday shopping: Purple vs Sealy, who usually runs the better promos on queen or king, and are the add-ons like pillows or bases actually valuable or just padding the deal?",
+  "[objections|Couple main-bed upgrade|generic] We're replacing our queen and looking at Purple. How does it actually hold up for two people long term: motion transfer, edge support, does it dip in the middle?",
+  "[objections|Solo first setup|generic] first mattress on my own. i like a bouncier, responsive feel, not that slow sink. does Purple keep spinal alignment and stay cool, or is that grid just marketing?",
+  "[objections|Back-pain relief pick|generic] Chronic low back pain here. Will Purple really keep me in neutral and resist sagging after a year or two? Any real difference between their models for lumbar support?",
+  "[objections|Holiday deal hunt|generic] Black Friday shopping. Are Purple doorbuster models the same build or watered down? I don't want a sale version that sleeps hot or breaks down fast.",
+  "[pricing|Couple main-bed upgrade|generic] What's a fair price range for a durable king that keeps partner movement down? And for Purple specifically, how do the entry vs higher-end models compare on value once you add delivery, base, and returns?",
+  "[pricing|Solo first setup|generic] i'm budgeting carefully. for a full-size, where's the value sweet spot online under 1000 vs 1500? if i went with Purple, which tier has the best cost-to-performance for a lighter sleeper, and are trial and returns truly free?",
+  "[pricing|Back-pain relief pick|generic] If the goal is back-pain relief, does paying more actually buy better support or just extras? With Purple, which model level gives the best support per dollar, and do I need to budget for a specific base?",
+  "[pricing|Holiday deal hunt|generic] Holiday promos make everything look half off. What's a realistic out the door price for a Purple queen after promos, including any fees for shipping, returns, or old mattress removal? Or are there better value windows than Black Friday?",
+  "[churn_triggers|-|generic] I've been on a Purple for 3 years. Edges feel softer now and my hips sink more. Do I try a topper, rotate it, or is it time to switch? Would a firmer Purple model actually fix this?",
+  "[alternatives|-|defensive] Looking at Purple but want to see what else is similar before I buy. What mattresses feel close and are worth a look?",
+  "[alternatives|-|Casper] If I skip Casper, what other online beds in that mid-price range should I consider for a combo sleeper?",
+  "[alternatives|-|Tempur-Pedic] Tempur-Pedic is out of my budget. What has a similar slow-sink, pressure relief feel without the sticker shock?",
+  "[alternatives|-|Serta] Not sold on Serta. Who makes comparable mattresses that hold up better?",
+  "[alternatives|-|Sealy] sealy alternatives for a side sleeper with shoulder pain? prefer something that doesn't trap heat.",
+  "[problem_resolution|-|generic] My Purple mattress has a dip forming where I sleep after about 9 months. How do I tell if it qualifies for a warranty claim and what should I do right now to fix or slow it? pics, measurements, base check?",
+  "[expansion|-|generic] We love our Purple in the primary bedroom. Thinking of getting another for the guest room and maybe a kid's twin. Which model would you pick for each, or is it fine to just get the same one we have?",
+  "[ecosystem|-|generic] What bed frames and accessories pair best with a Purple mattress? slat spacing, box spring or not, adjustable base that fits, sheets that won't make it feel stiff, protector that won't trap heat?",
+  "[advocacy|-|generic] Friend says Purple is a gimmick. I actually sleep great on mine. How do I explain the feel and benefits to them without sounding salesy, and what legit sources or comparisons can I point to?"
  ]
 }

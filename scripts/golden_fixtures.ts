@@ -20,8 +20,11 @@
  *          only their counts are compared.
  *
  * Estimate fields are FROZEN here on purpose: the fixtures test the
- * instrument pipeline, not the estimate. Estimate-prompt changes are
- * reviewed separately.
+ * instrument pipeline, not the estimate. The consistency gate compares
+ * these values to the LIVE estimate before every run and refuses on
+ * drift - when an estimate change is intentional, reconcile this
+ * roster to the live values (last reconciled 2026-09-16, v11 era) and
+ * re-capture.
  */
 import { mkdirSync, readFileSync, writeFileSync, existsSync } from "fs";
 import { join } from "path";
@@ -33,17 +36,17 @@ import {
 import { getBrandProfile } from "../src/lib/engine/suggest";
 
 const ROSTER = [
-  { brand: "jira", category: "project management tools", audience: "software development teams", competitors: ["Asana", "Monday.com", "Trello", "ClickUp", "GitHub Issues", "Azure DevOps"] },
-  { brand: "Sephora", category: "beauty retailers", audience: "makeup and skincare shoppers", competitors: ["Ulta Beauty", "Amazon (beauty)", "Target (beauty)", "Macy's (beauty)", "Nordstrom (beauty)"] },
-  { brand: "Google Pixel", category: "Android smartphones", audience: "Android-focused smartphone buyers", competitors: ["Apple (iPhone)", "Samsung (Galaxy)", "OnePlus", "Xiaomi (Mi/Redmi)", "Motorola (Moto)"] },
-  { brand: "Google Nest", category: "smart home devices", audience: "homeowners and renters buying smart home devices", competitors: ["Amazon", "Ecobee", "Arlo", "Wyze", "Philips Hue"] },
-  { brand: "Netflix", category: "subscription streaming services", audience: "streaming entertainment consumers", competitors: ["Disney+", "Amazon Prime Video", "Hulu", "Max (HBO)", "Apple TV+"] },
-  { brand: "Purple", category: "mattress brands", audience: "online mattress shoppers", competitors: ["Casper", "Tempur-Pedic", "Saatva", "Nectar", "Leesa"] },
-  { brand: "AG1", category: "greens powder supplements", audience: "health-conscious adults seeking an all-in-one daily greens supplement", competitors: ["Garden of Life", "Organifi", "Amazing Grass", "KOS", "Vibrant Health (Green Vibrance)"] },
-  { brand: "American Express", category: "credit cards", audience: "consumers and small businesses looking for credit cards", competitors: ["Visa", "Mastercard", "Chase", "Capital One", "Discover"] },
-  { brand: "Doritos", category: "tortilla chips", audience: "grocery shoppers buying savory snacks", competitors: ["Tostitos", "Takis", "Late July", "Santitas", "Great Value (Walmart)"] },
-  { brand: "athenahealth", category: "ambulatory EHR software", audience: "ambulatory practice administrators", competitors: ["Epic", "Cerner", "eClinicalWorks", "NextGen Healthcare", "Allscripts", "Practice Fusion"] },
-  { brand: "PwC", category: "professional services firms", audience: "CFOs and senior executives at large enterprises", competitors: ["Deloitte", "EY (Ernst & Young)", "KPMG", "Accenture", "McKinsey & Company"] },
+  { brand: "jira", category: "project management software", audience: "product and engineering teams", competitors: ["Asana","Monday.com","ClickUp","Trello","GitHub (Issues/Projects)","Azure DevOps (Boards)"] },
+  { brand: "Sephora", category: "beauty retailers", audience: "makeup and skincare shoppers", competitors: ["Ulta Beauty","Amazon (Beauty)","Nordstrom","Macy's","Dermstore"] },
+  { brand: "Google Pixel", category: "smartphones", audience: "consumers seeking premium Android phones", competitors: ["Apple iPhone","Samsung Galaxy","OnePlus","Xiaomi","Oppo"] },
+  { brand: "Google Nest", category: "smart home devices", audience: "homeowners and renters setting up a smart home", competitors: ["Amazon (Echo & Ring)","Apple (HomeKit/Apple Home)","Philips Hue","Ecobee","Arlo","Wyze"] },
+  { brand: "Netflix", category: "streaming video services", audience: "TV and movie streaming subscribers", competitors: ["Disney+","Amazon Prime Video","Max (HBO)","Apple TV+","Hulu","Paramount+"] },
+  { brand: "Purple", category: "mattresses", audience: "online mattress shoppers", competitors: ["Casper","Tempur-Pedic","Serta","Sealy","Saatva","Nectar"] },
+  { brand: "AG1", category: "daily greens powders", audience: "busy health-conscious adults", competitors: ["Amazing Grass","Garden of Life","Organifi","Vega","Kion"] },
+  { brand: "American Express", category: "credit cards", audience: "consumers and small business owners choosing credit cards", competitors: ["Visa","Mastercard","Chase","Capital One","Discover","Citi"] },
+  { brand: "Doritos", category: "tortilla chips", audience: "grocery shoppers buying snack chips", competitors: ["Tostitos","Mission","Santitas","Late July","Siete"] },
+  { brand: "athenahealth", category: "ambulatory EHR software", audience: "ambulatory physician practices and medical groups", competitors: ["Epic","Oracle Cerner","Allscripts","eClinicalWorks","NextGen Healthcare","Practice Fusion"] },
+  { brand: "PwC", category: "professional services firms", audience: "CFOs and senior corporate executives", competitors: ["Deloitte","EY (Ernst & Young)","KPMG","Accenture","McKinsey & Company"] },
 ];
 
 const DIR = join(__dirname, "..", "fixtures", "golden");

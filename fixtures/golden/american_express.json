@@ -1,15 +1,16 @@
 {
  "brand": "American Express",
  "category": "credit cards",
- "audience": "consumers and small businesses looking for credit cards",
+ "audience": "consumers and small business owners choosing credit cards",
  "competitors": [
   "Visa",
   "Mastercard",
   "Chase",
   "Capital One",
-  "Discover"
+  "Discover",
+  "Citi"
  ],
- "capturedAt": "2026-09-16",
+ "capturedAt": "2026-09-17",
  "reviewedBy": "Claude via the v8/v9/v10 three-way diff, presented to Tyler 2026-09-16; not independently reviewed by Tyler",
  "base": {
   "verifiability": "spec",
@@ -19,28 +20,28 @@
   "rhythm": "one_shot",
   "risk": "financial",
   "channel_retail": false,
-  "rationale": "I want a card I'm likely to be approved for that maximizes value for my spending without surprise fees or traps."
+  "rationale": "I want the card that gives me the most value for how I spend while minimizing interest, fees, and hassles."
  },
  "scenarios": [
   {
-   "label": "Everyday cashback card",
-   "description": "A consumer choosing a reliable daily-spend card to pay in full each month.",
+   "label": "Balance transfer move",
+   "description": "Moving an existing balance to minimize interest with a long 0% intro and low transfer fee.",
    "deviates": false
   },
   {
-   "label": "Balance transfer seeker",
-   "description": "Someone carrying debt looking for a low APR or 0% balance transfer to cut interest costs.",
+   "label": "Everyday cash back",
+   "description": "Picking a primary everyday card to maximize cash back across typical spend.",
    "deviates": false
   },
   {
-   "label": "Premium travel rewards",
-   "description": "A traveler optimizing points, lounge access, and travel protections for frequent trips.",
+   "label": "Premium travel perks",
+   "description": "Choosing a premium travel card for lounge access, protections, and high travel rewards.",
    "deviates": false
   },
   {
-   "label": "Store checkout offer",
-   "description": "Shopper accepts an instant store-card offer at checkout for a one-time discount or promo financing.",
-   "deviates": true
+   "label": "Small business rewards",
+   "description": "Setting up a business card to earn on business spend and manage employee expenses.",
+   "deviates": false
   }
  ],
  "stages": [
@@ -91,8 +92,8 @@
   },
   {
    "key": "premium_worth",
-   "label": "Splurge or save",
-   "recommended": true
+   "label": "Premium vs. basic brands",
+   "recommended": false
   },
   {
    "key": "objections",
@@ -151,9 +152,9 @@
   }
  ],
  "cells": {
-  "count": 49,
-  "blind": 29,
-  "branded": 20,
+  "count": 48,
+  "blind": 27,
+  "branded": 21,
   "byStage": {
    "problem_recognition": 4,
    "category_education": 1,
@@ -164,7 +165,6 @@
    "use_case": 4,
    "social_validation": 1,
    "comparison": 4,
-   "premium_worth": 1,
    "objections": 4,
    "pricing": 4,
    "churn_triggers": 1,
@@ -176,54 +176,53 @@
   }
  },
  "cellTexts": [
-  "[problem_recognition|Everyday cashback card|generic] I keep blowing money on groceries, gas, takeout, the usual, and it feels like I'm leaving value on the table. is there a simple way to get a little back on what I already buy?",
-  "[problem_recognition|Balance transfer seeker|generic] paying high interest on a couple balances and it's barely moving. is there a legit way to move what I owe somewhere cheaper for a while so I can actually make a dent?",
-  "[problem_recognition|Premium travel rewards|generic] I'm flying a lot this year. bag fees, airport food, delays, no lounge, and my points are scattered everywhere. how do people turn all that spending into real perks and cover some of the hassle?",
-  "[problem_recognition|Store checkout offer|generic] cashier offered me instant approval at checkout to save like 20 bucks today. sounds good, but does that hit my credit or come with gotchas? how do I tell if saying yes is a bad idea?",
-  "[category_education|-|generic] dumb question, but what does a credit card actually do besides let you pay later? how do cash back, points, interest, and fees work in plain english?",
-  "[discovery|Everyday cashback card|generic] best credit cards for simple cash back on everyday spending like groceries, gas, and streaming? prefer no annual fee and easy rewards.",
-  "[discovery|Balance transfer seeker|generic] what are the best credit cards for moving an existing balance with a long 0% intro period and a low transfer fee so I can pay it off?",
-  "[discovery|Premium travel rewards|generic] best premium travel credit cards with lounge access, strong protections, and useful airline/hotel transfer partners. ok with a higher annual fee if the perks actually offset it.",
-  "[discovery|Store checkout offer|generic] best general-purpose credit cards to choose instead of a store checkout sign-up discount. want consistent rewards everywhere, not just a one-time 15% off.",
-  "[shortlist|Everyday cashback card|generic] can you give me 3-5 solid everyday cash back options that are easy to use, good for groceries and gas, and low or no annual fee?",
-  "[shortlist|Balance transfer seeker|generic] shortlist a few top picks for moving a balance: long 0% intro, low transfer fee, reasonable terms after the promo.",
-  "[shortlist|Premium travel rewards|generic] shortlist 3-4 premium travel options with lounge access, good travel protections, and flexible points transfers.",
-  "[shortlist|Store checkout offer|generic] if I skip the in-store sign-up, give me a few general options that beat those one-time checkout discounts on long-term value: usable anywhere, decent rewards, fees not crazy.",
-  "[criteria|Everyday cashback card|generic] how do i pick a solid everyday cash back card? is it just the % back, or do caps, categories, and redemption rules matter more?",
-  "[criteria|Balance transfer seeker|generic] I want to move about 5k from two cards onto a 0% intro offer. what should I be checking besides the teaser rate - fees, how long the window is, any gotchas?",
-  "[criteria|Premium travel rewards|generic] Looking at premium travel cards. What should actually drive the choice - transfer partners, lounge access, travel protections, effective annual fee after credits?",
-  "[criteria|Store checkout offer|generic] At checkout I keep getting \"save 20% today if you open the store card.\" What specs should I scan fast before deciding - open vs closed loop, promo financing terms, APR, hit to credit?",
-  "[feature_screening|Everyday cashback card|generic] Which cash back cards give a flat 2% (or better) on everything, no annual fee, and let me cash out to a bank account with no minimum?",
-  "[feature_screening|Balance transfer seeker|generic] Point me to cards with 0% intro APR on balance transfers for 18+ months and either no transfer fee or a first-60-days fee waiver.",
-  "[feature_screening|Premium travel rewards|generic] Which premium travel cards include airport lounge access for a guest, credits for expedited airport screening, strong trip protections, and points that transfer to multiple airline and hotel programs?",
-  "[feature_screening|Store checkout offer|generic] Are there store-branded cards that work anywhere (not just that store) and offer real 0% promo financing without deferred interest? Which ones have no annual fee?",
-  "[use_case|Everyday cashback card|generic] Household spend: about 900 a month groceries, 250 gas, 120 dining out, rest is random. I want one simple cash back card I don't have to micro-manage. What should I pick?",
-  "[use_case|Balance transfer seeker|generic] I've got 6,200 at 23% APR. I can pay 350 a month. I want a balance transfer card that gives me at least 18 months 0% and won't kill me with fees. What should I apply for and how do I time the transfer?",
-  "[use_case|Premium travel rewards|generic] I travel for work and family 5-6 trips a year, mix of domestic and international. I want lounge access for me + a guest, good travel insurance, and strong airline/hotel transfer options. Annual fee is fine if the perks actually offset it. What card fits?",
-  "[use_case|Store checkout offer|generic] Big purchase in my cart and the site is offering 15% off if I open their card. I only shop there a few times a year. Is it worth taking for the discount, or is the promo likely deferred interest? How do I decide in 2 minutes?",
-  "[social_validation|-|generic] What cash back and travel cards are people actually happy with right now? Looking for crowd favorites based on real reviews and hassle-free redemptions, not marketing.",
-  "[comparison|Everyday cashback card|Visa] For an everyday cashback card, is American Express or Visa better? I spend on groceries, gas, dining, want easy redemption. Anything about acceptance I should factor in?",
-  "[comparison|Balance transfer seeker|Mastercard] Trying to move a balance and stop the bleeding for 12 to 18 months. American Express vs Mastercard for 0% intro balance transfers; which one usually has lower transfer fees and fewer traps?",
-  "[comparison|Premium travel rewards|Chase] For a premium travel card, American Express or Chase? I care about lounge access, transfer partners, travel protections, and getting more than the annual fee back.",
-  "[comparison|Everyday cashback card|Capital One] Flat cash back for daily spend: American Express or Capital One? I don't want to juggle categories. Any reason one is meaningfully simpler or richer long term?",
-  "[premium_worth|-|generic] The cashier keeps pitching the store card for an extra 15% off today, but I've been eyeing a premium card with an annual fee. Is the pricey one actually worth it for everyday use, or is the cheap store card good enough if I just want savings at checkout?",
-  "[objections|Everyday cashback card|generic] Be real with me: with American Express, am I just going to pay more in annual fees and interest than I get back in everyday cash back? I don't want a card that only looks rewarding on paper.",
-  "[objections|Balance transfer seeker|generic] I'm nervous about doing a balance transfer to American Express. Are the transfer fees and the post promo APR going to wipe out the savings if I can't pay it off fast?",
-  "[objections|Premium travel rewards|generic] Everyone says the perks are great, but that American Express annual fee is steep. If I don't travel every month, am I just burning cash on a premium travel card?",
-  "[objections|Store checkout offer|generic] At checkout I can open the store card and save right now, or apply for an American Express instead. My worry is cost: would American Express hit me with an annual fee or higher APR that makes this a worse move than the store promo?",
-  "[pricing|Everyday cashback card|generic] For a no-annual-fee everyday cashback card, what's good value right now? 2% flat vs 3% categories, any caps or foreign fees I should watch for?",
-  "[pricing|Balance transfer seeker|generic] If I move 5,000 onto an American Express with a 0% intro, what would I actually pay over the promo? Transfer fee percentage, length of intro, go-to APR after, and any gotchas if a payment is late.",
-  "[pricing|Premium travel rewards|generic] Does the annual fee on an American Express premium travel card net out positive for a couple who takes 2 or 3 trips a year? Assume we can use airline credits and some lounge visits, rough math is fine.",
-  "[pricing|Store checkout offer|generic] Cashier is offering 20% off today with a store card. If I'm choosing purely on cost, is that usually a better deal than putting it on a premium card with an annual fee? Say I spend about 300 a month at this store.",
-  "[churn_triggers|-|generic] I've had an American Express card for years, but the annual fee went up and a few local spots won't take it. Still worth keeping, or time to switch?",
-  "[alternatives|-|defensive] If I move away from American Express, what cards are good substitutes for travel and dining without huge annual fees?",
-  "[alternatives|-|Visa] alternatives to visa cards? need good rewards + solid acceptance.",
-  "[alternatives|-|Mastercard] no mastercard please. what else should i look at for cash back and purchase protections?",
-  "[alternatives|-|Chase] Thinking of dumping Chase. Which other card programs have comparable signup bonuses and airline transfer partners?",
-  "[alternatives|-|Capital One] Skipping Capital One. Who offers flexible points and decent support instead?",
-  "[problem_resolution|-|generic] American Express: my payment posted but the account still shows past due and a late fee hit. How do I get this corrected fast?",
-  "[expansion|-|generic] We like American Express so far. For a small team, how do we expand, add employee cards, set limits, and tie it into our monthly close without creating a mess?",
-  "[ecosystem|-|generic] What works well with American Express to manage receipts, reimburse employees, and sync transactions into accounting? Looking for simple integrations.",
-  "[advocacy|-|generic] How do I make the case for American Express to a coworker who thinks the fee and acceptance issues make it not worth it? I want talking points based on real benefits and protections."
+  "[problem_recognition|Balance transfer move|generic] I've got about 7k spread across two accounts and the interest is eating me alive. is there a clean way to move it into one place and not get slammed for a bit so I can pay it down?",
+  "[problem_recognition|Everyday cash back|generic] I spend a ton on groceries, gas, and random Target runs and feel like I'm leaving money on the table. any simple way to get a little back without juggling a bunch of apps?",
+  "[problem_recognition|Premium travel perks|generic] how do people get into airport lounges and dodge bag fees? I fly 6 to 8 times a year for work and it adds up. is there some membership or angle I'm missing?",
+  "[problem_recognition|Small business rewards|generic] I run a small landscaping business. about 12k a month on fuel, supplies, and equipment. I'd love to earn something back on that and keep it separate from my personal spend. what's the smart setup?",
+  "[category_education|-|generic] sorry if basic, but what does a credit card actually do besides let you pay later? how do limits, interest, and rewards really work?",
+  "[discovery|Balance transfer move|generic] best credit cards for moving an existing balance and paying 0 percent interest for the longest intro period?",
+  "[discovery|Everyday cash back|generic] what are the best credit cards for simple everyday cash back on groceries, gas, and dining? ideally no annual fee.",
+  "[discovery|Premium travel perks|generic] best credit card for airport lounge access, travel credits, and good protection perks if I fly about 10 times a year?",
+  "[discovery|Small business rewards|generic] best small business credit cards for rewards on online ads, software, and inventory, with easy employee cards and expense tracking?",
+  "[shortlist|Balance transfer move|generic] can you give me 3 to 5 top options for 0 percent intro on balance moves with low or no transfer fees?",
+  "[shortlist|Everyday cash back|generic] short list a few everyday cash back cards that are straightforward, preferably no annual fee and decent grocery and gas rates.",
+  "[shortlist|Premium travel perks|generic] narrow it to three premium travel cards that are actually worth the annual fee for lounge access and annual credits.",
+  "[shortlist|Small business rewards|generic] I need a short list of small business rewards cards strong on ad spend, shipping, and gas, with decent expense tools. top 3?",
+  "[criteria|Balance transfer move|generic] trying to move a balance. besides the 0% intro, what should I focus on? fees, intro length, when the clock starts, any traps?",
+  "[criteria|Everyday cash back|generic] I want a simple cash back card for daily stuff. what matters most when choosing? flat rate vs categories, caps, redemption rules, annual fee?",
+  "[criteria|Premium travel perks|generic] Thinking about a premium travel card. what perks actually justify a big annual fee vs nice-to-haves?",
+  "[criteria|Small business rewards|generic] Small business, variable spend on ads, software, shipping. how do I pick the right rewards card? what should I weigh to get real value?",
+  "[feature_screening|Balance transfer move|generic] Which cards offer at least 15 months 0% on balance transfers with a transfer fee 3% or less and no deferred interest?",
+  "[feature_screening|Everyday cash back|generic] Any no-annual-fee cards that give a flat 2% back on everything and let me redeem straight to my bank with no minimums?",
+  "[feature_screening|Premium travel perks|generic] Looking for cards with lounge access for me + a guest, TSA PreCheck or Global Entry credit, and strong trip delay/cancellation coverage. what fits that?",
+  "[feature_screening|Small business rewards|generic] Business cards that bonus online advertising and software, include free employee cards with per-card limits, and export to QuickBooks?",
+  "[use_case|Balance transfer move|generic] I've got about 8k at 23% APR and can pay 500 a month. want to move it to a 0% intro and wipe it out in 16 months. how should I approach this and what terms should I target?",
+  "[use_case|Everyday cash back|generic] Family of four. most spend is groceries, gas, streaming, phone bill. I don't want to track rotating categories. just easy cash back I can dump into checking. what would you suggest?",
+  "[use_case|Premium travel perks|generic] I fly 6 to 8 times a year on different airlines. lounge access and solid travel insurance matter more to me than max points. hotel status would be a plus. what kind of card should I look at?",
+  "[use_case|Small business rewards|generic] I run a small agency. 12k to 15k a month on ads and SaaS, plus some airfare. need employee cards with limits and clean expense tracking. what's the right business card setup?",
+  "[social_validation|-|generic] What are people actually happy with right now for credit cards? any community favorites or top-rated picks for cash back, travel, or balance transfers?",
+  "[comparison|Balance transfer move|Visa] Amex vs Visa for a balance transfer: who's got the longer 0% intro APR and lower transfer fee right now? I've got about 5k to move, 720 score.",
+  "[comparison|Everyday cash back|Mastercard] For everyday cash back (groceries, gas, dining), is an American Express card or a Mastercard going to net more after any annual fees? Don't want rotating categories.",
+  "[comparison|Premium travel perks|Chase] Choosing between American Express (thinking Platinum/Gold) and Chase (Sapphire line). Which actually gives better lounge access, credits, and travel protections for someone who flies about 6 - 8 times a year?",
+  "[comparison|Small business rewards|Capital One] Small business here (marketing spend about 20k/month, lots of ad buys). Would American Express business cards or Capital One be better for rewards and employee cards? Need decent float/payment terms too.",
+  "[objections|Balance transfer move|generic] If I transfer a balance to American Express, am I just swapping costs? That 3 - 5% transfer fee plus the go-to APR after the promo makes me worry I won't actually save much.",
+  "[objections|Everyday cash back|generic] With American Express cash back cards, do the annual fees and spots that don't take Amex end up eating the rewards? I don't want to jump through hoops just to break even.",
+  "[objections|Premium travel perks|generic] Honest take: are American Express travel cards still worth those big annual fees? Lounge crowding and tricky credits make it feel like I'm paying a lot for perks I can't fully use.",
+  "[objections|Small business rewards|generic] For my LLC, I'm worried an American Express business card will nickel-and-dime me: employee card fees, foreign transaction fees, Pay Over Time interest. Am I going to rack up costs chasing points?",
+  "[pricing|Balance transfer move|generic] Which American Express cards actually have 0% intro APR on balance transfers right now, and what's the transfer fee? Any no-annual-fee options versus ones that charge a fee but give better terms?",
+  "[pricing|Everyday cash back|generic] For a no-annual-fee cash back card I can use daily, how much value do you usually give up versus a 95-dollar annual fee card that pays higher rates? What's the break-even spend for groceries/dining?",
+  "[pricing|Premium travel perks|generic] Run the math on American Express premium travel cards: how many trips a year does it take to justify something like the Platinum versus the Gold once you count the credits and lounge value?",
+  "[pricing|Small business rewards|generic] For small business, what does American Express charge for employee cards, foreign transactions, and Pay Over Time APR? Is Business Gold or Business Platinum worth it if we spend about 15k/month on ads?",
+  "[churn_triggers|-|generic] I've been with American Express for years (Platinum + a cash back card). Not traveling much lately and the fees sting. Should I downgrade or is there a better Amex setup that still makes sense?",
+  "[alternatives|-|defensive] Not loving the annual fees on American Express. If I want similar travel perks and solid protections but skip Amex, what other cards should I look at?",
+  "[alternatives|-|Visa] What are solid credit card options that are not Visa for everyday spend and travel? Need wide acceptance and decent cash back or points.",
+  "[alternatives|-|Mastercard] If I want to avoid Mastercard cards, what other networks or issuers should I look at for small business purchases and travel insurance?",
+  "[alternatives|-|Chase] not going to use Chase. what other credit card lines should I look at if I want premium travel perks and flexible points?",
+  "[alternatives|-|Capital One] Capital One keeps denying me even with good credit. What are comparable credit cards with simple travel redemptions and no foreign fees?",
+  "[problem_resolution|-|generic] Autopay on my American Express didn't run and I got hit with a late fee and interest. Balance is paid now. How do I get the fees reversed and make sure autopay is actually set for next month?",
+  "[expansion|-|generic] Loving my American Express setup for personal spend. Thinking about moving my small business over too and issuing employee cards. Smart way to do this so I maximize points and keep controls tight? Anything to watch for on limits or fees?",
+  "[ecosystem|-|generic] Using American Express for my LLC. What plays nicest with it for bookkeeping and spend control? Looking for accounting software that syncs cleanly, receipt capture that matches charges automatically, and travel tools that make Membership Rewards easy to use.",
+  "[advocacy|-|generic] Friend keeps saying American Express isn't worth the fees and half the places won't take it. I've had a good run with service and travel perks. How do I make the case without sounding salesy? What points actually land with skeptics?"
  ]
 }
