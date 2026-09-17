@@ -1407,6 +1407,25 @@ export function ScenariosGate({
         Tick the scenarios worth measuring - each becomes a column of your
         Landscape.
       </p>
+      {/* The rebuild is ALWAYS on offer, not just behind two off-portfolio
+       * flags - the blind-vs-aware comparison (2026-09-16) showed the
+       * brand-aware read finds rooms the category read cannot (Nest's
+       * thermostats, Netflix's win-back). The banner keeps its own copy
+       * of the link for the case where the set is clearly off. */}
+      {onRebuildForBrand && fitBrand && (
+        <p className="m-0 text-[12px] text-ink-3">
+          These scenarios describe the category at large. You can also{" "}
+          <button
+            type="button"
+            disabled={busy}
+            onClick={onRebuildForBrand}
+            className="font-semibold text-primary hover:opacity-80 disabled:opacity-40"
+          >
+            rebuild them around {fitBrand}
+          </button>{" "}
+          - a fresh read focused on occasions it competes in.
+        </p>
+      )}
       {showFit && (
         <div className="rounded-lg border border-amber-300/60 bg-amber-50 p-3 text-[12px] text-amber-900 grid gap-1.5 dark:bg-amber-950/30 dark:text-amber-200 dark:border-amber-700/50">
           <div className="flex items-start justify-between gap-2">
