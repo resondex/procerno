@@ -117,13 +117,18 @@ export async function POST(req: Request) {
         meta: { source: cacheSource(auth) },
       }).catch(() => null),
       // The journey advisory: does THIS brand's buyer diverge from the
-      // category-modal read? Same one-shot contract as fit.
-      reviewJourneyFit({
-        brand: parsed.data.brand,
-        category: parsed.data.category,
-        base,
-        meta: { source: cacheSource(auth) },
-      }).catch(() => null),
+      // category-modal read? Computed against the FRESH read only - an
+      // edited recompose returns null and the client keeps its first
+      // advice, so applying a suggestion never conjures the next one
+      // (the iteration loop the scenario advisory was ruled out of).
+      parsed.data.base
+        ? Promise.resolve(null)
+        : reviewJourneyFit({
+            brand: parsed.data.brand,
+            category: parsed.data.category,
+            base,
+            meta: { source: cacheSource(auth) },
+          }).catch(() => null),
     ]);
   }
   return NextResponse.json({
