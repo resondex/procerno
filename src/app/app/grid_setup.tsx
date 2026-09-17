@@ -1308,7 +1308,7 @@ export function ScenariosGate({
       <div className="flex flex-wrap gap-2">
         {MODERATOR_FIELDS.map((f) => (
           <fieldset key={f.key} className="m-0 flex flex-col gap-1 border-0 p-0">
-            <legend className="mb-0.5 px-1 text-[10px] font-semibold uppercase tracking-wide text-ink-3">
+            <legend className="mb-0.5 w-32 text-center text-[10px] font-semibold uppercase tracking-wide text-ink-3">
               {f.header}
             </legend>
             {f.options.map(([k, label]) => {
