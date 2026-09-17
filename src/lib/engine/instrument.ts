@@ -2334,6 +2334,8 @@ export async function generatePhrasings(input: {
       /** Worn-out content words per subset position - the writer is told
        * to find other ways into the ask. */
       avoidWords?: string[][];
+      /** Overlap ceiling override for the last-resort round. */
+      maxOverlap?: number;
     }
   ): Promise<Phrasing[][]> {
     const extra =
@@ -2438,7 +2440,7 @@ export async function generatePhrasings(input: {
         // is a thesaurus pass, not another person asking; drop it. Brand
         // tokens are excluded - required words can't count as copying.
         const ws = contentWords(text);
-        if (keptWords.some((k) => jaccard(k, ws) > MAX_OVERLAP)) continue;
+        if (keptWords.some((k) => jaccard(k, ws) > (opts?.maxOverlap ?? MAX_OVERLAP))) continue;
         seen.add(n);
         keptWords.push(ws);
         kept.push({ text, asker: (p.asker ?? "").trim() });
@@ -2495,6 +2497,25 @@ export async function generatePhrasings(input: {
         got[j] = [...got[j], ...again[k]].slice(0, want);
       });
       if (!progressed) break;
+    }
+    // LAST RESORT: a cell still short after the steered retries is a
+    // narrow-lexicon seed - enumerated constraints or a two-brand
+    // criteria ask - whose faithful retellings NEED the seed's words,
+    // so the anti-copying bar itself is what starves it (Netflix's
+    // use_case road-trip cell held at 2/10 through every dial). One
+    // final round accepts higher overlap: ten same-ish retellings
+    // measure better than three distinct ones. Normal cells fill in
+    // the rounds above and never reach this.
+    const starved = got.map((k, j) => (k.length < want ? j : -1)).filter((j) => j >= 0);
+    if (starved.length > 0) {
+      const again = await pass(starved.map((j) => subset[j]), {
+        extra: PHRASINGS_EXTRA_RETRY,
+        have: starved.map((j) => got[j]),
+        maxOverlap: RELAXED_OVERLAP,
+      });
+      starved.forEach((j, k) => {
+        got[j] = [...got[j], ...again[k]].slice(0, want);
+      });
     }
     await Promise.all(
       idx.map((i, j) => {
@@ -2588,6 +2609,10 @@ function norm(t: string): string {
 }
 
 const MAX_OVERLAP = 0.5;
+/** The last-resort round's ceiling - loose enough that a retelling
+ * reusing a seed's mandatory constraint words survives, tight enough
+ * that verbatim-adjacent copies still die. */
+const RELAXED_OVERLAP = 0.75;
 const STOP = new Set(
   "a an the and or of to for in on with we our us is are it this that how what which do does can should would i my me be as at by from have has need want".split(" ")
 );
