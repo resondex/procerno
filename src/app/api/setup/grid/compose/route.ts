@@ -5,8 +5,10 @@ import { apiKeyConfigured } from "@/lib/engine/providers";
 import {
   composeInstrument,
   participationMask,
+  reviewJourneyFit,
   reviewScenarioFit,
   type Journey,
+  type JourneyFit,
   type Moderators,
   type ScenarioFit,
   type ScenarioSpec,
@@ -105,16 +107,28 @@ export async function POST(req: Request) {
   // user reaches the gate, read AND advice are cached, zero lag. A
   // failure ships null advice rather than an error.
   let fit: ScenarioFit | null = null;
+  let journeyFit: JourneyFit | null = null;
   if (parsed.data.brand) {
-    fit = await reviewScenarioFit({
-      brand: parsed.data.brand,
-      category: parsed.data.category,
-      scenarios: scenarios.map((s) => ({ label: s.label, description: s.description })),
-      meta: { source: cacheSource(auth) },
-    }).catch(() => null);
+    [fit, journeyFit] = await Promise.all([
+      reviewScenarioFit({
+        brand: parsed.data.brand,
+        category: parsed.data.category,
+        scenarios: scenarios.map((s) => ({ label: s.label, description: s.description })),
+        meta: { source: cacheSource(auth) },
+      }).catch(() => null),
+      // The journey advisory: does THIS brand's buyer diverge from the
+      // category-modal read? Same one-shot contract as fit.
+      reviewJourneyFit({
+        brand: parsed.data.brand,
+        category: parsed.data.category,
+        base,
+        meta: { source: cacheSource(auth) },
+      }).catch(() => null),
+    ]);
   }
   return NextResponse.json({
     fit,
+    journeyFit,
     base,
     moderators: base,
     scenarios,

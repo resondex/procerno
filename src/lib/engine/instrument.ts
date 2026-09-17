@@ -1138,6 +1138,127 @@ export async function reviewScenarios(input: {
   return verdicts;
 }
 
+/** A dimension of the base read the BRAND's own buyer may diverge on.
+ * The base read is category-modal by design (Opus classifies the
+ * category, brand-blind, tenant-shared); a brand whose business model
+ * concentrates a different buying pattern - AG1 sells by subscription
+ * in a category mostly rebought tub by tub - may warrant a different
+ * setting for ITS instrument. Advisory only: applying one is the same
+ * radio-pill edit the user could make by hand, pure code, no cache. */
+export interface JourneyFit {
+  suggestions: {
+    dimension: string;
+    current: string;
+    suggested: string;
+    reason: string;
+  }[];
+}
+
+const JOURNEY_FIT_SCHEMA = {
+  type: "object",
+  additionalProperties: false,
+  properties: {
+    suggestions: {
+      type: "array",
+      items: {
+        type: "object",
+        additionalProperties: false,
+        properties: {
+          dimension: {
+            type: "string",
+            enum: ["verifiability", "involvement", "think_feel", "decision_unit", "rhythm", "risk"],
+          },
+          suggested: { type: "string" },
+          reason: { type: "string" },
+        },
+        required: ["dimension", "suggested", "reason"],
+      },
+    },
+  },
+  required: ["suggestions"],
+} as const;
+
+/**
+ * Journey-fit advisory over the base read. Bar set conservative from
+ * day one (the scenario advisory needed four calibration rounds to get
+ * there): flag ONLY a business-model-level divergence, at most two
+ * dimensions, empty for most brands. Suggested values are validated
+ * against the dimension enums - an invalid one is dropped, never shown.
+ */
+export async function reviewJourneyFit(input: {
+  brand: string;
+  category: string;
+  base: Moderators;
+  meta?: CacheMeta;
+}): Promise<JourneyFit> {
+  const dims = ["verifiability", "involvement", "think_feel", "decision_unit", "rhythm", "risk"] as const;
+  const key = cacheKey("journey_fit1", [
+    input.brand, input.category,
+    dims.map((d) => String(input.base[d])).join("|"),
+  ]);
+  const hit = await store.cacheGet(key, CACHE_TTL_MS);
+  if (hit) return JSON.parse(hit) as JourneyFit;
+  const res = await openaiClient().chat.completions.create({
+    model: MODEL,
+    reasoning_effort: "low",
+    messages: [
+      {
+        role: "system",
+        content:
+          "You check whether a brand's TYPICAL buyer decides differently " +
+          "than the category at large. The read below describes the " +
+          "CATEGORY's dominant decision structure; a brand whose business " +
+          "model concentrates a different buying pattern may warrant a " +
+          "different setting for its own instrument. Dimensions:\n" +
+          DIMENSION_GUIDE +
+          "Suggest a change ONLY for a clear BUSINESS-MODEL-level " +
+          "difference - a subscription-first brand in a category mostly " +
+          "rebought off the shelf, a committee-sold brand in a solo-buyer " +
+          "category. Never suggest because the brand is premium, popular, " +
+          "or big; only when its buyers' PROCESS differs. At most TWO " +
+          "suggestions; MOST brands match their category, and an empty " +
+          "list is the common, correct answer. suggested must be a valid " +
+          "value for that dimension. reason: one plain sentence.\n" +
+          "Voice: this is ADVICE the user weighs, never a verdict. Write " +
+          "every reason tentatively - 'appears to', 'may', 'tends to' - " +
+          "and never declare the read wrong.",
+      },
+      {
+        role: "user",
+        content: JSON.stringify({
+          brand: input.brand,
+          category: input.category,
+          read: Object.fromEntries(dims.map((d) => [d, input.base[d]])),
+        }),
+      },
+    ],
+    response_format: {
+      type: "json_schema",
+      json_schema: { name: "journey_fit", strict: true, schema: JOURNEY_FIT_SCHEMA },
+    },
+  });
+  const parsed = JSON.parse(res.choices[0]?.message?.content ?? "{}") as {
+    suggestions?: { dimension: string; suggested: string; reason: string }[];
+  };
+  const plainText = (t: string) => humanize((t ?? "").replace(/\s*[—–]\s*/g, " - "));
+  const valid = (d: string, v: string) =>
+    ((MODERATOR_PROPS as Record<string, { enum?: readonly string[] }>)[d]?.enum ?? []).includes(v);
+  const fit: JourneyFit = {
+    suggestions: (parsed.suggestions ?? [])
+      .filter((s) => valid(s.dimension, s.suggested) &&
+        String(input.base[s.dimension as (typeof dims)[number]]) !== s.suggested)
+      .slice(0, 2)
+      .map((s) => ({
+        dimension: s.dimension,
+        current: String(input.base[s.dimension as (typeof dims)[number]]),
+        suggested: s.suggested,
+        reason: plainText(s.reason),
+      })),
+  };
+  await store.cacheSet(key, JSON.stringify(fit), stampOf(input));
+  return fit;
+}
+
 export interface ScenarioFit {
   /** Scenarios that fall OUTSIDE what the brand actually sells - a
    * category-level scenario the client can never win (Nest asked about

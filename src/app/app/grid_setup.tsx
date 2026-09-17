@@ -155,6 +155,13 @@ interface ScenarioFitUi {
   missingCore: { label: string; description: string; reason: string } | null;
 }
 
+/** Client mirror of the engine's JourneyFit advisory - dimensions where
+ * this brand's own buyer may diverge from the category-modal read.
+ * Applying one is exactly a radio-pill edit. */
+interface JourneyFitUi {
+  suggestions: { dimension: string; current: string; suggested: string; reason: string }[];
+}
+
 export interface ScenarioRow {
   label: string;
   description: string;
@@ -202,6 +209,9 @@ export interface GridState {
   /** Portfolio-fit advisory computed WITH the compose, so the scenarios
    * gate never renders before its advice exists (edits refetch async). */
   fit?: ScenarioFitUi | null;
+  /** Journey-fit advisory, same contract - suggestions self-resolve once
+   * applied (the recomposed base matches, so the server drops them). */
+  journeyFit?: JourneyFitUi | null;
   /** Fingerprints (label|description) of user-authored scenarios that
    * PASSED the quality check, persisted with the draft so unchanged rows
    * are never rechecked. Deliberately excludes "keep mine" choices - a
@@ -464,6 +474,7 @@ export function useGridSetup(a: GridSetupArgs) {
       reserve?: { label: string; description: string }[];
       stages: GridStage[];
       fit?: ScenarioFitUi | null;
+      journeyFit?: JourneyFitUi | null;
     }>("/api/setup/grid/compose", {
       brand: a.brand,
       category: a.category,
@@ -496,6 +507,7 @@ export function useGridSetup(a: GridSetupArgs) {
         stages: data.stages,
         keptStages: data.stages.filter((s) => s.recommended).map((s) => s.key),
         fit: data.fit ?? a.state?.fit ?? null,
+        journeyFit: data.journeyFit ?? a.state?.journeyFit ?? null,
         scenarios: [],
         // An edited recompose returns no reserve; the pool carries over,
         // as do the already-checked scenario fingerprints. Custom
@@ -1261,6 +1273,8 @@ export function ScenariosGate({
   // the missing line retires once its row exists.
   const fit = state.fit ?? null;
   const [fitDismissed, setFitDismissed] = useState(false);
+  const journeyFit = state.journeyFit ?? null;
+  const [journeyFitDismissed, setJourneyFitDismissed] = useState(false);
   const cap = maxScenarios;
   const rows = scenarioRows(state);
   const active = rows.filter((r) => r.on);
@@ -1344,6 +1358,48 @@ export function ScenariosGate({
       {readDelta && (
         <p className="text-[12px] text-primary font-medium">{readDelta}</p>
       )}
+      {(() => {
+        // Only suggestions still pointing away from the current read - an
+        // applied (or hand-set) one disappears on its own.
+        const journeyFlags = (journeyFit?.suggestions ?? []).filter(
+          (s) => String(state.moderators[s.dimension] ?? "") !== s.suggested
+        );
+        const pill = (dim: string, value: string) =>
+          MODERATOR_FIELDS.find((f) => f.key === dim)?.options.find(([k]) => k === value)?.[1] ?? value;
+        if (journeyFitDismissed || journeyFlags.length === 0) return null;
+        return (
+          <div className="rounded-lg border border-amber-300/60 bg-amber-50 p-3 text-[12px] text-amber-900 grid gap-1.5 dark:bg-amber-950/30 dark:text-amber-200 dark:border-amber-700/50">
+            <div className="flex items-start justify-between gap-2">
+              <span className="font-semibold">
+                How {fitBrand} buyers may differ
+              </span>
+              <button
+                type="button"
+                onClick={() => setJourneyFitDismissed(true)}
+                aria-label="Dismiss"
+                className="leading-none opacity-60 hover:opacity-100"
+              >
+                ×
+              </button>
+            </div>
+            {journeyFlags.map((s) => (
+              <p key={s.dimension} className="m-0 flex flex-wrap items-center gap-2">
+                <span>{s.reason}</span>
+                <button
+                  type="button"
+                  disabled={busy}
+                  onClick={() =>
+                    onRecomposeBase({ ...state.moderators, [s.dimension]: s.suggested }, rows)
+                  }
+                  className="rounded-full border border-amber-400/70 px-2 py-0.5 font-medium hover:bg-amber-100 dark:hover:bg-amber-900/40"
+                >
+                  Set to {pill(s.dimension, s.suggested)}
+                </button>
+              </p>
+            ))}
+          </div>
+        );
+      })()}
       <span className="mt-3 text-sm font-semibold uppercase tracking-wide text-primary">
         Who&apos;s generally buying
       </span>
