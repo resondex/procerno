@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useState, type ReactNode } from "react";
 
 /**
  * Buyer Landscape setup pieces: the state shape, the gate API calls, and
@@ -1255,11 +1255,13 @@ export function ScenariosGate({
   onRebuildForBrand?: () => void;
 }) {
   const [editRead, setEditRead] = useState(false);
-  // Seeded from the compose response - the gate never renders before its
-  // advice exists; the effect below refetches only after edits.
-  const [fit, setFit] = useState<ScenarioFitUi | null>(state.fit ?? null);
+  // ONE-SHOT advisory: computed with the compose, shown for the set as
+  // composed, never refetched on edits - accepting its suggestion must
+  // not conjure a successor (Tyler: guarding user scenario edits is out
+  // of scope). Flag lines self-retire as their rows are unticked, and
+  // the missing line retires once its row exists.
+  const fit = state.fit ?? null;
   const [fitDismissed, setFitDismissed] = useState(false);
-  const seededFitFp = useRef<string | null>(null);
   const cap = maxScenarios;
   const rows = scenarioRows(state);
   const active = rows.filter((r) => r.on);
@@ -1286,41 +1288,6 @@ export function ScenariosGate({
     setRows(rows.map((r, j) => (j === i ? { ...r, ...patch } : r)), recompose, cells);
   };
 
-  // Portfolio-fit advisory: the read is brand-blind by design (shared per
-  // category), so a multi-product brand can be handed a scenario it can't
-  // win or miss its core line. Advice only - fetched cache-first, silent
-  // on failure, re-fetched when the active set's wording changes.
-  const fitFp = active.map((r) => `${r.label.trim()}|${r.description.trim()}`).join("~");
-  if (seededFitFp.current === null && state.fit !== undefined) seededFitFp.current = fitFp;
-  useEffect(() => {
-    if (!fitBrand || !fitCategory || active.length === 0) return;
-    // The compose-time advice covers the set as composed; only an edited
-    // set needs a refetch (which is a cache hit server-side thereafter).
-    if (fitFp === seededFitFp.current) return;
-    let stale = false;
-    fetch("/api/setup/grid/scenario_fit", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        brand: fitBrand,
-        category: fitCategory,
-        scenarios: active.map((r) => ({ label: r.label, description: r.description })),
-      }),
-      signal: AbortSignal.timeout(60_000),
-    })
-      .then((r) => (r.ok ? r.json() : null))
-      .then((d) => {
-        if (!stale && d?.fit) {
-          setFit(d.fit as ScenarioFitUi);
-          seededFitFp.current = fitFp;
-        }
-      })
-      .catch(() => {});
-    return () => {
-      stale = true;
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [fitBrand, fitCategory, fitFp]);
   const fitFlags = fit
     ? [
         ...fit.offPortfolio.filter((f) =>
@@ -1355,20 +1322,37 @@ export function ScenariosGate({
         ) : (
           <span className="flex flex-wrap items-center gap-1.5">
             {MODERATOR_FIELDS.map((f) => (
-              <select
-                key={f.key}
-                aria-label={f.key.replace("_", " ")}
-                value={String(state.moderators[f.key] ?? "")}
-                disabled={busy}
-                onChange={(e) =>
-                  onRecomposeBase({ ...state.moderators, [f.key]: e.target.value }, rows)
-                }
-                className="rounded-full bg-primary-soft px-2 py-0.5 text-[11px] font-medium text-primary border-0 cursor-pointer"
-              >
-                {f.options.map(([k, label]) => (
-                  <option key={k} value={k}>{label}</option>
-                ))}
-              </select>
+              <fieldset key={f.key} className="m-0 flex items-center gap-1 border-0 p-0">
+                <legend className="sr-only">{f.key.replace("_", " ")}</legend>
+                {f.options.map(([k, label]) => {
+                  const selected = String(state.moderators[f.key] ?? "") === k;
+                  return (
+                    <label
+                      key={k}
+                      className={
+                        "cursor-pointer rounded-full px-2 py-0.5 text-[11px] font-medium " +
+                        (selected
+                          ? "bg-primary text-white"
+                          : "bg-primary-soft text-primary hover:opacity-80")
+                      }
+                    >
+                      <input
+                        type="radio"
+                        name={`read-${f.key}`}
+                        value={k}
+                        checked={selected}
+                        disabled={busy}
+                        onChange={() =>
+                          onRecomposeBase({ ...state.moderators, [f.key]: k }, rows)
+                        }
+                        className="sr-only"
+                      />
+                      {label}
+                    </label>
+                  );
+                })}
+                <span className="px-0.5 text-ink-3">·</span>
+              </fieldset>
             ))}
             <button
               type="button"

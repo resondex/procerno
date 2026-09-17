@@ -177,13 +177,31 @@ const MODERATOR_SCHEMA = {
   ],
 } as const;
 
-const DIMENSION_GUIDE =
-  "- verifiability: bought on checkable specs, on taste/experience, " +
-  "or on trust (credence - quality unverifiable even after use).\n" +
+// The verifiability and rhythm definitions carry the boundary rules
+// because those two dimensions measurably split in sampling (an
+// ambulatory-EHR category drew trust/spec/taste 5/3/2 on ten runs
+// before the tightening): the classifier needs the tiebreaks, not
+// more judgment.
+export const DIMENSION_GUIDE =
+  "- verifiability: HOW quality is judged. spec = checkable BEFORE " +
+  "buying via specs, demos, trials, RFPs, or side-by-side comparison - " +
+  "software and equipment evaluated through demos are spec even when " +
+  "marketed on 'experience' or 'usability'. taste = judged by personal " +
+  "sensory or aesthetic experience of using it (food, fragrance, " +
+  "comfort). trust = credence: quality hard to verify even AFTER " +
+  "purchase (advisory services, audits, supplements' efficacy). When " +
+  "torn between spec and trust for an organization-bought product: if " +
+  "buyers run demos and compare feature sheets, it is spec.\n" +
   "- involvement: a considered purchase, or habitual/impulse.\n" +
   "- think_feel: decided mostly rationally, or by identity/emotion.\n" +
   "- decision_unit: one person, a household, or a committee/team.\n" +
-  "- rhythm: one-shot purchase, replenishment, or subscription.\n" +
+  "- rhythm: subscription = an ongoing paid plan or engagement that " +
+  "RENEWS BY DEFAULT unless cancelled (SaaS seats, retainers, " +
+  "auto-renewing audits). replenishment = the same consumable rebought " +
+  "as it runs out. one_shot = each purchase is a fresh decision, " +
+  "however often it recurs (projects won case-by-case, device " +
+  "upgrades). The test is who acts at renewal time: default-continue = " +
+  "subscription, re-decide = one_shot.\n" +
   "- risk: the buyer's dominant worry - performance, financial, " +
   "social (how it looks), or physical (safety).\n" +
   "- channel_retail: true when where-to-buy is a real question " +
@@ -542,10 +560,10 @@ export async function readScenarios(input: {
   noWait?: boolean;
   meta?: CacheMeta;
 }): Promise<{ base: Moderators; scenarios: ScenarioSpec[]; reserve: ScenarioSpec[] } | null> {
-  // "scenarios_journeys10": v9 minus the occasion-frequency weighting
-  // (A/B vs v9); the brand-aware forBrand mode stays. v10 category-read
-  // prompt matches v8 exactly, so v8-vs-v10 diffs are pure re-roll noise.
-  const key = cacheKey("scenarios_journeys10", [
+  // "scenarios_journeys11": tightened verifiability/rhythm boundary rules
+  // in DIMENSION_GUIDE (the athena trust/spec/taste split). v10 dropped
+  // the frequency rule; forBrand mode unchanged.
+  const key = cacheKey("scenarios_journeys11", [
     input.category, input.audience, input.forBrand ?? "",
   ]);
   const read = await coalesced<{
