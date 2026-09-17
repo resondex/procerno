@@ -1367,6 +1367,10 @@ export function ScenariosGate({
   const [fitDismissed, setFitDismissed] = useState(false);
   const journeyFit = state.journeyFit ?? null;
   const [journeyFitDismissed, setJourneyFitDismissed] = useState(false);
+  /** Stage keys added via the advisory's "keep the market view" action,
+   * per dimension - the line's Undo removes exactly these and no more
+   * (a coverage-map tick the user made themselves is never touched). */
+  const [journeyStageAdds, setJourneyStageAdds] = useState<Record<string, { key: string; label: string }[]>>({});
   const cap = maxScenarios;
   const rows = scenarioRows(state);
   const active = rows.filter((r) => r.on);
@@ -1411,16 +1415,23 @@ export function ScenariosGate({
       {(() => {
         // Only suggestions still unresolved: applying either resolution -
         // flipping the base, or ticking the stages on while keeping the
-        // market view - makes its line disappear on its own.
+        // market view - retires its line (the stage route to an Undo row,
+        // the flip for good: the pills themselves are its undo).
         const journeyFlags = (journeyFit?.suggestions ?? []).filter(
           (s) =>
             String(state.moderators[s.dimension] ?? "") !== s.suggested &&
             !((s.stagesIn?.length ?? 0) > 0 &&
               s.stagesIn!.every((st) => state.keptStages.includes(st.key)))
         );
+        const journeyApplied = (journeyFit?.suggestions ?? []).filter(
+          (s) =>
+            journeyStageAdds[s.dimension] &&
+            (s.stagesIn?.length ?? 0) > 0 &&
+            s.stagesIn!.every((st) => state.keptStages.includes(st.key))
+        );
         const pill = (dim: string, value: string) =>
           MODERATOR_FIELDS.find((f) => f.key === dim)?.options.find(([k]) => k === value)?.[1] ?? value;
-        if (journeyFitDismissed || journeyFlags.length === 0) return null;
+        if (journeyFitDismissed || (journeyFlags.length === 0 && journeyApplied.length === 0)) return null;
         return (
           <div className="rounded-lg border border-amber-300/60 bg-amber-50 p-3 text-[12px] text-amber-900 grid gap-1.5 dark:bg-amber-950/30 dark:text-amber-200 dark:border-amber-700/50">
             <div className="flex items-start justify-between gap-2">
@@ -1439,12 +1450,39 @@ export function ScenariosGate({
             {journeyFlags.map((s) => {
               // The market-view resolution stays targeted: offered only
               // when the flip's stage delta is one or two stages -
-              // anything wider is no longer a pointed suggestion.
+              // anything wider is no longer a pointed suggestion. When
+              // offered, it leads as the RECOMMENDED action (it keeps the
+              // shared market read and is one Undo away); the base flip
+              // is the quieter alternative.
               const addable = (s.stagesIn ?? []).slice(0, 2);
               const offerStages = (s.stagesIn?.length ?? 0) >= 1 && s.stagesIn!.length <= 2;
+              const stageNames =
+                addable.map((st) => st.label).join(" and ") +
+                (addable.length > 1 ? " stages" : " stage");
+              const addStages = () => {
+                // The keptStages override - the same tick the coverage
+                // map offers, so it survives recomposes. No model call,
+                // no read change; remembered per dimension for Undo.
+                const added = addable.filter((st) => !state.keptStages.includes(st.key));
+                setJourneyStageAdds((prev) => ({ ...prev, [s.dimension]: added }));
+                setState({
+                  ...state,
+                  keptStages: [...state.keptStages, ...added.map((st) => st.key)],
+                });
+              };
               return (
                 <p key={s.dimension} className="m-0 flex flex-wrap items-center gap-2">
                   <span>{s.reason}</span>
+                  {offerStages && (
+                    <button
+                      type="button"
+                      disabled={busy}
+                      onClick={addStages}
+                      className="rounded-full bg-amber-400/80 px-2 py-0.5 font-semibold text-amber-950 hover:bg-amber-400 dark:bg-amber-500/80 dark:hover:bg-amber-500"
+                    >
+                      Keep the market view and add the {stageNames}
+                    </button>
+                  )}
                   <button
                     type="button"
                     disabled={busy}
@@ -1453,31 +1491,40 @@ export function ScenariosGate({
                     }
                     className="rounded-full border border-amber-400/70 px-2 py-0.5 font-medium hover:bg-amber-100 dark:hover:bg-amber-900/40"
                   >
-                    Set to {pill(s.dimension, s.suggested)}
+                    {offerStages ? `or set to ${pill(s.dimension, s.suggested)}` : `Set to ${pill(s.dimension, s.suggested)}`}
                   </button>
-                  {offerStages && (
-                    <button
-                      type="button"
-                      disabled={busy}
-                      onClick={() =>
-                        // The keptStages override - the same tick the
-                        // coverage map offers, so it survives recomposes.
-                        // No model call, no read change.
-                        setState({
-                          ...state,
-                          keptStages: [
-                            ...state.keptStages,
-                            ...addable.map((st) => st.key).filter((k) => !state.keptStages.includes(k)),
-                          ],
-                        })
-                      }
-                      className="rounded-full border border-amber-400/70 px-2 py-0.5 font-medium hover:bg-amber-100 dark:hover:bg-amber-900/40"
-                    >
-                      or keep the market view and add the{" "}
-                      {addable.map((st) => st.label).join(" and ")}{" "}
-                      {addable.length > 1 ? "stages" : "stage"}
-                    </button>
-                  )}
+                </p>
+              );
+            })}
+            {journeyApplied.map((s) => {
+              const added = journeyStageAdds[s.dimension] ?? [];
+              const names =
+                added.map((st) => st.label).join(" and ") +
+                (added.length > 1 ? " stages" : " stage");
+              return (
+                <p key={`applied-${s.dimension}`} className="m-0 flex flex-wrap items-center gap-2">
+                  <span>
+                    Added the {names} - the market read stays as it was.
+                  </span>
+                  <button
+                    type="button"
+                    disabled={busy}
+                    onClick={() => {
+                      const keys = new Set(added.map((st) => st.key));
+                      setJourneyStageAdds((prev) => {
+                        const next = { ...prev };
+                        delete next[s.dimension];
+                        return next;
+                      });
+                      setState({
+                        ...state,
+                        keptStages: state.keptStages.filter((k) => !keys.has(k)),
+                      });
+                    }}
+                    className="rounded-full border border-amber-400/70 px-2 py-0.5 font-medium hover:bg-amber-100 dark:hover:bg-amber-900/40"
+                  >
+                    Undo
+                  </button>
                 </p>
               );
             })}
