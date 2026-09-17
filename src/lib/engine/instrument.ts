@@ -2214,6 +2214,10 @@ const PHRASINGS_EXTRA = 3;
  * to the overlap filter - Sephora and Tide both ran short ONLY on blind
  * picks-a-brand stages. Output tokens are the cheap side of the call. */
 const PHRASINGS_EXTRA_BLIND = 5;
+/** Cells per paraphrase model call. Sized so the worst case (~8 cells x
+ * 14 candidates of long-winded seeds) finishes well inside the client's
+ * 150s deadline - the paraphrase analogue of CELL_CHUNK. */
+const PHRASINGS_CHUNK = 8;
 /** The retry's wider margin: a cell that came up short is fighting the
  * overlap filter, so give it more candidates to survive it. */
 const PHRASINGS_EXTRA_RETRY = 6;
@@ -2565,7 +2569,17 @@ export async function generatePhrasings(input: {
     // heals them from the by-then-finished cache.
   };
 
-  await Promise.all([generate(mine), waitForTheirs()]);
+  // The writer bounds its own call sizes the way the cell writer does
+  // (CELL_CHUNK): one call per ~PHRASINGS_CHUNK cells, chunks in
+  // parallel. Without this, a 30-cell request on a verbose brand asks
+  // one response for ~400 paraphrases and can outrun the 150s client
+  // deadline - athenahealth and Google Nest did exactly that, and the
+  // SDK's auto-retries turned each overrun into minutes of dead air.
+  const chunks: number[][] = [];
+  for (let i = 0; i < mine.length; i += PHRASINGS_CHUNK) {
+    chunks.push(mine.slice(i, i + PHRASINGS_CHUNK));
+  }
+  await Promise.all([...chunks.map((c) => generate(c)), waitForTheirs()]);
   return out;
 }
 
