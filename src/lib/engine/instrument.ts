@@ -1903,6 +1903,44 @@ export async function generateGrid(input: {
           if (list) list.push(cell);
           else produced.set(u, [cell]);
         });
+        // Fresh cells get one pass of the same checker the Prompts gate
+        // runs on user edits; anything flagged is served as its suggested
+        // repair. The swap lands BEFORE the unit cache write, so the
+        // healed text is the only text downstream ever sees - paraphrase
+        // sets, fixtures, and the UI all stay coherent with it. Cached
+        // units never re-heal (the approved baseline stands), and a
+        // checker failure never blocks generation.
+        const flat = group.flatMap((u) => produced.get(u) ?? []);
+        if (flat.length > 0) {
+          try {
+            const verdicts = await reviewCells({
+              brand: input.brand,
+              category: input.category,
+              competitors: input.competitors,
+              audience: input.audience,
+              candidates: flat.map((c) => {
+                const st = byKey.get(c.stage);
+                return {
+                  text: c.text,
+                  original: null,
+                  stage: c.stage,
+                  hint: st?.hint ?? null,
+                  tag: st?.tag ?? null,
+                  situation: c.situation,
+                  situationDescription: null,
+                  angle: c.angle,
+                  mode: c.mode,
+                };
+              }),
+              meta: input.meta,
+            });
+            verdicts.forEach((v, i) => {
+              if (!v.ok && v.suggestion?.trim()) flat[i].text = humanize(v.suggestion.trim());
+            });
+          } catch {
+            // The writer's text stands - healing is best-effort.
+          }
+        }
         await Promise.all(
           group.map((u) => {
             const cells = produced.get(u) ?? [];
