@@ -1151,6 +1151,12 @@ export interface JourneyFit {
     current: string;
     suggested: string;
     reason: string;
+    /** Stages the suggested value would bring into the grid - pure code
+     * (a stageLibrary diff), no model. Powers the advisory's SECOND
+     * resolution: keep the market-norm read and tick these stages on
+     * via the existing keptStages override, instead of flipping the
+     * base. The UI offers it only when this list is small (1-2). */
+    stagesIn: { key: string; label: string }[];
   }[];
 }
 
@@ -1192,11 +1198,10 @@ export async function reviewJourneyFit(input: {
   meta?: CacheMeta;
 }): Promise<JourneyFit> {
   const dims = ["verifiability", "involvement", "think_feel", "decision_unit", "rhythm", "risk"] as const;
-  // "journey_fit2": reasons framed against the market norm and hinged on
-  // audience width - the read isn't wrong, it's the category's; whether
-  // to depart depends on whether the user measures the brand's own
-  // buyers or the market at large.
-  const key = cacheKey("journey_fit2", [
+  // "journey_fit3": suggestions carry stagesIn (the stage delta the flip
+  // would cause) so cached entries always have it. fit2 framed reasons
+  // against the market norm, hinged on audience width.
+  const key = cacheKey("journey_fit3", [
     input.brand, input.category,
     dims.map((d) => String(input.base[d])).join("|"),
   ]);
@@ -1260,12 +1265,24 @@ export async function reviewJourneyFit(input: {
       .filter((s) => valid(s.dimension, s.suggested) &&
         String(input.base[s.dimension as (typeof dims)[number]]) !== s.suggested)
       .slice(0, 2)
-      .map((s) => ({
-        dimension: s.dimension,
-        current: String(input.base[s.dimension as (typeof dims)[number]]),
-        suggested: s.suggested,
-        reason: plainText(s.reason),
-      })),
+      .map((s) => {
+        // The stage delta the flip would cause - what the "keep the
+        // market view" resolution would tick on instead.
+        const wasIn = new Set(
+          stageLibrary(input.base).filter((st) => st.recommended).map((st) => st.key)
+        );
+        const flipped = { ...input.base, [s.dimension]: s.suggested } as Moderators;
+        const stagesIn = stageLibrary(flipped)
+          .filter((st) => st.recommended && !wasIn.has(st.key))
+          .map((st) => ({ key: st.key, label: st.label }));
+        return {
+          dimension: s.dimension,
+          current: String(input.base[s.dimension as (typeof dims)[number]]),
+          suggested: s.suggested,
+          reason: plainText(s.reason),
+          stagesIn,
+        };
+      }),
   };
   await store.cacheSet(key, JSON.stringify(fit), stampOf(input));
   return fit;

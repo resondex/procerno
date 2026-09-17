@@ -159,7 +159,16 @@ interface ScenarioFitUi {
  * this brand's own buyer may diverge from the category-modal read.
  * Applying one is exactly a radio-pill edit. */
 interface JourneyFitUi {
-  suggestions: { dimension: string; current: string; suggested: string; reason: string }[];
+  suggestions: {
+    dimension: string;
+    current: string;
+    suggested: string;
+    reason: string;
+    /** Stages the flip would bring in - the "keep the market view"
+     * resolution ticks these on instead of changing the base. Absent on
+     * advice cached before this field existed. */
+    stagesIn?: { key: string; label: string }[];
+  }[];
 }
 
 export interface ScenarioRow {
@@ -1400,10 +1409,14 @@ export function ScenariosGate({
         How they generally decide
       </span>
       {(() => {
-        // Only suggestions still pointing away from the current read - an
-        // applied (or hand-set) one disappears on its own.
+        // Only suggestions still unresolved: applying either resolution -
+        // flipping the base, or ticking the stages on while keeping the
+        // market view - makes its line disappear on its own.
         const journeyFlags = (journeyFit?.suggestions ?? []).filter(
-          (s) => String(state.moderators[s.dimension] ?? "") !== s.suggested
+          (s) =>
+            String(state.moderators[s.dimension] ?? "") !== s.suggested &&
+            !((s.stagesIn?.length ?? 0) > 0 &&
+              s.stagesIn!.every((st) => state.keptStages.includes(st.key)))
         );
         const pill = (dim: string, value: string) =>
           MODERATOR_FIELDS.find((f) => f.key === dim)?.options.find(([k]) => k === value)?.[1] ?? value;
@@ -1423,21 +1436,51 @@ export function ScenariosGate({
                 ×
               </button>
             </div>
-            {journeyFlags.map((s) => (
-              <p key={s.dimension} className="m-0 flex flex-wrap items-center gap-2">
-                <span>{s.reason}</span>
-                <button
-                  type="button"
-                  disabled={busy}
-                  onClick={() =>
-                    onRecomposeBase({ ...state.moderators, [s.dimension]: s.suggested }, rows)
-                  }
-                  className="rounded-full border border-amber-400/70 px-2 py-0.5 font-medium hover:bg-amber-100 dark:hover:bg-amber-900/40"
-                >
-                  Set to {pill(s.dimension, s.suggested)}
-                </button>
-              </p>
-            ))}
+            {journeyFlags.map((s) => {
+              // The market-view resolution stays targeted: offered only
+              // when the flip's stage delta is one or two stages -
+              // anything wider is no longer a pointed suggestion.
+              const addable = (s.stagesIn ?? []).slice(0, 2);
+              const offerStages = (s.stagesIn?.length ?? 0) >= 1 && s.stagesIn!.length <= 2;
+              return (
+                <p key={s.dimension} className="m-0 flex flex-wrap items-center gap-2">
+                  <span>{s.reason}</span>
+                  <button
+                    type="button"
+                    disabled={busy}
+                    onClick={() =>
+                      onRecomposeBase({ ...state.moderators, [s.dimension]: s.suggested }, rows)
+                    }
+                    className="rounded-full border border-amber-400/70 px-2 py-0.5 font-medium hover:bg-amber-100 dark:hover:bg-amber-900/40"
+                  >
+                    Set to {pill(s.dimension, s.suggested)}
+                  </button>
+                  {offerStages && (
+                    <button
+                      type="button"
+                      disabled={busy}
+                      onClick={() =>
+                        // The keptStages override - the same tick the
+                        // coverage map offers, so it survives recomposes.
+                        // No model call, no read change.
+                        setState({
+                          ...state,
+                          keptStages: [
+                            ...state.keptStages,
+                            ...addable.map((st) => st.key).filter((k) => !state.keptStages.includes(k)),
+                          ],
+                        })
+                      }
+                      className="rounded-full border border-amber-400/70 px-2 py-0.5 font-medium hover:bg-amber-100 dark:hover:bg-amber-900/40"
+                    >
+                      or keep the market view and add the{" "}
+                      {addable.map((st) => st.label).join(" and ")}{" "}
+                      {addable.length > 1 ? "stages" : "stage"}
+                    </button>
+                  )}
+                </p>
+              );
+            })}
           </div>
         );
       })()}
