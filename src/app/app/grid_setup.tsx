@@ -1302,11 +1302,12 @@ export function ScenariosGate({
       <span className="text-sm font-semibold uppercase tracking-wide text-primary">
         How they generally decide
       </span>
-      {/* Always visible, one dimension per row, uniform pill widths - the
-       * unselected options never hide, so the read is edited in place. */}
-      <div className="grid gap-1.5">
+      {/* Always visible: one COLUMN per dimension, its options stacked
+       * vertically as uniform pills - the unselected never hide, and the
+       * read is edited in place. */}
+      <div className="flex flex-wrap gap-2">
         {MODERATOR_FIELDS.map((f) => (
-          <fieldset key={f.key} className="m-0 flex items-center gap-1.5 border-0 p-0">
+          <fieldset key={f.key} className="m-0 flex flex-col gap-1 border-0 p-0">
             <legend className="sr-only">{f.key.replace("_", " ")}</legend>
             {f.options.map(([k, label]) => {
               const selected = String(state.moderators[f.key] ?? "") === k;
@@ -1314,7 +1315,7 @@ export function ScenariosGate({
                 <label
                   key={k}
                   className={
-                    "w-36 cursor-pointer rounded-full px-2 py-1 text-center text-[11px] font-medium " +
+                    "w-32 cursor-pointer rounded-full px-2 py-1 text-center text-[11px] font-medium " +
                     (selected
                       ? "bg-primary text-white"
                       : "bg-primary-soft text-primary hover:opacity-80")
