@@ -1254,7 +1254,6 @@ export function ScenariosGate({
    * finds the shared category read gave this brand rooms it can't win. */
   onRebuildForBrand?: () => void;
 }) {
-  const [editRead, setEditRead] = useState(false);
   // ONE-SHOT advisory: computed with the compose, shown for the set as
   // composed, never refetched on edits - accepting its suggestion must
   // not conjure a successor (Tyler: guarding user scenario edits is out
@@ -1272,10 +1271,6 @@ export function ScenariosGate({
   const marketStyle = JOURNEY_FIELDS
     .map((f) => displayOf(f.key, state.moderators[f.key]))
     .join(" · ");
-  const readSentence = MODERATOR_FIELDS.map((f) => {
-    const v = String(state.moderators[f.key] ?? "");
-    return f.options.find(([k]) => k === v)?.[1];
-  }).filter(Boolean).join(" · ");
   const setRows = (next: ScenarioRow[], recompose = false, cells?: GridCellUi[]) => {
     if (recompose) onRecompose(state.moderators, next, (cells ?? state.cells).filter((c) => c.custom));
     else setState(withScenarioRows(cells ? { ...state, cells } : state, next));
@@ -1307,62 +1302,41 @@ export function ScenariosGate({
       <span className="text-sm font-semibold uppercase tracking-wide text-primary">
         How they generally decide
       </span>
-      <div className="flex flex-wrap items-baseline gap-2 text-[13px]">
-        {!editRead ? (
-          <>
-            <span className="text-ink-2">{readSentence}</span>
-            <button
-              type="button"
-              onClick={() => setEditRead(true)}
-              className="text-[13px] font-medium text-primary hover:opacity-80"
-            >
-              change
-            </button>
-          </>
-        ) : (
-          <span className="flex flex-wrap items-center gap-1.5">
-            {MODERATOR_FIELDS.map((f) => (
-              <fieldset key={f.key} className="m-0 flex items-center gap-1 border-0 p-0">
-                <legend className="sr-only">{f.key.replace("_", " ")}</legend>
-                {f.options.map(([k, label]) => {
-                  const selected = String(state.moderators[f.key] ?? "") === k;
-                  return (
-                    <label
-                      key={k}
-                      className={
-                        "cursor-pointer rounded-full px-2 py-0.5 text-[11px] font-medium " +
-                        (selected
-                          ? "bg-primary text-white"
-                          : "bg-primary-soft text-primary hover:opacity-80")
-                      }
-                    >
-                      <input
-                        type="radio"
-                        name={`read-${f.key}`}
-                        value={k}
-                        checked={selected}
-                        disabled={busy}
-                        onChange={() =>
-                          onRecomposeBase({ ...state.moderators, [f.key]: k }, rows)
-                        }
-                        className="sr-only"
-                      />
-                      {label}
-                    </label>
-                  );
-                })}
-                <span className="px-0.5 text-ink-3">·</span>
-              </fieldset>
-            ))}
-            <button
-              type="button"
-              onClick={() => setEditRead(false)}
-              className="text-[13px] font-medium text-ink-3 hover:text-ink"
-            >
-              done
-            </button>
-          </span>
-        )}
+      {/* Always visible, one dimension per row, uniform pill widths - the
+       * unselected options never hide, so the read is edited in place. */}
+      <div className="grid gap-1.5">
+        {MODERATOR_FIELDS.map((f) => (
+          <fieldset key={f.key} className="m-0 flex items-center gap-1.5 border-0 p-0">
+            <legend className="sr-only">{f.key.replace("_", " ")}</legend>
+            {f.options.map(([k, label]) => {
+              const selected = String(state.moderators[f.key] ?? "") === k;
+              return (
+                <label
+                  key={k}
+                  className={
+                    "w-36 cursor-pointer rounded-full px-2 py-1 text-center text-[11px] font-medium " +
+                    (selected
+                      ? "bg-primary text-white"
+                      : "bg-primary-soft text-primary hover:opacity-80")
+                  }
+                >
+                  <input
+                    type="radio"
+                    name={`read-${f.key}`}
+                    value={k}
+                    checked={selected}
+                    disabled={busy}
+                    onChange={() =>
+                      onRecomposeBase({ ...state.moderators, [f.key]: k }, rows)
+                    }
+                    className="sr-only"
+                  />
+                  {label}
+                </label>
+              );
+            })}
+          </fieldset>
+        ))}
       </div>
       {readDelta && (
         <p className="text-[12px] text-primary font-medium">{readDelta}</p>
