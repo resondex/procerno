@@ -1502,8 +1502,11 @@ export async function reviewCells(input: {
   // exemption was missing (29), "blind" was read as "may not ask for
   // brand recommendations" (10), and rival cells drew flags whose own
   // reasons said allowed (4); the mutation test also showed off-target
-  // text slipping through. review2 added incoherence rewrites.
-  const key = cacheKey("cell_review3", [
+  // text slipping through. review2 added incoherence rewrites. review4:
+  // target never polices brand presence or naturally blended detail -
+  // review3's sharpened target re-flagged 17 deliberate blind variants
+  // and buyer-style blends on the same audit corpus.
+  const key = cacheKey("cell_review4", [
     input.brand, input.category, input.audience, input.competitors.join(","),
     input.candidates.map(fp).join("~"),
   ]);
@@ -1548,7 +1551,15 @@ export async function reviewCells(input: {
           "cell measures? Compare the ask against the stage line: a " +
           "perfectly coherent question that belongs to another stage's " +
           "territory, or that lost its scenario's circumstance entirely, " +
-          "is a yes - coherence is not the test, the RIGHT question is.\n" +
+          "is a yes - coherence is not the test, the RIGHT question is. " +
+          "Two things are NEVER target drift: whether a brand is named " +
+          "(brand presence is solely the branding question - a cell about " +
+          "the client brand may still be written blind on purpose, to " +
+          "measure whether the assistant brings the brand up itself), and " +
+          "adjacent detail woven in the way real people ask (a pain " +
+          "description that mentions products, a question that trails " +
+          "into what-should-I-look-for). Flag target only when the " +
+          "CENTRAL ask belongs to a different stage.\n" +
           "- branding: does it VIOLATE the cell's brand rule (stated per " +
           "candidate) - naming a brand where it must be blind, or missing " +
           "a brand it must name? A brand the rule permits or requires is " +
