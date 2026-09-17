@@ -1494,9 +1494,16 @@ export async function reviewCells(input: {
   meta?: CacheMeta;
 }): Promise<CellVerdict[]> {
   const fp = (c: CellReviewCandidate) =>
-    [c.stage, c.situation ?? "", c.angle, c.text.trim(), c.original?.trim() ?? ""].join("|");
-  // "cell_review2": unclear-flag suggestions rewrite the incoherent parts.
-  const key = cacheKey("cell_review2", [
+    // hint is in the fingerprint: the target check leans on it, so a
+    // sharper hint must not serve verdicts formed without one.
+    [c.stage, c.situation ?? "", c.angle, c.text.trim(), c.original?.trim() ?? "", c.hint ?? ""].join("|");
+  // "cell_review3": the 524-cell fixture audit (2026-09-17) traced every
+  // one of its 43 flags to the checker, not the cells - the steers
+  // exemption was missing (29), "blind" was read as "may not ask for
+  // brand recommendations" (10), and rival cells drew flags whose own
+  // reasons said allowed (4); the mutation test also showed off-target
+  // text slipping through. review2 added incoherence rewrites.
+  const key = cacheKey("cell_review3", [
     input.brand, input.category, input.audience, input.competitors.join(","),
     input.candidates.map(fp).join("~"),
   ]);
@@ -1507,12 +1514,17 @@ export async function reviewCells(input: {
     c.angle === "open"
       ? "no restriction - the prompt may name brands where its ask calls for it"
       : c.angle === "generic"
-      ? c.tag === "judges"
-        ? `blind except the client brand: may name ${input.brand} (the stage is a verdict on it), never a rival`
-        : "blind: must not name any brand"
+      // "judges" verdicts on the client brand; "steers" retention and
+      // loyalty stages are client-anchored by design (their hints tell
+      // the writer to name it) - both may name the client, never a rival.
+      ? c.tag === "judges" || c.tag === "steers"
+        ? `blind except the client brand: may name ${input.brand} (the stage concerns it directly), never a rival`
+        : "blind: the prompt TEXT must not contain any brand name - " +
+          "asking the assistant to recommend, name, or list brands is " +
+          "the point of many cells and is always fine"
       : c.angle === "defensive"
         ? `must ask for alternatives to ${input.brand} by name`
-        : `about the rival ${c.angle} (comparison with ${input.brand}, or alternatives to ${c.angle})`;
+        : `about the rival ${c.angle} - naming ${c.angle} is REQUIRED, and naming ${input.brand} alongside it (a comparison) is fine`;
   const res = await openaiClient().chat.completions.create({
     model: MODEL,
     // A safety net, not a deep thinker - low effort roughly halves the
@@ -1533,11 +1545,15 @@ export async function reviewCells(input: {
           "never flag them. For EACH candidate answer three yes/no " +
           "questions, each judged on its own:\n" +
           "- target: does it ask a materially different question than its " +
-          "cell measures - drifted to another stage's territory, or lost " +
-          "its scenario's circumstance entirely?\n" +
-          "- branding: does it break the cell's brand rule (stated per " +
+          "cell measures? Compare the ask against the stage line: a " +
+          "perfectly coherent question that belongs to another stage's " +
+          "territory, or that lost its scenario's circumstance entirely, " +
+          "is a yes - coherence is not the test, the RIGHT question is.\n" +
+          "- branding: does it VIOLATE the cell's brand rule (stated per " +
           "candidate) - naming a brand where it must be blind, or missing " +
-          "a brand it must name?\n" +
+          "a brand it must name? A brand the rule permits or requires is " +
+          "never a violation: when the text matches its rule, the answer " +
+          "is no.\n" +
           "- unclear: is it garbled or self-contradictory enough that a " +
           "reader couldn't tell what's being asked? (Not typos, not " +
           "informality - only genuine incoherence.)\n" +
