@@ -766,12 +766,25 @@ export function summarizeCoderProvenance(
 
 /** Per-answer accumulator for exact coder metering: pass `sink` as the
  * ExtractionContext usageSink, then read `usage` after the consensus call.
- * Anthropic inputs arrive already folded to billed-equivalent tokens. */
-export function coderUsageAccumulator(): {
+ * Anthropic inputs arrive already folded to billed-equivalent tokens.
+ * `prior` seeds from a stored responses.coder_usage JSON so a re-code
+ * accumulates spend on the answer instead of overwriting what the first
+ * coding pass cost. */
+export function coderUsageAccumulator(prior?: string | null): {
   sink: NonNullable<ExtractionContext["usageSink"]>;
   usage: Record<string, { input: number; output: number }>;
 } {
-  const usage: Record<string, { input: number; output: number }> = {};
+  let usage: Record<string, { input: number; output: number }> = {};
+  if (prior) {
+    try {
+      const parsed = JSON.parse(prior) as Record<string, { input?: number; output?: number }>;
+      for (const [m, u] of Object.entries(parsed ?? {})) {
+        usage[m] = { input: u?.input ?? 0, output: u?.output ?? 0 };
+      }
+    } catch {
+      usage = {};
+    }
+  }
   return {
     usage,
     sink: (model, input, output) => {

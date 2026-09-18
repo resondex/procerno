@@ -1157,9 +1157,10 @@ export const sqliteStore: Store = {
     insertAll();
   },
 
-  async writeResponseCoding(responseId, coding, coderModel, mentions) {
+  async writeResponseCoding(responseId, coding, coderModel, mentions, coderUsage) {
     const db = getDb();
-    const cols = codingColumns(coding, coderModel) as unknown as Record<string, unknown>;
+    const cols = { ...(codingColumns(coding, coderModel) as unknown as Record<string, unknown>) };
+    if (coderUsage !== undefined) cols.coder_usage = JSON.stringify(coderUsage);
     const keys = Object.keys(cols);
     db.transaction(() => {
       db.prepare(

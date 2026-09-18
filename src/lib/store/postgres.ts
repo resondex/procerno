@@ -914,9 +914,10 @@ export const pgStore: Store = {
     });
   },
 
-  async writeResponseCoding(responseId, coding, coderModel, mentions) {
+  async writeResponseCoding(responseId, coding, coderModel, mentions, coderUsage) {
     const sql = await db();
-    const cols = codingColumns(coding, coderModel);
+    const cols: Record<string, unknown> = { ...codingColumns(coding, coderModel) };
+    if (coderUsage !== undefined) cols.coder_usage = JSON.stringify(coderUsage);
     await sql.begin(async (tx) => {
       await tx`UPDATE responses SET ${tx(cols)} WHERE id = ${responseId}`;
       await tx`DELETE FROM mentions WHERE response_id = ${responseId}`;

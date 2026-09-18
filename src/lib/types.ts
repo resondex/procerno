@@ -797,7 +797,10 @@ export interface Store {
     responseId: string,
     coding: Omit<ExtractionResult, "mentions"> | null,
     coderModel: string | null,
-    mentions: { brand: string; framing: Framing }[]
+    mentions: { brand: string; framing: Framing }[],
+    /** Cumulative exact coder usage after this re-code (prior + this pass);
+     * omitted leaves the stored coder_usage untouched. */
+    coderUsage?: Record<string, { input: number; output: number }>
   ): Promise<void>;
   /** Delete a run and its responses/mentions. Prompts and dictionary stay. */
   deleteRun(runId: string): Promise<void>;

@@ -239,12 +239,19 @@ export async function recodeRun(runId: string): Promise<number> {
     while (cursor < responses.length) {
       const r = responses[cursor++];
       try {
-        const coding = await extractCodingConsensus(r.text, ctx);
+        // Seeded from the stored usage: a re-code ADDS to the answer's coder
+        // spend - the first pass's tokens were still bought.
+        const meter = coderUsageAccumulator(r.coder_usage);
+        const coding = await extractCodingConsensus(r.text, {
+          ...ctx,
+          usageSink: meter.sink,
+        });
         await store.writeResponseCoding(
           r.id,
           coding,
           coding.coderProvenance,
-          coding.mentions
+          coding.mentions,
+          meter.usage
         );
         recoded++;
       } catch (err) {
