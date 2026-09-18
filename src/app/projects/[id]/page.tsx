@@ -294,7 +294,7 @@ function ProjectDashboard() {
             {project.name} — LLM visibility
           </h1>
           <Link
-            href="/"
+            href="/app"
             className="text-sm font-medium text-primary hover:opacity-80"
           >
             ← all trackers
