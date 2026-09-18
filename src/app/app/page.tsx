@@ -1,7 +1,9 @@
 import { redirect } from "next/navigation";
-import { getAuth, isStaff } from "@/lib/auth";
+import { NextResponse } from "next/server";
+import { getAuth, isStaff, requireProject } from "@/lib/auth";
 import { store } from "@/lib/store";
 import { ENGINES } from "@/lib/engine/providers";
+import { buildEditSetupDraft } from "@/lib/server/edit_setup";
 import AppHome from "./home";
 
 /**
@@ -9,9 +11,25 @@ import AppHome from "./home";
  * tracker page: everything the first paint needs loads here, in
  * process, and arrives with the HTML. No mount fetches, no flicker.
  */
-export default async function AppHomePage() {
+export default async function AppHomePage({
+  searchParams,
+}: {
+  searchParams: Promise<{ editSetup?: string }>;
+}) {
+  const sp = await searchParams;
   const auth = await getAuth();
   if (!auth) redirect("/login");
+  // Edit setup arrives in the SAME navigation: the tracker's draft is
+  // built here, so the wizard is already open on first paint - no bare
+  // list, no second fetch, no seconds of waiting.
+  let editSetup: { id: string; draft: unknown } | null = null;
+  if (sp.editSetup) {
+    const project = await requireProject(sp.editSetup, auth, { write: true });
+    if (!(project instanceof NextResponse)) {
+      const draft = await buildEditSetupDraft(project);
+      if (draft) editSetup = { id: sp.editSetup, draft };
+    }
+  }
   const staff = auth.userId !== null && (await isStaff(auth));
   let projects = staff
     ? await store.listProjects()
@@ -45,13 +63,14 @@ export default async function AppHomePage() {
     mode: e.mode,
   }));
   // Wire format parity with the API routes (dates as strings).
-  const wire = JSON.parse(JSON.stringify({ withRuns, drafts }));
+  const wire = JSON.parse(JSON.stringify({ withRuns, drafts, editSetup }));
   return (
     <AppHome
       initialProjects={wire.withRuns}
       initialDrafts={wire.drafts}
       initialIsAdmin={isAdmin}
       initialEngines={engines}
+      initialEditSetup={wire.editSetup}
     />
   );
 }

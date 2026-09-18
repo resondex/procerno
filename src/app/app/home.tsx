@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { useRouter, useSearchParams } from "next/navigation";
+import { useRouter } from "next/navigation";
 import Link from "next/link";
 import type { Project, Run, SetupDraft } from "@/lib/types";
 import type { EngineOption } from "@/app/components/engine_picker";
@@ -14,12 +14,16 @@ export default function AppHome({
   initialDrafts,
   initialIsAdmin,
   initialEngines,
+  initialEditSetup,
 }: {
   /** Server-loaded: the list arrives WITH the HTML - no flicker. */
   initialProjects: ProjectWithRun[];
   initialDrafts: SetupDraft[];
   initialIsAdmin: boolean;
   initialEngines: EngineOption[];
+  /** Present when the navigation carried ?editSetup= - the wizard opens
+   * on first paint with the tracker's instrument. */
+  initialEditSetup?: { id: string; draft: SetupDraft } | null;
 }) {
   const router = useRouter();
   const [projects] = useState<ProjectWithRun[]>(initialProjects);
@@ -31,21 +35,11 @@ export default function AppHome({
   // The open setup, if any: which question set, which brand, resuming what.
   // editProjectId marks the zero-run edit-setup flow: Save replaces the
   // tracker's instrument in place instead of creating a new one.
-  const [wizard, setWizard] = useState<{ mode: SetupMode; brand: string; draft: SetupDraft | null; editProjectId?: string } | null>(null);
-  const searchParams = useSearchParams();
-  const editSetupId = searchParams.get("editSetup");
-
-  useEffect(() => {
-    if (!editSetupId) return;
-    void (async () => {
-      const res = await fetch(`/api/projects/${editSetupId}/setup`);
-      if (!res.ok) return;
-      const data = await res.json();
-      if (data.draft) {
-        setWizard({ mode: "grid", brand: data.draft.brand, draft: data.draft as SetupDraft, editProjectId: editSetupId });
-      }
-    })();
-  }, [editSetupId]);
+  const [wizard, setWizard] = useState<{ mode: SetupMode; brand: string; draft: SetupDraft | null; editProjectId?: string } | null>(
+    initialEditSetup
+      ? { mode: "grid", brand: initialEditSetup.draft.brand, draft: initialEditSetup.draft, editProjectId: initialEditSetup.id }
+      : null
+  );
 
   async function refreshDrafts() {
     const res = await fetch("/api/drafts");
