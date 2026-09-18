@@ -1320,14 +1320,16 @@ export function SetupWizard({ mode, brand, draft, engineOptions, onClose, onCrea
           disabled={submitting}
           className="text-left text-[13px] font-medium text-primary hover:opacity-80 disabled:opacity-50 px-2"
         >
-          {demo ? "Close" : saving ? "Saving…" : busy !== null ? "Close" : "Save & close"}
+          {demo || editProjectId ? "Close" : saving ? "Saving…" : busy !== null ? "Close" : "Save & close"}
         </button>
         <span className="px-2 text-[11px] text-ink-3">
           {demo
             ? "Demo - nothing is saved or created."
-            : busy !== null
-              ? "Safe to close - the writing continues and saves itself."
-              : "Progress saves at every step."}
+            : editProjectId
+              ? "Edits apply only when you Save setup on the last step - closing discards them."
+              : busy !== null
+                ? "Safe to close - the writing continues and saves itself."
+                : "Progress saves at every step."}
         </span>
       </nav>
 
