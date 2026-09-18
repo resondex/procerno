@@ -535,12 +535,27 @@ export function useGridSetup(a: GridSetupArgs) {
       });
       a.setBusy(null);
       if (!masked) return null;
+      // Stage overrides survive the rebuild exactly as they survive an
+      // edited recompose: a kept-but-not-recommended stage (an advisory
+      // add like Renewal) was silently dropped here - the rebuild reset
+      // keptStages to rules-only, and the save then persisted the loss.
+      const prevByKey = new Map(a.state.stages.map((s) => [s.key, s]));
+      const prevKept = new Set(a.state.keptStages);
+      const rebuildKept = masked.stages
+        .filter((s) => {
+          const prev = prevByKey.get(s.key);
+          if (!prev) return s.recommended;
+          const wasKept = prevKept.has(s.key);
+          const overridden = wasKept !== prev.recommended;
+          return overridden ? wasKept : s.recommended;
+        })
+        .map((s) => s.key);
       const next: GridState = withScenarioRows(
         {
           step: "compose",
           moderators: keptBase,
           stages: masked.stages,
-          keptStages: masked.stages.filter((s) => s.recommended).map((s) => s.key),
+          keptStages: rebuildKept,
           // Fit advises on the AWARE set (the fresh read computed it);
           // journey advice never refreshes here - the base didn't move.
           fit: data.fit ?? a.state.fit ?? null,
