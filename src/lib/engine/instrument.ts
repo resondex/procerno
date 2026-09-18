@@ -2489,7 +2489,10 @@ export async function generatePhrasings(input: {
       const keptWords: Set<string>[] = [contentWords(seed.text), ...prior.map((p) => contentWords(p.text))];
       const kept: Phrasing[] = [];
       for (const p of c.phrasings ?? []) {
-        const text = humanize((p.text ?? "").trim());
+        // The writer occasionally merges its asker metadata into the
+        // text ("asker: parent - two big dogs..."); the label belongs in
+        // the field, never in a served prompt.
+        const text = humanize((p.text ?? "").trim()).replace(/^asker:\s*[^-:]{1,40}[-:]\s*/i, "");
         if (!text) continue;
         // The signature check is the blind/branded discipline: a paraphrase of
         // a blind seed that names a brand is not a paraphrase, it is a leak.
