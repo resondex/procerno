@@ -311,6 +311,9 @@ export function SetupWizard({ mode, brand, draft, engineOptions, onClose, onCrea
   /** The plan's buying-scenario cap (PLAN_SCENARIO_CAPS); 4 until the
    * plan loads, then Starter/Growth tighten to 3. */
   const [scenarioCap, setScenarioCap] = useState(4);
+  /** The caller's plan tier - gates enterprise-only affordances (the
+   * whole-battery rewrite). Null until loaded = hidden. */
+  const [plan, setPlan] = useState<string | null>(null);
   /** Custom questions the plan may add net of deletions (provisional
    * allotment - the per-tier numbers are still to be decided). Defaults
    * to the most generous tier so the moment before the plan loads can
@@ -331,6 +334,7 @@ export function SetupWizard({ mode, brand, draft, engineOptions, onClose, onCrea
       .then((r) => (r.ok ? r.json() : null))
       .then((d) => {
         if (alive && typeof d?.scenarioCap === "number") setScenarioCap(d.scenarioCap);
+        if (alive && typeof d?.plan === "string") setPlan(d.plan);
         if (alive && typeof d?.customCellAllowance === "number") setCustomAllowance(d.customCellAllowance);
       })
       .catch(() => {});
@@ -1487,9 +1491,30 @@ export function SetupWizard({ mode, brand, draft, engineOptions, onClose, onCrea
                           Top up short sets
                         </button>
                       )}
-                      <button type="button" onClick={() => void writePhrasings(true)} className="text-[13px] font-medium text-primary hover:opacity-80">
-                        Rewrite all paraphrases
-                      </button>
+                      {/* Enterprise-only, and never in the demo (a demo
+                       * force-rewrite would redraw the SHARED cached
+                       * sets). Destructive to review work, not wallets:
+                       * ~$0.25 of model time, but it replaces every
+                       * reviewed prompt and any hand edits with fresh
+                       * unreviewed drafts - so it confirms first. */}
+                      {!demo && plan === "enterprise" && (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const live = grid.cells.filter((c) => c.text.trim()).length;
+                            if (
+                              !confirm(
+                                `Rewrite ALL paraphrases? This replaces the full set (~${live * PHRASING_COUNT} prompts) with fresh drafts - including any you have edited or already reviewed.`
+                              )
+                            )
+                              return;
+                            void writePhrasings(true);
+                          }}
+                          className="text-[13px] font-medium text-primary hover:opacity-80"
+                        >
+                          Rewrite all paraphrases
+                        </button>
+                      )}
                     </>
                   )}
                 </div>
