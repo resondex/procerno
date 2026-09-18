@@ -228,6 +228,8 @@ export interface ResponseRow {
   run_id: string;
   prompt_id: string;
   repeat_idx: number;
+  input_tokens: number | null;
+  output_tokens: number | null;
   /** The engine that produced this answer. */
   model: string;
   /** Vendor-reported stop reason — 'length'/'max_tokens' = truncated. */
@@ -773,6 +775,9 @@ export interface Store {
     citations?: string[] | null;
     coderModel?: string | null;
     searchCount?: number | null;
+    /** Vendor-reported answer-call usage; null when the vendor omits it. */
+    inputTokens?: number | null;
+    outputTokens?: number | null;
     text: string;
     mentions: { brand: string; framing: Framing }[];
     coding: Omit<ExtractionResult, "mentions"> | null;

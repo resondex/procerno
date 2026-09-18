@@ -167,6 +167,12 @@ function createDb(): Database.Database {
   if (!promptColsForAsker.some((c) => c.name === "asker")) {
     db.exec("ALTER TABLE prompts ADD COLUMN asker TEXT");
   }
+  const respTokenCols = db.prepare("PRAGMA table_info(responses)").all() as { name: string }[];
+  for (const col of ["input_tokens", "output_tokens"]) {
+    if (!respTokenCols.some((c) => c.name === col)) {
+      db.exec(`ALTER TABLE responses ADD COLUMN ${col} INTEGER`);
+    }
+  }
   const cacheCols = db.prepare("PRAGMA table_info(llm_cache)").all() as { name: string }[];
   for (const col of ["brand", "category", "source", "project_id"]) {
     if (!cacheCols.some((c) => c.name === col)) {
@@ -1126,6 +1132,8 @@ export const sqliteStore: Store = {
       finish_reason: input.finishReason ?? null,
       citations: input.citations ? JSON.stringify(input.citations) : null,
       search_count: input.searchCount ?? null,
+      input_tokens: input.inputTokens ?? null,
+      output_tokens: input.outputTokens ?? null,
       text: input.text,
       ...codingColumns(input.coding, input.coderModel ?? null),
     };

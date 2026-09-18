@@ -164,6 +164,8 @@ function ensureSchema(): Promise<void> {
       await sql`ALTER TABLE responses ADD COLUMN IF NOT EXISTS total_recommendations INTEGER`;
       await sql`ALTER TABLE responses ADD COLUMN IF NOT EXISTS focus_quote TEXT`;
       await sql`ALTER TABLE responses ADD COLUMN IF NOT EXISTS focus_interpretation TEXT`;
+      await sql`ALTER TABLE responses ADD COLUMN IF NOT EXISTS input_tokens INTEGER`;
+      await sql`ALTER TABLE responses ADD COLUMN IF NOT EXISTS output_tokens INTEGER`;
       await sql`CREATE TABLE IF NOT EXISTS dictionary_entries (
         id TEXT PRIMARY KEY,
         project_id TEXT NOT NULL REFERENCES projects(id),
@@ -895,6 +897,8 @@ export const pgStore: Store = {
       finish_reason: input.finishReason ?? null,
       citations: input.citations ? JSON.stringify(input.citations) : null,
       search_count: input.searchCount ?? null,
+      input_tokens: input.inputTokens ?? null,
+      output_tokens: input.outputTokens ?? null,
       text: input.text,
       ...codingColumns(input.coding, input.coderModel ?? null),
     };

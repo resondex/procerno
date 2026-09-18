@@ -166,6 +166,9 @@ export async function completeWithEngine(
    * but answered from weights; null = not reported (instinct engines, and
    * always-grounded vendors like Perplexity). */
   searchCount: number | null;
+  /** Vendor-reported token usage for the answer call - the raw material
+   * of the staff financials view. null when a vendor omits it. */
+  usage: { input: number | null; output: number | null };
 }> {
   const engine = getEngine(engineId);
   if (!engine) throw new Error(`unknown engine: ${engineId}`);
@@ -197,9 +200,12 @@ export async function completeWithEngine(
         for (const c of cites ?? []) if (c.url) urls.add(c.url);
       }
       const usage = res.usage as unknown as {
+        input_tokens?: number;
+        output_tokens?: number;
         server_tool_use?: { web_search_requests?: number };
       };
       return {
+        usage: { input: usage.input_tokens ?? null, output: usage.output_tokens ?? null },
         text: res.content
           .filter((b): b is Extract<typeof b, { type: "text" }> => b.type === "text")
           .map((b) => b.text)
@@ -234,8 +240,10 @@ export async function completeWithEngine(
         output_text?: string;
         status?: string;
         incomplete_details?: { reason?: string };
+        usage?: { input_tokens?: number; output_tokens?: number };
       };
       return {
+        usage: { input: r.usage?.input_tokens ?? null, output: r.usage?.output_tokens ?? null },
         text: r.output_text ?? "",
         finishReason:
           r.incomplete_details?.reason ?? (r.status === "completed" ? "stop" : r.status ?? null),
@@ -260,6 +268,10 @@ export async function completeWithEngine(
         .filter((u): u is string => Boolean(u)) ??
       null;
     return {
+      usage: {
+        input: res.usage?.prompt_tokens ?? null,
+        output: res.usage?.completion_tokens ?? null,
+      },
       text: res.choices[0]?.message?.content ?? "",
       finishReason: res.choices[0]?.finish_reason ?? null,
       citations: citations && citations.length > 0 ? citations : null,

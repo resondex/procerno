@@ -127,7 +127,7 @@ export async function driveRunChunk(
     while (cursor < pending.length && Date.now() < deadline) {
       const task = pending[cursor++];
       try {
-        const { text, finishReason, citations, searchCount } = await completeWithEngine(
+        const { text, finishReason, citations, searchCount, usage } = await completeWithEngine(
           task.model,
           task.promptText
         );
@@ -141,6 +141,8 @@ export async function driveRunChunk(
           citations,
           coderModel: coding.coderProvenance,
           searchCount,
+          inputTokens: usage.input,
+          outputTokens: usage.output,
           text,
           mentions: coding.mentions,
           coding,
