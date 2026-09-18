@@ -1,4 +1,5 @@
 import { createHash } from "crypto";
+import { tagCosts } from "../cost_log";
 import { anthropicClient, openaiClient } from "./providers";
 import { store } from "../store";
 import type { CacheMeta } from "../types";
@@ -220,6 +221,7 @@ export async function classifyModerators(input: {
   audience: string | null;
   meta?: CacheMeta;
 }): Promise<Moderators> {
+  tagCosts({ purpose: "setup:moderators" });
   const key = cacheKey("moderators", [input.category, input.audience]);
   const hit = await store.cacheGet(key, CACHE_TTL_MS);
   if (hit) return JSON.parse(hit) as Moderators;
@@ -610,6 +612,7 @@ export async function readScenarios(input: {
   noWait?: boolean;
   meta?: CacheMeta;
 }): Promise<{ base: Moderators; scenarios: ScenarioSpec[]; reserve: ScenarioSpec[] } | null> {
+  tagCosts({ purpose: "setup:scenarios" });
   // "scenarios_journeys12": the read is SPLIT - Claude Opus classifies
   // the base journey (see JOURNEY_MODEL), gpt-5 writes the scenarios
   // against that given base. v11 tightened the guide boundaries; the
@@ -840,6 +843,7 @@ export async function suggestScenario(input: {
   exclude: Situation[];
   meta?: CacheMeta;
 }): Promise<Situation | null> {
+  tagCosts({ purpose: "setup:scenario_suggest" });
   const avoid = input.exclude.map((s) => s.label.trim().toLowerCase()).filter(Boolean).sort();
   const key = cacheKey("scenario_more3", [
     input.category, input.audience, input.decisionUnit, avoid.join("|"),
@@ -902,6 +906,7 @@ export async function nearScenarios(input: {
   exclude: Situation[];
   meta?: CacheMeta;
 }): Promise<Situation[]> {
+  tagCosts({ purpose: "setup:scenario_near" });
   const avoid = input.exclude.map((s) => s.label.trim().toLowerCase()).filter(Boolean).sort();
   const key = cacheKey("scenario_near_pool", [
     input.category, input.audience, input.of.label, input.of.description, avoid.join("|"),
@@ -1031,6 +1036,7 @@ export async function reviewScenarios(input: {
   others: Situation[];
   meta?: CacheMeta;
 }): Promise<ScenarioVerdict[]> {
+  tagCosts({ purpose: "setup:scenario_review" });
   const fp = (s: Situation & { original?: Situation | null }) =>
     `${s.label.trim()}|${s.description.trim()}` +
     (s.original ? `<${s.original.label.trim()}|${s.original.description.trim()}` : "");
@@ -1197,6 +1203,7 @@ export async function reviewJourneyFit(input: {
   base: Moderators;
   meta?: CacheMeta;
 }): Promise<JourneyFit> {
+  tagCosts({ purpose: "setup:journey_fit" });
   const dims = ["verifiability", "involvement", "think_feel", "decision_unit", "rhythm", "risk"] as const;
   // "journey_fit3": suggestions carry stagesIn (the stage delta the flip
   // would cause) so cached entries always have it. fit2 framed reasons
@@ -1345,6 +1352,7 @@ export async function reviewScenarioFit(input: {
   scenarios: Situation[];
   meta?: CacheMeta;
 }): Promise<ScenarioFit> {
+  tagCosts({ purpose: "setup:scenario_fit" });
   const empty: ScenarioFit = { offPortfolio: [], missingCore: null };
   if (input.scenarios.length === 0) return empty;
   // "scenario_fit4": tentative voice - advice reads as "you may want
@@ -1493,6 +1501,7 @@ export async function reviewCells(input: {
   candidates: CellReviewCandidate[];
   meta?: CacheMeta;
 }): Promise<CellVerdict[]> {
+  tagCosts({ purpose: "setup:cell_review" });
   const fp = (c: CellReviewCandidate) =>
     // hint is in the fingerprint: the target check leans on it, so a
     // sharper hint must not serve verdicts formed without one.
@@ -1780,6 +1789,7 @@ export async function generateGrid(input: {
   noWait?: boolean;
   meta?: CacheMeta;
 }): Promise<GridCell[] | null> {
+  tagCosts({ purpose: "setup:cells" });
   const rivals = input.competitors.slice(0, 4);
   const allLabels = input.scenarios.map((s) => s.label);
   const plan: { stage: MaskedStage; situation: string | null; angle: string; scope: string | null }[] = [];
@@ -2087,6 +2097,7 @@ export async function regenerateCell(input: {
   nearTo?: string;
   meta?: CacheMeta;
 }): Promise<string | null> {
+  tagCosts({ purpose: "setup:cells" });
   const rivals = input.competitors.slice(0, 4);
   const stages = participationMask(input.base, input.scenarios);
   const st = stages.find((x) => x.key === input.cell.stage);
@@ -2298,6 +2309,7 @@ export async function generatePhrasings(input: {
   onRaw?: (raw: unknown) => void;
   meta?: CacheMeta;
 }): Promise<Phrasing[][]> {
+  tagCosts({ purpose: "setup:phrasings" });
   const want = Math.max(0, input.count - 1);
   if (want === 0 || input.cells.length === 0) return input.cells.map(() => []);
   const rivals = input.competitors.slice(0, 4);
@@ -2754,6 +2766,7 @@ export async function composeInstrument(input: {
   reserve: ScenarioSpec[];
   stages: MaskedStage[];
 } | null> {
+  tagCosts({ purpose: "setup:compose" });
   const read = await readScenarios(input);
   // Ternary, not an if-guard: Turbopack's compile-time evaluation folds
   // `if (!read) return null` here as "unreachable" (it wrongly concludes
@@ -2785,6 +2798,7 @@ export async function buildInstrument(input: {
   audience: string | null;
   meta?: CacheMeta;
 }): Promise<Instrument> {
+  tagCosts({ purpose: "setup:compose" });
   const composed = await composeInstrument({
     category: input.category,
     audience: input.audience,

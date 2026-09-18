@@ -27,6 +27,19 @@ export function answerCost(model: string, inTok: number, outTok: number, searche
   return (inTok / 1e6) * p.in + (outTok / 1e6) * p.out + searches * (p.perSearch ?? 0);
 }
 
+/** Per-search tool fee for a ledger row. Search engines call the vendor
+ * under their BASE api model name (gpt-5-search calls "gpt-5"), so a row
+ * with searches on a fee-less model looks up its -search variant; $0.01
+ * is the conservative fallback. Rows without searches cost nothing here. */
+export function searchFee(model: string, searches: number): number {
+  if (searches <= 0) return 0;
+  const fee =
+    ENGINE_PRICES[model]?.perSearch ??
+    ENGINE_PRICES[`${model}-search`]?.perSearch ??
+    0.01;
+  return searches * fee;
+}
+
 /**
  * EXACT extraction cost for one answer, from the responses.coder_usage
  * JSON (model -> vendor-metered {input, output}; Anthropic inputs already

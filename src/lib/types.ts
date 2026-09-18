@@ -568,6 +568,17 @@ export interface ProjectTrend {
  * Async storage interface implemented by both drivers (SQLite for local dev,
  * Postgres when DATABASE_URL is set — serverless filesystems don't persist).
  */
+/** One aggregated ledger line: spend for a (project, purpose, model). */
+export interface CostSummaryRow {
+  project_id: string | null;
+  purpose: string;
+  model: string;
+  calls: number;
+  input_tokens: number;
+  output_tokens: number;
+  searches: number;
+}
+
 export interface Store {
   createProject(input: {
     name: string;
@@ -793,6 +804,18 @@ export interface Store {
    * column list with insertResponse (see lib/coding_columns.ts) so the two
    * write paths cannot fall out of step.
    */
+  /** Append one row to the token-spend ledger (see lib/cost_log.ts). */
+  insertCostEntry(input: {
+    projectId?: string | null;
+    runId?: string | null;
+    purpose: string;
+    model: string;
+    inputTokens: number;
+    outputTokens: number;
+    searches?: number;
+  }): Promise<void>;
+  /** Ledger totals grouped by project x purpose x model. */
+  summarizeCostLog(): Promise<CostSummaryRow[]>;
   writeResponseCoding(
     responseId: string,
     coding: Omit<ExtractionResult, "mentions"> | null,

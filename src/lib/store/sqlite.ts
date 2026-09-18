@@ -176,6 +176,18 @@ function createDb(): Database.Database {
   if (!respTokenCols.some((c) => c.name === "coder_usage")) {
     db.exec("ALTER TABLE responses ADD COLUMN coder_usage TEXT");
   }
+  db.exec(`CREATE TABLE IF NOT EXISTS cost_log (
+    id TEXT PRIMARY KEY,
+    project_id TEXT,
+    run_id TEXT,
+    purpose TEXT NOT NULL,
+    model TEXT NOT NULL,
+    input_tokens INTEGER NOT NULL DEFAULT 0,
+    output_tokens INTEGER NOT NULL DEFAULT 0,
+    searches INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+  )`);
+  db.exec("CREATE INDEX IF NOT EXISTS cost_log_project ON cost_log(project_id)");
   const cacheCols = db.prepare("PRAGMA table_info(llm_cache)").all() as { name: string }[];
   for (const col of ["brand", "category", "source", "project_id"]) {
     if (!cacheCols.some((c) => c.name === col)) {
@@ -1155,6 +1167,39 @@ export const sqliteStore: Store = {
       writeMentions(db, responseId, input.mentions);
     });
     insertAll();
+  },
+
+  async insertCostEntry(input) {
+    getDb()
+      .prepare(
+        `INSERT INTO cost_log (id, project_id, run_id, purpose, model, input_tokens, output_tokens, searches)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+      )
+      .run(
+        crypto.randomUUID(),
+        input.projectId ?? null,
+        input.runId ?? null,
+        input.purpose,
+        input.model,
+        input.inputTokens,
+        input.outputTokens,
+        input.searches ?? 0
+      );
+  },
+
+  async summarizeCostLog() {
+    return getDb()
+      .prepare(
+        `SELECT project_id, purpose, model,
+           COUNT(*) AS calls,
+           COALESCE(SUM(input_tokens), 0) AS input_tokens,
+           COALESCE(SUM(output_tokens), 0) AS output_tokens,
+           COALESCE(SUM(searches), 0) AS searches
+         FROM cost_log
+         GROUP BY project_id, purpose, model
+         ORDER BY purpose, model`
+      )
+      .all() as import("../types").CostSummaryRow[];
   },
 
   async writeResponseCoding(responseId, coding, coderModel, mentions, coderUsage) {

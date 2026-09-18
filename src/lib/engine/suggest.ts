@@ -1,4 +1,5 @@
 import { createHash } from "crypto";
+import { tagCosts } from "../cost_log";
 import { openaiClient } from "./providers";
 import { store } from "../store";
 import { primaryBrandName } from "./instrument";
@@ -32,6 +33,7 @@ const PROFILE_SCHEMA = {
 
 /** Cache-first profile estimation — one live call per brand per ~6 months. */
 export async function getBrandProfile(brand: string): Promise<BrandProfile> {
+  tagCosts({ purpose: "setup:brand_profile" });
   const key = cacheKey("analyze", [brand]);
   const hit = await store.cacheGet(key, CACHE_TTL_MS);
   if (hit) return JSON.parse(hit) as BrandProfile;
@@ -50,6 +52,7 @@ export async function getBattery(
   },
   force = false
 ): Promise<PromptSpec[]> {
+  tagCosts({ purpose: "setup:battery" });
   // Version in the key: prompt-writing changes must bypass old cached batteries.
   const key = cacheKey("battery", [
     BATTERY_STYLE_VERSION,
@@ -86,6 +89,7 @@ export async function getReasonTaxonomy(input: {
   category: string;
   competitors: string[];
 }): Promise<string[]> {
+  tagCosts({ purpose: "setup:taxonomy" });
   const key = cacheKey("taxonomy", [
     input.category,
     [...input.competitors].sort().join(","),
@@ -158,6 +162,7 @@ export async function seedDictionary(
   projectId: string,
   brands: string[]
 ): Promise<void> {
+  tagCosts({ purpose: "setup:dictionary" });
   const targetKey = matchKey(brands[0] ?? "");
   const brandKeys = new Set(brands.map(matchKey));
   let suggested: { canonical: string; aliases: string[] }[] = [];
@@ -257,6 +262,7 @@ const NONBRAND_SCHEMA = {
 export async function classifyNonBrands(
   names: string[]
 ): Promise<Set<string>> {
+  tagCosts({ purpose: "run:dictionary" });
   if (names.length === 0) return new Set();
   try {
     const res = await openaiClient().chat.completions.create({
@@ -449,6 +455,7 @@ async function lintAndRepair(
 export async function suggestBrandProfile(
   brand: string
 ): Promise<BrandProfile> {
+  tagCosts({ purpose: "setup:brand_profile" });
   const res = await openaiClient().chat.completions.create({
     model: SUGGEST_MODEL,
     messages: [
@@ -537,6 +544,7 @@ export async function generateBatteryAi(input: {
   competitors: string[];
   audience: string | null;
 }): Promise<PromptSpec[]> {
+  tagCosts({ purpose: "setup:battery" });
   let unbranded: PromptSpec[] = [];
   try {
     const res = await openaiClient().chat.completions.create({

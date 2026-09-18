@@ -2,6 +2,8 @@ import OpenAI from "openai";
 import type { ExtractedMention, ExtractionResult } from "../types";
 import { matchKey } from "../brand_key";
 
+import { logCost } from "../cost_log";
+
 export interface ExtractionContext {
   targetBrand: string;
   knownBrands: string[];
@@ -120,13 +122,74 @@ export function getProvider(): CompletionProvider {
   return openaiProvider;
 }
 
+/** Transport-level spend metering: every vendor call made through these
+ * clients appends one ledger row (lib/cost_log.ts), attributed to the
+ * active cost context. The subscription never blocks or fails the call. */
+function meterOpenAI(c: OpenAI): OpenAI {
+  const chat = c.chat.completions;
+  const chatCreate = chat.create.bind(chat);
+  chat.create = ((body: { model?: string }, opts?: unknown) => {
+    const p = chatCreate(body as never, opts as never);
+    void (p as Promise<unknown>).then((res) => {
+      const u = (res as { usage?: { prompt_tokens?: number; completion_tokens?: number } })?.usage;
+      logCost({
+        model: body?.model ?? "unknown",
+        inputTokens: u?.prompt_tokens ?? 0,
+        outputTokens: u?.completion_tokens ?? 0,
+      });
+    }, () => {});
+    return p;
+  }) as unknown as typeof chat.create;
+  const responses = c.responses;
+  const respCreate = responses.create.bind(responses);
+  responses.create = ((body: { model?: string }, opts?: unknown) => {
+    const p = respCreate(body as never, opts as never);
+    void (p as Promise<unknown>).then((res) => {
+      const r = res as {
+        usage?: { input_tokens?: number; output_tokens?: number };
+        output?: { type: string }[];
+      };
+      logCost({
+        model: body?.model ?? "unknown",
+        inputTokens: r?.usage?.input_tokens ?? 0,
+        outputTokens: r?.usage?.output_tokens ?? 0,
+        searches: (r?.output ?? []).filter((o) => o.type === "web_search_call").length,
+      });
+    }, () => {});
+    return p;
+  }) as unknown as typeof responses.create;
+  return c;
+}
+
+type AnthropicSdk = import("@anthropic-ai/sdk").default;
+function meterAnthropic(a: AnthropicSdk): AnthropicSdk {
+  const messages = a.messages;
+  const create = messages.create.bind(messages);
+  messages.create = ((body: { model?: string }, opts?: unknown) => {
+    const p = create(body as never, opts as never);
+    void (p as Promise<unknown>).then((res) => {
+      const u = (res as { usage?: unknown })?.usage as
+        | { output_tokens?: number; server_tool_use?: { web_search_requests?: number } }
+        | undefined;
+      logCost({
+        model: body?.model ?? "unknown",
+        inputTokens: claudeBilledInput(u),
+        outputTokens: u?.output_tokens ?? 0,
+        searches: u?.server_tool_use?.web_search_requests ?? 0,
+      });
+    }, () => {});
+    return p;
+  }) as unknown as typeof messages.create;
+  return a;
+}
+
 let _client: OpenAI | null = null;
 export function openaiClient(): OpenAI {
   // The SDK default timeout is 600s - a stalled call occupies a request
   // for ten minutes before its retries even start. The slowest legitimate
   // call (the gpt-5 market read) runs ~100-120s; 150s bounds a stall
   // while leaving headroom, and the SDK's retries then get a fresh start.
-  if (!_client) _client = new OpenAI({ timeout: 150_000 });
+  if (!_client) _client = meterOpenAI(new OpenAI({ timeout: 150_000 }));
   return _client;
 }
 const client = openaiClient;
@@ -136,10 +199,12 @@ function compatClient(engine: Engine): OpenAI {
   const key = engine.baseURL ?? "default";
   let c = _compat.get(key);
   if (!c) {
-    c = new OpenAI({
-      apiKey: process.env[engine.keyEnv],
-      baseURL: engine.baseURL,
-    });
+    c = meterOpenAI(
+      new OpenAI({
+        apiKey: process.env[engine.keyEnv],
+        baseURL: engine.baseURL,
+      })
+    );
     _compat.set(key, c);
   }
   return c;
@@ -149,7 +214,7 @@ let _anthropic: import("@anthropic-ai/sdk").default | null = null;
 export async function anthropicClient() {
   if (!_anthropic) {
     const { default: Anthropic } = await import("@anthropic-ai/sdk");
-    _anthropic = new Anthropic();
+    _anthropic = meterAnthropic(new Anthropic());
   }
   return _anthropic;
 }

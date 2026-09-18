@@ -1,6 +1,6 @@
 import { isStaff, type AuthContext } from "@/lib/auth";
 import { store } from "@/lib/store";
-import { answerCost, coderCost } from "@/lib/pricing";
+import { answerCost, coderCost, searchFee } from "@/lib/pricing";
 import type { Org, OrgMember } from "@/lib/types";
 
 /** The admin console's data - shared by the /api/admin route and the
@@ -57,9 +57,33 @@ export async function loadAdminData(auth: AuthContext) {
     rows.sort((a, b) => (a.createdAt < b.createdAt ? 1 : -1));
     financials = rows;
   }
+  // Staff-only spend ledger: every vendor call since the ledger shipped,
+  // grouped by purpose x model - includes setup/edit work and redone
+  // passes that no response row remembers. Run spend appears here too, so
+  // the ledger total and the run table overlap by design.
+  let costLedger: unknown = null;
+  if (staff) {
+    const projectNames = new Map(projects.map((pr) => [pr.id, pr.brand]));
+    const summary = await store.summarizeCostLog();
+    costLedger = summary.map((row) => ({
+      project: row.project_id ? projectNames.get(row.project_id) ?? "(deleted)" : null,
+      purpose: row.purpose,
+      model: row.model,
+      calls: row.calls,
+      inTokens: row.input_tokens,
+      outTokens: row.output_tokens,
+      searches: row.searches,
+      cost:
+        Math.round(
+          (answerCost(row.model, row.input_tokens, row.output_tokens, 0) +
+            searchFee(row.model, row.searches)) * 10000
+        ) / 10000,
+    }));
+  }
   return {
     staff,
     financials,
+    costLedger,
     orgs,
     projects: projects.map((p) => ({
       id: p.id,

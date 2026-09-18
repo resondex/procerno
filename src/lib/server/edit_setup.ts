@@ -1,4 +1,5 @@
 import { store } from "@/lib/store";
+import { tagCosts } from "@/lib/cost_log";
 import {
   composeInstrument,
   participationMask,
@@ -17,6 +18,7 @@ const norm = (t: string) => t.trim().toLowerCase().replace(/\s+/g, " ");
  * Returns null when the tracker has runs (locked) or was not built with
  * the Landscape setup. Callers have already checked access. */
 export async function buildEditSetupDraft(project: Project) {
+  tagCosts({ projectId: project.id, purpose: "edit_setup" });
   const id = project.id;
   const storedJourneys = (() => {
     const raw = (project as unknown as { scenario_journeys?: string | null }).scenario_journeys;

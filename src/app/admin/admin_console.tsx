@@ -10,11 +10,20 @@ interface FinRow {
   answerCost: number; coderCost: number;
 }
 
+interface LedgerRow {
+  project: string | null; purpose: string; model: string;
+  calls: number; inTokens: number; outTokens: number; searches: number;
+  cost: number;
+}
+
 interface AdminData {
   staff: boolean;
-  /** Staff-only run financials: metered answer tokens priced exactly,
-   * coder pass estimated. Null for org admins. */
+  /** Staff-only run financials: metered answer and coder tokens priced
+   * exactly. Null for org admins. */
   financials?: FinRow[] | null;
+  /** Staff-only spend ledger: every vendor call, grouped by purpose x
+   * model - includes setup/edit spend no response row remembers. */
+  costLedger?: LedgerRow[] | null;
   orgs: {
     id: string;
     name: string;
@@ -306,6 +315,65 @@ export default function AdminConsole({
                 list rates (Anthropic coder inputs are cache-billing
                 adjusted). Answers collected before metering shipped count
                 tokens and coder cost as zero.
+              </p>
+            </div>
+          )}
+        </section>
+      )}
+
+      {/* ---- Spend ledger (staff only) ---- */}
+      {data.staff && data.costLedger && (
+        <section className="grid gap-3">
+          <h2 className="section-label">Spend ledger</h2>
+          {data.costLedger.length === 0 ? (
+            <p className="text-sm text-ink-3">
+              Empty - the ledger records every vendor call from the moment it
+              shipped: answers, coder passes, re-codes, setup and edit work.
+            </p>
+          ) : (
+            <div className="card overflow-x-auto">
+              <table className="w-full text-[13px]">
+                <thead>
+                  <tr className="text-left text-[11px] uppercase tracking-wide text-ink-3">
+                    <th className="px-4 py-2">Purpose</th>
+                    <th className="px-2 py-2">Model</th>
+                    <th className="px-2 py-2">Tracker</th>
+                    <th className="px-2 py-2 text-right">Calls</th>
+                    <th className="px-2 py-2 text-right">Tokens in</th>
+                    <th className="px-2 py-2 text-right">Tokens out</th>
+                    <th className="px-2 py-2 text-right">Searches</th>
+                    <th className="px-4 py-2 text-right">Cost $</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-line">
+                  {data.costLedger.map((r, i) => (
+                    <tr key={i}>
+                      <td className="px-4 py-2">{r.purpose}</td>
+                      <td className="px-2 py-2">{r.model}</td>
+                      <td className="px-2 py-2 text-ink-3">{r.project ?? "-"}</td>
+                      <td className="px-2 py-2 text-right tabular-nums">{r.calls.toLocaleString()}</td>
+                      <td className="px-2 py-2 text-right tabular-nums">{r.inTokens.toLocaleString()}</td>
+                      <td className="px-2 py-2 text-right tabular-nums">{r.outTokens.toLocaleString()}</td>
+                      <td className="px-2 py-2 text-right tabular-nums">{r.searches.toLocaleString()}</td>
+                      <td className="px-4 py-2 text-right tabular-nums">${r.cost.toFixed(4)}</td>
+                    </tr>
+                  ))}
+                  <tr className="font-semibold">
+                    <td className="px-4 py-2" colSpan={3}>All spend</td>
+                    <td className="px-2 py-2 text-right tabular-nums">{data.costLedger.reduce((a, r) => a + r.calls, 0).toLocaleString()}</td>
+                    <td className="px-2 py-2 text-right tabular-nums">{data.costLedger.reduce((a, r) => a + r.inTokens, 0).toLocaleString()}</td>
+                    <td className="px-2 py-2 text-right tabular-nums">{data.costLedger.reduce((a, r) => a + r.outTokens, 0).toLocaleString()}</td>
+                    <td className="px-2 py-2 text-right tabular-nums">{data.costLedger.reduce((a, r) => a + r.searches, 0).toLocaleString()}</td>
+                    <td className="px-4 py-2 text-right tabular-nums">${data.costLedger.reduce((a, r) => a + r.cost, 0).toFixed(2)}</td>
+                  </tr>
+                </tbody>
+              </table>
+              <p className="px-4 py-2 text-[11px] text-ink-3">
+                Append-only: every vendor call lands here as it happens, so
+                redone and discarded work is counted. Run spend appears in
+                both tables - the run table breaks it down per run, this one
+                adds everything else. Spend from before the ledger shipped is
+                not in it. Anthropic inputs are cache-billing adjusted.
               </p>
             </div>
           )}

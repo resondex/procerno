@@ -1,4 +1,5 @@
 import { createHash } from "crypto";
+import { tagCosts } from "../cost_log";
 import { openaiClient } from "./providers";
 import { store } from "../store";
 import type { DictionaryEntry } from "../types";
@@ -56,6 +57,7 @@ export async function getDictionarySuggestions(
   projectId: string,
   category: string
 ): Promise<DictSuggestion[]> {
+  tagCosts({ purpose: "run:dictionary" });
   const entries = await store.getDictionary(projectId);
   const pending = entries.filter((e) => e.status === "pending");
   const active = entries.filter((e) => e.status === "active");

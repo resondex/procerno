@@ -1,4 +1,5 @@
 import JSZip from "jszip";
+import { tagCosts } from "../cost_log";
 import { store } from "../store";
 import {
   buildCanonicalizer,
@@ -42,6 +43,7 @@ function promptCode(i: number): string {
 export async function buildStudyBundle(
   project: Project
 ): Promise<{ filename: string; buffer: Buffer } | null> {
+  tagCosts({ purpose: "run:study" });
   const runs = await store.listRuns(project.id);
   const complete = runs.filter((r) => r.status === "complete");
   if (complete.length === 0) return null;

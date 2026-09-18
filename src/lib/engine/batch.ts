@@ -1,5 +1,6 @@
 import { toFile } from "openai";
 import { store } from "../store";
+import { logCost, tagCosts, withCostContext } from "../cost_log";
 import type { RunBatch } from "../types";
 import {
   coderUsageAccumulator,
@@ -165,6 +166,9 @@ interface Extracted {
   finishReason: string | null;
   citations: string[] | null;
   searchCount: number | null;
+  /** Vendor-reported usage from the batch result body; null if omitted. */
+  inputTokens: number | null;
+  outputTokens: number | null;
 }
 
 /* Mirror the live parsers in providers.ts, applied to batch result bodies. */
@@ -173,11 +177,14 @@ function extractOpenAiChat(body: Record<string, unknown>): Extracted {
   const choices = body.choices as
     | { message?: { content?: string }; finish_reason?: string }[]
     | undefined;
+  const u = body.usage as { prompt_tokens?: number; completion_tokens?: number } | undefined;
   return {
     text: choices?.[0]?.message?.content ?? "",
     finishReason: choices?.[0]?.finish_reason ?? null,
     citations: null,
     searchCount: null,
+    inputTokens: u?.prompt_tokens ?? null,
+    outputTokens: u?.completion_tokens ?? null,
   };
 }
 
@@ -197,13 +204,20 @@ function extractOpenAiResponses(body: Record<string, unknown>): Extracted {
       }
     }
   }
-  const b = body as { output_text?: string; status?: string; incomplete_details?: { reason?: string } };
+  const b = body as {
+    output_text?: string;
+    status?: string;
+    incomplete_details?: { reason?: string };
+    usage?: { input_tokens?: number; output_tokens?: number };
+  };
   return {
     text: b.output_text ?? parts.join("\n"),
     finishReason:
       b.incomplete_details?.reason ?? (b.status === "completed" ? "stop" : b.status ?? null),
     citations: urls.size > 0 ? [...urls] : null,
     searchCount: searches,
+    inputTokens: b.usage?.input_tokens ?? null,
+    outputTokens: b.usage?.output_tokens ?? null,
   };
 }
 
@@ -219,13 +233,19 @@ function extractAnthropic(message: Record<string, unknown>, searchMode: boolean)
     for (const c of b.citations ?? []) if (c.url) urls.add(c.url);
   }
   const usage = message.usage as
-    | { server_tool_use?: { web_search_requests?: number } }
+    | {
+        input_tokens?: number;
+        output_tokens?: number;
+        server_tool_use?: { web_search_requests?: number };
+      }
     | undefined;
   return {
     text: content.filter((b) => b.type === "text").map((b) => b.text ?? "").join("\n"),
     finishReason: (message.stop_reason as string | null) ?? null,
     citations: urls.size > 0 ? [...urls] : null,
     searchCount: searchMode ? usage?.server_tool_use?.web_search_requests ?? 0 : null,
+    inputTokens: usage?.input_tokens ?? null,
+    outputTokens: usage?.output_tokens ?? null,
   };
 }
 
@@ -245,6 +265,7 @@ async function ingest(
     knownBrands: [project.brand, ...project.competitors],
     reasonCodes: project.reason_taxonomy,
   };
+  tagCosts({ projectId: project.id, runId });
   const done = new Set(
     (await store.listResponses(runId)).map(
       (r) => `${r.prompt_id}:${r.repeat_idx}:${r.model}`
@@ -268,11 +289,22 @@ async function ingest(
     while (cursor < entries.length && !outage.err) {
       const { task, ex } = entries[cursor++];
       try {
-        const meter = coderUsageAccumulator();
-        const coding = await extractCodingConsensus(ex.text, {
-          ...ctx,
-          usageSink: meter.sink,
+        // Batch answers never touch the live clients, so their usage is
+        // ledgered here, from the vendor's own batch-result accounting.
+        logCost({
+          model: task.engine,
+          inputTokens: ex.inputTokens ?? 0,
+          outputTokens: ex.outputTokens ?? 0,
+          searches: ex.searchCount ?? 0,
+          purpose: "run:answer",
         });
+        const meter = coderUsageAccumulator();
+        const coding = await withCostContext({ purpose: "run:coder" }, () =>
+          extractCodingConsensus(ex.text, {
+            ...ctx,
+            usageSink: meter.sink,
+          })
+        );
         await store.insertResponse({
           runId,
           promptId: task.promptId,
@@ -282,6 +314,8 @@ async function ingest(
           citations: ex.citations,
           coderModel: coding.coderProvenance,
           searchCount: ex.searchCount,
+          inputTokens: ex.inputTokens,
+          outputTokens: ex.outputTokens,
           coderUsage: meter.usage,
           text: ex.text,
           mentions: coding.mentions,

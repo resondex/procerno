@@ -1,4 +1,5 @@
 import { store } from "../store";
+import { tagCosts, withCostContext } from "../cost_log";
 import {
   coderUsageAccumulator,
   CoderUnavailableError,
@@ -67,6 +68,7 @@ export async function driveRunChunk(
     knownBrands,
     reasonCodes: project.reason_taxonomy,
   };
+  tagCosts({ projectId: project.id, runId });
 
   if (run.status === "pending") await store.updateRunStatus(runId, "running");
 
@@ -128,15 +130,17 @@ export async function driveRunChunk(
     while (cursor < pending.length && Date.now() < deadline) {
       const task = pending[cursor++];
       try {
-        const { text, finishReason, citations, searchCount, usage } = await completeWithEngine(
-          task.model,
-          task.promptText
+        const { text, finishReason, citations, searchCount, usage } = await withCostContext(
+          { purpose: "run:answer" },
+          () => completeWithEngine(task.model, task.promptText)
         );
         const meter = coderUsageAccumulator();
-        const coding = await extractCodingConsensus(text, {
-          ...extractionCtx,
-          usageSink: meter.sink,
-        });
+        const coding = await withCostContext({ purpose: "run:coder" }, () =>
+          extractCodingConsensus(text, {
+            ...extractionCtx,
+            usageSink: meter.sink,
+          })
+        );
         await store.insertResponse({
           runId,
           promptId: task.promptId,
@@ -229,6 +233,7 @@ export async function recodeRun(runId: string): Promise<number> {
     knownBrands: [project.brand, ...project.competitors],
     reasonCodes: project.reason_taxonomy,
   };
+  tagCosts({ projectId: project.id, runId, purpose: "run:recode" });
   const responses = await store.listResponses(runId);
   let cursor = 0;
   let recoded = 0;
@@ -295,6 +300,7 @@ export async function finalizeRun(runId: string): Promise<void> {
   if (!run || run.status === "complete" || run.status === "failed") return;
   const project = await store.getProject(run.project_id);
   if (!project) return;
+  tagCosts({ projectId: project.id, runId, purpose: "run:finalize" });
   try {
     const [runMentions, runResponses] = await Promise.all([
       store.listMentionsForRun(runId),

@@ -167,6 +167,18 @@ function ensureSchema(): Promise<void> {
       await sql`ALTER TABLE responses ADD COLUMN IF NOT EXISTS input_tokens INTEGER`;
       await sql`ALTER TABLE responses ADD COLUMN IF NOT EXISTS output_tokens INTEGER`;
       await sql`ALTER TABLE responses ADD COLUMN IF NOT EXISTS coder_usage TEXT`;
+      await sql`CREATE TABLE IF NOT EXISTS cost_log (
+        id TEXT PRIMARY KEY,
+        project_id TEXT,
+        run_id TEXT,
+        purpose TEXT NOT NULL,
+        model TEXT NOT NULL,
+        input_tokens INTEGER NOT NULL DEFAULT 0,
+        output_tokens INTEGER NOT NULL DEFAULT 0,
+        searches INTEGER NOT NULL DEFAULT 0,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+      )`;
+      await sql`CREATE INDEX IF NOT EXISTS cost_log_project ON cost_log(project_id)`;
       await sql`CREATE TABLE IF NOT EXISTS dictionary_entries (
         id TEXT PRIMARY KEY,
         project_id TEXT NOT NULL REFERENCES projects(id),
@@ -912,6 +924,41 @@ export const pgStore: Store = {
       if (res.count === 0) return;
       await insertMentions(tx, responseId, input.mentions);
     });
+  },
+
+  async insertCostEntry(input) {
+    const sql = await db();
+    await sql`INSERT INTO cost_log ${sql({
+      id: crypto.randomUUID(),
+      project_id: input.projectId ?? null,
+      run_id: input.runId ?? null,
+      purpose: input.purpose,
+      model: input.model,
+      input_tokens: input.inputTokens,
+      output_tokens: input.outputTokens,
+      searches: input.searches ?? 0,
+    })}`;
+  },
+
+  async summarizeCostLog() {
+    const sql = await db();
+    const rows = await sql`SELECT project_id, purpose, model,
+        COUNT(*)::int AS calls,
+        COALESCE(SUM(input_tokens), 0)::bigint AS input_tokens,
+        COALESCE(SUM(output_tokens), 0)::bigint AS output_tokens,
+        COALESCE(SUM(searches), 0)::int AS searches
+      FROM cost_log
+      GROUP BY project_id, purpose, model
+      ORDER BY purpose, model`;
+    return rows.map((r) => ({
+      project_id: (r.project_id as string | null) ?? null,
+      purpose: r.purpose as string,
+      model: r.model as string,
+      calls: Number(r.calls),
+      input_tokens: Number(r.input_tokens),
+      output_tokens: Number(r.output_tokens),
+      searches: Number(r.searches),
+    }));
   },
 
   async writeResponseCoding(responseId, coding, coderModel, mentions, coderUsage) {

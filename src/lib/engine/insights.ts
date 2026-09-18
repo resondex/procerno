@@ -1,4 +1,5 @@
 import { anthropicClient, openaiClient } from "./providers";
+import { tagCosts } from "../cost_log";
 import { store } from "../store";
 import { computeRunMetrics } from "./metrics";
 import { computeProjectTrend } from "./trend";
@@ -298,6 +299,7 @@ function passesGate(text: string, allowed: Set<string>): boolean {
 export async function buildRunInsights(
   runId: string
 ): Promise<InsightsBundle | null> {
+  tagCosts({ purpose: "run:insights" });
   const run = await store.getRun(runId);
   if (!run) return null;
   const project = await store.getProject(run.project_id);

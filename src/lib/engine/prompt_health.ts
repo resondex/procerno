@@ -1,4 +1,5 @@
 import { store } from "../store";
+import { tagCosts } from "../cost_log";
 import { buildCanonicalizer } from "./metrics";
 import { apiKeyConfigured, openaiClient } from "./providers";
 
@@ -41,6 +42,7 @@ export async function analyzePromptHealth(
   projectId: string,
   runId: string
 ): Promise<void> {
+  tagCosts({ purpose: "run:prompt_health" });
   if (!apiKeyConfigured()) return;
   const project = await store.getProject(projectId);
   if (!project) return;

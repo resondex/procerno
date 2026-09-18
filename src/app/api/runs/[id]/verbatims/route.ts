@@ -3,6 +3,7 @@ import { store } from "@/lib/store";
 import { getPlanFor, requireAuth, requireRun } from "@/lib/auth";
 import { buildCanonicalizer } from "@/lib/engine/metrics";
 import { apiKeyConfigured, openaiClient } from "@/lib/engine/providers";
+import { tagCosts } from "@/lib/cost_log";
 
 export const maxDuration = 120;
 const CACHE_MS = 365 * 24 * 3600 * 1000;
@@ -59,6 +60,7 @@ export async function GET(
   );
   const rows = responses.filter((r) => negativeIds.has(r.id)).slice(0, 12);
   const display = canon.canonical(brand);
+  tagCosts({ purpose: "run:verbatims" });
   const client = openaiClient();
   const out = await Promise.all(
     rows.map(async (r) => {
