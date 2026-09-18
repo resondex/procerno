@@ -2357,6 +2357,14 @@ export async function generatePhrasings(input: {
           // into solution-seeking asks - real people ask for products,
           // and the writer had no way to know this stage must not.
           (hintOf.get(c.stage) ? `\n   [stage guidance: ${hintOf.get(c.stage)}]` : "") +
+          // But the seed's own brand pattern outranks the guidance: the
+          // blind VARIANT of a client-anchored stage exists to measure
+          // unprompted recall, and a guidance line saying "the client
+          // brand" made the writer name it - every candidate then died
+          // as a signature leak (six cells straight to 1/10 under p8).
+          (brandSignature(c.text, input.brand, rivals) === ""
+            ? `\n   [deliberately blind variant: name NO brand - the guidance's subject stays implied ("my subscription", "the service"), never named]`
+            : "") +
           (opts?.avoidWords?.[i]?.length
             ? `\n   [overused: ${opts.avoidWords[i].join(", ")}]`
             : "")
