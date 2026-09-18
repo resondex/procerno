@@ -189,7 +189,7 @@ export function openaiClient(): OpenAI {
   // for ten minutes before its retries even start. The slowest legitimate
   // call (the gpt-5 market read) runs ~100-120s; 150s bounds a stall
   // while leaving headroom, and the SDK's retries then get a fresh start.
-  if (!_client) _client = meterOpenAI(new OpenAI({ timeout: 150_000 }));
+  if (!_client) _client = meterOpenAI(new OpenAI({ timeout: 150_000, maxRetries: 1 }));
   return _client;
 }
 const client = openaiClient;
@@ -199,10 +199,15 @@ function compatClient(engine: Engine): OpenAI {
   const key = engine.baseURL ?? "default";
   let c = _compat.get(key);
   if (!c) {
+    // Same stall bound as the OpenAI client: the vendor defaults (600s
+    // timeout x 2 retries, stacked on our own withRetry) let one wedged
+    // Gemini/Grok/Sonar call pin a worker far past a chunk budget.
     c = meterOpenAI(
       new OpenAI({
         apiKey: process.env[engine.keyEnv],
         baseURL: engine.baseURL,
+        timeout: 150_000,
+        maxRetries: 1,
       })
     );
     _compat.set(key, c);
@@ -214,7 +219,10 @@ let _anthropic: import("@anthropic-ai/sdk").default | null = null;
 export async function anthropicClient() {
   if (!_anthropic) {
     const { default: Anthropic } = await import("@anthropic-ai/sdk");
-    _anthropic = meterAnthropic(new Anthropic());
+    // 180s, not 150: search-tool answers (web_search + 4096 max_tokens)
+    // run longer than any OpenAI call we make. Single SDK retry - the
+    // engine layer's withRetry already retries transient failures.
+    _anthropic = meterAnthropic(new Anthropic({ timeout: 180_000, maxRetries: 1 }));
   }
   return _anthropic;
 }

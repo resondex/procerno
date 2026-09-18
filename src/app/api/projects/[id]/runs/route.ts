@@ -3,7 +3,7 @@ import { waitUntil } from "@vercel/functions";
 import { z } from "zod";
 import { store } from "@/lib/store";
 import { requireAuth, requireProject } from "@/lib/auth";
-import { apiKeyConfigured, engineAvailable } from "@/lib/engine/providers";
+import { apiKeyConfigured, engineAvailable, ENGINES } from "@/lib/engine/providers";
 import { driveAndChain, runInBackground } from "@/lib/engine/runner";
 import { batchableEngine, submitRunBatches } from "@/lib/engine/batch";
 
@@ -13,8 +13,10 @@ export const maxDuration = 300;
 
 const runSchema = z.object({
   model: z.string().trim().min(1).default("gpt-5-mini"),
-  /** Engines to sample. One answer per prompt × repeat × engine. */
-  models: z.array(z.string().trim().min(1)).min(1).max(8).optional(),
+  /** Engines to sample. One answer per prompt × repeat × engine. The cap
+   * tracks the registry - a hardcoded 8 rejected full panels once the
+   * registry grew past it. */
+  models: z.array(z.string().trim().min(1)).min(1).max(ENGINES.length).optional(),
   repeats: z.number().int().min(1).max(20).default(5),
 });
 
