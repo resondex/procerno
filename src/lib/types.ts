@@ -77,6 +77,9 @@ export interface Project {
   /** JSON Moderators when the battery was built by the instrument designer;
    * null for classic suggested batteries. */
   moderators: string | null;
+  /** JSON map of scenario label -> Journey|null - which scenario buys
+   * differently. Part of the frozen instrument; null pre-persistence. */
+  scenario_journeys: string | null;
   /** 0 = classic battery; >=1 = grid-built, bumped on grid edits. */
   instrument_version: number;
   created_at: string;

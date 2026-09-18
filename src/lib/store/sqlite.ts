@@ -438,6 +438,8 @@ function parseProject(row: ProjectRaw): Project {
       (row as unknown as { human_override?: number }).human_override ?? 0,
     moderators:
       (row as unknown as { moderators?: string | null }).moderators ?? null,
+    scenario_journeys:
+      (row as unknown as { scenario_journeys?: string | null }).scenario_journeys ?? null,
     instrument_version:
       (row as unknown as { instrument_version?: number }).instrument_version ?? 0,
   };

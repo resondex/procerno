@@ -303,6 +303,7 @@ function rowToProject(r: Record<string, unknown>): Project {
     evidence_drawer: (r.evidence_drawer as number) ?? 1,
     human_override: (r.human_override as number) ?? 0,
     moderators: (r.moderators as string | null) ?? null,
+    scenario_journeys: (r.scenario_journeys as string | null) ?? null,
     instrument_version: (r.instrument_version as number) ?? 0,
     created_at: iso(r.created_at)!,
   };
