@@ -2202,10 +2202,14 @@ export interface Phrasing {
 
 // Bump when the paraphrase prompt or filters change: cached sets written
 // under old instructions must not be served as if they were new.
-// "p7": word-boundary brand signatures (the "purchases"-reads-as-Chase
-// poisoning) and the init retry loops until quota - short sets from the
-// poisoned filter must not be served.
-const PHRASINGS_VERSION = "p7";
+// "p8": every seed line carries its stage's guidance and the writer is
+// told to stay inside it - the A/B (2026-09-17) showed hint-blind
+// paraphrases drifting problem_recognition cells into solution-seeking
+// ("which card gives cash back" is discovery wearing problem_recognition's
+// clothes) on ~30 of 47 sampled, and 0 with the hint; the other stages
+// were unchanged by it. p7 added word-boundary brand signatures (the
+// "purchases"-reads-as-Chase poisoning) and init retries to quota.
+const PHRASINGS_VERSION = "p8";
 // Over-generate so the overlap filter can be strict and still fill the set.
 const PHRASINGS_EXTRA = 3;
 /** Blind cells get a wider first-pass margin: with no brand tokens to
@@ -2270,6 +2274,7 @@ export async function generatePhrasings(input: {
   // punishes candidates for obeying the rules. Narrow-lexicon stages
   // (pricing/value: brand + worth/cost/price is most of the ask) plateaued
   // at ~5-6/10 because every pair shared the brand tokens by construction.
+  const hintOf = new Map(stageLibrary(input.base).map((s) => [s.key, s.hint]));
   const brandTokens = new Set(
     [input.brand, ...rivals].flatMap((b) => [...wordSet(b)])
   );
@@ -2347,6 +2352,11 @@ export async function generatePhrasings(input: {
       .map(
         (c, i) =>
           `${i}. [stage=${c.stage} situation=${c.situation ?? "-"} angle=${primaryBrandName(c.angle)}${c.mode ? ` reach=${c.mode}` : ""}] ${c.text}` +
+          // The stage's guidance rides with every seed: without it the
+          // writer drifted problem_recognition ("pre-category") cells
+          // into solution-seeking asks - real people ask for products,
+          // and the writer had no way to know this stage must not.
+          (hintOf.get(c.stage) ? `\n   [stage guidance: ${hintOf.get(c.stage)}]` : "") +
           (opts?.avoidWords?.[i]?.length
             ? `\n   [overused: ${opts.avoidWords[i].join(", ")}]`
             : "")
@@ -2382,6 +2392,10 @@ export async function generatePhrasings(input: {
             "same brands and no others.\n" +
             "- Never change the circumstance or the decision being made; never " +
             "add a new constraint the seed does not have.\n" +
+            "- A seed's [stage guidance] is part of the SAME question: every " +
+            "paraphrase stays inside it. If it says pre-category, the asker " +
+            "does not know the category exists - they describe the pain and " +
+            "ask for help, never for a product type.\n" +
             "- No verbatim repeats, no trivial reorderings; each paraphrase " +
             "should be something a different person would plausibly type.\n" +
             "- Punctuation people actually type: never an em dash, never the " +
