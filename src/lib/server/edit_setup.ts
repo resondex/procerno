@@ -18,6 +18,11 @@ const norm = (t: string) => t.trim().toLowerCase().replace(/\s+/g, " ");
  * the Landscape setup. Callers have already checked access. */
 export async function buildEditSetupDraft(project: Project) {
   const id = project.id;
+  const storedJourneys = (() => {
+    const raw = (project as unknown as { scenario_journeys?: string | null }).scenario_journeys;
+    if (!raw) return {} as Record<string, ScenarioSpec["journey"]>;
+    try { return JSON.parse(raw) as Record<string, ScenarioSpec["journey"]>; } catch { return {}; }
+  })();
   const runs = await store.listRuns(id);
   if (runs.length > 0) return null;
   const intents = await store.listIntents(id);
@@ -42,10 +47,13 @@ export async function buildEditSetupDraft(project: Project) {
   } catch {
     // cold read: descriptions stay blank, all editable
   }
+  // Journey deltas come back from the tracker (persisted since the
+  // flattening bug): the deviating scenario keeps buying differently
+  // through an edit, and the mask recomputes true to the design.
   const scenarios: ScenarioSpec[] = situations.map((label) => ({
     label,
     description: desc.get(label) ?? "",
-    journey: null,
+    journey: storedJourneys[label] ?? null,
   }));
   const stages = participationMask(base, scenarios);
   const keptStages = [...new Set(intents.map((i) => i.stage))];
@@ -83,7 +91,7 @@ export async function buildEditSetupDraft(project: Project) {
   const rows = scenarios.map((s) => ({
     label: s.label,
     description: s.description,
-    journey: null,
+    journey: s.journey,
     suggested: true,
     on: true,
     original: { label: s.label, description: s.description },
@@ -112,7 +120,7 @@ export async function buildEditSetupDraft(project: Project) {
           columns: s.columns, hint: s.hint, why: s.why,
         })),
         keptStages,
-        scenarios: scenarios.map((s) => ({ label: s.label, description: s.description, journey: null })),
+        scenarios: scenarios.map((s) => ({ label: s.label, description: s.description, journey: s.journey })),
         scenarioRows: rows,
         reserve: [],
         baselineCellCount: cells.length,

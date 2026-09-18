@@ -44,6 +44,19 @@ const createSchema = z.object({
   grid: z
     .object({
       moderators: z.record(z.string(), z.unknown()),
+      journeys: z
+        .record(
+          z.string(),
+          z
+            .object({
+              involvement: z.enum(["considered", "habitual"]),
+              verifiability: z.enum(["spec", "taste", "trust"]),
+              think_feel: z.enum(["think", "feel"]),
+              decision_unit: z.enum(["solo", "household", "committee"]),
+            })
+            .nullable()
+        )
+        .optional(),
       cells: z
         .array(
           z.object({
@@ -169,6 +182,7 @@ export async function POST(req: Request) {
     reasonTaxonomy,
     engineSet,
     moderators: grid ? JSON.stringify(grid.moderators) : null,
+    scenarioJourneys: grid?.journeys ? JSON.stringify(grid.journeys) : null,
     instrumentVersion: grid ? 1 : 0,
   });
   if (grid) {

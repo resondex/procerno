@@ -204,6 +204,9 @@ function createDb(): Database.Database {
   if (!cols.some((c) => c.name === "moderators")) {
     db.exec("ALTER TABLE projects ADD COLUMN moderators TEXT");
   }
+  if (!cols.some((c) => c.name === "scenario_journeys")) {
+    db.exec("ALTER TABLE projects ADD COLUMN scenario_journeys TEXT");
+  }
   if (!cols.some((c) => c.name === "instrument_version")) {
     db.exec(
       "ALTER TABLE projects ADD COLUMN instrument_version INTEGER NOT NULL DEFAULT 0"
@@ -489,8 +492,8 @@ export const sqliteStore: Store = {
     const id = crypto.randomUUID();
     getDb()
       .prepare(
-        `INSERT INTO projects (id, name, brand, competitors, category, audience, user_id, reason_taxonomy, engine_set, moderators, instrument_version)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+        `INSERT INTO projects (id, name, brand, competitors, category, audience, user_id, reason_taxonomy, engine_set, moderators, scenario_journeys, instrument_version)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
       )
       .run(
         id,
@@ -503,6 +506,7 @@ export const sqliteStore: Store = {
         JSON.stringify(input.reasonTaxonomy),
         JSON.stringify(input.engineSet),
         input.moderators ?? null,
+        input.scenarioJourneys ?? null,
         input.instrumentVersion ?? 0
       );
     return (await this.getProject(id))!;
@@ -1169,11 +1173,11 @@ export const sqliteStore: Store = {
     const reset = db.transaction(() => {
       db.prepare(
         `UPDATE projects SET name = ?, category = ?, audience = ?,
-         competitors = ?, moderators = ?, engine_set = ?, reason_taxonomy = ?
+         competitors = ?, moderators = ?, scenario_journeys = ?, engine_set = ?, reason_taxonomy = ?
          WHERE id = ?`
       ).run(
         input.name, input.category, input.audience,
-        JSON.stringify(input.competitors), input.moderators,
+        JSON.stringify(input.competitors), input.moderators, input.scenarioJourneys,
         JSON.stringify(input.engineSet), JSON.stringify(input.reasonTaxonomy),
         projectId
       );

@@ -64,6 +64,7 @@ function ensureSchema(): Promise<void> {
       await sql`ALTER TABLE projects ADD COLUMN IF NOT EXISTS evidence_drawer INTEGER NOT NULL DEFAULT 1`;
       await sql`ALTER TABLE projects ADD COLUMN IF NOT EXISTS human_override INTEGER NOT NULL DEFAULT 0`;
       await sql`ALTER TABLE projects ADD COLUMN IF NOT EXISTS moderators TEXT`;
+      await sql`ALTER TABLE projects ADD COLUMN IF NOT EXISTS scenario_journeys TEXT`;
       await sql`ALTER TABLE projects ADD COLUMN IF NOT EXISTS instrument_version INTEGER NOT NULL DEFAULT 0`;
       await sql`CREATE TABLE IF NOT EXISTS intents (
         id TEXT PRIMARY KEY,
@@ -376,8 +377,8 @@ export const pgStore: Store = {
   async createProject(input) {
     const sql = await db();
     const id = crypto.randomUUID();
-    await sql`INSERT INTO projects (id, name, brand, competitors, category, audience, user_id, reason_taxonomy, engine_set, moderators, instrument_version)
-      VALUES (${id}, ${input.name}, ${input.brand}, ${JSON.stringify(input.competitors)}, ${input.category}, ${input.audience}, ${input.userId}, ${JSON.stringify(input.reasonTaxonomy)}, ${JSON.stringify(input.engineSet)}, ${input.moderators ?? null}, ${input.instrumentVersion ?? 0})`;
+    await sql`INSERT INTO projects (id, name, brand, competitors, category, audience, user_id, reason_taxonomy, engine_set, moderators, scenario_journeys, instrument_version)
+      VALUES (${id}, ${input.name}, ${input.brand}, ${JSON.stringify(input.competitors)}, ${input.category}, ${input.audience}, ${input.userId}, ${JSON.stringify(input.reasonTaxonomy)}, ${JSON.stringify(input.engineSet)}, ${input.moderators ?? null}, ${input.scenarioJourneys ?? null}, ${input.instrumentVersion ?? 0})`;
     return (await this.getProject(id))!;
   },
 
@@ -934,6 +935,7 @@ export const pgStore: Store = {
         audience = ${input.audience},
         competitors = ${JSON.stringify(input.competitors)},
         moderators = ${input.moderators},
+        scenario_journeys = ${input.scenarioJourneys},
         engine_set = ${JSON.stringify(input.engineSet)},
         reason_taxonomy = ${JSON.stringify(input.reasonTaxonomy)}
         WHERE id = ${projectId}`;

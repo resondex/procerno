@@ -70,7 +70,9 @@ const putSchema = z.object({
         })
       )
       .min(4),
-    journeys: z.array(JourneyShape).optional(),
+    /** Scenario label -> journey delta (null = inherits base). Part of
+     * the frozen instrument: without it a later edit flattens the mask. */
+    journeys: z.record(z.string(), JourneyShape.nullable()).optional(),
   }),
 });
 
@@ -123,6 +125,7 @@ export async function PUT(
     audience,
     competitors,
     moderators: JSON.stringify(grid.moderators),
+    scenarioJourneys: grid.journeys ? JSON.stringify(grid.journeys) : null,
     engineSet,
     reasonTaxonomy,
   });

@@ -573,6 +573,11 @@ export interface Store {
     engineSet: string[];
     /** JSON Moderators for grid-built batteries. */
     moderators?: string | null;
+    /** JSON map of scenario label -> Journey|null. The deviating
+     * scenario's delta is part of the frozen instrument: without it a
+     * later edit-hydration recomputes the mask flat (the Doritos
+     * party-column flattening). */
+    scenarioJourneys?: string | null;
     instrumentVersion?: number;
   }): Promise<Project>;
   getDictionary(projectId: string): Promise<DictionaryEntry[]>;
@@ -642,6 +647,7 @@ export interface Store {
       audience: string | null;
       competitors: string[];
       moderators: string | null;
+      scenarioJourneys: string | null;
       engineSet: string[];
       reasonTaxonomy: string[];
     }
