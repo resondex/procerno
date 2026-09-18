@@ -925,6 +925,24 @@ export const pgStore: Store = {
     });
   },
 
+  async resetInstrument(projectId, input) {
+    const sql = await db();
+    await sql.begin(async (tx) => {
+      await tx`UPDATE projects SET
+        name = ${input.name},
+        category = ${input.category},
+        audience = ${input.audience},
+        competitors = ${JSON.stringify(input.competitors)},
+        moderators = ${input.moderators},
+        engine_set = ${JSON.stringify(input.engineSet)},
+        reason_taxonomy = ${JSON.stringify(input.reasonTaxonomy)}
+        WHERE id = ${projectId}`;
+      await tx`DELETE FROM prompts WHERE project_id = ${projectId}`;
+      await tx`DELETE FROM intents WHERE project_id = ${projectId}`;
+      await tx`DELETE FROM dictionary_entries WHERE project_id = ${projectId}`;
+    });
+  },
+
   async deleteProject(projectId) {
     const sql = await db();
     await sql.begin(async (tx) => {

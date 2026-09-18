@@ -293,12 +293,26 @@ function ProjectDashboard() {
           <h1 className="text-2xl font-semibold tracking-tight">
             {project.name} — LLM visibility
           </h1>
-          <Link
-            href="/app"
-            className="text-sm font-medium text-primary hover:opacity-80"
-          >
-            ← all trackers
-          </Link>
+          <span className="flex items-center gap-4">
+            {/* Edit-setup: the escape hatch for regretful clicks. Only
+             * while ZERO runs exist - from the first run the instrument
+             * is locked, or the trend would compare different questions.
+             * The server enforces the same rule. */}
+            {runs.length === 0 && (
+              <Link
+                href={`/app?editSetup=${id}`}
+                className="text-sm font-medium text-primary hover:opacity-80"
+              >
+                Edit setup
+              </Link>
+            )}
+            <Link
+              href="/app"
+              className="text-sm font-medium text-primary hover:opacity-80"
+            >
+              ← all trackers
+            </Link>
+          </span>
         </div>
         <div className="flex items-baseline justify-between gap-4 flex-wrap mt-1.5">
           <span className="flex items-center gap-4">

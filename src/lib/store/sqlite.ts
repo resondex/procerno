@@ -1164,6 +1164,26 @@ export const sqliteStore: Store = {
     del();
   },
 
+  async resetInstrument(projectId, input) {
+    const db = getDb();
+    const reset = db.transaction(() => {
+      db.prepare(
+        `UPDATE projects SET name = ?, category = ?, audience = ?,
+         competitors = ?, moderators = ?, engine_set = ?, reason_taxonomy = ?
+         WHERE id = ?`
+      ).run(
+        input.name, input.category, input.audience,
+        JSON.stringify(input.competitors), input.moderators,
+        JSON.stringify(input.engineSet), JSON.stringify(input.reasonTaxonomy),
+        projectId
+      );
+      db.prepare("DELETE FROM prompts WHERE project_id = ?").run(projectId);
+      db.prepare("DELETE FROM intents WHERE project_id = ?").run(projectId);
+      db.prepare("DELETE FROM dictionary_entries WHERE project_id = ?").run(projectId);
+    });
+    reset();
+  },
+
   async deleteProject(projectId) {
     const db = getDb();
     const del = db.transaction(() => {

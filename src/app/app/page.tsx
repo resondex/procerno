@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import type { Project, Run, SetupDraft } from "@/lib/types";
 import type { EngineOption } from "@/app/components/engine_picker";
@@ -18,7 +18,23 @@ export default function AppHomePage() {
   const [isAdmin, setIsAdmin] = useState(false);
   const [engineOptions, setEngineOptions] = useState<EngineOption[]>([]);
   // The open setup, if any: which question set, which brand, resuming what.
-  const [wizard, setWizard] = useState<{ mode: SetupMode; brand: string; draft: SetupDraft | null } | null>(null);
+  // editProjectId marks the zero-run edit-setup flow: Save replaces the
+  // tracker's instrument in place instead of creating a new one.
+  const [wizard, setWizard] = useState<{ mode: SetupMode; brand: string; draft: SetupDraft | null; editProjectId?: string } | null>(null);
+  const searchParams = useSearchParams();
+  const editSetupId = searchParams.get("editSetup");
+
+  useEffect(() => {
+    if (!editSetupId) return;
+    void (async () => {
+      const res = await fetch(`/api/projects/${editSetupId}/setup`);
+      if (!res.ok) return;
+      const data = await res.json();
+      if (data.draft) {
+        setWizard({ mode: "grid", brand: data.draft.brand, draft: data.draft as SetupDraft, editProjectId: editSetupId });
+      }
+    })();
+  }, [editSetupId]);
 
   useEffect(() => {
     fetch("/api/projects")
@@ -200,10 +216,11 @@ export default function AppHomePage() {
             className="card mx-auto h-full w-full max-w-[1200px] overflow-hidden bg-surface"
           >
             <SetupWizard
-              key={wizard.draft?.id ?? `${wizard.mode}:${wizard.brand}`}
+              key={wizard.editProjectId ?? wizard.draft?.id ?? `${wizard.mode}:${wizard.brand}`}
               mode={wizard.mode}
               brand={wizard.brand}
               draft={wizard.draft}
+              editProjectId={wizard.editProjectId}
               engineOptions={engineOptions}
               onClose={() => setWizard(null)}
               onCreated={(id) => router.push(`/projects/${id}`)}

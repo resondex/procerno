@@ -630,6 +630,22 @@ export interface Store {
   listProjects(userId?: string): Promise<Project[]>;
   updateProjectSchedule(id: string, schedule: RunSchedule): Promise<void>;
   updateProjectEngineSet(id: string, engineSet: string[]): Promise<void>;
+  /** Edit-setup for a ZERO-RUN tracker: update the setup fields and wipe
+   * the instrument (intents, prompts, dictionary) so the caller can
+   * re-insert the edited one. Callers must verify no runs exist - after
+   * the first run the instrument is locked for comparability. */
+  resetInstrument(
+    id: string,
+    input: {
+      name: string;
+      category: string;
+      audience: string | null;
+      competitors: string[];
+      moderators: string | null;
+      engineSet: string[];
+      reasonTaxonomy: string[];
+    }
+  ): Promise<void>;
   /** Per-project switches for the evidence drawer and human override. */
   updateProjectFlags(
     id: string,

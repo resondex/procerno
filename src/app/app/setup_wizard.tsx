@@ -242,9 +242,13 @@ interface Props {
   /** Demo mode: the full setup experience, but nothing persists - no
    * drafts saved, no tracker created, no run started. */
   demo?: boolean;
+  /** Edit-setup for a ZERO-RUN tracker: the wizard resumes on the
+   * tracker's instrument and Save replaces it in place - no draft chips,
+   * no new tracker, never a run. Locked out once any run exists. */
+  editProjectId?: string;
 }
 
-export function SetupWizard({ mode, brand, draft, engineOptions, onClose, onCreated, onDraftsChanged, demo = false }: Props) {
+export function SetupWizard({ mode, brand, draft, engineOptions, onClose, onCreated, onDraftsChanged, demo = false, editProjectId }: Props) {
   const steps = STEPS[mode];
   const saved = (draft?.wizard ?? null) as WizardDraft | null;
 
@@ -391,7 +395,7 @@ export function SetupWizard({ mode, brand, draft, engineOptions, onClose, onCrea
     mp: string[] = machinePrompts,
     rp: string[] = reviewedPrompts
   ) {
-    if (demo) return;
+    if (demo || editProjectId) return;
     setSaving(true);
     const wizard: WizardDraft = {
       mode, step: at, studyName, grid: g, engineSet,
@@ -1016,6 +1020,42 @@ export function SetupWizard({ mode, brand, draft, engineOptions, onClose, onCrea
     setSubmitting(true);
     setError(null);
     const usingGrid = mode === "grid";
+    // Edit-setup replaces the zero-run tracker's instrument in place.
+    if (editProjectId && usingGrid) {
+      const res = await fetch(`/api/projects/${editProjectId}/setup`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        signal: AbortSignal.timeout(120_000),
+        body: JSON.stringify({
+          name: studyName.trim() || undefined,
+          category,
+          audience: audience || undefined,
+          competitors: allCompetitors(),
+          engines: engineSet,
+          grid: {
+            moderators: grid!.moderators,
+            cells: grid!.cells
+              .filter((c) => c.text.trim())
+              .map((c) => ({
+                stage: c.stage, layer: c.layer, situation: c.situation, angle: c.angle,
+                mode: c.mode ?? null, text: c.text,
+                phrasings: c.phrasings
+                  .filter((p) => p.text.trim())
+                  .map((p) => ({ text: p.text, asker: p.asker || undefined })),
+              })),
+          },
+        }),
+      }).catch(() => null);
+      setSubmitting(false);
+      if (!res) { setError("that took too long - try again"); return; }
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        setError(data.error ?? "something went wrong");
+        return;
+      }
+      onCreated(editProjectId);
+      return;
+    }
     const res = await fetch("/api/projects", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -1195,6 +1235,12 @@ export function SetupWizard({ mode, brand, draft, engineOptions, onClose, onCrea
             onClick: () => setDemoDone(true),
             disabled: engineSet.length === 0 || promptCount < 4,
           }
+      : editProjectId
+      ? {
+          label: submitting ? "Saving setup…" : "Save setup - no run starts",
+          onClick: () => void create(),
+          disabled: submitting || engineSet.length === 0 || promptCount < 4,
+        }
       : {
           label: submitting ? "Starting your first run…" : "Create tracker & run",
           onClick: () => void create(),
