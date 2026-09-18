@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { store } from "@/lib/store";
+import { loadAdminData } from "@/lib/server/admin_data";
 import { isStaff, requireAuth } from "@/lib/auth";
 import type { Org, OrgMember } from "@/lib/types";
 
@@ -12,6 +13,17 @@ import type { Org, OrgMember } from "@/lib/types";
  * Everyone else: 404 (no existence leak).
  */
 
+export async function GET() {
+  const auth = await requireAuth();
+  if (auth instanceof NextResponse) return auth;
+  const data = await loadAdminData(auth);
+  if (!data) {
+    return NextResponse.json({ error: "not found" }, { status: 404 });
+  }
+  return NextResponse.json(data);
+}
+
+/** Mutations still need the caller's admin scope - recompute per action. */
 async function adminContext(auth: { userId: string | null; email: string | null }) {
   const staff = auth.userId === null ? true : await isStaff(auth);
   const memberships = auth.email
@@ -21,41 +33,6 @@ async function adminContext(auth: { userId: string | null; email: string | null 
     .filter((m) => m.role === "admin")
     .map((m) => m.org_id);
   return { staff, adminOrgIds };
-}
-
-export async function GET() {
-  const auth = await requireAuth();
-  if (auth instanceof NextResponse) return auth;
-  const { staff, adminOrgIds } = await adminContext(auth);
-  if (!staff && adminOrgIds.length === 0) {
-    return NextResponse.json({ error: "not found" }, { status: 404 });
-  }
-
-  const allOrgs = await store.listOrgs();
-  const orgs: (Org & { members: OrgMember[] })[] = [];
-  for (const org of allOrgs) {
-    if (!staff && !adminOrgIds.includes(org.id)) continue;
-    orgs.push({ ...org, members: await store.listOrgMembers(org.id) });
-  }
-
-  const projects = staff
-    ? await store.listProjects()
-    : await store.listProjectsByOrgIds(adminOrgIds);
-
-  return NextResponse.json({
-    staff,
-    orgs,
-    projects: projects.map((p) => ({
-      id: p.id,
-      name: p.name,
-      brand: p.brand,
-      category: p.category,
-      org_id: p.org_id,
-      user_id: p.user_id,
-      created_at: p.created_at,
-    })),
-    staffEmails: staff ? await store.listStaff() : [],
-  });
 }
 
 const actionSchema = z.discriminatedUnion("action", [

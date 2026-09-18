@@ -1,10 +1,7 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { store } from "@/lib/store";
-import {
-  METRIC_DEFINITION,
-  METRIC_QUESTION,
-} from "@/lib/coding_questions";
+import { buildCodingPayload } from "@/lib/server/coding_payload";
 import type { AssignmentItem } from "@/lib/engine/human_coding";
 
 export const maxDuration = 60;
@@ -21,56 +18,13 @@ export async function GET(
   { params }: { params: Promise<{ token: string }> }
 ) {
   const { token } = await params;
-  if (!/^[a-f0-9]{32,64}$/.test(token)) {
-    return NextResponse.json({ error: "not found" }, { status: 404 });
-  }
-  const assignment = await store.getCodingAssignmentByToken(token);
-  if (!assignment) {
-    return NextResponse.json({ error: "not found" }, { status: 404 });
-  }
-  const items = JSON.parse(assignment.items) as AssignmentItem[];
-  const [responses, prompts, project] = await Promise.all([
-    store.listResponses(assignment.run_id),
-    store.listPrompts(assignment.project_id),
-    store.getProject(assignment.project_id),
-  ]);
-  const responseById = new Map(responses.map((r) => [r.id, r]));
-  const promptById = new Map(prompts.map((p) => [p.id, p]));
-
-  // A returning coder resumes where they left off.
   const url = new URL(req.url);
-  const coder = url.searchParams.get("coder")?.trim().slice(0, 60);
-  let codes: Record<string, boolean> = {};
-  if (coder) {
-    const all = await store.listHumanCodes(assignment.id);
-    codes = Object.fromEntries(
-      all
-        .filter((c) => c.coder === coder)
-        .map((c) => [`${c.response_id}|${c.brand_norm}`, c.verdict === 1])
-    );
+  const coder = url.searchParams.get("coder")?.trim().slice(0, 60) ?? null;
+  const payload = await buildCodingPayload(token, coder);
+  if (!payload) {
+    return NextResponse.json({ error: "not found" }, { status: 404 });
   }
-
-  return NextResponse.json({
-    name: assignment.name,
-    metric: assignment.metric,
-    question: METRIC_QUESTION[assignment.metric],
-    definition: METRIC_DEFINITION[assignment.metric],
-    category: project?.category ?? "",
-    items: items.flatMap((it) => {
-      const r = responseById.get(it.response_id);
-      if (!r) return [];
-      return [
-        {
-          responseId: it.response_id,
-          brand: it.brand,
-          brandNorm: it.brand_norm,
-          prompt: promptById.get(r.prompt_id)?.text ?? "",
-          text: r.text,
-        },
-      ];
-    }),
-    codes,
-  });
+  return NextResponse.json(payload);
 }
 
 const CodeBody = z.object({
