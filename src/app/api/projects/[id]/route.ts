@@ -12,10 +12,14 @@ export async function GET(
   const { id } = await params;
   const project = await requireProject(id, auth);
   if (project instanceof NextResponse) return project;
-  const [prompts, runs, staff] = await Promise.all([
+  // Dictionary rides along: the page needs it on every load, and a
+  // separate fetch pays a second function invocation and auth handshake
+  // in series - the visible lag between layout and live buttons.
+  const [prompts, runs, staff, dictionary] = await Promise.all([
     store.listPrompts(id),
     store.listRuns(id),
     isStaff(auth),
+    store.getDictionary(id),
   ]);
   // Drives whether staff-only switches are rendered at all. The PATCH route
   // enforces the same check, so a hidden control is a courtesy, not the gate.
@@ -24,6 +28,7 @@ export async function GET(
     prompts,
     runs,
     staff,
+    dictionary,
   });
 }
 

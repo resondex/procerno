@@ -26,6 +26,8 @@ interface Detail {
   project: Project;
   prompts: Prompt[];
   runs: Run[];
+  /** Rides with the detail so first paint needs ONE roundtrip. */
+  dictionary?: DictionaryEntry[];
 }
 
 interface Progress {
@@ -83,38 +85,48 @@ function ProjectDashboard() {
   const [dictVersion, setDictVersion] = useState(0);
 
   const refresh = useCallback(async () => {
+    // ONE roundtrip renders the whole page: the dictionary rides with
+    // the detail, and the follow-ups (run progress, trend) fetch in
+    // PARALLEL after it - the old serial chain of separate requests,
+    // each paying its own function spin-up and auth handshake, was the
+    // visible ~1s gap between layout and live buttons.
     const res = await fetch(`/api/projects/${id}`);
     if (!res.ok) return;
     const d: Detail = await res.json();
     setDetail(d);
+    setDict(d.dictionary ?? []);
+    setChosenEngines((prev) =>
+      prev.length > 0 ? prev : (d.project.engine_set ?? [])
+    );
     const active = d.runs.find(
       (r) => r.status === "pending" || r.status === "running"
     );
+    const followUps: Promise<void>[] = [];
     if (active) {
-      const pr = await fetch(`/api/runs/${active.id}`);
-      if (pr.ok) {
-        const pd = await pr.json();
-        setProgress({
-          completed: pd.completed,
-          total: pd.total,
-          promptCount: pd.promptCount ?? 0,
-          perEngineTotal: pd.perEngineTotal ?? 0,
-          perEngine: pd.perEngine ?? [],
-        });
-      }
+      followUps.push(
+        fetch(`/api/runs/${active.id}`).then(async (pr) => {
+          if (!pr.ok) return;
+          const pd = await pr.json();
+          setProgress({
+            completed: pd.completed,
+            total: pd.total,
+            promptCount: pd.promptCount ?? 0,
+            perEngineTotal: pd.perEngineTotal ?? 0,
+            perEngine: pd.perEngine ?? [],
+          });
+        })
+      );
     } else {
       setProgress(null);
     }
     if (d.runs.filter((r) => r.status === "complete").length >= 2) {
-      const tr = await fetch(`/api/projects/${id}/trend`);
-      if (tr.ok) setTrend((await tr.json()).trend);
+      followUps.push(
+        fetch(`/api/projects/${id}/trend`).then(async (tr) => {
+          if (tr.ok) setTrend((await tr.json()).trend);
+        })
+      );
     }
-    const dr = await fetch(`/api/projects/${id}/dictionary`);
-    if (dr.ok) setDict((await dr.json()).entries ?? []);
-    // Runs default to the tracker's core engine panel.
-    setChosenEngines((prev) =>
-      prev.length > 0 ? prev : (d.project.engine_set ?? [])
-    );
+    await Promise.all(followUps);
   }, [id]);
 
   async function refreshDict() {
