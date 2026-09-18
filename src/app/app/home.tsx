@@ -182,7 +182,10 @@ export default function AppHome({
           <ul className="grid gap-2">
             {projects.map((p) => (
               <li key={p.id}>
-                <Link href={`/projects/${p.id}`} className="card block px-5 py-4 transition-colors hover:border-primary">
+                {/* prefetch: the server-rendered payload loads while the row is on
+                 * screen, so the click lands on ready data - without it the
+                 * SSR render blocks the navigation for its ~300-500ms. */}
+                <Link prefetch={true} href={`/projects/${p.id}`} className="card block px-5 py-4 transition-colors hover:border-primary">
                   <div className="flex items-baseline justify-between gap-3">
                     <span className="font-semibold text-[15px]">{p.name}</span>
                     <RunHint run={p.latestRun} />

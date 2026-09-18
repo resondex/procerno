@@ -309,6 +309,7 @@ export default function ProjectDashboard({
              * The server enforces the same rule. */}
             {runs.length === 0 && (
               <Link
+                prefetch={true}
                 href={`/app?editSetup=${id}`}
                 className="text-sm font-medium text-primary hover:opacity-80"
               >
@@ -316,6 +317,7 @@ export default function ProjectDashboard({
               </Link>
             )}
             <Link
+              prefetch={true}
               href="/app"
               className="text-sm font-medium text-primary hover:opacity-80"
             >
