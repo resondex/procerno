@@ -108,7 +108,15 @@ export async function POST(req: Request) {
   // failure ships null advice rather than an error.
   let fit: ScenarioFit | null = null;
   let journeyFit: JourneyFit | null = null;
-  if (parsed.data.brand) {
+  // BOTH advisories are computed against the FRESH read only. An edited
+  // recompose returns null for each and the client keeps its first
+  // advice: applying a suggestion never conjures the next one (Tyler's
+  // no-iteration-loop ruling), and - just as important - the edited path
+  // stays what its comment promises, pure code and instant. Scenario fit
+  // used to recompute here on every tick/untick: each edited set was a
+  // fresh cache key, so every click at the gate paid a live model call
+  // and froze the page for seconds.
+  if (parsed.data.brand && !parsed.data.base) {
     [fit, journeyFit] = await Promise.all([
       reviewScenarioFit({
         brand: parsed.data.brand,
@@ -116,19 +124,12 @@ export async function POST(req: Request) {
         scenarios: scenarios.map((s) => ({ label: s.label, description: s.description })),
         meta: { source: cacheSource(auth) },
       }).catch(() => null),
-      // The journey advisory: does THIS brand's buyer diverge from the
-      // category-modal read? Computed against the FRESH read only - an
-      // edited recompose returns null and the client keeps its first
-      // advice, so applying a suggestion never conjures the next one
-      // (the iteration loop the scenario advisory was ruled out of).
-      parsed.data.base
-        ? Promise.resolve(null)
-        : reviewJourneyFit({
-            brand: parsed.data.brand,
-            category: parsed.data.category,
-            base,
-            meta: { source: cacheSource(auth) },
-          }).catch(() => null),
+      reviewJourneyFit({
+        brand: parsed.data.brand,
+        category: parsed.data.category,
+        base,
+        meta: { source: cacheSource(auth) },
+      }).catch(() => null),
     ]);
   }
   return NextResponse.json({
