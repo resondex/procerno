@@ -9,6 +9,8 @@ import {
   humanize,
   namesAnyBrand,
   participationMask,
+  reviewJourneyFit,
+  reviewScenarioFit,
   type Moderators,
   type ScenarioSpec,
 } from "@/lib/engine/instrument";
@@ -96,6 +98,25 @@ export async function GET(
     text: i.text,
     phrasings: (byIntent.get(i.id) ?? []).filter((p) => norm(p.text) !== norm(i.text)),
   }));
+  // The advisories ship WITH the draft render, exactly as compose ships
+  // them - the edit flow never composes, so without this the scenarios
+  // gate reopened with no "generally decide" or "worth a look" banners.
+  // Both are cached from setup; a failure ships null advice, never an
+  // error.
+  const [fit, journeyFit] = await Promise.all([
+    reviewScenarioFit({
+      brand: project.brand,
+      category: project.category,
+      scenarios: scenarios.map((s) => ({ label: s.label, description: s.description })),
+      meta: { brand: project.brand, source: "edit_setup" },
+    }).catch(() => null),
+    reviewJourneyFit({
+      brand: project.brand,
+      category: project.category,
+      base,
+      meta: { brand: project.brand, source: "edit_setup" },
+    }).catch(() => null),
+  ]);
   const rows = scenarios.map((s) => ({
     label: s.label,
     description: s.description,
@@ -120,6 +141,8 @@ export async function GET(
         engineSet: project.engine_set,
         grid: {
           step: "phrasings",
+          fit,
+          journeyFit,
           moderators: base,
           stages: stages.map((s) => ({
             key: s.key, label: s.label, layer: s.layer, situational: s.situational,
