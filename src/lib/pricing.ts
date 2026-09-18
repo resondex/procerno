@@ -1,8 +1,8 @@
 /**
  * Per-engine list prices, USD per MILLION tokens, plus per-search tool
  * fees. Staff financials only - these are LIST prices maintained by hand
- * (checked 2026-09-18); they price the metered answer tokens exactly and
- * the extraction coders by estimate. Update when vendors reprice.
+ * (checked 2026-09-18); answer tokens and extraction-coder tokens are both
+ * vendor-metered, so every row prices exactly. Update when vendors reprice.
  */
 export const ENGINE_PRICES: Record<string, { in: number; out: number; perSearch?: number }> = {
   "gpt-5": { in: 1.25, out: 10 },
@@ -16,6 +16,8 @@ export const ENGINE_PRICES: Record<string, { in: number; out: number; perSearch?
   "gemini-flash-latest": { in: 0.3, out: 2.5 },
   "grok-4": { in: 3, out: 15 },
   sonar: { in: 1, out: 1, perSearch: 0.008 },
+  // Extraction coders that never serve as answer engines.
+  "gpt-4o-mini": { in: 0.15, out: 0.6 },
 };
 
 /** Answer cost in USD for one engine's token sums. Unknown engines price
@@ -26,17 +28,23 @@ export function answerCost(model: string, inTok: number, outTok: number, searche
 }
 
 /**
- * ESTIMATED extraction cost for one answer: three coder reads (coder A,
- * coder B, focus) whose input is the answer plus ~600 prompt tokens,
- * ~200 output tokens each, priced at a blended coder rate (gpt-4o-mini /
- * Haiku / occasional Sonnet adjudication). Clearly an estimate - exact
- * coder metering is a deeper refactor.
+ * EXACT extraction cost for one answer, from the responses.coder_usage
+ * JSON (model -> vendor-metered {input, output}; Anthropic inputs already
+ * folded to billed-equivalent tokens for prompt caching). Null or
+ * malformed usage - answers coded before metering existed - price as 0.
  */
-export function coderCostEstimate(answerChars: number): number {
-  const answerTok = Math.ceil(answerChars / 4);
-  const inTok = (answerTok + 600) * 3;
-  const outTok = 200 * 3;
-  const BLEND_IN = 0.6; // $/M, blended
-  const BLEND_OUT = 3;
-  return (inTok / 1e6) * BLEND_IN + (outTok / 1e6) * BLEND_OUT;
+export function coderCost(coderUsageJson: string | null): number {
+  if (!coderUsageJson) return 0;
+  let usage: Record<string, { input?: number; output?: number }>;
+  try {
+    usage = JSON.parse(coderUsageJson);
+  } catch {
+    return 0;
+  }
+  let total = 0;
+  for (const [model, u] of Object.entries(usage ?? {})) {
+    const p = ENGINE_PRICES[model] ?? { in: 3, out: 15 };
+    total += ((u?.input ?? 0) / 1e6) * p.in + ((u?.output ?? 0) / 1e6) * p.out;
+  }
+  return total;
 }

@@ -7,7 +7,7 @@ import type { OrgRole } from "@/lib/types";
 interface FinRow {
   runId: string; project: string; brand: string; createdAt: string; status: string;
   answers: number; inTokens: number; outTokens: number; searches: number;
-  answerCost: number; coderEst: number;
+  answerCost: number; coderCost: number;
 }
 
 interface AdminData {
@@ -266,7 +266,7 @@ export default function AdminConsole({
                     <th className="px-2 py-2 text-right">Tokens out</th>
                     <th className="px-2 py-2 text-right">Searches</th>
                     <th className="px-2 py-2 text-right">Answer $</th>
-                    <th className="px-2 py-2 text-right">Coder $ (est)</th>
+                    <th className="px-2 py-2 text-right">Coder $</th>
                     <th className="px-4 py-2 text-right">Total $</th>
                   </tr>
                 </thead>
@@ -283,9 +283,9 @@ export default function AdminConsole({
                       <td className="px-2 py-2 text-right tabular-nums">{r.outTokens.toLocaleString()}</td>
                       <td className="px-2 py-2 text-right tabular-nums">{r.searches.toLocaleString()}</td>
                       <td className="px-2 py-2 text-right tabular-nums">${r.answerCost.toFixed(2)}</td>
-                      <td className="px-2 py-2 text-right tabular-nums">${r.coderEst.toFixed(2)}</td>
+                      <td className="px-2 py-2 text-right tabular-nums">${r.coderCost.toFixed(2)}</td>
                       <td className="px-4 py-2 text-right tabular-nums font-semibold">
-                        ${(r.answerCost + r.coderEst).toFixed(2)}
+                        ${(r.answerCost + r.coderCost).toFixed(2)}
                       </td>
                     </tr>
                   ))}
@@ -296,15 +296,16 @@ export default function AdminConsole({
                     <td className="px-2 py-2 text-right tabular-nums">{data.financials.reduce((a, r) => a + r.outTokens, 0).toLocaleString()}</td>
                     <td className="px-2 py-2 text-right tabular-nums">{data.financials.reduce((a, r) => a + r.searches, 0).toLocaleString()}</td>
                     <td className="px-2 py-2 text-right tabular-nums">${data.financials.reduce((a, r) => a + r.answerCost, 0).toFixed(2)}</td>
-                    <td className="px-2 py-2 text-right tabular-nums">${data.financials.reduce((a, r) => a + r.coderEst, 0).toFixed(2)}</td>
-                    <td className="px-4 py-2 text-right tabular-nums">${data.financials.reduce((a, r) => a + r.answerCost + r.coderEst, 0).toFixed(2)}</td>
+                    <td className="px-2 py-2 text-right tabular-nums">${data.financials.reduce((a, r) => a + r.coderCost, 0).toFixed(2)}</td>
+                    <td className="px-4 py-2 text-right tabular-nums">${data.financials.reduce((a, r) => a + r.answerCost + r.coderCost, 0).toFixed(2)}</td>
                   </tr>
                 </tbody>
               </table>
               <p className="px-4 py-2 text-[11px] text-ink-3">
-                Answer costs price vendor-metered tokens at list rates; the
-                coder column is an estimate from answer lengths. Answers
-                collected before token capture shipped count tokens as zero.
+                Answer and coder costs both price vendor-metered tokens at
+                list rates (Anthropic coder inputs are cache-billing
+                adjusted). Answers collected before metering shipped count
+                tokens and coder cost as zero.
               </p>
             </div>
           )}

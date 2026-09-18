@@ -6,6 +6,11 @@ export interface ExtractionContext {
   targetBrand: string;
   knownBrands: string[];
   reasonCodes: string[];
+  /** Exact coder metering: every extraction model call reports its
+   * vendor-metered usage here (input already folded to billed-equivalent
+   * tokens for Anthropic prompt caching: uncached + 1.25x creation +
+   * 0.1x reads). Absent = caller doesn't meter. */
+  usageSink?: (model: string, inputTokens: number, outputTokens: number) => void;
 }
 
 export interface CompletionProvider {
@@ -415,6 +420,12 @@ function codingInstructions(ctx: ExtractionContext): string {
   );
 }
 
+/** Billed-equivalent input tokens under Anthropic prompt caching. */
+function claudeBilledInput(u: unknown): number {
+  const x = (u ?? {}) as { input_tokens?: number; cache_creation_input_tokens?: number; cache_read_input_tokens?: number };
+  return Math.round((x.input_tokens ?? 0) + (x.cache_creation_input_tokens ?? 0) * 1.25 + (x.cache_read_input_tokens ?? 0) * 0.1);
+}
+
 /** Claude as the extraction coder: a forced tool call is Anthropic's
  * equivalent of structured outputs. */
 async function codeWithClaude(
@@ -449,6 +460,7 @@ async function codeWithClaude(
     tool_choice: { type: "tool", name: "emit_coding" },
     messages: [{ role: "user", content: responseText }],
   });
+  ctx.usageSink?.(model, claudeBilledInput(res.usage), (res.usage as { output_tokens?: number }).output_tokens ?? 0);
   const block = res.content.find((b) => b.type === "tool_use");
   const parsed = (block && "input" in block ? block.input : {}) as ExtractionResult;
   const pick =
@@ -484,6 +496,7 @@ async function codeWithClaude(
       tool_choice: { type: "tool", name: "emit_focus" },
       messages: [{ role: "user", content: responseText }],
     });
+    ctx.usageSink?.(model, claudeBilledInput(f.usage), (f.usage as { output_tokens?: number }).output_tokens ?? 0);
     const fb = f.content.find((b) => b.type === "tool_use");
     const fp = (fb && "input" in fb ? fb.input : {}) as {
       focus_quote?: string | null;
@@ -543,6 +556,7 @@ codingInstructions(ctx),
           },
         },
       });
+      ctx.usageSink?.(coder, res.usage?.prompt_tokens ?? 0, res.usage?.completion_tokens ?? 0);
       const raw = res.choices[0]?.message?.content ?? "{}";
       const parsed = JSON.parse(raw) as ExtractionResult;
       // The focus brand is needed only for the quote fields, so it is asked
@@ -582,6 +596,7 @@ codingInstructions(ctx),
             },
           },
         });
+        ctx.usageSink?.(coder, f.usage?.prompt_tokens ?? 0, f.usage?.completion_tokens ?? 0);
         const fp = JSON.parse(f.choices[0]?.message?.content ?? "{}");
         focusQuote = fp.focus_quote ?? null;
         focusInterpretation = fp.focus_interpretation ?? null;
@@ -749,6 +764,24 @@ export function summarizeCoderProvenance(
     .join("; ");
 }
 
+/** Per-answer accumulator for exact coder metering: pass `sink` as the
+ * ExtractionContext usageSink, then read `usage` after the consensus call.
+ * Anthropic inputs arrive already folded to billed-equivalent tokens. */
+export function coderUsageAccumulator(): {
+  sink: NonNullable<ExtractionContext["usageSink"]>;
+  usage: Record<string, { input: number; output: number }>;
+} {
+  const usage: Record<string, { input: number; output: number }> = {};
+  return {
+    usage,
+    sink: (model, input, output) => {
+      const u = (usage[model] ??= { input: 0, output: 0 });
+      u.input += input;
+      u.output += output;
+    },
+  };
+}
+
 export async function extractCodingConsensus(
   responseText: string,
   ctx: ExtractionContext
@@ -829,7 +862,7 @@ export async function extractCodingConsensus(
   let topPick = a.top_pick_brand;
   let provenance = `${CODER_A}+${CODER_B} (agreed)`;
   if (disagreements.length > 0) {
-    const verdict = await adjudicate(responseText, a, b).catch(() => null);
+    const verdict = await adjudicate(responseText, a, b, ctx).catch(() => null);
     if (verdict) {
       outcome = verdict.outcome;
       topPick = verdict.outcome === "pick" ? verdict.top_pick_brand : null;
@@ -910,6 +943,7 @@ async function readFocus(
       tool_choice: { type: "tool", name: "emit_focus" },
       messages: [{ role: "user", content: responseText }],
     });
+    ctx.usageSink?.(FOCUS_MODEL, claudeBilledInput(res.usage), (res.usage as { output_tokens?: number }).output_tokens ?? 0);
     const block = res.content.find((b) => b.type === "tool_use");
     const fp = (block && "input" in block ? block.input : {}) as {
       focus_quote?: string | null;
@@ -951,6 +985,7 @@ async function readFocus(
       },
     },
   });
+  ctx.usageSink?.(FOCUS_MODEL, res.usage?.prompt_tokens ?? 0, res.usage?.completion_tokens ?? 0);
   const parsed = JSON.parse(res.choices[0]?.message?.content ?? "{}");
   return {
     focus_quote: parsed.focus_quote ?? null,
@@ -961,7 +996,8 @@ async function readFocus(
 async function adjudicate(
   responseText: string,
   a: ExtractionResult,
-  b: ExtractionResult
+  b: ExtractionResult,
+  ctx: ExtractionContext
 ): Promise<{ outcome: ExtractionResult["outcome"]; top_pick_brand: string | null }> {
   const anthropic = await anthropicClient();
   const res = await anthropic.messages.create({
@@ -1011,6 +1047,7 @@ async function adjudicate(
       },
     ],
   });
+  ctx.usageSink?.(ADJUDICATOR, claudeBilledInput(res.usage), (res.usage as { output_tokens?: number }).output_tokens ?? 0);
   const block = res.content.find((x) => x.type === "tool_use");
   return (block && "input" in block ? block.input : {}) as {
     outcome: ExtractionResult["outcome"];

@@ -1,5 +1,6 @@
 import { store } from "../store";
 import {
+  coderUsageAccumulator,
   CoderUnavailableError,
   completeWithEngine,
   engineAvailable,
@@ -131,7 +132,11 @@ export async function driveRunChunk(
           task.model,
           task.promptText
         );
-        const coding = await extractCodingConsensus(text, extractionCtx);
+        const meter = coderUsageAccumulator();
+        const coding = await extractCodingConsensus(text, {
+          ...extractionCtx,
+          usageSink: meter.sink,
+        });
         await store.insertResponse({
           runId,
           promptId: task.promptId,
@@ -143,6 +148,7 @@ export async function driveRunChunk(
           searchCount,
           inputTokens: usage.input,
           outputTokens: usage.output,
+          coderUsage: meter.usage,
           text,
           mentions: coding.mentions,
           coding,

@@ -1,6 +1,6 @@
 import { isStaff, type AuthContext } from "@/lib/auth";
 import { store } from "@/lib/store";
-import { answerCost, coderCostEstimate } from "@/lib/pricing";
+import { answerCost, coderCost } from "@/lib/pricing";
 import type { Org, OrgMember } from "@/lib/types";
 
 /** The admin console's data - shared by the /api/admin route and the
@@ -23,14 +23,14 @@ export async function loadAdminData(auth: AuthContext) {
   const projects = staff
     ? await store.listProjects()
     : await store.listProjectsByOrgIds(adminOrgIds);
-  // Staff-only financials: metered answer tokens per run x engine,
-  // priced exactly; coder pass estimated from answer lengths.
+  // Staff-only financials: metered answer tokens per run x engine and
+  // metered extraction-coder tokens per answer, both priced exactly.
   let financials: unknown = null;
   if (staff) {
     const rows: {
       runId: string; project: string; brand: string; createdAt: string; status: string;
       answers: number; inTokens: number; outTokens: number; searches: number;
-      answerCost: number; coderEst: number;
+      answerCost: number; coderCost: number;
     }[] = [];
     for (const pr of projects.slice(0, 100)) {
       for (const run of await store.listRuns(pr.id)) {
@@ -38,19 +38,19 @@ export async function loadAdminData(auth: AuthContext) {
         if (responses.length === 0 && run.status === "pending") continue;
         let inT = 0, outT = 0, searches = 0, cost = 0, coder = 0;
         for (const r of responses) {
-          const rr = r as unknown as { model: string | null; input_tokens: number | null; output_tokens: number | null; search_count: number | null; text: string };
+          const rr = r as unknown as { model: string | null; input_tokens: number | null; output_tokens: number | null; search_count: number | null; coder_usage: string | null };
           inT += rr.input_tokens ?? 0;
           outT += rr.output_tokens ?? 0;
           searches += rr.search_count ?? 0;
           cost += answerCost(rr.model ?? run.model, rr.input_tokens ?? 0, rr.output_tokens ?? 0, rr.search_count ?? 0);
-          coder += coderCostEstimate(rr.text.length);
+          coder += coderCost(rr.coder_usage);
         }
         rows.push({
           runId: run.id, project: pr.name, brand: pr.brand,
           createdAt: run.created_at, status: run.status,
           answers: responses.length, inTokens: inT, outTokens: outT, searches,
           answerCost: Math.round(cost * 100) / 100,
-          coderEst: Math.round(coder * 100) / 100,
+          coderCost: Math.round(coder * 100) / 100,
         });
       }
     }

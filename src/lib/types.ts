@@ -230,6 +230,8 @@ export interface ResponseRow {
   repeat_idx: number;
   input_tokens: number | null;
   output_tokens: number | null;
+  /** JSON: model -> {input, output}. Null predates exact coder metering. */
+  coder_usage: string | null;
   /** The engine that produced this answer. */
   model: string;
   /** Vendor-reported stop reason — 'length'/'max_tokens' = truncated. */
@@ -778,6 +780,9 @@ export interface Store {
     /** Vendor-reported answer-call usage; null when the vendor omits it. */
     inputTokens?: number | null;
     outputTokens?: number | null;
+    /** Exact per-model extraction usage (coders + focus + adjudicator),
+     * vendor-metered; null for answers coded before metering existed. */
+    coderUsage?: Record<string, { input: number; output: number }> | null;
     text: string;
     mentions: { brand: string; framing: Framing }[];
     coding: Omit<ExtractionResult, "mentions"> | null;

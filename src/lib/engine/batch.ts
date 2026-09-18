@@ -2,6 +2,7 @@ import { toFile } from "openai";
 import { store } from "../store";
 import type { RunBatch } from "../types";
 import {
+  coderUsageAccumulator,
   CoderUnavailableError,
   anthropicClient,
   extractCodingConsensus,
@@ -267,7 +268,11 @@ async function ingest(
     while (cursor < entries.length && !outage.err) {
       const { task, ex } = entries[cursor++];
       try {
-        const coding = await extractCodingConsensus(ex.text, ctx);
+        const meter = coderUsageAccumulator();
+        const coding = await extractCodingConsensus(ex.text, {
+          ...ctx,
+          usageSink: meter.sink,
+        });
         await store.insertResponse({
           runId,
           promptId: task.promptId,
@@ -277,6 +282,7 @@ async function ingest(
           citations: ex.citations,
           coderModel: coding.coderProvenance,
           searchCount: ex.searchCount,
+          coderUsage: meter.usage,
           text: ex.text,
           mentions: coding.mentions,
           coding,
