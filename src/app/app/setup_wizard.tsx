@@ -295,6 +295,10 @@ export function SetupWizard({ mode, brand, draft, engineOptions, onClose, onCrea
   const [submitting, setSubmitting] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  /** One-line explanation for why a confirm re-landed on the Prompts
+   * gate (it wrote prompts for new questions) - cleared on the next
+   * confirm or when leaving the gate. */
+  const [promptsNotice, setPromptsNotice] = useState<string | null>(null);
   // The market the current battery was composed from; a changed market
   // means a deliberate trip back, and a recompose on re-confirm.
   const [servedRead, setServedRead] = useState<string | null>(
@@ -434,6 +438,7 @@ export function SetupWizard({ mode, brand, draft, engineOptions, onClose, onCrea
     rp: string[] = reviewedPrompts
   ) {
     setReadDelta(null);
+    if (k !== "prompts") setPromptsNotice(null);
     setStep(k);
     setReached((r) => Math.max(r, steps.findIndex((s) => s.key === k)));
     setError(null);
@@ -739,8 +744,21 @@ export function SetupWizard({ mode, brand, draft, engineOptions, onClose, onCrea
   }
 
   async function writePhrasings(force = false, onlyMissing = false, from?: GridState) {
+    const src = from ?? grid;
+    const live = (src?.cells ?? []).filter((c) => c.text.trim());
+    const missingBefore = live.filter((c) => !c.phrasings.some((p) => p.text.trim())).length;
     const next = await gridApi.writePhrasings(force, onlyMissing, from);
-    if (next) goTo("prompts", next);
+    if (next) {
+      goTo("prompts", next);
+      // A partial write means a confirm re-landed here: say why, or the
+      // gate looks stuck (a full first write is the expected flow and
+      // needs no note).
+      if (missingBefore > 0 && missingBefore < live.length) {
+        setPromptsNotice(
+          `Wrote prompts for ${missingBefore} new question${missingBefore === 1 ? "" : "s"} - review them below, then confirm again.`
+        );
+      }
+    }
   }
 
   /** What the Prompts footer does once the battery is clean - recomputed
@@ -784,9 +802,16 @@ export function SetupWizard({ mode, brand, draft, engineOptions, onClose, onCrea
   /** The missing-fill also tops up below-quota sets: empty cells get full
    * sets, short cells get just their shortfall - nothing kept is touched. */
   async function fillParaphrases(g: GridState) {
+    const live = g.cells.filter((c) => c.text.trim());
+    const missingBefore = live.filter((c) => !c.phrasings.some((p) => p.text.trim())).length;
     const filled = await gridApi.writePhrasings(false, true, g);
     const topped = await gridApi.topUpPhrasings(filled ?? g);
     goTo("prompts", topped ?? filled ?? g);
+    if (missingBefore > 0) {
+      setPromptsNotice(
+        `Wrote prompts for ${missingBefore} new question${missingBefore === 1 ? "" : "s"} - review them below, then confirm again.`
+      );
+    }
   }
 
   /** The standalone top-up, for short-but-nonzero sets (they never block
@@ -801,6 +826,7 @@ export function SetupWizard({ mode, brand, draft, engineOptions, onClose, onCrea
    * mine" is never recorded, a reviewer failure never blocks). */
   async function confirmPrompts() {
     if (!grid) return;
+    setPromptsNotice(null);
     const { authored, body } = cellReviewRequest(grid, brand, allCompetitors(), category, audience);
     if (authored.length === 0) {
       proceedPrompts(grid);
@@ -1193,7 +1219,7 @@ export function SetupWizard({ mode, brand, draft, engineOptions, onClose, onCrea
         customUsed > 0 ? ` · ${customUsed}/${customAllowance} custom` : ""
       }`;
       footerAction = {
-        label: busy ?? "These are my questions",
+        label: busy ?? "These are my questions - write the prompts",
         onClick: () => void confirmPrompts(),
         disabled: busy !== null || live.length < 4,
       };
@@ -1202,7 +1228,7 @@ export function SetupWizard({ mode, brand, draft, engineOptions, onClose, onCrea
         customUsed > 0 ? ` · ${customUsed}/${customAllowance} custom` : ""
       } - some questions still need paraphrases`;
       footerAction = {
-        label: busy ?? "Write the missing paraphrases",
+        label: busy ?? "These are my questions - write the missing prompts",
         onClick: () => void confirmPrompts(),
         disabled: busy !== null || live.length < 4,
       };
@@ -1422,6 +1448,19 @@ export function SetupWizard({ mode, brand, draft, engineOptions, onClose, onCrea
 
           {step === "prompts" && mode === "grid" && grid && (
             <div className="grid gap-3">
+              {promptsNotice && (
+                <div className="rounded-lg border border-primary/30 bg-primary-soft px-3 py-2 text-[13px] text-primary flex items-start justify-between gap-3">
+                  <span>{promptsNotice}</span>
+                  <button
+                    type="button"
+                    onClick={() => setPromptsNotice(null)}
+                    aria-label="Dismiss"
+                    className="leading-none opacity-60 hover:opacity-100"
+                  >
+                    ×
+                  </button>
+                </div>
+              )}
               {/* Busy stays inline so the gate never unmounts - open stages
                   and folds survive a paraphrase write. */}
               {(busy !== null || grid.step === "phrasings") && (
