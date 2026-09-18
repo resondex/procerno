@@ -1719,6 +1719,43 @@ const CELLS_SCHEMA = {
 } as const;
 
 /** One line describing a deviating column's journey, for prompts. */
+/** The cache key for ONE grid cell - exported so migrations can seed
+ * values under exactly the keys generateGrid will read. */
+export function gridCellCacheKey(
+  args: {
+    brand: string; category: string; competitors: string[];
+    audience: string | null; base: Moderators; scenarios: ScenarioSpec[];
+  },
+  row: { stage: string; situation: string | null; angle: string; scope: string | null }
+): string {
+  const rivals = args.competitors.slice(0, 4);
+  const s = row.situation ? args.scenarios.find((x) => x.label === row.situation) : undefined;
+  const sctx = s ? `${s.label}|${s.description}|${journeyNote(args.base, s) ?? ""}` : "";
+  return cacheKey("grid_cell1", [
+    STYLE_VERSION, args.brand, args.category, rivals.join(","), args.audience,
+    JSON.stringify(args.base),
+    row.stage, row.situation ?? "", row.angle, row.scope ?? "", sctx,
+  ]);
+}
+
+/** The cache key for ONE cell's paraphrase set - same contract. */
+export function phrasingCacheKey(
+  args: {
+    brand: string; competitors: string[]; audience: string | null;
+    count: number; base: Moderators; scenarios: ScenarioSpec[];
+  },
+  cell: { situation: string | null; mode?: string | null; text: string }
+): string {
+  const rivals = args.competitors.slice(0, 4);
+  const s = cell.situation ? args.scenarios.find((x) => x.label === cell.situation) : undefined;
+  const jnote = s ? journeyNote(args.base, s) ?? "" : "";
+  return cacheKey("phrasings", [
+    PHRASINGS_VERSION, STYLE_VERSION, args.brand, rivals.join(","), args.audience, String(args.count),
+    JSON.stringify(args.base),
+    `${cell.situation ?? ""}|${cell.mode ?? ""}|${cell.text}|${jnote}`,
+  ]);
+}
+
 function journeyNote(base: Moderators, s: ScenarioSpec): string | null {
   if (!s.journey) return null;
   const j = { ...base, ...s.journey };
@@ -1770,31 +1807,26 @@ export async function generateGrid(input: {
     }
   }
 
-  // Per-STAGE cache units: a coverage tick re-buys only the stages it
-  // changes, never the whole grid. The base read, journeys, and rivals
-  // stay in every key - the same structural cell voiced under a different
-  // read is a different prompt. Missing units are grouped into ~13-cell
-  // model calls, so the writer still varies register across a real batch;
-  // in-flight units coalesce across requests exactly like the paraphrases.
-  const ctx = [
-    STYLE_VERSION,
-    input.brand, input.category, rivals.join(","), input.audience,
-    JSON.stringify(input.base),
-    JSON.stringify(input.scenarios),
-  ];
-  const units: (typeof plan)[] = [];
-  for (const row of plan) {
-    const last = units[units.length - 1];
-    if (last && last[0].stage.key === row.stage.key) last.push(row);
-    else units.push([row]);
-  }
+  // Per-CELL cache units, keyed only on what the cell actually depends
+  // on: its stage, angle, reach, and ITS OWN scenario (label,
+  // description, journey note) - never the siblings. Editing one
+  // scenario therefore regenerates only that scenario's cells; the rest
+  // of the grid serves byte-identical from cache. (The old "grid_unit"
+  // keyed every stage on the whole scenario array, so a one-word
+  // scenario edit redrew the entire grid - and every reviewed prompt
+  // with it.) A scoped invariant cell carries the column list in
+  // `scope`, so a rename still re-keys exactly the cells it reaches;
+  // a journey change re-keys its scenario's cells via the note, and
+  // mask movement re-keys scoped cells via `scope`. Model-call batching
+  // is unchanged: units group into ~CELL_CHUNK-cell calls either way,
+  // and the dedupe seed still spans everything cached.
+  const units: (typeof plan)[] = plan.map((row) => [row]);
   const unitOf = new Map<(typeof plan)[number], number>();
   units.forEach((rows, u) => rows.forEach((r) => unitOf.set(r, u)));
-  const unitKeys = units.map((rows) =>
-    cacheKey("grid_unit", [
-      ...ctx,
-      rows.map((r) => `${r.stage.key}|${r.situation ?? ""}|${r.angle}|${r.scope ?? ""}`).join("\n"),
-    ])
+  const unitKeys = plan.map((r) =>
+    gridCellCacheKey(input, {
+      stage: r.stage.key, situation: r.situation, angle: r.angle, scope: r.scope,
+    })
   );
   const resolved: (GridCell[] | null)[] = units.map(() => null);
   const scrub = (cells: GridCell[]): GridCell[] =>
@@ -2288,14 +2320,11 @@ export async function generatePhrasings(input: {
   // them. The base read and journeys stay in the key - a read edit that
   // leaves a cell's text identical must not serve paraphrases voiced
   // under the old read.
-  const ctx = [
-    PHRASINGS_VERSION, STYLE_VERSION, input.brand, rivals.join(","), input.audience, String(input.count),
-    JSON.stringify(input.base),
-    input.scenarios.map((sc) => `${sc.label}:${JSON.stringify(sc.journey)}`).join("|"),
-  ];
-  const keys = input.cells.map((c) =>
-    cacheKey("phrasings", [...ctx, `${c.situation ?? ""}|${c.mode ?? ""}|${c.text}`])
-  );
+  // Per-cell keys carry only the cell's OWN scenario dependency (its
+  // situation's journey note) - the old composition folded every
+  // scenario label into every key, so renaming one scenario re-keyed
+  // and redrew all ~500 paraphrases. See phrasingCacheKey.
+  const keys = input.cells.map((c) => phrasingCacheKey(input, c));
   const out: Phrasing[][] = input.cells.map(() => []);
 
   /** A pending marker's claim time, or null for a real value / no entry. */
