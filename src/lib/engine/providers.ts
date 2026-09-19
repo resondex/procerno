@@ -627,8 +627,12 @@ const openaiProvider: CompletionProvider = {
     if (coder.startsWith("claude")) {
       return codeWithClaude(responseText, ctx, coder, skipFocus);
     }
+    // A coder that lives in the engine registry with its own baseURL
+    // (grok, gemini) talks to ITS vendor; anything else is an OpenAI model.
+    const coderEngine = getEngine(coder);
+    const c = coderEngine?.baseURL ? compatClient(coderEngine) : client();
     return withRetry(async () => {
-      const res = await client().chat.completions.create({
+      const res = await c.chat.completions.create({
         model: coder,
         messages: [
           {
@@ -659,7 +663,7 @@ codingInstructions(ctx),
       let focusInterpretation: string | null = null;
       try {
         if (skipFocus) throw new Error("skip");
-        const f = await client().chat.completions.create({
+        const f = await c.chat.completions.create({
           model: coder,
           messages: [
             {
