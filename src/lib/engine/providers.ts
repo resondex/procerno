@@ -234,7 +234,15 @@ export async function anthropicClient() {
  * searchCount (null = the vendor doesn't report it). */
 export async function completeWithEngine(
   engineId: string,
-  prompt: string
+  prompt: string,
+  opts?: {
+    /** Raise the Anthropic output cap for truncation retries; other
+     * vendors run at their own intrinsic limits and ignore this. */
+    maxTokens?: number;
+    /** Per-request deadline override (a long retry generation needs more
+     * than the client's stall bound). */
+    timeoutMs?: number;
+  }
 ): Promise<{
   text: string;
   finishReason: string | null;
@@ -257,12 +265,13 @@ export async function completeWithEngine(
   return withRetry(async () => {
     if (engine.sdk === "anthropic") {
       const a = await anthropicClient();
-      const res = await a.messages.create({
+      const res = await a.messages.create(
+        {
         model,
         // 8192, not 4096: the cap is OUR artifact, not assistant reality -
         // 18 of 1,040 Anthropic answers on the jira battery hit 4096 and
         // truncated. Output is billed as generated, so headroom is free.
-        max_tokens: 8192,
+        max_tokens: opts?.maxTokens ?? 8192,
         messages: [{ role: "user", content: prompt }],
         ...(engine.mode === "search"
           ? {
@@ -273,7 +282,9 @@ export async function completeWithEngine(
               ],
             }
           : {}),
-      });
+        },
+        opts?.timeoutMs ? { timeout: opts.timeoutMs } : undefined
+      );
       const urls = new Set<string>();
       for (const b of res.content) {
         if (b.type !== "text") continue;

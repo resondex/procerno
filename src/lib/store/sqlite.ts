@@ -1169,6 +1169,23 @@ export const sqliteStore: Store = {
     insertAll();
   },
 
+  async replaceResponseAnswer(responseId, input) {
+    getDb()
+      .prepare(
+        `UPDATE responses SET text = ?, finish_reason = ?, citations = ?,
+         search_count = ?, input_tokens = ?, output_tokens = ? WHERE id = ?`
+      )
+      .run(
+        input.text,
+        input.finishReason,
+        input.citations ? JSON.stringify(input.citations) : null,
+        input.searchCount,
+        input.inputTokens,
+        input.outputTokens,
+        responseId
+      );
+  },
+
   async insertCostEntry(input) {
     getDb()
       .prepare(

@@ -806,6 +806,19 @@ export interface Store {
    * column list with insertResponse (see lib/coding_columns.ts) so the two
    * write paths cannot fall out of step.
    */
+  /** Replace a stored answer in place (truncation recollect): the row keeps
+   * its identity and coding state; only the collected answer changes. */
+  replaceResponseAnswer(
+    responseId: string,
+    input: {
+      text: string;
+      finishReason: string | null;
+      citations: string[] | null;
+      searchCount: number | null;
+      inputTokens: number | null;
+      outputTokens: number | null;
+    }
+  ): Promise<void>;
   /** Append one row to the token-spend ledger (see lib/cost_log.ts). */
   insertCostEntry(input: {
     projectId?: string | null;

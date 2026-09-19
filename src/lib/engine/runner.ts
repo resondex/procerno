@@ -178,7 +178,7 @@ export async function driveRunChunk(
 
   if (pending.length === 0) {
     if (batchesOpen) return "waiting";
-    return codeCollectedChunk(runId, run.status, extractionCtx, Date.now() + budgetMs, {
+    return codeCollectedChunk(runId, run.status, project.id, extractionCtx, Date.now() + budgetMs, {
       expected: total,
     });
   }
@@ -370,23 +370,99 @@ export async function recodeRun(runId: string): Promise<number> {
  * a coder outage here parks the run at "collected" (data safe, coding
  * resumes on the next drive) instead of failing it.
  */
+/** finish_reason values that mean the answer hit an output cap. */
+const TRUNCATED_FINISH = new Set(["max_tokens", "length", "max_output_tokens"]);
+/** Retry cap for truncated answers - and the self-limit: a row that
+ * already produced more output than RETRY_SKIP_OUTPUT was a high-cap retry
+ * that still maxed out, so it is kept as-is rather than retried forever. */
+const TRUNCATION_RETRY_CAP = 16_384;
+const RETRY_SKIP_OUTPUT = 12_000;
+
 async function codeCollectedChunk(
   runId: string,
   status: string,
+  projectId: string,
   ctx: { targetBrand: string; knownBrands: string[]; reasonCodes: string[] },
   deadline: number,
   health: { expected: number }
 ): Promise<ChunkOutcome> {
   const responses = await store.listResponses(runId);
   const uncoded = responses.filter((r) => !r.coder_model && !r.outcome);
+
+  // Recollect truncated answers at a higher cap BEFORE any coding spend:
+  // coding a cut-off answer measures our cap, not the assistant.
+  const retryable = uncoded.filter(
+    (r) =>
+      TRUNCATED_FINISH.has(r.finish_reason ?? "") &&
+      (r.output_tokens ?? 0) < RETRY_SKIP_OUTPUT
+  );
+  let recollected = 0;
+  if (retryable.length > 0) {
+    const promptText = new Map(
+      (await store.listPrompts(projectId)).map((p) => [p.id, p.text])
+    );
+    for (const r of retryable) {
+      if (Date.now() >= deadline) break;
+      const text = promptText.get(r.prompt_id);
+      if (!text) continue;
+      try {
+        const fresh = await withCostContext({ purpose: "run:truncation_retry" }, () =>
+          // A 16K generation can outrun the client's default deadline, so
+          // the retry also carries a longer per-request timeout.
+          completeWithEngine(r.model, text, {
+            maxTokens: TRUNCATION_RETRY_CAP,
+            timeoutMs: 240_000,
+          })
+        );
+        if (!fresh.text.trim()) continue;
+        // Keep the longer read: a retry that truncated even higher is
+        // still more of the answer than we had.
+        if (fresh.text.length >= r.text.length) {
+          await store.replaceResponseAnswer(r.id, {
+            text: fresh.text,
+            finishReason: fresh.finishReason,
+            citations: fresh.citations,
+            searchCount: fresh.searchCount,
+            inputTokens: fresh.usage.input,
+            outputTokens: fresh.usage.output,
+          });
+          r.text = fresh.text;
+          r.finish_reason = fresh.finishReason;
+          r.output_tokens = fresh.usage.output;
+          recollected++;
+        }
+      } catch (err) {
+        console.error(`truncation retry failed for response ${r.id}:`, err);
+      }
+    }
+    // Budget died mid-recollect: resume it next chunk before coding starts.
+    const stillPending = retryable.some(
+      (r) =>
+        TRUNCATED_FINISH.has(r.finish_reason ?? "") &&
+        (r.output_tokens ?? 0) < RETRY_SKIP_OUTPUT
+    );
+    if (stillPending && Date.now() >= deadline) return "continue";
+  }
+
   if (status !== "collected" && uncoded.length > 0) {
     // Health gate at the wave boundary: how much of the grid actually
-    // arrived is recorded before a single coding cent is spent.
-    const note =
-      responses.length < health.expected
-        ? `collected ${responses.length}/${health.expected} answers; coding`
-        : undefined;
-    await store.updateRunStatus(runId, "collected", note);
+    // arrived - and in what shape - is recorded before a coding cent is
+    // spent.
+    const truncated = responses.filter((r) =>
+      TRUNCATED_FINISH.has(r.finish_reason ?? "")
+    ).length;
+    const parts: string[] = [];
+    if (responses.length < health.expected) {
+      parts.push(`collected ${responses.length}/${health.expected} answers`);
+    }
+    if (truncated > 0 || recollected > 0) {
+      parts.push(`${truncated} truncated, ${recollected} recollected at a higher cap`);
+    }
+    await store.updateRunStatus(
+      runId,
+      "collected",
+      parts.length > 0 ? parts.join("; ") : undefined
+    );
   }
   if (uncoded.length === 0) return "finalize";
 

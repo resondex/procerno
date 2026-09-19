@@ -926,6 +926,18 @@ export const pgStore: Store = {
     });
   },
 
+  async replaceResponseAnswer(responseId, input) {
+    const sql = await db();
+    await sql`UPDATE responses SET
+      text = ${input.text},
+      finish_reason = ${input.finishReason},
+      citations = ${input.citations ? JSON.stringify(input.citations) : null},
+      search_count = ${input.searchCount},
+      input_tokens = ${input.inputTokens},
+      output_tokens = ${input.outputTokens}
+      WHERE id = ${responseId}`;
+  },
+
   async insertCostEntry(input) {
     const sql = await db();
     await sql`INSERT INTO cost_log ${sql({
