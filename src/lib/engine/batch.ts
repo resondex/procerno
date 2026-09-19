@@ -94,7 +94,9 @@ export async function submitRunBatches(runId: string): Promise<number> {
             custom_id: `i${i}`,
             params: {
               model: e.apiModel ?? e.id,
-              max_tokens: 4096,
+              // Mirrors the live path's cap (see completeWithEngine): 4096
+              // truncated 18/1,040 Anthropic answers on the jira battery.
+              max_tokens: 8192,
               messages: [{ role: "user" as const, content: t.text }],
               ...(e.mode === "search"
                 ? {
