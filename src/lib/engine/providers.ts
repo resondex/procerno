@@ -299,11 +299,18 @@ export async function completeWithEngine(
     if (engine.mode === "search" && !engine.baseURL) {
       // OpenAI search variants go through the Responses API — web search is
       // a first-class tool there, with each search recorded in the output.
-      const res = await client().responses.create({
-        model,
-        input: prompt,
-        tools: [{ type: "web_search" }],
-      } as Parameters<ReturnType<typeof client>["responses"]["create"]>[0]);
+      const res = await client().responses.create(
+        {
+          model,
+          input: prompt,
+          tools: [{ type: "web_search" }],
+        } as Parameters<ReturnType<typeof client>["responses"]["create"]>[0],
+        // Per-request override: a search answer legitimately runs multiple
+        // retrieval rounds (observed avg 4.4 searches) - the client's 150s
+        // stall bound cut off ~1% of gpt-5-search answers. Only this call
+        // gets the long leash; setup and instinct calls keep 150s.
+        { timeout: 300_000 }
+      );
       const output = (res as unknown as { output?: { type: string; content?: { type: string; annotations?: { type: string; url?: string }[] }[] }[] }).output ?? [];
       const searches = output.filter((i) => i.type === "web_search_call").length;
       const urls = new Set<string>();
