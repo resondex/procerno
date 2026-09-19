@@ -425,7 +425,6 @@ function extractSchema(reasonCodes: string[]) {
       gives_recommendation: { type: "boolean" },
       includes_prices: { type: "boolean" },
       includes_specs: { type: "boolean" },
-      total_recommendations: { type: "integer" },
     },
     required: [
       "mentions",
@@ -436,7 +435,6 @@ function extractSchema(reasonCodes: string[]) {
       "gives_recommendation",
       "includes_prices",
       "includes_specs",
-      "total_recommendations",
     ],
   } as const;
 }
@@ -564,8 +562,6 @@ function codingInstructions(ctx: ExtractionContext): string {
     "includes_specs — true ONLY if concrete numeric limits or " +
     "quantities appear (storage, seats, API limits, versions). " +
     "Feature names without numbers are false.\n" +
-    "total_recommendations — how many distinct options it actually " +
-    "recommends (0 when it recommends none).\n" +
     `Known brands (extract others too): ${ctx.knownBrands.join(", ")}.`
   );
 }
@@ -657,10 +653,12 @@ async function codeWithClaude(
   } catch {
     // Quotes are optional; the coding is not.
   }
+  const cwcMentions = dedupeMentions(parsed.mentions ?? []);
   return {
     ...parsed,
     top_pick_brand: parsed.outcome === "pick" ? pick : null,
-    mentions: dedupeMentions(parsed.mentions ?? []),
+    mentions: cwcMentions,
+    total_recommendations: recommendedCount(cwcMentions),
     reasons: [...new Set(parsed.reasons ?? [])],
     focus_quote: focusQuote,
     focus_interpretation: focusInterpretation,
@@ -766,12 +764,14 @@ codingInstructions(ctx),
         !/^(null|none|n\/a|no pick|no_pick)$/i.test(parsed.top_pick_brand.trim())
           ? parsed.top_pick_brand
           : null;
+      const oaMentions = dedupeMentions(parsed.mentions ?? []);
       return {
         ...parsed,
         // A conditional or undecided answer crowns nobody, whatever the
         // model volunteered.
         top_pick_brand: parsed.outcome === "pick" ? pick : null,
-        mentions: dedupeMentions(parsed.mentions ?? []),
+        mentions: oaMentions,
+        total_recommendations: recommendedCount(oaMentions),
         reasons: [...new Set(parsed.reasons ?? [])],
         focus_quote: focusQuote,
         focus_interpretation: focusInterpretation,
@@ -1053,9 +1053,7 @@ export async function extractCodingConsensus(
     // Numeric flags: agree, or take the affirmative only when both saw it.
     includes_prices: a.includes_prices && b.includes_prices,
     includes_specs: a.includes_specs && b.includes_specs,
-    total_recommendations: Math.round(
-      (a.total_recommendations + b.total_recommendations) / 2
-    ),
+    total_recommendations: recommendedCount(mentions),
     reasons: [...new Set([...(a.reasons ?? []), ...(b.reasons ?? [])])],
     focus_quote: focus.focus_quote,
     focus_interpretation: focus.focus_interpretation,
@@ -1222,6 +1220,12 @@ async function adjudicate(
     outcome: ExtractionResult["outcome"];
     top_pick_brand: string | null;
   };
+}
+
+/** Derived, not coded (Tyler 2026-09-19): the coded count disagreed with
+ * the mention framings on 20-30% of answers - one source of truth now. */
+function recommendedCount(mentions: ExtractedMention[]): number {
+  return mentions.filter((m) => m.framing === "recommended").length;
 }
 
 function dedupeMentions(mentions: ExtractedMention[]): ExtractedMention[] {
