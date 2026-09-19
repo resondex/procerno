@@ -454,6 +454,62 @@ async function withRetry<T>(fn: () => Promise<T>, tries = 3): Promise<T> {
   throw lastErr;
 }
 
+/** Framing rules, v1 (shipped Aug 2026) vs v2 (the ratified codebook,
+ * 2026-09-18: direction test, branch verbs, market descriptors, reported
+ * claims, net-caveat, incumbent defense - category-agnostic by design).
+ * EXTRACT_PROMPT_V2 selects; the A/B control runs both on fixed answers. */
+function framingRules(): string {
+  if (!process.env.EXTRACT_PROMPT_V2) {
+    return (
+      "framing per mention — 'recommended' only when the answer " +
+      "endorses it for the reader's situation (a pick, a 'best for " +
+      "you', a clear favourable ranking). 'negative' when criticized, " +
+      "warned about, or advised against — including a caveat like " +
+      "'powerful but too heavy for a small team'. 'mentioned' when it " +
+      "is merely listed, compared factually, or named as an " +
+      "integration. Being included in a list is NOT an endorsement.\n"
+    );
+  }
+  return (
+    "framing per mention — decide by DIRECTION, not enthusiasm.\n" +
+    "  'recommended' ONLY when the answer points THIS reader toward " +
+    "the brand: an outright pick, a stated default, a 'best for your " +
+    "situation', the top of a ranking presented as advice — or a " +
+    "conditional branch with a strong directive verb ('X is your best " +
+    "bet if you're on a tight budget'): branch advice is still advice. " +
+    "When the answer's operative advice is to KEEP or renew something " +
+    "the reader already uses, that incumbent is recommended even " +
+    "without superlatives.\n" +
+    "  'mentioned' when listed, compared factually, or named as an " +
+    "adjacent product. ALSO mentioned: praise with no direction (a " +
+    "glowing description that never tells the reader what to do), " +
+    "market-position superlatives ('the industry standard') not tied " +
+    "to advice, weak-verb hedges ('worth considering', 'worth a " +
+    "look'), and REPORTED opinions ('often recommended', 'has a " +
+    "reputation for being clunky') — attributing a view to others is " +
+    "not the answer's own verdict, in either direction.\n" +
+    "  'negative' when the answer itself criticizes, warns, or steers " +
+    "away — including a caveat that disqualifies the brand for THIS " +
+    "reader's stated situation ('powerful, but too heavy for a team " +
+    "your size'). A caveat inside a standing endorsement does NOT " +
+    "flip it: 'X wins for you, though budget for the learning curve' " +
+    "stays recommended — the reader is still being sent to X.\n"
+  );
+}
+
+/** Reasons rule: v2 requires the answer to ARGUE FROM the attribute. */
+function reasonsRule(): string {
+  if (!process.env.EXTRACT_PROMPT_V2) {
+    return "reasons — which allowed argument codes the answer uses.\n";
+  }
+  return (
+    "reasons — the allowed argument codes the answer actually ARGUES " +
+    "FROM to justify a recommendation or a warning — never codes whose " +
+    "topic merely appears. An attribute named in passing that supports " +
+    "no judgement gets no code.\n"
+  );
+}
+
 /** One instruction set, whichever vendor codes — so a coder swap changes
  * the model and nothing else. */
 function codingInstructions(ctx: ExtractionContext): string {
@@ -471,13 +527,7 @@ function codingInstructions(ctx: ExtractionContext): string {
     "that product itself, so a product, its board view, and its " +
     "enterprise edition are all the SAME one name, recorded once. A " +
     "bare feature fragment with no brand attached is omitted.\n" +
-    "framing per mention — 'recommended' only when the answer " +
-    "endorses it for the reader's situation (a pick, a 'best for " +
-    "you', a clear favourable ranking). 'negative' when criticized, " +
-    "warned about, or advised against — including a caveat like " +
-    "'powerful but too heavy for a small team'. 'mentioned' when it " +
-    "is merely listed, compared factually, or named as an " +
-    "integration. Being included in a list is NOT an endorsement.\n" +
+    framingRules() +
     "outcome — exactly one of four. Decide by what the answer DECIDES, " +
     "never by whether it asks a question at the end.\n" +
     "  THE TEST — apply it literally, do not weigh emphasis or tone: " +
@@ -503,7 +553,7 @@ function codingInstructions(ctx: ExtractionContext): string {
     "as the answer writes it — never two names joined by 'or', '+', '/' " +
     "or a parenthetical. If the answer genuinely leads with two, that " +
     "is 'conditional', not a pick.\n" +
-    "reasons — which allowed argument codes the answer uses.\n" +
+    reasonsRule() +
     "clarification_requested — independent of outcome: true whenever " +
     "the answer asks the reader any question, including when it has " +
     "already recommended something.\n" +
