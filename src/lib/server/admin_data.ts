@@ -75,9 +75,11 @@ export async function loadAdminData(auth: AuthContext) {
       searches: row.searches,
       cost:
         Math.round(
-          (answerCost(row.model, row.input_tokens, row.output_tokens, 0) -
+          ((answerCost(row.model, row.input_tokens, row.output_tokens, 0) -
             // answerCost adds one perRequest fee; this row is `calls` answers.
-            requestFee(row.model, 1) +
+            requestFee(row.model, 1)) *
+            // Vendor batches bill tokens at 50% of list; tool fees don't discount.
+            (row.purpose === "run:answer_batch" ? 0.5 : 1) +
             requestFee(row.model, row.calls) +
             searchFee(row.model, row.searches)) * 10000
         ) / 10000,

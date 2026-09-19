@@ -389,6 +389,19 @@ async function codeCollectedChunk(
   const responses = await store.listResponses(runId);
   const uncoded = responses.filter((r) => !r.coder_model && !r.outcome);
 
+  // Operational hold: with RUN_COLLECT_ONLY set, runs park at "collected"
+  // and never spend a coding cent - used while the coder question (solo vs
+  // consensus vs fast) is unsettled. Clear the env and hit /continue to
+  // code a held run.
+  if (process.env.RUN_COLLECT_ONLY && uncoded.length > 0) {
+    await store.updateRunStatus(
+      runId,
+      "collected",
+      "collect-only hold (RUN_COLLECT_ONLY): coding deferred"
+    );
+    return "coding_blocked";
+  }
+
   // Recollect truncated answers at a higher cap BEFORE any coding spend:
   // coding a cut-off answer measures our cap, not the assistant.
   const retryable = uncoded.filter(

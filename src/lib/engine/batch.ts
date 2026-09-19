@@ -290,7 +290,9 @@ async function ingest(
           inputTokens: ex.inputTokens ?? 0,
           outputTokens: ex.outputTokens ?? 0,
           searches: ex.searchCount ?? 0,
-          purpose: "run:answer",
+          // Distinct purpose: batch tokens bill at 50% of list - the
+          // admin ledger prices this purpose at half token rates.
+          purpose: "run:answer_batch",
         });
         // Stored uncoded, like live collection: the coding wave picks these
         // up once every batch is terminal.
