@@ -281,6 +281,34 @@ export async function driveRunChunk(
   return "failed";
 }
 
+/** Both store drivers emit UTC; sqlite omits the T and Z. */
+function utcMs(ts: string): number {
+  const iso = ts.includes("T") ? ts : ts.replace(" ", "T");
+  return new Date(/[zZ]|[+-]\d\d:?\d\d$/.test(iso) ? iso : iso + "Z").getTime();
+}
+
+/**
+ * Auto-resume sweep: non-terminal runs with no open vendor batches and no
+ * stored progress for `staleMs` are orphans - a died driver process, a
+ * dropped chunk hop - and get re-driven by the caller. Held runs
+ * (RUN_COLLECT_ONLY + collected) are parked on purpose, not stalled.
+ */
+export async function findStalledRuns(staleMs = 45 * 60 * 1000): Promise<string[]> {
+  const stalled: string[] = [];
+  const cutoff = Date.now() - staleMs;
+  for (const project of await store.listProjects()) {
+    for (const run of await store.listRuns(project.id)) {
+      if (!["pending", "running", "collected"].includes(run.status)) continue;
+      if (run.status === "collected" && process.env.RUN_COLLECT_ONLY) continue;
+      if (run.pipeline === "batch" && (await hasOpenBatches(run.id))) continue;
+      const latest = await store.latestResponseAt(run.id);
+      const lastActivity = latest ? utcMs(latest) : utcMs(run.created_at);
+      if (lastActivity < cutoff) stalled.push(run.id);
+    }
+  }
+  return stalled;
+}
+
 /** Local driver: chunk in-process until the run reaches a terminal state. */
 /**
  * Re-code a run's stored answers without touching the vendors that produced

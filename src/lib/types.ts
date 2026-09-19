@@ -806,6 +806,9 @@ export interface Store {
    * column list with insertResponse (see lib/coding_columns.ts) so the two
    * write paths cannot fall out of step.
    */
+  /** Newest response timestamp for a run, or null when none stored -
+   * cheap staleness probe for the auto-resume sweep. */
+  latestResponseAt(runId: string): Promise<string | null>;
   /** Replace a stored answer in place (truncation recollect): the row keeps
    * its identity and coding state; only the collected answer changes. */
   replaceResponseAnswer(

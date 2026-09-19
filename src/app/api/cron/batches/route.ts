@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { waitUntil } from "@vercel/functions";
 import { store } from "@/lib/store";
-import { driveAndChain, runInBackground } from "@/lib/engine/runner";
+import { driveAndChain, findStalledRuns, runInBackground } from "@/lib/engine/runner";
 import { hasOpenBatches, pollRunBatches } from "@/lib/engine/batch";
 
 export const maxDuration = 300;
@@ -32,5 +32,11 @@ export async function GET(req: Request) {
       }
     }
   }
-  return NextResponse.json({ ok: true, polled });
+  // Orphaned runs (died driver, dropped chunk hop) resume here too.
+  const resumed = await findStalledRuns();
+  for (const id of resumed) {
+    if (process.env.VERCEL) waitUntil(driveAndChain(id, origin));
+    else void runInBackground(id);
+  }
+  return NextResponse.json({ ok: true, polled, resumed });
 }

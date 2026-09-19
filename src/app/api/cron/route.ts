@@ -3,7 +3,7 @@ import { planAllowsEngine } from "@/lib/auth";
 import { waitUntil } from "@vercel/functions";
 import { store } from "@/lib/store";
 import { apiKeyConfigured } from "@/lib/engine/providers";
-import { driveAndChain, runInBackground } from "@/lib/engine/runner";
+import { driveAndChain, findStalledRuns, runInBackground } from "@/lib/engine/runner";
 import { batchableEngine, hasOpenBatches, pollRunBatches, submitRunBatches } from "@/lib/engine/batch";
 
 export const maxDuration = 300;
@@ -102,5 +102,10 @@ export async function GET(req: Request) {
     launched.push(project.name);
   }
 
-  return NextResponse.json({ ok: true, launched, polled });
+  const resumed = await findStalledRuns();
+  for (const id of resumed) {
+    if (process.env.VERCEL) waitUntil(driveAndChain(id, origin));
+    else void runInBackground(id);
+  }
+  return NextResponse.json({ ok: true, launched, polled, resumed });
 }

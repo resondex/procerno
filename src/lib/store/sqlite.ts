@@ -1169,6 +1169,13 @@ export const sqliteStore: Store = {
     insertAll();
   },
 
+  async latestResponseAt(runId) {
+    const row = getDb()
+      .prepare("SELECT MAX(created_at) AS t FROM responses WHERE run_id = ?")
+      .get(runId) as { t: string | null } | undefined;
+    return row?.t ?? null;
+  },
+
   async replaceResponseAnswer(responseId, input) {
     getDb()
       .prepare(

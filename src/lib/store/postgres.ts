@@ -926,6 +926,12 @@ export const pgStore: Store = {
     });
   },
 
+  async latestResponseAt(runId) {
+    const sql = await db();
+    const rows = await sql`SELECT MAX(created_at) AS t FROM responses WHERE run_id = ${runId}`;
+    return iso(rows[0]?.t) ?? null;
+  },
+
   async replaceResponseAnswer(responseId, input) {
     const sql = await db();
     await sql`UPDATE responses SET
