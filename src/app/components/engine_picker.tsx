@@ -9,6 +9,8 @@ export interface EngineOption {
   available: boolean;
   keyEnv?: string;
   mode: "instinct" | "search";
+  /** True when the viewer's plan does not include this engine. */
+  locked?: boolean;
 }
 
 export type EngineModeChoice = "instinct" | "search" | "both";
@@ -27,7 +29,7 @@ export function defaultEnginesFor(
     wanted.push("gpt-5-mini-search", "claude-sonnet-5-search", "sonar");
   }
   return wanted.filter((id) =>
-    options.some((e) => e.id === id && e.available)
+    options.some((e) => e.id === id && e.available && !e.locked)
   );
 }
 
@@ -145,16 +147,18 @@ export function EnginePicker({
           {list.map((e) => (
             <label
               key={e.id}
-              className={`flex items-center gap-2 text-sm ${e.available ? "cursor-pointer" : "opacity-50"}`}
+              className={`flex items-center gap-2 text-sm ${e.available && !e.locked ? "cursor-pointer" : "opacity-50"}`}
               title={
-                e.available
-                  ? `${e.vendor} · ${e.id}`
-                  : `${e.keyEnv ?? "API key"} is not configured in this deployment`
+                !e.available
+                  ? `${e.keyEnv ?? "API key"} is not configured in this deployment`
+                  : e.locked
+                    ? "Not included in your plan"
+                    : `${e.vendor} · ${e.id}`
               }
             >
               <input
                 type="checkbox"
-                disabled={!e.available}
+                disabled={!e.available || e.locked}
                 checked={selected.includes(e.id)}
                 onChange={(ev) => onToggle(e.id, ev.target.checked)}
                 className="h-4 w-4 accent-[var(--color-primary)]"
@@ -165,6 +169,11 @@ export function EnginePicker({
               {!e.available && (
                 <span className="text-[11px] text-ink-3">
                   · add {e.keyEnv}
+                </span>
+              )}
+              {e.available && e.locked && (
+                <span className="rounded-full bg-line/60 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-ink-3">
+                  higher tier
                 </span>
               )}
             </label>

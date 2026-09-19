@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { planAllowsEngine } from "@/lib/auth";
 import { waitUntil } from "@vercel/functions";
 import { store } from "@/lib/store";
 import { apiKeyConfigured } from "@/lib/engine/providers";
@@ -71,8 +72,11 @@ export async function GET(req: Request) {
     }
     // Scheduled runs always sample the tracker's core engine panel — that
     // consistency is what makes the trend line a trend.
-    const engineSet =
-      project.engine_set.length > 0 ? project.engine_set : [CRON_MODEL];
+    // Owner-less trackers are staff-run: no allowance. Otherwise the core
+    // panel is trimmed to the owner's tier, same rule as manual runs.
+    const ownerPlan = project.user_id ? await store.getPlan(project.user_id) : "enterprise";
+    const allowedSet = project.engine_set.filter((m) => planAllowsEngine(ownerPlan, m));
+    const engineSet = allowedSet.length > 0 ? allowedSet : [CRON_MODEL];
     // Scheduled runs take the batch pipeline whenever any engine supports
     // it - a scheduled job trades latency for the 50% collection discount.
     const pipeline = engineSet.some(batchableEngine) ? "batch" : "live";

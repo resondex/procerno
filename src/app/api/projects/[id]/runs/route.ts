@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { waitUntil } from "@vercel/functions";
 import { z } from "zod";
 import { store } from "@/lib/store";
-import { requireAuth, requireProject } from "@/lib/auth";
+import { getPlanFor, planAllowsEngine, requireAuth, requireProject } from "@/lib/auth";
 import { apiKeyConfigured, engineAvailable, ENGINES } from "@/lib/engine/providers";
 import { driveAndChain, runInBackground } from "@/lib/engine/runner";
 import { batchableEngine, submitRunBatches } from "@/lib/engine/batch";
@@ -60,6 +60,18 @@ export async function POST(
         error: `No API key configured for the requested engine(s): ${requested.join(", ")}`,
       },
       { status: 503 }
+    );
+  }
+  // The tier's engine allowance caps per-run vendor spend - tracker count
+  // alone doesn't, since one panel choice swings a run's cost ~30x.
+  const effectivePlan = await getPlanFor(auth);
+  const blocked = models.filter((m) => !planAllowsEngine(effectivePlan, m));
+  if (blocked.length > 0) {
+    return NextResponse.json(
+      {
+        error: `Your ${effectivePlan} plan does not include: ${blocked.join(", ")}. Uncheck them, or upgrade to run them.`,
+      },
+      { status: 403 }
     );
   }
   // Enterprise customers take the batch pipeline (50% collection cost) on
