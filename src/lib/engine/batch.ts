@@ -46,6 +46,13 @@ async function pendingTasks(runId: string): Promise<BatchTask[]> {
       (r) => `${r.prompt_id}:${r.repeat_idx}:${r.model}`
     )
   );
+  // Tasks riding in a still-open batch are not pending: submitRunBatches
+  // must be safely re-callable after a partial failure (one vendor's batch
+  // rejected, another's still processing) without double-submitting.
+  for (const b of await store.listRunBatches(runId)) {
+    if (b.status !== "submitted") continue;
+    for (const m of b.manifest) done.add(`${m.promptId}:${m.repeatIdx}:${m.engine}`);
+  }
   const engines = run.models.filter(batchableEngine);
   const tasks: BatchTask[] = [];
   for (const p of prompts) {
@@ -69,12 +76,13 @@ export async function submitRunBatches(runId: string): Promise<number> {
   const groups: Record<string, BatchTask[]> = {};
   for (const t of tasks) {
     const e = getEngine(t.engine)!;
+    // OpenAI validates that a batch holds a SINGLE model (learned on the
+    // AmEx shakedown: gpt-5 + gpt-5-mini in one file -> the whole batch
+    // rejected as mismatched_model). Anthropic accepts mixed models.
     const key =
       e.sdk === "anthropic"
         ? "anthropic"
-        : e.mode === "search"
-          ? "openai:/v1/responses"
-          : "openai:/v1/chat/completions";
+        : `openai:${e.mode === "search" ? "/v1/responses" : "/v1/chat/completions"}:${e.apiModel ?? e.id}`;
     (groups[key] ??= []).push(t);
   }
 
