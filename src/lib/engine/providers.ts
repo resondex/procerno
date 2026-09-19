@@ -58,6 +58,12 @@ export interface Engine {
   apiModel?: string;
 }
 
+/** Extraction-coder-only models: routable like engines, never selectable
+ * as answer engines. */
+const CODER_ONLY: Record<string, Pick<Engine, "id" | "keyEnv" | "baseURL">> = {
+  "grok-4-fast": { id: "grok-4-fast", keyEnv: "XAI_API_KEY", baseURL: "https://api.x.ai/v1" },
+};
+
 export const ENGINES: Engine[] = [
   { id: "gpt-5-mini", label: "ChatGPT (default tier)", vendor: "OpenAI", keyEnv: "OPENAI_API_KEY", mode: "instinct" },
   { id: "gpt-5-mini-search", label: "ChatGPT (default tier) + search", vendor: "OpenAI", keyEnv: "OPENAI_API_KEY", mode: "search", apiModel: "gpt-5-mini" },
@@ -629,8 +635,10 @@ const openaiProvider: CompletionProvider = {
     }
     // A coder that lives in the engine registry with its own baseURL
     // (grok, gemini) talks to ITS vendor; anything else is an OpenAI model.
-    const coderEngine = getEngine(coder);
-    const c = coderEngine?.baseURL ? compatClient(coderEngine) : client();
+    // CODER_ONLY covers models used exclusively as extraction coders - they
+    // never appear in engine pickers, so they don't belong in ENGINES.
+    const coderEngine = getEngine(coder) ?? CODER_ONLY[coder];
+    const c = coderEngine?.baseURL ? compatClient(coderEngine as Engine) : client();
     return withRetry(async () => {
       const res = await c.chat.completions.create({
         model: coder,

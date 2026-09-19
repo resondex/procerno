@@ -21,6 +21,7 @@ export const ENGINE_PRICES: Record<string, { in: number; out: number; perSearch?
   sonar: { in: 1, out: 1, perRequest: 0.008 },
   // Extraction coders that never serve as answer engines.
   "gpt-4o-mini": { in: 0.15, out: 0.6 },
+  "grok-4-fast": { in: 0.2, out: 0.5 },
 };
 
 /** Answer cost in USD for ONE answer's tokens (callers summing many
