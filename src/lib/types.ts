@@ -12,7 +12,9 @@ export type PromptTheme =
   | "branded"
   | (string & {});
 
-export type RunStatus = "pending" | "running" | "complete" | "failed";
+/** "collected" = every answer stored, coding wave pending or in flight -
+ * metrics are not final until "complete". */
+export type RunStatus = "pending" | "running" | "collected" | "complete" | "failed";
 
 export type Framing = "recommended" | "mentioned" | "negative";
 

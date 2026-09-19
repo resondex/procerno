@@ -1,15 +1,8 @@
 import { toFile } from "openai";
 import { store } from "../store";
-import { logCost, tagCosts, withCostContext } from "../cost_log";
+import { logCost, tagCosts } from "../cost_log";
 import type { RunBatch } from "../types";
-import {
-  coderUsageAccumulator,
-  CoderUnavailableError,
-  anthropicClient,
-  extractCodingConsensus,
-  getEngine,
-  openaiClient,
-} from "./providers";
+import { anthropicClient, getEngine, openaiClient } from "./providers";
 
 /**
  * The batch pipeline: the same (prompt × repeat × engine) tasks a live run
@@ -284,9 +277,8 @@ async function ingest(
     .filter(({ ex }) => ex.text.trim().length > 0);
 
   let cursor = 0;
-  const outage: { err: CoderUnavailableError | null } = { err: null };
   async function worker(): Promise<void> {
-    while (cursor < entries.length && !outage.err) {
+    while (cursor < entries.length) {
       const { task, ex } = entries[cursor++];
       try {
         // Batch answers never touch the live clients, so their usage is
@@ -298,13 +290,8 @@ async function ingest(
           searches: ex.searchCount ?? 0,
           purpose: "run:answer",
         });
-        const meter = coderUsageAccumulator();
-        const coding = await withCostContext({ purpose: "run:coder" }, () =>
-          extractCodingConsensus(ex.text, {
-            ...ctx,
-            usageSink: meter.sink,
-          })
-        );
+        // Stored uncoded, like live collection: the coding wave picks these
+        // up once every batch is terminal.
         await store.insertResponse({
           runId,
           promptId: task.promptId,
@@ -312,20 +299,15 @@ async function ingest(
           model: task.engine,
           finishReason: ex.finishReason,
           citations: ex.citations,
-          coderModel: coding.coderProvenance,
+          coderModel: null,
           searchCount: ex.searchCount,
           inputTokens: ex.inputTokens,
           outputTokens: ex.outputTokens,
-          coderUsage: meter.usage,
           text: ex.text,
-          mentions: coding.mentions,
-          coding,
+          mentions: [],
+          coding: null,
         });
       } catch (err) {
-        if (err instanceof CoderUnavailableError) {
-          outage.err = err;
-          return;
-        }
         console.error(`batch ingest task failed for run ${runId}:`, err);
       }
     }
@@ -333,7 +315,6 @@ async function ingest(
   await Promise.all(
     Array.from({ length: Math.min(INGEST_CONCURRENCY, entries.length) }, worker)
   );
-  if (outage.err) throw outage.err;
 }
 
 /**
@@ -407,12 +388,7 @@ export async function pollRunBatches(runId: string): Promise<{ open: number }> {
         }
       }
     } catch (err) {
-      if (err instanceof CoderUnavailableError) {
-        // Leave the row submitted: results are safe at the vendor; the next
-        // poll retries the ingest once the coder is back.
-        console.error(`batch ingest paused for run ${runId}: ${err.message}`);
-        open++;
-      } else {
+      {
         console.error(`batch poll failed for run ${runId} (${row.provider_batch_id}):`, err);
         open++;
       }

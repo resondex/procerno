@@ -233,6 +233,7 @@ function RunHint({ run }: { run: Run | null }) {
   const map: Record<Run["status"], { label: string; cls: string }> = {
     pending: { label: "queued", cls: "text-ink-3" },
     running: { label: "running", cls: "text-primary" },
+    collected: { label: "coding", cls: "text-primary" },
     complete: { label: "measured", cls: "text-success" },
     failed: { label: "run failed", cls: "text-danger" },
   };

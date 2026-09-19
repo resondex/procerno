@@ -6,6 +6,7 @@ import {
   completeWithEngine,
   engineAvailable,
   extractCodingConsensus,
+  getEngine,
 } from "./providers";
 import { analyzePromptHealth } from "./prompt_health";
 import { classifyNonBrands } from "./suggest";
@@ -21,6 +22,26 @@ import { batchableEngine, hasOpenBatches, pollRunBatches } from "./batch";
 // four minutes; raise it if the vendors tolerate more, but watch for 429s —
 // retries make an over-subscribed run slower, not faster.
 const CONCURRENCY = Number(process.env.RUN_CONCURRENCY ?? 64);
+
+// Collection runs one worker pool PER VENDOR, sized to what each vendor's
+// rate limits actually tolerate (measured on the jira battery: OpenAI and
+// Anthropic take heavy concurrency; Gemini and Perplexity 429 well before
+// 48). A shared pool made every vendor run at the timid common denominator
+// and let one throttled vendor drag the whole run.
+const VENDOR_CONCURRENCY: Record<string, number> = {
+  OpenAI: Number(process.env.RUN_CONCURRENCY_OPENAI ?? 64),
+  Anthropic: Number(process.env.RUN_CONCURRENCY_ANTHROPIC ?? 48),
+  Google: Number(process.env.RUN_CONCURRENCY_GOOGLE ?? 16),
+  xAI: Number(process.env.RUN_CONCURRENCY_XAI ?? 24),
+  Perplexity: Number(process.env.RUN_CONCURRENCY_PERPLEXITY ?? 8),
+};
+
+// Circuit breaker: an engine failing this many times in a chunk with zero
+// successes is parked for the REST OF THE CHUNK (its tasks stay pending and
+// retry fresh next chunk). A depleted billing account or dead key burns
+// hundreds of doomed attempts otherwise - the jira shakedown burned ~800
+// against Gemini's drained prepaid credits.
+const BREAKER_THRESHOLD = 12;
 
 // Serverless functions cap at maxDuration=300s; leave headroom for in-flight
 // completions to finish and the chain handoff to fire.
@@ -41,7 +62,10 @@ export type ChunkOutcome =
   | "finalize"
   /** Batch-pipeline run with vendor batches still out: nothing to do live
    * right now; the batch poller resumes the run. */
-  | "waiting";
+  | "waiting"
+  /** Coder outage during the coding wave: collection is safe under status
+   * "collected"; the chain stops and coding resumes on the next drive. */
+  | "coding_blocked";
 
 /**
  * Process as much of a run as fits in budgetMs, then report whether work
@@ -70,13 +94,49 @@ export async function driveRunChunk(
   };
   tagCosts({ projectId: project.id, runId });
 
-  if (run.status === "pending") await store.updateRunStatus(runId, "running");
-
   // Engines whose vendor key is missing would fail every task; drop them and
   // measure what we can rather than failing the whole run.
   let engines = (run.models.length > 0 ? run.models : [run.model]).filter(
     (m) => engineAvailable(m)
   );
+
+  if (run.status === "pending") {
+    // Preflight: one probe answer per engine BEFORE thousands of calls -
+    // a drained billing account or revoked key costs one failed cent here
+    // instead of a chunk of doomed retries. Failed engines are dropped for
+    // the whole run, named in the run note.
+    const probes = await Promise.all(
+      engines.map(async (m) => {
+        try {
+          await withCostContext({ purpose: "run:preflight" }, () =>
+            completeWithEngine(m, "Reply with the single word: ok")
+          );
+          return { m, ok: true as const };
+        } catch (err) {
+          console.error(`preflight failed for ${m}:`, err);
+          return { m, ok: false as const };
+        }
+      })
+    );
+    const dead = probes.filter((p) => !p.ok).map((p) => p.m);
+    if (dead.length > 0) {
+      engines = engines.filter((m) => !dead.includes(m));
+      await store.updateRunStatus(
+        runId,
+        "running",
+        `engine(s) failed preflight and were skipped: ${dead.join(", ")}`
+      );
+    } else {
+      await store.updateRunStatus(runId, "running");
+    }
+  } else if (run.error?.startsWith("engine(s) failed preflight")) {
+    // Later chunks honor the first chunk's verdict instead of re-probing.
+    const dead = run.error
+      .slice(run.error.indexOf(":") + 1)
+      .split(",")
+      .map((x) => x.trim());
+    engines = engines.filter((m) => !dead.includes(m));
+  }
   if (engines.length === 0) {
     await store.updateRunStatus(
       runId,
@@ -116,31 +176,43 @@ export async function driveRunChunk(
     }
   }
 
-  if (pending.length === 0) return batchesOpen ? "waiting" : "finalize";
+  if (pending.length === 0) {
+    if (batchesOpen) return "waiting";
+    return codeCollectedChunk(runId, run.status, extractionCtx, Date.now() + budgetMs, {
+      expected: total,
+    });
+  }
   if (engines.length === 0) return "waiting";
 
   const deadline = Date.now() + budgetMs;
-  let cursor = 0;
   let inserted = 0;
-  // Holder object: a plain `let` assigned only inside the worker closure
-  // gets narrowed to `never` by control-flow analysis.
-  const outage: { err: CoderUnavailableError | null } = { err: null };
 
-  async function worker(): Promise<void> {
-    while (cursor < pending.length && Date.now() < deadline) {
-      const task = pending[cursor++];
+  // Collection stores answers UNCODED (coding null): the text is the
+  // expensive, irreplaceable half, and a coder outage must never cost
+  // collection budget. The coding wave runs once collection is complete.
+  // Per-vendor queues so each vendor runs at its own ceiling.
+  const byVendor = new Map<string, Task[]>();
+  for (const task of pending) {
+    const vendor = getEngine(task.model)?.vendor ?? "OpenAI";
+    (byVendor.get(vendor) ?? byVendor.set(vendor, []).get(vendor)!).push(task);
+  }
+  // Circuit breaker state, per engine, per chunk.
+  const failStreak = new Map<string, number>();
+  const succeeded = new Set<string>();
+  const parked = new Set<string>();
+
+  async function collectFrom(queue: Task[], cursorBox: { i: number }): Promise<void> {
+    while (cursorBox.i < queue.length && Date.now() < deadline) {
+      const task = queue[cursorBox.i++];
+      if (parked.has(task.model)) continue;
       try {
         const { text, finishReason, citations, searchCount, usage } = await withCostContext(
           { purpose: "run:answer" },
           () => completeWithEngine(task.model, task.promptText)
         );
-        const meter = coderUsageAccumulator();
-        const coding = await withCostContext({ purpose: "run:coder" }, () =>
-          extractCodingConsensus(text, {
-            ...extractionCtx,
-            usageSink: meter.sink,
-          })
-        );
+        // An empty answer is a failed collection, not a datum - storing it
+        // would waste a coding pass and pollute metrics.
+        if (!text.trim()) throw new Error("empty answer");
         await store.insertResponse({
           runId,
           promptId: task.promptId,
@@ -148,23 +220,25 @@ export async function driveRunChunk(
           model: task.model,
           finishReason,
           citations,
-          coderModel: coding.coderProvenance,
+          coderModel: null,
           searchCount,
           inputTokens: usage.input,
           outputTokens: usage.output,
-          coderUsage: meter.usage,
           text,
-          mentions: coding.mentions,
-          coding,
+          mentions: [],
+          coding: null,
         });
         inserted++;
+        succeeded.add(task.model);
+        failStreak.set(task.model, 0);
       } catch (err) {
-        if (err instanceof CoderUnavailableError) {
-          // Systemic, not transient: every remaining answer would be coded by
-          // half the methodology. Stop rather than bank unusable data.
-          outage.err = err;
-          cursor = pending.length;
-          return;
+        const streak = (failStreak.get(task.model) ?? 0) + 1;
+        failStreak.set(task.model, streak);
+        if (streak >= BREAKER_THRESHOLD && !succeeded.has(task.model)) {
+          parked.add(task.model);
+          console.error(
+            `procerno run ${runId}: parked ${task.model} for this chunk after ${streak} straight failures`
+          );
         }
         console.error(`procerno run ${runId} task failed:`, err);
       }
@@ -172,24 +246,19 @@ export async function driveRunChunk(
   }
 
   await Promise.all(
-    Array.from({ length: Math.min(CONCURRENCY, pending.length) }, worker)
+    [...byVendor.entries()].flatMap(([vendor, queue]) => {
+      const cursorBox = { i: 0 };
+      const size = Math.min(VENDOR_CONCURRENCY[vendor] ?? 16, queue.length);
+      return Array.from({ length: size }, () => collectFrom(queue, cursorBox));
+    })
   );
-
-  if (outage.err) {
-    await store.updateRunStatus(runId, "failed", outage.err.message);
-    console.error(`procerno run ${runId} halted: ${outage.err.message}`);
-    return "failed";
-  }
 
   const remaining = pending.length - inserted;
   if (remaining === 0 && batchesOpen) return "waiting";
   if (remaining === 0) {
-    // Collection is done, but the run is NOT complete: the dictionary and
-    // the health check still have to land. They used to run here, in whatever
-    // budget the last collection chunk had left over, which is why they were
-    // silently skipped or arrived minutes late. finalizeRun gets its own
-    // invocation and its own full budget.
-    return "finalize";
+    // Collection is done; the coding wave (next chunk, fresh budget) takes
+    // over, and finalize (dictionary, prompt health) follows it.
+    return "continue";
   }
   if (inserted > 0) return "continue";
   if (batchesOpen) return "waiting";
@@ -295,6 +364,71 @@ export async function recodeRun(runId: string): Promise<number> {
  * Every step is individually guarded and the run is completed regardless: a
  * failure here must not strand a run with 420 good answers in "running".
  */
+/**
+ * The coding wave: code every uncoded stored answer, within budget. Runs
+ * only after collection is complete - the collected text is the asset, and
+ * a coder outage here parks the run at "collected" (data safe, coding
+ * resumes on the next drive) instead of failing it.
+ */
+async function codeCollectedChunk(
+  runId: string,
+  status: string,
+  ctx: { targetBrand: string; knownBrands: string[]; reasonCodes: string[] },
+  deadline: number,
+  health: { expected: number }
+): Promise<ChunkOutcome> {
+  const responses = await store.listResponses(runId);
+  const uncoded = responses.filter((r) => !r.coder_model && !r.outcome);
+  if (status !== "collected" && uncoded.length > 0) {
+    // Health gate at the wave boundary: how much of the grid actually
+    // arrived is recorded before a single coding cent is spent.
+    const note =
+      responses.length < health.expected
+        ? `collected ${responses.length}/${health.expected} answers; coding`
+        : undefined;
+    await store.updateRunStatus(runId, "collected", note);
+  }
+  if (uncoded.length === 0) return "finalize";
+
+  let cursor = 0;
+  let coded = 0;
+  const outage: { err: CoderUnavailableError | null } = { err: null };
+  async function worker(): Promise<void> {
+    while (cursor < uncoded.length && Date.now() < deadline && !outage.err) {
+      const r = uncoded[cursor++];
+      try {
+        const meter = coderUsageAccumulator(r.coder_usage);
+        const coding = await withCostContext({ purpose: "run:coder" }, () =>
+          extractCodingConsensus(r.text, { ...ctx, usageSink: meter.sink })
+        );
+        await store.writeResponseCoding(
+          r.id,
+          coding,
+          coding.coderProvenance,
+          coding.mentions,
+          meter.usage
+        );
+        coded++;
+      } catch (err) {
+        if (err instanceof CoderUnavailableError) {
+          outage.err = err;
+          return;
+        }
+        console.error(`coding of response ${r.id} failed:`, err);
+      }
+    }
+  }
+  await Promise.all(
+    Array.from({ length: Math.min(CONCURRENCY, uncoded.length) }, worker)
+  );
+  if (outage.err) {
+    await store.updateRunStatus(runId, "collected", outage.err.message);
+    console.error(`procerno run ${runId} coding halted: ${outage.err.message}`);
+    return "coding_blocked";
+  }
+  return coded < uncoded.length ? "continue" : "finalize";
+}
+
 export async function finalizeRun(runId: string): Promise<void> {
   const run = await store.getRun(runId);
   if (!run || run.status === "complete" || run.status === "failed") return;

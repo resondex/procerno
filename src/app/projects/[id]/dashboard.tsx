@@ -96,7 +96,7 @@ export default function ProjectDashboard({
       prev.length > 0 ? prev : (d.project.engine_set ?? [])
     );
     const active = d.runs.find(
-      (r) => r.status === "pending" || r.status === "running"
+      (r) => r.status === "pending" || r.status === "running" || r.status === "collected"
     );
     const followUps: Promise<void>[] = [];
     if (active) {
@@ -193,10 +193,10 @@ export default function ProjectDashboard({
   }, []);
 
   const hasActiveRun = detail?.runs.some(
-    (r) => r.status === "pending" || r.status === "running"
+    (r) => r.status === "pending" || r.status === "running" || r.status === "collected"
   );
   const activeRunId =
-    detail?.runs.find((r) => r.status === "pending" || r.status === "running")
+    detail?.runs.find((r) => r.status === "pending" || r.status === "running" || r.status === "collected")
       ?.id ?? null;
 
   // Live progress is a LIGHT poll: one tiny request for the counter. The
@@ -219,7 +219,7 @@ export default function ProjectDashboard({
           perEngineTotal: d.perEngineTotal ?? 0,
           perEngine: d.perEngine ?? [],
         });
-        if (d.run.status !== "pending" && d.run.status !== "running") {
+        if (d.run.status !== "pending" && d.run.status !== "running" && d.run.status !== "collected") {
           await refresh();
         }
       } catch {
@@ -286,7 +286,7 @@ export default function ProjectDashboard({
   const shownRun =
     completeRuns.find((r) => r.id === selectedRunId) ?? completeRuns[0] ?? null;
   const activeRun = runs.find(
-    (r) => r.status === "pending" || r.status === "running"
+    (r) => r.status === "pending" || r.status === "running" || r.status === "collected"
   );
   const pendingDict = dict.filter((e) => e.status === "pending").length;
   const flaggedPrompts = prompts.filter(
@@ -585,7 +585,7 @@ export default function ProjectDashboard({
 
           <ul className="grid gap-2">
             {runs.map((r) => {
-              const active = r.status === "pending" || r.status === "running";
+              const active = r.status === "pending" || r.status === "running" || r.status === "collected";
               const shown = shownRun?.id === r.id;
               return (
                 <li
@@ -1278,11 +1278,11 @@ function ProgressBar({
 }
 
 function StatusBadge({ status }: { status: Run["status"] }) {
-  if (status === "running" || status === "pending") {
+  if (status === "running" || status === "pending" || status === "collected") {
     return (
       <span className="inline-flex items-center gap-1.5 rounded-full bg-primary-soft px-2.5 py-1 text-xs font-semibold text-primary">
         <span className="pulse-dot inline-block h-1.5 w-1.5 rounded-full bg-primary" />
-        {status === "running" ? "running" : "queued"}
+        {status === "running" ? "running" : status === "collected" ? "coding" : "queued"}
       </span>
     );
   }

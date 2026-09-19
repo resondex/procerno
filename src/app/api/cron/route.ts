@@ -62,7 +62,7 @@ export async function GET(req: Request) {
     }
     const intervalDays = INTERVAL_DAYS[project.schedule];
     if (!intervalDays) continue;
-    if (runs.some((r) => r.status === "pending" || r.status === "running")) {
+    if (runs.some((r) => r.status === "pending" || r.status === "running" || r.status === "collected")) {
       continue;
     }
     const latest = runs[0];

@@ -1,6 +1,6 @@
 import { isStaff, type AuthContext } from "@/lib/auth";
 import { store } from "@/lib/store";
-import { answerCost, coderCost, searchFee } from "@/lib/pricing";
+import { answerCost, coderCost, requestFee, searchFee } from "@/lib/pricing";
 import type { Org, OrgMember } from "@/lib/types";
 
 /** The admin console's data - shared by the /api/admin route and the
@@ -75,7 +75,10 @@ export async function loadAdminData(auth: AuthContext) {
       searches: row.searches,
       cost:
         Math.round(
-          (answerCost(row.model, row.input_tokens, row.output_tokens, 0) +
+          (answerCost(row.model, row.input_tokens, row.output_tokens, 0) -
+            // answerCost adds one perRequest fee; this row is `calls` answers.
+            requestFee(row.model, 1) +
+            requestFee(row.model, row.calls) +
             searchFee(row.model, row.searches)) * 10000
         ) / 10000,
     }));

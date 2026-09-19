@@ -4,7 +4,7 @@
  * (checked 2026-09-18); answer tokens and extraction-coder tokens are both
  * vendor-metered, so every row prices exactly. Update when vendors reprice.
  */
-export const ENGINE_PRICES: Record<string, { in: number; out: number; perSearch?: number }> = {
+export const ENGINE_PRICES: Record<string, { in: number; out: number; perSearch?: number; perRequest?: number }> = {
   "gpt-5": { in: 1.25, out: 10 },
   "gpt-5-search": { in: 1.25, out: 10, perSearch: 0.01 },
   "gpt-5-mini": { in: 0.25, out: 2 },
@@ -15,16 +15,31 @@ export const ENGINE_PRICES: Record<string, { in: number; out: number; perSearch?
   "gemini-pro-latest": { in: 1.25, out: 10 },
   "gemini-flash-latest": { in: 0.3, out: 2.5 },
   "grok-4": { in: 3, out: 15 },
-  sonar: { in: 1, out: 1, perSearch: 0.008 },
+  // Perplexity bills per REQUEST, not per search, and reports no search
+  // count - a perSearch fee against searchCount null priced sonar at ~7%
+  // of its true cost on the jira shakedown.
+  sonar: { in: 1, out: 1, perRequest: 0.008 },
   // Extraction coders that never serve as answer engines.
   "gpt-4o-mini": { in: 0.15, out: 0.6 },
 };
 
-/** Answer cost in USD for one engine's token sums. Unknown engines price
- * at a conservative mid rate so totals never silently omit them. */
+/** Answer cost in USD for ONE answer's tokens (callers summing many
+ * answers of a per-request-fee engine should call this per answer, or add
+ * requestFee separately). Unknown engines price at a conservative mid rate
+ * so totals never silently omit them. */
 export function answerCost(model: string, inTok: number, outTok: number, searches: number): number {
   const p = ENGINE_PRICES[model] ?? { in: 3, out: 15 };
-  return (inTok / 1e6) * p.in + (outTok / 1e6) * p.out + searches * (p.perSearch ?? 0);
+  return (
+    (inTok / 1e6) * p.in +
+    (outTok / 1e6) * p.out +
+    searches * (p.perSearch ?? 0) +
+    (p.perRequest ?? 0)
+  );
+}
+
+/** Per-request fees for an AGGREGATED row of `calls` answers. */
+export function requestFee(model: string, calls: number): number {
+  return calls * (ENGINE_PRICES[model]?.perRequest ?? 0);
 }
 
 /** Per-search tool fee for a ledger row. Search engines call the vendor

@@ -259,7 +259,10 @@ export async function completeWithEngine(
       const a = await anthropicClient();
       const res = await a.messages.create({
         model,
-        max_tokens: 4096,
+        // 8192, not 4096: the cap is OUR artifact, not assistant reality -
+        // 18 of 1,040 Anthropic answers on the jira battery hit 4096 and
+        // truncated. Output is billed as generated, so headroom is free.
+        max_tokens: 8192,
         messages: [{ role: "user", content: prompt }],
         ...(engine.mode === "search"
           ? {

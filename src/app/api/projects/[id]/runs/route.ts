@@ -46,7 +46,7 @@ export async function POST(
   // One run at a time per tracker: a double-click or second tab must not
   // start a second paid run while one is already in flight.
   const existing = await store.listRuns(id);
-  if (existing.some((r) => r.status === "pending" || r.status === "running")) {
+  if (existing.some((r) => r.status === "pending" || r.status === "running" || r.status === "collected")) {
     return NextResponse.json(
       { error: "A run is already in progress for this tracker" },
       { status: 409 }
