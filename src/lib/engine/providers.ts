@@ -654,12 +654,16 @@ async function codeWithClaude(
     // Quotes are optional; the coding is not.
   }
   const cwcMentions = dedupeMentions(parsed.mentions ?? []);
+  // Anthropic forced-tool calls do not hard-enforce enum constraints the
+  // way OpenAI structured outputs do - invented reason codes slip through
+  // (caught in the Phase 2 examples). Validate against the taxonomy here.
+  const allowed = new Set(ctx.reasonCodes);
   return {
     ...parsed,
     top_pick_brand: parsed.outcome === "pick" ? pick : null,
     mentions: cwcMentions,
     total_recommendations: recommendedCount(cwcMentions),
-    reasons: [...new Set(parsed.reasons ?? [])],
+    reasons: [...new Set(parsed.reasons ?? [])].filter((r) => allowed.size === 0 || allowed.has(r)),
     focus_quote: focusQuote,
     focus_interpretation: focusInterpretation,
   };
