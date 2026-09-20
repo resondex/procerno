@@ -413,7 +413,7 @@ function extractSchema(reasonCodes: string[]) {
         },
       },
       top_pick_brand: { type: ["string", "null"] },
-      ...(outcomeMode() === "decompose"
+      ...(isDecompose()
         ? {
             q_recommends_any: { type: "boolean" },
             q_single_direction: { type: "boolean" },
@@ -437,7 +437,7 @@ function extractSchema(reasonCodes: string[]) {
     required: [
       "mentions",
       "top_pick_brand",
-      ...(outcomeMode() === "decompose"
+      ...(isDecompose()
         ? ["q_recommends_any", "q_single_direction", "q_asks_and_waits"]
         : ["outcome"]),
       "reasons",
@@ -478,9 +478,16 @@ async function withRetry<T>(fn: () => Promise<T>, tries = 3): Promise<T> {
  * examples, "ladder_bare" = the ladder without the examples (isolates the
  * examples' effect), "decompose" = outcome never coded - three booleans,
  * derived by code. Any mode implies v2 framing + hardened reasons. */
-function outcomeMode(): "" | "ladder" | "ladder_bare" | "decompose" {
+function outcomeMode(): "" | "ladder" | "ladder_bare" | "decompose" | "decompose2" {
   const m = process.env.EXTRACT_OUTCOME_MODE ?? "";
-  return m === "ladder" || m === "ladder_bare" || m === "decompose" ? m : "";
+  return m === "ladder" || m === "ladder_bare" || m === "decompose" || m === "decompose2"
+    ? m
+    : "";
+}
+
+/** Both decompose generations share the boolean schema and derivation. */
+function isDecompose(): boolean {
+  return outcomeMode().startsWith("decompose");
 }
 
 const LADDER_STEPS =
@@ -565,6 +572,41 @@ const DECOMPOSE_QUESTIONS =
   "top_pick_brand - ONLY when exactly one product is what to do, its " +
   "name exactly as the answer writes it; otherwise null.\n";
 
+/** decompose2 (grok round, 2026-09-19): the three booleans sharpened
+ * against measured failure modes - tail-anchoring (26% phantom-clar with
+ * trailing offers), the two-way q1 advice boundary (18 hedged misses + 38
+ * over-detections), and 22 missed stated defaults. */
+const DECOMPOSE2_QUESTIONS =
+  "Answer these three questions about the answer FIRST - each is a " +
+  "plain reading question about the WHOLE answer. The evidence may " +
+  "appear ANYWHERE - openings and middles count exactly as much as " +
+  "endings; a verdict stated early and hedged later still counts.\n" +
+  "q_recommends_any - Does the answer put forward ANY named product " +
+  "or brand as advice for the reader? Hedged advice counts: 'good " +
+  "candidates to check are X and Y', a best-for named mid-answer, a " +
+  "ranked list presented as advice, or telling the reader to keep " +
+  "what they already have. But DESCRIBING is not advising: a list or " +
+  "table of options with strengths and weaknesses, where none is put " +
+  "forward for the reader, is 'no'. Named means a proper noun - " +
+  "generic categories ('a premium variety', 'a 0%-intro card') are " +
+  "not products, and neither are actions (audit, test-drive) or " +
+  "playbooks (timing, cancellation steps).\n" +
+  "q_single_direction - Is exactly ONE product named as what the " +
+  "reader should do - an outright pick or a stated default? A default " +
+  "followed by alternatives is still exactly one direction ('start " +
+  "with X; Y if you outgrow it' -> yes, X). A default survives " +
+  "exceptions, caveats, and follow-up questions. A #1 in an " +
+  "advice-ranking is a default. Keep or renew what you have is a pick " +
+  "of that product.\n" +
+  "q_asks_and_waits - Does the answer give NO direction and ONLY ask " +
+  "for details? An offer to help further AFTER giving information or " +
+  "advice ('tell me your setup and I'll narrow it down', 'want me to " +
+  "compare these?') is NOT asking-and-waiting - answer 'no' for " +
+  "those. 'Yes' is rare: the answer must advise nothing and only " +
+  "ask.\n" +
+  "top_pick_brand - ONLY when exactly one product is what to do, its " +
+  "name exactly as the answer writes it; otherwise null.\n";
+
 /** Framing rules, v1 (shipped Aug 2026) vs v2 (the ratified codebook,
  * 2026-09-18: direction test, branch verbs, market descriptors, reported
  * claims, net-caveat, incumbent defense - category-agnostic by design).
@@ -637,7 +679,9 @@ function reasonsRule(): string {
 function codingInstructions(ctx: ExtractionContext): string {
   const mode = outcomeMode();
   const outcomeSection =
-    mode === "decompose"
+    mode === "decompose2"
+      ? DECOMPOSE2_QUESTIONS
+      : mode === "decompose"
       ? DECOMPOSE_QUESTIONS
       : mode === "ladder"
         ? LADDER_STEPS + LADDER_EXAMPLES
@@ -682,7 +726,7 @@ function codingInstructions(ctx: ExtractionContext): string {
     "to none → 'no_pick'.\n" +
     "  A long or enthusiastic write-up is not by itself a pick: if the " +
     "answer never says what to do, the test fails.\n") +
-    (mode === "decompose" ? "" :
+    (isDecompose() ? "" :
     "top_pick_brand — the ONE brand that leads. MUST be null unless " +
     "outcome is 'pick', and MUST be a single brand name written exactly " +
     "as the answer writes it — never two names joined by 'or', '+', '/' " +
@@ -722,6 +766,8 @@ async function codeWithClaude(
   const res = await a.messages.create({
     model,
     max_tokens: 2000,
+    // Coding is measurement: pinned sampling, not creative-writing default.
+    temperature: 0,
     // The instructions are identical for every answer in a run, so cache
     // them: first call writes (1.25x input), the other ~419 read at 0.1x.
     // Covers the tools + system prefix. No-op below Anthropic's minimum
@@ -759,6 +805,7 @@ async function codeWithClaude(
     const f = await a.messages.create({
       model,
       max_tokens: 400,
+      temperature: 0,
       system:
         `Read this AI assistant answer and report how it treats "${ctx.targetBrand}".`,
       tools: [
@@ -790,7 +837,7 @@ async function codeWithClaude(
   } catch {
     // Quotes are optional; the coding is not.
   }
-  if (outcomeMode() === "decompose") {
+  if (isDecompose()) {
     const q = parsed as unknown as Parameters<typeof deriveOutcome>[0];
     parsed.outcome = deriveOutcome(q);
     if (!q.q_single_direction) parsed.top_pick_brand = null;
@@ -836,6 +883,7 @@ const openaiProvider: CompletionProvider = {
     return withRetry(async () => {
       const res = await c.chat.completions.create({
         model: coder,
+        temperature: 0,
         messages: [
           {
             role: "system",
@@ -867,6 +915,7 @@ codingInstructions(ctx),
         if (skipFocus) throw new Error("skip");
         const f = await c.chat.completions.create({
           model: coder,
+          temperature: 0,
           messages: [
             {
               role: "system",
@@ -910,7 +959,7 @@ codingInstructions(ctx),
         !/^(null|none|n\/a|no pick|no_pick)$/i.test(parsed.top_pick_brand.trim())
           ? parsed.top_pick_brand
           : null;
-      if (outcomeMode() === "decompose") {
+      if (isDecompose()) {
         const q = parsed as unknown as Parameters<typeof deriveOutcome>[0];
         parsed.outcome = deriveOutcome(q);
         if (!q.q_single_direction) parsed.top_pick_brand = null;
@@ -1232,6 +1281,7 @@ async function readFocus(
     const res = await a.messages.create({
       model: FOCUS_MODEL,
       max_tokens: 400,
+      temperature: 0,
       system:
         `Read this AI assistant answer and report how it treats ` +
         `"${ctx.targetBrand}". Quote exactly; invent nothing.`,
@@ -1274,6 +1324,7 @@ async function readFocus(
   }
   const res = await client().chat.completions.create({
     model: FOCUS_MODEL,
+    temperature: 0,
     messages: [
       {
         role: "system",
@@ -1321,6 +1372,7 @@ async function adjudicate(
   const res = await anthropic.messages.create({
     model: ADJUDICATOR,
     max_tokens: 500,
+    temperature: 0,
     system:
       "Two coders disagree about one AI answer. Decide from the text alone. " +
       "outcome — apply this test literally, do not weigh emphasis or " +
