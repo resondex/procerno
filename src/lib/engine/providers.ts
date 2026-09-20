@@ -414,19 +414,44 @@ function extractSchema(reasonCodes: string[]) {
       },
       top_pick_brand: { type: ["string", "null"] },
       ...(isDecompose()
-        ? {
-            q_recommends_any: { type: "boolean" },
-            q_single_direction: { type: "boolean" },
-            q_asks_and_waits: { type: "boolean" },
-          }
+        ? outcomeMode() === "decompose3_split"
+          ? {
+              q_recommends_any: { type: "boolean" },
+              q_default_named: { type: "boolean" },
+              q_splits_decision: { type: "boolean" },
+              q_asks_and_waits: { type: "boolean" },
+            }
+          : {
+              q_recommends_any: { type: "boolean" },
+              q_single_direction: { type: "boolean" },
+              q_asks_and_waits: { type: "boolean" },
+              ...(outcomeMode() === "decompose3_default"
+                ? { default_candidate_brand: { type: ["string", "null"] } }
+                : {}),
+            }
         : {
             outcome: {
               type: "string",
               enum: ["pick", "conditional", "no_pick", "clarification"],
             },
           }),
-      reasons:
-        reasonCodes.length > 0
+      reasons: reasonQuotesOn()
+        ? {
+            type: "array",
+            items: {
+              type: "object",
+              additionalProperties: false,
+              properties: {
+                code:
+                  reasonCodes.length > 0
+                    ? { type: "string", enum: reasonCodes }
+                    : { type: "string" },
+                quote: { type: "string" },
+              },
+              required: ["code", "quote"],
+            },
+          }
+        : reasonCodes.length > 0
           ? { type: "array", items: { type: "string", enum: reasonCodes } }
           : { type: "array", items: { type: "string" } },
       clarification_requested: { type: "boolean" },
@@ -438,7 +463,14 @@ function extractSchema(reasonCodes: string[]) {
       "mentions",
       "top_pick_brand",
       ...(isDecompose()
-        ? ["q_recommends_any", "q_single_direction", "q_asks_and_waits"]
+        ? outcomeMode() === "decompose3_split"
+          ? ["q_recommends_any", "q_default_named", "q_splits_decision", "q_asks_and_waits"]
+          : [
+              "q_recommends_any",
+              "q_single_direction",
+              "q_asks_and_waits",
+              ...(outcomeMode() === "decompose3_default" ? ["default_candidate_brand"] : []),
+            ]
         : ["outcome"]),
       "reasons",
       "clarification_requested",
@@ -451,13 +483,40 @@ function extractSchema(reasonCodes: string[]) {
 
 /** Derive the outcome from the decompose booleans - by code, so it can
  * never be internally inconsistent or invent a category. */
-function deriveOutcome(q: {
+type DecomposeBooleans = {
   q_recommends_any?: boolean;
   q_single_direction?: boolean;
+  q_default_named?: boolean;
+  q_splits_decision?: boolean;
   q_asks_and_waits?: boolean;
-}): ExtractionResult["outcome"] {
+};
+
+/** The boolean that separates pick from conditional. In split mode a named
+ * default wins outright - q_splits_decision exists to force the model to
+ * confront the contrast, never to veto a default. */
+function singleDirection(q: DecomposeBooleans): boolean {
+  return outcomeMode() === "decompose3_split"
+    ? Boolean(q.q_default_named)
+    : Boolean(q.q_single_direction);
+}
+
+function deriveOutcome(q: DecomposeBooleans): ExtractionResult["outcome"] {
   if (!q.q_recommends_any) return q.q_asks_and_waits ? "clarification" : "no_pick";
-  return q.q_single_direction ? "pick" : "conditional";
+  return singleDirection(q) ? "pick" : "conditional";
+}
+
+/** Flatten quote-required reasons ({code, quote} pairs) back to codes; a
+ * pair whose quote is blank earns no code. Raw pairs ride along on the
+ * result (as reason_quotes) so the eval can verify quotes offline. */
+function flattenReasons(parsed: ExtractionResult): void {
+  if (!reasonQuotesOn()) return;
+  const raw = (parsed.reasons ?? []) as unknown as { code?: string; quote?: string }[];
+  const pairs = raw.filter(
+    (e): e is { code: string; quote: string } =>
+      Boolean(e && typeof e === "object" && e.code && (e.quote ?? "").trim().length > 0)
+  );
+  parsed.reasons = [...new Set(pairs.map((p) => p.code))];
+  (parsed as ExtractionResult & { reason_quotes?: { code: string; quote: string }[] }).reason_quotes = pairs;
 }
 
 async function withRetry<T>(fn: () => Promise<T>, tries = 3): Promise<T> {
@@ -478,11 +537,30 @@ async function withRetry<T>(fn: () => Promise<T>, tries = 3): Promise<T> {
  * examples, "ladder_bare" = the ladder without the examples (isolates the
  * examples' effect), "decompose" = outcome never coded - three booleans,
  * derived by code. Any mode implies v2 framing + hardened reasons. */
-function outcomeMode(): "" | "ladder" | "ladder_bare" | "decompose" | "decompose2" {
+const OUTCOME_MODES = [
+  "ladder",
+  "ladder_bare",
+  "decompose",
+  "decompose2",
+  // decompose3 round (2026-09-20): three independent attacks on the
+  // pick->conditional cell (412 of 1,308 decompose2 errors, 265 O-DEFAULT).
+  "decompose3_split", // q_single_direction split into default-named vs splits-decision
+  "decompose3_tiebreak", // decompose2 + a second reading pass on the boundary cell only
+  "decompose3_default", // decompose2 + always-asked default_candidate_brand
+] as const;
+type OutcomeMode = "" | (typeof OUTCOME_MODES)[number];
+
+function outcomeMode(): OutcomeMode {
   const m = process.env.EXTRACT_OUTCOME_MODE ?? "";
-  return m === "ladder" || m === "ladder_bare" || m === "decompose" || m === "decompose2"
-    ? m
-    : "";
+  return (OUTCOME_MODES as readonly string[]).includes(m) ? (m as OutcomeMode) : "";
+}
+
+/** decompose3 round: reasons as {code, quote} pairs - a code only counts
+ * when the coder can quote the because-clause it argues from. Measured
+ * motive: grok fires codes on topic presence (1.78 codes/answer vs the
+ * ground truth's 1.22; precision 43.9%). */
+function reasonQuotesOn(): boolean {
+  return process.env.EXTRACT_REASON_QUOTES === "1";
 }
 
 /** Both decompose generations share the boolean schema and derivation. */
@@ -607,6 +685,79 @@ const DECOMPOSE2_QUESTIONS =
   "top_pick_brand - ONLY when exactly one product is what to do, its " +
   "name exactly as the answer writes it; otherwise null.\n";
 
+/** decompose3_split (2026-09-20, h1): q_single_direction asked grok to
+ * count directions, and 'exactly ONE' misfires when a default is followed
+ * by named alternatives - 265 of the 412 pick->conditional misses were
+ * O-DEFAULT. Split the compound question into its two halves and let a
+ * named default win by derivation. */
+const DECOMPOSE3_SPLIT_QUESTIONS =
+  "Answer these four questions about the answer FIRST - each is a " +
+  "plain reading question about the WHOLE answer. The evidence may " +
+  "appear ANYWHERE - openings and middles count exactly as much as " +
+  "endings; a verdict stated early and hedged later still counts.\n" +
+  "q_recommends_any - Does the answer put forward ANY named product " +
+  "or brand as advice for the reader? Hedged advice counts: 'good " +
+  "candidates to check are X and Y', a best-for named mid-answer, a " +
+  "ranked list presented as advice, or telling the reader to keep " +
+  "what they already have. But DESCRIBING is not advising: a list or " +
+  "table of options with strengths and weaknesses, where none is put " +
+  "forward for the reader, is 'no'. Named means a proper noun - " +
+  "generic categories ('a premium variety', 'a 0%-intro card') are " +
+  "not products, and neither are actions (audit, test-drive) or " +
+  "playbooks (timing, cancellation steps).\n" +
+  "q_default_named - Does the answer put ONE product first - a " +
+  "default, first choice, or starting recommendation? Count a " +
+  "default stated anywhere and however phrased: 'start with X', 'X " +
+  "is the safest bet', 'I'd go with X', a #1 in a ranking presented " +
+  "as advice, or advice to keep what the reader already has. A " +
+  "default REMAINS the default when it is followed by alternatives " +
+  "('start with X; Y if you outgrow it'), exceptions ('unless " +
+  "you...'), caveats, or follow-up questions - none of those take it " +
+  "away. Answer 'no' only when NO single product is put first.\n" +
+  "q_splits_decision - Does the answer leave the choice split: two " +
+  "or more finalists treated as equals, or branches keyed to the " +
+  "reader's situation ('X if ..., Y if ...') with NO product put " +
+  "first? If any single product is put first, answer 'no' even when " +
+  "branches follow it.\n" +
+  "q_asks_and_waits - Does the answer give NO direction and ONLY ask " +
+  "for details? An offer to help further AFTER giving information or " +
+  "advice ('tell me your setup and I'll narrow it down', 'want me to " +
+  "compare these?') is NOT asking-and-waiting - answer 'no' for " +
+  "those. 'Yes' is rare: the answer must advise nothing and only " +
+  "ask.\n" +
+  "top_pick_brand - ONLY when one product is put first, its name " +
+  "exactly as the answer writes it; otherwise null.\n";
+
+/** decompose3_default (2026-09-20, h4): decompose2 unchanged, plus an
+ * always-asked default-candidate field. Derivation turns a conditional
+ * with a confident candidate into a pick of that candidate. */
+const DECOMPOSE3_DEFAULT_EXTRA =
+  "default_candidate_brand - EVEN when more than one product is " +
+  "advised: the single product the answer most treats as its default " +
+  "or first choice - the one it would start this reader on ('start " +
+  "with X', 'X is the safest bet', a #1 in a ranking presented as " +
+  "advice), named exactly as the answer writes it. null when the " +
+  "answer genuinely treats its finalists as equals, or advises " +
+  "none.\n";
+
+/** decompose3_tiebreak (2026-09-20, h3): the entire pick->conditional gap
+ * lives in one boolean, so re-ask only that boolean, only on the boundary
+ * cell (q_recommends_any && !q_single_direction, ~34% of answers). */
+const TIEBREAK_SYSTEM =
+  "You are re-checking one reading question about an AI assistant " +
+  "answer. The answer advises on products, and a first read said it " +
+  "splits the decision among several. Re-read the WHOLE answer and " +
+  "decide: is any SINGLE named product the answer's first choice, " +
+  "default, or starting recommendation - even with branches, " +
+  "alternatives, caveats, or follow-up questions after it? 'Start " +
+  "with X; Y if you outgrow it' means X is the default. A #1 in a " +
+  "ranking presented as advice is a default. Advice to keep what the " +
+  "reader already has is a default (that product). Two or more " +
+  "finalists treated as equals, or branches keyed to the reader's " +
+  "situation with no product put first, mean NO default. " +
+  "default_brand: the default's name exactly as the answer writes " +
+  "it, or null.";
+
 /** Framing rules, v1 (shipped Aug 2026) vs v2 (the ratified codebook,
  * 2026-09-18: direction test, branch verbs, market descriptors, reported
  * claims, net-caveat, incumbent defense - category-agnostic by design).
@@ -660,7 +811,15 @@ function reasonsRule(): string {
       "at scale' -> automation capabilities). A feature table row, a " +
       "spec listed without judgement, or a capability named in passing " +
       "carries no code. Most answers earn 1-4 codes; more than 6 is " +
-      "almost always over-coded.\n"
+      "almost always over-coded.\n" +
+      (reasonQuotesOn()
+        ? "For each code, quote VERBATIM (max 200 chars) the sentence " +
+          "where the answer argues from that attribute - the quote must " +
+          "contain the because-clause that justifies recommending or " +
+          "warning. If no sentence in the answer qualifies, the code is " +
+          "not assigned. A quote that merely names the topic (a feature " +
+          "list row, a spec) does not qualify.\n"
+        : "")
     );
   }
   if (!process.env.EXTRACT_PROMPT_V2) {
@@ -679,15 +838,19 @@ function reasonsRule(): string {
 function codingInstructions(ctx: ExtractionContext): string {
   const mode = outcomeMode();
   const outcomeSection =
-    mode === "decompose2"
-      ? DECOMPOSE2_QUESTIONS
-      : mode === "decompose"
-      ? DECOMPOSE_QUESTIONS
-      : mode === "ladder"
-        ? LADDER_STEPS + LADDER_EXAMPLES
-        : mode === "ladder_bare"
-          ? LADDER_STEPS
-          : "";
+    mode === "decompose3_split"
+      ? DECOMPOSE3_SPLIT_QUESTIONS
+      : mode === "decompose3_default"
+        ? DECOMPOSE2_QUESTIONS + DECOMPOSE3_DEFAULT_EXTRA
+        : mode === "decompose2" || mode === "decompose3_tiebreak"
+          ? DECOMPOSE2_QUESTIONS
+          : mode === "decompose"
+            ? DECOMPOSE_QUESTIONS
+            : mode === "ladder"
+              ? LADDER_STEPS + LADDER_EXAMPLES
+              : mode === "ladder_bare"
+                ? LADDER_STEPS
+                : "";
   return (
     "You are coding one AI assistant answer for a brand study. Be " +
     "literal: code only what the text says.\n\n" +
@@ -854,10 +1017,11 @@ async function codeWithClaude(
     // Quotes are optional; the coding is not.
   }
   if (isDecompose()) {
-    const q = parsed as unknown as Parameters<typeof deriveOutcome>[0];
+    const q = parsed as unknown as DecomposeBooleans;
     parsed.outcome = deriveOutcome(q);
-    if (!q.q_single_direction) parsed.top_pick_brand = null;
+    if (!singleDirection(q)) parsed.top_pick_brand = null;
   }
+  flattenReasons(parsed);
   const cwcMentions = dedupeMentions(parsed.mentions ?? []);
   // Anthropic forced-tool calls do not hard-enforce enum constraints the
   // way OpenAI structured outputs do - invented reason codes slip through
@@ -922,6 +1086,7 @@ codingInstructions(ctx),
       });
       ctx.usageSink?.(coder, res.usage?.prompt_tokens ?? 0, res.usage?.completion_tokens ?? 0);
       const raw = res.choices[0]?.message?.content ?? "{}";
+      if (process.env.EXTRACT_DEBUG_RAW === "1") console.error("RAW:", raw);
       const parsed = JSON.parse(raw) as ExtractionResult;
       // The focus brand is needed only for the quote fields, so it is asked
       // for in its own call — after the judgement calls are already made.
@@ -968,18 +1133,71 @@ codingInstructions(ctx),
       } catch {
         // A failed focus read costs quotes, never the coding itself.
       }
+      const realBrand = (b: string | null | undefined) =>
+        b && !/^(null|none|n\/a|no pick|no_pick)$/i.test(b.trim()) ? b : null;
+      if (isDecompose()) {
+        const q = parsed as unknown as DecomposeBooleans;
+        parsed.outcome = deriveOutcome(q);
+        if (!singleDirection(q)) parsed.top_pick_brand = null;
+        // decompose3 overrides live on this path only - grok is the sole
+        // coder under test; the Claude path derives but never overrides.
+        if (outcomeMode() === "decompose3_default" && parsed.outcome === "conditional") {
+          const cand = realBrand(
+            (parsed as unknown as { default_candidate_brand?: string | null })
+              .default_candidate_brand
+          );
+          if (cand) {
+            parsed.outcome = "pick";
+            parsed.top_pick_brand = cand;
+          }
+        }
+        if (outcomeMode() === "decompose3_tiebreak" && parsed.outcome === "conditional") {
+          const tb = await c.chat.completions.create({
+            model: coder,
+            temperature: 0,
+            messages: [
+              { role: "system", content: TIEBREAK_SYSTEM },
+              { role: "user", content: responseText },
+            ],
+            response_format: {
+              type: "json_schema",
+              json_schema: {
+                name: "default_check",
+                strict: true,
+                schema: {
+                  type: "object",
+                  additionalProperties: false,
+                  properties: {
+                    has_default: { type: "boolean" },
+                    default_brand: { type: ["string", "null"] },
+                  },
+                  required: ["has_default", "default_brand"],
+                },
+              },
+            },
+          });
+          ctx.usageSink?.(coder, tb.usage?.prompt_tokens ?? 0, tb.usage?.completion_tokens ?? 0);
+          const tbp = JSON.parse(tb.choices[0]?.message?.content ?? "{}") as {
+            has_default?: boolean;
+            default_brand?: string | null;
+          };
+          const tbBrand = realBrand(tbp.default_brand);
+          if (tbp.has_default && tbBrand) {
+            parsed.outcome = "pick";
+            parsed.top_pick_brand = tbBrand;
+          }
+          // Ride along for the eval's analysis of how often the pass fired.
+          (parsed as unknown as { tiebreak?: unknown }).tiebreak = {
+            fired: true,
+            has_default: Boolean(tbp.has_default),
+            default_brand: tbBrand,
+          };
+        }
+      }
       // Structured outputs guarantee the TYPE, not the semantics: the model
       // occasionally writes the string "null" where it means no pick.
-      const pick =
-        parsed.top_pick_brand &&
-        !/^(null|none|n\/a|no pick|no_pick)$/i.test(parsed.top_pick_brand.trim())
-          ? parsed.top_pick_brand
-          : null;
-      if (isDecompose()) {
-        const q = parsed as unknown as Parameters<typeof deriveOutcome>[0];
-        parsed.outcome = deriveOutcome(q);
-        if (!q.q_single_direction) parsed.top_pick_brand = null;
-      }
+      const pick = realBrand(parsed.top_pick_brand);
+      flattenReasons(parsed);
       const oaMentions = dedupeMentions(parsed.mentions ?? []);
       return {
         ...parsed,
@@ -1175,10 +1393,14 @@ export async function extractCodingConsensus(
   if (SOLO_CODER) {
     const [only, focus] = await Promise.all([
       provider.extractCoding(responseText, ctx, SOLO_CODER, true),
-      readFocus(responseText, ctx).catch(() => ({
-        focus_quote: null,
-        focus_interpretation: null,
-      })),
+      // Eval drivers set EXTRACT_SKIP_FOCUS=1: focus fields are never
+      // scored, and the default focus reader is a per-answer Claude call.
+      process.env.EXTRACT_SKIP_FOCUS === "1"
+        ? Promise.resolve({ focus_quote: null, focus_interpretation: null })
+        : readFocus(responseText, ctx).catch(() => ({
+            focus_quote: null,
+            focus_interpretation: null,
+          })),
     ]);
     return {
       ...only,
