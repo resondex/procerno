@@ -24,7 +24,9 @@ This block is written and re-added by `next dev` — verify at `node_modules/nex
   - `jira/grok_full_jira.jsonl` - grok-4-fast x decompose2 temp-0 codes for all 5,720 (coder-output schema, keyed `responseId`).
   - `jira/precedents_339.jsonl`, `labels_part1-4.jsonl`, `reference_set_339.jsonl` - the human-ratified reference set; `jira/eval_cells/` - every (coder x mechanism) eval cell from the bakeoff.
   - `amex/opus_full_amex.jsonl` - Opus reference labels for ALL 5,390 AmEx answers (run 34d46b95, coded from vault, prod untouched).
-  - `*/opus_coding_instructions.md` - the ratified codebook as given to the Opus labelers.
+  - `netflix/opus_full_netflix.jsonl` - Opus reference labels for ALL 3,760 Netflix answers (run 3edb9206, coded from vault, prod untouched).
+  - `pixel/opus_full_pixel.jsonl` - Opus reference labels for ALL 3,920 Google Pixel answers (run 78704e8f, coded from vault, prod untouched).
+  - `*/opus_coding_instructions.md` - the ratified codebook as given to the Opus labelers; each tracker's copy is the jira codebook retargeted to that brand, with its reason list taken verbatim from the project's prod `reason_taxonomy`.
   - `scripts/` - fill/score scripts (`jira_grok_fill.mts` shows the env-before-import pattern: set `EXTRACT_SOLO` / `EXTRACT_OUTCOME_MODE` before importing providers).
 
 ## Collection state (reconciled against prod 2026-09-20)
