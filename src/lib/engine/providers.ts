@@ -747,6 +747,25 @@ function codingInstructions(ctx: ExtractionContext): string {
   );
 }
 
+/** Anthropic call that pins temperature 0 but survives models that
+ * reject the parameter ("temperature is deprecated for this model",
+ * e.g. claude-sonnet-5): retry once without it. Determinism where the
+ * model allows it, graceful default where it does not. */
+async function anthropicCreateT0(
+  a: AnthropicSdk,
+  params: Record<string, unknown>,
+  opts?: { timeout?: number }
+): Promise<import("@anthropic-ai/sdk").default.Message> {
+  try {
+    return (await a.messages.create({ ...params, temperature: 0 } as never, opts as never)) as never;
+  } catch (err) {
+    if (/temperature.{0,30}deprecated/i.test(String(err))) {
+      return (await a.messages.create(params as never, opts as never)) as never;
+    }
+    throw err;
+  }
+}
+
 /** Billed-equivalent input tokens under Anthropic prompt caching. */
 function claudeBilledInput(u: unknown): number {
   const x = (u ?? {}) as { input_tokens?: number; cache_creation_input_tokens?: number; cache_read_input_tokens?: number };
@@ -763,11 +782,9 @@ async function codeWithClaude(
 ): Promise<ExtractionResult> {
   const a = await anthropicClient();
   const schema = extractSchema(ctx.reasonCodes);
-  const res = await a.messages.create({
+  const res = await anthropicCreateT0(a, {
     model,
     max_tokens: 2000,
-    // Coding is measurement: pinned sampling, not creative-writing default.
-    temperature: 0,
     // The instructions are identical for every answer in a run, so cache
     // them: first call writes (1.25x input), the other ~419 read at 0.1x.
     // Covers the tools + system prefix. No-op below Anthropic's minimum
@@ -802,10 +819,9 @@ async function codeWithClaude(
   let focusInterpretation: string | null = null;
   try {
     if (skipFocus) throw new Error("skip");
-    const f = await a.messages.create({
+    const f = await anthropicCreateT0(a, {
       model,
       max_tokens: 400,
-      temperature: 0,
       system:
         `Read this AI assistant answer and report how it treats "${ctx.targetBrand}".`,
       tools: [
@@ -1278,10 +1294,9 @@ async function readFocus(
 ): Promise<{ focus_quote: string | null; focus_interpretation: string | null }> {
   if (FOCUS_MODEL.startsWith("claude")) {
     const a = await anthropicClient();
-    const res = await a.messages.create({
+    const res = await anthropicCreateT0(a, {
       model: FOCUS_MODEL,
       max_tokens: 400,
-      temperature: 0,
       system:
         `Read this AI assistant answer and report how it treats ` +
         `"${ctx.targetBrand}". Quote exactly; invent nothing.`,
@@ -1369,10 +1384,9 @@ async function adjudicate(
   ctx: ExtractionContext
 ): Promise<{ outcome: ExtractionResult["outcome"]; top_pick_brand: string | null }> {
   const anthropic = await anthropicClient();
-  const res = await anthropic.messages.create({
+  const res = await anthropicCreateT0(anthropic, {
     model: ADJUDICATOR,
     max_tokens: 500,
-    temperature: 0,
     system:
       "Two coders disagree about one AI answer. Decide from the text alone. " +
       "outcome — apply this test literally, do not weigh emphasis or " +
