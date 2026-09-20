@@ -27,6 +27,12 @@ This block is written and re-added by `next dev` — verify at `node_modules/nex
   - `*/opus_coding_instructions.md` - the ratified codebook as given to the Opus labelers.
   - `scripts/` - fill/score scripts (`jira_grok_fill.mts` shows the env-before-import pattern: set `EXTRACT_SOLO` / `EXTRACT_OUTCOME_MODE` before importing providers).
 
+## Collection state (reconciled against prod 2026-09-20)
+
+Prod `responses` holds **26,070** rows across 6 runs, matching the vault row-for-row: jira 5,720 (`complete`), American Express 5,390, Google Pixel 3,920, Netflix 3,760, Doritos 3,680, Sephora 3,600 (all `collected`, `completed_at` null). `mentions` is empty - **zero answers are coded anywhere in prod**, jira included. The earlier "~34K" figure was an unsourced estimate; it matched nothing in prod and has been replaced.
+
+Engine-coverage gap: all 11 projects are configured for the same 11-engine set, but the four runs launched 2026-09-19 00:05 (Netflix, Sephora, Google Pixel, Doritos) stored an 8-engine `models` list - `claude-sonnet-5`, `claude-sonnet-5-search` and `claude-haiku-4-5-20251001` are missing, with no error recorded. Only jira and AmEx have Claude coverage. Backfilling the four is 1,870 prompts x 3 engines = 5,610 answers; awaiting Tyler's go like every other run.
+
 ## Coder evaluation state (as of 2026-09-20)
 
-Exact full-set accuracy of grok-4-fast x decompose2 (temp 0) vs the 5,720-row Opus ground truth: **outcome 77.1%, framing 80.0%, top_pick 86.5%** (reason precision 43.9% / recall 64.3%). Runner-up consensus x ladder_bare was 72.9% outcome on the 339-row reference set at ~5x the cost. Grok's dominant error: stated defaults coded conditional (pick->conditional, 31.5% of errors). Production coder decision, prod config flip (`EXTRACT_SOLO=grok-4-fast`, `EXTRACT_OUTCOME_MODE=decompose2`, clear `RUN_COLLECT_ONLY`), and coding the ~34K held answers all await Tyler's go. Remaining fleet to collect (trimmed panel): AG1, athenahealth, Purple, PwC, Nest.
+Exact full-set accuracy of grok-4-fast x decompose2 (temp 0) vs the 5,720-row Opus ground truth: **outcome 77.1%, framing 80.0%, top_pick 86.5%** (reason precision 43.9% / recall 64.3%). Runner-up consensus x ladder_bare was 72.9% outcome on the 339-row reference set at ~5x the cost. Grok's dominant error: stated defaults coded conditional (pick->conditional, 31.5% of errors). Production coder decision, prod config flip (`EXTRACT_SOLO=grok-4-fast`, `EXTRACT_OUTCOME_MODE=decompose2`, clear `RUN_COLLECT_ONLY`), and coding the 26,070 held answers all await Tyler's go. Remaining fleet to collect (trimmed panel): AG1, athenahealth, Purple, PwC, Nest - 2,440 prompts, ~26,840 answers at the full engine set.
