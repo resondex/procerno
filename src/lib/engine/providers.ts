@@ -413,10 +413,18 @@ function extractSchema(reasonCodes: string[]) {
         },
       },
       top_pick_brand: { type: ["string", "null"] },
-      outcome: {
-        type: "string",
-        enum: ["pick", "conditional", "no_pick", "clarification"],
-      },
+      ...(outcomeMode() === "decompose"
+        ? {
+            q_recommends_any: { type: "boolean" },
+            q_single_direction: { type: "boolean" },
+            q_asks_and_waits: { type: "boolean" },
+          }
+        : {
+            outcome: {
+              type: "string",
+              enum: ["pick", "conditional", "no_pick", "clarification"],
+            },
+          }),
       reasons:
         reasonCodes.length > 0
           ? { type: "array", items: { type: "string", enum: reasonCodes } }
@@ -429,14 +437,27 @@ function extractSchema(reasonCodes: string[]) {
     required: [
       "mentions",
       "top_pick_brand",
-      "outcome",
+      ...(outcomeMode() === "decompose"
+        ? ["q_recommends_any", "q_single_direction", "q_asks_and_waits"]
+        : ["outcome"]),
       "reasons",
       "clarification_requested",
       "gives_recommendation",
       "includes_prices",
       "includes_specs",
     ],
-  } as const;
+  };
+}
+
+/** Derive the outcome from the decompose booleans - by code, so it can
+ * never be internally inconsistent or invent a category. */
+function deriveOutcome(q: {
+  q_recommends_any?: boolean;
+  q_single_direction?: boolean;
+  q_asks_and_waits?: boolean;
+}): ExtractionResult["outcome"] {
+  if (!q.q_recommends_any) return q.q_asks_and_waits ? "clarification" : "no_pick";
+  return q.q_single_direction ? "pick" : "conditional";
 }
 
 async function withRetry<T>(fn: () => Promise<T>, tries = 3): Promise<T> {
@@ -452,12 +473,104 @@ async function withRetry<T>(fn: () => Promise<T>, tries = 3): Promise<T> {
   throw lastErr;
 }
 
+/** Outcome-mechanism experiment (2026-09-19): "" = classic O-TEST text,
+ * "ladder" = ordered stop-at-first-match ladder with cross-category worked
+ * examples, "ladder_bare" = the ladder without the examples (isolates the
+ * examples' effect), "decompose" = outcome never coded - three booleans,
+ * derived by code. Any mode implies v2 framing + hardened reasons. */
+function outcomeMode(): "" | "ladder" | "ladder_bare" | "decompose" {
+  const m = process.env.EXTRACT_OUTCOME_MODE ?? "";
+  return m === "ladder" || m === "ladder_bare" || m === "decompose" ? m : "";
+}
+
+const LADDER_STEPS =
+  "outcome — decide this FIRST, by walking these steps IN ORDER and " +
+  "stopping at the first match. Decide by what the answer DECIDES - " +
+  "never by whether it asks a question: questions at the end change " +
+  "nothing at any step.\n" +
+  "STEP 1 - Does the answer put forward ANY named product or brand as " +
+  "advice (recommend, rank as advice, name a best-for, or tell the " +
+  "reader to keep what they have)? Named means a proper noun: generic " +
+  "categories ('a premium variety', 'thick-cut chips', 'a 0%-intro " +
+  "card', 'a mid-range phone') are NOT product direction, however " +
+  "firmly advised.\n" +
+  "  NO, and it declines to advise until the reader supplies details " +
+  "(it asks and waits) -> 'clarification'. This is rare: the answer " +
+  "must offer NO product direction at all.\n" +
+  "  NO, and it informs, diagnoses, compares neutrally, or recommends " +
+  "only ACTIONS (audit, test-drive, check docs) or playbooks (timing, " +
+  "cancellation steps) rather than products -> 'no_pick'. An answer " +
+  "that lays out options while championing none is no_pick even when " +
+  "the options are described in detail.\n" +
+  "STEP 2 - Is exactly ONE product named as what to do - an outright " +
+  "pick OR a stated default? A default survives everything that " +
+  "follows it: exceptions ('unless you...'), caveats, alternatives " +
+  "listed after, and follow-up questions. A #1 in a ranking presented " +
+  "as advice for the reader's stated scenario is a default. Advice to " +
+  "keep or renew the reader's current product is a pick of that " +
+  "product.\n" +
+  "  YES -> 'pick'; that product is top_pick.\n" +
+  "STEP 3 - Otherwise the answer advises but splits the decision -> " +
+  "'conditional'. This covers: branches keyed to the reader's " +
+  "situation with no default named, two or more finalists presented " +
+  "as equals, and shortlists to pilot or trial.\n";
+
+const LADDER_EXAMPLES =
+  "WORKED MICRO-EXAMPLES (imitate the reasoning):\n" +
+  "- 'X works best overall for your dip table; keep a small bowl of Y " +
+  "for the die-hards.' -> pick (X); the add-on role for Y changes " +
+  "nothing (STEP 2).\n" +
+  "- 'For your team I'd start with X. If you outgrow it, Y is the " +
+  "natural step up. What's your rollout timeline?' -> pick (X); the " +
+  "alternative and the trailing question change nothing (STEP 2).\n" +
+  "- 'X wins for your situation - one catch: only worth it if you pay " +
+  "in full each month.' -> pick (X); an eligibility caveat after a " +
+  "stated winner is an exception, not a branch (STEP 2).\n" +
+  "- 'If you want the cleaner label, X; if you want the loudest " +
+  "flavor, Y.' / 'Three good choices are X, Y and Z - pick whichever " +
+  "fits.' -> conditional (STEP 3).\n" +
+  "- 'Renewing what you already have is the safest decision here.' -> " +
+  "pick (the incumbent) (STEP 2).\n" +
+  "- 'Sign up the day the finale drops, cancel immediately, set a " +
+  "reminder - here's the step-by-step.' -> no_pick; a thorough " +
+  "playbook that champions no product (STEP 1).\n" +
+  "- 'The failures you describe are usually account flags - check the " +
+  "app, then call the number on your card.' -> no_pick (STEP 1).\n" +
+  "- 'Look for scoop-shaped or restaurant-style chips - they hold up " +
+  "under toppings.' -> no_pick; generic categories firmly advised, no " +
+  "named product (STEP 1).\n" +
+  "- 'That depends entirely on your budget and how you'll use it - " +
+  "what are they?' with nothing recommended -> clarification " +
+  "(STEP 1).\n";
+
+const DECOMPOSE_QUESTIONS =
+  "Answer these three questions about the answer FIRST - each is a " +
+  "plain reading question; decide by what the answer DECIDES, never " +
+  "by whether it asks a question at the end.\n" +
+  "q_recommends_any - Does the answer put forward ANY named product " +
+  "or brand as advice for the reader (recommend it, rank it as " +
+  "advice, call it best-for, or tell the reader to keep what they " +
+  "already have)? Named means a proper noun - generic categories ('a " +
+  "premium variety', 'a 0%-intro card') are not products, and neither " +
+  "are actions (audit, test-drive, check docs) or playbooks (timing, " +
+  "cancellation steps).\n" +
+  "q_single_direction - Is exactly ONE product named as what the " +
+  "reader should do - an outright pick or a stated default? A default " +
+  "survives exceptions, caveats, alternatives listed after it, and " +
+  "follow-up questions. A #1 in an advice-ranking is a default. Keep " +
+  "or renew what you have is a pick of that product.\n" +
+  "q_asks_and_waits - Does the answer decline to advise until the " +
+  "reader supplies more details - asking and waiting, offering no " +
+  "product direction at all in the meantime?\n" +
+  "top_pick_brand - ONLY when exactly one product is what to do, its " +
+  "name exactly as the answer writes it; otherwise null.\n";
+
 /** Framing rules, v1 (shipped Aug 2026) vs v2 (the ratified codebook,
  * 2026-09-18: direction test, branch verbs, market descriptors, reported
  * claims, net-caveat, incumbent defense - category-agnostic by design).
  * EXTRACT_PROMPT_V2 selects; the A/B control runs both on fixed answers. */
 function framingRules(): string {
-  if (!process.env.EXTRACT_PROMPT_V2) {
+  if (!process.env.EXTRACT_PROMPT_V2 && !outcomeMode()) {
     return (
       "framing per mention — 'recommended' only when the answer " +
       "endorses it for the reader's situation (a pick, a 'best for " +
@@ -497,6 +610,17 @@ function framingRules(): string {
 
 /** Reasons rule: v2 requires the answer to ARGUE FROM the attribute. */
 function reasonsRule(): string {
+  if (outcomeMode()) {
+    return (
+      "reasons — assign a code ONLY where the answer argues FROM that " +
+      "attribute — the attribute must carry a 'because' that justifies " +
+      "recommending or warning ('X wins because its automation holds up " +
+      "at scale' -> automation capabilities). A feature table row, a " +
+      "spec listed without judgement, or a capability named in passing " +
+      "carries no code. Most answers earn 1-4 codes; more than 6 is " +
+      "almost always over-coded.\n"
+    );
+  }
   if (!process.env.EXTRACT_PROMPT_V2) {
     return "reasons — which allowed argument codes the answer uses.\n";
   }
@@ -511,9 +635,20 @@ function reasonsRule(): string {
 /** One instruction set, whichever vendor codes — so a coder swap changes
  * the model and nothing else. */
 function codingInstructions(ctx: ExtractionContext): string {
+  const mode = outcomeMode();
+  const outcomeSection =
+    mode === "decompose"
+      ? DECOMPOSE_QUESTIONS
+      : mode === "ladder"
+        ? LADDER_STEPS + LADDER_EXAMPLES
+        : mode === "ladder_bare"
+          ? LADDER_STEPS
+          : "";
   return (
     "You are coding one AI assistant answer for a brand study. Be " +
     "literal: code only what the text says.\n\n" +
+    // Experiment modes decide outcome (or its booleans) FIRST.
+    outcomeSection +
     "mentions — every company, brand, product, or service named, in " +
     "order of first appearance, including ones named only as " +
     "integrations or adjacent tools. Completeness matters; relevance " +
@@ -526,6 +661,7 @@ function codingInstructions(ctx: ExtractionContext): string {
     "enterprise edition are all the SAME one name, recorded once. A " +
     "bare feature fragment with no brand attached is omitted.\n" +
     framingRules() +
+    (mode !== "" ? "" :
     "outcome — exactly one of four. Decide by what the answer DECIDES, " +
     "never by whether it asks a question at the end.\n" +
     "  THE TEST — apply it literally, do not weigh emphasis or tone: " +
@@ -545,12 +681,13 @@ function codingInstructions(ctx: ExtractionContext): string {
     "  NO, and it lays out options while recommending none and routing " +
     "to none → 'no_pick'.\n" +
     "  A long or enthusiastic write-up is not by itself a pick: if the " +
-    "answer never says what to do, the test fails.\n" +
+    "answer never says what to do, the test fails.\n") +
+    (mode === "decompose" ? "" :
     "top_pick_brand — the ONE brand that leads. MUST be null unless " +
     "outcome is 'pick', and MUST be a single brand name written exactly " +
     "as the answer writes it — never two names joined by 'or', '+', '/' " +
     "or a parenthetical. If the answer genuinely leads with two, that " +
-    "is 'conditional', not a pick.\n" +
+    "is 'conditional', not a pick.\n") +
     reasonsRule() +
     "clarification_requested — independent of outcome: true whenever " +
     "the answer asks the reader any question, including when it has " +
@@ -652,6 +789,11 @@ async function codeWithClaude(
     focusInterpretation = fp.focus_interpretation ?? null;
   } catch {
     // Quotes are optional; the coding is not.
+  }
+  if (outcomeMode() === "decompose") {
+    const q = parsed as unknown as Parameters<typeof deriveOutcome>[0];
+    parsed.outcome = deriveOutcome(q);
+    if (!q.q_single_direction) parsed.top_pick_brand = null;
   }
   const cwcMentions = dedupeMentions(parsed.mentions ?? []);
   // Anthropic forced-tool calls do not hard-enforce enum constraints the
@@ -768,6 +910,11 @@ codingInstructions(ctx),
         !/^(null|none|n\/a|no pick|no_pick)$/i.test(parsed.top_pick_brand.trim())
           ? parsed.top_pick_brand
           : null;
+      if (outcomeMode() === "decompose") {
+        const q = parsed as unknown as Parameters<typeof deriveOutcome>[0];
+        parsed.outcome = deriveOutcome(q);
+        if (!q.q_single_direction) parsed.top_pick_brand = null;
+      }
       const oaMentions = dedupeMentions(parsed.mentions ?? []);
       return {
         ...parsed,
