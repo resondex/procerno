@@ -547,6 +547,7 @@ const OUTCOME_MODES = [
   "decompose3_split", // q_single_direction split into default-named vs splits-decision
   "decompose3_tiebreak", // decompose2 + a second reading pass on the boundary cell only
   "decompose3_default", // decompose2 + always-asked default_candidate_brand
+  "decompose3_survival", // q_single_direction with hardened survival clause + in-question micro-examples
 ] as const;
 type OutcomeMode = "" | (typeof OUTCOME_MODES)[number];
 
@@ -740,6 +741,35 @@ const DECOMPOSE3_DEFAULT_EXTRA =
   "answer genuinely treats its finalists as equals, or advises " +
   "none.\n";
 
+/** decompose3_survival (2026-09-20, rung 2 of the stated-default round):
+ * decompose2 with only q_single_direction rewritten - hardened survival
+ * clause plus worked micro-examples inside the question, built from the
+ * measured miss taxonomy (178 trailing if/unless, 100 best-overall labels,
+ * 32 keep/renew, 15 rankings among the 412 pick->conditional misses). */
+const DECOMPOSE3_SURVIVAL_Q2 =
+  "q_single_direction - Is exactly ONE product named as what the " +
+  "reader should do - an outright pick or a stated default? A default " +
+  "SURVIVES everything that trails or surrounds it: alternatives " +
+  "listed after it, 'if you...' branches, 'unless' exceptions, " +
+  "caveats, comparisons, and follow-up questions - none of them take " +
+  "the default away. A #1 or 'Best Overall' in a ranking presented as " +
+  "advice is a default. Advice to keep or renew what the reader " +
+  "already has is a pick of that product. Worked examples:\n" +
+  "  'Start with X. If you outgrow it, Y is the natural step up.' -> " +
+  "yes (X): the branch to Y does not remove the default.\n" +
+  "  'X (Best Overall for your case). Y (Best for tight budgets).' - " +
+  "a labeled ranking presented as advice -> yes (X).\n" +
+  "  'Keep X; only consider switching if the audit fails.' -> yes " +
+  "(X, the incumbent).\n" +
+  "  'X if you want simplicity, Y if you need power', with NO " +
+  "product put first -> no: branches with no stated default split " +
+  "the decision.\n";
+
+const DECOMPOSE3_SURVIVAL_QUESTIONS = DECOMPOSE2_QUESTIONS.replace(
+  /q_single_direction - [\s\S]*?(?=q_asks_and_waits - )/,
+  DECOMPOSE3_SURVIVAL_Q2
+);
+
 /** decompose3_tiebreak (2026-09-20, h3): the entire pick->conditional gap
  * lives in one boolean, so re-ask only that boolean, only on the boundary
  * cell (q_recommends_any && !q_single_direction, ~34% of answers). */
@@ -842,8 +872,10 @@ function codingInstructions(ctx: ExtractionContext): string {
       ? DECOMPOSE3_SPLIT_QUESTIONS
       : mode === "decompose3_default"
         ? DECOMPOSE2_QUESTIONS + DECOMPOSE3_DEFAULT_EXTRA
-        : mode === "decompose2" || mode === "decompose3_tiebreak"
-          ? DECOMPOSE2_QUESTIONS
+        : mode === "decompose3_survival"
+          ? DECOMPOSE3_SURVIVAL_QUESTIONS
+          : mode === "decompose2" || mode === "decompose3_tiebreak"
+            ? DECOMPOSE2_QUESTIONS
           : mode === "decompose"
             ? DECOMPOSE_QUESTIONS
             : mode === "ladder"
