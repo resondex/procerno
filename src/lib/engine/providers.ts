@@ -422,6 +422,15 @@ function extractSchema(reasonCodes: string[]) {
               q_asks_and_waits: { type: "boolean" },
             }
           : {
+              // Evidence fields come BEFORE the booleans on purpose: strict
+              // decoding follows property order, so the quotes are emitted
+              // (and attended to) before the verdicts.
+              ...(outcomeMode() === "decompose3_evidence"
+                ? {
+                    advice_evidence: { type: ["string", "null"] },
+                    default_evidence: { type: ["string", "null"] },
+                  }
+                : {}),
               q_recommends_any: { type: "boolean" },
               q_single_direction: { type: "boolean" },
               q_asks_and_waits: { type: "boolean" },
@@ -466,6 +475,9 @@ function extractSchema(reasonCodes: string[]) {
         ? outcomeMode() === "decompose3_split"
           ? ["q_recommends_any", "q_default_named", "q_splits_decision", "q_asks_and_waits"]
           : [
+              ...(outcomeMode() === "decompose3_evidence"
+                ? ["advice_evidence", "default_evidence"]
+                : []),
               "q_recommends_any",
               "q_single_direction",
               "q_asks_and_waits",
@@ -548,6 +560,7 @@ const OUTCOME_MODES = [
   "decompose3_tiebreak", // decompose2 + a second reading pass on the boundary cell only
   "decompose3_default", // decompose2 + always-asked default_candidate_brand
   "decompose3_survival", // q_single_direction with hardened survival clause + in-question micro-examples
+  "decompose3_evidence", // quote-then-decide: verbatim evidence fields precede the booleans
 ] as const;
 type OutcomeMode = "" | (typeof OUTCOME_MODES)[number];
 
@@ -770,6 +783,32 @@ const DECOMPOSE3_SURVIVAL_QUESTIONS = DECOMPOSE2_QUESTIONS.replace(
   DECOMPOSE3_SURVIVAL_Q2
 );
 
+/** decompose3_evidence (2026-09-20): quote-then-decide. Strict JSON gives
+ * the coder no reasoning space, and the q1 miss taxonomy shows two-sided
+ * boundary noise (326 under-reads of hedged/branch advice, 435 over-reads
+ * of playbooks/pricing/diagnostics). Two verbatim evidence fields precede
+ * the booleans so the verdicts must point at a sentence. */
+const DECOMPOSE3_EVIDENCE_PREFIX =
+  "Collect evidence FIRST - two verbatim quotes - then answer the " +
+  "questions from that evidence.\n" +
+  "advice_evidence - quote VERBATIM (max 200 chars) the single " +
+  "sentence that most clearly puts a named product or brand forward " +
+  "as advice for THIS reader. Hedged advice counts ('good candidates " +
+  "to check are X and Y', 'X is worth a look for your case'), branch " +
+  "advice counts ('use X if you need deep customization'), and so " +
+  "does advice to keep what the reader already has. null when NO " +
+  "sentence advises: describing, comparing, pricing, diagnosing, or " +
+  "walking through steps is not advising, and a product named inside " +
+  "an explanation ('the culprit is usually configuration, not X " +
+  "being bad') is not being advised.\n" +
+  "default_evidence - quote VERBATIM the sentence that puts exactly " +
+  "ONE product first: a stated default, 'start with X', a #1 or Best " +
+  "Overall presented as advice, or keep-what-you-have. null when no " +
+  "single product is put first.\n" +
+  "Answer in AGREEMENT with your evidence: q_recommends_any is yes " +
+  "only when advice_evidence is non-null; q_single_direction is yes " +
+  "only when default_evidence is non-null.\n";
+
 /** decompose3_tiebreak (2026-09-20, h3): the entire pick->conditional gap
  * lives in one boolean, so re-ask only that boolean, only on the boundary
  * cell (q_recommends_any && !q_single_direction, ~34% of answers). */
@@ -874,8 +913,10 @@ function codingInstructions(ctx: ExtractionContext): string {
         ? DECOMPOSE2_QUESTIONS + DECOMPOSE3_DEFAULT_EXTRA
         : mode === "decompose3_survival"
           ? DECOMPOSE3_SURVIVAL_QUESTIONS
-          : mode === "decompose2" || mode === "decompose3_tiebreak"
-            ? DECOMPOSE2_QUESTIONS
+          : mode === "decompose3_evidence"
+            ? DECOMPOSE3_EVIDENCE_PREFIX + DECOMPOSE2_QUESTIONS
+            : mode === "decompose2" || mode === "decompose3_tiebreak"
+              ? DECOMPOSE2_QUESTIONS
           : mode === "decompose"
             ? DECOMPOSE_QUESTIONS
             : mode === "ladder"
