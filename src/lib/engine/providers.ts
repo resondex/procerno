@@ -1259,6 +1259,23 @@ async function codeWithClaude(
   };
 }
 
+/** OpenAI-compatible twin of anthropicCreateT0: pin temperature 0, but
+ * survive models that reject the parameter (gpt-5 family: "'temperature'
+ * does not support 0 with this model") by retrying without it. */
+async function openaiCreateT0(
+  c: ReturnType<typeof client>,
+  params: Omit<Parameters<typeof c.chat.completions.create>[0], "temperature">
+): Promise<import("openai/resources/chat/completions").ChatCompletion> {
+  try {
+    return (await c.chat.completions.create({ ...params, temperature: 0 } as never)) as never;
+  } catch (err) {
+    if (/temperature.{0,60}(does not support|unsupported)/i.test(String(err))) {
+      return (await c.chat.completions.create(params as never)) as never;
+    }
+    throw err;
+  }
+}
+
 const openaiProvider: CompletionProvider = {
   async complete(prompt, model) {
     return withRetry(async () => {
@@ -1286,9 +1303,8 @@ const openaiProvider: CompletionProvider = {
       // on the structured brief instead of the raw answer.
       let codingText = responseText;
       if (outcomeMode() === "decompose3_summary") {
-        const s = await c.chat.completions.create({
+        const s = await openaiCreateT0(c, {
           model: coder,
-          temperature: 0,
           max_tokens: 450,
           messages: [
             { role: "system", content: SUMMARY_SYSTEM },
@@ -1298,9 +1314,8 @@ const openaiProvider: CompletionProvider = {
         ctx.usageSink?.(coder, s.usage?.prompt_tokens ?? 0, s.usage?.completion_tokens ?? 0);
         codingText = s.choices[0]?.message?.content?.trim() || responseText;
       }
-      const res = await c.chat.completions.create({
+      const res = await openaiCreateT0(c, {
         model: coder,
-        temperature: 0,
         messages: [
           {
             role: "system",
@@ -1335,9 +1350,8 @@ codingInstructions(ctx),
       let focusInterpretation: string | null = null;
       try {
         if (skipFocus) throw new Error("skip");
-        const f = await c.chat.completions.create({
+        const f = await openaiCreateT0(c, {
           model: coder,
-          temperature: 0,
           messages: [
             {
               role: "system",
@@ -1393,9 +1407,8 @@ codingInstructions(ctx),
           }
         }
         if (outcomeMode() === "decompose3_tiebreak" && parsed.outcome === "conditional") {
-          const tb = await c.chat.completions.create({
+          const tb = await openaiCreateT0(c, {
             model: coder,
-            temperature: 0,
             messages: [
               { role: "system", content: TIEBREAK_SYSTEM },
               { role: "user", content: responseText },
