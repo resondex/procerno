@@ -561,6 +561,7 @@ const OUTCOME_MODES = [
   "decompose3_default", // decompose2 + always-asked default_candidate_brand
   "decompose3_survival", // q_single_direction with hardened survival clause + in-question micro-examples
   "decompose3_evidence", // quote-then-decide: verbatim evidence fields precede the booleans
+  "decompose3_fewshot", // decompose2 + ratified precedents as worked cases
 ] as const;
 type OutcomeMode = "" | (typeof OUTCOME_MODES)[number];
 
@@ -809,6 +810,48 @@ const DECOMPOSE3_EVIDENCE_PREFIX =
   "only when advice_evidence is non-null; q_single_direction is yes " +
   "only when default_evidence is non-null.\n";
 
+/** decompose3_fewshot (2026-09-20): decompose2 plus PRECEDENTS - worked
+ * cases drawn from the human-ratified reference set, chosen from rows that
+ * three or more bakeoff coder configs missed. The error-overlap diagnostic
+ * showed grok's residual errors are shared difficulty, not model noise:
+ * the codebook's distinctions did not transfer as rule text, so transfer
+ * them as cases. Quotes are verbatim from ratified rows. */
+const DECOMPOSE3_PRECEDENTS =
+  "PRECEDENTS - ratified codings of real cases. Apply the same " +
+  "reasoning; the quote is the decisive sentence of a longer answer.\n" +
+  "- 'Default safe choice: Renew Jira for 12 months' -> " +
+  "recommends yes, single direction yes (Jira). Renewing or keeping " +
+  "what the reader has is a pick of that product.\n" +
+  "- 'You can usually get 60-80% of the benefit you want from Jira " +
+  "by auditing and simplifying' -> recommends yes, single direction " +
+  "yes (Jira). Fix-in-place advice champions the incumbent - that is " +
+  "product direction, not a mere playbook.\n" +
+  "- 'For engineering-heavy backlogs with scaled delivery, choose " +
+  "Jira', where the reader described exactly that situation -> " +
+  "recommends yes, single direction yes (Jira). A branch whose " +
+  "condition matches the reader's stated case is a pick, not a " +
+  "split.\n" +
+  "- 'Best-in-class if you're coming from another Jira instance' " +
+  "alongside other best-ifs, none put first -> recommends yes, " +
+  "single direction no. Hedged best-if branches are still advice - " +
+  "never 'describing only'.\n" +
+  "- 'Three platforms with the strongest, most battle-tested " +
+  "migration paths' (a championed shortlist) -> recommends yes, " +
+  "single direction no. Championing a shortlist is advice even with " +
+  "no winner named.\n" +
+  "- 'I can recommend the single best fit and outline a short " +
+  "migration plan' after presenting options -> recommends yes, " +
+  "single direction no, asks-and-waits no. An offer to narrow later " +
+  "does not erase the advice already given.\n" +
+  "- 'Jira is still the default for large enterprises and teams that " +
+  "need deep workflow customization' in a neutral market overview -> " +
+  "recommends no. Market-position language ('the default', 'industry " +
+  "standard') describes the market, it does not advise the reader.\n" +
+  "- A diagnosis ending 'tell me which tool (Jira Cloud/Data Center, " +
+  "Azure DevOps, etc.) and I can tailor this' -> recommends no, " +
+  "asks-and-waits no (information was already given). Products named " +
+  "inside a question or an explanation are not being advised.\n";
+
 /** decompose3_tiebreak (2026-09-20, h3): the entire pick->conditional gap
  * lives in one boolean, so re-ask only that boolean, only on the boundary
  * cell (q_recommends_any && !q_single_direction, ~34% of answers). */
@@ -915,8 +958,10 @@ function codingInstructions(ctx: ExtractionContext): string {
           ? DECOMPOSE3_SURVIVAL_QUESTIONS
           : mode === "decompose3_evidence"
             ? DECOMPOSE3_EVIDENCE_PREFIX + DECOMPOSE2_QUESTIONS
-            : mode === "decompose2" || mode === "decompose3_tiebreak"
-              ? DECOMPOSE2_QUESTIONS
+            : mode === "decompose3_fewshot"
+              ? DECOMPOSE2_QUESTIONS + DECOMPOSE3_PRECEDENTS
+              : mode === "decompose2" || mode === "decompose3_tiebreak"
+                ? DECOMPOSE2_QUESTIONS
           : mode === "decompose"
             ? DECOMPOSE_QUESTIONS
             : mode === "ladder"
