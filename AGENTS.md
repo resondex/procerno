@@ -62,4 +62,25 @@ Truth is 1.60 codes/row on the held-out set. Findings:
 
 Hygiene note: model-authored reason-code definition files (`*_code_defs.json`) are not validated artifacts and one was shown to degrade agreement. The Netflix copy was deleted; do not regenerate them from world knowledge.
 
-Open: Fireworks LoRA fine-tune (qwen-class judgment coder trained on the 5,081 non-ratified Opus labels, 339 held out; `~/Documents/procerno_eval/finetune/`) - launched from a separate session; score it on the full set AND the routed slice (`decompose3/routed_slice.txt`); Netflix transfer is measured (above), jira full-set and routed-slice scoring is not. Production coder decision, prod config flip, and coding the 26,070 held answers all await Tyler's go. Remaining fleet to collect (trimmed panel): AG1, athenahealth, Purple, PwC, Nest - 2,440 prompts, ~26,840 answers at the full engine set.
+## LoRA fine-tune scored (2026-09-21): the presumptive production coder
+
+Adapter `procerno-coder-v1` (muse-glimmer-30b LoRA, jira-only training: 5,081 non-ratified Opus labels; 300 val + 339 ratified held out). Serving note: the addon does NOT serve serverless - stand up a dedicated deployment (2x H100, `enableAddons`), bind the LoRA as a deployedModel, and query with model id `<lora-model>#<deployment>` (the bare LoRA name never routes); tear down after. Eval files `finetune/ft_jira_eval.jsonl`, `ft_amex_eval.jsonl`; scorers `scripts/score_ft_jira.py`, `score_ft_amex.py`.
+
+- jira held-out 639 (clean): outcome 93.1%, framing 90.5%, top_pick 95.3%, reasons P 80.2 / R 79.6. Ratified 339 vs HUMAN labels: 90.6 / 87.3 / 94.1 (human-vs-Opus on those rows is 100%, so the ceiling is real). Grok best (decompose2+tiebreak, never trained): 79.0 / 80.1 / 87.0.
+- Routed slice (the rows grok's variants disagree on): routed ∩ held-out (n=184) outcome 87.5% vs grok's 54.7% - the fine-tune IS the escalation coder that the decompose3 round failed to find. Unanimous ∩ held-out: 95.4%.
+- AmEx transfer (all 5,390, zero AmEx training): outcome 82.7%, framing 85.0%, top_pick 84.8% - above grok's in-domain jira score. Weakness: reason recall 47.4% (high P everywhere, low R - the adapter memorised jira's codes and density instead of reading the allowed-code list).
+
+## New-category onboarding procedure - AmEx dry run (2026-09-21)
+
+Procedure: (1) collect to vault; (2) author one-line code defs from ground documents; (3) Opus-label a seeded ~300-row calibration sample; (4) measure ONLY distributional priors from it (density; defs validated by paired A/B) - never error-pattern corrections; (5) gate: score the calibrated adapter on the sample, pass -> run the brand, fail -> full-label and add to the next retrain.
+
+Dry run on AmEx (calib `amex/calib_300_ids.txt` seed 20260921, held-out `amex/heldout_5090_ids.txt`; runner `finetune/ft_eval_amex_calib.mts`, output `ft_amex_calibrated.jsonl`, scorer `scripts/score_amex_procedure.py`). Calibrated = defs block (from the 800-row paired test) + density sentence ("about 2.2 codes each", measured 2.16 on the 300; truth 2.09). Held-out 5,090:
+
+| condition | outcome | framing | top_pick | reason P | reason R | F1 | codes/row |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| baseline | 82.9% | 84.9% | 84.9% | 73.9% | 47.3% | 57.7% | 1.34 |
+| defs + density | 82.9% | 85.0% | 85.2% | 77.2% | 63.3% | **69.5%** | 1.72 |
+
+Findings: (1) **defs and density stack cleanly** - +11.8 F1 with recall +16.0 AND precision +3.3, outcomes untouched; better than either alone (defs +7.3R on the 800 sample, density +7.1R on Netflix) and far better than defs+count (+18.3R but scattershot). (2) Recovery concentrates exactly where defs disambiguate finance-specific codes: balance transfer fee R 40->89, intro apr 32->87, cash back 27->58. Localized precision cost on sibling-heavy codes (intro apr P 90->78, interest rate 81->67); travel perks stays a catch-all (P 58). (3) The 300-row gate estimates reason metrics within ~1pt of held-out truth, but outcome carries +-4-5pt sampling noise at n=300 - set gate thresholds on reasons, use outcome only as a coarse check. (4) Still 0.37 codes/row under truth - the residual recall gap is the v2 retrain's job (defs-in-prompt training on all four labeled brands), not more prompt sentences.
+
+Open: v2 multi-brand retrain (train on jira+AmEx+Pixel with defs in the training prompt, hold out Netflix + the ratified 339) awaits Tyler's go on Fireworks spend. Production coder decision, prod config flip, and coding the 26,070 held answers all await Tyler's go. Remaining fleet to collect (trimmed panel): AG1, athenahealth, Purple, PwC, Nest - 2,440 prompts, ~26,840 answers at the full engine set; per-category calibration labeling is ~$10-25 on the Batch API if the subagent rule is ever lifted for prod.
