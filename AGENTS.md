@@ -41,4 +41,25 @@ Baseline grok-4-fast x decompose2 (temp 0) vs the 5,720-row Opus ground truth: *
 
 Nine prompt variants ran full-set (files in `~/Documents/procerno_eval/jira/decompose3/`, scorer `scripts/score_decompose3.py`): split 78.2%, tiebreak 79.0%, default 77.2%, evidence 67.8%, fewshot 75.6%, contrast 75.2%, traps 77.1%, summarize-then-code 58.0%/65.7% (v1/v2). Findings that should stop repeat work: (1) grok's errors are two-sided at both judgment boundaries - prompt changes shift thresholds and trade cells, they never add discrimination; (2) quote/evidence gates make grok refuse positive judgments (reasons recall 64->20%, outcome 77->68%); (3) errors are shared difficulty, not model noise - on the 339 ratified rows only 2 of grok's 82 errors are grok-alone, and 105 rows are missed by 3+ of 5 bakeoff configs; (4) route-by-instability works as a detector (split+tb+traps disagreement flags 28% of rows carrying ~65% of errors; grok is 89.1% on the unanimous rest) but no cheap escalation coder exists: gpt-5-mini scored 41.1% on the routed slice (grok itself: 54.7%), summarize-then-code 48.3%; (5) gpt-5 family rejects temperature 0 - `openaiCreateT0` handles it (codes at default temp, not deterministic).
 
-Open: Fireworks LoRA fine-tune (qwen-class judgment coder trained on the 5,081 non-ratified Opus labels, 339 held out; `~/Documents/procerno_eval/finetune/`) - launched from a separate session; score it on the full set AND the routed slice (`decompose3/routed_slice.txt`). Production coder decision, prod config flip, and coding the 26,070 held answers all await Tyler's go. Remaining fleet to collect (trimmed panel): AG1, athenahealth, Purple, PwC, Nest - 2,440 prompts, ~26,840 answers at the full engine set.
+## Calibration-sample round (Netflix, 2026-09-21)
+
+Tested whether a small labeled calibration sample can supply prompt parameters that improve the LoRA coder's weak field (reasons) on an unseen brand. Adapter `procerno-coder-v1` (jira-only training) over the 3,760 Netflix answers from vault run 3edb9206, temp 0, prod untouched. 150 rows drawn at random (seed 20260921, ids in `netflix/calib_150_ids.txt`); all scoring on the 3,610 held-out rows (`netflix/heldout_3610_ids.txt`). Scripts: `finetune/ft_eval_netflix.mts`, `scripts/score_netflix_calibration.py`, `scripts/score_netflix_ablation.py`; outputs `finetune/ft_netflix_{baseline,calibrated,density_only}.jsonl`.
+
+Two parameters were measured from the 150-row sample only: (a) density - truth 1.65 codes/row vs the model's 1.02; (b) top sibling confusion - "ad-supported option" used where truth said "ad frequency".
+
+| condition | outcome | framing | top_pick | reason P | reason R | reason F1 | codes/row |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| baseline | 85.1% | 88.0% | 86.6% | 78.0% | 55.7% | 65.0% | 1.14 |
+| density sentence only | 85.1% | 87.8% | 86.6% | 75.4% | 62.8% | **68.5%** | 1.33 |
+| density + confusion | 85.5% | 87.0% | 86.7% | 74.4% | 62.4% | 67.9% | 1.34 |
+
+Truth is 1.60 codes/row on the held-out set. Findings:
+
+1. **Density transfers, and it is the whole gain.** One sentence stating the measured mean buys **+3.5 reason F1** (recall +7.1 against precision -2.6) and moves nothing else: outcome -0.0, framing -0.1, top_pick +0.0, exact-set +0.0. Adapter transfer on outcome/framing/top_pick (85.1 / 88.0 / 86.6) is unaffected by prompt density nudges.
+2. **The confusion parameter is harmful - do not re-try it.** Isolated by ablation, the second sentence costs F1 -0.7, precision -1.0, recall -0.4, framing -0.8 versus density-only, and fails at its own job: naming the pair pushed "ad-supported option" from 225 to 359 emissions and from 60% to 69% wrong, with targeted confusion rows rising 87 -> 123. Naming a code pair raises salience of both codes rather than redirecting between them - same "sensitivity lever, not threshold shift" pattern as decompose3 finding (1), now with a controlled ablation behind it.
+3. Spend a calibration sample on **distributional priors** (a mean a 150-row draw estimates tightly), never on error-pattern corrections - those need far more rows to estimate and then push the wrong way. The confusion parameter here rested on 3 rows and tied with a non-sibling pair.
+4. Density-only still sits 0.27 codes/row under truth, so some recall gap remains reachable; whether a stronger statement recovers it or tips into precision collapse is untested.
+
+Hygiene note: model-authored reason-code definition files (`*_code_defs.json`) are not validated artifacts and one was shown to degrade agreement. The Netflix copy was deleted; do not regenerate them from world knowledge.
+
+Open: Fireworks LoRA fine-tune (qwen-class judgment coder trained on the 5,081 non-ratified Opus labels, 339 held out; `~/Documents/procerno_eval/finetune/`) - launched from a separate session; score it on the full set AND the routed slice (`decompose3/routed_slice.txt`); Netflix transfer is measured (above), jira full-set and routed-slice scoring is not. Production coder decision, prod config flip, and coding the 26,070 held answers all await Tyler's go. Remaining fleet to collect (trimmed panel): AG1, athenahealth, Purple, PwC, Nest - 2,440 prompts, ~26,840 answers at the full engine set.
