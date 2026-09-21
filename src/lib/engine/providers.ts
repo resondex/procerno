@@ -944,9 +944,10 @@ const SUMMARY_SYSTEM =
   "diagnoses, compares, or instructs without advising any product. " +
   "Preserve hedging verbs exactly ('likely worth it', 'best for', " +
   "'start with').\n" +
-  "QUESTIONS: whether it asks the reader anything, and whether it " +
-  "advises nothing until details arrive.\n" +
-  "Max 250 words. Report only what the answer says; add nothing.";
+  "QUESTIONS: copy verbatim any question the answer asks the reader, " +
+  "or write 'none'. Nothing else in this section.\n" +
+  "Max 250 words. Report only what the answer says; add nothing, and " +
+  "never repeat wording from these instructions.";
 
 /** decompose3_tiebreak (2026-09-20, h3): the entire pick->conditional gap
  * lives in one boolean, so re-ask only that boolean, only on the boundary
