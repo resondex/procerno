@@ -562,6 +562,9 @@ const OUTCOME_MODES = [
   "decompose3_survival", // q_single_direction with hardened survival clause + in-question micro-examples
   "decompose3_evidence", // quote-then-decide: verbatim evidence fields precede the booleans
   "decompose3_fewshot", // decompose2 + ratified precedents as worked cases
+  "decompose3_contrast", // decompose2 + balanced near-miss pairs and do-NOT rules
+  "decompose3_traps", // decompose2 + named checklist of measured coder mistakes
+  "decompose3_summary", // summarize the answer first, then code the summary
 ] as const;
 type OutcomeMode = "" | (typeof OUTCOME_MODES)[number];
 
@@ -852,6 +855,99 @@ const DECOMPOSE3_PRECEDENTS =
   "asks-and-waits no (information was already given). Products named " +
   "inside a question or an explanation are not being advised.\n";
 
+/** decompose3_contrast (2026-09-21): every earlier variant pushed the
+ * boundary from one side and traded cells. These are balanced near-miss
+ * PAIRS - both sides of each failing boundary, plus do-NOT rules mined
+ * from the giveback cells. */
+const DECOMPOSE3_CONTRAST =
+  "CONTRAST PAIRS - near-identical cases whose codings differ; the one " +
+  "stated difference decides. Apply the same distinctions.\n" +
+  "PAIR A (default vs split):\n" +
+  "- 'Start with X. If you outgrow it, Y is the natural step up.' -> " +
+  "q_single_direction YES (X is put first; the branch does not remove " +
+  "it).\n" +
+  "- 'X if you want simplicity; Y if you need power.' -> " +
+  "q_single_direction NO (branches only; nothing put first).\n" +
+  "The difference: is one product put first BEFORE the branching, or " +
+  "is branching all there is?\n" +
+  "PAIR B (labeled winner vs labeled shortlist):\n" +
+  "- 'X (Best Overall). Y (Best for tight budgets).' -> " +
+  "q_single_direction YES (a Best-Overall label puts X first).\n" +
+  "- '1) X - best for enterprises. 2) Y - best for startups. 3) Z - " +
+  "best for solo use.', no overall winner -> q_single_direction NO " +
+  "(best-fors only; no product put first).\n" +
+  "PAIR C (hedged advice vs description):\n" +
+  "- 'The extra $75/month for X Premium is likely worth it for a team " +
+  "your size.' -> q_recommends_any YES (hedged advice is advice).\n" +
+  "- 'X Premium costs an extra $75/month and includes a 12,000-run " +
+  "pool.' -> q_recommends_any NO (pricing facts; no direction).\n" +
+  "PAIR D (fix-in-place advice vs diagnosis that names brands):\n" +
+  "- 'Most teams solve this without leaving X - audit your workflows " +
+  "first.' -> q_recommends_any YES (keep-what-you-have direction).\n" +
+  "- 'The culprit is usually configuration, not X being bad at scale " +
+  "- here is the audit checklist.' -> q_recommends_any NO (diagnosis " +
+  "and playbook; X is named only inside the explanation).\n" +
+  "DO NOT rules (each is a measured coder mistake):\n" +
+  "- Do NOT answer q_single_direction 'no' merely because " +
+  "alternatives, exceptions, caveats or questions follow a stated " +
+  "default.\n" +
+  "- Do NOT answer q_recommends_any 'yes' merely because brands are " +
+  "named inside explanations, pricing, tables, or how-to steps.\n" +
+  "- Do NOT answer q_recommends_any 'no' merely because the advice is " +
+  "hedged ('likely worth it', 'good candidates') or split into " +
+  "branches.\n";
+
+/** decompose3_traps (2026-09-21): the same failure knowledge delivered as
+ * a named checklist of the coder's measured mistake patterns, to prime
+ * self-checking rather than teach by pairs. */
+const DECOMPOSE3_TRAPS =
+  "KNOWN CODING TRAPS - the measured mistake patterns of coders on " +
+  "this task. Check every headline against the answer BEFORE " +
+  "answering the questions.\n" +
+  "- STATED DEFAULT, THEN BRANCHES: a default followed by 'if you " +
+  "outgrow it...', 'unless...', caveats, alternatives, or questions " +
+  "is still exactly one direction. Trap: coding it as split.\n" +
+  "- BEST OVERALL LABEL: a #1, 'Best Overall', or 'top pick' in a " +
+  "ranking presented as advice puts that product first. Trap: " +
+  "reading the ranking as a neutral list.\n" +
+  "- KEEP OR RENEW: advice to stay with, renew, or fix the reader's " +
+  "current product is a pick of that product. Trap: coding it as no " +
+  "advice.\n" +
+  "- HEDGED TIER ADVICE: 'likely worth it', 'worth the upgrade for " +
+  "your size', 'good candidates to check' is advice. Trap: reading " +
+  "hedges as description.\n" +
+  "- BEST-FOR SHORTLIST: options each championed for a situation " +
+  "('Best for: ...') are advice that splits the decision. Trap: " +
+  "coding the set as a neutral comparison.\n" +
+  "- PLAYBOOK WITH BRAND NAMES: steps, audits, pricing math, and " +
+  "diagnoses that merely name products are NOT advice. Trap: " +
+  "crowning a brand named inside an explanation.\n" +
+  "- MARKET-POSITION LANGUAGE: 'the industry standard', 'still the " +
+  "default for large enterprises' describes the market, not the " +
+  "reader's direction. Trap: reading it as a recommendation.\n";
+
+/** decompose3_summary (2026-09-21): normalize before judging - a first
+ * call rewrites the answer as a structured brief (brands, advice
+ * structure, questions), and the coding questions run on the brief.
+ * Stays blind: the summary prompt never names the study's focus brand. */
+const SUMMARY_SYSTEM =
+  "Rewrite the following AI assistant answer as a compact structured " +
+  "brief for a coder. Include exactly three sections:\n" +
+  "BRANDS: every company, brand, product, or service named, in order " +
+  "of first appearance, including ones named only as integrations - " +
+  "copy each name exactly as written.\n" +
+  "ADVICE: what the answer tells the reader to do - which products " +
+  "(if any) it puts forward as advice and how strongly; whether any " +
+  "single product is put first as a default or first choice, and " +
+  "which; what branches, conditions, caveats, or alternatives " +
+  "surround the advice; or state plainly that it only informs, " +
+  "diagnoses, compares, or instructs without advising any product. " +
+  "Preserve hedging verbs exactly ('likely worth it', 'best for', " +
+  "'start with').\n" +
+  "QUESTIONS: whether it asks the reader anything, and whether it " +
+  "advises nothing until details arrive.\n" +
+  "Max 250 words. Report only what the answer says; add nothing.";
+
 /** decompose3_tiebreak (2026-09-20, h3): the entire pick->conditional gap
  * lives in one boolean, so re-ask only that boolean, only on the boundary
  * cell (q_recommends_any && !q_single_direction, ~34% of answers). */
@@ -960,8 +1056,14 @@ function codingInstructions(ctx: ExtractionContext): string {
             ? DECOMPOSE3_EVIDENCE_PREFIX + DECOMPOSE2_QUESTIONS
             : mode === "decompose3_fewshot"
               ? DECOMPOSE2_QUESTIONS + DECOMPOSE3_PRECEDENTS
-              : mode === "decompose2" || mode === "decompose3_tiebreak"
-                ? DECOMPOSE2_QUESTIONS
+              : mode === "decompose3_contrast"
+                ? DECOMPOSE2_QUESTIONS + DECOMPOSE3_CONTRAST
+                : mode === "decompose3_traps"
+                  ? DECOMPOSE2_QUESTIONS + DECOMPOSE3_TRAPS
+                  : mode === "decompose2" ||
+                      mode === "decompose3_tiebreak" ||
+                      mode === "decompose3_summary"
+                    ? DECOMPOSE2_QUESTIONS
           : mode === "decompose"
             ? DECOMPOSE_QUESTIONS
             : mode === "ladder"
@@ -1179,6 +1281,22 @@ const openaiProvider: CompletionProvider = {
     const coderEngine = getEngine(coder) ?? CODER_ONLY[coder];
     const c = coderEngine?.baseURL ? compatClient(coderEngine as Engine) : client();
     return withRetry(async () => {
+      // decompose3_summary: normalize first - the coding questions then run
+      // on the structured brief instead of the raw answer.
+      let codingText = responseText;
+      if (outcomeMode() === "decompose3_summary") {
+        const s = await c.chat.completions.create({
+          model: coder,
+          temperature: 0,
+          max_tokens: 450,
+          messages: [
+            { role: "system", content: SUMMARY_SYSTEM },
+            { role: "user", content: responseText },
+          ],
+        });
+        ctx.usageSink?.(coder, s.usage?.prompt_tokens ?? 0, s.usage?.completion_tokens ?? 0);
+        codingText = s.choices[0]?.message?.content?.trim() || responseText;
+      }
       const res = await c.chat.completions.create({
         model: coder,
         temperature: 0,
@@ -1191,7 +1309,7 @@ const openaiProvider: CompletionProvider = {
               // focus changed. This pass never learns whose study it is.
 codingInstructions(ctx),
           },
-          { role: "user", content: responseText },
+          { role: "user", content: codingText },
         ],
         response_format: {
           type: "json_schema",
@@ -1206,6 +1324,10 @@ codingInstructions(ctx),
       const raw = res.choices[0]?.message?.content ?? "{}";
       if (process.env.EXTRACT_DEBUG_RAW === "1") console.error("RAW:", raw);
       const parsed = JSON.parse(raw) as ExtractionResult;
+      if (outcomeMode() === "decompose3_summary") {
+        // Ride along so the eval can audit what the coder actually judged.
+        (parsed as unknown as { summary_text?: string }).summary_text = codingText;
+      }
       // The focus brand is needed only for the quote fields, so it is asked
       // for in its own call — after the judgement calls are already made.
       let focusQuote: string | null = null;
