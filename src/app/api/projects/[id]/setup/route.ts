@@ -110,7 +110,13 @@ export async function PUT(
       competitors.join("|") !== project.competitors.join("|"))
   ) {
     try {
-      reasonTaxonomy = await getReasonTaxonomy({ category, competitors });
+      reasonTaxonomy = await getReasonTaxonomy({
+        category,
+        competitors,
+        scenarios: grid.cells
+          .map((c) => c.situation)
+          .filter((s): s is string => !!s),
+      });
     } catch (err) {
       console.error("taxonomy regeneration failed:", err);
     }

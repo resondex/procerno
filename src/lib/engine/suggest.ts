@@ -81,18 +81,25 @@ const TAXONOMY_SCHEMA = {
 } as const;
 
 /**
- * Closed reason-code taxonomy for a category — the arguments assistants use
- * to justify recommendations. Generated once per category (cache-first) and
- * frozen on the project at creation.
+ * Seed reason-code taxonomy for a category — the arguments assistants use
+ * to justify recommendations. Generated once per category (cache-first) at
+ * creation. This is a PRE-DATA HYPOTHESIS: the ratified list comes from the
+ * post-collection discovery pass (incidence, confusion, uncoded_reason
+ * clusters), which cuts, merges, and adds against real emissions. The jira
+ * pass showed why: 3 of its 22 seed codes were never argued from once in
+ * 5,720 answers, while a real axis (migration tooling) was missing entirely.
  */
 export async function getReasonTaxonomy(input: {
   category: string;
   competitors: string[];
+  scenarios?: string[];
 }): Promise<string[]> {
   tagCosts({ purpose: "setup:taxonomy" });
+  const scenarios = [...new Set(input.scenarios ?? [])].filter(Boolean);
   const key = cacheKey("taxonomy", [
     input.category,
     [...input.competitors].sort().join(","),
+    [...scenarios].sort().join("|"),
   ]);
   const hit = await store.cacheGet(key, CACHE_TTL_MS);
   if (hit) return JSON.parse(hit) as string[];
@@ -102,19 +109,26 @@ export async function getReasonTaxonomy(input: {
       {
         role: "system",
         content:
-          "Produce a closed taxonomy of 18 to 22 reason codes: the arguments " +
-          "an AI assistant uses to justify or compare recommendations in the " +
-          "given category (the credit-card equivalents are 'annual fee', " +
-          "'lounge access', 'cash back'). Rules: short lowercase noun phrases " +
-          "(1-3 words), mutually distinct, spanning price/cost, quality, " +
-          "features, ease of use, trust/reputation, fit-for-situation, and any " +
-          "category-specific dimensions. No brand names.",
+          "Produce a closed taxonomy of reason codes: the arguments an AI " +
+          "assistant uses to justify or compare recommendations in the given " +
+          "category (the credit-card equivalents are 'annual fee', " +
+          "'lounge access', 'cash back'). Ground every code in the buying " +
+          "scenarios provided: include a code only if an answer to one of " +
+          "those scenarios would plausibly argue FROM it; scenario-specific " +
+          "dimensions (e.g. migration or switching concerns when scenarios " +
+          "describe replacing an incumbent) matter as much as generic ones. " +
+          "Rules: short lowercase noun phrases (1-3 words), mutually " +
+          "distinct, never an umbrella term alongside its own specifics " +
+          "(one of 'travel perks' or 'lounge access', not both). As many " +
+          "codes as the scenarios justify and no more - do not pad to a " +
+          "count. No brand names.",
       },
       {
         role: "user",
         content: JSON.stringify({
           category: input.category,
           competitor_context: input.competitors,
+          buying_scenarios: scenarios,
         }),
       },
     ],

@@ -157,7 +157,13 @@ export async function POST(req: Request) {
   let reasonTaxonomy: string[] = [];
   if (apiKeyConfigured()) {
     try {
-      reasonTaxonomy = await getReasonTaxonomy({ category, competitors });
+      reasonTaxonomy = await getReasonTaxonomy({
+        category,
+        competitors,
+        scenarios: parsed.data.grid?.cells
+          .map((c) => c.situation)
+          .filter((s): s is string => !!s),
+      });
     } catch (err) {
       console.error("taxonomy generation failed:", err);
     }
