@@ -79,6 +79,14 @@ export interface Project {
   taxonomy_proposal: string | null;
   /** pending -> proposed -> ratified. */
   taxonomy_status: string;
+  /** Snapshot of reason_taxonomy the moment a proposal attached - the
+   * pre-discovery seed (or []). Kept so recommended-vs-decided-vs-original
+   * is analyzable across brands. */
+  taxonomy_original: string | null;
+  /** The confirmation's decision record (JSON): per code the machine's
+   * recommendation, the human's decision, display renames, merges, and
+   * user-added codes. The training data for sharpening recommendations. */
+  taxonomy_decision: string | null;
   /** The core engine panel — part of the frozen instrument. Scheduled runs
    * always use it; headline metrics and the trend compute over it. Engines
    * beyond it in a run are bonus views. */
@@ -842,8 +850,9 @@ export interface Store {
   /** Append one row to the token-spend ledger (see lib/cost_log.ts). */
   /** Attach a discovery-derived taxonomy proposal; status -> proposed. */
   setTaxonomyProposal(projectId: string, proposalJson: string): Promise<void>;
-  /** Ratify the confirmed code list; status -> ratified. */
-  ratifyTaxonomy(projectId: string, codes: string[]): Promise<void>;
+  /** Ratify the confirmed code list with its decision record;
+   * status -> ratified. */
+  ratifyTaxonomy(projectId: string, codes: string[], decisionJson: string): Promise<void>;
   insertCostEntry(input: {
     projectId?: string | null;
     runId?: string | null;

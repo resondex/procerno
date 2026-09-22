@@ -3,10 +3,12 @@ import { z } from "zod";
 import { getAuth, requireProject } from "@/lib/auth";
 import { store } from "@/lib/store";
 
-/** The taxonomy confirmation endpoint. GET returns the discovery-derived
- * proposal and status; POST ratifies the confirmed code list - the one
- * human/customer judgment in the discovery pipeline. Ratification writes
- * reason_taxonomy and flips taxonomy_status; it never touches answers. */
+/** The taxonomy confirmation endpoint - the one human judgment in the
+ * discovery pipeline. GET returns the proposal and status; POST ratifies a
+ * full decision record: per-code include/exclude, cosmetic renames, merges
+ * (members fold into a new canonical), and user-added codes. The record is
+ * stored verbatim alongside the machine's recommendation so
+ * recommended-vs-decided is analyzable across brands. Never touches answers. */
 
 export async function GET(
   _req: Request,
@@ -21,11 +23,33 @@ export async function GET(
     status: project.taxonomy_status,
     reason_taxonomy: project.reason_taxonomy,
     proposal: project.taxonomy_proposal ? JSON.parse(project.taxonomy_proposal) : null,
+    decision: project.taxonomy_decision ? JSON.parse(project.taxonomy_decision) : null,
   });
 }
 
-const confirmSchema = z.object({
-  codes: z.array(z.string().trim().min(1).max(80)).min(3).max(60),
+const slug = (s: string) =>
+  s.trim().toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+
+const decisionSchema = z.object({
+  decisions: z
+    .array(
+      z.object({
+        /** Proposal code this row decides, or the new name of an added code. */
+        canonical: z.string().trim().min(1).max(80),
+        recommended: z.enum(["include", "review"]),
+        decided: z.enum(["include", "exclude"]),
+        /** Cosmetic rename; canonical stays the coding key. */
+        display_name: z.string().trim().min(1).max(80).optional(),
+        /** Set when this code was folded into a merge group. */
+        merged_into: z.string().trim().min(1).max(80).optional(),
+        /** True for codes the user typed in themselves. */
+        added: z.boolean().optional(),
+      })
+    )
+    .min(3)
+    .max(120),
+  /** Merge groups: new canonical -> member proposal codes. */
+  merges: z.record(z.string(), z.array(z.string()).min(2)).default({}),
 });
 
 export async function POST(
@@ -37,14 +61,40 @@ export async function POST(
   if (!auth) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   const project = await requireProject(id, auth);
   if (project instanceof NextResponse) return project;
-  const parsed = confirmSchema.safeParse(await req.json().catch(() => null));
+  const parsed = decisionSchema.safeParse(await req.json().catch(() => null));
   if (!parsed.success) {
     return NextResponse.json(
       { error: parsed.error.issues[0]?.message ?? "invalid input" },
       { status: 400 }
     );
   }
-  const codes = [...new Set(parsed.data.codes.map((c) => c.toLowerCase()))];
-  await store.ratifyTaxonomy(id, codes);
-  return NextResponse.json({ ok: true, reason_taxonomy: codes, status: "ratified" });
+  const { decisions, merges } = parsed.data;
+
+  // The ratified list: every included, un-merged canonical, plus each merge
+  // group's target once, deduped. Merged members ride under their target.
+  const codes: string[] = [];
+  for (const d of decisions) {
+    if (d.decided !== "include" || d.merged_into) continue;
+    codes.push(slug(d.canonical));
+  }
+  for (const target of Object.keys(merges)) {
+    const t = slug(target);
+    if (!codes.includes(t)) codes.push(t);
+  }
+  const finalCodes = [...new Set(codes.filter(Boolean))];
+  if (finalCodes.length < 3 || finalCodes.length > 60) {
+    return NextResponse.json(
+      { error: `ratified list must be 3-60 codes (got ${finalCodes.length})` },
+      { status: 400 }
+    );
+  }
+
+  const record = JSON.stringify({
+    decided_at: new Date().toISOString(),
+    decisions,
+    merges,
+    ratified: finalCodes,
+  });
+  await store.ratifyTaxonomy(id, finalCodes, record);
+  return NextResponse.json({ ok: true, reason_taxonomy: finalCodes, status: "ratified" });
 }

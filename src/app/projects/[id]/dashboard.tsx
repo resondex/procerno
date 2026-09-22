@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import TrendChart from "./trend_chart";
 import RunResults from "./run_results";
+import TaxonomyReview from "./taxonomy_review";
 import IdentifyTab from "./identify_tab";
 import ParentsTab from "./parents_tab";
 import {
@@ -400,7 +401,7 @@ export default function ProjectDashboard({
 
       {activeRun?.status === "collected" &&
         (!progress || (progress.total > 0 && progress.completed >= progress.total)) && (
-          <PipelineNext id={id} project={project} answers={progress?.total ?? 0} />
+          <PipelineNext id={id} project={project} answers={progress?.total ?? 0} onRatified={refresh} />
         )}
 
       {shownRun ? (
@@ -1165,21 +1166,14 @@ function PipelineNext({
   id,
   project,
   answers,
+  onRatified,
 }: {
   id: string;
   project: Project;
   answers: number;
+  onRatified: () => void;
 }) {
   const status = project.taxonomy_status ?? "pending";
-  const proposalCodes: number = (() => {
-    try {
-      return project.taxonomy_proposal
-        ? (JSON.parse(project.taxonomy_proposal).codes?.length ?? 0)
-        : 0;
-    } catch {
-      return 0;
-    }
-  })();
   const steps: { label: string; state: "done" | "now" | "todo" }[] = [
     { label: "Collect", state: "done" },
     {
@@ -1224,23 +1218,12 @@ function PipelineNext({
         </div>
       )}
       {status === "proposed" && (
-        <div className="flex flex-wrap items-center justify-between gap-3">
-          <div className="grid gap-1">
-            <h2 className="text-sm font-semibold">
-              Your codebook is ready to confirm
-            </h2>
-            <p className="text-[13px] text-ink-3">
-              {proposalCodes} argument dimensions measured from{" "}
-              {answers.toLocaleString()} answers. Confirm them to start coding.
-            </p>
-          </div>
-          <Link
-            href={`/projects/${id}/taxonomy`}
-            className="rounded bg-primary px-4 py-2 text-sm font-medium text-white"
-          >
-            Review &amp; confirm
-          </Link>
-        </div>
+        <TaxonomyReview
+          id={id}
+          project={project}
+          answers={answers}
+          onRatified={onRatified}
+        />
       )}
       {status === "ratified" && (
         <div className="grid gap-2">

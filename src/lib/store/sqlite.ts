@@ -46,6 +46,8 @@ function createDb(): Database.Database {
       reason_taxonomy TEXT NOT NULL DEFAULT '[]',
       taxonomy_proposal TEXT,
       taxonomy_status TEXT NOT NULL DEFAULT 'pending',
+      taxonomy_original TEXT,
+      taxonomy_decision TEXT,
       engine_set TEXT NOT NULL DEFAULT '[]',
       org_id TEXT,
       dictionary_version INTEGER NOT NULL DEFAULT 1,
@@ -327,6 +329,10 @@ function createDb(): Database.Database {
       "ALTER TABLE projects ADD COLUMN taxonomy_status TEXT NOT NULL DEFAULT 'pending'"
     );
   }
+  if (!cols.some((c) => c.name === "taxonomy_decision")) {
+    db.exec("ALTER TABLE projects ADD COLUMN taxonomy_original TEXT");
+    db.exec("ALTER TABLE projects ADD COLUMN taxonomy_decision TEXT");
+  }
   if (!cols.some((c) => c.name === "reason_taxonomy")) {
     db.exec(
       "ALTER TABLE projects ADD COLUMN reason_taxonomy TEXT NOT NULL DEFAULT '[]'"
@@ -470,6 +476,10 @@ function parseProject(row: ProjectRaw): Project {
       (row as unknown as { taxonomy_proposal?: string | null }).taxonomy_proposal ?? null,
     taxonomy_status:
       (row as unknown as { taxonomy_status?: string }).taxonomy_status ?? "pending",
+    taxonomy_original:
+      (row as unknown as { taxonomy_original?: string | null }).taxonomy_original ?? null,
+    taxonomy_decision:
+      (row as unknown as { taxonomy_decision?: string | null }).taxonomy_decision ?? null,
     dictionary_version:
       (row as unknown as { dictionary_version?: number }).dictionary_version ?? 1,
     evidence_drawer:
@@ -1215,17 +1225,18 @@ export const sqliteStore: Store = {
   async setTaxonomyProposal(projectId, proposalJson) {
     getDb()
       .prepare(
-        "UPDATE projects SET taxonomy_proposal = ?, taxonomy_status = 'proposed' WHERE id = ?"
+        "UPDATE projects SET taxonomy_proposal = ?, taxonomy_status = 'proposed', " +
+          "taxonomy_original = COALESCE(taxonomy_original, reason_taxonomy) WHERE id = ?"
       )
       .run(proposalJson, projectId);
   },
 
-  async ratifyTaxonomy(projectId, codes) {
+  async ratifyTaxonomy(projectId, codes, decisionJson) {
     getDb()
       .prepare(
-        "UPDATE projects SET reason_taxonomy = ?, taxonomy_status = 'ratified' WHERE id = ?"
+        "UPDATE projects SET reason_taxonomy = ?, taxonomy_decision = ?, taxonomy_status = 'ratified' WHERE id = ?"
       )
-      .run(JSON.stringify(codes), projectId);
+      .run(JSON.stringify(codes), decisionJson, projectId);
   },
 
   async insertCostEntry(input) {

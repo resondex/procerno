@@ -60,6 +60,8 @@ function ensureSchema(): Promise<void> {
       await sql`ALTER TABLE projects ADD COLUMN IF NOT EXISTS reason_taxonomy TEXT NOT NULL DEFAULT '[]'`;
       await sql`ALTER TABLE projects ADD COLUMN IF NOT EXISTS taxonomy_proposal TEXT`;
       await sql`ALTER TABLE projects ADD COLUMN IF NOT EXISTS taxonomy_status TEXT NOT NULL DEFAULT 'pending'`;
+      await sql`ALTER TABLE projects ADD COLUMN IF NOT EXISTS taxonomy_original TEXT`;
+      await sql`ALTER TABLE projects ADD COLUMN IF NOT EXISTS taxonomy_decision TEXT`;
       await sql`ALTER TABLE projects ADD COLUMN IF NOT EXISTS dictionary_version INTEGER NOT NULL DEFAULT 1`;
       await sql`ALTER TABLE projects ADD COLUMN IF NOT EXISTS engine_set TEXT NOT NULL DEFAULT '[]'`;
       await sql`ALTER TABLE projects ADD COLUMN IF NOT EXISTS org_id TEXT`;
@@ -318,6 +320,8 @@ function rowToProject(r: Record<string, unknown>): Project {
     reason_taxonomy: JSON.parse((r.reason_taxonomy as string) ?? "[]"),
     taxonomy_proposal: (r.taxonomy_proposal as string | null) ?? null,
     taxonomy_status: (r.taxonomy_status as string) ?? "pending",
+    taxonomy_original: (r.taxonomy_original as string | null) ?? null,
+    taxonomy_decision: (r.taxonomy_decision as string | null) ?? null,
     engine_set: JSON.parse((r.engine_set as string) ?? "[]"),
     dictionary_version: (r.dictionary_version as number) ?? 1,
     evidence_drawer: (r.evidence_drawer as number) ?? 1,
@@ -951,12 +955,19 @@ export const pgStore: Store = {
 
   async setTaxonomyProposal(projectId, proposalJson) {
     const sql = await db();
-    await sql`UPDATE projects SET taxonomy_proposal = ${proposalJson}, taxonomy_status = 'proposed' WHERE id = ${projectId}`;
+    // Snapshot the pre-discovery list once - COALESCE keeps the first
+    // snapshot if a proposal is ever re-attached.
+    await sql`UPDATE projects SET taxonomy_proposal = ${proposalJson},
+      taxonomy_status = 'proposed',
+      taxonomy_original = COALESCE(taxonomy_original, reason_taxonomy)
+      WHERE id = ${projectId}`;
   },
 
-  async ratifyTaxonomy(projectId, codes) {
+  async ratifyTaxonomy(projectId, codes, decisionJson) {
     const sql = await db();
-    await sql`UPDATE projects SET reason_taxonomy = ${JSON.stringify(codes)}, taxonomy_status = 'ratified' WHERE id = ${projectId}`;
+    await sql`UPDATE projects SET reason_taxonomy = ${JSON.stringify(codes)},
+      taxonomy_decision = ${decisionJson},
+      taxonomy_status = 'ratified' WHERE id = ${projectId}`;
   },
 
   async insertCostEntry(input) {
