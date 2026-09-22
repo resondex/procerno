@@ -123,4 +123,21 @@ Cross-model match (grok-4-fast, temp 0, byte-identical open prompts, 2,000 rows,
 
 Review-gate design (Tyler): invert into a customer feature - after discovery, a findings screen ("your market's arguments") with per-code evidence (incidence, quote snippets) and Claude-authored recommendations (include / out-of-scope / merge / flag), customer confirms -> ratified -> coding wave. Tyler reviews only the bootstrap brands to calibrate thresholds and scope rules.
 
-Open: consolidation stage (altitude rule + size prior, embeddings-first later) -> corrected four-brand proposals -> Tyler/customer-style confirmation -> full reasons-only relabels under ratified lists (Opus batch, ~$250 all four) -> v3 retrain. Production coder decision, prod config flip, and coding the 26,070 held answers await Tyler's go. Remaining fleet to collect (trimmed panel): AG1, athenahealth, Purple, PwC, Nest - 2,440 prompts, ~26,840 answers at the full engine set; per-category calibration labeling is ~$10-25 on the Batch API if the subagent rule is ever lifted for prod.
+## Census + consolidation bakeoff (2026-09-22): embeddings-first wins prod
+
+Full-brand discovery census ran on grok-4-fast (engine module `src/lib/engine/discovery.ts`: coverage param default 100%, equal-per-engine stratified sampling below that, metered to cost_log as discovery:open per project): 18,790/18,790 answers, $5.03 total, ~35-60 min/brand. The ledger also gained an **rnd boolean** (additive to project/run attribution; production COGS = WHERE NOT rnd; backfilled - everything to date except run:*/setup:*/tagged discovery is R&D).
+
+Two consolidation implementations built and compared on all four censuses (`labeling/consolidate_taxonomy.py` = all-LLM reference; `labeling/consolidate_embed.py` = embeddings-first: text-embedding-3-large + leader clustering at tau 0.60, ONE Opus consolidation call for altitude/scope/naming; comparison `compare_consolidations.py`, one-to-one semantic pairing):
+
+| brand | LLM codes | embed codes | weighted match LLM-side / embed-side |
+| --- | --- | --- | --- |
+| jira | 35 | 37 | 98% / 96% |
+| AmEx | 37 | 35 | 80% / 90% |
+| Netflix | 38 | 38 | 92% / 92% |
+| Pixel | 38 | 33 | 74% / 90% |
+
+Read: embed-side ~90-96% = content agreement; the LLM-side deficit is one-to-one pairing punishing slicing granularity (LLM splits camera/APR into shards; embed consolidates) - the truly unmatched codes are all tail (<16%). **Embed version is the prod consolidation stage**: same content at 8 min/$0.50 vs 60-90 min/$3-4, deterministic similarity core (the all-LLM version needed four robustness patches in one day: thinking-truncation, duplicate assignments, trailing commas, stream-buffer loss), one judgment call to audit, granularity a knob (tau + altitude prompt) instead of per-run drift. The all-LLM version is retained as an occasional QA cross-check only. Consolidation runs log to the ledger (discovery:consolidate, production).
+
+Four ratified-candidate taxonomies exist for review: `labeling/ratified_{brand}_embed.json` (+ .report.md; codes with incidence, evidence phrases, scope flags in/boundary, recommendation, rationale - the confirmation-screen artifact). Known open knob: the two versions slice differently at the same content; the confirmation pass is where slicing taste gets settled.
+
+Open: Tyler (or customer-style) confirmation of the four embed taxonomies -> full reasons-only relabels under ratified lists (Opus batch, ~$250 all four) -> v3 retrain. Prod build list: embeddings-first consolidation as engine module, confirmation card in console, Fireworks provider integration. Production coder decision, prod config flip, and coding the 26,070 held answers await Tyler's go. Remaining fleet to collect (trimmed panel): AG1, athenahealth, Purple, PwC, Nest - 2,440 prompts, ~26,840 answers at the full engine set; per-category calibration labeling is ~$10-25 on the Batch API if the subagent rule is ever lifted for prod.
