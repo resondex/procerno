@@ -9,7 +9,7 @@ import {
   requireAuth,
 } from "@/lib/auth";
 import { generatePromptBattery } from "@/lib/engine/prompts";
-import { getReasonTaxonomy, seedDictionary } from "@/lib/engine/suggest";
+import { seedDictionary } from "@/lib/engine/suggest";
 import { humanize, namesAnyBrand } from "@/lib/engine/instrument";
 import { apiKeyConfigured, availableEngines, getEngine } from "@/lib/engine/providers";
 
@@ -154,20 +154,12 @@ export async function POST(req: Request) {
 
   const { brand, competitors, category } = parsed.data;
   const audience = parsed.data.audience || null;
-  let reasonTaxonomy: string[] = [];
-  if (apiKeyConfigured()) {
-    try {
-      reasonTaxonomy = await getReasonTaxonomy({
-        category,
-        competitors,
-        scenarios: parsed.data.grid?.cells
-          .map((c) => c.situation)
-          .filter((s): s is string => !!s),
-      });
-    } catch (err) {
-      console.error("taxonomy generation failed:", err);
-    }
-  }
+  // No seed taxonomy at creation: the reason taxonomy is discovered from the
+  // collected answers (open-coded discovery pass -> clustering -> ratified),
+  // never guessed up front. Measured 2026-09-22: generated seeds anticipate
+  // ~50-80% of the real argument space and, when shown to the labeler,
+  // suppress discovery of the rest (absorption into nearby listed codes).
+  const reasonTaxonomy: string[] = [];
   const requestedEngines = (parsed.data.engines ?? []).filter((m) =>
     getEngine(m)
   );

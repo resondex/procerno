@@ -73,81 +73,9 @@ export async function getBattery(
   return battery;
 }
 
-const TAXONOMY_SCHEMA = {
-  type: "object",
-  additionalProperties: false,
-  properties: { codes: { type: "array", items: { type: "string" } } },
-  required: ["codes"],
-} as const;
-
-/**
- * Seed reason-code taxonomy for a category — the arguments assistants use
- * to justify recommendations. Generated once per category (cache-first) at
- * creation. This is a PRE-DATA HYPOTHESIS: the ratified list comes from the
- * post-collection discovery pass (incidence, confusion, uncoded_reason
- * clusters), which cuts, merges, and adds against real emissions. The jira
- * pass showed why: 3 of its 22 seed codes were never argued from once in
- * 5,720 answers, while a real axis (migration tooling) was missing entirely.
- */
-export async function getReasonTaxonomy(input: {
-  category: string;
-  competitors: string[];
-  scenarios?: string[];
-}): Promise<string[]> {
-  tagCosts({ purpose: "setup:taxonomy" });
-  const scenarios = [...new Set(input.scenarios ?? [])].filter(Boolean);
-  const key = cacheKey("taxonomy", [
-    input.category,
-    [...input.competitors].sort().join(","),
-    [...scenarios].sort().join("|"),
-  ]);
-  const hit = await store.cacheGet(key, CACHE_TTL_MS);
-  if (hit) return JSON.parse(hit) as string[];
-  const res = await openaiClient().chat.completions.create({
-    model: SUGGEST_MODEL,
-    messages: [
-      {
-        role: "system",
-        content:
-          "Produce a closed taxonomy of reason codes: the arguments an AI " +
-          "assistant uses to justify or compare recommendations in the given " +
-          "category (the credit-card equivalents are 'annual fee', " +
-          "'lounge access', 'cash back'). Ground every code in the buying " +
-          "scenarios provided: include a code only if an answer to one of " +
-          "those scenarios would plausibly argue FROM it; scenario-specific " +
-          "dimensions (e.g. migration or switching concerns when scenarios " +
-          "describe replacing an incumbent) matter as much as generic ones. " +
-          "Rules: short lowercase noun phrases (1-3 words), mutually " +
-          "distinct, never an umbrella term alongside its own specifics " +
-          "(one of 'travel perks' or 'lounge access', not both). As many " +
-          "codes as the scenarios justify and no more - do not pad to a " +
-          "count. No brand names.",
-      },
-      {
-        role: "user",
-        content: JSON.stringify({
-          category: input.category,
-          competitor_context: input.competitors,
-          buying_scenarios: scenarios,
-        }),
-      },
-    ],
-    response_format: {
-      type: "json_schema",
-      json_schema: { name: "taxonomy", strict: true, schema: TAXONOMY_SCHEMA },
-    },
-  });
-  const codes = [
-    ...new Set(
-      (JSON.parse(res.choices[0]?.message?.content ?? '{"codes":[]}')
-        .codes as string[])
-        .map((c) => c.trim().toLowerCase())
-        .filter(Boolean)
-    ),
-  ].slice(0, 24);
-  await store.cacheSet(key, JSON.stringify(codes), { category: input.category });
-  return codes;
-}
+// getReasonTaxonomy removed 2026-09-22: reason taxonomies are discovered
+// from collected answers (open-coded discovery -> clustering -> ratified),
+// never generated from priors. See AGENTS.md discovery-pilot findings.
 
 const ALIAS_SCHEMA = {
   type: "object",

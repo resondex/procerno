@@ -3,7 +3,7 @@ import { z } from "zod";
 import { requireAuth, requireProject } from "@/lib/auth";
 import { store } from "@/lib/store";
 import { apiKeyConfigured } from "@/lib/engine/providers";
-import { getReasonTaxonomy, seedDictionary } from "@/lib/engine/suggest";
+import { seedDictionary } from "@/lib/engine/suggest";
 import { humanize, namesAnyBrand } from "@/lib/engine/instrument";
 import { buildEditSetupDraft } from "@/lib/server/edit_setup";
 
@@ -102,25 +102,11 @@ export async function PUT(
   const { category, competitors, grid } = parsed.data;
   const audience = parsed.data.audience || null;
   const brand = project.brand;
-  let reasonTaxonomy: string[] = project.reason_taxonomy;
-  // The taxonomy is category-derived; regenerate only when the frame moved.
-  if (
-    apiKeyConfigured() &&
-    (category !== project.category ||
-      competitors.join("|") !== project.competitors.join("|"))
-  ) {
-    try {
-      reasonTaxonomy = await getReasonTaxonomy({
-        category,
-        competitors,
-        scenarios: grid.cells
-          .map((c) => c.situation)
-          .filter((s): s is string => !!s),
-      });
-    } catch (err) {
-      console.error("taxonomy regeneration failed:", err);
-    }
-  }
+  // The reason taxonomy is discovery-derived (never generated), so an edited
+  // frame keeps whatever the project has: an empty list pre-discovery, or the
+  // ratified list - a frame change big enough to invalidate it warrants a
+  // fresh discovery pass, not a regenerated guess.
+  const reasonTaxonomy: string[] = project.reason_taxonomy;
   const engineSet =
     parsed.data.engines && parsed.data.engines.length > 0
       ? parsed.data.engines
