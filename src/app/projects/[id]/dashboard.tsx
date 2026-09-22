@@ -389,7 +389,7 @@ export default function ProjectDashboard({
         />
       </div>
 
-      {activeRun && progress && (
+      {activeRun && progress && (progress.total === 0 || progress.completed < progress.total) && (
         <RunProgress
           progress={progress}
           engines={engines}
@@ -397,6 +397,11 @@ export default function ProjectDashboard({
           startedAt={activeRun.created_at}
         />
       )}
+
+      {activeRun?.status === "collected" &&
+        (!progress || (progress.total > 0 && progress.completed >= progress.total)) && (
+          <PipelineNext id={id} project={project} answers={progress?.total ?? 0} />
+        )}
 
       {shownRun ? (
         <>
@@ -1152,6 +1157,111 @@ const ASSISTANT_NAME: Record<string, string> = {
  * the task list, so they advance together; the assistant chips report who has
  * finished, never a per-engine diagnostic breakdown.
  */
+/** Collect-then-code pipeline: once a run's answers are all in, the next
+ * gate is the codebook. This card names the stage the tracker is actually
+ * in - discovery running, codebook awaiting confirmation, or coding - and
+ * routes to the confirmation screen when it is the human's turn. */
+function PipelineNext({
+  id,
+  project,
+  answers,
+}: {
+  id: string;
+  project: Project;
+  answers: number;
+}) {
+  const status = project.taxonomy_status ?? "pending";
+  const proposalCodes: number = (() => {
+    try {
+      return project.taxonomy_proposal
+        ? (JSON.parse(project.taxonomy_proposal).codes?.length ?? 0)
+        : 0;
+    } catch {
+      return 0;
+    }
+  })();
+  const steps: { label: string; state: "done" | "now" | "todo" }[] = [
+    { label: "Collect", state: "done" },
+    {
+      label: "Confirm codebook",
+      state: status === "ratified" ? "done" : "now",
+    },
+    { label: "Code", state: status === "ratified" ? "now" : "todo" },
+    { label: "Measure", state: "todo" },
+  ];
+  return (
+    <section className="card p-5 grid gap-3">
+      <div className="flex flex-wrap items-center gap-2 text-[12px]">
+        {steps.map((st, i) => (
+          <span key={st.label} className="flex items-center gap-2">
+            {i > 0 && <span className="text-ink-3">&rarr;</span>}
+            <span
+              className={
+                st.state === "done"
+                  ? "text-success font-medium"
+                  : st.state === "now"
+                    ? "text-primary font-semibold"
+                    : "text-ink-3"
+              }
+            >
+              {st.state === "done" ? "\u2713 " : ""}
+              {st.label}
+            </span>
+          </span>
+        ))}
+      </div>
+      {status === "pending" && (
+        <div className="grid gap-1">
+          <h2 className="flex items-center gap-2 text-sm font-semibold">
+            <span className="pulse-dot inline-block h-1.5 w-1.5 rounded-full bg-primary" />
+            Measuring your market&apos;s arguments
+          </h2>
+          <p className="text-[13px] text-ink-3">
+            All {answers.toLocaleString()} answers are in. Discovery is reading
+            them to find the arguments buyers actually make - your codebook
+            proposal appears here when it is ready.
+          </p>
+        </div>
+      )}
+      {status === "proposed" && (
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div className="grid gap-1">
+            <h2 className="text-sm font-semibold">
+              Your codebook is ready to confirm
+            </h2>
+            <p className="text-[13px] text-ink-3">
+              {proposalCodes} argument dimensions measured from{" "}
+              {answers.toLocaleString()} answers. Confirm them to start coding.
+            </p>
+          </div>
+          <Link
+            href={`/projects/${id}/taxonomy`}
+            className="rounded bg-primary px-4 py-2 text-sm font-medium text-white"
+          >
+            Review &amp; confirm
+          </Link>
+        </div>
+      )}
+      {status === "ratified" && (
+        <div className="grid gap-2">
+          <h2 className="flex items-center gap-2 text-sm font-semibold">
+            <span className="pulse-dot inline-block h-1.5 w-1.5 rounded-full bg-primary" />
+            Coding answers
+          </h2>
+          <p className="text-[13px] text-ink-3">
+            Reading all {answers.toLocaleString()} answers against your{" "}
+            {project.reason_taxonomy.length} confirmed dimensions. Results
+            appear here when coding completes.
+          </p>
+          <div className="h-1.5 w-full overflow-hidden rounded-full bg-line">
+            <div className="h-full w-full animate-pulse rounded-full bg-primary" />
+          </div>
+        </div>
+      )}
+    </section>
+  );
+}
+
 function RunProgress({
   progress,
   engines,
