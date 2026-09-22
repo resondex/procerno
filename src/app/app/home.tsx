@@ -233,7 +233,9 @@ function RunHint({ run }: { run: Run | null }) {
   const map: Record<Run["status"], { label: string; cls: string }> = {
     pending: { label: "queued", cls: "text-ink-3" },
     running: { label: "running", cls: "text-primary" },
-    collected: { label: "coding", cls: "text-primary" },
+    // Collect-then-code: collected answers are held until the coding wave
+    // runs - "coding" overpromised while the hold is on.
+    collected: { label: "collected", cls: "text-primary" },
     complete: { label: "measured", cls: "text-success" },
     failed: { label: "run failed", cls: "text-danger" },
   };
