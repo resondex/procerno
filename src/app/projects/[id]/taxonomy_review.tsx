@@ -100,6 +100,7 @@ export default function TaxonomyReview({
   const [undoDepth, setUndoDepth] = useState(0);
   const [mergeSel, setMergeSel] = useState<Set<string>>(new Set());
   const [addText, setAddText] = useState("");
+  const [expanded, setExpanded] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -291,7 +292,7 @@ export default function TaxonomyReview({
             included automatically - open to rename, exclude, or merge
           </span>
         </summary>
-        <div>
+        <div className="max-h-80 overflow-y-auto">
           {state.merges.map((m) => (
             <div
               key={m.target}
@@ -324,9 +325,9 @@ export default function TaxonomyReview({
             .map((c) => {
               const r = state.rows[c.code];
               return (
+                <div key={c.code} className="border-t border-line">
                 <div
-                  key={c.code}
-                  className={`flex items-center gap-2 border-t border-line px-3 py-1.5 ${r.included ? "" : "opacity-50"}`}
+                  className={`flex items-center gap-2 px-3 py-1.5 ${r.included ? "" : "opacity-50"}`}
                 >
                   <input
                     type="checkbox"
@@ -348,6 +349,12 @@ export default function TaxonomyReview({
                   {r.displayName !== c.code && (
                     <span className="text-[11px] text-ink-3">({c.code})</span>
                   )}
+                  <button
+                    className="text-[11px] text-ink-3 underline decoration-dotted"
+                    onClick={() => setExpanded(expanded === c.code ? null : c.code)}
+                  >
+                    {expanded === c.code ? "less" : "details"}
+                  </button>
                   {pctBar(c.incidence)}
                   <button
                     className="px-1 text-ink-3"
@@ -356,6 +363,17 @@ export default function TaxonomyReview({
                   >
                     {r.included ? "×" : "+"}
                   </button>
+                </div>
+                {expanded === c.code && (
+                  <div className="grid gap-1 px-9 pb-2">
+                    <p className="text-[12.5px] text-ink-3">
+                      {c.why} · argued in {c.rows} answers
+                    </p>
+                    <p className="text-xs italic text-ink-3">
+                      {c.evidence_phrases.slice(0, 6).map((ph) => `“${ph}”`).join(" · ")}
+                    </p>
+                  </div>
+                )}
                 </div>
               );
             })}
@@ -415,13 +433,13 @@ export default function TaxonomyReview({
                   className={`px-2.5 py-1 ${r.included ? "bg-success/10 text-success" : "text-ink-3"}`}
                   onClick={() => setIncluded(c.code, true)}
                 >
-                  Keep
+                  Keep{c.scope === "in" ? " · rec" : ""}
                 </button>
                 <button
                   className={`px-2.5 py-1 ${!r.included ? "bg-warning/10 text-danger" : "text-ink-3"}`}
                   onClick={() => setIncluded(c.code, false)}
                 >
-                  Exclude
+                  Exclude{c.scope === "boundary" ? " · rec" : ""}
                 </button>
               </span>
             </div>
@@ -463,7 +481,9 @@ export default function TaxonomyReview({
   );
 }
 
-/** Click-to-rename name span; commits on blur or Enter. */
+/** Explicit rename: the name plus a pencil; clicking either swaps in an
+ * input that commits on blur or Enter. Renames are cosmetic - reports use
+ * the display name, coding stays on the canonical code. */
 function EditableName({
   value,
   onCommit,
@@ -471,25 +491,45 @@ function EditableName({
   value: string;
   onCommit: (v: string) => void;
 }) {
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState(value);
+  if (editing) {
+    return (
+      <input
+        className="input w-40 px-1.5 py-0.5 text-[13px] font-semibold"
+        autoFocus
+        value={draft}
+        onChange={(e) => setDraft(e.target.value)}
+        onBlur={() => {
+          setEditing(false);
+          const v = draft.trim();
+          if (v && v !== value) onCommit(v);
+          else setDraft(value);
+        }}
+        onKeyDown={(e) => {
+          if (e.key === "Enter") (e.currentTarget as HTMLElement).blur();
+          if (e.key === "Escape") {
+            setDraft(value);
+            setEditing(false);
+          }
+        }}
+      />
+    );
+  }
   return (
-    <span
-      className="cursor-text border-b border-dashed border-transparent text-[13.5px] font-semibold outline-none focus:border-primary hover:border-primary"
-      contentEditable
-      suppressContentEditableWarning
-      spellCheck={false}
-      onBlur={(e) => {
-        const v = (e.currentTarget.textContent ?? "").trim();
-        if (v && v !== value) onCommit(v);
-        else e.currentTarget.textContent = value;
-      }}
-      onKeyDown={(e) => {
-        if (e.key === "Enter") {
-          e.preventDefault();
-          (e.currentTarget as HTMLElement).blur();
-        }
+    <button
+      type="button"
+      className="group flex items-center gap-1 text-left text-[13.5px] font-semibold"
+      title="rename (cosmetic - coding keeps our name)"
+      onClick={() => {
+        setDraft(value);
+        setEditing(true);
       }}
     >
       {value}
-    </span>
+      <span className="text-[11px] text-ink-3 opacity-0 transition-opacity group-hover:opacity-100">
+        {"\u270e"}
+      </span>
+    </button>
   );
 }
