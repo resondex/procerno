@@ -44,6 +44,8 @@ function createDb(): Database.Database {
       schedule TEXT NOT NULL DEFAULT 'none',
       user_id TEXT,
       reason_taxonomy TEXT NOT NULL DEFAULT '[]',
+      taxonomy_proposal TEXT,
+      taxonomy_status TEXT NOT NULL DEFAULT 'pending',
       engine_set TEXT NOT NULL DEFAULT '[]',
       org_id TEXT,
       dictionary_version INTEGER NOT NULL DEFAULT 1,
@@ -319,6 +321,12 @@ function createDb(): Database.Database {
       "ALTER TABLE projects ADD COLUMN engine_set TEXT NOT NULL DEFAULT '[]'"
     );
   }
+  if (!cols.some((c) => c.name === "taxonomy_status")) {
+    db.exec("ALTER TABLE projects ADD COLUMN taxonomy_proposal TEXT");
+    db.exec(
+      "ALTER TABLE projects ADD COLUMN taxonomy_status TEXT NOT NULL DEFAULT 'pending'"
+    );
+  }
   if (!cols.some((c) => c.name === "reason_taxonomy")) {
     db.exec(
       "ALTER TABLE projects ADD COLUMN reason_taxonomy TEXT NOT NULL DEFAULT '[]'"
@@ -458,6 +466,10 @@ function parseProject(row: ProjectRaw): Project {
     reason_taxonomy: JSON.parse(
       (row as unknown as { reason_taxonomy?: string }).reason_taxonomy ?? "[]"
     ),
+    taxonomy_proposal:
+      (row as unknown as { taxonomy_proposal?: string | null }).taxonomy_proposal ?? null,
+    taxonomy_status:
+      (row as unknown as { taxonomy_status?: string }).taxonomy_status ?? "pending",
     dictionary_version:
       (row as unknown as { dictionary_version?: number }).dictionary_version ?? 1,
     evidence_drawer:
@@ -1198,6 +1210,22 @@ export const sqliteStore: Store = {
         input.outputTokens,
         responseId
       );
+  },
+
+  async setTaxonomyProposal(projectId, proposalJson) {
+    getDb()
+      .prepare(
+        "UPDATE projects SET taxonomy_proposal = ?, taxonomy_status = 'proposed' WHERE id = ?"
+      )
+      .run(proposalJson, projectId);
+  },
+
+  async ratifyTaxonomy(projectId, codes) {
+    getDb()
+      .prepare(
+        "UPDATE projects SET reason_taxonomy = ?, taxonomy_status = 'ratified' WHERE id = ?"
+      )
+      .run(JSON.stringify(codes), projectId);
   },
 
   async insertCostEntry(input) {

@@ -49,6 +49,17 @@ export interface OrgMember {
   created_at: string;
 }
 
+/** One proposed reason code from the discovery+consolidation pipeline. */
+export interface ProposedCode {
+  code: string;
+  rows: number;
+  incidence: number;
+  scope: "in" | "boundary";
+  recommendation: string;
+  why: string;
+  evidence_phrases: string[];
+}
+
 export interface Project {
   id: string;
   name: string;
@@ -60,8 +71,14 @@ export interface Project {
   user_id: string | null;
   /** Owning organization; null = personal/legacy tracker. */
   org_id: string | null;
-  /** Closed reason-code taxonomy, generated at setup and frozen. */
+  /** Closed reason-code taxonomy. Discovered from collected answers and
+   * ratified via the confirmation step - empty until then. */
   reason_taxonomy: string[];
+  /** Discovery-derived taxonomy proposal (JSON: TaxonomyProposal) awaiting
+   * confirmation; null before discovery runs. */
+  taxonomy_proposal: string | null;
+  /** pending -> proposed -> ratified. */
+  taxonomy_status: string;
   /** The core engine panel — part of the frozen instrument. Scheduled runs
    * always use it; headline metrics and the trend compute over it. Engines
    * beyond it in a run are bonus views. */
@@ -823,6 +840,10 @@ export interface Store {
     }
   ): Promise<void>;
   /** Append one row to the token-spend ledger (see lib/cost_log.ts). */
+  /** Attach a discovery-derived taxonomy proposal; status -> proposed. */
+  setTaxonomyProposal(projectId: string, proposalJson: string): Promise<void>;
+  /** Ratify the confirmed code list; status -> ratified. */
+  ratifyTaxonomy(projectId: string, codes: string[]): Promise<void>;
   insertCostEntry(input: {
     projectId?: string | null;
     runId?: string | null;
