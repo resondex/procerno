@@ -221,6 +221,14 @@ function compatClient(engine: Engine): OpenAI {
   return c;
 }
 
+/** Metered OpenAI-compatible client for a coder model (engine registry or
+ * CODER_ONLY). Discovery and other coder-side callers use this so every
+ * vendor call lands in the cost ledger like the rest of the pipeline. */
+export function coderCompatClient(model: string): OpenAI {
+  const eng = getEngine(model) ?? CODER_ONLY[model];
+  return eng?.baseURL ? compatClient(eng as Engine) : client();
+}
+
 let _anthropic: import("@anthropic-ai/sdk").default | null = null;
 export async function anthropicClient() {
   if (!_anthropic) {
