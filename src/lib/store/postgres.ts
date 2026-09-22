@@ -179,6 +179,7 @@ function ensureSchema(): Promise<void> {
         created_at TIMESTAMPTZ NOT NULL DEFAULT now()
       )`;
       await sql`CREATE INDEX IF NOT EXISTS cost_log_project ON cost_log(project_id)`;
+      await sql`ALTER TABLE cost_log ADD COLUMN IF NOT EXISTS rnd BOOLEAN NOT NULL DEFAULT FALSE`;
       await sql`CREATE TABLE IF NOT EXISTS dictionary_entries (
         id TEXT PRIMARY KEY,
         project_id TEXT NOT NULL REFERENCES projects(id),
@@ -955,6 +956,7 @@ export const pgStore: Store = {
       input_tokens: input.inputTokens,
       output_tokens: input.outputTokens,
       searches: input.searches ?? 0,
+      rnd: input.rnd ?? false,
     })}`;
   },
 

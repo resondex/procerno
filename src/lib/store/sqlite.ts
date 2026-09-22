@@ -185,8 +185,9 @@ function createDb(): Database.Database {
     input_tokens INTEGER NOT NULL DEFAULT 0,
     output_tokens INTEGER NOT NULL DEFAULT 0,
     searches INTEGER NOT NULL DEFAULT 0,
-    created_at TEXT NOT NULL DEFAULT (datetime('now'))
-  )`);
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      rnd INTEGER NOT NULL DEFAULT 0
+    )`);
   db.exec("CREATE INDEX IF NOT EXISTS cost_log_project ON cost_log(project_id)");
   const cacheCols = db.prepare("PRAGMA table_info(llm_cache)").all() as { name: string }[];
   for (const col of ["brand", "category", "source", "project_id"]) {
@@ -325,6 +326,12 @@ function createDb(): Database.Database {
     db.exec(
       "ALTER TABLE projects ADD COLUMN dictionary_version INTEGER NOT NULL DEFAULT 1"
     );
+  }
+  const costCols = db.prepare("PRAGMA table_info(cost_log)").all() as {
+    name: string;
+  }[];
+  if (costCols.length > 0 && !costCols.some((c) => c.name === "rnd")) {
+    db.exec("ALTER TABLE cost_log ADD COLUMN rnd INTEGER NOT NULL DEFAULT 0");
   }
   const dictCols = db.prepare("PRAGMA table_info(dictionary_entries)").all() as {
     name: string;
@@ -1196,8 +1203,8 @@ export const sqliteStore: Store = {
   async insertCostEntry(input) {
     getDb()
       .prepare(
-        `INSERT INTO cost_log (id, project_id, run_id, purpose, model, input_tokens, output_tokens, searches)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+        `INSERT INTO cost_log (id, project_id, run_id, purpose, model, input_tokens, output_tokens, searches, rnd)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
       )
       .run(
         crypto.randomUUID(),
@@ -1207,7 +1214,8 @@ export const sqliteStore: Store = {
         input.model,
         input.inputTokens,
         input.outputTokens,
-        input.searches ?? 0
+        input.searches ?? 0,
+        input.rnd ? 1 : 0
       );
   },
 

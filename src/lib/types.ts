@@ -831,6 +831,10 @@ export interface Store {
     inputTokens: number;
     outputTokens: number;
     searches?: number;
+    /** R&D spend: experimentation that never ships to the project's final
+     * data set. Additional dimension - never replaces project/run
+     * attribution; production COGS per project = rows WHERE NOT rnd. */
+    rnd?: boolean;
   }): Promise<void>;
   /** Ledger totals grouped by project x purpose x model. */
   summarizeCostLog(): Promise<CostSummaryRow[]>;

@@ -16,6 +16,9 @@ export interface CostContext {
   projectId?: string | null;
   runId?: string | null;
   purpose?: string;
+  /** Marks spend as R&D (experiments, evals, bakeoffs) - additive to
+   * project/run attribution so production COGS can exclude it. */
+  rnd?: boolean;
 }
 
 const als = new AsyncLocalStorage<CostContext>();
@@ -48,6 +51,7 @@ export function logCost(entry: {
   purpose?: string;
   projectId?: string | null;
   runId?: string | null;
+  rnd?: boolean;
 }): void {
   const searches = entry.searches ?? 0;
   if (entry.inputTokens + entry.outputTokens + searches === 0) return;
@@ -57,6 +61,7 @@ export function logCost(entry: {
       projectId: entry.projectId ?? ctx.projectId ?? null,
       runId: entry.runId ?? ctx.runId ?? null,
       purpose: entry.purpose ?? ctx.purpose ?? "untagged",
+      rnd: entry.rnd ?? ctx.rnd ?? false,
       model: entry.model,
       inputTokens: entry.inputTokens,
       outputTokens: entry.outputTokens,
