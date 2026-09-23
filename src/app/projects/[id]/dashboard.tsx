@@ -408,10 +408,7 @@ export default function ProjectDashboard({
             dictionary={dict}
             onRatified={refresh}
             onDictApplied={refreshDict}
-            onOpenDictionary={() => {
-              setDictTab("parents");
-              setOpenModal("dictionary");
-            }}
+            dictAction={dictAction}
           />
         )}
 
@@ -716,154 +713,13 @@ export default function ProjectDashboard({
             <ParentsTab projectId={id} dict={dict} onApplied={refreshDict} />
           )}
           {dictTab === "analyze" && (
-            <>
-              <p className="text-[13px] text-ink-3 mb-4 -mt-1">
-                Every grouping and whether it counts in the analysis, filed
-                under its parent company. Excluded groupings stay in the raw
-                data and can be re-included at any time — the metrics
-                recompute retroactively.
-              </p>
-              {(() => {
-                // Merge remnants live on as aliases of an active grouping —
-                // they are not their own row anymore.
-                const rows = dict
-                  .filter((e) => e.status !== "pending")
-                  .filter((e) => {
-                    if (e.status !== "rejected") return true;
-                    const n = e.canonical.trim().toLowerCase();
-                    return !dict.some(
-                      (x) => x.status === "active" && x.aliases.includes(n)
-                    );
-                  })
-                  .sort((a, b) => a.canonical.localeCompare(b.canonical));
-                const active = rows.filter((e) => e.status === "active");
-                const excluded = rows.filter((e) => e.status === "rejected");
-                const parents = [
-                  ...new Set(
-                    active
-                      .map((e) => e.parent)
-                      .filter((p): p is string => !!p)
-                  ),
-                ].sort((a, b) => a.localeCompare(b));
-                const brandNorm = project.brand.trim().toLowerCase();
-                const legacyComp = new Set(
-                  project.competitors.map((c) => c.trim().toLowerCase())
-                );
-                const isTargetEntry = (e: DictionaryEntry) =>
-                  e.canonical.trim().toLowerCase() === brandNorm ||
-                  e.aliases.includes(brandNorm);
-                const isCompetitor = (e: DictionaryEntry) =>
-                  e.role
-                    ? e.role === "competitor"
-                    : legacyComp.has(e.canonical.trim().toLowerCase());
-                const row = (e: DictionaryEntry, indent = false) => (
-                  <div
-                    key={e.id}
-                    className={`flex items-center gap-3 text-sm border-b border-line/60 py-2 ${indent ? "ml-5" : ""}`}
-                  >
-                    <input
-                      type="checkbox"
-                      checked={e.status === "active"}
-                      onChange={() =>
-                        dictAction(
-                          e.id,
-                          e.status === "active" ? "reject" : "approve"
-                        )
-                      }
-                      className="h-4 w-4 accent-[var(--color-primary)] cursor-pointer"
-                    />
-                    <span
-                      className={`font-medium ${e.status === "active" ? "" : "text-ink-3 line-through"}`}
-                    >
-                      {e.display_name ?? e.canonical}
-                    </span>
-                    {isTargetEntry(e) ? (
-                      <span className="shrink-0 rounded-full bg-primary-soft px-2 py-0.5 text-[11px] font-semibold uppercase tracking-wide text-primary">
-                        you
-                      </span>
-                    ) : (
-                      e.status === "active" &&
-                      e.canonical !== "Other" && (
-                        <button
-                          type="button"
-                          title={
-                            isCompetitor(e)
-                              ? "Tracked competitor — click to demote to discovered"
-                              : "Discovered by the model — click to track as a competitor"
-                          }
-                          onClick={async () => {
-                            await fetch(`/api/projects/${id}/dictionary`, {
-                              method: "POST",
-                              headers: {
-                                "Content-Type": "application/json",
-                              },
-                              body: JSON.stringify({
-                                entryId: e.id,
-                                action: "set_role",
-                                role: isCompetitor(e)
-                                  ? "emerged"
-                                  : "competitor",
-                              }),
-                            });
-                            await refreshDict();
-                          }}
-                          className={`shrink-0 rounded-full px-2 py-0.5 text-[11px] font-semibold uppercase tracking-wide ${
-                            isCompetitor(e)
-                              ? "bg-ink/10 text-ink"
-                              : "border border-line text-ink-3 hover:text-ink hover:border-ink-3"
-                          }`}
-                        >
-                          {isCompetitor(e) ? "competitor" : "discovered"}
-                        </button>
-                      )
-                    )}
-                    {e.aliases.length > 0 && (
-                      <span className="text-xs text-ink-3 truncate flex-1">
-                        groups: {e.aliases.join(", ")}
-                      </span>
-                    )}
-                  </div>
-                );
-                return (
-                  <div className="grid gap-4">
-                    {parents.map((p) => (
-                      <div key={p}>
-                        <p className="text-xs font-semibold uppercase tracking-wide text-ink-3 mb-1">
-                          {p}
-                        </p>
-                        <div className="grid gap-1">
-                          {active
-                            .filter((e) => e.parent === p)
-                            .map((e) => row(e, true))}
-                        </div>
-                      </div>
-                    ))}
-                    <div>
-                      {parents.length > 0 && (
-                        <p className="text-xs font-semibold uppercase tracking-wide text-ink-3 mb-1">
-                          Independent — each its own parent company
-                        </p>
-                      )}
-                      <div className="grid gap-1">
-                        {active
-                          .filter((e) => !e.parent)
-                          .map((e) => row(e, parents.length > 0))}
-                      </div>
-                    </div>
-                    {excluded.length > 0 && (
-                      <div>
-                        <p className="text-xs font-semibold uppercase tracking-wide text-ink-3 mb-1">
-                          Excluded from analysis
-                        </p>
-                        <div className="grid gap-1">
-                          {excluded.map((e) => row(e, parents.length > 0))}
-                        </div>
-                      </div>
-                    )}
-                  </div>
-                );
-              })()}
-            </>
+            <AnalysisSettings
+              id={id}
+              project={project}
+              dict={dict}
+              dictAction={dictAction}
+              refreshDict={refreshDict}
+            />
           )}
           <p className="text-xs text-ink-3 mt-4">
             {pendingDict} pending ·{" "}
@@ -1178,6 +1034,173 @@ const ASSISTANT_NAME: Record<string, string> = {
  * gate is the codebook. This card names the stage the tracker is actually
  * in - discovery running, codebook awaiting confirmation, or coding - and
  * routes to the confirmation screen when it is the human's turn. */
+/** The Analyze view: every grouping, its parent company, and whether it
+ * counts in the analysis. Shared by the Brand dictionary modal and step 3 of
+ * the dictionary gate, so the gate and the standing view never drift. */
+function AnalysisSettings({
+  id,
+  project,
+  dict,
+  dictAction,
+  refreshDict,
+}: {
+  id: string;
+  project: Project;
+  dict: DictionaryEntry[];
+  dictAction: (entryId: string, action: "approve" | "reject") => Promise<void>;
+  refreshDict: () => Promise<void>;
+}) {
+  return (
+    <>
+      <p className="text-[13px] text-ink-3 mb-4 -mt-1">
+        Every grouping and whether it counts in the analysis, filed under its
+        parent company. Excluded groupings stay in the raw data and can be
+        re-included at any time - the metrics recompute retroactively.
+      </p>
+              {(() => {
+                // Merge remnants live on as aliases of an active grouping —
+                // they are not their own row anymore.
+                const rows = dict
+                  .filter((e) => e.status !== "pending")
+                  .filter((e) => {
+                    if (e.status !== "rejected") return true;
+                    const n = e.canonical.trim().toLowerCase();
+                    return !dict.some(
+                      (x) => x.status === "active" && x.aliases.includes(n)
+                    );
+                  })
+                  .sort((a, b) => a.canonical.localeCompare(b.canonical));
+                const active = rows.filter((e) => e.status === "active");
+                const excluded = rows.filter((e) => e.status === "rejected");
+                const parents = [
+                  ...new Set(
+                    active
+                      .map((e) => e.parent)
+                      .filter((p): p is string => !!p)
+                  ),
+                ].sort((a, b) => a.localeCompare(b));
+                const brandNorm = project.brand.trim().toLowerCase();
+                const legacyComp = new Set(
+                  project.competitors.map((c) => c.trim().toLowerCase())
+                );
+                const isTargetEntry = (e: DictionaryEntry) =>
+                  e.canonical.trim().toLowerCase() === brandNorm ||
+                  e.aliases.includes(brandNorm);
+                const isCompetitor = (e: DictionaryEntry) =>
+                  e.role
+                    ? e.role === "competitor"
+                    : legacyComp.has(e.canonical.trim().toLowerCase());
+                const row = (e: DictionaryEntry, indent = false) => (
+                  <div
+                    key={e.id}
+                    className={`flex items-center gap-3 text-sm border-b border-line/60 py-2 ${indent ? "ml-5" : ""}`}
+                  >
+                    <input
+                      type="checkbox"
+                      checked={e.status === "active"}
+                      onChange={() =>
+                        dictAction(
+                          e.id,
+                          e.status === "active" ? "reject" : "approve"
+                        )
+                      }
+                      className="h-4 w-4 accent-[var(--color-primary)] cursor-pointer"
+                    />
+                    <span
+                      className={`font-medium ${e.status === "active" ? "" : "text-ink-3 line-through"}`}
+                    >
+                      {e.display_name ?? e.canonical}
+                    </span>
+                    {isTargetEntry(e) ? (
+                      <span className="shrink-0 rounded-full bg-primary-soft px-2 py-0.5 text-[11px] font-semibold uppercase tracking-wide text-primary">
+                        you
+                      </span>
+                    ) : (
+                      e.status === "active" &&
+                      e.canonical !== "Other" && (
+                        <button
+                          type="button"
+                          title={
+                            isCompetitor(e)
+                              ? "Tracked competitor — click to demote to discovered"
+                              : "Discovered by the model — click to track as a competitor"
+                          }
+                          onClick={async () => {
+                            await fetch(`/api/projects/${id}/dictionary`, {
+                              method: "POST",
+                              headers: {
+                                "Content-Type": "application/json",
+                              },
+                              body: JSON.stringify({
+                                entryId: e.id,
+                                action: "set_role",
+                                role: isCompetitor(e)
+                                  ? "emerged"
+                                  : "competitor",
+                              }),
+                            });
+                            await refreshDict();
+                          }}
+                          className={`shrink-0 rounded-full px-2 py-0.5 text-[11px] font-semibold uppercase tracking-wide ${
+                            isCompetitor(e)
+                              ? "bg-ink/10 text-ink"
+                              : "border border-line text-ink-3 hover:text-ink hover:border-ink-3"
+                          }`}
+                        >
+                          {isCompetitor(e) ? "competitor" : "discovered"}
+                        </button>
+                      )
+                    )}
+                    {e.aliases.length > 0 && (
+                      <span className="text-xs text-ink-3 truncate flex-1">
+                        groups: {e.aliases.join(", ")}
+                      </span>
+                    )}
+                  </div>
+                );
+                return (
+                  <div className="grid gap-4">
+                    {parents.map((p) => (
+                      <div key={p}>
+                        <p className="text-xs font-semibold uppercase tracking-wide text-ink-3 mb-1">
+                          {p}
+                        </p>
+                        <div className="grid gap-1">
+                          {active
+                            .filter((e) => e.parent === p)
+                            .map((e) => row(e, true))}
+                        </div>
+                      </div>
+                    ))}
+                    <div>
+                      {parents.length > 0 && (
+                        <p className="text-xs font-semibold uppercase tracking-wide text-ink-3 mb-1">
+                          Independent — each its own parent company
+                        </p>
+                      )}
+                      <div className="grid gap-1">
+                        {active
+                          .filter((e) => !e.parent)
+                          .map((e) => row(e, parents.length > 0))}
+                      </div>
+                    </div>
+                    {excluded.length > 0 && (
+                      <div>
+                        <p className="text-xs font-semibold uppercase tracking-wide text-ink-3 mb-1">
+                          Excluded from analysis
+                        </p>
+                        <div className="grid gap-1">
+                          {excluded.map((e) => row(e, parents.length > 0))}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                );
+              })()}
+    </>
+  );
+}
+
 function PipelineNext({
   id,
   project,
@@ -1185,7 +1208,7 @@ function PipelineNext({
   dictionary,
   onRatified,
   onDictApplied,
-  onOpenDictionary,
+  dictAction,
 }: {
   id: string;
   project: Project;
@@ -1193,7 +1216,7 @@ function PipelineNext({
   dictionary: DictionaryEntry[];
   onRatified: () => void;
   onDictApplied: () => Promise<void>;
-  onOpenDictionary: () => void;
+  dictAction: (entryId: string, action: "approve" | "reject") => Promise<void>;
 }) {
   const status = project.taxonomy_status ?? "pending";
   const dictDone = project.dictionary_status === "confirmed";
@@ -1256,7 +1279,7 @@ function PipelineNext({
           dictionary={dictionary}
           onApplied={onDictApplied}
           onConfirmed={onRatified}
-          onOpenDictionary={onOpenDictionary}
+          dictAction={dictAction}
         />
       )}
       {status === "ratified" && dictDone && (
@@ -1279,24 +1302,27 @@ function PipelineNext({
   );
 }
 
-/** The brand-dictionary gate: confirm who's you, who's tracked competition,
- * and the aliases each brand answers to, before coding runs. Edits happen in
- * the Identify tab; this card is the sign-off. */
+/** The brand-dictionary gate: three steps in the pipeline card, not a modal
+ * detour - (1/3) sort the brand board, (2/3) parent groupings, (3/3) analysis
+ * settings - with back navigation, ending in the sign-off that starts coding.
+ * Each step renders the SAME component as the Brand dictionary view's tab of
+ * the same name, so the gate and the standing view never drift. */
 function DictionaryGate({
   id,
   project,
   dictionary,
   onApplied,
   onConfirmed,
-  onOpenDictionary,
+  dictAction,
 }: {
   id: string;
   project: Project;
   dictionary: DictionaryEntry[];
   onApplied: () => Promise<void>;
   onConfirmed: () => void;
-  onOpenDictionary: () => void;
+  dictAction: (entryId: string, action: "approve" | "reject") => Promise<void>;
 }) {
+  const [step, setStep] = useState<1 | 2 | 3>(1);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const confirm = async () => {
@@ -1314,42 +1340,91 @@ function DictionaryGate({
     onConfirmed();
   };
   const pending = dictionary.filter((d) => d.status === "pending").length;
+  const STEPS: Record<1 | 2 | 3, { title: string; blurb: string }> = {
+    1: {
+      title: "Confirm your brands",
+      blurb:
+        "Codebook confirmed. These are the brands we'll recognize in answers - sized by how often each actually appears - plus the names seen in your answers that aren't sorted yet. Drag a name onto a brand to make it an alias, into its own bucket to track it, or into Ignore.",
+    },
+    2: {
+      title: "Parent groupings",
+      blurb:
+        "File groupings under their parent company where it helps the analysis - metrics can roll up to the parent as well as the individual brand.",
+    },
+    3: {
+      title: "Analysis settings",
+      blurb:
+        "Which groupings count in the analysis. Excluded ones stay in the raw data and can be re-included at any time.",
+    },
+  };
   return (
     <div className="grid gap-3">
       <div className="grid gap-0.5">
-        <h2 className="text-sm font-semibold">Confirm your brand dictionary</h2>
-        <p className="text-[13px] text-ink-3">
-          Codebook confirmed. Last check before coding: these are the brands
-          we&apos;ll recognize in answers - sized by how often each actually
-          appears - plus the names seen in your answers that aren&apos;t sorted
-          yet. Drag a name onto a brand to make it an alias, into its own
-          bucket to track it, or into Ignore. This is the same board as the
-          Brand dictionary view.
-        </p>
+        <h2 className="text-sm font-semibold">
+          <span className="text-ink-3 font-medium">({step}/3)</span>{" "}
+          {STEPS[step].title}
+        </h2>
+        <p className="text-[13px] text-ink-3">{STEPS[step].blurb}</p>
       </div>
-      <IdentifyTab
-        projectId={id}
-        dict={dictionary}
-        onApplied={onApplied}
-        observations={project.brand_observations}
-      />
+      {step === 1 && (
+        <IdentifyTab
+          projectId={id}
+          dict={dictionary}
+          onApplied={onApplied}
+          observations={project.brand_observations}
+        />
+      )}
+      {step === 2 && (
+        <ParentsTab projectId={id} dict={dictionary} onApplied={onApplied} />
+      )}
+      {step === 3 && (
+        <AnalysisSettings
+          id={id}
+          project={project}
+          dict={dictionary}
+          dictAction={dictAction}
+          refreshDict={onApplied}
+        />
+      )}
       <div className="flex flex-wrap items-center justify-between gap-3 border-t border-line pt-3">
-        <button
-          className="text-xs text-ink-3 underline"
-          onClick={onOpenDictionary}
-        >
-          Parent groupings &amp; analysis settings
-        </button>
+        {step > 1 ? (
+          <button
+            className="rounded border border-line px-4 py-2 text-sm font-medium text-ink hover:border-ink-3"
+            onClick={() => setStep((s) => (s - 1) as 1 | 2)}
+          >
+            &larr; Back
+          </button>
+        ) : (
+          <span />
+        )}
         <div className="flex items-center gap-3">
           {error && <span className="text-xs text-danger">{error}</span>}
-          <button
-            className="rounded bg-primary px-4 py-2 text-sm font-medium text-white disabled:opacity-50"
-            onClick={confirm}
-            disabled={saving}
-            title={pending > 0 ? `${pending} names still unsorted - they analyze as pending until sorted` : undefined}
-          >
-            {saving ? "Saving..." : "Confirm brands \u2192 start coding"}
-          </button>
+          {step < 3 ? (
+            <button
+              className="rounded bg-primary px-4 py-2 text-sm font-medium text-white"
+              onClick={() => setStep((s) => (s + 1) as 2 | 3)}
+              title={
+                step === 1 && pending > 0
+                  ? `${pending} names still unsorted - they analyze as pending until sorted`
+                  : undefined
+              }
+            >
+              Continue &rarr;
+            </button>
+          ) : (
+            <button
+              className="rounded bg-primary px-4 py-2 text-sm font-medium text-white disabled:opacity-50"
+              onClick={confirm}
+              disabled={saving}
+              title={
+                pending > 0
+                  ? `${pending} names still unsorted - they analyze as pending until sorted`
+                  : undefined
+              }
+            >
+              {saving ? "Saving..." : "Confirm brands \u2192 start coding"}
+            </button>
+          )}
         </div>
       </div>
     </div>

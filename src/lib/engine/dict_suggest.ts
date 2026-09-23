@@ -138,23 +138,14 @@ export async function getDictionarySuggestions(
   return out;
 }
 
-/** Judge one batch of never-before-seen names against the CURRENT active set
- * (user-confirmed brands are facts here, not open questions) and cache a
- * verdict per name. Returns entry id -> verdict for the names the model
- * actually answered; names it skipped stay uncached and retry next visit. */
-async function suggestBatch(
-  projectId: string,
+/** The v5 disposition rules, exported so evals can run the byte-identical
+ * production prompt against other models. */
+export function suggestSystemPrompt(
   category: string,
-  batch: DictionaryEntry[],
-  active: DictionaryEntry[]
-): Promise<Map<string, CachedVerdict>> {
-  const res = await openaiClient().chat.completions.create({
-    model: SUGGEST_MODEL,
-    messages: [
-      {
-        role: "system",
-        content:
-          "You review a brand-dictionary queue for a study of AI answers in " +
+  activeNames: string[]
+): string {
+  return (
+    "You review a brand-dictionary queue for a study of AI answers in " +
           `the category "${category}". For each pending name, propose:\n` +
           "- merge: the name is the SAME offering as one of the active brands " +
           "(alternate name, spelling, sub-surface of the same product). Set " +
@@ -178,16 +169,38 @@ async function suggestBatch(
           "would weigh against each other, stay separate even under one " +
           "corporate parent; one product's several views or editions do not. " +
           "Every suggestion needs a one-line rationale.\n" +
-          `Active brands: ${active.map((a) => a.canonical).join(", ")}.\n` +
+          `Active brands: ${activeNames.join(", ")}.\n` +
           "Also treat pending names as potential merge targets for OTHER " +
           "pending names by proposing approve for the best-named variant and " +
           "merge for the rest, with merge_into set to the approved variant. " +
           "The approved variant must be the plainest buyer-facing brand " +
           "name — the bare product name rather than any feature-phrased or " +
           "edition-phrased form of it, which are always the ones merged. If " +
-          "several pending names are surfaces of one product that is not " +
-          "itself listed, approve the plainest name as the parent and merge " +
-          "the others into it.",
+    "several pending names are surfaces of one product that is not " +
+    "itself listed, approve the plainest name as the parent and merge " +
+    "the others into it."
+  );
+}
+
+/** Judge one batch of never-before-seen names against the CURRENT active set
+ * (user-confirmed brands are facts here, not open questions) and cache a
+ * verdict per name. Returns entry id -> verdict for the names the model
+ * actually answered; names it skipped stay uncached and retry next visit. */
+async function suggestBatch(
+  projectId: string,
+  category: string,
+  batch: DictionaryEntry[],
+  active: DictionaryEntry[]
+): Promise<Map<string, CachedVerdict>> {
+  const res = await openaiClient().chat.completions.create({
+    model: SUGGEST_MODEL,
+    messages: [
+      {
+        role: "system",
+        content: suggestSystemPrompt(
+          category,
+          active.map((a) => a.canonical)
+        ),
       },
       {
         role: "user",
