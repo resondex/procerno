@@ -510,11 +510,10 @@ export default function TaxonomyReview({
         <div className="grid gap-0.5">
           <h3 className="text-sm font-semibold">Confirm your codebook</h3>
           <p className="text-[13px] text-ink-3">
-            {codes.length} argument dimensions measured from{" "}
-            {answers.toLocaleString()} answers. Rename anything (cosmetic),
-            pick Merge on two or more codes to combine them, open details to inspect or move the
-            phrases inside a dimension. Sizes are preliminary - final
-            measurements appear after coding.
+            {codes.length} argument dimensions measured from all answers.
+            Rename tag, pick Merge on two or more codes to combine them, open
+            details to inspect or move the phrases inside a dimension. Sizes
+            are preliminary - final measurements appear after coding.
           </p>
         </div>
         <button
@@ -543,8 +542,11 @@ export default function TaxonomyReview({
               >
                 merged &middot; {m.members.length}
               </span>
-              <span className="text-[11px] text-ink-3">
-                {m.members.join(" + ")}
+              <span className="text-[12px] text-ink-2">
+                combines:{" "}
+                {m.members
+                  .map((k) => state.rows[k]?.displayName ?? k)
+                  .join(" + ")}
               </span>
               <button
                 className="text-[11px] text-ink-3 underline"
