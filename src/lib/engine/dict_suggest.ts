@@ -163,6 +163,28 @@ const nameKey = (projectId: string, name: string) =>
  * truncated reply costs one batch, large enough to keep the batch count low. */
 const CHUNK = 40;
 
+/** Per-answer brand-name sets from the discovery brands pass, for the
+ * co-occurrence guard. Null when the project has no discovery data yet
+ * (pre-bootstrap runs) - the guard then simply doesn't fire. */
+async function loadDiscoveryBrandSets(
+  projectId: string
+): Promise<Set<string>[] | null> {
+  const sets: Set<string>[] = [];
+  for (const run of await store.listRuns(projectId)) {
+    for (const r of await store.listResponses(run.id)) {
+      if (!r.discovery_brands) continue;
+      try {
+        sets.push(
+          new Set((JSON.parse(r.discovery_brands) as string[]).map(norm))
+        );
+      } catch {
+        // one bad row never blocks the guard
+      }
+    }
+  }
+  return sets.length > 0 ? sets : null;
+}
+
 /**
  * AI pre-review of the pending dictionary queue. Each pending name is judged
  * ONCE - against the active brands as they stand when it first appears - and
@@ -255,6 +277,73 @@ export async function getDictionarySuggestions(
     };
     const settled = await Promise.all(batches.map(judge));
     for (const m of settled) for (const [id, v] of m) cached.set(id, v);
+
+    // Co-occurrence guard on the model's merge proposals (string-variant
+    // family merges are exempt - they never reach this list). Measured from
+    // the brands pass: a satellite that (a) almost never appears without its
+    // proposed parent is program/content vocabulary the parent already
+    // matched - redundant in the dictionary, its information belongs to the
+    // reason codes; (b) often appears WITHOUT the parent lives in its own
+    // context, and merging would inflate the parent's share. Both drop to
+    // ignore; only the middle band - genuinely referential use - keeps the
+    // merge, annotated with the measured number for the human at the gate.
+    const guarded = fresh.filter((p) => cached.get(p.id)?.action === "merge");
+    if (guarded.length > 0) {
+      const brandSets = await loadDiscoveryBrandSets(projectId);
+      if (brandSets) {
+        for (const p of guarded) {
+          const v = cached.get(p.id)!;
+          const target = entries.find(
+            (e) => norm(e.canonical) === norm(v.merge_into ?? "")
+          );
+          const satTerm = norm(p.canonical);
+          const parentTerms = target
+            ? [norm(target.canonical), ...target.aliases.map(norm)]
+            : [norm(v.merge_into ?? "")];
+          let n = 0;
+          let withParent = 0;
+          for (const set of brandSets) {
+            let hasSat = false;
+            let hasParent = false;
+            for (const b of set) {
+              if (!hasSat && b.includes(satTerm)) hasSat = true;
+              if (!hasParent && parentTerms.some((t) => t && b.includes(t)))
+                hasParent = true;
+              if (hasSat && hasParent) break;
+            }
+            if (!hasSat) continue;
+            n++;
+            if (hasParent) withParent++;
+          }
+          if (n < 10) continue; // too thin to judge
+          const alone = 1 - withParent / n;
+          let next: CachedVerdict | null = null;
+          if (alone <= 0.05) {
+            next = {
+              action: "ignore",
+              merge_into: null,
+              rationale: `vocabulary of "${v.merge_into}" - named alone in only ${Math.round(alone * 100)}% of ${n} answers; the parent already matches those answers, and the argument belongs to the reason codes`,
+            };
+          } else if (alone >= 0.3) {
+            next = {
+              action: "ignore",
+              merge_into: null,
+              rationale: `own-context brand - named WITHOUT "${v.merge_into}" in ${Math.round(alone * 100)}% of ${n} answers; merging would inflate the parent`,
+            };
+          } else {
+            next = {
+              ...v,
+              rationale: `${v.rationale} (named without "${v.merge_into}" in ${Math.round(alone * 100)}% of ${n} answers - review)`,
+            };
+          }
+          cached.set(p.id, next);
+          await store.cacheSet(nameKey(projectId, p.canonical), JSON.stringify(next), {
+            category,
+            projectId,
+          });
+        }
+      }
+    }
   }
 
   // Family children inherit their root's verdict: root approved -> the child
