@@ -384,10 +384,25 @@ export default function TaxonomyReview({
             </button>
           </span>
         </div>
+        {isReview && (
+          <p className="px-9 pb-2 -mt-0.5 text-[12px] text-ink-3">
+            <span className="font-medium text-warning">
+              {c.scope === "boundary"
+                ? "Your call because it\u2019s an adjacent-category argument."
+                : "Your call because it\u2019s only occasionally argued - near the cut line."}
+            </span>{" "}
+            {c.why}{" "}
+            <span className="font-medium">
+              {c.scope === "boundary"
+                ? "Recommended: exclude - it\u2019s not an attribute of your product; keep it only if you compete there."
+                : "Recommended: keep - rare but real; exclude it only if it would clutter your dashboard."}
+            </span>
+          </p>
+        )}
         {expanded === c.code && (
           <div className="grid gap-2 px-9 pb-3">
             <p className="text-[12.5px] text-ink-3">
-              {c.why}{" "}
+              {isReview ? null : `${c.why} `}
               <button
                 className="text-[11px] underline decoration-dotted"
                 onClick={() => {
