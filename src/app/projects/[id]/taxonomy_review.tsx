@@ -85,6 +85,26 @@ export default function TaxonomyReview({
     () => Object.fromEntries(codes.map((c) => [c.code, c])),
     [codes]
   );
+  // S1 sizing: tier words from within-brand quantiles + a relative bar -
+  // exact figures stay stored but unprinted until coding finalizes them.
+  const tierOf = useMemo(() => {
+    const sorted = [...codes.map((c) => c.incidence)].sort((a, b) => a - b);
+    const q = (f: number) => sorted[Math.floor(f * (sorted.length - 1))] ?? 0;
+    const [q25, q50, q75] = [q(0.25), q(0.5), q(0.75)];
+    const max = sorted[sorted.length - 1] || 1;
+    return (v: number) => ({
+      label: v >= q75 ? "DOMINANT" : v >= q50 ? "MAJOR" : v >= q25 ? "COMMON" : "OCCASIONAL",
+      cls:
+        v >= q75
+          ? "text-primary"
+          : v >= q50
+            ? "text-ink"
+            : v >= q25
+              ? "text-ink-2"
+              : "text-ink-3",
+      width: Math.max(6, (v / max) * 100),
+    });
+  }, [codes]);
   const strong = codes.filter((c) => c.scope === "in" && c.incidence >= REVIEW_FLOOR);
   const review = codes.filter((c) => c.scope !== "in" || c.incidence < REVIEW_FLOOR);
 
@@ -109,6 +129,9 @@ export default function TaxonomyReview({
   const [mergeSel, setMergeSel] = useState<Set<string>>(new Set());
   const [addText, setAddText] = useState("");
   const [expanded, setExpanded] = useState<string | null>(null);
+  const [moveMode, setMoveMode] = useState(false);
+  const [moveSel, setMoveSel] = useState<Set<string>>(new Set());
+  const [moveDest, setMoveDest] = useState("");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -335,15 +358,15 @@ export default function TaxonomyReview({
           >
             {expanded === c.code ? "less" : "details"}
           </button>
-          <span className="ml-auto flex items-center gap-2">
-            <span className="h-1 w-16 overflow-hidden rounded-full bg-line">
+          <span className="ml-auto flex items-center gap-2" title="size is preliminary - final measurement after coding">
+            <span className={`w-24 text-right text-[10px] font-bold tracking-wide ${tierOf(c.incidence).cls}`}>
+              {tierOf(c.incidence).label}
+            </span>
+            <span className="h-1 w-20 overflow-hidden rounded-full bg-line">
               <span
                 className="block h-full rounded-full bg-primary"
-                style={{ width: `${Math.min(100, (c.incidence / 0.45) * 100)}%` }}
+                style={{ width: `${tierOf(c.incidence).width}%` }}
               />
-            </span>
-            <span className="w-11 text-right text-xs tabular-nums text-ink-3">
-              {(c.incidence * 100).toFixed(1)}%
             </span>
           </span>
           <span className="inline-flex overflow-hidden rounded border border-line text-xs font-medium">
@@ -364,40 +387,83 @@ export default function TaxonomyReview({
         {expanded === c.code && (
           <div className="grid gap-2 px-9 pb-3">
             <p className="text-[12.5px] text-ink-3">
-              {c.why} &middot; argued in {c.rows} answers
+              {c.why}{" "}
+              <button
+                className="text-[11px] underline decoration-dotted"
+                onClick={() => {
+                  setMoveMode(!moveMode);
+                  setMoveSel(new Set());
+                }}
+              >
+                {moveMode ? "done moving" : "move phrases…"}
+              </button>
             </p>
             <div className="flex flex-wrap gap-1.5">
-              {microsFor(c.code).map((m) => (
-                <span
-                  key={m.p}
-                  className={`inline-flex items-center gap-1 rounded-full border border-line px-2 py-0.5 text-[11.5px] ${state.moves[m.p] ? "border-primary text-primary" : "text-ink-2"}`}
-                >
-                  {m.p}
-                  <span className="text-[10px] text-ink-3">{m.n}</span>
-                  <select
-                    className="w-4 cursor-pointer border-0 bg-transparent text-[10px] text-ink-3"
-                    title="move this phrase to another dimension"
-                    value=""
-                    onChange={(e) => {
-                      if (e.target.value) movePhrase(m.p, e.target.value);
-                    }}
+              {microsFor(c.code).map((m) => {
+                const moved = !!state.moves[m.p];
+                const sel = moveSel.has(m.p);
+                return (
+                  <button
+                    key={m.p}
+                    type="button"
+                    disabled={!moveMode}
+                    title={
+                      moved
+                        ? `moved to ${state.rows[state.moves[m.p]]?.displayName ?? state.moves[m.p]}`
+                        : undefined
+                    }
+                    onClick={() =>
+                      setMoveSel((prev) => {
+                        const n = new Set(prev);
+                        if (n.has(m.p)) n.delete(m.p);
+                        else n.add(m.p);
+                        return n;
+                      })
+                    }
+                    className={`inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[11.5px] ${
+                      sel
+                        ? "border-primary bg-primary/10 text-primary"
+                        : moved
+                          ? "border-dashed border-primary text-primary"
+                          : "border-line text-ink-2"
+                    } ${moveMode ? "cursor-pointer" : "cursor-default"}`}
                   >
-                    <option value="">&#8942;</option>
-                    {moveTargets
-                      .filter((t) => t !== c.code)
-                      .map((t) => (
-                        <option key={t} value={t}>
-                          move to: {state.rows[t]?.displayName ?? t}
-                        </option>
-                      ))}
-                  </select>
-                </span>
-              ))}
+                    {m.p}
+                    <span className="text-[10px] text-ink-3">{m.n}</span>
+                  </button>
+                );
+              })}
             </div>
-            <p className="text-[11px] text-ink-3">
-              Each chip is a phrase the market actually used (with its answer
-              count). Use &#8942; to move one into a different dimension.
-            </p>
+            {moveMode && (
+              <div className="flex flex-wrap items-center gap-2 rounded border border-line bg-primary/5 px-2.5 py-1.5 text-[12px]">
+                <span>{moveSel.size} selected</span>
+                <select
+                  className="input w-auto px-1.5 py-0.5 text-[12px]"
+                  value={moveDest}
+                  onChange={(e) => setMoveDest(e.target.value)}
+                >
+                  <option value="">move to&hellip;</option>
+                  {moveTargets
+                    .filter((t) => t !== c.code)
+                    .map((t) => (
+                      <option key={t} value={t}>
+                        {state.rows[t]?.displayName ?? t}
+                      </option>
+                    ))}
+                </select>
+                <button
+                  className="rounded bg-primary px-2.5 py-1 text-[11px] font-medium text-white disabled:opacity-50"
+                  disabled={!moveDest || moveSel.size === 0}
+                  onClick={() => {
+                    for (const ph of moveSel) movePhrase(ph, moveDest);
+                    setMoveSel(new Set());
+                    setMoveDest("");
+                  }}
+                >
+                  Move
+                </button>
+              </div>
+            )}
           </div>
         )}
       </div>
@@ -413,7 +479,8 @@ export default function TaxonomyReview({
             {codes.length} argument dimensions measured from{" "}
             {answers.toLocaleString()} answers. Rename anything (cosmetic),
             merge by ticking two or more, open details to inspect or move the
-            phrases inside a dimension.
+            phrases inside a dimension. Sizes are preliminary - final
+            measurements appear after coding.
           </p>
         </div>
         <button
@@ -451,8 +518,11 @@ export default function TaxonomyReview({
               >
                 unmerge
               </button>
-              <span className="ml-auto text-xs tabular-nums text-ink-3">
-                &le; {(m.incidenceCap * 100).toFixed(1)}%
+              <span
+                className="ml-auto text-[10px] font-bold tracking-wide text-primary"
+                title="combined size - measured exactly when coding runs"
+              >
+                COMBINED
               </span>
             </div>
           ))}
