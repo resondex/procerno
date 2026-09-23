@@ -544,19 +544,18 @@ export default function TaxonomyReview({
         </div>
       )}
 
-      <div>
-        <div className="mb-1.5 flex items-center gap-2">
+      {/* One shared scroller for both sections - section headers stay pinned
+          inside it, so the whole codebook is one scrollbar. */}
+      <div className="max-h-[62vh] overflow-y-auto rounded-lg border border-line">
+        <div className="sticky top-0 z-10 flex items-center gap-2 border-b border-line bg-surface px-3 py-2">
           <span className="rounded-full bg-success/10 px-2 py-0.5 text-xs font-semibold text-success">
             {strong.filter((c) => !state.rows[c.code]?.mergedInto).length} strong
             confidence
           </span>
           <span className="text-xs text-ink-3">included unless you exclude them</span>
         </div>
-        <div className="max-h-96 overflow-y-auto rounded-lg border border-line">{strong.map(codeRow)}</div>
-      </div>
-
-      <div>
-        <div className="mb-1.5 flex items-center gap-2">
+        {strong.map(codeRow)}
+        <div className="sticky top-0 z-10 flex items-center gap-2 border-y border-line bg-surface px-3 py-2">
           <span className="rounded-full bg-warning/10 px-2 py-0.5 text-xs font-semibold text-warning">
             {review.filter((c) => !state.rows[c.code]?.mergedInto).length} need your
             call
@@ -565,7 +564,7 @@ export default function TaxonomyReview({
             boundary or rarely argued - the recommendation is pre-applied
           </span>
         </div>
-        <div className="max-h-96 overflow-y-auto rounded-lg border border-line">{review.map(codeRow)}</div>
+        {review.map(codeRow)}
       </div>
 
       {[...Object.values(state.rows)].filter((r) => r.added).length > 0 && (
