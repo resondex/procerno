@@ -6,7 +6,7 @@ for (const line of fs.readFileSync(path.join(process.cwd(), ".env.local"), "utf8
   const m = line.match(/^([A-Z_]+)=(.*)$/);
   if (m && !process.env[m[1]]) process.env[m[1]] = m[2].replace(/^"|"$/g, "");
 }
-const v4mod = await import("../src/lib/engine/dict_suggest_v4_tmp");
+// v4 module no longer needed - prompt is inlined below (from commit a6f190d).
 const { openaiClient } = await import("../src/lib/engine/providers");
 const { withCostContext } = await import("../src/lib/cost_log");
 const postgres = (await import("postgres")).default;
@@ -43,7 +43,7 @@ const V4_SYSTEM =
   "different offerings; GitLab Issues and GitLab Boards are the same " +
   "one. Every suggestion needs a one-line rationale.\n" +
   `Active brands: ${active.join(", ")}.`;
-void v4mod;
+
 
 const SCHEMA = {
   type: "object", additionalProperties: false,

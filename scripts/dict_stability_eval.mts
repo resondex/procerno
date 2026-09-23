@@ -11,7 +11,8 @@ for (const line of fs.readFileSync(path.join(process.cwd(), ".env.local"), "utf8
   if (m && !process.env[m[1]]) process.env[m[1]] = m[2].replace(/^"|"$/g, "");
 }
 const { suggestSystemPrompt: v6Prompt } = await import("../src/lib/engine/dict_suggest");
-const { suggestSystemPrompt: v5Prompt } = await import("../src/lib/engine/dict_suggest_v5_tmp");
+// v5 prompt module: recreate with `git show 8d5b571:src/lib/engine/dict_suggest.ts > src/lib/engine/dict_suggest_v5_tmp.ts`
+const { suggestSystemPrompt: v5Prompt } = await import("../src/lib/engine/dict_suggest_v5_tmp" as string);
 const { openaiClient } = await import("../src/lib/engine/providers");
 const { withCostContext } = await import("../src/lib/cost_log");
 const postgres = (await import("postgres")).default;
