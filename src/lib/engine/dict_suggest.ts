@@ -13,8 +13,14 @@ const CACHE_TTL_MS = 183 * 24 * 3600 * 1000; // ~6 months
 // devices, first-party services, co-branded components) and named
 // models/trims of its lines always merge. 5-run harness: unanimity 68/71
 // on Pixel (v5: 60), 68/71 match to the approved board; AmEx stability
-// 42 -> 60/72. In the cache key so prompt changes bypass stale suggestions.
-const SUGGEST_RULES_VERSION = "v7";
+// 42 -> 60/72.
+// v8 = the v7 rules plus the mechanical family layer (buildFamilyPlan):
+// name-containment resolves brand families deterministically and only
+// family ROOTS reach the model. Validated 2026-09-23: two fresh Pixel runs
+// produced IDENTICAL boards, 69/71 matching the Tyler-ratified board (both
+// stable diffs are the rules being more consistent than the ratified roll).
+// In the cache key so behavior changes bypass stale suggestions.
+const SUGGEST_RULES_VERSION = "v8";
 
 const SCHEMA = {
   type: "object",
@@ -57,6 +63,94 @@ interface CachedVerdict {
 
 const norm = (s: string) => s.trim().toLowerCase();
 
+/**
+ * Mechanical family grouping - the deterministic layer in front of the
+ * model. A pending name whose tokens contain a tracked brand's name (or
+ * alias) extends that brand and merges into it with no model call at all;
+ * a pending name containing another, shorter pending name joins that name's
+ * family and inherits its verdict. The relationship between "Sony" and
+ * "Sony Xperia 1 VI" is string arithmetic, not judgment - asking a sampled
+ * model to rediscover it per name is how families got scattered across
+ * approve/ignore/wrong-target. Only family ROOTS reach the model.
+ */
+export interface FamilyPlan {
+  /** pending entry id -> active canonical it mechanically merges into */
+  activeMerge: Map<string, string>;
+  /** pending child entry id -> its family root's pending entry id */
+  rootOf: Map<string, string>;
+}
+
+const famTokens = (s: string) => norm(s).split(/[^a-z0-9+]+/).filter(Boolean);
+
+function containsSeq(hay: string[], needle: string[]): boolean {
+  if (needle.length === 0 || needle.length > hay.length) return false;
+  outer: for (let i = 0; i + needle.length <= hay.length; i++) {
+    for (let j = 0; j < needle.length; j++) {
+      if (hay[i + j] !== needle[j]) continue outer;
+    }
+    return true;
+  }
+  return false;
+}
+
+export function buildFamilyPlan(
+  pending: DictionaryEntry[],
+  active: DictionaryEntry[]
+): FamilyPlan {
+  const activeSeqs: { seq: string[]; canonical: string }[] = [];
+  for (const a of active) {
+    if (a.canonical === "Other") continue;
+    activeSeqs.push({ seq: famTokens(a.canonical), canonical: a.canonical });
+    for (const al of a.aliases) {
+      activeSeqs.push({ seq: famTokens(al), canonical: a.canonical });
+    }
+  }
+  const toks = new Map(pending.map((p) => [p.id, famTokens(p.canonical)]));
+
+  // Best head per name: the LONGEST contained sequence; active beats a
+  // pending head of equal length. Pending heads must be strictly shorter
+  // than the child, so containment can never cycle.
+  interface Head { kind: "active" | "pending"; key: string; len: number }
+  const bestHead = new Map<string, Head | null>();
+  for (const p of pending) {
+    const hay = toks.get(p.id)!;
+    let best: Head | null = null;
+    for (const { seq, canonical } of activeSeqs) {
+      if (containsSeq(hay, seq) && (!best || seq.length > best.len)) {
+        best = { kind: "active", key: canonical, len: seq.length };
+      }
+    }
+    for (const q of pending) {
+      if (q.id === p.id) continue;
+      const qs = toks.get(q.id)!;
+      if (
+        qs.length < hay.length &&
+        containsSeq(hay, qs) &&
+        (!best || qs.length > best.len)
+      ) {
+        best = { kind: "pending", key: q.id, len: qs.length };
+      }
+    }
+    bestHead.set(p.id, best);
+  }
+
+  // Resolve transitively: a chain of pending heads bottoms out at either an
+  // active brand (whole chain merges mechanically) or a root pending name.
+  const plan: FamilyPlan = { activeMerge: new Map(), rootOf: new Map() };
+  const resolve = (id: string): { active?: string; root?: string } => {
+    const h = bestHead.get(id);
+    if (!h) return { root: id };
+    if (h.kind === "active") return { active: h.key };
+    return resolve(h.key);
+  };
+  for (const p of pending) {
+    const r = resolve(p.id);
+    if (r.active) plan.activeMerge.set(p.id, r.active);
+    else if (r.root && r.root !== p.id) plan.rootOf.set(p.id, r.root);
+  }
+  return plan;
+}
+
 /** Per-NAME cache key. Deliberately excludes the queue and active-set state:
  * a suggestion is a one-time pre-review, computed the first time a name shows
  * up and never revisited. The user's own confirmations are ground truth -
@@ -89,7 +183,7 @@ export async function getDictionarySuggestions(
 
   // Split pending into cached and new.
   const cached = new Map<string, CachedVerdict>(); // entry id -> verdict
-  const fresh: DictionaryEntry[] = [];
+  let fresh: DictionaryEntry[] = [];
   const hits = await Promise.all(
     pending.map((p) => store.cacheGet(nameKey(projectId, p.canonical), CACHE_TTL_MS))
   );
@@ -98,6 +192,31 @@ export async function getDictionarySuggestions(
     if (hit) cached.set(p.id, JSON.parse(hit) as CachedVerdict);
     else fresh.push(p);
   });
+
+  // Mechanical family layer: names that extend a tracked brand merge into it
+  // deterministically; names that extend another pending name wait for that
+  // root's verdict and inherit it. Only family roots reach the model.
+  const plan = buildFamilyPlan(pending, active);
+  for (const p of fresh) {
+    const target = plan.activeMerge.get(p.id);
+    if (!target) continue;
+    const v: CachedVerdict = {
+      action: "merge",
+      merge_into: target,
+      rationale: `extends the tracked brand "${target}"`,
+    };
+    cached.set(p.id, v);
+    await store.cacheSet(nameKey(projectId, p.canonical), JSON.stringify(v), {
+      category,
+      projectId,
+    });
+  }
+  const freshChildren = fresh.filter(
+    (p) => !plan.activeMerge.has(p.id) && plan.rootOf.has(p.id)
+  );
+  fresh = fresh.filter(
+    (p) => !plan.activeMerge.has(p.id) && !plan.rootOf.has(p.id)
+  );
 
   if (fresh.length > 0) {
     // Batches run concurrently, so total latency is roughly one batch, and a
@@ -136,6 +255,41 @@ export async function getDictionarySuggestions(
     };
     const settled = await Promise.all(batches.map(judge));
     for (const m of settled) for (const [id, v] of m) cached.set(id, v);
+  }
+
+  // Family children inherit their root's verdict: root approved -> the child
+  // merges under it; root merged somewhere -> the child follows; root
+  // ignored -> the child is ignored. A root that failed to get a verdict
+  // leaves its children uncached to retry next visit.
+  const byId = new Map(pending.map((p) => [p.id, p]));
+  for (const p of freshChildren) {
+    const rootId = plan.rootOf.get(p.id)!;
+    const rootVerdict = cached.get(rootId);
+    const root = byId.get(rootId);
+    if (!rootVerdict || !root) continue;
+    const v: CachedVerdict =
+      rootVerdict.action === "approve"
+        ? {
+            action: "merge",
+            merge_into: root.canonical,
+            rationale: `variant of "${root.canonical}"`,
+          }
+        : rootVerdict.action === "merge"
+          ? {
+              action: "merge",
+              merge_into: rootVerdict.merge_into,
+              rationale: `follows "${root.canonical}"`,
+            }
+          : {
+              action: "ignore",
+              merge_into: null,
+              rationale: `follows "${root.canonical}"`,
+            };
+    cached.set(p.id, v);
+    await store.cacheSet(nameKey(projectId, p.canonical), JSON.stringify(v), {
+      category,
+      projectId,
+    });
   }
 
   // Resolve names to entry ids fresh at read time - a cached merge target may

@@ -12,7 +12,7 @@ const oldRows = await sql`SELECT value FROM llm_cache WHERE key LIKE ${'dict_sug
 let n = 0;
 const counts: Record<string, number> = {};
 for (const r of oldRows) for (const s of JSON.parse(r.value)) {
-  const key = `dict_suggest:v5:${PID}:` + createHash("sha256").update(s.name.trim().toLowerCase()).digest("hex");
+  const key = `dict_suggest:v7:${PID}:` + createHash("sha256").update(s.name.trim().toLowerCase()).digest("hex");
   await store.cacheSet(key, JSON.stringify({ action: s.action, merge_into: s.mergeIntoName ?? null, rationale: s.rationale ?? "" }), { projectId: PID, category: "smartphones" });
   counts[s.action] = (counts[s.action] ?? 0) + 1;
   n++;
