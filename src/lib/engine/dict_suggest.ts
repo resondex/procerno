@@ -104,17 +104,33 @@ export async function getDictionarySuggestions(
     for (let i = 0; i < fresh.length; i += CHUNK) {
       batches.push(fresh.slice(i, i + CHUNK));
     }
-    const settled = await Promise.all(
-      batches.map((batch) =>
-        suggestBatch(projectId, category, batch, active).catch((err) => {
-          console.error(
-            `dictionary suggestions: batch of ${batch.length} failed —`,
-            err
-          );
-          return new Map<string, CachedVerdict>();
-        })
-      )
-    );
+    // A failed batch (gpt-5-mini's hidden reasoning can eat the output cap,
+    // truncating the JSON) splits and retries its halves, so one hard batch
+    // strands at most a handful of names instead of all 40 - which showed up
+    // as the sorting spinner re-running on every page load, forever.
+    const judge = async (
+      batch: DictionaryEntry[]
+    ): Promise<Map<string, CachedVerdict>> => {
+      try {
+        return await suggestBatch(projectId, category, batch, active);
+      } catch (err) {
+        if (batch.length < 2) {
+          console.error(`dictionary suggestion failed for "${batch[0]?.canonical}" —`, err);
+          return new Map();
+        }
+        console.error(
+          `dictionary suggestions: batch of ${batch.length} failed, splitting —`,
+          err
+        );
+        const mid = Math.ceil(batch.length / 2);
+        const [a, b] = await Promise.all([
+          judge(batch.slice(0, mid)),
+          judge(batch.slice(mid)),
+        ]);
+        return new Map([...a, ...b]);
+      }
+    };
+    const settled = await Promise.all(batches.map(judge));
     for (const m of settled) for (const [id, v] of m) cached.set(id, v);
   }
 
@@ -207,7 +223,9 @@ async function suggestBatch(
         content: JSON.stringify(batch.map((p) => p.canonical)),
       },
     ],
-    max_completion_tokens: 8000,
+    // Generous cap: gpt-5-mini's reasoning tokens bill against this too, and
+    // a cap hit truncates the strict-schema JSON into a parse failure.
+    max_completion_tokens: 24000,
     response_format: {
       type: "json_schema",
       json_schema: { name: "dispositions", strict: true, schema: SCHEMA },
