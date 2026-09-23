@@ -467,7 +467,7 @@ export default function TaxonomyReview({
           </span>
           <span className="text-xs text-ink-3">included unless you exclude them</span>
         </div>
-        <div className="rounded-lg border border-line">{strong.map(codeRow)}</div>
+        <div className="max-h-96 overflow-y-auto rounded-lg border border-line">{strong.map(codeRow)}</div>
       </div>
 
       <div>
@@ -480,7 +480,7 @@ export default function TaxonomyReview({
             boundary or rarely argued - the recommendation is pre-applied
           </span>
         </div>
-        <div className="rounded-lg border border-line">{review.map(codeRow)}</div>
+        <div className="max-h-96 overflow-y-auto rounded-lg border border-line">{review.map(codeRow)}</div>
       </div>
 
       {[...Object.values(state.rows)].filter((r) => r.added).length > 0 && (
