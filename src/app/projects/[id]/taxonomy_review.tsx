@@ -129,6 +129,7 @@ export default function TaxonomyReview({
   const [mergeSel, setMergeSel] = useState<Set<string>>(new Set());
   const [addText, setAddText] = useState("");
   const [expanded, setExpanded] = useState<string | null>(null);
+  const [strongOpen, setStrongOpen] = useState(false);
   const [moveMode, setMoveMode] = useState(false);
   const [moveSel, setMoveSel] = useState<Set<string>>(new Set());
   const [moveDest, setMoveDest] = useState("");
@@ -547,14 +548,25 @@ export default function TaxonomyReview({
       {/* One shared scroller for both sections - section headers stay pinned
           inside it, so the whole codebook is one scrollbar. */}
       <div className="max-h-[62vh] overflow-y-auto rounded-lg border border-line">
-        <div className="sticky top-0 z-10 flex items-center gap-2 border-b border-line bg-surface px-3 py-2">
+        <button
+          type="button"
+          className="sticky top-0 z-10 flex w-full items-center gap-2 border-b border-line bg-surface px-3 py-2 text-left"
+          onClick={() => setStrongOpen(!strongOpen)}
+        >
           <span className="rounded-full bg-success/10 px-2 py-0.5 text-xs font-semibold text-success">
             {strong.filter((c) => !state.rows[c.code]?.mergedInto).length} strong
             confidence
           </span>
-          <span className="text-xs text-ink-3">included unless you exclude them</span>
-        </div>
-        {strong.map(codeRow)}
+          <span className="text-xs text-ink-3">
+            {strongOpen
+              ? "included unless you exclude them"
+              : `${strong.slice(0, 4).map((c) => state.rows[c.code]?.displayName ?? c.code).join(", ")}… all included`}
+          </span>
+          <span className="ml-auto text-[11px] text-ink-3 underline">
+            {strongOpen ? "collapse" : "view & edit"}
+          </span>
+        </button>
+        {strongOpen && strong.map(codeRow)}
         <div className="sticky top-0 z-10 flex items-center gap-2 border-y border-line bg-surface px-3 py-2">
           <span className="rounded-full bg-warning/10 px-2 py-0.5 text-xs font-semibold text-warning">
             {review.filter((c) => !state.rows[c.code]?.mergedInto).length} need your
