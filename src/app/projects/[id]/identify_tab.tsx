@@ -206,9 +206,52 @@ export default function IdentifyTab({
     []
   );
 
-  // Rebuild from server state whenever the dictionary changes.
+  // Rebuild from server state whenever the dictionary changes - but carry
+  // the board's un-applied placements over. A background dict refresh (the
+  // dashboard revalidates on mount) used to race the suggestion pass and
+  // wipe every pre-placed pill, leaving the tray "ungrouped" until a lucky
+  // reload reordered the race.
   useEffect(() => {
-    setBuckets(buildBuckets(dict));
+    setBuckets((prev) => {
+      const fresh = buildBuckets(dict);
+      if (prev.length === 0) return fresh;
+      const stillPending = new Set(
+        dict.filter((e) => e.status === "pending").map((e) => e.id)
+      );
+      // Placements worth keeping: pending pills placed anywhere (by the
+      // suggestion pass or by hand), and active pills the user has dragged.
+      const carried: { pill: Pill; from: Bucket }[] = [];
+      for (const b of prev) {
+        for (const p of b.pills) {
+          if (p.homeStatus === "pending") {
+            if (p.entryId && stillPending.has(p.entryId)) {
+              carried.push({ pill: p, from: b });
+            }
+          } else if (p.moved) {
+            carried.push({ pill: p, from: b });
+          }
+        }
+      }
+      if (carried.length === 0) return fresh;
+      for (const { pill, from } of carried) {
+        // Remove the pill from wherever the server build put it, then
+        // restore it to the bucket the board had it in.
+        for (const fb of fresh) {
+          fb.pills = fb.pills.filter(
+            (fp) => !(fp.norm === pill.norm && fp.entryId === pill.entryId)
+          );
+        }
+        let dest = fresh.find((fb) => fb.key === from.key);
+        if (!dest && from.kind === "new") {
+          dest = { ...from, pills: [] };
+          fresh.splice(fresh.length - 2, 0, dest);
+        }
+        dest?.pills.push({ ...pill });
+      }
+      return fresh.filter(
+        (b) => (b.kind !== "new" && b.kind !== "brand") || b.pills.length > 0
+      );
+    });
   }, [dict, buildBuckets]);
 
   const pendingEntries = dict.filter((e) => e.status === "pending");
@@ -229,7 +272,12 @@ export default function IdentifyTab({
         const res = await fetch(`/api/projects/${projectId}/dictionary/suggest`, {
           method: "POST",
         });
-        if (!res.ok) return;
+        if (!res.ok) {
+          // Un-mark so the next effect run retries instead of stranding the
+          // whole tray unplaced for the rest of the mount.
+          fresh.forEach((e) => suggestedFor.current.delete(e.id));
+          return;
+        }
         const suggestions: Suggestion[] = (await res.json()).suggestions ?? [];
         const summary = { merged: 0, proposed: 0, ignored: 0 };
         setBuckets((prev) => {
