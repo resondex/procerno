@@ -88,20 +88,23 @@ export default function TaxonomyReview({
   // S1 sizing: tier words from within-brand quantiles + a relative bar -
   // exact figures stay stored but unprinted until coding finalizes them.
   const tierOf = useMemo(() => {
-    const sorted = [...codes.map((c) => c.incidence)].sort((a, b) => a - b);
-    const q = (f: number) => sorted[Math.floor(f * (sorted.length - 1))] ?? 0;
-    const [q25, q50, q75] = [q(0.25), q(0.5), q(0.75)];
-    const max = sorted[sorted.length - 1] || 1;
+    // Quartiles are computed only over codes at/above the review floor, and
+    // everything below the floor is RARE - so the tier word agrees with the
+    // bucket: an in-scope RARE code is always a needs-your-call code.
+    const above = codes.map((c) => c.incidence).filter((v) => v >= REVIEW_FLOOR).sort((a, b) => a - b);
+    const q = (f: number) => above[Math.floor(f * (above.length - 1))] ?? REVIEW_FLOOR;
+    const [q33, q66] = [q(1 / 3), q(2 / 3)];
+    const max = Math.max(...codes.map((c) => c.incidence), 0.01);
     return (v: number) => ({
-      label: v >= q75 ? "DOMINANT" : v >= q50 ? "MAJOR" : v >= q25 ? "COMMON" : "OCCASIONAL",
+      label: v < REVIEW_FLOOR ? "RARE" : v >= q66 ? "DOMINANT" : v >= q33 ? "MAJOR" : "COMMON",
       cls:
-        v >= q75
-          ? "text-primary"
-          : v >= q50
-            ? "text-ink"
-            : v >= q25
-              ? "text-ink-2"
-              : "text-ink-3",
+        v < REVIEW_FLOOR
+          ? "text-ink-3"
+          : v >= q66
+            ? "text-primary"
+            : v >= q33
+              ? "text-ink"
+              : "text-ink-2",
       width: Math.max(6, (v / max) * 100),
     });
   }, [codes]);
@@ -331,19 +334,6 @@ export default function TaxonomyReview({
         <div
           className={`flex flex-wrap items-center gap-2 px-3 py-2 ${r.included ? "" : "opacity-50"}`}
         >
-          <input
-            type="checkbox"
-            title="select to merge"
-            checked={mergeSel.has(c.code)}
-            onChange={(e) =>
-              setMergeSel((s) => {
-                const n = new Set(s);
-                if (e.target.checked) n.add(c.code);
-                else n.delete(c.code);
-                return n;
-              })
-            }
-          />
           <EditableName value={r.displayName} onCommit={(v) => rename(c.code, v)} />
           {r.displayName !== c.code && (
             <span className="text-[11px] text-ink-3">({c.code})</span>
@@ -372,16 +362,44 @@ export default function TaxonomyReview({
           </span>
           <span className="inline-flex overflow-hidden rounded border border-line text-xs font-medium">
             <button
-              className={`px-2 py-0.5 ${r.included ? "bg-success/10 text-success" : "text-ink-3"}`}
-              onClick={() => setIncluded(c.code, true)}
+              className={`px-2 py-0.5 ${r.included && !mergeSel.has(c.code) ? "bg-success/10 text-success" : "text-ink-3"}`}
+              onClick={() => {
+                setIncluded(c.code, true);
+                setMergeSel((prev) => {
+                  const n = new Set(prev);
+                  n.delete(c.code);
+                  return n;
+                });
+              }}
             >
-              Keep{c.scope === "in" && !isReview ? " · rec" : c.scope === "in" ? " · rec" : ""}
+              Keep{c.scope === "in" ? " · rec" : ""}
             </button>
             <button
-              className={`px-2 py-0.5 ${!r.included ? "bg-warning/10 text-danger" : "text-ink-3"}`}
-              onClick={() => setIncluded(c.code, false)}
+              className={`px-2 py-0.5 ${!r.included && !mergeSel.has(c.code) ? "bg-warning/10 text-danger" : "text-ink-3"}`}
+              onClick={() => {
+                setIncluded(c.code, false);
+                setMergeSel((prev) => {
+                  const n = new Set(prev);
+                  n.delete(c.code);
+                  return n;
+                });
+              }}
             >
               Exclude{c.scope === "boundary" ? " · rec" : ""}
+            </button>
+            <button
+              className={`px-2 py-0.5 ${mergeSel.has(c.code) ? "bg-primary/10 text-primary" : "text-ink-3"}`}
+              title="combine with another dimension - pick Merge on two or more"
+              onClick={() =>
+                setMergeSel((prev) => {
+                  const n = new Set(prev);
+                  if (n.has(c.code)) n.delete(c.code);
+                  else n.add(c.code);
+                  return n;
+                })
+              }
+            >
+              Merge{mergeSel.has(c.code) ? " ✓" : ""}
             </button>
           </span>
         </div>
@@ -390,7 +408,7 @@ export default function TaxonomyReview({
             <span className="font-medium text-warning">
               {c.scope === "boundary"
                 ? "Your call because it\u2019s an adjacent-category argument."
-                : "Your call because it\u2019s only occasionally argued - near the cut line."}
+                : "Your call because it\u2019s rarely argued - near the cut line."}
             </span>{" "}
             {c.why}{" "}
             <span className="font-medium">
@@ -494,7 +512,7 @@ export default function TaxonomyReview({
           <p className="text-[13px] text-ink-3">
             {codes.length} argument dimensions measured from{" "}
             {answers.toLocaleString()} answers. Rename anything (cosmetic),
-            merge by ticking two or more, open details to inspect or move the
+            pick Merge on two or more codes to combine them, open details to inspect or move the
             phrases inside a dimension. Sizes are preliminary - final
             measurements appear after coding.
           </p>
