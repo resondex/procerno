@@ -401,7 +401,7 @@ export default function ProjectDashboard({
 
       {activeRun?.status === "collected" &&
         (!progress || (progress.total > 0 && progress.completed >= progress.total)) && (
-          <PipelineNext id={id} project={project} answers={progress?.total ?? 0} onRatified={refresh} />
+          <PipelineNext id={id} project={project} answers={progress?.total ?? 0} dictionary={dict} onRatified={refresh} />
         )}
 
       {shownRun ? (
@@ -1166,21 +1166,25 @@ function PipelineNext({
   id,
   project,
   answers,
+  dictionary,
   onRatified,
 }: {
   id: string;
   project: Project;
   answers: number;
+  dictionary: DictionaryEntry[];
   onRatified: () => void;
 }) {
   const status = project.taxonomy_status ?? "pending";
+  const dictDone = project.dictionary_status === "confirmed";
   const steps: { label: string; state: "done" | "now" | "todo" }[] = [
     { label: "Collect", state: "done" },
+    { label: "Codebook", state: status === "ratified" ? "done" : "now" },
     {
-      label: "Confirm codebook",
-      state: status === "ratified" ? "done" : "now",
+      label: "Brands",
+      state: status !== "ratified" ? "todo" : dictDone ? "done" : "now",
     },
-    { label: "Code", state: status === "ratified" ? "now" : "todo" },
+    { label: "Code", state: status === "ratified" && dictDone ? "now" : "todo" },
     { label: "Measure", state: "todo" },
   ];
   return (
@@ -1225,7 +1229,10 @@ function PipelineNext({
           onRatified={onRatified}
         />
       )}
-      {status === "ratified" && (
+      {status === "ratified" && !dictDone && (
+        <DictionaryGate id={id} dictionary={dictionary} onConfirmed={onRatified} />
+      )}
+      {status === "ratified" && dictDone && (
         <div className="grid gap-2">
           <h2 className="flex items-center gap-2 text-sm font-semibold">
             <span className="pulse-dot inline-block h-1.5 w-1.5 rounded-full bg-primary" />
@@ -1242,6 +1249,87 @@ function PipelineNext({
         </div>
       )}
     </section>
+  );
+}
+
+/** The brand-dictionary gate: confirm who's you, who's tracked competition,
+ * and the aliases each brand answers to, before coding runs. Edits happen in
+ * the Identify tab; this card is the sign-off. */
+function DictionaryGate({
+  id,
+  dictionary,
+  onConfirmed,
+}: {
+  id: string;
+  dictionary: DictionaryEntry[];
+  onConfirmed: () => void;
+}) {
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const confirm = async () => {
+    setSaving(true);
+    setError(null);
+    const res = await fetch(`/api/projects/${id}/dictionary/confirm`, {
+      method: "POST",
+    });
+    setSaving(false);
+    if (!res.ok) {
+      const j = await res.json().catch(() => null);
+      setError(j?.error ?? `save failed (${res.status})`);
+      return;
+    }
+    onConfirmed();
+  };
+  const active = dictionary.filter((d) => d.status !== "rejected");
+  return (
+    <div className="grid gap-3">
+      <div className="grid gap-0.5">
+        <h2 className="text-sm font-semibold">Confirm your brand dictionary</h2>
+        <p className="text-[13px] text-ink-3">
+          Codebook confirmed. Last check before coding: these are the brands
+          we&apos;ll recognize in answers, and the names each one goes by. Add,
+          merge, or exclude brands in the Identify tab - then confirm here.
+        </p>
+      </div>
+      <div className="rounded-lg border border-line">
+        {active.slice(0, 40).map((d) => (
+          <div
+            key={d.id}
+            className="flex flex-wrap items-center gap-2 border-t border-line px-3 py-1.5 first:border-t-0"
+          >
+            <span className="text-[13.5px] font-semibold">
+              {d.display_name ?? d.canonical}
+            </span>
+            <span
+              className={`rounded-full px-2 py-0.5 text-[11px] font-semibold ${d.role === "competitor" ? "bg-line text-ink-2" : "bg-primary/10 text-primary"}`}
+            >
+              {d.role === "competitor" ? "competitor" : "your brand"}
+            </span>
+            {d.aliases.length > 0 && (
+              <span className="text-xs text-ink-3">
+                also answers to: {d.aliases.slice(0, 5).join(", ")}
+                {d.aliases.length > 5 ? "\u2026" : ""}
+              </span>
+            )}
+          </div>
+        ))}
+      </div>
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <span className="text-xs text-ink-3">
+          {active.length} brands recognized
+        </span>
+        <div className="flex items-center gap-3">
+          {error && <span className="text-xs text-danger">{error}</span>}
+          <button
+            className="rounded bg-primary px-4 py-2 text-sm font-medium text-white disabled:opacity-50"
+            onClick={confirm}
+            disabled={saving}
+          >
+            {saving ? "Saving..." : "Confirm brands \u2192 start coding"}
+          </button>
+        </div>
+      </div>
+    </div>
   );
 }
 

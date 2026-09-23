@@ -79,6 +79,9 @@ export interface Project {
   taxonomy_proposal: string | null;
   /** pending -> proposed -> ratified. */
   taxonomy_status: string;
+  /** Brand-dictionary gate: pending -> confirmed. Follows codebook
+   * ratification; coding waits on both. */
+  dictionary_status: string;
   /** Snapshot of reason_taxonomy the moment a proposal attached - the
    * pre-discovery seed (or []). Kept so recommended-vs-decided-vs-original
    * is analyzable across brands. */
@@ -853,6 +856,8 @@ export interface Store {
   /** Ratify the confirmed code list with its decision record;
    * status -> ratified. */
   ratifyTaxonomy(projectId: string, codes: string[], decisionJson: string): Promise<void>;
+  /** Mark the brand dictionary reviewed - the second confirmation gate. */
+  confirmDictionary(projectId: string): Promise<void>;
   insertCostEntry(input: {
     projectId?: string | null;
     runId?: string | null;

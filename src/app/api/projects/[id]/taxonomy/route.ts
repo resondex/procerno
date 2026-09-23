@@ -50,6 +50,9 @@ const decisionSchema = z.object({
     .max(120),
   /** Merge groups: new canonical -> member proposal codes. */
   merges: z.record(z.string(), z.array(z.string()).min(2)).default({}),
+  /** Micro reassignments: phrase -> the code it now belongs to. Recorded in
+   * the decision and applied when the relabel/coding prompts are built. */
+  phrase_moves: z.record(z.string().max(120), z.string().max(80)).default({}),
 });
 
 export async function POST(
@@ -68,7 +71,7 @@ export async function POST(
       { status: 400 }
     );
   }
-  const { decisions, merges } = parsed.data;
+  const { decisions, merges, phrase_moves } = parsed.data;
 
   // The ratified list: every included, un-merged canonical, plus each merge
   // group's target once, deduped. Merged members ride under their target.
@@ -93,6 +96,7 @@ export async function POST(
     decided_at: new Date().toISOString(),
     decisions,
     merges,
+    phrase_moves,
     ratified: finalCodes,
   });
   await store.ratifyTaxonomy(id, finalCodes, record);

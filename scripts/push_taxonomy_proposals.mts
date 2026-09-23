@@ -17,8 +17,24 @@ const IDS: Record<string,string> = {
 };
 for (const [brand, id] of Object.entries(IDS)) {
   const p = JSON.parse(fs.readFileSync(`${L}/ratified_${brand}_embed.json`, "utf8"));
-  // page payload: keep codes + provenance, drop the bulky phrase_map
-  const proposal = { brand: p.brand, rows: p.rows, source: p.source, codes: p.codes };
+  // Micros: the phrase membership behind each code, capped to the top 30 by
+  // census mention count - enough for the review screen's reassignment UI
+  // without shipping the multi-thousand-phrase tail.
+  const counts: Record<string, number> = {};
+  for (const line of fs.readFileSync(`${L}/grok_census_${brand}.jsonl`, "utf8").trim().split("\n")) {
+    for (const ph of (JSON.parse(line).reasons_open ?? []) as string[]) {
+      const k = ph.trim().toLowerCase();
+      if (k) counts[k] = (counts[k] ?? 0) + 1;
+    }
+  }
+  const micros: Record<string, { p: string; n: number }[]> = {};
+  for (const [phrase, code] of Object.entries(p.phrase_map as Record<string, string>)) {
+    (micros[code] ??= []).push({ p: phrase, n: counts[phrase] ?? 0 });
+  }
+  for (const code of Object.keys(micros)) {
+    micros[code] = micros[code].sort((a, b) => b.n - a.n).slice(0, 30);
+  }
+  const proposal = { brand: p.brand, rows: p.rows, source: p.source, codes: p.codes, micros };
   await sql`UPDATE projects SET taxonomy_proposal = ${JSON.stringify(proposal)}, taxonomy_status = 'proposed' WHERE id = ${id}`;
   console.log(`${brand}: ${proposal.codes.length} codes -> proposed`);
 }
