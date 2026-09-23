@@ -6,7 +6,7 @@ import { apiKeyConfigured } from "@/lib/engine/providers";
 import { driveAndChain, findStalledRuns, runInBackground } from "@/lib/engine/runner";
 import { batchableEngine, hasOpenBatches, pollRunBatches, submitRunBatches } from "@/lib/engine/batch";
 
-export const maxDuration = 800;
+export const maxDuration = 300;
 
 const INTERVAL_DAYS: Record<string, number> = {
   // A margin under the nominal interval so a cron that fires a little early

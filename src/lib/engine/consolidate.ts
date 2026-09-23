@@ -174,6 +174,12 @@ export async function consolidateTaxonomy(
     'Reply ONLY JSON: {"codes": [{"name": "<name>", "scope": "in|boundary|out", ' +
     '"members": [cluster_numbers], "why": "<one-line rationale>"}]}';
 
+  // Serverless ceiling note: this plan caps functions at maxDuration 300s
+  // and this one Opus call can approach that on a large brand. A killed
+  // invocation is safe - discovery is already persisted per answer, the
+  // stalled-run sweep re-drives, and only this call's ~$0.50 re-spends.
+  // If it recurs, set CONSOLIDATE_EFFORT=low or move the call to the
+  // Batch API poller.
   const anthropic = await anthropicClient();
   const res = await anthropic.messages.create(
     {

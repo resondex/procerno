@@ -4,7 +4,7 @@ import { store } from "@/lib/store";
 import { getAuth, canAccessProject } from "@/lib/auth";
 import { driveAndChain, runInBackground } from "@/lib/engine/runner";
 
-export const maxDuration = 800;
+export const maxDuration = 300;
 
 /**
  * Process the next chunk of an unfinished run. Reached two ways: the chunk
