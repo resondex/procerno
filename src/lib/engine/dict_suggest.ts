@@ -43,16 +43,36 @@ export interface DictSuggestion {
   rationale: string;
 }
 
-/**
- * AI pre-review of the pending dictionary queue, cache-first. The cache key
- * hashes the exact pending + active sets, so the expensive call runs once
- * per queue state — warmed at run completion, instant when the user opens
- * the Identify view.
- */
+/** What the model said about one name, cached forever (well, ~6 months).
+ * Entry ids are resolved fresh at read time, so the stored form is names. */
+interface CachedVerdict {
+  action: "merge" | "approve" | "ignore";
+  merge_into: string | null;
+  rationale: string;
+}
+
+const norm = (s: string) => s.trim().toLowerCase();
+
+/** Per-NAME cache key. Deliberately excludes the queue and active-set state:
+ * a suggestion is a one-time pre-review, computed the first time a name shows
+ * up and never revisited. The user's own confirmations are ground truth -
+ * approving Linear must not send eBay back to the model. */
+const nameKey = (projectId: string, name: string) =>
+  `dict_suggest:${SUGGEST_RULES_VERSION}:${projectId}:` +
+  createHash("sha256").update(norm(name)).digest("hex");
+
 /** Names per request. Small enough that each name gets real attention and a
  * truncated reply costs one batch, large enough to keep the batch count low. */
 const CHUNK = 40;
 
+/**
+ * AI pre-review of the pending dictionary queue. Each pending name is judged
+ * ONCE - against the active brands as they stand when it first appears - and
+ * the verdict is cached per name. Later visits only send names the model has
+ * never seen (new candidates from a coding or brands pass); everything else,
+ * including everything the user has already dispositioned, is settled and
+ * never re-evaluated. Warmed at run completion, instant on the Identify view.
+ */
 export async function getDictionarySuggestions(
   projectId: string,
   category: string
@@ -63,49 +83,71 @@ export async function getDictionarySuggestions(
   const active = entries.filter((e) => e.status === "active");
   if (pending.length === 0) return [];
 
-  // Batches run concurrently and cache independently, so total latency is
-  // roughly one batch rather than the sum, and a batch that fails costs its
-  // own names instead of the whole queue. One 216-name request could exceed
-  // the model's output cap, and the truncated JSON then threw on parse — so
-  // nothing was ever cached and every visit re-ran the whole thing.
-  const batches: typeof pending[] = [];
-  for (let i = 0; i < pending.length; i += CHUNK) {
-    batches.push(pending.slice(i, i + CHUNK));
-  }
-  const results = await Promise.all(
-    batches.map((batch) =>
-      suggestBatch(projectId, category, batch, active, entries).catch((err) => {
-        console.error(
-          `dictionary suggestions: batch of ${batch.length} failed —`,
-          err
-        );
-        return [] as DictSuggestion[];
-      })
-    )
+  // Split pending into cached and new.
+  const cached = new Map<string, CachedVerdict>(); // entry id -> verdict
+  const fresh: DictionaryEntry[] = [];
+  const hits = await Promise.all(
+    pending.map((p) => store.cacheGet(nameKey(projectId, p.canonical), CACHE_TTL_MS))
   );
-  return results.flat();
+  pending.forEach((p, i) => {
+    const hit = hits[i];
+    if (hit) cached.set(p.id, JSON.parse(hit) as CachedVerdict);
+    else fresh.push(p);
+  });
+
+  if (fresh.length > 0) {
+    // Batches run concurrently, so total latency is roughly one batch, and a
+    // batch that fails costs its own names instead of the whole queue. (One
+    // 216-name request once exceeded the model's output cap and the truncated
+    // JSON threw on parse - keep the chunking.)
+    const batches: DictionaryEntry[][] = [];
+    for (let i = 0; i < fresh.length; i += CHUNK) {
+      batches.push(fresh.slice(i, i + CHUNK));
+    }
+    const settled = await Promise.all(
+      batches.map((batch) =>
+        suggestBatch(projectId, category, batch, active).catch((err) => {
+          console.error(
+            `dictionary suggestions: batch of ${batch.length} failed —`,
+            err
+          );
+          return new Map<string, CachedVerdict>();
+        })
+      )
+    );
+    for (const m of settled) for (const [id, v] of m) cached.set(id, v);
+  }
+
+  // Resolve names to entry ids fresh at read time - a cached merge target may
+  // have been approved (now active) or renamed since the verdict was stored.
+  const byName = new Map(entries.map((e) => [norm(e.canonical), e]));
+  const out: DictSuggestion[] = [];
+  for (const p of pending) {
+    const v = cached.get(p.id);
+    if (!v) continue;
+    const target = v.merge_into ? byName.get(norm(v.merge_into)) : null;
+    out.push({
+      entryId: p.id,
+      name: p.canonical,
+      action: v.action,
+      mergeIntoId: target?.id ?? null,
+      mergeIntoName: target?.canonical ?? v.merge_into,
+      rationale: v.rationale,
+    });
+  }
+  return out;
 }
 
+/** Judge one batch of never-before-seen names against the CURRENT active set
+ * (user-confirmed brands are facts here, not open questions) and cache a
+ * verdict per name. Returns entry id -> verdict for the names the model
+ * actually answered; names it skipped stay uncached and retry next visit. */
 async function suggestBatch(
   projectId: string,
   category: string,
-  pending: DictionaryEntry[],
-  active: DictionaryEntry[],
-  entries: DictionaryEntry[]
-): Promise<DictSuggestion[]> {
-  const stateHash = createHash("sha256")
-    .update(
-      JSON.stringify({
-        v: SUGGEST_RULES_VERSION,
-        p: pending.map((e) => e.canonical.trim().toLowerCase()).sort(),
-        a: active.map((e) => e.canonical.trim().toLowerCase()).sort(),
-      })
-    )
-    .digest("hex");
-  const key = `dict_suggest:${projectId}:${stateHash}`;
-  const hit = await store.cacheGet(key, CACHE_TTL_MS);
-  if (hit) return JSON.parse(hit) as DictSuggestion[];
-
+  batch: DictionaryEntry[],
+  active: DictionaryEntry[]
+): Promise<Map<string, CachedVerdict>> {
   const res = await openaiClient().chat.completions.create({
     model: SUGGEST_MODEL,
     messages: [
@@ -149,7 +191,7 @@ async function suggestBatch(
       },
       {
         role: "user",
-        content: JSON.stringify(pending.map((p) => p.canonical)),
+        content: JSON.stringify(batch.map((p) => p.canonical)),
       },
     ],
     max_completion_tokens: 8000,
@@ -162,44 +204,29 @@ async function suggestBatch(
   // catch upstream; name it so the log says what actually happened.
   if (res.choices[0]?.finish_reason === "length") {
     throw new Error(
-      `suggestion batch truncated at the output cap (${pending.length} names)`
+      `suggestion batch truncated at the output cap (${batch.length} names)`
     );
   }
   const parsed = JSON.parse(
     res.choices[0]?.message?.content ?? '{"suggestions":[]}'
-  ) as {
-    suggestions: {
-      name: string;
-      action: "merge" | "approve" | "ignore";
-      merge_into: string | null;
-      rationale: string;
-    }[];
-  };
+  ) as { suggestions: (CachedVerdict & { name: string })[] };
 
-  // Attach entry ids; resolve merge targets to entry ids where possible.
-  const byName = new Map(
-    entries.map((e) => [e.canonical.trim().toLowerCase(), e])
-  );
-  const suggestions = parsed.suggestions
-    .map((s) => {
-      const entry = byName.get(s.name.trim().toLowerCase());
-      if (!entry || entry.status !== "pending") return null;
-      const target = s.merge_into
-        ? byName.get(s.merge_into.trim().toLowerCase())
-        : null;
-      return {
-        entryId: entry.id,
-        name: entry.canonical,
-        action: s.action,
-        mergeIntoId: target?.id ?? null,
-        mergeIntoName: target?.canonical ?? s.merge_into,
-        rationale: s.rationale,
-      };
-    })
-    .filter((s): s is DictSuggestion => s !== null);
-  await store.cacheSet(key, JSON.stringify(suggestions), {
-    category,
-    projectId,
-  });
-  return suggestions;
+  const byName = new Map(batch.map((e) => [norm(e.canonical), e]));
+  const verdicts = new Map<string, CachedVerdict>();
+  for (const s of parsed.suggestions) {
+    const entry = byName.get(norm(s.name));
+    if (!entry) continue;
+    const verdict: CachedVerdict = {
+      action: s.action,
+      merge_into: s.merge_into,
+      rationale: s.rationale,
+    };
+    verdicts.set(entry.id, verdict);
+    await store.cacheSet(
+      nameKey(projectId, entry.canonical),
+      JSON.stringify(verdict),
+      { category, projectId }
+    );
+  }
+  return verdicts;
 }
