@@ -423,6 +423,10 @@ function createDb(): Database.Database {
   if (!respCols.some((c) => c.name === "search_count")) {
     db.exec("ALTER TABLE responses ADD COLUMN search_count INTEGER");
   }
+  if (!respCols.some((c) => c.name === "discovery_codes")) {
+    db.exec("ALTER TABLE responses ADD COLUMN discovery_codes TEXT");
+    db.exec("ALTER TABLE responses ADD COLUMN discovery_brands TEXT");
+  }
   if (!respCols.some((c) => c.name === "model")) {
     db.exec("ALTER TABLE responses ADD COLUMN model TEXT");
     db.exec(
@@ -1234,6 +1238,22 @@ export const sqliteStore: Store = {
         input.outputTokens,
         responseId
       );
+  },
+
+  async writeResponseDiscovery(responseId, d) {
+    const db = getDb();
+    if (d.codes !== undefined) {
+      db.prepare("UPDATE responses SET discovery_codes = ? WHERE id = ?").run(
+        JSON.stringify(d.codes),
+        responseId
+      );
+    }
+    if (d.brands !== undefined) {
+      db.prepare("UPDATE responses SET discovery_brands = ? WHERE id = ?").run(
+        JSON.stringify(d.brands),
+        responseId
+      );
+    }
   },
 
   async setTaxonomyProposal(projectId, proposalJson) {

@@ -12,6 +12,7 @@ import { analyzePromptHealth } from "./prompt_health";
 import { classifyNonBrands } from "./suggest";
 import { getDictionarySuggestions } from "./dict_suggest";
 import { batchableEngine, hasOpenBatches, pollRunBatches } from "./batch";
+import { bootstrapRunChunk } from "./bootstrap";
 
 // Sized when a run sampled one engine from one vendor. A six-engine panel
 // spreads across four vendors, so 4 global slots left each vendor running
@@ -65,7 +66,10 @@ export type ChunkOutcome =
   | "waiting"
   /** Coder outage during the coding wave: collection is safe under status
    * "collected"; the chain stops and coding resumes on the next drive. */
-  | "coding_blocked";
+  | "coding_blocked"
+  /** Init bootstrap finished (or held): the run sits at "collected" waiting
+   * on a human gate - nothing more to drive until a confirmation. */
+  | "gated";
 
 /**
  * Process as much of a run as fits in budgetMs, then report whether work
@@ -178,6 +182,13 @@ export async function driveRunChunk(
 
   if (pending.length === 0) {
     if (batchesOpen) return "waiting";
+    // First-run pipeline: while the taxonomy is unratified there is nothing
+    // to code against - the run owes the discovery bootstrap instead, and is
+    // told "collected" only once the codebook proposal and brand
+    // observations are ready for their gates.
+    if ((project.taxonomy_status ?? "pending") !== "ratified") {
+      return bootstrapRunChunk(runId, project, Date.now() + budgetMs);
+    }
     return codeCollectedChunk(runId, run.status, project.id, extractionCtx, Date.now() + budgetMs, {
       expected: total,
     });
@@ -546,6 +557,11 @@ async function codeCollectedChunk(
   return coded < uncoded.length ? "continue" : "finalize";
 }
 
+/** Scheduled-run contract: a run is marked "complete" - the user's "run
+ * finished" signal - only after collection, the coding wave, and everything
+ * here (new-name dictionary triggers, junk filter, pre-warmed suggestions,
+ * prompt health) have finished. Future codebook triggers (drift detection on
+ * a ratified taxonomy) belong in this function, before the status flip. */
 export async function finalizeRun(runId: string): Promise<void> {
   const run = await store.getRun(runId);
   if (!run || run.status === "complete" || run.status === "failed") return;

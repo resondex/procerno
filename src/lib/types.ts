@@ -289,6 +289,11 @@ export interface ResponseRow {
   total_recommendations: number | null;
   focus_quote: string | null;
   focus_interpretation: string | null;
+  /** Discovery-pass outputs for the init bootstrap (JSON string arrays):
+   * open-coded argument phrases and brand mentions. Null until each pass
+   * reaches this answer - the resumability marker for the bootstrap. */
+  discovery_codes: string | null;
+  discovery_brands: string | null;
   created_at: string;
 }
 
@@ -855,6 +860,11 @@ export interface Store {
     }
   ): Promise<void>;
   /** Append one row to the token-spend ledger (see lib/cost_log.ts). */
+  /** Persist one answer's discovery-pass output (either pass, or both). */
+  writeResponseDiscovery(
+    responseId: string,
+    d: { codes?: string[]; brands?: string[] }
+  ): Promise<void>;
   /** Attach a discovery-derived taxonomy proposal; status -> proposed. */
   setTaxonomyProposal(projectId: string, proposalJson: string): Promise<void>;
   /** Ratify the confirmed code list with its decision record;

@@ -1,0 +1,21 @@
+/** Sqlite roundtrip: discovery columns migrate, write, and read back. */
+import fs from "node:fs";
+process.env.DATA_DIR = "/tmp/procerno_bootstrap_check";
+fs.rmSync(process.env.DATA_DIR, { recursive: true, force: true });
+fs.mkdirSync(process.env.DATA_DIR, { recursive: true });
+const { store } = await import("../src/lib/store");
+const p = await store.createProject({ name: "t", brand: "b", category: "c", audience: "buyers", competitors: [], reasonTaxonomy: [], engineSet: ["m"], userId: null } as never);
+await store.insertPrompts(p.id, [{ text: "q1", theme: "general" }] as never);
+const run = await store.createRun({ projectId: p.id, model: "m", models: ["m"], repeats: 1 } as never);
+const runId = run.id;
+const prompts = await store.listPrompts(p.id);
+await store.insertResponse({ runId, promptId: prompts[0].id, repeatIdx: 0, model: "m", finishReason: null, citations: null, coderModel: null, searchCount: null, inputTokens: 1, outputTokens: 1, text: "hello", mentions: [], coding: null });
+const [r0] = await store.listResponses(runId);
+console.log("initial nulls:", r0.discovery_codes === null, r0.discovery_brands === null);
+await store.writeResponseDiscovery(r0.id, { codes: ["price", "speed"] });
+await store.writeResponseDiscovery(r0.id, { brands: ["Acme"] });
+const [r1] = await store.listResponses(runId);
+console.log("codes:", r1.discovery_codes, "brands:", r1.discovery_brands);
+if (JSON.parse(r1.discovery_codes!)[0] !== "price" || JSON.parse(r1.discovery_brands!)[0] !== "Acme") throw new Error("roundtrip mismatch");
+console.log("OK");
+process.exit(0);

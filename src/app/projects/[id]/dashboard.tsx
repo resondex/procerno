@@ -399,8 +399,16 @@ export default function ProjectDashboard({
         />
       )}
 
-      {activeRun?.status === "collected" &&
-        (!progress || (progress.total > 0 && progress.completed >= progress.total)) && (
+      {/* The pipeline card shows from the moment collection is full - the
+          bootstrap keeps the run "running" while discovery + consolidation
+          work, and that state reads as "Measuring your market's arguments". */}
+      {activeRun &&
+        (activeRun.status === "collected"
+          ? !progress || (progress.total > 0 && progress.completed >= progress.total)
+          : activeRun.status === "running" &&
+            !!progress &&
+            progress.total > 0 &&
+            progress.completed >= progress.total) && (
           <PipelineNext
             id={id}
             project={project}

@@ -9,7 +9,7 @@ import { batchableEngine, submitRunBatches } from "@/lib/engine/batch";
 
 // Vercel: runs execute as a chain of budgeted chunks — each invocation
 // processes what fits under maxDuration, then hands off via /continue.
-export const maxDuration = 300;
+export const maxDuration = 800;
 
 const runSchema = z.object({
   model: z.string().trim().min(1).default("gpt-5-mini"),

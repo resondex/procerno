@@ -100,6 +100,11 @@ export async function runOpenDiscovery(
     concurrency?: number;
     seed?: number;
     onProgress?: (done: number, failed: number, total: number) => void;
+    /** Called as each answer codes - the bootstrap's persistence hook, so a
+     * killed chunk resumes instead of re-spending. */
+    onResult?: (row: DiscoveryCode) => Promise<void>;
+    /** Workers stop pulling new answers past this time (epoch ms). */
+    deadlineMs?: number;
   } = {}
 ): Promise<DiscoveryCode[]> {
   tagCosts({ purpose: "discovery:open" });
@@ -126,6 +131,7 @@ export async function runOpenDiscovery(
   };
   const worker = async () => {
     while (cursor < pool.length) {
+      if (opts.deadlineMs && Date.now() >= opts.deadlineMs) return;
       const a = pool[cursor++];
       try {
         let codes: string[];
@@ -135,7 +141,9 @@ export async function runOpenDiscovery(
           await new Promise((r) => setTimeout(r, 2500));
           codes = await one(a);
         }
-        out.push({ responseId: a.id, engine: a.engine, reasons_open: codes });
+        const row = { responseId: a.id, engine: a.engine, reasons_open: codes };
+        await opts.onResult?.(row);
+        out.push(row);
       } catch {
         failed++;
       }
@@ -175,6 +183,8 @@ export async function runBrandDiscovery(
     concurrency?: number;
     seed?: number;
     onProgress?: (done: number, failed: number, total: number) => void;
+    onResult?: (row: BrandMentions) => Promise<void>;
+    deadlineMs?: number;
   } = {}
 ): Promise<BrandMentions[]> {
   const pool = sampleForDiscovery(answers, opts.coverage ?? 1, opts.seed);
@@ -200,6 +210,7 @@ export async function runBrandDiscovery(
   };
   const worker = async () => {
     while (cursor < pool.length) {
+      if (opts.deadlineMs && Date.now() >= opts.deadlineMs) return;
       const a = pool[cursor++];
       try {
         let brands: string[];
@@ -209,7 +220,9 @@ export async function runBrandDiscovery(
           await new Promise((r) => setTimeout(r, 2500));
           brands = await one(a);
         }
-        out.push({ responseId: a.id, engine: a.engine, brands });
+        const row = { responseId: a.id, engine: a.engine, brands };
+        await opts.onResult?.(row);
+        out.push(row);
       } catch {
         failed++;
       }

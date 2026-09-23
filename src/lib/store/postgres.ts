@@ -274,6 +274,8 @@ function ensureSchema(): Promise<void> {
       await sql`ALTER TABLE responses ADD COLUMN IF NOT EXISTS citations TEXT`;
       await sql`ALTER TABLE responses ADD COLUMN IF NOT EXISTS coder_model TEXT`;
       await sql`ALTER TABLE responses ADD COLUMN IF NOT EXISTS search_count INTEGER`;
+      await sql`ALTER TABLE responses ADD COLUMN IF NOT EXISTS discovery_codes TEXT`;
+      await sql`ALTER TABLE responses ADD COLUMN IF NOT EXISTS discovery_brands TEXT`;
       await sql`UPDATE responses r SET model = ru.model FROM runs ru
         WHERE r.run_id = ru.id AND (r.model IS NULL OR r.model = '')`;
       await sql`DROP INDEX IF EXISTS idx_responses_task`;
@@ -957,6 +959,16 @@ export const pgStore: Store = {
       WHERE id = ${responseId}`;
   },
 
+  async writeResponseDiscovery(responseId, d) {
+    const sql = await db();
+    if (d.codes !== undefined) {
+      await sql`UPDATE responses SET discovery_codes = ${JSON.stringify(d.codes)} WHERE id = ${responseId}`;
+    }
+    if (d.brands !== undefined) {
+      await sql`UPDATE responses SET discovery_brands = ${JSON.stringify(d.brands)} WHERE id = ${responseId}`;
+    }
+  },
+
   async setTaxonomyProposal(projectId, proposalJson) {
     const sql = await db();
     // Snapshot the pre-discovery list once - COALESCE keeps the first
@@ -1120,6 +1132,8 @@ export const pgStore: Store = {
           total_recommendations: r.total_recommendations ?? null,
           focus_quote: r.focus_quote ?? null,
           focus_interpretation: r.focus_interpretation ?? null,
+          discovery_codes: (r.discovery_codes as string | null) ?? null,
+          discovery_brands: (r.discovery_brands as string | null) ?? null,
           created_at: iso(r.created_at)!,
         }) as ResponseRow
     );
