@@ -1230,7 +1230,7 @@ function PipelineNext({
         />
       )}
       {status === "ratified" && !dictDone && (
-        <DictionaryGate id={id} dictionary={dictionary} onConfirmed={onRatified} />
+        <DictionaryGate id={id} project={project} dictionary={dictionary} onConfirmed={onRatified} />
       )}
       {status === "ratified" && dictDone && (
         <div className="grid gap-2">
@@ -1257,15 +1257,47 @@ function PipelineNext({
  * the Identify tab; this card is the sign-off. */
 function DictionaryGate({
   id,
+  project,
   dictionary,
   onConfirmed,
 }: {
   id: string;
+  project: Project;
   dictionary: DictionaryEntry[];
   onConfirmed: () => void;
 }) {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Observed mentions from the discovery brands pass: entry_id-matched rows
+  // size the tracked brands; unmatched names are the emerged brands.
+  const obs = (() => {
+    try {
+      return project.brand_observations
+        ? (JSON.parse(project.brand_observations) as {
+            rows: number;
+            observed: { name: string; entry_id: string | null; answers: number }[];
+          })
+        : null;
+    } catch {
+      return null;
+    }
+  })();
+  const byEntry = new Map<string, number>();
+  for (const o of obs?.observed ?? []) {
+    if (o.entry_id) byEntry.set(o.entry_id, (byEntry.get(o.entry_id) ?? 0) + o.answers);
+  }
+  const emerged = (obs?.observed ?? []).filter((o) => !o.entry_id).slice(0, 12);
+  const maxObs = Math.max(1, ...(obs?.observed ?? []).map((o) => o.answers));
+  const tier = (n: number) => {
+    const f = n / (obs?.rows || 1);
+    return f >= 0.3
+      ? { label: "DOMINANT", cls: "text-primary" }
+      : f >= 0.1
+        ? { label: "MAJOR", cls: "text-ink" }
+        : f >= 0.02
+          ? { label: "COMMON", cls: "text-ink-2" }
+          : { label: "OCCASIONAL", cls: "text-ink-3" };
+  };
   const confirm = async () => {
     setSaving(true);
     setError(null);
@@ -1311,9 +1343,57 @@ function DictionaryGate({
                 {d.aliases.length > 5 ? "\u2026" : ""}
               </span>
             )}
+            {obs && (
+              <span
+                className="ml-auto flex items-center gap-2"
+                title="how often this brand appears in your collected answers - preliminary"
+              >
+                {byEntry.has(d.id) ? (
+                  <>
+                    <span className={`text-[10px] font-bold tracking-wide ${tier(byEntry.get(d.id)!).cls}`}>
+                      {tier(byEntry.get(d.id)!).label}
+                    </span>
+                    <span className="h-1 w-16 overflow-hidden rounded-full bg-line">
+                      <span
+                        className="block h-full rounded-full bg-primary"
+                        style={{ width: `${Math.max(5, ((byEntry.get(d.id) ?? 0) / maxObs) * 100)}%` }}
+                      />
+                    </span>
+                  </>
+                ) : (
+                  <span className="text-[10px] font-bold tracking-wide text-ink-3" title="never mentioned in the collected answers">
+                    NOT SEEN
+                  </span>
+                )}
+              </span>
+            )}
           </div>
         ))}
       </div>
+      {emerged.length > 0 && (
+        <div className="grid gap-1.5 rounded-lg border border-line border-l-2 border-l-warning px-3.5 py-3">
+          <span className="text-[12px] font-semibold">
+            Also seen in your answers, not yet tracked
+          </span>
+          <div className="flex flex-wrap gap-1.5">
+            {emerged.map((o) => (
+              <span
+                key={o.name}
+                className="inline-flex items-center gap-1.5 rounded-full border border-line px-2 py-0.5 text-[11.5px] text-ink-2"
+              >
+                {o.name}
+                <span className={`text-[9px] font-bold ${tier(o.answers).cls}`}>
+                  {tier(o.answers).label}
+                </span>
+              </span>
+            ))}
+          </div>
+          <span className="text-[11px] text-ink-3">
+            Add any of these as competitors (or aliases of a tracked brand) in
+            the Identify tab before confirming.
+          </span>
+        </div>
+      )}
       <div className="flex flex-wrap items-center justify-between gap-3">
         <span className="text-xs text-ink-3">
           {active.length} brands recognized

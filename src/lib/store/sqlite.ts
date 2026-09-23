@@ -49,6 +49,7 @@ function createDb(): Database.Database {
       taxonomy_original TEXT,
       taxonomy_decision TEXT,
       dictionary_status TEXT NOT NULL DEFAULT 'pending',
+      brand_observations TEXT,
       engine_set TEXT NOT NULL DEFAULT '[]',
       org_id TEXT,
       dictionary_version INTEGER NOT NULL DEFAULT 1,
@@ -339,6 +340,9 @@ function createDb(): Database.Database {
       "ALTER TABLE projects ADD COLUMN dictionary_status TEXT NOT NULL DEFAULT 'pending'"
     );
   }
+  if (!cols.some((c) => c.name === "brand_observations")) {
+    db.exec("ALTER TABLE projects ADD COLUMN brand_observations TEXT");
+  }
   if (!cols.some((c) => c.name === "reason_taxonomy")) {
     db.exec(
       "ALTER TABLE projects ADD COLUMN reason_taxonomy TEXT NOT NULL DEFAULT '[]'"
@@ -488,6 +492,8 @@ function parseProject(row: ProjectRaw): Project {
       (row as unknown as { taxonomy_decision?: string | null }).taxonomy_decision ?? null,
     dictionary_status:
       (row as unknown as { dictionary_status?: string }).dictionary_status ?? "pending",
+    brand_observations:
+      (row as unknown as { brand_observations?: string | null }).brand_observations ?? null,
     dictionary_version:
       (row as unknown as { dictionary_version?: number }).dictionary_version ?? 1,
     evidence_drawer:
@@ -1251,6 +1257,12 @@ export const sqliteStore: Store = {
     getDb()
       .prepare("UPDATE projects SET dictionary_status = 'confirmed' WHERE id = ?")
       .run(projectId);
+  },
+
+  async setBrandObservations(projectId, json) {
+    getDb()
+      .prepare("UPDATE projects SET brand_observations = ? WHERE id = ?")
+      .run(json, projectId);
   },
 
   async insertCostEntry(input) {

@@ -82,6 +82,10 @@ export interface Project {
   /** Brand-dictionary gate: pending -> confirmed. Follows codebook
    * ratification; coding waits on both. */
   dictionary_status: string;
+  /** Observed brand mentions from the discovery brands pass (JSON:
+   * {rows, observed: [{name, entry_id|null, answers}]}). Null until the
+   * pass runs. */
+  brand_observations: string | null;
   /** Snapshot of reason_taxonomy the moment a proposal attached - the
    * pre-discovery seed (or []). Kept so recommended-vs-decided-vs-original
    * is analyzable across brands. */
@@ -858,6 +862,8 @@ export interface Store {
   ratifyTaxonomy(projectId: string, codes: string[], decisionJson: string): Promise<void>;
   /** Mark the brand dictionary reviewed - the second confirmation gate. */
   confirmDictionary(projectId: string): Promise<void>;
+  /** Attach observed brand mentions from the discovery brands pass. */
+  setBrandObservations(projectId: string, json: string): Promise<void>;
   insertCostEntry(input: {
     projectId?: string | null;
     runId?: string | null;

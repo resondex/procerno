@@ -149,3 +149,75 @@ export async function runOpenDiscovery(
   opts.onProgress?.(out.length, failed, pool.length);
   return out;
 }
+
+/** Brand-mention discovery: which brands/products each answer actually
+ * names. Feeds the dictionary gate with observed reality - who appears in
+ * this market's answers and how often - instead of only the setup-seeded
+ * list. Same metering, purpose discovery:brands via cost context. */
+const BRANDS_SYSTEM =
+  "You extract brand mentions from one AI assistant answer for a " +
+  "brand-visibility study. List every distinct brand, company, or named " +
+  "product the answer mentions - by the name the answer uses, one entry per " +
+  "brand (dedupe variants within the answer to the most complete form). " +
+  "Generic categories are not brands. Reply with ONLY the JSON object: " +
+  '{"brands": ["<names>"]}';
+
+export interface BrandMentions {
+  responseId: string;
+  engine: string;
+  brands: string[];
+}
+
+export async function runBrandDiscovery(
+  answers: DiscoveryAnswer[],
+  opts: {
+    coverage?: number;
+    concurrency?: number;
+    seed?: number;
+    onProgress?: (done: number, failed: number, total: number) => void;
+  } = {}
+): Promise<BrandMentions[]> {
+  const pool = sampleForDiscovery(answers, opts.coverage ?? 1, opts.seed);
+  const c = coderCompatClient(DISCOVERY_MODEL);
+  const out: BrandMentions[] = [];
+  let cursor = 0;
+  let failed = 0;
+  const one = async (a: DiscoveryAnswer) => {
+    const res = await c.chat.completions.create({
+      model: DISCOVERY_MODEL,
+      temperature: 0,
+      max_tokens: 500,
+      messages: [
+        { role: "system", content: BRANDS_SYSTEM },
+        { role: "user", content: `Question: ${a.prompt}\n\nAnswer:\n${a.text}` },
+      ],
+    });
+    const raw = (res.choices[0]?.message?.content ?? "").trim();
+    const parsed = JSON.parse(raw.replace(/^```(?:json)?|```$/g, "").trim()) as {
+      brands?: string[];
+    };
+    return (parsed.brands ?? []).filter((b) => typeof b === "string" && b.trim());
+  };
+  const worker = async () => {
+    while (cursor < pool.length) {
+      const a = pool[cursor++];
+      try {
+        let brands: string[];
+        try {
+          brands = await one(a);
+        } catch {
+          await new Promise((r) => setTimeout(r, 2500));
+          brands = await one(a);
+        }
+        out.push({ responseId: a.id, engine: a.engine, brands });
+      } catch {
+        failed++;
+      }
+      if ((out.length + failed) % 250 === 0)
+        opts.onProgress?.(out.length, failed, pool.length);
+    }
+  };
+  await Promise.all(Array.from({ length: opts.concurrency ?? 16 }, worker));
+  opts.onProgress?.(out.length, failed, pool.length);
+  return out;
+}
