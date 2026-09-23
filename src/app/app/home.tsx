@@ -188,7 +188,7 @@ export default function AppHome({
                 <Link prefetch={true} href={`/projects/${p.id}`} className="card block px-5 py-4 transition-colors hover:border-primary">
                   <div className="flex items-baseline justify-between gap-3">
                     <span className="font-semibold text-[15px]">{p.name}</span>
-                    <RunHint run={p.latestRun} taxonomyStatus={p.taxonomy_status} />
+                    <RunHint run={p.latestRun} taxonomyStatus={p.taxonomy_status} dictionaryStatus={p.dictionary_status} />
                   </div>
                   <div className="text-[13px] text-ink-2 mt-1">
                     {p.brand} · {p.category}
@@ -231,19 +231,23 @@ export default function AppHome({
 function RunHint({
   run,
   taxonomyStatus,
+  dictionaryStatus,
 }: {
   run: Run | null;
   taxonomyStatus?: string;
+  dictionaryStatus?: string;
 }) {
   if (!run) return <span className="text-xs text-ink-3">ready to run</span>;
-  // Collect-then-code: a collected run's real state depends on the taxonomy
-  // gate - name the stage, and especially name the one that waits on a human.
+  // Collect-then-code: a collected run's real state depends on the two
+  // gates - name the stage, especially the ones that wait on a human.
   const collected =
     taxonomyStatus === "proposed"
       ? { label: "confirm codebook", cls: "text-warning" }
-      : taxonomyStatus === "ratified"
-        ? { label: "coding queued", cls: "text-primary" }
-        : { label: "measuring arguments", cls: "text-primary" };
+      : taxonomyStatus === "ratified" && dictionaryStatus !== "confirmed"
+        ? { label: "confirm brands", cls: "text-warning" }
+        : taxonomyStatus === "ratified"
+          ? { label: "coding queued", cls: "text-primary" }
+          : { label: "measuring arguments", cls: "text-primary" };
   const map: Record<Run["status"], { label: string; cls: string }> = {
     pending: { label: "queued", cls: "text-ink-3" },
     running: { label: "running", cls: "text-primary" },

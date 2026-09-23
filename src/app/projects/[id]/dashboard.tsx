@@ -401,7 +401,18 @@ export default function ProjectDashboard({
 
       {activeRun?.status === "collected" &&
         (!progress || (progress.total > 0 && progress.completed >= progress.total)) && (
-          <PipelineNext id={id} project={project} answers={progress?.total ?? 0} dictionary={dict} onRatified={refresh} />
+          <PipelineNext
+            id={id}
+            project={project}
+            answers={progress?.total ?? 0}
+            dictionary={dict}
+            onRatified={refresh}
+            onDictApplied={refreshDict}
+            onOpenDictionary={() => {
+              setDictTab("parents");
+              setOpenModal("dictionary");
+            }}
+          />
         )}
 
       {shownRun ? (
@@ -694,7 +705,12 @@ export default function ProjectDashboard({
           }
         >
           {dictTab === "identify" && (
-            <IdentifyTab projectId={id} dict={dict} onApplied={refreshDict} />
+            <IdentifyTab
+              projectId={id}
+              dict={dict}
+              onApplied={refreshDict}
+              observations={project.taxonomy_status ? project.brand_observations : null}
+            />
           )}
           {dictTab === "parents" && (
             <ParentsTab projectId={id} dict={dict} onApplied={refreshDict} />
@@ -1168,12 +1184,16 @@ function PipelineNext({
   answers,
   dictionary,
   onRatified,
+  onDictApplied,
+  onOpenDictionary,
 }: {
   id: string;
   project: Project;
   answers: number;
   dictionary: DictionaryEntry[];
   onRatified: () => void;
+  onDictApplied: () => Promise<void>;
+  onOpenDictionary: () => void;
 }) {
   const status = project.taxonomy_status ?? "pending";
   const dictDone = project.dictionary_status === "confirmed";
@@ -1230,7 +1250,14 @@ function PipelineNext({
         />
       )}
       {status === "ratified" && !dictDone && (
-        <DictionaryGate id={id} project={project} dictionary={dictionary} onConfirmed={onRatified} />
+        <DictionaryGate
+          id={id}
+          project={project}
+          dictionary={dictionary}
+          onApplied={onDictApplied}
+          onConfirmed={onRatified}
+          onOpenDictionary={onOpenDictionary}
+        />
       )}
       {status === "ratified" && dictDone && (
         <div className="grid gap-2">
@@ -1259,45 +1286,19 @@ function DictionaryGate({
   id,
   project,
   dictionary,
+  onApplied,
   onConfirmed,
+  onOpenDictionary,
 }: {
   id: string;
   project: Project;
   dictionary: DictionaryEntry[];
+  onApplied: () => Promise<void>;
   onConfirmed: () => void;
+  onOpenDictionary: () => void;
 }) {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  // Observed mentions from the discovery brands pass: entry_id-matched rows
-  // size the tracked brands; unmatched names are the emerged brands.
-  const obs = (() => {
-    try {
-      return project.brand_observations
-        ? (JSON.parse(project.brand_observations) as {
-            rows: number;
-            observed: { name: string; entry_id: string | null; answers: number }[];
-          })
-        : null;
-    } catch {
-      return null;
-    }
-  })();
-  const byEntry = new Map<string, number>();
-  for (const o of obs?.observed ?? []) {
-    if (o.entry_id) byEntry.set(o.entry_id, (byEntry.get(o.entry_id) ?? 0) + o.answers);
-  }
-  const emerged = (obs?.observed ?? []).filter((o) => !o.entry_id).slice(0, 12);
-  const maxObs = Math.max(1, ...(obs?.observed ?? []).map((o) => o.answers));
-  const tier = (n: number) => {
-    const f = n / (obs?.rows || 1);
-    return f >= 0.3
-      ? { label: "DOMINANT", cls: "text-primary" }
-      : f >= 0.1
-        ? { label: "MAJOR", cls: "text-ink" }
-        : f >= 0.02
-          ? { label: "COMMON", cls: "text-ink-2" }
-          : { label: "OCCASIONAL", cls: "text-ink-3" };
-  };
   const confirm = async () => {
     setSaving(true);
     setError(null);
@@ -1312,98 +1313,40 @@ function DictionaryGate({
     }
     onConfirmed();
   };
-  const active = dictionary.filter((d) => d.status !== "rejected");
+  const pending = dictionary.filter((d) => d.status === "pending").length;
   return (
     <div className="grid gap-3">
       <div className="grid gap-0.5">
         <h2 className="text-sm font-semibold">Confirm your brand dictionary</h2>
         <p className="text-[13px] text-ink-3">
           Codebook confirmed. Last check before coding: these are the brands
-          we&apos;ll recognize in answers, and the names each one goes by. Add,
-          merge, or exclude brands in the Identify tab - then confirm here.
+          we&apos;ll recognize in answers - sized by how often each actually
+          appears - plus the names seen in your answers that aren&apos;t sorted
+          yet. Drag a name onto a brand to make it an alias, into its own
+          bucket to track it, or into Ignore. This is the same board as the
+          Brand dictionary view.
         </p>
       </div>
-      <div className="rounded-lg border border-line">
-        {active.slice(0, 40).map((d) => (
-          <div
-            key={d.id}
-            className="flex flex-wrap items-center gap-2 border-t border-line px-3 py-1.5 first:border-t-0"
-          >
-            <span className="text-[13.5px] font-semibold">
-              {d.display_name ?? d.canonical}
-            </span>
-            <span
-              className={`rounded-full px-2 py-0.5 text-[11px] font-semibold ${d.role === "competitor" ? "bg-line text-ink-2" : "bg-primary/10 text-primary"}`}
-            >
-              {d.role === "competitor" ? "competitor" : "your brand"}
-            </span>
-            {d.aliases.length > 0 && (
-              <span className="text-xs text-ink-3">
-                also answers to: {d.aliases.slice(0, 5).join(", ")}
-                {d.aliases.length > 5 ? "\u2026" : ""}
-              </span>
-            )}
-            {obs && (
-              <span
-                className="ml-auto flex items-center gap-2"
-                title="how often this brand appears in your collected answers - preliminary"
-              >
-                {byEntry.has(d.id) ? (
-                  <>
-                    <span className={`text-[10px] font-bold tracking-wide ${tier(byEntry.get(d.id)!).cls}`}>
-                      {tier(byEntry.get(d.id)!).label}
-                    </span>
-                    <span className="h-1 w-16 overflow-hidden rounded-full bg-line">
-                      <span
-                        className="block h-full rounded-full bg-primary"
-                        style={{ width: `${Math.max(5, ((byEntry.get(d.id) ?? 0) / maxObs) * 100)}%` }}
-                      />
-                    </span>
-                  </>
-                ) : (
-                  <span className="text-[10px] font-bold tracking-wide text-ink-3" title="never mentioned in the collected answers">
-                    NOT SEEN
-                  </span>
-                )}
-              </span>
-            )}
-          </div>
-        ))}
-      </div>
-      {emerged.length > 0 && (
-        <div className="grid gap-1.5 rounded-lg border border-line border-l-2 border-l-warning px-3.5 py-3">
-          <span className="text-[12px] font-semibold">
-            Also seen in your answers, not yet tracked
-          </span>
-          <div className="flex flex-wrap gap-1.5">
-            {emerged.map((o) => (
-              <span
-                key={o.name}
-                className="inline-flex items-center gap-1.5 rounded-full border border-line px-2 py-0.5 text-[11.5px] text-ink-2"
-              >
-                {o.name}
-                <span className={`text-[9px] font-bold ${tier(o.answers).cls}`}>
-                  {tier(o.answers).label}
-                </span>
-              </span>
-            ))}
-          </div>
-          <span className="text-[11px] text-ink-3">
-            Add any of these as competitors (or aliases of a tracked brand) in
-            the Identify tab before confirming.
-          </span>
-        </div>
-      )}
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <span className="text-xs text-ink-3">
-          {active.length} brands recognized
-        </span>
+      <IdentifyTab
+        projectId={id}
+        dict={dictionary}
+        onApplied={onApplied}
+        observations={project.brand_observations}
+      />
+      <div className="flex flex-wrap items-center justify-between gap-3 border-t border-line pt-3">
+        <button
+          className="text-xs text-ink-3 underline"
+          onClick={onOpenDictionary}
+        >
+          Parent groupings &amp; analysis settings
+        </button>
         <div className="flex items-center gap-3">
           {error && <span className="text-xs text-danger">{error}</span>}
           <button
             className="rounded bg-primary px-4 py-2 text-sm font-medium text-white disabled:opacity-50"
             onClick={confirm}
             disabled={saving}
+            title={pending > 0 ? `${pending} names still unsorted - they analyze as pending until sorted` : undefined}
           >
             {saving ? "Saving..." : "Confirm brands \u2192 start coding"}
           </button>

@@ -47,11 +47,51 @@ export default function IdentifyTab({
   projectId,
   dict,
   onApplied,
+  observations,
 }: {
   projectId: string;
   dict: DictionaryEntry[];
   onApplied: () => Promise<void>;
+  /** projects.brand_observations JSON - observed mention counts from the
+   * discovery brands pass. Optional: without it the board renders unsized. */
+  observations?: string | null;
 }) {
+  // Observed sizing: entry_id-matched counts size the brand buckets; name
+  // keys size the pending pills. Tier words, no raw numbers - preliminary
+  // until coding.
+  const obs = (() => {
+    try {
+      return observations
+        ? (JSON.parse(observations) as {
+            rows: number;
+            observed: { name: string; entry_id: string | null; answers: number }[];
+          })
+        : null;
+    } catch {
+      return null;
+    }
+  })();
+  const obsByEntry = new Map<string, number>();
+  const obsByName = new Map<string, number>();
+  for (const o of obs?.observed ?? []) {
+    if (o.entry_id) obsByEntry.set(o.entry_id, (obsByEntry.get(o.entry_id) ?? 0) + o.answers);
+    obsByName.set(norm(o.name), o.answers);
+  }
+  const maxObs = Math.max(1, ...(obs?.observed ?? []).map((o) => o.answers));
+  const tierOf = (n: number) => {
+    const f = n / (obs?.rows || 1);
+    return f >= 0.3
+      ? { label: "DOMINANT", cls: "text-primary" }
+      : f >= 0.1
+        ? { label: "MAJOR", cls: "text-ink" }
+        : f >= 0.02
+          ? { label: "COMMON", cls: "text-ink-2" }
+          : { label: "OCCASIONAL", cls: "text-ink-3" };
+  };
+  const bucketSize = (b: { entryId: string | null }) =>
+    b.entryId && obsByEntry.has(b.entryId) ? obsByEntry.get(b.entryId)! : null;
+  const roleOf = (entryId: string | null) =>
+    dict.find((e) => e.id === entryId)?.role ?? null;
   const [buckets, setBuckets] = useState<Bucket[]>([]);
   const [suggesting, setSuggesting] = useState(false);
   // Delayed indicator: cached suggestions resolve in <1s — flashing
@@ -601,9 +641,14 @@ export default function IdentifyTab({
                     JSON.stringify({ entryId: e.id, name: e.canonical })
                   );
                 }}
-                className="inline-flex items-center rounded-full border border-danger/30 bg-danger/10 px-2.5 py-1 text-[13px] font-medium text-danger cursor-grab"
+                className="inline-flex items-center gap-1.5 rounded-full border border-danger/30 bg-danger/10 px-2.5 py-1 text-[13px] font-medium text-danger cursor-grab"
               >
                 {e.canonical}
+                {obs && obsByName.has(norm(e.canonical)) && (
+                  <span className={`text-[9px] font-bold tracking-wide ${tierOf(obsByName.get(norm(e.canonical))!).cls}`}>
+                    {tierOf(obsByName.get(norm(e.canonical))!).label}
+                  </span>
+                )}
               </span>
             ))}
           </div>
@@ -626,6 +671,38 @@ export default function IdentifyTab({
                 className="w-full bg-transparent text-sm font-semibold mb-2 outline-none border-b border-transparent focus:border-line"
                 title="Grouping label — used across all reports and dashboards"
               />
+              {obs && (
+                <div className="mb-2 -mt-1 flex items-center gap-2">
+                  <span
+                    className={`rounded-full px-2 py-0.5 text-[10px] font-semibold ${roleOf(b.entryId) === "competitor" ? "bg-line text-ink-2" : "bg-primary/10 text-primary"}`}
+                  >
+                    {roleOf(b.entryId) === "competitor" ? "competitor" : "your brand"}
+                  </span>
+                  {bucketSize(b) !== null ? (
+                    <span
+                      className="flex items-center gap-1.5"
+                      title="how often this brand appears in your collected answers - preliminary until coding"
+                    >
+                      <span className={`text-[10px] font-bold tracking-wide ${tierOf(bucketSize(b)!).cls}`}>
+                        {tierOf(bucketSize(b)!).label}
+                      </span>
+                      <span className="h-1 w-14 overflow-hidden rounded-full bg-line">
+                        <span
+                          className="block h-full rounded-full bg-primary"
+                          style={{ width: `${Math.max(5, (bucketSize(b)! / maxObs) * 100)}%` }}
+                        />
+                      </span>
+                    </span>
+                  ) : (
+                    <span
+                      className="text-[10px] font-bold tracking-wide text-ink-3"
+                      title="never mentioned in the collected answers"
+                    >
+                      NOT SEEN
+                    </span>
+                  )}
+                </div>
+              )}
               {bucketBody(b)}
             </div>
           ))}

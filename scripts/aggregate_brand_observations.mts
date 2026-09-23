@@ -53,6 +53,13 @@ await store.setBrandObservations(
   projectId,
   JSON.stringify({ rows, generated_at: new Date().toISOString(), observed })
 );
+// Emerged names become pending dictionary entries - the unresolved-names
+// tray that the gate and the Brand dictionary view both triage. Idempotent:
+// queueDictionaryCandidates skips names already known to the dictionary.
+await store.queueDictionaryCandidates(
+  projectId,
+  observed.filter((o) => !o.entry_id).map((o) => o.name)
+);
 const matched = observed.filter((o) => o.entry_id).length;
 console.log(`${brand}: ${rows} answers, ${observed.length} brands kept (${matched} matched to dictionary, ${observed.length - matched} emerged)`);
 await new Promise((r) => setTimeout(r, 4000));
