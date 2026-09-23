@@ -6,11 +6,15 @@ import type { DictionaryEntry } from "../types";
 
 const SUGGEST_MODEL = process.env.SUGGEST_MODEL ?? "gpt-5-mini";
 const CACHE_TTL_MS = 183 * 24 * 3600 * 1000; // ~6 months
-// v5: merge now beats ignore whenever a parent offering is present, and
-// every example is category-neutral so the rules do not read as written for
-// one study's category. In the cache key so prompt changes bypass stale
-// suggestions.
-const SUGGEST_RULES_VERSION = "v5";
+// v7 (2026-09-23, Tyler-calibrated on the pinned Pixel board): approve is
+// reserved for competing offerings from a DIFFERENT maker; independent
+// non-category companies (carriers, suppliers, retailers, publications,
+// bystander apps) are ignore; an active brand's ecosystem (companion
+// devices, first-party services, co-branded components) and named
+// models/trims of its lines always merge. 5-run harness: unanimity 68/71
+// on Pixel (v5: 60), 68/71 match to the approved board; AmEx stability
+// 42 -> 60/72. In the cache key so prompt changes bypass stale suggestions.
+const SUGGEST_RULES_VERSION = "v7";
 
 const SCHEMA = {
   type: "object",
@@ -154,8 +158,9 @@ export async function getDictionarySuggestions(
   return out;
 }
 
-/** The v5 disposition rules, exported so evals can run the byte-identical
- * production prompt against other models. */
+/** The v7 disposition rules (Tyler-calibrated, harness-validated), exported
+ * so evals can run the byte-identical production prompt against other
+ * models. */
 export function suggestSystemPrompt(
   category: string,
   activeNames: string[]
@@ -166,14 +171,19 @@ export function suggestSystemPrompt(
           "- merge: the name is the SAME offering as one of the active brands " +
           "(alternate name, spelling, sub-surface of the same product). Set " +
           "merge_into to that active brand's canonical name exactly.\n" +
-          "- approve: a genuinely distinct brand/product competing in or " +
-          "relevant to the category, worth its own row.\n" +
-          "- ignore: not an analyzable brand. This includes generic or " +
-          "infrastructure descriptors ('a self-hosted server', 'open-source " +
-          "tools', 'a spreadsheet'), feature fragments with no brand " +
-          "attached, compound names listing multiple DISTINCT brands " +
-          "(merging such a name into either would misattribute the other), " +
-          "one-off tangents, and products from unrelated categories.\n" +
+          "- approve: a competing brand or product line from a DIFFERENT " +
+          "maker than the active brands - a genuinely new player in this " +
+          "category, worth its own row.\n" +
+          "- ignore: not an analyzable offering in this category. This " +
+          "includes generic or infrastructure descriptors ('a self-hosted " +
+          "server', 'open-source tools', 'a spreadsheet'), feature fragments " +
+          "with no brand attached, compound names listing multiple DISTINCT " +
+          "brands (merging such a name into either would misattribute the " +
+          "other), one-off tangents - AND real companies that do not sell " +
+          "this category's offering: component suppliers, carriers, platform " +
+          "owners, retailers, marketplaces, publications, review sites, and " +
+          "apps the products merely run. Appearing in answers is not the " +
+          "same as being a choice.\n" +
           "PREFER MERGE OVER IGNORE: when a name is a surface, module, " +
           "add-on, edition, or tier of an offering that appears among the " +
           "active brands or elsewhere in this batch, merge it into that " +
@@ -184,6 +194,15 @@ export function suggestSystemPrompt(
           "offering. Two products a company sells separately, which a buyer " +
           "would weigh against each other, stay separate even under one " +
           "corporate parent; one product's several views or editions do not. " +
+          "A named model, generation, or trim of an active brand's product " +
+          "line (a numbered or suffixed variant of its name) merges into " +
+          "that line - it is never approve.\n" +
+          "ECOSYSTEM RULE — a product, service, app, store, or accessory " +
+          "belonging to an active brand's ecosystem (a companion device, " +
+          "first-party service, migration tool, accessory line) and a " +
+          "partner brand named as part of an active brand's product (a " +
+          "co-engineered camera, a licensed feature) are NEVER their own " +
+          "row and never ignored: merge them into that brand.\n" +
           "Every suggestion needs a one-line rationale.\n" +
           `Active brands: ${activeNames.join(", ")}.\n` +
           "Also treat pending names as potential merge targets for OTHER " +
