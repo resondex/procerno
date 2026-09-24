@@ -207,7 +207,12 @@ export async function runBrandDiscovery(
     const parsed = JSON.parse(raw.replace(/^```(?:json)?|```$/g, "").trim()) as {
       brands?: string[];
     };
-    return (parsed.brands ?? []).filter((b) => typeof b === "string" && b.trim());
+    // Boundary validation: a detected name must actually appear in the
+    // answer as a token-bounded match ("Marvel" inside "Marvelous" doesn't).
+    return boundedNames(
+      a.text,
+      (parsed.brands ?? []).filter((b) => typeof b === "string" && b.trim())
+    );
   };
   const worker = async () => {
     while (cursor < pool.length) {

@@ -1,4 +1,5 @@
 import OpenAI from "openai";
+import { nameAppearsBounded } from "./mention_filter";
 import type { ExtractedMention, ExtractionResult } from "../types";
 import { matchKey } from "../brand_key";
 
@@ -1251,7 +1252,11 @@ async function codeWithClaude(
     if (!singleDirection(q)) parsed.top_pick_brand = null;
   }
   flattenReasons(parsed);
-  const cwcMentions = dedupeMentions(parsed.mentions ?? []);
+  const cwcMentions = dedupeMentions(
+    // Boundary validation: a mention must appear token-bounded in the
+    // answer ("Marvel" inside "Marvelous" is not a mention).
+    (parsed.mentions ?? []).filter((m) => nameAppearsBounded(responseText, m.brand, new Set(ctx.knownBrands.map((b) => b.trim().toLowerCase()))))
+  );
   // Anthropic forced-tool calls do not hard-enforce enum constraints the
   // way OpenAI structured outputs do - invented reason codes slip through
   // (caught in the Phase 2 examples). Validate against the taxonomy here.
@@ -1460,7 +1465,9 @@ codingInstructions(ctx),
       // occasionally writes the string "null" where it means no pick.
       const pick = realBrand(parsed.top_pick_brand);
       flattenReasons(parsed);
-      const oaMentions = dedupeMentions(parsed.mentions ?? []);
+      const oaMentions = dedupeMentions(
+        (parsed.mentions ?? []).filter((m) => nameAppearsBounded(responseText, m.brand, new Set(ctx.knownBrands.map((b) => b.trim().toLowerCase()))))
+      );
       return {
         ...parsed,
         // A conditional or undecided answer crowns nobody, whatever the
