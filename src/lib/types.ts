@@ -878,6 +878,11 @@ export interface Store {
   confirmDictionary(projectId: string): Promise<void>;
   /** Attach observed brand mentions from the discovery brands pass. */
   setBrandObservations(projectId: string, json: string): Promise<void>;
+  /** Per-answer detected brand-name lists for a project - discovery_brands
+   * where present, mentions rows otherwise. Light: never loads answer text. */
+  listProjectBrandRows(
+    projectId: string
+  ): Promise<{ responseId: string; brands: string[] }[]>;
   insertCostEntry(input: {
     projectId?: string | null;
     runId?: string | null;

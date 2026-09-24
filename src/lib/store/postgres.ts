@@ -959,6 +959,32 @@ export const pgStore: Store = {
       WHERE id = ${responseId}`;
   },
 
+  async listProjectBrandRows(projectId) {
+    const sql = await db();
+    const disc = await sql`SELECT r.id, r.discovery_brands FROM responses r
+      JOIN runs ru ON ru.id = r.run_id
+      WHERE ru.project_id = ${projectId} AND r.discovery_brands IS NOT NULL`;
+    const out = disc.map((r) => {
+      try {
+        return { responseId: r.id as string, brands: JSON.parse(r.discovery_brands) as string[] };
+      } catch {
+        return { responseId: r.id as string, brands: [] };
+      }
+    });
+    const covered = new Set(out.map((r) => r.responseId));
+    const men = await sql`SELECT m.response_id, m.brand FROM mentions m
+      JOIN responses r ON r.id = m.response_id
+      JOIN runs ru ON ru.id = r.run_id
+      WHERE ru.project_id = ${projectId}`;
+    const byResp = new Map<string, string[]>();
+    for (const m of men) {
+      if (covered.has(m.response_id as string)) continue;
+      (byResp.get(m.response_id) ?? byResp.set(m.response_id, []).get(m.response_id)!).push(m.brand as string);
+    }
+    for (const [responseId, brands] of byResp) out.push({ responseId, brands });
+    return out;
+  },
+
   async writeResponseDiscovery(responseId, d) {
     const sql = await db();
     if (d.codes !== undefined) {

@@ -1,10 +1,10 @@
 import { store } from "../store";
-import { matchKey } from "../brand_key";
 import { withCostContext } from "../cost_log";
 import type { Project, ResponseRow } from "../types";
 import { runBrandDiscovery, runOpenDiscovery, type DiscoveryAnswer } from "./discovery";
 import { consolidateTaxonomy } from "./consolidate";
 import { classifyNonBrands } from "./suggest";
+import { refreshBrandObservations } from "./observations";
 import { getDictionarySuggestions } from "./dict_suggest";
 
 /**
@@ -98,50 +98,10 @@ export async function bootstrapRunChunk(
     await store.setTaxonomyProposal(project.id, JSON.stringify(proposal));
   }
 
-  // Stage 4: brand observations + the dictionary queue.
+  // Stage 4: brand observations + the dictionary queue - the shared
+  // recomputable implementation (family-aware attribution, 1% floor).
   if (!project.brand_observations) {
-    const dict = await store.getDictionary(project.id);
-    const keyToEntry = new Map<string, string>();
-    for (const e of dict) {
-      keyToEntry.set(matchKey(e.canonical), e.id);
-      for (const a of e.aliases) keyToEntry.set(matchKey(a), e.id);
-    }
-    const byKey = new Map<string, { answers: number; forms: Map<string, number> }>();
-    let rows = 0;
-    for (const r of fresh) {
-      if (r.discovery_brands === null) continue;
-      rows++;
-      const seen = new Set<string>();
-      for (const b of JSON.parse(r.discovery_brands) as string[]) {
-        const k = matchKey(b);
-        if (!k || seen.has(k)) continue;
-        seen.add(k);
-        const g = byKey.get(k) ?? { answers: 0, forms: new Map() };
-        g.answers++;
-        g.forms.set(b, (g.forms.get(b) ?? 0) + 1);
-        byKey.set(k, g);
-      }
-    }
-    const observed = [...byKey.entries()]
-      .map(([k, g]) => ({
-        name: [...g.forms.entries()].sort((a, b) => b[1] - a[1])[0][0],
-        entry_id: keyToEntry.get(k) ?? null,
-        answers: g.answers,
-      }))
-      .sort((a, b) => b.answers - a.answers)
-      // tracked entries always kept; emerged names only above 1% of rows -
-      // below that is noise the board never serves (re-evaluated every run,
-      // so a rising name surfaces the moment it crosses the floor)
-      .filter((o) => o.entry_id !== null || o.answers >= rows * 0.01)
-      .slice(0, 80);
-    await store.setBrandObservations(
-      project.id,
-      JSON.stringify({ rows, generated_at: new Date().toISOString(), observed })
-    );
-    await store.queueDictionaryCandidates(
-      project.id,
-      observed.filter((o) => !o.entry_id).map((o) => o.name)
-    );
+    await refreshBrandObservations(project.id);
     // Junk filter + pre-warmed suggestions, so the gate opens onto a sorted
     // tray instead of a spinner.
     try {

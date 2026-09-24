@@ -1240,6 +1240,40 @@ export const sqliteStore: Store = {
       );
   },
 
+  async listProjectBrandRows(projectId) {
+    const db = getDb();
+    const disc = db
+      .prepare(
+        `SELECT r.id, r.discovery_brands FROM responses r
+         JOIN runs ru ON ru.id = r.run_id
+         WHERE ru.project_id = ? AND r.discovery_brands IS NOT NULL`
+      )
+      .all(projectId) as { id: string; discovery_brands: string }[];
+    const out = disc.map((r) => {
+      try {
+        return { responseId: r.id, brands: JSON.parse(r.discovery_brands) as string[] };
+      } catch {
+        return { responseId: r.id, brands: [] as string[] };
+      }
+    });
+    const covered = new Set(out.map((r) => r.responseId));
+    const men = db
+      .prepare(
+        `SELECT m.response_id, m.brand FROM mentions m
+         JOIN responses r ON r.id = m.response_id
+         JOIN runs ru ON ru.id = r.run_id
+         WHERE ru.project_id = ?`
+      )
+      .all(projectId) as { response_id: string; brand: string }[];
+    const byResp = new Map<string, string[]>();
+    for (const m of men) {
+      if (covered.has(m.response_id)) continue;
+      (byResp.get(m.response_id) ?? byResp.set(m.response_id, []).get(m.response_id)!).push(m.brand);
+    }
+    for (const [responseId, brands] of byResp) out.push({ responseId, brands });
+    return out;
+  },
+
   async writeResponseDiscovery(responseId, d) {
     const db = getDb();
     if (d.codes !== undefined) {

@@ -80,9 +80,9 @@ export interface FamilyPlan {
   rootOf: Map<string, string>;
 }
 
-const famTokens = (s: string) => norm(s).split(/[^a-z0-9+]+/).filter(Boolean);
+export const famTokens = (s: string) => norm(s).split(/[^a-z0-9+]+/).filter(Boolean);
 
-function containsSeq(hay: string[], needle: string[]): boolean {
+export function containsSeq(hay: string[], needle: string[]): boolean {
   if (needle.length === 0 || needle.length > hay.length) return false;
   outer: for (let i = 0; i + needle.length <= hay.length; i++) {
     for (let j = 0; j < needle.length; j++) {
@@ -169,34 +169,11 @@ const CHUNK = 40;
 async function loadDiscoveryBrandSets(
   projectId: string
 ): Promise<Set<string>[] | null> {
-  const sets: Set<string>[] = [];
-  for (const run of await store.listRuns(projectId)) {
-    let any = false;
-    for (const r of await store.listResponses(run.id)) {
-      if (!r.discovery_brands) continue;
-      try {
-        sets.push(
-          new Set((JSON.parse(r.discovery_brands) as string[]).map(norm))
-        );
-        any = true;
-      } catch {
-        // one bad row never blocks the guard
-      }
-    }
-    // Steady state: coded runs carry per-answer brand sets in the mentions
-    // table instead of discovery_brands - same signal, same guard.
-    if (!any) {
-      const byResponse = new Map<string, Set<string>>();
-      for (const m of await store.listMentionsForRun(run.id)) {
-        (byResponse.get(m.response_id) ??
-          byResponse.set(m.response_id, new Set()).get(m.response_id)!).add(
-          norm(m.brand)
-        );
-      }
-      for (const s of byResponse.values()) sets.push(s);
-    }
-  }
-  return sets.length > 0 ? sets : null;
+  // discovery_brands where present, mentions rows otherwise - one query
+  // path, no answer text loaded.
+  const rows = await store.listProjectBrandRows(projectId);
+  if (rows.length === 0) return null;
+  return rows.map((r) => new Set(r.brands.map(norm)));
 }
 
 /**

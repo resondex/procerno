@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { store } from "@/lib/store";
+import { refreshBrandObservations } from "@/lib/engine/observations";
 import { requireAuth, requireProject } from "@/lib/auth";
 
 export async function GET(
@@ -313,6 +314,13 @@ export async function POST(
     if (err) errors.push(err);
   }
   const version = await store.bumpDictionaryVersion(id);
+  // Entry attribution in the observations follows the dictionary - refresh
+  // so tier bars and NOT SEEN flags never go stale after a gate decision.
+  try {
+    await refreshBrandObservations(id);
+  } catch (err) {
+    console.error("observation refresh failed:", err);
+  }
   return NextResponse.json({
     ok: errors.length === 0,
     applied: ordered.length - errors.length,
