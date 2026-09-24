@@ -4,6 +4,7 @@ import { getAuth, requireProject } from "@/lib/auth";
 import { store } from "@/lib/store";
 import { extractSnippet, extractSnippetExcluding } from "@/lib/engine/mention_filter";
 import { containsSeq, famTokens } from "@/lib/engine/dict_suggest";
+import { evidenceOwner } from "@/lib/engine/observations";
 
 export const maxDuration = 60;
 
@@ -41,27 +42,8 @@ export async function GET(
   const parentForms = parent ? [parent, ...(parentEntry?.aliases ?? [])] : [];
   const parentSeqs = parentForms.map(famTokens);
   const satSeq = famTokens(name);
-  // Best-owner attribution, lead-preserving: a detected name refers to a
-  // form only when one leads the other ("Prime Video" extends Prime;
-  // "Amazon Prime" truncates Amazon Prime Video) - a trailing token match
-  // ("Sonic Prime", "Optimus Prime") refers to neither. Each detection then
-  // belongs to whichever form it matches most specifically; an exact match
-  // of the satellite's own name is always the satellite.
-  const eq = (a: string[], b: string[]) =>
-    a.length === b.length && a.every((t, i) => t === b[i]);
-  const matchScore = (det: string[], seq: string[]) => {
-    if (eq(det, seq)) return seq.length + 0.5;
-    if (containsSeq(det, seq) && det[0] === seq[0]) return seq.length;
-    if (containsSeq(seq, det) && seq[0] === det[0]) return det.length;
-    return 0;
-  };
-  const ownerOf = (det: string[]): "sat" | "parent" | null => {
-    if (eq(det, satSeq)) return "sat";
-    const ps = parentSeqs.reduce((m, seq) => Math.max(m, matchScore(det, seq)), 0);
-    const ss = matchScore(det, satSeq);
-    if (ss === 0 && ps === 0) return null;
-    return ss > ps ? "sat" : "parent";
-  };
+  const ownerOf = (det: string[]): "sat" | "parent" | null =>
+    evidenceOwner(det, satSeq, parentSeqs);
 
   const rows = await store.listProjectBrandRows(id);
   const withParent: string[] = [];

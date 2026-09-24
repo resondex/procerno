@@ -2,7 +2,7 @@ import { createHash } from "crypto";
 import { tagCosts } from "../cost_log";
 import { openaiClient } from "./providers";
 import { store } from "../store";
-import { coRefers } from "./observations";
+import { evidenceOwner } from "./observations";
 import type { DictionaryEntry } from "../types";
 
 const SUGGEST_MODEL = process.env.SUGGEST_MODEL ?? "gpt-5-mini";
@@ -288,7 +288,6 @@ export async function getDictionarySuggestions(
           const target = entries.find(
             (e) => norm(e.canonical) === norm(v.merge_into ?? "")
           );
-          const satTerm = norm(p.canonical);
           // Short form of the brand itself: the target's name CONTAINS the
           // satellite's, so it is referential by construction and never
           // guarded away. A maker-prefix identity ("Samsung" -> SAMSUNG
@@ -323,15 +322,16 @@ export async function getDictionarySuggestions(
             ? [target.canonical, ...target.aliases]
             : [v.merge_into ?? ""]
           ).map(famTokens);
+          const guardSatSeq = famTokens(p.canonical);
           let n = 0;
           let withParent = 0;
           for (const set of brandSets) {
             let hasSat = false;
             let hasParent = false;
             for (const b of set) {
-              if (!hasSat && b.includes(satTerm)) hasSat = true;
-              if (!hasParent && coRefers(famTokens(b), parentSeqs))
-                hasParent = true;
+              const owner = evidenceOwner(famTokens(b), guardSatSeq, parentSeqs);
+              if (owner === "sat") hasSat = true;
+              else if (owner === "parent") hasParent = true;
               if (hasSat && hasParent) break;
             }
             if (!hasSat) continue;

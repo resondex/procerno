@@ -12,6 +12,33 @@ export function familyContains(hay: string[], seq: string[]): boolean {
   return hay[0] === seq[0] || hay.length <= 2;
 }
 
+/** Evidence attribution, shared by the co-occurrence guard and the
+ * examples view so their numbers can never disagree: a detected name is
+ * evidence for a form only under LEAD-PRESERVING containment (one name
+ * begins with the other - "Prime Video" extends Prime, "Amazon Prime"
+ * truncates Amazon Prime Video, but "Sonic Prime" and "MGM+" are their own
+ * names), and it belongs to whichever of satellite/parent it matches most
+ * specifically; an exact satellite match always wins. */
+export function evidenceOwner(
+  det: string[],
+  satSeq: string[],
+  parentSeqs: string[][]
+): "sat" | "parent" | null {
+  const eq = (a: string[], b: string[]) =>
+    a.length === b.length && a.every((t, i) => t === b[i]);
+  const score = (seq: string[]) => {
+    if (eq(det, seq)) return seq.length + 0.5;
+    if (containsSeq(det, seq) && det[0] === seq[0]) return seq.length;
+    if (containsSeq(seq, det) && seq[0] === det[0]) return det.length;
+    return 0;
+  };
+  if (eq(det, satSeq)) return "sat";
+  const ps = parentSeqs.reduce((m, seq) => Math.max(m, score(seq)), 0);
+  const ss = score(satSeq);
+  if (ss === 0 && ps === 0) return null;
+  return ss > ps ? "sat" : "parent";
+}
+
 /** Does a detected name refer to the same offering as any of the parent's
  * name-forms? Token-contiguous containment in EITHER direction: the
  * detected name may extend a parent form ("Amazon Prime Video 4K") or
