@@ -570,7 +570,7 @@ export default function TaxonomyReview({
       <div className="max-h-[62vh] overflow-y-auto rounded-lg border border-line">
         <button
           type="button"
-          className="sticky top-0 z-10 flex w-full items-center gap-2 border-b border-line bg-surface px-3 py-2 text-left"
+          className="sticky top-0 z-10 flex w-full items-center gap-2 border-b border-line bg-surface px-3 py-2.5 text-left"
           onClick={() => setStrongOpen(!strongOpen)}
         >
           <span className="rounded-full bg-success/10 px-2 py-0.5 text-xs font-semibold text-success">
@@ -587,7 +587,10 @@ export default function TaxonomyReview({
           </span>
         </button>
         {strongOpen && strong.map(codeRow)}
-        <div className="sticky top-0 z-10 flex items-center gap-2 border-y border-line bg-surface px-3 py-2">
+        {/* Canvas band between the sections so the two headers read as
+            separate groups rather than one stacked block. */}
+        <div className="h-4 bg-canvas" aria-hidden />
+        <div className="sticky top-0 z-10 flex items-center gap-2 border-y border-line bg-surface px-3 py-2.5">
           <span className="rounded-full bg-warning/10 px-2 py-0.5 text-xs font-semibold text-warning">
             {review.filter((c) => !state.rows[c.code]?.mergedInto).length} need your
             call
