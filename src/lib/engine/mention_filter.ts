@@ -72,9 +72,18 @@ export function extractSnippet(
     before.lastIndexOf("• ")
   );
   if (cut > 0) start += cut + 1;
+  else if (start > 0) {
+    // No sentence boundary in reach: at least never cut mid-word.
+    const sp = text.indexOf(" ", start);
+    if (sp > -1 && sp < hit) start = sp + 1;
+  }
   const after = text.slice(hit, end);
   const stop = after.search(/[.!?]\s|\n/);
   if (stop > n.length) end = hit + stop + 1;
+  else if (end < text.length) {
+    const sp = text.lastIndexOf(" ", end);
+    if (sp > hit + n.length) end = sp;
+  }
   // Answers are markdown; a raw slice of a table row or bold run is
   // unreadable. Flatten to prose: emphasis markers and backticks go, links
   // keep their text, table pipes become soft separators.

@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { createHash } from "crypto";
 import { getAuth, requireProject } from "@/lib/auth";
 import { store } from "@/lib/store";
-import { extractSnippetExcluding } from "@/lib/engine/mention_filter";
+import { extractSnippet, extractSnippetExcluding } from "@/lib/engine/mention_filter";
 import { containsSeq, famTokens } from "@/lib/engine/dict_suggest";
 
 export const maxDuration = 60;
@@ -30,7 +30,7 @@ export async function GET(
   if (!name) return NextResponse.json({ error: "name required" }, { status: 400 });
 
   const cacheKey =
-    `dict_examples:v5:${id}:` +
+    `dict_examples:v6:${id}:` +
     createHash("sha256").update(`${name.toLowerCase()}|${parent.toLowerCase()}`).digest("hex");
   const hit = await store.cacheGet(cacheKey, 30 * 24 * 3600 * 1000);
   if (hit) return NextResponse.json(JSON.parse(hit));
@@ -98,9 +98,10 @@ export async function GET(
     const ft = famTokens(f);
     return ft.length > satSeq.length && containsSeq(ft, satSeq);
   });
-  const quotes = (ids: string[]) =>
+  const quotes = (ids: string[], showParent: boolean) =>
     sample(ids, 3)
       .map((rid) => {
+        const text = texts.get(rid) ?? "";
         const strangers = (brandsOf.get(rid) ?? []).filter((b) => {
           const bt = famTokens(b);
           return (
@@ -109,19 +110,29 @@ export async function GET(
             ownerOf(bt) !== "sat"
           );
         });
-        return extractSnippetExcluding(
-          texts.get(rid) ?? "",
-          name,
-          [...parentEmbedding, ...strangers]
-        );
+        const satSnip = extractSnippetExcluding(text, name, [
+          ...parentEmbedding,
+          ...strangers,
+        ]);
+        if (!showParent || !satSnip) return satSnip;
+        // The column claims co-occurrence - the quote must show it. If the
+        // window doesn't already contain a parent form, append the parent's
+        // own line from the same answer.
+        const low = satSnip.toLowerCase();
+        if (parentForms.some((f) => low.includes(f.toLowerCase()))) return satSnip;
+        for (const f of parentForms) {
+          const ps = extractSnippet(text, f, 90);
+          if (ps) return `${satSnip} — same answer: ${ps}`;
+        }
+        return satSnip;
       })
       .filter(Boolean);
   const payload = {
     name,
     parent: parent || null,
     counts: { withParent: withParent.length, alone: alone.length },
-    withParent: parent ? quotes(withParent) : [],
-    alone: quotes(alone),
+    withParent: parent ? quotes(withParent, true) : [],
+    alone: quotes(alone, false),
     /** Longer phrases embedding this name - the client skips bolding
      * occurrences inside them. */
     embedding: parentEmbedding,
