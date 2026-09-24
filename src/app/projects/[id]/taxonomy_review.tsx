@@ -604,43 +604,42 @@ export default function TaxonomyReview({
         </div>
       </div>
 
-      {[...Object.values(state.rows)].filter((r) => r.added).length > 0 && (
-        <div className="rounded-lg border border-line">
-          {[...Object.values(state.rows)]
-            .filter((r) => r.added)
-            .map((r) => (
-              <div
-                key={r.canonical}
-                className="flex items-center gap-2 border-t border-line px-3 py-2 first:border-t-0"
+      {/* Third card: dimensions the user adds, with the add input at the foot. mt-1 on
+          the page's gap-3 matches the 16px between the two cards above. */}
+      <div className="mt-1 rounded-lg border border-line">
+        {[...Object.values(state.rows)]
+          .filter((r) => r.added)
+          .map((r) => (
+            <div
+              key={r.canonical}
+              className="flex items-center gap-2 border-b border-line px-3 py-2"
+            >
+              <EditableName value={r.displayName} onCommit={(v) => rename(r.canonical, v)} />
+              <span className="rounded-full bg-line px-1.5 py-0.5 text-[11px] text-ink-3">
+                added by you
+              </span>
+              <button
+                className="ml-auto px-1 text-ink-3"
+                onClick={() => setIncluded(r.canonical, false)}
               >
-                <EditableName value={r.displayName} onCommit={(v) => rename(r.canonical, v)} />
-                <span className="rounded-full bg-line px-1.5 py-0.5 text-[11px] text-ink-3">
-                  added by you
-                </span>
-                <button
-                  className="ml-auto px-1 text-ink-3"
-                  onClick={() => setIncluded(r.canonical, false)}
-                >
-                  &times;
-                </button>
-              </div>
-            ))}
+                &times;
+              </button>
+            </div>
+          ))}
+        <div className="flex items-center gap-2 px-3 py-2.5 text-[13px] text-ink-3">
+          <span>Add a dimension we didn&apos;t find:</span>
+          <input
+            id="tax-add-code"
+            className="input w-44 text-[13px]"
+            placeholder="e.g. retail availability"
+            value={addText}
+            onChange={(e) => setAddText(e.target.value)}
+            onKeyDown={(e) => e.key === "Enter" && addCode()}
+          />
+          <button className="text-xs underline" onClick={addCode}>
+            add
+          </button>
         </div>
-      )}
-
-      <div className="flex items-center gap-2 text-[13px] text-ink-3">
-        <span>Add a dimension we didn&apos;t find:</span>
-        <input
-          id="tax-add-code"
-          className="input w-44 text-[13px]"
-          placeholder="e.g. retail availability"
-          value={addText}
-          onChange={(e) => setAddText(e.target.value)}
-          onKeyDown={(e) => e.key === "Enter" && addCode()}
-        />
-        <button className="text-xs underline" onClick={addCode}>
-          add
-        </button>
       </div>
 
       {/* Sticky action bar: the page scrolls, the decision doesn't leave. */}
