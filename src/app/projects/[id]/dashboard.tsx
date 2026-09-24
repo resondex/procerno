@@ -11,6 +11,7 @@ import {
   EnginePicker,
   type EngineOption,
 } from "@/app/components/engine_picker";
+import { matchKey } from "@/lib/brand_key";
 import type {
   DictionaryEntry,
   Project,
@@ -1090,9 +1091,11 @@ function AnalysisSettings({
                   .filter((e) => e.status !== "pending")
                   .filter((e) => {
                     if (e.status !== "rejected") return true;
-                    const n = e.canonical.trim().toLowerCase();
+                    const k = matchKey(e.canonical);
                     return !dict.some(
-                      (x) => x.status === "active" && x.aliases.includes(n)
+                      (x) =>
+                        x.status !== "rejected" &&
+                        x.aliases.some((a) => matchKey(a) === k)
                     );
                   })
                   .sort((a, b) => a.canonical.localeCompare(b.canonical));

@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { DictionaryEntry } from "@/lib/types";
+import { matchKey } from "@/lib/brand_key";
 
 const OTHER_CANONICAL = "Other";
 
@@ -200,10 +201,13 @@ export default function IdentifyTab({
   const buildBuckets = useCallback(
     (entries: DictionaryEntry[]): Bucket[] => {
       const out: Bucket[] = [];
+      // A rejected entry whose name lives on as an alias ANYWHERE (active
+      // or pending, matchKey-normalized so symbol/case differences never
+      // resurrect it) is a merge remnant, not an Ignore decision.
       const aliasOwners = new Set(
         entries
-          .filter((e) => e.status === "active")
-          .flatMap((e) => e.aliases)
+          .filter((e) => e.status !== "rejected")
+          .flatMap((e) => e.aliases.map((a) => matchKey(a)))
       );
       const other = entries.find(
         (e) => e.canonical === OTHER_CANONICAL && e.status === "active"
@@ -268,7 +272,7 @@ export default function IdentifyTab({
             (e) =>
               e.status === "rejected" &&
               // Merge remnants live on as aliases elsewhere — one pill only.
-              !aliasOwners.has(norm(e.canonical)) &&
+              !aliasOwners.has(matchKey(e.canonical)) &&
               e.canonical !== OTHER_CANONICAL
           )
           .map((e) => ({
