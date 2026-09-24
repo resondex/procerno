@@ -1274,6 +1274,18 @@ export const sqliteStore: Store = {
     return out;
   },
 
+  async getResponseTexts(ids) {
+    if (ids.length === 0) return [];
+    const db = getDb();
+    const ph = ids.map(() => "?").join(",");
+    return (
+      db.prepare(`SELECT id, text FROM responses WHERE id IN (${ph})`).all(...ids) as {
+        id: string;
+        text: string;
+      }[]
+    ).map((r) => ({ id: r.id, text: r.text }));
+  },
+
   async writeResponseDiscovery(responseId, d) {
     const db = getDb();
     if (d.codes !== undefined) {

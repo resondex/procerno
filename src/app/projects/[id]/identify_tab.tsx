@@ -131,6 +131,49 @@ export default function IdentifyTab({
     { entryId: string; name: string; rationale: string }[]
   >([]);
   const [showAutoIgnored, setShowAutoIgnored] = useState(false);
+  // Verbatim evidence popover: real answer snippets for a clicked pill,
+  // split by whether the parent brand is named in the same answer.
+  const [examples, setExamples] = useState<{
+    name: string;
+    parent: string | null;
+    loading: boolean;
+    counts?: { withParent: number; alone: number };
+    withParent?: string[];
+    alone?: string[];
+  } | null>(null);
+
+  async function openExamples(name: string, parent: string | null) {
+    setExamples({ name, parent, loading: true });
+    try {
+      const q = new URLSearchParams({ name, ...(parent ? { parent } : {}) });
+      const res = await fetch(`/api/projects/${projectId}/dictionary/examples?${q}`);
+      if (!res.ok) throw new Error();
+      const d = await res.json();
+      setExamples({
+        name,
+        parent,
+        loading: false,
+        counts: d.counts,
+        withParent: d.withParent ?? [],
+        alone: d.alone ?? [],
+      });
+    } catch {
+      setExamples(null);
+    }
+  }
+
+  /** Bold every bounded occurrence of the name inside a snippet. */
+  function highlight(snippet: string, name: string) {
+    const esc = name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const parts = snippet.split(new RegExp(`(${esc})`, "ig"));
+    return parts.map((part, i) =>
+      part.toLowerCase() === name.toLowerCase() ? (
+        <b key={i} className="text-ink">{part}</b>
+      ) : (
+        part
+      )
+    );
+  }
 
   const buildBuckets = useCallback(
     (entries: DictionaryEntry[]): Bucket[] => {
@@ -747,6 +790,11 @@ export default function IdentifyTab({
                   ? "bg-primary-soft border-primary/30 text-primary"
                   : "bg-danger/10 border-danger/30 text-danger"
             } ${p.note ? "group relative border-2 border-warning" : ""} ${dragNorm === p.norm ? "opacity-40" : ""}`}
+            onClick={
+              p.note
+                ? () => openExamples(p.name, p.noteTarget ?? null)
+                : undefined
+            }
           >
             {p.name}
             {p.note && (
@@ -762,7 +810,7 @@ export default function IdentifyTab({
                 )}
                 <span className="mt-1 block text-[12px] font-normal leading-snug text-ink-2">
                   Drag it to its own bucket to track it separately, or into
-                  Ignore to not count it.
+                  Ignore to not count it. Click for real answer examples.
                 </span>
                 <span className="mt-1.5 block text-[11px] font-normal leading-snug text-ink-3">
                   {p.note}
@@ -887,6 +935,72 @@ export default function IdentifyTab({
             {showAutoIgnored ? "hide them" : "show them in Ignore"}
           </button>
         </p>
+      )}
+      {examples && (
+        <div
+          className="fixed inset-0 z-40 flex items-center justify-center bg-black/30 p-6"
+          onClick={() => setExamples(null)}
+        >
+          <div
+            className="card w-full max-w-xl max-h-[75vh] overflow-auto bg-surface p-5"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="mb-3 flex items-start justify-between gap-4">
+              <h3 className="text-sm font-semibold">
+                &ldquo;{examples.name}&rdquo; in real answers
+              </h3>
+              <button
+                type="button"
+                onClick={() => setExamples(null)}
+                className="text-ink-3 hover:text-ink text-lg leading-none"
+              >
+                ×
+              </button>
+            </div>
+            {examples.loading ? (
+              <p className="text-[13px] text-ink-3">
+                <span
+                  aria-hidden="true"
+                  className="inline-block h-3 w-3 mr-1.5 align-[-1px] rounded-full border-2 border-line border-t-primary animate-spin"
+                />
+                Pulling examples from the collected answers…
+              </p>
+            ) : (
+              <div className="grid gap-4">
+                {examples.parent && (
+                  <div>
+                    <p className="section-label mb-1.5">
+                      Named alongside {examples.parent} —{" "}
+                      {examples.counts?.withParent.toLocaleString()} answers
+                    </p>
+                    {(examples.withParent ?? []).map((q, i) => (
+                      <p key={i} className="mb-1.5 rounded-lg border border-line bg-white/50 px-3 py-2 text-[13px] italic leading-snug text-ink-2">
+                        {highlight(q, examples.name)}
+                      </p>
+                    ))}
+                    {(examples.withParent ?? []).length === 0 && (
+                      <p className="text-[12px] text-ink-3">no examples found</p>
+                    )}
+                  </div>
+                )}
+                <div>
+                  <p className="section-label mb-1.5">
+                    Named {examples.parent ? "without " + examples.parent : "in answers"} —{" "}
+                    {examples.counts?.alone.toLocaleString()} answers
+                  </p>
+                  {(examples.alone ?? []).map((q, i) => (
+                    <p key={i} className="mb-1.5 rounded-lg border border-line bg-white/50 px-3 py-2 text-[13px] italic leading-snug text-ink-2">
+                      {highlight(q, examples.name)}
+                    </p>
+                  ))}
+                  {(examples.alone ?? []).length === 0 && (
+                    <p className="text-[12px] text-ink-3">no examples found</p>
+                  )}
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
       )}
       {lowSignalCount > 0 && (
         <p className="text-xs text-ink-3">

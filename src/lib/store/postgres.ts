@@ -985,6 +985,13 @@ export const pgStore: Store = {
     return out;
   },
 
+  async getResponseTexts(ids) {
+    if (ids.length === 0) return [];
+    const sql = await db();
+    const rows = await sql`SELECT id, text FROM responses WHERE id = ANY(${ids})`;
+    return rows.map((r) => ({ id: r.id as string, text: r.text as string }));
+  },
+
   async writeResponseDiscovery(responseId, d) {
     const sql = await db();
     if (d.codes !== undefined) {

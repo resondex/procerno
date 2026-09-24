@@ -40,6 +40,37 @@ export function nameAppearsBounded(
   return tokens.some((tok) => boundedRegex(tok).test(t));
 }
 
+/** Extract a readable verbatim around the first token-bounded occurrence of
+ * `name` in `text`: roughly one sentence each side, trimmed to sentence or
+ * line boundaries, ellipsized. Empty string when the name never appears
+ * bounded (a canonicalized detection with no literal surface form). */
+export function extractSnippet(text: string, name: string, radius = 160): string {
+  const n = name.trim().toLowerCase();
+  const tokens = n.split(/[^a-z0-9+]+/).filter((x) => x.length > 2);
+  const m =
+    boundedRegex(n).exec(text) ??
+    (tokens.length > 0 ? boundedRegex(tokens[0]).exec(text) : null);
+  if (!m) return "";
+  const hit = m.index + (m[1]?.length ?? 0);
+  let start = Math.max(0, hit - radius);
+  let end = Math.min(text.length, hit + n.length + radius);
+  // Snap outward-cut edges to sentence/line boundaries where one is near.
+  const before = text.slice(start, hit);
+  const cut = Math.max(
+    before.lastIndexOf(". "),
+    before.lastIndexOf("\n"),
+    before.lastIndexOf("• ")
+  );
+  if (cut > 0) start += cut + 1;
+  const after = text.slice(hit, end);
+  const stop = after.search(/[.!?]\s|\n/);
+  if (stop > n.length) end = hit + stop + 1;
+  const snippet = text.slice(start, end).replace(/\s+/g, " ").trim();
+  return (
+    (start > 0 ? "…" : "") + snippet + (end < text.length ? "…" : "")
+  );
+}
+
 /** Filter a detected-name list against the answer it came from. `known`
  * holds normalized dictionary names (canonicals + aliases) that are always
  * accepted. */

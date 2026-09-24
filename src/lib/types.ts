@@ -883,6 +883,8 @@ export interface Store {
   listProjectBrandRows(
     projectId: string
   ): Promise<{ responseId: string; brands: string[] }[]>;
+  /** Answer texts for a handful of sampled response ids. */
+  getResponseTexts(ids: string[]): Promise<{ id: string; text: string }[]>;
   insertCostEntry(input: {
     projectId?: string | null;
     runId?: string | null;
