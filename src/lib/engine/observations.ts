@@ -1,5 +1,5 @@
 import { store } from "../store";
-import { matchKey } from "../brand_key";
+import { cleanSurface, matchKey } from "../brand_key";
 import { containsSeq, famTokens } from "./dict_suggest";
 
 /** Family membership for attribution: token containment, but a SINGLE-token
@@ -140,7 +140,7 @@ export async function computeBrandObservations(projectId: string): Promise<{
   }
   const observed = [...byKey.values()]
     .map((g) => ({
-      name: [...g.forms.entries()].sort((a, b) => b[1] - a[1])[0][0],
+      name: cleanSurface([...g.forms.entries()].sort((a, b) => b[1] - a[1])[0][0]),
       entry_id: g.entryId,
       answers: g.answers,
     }))
@@ -209,7 +209,7 @@ export async function refreshObservedAliases(projectId: string): Promise<{
     }
     if (!best) continue;
     const entry = dict.find((e) => e.id === best!.entryId)!;
-    const alias = g.form.trim().toLowerCase();
+    const alias = cleanSurface(g.form).toLowerCase();
     await store.upsertDictionaryEntry({
       id: entry.id,
       projectId,

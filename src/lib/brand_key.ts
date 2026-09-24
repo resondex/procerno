@@ -24,3 +24,9 @@ export function matchKey(raw: string): string {
   // every other such name; keep it distinguishable instead.
   return key || raw.trim().toLowerCase();
 }
+
+/** Display/storage cleanup for observed surface forms: trademark symbols
+ * carry no identity (matchKey ignores them) and only clutter pills. */
+export function cleanSurface(raw: string): string {
+  return raw.replace(/[\u00ae\u2122\u00a9]/g, "").replace(/\s+/g, " ").trim();
+}
