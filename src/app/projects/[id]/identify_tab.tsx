@@ -122,6 +122,7 @@ export default function IdentifyTab({
   const [autoIgnored, setAutoIgnored] = useState<
     { entryId: string; name: string; rationale: string }[]
   >([]);
+  const [showAutoIgnored, setShowAutoIgnored] = useState(false);
 
   const buildBuckets = useCallback(
     (entries: DictionaryEntry[]): Bucket[] => {
@@ -489,7 +490,32 @@ export default function IdentifyTab({
       }
       return next;
     });
-    setAutoIgnored([]);
+    setShowAutoIgnored(true);
+  }
+
+  function hideAutoIgnored() {
+    // Pills still sitting in Ignore go back behind the receipt; anything the
+    // user dragged elsewhere stays placed and leaves the receipt's list.
+    const ids = new Set(autoIgnored.map((a) => a.entryId));
+    const rescued = new Set<string>();
+    setBuckets((prev) =>
+      prev.map((b) => {
+        if (b.key !== "__ignore__") {
+          for (const p of b.pills) {
+            if (ids.has(p.entryId)) rescued.add(p.entryId);
+          }
+          return b;
+        }
+        return {
+          ...b,
+          pills: b.pills.filter((p) => !ids.has(p.entryId)),
+        };
+      })
+    );
+    if (rescued.size > 0) {
+      setAutoIgnored((prev) => prev.filter((a) => !rescued.has(a.entryId)));
+    }
+    setShowAutoIgnored(false);
   }
 
   async function confirmAll() {
@@ -613,9 +639,12 @@ export default function IdentifyTab({
           }
         }
       }
-      // Hidden engine-ignored names commit as rejected: confirming the
-      // board accepts the receipt line's contents too.
+      // Engine-ignored names commit as rejected alongside the board -
+      // unless they're currently visible as pills, in which case the bucket
+      // walk above already covered them.
       for (const a of autoIgnored) {
+        if (buckets.some((b) => b.pills.some((p) => p.entryId === a.entryId)))
+          continue;
         merges.push({ entryId: a.entryId, action: "reject" });
       }
       const actions = [...approves, ...renames, ...moves, ...merges];
@@ -639,6 +668,7 @@ export default function IdentifyTab({
       }
       suggestedFor.current.clear();
       setAutoIgnored([]);
+      setShowAutoIgnored(false);
       await onApplied();
     } finally {
       setConfirming(false);
@@ -804,13 +834,14 @@ export default function IdentifyTab({
         <p className="text-xs text-ink-3">
           {autoIgnored.length} name{autoIgnored.length === 1 ? "" : "s"}{" "}
           auto-ignored by measured rules (redundant vocabulary, own-context
-          brands, off-category scenery) - confirmed with the board.{" "}
+          brands, off-category scenery)
+          {showAutoIgnored ? " - put in Ignore. " : " - saved as Ignore when you confirm. "}
           <button
             type="button"
-            onClick={revealAutoIgnored}
+            onClick={showAutoIgnored ? hideAutoIgnored : revealAutoIgnored}
             className="underline hover:text-ink"
           >
-            show them
+            {showAutoIgnored ? "hide them" : "show them in Ignore"}
           </button>
         </p>
       )}
