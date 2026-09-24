@@ -916,8 +916,7 @@ export default function IdentifyTab({
           </span>
           <span className="inline-flex items-center gap-1.5">
             <span className="h-2.5 w-2.5 rounded-full border-2 border-warning bg-danger/10" />{" "}
-            flagged for review — hover for what the merge means and the
-            measured reason
+            flagged for review — hover for why and click for examples
           </span>
         </div>
         {!hideConfirm && (
