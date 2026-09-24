@@ -254,7 +254,23 @@ export default function IdentifyTab({
     });
   }, [dict, buildBuckets]);
 
-  const pendingEntries = dict.filter((e) => e.status === "pending");
+  // Sub-1% emerged names are noise the board does not serve: they get no
+  // pill, no suggestion, no drag target - just a one-line receipt below the
+  // tray. The cut is presentation-only and self-healing: the next run's
+  // aggregation re-scores every name, so anything that crosses 1% appears
+  // then. Names without an observation row (queued from a coding pass, not
+  // the brands pass) can't be scored and are always served.
+  const lowSignal = (e: DictionaryEntry) => {
+    if (!obs || obs.rows === 0) return false;
+    const n = obsByName.get(norm(e.canonical));
+    return n !== undefined && n < obs.rows * 0.01;
+  };
+  const pendingEntries = dict.filter(
+    (e) => e.status === "pending" && !lowSignal(e)
+  );
+  const lowSignalCount = dict.filter(
+    (e) => e.status === "pending" && lowSignal(e)
+  ).length;
   const unplacedPending = pendingEntries.filter(
     (e) => !buckets.some((b) => b.pills.some((p) => p.entryId === e.id))
   );
@@ -701,6 +717,14 @@ export default function IdentifyTab({
             ))}
           </div>
         </div>
+      )}
+      {lowSignalCount > 0 && (
+        <p className="text-xs text-ink-3">
+          {lowSignalCount} more name{lowSignalCount === 1 ? "" : "s"} appeared
+          in under 1% of answers and {lowSignalCount === 1 ? "was" : "were"}{" "}
+          left out as noise - they resurface automatically if a future run
+          crosses that floor.
+        </p>
       )}
       <div className="grid gap-3 sm:grid-cols-2">
         {buckets

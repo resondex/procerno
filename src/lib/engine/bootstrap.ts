@@ -129,8 +129,10 @@ export async function bootstrapRunChunk(
         answers: g.answers,
       }))
       .sort((a, b) => b.answers - a.answers)
-      // tracked entries always kept; emerged names only above 0.5% of rows
-      .filter((o) => o.entry_id !== null || o.answers >= rows * 0.005)
+      // tracked entries always kept; emerged names only above 1% of rows -
+      // below that is noise the board never serves (re-evaluated every run,
+      // so a rising name surfaces the moment it crosses the floor)
+      .filter((o) => o.entry_id !== null || o.answers >= rows * 0.01)
       .slice(0, 80);
     await store.setBrandObservations(
       project.id,
