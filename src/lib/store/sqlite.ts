@@ -1273,6 +1273,14 @@ export const sqliteStore: Store = {
       .run(JSON.stringify(codes), decisionJson, projectId);
   },
 
+  async reopenTaxonomy(projectId) {
+    getDb()
+      .prepare(
+        "UPDATE projects SET taxonomy_status = 'proposed' WHERE id = ? AND taxonomy_status = 'ratified'"
+      )
+      .run(projectId);
+  },
+
   async confirmDictionary(projectId) {
     getDb()
       .prepare("UPDATE projects SET dictionary_status = 'confirmed' WHERE id = ?")

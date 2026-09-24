@@ -870,6 +870,10 @@ export interface Store {
   /** Ratify the confirmed code list with its decision record;
    * status -> ratified. */
   ratifyTaxonomy(projectId: string, codes: string[], decisionJson: string): Promise<void>;
+  /** Back out of a ratified codebook to revise it: status -> proposed. The
+   * decision record is kept so the review reopens with the user's edits.
+   * No-op unless currently ratified. */
+  reopenTaxonomy(projectId: string): Promise<void>;
   /** Mark the brand dictionary reviewed - the second confirmation gate. */
   confirmDictionary(projectId: string): Promise<void>;
   /** Attach observed brand mentions from the discovery brands pass. */

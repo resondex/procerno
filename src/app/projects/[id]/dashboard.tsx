@@ -1287,6 +1287,7 @@ function PipelineNext({
           dictionary={dictionary}
           onApplied={onDictApplied}
           onConfirmed={onRatified}
+          onBackToCodebook={onRatified}
           dictAction={dictAction}
         />
       )}
@@ -1321,6 +1322,7 @@ function DictionaryGate({
   dictionary,
   onApplied,
   onConfirmed,
+  onBackToCodebook,
   dictAction,
 }: {
   id: string;
@@ -1328,6 +1330,8 @@ function DictionaryGate({
   dictionary: DictionaryEntry[];
   onApplied: () => Promise<void>;
   onConfirmed: () => void;
+  /** Called after the codebook is reopened, to refresh into the review. */
+  onBackToCodebook: () => void;
   dictAction: (entryId: string, action: "approve" | "reject") => Promise<void>;
 }) {
   const [step, setStep] = useState<1 | 2 | 3>(1);
@@ -1346,6 +1350,20 @@ function DictionaryGate({
       return;
     }
     onConfirmed();
+  };
+  // Step 1's back button leaves the gate: reopen the codebook (the stored
+  // decision record restores the user's edits there).
+  const backToCodebook = async () => {
+    setSaving(true);
+    setError(null);
+    const res = await fetch(`/api/projects/${id}/taxonomy`, { method: "DELETE" });
+    setSaving(false);
+    if (!res.ok) {
+      const j = await res.json().catch(() => null);
+      setError(j?.error ?? `could not reopen the codebook (${res.status})`);
+      return;
+    }
+    onBackToCodebook();
   };
   const pending = dictionary.filter((d) => d.status === "pending").length;
   const STEPS: Record<1 | 2 | 3, { title: string; blurb: string }> = {
@@ -1395,16 +1413,15 @@ function DictionaryGate({
         />
       )}
       <div className="flex flex-wrap items-center justify-between gap-3 border-t border-line pt-3">
-        {step > 1 ? (
-          <button
-            className="rounded border border-line px-4 py-2 text-sm font-medium text-ink hover:border-ink-3"
-            onClick={() => setStep((s) => (s - 1) as 1 | 2)}
-          >
-            &larr; Back
-          </button>
-        ) : (
-          <span />
-        )}
+        <button
+          className="rounded border border-line px-4 py-2 text-sm font-medium text-ink hover:border-ink-3 disabled:opacity-50"
+          onClick={() =>
+            step > 1 ? setStep((s) => (s - 1) as 1 | 2) : backToCodebook()
+          }
+          disabled={saving}
+        >
+          {step > 1 ? "\u2190 Back" : "\u2190 Back to codebook"}
+        </button>
         <div className="flex items-center gap-3">
           {error && <span className="text-xs text-danger">{error}</span>}
           {step < 3 ? (

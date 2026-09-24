@@ -53,6 +53,9 @@ const decisionSchema = z.object({
   /** Micro reassignments: phrase -> the code it now belongs to. Recorded in
    * the decision and applied when the relabel/coding prompts are built. */
   phrase_moves: z.record(z.string().max(120), z.string().max(80)).default({}),
+  /** Display names of merge groups (target -> name), so a reopened review
+   * shows the name the user gave the merged dimension. */
+  merge_names: z.record(z.string(), z.string().trim().min(1).max(80)).default({}),
 });
 
 export async function POST(
@@ -71,7 +74,7 @@ export async function POST(
       { status: 400 }
     );
   }
-  const { decisions, merges, phrase_moves } = parsed.data;
+  const { decisions, merges, phrase_moves, merge_names } = parsed.data;
 
   // The ratified list: every included, un-merged canonical, plus each merge
   // group's target once, deduped. Merged members ride under their target.
@@ -97,8 +100,31 @@ export async function POST(
     decisions,
     merges,
     phrase_moves,
+    merge_names,
     ratified: finalCodes,
   });
   await store.ratifyTaxonomy(id, finalCodes, record);
   return NextResponse.json({ ok: true, reason_taxonomy: finalCodes, status: "ratified" });
+}
+
+/** Back from the brands gate to the codebook: un-ratify so the review can be
+ * revised. Only allowed before the brand dictionary is confirmed - after
+ * that, coding has been released against this list. */
+export async function DELETE(
+  _req: Request,
+  { params }: { params: Promise<{ id: string }> }
+) {
+  const { id } = await params;
+  const auth = await getAuth();
+  if (!auth) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
+  const project = await requireProject(id, auth);
+  if (project instanceof NextResponse) return project;
+  if (project.dictionary_status === "confirmed") {
+    return NextResponse.json(
+      { error: "brands are already confirmed - coding has started on this codebook" },
+      { status: 409 }
+    );
+  }
+  await store.reopenTaxonomy(id);
+  return NextResponse.json({ ok: true, status: "proposed" });
 }

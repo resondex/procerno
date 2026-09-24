@@ -111,7 +111,8 @@ export default function TaxonomyReview({
   const strong = codes.filter((c) => c.scope === "in" && c.incidence >= REVIEW_FLOOR);
   const review = codes.filter((c) => c.scope !== "in" || c.incidence < REVIEW_FLOOR);
 
-  const [state, setState] = useState<ReviewState>(() => ({
+  const [state, setState] = useState<ReviewState>(() => {
+    const base: ReviewState = {
     rows: Object.fromEntries(
       codes.map((c) => [
         c.code,
@@ -126,7 +127,9 @@ export default function TaxonomyReview({
     ),
     merges: [],
     moves: {},
-  }));
+    };
+    return restoreDecision(base, project.taxonomy_decision, byCode);
+  });
   const undoStack = useRef<ReviewState[]>([]);
   const [undoDepth, setUndoDepth] = useState(0);
   const [mergeSel, setMergeSel] = useState<Set<string>>(new Set());
@@ -312,7 +315,14 @@ export default function TaxonomyReview({
     const res = await fetch(`/api/projects/${id}/taxonomy`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ decisions, merges, phrase_moves: state.moves }),
+      body: JSON.stringify({
+        decisions,
+        merges,
+        phrase_moves: state.moves,
+        merge_names: Object.fromEntries(
+          state.merges.map((m) => [m.target, m.displayName])
+        ),
+      }),
     });
     setSaving(false);
     if (!res.ok) {
@@ -689,6 +699,62 @@ export default function TaxonomyReview({
       </div>
     </div>
   );
+}
+
+/** Re-applies a stored decision record (from a previous confirm the user
+ * backed out of) onto the recommendation defaults, so returning to the
+ * codebook shows their edits rather than a fresh proposal. */
+function restoreDecision(
+  base: ReviewState,
+  decisionJson: string | null,
+  byCode: Record<string, ProposedCode>
+): ReviewState {
+  if (!decisionJson) return base;
+  let rec: {
+    decisions?: {
+      canonical: string;
+      decided: "include" | "exclude";
+      display_name?: string;
+      merged_into?: string;
+      added?: boolean;
+    }[];
+    merges?: Record<string, string[]>;
+    phrase_moves?: Record<string, string>;
+    merge_names?: Record<string, string>;
+  };
+  try {
+    rec = JSON.parse(decisionJson);
+  } catch {
+    return base;
+  }
+  const rows = { ...base.rows };
+  for (const d of rec.decisions ?? []) {
+    if (!rows[d.canonical] && !d.added) continue; // code no longer proposed
+    rows[d.canonical] = {
+      canonical: d.canonical,
+      displayName: d.display_name ?? d.canonical,
+      included: d.decided === "include",
+      mergedInto: d.merged_into ?? null,
+      added: !!d.added,
+    };
+  }
+  const merges: MergeGroup[] = Object.entries(rec.merges ?? {})
+    .filter(([, members]) => members.every((m) => rows[m]))
+    .map(([target, members]) => {
+      const lead = [...members].sort(
+        (a, b) => (byCode[b]?.incidence ?? 0) - (byCode[a]?.incidence ?? 0)
+      )[0];
+      return {
+        target,
+        displayName: rec.merge_names?.[target] ?? rows[lead]?.displayName ?? lead,
+        members,
+        incidenceCap: Math.min(
+          1,
+          members.reduce((a, m) => a + (byCode[m]?.incidence ?? 0), 0)
+        ),
+      };
+    });
+  return { rows, merges, moves: rec.phrase_moves ?? {} };
 }
 
 /** Explicit rename: name + pencil; click swaps in an input. Cosmetic - the

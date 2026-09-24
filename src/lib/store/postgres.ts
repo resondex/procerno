@@ -986,6 +986,12 @@ export const pgStore: Store = {
       taxonomy_status = 'ratified' WHERE id = ${projectId}`;
   },
 
+  async reopenTaxonomy(projectId) {
+    const sql = await db();
+    await sql`UPDATE projects SET taxonomy_status = 'proposed'
+      WHERE id = ${projectId} AND taxonomy_status = 'ratified'`;
+  },
+
   async confirmDictionary(projectId) {
     const sql = await db();
     await sql`UPDATE projects SET dictionary_status = 'confirmed' WHERE id = ${projectId}`;
