@@ -594,7 +594,7 @@ export default function TaxonomyReview({
           one scrollbar. */}
       <div
         ref={scrollRef}
-        className="max-h-[62vh] space-y-4 overflow-y-auto"
+        className="max-h-[62vh] space-y-4 overflow-y-auto pb-1"
         style={lockHeight ? { height: lockHeight } : undefined}
       >
         <div className="overflow-clip rounded-lg border border-line">
