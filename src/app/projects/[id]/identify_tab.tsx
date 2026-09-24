@@ -794,28 +794,6 @@ export default function IdentifyTab({
     const shown = open ? b.pills : b.pills.filter((p) => !collapsible(p));
     return (
       <div className="flex flex-wrap gap-1.5 min-h-9 rounded-lg p-1 -m-1">
-        {autos.length > 0 && (
-          <button
-            type="button"
-            onClick={() =>
-              setVariantsOpen((prev) => {
-                const next = new Set(prev);
-                if (next.has(b.key)) next.delete(b.key);
-                else next.add(b.key);
-                return next;
-              })
-            }
-            title={
-              open
-                ? "Collapse the auto-grouped variants"
-                : autos.slice(0, 6).map((p) => p.name).join(", ") +
-                  (autos.length > 6 ? ", …" : "")
-            }
-            className="inline-flex items-center rounded-full border border-line bg-white/60 px-2.5 py-1 text-[12px] font-medium text-ink-3 hover:text-ink hover:border-ink-3"
-          >
-            {open ? "collapse" : `+${autos.length} grouped name${autos.length === 1 ? "" : "s"}`}
-          </button>
-        )}
         {shown.map((p) => (
           <span
             key={p.norm}
@@ -848,10 +826,31 @@ export default function IdentifyTab({
             onClick={
               p.note
                 ? () => openExamples(p.name, p.noteTarget ?? null)
-                : undefined
+                : p.kind === "canonical" &&
+                    p.homeStatus === "active" &&
+                    b.kind === "brand" &&
+                    autos.length > 0
+                  ? () =>
+                      setVariantsOpen((prev) => {
+                        const next = new Set(prev);
+                        if (next.has(b.key)) next.delete(b.key);
+                        else next.add(b.key);
+                        return next;
+                      })
+                  : undefined
             }
           >
             {p.name}
+            {p.kind === "canonical" &&
+              p.homeStatus === "active" &&
+              b.kind === "brand" &&
+              autos.length > 0 && (
+                <span className="ml-1.5 text-[11px] font-normal opacity-60">
+                  {open
+                    ? "· collapse"
+                    : `· ${autos.length} grouped name${autos.length === 1 ? "" : "s"}`}
+                </span>
+              )}
             {p.note && (
               <span className="pointer-events-none absolute left-0 top-full z-30 mt-1.5 hidden w-72 rounded-lg border border-line bg-surface p-3 text-left shadow-lg group-hover:block">
                 <span className="block text-[11px] font-semibold uppercase tracking-wide text-orange-700">
