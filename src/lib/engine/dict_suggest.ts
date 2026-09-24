@@ -297,9 +297,41 @@ export async function getDictionarySuggestions(
             (e) => norm(e.canonical) === norm(v.merge_into ?? "")
           );
           const satTerm = norm(p.canonical);
-          const parentTerms = target
-            ? [norm(target.canonical), ...target.aliases.map(norm)]
-            : [norm(v.merge_into ?? "")];
+          // Short form of the brand itself ("Samsung" -> Samsung Galaxy,
+          // "Amazon" -> Amazon Prime Video): the target's name CONTAINS the
+          // satellite's, so it is referential by construction - never
+          // guarded away, but flagged, since a company short form can also
+          // carry the company's other contexts.
+          if (
+            containsSeq(famTokens(v.merge_into ?? ""), famTokens(p.canonical))
+          ) {
+            const flagged: CachedVerdict = {
+              ...v,
+              rationale: `${v.rationale} (short form of the brand name - review)`,
+            };
+            cached.set(p.id, flagged);
+            await store.cacheSet(
+              nameKey(projectId, p.canonical),
+              JSON.stringify(flagged),
+              { category, projectId }
+            );
+            continue;
+          }
+          // Parent terms include the target's aliases AND its pending short
+          // forms - "Apple" is how answers name the iPhone's parent before
+          // the gate makes it an alias, and scoring iMessage without it
+          // called a 7%-alone satellite a 32% one.
+          const shortForms = pending
+            .filter((q) =>
+              containsSeq(famTokens(v.merge_into ?? ""), famTokens(q.canonical))
+            )
+            .map((q) => norm(q.canonical));
+          const parentTerms = [
+            ...(target
+              ? [norm(target.canonical), ...target.aliases.map(norm)]
+              : [norm(v.merge_into ?? "")]),
+            ...shortForms,
+          ];
           let n = 0;
           let withParent = 0;
           for (const set of brandSets) {
