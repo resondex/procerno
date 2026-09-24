@@ -4,7 +4,7 @@ import type { Project, ResponseRow } from "../types";
 import { runBrandDiscovery, runOpenDiscovery, type DiscoveryAnswer } from "./discovery";
 import { consolidateTaxonomy } from "./consolidate";
 import { classifyNonBrands } from "./suggest";
-import { refreshBrandObservations } from "./observations";
+import { refreshBrandObservations, refreshObservedAliases } from "./observations";
 import { getDictionarySuggestions } from "./dict_suggest";
 
 /**
@@ -102,6 +102,13 @@ export async function bootstrapRunChunk(
   // recomputable implementation (family-aware attribution, 1% floor).
   if (!project.brand_observations) {
     await refreshBrandObservations(project.id);
+    // Sub-floor surface forms alias into their family's entry so read-time
+    // matching keeps up with the data without human adjudication.
+    try {
+      await refreshObservedAliases(project.id);
+    } catch (err) {
+      console.error("observed-alias refresh failed:", err);
+    }
     // Junk filter + pre-warmed suggestions, so the gate opens onto a sorted
     // tray instead of a spinner.
     try {
