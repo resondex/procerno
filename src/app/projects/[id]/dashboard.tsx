@@ -193,6 +193,12 @@ export default function ProjectDashboard({
       .catch(() => {});
   }, []);
 
+  // Init phase: a first run exists but nothing has measured yet - the
+  // pipeline card (collect -> codebook -> brands -> code) is the only path,
+  // so the standing tools sit disabled until the first measure lands.
+  const initPhase =
+    (detail?.runs.length ?? 0) > 0 &&
+    !detail?.runs.some((r) => r.status === "complete");
   const hasActiveRun = detail?.runs.some(
     (r) => r.status === "pending" || r.status === "running" || r.status === "collected"
   );
@@ -359,20 +365,24 @@ export default function ProjectDashboard({
           primary
           bubble={needsFirstRun ? "dot" : null}
           onClick={() => setOpenModal("run")}
+          disabled={initPhase}
         />
         <TaskButton
           label="Schedule"
           bubble={null}
+          disabled={initPhase}
           onClick={() => setOpenModal("schedule")}
         />
         <TaskButton
           label="Run history"
           bubble={null}
+          disabled={initPhase}
           onClick={() => setOpenModal("history")}
         />
         <TaskButton
           label="Brand dictionary"
-          bubble={pendingDict > 0 ? pendingDict : null}
+          bubble={!initPhase && pendingDict > 0 ? pendingDict : null}
+          disabled={initPhase}
           onClick={() => {
             setDictTab("identify");
             setOpenModal("dictionary");
@@ -381,11 +391,13 @@ export default function ProjectDashboard({
         <TaskButton
           label="Settings"
           bubble={null}
+          disabled={initPhase}
           onClick={() => setOpenModal("settings")}
         />
         <TaskButton
           label="Prompt health"
-          bubble={flaggedPrompts.length > 0 ? flaggedPrompts.length : null}
+          bubble={!initPhase && flaggedPrompts.length > 0 ? flaggedPrompts.length : null}
+          disabled={initPhase}
           onClick={() => setOpenModal("health")}
         />
       </div>
@@ -945,24 +957,29 @@ function TaskButton({
   bubble,
   primary,
   onClick,
+  disabled,
 }: {
   label: string;
   bubble: number | "dot" | null;
   primary?: boolean;
   onClick: () => void;
+  /** Init phase: the pipeline card is the only path until the first measure
+   * lands - the standing tools wait, counters and all. */
+  disabled?: boolean;
 }) {
   return (
     <button
       type="button"
       onClick={onClick}
+      disabled={disabled}
       className={`relative ${
         primary
           ? "btn-primary"
           : "card px-4 py-2 text-sm font-semibold text-ink-2 hover:border-primary/40 hover:text-ink"
-      }`}
+      } ${disabled ? "opacity-40 cursor-not-allowed hover:border-line hover:text-ink-2" : ""}`}
     >
       {label}
-      {bubble !== null && (
+      {bubble !== null && !disabled && (
         <span
           className={`absolute -top-1.5 -right-1.5 rounded-full bg-danger text-white ${
             bubble === "dot"
