@@ -65,7 +65,18 @@ export function extractSnippet(text: string, name: string, radius = 160): string
   const after = text.slice(hit, end);
   const stop = after.search(/[.!?]\s|\n/);
   if (stop > n.length) end = hit + stop + 1;
-  const snippet = text.slice(start, end).replace(/\s+/g, " ").trim();
+  // Answers are markdown; a raw slice of a table row or bold run is
+  // unreadable. Flatten to prose: emphasis markers and backticks go, links
+  // keep their text, table pipes become soft separators.
+  const snippet = text
+    .slice(start, end)
+    .replace(/\[([^\]]+)\]\([^)]*\)/g, "$1")
+    .replace(/\*\*|__|`/g, "")
+    .replace(/(^|\s)[*#>-]+\s/g, "$1")
+    .replace(/\s*\|\s*/g, " · ")
+    .replace(/\s+/g, " ")
+    .replace(/^[·\s]+|[·\s]+$/g, "")
+    .trim();
   return (
     (start > 0 ? "…" : "") + snippet + (end < text.length ? "…" : "")
   );
