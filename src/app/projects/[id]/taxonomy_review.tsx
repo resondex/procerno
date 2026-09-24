@@ -565,9 +565,11 @@ export default function TaxonomyReview({
         </div>
       )}
 
-      {/* One shared scroller for both sections - section headers stay pinned
-          inside it, so the whole codebook is one scrollbar. */}
-      <div className="max-h-[62vh] overflow-y-auto rounded-lg border border-line">
+      {/* One shared scroller holding two separate cards - each section header
+          stays pinned while its own card scrolls, and the whole codebook is
+          one scrollbar. */}
+      <div className="max-h-[62vh] space-y-4 overflow-y-auto">
+        <div className="overflow-clip rounded-lg border border-line">
         <button
           type="button"
           className="sticky top-0 z-10 flex w-full items-center gap-2 border-b border-line bg-surface px-3 py-2.5 text-left"
@@ -587,10 +589,9 @@ export default function TaxonomyReview({
           </span>
         </button>
         {strongOpen && strong.map(codeRow)}
-        {/* Canvas band between the sections so the two headers read as
-            separate groups rather than one stacked block. */}
-        <div className="h-4 bg-canvas" aria-hidden />
-        <div className="sticky top-0 z-10 flex items-center gap-2 border-y border-line bg-surface px-3 py-2.5">
+        </div>
+        <div className="overflow-clip rounded-lg border border-line">
+        <div className="sticky top-0 z-10 flex items-center gap-2 border-b border-line bg-surface px-3 py-2.5">
           <span className="rounded-full bg-warning/10 px-2 py-0.5 text-xs font-semibold text-warning">
             {review.filter((c) => !state.rows[c.code]?.mergedInto).length} need your
             call
@@ -600,6 +601,7 @@ export default function TaxonomyReview({
           </span>
         </div>
         {review.map(codeRow)}
+        </div>
       </div>
 
       {[...Object.values(state.rows)].filter((r) => r.added).length > 0 && (
