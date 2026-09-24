@@ -2,9 +2,9 @@ import { NextResponse } from "next/server";
 import { createHash } from "crypto";
 import { getAuth, requireProject } from "@/lib/auth";
 import { store } from "@/lib/store";
-import { extractSnippet } from "@/lib/engine/mention_filter";
-import { coRefers } from "@/lib/engine/observations";
-import { famTokens } from "@/lib/engine/dict_suggest";
+import { extractSnippetExcluding } from "@/lib/engine/mention_filter";
+import { familyContains } from "@/lib/engine/observations";
+import { containsSeq, famTokens } from "@/lib/engine/dict_suggest";
 
 export const maxDuration = 60;
 
@@ -31,7 +31,7 @@ export async function GET(
   if (!name) return NextResponse.json({ error: "name required" }, { status: 400 });
 
   const cacheKey =
-    `dict_examples:v3:${id}:` +
+    `dict_examples:v4:${id}:` +
     createHash("sha256").update(`${name.toLowerCase()}|${parent.toLowerCase()}`).digest("hex");
   const hit = await store.cacheGet(cacheKey, 30 * 24 * 3600 * 1000);
   if (hit) return NextResponse.json(JSON.parse(hit));
@@ -39,11 +39,25 @@ export async function GET(
   const norm = (s: string) => s.trim().toLowerCase();
   const dict = await store.getDictionary(id);
   const parentEntry = dict.find((e) => norm(e.canonical) === norm(parent));
-  const parentSeqs = (parent
-    ? [parent, ...(parentEntry?.aliases ?? [])]
-    : []
-  ).map(famTokens);
-  const satTerm = norm(name);
+  const parentForms = parent ? [parent, ...(parentEntry?.aliases ?? [])] : [];
+  const parentSeqs = parentForms.map(famTokens);
+  const satSeq = famTokens(name);
+  // Best-owner attribution: each detected name belongs to whichever form it
+  // matches most specifically. "Amazon Prime Video" scores 3 for the parent
+  // and 1 for satellite "Prime", so it is parent evidence ONLY - a name
+  // that is a token of its parent's name no longer counts every parent
+  // mention as its own.
+  const matchScore = (det: string[], seq: string[]) => {
+    if (containsSeq(det, seq)) return seq.length;
+    if (familyContains(seq, det)) return det.length;
+    return 0;
+  };
+  const ownerOf = (det: string[]): "sat" | "parent" | null => {
+    const ps = parentSeqs.reduce((m, seq) => Math.max(m, matchScore(det, seq)), 0);
+    const ss = matchScore(det, satSeq);
+    if (ss === 0 && ps === 0) return null;
+    return ss > ps ? "sat" : "parent";
+  };
 
   const rows = await store.listProjectBrandRows(id);
   const withParent: string[] = [];
@@ -52,10 +66,9 @@ export async function GET(
     let hasSat = false;
     let hasParent = false;
     for (const b of r.brands) {
-      const nb = norm(b);
-      if (!hasSat && nb.includes(satTerm)) hasSat = true;
-      if (!hasParent && parentSeqs.length > 0 && coRefers(famTokens(nb), parentSeqs))
-        hasParent = true;
+      const owner = ownerOf(famTokens(b));
+      if (owner === "sat") hasSat = true;
+      else if (owner === "parent") hasParent = true;
       if (hasSat && hasParent) break;
     }
     if (!hasSat) continue;
@@ -72,9 +85,15 @@ export async function GET(
   const texts = new Map(
     (await store.getResponseTexts(wanted)).map((t) => [t.id, t.text])
   );
+  // Longer parent forms that embed the satellite's tokens: occurrences
+  // inside them are the parent's name, not a bare use of this one.
+  const embedding = parentForms.filter((f) => {
+    const ft = famTokens(f);
+    return ft.length > satSeq.length && containsSeq(ft, satSeq);
+  });
   const quotes = (ids: string[]) =>
     sample(ids, 3)
-      .map((rid) => extractSnippet(texts.get(rid) ?? "", name))
+      .map((rid) => extractSnippetExcluding(texts.get(rid) ?? "", name, embedding))
       .filter(Boolean);
   const payload = {
     name,

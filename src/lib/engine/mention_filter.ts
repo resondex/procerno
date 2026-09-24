@@ -44,14 +44,24 @@ export function nameAppearsBounded(
  * `name` in `text`: roughly one sentence each side, trimmed to sentence or
  * line boundaries, ellipsized. Empty string when the name never appears
  * bounded (a canonicalized detection with no literal surface form). */
-export function extractSnippet(text: string, name: string, radius = 160): string {
+export function extractSnippet(
+  text: string,
+  name: string,
+  radius = 160,
+  hitAt?: number
+): string {
   const n = name.trim().toLowerCase();
-  const tokens = n.split(/[^a-z0-9+]+/).filter((x) => x.length > 2);
-  const m =
-    boundedRegex(n).exec(text) ??
-    (tokens.length > 0 ? boundedRegex(tokens[0]).exec(text) : null);
-  if (!m) return "";
-  const hit = m.index + (m[1]?.length ?? 0);
+  let hit: number;
+  if (hitAt !== undefined) {
+    hit = hitAt;
+  } else {
+    const tokens = n.split(/[^a-z0-9+]+/).filter((x) => x.length > 2);
+    const m =
+      boundedRegex(n).exec(text) ??
+      (tokens.length > 0 ? boundedRegex(tokens[0]).exec(text) : null);
+    if (!m) return "";
+    hit = m.index + (m[1]?.length ?? 0);
+  }
   let start = Math.max(0, hit - radius);
   let end = Math.min(text.length, hit + n.length + radius);
   // Snap outward-cut edges to sentence/line boundaries where one is near.
@@ -80,6 +90,42 @@ export function extractSnippet(text: string, name: string, radius = 160): string
   return (
     (start > 0 ? "…" : "") + snippet + (end < text.length ? "…" : "")
   );
+}
+
+/** Like extractSnippet, but skip occurrences of `name` that sit inside a
+ * longer phrase from `excludePhrases` ("Prime" inside "Amazon Prime Video"
+ * is the parent's name, not a bare use of the satellite). Falls back to the
+ * plain extraction when no standalone occurrence exists. */
+export function extractSnippetExcluding(
+  text: string,
+  name: string,
+  excludePhrases: string[],
+  radius = 160
+): string {
+  const n = name.trim().toLowerCase();
+  const re = new RegExp(
+    `(^|[^a-z0-9])(${esc(n)})(s|es)?($|[^a-z0-9])`,
+    "ig"
+  );
+  const covers: [number, number][] = [];
+  for (const ph of excludePhrases) {
+    const pre = new RegExp(`(^|[^a-z0-9])${esc(ph.toLowerCase())}(s|es)?($|[^a-z0-9])`, "ig");
+    let pm: RegExpExecArray | null;
+    while ((pm = pre.exec(text)) !== null) {
+      covers.push([pm.index, pm.index + pm[0].length]);
+      pre.lastIndex = pm.index + 1;
+    }
+  }
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(text)) !== null) {
+    const at = m.index + (m[1]?.length ?? 0);
+    if (!covers.some(([a, b]) => at >= a && at < b)) {
+      // Standalone occurrence: extract the window around exactly this hit.
+      return extractSnippet(text, name, radius, at);
+    }
+    re.lastIndex = m.index + 1;
+  }
+  return extractSnippet(text, name, radius);
 }
 
 /** Filter a detected-name list against the answer it came from. `known`

@@ -837,6 +837,23 @@ export default function IdentifyTab({
     );
   }
 
+  // Serve the board all at once: until the suggestion pass resolves,
+  // render one quiet loading state instead of buckets that reshuffle as
+  // placements, the summary line, and the receipt pop in one by one.
+  if (!passDone && pendingEntries.length > 0) {
+    return (
+      <div className="grid gap-4 py-8 justify-center">
+        <p className="text-[13px] text-ink-3">
+          <span
+            aria-hidden="true"
+            className="inline-block h-3 w-3 mr-1.5 align-[-1px] rounded-full border-2 border-line border-t-primary animate-spin"
+          />
+          Preparing your brand board…
+        </p>
+      </div>
+    );
+  }
+
   return (
     <div className="grid gap-4">
       <div className="flex items-center justify-between gap-4 flex-wrap">
