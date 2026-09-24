@@ -842,7 +842,7 @@ export default function IdentifyTab({
                 : p.confirmed
                   ? "bg-primary-soft border-primary/30 text-primary"
                   : "bg-danger/10 border-danger/30 text-danger"
-            } ${p.note ? "group relative border-2 border-warning" : ""} ${dragNorm === p.norm ? "opacity-40" : ""}`}
+            } ${p.note ? "group relative border-2 border-purple-500" : ""} ${dragNorm === p.norm ? "opacity-40" : ""}`}
             onClick={
               p.note
                 ? () => openExamples(p.name, p.noteTarget ?? null)
@@ -852,7 +852,7 @@ export default function IdentifyTab({
             {p.name}
             {p.note && (
               <span className="pointer-events-none absolute left-0 top-full z-30 mt-1.5 hidden w-72 rounded-lg border border-line bg-surface p-3 text-left shadow-lg group-hover:block">
-                <span className="block text-[11px] font-semibold uppercase tracking-wide text-warning">
+                <span className="block text-[11px] font-semibold uppercase tracking-wide text-purple-600">
                   Flagged for review
                 </span>
                 {p.noteTarget && (
@@ -915,7 +915,7 @@ export default function IdentifyTab({
             moved this session
           </span>
           <span className="inline-flex items-center gap-1.5">
-            <span className="h-2.5 w-2.5 rounded-full border-2 border-warning bg-danger/10" />{" "}
+            <span className="h-2.5 w-2.5 rounded-full border-2 border-purple-500 bg-danger/10" />{" "}
             flagged for review — hover for why and click for examples
           </span>
         </div>
