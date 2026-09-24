@@ -163,12 +163,21 @@ export async function runOpenDiscovery(
  * names. Feeds the dictionary gate with observed reality - who appears in
  * this market's answers and how often - instead of only the setup-seeded
  * list. Same metering, purpose discovery:brands via cost context. */
+// Unified with the prod coder's mentions instruction (providers.ts), so the
+// bootstrap census and the steady-state coder emit the same name vocabulary
+// and every downstream calibration (family layer, co-occurrence guard, 1%
+// floor) transfers between phases.
 const BRANDS_SYSTEM =
   "You extract brand mentions from one AI assistant answer for a " +
-  "brand-visibility study. List every distinct brand, company, or named " +
-  "product the answer mentions - by the name the answer uses, one entry per " +
-  "brand (dedupe variants within the answer to the most complete form). " +
-  "Generic categories are not brands. Reply with ONLY the JSON object: " +
+  "brand-visibility study. List every company, brand, product, or service " +
+  "named, including ones named only as integrations or adjacent tools. " +
+  "Completeness matters; relevance is decided later. ONLY proper-noun " +
+  "names: a generic descriptor ('a self-hosted server', 'open-source " +
+  "tools', 'a spreadsheet') is never a mention. A phrase naming several " +
+  "brands is one entry PER brand. Name the PRODUCT, not its parts: a " +
+  "feature, module, view, add-on, edition, or pricing tier of a product is " +
+  "the product itself - one entry per distinct product, deduped to the " +
+  "most complete form the answer uses. Reply with ONLY the JSON object: " +
   '{"brands": ["<names>"]}';
 
 export interface BrandMentions {

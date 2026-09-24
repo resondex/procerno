@@ -171,15 +171,29 @@ async function loadDiscoveryBrandSets(
 ): Promise<Set<string>[] | null> {
   const sets: Set<string>[] = [];
   for (const run of await store.listRuns(projectId)) {
+    let any = false;
     for (const r of await store.listResponses(run.id)) {
       if (!r.discovery_brands) continue;
       try {
         sets.push(
           new Set((JSON.parse(r.discovery_brands) as string[]).map(norm))
         );
+        any = true;
       } catch {
         // one bad row never blocks the guard
       }
+    }
+    // Steady state: coded runs carry per-answer brand sets in the mentions
+    // table instead of discovery_brands - same signal, same guard.
+    if (!any) {
+      const byResponse = new Map<string, Set<string>>();
+      for (const m of await store.listMentionsForRun(run.id)) {
+        (byResponse.get(m.response_id) ??
+          byResponse.set(m.response_id, new Set()).get(m.response_id)!).add(
+          norm(m.brand)
+        );
+      }
+      for (const s of byResponse.values()) sets.push(s);
     }
   }
   return sets.length > 0 ? sets : null;
