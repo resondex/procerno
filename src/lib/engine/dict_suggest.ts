@@ -288,25 +288,31 @@ export async function getDictionarySuggestions(
             (e) => norm(e.canonical) === norm(v.merge_into ?? "")
           );
           const satTerm = norm(p.canonical);
-          // Short form of the brand itself ("Samsung" -> Samsung Galaxy,
-          // "Amazon" -> Amazon Prime Video): the target's name CONTAINS the
-          // satellite's, so it is referential by construction - never
-          // guarded away, but flagged, since a company short form can also
-          // carry the company's other contexts.
-          if (
-            containsSeq(famTokens(v.merge_into ?? ""), famTokens(p.canonical))
-          ) {
-            const flagged: CachedVerdict = {
-              ...v,
-              rationale: `${v.rationale} (short form of the brand name - review)`,
-            };
-            cached.set(p.id, flagged);
-            await store.cacheSet(
-              nameKey(projectId, p.canonical),
-              JSON.stringify(flagged),
-              { category, projectId }
-            );
-            continue;
+          // Short form of the brand itself: the target's name CONTAINS the
+          // satellite's, so it is referential by construction and never
+          // guarded away. A maker-prefix identity ("Samsung" -> SAMSUNG
+          // Galaxy, "Amazon" -> AMAZON Prime Video - the tokens LEAD the
+          // target name) is the brand by definition: silent merge, no flag.
+          // A non-leading containment keeps the review flag.
+          {
+            const satToks = famTokens(p.canonical);
+            const tgtToks = famTokens(v.merge_into ?? "");
+            if (containsSeq(tgtToks, satToks)) {
+              const leading = satToks.every((t, i) => tgtToks[i] === t);
+              const verdict: CachedVerdict = leading
+                ? v
+                : {
+                    ...v,
+                    rationale: `${v.rationale} (short form of the brand name - review)`,
+                  };
+              cached.set(p.id, verdict);
+              await store.cacheSet(
+                nameKey(projectId, p.canonical),
+                JSON.stringify(verdict),
+                { category, projectId }
+              );
+              continue;
+            }
           }
           // Parent terms include the target's aliases AND its pending short
           // forms - "Apple" is how answers name the iPhone's parent before

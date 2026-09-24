@@ -14,6 +14,8 @@ interface Pill {
   locked: boolean; // active canonicals anchor their bucket — not draggable
   confirmed: boolean;
   moved: boolean; // user dragged it this session → white
+  /** Measured review rationale from the suggestion guard, when flagged. */
+  note?: string;
 }
 
 interface Bucket {
@@ -115,6 +117,11 @@ export default function IdentifyTab({
   } | null>(null);
   // Entry ids the suggestion pass has already placed — avoids re-suggesting.
   const suggestedFor = useRef<Set<string>>(new Set());
+  // Engine-ignored names: never rendered as pills - a receipt line with a
+  // reveal button instead. Confirm commits them as rejected.
+  const [autoIgnored, setAutoIgnored] = useState<
+    { entryId: string; name: string; rationale: string }[]
+  >([]);
 
   const buildBuckets = useCallback(
     (entries: DictionaryEntry[]): Bucket[] => {
@@ -272,7 +279,9 @@ export default function IdentifyTab({
     (e) => e.status === "pending" && lowSignal(e)
   ).length;
   const unplacedPending = pendingEntries.filter(
-    (e) => !buckets.some((b) => b.pills.some((p) => p.entryId === e.id))
+    (e) =>
+      !buckets.some((b) => b.pills.some((p) => p.entryId === e.id)) &&
+      !autoIgnored.some((a) => a.entryId === e.id)
   );
 
   // Pre-organize newly discovered names by suggestion.
@@ -296,30 +305,50 @@ export default function IdentifyTab({
         }
         const suggestions: Suggestion[] = (await res.json()).suggestions ?? [];
         const summary = { merged: 0, proposed: 0, ignored: 0 };
+        const ignoredNow: { entryId: string; name: string; rationale: string }[] = [];
         setBuckets((prev) => {
           const next = prev.map((b) => ({ ...b, pills: [...b.pills] }));
+          const mkPill = (entry: DictionaryEntry, s: Suggestion): Pill => ({
+            name: entry.canonical,
+            norm: norm(entry.canonical),
+            entryId: entry.id,
+            kind: "canonical",
+            homeStatus: "pending",
+            locked: false,
+            confirmed: false,
+            moved: false,
+            ...(/- review\)/.test(s.rationale ?? "")
+              ? { note: s.rationale }
+              : {}),
+          });
+          const placed = (id: string) =>
+            next.some((b) => b.pills.some((p) => p.entryId === id));
+          // Pass 1: approvals create their buckets FIRST, so a family
+          // child's merge target exists whatever order the list came in
+          // (the Vivo / Vivo X100 Pro split was this order dependence).
           for (const s of suggestions) {
+            if (s.action !== "approve") continue;
             const entry = pendingEntries.find((e) => e.id === s.entryId);
-            if (!entry) continue;
-            if (next.some((b) => b.pills.some((p) => p.entryId === s.entryId)))
-              continue;
-            const pill: Pill = {
-              name: entry.canonical,
-              norm: norm(entry.canonical),
+            if (!entry || placed(entry.id)) continue;
+            summary.proposed++;
+            next.splice(next.length - 2, 0, {
+              key: `new:${entry.id}`,
+              kind: "new",
               entryId: entry.id,
-              kind: "canonical",
-              homeStatus: "pending",
-              locked: false,
-              confirmed: false,
-              moved: false,
-            };
-            let target: Bucket | undefined;
-            if (s.action === "merge" && s.mergeIntoId) {
-              target = next.find((b) => b.entryId === s.mergeIntoId);
-            } else if (s.action === "ignore") {
-              target = next.find((b) => b.key === "__ignore__");
-            }
-            if (s.action === "approve" || !target) {
+              label: entry.canonical,
+              originalLabel: entry.canonical,
+              pills: [mkPill(entry, s)],
+            });
+          }
+          // Pass 2: merges, into actives or the buckets pass 1 created.
+          for (const s of suggestions) {
+            if (s.action !== "merge") continue;
+            const entry = pendingEntries.find((e) => e.id === s.entryId);
+            if (!entry || placed(entry.id)) continue;
+            const target = s.mergeIntoId
+              ? next.find((b) => b.entryId === s.mergeIntoId)
+              : undefined;
+            if (!target) {
               summary.proposed++;
               next.splice(next.length - 2, 0, {
                 key: `new:${entry.id}`,
@@ -327,16 +356,34 @@ export default function IdentifyTab({
                 entryId: entry.id,
                 label: entry.canonical,
                 originalLabel: entry.canonical,
-                pills: [pill],
+                pills: [mkPill(entry, s)],
               });
             } else {
-              if (target.kind === "ignore") summary.ignored++;
-              else summary.merged++;
-              target.pills.push(pill);
+              summary.merged++;
+              target.pills.push(mkPill(entry, s));
             }
+          }
+          // Pass 3: engine-ignored names are NOT pills - they collapse
+          // behind the receipt line, recoverable via its reveal button.
+          for (const s of suggestions) {
+            if (s.action !== "ignore") continue;
+            const entry = pendingEntries.find((e) => e.id === s.entryId);
+            if (!entry || placed(entry.id)) continue;
+            summary.ignored++;
+            ignoredNow.push({
+              entryId: entry.id,
+              name: entry.canonical,
+              rationale: s.rationale ?? "",
+            });
           }
           return next;
         });
+        if (ignoredNow.length > 0) {
+          setAutoIgnored((prev) => [
+            ...prev.filter((x) => !ignoredNow.some((y) => y.entryId === x.entryId)),
+            ...ignoredNow,
+          ]);
+        }
         setSuggestSummary(summary);
       } finally {
         setSuggesting(false);
@@ -419,6 +466,30 @@ export default function IdentifyTab({
         prev.map((b) => ({ ...b, pills: [...b.pills] }))
       );
     });
+  }
+
+  function revealAutoIgnored() {
+    setBuckets((prev) => {
+      const next = prev.map((b) => ({ ...b, pills: [...b.pills] }));
+      const ig = next.find((b) => b.key === "__ignore__");
+      if (!ig) return prev;
+      for (const a of autoIgnored) {
+        if (next.some((b) => b.pills.some((p) => p.entryId === a.entryId))) continue;
+        ig.pills.push({
+          name: a.name,
+          norm: norm(a.name),
+          entryId: a.entryId,
+          kind: "canonical",
+          homeStatus: "pending",
+          locked: false,
+          confirmed: false,
+          moved: false,
+          note: a.rationale,
+        });
+      }
+      return next;
+    });
+    setAutoIgnored([]);
   }
 
   async function confirmAll() {
@@ -542,6 +613,11 @@ export default function IdentifyTab({
           }
         }
       }
+      // Hidden engine-ignored names commit as rejected: confirming the
+      // board accepts the receipt line's contents too.
+      for (const a of autoIgnored) {
+        merges.push({ entryId: a.entryId, action: "reject" });
+      }
       const actions = [...approves, ...renames, ...moves, ...merges];
       if (actions.length > 0) {
         await fetch(`/api/projects/${projectId}/dictionary`, {
@@ -550,7 +626,10 @@ export default function IdentifyTab({
           body: JSON.stringify({ actions }),
         });
       }
-      const allNames = buckets.flatMap((b) => b.pills.map((p) => p.name));
+      const allNames = [
+        ...buckets.flatMap((b) => b.pills.map((p) => p.name)),
+        ...autoIgnored.map((a) => a.name),
+      ];
       if (allNames.length > 0) {
         await fetch(`/api/projects/${projectId}/dictionary`, {
           method: "POST",
@@ -559,6 +638,7 @@ export default function IdentifyTab({
         });
       }
       suggestedFor.current.clear();
+      setAutoIgnored([]);
       await onApplied();
     } finally {
       setConfirming(false);
@@ -602,13 +682,15 @@ export default function IdentifyTab({
             }}
             onDragEnd={() => setDragNorm(null)}
             title={
-              p.kind === "canonical" && p.homeStatus === "active"
-                ? "Group anchor — dragging it moves the whole group"
-                : p.confirmed && !p.moved
-                  ? "Confirmed"
-                  : p.moved
-                    ? "Moved — will be saved on confirm"
-                    : "New — needs your confirmation"
+              p.note
+                ? p.note
+                : p.kind === "canonical" && p.homeStatus === "active"
+                  ? "Group anchor — dragging it moves the whole group"
+                  : p.confirmed && !p.moved
+                    ? "Confirmed"
+                    : p.moved
+                      ? "Moved — will be saved on confirm"
+                      : "New — needs your confirmation"
             }
             className={`inline-flex items-center rounded-full border px-2.5 py-1 text-[13px] font-medium select-none ${
               p.locked ? "cursor-default" : "cursor-grab active:cursor-grabbing"
@@ -618,7 +700,7 @@ export default function IdentifyTab({
                 : p.confirmed
                   ? "bg-primary-soft border-primary/30 text-primary"
                   : "bg-danger/10 border-danger/30 text-danger"
-            } ${dragNorm === p.norm ? "opacity-40" : ""}`}
+            } ${p.note ? "border-2 border-warning" : ""} ${dragNorm === p.norm ? "opacity-40" : ""}`}
           >
             {p.name}
           </span>
@@ -717,6 +799,20 @@ export default function IdentifyTab({
             ))}
           </div>
         </div>
+      )}
+      {autoIgnored.length > 0 && (
+        <p className="text-xs text-ink-3">
+          {autoIgnored.length} name{autoIgnored.length === 1 ? "" : "s"}{" "}
+          auto-ignored by measured rules (redundant vocabulary, own-context
+          brands, off-category scenery) - confirmed with the board.{" "}
+          <button
+            type="button"
+            onClick={revealAutoIgnored}
+            className="underline hover:text-ink"
+          >
+            show them
+          </button>
+        </p>
       )}
       {lowSignalCount > 0 && (
         <p className="text-xs text-ink-3">
