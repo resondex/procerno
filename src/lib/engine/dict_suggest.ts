@@ -443,8 +443,71 @@ export async function getDictionarySuggestions(
     });
   }
 
+  // Family-consistency reconciliation: EVERY family member's verdict is
+  // re-derived from its root (or its mechanical active target) on every
+  // read, not just fresh ones - verdicts issued at different moments can
+  // otherwise drift apart (BankAmericard merged while "BankAmericard
+  // credit card" stayed ignored). Self-healing, no model calls.
+  for (const p of pending) {
+    const target = plan.activeMerge.get(p.id);
+    if (target) {
+      const want: CachedVerdict = {
+        action: "merge",
+        merge_into: target,
+        relationship: "same_offering",
+        rationale: `extends the tracked brand "${target}"`,
+      };
+      const cur = cached.get(p.id);
+      if (!cur || cur.action !== "merge" || cur.merge_into !== target) {
+        cached.set(p.id, want);
+        await store.cacheSet(nameKey(projectId, p.canonical), JSON.stringify(want), {
+          category,
+          projectId,
+        });
+      }
+      continue;
+    }
+    const rootId = plan.rootOf.get(p.id);
+    if (!rootId) continue;
+    const rootVerdict = cached.get(rootId);
+    const root = byId.get(rootId);
+    if (!rootVerdict || !root) continue;
+    const want: CachedVerdict =
+      rootVerdict.action === "approve"
+        ? {
+            action: "merge",
+            merge_into: root.canonical,
+            relationship: "same_offering",
+            rationale: `variant of "${root.canonical}"`,
+          }
+        : rootVerdict.action === "merge"
+          ? {
+              action: "merge",
+              merge_into: rootVerdict.merge_into,
+              relationship: rootVerdict.relationship ?? "same_offering",
+              rationale: `follows "${root.canonical}"`,
+            }
+          : {
+              action: "ignore",
+              merge_into: null,
+              rationale: `follows "${root.canonical}"`,
+            };
+    const cur = cached.get(p.id);
+    if (
+      !cur ||
+      cur.action !== want.action ||
+      (cur.merge_into ?? null) !== (want.merge_into ?? null)
+    ) {
+      cached.set(p.id, want);
+      await store.cacheSet(nameKey(projectId, p.canonical), JSON.stringify(want), {
+        category,
+        projectId,
+      });
+    }
+  }
+
   // Resolve names to entry ids fresh at read time - a cached merge target may
-  // have been approved (now active) or renamed since the verdict was stored.
+  // have been approved (now made active) or renamed since the verdict was stored.
   const byName = new Map(entries.map((e) => [norm(e.canonical), e]));
   const out: DictSuggestion[] = [];
   for (const p of pending) {

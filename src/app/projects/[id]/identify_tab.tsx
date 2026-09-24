@@ -405,10 +405,29 @@ export default function IdentifyTab({
           if (!entry) continue;
           if (sug.action === "ignore") {
             summary.ignored++;
-            ignoredNow.push({
-              entryId: entry.id,
-              name: entry.canonical,
-              rationale: sug.rationale ?? "",
+            // Volume escalation: an ignore verdict on a name observed in
+            // >=10% of answers is where a wrong call is costly - it renders
+            // as a flagged pill in Ignore instead of vanishing into the
+            // receipt, so it gets one deliberate look.
+            const share =
+              obs && obs.rows > 0
+                ? (obsByName.get(norm(entry.canonical)) ?? 0) / obs.rows
+                : 0;
+            if (share < 0.1) {
+              ignoredNow.push({
+                entryId: entry.id,
+                name: entry.canonical,
+                rationale: sug.rationale ?? "",
+              });
+              continue;
+            }
+            plans.push({
+              entry,
+              s: {
+                ...sug,
+                rationale: `Ignored by rule, but named in ${Math.round(share * 100)}% of answers - confirm this is scenery, or drag it out to track it. ${sug.rationale ?? ""} - review)`,
+              },
+              target: "__ignore__",
             });
             continue;
           }
