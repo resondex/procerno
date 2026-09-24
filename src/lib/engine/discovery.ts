@@ -1,5 +1,6 @@
 import { coderCompatClient } from "./providers";
 import { tagCosts } from "../cost_log";
+import { boundedNames } from "./mention_filter";
 
 /**
  * Taxonomy discovery: open-code answers with NO code list - the labeler

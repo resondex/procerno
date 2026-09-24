@@ -577,8 +577,9 @@ export default function TaxonomyReview({
 
       {/* One shared scroller holding two separate cards - each section header
           stays pinned while its own card scrolls, and the whole codebook is
-          one scrollbar. */}
-      <div className="max-h-[62vh] space-y-4 overflow-y-auto">
+          one scrollbar. Fixed height, not max: expanding a section scrolls
+          inside the box instead of growing the page card. */}
+      <div className="h-[62vh] space-y-4 overflow-y-auto">
         <div className="overflow-clip rounded-lg border border-line">
         <button
           type="button"
