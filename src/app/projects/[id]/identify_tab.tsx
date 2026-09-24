@@ -788,8 +788,10 @@ export default function IdentifyTab({
 
   function bucketBody(b: Bucket) {
     const open = variantsOpen.has(b.key);
-    const autos = b.pills.filter((p) => p.auto);
-    const shown = open ? b.pills : b.pills.filter((p) => !p.auto);
+    const collapsible = (p: Pill) =>
+      !p.moved && (p.auto === true || (p.kind === "alias" && b.kind === "brand"));
+    const autos = b.pills.filter(collapsible);
+    const shown = open ? b.pills : b.pills.filter((p) => !collapsible(p));
     return (
       <div className="flex flex-wrap gap-1.5 min-h-9 rounded-lg p-1 -m-1">
         {autos.length > 0 && (
@@ -811,7 +813,7 @@ export default function IdentifyTab({
             }
             className="inline-flex items-center rounded-full border border-line bg-white/60 px-2.5 py-1 text-[12px] font-medium text-ink-3 hover:text-ink hover:border-ink-3"
           >
-            {open ? "collapse variants" : `+${autos.length} variant${autos.length === 1 ? "" : "s"}`}
+            {open ? "collapse" : `+${autos.length} grouped name${autos.length === 1 ? "" : "s"}`}
           </button>
         )}
         {shown.map((p) => (
@@ -842,7 +844,7 @@ export default function IdentifyTab({
                 : p.confirmed
                   ? "bg-primary-soft border-primary/30 text-primary"
                   : "bg-danger/10 border-danger/30 text-danger"
-            } ${p.note ? "group relative border-2 border-purple-500" : ""} ${dragNorm === p.norm ? "opacity-40" : ""}`}
+            } ${p.note ? "group relative !bg-purple-500/10 !border-purple-500/40 !text-purple-700 border-2" : ""} ${dragNorm === p.norm ? "opacity-40" : ""}`}
             onClick={
               p.note
                 ? () => openExamples(p.name, p.noteTarget ?? null)
@@ -852,7 +854,7 @@ export default function IdentifyTab({
             {p.name}
             {p.note && (
               <span className="pointer-events-none absolute left-0 top-full z-30 mt-1.5 hidden w-72 rounded-lg border border-line bg-surface p-3 text-left shadow-lg group-hover:block">
-                <span className="block text-[11px] font-semibold uppercase tracking-wide text-purple-600">
+                <span className="block text-[11px] font-semibold uppercase tracking-wide text-purple-700">
                   Flagged for review
                 </span>
                 {p.noteTarget && (
@@ -915,7 +917,7 @@ export default function IdentifyTab({
             moved this session
           </span>
           <span className="inline-flex items-center gap-1.5">
-            <span className="h-2.5 w-2.5 rounded-full border-2 border-purple-500 bg-danger/10" />{" "}
+            <span className="h-2.5 w-2.5 rounded-full border-2 border-purple-500/40 bg-purple-500/10" />{" "}
             flagged for review — hover for why and click for examples
           </span>
         </div>
