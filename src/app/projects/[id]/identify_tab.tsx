@@ -822,7 +822,7 @@ export default function IdentifyTab({
                 : p.confirmed
                   ? "bg-primary-soft border-primary/30 text-primary"
                   : "bg-danger/10 border-danger/30 text-danger"
-            } ${p.note ? "group relative !bg-amber-400/15 !border-amber-500/50 !text-amber-800 border-2" : ""} ${dragNorm === p.norm ? "opacity-40" : ""}`}
+            } ${p.note ? "group relative !bg-amber-400/15 !border-amber-500/50 !text-amber-800" : ""} ${dragNorm === p.norm ? "opacity-40" : ""}`}
             onClick={
               p.note
                 ? () => openExamples(p.name, p.noteTarget ?? null)
@@ -916,7 +916,7 @@ export default function IdentifyTab({
             moved this session
           </span>
           <span className="inline-flex items-center gap-1.5">
-            <span className="h-2.5 w-2.5 rounded-full border-2 border-amber-500/50 bg-amber-400/15" />{" "}
+            <span className="h-2.5 w-2.5 rounded-full border border-amber-500/50 bg-amber-400/15" />{" "}
             flagged for review — hover for why and click for examples
           </span>
         </div>
