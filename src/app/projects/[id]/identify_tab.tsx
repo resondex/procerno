@@ -16,6 +16,8 @@ interface Pill {
   moved: boolean; // user dragged it this session → white
   /** Measured review rationale from the suggestion guard, when flagged. */
   note?: string;
+  /** The merge target the flag is about (drives the tooltip's wording). */
+  noteTarget?: string | null;
 }
 
 interface Bucket {
@@ -325,12 +327,7 @@ export default function IdentifyTab({
             confirmed: false,
             moved: false,
             ...(/- review\)/.test(s.rationale ?? "")
-              ? {
-                  note:
-                    `REVIEW - left here, answers naming "${entry.canonical}" count as ${s.mergeIntoName}. ` +
-                    `Drag to its own bucket to track it separately, or into Ignore to not count it. ` +
-                    `Why flagged: ${s.rationale}`,
-                }
+              ? { note: s.rationale, noteTarget: s.mergeIntoName }
               : {}),
           });
           const placed = (id: string) =>
@@ -732,7 +729,7 @@ export default function IdentifyTab({
             onDragEnd={() => setDragNorm(null)}
             title={
               p.note
-                ? p.note
+                ? undefined
                 : p.kind === "canonical" && p.homeStatus === "active"
                   ? "Group anchor — dragging it moves the whole group"
                   : p.confirmed && !p.moved
@@ -749,9 +746,29 @@ export default function IdentifyTab({
                 : p.confirmed
                   ? "bg-primary-soft border-primary/30 text-primary"
                   : "bg-danger/10 border-danger/30 text-danger"
-            } ${p.note ? "border-2 border-warning" : ""} ${dragNorm === p.norm ? "opacity-40" : ""}`}
+            } ${p.note ? "group relative border-2 border-warning" : ""} ${dragNorm === p.norm ? "opacity-40" : ""}`}
           >
             {p.name}
+            {p.note && (
+              <span className="pointer-events-none absolute left-0 top-full z-30 mt-1.5 hidden w-72 rounded-lg border border-line bg-surface p-3 text-left shadow-lg group-hover:block">
+                <span className="block text-[11px] font-semibold uppercase tracking-wide text-warning">
+                  Flagged for review
+                </span>
+                {p.noteTarget && (
+                  <span className="mt-1 block text-[12px] font-normal leading-snug text-ink">
+                    Left here, answers naming &ldquo;{p.name}&rdquo; count as{" "}
+                    <b>{p.noteTarget}</b>.
+                  </span>
+                )}
+                <span className="mt-1 block text-[12px] font-normal leading-snug text-ink-2">
+                  Drag it to its own bucket to track it separately, or into
+                  Ignore to not count it.
+                </span>
+                <span className="mt-1.5 block text-[11px] font-normal leading-snug text-ink-3">
+                  {p.note}
+                </span>
+              </span>
+            )}
           </span>
         ))}
         {b.pills.length === 0 && (
