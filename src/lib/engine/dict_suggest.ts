@@ -36,9 +36,13 @@ const SCHEMA = {
           name: { type: "string" },
           action: { type: "string", enum: ["merge", "approve", "ignore"] },
           merge_into: { type: ["string", "null"] },
+          relationship: {
+            type: "string",
+            enum: ["same_offering", "product_of", "affiliated", "content_of", "none"],
+          },
           rationale: { type: "string" },
         },
-        required: ["name", "action", "merge_into", "rationale"],
+        required: ["name", "action", "merge_into", "relationship", "rationale"],
       },
     },
   },
@@ -60,6 +64,11 @@ interface CachedVerdict {
   action: "merge" | "approve" | "ignore";
   merge_into: string | null;
   rationale: string;
+  /** For merges: how the name relates to the target. product_of and
+   * same_offering names ALWAYS merge (picking them is picking the target -
+   * framing and top-pick credit must flow); affiliated and content_of keep
+   * the measured ignore bands. */
+  relationship?: "same_offering" | "product_of" | "affiliated" | "content_of" | "none";
 }
 
 const norm = (s: string) => s.trim().toLowerCase();
@@ -360,8 +369,18 @@ export async function getDictionarySuggestions(
           }
           if (n < 10) continue; // too thin to judge
           const alone = 1 - withParent / n;
+          const productForm =
+            v.relationship === "product_of" || v.relationship === "same_offering";
           let next: CachedVerdict | null = null;
-          if (alone <= 0.05) {
+          if (productForm) {
+            // Picking the product IS picking the target: framing and
+            // top-pick credit must flow, so these merge regardless of the
+            // bands - the measurement only decides whether to flag.
+            next =
+              alone <= 0.05
+                ? { ...v, rationale: `${v.rationale} (form of the brand - ${Math.round(alone * 100)}% alone of ${n})` }
+                : { ...v, rationale: `${v.rationale} (named without "${v.merge_into}" in ${Math.round(alone * 100)}% of ${n} answers - review)` };
+          } else if (alone <= 0.05) {
             next = {
               action: "ignore",
               merge_into: null,
@@ -489,6 +508,14 @@ export function suggestSystemPrompt(
           "partner brand named as part of an active brand's product (a " +
           "co-engineered camera, a licensed feature) are NEVER their own " +
           "row and never ignored: merge them into that brand.\n" +
+          "For every merge, also set relationship: same_offering (another " +
+          "name, spelling, or short form of the target itself), product_of " +
+          "(a product, card, model, plan, or program the target's company " +
+          "sells - choosing it IS choosing the target), affiliated (a " +
+          "sibling product or corporate relative sold separately - praising " +
+          "it is NOT praising the target), content_of (content or " +
+          "programming carried by the target). Use none for approve and " +
+          "ignore.\n" +
           "Every suggestion needs a one-line rationale.\n" +
           `Active brands: ${activeNames.join(", ")}.\n` +
           "Also treat pending names as potential merge targets for OTHER " +
@@ -555,6 +582,7 @@ async function suggestBatch(
     const verdict: CachedVerdict = {
       action: s.action,
       merge_into: s.merge_into,
+      relationship: s.relationship ?? "none",
       rationale: s.rationale,
     };
     verdicts.set(entry.id, verdict);
