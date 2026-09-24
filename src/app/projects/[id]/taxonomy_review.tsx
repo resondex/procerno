@@ -578,7 +578,7 @@ export default function TaxonomyReview({
       {/* One shared scroller holding two separate cards - each section header
           stays pinned while its own card scrolls, and the whole codebook is
           one scrollbar. */}
-      <div className="max-h-[62vh] space-y-6 overflow-y-auto">
+      <div className="max-h-[62vh] space-y-4 overflow-y-auto">
         <div className="overflow-clip rounded-lg border border-line">
         <button
           type="button"
@@ -614,9 +614,9 @@ export default function TaxonomyReview({
         </div>
       </div>
 
-      {/* Third card: dimensions the user adds, with the add input at the foot. mt-3 on
-          the page's gap-3 matches the 24px between the two cards above. */}
-      <div className="mt-3 rounded-lg border border-line">
+      {/* Third card: dimensions the user adds, with the add input at the foot. mt-1 on
+          the page's gap-3 matches the 16px between the two cards above. */}
+      <div className="mt-1 rounded-lg border border-line">
         {[...Object.values(state.rows)]
           .filter((r) => r.added)
           .map((r) => (
