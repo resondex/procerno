@@ -727,6 +727,7 @@ export default function ProjectDashboard({
               dict={dict}
               onApplied={refreshDict}
               observations={project.taxonomy_status ? project.brand_observations : null}
+              targetBrand={project.brand}
             />
           )}
           {dictTab === "parents" && (
@@ -1421,6 +1422,7 @@ function DictionaryGate({
           dict={dictionary}
           onApplied={onApplied}
           observations={project.brand_observations}
+          targetBrand={project.brand}
           hideConfirm
           registerConfirm={registerBoardConfirm}
         />

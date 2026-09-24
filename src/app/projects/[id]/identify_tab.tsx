@@ -57,6 +57,7 @@ export default function IdentifyTab({
   observations,
   hideConfirm,
   registerConfirm,
+  targetBrand,
 }: {
   projectId: string;
   dict: DictionaryEntry[];
@@ -68,6 +69,8 @@ export default function IdentifyTab({
    * top-right one is hidden and confirmAll is handed up instead. */
   hideConfirm?: boolean;
   registerConfirm?: (fn: () => Promise<void>) => void;
+  /** The tracker's own brand - its card always sorts first. */
+  targetBrand?: string;
 }) {
   // Observed sizing: entry_id-matched counts size the brand buckets; name
   // keys size the pending pills. Tier words, no raw numbers - preliminary
@@ -791,12 +794,20 @@ export default function IdentifyTab({
     const collapsible = (p: Pill) =>
       !p.moved && (p.auto === true || (p.kind === "alias" && b.kind === "brand"));
     const autos = b.pills.filter(collapsible);
-    const shown = open ? b.pills : b.pills.filter((p) => !collapsible(p));
-    return (
-      <div className="flex flex-wrap gap-1.5 min-h-9 rounded-lg p-1 -m-1">
-        {shown.map((p) => (
+    // Order: anchor first, plain pills, flagged-for-review LAST; the
+    // expanded group renders as one enclosed cluster after the anchor.
+    const isAnchor = (p: Pill) =>
+      p.kind === "canonical" && p.homeStatus === "active" && b.kind === "brand";
+    const loose = b.pills.filter((p) => !collapsible(p));
+    const shown = [
+      ...loose.filter((p) => isAnchor(p)),
+      ...loose.filter((p) => !isAnchor(p) && !p.note),
+      ...loose.filter((p) => !isAnchor(p) && p.note),
+    ];
+    const pillSpan = (p: Pill, orderVal = 0) => (
           <span
             key={p.norm}
+            style={{ order: orderVal }}
             draggable={!p.locked}
             onDragStart={(e) => {
               e.dataTransfer.setData("text/pill", p.norm);
@@ -872,7 +883,16 @@ export default function IdentifyTab({
               </span>
             )}
           </span>
-        ))}
+    );
+
+    return (
+      <div className="flex flex-wrap gap-1.5 min-h-9 rounded-lg p-1 -m-1">
+        {open && autos.length > 0 && (
+          <span className="order-2 inline-flex flex-wrap items-center gap-1.5 rounded-xl border border-dashed border-line bg-ink/[0.03] px-1.5 py-1">
+            {autos.map((p) => pillSpan(p))}
+          </span>
+        )}
+        {shown.map((p, idx) => pillSpan(p, isAnchor(p) ? 1 : 3 + idx))}
         {b.pills.length === 0 && (
           <span className="text-xs text-ink-3 self-center px-1">
             drop names here
@@ -1083,6 +1103,15 @@ export default function IdentifyTab({
       <div className="grid gap-3 sm:grid-cols-2">
         {buckets
           .filter((b) => b.kind === "brand")
+          .sort((a, b) => {
+            const isT = (x: Bucket) =>
+              !!targetBrand &&
+              x.pills.some(
+                (p) =>
+                  p.kind === "canonical" && norm(p.name) === norm(targetBrand)
+              );
+            return Number(isT(b)) - Number(isT(a));
+          })
           .map((b) => (
             <div key={b.key} className="card p-4" {...dropProps(b.key)}>
               <input
