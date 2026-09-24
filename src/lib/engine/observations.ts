@@ -119,6 +119,25 @@ export async function computeBrandObservations(projectId: string): Promise<{
       byKey.set(k, g);
     }
   }
+  // Trivial-plural fold: "Delta Sky Clubs" and "Delta Sky Club" are one
+  // name. When a key is another key plus a trailing s/es, its counts fold
+  // into the shorter form (matchKey strips spacing, so this works on the
+  // concatenated key). Only observed identities fold - dictionary entries
+  // are never touched here.
+  for (const k of [...byKey.keys()]) {
+    const base = k.endsWith("es") && byKey.has(k.slice(0, -2))
+      ? k.slice(0, -2)
+      : k.endsWith("s") && byKey.has(k.slice(0, -1))
+        ? k.slice(0, -1)
+        : null;
+    if (!base || base === k) continue;
+    const from = byKey.get(k)!;
+    const into = byKey.get(base)!;
+    into.answers += from.answers;
+    for (const [f, c] of from.forms) into.forms.set(f, (into.forms.get(f) ?? 0) + c);
+    into.entryId = into.entryId ?? from.entryId;
+    byKey.delete(k);
+  }
   const observed = [...byKey.values()]
     .map((g) => ({
       name: [...g.forms.entries()].sort((a, b) => b[1] - a[1])[0][0],
