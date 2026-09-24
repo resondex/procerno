@@ -144,6 +144,7 @@ export default function IdentifyTab({
     counts?: { withParent: number; alone: number };
     withParent?: string[];
     alone?: string[];
+    embedding?: string[];
   } | null>(null);
 
   async function openExamples(name: string, parent: string | null) {
@@ -160,18 +161,27 @@ export default function IdentifyTab({
         counts: d.counts,
         withParent: d.withParent ?? [],
         alone: d.alone ?? [],
+        embedding: d.embedding ?? [],
       });
     } catch {
       setExamples(null);
     }
   }
 
-  /** Bold every bounded occurrence of the name inside a snippet. */
-  function highlight(snippet: string, name: string) {
-    const esc = name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-    const parts = snippet.split(new RegExp(`(${esc})`, "ig"));
-    return parts.map((part, i) =>
-      part.toLowerCase() === name.toLowerCase() ? (
+  /** Bold standalone occurrences of the name - never the ones sitting
+   * inside a longer phrase ("Prime" inside "Prime Video" stays plain, so
+   * the quote reads as the parent's name, not a separate Prime). */
+  function highlight(snippet: string, name: string, embedding: string[]) {
+    const escRe = (x: string) => x.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const phrases = embedding.filter(
+      (ph) => ph.toLowerCase() !== name.toLowerCase()
+    );
+    const splitter = new RegExp(
+      `(${[...phrases.map(escRe), escRe(name)].join("|")})`,
+      "ig"
+    );
+    return snippet.split(splitter).map((part, i) =>
+      part && part.toLowerCase() === name.toLowerCase() ? (
         <b key={i} className="text-ink">{part}</b>
       ) : (
         part
@@ -1001,7 +1011,7 @@ export default function IdentifyTab({
                     </p>
                     {(examples.withParent ?? []).map((q, i) => (
                       <p key={i} className="mb-1.5 rounded-lg border border-line bg-white/50 px-3 py-2 text-[13px] italic leading-snug text-ink-2">
-                        {highlight(q, examples.name)}
+                        {highlight(q, examples.name, examples.embedding ?? [])}
                       </p>
                     ))}
                     {(examples.withParent ?? []).length === 0 && (
@@ -1016,7 +1026,7 @@ export default function IdentifyTab({
                   </p>
                   {(examples.alone ?? []).map((q, i) => (
                     <p key={i} className="mb-1.5 rounded-lg border border-line bg-white/50 px-3 py-2 text-[13px] italic leading-snug text-ink-2">
-                      {highlight(q, examples.name)}
+                      {highlight(q, examples.name, examples.embedding ?? [])}
                     </p>
                   ))}
                   {(examples.alone ?? []).length === 0 && (
