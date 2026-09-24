@@ -2,6 +2,7 @@ import { createHash } from "crypto";
 import { tagCosts } from "../cost_log";
 import { openaiClient } from "./providers";
 import { store } from "../store";
+import { coRefers } from "./observations";
 import type { DictionaryEntry } from "../types";
 
 const SUGGEST_MODEL = process.env.SUGGEST_MODEL ?? "gpt-5-mini";
@@ -318,17 +319,10 @@ export async function getDictionarySuggestions(
           // forms - "Apple" is how answers name the iPhone's parent before
           // the gate makes it an alias, and scoring iMessage without it
           // called a 7%-alone satellite a 32% one.
-          const shortForms = pending
-            .filter((q) =>
-              containsSeq(famTokens(v.merge_into ?? ""), famTokens(q.canonical))
-            )
-            .map((q) => norm(q.canonical));
-          const parentTerms = [
-            ...(target
-              ? [norm(target.canonical), ...target.aliases.map(norm)]
-              : [norm(v.merge_into ?? "")]),
-            ...shortForms,
-          ];
+          const parentSeqs = (target
+            ? [target.canonical, ...target.aliases]
+            : [v.merge_into ?? ""]
+          ).map(famTokens);
           let n = 0;
           let withParent = 0;
           for (const set of brandSets) {
@@ -336,7 +330,7 @@ export async function getDictionarySuggestions(
             let hasParent = false;
             for (const b of set) {
               if (!hasSat && b.includes(satTerm)) hasSat = true;
-              if (!hasParent && parentTerms.some((t) => t && b.includes(t)))
+              if (!hasParent && coRefers(famTokens(b), parentSeqs))
                 hasParent = true;
               if (hasSat && hasParent) break;
             }

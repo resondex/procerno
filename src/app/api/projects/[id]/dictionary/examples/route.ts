@@ -3,6 +3,8 @@ import { createHash } from "crypto";
 import { getAuth, requireProject } from "@/lib/auth";
 import { store } from "@/lib/store";
 import { extractSnippet } from "@/lib/engine/mention_filter";
+import { coRefers } from "@/lib/engine/observations";
+import { famTokens } from "@/lib/engine/dict_suggest";
 
 export const maxDuration = 60;
 
@@ -29,7 +31,7 @@ export async function GET(
   if (!name) return NextResponse.json({ error: "name required" }, { status: 400 });
 
   const cacheKey =
-    `dict_examples:v2:${id}:` +
+    `dict_examples:v3:${id}:` +
     createHash("sha256").update(`${name.toLowerCase()}|${parent.toLowerCase()}`).digest("hex");
   const hit = await store.cacheGet(cacheKey, 30 * 24 * 3600 * 1000);
   if (hit) return NextResponse.json(JSON.parse(hit));
@@ -37,9 +39,10 @@ export async function GET(
   const norm = (s: string) => s.trim().toLowerCase();
   const dict = await store.getDictionary(id);
   const parentEntry = dict.find((e) => norm(e.canonical) === norm(parent));
-  const parentTerms = parent
-    ? [norm(parent), ...(parentEntry?.aliases.map(norm) ?? [])]
-    : [];
+  const parentSeqs = (parent
+    ? [parent, ...(parentEntry?.aliases ?? [])]
+    : []
+  ).map(famTokens);
   const satTerm = norm(name);
 
   const rows = await store.listProjectBrandRows(id);
@@ -51,7 +54,8 @@ export async function GET(
     for (const b of r.brands) {
       const nb = norm(b);
       if (!hasSat && nb.includes(satTerm)) hasSat = true;
-      if (!hasParent && parentTerms.some((t) => nb.includes(t))) hasParent = true;
+      if (!hasParent && parentSeqs.length > 0 && coRefers(famTokens(nb), parentSeqs))
+        hasParent = true;
       if (hasSat && hasParent) break;
     }
     if (!hasSat) continue;

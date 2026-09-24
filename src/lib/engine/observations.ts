@@ -12,6 +12,20 @@ export function familyContains(hay: string[], seq: string[]): boolean {
   return hay[0] === seq[0] || hay.length <= 2;
 }
 
+/** Does a detected name refer to the same offering as any of the parent's
+ * name-forms? Token-contiguous containment in EITHER direction: the
+ * detected name may extend a parent form ("Amazon Prime Video 4K") or
+ * truncate it ("Amazon Prime", "Prime") - one-directional substring
+ * matching classified truncations as not-the-parent. Truncations go
+ * through familyContains so a stray trailing token can't claim a name. */
+export function coRefers(detectedTokens: string[], parentSeqs: string[][]): boolean {
+  for (const seq of parentSeqs) {
+    if (containsSeq(detectedTokens, seq)) return true;
+    if (familyContains(seq, detectedTokens)) return true;
+  }
+  return false;
+}
+
 /**
  * Brand observations, recomputable: per observed name, the number of answers
  * naming it, attributed to a dictionary entry by matchKey OR by family
