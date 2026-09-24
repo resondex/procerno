@@ -131,6 +131,10 @@ export default function IdentifyTab({
     { entryId: string; name: string; rationale: string }[]
   >([]);
   const [showAutoIgnored, setShowAutoIgnored] = useState(false);
+  // First paint races the suggestion pass: until it resolves, every pending
+  // name would flash in the tray un-sorted, then snap into place. The tray
+  // waits for the pass instead.
+  const [passDone, setPassDone] = useState(false);
   // Verbatim evidence popover: real answer snippets for a clicked pill,
   // split by whether the parent brand is named in the same answer.
   const [examples, setExamples] = useState<{
@@ -341,7 +345,10 @@ export default function IdentifyTab({
     const fresh = pendingEntries.filter(
       (e) => !suggestedFor.current.has(e.id)
     );
-    if (fresh.length === 0 || suggesting) return;
+    if (fresh.length === 0 || suggesting) {
+      if (fresh.length === 0 && !suggesting) setPassDone(true);
+      return;
+    }
     fresh.forEach((e) => suggestedFor.current.add(e.id));
     setSuggesting(true);
     (async () => {
@@ -440,6 +447,7 @@ export default function IdentifyTab({
         setSuggestSummary(summary);
       } finally {
         setSuggesting(false);
+        setPassDone(true);
       }
     })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -893,7 +901,7 @@ export default function IdentifyTab({
           )}
         </p>
       )}
-      {unplacedPending.length > 0 && !suggesting && (
+      {passDone && !suggesting && unplacedPending.length > 0 && (
         <div className="rounded-lg border border-dashed border-line p-3">
           <p className="text-xs text-ink-3 mb-2">
             New names — drag into a group:
