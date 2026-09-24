@@ -356,11 +356,52 @@ export default function IdentifyTab({
           return;
         }
         const suggestions: Suggestion[] = (await res.json()).suggestions ?? [];
-        const summary = { merged: 0, proposed: 0, ignored: 0 };
+        // Compute the whole placement plan PURELY, before any state update.
+        // (Collecting side effects inside the setBuckets updater ran on
+        // React's schedule, not ours - the ignore list was read while still
+        // empty and the engine-ignored names fell through to the tray.)
+        const activeIds = new Set(
+          dict.filter((e) => e.status === "active").map((e) => e.id)
+        );
+        const approveIds = new Set(
+          suggestions.filter(
+            (x) => x.action === "approve" && pendingEntries.some((e) => e.id === x.entryId)
+          ).map((x) => x.entryId)
+        );
+        const plans: { entry: DictionaryEntry; s: Suggestion; target: string | null }[] = [];
         const ignoredNow: { entryId: string; name: string; rationale: string }[] = [];
+        const summary = { merged: 0, proposed: 0, ignored: 0 };
+        for (const sug of suggestions) {
+          const entry = pendingEntries.find((e) => e.id === sug.entryId);
+          if (!entry) continue;
+          if (sug.action === "ignore") {
+            summary.ignored++;
+            ignoredNow.push({
+              entryId: entry.id,
+              name: entry.canonical,
+              rationale: sug.rationale ?? "",
+            });
+            continue;
+          }
+          const target =
+            sug.action === "merge" &&
+            sug.mergeIntoId &&
+            (activeIds.has(sug.mergeIntoId) || approveIds.has(sug.mergeIntoId))
+              ? sug.mergeIntoId
+              : null;
+          if (sug.action === "approve" || !target) summary.proposed++;
+          else summary.merged++;
+          plans.push({ entry, s: sug, target });
+        }
+        if (ignoredNow.length > 0) {
+          setAutoIgnored((prev) => [
+            ...prev.filter((x) => !ignoredNow.some((y) => y.entryId === x.entryId)),
+            ...ignoredNow,
+          ]);
+        }
         setBuckets((prev) => {
           const next = prev.map((b) => ({ ...b, pills: [...b.pills] }));
-          const mkPill = (entry: DictionaryEntry, s: Suggestion): Pill => ({
+          const mkPill = (entry: DictionaryEntry, sug: Suggestion): Pill => ({
             name: entry.canonical,
             norm: norm(entry.canonical),
             entryId: entry.id,
@@ -369,73 +410,33 @@ export default function IdentifyTab({
             locked: false,
             confirmed: false,
             moved: false,
-            ...(/- review\)/.test(s.rationale ?? "")
-              ? { note: s.rationale, noteTarget: s.mergeIntoName }
+            ...(/- review\)/.test(sug.rationale ?? "")
+              ? { note: sug.rationale, noteTarget: sug.mergeIntoName }
               : {}),
           });
           const placed = (id: string) =>
-            next.some((b) => b.pills.some((p) => p.entryId === id));
-          // Pass 1: approvals create their buckets FIRST, so a family
-          // child's merge target exists whatever order the list came in
-          // (the Vivo / Vivo X100 Pro split was this order dependence).
-          for (const s of suggestions) {
-            if (s.action !== "approve") continue;
-            const entry = pendingEntries.find((e) => e.id === s.entryId);
-            if (!entry || placed(entry.id)) continue;
-            summary.proposed++;
+            next.some((b) => b.pills.some((pp) => pp.entryId === id));
+          // Pass 1: approvals and target-less merges found their buckets, so
+          // family children have somewhere to land whatever the list order.
+          for (const { entry, s: sug, target } of plans) {
+            if (target || placed(entry.id)) continue;
             next.splice(next.length - 2, 0, {
               key: `new:${entry.id}`,
               kind: "new",
               entryId: entry.id,
               label: entry.canonical,
               originalLabel: entry.canonical,
-              pills: [mkPill(entry, s)],
+              pills: [mkPill(entry, sug)],
             });
           }
-          // Pass 2: merges, into actives or the buckets pass 1 created.
-          for (const s of suggestions) {
-            if (s.action !== "merge") continue;
-            const entry = pendingEntries.find((e) => e.id === s.entryId);
-            if (!entry || placed(entry.id)) continue;
-            const target = s.mergeIntoId
-              ? next.find((b) => b.entryId === s.mergeIntoId)
-              : undefined;
-            if (!target) {
-              summary.proposed++;
-              next.splice(next.length - 2, 0, {
-                key: `new:${entry.id}`,
-                kind: "new",
-                entryId: entry.id,
-                label: entry.canonical,
-                originalLabel: entry.canonical,
-                pills: [mkPill(entry, s)],
-              });
-            } else {
-              summary.merged++;
-              target.pills.push(mkPill(entry, s));
-            }
-          }
-          // Pass 3: engine-ignored names are NOT pills - they collapse
-          // behind the receipt line, recoverable via its reveal button.
-          for (const s of suggestions) {
-            if (s.action !== "ignore") continue;
-            const entry = pendingEntries.find((e) => e.id === s.entryId);
-            if (!entry || placed(entry.id)) continue;
-            summary.ignored++;
-            ignoredNow.push({
-              entryId: entry.id,
-              name: entry.canonical,
-              rationale: s.rationale ?? "",
-            });
+          // Pass 2: merges into actives or the buckets pass 1 created.
+          for (const { entry, s: sug, target } of plans) {
+            if (!target || placed(entry.id)) continue;
+            const b = next.find((x) => x.entryId === target);
+            if (b) b.pills.push(mkPill(entry, sug));
           }
           return next;
         });
-        if (ignoredNow.length > 0) {
-          setAutoIgnored((prev) => [
-            ...prev.filter((x) => !ignoredNow.some((y) => y.entryId === x.entryId)),
-            ...ignoredNow,
-          ]);
-        }
         setSuggestSummary(summary);
       } finally {
         setSuggesting(false);
