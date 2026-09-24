@@ -90,8 +90,9 @@ export function extractSnippet(
   const snippet = text
     .slice(start, end)
     .replace(/\[([^\]]+)\]\([^)]*\)/g, "$1")
-    .replace(/\*\*|__|`/g, "")
-    .replace(/(^|\s)[*#>-]+\s/g, "$1")
+    .replace(/\*+|`/g, "")
+    .replace(/(^|\s)_(\S[^_]*\S)_(?=\s|$)/g, "$1$2")
+    .replace(/(^|\s)[#>-]+\s/g, "$1")
     .replace(/\s*\|\s*/g, " · ")
     .replace(/\s+/g, " ")
     .replace(/^[·\s]+|[·\s]+$/g, "")

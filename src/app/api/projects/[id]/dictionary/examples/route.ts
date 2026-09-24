@@ -31,7 +31,7 @@ export async function GET(
   if (!name) return NextResponse.json({ error: "name required" }, { status: 400 });
 
   const cacheKey =
-    `dict_examples:v6:${id}:` +
+    `dict_examples:v7:${id}:` +
     createHash("sha256").update(`${name.toLowerCase()}|${parent.toLowerCase()}`).digest("hex");
   const hit = await store.cacheGet(cacheKey, 30 * 24 * 3600 * 1000);
   if (hit) return NextResponse.json(JSON.parse(hit));
