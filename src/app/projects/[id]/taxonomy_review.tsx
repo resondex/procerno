@@ -136,6 +136,20 @@ export default function TaxonomyReview({
   const [addText, setAddText] = useState("");
   const [expanded, setExpanded] = useState<string | null>(null);
   const [strongOpen, setStrongOpen] = useState(false);
+  // Expanding strong confidence freezes the scroller at its collapsed height
+  // (floor 320px, still capped at 62vh) so the list scrolls inside the box
+  // instead of growing the pipeline card - and a short codebook never gets
+  // padded with an empty fixed-height box.
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const [lockHeight, setLockHeight] = useState<number | null>(null);
+  const toggleStrong = () => {
+    if (!strongOpen) {
+      setLockHeight(Math.max(320, scrollRef.current?.offsetHeight ?? 0));
+    } else {
+      setLockHeight(null);
+    }
+    setStrongOpen(!strongOpen);
+  };
   const [moveMode, setMoveMode] = useState(false);
   const [moveSel, setMoveSel] = useState<Set<string>>(new Set());
   const [moveDest, setMoveDest] = useState("");
@@ -577,14 +591,17 @@ export default function TaxonomyReview({
 
       {/* One shared scroller holding two separate cards - each section header
           stays pinned while its own card scrolls, and the whole codebook is
-          one scrollbar. Fixed height, not max: expanding a section scrolls
-          inside the box instead of growing the page card. */}
-      <div className="h-[62vh] space-y-4 overflow-y-auto">
+          one scrollbar. */}
+      <div
+        ref={scrollRef}
+        className="max-h-[62vh] space-y-4 overflow-y-auto"
+        style={lockHeight ? { height: lockHeight } : undefined}
+      >
         <div className="overflow-clip rounded-lg border border-line">
         <button
           type="button"
           className="sticky top-0 z-10 flex w-full items-center gap-2 border-b border-line bg-surface px-3 py-2.5 text-left"
-          onClick={() => setStrongOpen(!strongOpen)}
+          onClick={toggleStrong}
         >
           <span className="rounded-full bg-success/10 px-2 py-0.5 text-xs font-semibold text-success">
             {strong.filter((c) => !state.rows[c.code]?.mergedInto).length} strong
