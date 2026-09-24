@@ -50,6 +50,8 @@ export default function IdentifyTab({
   dict,
   onApplied,
   observations,
+  hideConfirm,
+  registerConfirm,
 }: {
   projectId: string;
   dict: DictionaryEntry[];
@@ -57,6 +59,10 @@ export default function IdentifyTab({
   /** projects.brand_observations JSON - observed mention counts from the
    * discovery brands pass. Optional: without it the board renders unsized. */
   observations?: string | null;
+  /** Gate mode: the step footer owns the confirm button, so the board's own
+   * top-right one is hidden and confirmAll is handed up instead. */
+  hideConfirm?: boolean;
+  registerConfirm?: (fn: () => Promise<void>) => void;
 }) {
   // Observed sizing: entry_id-matched counts size the brand buckets; name
   // keys size the pending pills. Tier words, no raw numbers - preliminary
@@ -319,7 +325,12 @@ export default function IdentifyTab({
             confirmed: false,
             moved: false,
             ...(/- review\)/.test(s.rationale ?? "")
-              ? { note: s.rationale }
+              ? {
+                  note:
+                    `REVIEW - left here, answers naming "${entry.canonical}" count as ${s.mergeIntoName}. ` +
+                    `Drag to its own bucket to track it separately, or into Ignore to not count it. ` +
+                    `Why flagged: ${s.rationale}`,
+                }
               : {}),
           });
           const placed = (id: string) =>
@@ -675,6 +686,14 @@ export default function IdentifyTab({
     }
   }
 
+  // Latest confirmAll, handed to the gate footer once.
+  const confirmAllRef = useRef<() => Promise<void>>(async () => {});
+  confirmAllRef.current = confirmAll;
+  useEffect(() => {
+    registerConfirm?.(() => confirmAllRef.current());
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [registerConfirm]);
+
   const unconfirmedCount = buckets.reduce(
     (n, b) => n + b.pills.filter((p) => !p.confirmed || p.moved).length,
     0
@@ -760,25 +779,32 @@ export default function IdentifyTab({
             <span className="h-2.5 w-2.5 rounded-full border border-line bg-white" />{" "}
             moved this session
           </span>
+          <span className="inline-flex items-center gap-1.5">
+            <span className="h-2.5 w-2.5 rounded-full border-2 border-warning bg-danger/10" />{" "}
+            flagged for review — hover for what the merge means and the
+            measured reason
+          </span>
         </div>
-        <button
-          type="button"
-          onClick={confirmAll}
-          disabled={confirming || unconfirmedCount === 0}
-          className="btn-primary px-3 py-1.5 text-[13px] inline-flex items-center gap-2"
-        >
-          {confirming && (
-            <span
-              aria-hidden="true"
-              className="h-3.5 w-3.5 rounded-full border-2 border-white/30 border-t-white animate-spin"
-            />
-          )}
-          {confirming
-            ? "Saving…"
-            : unconfirmedCount > 0
-              ? `Confirm layout (${unconfirmedCount})`
-              : "All confirmed"}
-        </button>
+        {!hideConfirm && (
+          <button
+            type="button"
+            onClick={confirmAll}
+            disabled={confirming || unconfirmedCount === 0}
+            className="btn-primary px-3 py-1.5 text-[13px] inline-flex items-center gap-2"
+          >
+            {confirming && (
+              <span
+                aria-hidden="true"
+                className="h-3.5 w-3.5 rounded-full border-2 border-white/30 border-t-white animate-spin"
+              />
+            )}
+            {confirming
+              ? "Saving…"
+              : unconfirmedCount > 0
+                ? `Confirm layout (${unconfirmedCount})`
+                : "All confirmed"}
+          </button>
+        )}
       </div>
       {(showSorting || (suggestSummary && !suggesting)) && (
         <p className="text-[13px] text-ink-3">

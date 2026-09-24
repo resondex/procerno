@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import TrendChart from "./trend_chart";
 import RunResults from "./run_results";
@@ -1354,6 +1354,12 @@ function DictionaryGate({
   const [step, setStep] = useState<1 | 2 | 3>(1);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // The board's confirmAll, handed up so the footer's "Confirm layout"
+  // commits the layout before advancing.
+  const boardConfirm = useRef<(() => Promise<void>) | null>(null);
+  const registerBoardConfirm = useCallback((fn: () => Promise<void>) => {
+    boardConfirm.current = fn;
+  }, []);
   const confirm = async () => {
     setSaving(true);
     setError(null);
@@ -1415,6 +1421,8 @@ function DictionaryGate({
           dict={dictionary}
           onApplied={onApplied}
           observations={project.brand_observations}
+          hideConfirm
+          registerConfirm={registerBoardConfirm}
         />
       )}
       {step === 2 && (
@@ -1443,15 +1451,26 @@ function DictionaryGate({
           {error && <span className="text-xs text-danger">{error}</span>}
           {step < 3 ? (
             <button
-              className="rounded bg-primary px-4 py-2 text-sm font-medium text-white"
-              onClick={() => setStep((s) => (s + 1) as 2 | 3)}
+              className="rounded bg-primary px-4 py-2 text-sm font-medium text-white disabled:opacity-50"
+              disabled={saving}
+              onClick={async () => {
+                if (step === 1 && boardConfirm.current) {
+                  setSaving(true);
+                  try {
+                    await boardConfirm.current();
+                  } finally {
+                    setSaving(false);
+                  }
+                }
+                setStep((s) => (s + 1) as 2 | 3);
+              }}
               title={
                 step === 1 && pending > 0
                   ? `${pending} names still unsorted - they analyze as pending until sorted`
                   : undefined
               }
             >
-              Continue &rarr;
+              {step === 1 ? (saving ? "Saving\u2026" : "Confirm layout") : "Continue \u2192"}
             </button>
           ) : (
             <button
