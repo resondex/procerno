@@ -18,6 +18,9 @@ interface Pill {
   note?: string;
   /** The merge target the flag is about (drives the tooltip's wording). */
   noteTarget?: string | null;
+  /** Placed mechanically (family/variant) - collapses into a per-bucket
+   * "+N variants" chip until expanded. */
+  auto?: boolean;
 }
 
 interface Bucket {
@@ -117,6 +120,8 @@ export default function IdentifyTab({
     return () => clearTimeout(t);
   }, [suggesting]);
   const [confirming, setConfirming] = useState(false);
+  // Buckets whose mechanically-placed variant pills are expanded.
+  const [variantsOpen, setVariantsOpen] = useState<Set<string>>(new Set());
   const [dragNorm, setDragNorm] = useState<string | null>(null);
   const [suggestSummary, setSuggestSummary] = useState<{
     merged: number;
@@ -430,6 +435,9 @@ export default function IdentifyTab({
             ...(/- review\)/.test(sug.rationale ?? "")
               ? { note: sug.rationale, noteTarget: sug.mergeIntoName }
               : {}),
+            ...(/^(extends the tracked brand|variant of|follows )/.test(sug.rationale ?? "")
+              ? { auto: true }
+              : {}),
           });
           const placed = (id: string) =>
             next.some((b) => b.pills.some((pp) => pp.entryId === id));
@@ -496,6 +504,7 @@ export default function IdentifyTab({
       const moving = (groupMove ? src.pills : [pill]).map((p) => ({
         ...p,
         moved: true,
+        auto: false, // a hand-moved pill never re-collapses
       }));
       const movingNorms = new Set(moving.map((p) => p.norm));
       const next = prev
@@ -778,9 +787,34 @@ export default function IdentifyTab({
   }
 
   function bucketBody(b: Bucket) {
+    const open = variantsOpen.has(b.key);
+    const autos = b.pills.filter((p) => p.auto);
+    const shown = open ? b.pills : b.pills.filter((p) => !p.auto);
     return (
       <div className="flex flex-wrap gap-1.5 min-h-9 rounded-lg p-1 -m-1">
-        {b.pills.map((p) => (
+        {autos.length > 0 && (
+          <button
+            type="button"
+            onClick={() =>
+              setVariantsOpen((prev) => {
+                const next = new Set(prev);
+                if (next.has(b.key)) next.delete(b.key);
+                else next.add(b.key);
+                return next;
+              })
+            }
+            title={
+              open
+                ? "Collapse the auto-grouped variants"
+                : autos.slice(0, 6).map((p) => p.name).join(", ") +
+                  (autos.length > 6 ? ", …" : "")
+            }
+            className="inline-flex items-center rounded-full border border-line bg-white/60 px-2.5 py-1 text-[12px] font-medium text-ink-3 hover:text-ink hover:border-ink-3"
+          >
+            {open ? "collapse variants" : `+${autos.length} variant${autos.length === 1 ? "" : "s"}`}
+          </button>
+        )}
+        {shown.map((p) => (
           <span
             key={p.norm}
             draggable={!p.locked}

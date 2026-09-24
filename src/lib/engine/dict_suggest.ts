@@ -83,6 +83,18 @@ export interface FamilyPlan {
 
 export const famTokens = (s: string) => norm(s).split(/[^a-z0-9+]+/).filter(Boolean);
 
+/** Alternate-name forms declared inside a tracked name's parenthetical:
+ * "Max (HBO)" -> [max], [hbo]; "GitHub (Issues/Projects)" -> [github],
+ * [issues projects], [issues], [projects]. */
+export function declaredForms(name: string): string[][] {
+  const m = name.match(/^(.*?)\s*\(([^)]+)\)\s*$/);
+  if (!m) return [];
+  const out = [m[1], m[2], ...m[2].split("/")]
+    .map((x) => famTokens(x))
+    .filter((t) => t.length > 0);
+  return out;
+}
+
 export function containsSeq(hay: string[], needle: string[]): boolean {
   if (needle.length === 0 || needle.length > hay.length) return false;
   outer: for (let i = 0; i + needle.length <= hay.length; i++) {
@@ -299,7 +311,15 @@ export async function getDictionarySuggestions(
             const tgtToks = famTokens(v.merge_into ?? "");
             if (containsSeq(tgtToks, satToks)) {
               const leading = satToks.every((t, i) => tgtToks[i] === t);
-              const verdict: CachedVerdict = leading
+              // A parenthetical in the tracked name is a DECLARED alternate
+              // ("Max (HBO)" says HBO is this brand): exact match to it
+              // merges silently, same as a leading maker-prefix.
+              const declared = declaredForms(v.merge_into ?? "").some(
+                (seq) =>
+                  seq.length === satToks.length &&
+                  seq.every((t, i) => t === satToks[i])
+              );
+              const verdict: CachedVerdict = leading || declared
                 ? v
                 : {
                     ...v,
