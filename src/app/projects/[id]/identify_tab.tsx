@@ -147,6 +147,11 @@ export default function IdentifyTab({
   // Buckets whose mechanically-placed variant pills are expanded.
   const [variantsOpen, setVariantsOpen] = useState<Set<string>>(new Set());
   const [dragNorm, setDragNorm] = useState<string | null>(null);
+  // The flagged-pill tooltip is React state, not CSS :hover - hover state
+  // goes stale in Chrome when the pill list reflows under the cursor
+  // (after a drag or a re-render), which left tooltips stuck open, several
+  // at once. State guarantees at most ONE, cleared on any drag.
+  const [hoverNote, setHoverNote] = useState<string | null>(null);
   const [suggestSummary, setSuggestSummary] = useState<{
     merged: number;
     proposed: number;
@@ -1088,8 +1093,15 @@ export default function IdentifyTab({
             onDragStart={(e) => {
               e.dataTransfer.setData("text/pill", p.norm);
               setDragNorm(p.norm);
+              setHoverNote(null);
             }}
             onDragEnd={() => setDragNorm(null)}
+            onMouseEnter={p.note ? () => setHoverNote(p.norm) : undefined}
+            onMouseLeave={
+              p.note
+                ? () => setHoverNote((cur) => (cur === p.norm ? null : cur))
+                : undefined
+            }
             title={
               p.note
                 ? undefined
@@ -1109,7 +1121,7 @@ export default function IdentifyTab({
                 : p.confirmed
                   ? "bg-primary-soft border-primary/30 text-primary"
                   : "bg-danger/10 border-danger/30 text-danger"
-            } ${p.note ? "group relative !bg-amber-400/15 !border-amber-500/50 !text-amber-800" : ""} ${dragNorm === p.norm ? "opacity-40" : ""}`}
+            } ${p.note ? "relative !bg-amber-400/15 !border-amber-500/50 !text-amber-800" : ""} ${dragNorm === p.norm ? "opacity-40" : ""}`}
             onClick={
               p.note
                 ? () => openExamples(p.name, p.noteTarget ?? null)
@@ -1138,8 +1150,8 @@ export default function IdentifyTab({
                     : `· ${autos.length} grouped name${autos.length === 1 ? "" : "s"}`}
                 </span>
               )}
-            {p.note && (
-              <span className="pointer-events-none absolute left-0 top-full z-30 mt-1.5 hidden w-72 rounded-lg border border-line bg-surface p-3 text-left shadow-lg group-hover:block">
+            {p.note && hoverNote === p.norm && (
+              <span className="pointer-events-none absolute left-0 top-full z-30 mt-1.5 block w-72 rounded-lg border border-line bg-surface p-3 text-left shadow-lg">
                 <span className="block text-[11px] font-semibold uppercase tracking-wide text-amber-800">
                   Flagged for review
                 </span>
