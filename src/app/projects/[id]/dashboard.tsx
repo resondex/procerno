@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import Link from "next/link";
 import TrendChart from "./trend_chart";
 import RunResults from "./run_results";
@@ -1201,7 +1201,14 @@ function AnalysisSettings({
         >
           {e.aliases.length > 0 ? `${e.aliases.length} name form${e.aliases.length === 1 ? "" : "s"}` : ""}
         </span>
-        {inAnalysis ? (
+        {isTargetEntry(e) ? (
+          <span
+            title="Your brand is always in analysis"
+            className="w-24 rounded-full border border-line bg-primary-soft px-2.5 py-1 text-center text-[11px] font-semibold text-primary"
+          >
+            Always in
+          </span>
+        ) : inAnalysis ? (
           <button
             type="button"
             onClick={() => dictAction(e.id, "reject")}
@@ -1375,7 +1382,28 @@ function DictionaryGate({
   onBackToCodebook: () => void;
   dictAction: (entryId: string, action: "approve" | "reject") => Promise<void>;
 }) {
-  const [step, setStep] = useState<1 | 2 | 3>(1);
+  // Step survives a reload: a browser refresh mid-gate must land the user
+  // back where they were, not restart the walkthrough. Per-project key;
+  // storage can throw (private windows), so every touch is guarded.
+  const stepKey = `dict_gate_step:${id}`;
+  const [step, rawSetStep] = useState<1 | 2 | 3>(1);
+  // Restore before first paint (layout effect) so the server-rendered step-1
+  // markup never flashes and hydration stays clean.
+  useLayoutEffect(() => {
+    try {
+      const s = Number(window.localStorage.getItem(stepKey));
+      if (s === 2 || s === 3) rawSetStep(s);
+    } catch {}
+  }, [stepKey]);
+  const setStep = useCallback(
+    (s: 1 | 2 | 3) => {
+      rawSetStep(s);
+      try {
+        window.localStorage.setItem(stepKey, String(s));
+      } catch {}
+    },
+    [stepKey]
+  );
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   // The board's confirmAll, handed up so the footer's "Confirm layout"
@@ -1396,6 +1424,9 @@ function DictionaryGate({
       setError(j?.error ?? `save failed (${res.status})`);
       return;
     }
+    try {
+      window.localStorage.removeItem(stepKey);
+    } catch {}
     onConfirmed();
   };
   // Step 1's back button leaves the gate: reopen the codebook (the stored
@@ -1466,7 +1497,7 @@ function DictionaryGate({
         <button
           className="rounded border border-line px-4 py-2 text-sm font-medium text-ink hover:border-ink-3 disabled:opacity-50"
           onClick={() =>
-            step > 1 ? setStep((s) => (s - 1) as 1 | 2) : backToCodebook()
+            step > 1 ? setStep((step - 1) as 1 | 2) : backToCodebook()
           }
           disabled={saving}
         >
@@ -1487,7 +1518,7 @@ function DictionaryGate({
                     setSaving(false);
                   }
                 }
-                setStep((s) => (s + 1) as 2 | 3);
+                setStep((step + 1) as 2 | 3);
               }}
               title={
                 step === 1 && pending > 0

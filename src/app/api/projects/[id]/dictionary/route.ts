@@ -3,6 +3,7 @@ import { z } from "zod";
 import { store } from "@/lib/store";
 import { refreshBrandObservations } from "@/lib/engine/observations";
 import { requireAuth, requireProject } from "@/lib/auth";
+import { matchKey } from "@/lib/brand_key";
 
 export async function GET(
   _req: Request,
@@ -100,7 +101,11 @@ async function ensureOtherEntry(projectId: string) {
   });
 }
 
-async function applyAction(projectId: string, a: Action): Promise<string | null> {
+async function applyAction(
+  projectId: string,
+  a: Action,
+  targetBrand?: string
+): Promise<string | null> {
   if (a.action === "confirm") {
     if (!a.names || a.names.length === 0) return "confirm needs names";
     await store.confirmDictionaryNames(projectId, a.names);
@@ -119,6 +124,20 @@ async function applyAction(projectId: string, a: Action): Promise<string | null>
   const entry = entries.find((e) => e.id === a.entryId);
   if (!entry) return `entry not found: ${a.entryId}`;
 
+  // The target brand's entry is the one row the whole tracker exists to
+  // measure - no client action may reject it or merge it away. This guard
+  // exists because a UI defect once rejected American Express itself
+  // (2026-09-24): whatever the client sends, the server refuses here.
+  if (
+    targetBrand &&
+    (a.action === "reject" || a.action === "merge" || a.action === "merge_other")
+  ) {
+    const tk = matchKey(targetBrand);
+    if (matchKey(entry.canonical) === tk || entry.aliases.some((al) => matchKey(al) === tk)) {
+      return `refused: "${entry.canonical}" is the target brand and cannot be ${a.action === "reject" ? "rejected" : "merged away"}`;
+    }
+  }
+
   if (a.action === "set_parent") {
     await store.setDictionaryParent(entry.id, a.parent ?? null);
     return null;
@@ -133,11 +152,11 @@ async function applyAction(projectId: string, a: Action): Promise<string | null>
   if (a.action === "merge_other") {
     const other = await ensureOtherEntry(projectId);
     if (other.id === entry.id) return null;
-    return applyAction(projectId, {
-      entryId: entry.id,
-      action: "merge",
-      mergeIntoId: other.id,
-    });
+    return applyAction(
+      projectId,
+      { entryId: entry.id, action: "merge", mergeIntoId: other.id },
+      targetBrand
+    );
   }
 
   if (a.action === "promote_alias") {
@@ -310,7 +329,7 @@ export async function POST(
   ];
   const errors: string[] = [];
   for (const a of ordered) {
-    const err = await applyAction(id, a);
+    const err = await applyAction(id, a, project.brand);
     if (err) errors.push(err);
   }
   const version = await store.bumpDictionaryVersion(id);

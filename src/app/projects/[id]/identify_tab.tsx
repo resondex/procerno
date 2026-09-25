@@ -107,8 +107,13 @@ export default function IdentifyTab({
   };
   const bucketSize = (b: { entryId: string | null }) =>
     b.entryId && obsByEntry.has(b.entryId) ? obsByEntry.get(b.entryId)! : null;
-  const roleOf = (entryId: string | null) =>
-    dict.find((e) => e.id === entryId)?.role ?? null;
+  // "your brand" is an identity fact (the project's target), never a role
+  // default - a null-role competitor must not wear the chip.
+  const isTargetBucket = (b: Bucket) =>
+    !!targetBrand &&
+    b.pills.some(
+      (p) => p.kind === "canonical" && norm(p.name) === norm(targetBrand)
+    );
   const [buckets, setBuckets] = useState<Bucket[]>([]);
   const [suggesting, setSuggesting] = useState(false);
   // Delayed indicator: cached suggestions resolve in <1s — flashing
@@ -736,6 +741,9 @@ export default function IdentifyTab({
         } else {
           for (const p of b.pills) {
             if (p.homeStatus === "rejected" || covered(p)) continue;
+            // The target brand can never be rejected, whatever bucket its
+            // pill sits in (the server refuses this too).
+            if (targetBrand && norm(p.name) === norm(targetBrand)) continue;
             if (p.kind === "alias") {
               moves.push({
                 entryId: p.entryId,
@@ -1131,15 +1139,7 @@ export default function IdentifyTab({
       <div className="grid gap-3 sm:grid-cols-2">
         {buckets
           .filter((b) => b.kind === "brand")
-          .sort((a, b) => {
-            const isT = (x: Bucket) =>
-              !!targetBrand &&
-              x.pills.some(
-                (p) =>
-                  p.kind === "canonical" && norm(p.name) === norm(targetBrand)
-              );
-            return Number(isT(b)) - Number(isT(a));
-          })
+          .sort((a, b) => Number(isTargetBucket(b)) - Number(isTargetBucket(a)))
           .map((b) => (
             <div key={b.key} className="card p-4" {...dropProps(b.key)}>
               <input
@@ -1157,9 +1157,9 @@ export default function IdentifyTab({
               {obs && (
                 <div className="mb-2 -mt-1 flex items-center gap-2">
                   <span
-                    className={`rounded-full px-2 py-0.5 text-[10px] font-semibold ${roleOf(b.entryId) === "competitor" ? "bg-line text-ink-2" : "bg-primary/10 text-primary"}`}
+                    className={`rounded-full px-2 py-0.5 text-[10px] font-semibold ${isTargetBucket(b) ? "bg-primary/10 text-primary" : "bg-line text-ink-2"}`}
                   >
-                    {roleOf(b.entryId) === "competitor" ? "competitor" : "your brand"}
+                    {isTargetBucket(b) ? "your brand" : "competitor"}
                   </span>
                   {bucketSize(b) !== null ? (
                     <span
