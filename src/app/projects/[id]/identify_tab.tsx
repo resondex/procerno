@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { DictionaryEntry } from "@/lib/types";
 import { matchKey } from "@/lib/brand_key";
+import { flaggedIgnorePrefix, ignoreSurfaces } from "@/lib/ignore_rules";
 
 const OTHER_CANONICAL = "Other";
 
@@ -462,7 +463,7 @@ export default function IdentifyTab({
             obs && obs.rows > 0
               ? (obsByName.get(norm(e.canonical)) ?? 0) / obs.rows
               : 0;
-          if (share >= 0.1) continue;
+          if (ignoreSurfaces(s.rationale, share) !== "fold") continue;
           rejFold.push({
             entryId: e.id,
             name: e.canonical,
@@ -495,15 +496,17 @@ export default function IdentifyTab({
           if (!entry) continue;
           if (sug.action === "ignore") {
             summary.ignored++;
-            // Volume escalation: an ignore verdict on a name observed in
-            // >=10% of answers is where a wrong call is costly - it renders
-            // as a flagged pill in Ignore instead of vanishing into the
-            // receipt, so it gets one deliberate look.
+            // The silent receipt is reserved for the model's direct
+            // out-of-category calls: own-context guard flips, inherited
+            // family ignores above a small floor, and high-volume names
+            // all surface as flagged pills for one deliberate look (the
+            // shared ignoreSurfaces rule - Pluto TV once vanished behind
+            // the receipt by inheriting its own short form's ignore).
             const share =
               obs && obs.rows > 0
                 ? (obsByName.get(norm(entry.canonical)) ?? 0) / obs.rows
                 : 0;
-            if (share < 0.1) {
+            if (ignoreSurfaces(sug.rationale, share) === "fold") {
               ignoredNow.push({
                 entryId: entry.id,
                 name: entry.canonical,
@@ -515,7 +518,7 @@ export default function IdentifyTab({
               entry,
               s: {
                 ...sug,
-                rationale: `Ignored by rule, but named in ${Math.round(share * 100)}% of answers - confirm this is scenery, or drag it out to track it. ${sug.rationale ?? ""} - review)`,
+                rationale: `${flaggedIgnorePrefix(sug.rationale, share)} ${sug.rationale ?? ""} - review)`,
               },
               target: "__ignore__",
             });

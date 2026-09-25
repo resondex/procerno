@@ -1,6 +1,7 @@
 import { createHash } from "crypto";
 import { store } from "../store";
 import { matchKey } from "../brand_key";
+import { ignoreSurfaces } from "../ignore_rules";
 import { extractSnippet, extractSnippetExcluding } from "./mention_filter";
 import { containsSeq, famTokens, type DictSuggestion } from "./dict_suggest";
 import { evidenceOwner } from "./observations";
@@ -178,7 +179,13 @@ export async function prewarmDictionaryExamples(
   for (const s of suggestions) {
     if (/- review\)/.test(s.rationale ?? "")) {
       targets.push({ name: s.name, parent: s.mergeIntoName });
-    } else if (s.action === "ignore" && share(s.name) >= 0.1) {
+    } else if (
+      s.action === "ignore" &&
+      ignoreSurfaces(s.rationale, share(s.name)) === "flag"
+    ) {
+      // Every ignore the shared rule surfaces as a flagged pill (own-context
+      // flips, inherited ignores above the floor, high-volume names) invites
+      // an examples click - warm it.
       targets.push({ name: s.name, parent: null });
     }
   }

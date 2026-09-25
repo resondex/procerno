@@ -12,6 +12,7 @@ import {
   type EngineOption,
 } from "@/app/components/engine_picker";
 import { matchKey } from "@/lib/brand_key";
+import { ignoreSurfaces } from "@/lib/ignore_rules";
 import type {
   DictionaryEntry,
   Project,
@@ -1185,7 +1186,7 @@ function AnalysisSettings({
       obs && obs.rows > 0
         ? (obsShareByName.get(e.canonical.trim().toLowerCase()) ?? 0) / obs.rows
         : 0;
-    return share < 0.1;
+    return ignoreSurfaces(s.rationale, share) === "fold";
   };
   const autoHiddenCount = dict.filter(
     (e) => !aliasOwnerKeys.has(matchKey(e.canonical)) && isAutoHidden(e)
