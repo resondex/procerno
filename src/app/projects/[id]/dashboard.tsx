@@ -1077,158 +1077,177 @@ function AnalysisSettings({
   dictAction: (entryId: string, action: "approve" | "reject") => Promise<void>;
   refreshDict: () => Promise<void>;
 }) {
+  // Observed reach per entry: entry_id join plus name-key fallback, so
+  // promotions after the aggregation snapshot still show their numbers.
+  const obs = (() => {
+    try {
+      return project.brand_observations
+        ? (JSON.parse(project.brand_observations) as {
+            rows: number;
+            observed: { name: string; entry_id: string | null; answers: number }[];
+          })
+        : null;
+    } catch {
+      return null;
+    }
+  })();
+  const reachOf = (e: DictionaryEntry) => {
+    if (!obs) return 0;
+    const keys = new Set([matchKey(e.canonical), ...e.aliases.map((a) => matchKey(a))]);
+    return obs.observed
+      .filter((o) => o.entry_id === e.id || (o.entry_id === null && keys.has(matchKey(o.name))))
+      .reduce((s, o) => s + o.answers, 0);
+  };
+  const tierOf = (n: number) => {
+    const f = n / (obs?.rows || 1);
+    return f >= 0.3
+      ? { label: "DOMINANT", cls: "text-primary" }
+      : f >= 0.1
+        ? { label: "MAJOR", cls: "text-ink" }
+        : f >= 0.02
+          ? { label: "COMMON", cls: "text-ink-2" }
+          : n > 0
+            ? { label: "OCCASIONAL", cls: "text-ink-3" }
+            : { label: "NOT SEEN", cls: "text-ink-3" };
+  };
+  const brandNorm = project.brand.trim().toLowerCase();
+  const legacyComp = new Set(project.competitors.map((c) => c.trim().toLowerCase()));
+  const isTargetEntry = (e: DictionaryEntry) =>
+    e.canonical.trim().toLowerCase() === brandNorm || e.aliases.includes(brandNorm);
+  const isCompetitor = (e: DictionaryEntry) =>
+    e.role ? e.role === "competitor" : legacyComp.has(e.canonical.trim().toLowerCase());
+
+  // Merge remnants live on as aliases elsewhere - never rows here.
+  const aliasOwnerKeys = new Set(
+    dict.filter((x) => x.status !== "rejected").flatMap((x) => x.aliases.map((a) => matchKey(a)))
+  );
+  const rows = dict.filter(
+    (e) =>
+      e.status !== "pending" &&
+      e.canonical !== "Other" &&
+      (e.status !== "rejected" || !aliasOwnerKeys.has(matchKey(e.canonical)))
+  );
+  const active = rows
+    .filter((e) => e.status === "active")
+    .map((e) => ({ e, reach: reachOf(e) }))
+    .sort((a, b) => b.reach - a.reach);
+  const excluded = rows
+    .filter((e) => e.status === "rejected")
+    .map((e) => ({ e, reach: reachOf(e) }))
+    .sort((a, b) => b.reach - a.reach);
+  const parents = [...new Set(active.map(({ e }) => e.parent).filter((p): p is string => !!p))];
+  const maxReach = Math.max(1, ...active.map((x) => x.reach));
+
+  const row = ({ e, reach }: { e: DictionaryEntry; reach: number }) => {
+    const tier = tierOf(reach);
+    const inAnalysis = e.status === "active";
+    return (
+      <div
+        key={e.id}
+        className={`grid grid-cols-[minmax(0,1.4fr)_auto_minmax(0,1fr)_auto_auto] items-center gap-3 border-b border-line/60 py-2 text-sm ${inAnalysis ? "" : "opacity-60"}`}
+      >
+        <div className="min-w-0 flex items-center gap-2">
+          <span className={`truncate font-medium ${inAnalysis ? "" : "line-through text-ink-3"}`}>
+            {e.display_name ?? e.canonical}
+          </span>
+          {isTargetEntry(e) ? (
+            <span className="shrink-0 rounded-full bg-primary-soft px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-primary">
+              you
+            </span>
+          ) : (
+            inAnalysis && (
+              <button
+                type="button"
+                title={
+                  isCompetitor(e)
+                    ? "Tracked competitor — click to demote to discovered"
+                    : "Discovered by the model — click to track as a competitor"
+                }
+                onClick={async () => {
+                  await fetch(`/api/projects/${id}/dictionary`, {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({
+                      entryId: e.id,
+                      action: "set_role",
+                      role: isCompetitor(e) ? "emerged" : "competitor",
+                    }),
+                  });
+                  await refreshDict();
+                }}
+                className={`shrink-0 rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide ${
+                  isCompetitor(e)
+                    ? "bg-ink/10 text-ink"
+                    : "border border-line text-ink-3 hover:text-ink hover:border-ink-3"
+                }`}
+              >
+                {isCompetitor(e) ? "competitor" : "discovered"}
+              </button>
+            )
+          )}
+        </div>
+        <span className={`w-20 text-right text-[10px] font-bold tracking-wide ${tier.cls}`}>
+          {tier.label}
+        </span>
+        <div className="h-1 min-w-10 overflow-hidden rounded-full bg-line/60">
+          <div
+            className="h-full rounded-full bg-primary/50"
+            style={{ width: `${Math.max(reach > 0 ? 4 : 0, (reach / maxReach) * 100)}%` }}
+          />
+        </div>
+        <span
+          className="w-24 text-right text-xs text-ink-3"
+          title={e.aliases.slice(0, 12).join(", ") + (e.aliases.length > 12 ? ", …" : "")}
+        >
+          {e.aliases.length > 0 ? `${e.aliases.length} name form${e.aliases.length === 1 ? "" : "s"}` : ""}
+        </span>
+        <button
+          type="button"
+          onClick={() => dictAction(e.id, inAnalysis ? "reject" : "approve")}
+          className={`w-24 rounded-full border px-2.5 py-1 text-[11px] font-semibold ${
+            inAnalysis
+              ? "border-primary/30 bg-primary-soft text-primary hover:opacity-80"
+              : "border-line text-ink-3 hover:border-ink-3 hover:text-ink"
+          }`}
+        >
+          {inAnalysis ? "In analysis" : "Include"}
+        </button>
+      </div>
+    );
+  };
+
   return (
-    <>
-      <p className="text-[13px] text-ink-3 mb-4 -mt-1">
-        Every grouping and whether it counts in the analysis, filed under its
-        parent company. Excluded groupings stay in the raw data and can be
-        re-included at any time - the metrics recompute retroactively.
+    <div className="grid gap-4">
+      <p className="text-[13px] text-ink-3 -mt-1">
+        Every grouping, sized by how many answers actually name it. Excluded
+        groupings stay in the raw data and can be re-included at any time -
+        the metrics recompute retroactively.
       </p>
-              {(() => {
-                // Merge remnants live on as aliases of an active grouping —
-                // they are not their own row anymore.
-                const rows = dict
-                  .filter((e) => e.status !== "pending")
-                  .filter((e) => {
-                    if (e.status !== "rejected") return true;
-                    const k = matchKey(e.canonical);
-                    return !dict.some(
-                      (x) =>
-                        x.status !== "rejected" &&
-                        x.aliases.some((a) => matchKey(a) === k)
-                    );
-                  })
-                  .sort((a, b) => a.canonical.localeCompare(b.canonical));
-                const active = rows.filter((e) => e.status === "active");
-                const excluded = rows.filter((e) => e.status === "rejected");
-                const parents = [
-                  ...new Set(
-                    active
-                      .map((e) => e.parent)
-                      .filter((p): p is string => !!p)
-                  ),
-                ].sort((a, b) => a.localeCompare(b));
-                const brandNorm = project.brand.trim().toLowerCase();
-                const legacyComp = new Set(
-                  project.competitors.map((c) => c.trim().toLowerCase())
-                );
-                const isTargetEntry = (e: DictionaryEntry) =>
-                  e.canonical.trim().toLowerCase() === brandNorm ||
-                  e.aliases.includes(brandNorm);
-                const isCompetitor = (e: DictionaryEntry) =>
-                  e.role
-                    ? e.role === "competitor"
-                    : legacyComp.has(e.canonical.trim().toLowerCase());
-                const row = (e: DictionaryEntry, indent = false) => (
-                  <div
-                    key={e.id}
-                    className={`flex items-center gap-3 text-sm border-b border-line/60 py-2 ${indent ? "ml-5" : ""}`}
-                  >
-                    <input
-                      type="checkbox"
-                      checked={e.status === "active"}
-                      onChange={() =>
-                        dictAction(
-                          e.id,
-                          e.status === "active" ? "reject" : "approve"
-                        )
-                      }
-                      className="h-4 w-4 accent-[var(--color-primary)] cursor-pointer"
-                    />
-                    <span
-                      className={`font-medium ${e.status === "active" ? "" : "text-ink-3 line-through"}`}
-                    >
-                      {e.display_name ?? e.canonical}
-                    </span>
-                    {isTargetEntry(e) ? (
-                      <span className="shrink-0 rounded-full bg-primary-soft px-2 py-0.5 text-[11px] font-semibold uppercase tracking-wide text-primary">
-                        you
-                      </span>
-                    ) : (
-                      e.status === "active" &&
-                      e.canonical !== "Other" && (
-                        <button
-                          type="button"
-                          title={
-                            isCompetitor(e)
-                              ? "Tracked competitor — click to demote to discovered"
-                              : "Discovered by the model — click to track as a competitor"
-                          }
-                          onClick={async () => {
-                            await fetch(`/api/projects/${id}/dictionary`, {
-                              method: "POST",
-                              headers: {
-                                "Content-Type": "application/json",
-                              },
-                              body: JSON.stringify({
-                                entryId: e.id,
-                                action: "set_role",
-                                role: isCompetitor(e)
-                                  ? "emerged"
-                                  : "competitor",
-                              }),
-                            });
-                            await refreshDict();
-                          }}
-                          className={`shrink-0 rounded-full px-2 py-0.5 text-[11px] font-semibold uppercase tracking-wide ${
-                            isCompetitor(e)
-                              ? "bg-ink/10 text-ink"
-                              : "border border-line text-ink-3 hover:text-ink hover:border-ink-3"
-                          }`}
-                        >
-                          {isCompetitor(e) ? "competitor" : "discovered"}
-                        </button>
-                      )
-                    )}
-                    {e.aliases.length > 0 && (
-                      <span className="text-xs text-ink-3 truncate flex-1">
-                        groups: {e.aliases.join(", ")}
-                      </span>
-                    )}
-                  </div>
-                );
-                return (
-                  <div className="grid gap-4">
-                    {parents.map((p) => (
-                      <div key={p}>
-                        <p className="text-xs font-semibold uppercase tracking-wide text-ink-3 mb-1">
-                          {p}
-                        </p>
-                        <div className="grid gap-1">
-                          {active
-                            .filter((e) => e.parent === p)
-                            .map((e) => row(e, true))}
-                        </div>
-                      </div>
-                    ))}
-                    <div>
-                      {parents.length > 0 && (
-                        <p className="text-xs font-semibold uppercase tracking-wide text-ink-3 mb-1">
-                          Independent — each its own parent company
-                        </p>
-                      )}
-                      <div className="grid gap-1">
-                        {active
-                          .filter((e) => !e.parent)
-                          .map((e) => row(e, parents.length > 0))}
-                      </div>
-                    </div>
-                    {excluded.length > 0 && (
-                      <div>
-                        <p className="text-xs font-semibold uppercase tracking-wide text-ink-3 mb-1">
-                          Excluded from analysis
-                        </p>
-                        <div className="grid gap-1">
-                          {excluded.map((e) => row(e, parents.length > 0))}
-                        </div>
-                      </div>
-                    )}
-                  </div>
-                );
-              })()}
-    </>
+      {parents.map((par) => (
+        <div key={par}>
+          <p className="section-label mb-1">{par}</p>
+          <div>{active.filter(({ e }) => e.parent === par).map(row)}</div>
+        </div>
+      ))}
+      <div>
+        {parents.length > 0 && (
+          <p className="section-label mb-1">Independent</p>
+        )}
+        <div>{active.filter(({ e }) => !e.parent).map(row)}</div>
+      </div>
+      {excluded.length > 0 && (
+        <details>
+          <summary className="cursor-pointer text-xs text-ink-3 hover:text-ink">
+            {excluded.length} grouping{excluded.length === 1 ? "" : "s"} excluded
+            from analysis - view or re-include
+          </summary>
+          <div className="mt-2">{excluded.map(row)}</div>
+        </details>
+      )}
+    </div>
   );
 }
+
 
 function PipelineNext({
   id,
