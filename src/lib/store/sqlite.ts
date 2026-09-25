@@ -845,6 +845,20 @@ export const sqliteStore: Store = {
     return row?.value ?? null;
   },
 
+  async cacheGetMany(keys, maxAgeMs) {
+    if (keys.length === 0) return new Map<string, string>();
+    const cutoff = new Date(Date.now() - maxAgeMs)
+      .toISOString()
+      .slice(0, 19)
+      .replace("T", " ");
+    const rows = getDb()
+      .prepare(
+        `SELECT key, value FROM llm_cache WHERE key IN (${keys.map(() => "?").join(",")}) AND created_at > ?`
+      )
+      .all(...keys, cutoff) as { key: string; value: string }[];
+    return new Map(rows.map((r) => [r.key, r.value]));
+  },
+
   async cacheSet(key, value, meta) {
     const brand = meta?.brand?.trim().toLowerCase() || null;
     const category = meta?.category?.trim().toLowerCase() || null;

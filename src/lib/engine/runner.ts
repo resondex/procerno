@@ -1,4 +1,5 @@
 import { store } from "../store";
+import { cleanSurface } from "../brand_key";
 import { tagCosts, withCostContext } from "../cost_log";
 import {
   coderUsageAccumulator,
@@ -573,13 +574,17 @@ export async function finalizeRun(runId: string): Promise<void> {
       store.listMentionsForRun(runId),
       store.listResponses(runId),
     ]);
+    // cleanSurface, same as the observations queue path - a mention's "®"
+    // or doubled spaces must not become part of a pill's name.
     await store.queueDictionaryCandidates(project.id, [
-      ...new Set([
-        ...runMentions.map((m) => m.brand),
-        ...runResponses
-          .map((r) => r.top_pick_brand)
-          .filter((b): b is string => Boolean(b)),
-      ]),
+      ...new Set(
+        [
+          ...runMentions.map((m) => m.brand),
+          ...runResponses
+            .map((r) => r.top_pick_brand)
+            .filter((b): b is string => Boolean(b)),
+        ].map(cleanSurface)
+      ),
     ]);
     const dict = await store.getDictionary(project.id);
     const pendingEntries = dict.filter((e) => e.status === "pending");

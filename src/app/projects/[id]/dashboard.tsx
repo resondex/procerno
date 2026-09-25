@@ -134,15 +134,6 @@ export default function ProjectDashboard({
     setDictVersion((v) => v + 1);
   }
 
-  async function dictAction(entryId: string, action: "approve" | "reject") {
-    await fetch(`/api/projects/${id}/dictionary`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ entryId, action }),
-    });
-    await refreshDict();
-  }
-
   async function setFlag(
     flags: { evidenceDrawer?: boolean; humanOverride?: boolean }
   ) {
@@ -207,10 +198,25 @@ export default function ProjectDashboard({
     detail?.runs.find((r) => r.status === "pending" || r.status === "running" || r.status === "collected")
       ?.id ?? null;
 
+  // The pipeline card is waiting on a HUMAN (codebook or brands gate) -
+  // nothing changes server-side until they act, and every action refreshes
+  // through its own handler, so the background poll pauses instead of
+  // asking the same question every 2.5s for the length of a review session.
+  const humanGated =
+    detail?.runs.find((r) => r.id === activeRunId)?.status === "collected" &&
+    ((detail?.project.taxonomy_status ?? "pending") === "proposed" ||
+      ((detail?.project.taxonomy_status ?? "pending") === "ratified" &&
+        detail?.project.dictionary_status !== "confirmed"));
+  // Last run status the poll saw - a CHANGE is what triggers the heavy
+  // refresh, so every transition lands (running -> collected used to slip
+  // through: the tick only refreshed on terminal states, and the codebook
+  // proposal never appeared without a manual reload).
+  const polledStatus = useRef<string | null>(null);
+
   // Live progress is a LIGHT poll: one tiny request for the counter. The
-  // heavy refresh (dictionary included) runs on load, on completion, and
-  // after edits — never on the tick, so an open Identify board can't have
-  // its in-progress layout reset by background polling.
+  // heavy refresh (dictionary included) runs on load, on status changes,
+  // and after edits — never on the plain tick, so an open Identify board
+  // can't have its in-progress layout reset by background polling.
   useEffect(() => {
     if (!activeRunId) return;
     // Tick once immediately: a run that just launched should show its panel
@@ -227,17 +233,22 @@ export default function ProjectDashboard({
           perEngineTotal: d.perEngineTotal ?? 0,
           perEngine: d.perEngine ?? [],
         });
-        if (d.run.status !== "pending" && d.run.status !== "running" && d.run.status !== "collected") {
+        const status: string = d.run.status;
+        if (polledStatus.current !== null && polledStatus.current !== status) {
+          polledStatus.current = status;
           await refresh();
+        } else {
+          polledStatus.current = status;
         }
       } catch {
         // transient network noise — the next tick retries
       }
     };
     void tick();
+    if (humanGated) return; // one tick for the counters, no interval
     const t = setInterval(tick, 2500);
     return () => clearInterval(t);
-  }, [activeRunId, refresh]);
+  }, [activeRunId, refresh, humanGated]);
 
   async function launchRun() {
     if (launching || hasActiveRun) return;
@@ -429,7 +440,6 @@ export default function ProjectDashboard({
             dictionary={dict}
             onRatified={refresh}
             onDictApplied={refreshDict}
-            dictAction={dictAction}
           />
         )}
 
@@ -739,7 +749,6 @@ export default function ProjectDashboard({
               id={id}
               project={project}
               dict={dict}
-              dictAction={dictAction}
               refreshDict={refreshDict}
             />
           )}
@@ -1068,13 +1077,11 @@ function AnalysisSettings({
   id,
   project,
   dict,
-  dictAction,
   refreshDict,
 }: {
   id: string;
   project: Project;
   dict: DictionaryEntry[];
-  dictAction: (entryId: string, action: "approve" | "reject") => Promise<void>;
   refreshDict: () => Promise<void>;
 }) {
   // Observed reach per entry: entry_id join plus name-key fallback, so
@@ -1110,10 +1117,13 @@ function AnalysisSettings({
             ? { label: "OCCASIONAL", cls: "text-ink-3" }
             : { label: "NOT SEEN", cls: "text-ink-3" };
   };
-  const brandNorm = project.brand.trim().toLowerCase();
+  // Target identity by matchKey, same as the server's guard - the chip and
+  // the refusal must agree on spelling variants.
+  const brandKey = matchKey(project.brand);
   const legacyComp = new Set(project.competitors.map((c) => c.trim().toLowerCase()));
   const isTargetEntry = (e: DictionaryEntry) =>
-    e.canonical.trim().toLowerCase() === brandNorm || e.aliases.includes(brandNorm);
+    matchKey(e.canonical) === brandKey ||
+    e.aliases.some((a) => matchKey(a) === brandKey);
   const isCompetitor = (e: DictionaryEntry) =>
     e.role ? e.role === "competitor" : legacyComp.has(e.canonical.trim().toLowerCase());
 
@@ -1300,15 +1310,13 @@ function PipelineNext({
   dictionary,
   onRatified,
   onDictApplied,
-  dictAction,
 }: {
   id: string;
   project: Project;
   answers: number;
   dictionary: DictionaryEntry[];
-  onRatified: () => void;
+  onRatified: () => void | Promise<void>;
   onDictApplied: () => Promise<void>;
-  dictAction: (entryId: string, action: "approve" | "reject") => Promise<void>;
 }) {
   const status = project.taxonomy_status ?? "pending";
   const dictDone = project.dictionary_status === "confirmed";
@@ -1372,7 +1380,6 @@ function PipelineNext({
           onApplied={onDictApplied}
           onConfirmed={onRatified}
           onBackToCodebook={onRatified}
-          dictAction={dictAction}
         />
       )}
       {status === "ratified" && dictDone && (
@@ -1407,16 +1414,14 @@ function DictionaryGate({
   onApplied,
   onConfirmed,
   onBackToCodebook,
-  dictAction,
 }: {
   id: string;
   project: Project;
   dictionary: DictionaryEntry[];
   onApplied: () => Promise<void>;
-  onConfirmed: () => void;
+  onConfirmed: () => void | Promise<void>;
   /** Called after the codebook is reopened, to refresh into the review. */
-  onBackToCodebook: () => void;
-  dictAction: (entryId: string, action: "approve" | "reject") => Promise<void>;
+  onBackToCodebook: () => void | Promise<void>;
 }) {
   // Step survives a reload: a browser refresh mid-gate must land the user
   // back where they were, not restart the walkthrough. Per-project key;
@@ -1438,36 +1443,42 @@ function DictionaryGate({
     // not yank the user back a step.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [stepKey]);
-  const setStep = useCallback(
-    (s: 1 | 2 | 3) => {
-      rawSetStep(s);
-      try {
-        window.localStorage.setItem(stepKey, String(s));
-      } catch {}
-    },
-    [stepKey]
-  );
-  const [saving, setSaving] = useState(false);
-  const [error, setError] = useState<string | null>(null);
   // The board's confirmAll, handed up so the footer's "Confirm layout"
-  // commits the layout before advancing.
-  const boardConfirm = useRef<
+  // commits the layout before advancing. State (not a ref) so the footer
+  // button disables until the board is served: it registers only once its
+  // suggestion pass resolves, and a stale closure from a previous visit
+  // must never commit a board the user hasn't seen.
+  const [boardConfirm, setBoardConfirm] = useState<
     ((opts?: { deferRefresh?: boolean }) => Promise<void>) | null
   >(null);
   const registerBoardConfirm = useCallback(
     (fn: (opts?: { deferRefresh?: boolean }) => Promise<void>) => {
-      boardConfirm.current = fn;
+      setBoardConfirm(() => fn);
     },
-    []
+    [setBoardConfirm]
   );
+  const setStep = useCallback(
+    (s: 1 | 2 | 3) => {
+      rawSetStep(s);
+      // Leaving step 1 unmounts the board; its confirm is stale until a
+      // fresh board registers again.
+      if (s !== 1) setBoardConfirm(null);
+      try {
+        window.localStorage.setItem(stepKey, String(s));
+      } catch {}
+    },
+    [stepKey, setBoardConfirm]
+  );
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   const confirm = async () => {
     setSaving(true);
     setError(null);
     const res = await fetch(`/api/projects/${id}/dictionary/confirm`, {
       method: "POST",
     });
-    setSaving(false);
     if (!res.ok) {
+      setSaving(false);
       const j = await res.json().catch(() => null);
       setError(j?.error ?? `save failed (${res.status})`);
       return;
@@ -1475,7 +1486,10 @@ function DictionaryGate({
     try {
       window.localStorage.removeItem(stepKey);
     } catch {}
-    onConfirmed();
+    // Saving stays on until the refreshed detail swaps this view for the
+    // coding waiter - otherwise the button re-enables for the beat between
+    // the POST and the re-render, inviting a double confirm.
+    await onConfirmed();
   };
   // Step 1's back button leaves the gate: reopen the codebook (the stored
   // decision record restores the user's edits there).
@@ -1483,13 +1497,14 @@ function DictionaryGate({
     setSaving(true);
     setError(null);
     const res = await fetch(`/api/projects/${id}/taxonomy`, { method: "DELETE" });
-    setSaving(false);
     if (!res.ok) {
+      setSaving(false);
       const j = await res.json().catch(() => null);
       setError(j?.error ?? `could not reopen the codebook (${res.status})`);
       return;
     }
-    onBackToCodebook();
+    // Same discipline as confirm: held until the refresh unmounts the gate.
+    await onBackToCodebook();
   };
   const pending = dictionary.filter((d) => d.status === "pending").length;
   const STEPS: Record<1 | 2 | 3, { title: string; blurb: string }> = {
@@ -1530,14 +1545,18 @@ function DictionaryGate({
         />
       )}
       {step === 2 && (
-        <ParentsTab projectId={id} dict={dictionary} onApplied={onApplied} />
+        <ParentsTab
+          projectId={id}
+          dict={dictionary}
+          onApplied={onApplied}
+          hideIntro
+        />
       )}
       {step === 3 && (
         <AnalysisSettings
           id={id}
           project={project}
           dict={dictionary}
-          dictAction={dictAction}
           refreshDict={onApplied}
         />
       )}
@@ -1556,14 +1575,22 @@ function DictionaryGate({
           {step < 3 ? (
             <button
               className="rounded bg-primary px-4 py-2 text-sm font-medium text-white disabled:opacity-50"
-              disabled={saving}
+              disabled={saving || (step === 1 && !boardConfirm)}
               onClick={async () => {
-                if (step === 1 && boardConfirm.current) {
+                if (step === 1 && boardConfirm) {
                   setSaving(true);
+                  setError(null);
                   try {
                     // Commit only - the refresh comes after the step change
                     // so the board never visibly reshuffles on its way out.
-                    await boardConfirm.current({ deferRefresh: true });
+                    await boardConfirm({ deferRefresh: true });
+                  } catch (err) {
+                    // A failed commit keeps the user on the board with the
+                    // reason, instead of advancing past an unsaved layout.
+                    setError(
+                      err instanceof Error ? err.message : "save failed"
+                    );
+                    return;
                   } finally {
                     setSaving(false);
                   }

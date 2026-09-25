@@ -6,6 +6,7 @@ import { consolidateTaxonomy } from "./consolidate";
 import { classifyNonBrands } from "./suggest";
 import { refreshBrandObservations, refreshObservedAliases } from "./observations";
 import { getDictionarySuggestions } from "./dict_suggest";
+import { prewarmDictionaryExamples } from "./dict_examples";
 
 /**
  * The init bootstrap: everything a FIRST run owes between its last collected
@@ -132,7 +133,19 @@ export async function bootstrapRunChunk(
         }
         if (excluded > 0) await store.bumpDictionaryVersion(project.id);
       }
-      await getDictionarySuggestions(project.id, project.category);
+      const suggestions = await getDictionarySuggestions(
+        project.id,
+        project.category
+      );
+      // Review-flagged suggestions render as pills inviting "click for real
+      // answer examples" - warm that cache now so the click is instant.
+      await prewarmDictionaryExamples(
+        project.id,
+        suggestions
+          .filter((s) => /- review\)/.test(s.rationale ?? ""))
+          .map((s) => ({ name: s.name, parent: s.mergeIntoName })),
+        deadline
+      );
     } catch (err) {
       console.error("bootstrap dictionary prep failed:", err);
     }

@@ -617,6 +617,15 @@ export const pgStore: Store = {
     return (rows[0]?.value as string | undefined) ?? null;
   },
 
+  async cacheGetMany(keys, maxAgeMs) {
+    if (keys.length === 0) return new Map<string, string>();
+    const sql = await db();
+    const cutoff = new Date(Date.now() - maxAgeMs);
+    const rows = await sql`SELECT key, value FROM llm_cache
+      WHERE key = ANY(${keys}) AND created_at > ${cutoff}`;
+    return new Map(rows.map((r) => [r.key as string, r.value as string]));
+  },
+
   async cachePurge(prefix, keep) {
     const sql = await db();
     await sql`DELETE FROM llm_cache

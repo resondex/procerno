@@ -751,6 +751,11 @@ export interface Store {
   getPlan(userId: string): Promise<Plan>;
   /** Cached value no older than maxAgeMs, else null. */
   cacheGet(key: string, maxAgeMs: number): Promise<string | null>;
+  /** Batch read: one roundtrip for many keys (misses simply absent from the
+   * map). The per-name suggestion cache reads ~100 keys per board open -
+   * point-querying them serialized on the pool was the board's whole
+   * latency. */
+  cacheGetMany(keys: string[], maxAgeMs: number): Promise<Map<string, string>>;
   cacheSet(key: string, value: string, meta?: CacheMeta): Promise<void>;
   /** Append-only setup feedback log (rejected variants, review verdicts and
    * choices). For OUR visibility only - it is never read back into

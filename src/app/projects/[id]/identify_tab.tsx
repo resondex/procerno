@@ -110,11 +110,13 @@ export default function IdentifyTab({
   const bucketSize = (b: { entryId: string | null }) =>
     b.entryId && obsByEntry.has(b.entryId) ? obsByEntry.get(b.entryId)! : null;
   // "your brand" is an identity fact (the project's target), never a role
-  // default - a null-role competitor must not wear the chip.
+  // default - a null-role competitor must not wear the chip. matchKey, same
+  // as the server's target guard, so the chip and the refusal agree on
+  // spelling variants.
   const isTargetBucket = (b: Bucket) =>
     !!targetBrand &&
     b.pills.some(
-      (p) => p.kind === "canonical" && norm(p.name) === norm(targetBrand)
+      (p) => p.kind === "canonical" && matchKey(p.name) === matchKey(targetBrand)
     );
   const [buckets, setBuckets] = useState<Bucket[]>([]);
   const [suggesting, setSuggesting] = useState(false);
@@ -621,21 +623,24 @@ export default function IdentifyTab({
   function hideAutoIgnored() {
     // Pills still sitting in Ignore go back behind the receipt; anything the
     // user dragged elsewhere stays placed and leaves the receipt's list.
+    // Rescues are read from the CURRENT board, never inside the setBuckets
+    // updater - updaters run on React's schedule, so a set collected there
+    // is still empty when checked (the same class of bug the suggestion
+    // pass hit).
     const ids = new Set(autoIgnored.map((a) => a.entryId));
     const rescued = new Set<string>();
+    for (const b of buckets) {
+      if (b.key === "__ignore__") continue;
+      for (const p of b.pills) {
+        if (ids.has(p.entryId)) rescued.add(p.entryId);
+      }
+    }
     setBuckets((prev) =>
-      prev.map((b) => {
-        if (b.key !== "__ignore__") {
-          for (const p of b.pills) {
-            if (ids.has(p.entryId)) rescued.add(p.entryId);
-          }
-          return b;
-        }
-        return {
-          ...b,
-          pills: b.pills.filter((p) => !ids.has(p.entryId)),
-        };
-      })
+      prev.map((b) =>
+        b.key === "__ignore__"
+          ? { ...b, pills: b.pills.filter((p) => !ids.has(p.entryId)) }
+          : b
+      )
     );
     if (rescued.size > 0) {
       setAutoIgnored((prev) => prev.filter((a) => !rescued.has(a.entryId)));
@@ -752,8 +757,9 @@ export default function IdentifyTab({
           for (const p of b.pills) {
             if (p.homeStatus === "rejected" || covered(p)) continue;
             // The target brand can never be rejected, whatever bucket its
-            // pill sits in (the server refuses this too).
-            if (targetBrand && norm(p.name) === norm(targetBrand)) continue;
+            // pill sits in (the server refuses this too - same matchKey).
+            if (targetBrand && matchKey(p.name) === matchKey(targetBrand))
+              continue;
             if (p.kind === "alias") {
               moves.push({
                 entryId: p.entryId,
@@ -775,24 +781,32 @@ export default function IdentifyTab({
           continue;
         merges.push({ entryId: a.entryId, action: "reject" });
       }
-      const actions = [...approves, ...renames, ...moves, ...merges];
-      if (actions.length > 0) {
-        await fetch(`/api/projects/${projectId}/dictionary`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ actions }),
-        });
-      }
       const allNames = [
         ...buckets.flatMap((b) => b.pills.map((p) => p.name)),
         ...autoIgnored.map((a) => a.name),
       ];
-      if (allNames.length > 0) {
-        await fetch(`/api/projects/${projectId}/dictionary`, {
+      // ONE batch: layout actions plus the name sign-off ride together, so
+      // the server runs one auth pass and one observation recompute instead
+      // of two roundtrips.
+      const actions = [
+        ...approves,
+        ...renames,
+        ...moves,
+        ...merges,
+        ...(allNames.length > 0
+          ? [{ action: "confirm", names: allNames }]
+          : []),
+      ];
+      if (actions.length > 0) {
+        const res = await fetch(`/api/projects/${projectId}/dictionary`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ action: "confirm", names: allNames }),
+          body: JSON.stringify({ actions }),
         });
+        if (!res.ok) {
+          const j = await res.json().catch(() => null);
+          throw new Error(j?.error ?? `save failed (${res.status})`);
+        }
       }
       suggestedFor.current.clear();
       // The gate footer defers the refresh: it advances to the next step
@@ -808,13 +822,16 @@ export default function IdentifyTab({
     }
   }
 
-  // Latest confirmAll, handed to the gate footer once.
+  // Latest confirmAll, handed to the gate footer - but only once the board
+  // is actually served (passDone): committing a still-preparing board would
+  // sign off a layout the user never saw.
   const confirmAllRef = useRef<typeof confirmAll>(async () => {});
   confirmAllRef.current = confirmAll;
   useEffect(() => {
+    if (!passDone && pendingEntries.length > 0) return;
     registerConfirm?.((opts) => confirmAllRef.current(opts));
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [registerConfirm]);
+  }, [registerConfirm, passDone]);
 
   const unconfirmedCount = buckets.reduce(
     (n, b) => n + b.pills.filter((p) => !p.confirmed || p.moved).length,

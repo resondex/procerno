@@ -65,7 +65,7 @@ export default function TaxonomyReview({
   id: string;
   project: Project;
   answers: number;
-  onRatified: () => void;
+  onRatified: () => void | Promise<void>;
 }) {
   const proposal = useMemo(() => {
     try {
@@ -338,13 +338,16 @@ export default function TaxonomyReview({
         ),
       }),
     });
-    setSaving(false);
     if (!res.ok) {
+      setSaving(false);
       const j = await res.json().catch(() => null);
       setError(j?.error ?? `save failed (${res.status})`);
       return;
     }
-    onRatified();
+    // Saving holds until the refreshed detail swaps this card for the
+    // brands gate - otherwise the confirm re-enables for a beat and a
+    // second click double-posts the decision.
+    await onRatified();
   };
 
   if (!proposal) return null;
