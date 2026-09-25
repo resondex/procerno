@@ -1138,21 +1138,40 @@ function AnalysisSettings({
   const parents = [...new Set(active.map(({ e }) => e.parent).filter((p): p is string => !!p))];
   const maxReach = Math.max(1, ...active.map((x) => x.reach));
 
+  // Optimistic: the pill flips on click; the server call syncs behind it
+  // and the override lifts once the refreshed dictionary carries the truth
+  // (or immediately, if the server refuses - e.g. the target-brand guard).
+  const [analyzedOverride, setAnalyzedOverride] = useState<
+    Record<string, boolean>
+  >({});
   const setAnalyzed = async (entryId: string, analyzed: boolean) => {
-    await fetch(`/api/projects/${id}/dictionary`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ entryId, action: "set_analyzed", analyzed }),
+    setAnalyzedOverride((prev) => ({ ...prev, [entryId]: analyzed }));
+    try {
+      const res = await fetch(`/api/projects/${id}/dictionary`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ entryId, action: "set_analyzed", analyzed }),
+      });
+      const j = await res.json().catch(() => null);
+      if (!res.ok || j?.ok === false) throw new Error("refused");
+      await refreshDict();
+    } catch {
+      // revert to server truth
+    }
+    setAnalyzedOverride((prev) => {
+      const next = { ...prev };
+      delete next[entryId];
+      return next;
     });
-    await refreshDict();
   };
   const row = ({ e, reach }: { e: DictionaryEntry; reach: number }) => {
     const tier = tierOf(reach);
     const inAnalysis = e.status === "active";
+    const analyzed = analyzedOverride[e.id] ?? e.analyzed;
     return (
       <div
         key={e.id}
-        className={`grid grid-cols-[minmax(0,1.4fr)_auto_minmax(0,1fr)_auto_auto] items-center gap-3 border-b border-line/60 py-2 text-sm ${!inAnalysis ? "opacity-60" : e.analyzed ? "" : "opacity-70"}`}
+        className={`grid grid-cols-[minmax(0,1.4fr)_auto_minmax(0,1fr)_auto_auto] items-center gap-3 border-b border-line/60 py-2 text-sm ${!inAnalysis ? "opacity-60" : analyzed ? "" : "opacity-70"}`}
       >
         <div className="min-w-0 flex items-center gap-2">
           <span className={`truncate font-medium ${inAnalysis ? "" : "line-through text-ink-3"}`}>
@@ -1218,7 +1237,7 @@ function AnalysisSettings({
           </span>
         ) : !inAnalysis ? (
           <span className="w-24 text-right text-[11px] text-ink-3">ignored</span>
-        ) : e.analyzed ? (
+        ) : analyzed ? (
           <button
             type="button"
             onClick={() => setAnalyzed(e.id, false)}
@@ -1264,7 +1283,7 @@ function AnalysisSettings({
         <details>
           <summary className="cursor-pointer text-xs text-ink-3 hover:text-ink">
             {excluded.length} name{excluded.length === 1 ? "" : "s"} ignored -
-            view (rescue them on the brands board)
+            view (activate them on the brands board)
           </summary>
           <div className="mt-2">{excluded.map(row)}</div>
         </details>

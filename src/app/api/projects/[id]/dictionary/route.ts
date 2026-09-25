@@ -347,10 +347,14 @@ export async function POST(
   const version = await store.bumpDictionaryVersion(id);
   // Entry attribution in the observations follows the dictionary - refresh
   // so tier bars and NOT SEEN flags never go stale after a gate decision.
-  try {
-    await refreshBrandObservations(id);
-  } catch (err) {
-    console.error("observation refresh failed:", err);
+  // set_analyzed is display-only (attribution untouched), so a pure toggle
+  // batch skips the recompute and answers fast.
+  if (ordered.some((a) => a.action !== "set_analyzed")) {
+    try {
+      await refreshBrandObservations(id);
+    } catch (err) {
+      console.error("observation refresh failed:", err);
+    }
   }
   return NextResponse.json({
     ok: errors.length === 0,
