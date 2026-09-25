@@ -60,11 +60,17 @@ export default function TaxonomyReview({
   id,
   project,
   answers,
+  onAdvance,
+  onFailed,
   onRatified,
 }: {
   id: string;
   project: Project;
   answers: number;
+  /** Optimistic transition: the pipeline card shows the brands gate NOW;
+   * the ratify POST syncs behind it, and onFailed snaps the card back. */
+  onAdvance: () => void;
+  onFailed: (msg: string) => void;
   onRatified: () => void | Promise<void>;
 }) {
   const proposal = useMemo(() => {
@@ -153,8 +159,6 @@ export default function TaxonomyReview({
   const [moveMode, setMoveMode] = useState(false);
   const [moveSel, setMoveSel] = useState<Set<string>>(new Set());
   const [moveDest, setMoveDest] = useState("");
-  const [saving, setSaving] = useState(false);
-  const [error, setError] = useState<string | null>(null);
 
   const mutate = useCallback((fn: (s: ReviewState) => ReviewState) => {
     setState((prev) => {
@@ -306,8 +310,6 @@ export default function TaxonomyReview({
   );
 
   const confirm = async () => {
-    setSaving(true);
-    setError(null);
     const decisions = Object.values(state.rows).map((r) => {
       const meta = byCode[r.canonical];
       const recommended: "include" | "review" =
@@ -326,6 +328,10 @@ export default function TaxonomyReview({
       };
     });
     const merges = Object.fromEntries(state.merges.map((m) => [m.target, m.members]));
+    // No Saving beat: the card advances to the brands gate NOW and the
+    // ratify POST syncs behind it; a refusal snaps the pipeline back with
+    // the reason.
+    onAdvance();
     const res = await fetch(`/api/projects/${id}/taxonomy`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -337,16 +343,14 @@ export default function TaxonomyReview({
           state.merges.map((m) => [m.target, m.displayName])
         ),
       }),
-    });
-    if (!res.ok) {
-      setSaving(false);
-      const j = await res.json().catch(() => null);
-      setError(j?.error ?? `save failed (${res.status})`);
+    }).catch(() => null);
+    if (!res || !res.ok) {
+      const j = await res?.json().catch(() => null);
+      onFailed(
+        j?.error ?? (res ? `save failed (${res.status})` : "network error")
+      );
       return;
     }
-    // Saving holds until the refreshed detail swaps this card for the
-    // brands gate - otherwise the confirm re-enables for a beat and a
-    // second click double-posts the decision.
     await onRatified();
   };
 
@@ -704,15 +708,12 @@ export default function TaxonomyReview({
                 ` · ${Object.keys(state.moves).length} phrase${Object.keys(state.moves).length === 1 ? "" : "s"} moved`}
             </span>
             <div className="flex items-center gap-3">
-              {error && <span className="text-xs text-danger">{error}</span>}
               <button
                 className="rounded bg-primary px-4 py-2 text-sm font-medium text-white disabled:opacity-50"
                 onClick={confirm}
-                disabled={saving || includedCount < 3}
+                disabled={includedCount < 3}
               >
-                {saving
-                  ? "Saving..."
-                  : `Confirm ${includedCount} dimensions → review brands`}
+                {`Confirm ${includedCount} dimensions → review brands`}
               </button>
             </div>
           </>

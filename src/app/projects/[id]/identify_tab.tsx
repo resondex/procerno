@@ -33,7 +33,7 @@ interface Bucket {
   pills: Pill[];
 }
 
-interface Suggestion {
+export interface Suggestion {
   entryId: string;
   name: string;
   action: "merge" | "approve" | "ignore";
@@ -59,6 +59,7 @@ export default function IdentifyTab({
   hideConfirm,
   registerConfirm,
   targetBrand,
+  prefetched,
 }: {
   projectId: string;
   dict: DictionaryEntry[];
@@ -74,6 +75,10 @@ export default function IdentifyTab({
   ) => void;
   /** The tracker's own brand - its card always sorts first. */
   targetBrand?: string;
+  /** Suggestions fetched ahead of the board (the dashboard warms them while
+   * the user is still on the codebook), so the gate opens fully served with
+   * no fetch and no spinner. Consumed once; later-appearing names fetch. */
+  prefetched?: Suggestion[] | null;
 }) {
   // Observed sizing: entry_id-matched counts size the brand buckets; name
   // keys size the pending pills. Tier words, no raw numbers - preliminary
@@ -143,6 +148,9 @@ export default function IdentifyTab({
   } | null>(null);
   // Entry ids the suggestion pass has already placed — avoids re-suggesting.
   const suggestedFor = useRef<Set<string>>(new Set());
+  // The prefetched suggestion list serves exactly one pass - names that show
+  // up after it was computed go through the endpoint like any other.
+  const prefetchConsumed = useRef(false);
   // Engine-ignored names: never rendered as pills - a receipt line with a
   // reveal button instead. Confirm commits them as rejected.
   const [autoIgnored, setAutoIgnored] = useState<
@@ -392,16 +400,25 @@ export default function IdentifyTab({
     setSuggesting(true);
     (async () => {
       try {
-        const res = await fetch(`/api/projects/${projectId}/dictionary/suggest`, {
-          method: "POST",
-        });
-        if (!res.ok) {
-          // Un-mark so the next effect run retries instead of stranding the
-          // whole tray unplaced for the rest of the mount.
-          fresh.forEach((e) => suggestedFor.current.delete(e.id));
-          return;
+        let suggestions: Suggestion[];
+        if (prefetched && !prefetchConsumed.current) {
+          // Warmed ahead of the board: no fetch, the placement below runs in
+          // the same tick and the board is served whole.
+          prefetchConsumed.current = true;
+          suggestions = prefetched;
+        } else {
+          const res = await fetch(
+            `/api/projects/${projectId}/dictionary/suggest`,
+            { method: "POST" }
+          );
+          if (!res.ok) {
+            // Un-mark so the next effect run retries instead of stranding the
+            // whole tray unplaced for the rest of the mount.
+            fresh.forEach((e) => suggestedFor.current.delete(e.id));
+            return;
+          }
+          suggestions = (await res.json()).suggestions ?? [];
         }
-        const suggestions: Suggestion[] = (await res.json()).suggestions ?? [];
         // Compute the whole placement plan PURELY, before any state update.
         // (Collecting side effects inside the setBuckets updater ran on
         // React's schedule, not ours - the ignore list was read while still

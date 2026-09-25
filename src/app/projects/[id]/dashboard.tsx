@@ -5,7 +5,7 @@ import Link from "next/link";
 import TrendChart from "./trend_chart";
 import RunResults from "./run_results";
 import TaxonomyReview from "./taxonomy_review";
-import IdentifyTab from "./identify_tab";
+import IdentifyTab, { type Suggestion } from "./identify_tab";
 import ParentsTab from "./parents_tab";
 import {
   EnginePicker,
@@ -82,6 +82,26 @@ export default function ProjectDashboard({
   // Bumped after dictionary edits so RunResults refetches — dictionary
   // decisions apply retroactively at read time.
   const [dictVersion, setDictVersion] = useState(0);
+  // Brand-board suggestions, warmed while the user is still on the CODEBOOK
+  // step - by the time they confirm it, the gate's board mounts with its
+  // placements already in hand: no fetch, no "Preparing your brand board".
+  const [gateSuggestions, setGateSuggestions] = useState<Suggestion[] | null>(
+    null
+  );
+  useEffect(() => {
+    if ((detail?.project.taxonomy_status ?? "pending") !== "proposed") return;
+    if (gateSuggestions) return;
+    let cancelled = false;
+    fetch(`/api/projects/${id}/dictionary/suggest`, { method: "POST" })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => {
+        if (!cancelled && d) setGateSuggestions(d.suggestions ?? []);
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [detail?.project.taxonomy_status, id, gateSuggestions]);
 
   const refresh = useCallback(async () => {
     // ONE roundtrip renders the whole page: the dictionary rides with
@@ -438,6 +458,7 @@ export default function ProjectDashboard({
             project={project}
             answers={progress?.total ?? 0}
             dictionary={dict}
+            suggestions={gateSuggestions}
             onRatified={refresh}
             onDictApplied={refreshDict}
           />
@@ -1308,6 +1329,7 @@ function PipelineNext({
   project,
   answers,
   dictionary,
+  suggestions,
   onRatified,
   onDictApplied,
 }: {
@@ -1315,11 +1337,42 @@ function PipelineNext({
   project: Project;
   answers: number;
   dictionary: DictionaryEntry[];
+  /** Pre-warmed brand-board suggestions (fetched during the codebook step). */
+  suggestions: Suggestion[] | null;
   onRatified: () => void | Promise<void>;
   onDictApplied: () => Promise<void>;
 }) {
-  const status = project.taxonomy_status ?? "pending";
-  const dictDone = project.dictionary_status === "confirmed";
+  // Optimistic stage: a confirm moves the card forward NOW - no Saving
+  // beat - while the server call syncs behind it; a refusal snaps the card
+  // back with the reason. Cleared automatically once server truth agrees.
+  const [optimistic, setOptimistic] = useState<{
+    tax?: "ratified" | "proposed";
+    dict?: boolean;
+  }>({});
+  const [stageError, setStageError] = useState<string | null>(null);
+  const serverTax = project.taxonomy_status ?? "pending";
+  const serverDict = project.dictionary_status === "confirmed";
+  useEffect(() => {
+    setOptimistic((o) => {
+      const tax = o.tax !== undefined && o.tax === serverTax ? undefined : o.tax;
+      const dict =
+        o.dict !== undefined && o.dict === serverDict ? undefined : o.dict;
+      return tax === o.tax && dict === o.dict ? o : { tax, dict };
+    });
+  }, [serverTax, serverDict]);
+  const advance = (patch: { tax?: "ratified" | "proposed"; dict?: boolean }) => {
+    setStageError(null);
+    setOptimistic((o) => ({ ...o, ...patch }));
+  };
+  const snapBack = (
+    clear: "tax" | "dict",
+    msg: string
+  ) => {
+    setOptimistic((o) => ({ ...o, [clear]: undefined }));
+    setStageError(msg);
+  };
+  const status = optimistic.tax ?? serverTax;
+  const dictDone = optimistic.dict ?? serverDict;
   const steps: { label: string; state: "done" | "now" | "todo" }[] = [
     { label: "Collect", state: "done" },
     { label: "Codebook", state: status === "ratified" ? "done" : "now" },
@@ -1364,11 +1417,20 @@ function PipelineNext({
           </p>
         </div>
       )}
+      {stageError && (
+        <p className="rounded-lg border border-danger/40 bg-danger/5 px-3.5 py-2 text-[13px] text-danger">
+          {stageError}
+        </p>
+      )}
       {status === "proposed" && (
         <TaxonomyReview
           id={id}
           project={project}
           answers={answers}
+          onAdvance={() => advance({ tax: "ratified" })}
+          onFailed={(m) =>
+            snapBack("tax", `The codebook could not be confirmed: ${m}`)
+          }
           onRatified={onRatified}
         />
       )}
@@ -1377,7 +1439,16 @@ function PipelineNext({
           id={id}
           project={project}
           dictionary={dictionary}
+          suggestions={suggestions}
           onApplied={onDictApplied}
+          onAdvance={() => advance({ dict: true })}
+          onFailed={(m) =>
+            snapBack("dict", `The brands sign-off did not save: ${m}`)
+          }
+          onBackAdvance={() => advance({ tax: "proposed" })}
+          onBackFailed={(m) =>
+            snapBack("tax", `Could not reopen the codebook: ${m}`)
+          }
           onConfirmed={onRatified}
           onBackToCodebook={onRatified}
         />
@@ -1411,14 +1482,27 @@ function DictionaryGate({
   id,
   project,
   dictionary,
+  suggestions,
   onApplied,
+  onAdvance,
+  onFailed,
+  onBackAdvance,
+  onBackFailed,
   onConfirmed,
   onBackToCodebook,
 }: {
   id: string;
   project: Project;
   dictionary: DictionaryEntry[];
+  /** Pre-warmed board suggestions - the board mounts fully served. */
+  suggestions: Suggestion[] | null;
   onApplied: () => Promise<void>;
+  /** Optimistic transitions: the card moves NOW, the server call syncs
+   * behind it, and the matching -Failed callback snaps it back. */
+  onAdvance: () => void;
+  onFailed: (msg: string) => void;
+  onBackAdvance: () => void;
+  onBackFailed: (msg: string) => void;
   onConfirmed: () => void | Promise<void>;
   /** Called after the codebook is reopened, to refresh into the review. */
   onBackToCodebook: () => void | Promise<void>;
@@ -1469,41 +1553,39 @@ function DictionaryGate({
     },
     [stepKey, setBoardConfirm]
   );
-  const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // No Saving beat anywhere in the gate: the click moves the view NOW, the
+  // POST syncs behind it, and a refusal snaps the pipeline back with the
+  // reason (the parent's stage banner).
   const confirm = async () => {
-    setSaving(true);
-    setError(null);
+    onAdvance();
     const res = await fetch(`/api/projects/${id}/dictionary/confirm`, {
       method: "POST",
-    });
-    if (!res.ok) {
-      setSaving(false);
-      const j = await res.json().catch(() => null);
-      setError(j?.error ?? `save failed (${res.status})`);
+    }).catch(() => null);
+    if (!res || !res.ok) {
+      const j = await res?.json().catch(() => null);
+      onFailed(j?.error ?? (res ? `save failed (${res.status})` : "network error"));
       return;
     }
     try {
       window.localStorage.removeItem(stepKey);
     } catch {}
-    // Saving stays on until the refreshed detail swaps this view for the
-    // coding waiter - otherwise the button re-enables for the beat between
-    // the POST and the re-render, inviting a double confirm.
     await onConfirmed();
   };
   // Step 1's back button leaves the gate: reopen the codebook (the stored
   // decision record restores the user's edits there).
   const backToCodebook = async () => {
-    setSaving(true);
-    setError(null);
-    const res = await fetch(`/api/projects/${id}/taxonomy`, { method: "DELETE" });
-    if (!res.ok) {
-      setSaving(false);
-      const j = await res.json().catch(() => null);
-      setError(j?.error ?? `could not reopen the codebook (${res.status})`);
+    onBackAdvance();
+    const res = await fetch(`/api/projects/${id}/taxonomy`, {
+      method: "DELETE",
+    }).catch(() => null);
+    if (!res || !res.ok) {
+      const j = await res?.json().catch(() => null);
+      onBackFailed(
+        j?.error ?? (res ? `save failed (${res.status})` : "network error")
+      );
       return;
     }
-    // Same discipline as confirm: held until the refresh unmounts the gate.
     await onBackToCodebook();
   };
   const pending = dictionary.filter((d) => d.status === "pending").length;
@@ -1542,6 +1624,7 @@ function DictionaryGate({
           targetBrand={project.brand}
           hideConfirm
           registerConfirm={registerBoardConfirm}
+          prefetched={suggestions}
         />
       )}
       {step === 2 && (
@@ -1566,7 +1649,6 @@ function DictionaryGate({
           onClick={() =>
             step > 1 ? setStep((step - 1) as 1 | 2) : backToCodebook()
           }
-          disabled={saving}
         >
           {step > 1 ? "\u2190 Back" : "\u2190 Back to codebook"}
         </button>
@@ -1575,27 +1657,22 @@ function DictionaryGate({
           {step < 3 ? (
             <button
               className="rounded bg-primary px-4 py-2 text-sm font-medium text-white disabled:opacity-50"
-              disabled={saving || (step === 1 && !boardConfirm)}
-              onClick={async () => {
+              disabled={step === 1 && !boardConfirm}
+              onClick={() => {
                 if (step === 1 && boardConfirm) {
-                  setSaving(true);
+                  // Advance NOW; the layout commit runs behind the step
+                  // change (the board unmounts first, so nothing visibly
+                  // reshuffles) and a failure surfaces in the footer.
+                  const commit = boardConfirm({ deferRefresh: true });
                   setError(null);
-                  try {
-                    // Commit only - the refresh comes after the step change
-                    // so the board never visibly reshuffles on its way out.
-                    await boardConfirm({ deferRefresh: true });
-                  } catch (err) {
-                    // A failed commit keeps the user on the board with the
-                    // reason, instead of advancing past an unsaved layout.
-                    setError(
-                      err instanceof Error ? err.message : "save failed"
-                    );
-                    return;
-                  } finally {
-                    setSaving(false);
-                  }
                   setStep(2);
-                  await onApplied();
+                  commit
+                    .then(() => onApplied())
+                    .catch((err) =>
+                      setError(
+                        `${err instanceof Error ? err.message : "save failed"} - the board layout has NOT been saved; go back and confirm it again`
+                      )
+                    );
                   return;
                 }
                 setStep((step + 1) as 2 | 3);
@@ -1606,20 +1683,19 @@ function DictionaryGate({
                   : undefined
               }
             >
-              {step === 1 ? (saving ? "Saving\u2026" : "Confirm layout") : "Continue \u2192"}
+              {step === 1 ? "Confirm layout" : "Continue \u2192"}
             </button>
           ) : (
             <button
-              className="rounded bg-primary px-4 py-2 text-sm font-medium text-white disabled:opacity-50"
+              className="rounded bg-primary px-4 py-2 text-sm font-medium text-white"
               onClick={confirm}
-              disabled={saving}
               title={
                 pending > 0
                   ? `${pending} names still unsorted - they analyze as pending until sorted`
                   : undefined
               }
             >
-              {saving ? "Saving..." : "Confirm brands \u2192 start coding"}
+              {"Confirm brands \u2192 start coding"}
             </button>
           )}
         </div>
