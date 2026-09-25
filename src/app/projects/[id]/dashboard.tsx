@@ -476,7 +476,11 @@ export default function ProjectDashboard({
             suggestions={gateSuggestions}
             initialGateStep={initialGateStep}
             onRatified={refresh}
-            onDictApplied={refreshDict}
+            // The FULL refresh, not the dictionary-only one: gate actions
+            // recompute brand_observations server-side, and step 3's reach
+            // bars read them from the project detail - the dict-only
+            // refresh left them frozen at page-load for the whole session.
+            onDictApplied={refresh}
           />
         )}
 
