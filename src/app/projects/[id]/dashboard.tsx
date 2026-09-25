@@ -1405,12 +1405,19 @@ function DictionaryGate({
   const stepKey = `dict_gate_step:${id}`;
   const [step, rawSetStep] = useState<1 | 2 | 3>(1);
   // Restore before first paint (layout effect) so the server-rendered step-1
-  // markup never flashes and hydration stays clean.
+  // markup never flashes and hydration stays clean. A stored step past 1 is
+  // only honored when the dictionary actually carries a confirmed layout -
+  // after a board reset the saved position is stale and the walkthrough
+  // starts over.
+  const hasConfirmedLayout = dictionary.some((d) => d.confirmed.length > 0);
   useLayoutEffect(() => {
     try {
       const s = Number(window.localStorage.getItem(stepKey));
-      if (s === 2 || s === 3) rawSetStep(s);
+      if ((s === 2 || s === 3) && hasConfirmedLayout) rawSetStep(s);
     } catch {}
+    // Intentionally run once on mount: mid-session dictionary refreshes must
+    // not yank the user back a step.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [stepKey]);
   const setStep = useCallback(
     (s: 1 | 2 | 3) => {
