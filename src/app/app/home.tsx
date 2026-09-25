@@ -26,8 +26,27 @@ export default function AppHome({
   initialEditSetup?: { id: string; draft: SetupDraft } | null;
 }) {
   const router = useRouter();
-  const [projects] = useState<ProjectWithRun[]>(initialProjects);
+  const [projects, setProjects] = useState<ProjectWithRun[]>(initialProjects);
   const loaded = true;
+  // The server-rendered list can arrive STALE: Next's client router serves
+  // a prefetched payload for minutes, and the browser's bfcache restores
+  // the old page wholesale on back-navigation - a tracker confirmed through
+  // its gates kept reading "confirm codebook" here. Revalidate on mount and
+  // on every bfcache restore; the repaint is invisible when nothing changed.
+  useEffect(() => {
+    const revalidate = async () => {
+      try {
+        const res = await fetch("/api/projects");
+        if (res.ok) setProjects((await res.json()).projects ?? []);
+      } catch {}
+    };
+    void revalidate();
+    const onShow = (e: PageTransitionEvent) => {
+      if (e.persisted) void revalidate();
+    };
+    window.addEventListener("pageshow", onShow);
+    return () => window.removeEventListener("pageshow", onShow);
+  }, []);
   const [brand, setBrand] = useState("");
   const [drafts, setDrafts] = useState<SetupDraft[]>(initialDrafts);
   const isAdmin = initialIsAdmin;

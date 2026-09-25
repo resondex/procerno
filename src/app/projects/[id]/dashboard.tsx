@@ -369,8 +369,9 @@ export default function ProjectDashboard({
                 Edit setup
               </Link>
             )}
+            {/* No prefetch: a prefetched /app payload is cached for minutes
+             * and shows pre-walk gate states after confirms - fetch fresh. */}
             <Link
-              prefetch={true}
               href="/app"
               className="text-sm font-medium text-primary hover:opacity-80"
             >
