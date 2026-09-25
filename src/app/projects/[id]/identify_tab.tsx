@@ -384,6 +384,20 @@ export default function IdentifyTab({
   const pendingEntries = dict.filter(
     (e) => e.status === "pending" && !lowSignal(e)
   );
+  // Rejected entries that could belong behind the auto-ignore receipt: not
+  // the Other bucket, not merge remnants (those render nowhere). Whether
+  // each one actually folds is decided by its cached verdict below.
+  const aliasOwnersTop = new Set(
+    dict
+      .filter((e) => e.status !== "rejected")
+      .flatMap((e) => e.aliases.map((a) => matchKey(a)))
+  );
+  const rejectedFoldables = dict.filter(
+    (e) =>
+      e.status === "rejected" &&
+      e.canonical !== OTHER_CANONICAL &&
+      !aliasOwnersTop.has(matchKey(e.canonical))
+  );
   const lowSignalCount = dict.filter(
     (e) => e.status === "pending" && lowSignal(e)
   ).length;
@@ -393,15 +407,20 @@ export default function IdentifyTab({
       !autoIgnored.some((a) => a.entryId === e.id)
   );
 
-  // Pre-organize newly discovered names by suggestion.
+  // Pre-organize newly discovered names by suggestion. The pass also runs
+  // when there is nothing pending but rejected entries exist - their cached
+  // verdicts decide which stay folded behind the auto-ignore receipt.
+  const passRan = useRef(false);
   useEffect(() => {
     const fresh = pendingEntries.filter(
       (e) => !suggestedFor.current.has(e.id)
     );
-    if (fresh.length === 0 || suggesting) {
-      if (fresh.length === 0 && !suggesting) setPassDone(true);
+    const needsFold = !passRan.current && rejectedFoldables.length > 0;
+    if ((fresh.length === 0 && !needsFold) || suggesting) {
+      if (fresh.length === 0 && !needsFold && !suggesting) setPassDone(true);
       return;
     }
+    passRan.current = true;
     fresh.forEach((e) => suggestedFor.current.add(e.id));
     setSuggesting(true);
     (async () => {
@@ -424,6 +443,32 @@ export default function IdentifyTab({
             return;
           }
           suggestions = (await res.json()).suggestions ?? [];
+        }
+        // Engine-ignored names STAY behind the receipt after committing as
+        // rejected: a rejected entry whose cached verdict is a below-
+        // threshold ignore folds back into the auto-ignored list instead of
+        // rendering as a wall of Ignore pills on the next visit.
+        const rejFold: { entryId: string; name: string; rationale: string }[] =
+          [];
+        for (const e of rejectedFoldables) {
+          const s = suggestions.find((x) => x.entryId === e.id);
+          if (!s || s.action !== "ignore") continue;
+          const share =
+            obs && obs.rows > 0
+              ? (obsByName.get(norm(e.canonical)) ?? 0) / obs.rows
+              : 0;
+          if (share >= 0.1) continue;
+          rejFold.push({
+            entryId: e.id,
+            name: e.canonical,
+            rationale: s.rationale ?? "",
+          });
+        }
+        if (rejFold.length > 0) {
+          setAutoIgnored((prev) => [
+            ...prev.filter((x) => !rejFold.some((y) => y.entryId === x.entryId)),
+            ...rejFold,
+          ]);
         }
         // Compute the whole placement plan PURELY, before any state update.
         // (Collecting side effects inside the setBuckets updater ran on
@@ -661,7 +706,15 @@ export default function IdentifyTab({
     setBuckets((prev) =>
       prev.map((b) =>
         b.key === "__ignore__"
-          ? { ...b, pills: b.pills.filter((p) => !ids.has(p.entryId)) }
+          ? {
+              ...b,
+              // Only the PENDING pills reveal added are removed - rejected
+              // folded entries stay in the bucket's list and re-hide via
+              // the render filter.
+              pills: b.pills.filter(
+                (p) => !(ids.has(p.entryId) && p.homeStatus === "pending")
+              ),
+            }
           : b
       )
     );
@@ -1004,15 +1057,25 @@ export default function IdentifyTab({
   }
 
   function bucketBody(b: Bucket) {
+    // Folded engine-ignores stay behind the receipt until revealed - the
+    // rejected entries themselves live in this bucket's pill list, but only
+    // render while "show them in Ignore" is on.
+    const hiddenIgnores =
+      b.kind === "ignore" && !showAutoIgnored
+        ? new Set(autoIgnored.map((a) => a.entryId))
+        : null;
+    const pills = hiddenIgnores
+      ? b.pills.filter((p) => !hiddenIgnores.has(p.entryId))
+      : b.pills;
     const open = variantsOpen.has(b.key);
     const collapsible = (p: Pill) =>
       !p.moved && (p.auto === true || (p.kind === "alias" && b.kind === "brand"));
-    const autos = b.pills.filter(collapsible);
+    const autos = pills.filter(collapsible);
     // Order: anchor first, plain pills, flagged-for-review LAST; the
     // expanded group renders as one enclosed cluster after the anchor.
     const isAnchor = (p: Pill) =>
       p.kind === "canonical" && p.homeStatus === "active" && b.kind === "brand";
-    const loose = b.pills.filter((p) => !collapsible(p));
+    const loose = pills.filter((p) => !collapsible(p));
     const shown = [
       ...loose.filter((p) => isAnchor(p)),
       ...loose.filter((p) => !isAnchor(p) && !p.note),
@@ -1107,7 +1170,7 @@ export default function IdentifyTab({
           </span>
         )}
         {shown.filter((p) => !isAnchor(p)).map((p) => pillSpan(p))}
-        {b.pills.length === 0 && (
+        {pills.length === 0 && (
           <span className="text-xs text-ink-3 self-center px-1">
             drop names here
           </span>
@@ -1119,7 +1182,7 @@ export default function IdentifyTab({
   // Serve the board all at once: until the suggestion pass resolves,
   // render one quiet loading state instead of buckets that reshuffle as
   // placements, the summary line, and the receipt pop in one by one.
-  if (!passDone && pendingEntries.length > 0) {
+  if (!passDone && (pendingEntries.length > 0 || rejectedFoldables.length > 0)) {
     return (
       <div className="grid gap-4 py-8 justify-center">
         <p className="text-[13px] text-ink-3">
@@ -1230,7 +1293,7 @@ export default function IdentifyTab({
           {autoIgnored.length} name{autoIgnored.length === 1 ? "" : "s"}{" "}
           auto-ignored by measured rules (redundant vocabulary, own-context
           brands, off-category scenery)
-          {showAutoIgnored ? " - put in Ignore. " : " - saved as Ignore when you confirm. "}
+          {showAutoIgnored ? " - shown in Ignore below. " : " - they count as Ignore, kept out of the way. "}
           <button
             type="button"
             onClick={showAutoIgnored ? hideAutoIgnored : revealAutoIgnored}

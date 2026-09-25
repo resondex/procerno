@@ -89,11 +89,20 @@ export default function ProjectDashboard({
   // Brand-board suggestions, warmed while the user is still on the CODEBOOK
   // step - by the time they confirm it, the gate's board mounts with its
   // placements already in hand: no fetch, no "Preparing your brand board".
+  // Also fetched at the gate itself and when the dictionary modal opens:
+  // the Analyze view uses the same verdicts to keep auto-hidden ignores
+  // out of its list. Always a cached read server-side.
   const [gateSuggestions, setGateSuggestions] = useState<Suggestion[] | null>(
     null
   );
+  const taxStatusNow = detail?.project.taxonomy_status ?? "pending";
+  const wantSuggestions =
+    taxStatusNow === "proposed" ||
+    (taxStatusNow === "ratified" &&
+      detail?.project.dictionary_status !== "confirmed") ||
+    openModal === "dictionary";
   useEffect(() => {
-    if ((detail?.project.taxonomy_status ?? "pending") !== "proposed") return;
+    if (!wantSuggestions) return;
     if (gateSuggestions) return;
     let cancelled = false;
     fetch(`/api/projects/${id}/dictionary/suggest`, { method: "POST" })
@@ -105,7 +114,7 @@ export default function ProjectDashboard({
     return () => {
       cancelled = true;
     };
-  }, [detail?.project.taxonomy_status, id, gateSuggestions]);
+  }, [wantSuggestions, id, gateSuggestions]);
 
   const refresh = useCallback(async () => {
     // ONE roundtrip renders the whole page: the dictionary rides with
@@ -775,6 +784,7 @@ export default function ProjectDashboard({
               id={id}
               project={project}
               dict={dict}
+              suggestions={gateSuggestions}
               refreshDict={refreshDict}
             />
           )}
@@ -1103,11 +1113,15 @@ function AnalysisSettings({
   id,
   project,
   dict,
+  suggestions,
   refreshDict,
 }: {
   id: string;
   project: Project;
   dict: DictionaryEntry[];
+  /** Cached engine verdicts (incl. rejected names) - drives which ignores
+   * are auto-hidden here, same rule as the brands board's receipt. */
+  suggestions: Suggestion[] | null;
   refreshDict: () => Promise<void>;
 }) {
   // Observed reach per entry: entry_id join plus name-key fallback, so
@@ -1157,11 +1171,31 @@ function AnalysisSettings({
   const aliasOwnerKeys = new Set(
     dict.filter((x) => x.status !== "rejected").flatMap((x) => x.aliases.map((a) => matchKey(a)))
   );
+  // Auto-hidden ignores (engine-deemed, below the volume threshold - the
+  // same rule as the brands board's receipt) don't reach this view at all:
+  // still ignored for matching, listed only as a count.
+  const obsShareByName = new Map(
+    (obs?.observed ?? []).map((o) => [o.name.trim().toLowerCase(), o.answers])
+  );
+  const isAutoHidden = (e: DictionaryEntry) => {
+    if (e.status !== "rejected" || !suggestions) return false;
+    const s = suggestions.find((x) => x.entryId === e.id);
+    if (!s || s.action !== "ignore") return false;
+    const share =
+      obs && obs.rows > 0
+        ? (obsShareByName.get(e.canonical.trim().toLowerCase()) ?? 0) / obs.rows
+        : 0;
+    return share < 0.1;
+  };
+  const autoHiddenCount = dict.filter(
+    (e) => !aliasOwnerKeys.has(matchKey(e.canonical)) && isAutoHidden(e)
+  ).length;
   const rows = dict.filter(
     (e) =>
       e.status !== "pending" &&
       e.canonical !== "Other" &&
-      (e.status !== "rejected" || !aliasOwnerKeys.has(matchKey(e.canonical)))
+      (e.status !== "rejected" || !aliasOwnerKeys.has(matchKey(e.canonical))) &&
+      !isAutoHidden(e)
   );
   const active = rows
     .filter((e) => e.status === "active")
@@ -1297,7 +1331,7 @@ function AnalysisSettings({
   };
 
   return (
-    <div className="grid gap-4 max-w-3xl">
+    <div className="grid gap-4">
       <p className="text-[13px] text-ink-3 -mt-1">
         Every grouping, sized by how many answers actually name it. Ignored
         names stay in the raw data - rescue them on the brands board if one
@@ -1323,6 +1357,13 @@ function AnalysisSettings({
           </summary>
           <div className="mt-2">{excluded.map(row)}</div>
         </details>
+      )}
+      {autoHiddenCount > 0 && (
+        <p className="text-xs text-ink-3">
+          {autoHiddenCount} more name{autoHiddenCount === 1 ? "" : "s"}{" "}
+          auto-ignored by measured rules - kept out of the way here; the
+          brands board&apos;s receipt can reveal them.
+        </p>
       )}
     </div>
   );
@@ -1672,6 +1713,7 @@ function DictionaryGate({
           id={id}
           project={project}
           dict={projectedDict ?? dictionary}
+          suggestions={suggestions}
           refreshDict={onApplied}
         />
       )}

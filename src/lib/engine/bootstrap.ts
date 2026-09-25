@@ -152,18 +152,23 @@ export async function bootstrapRunChunk(
       project.category
     );
     for (let attempt = 0; attempt < 2; attempt++) {
-      const pendingCount = (await store.getDictionary(project.id)).filter(
-        (e) => e.status === "pending"
-      ).length;
-      if (suggestions.length >= pendingCount) break;
+      // Count only PENDING-name verdicts: the response also carries cached
+      // verdicts for rejected names (the auto-ignore receipt's memory).
+      const pendingIds = new Set(
+        (await store.getDictionary(project.id))
+          .filter((e) => e.status === "pending")
+          .map((e) => e.id)
+      );
+      const covered = suggestions.filter((s) => pendingIds.has(s.entryId)).length;
+      if (covered >= pendingIds.size) break;
       if (Date.now() > deadline - 30_000) {
         console.error(
-          `suggestion warm still incomplete at deadline (${suggestions.length}/${pendingCount})`
+          `suggestion warm still incomplete at deadline (${covered}/${pendingIds.size})`
         );
         break;
       }
       console.log(
-        `suggestion warm incomplete (${suggestions.length}/${pendingCount}) - retrying`
+        `suggestion warm incomplete (${covered}/${pendingIds.size}) - retrying`
       );
       suggestions = await getDictionarySuggestions(
         project.id,
