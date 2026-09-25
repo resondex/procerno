@@ -71,7 +71,13 @@ export default function IdentifyTab({
    * top-right one is hidden and confirmAll is handed up instead. */
   hideConfirm?: boolean;
   registerConfirm?: (
-    fn: (opts?: { deferRefresh?: boolean }) => Promise<void>
+    fn: (opts?: {
+      deferRefresh?: boolean;
+      /** Called SYNCHRONOUSLY with the projected post-commit dictionary, so
+       * the next gate step can render the committed layout immediately
+       * instead of flashing the pre-commit one until the refresh lands. */
+      onProjected?: (entries: DictionaryEntry[]) => void;
+    }) => Promise<void>
   ) => void;
   /** The tracker's own brand - its card always sorts first. */
   targetBrand?: string;
@@ -665,7 +671,130 @@ export default function IdentifyTab({
     setShowAutoIgnored(false);
   }
 
-  async function confirmAll(opts?: { deferRefresh?: boolean }) {
+  /** What the dictionary will look like once this board's commit lands -
+   * the same walk confirmAll ships as actions, applied to a local copy.
+   * Lets the gate's later steps render the committed layout instantly; the
+   * server refresh replaces it with (matching) truth moments later. */
+  function projectCommittedDict(): DictionaryEntry[] {
+    const byId = new Map(
+      dict.map((e) => [e.id, { ...e, aliases: [...e.aliases] }])
+    );
+    const synthetic: DictionaryEntry[] = [];
+    const lower = (s: string) => s.trim().toLowerCase();
+    const absorbInto = (target: DictionaryEntry | undefined, p: Pill) => {
+      if (!target) return;
+      if (p.kind === "alias") {
+        const src = byId.get(p.entryId);
+        if (src) src.aliases = src.aliases.filter((a) => a !== p.norm);
+        if (!target.aliases.includes(p.norm)) target.aliases.push(p.norm);
+      } else {
+        const src = byId.get(p.entryId);
+        if (!src || src === target) return;
+        src.status = "rejected";
+        const moved = [lower(src.canonical), ...src.aliases];
+        src.aliases = [];
+        for (const a of moved) {
+          if (!target.aliases.includes(a)) target.aliases.push(a);
+        }
+      }
+    };
+    for (const b of buckets) {
+      const groupedHere = new Set(
+        b.pills
+          .filter((p) => p.kind === "canonical" && p.homeStatus === "active")
+          .map((p) => p.entryId)
+      );
+      const covered = (p: Pill) =>
+        p.kind === "alias" && groupedHere.has(p.entryId);
+      if (b.kind === "new") {
+        const anchor = b.pills.find((p) => p.kind === "canonical") ?? b.pills[0];
+        if (!anchor) continue;
+        let target: DictionaryEntry | undefined;
+        if (anchor.kind === "canonical") {
+          target = byId.get(anchor.entryId);
+          if (target) {
+            target.status = "active";
+            if (b.label.trim() && b.label.trim() !== anchor.name) {
+              target.display_name = b.label.trim();
+            }
+          }
+        } else {
+          const src = byId.get(anchor.entryId);
+          if (src) src.aliases = src.aliases.filter((a) => a !== anchor.norm);
+          target = {
+            ...(byId.get(anchor.entryId) ?? dict[0]),
+            id: `optimistic:${anchor.norm}`,
+            canonical: anchor.name,
+            aliases: [],
+            display_name:
+              b.label.trim() && b.label.trim() !== anchor.name
+                ? b.label.trim()
+                : null,
+            status: "active",
+            confirmed: [],
+            parent: null,
+            role: null,
+            analyzed: true,
+          };
+          synthetic.push(target);
+        }
+        for (const p of b.pills) {
+          if (p === anchor || covered(p)) continue;
+          absorbInto(target, p);
+        }
+      } else if (b.kind === "brand") {
+        const target = b.entryId ? byId.get(b.entryId) : undefined;
+        if (target && b.label.trim() && b.label.trim() !== b.originalLabel) {
+          target.display_name = b.label.trim();
+        }
+        for (const p of b.pills) {
+          if (p.entryId === b.entryId || covered(p)) continue;
+          absorbInto(target, p);
+        }
+      } else if (b.kind === "other") {
+        const target = b.entryId ? byId.get(b.entryId) : undefined;
+        for (const p of b.pills) {
+          if ((b.entryId && p.entryId === b.entryId) || covered(p)) continue;
+          if (target) absorbInto(target, p);
+          else if (p.kind === "canonical") {
+            // No Other entry yet - the server creates it on commit; until
+            // the refresh, the source simply leaves the analyzable set.
+            const src = byId.get(p.entryId);
+            if (src) src.status = "rejected";
+          }
+        }
+      } else {
+        for (const p of b.pills) {
+          if (p.homeStatus === "rejected" || covered(p)) continue;
+          if (targetBrand && matchKey(p.name) === matchKey(targetBrand))
+            continue;
+          const src = byId.get(p.entryId);
+          if (!src) continue;
+          if (p.kind === "alias") {
+            src.aliases = src.aliases.filter((a) => a !== p.norm);
+          } else {
+            src.status = "rejected";
+          }
+        }
+      }
+    }
+    for (const a of autoIgnored) {
+      if (buckets.some((b) => b.pills.some((p) => p.entryId === a.entryId)))
+        continue;
+      const src = byId.get(a.entryId);
+      if (src) src.status = "rejected";
+    }
+    return [...byId.values(), ...synthetic];
+  }
+
+  async function confirmAll(opts?: {
+    deferRefresh?: boolean;
+    onProjected?: (entries: DictionaryEntry[]) => void;
+  }) {
+    // Synchronous, before any await: the caller advances the gate the
+    // moment this returns its promise, and the projection must already be
+    // in its hands by then.
+    opts?.onProjected?.(projectCommittedDict());
     setConfirming(true);
     try {
       type Act = Record<string, unknown>;

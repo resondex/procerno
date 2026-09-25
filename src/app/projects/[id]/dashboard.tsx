@@ -52,12 +52,16 @@ export default function ProjectDashboard({
   id,
   initialDetail,
   initialRunId,
+  initialGateStep = null,
 }: {
   id: string;
   /** Server-loaded: the page arrives WITH its data - no skeleton, no
    * flicker. The mount refresh() revalidates in the background. */
   initialDetail: Detail;
   initialRunId: string | null;
+  /** The dictionary-gate step from the request's cookie, so the server
+   * render opens on the user's saved step instead of flashing 1/3. */
+  initialGateStep?: 2 | 3 | null;
 }) {
   const [detail, setDetail] = useState<Detail | null>(initialDetail);
   const [progress, setProgress] = useState<Progress | null>(null);
@@ -459,6 +463,7 @@ export default function ProjectDashboard({
             answers={progress?.total ?? 0}
             dictionary={dict}
             suggestions={gateSuggestions}
+            initialGateStep={initialGateStep}
             onRatified={refresh}
             onDictApplied={refreshDict}
           />
@@ -1330,6 +1335,7 @@ function PipelineNext({
   answers,
   dictionary,
   suggestions,
+  initialGateStep,
   onRatified,
   onDictApplied,
 }: {
@@ -1339,6 +1345,8 @@ function PipelineNext({
   dictionary: DictionaryEntry[];
   /** Pre-warmed brand-board suggestions (fetched during the codebook step). */
   suggestions: Suggestion[] | null;
+  /** Cookie-restored gate step, from the server render. */
+  initialGateStep: 2 | 3 | null;
   onRatified: () => void | Promise<void>;
   onDictApplied: () => Promise<void>;
 }) {
@@ -1440,6 +1448,7 @@ function PipelineNext({
           project={project}
           dictionary={dictionary}
           suggestions={suggestions}
+          initialStep={initialGateStep}
           onApplied={onDictApplied}
           onAdvance={() => advance({ dict: true })}
           onFailed={(m) =>
@@ -1483,6 +1492,7 @@ function DictionaryGate({
   project,
   dictionary,
   suggestions,
+  initialStep,
   onApplied,
   onAdvance,
   onFailed,
@@ -1496,6 +1506,9 @@ function DictionaryGate({
   dictionary: DictionaryEntry[];
   /** Pre-warmed board suggestions - the board mounts fully served. */
   suggestions: Suggestion[] | null;
+  /** Cookie-restored step, known to the SERVER - the first paint renders
+   * the right step instead of flashing 1/3 until hydration. */
+  initialStep: 2 | 3 | null;
   onApplied: () => Promise<void>;
   /** Optimistic transitions: the card moves NOW, the server call syncs
    * behind it, and the matching -Failed callback snaps it back. */
@@ -1508,20 +1521,29 @@ function DictionaryGate({
   onBackToCodebook: () => void | Promise<void>;
 }) {
   // Step survives a reload: a browser refresh mid-gate must land the user
-  // back where they were, not restart the walkthrough. Per-project key;
-  // storage can throw (private windows), so every touch is guarded.
+  // back where they were, not restart the walkthrough. The step lives in a
+  // COOKIE so the server renders the right step in the very first paint -
+  // localStorage restore only happened at hydration, and the SSR'd step-1
+  // markup flashed for the beat before it. A stored step past 1 is only
+  // honored when the dictionary actually carries a confirmed layout - after
+  // a board reset the saved position is stale and the walkthrough starts
+  // over.
   const stepKey = `dict_gate_step:${id}`;
-  const [step, rawSetStep] = useState<1 | 2 | 3>(1);
-  // Restore before first paint (layout effect) so the server-rendered step-1
-  // markup never flashes and hydration stays clean. A stored step past 1 is
-  // only honored when the dictionary actually carries a confirmed layout -
-  // after a board reset the saved position is stale and the walkthrough
-  // starts over.
+  const cookieKey = `dict_gate_step_${id}`;
   const hasConfirmedLayout = dictionary.some((d) => d.confirmed.length > 0);
+  const [step, rawSetStep] = useState<1 | 2 | 3>(() =>
+    (initialStep === 2 || initialStep === 3) && hasConfirmedLayout
+      ? initialStep
+      : 1
+  );
+  // Legacy migration: a step saved by the localStorage-only version has no
+  // cookie yet - restore it once at hydration (and write the cookie via
+  // setStep so the next reload is flash-free).
   useLayoutEffect(() => {
+    if (initialStep) return;
     try {
       const s = Number(window.localStorage.getItem(stepKey));
-      if ((s === 2 || s === 3) && hasConfirmedLayout) rawSetStep(s);
+      if ((s === 2 || s === 3) && hasConfirmedLayout) setStep(s as 2 | 3);
     } catch {}
     // Intentionally run once on mount: mid-session dictionary refreshes must
     // not yank the user back a step.
@@ -1532,14 +1554,22 @@ function DictionaryGate({
   // button disables until the board is served: it registers only once its
   // suggestion pass resolves, and a stale closure from a previous visit
   // must never commit a board the user hasn't seen.
-  const [boardConfirm, setBoardConfirm] = useState<
-    ((opts?: { deferRefresh?: boolean }) => Promise<void>) | null
-  >(null);
+  type BoardConfirm = (opts?: {
+    deferRefresh?: boolean;
+    onProjected?: (entries: DictionaryEntry[]) => void;
+  }) => Promise<void>;
+  const [boardConfirm, setBoardConfirm] = useState<BoardConfirm | null>(null);
   const registerBoardConfirm = useCallback(
-    (fn: (opts?: { deferRefresh?: boolean }) => Promise<void>) => {
+    (fn: BoardConfirm) => {
       setBoardConfirm(() => fn);
     },
     [setBoardConfirm]
+  );
+  // The projected post-commit dictionary: steps 2/3 render it the moment
+  // step 1 confirms, so they never flash the pre-commit layout; the server
+  // refresh replaces it with matching truth and it clears.
+  const [projectedDict, setProjectedDict] = useState<DictionaryEntry[] | null>(
+    null
   );
   const setStep = useCallback(
     (s: 1 | 2 | 3) => {
@@ -1549,9 +1579,10 @@ function DictionaryGate({
       if (s !== 1) setBoardConfirm(null);
       try {
         window.localStorage.setItem(stepKey, String(s));
+        document.cookie = `${cookieKey}=${s}; path=/; max-age=2592000; samesite=lax`;
       } catch {}
     },
-    [stepKey, setBoardConfirm]
+    [stepKey, cookieKey, setBoardConfirm]
   );
   const [error, setError] = useState<string | null>(null);
   // No Saving beat anywhere in the gate: the click moves the view NOW, the
@@ -1569,6 +1600,7 @@ function DictionaryGate({
     }
     try {
       window.localStorage.removeItem(stepKey);
+      document.cookie = `${cookieKey}=; path=/; max-age=0`;
     } catch {}
     await onConfirmed();
   };
@@ -1630,7 +1662,7 @@ function DictionaryGate({
       {step === 2 && (
         <ParentsTab
           projectId={id}
-          dict={dictionary}
+          dict={projectedDict ?? dictionary}
           onApplied={onApplied}
           hideIntro
         />
@@ -1639,7 +1671,7 @@ function DictionaryGate({
         <AnalysisSettings
           id={id}
           project={project}
-          dict={dictionary}
+          dict={projectedDict ?? dictionary}
           refreshDict={onApplied}
         />
       )}
@@ -1662,17 +1694,25 @@ function DictionaryGate({
                 if (step === 1 && boardConfirm) {
                   // Advance NOW; the layout commit runs behind the step
                   // change (the board unmounts first, so nothing visibly
-                  // reshuffles) and a failure surfaces in the footer.
-                  const commit = boardConfirm({ deferRefresh: true });
+                  // reshuffles) and a failure surfaces in the footer. The
+                  // board hands over its projected post-commit dictionary
+                  // synchronously, so step 2 opens on the layout the user
+                  // just confirmed - never the pre-commit one.
+                  const commit = boardConfirm({
+                    deferRefresh: true,
+                    onProjected: setProjectedDict,
+                  });
                   setError(null);
                   setStep(2);
                   commit
                     .then(() => onApplied())
-                    .catch((err) =>
+                    .then(() => setProjectedDict(null))
+                    .catch((err) => {
+                      setProjectedDict(null);
                       setError(
                         `${err instanceof Error ? err.message : "save failed"} - the board layout has NOT been saved; go back and confirm it again`
-                      )
-                    );
+                      );
+                    });
                   return;
                 }
                 setStep((step + 1) as 2 | 3);
