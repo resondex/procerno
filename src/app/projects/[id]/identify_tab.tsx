@@ -289,6 +289,14 @@ export default function IdentifyTab({
             locked: false,
             confirmed: e.confirmed.includes(norm(e.canonical)),
             moved: false,
+            // An engine-deemed ignore that surfaces as a pill (rather than
+            // folding into the auto-ignore receipt) always asks for one
+            // deliberate look - only a user's own confirmation clears it.
+            ...(e.confirmed.includes(norm(e.canonical))
+              ? {}
+              : {
+                  note: "The engine filed this under Ignore - usually a generic word or scenery rather than a brand. Confirm that is right, or drag it onto a brand to group it, or into its own bucket to track it.",
+                }),
           })),
       });
       return out;
