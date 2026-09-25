@@ -1201,27 +1201,28 @@ function AnalysisSettings({
         >
           {e.aliases.length > 0 ? `${e.aliases.length} name form${e.aliases.length === 1 ? "" : "s"}` : ""}
         </span>
-        <button
-          type="button"
-          onClick={() => dictAction(e.id, inAnalysis ? "reject" : "approve")}
-          className={`w-24 rounded-full border px-2.5 py-1 text-[11px] font-semibold ${
-            inAnalysis
-              ? "border-primary/30 bg-primary-soft text-primary hover:opacity-80"
-              : "border-line text-ink-3 hover:border-ink-3 hover:text-ink"
-          }`}
-        >
-          {inAnalysis ? "In analysis" : "Include"}
-        </button>
+        {inAnalysis ? (
+          <button
+            type="button"
+            onClick={() => dictAction(e.id, "reject")}
+            title="Click to exclude from analysis"
+            className="w-24 rounded-full border border-primary/30 bg-primary-soft px-2.5 py-1 text-[11px] font-semibold text-primary hover:opacity-80"
+          >
+            In analysis
+          </button>
+        ) : (
+          <span className="w-24 text-right text-[11px] text-ink-3">ignored</span>
+        )}
       </div>
     );
   };
 
   return (
-    <div className="grid gap-4">
+    <div className="grid gap-4 max-w-3xl">
       <p className="text-[13px] text-ink-3 -mt-1">
-        Every grouping, sized by how many answers actually name it. Excluded
-        groupings stay in the raw data and can be re-included at any time -
-        the metrics recompute retroactively.
+        Every grouping, sized by how many answers actually name it. Ignored
+        names stay in the raw data - rescue them on the brands board if one
+        should count.
       </p>
       {parents.map((par) => (
         <div key={par}>
@@ -1238,8 +1239,8 @@ function AnalysisSettings({
       {excluded.length > 0 && (
         <details>
           <summary className="cursor-pointer text-xs text-ink-3 hover:text-ink">
-            {excluded.length} grouping{excluded.length === 1 ? "" : "s"} excluded
-            from analysis - view or re-include
+            {excluded.length} name{excluded.length === 1 ? "" : "s"} ignored -
+            view (rescue them on the brands board)
           </summary>
           <div className="mt-2">{excluded.map(row)}</div>
         </details>
