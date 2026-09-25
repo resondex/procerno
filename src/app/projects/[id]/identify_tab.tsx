@@ -480,10 +480,15 @@ export default function IdentifyTab({
               pills: [mkPill(entry, sug)],
             });
           }
-          // Pass 2: merges into actives or the buckets pass 1 created.
+          // Pass 2: merges into actives or the buckets pass 1 created;
+          // volume-escalated ignores land in the Ignore bucket as flagged
+          // pills.
           for (const { entry, s: sug, target } of plans) {
             if (!target || placed(entry.id)) continue;
-            const b = next.find((x) => x.entryId === target);
+            const b =
+              target === "__ignore__"
+                ? next.find((x) => x.key === "__ignore__")
+                : next.find((x) => x.entryId === target);
             if (b) b.pills.push(mkPill(entry, sug));
           }
           return next;
@@ -827,10 +832,9 @@ export default function IdentifyTab({
       ...loose.filter((p) => !isAnchor(p) && !p.note),
       ...loose.filter((p) => !isAnchor(p) && p.note),
     ];
-    const pillSpan = (p: Pill, orderVal = 0) => (
+    const pillSpan = (p: Pill) => (
           <span
             key={p.norm}
-            style={{ order: orderVal }}
             draggable={!p.locked}
             onDragStart={(e) => {
               e.dataTransfer.setData("text/pill", p.norm);
@@ -910,12 +914,13 @@ export default function IdentifyTab({
 
     return (
       <div className="flex flex-wrap gap-1.5 min-h-9 rounded-lg p-1 -m-1">
+        {shown.filter((p) => isAnchor(p)).map((p) => pillSpan(p))}
         {open && autos.length > 0 && (
-          <span className="order-2 inline-flex flex-wrap items-center gap-1.5 rounded-xl border border-dashed border-line bg-ink/[0.03] px-1.5 py-1">
+          <span className="inline-flex flex-wrap items-center gap-1.5 rounded-xl border border-dashed border-line bg-ink/[0.03] px-1.5 py-1">
             {autos.map((p) => pillSpan(p))}
           </span>
         )}
-        {shown.map((p, idx) => pillSpan(p, isAnchor(p) ? 1 : 3 + idx))}
+        {shown.filter((p) => !isAnchor(p)).map((p) => pillSpan(p))}
         {b.pills.length === 0 && (
           <span className="text-xs text-ink-3 self-center px-1">
             drop names here
