@@ -200,6 +200,7 @@ function ensureSchema(): Promise<void> {
       await sql`ALTER TABLE dictionary_entries ADD COLUMN IF NOT EXISTS confirmed_aliases TEXT NOT NULL DEFAULT '[]'`;
       await sql`ALTER TABLE dictionary_entries ADD COLUMN IF NOT EXISTS parent TEXT`;
       await sql`ALTER TABLE dictionary_entries ADD COLUMN IF NOT EXISTS role TEXT`;
+      await sql`ALTER TABLE dictionary_entries ADD COLUMN IF NOT EXISTS analyzed BOOLEAN`;
       await sql`CREATE TABLE IF NOT EXISTS user_plans (
         user_id TEXT PRIMARY KEY,
         plan TEXT NOT NULL DEFAULT 'free'
@@ -350,6 +351,7 @@ function rowToDictEntry(r: Record<string, unknown>): DictionaryEntry {
     confirmed: JSON.parse((r.confirmed_aliases as string) ?? "[]"),
     parent: (r.parent as string | null) ?? null,
     role: (r.role as DictionaryEntry["role"]) ?? null,
+    analyzed: (r.analyzed as boolean | null) ?? true,
     version: (r.version as number) ?? 1,
     created_at: iso(r.created_at)!,
   };
@@ -537,6 +539,11 @@ export const pgStore: Store = {
   async setDictionaryRole(entryId, role) {
     const sql = await db();
     await sql`UPDATE dictionary_entries SET role = ${role} WHERE id = ${entryId}`;
+  },
+
+  async setDictionaryAnalyzed(entryId, analyzed) {
+    const sql = await db();
+    await sql`UPDATE dictionary_entries SET analyzed = ${analyzed} WHERE id = ${entryId}`;
   },
 
   async upsertDictionaryEntry(input) {

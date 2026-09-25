@@ -289,6 +289,14 @@ export function computeRunMetricsFromData(
   const roleOf = dictionaryRoles(dictionary, project, canon);
 
   // --- per-brand stats over unbranded responses (canonicalized) ---
+  // Analysis-settings exclusions are read-time: the entry keeps matching
+  // (mentions stay attributed), its rows just never reach the stats - so
+  // re-including a brand recomputes retroactively with nothing lost.
+  const notAnalyzed = new Set(
+    dictionary
+      .filter((e) => e.status === "active" && !e.analyzed)
+      .map((e) => e.canonical.trim().toLowerCase())
+  );
   const byBrand = new Map<string, { display: string; rows: MentionRow[] }>();
   const mentionNorm = new Map<string, string>(); // mention id -> canonical norm
   for (const m of mentions) {
@@ -296,6 +304,7 @@ export function computeRunMetricsFromData(
     mentionNorm.set(m.id, norm);
     if (!unbrandedIds.has(m.response_id)) continue;
     if (canon.isRejected(m.brand)) continue; // reviewed out of the category
+    if (notAnalyzed.has(norm)) continue; // excluded in Analysis settings
     const entry =
       byBrand.get(norm) ?? { display: canon.canonical(m.brand), rows: [] };
     entry.rows.push(m);

@@ -36,6 +36,7 @@ const actionSchema = z.object({
     "set_parent",
     "rename_parent",
     "set_role",
+    "set_analyzed",
   ]),
   mergeIntoId: z.string().min(1).optional(),
   /** Fallback target for merge/move_alias when the target entry was created
@@ -52,6 +53,8 @@ const actionSchema = z.object({
   parent: z.string().trim().min(1).max(80).nullable().optional(),
   /** set_role: tracked competitor or model-volunteered discovery. */
   role: z.enum(["competitor", "emerged"]).optional(),
+  /** set_analyzed: include/exclude from analysis - matching untouched. */
+  analyzed: z.boolean().optional(),
 });
 
 const batchSchema = z.object({
@@ -130,12 +133,21 @@ async function applyAction(
   // (2026-09-24): whatever the client sends, the server refuses here.
   if (
     targetBrand &&
-    (a.action === "reject" || a.action === "merge" || a.action === "merge_other")
+    (a.action === "reject" ||
+      a.action === "merge" ||
+      a.action === "merge_other" ||
+      (a.action === "set_analyzed" && a.analyzed === false))
   ) {
     const tk = matchKey(targetBrand);
     if (matchKey(entry.canonical) === tk || entry.aliases.some((al) => matchKey(al) === tk)) {
-      return `refused: "${entry.canonical}" is the target brand and cannot be ${a.action === "reject" ? "rejected" : "merged away"}`;
+      return `refused: "${entry.canonical}" is the target brand and cannot be ${a.action === "reject" ? "rejected" : a.action === "set_analyzed" ? "excluded from analysis" : "merged away"}`;
     }
+  }
+
+  if (a.action === "set_analyzed") {
+    if (typeof a.analyzed !== "boolean") return "set_analyzed needs analyzed";
+    await store.setDictionaryAnalyzed(entry.id, a.analyzed);
+    return null;
   }
 
   if (a.action === "set_parent") {

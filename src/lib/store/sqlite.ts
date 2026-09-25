@@ -377,6 +377,9 @@ function createDb(): Database.Database {
   if (dictCols.length > 0 && !dictCols.some((c) => c.name === "role")) {
     db.exec("ALTER TABLE dictionary_entries ADD COLUMN role TEXT");
   }
+  if (dictCols.length > 0 && !dictCols.some((c) => c.name === "analyzed")) {
+    db.exec("ALTER TABLE dictionary_entries ADD COLUMN analyzed INTEGER");
+  }
   const promptCols = db.prepare("PRAGMA table_info(prompts)").all() as {
     name: string;
   }[];
@@ -524,6 +527,7 @@ function parseDictEntry(row: Record<string, unknown>): DictionaryEntry {
     confirmed: JSON.parse((row.confirmed_aliases as string) ?? "[]"),
     parent: (row.parent as string | null) ?? null,
     role: (row.role as DictionaryEntry["role"]) ?? null,
+    analyzed: (row.analyzed as number | null) == null ? true : !!row.analyzed,
     version: (row.version as number) ?? 1,
     created_at: row.created_at as string,
   };
@@ -736,6 +740,12 @@ export const sqliteStore: Store = {
     getDb()
       .prepare("UPDATE dictionary_entries SET role = ? WHERE id = ?")
       .run(role, entryId);
+  },
+
+  async setDictionaryAnalyzed(entryId, analyzed) {
+    getDb()
+      .prepare("UPDATE dictionary_entries SET analyzed = ? WHERE id = ?")
+      .run(analyzed ? 1 : 0, entryId);
   },
 
   async upsertDictionaryEntry(input) {

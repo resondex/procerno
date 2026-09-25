@@ -315,6 +315,9 @@ export interface DictionaryEntry {
    * setup-time competitor list (pre-migration entries). The target brand's
    * role is always derived from the project, never stored. */
   role: "competitor" | "emerged" | null;
+  /** Analysis-settings toggle: false = tracked and matched as usual but
+   * left out of dashboards. Distinct from rejected - reversible in place. */
+  analyzed: boolean;
   version: number;
   created_at: string;
 }
@@ -662,6 +665,8 @@ export interface Store {
     entryId: string,
     role: "competitor" | "emerged"
   ): Promise<void>;
+  /** Analysis-settings include/exclude - status and matching untouched. */
+  setDictionaryAnalyzed(entryId: string, analyzed: boolean): Promise<void>;
   // --- orgs, membership, staff ---
   createOrg(name: string): Promise<Org>;
   listOrgs(): Promise<Org[]>;

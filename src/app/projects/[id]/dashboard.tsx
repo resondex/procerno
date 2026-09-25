@@ -1138,13 +1138,21 @@ function AnalysisSettings({
   const parents = [...new Set(active.map(({ e }) => e.parent).filter((p): p is string => !!p))];
   const maxReach = Math.max(1, ...active.map((x) => x.reach));
 
+  const setAnalyzed = async (entryId: string, analyzed: boolean) => {
+    await fetch(`/api/projects/${id}/dictionary`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ entryId, action: "set_analyzed", analyzed }),
+    });
+    await refreshDict();
+  };
   const row = ({ e, reach }: { e: DictionaryEntry; reach: number }) => {
     const tier = tierOf(reach);
     const inAnalysis = e.status === "active";
     return (
       <div
         key={e.id}
-        className={`grid grid-cols-[minmax(0,1.4fr)_auto_minmax(0,1fr)_auto_auto] items-center gap-3 border-b border-line/60 py-2 text-sm ${inAnalysis ? "" : "opacity-60"}`}
+        className={`grid grid-cols-[minmax(0,1.4fr)_auto_minmax(0,1fr)_auto_auto] items-center gap-3 border-b border-line/60 py-2 text-sm ${!inAnalysis ? "opacity-60" : e.analyzed ? "" : "opacity-70"}`}
       >
         <div className="min-w-0 flex items-center gap-2">
           <span className={`truncate font-medium ${inAnalysis ? "" : "line-through text-ink-3"}`}>
@@ -1208,17 +1216,26 @@ function AnalysisSettings({
           >
             Always in
           </span>
-        ) : inAnalysis ? (
+        ) : !inAnalysis ? (
+          <span className="w-24 text-right text-[11px] text-ink-3">ignored</span>
+        ) : e.analyzed ? (
           <button
             type="button"
-            onClick={() => dictAction(e.id, "reject")}
-            title="Click to exclude from analysis"
+            onClick={() => setAnalyzed(e.id, false)}
+            title="Click to exclude from analysis - reversible any time"
             className="w-24 rounded-full border border-primary/30 bg-primary-soft px-2.5 py-1 text-[11px] font-semibold text-primary hover:opacity-80"
           >
             In analysis
           </button>
         ) : (
-          <span className="w-24 text-right text-[11px] text-ink-3">ignored</span>
+          <button
+            type="button"
+            onClick={() => setAnalyzed(e.id, true)}
+            title="Excluded from analysis - click to include again"
+            className="w-24 rounded-full border border-danger/30 bg-danger/10 px-2.5 py-1 text-[11px] font-semibold text-danger hover:opacity-80"
+          >
+            Not analyzed
+          </button>
         )}
       </div>
     );
