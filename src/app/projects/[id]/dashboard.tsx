@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import TrendChart from "./trend_chart";
 import RunResults from "./run_results";
@@ -1128,7 +1128,8 @@ function AnalysisSettings({
 }) {
   // Observed reach per entry: entry_id join plus name-key fallback, so
   // promotions after the aggregation snapshot still show their numbers.
-  const obs = (() => {
+  // Memoized - toggles re-render this view and the parse is not free.
+  const obs = useMemo(() => {
     try {
       return project.brand_observations
         ? (JSON.parse(project.brand_observations) as {
@@ -1139,7 +1140,7 @@ function AnalysisSettings({
     } catch {
       return null;
     }
-  })();
+  }, [project.brand_observations]);
   const reachOf = (e: DictionaryEntry) => {
     if (!obs) return 0;
     const keys = new Set([matchKey(e.canonical), ...e.aliases.map((a) => matchKey(a))]);
@@ -1628,11 +1629,26 @@ function DictionaryGate({
     [stepKey, cookieKey, setBoardConfirm]
   );
   const [error, setError] = useState<string | null>(null);
+  // The step-1 layout commit runs behind the step change; the final
+  // sign-off must not close the gate over a commit that is still in
+  // flight - or worse, one that failed.
+  const layoutCommit = useRef<Promise<void> | null>(null);
   // No Saving beat anywhere in the gate: the click moves the view NOW, the
   // POST syncs behind it, and a refusal snaps the pipeline back with the
   // reason (the parent's stage banner).
   const confirm = async () => {
     onAdvance();
+    // A failed or unfinished layout commit means the board the user signed
+    // off on is not what the server holds - snap back with that reason
+    // instead of confirming a lost layout.
+    try {
+      await layoutCommit.current;
+    } catch (err) {
+      onFailed(
+        `the board layout did not save (${err instanceof Error ? err.message : "error"}) - go back to the board and confirm it again`
+      );
+      return;
+    }
     const res = await fetch(`/api/projects/${id}/dictionary/confirm`, {
       method: "POST",
     }).catch(() => null);
@@ -1746,6 +1762,7 @@ function DictionaryGate({
                     deferRefresh: true,
                     onProjected: setProjectedDict,
                   });
+                  layoutCommit.current = commit;
                   setError(null);
                   setStep(2);
                   commit

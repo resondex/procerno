@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { DictionaryEntry } from "@/lib/types";
 import { matchKey } from "@/lib/brand_key";
 import { flaggedIgnorePrefix, ignoreSurfaces } from "@/lib/ignore_rules";
@@ -89,26 +89,29 @@ export default function IdentifyTab({
 }) {
   // Observed sizing: entry_id-matched counts size the brand buckets; name
   // keys size the pending pills. Tier words, no raw numbers - preliminary
-  // until coding.
-  const obs = (() => {
+  // until coding. Memoized: drags and hovers re-render this board a lot,
+  // and re-parsing a ~120-row JSON blob each time is pure waste.
+  const { obs, obsByEntry, obsByName, maxObs } = useMemo(() => {
+    let parsed: {
+      rows: number;
+      observed: { name: string; entry_id: string | null; answers: number }[];
+    } | null = null;
     try {
-      return observations
-        ? (JSON.parse(observations) as {
-            rows: number;
-            observed: { name: string; entry_id: string | null; answers: number }[];
-          })
-        : null;
-    } catch {
-      return null;
+      parsed = observations ? JSON.parse(observations) : null;
+    } catch {}
+    const byEntry = new Map<string, number>();
+    const byName = new Map<string, number>();
+    for (const o of parsed?.observed ?? []) {
+      if (o.entry_id) byEntry.set(o.entry_id, (byEntry.get(o.entry_id) ?? 0) + o.answers);
+      byName.set(norm(o.name), o.answers);
     }
-  })();
-  const obsByEntry = new Map<string, number>();
-  const obsByName = new Map<string, number>();
-  for (const o of obs?.observed ?? []) {
-    if (o.entry_id) obsByEntry.set(o.entry_id, (obsByEntry.get(o.entry_id) ?? 0) + o.answers);
-    obsByName.set(norm(o.name), o.answers);
-  }
-  const maxObs = Math.max(1, ...(obs?.observed ?? []).map((o) => o.answers));
+    return {
+      obs: parsed,
+      obsByEntry: byEntry,
+      obsByName: byName,
+      maxObs: Math.max(1, ...(parsed?.observed ?? []).map((o) => o.answers)),
+    };
+  }, [observations]);
   const tierOf = (n: number) => {
     const f = n / (obs?.rows || 1);
     return f >= 0.3
@@ -981,9 +984,13 @@ export default function IdentifyTab({
         }
       }
       // Engine-ignored names commit as rejected alongside the board -
-      // unless they're currently visible as pills, in which case the bucket
-      // walk above already covered them.
+      // unless they're currently visible as pills (the bucket walk above
+      // covered them) or ALREADY rejected (the fold-persistence case: a
+      // re-walk of a confirmed board must not re-write ~40 no-op rejects
+      // and pay the observations recompute they trigger).
+      const statusOf = new Map(dict.map((e) => [e.id, e.status]));
       for (const a of autoIgnored) {
+        if (statusOf.get(a.entryId) === "rejected") continue;
         if (buckets.some((b) => b.pills.some((p) => p.entryId === a.entryId)))
           continue;
         merges.push({ entryId: a.entryId, action: "reject" });
@@ -1022,6 +1029,11 @@ export default function IdentifyTab({
       if (!opts?.deferRefresh) {
         setAutoIgnored([]);
         setShowAutoIgnored(false);
+        // Let the suggestion pass rerun against the refreshed dictionary:
+        // the just-committed rejects must fold straight back behind the
+        // receipt instead of appearing as pills until a remount.
+        passRan.current = false;
+        prefetchConsumed.current = true;
         await onApplied();
       }
     } finally {
