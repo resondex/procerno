@@ -69,7 +69,9 @@ export default function IdentifyTab({
   /** Gate mode: the step footer owns the confirm button, so the board's own
    * top-right one is hidden and confirmAll is handed up instead. */
   hideConfirm?: boolean;
-  registerConfirm?: (fn: () => Promise<void>) => void;
+  registerConfirm?: (
+    fn: (opts?: { deferRefresh?: boolean }) => Promise<void>
+  ) => void;
   /** The tracker's own brand - its card always sorts first. */
   targetBrand?: string;
 }) {
@@ -641,7 +643,7 @@ export default function IdentifyTab({
     setShowAutoIgnored(false);
   }
 
-  async function confirmAll() {
+  async function confirmAll(opts?: { deferRefresh?: boolean }) {
     setConfirming(true);
     try {
       type Act = Record<string, unknown>;
@@ -793,19 +795,24 @@ export default function IdentifyTab({
         });
       }
       suggestedFor.current.clear();
-      setAutoIgnored([]);
-      setShowAutoIgnored(false);
-      await onApplied();
+      // The gate footer defers the refresh: it advances to the next step
+      // first (unmounting this board) and refreshes then, so the committed
+      // layout never visibly reshuffles in the beat before the step change.
+      if (!opts?.deferRefresh) {
+        setAutoIgnored([]);
+        setShowAutoIgnored(false);
+        await onApplied();
+      }
     } finally {
       setConfirming(false);
     }
   }
 
   // Latest confirmAll, handed to the gate footer once.
-  const confirmAllRef = useRef<() => Promise<void>>(async () => {});
+  const confirmAllRef = useRef<typeof confirmAll>(async () => {});
   confirmAllRef.current = confirmAll;
   useEffect(() => {
-    registerConfirm?.(() => confirmAllRef.current());
+    registerConfirm?.((opts) => confirmAllRef.current(opts));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [registerConfirm]);
 
@@ -987,7 +994,7 @@ export default function IdentifyTab({
         {!hideConfirm && (
           <button
             type="button"
-            onClick={confirmAll}
+            onClick={() => confirmAll()}
             disabled={confirming || unconfirmedCount === 0}
             className="btn-primary px-3 py-1.5 text-[13px] inline-flex items-center gap-2"
           >

@@ -1432,10 +1432,15 @@ function DictionaryGate({
   const [error, setError] = useState<string | null>(null);
   // The board's confirmAll, handed up so the footer's "Confirm layout"
   // commits the layout before advancing.
-  const boardConfirm = useRef<(() => Promise<void>) | null>(null);
-  const registerBoardConfirm = useCallback((fn: () => Promise<void>) => {
-    boardConfirm.current = fn;
-  }, []);
+  const boardConfirm = useRef<
+    ((opts?: { deferRefresh?: boolean }) => Promise<void>) | null
+  >(null);
+  const registerBoardConfirm = useCallback(
+    (fn: (opts?: { deferRefresh?: boolean }) => Promise<void>) => {
+      boardConfirm.current = fn;
+    },
+    []
+  );
   const confirm = async () => {
     setSaving(true);
     setError(null);
@@ -1537,10 +1542,15 @@ function DictionaryGate({
                 if (step === 1 && boardConfirm.current) {
                   setSaving(true);
                   try {
-                    await boardConfirm.current();
+                    // Commit only - the refresh comes after the step change
+                    // so the board never visibly reshuffles on its way out.
+                    await boardConfirm.current({ deferRefresh: true });
                   } finally {
                     setSaving(false);
                   }
+                  setStep(2);
+                  await onApplied();
+                  return;
                 }
                 setStep((step + 1) as 2 | 3);
               }}
