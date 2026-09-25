@@ -99,8 +99,9 @@ export async function bootstrapRunChunk(
     await store.setTaxonomyProposal(project.id, JSON.stringify(proposal));
   }
 
-  // Stage 4: brand observations + the dictionary queue - the shared
-  // recomputable implementation (family-aware attribution, 1% floor).
+  // Stage 4a: brand observations + the dictionary queue - the shared
+  // recomputable implementation (family-aware attribution, 1% floor) - and
+  // the junk filter, once per project.
   if (!project.brand_observations) {
     await refreshBrandObservations(project.id);
     // Sub-floor surface forms alias into their family's entry so read-time
@@ -110,8 +111,6 @@ export async function bootstrapRunChunk(
     } catch (err) {
       console.error("observed-alias refresh failed:", err);
     }
-    // Junk filter + pre-warmed suggestions, so the gate opens onto a sorted
-    // tray instead of a spinner.
     try {
       const pending = (await store.getDictionary(project.id)).filter(
         (e) => e.status === "pending"
@@ -133,22 +132,47 @@ export async function bootstrapRunChunk(
         }
         if (excluded > 0) await store.bumpDictionaryVersion(project.id);
       }
-      const suggestions = await getDictionarySuggestions(
+    } catch (err) {
+      console.error("bootstrap junk filter failed:", err);
+    }
+  }
+
+  // Stage 4b: the review-phase contract - by the time the run reads
+  // "collected", EVERY judgment the gates will show is cached: a verdict
+  // per pending name and the examples behind every flagged pill. This runs
+  // on every drive (cache-first, so a re-drive of a warm project costs one
+  // batch read), NOT only on the first: a killed chunk used to skip it via
+  // the brand_observations guard and ship a half-warm board. Completeness
+  // is verified with bounded retries - a failed suggestion batch leaves
+  // names uncached, and retrying here is what keeps live model calls out
+  // of the user's review session.
+  try {
+    let suggestions = await getDictionarySuggestions(
+      project.id,
+      project.category
+    );
+    for (let attempt = 0; attempt < 2; attempt++) {
+      const pendingCount = (await store.getDictionary(project.id)).filter(
+        (e) => e.status === "pending"
+      ).length;
+      if (suggestions.length >= pendingCount) break;
+      if (Date.now() > deadline - 30_000) {
+        console.error(
+          `suggestion warm still incomplete at deadline (${suggestions.length}/${pendingCount})`
+        );
+        break;
+      }
+      console.log(
+        `suggestion warm incomplete (${suggestions.length}/${pendingCount}) - retrying`
+      );
+      suggestions = await getDictionarySuggestions(
         project.id,
         project.category
       );
-      // Review-flagged suggestions render as pills inviting "click for real
-      // answer examples" - warm that cache now so the click is instant.
-      await prewarmDictionaryExamples(
-        project.id,
-        suggestions
-          .filter((s) => /- review\)/.test(s.rationale ?? ""))
-          .map((s) => ({ name: s.name, parent: s.mergeIntoName })),
-        deadline
-      );
-    } catch (err) {
-      console.error("bootstrap dictionary prep failed:", err);
     }
+    await prewarmDictionaryExamples(project.id, suggestions, deadline);
+  } catch (err) {
+    console.error("bootstrap dictionary warm failed:", err);
   }
 
   await store.updateRunStatus(

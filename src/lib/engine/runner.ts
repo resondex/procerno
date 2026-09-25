@@ -12,6 +12,7 @@ import {
 import { analyzePromptHealth } from "./prompt_health";
 import { classifyNonBrands } from "./suggest";
 import { getDictionarySuggestions } from "./dict_suggest";
+import { prewarmDictionaryExamples } from "./dict_examples";
 import { batchableEngine, hasOpenBatches, pollRunBatches } from "./batch";
 import { bootstrapRunChunk } from "./bootstrap";
 
@@ -612,7 +613,18 @@ export async function finalizeRun(runId: string): Promise<void> {
         );
       }
     }
-    await getDictionarySuggestions(project.id, project.category);
+    const suggestions = await getDictionarySuggestions(
+      project.id,
+      project.category
+    );
+    // Same review-phase contract as the bootstrap: every flagged pill's
+    // examples are warm before the run reads "complete". Cache-first, so a
+    // warm project pays one batch read; soft 2-minute budget.
+    await prewarmDictionaryExamples(
+      project.id,
+      suggestions,
+      Date.now() + 120_000
+    );
   } catch (err) {
     console.error("dictionary finalize failed:", err);
   }

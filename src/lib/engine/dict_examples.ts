@@ -1,8 +1,10 @@
 import { createHash } from "crypto";
 import { store } from "../store";
+import { matchKey } from "../brand_key";
 import { extractSnippet, extractSnippetExcluding } from "./mention_filter";
-import { containsSeq, famTokens } from "./dict_suggest";
+import { containsSeq, famTokens, type DictSuggestion } from "./dict_suggest";
 import { evidenceOwner } from "./observations";
+import type { DictionaryEntry } from "../types";
 
 export interface DictionaryExamples {
   name: string;
@@ -35,14 +37,20 @@ const CACHE_TTL_MS = 30 * 24 * 3600 * 1000;
 export async function buildDictionaryExamples(
   projectId: string,
   name: string,
-  parent: string
+  parent: string,
+  /** Preloaded shared context, so a warm of many names loads the project's
+   * brand rows and dictionary once instead of once per name. */
+  ctx?: {
+    dict: DictionaryEntry[];
+    rows: Awaited<ReturnType<typeof store.listProjectBrandRows>>;
+  }
 ): Promise<DictionaryExamples> {
   const cacheKey = cacheKeyFor(projectId, name, parent);
   const hit = await store.cacheGet(cacheKey, CACHE_TTL_MS);
   if (hit) return JSON.parse(hit) as DictionaryExamples;
 
   const norm = (s: string) => s.trim().toLowerCase();
-  const dict = await store.getDictionary(projectId);
+  const dict = ctx?.dict ?? (await store.getDictionary(projectId));
   const parentEntry = dict.find((e) => norm(e.canonical) === norm(parent));
   const parentForms = parent ? [parent, ...(parentEntry?.aliases ?? [])] : [];
   const parentSeqs = parentForms.map(famTokens);
@@ -50,7 +58,7 @@ export async function buildDictionaryExamples(
   const ownerOf = (det: string[]): "sat" | "parent" | null =>
     evidenceOwner(det, satSeq, parentSeqs);
 
-  const rows = await store.listProjectBrandRows(projectId);
+  const rows = ctx?.rows ?? (await store.listProjectBrandRows(projectId));
   const withParent: string[] = [];
   const alone: string[] = [];
   const brandsOf = new Map<string, string[]>();
@@ -127,22 +135,85 @@ export async function buildDictionaryExamples(
 }
 
 /**
- * Pre-warm the examples cache for every suggestion likely to be clicked:
- * review-flagged pills carry a "click for real answer examples" invitation,
- * so the click should be a cache hit, not a multi-second scan. Server
- * compute only - no model calls. Deadline-aware: warming is a nicety and
- * must never run the bootstrap chunk out of budget.
+ * Pre-warm the examples cache for EVERY pill that invites "click for real
+ * answer examples", so the review phase runs entirely on cache - the same
+ * three classes the board flags:
+ *   (a) review-flagged merge suggestions (guard-annotated rationale);
+ *   (b) volume-escalated ignores - an ignore verdict on a name observed in
+ *       >=10% of answers renders as a flagged pill (identify_tab uses the
+ *       same 0.1 threshold);
+ *   (c) engine-rejected names that will surface as flagged pills in Ignore
+ *       (unconfirmed rejects that aren't merge remnants).
+ * Server compute only - no model calls. Cache-checked in one batch first,
+ * and the misses share ONE load of the project's brand rows. Deadline-
+ * aware: warming is a nicety and must never run the chunk out of budget.
  */
 export async function prewarmDictionaryExamples(
   projectId: string,
-  targets: { name: string; parent: string | null }[],
+  suggestions: DictSuggestion[],
   deadline: number
 ): Promise<number> {
+  const norm = (s: string) => s.trim().toLowerCase();
+  const [dict, project] = await Promise.all([
+    store.getDictionary(projectId),
+    store.getProject(projectId),
+  ]);
+  // Observed share per name, for the volume-escalation threshold.
+  const obsByName = new Map<string, number>();
+  let obsRows = 0;
+  try {
+    if (project?.brand_observations) {
+      const obs = JSON.parse(project.brand_observations) as {
+        rows: number;
+        observed: { name: string; answers: number }[];
+      };
+      obsRows = obs.rows;
+      for (const o of obs.observed) obsByName.set(norm(o.name), o.answers);
+    }
+  } catch {}
+  const share = (name: string) =>
+    obsRows > 0 ? (obsByName.get(norm(name)) ?? 0) / obsRows : 0;
+
+  const targets: { name: string; parent: string | null }[] = [];
+  for (const s of suggestions) {
+    if (/- review\)/.test(s.rationale ?? "")) {
+      targets.push({ name: s.name, parent: s.mergeIntoName });
+    } else if (s.action === "ignore" && share(s.name) >= 0.1) {
+      targets.push({ name: s.name, parent: null });
+    }
+  }
+  // Rejected names that render as flagged pills: unconfirmed, not the Other
+  // bucket, and not a merge remnant living on as someone's alias.
+  const aliasOwners = new Set(
+    dict
+      .filter((e) => e.status !== "rejected")
+      .flatMap((e) => e.aliases.map((a) => matchKey(a)))
+  );
+  for (const e of dict) {
+    if (e.status !== "rejected" || e.canonical === "Other") continue;
+    if (e.confirmed.includes(norm(e.canonical))) continue;
+    if (aliasOwners.has(matchKey(e.canonical))) continue;
+    targets.push({ name: e.canonical, parent: null });
+  }
+
+  // One batch cache check - the normal re-drive finds everything warm and
+  // never touches the brand rows at all.
+  const keys = targets.map((t) =>
+    cacheKeyFor(projectId, t.name, t.parent ?? "")
+  );
+  const hits = await store.cacheGetMany(keys, CACHE_TTL_MS);
+  const misses = targets.filter((_, i) => !hits.has(keys[i]));
+  if (misses.length === 0) return 0;
+
+  const rows = await store.listProjectBrandRows(projectId);
   let warmed = 0;
-  for (const t of targets) {
+  for (const t of misses) {
     if (Date.now() > deadline - 15_000) break;
     try {
-      await buildDictionaryExamples(projectId, t.name, t.parent ?? "");
+      await buildDictionaryExamples(projectId, t.name, t.parent ?? "", {
+        dict,
+        rows,
+      });
       warmed++;
     } catch (err) {
       console.error(`examples pre-warm failed for "${t.name}":`, err);
