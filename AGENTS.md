@@ -346,3 +346,17 @@ Read: on trained brands the 9B is indistinguishable from the 30B (every differen
 - **v4b-warm10/20** - v4b (9B) warm-started on the same slices + replay (`fireworks_launch_v4bwarm.sh`, reuses the uploaded warm datasets, rank 16/alpha 32).
 - One command for all five: `fireworks_launch_round3.sh` (hand-run). Est. ~$30 + ~$28 + ~$5.
 - Eval chains (armed; each waits for its jobs, discovers ids by output model, deploys, probes routability, evaluates, verified teardown, scores): `FAMILY=v4 chain_warm_eval.sh` (30B, 2x H100), `FAMILY=v4b chain_warm_eval.sh` (9B, 1x H100, REASONING=none), `chain_v5b_eval.sh`. Chains run locally - the Mac must stay awake or deployments idle-bill until it wakes.
+
+## v4b-warm scored (2026-09-26): a 10% calibration sample closes the unseen-brand gap
+
+v4b warm-started on Netflix 10% / 20% (+ equal replay), 1x H100 eval, thinking off. Netflix = 2,882 answers to questions no warm model trained on; other brands = standard segments (forgetting check). Table `finetune/warm/warm_scores_v4b_v4truth.md`.
+
+| model | Netflix outcome / framing / top_pick | Netflix reason F1 | exact set | per-code gap | codes off >3 | plan tiers (truth 30.3%) |
+| --- | --- | --- | --- | --- | --- | --- |
+| v4 (30B, no warm) | 88.1 / 90.9 / 89.2 | 86.2 | 32.4 | 1.7 | 5 | 18.9% |
+| v4b (9B, no warm) | 87.0 / 91.3 / 88.4 | 84.9 | 28.8 | 1.9 | 6 | 20.6% |
+| v4b-warm10 | 86.7 / 91.6 / 88.1 | **87.5** | 37.0 | **0.7** | **0** | 27.3% |
+| v4b-warm20 | 87.8 / 91.4 / 89.2 | **88.2** | 38.1 | **0.6** | **0** | 29.6% |
+
+Findings: (1) **A 376-answer (10%) Netflix sample brings the new brand to trained-brand dashboard accuracy** - per-code gap 1.9 -> 0.7 pts, codes off >3pts 6 -> 0, reason F1 +2.6 (the 9B now beats the un-calibrated 30B). 20% adds a little more (F1 +0.7, plan tiers 27.3 -> 29.6%). The brand-specific breadth no model could infer (plan tiers) is learned from the sample. (2) Judgment fields don't move with calibration (Netflix outcome 87.0 / 86.7 / 87.8) - the sample fixes reasons, not the pick/conditional boundary. (3) Forgetting is small: trained-brand reason F1 -0.3 to -0.7; outcome on AmEx warm20 84.0 vs 86.7 and Pixel -1 to -2 (inside n=300 noise, but it trends down with more new-brand data - watch it; more replay is the lever). Cost: v4b-warm10 trained for ~$2. This is the empirical case for the paid 5-10% calibration tier.
+Ops: the warm chain's teardown trap used a relative path and the scoring step cd'd away - procerno-v4bwarmeval stayed READY a few minutes until torn down by hand. chain_v5b_eval.sh fixed (absolute path); chain_warm_eval.sh to be fixed once the running v4-warm chain exits (a guard tears its deployment down on exit).
