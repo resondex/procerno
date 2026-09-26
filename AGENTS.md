@@ -380,3 +380,27 @@ Findings: (1) Calibration lifts both bases by ~2-3 reason F1 and brings the new 
 procerno-coder-v5b (9B, v5 labels + v5 definitions in training and eval prompts; deployment procerno-v5beval torn down, DELETED verified). Reason F1, each model scored against its OWN contract's labels (v4b vs v4 truth, v5b vs v5 truth): jira 84.7 / 84.4, AmEx 93.0 / 93.1, Pixel 92.8 / 91.3, Netflix (unseen) 85.0 / 84.6. Judgment fields unchanged (v5b Netflix 87.8 / 90.9 / 89.1). Cross-scored, each loses ~6-8 F1 on the other's labels (v5b vs v4 truth: 77.4 / 90.2 / 86.8 / 81.2) - the same "each coder wins on its own labeler's contract" pattern as v3/v4. Read: the longer contract definitions neither help nor hurt learnability; since they also introduced cross-code overlaps (plan tiers 30% -> 8%) without shrinking the uncoded residue, the v4 contract stays. The definition-contract checker is still worth keeping for new brands, with an overlap check added before it is used for real.
 
 Also 2026-09-26 - consumer ChatGPT vs our engines: the OpenAI API now lists gpt-5.6-luna / gpt-5.6-sol (2026-06-23), gpt-6-astra (2026-08-27) and gpt-6-sol / gpt-6-luna (2026-09-14). Third-party plan comparisons (Sept 2026) put ChatGPT Free on GPT-5.6 Luna and Plus on GPT-5.6 Sol, with GPT-6 Astra from Pro; our "ChatGPT (default tier)" / "(premium tier)" engines still call gpt-5-mini / gpt-5 (Aug 2025). Engine-to-surface mapping needs a refresh before prod collection resumes; costs on the 2026-09-26 price sheet are for the old models.
+
+## procerno_reason_coder v0.1 (2026-09-26, Tyler's decision): the v4b process is the coder
+
+Tyler committed to the v4b process as the production coder recipe, named **procerno_reason_coder v0.1**. This is the coder decision, not a prod flip - coding the 26,070 held answers, clearing RUN_COLLECT_ONLY and the Fireworks provider integration still await Tyler's go.
+
+**Identity.** Fireworks model `accounts/tsolloway-ekhu67i4gj/models/procerno-coder-v4b` (sftj fsbxx0o1). Fireworks resource ids take neither underscores nor dots, so the Fireworks id stays `procerno-coder-v4b`; future versions can use `procerno-reason-coder-v0-2` etc. v0.1 = that model, nothing else.
+
+**Recipe (reproducible from `~/Documents/procerno_eval/finetune/`).**
+- Base: `qwen3p5-9b` (9.4B), LoRA rank 16 / alpha 32, 2 epochs, lr 1e-4 cosine, warmup 20, 8,192 context (`fireworks_launch_v4b.sh`).
+- Data: `train_v4.jsonl` / `val_v4.jsonl` (13,491 / 300; jira + AmEx + Pixel, Netflix fully held out; partition `split_v2.json`), built by `build_train_v4.py`.
+- Labels: judgment fields (outcome / top_pick / target_framing) from the Opus full labels; reasons from the v4 relabel - claude-opus-5-5, effort high, Batch API, brand-agnostic, **scope-aware codebook** (each code shown with its confirmed scope sentence).
+- Codebook contract: the gate-confirmed code list (`labeling/taxonomy_<brand>_ratified.json`) + the consolidation scope sentences (`finetune/defs_v3_<brand>.json`, i.e. the v4 definitions). The v5 contract definitions were tested (v5b) and rejected: no learnability gain, cross-code overlaps.
+
+**Inference contract (must match training).**
+- System prompt and user layout exactly as `finetune/ft_eval_v3.mts`: question + answer + `Target brand:` + "Allowed reason codes - use the most specific code that applies:" with one `- code: scope sentence` line per code. Scope sentences are ALWAYS sent (unseen brands lose ~5 reason F1 without them).
+- temperature 0, max_tokens 400, **`reasoning_effort: "none"`** (Qwen3.5 thinks by default and burns the budget otherwise).
+- Output: `{outcome, top_pick, target_framing, reasons}`. It does NOT extract brand mentions - a separate mentions pass is required (grok brands pass, ~$0.25 / 1K answers).
+- Serving: dedicated 1x H100 deployment, BF16, enableAddons, model id `<lora>#<deployment>`; probe routability before use; ~43K answers / hr at concurrency 24 (~$0.19 / 1K answers). Tear down with verified deletion (`deploy_eval_v3.sh`).
+
+**Measured accuracy (vs the v4 reference labels).** Trained brands, held out - outcome / framing / top_pick / reason F1: jira 92.8 / 91.7 / 93.9 / 84.7; AmEx 86.7 / 92.0 / 92.0 / 93.0; Pixel 92.7 / 95.3 / 92.0 / 92.8; per-code incidence gap 0.6 pts, 0 codes off >3pts. Unseen brand (Netflix, 3,610): 87.1 / 91.0 / 88.5 / 85.0, gap 1.9 pts, 6 codes off >3pts. Within ~1pt of the 30B v4 everywhere; beats the prod grok coder by 15+ pts on outcome and framing.
+
+**Calibration option (paid tier, not default).** Warm-start v0.1 on ~10% of a new tracker's answers labeled by the reference labeler (+ equal replay rows) - brings a new category to trained-brand reason accuracy (Netflix: F1 84.9 -> 87.5, 0 codes off >3pts) for ~$2 training + ~$3-5 labels. Recipe: `build_warm_netflix.py` + `fireworks_launch_v4bwarm.sh` (rank 16 / alpha 32 explicit). Rebuild calibrations from base + stored labels on every base upgrade; don't stack warm starts.
+
+**Next version triggers.** A v0.2 retrain (~$30 training + ~$140 relabel if the codebook contract changes) when: the codebook contract changes, new labeled brands join the training mix, or drift shows up in per-wave audit samples. Open items carried forward: mentions path (v0.1 has none), ChatGPT engines to GPT-5.6, overlap check in the definition checker, AI Overviews + Coverage sweep not built.
