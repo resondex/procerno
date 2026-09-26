@@ -2,6 +2,7 @@ import { cookies } from "next/headers";
 import { NextResponse } from "next/server";
 import { createServerClient } from "@supabase/ssr";
 import { store } from "./store";
+import { currentEngineId } from "./engine/providers";
 import type { Plan, Project, Run } from "./types";
 
 /**
@@ -196,26 +197,26 @@ export const PLAN_SCENARIO_CAPS: Record<Plan, number> = {
 /** Engine panel each tier may run, chosen so per-run vendor cost scales
  * with the tier (measured on the jira battery, 520 prompts): the cheap
  * instinct trio ~ $6/run, Growth's mid panel ~ $39, Pro's 8 ~ $56, the
- * full 11 ~ $195 - the premium search engines (gpt-5-search,
+ * full 11 ~ $195 - the premium search engines (ChatGPT premium + search,
  * claude-sonnet-5-search) are ~60% of full-panel cost and stay
  * enterprise-only. Null = every engine. PROVISIONAL numbers, like the
  * custom-cell allowance. */
 export const PLAN_ENGINE_ALLOWANCE: Record<Plan, string[] | null> = {
-  free: ["gpt-5-mini", "claude-haiku-4-5-20251001", "gemini-flash-latest"],
-  starter: ["gpt-5-mini", "claude-haiku-4-5-20251001", "gemini-flash-latest"],
+  free: ["gpt-5.6-luna", "claude-haiku-4-5-20251001", "gemini-flash-latest"],
+  starter: ["gpt-5.6-luna", "claude-haiku-4-5-20251001", "gemini-flash-latest"],
   growth: [
-    "gpt-5-mini",
+    "gpt-5.6-luna",
     "claude-haiku-4-5-20251001",
     "gemini-flash-latest",
     "claude-sonnet-5",
-    "gpt-5-mini-search",
+    "gpt-5.6-luna-search",
   ],
   pro: [
-    "gpt-5-mini",
+    "gpt-5.6-luna",
     "claude-haiku-4-5-20251001",
     "gemini-flash-latest",
     "claude-sonnet-5",
-    "gpt-5-mini-search",
+    "gpt-5.6-luna-search",
     "gemini-pro-latest",
     "grok-4",
     "sonar",
@@ -226,7 +227,8 @@ export const PLAN_ENGINE_ALLOWANCE: Record<Plan, string[] | null> = {
 /** True when the plan's panel includes the engine. */
 export function planAllowsEngine(plan: Plan, engineId: string): boolean {
   const allowance = PLAN_ENGINE_ALLOWANCE[plan];
-  return allowance === null || allowance.includes(engineId);
+  // Retired ids check as their successors (the engine a run would use).
+  return allowance === null || allowance.includes(currentEngineId(engineId));
 }
 
 /** Auth context, or a ready-to-return 401 when auth is on and nobody's in. */

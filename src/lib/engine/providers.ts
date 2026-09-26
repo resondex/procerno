@@ -62,7 +62,17 @@ export interface Engine {
   /** Model id sent to the vendor when it differs from our registry id
    * (search variants share the base model). */
   apiModel?: string;
+  /** Set on a retired engine: the engine new runs collect on instead (see
+   * currentEngineId). Retired entries stay registered so stored answers
+   * keep their label, mode and price. */
+  successor?: string;
 }
+
+/** Web searches one search-mode answer may run, on every vendor that lets
+ * us bound it (Anthropic max_uses, OpenAI max_tool_calls; Perplexity is
+ * always-grounded and unbounded by design). Uncapped, gpt-5-search ran 7+
+ * searches on 22-36% of answers and search fees dominated its cost. */
+export const SEARCH_CAP = 3;
 
 /** Extraction-coder-only models: routable like engines, never selectable
  * as answer engines. */
@@ -71,10 +81,20 @@ const CODER_ONLY: Record<string, Pick<Engine, "id" | "keyEnv" | "baseURL">> = {
 };
 
 export const ENGINES: Engine[] = [
-  { id: "gpt-5-mini", label: "ChatGPT (default tier)", vendor: "OpenAI", keyEnv: "OPENAI_API_KEY", mode: "instinct" },
-  { id: "gpt-5-mini-search", label: "ChatGPT (default tier) + search", vendor: "OpenAI", keyEnv: "OPENAI_API_KEY", mode: "search", apiModel: "gpt-5-mini" },
-  { id: "gpt-5", label: "ChatGPT (premium tier)", vendor: "OpenAI", keyEnv: "OPENAI_API_KEY", mode: "instinct" },
-  { id: "gpt-5-search", label: "ChatGPT (premium tier) + search", vendor: "OpenAI", keyEnv: "OPENAI_API_KEY", mode: "search", apiModel: "gpt-5" },
+  // ChatGPT surfaces, re-pointed 2026-09-26 to what consumers get: Free runs
+  // GPT-5.6 Luna, Plus runs GPT-5.6 Sol (third-party plan comparisons, Sept
+  // 2026). When ChatGPT moves again, add the new pair and set `successor`
+  // on these - projects and schedules follow without a config change.
+  { id: "gpt-5.6-luna", label: "ChatGPT (default tier)", vendor: "OpenAI", keyEnv: "OPENAI_API_KEY", mode: "instinct" },
+  { id: "gpt-5.6-luna-search", label: "ChatGPT (default tier) + search", vendor: "OpenAI", keyEnv: "OPENAI_API_KEY", mode: "search", apiModel: "gpt-5.6-luna" },
+  { id: "gpt-5.6-sol", label: "ChatGPT (premium tier)", vendor: "OpenAI", keyEnv: "OPENAI_API_KEY", mode: "instinct" },
+  { id: "gpt-5.6-sol-search", label: "ChatGPT (premium tier) + search", vendor: "OpenAI", keyEnv: "OPENAI_API_KEY", mode: "search", apiModel: "gpt-5.6-sol" },
+  // Retired ChatGPT stand-ins (Aug 2025 models) - every run collected
+  // before 2026-09-26 answered on these.
+  { id: "gpt-5-mini", label: "ChatGPT (default tier, gpt-5-mini - retired)", vendor: "OpenAI", keyEnv: "OPENAI_API_KEY", mode: "instinct", successor: "gpt-5.6-luna" },
+  { id: "gpt-5-mini-search", label: "ChatGPT (default tier, gpt-5-mini - retired) + search", vendor: "OpenAI", keyEnv: "OPENAI_API_KEY", mode: "search", apiModel: "gpt-5-mini", successor: "gpt-5.6-luna-search" },
+  { id: "gpt-5", label: "ChatGPT (premium tier, gpt-5 - retired)", vendor: "OpenAI", keyEnv: "OPENAI_API_KEY", mode: "instinct", successor: "gpt-5.6-sol" },
+  { id: "gpt-5-search", label: "ChatGPT (premium tier, gpt-5 - retired) + search", vendor: "OpenAI", keyEnv: "OPENAI_API_KEY", mode: "search", apiModel: "gpt-5", successor: "gpt-5.6-sol-search" },
   { id: "claude-sonnet-5", label: "Claude (Sonnet)", vendor: "Anthropic", keyEnv: "ANTHROPIC_API_KEY", sdk: "anthropic", mode: "instinct" },
   { id: "claude-sonnet-5-search", label: "Claude (Sonnet) + search", vendor: "Anthropic", keyEnv: "ANTHROPIC_API_KEY", sdk: "anthropic", mode: "search", apiModel: "claude-sonnet-5" },
   { id: "claude-haiku-4-5-20251001", label: "Claude (Haiku)", vendor: "Anthropic", keyEnv: "ANTHROPIC_API_KEY", sdk: "anthropic", mode: "instinct" },
@@ -115,9 +135,28 @@ export function getEngine(id: string): Engine | undefined {
   return ENGINES.find((e) => e.id === id);
 }
 
-/** Engines whose vendor key is present in this environment. */
+/** The engine a NEW run collects on for a configured id: retired engines
+ * resolve along their successor chain, everything else is itself. Applied
+ * where runs are created, so a run's stored engine list, its responses and
+ * its batch bookkeeping all carry the same (current) ids. */
+export function currentEngineId(id: string): string {
+  let e = getEngine(id);
+  const seen = new Set<string>();
+  while (e?.successor && !seen.has(e.id)) {
+    seen.add(e.id);
+    e = getEngine(e.successor);
+  }
+  return e?.id ?? id;
+}
+
+/** Resolve a configured engine list for a new run (order kept, deduped). */
+export function currentEngineIds(ids: string[]): string[] {
+  return [...new Set(ids.map(currentEngineId))];
+}
+
+/** Selectable engines whose vendor key is present in this environment. */
 export function availableEngines(): Engine[] {
-  return ENGINES.filter((e) => Boolean(process.env[e.keyEnv]));
+  return ENGINES.filter((e) => !e.successor && Boolean(process.env[e.keyEnv]));
 }
 
 export function engineAvailable(id: string): boolean {
@@ -298,7 +337,7 @@ export async function completeWithEngine(
               tools: [
                 // Server-side web search — the model decides per answer
                 // whether to use it, mirroring claude.ai's default.
-                { type: "web_search_20250305" as const, name: "web_search" as const, max_uses: 3 },
+                { type: "web_search_20250305" as const, name: "web_search" as const, max_uses: SEARCH_CAP },
               ],
             }
           : {}),
@@ -338,9 +377,11 @@ export async function completeWithEngine(
           model,
           input: prompt,
           tools: [{ type: "web_search" }],
+          // Same bound as Anthropic's max_uses (web_search is the only tool).
+          max_tool_calls: SEARCH_CAP,
         } as Parameters<ReturnType<typeof client>["responses"]["create"]>[0],
         // Per-request override: a search answer legitimately runs multiple
-        // retrieval rounds (observed avg 4.4 searches) - the client's 150s
+        // retrieval rounds (avg 4.4 searches before the cap) - the client's 150s
         // stall bound cut off ~1% of gpt-5-search answers. Only this call
         // gets the long leash; setup and instinct calls keep 150s.
         { timeout: 300_000 }

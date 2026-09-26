@@ -404,3 +404,14 @@ Tyler committed to the v4b process as the production coder recipe, named **proce
 **Calibration option (paid tier, not default).** Warm-start v0.1 on ~10% of a new tracker's answers labeled by the reference labeler (+ equal replay rows) - brings a new category to trained-brand reason accuracy (Netflix: F1 84.9 -> 87.5, 0 codes off >3pts) for ~$2 training + ~$3-5 labels. Recipe: `build_warm_netflix.py` + `fireworks_launch_v4bwarm.sh` (rank 16 / alpha 32 explicit). Rebuild calibrations from base + stored labels on every base upgrade; don't stack warm starts.
 
 **Next version triggers.** A v0.2 retrain (~$30 training + ~$140 relabel if the codebook contract changes) when: the codebook contract changes, new labeled brands join the training mix, or drift shows up in per-wave audit samples. Open items carried forward: mentions path (v0.1 has none), ChatGPT engines to GPT-5.6, overlap check in the definition checker, AI Overviews + Coverage sweep not built.
+
+## ChatGPT engines refreshed to GPT-5.6 + search cap (2026-09-26, Tyler's go)
+
+- Engines: "ChatGPT (default tier)" = `gpt-5.6-luna`, "(premium tier)" = `gpt-5.6-sol`, each with a `-search` variant (Responses API web_search). The old gpt-5-mini / gpt-5 entries stay registered as retired (label, mode, price for stored answers) with a `successor`; `currentEngineIds` resolves retired ids at run creation (runs route, cron, project create) and `planAllowsEngine` checks the successor, so trackers configured with old ids collect on GPT-5.6 with no prod config change. Next ChatGPT move = add the new pair + set `successor`. Internal helper calls (dict suggest, instrument, insights) stay on gpt-5-mini - they were calibrated there.
+- Search cap: `SEARCH_CAP = 3` shared by Anthropic `max_uses` and OpenAI `max_tool_calls`, live and batch.
+- Verification (local only, `~/Documents/procerno_eval/openai_refresh/`, script `scripts/openai_refresh_test.mts`, compare `openai_refresh_compare.py`): 64 answers - 24 prompts (6 per jira/AmEx/Netflix/Pixel) x Luna and Luna-search, 8 x Sol and Sol-search; $2.11; zero failures, every answer finish=stop. Per answer vs the same prompts' stored repeat-0 answers (live / batch; old model live):
+  - Luna: $0.0012 / $0.0006 (gpt-5-mini $0.0039); output 1,009 vs 1,934 tokens.
+  - Luna-search: $0.026 / $0.023 (gpt-5-mini-search $0.031); searches 2.0 vs 2.25 on these prompts; ~19K input tokens of search content per answer.
+  - Sol: $0.023 / $0.012 (gpt-5 $0.034); output 1,148 vs 3,422.
+  - Sol-search: $0.159 / $0.093 (gpt-5-search $0.108); searches 2.6 vs 4.25. More expensive than gpt-5-search despite fewer searches: ~23K search-content input tokens at Sol's $4/M.
+- Open: 5 of 32 search answers still logged 4 `web_search_call` items despite max_tool_calls 3 - likely open_page/find actions counted as calls by our parser; action types are not yet recorded, so whether the extra item is billed is unverified.

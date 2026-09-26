@@ -11,6 +11,8 @@ export interface EngineOption {
   mode: "instinct" | "search";
   /** True when the viewer's plan does not include this engine. */
   locked?: boolean;
+  /** Retired engine: kept so stored answers resolve, never offered. */
+  retired?: boolean;
 }
 
 export type EngineModeChoice = "instinct" | "search" | "both";
@@ -23,10 +25,10 @@ export function defaultEnginesFor(
 ): string[] {
   const wanted: string[] = [];
   if (choice !== "search") {
-    wanted.push("gpt-5-mini", "claude-sonnet-5", "gemini-flash-latest");
+    wanted.push("gpt-5.6-luna", "claude-sonnet-5", "gemini-flash-latest");
   }
   if (choice !== "instinct") {
-    wanted.push("gpt-5-mini-search", "claude-sonnet-5-search", "sonar");
+    wanted.push("gpt-5.6-luna-search", "claude-sonnet-5-search", "sonar");
   }
   return wanted.filter((id) =>
     options.some((e) => e.id === id && e.available && !e.locked)
@@ -136,7 +138,7 @@ export function EnginePicker({
   }, [selected, options]);
 
   const group = (mode: "instinct" | "search") => {
-    const list = options.filter((e) => e.mode === mode);
+    const list = options.filter((e) => e.mode === mode && !e.retired);
     if (list.length === 0) return null;
     return (
       <div key={mode} className="grid gap-1">

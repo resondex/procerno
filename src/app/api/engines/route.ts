@@ -16,6 +16,7 @@ export async function GET() {
       available: Boolean(process.env[e.keyEnv]),
       keyEnv: e.keyEnv,
       mode: e.mode,
+      retired: Boolean(e.successor),
       locked: !planAllowsEngine(plan, e.id),
     })),
   });

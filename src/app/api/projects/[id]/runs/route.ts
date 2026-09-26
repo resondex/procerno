@@ -3,7 +3,7 @@ import { waitUntil } from "@vercel/functions";
 import { z } from "zod";
 import { store } from "@/lib/store";
 import { getPlanFor, planAllowsEngine, requireAuth, requireProject } from "@/lib/auth";
-import { apiKeyConfigured, engineAvailable, ENGINES } from "@/lib/engine/providers";
+import { apiKeyConfigured, currentEngineIds, engineAvailable, ENGINES } from "@/lib/engine/providers";
 import { driveAndChain, runInBackground } from "@/lib/engine/runner";
 import { batchableEngine, submitRunBatches } from "@/lib/engine/batch";
 
@@ -12,7 +12,7 @@ import { batchableEngine, submitRunBatches } from "@/lib/engine/batch";
 export const maxDuration = 300;
 
 const runSchema = z.object({
-  model: z.string().trim().min(1).default("gpt-5-mini"),
+  model: z.string().trim().min(1).default("gpt-5.6-luna"),
   /** Engines to sample. One answer per prompt × repeat × engine. The cap
    * tracks the registry - a hardcoded 8 rejected full panels once the
    * registry grew past it. */
@@ -52,7 +52,9 @@ export async function POST(
       { status: 409 }
     );
   }
-  const requested = parsed.data.models ?? [parsed.data.model];
+  // Retired engine ids (a tracker configured before an engine refresh)
+  // collect on their successors.
+  const requested = currentEngineIds(parsed.data.models ?? [parsed.data.model]);
   const models = requested.filter((m) => engineAvailable(m));
   if (models.length === 0) {
     return NextResponse.json(

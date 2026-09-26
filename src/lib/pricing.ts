@@ -5,6 +5,13 @@
  * vendor-metered, so every row prices exactly. Update when vendors reprice.
  */
 export const ENGINE_PRICES: Record<string, { in: number; out: number; perSearch?: number; perRequest?: number }> = {
+  // GPT-5.6 list prices checked 2026-09-26; search-content tokens bill as
+  // input at model rates, on top of the per-call fee.
+  "gpt-5.6-luna": { in: 0.2, out: 1.2 },
+  "gpt-5.6-luna-search": { in: 0.2, out: 1.2, perSearch: 0.01 },
+  "gpt-5.6-sol": { in: 4, out: 20 },
+  "gpt-5.6-sol-search": { in: 4, out: 20, perSearch: 0.01 },
+  // Retired ChatGPT engines - priced for the answers already stored.
   "gpt-5": { in: 1.25, out: 10 },
   "gpt-5-search": { in: 1.25, out: 10, perSearch: 0.01 },
   "gpt-5-mini": { in: 0.25, out: 2 },

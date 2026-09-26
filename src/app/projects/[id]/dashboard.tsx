@@ -248,7 +248,7 @@ export default function ProjectDashboard({
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          model: chosenEngines[0] ?? "gpt-5-mini",
+          model: chosenEngines[0] ?? "gpt-5.6-luna",
           models: chosenEngines,
           repeats,
         }),

@@ -11,7 +11,7 @@ import {
 import { generatePromptBattery } from "@/lib/engine/prompts";
 import { seedDictionary } from "@/lib/engine/suggest";
 import { humanize, namesAnyBrand } from "@/lib/engine/instrument";
-import { apiKeyConfigured, availableEngines, getEngine } from "@/lib/engine/providers";
+import { apiKeyConfigured, availableEngines, currentEngineIds, getEngine } from "@/lib/engine/providers";
 
 const createSchema = z.object({
   name: z.string().trim().min(1).optional(),
@@ -160,8 +160,8 @@ export async function POST(req: Request) {
   // ~50-80% of the real argument space and, when shown to the labeler,
   // suppress discovery of the rest (absorption into nearby listed codes).
   const reasonTaxonomy: string[] = [];
-  const requestedEngines = (parsed.data.engines ?? []).filter((m) =>
-    getEngine(m)
+  const requestedEngines = currentEngineIds(
+    (parsed.data.engines ?? []).filter((m) => getEngine(m))
   );
   const engineSet =
     requestedEngines.length > 0

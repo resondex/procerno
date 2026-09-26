@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { planAllowsEngine } from "@/lib/auth";
 import { waitUntil } from "@vercel/functions";
 import { store } from "@/lib/store";
-import { apiKeyConfigured } from "@/lib/engine/providers";
+import { apiKeyConfigured, currentEngineIds } from "@/lib/engine/providers";
 import { driveAndChain, findStalledRuns, runInBackground } from "@/lib/engine/runner";
 import { batchableEngine, hasOpenBatches, pollRunBatches, submitRunBatches } from "@/lib/engine/batch";
 
@@ -15,7 +15,7 @@ const INTERVAL_DAYS: Record<string, number> = {
   monthly: 27,
 };
 
-const CRON_MODEL = "gpt-5-mini";
+const CRON_MODEL = "gpt-5.6-luna";
 const CRON_REPEATS = 5;
 
 /** Both store drivers emit UTC; sqlite omits the T and Z, postgres has them. */
@@ -75,7 +75,7 @@ export async function GET(req: Request) {
     // Owner-less trackers are staff-run: no allowance. Otherwise the core
     // panel is trimmed to the owner's tier, same rule as manual runs.
     const ownerPlan = project.user_id ? await store.getPlan(project.user_id) : "enterprise";
-    const allowedSet = project.engine_set.filter((m) => planAllowsEngine(ownerPlan, m));
+    const allowedSet = currentEngineIds(project.engine_set).filter((m) => planAllowsEngine(ownerPlan, m));
     const engineSet = allowedSet.length > 0 ? allowedSet : [CRON_MODEL];
     // Scheduled runs take the batch pipeline whenever any engine supports
     // it - a scheduled job trades latency for the 50% collection discount.

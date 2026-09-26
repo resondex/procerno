@@ -2,7 +2,7 @@ import { toFile } from "openai";
 import { store } from "../store";
 import { logCost, tagCosts } from "../cost_log";
 import type { RunBatch } from "../types";
-import { anthropicClient, getEngine, openaiClient } from "./providers";
+import { SEARCH_CAP, anthropicClient, getEngine, openaiClient } from "./providers";
 
 /**
  * The batch pipeline: the same (prompt × repeat × engine) tasks a live run
@@ -112,7 +112,7 @@ export async function submitRunBatches(runId: string): Promise<number> {
                       {
                         type: "web_search_20250305" as const,
                         name: "web_search" as const,
-                        max_uses: 3,
+                        max_uses: SEARCH_CAP,
                       },
                     ],
                   }
@@ -136,7 +136,7 @@ export async function submitRunBatches(runId: string): Promise<number> {
           const model = e.apiModel ?? e.id;
           const body =
             endpoint === "/v1/responses"
-              ? { model, input: t.text, tools: [{ type: "web_search" }] }
+              ? { model, input: t.text, tools: [{ type: "web_search" }], max_tool_calls: SEARCH_CAP }
               : { model, messages: [{ role: "user", content: t.text }] };
           return JSON.stringify({ custom_id: `i${i}`, method: "POST", url: endpoint, body });
         })
