@@ -252,3 +252,27 @@ Findings:
 2. **Judgment fields flat within noise** (v2 -> v3): jira 639 outcome 93.4 / 93.4, framing 92.3 / 91.1, top_pick 95.8 / 95.1; Netflix 3,610 outcome 88.7 / 88.1, framing 91.5 / 91.3, top_pick 89.0 / 89.2. The denser reason target did not buy anything on judgment, and may cost ~0.5-1pt; watch it in v4.
 3. **Consolidation defs HELP at inference on the unseen brand for v3** (+2.3 F1 vs bare, P and R both up) - reverses v2's defs finding. The difference: these are the pipeline's confirmed scope sentences, not world-knowledge authored defs. New-category default should become: consolidation defs in the coder prompt.
 4. **The coder follows its answer keys over its prompt definitions** (score_scope_uptake.py): on scope pairs - arguments the definitions assign to a code but the names-only keys omitted - v3 recalls 15% jira / 15% AmEx / 30% Pixel / 32-33% Netflix, against 88-97% on codes both key sets agree on. The definitions in its prompt barely move it off what it was trained to emit. So the codebook contract has to be fixed in the LABELS (v4), not patched at inference - and scoring against v4 truth costs v3 4-10 F1 exactly there.
+
+## v4 scored (2026-09-25): scope-aware labels win - v4 is the coder candidate (production decision is Tyler's)
+
+procerno-coder-v4 (sftj r5abctd3 - relaunch after hzyfk7ud died on the suspension; same recipe) evaluated on deployment procerno-v4eval (torn down after) over the same matrix. Tables `finetune/v3eval_scores_{v3,v4}truth.md`; scope analysis `scripts/score_scope_uptake.py`. Fireworks spend today: two completed LoRA trainings + one failed at 84%, four short 2x H100 eval deployments.
+
+Against v4 truth (scope-aware - the contract the customer confirms on the gate):
+
+| segment | v2 F1 | v3 F1 | **v4 F1** | v4 P / R | v4 codes/row (truth) | v4 Jaccard | v4 exact set | v4 outcome / framing / top_pick |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| jira 639 | 40.6 | 73.9 | **84.6** | 85.0 / 84.3 | 4.05 (4.08) | 0.76 | 34.1 | 93.6 / 92.2 / 95.3 |
+| AmEx 300 | 65.7 | 88.0 | **93.3** | 93.0 / 93.6 | 4.07 (4.05) | 0.89 | 64.3 | 87.7 / 92.0 / 93.0 |
+| Pixel 300 | 54.7 | 86.7 | **92.9** | 91.6 / 94.1 | 4.18 (4.07) | 0.88 | 60.0 | 91.7 / 93.0 / 91.7 |
+| Netflix 3,610 bare (unseen) | 52.3 | 80.5 | **80.7** | 80.6 / 80.9 | 4.56 (4.54) | 0.69 | 20.9 | 88.5 / 91.1 / 89.5 |
+| Netflix 3,610 scope defs (unseen) | 52.5 | 83.3 | **86.3** | 86.4 / 86.2 | 4.53 (4.54) | 0.77 | 32.6 | 88.2 / 90.7 / 89.6 |
+
+Findings:
+1. **v4 learned the scope; v3 did not.** Scope-pair recall (arguments the definitions assign but the names-only keys omitted): v4 74% jira / 74% AmEx / 88% Pixel / 61% Netflix-with-defs, vs v3 15 / 15 / 30 / 32. Shared-pair recall is unchanged (89-97% both). The fix lives in the labels, as predicted.
+2. **Each model wins on its own labeler's contract** (v4 scores 73.7 F1 vs v3 truth on jira; v3 scores 73.9 vs v4 truth) - so "which coder is better" reduces to "which contract is right". The scope-aware contract is what the customer confirms, so v4 is the candidate.
+3. **Dashboard accuracy on trained brands is near-exact**: mean per-code incidence gap vs v4 truth 0.6 jira / 0.6 AmEx / 0.8 Pixel pts, zero codes off by >3pts (v3: 2.4 / 1.4 / 1.5, with 12 jira codes off >3 - developer experience 17.1% truth vs 5.0%).
+4. **On an unseen brand, v4 needs the scope sentences at inference**: bare 80.7 = v3; with consolidation defs 86.3 (+5.6; v3 gained only +2.8). v4 was trained to read definitions, so without them it has nothing to read. New-category default: consolidation scope sentences ALWAYS in the coder prompt (they exist for every brand by construction). Bare list is obsolete.
+5. **The unseen-brand residual is per-code, and it is the gate's job.** Netflix-with-defs mean incidence gap 1.6pts, but 5 codes off >3pts - plan tiers 30.1% truth vs 18.0% (every model undercalls it; its scope moved +554 rows in the v4 relabel, a Netflix-specific breadth no model can infer). Gate metric: per-code incidence gap on the ~300-row calibration sample, flagging codes off >3pts - those are where a brand needs calibration labels or a scope-sentence edit before its dashboard ships.
+6. Judgment fields flat across v2/v3/v4 within noise (jira framing 92.3 / 91.1 / 92.2; Netflix outcome 88.7 / 88.1 / 88.5). Denser reason targets neither help nor hurt judgment.
+
+New-category gate expectations under v4 + scope sentences: outcome ~88, framing ~91, top_pick ~89-90, reason F1 ~86 vs same-contract labels, mean per-code incidence gap ~1.5-2pts with a handful of brand-specific codes needing calibration. Open for Tyler: production coder decision (v4 candidate) and prod flip; the prod coder prompt must carry the scope sentences (providers.ts + Fireworks provider integration); mentions path (v3/v4 labels carry no mentions field - the v4 coder cannot replace the mentions pass as trained); taxonomy adds for the post-scope residue (AmEx consumer credit-score impact / retention offers, Netflix home bandwidth, etc.); solo-vs-consensus; whether plan-tiers-style breadth gaps get fixed by scope-sentence edits or calibration labels.
