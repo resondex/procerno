@@ -1,6 +1,6 @@
 import { createHash } from "crypto";
 import { tagCosts } from "../cost_log";
-import { openaiClient } from "./providers";
+import { apiKeyConfigured, openaiClient } from "./providers";
 import { store } from "../store";
 import { evidenceOwner } from "./observations";
 import type { DictionaryEntry } from "../types";
@@ -214,24 +214,33 @@ export async function getDictionarySuggestions(
   const entries = await store.getDictionary(projectId);
   const pending = entries.filter((e) => e.status === "pending");
   const active = entries.filter((e) => e.status === "active");
-  if (pending.length === 0) return [];
+  // Nothing pending (a confirmed board) still serves the REJECTED names'
+  // cached verdicts - the auto-ignore receipt's memory. This is the normal
+  // state right after a gate confirm; returning [] here is what turned the
+  // receipt's names into a wall of Ignore pills.
+  if (pending.length === 0) return rejectedVerdictRows(projectId, entries);
 
-  // Split pending into cached and new.
+  // Split pending into cached and new. ONE batch read - a board of ~100
+  // names must not pay ~100 pool-serialized point queries to open.
   const cached = new Map<string, CachedVerdict>(); // entry id -> verdict
   let fresh: DictionaryEntry[] = [];
-  const hits = await Promise.all(
-    pending.map((p) => store.cacheGet(nameKey(projectId, p.canonical), CACHE_TTL_MS))
+  const hits = await store.cacheGetMany(
+    pending.map((p) => nameKey(projectId, p.canonical)),
+    CACHE_TTL_MS
   );
-  pending.forEach((p, i) => {
-    const hit = hits[i];
+  for (const p of pending) {
+    const hit = hits.get(nameKey(projectId, p.canonical));
     if (hit) cached.set(p.id, JSON.parse(hit) as CachedVerdict);
     else fresh.push(p);
-  });
+  }
 
   // Mechanical family layer: names that extend a tracked brand merge into it
   // deterministically; names that extend another pending name wait for that
   // root's verdict and inherit it. Only family roots reach the model.
   const plan = buildFamilyPlan(pending, active);
+  // Cache writes batch up per stage - they are independent per name, and
+  // awaiting them one by one serialized ~N roundtrips into the board open.
+  let writes: Promise<void>[] = [];
   for (const p of fresh) {
     const target = plan.activeMerge.get(p.id);
     if (!target) continue;
@@ -241,11 +250,15 @@ export async function getDictionarySuggestions(
       rationale: `extends the tracked brand "${target}"`,
     };
     cached.set(p.id, v);
-    await store.cacheSet(nameKey(projectId, p.canonical), JSON.stringify(v), {
-      category,
-      projectId,
-    });
+    writes.push(
+      store.cacheSet(nameKey(projectId, p.canonical), JSON.stringify(v), {
+        category,
+        projectId,
+      })
+    );
   }
+  await Promise.all(writes);
+  writes = [];
   const freshChildren = fresh.filter(
     (p) => !plan.activeMerge.has(p.id) && plan.rootOf.has(p.id)
   );
@@ -253,6 +266,15 @@ export async function getDictionarySuggestions(
     (p) => !plan.activeMerge.has(p.id) && !plan.rootOf.has(p.id)
   );
 
+  // No key = no model pass: cached verdicts and the mechanical family layer
+  // still serve (the normal case is fully pre-warmed), and the un-judged
+  // names surface as draggable tray pills instead of a hard error.
+  if (fresh.length > 0 && !apiKeyConfigured()) {
+    console.error(
+      `dictionary suggestions: OPENAI_API_KEY missing - ${fresh.length} name(s) left unjudged`
+    );
+    fresh = [];
+  }
   if (fresh.length > 0) {
     // Batches run concurrently, so total latency is roughly one batch, and a
     // batch that fails costs its own names instead of the whole queue. (One
@@ -437,11 +459,15 @@ export async function getDictionarySuggestions(
               rationale: `follows "${root.canonical}"`,
             };
     cached.set(p.id, v);
-    await store.cacheSet(nameKey(projectId, p.canonical), JSON.stringify(v), {
-      category,
-      projectId,
-    });
+    writes.push(
+      store.cacheSet(nameKey(projectId, p.canonical), JSON.stringify(v), {
+        category,
+        projectId,
+      })
+    );
   }
+  await Promise.all(writes);
+  writes = [];
 
   // Family-consistency reconciliation: EVERY family member's verdict is
   // re-derived from its root (or its mechanical active target) on every
@@ -460,10 +486,12 @@ export async function getDictionarySuggestions(
       const cur = cached.get(p.id);
       if (!cur || cur.action !== "merge" || cur.merge_into !== target) {
         cached.set(p.id, want);
-        await store.cacheSet(nameKey(projectId, p.canonical), JSON.stringify(want), {
-          category,
-          projectId,
-        });
+        writes.push(
+          store.cacheSet(nameKey(projectId, p.canonical), JSON.stringify(want), {
+            category,
+            projectId,
+          })
+        );
       }
       continue;
     }
@@ -499,12 +527,15 @@ export async function getDictionarySuggestions(
       (cur.merge_into ?? null) !== (want.merge_into ?? null)
     ) {
       cached.set(p.id, want);
-      await store.cacheSet(nameKey(projectId, p.canonical), JSON.stringify(want), {
-        category,
-        projectId,
-      });
+      writes.push(
+        store.cacheSet(nameKey(projectId, p.canonical), JSON.stringify(want), {
+          category,
+          projectId,
+        })
+      );
     }
   }
+  await Promise.all(writes);
 
   // Resolve names to entry ids fresh at read time - a cached merge target may
   // have been approved (now made active) or renamed since the verdict was stored.
@@ -517,6 +548,43 @@ export async function getDictionarySuggestions(
     out.push({
       entryId: p.id,
       name: p.canonical,
+      action: v.action,
+      mergeIntoId: target?.id ?? null,
+      mergeIntoName: target?.canonical ?? v.merge_into,
+      rationale: v.rationale,
+    });
+  }
+
+  out.push(...(await rejectedVerdictRows(projectId, entries)));
+  return out;
+}
+
+/** REJECTED entries' cached verdicts (one batch read, never a model call):
+ * the board needs them to keep engine-ignored names behind the auto-ignore
+ * receipt after they commit as rejected. Callers placing pending names key
+ * by entry id, so these rows are inert to them. */
+async function rejectedVerdictRows(
+  projectId: string,
+  entries: DictionaryEntry[]
+): Promise<DictSuggestion[]> {
+  const rejected = entries.filter(
+    (e) => e.status === "rejected" && e.canonical !== "Other"
+  );
+  if (rejected.length === 0) return [];
+  const byName = new Map(entries.map((e) => [norm(e.canonical), e]));
+  const hits = await store.cacheGetMany(
+    rejected.map((r) => nameKey(projectId, r.canonical)),
+    CACHE_TTL_MS
+  );
+  const out: DictSuggestion[] = [];
+  for (const r of rejected) {
+    const hit = hits.get(nameKey(projectId, r.canonical));
+    if (!hit) continue;
+    const v = JSON.parse(hit) as CachedVerdict;
+    const target = v.merge_into ? byName.get(norm(v.merge_into)) : null;
+    out.push({
+      entryId: r.id,
+      name: r.canonical,
       action: v.action,
       mergeIntoId: target?.id ?? null,
       mergeIntoName: target?.canonical ?? v.merge_into,

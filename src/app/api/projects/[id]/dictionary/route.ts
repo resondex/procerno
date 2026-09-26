@@ -334,10 +334,13 @@ export async function POST(
   if (!actions) {
     return NextResponse.json({ error: "invalid action" }, { status: 400 });
   }
-  // Approvals first so same-batch merges can land on newly active entries.
+  // Approvals first so same-batch merges can land on newly active entries;
+  // the name sign-off ("confirm") last, so it records names where the
+  // batch's merges finally put them.
   const ordered = [
-    ...actions.filter((a) => a.action !== "merge"),
+    ...actions.filter((a) => a.action !== "merge" && a.action !== "confirm"),
     ...actions.filter((a) => a.action === "merge"),
+    ...actions.filter((a) => a.action === "confirm"),
   ];
   const errors: string[] = [];
   for (const a of ordered) {
@@ -347,9 +350,20 @@ export async function POST(
   const version = await store.bumpDictionaryVersion(id);
   // Entry attribution in the observations follows the dictionary - refresh
   // so tier bars and NOT SEEN flags never go stale after a gate decision.
-  // set_analyzed is display-only (attribution untouched), so a pure toggle
-  // batch skips the recompute and answers fast.
-  if (ordered.some((a) => a.action !== "set_analyzed")) {
+  // Attribution reads canonical/alias matchKeys and entry status, nothing
+  // else - so display-only actions (analyzed toggles, renames, parent
+  // groupings, role chips, name sign-offs) skip the recompute and answer
+  // fast.
+  const ATTRIBUTION_ACTIONS = new Set([
+    "approve",
+    "reject",
+    "merge",
+    "merge_other",
+    "unalias",
+    "move_alias",
+    "promote_alias",
+  ]);
+  if (ordered.some((a) => ATTRIBUTION_ACTIONS.has(a.action))) {
     try {
       await refreshBrandObservations(id);
     } catch (err) {

@@ -1,4 +1,5 @@
 import { store } from "../store";
+import { cleanSurface } from "../brand_key";
 import { tagCosts, withCostContext } from "../cost_log";
 import {
   coderUsageAccumulator,
@@ -11,6 +12,7 @@ import {
 import { analyzePromptHealth } from "./prompt_health";
 import { classifyNonBrands } from "./suggest";
 import { getDictionarySuggestions } from "./dict_suggest";
+import { prewarmDictionaryExamples } from "./dict_examples";
 import { batchableEngine, hasOpenBatches, pollRunBatches } from "./batch";
 import { bootstrapRunChunk } from "./bootstrap";
 
@@ -573,13 +575,17 @@ export async function finalizeRun(runId: string): Promise<void> {
       store.listMentionsForRun(runId),
       store.listResponses(runId),
     ]);
+    // cleanSurface, same as the observations queue path - a mention's "®"
+    // or doubled spaces must not become part of a pill's name.
     await store.queueDictionaryCandidates(project.id, [
-      ...new Set([
-        ...runMentions.map((m) => m.brand),
-        ...runResponses
-          .map((r) => r.top_pick_brand)
-          .filter((b): b is string => Boolean(b)),
-      ]),
+      ...new Set(
+        [
+          ...runMentions.map((m) => m.brand),
+          ...runResponses
+            .map((r) => r.top_pick_brand)
+            .filter((b): b is string => Boolean(b)),
+        ].map(cleanSurface)
+      ),
     ]);
     const dict = await store.getDictionary(project.id);
     const pendingEntries = dict.filter((e) => e.status === "pending");
@@ -607,7 +613,18 @@ export async function finalizeRun(runId: string): Promise<void> {
         );
       }
     }
-    await getDictionarySuggestions(project.id, project.category);
+    const suggestions = await getDictionarySuggestions(
+      project.id,
+      project.category
+    );
+    // Same review-phase contract as the bootstrap: every flagged pill's
+    // examples are warm before the run reads "complete". Cache-first, so a
+    // warm project pays one batch read; soft 2-minute budget.
+    await prewarmDictionaryExamples(
+      project.id,
+      suggestions,
+      Date.now() + 120_000
+    );
   } catch (err) {
     console.error("dictionary finalize failed:", err);
   }

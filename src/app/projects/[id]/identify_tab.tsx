@@ -1,8 +1,9 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { DictionaryEntry } from "@/lib/types";
 import { matchKey } from "@/lib/brand_key";
+import { flaggedIgnorePrefix, ignoreSurfaces } from "@/lib/ignore_rules";
 
 const OTHER_CANONICAL = "Other";
 
@@ -33,7 +34,7 @@ interface Bucket {
   pills: Pill[];
 }
 
-interface Suggestion {
+export interface Suggestion {
   entryId: string;
   name: string;
   action: "merge" | "approve" | "ignore";
@@ -59,6 +60,7 @@ export default function IdentifyTab({
   hideConfirm,
   registerConfirm,
   targetBrand,
+  prefetched,
 }: {
   projectId: string;
   dict: DictionaryEntry[];
@@ -70,33 +72,46 @@ export default function IdentifyTab({
    * top-right one is hidden and confirmAll is handed up instead. */
   hideConfirm?: boolean;
   registerConfirm?: (
-    fn: (opts?: { deferRefresh?: boolean }) => Promise<void>
+    fn: (opts?: {
+      deferRefresh?: boolean;
+      /** Called SYNCHRONOUSLY with the projected post-commit dictionary, so
+       * the next gate step can render the committed layout immediately
+       * instead of flashing the pre-commit one until the refresh lands. */
+      onProjected?: (entries: DictionaryEntry[]) => void;
+    }) => Promise<void>
   ) => void;
   /** The tracker's own brand - its card always sorts first. */
   targetBrand?: string;
+  /** Suggestions fetched ahead of the board (the dashboard warms them while
+   * the user is still on the codebook), so the gate opens fully served with
+   * no fetch and no spinner. Consumed once; later-appearing names fetch. */
+  prefetched?: Suggestion[] | null;
 }) {
   // Observed sizing: entry_id-matched counts size the brand buckets; name
   // keys size the pending pills. Tier words, no raw numbers - preliminary
-  // until coding.
-  const obs = (() => {
+  // until coding. Memoized: drags and hovers re-render this board a lot,
+  // and re-parsing a ~120-row JSON blob each time is pure waste.
+  const { obs, obsByEntry, obsByName, maxObs } = useMemo(() => {
+    let parsed: {
+      rows: number;
+      observed: { name: string; entry_id: string | null; answers: number }[];
+    } | null = null;
     try {
-      return observations
-        ? (JSON.parse(observations) as {
-            rows: number;
-            observed: { name: string; entry_id: string | null; answers: number }[];
-          })
-        : null;
-    } catch {
-      return null;
+      parsed = observations ? JSON.parse(observations) : null;
+    } catch {}
+    const byEntry = new Map<string, number>();
+    const byName = new Map<string, number>();
+    for (const o of parsed?.observed ?? []) {
+      if (o.entry_id) byEntry.set(o.entry_id, (byEntry.get(o.entry_id) ?? 0) + o.answers);
+      byName.set(norm(o.name), o.answers);
     }
-  })();
-  const obsByEntry = new Map<string, number>();
-  const obsByName = new Map<string, number>();
-  for (const o of obs?.observed ?? []) {
-    if (o.entry_id) obsByEntry.set(o.entry_id, (obsByEntry.get(o.entry_id) ?? 0) + o.answers);
-    obsByName.set(norm(o.name), o.answers);
-  }
-  const maxObs = Math.max(1, ...(obs?.observed ?? []).map((o) => o.answers));
+    return {
+      obs: parsed,
+      obsByEntry: byEntry,
+      obsByName: byName,
+      maxObs: Math.max(1, ...(parsed?.observed ?? []).map((o) => o.answers)),
+    };
+  }, [observations]);
   const tierOf = (n: number) => {
     const f = n / (obs?.rows || 1);
     return f >= 0.3
@@ -110,11 +125,13 @@ export default function IdentifyTab({
   const bucketSize = (b: { entryId: string | null }) =>
     b.entryId && obsByEntry.has(b.entryId) ? obsByEntry.get(b.entryId)! : null;
   // "your brand" is an identity fact (the project's target), never a role
-  // default - a null-role competitor must not wear the chip.
+  // default - a null-role competitor must not wear the chip. matchKey, same
+  // as the server's target guard, so the chip and the refusal agree on
+  // spelling variants.
   const isTargetBucket = (b: Bucket) =>
     !!targetBrand &&
     b.pills.some(
-      (p) => p.kind === "canonical" && norm(p.name) === norm(targetBrand)
+      (p) => p.kind === "canonical" && matchKey(p.name) === matchKey(targetBrand)
     );
   const [buckets, setBuckets] = useState<Bucket[]>([]);
   const [suggesting, setSuggesting] = useState(false);
@@ -134,6 +151,11 @@ export default function IdentifyTab({
   // Buckets whose mechanically-placed variant pills are expanded.
   const [variantsOpen, setVariantsOpen] = useState<Set<string>>(new Set());
   const [dragNorm, setDragNorm] = useState<string | null>(null);
+  // The flagged-pill tooltip is React state, not CSS :hover - hover state
+  // goes stale in Chrome when the pill list reflows under the cursor
+  // (after a drag or a re-render), which left tooltips stuck open, several
+  // at once. State guarantees at most ONE, cleared on any drag.
+  const [hoverNote, setHoverNote] = useState<string | null>(null);
   const [suggestSummary, setSuggestSummary] = useState<{
     merged: number;
     proposed: number;
@@ -141,6 +163,9 @@ export default function IdentifyTab({
   } | null>(null);
   // Entry ids the suggestion pass has already placed — avoids re-suggesting.
   const suggestedFor = useRef<Set<string>>(new Set());
+  // The prefetched suggestion list serves exactly one pass - names that show
+  // up after it was computed go through the endpoint like any other.
+  const prefetchConsumed = useRef(false);
   // Engine-ignored names: never rendered as pills - a receipt line with a
   // reveal button instead. Confirm commits them as rejected.
   const [autoIgnored, setAutoIgnored] = useState<
@@ -368,6 +393,20 @@ export default function IdentifyTab({
   const pendingEntries = dict.filter(
     (e) => e.status === "pending" && !lowSignal(e)
   );
+  // Rejected entries that could belong behind the auto-ignore receipt: not
+  // the Other bucket, not merge remnants (those render nowhere). Whether
+  // each one actually folds is decided by its cached verdict below.
+  const aliasOwnersTop = new Set(
+    dict
+      .filter((e) => e.status !== "rejected")
+      .flatMap((e) => e.aliases.map((a) => matchKey(a)))
+  );
+  const rejectedFoldables = dict.filter(
+    (e) =>
+      e.status === "rejected" &&
+      e.canonical !== OTHER_CANONICAL &&
+      !aliasOwnersTop.has(matchKey(e.canonical))
+  );
   const lowSignalCount = dict.filter(
     (e) => e.status === "pending" && lowSignal(e)
   ).length;
@@ -377,29 +416,69 @@ export default function IdentifyTab({
       !autoIgnored.some((a) => a.entryId === e.id)
   );
 
-  // Pre-organize newly discovered names by suggestion.
+  // Pre-organize newly discovered names by suggestion. The pass also runs
+  // when there is nothing pending but rejected entries exist - their cached
+  // verdicts decide which stay folded behind the auto-ignore receipt.
+  const passRan = useRef(false);
   useEffect(() => {
     const fresh = pendingEntries.filter(
       (e) => !suggestedFor.current.has(e.id)
     );
-    if (fresh.length === 0 || suggesting) {
-      if (fresh.length === 0 && !suggesting) setPassDone(true);
+    const needsFold = !passRan.current && rejectedFoldables.length > 0;
+    if ((fresh.length === 0 && !needsFold) || suggesting) {
+      if (fresh.length === 0 && !needsFold && !suggesting) setPassDone(true);
       return;
     }
+    passRan.current = true;
     fresh.forEach((e) => suggestedFor.current.add(e.id));
     setSuggesting(true);
     (async () => {
       try {
-        const res = await fetch(`/api/projects/${projectId}/dictionary/suggest`, {
-          method: "POST",
-        });
-        if (!res.ok) {
-          // Un-mark so the next effect run retries instead of stranding the
-          // whole tray unplaced for the rest of the mount.
-          fresh.forEach((e) => suggestedFor.current.delete(e.id));
-          return;
+        let suggestions: Suggestion[];
+        if (prefetched && !prefetchConsumed.current) {
+          // Warmed ahead of the board: no fetch, the placement below runs in
+          // the same tick and the board is served whole.
+          prefetchConsumed.current = true;
+          suggestions = prefetched;
+        } else {
+          const res = await fetch(
+            `/api/projects/${projectId}/dictionary/suggest`,
+            { method: "POST" }
+          );
+          if (!res.ok) {
+            // Un-mark so the next effect run retries instead of stranding the
+            // whole tray unplaced for the rest of the mount.
+            fresh.forEach((e) => suggestedFor.current.delete(e.id));
+            return;
+          }
+          suggestions = (await res.json()).suggestions ?? [];
         }
-        const suggestions: Suggestion[] = (await res.json()).suggestions ?? [];
+        // Engine-ignored names STAY behind the receipt after committing as
+        // rejected: a rejected entry whose cached verdict is a below-
+        // threshold ignore folds back into the auto-ignored list instead of
+        // rendering as a wall of Ignore pills on the next visit.
+        const rejFold: { entryId: string; name: string; rationale: string }[] =
+          [];
+        for (const e of rejectedFoldables) {
+          const s = suggestions.find((x) => x.entryId === e.id);
+          if (!s || s.action !== "ignore") continue;
+          const share =
+            obs && obs.rows > 0
+              ? (obsByName.get(norm(e.canonical)) ?? 0) / obs.rows
+              : 0;
+          if (ignoreSurfaces(s.rationale, share) !== "fold") continue;
+          rejFold.push({
+            entryId: e.id,
+            name: e.canonical,
+            rationale: s.rationale ?? "",
+          });
+        }
+        if (rejFold.length > 0) {
+          setAutoIgnored((prev) => [
+            ...prev.filter((x) => !rejFold.some((y) => y.entryId === x.entryId)),
+            ...rejFold,
+          ]);
+        }
         // Compute the whole placement plan PURELY, before any state update.
         // (Collecting side effects inside the setBuckets updater ran on
         // React's schedule, not ours - the ignore list was read while still
@@ -420,15 +499,17 @@ export default function IdentifyTab({
           if (!entry) continue;
           if (sug.action === "ignore") {
             summary.ignored++;
-            // Volume escalation: an ignore verdict on a name observed in
-            // >=10% of answers is where a wrong call is costly - it renders
-            // as a flagged pill in Ignore instead of vanishing into the
-            // receipt, so it gets one deliberate look.
+            // The silent receipt is reserved for the model's direct
+            // out-of-category calls: own-context guard flips, inherited
+            // family ignores above a small floor, and high-volume names
+            // all surface as flagged pills for one deliberate look (the
+            // shared ignoreSurfaces rule - Pluto TV once vanished behind
+            // the receipt by inheriting its own short form's ignore).
             const share =
               obs && obs.rows > 0
                 ? (obsByName.get(norm(entry.canonical)) ?? 0) / obs.rows
                 : 0;
-            if (share < 0.1) {
+            if (ignoreSurfaces(sug.rationale, share) === "fold") {
               ignoredNow.push({
                 entryId: entry.id,
                 name: entry.canonical,
@@ -440,7 +521,7 @@ export default function IdentifyTab({
               entry,
               s: {
                 ...sug,
-                rationale: `Ignored by rule, but named in ${Math.round(share * 100)}% of answers - confirm this is scenery, or drag it out to track it. ${sug.rationale ?? ""} - review)`,
+                rationale: `${flaggedIgnorePrefix(sug.rationale, share)} ${sug.rationale ?? ""} - review)`,
               },
               target: "__ignore__",
             });
@@ -621,21 +702,32 @@ export default function IdentifyTab({
   function hideAutoIgnored() {
     // Pills still sitting in Ignore go back behind the receipt; anything the
     // user dragged elsewhere stays placed and leaves the receipt's list.
+    // Rescues are read from the CURRENT board, never inside the setBuckets
+    // updater - updaters run on React's schedule, so a set collected there
+    // is still empty when checked (the same class of bug the suggestion
+    // pass hit).
     const ids = new Set(autoIgnored.map((a) => a.entryId));
     const rescued = new Set<string>();
+    for (const b of buckets) {
+      if (b.key === "__ignore__") continue;
+      for (const p of b.pills) {
+        if (ids.has(p.entryId)) rescued.add(p.entryId);
+      }
+    }
     setBuckets((prev) =>
-      prev.map((b) => {
-        if (b.key !== "__ignore__") {
-          for (const p of b.pills) {
-            if (ids.has(p.entryId)) rescued.add(p.entryId);
-          }
-          return b;
-        }
-        return {
-          ...b,
-          pills: b.pills.filter((p) => !ids.has(p.entryId)),
-        };
-      })
+      prev.map((b) =>
+        b.key === "__ignore__"
+          ? {
+              ...b,
+              // Only the PENDING pills reveal added are removed - rejected
+              // folded entries stay in the bucket's list and re-hide via
+              // the render filter.
+              pills: b.pills.filter(
+                (p) => !(ids.has(p.entryId) && p.homeStatus === "pending")
+              ),
+            }
+          : b
+      )
     );
     if (rescued.size > 0) {
       setAutoIgnored((prev) => prev.filter((a) => !rescued.has(a.entryId)));
@@ -643,7 +735,130 @@ export default function IdentifyTab({
     setShowAutoIgnored(false);
   }
 
-  async function confirmAll(opts?: { deferRefresh?: boolean }) {
+  /** What the dictionary will look like once this board's commit lands -
+   * the same walk confirmAll ships as actions, applied to a local copy.
+   * Lets the gate's later steps render the committed layout instantly; the
+   * server refresh replaces it with (matching) truth moments later. */
+  function projectCommittedDict(): DictionaryEntry[] {
+    const byId = new Map(
+      dict.map((e) => [e.id, { ...e, aliases: [...e.aliases] }])
+    );
+    const synthetic: DictionaryEntry[] = [];
+    const lower = (s: string) => s.trim().toLowerCase();
+    const absorbInto = (target: DictionaryEntry | undefined, p: Pill) => {
+      if (!target) return;
+      if (p.kind === "alias") {
+        const src = byId.get(p.entryId);
+        if (src) src.aliases = src.aliases.filter((a) => a !== p.norm);
+        if (!target.aliases.includes(p.norm)) target.aliases.push(p.norm);
+      } else {
+        const src = byId.get(p.entryId);
+        if (!src || src === target) return;
+        src.status = "rejected";
+        const moved = [lower(src.canonical), ...src.aliases];
+        src.aliases = [];
+        for (const a of moved) {
+          if (!target.aliases.includes(a)) target.aliases.push(a);
+        }
+      }
+    };
+    for (const b of buckets) {
+      const groupedHere = new Set(
+        b.pills
+          .filter((p) => p.kind === "canonical" && p.homeStatus === "active")
+          .map((p) => p.entryId)
+      );
+      const covered = (p: Pill) =>
+        p.kind === "alias" && groupedHere.has(p.entryId);
+      if (b.kind === "new") {
+        const anchor = b.pills.find((p) => p.kind === "canonical") ?? b.pills[0];
+        if (!anchor) continue;
+        let target: DictionaryEntry | undefined;
+        if (anchor.kind === "canonical") {
+          target = byId.get(anchor.entryId);
+          if (target) {
+            target.status = "active";
+            if (b.label.trim() && b.label.trim() !== anchor.name) {
+              target.display_name = b.label.trim();
+            }
+          }
+        } else {
+          const src = byId.get(anchor.entryId);
+          if (src) src.aliases = src.aliases.filter((a) => a !== anchor.norm);
+          target = {
+            ...(byId.get(anchor.entryId) ?? dict[0]),
+            id: `optimistic:${anchor.norm}`,
+            canonical: anchor.name,
+            aliases: [],
+            display_name:
+              b.label.trim() && b.label.trim() !== anchor.name
+                ? b.label.trim()
+                : null,
+            status: "active",
+            confirmed: [],
+            parent: null,
+            role: null,
+            analyzed: true,
+          };
+          synthetic.push(target);
+        }
+        for (const p of b.pills) {
+          if (p === anchor || covered(p)) continue;
+          absorbInto(target, p);
+        }
+      } else if (b.kind === "brand") {
+        const target = b.entryId ? byId.get(b.entryId) : undefined;
+        if (target && b.label.trim() && b.label.trim() !== b.originalLabel) {
+          target.display_name = b.label.trim();
+        }
+        for (const p of b.pills) {
+          if (p.entryId === b.entryId || covered(p)) continue;
+          absorbInto(target, p);
+        }
+      } else if (b.kind === "other") {
+        const target = b.entryId ? byId.get(b.entryId) : undefined;
+        for (const p of b.pills) {
+          if ((b.entryId && p.entryId === b.entryId) || covered(p)) continue;
+          if (target) absorbInto(target, p);
+          else if (p.kind === "canonical") {
+            // No Other entry yet - the server creates it on commit; until
+            // the refresh, the source simply leaves the analyzable set.
+            const src = byId.get(p.entryId);
+            if (src) src.status = "rejected";
+          }
+        }
+      } else {
+        for (const p of b.pills) {
+          if (p.homeStatus === "rejected" || covered(p)) continue;
+          if (targetBrand && matchKey(p.name) === matchKey(targetBrand))
+            continue;
+          const src = byId.get(p.entryId);
+          if (!src) continue;
+          if (p.kind === "alias") {
+            src.aliases = src.aliases.filter((a) => a !== p.norm);
+          } else {
+            src.status = "rejected";
+          }
+        }
+      }
+    }
+    for (const a of autoIgnored) {
+      if (buckets.some((b) => b.pills.some((p) => p.entryId === a.entryId)))
+        continue;
+      const src = byId.get(a.entryId);
+      if (src) src.status = "rejected";
+    }
+    return [...byId.values(), ...synthetic];
+  }
+
+  async function confirmAll(opts?: {
+    deferRefresh?: boolean;
+    onProjected?: (entries: DictionaryEntry[]) => void;
+  }) {
+    // Synchronous, before any await: the caller advances the gate the
+    // moment this returns its promise, and the projection must already be
+    // in its hands by then.
+    opts?.onProjected?.(projectCommittedDict());
     setConfirming(true);
     try {
       type Act = Record<string, unknown>;
@@ -752,8 +967,9 @@ export default function IdentifyTab({
           for (const p of b.pills) {
             if (p.homeStatus === "rejected" || covered(p)) continue;
             // The target brand can never be rejected, whatever bucket its
-            // pill sits in (the server refuses this too).
-            if (targetBrand && norm(p.name) === norm(targetBrand)) continue;
+            // pill sits in (the server refuses this too - same matchKey).
+            if (targetBrand && matchKey(p.name) === matchKey(targetBrand))
+              continue;
             if (p.kind === "alias") {
               moves.push({
                 entryId: p.entryId,
@@ -768,31 +984,43 @@ export default function IdentifyTab({
         }
       }
       // Engine-ignored names commit as rejected alongside the board -
-      // unless they're currently visible as pills, in which case the bucket
-      // walk above already covered them.
+      // unless they're currently visible as pills (the bucket walk above
+      // covered them) or ALREADY rejected (the fold-persistence case: a
+      // re-walk of a confirmed board must not re-write ~40 no-op rejects
+      // and pay the observations recompute they trigger).
+      const statusOf = new Map(dict.map((e) => [e.id, e.status]));
       for (const a of autoIgnored) {
+        if (statusOf.get(a.entryId) === "rejected") continue;
         if (buckets.some((b) => b.pills.some((p) => p.entryId === a.entryId)))
           continue;
         merges.push({ entryId: a.entryId, action: "reject" });
-      }
-      const actions = [...approves, ...renames, ...moves, ...merges];
-      if (actions.length > 0) {
-        await fetch(`/api/projects/${projectId}/dictionary`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ actions }),
-        });
       }
       const allNames = [
         ...buckets.flatMap((b) => b.pills.map((p) => p.name)),
         ...autoIgnored.map((a) => a.name),
       ];
-      if (allNames.length > 0) {
-        await fetch(`/api/projects/${projectId}/dictionary`, {
+      // ONE batch: layout actions plus the name sign-off ride together, so
+      // the server runs one auth pass and one observation recompute instead
+      // of two roundtrips.
+      const actions = [
+        ...approves,
+        ...renames,
+        ...moves,
+        ...merges,
+        ...(allNames.length > 0
+          ? [{ action: "confirm", names: allNames }]
+          : []),
+      ];
+      if (actions.length > 0) {
+        const res = await fetch(`/api/projects/${projectId}/dictionary`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ action: "confirm", names: allNames }),
+          body: JSON.stringify({ actions }),
         });
+        if (!res.ok) {
+          const j = await res.json().catch(() => null);
+          throw new Error(j?.error ?? `save failed (${res.status})`);
+        }
       }
       suggestedFor.current.clear();
       // The gate footer defers the refresh: it advances to the next step
@@ -801,6 +1029,11 @@ export default function IdentifyTab({
       if (!opts?.deferRefresh) {
         setAutoIgnored([]);
         setShowAutoIgnored(false);
+        // Let the suggestion pass rerun against the refreshed dictionary:
+        // the just-committed rejects must fold straight back behind the
+        // receipt instead of appearing as pills until a remount.
+        passRan.current = false;
+        prefetchConsumed.current = true;
         await onApplied();
       }
     } finally {
@@ -808,13 +1041,16 @@ export default function IdentifyTab({
     }
   }
 
-  // Latest confirmAll, handed to the gate footer once.
+  // Latest confirmAll, handed to the gate footer - but only once the board
+  // is actually served (passDone): committing a still-preparing board would
+  // sign off a layout the user never saw.
   const confirmAllRef = useRef<typeof confirmAll>(async () => {});
   confirmAllRef.current = confirmAll;
   useEffect(() => {
+    if (!passDone && pendingEntries.length > 0) return;
     registerConfirm?.((opts) => confirmAllRef.current(opts));
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [registerConfirm]);
+  }, [registerConfirm, passDone]);
 
   const unconfirmedCount = buckets.reduce(
     (n, b) => n + b.pills.filter((p) => !p.confirmed || p.moved).length,
@@ -841,15 +1077,25 @@ export default function IdentifyTab({
   }
 
   function bucketBody(b: Bucket) {
+    // Folded engine-ignores stay behind the receipt until revealed - the
+    // rejected entries themselves live in this bucket's pill list, but only
+    // render while "show them in Ignore" is on.
+    const hiddenIgnores =
+      b.kind === "ignore" && !showAutoIgnored
+        ? new Set(autoIgnored.map((a) => a.entryId))
+        : null;
+    const pills = hiddenIgnores
+      ? b.pills.filter((p) => !hiddenIgnores.has(p.entryId))
+      : b.pills;
     const open = variantsOpen.has(b.key);
     const collapsible = (p: Pill) =>
       !p.moved && (p.auto === true || (p.kind === "alias" && b.kind === "brand"));
-    const autos = b.pills.filter(collapsible);
+    const autos = pills.filter(collapsible);
     // Order: anchor first, plain pills, flagged-for-review LAST; the
     // expanded group renders as one enclosed cluster after the anchor.
     const isAnchor = (p: Pill) =>
       p.kind === "canonical" && p.homeStatus === "active" && b.kind === "brand";
-    const loose = b.pills.filter((p) => !collapsible(p));
+    const loose = pills.filter((p) => !collapsible(p));
     const shown = [
       ...loose.filter((p) => isAnchor(p)),
       ...loose.filter((p) => !isAnchor(p) && !p.note),
@@ -862,8 +1108,15 @@ export default function IdentifyTab({
             onDragStart={(e) => {
               e.dataTransfer.setData("text/pill", p.norm);
               setDragNorm(p.norm);
+              setHoverNote(null);
             }}
             onDragEnd={() => setDragNorm(null)}
+            onMouseEnter={p.note ? () => setHoverNote(p.norm) : undefined}
+            onMouseLeave={
+              p.note
+                ? () => setHoverNote((cur) => (cur === p.norm ? null : cur))
+                : undefined
+            }
             title={
               p.note
                 ? undefined
@@ -883,7 +1136,7 @@ export default function IdentifyTab({
                 : p.confirmed
                   ? "bg-primary-soft border-primary/30 text-primary"
                   : "bg-danger/10 border-danger/30 text-danger"
-            } ${p.note ? "group relative !bg-amber-400/15 !border-amber-500/50 !text-amber-800" : ""} ${dragNorm === p.norm ? "opacity-40" : ""}`}
+            } ${p.note ? "relative !bg-amber-400/15 !border-amber-500/50 !text-amber-800" : ""} ${dragNorm === p.norm ? "opacity-40" : ""}`}
             onClick={
               p.note
                 ? () => openExamples(p.name, p.noteTarget ?? null)
@@ -912,8 +1165,8 @@ export default function IdentifyTab({
                     : `· ${autos.length} grouped name${autos.length === 1 ? "" : "s"}`}
                 </span>
               )}
-            {p.note && (
-              <span className="pointer-events-none absolute left-0 top-full z-30 mt-1.5 hidden w-72 rounded-lg border border-line bg-surface p-3 text-left shadow-lg group-hover:block">
+            {p.note && hoverNote === p.norm && (
+              <span className="pointer-events-none absolute left-0 top-full z-30 mt-1.5 block w-72 rounded-lg border border-line bg-surface p-3 text-left shadow-lg">
                 <span className="block text-[11px] font-semibold uppercase tracking-wide text-amber-800">
                   Flagged for review
                 </span>
@@ -944,7 +1197,7 @@ export default function IdentifyTab({
           </span>
         )}
         {shown.filter((p) => !isAnchor(p)).map((p) => pillSpan(p))}
-        {b.pills.length === 0 && (
+        {pills.length === 0 && (
           <span className="text-xs text-ink-3 self-center px-1">
             drop names here
           </span>
@@ -956,7 +1209,7 @@ export default function IdentifyTab({
   // Serve the board all at once: until the suggestion pass resolves,
   // render one quiet loading state instead of buckets that reshuffle as
   // placements, the summary line, and the receipt pop in one by one.
-  if (!passDone && pendingEntries.length > 0) {
+  if (!passDone && (pendingEntries.length > 0 || rejectedFoldables.length > 0)) {
     return (
       <div className="grid gap-4 py-8 justify-center">
         <p className="text-[13px] text-ink-3">
@@ -1067,7 +1320,7 @@ export default function IdentifyTab({
           {autoIgnored.length} name{autoIgnored.length === 1 ? "" : "s"}{" "}
           auto-ignored by measured rules (redundant vocabulary, own-context
           brands, off-category scenery)
-          {showAutoIgnored ? " - put in Ignore. " : " - saved as Ignore when you confirm. "}
+          {showAutoIgnored ? " - shown in Ignore below. " : " - they count as Ignore, kept out of the way. "}
           <button
             type="button"
             onClick={showAutoIgnored ? hideAutoIgnored : revealAutoIgnored}

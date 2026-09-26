@@ -15,21 +15,36 @@ export default function ParentsTab({
   projectId,
   dict,
   onApplied,
+  hideIntro,
 }: {
   projectId: string;
   dict: DictionaryEntry[];
   onApplied: () => Promise<void>;
+  /** Gate mode: the step header already explains the view, so the tab's own
+   * intro paragraph would print the same thing twice. */
+  hideIntro?: boolean;
 }) {
   const [saving, setSaving] = useState(false);
   const [labelDrafts, setLabelDrafts] = useState<Record<string, string>>({});
+  // Optimistic: a dropped pill moves NOW; the server call syncs behind it
+  // and the override lifts once the refreshed dictionary carries the truth
+  // (or immediately if the server refuses) - same convention as the
+  // analyzed toggle in Analysis settings.
+  const [parentOverride, setParentOverride] = useState<
+    Record<string, string | null>
+  >({});
 
+  const parentOf = (e: DictionaryEntry) =>
+    Object.prototype.hasOwnProperty.call(parentOverride, e.id)
+      ? parentOverride[e.id]
+      : e.parent;
   const brands = dict.filter(
     (e) => e.status === "active" && e.canonical !== OTHER_CANONICAL
   );
   const parents = [
-    ...new Set(brands.map((b) => b.parent).filter((p): p is string => !!p)),
+    ...new Set(brands.map(parentOf).filter((p): p is string => !!p)),
   ].sort((a, b) => a.localeCompare(b));
-  const unparented = brands.filter((b) => !b.parent);
+  const unparented = brands.filter((b) => !parentOf(b));
 
   async function post(body: Record<string, unknown>) {
     setSaving(true);
@@ -42,6 +57,19 @@ export default function ParentsTab({
       await onApplied();
     } finally {
       setSaving(false);
+    }
+  }
+
+  async function setParent(entryId: string, parent: string | null) {
+    setParentOverride((prev) => ({ ...prev, [entryId]: parent }));
+    try {
+      await post({ entryId, action: "set_parent", parent });
+    } finally {
+      setParentOverride((prev) => {
+        const next = { ...prev };
+        delete next[entryId];
+        return next;
+      });
     }
   }
 
@@ -58,8 +86,8 @@ export default function ParentsTab({
           parent === "__new__"
             ? (brand.display_name ?? brand.canonical)
             : parent;
-        if (brand.parent === target) return;
-        post({ entryId, action: "set_parent", parent: target });
+        if (parentOf(brand) === target) return;
+        void setParent(entryId, target);
       },
     };
   }
@@ -79,12 +107,16 @@ export default function ParentsTab({
 
   return (
     <div className="grid gap-4">
-      <p className="text-[13px] text-ink-3 -mt-1">
-        Group brands under their parent company for rollup views. Brand-level
-        numbers stay exactly as they are — the parent is an extra layer, and
-        dragging a brand out again removes it. Changes save as you go
-        {saving ? " — saving…" : "."}
-      </p>
+      {!hideIntro ? (
+        <p className="text-[13px] text-ink-3 -mt-1">
+          Group brands under their parent company for rollup views. Brand-level
+          numbers stay exactly as they are — the parent is an extra layer, and
+          dragging a brand out again removes it. Changes save as you go
+          {saving ? " — saving…" : "."}
+        </p>
+      ) : (
+        saving && <p className="text-xs text-ink-3 -mt-1">saving…</p>
+      )}
       <div>
         <p className="text-xs font-semibold uppercase tracking-wide text-ink-3 mb-2">
           Independent brands ({unparented.length}) — drag into a parent
@@ -129,7 +161,7 @@ export default function ParentsTab({
               title="Parent company label — rename applies to all its brands"
             />
             <div className="flex flex-wrap gap-1.5 min-h-9">
-              {brands.filter((b) => b.parent === p).map(pill)}
+              {brands.filter((b) => parentOf(b) === p).map(pill)}
             </div>
           </div>
         ))}

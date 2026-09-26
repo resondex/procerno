@@ -1,6 +1,5 @@
 import { NextResponse } from "next/server";
 import { requireAuth, requireProject } from "@/lib/auth";
-import { apiKeyConfigured } from "@/lib/engine/providers";
 import { getDictionarySuggestions } from "@/lib/engine/dict_suggest";
 
 export const maxDuration = 120;
@@ -20,12 +19,9 @@ export async function POST(
   const { id } = await params;
   const project = await requireProject(id, auth);
   if (project instanceof NextResponse) return project;
-  if (!apiKeyConfigured()) {
-    return NextResponse.json(
-      { error: "OPENAI_API_KEY is not configured" },
-      { status: 503 }
-    );
-  }
+  // A missing OPENAI_API_KEY no longer 503s here: cached verdicts and the
+  // mechanical family layer still serve (dict_suggest skips only the model
+  // pass), so a pre-warmed board renders instead of a hard error.
   const suggestions = await getDictionarySuggestions(id, project.category);
   return NextResponse.json({ suggestions });
 }

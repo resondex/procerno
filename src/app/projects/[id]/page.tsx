@@ -1,3 +1,4 @@
+import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import { NextResponse } from "next/server";
 import { getAuth, isStaff, requireProject } from "@/lib/auth";
@@ -35,11 +36,20 @@ export default async function ProjectPage({
   const initialDetail = JSON.parse(
     JSON.stringify({ project, prompts, runs, staff, dictionary })
   ) as Detail;
+  // The dictionary gate's saved step rides in a cookie so THIS render can
+  // open on it - a localStorage-only restore flashed step 1/3 until
+  // hydration caught up.
+  const gateStepRaw = Number(
+    (await cookies()).get(`dict_gate_step_${id}`)?.value ?? ""
+  );
+  const initialGateStep =
+    gateStepRaw === 2 || gateStepRaw === 3 ? (gateStepRaw as 2 | 3) : null;
   return (
     <ProjectDashboard
       id={id}
       initialDetail={initialDetail}
       initialRunId={sp.run ?? null}
+      initialGateStep={initialGateStep}
     />
   );
 }
