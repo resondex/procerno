@@ -276,3 +276,15 @@ Findings:
 6. Judgment fields flat across v2/v3/v4 within noise (jira framing 92.3 / 91.1 / 92.2; Netflix outcome 88.7 / 88.1 / 88.5). Denser reason targets neither help nor hurt judgment.
 
 New-category gate expectations under v4 + scope sentences: outcome ~88, framing ~91, top_pick ~89-90, reason F1 ~86 vs same-contract labels, mean per-code incidence gap ~1.5-2pts with a handful of brand-specific codes needing calibration. Open for Tyler: production coder decision (v4 candidate) and prod flip; the prod coder prompt must carry the scope sentences (providers.ts + Fireworks provider integration); mentions path (v3/v4 labels carry no mentions field - the v4 coder cannot replace the mentions pass as trained); taxonomy adds for the post-scope residue (AmEx consumer credit-score impact / retention offers, Netflix home bandwidth, etc.); solo-vs-consensus; whether plan-tiers-style breadth gaps get fixed by scope-sentence edits or calibration labels.
+
+## Grok baseline with scope sentences (2026-09-25, Tyler's go): v4 wins every segment on every metric
+
+The PROD coder path (extractCodingConsensus, EXTRACT_SOLO=grok-4-fast, decompose2) over the same held-out segments, with the confirmed code list AND scope sentences via the new optional `reasonDefinitions` coder context (providers.ts, commit eb5edae - inert when absent, and the prerequisite for any coder flip). Runner `scripts/grok_scope_eval.mts`: answers from vault, DATABASE_URL stripped so the ledger logger falls back to a scratch SQLite (nothing to prod), target framing derived from the target's mention framing as prod does. **Spend $13.88** (AmEx 0.83, jira 2.10, Pixel 0.86, Netflix 10.09 - ~$2.8/1K answers, 70% of it the pipeline's Haiku call). Outputs `finetune/v3eval/grok_*_defs.jsonl`.
+
+vs v4 truth, grok -> v4 (outcome / framing / top_pick / reason F1; per-code incidence gap):
+- jira 639: 78.1 -> 93.6 / 78.1 -> 92.2 / 87.0 -> 95.3 / F1 50.2 -> 84.6; gap 4.2 -> 0.6 pts (21 -> 0 codes off >3)
+- AmEx 300: 68.7 -> 87.7 / 72.0 -> 92.0 / 84.0 -> 93.0 / F1 68.6 -> 93.3; gap 4.0 -> 0.6 (16 -> 0)
+- Pixel 300: 75.3 -> 91.7 / 83.0 -> 93.0 / 86.0 -> 91.7 / F1 59.5 -> 92.9; gap 5.1 -> 0.8 (20 -> 0)
+- Netflix 3,610 (unseen by v4): 68.3 -> 88.2 / 84.9 -> 90.7 / 78.1 -> 89.6 / F1 65.7 -> 86.3; gap 3.9 -> 1.6 (13 -> 5)
+
+Findings: (1) grok's judgment was tuned on jira and does not transfer - outcome 78 on jira but 68-75 on the other three brands; v4 holds 88-94 everywhere including the brand it never saw. (2) Grok under-codes reasons (2.5-3.2 codes/row vs truth ~4) and ignores most scope: scope-pair recall 13-37% even with the sentences in its prompt (v4 61-88%). (3) On dashboard accuracy grok leaves 13-21 codes per brand off by >3pts; v4 leaves 0 on trained brands and 5 on unseen Netflix. (4) Cost: grok pipeline ~$2.8/1K answers vs v4 ~$0.6/1K GPU time + ~$3 spin-up per batch (plus a mentions pass for v4, ~$0.3/1K).
