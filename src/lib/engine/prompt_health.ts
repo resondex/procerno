@@ -48,7 +48,7 @@ export async function analyzePromptHealth(
   if (!project) return;
   const [prompts, responses, mentions, dictionary] = await Promise.all([
     store.listPrompts(projectId),
-    store.listResponses(runId),
+    store.listResponseMeta(runId),
     store.listMentionsForRun(runId),
     store.getDictionary(projectId),
   ]);

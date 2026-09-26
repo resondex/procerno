@@ -34,7 +34,7 @@ export async function loadAdminData(auth: AuthContext) {
     }[] = [];
     for (const pr of projects.slice(0, 100)) {
       for (const run of await store.listRuns(pr.id)) {
-        const responses = await store.listResponses(run.id);
+        const responses = await store.listResponseMeta(run.id);
         if (responses.length === 0 && run.status === "pending") continue;
         let inT = 0, outT = 0, searches = 0, cost = 0, coder = 0;
         for (const r of responses) {

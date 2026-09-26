@@ -8,6 +8,7 @@ import {
   wilson,
 } from "./metrics";
 import { computeProjectTrend } from "./trend";
+import { computeRunMetricsCached } from "./slice_cache";
 import { apiKeyConfigured, engineMode, openaiClient, summarizeCoderProvenance } from "./providers";
 import { buildRunInsights, type InsightsBundle } from "./insights";
 import { buildAnalysisWorkbook, buildScorecardWorkbook } from "./workbooks";
@@ -51,7 +52,7 @@ export async function buildStudyBundle(
 
   const [metrics, prompts, responses, mentions, trend, dictionary] =
     await Promise.all([
-      computeRunMetrics(run.id),
+      computeRunMetricsCached(run.id),
       store.listPrompts(project.id),
       store.listResponses(run.id),
       store.listMentionsForRun(run.id),

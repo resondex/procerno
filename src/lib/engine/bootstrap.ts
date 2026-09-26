@@ -1,12 +1,16 @@
 import { store } from "../store";
 import { withCostContext } from "../cost_log";
-import type { Project, ResponseRow } from "../types";
+import type { Project, ResponseMetaRow } from "../types";
 import { runBrandDiscovery, runOpenDiscovery, type DiscoveryAnswer } from "./discovery";
 import { consolidateTaxonomy } from "./consolidate";
 import { classifyNonBrands } from "./suggest";
 import { refreshBrandObservations, refreshObservedAliases } from "./observations";
 import { getDictionarySuggestions } from "./dict_suggest";
 import { prewarmDictionaryExamples } from "./dict_examples";
+
+/** Answer bodies one bootstrap drive loads per discovery pass - about what
+ * a drive codes at concurrency 16 inside its budget. */
+const DISCOVERY_BODIES_PER_DRIVE = 2000;
 
 /**
  * The init bootstrap: everything a FIRST run owes between its last collected
@@ -41,16 +45,27 @@ export async function bootstrapRunChunk(
     return "gated";
   }
 
-  const responses = await store.listResponses(runId);
+  // Bodies stay in the database until a stage needs them: a warm re-drive
+  // (everything discovered) reads no answer text at all.
+  const responses = await store.listResponseMeta(runId);
   const promptText = new Map(
     (await store.listPrompts(project.id)).map((p) => [p.id, p.text])
   );
-  const toAnswer = (r: ResponseRow): DiscoveryAnswer => ({
-    id: r.id,
-    engine: r.model,
-    prompt: promptText.get(r.prompt_id) ?? "",
-    text: r.text,
-  });
+  // Bodies for one drive's worth of answers. Capped so a drive that runs out
+  // of budget hasn't paid to read bodies it never reached - the next drive
+  // fetches the rest.
+  const answersFor = async (rows: ResponseMetaRow[]): Promise<DiscoveryAnswer[]> => {
+    const slice = rows.slice(0, DISCOVERY_BODIES_PER_DRIVE);
+    const text = new Map(
+      (await store.getResponseTexts(slice.map((r) => r.id))).map((t) => [t.id, t.text])
+    );
+    return slice.map((r) => ({
+      id: r.id,
+      engine: r.model,
+      prompt: promptText.get(r.prompt_id) ?? "",
+      text: text.get(r.id) ?? "",
+    }));
+  };
 
   // Stages 1+2: per-answer discovery, persisted as each answer lands. A few
   // answers can fail both attempts and stay null - within a 2% tolerance
@@ -60,7 +75,7 @@ export async function bootstrapRunChunk(
   const needBrands = responses.filter((r) => r.discovery_brands === null);
   if (needCodes.length > tolerance || needBrands.length > tolerance) {
     if (needCodes.length > tolerance) {
-      await runOpenDiscovery(needCodes.map(toAnswer), {
+      await runOpenDiscovery(await answersFor(needCodes), {
         concurrency: 16,
         deadlineMs: deadline,
         onResult: (row) =>
@@ -68,8 +83,9 @@ export async function bootstrapRunChunk(
       });
     }
     if (needBrands.length > tolerance && Date.now() < deadline) {
+      const answers = await answersFor(needBrands);
       await withCostContext({ purpose: "discovery:brands" }, () =>
-        runBrandDiscovery(needBrands.map(toAnswer), {
+        runBrandDiscovery(answers, {
           concurrency: 16,
           deadlineMs: deadline,
           onResult: (row) =>

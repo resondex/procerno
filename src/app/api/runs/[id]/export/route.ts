@@ -4,9 +4,9 @@ import { engineMode } from "@/lib/engine/providers";
 import { requireAuth, requireRun } from "@/lib/auth";
 import {
   buildCanonicalizer,
-  computeRunMetrics,
   dictionaryRoles,
 } from "@/lib/engine/metrics";
+import { computeRunMetricsCached } from "@/lib/engine/slice_cache";
 
 function csvCell(v: unknown): string {
   const s = v === null || v === undefined ? "" : String(v);
@@ -42,7 +42,7 @@ export async function GET(
   if (loaded instanceof NextResponse) return loaded;
   const { run, project } = loaded;
   const [metrics, responses, mentions, prompts] = await Promise.all([
-    computeRunMetrics(id),
+    computeRunMetricsCached(id),
     store.listResponses(id),
     store.listMentionsForRun(id),
     store.listPrompts(run.project_id),

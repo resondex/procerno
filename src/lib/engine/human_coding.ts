@@ -74,7 +74,7 @@ export async function sampleItems(
   token: string
 ): Promise<AssignmentItem[]> {
   const [responses, mentions, prompts, dictionary] = await Promise.all([
-    store.listResponses(run.id),
+    store.listResponseMeta(run.id),
     store.listMentionsForRun(run.id),
     store.listPrompts(project.id),
     store.getDictionary(project.id),
@@ -121,7 +121,7 @@ export async function llmVerdicts(
   items: AssignmentItem[]
 ): Promise<Map<string, boolean>> {
   const [responses, mentions, dictionary] = await Promise.all([
-    store.listResponses(runId),
+    store.listResponseMeta(runId),
     store.listMentionsForRun(runId),
     store.getDictionary(project.id),
   ]);

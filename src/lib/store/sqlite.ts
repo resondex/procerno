@@ -14,6 +14,7 @@ import type {
   Prompt,
   Run,
   ResponseRow,
+  ResponseStatsRow,
   MentionRow,
   SetupDraft,
   Store,
@@ -930,6 +931,11 @@ export const sqliteStore: Store = {
     return `${row?.n ?? 0}:${row?.m ?? "0"}`;
   },
 
+  async runDataRevision() {
+    // No cheap in-database hash here; the local store just doesn't cache.
+    return null;
+  },
+
   async createCodingAssignment(a) {
     getDb()
       .prepare(
@@ -1497,6 +1503,16 @@ export const sqliteStore: Store = {
           search_count: (r.search_count as number | null) ?? null,
         }) as ResponseRow
     );
+  },
+
+  async listResponseMeta(runId: string, opts?: { textStats: true }) {
+    // Local file: no egress to save, so derive from the full rows.
+    const rows = await this.listResponses(runId);
+    return rows.map(({ text, ...meta }) =>
+      opts?.textStats
+        ? { ...meta, text_head: text.slice(0, 700), word_count: text.split(/\s+/).length }
+        : meta
+    ) as ResponseStatsRow[];
   },
 
   async listMentionsForRun(runId) {

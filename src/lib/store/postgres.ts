@@ -11,6 +11,8 @@ import type {
   Prompt,
   Run,
   ResponseRow,
+  ResponseMetaRow,
+  ResponseStatsRow,
   MentionRow,
   SetupDraft,
   Store,
@@ -371,6 +373,46 @@ function rowToDraft(r: Record<string, unknown>): SetupDraft {
   };
 }
 
+/** Every responses column but the answer body (and seq, used only to order). */
+const RESPONSE_META_COLUMNS = [
+  "id", "run_id", "prompt_id", "repeat_idx", "model", "finish_reason",
+  "citations", "coder_model", "search_count", "input_tokens", "output_tokens",
+  "coder_usage", "top_pick_brand", "outcome", "reason_codes",
+  "clarification_requested", "gives_recommendation", "includes_prices",
+  "includes_specs", "total_recommendations", "focus_quote",
+  "focus_interpretation", "discovery_codes", "discovery_brands", "created_at",
+];
+
+function responseMeta(r: Record<string, unknown>): ResponseMetaRow {
+  return {
+    id: r.id as string,
+    run_id: r.run_id as string,
+    prompt_id: r.prompt_id as string,
+    repeat_idx: r.repeat_idx as number,
+    model: (r.model as string | null) ?? "",
+    finish_reason: (r.finish_reason as string | null) ?? null,
+    citations: r.citations ? JSON.parse(r.citations as string) : null,
+    coder_model: (r.coder_model as string | null) ?? null,
+    search_count: (r.search_count as number | null) ?? null,
+    input_tokens: (r.input_tokens as number | null) ?? null,
+    output_tokens: (r.output_tokens as number | null) ?? null,
+    coder_usage: (r.coder_usage as string | null) ?? null,
+    top_pick_brand: (r.top_pick_brand as string | null) ?? null,
+    outcome: (r.outcome as ResponseMetaRow["outcome"]) ?? null,
+    reason_codes: (r.reason_codes as string | null) ?? null,
+    clarification_requested: (r.clarification_requested as number | null) ?? null,
+    gives_recommendation: (r.gives_recommendation as number | null) ?? null,
+    includes_prices: (r.includes_prices as number | null) ?? null,
+    includes_specs: (r.includes_specs as number | null) ?? null,
+    total_recommendations: (r.total_recommendations as number | null) ?? null,
+    focus_quote: (r.focus_quote as string | null) ?? null,
+    focus_interpretation: (r.focus_interpretation as string | null) ?? null,
+    discovery_codes: (r.discovery_codes as string | null) ?? null,
+    discovery_brands: (r.discovery_brands as string | null) ?? null,
+    created_at: iso(r.created_at)!,
+  };
+}
+
 function rowToRun(r: Record<string, unknown>): Run {
   return {
     id: r.id as string,
@@ -640,6 +682,26 @@ export const pgStore: Store = {
       JOIN responses r ON r.id = l.response_id
       WHERE r.run_id = ${runId}`;
     return `${rows[0]?.n ?? 0}:${rows[0]?.m ?? "0"}`;
+  },
+
+  async runDataRevision(runId) {
+    const sql = await db();
+    // Sums of per-row hashes: order-free, and any column change moves them.
+    // Row text is hashed in place - only the four numbers come back.
+    const rows = await sql`SELECT
+        (SELECT count(*)::text || ':' || coalesce(sum(hashtext(r::text)), 0)::text
+           FROM responses r WHERE r.run_id = ${runId}) AS resp,
+        (SELECT count(*)::text || ':' || coalesce(sum(hashtext(m::text)), 0)::text
+           FROM mentions m JOIN responses r ON r.id = m.response_id
+           WHERE r.run_id = ${runId}) AS men,
+        (SELECT count(*)::text || ':' || coalesce(sum(hashtext(l::text)), 0)::text
+           FROM answer_labels l JOIN responses r ON r.id = l.response_id
+           WHERE r.run_id = ${runId}) AS lab,
+        (SELECT count(*)::text || ':' || coalesce(sum(hashtext(p::text)), 0)::text
+           FROM prompts p JOIN runs ru ON ru.project_id = p.project_id
+           WHERE ru.id = ${runId}) AS pr`;
+    const r = rows[0];
+    return r ? `${r.resp}/${r.men}/${r.lab}/${r.pr}` : null;
   },
 
   async createCodingAssignment(a) {
@@ -1162,36 +1224,26 @@ export const pgStore: Store = {
     const rows =
       await sql`SELECT * FROM responses WHERE run_id = ${runId} ORDER BY seq`;
     return rows.map(
-      (r) =>
-        ({
-          id: r.id,
-          run_id: r.run_id,
-          prompt_id: r.prompt_id,
-          repeat_idx: r.repeat_idx,
-          model: r.model ?? "",
-          finish_reason: r.finish_reason ?? null,
-          citations: r.citations ? JSON.parse(r.citations) : null,
-          coder_model: r.coder_model ?? null,
-          search_count: r.search_count ?? null,
-          input_tokens: (r.input_tokens as number | null) ?? null,
-          output_tokens: (r.output_tokens as number | null) ?? null,
-          coder_usage: (r.coder_usage as string | null) ?? null,
-          text: r.text,
-          top_pick_brand: r.top_pick_brand ?? null,
-          outcome: r.outcome ?? null,
-          reason_codes: r.reason_codes ?? null,
-          clarification_requested: r.clarification_requested ?? null,
-          gives_recommendation: r.gives_recommendation ?? null,
-          includes_prices: r.includes_prices ?? null,
-          includes_specs: r.includes_specs ?? null,
-          total_recommendations: r.total_recommendations ?? null,
-          focus_quote: r.focus_quote ?? null,
-          focus_interpretation: r.focus_interpretation ?? null,
-          discovery_codes: (r.discovery_codes as string | null) ?? null,
-          discovery_brands: (r.discovery_brands as string | null) ?? null,
-          created_at: iso(r.created_at)!,
-        }) as ResponseRow
+      (r) => ({ ...responseMeta(r), text: r.text }) as ResponseRow
     );
+  },
+
+  async listResponseMeta(runId: string, opts?: { textStats: true }) {
+    const sql = await db();
+    // Every column but the body. Text stats ride along only when asked:
+    // the split costs the database a pass over every body.
+    const rows = opts?.textStats
+      ? await sql`SELECT ${sql(RESPONSE_META_COLUMNS)},
+          left(text, 700) AS text_head,
+          coalesce(array_length(regexp_split_to_array(text, '[[:space:]]+'), 1), 1) AS word_count
+          FROM responses WHERE run_id = ${runId} ORDER BY seq`
+      : await sql`SELECT ${sql(RESPONSE_META_COLUMNS)}
+          FROM responses WHERE run_id = ${runId} ORDER BY seq`;
+    return rows.map((r) =>
+      opts?.textStats
+        ? { ...responseMeta(r), text_head: r.text_head as string, word_count: r.word_count as number }
+        : responseMeta(r)
+    ) as ResponseStatsRow[];
   },
 
   async listMentionsForRun(runId) {

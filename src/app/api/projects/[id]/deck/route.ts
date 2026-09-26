@@ -2,7 +2,8 @@ import { NextResponse } from "next/server";
 import { store } from "@/lib/store";
 import { requireAuth, requireProject } from "@/lib/auth";
 import { apiKeyConfigured } from "@/lib/engine/providers";
-import { buildCanonicalizer, computeRunMetrics } from "@/lib/engine/metrics";
+import { buildCanonicalizer } from "@/lib/engine/metrics";
+import { computeRunMetricsCached } from "@/lib/engine/slice_cache";
 import { computeProjectTrend } from "@/lib/engine/trend";
 import { buildRunInsights, type InsightsBundle } from "@/lib/engine/insights";
 import { buildStudyDeck, type DeckVariant } from "@/lib/engine/deck";
@@ -36,7 +37,7 @@ export async function GET(
 
   const [metrics, prompts, responses, mentions, trend, dictionary] =
     await Promise.all([
-      computeRunMetrics(run.id),
+      computeRunMetricsCached(run.id),
       store.listPrompts(id),
       store.listResponses(run.id),
       store.listMentionsForRun(run.id),

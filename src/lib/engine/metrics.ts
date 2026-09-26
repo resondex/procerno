@@ -13,7 +13,7 @@ import type {
   PromptBadge,
   PromptStats,
   PromptTheme,
-  ResponseRow,
+  ResponseStatsRow,
   Run,
   RunMetrics,
   ThemeStats,
@@ -27,7 +27,7 @@ const THEME_ORDER: PromptTheme[] = [
   "branded",
 ];
 
-function rate(rows: ResponseRow[], test: (r: ResponseRow) => boolean): number {
+function rate(rows: ResponseStatsRow[], test: (r: ResponseStatsRow) => boolean): number {
   return rows.length > 0 ? rows.filter(test).length / rows.length : 0;
 }
 
@@ -135,7 +135,8 @@ export interface SliceOpts {
 export interface RunData {
   run: Run;
   project: Project;
-  responses: ResponseRow[];
+  /** Bodies stay in the database: metrics read only text_head/word_count. */
+  responses: ResponseStatsRow[];
   mentions: MentionRow[];
   prompts: Prompt[];
   dictionary: DictionaryEntry[];
@@ -189,7 +190,7 @@ export async function loadRunData(runId: string): Promise<RunData | null> {
   if (!run) return null;
   const [projectMaybe, responses, mentions] = await Promise.all([
     store.getProject(run.project_id),
-    store.listResponses(runId),
+    store.listResponseMeta(runId, { textStats: true }),
     store.listMentionsForRun(runId),
   ]);
   const project = projectMaybe!;
@@ -262,7 +263,7 @@ export function computeRunMetricsFromData(
       : sampledModels;
   const coreSet = new Set(coreModels.length > 0 ? coreModels : sampledModels);
   const bonusModels = sampledModels.filter((m) => !coreSet.has(m));
-  const inCore = (r: ResponseRow) =>
+  const inCore = (r: ResponseStatsRow) =>
     !r.model || coreSet.size === 0 || coreSet.has(r.model);
 
   // Headline rates use unbranded prompts only — asking about the brand by
@@ -514,7 +515,7 @@ export function computeRunMetricsFromData(
                 rows.length > 0
                   ? Math.round(
                       rows.reduce(
-                        (a, r) => a + r.text.split(/\s+/).length,
+                        (a, r) => a + r.word_count,
                         0
                       ) / rows.length
                     )
@@ -806,7 +807,7 @@ export function computeRunMetricsFromData(
   const verbatims = [...withTarget.slice(0, 2), ...withoutTarget.slice(0, 2)].map(
     (r) => ({
       promptText: promptById.get(r.prompt_id)?.text ?? "",
-      text: r.text.length > 600 ? r.text.slice(0, 600) + "…" : r.text,
+      text: r.text_head.length > 600 ? r.text_head.slice(0, 600) + "…" : r.text_head,
       mentionsTarget: targetByResponse.has(r.id),
     })
   );
@@ -826,7 +827,7 @@ export function computeRunMetricsFromData(
   let positionDist: RunMetrics["positionDist"] = null;
 
   if (coded) {
-    const isTargetPick = (r: ResponseRow) =>
+    const isTargetPick = (r: ResponseStatsRow) =>
       r.top_pick_brand !== null && isT(canon.norm(r.top_pick_brand));
 
     outcomes = {
@@ -875,7 +876,7 @@ export function computeRunMetricsFromData(
 
     // Reason-code lift — argument share in wins vs overall vs target-absent.
     if (project.reason_taxonomy.length > 0) {
-      const reasonsOf = (r: ResponseRow) =>
+      const reasonsOf = (r: ResponseStatsRow) =>
         new Set((r.reason_codes ?? "").split("|").filter(Boolean));
       const absent = codedRows.filter((r) => !targetByResponse.has(r.id));
       reasonLift = project.reason_taxonomy

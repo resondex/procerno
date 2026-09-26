@@ -1,7 +1,7 @@
 import { anthropicClient, openaiClient } from "./providers";
 import { tagCosts } from "../cost_log";
 import { store } from "../store";
-import { computeRunMetrics } from "./metrics";
+import { computeRunMetricsCached } from "./slice_cache";
 import { computeProjectTrend } from "./trend";
 import type { RunMetrics } from "../types";
 
@@ -311,7 +311,7 @@ export async function buildRunInsights(
   const hit = await store.cacheGet(key, CACHE_TTL_MS);
   if (hit) return JSON.parse(hit) as InsightsBundle;
 
-  const metrics = await computeRunMetrics(runId);
+  const metrics = await computeRunMetricsCached(runId);
   if (!metrics) return null;
 
   // Trend delta when a previous completed run exists.

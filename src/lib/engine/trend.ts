@@ -1,5 +1,6 @@
 import { store } from "../store";
-import { computeRunMetrics, wilson } from "./metrics";
+import { wilson } from "./metrics";
+import { computeRunMetricsCached } from "./slice_cache";
 import type { ProjectTrend, TrendPoint, TrendSeries } from "../types";
 
 /**
@@ -24,7 +25,7 @@ export async function computeProjectTrend(
   const runs: ProjectTrend["runs"] = [];
 
   for (const run of completed) {
-    const m = await computeRunMetrics(run.id);
+    const m = await computeRunMetricsCached(run.id);
     if (!m) continue;
     runs.push({
       runId: run.id,

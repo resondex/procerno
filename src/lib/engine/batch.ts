@@ -42,7 +42,7 @@ async function pendingTasks(runId: string): Promise<BatchTask[]> {
   if (!project) return [];
   const prompts = (await store.listPrompts(project.id)).filter((p) => !p.retired);
   const done = new Set(
-    (await store.listResponses(runId)).map(
+    (await store.listResponseMeta(runId)).map(
       (r) => `${r.prompt_id}:${r.repeat_idx}:${r.model}`
     )
   );
@@ -270,7 +270,7 @@ async function ingest(
   };
   tagCosts({ projectId: project.id, runId });
   const done = new Set(
-    (await store.listResponses(runId)).map(
+    (await store.listResponseMeta(runId)).map(
       (r) => `${r.prompt_id}:${r.repeat_idx}:${r.model}`
     )
   );

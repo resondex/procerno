@@ -297,6 +297,20 @@ export interface ResponseRow {
   created_at: string;
 }
 
+/** A response without its answer body. The body is ~85% of a row's bytes,
+ * and most readers (metrics, collection bookkeeping, finalize, admin) never
+ * touch it - they load this and fetch bodies by id when they need them. */
+export type ResponseMetaRow = Omit<ResponseRow, "text">;
+
+/** Meta plus the two text-derived facts metrics needs: the first 700
+ * characters (Postgres counts code points, JS UTF-16 units - 700 code points
+ * always cover a 600-unit verbatim and its truncation test) and the
+ * whitespace word count, computed in SQL to match `text.split(/\s+/)`. */
+export type ResponseStatsRow = ResponseMetaRow & {
+  text_head: string;
+  word_count: number;
+};
+
 export interface DictionaryEntry {
   id: string;
   project_id: string;
@@ -735,6 +749,11 @@ export interface Store {
    * write (upserts refresh created_at), so cache keys built on it stay
    * correct without invalidation hooks. */
   labelsRevisionForRun(runId: string): Promise<string>;
+  /** Fingerprint of everything a run's metrics read - its responses,
+   * mentions, labels and the project's prompts - hashed in the database so
+   * nothing but one short string leaves it. Moves on any write; null means
+   * the store can't fingerprint cheaply and callers should not cache. */
+  runDataRevision(runId: string): Promise<string | null>;
   createCodingAssignment(a: CodingAssignment): Promise<void>;
   getCodingAssignmentByToken(token: string): Promise<CodingAssignment | null>;
   listCodingAssignments(projectId: string): Promise<CodingAssignment[]>;
@@ -931,5 +950,11 @@ export interface Store {
    */
   countResponsesByModel(runId: string): Promise<Record<string, number>>;
   listResponses(runId: string): Promise<ResponseRow[]>;
+  /** listResponses without answer bodies - see ResponseMetaRow. */
+  listResponseMeta(runId: string): Promise<ResponseMetaRow[]>;
+  listResponseMeta(
+    runId: string,
+    opts: { textStats: true }
+  ): Promise<ResponseStatsRow[]>;
   listMentionsForRun(runId: string): Promise<MentionRow[]>;
 }

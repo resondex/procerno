@@ -161,7 +161,7 @@ export async function driveRunChunk(
   }
 
   const doneKeys = new Set(
-    (await store.listResponses(runId)).map(
+    (await store.listResponseMeta(runId)).map(
       (r) => `${r.prompt_id}:${r.repeat_idx}:${r.model}`
     )
   );
@@ -418,6 +418,10 @@ const TRUNCATED_FINISH = new Set(["max_tokens", "length", "max_output_tokens"]);
  * that still maxed out, so it is kept as-is rather than retried forever. */
 const TRUNCATION_RETRY_CAP = 16_384;
 const RETRY_SKIP_OUTPUT = 12_000;
+/** Answer bodies fetched per round trip while coding - a few waves of
+ * CONCURRENCY workers, so a chunk that hits its deadline has read little it
+ * didn't code. */
+const CODING_BODY_PAGE = 256;
 
 async function codeCollectedChunk(
   runId: string,
@@ -427,8 +431,15 @@ async function codeCollectedChunk(
   deadline: number,
   health: { expected: number }
 ): Promise<ChunkOutcome> {
-  const responses = await store.listResponses(runId);
+  // Bodies stay in the database until an answer is actually worked on: a
+  // chunk reads the whole run's bookkeeping, but only the bodies it codes.
+  const responses = await store.listResponseMeta(runId);
   const uncoded = responses.filter((r) => !r.coder_model && !r.outcome);
+  const bodies = new Map<string, string>();
+  const loadBodies = async (ids: string[]) => {
+    const missing = ids.filter((id) => !bodies.has(id));
+    for (const t of await store.getResponseTexts(missing)) bodies.set(t.id, t.text);
+  };
 
   // Operational hold: with RUN_COLLECT_ONLY set, runs park at "collected"
   // and never spend a coding cent - used while the coder question (solo vs
@@ -452,6 +463,7 @@ async function codeCollectedChunk(
   );
   let recollected = 0;
   if (retryable.length > 0) {
+    await loadBodies(retryable.map((r) => r.id));
     const promptText = new Map(
       (await store.listPrompts(projectId)).map((p) => [p.id, p.text])
     );
@@ -471,7 +483,7 @@ async function codeCollectedChunk(
         if (!fresh.text.trim()) continue;
         // Keep the longer read: a retry that truncated even higher is
         // still more of the answer than we had.
-        if (fresh.text.length >= r.text.length) {
+        if (fresh.text.length >= (bodies.get(r.id) ?? "").length) {
           await store.replaceResponseAnswer(r.id, {
             text: fresh.text,
             finishReason: fresh.finishReason,
@@ -480,7 +492,7 @@ async function codeCollectedChunk(
             inputTokens: fresh.usage.input,
             outputTokens: fresh.usage.output,
           });
-          r.text = fresh.text;
+          bodies.set(r.id, fresh.text);
           r.finish_reason = fresh.finishReason;
           r.output_tokens = fresh.usage.output;
           recollected++;
@@ -523,13 +535,31 @@ async function codeCollectedChunk(
   let cursor = 0;
   let coded = 0;
   const outage: { err: CoderUnavailableError | null } = { err: null };
+  // Bodies arrive a page ahead of the workers, one shared fetch per page.
+  const pages = new Map<number, Promise<void>>();
+  const bodyOf = async (i: number): Promise<string> => {
+    const page = Math.floor(i / CODING_BODY_PAGE);
+    if (!pages.has(page)) {
+      const start = page * CODING_BODY_PAGE;
+      pages.set(
+        page,
+        loadBodies(uncoded.slice(start, start + CODING_BODY_PAGE).map((r) => r.id))
+          // A failed page is retried by the next worker that needs it.
+          .catch((err) => { pages.delete(page); throw err; })
+      );
+    }
+    await pages.get(page);
+    return bodies.get(uncoded[i].id) ?? "";
+  };
   async function worker(): Promise<void> {
     while (cursor < uncoded.length && Date.now() < deadline && !outage.err) {
-      const r = uncoded[cursor++];
+      const i = cursor++;
+      const r = uncoded[i];
       try {
+        const text = await bodyOf(i);
         const meter = coderUsageAccumulator(r.coder_usage);
         const coding = await withCostContext({ purpose: "run:coder" }, () =>
-          extractCodingConsensus(r.text, { ...ctx, usageSink: meter.sink })
+          extractCodingConsensus(text, { ...ctx, usageSink: meter.sink })
         );
         await store.writeResponseCoding(
           r.id,
@@ -573,7 +603,7 @@ export async function finalizeRun(runId: string): Promise<void> {
   try {
     const [runMentions, runResponses] = await Promise.all([
       store.listMentionsForRun(runId),
-      store.listResponses(runId),
+      store.listResponseMeta(runId),
     ]);
     // cleanSurface, same as the observations queue path - a mention's "®"
     // or doubled spaces must not become part of a pill's name.
