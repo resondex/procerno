@@ -9,6 +9,11 @@ export interface ExtractionContext {
   targetBrand: string;
   knownBrands: string[];
   reasonCodes: string[];
+  /** Confirmed scope sentence per reason code (the consolidation "why" the
+   * customer ratifies). Rendered with the reasons rule so a code covers
+   * everything its definition names, not just what its name suggests.
+   * Absent = names-only enum, the pre-2026-09-25 behavior. */
+  reasonDefinitions?: Record<string, string>;
   /** Exact coder metering: every extraction model call reports its
    * vendor-metered usage here (input already folded to billed-equivalent
    * tokens for Anthropic prompt caching: uncached + 1.25x creation +
@@ -1051,6 +1056,19 @@ function reasonsRule(): string {
   );
 }
 
+function reasonDefinitionsBlock(ctx: ExtractionContext): string {
+  const defs = ctx.reasonDefinitions;
+  if (!defs) return "";
+  const lines = ctx.reasonCodes.filter((c) => defs[c]).map((c) => `- ${c}: ${defs[c]}`);
+  if (lines.length === 0) return "";
+  return (
+    "Allowed reason codes - each code covers everything in its " +
+    "definition; use the most specific code that applies:\n" +
+    lines.join("\n") +
+    "\n"
+  );
+}
+
 /** One instruction set, whichever vendor codes — so a coder swap changes
  * the model and nothing else. */
 function codingInstructions(ctx: ExtractionContext): string {
@@ -1126,6 +1144,7 @@ function codingInstructions(ctx: ExtractionContext): string {
     "or a parenthetical. If the answer genuinely leads with two, that " +
     "is 'conditional', not a pick.\n") +
     reasonsRule() +
+    reasonDefinitionsBlock(ctx) +
     "clarification_requested — independent of outcome: true whenever " +
     "the answer asks the reader any question, including when it has " +
     "already recommended something.\n" +
