@@ -338,3 +338,11 @@ procerno-coder-v4b (sftj fsbxx0o1, qwen3p5-9b, v4's exact data/hyperparameters) 
 | Netflix 3,610 scope defs | 88.2 / 90.7 / 89.6 / 86.3 | 87.1 / 91.0 / 88.5 / 85.0 | 1.6 -> 1.9 (5 -> 6 codes >3) |
 
 Read: on trained brands the 9B is indistinguishable from the 30B (every difference inside n=300/639 noise; reason F1 within 0.3). On the unseen brand it gives up ~1pt outcome / top_pick and 1.3 F1 at n=3,610 - small but real. Economics: eval ran 4,849 answers in ~7 min on ONE H100 (~43K answers/hr at concurrency 24 vs the 30B's ~26K/hr on two) -> ~$0.19/1K answers vs ~$0.60, and retrains ~$30 vs ~$175. Ops lessons (fixed): (1) Qwen3.5 bases THINK by default even when fine-tuned on bare JSON - every eval answer burned the 400-token budget in reasoning_content; send `reasoning_effort: "none"` (ft_eval_v3.mts REASONING=none) - any prod integration of a Qwen coder must do the same. (2) DEPLOYED status can precede routability (636 model_not_found 404s) - chains now `deploy_eval_v3.sh probe <model>` before evaluating. (3) One teardown call left the deployment READY and billing ~40 min (~$5) while reporting success - teardown now retries until DELETING/DELETED is confirmed.
+
+## Round 3 set up (2026-09-26, Tyler's go): v5b + warm starts on both bases
+
+- **v5b** - v5 data (contract definitions in labels AND training prompts) on qwen3p5-9b, v4 hyperparameters (`fireworks_launch_v5b.sh`, uploads train_v5/val_v5). Compare to v4b (same base, v4 data) to isolate the definitions. Eval `chain_v5b_eval.sh`: DEFS_VER=v5, thinking off, scored vs v5 truth and v4 truth.
+- **v4-warm10/20** - v4 (30B) warm-started on the Netflix slices (`fireworks_launch_v4warm.sh`; the first launch was cancelled at 0%).
+- **v4b-warm10/20** - v4b (9B) warm-started on the same slices + replay (`fireworks_launch_v4bwarm.sh`, reuses the uploaded warm datasets, rank 16/alpha 32).
+- One command for all five: `fireworks_launch_round3.sh` (hand-run). Est. ~$30 + ~$28 + ~$5.
+- Eval chains (armed; each waits for its jobs, discovers ids by output model, deploys, probes routability, evaluates, verified teardown, scores): `FAMILY=v4 chain_warm_eval.sh` (30B, 2x H100), `FAMILY=v4b chain_warm_eval.sh` (9B, 1x H100, REASONING=none), `chain_v5b_eval.sh`. Chains run locally - the Mac must stay awake or deployments idle-bill until it wakes.
