@@ -309,3 +309,11 @@ Question: does a small base hold v4's accuracy? Fireworks serves fine-tunes ONLY
 - Base: `qwen3p5-9b` (9.4B). Catalog check: llama-v3p1-8b-instruct (deprecated 2025-11-26) and qwen3-8b (deprecated 2026-05-14) are past deprecation; qwen3-vl-8b-instruct carries an unused vision tower; qwen3p5-9b is current, text-only, supervised-LoRA-tunable, in the <=16B price tier.
 - `finetune/fireworks_launch_v4b.sh` (hand-run): reuses the uploaded v4 datasets procerno-coder-multi-v4 / -v4-val (13,491 / 300 - no new data), v4 hyperparameters, output `procerno-coder-v4b`. Only the base changes.
 - Eval: `BASE=qwen3p5-9b GPUS=1 DEP=<new id> ./deploy_eval_v3.sh create`, bind procerno-coder-v4b, `run_v3eval.sh v4b` (v4's definition sheets, DEFS_VER default), score with `TRUTH=v4`. The runner strips Qwen `<think>` blocks before JSON parsing.
+
+## Netflix warm-start test set up (2026-09-26, Tyler's go): v4-warm10 / v4-warm20
+
+Tests the paid-calibration idea (label 5-20% of a new tracker, tune the prod coder on it): warm-start procerno-coder-v4 (`--warm-start-from`, no full retrain) on a Netflix slice + equal replay rows from train_v4 (anti-forgetting). Labels = existing v4 truth; no new labeling.
+- `finetune/build_warm_netflix.py` -> `finetune/warm/`: split by QUESTION (Netflix = 470 questions x 8 engines, seed 20260926), nested - warm10 = 47 questions / 376 answers (+376 replay), warm20 = 94 questions / 752 answers (+752 replay, contains warm10). Eval = 2,882 heldout_3610 answers to the 376 questions neither set trains on (`warm/netflix_warm_eval_ids.txt`; zero question overlap verified).
+- `finetune/fireworks_launch_v4warm.sh` (hand-run): uploads both sets, two warm-start sftj from procerno-coder-v4 (epochs 2, lr 1e-4 cosine, warmup 20, 8192 ctx; LoRA shape inherited) -> `procerno-coder-v4-warm10` / `-warm20`. Est. training ~$9 / ~$19 (3.1M / 6.3M tokens at the 30B $3/M tier).
+- Eval: 30B deployment (2x H100), bind both, `DEP=<id> ./run_warm.sh v4-warm10` (Netflix scope-sentence arm on the eval subset + jira/AmEx/Pixel segments for forgetting); score `TRUTH=v4 NETFLIX_IDS=../finetune/warm/netflix_warm_eval_ids.txt python3 score_v3.py`.
+- Baseline on the eval subset (existing outputs, re-scored): v4 88.1 / 90.9 / 89.2, reason F1 86.2 (full 3,610: 88.2 / 90.7 / 89.6 / 86.3 - subset is representative); v3 83.3 F1; grok 65.4 F1.
