@@ -232,3 +232,23 @@ Fresh v2 baseline (procerno-coder-v2, byte-identical prompts to v3/v4 evals; `fi
 - **procerno-coder-v4** (sftj hzyfk7ud, launched 13:48, same recipe): FAILED at 84% (16:26:27) - "Account tsolloway-ekhu67i4gj is suspended, possibly due to reaching the monthly spending limit or failure to pay past invoices" (412 PRECONDITION_FAILED). No v4 model exists; relaunching = `fireworks_launch_v4.sh` from scratch (datasets procerno-coder-multi-v4/-val already uploaded). Minutes later the account API reported state READY / UNSUSPENDED - cause and whether the limit was raised are unknown. The eval deployment procerno-v34eval (created ~16:25) was torn down immediately (0 replicas); nothing is running on the account. Re-deploying and relaunching v4 wait on Tyler's go given the spend-limit signal.
 - Fireworks API changes seen today: deployment create now requires `acceptShapelessRisk=true` (or a deploymentShape) - added to `finetune/deploy_eval_v3.sh`, which keeps the prior 2x H100 BF16 config for comparability; deleted deployment ids stay reserved, so the script now defaults to `procerno-v34eval` (override with DEP=).
 - Ready to run on go: `run_v3eval.sh v3|v4` (same matrix as the v2 baseline), `score_v3.py` (TRUTH=v3|v4), `score_scope_uptake.py` (does the coder emit parent codes the names-only keys omitted - v2 baseline: 2-15% of scope pairs vs 34-56% of shared pairs).
+
+## v3 scored (2026-09-25): taxonomy-reading transfer is strong; the coder follows its keys, not its definitions
+
+procerno-coder-v3 evaluated on deployment procerno-v3evalb (torn down after) over the same matrix and byte-identical prompts as the fresh v2 baseline; outputs `finetune/v3eval/v3_*`, tables `finetune/v3eval_scores_{v3,v4}truth.md`. v4 relaunched as sftj r5abctd3 (running).
+
+Reason F1 (v2 -> v3), clean held-out segments:
+
+| segment | vs v3 truth (names-only keys) | vs v4 truth (scope-aware keys) | v3 Jaccard vs v3 truth |
+| --- | --- | --- | --- |
+| jira 639 | 42.1 -> **83.9** | 40.6 -> 73.9 | 0.75 |
+| AmEx 300 | 66.2 -> **93.6** | 65.7 -> 88.0 | 0.88 |
+| Pixel 300 | 56.2 -> **90.5** | 54.7 -> 86.7 | 0.86 |
+| Netflix 3,610 bare (never trained) | 54.9 -> **83.0** | 52.3 -> 80.5 | 0.72 |
+| Netflix 3,610 consolidation defs | 54.7 -> **85.3** | 52.5 -> 83.3 | 0.76 |
+
+Findings:
+1. **Reasons solved at the dense truth**: v3 emits 3.7-4.3 codes/row against truth 3.8-4.2 (v2: 1.4-2.2) with P and R balanced (jira 84.6/83.3, AmEx 94.0/93.1). Unseen Netflix bare-list F1 83.0 with 3 off-list emissions in 3,610 rows. Row Jaccard 0.72-0.88 exceeds the ~0.55 cross-condition Opus ceiling - expected, since v3 imitates one fixed labeler/prompt; read it as fidelity to that labeler, not super-human agreement.
+2. **Judgment fields flat within noise** (v2 -> v3): jira 639 outcome 93.4 / 93.4, framing 92.3 / 91.1, top_pick 95.8 / 95.1; Netflix 3,610 outcome 88.7 / 88.1, framing 91.5 / 91.3, top_pick 89.0 / 89.2. The denser reason target did not buy anything on judgment, and may cost ~0.5-1pt; watch it in v4.
+3. **Consolidation defs HELP at inference on the unseen brand for v3** (+2.3 F1 vs bare, P and R both up) - reverses v2's defs finding. The difference: these are the pipeline's confirmed scope sentences, not world-knowledge authored defs. New-category default should become: consolidation defs in the coder prompt.
+4. **The coder follows its answer keys over its prompt definitions** (score_scope_uptake.py): on scope pairs - arguments the definitions assign to a code but the names-only keys omitted - v3 recalls 15% jira / 15% AmEx / 30% Pixel / 32-33% Netflix, against 88-97% on codes both key sets agree on. The definitions in its prompt barely move it off what it was trained to emit. So the codebook contract has to be fixed in the LABELS (v4), not patched at inference - and scoring against v4 truth costs v3 4-10 F1 exactly there.
