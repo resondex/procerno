@@ -360,3 +360,17 @@ v4b warm-started on Netflix 10% / 20% (+ equal replay), 1x H100 eval, thinking o
 
 Findings: (1) **A 376-answer (10%) Netflix sample brings the new brand to trained-brand dashboard accuracy** - per-code gap 1.9 -> 0.7 pts, codes off >3pts 6 -> 0, reason F1 +2.6 (the 9B now beats the un-calibrated 30B). 20% adds a little more (F1 +0.7, plan tiers 27.3 -> 29.6%). The brand-specific breadth no model could infer (plan tiers) is learned from the sample. (2) Judgment fields don't move with calibration (Netflix outcome 87.0 / 86.7 / 87.8) - the sample fixes reasons, not the pick/conditional boundary. (3) Forgetting is small: trained-brand reason F1 -0.3 to -0.7; outcome on AmEx warm20 84.0 vs 86.7 and Pixel -1 to -2 (inside n=300 noise, but it trends down with more new-brand data - watch it; more replay is the lever). Cost: v4b-warm10 trained for ~$2. This is the empirical case for the paid 5-10% calibration tier.
 Ops: the warm chain's teardown trap used a relative path and the scoring step cd'd away - procerno-v4bwarmeval stayed READY a few minutes until torn down by hand. chain_v5b_eval.sh fixed (absolute path); chain_warm_eval.sh to be fixed once the running v4-warm chain exits (a guard tears its deployment down on exit).
+
+## v4-warm scored (2026-09-26): calibration works on both bases; the 9B calibrates to the 30B's level
+
+v4 (30B) warm-started on the same Netflix slices; eval on procerno-warmeval2 (torn down, DELETING verified). The first v4-warm eval attempt never started: the routability probe sent `reasoning_effort: "none"`, which the muse-glimmer base rejects - probe now sends it only when REASONING is set, and prints the HTTP error on failure.
+
+Netflix, 2,882 answers to unseen questions (outcome / framing / top_pick; reason F1; per-code gap; codes off >3):
+- v4 30B: 88.1 / 90.9 / 89.2; F1 86.2; gap 1.7; 5 off
+- v4-warm10: 87.8 / 92.5 / 88.9; F1 **88.1**; gap 0.8; 1 off
+- v4-warm20: 89.2 / 92.2 / 90.1; F1 **89.1**; gap **0.5**; 0 off
+- v4b 9B: 87.0 / 91.3 / 88.4; F1 84.9; gap 1.9; 6 off
+- v4b-warm10: 86.7 / 91.6 / 88.1; F1 87.5; gap 0.7; 0 off
+- v4b-warm20: 87.8 / 91.4 / 89.2; F1 88.2; gap 0.6; 0 off
+
+Findings: (1) Calibration lifts both bases by ~2-3 reason F1 and brings the new brand to trained-brand dashboard accuracy (gap <=0.8, 0-1 codes off >3); plan tiers recovered on both (v4 18.9 -> 29-31%, truth 30.3%). (2) **After calibration the base-model gap nearly closes**: v4b-warm20 (9B) 88.2 F1 vs v4-warm20 (30B) 89.1; the 30B keeps ~1-1.5pt on outcome/top_pick at 20%. (3) 20% beats 10% on the 30B more than on the 9B (outcome +1.4, F1 +1.0 vs +1.1 / +0.7) - diminishing but not flat. (4) Forgetting is small on both: trained-brand reason F1 -0 to -1.0; the largest single cell is AmEx outcome warm10 85.7 vs 87.7 (n=300 noise band). Recommendation input for the paid tier: 10% on the 9B already delivers trained-brand reason accuracy for ~$2 of training; 20% on the 30B is the accuracy ceiling measured.
