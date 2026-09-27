@@ -42,12 +42,21 @@ const COBRAND_RULE =
   "name appears on a card, plan, or product the target's company sells - " +
   "is affiliated, never product_of or same_offering: it is its own company, " +
   "and its name alone does not mean the target's product was chosen.\n";
+// Candidate rule (test A2, 2026-09-27): third-party marketplace apps are
+// affiliated, so the guard measures them instead of product_of merging them
+// into the target. ADDON_RULE=1 inserts it after the co-brand rule.
+const ADDON_RULE =
+  "A third-party app, plugin, add-on, or integration that ANOTHER company " +
+  "builds for an active brand's platform or marketplace is affiliated, never " +
+  "product_of: its maker is a different company, and naming it does not mean " +
+  "the target's product was chosen.\n";
 const systemPrompt = (category: string, seeds: string[]) => {
   const base = suggestSystemPrompt(category, seeds);
   if (process.env.COBRAND_RULE !== "1") return base;
   const i = base.indexOf("ignore.\nEvery suggestion needs");
   if (i < 0) throw new Error("co-brand rule anchor not found in the prod prompt");
-  return base.slice(0, i + "ignore.\n".length) + COBRAND_RULE + base.slice(i + "ignore.\n".length);
+  const rules = COBRAND_RULE + (process.env.ADDON_RULE === "1" ? ADDON_RULE : "");
+  return base.slice(0, i + "ignore.\n".length) + rules + base.slice(i + "ignore.\n".length);
 };
 fs.mkdirSync(OUT, { recursive: true });
 const RUNS = Number(process.env.RUNS ?? 3);
