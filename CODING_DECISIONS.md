@@ -100,5 +100,5 @@ Status tags: **DECIDED** (in force), **PROPOSED** (recommended, awaiting Tyler),
 5. Go for the dictionary-in-prompt test (~$10, two arms on the 200-answer set).
 6. Reporting of objection-stage answers (defend / concede / redirect) as their own dashboard metric.
 7. Taxonomy adds for the post-scope residue.
-9. B7 - add a per-brand role (chosen / branch winner / shortlisted / mentioned / warned against) to the mentions list?
-8. Labeling route for the rest of v0.2 (in-session plan allowance vs Batch API vs mix).
+8. B7 - add a per-brand role (chosen / branch winner / shortlisted / mentioned / warned against) to the mentions list?
+9. Labeling route for the rest of v0.2 (in-session plan allowance vs Batch API vs mix).
