@@ -562,4 +562,6 @@ Why: Tyler's blind review found an objection answer ("Be frank: does Jira slow d
 
 ## To do (added 2026-09-27, Tyler)
 
+- **In-category pick flag in metrics (B5, Tyler 2026-09-27).** Compute whether an answer's top pick resolves to an approved brand in the confirmed dictionary, so the "AI makes a firm pick" rate can be filtered to category picks (ecosystem answers like "pick Expensify" count as picks today). Future version: code adjacent out-of-category brands as their own class and map their associations with tracked brands. Decision record: CODING_DECISIONS.md B5.
+
 - **Design-fidelity check in setup prompt linting.** The setup lint checks category anchoring and spec-sheet texture but not whether each paraphrase still voices its cell's design - jira's "Jira Cloud trial" objection cell drifted entirely into neutral load-time lookups unnoticed. Add the per-question design check (`labeling/v02_relabel/design_check.mts` pattern, ~$0.005/prompt) to the instrument's lint pass for doubt/plan stages, and rewrite the 21 prompts in `labeling/v02_relabel/off_design_prompts.json` before those trackers' next collection. Their answers are left out of the v0.2 relabel (Tyler).
