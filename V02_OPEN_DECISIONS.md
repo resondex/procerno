@@ -30,7 +30,7 @@ Every item marked "prompt change" must be settled before the freeze. Once the pr
 | B6b | **Decided:** which sentence becomes the focus quote | The sentence that most directly states how the answer positions the brand (its verdict on it); first such sentence as tiebreak | - | yes |
 | B6c | **Resolved by B1:** top pick naming variants ("Gold" vs "Amex Gold"). B1 already decided the top pick carries its dictionary entry like the mentions do; metrics and scoring use the entry, and the as-written form keeps product detail | - | - | no further change |
 | B10 | **Review how branded prompts are handled (added 2026-09-27, Tyler).** Branded prompts (the question names a brand) measure stance, not visibility. Only doubt-stage cells get the doubt verdict today, but value doubts and doubts phrased as comparisons likely sit in other stages too (pricing: "is the Amex fee worth it?"; comparison: "is Jira really slower than Linear?") | Examine: which stages carry branded prompts and how each is reported; a per-question doubt check over ALL branded prompts (~$0.005 each, a few dollars for four trackers) so any question voicing a doubt gets the design line regardless of stage; how reference-only mentions count (B6a) | Do the review before the freeze - it changes which answers carry a design line | yes |
-| B7 | Per-brand role in the mentions list: chosen / branch winner / shortlisted / mentioned / warned against (conditional answers are 40% of AmEx) | Add / leave outcome at answer level | Add | yes |
+| B7 | **Decided (option 3, built as a split), pending an isolated test:** per-mention role replaces per-mention framing. Today "recommended" lumps the winner with everything listed (AmEx: 3.0 recommended brands per conditional answer, 2.3 per pick answer) | Split recommended only: **chosen** (= the top pick) / **branch winner** (the product named as the answer for a stated condition) / **shortlisted** (recommended under today's rules, neither of the others); **mentioned** unchanged; **warned against** = today's negative renamed. Framing is derived by merging the three back into recommended | Test in isolation before the freeze (see below); if branch winner is unstable, collapse it into shortlisted (no relabel needed) | yes |
 | B8 | Taxonomy adds for the post-scope residue (AmEx consumer credit-score impact, retention offers; Netflix home bandwidth; jira review-source credibility; Pixel return policy) | Add codes (forces a reasons relabel, already happening) / leave in uncoded | Decide per tracker now, since the relabel is happening anyway | yes (code lists) |
 | B9 | Freeze and version the prompt, plus a check on the 200-answer test set | Approve (~$5) | Approve after B1-B8 | - |
 
@@ -51,6 +51,14 @@ It is run separately from the dictionary test (B1) so each change's effect can b
 4. No other field moves beyond the rerun baseline.
 
 It is run separately from the B1 and B2 tests.
+
+**B7 isolated test (flagged, not run):** run only the B7 change on the 200-answer test set, Batch API, one answer per request (~$5). Check that:
+1. Framing derived from the roles (chosen + branch winner + shortlisted = recommended) matches the baseline run's per-mention framing within the rerun baseline - the split must not move the recommended / mentioned / negative lines.
+2. Branch winner vs shortlisted holds up run to run (a second run of the B7 prompt, ~$5 more): if it doesn't, branch winner collapses into shortlisted and the labels stay usable.
+3. The mechanical checks pass: chosen = top pick; exactly one chosen in a pick answer; branch winner only in conditional answers; conditional answers with no branch winner are flagged and hand-read.
+4. No other field moves beyond the rerun baseline.
+
+Branch-winner rule wording to test: two products named for one branch ("Platinum or Gold if you travel") are both shortlisted; with nested conditions the innermost stated winner counts; "also consider X" is shortlisted. It is run separately from the B1, B2 and B3 tests.
 
 **Already decided and needing no prompt change:** mention order is computed from the answer text after labeling; top pick and framing are also resolved through the dictionary as a safety net.
 
