@@ -13,6 +13,7 @@ This block is written and re-added by `next dev` — verify at `node_modules/nex
 - **No coding runs, eval passes, or API-spend tests without Tyler's explicit go.** This includes tracker collection runs. Collected data is held UNCODED: `RUN_COLLECT_ONLY` is set in Vercel prod and must be set locally in any driver script.
 - **Never code answers into the prod `responses` table during experiments** - eval/reference codes go to local JSONL only. The held runs stay `collected` until Tyler flips prod.
 - **Anthropic budget:** Build tier, $1K/month workspace cap. Reference labeling (Opus) may run via the Anthropic **Batch API** (amended 2026-09-21 with Tyler's go): model `claude-opus-5`, output to local JSONL only, NEVER to prod tables; submission itself still needs Tyler's explicit go per run, like all API spend. The old in-session-subagent route remains valid.
+- **Coding decisions live in `CODING_DECISIONS.md`** (labeling standard, codebook contract, brand resolution, coder, evaluation conventions, open decisions). Read it before any labeling, codebook or coder work, and record new decisions there.
 - Git: commit straight to master (single dev, no feature branches). No Co-Authored-By or AI attribution trailers. Use " - ", never em dashes, in anything user-facing.
 - All extraction/coder calls run at temperature 0 (`anthropicCreateT0` handles sonnet-5 rejecting the param). Answer engines are never pinned to temperature.
 
