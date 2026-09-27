@@ -15,7 +15,7 @@ Status tags: **DECIDED** (in force), **PROPOSED** (recommended, awaiting Tyler),
 | Reference labeler | claude-opus-5-5, effort high, ONE answer per request | DECIDED 2026-09-27 |
 | Labeling prompt | `labeling/build_batch.mts --mode v02_full --defs --design`, no precedents | DECIDED 2026-09-27 (gaps B2-B6 open) |
 | Codebook | gate-confirmed code list + confirmed scope sentence per code (v4 contract) | DECIDED 2026-09-25 |
-| Brand resolution | top pick and target framing resolved through the confirmed dictionary after labeling | PROPOSED 2026-09-27 |
+| Brand resolution | the confirmed dictionary is fed to the labeler (and the coder); each mention carries its dictionary entry; post-hoc resolution stays as a safety net | DECIDED 2026-09-27 (test pending) |
 
 ---
 
@@ -64,7 +64,13 @@ Status tags: **DECIDED** (in force), **PROPOSED** (recommended, awaiting Tyler),
 ## 6. Brand identity and resolution
 
 - **The target includes its products (boundaries DECIDED 2026-09-27, Tyler).** Picking, recommending or criticizing a product the brand sells for the job the study covers counts for the brand. AmEx: its cards, including co-branded cards AmEx issues (Delta SkyMiles, Hilton Honors) - not programs (Membership Rewards), partner brands, or the networks. jira: its editions and same-job products (Jira Software, Service Management, Work Management, Align, Cloud / Data Center) - not Confluence, Bitbucket, Trello or Marketplace apps. Netflix: its plans - not content or devices. Google Pixel: Pixel phone models - not Pixel Watch, Buds, Nest or Android. Matches the dictionary's product_of vs affiliated split.
-- **Enforced through the dictionary, not the prompt (PROPOSED 2026-09-27).** Measured on 4,868 AmEx labels: product-name top picks (0.9%) and target framings that differ from the family-derived framing (5.1%) are both recomputable from the brands list through the confirmed dictionary; the only unrepairable effect is a missing focus quote on answers that name only AmEx cards (2.8%, display-only). Proposal: no prompt change; apply the dictionary repair to every tracker's labels before training; keep labeled and repaired fields side by side; unresolved names listed for review.
+- **Feed the confirmed dictionary into the prompt (DECIDED 2026-09-27, Tyler; supersedes the "repair only" proposal).** On an init run coding starts only after the gate, so the confirmed dictionary always exists at coding time. Every request (labeler now, coder in prod) carries the tracker's confirmed dictionary: each active entry with its aliases, the target entry marked. Why the whole dictionary, not just the target: every brand's products roll up (Chase Sapphire -> Chase), the conflicting-framing rule applies per brand, and top picks come out as known entries. It also closes the one gap the repair could not: answers naming only the target's products got no focus quote (2.8% of AmEx).
+  - **Each mention records both** the name exactly as written and its dictionary entry (null when none). Resolution stays reversible and product-level drill-down stays possible.
+  - **New brands are expected:** names not in the dictionary are listed as written with no entry; never force a name into an entry it does not belong to. (A shown list acts as a gravity well - the seeded codebook suppressed discovery the same way.)
+  - **Boundaries come from the confirmed board's relationships** (forms and products of a brand roll up; affiliated brands do not), so Tyler's calls above apply automatically.
+  - **Post-hoc dictionary resolution stays** as a safety net for unusual spellings and for labels made before this change.
+  - **Test before freezing (NOT RUN - Tyler: record, don't run yet):** the 200-answer test set with and without the dictionary in the prompt, Batch API, ~$5 per arm. Pass criteria: new-brand (not-in-dictionary) detection does not drop; labeler entries agree with dictionary resolution; outcome / top pick stay at the rerun baseline.
+  - Consequence: this is a prompt change, so it goes in with B2-B4 before the prompt is frozen; the 4,868 AmEx labels made without it are relabeled under the frozen prompt.
 - **Dictionary admission and relationships** (decided 2026-09-22 to 09-24, see AGENTS.md): real offerings + string variants + measured-referential satellites; merges carry a relationship (same_offering | product_of | affiliated | content_of); product forms always merge; the target entry can never be rejected or merged away (server-enforced).
 
 ## 7. The coder
@@ -89,7 +95,7 @@ Status tags: **DECIDED** (in force), **PROPOSED** (recommended, awaiting Tyler),
 2. B3 - clarification_requested: information requests only?
 3. B4 - price and spec flags: per-category definitions or accept as broad.
 4. B5 - do out-of-category picks count as picks?
-5. B1 enforcement - confirm "dictionary repair, no prompt change".
+5. Go for the dictionary-in-prompt test (~$10, two arms on the 200-answer set).
 6. Reporting of objection-stage answers (defend / concede / redirect) as their own dashboard metric.
 7. Taxonomy adds for the post-scope residue.
 8. Labeling route for the rest of v0.2 (in-session plan allowance vs Batch API vs mix).
