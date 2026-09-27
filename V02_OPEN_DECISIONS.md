@@ -24,7 +24,7 @@ Every item marked "prompt change" must be settled before the freeze. Once the pr
 | B1 | **Decided:** feed the confirmed dictionary to the labeler and coder; mentions carry their entry; new brands allowed | Pending only: go for the with/without test (~$10, 200 answers) | Run the test before the freeze | yes |
 | B2 | **Decided (option 4), pending an isolated test:** a brand framed two ways in one answer (Gold recommended, Platinum criticized; 384 of 4,868 AmEx answers) | Replace the single brand-level framing with two signals: **recommended** (any of the brand's products recommended) and **criticized** (any warned against); both can be true | Test in isolation before the freeze (see below) | yes |
 | B3 | **Decided (option 1), pending an isolated test:** `clarification_requested` (dashboard "Asks back") is true on 52% of answers, almost all trailing offers ("Want me to compare...?") | True only when the answer asks the reader for information it needs to give or refine its advice; offers to do more and rhetorical questions don't count | Test in isolation before the freeze (see below) | yes |
-| B4 | Price and spec flags are 74% / 82% true on credit cards (definitions were written for B2B software) | Per-category definitions of what counts / accept as broad "has numbers" flags | Per-category one-liners, generated with each tracker's codebook | yes |
+| B4 | **Decided (option 2):** price and spec flags (dashboard "Prices" / "Specs"). They vary widely by engine (prices 55% Sonar - 94% Gemini on AmEx), so they carry signal; the problem is B2B-only examples (APR, "3% cash back", "$300 credit" are ambiguous) | One generic rule for every category: **price** = what the buyer pays (price, fee, subscription, interest rate); **spec** = what the product delivers in numbers (capacity, limits, earn rates, sizes, speeds); examples drawn from many categories, not card cases | Validate on the held-out categories (section H), plus the isolated full-prompt test | yes |
 | B5 | Does a pick of an out-of-category product count? (AmEx ecosystem answers "pick Expensify") | Yes, any product / no, only the tracker's category (else conditional or no pick) / count it, but flag out-of-category | Count it and flag it, so loyalty and ecosystem answers aren't miscounted as losses | yes |
 | B6 | Small wording fixes: "absent" means not named in the answer; how the focus sentence is chosen; top pick written as the mentions list writes it | Approve / change | Approve | yes |
 | B7 | Per-brand role in the mentions list: chosen / branch winner / shortlisted / mentioned / warned against (conditional answers are 40% of AmEx) | Add / leave outcome at answer level | Add | yes |
@@ -52,6 +52,20 @@ It is run separately from the B1 and B2 tests.
 **Already decided and needing no prompt change:** mention order is computed from the answer text after labeling; top pick and framing are also resolved through the dictionary as a safety net.
 
 ---
+
+## H. Held-out categories: Doritos and Sephora (validation for the whole frozen prompt)
+
+Doritos and Sephora (~7,300 collected answers, 8 engines each) have never been labeled or used to design any rule, so they are the out-of-sample test for everything decided in B - not just B4 - and a full rehearsal of the new-tracker flow. Nothing here has run.
+
+| # | Step | Decision needed | Size |
+| --- | --- | --- | --- |
+| H1 | Bootstrap both through the init-run pipeline: open discovery and brands discovery (grok), embeddings-first consolidation (Opus), question designs and the per-question design check | Run it in prod (the real product path, writes discovery data to their rows) or locally from the vault (no prod writes) | ~$3-5 in total |
+| H2 | Confirm the codebook and brand dictionary through the gates, as a customer would | You as the customer, or me proposing and you signing off | your time |
+| H3 | Label a sample of each with the FROZEN prompt, one answer per request | Sample size (proposal: 500 per category) | ~$25 |
+| H4 | Check every decision on categories it was not designed on: dictionary in the prompt (new brands still found), two framing signals, "Asks back", price/spec rule (calories, shade counts, coupons, sizes), out-of-category picks, per-brand roles, doubt verdict, reason codes under new codebooks, computed mention order | A blind review page for you (~40 items across the decisions) plus automatic consistency checks and a rerun subset for stability | ~$5 + your time |
+| H5 | After v0.2 trains: unseen-category evaluation of the coder on Doritos and Sephora (alongside Netflix), plus the 10% calibration test | - | ~$5 GPU |
+
+**Rule:** Doritos and Sephora stay out of all prompt and codebook design. If H4 shows a problem, the fix is designed on the four labeled trackers and re-checked on H, so they remain held out. Their engine gap (no Claude engines collected) doesn't affect labeling tests; backfilling it is a separate collection decision.
 
 ## C. Labels (after B)
 
