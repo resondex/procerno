@@ -31,6 +31,8 @@ Every item marked "prompt change" must be settled before the freeze. Once the pr
 | B8 | Taxonomy adds for the post-scope residue (AmEx consumer credit-score impact, retention offers; Netflix home bandwidth; jira review-source credibility; Pixel return policy) | Add codes (forces a reasons relabel, already happening) / leave in uncoded | Decide per tracker now, since the relabel is happening anyway | yes (code lists) |
 | B9 | Freeze and version the prompt, plus a check on the 200-answer test set | Approve (~$5) | Approve after B1-B8 | - |
 
+**How every isolated test works:** each one sends the FULL labeling prompt (all fields) with only its one change applied, over the same 200 answers, and compares every field against a baseline run of the current prompt, so it shows both the intended effect and any spillover onto other fields (outcome, top pick, framing, reasons, brands, doubt verdict). A field moving more than the Opus rerun baseline (95% outcome, 92% top pick, 98% framing, reasons 0.83, brands 0.90) counts as affected. One fresh baseline run of today's prompt (~$5) is shared by all tests; the older runs 1 and 2 predate the doubt field and design lines, so they are not the comparison.
+
 **B2 isolated test (flagged, not run):** run only the B2 change (no other B edits) on the 200-answer test set, Batch API, one answer per request (~$5). Check that:
 1. The two signals agree with what the per-brand framings in the mentions list imply.
 2. They are as stable run to run as today's single framing (98%).

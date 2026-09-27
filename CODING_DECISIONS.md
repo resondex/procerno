@@ -85,6 +85,8 @@ Status tags: **DECIDED** (in force), **PROPOSED** (recommended, awaiting Tyler),
 
 ## 8. Evaluation conventions
 
+- **Isolated prompt tests (DECIDED 2026-09-27, Tyler):** test one change at a time, but always with the FULL labeling prompt (every field), on the same answer set, compared field by field against a fresh baseline run of the current prompt. This measures the intended effect and spillover onto every other field; movement beyond the Opus rerun baseline counts as spillover.
+
 - Netflix is the unseen-brand segment and is always evaluated WITH scope sentences (DECIDED 2026-09-25).
 - Score each coder against labels of its own contract; cross-contract scores measure the contract difference, not the coder.
 - Dashboard accuracy = per-code incidence gap; flag codes off by >3 points.
