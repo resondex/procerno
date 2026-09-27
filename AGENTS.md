@@ -526,3 +526,15 @@ Batching-bias test (2026-09-27, Tyler's go, **$7.11**; `labeling/v02_relabel/bat
 - **Batching biases labels mildly:** batched vs single outcome 90.4%, top pick 87-90%, framing 93.9%, reasons 0.78, brands 0.86 - all below the rerun baseline, and one-sided (12 answers less decisive vs 7 more). Batched requests reason ~12% less per answer (1,112 vs 1,260 output tokens) and silently dropped 3 of 200 answers. For reference labels, one answer per request; batching saves only ~2% on the API (the codebook is already cached).
 - **Part of the old-label gap is batching:** the old judgment labels were made in-session at ~88 answers per agent. Old vs batched outcome 86.3% vs old vs single 80.5-81.0% on these 200 - roughly 5-6 of the ~15-point gap is batching; the rest is model (Opus 5 -> 5.5), prompt and/or the missing 339 precedents.
 - Old-vs-new reasons/brands columns in compare.py are not meaningful (old labels use the pre-v3 taxonomy and have no mentions).
+
+Source test, arm N (2026-09-27, Tyler's go): the 4-arm source batch (msgbatch_01WNooBuv4VRgHMdLkmjSuDn) sat 2h+ with 0 of 800 started and was canceled at $0; arm N ran live instead - **$10.37**, 200/200, 0 failures (`labeling/v02_relabel/source_test/run_n_live.mts`, `arm_N.jsonl`, `compare.py`). Arm N = Opus 5.5 high + v02_full prompt + the 339 jira precedents appended to the system prompt with reason codes stripped (judgment fields, rule, quote), one answer per request. Scored against the old labels on the 183 test answers that are not themselves precedents:
+
+| setup | outcome | top pick | framing | vs old: less / more decisive |
+| --- | --- | --- | --- | --- |
+| Opus 5.5 + v02 (runs 1 / 2) | 80.9 / 81.4% | 80.3 / 82.0% | 91.8% | 6-7 / 26-28 |
+| **+ precedents (N)** | **85.8%** | **87.4%** | 91.3% | 8 / 17 |
+| v02, 20 per request | 86.1% | 82.2% | 92.8% | 4 / 20 |
+
+- **The precedents are a real anchor:** +5 outcome, +6 top pick vs plain v02, and the one-sided drift toward decisive calls roughly halves (28 -> 17). N vs plain v02 outcome agreement is 90% - below the 95% rerun baseline, so the precedents change Opus 5.5's calls, not just noise. AmEx moves most (68 -> 78%) and stays lowest.
+- **Reasons are untouched:** 0 off-list codes, 3.65 vs 3.77 codes/row, Jaccard vs run 1 0.82 (rerun baseline 0.83) - stripping the old codes made the precedents judgment-only as intended.
+- The remaining ~9-point gap to the old labels is the old labels' own batching lean (~5 points, see the batching test) plus model/prompt differences (Opus 5 vs 5.5 not isolated - arms A/P/M were canceled with the batch).
