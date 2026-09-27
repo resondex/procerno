@@ -59,6 +59,7 @@ Status tags: **DECIDED** (in force), **PROPOSED** (recommended, awaiting Tyler),
   - B3 - clarification_requested fires on trailing offers ("Want me to compare...?"): true on 52% of answers. Proposal: count only questions asking for information the answer needs.
   - B4 - includes_prices / includes_specs were written for B2B software; on credit cards they are 74% / 82% true. Needs per-category definitions or acceptance as broad "has numbers" flags.
   - B5 - out-of-category picks (see section 4).
+  - B7 - per-brand role in the mentions list (added 2026-09-27, Tyler). Outcome is answer-level and the only per-brand judgment is framing, so in conditional answers (40% of AmEx) a branch winner ("Jira if you're enterprise, Linear if you're a startup") and one entry on a five-product shortlist are both just "recommended". Proposal: one extra value per mention - chosen (the top pick) | branch_winner | shortlisted | mentioned | warned_against. Separates winning a scenario from being listed, and shows both roles when a brand's products are chosen and warned against in the same answer (bears on B2). Prompt change, so it goes in with B2-B4 before the freeze.
   - B6 - wording: "absent" should say "never named in the answer"; how to choose the focus sentence; top pick should be written as the mentions list writes it.
 
 ## 6. Brand identity and resolution
@@ -99,4 +100,5 @@ Status tags: **DECIDED** (in force), **PROPOSED** (recommended, awaiting Tyler),
 5. Go for the dictionary-in-prompt test (~$10, two arms on the 200-answer set).
 6. Reporting of objection-stage answers (defend / concede / redirect) as their own dashboard metric.
 7. Taxonomy adds for the post-scope residue.
+9. B7 - add a per-brand role (chosen / branch winner / shortlisted / mentioned / warned against) to the mentions list?
 8. Labeling route for the rest of v0.2 (in-session plan allowance vs Batch API vs mix).
