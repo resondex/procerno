@@ -110,5 +110,5 @@ The working checklist with options, recommendations and costs is `V02_OPEN_DECIS
 6. Reporting of objection-stage answers (defend / concede / redirect) as their own dashboard metric.
 7. Taxonomy adds for the post-scope residue.
 8. B7 - add a per-brand role (chosen / branch winner / shortlisted / mentioned / warned against) to the mentions list?
-10. B10 - review how branded prompts are handled (doubt check across all branded prompts; stance reporting; reference-only mentions) - blocks B6a.
-9. Labeling route for the rest of v0.2 (in-session plan allowance vs Batch API vs mix).
+9. B10 - review how branded prompts are handled (doubt check across all branded prompts; stance reporting; reference-only mentions) - blocks B6a.
+10. Labeling route for the rest of v0.2 (in-session plan allowance vs Batch API vs mix).
