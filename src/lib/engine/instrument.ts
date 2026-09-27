@@ -1,6 +1,7 @@
 import { createHash } from "crypto";
 import { tagCosts } from "../cost_log";
 import { anthropicClient, openaiClient } from "./providers";
+import { INSTRUMENT_HELPER_MODEL } from "./models";
 import { store } from "../store";
 import type { CacheMeta } from "../types";
 
@@ -23,7 +24,6 @@ import type { CacheMeta } from "../types";
  * new services, no new vendors.
  */
 
-const MODEL = process.env.SUGGEST_MODEL ?? "gpt-5-mini";
 /** The market read runs on the full model: it is one cached call per
  * category carrying the most leverage in the pipeline - mini's economy
  * is for the high-volume mechanical calls (cells, phrasings, variants). */
@@ -226,7 +226,7 @@ export async function classifyModerators(input: {
   const hit = await store.cacheGet(key, CACHE_TTL_MS);
   if (hit) return JSON.parse(hit) as Moderators;
   const res = await openaiClient().chat.completions.create({
-    model: MODEL,
+    model: INSTRUMENT_HELPER_MODEL,
     messages: [
       {
         role: "system",
@@ -854,7 +854,7 @@ export async function suggestScenario(input: {
     return { label: humanize(cached.label), description: humanize(cached.description) };
   }
   const res = await openaiClient().chat.completions.create({
-    model: MODEL,
+    model: INSTRUMENT_HELPER_MODEL,
     messages: [
       {
         role: "system",
@@ -919,7 +919,7 @@ export async function nearScenarios(input: {
     }));
   }
   const res = await openaiClient().chat.completions.create({
-    model: MODEL,
+    model: INSTRUMENT_HELPER_MODEL,
     messages: [
       {
         role: "system",
@@ -1048,7 +1048,7 @@ export async function reviewScenarios(input: {
   const hit = await store.cacheGet(key, CACHE_TTL_MS);
   if (hit) return JSON.parse(hit) as ScenarioVerdict[];
   const res = await openaiClient().chat.completions.create({
-    model: MODEL,
+    model: INSTRUMENT_HELPER_MODEL,
     // A safety net, not a deep thinker - low effort roughly halves the
     // wait at the gate confirm.
     reasoning_effort: "low",
@@ -1215,7 +1215,7 @@ export async function reviewJourneyFit(input: {
   const hit = await store.cacheGet(key, CACHE_TTL_MS);
   if (hit) return JSON.parse(hit) as JourneyFit;
   const res = await openaiClient().chat.completions.create({
-    model: MODEL,
+    model: INSTRUMENT_HELPER_MODEL,
     reasoning_effort: "low",
     messages: [
       {
@@ -1365,7 +1365,7 @@ export async function reviewScenarioFit(input: {
   const hit = await store.cacheGet(key, CACHE_TTL_MS);
   if (hit) return JSON.parse(hit) as ScenarioFit;
   const res = await openaiClient().chat.completions.create({
-    model: MODEL,
+    model: INSTRUMENT_HELPER_MODEL,
     reasoning_effort: "low",
     messages: [
       {
@@ -1538,7 +1538,7 @@ export async function reviewCells(input: {
         ? `must ask for alternatives to ${input.brand} by name`
         : `about the rival ${c.angle} - naming ${c.angle} is REQUIRED, and naming ${input.brand} alongside it (a comparison) is fine`;
   const res = await openaiClient().chat.completions.create({
-    model: MODEL,
+    model: INSTRUMENT_HELPER_MODEL,
     // A safety net, not a deep thinker - low effort roughly halves the
     // wait at the gate confirm.
     reasoning_effort: "low",
@@ -2412,7 +2412,7 @@ export async function generatePhrasings(input: {
       )
       .join("\n");
     const res = await openaiClient().chat.completions.create({
-      model: MODEL,
+      model: INSTRUMENT_HELPER_MODEL,
       messages: [
         {
           role: "system",

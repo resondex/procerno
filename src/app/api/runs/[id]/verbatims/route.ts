@@ -4,6 +4,7 @@ import { getPlanFor, requireAuth, requireRun } from "@/lib/auth";
 import { buildCanonicalizer } from "@/lib/engine/metrics";
 import { apiKeyConfigured, openaiClient } from "@/lib/engine/providers";
 import { tagCosts } from "@/lib/cost_log";
+import { VERBATIM_MODEL } from "@/lib/engine/models";
 
 export const maxDuration = 120;
 const CACHE_MS = 365 * 24 * 3600 * 1000;
@@ -66,7 +67,7 @@ export async function GET(
     rows.map(async (r) => {
       try {
         const res = await client.chat.completions.create({
-          model: "gpt-4o-mini",
+          model: VERBATIM_MODEL,
           messages: [
             {
               role: "system",

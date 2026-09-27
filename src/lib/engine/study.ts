@@ -11,12 +11,12 @@ import { computeProjectTrend } from "./trend";
 import { computeRunMetricsCached } from "./slice_cache";
 import { apiKeyConfigured, engineMode, openaiClient, summarizeCoderProvenance } from "./providers";
 import { buildRunInsights, type InsightsBundle } from "./insights";
+import { STUDY_SUMMARY_MODEL } from "./models";
 import { buildAnalysisWorkbook, buildScorecardWorkbook } from "./workbooks";
 import { buildStudyDeck } from "./deck";
 import { seededShuffle, verifyStudy, type StudyVerification } from "./verify";
 import type { MentionRow, Project, ResponseRow, Run } from "../types";
 
-const SUMMARY_MODEL = process.env.SUGGEST_MODEL ?? "gpt-5-mini";
 const SUMMARY_CACHE_MS = 365 * 24 * 3600 * 1000;
 
 const pct = (x: number) => `${(x * 100).toFixed(1)}%`;
@@ -496,7 +496,7 @@ async function executiveSummary(
       completed_runs_in_trend: extra.trendRuns,
     };
     const res = await openaiClient().chat.completions.create({
-      model: SUMMARY_MODEL,
+      model: STUDY_SUMMARY_MODEL,
       messages: [
         {
           role: "system",

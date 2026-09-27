@@ -3,9 +3,9 @@ import { tagCosts } from "../cost_log";
 import { store } from "../store";
 import { computeRunMetricsCached } from "./slice_cache";
 import { computeProjectTrend } from "./trend";
+import { INSIGHTS_FALLBACK_MODEL } from "./models";
 import type { RunMetrics } from "../types";
 
-const SUGGEST_MODEL = process.env.SUGGEST_MODEL ?? "gpt-5-mini";
 /**
  * The narrative writer. Claude Sonnet 5 when an Anthropic key is present —
  * client-facing prose is the product here, and it holds the placeholder
@@ -435,7 +435,7 @@ export async function buildRunInsights(
     if (block && block.type === "tool_use") raw = JSON.stringify(block.input);
   } else {
     const res = await openaiClient().chat.completions.create({
-      model: SUGGEST_MODEL,
+      model: INSIGHTS_FALLBACK_MODEL,
       messages: [
         { role: "system", content: systemPrompt },
         { role: "user", content: userPayload },

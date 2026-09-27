@@ -2,8 +2,8 @@ import { store } from "../store";
 import { tagCosts } from "../cost_log";
 import { buildCanonicalizer } from "./metrics";
 import { apiKeyConfigured, openaiClient } from "./providers";
+import { PROMPT_HEALTH_MODEL } from "./models";
 
-const HEALTH_MODEL = process.env.SUGGEST_MODEL ?? "gpt-5-mini";
 
 const SCHEMA = {
   type: "object",
@@ -80,7 +80,7 @@ export async function analyzePromptHealth(
   });
 
   const res = await openaiClient().chat.completions.create({
-    model: HEALTH_MODEL,
+    model: PROMPT_HEALTH_MODEL,
     messages: [
       {
         role: "system",

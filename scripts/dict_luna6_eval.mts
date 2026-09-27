@@ -65,8 +65,15 @@ const SCHEMA = {
 } as const;
 
 // ---- read the four confirmed boards (read only) ----
-const sql = postgres(DB_URL, { max: 1 });
-await sql`SET SESSION CHARACTERISTICS AS TRANSACTION READ ONLY`;
+// Every query runs in its own READ ONLY transaction. A session-level
+// "SET SESSION CHARACTERISTICS ... READ ONLY" must never be used here:
+// behind the Supabase transaction pooler it sticks to a shared server
+// connection and leaks to the live app (2026-09-26 incident).
+const ro = postgres(DB_URL, { max: 1 });
+const sql = Object.assign(
+  (s: TemplateStringsArray, ...v: unknown[]) => ro.begin("read only", (t: any) => t(s, ...v)),
+  { end: () => ro.end() }
+);
 const projects = await sql`SELECT id, brand, category, competitors FROM projects
   WHERE brand IN ('jira','American Express','Netflix','Google Pixel') ORDER BY brand`;
 type Case = { pid: string; brand: string; category: string; seeds: string[]; roots: string[];

@@ -2,7 +2,12 @@ import fs from "node:fs";
 let url="";
 for (const line of fs.readFileSync("/Users/tylersolloway/Documents/GitHub/procerno/.env.local","utf8").split("\n")) { const m=line.match(/^DATABASE_URL=(.*)$/); if(m) url=m[1].replace(/^"|"$/g,""); }
 const postgres=(await import("/Users/tylersolloway/Documents/GitHub/procerno/node_modules/postgres/src/index.js")).default;
-const sql=postgres(url,{max:1}); await sql`SET SESSION CHARACTERISTICS AS TRANSACTION READ ONLY`;
+// Every query runs in its own READ ONLY transaction. A session-level
+// "SET SESSION CHARACTERISTICS ... READ ONLY" must never be used here:
+// behind the Supabase transaction pooler it sticks to a shared server
+// connection and leaks to the live app (2026-09-26 incident).
+const ro=postgres(url,{max:1});
+const sql=Object.assign((s:TemplateStringsArray,...v:unknown[])=>ro.begin("read only",(t:any)=>t(s,...v)),{end:()=>ro.end()});
 // Re-scores luna6/results.json with merged names counted as merges (no model calls; prod read only).
 const D=`${process.env.HOME}/Documents/procerno_eval/dict_bakeoff/luna6`;
 const d=JSON.parse(fs.readFileSync(`${D}/results.json`,"utf8"));

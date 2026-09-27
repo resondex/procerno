@@ -5,8 +5,14 @@ import { store } from "../store";
 import { primaryBrandName } from "./instrument";
 import { generatePromptBattery, type PromptSpec } from "./prompts";
 import { matchKey } from "./metrics";
+import {
+  BATTERY_MODEL,
+  BRAND_PROFILE_MODEL,
+  DICT_SEED_MODEL,
+  JUNK_FILTER_MODEL,
+  PROMPT_LINT_MODEL,
+} from "./models";
 
-const SUGGEST_MODEL = process.env.SUGGEST_MODEL ?? "gpt-5-mini";
 const CACHE_TTL_MS = 183 * 24 * 3600 * 1000; // ~6 months
 
 function cacheKey(prefix: string, parts: (string | null)[]): string {
@@ -115,7 +121,7 @@ export async function seedDictionary(
       suggested = JSON.parse(hit);
     } else {
       const res = await openaiClient().chat.completions.create({
-        model: SUGGEST_MODEL,
+        model: DICT_SEED_MODEL,
         messages: [
           {
             role: "system",
@@ -208,7 +214,7 @@ export async function classifyNonBrands(
   if (names.length === 0) return new Set();
   try {
     const res = await openaiClient().chat.completions.create({
-      model: SUGGEST_MODEL,
+      model: JUNK_FILTER_MODEL,
       messages: [
         {
           role: "system",
@@ -292,7 +298,7 @@ async function lintAndRepair(
 ): Promise<PromptSpec[]> {
   try {
     const lintRes = await openaiClient().chat.completions.create({
-      model: SUGGEST_MODEL,
+      model: PROMPT_LINT_MODEL,
       messages: [
         {
           role: "system",
@@ -345,7 +351,7 @@ async function lintAndRepair(
       bad.map((b) => ({ text: b.p.text, issues: b.issues }))
     );
     const repairRes = await openaiClient().chat.completions.create({
-      model: SUGGEST_MODEL,
+      model: PROMPT_LINT_MODEL,
       messages: [
         {
           role: "system",
@@ -399,7 +405,7 @@ export async function suggestBrandProfile(
 ): Promise<BrandProfile> {
   tagCosts({ purpose: "setup:brand_profile" });
   const res = await openaiClient().chat.completions.create({
-    model: SUGGEST_MODEL,
+    model: BRAND_PROFILE_MODEL,
     messages: [
       {
         role: "system",
@@ -490,7 +496,7 @@ export async function generateBatteryAi(input: {
   let unbranded: PromptSpec[] = [];
   try {
     const res = await openaiClient().chat.completions.create({
-      model: SUGGEST_MODEL,
+      model: BATTERY_MODEL,
       messages: [
         {
           role: "system",

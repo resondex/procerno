@@ -26,6 +26,11 @@ export const ENGINE_PRICES: Record<string, { in: number; out: number; perSearch?
   // count - a perSearch fee against searchCount null priced sonar at ~7%
   // of its true cost on the jira shakedown.
   sonar: { in: 1, out: 1, perRequest: 0.008 },
+  // Internal-job models (GPT-6 list prices checked 2026-09-26, short
+  // context). Unlisted models price at the $3/$15 fallback.
+  "gpt-6-luna": { in: 0.1, out: 0.5 },
+  "gpt-6-sol": { in: 2, out: 10 },
+  "gpt-6-astra": { in: 10, out: 50 },
   // Extraction coders that never serve as answer engines.
   "gpt-4o-mini": { in: 0.15, out: 0.6 },
   "grok-4-fast": { in: 0.2, out: 0.5 },

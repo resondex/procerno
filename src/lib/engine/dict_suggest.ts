@@ -3,9 +3,9 @@ import { tagCosts } from "../cost_log";
 import { apiKeyConfigured, openaiClient } from "./providers";
 import { store } from "../store";
 import { evidenceOwner } from "./observations";
+import { DICT_SUGGEST_MODEL } from "./models";
 import type { DictionaryEntry } from "../types";
 
-const SUGGEST_MODEL = process.env.SUGGEST_MODEL ?? "gpt-5-mini";
 const CACHE_TTL_MS = 183 * 24 * 3600 * 1000; // ~6 months
 // v7 (2026-09-23, Tyler-calibrated on the pinned Pixel board): approve is
 // reserved for competing offerings from a DIFFERENT maker; independent
@@ -177,9 +177,41 @@ export function buildFamilyPlan(
  * a suggestion is a one-time pre-review, computed the first time a name shows
  * up and never revisited. The user's own confirmations are ground truth -
  * approving Linear must not send eBay back to the model. */
-const nameKey = (projectId: string, name: string) =>
-  `dict_suggest:${SUGGEST_RULES_VERSION}:${projectId}:` +
+const nameHash = (name: string) =>
   createHash("sha256").update(norm(name)).digest("hex");
+/** The key also carries the model, so a model switch never passes one
+ * model's verdict off as another's (writes always go here). */
+const nameKey = (projectId: string, name: string) =>
+  `dict_suggest:${SUGGEST_RULES_VERSION}:${DICT_SUGGEST_MODEL}:${projectId}:` +
+  nameHash(name);
+/** Verdicts cached before keys carried the model (all gpt-5-mini, v8
+ * rules). Read through while the rules are still v8, so a model switch
+ * leaves every already-reviewed board exactly as it was and only
+ * never-seen names reach the new model. A rules bump retires them. */
+const legacyKey = (projectId: string, name: string) =>
+  SUGGEST_RULES_VERSION === "v8"
+    ? `dict_suggest:v8:${projectId}:` + nameHash(name)
+    : null;
+
+/** Cached verdicts for many names in ONE batch read: the model-tagged key
+ * wins, the legacy key fills in. Keyed by the name as passed. */
+async function cachedVerdicts(
+  projectId: string,
+  names: string[]
+): Promise<Map<string, string>> {
+  const keys = names.flatMap((n) => {
+    const legacy = legacyKey(projectId, n);
+    return legacy ? [nameKey(projectId, n), legacy] : [nameKey(projectId, n)];
+  });
+  const hits = await store.cacheGetMany(keys, CACHE_TTL_MS);
+  const out = new Map<string, string>();
+  for (const n of names) {
+    const legacy = legacyKey(projectId, n);
+    const hit = hits.get(nameKey(projectId, n)) ?? (legacy ? hits.get(legacy) : undefined);
+    if (hit) out.set(n, hit);
+  }
+  return out;
+}
 
 /** Names per request. Small enough that each name gets real attention and a
  * truncated reply costs one batch, large enough to keep the batch count low. */
@@ -224,12 +256,12 @@ export async function getDictionarySuggestions(
   // names must not pay ~100 pool-serialized point queries to open.
   const cached = new Map<string, CachedVerdict>(); // entry id -> verdict
   let fresh: DictionaryEntry[] = [];
-  const hits = await store.cacheGetMany(
-    pending.map((p) => nameKey(projectId, p.canonical)),
-    CACHE_TTL_MS
+  const hits = await cachedVerdicts(
+    projectId,
+    pending.map((p) => p.canonical)
   );
   for (const p of pending) {
-    const hit = hits.get(nameKey(projectId, p.canonical));
+    const hit = hits.get(p.canonical);
     if (hit) cached.set(p.id, JSON.parse(hit) as CachedVerdict);
     else fresh.push(p);
   }
@@ -572,13 +604,13 @@ async function rejectedVerdictRows(
   );
   if (rejected.length === 0) return [];
   const byName = new Map(entries.map((e) => [norm(e.canonical), e]));
-  const hits = await store.cacheGetMany(
-    rejected.map((r) => nameKey(projectId, r.canonical)),
-    CACHE_TTL_MS
+  const hits = await cachedVerdicts(
+    projectId,
+    rejected.map((r) => r.canonical)
   );
   const out: DictSuggestion[] = [];
   for (const r of rejected) {
-    const hit = hits.get(nameKey(projectId, r.canonical));
+    const hit = hits.get(r.canonical);
     if (!hit) continue;
     const v = JSON.parse(hit) as CachedVerdict;
     const target = v.merge_into ? byName.get(norm(v.merge_into)) : null;
@@ -672,7 +704,7 @@ async function suggestBatch(
   active: DictionaryEntry[]
 ): Promise<Map<string, CachedVerdict>> {
   const res = await openaiClient().chat.completions.create({
-    model: SUGGEST_MODEL,
+    model: DICT_SUGGEST_MODEL,
     messages: [
       {
         role: "system",
