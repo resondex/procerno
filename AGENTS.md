@@ -20,6 +20,8 @@ This block is written and re-added by `next dev` — verify at `node_modules/nex
 ## Data locations
 
 - `~/Documents/procerno_response_vault/` - immutable (chflags uchg) gzip+sha256 exports of every collected run. Rebuild with `export_vault.mts` pattern.
+- `~/Documents/procerno_label_vault/` - dated immutable snapshots of the whole procerno_eval tree (one tar.gz per top-level dir + SHA256SUMS + MANIFEST.md, chflags uchg). First snapshot 2026-09-27 (533 MB).
+- **S3 archive: `s3://procerno-vault-931634294445`** (us-west-2, versioned, private) - `label_vault/<date>/` mirrors the label-vault snapshots, `response_vault/` mirrors the response vault. Sync new snapshots with `aws s3 sync`; verified by round-tripping SHA256SUMS.
 - `~/Documents/procerno_eval/` - coder-evaluation ground truth and scripts:
   - `jira/opus_full_jira.jsonl` - Opus reference labels for ALL 5,720 jira answers (run a2b37945); schema `{id, outcome, top_pick, target_framing, reasons, rule, quote, boundary}`.
   - `jira/grok_full_jira.jsonl` - grok-4-fast x decompose2 temp-0 codes for all 5,720 (coder-output schema, keyed `responseId`).
