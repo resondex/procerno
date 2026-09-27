@@ -23,7 +23,7 @@ Every item marked "prompt change" must be settled before the freeze. Once the pr
 | --- | --- | --- | --- | --- |
 | B1 | **Decided:** feed the confirmed dictionary to the labeler and coder; mentions carry their entry; new brands allowed | Pending only: go for the with/without test (~$10, 200 answers) | Run the test before the freeze | yes |
 | B2 | **Decided (option 4), pending an isolated test:** a brand framed two ways in one answer (Gold recommended, Platinum criticized; 384 of 4,868 AmEx answers) | Replace the single brand-level framing with two signals: **recommended** (any of the brand's products recommended) and **criticized** (any warned against); both can be true | Test in isolation before the freeze (see below) | yes |
-| B3 | "Asks the reader a question" is true on 52% of answers, almost all trailing offers ("Want me to compare...?") | Count only questions asking for information the answer needs / keep as is | Information requests only | yes |
+| B3 | **Decided (option 1), pending an isolated test:** `clarification_requested` (dashboard "Asks back") is true on 52% of answers, almost all trailing offers ("Want me to compare...?") | True only when the answer asks the reader for information it needs to give or refine its advice; offers to do more and rhetorical questions don't count | Test in isolation before the freeze (see below) | yes |
 | B4 | Price and spec flags are 74% / 82% true on credit cards (definitions were written for B2B software) | Per-category definitions of what counts / accept as broad "has numbers" flags | Per-category one-liners, generated with each tracker's codebook | yes |
 | B5 | Does a pick of an out-of-category product count? (AmEx ecosystem answers "pick Expensify") | Yes, any product / no, only the tracker's category (else conditional or no pick) / count it, but flag out-of-category | Count it and flag it, so loyalty and ecosystem answers aren't miscounted as losses | yes |
 | B6 | Small wording fixes: "absent" means not named in the answer; how the focus sentence is chosen; top pick written as the mentions list writes it | Approve / change | Approve | yes |
@@ -38,6 +38,14 @@ Every item marked "prompt change" must be settled before the freeze. Once the pr
 4. The share of answers that are both recommended and criticized looks right, from a hand-read sample.
 
 It is run separately from the dictionary test (B1) so each change's effect can be seen on its own.
+
+**B3 isolated test (flagged, not run):** run only the B3 change on the 200-answer test set, Batch API, one answer per request (~$5). Check that:
+1. Trailing offers no longer set the flag.
+2. Real information requests still do (hand-checked sample).
+3. The rate drops from ~52% to the information-request share.
+4. No other field moves beyond the rerun baseline.
+
+It is run separately from the B1 and B2 tests.
 
 **Already decided and needing no prompt change:** mention order is computed from the answer text after labeling; top pick and framing are also resolved through the dictionary as a safety net.
 
