@@ -475,3 +475,17 @@ Supabase flagged 17.45 GB egress on the 5.5 GB free plan (restriction 2026-09-29
 - `store.runDataRevision(runId)` - in-database hash of the run's responses, mentions, labels and the project's prompts. `slice_cache` keys on it (plus a hash of brand/competitors/taxonomy), so runs of any status cache safely. `computeRunMetricsCached` routes trend, deck, export, insights and study through the same cache.
 - Per load on jira: full rows 29 MB -> metrics miss 7.3 MB -> cache hit ~one metrics JSON. Metrics output verified byte-identical to the full-body computation on Netflix across 5 slices.
 - Still full-body by necessity: recode, export/verbatims/evidence/answers routes, study library, deck. Biggest remaining egress source is local dev and scripts pointed at the prod DB.
+
+## Dictionary suggestions: gpt-6-luna vs gpt-5-mini (2026-09-26, Tyler's go)
+
+`scripts/dict_luna6_eval.mts` (+ `dict_luna6_rescore.mts`): byte-identical prod prompt/request on the 290 family-root names of the four CONFIRMED boards, 3 runs per model, truth = Tyler's confirmed dictionaries; prod read only, ledger local. Outputs `~/Documents/procerno_eval/dict_bakeoff/luna6/` (`scores_corrected.md` is authoritative - the first scoring pass counted merged names as ignores because a merge leaves the name as a rejected entry AND an alias of its target; fixed in the eval script). **gpt-6-luna rejects temperature 0** (default 1 only), like gpt-5-mini.
+
+| | gpt-5-mini (prod) | gpt-6-luna |
+| --- | --- | --- |
+| Verdict = your board (all 290) | 79% | **84%** |
+| Same, excluding the 32 co-occurrence-guard names | 86% | **90%** |
+| Same verdict in all 3 runs | 81% | **87%** |
+| Cost (all runs) / median batch latency | $0.285 / 28.5s | **$0.040 / 19.3s** |
+| Failures / truncations | 0 / 0 | 0 / 0 |
+
+Reference: the verdicts prod actually served (gpt-5-mini roll + family layer + guard) match the boards 95% - the board truth is anchored on what Tyler reviewed, which favors gpt-5-mini, yet gpt-6-luna still wins. Netflix is the weakest brand for both (62% / 76%). Remaining disagreements are mostly raw merges the prod guard turns into ignores. Decision on switching (and whether to bump the cache rules version so cached names are re-judged) is Tyler's.
