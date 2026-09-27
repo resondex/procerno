@@ -109,6 +109,8 @@ Status tags: **DECIDED** (in force), **PROPOSED** (recommended, awaiting Tyler),
 
 - **Isolated prompt tests (DECIDED 2026-09-27, Tyler):** test one change at a time, but always with the FULL labeling prompt (every field), on the same answer set, compared field by field against a fresh baseline run of the current prompt. This measures the intended effect and spillover onto every other field; movement beyond the Opus rerun baseline counts as spillover.
 
+- **Presentation rule: win/loss only where the question does not presuppose the brand (DECIDED 2026-09-27, Tyler).** Headline win / pick / visibility rates come only from open-choice questions (no brand named). Every other question type gets its own view: head-to-head (rival named) - prompted win rate, reported separately; within-brand (the brand's own products, e.g. Gold vs Platinum) - product mix, rival intrusion, reasons; doubt and keep-or-leave - doubt verdict, keep vs leave; settled-customer - the separate scorer. Why: AmEx's 20 within-brand pricing prompts (194 answers) are 96% recommended with every pick an AmEx card and 2 rival recommendations - a win by construction; the real finding there is the product mix (Gold 68 vs Platinum 3 at ~3 trips a year). Labels stay as they are (they describe the answers correctly); this is a dashboard rule, required before customers see branded results. Replaces the pooled "branded" theme row.
+
 - Netflix is the unseen-brand segment and is always evaluated WITH scope sentences (DECIDED 2026-09-25).
 - Score each coder against labels of its own contract; cross-contract scores measure the contract difference, not the coder.
 - Dashboard accuracy = per-code incidence gap; flag codes off by >3 points.
