@@ -21,23 +21,23 @@ One declared type per cell, from a closed set of six. Each type has one fixed re
 | awareness | category_education | awareness | decided |
 | awareness | discovery | open_choice | |
 | consideration | shortlist | open_choice | |
-| consideration | criteria | **awareness** | CALL 1 below |
+| consideration | criteria | awareness | DECIDED 2026-09-27 (Tyler) |
 | consideration | feature_screening | open_choice | |
 | consideration | use_case | open_choice | |
 | consideration | social_validation | open_choice | |
 | decision | comparison | head_to_head | |
-| decision | premium_worth | **open_choice** | CALL 2; dropped from doubt stages per A3 narrowing |
+| decision | premium_worth | open_choice | DECIDED 2026-09-27 (Tyler); dropped from doubt stages per A3 narrowing |
 | decision | objections | doubt | must name the brand (already the rule) |
 | decision | pricing | **per-cell** | target-tier cells = within_brand; B10-flagged doubt cells (17) = doubt; generic category cells = open_choice |
-| decision | business_case | **settled_customer** | CALL 3 |
+| decision | business_case | settled_customer | DECIDED 2026-09-27 (Tyler) |
 | retention | churn_triggers | doubt (keep-or-leave) | A3: must name the brand |
-| retention | alternatives | **per-cell** | defensive ("alternatives to [target]") = doubt keep-or-leave; offensive ("alternatives to [rival]") = open_choice - CALL 5; B10 flagged 16 |
+| retention | alternatives | **per-cell** | defensive ("alternatives to [target]") = doubt keep-or-leave; offensive ("alternatives to [rival]") = open_choice with a prompted-rival annotation - DECIDED 2026-09-27 (Tyler); B10 flagged 16 |
 | retention | renewal | doubt (keep-or-leave) | A3: must name the brand |
 | retention | problem_resolution | settled_customer | decided (scoring split) |
 | loyalty | expansion | settled_customer | decided |
 | loyalty | ecosystem | settled_customer | decided |
 | loyalty | advocacy | **per-cell** | critic-quoting cells (22 of 40) = doubt; the rest = settled_customer - already how question_designs.json splits them |
-| loyalty | repertoire | **doubt (keep-or-leave)** | CALL 4; it is renewal for replenishment markets |
+| loyalty | repertoire | doubt (keep-or-leave) | DECIDED 2026-09-27 (Tyler); it is renewal for replenishment markets |
 
 The instrument's existing `tag` field (rules / picks / judges / steers) is a proto-typology but does not align (alternatives is tagged picks though its defensive cells are keep-or-leave; pricing is tagged judges though its cells split three ways). The type is a new per-cell field, not a tag rename.
 
@@ -51,18 +51,14 @@ The instrument's existing `tag` field (rules / picks / judges / steers) is a pro
 ## 4. Hard dependencies
 
 1. **Design-fidelity lint (to-do, now load-bearing).** A paraphrase that drifts off its cell's design makes the declared type silently wrong at the answer level - measured 21/410 on doubt prompts, including one entire jira cell. Under this design that failure mode applies to every type, so the lint ships with the type field, not after it.
-2. **B7 roles - pending.** within_brand's product-mix view reads the roles. B7's spillover read (`~/Documents/procerno_eval/labeling/v02_relabel/isolated/b7_spillover_read.md`) found outcome-role coupling; a decoupled retest is recommended. If B7 is ultimately rejected, within_brand falls back to per-mention framing + dictionary-resolved top_pick - the view survives either way.
-3. **B2 computed-from-roles is NOT decided.** It inherits B7's coupling; it waits on the decoupled B7 retest passing, then a paired check (labeled signals vs role-derived on the same rows, free from those runs). Until then B2 stays a labeled field.
+2. **B7 - RESOLVED 2026-09-27 (Tyler): no labeled role field.** branch_winner failed its accuracy bar (94.1% stability, and stable only when coupled to outcome); the surviving role set (chosen/shortlisted/mentioned/warned_against) is fully derivable from per-mention framing + top_pick + outcome with dictionary resolution, so roles are computed at read time. within_brand's product-mix view reads the derived roles; the labeling prompt is unchanged.
+3. **B2 - computed at read time** (recorded 2026-09-27, Tyler veto open): recommended/criticized derived from the target's mention framings via the dictionary (identity measured 100%/97% in the B2 arm). No labeled brand-level booleans; the tightened "criticized" wording moves to the per-mention negative rule (~$5 retest pending).
 4. **Dictionary-resolved top_pick (B6c)** - decided, read-time; open_choice and head_to_head both require it.
 5. **B5 in-category flag** - orthogonal to the type; applies inside open_choice.
 
-## 5. Open mapping calls (Tyler)
+## 5. Mapping calls - ALL DECIDED 2026-09-27 (Tyler, per the recommendations)
 
-1. **criteria** -> awareness (recommended) or open_choice? The answer teaches what to look for; no pick is requested, so a "win" there is not a decision won - but brand mentions in taught criteria are real visibility.
-2. **premium_worth** -> open_choice (recommended)? It is the habitual market's whole comparison moment, brand-free by construction; answers do name makers.
-3. **business_case** -> settled_customer (recommended) or doubt? The buyer has picked and asks for the internal case - case-strength is group-3 material, not a choice.
-4. **repertoire** -> doubt keep-or-leave (recommended) or settled_customer?
-5. **offensive alternatives** ("alternatives to [rival]") -> open_choice (recommended): an open replacement ask the target can win; report with a prompted-rival annotation rather than pooling with unprompted discovery.
+1. criteria -> awareness. 2. premium_worth -> open_choice. 3. business_case -> settled_customer. 4. repertoire -> doubt keep-or-leave. 5. offensive alternatives -> open_choice with a prompted-rival annotation.
 
 ## 6. v0.2 impact
 
