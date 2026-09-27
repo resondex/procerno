@@ -44,7 +44,9 @@ export async function GET(
   if (!apiKeyConfigured()) {
     return NextResponse.json({ error: "extraction unavailable" }, { status: 503 });
   }
-  const cacheKey = `verbatims:v1:${id}:${norm}:${project.dictionary_version}`;
+  // v2: gpt-6-luna - gpt-4o-mini's "verbatim" quotes were absent from the
+  // answer 28% of the time (internal-model test F).
+  const cacheKey = `verbatims:v2:${id}:${norm}:${project.dictionary_version}`;
   const hit = await store.cacheGet(cacheKey, CACHE_MS);
   if (hit) return NextResponse.json({ verbatims: JSON.parse(hit) });
 

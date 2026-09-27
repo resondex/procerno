@@ -450,7 +450,8 @@ async function executiveSummary(
   metrics: NonNullable<Awaited<ReturnType<typeof computeRunMetrics>>>,
   extra: { fnRate: number; fnCi: { low: number; high: number }; firstNamed: number; unbranded: number; trendRuns: number }
 ): Promise<string> {
-  const cacheKey = `study_summary:v2:${run.id}`;
+  // v3: summary writer moved to gpt-6-luna.
+  const cacheKey = `study_summary:v3:${run.id}`;
   const hit = await store.cacheGet(cacheKey, SUMMARY_CACHE_MS);
   if (hit) return hit;
   const fallback =

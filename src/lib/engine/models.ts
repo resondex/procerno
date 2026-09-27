@@ -4,7 +4,10 @@
  * override first, then the legacy shared SUGGEST_MODEL (which used to set
  * all of the gpt-5-mini jobs at once), then its default. Defaults are the
  * models each job was calibrated on; changing one is a per-job decision
- * backed by a side-by-side test (see AGENTS.md).
+ * backed by a side-by-side test (see AGENTS.md, "Internal-model tests A-G").
+ * Switched to gpt-6-luna 2026-09-27: dictionary seed, junk filter, battery
+ * lint, verbatims (tested wins) and the study summary (Tyler's call, untested -
+ * no coded run existed to summarize).
  *
  * Not here: answer engines (providers.ts ENGINES), the answer coder
  * (EXTRACT_MODEL), discovery (DISCOVERY_MODEL), consolidation
@@ -21,17 +24,17 @@ export const DICT_SUGGEST_MODEL = pick("DICT_SUGGEST_MODEL", "gpt-5-mini");
 /** Setup pre-fill: category, competitors, audience (suggest.ts). */
 export const BRAND_PROFILE_MODEL = pick("BRAND_PROFILE_MODEL", "gpt-5-mini");
 /** Starting aliases for the target and competitors (suggest.ts). */
-export const DICT_SEED_MODEL = pick("DICT_SEED_MODEL", "gpt-5-mini");
+export const DICT_SEED_MODEL = pick("DICT_SEED_MODEL", "gpt-6-luna");
 /** Post-run filter of non-brand names before they reach the board (suggest.ts). */
-export const JUNK_FILTER_MODEL = pick("JUNK_FILTER_MODEL", "gpt-5-mini");
+export const JUNK_FILTER_MODEL = pick("JUNK_FILTER_MODEL", "gpt-6-luna");
 /** Legacy prompt-battery drafting (suggest.ts). */
 export const BATTERY_MODEL = pick("BATTERY_MODEL", "gpt-5-mini");
 /** Battery lint (anchoring / spec-sheet) and its repair round (suggest.ts). */
-export const PROMPT_LINT_MODEL = pick("PROMPT_LINT_MODEL", "gpt-5-mini");
+export const PROMPT_LINT_MODEL = pick("PROMPT_LINT_MODEL", "gpt-6-luna");
 /** Post-run prompt health audit (prompt_health.ts). */
 export const PROMPT_HEALTH_MODEL = pick("PROMPT_HEALTH_MODEL", "gpt-5-mini");
 /** Study executive summary (study.ts). */
-export const STUDY_SUMMARY_MODEL = pick("STUDY_SUMMARY_MODEL", "gpt-5-mini");
+export const STUDY_SUMMARY_MODEL = pick("STUDY_SUMMARY_MODEL", "gpt-6-luna");
 /** Insights narrative when the Claude writer is unavailable (insights.ts). */
 export const INSIGHTS_FALLBACK_MODEL = pick("INSIGHTS_FALLBACK_MODEL", "gpt-5-mini");
 /** The instrument's small setup jobs: moderators, scenario suggest / near /
@@ -39,4 +42,4 @@ export const INSIGHTS_FALLBACK_MODEL = pick("INSIGHTS_FALLBACK_MODEL", "gpt-5-mi
 export const INSTRUMENT_HELPER_MODEL = pick("INSTRUMENT_HELPER_MODEL", "gpt-5-mini");
 /** Negative-verbatim explanations (runs/[id]/verbatims). Never followed
  * SUGGEST_MODEL, so it doesn't now. */
-export const VERBATIM_MODEL = process.env.VERBATIM_MODEL ?? "gpt-4o-mini";
+export const VERBATIM_MODEL = process.env.VERBATIM_MODEL ?? "gpt-6-luna";
