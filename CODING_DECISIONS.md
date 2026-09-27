@@ -93,6 +93,8 @@ Status tags: **DECIDED** (in force), **PROPOSED** (recommended, awaiting Tyler),
 
 ## 9. Open decisions (for Tyler)
 
+The working checklist with options, recommendations and costs is `V02_OPEN_DECISIONS.md` (A = cells and prompts, B = prompt freeze, C = labels).
+
 1. B2 - target appears with conflicting framings: negative wins / recommended wins / keep both levels.
 2. B3 - clarification_requested: information requests only?
 3. B4 - price and spec flags: per-category definitions or accept as broad.
