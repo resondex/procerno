@@ -55,7 +55,7 @@ Status tags: **DECIDED** (in force), **PROPOSED** (recommended, awaiting Tyler),
   - **Loyalty "plan" verdict dropped (DECIDED):** backs 16/16 - the question presupposes the brand, so it never varied. Loyalty signal comes from existing fields (first-party vs third-party companions via the dictionary, rival leakage, reason codes in advocacy, the doubt verdict on advocacy prompts that quote a critic).
 - **Off-design prompts' answers are left out of the v0.2 relabel (DECIDED 2026-09-27, Tyler).** `labeling/v02_relabel/off_design_prompts.json`; rewrite them before the next collection.
 - **Known field gaps (OPEN, from the AmEx labels 2026-09-27):**
-  - B2 - no rule when the target appears more than once with different framings (384 of 4,868 AmEx answers list AmEx more than once with different framings). Options: negative wins (prod's merge rule), recommended wins, or keep brand-level plus per-product framing.
+  - B2 - **DECIDED 2026-09-27 (Tyler), pending an isolated test:** a brand framed two ways in one answer (384 of 4,868 AmEx answers list AmEx more than once with different framings, e.g. Gold recommended, Platinum criticized). The single brand-level framing is replaced by two signals: **recommended** (any of the brand's products recommended) and **criticized** (any warned against); both can be true. Rejected: negative wins (prod's old merge rule - an answer that picks an AmEx card would read negative for AmEx), recommended wins (hides product criticism), a single brand-level framing with per-product detail (still needs one of those rules). Schema change: target_framing becomes two booleans at brand level; per-brand framing in the mentions list stays; the dashboard funnel shows recommended rate and criticized rate, which can overlap. For comparisons with v0.1, a single framing can be derived from the two signals. **Isolated test (flagged, NOT RUN):** only this change, on the 200-answer set (~$5): the signals match the mentions' per-brand framings; run-to-run stability is at least today's 98%; no other field moves beyond the rerun baseline; the both-true share is hand-checked. Run separately from the B1 dictionary test.
   - B3 - clarification_requested fires on trailing offers ("Want me to compare...?"): true on 52% of answers. Proposal: count only questions asking for information the answer needs.
   - B4 - includes_prices / includes_specs were written for B2B software; on credit cards they are 74% / 82% true. Needs per-category definitions or acceptance as broad "has numbers" flags.
   - B5 - out-of-category picks (see section 4).
@@ -95,7 +95,7 @@ Status tags: **DECIDED** (in force), **PROPOSED** (recommended, awaiting Tyler),
 
 The working checklist with options, recommendations and costs is `V02_OPEN_DECISIONS.md` (A = cells and prompts, B = prompt freeze, C = labels).
 
-1. B2 - target appears with conflicting framings: negative wins / recommended wins / keep both levels.
+1. B2 - decided (two signals: recommended + criticized); go for its isolated test (~$5).
 2. B3 - clarification_requested: information requests only?
 3. B4 - price and spec flags: per-category definitions or accept as broad.
 4. B5 - do out-of-category picks count as picks?

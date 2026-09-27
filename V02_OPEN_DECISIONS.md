@@ -22,7 +22,7 @@ Every item marked "prompt change" must be settled before the freeze. Once the pr
 | # | Decision | Options | Recommendation | Changes the prompt? |
 | --- | --- | --- | --- | --- |
 | B1 | **Decided:** feed the confirmed dictionary to the labeler and coder; mentions carry their entry; new brands allowed | Pending only: go for the with/without test (~$10, 200 answers) | Run the test before the freeze | yes |
-| B2 | A brand appears with conflicting framings (Gold recommended, Platinum criticized; 384 of 4,868 AmEx answers) | Negative wins (prod's merge rule) / recommended wins / keep a brand-level framing plus per-product framings | Keep both levels, with negative winning at brand level. B7 below would carry most of the per-product detail. | yes |
+| B2 | **Decided (option 4), pending an isolated test:** a brand framed two ways in one answer (Gold recommended, Platinum criticized; 384 of 4,868 AmEx answers) | Replace the single brand-level framing with two signals: **recommended** (any of the brand's products recommended) and **criticized** (any warned against); both can be true | Test in isolation before the freeze (see below) | yes |
 | B3 | "Asks the reader a question" is true on 52% of answers, almost all trailing offers ("Want me to compare...?") | Count only questions asking for information the answer needs / keep as is | Information requests only | yes |
 | B4 | Price and spec flags are 74% / 82% true on credit cards (definitions were written for B2B software) | Per-category definitions of what counts / accept as broad "has numbers" flags | Per-category one-liners, generated with each tracker's codebook | yes |
 | B5 | Does a pick of an out-of-category product count? (AmEx ecosystem answers "pick Expensify") | Yes, any product / no, only the tracker's category (else conditional or no pick) / count it, but flag out-of-category | Count it and flag it, so loyalty and ecosystem answers aren't miscounted as losses | yes |
@@ -30,6 +30,14 @@ Every item marked "prompt change" must be settled before the freeze. Once the pr
 | B7 | Per-brand role in the mentions list: chosen / branch winner / shortlisted / mentioned / warned against (conditional answers are 40% of AmEx) | Add / leave outcome at answer level | Add | yes |
 | B8 | Taxonomy adds for the post-scope residue (AmEx consumer credit-score impact, retention offers; Netflix home bandwidth; jira review-source credibility; Pixel return policy) | Add codes (forces a reasons relabel, already happening) / leave in uncoded | Decide per tracker now, since the relabel is happening anyway | yes (code lists) |
 | B9 | Freeze and version the prompt, plus a check on the 200-answer test set | Approve (~$5) | Approve after B1-B8 | - |
+
+**B2 isolated test (flagged, not run):** run only the B2 change (no other B edits) on the 200-answer test set, Batch API, one answer per request (~$5). Check that:
+1. The two signals agree with what the per-brand framings in the mentions list imply.
+2. They are as stable run to run as today's single framing (98%).
+3. No other field moves beyond the rerun baseline.
+4. The share of answers that are both recommended and criticized looks right, from a hand-read sample.
+
+It is run separately from the dictionary test (B1) so each change's effect can be seen on its own.
 
 **Already decided and needing no prompt change:** mention order is computed from the answer text after labeling; top pick and framing are also resolved through the dictionary as a safety net.
 
