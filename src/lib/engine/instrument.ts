@@ -561,7 +561,7 @@ const CORE_SCENARIOS = 4;
  * takes adaptive thinking, which cannot be combined with a FORCED tool
  * call - so the tool stays auto with a hard instruction, and a JSON
  * fallback parse covers the rare prose reply. */
-async function classifyJourney(input: {
+export async function classifyJourney(input: {
   category: string;
   audience: string | null;
 }): Promise<Moderators> {
@@ -611,6 +611,10 @@ export async function readScenarios(input: {
   /** Background warm: never wait on another request's in-flight read. */
   noWait?: boolean;
   meta?: CacheMeta;
+  /** A given base journey skips the Opus classification. For evals that
+   * hold the journey fixed across model arms; not part of the cache key,
+   * so prod callers never pass it. */
+  base?: Moderators;
 }): Promise<{ base: Moderators; scenarios: ScenarioSpec[]; reserve: ScenarioSpec[] } | null> {
   tagCosts({ purpose: "setup:scenarios" });
   // "scenarios_journeys12": the read is SPLIT - Claude Opus classifies
@@ -625,7 +629,7 @@ export async function readScenarios(input: {
     scenarios: ScenarioSpec[];
     reserve: ScenarioSpec[];
   }>(key, { noWait: input.noWait, meta: stampOf(input) }, async () => {
-  const base = await classifyJourney(input);
+  const base = input.base ?? await classifyJourney(input);
   const res = await openaiClient().chat.completions.create({
     model: READ_MODEL,
     messages: [

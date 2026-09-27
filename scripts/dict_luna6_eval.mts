@@ -33,7 +33,22 @@ const { suggestSystemPrompt, buildFamilyPlan } = await import(`${REPO}/src/lib/e
 const { openaiClient } = await import(`${REPO}/src/lib/engine/providers`);
 const postgres = (await import(`${REPO}/node_modules/postgres/src/index.js`)).default;
 
-const OUT = `${process.env.HOME}/Documents/procerno_eval/dict_bakeoff/luna6`;
+const OUT = process.env.OUT_DIR ?? `${process.env.HOME}/Documents/procerno_eval/dict_bakeoff/luna6`;
+// Candidate rule (test A, 2026-09-26): co-brand partners are affiliated, so
+// the co-occurrence guard measures them instead of product_of waving them
+// through. COBRAND_RULE=1 inserts it after the relationship definitions.
+const COBRAND_RULE =
+  "A co-brand partner - an airline, hotel, retailer, or other company whose " +
+  "name appears on a card, plan, or product the target's company sells - " +
+  "is affiliated, never product_of or same_offering: it is its own company, " +
+  "and its name alone does not mean the target's product was chosen.\n";
+const systemPrompt = (category: string, seeds: string[]) => {
+  const base = suggestSystemPrompt(category, seeds);
+  if (process.env.COBRAND_RULE !== "1") return base;
+  const i = base.indexOf("ignore.\nEvery suggestion needs");
+  if (i < 0) throw new Error("co-brand rule anchor not found in the prod prompt");
+  return base.slice(0, i + "ignore.\n".length) + COBRAND_RULE + base.slice(i + "ignore.\n".length);
+};
 fs.mkdirSync(OUT, { recursive: true });
 const RUNS = Number(process.env.RUNS ?? 3);
 const CHUNK = 40;
@@ -134,7 +149,7 @@ async function judge(model: string, c: Case, batch: string[], temp0: boolean) {
   const res = await openaiClient().chat.completions.create({
     model,
     messages: [
-      { role: "system", content: suggestSystemPrompt(c.category, c.seeds) },
+      { role: "system", content: systemPrompt(c.category, c.seeds) },
       { role: "user", content: JSON.stringify(batch) },
     ],
     max_completion_tokens: 24000,

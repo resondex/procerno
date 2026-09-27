@@ -292,7 +292,7 @@ const REPAIR_SCHEMA = {
  * round scoped to their specific issues; unrepairable ones survive as-is and
  * are caught later by the post-first-run health check.
  */
-async function lintAndRepair(
+export async function lintAndRepair(
   prompts: PromptSpec[],
   category: string
 ): Promise<PromptSpec[]> {

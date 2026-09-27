@@ -2,9 +2,9 @@ import { NextResponse } from "next/server";
 import { store } from "@/lib/store";
 import { getPlanFor, requireAuth, requireRun } from "@/lib/auth";
 import { buildCanonicalizer } from "@/lib/engine/metrics";
-import { apiKeyConfigured, openaiClient } from "@/lib/engine/providers";
+import { apiKeyConfigured } from "@/lib/engine/providers";
 import { tagCosts } from "@/lib/cost_log";
-import { VERBATIM_MODEL } from "@/lib/engine/models";
+import { explainNegativeVerbatim } from "@/lib/engine/verbatims";
 
 export const maxDuration = 120;
 const CACHE_MS = 365 * 24 * 3600 * 1000;
@@ -62,44 +62,14 @@ export async function GET(
   const rows = responses.filter((r) => negativeIds.has(r.id)).slice(0, 12);
   const display = canon.canonical(brand);
   tagCosts({ purpose: "run:verbatims" });
-  const client = openaiClient();
   const out = await Promise.all(
     rows.map(async (r) => {
       try {
-        const res = await client.chat.completions.create({
-          model: VERBATIM_MODEL,
-          messages: [
-            {
-              role: "system",
-              content:
-                `From the answer, extract how "${display}" is criticized. Return ` +
-                "quote: ONE verbatim sentence (max 200 chars) that frames it " +
-                "negatively, and interpretation: one plain sentence on the criticism.",
-            },
-            { role: "user", content: r.text },
-          ],
-          response_format: {
-            type: "json_schema",
-            json_schema: {
-              name: "verbatim",
-              strict: true,
-              schema: {
-                type: "object",
-                additionalProperties: false,
-                properties: {
-                  quote: { type: ["string", "null"] },
-                  interpretation: { type: ["string", "null"] },
-                },
-                required: ["quote", "interpretation"],
-              },
-            },
-          },
-        });
-        const parsed = JSON.parse(res.choices[0]?.message?.content ?? "{}");
+        const parsed = await explainNegativeVerbatim(display, r.text);
         return {
           promptText: promptText.get(r.prompt_id) ?? "",
-          quote: parsed.quote ?? null,
-          interpretation: parsed.interpretation ?? null,
+          quote: parsed.quote,
+          interpretation: parsed.interpretation,
         };
       } catch {
         return { promptText: promptText.get(r.prompt_id) ?? "", quote: null, interpretation: null };
