@@ -2678,10 +2678,15 @@ export async function generatePhrasings(input: {
           if (new RegExp(`(?:^|[^a-z0-9])${esc}(?:$|[^a-z0-9])`, caseSensitive ? "" : "i").test(text)) return true;
         }
         if (b.trim().toLowerCase() !== angle) return false;
-        const first = primaryBrandName(b).split(/\s+/)[0] ?? "";
+        // Split on dots too: "Monday.com" is typed "Monday" as naturally as
+        // "Ulta Beauty" is typed "Ulta" - a whitespace-only split left
+        // dotted names without a shorthand, the correlated-kill shape that
+        // starved the Asana cell.
+        const first = primaryBrandName(b).split(/[\s.]+/)[0] ?? "";
         if (first.length < 4 || first.toLowerCase() === b.trim().toLowerCase()) return false;
         const esc = first.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-        return new RegExp(`(?:^|[^a-z0-9])${esc}(?:$|[^a-z0-9])`, "i").test(text);
+        const caseSensitive = SIG_AMBIGUOUS_FORMS.has(first.toLowerCase());
+        return new RegExp(`(?:^|[^a-z0-9])${esc}(?:$|[^a-z0-9])`, caseSensitive ? "" : "i").test(text);
       };
       const sigOf = (text: string) =>
         [input.brand, ...rivals]
@@ -2694,26 +2699,37 @@ export async function generatePhrasings(input: {
       const seen = new Set<string>([norm(seed.text), ...prior.map((p) => norm(p.text))]);
       const keptWords: Set<string>[] = [contentWords(seed.text), ...prior.map((p) => contentWords(p.text))];
       const kept: Phrasing[] = [];
+      // Cull accounting (2026-09-28): a cell whose batch dies usually dies
+      // to ONE filter (correlated kill - the Asana signature bug looked
+      // exactly like bad luck from outside). Count the kills so a starved
+      // cell names its eater in the logs instead of needing archaeology.
+      const culls = { empty: 0, sig: 0, dup: 0, overlap: 0 };
       for (const p of c.phrasings ?? []) {
         // The writer occasionally merges its asker metadata into the
         // text ("asker: parent - two big dogs..."); the label belongs in
         // the field, never in a served prompt.
         const text = humanize((p.text ?? "").trim()).replace(/^asker:\s*[^-:]{1,40}[-:]\s*/i, "");
-        if (!text) continue;
+        if (!text) { culls.empty++; continue; }
         // The signature check is the blind/branded discipline: a paraphrase of
         // a blind seed that names a brand is not a paraphrase, it is a leak.
-        if (sigOf(text) !== sig) continue;
+        if (sigOf(text) !== sig) { culls.sig++; continue; }
         const n = norm(text);
-        if (seen.has(n)) continue;
+        if (seen.has(n)) { culls.dup++; continue; }
         // A paraphrase that shares most of its words with the seed or a sibling
         // is a thesaurus pass, not another person asking; drop it. Brand
         // tokens are excluded - required words can't count as copying.
         const ws = contentWords(text);
-        if (keptWords.some((k) => jaccard(k, ws) > (opts?.maxOverlap ?? MAX_OVERLAP))) continue;
+        if (keptWords.some((k) => jaccard(k, ws) > (opts?.maxOverlap ?? MAX_OVERLAP))) { culls.overlap++; continue; }
         seen.add(n);
         keptWords.push(ws);
         kept.push({ text, asker: (p.asker ?? "").trim() });
         if (prior.length + kept.length >= want) break;
+      }
+      if (prior.length + kept.length < want) {
+        console.warn(
+          `phrasings cull [${seed.stage}] kept ${prior.length + kept.length}/${want} - ` +
+          `raw ${(c.phrasings ?? []).length}, sig ${culls.sig}, overlap ${culls.overlap}, dup ${culls.dup}, empty ${culls.empty}, sig="${sig}" | ${seed.text.slice(0, 80)}`
+        );
       }
       result[c.index] = kept;
     }
