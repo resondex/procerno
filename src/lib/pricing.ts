@@ -38,6 +38,7 @@ export const ENGINE_PRICES: Record<string, { in: number; out: number; perSearch?
   "gpt-6-astra": { in: 10, out: 50 },
   // Extraction coders that never serve as answer engines.
   "gpt-4o-mini": { in: 0.15, out: 0.6 },
+  "grok-4.6": { in: 2, out: 6 },
   "grok-4-fast": { in: 0.2, out: 0.5 },
 };
 

@@ -101,7 +101,9 @@ export const ENGINES: Engine[] = [
   { id: "claude-sonnet-5-search", label: "Claude (free tier) + search", vendor: "Anthropic", keyEnv: "ANTHROPIC_API_KEY", sdk: "anthropic", mode: "search", apiModel: "claude-sonnet-5" },
   { id: "claude-opus-5-5", label: "Claude (paid tier)", vendor: "Anthropic", keyEnv: "ANTHROPIC_API_KEY", sdk: "anthropic", mode: "instinct" },
   { id: "claude-opus-5-5-search", label: "Claude (paid tier) + search", vendor: "Anthropic", keyEnv: "ANTHROPIC_API_KEY", sdk: "anthropic", mode: "search", apiModel: "claude-opus-5-5" },
-  { id: "claude-haiku-4-5-20251001", label: "Claude (Haiku)", vendor: "Anthropic", keyEnv: "ANTHROPIC_API_KEY", sdk: "anthropic", mode: "instinct" },
+  // Haiku is a model, not a consumer tier - retired from the offering
+  // (2026-09-28: the panel is free/paid tiers only, no model names).
+  { id: "claude-haiku-4-5-20251001", label: "Claude (Haiku - retired)", vendor: "Anthropic", keyEnv: "ANTHROPIC_API_KEY", sdk: "anthropic", mode: "instinct", successor: "claude-sonnet-5" },
   // Gemini tiers verified 2026-09-28: the consumer free tier runs 3.6 Flash;
   // AI Pro runs 3.1 Pro (and 3.8 Flash). gemini-pro-latest resolves to
   // 3.1-pro-preview (probed via modelVersion) = the paid surface; but
@@ -132,11 +134,14 @@ export const ENGINES: Engine[] = [
     mode: "instinct",
     successor: "gemini-3.6-flash",
   },
-  { id: "grok-4", label: "Grok", vendor: "xAI", keyEnv: "XAI_API_KEY", baseURL: "https://api.x.ai/v1", mode: "instinct" },
+  // Grok verified 2026-09-28: both consumer tiers (free with limits, and
+  // every SuperGrok plan) now serve Grok 4.6, so one engine covers both.
+  { id: "grok-4.6", label: "Grok (free & paid tiers)", vendor: "xAI", keyEnv: "XAI_API_KEY", baseURL: "https://api.x.ai/v1", mode: "instinct" },
+  { id: "grok-4", label: "Grok (grok-4 - retired)", vendor: "xAI", keyEnv: "XAI_API_KEY", baseURL: "https://api.x.ai/v1", mode: "instinct", successor: "grok-4.6" },
   {
     // Perplexity has no instinct mode — retrieval IS the product.
     id: "sonar",
-    label: "Perplexity (grounded)",
+    label: "Perplexity (free tier)",
     vendor: "Perplexity",
     keyEnv: "PERPLEXITY_API_KEY",
     baseURL: "https://api.perplexity.ai",
