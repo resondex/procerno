@@ -31,6 +31,8 @@ export const ENGINE_PRICES: Record<string, { in: number; out: number; perSearch?
   // count - a perSearch fee against searchCount null priced sonar at ~7%
   // of its true cost on the jira shakedown.
   sonar: { in: 1, out: 1, perRequest: 0.008 },
+  // Mid-depth request fee; Perplexity bills $5-14/1k by search depth.
+  "sonar-pro": { in: 3, out: 15, perRequest: 0.009 },
   // Internal-job models (GPT-6 list prices checked 2026-09-26, short
   // context). Unlisted models price at the $3/$15 fallback.
   "gpt-6-luna": { in: 0.1, out: 0.5 },

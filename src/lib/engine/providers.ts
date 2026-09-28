@@ -139,7 +139,17 @@ export const ENGINES: Engine[] = [
   { id: "grok-4.6", label: "Grok (free & paid tiers)", vendor: "xAI", keyEnv: "XAI_API_KEY", baseURL: "https://api.x.ai/v1", mode: "instinct" },
   { id: "grok-4", label: "Grok (grok-4 - retired)", vendor: "xAI", keyEnv: "XAI_API_KEY", baseURL: "https://api.x.ai/v1", mode: "instinct", successor: "grok-4.6" },
   {
-    // Perplexity has no instinct mode — retrieval IS the product.
+    // Perplexity has no instinct mode — retrieval IS the product. The paid
+    // tier is largely a frontier-model PICKER (surfaces we track directly);
+    // sonar-pro is the paid-grade default search surface (2026-09-28).
+    id: "sonar-pro",
+    label: "Perplexity (paid tier)",
+    vendor: "Perplexity",
+    keyEnv: "PERPLEXITY_API_KEY",
+    baseURL: "https://api.perplexity.ai",
+    mode: "search",
+  },
+  {
     id: "sonar",
     label: "Perplexity (free tier)",
     vendor: "Perplexity",
