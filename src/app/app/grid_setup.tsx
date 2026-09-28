@@ -708,7 +708,7 @@ export function useGridSetup(a: GridSetupArgs) {
     try {
       const res = await fetch("/api/setup/grid/scenario", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", ...(a.setupId ? { "x-setup-id": a.setupId } : {}) },
         signal: AbortSignal.timeout(60_000),
         body: JSON.stringify({
           category: a.category,
@@ -791,7 +791,7 @@ export function useGridSetup(a: GridSetupArgs) {
     // for OUR visibility only, never read back into generation.
     void fetch("/api/setup/grid/feedback", {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: { "Content-Type": "application/json", ...(a.setupId ? { "x-setup-id": a.setupId } : {}) },
       body: JSON.stringify({
         category: a.category,
         audience: a.audience || undefined,
@@ -1245,7 +1245,7 @@ export function useGridSetup(a: GridSetupArgs) {
     if (!cat) return;
     void fetch("/api/setup/grid/compose", {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: { "Content-Type": "application/json", ...(a.setupId ? { "x-setup-id": a.setupId } : {}) },
       body: JSON.stringify({ brand: a.brand, category: cat, audience: (audience ?? a.audience) || undefined, warm: true }),
     }).catch(() => {});
   }
@@ -1256,7 +1256,7 @@ export function useGridSetup(a: GridSetupArgs) {
     if (st.scenarios.some((s) => !s.label.trim())) return;
     void fetch("/api/setup/grid/cells", {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: { "Content-Type": "application/json", ...(a.setupId ? { "x-setup-id": a.setupId } : {}) },
       body: JSON.stringify({
         brand: a.brand, category: a.category, competitors: a.competitors,
         audience: a.audience || undefined,
@@ -1289,7 +1289,7 @@ export function useGridSetup(a: GridSetupArgs) {
         const slice = idx.slice(k, k + PHRASING_BATCH);
         void fetch("/api/setup/grid/phrasings", {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
+          headers: { "Content-Type": "application/json", ...(a.setupId ? { "x-setup-id": a.setupId } : {}) },
           body: JSON.stringify({
             brand: a.brand, category: a.category, competitors: a.competitors,
             audience: a.audience || undefined,
