@@ -80,7 +80,15 @@ export default function AppHome({
     setDrafts(drafts.filter((d) => d.id !== id));
   }
 
-  function draftStatus(d: SetupDraft): string {
+  /** A draft's display title: the study name the user typed in the wizard
+ * (saved in the wizard state - the drafts table has no name column), else
+ * the brand. Named studies must not silently display as their brand. */
+function draftTitle(d: SetupDraft): string {
+  const n = d.wizard && typeof d.wizard.studyName === "string" ? d.wizard.studyName.trim() : "";
+  return n || d.brand;
+}
+
+function draftStatus(d: SetupDraft): string {
     const w = d.wizard as { mode?: SetupMode; step?: keyof typeof STEP_LABEL } | null;
     const set = w?.mode === "grid" ? "Buyer Landscape" : "Visibility scan";
     const at = w?.step ? STEP_LABEL[w.step] : d.prompts ? "prompts written" : "setup in progress";
@@ -160,7 +168,7 @@ export default function AppHome({
             {drafts.map((d) => (
               <li key={d.id} className="card flex items-center justify-between gap-4 px-5 py-3.5">
                 <div className="min-w-0">
-                  <span className="font-semibold text-[15px]">{d.brand}</span>
+                  <span className="font-semibold text-[15px]">{draftTitle(d)}</span>
                   <span className="text-[13px] text-ink-2"> · {draftStatus(d)}</span>
                 </div>
                 <div className="flex items-center gap-4 shrink-0">
@@ -173,7 +181,7 @@ export default function AppHome({
                   </button>
                   <button
                     type="button"
-                    aria-label={`delete ${d.brand} setup`}
+                    aria-label={`delete ${draftTitle(d)} setup`}
                     onClick={() => deleteDraft(d.id)}
                     className="text-ink-3 hover:text-danger text-lg leading-none"
                   >
