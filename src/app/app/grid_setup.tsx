@@ -444,6 +444,9 @@ export interface GridSetupArgs {
   setState: (s: GridState | null | ((prev: GridState | null) => GridState | null)) => void;
   setBusy: (b: string | null) => void;
   setError: (e: string | null) => void;
+  /** The wizard's setup id - every spend request carries it so the ledger
+   * books setup costs to the tracker before the project exists. */
+  setupId?: string | null;
 }
 
 export function useGridSetup(a: GridSetupArgs) {
@@ -455,7 +458,10 @@ export function useGridSetup(a: GridSetupArgs) {
     // timeout usually lands instantly.
     const res = await fetch(path, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: {
+        "Content-Type": "application/json",
+        ...(a.setupId ? { "x-setup-id": a.setupId } : {}),
+      },
       body: JSON.stringify(body),
       signal: AbortSignal.timeout(240_000),
     }).catch(() => null);

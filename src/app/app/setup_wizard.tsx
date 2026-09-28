@@ -290,7 +290,12 @@ export function SetupWizard({ mode, brand, draft, engineOptions, onClose, onCrea
   const engineSet = chosenEngines ?? defaultEnginesFor("both", engineOptions);
   const setEngineSet = (update: (prev: string[]) => string[]) =>
     setChosenEngines((prev) => update(prev ?? defaultEnginesFor("both", engineOptions)));
-  const [draftId, setDraftId] = useState<string | null>(draft?.id ?? null);
+  // The tracker's unique id exists the moment setup STARTS (Tyler,
+  // 2026-09-28): generated client-side, upserted as the draft id, sent as
+  // x-setup-id on every spend call, transferred to the project at create.
+  const [draftId, setDraftId] = useState<string | null>(
+    draft?.id ?? (demo || editProjectId ? null : crypto.randomUUID())
+  );
   const [busy, setBusy] = useState<string | null>(null);
   const [suggesting, setSuggesting] = useState(false);
   const [submitting, setSubmitting] = useState(false);
@@ -322,6 +327,7 @@ export function SetupWizard({ mode, brand, draft, engineOptions, onClose, onCrea
   const [customAllowance, setCustomAllowance] = useState(12);
 
   const gridApi = useGridSetup({
+    setupId: draftId,
     brand, category, competitors: allCompetitors(), audience,
     maxScenarios: scenarioCap,
     state: grid, setState: setGrid, setBusy, setError,
@@ -604,7 +610,7 @@ export function SetupWizard({ mode, brand, draft, engineOptions, onClose, onCrea
     // the gate in busy - the reviewer is a safety net, not a gatekeeper.
     const resP = fetch("/api/setup/grid/scenario_review", {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: { "Content-Type": "application/json", ...(draftId ? { "x-setup-id": draftId } : {}) },
       body: JSON.stringify(body),
       signal: AbortSignal.timeout(90_000),
     }).catch(() => null);
@@ -854,7 +860,7 @@ export function SetupWizard({ mode, brand, draft, engineOptions, onClose, onCrea
     setError(null);
     const res = await fetch("/api/setup/grid/cell_review", {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: { "Content-Type": "application/json", ...(draftId ? { "x-setup-id": draftId } : {}) },
       body: JSON.stringify(body),
       signal: AbortSignal.timeout(90_000),
     }).catch(() => null);
@@ -1110,6 +1116,7 @@ export function SetupWizard({ mode, brand, draft, engineOptions, onClose, onCrea
       signal: AbortSignal.timeout(120_000),
       body: JSON.stringify({
         name: studyName.trim() || undefined,
+        setupId: draftId ?? undefined,
         brand, category,
         audience: audience || undefined,
         competitors: allCompetitors(),

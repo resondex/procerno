@@ -926,11 +926,16 @@ export interface Store {
     inputTokens: number;
     outputTokens: number;
     searches?: number;
-    /** R&D spend: experimentation that never ships to the project's final
-     * data set. Additional dimension - never replaces project/run
-     * attribution; production COGS per project = rows WHERE NOT rnd. */
+    /** Setup-phase spend books against the wizard's setup id until the
+     * project exists; attachSetupCosts transfers it at create. */
+    setupId?: string | null;
+    /** REWORK spend (fixes, repairs, redos, experiments) backed out so the
+     * real cost of a tracker stays readable. Additional dimension - never
+     * replaces project/run attribution; production COGS = WHERE NOT rnd. */
     rnd?: boolean;
   }): Promise<void>;
+  /** Transfer setup-phase ledger rows onto the created project. */
+  attachSetupCosts(projectId: string, setupId: string): Promise<number>;
   /** Ledger totals grouped by project x purpose x model. */
   summarizeCostLog(): Promise<CostSummaryRow[]>;
   writeResponseCoding(

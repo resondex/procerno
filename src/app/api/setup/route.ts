@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { tagSetupFromRequest } from "@/lib/cost_log";
 import { z } from "zod";
 import { requireAuthOrDemo } from "@/lib/auth";
 import { apiKeyConfigured } from "@/lib/engine/providers";
@@ -19,6 +20,7 @@ export const maxDuration = 120;
  * ~6-month TTL, returned together.
  */
 export async function POST(req: Request) {
+  tagSetupFromRequest(req);
   const auth = await requireAuthOrDemo();
   if (auth instanceof NextResponse) return auth;
   if (!apiKeyConfigured()) {

@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { tagSetupFromRequest } from "@/lib/cost_log";
 import { z } from "zod";
 import { cacheSource, requireAuth } from "@/lib/auth";
 import { apiKeyConfigured } from "@/lib/engine/providers";
@@ -20,6 +21,7 @@ const Body = z.object({
  * builder, chosen in the setup UI.
  */
 export async function POST(req: Request) {
+  tagSetupFromRequest(req);
   const auth = await requireAuth();
   if (auth instanceof NextResponse) return auth;
   if (!apiKeyConfigured()) {

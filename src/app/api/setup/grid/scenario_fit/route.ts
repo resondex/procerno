@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { tagSetupFromRequest } from "@/lib/cost_log";
 import { z } from "zod";
 import { cacheSource, requireAuthOrDemo } from "@/lib/auth";
 import { apiKeyConfigured } from "@/lib/engine/providers";
@@ -26,6 +27,7 @@ const Body = z.object({
  * scenarios gate never blocks on it, and a failure returns empty advice.
  */
 export async function POST(req: Request) {
+  tagSetupFromRequest(req);
   const auth = await requireAuthOrDemo();
   if (auth instanceof NextResponse) return auth;
   if (!apiKeyConfigured()) {

@@ -189,6 +189,7 @@ function ensureSchema(): Promise<void> {
       )`;
       await sql`CREATE INDEX IF NOT EXISTS cost_log_project ON cost_log(project_id)`;
       await sql`ALTER TABLE cost_log ADD COLUMN IF NOT EXISTS rnd BOOLEAN NOT NULL DEFAULT FALSE`;
+      await sql`ALTER TABLE cost_log ADD COLUMN IF NOT EXISTS setup_id TEXT`;
       await sql`CREATE TABLE IF NOT EXISTS dictionary_entries (
         id TEXT PRIMARY KEY,
         project_id TEXT NOT NULL REFERENCES projects(id),
@@ -1126,8 +1127,16 @@ export const pgStore: Store = {
       input_tokens: input.inputTokens,
       output_tokens: input.outputTokens,
       searches: input.searches ?? 0,
+      setup_id: input.setupId ?? null,
       rnd: input.rnd ?? false,
     })}`;
+  },
+
+  async attachSetupCosts(projectId, setupId) {
+    const sql = await db();
+    const res = await sql`UPDATE cost_log SET project_id = ${projectId}
+      WHERE setup_id = ${setupId} AND project_id IS NULL`;
+    return res.count ?? 0;
   },
 
   async summarizeCostLog() {

@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { tagSetupFromRequest } from "@/lib/cost_log";
 import { z } from "zod";
 import { cacheSource, requireAuthOrDemo } from "@/lib/auth";
 import { apiKeyConfigured } from "@/lib/engine/providers";
@@ -22,6 +23,7 @@ const Body = z.object({
 /** Gate 1 helper: "suggest another" buying scenario, or with `nearTo` a
  * near variant of one already on the table. */
 export async function POST(req: Request) {
+  tagSetupFromRequest(req);
   const auth = await requireAuthOrDemo();
   if (auth instanceof NextResponse) return auth;
   if (!apiKeyConfigured()) {

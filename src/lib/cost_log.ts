@@ -16,8 +16,13 @@ export interface CostContext {
   projectId?: string | null;
   runId?: string | null;
   purpose?: string;
-  /** Marks spend as R&D (experiments, evals, bakeoffs) - additive to
-   * project/run attribution so production COGS can exclude it. */
+  /** The setup (draft) id for spend before a project exists - transferred
+   * onto the project at create (attachSetupCosts). A tracker has a unique
+   * id from the moment someone STARTS it. */
+  setupId?: string | null;
+  /** Marks spend as REWORK - fixes, repairs, redos, experiments - so the
+   * real cost of a tracker stays readable (production COGS = NOT rnd).
+   * Normal product-path spend is never rnd, whoever owns the tracker. */
   rnd?: boolean;
 }
 
@@ -51,6 +56,7 @@ export function logCost(entry: {
   purpose?: string;
   projectId?: string | null;
   runId?: string | null;
+  setupId?: string | null;
   rnd?: boolean;
 }): void {
   const searches = entry.searches ?? 0;
@@ -60,6 +66,7 @@ export function logCost(entry: {
     .insertCostEntry({
       projectId: entry.projectId ?? ctx.projectId ?? null,
       runId: entry.runId ?? ctx.runId ?? null,
+      setupId: entry.setupId ?? ctx.setupId ?? null,
       purpose: entry.purpose ?? ctx.purpose ?? "untagged",
       rnd: entry.rnd ?? ctx.rnd ?? false,
       model: entry.model,
@@ -68,4 +75,11 @@ export function logCost(entry: {
       searches,
     })
     .catch((err) => console.error("cost ledger write failed:", err));
+}
+
+/** Tag the request's spend with the wizard's setup id when the client sent
+ * one (x-setup-id) - one line at the top of every setup route handler. */
+export function tagSetupFromRequest(req: Request): void {
+  const id = req.headers.get("x-setup-id");
+  if (id && /^[0-9a-f-]{36}$/i.test(id)) tagCosts({ setupId: id });
 }

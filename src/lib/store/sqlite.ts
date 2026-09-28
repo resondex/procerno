@@ -361,6 +361,9 @@ function createDb(): Database.Database {
   if (costCols.length > 0 && !costCols.some((c) => c.name === "rnd")) {
     db.exec("ALTER TABLE cost_log ADD COLUMN rnd INTEGER NOT NULL DEFAULT 0");
   }
+  if (!costCols.some((c) => c.name === "setup_id")) {
+    db.exec("ALTER TABLE cost_log ADD COLUMN setup_id TEXT");
+  }
   const dictCols = db.prepare("PRAGMA table_info(dictionary_entries)").all() as {
     name: string;
   }[];
@@ -1375,8 +1378,8 @@ export const sqliteStore: Store = {
   async insertCostEntry(input) {
     getDb()
       .prepare(
-        `INSERT INTO cost_log (id, project_id, run_id, purpose, model, input_tokens, output_tokens, searches, rnd)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
+        `INSERT INTO cost_log (id, project_id, run_id, purpose, model, input_tokens, output_tokens, searches, setup_id, rnd)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
       )
       .run(
         crypto.randomUUID(),
@@ -1387,8 +1390,16 @@ export const sqliteStore: Store = {
         input.inputTokens,
         input.outputTokens,
         input.searches ?? 0,
+        input.setupId ?? null,
         input.rnd ? 1 : 0
       );
+  },
+
+  async attachSetupCosts(projectId, setupId) {
+    const res = getDb()
+      .prepare("UPDATE cost_log SET project_id = ? WHERE setup_id = ? AND project_id IS NULL")
+      .run(projectId, setupId);
+    return res.changes;
   },
 
   async summarizeCostLog() {

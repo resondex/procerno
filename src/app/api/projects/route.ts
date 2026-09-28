@@ -16,6 +16,7 @@ import { apiKeyConfigured, availableEngines, currentEngineIds, getEngine } from 
 
 const createSchema = z.object({
   name: z.string().trim().min(1).optional(),
+  setupId: z.string().uuid().optional(),
   brand: z.string().trim().min(1),
   competitors: z.array(z.string().trim().min(1)).max(12).default([]),
   category: z.string().trim().min(1),
@@ -192,6 +193,11 @@ export async function POST(req: Request) {
     // Each cell's seed prompt and its paraphrases all hang off one intent;
     // the theme is decided per prompt, so a paraphrase that names a brand is
     // fenced off individually even if its seed is blind.
+    if (parsed.data.setupId) {
+      // Transfer setup-phase ledger rows onto the project the moment it
+      // exists - the tracker's costs are one series from wizard open.
+      await store.attachSetupCosts(project.id, parsed.data.setupId).catch(() => 0);
+    }
     const intents = await store.insertIntents(
       project.id,
       grid.cells.map((c) => ({
