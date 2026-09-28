@@ -2,6 +2,8 @@ import { createHash } from "crypto";
 import { tagCosts } from "../cost_log";
 import { anthropicClient, openaiClient } from "./providers";
 import { INSTRUMENT_HELPER_MODEL } from "./models";
+import { checkBattery, MUST_NAME_STAGES, seedDesignLine } from "./battery_checks";
+export { MUST_NAME_STAGES };
 import { store } from "../store";
 import type { CacheMeta } from "../types";
 
@@ -290,17 +292,6 @@ export type LibraryStage = ComposedStage & {
  * a model call. This is the part that makes the battery an instrument rather
  * than a suggestion.
  */
-/** Stages whose prompts MUST name the client brand (A3, 2026-09-27,
- * extended to the settled-customer stages the same day): the ask concerns
- * the customer's OWN brand, so a brand-free wording ("my subscription",
- * "the service") makes the answer unattributable - measured on the v4
- * labels, the target was absent from 36-68% of churn/renewal answers.
- * Deliberately blind variants remain the design everywhere else. */
-export const MUST_NAME_STAGES = new Set([
-  "objections", "churn_triggers", "renewal", "business_case",
-  "problem_resolution", "expansion", "ecosystem", "advocacy", "repertoire",
-]);
-
 export function stageLibrary(m: Moderators): LibraryStage[] {
   const considered = m.involvement === "considered";
   return [
@@ -2511,7 +2502,12 @@ export async function generatePhrasings(input: {
             "describing it their own way - NOT a rewording of the seed. Do not " +
             "copy the seed's specific details (its numbers, its examples, its " +
             "list of symptoms); invent plausible ones of your own that fit the " +
-            "scenario, or leave details out entirely. Some askers give " +
+            "scenario, or leave details out entirely. NEVER repeat a number " +
+            "that appears in the seed: if the circumstance needs a quantity, " +
+            "use a DIFFERENT plausible one (or spell it - 'about a dozen'), " +
+            "and most paraphrases should carry no number at all. Standard " +
+            "spec terms are vocabulary, not quantities - 4K, 5G, HDR10, " +
+            "USB-C stay as written. Some askers give " +
             "backstory, some just ask.\n" +
             "Vary, across the set: who is asking (pick realistic roles for the " +
             "audience - e.g. founder, engineering manager, IT director, " +
@@ -2707,6 +2703,79 @@ export async function generatePhrasings(input: {
         got[j] = [...got[j], ...again[k]].slice(0, want);
       });
     }
+    // CHECKS IN GENERATION (2026-09-28, Tyler's checks-first directive):
+    // before anything is cached, doubt/plan cells' paraphrases must voice
+    // their design (seed-as-design until cells carry stored lines) and the
+    // batch must pass the mechanical battery checks. Design failures are
+    // dropped and refilled once; mechanical prompt-level violations are
+    // dropped; cell-level findings (seed-number propagation) are logged -
+    // their fix is the writer's instruction, measured by its own A/B.
+    // PHRASINGS_CHECKS=0 disables (single-change experiments, emergencies).
+    if (process.env.PHRASINGS_CHECKS !== "0") {
+      const designFilter = async (cellIdxs: number[]): Promise<number[]> => {
+        const targets: { j: number; k: number }[] = [];
+        const candidates: { text: string; design: string }[] = [];
+        for (const j of cellIdxs) {
+          const line = seedDesignLine(subset[j].stage, input.brand, subset[j].text);
+          if (!line) continue;
+          got[j].forEach((ph, k) => {
+            targets.push({ j, k });
+            candidates.push({ text: ph.text, design: line });
+          });
+        }
+        if (candidates.length === 0) return [];
+        const verdicts = await checkDesignFidelity({ candidates, meta: input.meta });
+        const dropAt = new Map<number, Set<number>>();
+        verdicts.forEach((v, i) => {
+          if (!v.voices) {
+            const t = targets[i];
+            (dropAt.get(t.j) ?? dropAt.set(t.j, new Set()).get(t.j)!).add(t.k);
+            console.warn(`phrasings design check dropped [${subset[t.j].stage}]: ${got[t.j][t.k]?.text.slice(0, 90)} - ${v.reason}`);
+          }
+        });
+        const short: number[] = [];
+        for (const [j, ks] of dropAt) {
+          got[j] = got[j].filter((_, k) => !ks.has(k));
+          if (got[j].length < want) short.push(j);
+        }
+        return short;
+      };
+      const short = await designFilter(subset.map((_, j) => j));
+      if (short.length > 0) {
+        // One refill round for cells the filter emptied below target; the
+        // refill itself passes the same check, with no second refill.
+        const before = short.map((j) => got[j].length);
+        const again = await pass(short.map((j) => subset[j]), {
+          extra: PHRASINGS_EXTRA_RETRY,
+          have: short.map((j) => got[j]),
+        });
+        short.forEach((j, k) => {
+          got[j] = [...got[j], ...again[k]].slice(0, want);
+        });
+        await designFilter(short.filter((j, k) => got[j].length > before[k]));
+      }
+      const findings = checkBattery({
+        brand: input.brand,
+        competitors: rivals,
+        category: input.category,
+        cells: subset.map((c, j) => ({ stage: c.stage, angle: c.angle, text: c.text, phrasings: got[j].map((ph) => ph.text) })),
+      });
+      for (const f of findings) {
+        if (f.check === "seed_number_propagation" || f.check === "duplicate_paraphrase") {
+          console.warn(`battery check [${f.check}] cell ${subset[f.cell]?.stage}: ${f.detail}`);
+        } else {
+          // A prompt-level brand-rule violation never ships: drop the
+          // offending paraphrase (a violating SEED is upstream's problem
+          // and stays visible in the finding log).
+          const j = f.cell;
+          const before = got[j].length;
+          got[j] = got[j].filter((ph) => ph.text !== f.text);
+          if (got[j].length < before)
+            console.warn(`battery check dropped [${f.check}] ${subset[j].stage}: ${f.text.slice(0, 90)}`);
+        }
+      }
+    }
+
     await Promise.all(
       idx.map((i, j) => {
         out[i] = got[j];

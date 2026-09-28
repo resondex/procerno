@@ -10,7 +10,34 @@
  * of every hand-fixed prompt must flag, the fixed battery must pass
  * (~/Documents/procerno_eval/internal_models/conformance/checker_fixture.md).
  */
-import { MUST_NAME_STAGES } from "./instrument";
+/** Stages whose prompts MUST name the client brand (A3, 2026-09-27; owned
+ * here so instrument can import the checks without a cycle). */
+export const MUST_NAME_STAGES = new Set([
+  "objections", "churn_triggers", "renewal", "business_case",
+  "problem_resolution", "expansion", "ecosystem", "advocacy", "repertoire",
+]);
+
+export const DOUBT_CHECK_STAGES = new Set(["objections", "churn_triggers", "renewal", "repertoire"]);
+export const PLAN_CHECK_STAGES = new Set(["problem_resolution", "expansion", "ecosystem", "advocacy"]);
+
+/** The design a stage's paraphrases must voice, synthesized from the cell
+ * seed until cells carry stored design lines. problem_resolution has its
+ * own wording - the generic plan line mis-flagged 15 conforming support
+ * asks in the harness. */
+export function seedDesignLine(stage: string, brand: string, seed: string): string | null {
+  if (DOUBT_CHECK_STAGES.has(stage))
+    return `Question design (doubt): the question voices a concern about ${brand}. Designed as: "${seed}"`;
+  if (!PLAN_CHECK_STAGES.has(stage)) return null;
+  const intent =
+    stage === "problem_resolution"
+      ? `an existing ${brand} customer has a problem with ${brand} or its product and wants it fixed`
+      : stage === "expansion"
+        ? `the customer plans to use ${brand} for more`
+        : stage === "ecosystem"
+          ? `the customer plans to find products and services that work well with ${brand}`
+          : `the customer plans to recommend or defend ${brand} to someone else`;
+  return `Question design (plan): ${intent}. Designed as: "${seed}"`;
+}
 
 export const BLIND_STAGES = new Set([
   "problem_recognition", "category_education", "discovery", "shortlist",
