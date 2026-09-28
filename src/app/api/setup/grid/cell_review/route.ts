@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { cacheSource, requireAuthOrDemo } from "@/lib/auth";
 import { apiKeyConfigured } from "@/lib/engine/providers";
-import { reviewCells } from "@/lib/engine/instrument";
+import { checkDesignFidelity, reviewCells } from "@/lib/engine/instrument";
 import { store } from "@/lib/store";
 
 export const maxDuration = 60;
@@ -26,6 +26,9 @@ const Body = z.object({
         situationDescription: z.string().trim().max(240).nullable().optional(),
         angle: z.string().trim().min(1).max(80),
         mode: z.string().trim().max(300).nullable().optional(),
+        /** The cell's doubt/plan design line, when it declares one - the
+         * paraphrase must still voice it (design-fidelity check). */
+        design: z.string().trim().max(500).nullable().optional(),
       })
     )
     .min(1)
@@ -45,23 +48,42 @@ export async function POST(req: Request) {
   if (!parsed.success) {
     return NextResponse.json({ error: "bad request" }, { status: 400 });
   }
-  const verdicts = await reviewCells({
-    brand: parsed.data.brand,
-    category: parsed.data.category,
-    competitors: parsed.data.competitors,
-    audience: parsed.data.audience || null,
-    candidates: parsed.data.candidates.map((c) => ({
-      text: c.text,
-      original: c.original ?? null,
-      stage: c.stage,
-      hint: c.hint ?? null,
-      tag: c.tag ?? null,
-      situation: c.situation,
-      situationDescription: c.situationDescription ?? null,
-      angle: c.angle,
-      mode: c.mode ?? null,
-    })),
-    meta: { source: cacheSource(auth) },
+  const withDesign = parsed.data.candidates
+    .map((c, i) => ({ c, i }))
+    .filter((x) => !!x.c.design);
+  const [verdicts, fidelity] = await Promise.all([
+    reviewCells({
+      brand: parsed.data.brand,
+      category: parsed.data.category,
+      competitors: parsed.data.competitors,
+      audience: parsed.data.audience || null,
+      candidates: parsed.data.candidates.map((c) => ({
+        text: c.text,
+        original: c.original ?? null,
+        stage: c.stage,
+        hint: c.hint ?? null,
+        tag: c.tag ?? null,
+        situation: c.situation,
+        situationDescription: c.situationDescription ?? null,
+        angle: c.angle,
+        mode: c.mode ?? null,
+      })),
+      meta: { source: cacheSource(auth) },
+    }),
+    checkDesignFidelity({
+      candidates: withDesign.map((x) => ({ text: x.c.text, design: x.c.design! })),
+      meta: { source: cacheSource(auth) },
+    }),
+  ]);
+  withDesign.forEach((x, k) => {
+    const f = fidelity[k];
+    if (f && !f.voices) {
+      const v = verdicts[x.i];
+      v.ok = false;
+      v.flags = [...v.flags, "design"];
+      v.reason = [v.reason, f.reason || "This paraphrase no longer voices its cell's design."]
+        .filter(Boolean).join(" ");
+    }
   });
   const flagged = verdicts
     .map((v, i) => ({ candidate: parsed.data.candidates[i], verdict: v }))

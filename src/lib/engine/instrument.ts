@@ -1435,8 +1435,64 @@ export async function reviewScenarioFit(input: {
   return fit;
 }
 
-/** Why a prompt edit was flagged: drift, brand design, or coherence. */
-export type CellFlag = "target" | "branding" | "unclear";
+/** Why a prompt edit was flagged: drift, brand design, coherence, or a
+ * doubt/plan cell whose paraphrase no longer voices its design. */
+export type CellFlag = "target" | "branding" | "unclear" | "design";
+
+/** See checkDesignFidelity. Default is the model the offline pattern was
+ * validated on (design_check.mts, 2026-09-27: cell-declared designs judged with
+ * 0 false positives across 410 prompts). */
+const DESIGN_CHECK_MODEL = process.env.DESIGN_CHECK_MODEL ?? "claude-opus-5-5";
+
+const DESIGN_CHECK_SYSTEM = `You check survey questions against their design. Each question was written for a cell with a stated design:
+- Doubt design: the question should itself voice a concern, complaint, doubt or "is it still worth it / should I cut it" about the named brand or option.
+- Plan design: the question should itself carry a customer's plan with the named brand (use it for more, find products that work with it, recommend or defend it to someone).
+Decide whether THIS question voices its design. A neutral information request, a how-to, or a lookup that never states or asks the concern (or plan) does NOT voice it, even if it is on the same topic. Judge only the question's words, never what an answer might say.
+Reply with ONLY: {"voices_design": true|false, "reason": "<one short sentence>"}`;
+
+/**
+ * Design-fidelity check for doubt/plan cells: does each paraphrase still
+ * voice the design its cell declares? Paraphrase drift here is silent and
+ * poisons the measurement (an off-design question gets typed as doubt but
+ * never states the doubt - the jira "Cloud trial" objection cell lost its
+ * entire design this way, unnoticed). One model call per candidate, cached
+ * per (design, text). Mirrors the validated offline pattern in
+ * labeling/v02_relabel/design_check.mts.
+ */
+export async function checkDesignFidelity(input: {
+  candidates: { text: string; design: string }[];
+  meta?: CacheMeta;
+}): Promise<{ voices: boolean; reason: string }[]> {
+  tagCosts({ purpose: "setup:design_check" });
+  const a = await anthropicClient();
+  return Promise.all(
+    input.candidates.map(async (c) => {
+      const key = cacheKey("design_check1", [DESIGN_CHECK_MODEL, c.design, c.text.trim()]);
+      const hit = await store.cacheGet(key, CACHE_TTL_MS);
+      if (hit) return JSON.parse(hit) as { voices: boolean; reason: string };
+      try {
+        const res = await a.messages.create({
+          model: DESIGN_CHECK_MODEL,
+          max_tokens: 2000,
+          output_config: { effort: "medium" },
+          system: DESIGN_CHECK_SYSTEM,
+          messages: [{ role: "user", content: `${c.design}\n\nQuestion: ${c.text}` }],
+        } as never);
+        const text = (res as { content: { type: string; text?: string }[] }).content
+          .filter((b) => b.type === "text").map((b) => b.text ?? "").join("")
+          .trim().replace(/^```(?:json)?\s*/, "").replace(/\s*```$/, "");
+        const j = JSON.parse(text) as { voices_design: boolean; reason?: string };
+        const out = { voices: !!j.voices_design, reason: j.reason ?? "" };
+        await store.cacheSet(key, JSON.stringify(out), input.meta);
+        return out;
+      } catch (err) {
+        // Fail open: an unreachable checker never blocks the gate.
+        console.error("design fidelity check failed:", err);
+        return { voices: true, reason: "" };
+      }
+    })
+  );
+}
 
 export interface CellVerdict {
   ok: boolean;
