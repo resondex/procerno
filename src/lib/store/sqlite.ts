@@ -170,6 +170,9 @@ function createDb(): Database.Database {
   if (intentCols.length > 0 && !intentCols.some((c) => c.name === "mode")) {
     db.exec("ALTER TABLE intents ADD COLUMN mode TEXT");
   }
+  if (intentCols.length > 0 && !intentCols.some((c) => c.name === "qtype")) {
+    db.exec("ALTER TABLE intents ADD COLUMN qtype TEXT");
+  }
   const promptColsForAsker = db.prepare("PRAGMA table_info(prompts)").all() as { name: string }[];
   if (!promptColsForAsker.some((c) => c.name === "asker")) {
     db.exec("ALTER TABLE prompts ADD COLUMN asker TEXT");
@@ -1112,11 +1115,11 @@ export const sqliteStore: Store = {
   async insertIntents(projectId, intents) {
     const db = getDb();
     const stmt = db.prepare(
-      "INSERT INTO intents (id, project_id, stage, layer, situation, angle, mode, text) VALUES (?, ?, ?, ?, ?, ?, ?, ?)"
+      "INSERT INTO intents (id, project_id, stage, layer, situation, angle, mode, qtype, text) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)"
     );
     const insertAll = db.transaction(() => {
       for (const i of intents) {
-        stmt.run(crypto.randomUUID(), projectId, i.stage, i.layer, i.situation, i.angle, i.mode ?? null, i.text);
+        stmt.run(crypto.randomUUID(), projectId, i.stage, i.layer, i.situation, i.angle, i.mode ?? null, i.qtype ?? null, i.text);
       }
     });
     insertAll();

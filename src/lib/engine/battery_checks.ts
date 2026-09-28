@@ -20,7 +20,39 @@ export const MUST_NAME_STAGES = new Set([
 export const DOUBT_CHECK_STAGES = new Set(["objections", "churn_triggers", "renewal", "repertoire"]);
 export const PLAN_CHECK_STAGES = new Set(["problem_resolution", "expansion", "ecosystem", "advocacy"]);
 
-/** The design a stage's paraphrases must voice, synthesized from the cell
+/** The six measurement types (V02_QUESTION_TYPES.md, decided 2026-09-27).
+ * The TAG is the story ("picks a brand"); the TYPE is the score - which
+ * fields are read and which dashboard view an answer feeds. */
+export type QuestionType =
+  | "open_choice" | "head_to_head" | "within_brand"
+  | "doubt" | "awareness" | "settled_customer";
+
+const STAGE_TYPE: Record<string, QuestionType> = {
+  problem_recognition: "awareness", category_education: "awareness", criteria: "awareness",
+  discovery: "open_choice", shortlist: "open_choice", feature_screening: "open_choice",
+  use_case: "open_choice", social_validation: "open_choice", premium_worth: "open_choice",
+  comparison: "head_to_head",
+  objections: "doubt", churn_triggers: "doubt", renewal: "doubt", repertoire: "doubt",
+  business_case: "settled_customer", problem_resolution: "settled_customer",
+  expansion: "settled_customer", ecosystem: "settled_customer", advocacy: "settled_customer",
+};
+
+/** The decided per-cell typing, computed mechanically: stage default, with
+ * pricing split by whether the cell names the target (its tiers = within
+ * brand; generic = open choice) and alternatives split by angle (defensive =
+ * keep-or-leave doubt; a rival's cell = open choice with a prompted rival).
+ * Advocacy's critic-quoting cells type as doubt at labeling time via their
+ * design lines; the stored default is settled_customer. */
+export function questionTypeOf(cell: { stage: string; angle: string; text: string }, brand: string, category?: string): QuestionType {
+  if (cell.stage === "pricing")
+    return textNamesBrand(cell.text, brand, { excludeTokens: new Set(key(category ?? "").split(" ").filter(Boolean)) })
+      ? "within_brand" : "open_choice";
+  if (cell.stage === "alternatives")
+    return cell.angle === "defensive" ? "doubt" : "open_choice";
+  return STAGE_TYPE[cell.stage] ?? "open_choice";
+}
+
+/** The design a stage's paraphrases must voice/** The design a stage's paraphrases must voice, synthesized from the cell
  * seed until cells carry stored design lines. problem_resolution has its
  * own wording - the generic plan line mis-flagged 15 conforming support
  * asks in the harness. */

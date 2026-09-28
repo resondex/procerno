@@ -3,6 +3,7 @@ import { z } from "zod";
 import { requireAuth, requireProject } from "@/lib/auth";
 import { store } from "@/lib/store";
 import { apiKeyConfigured } from "@/lib/engine/providers";
+import { questionTypeOf } from "@/lib/engine/battery_checks";
 import { seedDictionary } from "@/lib/engine/suggest";
 import { humanize, namesAnyBrand } from "@/lib/engine/instrument";
 import { buildEditSetupDraft } from "@/lib/server/edit_setup";
@@ -58,6 +59,7 @@ const putSchema = z.object({
           situation: z.string().trim().nullable(),
           angle: z.string().trim().min(1),
           mode: z.string().trim().nullable().optional(),
+          qtype: z.string().trim().max(40).nullable().optional(),
           text: z.string().trim().min(1),
           phrasings: z
             .array(
@@ -125,7 +127,9 @@ export async function PUT(
     id,
     grid.cells.map((c) => ({
       stage: c.stage, layer: c.layer, situation: c.situation, angle: c.angle,
-      mode: c.mode ?? null, text: humanize(c.text),
+      mode: c.mode ?? null,
+        qtype: c.qtype ?? questionTypeOf({ stage: c.stage, angle: c.angle, text: c.text }, project.brand, category),
+        text: humanize(c.text),
     }))
   );
   await store.insertPrompts(

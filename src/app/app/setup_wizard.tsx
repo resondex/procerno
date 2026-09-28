@@ -1073,7 +1073,7 @@ export function SetupWizard({ mode, brand, draft, engineOptions, onClose, onCrea
               .filter((c) => c.text.trim())
               .map((c) => ({
                 stage: c.stage, layer: c.layer, situation: c.situation, angle: c.angle,
-                mode: c.mode ?? null, text: c.text,
+                mode: c.mode ?? null, qtype: c.qtype ?? null, text: c.text,
                 phrasings: c.phrasings
                   .filter((p) => p.text.trim())
                   .map((p) => ({ text: p.text, asker: p.asker || undefined })),
@@ -1112,7 +1112,7 @@ export function SetupWizard({ mode, brand, draft, engineOptions, onClose, onCrea
                   .filter((c) => c.text.trim())
                   .map((c) => ({
                     stage: c.stage, layer: c.layer, situation: c.situation, angle: c.angle,
-                    mode: c.mode ?? null, text: c.text,
+                    mode: c.mode ?? null, qtype: c.qtype ?? null, text: c.text,
                     phrasings: c.phrasings
                       .filter((p) => p.text.trim())
                       .map((p) => ({ text: p.text, asker: p.asker || undefined })),

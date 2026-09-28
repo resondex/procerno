@@ -9,6 +9,7 @@ import {
   requireAuth,
 } from "@/lib/auth";
 import { generatePromptBattery } from "@/lib/engine/prompts";
+import { questionTypeOf } from "@/lib/engine/battery_checks";
 import { seedDictionary } from "@/lib/engine/suggest";
 import { humanize, namesAnyBrand } from "@/lib/engine/instrument";
 import { apiKeyConfigured, availableEngines, currentEngineIds, getEngine } from "@/lib/engine/providers";
@@ -65,6 +66,7 @@ const createSchema = z.object({
             situation: z.string().trim().nullable(),
             angle: z.string().trim().min(1),
             mode: z.string().trim().nullable().optional(),
+            qtype: z.string().trim().max(40).nullable().optional(),
             text: z.string().trim().min(1),
             /** The confirmed paraphrase set for this cell; each becomes its
              * own prompt under the same intent, carrying its buyer voice. */
@@ -196,7 +198,9 @@ export async function POST(req: Request) {
         stage: c.stage, layer: c.layer, situation: c.situation, angle: c.angle,
         // House punctuation on the way in - covers text frozen in drafts
         // that predate the humanize coverage.
-        mode: c.mode ?? null, text: humanize(c.text),
+        mode: c.mode ?? null,
+        qtype: c.qtype ?? questionTypeOf({ stage: c.stage, angle: c.angle, text: c.text }, project.brand, category),
+        text: humanize(c.text),
       }))
     );
     await store.insertPrompts(

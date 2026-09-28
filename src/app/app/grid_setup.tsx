@@ -52,6 +52,10 @@ export interface GridCellUi {
   /** Scenario label, or null for invariant single cells. */
   situation: string | null;
   angle: string;
+  /** Measurement type from the generator (open_choice/head_to_head/
+   * within_brand/doubt/awareness/settled_customer); absent on legacy or
+   * hand-added cells (typed server-side at create as a fallback). */
+  qtype?: string | null;
   /** Invariant cells only: comma-joined scenario labels whose journeys
    * reach this stage, when not universal. */
   mode?: string | null;

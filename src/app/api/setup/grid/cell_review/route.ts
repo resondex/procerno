@@ -66,6 +66,7 @@ export async function POST(req: Request) {
         text: c.text,
         original: c.original ?? null,
         stage: c.stage,
+        stageKey: c.stageKey,
         hint: c.hint ?? null,
         tag: c.tag ?? null,
         situation: c.situation,

@@ -133,6 +133,9 @@ export interface Intent {
   angle: string;
   /** Buyer mode this cell serves; null = every mode. */
   mode: string | null;
+  /** Measurement type (open_choice/head_to_head/within_brand/doubt/
+   * awareness/settled_customer); null on cells created before 2026-09-28. */
+  qtype: string | null;
   text: string;
   seq: number;
 }
@@ -810,6 +813,7 @@ export interface Store {
       situation: string | null;
       angle: string;
       mode?: string | null;
+      qtype?: string | null;
       text: string;
     }[]
   ): Promise<Intent[]>;

@@ -2,7 +2,7 @@ import { createHash } from "crypto";
 import { tagCosts } from "../cost_log";
 import { anthropicClient, openaiClient } from "./providers";
 import { INSTRUMENT_HELPER_MODEL } from "./models";
-import { checkBattery, MUST_NAME_STAGES, seedDesignLine, stageDesignIntent } from "./battery_checks";
+import { checkBattery, MUST_NAME_STAGES, questionTypeOf, seedDesignLine, stageDesignIntent, type QuestionType } from "./battery_checks";
 export { MUST_NAME_STAGES };
 import { store } from "../store";
 import type { CacheMeta } from "../types";
@@ -1546,6 +1546,10 @@ export interface CellReviewCandidate {
   original: string | null;
   /** Stage label, what it asks, and its market-effect tag. */
   stage: string;
+  /** The stage KEY (churn_triggers) - the brand rule is keyed on it; the
+   * tag is narrative only. Falls back to `stage` (the generator passes
+   * keys there). */
+  stageKey?: string;
   hint: string | null;
   tag: string | null;
   situation: string | null;
@@ -1572,7 +1576,7 @@ export async function reviewCells(input: {
   const fp = (c: CellReviewCandidate) =>
     // hint is in the fingerprint: the target check leans on it, so a
     // sharper hint must not serve verdicts formed without one.
-    [c.stage, c.situation ?? "", c.angle, c.text.trim(), c.original?.trim() ?? "", c.hint ?? ""].join("|");
+    [c.stageKey ?? "", c.stage, c.situation ?? "", c.angle, c.text.trim(), c.original?.trim() ?? "", c.hint ?? ""].join("|");
   // "cell_review3": the 524-cell fixture audit (2026-09-17) traced every
   // one of its 43 flags to the checker, not the cells - the steers
   // exemption was missing (29), "blind" was read as "may not ask for
@@ -1598,14 +1602,18 @@ export async function reviewCells(input: {
       // "judges" verdicts on the client brand; "steers" retention and
       // loyalty stages are client-anchored by design (their hints tell
       // the writer to name it) - both may name the client, never a rival.
-      ? MUST_NAME_STAGES.has(c.stage)
+      ? MUST_NAME_STAGES.has(c.stageKey ?? c.stage)
         ? `must name ${input.brand}: the stage concerns the customer's own ` +
           `${input.brand}, and a wording that leaves it implied ("my ` +
           `subscription", "the service") breaks the measurement` +
           (c.stage === "advocacy"
             ? ` - a rival may appear only as the counterpart being persuaded ("my iPhone friend says...")`
             : ` - never a rival`)
-        : c.tag === "judges" || c.tag === "steers"
+        // Tags are narrative only (2026-09-28 demotion): the sole surviving
+        // beneficiary of the old judges/steers tag rule is pricing, whose
+        // battery mixes branded tier cells with blind category cells by
+        // design - so it is named directly.
+        : (c.stageKey ?? c.stage) === "pricing"
         ? `blind except the client brand: may name ${input.brand} (the stage concerns it directly), never a rival`
         : "blind: the prompt TEXT must not contain any brand name - " +
           "asking the assistant to recommend, name, or list brands is " +
@@ -1779,6 +1787,9 @@ export interface GridCell {
    * these. null = every scenario (or a situational cell, whose situation
    * already says who it serves). Stored on intents.mode. */
   mode: string | null;
+  /** The measurement type this cell's answers feed (the decided per-cell
+   * typing; advocacy critic cells refine to doubt at labeling time). */
+  qtype?: QuestionType;
   /** The prompt as a user would type it. */
   text: string;
 }
@@ -2019,6 +2030,7 @@ export async function generateGrid(input: {
             mode: row.scope ?? null,
             text: humanize(c.text.trim()),
           };
+          cell.qtype = questionTypeOf(cell, input.brand, input.category);
           const list = produced.get(u);
           if (list) list.push(cell);
           else produced.set(u, [cell]);
@@ -2044,6 +2056,7 @@ export async function generateGrid(input: {
                   text: c.text,
                   original: null,
                   stage: c.stage,
+                  stageKey: c.stage,
                   hint: st?.hint ?? null,
                   tag: st?.tag ?? null,
                   situation: c.situation,
