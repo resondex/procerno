@@ -15,11 +15,26 @@ import fs from "node:fs";
 import { ARM, closeProd, errors, localUsage, outDir, trackers, REPO } from "./internal_models_common.mts";
 
 const inst = await import(`${REPO}/src/lib/engine/instrument`);
-const OUT = outDir("conformance");
-const projects = await trackers(["Doritos", "Sephora"]);
+const OUT = outDir(process.env.OUT_NAME ?? "conformance");
+const projects = await trackers(process.env.BRANDS ? process.env.BRANDS.split("|") : ["Doritos", "Sephora"]);
 const meta = { source: "eval:conformance" };
 
-if (ARM === "checkedgen") {
+if (ARM === "gridonly") {
+  // Seed self-healing smoke: fresh grid only (no paraphrases), watch the
+  // seed design checks and any regeneration fire.
+  const journeys = JSON.parse(fs.readFileSync(`${OUT}/journeys.json`, "utf8")).journeys;
+  for (const p of projects) {
+    const base = journeys[p.brand];
+    const read: any = await inst.readScenarios({ category: p.category, audience: p.audience, base, meta });
+    const stages = inst.participationMask(read.base, read.scenarios);
+    const cells = await inst.generateGrid({ brand: p.brand, category: p.category, competitors: p.competitors,
+      audience: p.audience, meta, base: read.base, scenarios: read.scenarios,
+      stages: stages.filter((s: any) => s.recommended) });
+    const list = Array.isArray(cells) ? cells : [];
+    console.log(`${p.brand}: ${list.length} cells`);
+    fs.writeFileSync(`${OUT}/gridonly_${p.brand.replace(/\W+/g, "_")}.json`, JSON.stringify({ cells: list }, null, 1));
+  }
+} else if (ARM === "checkedgen") {
   // Wiring validation: regenerate ONLY doubt/plan cells through the checked
   // generation path (PHRASINGS_CHECKS on); drifters must be dropped/refilled.
   const DP = new Set(["objections", "churn_triggers", "renewal", "repertoire", "problem_resolution", "expansion", "ecosystem", "advocacy"]);

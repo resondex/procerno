@@ -3,6 +3,7 @@ import { z } from "zod";
 import { cacheSource, requireAuthOrDemo } from "@/lib/auth";
 import { apiKeyConfigured } from "@/lib/engine/providers";
 import { checkDesignFidelity, reviewCells } from "@/lib/engine/instrument";
+import { checkPromptBrandRule, stageDesignIntent } from "@/lib/engine/battery_checks";
 import { store } from "@/lib/store";
 
 export const maxDuration = 60;
@@ -29,6 +30,10 @@ const Body = z.object({
         /** The cell's doubt/plan design line, when it declares one - the
          * paraphrase must still voice it (design-fidelity check). */
         design: z.string().trim().max(500).nullable().optional(),
+        /** The stage KEY (churn_triggers, not "Churn triggers") - enables the
+         * deterministic brand-rule check and the stage-intent design check
+         * on manual edits, before any paraphrase generation. */
+        stageKey: z.string().trim().max(80).optional(),
       })
     )
     .min(1)
@@ -49,8 +54,8 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: "bad request" }, { status: 400 });
   }
   const withDesign = parsed.data.candidates
-    .map((c, i) => ({ c, i }))
-    .filter((x) => !!x.c.design);
+    .map((c, i) => ({ c, i, design: c.design ?? (c.stageKey ? stageDesignIntent(c.stageKey, parsed.data.brand) : null) }))
+    .filter((x): x is { c: (typeof parsed.data.candidates)[number]; i: number; design: string } => !!x.design);
   const [verdicts, fidelity] = await Promise.all([
     reviewCells({
       brand: parsed.data.brand,
@@ -71,10 +76,27 @@ export async function POST(req: Request) {
       meta: { source: cacheSource(auth) },
     }),
     checkDesignFidelity({
-      candidates: withDesign.map((x) => ({ text: x.c.text, design: x.c.design! })),
+      candidates: withDesign.map((x) => ({ text: x.c.text, design: x.design })),
       meta: { source: cacheSource(auth) },
     }),
   ]);
+  // Deterministic brand rules on every edit that carries a stage key - a
+  // check the model cannot be sweet-talked out of, run BEFORE the confirm
+  // proceeds to paraphrase generation.
+  parsed.data.candidates.forEach((c, i) => {
+    if (!c.stageKey) return;
+    const mech = checkPromptBrandRule({
+      text: c.text, stage: c.stageKey, angle: c.angle,
+      brand: parsed.data.brand, competitors: parsed.data.competitors,
+      category: parsed.data.category,
+    });
+    if (mech.length > 0) {
+      const v = verdicts[i];
+      v.ok = false;
+      if (!v.flags.includes("branding")) v.flags = [...v.flags, "branding"];
+      v.reason = [v.reason, ...mech.map((m) => m.detail)].filter(Boolean).join(" ");
+    }
+  });
   withDesign.forEach((x, k) => {
     const f = fidelity[k];
     if (f && !f.voices) {

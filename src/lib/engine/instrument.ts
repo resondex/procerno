@@ -2,7 +2,7 @@ import { createHash } from "crypto";
 import { tagCosts } from "../cost_log";
 import { anthropicClient, openaiClient } from "./providers";
 import { INSTRUMENT_HELPER_MODEL } from "./models";
-import { checkBattery, MUST_NAME_STAGES, seedDesignLine } from "./battery_checks";
+import { checkBattery, MUST_NAME_STAGES, seedDesignLine, stageDesignIntent } from "./battery_checks";
 export { MUST_NAME_STAGES };
 import { store } from "../store";
 import type { CacheMeta } from "../types";
@@ -2054,6 +2054,56 @@ export async function generateGrid(input: {
             });
           } catch {
             // The writer's text stands - healing is best-effort.
+          }
+        }
+        // SEED SELF-HEALING (2026-09-28): a doubt/plan cell's SEED must
+        // itself voice the stage's design - the paraphrase-level filter can
+        // only starve a cell whose seed is off-design (the jira p50/p95
+        // spec-lookup cell burned 17 candidates this way). Flagged seeds get
+        // ONE regeneration with the reason attached, re-checked; still-
+        // failing seeds stand with a loud log (never block generation).
+        if (process.env.PHRASINGS_CHECKS !== "0" && flat.length > 0) {
+          try {
+            const seedTargets = flat
+              .map((c, i) => ({ c, i, intent: stageDesignIntent(c.stage, input.brand) }))
+              .filter((x): x is { c: GridCell; i: number; intent: string } => !!x.intent);
+            if (seedTargets.length > 0) {
+              const verdicts = await checkDesignFidelity({
+                candidates: seedTargets.map((x) => ({ text: x.c.text, design: x.intent })),
+                meta: input.meta,
+              });
+              const bad = seedTargets.filter((_, k) => !verdicts[k].voices);
+              for (const x of bad) {
+                console.warn(`seed design check flagged [${x.c.stage}]: ${x.c.text.slice(0, 90)}`);
+                const row = rows.find((r) => r.stage.key === x.c.stage && (r.situation ?? null) === x.c.situation && primaryBrandName(r.angle) === x.c.angle) ?? rows.find((r) => r.stage.key === x.c.stage);
+                if (!row) continue;
+                const res2 = await openaiClient().chat.completions.create({
+                  model: CELLS_MODEL,
+                  messages: [
+                    { role: "system", content: CELL_WRITER_SYSTEM + "Return one cell object for the plan line." },
+                    { role: "user", content:
+                        `Client brand: ${input.brand}\nCategory: ${input.category}\n` +
+                        `Rivals: ${rivals.map(primaryBrandName).join(", ")}\nAudience: ${input.audience ?? "unknown"}\n\n` +
+                        `Cell plan:\n${planLine(row, 0)}\n` +
+                        `   [previous attempt was OFF-DESIGN and was rejected: it read as a neutral lookup. ` +
+                        `${x.intent} Do not reuse this wording: "${x.c.text}"]` },
+                  ],
+                  response_format: { type: "json_schema", json_schema: { name: "grid_cells", strict: true, schema: CELLS_SCHEMA } },
+                });
+                const cell2 = (JSON.parse(res2.choices[0]?.message?.content ?? "{}") as { cells?: { text?: string }[] }).cells?.[0];
+                const text2 = cell2?.text?.trim();
+                if (!text2) continue;
+                const [again] = await checkDesignFidelity({ candidates: [{ text: text2, design: x.intent }], meta: input.meta });
+                if (again.voices) {
+                  console.warn(`seed self-healed [${x.c.stage}]: ${text2.slice(0, 90)}`);
+                  flat[x.i].text = humanize(text2);
+                } else {
+                  console.warn(`seed regeneration still off-design [${x.c.stage}] - seed stands, flagged for the gate`);
+                }
+              }
+            }
+          } catch (err) {
+            console.error("seed design healing failed open:", err);
           }
         }
         await Promise.all(

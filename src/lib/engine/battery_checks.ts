@@ -39,6 +39,24 @@ export function seedDesignLine(stage: string, brand: string, seed: string): stri
   return `Question design (plan): ${intent}. Designed as: "${seed}"`;
 }
 
+/** The design intent a doubt/plan STAGE demands, independent of any seed -
+ * the yardstick for judging seeds themselves (seed-as-design cannot judge
+ * the seed). */
+export function stageDesignIntent(stage: string, brand: string): string | null {
+  if (DOUBT_CHECK_STAGES.has(stage))
+    return `Question design (doubt): the question itself voices the buyer's concern, complaint or "is it still worth it" doubt about ${brand}. A neutral lookup, spec request or how-to on the same topic does not satisfy the design.`;
+  if (!PLAN_CHECK_STAGES.has(stage)) return null;
+  const intent =
+    stage === "problem_resolution"
+      ? `an existing ${brand} customer has a problem with ${brand} or its product and wants it fixed`
+      : stage === "expansion"
+        ? `the customer plans to use ${brand} for more`
+        : stage === "ecosystem"
+          ? `the customer plans to find products and services that work well with ${brand}`
+          : `the customer plans to recommend or defend ${brand} to someone else`;
+  return `Question design (plan): ${intent}.`;
+}
+
 export const BLIND_STAGES = new Set([
   "problem_recognition", "category_education", "discovery", "shortlist",
   "criteria", "feature_screening", "use_case", "social_validation", "premium_worth",
