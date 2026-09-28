@@ -752,7 +752,20 @@ export function SetupWizard({ mode, brand, draft, engineOptions, onClose, onCrea
     const src = from ?? grid;
     const live = (src?.cells ?? []).filter((c) => c.text.trim());
     const missingBefore = live.filter((c) => !c.phrasings.some((p) => p.text.trim())).length;
-    const next = await gridApi.writePhrasings(force, onlyMissing, from);
+    let next = await gridApi.writePhrasings(force, onlyMissing, from);
+    // Self-heal before serving (2026-09-28): a cell whose paraphrase set
+    // came back empty or short gets ONE automatic top-up pass - the same
+    // courtesy the demo path always had. A cell that starves through the
+    // retry too still renders with its gap and the footer's
+    // "write the missing prompts" fallback.
+    if (next && !onlyMissing) {
+      const gap = next.cells.some(
+        (c) =>
+          c.text.trim() &&
+          1 + c.phrasings.filter((p) => p.text.trim()).length < PHRASING_COUNT
+      );
+      if (gap) next = (await gridApi.topUpPhrasings(next)) ?? next;
+    }
     if (next) {
       goTo("prompts", next);
       // A partial write means a confirm re-landed here: say why, or the

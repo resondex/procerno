@@ -52,6 +52,15 @@ const CACHE_TTL_MS = 183 * 24 * 3600 * 1000;
 // identical brand and category. Existing projects are untouched - their
 // prompts are stored rows, not cache reads; orphaned entries age out.
 const STYLE_VERSION = "s4";
+
+/** Brand forms that double as ordinary English words: only these demand a
+ * capitalized occurrence to count as naming the brand ("2-3 services max"
+ * is not Max). Everything else matches case-blind - people type brand
+ * names lowercase all the time. */
+const SIG_AMBIGUOUS_FORMS = new Set([
+  "max", "visa", "citi", "prime", "go", "one", "mini", "pro", "plus",
+  "air", "fire", "mission", "video", "music", "cloud", "monday",
+]);
 // Version the cache: composer-rule or prompt-style changes must not serve
 // grids built under old rules.
 const INSTRUMENT_VERSION = "g7";
@@ -2659,7 +2668,13 @@ export async function generatePhrasings(input: {
         const forms = [b, primaryBrandName(b)].filter((f, i, a) => f && a.indexOf(f) === i);
         for (const f of forms) {
           const esc = f.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-          const caseSensitive = /^[A-Z][a-z]{1,4}$/.test(f);
+          // Case-sensitive only for brand forms that are also ordinary
+          // English words - the old shape test (any capitalized word of
+          // 2-5 letters) starved real short names typed casually: a seed
+          // saying lowercase "asana" registered NO brand, so every
+          // candidate that wrote "Asana" properly died as a signature
+          // mismatch (44 straight kills on one Jira V2 cell, 2026-09-28).
+          const caseSensitive = SIG_AMBIGUOUS_FORMS.has(f.toLowerCase());
           if (new RegExp(`(?:^|[^a-z0-9])${esc}(?:$|[^a-z0-9])`, caseSensitive ? "" : "i").test(text)) return true;
         }
         if (b.trim().toLowerCase() !== angle) return false;
