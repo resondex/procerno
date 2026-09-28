@@ -85,16 +85,16 @@ export const ENGINES: Engine[] = [
   // GPT-5.6 Luna, Plus runs GPT-5.6 Sol (third-party plan comparisons, Sept
   // 2026). When ChatGPT moves again, add the new pair and set `successor`
   // on these - projects and schedules follow without a config change.
-  { id: "gpt-5.6-luna", label: "ChatGPT (default tier)", vendor: "OpenAI", keyEnv: "OPENAI_API_KEY", mode: "instinct" },
-  { id: "gpt-5.6-luna-search", label: "ChatGPT (default tier) + search", vendor: "OpenAI", keyEnv: "OPENAI_API_KEY", mode: "search", apiModel: "gpt-5.6-luna" },
-  { id: "gpt-5.6-sol", label: "ChatGPT (premium tier)", vendor: "OpenAI", keyEnv: "OPENAI_API_KEY", mode: "instinct" },
-  { id: "gpt-5.6-sol-search", label: "ChatGPT (premium tier) + search", vendor: "OpenAI", keyEnv: "OPENAI_API_KEY", mode: "search", apiModel: "gpt-5.6-sol" },
+  { id: "gpt-5.6-luna", label: "ChatGPT (free tier)", vendor: "OpenAI", keyEnv: "OPENAI_API_KEY", mode: "instinct" },
+  { id: "gpt-5.6-luna-search", label: "ChatGPT (free tier) + search", vendor: "OpenAI", keyEnv: "OPENAI_API_KEY", mode: "search", apiModel: "gpt-5.6-luna" },
+  { id: "gpt-5.6-sol", label: "ChatGPT (paid tier)", vendor: "OpenAI", keyEnv: "OPENAI_API_KEY", mode: "instinct" },
+  { id: "gpt-5.6-sol-search", label: "ChatGPT (paid tier) + search", vendor: "OpenAI", keyEnv: "OPENAI_API_KEY", mode: "search", apiModel: "gpt-5.6-sol" },
   // Retired ChatGPT stand-ins (Aug 2025 models) - every run collected
   // before 2026-09-26 answered on these.
-  { id: "gpt-5-mini", label: "ChatGPT (default tier, gpt-5-mini - retired)", vendor: "OpenAI", keyEnv: "OPENAI_API_KEY", mode: "instinct", successor: "gpt-5.6-luna" },
-  { id: "gpt-5-mini-search", label: "ChatGPT (default tier, gpt-5-mini - retired) + search", vendor: "OpenAI", keyEnv: "OPENAI_API_KEY", mode: "search", apiModel: "gpt-5-mini", successor: "gpt-5.6-luna-search" },
-  { id: "gpt-5", label: "ChatGPT (premium tier, gpt-5 - retired)", vendor: "OpenAI", keyEnv: "OPENAI_API_KEY", mode: "instinct", successor: "gpt-5.6-sol" },
-  { id: "gpt-5-search", label: "ChatGPT (premium tier, gpt-5 - retired) + search", vendor: "OpenAI", keyEnv: "OPENAI_API_KEY", mode: "search", apiModel: "gpt-5", successor: "gpt-5.6-sol-search" },
+  { id: "gpt-5-mini", label: "ChatGPT (free tier, gpt-5-mini - retired)", vendor: "OpenAI", keyEnv: "OPENAI_API_KEY", mode: "instinct", successor: "gpt-5.6-luna" },
+  { id: "gpt-5-mini-search", label: "ChatGPT (free tier, gpt-5-mini - retired) + search", vendor: "OpenAI", keyEnv: "OPENAI_API_KEY", mode: "search", apiModel: "gpt-5-mini", successor: "gpt-5.6-luna-search" },
+  { id: "gpt-5", label: "ChatGPT (paid tier, gpt-5 - retired)", vendor: "OpenAI", keyEnv: "OPENAI_API_KEY", mode: "instinct", successor: "gpt-5.6-sol" },
+  { id: "gpt-5-search", label: "ChatGPT (paid tier, gpt-5 - retired) + search", vendor: "OpenAI", keyEnv: "OPENAI_API_KEY", mode: "search", apiModel: "gpt-5", successor: "gpt-5.6-sol-search" },
   { id: "claude-sonnet-5", label: "Claude (Sonnet)", vendor: "Anthropic", keyEnv: "ANTHROPIC_API_KEY", sdk: "anthropic", mode: "instinct" },
   { id: "claude-sonnet-5-search", label: "Claude (Sonnet) + search", vendor: "Anthropic", keyEnv: "ANTHROPIC_API_KEY", sdk: "anthropic", mode: "search", apiModel: "claude-sonnet-5" },
   { id: "claude-haiku-4-5-20251001", label: "Claude (Haiku)", vendor: "Anthropic", keyEnv: "ANTHROPIC_API_KEY", sdk: "anthropic", mode: "instinct" },
