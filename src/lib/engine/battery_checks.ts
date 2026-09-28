@@ -54,13 +54,23 @@ const STOP_FORMS = new Set(["one", "max", "mini", "pro", "plus", "air", "go", "f
 const TERM_COLLISIONS = /\b(pixel (?:size|sizes|binning|count|density)|keyboard shortcuts?)\b/g;
 
 /** Numeric tokens that are vocabulary, not quantities - repeating them is
- * topic fidelity, not propagation (a 4K cell says 4K in every paraphrase). */
-const TECH_TOKENS = /\b(4k|5g|8k|1080p?|720p?|2160p?|24\/7|mp[34]|wi-?fi ?[67]|usb-?c)\b/gi;
+ * topic fidelity, not propagation (a 4K cell says 4K in every paraphrase;
+ * "0%" is the product term for intro-APR cards, while the months and
+ * amounts around it are true quantities and stay checked). */
+const TECH_TOKENS = /\b(4k|5g|8k|1080p?|720p?|2160p?|24\/7|mp[34]|wi-?fi ?[67]|usb-?c)\b|\b0\s*%/gi;
 
 const key = (s: string) => (s || "").toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
 
 function brandPatterns(name: string, opts?: { required?: boolean; extraForms?: string[]; excludeTokens?: Set<string> }): RegExp[] {
   const out = new Set<string>();
+  // A parenthetical in a brand name is a qualifier, not a name - "Azure
+  // DevOps (Boards)" must never match "kanban boards". Exception: when the
+  // base is itself a stopworded common word ("Max (HBO)"), the parenthetical
+  // IS the effective name.
+  const base = name.replace(/\s*\([^)]*\)/g, "").trim();
+  const paren = [...name.matchAll(/\(([^)]*)\)/g)].map((m) => m[1]).join(" ");
+  const useParen = STOP_FORMS.has(key(base)) && key(paren).length >= 3;
+  name = useParen ? paren : base || name;
   const k = key(name);
   if (k && (opts?.required || !STOP_FORMS.has(k))) out.add(k);
   // Every distinctive token of a multi-word name identifies the brand in
@@ -69,7 +79,7 @@ function brandPatterns(name: string, opts?: { required?: boolean; extraForms?: s
   // that appear in the study CATEGORY ("Ulta Beauty" in "beauty retailers")
   // are category vocabulary, never brand evidence.
   for (const tok of k.split(" ")) {
-    if (tok.length > 3 && !STOP_FORMS.has(tok) && !opts?.excludeTokens?.has(tok)) out.add(tok);
+    if (tok.length > (useParen ? 2 : 3) && !STOP_FORMS.has(tok) && !opts?.excludeTokens?.has(tok)) out.add(tok);
   }
   for (const f of opts?.extraForms ?? []) {
     const fk = key(f);
