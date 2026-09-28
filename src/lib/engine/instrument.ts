@@ -290,6 +290,17 @@ export type LibraryStage = ComposedStage & {
  * a model call. This is the part that makes the battery an instrument rather
  * than a suggestion.
  */
+/** Stages whose prompts MUST name the client brand (A3, 2026-09-27,
+ * extended to the settled-customer stages the same day): the ask concerns
+ * the customer's OWN brand, so a brand-free wording ("my subscription",
+ * "the service") makes the answer unattributable - measured on the v4
+ * labels, the target was absent from 36-68% of churn/renewal answers.
+ * Deliberately blind variants remain the design everywhere else. */
+export const MUST_NAME_STAGES = new Set([
+  "objections", "churn_triggers", "renewal", "business_case",
+  "problem_resolution", "expansion", "ecosystem", "advocacy", "repertoire",
+]);
+
 export function stageLibrary(m: Moderators): LibraryStage[] {
   const considered = m.involvement === "considered";
   return [
@@ -409,7 +420,7 @@ export function stageLibrary(m: Moderators): LibraryStage[] {
     {
       key: "churn_triggers", label: "Churn triggers", layer: "retention",
       situational: false, rivals: "none", tag: "steers", recommended: true,
-      hint: "An existing customer wonders whether the client brand is still the right choice.",
+      hint: "An existing customer wonders whether the client brand, named, is still the right choice.",
       why: "Every install base has doubters - this is where assistant-induced churn starts.",
     },
     {
@@ -422,7 +433,7 @@ export function stageLibrary(m: Moderators): LibraryStage[] {
       key: "renewal", label: "Renewal", layer: "retention",
       situational: false, rivals: "none", tag: "judges",
       recommended: m.rhythm === "subscription",
-      hint: "At renewal: is the client brand worth keeping, are there cheaper options.",
+      hint: "At renewal: is the client brand, named, worth keeping, are there cheaper options.",
       why: m.rhythm === "subscription"
         ? "A subscription market re-decides at every renewal."
         : m.rhythm === "replenishment"
@@ -432,25 +443,25 @@ export function stageLibrary(m: Moderators): LibraryStage[] {
     {
       key: "problem_resolution", label: "Problem resolution", layer: "retention",
       situational: false, rivals: "none", tag: "steers", recommended: true,
-      hint: "A support-style ask: something about the client brand is broken or messy, how to fix it.",
+      hint: "A support-style ask naming the client brand: something about it is broken or messy, how to fix it.",
       why: "Support moments are where satisfied customers quietly become switchers.",
     },
     {
       key: "expansion", label: "Expansion", layer: "loyalty",
       situational: false, rivals: "none", tag: "steers", recommended: true,
-      hint: "A happy customer considers using the client brand for more ('roll it out further', 'use it for Y too').",
+      hint: "A happy customer considers using the client brand, named, for more ('roll it out further', 'use it for Y too').",
       why: "Happy customers ask whether to use you for more - growth the assistant can steer.",
     },
     {
       key: "ecosystem", label: "Ecosystem", layer: "loyalty",
       situational: false, rivals: "none", tag: "steers", recommended: true,
-      hint: "What works well WITH the client brand - add-ons, companions, integrations.",
+      hint: "What works well WITH the client brand, named - add-ons, companions, integrations.",
       why: "What-works-with-you asks show whether assistants place you at the center of a stack.",
     },
     {
       key: "advocacy", label: "Advocacy", layer: "loyalty",
       situational: false, rivals: "none", tag: "steers", recommended: true,
-      hint: "A customer asks how to defend or recommend the client brand to someone else.",
+      hint: "A customer asks how to defend or recommend the client brand, named, to someone else.",
       why: "Customers recruiting others is your cheapest funnel - if the assistant backs them.",
     },
     {
@@ -1575,7 +1586,9 @@ export async function reviewCells(input: {
   // target never polices brand presence or naturally blended detail -
   // review3's sharpened target re-flagged 17 deliberate blind variants
   // and buyer-style blends on the same audit corpus.
-  const key = cacheKey("cell_review4", [
+  // review5: must-name brand rule for the A3 + settled-customer stages
+  // (2026-09-27) - brand-free wording there is now a branding flag.
+  const key = cacheKey("cell_review5", [
     input.brand, input.category, input.audience, input.competitors.join(","),
     input.candidates.map(fp).join("~"),
   ]);
@@ -1589,7 +1602,11 @@ export async function reviewCells(input: {
       // "judges" verdicts on the client brand; "steers" retention and
       // loyalty stages are client-anchored by design (their hints tell
       // the writer to name it) - both may name the client, never a rival.
-      ? c.tag === "judges" || c.tag === "steers"
+      ? MUST_NAME_STAGES.has(c.stage)
+        ? `must name ${input.brand}: the stage concerns the customer's own ` +
+          `${input.brand}, and a wording that leaves it implied ("my ` +
+          `subscription", "the service") breaks the measurement - never a rival`
+        : c.tag === "judges" || c.tag === "steers"
         ? `blind except the client brand: may name ${input.brand} (the stage concerns it directly), never a rival`
         : "blind: the prompt TEXT must not contain any brand name - " +
           "asking the assistant to recommend, name, or list brands is " +
@@ -1740,7 +1757,9 @@ const CELL_WRITER_SYSTEM =
           "alternatives to that rival (client brand NOT named).\n" +
           "- angle=defensive: ask for alternatives to the client brand by name.\n" +
           "- Retention and loyalty stages speak as an existing customer and " +
-          "name the client brand where the guidance says so.\n" +
+          "MUST name the client brand: a churn, renewal, support, expansion, " +
+          "ecosystem or advocacy ask that leaves the brand implied ('my " +
+          "subscription', 'the service') is a defect, never a variant.\n" +
           "- situation: weave the circumstance in naturally; do not label it.\n" +
           "- journey(...): that cell's buyer decides that way - write the " +
           "prompt in that buyer's register.\n" +
@@ -2464,7 +2483,9 @@ export async function generatePhrasings(input: {
           // brand" made the writer name it - every candidate then died
           // as a signature leak (six cells straight to 1/10 under p8).
           (brandSignature(c.text, input.brand, rivals) === ""
-            ? `\n   [deliberately blind variant: name NO brand - the guidance's subject stays implied ("my subscription", "the service"), never named]`
+            ? MUST_NAME_STAGES.has(c.stage)
+              ? `\n   [this stage must name ${input.brand}: every paraphrase names ${input.brand} (the seed's blind wording is a legacy defect - do not preserve it), never a rival]`
+              : `\n   [deliberately blind variant: name NO brand - the guidance's subject stays implied ("my subscription", "the service"), never named]`
             : "") +
           (opts?.avoidWords?.[i]?.length
             ? `\n   [overused: ${opts.avoidWords[i].join(", ")}]`
@@ -2496,7 +2517,9 @@ export async function generatePhrasings(input: {
             "terse 8-word ask to a two-sentence backstory), and question form.\n" +
             "Rules:\n" +
             "- If the seed names NO brand, name NO brand or product in any " +
-            "paraphrase. Blind prompts are the measurement.\n" +
+            "paraphrase. Blind prompts are the measurement. EXCEPTION: a " +
+            "seed whose bracket note says its stage must name the client " +
+            "brand - the note wins, every paraphrase names it.\n" +
             "- If the seed names brands, every paraphrase names exactly those " +
             "same brands and no others.\n" +
             "- Never change the circumstance or the decision being made; never " +
