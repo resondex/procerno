@@ -2806,7 +2806,9 @@ export async function generatePhrasings(input: {
       }
       const findings = checkBattery({
         brand: input.brand,
-        competitors: rivals,
+        // The FULL competitor list - the writer's 4-rival cap is a prompt
+        // budget, not a check scope (a leak of rival #5 is still a leak).
+        competitors: input.competitors,
         category: input.category,
         cells: subset.map((c, j) => ({ stage: c.stage, angle: c.angle, text: c.text, phrasings: got[j].map((ph) => ph.text) })),
       });
