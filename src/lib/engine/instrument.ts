@@ -46,7 +46,12 @@ const CACHE_TTL_MS = 183 * 24 * 3600 * 1000;
 /** Versions the WRITING STYLE of cells and phrasings independently of the
  * instrument rules - a style change regenerates prompt text without
  * discarding scenario reads. */
-const STYLE_VERSION = "s3";
+// s4 = the 2026-09-28 era cut (Tyler): everything generated before the
+// checks-and-healing era (must-name rules, seed design healing, in-generation
+// filters, tightened number rule) must never serve a NEW project, even for an
+// identical brand and category. Existing projects are untouched - their
+// prompts are stored rows, not cache reads; orphaned entries age out.
+const STYLE_VERSION = "s4";
 // Version the cache: composer-rule or prompt-style changes must not serve
 // grids built under old rules.
 const INSTRUMENT_VERSION = "g7";
@@ -224,7 +229,7 @@ export async function classifyModerators(input: {
   meta?: CacheMeta;
 }): Promise<Moderators> {
   tagCosts({ purpose: "setup:moderators" });
-  const key = cacheKey("moderators", [input.category, input.audience]);
+  const key = cacheKey("moderators2", [input.category, input.audience]);
   const hit = await store.cacheGet(key, CACHE_TTL_MS);
   if (hit) return JSON.parse(hit) as Moderators;
   const res = await openaiClient().chat.completions.create({
@@ -623,7 +628,7 @@ export async function readScenarios(input: {
   // the base journey (see JOURNEY_MODEL), gpt-5 writes the scenarios
   // against that given base. v11 tightened the guide boundaries; the
   // guide and scenario rules are unchanged here.
-  const key = cacheKey("scenarios_journeys12", [
+  const key = cacheKey("scenarios_journeys13", [
     input.category, input.audience, input.forBrand ?? "",
   ]);
   const read = await coalesced<{
@@ -851,7 +856,7 @@ export async function suggestScenario(input: {
 }): Promise<Situation | null> {
   tagCosts({ purpose: "setup:scenario_suggest" });
   const avoid = input.exclude.map((s) => s.label.trim().toLowerCase()).filter(Boolean).sort();
-  const key = cacheKey("scenario_more3", [
+  const key = cacheKey("scenario_more4", [
     input.category, input.audience, input.decisionUnit, avoid.join("|"),
   ]);
   const hit = await store.cacheGet(key, CACHE_TTL_MS);
@@ -914,7 +919,7 @@ export async function nearScenarios(input: {
 }): Promise<Situation[]> {
   tagCosts({ purpose: "setup:scenario_near" });
   const avoid = input.exclude.map((s) => s.label.trim().toLowerCase()).filter(Boolean).sort();
-  const key = cacheKey("scenario_near_pool", [
+  const key = cacheKey("scenario_near_pool2", [
     input.category, input.audience, input.of.label, input.of.description, avoid.join("|"),
   ]);
   const hit = await store.cacheGet(key, CACHE_TTL_MS);
@@ -1047,7 +1052,7 @@ export async function reviewScenarios(input: {
     `${s.label.trim()}|${s.description.trim()}` +
     (s.original ? `<${s.original.label.trim()}|${s.original.description.trim()}` : "");
   // "scenario_review7": originals in the contract, minimal-edit rules.
-  const key = cacheKey("scenario_review7", [
+  const key = cacheKey("scenario_review8", [
     input.category, input.audience,
     input.candidates.map(fp).join("~"), input.others.map((s) => fp(s)).sort().join("~"),
   ]);
@@ -1214,7 +1219,7 @@ export async function reviewJourneyFit(input: {
   // "journey_fit3": suggestions carry stagesIn (the stage delta the flip
   // would cause) so cached entries always have it. fit2 framed reasons
   // against the market norm, hinged on audience width.
-  const key = cacheKey("journey_fit3", [
+  const key = cacheKey("journey_fit4", [
     input.brand, input.category,
     dims.map((d) => String(input.base[d])).join("|"),
   ]);
@@ -1364,7 +1369,7 @@ export async function reviewScenarioFit(input: {
   // "scenario_fit4": tentative voice - advice reads as "you may want
   // to", never a verdict. fit3 softened the bar; fit2 over-suppressed;
   // fit1 suggested on every brand.
-  const key = cacheKey("scenario_fit4", [
+  const key = cacheKey("scenario_fit5", [
     input.brand, input.category,
     input.scenarios.map((s) => `${s.label.trim()}|${s.description.trim()}`).join("~"),
   ]);

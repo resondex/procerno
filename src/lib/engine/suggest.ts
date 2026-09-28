@@ -478,7 +478,8 @@ const BATTERY_SCHEMA = {
 
 // v6: v5 anchoring + long-prompt texture rule (long = backstory, never a
 // requirements list; no precise round constraints) with spec-sheet lint.
-const BATTERY_STYLE_VERSION = "v7";
+// v8 = the 2026-09-28 era cut - see STYLE_VERSION s4 in instrument.ts.
+const BATTERY_STYLE_VERSION = "v8";
 
 /**
  * Generate the unbranded battery with the model (falling back to templates),
