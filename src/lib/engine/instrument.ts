@@ -1605,7 +1605,10 @@ export async function reviewCells(input: {
       ? MUST_NAME_STAGES.has(c.stage)
         ? `must name ${input.brand}: the stage concerns the customer's own ` +
           `${input.brand}, and a wording that leaves it implied ("my ` +
-          `subscription", "the service") breaks the measurement - never a rival`
+          `subscription", "the service") breaks the measurement` +
+          (c.stage === "advocacy"
+            ? ` - a rival may appear only as the counterpart being persuaded ("my iPhone friend says...")`
+            : ` - never a rival`)
         : c.tag === "judges" || c.tag === "steers"
         ? `blind except the client brand: may name ${input.brand} (the stage concerns it directly), never a rival`
         : "blind: the prompt TEXT must not contain any brand name - " +
