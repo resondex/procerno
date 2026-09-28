@@ -19,8 +19,13 @@ export const ENGINE_PRICES: Record<string, { in: number; out: number; perSearch?
   "claude-sonnet-5": { in: 3, out: 15 },
   "claude-sonnet-5-search": { in: 3, out: 15, perSearch: 0.01 },
   "claude-haiku-4-5-20251001": { in: 1, out: 5 },
-  "gemini-pro-latest": { in: 1.25, out: 10 },
-  "gemini-flash-latest": { in: 0.3, out: 2.5 },
+  // Updated 2026-09-28 to what the aliases now serve (3.1 Pro / 3.8 Flash);
+  // 3.6 Flash is at the intro rate through 2026-12-31 (then 1.5/7.5).
+  "gemini-pro-latest": { in: 2, out: 12 },
+  "gemini-flash-latest": { in: 0.75, out: 3.75 },
+  "gemini-3.6-flash": { in: 0.75, out: 3.75 },
+  "claude-opus-5-5": { in: 4, out: 20 },
+  "claude-opus-5-5-search": { in: 4, out: 20, perSearch: 0.01 },
   "grok-4": { in: 3, out: 15 },
   // Perplexity bills per REQUEST, not per search, and reports no search
   // count - a perSearch fee against searchCount null priced sonar at ~7%

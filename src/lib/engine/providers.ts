@@ -95,12 +95,29 @@ export const ENGINES: Engine[] = [
   { id: "gpt-5-mini-search", label: "ChatGPT (free tier, gpt-5-mini - retired) + search", vendor: "OpenAI", keyEnv: "OPENAI_API_KEY", mode: "search", apiModel: "gpt-5-mini", successor: "gpt-5.6-luna-search" },
   { id: "gpt-5", label: "ChatGPT (paid tier, gpt-5 - retired)", vendor: "OpenAI", keyEnv: "OPENAI_API_KEY", mode: "instinct", successor: "gpt-5.6-sol" },
   { id: "gpt-5-search", label: "ChatGPT (paid tier, gpt-5 - retired) + search", vendor: "OpenAI", keyEnv: "OPENAI_API_KEY", mode: "search", apiModel: "gpt-5", successor: "gpt-5.6-sol-search" },
-  { id: "claude-sonnet-5", label: "Claude (Sonnet)", vendor: "Anthropic", keyEnv: "ANTHROPIC_API_KEY", sdk: "anthropic", mode: "instinct" },
-  { id: "claude-sonnet-5-search", label: "Claude (Sonnet) + search", vendor: "Anthropic", keyEnv: "ANTHROPIC_API_KEY", sdk: "anthropic", mode: "search", apiModel: "claude-sonnet-5" },
+  // Claude tiers verified 2026-09-28: Free = Sonnet 5 (+ Haiku); every paid
+  // plan gets Opus 5.5 (released 2026-09-22).
+  { id: "claude-sonnet-5", label: "Claude (free tier)", vendor: "Anthropic", keyEnv: "ANTHROPIC_API_KEY", sdk: "anthropic", mode: "instinct" },
+  { id: "claude-sonnet-5-search", label: "Claude (free tier) + search", vendor: "Anthropic", keyEnv: "ANTHROPIC_API_KEY", sdk: "anthropic", mode: "search", apiModel: "claude-sonnet-5" },
+  { id: "claude-opus-5-5", label: "Claude (paid tier)", vendor: "Anthropic", keyEnv: "ANTHROPIC_API_KEY", sdk: "anthropic", mode: "instinct" },
+  { id: "claude-opus-5-5-search", label: "Claude (paid tier) + search", vendor: "Anthropic", keyEnv: "ANTHROPIC_API_KEY", sdk: "anthropic", mode: "search", apiModel: "claude-opus-5-5" },
   { id: "claude-haiku-4-5-20251001", label: "Claude (Haiku)", vendor: "Anthropic", keyEnv: "ANTHROPIC_API_KEY", sdk: "anthropic", mode: "instinct" },
+  // Gemini tiers verified 2026-09-28: the consumer free tier runs 3.6 Flash;
+  // AI Pro runs 3.1 Pro (and 3.8 Flash). gemini-pro-latest resolves to
+  // 3.1-pro-preview (probed via modelVersion) = the paid surface; but
+  // gemini-flash-latest resolves to 3.8 Flash - the PAID tier's Flash - so
+  // the free surface is pinned explicitly and flash-latest is retired.
   {
     id: "gemini-pro-latest",
-    label: "Gemini (Pro)",
+    label: "Gemini (paid tier)",
+    vendor: "Google",
+    keyEnv: "GEMINI_API_KEY",
+    baseURL: "https://generativelanguage.googleapis.com/v1beta/openai/",
+    mode: "instinct",
+  },
+  {
+    id: "gemini-3.6-flash",
+    label: "Gemini (free tier)",
     vendor: "Google",
     keyEnv: "GEMINI_API_KEY",
     baseURL: "https://generativelanguage.googleapis.com/v1beta/openai/",
@@ -108,11 +125,12 @@ export const ENGINES: Engine[] = [
   },
   {
     id: "gemini-flash-latest",
-    label: "Gemini (Flash)",
+    label: "Gemini (flash-latest - retired, now serves the paid tier's Flash)",
     vendor: "Google",
     keyEnv: "GEMINI_API_KEY",
     baseURL: "https://generativelanguage.googleapis.com/v1beta/openai/",
     mode: "instinct",
+    successor: "gemini-3.6-flash",
   },
   { id: "grok-4", label: "Grok", vendor: "xAI", keyEnv: "XAI_API_KEY", baseURL: "https://api.x.ai/v1", mode: "instinct" },
   {
