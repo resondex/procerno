@@ -13,7 +13,7 @@ Status tags: **DECIDED** (in force), **PROPOSED** (recommended, awaiting Tyler),
 | Production coder | procerno_reason_coder v0.1 = the v4b process (qwen3p5-9b LoRA, v4 labels) | DECIDED 2026-09-26 (not yet in prod) |
 | Next coder | v0.2: same recipe, every field prod reads, trained on v0.2 labels | DECIDED 2026-09-26 (in progress) |
 | Reference labeler | claude-opus-5-5, effort high, ONE answer per request | DECIDED 2026-09-27 |
-| Labeling prompt | `labeling/build_batch.mts --mode v02_full --defs --design`, no precedents | DECIDED 2026-09-27 (gaps B2-B6 open) |
+| Labeling prompt | `labeling/build_batch.mts --mode v02_full --defs --design`, no precedents | **FROZEN 2026-09-27 (v02_frozen_2026-09-27)**: the b2c tightened negative rule folded into the baseline (verified byte-identical to the tested arm); B2 signals and B7 roles are read-time computations, so no other B change touches the prompt. Do not edit without a new freeze decision. |
 | Codebook | gate-confirmed code list + confirmed scope sentence per code (v4 contract) | DECIDED 2026-09-25 |
 | Brand resolution | the confirmed dictionary is fed to the labeler (and the coder); each mention carries its dictionary entry; post-hoc resolution stays as a safety net | DECIDED 2026-09-27 (test pending) |
 
