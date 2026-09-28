@@ -49,6 +49,7 @@ export default function AppHome({
   }, []);
   const [brand, setBrand] = useState("");
   const [drafts, setDrafts] = useState<SetupDraft[]>(initialDrafts);
+  const [confirmDelete, setConfirmDelete] = useState<SetupDraft | null>(null);
   const isAdmin = initialIsAdmin;
   const engineOptions = initialEngines;
   // The open setup, if any: which question set, which brand, resuming what.
@@ -182,7 +183,7 @@ function draftStatus(d: SetupDraft): string {
                   <button
                     type="button"
                     aria-label={`delete ${draftTitle(d)} setup`}
-                    onClick={() => deleteDraft(d.id)}
+                    onClick={() => setConfirmDelete(d)}
                     className="text-ink-3 hover:text-danger text-lg leading-none"
                   >
                     ×
@@ -230,6 +231,39 @@ function draftStatus(d: SetupDraft): string {
       {/* The setup sheet: a large dialog over the trackers. Clicking outside
           does nothing on purpose - closing saves, and only the × or Escape
           closes, so minutes of generation can't be lost to a stray click. */}
+      {confirmDelete && (
+        <div
+          className="fixed inset-0 z-50 grid place-items-center bg-black/40 p-4"
+          onClick={() => setConfirmDelete(null)}
+        >
+          <div className="card w-full max-w-md bg-white p-6" onClick={(e) => e.stopPropagation()}>
+            <h2 className="text-lg font-semibold tracking-tight">Delete this setup?</h2>
+            <p className="mt-2 text-sm text-ink-2">
+              &ldquo;{draftTitle(confirmDelete)}&rdquo; and all its saved progress - the market read,
+              questions, prompts, and any edits - will be permanently deleted. This cannot be undone.
+            </p>
+            <div className="mt-5 flex justify-end gap-3">
+              <button
+                type="button"
+                onClick={() => setConfirmDelete(null)}
+                className="rounded-md px-3 py-1.5 text-sm font-medium text-ink-2 hover:text-ink"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  void deleteDraft(confirmDelete.id);
+                  setConfirmDelete(null);
+                }}
+                className="rounded-md bg-danger px-3 py-1.5 text-sm font-semibold text-white hover:opacity-90"
+              >
+                Delete setup
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
       {wizard && (
         <div className="fixed inset-0 z-50 bg-black/40 p-[3vh_3vw]">
           <div
