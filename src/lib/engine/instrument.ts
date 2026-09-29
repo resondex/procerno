@@ -55,7 +55,10 @@ const CACHE_TTL_MS = 183 * 24 * 3600 * 1000;
 // pricing rules, seed-numbers-are-facts inversion, same-concern design
 // line, checked alternate-seed path - the six re-walks must not serve
 // cells or paraphrases cached before these landed.
-const STYLE_VERSION = "s5";
+// s6 = same day, after the comparison-signature deadlock fix (design-
+// derived expected sig, case-blind design-named angle): walk 2 of the six
+// drafts regenerates everything under it.
+const STYLE_VERSION = "s6";
 
 /** Brand forms that double as ordinary English words: only these demand a
  * capitalized occurrence to count as naming the brand ("2-3 services max"
