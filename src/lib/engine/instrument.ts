@@ -1472,7 +1472,7 @@ const DESIGN_CHECK_MODEL = process.env.DESIGN_CHECK_MODEL ?? "claude-opus-5-5";
 const DESIGN_CHECK_SYSTEM = `You check survey questions against their design. Each question was written for a cell with a stated design:
 - Doubt design: the question should itself voice a concern, complaint, doubt or "is it still worth it / should I cut it" about the named brand or option.
 - Plan design: the question should itself carry a customer's plan with the named brand (use it for more, find products that work with it, recommend or defend it to someone).
-Decide whether THIS question voices its design. A neutral information request, a how-to, or a lookup that never states or asks the concern (or plan) does NOT voice it, even if it is on the same topic. Judge only the question's words, never what an answer might say.
+Decide whether THIS question voices its design. A neutral information request, a how-to, or a lookup that never states or asks the concern (or plan) does NOT voice it, even if it is on the same topic. When the design includes 'Designed as: "..."', the question must carry the SAME specific concern or plan as that designed question - the same subject, not merely any concern or plan of the same kind about the same brand. Different wording, register, backstory and detail are expected and fine; a different subject is not. Judge only the question's words, never what an answer might say.
 Reply with ONLY: {"voices_design": true|false, "reason": "<one short sentence>"}`;
 
 /**
@@ -2695,15 +2695,15 @@ export async function generatePhrasings(input: {
             "the wordings people actually type into a chat assistant.\n" +
             "Each paraphrase is a DIFFERENT PERSON in the same circumstance " +
             "describing it their own way - NOT a rewording of the seed. Do not " +
-            "copy the seed's specific details (its numbers, its examples, its " +
-            "list of symptoms); invent plausible ones of your own that fit the " +
-            "scenario, or leave details out entirely. NEVER repeat a number " +
-            "that appears in the seed: if the circumstance needs a quantity, " +
-            "use a DIFFERENT plausible one (or spell it - 'about a dozen'), " +
-            "and most paraphrases should carry no number at all. Standard " +
-            "spec terms are vocabulary, not quantities - 4K, 5G, HDR10, " +
-            "USB-C stay as written. Some askers give " +
-            "backstory, some just ask.\n" +
+            "copy the seed's qualitative details (its examples, its list of " +
+            "symptoms); describe the circumstance in your own words or leave " +
+            "details out entirely. NUMBERS are different: a number in the " +
+            "seed is a FACT of the designed question - keep it exactly as " +
+            "written or leave it out, NEVER swap it for a different value " +
+            "('0% for 24 months' must never become 'about 18 months'), and " +
+            "never add a number the seed does not carry. Standard spec terms " +
+            "are vocabulary, not quantities - 4K, 5G, HDR10, USB-C stay as " +
+            "written. Some askers give backstory, some just ask.\n" +
             "Vary, across the set: who is asking (pick realistic roles for the " +
             "audience - e.g. founder, engineering manager, IT director, " +
             "procurement, a parent, a gift buyer - and tag each with `asker`), " +
@@ -3024,7 +3024,7 @@ export async function generatePhrasings(input: {
         cells: subset.map((c, j) => ({ stage: c.stage, angle: c.angle, text: c.text, phrasings: got[j].map((ph) => ph.text) })),
       });
       for (const f of findings) {
-        if (f.check === "seed_number_propagation" || f.check === "duplicate_paraphrase") {
+        if (f.check === "duplicate_paraphrase") {
           console.warn(`battery check [${f.check}] cell ${subset[f.cell]?.stage}: ${f.detail}`);
         } else {
           // A prompt-level brand-rule violation never ships: drop the

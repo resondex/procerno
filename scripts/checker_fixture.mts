@@ -33,12 +33,24 @@ for (const r of rejected) {
 console.log(`1. rejected brand-free corpus: ${caught}/${rejected.length} flagged`);
 for (const m of missed.slice(0, 6)) console.log("   MISSED:", m);
 
-// --- 2. The 30-45W cell (old texts) must flag propagation ---
+// --- 2. Number rule (inverted 2026-09-29: seed numbers are FACTS) ---
+// (a) A paraphrase substituting a seed number must flag (the Pixel
+//     "0% for 24 months" -> "about 18 months" mutation class).
+const mut = bc.checkBattery({
+  brand: "Google Pixel", competitors: COMP["Google Pixel"], category: CAT["Google Pixel"],
+  cells: [{ stage: "pricing", angle: "generic", text: "any 0% financing for 24 months on a flagship phone?",
+    phrasings: ["is 0% over 18 months a thing for flagship phones?", "any interest-free flagship financing right now?"] }],
+});
+const mutFlags = mut.filter((f: any) => f.check === "seed_number_changed");
+console.log(`2a. substituted seed number: ${mutFlags.length === 1 ? "FLAGGED (1, correct)" : `WRONG (${mutFlags.length})`}`, mutFlags.map((f: any) => f.detail));
+// (b) Paraphrases PRESERVING seed numbers are now clean - the old wattage
+//     cell (seed quantities repeated verbatim) is the negative control.
 const watt = read(`${V02}/wattage_fix.json`);
 const wattCell = { stage: "ecosystem", angle: "generic", text: watt[0].text, phrasings: watt.slice(1).map((r: any) => r.text) };
-const wf = bc.checkBattery({ brand: "Google Pixel", competitors: COMP["Google Pixel"], category: CAT["Google Pixel"], cells: [wattCell] });
-console.log(`2. old wattage cell: ${wf.filter((f: any) => f.check === "seed_number_propagation").length > 0 ? "FLAGGED (propagation)" : "MISSED"}`,
-  wf.filter((f: any) => f.check === "seed_number_propagation").map((f: any) => f.detail));
+const wf = bc.checkBattery({ brand: "Google Pixel", competitors: COMP["Google Pixel"], category: CAT["Google Pixel"], cells: [wattCell] })
+  .filter((f: any) => f.check === "seed_number_changed");
+console.log(`2b. wattage cell (numbers preserved): ${wf.length === 0 ? "CLEAN (correct)" : `${wf.length} flags`}`,
+  wf.slice(0, 3).map((f: any) => f.detail));
 
 // --- 3. Negative control: the fixed live battery ---
 const types = read(`${V02}/question_types.json`);
@@ -55,7 +67,10 @@ for (const p of live) {
 console.log(`3. fixed live battery (${live.length} prompts, pricing excluded as per-cell): ${flags.length} flags`);
 for (const f of flags) console.log("   ", JSON.stringify(f));
 
-// --- 4. Negative control: harness-generated batteries ---
+// --- 4. Harness-generated batteries (note: these were generated under the
+// OLD number instruction, which told the writer to VARY seed numbers -
+// seed_number_changed findings here are the old contract showing, not
+// checker false positives; brand-rule findings are the signal) ---
 const head = read(`${CONF}/head.json`);
 for (const [brand, P] of Object.entries<any>(head.projects)) {
   const cells = P.cells.map((c: any, i: number) => ({

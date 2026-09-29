@@ -57,8 +57,12 @@ export function questionTypeOf(cell: { stage: string; angle: string; text: strin
  * own wording - the generic plan line mis-flagged 15 conforming support
  * asks in the harness. */
 export function seedDesignLine(stage: string, brand: string, seed: string): string | null {
+  // "SAME concern/plan as the designed question" (2026-09-29): the earlier
+  // wording only demanded A doubt about the brand, so a gifting objection
+  // could drift into nine limited-drops objections and pass - each still
+  // voiced a doubt about the brand, just not the designed one.
   if (DOUBT_CHECK_STAGES.has(stage))
-    return `Question design (doubt): the question voices a concern about ${brand}. Designed as: "${seed}"`;
+    return `Question design (doubt): the question voices the SAME concern about ${brand} as the designed question below - the same subject and worry, differently worded by a different person. A DIFFERENT concern about ${brand} does not satisfy the design. Designed as: "${seed}"`;
   if (!PLAN_CHECK_STAGES.has(stage)) return null;
   const intent =
     stage === "problem_resolution"
@@ -68,7 +72,7 @@ export function seedDesignLine(stage: string, brand: string, seed: string): stri
         : stage === "ecosystem"
           ? `the customer plans to find products and services that work well with ${brand}`
           : `the customer plans to recommend or defend ${brand} to someone else`;
-  return `Question design (plan): ${intent}. Designed as: "${seed}"`;
+  return `Question design (plan): ${intent}, on the SAME subject as the designed question below - a different plan or subject does not satisfy the design. Designed as: "${seed}"`;
 }
 
 /** The design intent a doubt/plan STAGE demands, independent of any seed -
@@ -161,7 +165,7 @@ export interface BatteryFinding {
     | "comparison_missing_target" | "comparison_missing_rival" | "comparison_names_extra_rival"
     | "defensive_alt_missing_target" | "offensive_alt_names_target" | "offensive_alt_missing_rival"
     | "alternatives_names_extra_rival" | "pricing_names_rival" | "meta_text"
-    | "seed_number_propagation" | "duplicate_paraphrase";
+    | "seed_number_changed" | "duplicate_paraphrase";
   /** The offending prompt text (or the seed, for cell-level findings). */
   text: string;
   detail: string;
@@ -268,14 +272,10 @@ export function checkBattery(input: {
   brand: string;
   competitors: string[];
   cells: BatteryCheckCell[];
-  /** A cell flags propagation when more than this share of paraphrases
-   * repeat a seed quantity (default 0.5). */
-  propagationThreshold?: number;
   category?: string;
   extraForms?: Record<string, string[]>;
 }): BatteryFinding[] {
   const findings: BatteryFinding[] = [];
-  const thr = input.propagationThreshold ?? 0.5;
   const brandVocab = [input.brand, ...input.competitors].flatMap((b) => brandPatterns(b, { required: true }));
   input.cells.forEach((cell, i) => {
     const texts = [cell.text, ...cell.phrasings];
@@ -287,16 +287,19 @@ export function checkBattery(input: {
       for (const v of checkPromptBrandRule({ text: t, stage: cell.stage, angle: cell.angle, brand: input.brand, competitors: input.competitors, category: input.category, extraForms: input.extraForms }))
         findings.push({ cell: i, ...v, text: t });
     }
-    const seedNums = [...new Set(quantities(cell.text, brandVocab))];
-    if (seedNums.length > 0 && cell.phrasings.length > 0) {
-      const rep = cell.phrasings.filter((t) => {
-        const nums = new Set(quantities(t, brandVocab));
-        return seedNums.some((n) => nums.has(n));
-      }).length;
-      if (rep / cell.phrasings.length > thr)
+    // Seed numbers are FACTS of the designed question (Tyler, 2026-09-29):
+    // a paraphrase keeps them verbatim or leaves them out, and never
+    // carries a quantity the seed does not - substituting "0% for 24
+    // months" with "about 18 months" or inventing spec texture changes
+    // the question being measured. (This inverts the retired propagation
+    // check, which treated repetition as the defect.)
+    const seedNums = new Set(quantities(cell.text, brandVocab));
+    for (const t of cell.phrasings) {
+      const extras = [...new Set(quantities(t, brandVocab))].filter((n) => !seedNums.has(n));
+      if (extras.length > 0)
         findings.push({
-          cell: i, check: "seed_number_propagation", text: cell.text,
-          detail: `seed quantities [${seedNums.join(", ")}] repeated in ${rep}/${cell.phrasings.length} paraphrases`,
+          cell: i, check: "seed_number_changed", text: t,
+          detail: `carries quantit${extras.length > 1 ? "ies" : "y"} [${extras.join(", ")}] not in the seed${seedNums.size > 0 ? ` [${[...seedNums].join(", ")}]` : ""}`,
         });
     }
   });
