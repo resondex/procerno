@@ -1,8 +1,8 @@
 import { createHash } from "crypto";
-import { tagCosts } from "../cost_log";
+import { tagCosts, withCostContext } from "../cost_log";
 import { anthropicClient, openaiClient } from "./providers";
 import { INSTRUMENT_HELPER_MODEL } from "./models";
-import { checkBattery, MUST_NAME_STAGES, questionTypeOf, seedDesignLine, stageDesignIntent, type QuestionType } from "./battery_checks";
+import { checkBattery, MUST_NAME_STAGES, questionTypeOf, seedDesignLine, stageDesignIntent, TERM_COLLISIONS, type QuestionType } from "./battery_checks";
 export { MUST_NAME_STAGES };
 import { store } from "../store";
 import type { CacheMeta } from "../types";
@@ -1479,9 +1479,11 @@ export async function checkDesignFidelity(input: {
   candidates: { text: string; design: string }[];
   meta?: CacheMeta;
 }): Promise<{ voices: boolean; reason: string }[]> {
-  tagCosts({ purpose: "setup:design_check" });
   const a = await anthropicClient();
-  return Promise.all(
+  // Scoped, not tagCosts: mutating the shared request context here bled the
+  // design_check purpose onto concurrent writer calls in the same request
+  // (the stray gpt-5-mini design_check ledger rows).
+  return withCostContext({ purpose: "setup:design_check" }, () => Promise.all(
     input.candidates.map(async (c) => {
       const key = cacheKey("design_check1", [DESIGN_CHECK_MODEL, c.design, c.text.trim()]);
       const hit = await store.cacheGet(key, CACHE_TTL_MS);
@@ -1507,7 +1509,7 @@ export async function checkDesignFidelity(input: {
         return { voices: true, reason: "" };
       }
     })
-  );
+  ));
 }
 
 export interface CellVerdict {
@@ -2655,7 +2657,11 @@ export async function generatePhrasings(input: {
       // add a brand both sides already carry. Blind counting elsewhere
       // keeps the strict matcher.
       const angle = seed.angle.trim().toLowerCase();
-      const namesForSig = (text: string, b: string) => {
+      const namesForSig = (rawText: string, b: string) => {
+        // Shared with battery_checks: "pixel size" is a sensor term, not
+        // the brand - unscrubbed it registered the target in blind cells
+        // and killed honest candidates.
+        const text = rawText.replace(TERM_COLLISIONS, " ");
         // A single short capitalized brand form ("Max", "Visa", "Citi")
         // is also an ordinary English word, and the case-blind matcher
         // poisoned signatures with it: a blind seed saying "2-3 services

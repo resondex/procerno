@@ -101,7 +101,7 @@ const STOP_FORMS = new Set(["one", "max", "mini", "pro", "plus", "air", "go", "f
 
 /** Brand tokens that are also technical nouns in specific collocations -
  * scrubbed before matching ("pixel size" is a sensor term, not the brand). */
-const TERM_COLLISIONS = /\b(pixel (?:size|sizes|binning|count|density)|keyboard shortcuts?)\b/g;
+export const TERM_COLLISIONS = /\b(pixel (?:size|sizes|binning|count|density)|keyboard shortcuts?)\b/g;
 
 /** Numeric tokens that are vocabulary, not quantities - repeating them is
  * topic fidelity, not propagation (a 4K cell says 4K in every paraphrase;
