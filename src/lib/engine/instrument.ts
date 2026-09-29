@@ -2799,6 +2799,17 @@ export async function generatePhrasings(input: {
         // longer or lowercase-branded forms (Purple, jira) keep the
         // insensitive match so casual typing still registers. Signature
         // scope only - blind counting elsewhere is unchanged.
+        // The cell's own angle brand in a comparison or alternatives cell
+        // is DESIGN-NAMED: every text carries it, so context disambiguates
+        // an ambiguous English-word form and the case guard is dropped for
+        // it. Without this, "american express vs visa" (lowercase seed)
+        // registered no rival while candidates' proper "Visa" did - every
+        // faithful candidate died as a leak, unhealable (2026-09-29,
+        // Tyler live). Blind cells keep the strict guard: "2-3 services
+        // max" must still never register Max.
+        const designAngle =
+          (seed.stage === "comparison" || seed.stage === "alternatives") &&
+          b.trim().toLowerCase() === angle;
         const forms = [b, primaryBrandName(b)].filter((f, i, a) => f && a.indexOf(f) === i);
         for (const f of forms) {
           const esc = f.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
@@ -2808,7 +2819,7 @@ export async function generatePhrasings(input: {
           // saying lowercase "asana" registered NO brand, so every
           // candidate that wrote "Asana" properly died as a signature
           // mismatch (44 straight kills on one Jira V2 cell, 2026-09-28).
-          const caseSensitive = SIG_AMBIGUOUS_FORMS.has(f.toLowerCase());
+          const caseSensitive = !designAngle && SIG_AMBIGUOUS_FORMS.has(f.toLowerCase());
           if (new RegExp(`(?:^|[^a-z0-9])${esc}(?:$|[^a-z0-9])`, caseSensitive ? "" : "i").test(text)) return true;
         }
         // Token shorthand applies where context makes it unambiguous: the
@@ -2834,7 +2845,7 @@ export async function generatePhrasings(input: {
         for (const tok of primaryBrandName(b).split(/[\s.]+/)) {
           if (tok.length < 4 || tok.toLowerCase() === b.trim().toLowerCase()) continue;
           const esc = tok.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-          const caseSensitive = SIG_AMBIGUOUS_FORMS.has(tok.toLowerCase());
+          const caseSensitive = !designAngle && SIG_AMBIGUOUS_FORMS.has(tok.toLowerCase());
           if (new RegExp(`(?:^|[^a-z0-9])${esc}(?:$|[^a-z0-9])`, caseSensitive ? "" : "i").test(text)) return true;
         }
         return false;
@@ -2846,14 +2857,31 @@ export async function generatePhrasings(input: {
           .sort()
           .join("|");
       let sig = sigOf(seed.text);
-      // A blind seed in a must-name stage is a legacy defect the writer is
-      // told to repair ("every paraphrase names <brand>"). The expected
-      // signature must agree with that instruction, or every obedient
-      // candidate dies here while checkBattery kills the disobedient ones -
-      // guaranteed starvation, paid in full on every retry and top-up.
-      const brandKey = input.brand.trim().toLowerCase();
-      if (MUST_NAME_STAGES.has(seed.stage) && !sig.split("|").includes(brandKey)) {
-        sig = [...sig.split("|").filter(Boolean), brandKey].sort().join("|");
+      // The expected signature is the CELL DESIGN's, not merely the seed
+      // text's - two design-required brands are unioned in:
+      // (1) must-name stages require the client brand (a blind seed is a
+      //     legacy defect the writer is told to repair);
+      // (2) comparison and offensive-alternatives cells require their
+      //     angle rival. Seed spelling must not decide this: the AmEx
+      //     "vs visa" seed spelled the rival lowercase, the ambiguous-word
+      //     case guard didn't count it, and every candidate that wrote
+      //     "Visa" properly died as a leak - 12-15/15 killed per batch,
+      //     unhealable (2026-09-29, Tyler live).
+      const unionSig = (name: string) => {
+        const k = name.trim().toLowerCase();
+        if (k && !sig.split("|").includes(k)) sig = [...sig.split("|").filter(Boolean), k].sort().join("|");
+      };
+      if (MUST_NAME_STAGES.has(seed.stage) || seed.stage === "comparison") unionSig(input.brand);
+      if (
+        (seed.stage === "comparison" || seed.stage === "alternatives") &&
+        seed.angle && !["generic", "defensive"].includes(seed.angle.trim().toLowerCase())
+      ) {
+        // The angle may be a display label ("Amazon (Beauty)") - union the
+        // matching roster entry's sig token, which is what sigOf emits.
+        const match = [input.brand, ...rivals].find(
+          (b) => primaryBrandName(b).toLowerCase() === primaryBrandName(seed.angle).toLowerCase()
+        );
+        unionSig(match ?? primaryBrandName(seed.angle));
       }
       const prior = opts?.have?.[c.index] ?? [];
       const seen = new Set<string>([norm(seed.text), ...prior.map((p) => norm(p.text))]);
