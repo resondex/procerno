@@ -305,7 +305,13 @@ export function checkBattery(input: {
     // check, which treated repetition as the defect.)
     const seedNums = new Set(quantities(cell.text, brandVocab));
     for (const t of cell.phrasings) {
-      const extras = [...new Set(quantities(t, brandVocab))].filter((n) => !seedNums.has(n));
+      // Extra 1s and 2s are tolerated: seeds spell them ("under a second",
+      // "family of four" restated as "2 kids") and candidates digitize -
+      // the mutation class this check exists for (months, percents,
+      // dollar thresholds) lives at 3 and up. The jira founder cell died
+      // on candidates writing "under 1 second" for the seed's "under a
+      // second" (2026-09-29).
+      const extras = [...new Set(quantities(t, brandVocab))].filter((n) => !seedNums.has(n) && parseFloat(n) > 2);
       if (extras.length > 0)
         findings.push({
           cell: i, check: "seed_number_changed", text: t,
