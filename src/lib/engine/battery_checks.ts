@@ -52,7 +52,7 @@ export function questionTypeOf(cell: { stage: string; angle: string; text: strin
   return STAGE_TYPE[cell.stage] ?? "open_choice";
 }
 
-/** The design a stage's paraphrases must voice/** The design a stage's paraphrases must voice, synthesized from the cell
+/** The design a stage's paraphrases must voice, synthesized from the cell
  * seed until cells carry stored design lines. problem_resolution has its
  * own wording - the generic plan line mis-flagged 15 conforming support
  * asks in the harness. */
@@ -158,12 +158,36 @@ export interface BatteryCheckCell {
 export interface BatteryFinding {
   cell: number;
   check: "must_name_missing_target" | "must_name_names_rival" | "blind_names_brand"
-    | "comparison_missing_target" | "comparison_missing_rival"
+    | "comparison_missing_target" | "comparison_missing_rival" | "comparison_names_extra_rival"
     | "defensive_alt_missing_target" | "offensive_alt_names_target" | "offensive_alt_missing_rival"
+    | "alternatives_names_extra_rival" | "pricing_names_rival" | "meta_text"
     | "seed_number_propagation" | "duplicate_paraphrase";
   /** The offending prompt text (or the seed, for cell-level findings). */
   text: string;
   detail: string;
+}
+
+/** Generator self-talk that leaked into a served prompt: correction
+ * narration, references to the seed/paraphrase task, bracketed writer
+ * notes. Real buyers never type these (2026-09-29 battery audit - "Sorry,
+ * small correction:", "15-squad detail in seed can't be reused; instead:").
+ * The writer prompts also forbid it; this is the net for when instruction-
+ * following fails, like every leak class before it. */
+const META_TEXT_PATTERNS: { p: RegExp; why: string }[] = [
+  { p: /\bparaphrases?\b/i, why: "mentions 'paraphrase'" },
+  { p: /\bseed(?:'s)? (?:number|text|wording|question|prompt|detail)\b/i, why: "references the seed" },
+  { p: /\b(?:can't|cannot|can not|won't) be reused\b/i, why: "writer planning language" },
+  { p: /;\s*instead:\s/i, why: "writer correction ('; instead:')" },
+  { p: /^\s*(?:sorry|oops|apologies)\b/i, why: "opens with an apology/correction" },
+  { p: /\bsmall correction\b/i, why: "correction narration" },
+  { p: /\bcorrection:\s/i, why: "correction narration" },
+  { p: /[\[\]]/, why: "bracketed writer note" },
+  { p: /\basker\s*:/i, why: "asker metadata in the text" },
+];
+
+export function metaTextViolation(text: string): string | null {
+  for (const { p, why } of META_TEXT_PATTERNS) if (p.test(text)) return why;
+  return null;
 }
 
 /** Every prompt-level brand-rule verdict for ONE text - shared by the
@@ -179,9 +203,16 @@ export function checkPromptBrandRule(input: {
 }): { check: BatteryFinding["check"]; detail: string }[] {
   const { text, stage, angle, brand } = input;
   const out: { check: BatteryFinding["check"]; detail: string }[] = [];
+  const meta = metaTextViolation(text);
+  if (meta) out.push({ check: "meta_text", detail: `generator meta-text: ${meta}` });
   const catTokens = new Set(key(input.category ?? "").split(" ").filter(Boolean));
   const target = textNamesBrand(text, brand, { extraForms: input.extraForms?.[brand], excludeTokens: catTokens });
   const rivalsNamed = input.competitors.filter((c) => textNamesBrand(text, c, { extraForms: input.extraForms?.[c], excludeTokens: catTokens }));
+  // The cell's own angle brand is never an "extra" rival - match by name
+  // containment in both directions so label variants ("Amazon (Beauty)")
+  // resolve to their angle spelling.
+  const isAngleBrand = (r: string) =>
+    textNamesBrand(angle, r, { required: true }) || textNamesBrand(r, angle, { required: true });
   if (BLIND_STAGES.has(stage)) {
     if (target || rivalsNamed.length > 0)
       out.push({ check: "blind_names_brand", detail: `blind stage names ${target ? brand : rivalsNamed.join(", ")}` });
@@ -192,16 +223,35 @@ export function checkPromptBrandRule(input: {
       out.push({ check: "must_name_names_rival", detail: `${stage} names ${rivalsNamed.join(", ")}` });
   } else if (stage === "comparison") {
     if (!target) out.push({ check: "comparison_missing_target", detail: `comparison must name ${brand}` });
-    if (angle !== "generic" && angle !== "defensive" && !textNamesBrand(text, angle, { required: true }))
-      out.push({ check: "comparison_missing_rival", detail: `comparison cell for ${angle}` });
+    if (angle !== "generic" && angle !== "defensive") {
+      if (!textNamesBrand(text, angle, { required: true }))
+        out.push({ check: "comparison_missing_rival", detail: `comparison cell for ${angle}` });
+      // A comparison cell measures EXACTLY its designed pair - a third
+      // tracked brand in the prompt contaminates the head-to-head (the
+      // jira-vs-Trello cell naming GitHub, 2026-09-29 audit).
+      const extra = rivalsNamed.filter((r) => !isAngleBrand(r));
+      if (extra.length > 0)
+        out.push({ check: "comparison_names_extra_rival", detail: `comparison for ${angle} also names ${extra.join(", ")}` });
+    }
   } else if (stage === "alternatives") {
     if (angle === "defensive") {
       if (!target) out.push({ check: "defensive_alt_missing_target", detail: `defensive alternatives must name ${brand}` });
+      // The keep-or-leave ask is open by design - a named rival steers it.
+      if (rivalsNamed.length > 0)
+        out.push({ check: "alternatives_names_extra_rival", detail: `defensive alternatives names ${rivalsNamed.join(", ")}` });
     } else if (angle !== "generic") {
       if (target) out.push({ check: "offensive_alt_names_target", detail: `offensive alternatives must not name ${brand}` });
       if (!textNamesBrand(text, angle, { required: true }))
         out.push({ check: "offensive_alt_missing_rival", detail: `alternatives cell for ${angle}` });
+      const extra = rivalsNamed.filter((r) => !isAngleBrand(r));
+      if (extra.length > 0)
+        out.push({ check: "alternatives_names_extra_rival", detail: `alternatives for ${angle} also names ${extra.join(", ")}` });
     }
+  } else if (stage === "pricing") {
+    // Pricing cells price the target's world (branded tiers or the generic
+    // category) - a rival name turns them into unlogged comparisons.
+    if (rivalsNamed.length > 0)
+      out.push({ check: "pricing_names_rival", detail: `pricing names ${rivalsNamed.join(", ")}` });
   }
   return out;
 }

@@ -3,7 +3,7 @@ import { tagSetupFromRequest } from "@/lib/cost_log";
 import { z } from "zod";
 import { cacheSource, requireAuthOrDemo } from "@/lib/auth";
 import { apiKeyConfigured } from "@/lib/engine/providers";
-import { checkDesignFidelity, reviewCells } from "@/lib/engine/instrument";
+import { checkDesignFidelity, reviewCells, type CellFlag } from "@/lib/engine/instrument";
 import { checkPromptBrandRule, stageDesignIntent } from "@/lib/engine/battery_checks";
 import { store } from "@/lib/store";
 
@@ -58,6 +58,9 @@ export async function POST(req: Request) {
   const withDesign = parsed.data.candidates
     .map((c, i) => ({ c, i, design: c.design ?? (c.stageKey ? stageDesignIntent(c.stageKey, parsed.data.brand) : null) }))
     .filter((x): x is { c: (typeof parsed.data.candidates)[number]; i: number; design: string } => !!x.design);
+  // Each model check fails SOFT to a pass-through verdict: the free
+  // deterministic brand rule below must reach the client even when the
+  // reviewer times out or the checker errors (it used to die with them).
   const [verdicts, fidelity] = await Promise.all([
     reviewCells({
       brand: parsed.data.brand,
@@ -77,10 +80,18 @@ export async function POST(req: Request) {
         mode: c.mode ?? null,
       })),
       meta: { source: cacheSource(auth) },
+    }).catch((err) => {
+      console.error("cell_review reviewer failed - mechanical checks still run:", err);
+      return parsed.data.candidates.map((c) => ({
+        ok: true, flags: [] as CellFlag[], reason: "", suggestion: c.text,
+      }));
     }),
     checkDesignFidelity({
       candidates: withDesign.map((x) => ({ text: x.c.text, design: x.design })),
       meta: { source: cacheSource(auth) },
+    }).catch((err) => {
+      console.error("cell_review design check failed - mechanical checks still run:", err);
+      return withDesign.map(() => ({ voices: true, reason: "" }));
     }),
   ]);
   // Deterministic brand rules on every edit that carries a stage key - a

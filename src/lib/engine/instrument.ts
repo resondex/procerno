@@ -1487,7 +1487,7 @@ Reply with ONLY: {"voices_design": true|false, "reason": "<one short sentence>"}
 export async function checkDesignFidelity(input: {
   candidates: { text: string; design: string }[];
   meta?: CacheMeta;
-}): Promise<{ voices: boolean; reason: string }[]> {
+}): Promise<{ voices: boolean; reason: string; unchecked?: boolean }[]> {
   const a = await anthropicClient();
   // Scoped, not tagCosts: mutating the shared request context here bled the
   // design_check purpose onto concurrent writer calls in the same request
@@ -1508,14 +1508,18 @@ export async function checkDesignFidelity(input: {
         const text = (res as { content: { type: string; text?: string }[] }).content
           .filter((b) => b.type === "text").map((b) => b.text ?? "").join("")
           .trim().replace(/^```(?:json)?\s*/, "").replace(/\s*```$/, "");
-        const j = JSON.parse(text) as { voices_design: boolean; reason?: string };
+        // Opus occasionally wraps the JSON in prose - take the object, not
+        // the whole reply (the classifyJourney pattern).
+        const j = JSON.parse(text.match(/\{[\s\S]*\}/)?.[0] ?? text) as { voices_design: boolean; reason?: string };
         const out = { voices: !!j.voices_design, reason: j.reason ?? "" };
         await store.cacheSet(key, JSON.stringify(out), input.meta);
         return out;
       } catch (err) {
-        // Fail open: an unreachable checker never blocks the gate.
+        // Fail open for THIS request - an unreachable checker never blocks
+        // the gate - but say so: callers must not cache a set containing
+        // unchecked verdicts as checked (the 183-day-stale-pass hole).
         console.error("design fidelity check failed:", err);
-        return { voices: true, reason: "" };
+        return { voices: true, reason: "", unchecked: true };
       }
     })
   ));
@@ -1793,7 +1797,11 @@ const CELL_WRITER_SYSTEM =
           "- reach=<scenarios>: this single cell is asked by buyers in those " +
           "scenarios only - voice it for them.\n" +
           "- Punctuation people actually type: never an em dash, never the " +
-          "tilde character - write 'about 10', not '~10'.\n";
+          "tilde character - write 'about 10', not '~10'.\n" +
+          "- The text field holds ONLY the final prompt exactly as the " +
+          "person would type it: never a note to yourself, a correction " +
+          "('sorry', 'instead:'), a reference to the seed or this task, or " +
+          "a bracketed annotation.\n";
 
 export interface GridCell {
   stage: string;
@@ -2351,48 +2359,76 @@ export async function regenerateCell(input: {
     `1. stage=${st.key} situation=${input.cell.situation ?? "-"} angle=${primaryBrandName(input.cell.angle)}` +
     `${input.cell.mode ? ` reach=${input.cell.mode}` : ""}${jn ? ` journey(${jn})` : ""}` +
     `\n   guidance: ${st.hint}`;
-  const res = await openaiClient().chat.completions.create({
-    model: CELLS_MODEL,
-    messages: [
-      {
-        role: "system",
-        content: CELL_WRITER_SYSTEM +
-          (input.nearTo
-            ? "Write exactly ONE NEAR VARIANT of the given prompt for the " +
-              "cell below: the SAME designed ask, with ONE concrete detail " +
-              "moved (a number, a constraint, a context detail, who is " +
-              "affected) - noticeably different, never radically different, " +
-              "and never a mere rewording. It must also differ from every " +
-              "previous prompt listed. Return one cell object."
-            : "Write exactly ONE prompt for the single cell below. It must ask " +
-              "the cell's question a genuinely DIFFERENT WAY than every " +
-              "previous prompt listed - a different angle of attack, different " +
-              "concrete specifics, a different kind of asker - never a " +
-              "paraphrase or reordering of one. Return one cell object."),
+  const draw = async (rejectNote: string | null): Promise<string | null> => {
+    const res = await openaiClient().chat.completions.create({
+      model: CELLS_MODEL,
+      messages: [
+        {
+          role: "system",
+          content: CELL_WRITER_SYSTEM +
+            (input.nearTo
+              ? "Write exactly ONE NEAR VARIANT of the given prompt for the " +
+                "cell below: the SAME designed ask, with ONE concrete detail " +
+                "moved (a number, a constraint, a context detail, who is " +
+                "affected) - noticeably different, never radically different, " +
+                "and never a mere rewording. It must also differ from every " +
+                "previous prompt listed. Return one cell object."
+              : "Write exactly ONE prompt for the single cell below. It must ask " +
+                "the cell's question a genuinely DIFFERENT WAY than every " +
+                "previous prompt listed - a different angle of attack, different " +
+                "concrete specifics, a different kind of asker - never a " +
+                "paraphrase or reordering of one. Return one cell object."),
+        },
+        {
+          role: "user",
+          content:
+            `Client brand: ${input.brand}\nCategory: ${input.category}\n` +
+            `Rivals: ${rivals.map(primaryBrandName).join(", ")}\nAudience: ${input.audience ?? "unknown"}\n\n` +
+            `Cell plan:\n${planText}\n\n` +
+            (input.nearTo ? `The prompt to vary:\n${input.nearTo.trim()}\n\n` : "") +
+            `Previous prompts for this cell (write something DIFFERENT):\n` +
+            (avoidNorm.map((t, i) => `${i + 1}. ${t}`).join("\n") || "- (none)") +
+            (rejectNote ? `\n\n[your previous draw was rejected: ${rejectNote}]` : ""),
+        },
+      ],
+      response_format: {
+        type: "json_schema",
+        json_schema: { name: "grid_cells", strict: true, schema: CELLS_SCHEMA },
       },
-      {
-        role: "user",
-        content:
-          `Client brand: ${input.brand}\nCategory: ${input.category}\n` +
-          `Rivals: ${rivals.map(primaryBrandName).join(", ")}\nAudience: ${input.audience ?? "unknown"}\n\n` +
-          `Cell plan:\n${planText}\n\n` +
-          (input.nearTo ? `The prompt to vary:\n${input.nearTo.trim()}\n\n` : "") +
-          `Previous prompts for this cell (write something DIFFERENT):\n` +
-          (avoidNorm.map((t, i) => `${i + 1}. ${t}`).join("\n") || "- (none)"),
-      },
-    ],
-    response_format: {
-      type: "json_schema",
-      json_schema: { name: "grid_cells", strict: true, schema: CELLS_SCHEMA },
-    },
-  });
-  const parsed = JSON.parse(res.choices[0]?.message?.content ?? "{}") as {
-    cells: { text?: string }[];
+    });
+    const parsed = JSON.parse(res.choices[0]?.message?.content ?? "{}") as {
+      cells: { text?: string }[];
+    };
+    return humanize((parsed.cells?.[0]?.text ?? "").trim()) || null;
   };
-  const text = humanize((parsed.cells?.[0]?.text ?? "").trim());
+  // "New prompt" / "near variant" / "Suggest another" run the same free
+  // checks as generateGrid's writer output (they used to serve raw text -
+  // the one seed path that skipped every check): mechanical brand rule,
+  // then the doubt/plan design intent, one steered retry, and null rather
+  // than an unchecked seed - the client keeps what it has.
+  const intent = process.env.PHRASINGS_CHECKS !== "0" ? stageDesignIntent(input.cell.stage, input.brand) : null;
+  let text: string | null = null;
+  let note: string | null = null;
+  for (let attempt = 0; attempt < 2 && !text; attempt++) {
+    const cand = await draw(note);
+    if (!cand) return null;
+    if (avoidNorm.some((t) => t.toLowerCase() === cand.toLowerCase())) return null;
+    const problems =
+      process.env.PHRASINGS_CHECKS !== "0"
+        ? checkPromptBrandRule({
+            text: cand, stage: input.cell.stage, angle: input.cell.angle,
+            brand: input.brand, competitors: input.competitors, category: input.category,
+          }).map((m) => m.detail)
+        : [];
+    if (intent && problems.length === 0) {
+      const [v] = await checkDesignFidelity({ candidates: [{ text: cand, design: intent }], meta: input.meta });
+      if (!v.voices && !v.unchecked) problems.push(`off-design: ${v.reason || "does not voice the cell's design"}`);
+    }
+    if (problems.length === 0) { text = cand; break; }
+    console.warn(`cell alt rejected [${input.cell.stage}]: ${problems.join("; ")} | ${cand.slice(0, 90)}`);
+    note = `${problems.join(" ")} Do not reuse this wording: "${cand}"`;
+  }
   if (!text) return null;
-  const dup = avoidNorm.some((t) => t.toLowerCase() === text.toLowerCase());
-  if (dup) return null;
   await store.cacheSet(key, JSON.stringify(text), stampOf(input));
   return text;
 }
@@ -2694,6 +2730,10 @@ export async function generatePhrasings(input: {
             "should be something a different person would plausibly type.\n" +
             "- Punctuation people actually type: never an em dash, never the " +
             "tilde character - write 'about 10', not '~10'.\n" +
+            "- The text field holds ONLY the final prompt exactly as the " +
+            "person would type it: never a note to yourself, a correction " +
+            "('sorry', 'instead:'), a reference to the seed or this task, " +
+            "or a bracketed annotation.\n" +
             "- A seed may carry [overused: ...]: content words its existing " +
             "phrasings already lean on. Do not build new phrasings around " +
             "those words - find other angles into the same ask (different " +
@@ -2927,6 +2967,7 @@ export async function generatePhrasings(input: {
     // dropped; cell-level findings (seed-number propagation) are logged -
     // their fix is the writer's instruction, measured by its own A/B.
     // PHRASINGS_CHECKS=0 disables (single-change experiments, emergencies).
+    const uncheckedCells = new Set<number>();
     if (process.env.PHRASINGS_CHECKS !== "0") {
       const designFilter = async (cellIdxs: number[]): Promise<number[]> => {
         const targets: { j: number; k: number }[] = [];
@@ -2943,6 +2984,10 @@ export async function generatePhrasings(input: {
         const verdicts = await checkDesignFidelity({ candidates, meta: input.meta });
         const dropAt = new Map<number, Set<number>>();
         verdicts.forEach((v, i) => {
+          // An unchecked verdict serves (fail open) but poisons the cell's
+          // cacheability - the next request re-runs the check instead of
+          // inheriting a stale pass for the cache TTL.
+          if (v.unchecked) uncheckedCells.add(targets[i].j);
           if (!v.voices) {
             const t = targets[i];
             (dropAt.get(t.j) ?? dropAt.set(t.j, new Set()).get(t.j)!).add(t.k);
@@ -2999,10 +3044,14 @@ export async function generatePhrasings(input: {
         out[i] = got[j];
         // Never cache an empty set as real - that would make a transient
         // failure sticky. A zero-stamped marker reads as stale, so waiters
-        // stop waiting and the next request retries.
+        // stop waiting and the next request retries. A set whose design
+        // check errored is served but NOT cached, for the same reason: a
+        // checker outage must not mint a long-lived pass.
         return store.cacheSet(
           keys[i],
-          got[j].length > 0 ? JSON.stringify(got[j]) : JSON.stringify({ __pending: 0 }),
+          got[j].length > 0 && !uncheckedCells.has(j)
+            ? JSON.stringify(got[j])
+            : JSON.stringify({ __pending: 0 }),
           stampOf(input)
         );
       })

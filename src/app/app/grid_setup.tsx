@@ -72,6 +72,11 @@ export interface GridCellUi {
   /** The last machine-offered wording - a cell whose text differs from
    * this was edited by the user, and gets the quality check at confirm. */
   original?: string;
+  /** Wordings in `alts` that the USER wrote (captured when cycling away
+   * from a manual edit). Cycling back to one keeps it subject to the
+   * confirm-time quality check - edit -> cycle away -> cycle back must
+   * not launder an unchecked edit into the machine baseline. */
+  userAlts?: string[];
   /** Paraphrases beyond the seed text; empty until gate 3. */
   phrasings: GridPhrasing[];
   /** The wording the current set was generated for. When the live text
@@ -1221,15 +1226,25 @@ export function useGridSetup(a: GridSetupArgs) {
     const { alts, idx } = cellHistory(c);
     if (alts.length < 2) return;
     const next = (idx + dir + alts.length) % alts.length;
+    // Remember which banked wordings are the user's own: cycling back to
+    // one keeps it under review (original unchanged) instead of promoting
+    // it to the machine baseline unchecked.
+    const userAlts = new Set(c.userAlts ?? []);
+    if (c.text.trim() && c.original != null && c.text !== c.original) userAlts.add(c.text);
+    const cycledToUser = userAlts.has(alts[next]);
     a.setState({
       ...a.state,
       cells: a.state.cells.map((q, j) =>
         j === i
-          // A cycled-to wording becomes the accepted baseline: machine-
-          // offered, or the user's own wording deliberately returned to.
-          // Its paraphrases come back from the bank when it has been
-          // written before - cycling back is free.
-          ? { ...q, text: alts[next], original: alts[next], alts, altIdx: next, ...swapPhrasings(q, alts[next]) }
+          // A cycled-to MACHINE wording becomes the accepted baseline; its
+          // paraphrases come back from the bank when it has been written
+          // before - cycling back is free.
+          ? {
+              ...q, text: alts[next],
+              original: cycledToUser ? q.original : alts[next],
+              alts, altIdx: next, userAlts: [...userAlts],
+              ...swapPhrasings(q, alts[next]),
+            }
           : q
       ),
     });
