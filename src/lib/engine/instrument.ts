@@ -2598,6 +2598,10 @@ export async function generatePhrasings(input: {
             "paraphrase. Blind prompts are the measurement. EXCEPTION: a " +
             "seed whose bracket note says its stage must name the client " +
             "brand - the note wins, every paraphrase names it.\n" +
+            "- NEVER import a brand from the Rivals line above into a " +
+            "paraphrase whose seed does not name it - the roster is context " +
+            "for you, not vocabulary for the asker (a Pixel owner wondering " +
+            "about switching does not recite four competitor names).\n" +
             "- If the seed names brands, every paraphrase names exactly those " +
             "same brands and no others.\n" +
             "- Never change the circumstance or the decision being made; never " +
