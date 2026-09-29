@@ -2678,15 +2678,20 @@ export async function generatePhrasings(input: {
           if (new RegExp(`(?:^|[^a-z0-9])${esc}(?:$|[^a-z0-9])`, caseSensitive ? "" : "i").test(text)) return true;
         }
         if (b.trim().toLowerCase() !== angle) return false;
-        // Split on dots too: "Monday.com" is typed "Monday" as naturally as
-        // "Ulta Beauty" is typed "Ulta" - a whitespace-only split left
-        // dotted names without a shorthand, the correlated-kill shape that
-        // starved the Asana cell.
-        const first = primaryBrandName(b).split(/[\s.]+/)[0] ?? "";
-        if (first.length < 4 || first.toLowerCase() === b.trim().toLowerCase()) return false;
-        const esc = first.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-        const caseSensitive = SIG_AMBIGUOUS_FORMS.has(first.toLowerCase());
-        return new RegExp(`(?:^|[^a-z0-9])${esc}(?:$|[^a-z0-9])`, caseSensitive ? "" : "i").test(text);
+        // ANY distinctive token of the angle brand is its shorthand, split
+        // on spaces and dots alike: "Ulta Beauty" is typed "Ulta",
+        // "Monday.com" is "Monday" - and "Apple iPhone" is "iPhone", where
+        // the distinctive token is SECOND (first-word-only shorthand left
+        // the seed's signature empty and killed 14/14 candidates on the
+        // Pixel alternatives cell, 2026-09-28). Ambiguous English-word
+        // tokens stay case-sensitive.
+        for (const tok of primaryBrandName(b).split(/[\s.]+/)) {
+          if (tok.length < 4 || tok.toLowerCase() === b.trim().toLowerCase()) continue;
+          const esc = tok.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+          const caseSensitive = SIG_AMBIGUOUS_FORMS.has(tok.toLowerCase());
+          if (new RegExp(`(?:^|[^a-z0-9])${esc}(?:$|[^a-z0-9])`, caseSensitive ? "" : "i").test(text)) return true;
+        }
+        return false;
       };
       const sigOf = (text: string) =>
         [input.brand, ...rivals]
