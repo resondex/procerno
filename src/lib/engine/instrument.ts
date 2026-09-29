@@ -51,7 +51,11 @@ const CACHE_TTL_MS = 183 * 24 * 3600 * 1000;
 // filters, tightened number rule) must never serve a NEW project, even for an
 // identical brand and category. Existing projects are untouched - their
 // prompts are stored rows, not cache reads; orphaned entries age out.
-const STYLE_VERSION = "s4";
+// s5 = the 2026-09-29 audit-fix era (Tyler): meta-text + extra-rival +
+// pricing rules, seed-numbers-are-facts inversion, same-concern design
+// line, checked alternate-seed path - the six re-walks must not serve
+// cells or paraphrases cached before these landed.
+const STYLE_VERSION = "s5";
 
 /** Brand forms that double as ordinary English words: only these demand a
  * capitalized occurrence to count as naming the brand ("2-3 services max"
