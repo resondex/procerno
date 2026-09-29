@@ -3036,10 +3036,46 @@ export async function generatePhrasings(input: {
         }
         return short;
       };
-      const short = await designFilter(subset.map((_, j) => j));
+      // Mechanical drops (free) run BEFORE the paid design pass and share
+      // its refill round: a cell trimmed by the brand or number rule used
+      // to ship short and lean on the wizard's visible auto top-up - now
+      // it heals inside the batch like a design kill (Tyler, 2026-09-29,
+      // the AmEx "2 kids" use_case top-up).
+      const mechanicalFilter = (cellIdxs: number[]): number[] => {
+        const findings = checkBattery({
+          brand: input.brand,
+          // The FULL competitor list - the writer's 4-rival cap is a prompt
+          // budget, not a check scope (a leak of rival #5 is still a leak).
+          competitors: input.competitors,
+          category: input.category,
+          cells: cellIdxs.map((j) => ({
+            stage: subset[j].stage, angle: subset[j].angle, text: subset[j].text,
+            phrasings: got[j].map((ph) => ph.text),
+          })),
+        });
+        for (const f of findings) {
+          const j = cellIdxs[f.cell];
+          if (f.check === "duplicate_paraphrase") {
+            console.warn(`battery check [${f.check}] cell ${subset[j]?.stage}: ${f.detail}`);
+            continue;
+          }
+          // A prompt-level brand-rule violation never ships: drop the
+          // offending paraphrase (a violating SEED is upstream's problem
+          // and stays visible in the finding log).
+          const before = got[j].length;
+          got[j] = got[j].filter((ph) => ph.text !== f.text);
+          if (got[j].length < before)
+            console.warn(`battery check dropped [${f.check}] ${subset[j].stage}: ${f.text.slice(0, 90)}`);
+        }
+        return cellIdxs.filter((j) => got[j].length < want);
+      };
+      const all = subset.map((_, j) => j);
+      const mechShort = mechanicalFilter(all);
+      const designShort = await designFilter(all);
+      const short = [...new Set([...mechShort, ...designShort])];
       if (short.length > 0) {
-        // One refill round for cells the filter emptied below target; the
-        // refill itself passes the same check, with no second refill.
+        // One refill round for cells either filter emptied below target;
+        // the refill itself passes both checks, with no second refill.
         const before = short.map((j) => got[j].length);
         const again = await pass(short.map((j) => subset[j]), {
           extra: PHRASINGS_EXTRA_RETRY,
@@ -3048,29 +3084,9 @@ export async function generatePhrasings(input: {
         short.forEach((j, k) => {
           got[j] = [...got[j], ...again[k]].slice(0, want);
         });
-        await designFilter(short.filter((j, k) => got[j].length > before[k]));
-      }
-      const findings = checkBattery({
-        brand: input.brand,
-        // The FULL competitor list - the writer's 4-rival cap is a prompt
-        // budget, not a check scope (a leak of rival #5 is still a leak).
-        competitors: input.competitors,
-        category: input.category,
-        cells: subset.map((c, j) => ({ stage: c.stage, angle: c.angle, text: c.text, phrasings: got[j].map((ph) => ph.text) })),
-      });
-      for (const f of findings) {
-        if (f.check === "duplicate_paraphrase") {
-          console.warn(`battery check [${f.check}] cell ${subset[f.cell]?.stage}: ${f.detail}`);
-        } else {
-          // A prompt-level brand-rule violation never ships: drop the
-          // offending paraphrase (a violating SEED is upstream's problem
-          // and stays visible in the finding log).
-          const j = f.cell;
-          const before = got[j].length;
-          got[j] = got[j].filter((ph) => ph.text !== f.text);
-          if (got[j].length < before)
-            console.warn(`battery check dropped [${f.check}] ${subset[j].stage}: ${f.text.slice(0, 90)}`);
-        }
+        const grew = short.filter((j, k) => got[j].length > before[k]);
+        mechanicalFilter(grew);
+        await designFilter(grew.filter((j) => got[j].length > 0));
       }
     }
 
