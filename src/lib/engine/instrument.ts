@@ -2677,7 +2677,19 @@ export async function generatePhrasings(input: {
           const caseSensitive = SIG_AMBIGUOUS_FORMS.has(f.toLowerCase());
           if (new RegExp(`(?:^|[^a-z0-9])${esc}(?:$|[^a-z0-9])`, caseSensitive ? "" : "i").test(text)) return true;
         }
-        if (b.trim().toLowerCase() !== angle) return false;
+        // Token shorthand applies where context makes it unambiguous: the
+        // cell's OWN angle rival, and the TARGET brand in must-name stages
+        // (a churn seed saying "Google Pixel" with candidates typing bare
+        // "Pixel" killed half of every batch - the family's target-side
+        // sibling). Blind stages stay strict: "pixel density" in a blind
+        // candidate must never register as the brand.
+        const isTarget = b === input.brand;
+        // Comparison and pricing join the must-name set here: their
+        // target-named cells carry the same context guarantee, and in their
+        // BLIND cells a bare-token candidate registering the target is a
+        // leak that SHOULD die - correct in both directions.
+        const targetOk = isTarget && (MUST_NAME_STAGES.has(seed.stage) || seed.stage === "comparison" || seed.stage === "pricing");
+        if (b.trim().toLowerCase() !== angle && !targetOk) return false;
         // ANY distinctive token of the angle brand is its shorthand, split
         // on spaces and dots alike: "Ulta Beauty" is typed "Ulta",
         // "Monday.com" is "Monday" - and "Apple iPhone" is "iPhone", where
