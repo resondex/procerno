@@ -2,7 +2,11 @@ import { createHash } from "crypto";
 import { tagCosts, withCostContext } from "../cost_log";
 import { anthropicClient, openaiClient } from "./providers";
 import { INSTRUMENT_HELPER_MODEL } from "./models";
-import { checkBattery, checkPromptBrandRule, MUST_NAME_STAGES, questionTypeOf, seedDesignLine, stageDesignIntent, TERM_COLLISIONS, type QuestionType } from "./battery_checks";
+import {
+  AMBIGUOUS_FORMS, checkBattery, checkCandidateSignature, checkPromptAgainstSpec,
+  deriveCheckSpec, MUST_NAME_STAGES, questionTypeOf, resolveCellSpec, seedDesignLine, specWriterNote,
+  stageDesignIntent, TERM_COLLISIONS, type CellCheckSpec, type QuestionType,
+} from "./battery_checks";
 export { MUST_NAME_STAGES };
 import { store } from "../store";
 import type { CacheMeta } from "../types";
@@ -58,16 +62,18 @@ const CACHE_TTL_MS = 183 * 24 * 3600 * 1000;
 // s6 = same day, after the comparison-signature deadlock fix (design-
 // derived expected sig, case-blind design-named angle): walk 2 of the six
 // drafts regenerates everything under it.
-const STYLE_VERSION = "s6";
+// s7 = typed check-spec era (2026-09-29): every generated cell carries a
+// CellCheckSpec derived once from its design after its seed's last heal,
+// and the brand/number/design checks verify candidates against it instead
+// of re-inferring the design from the seed's spelling - nothing generated
+// under the string era serves.
+const STYLE_VERSION = "s7";
 
 /** Brand forms that double as ordinary English words: only these demand a
  * capitalized occurrence to count as naming the brand ("2-3 services max"
  * is not Max). Everything else matches case-blind - people type brand
  * names lowercase all the time. */
-const SIG_AMBIGUOUS_FORMS = new Set([
-  "max", "visa", "citi", "prime", "go", "one", "mini", "pro", "plus",
-  "air", "fire", "mission", "video", "music", "cloud", "monday",
-]);
+const SIG_AMBIGUOUS_FORMS = AMBIGUOUS_FORMS;
 // Version the cache: composer-rule or prompt-style changes must not serve
 // grids built under old rules.
 const INSTRUMENT_VERSION = "g7";
@@ -1827,6 +1833,10 @@ export interface GridCell {
   qtype?: QuestionType;
   /** The prompt as a user would type it. */
   text: string;
+  /** The cell's typed check-spec (s7+): derived once after the seed's last
+   * heal; every check verifies candidates against it. Absent on legacy
+   * cells, which keep the string-derived checks. */
+  spec?: CellCheckSpec;
 }
 
 const CELLS_SCHEMA = {
@@ -1877,7 +1887,7 @@ export function phrasingCacheKey(
     brand: string; competitors: string[]; audience: string | null;
     count: number; base: Moderators; scenarios: ScenarioSpec[];
   },
-  cell: { situation: string | null; mode?: string | null; text: string }
+  cell: { situation: string | null; mode?: string | null; text: string; spec?: unknown }
 ): string {
   const rivals = args.competitors.slice(0, 4);
   const s = cell.situation ? args.scenarios.find((x) => x.label === cell.situation) : undefined;
@@ -1885,7 +1895,9 @@ export function phrasingCacheKey(
   return cacheKey("phrasings", [
     PHRASINGS_VERSION, STYLE_VERSION, args.brand, rivals.join(","), args.audience, String(args.count),
     JSON.stringify(args.base),
-    `${cell.situation ?? ""}|${cell.mode ?? ""}|${cell.text}|${jnote}`,
+    // Spec-checked and string-checked sets never share an entry: a legacy
+    // draft's set must not serve a spec-era cell or the reverse.
+    `${cell.situation ?? ""}|${cell.mode ?? ""}|${cell.text}|${jnote}${cell.spec ? "|spec" : ""}`,
   ]);
 }
 
@@ -1963,8 +1975,18 @@ export async function generateGrid(input: {
     })
   );
   const resolved: (GridCell[] | null)[] = units.map(() => null);
+  // A served cell always carries a spec matching its (scrubbed) text: s7
+  // entries were written with one, and the derivation is pure, so a
+  // mismatch (humanize drift, pre-spec entry) re-derives rather than
+  // serving a stale or missing design.
   const scrub = (cells: GridCell[]): GridCell[] =>
-    cells.map((c) => ({ ...c, text: humanize(c.text) }));
+    cells.map((c) => {
+      const text = humanize(c.text);
+      const spec = c.spec && c.spec.seed === text.trim()
+        ? c.spec
+        : deriveCheckSpec({ ...c, text }, input.brand, input.competitors, input.category);
+      return { ...c, text, spec };
+    });
   const valueOf = (raw: string): GridCell[] | null => {
     try {
       const v = JSON.parse(raw) as { __pending?: number } | GridCell[];
@@ -2117,13 +2139,19 @@ export async function generateGrid(input: {
         // guaranteed starvation. One regeneration with the violation
         // attached, re-checked mechanically; a still-failing seed stands
         // with a loud log (never blocks generation).
+        // s7: the seed is checked against the spec its design derives -
+        // required brands tolerant, forbidden brands strict - never against
+        // a design re-read from its own spelling.
+        const seedRule = (c: { stage: string; angle: string; text: string }) =>
+          checkPromptAgainstSpec({
+            text: c.text,
+            spec: deriveCheckSpec(c, input.brand, input.competitors, input.category),
+            category: input.category,
+          });
         if (process.env.PHRASINGS_CHECKS !== "0" && flat.length > 0) {
           for (let i = 0; i < flat.length; i++) {
             const c = flat[i];
-            const mech = checkPromptBrandRule({
-              text: c.text, stage: c.stage, angle: c.angle,
-              brand: input.brand, competitors: input.competitors, category: input.category,
-            });
+            const mech = seedRule(c);
             if (mech.length === 0) continue;
             console.warn(`seed brand rule flagged [${c.stage}]: ${mech.map((m) => m.check).join(",")} | ${c.text.slice(0, 90)}`);
             const row =
@@ -2146,13 +2174,7 @@ export async function generateGrid(input: {
               });
               const cell2 = (JSON.parse(res2.choices[0]?.message?.content ?? "{}") as { cells?: { text?: string }[] }).cells?.[0];
               const text2 = cell2?.text?.trim();
-              if (
-                text2 &&
-                checkPromptBrandRule({
-                  text: text2, stage: c.stage, angle: c.angle,
-                  brand: input.brand, competitors: input.competitors, category: input.category,
-                }).length === 0
-              ) {
+              if (text2 && seedRule({ stage: c.stage, angle: c.angle, text: text2 }).length === 0) {
                 console.warn(`seed brand rule healed [${c.stage}]: ${text2.slice(0, 90)}`);
                 flat[i].text = humanize(text2);
               } else {
@@ -2215,8 +2237,13 @@ export async function generateGrid(input: {
         }
         // The heals above rewrite seed text after qtype was stamped at
         // parse time - recompute so a healed cell's stored type matches
-        // its final wording.
-        flat.forEach((c) => { c.qtype = questionTypeOf(c, input.brand, input.category); });
+        // its final wording. The check-spec is written HERE, once, from
+        // the final healed seed: everything downstream (paraphrase
+        // signature, mechanical battery, design check) reads it.
+        flat.forEach((c) => {
+          c.qtype = questionTypeOf(c, input.brand, input.category);
+          c.spec = deriveCheckSpec(c, input.brand, input.competitors, input.category);
+        });
         await Promise.all(
           group.map((u) => {
             const cells = produced.get(u) ?? [];
@@ -2343,8 +2370,12 @@ export async function regenerateCell(input: {
    * the prompts-card sibling of the scenario near neighbor. */
   nearTo?: string;
   meta?: CacheMeta;
-}): Promise<string | null> {
+}): Promise<{ text: string; spec: CellCheckSpec } | null> {
   tagCosts({ purpose: "setup:cells" });
+  // Every alternate draw carries its own check-spec, derived from the
+  // cell's design and the drawn seed - the same contract as generateGrid.
+  const specFor = (text: string) =>
+    deriveCheckSpec({ stage: input.cell.stage, angle: input.cell.angle, text }, input.brand, input.competitors, input.category);
   const rivals = input.competitors.slice(0, 4);
   const stages = participationMask(input.base, input.scenarios);
   const st = stages.find((x) => x.key === input.cell.stage);
@@ -2358,7 +2389,10 @@ export async function regenerateCell(input: {
     input.nearTo ? `near:${input.nearTo.trim().toLowerCase()}` : "",
   ]);
   const hit = await store.cacheGet(key, CACHE_TTL_MS);
-  if (hit) return humanize(JSON.parse(hit) as string);
+  if (hit) {
+    const text = humanize(JSON.parse(hit) as string);
+    return { text, spec: specFor(text) };
+  }
   const jn = input.cell.situation
     ? journeyNote(input.base, input.scenarios.find((sc) => sc.label === input.cell.situation) ?? { label: "", description: "", journey: null })
     : null;
@@ -2422,10 +2456,7 @@ export async function regenerateCell(input: {
     if (avoidNorm.some((t) => t.toLowerCase() === cand.toLowerCase())) return null;
     const problems =
       process.env.PHRASINGS_CHECKS !== "0"
-        ? checkPromptBrandRule({
-            text: cand, stage: input.cell.stage, angle: input.cell.angle,
-            brand: input.brand, competitors: input.competitors, category: input.category,
-          }).map((m) => m.detail)
+        ? checkPromptAgainstSpec({ text: cand, spec: specFor(cand), category: input.category }).map((m) => m.detail)
         : [];
     if (intent && problems.length === 0) {
       const [v] = await checkDesignFidelity({ candidates: [{ text: cand, design: intent }], meta: input.meta });
@@ -2437,7 +2468,7 @@ export async function regenerateCell(input: {
   }
   if (!text) return null;
   await store.cacheSet(key, JSON.stringify(text), stampOf(input));
-  return text;
+  return { text, spec: specFor(text) };
 }
 
 /* ------------------------------ phrasings ------------------------------- */
@@ -2572,7 +2603,13 @@ export async function generatePhrasings(input: {
   audience: string | null;
   base: Moderators;
   scenarios: ScenarioSpec[];
-  cells: { stage: string; situation: string | null; angle: string; mode?: string | null; text: string }[];
+  cells: {
+    stage: string; situation: string | null; angle: string; mode?: string | null; text: string;
+    /** The cell's carried check-spec (s7+). Present = the spec path (the
+     * design is re-derived from the cell and preferred over the carried
+     * copy); absent = the legacy string-derived path, unchanged. */
+    spec?: CellCheckSpec | null;
+  }[];
   /** Total phrasings wanted per cell including the seed. */
   count: number;
   /** Skip the cache read: the user asked for a fresh set. */
@@ -2613,6 +2650,13 @@ export async function generatePhrasings(input: {
   // and redrew all ~500 paraphrases. See phrasingCacheKey.
   const keys = input.cells.map((c) => phrasingCacheKey(input, c));
   const out: Phrasing[][] = input.cells.map(() => []);
+  // Each cell's resolved spec, looked up by cell object: pass() and the
+  // filters see subsets, never indices into input.cells.
+  const specOf = new Map<(typeof input.cells)[number], CellCheckSpec>();
+  for (const c of input.cells) {
+    const spec = resolveCellSpec(c, input.brand, input.competitors, input.category);
+    if (spec) specOf.set(c, spec);
+  }
 
   /** A pending marker's claim time, or null for a real value / no entry. */
   const pendingAt = (raw: string | null): number | null => {
@@ -2659,11 +2703,29 @@ export async function generatePhrasings(input: {
       maxOverlap?: number;
     }
   ): Promise<Phrasing[][]> {
+    const blindSeed = (c: (typeof subset)[number]) => {
+      const spec = specOf.get(c);
+      return spec ? spec.requiredBrands.length === 0 : brandSignature(c.text, input.brand, rivals) === "";
+    };
     const extra =
       opts?.extra ??
-      (subset.some((c) => brandSignature(c.text, input.brand, rivals) === "")
+      (subset.some(blindSeed)
         ? PHRASINGS_EXTRA_BLIND
         : PHRASINGS_EXTRA);
+    // The seed's brand note: a spec cell's is rendered FROM its design;
+    // a legacy cell's is inferred from the seed's spelling, as before.
+    const brandNote = (c: (typeof subset)[number]): string => {
+      const spec = specOf.get(c);
+      if (spec) {
+        const note = specWriterNote(spec);
+        return note ? `\n   ${note}` : "";
+      }
+      return brandSignature(c.text, input.brand, rivals) === ""
+        ? MUST_NAME_STAGES.has(c.stage)
+          ? `\n   [this stage must name ${input.brand}: every paraphrase names ${input.brand} (the seed's blind wording is a legacy defect - do not preserve it), never a rival]`
+          : `\n   [deliberately blind variant: name NO brand - the guidance's subject stays implied ("my subscription", "the service"), never named]`
+        : "";
+    };
     const cellText = subset
       .map(
         (c, i) =>
@@ -2678,11 +2740,7 @@ export async function generatePhrasings(input: {
           // unprompted recall, and a guidance line saying "the client
           // brand" made the writer name it - every candidate then died
           // as a signature leak (six cells straight to 1/10 under p8).
-          (brandSignature(c.text, input.brand, rivals) === ""
-            ? MUST_NAME_STAGES.has(c.stage)
-              ? `\n   [this stage must name ${input.brand}: every paraphrase names ${input.brand} (the seed's blind wording is a legacy defect - do not preserve it), never a rival]`
-              : `\n   [deliberately blind variant: name NO brand - the guidance's subject stays implied ("my subscription", "the service"), never named]`
-            : "") +
+          brandNote(c) +
           (opts?.avoidWords?.[i]?.length
             ? `\n   [overused: ${opts.avoidWords[i].join(", ")}]`
             : "")
@@ -2859,7 +2917,10 @@ export async function generatePhrasings(input: {
           .filter((b, i) => b && namesForSig(text, [input.brand, ...rivals][i]))
           .sort()
           .join("|");
-      let sig = sigOf(seed.text);
+      const spec = specOf.get(seed);
+      let sig = spec
+        ? `required=[${spec.requiredBrands.join(", ")}] forbidden=[${spec.forbiddenBrands.join(", ")}]`
+        : sigOf(seed.text);
       // The expected signature is the CELL DESIGN's, not merely the seed
       // text's - two design-required brands are unioned in:
       // (1) must-name stages require the client brand (a blind seed is a
@@ -2874,8 +2935,9 @@ export async function generatePhrasings(input: {
         const k = name.trim().toLowerCase();
         if (k && !sig.split("|").includes(k)) sig = [...sig.split("|").filter(Boolean), k].sort().join("|");
       };
-      if (MUST_NAME_STAGES.has(seed.stage) || seed.stage === "comparison") unionSig(input.brand);
+      if (!spec && (MUST_NAME_STAGES.has(seed.stage) || seed.stage === "comparison")) unionSig(input.brand);
       if (
+        !spec &&
         (seed.stage === "comparison" || seed.stage === "alternatives") &&
         seed.angle && !["generic", "defensive"].includes(seed.angle.trim().toLowerCase())
       ) {
@@ -2903,7 +2965,12 @@ export async function generatePhrasings(input: {
         if (!text) { culls.empty++; continue; }
         // The signature check is the blind/branded discipline: a paraphrase of
         // a blind seed that names a brand is not a paraphrase, it is a leak.
-        if (sigOf(text) !== sig) { culls.sig++; continue; }
+        // Spec cells: every required brand named (tolerant), no forbidden
+        // brand named (strict) - the design, not the seed's spelling.
+        if (spec ? !checkCandidateSignature(text, spec, { category: input.category }).ok : sigOf(text) !== sig) {
+          culls.sig++;
+          continue;
+        }
         const n = norm(text);
         if (seen.has(n)) { culls.dup++; continue; }
         // A paraphrase that shares most of its words with the seed or a sibling
@@ -3008,7 +3075,11 @@ export async function generatePhrasings(input: {
         const targets: { j: number; k: number }[] = [];
         const candidates: { text: string; design: string }[] = [];
         for (const j of cellIdxs) {
-          const line = seedDesignLine(subset[j].stage, input.brand, subset[j].text);
+          // The STORED design line for spec cells; synthesized from the
+          // seed for legacy ones (the same string - design-check cache
+          // entries carry over).
+          const spec = specOf.get(subset[j]);
+          const line = spec ? spec.designLine : seedDesignLine(subset[j].stage, input.brand, subset[j].text);
           if (!line) continue;
           got[j].forEach((ph, k) => {
             targets.push({ j, k });
@@ -3051,6 +3122,7 @@ export async function generatePhrasings(input: {
           cells: cellIdxs.map((j) => ({
             stage: subset[j].stage, angle: subset[j].angle, text: subset[j].text,
             phrasings: got[j].map((ph) => ph.text),
+            spec: specOf.get(subset[j]) ?? null,
           })),
         });
         for (const f of findings) {

@@ -59,7 +59,7 @@ export async function POST(req: Request) {
   if (!parsed.success) {
     return NextResponse.json({ error: "bad request" }, { status: 400 });
   }
-  const text = await regenerateCell({
+  const drawn = await regenerateCell({
     brand: parsed.data.brand,
     category: parsed.data.category,
     competitors: parsed.data.competitors,
@@ -71,8 +71,10 @@ export async function POST(req: Request) {
     nearTo: parsed.data.nearTo,
     meta: { source: cacheSource(auth) },
   });
-  if (!text) {
+  if (!drawn) {
     return NextResponse.json({ error: "no new prompt came back - try again" }, { status: 502 });
   }
-  return NextResponse.json({ text });
+  // The draw's check-spec rides back with it: the client stores it on the
+  // cell, and every later check reads it.
+  return NextResponse.json({ text: drawn.text, spec: drawn.spec });
 }

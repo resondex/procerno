@@ -4,7 +4,9 @@ import { z } from "zod";
 import { cacheSource, requireAuthOrDemo } from "@/lib/auth";
 import { apiKeyConfigured } from "@/lib/engine/providers";
 import { checkDesignFidelity, reviewCells, type CellFlag } from "@/lib/engine/instrument";
-import { checkPromptBrandRule, stageDesignIntent } from "@/lib/engine/battery_checks";
+import {
+  checkPromptAgainstSpec, checkPromptBrandRule, deriveCheckSpec, stageDesignIntent, type CellCheckSpec,
+} from "@/lib/engine/battery_checks";
 import { store } from "@/lib/store";
 
 export const maxDuration = 60;
@@ -35,6 +37,16 @@ const Body = z.object({
          * deterministic brand-rule check and the stage-intent design check
          * on manual edits, before any paraphrase generation. */
         stageKey: z.string().trim().max(80).optional(),
+        /** s7: the cell carries a typed check-spec. Its presence selects
+         * the spec path; the design is re-derived here from stageKey +
+         * angle + the seed, never trusted from the client. */
+        spec: z.record(z.string(), z.unknown()).nullable().optional(),
+        /** This candidate IS the cell's seed (not a paraphrase) - a
+         * confirmed seed edit re-derives the cell's spec from its text. */
+        seedEdit: z.boolean().optional(),
+        /** The cell's current seed text, for paraphrase candidates: the
+         * spec (quantities, design line) is the seed's. */
+        seed: z.string().trim().max(2000).optional(),
       })
     )
     .min(1)
@@ -55,8 +67,26 @@ export async function POST(req: Request) {
   if (!parsed.success) {
     return NextResponse.json({ error: "bad request" }, { status: 400 });
   }
+  // Spec-era candidates get their cell's design re-derived from the seed
+  // (the edited text itself for a seed edit). A seed is judged against
+  // the stage intent (a seed cannot be its own yardstick); a paraphrase
+  // against the stored same-concern design line, as in generation.
+  const specs: (CellCheckSpec | null)[] = parsed.data.candidates.map((c) => {
+    if (!c.spec || !c.stageKey) return null;
+    const seedText = c.seedEdit ? c.text : c.seed;
+    if (!seedText) return null;
+    return deriveCheckSpec(
+      { stage: c.stageKey, angle: c.angle, text: seedText },
+      parsed.data.brand, parsed.data.competitors, parsed.data.category
+    );
+  });
   const withDesign = parsed.data.candidates
-    .map((c, i) => ({ c, i, design: c.design ?? (c.stageKey ? stageDesignIntent(c.stageKey, parsed.data.brand) : null) }))
+    .map((c, i) => {
+      const intent = c.stageKey ? stageDesignIntent(c.stageKey, parsed.data.brand) : null;
+      const spec = specs[i];
+      const design = c.design ?? (spec && !c.seedEdit ? spec.designLine ?? intent : intent);
+      return { c, i, design };
+    })
     .filter((x): x is { c: (typeof parsed.data.candidates)[number]; i: number; design: string } => !!x.design);
   // Each model check fails SOFT to a pass-through verdict: the free
   // deterministic brand rule below must reach the client even when the
@@ -99,11 +129,14 @@ export async function POST(req: Request) {
   // proceeds to paraphrase generation.
   parsed.data.candidates.forEach((c, i) => {
     if (!c.stageKey) return;
-    const mech = checkPromptBrandRule({
-      text: c.text, stage: c.stageKey, angle: c.angle,
-      brand: parsed.data.brand, competitors: parsed.data.competitors,
-      category: parsed.data.category,
-    });
+    const spec = specs[i];
+    const mech = spec
+      ? checkPromptAgainstSpec({ text: c.text, spec, category: parsed.data.category })
+      : checkPromptBrandRule({
+          text: c.text, stage: c.stageKey, angle: c.angle,
+          brand: parsed.data.brand, competitors: parsed.data.competitors,
+          category: parsed.data.category,
+        });
     if (mech.length > 0) {
       const v = verdicts[i];
       v.ok = false;
@@ -145,5 +178,11 @@ export async function POST(req: Request) {
       })
       .catch(() => {});
   }
-  return NextResponse.json({ verdicts });
+  // A confirmed seed edit's re-derived spec rides back (aligned with the
+  // candidates; null for paraphrases and legacy cells) for the client to
+  // store on the cell.
+  return NextResponse.json({
+    verdicts,
+    specs: parsed.data.candidates.map((c, i) => (c.seedEdit ? specs[i] : null)),
+  });
 }

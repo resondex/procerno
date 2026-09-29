@@ -116,6 +116,11 @@ const TECH_TOKENS = /\b(4k|5g|8k|1080p?|720p?|2160p?|24\/7|mp[34]|wi-?fi ?[67]|u
 const key = (s: string) => (s || "").toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
 
 function brandPatterns(name: string, opts?: { required?: boolean; extraForms?: string[]; excludeTokens?: Set<string> }): RegExp[] {
+  return brandForms(name, opts).map((n) => new RegExp(`\\b${n.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}s?\\b`));
+}
+
+/** The keyed surface forms brandPatterns matches (see there). */
+function brandForms(name: string, opts?: { required?: boolean; extraForms?: string[]; excludeTokens?: Set<string> }): string[] {
   const out = new Set<string>();
   // A parenthetical in a brand name is a qualifier, not a name - "Azure
   // DevOps (Boards)" must never match "kanban boards". Exception: when the
@@ -139,7 +144,7 @@ function brandPatterns(name: string, opts?: { required?: boolean; extraForms?: s
     const fk = key(f);
     if (fk) out.add(fk);
   }
-  return [...out].map((n) => new RegExp(`\\b${n.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}s?\\b`));
+  return [...out];
 }
 
 export function textNamesBrand(
@@ -157,6 +162,9 @@ export interface BatteryCheckCell {
   text: string;
   /** Paraphrase texts (seed excluded). */
   phrasings: string[];
+  /** The cell's typed design, when it carries one (s7+). Absent = the
+   * legacy string-derived checks. */
+  spec?: CellCheckSpec | null;
 }
 
 export interface BatteryFinding {
@@ -294,16 +302,21 @@ export function checkBattery(input: {
       const k = key(t);
       if (seen.has(k)) findings.push({ cell: i, check: "duplicate_paraphrase", text: t, detail: "exact duplicate" });
       seen.add(k);
-      for (const v of checkPromptBrandRule({ text: t, stage: cell.stage, angle: cell.angle, brand: input.brand, competitors: input.competitors, category: input.category, extraForms: input.extraForms }))
-        findings.push({ cell: i, ...v, text: t });
+      // A cell carrying a typed spec is verified AGAINST it; a legacy cell
+      // reverse-engineers its design from stage + angle + prose, as before.
+      const verdicts = cell.spec
+        ? checkPromptAgainstSpec({ text: t, spec: cell.spec, category: input.category, extraForms: input.extraForms })
+        : checkPromptBrandRule({ text: t, stage: cell.stage, angle: cell.angle, brand: input.brand, competitors: input.competitors, category: input.category, extraForms: input.extraForms });
+      for (const v of verdicts) findings.push({ cell: i, ...v, text: t });
     }
     // Seed numbers are FACTS of the designed question (Tyler, 2026-09-29):
     // a paraphrase keeps them verbatim or leaves them out, and never
     // carries a quantity the seed does not - substituting "0% for 24
     // months" with "about 18 months" or inventing spec texture changes
     // the question being measured. (This inverts the retired propagation
-    // check, which treated repetition as the defect.)
-    const seedNums = new Set(quantities(cell.text, brandVocab));
+    // check, which treated repetition as the defect.) A spec carries the
+    // seed's facts already extracted - including spelled-out ones.
+    const seedNums = new Set(cell.spec ? cell.spec.quantities : quantities(cell.text, brandVocab));
     for (const t of cell.phrasings) {
       // Extra 1s and 2s are tolerated: seeds spell them ("under a second",
       // "family of four" restated as "2 kids") and candidates digitize -
@@ -320,4 +333,329 @@ export function checkBattery(input: {
     }
   });
   return findings;
+}
+
+/* ------------------------- typed check-spec (s7) --------------------------
+ * The string era reverse-engineered every cell's design from its seed's
+ * prose, twice per check - and each surface form it misread was a bug
+ * (lowercase "visa" not registering the designed rival, "60k" vs "60,000",
+ * "under a second" vs "under 1 second", "Apple iPhone" typed "iPhone").
+ * The fix that kept working was to derive expectations from the cell
+ * DESIGN, not the seed's spelling. The spec makes that the architecture:
+ * each cell carries its design as data, derived ONCE (mechanically, no
+ * model calls) after its seed's last heal, and every check verifies
+ * candidates AGAINST it:
+ * - REQUIRED brands are guaranteed by the design, so their detection is
+ *   case-blind and format-tolerant (any distinctive token, sub-phrase,
+ *   compact form or parenthetical alias) - context disambiguates;
+ * - FORBIDDEN brands keep precision-first detection (STOP_FORMS, the
+ *   ambiguous-word case guard, TERM_COLLISIONS, category tokens) - a false
+ *   positive there kills honest candidates;
+ * - quantities are the seed's FACTS, normalized once.
+ * Legacy cells (no spec) keep the string-derived path unchanged. */
+
+/** How a cell's brand design is scored. */
+export type BrandMode =
+  | "blind" | "must_name" | "comparison"
+  | "alternatives_defensive" | "alternatives_offensive"
+  | "pricing" | "open";
+
+export interface CellCheckSpec {
+  /** Spec schema version. */
+  v: 1;
+  stage: string;
+  angle: string;
+  /** The client brand, as configured. */
+  target: string;
+  /** The roster entry the cell's angle designates (comparison / offensive
+   * alternatives), or null. */
+  angleBrand: string | null;
+  /** The seed text this spec was derived from - a record, and the
+   * freshness key (a spec whose seed differs from the cell's text is
+   * re-derived, never trusted). */
+  seed: string;
+  brandMode: BrandMode;
+  /** Brands every prompt of the cell must name. */
+  requiredBrands: string[];
+  /** Tracked brands no prompt of the cell may name. required and
+   * forbidden partition [target, ...competitors]. */
+  forbiddenBrands: string[];
+  /** The seed's quantities (> 2, normalized: "60k" = "60,000" = "60000";
+   * spelled-out seed numbers included) - facts a paraphrase keeps or
+   * omits, never changes. */
+  quantities: string[];
+  /** The design sentence doubt/plan paraphrases must voice (same-concern
+   * form, quoting the seed), or null for stages without one. */
+  designLine: string | null;
+  qtype: QuestionType;
+}
+
+/** Brand forms that double as ordinary English words: in FORBIDDEN
+ * detection these count only when capitalized ("2-3 services max" is not
+ * Max, "do I need a visa" is not Visa). Shared with the legacy signature
+ * filter in instrument.ts. */
+export const AMBIGUOUS_FORMS = new Set([
+  "max", "visa", "citi", "prime", "go", "one", "mini", "pro", "plus",
+  "air", "fire", "mission", "video", "music", "cloud", "monday",
+]);
+
+/** Tokens that never identify a brand on their own ("monday.com" is not
+ * named by ".com"). */
+const GENERIC_TOKENS = new Set(["com", "net", "org", "inc", "llc", "ltd", "the", "and", "app", "co"]);
+
+/** "Amazon (beauty)" -> "Amazon": the parenthetical is a display
+ * disambiguator (mirrors instrument.primaryBrandName). */
+function speakable(name: string): string {
+  return name.replace(/\s*\([^)]*\)/g, " ").replace(/\s+/g, " ").trim();
+}
+
+const esc = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
+/** Required-brand detection: case-blind and format-tolerant. The cell
+ * design guarantees the brand's presence, so any of its identifying forms
+ * counts - full name, any distinctive token ("iPhone" for "Apple iPhone",
+ * "Monday" for "monday.com"), any contiguous sub-phrase ("Prime Video"),
+ * the compact form ("oneplus" / "one plus"), the parenthetical alias
+ * ("HBO"), dictionary aliases. Category words never count. */
+export function namesRequiredBrand(
+  text: string, name: string, opts?: { extraForms?: string[]; excludeTokens?: Set<string> }
+): boolean {
+  const t = key(text).replace(TERM_COLLISIONS, " ");
+  const forms = new Set<string>();
+  const base = key(name.replace(/\s*\([^)]*\)/g, ""));
+  const paren = key([...name.matchAll(/\(([^)]*)\)/g)].map((m) => m[1]).join(" "));
+  for (const f of [base, paren]) {
+    if (!f) continue;
+    forms.add(f);
+    const toks = f.split(" ");
+    if (toks.length > 1) forms.add(toks.join(""));
+    for (let i = 0; i < toks.length; i++) {
+      const tok = toks[i];
+      if (tok.length >= 3 && !STOP_FORMS.has(tok) && !GENERIC_TOKENS.has(tok) && !opts?.excludeTokens?.has(tok)) forms.add(tok);
+      for (let j = i + 2; j <= toks.length; j++) forms.add(toks.slice(i, j).join(" "));
+    }
+  }
+  for (const f of opts?.extraForms ?? []) {
+    const fk = key(f);
+    if (fk) forms.add(fk);
+  }
+  return [...forms].some((f) => new RegExp(`\\b${esc(f)}s?\\b`).test(t));
+}
+
+/** Forbidden-brand detection: precision-first. The same patterns as
+ * textNamesBrand (STOP_FORMS, TERM_COLLISIONS, category tokens excluded),
+ * with the ambiguous-word case guard: an ambiguous form counts only when
+ * capitalized - and a brand whose whole name is an ambiguous stopword
+ * ("Max") counts when capitalized, as the legacy signature did. */
+export function namesForbiddenBrand(
+  text: string, name: string, opts?: { extraForms?: string[]; excludeTokens?: Set<string> }
+): boolean {
+  const raw = text.replace(new RegExp(TERM_COLLISIONS.source, "gi"), " ");
+  const t = key(raw);
+  const capitalized = (form: string) => {
+    const cap = form[0].toUpperCase() + form.slice(1);
+    return new RegExp(`(?:^|[^A-Za-z0-9])(?:${esc(cap)}|${esc(form.toUpperCase())})(?:s|'s)?(?![A-Za-z0-9])`).test(raw);
+  };
+  for (const form of brandForms(name, opts)) {
+    if (AMBIGUOUS_FORMS.has(form) ? capitalized(form) : new RegExp(`\\b${esc(form)}s?\\b`).test(t)) return true;
+  }
+  const primary = key(speakable(name));
+  return STOP_FORMS.has(primary) && AMBIGUOUS_FORMS.has(primary) && capitalized(primary);
+}
+
+/** The scoring mode a stage x angle designs - the same branches
+ * checkPromptBrandRule walks, named once. */
+export function brandModeOf(stage: string, angle: string): BrandMode {
+  if (BLIND_STAGES.has(stage)) return "blind";
+  if (MUST_NAME_STAGES.has(stage)) return "must_name";
+  if (stage === "comparison") return "comparison";
+  if (stage === "alternatives") {
+    if (angle === "defensive") return "alternatives_defensive";
+    return angle === "generic" ? "open" : "alternatives_offensive";
+  }
+  if (stage === "pricing") return "pricing";
+  return "open";
+}
+
+/** Spelled-out numbers a seed may carry ("family of four", "a dozen"). */
+const SPELLED: Record<string, number> = {
+  three: 3, four: 4, five: 5, six: 6, seven: 7, eight: 8, nine: 9, ten: 10,
+  eleven: 11, twelve: 12, thirteen: 13, fourteen: 14, fifteen: 15, sixteen: 16,
+  seventeen: 17, eighteen: 18, nineteen: 19, twenty: 20, thirty: 30, forty: 40,
+  fifty: 50, sixty: 60, seventy: 70, eighty: 80, ninety: 90, hundred: 100, dozen: 12,
+};
+
+/** The seed's quantity facts: the normalizing extractor's digits plus any
+ * spelled-out numbers, > 2 only (1s and 2s are tolerated everywhere).
+ * Spelled forms are read on the SEED side only - they can only widen what
+ * a paraphrase may say ("four" -> "4"), never add a flag. */
+export function seedQuantities(seed: string, brand: string, competitors: string[]): string[] {
+  const vocab = [brand, ...competitors].flatMap((b) => brandPatterns(b, { required: true }));
+  const out = new Set(quantities(seed, vocab).filter((n) => parseFloat(n) > 2));
+  for (const w of key(seed).split(" ")) if (SPELLED[w]) out.add(String(SPELLED[w]));
+  return [...out];
+}
+
+/** The roster entry an angle designates: exact speakable match first,
+ * then name containment either way ("Amazon (Beauty)" vs "Amazon"). */
+function angleEntry(angle: string, roster: string[]): string | null {
+  if (["generic", "defensive", "open", ""].includes(angle.trim().toLowerCase())) return null;
+  const exact = roster.find((b) => speakable(b).toLowerCase() === speakable(angle).toLowerCase());
+  if (exact) return exact;
+  const loose = roster.find(
+    (r) => textNamesBrand(angle, r, { required: true }) || textNamesBrand(r, angle, { required: true })
+  );
+  return loose ?? speakable(angle);
+}
+
+/**
+ * The cell's typed check-spec - pure and mechanical, no model calls. Run
+ * once after a seed's last heal (generateGrid), on every alternate draw
+ * (regenerateCell), and on a confirmed seed edit (cell_review). Brand sets
+ * come from stage + angle (the design); only the "open" mode and
+ * advocacy's argued rival read the seed, once, here.
+ */
+export function deriveCheckSpec(
+  cell: { stage: string; angle: string; text: string },
+  brand: string,
+  competitors: string[],
+  category?: string
+): CellCheckSpec {
+  const seed = cell.text.trim();
+  const brandMode = brandModeOf(cell.stage, cell.angle);
+  const catTokens = new Set(key(category ?? "").split(" ").filter(Boolean));
+  const roster = [brand, ...competitors.filter((c) => c !== brand)];
+  const rivals = roster.slice(1);
+  const ang = brandMode === "comparison" || brandMode === "alternatives_offensive" ? angleEntry(cell.angle, rivals) : null;
+  const isAngle = (r: string) => ang !== null && (r === ang || speakable(r).toLowerCase() === speakable(ang).toLowerCase());
+  const seedNames = (b: string) => textNamesBrand(seed, b, { excludeTokens: catTokens });
+  const qtype = questionTypeOf({ stage: cell.stage, angle: cell.angle, text: seed }, brand, category);
+  let required: string[];
+  switch (brandMode) {
+    case "blind": required = []; break;
+    // Advocacy may argue with a rival - the one its seed names is part of
+    // the designed question.
+    case "must_name": required = [brand, ...(cell.stage === "advocacy" ? rivals.filter(seedNames) : [])]; break;
+    case "comparison": required = [brand, ...(ang ? [ang] : [])]; break;
+    case "alternatives_defensive": required = [brand]; break;
+    case "alternatives_offensive": required = ang ? [ang] : []; break;
+    case "pricing": required = qtype === "within_brand" ? [brand] : []; break;
+    default: required = roster.filter(seedNames);
+  }
+  // The angle may be a label not on the roster; everything tracked that
+  // is not required is forbidden.
+  const forbidden = roster.filter((b) => !required.includes(b) && !isAngle(b));
+  return {
+    v: 1,
+    stage: cell.stage,
+    angle: cell.angle,
+    target: brand,
+    angleBrand: ang,
+    seed,
+    brandMode,
+    requiredBrands: required,
+    forbiddenBrands: forbidden,
+    quantities: seedQuantities(seed, brand, competitors),
+    designLine: seedDesignLine(cell.stage, brand, seed),
+    qtype,
+  };
+}
+
+/** A carried spec is a record; the design is re-derivable from the cell
+ * and roster, so the server re-derives and prefers the derivation - a spec
+ * written before a seed edit, a roster change or a derivation fix never
+ * governs a check. Null when the cell carries no spec (legacy path). */
+export function resolveCellSpec(
+  cell: { stage: string; angle: string; text: string; spec?: unknown },
+  brand: string, competitors: string[], category?: string
+): CellCheckSpec | null {
+  if (!cell.spec || typeof cell.spec !== "object") return null;
+  const derived = deriveCheckSpec(cell, brand, competitors, category);
+  // A seed edit re-deriving is routine; the same seed yielding a different
+  // design (roster change, derivation fix, tampered copy) is worth a line.
+  const carried = cell.spec as Partial<CellCheckSpec>;
+  if (carried.seed === derived.seed && JSON.stringify(carried) !== JSON.stringify(derived))
+    console.warn(`check-spec stale for [${cell.stage}/${cell.angle}] - re-derived | ${cell.text.slice(0, 70)}`);
+  return derived;
+}
+
+/** Does a candidate carry exactly the cell's brand design? The signature
+ * filter's spec form: every required brand named (tolerant), no forbidden
+ * brand named (strict). */
+export function checkCandidateSignature(
+  text: string, spec: CellCheckSpec, opts?: { category?: string; extraForms?: Record<string, string[]> }
+): { ok: boolean; missing: string[]; leaked: string[] } {
+  const excludeTokens = new Set(key(opts?.category ?? "").split(" ").filter(Boolean));
+  const missing = spec.requiredBrands.filter(
+    (b) => !namesRequiredBrand(text, b, { extraForms: opts?.extraForms?.[b], excludeTokens })
+  );
+  const leaked = spec.forbiddenBrands.filter(
+    (b) => namesForbiddenBrand(text, b, { extraForms: opts?.extraForms?.[b], excludeTokens })
+  );
+  return { ok: missing.length === 0 && leaked.length === 0, missing, leaked };
+}
+
+/** checkPromptBrandRule's spec form: the same finding codes, verified
+ * against the cell's typed design instead of re-inferred from stage,
+ * angle and prose. */
+export function checkPromptAgainstSpec(input: {
+  text: string; spec: CellCheckSpec; category?: string; extraForms?: Record<string, string[]>;
+}): { check: BatteryFinding["check"]; detail: string }[] {
+  const { text, spec } = input;
+  const out: { check: BatteryFinding["check"]; detail: string }[] = [];
+  const meta = metaTextViolation(text);
+  if (meta) out.push({ check: "meta_text", detail: `generator meta-text: ${meta}` });
+  const { missing, leaked } = checkCandidateSignature(text, spec, input);
+  const misses = (b: string | null) => b !== null && missing.includes(b);
+  const rivalLeaks = leaked.filter((b) => b !== spec.target);
+  const { target, angleBrand: ang, stage } = spec;
+  switch (spec.brandMode) {
+    case "blind":
+      if (leaked.length > 0)
+        out.push({ check: "blind_names_brand", detail: `blind stage names ${leaked.includes(target) ? target : leaked.join(", ")}` });
+      break;
+    case "must_name":
+      if (misses(target)) out.push({ check: "must_name_missing_target", detail: `${stage} must name ${target}` });
+      if (rivalLeaks.length > 0) out.push({ check: "must_name_names_rival", detail: `${stage} names ${rivalLeaks.join(", ")}` });
+      break;
+    case "comparison":
+      if (misses(target)) out.push({ check: "comparison_missing_target", detail: `comparison must name ${target}` });
+      if (ang) {
+        if (misses(ang)) out.push({ check: "comparison_missing_rival", detail: `comparison cell for ${spec.angle}` });
+        if (rivalLeaks.length > 0)
+          out.push({ check: "comparison_names_extra_rival", detail: `comparison for ${spec.angle} also names ${rivalLeaks.join(", ")}` });
+      }
+      break;
+    case "alternatives_defensive":
+      if (misses(target)) out.push({ check: "defensive_alt_missing_target", detail: `defensive alternatives must name ${target}` });
+      if (rivalLeaks.length > 0)
+        out.push({ check: "alternatives_names_extra_rival", detail: `defensive alternatives names ${rivalLeaks.join(", ")}` });
+      break;
+    case "alternatives_offensive":
+      if (leaked.includes(target)) out.push({ check: "offensive_alt_names_target", detail: `offensive alternatives must not name ${target}` });
+      if (misses(ang)) out.push({ check: "offensive_alt_missing_rival", detail: `alternatives cell for ${spec.angle}` });
+      if (rivalLeaks.length > 0)
+        out.push({ check: "alternatives_names_extra_rival", detail: `alternatives for ${spec.angle} also names ${rivalLeaks.join(", ")}` });
+      break;
+    case "pricing":
+      if (rivalLeaks.length > 0) out.push({ check: "pricing_names_rival", detail: `pricing names ${rivalLeaks.join(", ")}` });
+      break;
+  }
+  return out;
+}
+
+/** The paraphrase writer's per-seed brand note, rendered FROM the spec:
+ * a blind design says so; a required brand the seed's own wording lacks
+ * (a legacy blind seed in a must-name stage, a lowercase or shorthand
+ * rival) is named explicitly. Null when the seed already carries its
+ * design - the common case adds nothing to the prompt. */
+export function specWriterNote(spec: CellCheckSpec): string | null {
+  if (spec.requiredBrands.length === 0)
+    return `[deliberately blind variant: name NO brand - the guidance's subject stays implied ("my subscription", "the service"), never named]`;
+  const missing = spec.requiredBrands.filter((b) => !namesRequiredBrand(spec.seed, b));
+  if (missing.length === 0) return null;
+  if (spec.brandMode === "must_name" && missing.length === 1 && missing[0] === spec.target)
+    return `[this stage must name ${spec.target}: every paraphrase names ${spec.target} (the seed's blind wording is a legacy defect - do not preserve it), never a rival]`;
+  const names = missing.map(speakable).join(" and ");
+  return `[this cell's design names ${names}: every paraphrase names ${names}]`;
 }

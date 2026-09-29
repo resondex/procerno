@@ -20,10 +20,12 @@ import {
   swapPhrasings,
   useGridSetup,
   type CellReviewItem,
+  type GridCellUi,
   type GridState,
   type ScenarioReviewItem,
   type ScenarioRow,
 } from "./grid_setup";
+import { deriveCheckSpec } from "@/lib/engine/battery_checks";
 
 /**
  * The setup wizard: a rail of steps, one gate at a time, a fixed footer that
@@ -151,9 +153,13 @@ function cellReviewRequest(
     category,
     competitors,
     audience: audience || undefined,
-    candidates: authored.map(({ c, text, original }) => {
+    candidates: authored.map(({ c, phr, text, original }) => {
       const st = stageBy.get(c.stage);
       return {
+        // s7: a spec-era cell is checked against its typed design - the
+        // server re-derives it from the seed (the edited text itself when
+        // this IS the seed) and returns the seed's new spec.
+        ...(c.spec ? { spec: c.spec, seedEdit: phr == null, seed: c.text } : {}),
         text,
         original,
         stage: st?.label ?? c.stage,
@@ -900,8 +906,19 @@ export function SetupWizard({ mode, brand, draft, engineOptions, onClose, onCrea
       }
     });
     let next = grid;
-    if (passed.length > 0) {
-      next = { ...grid, reviewedCells: [...(grid.reviewedCells ?? []), ...passed] };
+    // A reviewed seed edit's re-derived spec lands on its cell whatever the
+    // verdict - the spec records the design of the text the cell now holds.
+    const specAt = new Map<number, GridCellUi["spec"]>();
+    authored.forEach(({ i, phr }, k) => {
+      const sp = data.specs?.[k];
+      if (phr == null && sp) specAt.set(i, sp);
+    });
+    if (passed.length > 0 || specAt.size > 0) {
+      next = {
+        ...grid,
+        reviewedCells: [...(grid.reviewedCells ?? []), ...passed],
+        cells: grid.cells.map((c, i) => (specAt.has(i) ? { ...c, spec: specAt.get(i) } : c)),
+      };
       setGrid(next);
     }
     if (flagged.length === 0) proceedPrompts(next);
@@ -925,7 +942,10 @@ export function SetupWizard({ mode, brand, draft, engineOptions, onClose, onCrea
       if (it.phr == null) {
         // The old wording's set is banked, not thrown away - cycling back
         // to it later restores its paraphrases for free.
-        cells[it.index] = { ...c, text: it.suggestion, original: it.suggestion, ...swapPhrasings(c, it.suggestion) };
+        cells[it.index] = {
+          ...c, text: it.suggestion, original: it.suggestion, ...swapPhrasings(c, it.suggestion),
+          spec: c.spec ? deriveCheckSpec({ ...c, text: it.suggestion }, brand, allCompetitors(), category) : c.spec,
+        };
       } else {
         cells[it.index] = {
           ...c,

@@ -9,6 +9,7 @@ import {
   type Moderators,
   type ScenarioSpec,
 } from "@/lib/engine/instrument";
+import type { CellCheckSpec } from "@/lib/engine/battery_checks";
 
 // 300, not 120: a hard category's market read alone runs 90-120s of
 // gpt-5 reasoning - the old budget killed first reads at the wall and
@@ -48,6 +49,11 @@ const Body = z.object({
         angle: z.string().trim().min(1),
         mode: z.string().trim().nullable().optional(),
         text: z.string().trim().min(1),
+        /** The cell's carried check-spec (s7+). Its presence selects the
+         * spec path; the engine re-derives the design from the cell and
+         * roster and prefers that over the carried copy, so the shape is
+         * not trusted beyond being an object. Absent = legacy path. */
+        spec: z.record(z.string(), z.unknown()).nullable().optional(),
       })
     )
     .min(1)
@@ -79,7 +85,7 @@ export async function POST(req: Request) {
     audience: audience || null,
     base: parsed.data.base as unknown as Moderators,
     scenarios: parsed.data.scenarios as unknown as (ScenarioSpec & { journey: Journey | null })[],
-    cells,
+    cells: cells.map((c) => ({ ...c, spec: (c.spec ?? null) as CellCheckSpec | null })),
     count,
     force,
     noWait: parsed.data.warm,

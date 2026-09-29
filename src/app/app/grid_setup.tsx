@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, type ReactNode } from "react";
+import { deriveCheckSpec, type CellCheckSpec } from "@/lib/engine/battery_checks";
 
 /**
  * Buyer Landscape setup pieces: the state shape, the gate API calls, and
@@ -60,6 +61,12 @@ export interface GridCellUi {
    * reach this stage, when not universal. */
   mode?: string | null;
   text: string;
+  /** The cell's typed check-spec (s7+): written by the generator (or the
+   * draw / seed-edit review that last set the text), sent with every
+   * paraphrase request. Absent on legacy drafts, which keep the
+   * string-derived checks. The server re-derives it before use, so a
+   * stale copy is never trusted. */
+  spec?: CellCheckSpec | null;
   /** Every prompt offered for this cell, oldest first ([0] = the composed
    * seed); the user cycles through these. Absent = just the seed. */
   alts?: string[];
@@ -924,6 +931,7 @@ export function useGridSetup(a: GridSetupArgs) {
               angle: merged[i].angle,
               mode: merged[i].mode ?? null,
               text: merged[i].text,
+              spec: merged[i].spec ?? undefined,
             })),
             count: PHRASING_COUNT,
             force,
@@ -1002,7 +1010,7 @@ export function useGridSetup(a: GridSetupArgs) {
           brand: a.brand, category: a.category, competitors: a.competitors,
           audience: a.audience || undefined,
           base: st.moderators, scenarios: st.scenarios,
-          cells: [{ stage: c.stage, situation: c.situation, angle: c.angle, mode: c.mode ?? null, text: c.text }],
+          cells: [{ stage: c.stage, situation: c.situation, angle: c.angle, mode: c.mode ?? null, text: c.text, spec: c.spec ?? undefined }],
           count: PHRASING_COUNT,
           // A SHORT set must force: the cache holds the same short set that
           // created the gap. An EMPTY cell must NOT force: its completed
@@ -1067,7 +1075,7 @@ export function useGridSetup(a: GridSetupArgs) {
     // No global busy: the card shows its own writing state, the rest of
     // the gate stays usable.
     a.setError(null);
-    const data = await post<{ text: string }>("/api/setup/grid/cell", {
+    const data = await post<{ text: string; spec?: CellCheckSpec }>("/api/setup/grid/cell", {
       brand: a.brand, category: a.category, competitors: a.competitors,
       audience: a.audience || undefined,
       base: a.state.moderators,
@@ -1085,7 +1093,7 @@ export function useGridSetup(a: GridSetupArgs) {
         audience: a.audience || undefined,
         base: a.state.moderators,
         scenarios: a.state.scenarios,
-        cells: [{ stage: c.stage, situation: c.situation, angle: c.angle, mode: c.mode ?? null, text: data.text }],
+        cells: [{ stage: c.stage, situation: c.situation, angle: c.angle, mode: c.mode ?? null, text: data.text, spec: data.spec }],
         count: PHRASING_COUNT,
       });
       // A failed set is not fatal - the missing-paraphrases gate catches it.
@@ -1111,6 +1119,7 @@ export function useGridSetup(a: GridSetupArgs) {
             ...q,
             text: data.text,
             original: data.text,
+            spec: data.spec ?? q.spec,
             alts: nextAlts,
             altIdx: nextAlts.length - 1,
             regens: near ? q.regens : (q.regens ?? 0) + 1,
@@ -1148,7 +1157,7 @@ export function useGridSetup(a: GridSetupArgs) {
       ),
     ].slice(-8);
     a.setError(null);
-    const data = await post<{ text: string }>("/api/setup/grid/cell", {
+    const data = await post<{ text: string; spec?: CellCheckSpec }>("/api/setup/grid/cell", {
       brand: a.brand, category: a.category, competitors: a.competitors,
       audience: a.audience || undefined,
       base: a.state.moderators,
@@ -1164,7 +1173,7 @@ export function useGridSetup(a: GridSetupArgs) {
         audience: a.audience || undefined,
         base: a.state.moderators,
         scenarios: a.state.scenarios,
-        cells: [{ stage: stageKey, situation, angle, mode: null, text: data.text }],
+        cells: [{ stage: stageKey, situation, angle, mode: null, text: data.text, spec: data.spec }],
         count: PHRASING_COUNT,
       });
       generated = (pd?.phrasings?.[0] ?? []).map((ph) => ({ ...ph, original: ph.text }));
@@ -1179,6 +1188,7 @@ export function useGridSetup(a: GridSetupArgs) {
       mode: null,
       text: data.text,
       original: data.text,
+      spec: data.spec ?? null,
       phrasedFor: data.text,
       phrasings: generated,
     };
@@ -1210,6 +1220,9 @@ export function useGridSetup(a: GridSetupArgs) {
       angle,
       mode: null,
       text: "",
+      // A spec-era cell from birth: the server re-derives its design from
+      // whatever the user types, so the empty-seed copy is only a marker.
+      spec: deriveCheckSpec({ stage: stageKey, angle, text: "" }, a.brand, a.competitors, a.category),
       phrasings: [],
     };
     const cells = [...state.cells];
@@ -1242,6 +1255,8 @@ export function useGridSetup(a: GridSetupArgs) {
           ? {
               ...q, text: alts[next],
               original: cycledToUser ? q.original : alts[next],
+              // Keep the carried spec in step with the wording it describes.
+              spec: q.spec ? deriveCheckSpec({ ...q, text: alts[next] }, a.brand, a.competitors, a.category) : q.spec,
               alts, altIdx: next, userAlts: [...userAlts],
               ...swapPhrasings(q, alts[next]),
             }
@@ -1312,6 +1327,7 @@ export function useGridSetup(a: GridSetupArgs) {
             cells: slice.map((i) => ({
               stage: cells[i].stage, situation: cells[i].situation,
               angle: cells[i].angle, mode: cells[i].mode ?? null, text: cells[i].text,
+              spec: cells[i].spec ?? undefined,
             })),
             count: PHRASING_COUNT,
             warm: true,
