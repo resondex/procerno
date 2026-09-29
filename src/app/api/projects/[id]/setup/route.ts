@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { requireAuth, requireProject } from "@/lib/auth";
 import { store } from "@/lib/store";
+import { tagCosts } from "@/lib/cost_log";
 import { apiKeyConfigured } from "@/lib/engine/providers";
 import { questionTypeOf } from "@/lib/engine/battery_checks";
 import { seedDictionary } from "@/lib/engine/suggest";
@@ -145,6 +146,8 @@ export async function PUT(
       )
     )
   );
+  // Attribute the re-seed's model spend to the project being edited.
+  tagCosts({ projectId: id });
   await seedDictionary(id, [brand, ...competitors]);
   return NextResponse.json({ ok: true });
 }

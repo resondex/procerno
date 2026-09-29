@@ -365,7 +365,9 @@ export function SetupWizard({ mode, brand, draft, engineOptions, onClose, onCrea
 
   function allCompetitors(): string[] {
     const d = compDraft.trim().replace(/,+$/, "");
-    return [...new Set(d ? [...competitors, d] : competitors)];
+    // 12 is the create route's cap; the setup routes match it. Capping at
+    // entry beats an opaque "bad request" at the Prompts gate.
+    return [...new Set(d ? [...competitors, d] : competitors)].slice(0, 12);
   }
 
   function addCompetitor() {
@@ -378,7 +380,7 @@ export function SetupWizard({ mode, brand, draft, engineOptions, onClose, onCrea
     setError(null);
     const res = await fetch("/api/setup", {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: { "Content-Type": "application/json", ...(draftId ? { "x-setup-id": draftId } : {}) },
       body: JSON.stringify({ brand, skipBattery: true }),
       signal: AbortSignal.timeout(120_000),
     }).catch(() => null);
@@ -547,7 +549,7 @@ export function SetupWizard({ mode, brand, draft, engineOptions, onClose, onCrea
     setError(null);
     const res = await fetch("/api/prompts/generate", {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: { "Content-Type": "application/json", ...(draftId ? { "x-setup-id": draftId } : {}) },
       body: JSON.stringify({
         name: studyName.trim() || undefined,
         brand, category,
@@ -674,7 +676,7 @@ export function SetupWizard({ mode, brand, draft, engineOptions, onClose, onCrea
     // Log what the user chose - visibility only, fire and forget.
     void fetch("/api/setup/grid/feedback", {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: { "Content-Type": "application/json", ...(draftId ? { "x-setup-id": draftId } : {}) },
       body: JSON.stringify({
         category,
         audience: audience || undefined,
@@ -715,7 +717,7 @@ export function SetupWizard({ mode, brand, draft, engineOptions, onClose, onCrea
     lastWarm.current.scenario = payload;
     void fetch("/api/setup/grid/scenario_review", {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: { "Content-Type": "application/json", ...(draftId ? { "x-setup-id": draftId } : {}) },
       body: JSON.stringify(body),
     }).catch(() => {});
   }
@@ -878,6 +880,7 @@ export function SetupWizard({ mode, brand, draft, engineOptions, onClose, onCrea
         passed.push(cellFp(c, text));
       } else {
         const stage = grid.stages.find((s) => s.key === c.stage);
+        const sug = (v.suggestion || "").trim();
         flagged.push({
           index: i,
           phr,
@@ -887,8 +890,12 @@ export function SetupWizard({ mode, brand, draft, engineOptions, onClose, onCrea
           current: text,
           flags: Array.isArray(v.flags) && v.flags.length > 0 ? v.flags : ["unclear"],
           reason: v.reason || "This one may not ask what its cell measures.",
-          suggestion: v.suggestion || text,
-          choice: "suggestion",
+          // A missing suggestion, or one identical to the flagged text
+          // (the mechanical/design flags ride on the model's "ok" echo),
+          // is no repair: offer nothing and default to "mine" so one
+          // click can't turn the violation into the machine baseline.
+          suggestion: sug === text.trim() ? "" : sug,
+          choice: sug === "" || sug === text.trim() ? "mine" : "suggestion",
         });
       }
     });
@@ -912,7 +919,7 @@ export function SetupWizard({ mode, brand, draft, engineOptions, onClose, onCrea
     const ordered = [...cellReview].sort((a, b) => (a.phr == null ? 1 : 0) - (b.phr == null ? 1 : 0));
     const cells = [...grid.cells];
     for (const it of ordered) {
-      if (it.choice !== "suggestion") continue;
+      if (it.choice !== "suggestion" || !it.suggestion.trim()) continue;
       const c = cells[it.index];
       if (!c) continue;
       if (it.phr == null) {
@@ -932,7 +939,7 @@ export function SetupWizard({ mode, brand, draft, engineOptions, onClose, onCrea
     // Log what the user chose - visibility only, fire and forget.
     void fetch("/api/setup/grid/feedback", {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: { "Content-Type": "application/json", ...(draftId ? { "x-setup-id": draftId } : {}) },
       body: JSON.stringify({
         category,
         audience: audience || undefined,
@@ -967,7 +974,7 @@ export function SetupWizard({ mode, brand, draft, engineOptions, onClose, onCrea
     setError(null);
     const res = await fetch("/api/setup/grid/cell_review", {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: { "Content-Type": "application/json", ...(draftId ? { "x-setup-id": draftId } : {}) },
       body: JSON.stringify({
         brand,
         category,
@@ -1001,14 +1008,17 @@ export function SetupWizard({ mode, brand, draft, engineOptions, onClose, onCrea
       if (!v || v.ok) {
         passed.push(fpOf(q));
       } else {
+        const sug = (v.suggestion || "").trim();
         flagged.push({
           index: i,
           meta: q.theme.replace("_", " "),
           current: q.text,
           flags: Array.isArray(v.flags) && v.flags.length > 0 ? v.flags : ["unclear"],
           reason: v.reason || "This one may not ask what its theme covers.",
-          suggestion: v.suggestion || q.text,
-          choice: "suggestion",
+          // Same echo rule as the grid path: an echoed suggestion is no
+          // repair, so nothing is offered and "mine" stays under review.
+          suggestion: sug === q.text.trim() ? "" : sug,
+          choice: sug === "" || sug === q.text.trim() ? "mine" : "suggestion",
         });
       }
     });
@@ -1023,7 +1033,9 @@ export function SetupWizard({ mode, brand, draft, engineOptions, onClose, onCrea
   function resolveClassicReview() {
     if (!prompts || !cellReview) return;
     const byIndex = new Map(
-      cellReview.filter((it) => it.choice === "suggestion").map((it) => [it.index, it])
+      cellReview
+        .filter((it) => it.choice === "suggestion" && it.suggestion.trim())
+        .map((it) => [it.index, it])
     );
     const next = prompts.map((q, i) => {
       const it = byIndex.get(i);
@@ -1036,7 +1048,7 @@ export function SetupWizard({ mode, brand, draft, engineOptions, onClose, onCrea
     setMachinePrompts(nextMachine);
     void fetch("/api/setup/grid/feedback", {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: { "Content-Type": "application/json", ...(draftId ? { "x-setup-id": draftId } : {}) },
       body: JSON.stringify({
         category,
         audience: audience || undefined,
@@ -1062,7 +1074,7 @@ export function SetupWizard({ mode, brand, draft, engineOptions, onClose, onCrea
     lastWarm.current.cell = payload;
     void fetch("/api/setup/grid/cell_review", {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: { "Content-Type": "application/json", ...(draftId ? { "x-setup-id": draftId } : {}) },
       body: JSON.stringify(body),
     }).catch(() => {});
   }
@@ -1406,7 +1418,7 @@ export function SetupWizard({ mode, brand, draft, engineOptions, onClose, onCrea
                 </label>
                 <label className="grid gap-1.5 text-sm font-semibold uppercase tracking-wide text-primary">
                   Category
-                  <input className="input w-full" value={category} onChange={(e) => setCategory(e.target.value)} placeholder="e.g. market research firms" />
+                  <input className="input w-full" maxLength={120} value={category} onChange={(e) => setCategory(e.target.value)} placeholder="e.g. market research firms" />
                 </label>
                 <label className="grid gap-1.5 text-sm font-semibold uppercase tracking-wide text-primary">
                   Competitors
@@ -1422,6 +1434,7 @@ export function SetupWizard({ mode, brand, draft, engineOptions, onClose, onCrea
                   )}
                   <input
                     className="input w-full"
+                    maxLength={80}
                     value={compDraft}
                     onChange={(e) => setCompDraft(e.target.value)}
                     onKeyDown={(e) => {
@@ -1433,7 +1446,7 @@ export function SetupWizard({ mode, brand, draft, engineOptions, onClose, onCrea
                 </label>
                 <label className="grid gap-1.5 text-sm font-semibold uppercase tracking-wide text-primary">
                   Audience <span className="font-normal normal-case tracking-normal text-ink-3">(optional)</span>
-                  <input className="input w-full" value={audience} onChange={(e) => setAudience(e.target.value)} placeholder="e.g. mid-market CPG brands" />
+                  <input className="input w-full" maxLength={160} value={audience} onChange={(e) => setAudience(e.target.value)} placeholder="e.g. mid-market CPG brands" />
                 </label>
               </div>
             )

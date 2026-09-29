@@ -10,7 +10,7 @@ export const maxDuration = 120;
 const Body = z.object({
   brand: z.string().trim().min(1).max(80),
   category: z.string().trim().min(1).max(120),
-  competitors: z.array(z.string().trim().min(1).max(80)).max(8),
+  competitors: z.array(z.string().trim().min(1).max(80)).max(12),
   audience: z.string().trim().max(160).optional(),
 });
 

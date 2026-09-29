@@ -145,6 +145,7 @@ function draftStatus(d: SetupDraft): string {
             Your brand
             <input
               className="input w-full"
+              maxLength={80}
               value={brand}
               onChange={(e) => setBrand(e.target.value)}
               placeholder="e.g. Resondex"

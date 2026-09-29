@@ -12,7 +12,7 @@ export const maxDuration = 60;
 const Body = z.object({
   brand: z.string().trim().min(1).max(80),
   category: z.string().trim().min(1).max(120),
-  competitors: z.array(z.string().trim().min(1).max(80)).max(8),
+  competitors: z.array(z.string().trim().min(1).max(80)).max(12),
   audience: z.string().trim().max(160).optional(),
   /** The user-edited or user-written prompts to check, each with its
    * cell's design context; `original` is the last machine wording. */
@@ -109,6 +109,15 @@ export async function POST(req: Request) {
       v.reason = [v.reason, f.reason || "This paraphrase no longer voices its cell's design."]
         .filter(Boolean).join(" ");
     }
+  });
+  // A flag added by the mechanical rule or the design check rides on the
+  // model's "ok" echo, whose suggestion IS the flagged text. Serving that
+  // as a suggested edit lets one click launder the violation into the
+  // machine baseline and out of review forever - blank it, so the client
+  // offers no suggestion and the prompt stays under review.
+  parsed.data.candidates.forEach((c, i) => {
+    const v = verdicts[i];
+    if (!v.ok && v.suggestion.trim() === c.text.trim()) v.suggestion = "";
   });
   const flagged = verdicts
     .map((v, i) => ({ candidate: parsed.data.candidates[i], verdict: v }))

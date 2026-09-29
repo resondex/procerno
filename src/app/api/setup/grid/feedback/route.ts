@@ -44,7 +44,7 @@ const Body = z.discriminatedUnion("kind", [
         z.object({
           current: z.string().max(2000),
           suggestion: z.string().max(2000),
-          flags: z.array(z.enum(["target", "branding", "unclear"])).min(1).max(3),
+          flags: z.array(z.enum(["target", "branding", "unclear", "design"])).min(1).max(4),
           reason: z.string().max(400),
           choice: z.enum(["suggestion", "mine"]),
         })

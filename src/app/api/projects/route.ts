@@ -8,6 +8,7 @@ import {
   PLAN_TRACKER_LIMITS,
   requireAuth,
 } from "@/lib/auth";
+import { tagCosts } from "@/lib/cost_log";
 import { generatePromptBattery } from "@/lib/engine/prompts";
 import { questionTypeOf } from "@/lib/engine/battery_checks";
 import { seedDictionary } from "@/lib/engine/suggest";
@@ -190,6 +191,13 @@ export async function POST(req: Request) {
     scenarioJourneys: grid?.journeys ? JSON.stringify(grid.journeys) : null,
     instrumentVersion: grid ? 1 : 0,
   });
+  if (parsed.data.setupId) {
+    // Transfer setup-phase ledger rows onto the project the moment it
+    // exists - the tracker's costs are one series from wizard open.
+    // Both instrument modes: classic batteries spend through the wizard
+    // too, not only the grid.
+    await store.attachSetupCosts(project.id, parsed.data.setupId).catch(() => 0);
+  }
   if (grid) {
     // Grid path: intents carry the stage identity; prompts carry the stage
     // as their theme UNLESS the text names the brand or a rival, in which
@@ -197,11 +205,6 @@ export async function POST(req: Request) {
     // Each cell's seed prompt and its paraphrases all hang off one intent;
     // the theme is decided per prompt, so a paraphrase that names a brand is
     // fenced off individually even if its seed is blind.
-    if (parsed.data.setupId) {
-      // Transfer setup-phase ledger rows onto the project the moment it
-      // exists - the tracker's costs are one series from wizard open.
-      await store.attachSetupCosts(project.id, parsed.data.setupId).catch(() => 0);
-    }
     const intents = await store.insertIntents(
       project.id,
       grid.cells.map((c) => ({
@@ -232,6 +235,9 @@ export async function POST(req: Request) {
       parsed.data.prompts ?? generatePromptBattery({ brand, category, audience })
     );
   }
+  // The seed's model spend belongs to the project that now exists - without
+  // the tag it landed in the ledger unattributed.
+  tagCosts({ projectId: project.id });
   await seedDictionary(project.id, [brand, ...competitors]);
   return NextResponse.json({ project }, { status: 201 });
 }

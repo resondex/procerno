@@ -2,7 +2,7 @@ import { createHash } from "crypto";
 import { tagCosts, withCostContext } from "../cost_log";
 import { anthropicClient, openaiClient } from "./providers";
 import { INSTRUMENT_HELPER_MODEL } from "./models";
-import { checkBattery, MUST_NAME_STAGES, questionTypeOf, seedDesignLine, stageDesignIntent, TERM_COLLISIONS, type QuestionType } from "./battery_checks";
+import { checkBattery, checkPromptBrandRule, MUST_NAME_STAGES, questionTypeOf, seedDesignLine, stageDesignIntent, TERM_COLLISIONS, type QuestionType } from "./battery_checks";
 export { MUST_NAME_STAGES };
 import { store } from "../store";
 import type { CacheMeta } from "../types";
@@ -130,7 +130,16 @@ async function coalesced<T>(
   };
   const claimAndRun = async (): Promise<T | null> => {
     await store.cacheSet(key, JSON.stringify({ __pending: Date.now() }), opts.meta);
-    const out = await generate();
+    let out: T | null;
+    try {
+      out = await generate();
+    } catch (err) {
+      // A THROWN generation (vendor 5xx, timeout, truncated JSON) must not
+      // leave the fresh marker standing - the next request would wait the
+      // whole pending TTL on work nobody is doing.
+      await store.cacheSet(key, JSON.stringify({ __pending: 0 }), opts.meta).catch(() => {});
+      throw err;
+    }
     // A failed generation stamps the key retryable (a zero marker reads
     // as stale) instead of caching emptiness or leaving waiters hanging.
     await store.cacheSet(
@@ -1989,6 +1998,7 @@ export async function generateGrid(input: {
     if (cur.length > 0) groups.push(cur);
     await Promise.all(
       groups.map(async (group) => {
+        try {
         const rows = group.flatMap((u) => units[u]);
         const planText = rows.map(planLine).join("\n");
         const res = await openaiClient().chat.completions.create({
@@ -2085,6 +2095,59 @@ export async function generateGrid(input: {
             // The writer's text stands - healing is best-effort.
           }
         }
+        // MECHANICAL SEED CHECK (2026-09-29): the free brand rule runs on
+        // every fresh seed - a blind seed slipping into a must-name stage
+        // otherwise reaches paraphrasing, where the writer's repair
+        // instruction and the signature filter used to deadlock into
+        // guaranteed starvation. One regeneration with the violation
+        // attached, re-checked mechanically; a still-failing seed stands
+        // with a loud log (never blocks generation).
+        if (process.env.PHRASINGS_CHECKS !== "0" && flat.length > 0) {
+          for (let i = 0; i < flat.length; i++) {
+            const c = flat[i];
+            const mech = checkPromptBrandRule({
+              text: c.text, stage: c.stage, angle: c.angle,
+              brand: input.brand, competitors: input.competitors, category: input.category,
+            });
+            if (mech.length === 0) continue;
+            console.warn(`seed brand rule flagged [${c.stage}]: ${mech.map((m) => m.check).join(",")} | ${c.text.slice(0, 90)}`);
+            const row =
+              rows.find((r) => r.stage.key === c.stage && (r.situation ?? null) === c.situation && primaryBrandName(r.angle) === c.angle) ??
+              rows.find((r) => r.stage.key === c.stage);
+            if (!row) continue;
+            try {
+              const res2 = await openaiClient().chat.completions.create({
+                model: CELLS_MODEL,
+                messages: [
+                  { role: "system", content: CELL_WRITER_SYSTEM + "Return one cell object for the plan line." },
+                  { role: "user", content:
+                      `Client brand: ${input.brand}\nCategory: ${input.category}\n` +
+                      `Rivals: ${rivals.map(primaryBrandName).join(", ")}\nAudience: ${input.audience ?? "unknown"}\n\n` +
+                      `Cell plan:\n${planLine(row, 0)}\n` +
+                      `   [previous attempt broke the brand rule and was rejected: ${mech.map((m) => m.detail).join(" ")} ` +
+                      `Do not reuse this wording: "${c.text}"]` },
+                ],
+                response_format: { type: "json_schema", json_schema: { name: "grid_cells", strict: true, schema: CELLS_SCHEMA } },
+              });
+              const cell2 = (JSON.parse(res2.choices[0]?.message?.content ?? "{}") as { cells?: { text?: string }[] }).cells?.[0];
+              const text2 = cell2?.text?.trim();
+              if (
+                text2 &&
+                checkPromptBrandRule({
+                  text: text2, stage: c.stage, angle: c.angle,
+                  brand: input.brand, competitors: input.competitors, category: input.category,
+                }).length === 0
+              ) {
+                console.warn(`seed brand rule healed [${c.stage}]: ${text2.slice(0, 90)}`);
+                flat[i].text = humanize(text2);
+              } else {
+                console.warn(`seed brand-rule regeneration still failing [${c.stage}] - seed stands, flagged for the gate`);
+              }
+            } catch (err) {
+              console.error("seed brand-rule healing failed open:", err);
+            }
+          }
+        }
         // SEED SELF-HEALING (2026-09-28): a doubt/plan cell's SEED must
         // itself voice the stage's design - the paraphrase-level filter can
         // only starve a cell whose seed is off-design (the jira p50/p95
@@ -2135,6 +2198,10 @@ export async function generateGrid(input: {
             console.error("seed design healing failed open:", err);
           }
         }
+        // The heals above rewrite seed text after qtype was stamped at
+        // parse time - recompute so a healed cell's stored type matches
+        // its final wording.
+        flat.forEach((c) => { c.qtype = questionTypeOf(c, input.brand, input.category); });
         await Promise.all(
           group.map((u) => {
             const cells = produced.get(u) ?? [];
@@ -2148,6 +2215,19 @@ export async function generateGrid(input: {
             );
           })
         );
+        } catch (err) {
+          // A thrown group (vendor error, bad JSON) releases its claimed
+          // markers so the retry regenerates NOW instead of waiting out
+          // the pending TTL. Other groups' results stand; the missing
+          // units surface as retryable and the wizard's missing-fill
+          // picks them up.
+          console.error(`grid cells group failed (${group.length} units) - markers released:`, err);
+          await Promise.all(
+            group.map((u) =>
+              store.cacheSet(unitKeys[u], JSON.stringify({ __pending: 0 }), stampOf(input)).catch(() => {})
+            )
+          );
+        }
       })
     );
   };
@@ -2721,7 +2801,16 @@ export async function generatePhrasings(input: {
           .filter((b, i) => b && namesForSig(text, [input.brand, ...rivals][i]))
           .sort()
           .join("|");
-      const sig = sigOf(seed.text);
+      let sig = sigOf(seed.text);
+      // A blind seed in a must-name stage is a legacy defect the writer is
+      // told to repair ("every paraphrase names <brand>"). The expected
+      // signature must agree with that instruction, or every obedient
+      // candidate dies here while checkBattery kills the disobedient ones -
+      // guaranteed starvation, paid in full on every retry and top-up.
+      const brandKey = input.brand.trim().toLowerCase();
+      if (MUST_NAME_STAGES.has(seed.stage) && !sig.split("|").includes(brandKey)) {
+        sig = [...sig.split("|").filter(Boolean), brandKey].sort().join("|");
+      }
       const prior = opts?.have?.[c.index] ?? [];
       const seen = new Set<string>([norm(seed.text), ...prior.map((p) => norm(p.text))]);
       const keptWords: Set<string>[] = [contentWords(seed.text), ...prior.map((p) => contentWords(p.text))];
@@ -2771,6 +2860,7 @@ export async function generatePhrasings(input: {
     await Promise.all(
       idx.map((i) => store.cacheSet(keys[i], JSON.stringify({ __pending: Date.now() }), stampOf(input)))
     );
+    try {
     const subset = idx.map((i) => input.cells[i]);
     const got = await pass(subset);
     // Reasoning models occasionally return a degenerate, near-empty set
@@ -2917,6 +3007,15 @@ export async function generatePhrasings(input: {
         );
       })
     );
+    } catch (err) {
+      // A thrown pass (vendor error, truncated JSON) releases every
+      // claimed marker: the retry regenerates immediately instead of
+      // waiting out PHRASINGS_PENDING_TTL_MS and returning empty.
+      console.error(`phrasings generation failed (${idx.length} cells) - markers released:`, err);
+      await Promise.all(
+        idx.map((i) => store.cacheSet(keys[i], JSON.stringify({ __pending: 0 }), stampOf(input)).catch(() => {}))
+      );
+    }
   };
 
   const mine: number[] = [];

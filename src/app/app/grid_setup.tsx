@@ -1753,6 +1753,7 @@ export function ScenariosGate({
             />
             <input
               className="input w-56 shrink-0 text-sm font-medium"
+              maxLength={60}
               value={sc.label}
               placeholder="label"
               onChange={(e) => updateRow(i, { label: e.target.value })}
@@ -1765,6 +1766,7 @@ export function ScenariosGate({
           <textarea
             className="input w-full resize-none field-sizing-content text-sm"
             rows={1}
+            maxLength={240}
             value={sc.description}
             placeholder="one sentence describing the circumstance"
             onChange={(e) => updateRow(i, { description: e.target.value })}
@@ -2782,7 +2784,7 @@ export interface CellReviewItem {
   meta: string;
   current: string;
   /** Every problem the reviewer saw, most serious first. */
-  flags: ("target" | "branding" | "unclear")[];
+  flags: ("target" | "branding" | "unclear" | "design")[];
   reason: string;
   suggestion: string;
   choice: "suggestion" | "mine";
@@ -2792,6 +2794,7 @@ const CELL_FLAG_INFO: Record<CellReviewItem["flags"][number], { label: string; c
   target: { label: "asks a different question", cls: "bg-warning/10 text-warning" },
   branding: { label: "blind/branded broken", cls: "bg-warning/10 text-warning" },
   unclear: { label: "hard to follow", cls: "bg-primary-soft text-primary" },
+  design: { label: "drifted off its question", cls: "bg-warning/10 text-warning" },
 };
 
 /** Overlay shown when the Prompts-gate quality check flags user-edited
@@ -2837,16 +2840,24 @@ export function CellReviewModal({
             </span>
             <div className="flex items-start gap-2">
               <span className="flex shrink-0 gap-1.5">
-                {it.flags.map((f) => (
-                  <span key={f} className={`rounded-full px-2 py-px text-[10px] font-medium whitespace-nowrap ${CELL_FLAG_INFO[f].cls}`}>
-                    {CELL_FLAG_INFO[f].label}
-                  </span>
-                ))}
+                {it.flags.map((f) => {
+                  // A flag name this build doesn't know renders generically
+                  // instead of throwing mid-render (the "design" crash class).
+                  const info = CELL_FLAG_INFO[f] ?? { label: f, cls: "bg-warning/10 text-warning" };
+                  return (
+                    <span key={f} className={`rounded-full px-2 py-px text-[10px] font-medium whitespace-nowrap ${info.cls}`}>
+                      {info.label}
+                    </span>
+                  );
+                })}
               </span>
               <p className="text-[12px] text-ink-2">{it.reason}</p>
             </div>
             <div className="grid gap-2">
-              {option(k, it, "suggestion", "Suggested edit", it.suggestion)}
+              {/* No suggestion = the reviewer had no repair (the model's
+                * echo was blanked): the user keeps their wording, edits
+                * it, and it stays under review at the next confirm. */}
+              {it.suggestion.trim() !== "" && option(k, it, "suggestion", "Suggested edit", it.suggestion)}
               {option(k, it, "mine", "Keep mine", it.current)}
             </div>
           </div>
