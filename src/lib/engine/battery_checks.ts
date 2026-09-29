@@ -261,10 +261,20 @@ export function checkPromptBrandRule(input: {
 }
 
 /** Quantities in a text: numbers minus years, tech tokens, and numbers glued
- * to brand vocabulary (Pixel 9, iPhone 16). */
+ * to brand vocabulary (Pixel 9, iPhone 16). Formats are normalized before
+ * extraction so "60k", "60,000" and "60000" are the SAME quantity - a
+ * paraphrase preserving a seed number in a different format is fidelity,
+ * not a change (the jira "60k issues" cell died on candidates' "60,000",
+ * 2026-09-29). */
 function quantities(text: string, brandVocab: RegExp[]): string[] {
   let t = ` ${text.toLowerCase()} `.replace(TECH_TOKENS, " ");
   for (const p of brandVocab) t = t.replace(new RegExp(`${p.source}\\s*\\d+[a-z]*`, "g"), " ");
+  // Thousands separators out ("60,000" -> "60000"), then the k suffix
+  // expanded ("60k" -> "60000"). "m" stays untouched - it is ambiguous
+  // (millions, minutes, meters) and both sides of a real mismatch
+  // normalize identically anyway.
+  while (/\d,\d{3}(?!\d)/.test(t)) t = t.replace(/(\d),(\d{3})(?!\d)/g, "$1$2");
+  t = t.replace(/(\d+(?:\.\d+)?)\s*k(?![a-z0-9])/g, (_, n) => String(Math.round(parseFloat(n) * 1000)));
   return [...t.matchAll(/\d+(?:\.\d+)?/g)].map((m) => m[0]).filter((n) => !/^20\d\d$/.test(n));
 }
 
