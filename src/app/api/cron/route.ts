@@ -60,6 +60,9 @@ export async function GET(req: Request) {
         void pollRunBatches(r.id).then(() => runInBackground(r.id));
       }
     }
+    // Archived trackers keep finishing in-flight runs above but never
+    // launch a scheduled one.
+    if (project.archived_at) continue;
     const intervalDays = INTERVAL_DAYS[project.schedule];
     if (!intervalDays) continue;
     if (runs.some((r) => r.status === "pending" || r.status === "running" || r.status === "collected")) {

@@ -117,6 +117,7 @@ export default function ProjectDashboard({
     };
   }, [wantSuggestions, id, gateSuggestions]);
 
+  const [unarchiveError, setUnarchiveError] = useState<string | null>(null);
   const refresh = useCallback(async () => {
     // ONE roundtrip renders the whole page: the dictionary rides with
     // the detail, and the follow-ups (run progress, trend) fetch in
@@ -347,6 +348,7 @@ export default function ProjectDashboard({
   );
   // The Run button's task bubble: nothing measured yet and nothing running.
   const needsFirstRun = completeRuns.length === 0 && !activeRun;
+  const archived = Boolean(project.archived_at);
 
   return (
     <div className="grid gap-8">
@@ -382,25 +384,63 @@ export default function ProjectDashboard({
         <div className="flex items-baseline justify-between gap-4 flex-wrap mt-1.5">
           <span className="flex items-center gap-4">
             <ShareButton projectId={id} />
-            <button
-              type="button"
-              onClick={async () => {
-                if (
-                  !confirm(
-                    `Delete the "${project.name}" tracker and all its runs? This cannot be undone.`
+            {!archived && (
+              <button
+                type="button"
+                onClick={async () => {
+                  if (
+                    !confirm(
+                      `Archive the "${project.name}" tracker? It leaves your trackers list and stops running, but every run and answer is kept - you can unarchive it any time.`
+                    )
                   )
-                )
-                  return;
-                await fetch(`/api/projects/${id}`, { method: "DELETE" });
-                window.location.href = "/app";
-              }}
-              className="text-[13px] font-medium text-ink-3 hover:text-danger"
-            >
-              Delete tracker
-            </button>
+                    return;
+                  const res = await fetch(`/api/projects/${id}`, {
+                    method: "PATCH",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ archived: true }),
+                  });
+                  if (res.ok) window.location.href = "/app";
+                }}
+                className="text-[13px] font-medium text-ink-3 hover:text-ink"
+              >
+                Archive tracker
+              </button>
+            )}
           </span>
         </div>
       </div>
+
+      {archived && (
+        <div className="card flex items-center justify-between gap-4 px-5 py-3.5">
+          <span className="text-sm text-ink-2">
+            Archived {new Date(project.archived_at!).toLocaleDateString()} -
+            runs and scheduling are paused. Every run and answer is kept.
+            {unarchiveError && (
+              <span className="block text-danger mt-1">{unarchiveError}</span>
+            )}
+          </span>
+          <button
+            type="button"
+            onClick={async () => {
+              setUnarchiveError(null);
+              const res = await fetch(`/api/projects/${id}`, {
+                method: "PATCH",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ archived: false }),
+              });
+              if (!res.ok) {
+                const j = await res.json().catch(() => null);
+                setUnarchiveError(j?.error ?? "Could not unarchive");
+                return;
+              }
+              await refresh();
+            }}
+            className="btn-primary shrink-0 px-3 py-1.5 text-sm"
+          >
+            Unarchive
+          </button>
+        </div>
+      )}
 
       <div className="flex flex-wrap items-center gap-3">
         <TaskButton
@@ -410,14 +450,14 @@ export default function ProjectDashboard({
               : "Run"
           }
           primary
-          bubble={needsFirstRun ? "dot" : null}
+          bubble={needsFirstRun && !archived ? "dot" : null}
           onClick={() => setOpenModal("run")}
-          disabled={initPhase}
+          disabled={initPhase || archived}
         />
         <TaskButton
           label="Schedule"
           bubble={null}
-          disabled={initPhase}
+          disabled={initPhase || archived}
           onClick={() => setOpenModal("schedule")}
         />
         <TaskButton

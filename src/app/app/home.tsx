@@ -50,6 +50,10 @@ export default function AppHome({
   const [brand, setBrand] = useState("");
   const [drafts, setDrafts] = useState<SetupDraft[]>(initialDrafts);
   const [confirmDelete, setConfirmDelete] = useState<SetupDraft | null>(null);
+  const [showArchived, setShowArchived] = useState(false);
+  const [unarchiveError, setUnarchiveError] = useState<string | null>(null);
+  const activeProjects = projects.filter((p) => !p.archived_at);
+  const archivedProjects = projects.filter((p) => p.archived_at);
   const isAdmin = initialIsAdmin;
   const engineOptions = initialEngines;
   // The open setup, if any: which question set, which brand, resuming what.
@@ -74,6 +78,23 @@ export default function AppHome({
   function resumeDraft(d: SetupDraft) {
     const mode = ((d.wizard as { mode?: SetupMode } | null)?.mode ?? "classic") as SetupMode;
     setWizard({ mode, brand: d.brand, draft: d });
+  }
+
+  async function unarchive(id: string) {
+    setUnarchiveError(null);
+    const res = await fetch(`/api/projects/${id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ archived: false }),
+    });
+    if (!res.ok) {
+      const j = await res.json().catch(() => null);
+      setUnarchiveError(j?.error ?? "Could not unarchive");
+      return;
+    }
+    setProjects((prev) =>
+      prev.map((p) => (p.id === id ? { ...p, archived_at: null } : p))
+    );
   }
 
   async function deleteDraft(id: string) {
@@ -202,13 +223,13 @@ function draftStatus(d: SetupDraft): string {
             <div className="card h-[72px] animate-pulse" />
             <div className="card h-[72px] animate-pulse" />
           </div>
-        ) : projects.length === 0 ? (
+        ) : activeProjects.length === 0 ? (
           <div className="card px-5 py-8 text-center text-sm text-ink-3">
             Your first tracker will appear here.
           </div>
         ) : (
           <ul className="grid gap-2">
-            {projects.map((p) => (
+            {activeProjects.map((p) => (
               <li key={p.id}>
                 {/* prefetch: the server-rendered payload loads while the row is on
                  * screen, so the click lands on ready data - without it the
@@ -227,6 +248,49 @@ function draftStatus(d: SetupDraft): string {
           </ul>
         )}
       </section>
+
+      {archivedProjects.length > 0 && (
+        <section>
+          <button
+            type="button"
+            onClick={() => setShowArchived((v) => !v)}
+            className="section-label mb-3 hover:text-ink"
+            aria-expanded={showArchived}
+          >
+            {showArchived ? "▾" : "▸"} Archived ({archivedProjects.length})
+          </button>
+          {showArchived && (
+            <>
+              {unarchiveError && (
+                <p className="text-sm text-danger mb-2">{unarchiveError}</p>
+              )}
+              <ul className="grid gap-2">
+                {archivedProjects.map((p) => (
+                  <li
+                    key={p.id}
+                    className="card flex items-center justify-between gap-4 px-5 py-3.5"
+                  >
+                    <Link href={`/projects/${p.id}`} className="min-w-0 hover:opacity-80">
+                      <span className="font-semibold text-[15px] text-ink-2">{p.name}</span>
+                      <span className="text-[13px] text-ink-3">
+                        {" "}· {p.brand} · archived{" "}
+                        {new Date(p.archived_at!).toLocaleDateString()}
+                      </span>
+                    </Link>
+                    <button
+                      type="button"
+                      onClick={() => void unarchive(p.id)}
+                      className="shrink-0 text-sm font-semibold text-primary hover:opacity-80"
+                    >
+                      Unarchive
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            </>
+          )}
+        </section>
+      )}
 
       {/* The setup sheet: a large dialog over the trackers. Clicking outside
           does nothing on purpose - closing saves, and only the × or Escape

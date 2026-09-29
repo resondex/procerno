@@ -244,6 +244,9 @@ function createDb(): Database.Database {
       "ALTER TABLE projects ADD COLUMN instrument_version INTEGER NOT NULL DEFAULT 0"
     );
   }
+  if (!cols.some((c) => c.name === "archived_at")) {
+    db.exec("ALTER TABLE projects ADD COLUMN archived_at TEXT");
+  }
   const promptColsForIntent = db.prepare("PRAGMA table_info(prompts)").all() as { name: string }[];
   if (!promptColsForIntent.some((c) => c.name === "intent_id")) {
     db.exec("ALTER TABLE prompts ADD COLUMN intent_id TEXT");
@@ -520,6 +523,8 @@ function parseProject(row: ProjectRaw): Project {
       (row as unknown as { scenario_journeys?: string | null }).scenario_journeys ?? null,
     instrument_version:
       (row as unknown as { instrument_version?: number }).instrument_version ?? 0,
+    archived_at:
+      (row as unknown as { archived_at?: string | null }).archived_at ?? null,
   };
 }
 
@@ -1059,6 +1064,17 @@ export const sqliteStore: Store = {
     if (flags.humanOverride !== undefined) {
       db.prepare("UPDATE projects SET human_override = ? WHERE id = ?")
         .run(flags.humanOverride ? 1 : 0, id);
+    }
+  },
+
+  async setProjectArchived(id, archived) {
+    const db = getDb();
+    if (archived) {
+      db.prepare(
+        "UPDATE projects SET archived_at = COALESCE(archived_at, ?) WHERE id = ?"
+      ).run(new Date().toISOString(), id);
+    } else {
+      db.prepare("UPDATE projects SET archived_at = NULL WHERE id = ?").run(id);
     }
   },
 

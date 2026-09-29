@@ -116,6 +116,10 @@ export interface Project {
   scenario_journeys: string | null;
   /** 0 = classic battery; >=1 = grid-built, bumped on grid edits. */
   instrument_version: number;
+  /** Set when the tracker is archived (ISO timestamp); null = active.
+   * Archived trackers keep every run and answer, drop off the main list,
+   * take no scheduled or manual runs, and can be unarchived at any time. */
+  archived_at: string | null;
   created_at: string;
 }
 
@@ -736,6 +740,8 @@ export interface Store {
     id: string,
     flags: { evidenceDrawer?: boolean; humanOverride?: boolean }
   ): Promise<void>;
+  /** Archive (true) or unarchive (false) a tracker. Nothing is deleted. */
+  setProjectArchived(id: string, archived: boolean): Promise<void>;
   /** Record (or change) one human verdict. Re-labelling the same cell
    * replaces the previous verdict rather than accumulating duplicates. */
   upsertAnswerLabel(input: {

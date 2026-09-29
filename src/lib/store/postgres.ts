@@ -74,6 +74,7 @@ function ensureSchema(): Promise<void> {
       await sql`ALTER TABLE projects ADD COLUMN IF NOT EXISTS moderators TEXT`;
       await sql`ALTER TABLE projects ADD COLUMN IF NOT EXISTS scenario_journeys TEXT`;
       await sql`ALTER TABLE projects ADD COLUMN IF NOT EXISTS instrument_version INTEGER NOT NULL DEFAULT 0`;
+      await sql`ALTER TABLE projects ADD COLUMN IF NOT EXISTS archived_at TIMESTAMPTZ`;
       await sql`CREATE TABLE IF NOT EXISTS intents (
         id TEXT PRIMARY KEY,
         project_id TEXT NOT NULL,
@@ -340,6 +341,7 @@ function rowToProject(r: Record<string, unknown>): Project {
     moderators: (r.moderators as string | null) ?? null,
     scenario_journeys: (r.scenario_journeys as string | null) ?? null,
     instrument_version: (r.instrument_version as number) ?? 0,
+    archived_at: iso(r.archived_at) ?? null,
     created_at: iso(r.created_at)!,
   };
 }
@@ -853,6 +855,15 @@ export const pgStore: Store = {
     }
     if (flags.humanOverride !== undefined) {
       await sql`UPDATE projects SET human_override = ${flags.humanOverride ? 1 : 0} WHERE id = ${id}`;
+    }
+  },
+
+  async setProjectArchived(id, archived) {
+    const sql = await db();
+    if (archived) {
+      await sql`UPDATE projects SET archived_at = COALESCE(archived_at, now()) WHERE id = ${id}`;
+    } else {
+      await sql`UPDATE projects SET archived_at = NULL WHERE id = ${id}`;
     }
   },
 

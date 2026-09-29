@@ -35,6 +35,12 @@ export async function POST(
   }
   const project = await requireProject(id, auth, { write: true });
   if (project instanceof NextResponse) return project;
+  if (project.archived_at) {
+    return NextResponse.json(
+      { error: "This tracker is archived - unarchive it to run" },
+      { status: 409 }
+    );
+  }
   const body = await req.json().catch(() => ({}));
   const parsed = runSchema.safeParse(body);
   if (!parsed.success) {

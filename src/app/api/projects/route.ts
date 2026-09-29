@@ -129,7 +129,11 @@ export async function POST(req: Request) {
 
   if (auth.userId !== null) {
     const plan = await getPlanFor(auth);
-    const existing = await store.listProjects(auth.userId);
+    // Archived trackers don't count against the plan; unarchiving
+    // re-checks the limit instead.
+    const existing = (await store.listProjects(auth.userId)).filter(
+      (p) => !p.archived_at
+    );
     if (existing.length >= PLAN_TRACKER_LIMITS[plan]) {
       return NextResponse.json(
         {
