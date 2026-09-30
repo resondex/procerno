@@ -1166,18 +1166,12 @@ export function useGridSetup(a: GridSetupArgs) {
       avoid: avoid.length > 0 ? avoid : ["(no prompts yet)"],
     });
     if (!data) return;
-    let generated: GridPhrasing[] = [];
-    if (a.state.step === "phrasings") {
-      const pd = await post<{ phrasings: GridPhrasing[][] }>("/api/setup/grid/phrasings", {
-        brand: a.brand, category: a.category, competitors: a.competitors,
-        audience: a.audience || undefined,
-        base: a.state.moderators,
-        scenarios: a.state.scenarios,
-        cells: [{ stage: stageKey, situation, angle, mode: null, text: data.text, spec: data.spec }],
-        count: PHRASING_COUNT,
-      });
-      generated = (pd?.phrasings?.[0] ?? []).map((ph) => ({ ...ph, original: ph.text }));
-    }
+    // The suggestion lands SEED-ONLY (2026-09-29, Tyler): paying for its
+    // full paraphrase set at click time made "Suggest another" hang for
+    // the whole pipeline and billed sets for suggestions the user might
+    // delete. The card shows as missing its paraphrases and the existing
+    // missing-prompts flow writes them at confirm (or the write-missing
+    // click) - same path as any short cell.
     const cell: GridCellUi = {
       uid: cellUid(),
       custom: true,
@@ -1189,8 +1183,7 @@ export function useGridSetup(a: GridSetupArgs) {
       text: data.text,
       original: data.text,
       spec: data.spec ?? null,
-      phrasedFor: data.text,
-      phrasings: generated,
+      phrasings: [],
     };
     // Functional insert: concurrent edits made during the generation stay.
     a.setState((prev) => {
@@ -2784,11 +2777,15 @@ export function CellsGate({
                             >
                               Suggest another
                             </button>
-                            {atCap && (
+                            {atCap ? (
                               <span className="text-[11px] text-ink-3">
                                 custom limit reached - deleting a question frees a slot
                               </span>
-                            )}
+                            ) : customUsed > 0 ? (
+                              <span className="text-[11px] text-ink-3">
+                                {customUsed}/{customAllowance} custom questions used
+                              </span>
+                            ) : null}
                           </>
                         )}
                       </div>

@@ -69,10 +69,14 @@ const putSchema = z.object({
                 asker: z.string().trim().optional(),
               })
             )
+            .max(20)
             .default([]),
         })
       )
-      .min(4),
+      .min(4)
+      // Same ceiling as create - the client's custom-question allowance is
+      // advisory; the route is the enforcement (edit-setup skipped it).
+      .max(80),
     /** Scenario label -> journey delta (null = inherits base). Part of
      * the frozen instrument: without it a later edit flattens the mask. */
     journeys: z.record(z.string(), JourneyShape.nullable()).optional(),
