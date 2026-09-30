@@ -221,7 +221,10 @@ const META_TEXT_PATTERNS: { p: RegExp; why: string }[] = [
   { p: /[\[\]]/, why: "bracketed writer note" },
   { p: /\basker\s*:/i, why: "asker metadata in the text" },
   { p: /^\s*(?:one|two|three|\d+)[- ]?sentence/i, why: "length-instruction opener" },
-  { p: /^\s*(?:terse|short|brief|quick(?:ie)?)\s*:/i, why: "length-instruction opener" },
+  // "Terse:"/"Brief:" are writer vocabulary; "Short:"/"Quick:" are NOT
+  // banned - the ratified corpus carries 11 of them as genuine chat
+  // shorthand (the fixture caught the over-reach, 2026-09-30).
+  { p: /^\s*(?:terse|brief)\s*:/i, why: "length-instruction opener" },
 ];
 
 export function metaTextViolation(text: string): string | null {
