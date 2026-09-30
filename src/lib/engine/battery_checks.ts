@@ -100,6 +100,13 @@ export function stageDesignIntent(stage: string, brand: string, concern?: string
   return `Question design (plan): ${intent}.`;
 }
 
+/** Pre-category stages: the buyer does not know the SOLUTION category
+ * exists, so the category noun is legitimately absent (jira's buyer
+ * describes workflow pain, not "project management software"). The
+ * category-noun rule exempts them; the stage hint governs how the OWNED
+ * object is named ("my phone", never "my pocket gadget"). */
+export const PRE_CATEGORY_STAGES = new Set(["problem_recognition", "category_education"]);
+
 export const BLIND_STAGES = new Set([
   "problem_recognition", "category_education", "discovery", "shortlist",
   "criteria", "feature_screening", "use_case", "social_validation", "premium_worth",

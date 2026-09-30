@@ -4,7 +4,7 @@ import { anthropicClient, openaiClient } from "./providers";
 import { INSTRUMENT_HELPER_MODEL } from "./models";
 import {
   AMBIGUOUS_FORMS, checkBattery, checkCandidateSignature, checkPromptAgainstSpec,
-  deriveCheckSpec, DOUBT_CHECK_STAGES, MUST_NAME_STAGES, questionTypeOf, resolveCellSpec, scenarioLabelLeak, seedDesignLine, specWriterNote,
+  deriveCheckSpec, DOUBT_CHECK_STAGES, MUST_NAME_STAGES, PRE_CATEGORY_STAGES, questionTypeOf, resolveCellSpec, scenarioLabelLeak, seedDesignLine, specWriterNote,
   stageDesignIntent, TERM_COLLISIONS, textNamesCategory, type CellCheckSpec, type QuestionType,
 } from "./battery_checks";
 export { MUST_NAME_STAGES };
@@ -344,7 +344,7 @@ export function stageLibrary(m: Moderators): LibraryStage[] {
     {
       key: "problem_recognition", label: "Problem recognition", layer: "awareness",
       situational: true, rivals: "none", tag: "rules", recommended: true,
-      hint: "Pain-phrased and pre-category: the buyer describes the problem without knowing the category exists. Never name the category, a brand, or a product type.",
+      hint: "Pain-phrased and pre-category: the buyer describes the problem without knowing the SOLUTION category exists. Never name the category as a solution, a brand, or ask for a product type - but the thing the buyer already owns is named plainly and naturally ('my phone', 'my chips'), never contorted around ('my pocket gadget', 'my current setup').",
       why: "Every journey starts here - buyers describe the pain before they know the category exists.",
     },
     {
@@ -2500,7 +2500,7 @@ export async function generateGrid(input: {
     // A blind SEED must speak the category's language ("my phone",
     // "tortilla chips") - three rounds of instructions failed to stop
     // the writer contorting around the noun, so it is mechanical now.
-    if (spec.brandMode === "blind" && !textNamesCategory(c.text, input.category))
+    if (spec.brandMode === "blind" && !PRE_CATEGORY_STAGES.has(c.stage) && !textNamesCategory(c.text, input.category))
       out.push({
         check: "blind_missing_category" as const,
         detail: `blind seed never speaks the category "${input.category}" - use its plain everyday noun (the ordinary word a person calls this thing), never a contortion around it`,
@@ -2717,6 +2717,7 @@ export async function regenerateCell(input: {
     if (
       process.env.PHRASINGS_CHECKS !== "0" &&
       specFor(cand).brandMode === "blind" &&
+      !PRE_CATEGORY_STAGES.has(input.cell.stage) &&
       !textNamesCategory(cand, input.category)
     ) {
       problems.push(
