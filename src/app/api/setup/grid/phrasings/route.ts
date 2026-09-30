@@ -54,6 +54,9 @@ const Body = z.object({
          * roster and prefers that over the carried copy, so the shape is
          * not trusted beyond being an object. Absent = legacy path. */
         spec: z.record(z.string(), z.unknown()).nullable().optional(),
+        /** The cell's planned concern (s9+): rides into the re-derived
+         * spec's design line. */
+        concern: z.string().trim().max(120).nullable().optional(),
       })
     )
     .min(1)

@@ -39,6 +39,8 @@ const Body = z.object({
     situation: z.string().trim().max(60).nullable(),
     angle: z.string().trim().min(1).max(80),
     mode: z.string().trim().max(300).nullable(),
+    /** The cell's planned concern (s9+): part of the design, survives redraws. */
+    concern: z.string().trim().max(120).nullable().optional(),
   }),
   /** Every text already offered for this cell. */
   avoid: z.array(z.string().trim().min(1).max(2000)).min(1).max(8),

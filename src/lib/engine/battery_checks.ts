@@ -56,13 +56,16 @@ export function questionTypeOf(cell: { stage: string; angle: string; text: strin
  * seed until cells carry stored design lines. problem_resolution has its
  * own wording - the generic plan line mis-flagged 15 conforming support
  * asks in the harness. */
-export function seedDesignLine(stage: string, brand: string, seed: string): string | null {
+export function seedDesignLine(stage: string, brand: string, seed: string, concern?: string | null): string | null {
   // "SAME concern/plan as the designed question" (2026-09-29): the earlier
   // wording only demanded A doubt about the brand, so a gifting objection
   // could drift into nine limited-drops objections and pass - each still
-  // voiced a doubt about the brand, just not the designed one.
+  // voiced a doubt about the brand, just not the designed one. A PLANNED
+  // concern (2026-09-30) names the subject outright - the strongest form.
   if (DOUBT_CHECK_STAGES.has(stage))
-    return `Question design (doubt): the question voices the SAME concern about ${brand} as the designed question below - the same subject and worry, differently worded by a different person. A DIFFERENT concern about ${brand} does not satisfy the design. Designed as: "${seed}"`;
+    return concern
+      ? `Question design (doubt): the question voices the buyer's concern about ${brand} on THIS designed subject: ${concern}. Same concern, differently worded by a different person. A doubt about anything else does not satisfy the design. Designed as: "${seed}"`
+      : `Question design (doubt): the question voices the SAME concern about ${brand} as the designed question below - the same subject and worry, differently worded by a different person. A DIFFERENT concern about ${brand} does not satisfy the design. Designed as: "${seed}"`;
   if (!PLAN_CHECK_STAGES.has(stage))
     // Every other stage gets the generic same-question line (2026-09-29:
     // open/awareness/comparison cells drifted with no consistency check -
@@ -82,9 +85,9 @@ export function seedDesignLine(stage: string, brand: string, seed: string): stri
 /** The design intent a doubt/plan STAGE demands, independent of any seed -
  * the yardstick for judging seeds themselves (seed-as-design cannot judge
  * the seed). */
-export function stageDesignIntent(stage: string, brand: string): string | null {
+export function stageDesignIntent(stage: string, brand: string, concern?: string | null): string | null {
   if (DOUBT_CHECK_STAGES.has(stage))
-    return `Question design (doubt): the question itself voices the buyer's concern, complaint or "is it still worth it" doubt about ${brand}. A neutral lookup, spec request or how-to on the same topic does not satisfy the design.`;
+    return `Question design (doubt): the question itself voices the buyer's concern, complaint or "is it still worth it" doubt about ${brand}. A neutral lookup, spec request or how-to on the same topic does not satisfy the design.${concern ? ` The DESIGNED concern is: ${concern} - the question must voice that worry, not a different one.` : ""}`;
   if (!PLAN_CHECK_STAGES.has(stage)) return null;
   const intent =
     stage === "problem_resolution"
@@ -151,6 +154,21 @@ function brandForms(name: string, opts?: { required?: boolean; extraForms?: stri
   return [...out];
 }
 
+/** Does the text speak the category's language? A word of the category
+ * (>=4 chars) appears, including stem containment both ways - "phone"
+ * anchors "smartphones", "retailer" anchors "beauty retailers". Blind
+ * SEEDS must pass this: three rounds of instructions failed to stop the
+ * writer contorting around the noun ("my pocket gadget"), so it is a
+ * mechanical requirement now (2026-09-30). */
+export function textNamesCategory(text: string, category: string): boolean {
+  const words = key(text).split(" ").filter((w) => w.length >= 4);
+  for (const tok of key(category).split(" ")) {
+    if (tok.length < 4) continue;
+    for (const wd of words) if (tok === wd || tok.includes(wd) || wd.includes(tok)) return true;
+  }
+  return false;
+}
+
 export function textNamesBrand(
   text: string, brand: string, opts?: { required?: boolean; extraForms?: string[]; excludeTokens?: Set<string> }
 ): boolean {
@@ -179,7 +197,8 @@ export interface BatteryFinding {
     | "comparison_missing_target" | "comparison_missing_rival" | "comparison_names_extra_rival"
     | "defensive_alt_missing_target" | "offensive_alt_names_target" | "offensive_alt_missing_rival"
     | "alternatives_names_extra_rival" | "pricing_names_rival" | "meta_text"
-    | "scenario_label_leak" | "seed_number_changed" | "duplicate_paraphrase";
+    | "scenario_label_leak" | "blind_missing_category"
+    | "seed_number_changed" | "duplicate_paraphrase";
   /** The offending prompt text (or the seed, for cell-level findings). */
   text: string;
   detail: string;
@@ -431,6 +450,10 @@ export interface CellCheckSpec {
    * spelled-out seed numbers included) - facts a paraphrase keeps or
    * omits, never changes. */
   quantities: string[];
+  /** The PLANNED concern a doubt cell measures (2026-09-30): assigned at
+   * grid-plan time from the brand's enumerated doubt-space, so diversity
+   * holds by construction. Absent on non-doubt cells and legacy cells. */
+  concern?: string | null;
   /** The design sentence doubt/plan paraphrases must voice (same-concern
    * form, quoting the seed), or null for stages without one. */
   designLine: string | null;
@@ -563,7 +586,7 @@ function angleEntry(angle: string, roster: string[]): string | null {
  * advocacy's argued rival read the seed, once, here.
  */
 export function deriveCheckSpec(
-  cell: { stage: string; angle: string; text: string },
+  cell: { stage: string; angle: string; text: string; concern?: string | null },
   brand: string,
   competitors: string[],
   category?: string
@@ -603,7 +626,8 @@ export function deriveCheckSpec(
     requiredBrands: required,
     forbiddenBrands: forbidden,
     quantities: seedQuantities(seed, brand, competitors),
-    designLine: seedDesignLine(cell.stage, brand, seed),
+    concern: cell.concern ?? null,
+    designLine: seedDesignLine(cell.stage, brand, seed, cell.concern),
     qtype,
   };
 }
@@ -613,7 +637,7 @@ export function deriveCheckSpec(
  * written before a seed edit, a roster change or a derivation fix never
  * governs a check. Null when the cell carries no spec (legacy path). */
 export function resolveCellSpec(
-  cell: { stage: string; angle: string; text: string; spec?: unknown },
+  cell: { stage: string; angle: string; text: string; spec?: unknown; concern?: string | null },
   brand: string, competitors: string[], category?: string
 ): CellCheckSpec | null {
   if (!cell.spec || typeof cell.spec !== "object") return null;

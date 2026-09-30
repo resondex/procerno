@@ -57,6 +57,9 @@ export interface GridCellUi {
    * within_brand/doubt/awareness/settled_customer); absent on legacy or
    * hand-added cells (typed server-side at create as a fallback). */
   qtype?: string | null;
+  /** Doubt cells (s9+): the planned concern this cell measures - part of
+   * the design, sent with every generation request. */
+  concern?: string | null;
   /** Invariant cells only: comma-joined scenario labels whose journeys
    * reach this stage, when not universal. */
   mode?: string | null;
@@ -292,6 +295,7 @@ export function normalizeGrid(g: GridState | null): GridState | null {
       // Drafts from before the prompt review carry no machine baseline -
       // treat the saved text as it, so nothing is retroactively flagged.
       original: scrubPrompt(c.original ?? c.text),
+      concern: c.concern ?? null,
       // Pre-phrasedFor drafts: assume the set belongs to the current text
       // (same assumption `original` makes), so the edit-after-write flow
       // works on legacy drafts instead of silently no-opping.
@@ -932,6 +936,7 @@ export function useGridSetup(a: GridSetupArgs) {
               mode: merged[i].mode ?? null,
               text: merged[i].text,
               spec: merged[i].spec ?? undefined,
+              concern: merged[i].concern ?? undefined,
             })),
             count: PHRASING_COUNT,
             force,
@@ -1010,7 +1015,7 @@ export function useGridSetup(a: GridSetupArgs) {
           brand: a.brand, category: a.category, competitors: a.competitors,
           audience: a.audience || undefined,
           base: st.moderators, scenarios: st.scenarios,
-          cells: [{ stage: c.stage, situation: c.situation, angle: c.angle, mode: c.mode ?? null, text: c.text, spec: c.spec ?? undefined }],
+          cells: [{ stage: c.stage, situation: c.situation, angle: c.angle, mode: c.mode ?? null, text: c.text, spec: c.spec ?? undefined, concern: c.concern ?? undefined }],
           count: PHRASING_COUNT,
           // A SHORT set must force: the cache holds the same short set that
           // created the gap. An EMPTY cell must NOT force: its completed
@@ -1080,7 +1085,7 @@ export function useGridSetup(a: GridSetupArgs) {
       audience: a.audience || undefined,
       base: a.state.moderators,
       scenarios: a.state.scenarios,
-      cell: { stage: c.stage, situation: c.situation, angle: c.angle, mode: c.mode ?? null },
+      cell: { stage: c.stage, situation: c.situation, angle: c.angle, mode: c.mode ?? null, concern: c.concern ?? undefined },
       avoid: alts,
       // Near mode keeps this prompt's ask and moves one detail.
       nearTo: near ? c.text : undefined,
@@ -1093,7 +1098,7 @@ export function useGridSetup(a: GridSetupArgs) {
         audience: a.audience || undefined,
         base: a.state.moderators,
         scenarios: a.state.scenarios,
-        cells: [{ stage: c.stage, situation: c.situation, angle: c.angle, mode: c.mode ?? null, text: data.text, spec: data.spec }],
+        cells: [{ stage: c.stage, situation: c.situation, angle: c.angle, mode: c.mode ?? null, text: data.text, spec: data.spec, concern: c.concern ?? undefined }],
         count: PHRASING_COUNT,
       });
       // A failed set is not fatal - the missing-paraphrases gate catches it.

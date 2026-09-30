@@ -5,7 +5,7 @@ import { INSTRUMENT_HELPER_MODEL } from "./models";
 import {
   AMBIGUOUS_FORMS, checkBattery, checkCandidateSignature, checkPromptAgainstSpec,
   deriveCheckSpec, DOUBT_CHECK_STAGES, MUST_NAME_STAGES, questionTypeOf, resolveCellSpec, scenarioLabelLeak, seedDesignLine, specWriterNote,
-  stageDesignIntent, TERM_COLLISIONS, type CellCheckSpec, type QuestionType,
+  stageDesignIntent, TERM_COLLISIONS, textNamesCategory, type CellCheckSpec, type QuestionType,
 } from "./battery_checks";
 export { MUST_NAME_STAGES };
 import { store } from "../store";
@@ -46,6 +46,9 @@ const JOURNEY_MODEL = process.env.JOURNEY_MODEL ?? "claude-opus-5";
  * DESIGNED questions every paraphrase imitates - one-time, cached, cheap.
  * Paraphrase volume stays on mini. */
 const CELLS_MODEL = process.env.CELLS_MODEL ?? "gpt-5";
+/** Enumerates a brand's doubt-space at grid-plan time (2026-09-30):
+ * one small call per fresh battery, same knowledge class as READ_MODEL. */
+const CONCERNS_MODEL = process.env.CONCERNS_MODEL ?? "gpt-5";
 const CACHE_TTL_MS = 183 * 24 * 3600 * 1000;
 /** Versions the WRITING STYLE of cells and phrasings independently of the
  * instrument rules - a style change regenerates prompt text without
@@ -71,7 +74,10 @@ const CACHE_TTL_MS = 183 * 24 * 3600 * 1000;
 // diversity, universal same-question design lines, pick-eliciting and
 // category-term writer rules, product-line (not model-year) naming,
 // scenario-label-leak check.
-const STYLE_VERSION = "s8";
+// s9 = concern planning (2026-09-30): doubt cells carry a DESIGNED
+// concern assigned from the brand's enumerated doubt-space, and blind
+// seeds mechanically require a category noun.
+const STYLE_VERSION = "s9";
 
 /** Brand forms that double as ordinary English words: only these demand a
  * capitalized occurrence to count as naming the brand ("2-3 services max"
@@ -1817,11 +1823,14 @@ const CELL_WRITER_SYSTEM =
           "it, and NEVER copy the scenario's label text into the prompt " +
           "('Party hosting cart' is a plan label, not something a person " +
           "types).\n" +
-          "- Doubt cells (objections, churn, renewal, repertoire): EACH " +
-          "cell in the plan voices a DIFFERENT real concern buyers have " +
-          "about the client brand - never the same worry (price, fees, " +
-          "performance) recycled across cells. Cover the distinct doubts " +
-          "people actually raise about this brand and category.\n" +
+          "- concern(<subject>) on a plan line: that cell's doubt is ABOUT " +
+          "that subject and nothing else - voice THAT worry inside the " +
+          "cell's circumstance. A doubt about a different subject is " +
+          "wrong, however well written.\n" +
+          "- Doubt cells (objections, churn, renewal, repertoire) WITHOUT " +
+          "a concern(...) note: EACH cell voices a DIFFERENT real concern " +
+          "buyers have about the client brand - never the same worry " +
+          "(price, fees, performance) recycled across cells.\n" +
           "- Product names date: name product LINES ('Pixel vs iPhone') or " +
           "say 'the latest <line>' - never a specific model-year pairing " +
           "('Pixel 9 Pro vs iPhone 15 Pro'). Engines correct a stale model " +
@@ -1868,6 +1877,10 @@ export interface GridCell {
   /** The measurement type this cell's answers feed (the decided per-cell
    * typing; advocacy critic cells refine to doubt at labeling time). */
   qtype?: QuestionType;
+  /** Doubt cells only (2026-09-30): the PLANNED concern this cell
+   * measures, assigned at grid-plan time from the brand's enumerated
+   * doubt-space. The writer voices it; the design check enforces it. */
+  concern?: string;
   /** The prompt as a user would type it. */
   text: string;
   /** The cell's typed check-spec (s7+): derived once after the seed's last
@@ -1906,7 +1919,7 @@ export function gridCellCacheKey(
     brand: string; category: string; competitors: string[];
     audience: string | null; base: Moderators; scenarios: ScenarioSpec[];
   },
-  row: { stage: string; situation: string | null; angle: string; scope: string | null }
+  row: { stage: string; situation: string | null; angle: string; scope: string | null; concern?: string | null }
 ): string {
   const rivals = args.competitors.slice(0, 4);
   const s = row.situation ? args.scenarios.find((x) => x.label === row.situation) : undefined;
@@ -1914,7 +1927,7 @@ export function gridCellCacheKey(
   return cacheKey("grid_cell1", [
     STYLE_VERSION, args.brand, args.category, rivals.join(","), args.audience,
     JSON.stringify(args.base),
-    row.stage, row.situation ?? "", row.angle, row.scope ?? "", sctx,
+    row.stage, row.situation ?? "", row.angle, row.scope ?? "", sctx, row.concern ?? "",
   ]);
 }
 
@@ -1924,7 +1937,7 @@ export function phrasingCacheKey(
     brand: string; competitors: string[]; audience: string | null;
     count: number; base: Moderators; scenarios: ScenarioSpec[];
   },
-  cell: { situation: string | null; mode?: string | null; text: string; spec?: unknown }
+  cell: { situation: string | null; mode?: string | null; text: string; spec?: unknown; concern?: string | null }
 ): string {
   const rivals = args.competitors.slice(0, 4);
   const s = cell.situation ? args.scenarios.find((x) => x.label === cell.situation) : undefined;
@@ -1934,7 +1947,7 @@ export function phrasingCacheKey(
     JSON.stringify(args.base),
     // Spec-checked and string-checked sets never share an entry: a legacy
     // draft's set must not serve a spec-era cell or the reverse.
-    `${cell.situation ?? ""}|${cell.mode ?? ""}|${cell.text}|${jnote}${cell.spec ? "|spec" : ""}`,
+    `${cell.situation ?? ""}|${cell.mode ?? ""}|${cell.text}|${jnote}${cell.spec ? "|spec" : ""}${cell.concern ? `|concern:${cell.concern}` : ""}`,
   ]);
 }
 
@@ -1965,7 +1978,7 @@ export async function generateGrid(input: {
   tagCosts({ purpose: "setup:cells" });
   const rivals = input.competitors.slice(0, 4);
   const allLabels = input.scenarios.map((s) => s.label);
-  const plan: { stage: MaskedStage; situation: string | null; angle: string; scope: string | null }[] = [];
+  const plan: { stage: MaskedStage; situation: string | null; angle: string; scope: string | null; concern?: string }[] = [];
   for (const st of input.stages) {
     // A kept stage no journey reaches was forced in by the user: it runs
     // everywhere, in the base journey's voice (override semantics).
@@ -1987,6 +2000,63 @@ export async function generateGrid(input: {
       }
     } else {
       plan.push({ stage: st, situation: null, angle: "generic", scope });
+    }
+  }
+
+  // CONCERN PLANNING (2026-09-30, Tyler): which worry each doubt cell
+  // measures is DESIGNED here, not writer-chosen. One call enumerates the
+  // brand's distinct doubt-space at a coarse altitude; each doubt row gets
+  // one concern assigned, so diversity holds by construction - the writer
+  // voices an assigned worry and the design check enforces it per cell.
+  // (Post-hoc dedup lost to model gravity on thin-discourse brands: every
+  // Doritos objection collapsed to seasoning dust through two fix rounds.)
+  // Fails open: unassigned rows keep the legacy free-pick + dedup path.
+  const doubtRows = plan.filter((r) => DOUBT_CHECK_STAGES.has(r.stage.key));
+  if (doubtRows.length >= 2 && process.env.PHRASINGS_CHECKS !== "0") {
+    try {
+      const res = await openaiClient().chat.completions.create({
+        model: CONCERNS_MODEL,
+        messages: [
+          {
+            role: "system",
+            content:
+              "You know what real buyers complain and worry about. List the " +
+              "requested number of DISTINCT concerns buyers voice about the " +
+              "given brand in its category - each a different coarse class " +
+              "(price/value, quality, health/ingredients, performance, " +
+              "complexity, policy/trust, availability, durability, service, " +
+              "lock-in, ...), 2-6 plain words each, most widely-voiced " +
+              "first. Real concerns people actually raise, never invented " +
+              "ones. Reply with ONLY JSON: {\"concerns\": [\"...\"]}.",
+          },
+          {
+            role: "user",
+            content:
+              `Brand: ${input.brand}\nCategory: ${input.category}\n` +
+              `Audience: ${input.audience ?? "general buyers"}\n` +
+              `Number of concerns: ${doubtRows.length}`,
+          },
+        ],
+        response_format: {
+          type: "json_schema",
+          json_schema: {
+            name: "concerns", strict: true,
+            schema: {
+              type: "object", additionalProperties: false,
+              properties: { concerns: { type: "array", items: { type: "string" } } },
+              required: ["concerns"],
+            },
+          },
+        },
+      });
+      const concerns = (JSON.parse(res.choices[0]?.message?.content ?? "{}") as { concerns?: string[] }).concerns ?? [];
+      doubtRows.forEach((r, i) => {
+        const c = (concerns[i] ?? "").trim();
+        if (c) r.concern = c;
+      });
+      console.warn(`concern plan [${input.brand}]: ${doubtRows.map((r) => `${r.stage.key}=${r.concern ?? "?"}`).join("; ")}`);
+    } catch (err) {
+      console.error("concern planning failed open:", err);
     }
   }
 
@@ -2041,6 +2111,7 @@ export async function generateGrid(input: {
     return (
       `${i + 1}. stage=${p.stage.key} situation=${p.situation ?? "-"} angle=${primaryBrandName(p.angle)}` +
       `${p.scope ? ` reach=${p.scope}` : ""}${jn ? ` journey(${jn})` : ""}` +
+      `${p.concern ? ` concern(${p.concern})` : ""}` +
       `\n   guidance: ${p.stage.hint}`
     );
   };
@@ -2072,12 +2143,18 @@ export async function generateGrid(input: {
     if (cur.length > 0) groups.push(cur);
     // The free deterministic seed check, shared by the per-group heal and
     // the battery-wide concern-diversity pass below.
-    const seedRule = (c: { stage: string; angle: string; text: string; situation?: string | null }) => {
+    const seedRule = (c: { stage: string; angle: string; text: string; situation?: string | null; concern?: string | null }) => {
+      const spec = deriveCheckSpec(c, input.brand, input.competitors, input.category);
       const out = checkPromptAgainstSpec({
         text: c.text,
-        spec: deriveCheckSpec(c, input.brand, input.competitors, input.category),
+        spec,
         category: input.category,
       });
+      // A blind SEED must speak the category's language ("my phone",
+      // "tortilla chips") - three rounds of instructions failed to stop
+      // the writer contorting around the noun, so it is mechanical now.
+      if (spec.brandMode === "blind" && !textNamesCategory(c.text, input.category))
+        out.push({ check: "blind_missing_category" as const, detail: `blind seed never speaks the category ("${input.category}")` });
       // A seed that copies ANY scenario's label - full or as a "Label:"
       // opener - shipped the plan's vocabulary, not a person's circumstance.
       const leak = scenarioLabelLeak(c.text, [c.situation, ...input.scenarios.map((s) => s.label)]);
@@ -2138,6 +2215,7 @@ export async function generateGrid(input: {
             situation,
             angle: c.angle,
             mode: row.scope ?? null,
+            concern: row.concern,
             text: humanize(c.text.trim()),
           };
           cell.qtype = questionTypeOf(cell, input.brand, input.category);
@@ -2241,7 +2319,7 @@ export async function generateGrid(input: {
         if (process.env.PHRASINGS_CHECKS !== "0" && flat.length > 0) {
           try {
             const seedTargets = flat
-              .map((c, i) => ({ c, i, intent: stageDesignIntent(c.stage, input.brand) }))
+              .map((c, i) => ({ c, i, intent: stageDesignIntent(c.stage, input.brand, c.concern) }))
               .filter((x): x is { c: GridCell; i: number; intent: string } => !!x.intent);
             if (seedTargets.length > 0) {
               const verdicts = await checkDesignFidelity({
@@ -2328,8 +2406,11 @@ export async function generateGrid(input: {
     // battery-wide, after every group has landed; changed units re-cache.
     if (process.env.PHRASINGS_CHECKS !== "0") {
       try {
+        // Planned-concern cells are diverse by construction and enforced
+        // per-cell by the design check - the dedup pass is the safety net
+        // for LEGACY doubt cells that carry no assigned concern.
         const doubt: { u: number; c: GridCell }[] = [];
-        for (const u of idxs) for (const c of resolved[u] ?? []) if (DOUBT_CHECK_STAGES.has(c.stage)) doubt.push({ u, c });
+        for (const u of idxs) for (const c of resolved[u] ?? []) if (DOUBT_CHECK_STAGES.has(c.stage) && !c.concern) doubt.push({ u, c });
         if (doubt.length >= 2) {
           const labelConcerns = async (texts: string[]): Promise<string[]> => {
             const a = await anthropicClient();
@@ -2499,7 +2580,7 @@ export async function regenerateCell(input: {
   audience: string | null;
   base: Moderators;
   scenarios: ScenarioSpec[];
-  cell: { stage: string; situation: string | null; angle: string; mode: string | null };
+  cell: { stage: string; situation: string | null; angle: string; mode: string | null; concern?: string | null };
   /** Every text already offered for this cell, newest last. */
   avoid: string[];
   /** Near-variant mode: keep THIS prompt's ask, move one concrete detail -
@@ -2510,8 +2591,9 @@ export async function regenerateCell(input: {
   tagCosts({ purpose: "setup:cells" });
   // Every alternate draw carries its own check-spec, derived from the
   // cell's design and the drawn seed - the same contract as generateGrid.
+  // A planned concern is part of that design and survives redraws.
   const specFor = (text: string) =>
-    deriveCheckSpec({ stage: input.cell.stage, angle: input.cell.angle, text }, input.brand, input.competitors, input.category);
+    deriveCheckSpec({ stage: input.cell.stage, angle: input.cell.angle, text, concern: input.cell.concern }, input.brand, input.competitors, input.category);
   const rivals = input.competitors.slice(0, 4);
   const stages = participationMask(input.base, input.scenarios);
   const st = stages.find((x) => x.key === input.cell.stage);
@@ -2520,7 +2602,7 @@ export async function regenerateCell(input: {
   const key = cacheKey("cell_alt", [
     STYLE_VERSION, input.brand, rivals.join(","), input.audience,
     JSON.stringify(input.base), JSON.stringify(input.scenarios),
-    `${input.cell.stage}|${input.cell.situation ?? ""}|${input.cell.angle}|${input.cell.mode ?? ""}`,
+    `${input.cell.stage}|${input.cell.situation ?? ""}|${input.cell.angle}|${input.cell.mode ?? ""}|${input.cell.concern ?? ""}`,
     avoidNorm.map((t) => t.toLowerCase()).sort().join("~"),
     input.nearTo ? `near:${input.nearTo.trim().toLowerCase()}` : "",
   ]);
@@ -2535,6 +2617,7 @@ export async function regenerateCell(input: {
   const planText =
     `1. stage=${st.key} situation=${input.cell.situation ?? "-"} angle=${primaryBrandName(input.cell.angle)}` +
     `${input.cell.mode ? ` reach=${input.cell.mode}` : ""}${jn ? ` journey(${jn})` : ""}` +
+    `${input.cell.concern ? ` concern(${input.cell.concern})` : ""}` +
     `\n   guidance: ${st.hint}`;
   const draw = async (rejectNote: string | null): Promise<string | null> => {
     const res = await openaiClient().chat.completions.create({
@@ -2583,7 +2666,7 @@ export async function regenerateCell(input: {
   // the one seed path that skipped every check): mechanical brand rule,
   // then the doubt/plan design intent, one steered retry, and null rather
   // than an unchecked seed - the client keeps what it has.
-  const intent = process.env.PHRASINGS_CHECKS !== "0" ? stageDesignIntent(input.cell.stage, input.brand) : null;
+  const intent = process.env.PHRASINGS_CHECKS !== "0" ? stageDesignIntent(input.cell.stage, input.brand, input.cell.concern) : null;
   let text: string | null = null;
   let note: string | null = null;
   for (let attempt = 0; attempt < 2 && !text; attempt++) {
@@ -2745,6 +2828,9 @@ export async function generatePhrasings(input: {
      * design is re-derived from the cell and preferred over the carried
      * copy); absent = the legacy string-derived path, unchanged. */
     spec?: CellCheckSpec | null;
+    /** The cell's planned concern (s9+): rides into the re-derived spec's
+     * design line so paraphrases are checked against the DESIGNED worry. */
+    concern?: string | null;
   }[];
   /** Total phrasings wanted per cell including the seed. */
   count: number;
