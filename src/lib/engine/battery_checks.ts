@@ -220,6 +220,7 @@ const META_TEXT_PATTERNS: { p: RegExp; why: string }[] = [
   { p: /\bcorrection:\s/i, why: "correction narration" },
   { p: /[\[\]]/, why: "bracketed writer note" },
   { p: /\basker\s*:/i, why: "asker metadata in the text" },
+  { p: /^\s*(?:one|two|three|\d+)[- ]?sentence/i, why: "length-instruction opener" },
 ];
 
 export function metaTextViolation(text: string): string | null {

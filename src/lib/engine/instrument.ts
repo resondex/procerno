@@ -2014,6 +2014,19 @@ export async function generateGrid(input: {
   const doubtRows = plan.filter((r) => DOUBT_CHECK_STAGES.has(r.stage.key));
   if (doubtRows.length >= 2 && process.env.PHRASINGS_CHECKS !== "0") {
     try {
+      // The plan is CACHED per battery: warm and write must agree on the
+      // list (each drawing its own would re-key every doubt cell and pay
+      // twice), and a regeneration reuses the battery's established
+      // doubt-space instead of re-rolling it.
+      const planKey = cacheKey("concern_plan1", [
+        STYLE_VERSION, CONCERNS_MODEL, input.brand, input.category, input.audience, String(doubtRows.length),
+      ]);
+      const hit = await store.cacheGet(planKey, CACHE_TTL_MS);
+      if (hit) {
+        const cached = JSON.parse(hit) as string[];
+        doubtRows.forEach((r, i) => { if (cached[i]) r.concern = cached[i]; });
+        console.warn(`concern plan [${input.brand}] (cached): ${doubtRows.map((r) => `${r.stage.key}=${r.concern ?? "?"}`).join("; ")}`);
+      } else {
       const res = await openaiClient().chat.completions.create({
         model: CONCERNS_MODEL,
         messages: [
@@ -2054,7 +2067,10 @@ export async function generateGrid(input: {
         const c = (concerns[i] ?? "").trim();
         if (c) r.concern = c;
       });
+      if (doubtRows.some((r) => r.concern))
+        await store.cacheSet(planKey, JSON.stringify(doubtRows.map((r) => r.concern ?? "")), stampOf(input));
       console.warn(`concern plan [${input.brand}]: ${doubtRows.map((r) => `${r.stage.key}=${r.concern ?? "?"}`).join("; ")}`);
+      }
     } catch (err) {
       console.error("concern planning failed open:", err);
     }
