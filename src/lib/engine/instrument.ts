@@ -1477,10 +1477,14 @@ export async function reviewScenarioFit(input: {
  * doubt/plan cell whose paraphrase no longer voices its design. */
 export type CellFlag = "target" | "branding" | "unclear" | "design";
 
-/** See checkDesignFidelity. Default is the model the offline pattern was
- * validated on (design_check.mts, 2026-09-27: cell-declared designs judged with
- * 0 false positives across 410 prompts). */
-const DESIGN_CHECK_MODEL = process.env.DESIGN_CHECK_MODEL ?? "claude-opus-5-5";
+/** See checkDesignFidelity. sonnet-5 at LOW effort per the 2026-09-29
+ * bakeoff vs the opus-5.5(medium) reference on the 508-paraphrase
+ * same-concern fixture: 99.2% agreement, all 10 real drift kills caught,
+ * 4 gray-zone false kills (the reference's own noise band), ~3x cheaper
+ * and ~2x faster (design_check_bakeoff/report.md). Opus remains one env
+ * flip away (DESIGN_CHECK_MODEL + DESIGN_CHECK_EFFORT=medium). */
+const DESIGN_CHECK_MODEL = process.env.DESIGN_CHECK_MODEL ?? "claude-sonnet-5";
+const DESIGN_CHECK_EFFORT = process.env.DESIGN_CHECK_EFFORT ?? "low";
 
 const DESIGN_CHECK_SYSTEM = `You check survey questions against their design. Each question was written for a cell with a stated design:
 - Doubt design: the question should itself voice a concern, complaint, doubt or "is it still worth it / should I cut it" about the named brand or option.
@@ -1507,14 +1511,14 @@ export async function checkDesignFidelity(input: {
   // (the stray gpt-5-mini design_check ledger rows).
   return withCostContext({ purpose: "setup:design_check" }, () => Promise.all(
     input.candidates.map(async (c) => {
-      const key = cacheKey("design_check1", [DESIGN_CHECK_MODEL, c.design, c.text.trim()]);
+      const key = cacheKey("design_check1", [DESIGN_CHECK_MODEL, DESIGN_CHECK_EFFORT, c.design, c.text.trim()]);
       const hit = await store.cacheGet(key, CACHE_TTL_MS);
       if (hit) return JSON.parse(hit) as { voices: boolean; reason: string };
       try {
         const res = await a.messages.create({
           model: DESIGN_CHECK_MODEL,
           max_tokens: 2000,
-          output_config: { effort: "medium" },
+          output_config: { effort: DESIGN_CHECK_EFFORT },
           system: DESIGN_CHECK_SYSTEM,
           messages: [{ role: "user", content: `${c.design}\n\nQuestion: ${c.text}` }],
         } as never);
