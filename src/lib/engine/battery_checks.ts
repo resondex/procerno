@@ -232,6 +232,7 @@ const META_TEXT_PATTERNS: { p: RegExp; why: string }[] = [
   // banned - the ratified corpus carries 11 of them as genuine chat
   // shorthand (the fixture caught the over-reach, 2026-09-30).
   { p: /^\s*(?:terse|brief)\s*:/i, why: "length-instruction opener" },
+  { p: /\b(?:spec|trust|feel)-driven\b/i, why: "planning vocabulary (journey tag)" },
 ];
 
 export function metaTextViolation(text: string): string | null {
@@ -374,6 +375,18 @@ export function checkBattery(input: {
       const k = key(t);
       if (seen.has(k)) findings.push({ cell: i, check: "duplicate_paraphrase", text: t, detail: "exact duplicate" });
       seen.add(k);
+      // Owned-noun continuity (2026-09-30, round 8): when a pre-category
+      // blind SEED names the owned object with a category word ("my
+      // phone"), every paraphrase keeps one - a paraphrase saying "my
+      // device" re-opens the door a camera answer walks through.
+      if (
+        PRE_CATEGORY_STAGES.has(cell.stage) &&
+        t !== cell.text &&
+        input.category &&
+        textNamesCategory(cell.text, input.category) &&
+        !textNamesCategory(t, input.category)
+      )
+        findings.push({ cell: i, check: "blind_missing_category", text: t, detail: `paraphrase drops the owned category noun the seed uses` });
       // Path-independent: a prompt that copies a scenario LABEL - any
       // scenario's, full or as a "Label:" opener - shipped the plan's
       // vocabulary instead of voicing the circumstance.
