@@ -1937,7 +1937,8 @@ export function phrasingCacheKey(
     brand: string; competitors: string[]; audience: string | null;
     count: number; base: Moderators; scenarios: ScenarioSpec[];
   },
-  cell: { situation: string | null; mode?: string | null; text: string; spec?: unknown; concern?: string | null }
+  cell: { situation: string | null; mode?: string | null; text: string; spec?: unknown; concern?: string | null },
+  avoidConcerns?: string[]
 ): string {
   const rivals = args.competitors.slice(0, 4);
   const s = cell.situation ? args.scenarios.find((x) => x.label === cell.situation) : undefined;
@@ -1947,7 +1948,7 @@ export function phrasingCacheKey(
     JSON.stringify(args.base),
     // Spec-checked and string-checked sets never share an entry: a legacy
     // draft's set must not serve a spec-era cell or the reverse.
-    `${cell.situation ?? ""}|${cell.mode ?? ""}|${cell.text}|${jnote}${cell.spec ? "|spec" : ""}${cell.concern ? `|concern:${cell.concern}` : ""}`,
+    `${cell.situation ?? ""}|${cell.mode ?? ""}|${cell.text}|${jnote}${cell.spec ? "|spec" : ""}${cell.concern ? `|concern:${cell.concern}` : ""}${avoidConcerns && avoidConcerns.length > 0 ? `|guard:${[...avoidConcerns].sort().join(";")}` : ""}`,
   ]);
 }
 
@@ -2919,7 +2920,7 @@ export async function generatePhrasings(input: {
   // situation's journey note) - the old composition folded every
   // scenario label into every key, so renaming one scenario re-keyed
   // and redrew all ~500 paraphrases. See phrasingCacheKey.
-  const keys = input.cells.map((c) => phrasingCacheKey(input, c));
+  const keys = input.cells.map((c) => phrasingCacheKey(input, c, input.avoidConcerns));
   const out: Phrasing[][] = input.cells.map(() => []);
   // Each cell's resolved spec, looked up by cell object: pass() and the
   // filters see subsets, never indices into input.cells.
