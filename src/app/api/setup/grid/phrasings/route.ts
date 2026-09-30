@@ -62,6 +62,8 @@ const Body = z.object({
     .min(1)
     .max(30),
   count: z.number().int().min(2).max(20).default(10),
+  /** All planned concerns in the battery - sibling-bleed guard. */
+  avoidConcerns: z.array(z.string().trim().max(120)).max(12).optional(),
   force: z.boolean().optional(),
   /** Background warm: fill the cache but never wait on another request's
    * in-flight work - the confirm that needs results does the waiting. */
@@ -80,7 +82,7 @@ export async function POST(req: Request) {
   if (!parsed.success) {
     return NextResponse.json({ error: "bad request" }, { status: 400 });
   }
-  const { brand, category, competitors, audience, cells, count, force } = parsed.data;
+  const { brand, category, competitors, audience, cells, count, force, avoidConcerns } = parsed.data;
   const phrasings = await generatePhrasings({
     brand,
     category,
@@ -90,6 +92,7 @@ export async function POST(req: Request) {
     scenarios: parsed.data.scenarios as unknown as (ScenarioSpec & { journey: Journey | null })[],
     cells: cells.map((c) => ({ ...c, spec: (c.spec ?? null) as CellCheckSpec | null })),
     count,
+    avoidConcerns,
     force,
     noWait: parsed.data.warm,
     meta: { source: cacheSource(auth) },

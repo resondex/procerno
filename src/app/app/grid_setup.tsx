@@ -939,6 +939,7 @@ export function useGridSetup(a: GridSetupArgs) {
               concern: merged[i].concern ?? undefined,
             })),
             count: PHRASING_COUNT,
+            avoidConcerns: [...new Set((a.state?.cells ?? []).map((x) => x.concern).filter((x): x is string => !!x))],
             force,
           }
         );
@@ -1016,6 +1017,7 @@ export function useGridSetup(a: GridSetupArgs) {
           audience: a.audience || undefined,
           base: st.moderators, scenarios: st.scenarios,
           cells: [{ stage: c.stage, situation: c.situation, angle: c.angle, mode: c.mode ?? null, text: c.text, spec: c.spec ?? undefined, concern: c.concern ?? undefined }],
+          avoidConcerns: [...new Set((a.state?.cells ?? []).map((x) => x.concern).filter((x): x is string => !!x))],
           count: PHRASING_COUNT,
           // A SHORT set must force: the cache holds the same short set that
           // created the gap. An EMPTY cell must NOT force: its completed
@@ -1099,6 +1101,7 @@ export function useGridSetup(a: GridSetupArgs) {
         base: a.state.moderators,
         scenarios: a.state.scenarios,
         cells: [{ stage: c.stage, situation: c.situation, angle: c.angle, mode: c.mode ?? null, text: data.text, spec: data.spec, concern: c.concern ?? undefined }],
+        avoidConcerns: [...new Set((a.state?.cells ?? []).map((x) => x.concern).filter((x): x is string => !!x))],
         count: PHRASING_COUNT,
       });
       // A failed set is not fatal - the missing-paraphrases gate catches it.
@@ -1328,6 +1331,7 @@ export function useGridSetup(a: GridSetupArgs) {
               spec: cells[i].spec ?? undefined,
             })),
             count: PHRASING_COUNT,
+            avoidConcerns: [...new Set((a.state?.cells ?? []).map((x) => x.concern).filter((x): x is string => !!x))],
             warm: true,
           }),
         }).catch(() => {});

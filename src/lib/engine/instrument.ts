@@ -2158,30 +2158,6 @@ export async function generateGrid(input: {
       count += units[u].length;
     }
     if (cur.length > 0) groups.push(cur);
-    // The free deterministic seed check, shared by the per-group heal and
-    // the battery-wide concern-diversity pass below.
-    const seedRule = (c: { stage: string; angle: string; text: string; situation?: string | null; concern?: string | null }) => {
-      const spec = deriveCheckSpec(c, input.brand, input.competitors, input.category);
-      const out = checkPromptAgainstSpec({
-        text: c.text,
-        spec,
-        category: input.category,
-      });
-      // A blind SEED must speak the category's language ("my phone",
-      // "tortilla chips") - three rounds of instructions failed to stop
-      // the writer contorting around the noun, so it is mechanical now.
-      if (spec.brandMode === "blind" && !textNamesCategory(c.text, input.category))
-        out.push({
-          check: "blind_missing_category" as const,
-          detail: `blind seed never speaks the category "${input.category}" - use its plain everyday noun (the ordinary word a person calls this thing), never a contortion around it`,
-        });
-      // A seed that copies ANY scenario's label - full or as a "Label:"
-      // opener - shipped the plan's vocabulary, not a person's circumstance.
-      const leak = scenarioLabelLeak(c.text, [c.situation, ...input.scenarios.map((s) => s.label)]);
-      if (leak)
-        out.push({ check: "scenario_label_leak" as const, detail: `copies the scenario label "${leak}"` });
-      return out;
-    };
     await Promise.all(
       groups.map(async (group) => {
         try {
@@ -2511,6 +2487,31 @@ export async function generateGrid(input: {
     }
   };
 
+    // The free deterministic seed check, shared by the per-group heal and
+  // the battery-wide concern-diversity pass below.
+  const seedRule = (c: { stage: string; angle: string; text: string; situation?: string | null; concern?: string | null }) => {
+    const spec = deriveCheckSpec(c, input.brand, input.competitors, input.category);
+    const out = checkPromptAgainstSpec({
+      text: c.text,
+      spec,
+      category: input.category,
+    });
+    // A blind SEED must speak the category's language ("my phone",
+    // "tortilla chips") - three rounds of instructions failed to stop
+    // the writer contorting around the noun, so it is mechanical now.
+    if (spec.brandMode === "blind" && !textNamesCategory(c.text, input.category))
+      out.push({
+        check: "blind_missing_category" as const,
+        detail: `blind seed never speaks the category "${input.category}" - use its plain everyday noun (the ordinary word a person calls this thing), never a contortion around it`,
+      });
+    // A seed that copies ANY scenario's label - full or as a "Label:"
+    // opener - shipped the plan's vocabulary, not a person's circumstance.
+    const leak = scenarioLabelLeak(c.text, [c.situation, ...input.scenarios.map((s) => s.label)]);
+    if (leak)
+      out.push({ check: "scenario_label_leak" as const, detail: `copies the scenario label "${leak}"` });
+    return out;
+  };
+
   const mine: number[] = [];
   const theirs: number[] = [];
   {
@@ -2521,8 +2522,21 @@ export async function generateGrid(input: {
         if (at === null) {
           const v = valueOf(raw);
           if (v && v.length > 0) {
-            resolved[u] = scrub(v);
-            return;
+            const served = scrub(v);
+            // RULES REACH CACHED CELLS (2026-09-30, independent audit): a
+            // unit written before today's rules is re-validated on serve
+            // by the same free deterministic checks generation runs - a
+            // cell today's rules reject regenerates instead of riding the
+            // cache forever (Pixel C2 survived six audits this way).
+            if (
+              process.env.PHRASINGS_CHECKS !== "0" &&
+              served.some((c) => seedRule(c).length > 0)
+            ) {
+              console.warn(`cached unit fails current rules - regenerating [${served[0]?.stage}] ${served[0]?.text.slice(0, 70)}`);
+            } else {
+              resolved[u] = served;
+              return;
+            }
           }
         } else if (Date.now() - at < COALESCE_PENDING_TTL_MS) {
           theirs.push(u);
@@ -2865,6 +2879,10 @@ export async function generatePhrasings(input: {
   }[];
   /** Total phrasings wanted per cell including the seed. */
   count: number;
+  /** All planned concerns in the battery (doubt cells' assignments):
+   * each cell's paraphrases must not import a SIBLING's concern (the
+   * Jira C30 bleed - learning-curve paraphrases adding performance). */
+  avoidConcerns?: string[];
   /** Skip the cache read: the user asked for a fresh set. */
   force?: boolean;
   /** A background warm: generate what nobody else is generating, but never
@@ -2971,7 +2989,13 @@ export async function generatePhrasings(input: {
       const spec = specOf.get(c);
       if (spec) {
         const note = specWriterNote(spec);
-        return note ? `\n   ${note}` : "";
+        // A planned concern rides with the seed: the paraphrases voice
+        // THAT worry only, never the battery's other designed concerns.
+        const others = (input.avoidConcerns ?? []).filter((x) => x && x.toLowerCase() !== (spec.concern ?? "").toLowerCase());
+        const cnote = spec.concern
+          ? `\n   [designed concern: ${spec.concern} - every paraphrase voices THIS worry as its main point${others.length > 0 ? `; never these, which other cells cover: ${others.join("; ")}` : ""}]`
+          : "";
+        return (note ? `\n   ${note}` : "") + cnote;
       }
       return brandSignature(c.text, input.brand, rivals) === ""
         ? MUST_NAME_STAGES.has(c.stage)
@@ -3352,8 +3376,12 @@ export async function generatePhrasings(input: {
           // an earlier era can hold a null/stale designLine (the Netflix
           // "Korean thrillers" rephrase silently skipped the check on a
           // carried s7 spec, 2026-09-29).
-          const line = seedDesignLine(subset[j].stage, input.brand, subset[j].text);
+          let line = seedDesignLine(subset[j].stage, input.brand, subset[j].text, specOf.get(subset[j])?.concern ?? null);
           if (!line) continue;
+          const own = (specOf.get(subset[j])?.concern ?? "").toLowerCase();
+          const others = (input.avoidConcerns ?? []).filter((x) => x && x.toLowerCase() !== own);
+          if (own && others.length > 0)
+            line += ` It must NOT primarily voice these OTHER designed concerns the battery covers elsewhere: ${others.join("; ")}.`;
           got[j].forEach((ph, k) => {
             targets.push({ j, k });
             candidates.push({ text: ph.text, design: line });
