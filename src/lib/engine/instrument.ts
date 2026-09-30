@@ -4,7 +4,7 @@ import { anthropicClient, openaiClient } from "./providers";
 import { INSTRUMENT_HELPER_MODEL } from "./models";
 import {
   AMBIGUOUS_FORMS, checkBattery, checkCandidateSignature, checkPromptAgainstSpec,
-  deriveCheckSpec, MUST_NAME_STAGES, questionTypeOf, resolveCellSpec, seedDesignLine, specWriterNote,
+  deriveCheckSpec, DOUBT_CHECK_STAGES, MUST_NAME_STAGES, questionTypeOf, resolveCellSpec, seedDesignLine, specWriterNote,
   stageDesignIntent, TERM_COLLISIONS, type CellCheckSpec, type QuestionType,
 } from "./battery_checks";
 export { MUST_NAME_STAGES };
@@ -67,7 +67,11 @@ const CACHE_TTL_MS = 183 * 24 * 3600 * 1000;
 // and the brand/number/design checks verify candidates against it instead
 // of re-inferring the design from the seed's spelling - nothing generated
 // under the string era serves.
-const STYLE_VERSION = "s7";
+// s8 = the walk-3 audit fixes (2026-09-29): cross-cell doubt-concern
+// diversity, universal same-question design lines, pick-eliciting and
+// category-term writer rules, product-line (not model-year) naming,
+// scenario-label-leak check.
+const STYLE_VERSION = "s8";
 
 /** Brand forms that double as ordinary English words: only these demand a
  * capitalized occurrence to count as naming the brand ("2-3 services max"
@@ -1489,6 +1493,7 @@ const DESIGN_CHECK_EFFORT = process.env.DESIGN_CHECK_EFFORT ?? "low";
 const DESIGN_CHECK_SYSTEM = `You check survey questions against their design. Each question was written for a cell with a stated design:
 - Doubt design: the question should itself voice a concern, complaint, doubt or "is it still worth it / should I cut it" about the named brand or option.
 - Plan design: the question should itself carry a customer's plan with the named brand (use it for more, find products that work with it, recommend or defend it to someone).
+- Same-question design (no doubt/plan named): the question should ask the same designed question - same subject, same circumstance, same kind of ask. A which-one ask rewritten as a features-only or where-to-research ask does not satisfy it.
 Decide whether THIS question voices its design. A neutral information request, a how-to, or a lookup that never states or asks the concern (or plan) does NOT voice it, even if it is on the same topic. When the design includes 'Designed as: "..."', the question must carry the SAME specific concern or plan as that designed question - the same subject, not merely any concern or plan of the same kind about the same brand. Different wording, register, backstory and detail are expected and fine; a different subject is not. Judge only the question's words, never what an answer might say.
 Reply with ONLY: {"voices_design": true|false, "reason": "<one short sentence>"}`;
 
@@ -1808,7 +1813,30 @@ const CELL_WRITER_SYSTEM =
           "MUST name the client brand: a churn, renewal, support, expansion, " +
           "ecosystem or advocacy ask that leaves the brand implied ('my " +
           "subscription', 'the service') is a defect, never a variant.\n" +
-          "- situation: weave the circumstance in naturally; do not label it.\n" +
+          "- situation: weave the circumstance in naturally; do not label " +
+          "it, and NEVER copy the scenario's label text into the prompt " +
+          "('Party hosting cart' is a plan label, not something a person " +
+          "types).\n" +
+          "- Doubt cells (objections, churn, renewal, repertoire): EACH " +
+          "cell in the plan voices a DIFFERENT real concern buyers have " +
+          "about the client brand - never the same worry (price, fees, " +
+          "performance) recycled across cells. Cover the distinct doubts " +
+          "people actually raise about this brand and category.\n" +
+          "- Product names date: name product LINES ('Pixel vs iPhone') or " +
+          "say 'the latest <line>' - never a specific model-year pairing " +
+          "('Pixel 9 Pro vs iPhone 15 Pro'). Engines correct a stale model " +
+          "premise instead of answering the question.\n" +
+          "- Open-choice stages (discovery, shortlist, use_case, " +
+          "social_validation, feature_screening, premium_worth): the ask " +
+          "must invite NAMED picks - 'which ones', 'name a few worth a " +
+          "look' - never 'what should I look for', 'where do I find " +
+          "reviews', or a features-only essay ask. When the category is a " +
+          "RETAILER category, the ask is which retailer to buy from, not " +
+          "which product to buy.\n" +
+          "- The category term is vocabulary: use the study category's own " +
+          "words ('tortilla chips', 'beauty retailers'), never a looser " +
+          "genericization ('chips', 'stores') in blind cells - the " +
+          "category anchors what is being measured.\n" +
           "- journey(...): that cell's buyer decides that way - write the " +
           "prompt in that buyer's register.\n" +
           "- reach=<scenarios>: this single cell is asked by buyers in those " +
@@ -2037,6 +2065,21 @@ export async function generateGrid(input: {
       count += units[u].length;
     }
     if (cur.length > 0) groups.push(cur);
+    // The free deterministic seed check, shared by the per-group heal and
+    // the battery-wide concern-diversity pass below.
+    const seedRule = (c: { stage: string; angle: string; text: string; situation?: string | null }) => {
+      const out = checkPromptAgainstSpec({
+        text: c.text,
+        spec: deriveCheckSpec(c, input.brand, input.competitors, input.category),
+        category: input.category,
+      });
+      // A seed that copies its scenario's label verbatim shipped the
+      // plan's vocabulary, not a person's circumstance.
+      const label = (c.situation ?? "").trim();
+      if (label.length >= 8 && c.text.toLowerCase().includes(label.toLowerCase()))
+        out.push({ check: "scenario_label_leak" as const, detail: `copies the scenario label "${label}"` });
+      return out;
+    };
     await Promise.all(
       groups.map(async (group) => {
         try {
@@ -2145,13 +2188,8 @@ export async function generateGrid(input: {
         // with a loud log (never blocks generation).
         // s7: the seed is checked against the spec its design derives -
         // required brands tolerant, forbidden brands strict - never against
-        // a design re-read from its own spelling.
-        const seedRule = (c: { stage: string; angle: string; text: string }) =>
-          checkPromptAgainstSpec({
-            text: c.text,
-            spec: deriveCheckSpec(c, input.brand, input.competitors, input.category),
-            category: input.category,
-          });
+        // a design re-read from its own spelling (seedRule, hoisted to
+        // generate() scope so the cross-cell diversity pass shares it).
         if (process.env.PHRASINGS_CHECKS !== "0" && flat.length > 0) {
           for (let i = 0; i < flat.length; i++) {
             const c = flat[i];
@@ -2276,6 +2314,95 @@ export async function generateGrid(input: {
         }
       })
     );
+    // CROSS-CELL CONCERN DIVERSITY (2026-09-29 audit): every per-cell check
+    // passes when all of a brand's doubt cells converge on ONE worry (jira:
+    // four performance objections; Netflix: price six times) - the doubt
+    // dashboard then measures a single concern per brand. One cheap
+    // labeling call over this generation's doubt seeds; duplicates get one
+    // regeneration steered away from the concerns already covered. Runs
+    // battery-wide, after every group has landed; changed units re-cache.
+    if (process.env.PHRASINGS_CHECKS !== "0") {
+      try {
+        const doubt: { u: number; c: GridCell }[] = [];
+        for (const u of idxs) for (const c of resolved[u] ?? []) if (DOUBT_CHECK_STAGES.has(c.stage)) doubt.push({ u, c });
+        if (doubt.length >= 2) {
+          const labelConcerns = async (texts: string[]): Promise<string[]> => {
+            const a = await anthropicClient();
+            const res = await withCostContext({ purpose: "setup:cells" }, () => a.messages.create({
+              model: DESIGN_CHECK_MODEL,
+              max_tokens: 1500,
+              output_config: { effort: DESIGN_CHECK_EFFORT },
+              system: `Each question below voices a buyer's concern about ${input.brand}. Label each question's core concern in 2-4 words (e.g. "performance at scale", "annual fee value", "content library shrinking"). Reply with ONLY JSON: {"concerns": ["...", ...]} - one label per question, in order.`,
+              messages: [{ role: "user", content: texts.map((t, i) => `${i + 1}. ${t}`).join("\n") }],
+            } as never));
+            const text = (res as { content: { type: string; text?: string }[] }).content
+              .filter((b) => b.type === "text").map((b) => b.text ?? "").join("").trim();
+            const j = JSON.parse(text.match(/\{[\s\S]*\}/)?.[0] ?? text) as { concerns?: string[] };
+            return (j.concerns ?? []).map((s) => String(s));
+          };
+          const concerns = await labelConcerns(doubt.map((d) => d.c.text));
+          if (concerns.length === doubt.length) {
+            const norm = (s: string) => s.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+            const covered = new Map<string, number>();
+            const dups: number[] = [];
+            concerns.forEach((lab, i) => {
+              const k = norm(lab);
+              if (covered.has(k)) dups.push(i);
+              else covered.set(k, i);
+            });
+            const dirty = new Set<number>();
+            for (const i of dups.slice(0, 4)) {
+              const d = doubt[i];
+              const row = (units[d.u] ?? []).find(
+                (r) => r.stage.key === d.c.stage && (r.situation ?? null) === d.c.situation && primaryBrandName(r.angle) === d.c.angle
+              ) ?? (units[d.u] ?? [])[0];
+              if (!row) continue;
+              console.warn(`concern diversity: [${d.c.stage}] duplicates "${concerns[i]}" - regenerating | ${d.c.text.slice(0, 80)}`);
+              try {
+                const res2 = await openaiClient().chat.completions.create({
+                  model: CELLS_MODEL,
+                  messages: [
+                    { role: "system", content: CELL_WRITER_SYSTEM + "Return one cell object for the plan line." },
+                    { role: "user", content:
+                        `Client brand: ${input.brand}\nCategory: ${input.category}\n` +
+                        `Rivals: ${rivals.map(primaryBrandName).join(", ")}\nAudience: ${input.audience ?? "unknown"}\n\n` +
+                        `Cell plan:\n${planLine(row, 0)}\n` +
+                        `   [this battery ALREADY covers these concerns about ${input.brand}: ${[...covered.keys()].join("; ")}. ` +
+                        `This cell must voice a DIFFERENT real concern buyers have about ${input.brand} in ${input.category}. ` +
+                        `Do not reuse this wording: "${d.c.text}"]` },
+                  ],
+                  response_format: { type: "json_schema", json_schema: { name: "grid_cells", strict: true, schema: CELLS_SCHEMA } },
+                });
+                const text2 = (JSON.parse(res2.choices[0]?.message?.content ?? "{}") as { cells?: { text?: string }[] }).cells?.[0]?.text?.trim();
+                if (!text2) continue;
+                const cand = { stage: d.c.stage, angle: d.c.angle, text: humanize(text2), situation: d.c.situation };
+                const intent = stageDesignIntent(d.c.stage, input.brand);
+                const mechOk = seedRule(cand).length === 0;
+                const designOk = !intent || (await checkDesignFidelity({ candidates: [{ text: cand.text, design: intent }], meta: input.meta }))[0].voices;
+                if (mechOk && designOk) {
+                  d.c.text = cand.text;
+                  d.c.qtype = questionTypeOf(d.c, input.brand, input.category);
+                  d.c.spec = deriveCheckSpec(d.c, input.brand, input.competitors, input.category);
+                  dirty.add(d.u);
+                  console.warn(`concern diversity: healed [${d.c.stage}]: ${cand.text.slice(0, 80)}`);
+                } else {
+                  console.warn(`concern diversity: regeneration rejected [${d.c.stage}] - original stands`);
+                }
+              } catch (err) {
+                console.error("concern diversity regeneration failed open:", err);
+              }
+            }
+            await Promise.all(
+              [...dirty].map((u) =>
+                store.cacheSet(unitKeys[u], JSON.stringify(resolved[u] ?? []), stampOf(input)).catch(() => {})
+              )
+            );
+          }
+        }
+      } catch (err) {
+        console.error("concern diversity pass failed open:", err);
+      }
+    }
   };
 
   const mine: number[] = [];
@@ -2791,6 +2918,10 @@ export async function generatePhrasings(input: {
             "same brands and no others.\n" +
             "- Never change the circumstance or the decision being made; never " +
             "add a new constraint the seed does not have.\n" +
+            "- Keep the seed's category term exactly: 'tortilla chips' stays " +
+            "'tortilla chips', never 'chips' or 'snacks' - the category term " +
+            "is part of the measurement. Never copy a scenario label's text " +
+            "into a paraphrase.\n" +
             "- A seed's [stage guidance] is part of the SAME question: every " +
             "paraphrase stays inside it. If it says pre-category, the asker " +
             "does not know the category exists - they describe the pain and " +
@@ -3127,6 +3258,7 @@ export async function generatePhrasings(input: {
             stage: subset[j].stage, angle: subset[j].angle, text: subset[j].text,
             phrasings: got[j].map((ph) => ph.text),
             spec: specOf.get(subset[j]) ?? null,
+            situation: subset[j].situation ?? null,
           })),
         });
         for (const f of findings) {

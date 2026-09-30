@@ -63,7 +63,11 @@ export function seedDesignLine(stage: string, brand: string, seed: string): stri
   // voiced a doubt about the brand, just not the designed one.
   if (DOUBT_CHECK_STAGES.has(stage))
     return `Question design (doubt): the question voices the SAME concern about ${brand} as the designed question below - the same subject and worry, differently worded by a different person. A DIFFERENT concern about ${brand} does not satisfy the design. Designed as: "${seed}"`;
-  if (!PLAN_CHECK_STAGES.has(stage)) return null;
+  if (!PLAN_CHECK_STAGES.has(stage))
+    // Every other stage gets the generic same-question line (2026-09-29:
+    // open/awareness/comparison cells drifted with no consistency check -
+    // Netflix's discovery cell became "what should I look for" in 7 of 9).
+    return `Question design: the question asks the SAME designed question below - same subject, same circumstance, same kind of ask - differently worded by a different person. A different subject, a different ask, or a features-only rewrite of a which-one question does not satisfy the design. Designed as: "${seed}"`;
   const intent =
     stage === "problem_resolution"
       ? `an existing ${brand} customer has a problem with ${brand} or its product and wants it fixed`
@@ -165,6 +169,8 @@ export interface BatteryCheckCell {
   /** The cell's typed design, when it carries one (s7+). Absent = the
    * legacy string-derived checks. */
   spec?: CellCheckSpec | null;
+  /** Scenario label, for the label-leak check. */
+  situation?: string | null;
 }
 
 export interface BatteryFinding {
@@ -173,7 +179,7 @@ export interface BatteryFinding {
     | "comparison_missing_target" | "comparison_missing_rival" | "comparison_names_extra_rival"
     | "defensive_alt_missing_target" | "offensive_alt_names_target" | "offensive_alt_missing_rival"
     | "alternatives_names_extra_rival" | "pricing_names_rival" | "meta_text"
-    | "seed_number_changed" | "duplicate_paraphrase";
+    | "scenario_label_leak" | "seed_number_changed" | "duplicate_paraphrase";
   /** The offending prompt text (or the seed, for cell-level findings). */
   text: string;
   detail: string;
@@ -212,11 +218,18 @@ export function checkPromptBrandRule(input: {
   /** Known alternate surface forms per brand (dictionary aliases), e.g.
    * {"American Express": ["amex"]}. */
   extraForms?: Record<string, string[]>;
+  /** The cell's scenario label - a prompt containing it VERBATIM copied
+   * the plan's label instead of voicing the circumstance ("Household
+   * tune-up question: ..."). */
+  situationLabel?: string | null;
 }): { check: BatteryFinding["check"]; detail: string }[] {
   const { text, stage, angle, brand } = input;
   const out: { check: BatteryFinding["check"]; detail: string }[] = [];
   const meta = metaTextViolation(text);
   if (meta) out.push({ check: "meta_text", detail: `generator meta-text: ${meta}` });
+  const label = (input.situationLabel ?? "").trim();
+  if (label.length >= 8 && text.toLowerCase().includes(label.toLowerCase()))
+    out.push({ check: "scenario_label_leak", detail: `copies the scenario label "${label}"` });
   const catTokens = new Set(key(input.category ?? "").split(" ").filter(Boolean));
   const target = textNamesBrand(text, brand, { extraForms: input.extraForms?.[brand], excludeTokens: catTokens });
   const rivalsNamed = input.competitors.filter((c) => textNamesBrand(text, c, { extraForms: input.extraForms?.[c], excludeTokens: catTokens }));
@@ -302,6 +315,12 @@ export function checkBattery(input: {
       const k = key(t);
       if (seen.has(k)) findings.push({ cell: i, check: "duplicate_paraphrase", text: t, detail: "exact duplicate" });
       seen.add(k);
+      // Path-independent: a prompt that copies its scenario's LABEL text
+      // verbatim ("Household tune-up question: ...") shipped the plan's
+      // vocabulary instead of voicing the circumstance.
+      const label = (cell.situation ?? "").trim();
+      if (label.length >= 8 && t.toLowerCase().includes(label.toLowerCase()))
+        findings.push({ cell: i, check: "scenario_label_leak", text: t, detail: `copies the scenario label "${label}"` });
       // A cell carrying a typed spec is verified AGAINST it; a legacy cell
       // reverse-engineers its design from stage + angle + prose, as before.
       const verdicts = cell.spec
