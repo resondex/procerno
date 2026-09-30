@@ -2039,7 +2039,8 @@ export async function generateGrid(input: {
               "(price/value, quality, health/ingredients, performance, " +
               "complexity, policy/trust, availability, durability, service, " +
               "lock-in, ...), 2-6 plain words each, most widely-voiced " +
-              "first. Real concerns people actually raise, never invented " +
+              "first. At most ONE price/cost/value-class concern in the whole "
+              + "list. Real concerns people actually raise, never invented " +
               "ones. Reply with ONLY JSON: {\"concerns\": [\"...\"]}.",
           },
           {
@@ -2094,7 +2095,7 @@ export async function generateGrid(input: {
   units.forEach((rows, u) => rows.forEach((r) => unitOf.set(r, u)));
   const unitKeys = plan.map((r) =>
     gridCellCacheKey(input, {
-      stage: r.stage.key, situation: r.situation, angle: r.angle, scope: r.scope,
+      stage: r.stage.key, situation: r.situation, angle: r.angle, scope: r.scope, concern: r.concern ?? null,
     })
   );
   const resolved: (GridCell[] | null)[] = units.map(() => null);

@@ -64,7 +64,7 @@ export function seedDesignLine(stage: string, brand: string, seed: string, conce
   // concern (2026-09-30) names the subject outright - the strongest form.
   if (DOUBT_CHECK_STAGES.has(stage))
     return concern
-      ? `Question design (doubt): the question voices the buyer's concern about ${brand} on THIS designed subject: ${concern}. Same concern, differently worded by a different person. A doubt about anything else does not satisfy the design. Designed as: "${seed}"`
+      ? `Question design (doubt): the question voices the buyer's concern about ${brand} on THIS designed subject: ${concern}. THAT worry must be the question's MAIN point - a question whose main worry is something else does not satisfy the design even if it mentions the subject in passing. Same concern, differently worded by a different person. Designed as: "${seed}"`
       : `Question design (doubt): the question voices the SAME concern about ${brand} as the designed question below - the same subject and worry, differently worded by a different person. A DIFFERENT concern about ${brand} does not satisfy the design. Designed as: "${seed}"`;
   if (!PLAN_CHECK_STAGES.has(stage))
     // Every other stage gets the generic same-question line (2026-09-29:
@@ -221,6 +221,7 @@ const META_TEXT_PATTERNS: { p: RegExp; why: string }[] = [
   { p: /[\[\]]/, why: "bracketed writer note" },
   { p: /\basker\s*:/i, why: "asker metadata in the text" },
   { p: /^\s*(?:one|two|three|\d+)[- ]?sentence/i, why: "length-instruction opener" },
+  { p: /^\s*(?:terse|short|brief|quick(?:ie)?)\s*:/i, why: "length-instruction opener" },
 ];
 
 export function metaTextViolation(text: string): string | null {
