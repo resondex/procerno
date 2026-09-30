@@ -299,12 +299,40 @@ function quantities(text: string, brandVocab: RegExp[]): string[] {
   return [...t.matchAll(/\d+(?:\.\d+)?/g)].map((m) => m[0]).filter((n) => !/^20\d\d$/.test(n));
 }
 
+/** A prompt leaking a scenario label: the full label verbatim, or a short
+ * "Label-ish:" opener whose distinctive words come from a label ("Camera-
+ * first buy:" from the camera-first scenario). Any label counts - the
+ * jira leak carried a DIFFERENT cell's scenario label. */
+export function scenarioLabelLeak(text: string, labels: (string | null | undefined)[]): string | null {
+  const t = text.toLowerCase();
+  for (const raw of labels) {
+    const label = (raw ?? "").trim();
+    if (label.length >= 8 && t.includes(label.toLowerCase())) return label;
+  }
+  const m = text.match(/^([A-Za-z][A-Za-z0-9 &/-]{3,40}):/);
+  if (m) {
+    const prefixWords = new Set(key(m[1]).split(" ").filter((w) => w.length >= 5));
+    if (prefixWords.size > 0) {
+      for (const raw of labels) {
+        const lw = new Set(key(raw ?? "").split(" "));
+        let hit = 0;
+        for (const w of prefixWords) if (lw.has(w)) hit++;
+        if (hit > 0 && hit >= Math.ceil(prefixWords.size / 2)) return (raw ?? "").trim();
+      }
+    }
+  }
+  return null;
+}
+
 export function checkBattery(input: {
   brand: string;
   competitors: string[];
   cells: BatteryCheckCell[];
   category?: string;
   extraForms?: Record<string, string[]>;
+  /** Every scenario label in the battery - a prompt copying ANY of them
+   * leaked plan vocabulary, not just its own cell's. */
+  scenarioLabels?: string[];
 }): BatteryFinding[] {
   const findings: BatteryFinding[] = [];
   const brandVocab = [input.brand, ...input.competitors].flatMap((b) => brandPatterns(b, { required: true }));
@@ -315,12 +343,12 @@ export function checkBattery(input: {
       const k = key(t);
       if (seen.has(k)) findings.push({ cell: i, check: "duplicate_paraphrase", text: t, detail: "exact duplicate" });
       seen.add(k);
-      // Path-independent: a prompt that copies its scenario's LABEL text
-      // verbatim ("Household tune-up question: ...") shipped the plan's
+      // Path-independent: a prompt that copies a scenario LABEL - any
+      // scenario's, full or as a "Label:" opener - shipped the plan's
       // vocabulary instead of voicing the circumstance.
-      const label = (cell.situation ?? "").trim();
-      if (label.length >= 8 && t.toLowerCase().includes(label.toLowerCase()))
-        findings.push({ cell: i, check: "scenario_label_leak", text: t, detail: `copies the scenario label "${label}"` });
+      const leak = scenarioLabelLeak(t, [cell.situation, ...(input.scenarioLabels ?? [])]);
+      if (leak)
+        findings.push({ cell: i, check: "scenario_label_leak", text: t, detail: `copies the scenario label "${leak}"` });
       // A cell carrying a typed spec is verified AGAINST it; a legacy cell
       // reverse-engineers its design from stage + angle + prose, as before.
       const verdicts = cell.spec

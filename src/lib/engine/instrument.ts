@@ -4,7 +4,7 @@ import { anthropicClient, openaiClient } from "./providers";
 import { INSTRUMENT_HELPER_MODEL } from "./models";
 import {
   AMBIGUOUS_FORMS, checkBattery, checkCandidateSignature, checkPromptAgainstSpec,
-  deriveCheckSpec, DOUBT_CHECK_STAGES, MUST_NAME_STAGES, questionTypeOf, resolveCellSpec, seedDesignLine, specWriterNote,
+  deriveCheckSpec, DOUBT_CHECK_STAGES, MUST_NAME_STAGES, questionTypeOf, resolveCellSpec, scenarioLabelLeak, seedDesignLine, specWriterNote,
   stageDesignIntent, TERM_COLLISIONS, type CellCheckSpec, type QuestionType,
 } from "./battery_checks";
 export { MUST_NAME_STAGES };
@@ -1836,7 +1836,12 @@ const CELL_WRITER_SYSTEM =
           "- The category term is vocabulary: use the study category's own " +
           "words ('tortilla chips', 'beauty retailers'), never a looser " +
           "genericization ('chips', 'stores') in blind cells - the " +
-          "category anchors what is being measured.\n" +
+          "category anchors what is being measured. Blind means no BRAND " +
+          "names - the plain category noun ('my phone') is normal speech, " +
+          "never contorted around ('the thing in my pocket').\n" +
+          "- Never use planning vocabulary in a prompt: 'spec-driven', " +
+          "'trust-driven', 'think/feel', journey or scenario terms are " +
+          "OURS, not the asker's.\n" +
           "- journey(...): that cell's buyer decides that way - write the " +
           "prompt in that buyer's register.\n" +
           "- reach=<scenarios>: this single cell is asked by buyers in those " +
@@ -2073,11 +2078,11 @@ export async function generateGrid(input: {
         spec: deriveCheckSpec(c, input.brand, input.competitors, input.category),
         category: input.category,
       });
-      // A seed that copies its scenario's label verbatim shipped the
-      // plan's vocabulary, not a person's circumstance.
-      const label = (c.situation ?? "").trim();
-      if (label.length >= 8 && c.text.toLowerCase().includes(label.toLowerCase()))
-        out.push({ check: "scenario_label_leak" as const, detail: `copies the scenario label "${label}"` });
+      // A seed that copies ANY scenario's label - full or as a "Label:"
+      // opener - shipped the plan's vocabulary, not a person's circumstance.
+      const leak = scenarioLabelLeak(c.text, [c.situation, ...input.scenarios.map((s) => s.label)]);
+      if (leak)
+        out.push({ check: "scenario_label_leak" as const, detail: `copies the scenario label "${leak}"` });
       return out;
     };
     await Promise.all(
@@ -2332,7 +2337,7 @@ export async function generateGrid(input: {
               model: DESIGN_CHECK_MODEL,
               max_tokens: 1500,
               output_config: { effort: DESIGN_CHECK_EFFORT },
-              system: `Each question below voices a buyer's concern about ${input.brand}. Label each question's core concern in 2-4 words (e.g. "performance at scale", "annual fee value", "content library shrinking"). Reply with ONLY JSON: {"concerns": ["...", ...]} - one label per question, in order.`,
+              system: `Each question below voices a buyer's concern about ${input.brand}. Label each question's core concern with ONE COARSE class: price/fees, performance/reliability, complexity/admin burden, catalog/content, policy/trust, support/service, compatibility/lock-in, quality/durability - or a 2-3 word class at that same altitude. Two settings of the same worry (peak-load speed vs cross-region speed) are the SAME class. Reply with ONLY JSON: {"concerns": ["...", ...]} - one label per question, in order.`,
               messages: [{ role: "user", content: texts.map((t, i) => `${i + 1}. ${t}`).join("\n") }],
             } as never));
             const text = (res as { content: { type: string; text?: string }[] }).content
@@ -2922,6 +2927,18 @@ export async function generatePhrasings(input: {
             "'tortilla chips', never 'chips' or 'snacks' - the category term " +
             "is part of the measurement. Never copy a scenario label's text " +
             "into a paraphrase.\n" +
+            "- Defining qualifiers in the seed are FACTS, like its numbers: " +
+            "a genre, cuisine, nationality, material or format ('Korean " +
+            "thrillers', 'mineral sunscreen') stays exactly as written - " +
+            "'Korean' never becomes 'Asian', 'subtitled' or 'foreign'.\n" +
+            "- Blind means no BRAND names. The plain category noun ('my " +
+            "phone', 'tortilla chips') is normal speech - never contort " +
+            "around it ('the thing in my pocket', 'my carried device').\n" +
+            "- Never use planning vocabulary in a prompt: 'spec-driven', " +
+            "'trust-driven', 'think/feel', journey or scenario terms are " +
+            "OURS, not the asker's.\n" +
+            "- No single persona in more than 2 of a set's paraphrases: " +
+            "nine founders is one person nine times, not nine people.\n" +
             "- A seed's [stage guidance] is part of the SAME question: every " +
             "paraphrase stays inside it. If it says pre-category, the asker " +
             "does not know the category exists - they describe the pain and " +
@@ -3214,7 +3231,11 @@ export async function generatePhrasings(input: {
           // seed for legacy ones (the same string - design-check cache
           // entries carry over).
           const spec = specOf.get(subset[j]);
-          const line = spec ? spec.designLine : seedDesignLine(subset[j].stage, input.brand, subset[j].text);
+          // Always derived FRESH from the current seed: a carried spec from
+          // an earlier era can hold a null/stale designLine (the Netflix
+          // "Korean thrillers" rephrase silently skipped the check on a
+          // carried s7 spec, 2026-09-29).
+          const line = seedDesignLine(subset[j].stage, input.brand, subset[j].text);
           if (!line) continue;
           got[j].forEach((ph, k) => {
             targets.push({ j, k });
@@ -3260,6 +3281,7 @@ export async function generatePhrasings(input: {
             spec: specOf.get(subset[j]) ?? null,
             situation: subset[j].situation ?? null,
           })),
+          scenarioLabels: input.scenarios.map((s) => s.label),
         });
         for (const f of findings) {
           const j = cellIdxs[f.cell];
