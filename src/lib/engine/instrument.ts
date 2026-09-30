@@ -2154,7 +2154,10 @@ export async function generateGrid(input: {
       // "tortilla chips") - three rounds of instructions failed to stop
       // the writer contorting around the noun, so it is mechanical now.
       if (spec.brandMode === "blind" && !textNamesCategory(c.text, input.category))
-        out.push({ check: "blind_missing_category" as const, detail: `blind seed never speaks the category ("${input.category}")` });
+        out.push({
+          check: "blind_missing_category" as const,
+          detail: `blind seed never speaks the category "${input.category}" - use its plain everyday noun (the ordinary word a person calls this thing), never a contortion around it`,
+        });
       // A seed that copies ANY scenario's label - full or as a "Label:"
       // opener - shipped the plan's vocabulary, not a person's circumstance.
       const leak = scenarioLabelLeak(c.text, [c.situation, ...input.scenarios.map((s) => s.label)]);
@@ -2669,7 +2672,7 @@ export async function regenerateCell(input: {
   const intent = process.env.PHRASINGS_CHECKS !== "0" ? stageDesignIntent(input.cell.stage, input.brand, input.cell.concern) : null;
   let text: string | null = null;
   let note: string | null = null;
-  for (let attempt = 0; attempt < 2 && !text; attempt++) {
+  for (let attempt = 0; attempt < 3 && !text; attempt++) {
     const cand = await draw(note);
     if (!cand) return null;
     if (avoidNorm.some((t) => t.toLowerCase() === cand.toLowerCase())) return null;
@@ -2677,6 +2680,17 @@ export async function regenerateCell(input: {
       process.env.PHRASINGS_CHECKS !== "0"
         ? checkPromptAgainstSpec({ text: cand, spec: specFor(cand), category: input.category }).map((m) => m.detail)
         : [];
+    // Alternate draws honor the blind category-noun rule too - this path
+    // skipped it, which is how a "pocket camera" seed survived redraws.
+    if (
+      process.env.PHRASINGS_CHECKS !== "0" &&
+      specFor(cand).brandMode === "blind" &&
+      !textNamesCategory(cand, input.category)
+    ) {
+      problems.push(
+        `the prompt never speaks the category "${input.category}" - a blind prompt must use its plain everyday noun (the ordinary word a person calls this thing)`
+      );
+    }
     if (intent && problems.length === 0) {
       const [v] = await checkDesignFidelity({ candidates: [{ text: cand, design: intent }], meta: input.meta });
       if (!v.voices && !v.unchecked) problems.push(`off-design: ${v.reason || "does not voice the cell's design"}`);
