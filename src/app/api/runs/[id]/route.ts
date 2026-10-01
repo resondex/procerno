@@ -4,6 +4,7 @@ import { store } from "@/lib/store";
 import { requireAuth, requireRun } from "@/lib/auth";
 import { hasOpenBatches, pollRunBatches } from "@/lib/engine/batch";
 import { driveAndChain } from "@/lib/engine/runner";
+import { promptsForRun } from "@/lib/engine/surfaces";
 
 /** Per-run throttle for the opportunistic batch poll below (Hobby-plan
  * crons are daily, so the dashboard's own progress polling stands in as
@@ -33,12 +34,14 @@ export async function GET(
       waitUntil(pollRunBatches(run.id).then(() => driveAndChain(run.id, origin)));
     }
   }
-  const [prompts, completed, byModel] = await Promise.all([
+  const [prompts, intents, completed, byModel] = await Promise.all([
     store.listPrompts(run.project_id),
+    store.listIntents(run.project_id),
     store.countResponses(id),
     store.countResponsesByModel(id),
   ]);
-  const liveCount = prompts.filter((p) => !p.retired).length;
+  // The run's own prompt set: a skip wave never asks the worries surface.
+  const liveCount = promptsForRun(run, prompts, intents).length;
   const models = run.models.length > 0 ? run.models : [run.model];
   // Each engine answers every live prompt once per repeat, so they share one
   // per-engine target. Progress is honest only against that denominator.

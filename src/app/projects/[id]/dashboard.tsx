@@ -13,6 +13,7 @@ import {
 } from "@/app/components/engine_picker";
 import { matchKey } from "@/lib/brand_key";
 import { ignoreSurfaces } from "@/lib/ignore_rules";
+import type { NextRunPlan } from "@/lib/engine/surfaces";
 import type {
   DictionaryEntry,
   Project,
@@ -30,6 +31,9 @@ export interface Detail {
   runs: Run[];
   /** Rides with the detail so first paint needs ONE roundtrip. */
   dictionary?: DictionaryEntry[];
+  /** What the next run would collect - the worries surface rides monthly
+   * waves only (engine/surfaces.ts). */
+  nextRun?: NextRunPlan;
 }
 
 interface Progress {
@@ -331,8 +335,12 @@ export default function ProjectDashboard({
       </div>
     );
   }
-  const { project, prompts, runs } = detail;
-  const activePromptCount = prompts.filter((p) => p.retired === 0).length;
+  const { project, prompts, runs, nextRun } = detail;
+  const activePromptCount =
+    nextRun?.promptCount ?? prompts.filter((p) => p.retired === 0).length;
+  // Worry prompts the next run skips (they ride monthly waves only).
+  const skippedWorryPrompts =
+    nextRun && !nextRun.surfaces.includes("worries") ? nextRun.worryPromptCount : 0;
   const totalCalls =
     activePromptCount * repeats * Math.max(chosenEngines.length, 1);
   const completeRuns = runs.filter((r) => r.status === "complete");
@@ -644,6 +652,8 @@ export default function ProjectDashboard({
               {activePromptCount} prompts × {repeats} repeats ×{" "}
               {chosenEngines.length || 0} engine
               {chosenEngines.length === 1 ? "" : "s"} = {totalCalls} answers.
+              {skippedWorryPrompts > 0 &&
+                ` +${skippedWorryPrompts} buyer-worry prompt${skippedWorryPrompts === 1 ? "" : "s"} on monthly waves - not in this run.`}{" "}
               More repeats tighten the confidence intervals; more engines widen
               the coverage.
             </p>

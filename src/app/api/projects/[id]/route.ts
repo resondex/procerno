@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { store } from "@/lib/store";
+import { planNextRun } from "@/lib/engine/surfaces";
 import {
   isStaff,
   getPlanFor,
@@ -21,11 +22,12 @@ export async function GET(
   // Dictionary rides along: the page needs it on every load, and a
   // separate fetch pays a second function invocation and auth handshake
   // in series - the visible lag between layout and live buttons.
-  const [prompts, runs, staff, dictionary] = await Promise.all([
+  const [prompts, runs, staff, dictionary, intents] = await Promise.all([
     store.listPrompts(id),
     store.listRuns(id),
     isStaff(auth),
     store.getDictionary(id),
+    store.listIntents(id),
   ]);
   // Drives whether staff-only switches are rendered at all. The PATCH route
   // enforces the same check, so a hidden control is a courtesy, not the gate.
@@ -35,6 +37,7 @@ export async function GET(
     runs,
     staff,
     dictionary,
+    nextRun: planNextRun({ prompts, intents, runs }),
   });
 }
 

@@ -5,6 +5,7 @@ import { store } from "@/lib/store";
 import { apiKeyConfigured, currentEngineIds } from "@/lib/engine/providers";
 import { driveAndChain, findStalledRuns, runInBackground } from "@/lib/engine/runner";
 import { batchableEngine, hasOpenBatches, pollRunBatches, submitRunBatches } from "@/lib/engine/batch";
+import { planRunSurfaces } from "@/lib/engine/surfaces";
 
 export const maxDuration = 300;
 
@@ -89,6 +90,7 @@ export async function GET(req: Request) {
       models: engineSet,
       repeats: CRON_REPEATS,
       pipeline,
+      surfaces: await planRunSurfaces(project.id),
     });
     if (pipeline === "batch") {
       try {

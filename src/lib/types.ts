@@ -227,6 +227,10 @@ export interface Prompt {
   retired: number;
 }
 
+/** "core" collects on the tracker's cadence; "worries" (concern-bearing
+ * doubt cells) collects on monthly-inclusion waves only. */
+export type RunSurface = "core" | "worries";
+
 export interface Run {
   id: string;
   project_id: string;
@@ -241,6 +245,10 @@ export interface Run {
    * engines to the vendors' 50%-discount batch APIs (scheduled runs, and
    * enterprise first runs) with live mop-up for the rest. */
   pipeline: "live" | "batch";
+  /** Collection surfaces this run carried, decided at creation (see
+   * engine/surfaces.ts). null = created before per-surface cadence, which
+   * collected every prompt - reads as every surface. */
+  surfaces: RunSurface[] | null;
   started_at: string | null;
   completed_at: string | null;
   created_at: string;
@@ -846,6 +854,8 @@ export interface Store {
     models?: string[];
     repeats: number;
     pipeline?: "live" | "batch";
+    /** Omitted = NULL (every surface, the pre-cadence behavior). */
+    surfaces?: RunSurface[];
   }): Promise<Run>;
   insertRunBatch(input: {
     runId: string;

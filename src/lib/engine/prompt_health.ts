@@ -3,6 +3,7 @@ import { tagCosts } from "../cost_log";
 import { buildCanonicalizer } from "./metrics";
 import { apiKeyConfigured, openaiClient } from "./providers";
 import { PROMPT_HEALTH_MODEL } from "./models";
+import { promptsForRun } from "./surfaces";
 
 
 const SCHEMA = {
@@ -46,15 +47,22 @@ export async function analyzePromptHealth(
   if (!apiKeyConfigured()) return;
   const project = await store.getProject(projectId);
   if (!project) return;
-  const [prompts, responses, mentions, dictionary] = await Promise.all([
+  const [run, prompts, intents, responses, mentions, dictionary] = await Promise.all([
+    store.getRun(runId),
     store.listPrompts(projectId),
+    store.listIntents(projectId),
     store.listResponseMeta(runId),
     store.listMentionsForRun(runId),
     store.getDictionary(projectId),
   ]);
+  if (!run) return;
   const canon = buildCanonicalizer(dictionary);
 
-  const unbranded = prompts.filter((p) => p.theme !== "branded" && !p.retired);
+  // Only prompts this run asked: a skip wave sending a worry prompt with
+  // zero answers would let the model clear the flag its monthly wave set.
+  const unbranded = promptsForRun(run, prompts, intents).filter(
+    (p) => p.theme !== "branded"
+  );
   const mentionsByResponse = new Map<string, string[]>();
   for (const m of mentions) {
     const list = mentionsByResponse.get(m.response_id) ?? [];

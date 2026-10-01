@@ -1,6 +1,7 @@
 import { store } from "../store";
 import { matchKey } from "../brand_key";
 import { engineMode } from "./providers";
+import { carriedPrompts, worryPromptIds } from "./surfaces";
 import type {
   AnswerLabel,
   BrandStats,
@@ -138,7 +139,12 @@ export interface RunData {
   /** Bodies stay in the database: metrics read only text_head/word_count. */
   responses: ResponseStatsRow[];
   mentions: MentionRow[];
+  /** The prompts whose surface this run carried (engine/surfaces.ts). */
   prompts: Prompt[];
+  /** Worries-surface prompt ids - fenced out of the headline pool so the
+   * headline means the same questions on monthly and skip waves. Absent
+   * = no worry prompts. */
+  worryPromptIds?: Set<string>;
   dictionary: DictionaryEntry[];
   /** Human verdicts from the evidence drawer. Only consulted when the
    * project has human override switched on. */
@@ -194,12 +200,17 @@ export async function loadRunData(runId: string): Promise<RunData | null> {
     store.listMentionsForRun(runId),
   ]);
   const project = projectMaybe!;
-  const [prompts, dictionary, labels] = await Promise.all([
+  const [allPrompts, intents, dictionary, labels] = await Promise.all([
     store.listPrompts(project.id),
+    store.listIntents(project.id),
     store.getDictionary(project.id),
     store.listLabelsForRun(runId),
   ]);
-  return { run, project, responses, mentions, prompts, dictionary, labels };
+  // A skip wave never asked the worries surface: its cells are absent from
+  // this run's per-prompt cuts, not zero-answer rows reading as 0%.
+  const worryIds = worryPromptIds(allPrompts, intents);
+  const prompts = carriedPrompts(run, allPrompts, worryIds);
+  return { run, project, responses, mentions, prompts, dictionary, labels, worryPromptIds: worryIds };
 }
 
 export async function computeRunMetrics(
@@ -242,9 +253,14 @@ export function computeRunMetricsFromData(
       : undefined);
 
   const promptById = new Map(prompts.map((p) => [p.id, p]));
-  const brandedPromptIds = new Set(
+  // Off the headline pool: branded prompts, plus the worries surface - it
+  // rides monthly waves only, so pooling it would change what the headline
+  // measures wave to wave (its must-name stages store "branded" anyway;
+  // this fences a paraphrase that slipped that check).
+  const fencedPromptIds = new Set(
     prompts.filter((p) => p.theme === "branded").map((p) => p.id)
   );
+  for (const id of data.worryPromptIds ?? []) fencedPromptIds.add(id);
   // The core engine panel: the project's declared set, falling back to the
   // run's own engines for pre-engine-set projects. Headline rates compute
   // over core engines only — engines beyond the core are bonus views, shown
@@ -269,7 +285,7 @@ export function computeRunMetricsFromData(
   // Headline rates use unbranded prompts only — asking about the brand by
   // name trivially guarantees a mention.
   const unbranded = responses.filter(
-    (r) => !brandedPromptIds.has(r.prompt_id) && inCore(r)
+    (r) => !fencedPromptIds.has(r.prompt_id) && inCore(r)
   );
   const unbrandedIds = new Set(unbranded.map((r) => r.id));
 
@@ -439,7 +455,7 @@ export function computeRunMetricsFromData(
 
   // --- per-engine breakdown: the same headline questions, engine by engine ---
   const allUnbranded = responses.filter(
-    (r) => !brandedPromptIds.has(r.prompt_id)
+    (r) => !fencedPromptIds.has(r.prompt_id)
   );
   const engineIds = [
     ...new Set(allUnbranded.map((r) => r.model).filter(Boolean)),
@@ -907,7 +923,7 @@ export function computeRunMetricsFromData(
 
     // Prompt grid: modal pick per prompt + stability + badge.
     promptGrid = prompts
-      .filter((p) => p.theme !== "branded")
+      .filter((p) => !fencedPromptIds.has(p.id))
       .map((p) => {
         const rows = codedRows.filter((r) => r.prompt_id === p.id);
         const decidedRows = rows.filter(

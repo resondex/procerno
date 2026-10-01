@@ -3,6 +3,7 @@ import { store } from "../store";
 import { logCost, tagCosts } from "../cost_log";
 import type { RunBatch } from "../types";
 import { SEARCH_CAP, anthropicClient, getEngine, openaiClient } from "./providers";
+import { loadRunPrompts } from "./surfaces";
 
 /**
  * The batch pipeline: the same (prompt × repeat × engine) tasks a live run
@@ -40,7 +41,7 @@ async function pendingTasks(runId: string): Promise<BatchTask[]> {
   if (!run) return [];
   const project = await store.getProject(run.project_id);
   if (!project) return [];
-  const prompts = (await store.listPrompts(project.id)).filter((p) => !p.retired);
+  const prompts = await loadRunPrompts(run);
   const done = new Set(
     (await store.listResponseMeta(runId)).map(
       (r) => `${r.prompt_id}:${r.repeat_idx}:${r.model}`

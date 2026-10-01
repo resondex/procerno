@@ -3,6 +3,7 @@ import { redirect } from "next/navigation";
 import { NextResponse } from "next/server";
 import { getAuth, isStaff, requireProject } from "@/lib/auth";
 import { store } from "@/lib/store";
+import { planNextRun } from "@/lib/engine/surfaces";
 import ProjectDashboard, { type Detail } from "./dashboard";
 
 /**
@@ -25,16 +26,18 @@ export default async function ProjectPage({
   if (!auth) redirect("/login");
   const project = await requireProject(id, auth);
   if (project instanceof NextResponse) redirect("/app");
-  const [prompts, runs, staff, dictionary] = await Promise.all([
+  const [prompts, runs, staff, dictionary, intents] = await Promise.all([
     store.listPrompts(id),
     store.listRuns(id),
     isStaff(auth),
     store.getDictionary(id),
+    store.listIntents(id),
   ]);
+  const nextRun = planNextRun({ prompts, intents, runs });
   // Mirror the API's wire format (dates serialize to strings) so the
   // client-side types hold across both load paths.
   const initialDetail = JSON.parse(
-    JSON.stringify({ project, prompts, runs, staff, dictionary })
+    JSON.stringify({ project, prompts, runs, staff, dictionary, nextRun })
   ) as Detail;
   // The dictionary gate's saved step rides in a cookie so THIS render can
   // open on it - a localStorage-only restore flashed step 1/3 until

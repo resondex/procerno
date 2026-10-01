@@ -278,6 +278,9 @@ function ensureSchema(): Promise<void> {
       // Multi-engine: a task is prompt × repeat × ENGINE. Backfill the model
       // on pre-multi-engine rows from their run, then re-key the index.
       await sql`ALTER TABLE runs ADD COLUMN IF NOT EXISTS models TEXT NOT NULL DEFAULT '[]'`;
+      // Per-surface cadence (2026-10-01): JSON array of the surfaces a run
+      // carried; NULL on earlier runs = every surface.
+      await sql`ALTER TABLE runs ADD COLUMN IF NOT EXISTS surfaces TEXT`;
       await sql`ALTER TABLE responses ADD COLUMN IF NOT EXISTS model TEXT`;
       await sql`ALTER TABLE responses ADD COLUMN IF NOT EXISTS finish_reason TEXT`;
       await sql`ALTER TABLE responses ADD COLUMN IF NOT EXISTS citations TEXT`;
@@ -420,6 +423,17 @@ function responseMeta(r: Record<string, unknown>): ResponseMetaRow {
   };
 }
 
+/** NULL or unreadable = every surface (the pre-cadence run). */
+function parseSurfaces(v: unknown): Run["surfaces"] {
+  if (typeof v !== "string") return null;
+  try {
+    const a = JSON.parse(v);
+    return Array.isArray(a) ? (a as NonNullable<Run["surfaces"]>) : null;
+  } catch {
+    return null;
+  }
+}
+
 function rowToRun(r: Record<string, unknown>): Run {
   return {
     id: r.id as string,
@@ -436,6 +450,7 @@ function rowToRun(r: Record<string, unknown>): Run {
     repeats: r.repeats as number,
     status: r.status as Run["status"],
     pipeline: ((r.pipeline as Run["pipeline"]) ?? "live"),
+    surfaces: parseSurfaces(r.surfaces),
     error: (r.error as string | null) ?? null,
     started_at: iso(r.started_at),
     completed_at: iso(r.completed_at),
@@ -978,8 +993,8 @@ export const pgStore: Store = {
     const id = crypto.randomUUID();
     const models =
       input.models && input.models.length > 0 ? input.models : [input.model];
-    await sql`INSERT INTO runs (id, project_id, model, models, repeats, status, pipeline)
-      VALUES (${id}, ${input.projectId}, ${models[0]}, ${JSON.stringify(models)}, ${input.repeats}, 'pending', ${input.pipeline ?? "live"})`;
+    await sql`INSERT INTO runs (id, project_id, model, models, repeats, status, pipeline, surfaces)
+      VALUES (${id}, ${input.projectId}, ${models[0]}, ${JSON.stringify(models)}, ${input.repeats}, 'pending', ${input.pipeline ?? "live"}, ${input.surfaces ? JSON.stringify(input.surfaces) : null})`;
     return (await this.getRun(id))!;
   },
 

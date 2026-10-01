@@ -6,6 +6,7 @@ import { getPlanFor, planAllowsEngine, requireAuth, requireProject } from "@/lib
 import { apiKeyConfigured, currentEngineIds, engineAvailable, ENGINES } from "@/lib/engine/providers";
 import { driveAndChain, runInBackground } from "@/lib/engine/runner";
 import { batchableEngine, submitRunBatches } from "@/lib/engine/batch";
+import { planRunSurfaces } from "@/lib/engine/surfaces";
 
 // Vercel: runs execute as a chain of budgeted chunks — each invocation
 // processes what fits under maxDuration, then hands off via /continue.
@@ -95,6 +96,8 @@ export async function POST(
     models,
     repeats: parsed.data.repeats,
     pipeline,
+    // Manual runs obey the same monthly worries rule as scheduled ones.
+    surfaces: await planRunSurfaces(id),
   });
   if (pipeline === "batch") {
     try {

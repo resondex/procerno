@@ -15,6 +15,7 @@ import { getDictionarySuggestions } from "./dict_suggest";
 import { prewarmDictionaryExamples } from "./dict_examples";
 import { batchableEngine, hasOpenBatches, pollRunBatches } from "./batch";
 import { bootstrapRunChunk } from "./bootstrap";
+import { loadRunPrompts } from "./surfaces";
 
 // Sized when a run sampled one engine from one vendor. A six-engine panel
 // spreads across four vendors, so 4 global slots left each vendor running
@@ -89,9 +90,7 @@ export async function driveRunChunk(
   if (run.status === "complete" || run.status === "failed") return run.status;
   const project = await store.getProject(run.project_id);
   if (!project) throw new Error(`project ${run.project_id} not found`);
-  const prompts = (await store.listPrompts(project.id)).filter(
-    (p) => !p.retired
-  );
+  const prompts = await loadRunPrompts(run);
   const knownBrands = [project.brand, ...project.competitors];
   const extractionCtx = {
     targetBrand: project.brand,

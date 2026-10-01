@@ -456,6 +456,11 @@ function createDb(): Database.Database {
   if (!runCols.some((c) => c.name === "models")) {
     db.exec("ALTER TABLE runs ADD COLUMN models TEXT NOT NULL DEFAULT '[]'");
   }
+  // Per-surface cadence (2026-10-01): JSON array of the surfaces a run
+  // carried; NULL on earlier runs = every surface.
+  if (!runCols.some((c) => c.name === "surfaces")) {
+    db.exec("ALTER TABLE runs ADD COLUMN surfaces TEXT");
+  }
   db.exec(
     "INSERT OR IGNORE INTO staff_users (email) VALUES ('tyler@resondex.com')"
   );
@@ -480,7 +485,19 @@ function parseRun(row: Record<string, unknown>): Run {
     ...(row as unknown as Run),
     models: models.length > 0 ? models : [row.model as string],
     pipeline: (row.pipeline as Run["pipeline"]) ?? "live",
+    surfaces: parseSurfaces(row.surfaces),
   };
+}
+
+/** NULL or unreadable = every surface (the pre-cadence run). */
+function parseSurfaces(v: unknown): Run["surfaces"] {
+  if (typeof v !== "string") return null;
+  try {
+    const a = JSON.parse(v);
+    return Array.isArray(a) ? (a as NonNullable<Run["surfaces"]>) : null;
+  } catch {
+    return null;
+  }
 }
 
 function getDb(): Database.Database {
@@ -1188,8 +1205,8 @@ export const sqliteStore: Store = {
     const id = crypto.randomUUID();
     getDb()
       .prepare(
-        `INSERT INTO runs (id, project_id, model, models, repeats, status, pipeline)
-         VALUES (?, ?, ?, ?, ?, 'pending', ?)`
+        `INSERT INTO runs (id, project_id, model, models, repeats, status, pipeline, surfaces)
+         VALUES (?, ?, ?, ?, ?, 'pending', ?, ?)`
       )
       .run(
         id,
@@ -1199,7 +1216,8 @@ export const sqliteStore: Store = {
           input.models && input.models.length > 0 ? input.models : [input.model]
         ),
         input.repeats,
-        input.pipeline ?? "live"
+        input.pipeline ?? "live",
+        input.surfaces ? JSON.stringify(input.surfaces) : null
       );
     return (await this.getRun(id))!;
   },
