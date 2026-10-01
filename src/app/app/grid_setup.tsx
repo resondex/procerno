@@ -300,6 +300,22 @@ export interface WorryUi {
   detail: string;
   stances: string[];
   recommended: string;
+  /** The measurement plan: stances recommended for fielding (may be
+   * empty). Absent on pools drawn before the recommendation era. */
+  recommend?: string[];
+}
+
+/** The pool's recommended worry-stance pairs - the gate's pre-pick and
+ * pre-lit chips. Legacy pools (no recommend arrays anywhere) fall back to
+ * one pair per worry at its natural stance; a recommendation-era pool
+ * that recommends nothing falls back the same way rather than opening
+ * the gate empty. */
+export function recommendedWorryPairs(pool: WorryUi[]): { concern: string; stage: string }[] {
+  const planned = pool.flatMap((w) =>
+    (w.recommend ?? []).map((s) => ({ concern: w.worry, stage: s }))
+  );
+  if (planned.length > 0) return planned;
+  return pool.map((w) => ({ concern: w.worry, stage: w.recommended }));
 }
 
 /** House punctuation for prompt text - mirror of the engine's humanize().
@@ -2464,6 +2480,16 @@ export function WorriesGate({
 }) {
   const pool = state.worryPool ?? [];
   const picks = state.worries ?? [];
+  const planned = new Set(
+    recommendedWorryPairs(pool).map((p) => `${p.concern}|${p.stage}`)
+  );
+  // Recommended worries first; within each group, pool order (most
+  // widely-voiced first) stands.
+  const ordered = [...pool].sort(
+    (a, b) =>
+      Number(b.stances.some((s) => planned.has(`${b.worry}|${s}`))) -
+      Number(a.stances.some((s) => planned.has(`${a.worry}|${s}`)))
+  );
   const has = (worry: string, stage: string) =>
     picks.some((p) => p.concern === worry && p.stage === stage);
   const atCap = cap !== null && picks.length >= cap;
@@ -2484,7 +2510,7 @@ export function WorriesGate({
         one moment{cap !== null ? " - each costs a pick" : ""}. Worries collect on monthly
         waves, so extra picks cost little.
       </p>
-      {pool.map((w) => {
+      {ordered.map((w) => {
         const pickedAny = w.stances.some((s) => has(w.worry, s));
         return (
           <div
@@ -2505,6 +2531,7 @@ export function WorriesGate({
               {w.stances.map((s) => {
                 const active = has(w.worry, s);
                 const blocked = !active && (busy || atCap);
+                const inPlan = planned.has(`${w.worry}|${s}`);
                 return (
                   <button
                     key={s}
@@ -2512,9 +2539,9 @@ export function WorriesGate({
                     disabled={blocked}
                     onClick={() => toggle(w.worry, s)}
                     title={
-                      s === w.recommended && !active
-                        ? "Recommended moment for this worry"
-                        : undefined
+                      inPlan
+                        ? "In the recommended measurement plan"
+                        : "Available - not in the recommended plan"
                     }
                     className={`rounded-full px-2.5 py-0.5 text-[11px] font-medium border ${
                       active
@@ -2523,7 +2550,7 @@ export function WorriesGate({
                     }`}
                   >
                     {STANCE_LABEL[s] ?? s}
-                    {s === w.recommended && !active ? " ·" : ""}
+                    {inPlan ? " ✓" : ""}
                   </button>
                 );
               })}

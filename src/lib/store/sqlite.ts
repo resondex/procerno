@@ -346,6 +346,9 @@ function createDb(): Database.Database {
     db.exec("ALTER TABLE projects ADD COLUMN taxonomy_original TEXT");
     db.exec("ALTER TABLE projects ADD COLUMN taxonomy_decision TEXT");
   }
+  if (!cols.some((c) => c.name === "worry_decision")) {
+    db.exec("ALTER TABLE projects ADD COLUMN worry_decision TEXT");
+  }
   if (!cols.some((c) => c.name === "dictionary_status")) {
     db.exec(
       "ALTER TABLE projects ADD COLUMN dictionary_status TEXT NOT NULL DEFAULT 'pending'"
@@ -1391,6 +1394,12 @@ export const sqliteStore: Store = {
         "UPDATE projects SET reason_taxonomy = ?, taxonomy_decision = ?, taxonomy_status = 'ratified' WHERE id = ?"
       )
       .run(JSON.stringify(codes), decisionJson, projectId);
+  },
+
+  async setWorryDecision(projectId, decisionJson) {
+    getDb()
+      .prepare("UPDATE projects SET worry_decision = ? WHERE id = ?")
+      .run(decisionJson, projectId);
   },
 
   async reopenTaxonomy(projectId) {

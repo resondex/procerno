@@ -13,6 +13,7 @@ import {
   ScenarioReviewModal,
   ScenariosGate,
   gridCellCount,
+  recommendedWorryPairs,
   gridPromptCount,
   namesAny,
   normalizeGrid,
@@ -387,9 +388,9 @@ export function SetupWizard({ mode, brand, draft, engineOptions, onClose, onCrea
     const st = await gridApi.fetchWorries(g);
     if (!st) return;
     if (st.worries === undefined && (st.worryPool?.length ?? 0) > 0) {
-      const picks = (st.worryPool ?? [])
-        .slice(0, worryCap ?? Infinity)
-        .map((w) => ({ concern: w.worry, stage: w.recommended }));
+      // Pre-pick = the pool's recommended measurement plan; the user's
+      // deviation from it is recorded at create (worry_decision).
+      const picks = recommendedWorryPairs(st.worryPool ?? []).slice(0, worryCap ?? Infinity);
       setGrid({ ...st, worries: picks });
     }
   }
@@ -1260,6 +1261,15 @@ export function SetupWizard({ mode, brand, draft, engineOptions, onClose, onCrea
           engines: engineSet,
           grid: {
             moderators: grid!.moderators,
+            // Recommended-vs-decided: the worry recommender's training data.
+            ...(grid!.worries && grid!.worryPool
+              ? {
+                  worryDecision: {
+                    recommended: recommendedWorryPairs(grid!.worryPool),
+                    decided: grid!.worries,
+                  },
+                }
+              : {}),
             journeys: Object.fromEntries(
               grid!.scenarios.map((sc) => [sc.label, sc.journey])
             ),
@@ -1410,9 +1420,10 @@ export function SetupWizard({ mode, brand, draft, engineOptions, onClose, onCrea
     };
   } else if (step === "worries" && grid) {
     const picked = grid.worries?.length ?? 0;
+    const planCount = grid.worryPool ? recommendedWorryPairs(grid.worryPool).length : 0;
     footerLeft = grid.worryPool
       ? worryCap === null
-        ? `${picked} worries picked - they collect on monthly waves`
+        ? `${picked} picked · ${planCount} recommended - worries collect on monthly waves`
         : `${picked} of ${worryCap} worries picked`
       : "";
     footerAction = {

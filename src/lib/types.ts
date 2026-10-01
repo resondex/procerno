@@ -922,6 +922,9 @@ export interface Store {
   ): Promise<void>;
   /** Attach a discovery-derived taxonomy proposal; status -> proposed. */
   setTaxonomyProposal(projectId: string, proposalJson: string): Promise<void>;
+  /** The worries gate's recommended-vs-decided record (JSON) - the worry
+   * recommender's training data, written once at create. */
+  setWorryDecision(projectId: string, decisionJson: string): Promise<void>;
   /** Ratify the confirmed code list with its decision record;
    * status -> ratified. */
   ratifyTaxonomy(projectId: string, codes: string[], decisionJson: string): Promise<void>;

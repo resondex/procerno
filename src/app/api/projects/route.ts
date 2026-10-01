@@ -47,6 +47,18 @@ const createSchema = z.object({
   grid: z
     .object({
       moderators: z.record(z.string(), z.unknown()),
+      /** The worries gate's recommended-vs-decided record - stored on the
+       * project (worry_decision) as the recommender's training data. */
+      worryDecision: z
+        .object({
+          recommended: z
+            .array(z.object({ concern: z.string().trim().min(1).max(80), stage: z.string().trim().min(1).max(40) }))
+            .max(40),
+          decided: z
+            .array(z.object({ concern: z.string().trim().min(1).max(80), stage: z.string().trim().min(1).max(40) }))
+            .max(40),
+        })
+        .optional(),
       journeys: z
         .record(
           z.string(),
@@ -231,6 +243,9 @@ export async function POST(req: Request) {
         )
       )
     );
+    if (grid.worryDecision) {
+      await store.setWorryDecision(project.id, JSON.stringify(grid.worryDecision));
+    }
   } else {
     await store.insertPrompts(
       project.id,

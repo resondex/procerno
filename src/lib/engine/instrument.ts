@@ -2143,8 +2143,14 @@ export interface WorryCandidate {
   detail: string;
   /** The stances this worry is naturally voiced at (offered subset). */
   stances: WorryStance[];
-  /** The planner's pick among stances - the gate's pre-set chip. */
+  /** The single most natural stance - the chip a card-click toggles. */
   recommended: WorryStance;
+  /** The MEASUREMENT PLAN (2026-10-01, uncapped allowance): the stances
+   * the planner recommends actually fielding - widely voiced at that
+   * moment, distinct from the other recommendations, actionable. Pre-lit
+   * at the gate; may be empty (available, unrecommended). The user's
+   * deviation from it is stored as projects.worry_decision. */
+  recommend: WorryStance[];
 }
 
 /** A confirmed pick: one cell, at one stance. */
@@ -2176,7 +2182,10 @@ export async function generateWorries(input: {
     churn_triggers: "churn_triggers - an existing customer voices this worry as a reason to leave",
     renewal: "renewal - the keep-or-cancel moment when payment comes due",
   };
-  const key = cacheKey("worries1", [
+  // worries3: pools carry the recommendation plan (recommend[], model
+  // field "plan") - earlier eras either lack it (worries1) or drew it
+  // empty under the ambiguous recommend/recommended wording (worries2).
+  const key = cacheKey("worries3", [
     CONCERNS_MODEL, input.brand, input.category, input.audience,
     input.scenarios.map((s) => s.label).join(","), offered.join(","),
   ]);
@@ -2197,11 +2206,22 @@ export async function generateWorries(input: {
             "For each worry give: `worry` (2-6 plain words), `detail` (ONE " +
             "plain sentence of what buyers actually say - their words, not " +
             "marketing language), `stances` (every stage where buyers " +
-            "naturally voice it, from the allowed list only) and " +
+            "naturally voice it, from the allowed list only), " +
             "`recommended` (the single most natural stance, one of its own " +
-            "stances).\n" +
+            "stances) and `plan` (see below).\n" +
+            "`plan` is the MEASUREMENT PLAN: the subset of this worry's " +
+            "stances a sharp brand tracker would actually field monthly. " +
+            "Across the WHOLE list the plan must total 6 to 10 pairs - " +
+            "never zero, never every chip of every worry. Put a pair in " +
+            "the plan when the worry is widely voiced AT THAT MOMENT, " +
+            "distinct from every other planned pair (never two pairs " +
+            "measuring the same underlying doubt at the same moment), and " +
+            "actionable - the brand could respond to the reading. Most " +
+            "worries carry ONE planned stance; a tail or duplicative " +
+            "worry carries an empty plan; the top worries always carry at " +
+            "least one.\n" +
             `Allowed stances:\n${offered.map((s) => `- ${STANCE_DEF[s]}`).join("\n")}\n` +
-            'Reply with ONLY JSON: {"worries": [{"worry": "...", "detail": "...", "stances": ["..."], "recommended": "..."}]}.',
+            'Reply with ONLY JSON: {"worries": [{"worry": "...", "detail": "...", "stances": ["..."], "recommended": "...", "plan": ["..."]}]}.',
         },
         {
           role: "user",
@@ -2231,8 +2251,9 @@ export async function generateWorries(input: {
                     detail: { type: "string" },
                     stances: { type: "array", items: { type: "string" } },
                     recommended: { type: "string" },
+                    plan: { type: "array", items: { type: "string" } },
                   },
-                  required: ["worry", "detail", "stances", "recommended"],
+                  required: ["worry", "detail", "stances", "recommended", "plan"],
                 },
               },
             },
@@ -2241,7 +2262,7 @@ export async function generateWorries(input: {
         },
       },
     });
-    const raw = (JSON.parse(res.choices[0]?.message?.content ?? "{}") as { worries?: WorryCandidate[] }).worries ?? [];
+    const raw = (JSON.parse(res.choices[0]?.message?.content ?? "{}") as { worries?: (WorryCandidate & { plan?: string[] })[] }).worries ?? [];
     const seen = new Set<string>();
     const list: WorryCandidate[] = [];
     for (const w of raw) {
@@ -2258,8 +2279,13 @@ export async function generateWorries(input: {
       const recommended = safe.includes(w.recommended as WorryStance)
         ? (w.recommended as WorryStance)
         : safe[0];
+      // The plan may be empty (available, unrecommended) but never names
+      // a stance the worry doesn't carry.
+      const recommend = WORRY_STANCE_STAGES.filter(
+        (s) => safe.includes(s) && (w.plan ?? []).includes(s)
+      );
       seen.add(norm);
-      list.push({ worry, detail: String(w.detail ?? "").trim(), stances: safe, recommended });
+      list.push({ worry, detail: String(w.detail ?? "").trim(), stances: safe, recommended, recommend });
       if (list.length >= 12) break;
     }
     return list.length > 0 ? list : null;
