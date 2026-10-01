@@ -60,7 +60,7 @@ export const STEP_LABEL: Record<StepKey | "paraphrases", string> = {
   scenarios: "at buying scenarios",
   stages: "at the coverage map",
   prompts: "at prompts",
-  paraphrases: "paraphrases written",
+  paraphrases: "prompts written",
   engines: "choosing engines",
 };
 
@@ -192,16 +192,28 @@ const READ_STAGES: [number, string][] = [
   [105, "Still thinking - a hard market can take about two minutes…"],
 ];
 
-function ReadProgress() {
+/** The cell write narrated, same mechanism: captions pinned to the order
+ * generateGrid actually works in - concern planning, the writer groups,
+ * the per-cell review, the mechanical heals, the diversity check. */
+const CELLS_STAGES: [number, string][] = [
+  [0, "Mapping the concerns buyers raise in this market…"],
+  [10, "Writing your questions - one per cell of the coverage map…"],
+  [55, "Reviewing each question against its cell's design…"],
+  [85, "Rewriting any question that broke its rules…"],
+  [110, "Checking the doubt questions each measure a different worry…"],
+  [140, "Still writing - a full battery can take two to three minutes…"],
+];
+
+function StagedProgress({ stages }: { stages: readonly [number, string][] }) {
   const [secs, setSecs] = useState(0);
   useEffect(() => {
     // Elapsed from the clock, not tick-counting: background tabs throttle
-    // timers, and the narration must not fall behind the actual read.
+    // timers, and the narration must not fall behind the actual work.
     const started = Date.now();
     const iv = setInterval(() => setSecs(Math.round((Date.now() - started) / 1000)), 1000);
     return () => clearInterval(iv);
   }, []);
-  const msg = [...READ_STAGES].reverse().find(([at]) => secs >= at)?.[1] ?? READ_STAGES[0][1];
+  const msg = [...stages].reverse().find(([at]) => secs >= at)?.[1] ?? stages[0][1];
   return (
     <div className="grid gap-4 py-16 text-center justify-items-center">
       <span aria-hidden="true" className="h-7 w-7 rounded-full border-[3px] border-line border-t-primary animate-spin" />
@@ -993,7 +1005,7 @@ export function SetupWizard({ mode, brand, draft, engineOptions, onClose, onCrea
           phr,
           meta:
             `${stage?.label ?? c.stage} · ${cellSubMeta(c)}` +
-            (phr != null ? ` · paraphrase ${phr + 2}` : ""),
+            (phr != null ? ` · prompt ${phr + 2}` : ""),
           current: text,
           flags: Array.isArray(v.flags) && v.flags.length > 0 ? v.flags : ["unclear"],
           reason: v.reason || "This one may not ask what its cell measures.",
@@ -1397,7 +1409,7 @@ export function SetupWizard({ mode, brand, draft, engineOptions, onClose, onCrea
     } else if (missing) {
       footerLeft = `${promptCount} prompts across ${live.length} questions${
         customUsed > 0 ? ` · ${customUsed}/${customAllowance} custom` : ""
-      } - some questions still need paraphrases`;
+      } - some questions still need prompts`;
       footerAction = {
         label: busy ?? "These are my questions - write the missing prompts",
         onClick: () => void confirmPrompts(),
@@ -1527,7 +1539,7 @@ export function SetupWizard({ mode, brand, draft, engineOptions, onClose, onCrea
                 <p className="text-[13px] text-ink-3">category · competitors · audience</p>
               </div>
             ) : busy?.startsWith("Reading") ? (
-              <ReadProgress />
+              <StagedProgress stages={READ_STAGES} />
             ) : busy ? (
               <div className="grid gap-4 py-16 text-center justify-items-center">
                 <span aria-hidden="true" className="h-7 w-7 rounded-full border-[3px] border-line border-t-primary animate-spin" />
@@ -1631,11 +1643,18 @@ export function SetupWizard({ mode, brand, draft, engineOptions, onClose, onCrea
           )}
 
           {step === "stages" && grid && (
-            <CoverageGate
-              state={grid}
-              setState={setGrid}
-              busy={busy !== null}
-            />
+            // The cell write gets the same narrated treatment as the
+            // market read - the coverage map gives way to elapsed-driven
+            // captions instead of a frozen page behind a disabled button.
+            busy?.startsWith("Writing your questions") ? (
+              <StagedProgress stages={CELLS_STAGES} />
+            ) : (
+              <CoverageGate
+                state={grid}
+                setState={setGrid}
+                busy={busy !== null}
+              />
+            )
           )}
 
           {step === "prompts" && mode === "grid" && grid && (
@@ -1692,7 +1711,7 @@ export function SetupWizard({ mode, brand, draft, engineOptions, onClose, onCrea
                             const live = grid.cells.filter((c) => c.text.trim()).length;
                             if (
                               !confirm(
-                                `Rewrite ALL paraphrases? This replaces the full set (~${live * PHRASING_COUNT} prompts) with fresh drafts - including any you have edited or already reviewed.`
+                                `Rewrite ALL prompts? This replaces the full set (~${live * PHRASING_COUNT}) with fresh drafts - including any you have edited or already reviewed.`
                               )
                             )
                               return;
@@ -1700,7 +1719,7 @@ export function SetupWizard({ mode, brand, draft, engineOptions, onClose, onCrea
                           }}
                           className="text-[13px] font-medium text-primary hover:opacity-80"
                         >
-                          Rewrite all paraphrases
+                          Rewrite all prompts
                         </button>
                       )}
                     </>

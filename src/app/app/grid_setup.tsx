@@ -871,7 +871,10 @@ export function useGridSetup(a: GridSetupArgs) {
   /** Gate 2: one seed prompt per masked cell. */
   async function writeCells(): Promise<GridState | null> {
     if (!a.state) return null;
-    a.setBusy("Writing your prompts…");
+    // "questions", not "prompts": the UI's vocabulary is questions (cells)
+    // -> prompts (the 10 buyer wordings each). The wizard also keys its
+    // narrated progress captions on this prefix.
+    a.setBusy("Writing your questions…");
     a.setError(null);
     const data = await post<{ cells: Omit<GridCellUi, "phrasings">[] }>(
       "/api/setup/grid/cells",
@@ -948,7 +951,7 @@ export function useGridSetup(a: GridSetupArgs) {
     // wall time is the slowest batch, not the sum.
     const total = batches.reduce((n, b) => n + b.idx.length, 0);
     let done = 0;
-    a.setBusy(`Writing paraphrases… (0/${total})`);
+    a.setBusy(`Writing your prompts… (0/${total})`);
     const outcomes = await Promise.all(
       batches.map(async ({ idx }) => {
         const data = await post<{ phrasings: GridPhrasing[][] }>(
@@ -985,7 +988,7 @@ export function useGridSetup(a: GridSetupArgs) {
           };
         });
         done += idx.length;
-        a.setBusy(`Writing paraphrases… (${done}/${total})`);
+        a.setBusy(`Writing your prompts… (${done}/${total})`);
         return true;
       })
     );
@@ -1037,7 +1040,7 @@ export function useGridSetup(a: GridSetupArgs) {
     if (idx.length === 0) return st;
     a.setError(null);
     let done = 0;
-    a.setBusy(`Topping up paraphrases… (0/${idx.length})`);
+    a.setBusy(`Topping up prompts… (0/${idx.length})`);
     const merged = [...st.cells];
     await Promise.all(
       idx.map(async (i) => {
@@ -1066,7 +1069,7 @@ export function useGridSetup(a: GridSetupArgs) {
           merged[i] = { ...merged[i], phrasings: kept, phrasedFor: merged[i].text };
         }
         done++;
-        a.setBusy(`Topping up paraphrases… (${done}/${idx.length})`);
+        a.setBusy(`Topping up prompts… (${done}/${idx.length})`);
       })
     );
     a.setBusy(null);
@@ -2616,8 +2619,8 @@ export function CellsGate({
                                   className="h-3 w-3 rounded-full border-2 border-primary/30 border-t-primary animate-spin"
                                 />
                                 {pending.kind === "near"
-                                  ? written ? "Writing a near variant and its paraphrases…" : "Writing a near variant…"
-                                  : written ? "Writing a new prompt and its paraphrases…" : "Writing a new prompt…"}
+                                  ? written ? "Writing a near variant and its prompts…" : "Writing a near variant…"
+                                  : written ? "Writing a new question and its prompts…" : "Writing a new prompt…"}
                               </span>
                             ) : (
                               <>
@@ -2626,7 +2629,7 @@ export function CellsGate({
                                     type="button"
                                     disabled={busy || pending !== null}
                                     onClick={() => void draw(c.i, "new")}
-                                    title="Ask this cell's question a different way - not a paraphrase"
+                                    title="Ask this cell's question a different way - a new ask, not another wording"
                                     className="font-medium text-primary hover:opacity-80 disabled:opacity-50"
                                   >
                                     ↻ New prompt
@@ -2685,7 +2688,7 @@ export function CellsGate({
                                 onClick={() => setOpenPhr(openPhr === c.uid ? null : c.uid ?? null)}
                                 className="font-medium text-primary hover:opacity-80"
                               >
-                                {openPhr === c.uid ? "Hide paraphrases ▴" : "Show paraphrases ▾"}
+                                {openPhr === c.uid ? "Hide prompts ▴" : "Show prompts ▾"}
                               </button>
                             )}
                           </div>
@@ -2715,7 +2718,7 @@ export function CellsGate({
                                       it means nothing to the user here. */}
                                   <button
                                     type="button"
-                                    aria-label="remove paraphrase"
+                                    aria-label="remove prompt"
                                     onClick={() =>
                                       setState({
                                         ...state,
@@ -2757,7 +2760,7 @@ export function CellsGate({
                               aria-hidden="true"
                               className="h-3 w-3 rounded-full border-2 border-primary/30 border-t-primary animate-spin"
                             />
-                            {written ? "Writing a suggested question and its paraphrases…" : "Writing a suggested question…"}
+                            {written ? "Writing a suggested question and its prompts…" : "Writing a suggested question…"}
                           </span>
                         ) : adding?.stage === stage && adding.phase === "rival" ? (
                           <span className="flex flex-wrap items-center gap-1.5 text-[11px] text-ink-2">
