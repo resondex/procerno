@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, type ReactNode } from "react";
-import { deriveCheckSpec, sameSeatOf, type CellCheckSpec, type RosterRoles } from "@/lib/engine/battery_checks";
+import { deriveCheckSpec, sameSeatOf, type CellCheckSpec, type RosterClasses, type RosterRoles } from "@/lib/engine/battery_checks";
 
 /**
  * Buyer Landscape setup pieces: the state shape, the gate API calls, and
@@ -60,6 +60,12 @@ export interface GridCellUi {
   /** Doubt cells (s9+): the planned concern this cell measures - part of
    * the design, sent with every generation request. */
   concern?: string | null;
+  /** Class-angle comparison cells (2026-10-01; angle "class"): the class
+   * the client brand is weighed against ("a Visa card") and the upstream
+   * brand it evokes ("Visa"). Part of the design - sent with every
+   * generation and review request. Absent on every other cell. */
+  classPhrase?: string | null;
+  classBrand?: string | null;
   /** Invariant cells only: comma-joined scenario labels whose journeys
    * reach this stage, when not universal. */
   mode?: string | null;
@@ -97,6 +103,17 @@ export interface GridCellUi {
    * of, keyed by exact prompt text - cycling back to a wording restores
    * its set instead of regenerating it. */
   phrasingsByText?: Record<string, GridPhrasing[]>;
+}
+
+/** A class-angle cell's class fields for a request body; {} otherwise, so
+ * every other cell's request is unchanged. */
+function classFields(c: Pick<GridCellUi, "classPhrase" | "classBrand">): { classPhrase?: string; classBrand?: string } {
+  return c.classPhrase ? { classPhrase: c.classPhrase, classBrand: c.classBrand ?? undefined } : {};
+}
+
+/** The angle as a reader sees it. */
+function angleLabel(c: Pick<GridCellUi, "angle" | "classPhrase">): string {
+  return c.angle === "defensive" ? "your churn moment" : `vs ${c.classPhrase ?? c.angle}`;
 }
 
 /** Loose word-overlap similarity, mirroring the server's dedup filter -
@@ -457,6 +474,9 @@ export interface GridSetupArgs {
   /** Typed roster (2026-09-30): competitor -> same_seat | upstream, sent
    * with every competitors list. Absent = all same_seat (untyped). */
   rosterRoles?: RosterRoles;
+  /** Class-angle cells (2026-10-01): upstream brand -> buyer class phrase.
+   * Sent with the cells write; absent = no class cells. */
+  rosterClasses?: RosterClasses;
   /** The plan's scenario cap; defaults to the absolute maximum. */
   maxScenarios?: number;
   state: GridState | null;
@@ -852,6 +872,7 @@ export function useGridSetup(a: GridSetupArgs) {
       "/api/setup/grid/cells",
       {
         brand: a.brand, category: a.category, competitors: a.competitors, rosterRoles: a.rosterRoles,
+        rosterClasses: a.rosterClasses,
         audience: a.audience || undefined,
         base: a.state.moderators,
         scenarios: a.state.scenarios,
@@ -940,6 +961,7 @@ export function useGridSetup(a: GridSetupArgs) {
               text: merged[i].text,
               spec: merged[i].spec ?? undefined,
               concern: merged[i].concern ?? undefined,
+              ...classFields(merged[i]),
             })),
             count: PHRASING_COUNT,
             avoidConcerns: [...new Set((a.state?.cells ?? []).map((x) => x.concern).filter((x): x is string => !!x))],
@@ -1019,7 +1041,7 @@ export function useGridSetup(a: GridSetupArgs) {
           brand: a.brand, category: a.category, competitors: a.competitors, rosterRoles: a.rosterRoles,
           audience: a.audience || undefined,
           base: st.moderators, scenarios: st.scenarios,
-          cells: [{ stage: c.stage, situation: c.situation, angle: c.angle, mode: c.mode ?? null, text: c.text, spec: c.spec ?? undefined, concern: c.concern ?? undefined }],
+          cells: [{ stage: c.stage, situation: c.situation, angle: c.angle, mode: c.mode ?? null, text: c.text, spec: c.spec ?? undefined, concern: c.concern ?? undefined, ...classFields(c) }],
           avoidConcerns: [...new Set((a.state?.cells ?? []).map((x) => x.concern).filter((x): x is string => !!x))],
           count: PHRASING_COUNT,
           // A SHORT set must force: the cache holds the same short set that
@@ -1090,7 +1112,7 @@ export function useGridSetup(a: GridSetupArgs) {
       audience: a.audience || undefined,
       base: a.state.moderators,
       scenarios: a.state.scenarios,
-      cell: { stage: c.stage, situation: c.situation, angle: c.angle, mode: c.mode ?? null, concern: c.concern ?? undefined },
+      cell: { stage: c.stage, situation: c.situation, angle: c.angle, mode: c.mode ?? null, concern: c.concern ?? undefined, ...classFields(c) },
       avoid: alts,
       // Near mode keeps this prompt's ask and moves one detail.
       nearTo: near ? c.text : undefined,
@@ -1103,7 +1125,7 @@ export function useGridSetup(a: GridSetupArgs) {
         audience: a.audience || undefined,
         base: a.state.moderators,
         scenarios: a.state.scenarios,
-        cells: [{ stage: c.stage, situation: c.situation, angle: c.angle, mode: c.mode ?? null, text: data.text, spec: data.spec, concern: c.concern ?? undefined }],
+        cells: [{ stage: c.stage, situation: c.situation, angle: c.angle, mode: c.mode ?? null, text: data.text, spec: data.spec, concern: c.concern ?? undefined, ...classFields(c) }],
         avoidConcerns: [...new Set((a.state?.cells ?? []).map((x) => x.concern).filter((x): x is string => !!x))],
         count: PHRASING_COUNT,
       });
@@ -1293,6 +1315,7 @@ export function useGridSetup(a: GridSetupArgs) {
       headers: { "Content-Type": "application/json", ...(a.setupId ? { "x-setup-id": a.setupId } : {}) },
       body: JSON.stringify({
         brand: a.brand, category: a.category, competitors: a.competitors, rosterRoles: a.rosterRoles,
+        rosterClasses: a.rosterClasses,
         audience: a.audience || undefined,
         base: st.moderators, scenarios: st.scenarios, stageKeys: st.keptStages,
         warm: true,
@@ -1332,6 +1355,11 @@ export function useGridSetup(a: GridSetupArgs) {
               stage: cells[i].stage, situation: cells[i].situation,
               angle: cells[i].angle, mode: cells[i].mode ?? null, text: cells[i].text,
               spec: cells[i].spec ?? undefined,
+              // The warm must key exactly like the write: concern and class
+              // ride in the paraphrase cache key (the concern was missing,
+              // so warms filled a key the write never read).
+              concern: cells[i].concern ?? undefined,
+              ...classFields(cells[i]),
             })),
             count: PHRASING_COUNT,
             avoidConcerns: [...new Set((a.state?.cells ?? []).map((x) => x.concern).filter((x): x is string => !!x))],
@@ -1375,9 +1403,7 @@ export function cellMeta(state: GridState, c: GridCellUi): string {
   return (
     (stageOf(state, c.stage)?.label ?? c.stage) +
     (c.situation ? ` · ${c.situation}` : "") +
-    (c.angle !== "generic"
-      ? ` · ${c.angle === "defensive" ? "your churn moment" : `vs ${c.angle}`}`
-      : "") +
+    (c.angle !== "generic" ? ` · ${angleLabel(c)}` : "") +
     (c.mode ? ` · asked by: ${c.mode}` : "")
   );
 }
@@ -2299,9 +2325,7 @@ export function cellSubMeta(c: GridCellUi): string {
   return (
     [
       c.situation,
-      c.angle !== "generic"
-        ? c.angle === "defensive" ? "your churn moment" : `vs ${c.angle}`
-        : null,
+      c.angle !== "generic" ? angleLabel(c) : null,
       c.mode ? `asked by: ${c.mode}` : null,
     ]
       .filter(Boolean)

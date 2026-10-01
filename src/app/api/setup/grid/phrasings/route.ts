@@ -60,6 +60,10 @@ const Body = z.object({
         /** The cell's planned concern (s9+): rides into the re-derived
          * spec's design line. */
         concern: z.string().trim().max(120).nullable().optional(),
+        /** Class-angle comparison cells (2026-10-01): the class phrase
+         * and the upstream brand it evokes. Absent on every other cell. */
+        classPhrase: z.string().trim().max(60).nullable().optional(),
+        classBrand: z.string().trim().max(80).nullable().optional(),
       })
     )
     .min(1)

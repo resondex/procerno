@@ -364,4 +364,169 @@ const AMEX_ROLES = { Visa: "upstream", Mastercard: "upstream" } as const;
   expect("a roster whose same-seat list differs re-keys", kTyped !== kUntyped);
 }
 console.log(`6. typed roster: ${fails === fails5 ? "ALL PASS" : `${fails - fails5} FAILURE(S)`}`);
+
+// =====================================================================
+// 7. CLASS-ANGLE CELLS (2026-10-01): a consumer-salient upstream brand
+// earns a head-to-head against its CLASS ("a Visa card"), never against a
+// named rival entity. Additive plan rows, comparison_class specs, and no
+// class fields = byte-identical behavior (self-versioning through request
+// data - no STYLE_VERSION bump).
+// =====================================================================
+const fails6 = fails;
+console.log("7. class-angle cells");
+const AMEX_SEATED = bc.sameSeatOf(AMEX_ROSTER, AMEX_ROLES);
+const VISA_CLASS = { classPhrase: "a Visa card", classBrand: "Visa" };
+const classSeed = "worth paying for American Express over just getting a Visa card?";
+{
+  // (a) the comparison_class contract on the AmEx config.
+  const cell = { stage: "comparison", angle: "class", text: classSeed, ...VISA_CLASS };
+  const spec = specOf(cell as any, "American Express", AMEX_SEATED, "credit cards");
+  expect("class spec: brandMode comparison_class, qtype head_to_head",
+    spec.brandMode === "comparison_class" && spec.qtype === "head_to_head", { mode: spec.brandMode, qtype: spec.qtype });
+  expect("class spec: required = [target] only; class carried separately",
+    JSON.stringify(spec.requiredBrands) === JSON.stringify(["American Express"]) && spec.classBrand === "Visa" && spec.classPhrase === "a Visa card", spec);
+  expect("class spec: every same-seat rival forbidden",
+    JSON.stringify(spec.forbiddenBrands) === JSON.stringify(["Chase", "Capital One", "Citi", "Discover"]), spec.forbiddenBrands);
+  const untypedSpec = specOf(cell as any, "American Express", AMEX_ROSTER, "credit cards");
+  expect("untyped roster: the class's own brand is never forbidden, other tracked brands are",
+    !untypedSpec.forbiddenBrands.includes("Visa") && untypedSpec.forbiddenBrands.includes("Mastercard") && untypedSpec.forbiddenBrands.includes("Chase"),
+    untypedSpec.forbiddenBrands);
+  const chk = (t: string) => bc.checkPromptAgainstSpec({ text: t, spec, category: "credit cards", extraForms: FORMS });
+  expect("seed passes", chk(classSeed).length === 0, chk(classSeed));
+  expect("seed passes its own signature (target + classBrand)",
+    bc.checkCandidateSignature(classSeed, spec, { category: "credit cards", extraForms: FORMS }).ok);
+  const chase = chk("worth paying for American Express over a Chase card or just a Visa card?");
+  expect("same text naming Chase fails (extra rival)", chase.some((x: any) => x.check === "comparison_names_extra_rival"), chase);
+  const swapped = "is American Express worth it over a Chase Sapphire?";
+  const sw = chk(swapped);
+  expect("class swapped for 'Chase Sapphire' fails: class not evoked AND rival named",
+    sw.some((x: any) => x.check === "comparison_class_missing_class") && sw.some((x: any) => x.check === "comparison_names_extra_rival"), sw);
+  const swSig = bc.checkCandidateSignature(swapped, spec, { category: "credit cards", extraForms: FORMS });
+  expect("swap: signature reports Visa missing and Chase leaked",
+    !swSig.ok && swSig.missing.includes("Visa") && swSig.leaked.includes("Chase"), swSig);
+  const dl = spec.designLine ?? "";
+  expect("design line has the head-to-head-vs-a-class contract shape",
+    dl.startsWith("Question design (head-to-head vs a class):") && dl.includes("American Express against a Visa card as a CLASS of products") &&
+    dl.includes("a specific rival product or company name in place of the class does not satisfy the design") && dl.includes(`Designed as: "${classSeed}"`), dl);
+  expect("design line equals seedDesignLine with the class (the paraphrase design check derives the same line)",
+    dl === bc.seedDesignLine("comparison", "American Express", classSeed, null, { classPhrase: "a Visa card" }));
+  const lower = chk("amex or just a visa card - which one is actually worth it?");
+  expect("lowercase 'visa' passes (case-blind class brand)", lower.length === 0, lower);
+  const noClass = chk("is American Express worth paying for?");
+  expect("a prompt that never evokes the class fails", noClass.some((x: any) => x.check === "comparison_class_missing_class"), noClass);
+  const noTarget = chk("is a Visa card good enough for most people?");
+  expect("a prompt that drops the target fails", noTarget.some((x: any) => x.check === "comparison_missing_target"), noTarget);
+  const mc = chk("American Express or just a Visa or Mastercard card?");
+  expect("another upstream brand is free vocabulary under the typed roster (design check owns class framing)", mc.length === 0, mc);
+  const note = bc.specWriterNote(spec) ?? "";
+  expect("writer note renders the class contract", note.includes("vs a CLASS") && note.includes("a Visa card") && note.includes("never a specific rival company or product"), note);
+  // Class cells are spec-era by construction: no carried spec still resolves.
+  const re = bc.resolveCellSpec({ ...cell }, "American Express", AMEX_SEATED, "credit cards");
+  expect("resolveCellSpec derives a class cell with no carried spec", re?.brandMode === "comparison_class");
+  // Sweep: the battery drops only the Chase paraphrase.
+  const sweep = bc.checkBattery({ brand: "American Express", competitors: AMEX_SEATED, category: "credit cards", extraForms: FORMS,
+    cells: [{ ...cell, spec, phrasings: ["amex vs just getting a visa card - is the fee worth it?", "Amex or a Chase card, or just a Visa card?"] }] });
+  expect("battery sweep: only the Chase paraphrase flags",
+    sweep.length === 1 && sweep[0].text === "Amex or a Chase card, or just a Visa card?", sweep);
+  expect("a class field on a non-comparison stage is ignored",
+    bc.deriveCheckSpec({ stage: "discovery", angle: "generic", text: "best credit cards for travel?", ...VISA_CLASS } as any,
+      "American Express", AMEX_SEATED, "credit cards").brandMode === "blind");
+}
+{
+  // (b) untouched path: absent / undefined / null class fields reproduce
+  //     today's specs, findings, design lines and cache keys byte-for-byte.
+  let bad = 0;
+  const variants = (c: any) => [c, { ...c, classPhrase: undefined, classBrand: undefined }, { ...c, classPhrase: null, classBrand: null }];
+  for (const [brand, P] of Object.entries<any>(head.projects)) {
+    const cells = P.cells.map((c: any, i: number) => ({
+      stage: c.stage, angle: c.angle, text: c.text,
+      phrasings: (P.phrasings[i] ?? []).map((x: any) => (typeof x === "string" ? x : x.text)),
+    }));
+    const ref = JSON.stringify(bc.checkBattery({ brand, competitors: P.competitors, category: CAT[brand],
+      cells: cells.map((c: any) => ({ ...c, spec: specOf(c, brand, P.competitors, CAT[brand]) })) }));
+    for (const k of [1, 2]) {
+      const alt = JSON.stringify(bc.checkBattery({ brand, competitors: P.competitors, category: CAT[brand],
+        cells: cells.map((c: any) => ({ ...c, spec: specOf(variants(c)[k], brand, P.competitors, CAT[brand]) })) }));
+      if (alt !== ref) bad++;
+    }
+    for (const c of cells) {
+      const specs = variants(c).map((v: any) => JSON.stringify(specOf(v, brand, P.competitors, CAT[brand])));
+      if (specs[0] !== specs[1] || specs[0] !== specs[2] || specs[0].includes("classPhrase") || specs[0].includes("comparison_class")) bad++;
+      if (bc.seedDesignLine(c.stage, brand, c.text) !== bc.seedDesignLine(c.stage, brand, c.text, null, null)) bad++;
+    }
+  }
+  for (const p of live) {
+    const angle = p.angle ?? "generic";
+    const c = { stage: p.stage, angle, text: p.text };
+    const specs = variants(c).map((v: any) => JSON.stringify(specOf(v, p.project, COMP[p.project], CAT[p.project])));
+    if (specs[0] !== specs[1] || specs[0] !== specs[2]) bad++;
+    if (bc.resolveCellSpec({ ...c, classPhrase: null }, p.project, COMP[p.project]) !== null) bad++;
+  }
+  expect("absent / undefined / null class fields: harness + fixed-battery specs, findings and design lines byte-identical", bad === 0, { bad });
+  expect("classAnglesOf: no classes / no roles = none",
+    bc.classAnglesOf(AMEX_ROSTER, AMEX_ROLES).length === 0 && bc.classAnglesOf(AMEX_ROSTER, undefined, { Visa: "a Visa card" }).length === 0 &&
+    bc.classAnglesOf(AMEX_ROSTER, AMEX_ROLES, {}).length === 0);
+  const inst = await import(`${REPO}/src/lib/engine/instrument`);
+  const base = { involvement: "considered", verifiability: "spec", think_feel: "think", decision_unit: "solo" };
+  const args = { brand: "American Express", category: "credit cards", competitors: AMEX_SEATED, audience: "US consumers", base, scenarios: [], count: 10 };
+  let kbad = 0;
+  for (const row of [
+    { stage: "comparison", situation: null, angle: "Discover", scope: null },
+    { stage: "objections", situation: null, angle: "generic", scope: null, concern: "acceptance at small shops" },
+    { stage: "discovery", situation: null, angle: "generic", scope: "A, B" },
+  ]) {
+    const k0 = inst.gridCellCacheKey(args, row);
+    if (k0 !== inst.gridCellCacheKey(args, { ...row, classPhrase: undefined, classBrand: undefined })) kbad++;
+    if (k0 !== inst.gridCellCacheKey(args, { ...row, classPhrase: null, classBrand: null })) kbad++;
+  }
+  for (const cellK of [{ situation: null, mode: null, text: "amex or discover for cash back?" }, { situation: null, mode: null, text: "x", spec: {}, concern: "fees" }]) {
+    const k0 = inst.phrasingCacheKey(args, cellK, ["fees"]);
+    if (k0 !== inst.phrasingCacheKey(args, { ...cellK, classPhrase: undefined, classBrand: undefined }, ["fees"])) kbad++;
+    if (k0 !== inst.phrasingCacheKey(args, { ...cellK, classPhrase: null, classBrand: null }, ["fees"])) kbad++;
+  }
+  expect("untouched rows/cells: grid-cell and phrasing cache keys unchanged", kbad === 0, { kbad });
+  const classRow = { stage: "comparison", situation: null, angle: "class", scope: null, ...VISA_CLASS };
+  const mcRow = { ...classRow, classPhrase: "a Mastercard card", classBrand: "Mastercard" };
+  const kv = inst.gridCellCacheKey(args, classRow);
+  expect("class rows self-version: Visa / Mastercard / bare-'class' keys all distinct",
+    new Set([kv, inst.gridCellCacheKey(args, mcRow), inst.gridCellCacheKey(args, { ...classRow, classPhrase: undefined, classBrand: undefined })]).size === 3);
+  const kp = inst.phrasingCacheKey(args, { situation: null, mode: null, text: classSeed, spec: {}, ...VISA_CLASS });
+  expect("class cells' paraphrase sets key apart from the same text without the class",
+    kp !== inst.phrasingCacheKey(args, { situation: null, mode: null, text: classSeed, spec: {} }));
+
+  // (c) plan construction: a mixed roster with 2 salient upstreams yields
+  //     exactly 2 ADDITIVE class rows; the entity slots are unchanged.
+  const MIXED = ["Visa", "Chase", "Mastercard", "Capital One", "UnionPay", "Citi", "Discover"];
+  const ROLES3 = { Visa: "upstream", Mastercard: "upstream", UnionPay: "upstream" } as const;
+  const CLASSES = { Visa: "a Visa card", Mastercard: "a Mastercard card", Chase: "a Chase card" };
+  const angles = bc.classAnglesOf(MIXED, ROLES3, CLASSES);
+  expect("classAnglesOf: upstream entries with a phrase, roster order (UnionPay has none; same-seat Chase never)",
+    JSON.stringify(angles) === JSON.stringify([{ classBrand: "Visa", classPhrase: "a Visa card" }, { classBrand: "Mastercard", classPhrase: "a Mastercard card" }]), angles);
+  const capped = bc.classAnglesOf(MIXED, ROLES3, { ...CLASSES, UnionPay: "a UnionPay card" });
+  expect(`classAnglesOf caps at CLASS_SLOTS (${bc.CLASS_SLOTS})`, capped.length === bc.CLASS_SLOTS && capped[1].classBrand === "Mastercard", capped);
+  const stages = [
+    { key: "discovery", columns: ["A", "B"], situational: true, rivals: "none" },
+    { key: "comparison", columns: ["A", "B"], situational: true, rivals: "each" },
+    { key: "alternatives", columns: [], situational: false, rivals: "defensive_offensive" },
+  ] as any[];
+  const rivals = bc.angleRivals(bc.sameSeatOf(MIXED, ROLES3), ROLES3);
+  const plain = inst.planGridCells(stages, ["A", "B"], rivals);
+  const none = inst.planGridCells(stages, ["A", "B"], rivals, []);
+  const withCls = inst.planGridCells(stages, ["A", "B"], rivals, angles);
+  const classRows = withCls.filter((r: any) => r.classPhrase);
+  const strip = (rows: any[]) => JSON.stringify(rows.map((r) => ({ ...r, stage: r.stage.key })));
+  expect("no class angles = identical plan (default and [])", strip(plain) === strip(none));
+  expect("exactly 2 class rows, both comparison, angle 'class', roster order",
+    classRows.length === 2 && classRows.every((r: any) => r.stage.key === "comparison" && r.angle === "class") &&
+    classRows.map((r: any) => r.classBrand).join(",") === "Visa,Mastercard", classRows.map((r: any) => [r.stage.key, r.angle, r.classPhrase, r.situation]));
+  expect("entity rows unchanged (class rows are additive)", strip(withCls.filter((r: any) => !r.classPhrase)) === strip(plain));
+  expect("entity comparison slots are the 4 same-seat rivals",
+    withCls.filter((r: any) => r.stage.key === "comparison" && !r.classPhrase).map((r: any) => r.angle).join(",") === "Chase,Capital One,Citi,Discover");
+  expect("class rows follow the entity rows within the comparison stage",
+    withCls.findIndex((r: any) => r.classPhrase) === withCls.map((r: any) => r.stage.key === "comparison" && !r.classPhrase).lastIndexOf(true) + 1);
+  expect("class rows continue the situation cycle", classRows.map((r: any) => r.situation).join(",") === "A,B");
+  expect("a battery without the comparison stage gets no class rows",
+    inst.planGridCells(stages.filter((s) => s.key !== "comparison"), ["A", "B"], rivals, angles).every((r: any) => !r.classPhrase));
+}
+console.log(`7. class-angle cells: ${fails === fails6 ? "ALL PASS" : `${fails - fails6} FAILURE(S)`}`);
 if (fails > 0) process.exitCode = 1;

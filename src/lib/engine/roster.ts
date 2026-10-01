@@ -27,8 +27,9 @@ import type { RosterRole } from "./battery_checks";
  * (today's untyped behavior) and caches nothing.
  */
 
-/** Bump when the prompt or schema changes. */
-const ROSTER_VERSION = "roster1";
+/** Bump when the prompt or schema changes. roster2 (2026-10-01): upstream
+ * verdicts carry consumerSalient + classPhrase (class-angle cells). */
+const ROSTER_VERSION = "roster2";
 const CACHE_TTL_MS = 183 * 24 * 3600 * 1000; // ~6 months, like other setup calls
 
 export interface RosterVerdict {
@@ -42,6 +43,14 @@ export interface RosterVerdict {
   role: RosterRole;
   /** One line on why. */
   note: string;
+  /** Upstream only (2026-10-01): do buyers still choose BY this brand as a
+   * CLASS of products they buy from others ("a Visa card")? True earns a
+   * class-angle head-to-head cell. Always false for same_seat; absent on
+   * verdicts cached before roster2 (read as false). */
+  consumerSalient?: boolean;
+  /** When consumerSalient: the natural buyer phrase for the brand as a
+   * product class ("a Visa card", "a Mastercard card"). */
+  classPhrase?: string;
 }
 
 export interface RosterClassification {
@@ -68,8 +77,10 @@ const ROSTER_SCHEMA = {
           sellsTo: { type: "array", items: { type: "string" } },
           audienceBuyable: { type: "boolean" },
           note: { type: "string" },
+          consumerSalient: { type: "boolean" },
+          classPhrase: { type: "string" },
         },
-        required: ["name", "sellsTo", "audienceBuyable", "note"],
+        required: ["name", "sellsTo", "audienceBuyable", "note", "consumerSalient", "classPhrase"],
       },
     },
   },
@@ -87,7 +98,7 @@ function cacheKey(parts: (string | null)[]): string {
 function failOpen(competitors: string[]): RosterClassification {
   return {
     competitors: competitors.map((name) => ({
-      name, sellsTo: [], audienceBuyable: true, role: "same_seat", note: "",
+      name, sellsTo: [], audienceBuyable: true, role: "same_seat", note: "", consumerSalient: false,
     })),
     clientSellsTo: [],
     failedOpen: true,
@@ -138,6 +149,16 @@ export async function classifyRoster(input: {
             "- note: ONE short plain line saying who it sells to relative to " +
             "the audience (e.g. 'payment network - sells to card issuers and " +
             "merchants, not cardholders').\n" +
+            "- consumerSalient: ONLY for a competitor with audienceBuyable " +
+            "false - true when the audience still CHOOSES BY this brand as a " +
+            "class of products they buy from other sellers (buyers ask for " +
+            "'a Visa card' or 'an Intel laptop'); false when buyers rarely " +
+            "think of the brand when choosing. Always false when " +
+            "audienceBuyable is true.\n" +
+            "- classPhrase: when consumerSalient is true, the natural phrase " +
+            "a buyer uses for the brand as a product class, with its " +
+            "article ('a Visa card', 'a Mastercard card'); otherwise an " +
+            "empty string.\n" +
             "Return every competitor exactly once, in the given order, with " +
             "its name exactly as given. Never add or drop competitors.",
         },
@@ -156,7 +177,10 @@ export async function classifyRoster(input: {
     });
     const parsed = JSON.parse(res.choices[0]?.message?.content ?? "{}") as {
       clientSellsTo?: string[];
-      competitors?: { name?: string; sellsTo?: string[]; audienceBuyable?: boolean; note?: string }[];
+      competitors?: {
+        name?: string; sellsTo?: string[]; audienceBuyable?: boolean; note?: string;
+        consumerSalient?: boolean; classPhrase?: string;
+      }[];
     };
     const rows = parsed.competitors ?? [];
     // The model never decides the roster: verdicts align to OUR names, by
@@ -168,12 +192,19 @@ export async function classifyRoster(input: {
       const r = j >= 0 ? rows[j] : undefined;
       if (j >= 0) used.add(j);
       const audienceBuyable = typeof r?.audienceBuyable === "boolean" ? r.audienceBuyable : true;
+      // Salience is an upstream property, and a class needs its phrase -
+      // enforced in code so a same-seat or phrase-less verdict never
+      // yields a class cell.
+      const classPhrase = (r?.classPhrase ?? "").trim();
+      const consumerSalient = !audienceBuyable && r?.consumerSalient === true && classPhrase.length > 0;
       return {
         name,
         sellsTo: (r?.sellsTo ?? []).map((x) => String(x).trim()).filter(Boolean),
         audienceBuyable,
         role: audienceBuyable ? "same_seat" : "upstream",
         note: (r?.note ?? "").trim(),
+        consumerSalient,
+        ...(consumerSalient ? { classPhrase: classPhrase.slice(0, 60) } : {}),
       };
     });
     const out: RosterClassification = {

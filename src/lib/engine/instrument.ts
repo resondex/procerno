@@ -3,10 +3,10 @@ import { tagCosts, withCostContext } from "../cost_log";
 import { anthropicClient, openaiClient } from "./providers";
 import { INSTRUMENT_HELPER_MODEL } from "./models";
 import {
-  AMBIGUOUS_FORMS, angleRivals, checkBattery, checkCandidateSignature, checkPromptAgainstSpec,
+  AMBIGUOUS_FORMS, angleRivals, checkBattery, checkCandidateSignature, checkPromptAgainstSpec, classAnglesOf,
   deriveCheckSpec, DOUBT_CHECK_STAGES, MUST_NAME_STAGES, PRE_CATEGORY_STAGES, questionTypeOf, resolveCellSpec, scenarioLabelLeak, seedDesignLine, specWriterNote,
   sameSeatOf, stageDesignIntent, TERM_COLLISIONS, textNamesCategory, upstreamOf,
-  type CellCheckSpec, type QuestionType, type RosterRoles,
+  type CellCheckSpec, type ClassAngle, type QuestionType, type RosterClasses, type RosterRoles,
 } from "./battery_checks";
 export { MUST_NAME_STAGES };
 import { store } from "../store";
@@ -1609,6 +1609,9 @@ export interface CellReviewCandidate {
   situationDescription: string | null;
   angle: string;
   mode: string | null;
+  /** Class-angle comparison cells (2026-10-01): the class the cell weighs
+   * the client brand against ("a Visa card"). Absent = every other cell. */
+  classPhrase?: string | null;
 }
 
 /**
@@ -1633,7 +1636,9 @@ export async function reviewCells(input: {
   const fp = (c: CellReviewCandidate) =>
     // hint is in the fingerprint: the target check leans on it, so a
     // sharper hint must not serve verdicts formed without one.
-    [c.stageKey ?? "", c.stage, c.situation ?? "", c.angle, c.text.trim(), c.original?.trim() ?? "", c.hint ?? ""].join("|");
+    [c.stageKey ?? "", c.stage, c.situation ?? "", c.angle, c.text.trim(), c.original?.trim() ?? "", c.hint ?? ""].join("|") +
+    // Only class cells extend the fingerprint - every other key is unchanged.
+    (c.classPhrase ? `|class:${c.classPhrase}` : "");
   // "cell_review3": the 524-cell fixture audit (2026-09-17) traced every
   // one of its 43 flags to the checker, not the cells - the steers
   // exemption was missing (29), "blind" was read as "may not ask for
@@ -1652,8 +1657,10 @@ export async function reviewCells(input: {
   const hit = await store.cacheGet(key, CACHE_TTL_MS);
   if (hit) return JSON.parse(hit) as CellVerdict[];
   const brandRule = (c: CellReviewCandidate) =>
+    c.classPhrase
+      ? `head-to-head vs a CLASS: must name ${input.brand} and weigh it against ${c.classPhrase} as a class of products (naming that class is required) - naming any specific rival company or product is a violation`
     // "open" is the classic battery: no per-cell brand design to enforce.
-    c.angle === "open"
+    : c.angle === "open"
       ? "no restriction - the prompt may name brands where its ask calls for it"
       : c.angle === "generic"
       // "judges" verdicts on the client brand; "steers" retention and
@@ -1820,6 +1827,11 @@ const CELL_WRITER_SYSTEM =
           "brand AND that rival; for alternatives-type stages, ask for " +
           "alternatives to that rival (client brand NOT named).\n" +
           "- angle=defensive: ask for alternatives to the client brand by name.\n" +
+          "- angle=class(<class>): a head-to-head of the client brand against " +
+          "a CLASS of products, not a company - name the client brand and " +
+          "speak the class naturally, the way a buyer does ('or should I just " +
+          "get a Visa card?'). NEVER name any specific rival company, issuer " +
+          "or product: the class itself is the counterpart.\n" +
           "- Retention and loyalty stages speak as an existing customer and " +
           "MUST name the client brand: a churn, renewal, support, expansion, " +
           "ecosystem or advocacy ask that leaves the brand implied ('my " +
@@ -1886,6 +1898,13 @@ export interface GridCell {
    * measures, assigned at grid-plan time from the brand's enumerated
    * doubt-space. The writer voices it; the design check enforces it. */
   concern?: string;
+  /** Class-angle comparison cells only (2026-10-01): the class the client
+   * brand is weighed against ("a Visa card") and the upstream roster brand
+   * it evokes ("Visa"). Such cells carry angle "class"; qtype stays
+   * head_to_head and the spec's brandMode (comparison_class) is the
+   * dashboard split key. Absent on every other cell. */
+  classPhrase?: string;
+  classBrand?: string;
   /** The prompt as a user would type it. */
   text: string;
   /** The cell's typed check-spec (s7+): derived once after the seed's last
@@ -1924,7 +1943,10 @@ export function gridCellCacheKey(
     brand: string; category: string; competitors: string[];
     audience: string | null; base: Moderators; scenarios: ScenarioSpec[];
   },
-  row: { stage: string; situation: string | null; angle: string; scope: string | null; concern?: string | null }
+  row: {
+    stage: string; situation: string | null; angle: string; scope: string | null; concern?: string | null;
+    classPhrase?: string | null; classBrand?: string | null;
+  }
 ): string {
   // args.competitors is the SAME-SEAT list (generateGrid resolves roles
   // first), so an untyped roster keys exactly as before.
@@ -1935,6 +1957,10 @@ export function gridCellCacheKey(
     STYLE_VERSION, args.brand, args.category, rivals.join(","), args.audience,
     JSON.stringify(args.base),
     row.stage, row.situation ?? "", row.angle, row.scope ?? "", sctx, row.concern ?? "",
+    // A class-angle row's class rides in its key (self-versioning request
+    // data, 2026-10-01) - appended ONLY when present, so every other unit
+    // keys byte-identically to before.
+    ...(row.classPhrase ? [`class:${row.classBrand ?? ""}:${row.classPhrase}`] : []),
   ]);
 }
 
@@ -1944,7 +1970,10 @@ export function phrasingCacheKey(
     brand: string; competitors: string[]; audience: string | null;
     count: number; base: Moderators; scenarios: ScenarioSpec[];
   },
-  cell: { situation: string | null; mode?: string | null; text: string; spec?: unknown; concern?: string | null },
+  cell: {
+    situation: string | null; mode?: string | null; text: string; spec?: unknown; concern?: string | null;
+    classPhrase?: string | null; classBrand?: string | null;
+  },
   avoidConcerns?: string[]
 ): string {
   const rivals = angleRivals(args.competitors);
@@ -1955,8 +1984,73 @@ export function phrasingCacheKey(
     JSON.stringify(args.base),
     // Spec-checked and string-checked sets never share an entry: a legacy
     // draft's set must not serve a spec-era cell or the reverse.
-    `${cell.situation ?? ""}|${cell.mode ?? ""}|${cell.text}|${jnote}${cell.spec ? "|spec" : ""}${cell.concern ? `|concern:${cell.concern}` : ""}${avoidConcerns && avoidConcerns.length > 0 ? `|guard:${[...avoidConcerns].sort().join(";")}` : ""}`,
+    `${cell.situation ?? ""}|${cell.mode ?? ""}|${cell.text}|${jnote}${cell.spec ? "|spec" : ""}${cell.concern ? `|concern:${cell.concern}` : ""}${avoidConcerns && avoidConcerns.length > 0 ? `|guard:${[...avoidConcerns].sort().join(";")}` : ""}${cell.classPhrase ? `|class:${cell.classBrand ?? ""}:${cell.classPhrase}` : ""}`,
   ]);
+}
+
+/** One row of the grid's cell plan. */
+export interface CellPlanRow<S extends { key: string } = MaskedStage> {
+  stage: S;
+  situation: string | null;
+  angle: string;
+  scope: string | null;
+  concern?: string;
+  /** Class-angle rows only: angle "class" plus the class it voices. */
+  classPhrase?: string;
+  classBrand?: string;
+}
+
+/** How a plan row's angle is shown to the writer: a class row renders
+ * ` angle=class(<class phrase>)`, every other row its speakable angle. */
+function planAngle(p: { angle: string; classPhrase?: string | null }): string {
+  return p.classPhrase ? `class(${p.classPhrase})` : primaryBrandName(p.angle);
+}
+
+/** The cell plan, computed in code from the participation mask - which
+ * cells exist is a design rule, not a model choice. Pure (exported for
+ * the fixture). `rivals` are the entity angle slots (angleRivals of the
+ * same-seat roster); `classAngles` (2026-10-01) add ONE comparison row
+ * each, AFTER the entity rows - additive, never displacing an entity
+ * slot. No class angles = the plan exactly as before. */
+export function planGridCells<S extends {
+  key: string; columns: string[]; situational: boolean; rivals: "none" | "each" | "defensive_offensive";
+}>(
+  stages: S[], allLabels: string[], rivals: string[], classAngles: ClassAngle[] = []
+): CellPlanRow<S>[] {
+  const plan: CellPlanRow<S>[] = [];
+  for (const st of stages) {
+    // A kept stage no journey reaches was forced in by the user: it runs
+    // everywhere, in the base journey's voice (override semantics).
+    const cols = st.columns.length > 0 ? st.columns.filter((c) => allLabels.includes(c)) : allLabels;
+    const columns = cols.length > 0 ? cols : allLabels;
+    const scope =
+      columns.length < allLabels.length ? columns.join(", ") : null;
+    if (st.rivals === "each") {
+      const sits = st.situational && columns.length > 0 ? columns : [null as string | null];
+      rivals.forEach((r, i) => {
+        plan.push({ stage: st, situation: sits[i % sits.length] ?? null, angle: r, scope: null });
+      });
+      // Class angles continue the situation cycle after the entity rows.
+      if (st.key === "comparison") {
+        classAngles.forEach((ca, k) => {
+          plan.push({
+            stage: st, situation: sits[(rivals.length + k) % sits.length] ?? null, angle: "class", scope: null,
+            classPhrase: ca.classPhrase, classBrand: ca.classBrand,
+          });
+        });
+      }
+    } else if (st.rivals === "defensive_offensive") {
+      plan.push({ stage: st, situation: null, angle: "defensive", scope });
+      rivals.forEach((r) => plan.push({ stage: st, situation: null, angle: r, scope }));
+    } else if (st.situational) {
+      for (const label of columns) {
+        plan.push({ stage: st, situation: label, angle: "generic", scope: null });
+      }
+    } else {
+      plan.push({ stage: st, situation: null, angle: "generic", scope });
+    }
+  }
+  return plan;
 }
 
 function journeyNote(base: Moderators, s: ScenarioSpec): string | null {
@@ -1982,6 +2076,10 @@ export async function generateGrid(input: {
   /** Typed roster (2026-09-30): competitor name -> same_seat | upstream.
    * Absent = every competitor same_seat (the untyped behavior). */
   rosterRoles?: RosterRoles;
+  /** Class-angle cells (2026-10-01): upstream brand -> its buyer class
+   * phrase ("a Visa card"). Only UPSTREAM entries with a phrase earn a
+   * class cell (CLASS_SLOTS max, roster order). Absent = none. */
+  rosterClasses?: RosterClasses;
   /** Background warm: never wait on another request's in-flight write. */
   noWait?: boolean;
   meta?: CacheMeta;
@@ -1994,33 +2092,13 @@ export async function generateGrid(input: {
   // hold no cell, are free vocabulary in every check, and reach only the
   // concern planner as context. No roles = the input list itself.
   const upstream = upstreamOf(input.competitors, input.rosterRoles);
+  // Class angles read the FULL typed roster (they are upstream entries by
+  // definition) before the same-seat narrowing below.
+  const classAngles = classAnglesOf(input.competitors, input.rosterRoles, input.rosterClasses);
   input = { ...input, competitors: sameSeatOf(input.competitors, input.rosterRoles) };
   const rivals = angleRivals(input.competitors);
   const allLabels = input.scenarios.map((s) => s.label);
-  const plan: { stage: MaskedStage; situation: string | null; angle: string; scope: string | null; concern?: string }[] = [];
-  for (const st of input.stages) {
-    // A kept stage no journey reaches was forced in by the user: it runs
-    // everywhere, in the base journey's voice (override semantics).
-    const cols = st.columns.length > 0 ? st.columns.filter((c) => allLabels.includes(c)) : allLabels;
-    const columns = cols.length > 0 ? cols : allLabels;
-    const scope =
-      columns.length < allLabels.length ? columns.join(", ") : null;
-    if (st.rivals === "each") {
-      const sits = st.situational && columns.length > 0 ? columns : [null as string | null];
-      rivals.forEach((r, i) => {
-        plan.push({ stage: st, situation: sits[i % sits.length] ?? null, angle: r, scope: null });
-      });
-    } else if (st.rivals === "defensive_offensive") {
-      plan.push({ stage: st, situation: null, angle: "defensive", scope });
-      rivals.forEach((r) => plan.push({ stage: st, situation: null, angle: r, scope }));
-    } else if (st.situational) {
-      for (const label of columns) {
-        plan.push({ stage: st, situation: label, angle: "generic", scope: null });
-      }
-    } else {
-      plan.push({ stage: st, situation: null, angle: "generic", scope });
-    }
-  }
+  const plan = planGridCells(input.stages, allLabels, rivals, classAngles);
 
   // CONCERN PLANNING (2026-09-30, Tyler): which worry each doubt cell
   // measures is DESIGNED here, not writer-chosen. One call enumerates the
@@ -2125,6 +2203,7 @@ export async function generateGrid(input: {
   const unitKeys = plan.map((r) =>
     gridCellCacheKey(input, {
       stage: r.stage.key, situation: r.situation, angle: r.angle, scope: r.scope, concern: r.concern ?? null,
+      classPhrase: r.classPhrase ?? null, classBrand: r.classBrand ?? null,
     })
   );
   const resolved: (GridCell[] | null)[] = units.map(() => null);
@@ -2155,12 +2234,20 @@ export async function generateGrid(input: {
   const planLine = (p: (typeof plan)[number], i: number) => {
     const jn = p.situation ? journeyBySituation.get(p.situation) : null;
     return (
-      `${i + 1}. stage=${p.stage.key} situation=${p.situation ?? "-"} angle=${primaryBrandName(p.angle)}` +
+      `${i + 1}. stage=${p.stage.key} situation=${p.situation ?? "-"} angle=${planAngle(p)}` +
       `${p.scope ? ` reach=${p.scope}` : ""}${jn ? ` journey(${jn})` : ""}` +
       `${p.concern ? ` concern(${p.concern})` : ""}` +
-      `\n   guidance: ${p.stage.hint}`
+      `\n   guidance: ${p.stage.hint}` +
+      (p.classPhrase ? `\n   class contract: the counterpart is the CLASS "${p.classPhrase}", never a named rival company or product` : "")
     );
   };
+  /** The plan row a produced cell belongs to: stage + situation + angle,
+   * and the class for class rows (two class rows share angle "class"). */
+  const rowFor = (rows: typeof plan, c: { stage: string; situation: string | null; angle: string; classBrand?: string | null }) =>
+    rows.find((r) =>
+      r.stage.key === c.stage && (r.situation ?? null) === c.situation && primaryBrandName(r.angle) === c.angle &&
+      (r.classBrand ?? null) === (c.classBrand ?? null)
+    );
   const byKey = new Map(input.stages.map((s) => [s.key, s]));
   // One 50-cell call would flirt with the route's time budget; calls of
   // ~this many cells run in parallel instead.
@@ -2238,9 +2325,12 @@ export async function generateGrid(input: {
             stage: st.key,
             layer: st.layer,
             situation,
-            angle: c.angle,
+            // A class row's identity is the PLAN's (angle "class" + its
+            // class), never the writer's echo of the plan line.
+            angle: row.classPhrase ? "class" : c.angle,
             mode: row.scope ?? null,
             concern: row.concern,
+            ...(row.classPhrase ? { classPhrase: row.classPhrase, classBrand: row.classBrand } : {}),
             text: humanize(c.text.trim()),
           };
           cell.qtype = questionTypeOf(cell, input.brand, input.category);
@@ -2276,6 +2366,7 @@ export async function generateGrid(input: {
                   situationDescription: null,
                   angle: c.angle,
                   mode: c.mode,
+                  ...(c.classPhrase ? { classPhrase: c.classPhrase } : {}),
                 };
               }),
               meta: input.meta,
@@ -2304,9 +2395,7 @@ export async function generateGrid(input: {
             const mech = seedRule(c);
             if (mech.length === 0) continue;
             console.warn(`seed brand rule flagged [${c.stage}]: ${mech.map((m) => m.check).join(",")} | ${c.text.slice(0, 90)}`);
-            const row =
-              rows.find((r) => r.stage.key === c.stage && (r.situation ?? null) === c.situation && primaryBrandName(r.angle) === c.angle) ??
-              rows.find((r) => r.stage.key === c.stage);
+            const row = rowFor(rows, c) ?? rows.find((r) => r.stage.key === c.stage);
             if (!row) continue;
             try {
               const res2 = await openaiClient().chat.completions.create({
@@ -2324,7 +2413,7 @@ export async function generateGrid(input: {
               });
               const cell2 = (JSON.parse(res2.choices[0]?.message?.content ?? "{}") as { cells?: { text?: string }[] }).cells?.[0];
               const text2 = cell2?.text?.trim();
-              if (text2 && seedRule({ stage: c.stage, angle: c.angle, text: text2 }).length === 0) {
+              if (text2 && seedRule({ stage: c.stage, angle: c.angle, text: text2, classPhrase: c.classPhrase, classBrand: c.classBrand }).length === 0) {
                 console.warn(`seed brand rule healed [${c.stage}]: ${text2.slice(0, 90)}`);
                 flat[i].text = humanize(text2);
               } else {
@@ -2354,7 +2443,7 @@ export async function generateGrid(input: {
               const bad = seedTargets.filter((_, k) => !verdicts[k].voices);
               for (const x of bad) {
                 console.warn(`seed design check flagged [${x.c.stage}]: ${x.c.text.slice(0, 90)}`);
-                const row = rows.find((r) => r.stage.key === x.c.stage && (r.situation ?? null) === x.c.situation && primaryBrandName(r.angle) === x.c.angle) ?? rows.find((r) => r.stage.key === x.c.stage);
+                const row = rowFor(rows, x.c) ?? rows.find((r) => r.stage.key === x.c.stage);
                 if (!row) continue;
                 const res2 = await openaiClient().chat.completions.create({
                   model: CELLS_MODEL,
@@ -2464,9 +2553,7 @@ export async function generateGrid(input: {
             const dirty = new Set<number>();
             for (const i of dups.slice(0, 4)) {
               const d = doubt[i];
-              const row = (units[d.u] ?? []).find(
-                (r) => r.stage.key === d.c.stage && (r.situation ?? null) === d.c.situation && primaryBrandName(r.angle) === d.c.angle
-              ) ?? (units[d.u] ?? [])[0];
+              const row = rowFor(units[d.u] ?? [], d.c) ?? (units[d.u] ?? [])[0];
               if (!row) continue;
               console.warn(`concern diversity: [${d.c.stage}] duplicates "${concerns[i]}" - regenerating | ${d.c.text.slice(0, 80)}`);
               try {
@@ -2518,7 +2605,10 @@ export async function generateGrid(input: {
 
     // The free deterministic seed check, shared by the per-group heal and
   // the battery-wide concern-diversity pass below.
-  const seedRule = (c: { stage: string; angle: string; text: string; situation?: string | null; concern?: string | null }) => {
+  const seedRule = (c: {
+    stage: string; angle: string; text: string; situation?: string | null; concern?: string | null;
+    classPhrase?: string | null; classBrand?: string | null;
+  }) => {
     const spec = deriveCheckSpec(c, input.brand, input.competitors, input.category);
     const out = checkPromptAgainstSpec({
       text: c.text,
@@ -2643,7 +2733,11 @@ export async function regenerateCell(input: {
   audience: string | null;
   base: Moderators;
   scenarios: ScenarioSpec[];
-  cell: { stage: string; situation: string | null; angle: string; mode: string | null; concern?: string | null };
+  cell: {
+    stage: string; situation: string | null; angle: string; mode: string | null; concern?: string | null;
+    /** Class-angle comparison cells (2026-10-01): the class survives redraws. */
+    classPhrase?: string | null; classBrand?: string | null;
+  };
   /** Every text already offered for this cell, newest last. */
   avoid: string[];
   /** Near-variant mode: keep THIS prompt's ask, move one concrete detail -
@@ -2659,7 +2753,10 @@ export async function regenerateCell(input: {
   // cell's design and the drawn seed - the same contract as generateGrid.
   // A planned concern is part of that design and survives redraws.
   const specFor = (text: string) =>
-    deriveCheckSpec({ stage: input.cell.stage, angle: input.cell.angle, text, concern: input.cell.concern }, input.brand, input.competitors, input.category);
+    deriveCheckSpec({
+      stage: input.cell.stage, angle: input.cell.angle, text, concern: input.cell.concern,
+      ...(input.cell.classPhrase ? { classPhrase: input.cell.classPhrase, classBrand: input.cell.classBrand } : {}),
+    }, input.brand, input.competitors, input.category);
   const rivals = angleRivals(input.competitors);
   const stages = participationMask(input.base, input.scenarios);
   const st = stages.find((x) => x.key === input.cell.stage);
@@ -2671,6 +2768,8 @@ export async function regenerateCell(input: {
     `${input.cell.stage}|${input.cell.situation ?? ""}|${input.cell.angle}|${input.cell.mode ?? ""}|${input.cell.concern ?? ""}`,
     avoidNorm.map((t) => t.toLowerCase()).sort().join("~"),
     input.nearTo ? `near:${input.nearTo.trim().toLowerCase()}` : "",
+    // Class cells only - every other draw keys as before.
+    ...(input.cell.classPhrase ? [`class:${input.cell.classBrand ?? ""}:${input.cell.classPhrase}`] : []),
   ]);
   const hit = await store.cacheGet(key, CACHE_TTL_MS);
   if (hit) {
@@ -2681,10 +2780,11 @@ export async function regenerateCell(input: {
     ? journeyNote(input.base, input.scenarios.find((sc) => sc.label === input.cell.situation) ?? { label: "", description: "", journey: null })
     : null;
   const planText =
-    `1. stage=${st.key} situation=${input.cell.situation ?? "-"} angle=${primaryBrandName(input.cell.angle)}` +
+    `1. stage=${st.key} situation=${input.cell.situation ?? "-"} angle=${planAngle(input.cell)}` +
     `${input.cell.mode ? ` reach=${input.cell.mode}` : ""}${jn ? ` journey(${jn})` : ""}` +
     `${input.cell.concern ? ` concern(${input.cell.concern})` : ""}` +
-    `\n   guidance: ${st.hint}`;
+    `\n   guidance: ${st.hint}` +
+    (input.cell.classPhrase ? `\n   class contract: the counterpart is the CLASS "${input.cell.classPhrase}", never a named rival company or product` : "");
   const draw = async (rejectNote: string | null): Promise<string | null> => {
     const res = await openaiClient().chat.completions.create({
       model: CELLS_MODEL,
@@ -2909,6 +3009,10 @@ export async function generatePhrasings(input: {
     /** The cell's planned concern (s9+): rides into the re-derived spec's
      * design line so paraphrases are checked against the DESIGNED worry. */
     concern?: string | null;
+    /** Class-angle comparison cells (2026-10-01): select the
+     * comparison_class spec, writer note and design line. */
+    classPhrase?: string | null;
+    classBrand?: string | null;
   }[];
   /** Total phrasings wanted per cell including the seed. */
   count: number;
@@ -3045,7 +3149,7 @@ export async function generatePhrasings(input: {
     const cellText = subset
       .map(
         (c, i) =>
-          `${i}. [stage=${c.stage} situation=${c.situation ?? "-"} angle=${primaryBrandName(c.angle)}${c.mode ? ` reach=${c.mode}` : ""}] ${c.text}` +
+          `${i}. [stage=${c.stage} situation=${c.situation ?? "-"} angle=${planAngle(c)}${c.mode ? ` reach=${c.mode}` : ""}] ${c.text}` +
           // The stage's guidance rides with every seed: without it the
           // writer drifted problem_recognition ("pre-category") cells
           // into solution-seeking asks - real people ask for products,
@@ -3415,7 +3519,12 @@ export async function generatePhrasings(input: {
           // an earlier era can hold a null/stale designLine (the Netflix
           // "Korean thrillers" rephrase silently skipped the check on a
           // carried s7 spec, 2026-09-29).
-          let line = seedDesignLine(subset[j].stage, input.brand, subset[j].text, specOf.get(subset[j])?.concern ?? null);
+          // A class cell's line is the head-to-head-vs-a-class design (the
+          // same-question check then enforces class framing per paraphrase).
+          let line = seedDesignLine(
+            subset[j].stage, input.brand, subset[j].text, specOf.get(subset[j])?.concern ?? null,
+            subset[j].classPhrase ? { classPhrase: subset[j].classPhrase as string } : null
+          );
           if (!line) continue;
           const own = (specOf.get(subset[j])?.concern ?? "").toLowerCase();
           const others = (input.avoidConcerns ?? []).filter((x) => x && x.toLowerCase() !== own);
@@ -3694,6 +3803,7 @@ export async function buildInstrument(input: {
   competitors: string[];
   audience: string | null;
   rosterRoles?: RosterRoles;
+  rosterClasses?: RosterClasses;
   meta?: CacheMeta;
 }): Promise<Instrument> {
   tagCosts({ purpose: "setup:compose" });

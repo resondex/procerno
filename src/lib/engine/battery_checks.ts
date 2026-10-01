@@ -60,6 +60,52 @@ export function angleRivals(competitors: string[], roles?: RosterRoles | null): 
   return sameSeatOf(competitors, roles).slice(0, ANGLE_SLOTS);
 }
 
+/* ---------------------- class-angle cells (2026-10-01) ---------------------
+ * An upstream brand holds no ENTITY cell (its buyer can't buy from it), but
+ * when consumers still choose BY it as a class of products ("should I get
+ * the Amex or just a Visa card?") it earns a CLASS-ANGLE head-to-head: the
+ * client brand weighed against "a Visa card" as a category of products,
+ * never against a named rival entity. The roster classifier marks such
+ * upstream brands consumerSalient and names their classPhrase; the wizard
+ * sends brand -> classPhrase as RosterClasses. Class cells are additive
+ * (they never take an entity angle slot) and report on their own dashboard
+ * row - never pooled into open_choice or entity head-to-heads (AGENTS.md,
+ * the parked rail rollup). Absent classes = no class cells, byte-identical. */
+export type RosterClasses = Record<string, string>;
+
+/** At most this many class-angle cells per battery, in roster order. */
+export const CLASS_SLOTS = 2;
+
+export interface ClassAngle {
+  /** The upstream roster entry the class evokes ("Visa"). */
+  classBrand: string;
+  /** How a buyer speaks the class ("a Visa card"). */
+  classPhrase: string;
+}
+
+/** The class angles a roster earns: upstream entries (by role) carrying a
+ * class phrase, in roster order, capped at CLASS_SLOTS. A same-seat entry
+ * never yields a class (it holds entity cells); no classes = []. */
+export function classAnglesOf(
+  competitors: string[], roles?: RosterRoles | null, classes?: RosterClasses | null
+): ClassAngle[] {
+  if (!classes || !roles) return [];
+  const phraseOf = (name: string): string => {
+    const exact = classes[name];
+    if (typeof exact === "string") return exact.trim();
+    const k = key(name);
+    for (const [n, p] of Object.entries(classes)) if (key(n) === k) return (p ?? "").trim();
+    return "";
+  };
+  const out: ClassAngle[] = [];
+  for (const c of upstreamOf(competitors, roles)) {
+    const classPhrase = phraseOf(c);
+    if (classPhrase) out.push({ classBrand: c, classPhrase });
+    if (out.length >= CLASS_SLOTS) break;
+  }
+  return out;
+}
+
 /** Stages whose prompts MUST name the client brand (A3, 2026-09-27; owned
  * here so instrument can import the checks without a cycle). */
 export const MUST_NAME_STAGES = new Set([
@@ -106,7 +152,15 @@ export function questionTypeOf(cell: { stage: string; angle: string; text: strin
  * seed until cells carry stored design lines. problem_resolution has its
  * own wording - the generic plan line mis-flagged 15 conforming support
  * asks in the harness. */
-export function seedDesignLine(stage: string, brand: string, seed: string, concern?: string | null): string | null {
+export function seedDesignLine(
+  stage: string, brand: string, seed: string, concern?: string | null,
+  /** A class-angle comparison cell's class (2026-10-01): the design is a
+   * head-to-head against the CLASS, so a paraphrase that swaps the class
+   * for a named rival fails the same-question check. Absent = unchanged. */
+  cls?: { classPhrase: string } | null
+): string | null {
+  if (stage === "comparison" && cls?.classPhrase)
+    return `Question design (head-to-head vs a class): the question weighs ${brand} against ${cls.classPhrase} as a CLASS of products - a specific rival product or company name in place of the class does not satisfy the design. Designed as: "${seed}"`;
   // "SAME concern/plan as the designed question" (2026-09-29): the earlier
   // wording only demanded A doubt about the brand, so a gifting objection
   // could drift into nine limited-drops objections and pass - each still
@@ -254,7 +308,7 @@ export interface BatteryFinding {
     | "comparison_missing_target" | "comparison_missing_rival" | "comparison_names_extra_rival"
     | "defensive_alt_missing_target" | "offensive_alt_names_target" | "offensive_alt_missing_rival"
     | "alternatives_names_extra_rival" | "pricing_names_rival" | "meta_text"
-    | "scenario_label_leak" | "blind_missing_category"
+    | "scenario_label_leak" | "blind_missing_category" | "comparison_class_missing_class"
     | "seed_number_changed" | "duplicate_paraphrase";
   /** The offending prompt text (or the seed, for cell-level findings). */
   text: string;
@@ -498,6 +552,11 @@ export function checkBattery(input: {
 /** How a cell's brand design is scored. */
 export type BrandMode =
   | "blind" | "must_name" | "comparison"
+  // A head-to-head against a CLASS of products ("a Visa card") rather
+  // than a rival entity (2026-10-01). Its qtype stays head_to_head; THIS
+  // mode is the dashboard split key - class cells get their own view row,
+  // never pooled with entity head-to-heads or open_choice.
+  | "comparison_class"
   | "alternatives_defensive" | "alternatives_offensive"
   | "pricing" | "open";
 
@@ -533,6 +592,13 @@ export interface CellCheckSpec {
    * form, quoting the seed), or null for stages without one. */
   designLine: string | null;
   qtype: QuestionType;
+  /** comparison_class only: how a buyer speaks the class ("a Visa card"). */
+  classPhrase?: string;
+  /** comparison_class only: the upstream brand the class evokes ("Visa") -
+   * every prompt must name it (case-blind, tolerant), and it is never a
+   * forbidden-brand leak. Absent on every other mode (keys omitted, so
+   * non-class specs serialize byte-identically). */
+  classBrand?: string;
 }
 
 /** Brand forms that double as ordinary English words: in FORBIDDEN
@@ -661,12 +727,19 @@ function angleEntry(angle: string, roster: string[]): string | null {
  * advocacy's argued rival read the seed, once, here.
  */
 export function deriveCheckSpec(
-  cell: { stage: string; angle: string; text: string; concern?: string | null },
+  cell: {
+    stage: string; angle: string; text: string; concern?: string | null;
+    /** Class-angle comparison cells (2026-10-01) - both present = the
+     * comparison_class design; absent = every other path, unchanged. */
+    classPhrase?: string | null; classBrand?: string | null;
+  },
   brand: string,
   competitors: string[],
   category?: string
 ): CellCheckSpec {
   const seed = cell.text.trim();
+  const cls = classOfCell(cell);
+  if (cls) return deriveClassSpec(cell, seed, cls, brand, competitors, category);
   const brandMode = brandModeOf(cell.stage, cell.angle);
   const catTokens = new Set(key(category ?? "").split(" ").filter(Boolean));
   const roster = [brand, ...competitors.filter((c) => c !== brand)];
@@ -707,14 +780,70 @@ export function deriveCheckSpec(
   };
 }
 
+/** A cell's class angle, when it is a class-angle comparison cell. */
+export function classOfCell(cell: {
+  stage: string; classPhrase?: string | null; classBrand?: string | null;
+}): ClassAngle | null {
+  const classPhrase = (cell.classPhrase ?? "").trim();
+  const classBrand = (cell.classBrand ?? "").trim();
+  return cell.stage === "comparison" && classPhrase && classBrand ? { classBrand, classPhrase } : null;
+}
+
+/** Same brand under label variants ("Visa" / "visa" / "Visa (network)"). */
+function sameBrandLabel(a: string, b: string): boolean {
+  return speakable(a).toLowerCase() === speakable(b).toLowerCase() ||
+    textNamesBrand(a, b, { required: true }) || textNamesBrand(b, a, { required: true });
+}
+
+/** The comparison_class spec: the target is required; the class's own
+ * upstream brand is required separately (case-blind - the class must be
+ * evoked: "a Visa card" names Visa) and is never forbidden; every OTHER
+ * tracked brand is forbidden strictly - a Visa-class paraphrase naming
+ * Chase is an entity comparison, not the designed class contest. (Other
+ * upstream brands are outside the same-seat roster and stay free
+ * vocabulary, as everywhere; the same-question design check enforces
+ * the class framing per paraphrase.) */
+function deriveClassSpec(
+  cell: { stage: string; angle: string; concern?: string | null },
+  seed: string, cls: ClassAngle,
+  brand: string, competitors: string[], category?: string
+): CellCheckSpec {
+  const roster = [brand, ...competitors.filter((c) => c !== brand)];
+  return {
+    v: 1,
+    stage: cell.stage,
+    angle: cell.angle,
+    target: brand,
+    angleBrand: null,
+    seed,
+    brandMode: "comparison_class",
+    requiredBrands: [brand],
+    forbiddenBrands: roster.filter((b) => b !== brand && !sameBrandLabel(b, cls.classBrand)),
+    quantities: seedQuantities(seed, brand, competitors),
+    concern: cell.concern ?? null,
+    designLine: seedDesignLine(cell.stage, brand, seed, cell.concern, cls),
+    // head_to_head like any comparison - brandMode is the split key.
+    qtype: questionTypeOf({ stage: cell.stage, angle: cell.angle, text: seed }, brand, category),
+    classPhrase: cls.classPhrase,
+    classBrand: cls.classBrand,
+  };
+}
+
 /** A carried spec is a record; the design is re-derivable from the cell
  * and roster, so the server re-derives and prefers the derivation - a spec
  * written before a seed edit, a roster change or a derivation fix never
  * governs a check. Null when the cell carries no spec (legacy path). */
 export function resolveCellSpec(
-  cell: { stage: string; angle: string; text: string; spec?: unknown; concern?: string | null },
+  cell: {
+    stage: string; angle: string; text: string; spec?: unknown; concern?: string | null;
+    classPhrase?: string | null; classBrand?: string | null;
+  },
   brand: string, competitors: string[], category?: string
 ): CellCheckSpec | null {
+  // A class-angle cell is spec-era by construction: it has no legacy
+  // string-derived design to fall back to (the string path would read
+  // angle "class" as a rival named "class").
+  if (classOfCell(cell)) return deriveCheckSpec(cell, brand, competitors, category);
   if (!cell.spec || typeof cell.spec !== "object") return null;
   const derived = deriveCheckSpec(cell, brand, competitors, category);
   // A seed edit re-deriving is routine; the same seed yielding a different
@@ -738,6 +867,12 @@ export function checkCandidateSignature(
   const leaked = spec.forbiddenBrands.filter(
     (b) => namesForbiddenBrand(text, b, { extraForms: opts?.extraForms?.[b], excludeTokens })
   );
+  // A class cell's expected signature is {target + classBrand}: the class
+  // must actually be evoked, detected case-blind and format-tolerant like
+  // any design-named brand ("visa card" counts).
+  if (spec.brandMode === "comparison_class" && spec.classBrand &&
+      !namesRequiredBrand(text, spec.classBrand, { extraForms: opts?.extraForms?.[spec.classBrand], excludeTokens }))
+    missing.push(spec.classBrand);
   return { ok: missing.length === 0 && leaked.length === 0, missing, leaked };
 }
 
@@ -772,6 +907,13 @@ export function checkPromptAgainstSpec(input: {
           out.push({ check: "comparison_names_extra_rival", detail: `comparison for ${spec.angle} also names ${rivalLeaks.join(", ")}` });
       }
       break;
+    case "comparison_class":
+      if (misses(target)) out.push({ check: "comparison_missing_target", detail: `class comparison must name ${target}` });
+      if (spec.classBrand && misses(spec.classBrand))
+        out.push({ check: "comparison_class_missing_class", detail: `class comparison must evoke ${spec.classPhrase ?? spec.classBrand} (name ${spec.classBrand})` });
+      if (rivalLeaks.length > 0)
+        out.push({ check: "comparison_names_extra_rival", detail: `class comparison vs ${spec.classPhrase ?? spec.classBrand} names ${rivalLeaks.join(", ")} - the counterpart is the class, never a named rival` });
+      break;
     case "alternatives_defensive":
       if (misses(target)) out.push({ check: "defensive_alt_missing_target", detail: `defensive alternatives must name ${target}` });
       if (rivalLeaks.length > 0)
@@ -796,6 +938,11 @@ export function checkPromptAgainstSpec(input: {
  * rival) is named explicitly. Null when the seed already carries its
  * design - the common case adds nothing to the prompt. */
 export function specWriterNote(spec: CellCheckSpec): string | null {
+  // The class contract always rides with its seed: the paraphrase rule
+  // "same brands named" alone would let a writer trade the class for a
+  // specific card or issuer.
+  if (spec.brandMode === "comparison_class" && spec.classPhrase)
+    return `[head-to-head vs a CLASS: every paraphrase weighs ${speakable(spec.target)} against ${spec.classPhrase} as a class of products - speak the class the way a buyer does (any natural wording that names ${speakable(spec.classBrand ?? spec.classPhrase)}), never a specific rival company or product in its place]`;
   if (spec.requiredBrands.length === 0)
     return `[deliberately blind variant: name NO brand - the guidance's subject stays implied ("my subscription", "the service"), never named]`;
   const missing = spec.requiredBrands.filter((b) => !namesRequiredBrand(spec.seed, b));

@@ -25,7 +25,7 @@ import {
   type ScenarioReviewItem,
   type ScenarioRow,
 } from "./grid_setup";
-import { deriveCheckSpec, rosterRoleOf, sameSeatOf, type RosterRole, type RosterRoles } from "@/lib/engine/battery_checks";
+import { deriveCheckSpec, rosterRoleOf, sameSeatOf, type RosterClasses, type RosterRole, type RosterRoles } from "@/lib/engine/battery_checks";
 
 /**
  * The setup wizard: a rail of steps, one gate at a time, a fixed footer that
@@ -172,6 +172,8 @@ function cellReviewRequest(
         situationDescription: c.situation ? scDesc.get(c.situation) ?? null : null,
         angle: c.angle,
         mode: c.mode ?? null,
+        // Class-angle cells carry their class into the review (spec + rule).
+        ...(c.classPhrase ? { classPhrase: c.classPhrase, classBrand: c.classBrand ?? undefined } : {}),
       };
     }),
   };
@@ -244,6 +246,10 @@ interface WizardDraft {
   rosterRoles?: RosterRoles;
   /** The classifier's one-line note per competitor (chip tooltip). */
   rosterNotes?: Record<string, string>;
+  /** Class-angle cells (2026-10-01): upstream competitor -> the buyer's
+   * class phrase ("a Visa card"), for the upstream brands buyers still
+   * choose BY. Each earns one class-angle comparison cell. */
+  rosterClasses?: RosterClasses;
   /** Who the client brand sells to - stored only (future second-seat
    * signal). */
   clientSellsTo?: string[];
@@ -283,6 +289,7 @@ export function SetupWizard({ mode, brand, draft, engineOptions, onClose, onCrea
   const [compDraft, setCompDraft] = useState("");
   const [rosterRoles, setRosterRoles] = useState<RosterRoles | undefined>(saved?.rosterRoles);
   const [rosterNotes, setRosterNotes] = useState<Record<string, string>>(saved?.rosterNotes ?? {});
+  const [rosterClasses, setRosterClasses] = useState<RosterClasses | undefined>(saved?.rosterClasses);
   const [clientSellsTo, setClientSellsTo] = useState<string[] | undefined>(saved?.clientSellsTo);
   const [audience, setAudience] = useState(draft?.audience ?? "");
   const [prompts, setPrompts] = useState<DraftPrompt[] | null>(draft?.prompts ?? null);
@@ -331,7 +338,7 @@ export function SetupWizard({ mode, brand, draft, engineOptions, onClose, onCrea
     draft ? readKey(draft.category, draft.audience ?? "") : null
   );
   const [servedRivals, setServedRivals] = useState<string | null>(
-    draft ? rivalsKey(draft.competitors ?? [], saved?.rosterRoles) : null
+    draft ? rivalsKey(draft.competitors ?? [], saved?.rosterRoles, saved?.rosterClasses) : null
   );
 
   /** The plan's buying-scenario cap (PLAN_SCENARIO_CAPS); 4 until the
@@ -348,7 +355,7 @@ export function SetupWizard({ mode, brand, draft, engineOptions, onClose, onCrea
 
   const gridApi = useGridSetup({
     setupId: draftId,
-    brand, category, competitors: allCompetitors(), audience, rosterRoles,
+    brand, category, competitors: allCompetitors(), audience, rosterRoles, rosterClasses,
     maxScenarios: scenarioCap,
     state: grid, setState: setGrid, setBusy, setError,
   });
@@ -402,9 +409,17 @@ export function SetupWizard({ mode, brand, draft, engineOptions, onClose, onCrea
   }
 
   /** The rivals' role key for staleness: a role toggle changes which rivals
-   * hold cells exactly like an add/remove does. Untyped = the plain join. */
-  function rivalsKey(comps: string[], roles: RosterRoles | undefined): string {
-    return comps.map((c) => (rosterRoleOf(c, roles) === "upstream" ? `${c}#upstream` : c)).join("|");
+   * hold cells exactly like an add/remove does, and an upstream entry's
+   * class phrase decides its class-angle cell. Untyped = the plain join;
+   * no classes = the role-only key as before. */
+  function rivalsKey(comps: string[], roles: RosterRoles | undefined, classes?: RosterClasses): string {
+    return comps
+      .map((c) => {
+        if (rosterRoleOf(c, roles) !== "upstream") return c;
+        const cls = classes?.[c]?.trim();
+        return cls ? `${c}#upstream#class:${cls}` : `${c}#upstream`;
+      })
+      .join("|");
   }
 
   const classifyTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -423,7 +438,10 @@ export function SetupWizard({ mode, brand, draft, engineOptions, onClose, onCrea
     if (!res?.ok) return;
     const data = await res.json().catch(() => null);
     const roster = data?.roster as
-      | { competitors: { name: string; role: RosterRole; note: string }[]; clientSellsTo: string[]; failedOpen?: boolean }
+      | {
+          competitors: { name: string; role: RosterRole; note: string; consumerSalient?: boolean; classPhrase?: string }[];
+          clientSellsTo: string[]; failedOpen?: boolean;
+        }
       | undefined;
     if (!roster || roster.failedOpen) return;
     setRosterRoles((prev) => {
@@ -435,6 +453,17 @@ export function SetupWizard({ mode, brand, draft, engineOptions, onClose, onCrea
       const next = fresh ? {} : { ...prev };
       for (const v of roster.competitors) if (fresh || !(v.name in next)) next[v.name] = v.note;
       return next;
+    });
+    // Class phrases for the upstream brands buyers still choose BY. Same
+    // fill semantics as notes; a name the classifier calls non-salient
+    // carries no entry (no class cell).
+    setRosterClasses((prev) => {
+      const next: RosterClasses = fresh ? {} : { ...(prev ?? {}) };
+      for (const v of roster.competitors) {
+        if (!fresh && v.name in next) continue;
+        if (v.consumerSalient && v.classPhrase?.trim()) next[v.name] = v.classPhrase.trim();
+      }
+      return Object.keys(next).length > 0 ? next : undefined;
     });
     setClientSellsTo(roster.clientSellsTo);
   }
@@ -494,6 +523,7 @@ export function SetupWizard({ mode, brand, draft, engineOptions, onClose, onCrea
       machinePrompts: mp,
       reviewedPrompts: rp,
       ...(rosterRoles ? { rosterRoles, rosterNotes } : {}),
+      ...(rosterClasses ? { rosterClasses } : {}),
       ...(clientSellsTo ? { clientSellsTo } : {}),
     };
     // Bounded, never-throwing: a stalled save must not wedge the "Saving"
@@ -591,9 +621,9 @@ export function SetupWizard({ mode, brand, draft, engineOptions, onClose, onCrea
     setCompetitors(comps);
     setCompDraft("");
     const readChanged = servedRead !== readKey(category, audience);
-    const rivalsChanged = servedRivals !== rivalsKey(comps, rosterRoles);
+    const rivalsChanged = servedRivals !== rivalsKey(comps, rosterRoles, rosterClasses);
     setServedRead(readKey(category, audience));
-    setServedRivals(rivalsKey(comps, rosterRoles));
+    setServedRivals(rivalsKey(comps, rosterRoles, rosterClasses));
     if (mode === "grid") {
       if (!readChanged && grid) {
         if (!rivalsChanged) {
@@ -1528,7 +1558,11 @@ export function SetupWizard({ mode, brand, draft, engineOptions, onClose, onCrea
                             <button
                               type="button"
                               onClick={(e) => { e.preventDefault(); toggleRole(c); }}
-                              title={`${rosterNotes[c] ? `${rosterNotes[c]}. ` : ""}Click to switch - an upstream brand gets no questions of its own.`}
+                              title={`${rosterNotes[c] ? `${rosterNotes[c]}. ` : ""}${
+                                rosterRoleOf(c, rosterRoles) === "upstream" && rosterClasses?.[c]
+                                  ? `Buyers still choose by it as a class - one question weighs ${brand} against ${rosterClasses[c]}. `
+                                  : ""
+                              }Click to switch - an upstream brand gets no rival questions of its own.`}
                               className={`rounded-full px-1.5 text-[11px] font-medium leading-5 ${
                                 rosterRoleOf(c, rosterRoles) === "upstream"
                                   ? "bg-warning/10 text-warning"

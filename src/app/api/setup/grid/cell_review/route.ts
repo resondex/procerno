@@ -50,6 +50,10 @@ const Body = z.object({
         /** The cell's current seed text, for paraphrase candidates: the
          * spec (quantities, design line) is the seed's. */
         seed: z.string().trim().max(2000).optional(),
+        /** Class-angle comparison cells (2026-10-01): the class phrase
+         * and the upstream brand it evokes. Absent on every other cell. */
+        classPhrase: z.string().trim().max(60).nullable().optional(),
+        classBrand: z.string().trim().max(80).nullable().optional(),
       })
     )
     .min(1)
@@ -78,11 +82,15 @@ export async function POST(req: Request) {
   // the stage intent (a seed cannot be its own yardstick); a paraphrase
   // against the stored same-concern design line, as in generation.
   const specs: (CellCheckSpec | null)[] = parsed.data.candidates.map((c) => {
-    if (!c.spec || !c.stageKey) return null;
+    // A class-angle cell is spec-era by construction (no legacy design).
+    if ((!c.spec && !c.classPhrase) || !c.stageKey) return null;
     const seedText = c.seedEdit ? c.text : c.seed;
     if (!seedText) return null;
     return deriveCheckSpec(
-      { stage: c.stageKey, angle: c.angle, text: seedText },
+      {
+        stage: c.stageKey, angle: c.angle, text: seedText,
+        ...(c.classPhrase ? { classPhrase: c.classPhrase, classBrand: c.classBrand } : {}),
+      },
       parsed.data.brand, competitors, parsed.data.category
     );
   });
@@ -114,6 +122,7 @@ export async function POST(req: Request) {
         situationDescription: c.situationDescription ?? null,
         angle: c.angle,
         mode: c.mode ?? null,
+        ...(c.classPhrase ? { classPhrase: c.classPhrase } : {}),
       })),
       meta: { source: cacheSource(auth) },
     }).catch((err) => {

@@ -30,6 +30,10 @@ const Body = z.object({
   /** Typed roster (2026-09-30): competitor -> same_seat | upstream.
    * Absent = every competitor same_seat (the untyped behavior). */
   rosterRoles: z.record(z.string().max(80), z.enum(["same_seat", "upstream"])).optional(),
+  /** Class-angle cells (2026-10-01): upstream brand -> buyer class phrase
+   * ("a Visa card"). Only upstream entries with a phrase earn a class
+   * cell. Absent = no class cells (byte-identical behavior). */
+  rosterClasses: z.record(z.string().max(80), z.string().trim().max(60)).optional(),
   audience: z.string().trim().max(160).optional(),
   base: z.record(z.string(), z.unknown()),
   /** The ACTIVE scenarios as confirmed at gate 1, with their journeys. */
@@ -80,6 +84,7 @@ export async function POST(req: Request) {
     scenarios,
     stages,
     rosterRoles: parsed.data.rosterRoles,
+    rosterClasses: parsed.data.rosterClasses,
     noWait: parsed.data.warm,
     meta: { source: cacheSource(auth) },
   });
