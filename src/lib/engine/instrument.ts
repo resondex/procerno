@@ -3155,6 +3155,13 @@ export async function generatePhrasings(input: {
           // into solution-seeking asks - real people ask for products,
           // and the writer had no way to know this stage must not.
           (hintOf.get(c.stage) ? `\n   [stage guidance: ${hintOf.get(c.stage)}]` : "") +
+          // The owned noun travels WITH the seed (2026-10-01): the
+          // continuity check rejects paraphrases that trade "chips" for
+          // "snacks", but nothing told the writer which word to keep -
+          // the Doritos crumbs cell starved to 0/9 on exactly this.
+          (PRE_CATEGORY_STAGES.has(c.stage) && categoryNounOf(c.text, input.category)
+            ? `\n   [owned noun: every paraphrase keeps the word "${categoryNounOf(c.text, input.category)}" (or a direct form of it) - substituting a broader word like "snacks" or "device" changes what is measured and the paraphrase will be rejected]`
+            : "") +
           // But the seed's own brand pattern outranks the guidance: the
           // blind VARIANT of a client-anchored stage exists to measure
           // unprompted recall, and a guidance line saying "the client

@@ -271,6 +271,18 @@ function brandForms(name: string, opts?: { required?: boolean; extraForms?: stri
  * SEEDS must pass this: three rounds of instructions failed to stop the
  * writer contorting around the noun ("my pocket gadget"), so it is a
  * mechanical requirement now (2026-09-30). */
+/** The category word the text actually uses ("chips" for "tortilla
+ * chips", "phone" for "smartphones") - the owned noun a paraphrase set
+ * must keep. Null when the text speaks no category word. */
+export function categoryNounOf(text: string, category: string): string | null {
+  const words = key(text).split(" ").filter((w) => w.length >= 4);
+  for (const tok of key(category).split(" ")) {
+    if (tok.length < 4) continue;
+    for (const wd of words) if (tok === wd || tok.includes(wd) || wd.includes(tok)) return wd;
+  }
+  return null;
+}
+
 export function textNamesCategory(text: string, category: string): boolean {
   const words = key(text).split(" ").filter((w) => w.length >= 4);
   for (const tok of key(category).split(" ")) {
