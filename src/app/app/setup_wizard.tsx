@@ -208,6 +208,17 @@ const CELLS_STAGES: [number, string][] = [
   [140, "Still writing - a full battery can take two to three minutes…"],
 ];
 
+/** The worries pool draw narrated: one model call, so the captions walk
+ * its internal order - enumerate the worry-space, tag the stances, write
+ * the buyer wording, draft the recommended plan. */
+const WORRIES_STAGES: [number, string][] = [
+  [0, "Reading what buyers complain about…"],
+  [12, "Sorting the worries by who voices them - prospects, customers, the renewal moment…"],
+  [35, "Writing each worry in buyers' own words…"],
+  [60, "Drafting the recommended measurement plan…"],
+  [95, "Still listening - a talked-about brand carries many worries…"],
+];
+
 function StagedProgress({ stages }: { stages: readonly [number, string][] }) {
   const [secs, setSecs] = useState(0);
   useEffect(() => {
@@ -1697,10 +1708,7 @@ export function SetupWizard({ mode, brand, draft, engineOptions, onClose, onCrea
 
           {step === "worries" && grid && (
             !grid.worryPool ? (
-              <div className="grid gap-4 py-16 text-center justify-items-center">
-                <span aria-hidden="true" className="h-7 w-7 rounded-full border-[3px] border-line border-t-primary animate-spin" />
-                <p className="m-0 text-sm font-medium">Reading the worries buyers raise…</p>
-              </div>
+              <StagedProgress stages={WORRIES_STAGES} />
             ) : (
               <WorriesGate
                 state={grid}
