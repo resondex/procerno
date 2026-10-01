@@ -88,7 +88,12 @@ const CACHE_TTL_MS = 183 * 24 * 3600 * 1000;
 // 4 trips a year) that every paraphrase then had to keep - comparison
 // seeds now carry no situation, no identity, no quantities, no spec/size
 // qualifiers; the quantity slice is mechanical (comparison_seed_quantity).
-const STYLE_VERSION = "s11";
+// s12 = persona-in-voice-only for INVARIANT cells (2026-10-01, Tyler): an
+// invariant cell's paraphrase persona shapes register/length/form and
+// never appears in the words (a persona written into neutral comparison
+// text re-pins the cell to one buyer's story); situational cells keep the
+// leak deliberately - there the circumstance belongs in the text.
+const STYLE_VERSION = "s12";
 
 /** Versions the DETERMINISTIC seed-check set (everything seedRule runs:
  * checkPromptAgainstSpec + blind_missing_category + scenario_label_leak).
@@ -3401,6 +3406,14 @@ export async function generatePhrasings(input: {
           // brand" made the writer name it - every candidate then died
           // as a signature leak (six cells straight to 1/10 under p8).
           brandNote(c) +
+          // INVARIANT cells only (s12): the persona is a voice lever, not
+          // content. In a SITUATIONAL cell the asker's circumstance
+          // belongs in the words - that leak is wanted. An invariant cell
+          // (the comparison head-to-heads above all) has no owner, and a
+          // persona written into the text re-pins it to one buyer's story.
+          (c.situation == null
+            ? "\n   [invariant cell: the asker persona shapes VOICE only - register, length, question form - and never appears in the words: no role, identity, occupation or life situation in the text]"
+            : "") +
           (opts?.avoidWords?.[i]?.length
             ? `\n   [overused: ${opts.avoidWords[i].join(", ")}]`
             : "")
