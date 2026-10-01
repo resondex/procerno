@@ -83,7 +83,12 @@ const CACHE_TTL_MS = 183 * 24 * 3600 * 1000;
 // wrap imbalance are gone) and the writer holds their circumstance light.
 // Writer-prompt text changed, so everything generated under the pinned-
 // scenario era must not serve.
-const STYLE_VERSION = "s10";
+// s11 = circumstance-NEUTRAL comparisons (2026-10-01, Tyler): s10's "light
+// general circumstance" still invited invented flavor (a consulting LLC,
+// 4 trips a year) that every paraphrase then had to keep - comparison
+// seeds now carry no situation, no identity, no quantities, no spec/size
+// qualifiers; the quantity slice is mechanical (comparison_seed_quantity).
+const STYLE_VERSION = "s11";
 
 /** Versions the DETERMINISTIC seed-check set (everything seedRule runs:
  * checkPromptAgainstSpec + blind_missing_category + scenario_label_leak).
@@ -1913,11 +1918,17 @@ const CELL_WRITER_SYSTEM =
           "- angle=<rival name>: for comparison-type stages, name the client " +
           "brand AND that rival; for alternatives-type stages, ask for " +
           "alternatives to that rival (client brand NOT named).\n" +
-          "- A comparison cell (angle=<rival> or angle=class) belongs to no " +
-          "single buying scenario: give it a light, general circumstance any " +
-          "typical buyer in this audience could have ('thinking about my " +
-          "next card'), never a niche situation that would own the " +
-          "comparison - the head-to-head itself is the measurement.\n" +
+          "- A comparison cell (angle=<rival> or angle=class) is " +
+          "CIRCUMSTANCE-NEUTRAL: ask the head-to-head about the category " +
+          "plainly - which one, which would you pick and why, where does " +
+          "each win - and give the asker NO situation at all. No role or " +
+          "identity (a student, a founder, a parent), no usage amounts or " +
+          "frequencies, no occasion or project ('setting up', 'replacing', " +
+          "'for my trip'), no spec or size qualifier, no criteria list that " +
+          "implies a situation: any such detail becomes a fact every " +
+          "paraphrase must keep, and the measurement is the head-to-head " +
+          "itself, never one buyer's story. The shape is '<brand> or " +
+          "<rival> for <category> - which would you go with, and why?'\n" +
           "- angle=defensive: ask for alternatives to the client brand by name.\n" +
           "- angle=class(<class>): a head-to-head of the client brand against " +
           "a CLASS of products, not a company - name the client brand and " +
@@ -2815,6 +2826,20 @@ export async function generateGrid(input: {
     const leak = scenarioLabelLeak(c.text, [c.situation, ...input.scenarios.map((s) => s.label)]);
     if (leak)
       out.push({ check: "scenario_label_leak" as const, detail: `copies the scenario label "${leak}"` });
+    // COMPARISON SEEDS ARE CIRCUMSTANCE-NEUTRAL (s11): a quantity in a
+    // head-to-head seed is a writer-invented segment - a spend level, a
+    // trip count, a size - that every paraphrase must then keep, so the
+    // whole set measures one arbitrary slice. This is the mechanically
+    // detectable piece of the neutrality rule; roles and occasions stay
+    // with the writer prompt and the review pass. Spec vocabulary (4K,
+    // USB-C, 0%) never reaches spec.quantities.
+    if ((spec.brandMode === "comparison" || spec.brandMode === "comparison_class") && spec.quantities.length > 0)
+      out.push({
+        check: "comparison_seed_quantity" as const,
+        detail:
+          `comparison seeds are circumstance-neutral - drop the number${spec.quantities.length > 1 ? "s" : ""} ` +
+          `(${spec.quantities.join(", ")}): a spend level, frequency or size qualifier conditions the head-to-head on one writer-chosen segment`,
+      });
     return out;
   };
 

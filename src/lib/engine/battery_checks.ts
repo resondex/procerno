@@ -321,6 +321,9 @@ export interface BatteryFinding {
     | "defensive_alt_missing_target" | "offensive_alt_names_target" | "offensive_alt_missing_rival"
     | "alternatives_names_extra_rival" | "pricing_names_rival" | "meta_text"
     | "scenario_label_leak" | "blind_missing_category" | "comparison_class_missing_class"
+    // s11: a quantity in a comparison SEED (circumstance-neutrality's
+    // mechanical slice - seed-only, raised by the engine's seedRule).
+    | "comparison_seed_quantity"
     | "seed_number_changed" | "duplicate_paraphrase";
   /** The offending prompt text (or the seed, for cell-level findings). */
   text: string;
