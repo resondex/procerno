@@ -194,6 +194,18 @@ export const PLAN_SCENARIO_CAPS: Record<Plan, number> = {
   enterprise: 4,
 };
 
+/** Worry picks included per tier (the worries module's gate): each pick
+ * is one worry at one stance - a worry measured at two stances costs
+ * two. Tyler 2026-10-01: "3 to 5 depending on tier". PROVISIONAL numbers,
+ * like the scenario caps. */
+export const PLAN_WORRY_ALLOWANCE: Record<Plan, number> = {
+  free: 3,
+  starter: 3,
+  growth: 4,
+  pro: 5,
+  enterprise: 5,
+};
+
 /** Engine panel each tier may run, chosen so per-run vendor cost scales
  * with the tier (measured on the jira battery, 520 prompts): the cheap
  * instinct trio ~ $6/run, Growth's mid panel ~ $39, Pro's 8 ~ $56, the

@@ -533,4 +533,54 @@ const classSeed = "worth paying for American Express over just getting a Visa ca
     inst.planGridCells(stages.filter((s) => s.key !== "comparison"), ["A", "B"], rivals, angles).every((r: any) => !r.classPhrase));
 }
 console.log(`7. class-angle cells: ${fails === fails6 ? "ALL PASS" : `${fails - fails6} FAILURE(S)`}`);
+
+// --- 8. Worries module: confirmed picks replace the concern zip for doubt stages ---
+console.log("8. worries module");
+const fails7 = fails;
+{
+  const inst = await import(`${REPO}/src/lib/engine/instrument`);
+  const stages = [
+    { key: "discovery", columns: ["A", "B"], situational: true, rivals: "none" },
+    { key: "objections", columns: ["A", "B"], situational: true, rivals: "none" },
+    { key: "churn_triggers", columns: [], situational: false, rivals: "none" },
+    { key: "renewal", columns: [], situational: false, rivals: "none" },
+    { key: "comparison", columns: ["A", "B"], situational: true, rivals: "each" },
+  ] as any[];
+  const rivals = ["R1", "R2"];
+  const strip = (rows: any[]) => JSON.stringify(rows.map((r) => ({ ...r, stage: r.stage.key })));
+  const legacy = inst.planGridCells(stages, ["A", "B"], rivals);
+  const omitted = inst.planGridCells(stages, ["A", "B"], rivals, [], undefined);
+  expect("worries omitted = legacy plan byte-identical (untouched path)", strip(legacy) === strip(omitted));
+  expect("legacy shape holds: objections one per scenario, churn/renewal single invariant",
+    legacy.filter((r: any) => r.stage.key === "objections").map((r: any) => r.situation).join(",") === "A,B" &&
+    legacy.filter((r: any) => r.stage.key === "churn_triggers").length === 1 &&
+    legacy.filter((r: any) => r.stage.key === "renewal").length === 1);
+  const picks = [
+    { concern: "high fees", stage: "objections" },
+    { concern: "slow support", stage: "objections" },
+    { concern: "points lock-in", stage: "churn_triggers" },
+  ];
+  const planned = inst.planGridCells(stages, ["A", "B"], rivals, [], picks);
+  const doubt = (k: string) => planned.filter((r: any) => r.stage.key === k);
+  expect("one invariant row per worry-stance, concern riding the row",
+    doubt("objections").length === 2 &&
+    doubt("objections").every((r: any) => r.situation === null && r.angle === "generic") &&
+    doubt("objections").map((r: any) => r.concern).join("|") === "high fees|slow support" &&
+    doubt("churn_triggers").length === 1 && doubt("churn_triggers")[0].concern === "points lock-in",
+    planned.filter((r: any) => ["objections", "churn_triggers"].includes(r.stage.key)));
+  expect("a doubt stage with no assigned worries mints ZERO rows (deliberate pick, not a gap)",
+    doubt("renewal").length === 0);
+  expect("non-doubt stages are byte-identical with and without worries",
+    strip(planned.filter((r: any) => !["objections", "churn_triggers", "renewal"].includes(r.stage.key))) ===
+    strip(legacy.filter((r: any) => !["objections", "churn_triggers", "renewal"].includes(r.stage.key))));
+  const keyArgs = {
+    brand: "Acme", category: "widgets", competitors: [], audience: null,
+    base: {} as any, scenarios: [{ label: "A", description: "a", journey: null }, { label: "B", description: "b", journey: null }],
+  };
+  const k = (concern: string) => inst.gridCellCacheKey(keyArgs as any, {
+    stage: "objections", situation: null, angle: "generic", scope: null, concern,
+  });
+  expect("worry rows key apart per concern", k("high fees") !== k("slow support"));
+}
+console.log(`8. worries module: ${fails === fails7 ? "ALL PASS" : `${fails - fails7} FAILURE(S)`}`);
 if (fails > 0) process.exitCode = 1;

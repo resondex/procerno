@@ -61,6 +61,7 @@ const putSchema = z.object({
           angle: z.string().trim().min(1),
           mode: z.string().trim().nullable().optional(),
           qtype: z.string().trim().max(40).nullable().optional(),
+          concern: z.string().trim().max(80).nullable().optional(),
           text: z.string().trim().min(1),
           phrasings: z
             .array(
@@ -134,6 +135,7 @@ export async function PUT(
       stage: c.stage, layer: c.layer, situation: c.situation, angle: c.angle,
       mode: c.mode ?? null,
         qtype: c.qtype ?? questionTypeOf({ stage: c.stage, angle: c.angle, text: c.text }, project.brand, category),
+        concern: c.concern ?? null,
         text: humanize(c.text),
     }))
   );

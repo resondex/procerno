@@ -173,6 +173,9 @@ function createDb(): Database.Database {
   if (intentCols.length > 0 && !intentCols.some((c) => c.name === "qtype")) {
     db.exec("ALTER TABLE intents ADD COLUMN qtype TEXT");
   }
+  if (intentCols.length > 0 && !intentCols.some((c) => c.name === "concern")) {
+    db.exec("ALTER TABLE intents ADD COLUMN concern TEXT");
+  }
   const promptColsForAsker = db.prepare("PRAGMA table_info(prompts)").all() as { name: string }[];
   if (!promptColsForAsker.some((c) => c.name === "asker")) {
     db.exec("ALTER TABLE prompts ADD COLUMN asker TEXT");
@@ -259,6 +262,7 @@ function createDb(): Database.Database {
     situation TEXT,
     angle TEXT NOT NULL,
     mode TEXT,
+    concern TEXT,
     text TEXT NOT NULL
   )`);
   db.exec("CREATE INDEX IF NOT EXISTS idx_intents_project ON intents (project_id)");
@@ -1134,11 +1138,11 @@ export const sqliteStore: Store = {
   async insertIntents(projectId, intents) {
     const db = getDb();
     const stmt = db.prepare(
-      "INSERT INTO intents (id, project_id, stage, layer, situation, angle, mode, qtype, text) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)"
+      "INSERT INTO intents (id, project_id, stage, layer, situation, angle, mode, qtype, concern, text) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
     );
     const insertAll = db.transaction(() => {
       for (const i of intents) {
-        stmt.run(crypto.randomUUID(), projectId, i.stage, i.layer, i.situation, i.angle, i.mode ?? null, i.qtype ?? null, i.text);
+        stmt.run(crypto.randomUUID(), projectId, i.stage, i.layer, i.situation, i.angle, i.mode ?? null, i.qtype ?? null, i.concern ?? null, i.text);
       }
     });
     insertAll();

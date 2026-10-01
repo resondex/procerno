@@ -283,7 +283,23 @@ export interface GridState {
   /** Cell count as composed - the custom-question allowance measures NET
    * additions against this, so deleting any question frees a slot. */
   baselineCellCount?: number;
+  /** The worries gate's candidate pool (the menu); null until drawn. */
+  worryPool?: WorryUi[] | null;
+  /** Which stances of the pool the mask offered (chips shown). */
+  worryOffered?: string[];
+  /** Confirmed worry picks - one invariant doubt cell each; the concern
+   * rides the cell and the dashboard attributes by it. Absent = legacy
+   * concern-zip battery (old drafts). */
+  worries?: { concern: string; stage: string }[];
   cells: GridCellUi[];
+}
+
+/** A worries-gate candidate (engine WorryCandidate, UI copy). */
+export interface WorryUi {
+  worry: string;
+  detail: string;
+  stances: string[];
+  recommended: string;
 }
 
 /** House punctuation for prompt text - mirror of the engine's humanize().
@@ -395,6 +411,10 @@ export function stageColumns(st: GridStage, activeLabels: string[]): string[] {
 /** Cells the kept stages and active scenarios will produce - the same mask
  * rules the engine's planner applies, so the count is exact before anything
  * is written. */
+/** The doubt stages the worries module owns (mirror of the engine's
+ * WORRY_STANCE_STAGES - a confirmed pick list replaces their counts). */
+export const WORRY_STAGES = new Set(["objections", "churn_triggers", "renewal"]);
+
 export function gridCellCount(g: GridState | null, rivalCount: number): number {
   if (!g) return 0;
   const r = Math.min(rivalCount, 4);
@@ -403,6 +423,11 @@ export function gridCellCount(g: GridState | null, rivalCount: number): number {
   return g.stages
     .filter((s) => kept.has(s.key))
     .reduce((n, s) => {
+      // Worries module: a doubt stage holds one cell per worry the user
+      // assigned to it - zero is a deliberate pick, not a gap.
+      if (g.worries && WORRY_STAGES.has(s.key)) {
+        return n + g.worries.filter((w) => w.stage === s.key).length;
+      }
       const cols = stageColumns(s, active);
       const effective = cols.length > 0 ? cols : active;
       if (s.rivals === "each") return n + r;
@@ -868,6 +893,48 @@ export function useGridSetup(a: GridSetupArgs) {
     }
   }
 
+  /** The worries gate's pool: drawn once per battery (server-cached and
+   * coalesced), stored on the grid state so the draft carries it. */
+  async function fetchWorries(from?: GridState | null): Promise<GridState | null> {
+    const st = from ?? a.state;
+    if (!st) return null;
+    if (st.worryPool && st.worryPool.length > 0) return st;
+    a.setBusy("Reading the worries buyers raise…");
+    a.setError(null);
+    const data = await post<{ worries: WorryUi[]; offered: string[] }>(
+      "/api/setup/grid/worries",
+      {
+        brand: a.brand, category: a.category,
+        audience: a.audience || undefined,
+        base: st.moderators,
+        scenarios: st.scenarios,
+      }
+    );
+    a.setBusy(null);
+    if (!data) return null;
+    const next: GridState = { ...st, worryPool: data.worries, worryOffered: data.offered };
+    a.setState(next);
+    return next;
+  }
+
+  /** Silent pool warm - fired while the user reviews the scenarios, so
+   * the worries gate opens on a cache hit. */
+  function warmWorries(fresh?: GridState | null): void {
+    const st = fresh ?? a.state;
+    if (!st || st.worryPool?.length) return;
+    if (st.scenarios.length === 0 || st.scenarios.some((s) => !s.label.trim())) return;
+    void fetch("/api/setup/grid/worries", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", ...(a.setupId ? { "x-setup-id": a.setupId } : {}) },
+      body: JSON.stringify({
+        brand: a.brand, category: a.category,
+        audience: a.audience || undefined,
+        base: st.moderators, scenarios: st.scenarios,
+        warm: true,
+      }),
+    }).catch(() => {});
+  }
+
   /** Gate 2: one seed prompt per masked cell. */
   async function writeCells(): Promise<GridState | null> {
     if (!a.state) return null;
@@ -885,6 +952,7 @@ export function useGridSetup(a: GridSetupArgs) {
         base: a.state.moderators,
         scenarios: a.state.scenarios,
         stageKeys: a.state.keptStages,
+        worries: a.state.worries,
       }
     );
     a.setBusy(null);
@@ -1330,6 +1398,7 @@ export function useGridSetup(a: GridSetupArgs) {
         rosterClasses: a.rosterClasses,
         audience: a.audience || undefined,
         base: st.moderators, scenarios: st.scenarios, stageKeys: st.keptStages,
+        worries: st.worries,
         warm: true,
       }),
     })
@@ -1401,6 +1470,7 @@ export function useGridSetup(a: GridSetupArgs) {
     compose, writeCells, writePhrasings, topUpPhrasings, suggestScenario, nearScenario,
     suggestCell, addOwnCell,
     prefetchNearPools, warmRead, warmCells, warmPhrasings,
+    fetchWorries, warmWorries,
     regenerateCell, cycleCell, restoreCategoryView,
   };
 }
@@ -2370,6 +2440,98 @@ function useFolds() {
  * React so an accordion remount can't steal focus back to a card the
  * user has since blanked. */
 const focusedOnce = new Set<string>();
+
+/** Worry stance chips: where a picked worry is measured. */
+const STANCE_LABEL: Record<string, string> = {
+  objections: "prospect deciding",
+  churn_triggers: "customer leaving",
+  renewal: "renewal moment",
+};
+
+/** The worries gate: the brand's doubt-space as a menu. Each card is one
+ * worry; its stance chips decide WHERE it is measured - one doubt cell
+ * per active chip, each costing one pick of the plan's allowance. The
+ * recommended stance arrives pre-set (the top worries pre-picked); zero
+ * chips on a worry simply leaves it unmeasured. */
+export function WorriesGate({
+  state, setState, cap, busy,
+}: {
+  state: GridState;
+  setState: (s: GridState) => void;
+  cap: number;
+  busy: boolean;
+}) {
+  const pool = state.worryPool ?? [];
+  const picks = state.worries ?? [];
+  const has = (worry: string, stage: string) =>
+    picks.some((p) => p.concern === worry && p.stage === stage);
+  const atCap = picks.length >= cap;
+  const toggle = (worry: string, stage: string) => {
+    if (busy) return;
+    if (has(worry, stage)) {
+      setState({ ...state, worries: picks.filter((p) => !(p.concern === worry && p.stage === stage)) });
+    } else if (!atCap) {
+      setState({ ...state, worries: [...picks, { concern: worry, stage }] });
+    }
+  };
+  return (
+    <div className="grid gap-3 max-w-3xl">
+      <p className="m-0 text-[12px] text-ink-2">
+        The worries buyers actually voice about your brand - pick the ones worth measuring
+        (up to {cap}). Each chip is one question battery: a prospect deciding, a customer
+        thinking of leaving, or the renewal moment. A worry can be measured at more than
+        one moment - each costs a pick.
+      </p>
+      {pool.map((w) => {
+        const pickedAny = w.stances.some((s) => has(w.worry, s));
+        return (
+          <div
+            key={w.worry}
+            className={`grid gap-1.5 rounded-lg border bg-surface px-4 py-3 ${
+              pickedAny ? "border-primary" : "border-line"
+            }`}
+          >
+            <button
+              type="button"
+              onClick={() => toggle(w.worry, w.recommended)}
+              className="text-left"
+            >
+              <span className="text-[14px] font-semibold">{w.worry}</span>
+              <span className="block text-[13px] text-ink-2 mt-0.5">{w.detail}</span>
+            </button>
+            <div className="flex flex-wrap gap-1.5 pt-0.5">
+              {w.stances.map((s) => {
+                const active = has(w.worry, s);
+                const blocked = !active && (busy || atCap);
+                return (
+                  <button
+                    key={s}
+                    type="button"
+                    disabled={blocked}
+                    onClick={() => toggle(w.worry, s)}
+                    title={
+                      s === w.recommended && !active
+                        ? "Recommended moment for this worry"
+                        : undefined
+                    }
+                    className={`rounded-full px-2.5 py-0.5 text-[11px] font-medium border ${
+                      active
+                        ? "border-primary bg-primary-soft text-primary"
+                        : `border-line text-ink-2 ${blocked ? "opacity-40" : "hover:border-primary/50"}`
+                    }`}
+                  >
+                    {STANCE_LABEL[s] ?? s}
+                    {s === w.recommended && !active ? " ·" : ""}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
 
 export function CellsGate({
   state, setState, brandNames, onRegenerate, onNearCell, onSuggestCell, onAddOwn, onCycle, onWarmReview,

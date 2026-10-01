@@ -6,6 +6,7 @@ import { EnginePicker, defaultEnginesFor, type EngineOption } from "@/app/compon
 import {
   CellReviewModal,
   CellsGate,
+  WorriesGate,
   PHRASING_COUNT,
   cellSubMeta,
   CoverageGate,
@@ -36,12 +37,13 @@ import { deriveCheckSpec, rosterRoleOf, sameSeatOf, type RosterClasses, type Ros
  */
 
 export type SetupMode = "classic" | "grid";
-type StepKey = "market" | "scenarios" | "stages" | "prompts" | "engines";
+type StepKey = "market" | "scenarios" | "worries" | "stages" | "prompts" | "engines";
 
 const STEPS: Record<SetupMode, { key: StepKey; label: string }[]> = {
   grid: [
     { key: "market", label: "Your market" },
     { key: "scenarios", label: "Buying scenarios" },
+    { key: "worries", label: "Buyer worries" },
     { key: "stages", label: "Coverage map" },
     { key: "prompts", label: "Prompts" },
     { key: "engines", label: "Engines & first run" },
@@ -58,6 +60,7 @@ const STEPS: Record<SetupMode, { key: StepKey; label: string }[]> = {
 export const STEP_LABEL: Record<StepKey | "paraphrases", string> = {
   market: "at your market",
   scenarios: "at buying scenarios",
+  worries: "at buyer worries",
   stages: "at the coverage map",
   prompts: "at prompts",
   paraphrases: "prompts written",
@@ -364,6 +367,9 @@ export function SetupWizard({ mode, brand, draft, engineOptions, onClose, onCrea
    * to the most generous tier so the moment before the plan loads can
    * never falsely block; it only tightens downward. */
   const [customAllowance, setCustomAllowance] = useState(12);
+  /** Worry picks the plan includes (PLAN_WORRY_ALLOWANCE); defaults to the
+   * most generous tier, tightens when the plan loads. */
+  const [worryCap, setWorryCap] = useState(5);
 
   const gridApi = useGridSetup({
     setupId: draftId,
@@ -371,6 +377,21 @@ export function SetupWizard({ mode, brand, draft, engineOptions, onClose, onCrea
     maxScenarios: scenarioCap,
     state: grid, setState: setGrid, setBusy, setError,
   });
+
+  /** Landing on the worries gate: make sure the pool exists (usually a
+   * cache hit - it warms during the scenarios review), then pre-pick the
+   * top worries at their recommended stance the FIRST time only - the
+   * user's picks are never overwritten. */
+  async function landOnWorries(g: GridState | null = grid) {
+    const st = await gridApi.fetchWorries(g);
+    if (!st) return;
+    if (st.worries === undefined && (st.worryPool?.length ?? 0) > 0) {
+      const picks = (st.worryPool ?? [])
+        .slice(0, worryCap)
+        .map((w) => ({ concern: w.worry, stage: w.recommended }));
+      setGrid({ ...st, worries: picks });
+    }
+  }
 
   const estimated = useRef(false);
 
@@ -382,14 +403,18 @@ export function SetupWizard({ mode, brand, draft, engineOptions, onClose, onCrea
         if (alive && typeof d?.scenarioCap === "number") setScenarioCap(d.scenarioCap);
         if (alive && typeof d?.plan === "string") setPlan(d.plan);
         if (alive && typeof d?.customCellAllowance === "number") setCustomAllowance(d.customCellAllowance);
+        if (alive && typeof d?.worryCap === "number") setWorryCap(d.worryCap);
       })
       .catch(() => {});
     // A draft resumed directly onto the scenarios gate never passes goTo;
     // warm its near-variant pools here.
-    if (step === "scenarios") void gridApi.prefetchNearPools();
+    if (step === "scenarios") { void gridApi.prefetchNearPools(); gridApi.warmWorries(); }
     // Resumed on the market step with a known category: warm the read.
     if (step === "market" && category.trim()) gridApi.warmRead();
     // Resumed mid-flow: warm whatever the NEXT gate will ask for.
+    // (Deferred a tick: landOnWorries sets busy state, which an effect
+    // body must not do synchronously.)
+    if (step === "worries") void Promise.resolve().then(() => landOnWorries());
     if (step === "stages") gridApi.warmCells();
     if (step === "prompts" && mode === "grid") gridApi.warmPhrasings();
     return () => { alive = false; };
@@ -576,13 +601,15 @@ export function SetupWizard({ mode, brand, draft, engineOptions, onClose, onCrea
     setError(null);
     void persist(k, g, p, mp, rp);
     // Landing on a gate warms the NEXT gate's work in the background -
-    // pools for scenario draws, cells while the map is reviewed,
-    // paraphrases while the seeds are reviewed. Silent; failures cost
-    // nothing.
-    if (k === "scenarios") void gridApi.prefetchNearPools(g);
+    // pools for scenario draws, the worry pool while the scenarios are
+    // reviewed, cells while the map is reviewed, paraphrases while the
+    // seeds are reviewed. Silent; failures cost nothing.
+    if (k === "scenarios") { void gridApi.prefetchNearPools(g); gridApi.warmWorries(g); }
+    if (k === "worries") void landOnWorries(g);
     if (k === "stages") gridApi.warmCells(g);
     if (k === "prompts" && mode === "grid") gridApi.warmPhrasings(g);
   }
+
 
   async function requestClose() {
     const dirty = step !== "market" || prompts !== null || grid !== null;
@@ -722,7 +749,7 @@ export function SetupWizard({ mode, brand, draft, engineOptions, onClose, onCrea
       setBusy("Recomposing…");
       const composed = await recomposing;
       setBusy(null);
-      goTo("stages", composed ?? g);
+      goTo("worries", composed ?? g);
       return;
     }
     setBusy("Checking your scenarios…");
@@ -739,7 +766,7 @@ export function SetupWizard({ mode, brand, draft, engineOptions, onClose, onCrea
     if (composed) g = composed;
     setBusy(null);
     if (!res || !res.ok) {
-      goTo("stages", g);
+      goTo("worries", g);
       return;
     }
     const data = await res.json().catch(() => ({}));
@@ -765,7 +792,7 @@ export function SetupWizard({ mode, brand, draft, engineOptions, onClose, onCrea
       next = { ...g, reviewedScenarios: [...(g.reviewedScenarios ?? []), ...passed] };
       setGrid(next);
     }
-    if (flagged.length === 0) goTo("stages", next);
+    if (flagged.length === 0) goTo("worries", next);
     else setReview(flagged);
   }
 
@@ -812,9 +839,9 @@ export function SetupWizard({ mode, brand, draft, engineOptions, onClose, onCrea
         rows,
         cells: cellsAcc.filter((c) => c.custom),
       });
-      if (next) goTo("stages", next);
+      if (next) goTo("worries", next);
     } else {
-      goTo("stages");
+      goTo("worries");
     }
   }
 
@@ -1239,7 +1266,7 @@ export function SetupWizard({ mode, brand, draft, engineOptions, onClose, onCrea
               .filter((c) => c.text.trim())
               .map((c) => ({
                 stage: c.stage, layer: c.layer, situation: c.situation, angle: c.angle,
-                mode: c.mode ?? null, qtype: c.qtype ?? null, text: c.text,
+                mode: c.mode ?? null, qtype: c.qtype ?? null, concern: c.concern ?? null, text: c.text,
                 phrasings: c.phrasings
                   .filter((p) => p.text.trim())
                   .map((p) => ({ text: p.text, asker: p.asker || undefined })),
@@ -1280,7 +1307,7 @@ export function SetupWizard({ mode, brand, draft, engineOptions, onClose, onCrea
                   .filter((c) => c.text.trim())
                   .map((c) => ({
                     stage: c.stage, layer: c.layer, situation: c.situation, angle: c.angle,
-                    mode: c.mode ?? null, qtype: c.qtype ?? null, text: c.text,
+                    mode: c.mode ?? null, qtype: c.qtype ?? null, concern: c.concern ?? null, text: c.text,
                     phrasings: c.phrasings
                       .filter((p) => p.text.trim())
                       .map((p) => ({ text: p.text, asker: p.asker || undefined })),
@@ -1379,6 +1406,14 @@ export function SetupWizard({ mode, brand, draft, engineOptions, onClose, onCrea
       disabled:
         busy !== null || active === 0 || active > scenarioCap ||
         grid.scenarios.some((s) => !s.label.trim()),
+    };
+  } else if (step === "worries" && grid) {
+    const picked = grid.worries?.length ?? 0;
+    footerLeft = grid.worryPool ? `${picked} of ${worryCap} worries picked` : "";
+    footerAction = {
+      label: busy ?? "These are my worries",
+      onClick: () => goTo("stages"),
+      disabled: busy !== null || !grid.worryPool || picked === 0 || picked > worryCap,
     };
   } else if (step === "stages" && grid) {
     const cells = gridCellCount(grid, rivalCount);
@@ -1640,6 +1675,22 @@ export function SetupWizard({ mode, brand, draft, engineOptions, onClose, onCrea
               onBack={() => setReview(null)}
               onContinue={() => void resolveReview()}
             />
+          )}
+
+          {step === "worries" && grid && (
+            !grid.worryPool ? (
+              <div className="grid gap-4 py-16 text-center justify-items-center">
+                <span aria-hidden="true" className="h-7 w-7 rounded-full border-[3px] border-line border-t-primary animate-spin" />
+                <p className="m-0 text-sm font-medium">Reading the worries buyers raise…</p>
+              </div>
+            ) : (
+              <WorriesGate
+                state={grid}
+                setState={setGrid}
+                cap={worryCap}
+                busy={busy !== null}
+              />
+            )
           )}
 
           {step === "stages" && grid && (

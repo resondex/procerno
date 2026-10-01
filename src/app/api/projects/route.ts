@@ -69,6 +69,7 @@ const createSchema = z.object({
             angle: z.string().trim().min(1),
             mode: z.string().trim().nullable().optional(),
             qtype: z.string().trim().max(40).nullable().optional(),
+            concern: z.string().trim().max(80).nullable().optional(),
             text: z.string().trim().min(1),
             /** The confirmed paraphrase set for this cell; each becomes its
              * own prompt under the same intent, carrying its buyer voice. */
@@ -213,6 +214,7 @@ export async function POST(req: Request) {
         // that predate the humanize coverage.
         mode: c.mode ?? null,
         qtype: c.qtype ?? questionTypeOf({ stage: c.stage, angle: c.angle, text: c.text }, project.brand, category),
+        concern: c.concern ?? null,
         text: humanize(c.text),
       }))
     );

@@ -73,6 +73,7 @@ export async function buildEditSetupDraft(project: Project) {
     situation: i.situation,
     angle: i.angle,
     mode: i.mode,
+    concern: i.concern ?? null,
     text: i.text,
     phrasings: (byIntent.get(i.id) ?? []).filter((p) => norm(p.text) !== norm(i.text)),
   }));

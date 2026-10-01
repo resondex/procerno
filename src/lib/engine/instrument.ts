@@ -2120,6 +2120,152 @@ function planAngle(p: { angle: string; classPhrase?: string | null }): string {
   return p.classPhrase ? `class(${p.classPhrase})` : primaryBrandName(p.angle);
 }
 
+/* ---------------------------- worries module ----------------------------
+ * The doubt-space gets its own gate (Tyler 2026-10-01): one candidate pool
+ * of the brand's worries, stance-tagged; the user picks 3-5 (tier) and the
+ * confirmed picks replace the concern-plan zip - one INVARIANT cell per
+ * worry-stance, stance mapped onto the existing stage keys so must-name
+ * rules, design intents, premise derivation and the dashboard split all
+ * keep working. Reporting attributes by the concern riding each cell. */
+
+/** The doubt stages a picked worry may be assigned to (its lifecycle
+ * STANCE): pre-purchase -> objections, an existing customer's
+ * leave-trigger -> churn_triggers, the pay-again moment -> renewal.
+ * repertoire stays on the legacy path (never recommended). */
+export const WORRY_STANCE_STAGES = ["objections", "churn_triggers", "renewal"] as const;
+export type WorryStance = (typeof WORRY_STANCE_STAGES)[number];
+
+export interface WorryCandidate {
+  /** The worry, 2-6 plain words - becomes the cell's concern and the
+   * dashboard's attribution label. */
+  worry: string;
+  /** One plain sentence of what buyers actually say - the card's blurb. */
+  detail: string;
+  /** The stances this worry is naturally voiced at (offered subset). */
+  stances: WorryStance[];
+  /** The planner's pick among stances - the gate's pre-set chip. */
+  recommended: WorryStance;
+}
+
+/** A confirmed pick: one cell, at one stance. */
+export interface WorryPick {
+  concern: string;
+  stage: WorryStance;
+}
+
+/** Draw the candidate worry pool for the gate. One cached, coalesced call
+ * per (brand, category, audience, scenario set, offered stances); the
+ * confirmed PICKS are decision data stored on the draft/project - this
+ * pool is only the menu. */
+export async function generateWorries(input: {
+  brand: string;
+  category: string;
+  audience: string | null;
+  scenarios: ScenarioSpec[];
+  /** Doubt stages the participation mask recommends - the only stances
+   * offered (no renewal chips on a one-shot-rhythm category). */
+  offered: string[];
+  noWait?: boolean;
+  meta?: CacheMeta;
+}): Promise<WorryCandidate[] | null> {
+  tagCosts({ purpose: "setup:worries" });
+  const offered = WORRY_STANCE_STAGES.filter((s) => input.offered.includes(s));
+  if (offered.length === 0) return [];
+  const STANCE_DEF: Record<WorryStance, string> = {
+    objections: "objections - a prospect deciding whether to choose the brand voices this worry before buying",
+    churn_triggers: "churn_triggers - an existing customer voices this worry as a reason to leave",
+    renewal: "renewal - the keep-or-cancel moment when payment comes due",
+  };
+  const key = cacheKey("worries1", [
+    CONCERNS_MODEL, input.brand, input.category, input.audience,
+    input.scenarios.map((s) => s.label).join(","), offered.join(","),
+  ]);
+  return coalesced<WorryCandidate[]>(key, { noWait: input.noWait, meta: stampOf(input) }, async () => {
+    const res = await openaiClient().chat.completions.create({
+      model: CONCERNS_MODEL,
+      messages: [
+        {
+          role: "system",
+          content:
+            "You know what real buyers complain and worry about. List 8 to 12 " +
+            "DISTINCT worries buyers voice about the given brand in its " +
+            "category - each a different coarse class (price/value, quality, " +
+            "performance, complexity, policy/trust, availability, service, " +
+            "lock-in, ...), most widely-voiced first. At most TWO " +
+            "price/cost/value-class worries in the whole list. Real worries " +
+            "people actually raise, never invented ones.\n" +
+            "For each worry give: `worry` (2-6 plain words), `detail` (ONE " +
+            "plain sentence of what buyers actually say - their words, not " +
+            "marketing language), `stances` (every stage where buyers " +
+            "naturally voice it, from the allowed list only) and " +
+            "`recommended` (the single most natural stance, one of its own " +
+            "stances).\n" +
+            `Allowed stances:\n${offered.map((s) => `- ${STANCE_DEF[s]}`).join("\n")}\n` +
+            'Reply with ONLY JSON: {"worries": [{"worry": "...", "detail": "...", "stances": ["..."], "recommended": "..."}]}.',
+        },
+        {
+          role: "user",
+          content:
+            `Brand: ${input.brand}\nCategory: ${input.category}\n` +
+            `Audience: ${input.audience ?? "general buyers"}\n` +
+            (input.scenarios.length > 0
+              ? `Buying scenarios being measured (context for breadth, not labels to copy): ${input.scenarios
+                  .map((s) => s.label)
+                  .join("; ")}\n`
+              : ""),
+        },
+      ],
+      response_format: {
+        type: "json_schema",
+        json_schema: {
+          name: "worries", strict: true,
+          schema: {
+            type: "object", additionalProperties: false,
+            properties: {
+              worries: {
+                type: "array",
+                items: {
+                  type: "object", additionalProperties: false,
+                  properties: {
+                    worry: { type: "string" },
+                    detail: { type: "string" },
+                    stances: { type: "array", items: { type: "string" } },
+                    recommended: { type: "string" },
+                  },
+                  required: ["worry", "detail", "stances", "recommended"],
+                },
+              },
+            },
+            required: ["worries"],
+          },
+        },
+      },
+    });
+    const raw = (JSON.parse(res.choices[0]?.message?.content ?? "{}") as { worries?: WorryCandidate[] }).worries ?? [];
+    const seen = new Set<string>();
+    const list: WorryCandidate[] = [];
+    for (const w of raw) {
+      const worry = String(w.worry ?? "").trim();
+      const norm = worry.toLowerCase();
+      if (!worry || seen.has(norm)) continue;
+      // Stances outside the offered set are dropped; a worry with none
+      // left (or a bad recommended) is repaired to the first offered
+      // stance rather than discarded - the gate is where judgment lives.
+      const stances = WORRY_STANCE_STAGES.filter(
+        (s) => offered.includes(s) && (w.stances ?? []).includes(s)
+      );
+      const safe = stances.length > 0 ? stances : [offered[0]];
+      const recommended = safe.includes(w.recommended as WorryStance)
+        ? (w.recommended as WorryStance)
+        : safe[0];
+      seen.add(norm);
+      list.push({ worry, detail: String(w.detail ?? "").trim(), stances: safe, recommended });
+      if (list.length >= 12) break;
+    }
+    return list.length > 0 ? list : null;
+  });
+}
+
 /** The cell plan, computed in code from the participation mask - which
  * cells exist is a design rule, not a model choice. Pure (exported for
  * the fixture). `rivals` are the entity angle slots (angleRivals of the
@@ -2129,7 +2275,8 @@ function planAngle(p: { angle: string; classPhrase?: string | null }): string {
 export function planGridCells<S extends {
   key: string; columns: string[]; situational: boolean; rivals: "none" | "each" | "defensive_offensive";
 }>(
-  stages: S[], allLabels: string[], rivals: string[], classAngles: ClassAngle[] = []
+  stages: S[], allLabels: string[], rivals: string[], classAngles: ClassAngle[] = [],
+  worries?: WorryPick[]
 ): CellPlanRow<S>[] {
   const plan: CellPlanRow<S>[] = [];
   for (const st of stages) {
@@ -2139,6 +2286,20 @@ export function planGridCells<S extends {
     const columns = cols.length > 0 ? cols : allLabels;
     const scope =
       columns.length < allLabels.length ? columns.join(", ") : null;
+    // WORRIES MODULE (2026-10-01): a confirmed worry list replaces the
+    // concern zip for the doubt stages - one INVARIANT row per worry
+    // assigned to this stage (its stance), zero rows when the user
+    // assigned none (a deliberate pick, not a gap). The lifecycle
+    // context comes from the STAGE (hint, must-name rule, design
+    // intent), never from a scenario. Absent worries = the legacy
+    // shapes below, untouched.
+    if (worries && (WORRY_STANCE_STAGES as readonly string[]).includes(st.key)) {
+      for (const w of worries) {
+        if (w.stage === st.key)
+          plan.push({ stage: st, situation: null, angle: "generic", scope, concern: w.concern });
+      }
+      continue;
+    }
     if (st.rivals === "each") {
       // SCENARIO-INVARIANT COMPARISONS (2026-10-01, Tyler): a head-to-head
       // belongs to NO single buying scenario. The old build cycled rivals
@@ -2205,6 +2366,11 @@ export async function generateGrid(input: {
    * phrase ("a Visa card"). Only UPSTREAM entries with a phrase earn a
    * class cell (CLASS_SLOTS max, roster order). Absent = none. */
   rosterClasses?: RosterClasses;
+  /** Confirmed worry picks (the worries module, 2026-10-01): one
+   * invariant doubt cell per pick, concern riding the cell key
+   * (self-versioning request data). Absent = the legacy concern-plan
+   * zip, byte-identical. */
+  worries?: WorryPick[];
   /** Background warm: never wait on another request's in-flight write. */
   noWait?: boolean;
   meta?: CacheMeta;
@@ -2225,7 +2391,7 @@ export async function generateGrid(input: {
   input = { ...input, competitors: sameSeatOf(input.competitors, input.rosterRoles) };
   const rivals = angleRivals(input.competitors);
   const allLabels = input.scenarios.map((s) => s.label);
-  const plan = planGridCells(input.stages, allLabels, rivals, classAngles);
+  const plan = planGridCells(input.stages, allLabels, rivals, classAngles, input.worries);
 
   // CONCERN PLANNING (2026-09-30, Tyler): which worry each doubt cell
   // measures is DESIGNED here, not writer-chosen. One call enumerates the
@@ -2235,25 +2401,26 @@ export async function generateGrid(input: {
   // (Post-hoc dedup lost to model gravity on thin-discourse brands: every
   // Doritos objection collapsed to seasoning dust through two fix rounds.)
   // Fails open: unassigned rows keep the legacy free-pick + dedup path.
+  // A CONFIRMED worry list (the worries module) IS the plan - the zip
+  // below is the legacy path for batteries without one.
   const doubtRows = plan.filter((r) => DOUBT_CHECK_STAGES.has(r.stage.key));
-  if (doubtRows.length >= 2 && process.env.PHRASINGS_CHECKS !== "0") {
+  if (!input.worries && doubtRows.length >= 2 && process.env.PHRASINGS_CHECKS !== "0") {
     try {
       // The plan is CACHED per battery: warm and write must agree on the
       // list (each drawing its own would re-key every doubt cell and pay
       // twice), and a regeneration reuses the battery's established
-      // doubt-space instead of re-rolling it.
+      // doubt-space instead of re-rolling it. coalesced(), not a bare
+      // get/set: the AmEx walk's warm and write raced the old bare read
+      // and drew two DIFFERENT plans - every doubt cell generated twice
+      // under different keys. Both callers now wait on one draw (the
+      // call is short; a dead claim orphans in ~ORPHAN_MS).
       // Upstream context changes the plan, so it rides in the key - only
       // when present, so an untyped roster keeps its established plan.
       const planKey = cacheKey("concern_plan1", [
         STYLE_VERSION, CONCERNS_MODEL, input.brand, input.category, input.audience, String(doubtRows.length),
         ...(upstream.length > 0 ? [`upstream:${upstream.map(primaryBrandName).join(",")}`] : []),
       ]);
-      const hit = await store.cacheGet(planKey, CACHE_TTL_MS);
-      if (hit) {
-        const cached = JSON.parse(hit) as string[];
-        doubtRows.forEach((r, i) => { if (cached[i]) r.concern = cached[i]; });
-        console.warn(`concern plan [${input.brand}] (cached): ${doubtRows.map((r) => `${r.stage.key}=${r.concern ?? "?"}`).join("; ")}`);
-      } else {
+      const cached = await coalesced<string[]>(planKey, { meta: stampOf(input) }, async () => {
       const res = await openaiClient().chat.completions.create({
         model: CONCERNS_MODEL,
         messages: [
@@ -2297,15 +2464,15 @@ export async function generateGrid(input: {
           },
         },
       });
-      const concerns = (JSON.parse(res.choices[0]?.message?.content ?? "{}") as { concerns?: string[] }).concerns ?? [];
-      doubtRows.forEach((r, i) => {
-        const c = (concerns[i] ?? "").trim();
-        if (c) r.concern = c;
+      const concerns = ((JSON.parse(res.choices[0]?.message?.content ?? "{}") as { concerns?: string[] }).concerns ?? [])
+        .map((s) => String(s).trim())
+        .slice(0, doubtRows.length);
+      return concerns.some((c) => c) ? concerns : null;
       });
-      if (doubtRows.some((r) => r.concern))
-        await store.cacheSet(planKey, JSON.stringify(doubtRows.map((r) => r.concern ?? "")), stampOf(input));
-      console.warn(`concern plan [${input.brand}]: ${doubtRows.map((r) => `${r.stage.key}=${r.concern ?? "?"}`).join("; ")}`);
+      if (cached) {
+        doubtRows.forEach((r, i) => { if (cached[i]) r.concern = cached[i]; });
       }
+      console.warn(`concern plan [${input.brand}]: ${doubtRows.map((r) => `${r.stage.key}=${r.concern ?? "?"}`).join("; ")}`);
     } catch (err) {
       console.error("concern planning failed open:", err);
     }

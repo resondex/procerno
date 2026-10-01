@@ -34,6 +34,17 @@ const Body = z.object({
    * ("a Visa card"). Only upstream entries with a phrase earn a class
    * cell. Absent = no class cells (byte-identical behavior). */
   rosterClasses: z.record(z.string().max(80), z.string().trim().max(60)).optional(),
+  /** Confirmed worry picks (the worries module, 2026-10-01): one invariant
+   * doubt cell per pick. Absent = the legacy concern-plan zip. */
+  worries: z
+    .array(
+      z.object({
+        concern: z.string().trim().min(1).max(80),
+        stage: z.enum(["objections", "churn_triggers", "renewal"]),
+      })
+    )
+    .max(12)
+    .optional(),
   audience: z.string().trim().max(160).optional(),
   base: z.record(z.string(), z.unknown()),
   /** The ACTIVE scenarios as confirmed at gate 1, with their journeys. */
@@ -85,6 +96,7 @@ export async function POST(req: Request) {
     stages,
     rosterRoles: parsed.data.rosterRoles,
     rosterClasses: parsed.data.rosterClasses,
+    worries: parsed.data.worries,
     noWait: parsed.data.warm,
     meta: { source: cacheSource(auth) },
   });

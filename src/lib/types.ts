@@ -140,6 +140,10 @@ export interface Intent {
   /** Measurement type (open_choice/head_to_head/within_brand/doubt/
    * awareness/settled_customer); null on cells created before 2026-09-28. */
   qtype: string | null;
+  /** The ratified worry a doubt cell measures (worries module, 2026-10-01)
+   * - the dashboard's attribution key; null on non-doubt cells and on
+   * cells created before the module. */
+  concern: string | null;
   text: string;
   seq: number;
 }
@@ -820,6 +824,8 @@ export interface Store {
       angle: string;
       mode?: string | null;
       qtype?: string | null;
+      /** The ratified worry a doubt cell measures (worries module). */
+      concern?: string | null;
       text: string;
     }[]
   ): Promise<Intent[]>;

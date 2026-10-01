@@ -88,6 +88,9 @@ function ensureSchema(): Promise<void> {
       await sql`CREATE INDEX IF NOT EXISTS idx_intents_project ON intents (project_id)`;
       await sql`ALTER TABLE intents ADD COLUMN IF NOT EXISTS mode TEXT`;
       await sql`ALTER TABLE intents ADD COLUMN IF NOT EXISTS qtype TEXT`;
+      // The worries module (2026-10-01): a doubt cell's ratified worry -
+      // the dashboard's attribution key for the doubt views.
+      await sql`ALTER TABLE intents ADD COLUMN IF NOT EXISTS concern TEXT`;
       await sql`ALTER TABLE runs ADD COLUMN IF NOT EXISTS pipeline TEXT NOT NULL DEFAULT 'live'`;
       await sql`CREATE TABLE IF NOT EXISTS run_batches (
         id TEXT PRIMARY KEY,
@@ -924,10 +927,11 @@ export const pgStore: Store = {
       angle: i.angle,
       mode: i.mode ?? null,
       qtype: i.qtype ?? null,
+      concern: i.concern ?? null,
       text: i.text,
     }));
     if (rows.length > 0) {
-      await sql`INSERT INTO intents ${sql(rows, "id", "project_id", "stage", "layer", "situation", "angle", "mode", "qtype", "text")}`;
+      await sql`INSERT INTO intents ${sql(rows, "id", "project_id", "stage", "layer", "situation", "angle", "mode", "qtype", "concern", "text")}`;
     }
     return this.listIntents(projectId);
   },
