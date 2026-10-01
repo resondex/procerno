@@ -78,7 +78,12 @@ const CACHE_TTL_MS = 183 * 24 * 3600 * 1000;
 // s9 = concern planning (2026-09-30): doubt cells carry a DESIGNED
 // concern assigned from the brand's enumerated doubt-space, and blind
 // seeds mechanically require a category noun.
-const STYLE_VERSION = "s9";
+// s10 = scenario-invariant comparisons (2026-10-01): comparison entity and
+// class cells carry no scenario (the rival-x-circumstance confound and the
+// wrap imbalance are gone) and the writer holds their circumstance light.
+// Writer-prompt text changed, so everything generated under the pinned-
+// scenario era must not serve.
+const STYLE_VERSION = "s10";
 
 /** Versions the DETERMINISTIC seed-check set (everything seedRule runs:
  * checkPromptAgainstSpec + blind_missing_category + scenario_label_leak).
@@ -1908,6 +1913,11 @@ const CELL_WRITER_SYSTEM =
           "- angle=<rival name>: for comparison-type stages, name the client " +
           "brand AND that rival; for alternatives-type stages, ask for " +
           "alternatives to that rival (client brand NOT named).\n" +
+          "- A comparison cell (angle=<rival> or angle=class) belongs to no " +
+          "single buying scenario: give it a light, general circumstance any " +
+          "typical buyer in this audience could have ('thinking about my " +
+          "next card'), never a niche situation that would own the " +
+          "comparison - the head-to-head itself is the measurement.\n" +
           "- angle=defensive: ask for alternatives to the client brand by name.\n" +
           "- angle=class(<class>): a head-to-head of the client brand against " +
           "a CLASS of products, not a company - name the client brand and " +
@@ -2114,15 +2124,26 @@ export function planGridCells<S extends {
     const scope =
       columns.length < allLabels.length ? columns.join(", ") : null;
     if (st.rivals === "each") {
-      const sits = st.situational && columns.length > 0 ? columns : [null as string | null];
-      rivals.forEach((r, i) => {
-        plan.push({ stage: st, situation: sits[i % sits.length] ?? null, angle: r, scope: null });
+      // SCENARIO-INVARIANT COMPARISONS (2026-10-01, Tyler): a head-to-head
+      // belongs to NO single buying scenario. The old build cycled rivals
+      // through the scenario columns, which confounded rival with
+      // circumstance (vs-Citi only ever asked in the premium-travel
+      // voice), gave early scenarios two comparison cells and late ones
+      // none whenever rivals wrapped, and paired rival with scenario by
+      // roster-order accident that the writer then dressed up as intent.
+      // Entity and class rows are invariant like the alternatives stage:
+      // situation null, reach carried on scope, and the per-rival read
+      // averages over circumstance instead of secretly conditioning on
+      // one. Scenario-level head-to-head splits are deliberately not a
+      // measurement (n=10 per cell); scenario reads belong to the
+      // open-choice columns.
+      rivals.forEach((r) => {
+        plan.push({ stage: st, situation: null, angle: r, scope });
       });
-      // Class angles continue the situation cycle after the entity rows.
       if (st.key === "comparison") {
-        classAngles.forEach((ca, k) => {
+        classAngles.forEach((ca) => {
           plan.push({
-            stage: st, situation: sits[(rivals.length + k) % sits.length] ?? null, angle: "class", scope: null,
+            stage: st, situation: null, angle: "class", scope,
             classPhrase: ca.classPhrase, classBrand: ca.classBrand,
           });
         });

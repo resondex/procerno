@@ -524,7 +524,11 @@ const classSeed = "worth paying for American Express over just getting a Visa ca
     withCls.filter((r: any) => r.stage.key === "comparison" && !r.classPhrase).map((r: any) => r.angle).join(",") === "Chase,Capital One,Citi,Discover");
   expect("class rows follow the entity rows within the comparison stage",
     withCls.findIndex((r: any) => r.classPhrase) === withCls.map((r: any) => r.stage.key === "comparison" && !r.classPhrase).lastIndexOf(true) + 1);
-  expect("class rows continue the situation cycle", classRows.map((r: any) => r.situation).join(",") === "A,B");
+  // s10: comparisons are scenario-invariant - every comparison row (entity
+  // and class) carries no situation; the old build cycled scenarios
+  // through them, confounding rival with circumstance.
+  expect("comparison rows are scenario-invariant (situation null on entity and class rows)",
+    withCls.filter((r: any) => r.stage.key === "comparison").every((r: any) => r.situation === null));
   expect("a battery without the comparison stage gets no class rows",
     inst.planGridCells(stages.filter((s) => s.key !== "comparison"), ["A", "B"], rivals, angles).every((r: any) => !r.classPhrase));
 }
