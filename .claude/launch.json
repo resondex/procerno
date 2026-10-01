@@ -8,6 +8,22 @@
       "port": 3200
     },
     {
+      "name": "procerno-open-collect-only",
+      "runtimeExecutable": "env",
+      "runtimeArgs": [
+        "NEXT_PUBLIC_SUPABASE_URL=",
+        "NEXT_PUBLIC_SUPABASE_ANON_KEY=",
+        "RUN_COLLECT_ONLY=1",
+        "npm",
+        "run",
+        "dev",
+        "--",
+        "--port",
+        "3220"
+      ],
+      "port": 3220
+    },
+    {
       "name": "procerno-open",
       "runtimeExecutable": "env",
       "runtimeArgs": [
