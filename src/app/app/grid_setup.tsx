@@ -76,6 +76,11 @@ export interface GridCellUi {
    * string-derived checks. The server re-derives it before use, so a
    * stale copy is never trusted. */
   spec?: CellCheckSpec | null;
+  /** Deterministic-check violations the generator could not heal: the
+   * seed shipped flagged-terminal and the gate asks the human to resolve
+   * it (edit, cycle, or redraw - any of which clears the flag). The
+   * machine never retries these on its own. */
+  seedFlags?: string[] | null;
   /** Every prompt offered for this cell, oldest first ([0] = the composed
    * seed); the user cycles through these. Absent = just the seed. */
   alts?: string[];
@@ -1152,6 +1157,8 @@ export function useGridSetup(a: GridSetupArgs) {
             ...q,
             text: data.text,
             original: data.text,
+            // A fresh draw replaces whatever wording the flag described.
+            seedFlags: undefined,
             spec: data.spec ?? q.spec,
             alts: nextAlts,
             altIdx: nextAlts.length - 1,
@@ -1281,6 +1288,8 @@ export function useGridSetup(a: GridSetupArgs) {
           ? {
               ...q, text: alts[next],
               original: cycledToUser ? q.original : alts[next],
+              // The flag described the wording being cycled away from.
+              seedFlags: undefined,
               // Keep the carried spec in step with the wording it describes.
               spec: q.spec ? deriveCheckSpec({ ...q, text: alts[next] }, a.brand, sameSeatOf(a.competitors, a.rosterRoles), a.category) : q.spec,
               alts, altIdx: next, userAlts: [...userAlts],
@@ -2527,6 +2536,14 @@ export function CellsGate({
                             >
                               {namesAny(c.text, brandNames) ? "branded" : "blind"}
                             </span>
+                            {!!c.seedFlags?.length && (
+                              <span
+                                className="rounded-full bg-warning/10 px-2 py-px text-[9.5px] font-medium text-warning"
+                                title={c.seedFlags.join("; ")}
+                              >
+                                needs your call
+                              </span>
+                            )}
                             {written && (
                               <span
                                 className={`rounded-full px-2 py-px text-[9.5px] font-medium ${
@@ -2564,7 +2581,9 @@ export function CellsGate({
                               setState({
                                 ...state,
                                 cells: state.cells.map((q, j) =>
-                                  j === c.i ? { ...q, text: e.target.value } : q
+                                  // An edit is the human attention the flag
+                                  // asked for - it clears on the first touch.
+                                  j === c.i ? { ...q, text: e.target.value, seedFlags: undefined } : q
                                 ),
                               })
                             }

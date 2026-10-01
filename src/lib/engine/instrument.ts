@@ -80,6 +80,22 @@ const CACHE_TTL_MS = 183 * 24 * 3600 * 1000;
 // seeds mechanically require a category noun.
 const STYLE_VERSION = "s9";
 
+/** Versions the DETERMINISTIC seed-check set (everything seedRule runs:
+ * checkPromptAgainstSpec + blind_missing_category + scenario_label_leak).
+ * The cache-era rule's third mechanism, for rules that must reach CACHED
+ * cells without redrawing whole batteries: each unit stores the version
+ * it was last judged under. A unit judged under an older version (or the
+ * legacy bare-array shape) is re-judged at serve exactly once - passing
+ * cells upgrade in place with no model call, failing ones regenerate once
+ * and the outcome is stored as TERMINAL under the current version,
+ * flagged (seedFlags) if the heal couldn't fix them. A current-version
+ * unit is never re-judged, so a seed the writer cannot satisfy stops
+ * cycling through regeneration on every load (the init-stall loop: round
+ * 7's unversioned serve-time re-check had no terminal state). Bump when
+ * a deterministic check changes meaning; bumping costs one free re-judge
+ * per unit, and model calls only for units the new rules reject. */
+const SEED_RULES_VERSION = "r1";
+
 /** Brand forms that double as ordinary English words: only these demand a
  * capitalized occurrence to count as naming the brand ("2-3 services max"
  * is not Max). Everything else matches case-blind - people type brand
@@ -118,15 +134,73 @@ function stampOf(input: {
  * once it goes stale - and the wait budget is capped BELOW the routes'
  * time budget, so a takeover still fits inside it. */
 
-/** How long a pending marker is trusted before its generator is presumed
- * dead. Also the wait budget: a waiter that outlives a FRESH marker does
- * not start a duplicate generation - it reports "still cooking" and the
- * caller retries, landing on the finished result. Only a STALE marker
- * (dead generator) is taken over. MUST exceed the slowest legitimate
- * generation (a hard market read runs up to ~120s) or waiters abandon
- * live generators and duplicate the spend - the AmEx failure. */
+/** The WAIT budget: how long a waiter polls a fresh marker before giving
+ * up. A waiter that outlives a live generator does not start a duplicate
+ * generation - it reports "still cooking" and the caller retries, landing
+ * on the finished result. Capped below the routes' time budget so a
+ * takeover still fits inside it. */
 const COALESCE_PENDING_TTL_MS = 180_000;
 const COALESCE_POLL_MS = 2_000;
+/** Liveness is a HEARTBEAT, not a claim (2026-09-30): generators refresh
+ * their pending markers this often while working, so a marker's age
+ * measures time since the generator last proved alive - never total
+ * generation time. */
+const HEARTBEAT_MS = 20_000;
+/** A marker ~2 missed beats old belongs to a dead generator and is taken
+ * over. The old scheme trusted a claim-time-only stamp for a TTL sized to
+ * the slowest legitimate generation (~120s market reads), so a serverless
+ * kill - which runs no cleanup at all - stalled every follow-up request
+ * for up to 3 minutes before takeover (the init cell-creation stalls).
+ * Heartbeats keep live waits unbounded-safe (the AmEx duplicate-spend
+ * failure can't recur: a live generator keeps beating) while dead claims
+ * clear in under a minute. */
+const ORPHAN_MS = 45_000;
+/** generateGrid's self-imposed wall-clock budget (2026-09-30): past this,
+ * remaining heal passes are skipped and the pass finalizes what is done -
+ * cut-short units as PROVISIONAL (no rules stamp; the next serve
+ * re-judges them with a fresh budget), unstarted units released - rather
+ * than running into the platform kill at the routes' maxDuration (300s),
+ * which runs no cleanup and strands pending markers. Sits just below the
+ * wizard's 240s client abort so the server finalizes about when the
+ * client gives up and the retry lands on cache. */
+const GEN_DEADLINE_MS = 235_000;
+
+/** Refresh the given pending markers every HEARTBEAT_MS until stopped.
+ * keys() is read fresh each beat so finished work drops out; callers
+ * remove a key from the set and then quiesce() BEFORE its final value
+ * write, so a stale beat can never land after the value and re-mask it
+ * as pending. stop() also quiesces. */
+function startHeartbeat(keys: () => string[], meta: CacheMeta | undefined): {
+  quiesce: () => Promise<void>;
+  stop: () => Promise<void>;
+} {
+  let stopped = false;
+  let inflight: Promise<unknown> = Promise.resolve();
+  let timer: ReturnType<typeof setTimeout> | null = null;
+  const beat = () => {
+    if (stopped) return;
+    const ks = keys();
+    if (ks.length > 0) {
+      inflight = Promise.all(
+        ks.map((k) =>
+          store.cacheSet(k, JSON.stringify({ __pending: Date.now() }), meta).catch(() => {})
+        )
+      );
+    }
+    timer = setTimeout(beat, HEARTBEAT_MS);
+  };
+  timer = setTimeout(beat, HEARTBEAT_MS);
+  return {
+    quiesce: async () => {
+      await inflight.catch(() => {});
+    },
+    stop: async () => {
+      stopped = true;
+      if (timer) clearTimeout(timer);
+      await inflight.catch(() => {});
+    },
+  };
+}
 
 function pendingMarkerAt(raw: string | null): number | null {
   if (!raw) return null;
@@ -154,16 +228,24 @@ async function coalesced<T>(
   };
   const claimAndRun = async (): Promise<T | null> => {
     await store.cacheSet(key, JSON.stringify({ __pending: Date.now() }), opts.meta);
+    // Waiters trust the claim only while beats keep landing: a killed
+    // invocation is taken over within ~ORPHAN_MS instead of stalling
+    // every follow-up request for the whole wait budget.
+    const hb = startHeartbeat(() => [key], opts.meta);
     let out: T | null;
     try {
       out = await generate();
     } catch (err) {
       // A THROWN generation (vendor 5xx, timeout, truncated JSON) must not
-      // leave the fresh marker standing - the next request would wait the
-      // whole pending TTL on work nobody is doing.
+      // leave the fresh marker standing - the next request would wait on
+      // work nobody is doing.
+      await hb.stop();
       await store.cacheSet(key, JSON.stringify({ __pending: 0 }), opts.meta).catch(() => {});
       throw err;
     }
+    // Stop beating BEFORE the final write - a stale beat landing after it
+    // would re-mask the finished value as pending.
+    await hb.stop();
     // A failed generation stamps the key retryable (a zero marker reads
     // as stale) instead of caching emptiness or leaving waiters hanging.
     await store.cacheSet(
@@ -178,7 +260,7 @@ async function coalesced<T>(
   const first = readValue(raw);
   if (first !== null) return first;
   let at = pendingMarkerAt(raw);
-  if (at !== null && Date.now() - at < COALESCE_PENDING_TTL_MS) {
+  if (at !== null && Date.now() - at < ORPHAN_MS) {
     if (opts.noWait) return null;
     const deadline = Date.now() + COALESCE_PENDING_TTL_MS;
     let orphaned = false;
@@ -188,7 +270,7 @@ async function coalesced<T>(
       const v = readValue(raw);
       if (v !== null) return v;
       at = pendingMarkerAt(raw);
-      if (at === null || Date.now() - at >= COALESCE_PENDING_TTL_MS) {
+      if (at === null || Date.now() - at >= ORPHAN_MS) {
         orphaned = true;
         break;
       }
@@ -1911,6 +1993,12 @@ export interface GridCell {
    * heal; every check verifies candidates against it. Absent on legacy
    * cells, which keep the string-derived checks. */
   spec?: CellCheckSpec;
+  /** Deterministic-check violations the generation pass could not heal
+   * (one steered regen per check). Present only on flagged-TERMINAL cells
+   * (see SEED_RULES_VERSION): the seed ships, the gate shows the
+   * violation, and a human - or an explicit redraw - resolves it; serving
+   * never re-enters generation for it. */
+  seedFlags?: string[];
 }
 
 const CELLS_SCHEMA = {
@@ -2085,6 +2173,8 @@ export async function generateGrid(input: {
   meta?: CacheMeta;
 }): Promise<GridCell[] | null> {
   tagCosts({ purpose: "setup:cells" });
+  // Wall-clock budget for the whole pass - see GEN_DEADLINE_MS.
+  const deadlineAt = Date.now() + GEN_DEADLINE_MS;
   // TYPED ROSTER (2026-09-30): from here on input.competitors means the
   // rivals a buyer weighs - the SAME-SEAT list, in roster order. It feeds
   // the angle slots, the writer's rivals, every check-spec's brand sets and
@@ -2219,10 +2309,16 @@ export async function generateGrid(input: {
         : deriveCheckSpec({ ...c, text }, input.brand, input.competitors, input.category);
       return { ...c, text, spec };
     });
-  const valueOf = (raw: string): GridCell[] | null => {
+  /** A unit's stored value: `{cells, rules}` since the terminal-state era
+   * (SEED_RULES_VERSION) - `rules` records the deterministic-check version
+   * the unit was last judged under. A bare `GridCell[]` is the legacy
+   * shape, read as rules-unknown so the serve path judges it once and
+   * upgrades in place or regenerates. */
+  const valueOf = (raw: string): { cells: GridCell[]; rules?: string } | null => {
     try {
-      const v = JSON.parse(raw) as { __pending?: number } | GridCell[];
-      return Array.isArray(v) ? v : null;
+      const v = JSON.parse(raw) as { __pending?: number; cells?: GridCell[]; rules?: string } | GridCell[];
+      if (Array.isArray(v)) return { cells: v };
+      return Array.isArray(v.cells) ? { cells: v.cells, rules: v.rules } : null;
     } catch {
       return null;
     }
@@ -2261,6 +2357,12 @@ export async function generateGrid(input: {
     await Promise.all(
       idxs.map((u) => store.cacheSet(unitKeys[u], JSON.stringify({ __pending: Date.now() }), stampOf(input)))
     );
+    // Claims stay alive by heartbeat (see ORPHAN_MS): units leave the
+    // in-flight set the moment their group settles, and each final write
+    // quiesces first so a stale beat can never re-mask it as pending.
+    const inFlight = new Set(idxs);
+    const hb = startHeartbeat(() => [...inFlight].map((u) => unitKeys[u]), stampOf(input));
+    try {
     const groups: number[][] = [];
     let cur: number[] = [];
     let count = 0;
@@ -2277,6 +2379,23 @@ export async function generateGrid(input: {
     await Promise.all(
       groups.map(async (group) => {
         try {
+        if (Date.now() > deadlineAt) {
+          // Out of budget before this group's writer even ran (a late
+          // orphan takeover): release the claims so the next request
+          // regenerates immediately with a fresh budget.
+          group.forEach((u) => inFlight.delete(u));
+          await hb.quiesce();
+          await Promise.all(
+            group.map((u) =>
+              store.cacheSet(unitKeys[u], JSON.stringify({ __pending: 0 }), stampOf(input)).catch(() => {})
+            )
+          );
+          return;
+        }
+        // Terminal only if every heal stage ran: a deadline skip writes
+        // the unit PROVISIONAL (no rules stamp) so the cut-short heal is
+        // retried on the next serve, never frozen as final.
+        let complete = process.env.PHRASINGS_CHECKS !== "0";
         const rows = group.flatMap((u) => units[u]);
         const planText = rows.map(planLine).join("\n");
         const res = await openaiClient().chat.completions.create({
@@ -2346,7 +2465,8 @@ export async function generateGrid(input: {
         // units never re-heal (the approved baseline stands), and a
         // checker failure never blocks generation.
         const flat = group.flatMap((u) => produced.get(u) ?? []);
-        if (flat.length > 0) {
+        if (flat.length > 0 && Date.now() > deadlineAt) complete = false;
+        if (flat.length > 0 && Date.now() <= deadlineAt) {
           try {
             const verdicts = await reviewCells({
               brand: input.brand,
@@ -2390,13 +2510,20 @@ export async function generateGrid(input: {
         // a design re-read from its own spelling (seedRule, hoisted to
         // generate() scope so the cross-cell diversity pass shares it).
         if (process.env.PHRASINGS_CHECKS !== "0" && flat.length > 0) {
-          for (let i = 0; i < flat.length; i++) {
-            const c = flat[i];
-            const mech = seedRule(c);
-            if (mech.length === 0) continue;
+          const flagged = flat
+            .map((c, i) => ({ c, i, mech: seedRule(c) }))
+            .filter((x) => x.mech.length > 0);
+          // Heals are independent per cell, so they run concurrently - a
+          // bad batch costs one heal round of wall time, not a chain of
+          // sequential writer calls (the blown-budget stalls).
+          await Promise.all(flagged.map(async ({ c, i, mech }) => {
             console.warn(`seed brand rule flagged [${c.stage}]: ${mech.map((m) => m.check).join(",")} | ${c.text.slice(0, 90)}`);
+            if (Date.now() > deadlineAt) {
+              complete = false;
+              return;
+            }
             const row = rowFor(rows, c) ?? rows.find((r) => r.stage.key === c.stage);
-            if (!row) continue;
+            if (!row) return;
             try {
               const res2 = await openaiClient().chat.completions.create({
                 model: CELLS_MODEL,
@@ -2422,7 +2549,7 @@ export async function generateGrid(input: {
             } catch (err) {
               console.error("seed brand-rule healing failed open:", err);
             }
-          }
+          }));
         }
         // SEED SELF-HEALING (2026-09-28): a doubt/plan cell's SEED must
         // itself voice the stage's design - the paraphrase-level filter can
@@ -2435,16 +2562,22 @@ export async function generateGrid(input: {
             const seedTargets = flat
               .map((c, i) => ({ c, i, intent: stageDesignIntent(c.stage, input.brand, c.concern) }))
               .filter((x): x is { c: GridCell; i: number; intent: string } => !!x.intent);
-            if (seedTargets.length > 0) {
+            if (seedTargets.length > 0 && Date.now() > deadlineAt) complete = false;
+            if (seedTargets.length > 0 && Date.now() <= deadlineAt) {
               const verdicts = await checkDesignFidelity({
                 candidates: seedTargets.map((x) => ({ text: x.c.text, design: x.intent })),
                 meta: input.meta,
               });
               const bad = seedTargets.filter((_, k) => !verdicts[k].voices);
-              for (const x of bad) {
+              // Independent per cell - concurrent, like the brand-rule heal.
+              await Promise.all(bad.map(async (x) => {
                 console.warn(`seed design check flagged [${x.c.stage}]: ${x.c.text.slice(0, 90)}`);
+                if (Date.now() > deadlineAt) {
+                  complete = false;
+                  return;
+                }
                 const row = rowFor(rows, x.c) ?? rows.find((r) => r.stage.key === x.c.stage);
-                if (!row) continue;
+                if (!row) return;
                 const res2 = await openaiClient().chat.completions.create({
                   model: CELLS_MODEL,
                   messages: [
@@ -2460,7 +2593,7 @@ export async function generateGrid(input: {
                 });
                 const cell2 = (JSON.parse(res2.choices[0]?.message?.content ?? "{}") as { cells?: { text?: string }[] }).cells?.[0];
                 const text2 = cell2?.text?.trim();
-                if (!text2) continue;
+                if (!text2) return;
                 const [again] = await checkDesignFidelity({ candidates: [{ text: text2, design: x.intent }], meta: input.meta });
                 if (again.voices) {
                   console.warn(`seed self-healed [${x.c.stage}]: ${text2.slice(0, 90)}`);
@@ -2468,7 +2601,7 @@ export async function generateGrid(input: {
                 } else {
                   console.warn(`seed regeneration still off-design [${x.c.stage}] - seed stands, flagged for the gate`);
                 }
-              }
+              }));
             }
           } catch (err) {
             console.error("seed design healing failed open:", err);
@@ -2483,6 +2616,23 @@ export async function generateGrid(input: {
           c.qtype = questionTypeOf(c, input.brand, input.category);
           c.spec = deriveCheckSpec(c, input.brand, input.competitors, input.category);
         });
+        // TERMINAL VERDICT (SEED_RULES_VERSION): whatever the one steered
+        // regen per check could not fix ships FLAGGED - the violation
+        // travels to the gate on seedFlags, a human resolves it, and
+        // serving never re-enters generation for it. Only a full heal
+        // pass may stamp the version; a deadline-cut pass writes the unit
+        // provisional so the next serve retries with a fresh budget.
+        if (complete) {
+          flat.forEach((c) => {
+            const mech = seedRule(c);
+            if (mech.length > 0) {
+              c.seedFlags = mech.map((m) => m.detail);
+              console.warn(`seed ships flagged-terminal [${c.stage}]: ${mech.map((m) => m.check).join(",")} | ${c.text.slice(0, 80)}`);
+            } else delete c.seedFlags;
+          });
+        }
+        group.forEach((u) => inFlight.delete(u));
+        await hb.quiesce();
         await Promise.all(
           group.map((u) => {
             const cells = produced.get(u) ?? [];
@@ -2491,7 +2641,9 @@ export async function generateGrid(input: {
             // the failure.
             return store.cacheSet(
               unitKeys[u],
-              cells.length > 0 ? JSON.stringify(cells) : JSON.stringify({ __pending: 0 }),
+              cells.length > 0
+                ? JSON.stringify(complete ? { cells, rules: SEED_RULES_VERSION } : { cells })
+                : JSON.stringify({ __pending: 0 }),
               stampOf(input)
             );
           })
@@ -2503,6 +2655,8 @@ export async function generateGrid(input: {
           // units surface as retryable and the wizard's missing-fill
           // picks them up.
           console.error(`grid cells group failed (${group.length} units) - markers released:`, err);
+          group.forEach((u) => inFlight.delete(u));
+          await hb.quiesce();
           await Promise.all(
             group.map((u) =>
               store.cacheSet(unitKeys[u], JSON.stringify({ __pending: 0 }), stampOf(input)).catch(() => {})
@@ -2518,7 +2672,10 @@ export async function generateGrid(input: {
     // labeling call over this generation's doubt seeds; duplicates get one
     // regeneration steered away from the concerns already covered. Runs
     // battery-wide, after every group has landed; changed units re-cache.
-    if (process.env.PHRASINGS_CHECKS !== "0") {
+    // Past the deadline it is skipped whole (fail-open, like a thrown
+    // labeling call): the units are already written and the pass is a
+    // safety net for legacy no-concern cells only.
+    if (process.env.PHRASINGS_CHECKS !== "0" && Date.now() <= deadlineAt) {
       try {
         // Planned-concern cells are diverse by construction and enforced
         // per-cell by the design check - the dedup pass is the safety net
@@ -2551,10 +2708,11 @@ export async function generateGrid(input: {
               else covered.set(k, i);
             });
             const dirty = new Set<number>();
-            for (const i of dups.slice(0, 4)) {
+            // Independent per cell - concurrent, like the seed heals.
+            await Promise.all(dups.slice(0, 4).map(async (i) => {
               const d = doubt[i];
               const row = rowFor(units[d.u] ?? [], d.c) ?? (units[d.u] ?? [])[0];
-              if (!row) continue;
+              if (!row || Date.now() > deadlineAt) return;
               console.warn(`concern diversity: [${d.c.stage}] duplicates "${concerns[i]}" - regenerating | ${d.c.text.slice(0, 80)}`);
               try {
                 const res2 = await openaiClient().chat.completions.create({
@@ -2572,7 +2730,7 @@ export async function generateGrid(input: {
                   response_format: { type: "json_schema", json_schema: { name: "grid_cells", strict: true, schema: CELLS_SCHEMA } },
                 });
                 const text2 = (JSON.parse(res2.choices[0]?.message?.content ?? "{}") as { cells?: { text?: string }[] }).cells?.[0]?.text?.trim();
-                if (!text2) continue;
+                if (!text2) return;
                 const cand = { stage: d.c.stage, angle: d.c.angle, text: humanize(text2), situation: d.c.situation };
                 const intent = stageDesignIntent(d.c.stage, input.brand);
                 const mechOk = seedRule(cand).length === 0;
@@ -2581,6 +2739,9 @@ export async function generateGrid(input: {
                   d.c.text = cand.text;
                   d.c.qtype = questionTypeOf(d.c, input.brand, input.category);
                   d.c.spec = deriveCheckSpec(d.c, input.brand, input.competitors, input.category);
+                  // The swap passed the mechanical check, so any flag the
+                  // original wore no longer describes this cell.
+                  delete d.c.seedFlags;
                   dirty.add(d.u);
                   console.warn(`concern diversity: healed [${d.c.stage}]: ${cand.text.slice(0, 80)}`);
                 } else {
@@ -2589,10 +2750,12 @@ export async function generateGrid(input: {
               } catch (err) {
                 console.error("concern diversity regeneration failed open:", err);
               }
-            }
+            }));
+            // A dirty unit's swap passed both checks, so the rewrite is
+            // terminal under the current rules like any full heal.
             await Promise.all(
               [...dirty].map((u) =>
-                store.cacheSet(unitKeys[u], JSON.stringify(resolved[u] ?? []), stampOf(input)).catch(() => {})
+                store.cacheSet(unitKeys[u], JSON.stringify({ cells: resolved[u] ?? [], rules: SEED_RULES_VERSION }), stampOf(input)).catch(() => {})
               )
             );
           }
@@ -2600,6 +2763,9 @@ export async function generateGrid(input: {
       } catch (err) {
         console.error("concern diversity pass failed open:", err);
       }
+    }
+    } finally {
+      await hb.stop();
     }
   };
 
@@ -2635,35 +2801,55 @@ export async function generateGrid(input: {
   const theirs: number[] = [];
   {
     const raws = await Promise.all(unitKeys.map((k) => store.cacheGet(k, CACHE_TTL_MS)));
+    const upgrades: Promise<unknown>[] = [];
     raws.forEach((raw, u) => {
       if (raw) {
         const at = pendingMarkerAt(raw);
         if (at === null) {
           const v = valueOf(raw);
-          if (v && v.length > 0) {
-            const served = scrub(v);
-            // RULES REACH CACHED CELLS (2026-09-30, independent audit): a
-            // unit written before today's rules is re-validated on serve
-            // by the same free deterministic checks generation runs - a
-            // cell today's rules reject regenerates instead of riding the
-            // cache forever (Pixel C2 survived six audits this way).
-            if (
-              process.env.PHRASINGS_CHECKS !== "0" &&
-              served.some((c) => seedRule(c).length > 0)
-            ) {
-              console.warn(`cached unit fails current rules - regenerating [${served[0]?.stage}] ${served[0]?.text.slice(0, 70)}`);
-            } else {
+          if (v && v.cells.length > 0) {
+            const served = scrub(v.cells);
+            // RULES REACH CACHED CELLS - once per rules era (2026-09-30,
+            // terminal-state fix over the round-7 audit change): a unit
+            // judged under the CURRENT deterministic rules is terminal -
+            // flagged or not, it serves as-is. A unit judged under an
+            // older era (or the legacy bare-array shape) is re-judged
+            // here with the free checks exactly ONCE: passing cells
+            // upgrade in place with no model call (a reviewed battery is
+            // never redrawn by a version bump - the Pixel C2 protection
+            // stays), failing ones regenerate once and land terminal,
+            // flagged if the heal can't fix them. Round 7's unversioned
+            // serve-time check had no terminal state, so a seed the
+            // writer couldn't satisfy regenerated on EVERY open, forever
+            // (the init cell-creation stalls).
+            if (v.rules === SEED_RULES_VERSION || process.env.PHRASINGS_CHECKS === "0") {
               resolved[u] = served;
               return;
             }
+            if (served.every((c) => seedRule(c).length === 0)) {
+              const clean = served.map((c) => {
+                const rest = { ...c };
+                delete rest.seedFlags;
+                return rest;
+              });
+              resolved[u] = clean;
+              upgrades.push(
+                store
+                  .cacheSet(unitKeys[u], JSON.stringify({ cells: clean, rules: SEED_RULES_VERSION }), stampOf(input))
+                  .catch(() => {})
+              );
+              return;
+            }
+            console.warn(`cached unit fails current rules - regenerating once [${served[0]?.stage}] ${served[0]?.text.slice(0, 70)}`);
           }
-        } else if (Date.now() - at < COALESCE_PENDING_TTL_MS) {
+        } else if (Date.now() - at < ORPHAN_MS) {
           theirs.push(u);
           return;
         }
       }
       mine.push(u);
     });
+    await Promise.all(upgrades);
   }
   // Seed the dedupe with everything already cached, so a fresh unit can't
   // duplicate a cached one's text.
@@ -2689,13 +2875,15 @@ export async function generateGrid(input: {
         const at = pendingMarkerAt(raw);
         if (raw && at === null) {
           const v = valueOf(raw);
-          if (v && v.length > 0) {
-            resolved[u] = scrub(v);
+          if (v && v.cells.length > 0) {
+            // The other generator just wrote this under the current
+            // rules - no re-judge needed.
+            resolved[u] = scrub(v.cells);
             open.delete(u);
             return;
           }
         }
-        if (at === null || Date.now() - at >= COALESCE_PENDING_TTL_MS) {
+        if (at === null || Date.now() - at >= ORPHAN_MS) {
           orphaned.push(u);
           open.delete(u);
         }
@@ -2974,12 +3162,11 @@ const PHRASINGS_EXTRA_RETRY = 6;
 /** Retry rounds during the initial write: the served batch arrives full
  * instead of getting healed later by a visible top-up. */
 const PHRASINGS_RETRY_ROUNDS = 2;
-/** How long a pending marker is trusted before another request concludes
- * the generator died and takes the cell over. Fits inside the route's
- * 120s budget with room for the takeover generation. */
-const PHRASINGS_PENDING_TTL_MS = 180_000;
 /** Wait budget on someone else's in-flight work; the 300s route leaves
- * room to wait out a slow write plus its retry pass. */
+ * room to wait out a slow write plus its retry pass. Staleness itself is
+ * heartbeat-based (ORPHAN_MS) like the cell path: generators beat while
+ * working, so a dead claim clears in under a minute instead of being
+ * trusted for a TTL sized to the slowest write. */
 const PHRASINGS_WAIT_MS = 150_000;
 const PHRASINGS_POLL_MS = 2_000;
 
@@ -3445,6 +3632,11 @@ export async function generatePhrasings(input: {
     await Promise.all(
       idx.map((i) => store.cacheSet(keys[i], JSON.stringify({ __pending: Date.now() }), stampOf(input)))
     );
+    // Same liveness contract as the cell path: the claim stays alive by
+    // heartbeat, and the final write quiesces first so a stale beat can
+    // never re-mask it as pending.
+    const inFlight = new Set(idx);
+    const hb = startHeartbeat(() => [...inFlight].map((i) => keys[i]), stampOf(input));
     try {
     const subset = idx.map((i) => input.cells[i]);
     const got = await pass(subset);
@@ -3621,6 +3813,8 @@ export async function generatePhrasings(input: {
       }
     }
 
+    idx.forEach((i) => inFlight.delete(i));
+    await hb.quiesce();
     await Promise.all(
       idx.map((i, j) => {
         out[i] = got[j];
@@ -3641,11 +3835,15 @@ export async function generatePhrasings(input: {
     } catch (err) {
       // A thrown pass (vendor error, truncated JSON) releases every
       // claimed marker: the retry regenerates immediately instead of
-      // waiting out PHRASINGS_PENDING_TTL_MS and returning empty.
+      // waiting out the orphan window and returning empty.
       console.error(`phrasings generation failed (${idx.length} cells) - markers released:`, err);
+      idx.forEach((i) => inFlight.delete(i));
+      await hb.quiesce();
       await Promise.all(
         idx.map((i) => store.cacheSet(keys[i], JSON.stringify({ __pending: 0 }), stampOf(input)).catch(() => {}))
       );
+    } finally {
+      await hb.stop();
     }
   };
 
@@ -3664,7 +3862,7 @@ export async function generatePhrasings(input: {
             out[i] = v;
             return;
           }
-        } else if (Date.now() - at < PHRASINGS_PENDING_TTL_MS) {
+        } else if (Date.now() - at < ORPHAN_MS) {
           theirs.push(i);
           return;
         }
@@ -3695,7 +3893,7 @@ export async function generatePhrasings(input: {
             return;
           }
         }
-        if (at === null || Date.now() - at >= PHRASINGS_PENDING_TTL_MS) {
+        if (at === null || Date.now() - at >= ORPHAN_MS) {
           orphaned.push(i);
           open.delete(i);
         }
