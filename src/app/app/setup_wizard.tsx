@@ -197,15 +197,16 @@ const READ_STAGES: [number, string][] = [
 ];
 
 /** The cell write narrated, same mechanism: captions pinned to the order
- * generateGrid actually works in - concern planning, the writer groups,
- * the per-cell review, the mechanical heals, the diversity check. */
+ * generateGrid actually works in - the writer groups, the per-cell
+ * review, the heals, the variety check - in the user's language, not the
+ * engine's. (No concern-planning caption: worry batteries skip that call,
+ * so it would narrate work that isn't happening.) */
 const CELLS_STAGES: [number, string][] = [
-  [0, "Mapping the concerns buyers raise in this market…"],
-  [10, "Writing your questions - one per cell of the coverage map…"],
-  [55, "Reviewing each question against its cell's design…"],
-  [85, "Rewriting any question that broke its rules…"],
-  [110, "Checking the doubt questions each measure a different worry…"],
-  [140, "Still writing - a full battery can take two to three minutes…"],
+  [0, "Writing your questions - the way real buyers would ask them…"],
+  [45, "Giving every question a second read…"],
+  [75, "Rewriting the ones that don't sound right…"],
+  [105, "Making sure no two questions ask the same thing…"],
+  [140, "Still writing - a full set takes two to three minutes…"],
 ];
 
 /** The worries pool draw narrated: one model call, so the captions walk
