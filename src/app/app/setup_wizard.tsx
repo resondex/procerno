@@ -1722,6 +1722,7 @@ export function SetupWizard({ mode, brand, draft, engineOptions, onClose, onCrea
                 state={grid}
                 setState={setGrid}
                 busy={busy !== null}
+                onEditWorries={() => goTo("worries")}
               />
             )
           )}

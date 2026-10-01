@@ -431,10 +431,22 @@ export function stageColumns(st: GridStage, activeLabels: string[]): string[] {
  * WORRY_STANCE_STAGES - a confirmed pick list replaces their counts). */
 export const WORRY_STAGES = new Set(["objections", "churn_triggers", "renewal"]);
 
+/** The stage keys a cells write should send. On a worry-era battery the
+ * worries gate OWNS doubt coverage: a stage with picks is kept whatever
+ * the coverage map's tick says (the map renders those rows read-only, but
+ * an older draft may carry a stale untick that would otherwise silently
+ * kill confirmed picks). */
+export function effectiveKeptStages(g: GridState): string[] {
+  if (!g.worries) return g.keptStages;
+  const kept = new Set(g.keptStages);
+  for (const w of g.worries) kept.add(w.stage);
+  return [...kept];
+}
+
 export function gridCellCount(g: GridState | null, rivalCount: number): number {
   if (!g) return 0;
   const r = Math.min(rivalCount, 4);
-  const kept = new Set(g.keptStages);
+  const kept = new Set(effectiveKeptStages(g));
   const active = g.scenarios.map((s) => s.label);
   return g.stages
     .filter((s) => kept.has(s.key))
@@ -967,7 +979,7 @@ export function useGridSetup(a: GridSetupArgs) {
         audience: a.audience || undefined,
         base: a.state.moderators,
         scenarios: a.state.scenarios,
-        stageKeys: a.state.keptStages,
+        stageKeys: effectiveKeptStages(a.state),
         worries: a.state.worries,
       }
     );
@@ -1413,7 +1425,7 @@ export function useGridSetup(a: GridSetupArgs) {
         brand: a.brand, category: a.category, competitors: a.competitors, rosterRoles: a.rosterRoles,
         rosterClasses: a.rosterClasses,
         audience: a.audience || undefined,
-        base: st.moderators, scenarios: st.scenarios, stageKeys: st.keptStages,
+        base: st.moderators, scenarios: st.scenarios, stageKeys: effectiveKeptStages(st),
         worries: st.worries,
         warm: true,
       }),
@@ -2207,11 +2219,13 @@ export function ScenarioReviewModal({
  * previous step; stage ticks are the only control (A8: no dot painting,
  * participation stays derived). */
 export function CoverageGate({
-  state, setState, busy,
+  state, setState, busy, onEditWorries,
 }: {
   state: GridState;
   setState: (s: GridState) => void;
   busy: boolean;
+  /** Back to the Buyer worries gate - the owner of doubt coverage. */
+  onEditWorries?: () => void;
 }) {
   const [showSkipped, setShowSkipped] = useState(false);
   const folds = useFolds();
@@ -2230,8 +2244,15 @@ export function CoverageGate({
     Object.values(state.journeyStageAdds ?? {}).flat().map((a) => a.key)
   );
 
+  // Worry-era battery: the worries gate OWNS the doubt stages - their rows
+  // reflect the picks (read-only here) instead of per-scenario dots that
+  // stopped being true when doubt cells went invariant-per-worry.
+  const worryRow = (key: string) => state.worries !== undefined && WORRY_STAGES.has(key);
+  const worriesFor = (key: string) => (state.worries ?? []).filter((w) => w.stage === key);
+
   const renderRow = (s: GridStage) => {
-    const isKept = kept.has(s.key);
+    const wr = worryRow(s.key);
+    const isKept = wr ? worriesFor(s.key).length > 0 : kept.has(s.key);
     const brandAdd = advisoryKeys.has(s.key) && isKept;
     const cols = stageColumns(s, activeLabels);
     const effective = cols.length > 0 ? cols : activeLabels;
@@ -2242,7 +2263,8 @@ export function CoverageGate({
             <input
               type="checkbox"
               checked={isKept}
-              disabled={busy}
+              disabled={busy || wr}
+              title={wr ? "Owned by the Buyer worries step - pick worries there to change this stage's coverage" : undefined}
               onChange={(e) =>
                 setState({
                   ...state,
@@ -2284,7 +2306,50 @@ export function CoverageGate({
             ) : null}
           </label>
         </td>
-        {s.situational || s.rivals !== "none" ? (
+        {wr ? (
+          // Worry summary in place of dots: one invariant cell per picked
+          // worry at this stance, collecting on monthly waves.
+          <td colSpan={active.length} className="px-2 py-1 text-center">
+            {worriesFor(s.key).length > 0 ? (
+              <span
+                className="text-[10px] text-primary cursor-help underline decoration-dotted decoration-line underline-offset-2"
+                onMouseEnter={(e) => {
+                  const r = e.currentTarget.getBoundingClientRect();
+                  setTip({
+                    x: Math.min(r.left, window.innerWidth - 340),
+                    y: r.bottom + 6,
+                    hint: worriesFor(s.key).map((w) => w.concern).join(" · "),
+                    verdict: "",
+                  });
+                }}
+                onMouseLeave={() => setTip(null)}
+              >
+                {worriesFor(s.key).length} worr{worriesFor(s.key).length === 1 ? "y" : "ies"} · monthly
+              </span>
+            ) : (
+              <span className="text-[10px] text-ink-3">no worries picked</span>
+            )}
+            {onEditWorries && (
+              <button
+                type="button"
+                onClick={onEditWorries}
+                disabled={busy}
+                className="ml-2 text-[10px] font-medium text-primary hover:opacity-80"
+              >
+                edit
+              </button>
+            )}
+          </td>
+        ) : s.rivals === "each" ? (
+          // s10: comparisons are scenario-invariant - no column owns a
+          // head-to-head, so per-scenario dots would describe the old
+          // pinned-cycle battery.
+          <td colSpan={active.length} className="px-2 py-1 text-center">
+            <span className={`text-[10px] ${isKept ? "text-primary" : "text-ink-3"}`}>
+              {isKept ? "one cell per rival · every buyer" : "-"}
+            </span>
+          </td>
+        ) : s.situational || s.rivals !== "none" ? (
           active.map((sc) => {
             const inCol = isKept && effective.includes(sc.label);
             return (
