@@ -22,6 +22,9 @@ const Body = z.object({
   brand: z.string().trim().min(1).max(80),
   category: z.string().trim().min(1).max(120),
   competitors: z.array(z.string().trim().min(1).max(80)).max(12),
+  /** Typed roster (2026-09-30): competitor -> same_seat | upstream.
+   * Absent = every competitor same_seat (the untyped behavior). */
+  rosterRoles: z.record(z.string().max(80), z.enum(["same_seat", "upstream"])).optional(),
   audience: z.string().trim().max(160).optional(),
   base: z.record(z.string(), z.unknown()),
   scenarios: z
@@ -71,6 +74,7 @@ export async function POST(req: Request) {
     cell: parsed.data.cell,
     avoid: parsed.data.avoid,
     nearTo: parsed.data.nearTo,
+    rosterRoles: parsed.data.rosterRoles,
     meta: { source: cacheSource(auth) },
   });
   if (!drawn) {

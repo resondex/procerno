@@ -3,9 +3,10 @@ import { tagCosts, withCostContext } from "../cost_log";
 import { anthropicClient, openaiClient } from "./providers";
 import { INSTRUMENT_HELPER_MODEL } from "./models";
 import {
-  AMBIGUOUS_FORMS, checkBattery, checkCandidateSignature, checkPromptAgainstSpec,
+  AMBIGUOUS_FORMS, angleRivals, checkBattery, checkCandidateSignature, checkPromptAgainstSpec,
   deriveCheckSpec, DOUBT_CHECK_STAGES, MUST_NAME_STAGES, PRE_CATEGORY_STAGES, questionTypeOf, resolveCellSpec, scenarioLabelLeak, seedDesignLine, specWriterNote,
-  stageDesignIntent, TERM_COLLISIONS, textNamesCategory, type CellCheckSpec, type QuestionType,
+  sameSeatOf, stageDesignIntent, TERM_COLLISIONS, textNamesCategory, upstreamOf,
+  type CellCheckSpec, type QuestionType, type RosterRoles,
 } from "./battery_checks";
 export { MUST_NAME_STAGES };
 import { store } from "../store";
@@ -1622,9 +1623,13 @@ export async function reviewCells(input: {
   competitors: string[];
   audience: string | null;
   candidates: CellReviewCandidate[];
+  /** Typed roster (2026-09-30): upstream brands are not rivals here - they
+   * leave the reviewer's rival list (and its cache key). Absent = untyped. */
+  rosterRoles?: RosterRoles;
   meta?: CacheMeta;
 }): Promise<CellVerdict[]> {
   tagCosts({ purpose: "setup:cell_review" });
+  input = { ...input, competitors: sameSeatOf(input.competitors, input.rosterRoles) };
   const fp = (c: CellReviewCandidate) =>
     // hint is in the fingerprint: the target check leans on it, so a
     // sharper hint must not serve verdicts formed without one.
@@ -1921,7 +1926,9 @@ export function gridCellCacheKey(
   },
   row: { stage: string; situation: string | null; angle: string; scope: string | null; concern?: string | null }
 ): string {
-  const rivals = args.competitors.slice(0, 4);
+  // args.competitors is the SAME-SEAT list (generateGrid resolves roles
+  // first), so an untyped roster keys exactly as before.
+  const rivals = angleRivals(args.competitors);
   const s = row.situation ? args.scenarios.find((x) => x.label === row.situation) : undefined;
   const sctx = s ? `${s.label}|${s.description}|${journeyNote(args.base, s) ?? ""}` : "";
   return cacheKey("grid_cell1", [
@@ -1940,7 +1947,7 @@ export function phrasingCacheKey(
   cell: { situation: string | null; mode?: string | null; text: string; spec?: unknown; concern?: string | null },
   avoidConcerns?: string[]
 ): string {
-  const rivals = args.competitors.slice(0, 4);
+  const rivals = angleRivals(args.competitors);
   const s = cell.situation ? args.scenarios.find((x) => x.label === cell.situation) : undefined;
   const jnote = s ? journeyNote(args.base, s) ?? "" : "";
   return cacheKey("phrasings", [
@@ -1972,12 +1979,23 @@ export async function generateGrid(input: {
   base: Moderators;
   scenarios: ScenarioSpec[];
   stages: MaskedStage[];
+  /** Typed roster (2026-09-30): competitor name -> same_seat | upstream.
+   * Absent = every competitor same_seat (the untyped behavior). */
+  rosterRoles?: RosterRoles;
   /** Background warm: never wait on another request's in-flight write. */
   noWait?: boolean;
   meta?: CacheMeta;
 }): Promise<GridCell[] | null> {
   tagCosts({ purpose: "setup:cells" });
-  const rivals = input.competitors.slice(0, 4);
+  // TYPED ROSTER (2026-09-30): from here on input.competitors means the
+  // rivals a buyer weighs - the SAME-SEAT list, in roster order. It feeds
+  // the angle slots, the writer's rivals, every check-spec's brand sets and
+  // the cache keys; upstream brands (sold to the trade, not this audience)
+  // hold no cell, are free vocabulary in every check, and reach only the
+  // concern planner as context. No roles = the input list itself.
+  const upstream = upstreamOf(input.competitors, input.rosterRoles);
+  input = { ...input, competitors: sameSeatOf(input.competitors, input.rosterRoles) };
+  const rivals = angleRivals(input.competitors);
   const allLabels = input.scenarios.map((s) => s.label);
   const plan: { stage: MaskedStage; situation: string | null; angle: string; scope: string | null; concern?: string }[] = [];
   for (const st of input.stages) {
@@ -2019,8 +2037,11 @@ export async function generateGrid(input: {
       // list (each drawing its own would re-key every doubt cell and pay
       // twice), and a regeneration reuses the battery's established
       // doubt-space instead of re-rolling it.
+      // Upstream context changes the plan, so it rides in the key - only
+      // when present, so an untyped roster keeps its established plan.
       const planKey = cacheKey("concern_plan1", [
         STYLE_VERSION, CONCERNS_MODEL, input.brand, input.category, input.audience, String(doubtRows.length),
+        ...(upstream.length > 0 ? [`upstream:${upstream.map(primaryBrandName).join(",")}`] : []),
       ]);
       const hit = await store.cacheGet(planKey, CACHE_TTL_MS);
       if (hit) {
@@ -2049,6 +2070,13 @@ export async function generateGrid(input: {
             content:
               `Brand: ${input.brand}\nCategory: ${input.category}\n` +
               `Audience: ${input.audience ?? "general buyers"}\n` +
+              // Upstream brands are weather, not rivals: frictions with
+              // them (a network a merchant won't take) are real worries
+              // about the brand, so they enter the doubt-space reliably.
+              (upstream.length > 0
+                ? `Known upstream brands the rivals ride on: ${upstream.map(primaryBrandName).join(", ")} - ` +
+                  `they sell to the trade, not to this buyer; frictions with them are real buyer concerns about ${input.brand}.\n`
+                : "") +
               `Number of concerns: ${doubtRows.length}`,
           },
         ],
@@ -2621,15 +2649,18 @@ export async function regenerateCell(input: {
   /** Near-variant mode: keep THIS prompt's ask, move one concrete detail -
    * the prompts-card sibling of the scenario near neighbor. */
   nearTo?: string;
+  /** Typed roster (see generateGrid). Absent = untyped. */
+  rosterRoles?: RosterRoles;
   meta?: CacheMeta;
 }): Promise<{ text: string; spec: CellCheckSpec } | null> {
   tagCosts({ purpose: "setup:cells" });
+  input = { ...input, competitors: sameSeatOf(input.competitors, input.rosterRoles) };
   // Every alternate draw carries its own check-spec, derived from the
   // cell's design and the drawn seed - the same contract as generateGrid.
   // A planned concern is part of that design and survives redraws.
   const specFor = (text: string) =>
     deriveCheckSpec({ stage: input.cell.stage, angle: input.cell.angle, text, concern: input.cell.concern }, input.brand, input.competitors, input.category);
-  const rivals = input.competitors.slice(0, 4);
+  const rivals = angleRivals(input.competitors);
   const stages = participationMask(input.base, input.scenarios);
   const st = stages.find((x) => x.key === input.cell.stage);
   if (!st) return null;
@@ -2885,6 +2916,8 @@ export async function generatePhrasings(input: {
    * each cell's paraphrases must not import a SIBLING's concern (the
    * Jira C30 bleed - learning-curve paraphrases adding performance). */
   avoidConcerns?: string[];
+  /** Typed roster (see generateGrid). Absent = untyped. */
+  rosterRoles?: RosterRoles;
   /** Skip the cache read: the user asked for a fresh set. */
   force?: boolean;
   /** A background warm: generate what nobody else is generating, but never
@@ -2895,9 +2928,13 @@ export async function generatePhrasings(input: {
   meta?: CacheMeta;
 }): Promise<Phrasing[][]> {
   tagCosts({ purpose: "setup:phrasings" });
+  // Same-seat rivals only (see generateGrid): the writer's rivals, the
+  // signature filter, the spec brand sets, checkBattery's scope and the
+  // cache keys all read this list. No roles = the input list itself.
+  input = { ...input, competitors: sameSeatOf(input.competitors, input.rosterRoles) };
   const want = Math.max(0, input.count - 1);
   if (want === 0 || input.cells.length === 0) return input.cells.map(() => []);
-  const rivals = input.competitors.slice(0, 4);
+  const rivals = angleRivals(input.competitors);
   // Brand names are MANDATORY vocabulary in branded cells (the same-brands
   // rule), so counting them in the overlap filter or the worn-words list
   // punishes candidates for obeying the rules. Narrow-lexicon stages
@@ -3418,8 +3455,9 @@ export async function generatePhrasings(input: {
       const mechanicalFilter = (cellIdxs: number[]): number[] => {
         const findings = checkBattery({
           brand: input.brand,
-          // The FULL competitor list - the writer's 4-rival cap is a prompt
-          // budget, not a check scope (a leak of rival #5 is still a leak).
+          // The FULL same-seat list - the writer's 4-rival cap is a prompt
+          // budget, not a check scope (a leak of rival #5 is still a leak);
+          // upstream brands are out of scope by TYPE (free vocabulary).
           competitors: input.competitors,
           category: input.category,
           cells: cellIdxs.map((j) => ({
@@ -3655,6 +3693,7 @@ export async function buildInstrument(input: {
   category: string;
   competitors: string[];
   audience: string | null;
+  rosterRoles?: RosterRoles;
   meta?: CacheMeta;
 }): Promise<Instrument> {
   tagCosts({ purpose: "setup:compose" });

@@ -262,4 +262,106 @@ const AMEX_V = ["Chase", "Capital One", "Visa", "Discover"];
   expect("no carried spec = legacy path (null)", bc.resolveCellSpec({ stage: "renewal", angle: "generic", text: "x" }, "Netflix", COMP.Netflix) === null);
 }
 console.log(`5. spec era: ${fails === 0 ? "ALL PASS" : `${fails} FAILURE(S)`}`);
+
+// =====================================================================
+// 6. TYPED ROSTER (2026-09-30): competitors are typed by who they sell to;
+// upstream brands (sold to the trade, not this audience) hold no cells and
+// are free vocabulary. Absent roles must reproduce today's behavior exactly.
+// =====================================================================
+const fails5 = fails;
+console.log("6. typed roster");
+const AMEX_ROSTER = ["Chase", "Visa", "Capital One", "Mastercard", "Citi", "Discover"];
+const AMEX_ROLES = { Visa: "upstream", Mastercard: "upstream" } as const;
+{
+  // (a) blind cell on the AmEx config: an upstream network is vocabulary
+  //     BY TYPE; a same-seat issuer is still a leak.
+  const seated = bc.sameSeatOf(AMEX_ROSTER, AMEX_ROLES);
+  expect("sameSeatOf drops upstream, keeps order", JSON.stringify(seated) === JSON.stringify(["Chase", "Capital One", "Citi", "Discover"]), seated);
+  expect("upstreamOf lists the weather in order", JSON.stringify(bc.upstreamOf(AMEX_ROSTER, AMEX_ROLES)) === JSON.stringify(["Visa", "Mastercard"]));
+  const cell = { stage: "discovery", angle: "generic", text: "which credit cards have no foreign transaction fees?" };
+  const typed = specOf(cell, "American Express", seated, "credit cards");
+  expect("typed spec: Visa / Mastercard are in neither brand set",
+    !typed.forbiddenBrands.includes("Visa") && !typed.forbiddenBrands.includes("Mastercard") && typed.requiredBrands.length === 0, typed.forbiddenBrands);
+  const visa = bc.checkPromptAgainstSpec({ text: "any Visa card with no foreign fees?", spec: typed, category: "credit cards", extraForms: FORMS });
+  expect("typed: 'any Visa card with no foreign fees' is NOT blind_names_brand", !visa.some((x: any) => x.check === "blind_names_brand"), visa);
+  const chase = bc.checkPromptAgainstSpec({ text: "is a Chase card good with no foreign fees?", spec: typed, category: "credit cards", extraForms: FORMS });
+  expect("typed: 'a Chase card' still IS blind_names_brand", chase.some((x: any) => x.check === "blind_names_brand"), chase);
+  const untyped = specOf(cell, "American Express", AMEX_ROSTER, "credit cards");
+  const visaUntyped = bc.checkPromptAgainstSpec({ text: "any Visa card with no foreign fees?", spec: untyped, category: "credit cards", extraForms: FORMS });
+  expect("control: untyped roster still flags the Visa prompt (the change is by type)", visaUntyped.some((x: any) => x.check === "blind_names_brand"), visaUntyped);
+  // The legacy string path and the battery sweep scope the same way.
+  const sweep = bc.checkBattery({ brand: "American Express", competitors: seated, category: "credit cards", extraForms: FORMS,
+    cells: [{ ...cell, phrasings: ["any Visa card with no foreign fees?", "is a Chase card good abroad, no foreign fees?"] }] });
+  expect("typed sweep (legacy path): only the Chase paraphrase flags",
+    sweep.filter((x: any) => x.check === "blind_names_brand").map((x: any) => x.text).join("|") === "is a Chase card good abroad, no foreign fees?", sweep);
+  // Must-name stage: an upstream network named in a doubt is not a rival leak.
+  const doubt = specOf({ stage: "objections", angle: "generic", text: "does American Express still get turned down at small shops?" },
+    "American Express", seated, "credit cards");
+  const acc = bc.checkPromptAgainstSpec({ text: "Amex gets declined where Visa works - still worth carrying?", spec: doubt, category: "credit cards", extraForms: FORMS });
+  expect("typed must-name: naming upstream Visa is not must_name_names_rival", acc.length === 0, acc);
+}
+{
+  // (b) angle slots skip upstream entries - list position no longer
+  //     denies a same-seat rival its comparison / alternatives cells.
+  const mixed = ["Visa", "Chase", "Mastercard", "Capital One", "Citi", "Discover"];
+  const slots = bc.angleRivals(mixed, AMEX_ROLES);
+  expect("angle slots = first 4 same-seat rivals", JSON.stringify(slots) === JSON.stringify(["Chase", "Capital One", "Citi", "Discover"]), slots);
+  expect("untyped angle slots = roster.slice(0, 4) (today)", JSON.stringify(bc.angleRivals(mixed)) === JSON.stringify(mixed.slice(0, 4)));
+  expect("a hand-added / unlisted name defaults same_seat", bc.rosterRoleOf("Wells Fargo", AMEX_ROLES) === "same_seat");
+  expect("role lookup is case/punctuation-blind", bc.rosterRoleOf("visa", AMEX_ROLES) === "upstream");
+  const comp = specOf({ stage: "comparison", angle: "Discover", text: "amex or discover for cash back?" }, "American Express", bc.sameSeatOf(mixed, AMEX_ROLES), "credit cards");
+  const viaVisa = bc.checkCandidateSignature("Amex vs Discover - and does Visa acceptance matter for cash back?", comp, { category: "credit cards", extraForms: FORMS });
+  expect("typed comparison: an upstream mention is no extra-rival leak", viaVisa.ok, viaVisa);
+}
+{
+  // (c) absent / empty / all-same-seat roles reproduce today's findings
+  //     byte-for-byte on the existing corpora.
+  const identity = (comp: string[]) =>
+    bc.sameSeatOf(comp, undefined) === comp && bc.sameSeatOf(comp, {}) === comp &&
+    bc.sameSeatOf(comp, Object.fromEntries(comp.map((c) => [c, "same_seat"]))) === comp;
+  let bad = 0;
+  for (const [brand, P] of Object.entries<any>(head.projects)) {
+    if (!identity(P.competitors)) bad++;
+    const cells = P.cells.map((c: any, i: number) => ({
+      stage: c.stage, angle: c.angle, text: c.text,
+      phrasings: (P.phrasings[i] ?? []).map((x: any) => (typeof x === "string" ? x : x.text)),
+    }));
+    for (const roles of [undefined, {}, Object.fromEntries(P.competitors.map((c: string) => [c, "same_seat"]))]) {
+      const comp = bc.sameSeatOf(P.competitors, roles);
+      const a = JSON.stringify(bc.checkBattery({ brand, competitors: P.competitors, category: CAT[brand], cells }));
+      const b = JSON.stringify(bc.checkBattery({ brand, competitors: comp, category: CAT[brand], cells }));
+      const sa = JSON.stringify(bc.checkBattery({ brand, competitors: P.competitors, category: CAT[brand],
+        cells: cells.map((c: any) => ({ ...c, spec: specOf(c, brand, P.competitors, CAT[brand]) })) }));
+      const sb = JSON.stringify(bc.checkBattery({ brand, competitors: comp, category: CAT[brand],
+        cells: cells.map((c: any) => ({ ...c, spec: specOf(c, brand, comp, CAT[brand]) })) }));
+      if (a !== b || sa !== sb) bad++;
+    }
+  }
+  for (const p of live) {
+    const comp = bc.sameSeatOf(COMP[p.project], {});
+    if (!identity(COMP[p.project])) bad++;
+    const angle = p.angle ?? "generic";
+    const x = JSON.stringify(specOf({ stage: p.stage, angle, text: p.text }, p.project, COMP[p.project], CAT[p.project]));
+    const y = JSON.stringify(specOf({ stage: p.stage, angle, text: p.text }, p.project, comp, CAT[p.project]));
+    if (x !== y) bad++;
+  }
+  expect("untyped / empty / all-same-seat roles: harness + fixed-battery findings and specs byte-identical", bad === 0, { bad });
+  // Cache keys: an untouched roster keys exactly as before (no STYLE_VERSION
+  // bump); only a tracker whose same-seat list differs re-keys.
+  delete process.env.DATABASE_URL;
+  const inst = await import(`${REPO}/src/lib/engine/instrument`);
+  const base = { involvement: "considered", verifiability: "spec", think_feel: "think", decision_unit: "solo" };
+  const args = (comp: string[]) => ({ brand: "American Express", category: "credit cards", competitors: comp, audience: "US consumers", base, scenarios: [], count: 10 });
+  const row = { stage: "comparison", situation: null, angle: "Discover", scope: null };
+  const cellK = { situation: null, mode: null, text: "amex or discover for cash back?" };
+  const k0 = inst.gridCellCacheKey(args(COMP["American Express"]), row);
+  const k1 = inst.gridCellCacheKey(args(bc.sameSeatOf(COMP["American Express"], { Chase: "same_seat" })), row);
+  expect("untouched roster: grid cell cache key unchanged", k0 === k1);
+  expect("untouched roster: phrasing cache key unchanged",
+    inst.phrasingCacheKey(args(COMP["American Express"]), cellK) === inst.phrasingCacheKey(args(bc.sameSeatOf(COMP["American Express"], {})), cellK));
+  const kTyped = inst.gridCellCacheKey(args(bc.sameSeatOf(AMEX_ROSTER, AMEX_ROLES)), row);
+  const kUntyped = inst.gridCellCacheKey(args(AMEX_ROSTER), row);
+  expect("a roster whose same-seat list differs re-keys", kTyped !== kUntyped);
+}
+console.log(`6. typed roster: ${fails === fails5 ? "ALL PASS" : `${fails - fails5} FAILURE(S)`}`);
 if (fails > 0) process.exitCode = 1;

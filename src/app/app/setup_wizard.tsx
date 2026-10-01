@@ -25,7 +25,7 @@ import {
   type ScenarioReviewItem,
   type ScenarioRow,
 } from "./grid_setup";
-import { deriveCheckSpec } from "@/lib/engine/battery_checks";
+import { deriveCheckSpec, rosterRoleOf, sameSeatOf, type RosterRole, type RosterRoles } from "@/lib/engine/battery_checks";
 
 /**
  * The setup wizard: a rail of steps, one gate at a time, a fixed footer that
@@ -124,7 +124,8 @@ function cellReviewRequest(
   brand: string,
   competitors: string[],
   category: string,
-  audience: string
+  audience: string,
+  rosterRoles?: RosterRoles
 ) {
   const done = new Set(g.reviewedCells ?? []);
   const stageBy = new Map(g.stages.map((s) => [s.key, s]));
@@ -152,6 +153,7 @@ function cellReviewRequest(
     brand,
     category,
     competitors,
+    rosterRoles,
     audience: audience || undefined,
     candidates: authored.map(({ c, phr, text, original }) => {
       const st = stageBy.get(c.stage);
@@ -236,6 +238,15 @@ interface WizardDraft {
   machinePrompts?: string[];
   /** Classic-mode fingerprints (theme|text) that PASSED the check. */
   reviewedPrompts?: string[];
+  /** Typed roster (2026-09-30): competitor -> same_seat | upstream, as
+   * classified and then confirmed by the chip toggle. Absent = untyped
+   * (every competitor same_seat). */
+  rosterRoles?: RosterRoles;
+  /** The classifier's one-line note per competitor (chip tooltip). */
+  rosterNotes?: Record<string, string>;
+  /** Who the client brand sells to - stored only (future second-seat
+   * signal). */
+  clientSellsTo?: string[];
 }
 
 interface Props {
@@ -270,6 +281,9 @@ export function SetupWizard({ mode, brand, draft, engineOptions, onClose, onCrea
   const [category, setCategory] = useState(draft?.category ?? "");
   const [competitors, setCompetitors] = useState<string[]>(draft?.competitors ?? []);
   const [compDraft, setCompDraft] = useState("");
+  const [rosterRoles, setRosterRoles] = useState<RosterRoles | undefined>(saved?.rosterRoles);
+  const [rosterNotes, setRosterNotes] = useState<Record<string, string>>(saved?.rosterNotes ?? {});
+  const [clientSellsTo, setClientSellsTo] = useState<string[] | undefined>(saved?.clientSellsTo);
   const [audience, setAudience] = useState(draft?.audience ?? "");
   const [prompts, setPrompts] = useState<DraftPrompt[] | null>(draft?.prompts ?? null);
   const [editing, setEditing] = useState(false);
@@ -317,7 +331,7 @@ export function SetupWizard({ mode, brand, draft, engineOptions, onClose, onCrea
     draft ? readKey(draft.category, draft.audience ?? "") : null
   );
   const [servedRivals, setServedRivals] = useState<string | null>(
-    draft ? (draft.competitors ?? []).join("|") : null
+    draft ? rivalsKey(draft.competitors ?? [], saved?.rosterRoles) : null
   );
 
   /** The plan's buying-scenario cap (PLAN_SCENARIO_CAPS); 4 until the
@@ -334,7 +348,7 @@ export function SetupWizard({ mode, brand, draft, engineOptions, onClose, onCrea
 
   const gridApi = useGridSetup({
     setupId: draftId,
-    brand, category, competitors: allCompetitors(), audience,
+    brand, category, competitors: allCompetitors(), audience, rosterRoles,
     maxScenarios: scenarioCap,
     state: grid, setState: setGrid, setBusy, setError,
   });
@@ -377,8 +391,60 @@ export function SetupWizard({ mode, brand, draft, engineOptions, onClose, onCrea
   }
 
   function addCompetitor() {
-    setCompetitors(allCompetitors());
+    const comps = allCompetitors();
+    setCompetitors(comps);
     setCompDraft("");
+    // A hand-added rival is same_seat until the next classify, which runs
+    // shortly after the typing stops and only fills names it has no role
+    // for yet - a role the user toggled is never overwritten.
+    if (classifyTimer.current) clearTimeout(classifyTimer.current);
+    classifyTimer.current = setTimeout(() => void classifyRoster(category, audience, comps, false), 1500);
+  }
+
+  /** The rivals' role key for staleness: a role toggle changes which rivals
+   * hold cells exactly like an add/remove does. Untyped = the plain join. */
+  function rivalsKey(comps: string[], roles: RosterRoles | undefined): string {
+    return comps.map((c) => (rosterRoleOf(c, roles) === "upstream" ? `${c}#upstream` : c)).join("|");
+  }
+
+  const classifyTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  /** Type each competitor by who it sells to (/api/setup/roster). fresh =
+   * replace every role (a new estimate); otherwise only names without a
+   * role yet are filled. Silent and fail-open: no roles = untyped. */
+  async function classifyRoster(cat: string, aud: string, comps: string[], fresh: boolean) {
+    if (!cat.trim() || comps.length === 0) return;
+    const res = await fetch("/api/setup/roster", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", ...(draftId ? { "x-setup-id": draftId } : {}) },
+      body: JSON.stringify({ brand, category: cat, audience: aud || undefined, competitors: comps }),
+      signal: AbortSignal.timeout(120_000),
+    }).catch(() => null);
+    if (!res?.ok) return;
+    const data = await res.json().catch(() => null);
+    const roster = data?.roster as
+      | { competitors: { name: string; role: RosterRole; note: string }[]; clientSellsTo: string[]; failedOpen?: boolean }
+      | undefined;
+    if (!roster || roster.failedOpen) return;
+    setRosterRoles((prev) => {
+      const next: RosterRoles = fresh ? {} : { ...(prev ?? {}) };
+      for (const v of roster.competitors) if (fresh || !(v.name in next)) next[v.name] = v.role;
+      return next;
+    });
+    setRosterNotes((prev) => {
+      const next = fresh ? {} : { ...prev };
+      for (const v of roster.competitors) if (fresh || !(v.name in next)) next[v.name] = v.note;
+      return next;
+    });
+    setClientSellsTo(roster.clientSellsTo);
+  }
+
+  /** The chip toggle - the human gate on the classifier's facts. */
+  function toggleRole(c: string) {
+    setRosterRoles((prev) => ({
+      ...(prev ?? {}),
+      [c]: rosterRoleOf(c, prev) === "upstream" ? "same_seat" : "upstream",
+    }));
   }
 
   async function estimate() {
@@ -404,6 +470,9 @@ export function SetupWizard({ mode, brand, draft, engineOptions, onClose, onCrea
     setCompetitors(data.profile.competitors);
     setCompDraft("");
     setAudience(data.profile.audience);
+    // Type the estimated roster by who each rival sells to - silent; the
+    // pills show "rival" until the verdicts land.
+    void classifyRoster(data.profile.category, data.profile.audience, data.profile.competitors, true);
     // Warm the ~45s market read while the user reviews the form - by
     // confirm time it is cached and the scenarios gate opens instantly.
     gridApi.warmRead(data.profile.category, data.profile.audience);
@@ -424,6 +493,8 @@ export function SetupWizard({ mode, brand, draft, engineOptions, onClose, onCrea
       mode, step: at, studyName, grid: g, engineSet,
       machinePrompts: mp,
       reviewedPrompts: rp,
+      ...(rosterRoles ? { rosterRoles, rosterNotes } : {}),
+      ...(clientSellsTo ? { clientSellsTo } : {}),
     };
     // Bounded, never-throwing: a stalled save must not wedge the "Saving"
     // label or hang requestClose - the next step transition saves again.
@@ -520,9 +591,9 @@ export function SetupWizard({ mode, brand, draft, engineOptions, onClose, onCrea
     setCompetitors(comps);
     setCompDraft("");
     const readChanged = servedRead !== readKey(category, audience);
-    const rivalsChanged = servedRivals !== comps.join("|");
+    const rivalsChanged = servedRivals !== rivalsKey(comps, rosterRoles);
     setServedRead(readKey(category, audience));
-    setServedRivals(comps.join("|"));
+    setServedRivals(rivalsKey(comps, rosterRoles));
     if (mode === "grid") {
       if (!readChanged && grid) {
         if (!rivalsChanged) {
@@ -859,7 +930,7 @@ export function SetupWizard({ mode, brand, draft, engineOptions, onClose, onCrea
   async function confirmPrompts() {
     if (!grid) return;
     setPromptsNotice(null);
-    const { authored, body } = cellReviewRequest(grid, brand, allCompetitors(), category, audience);
+    const { authored, body } = cellReviewRequest(grid, brand, allCompetitors(), category, audience, rosterRoles);
     if (authored.length === 0) {
       proceedPrompts(grid);
       return;
@@ -944,7 +1015,7 @@ export function SetupWizard({ mode, brand, draft, engineOptions, onClose, onCrea
         // to it later restores its paraphrases for free.
         cells[it.index] = {
           ...c, text: it.suggestion, original: it.suggestion, ...swapPhrasings(c, it.suggestion),
-          spec: c.spec ? deriveCheckSpec({ ...c, text: it.suggestion }, brand, allCompetitors(), category) : c.spec,
+          spec: c.spec ? deriveCheckSpec({ ...c, text: it.suggestion }, brand, sameSeatOf(allCompetitors(), rosterRoles), category) : c.spec,
         };
       } else {
         cells[it.index] = {
@@ -999,6 +1070,7 @@ export function SetupWizard({ mode, brand, draft, engineOptions, onClose, onCrea
         brand,
         category,
         competitors: allCompetitors(),
+        rosterRoles,
         audience: audience || undefined,
         candidates: authored.map(({ q }) => ({
           text: q.text,
@@ -1087,7 +1159,7 @@ export function SetupWizard({ mode, brand, draft, engineOptions, onClose, onCrea
    * confirm will make, fired on field blur, cached server-side. */
   function warmCellReview() {
     if (!grid) return;
-    const { authored, body } = cellReviewRequest(grid, brand, allCompetitors(), category, audience);
+    const { authored, body } = cellReviewRequest(grid, brand, allCompetitors(), category, audience, rosterRoles);
     if (authored.length === 0) return;
     const payload = JSON.stringify(body);
     if (lastWarm.current.cell === payload) return;
@@ -1114,6 +1186,7 @@ export function SetupWizard({ mode, brand, draft, engineOptions, onClose, onCrea
           category,
           audience: audience || undefined,
           competitors: allCompetitors(),
+          rosterRoles,
           engines: engineSet,
           grid: {
             moderators: grid!.moderators,
@@ -1152,6 +1225,7 @@ export function SetupWizard({ mode, brand, draft, engineOptions, onClose, onCrea
         brand, category,
         audience: audience || undefined,
         competitors: allCompetitors(),
+        rosterRoles,
         engines: engineSet,
         ...(usingGrid
           ? {
@@ -1213,8 +1287,11 @@ export function SetupWizard({ mode, brand, draft, engineOptions, onClose, onCrea
 
   /* --------------------------------- counts -------------------------------- */
 
-  const rivalCount = allCompetitors().length;
-  const brandNames = [brand, ...allCompetitors()];
+  // Upstream brands hold no cells and are free vocabulary: counts, the
+  // custom-cell rival picker and the branded/blind pill read same-seat only.
+  const seated = sameSeatOf(allCompetitors(), rosterRoles);
+  const rivalCount = seated.length;
+  const brandNames = [brand, ...seated];
   const promptCount =
     mode === "grid" ? gridPromptCount(grid) : (prompts ?? []).filter((p) => p.text.trim()).length;
   const passes = mode === "grid" ? 1 : FIRST_RUN_REPEATS;
@@ -1447,6 +1524,20 @@ export function SetupWizard({ mode, brand, draft, engineOptions, onClose, onCrea
                       {competitors.map((c) => (
                         <span key={c} className="inline-flex items-center gap-1.5 rounded-full bg-primary-soft px-3 py-1 text-[13px] font-medium text-primary">
                           {c}
+                          {rosterRoles && (
+                            <button
+                              type="button"
+                              onClick={(e) => { e.preventDefault(); toggleRole(c); }}
+                              title={`${rosterNotes[c] ? `${rosterNotes[c]}. ` : ""}Click to switch - an upstream brand gets no questions of its own.`}
+                              className={`rounded-full px-1.5 text-[11px] font-medium leading-5 ${
+                                rosterRoleOf(c, rosterRoles) === "upstream"
+                                  ? "bg-warning/10 text-warning"
+                                  : "bg-primary/10 text-primary/80"
+                              }`}
+                            >
+                              {rosterRoleOf(c, rosterRoles) === "upstream" ? "upstream - sells to the trade" : "rival"}
+                            </button>
+                          )}
                           <button type="button" aria-label={`remove ${c}`} onClick={() => setCompetitors(competitors.filter((x) => x !== c))} className="text-primary/70 hover:text-danger leading-none">×</button>
                         </span>
                       ))}

@@ -27,6 +27,9 @@ const Body = z.object({
   brand: z.string().trim().min(1).max(80),
   category: z.string().trim().min(1).max(120),
   competitors: z.array(z.string().trim().min(1).max(80)).max(12),
+  /** Typed roster (2026-09-30): competitor -> same_seat | upstream.
+   * Absent = every competitor same_seat (the untyped behavior). */
+  rosterRoles: z.record(z.string().max(80), z.enum(["same_seat", "upstream"])).optional(),
   audience: z.string().trim().max(160).optional(),
   base: z.record(z.string(), z.unknown()),
   /** The ACTIVE scenarios as confirmed at gate 1, with their journeys. */
@@ -76,6 +79,7 @@ export async function POST(req: Request) {
     base,
     scenarios,
     stages,
+    rosterRoles: parsed.data.rosterRoles,
     noWait: parsed.data.warm,
     meta: { source: cacheSource(auth) },
   });

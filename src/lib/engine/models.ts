@@ -43,3 +43,7 @@ export const INSTRUMENT_HELPER_MODEL = pick("INSTRUMENT_HELPER_MODEL", "gpt-5-mi
 /** Negative-verbatim explanations (runs/[id]/verbatims). Never followed
  * SUGGEST_MODEL, so it doesn't now. */
 export const VERBATIM_MODEL = process.env.VERBATIM_MODEL ?? "gpt-6-luna";
+/** Typed competitor roster: who each competitor sells to, intersected with
+ * the tracker's audience (roster.ts, 2026-09-30). One cached call per
+ * roster at setup; a world-knowledge job, so the full model. */
+export const ROSTER_MODEL = process.env.ROSTER_MODEL ?? "gpt-5";

@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, type ReactNode } from "react";
-import { deriveCheckSpec, type CellCheckSpec } from "@/lib/engine/battery_checks";
+import { deriveCheckSpec, sameSeatOf, type CellCheckSpec, type RosterRoles } from "@/lib/engine/battery_checks";
 
 /**
  * Buyer Landscape setup pieces: the state shape, the gate API calls, and
@@ -454,6 +454,9 @@ export interface GridSetupArgs {
   category: string;
   competitors: string[];
   audience: string;
+  /** Typed roster (2026-09-30): competitor -> same_seat | upstream, sent
+   * with every competitors list. Absent = all same_seat (untyped). */
+  rosterRoles?: RosterRoles;
   /** The plan's scenario cap; defaults to the absolute maximum. */
   maxScenarios?: number;
   state: GridState | null;
@@ -848,7 +851,7 @@ export function useGridSetup(a: GridSetupArgs) {
     const data = await post<{ cells: Omit<GridCellUi, "phrasings">[] }>(
       "/api/setup/grid/cells",
       {
-        brand: a.brand, category: a.category, competitors: a.competitors,
+        brand: a.brand, category: a.category, competitors: a.competitors, rosterRoles: a.rosterRoles,
         audience: a.audience || undefined,
         base: a.state.moderators,
         scenarios: a.state.scenarios,
@@ -925,7 +928,7 @@ export function useGridSetup(a: GridSetupArgs) {
         const data = await post<{ phrasings: GridPhrasing[][] }>(
           "/api/setup/grid/phrasings",
           {
-            brand: a.brand, category: a.category, competitors: a.competitors,
+            brand: a.brand, category: a.category, competitors: a.competitors, rosterRoles: a.rosterRoles,
             audience: a.audience || undefined,
             base: st.moderators,
             scenarios: st.scenarios,
@@ -1013,7 +1016,7 @@ export function useGridSetup(a: GridSetupArgs) {
       idx.map(async (i) => {
         const c = st.cells[i];
         const data = await post<{ phrasings: GridPhrasing[][] }>("/api/setup/grid/phrasings", {
-          brand: a.brand, category: a.category, competitors: a.competitors,
+          brand: a.brand, category: a.category, competitors: a.competitors, rosterRoles: a.rosterRoles,
           audience: a.audience || undefined,
           base: st.moderators, scenarios: st.scenarios,
           cells: [{ stage: c.stage, situation: c.situation, angle: c.angle, mode: c.mode ?? null, text: c.text, spec: c.spec ?? undefined, concern: c.concern ?? undefined }],
@@ -1083,7 +1086,7 @@ export function useGridSetup(a: GridSetupArgs) {
     // the gate stays usable.
     a.setError(null);
     const data = await post<{ text: string; spec?: CellCheckSpec }>("/api/setup/grid/cell", {
-      brand: a.brand, category: a.category, competitors: a.competitors,
+      brand: a.brand, category: a.category, competitors: a.competitors, rosterRoles: a.rosterRoles,
       audience: a.audience || undefined,
       base: a.state.moderators,
       scenarios: a.state.scenarios,
@@ -1096,7 +1099,7 @@ export function useGridSetup(a: GridSetupArgs) {
     let generated: GridPhrasing[] = [];
     if (a.state.step === "phrasings") {
       const pd = await post<{ phrasings: GridPhrasing[][] }>("/api/setup/grid/phrasings", {
-        brand: a.brand, category: a.category, competitors: a.competitors,
+        brand: a.brand, category: a.category, competitors: a.competitors, rosterRoles: a.rosterRoles,
         audience: a.audience || undefined,
         base: a.state.moderators,
         scenarios: a.state.scenarios,
@@ -1166,7 +1169,7 @@ export function useGridSetup(a: GridSetupArgs) {
     ].slice(-8);
     a.setError(null);
     const data = await post<{ text: string; spec?: CellCheckSpec }>("/api/setup/grid/cell", {
-      brand: a.brand, category: a.category, competitors: a.competitors,
+      brand: a.brand, category: a.category, competitors: a.competitors, rosterRoles: a.rosterRoles,
       audience: a.audience || undefined,
       base: a.state.moderators,
       scenarios: a.state.scenarios,
@@ -1223,7 +1226,7 @@ export function useGridSetup(a: GridSetupArgs) {
       text: "",
       // A spec-era cell from birth: the server re-derives its design from
       // whatever the user types, so the empty-seed copy is only a marker.
-      spec: deriveCheckSpec({ stage: stageKey, angle, text: "" }, a.brand, a.competitors, a.category),
+      spec: deriveCheckSpec({ stage: stageKey, angle, text: "" }, a.brand, sameSeatOf(a.competitors, a.rosterRoles), a.category),
       phrasings: [],
     };
     const cells = [...state.cells];
@@ -1257,7 +1260,7 @@ export function useGridSetup(a: GridSetupArgs) {
               ...q, text: alts[next],
               original: cycledToUser ? q.original : alts[next],
               // Keep the carried spec in step with the wording it describes.
-              spec: q.spec ? deriveCheckSpec({ ...q, text: alts[next] }, a.brand, a.competitors, a.category) : q.spec,
+              spec: q.spec ? deriveCheckSpec({ ...q, text: alts[next] }, a.brand, sameSeatOf(a.competitors, a.rosterRoles), a.category) : q.spec,
               alts, altIdx: next, userAlts: [...userAlts],
               ...swapPhrasings(q, alts[next]),
             }
@@ -1289,7 +1292,7 @@ export function useGridSetup(a: GridSetupArgs) {
       method: "POST",
       headers: { "Content-Type": "application/json", ...(a.setupId ? { "x-setup-id": a.setupId } : {}) },
       body: JSON.stringify({
-        brand: a.brand, category: a.category, competitors: a.competitors,
+        brand: a.brand, category: a.category, competitors: a.competitors, rosterRoles: a.rosterRoles,
         audience: a.audience || undefined,
         base: st.moderators, scenarios: st.scenarios, stageKeys: st.keptStages,
         warm: true,
@@ -1322,7 +1325,7 @@ export function useGridSetup(a: GridSetupArgs) {
           method: "POST",
           headers: { "Content-Type": "application/json", ...(a.setupId ? { "x-setup-id": a.setupId } : {}) },
           body: JSON.stringify({
-            brand: a.brand, category: a.category, competitors: a.competitors,
+            brand: a.brand, category: a.category, competitors: a.competitors, rosterRoles: a.rosterRoles,
             audience: a.audience || undefined,
             base: st.moderators, scenarios: st.scenarios,
             cells: slice.map((i) => ({

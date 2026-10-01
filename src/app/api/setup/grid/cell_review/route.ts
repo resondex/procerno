@@ -5,7 +5,7 @@ import { cacheSource, requireAuthOrDemo } from "@/lib/auth";
 import { apiKeyConfigured } from "@/lib/engine/providers";
 import { checkDesignFidelity, reviewCells, type CellFlag } from "@/lib/engine/instrument";
 import {
-  checkPromptAgainstSpec, checkPromptBrandRule, deriveCheckSpec, stageDesignIntent, type CellCheckSpec,
+  checkPromptAgainstSpec, checkPromptBrandRule, deriveCheckSpec, sameSeatOf, stageDesignIntent, type CellCheckSpec,
 } from "@/lib/engine/battery_checks";
 import { store } from "@/lib/store";
 
@@ -15,6 +15,9 @@ const Body = z.object({
   brand: z.string().trim().min(1).max(80),
   category: z.string().trim().min(1).max(120),
   competitors: z.array(z.string().trim().min(1).max(80)).max(12),
+  /** Typed roster (2026-09-30): competitor -> same_seat | upstream.
+   * Absent = every competitor same_seat (the untyped behavior). */
+  rosterRoles: z.record(z.string().max(80), z.enum(["same_seat", "upstream"])).optional(),
   audience: z.string().trim().max(160).optional(),
   /** The user-edited or user-written prompts to check, each with its
    * cell's design context; `original` is the last machine wording. */
@@ -67,6 +70,9 @@ export async function POST(req: Request) {
   if (!parsed.success) {
     return NextResponse.json({ error: "bad request" }, { status: 400 });
   }
+  // Typed roster: every check below scopes to the SAME-SEAT rivals -
+  // upstream brands are free vocabulary (no roles = the full list).
+  const competitors = sameSeatOf(parsed.data.competitors, parsed.data.rosterRoles);
   // Spec-era candidates get their cell's design re-derived from the seed
   // (the edited text itself for a seed edit). A seed is judged against
   // the stage intent (a seed cannot be its own yardstick); a paraphrase
@@ -77,7 +83,7 @@ export async function POST(req: Request) {
     if (!seedText) return null;
     return deriveCheckSpec(
       { stage: c.stageKey, angle: c.angle, text: seedText },
-      parsed.data.brand, parsed.data.competitors, parsed.data.category
+      parsed.data.brand, competitors, parsed.data.category
     );
   });
   const withDesign = parsed.data.candidates
@@ -95,7 +101,7 @@ export async function POST(req: Request) {
     reviewCells({
       brand: parsed.data.brand,
       category: parsed.data.category,
-      competitors: parsed.data.competitors,
+      competitors,
       audience: parsed.data.audience || null,
       candidates: parsed.data.candidates.map((c) => ({
         text: c.text,
@@ -134,7 +140,7 @@ export async function POST(req: Request) {
       ? checkPromptAgainstSpec({ text: c.text, spec, category: parsed.data.category })
       : checkPromptBrandRule({
           text: c.text, stage: c.stageKey, angle: c.angle,
-          brand: parsed.data.brand, competitors: parsed.data.competitors,
+          brand: parsed.data.brand, competitors,
           category: parsed.data.category,
         });
     if (mech.length > 0) {

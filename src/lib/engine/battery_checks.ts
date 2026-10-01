@@ -10,6 +10,56 @@
  * of every hand-fixed prompt must flag, the fixed battery must pass
  * (~/Documents/procerno_eval/internal_models/conformance/checker_fixture.md).
  */
+/* -------------------- typed competitor roster (2026-09-30) ----------------
+ * Every competitor is typed by WHO IT SELLS TO; its per-tracker ROLE is the
+ * intersection with the tracker's audience (engine/roster.ts classifies,
+ * the wizard's chip toggle is the human gate):
+ * - same_seat: the audience can buy it - full cell rights (angle slots,
+ *   writer rivals, forbidden/required brand sets);
+ * - upstream: it sells to the rivals / the trade, not the audience (Visa
+ *   and Mastercard on an AmEx consumer tracker) - no cells ever; it is
+ *   free vocabulary and concern-planner context ("weather").
+ * Absent roles = every competitor same_seat = the untyped behavior,
+ * byte-identical. Order is preserved: the roster's own order still decides
+ * which same-seat rivals get the angle slots. */
+export type RosterRole = "same_seat" | "upstream";
+export type RosterRoles = Record<string, RosterRole>;
+
+/** The angle-slot budget: comparison / alternatives cells go to the first
+ * this-many same-seat rivals. */
+export const ANGLE_SLOTS = 4;
+
+/** A competitor's role: exact name first, then a case/punctuation-blind
+ * match; anything unlisted (a hand-added rival) is same_seat. */
+export function rosterRoleOf(name: string, roles?: RosterRoles | null): RosterRole {
+  if (!roles) return "same_seat";
+  const exact = roles[name];
+  if (exact === "upstream" || exact === "same_seat") return exact;
+  const k = key(name);
+  for (const [n, r] of Object.entries(roles)) if (key(n) === k) return r === "upstream" ? "upstream" : "same_seat";
+  return "same_seat";
+}
+
+/** The rivals a buyer actually weighs, in roster order. Returns the input
+ * array itself when nothing is upstream, so untyped callers see no change. */
+export function sameSeatOf(competitors: string[], roles?: RosterRoles | null): string[] {
+  if (!roles || !competitors.some((c) => rosterRoleOf(c, roles) === "upstream")) return competitors;
+  return competitors.filter((c) => rosterRoleOf(c, roles) !== "upstream");
+}
+
+/** The upstream brands (weather), in roster order. */
+export function upstreamOf(competitors: string[], roles?: RosterRoles | null): string[] {
+  if (!roles) return [];
+  return competitors.filter((c) => rosterRoleOf(c, roles) === "upstream");
+}
+
+/** The comparison / alternatives angle slots for a roster: the first
+ * ANGLE_SLOTS same-seat rivals - an upstream entry never holds a slot, and
+ * never pushes a same-seat rival out of one by its list position. */
+export function angleRivals(competitors: string[], roles?: RosterRoles | null): string[] {
+  return sameSeatOf(competitors, roles).slice(0, ANGLE_SLOTS);
+}
+
 /** Stages whose prompts MUST name the client brand (A3, 2026-09-27; owned
  * here so instrument can import the checks without a cycle). */
 export const MUST_NAME_STAGES = new Set([
