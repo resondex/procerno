@@ -196,14 +196,16 @@ export const PLAN_SCENARIO_CAPS: Record<Plan, number> = {
 
 /** Worry picks included per tier (the worries module's gate): each pick
  * is one worry at one stance - a worry measured at two stances costs
- * two. Tyler 2026-10-01: "3 to 5 depending on tier". PROVISIONAL numbers,
- * like the scenario caps. */
-export const PLAN_WORRY_ALLOWANCE: Record<Plan, number> = {
-  free: 3,
-  starter: 3,
-  growth: 4,
-  pro: 5,
-  enterprise: 5,
+ * two. UNCAPPED on every tier (Tyler 2026-10-01): the worries surface
+ * collects at monthly cadence, so volume is cheap (~$3/worry/month at
+ * the full panel) and the gate's recommendation layer, not a hard cap,
+ * steers the pick count. null = no cap; a number re-caps a tier. */
+export const PLAN_WORRY_ALLOWANCE: Record<Plan, number | null> = {
+  free: null,
+  starter: null,
+  growth: null,
+  pro: null,
+  enterprise: null,
 };
 
 /** Engine panel each tier may run, chosen so per-run vendor cost scales

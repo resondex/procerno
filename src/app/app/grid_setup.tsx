@@ -2458,14 +2458,15 @@ export function WorriesGate({
 }: {
   state: GridState;
   setState: (s: GridState) => void;
-  cap: number;
+  /** null = uncapped (the recommendation layer steers volume). */
+  cap: number | null;
   busy: boolean;
 }) {
   const pool = state.worryPool ?? [];
   const picks = state.worries ?? [];
   const has = (worry: string, stage: string) =>
     picks.some((p) => p.concern === worry && p.stage === stage);
-  const atCap = picks.length >= cap;
+  const atCap = cap !== null && picks.length >= cap;
   const toggle = (worry: string, stage: string) => {
     if (busy) return;
     if (has(worry, stage)) {
@@ -2477,10 +2478,11 @@ export function WorriesGate({
   return (
     <div className="grid gap-3 max-w-3xl">
       <p className="m-0 text-[12px] text-ink-2">
-        The worries buyers actually voice about your brand - pick the ones worth measuring
-        (up to {cap}). Each chip is one question battery: a prospect deciding, a customer
+        The worries buyers actually voice about your brand - pick the ones worth measuring{cap !== null ? ` (up to ${cap})` : ""}.
+        Each chip is one question battery: a prospect deciding, a customer
         thinking of leaving, or the renewal moment. A worry can be measured at more than
-        one moment - each costs a pick.
+        one moment{cap !== null ? " - each costs a pick" : ""}. Worries collect on monthly
+        waves, so extra picks cost little.
       </p>
       {pool.map((w) => {
         const pickedAny = w.stances.some((s) => has(w.worry, s));

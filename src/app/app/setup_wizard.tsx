@@ -367,9 +367,10 @@ export function SetupWizard({ mode, brand, draft, engineOptions, onClose, onCrea
    * to the most generous tier so the moment before the plan loads can
    * never falsely block; it only tightens downward. */
   const [customAllowance, setCustomAllowance] = useState(12);
-  /** Worry picks the plan includes (PLAN_WORRY_ALLOWANCE); defaults to the
-   * most generous tier, tightens when the plan loads. */
-  const [worryCap, setWorryCap] = useState(5);
+  /** Worry picks the plan includes (PLAN_WORRY_ALLOWANCE); null = no cap
+   * (every tier today - worries ride the monthly cadence, so the
+   * recommendation layer steers volume, not a hard limit). */
+  const [worryCap, setWorryCap] = useState<number | null>(null);
 
   const gridApi = useGridSetup({
     setupId: draftId,
@@ -387,7 +388,7 @@ export function SetupWizard({ mode, brand, draft, engineOptions, onClose, onCrea
     if (!st) return;
     if (st.worries === undefined && (st.worryPool?.length ?? 0) > 0) {
       const picks = (st.worryPool ?? [])
-        .slice(0, worryCap)
+        .slice(0, worryCap ?? Infinity)
         .map((w) => ({ concern: w.worry, stage: w.recommended }));
       setGrid({ ...st, worries: picks });
     }
@@ -1409,11 +1410,17 @@ export function SetupWizard({ mode, brand, draft, engineOptions, onClose, onCrea
     };
   } else if (step === "worries" && grid) {
     const picked = grid.worries?.length ?? 0;
-    footerLeft = grid.worryPool ? `${picked} of ${worryCap} worries picked` : "";
+    footerLeft = grid.worryPool
+      ? worryCap === null
+        ? `${picked} worries picked - they collect on monthly waves`
+        : `${picked} of ${worryCap} worries picked`
+      : "";
     footerAction = {
       label: busy ?? "These are my worries",
       onClick: () => goTo("stages"),
-      disabled: busy !== null || !grid.worryPool || picked === 0 || picked > worryCap,
+      disabled:
+        busy !== null || !grid.worryPool || picked === 0 ||
+        (worryCap !== null && picked > worryCap),
     };
   } else if (step === "stages" && grid) {
     const cells = gridCellCount(grid, rivalCount);
