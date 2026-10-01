@@ -93,7 +93,12 @@ const CACHE_TTL_MS = 183 * 24 * 3600 * 1000;
 // never appears in the words (a persona written into neutral comparison
 // text re-pins the cell to one buyer's story); situational cells keep the
 // leak deliberately - there the circumstance belongs in the text.
-const STYLE_VERSION = "s12";
+// s13 = the circumstance/doubt boundary enforced (2026-10-01, DECIDED):
+// pricing design lines demand value-MATH asks, worry lines demand
+// VERDICT asks, premium_worth holds the tier-as-class open-choice form
+// (never one named brand's own worth) - writer rules and design lines
+// changed together.
+const STYLE_VERSION = "s13";
 
 /** Versions the DETERMINISTIC seed-check set (everything seedRule runs:
  * checkPromptAgainstSpec + blind_missing_category + scenario_label_leak).
@@ -522,7 +527,7 @@ export function stageLibrary(m: Moderators): LibraryStage[] {
       label: considered ? "Premium vs. basic brands" : "Splurge or save",
       layer: "decision", situational: false, rivals: "none", tag: "picks",
       recommended: !considered,
-      hint: "Across brands, not tiers: whether the premium maker genuinely beats the basic/store option - asked from both sides (is the expensive one worth it, is the cheap one good enough).",
+      hint: "Across brands, not tiers: whether the premium maker genuinely beats the basic/store option - asked from both sides (is the expensive one worth it, is the cheap one good enough). Never one named brand's own worth - that form is a worry cell's job.",
       why: !considered
         ? "A habitual market compresses comparison into one shelf question: is the premium maker worth it."
         : "Your considered market decomposes this moment into Shortlist, Comparison, and Pricing instead.",
@@ -1967,6 +1972,10 @@ const CELL_WRITER_SYSTEM =
           "reviews', or a features-only essay ask. When the category is a " +
           "RETAILER category, the ask is which retailer to buy from, not " +
           "which product to buy.\n" +
+          "- premium_worth: weigh the category's premium maker(s) as a " +
+          "TIER against basic/store options and invite named picks; never " +
+          "ask whether one named brand is worth it - that form belongs to " +
+          "the worry cells.\n" +
           "- The category term is vocabulary: use the study category's own " +
           "words ('tortilla chips', 'beauty retailers'), never a looser " +
           "genericization ('chips', 'stores') in blind cells - the " +
@@ -2182,10 +2191,10 @@ export async function generateWorries(input: {
     churn_triggers: "churn_triggers - an existing customer voices this worry as a reason to leave",
     renewal: "renewal - the keep-or-cancel moment when payment comes due",
   };
-  // worries3: pools carry the recommendation plan (recommend[], model
-  // field "plan") - earlier eras either lack it (worries1) or drew it
-  // empty under the ambiguous recommend/recommended wording (worries2).
-  const key = cacheKey("worries3", [
+  // worries4: price worries are attitude-shaped per the circumstance/doubt
+  // boundary (the pricing battery owns the math). worries3 lacked the
+  // hygiene line; worries2 drew empty plans; worries1 predates plans.
+  const key = cacheKey("worries4", [
     CONCERNS_MODEL, input.brand, input.category, input.audience,
     input.scenarios.map((s) => s.label).join(","), offered.join(","),
   ]);
@@ -2201,7 +2210,10 @@ export async function generateWorries(input: {
             "category - each a different coarse class (price/value, quality, " +
             "performance, complexity, policy/trust, availability, service, " +
             "lock-in, ...), most widely-voiced first. At most TWO " +
-            "price/cost/value-class worries in the whole list. Real worries " +
+            "price/cost/value-class worries in the whole list, and a price " +
+            "worry is ATTITUDE-shaped (the fee feels high, not worth " +
+            "renewing) - never a request to run the value math; the " +
+            "pricing battery owns the math. Real worries " +
             "people actually raise, never invented ones.\n" +
             "For each worry give: `worry` (2-6 plain words), `detail` (ONE " +
             "plain sentence of what buyers actually say - their words, not " +

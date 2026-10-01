@@ -168,8 +168,15 @@ export function seedDesignLine(
   // concern (2026-09-30) names the subject outright - the strongest form.
   if (DOUBT_CHECK_STAGES.has(stage))
     return concern
-      ? `Question design (doubt): the question voices the buyer's concern about ${brand} on THIS designed subject: ${concern}. THAT worry must be the question's MAIN point - a question whose main worry is something else does not satisfy the design even if it mentions the subject in passing. Same concern, differently worded by a different person. Designed as: "${seed}"`
-      : `Question design (doubt): the question voices the SAME concern about ${brand} as the designed question below - the same subject and worry, differently worded by a different person. A DIFFERENT concern about ${brand} does not satisfy the design. Designed as: "${seed}"`;
+      ? `Question design (doubt): the question voices the buyer's concern about ${brand} on THIS designed subject: ${concern}. THAT worry must be the question's MAIN point - a question whose main worry is something else does not satisfy the design even if it mentions the subject in passing. A value-math request without the stated worry does not voice it. Same concern, differently worded by a different person. Designed as: "${seed}"`
+      : `Question design (doubt): the question voices the SAME concern about ${brand} as the designed question below - the same subject and worry, differently worded by a different person. A DIFFERENT concern about ${brand} does not satisfy the design, and neither does a value-math request without the stated worry. Designed as: "${seed}"`;
+  // The circumstance/doubt boundary (DECIDED 2026-10-01): pricing is value
+  // MATH, worries are VERDICTS - each design line polices its own side so
+  // the two instruments cannot trade clothes.
+  if (stage === "pricing")
+    return `Question design (value math): the question asks for ${brand}'s price/value accounting - what it costs, whether it pays off for the asker's usage - and leaves the verdict to the answer. A question that presupposes the verdict ("a ripoff", "not worth it, right?") is a doubt, not a pricing ask, and does not satisfy the design. Designed as: "${seed}"`;
+  if (stage === "premium_worth")
+    return `Question design (premium tier): the question weighs the category's premium maker(s) as a TIER against basic/store options and invites named picks - from either side (is the expensive one worth it, is the cheap one good enough). Judging one named brand's own worth does not satisfy the design. Designed as: "${seed}"`;
   if (!PLAN_CHECK_STAGES.has(stage))
     // Every other stage gets the generic same-question line (2026-09-29:
     // open/awareness/comparison cells drifted with no consistency check -
@@ -191,7 +198,11 @@ export function seedDesignLine(
  * the seed). */
 export function stageDesignIntent(stage: string, brand: string, concern?: string | null): string | null {
   if (DOUBT_CHECK_STAGES.has(stage))
-    return `Question design (doubt): the question itself voices the buyer's concern, complaint or "is it still worth it" doubt about ${brand}. A neutral lookup, spec request or how-to on the same topic does not satisfy the design.${concern ? ` The DESIGNED concern is: ${concern} - the question must voice that worry, not a different one.` : ""}`;
+    return `Question design (doubt): the question itself voices the buyer's concern, complaint or "is it still worth it" doubt about ${brand}. A neutral lookup, spec request, how-to or value-math request on the same topic does not satisfy the design - the math ask belongs to the pricing cells.${concern ? ` The DESIGNED concern is: ${concern} - the question must voice that worry, not a different one.` : ""}`;
+  if (stage === "pricing")
+    return `Question design (value math): the question asks for ${brand}'s price/value accounting - what it costs, whether it pays off for the asker's usage - and leaves the verdict to the answer. A question that presupposes the verdict ("a ripoff", "not worth it, right?") is a doubt, not a pricing ask.`;
+  if (stage === "premium_worth")
+    return `Question design (premium tier): the question weighs the category's premium maker(s) as a TIER against basic/store options and invites named picks - from either side. Judging one named brand's own worth does not satisfy it - that is a worry cell's job.`;
   if (!PLAN_CHECK_STAGES.has(stage)) return null;
   const intent =
     stage === "problem_resolution"
