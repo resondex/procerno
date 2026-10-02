@@ -3158,10 +3158,6 @@ export async function generateGrid(input: {
         }
       })
     );
-    // Battery-wide passes moved to runBatteryPasses (2026-10-02 review gap
-    // #3): skipped or thrown passes used to be lost forever once units were
-    // terminal - a completion marker now retries them on the next serve.
-    await maybeRunPasses();
     } finally {
       await hb.stop();
     }
@@ -3306,9 +3302,8 @@ export async function generateGrid(input: {
    * the eras) is written only when both passes ran uncut; a serve that finds
    * it absent re-runs them. */
   const passesKey = cacheKey("grid_passes1", [...unitKeys]);
-  let passesCut = false;
-  const runBatteryPasses = async (): Promise<void> => {
-    passesCut = false;
+  const runBatteryPasses = async (): Promise<boolean> => {
+    let passesCut = false;
     // CROSS-CELL CONCERN DIVERSITY (2026-09-29 audit): every per-cell check
     // passes when all of a brand's doubt cells converge on ONE worry (jira:
     // four performance objections; Netflix: price six times) - the doubt
@@ -3590,13 +3585,31 @@ export async function generateGrid(input: {
         console.error("pricing trade-off diversity pass failed open:", err);
       }
     }
+    return passesCut;
   };
+  /** One coalesced run of the battery passes per unit-key era: concurrent
+   * requests WAIT on the claim instead of double-running the labeler and
+   * racing regens (2026-10-02 review round 3, items 3/4). "1" = ran uncut
+   * (the completion marker); a cut run returns null, which coalesced stamps
+   * retryable so the next serve re-enters. Whether this request ran the
+   * passes itself or waited on another request's run, they may have
+   * rewritten cell text, so resolved is rebuilt from the store afterwards. */
   const maybeRunPasses = async (): Promise<void> => {
     if (process.env.PHRASINGS_CHECKS === "0") return;
     try {
-      await runBatteryPasses();
-      if (!passesCut) await store.cacheSet(passesKey, "1", stampOf(input));
-      else console.warn("battery passes cut short - retried on the next serve");
+      const out = await coalesced<string>(passesKey, { meta: stampOf(input) }, async () => {
+        const cut = await runBatteryPasses();
+        if (cut) console.warn("battery passes cut short - retried on the next serve");
+        return cut ? null : "1";
+      });
+      if (out === null) return; // cut, or the wait budget blew - next serve retries
+      const freshRaw = await store.cacheGetMany(unitKeys, CACHE_TTL_MS);
+      unitKeys.forEach((k, u) => {
+        const raw = freshRaw.get(k);
+        if (!raw) return;
+        const v = valueOf(raw);
+        if (v && v.cells.length > 0) resolved[u] = scrub(v.cells);
+      });
     } catch (err) {
       console.error("battery passes failed open:", err);
     }
@@ -3746,13 +3759,22 @@ export async function generateGrid(input: {
   };
 
   await Promise.all([generate(mine, seen, preCells, triesIn), waitForTheirs()]);
-  // Gap #3 (2026-10-02 review): a fully-cached serve never entered generate,
-  // so battery passes skipped by an earlier deadline or thrown labeling call
-  // were lost forever. The completion marker brings them back.
-  if (mine.length === 0 && !input.noWait && process.env.PHRASINGS_CHECKS !== "0"
-      && resolved.every((r) => r !== null && r.length > 0)) {
-    const passesDone = await store.cacheGet(passesKey, CACHE_TTL_MS).catch(() => null);
-    if (!passesDone) await maybeRunPasses();
+  // ONE call site for the battery passes (2026-10-02 review round 3, items
+  // 3/4): the old tail call inside generate could run twice (an orphan
+  // takeover calls generate again) and could stamp a PARTIAL battery (other
+  // units still pending elsewhere). Now: only when every unit is resolved
+  // and non-empty (or deliberately exhausted); when this request generated
+  // something, the marker is pre-invalidated so a stale completion cannot
+  // short-circuit the fresh battery's passes.
+  if (process.env.PHRASINGS_CHECKS !== "0"
+      && resolved.every((r, u) => (r !== null && r.length > 0) || exhausted.has(u))) {
+    if (mine.length > 0) {
+      await store.cacheSet(passesKey, JSON.stringify({ __pending: 0 }), stampOf(input)).catch(() => {});
+      await maybeRunPasses();
+    } else {
+      const done = await store.cacheGet(passesKey, CACHE_TTL_MS).catch(() => null);
+      if (!done || pendingMarkerAt(done) !== null) await maybeRunPasses();
+    }
   }
   const all = resolved.flatMap((r) => r ?? []);
   // Ternaries, not if-guards - see composeInstrument. Unresolved units
