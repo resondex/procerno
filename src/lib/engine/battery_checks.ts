@@ -517,10 +517,17 @@ function quantities(text: string, brandVocab: RegExp[]): string[] {
  * "Label-ish:" opener whose distinctive words come from a label ("Camera-
  * first buy:" from the camera-first scenario). Any label counts - the
  * jira leak carried a DIFFERENT cell's scenario label. */
-export function scenarioLabelLeak(text: string, labels: (string | null | undefined)[]): string | null {
+export function scenarioLabelLeak(text: string, labels: (string | null | undefined)[], category?: string): string | null {
   const t = text.toLowerCase();
   for (const raw of labels) {
     const label = (raw ?? "").trim();
+    // r3 (2026-10-01): a label that NAMES THE CATEGORY ("First credit card")
+    // is plain buyer vocabulary the plan cannot reserve - the substring rule
+    // was fighting the voiced-circumstance requirement head on ("this would
+    // be my first credit card" is exactly what we demand). Plan-register
+    // labels ("Party hosting cart", "Mid-market scale-up") stay caught, and
+    // the colon-opener heuristic below still catches meta-headers.
+    if (category && textNamesCategory(label, category)) continue;
     if (label.length >= 8 && t.includes(label.toLowerCase())) return label;
   }
   const m = text.match(/^([A-Za-z][A-Za-z0-9 &/-]{3,40}):/);
@@ -572,7 +579,7 @@ export function checkBattery(input: {
       // Path-independent: a prompt that copies a scenario LABEL - any
       // scenario's, full or as a "Label:" opener - shipped the plan's
       // vocabulary instead of voicing the circumstance.
-      const leak = scenarioLabelLeak(t, [cell.situation, ...(input.scenarioLabels ?? [])]);
+      const leak = scenarioLabelLeak(t, [cell.situation, ...(input.scenarioLabels ?? [])], input.category);
       if (leak)
         findings.push({ cell: i, check: "scenario_label_leak", text: t, detail: `copies the scenario label "${leak}"` });
       // A cell carrying a typed spec is verified AGAINST it; a legacy cell

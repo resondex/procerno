@@ -98,7 +98,7 @@ const CACHE_TTL_MS = 183 * 24 * 3600 * 1000;
 // VERDICT asks, premium_worth holds the tier-as-class open-choice form
 // (never one named brand's own worth) - writer rules and design lines
 // changed together.
-const STYLE_VERSION = "s15";
+const STYLE_VERSION = "s16";
 
 /** Versions the DETERMINISTIC seed-check set (everything seedRule runs:
  * checkPromptAgainstSpec + blind_missing_category + scenario_label_leak).
@@ -114,7 +114,7 @@ const STYLE_VERSION = "s15";
  * 7's unversioned serve-time re-check had no terminal state). Bump when
  * a deterministic check changes meaning; bumping costs one free re-judge
  * per unit, and model calls only for units the new rules reject. */
-export const SEED_RULES_VERSION = "r2"; // r2 (2026-10-01): calendar-year, 60-word ceiling, segment vocabulary
+export const SEED_RULES_VERSION = "r3"; // r2 (2026-10-01): calendar-year, 60-word ceiling, segment vocabulary; r3: category-naming labels exempt from the substring leak rule
 
 /** Brand forms that double as ordinary English words: only these demand a
  * capitalized occurrence to count as naming the brand ("2-3 services max"
@@ -2871,8 +2871,11 @@ export async function generateGrid(input: {
         // itself voice the stage's design - the paraphrase-level filter can
         // only starve a cell whose seed is off-design (the jira p50/p95
         // spec-lookup cell burned 17 candidates this way). Flagged seeds get
-        // ONE regeneration with the reason attached, re-checked; still-
-        // failing seeds stand with a loud log (never block generation).
+        // ONE regeneration with the reason attached, re-checked; a still-
+        // failing seed ships flagged-terminal like a mechanical violation
+        // (s16: the old path only logged "flagged for the gate" and shipped
+        // no flag - a Pixel off-design pricing seed sailed through clean).
+        const designFlagged = new Map<number, string>();
         if (process.env.PHRASINGS_CHECKS !== "0" && flat.length > 0) {
           try {
             const seedTargets = flat
@@ -2909,13 +2912,19 @@ export async function generateGrid(input: {
                 });
                 const cell2 = (JSON.parse(res2.choices[0]?.message?.content ?? "{}") as { cells?: { text?: string }[] }).cells?.[0];
                 const text2 = cell2?.text?.trim();
-                if (!text2) return;
-                const [again] = await checkDesignFidelity({ candidates: [{ text: text2, design: x.intent }], meta: input.meta });
-                if (again.voices) {
-                  console.warn(`seed self-healed [${x.c.stage}]: ${text2.slice(0, 90)}`);
-                  flat[x.i].text = humanize(text2);
+                // A design heal must also pass the mechanical rules (the
+                // brand-rule and concern-diversity heals already do this) -
+                // otherwise the terminal verdict flags the "fix".
+                const mech2ok = !!text2 && seedRule({ ...x.c, text: text2 }).length === 0;
+                const again = mech2ok
+                  ? (await checkDesignFidelity({ candidates: [{ text: text2!, design: x.intent }], meta: input.meta }))[0]
+                  : null;
+                if (again?.voices) {
+                  console.warn(`seed self-healed [${x.c.stage}]: ${text2!.slice(0, 90)}`);
+                  flat[x.i].text = humanize(text2!);
                 } else {
-                  console.warn(`seed regeneration still off-design [${x.c.stage}] - seed stands, flagged for the gate`);
+                  designFlagged.set(x.i, `off-design: ${again?.reason || verdicts[seedTargets.indexOf(x)]?.reason || "does not voice the cell's design"}`);
+                  console.warn(`seed regeneration still off-design [${x.c.stage}] - seed ships flagged for the gate`);
                 }
               }));
             }
@@ -2939,11 +2948,13 @@ export async function generateGrid(input: {
         // pass may stamp the version; a deadline-cut pass writes the unit
         // provisional so the next serve retries with a fresh budget.
         if (complete) {
-          flat.forEach((c) => {
+          flat.forEach((c, i) => {
             const mech = seedRule(c);
-            if (mech.length > 0) {
-              c.seedFlags = mech.map((m) => m.detail);
-              console.warn(`seed ships flagged-terminal [${c.stage}]: ${mech.map((m) => m.check).join(",")} | ${c.text.slice(0, 80)}`);
+            const design = designFlagged.get(i);
+            const flags = [...mech.map((m) => m.detail), ...(design ? [design] : [])];
+            if (flags.length > 0) {
+              c.seedFlags = flags;
+              console.warn(`seed ships flagged-terminal [${c.stage}]: ${[...mech.map((m) => m.check), ...(design ? ["off_design"] : [])].join(",")} | ${c.text.slice(0, 80)}`);
             } else delete c.seedFlags;
           });
         }
@@ -3107,7 +3118,7 @@ export async function generateGrid(input: {
       });
     // A seed that copies ANY scenario's label - full or as a "Label:"
     // opener - shipped the plan's vocabulary, not a person's circumstance.
-    const leak = scenarioLabelLeak(c.text, [c.situation, ...input.scenarios.map((s) => s.label)]);
+    const leak = scenarioLabelLeak(c.text, [c.situation, ...input.scenarios.map((s) => s.label)], input.category);
     if (leak)
       out.push({ check: "scenario_label_leak" as const, detail: `copies the scenario label "${leak}"` });
     // COMPARISON SEEDS ARE CIRCUMSTANCE-NEUTRAL (s11): a quantity in a
@@ -3183,8 +3194,14 @@ export async function generateGrid(input: {
             }
             if (served.every((c) => seedRule(c).length === 0)) {
               const clean = served.map((c) => {
+                // A rules-era re-judge can only re-derive MECHANICAL flags;
+                // an off-design flag came from the model check at generation
+                // and must survive the upgrade (the human clears it at the
+                // gate, or an edit/redraw re-keys the cell).
+                const kept = (c.seedFlags ?? []).filter((f) => f.startsWith("off-design:"));
                 const rest = { ...c };
-                delete rest.seedFlags;
+                if (kept.length > 0) rest.seedFlags = kept;
+                else delete rest.seedFlags;
                 return rest;
               });
               resolved[u] = clean;
