@@ -114,7 +114,7 @@ const STYLE_VERSION = "s29";
  * 7's unversioned serve-time re-check had no terminal state). Bump when
  * a deterministic check changes meaning; bumping costs one free re-judge
  * per unit, and model calls only for units the new rules reject. */
-export const SEED_RULES_VERSION = "r8"; // r4 (2026-10-01): r2 calendar-year/60-word/segment-vocab; r3 category-naming labels exempt from substring leak; r4 'standardization' in segment vocabulary; r5 directionless-switch string check; r6 punctuation-blind label-leak matching; r7-r8 switch direction detected by absence (no OS, no roster brand near switch vocabulary); cheaper bolt-on token on non-price concerns
+export const SEED_RULES_VERSION = "r9"; // r4 (2026-10-01): r2 calendar-year/60-word/segment-vocab; r3 category-naming labels exempt from substring leak; r4 'standardization' in segment vocabulary; r5 directionless-switch string check; r6 punctuation-blind label-leak matching; r7-r8 switch direction detected by absence (no OS, no roster brand near switch vocabulary); cheaper bolt-on token on non-price concerns
 
 /** Brand forms that double as ordinary English words: only these demand a
  * capitalized occurrence to count as naming the brand ("2-3 services max"
@@ -3417,7 +3417,7 @@ export async function generateGrid(input: {
     // ("one mobile platform" / "one phone platform" / "my current platform
     // to the other platform"). Switch vocabulary near platform/ecosystem
     // with no OS named and no roster brand carrying the direction = flagged.
-    const sw = c.text.match(/\b(?:switch|mov(?:e|ing)|leav(?:e|ing)|chang(?:e|ing)|jump(?:ing)?|coming|going)\w*\b[^.!?\n]{0,60}\b(?:platform|ecosystem)s?\b|\b(?:platform|ecosystem)s?\b[^.!?\n]{0,60}\b(?:switch|mov(?:e|ing)|chang(?:e|ing))\w*/i);
+    const sw = c.text.match(/\b(?:switch|mov(?:e|ing)|leav(?:e|ing)|chang(?:e|ing)|jump(?:ing)?|coming|going)\w*\b[^.!?\n]{0,60}\b(?:platform|ecosystem|system|camp|operating system|os)s?\b|\b(?:platform|ecosystem|system|camp|operating system|os)s?\b[^.!?\n]{0,60}\b(?:switch|mov(?:e|ing)|chang(?:e|ing))\w*/i);
     if (
       sw &&
       !/\b(?:iOS|Android)\b/i.test(c.text) &&
