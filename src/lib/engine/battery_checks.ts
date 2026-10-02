@@ -540,7 +540,10 @@ export function scenarioLabelLeak(text: string, labels: (string | null | undefin
     // labels ("Party hosting cart", "Mid-market scale-up") stay caught, and
     // the colon-opener heuristic below still catches meta-headers.
     if (category && textNamesCategory(label, category)) continue;
-    if (label.length >= 8 && t.includes(label.toLowerCase())) return label;
+    // Punctuation-blind containment (r6): "Carrier trade-in upgrade" leaks
+    // the label "Carrier trade in upgrade" - hyphens and commas must not
+    // hide a copy.
+    if (label.length >= 8 && ` ${key(t)} `.includes(` ${key(label)} `)) return label;
   }
   const m = text.match(/^([A-Za-z][A-Za-z0-9 &/-]{3,40}):/);
   if (m) {

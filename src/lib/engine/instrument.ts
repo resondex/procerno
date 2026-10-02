@@ -5,7 +5,7 @@ import { INSTRUMENT_HELPER_MODEL } from "./models";
 import {
   AMBIGUOUS_FORMS, angleRivals, categoryNounOf, checkBattery, checkCandidateSignature, checkPromptAgainstSpec, classAnglesOf,
   deriveCheckSpec, DOUBT_CHECK_STAGES, MUST_NAME_STAGES, PRE_CATEGORY_STAGES, questionTypeOf, resolveCellSpec, scenarioLabelLeak, seedDesignLine, specWriterNote,
-  sameSeatOf, stageDesignIntent, TERM_COLLISIONS, textNamesCategory, upstreamOf,
+  sameSeatOf, stageDesignIntent, TERM_COLLISIONS, textNamesBrand, textNamesCategory, upstreamOf,
   type CellCheckSpec, type ClassAngle, type QuestionType, type RosterClasses, type RosterRoles,
 } from "./battery_checks";
 export { MUST_NAME_STAGES };
@@ -98,7 +98,7 @@ const CACHE_TTL_MS = 183 * 24 * 3600 * 1000;
 // VERDICT asks, premium_worth holds the tier-as-class open-choice form
 // (never one named brand's own worth) - writer rules and design lines
 // changed together.
-const STYLE_VERSION = "s23";
+const STYLE_VERSION = "s24";
 
 /** Versions the DETERMINISTIC seed-check set (everything seedRule runs:
  * checkPromptAgainstSpec + blind_missing_category + scenario_label_leak).
@@ -114,7 +114,7 @@ const STYLE_VERSION = "s23";
  * 7's unversioned serve-time re-check had no terminal state). Bump when
  * a deterministic check changes meaning; bumping costs one free re-judge
  * per unit, and model calls only for units the new rules reject. */
-export const SEED_RULES_VERSION = "r5"; // r4 (2026-10-01): r2 calendar-year/60-word/segment-vocab; r3 category-naming labels exempt from substring leak; r4 'standardization' in segment vocabulary; r5 directionless-switch string check
+export const SEED_RULES_VERSION = "r6"; // r4 (2026-10-01): r2 calendar-year/60-word/segment-vocab; r3 category-naming labels exempt from substring leak; r4 'standardization' in segment vocabulary; r5 directionless-switch string check; r6 punctuation-blind label-leak matching
 
 /** Brand forms that double as ordinary English words: only these demand a
  * capitalized occurrence to count as naming the brand ("2-3 services max"
@@ -2070,9 +2070,12 @@ const CELL_WRITER_SYSTEM =
           "product term only one roster brand is known for ('charge card' " +
           "points every answer at American Express).\n" +
           "- problem_recognition and category_education describe the pain " +
-          "or ask what the thing does - never end in 'what specs or " +
-          "criteria should I care about' (that is the criteria cell's " +
-          "question).\n" +
+          "or ask what the thing does, ending with the ASK FOR A WAY OUT " +
+          "('how do people handle this?', 'what actually fixes this?') - " +
+          "never a yes/no reassurance ask ('is this a common problem?', " +
+          "'should I be worried?'), which invites sympathy instead of " +
+          "products, and never 'what specs or criteria should I care " +
+          "about' (that is the criteria cell's question).\n" +
           "- One prompt asks at most two or three things, stays under about " +
           "55 words, and reads ONE way: a list of four or more features or " +
           "requirements is survey-speak even in a short prompt (pick the " +
@@ -3175,6 +3178,15 @@ export async function generateGrid(input: {
               if (covered.has(k)) dups.push(i);
               else covered.set(k, i);
             });
+            // At least one pricing cell names the brand and does its own
+            // math (s20 writer rule; s23 shipped four generic AmEx cells -
+            // writer-only rules regress). If none does, steer one duplicate
+            // (or the last cell) into the brand's own tier/fee question.
+            if (!pricing.some((d) => textNamesBrand(d.c.text, input.brand))) {
+              const pick = dups.length > 0 ? dups[dups.length - 1] : pricing.length - 1;
+              if (!dups.includes(pick)) dups.push(pick);
+              console.warn(`pricing diversity: no cell names ${input.brand} - steering [${pick}] to the brand's own math`);
+            }
             const dirty = new Set<number>();
             await Promise.all(dups.slice(0, 4).map(async (i) => {
               const d = pricing[i];
