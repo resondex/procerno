@@ -98,7 +98,7 @@ const CACHE_TTL_MS = 183 * 24 * 3600 * 1000;
 // VERDICT asks, premium_worth holds the tier-as-class open-choice form
 // (never one named brand's own worth) - writer rules and design lines
 // changed together.
-const STYLE_VERSION = "s17";
+const STYLE_VERSION = "s18";
 
 /** Versions the DETERMINISTIC seed-check set (everything seedRule runs:
  * checkPromptAgainstSpec + blind_missing_category + scenario_label_leak).
@@ -114,7 +114,7 @@ const STYLE_VERSION = "s17";
  * 7's unversioned serve-time re-check had no terminal state). Bump when
  * a deterministic check changes meaning; bumping costs one free re-judge
  * per unit, and model calls only for units the new rules reject. */
-export const SEED_RULES_VERSION = "r3"; // r2 (2026-10-01): calendar-year, 60-word ceiling, segment vocabulary; r3: category-naming labels exempt from the substring leak rule
+export const SEED_RULES_VERSION = "r4"; // r4 (2026-10-01): r2 calendar-year/60-word/segment-vocab; r3 category-naming labels exempt from substring leak; r4 'standardization' added to segment vocabulary
 
 /** Brand forms that double as ordinary English words: only these demand a
  * capitalized occurrence to count as naming the brand ("2-3 services max"
@@ -1949,10 +1949,11 @@ const CELL_WRITER_SYSTEM =
           "paraphrase must keep, and the measurement is the head-to-head " +
           "itself, never one buyer's story. The shape is '<brand> or " +
           "<rival> for <category> - which would you go with, and why?' " +
-          "(drop the 'for <category>' clause when the names alone make the " +
-          "category obvious, and make it read grammatically - 'as a " +
-          "project management tool', never a plural category pasted into a " +
-          "singular slot).\n" +
+          "(drop the 'for <category>' clause only when both names are " +
+          "unambiguous product names - a bank or multi-product company " +
+          "name like Chase or Citi keeps it - and make it read " +
+          "grammatically: 'as a project management tool', never a plural " +
+          "category pasted into a singular slot).\n" +
           "- angle=defensive: an EXISTING customer of the client brand, " +
           "weighing a move away, asks for alternatives to it by name - " +
           "never a prospect ('if we don't go with it').\n" +
@@ -1974,10 +1975,12 @@ const CELL_WRITER_SYSTEM =
           "- Churn and renewal cells END with the stay-or-go choice stated " +
           "outright ('...or is it time to move off Jira?'): a fix-it or " +
           "tune-it ask with no option of leaving is a support question, not " +
-          "churn. The leave side stays plain - never 'something cheaper' or " +
-          "'simpler', and never an ask for alternatives by name, unless the " +
-          "cell's own concern is price: price has its own cells, and " +
-          "bolting it on muddies whose worry drove the exit.\n" +
+          "churn. VARY the stay-or-go wording across cells (not every cell " +
+          "ending in the same clause) and name the brand ONCE. The leave " +
+          "side stays plain - never 'something cheaper' or 'simpler', and " +
+          "never an ask for alternatives by name, unless the cell's own " +
+          "concern is price: price has its own cells, and bolting it on " +
+          "muddies whose worry drove the exit.\n" +
           "- situation: weave the circumstance in naturally, as the asker's " +
           "OWN situation ('this would be my first credit card', 'we're " +
           "about 120 people and doubling') - never as a topic opener " +
@@ -1999,10 +2002,13 @@ const CELL_WRITER_SYSTEM =
           "structure (paid vs free, fee vs no-fee, financing vs buying " +
           "outright, paying up vs the base tier) - NEVER 'which product is " +
           "the best value for my budget' (that is discovery's question). " +
-          "Where the category has a price structure, ONE pricing cell " +
-          "stays generic to it; where the trade-off lands on products " +
-          "('a no-fee card or one of the premium ones'), end by asking " +
-          "which they'd get.\n" +
+          "Financing or trade-in numbers are PRICES, not usage: say what " +
+          "the asker does with it or how long they keep it too. VARY the " +
+          "trade-off across a battery's pricing cells - never four cells " +
+          "on one shape. Where the category has a price structure, ONE " +
+          "pricing cell stays generic to it; where the trade-off lands on " +
+          "products ('a no-fee card or one of the premium ones'), end by " +
+          "asking which they'd get.\n" +
           "- A doubt cell (objections, churn, renewal, repertoire) STATES " +
           "the worry as the asker's own claim or feeling, something the " +
           "answer can confirm OR REBUT - never a neutral rules, " +
@@ -2039,19 +2045,24 @@ const CELL_WRITER_SYSTEM =
           "genericization ('chips', 'stores') in blind cells - the " +
           "category anchors what is being measured. Blind means no BRAND " +
           "names - the plain category noun ('my phone') is normal speech, " +
-          "never contorted around ('the thing in my pocket').\n" +
+          "never contorted around ('the thing in my pocket') - and no " +
+          "product term only one roster brand is known for ('charge card' " +
+          "points every answer at American Express).\n" +
           "- problem_recognition and category_education describe the pain " +
           "or ask what the thing does - never end in 'what specs or " +
           "criteria should I care about' (that is the criteria cell's " +
           "question).\n" +
           "- One prompt asks at most two or three things, stays under about " +
-          "55 words, and reads ONE way: a five-part requirements ask is " +
-          "survey-speak whatever the words, and an ask with two readings " +
-          "measures neither. When the circumstance is a platform or " +
+          "55 words, and reads ONE way: a list of four or more features or " +
+          "requirements is survey-speak even in a short prompt (pick the " +
+          "two or three this asker would actually type), and an ask with " +
+          "two readings measures neither. When the circumstance is a platform or " +
           "ecosystem switch, say the DIRECTION in platform words ('moving " +
           "from iOS to Android') - OS names are direction vocabulary, not " +
-          "brand names, while 'switching platforms' alone makes every " +
-          "answer guess which way.\n" +
+          "brand names. 'Switching platforms', 'moving between ecosystems' " +
+          "and 'from one platform to another' are NOT directions: every " +
+          "answer then guesses which way, and the guess decides which " +
+          "products get named.\n" +
           "- Never a calendar year in a prompt ('in 2026'): trackers re-ask " +
           "prompts for years and a dated prompt goes stale - say 'right " +
           "now'.\n" +
@@ -3158,7 +3169,7 @@ export async function generateGrid(input: {
         detail: `${words} words - a prompt is one chat message, not a requirements list; keep the circumstance to one sentence and ask at most two or three things (aim well under 60 words)`,
       });
     // Segment vocabulary is the plan's register, not a buyer's.
-    const seg = c.text.match(/\b(mid-?market|enterprise[- ]wide|enterprise standard(?:i[sz]ation)?|SMBs?)\b/i);
+    const seg = c.text.match(/\b(mid-?market|enterprise[- ]wide|enterprise standard|standardi[sz]ation|SMBs?)\b/i);
     if (seg)
       out.push({
         check: "segment_vocabulary" as const,
