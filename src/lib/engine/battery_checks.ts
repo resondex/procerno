@@ -416,7 +416,7 @@ export interface BatteryFinding {
     // a calendar year goes stale on the next wave and breaks the trend; a
     // 60+ word seed is a requirements list however casual the words; segment
     // vocabulary is the plan's register, not a buyer's.
-    | "seed_calendar_year" | "seed_overlong" | "segment_vocabulary" | "seed_switch_direction" | "concern_price_bolt_on" | "seed_multi_ask"
+    | "seed_calendar_year" | "seed_overlong" | "segment_vocabulary" | "seed_switch_direction" | "concern_price_bolt_on" | "seed_multi_ask" | "class_category_tail"
     | "seed_number_changed" | "duplicate_paraphrase";
   /** The offending prompt text (or the seed, for cell-level findings). */
   text: string;

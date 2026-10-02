@@ -114,7 +114,7 @@ const STYLE_VERSION = "s29";
  * 7's unversioned serve-time re-check had no terminal state). Bump when
  * a deterministic check changes meaning; bumping costs one free re-judge
  * per unit, and model calls only for units the new rules reject. */
-export const SEED_RULES_VERSION = "r10"; // r4 (2026-10-01): r2 calendar-year/60-word/segment-vocab; r3 category-naming labels exempt from substring leak; r4 'standardization' in segment vocabulary; r5 directionless-switch string check; r6 punctuation-blind label-leak matching; r7-r8 switch direction detected by absence (no OS, no roster brand near switch vocabulary); cheaper bolt-on token on non-price concerns
+export const SEED_RULES_VERSION = "r11"; // r4 (2026-10-01): r2 calendar-year/60-word/segment-vocab; r3 category-naming labels exempt from substring leak; r4 'standardization' in segment vocabulary; r5 directionless-switch string check; r6 punctuation-blind label-leak matching; r7-r8 switch direction detected by absence (no OS, no roster brand near switch vocabulary); cheaper bolt-on token on non-price concerns
 
 /** Brand forms that double as ordinary English words: only these demand a
  * capitalized occurrence to count as naming the brand ("2-3 services max"
@@ -3436,6 +3436,14 @@ export async function generateGrid(input: {
       out.push({
         check: "seed_multi_ask" as const,
         detail: `the prompt asks ${(c.text.match(/\?/g) ?? []).length} separate questions - one prompt asks at most two or three things, and one circumstance carries ONE core ask`,
+      });
+    // r11 (2026-10-02 cold-build audit): the class-cell "for <category>"
+    // tail ("a Visa card for credit cards") is a writer-rule lapse the cold
+    // roll exposed - countable, so counted.
+    if (spec.brandMode === "comparison_class" && new RegExp(`\\bfor\\s+${input.category.trim().replace(/[.*+?^${}()|[\]\\]/g, "\\$&").replace(/\\s+/g, "\\\\s+")}\\b`, "i").test(c.text))
+      out.push({
+        check: "class_category_tail" as const,
+        detail: `the class phrase already carries the category - drop the redundant "for ${input.category}" tail ("${input.brand} or a Visa card for credit cards" is not how anyone talks)`,
       });
     // r8: the "cheaper" bolt-on on a non-price concern keeps re-rolling in
     // (third recurrence) - it is a token, not a judgment. Price concerns
