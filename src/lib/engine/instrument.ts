@@ -2697,6 +2697,7 @@ export async function generateGrid(input: {
   const journeyBySituation = new Map(
     input.scenarios.map((s) => [s.label, journeyNote(input.base, s)] as const)
   );
+  const scenarioLabels = new Set(input.scenarios.map((sc) => sc.label));
   const planLine = (p: (typeof plan)[number], i: number) => {
     const jn = p.situation ? journeyBySituation.get(p.situation) : null;
     return (
@@ -2828,9 +2829,15 @@ export async function generateGrid(input: {
           if (!row || !c.text?.trim()) return;
           // A misordered reply puts one row's text on another row with no
           // signal now that identity comes from the plan (2026-10-02
-          // review): a VALID echoed stage that disagrees with the row's is
-          // that signal - drop the cell, the unit retries.
+          // review): a VALID echoed stage, situation or angle that
+          // disagrees with the row's is that signal - drop the cell, the
+          // unit retries. Same-stage swaps hide from the stage guard, so
+          // the situation and angle echoes are checked against the other
+          // rows of this group too.
           if (c.stage && c.stage !== row.stage.key && byKey.has(c.stage)) return;
+          const echoSit = c.situation && c.situation.trim() && c.situation.trim() !== "-" ? c.situation.trim() : null;
+          if (echoSit && echoSit !== (row.situation ?? null) && scenarioLabels.has(echoSit)) return;
+          if (c.angle && c.angle !== planAngle(row) && rows.some((r) => r !== row && planAngle(r) === c.angle)) return;
           // #4 (2026-10-02 review): stage and layer are the PLAN row's too -
           // the writer echoing a different valid stage used to cache the
           // cell under the row's key with the wrong stage, and echoing a
@@ -3317,16 +3324,18 @@ export async function generateGrid(input: {
     if (process.env.PHRASINGS_CHECKS !== "0" && Date.now() > deadlineAt) passesCut = true;
     if (process.env.PHRASINGS_CHECKS !== "0" && Date.now() <= deadlineAt) {
       try {
-        // Planned-concern cells are diverse by construction and enforced
-        // per-cell by the design check - the dedup pass is the safety net
-        // for LEGACY doubt cells that carry no assigned concern.
+        // ALL doubt cells are labeled (2026-10-02 review round 3, item 6):
+        // planned concerns seed the covered set so a CONCERN-LESS cell (a
+        // repertoire cell beside worry picks) cannot duplicate a picked
+        // worry; only concern-less cells are ever regenerated.
         const doubt: { u: number; c: GridCell }[] = [];
         // Battery-wide means the WHOLE battery: served units included (the
         // s24 eviction reroll saw only its 2 fresh units, skipped the pass
         // on length, and silently dropped Pixel's brand-named pricing cell).
         // A rewrite of a served unit re-caches terminal like any heal.
-        for (let u = 0; u < units.length; u++) for (const c of resolved[u] ?? []) if (DOUBT_CHECK_STAGES.has(c.stage) && !c.concern) doubt.push({ u, c });
-        if (doubt.length >= 2) {
+        for (let u = 0; u < units.length; u++) for (const c of resolved[u] ?? []) if (DOUBT_CHECK_STAGES.has(c.stage)) doubt.push({ u, c });
+        const concernless = doubt.filter((d) => !d.c.concern);
+        if (concernless.length >= 1 && doubt.length >= 2) {
           const labelConcerns = async (texts: string[]): Promise<string[]> => {
             const a = await anthropicClient();
             const res = await withCostContext({ purpose: "setup:cells" }, () => a.messages.create({
@@ -3346,7 +3355,13 @@ export async function generateGrid(input: {
             const norm = (s: string) => s.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
             const covered = new Map<string, number>();
             const dups: number[] = [];
+            // Planned concerns hold their seats first...
             concerns.forEach((lab, i) => {
+              if (doubt[i].c.concern) covered.set(norm(lab), i);
+            });
+            // ...then only concern-less cells can be duplicates.
+            concerns.forEach((lab, i) => {
+              if (doubt[i].c.concern) return;
               const k = norm(lab);
               if (covered.has(k)) dups.push(i);
               else covered.set(k, i);
