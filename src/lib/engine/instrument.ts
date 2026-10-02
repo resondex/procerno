@@ -246,8 +246,15 @@ async function coalesced<T>(
       return null;
     }
   };
-  const claimAndRun = async (): Promise<T | null> => {
-    await store.cacheSet(key, JSON.stringify({ __pending: Date.now() }), opts.meta);
+  const claimAndRun = async (expectedRaw: string | null, unconditional = false): Promise<T | null> => {
+    // CAS claim (2026-10-02 review round 3, item 7): the old read-then-write
+    // let two near-simultaneous requests both claim and both generate. A
+    // lost race re-enters the wait path once - the winner's work is reused.
+    // force claims trample unconditionally (that is what force means).
+    const won = unconditional
+      ? (await store.cacheSet(key, JSON.stringify({ __pending: Date.now() }), opts.meta), true)
+      : await store.cacheClaim(key, expectedRaw, JSON.stringify({ __pending: Date.now() }), CACHE_TTL_MS, opts.meta);
+    if (!won) return coalesced(key, opts, generate);
     // Waiters trust the claim only while beats keep landing: a killed
     // invocation is taken over within ~ORPHAN_MS instead of stalling
     // every follow-up request for the whole wait budget.
@@ -275,7 +282,7 @@ async function coalesced<T>(
     );
     return out;
   };
-  if (opts.force) return claimAndRun();
+  if (opts.force) return claimAndRun(null, true);
   let raw = await store.cacheGet(key, CACHE_TTL_MS);
   const first = readValue(raw);
   if (first !== null) return first;
@@ -299,7 +306,7 @@ async function coalesced<T>(
     // report null and let the caller retry onto the finished result.
     if (!orphaned) return null;
   }
-  return claimAndRun();
+  return claimAndRun(raw);
 }
 
 /* ------------------------------ moderators ------------------------------ */
@@ -2731,12 +2738,25 @@ export async function generateGrid(input: {
      * warmed paraphrases and re-roll settled text. */
     pre: Map<number, GridCell[]> = new Map(),
     /** Prior retry counts for empty units (bounded liveness - see A5). */
-    triesOf: Map<number, number> = new Map()
+    triesOf: Map<number, number> = new Map(),
+    /** The raw each unit held when we decided to claim it - the CAS
+     * expectation (null = absent). */
+    expected: Map<number, string | null> = new Map()
   ): Promise<void> => {
     if (idxs.length === 0) return;
-    await Promise.all(
-      idxs.map((u) => store.cacheSet(unitKeys[u], JSON.stringify({ __pending: Date.now() }), stampOf(input)))
+    // CAS claims (2026-10-02 review round 3, item 7): a lost race means a
+    // concurrent request claimed between our read and now - leave the unit
+    // to them; it resolves as a hole here and the caller's retry lands on
+    // their finished, cached result.
+    const wonClaims = await Promise.all(
+      idxs.map((u) =>
+        store.cacheClaim(unitKeys[u], expected.get(u) ?? null, JSON.stringify({ __pending: Date.now() }), CACHE_TTL_MS, stampOf(input))
+      )
     );
+    const lost = idxs.filter((_, k) => !wonClaims[k]);
+    if (lost.length > 0) console.warn(`grid unit claims lost to a concurrent request (${lost.length}) - leaving them to it`);
+    idxs = idxs.filter((_, k) => wonClaims[k]);
+    if (idxs.length === 0) return;
     // Claims stay alive by heartbeat (see ORPHAN_MS): units leave the
     // in-flight set the moment their group settles, and each final write
     // quiesces first so a stale beat can never re-mask it as pending.
@@ -3641,8 +3661,11 @@ export async function generateGrid(input: {
   const exhausted = new Set<number>();
   const preCells = new Map<number, GridCell[]>();
   const triesIn = new Map<number, number>();
+  /** What each unit's key held at scan time - the CAS claim expectation. */
+  const expectedRaw = new Map<number, string | null>();
   {
     const raws = await Promise.all(unitKeys.map((k) => store.cacheGet(k, CACHE_TTL_MS)));
+    raws.forEach((raw, u) => expectedRaw.set(u, raw ?? null));
     const upgrades: Promise<unknown>[] = [];
     raws.forEach((raw, u) => {
       if (raw) {
@@ -3763,17 +3786,18 @@ export async function generateGrid(input: {
         }
         if (at === null || Date.now() - at >= ORPHAN_MS) {
           orphaned.push(u);
+          expectedRaw.set(u, raw ?? null);
           open.delete(u);
         }
       });
-      if (orphaned.length > 0) await generate(orphaned, seen);
+      if (orphaned.length > 0) await generate(orphaned, seen, undefined, undefined, expectedRaw);
     }
     // Deadline with generators still alive: never duplicate their work -
     // unresolved units stay empty and the caller's retry lands on the
     // finished, cached result.
   };
 
-  await Promise.all([generate(mine, seen, preCells, triesIn), waitForTheirs()]);
+  await Promise.all([generate(mine, seen, preCells, triesIn, expectedRaw), waitForTheirs()]);
   // ONE call site for the battery passes (2026-10-02 review round 3, items
   // 3/4): the old tail call inside generate could run twice (an orphan
   // takeover calls generate again) and could stamp a PARTIAL battery (other

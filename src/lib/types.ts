@@ -797,6 +797,12 @@ export interface Store {
    * latency. */
   cacheGetMany(keys: string[], maxAgeMs: number): Promise<Map<string, string>>;
   cacheSet(key: string, value: string, meta?: CacheMeta): Promise<void>;
+  /** Atomic compare-and-set claim (2026-10-02): writes `marker` only when the
+   * stored value still equals `expectedRaw` (null = expect absent) OR the row
+   * is older than `maxAgeMs` (cacheGet reports an expired row as null while
+   * it still exists). Returns whether the claim was won - the read-then-write
+   * races in coalesced() and the grid unit claims lose silently otherwise. */
+  cacheClaim(key: string, expectedRaw: string | null, marker: string, maxAgeMs: number, meta?: CacheMeta): Promise<boolean>;
   /** Append-only setup feedback log (rejected variants, review verdicts and
    * choices). For OUR visibility only - it is never read back into
    * generation: one user's rejections say nothing about quality. */

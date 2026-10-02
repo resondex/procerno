@@ -812,6 +812,26 @@ export const pgStore: Store = {
       VALUES (${crypto.randomUUID()}, ${e.email}, ${e.category}, ${e.audience}, ${e.kind}, ${JSON.stringify(e.payload)})`;
   },
 
+  async cacheClaim(key, expectedRaw, marker, maxAgeMs, meta) {
+    const sql = await db();
+    const brand = meta?.brand?.trim().toLowerCase() || null;
+    const category = meta?.category?.trim().toLowerCase() || null;
+    const source = meta?.source || null;
+    const projectId = meta?.projectId || null;
+    const cutoff = new Date(Date.now() - maxAgeMs);
+    const rows = await sql`INSERT INTO llm_cache (key, value, created_at, brand, category, source, project_id)
+      VALUES (${key}, ${marker}, now(), ${brand}, ${category}, ${source}, ${projectId})
+      ON CONFLICT (key) DO UPDATE SET value = ${marker}, created_at = now(),
+        brand = COALESCE(${brand}, llm_cache.brand),
+        category = COALESCE(${category}, llm_cache.category),
+        source = COALESCE(${source}, llm_cache.source),
+        project_id = COALESCE(${projectId}, llm_cache.project_id)
+      WHERE (${expectedRaw}::text IS NOT NULL AND llm_cache.value = ${expectedRaw})
+         OR llm_cache.created_at <= ${cutoff}
+      RETURNING key`;
+    return rows.length > 0;
+  },
+
   async cacheSet(key, value, meta) {
     const sql = await db();
     const brand = meta?.brand?.trim().toLowerCase() || null;

@@ -167,6 +167,19 @@ try { tries3d = (JSON.parse((await store.cacheGet(keyOf(ceRow), 365 * 24 * 3600 
 check("3d hour-old exhaustion expires: claimed again, count reset (thrown call does not increment)",
   out === null && tries3d === 0 && ms < 10_000, `(${ms}ms, tries=${tries3d})`);
 
+// --- case 3e: cacheClaim is a real compare-and-set (2026-10-02 round 3,
+// item 7): wins when the stored value matches the expectation or the key is
+// absent, loses when another writer got there first.
+const ckey = "harness:claim";
+let w = await store.cacheClaim(ckey, null, "M0", 3600_000, {});
+check("3e claim wins on absent key", w === true);
+w = await store.cacheClaim(ckey, "M0", "M1", 3600_000, {});
+check("3e claim wins on matching expectation", w === true && (await store.cacheGet(ckey, 3600_000)) === "M1");
+w = await store.cacheClaim(ckey, "M0", "M2", 3600_000, {});
+check("3e claim loses on stale expectation", w === false && (await store.cacheGet(ckey, 3600_000)) === "M1");
+w = await store.cacheClaim(ckey, null, "M3", 3600_000, {});
+check("3e claim loses on absent expectation vs fresh row", w === false);
+
 // --- case 4: 60s-old marker is orphaned immediately (old code waited 180s) ---
 await store.cacheSet(keyOf(prRow), JSON.stringify({ __pending: Date.now() - 60_000 }), {});
 await store.cacheSet(keyOf(ceRow), JSON.stringify({ __pending: Date.now() - 60_000 }), {});

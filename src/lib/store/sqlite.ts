@@ -899,6 +899,26 @@ export const sqliteStore: Store = {
     return new Map(rows.map((r) => [r.key, r.value]));
   },
 
+  async cacheClaim(key, expectedRaw, marker, maxAgeMs, meta) {
+    const brand = meta?.brand?.trim().toLowerCase() || null;
+    const category = meta?.category?.trim().toLowerCase() || null;
+    const res = getDb()
+      .prepare(
+        `INSERT INTO llm_cache (key, value, created_at, brand, category, source, project_id)
+         VALUES (?, ?, datetime('now'), ?, ?, ?, ?)
+         ON CONFLICT(key) DO UPDATE SET value = excluded.value, created_at = excluded.created_at,
+           brand = COALESCE(excluded.brand, brand),
+           category = COALESCE(excluded.category, category),
+           source = COALESCE(excluded.source, source),
+           project_id = COALESCE(excluded.project_id, project_id)
+         WHERE (? IS NOT NULL AND llm_cache.value = ?)
+            OR llm_cache.created_at <= datetime('now', ?)`
+      )
+      .run(key, marker, brand, category, meta?.source ?? null, meta?.projectId ?? null,
+        expectedRaw, expectedRaw, `-${Math.max(1, Math.floor(maxAgeMs / 1000))} seconds`);
+    return res.changes > 0;
+  },
+
   async cacheSet(key, value, meta) {
     const brand = meta?.brand?.trim().toLowerCase() || null;
     const category = meta?.category?.trim().toLowerCase() || null;
