@@ -98,7 +98,7 @@ const CACHE_TTL_MS = 183 * 24 * 3600 * 1000;
 // VERDICT asks, premium_worth holds the tier-as-class open-choice form
 // (never one named brand's own worth) - writer rules and design lines
 // changed together.
-const STYLE_VERSION = "s26";
+const STYLE_VERSION = "s27";
 
 /** Versions the DETERMINISTIC seed-check set (everything seedRule runs:
  * checkPromptAgainstSpec + blind_missing_category + scenario_label_leak).
@@ -3212,12 +3212,10 @@ export async function generateGrid(input: {
             // math (s20 writer rule; s23 shipped four generic AmEx cells -
             // writer-only rules regress). If none does, steer one duplicate
             // (or the last cell) into the brand's own tier/fee question.
+            // Brand presence is enforced AFTER the duplicate heals (below):
+            // evaluating it here let a dup heal replace the battery's only
+            // brand-named cell right after the check had passed (s26 AmEx).
             let brandSteer = -1;
-            if (!pricing.some((d) => textNamesBrand(d.c.text, input.brand))) {
-              brandSteer = dups.length > 0 ? dups[dups.length - 1] : pricing.length - 1;
-              if (!dups.includes(brandSteer)) dups.push(brandSteer);
-              console.warn(`pricing diversity: no cell names ${input.brand} - steering [${brandSteer}] to the brand's own math`);
-            }
             const dirty = new Set<number>();
             await Promise.all(dups.slice(0, 4).map(async (i) => {
               const d = pricing[i];
@@ -3263,6 +3261,51 @@ export async function generateGrid(input: {
                 console.error("pricing diversity regeneration failed open:", err);
               }
             }));
+            // At least one pricing cell names the brand - judged on the
+            // FINAL post-heal texts, with its own regen when violated.
+            if (!pricing.some((d) => textNamesBrand(d.c.text, input.brand)) && Date.now() <= deadlineAt) {
+              brandSteer = pricing.length - 1;
+              const d = pricing[brandSteer];
+              const row = rowFor(units[d.u] ?? [], d.c) ?? (units[d.u] ?? [])[0];
+              console.warn(`pricing diversity: no cell names ${input.brand} - steering [${brandSteer}] to the brand's own math`);
+              if (row) {
+                try {
+                  const res3 = await openaiClient().chat.completions.create({
+                    model: CELLS_MODEL,
+                    messages: [
+                      { role: "system", content: CELL_WRITER_SYSTEM + "Return one cell object for the plan line." },
+                      { role: "user", content:
+                          `Client brand: ${input.brand}\nCategory: ${input.category}\n` +
+                          `Rivals: ${rivals.map(primaryBrandName).join(", ")}\nAudience: ${input.audience ?? "unknown"}\n\n` +
+                          `Cell plan:\n${planLine(row, 0)}\n` +
+                          `   [none of this battery's pricing cells names ${input.brand}: THIS cell must NAME ${input.brand} and reason about its own price math - its tiers or lines against each other, its fee vs what it returns, its financing or trade-in - in this circumstance. ` +
+                          `Do not reuse this wording: "${d.c.text}"]` },
+                    ],
+                    response_format: { type: "json_schema", json_schema: { name: "grid_cells", strict: true, schema: CELLS_SCHEMA } },
+                  });
+                  const text3 = (JSON.parse(res3.choices[0]?.message?.content ?? "{}") as { cells?: { text?: string }[] }).cells?.[0]?.text?.trim();
+                  if (text3) {
+                    const cand = { stage: d.c.stage, angle: d.c.angle, text: humanize(text3), situation: d.c.situation };
+                    const intent = stageDesignIntent(d.c.stage, input.brand, undefined, d.c.angle, d.c.situation);
+                    const mechOk = seedRule(cand).length === 0;
+                    const brandOk = textNamesBrand(cand.text, input.brand);
+                    const designOk = !intent || (await checkDesignFidelity({ candidates: [{ text: cand.text, design: intent }], meta: input.meta }))[0].voices;
+                    if (mechOk && brandOk && designOk) {
+                      d.c.text = cand.text;
+                      d.c.qtype = questionTypeOf(d.c, input.brand, input.category);
+                      d.c.spec = deriveCheckSpec(d.c, input.brand, input.competitors, input.category);
+                      delete d.c.seedFlags;
+                      dirty.add(d.u);
+                      console.warn(`pricing diversity: brand cell restored: ${cand.text.slice(0, 80)}`);
+                    } else {
+                      console.warn(`pricing diversity: brand steer rejected (${mechOk ? "" : "mech "}${brandOk ? "" : "brand "}${designOk ? "" : "design"}) - original stands`);
+                    }
+                  }
+                } catch (err) {
+                  console.error("pricing brand steer failed open:", err);
+                }
+              }
+            }
             await Promise.all(
               [...dirty].map((u) =>
                 store.cacheSet(unitKeys[u], JSON.stringify({ cells: resolved[u] ?? [], rules: SEED_RULES_VERSION }), stampOf(input)).catch(() => {})
