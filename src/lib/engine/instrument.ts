@@ -98,7 +98,7 @@ const CACHE_TTL_MS = 183 * 24 * 3600 * 1000;
 // VERDICT asks, premium_worth holds the tier-as-class open-choice form
 // (never one named brand's own worth) - writer rules and design lines
 // changed together.
-const STYLE_VERSION = "s27";
+const STYLE_VERSION = "s28";
 
 /** Versions the DETERMINISTIC seed-check set (everything seedRule runs:
  * checkPromptAgainstSpec + blind_missing_category + scenario_label_leak).
@@ -114,7 +114,7 @@ const STYLE_VERSION = "s27";
  * 7's unversioned serve-time re-check had no terminal state). Bump when
  * a deterministic check changes meaning; bumping costs one free re-judge
  * per unit, and model calls only for units the new rules reject. */
-export const SEED_RULES_VERSION = "r6"; // r4 (2026-10-01): r2 calendar-year/60-word/segment-vocab; r3 category-naming labels exempt from substring leak; r4 'standardization' in segment vocabulary; r5 directionless-switch string check; r6 punctuation-blind label-leak matching
+export const SEED_RULES_VERSION = "r7"; // r4 (2026-10-01): r2 calendar-year/60-word/segment-vocab; r3 category-naming labels exempt from substring leak; r4 'standardization' in segment vocabulary; r5 directionless-switch string check; r6 punctuation-blind label-leak matching; r7 switch-direction regex tolerates intervening words
 
 /** Brand forms that double as ordinary English words: only these demand a
  * capitalized occurrence to count as naming the brand ("2-3 services max"
@@ -2069,13 +2069,14 @@ const CELL_WRITER_SYSTEM =
           "never contorted around ('the thing in my pocket') - and no " +
           "product term only one roster brand is known for ('charge card' " +
           "points every answer at American Express).\n" +
-          "- problem_recognition and category_education describe the pain " +
-          "or ask what the thing does, ending with the ASK FOR A WAY OUT " +
-          "('how do people handle this?', 'what actually fixes this?') - " +
-          "never a yes/no reassurance ask ('is this a common problem?', " +
-          "'should I be worried?'), which invites sympathy instead of " +
-          "products, and never 'what specs or criteria should I care " +
-          "about' (that is the criteria cell's question).\n" +
+          "- problem_recognition describes the pain and ends asking for a " +
+          "way out ('how do people handle this?', 'what actually fixes " +
+          "this?'). category_education asks what this kind of product " +
+          "actually does and how people use it - nothing is broken there, " +
+          "so never 'what fixes this'. Neither stage asks a yes/no " +
+          "reassurance question ('is this a common problem?'), a " +
+          "premium-vs-cheap tier question, or 'what specs or criteria " +
+          "should I care about' (that is the criteria cell's question).\n" +
           "- One prompt asks at most two or three things, stays under about " +
           "55 words, and reads ONE way: a list of four or more features or " +
           "requirements is survey-speak even in a short prompt (pick the " +
@@ -2787,21 +2788,17 @@ export async function generateGrid(input: {
           const norm = c.text.trim().toLowerCase().replace(/\s+/g, " ");
           if (seen.has(norm)) return; // cheap dedupe; no embeddings needed at this scale
           seen.add(norm);
-          // The plan writes "-" for invariant cells; models echo it back
-          // as a string rather than null.
-          const situation =
-            c.situation && c.situation.trim() && c.situation.trim() !== "-"
-              ? c.situation.trim()
-              : null;
           const u = unitOf.get(row);
           if (u === undefined) return;
           const cell: GridCell = {
             stage: st.key,
             layer: st.layer,
-            situation,
-            // A class row's identity is the PLAN's (angle "class" + its
-            // class), never the writer's echo of the plan line.
-            angle: row.classPhrase ? "class" : c.angle,
+            // EVERY identity field is the PLAN row's, never the writer's
+            // echo of the plan line (s27 audit F4: five cells shipped
+            // angle "generic concern(...)" into stored intents and cache
+            // keys; the echoed situation was equally trusted).
+            situation: row.situation ?? null,
+            angle: row.classPhrase ? "class" : primaryBrandName(row.angle),
             mode: row.scope ?? null,
             concern: row.concern,
             ...(row.classPhrase ? { classPhrase: row.classPhrase, classBrand: row.classBrand } : {}),
@@ -3190,7 +3187,7 @@ export async function generateGrid(input: {
               model: DESIGN_CHECK_MODEL,
               max_tokens: 1500,
               output_config: { effort: DESIGN_CHECK_EFFORT },
-              system: `Each question below asks about price or value in ${input.brand}'s market. Label each question's core price TRADE-OFF by the TWO OPTIONS being weighed: fee vs no-fee, free vs paid, monthly vs annual billing, tier vs tier, financing vs buying outright, carrier credits vs unlocked, trade-in vs resale, total cost over time, pay up vs base - or a 2-4 word options pair at that same altitude. Wording, products and spend amounts do not change the class: two questions weighing the SAME two options are the SAME class however differently phrased. Reply with ONLY JSON: {"shapes": ["...", ...]} - one label per question, in order.`,
+              system: `Each question below asks about price or value in ${input.brand}'s market. Label each question's core price TRADE-OFF by the TWO OPTIONS being weighed: fee vs no-fee, free vs paid, monthly vs annual billing, tier vs tier, financing vs buying outright, carrier credits vs unlocked, trade-in vs resale, total cost over time, pay up vs base - or a 2-4 word options pair at that same altitude. Wording, products and spend amounts do not change the class: two questions weighing the SAME two options are the SAME class however differently phrased, and paying MORE OR LESS for the same product line - no-fee vs fee, mid-tier vs premium, cheaper line vs flagship - is ONE class ("which price level") whatever the tier names. Reply with ONLY JSON: {"shapes": ["...", ...]} - one label per question, in order.`,
               messages: [{ role: "user", content: texts.map((t, i) => `${i + 1}. ${t}`).join("\n") }],
             } as never));
             const text = (res as { content: { type: string; text?: string }[] }).content
@@ -3389,7 +3386,7 @@ export async function generateGrid(input: {
     // r5 (2026-10-01): a directionless switch is a STRING, not a judgment -
     // the design check passed "from one mobile platform to another" twice,
     // and which products get named then depends on each engine's guess.
-    const sw = c.text.match(/\b(?:from one (?:mobile )?(?:platform|ecosystem) to (?:another|the other)|switch(?:ing)? (?:platforms|ecosystems)|moving (?:between )?(?:platforms|ecosystems)|between (?:platforms|ecosystems))\b/i);
+    const sw = c.text.match(/\b(?:from one(?:\s+\w+){0,2}\s+(?:platform|ecosystem)s?\s+to\s+(?:another|the other)|switch(?:ing)?(?:\s+\w+)?\s+(?:platforms|ecosystems)|moving(?:\s+between)?(?:\s+\w+)?\s+(?:platforms|ecosystems)|between (?:platforms|ecosystems))\b/i);
     if (sw && !/\b(?:from|to|off|onto)\s+(?:iOS|Android|iPhone)\b/i.test(c.text))
       out.push({
         check: "seed_switch_direction" as const,

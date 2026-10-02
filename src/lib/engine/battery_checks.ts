@@ -257,8 +257,10 @@ export function stageDesignIntent(stage: string, brand: string, concern?: string
   // Awareness seeds drifted into tier comparisons and reassurance asks
   // (2026-10-01 s24 audit F4): the asker does not know the solution space
   // yet, and this stage reports only how often brands get named unprompted.
-  if (PRE_CATEGORY_STAGES.has(stage))
-    return `Question design (awareness): the asker describes a pain or asks what this kind of product actually does for them, ending with the ask for a way out ("how do people handle this?", "what actually fixes this?"). A premium-vs-cheap tier comparison, a which-brand ask, a specs/criteria ask, or a yes/no reassurance ask ("is this common?") does not satisfy the design.${situation ? ` The question also carries the asker's own circumstance matching: ${situation}.` : ""}`;
+  if (stage === "problem_recognition")
+    return `Question design (awareness): the asker describes a pain and ends asking for a way out ("how do people handle this?", "what actually fixes this?"). A premium-vs-cheap tier comparison, a which-brand ask, a specs/criteria ask, or a yes/no reassurance ask ("is this common?") does not satisfy the design.${situation ? ` The question also carries the asker's own circumstance matching: ${situation}.` : ""}`;
+  if (stage === "category_education")
+    return `Question design (awareness): the asker wants to understand what this kind of product actually does and how people use it - nothing is broken, so a "what fixes this" ask does not fit. A premium-vs-cheap tier comparison, a which-brand ask, a specs/criteria ask, or a yes/no reassurance ask does not satisfy the design.${situation ? ` The question also carries the asker's own circumstance matching: ${situation}.` : ""}`;
   // Open-choice seeds must invite NAMED picks (s24 audit F3: a
   // social_validation cell became a features-gush ask and named nothing).
   const pickClause = OPEN_PICK_STAGES.has(stage)
