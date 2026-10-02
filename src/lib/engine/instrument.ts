@@ -98,7 +98,7 @@ const CACHE_TTL_MS = 183 * 24 * 3600 * 1000;
 // VERDICT asks, premium_worth holds the tier-as-class open-choice form
 // (never one named brand's own worth) - writer rules and design lines
 // changed together.
-const STYLE_VERSION = "s25";
+const STYLE_VERSION = "s26";
 
 /** Versions the DETERMINISTIC seed-check set (everything seedRule runs:
  * checkPromptAgainstSpec + blind_missing_category + scenario_label_leak).
@@ -2960,14 +2960,40 @@ export async function generateGrid(input: {
                   response_format: { type: "json_schema", json_schema: { name: "grid_cells", strict: true, schema: CELLS_SCHEMA } },
                 });
                 const cell2 = (JSON.parse(res2.choices[0]?.message?.content ?? "{}") as { cells?: { text?: string }[] }).cells?.[0];
-                const text2 = cell2?.text?.trim();
+                let text2 = cell2?.text?.trim();
                 // A design heal must also pass the mechanical rules (the
                 // brand-rule and concern-diversity heals already do this) -
                 // otherwise the terminal verdict flags the "fix".
-                const mech2ok = !!text2 && seedRule({ ...x.c, text: text2 }).length === 0;
-                const again = mech2ok
+                let mech2ok = !!text2 && seedRule({ ...x.c, text: text2 }).length === 0;
+                let again = mech2ok
                   ? (await checkDesignFidelity({ candidates: [{ text: text2!, design: x.intent }], meta: input.meta }))[0]
                   : null;
+                // Second bounded attempt, steered by the first failure (s26:
+                // three AmEx worry cells anchored on the famous acceptance
+                // doubt and one retry never shook it - still terminal, just
+                // two tries instead of one).
+                if (!again?.voices && Date.now() <= deadlineAt) {
+                  const why = again ? `it voiced the wrong thing: ${again.reason}` : text2 ? "it broke a mechanical rule" : "it returned nothing";
+                  const res3 = await openaiClient().chat.completions.create({
+                    model: CELLS_MODEL,
+                    messages: [
+                      { role: "system", content: CELL_WRITER_SYSTEM + "Return one cell object for the plan line." },
+                      { role: "user", content:
+                          `Client brand: ${input.brand}\nCategory: ${input.category}\n` +
+                          `Rivals: ${rivals.map(primaryBrandName).join(", ")}\nAudience: ${input.audience ?? "unknown"}\n\n` +
+                          `Cell plan:\n${planLine(row, 0)}\n` +
+                          `   [two attempts were rejected. The design: ${x.intent} ` +
+                          `The last attempt failed because ${why}. ` +
+                          `Do not reuse these wordings: "${x.c.text}" / "${text2 ?? ""}"]` },
+                    ],
+                    response_format: { type: "json_schema", json_schema: { name: "grid_cells", strict: true, schema: CELLS_SCHEMA } },
+                  });
+                  text2 = (JSON.parse(res3.choices[0]?.message?.content ?? "{}") as { cells?: { text?: string }[] }).cells?.[0]?.text?.trim();
+                  mech2ok = !!text2 && seedRule({ ...x.c, text: text2 }).length === 0;
+                  again = mech2ok
+                    ? (await checkDesignFidelity({ candidates: [{ text: text2!, design: x.intent }], meta: input.meta }))[0]
+                    : null;
+                }
                 if (again?.voices) {
                   console.warn(`seed self-healed [${x.c.stage}]: ${text2!.slice(0, 90)}`);
                   flat[x.i].text = humanize(text2!);
@@ -3186,10 +3212,11 @@ export async function generateGrid(input: {
             // math (s20 writer rule; s23 shipped four generic AmEx cells -
             // writer-only rules regress). If none does, steer one duplicate
             // (or the last cell) into the brand's own tier/fee question.
+            let brandSteer = -1;
             if (!pricing.some((d) => textNamesBrand(d.c.text, input.brand))) {
-              const pick = dups.length > 0 ? dups[dups.length - 1] : pricing.length - 1;
-              if (!dups.includes(pick)) dups.push(pick);
-              console.warn(`pricing diversity: no cell names ${input.brand} - steering [${pick}] to the brand's own math`);
+              brandSteer = dups.length > 0 ? dups[dups.length - 1] : pricing.length - 1;
+              if (!dups.includes(brandSteer)) dups.push(brandSteer);
+              console.warn(`pricing diversity: no cell names ${input.brand} - steering [${brandSteer}] to the brand's own math`);
             }
             const dirty = new Set<number>();
             await Promise.all(dups.slice(0, 4).map(async (i) => {
@@ -3206,9 +3233,12 @@ export async function generateGrid(input: {
                         `Client brand: ${input.brand}\nCategory: ${input.category}\n` +
                         `Rivals: ${rivals.map(primaryBrandName).join(", ")}\nAudience: ${input.audience ?? "unknown"}\n\n` +
                         `Cell plan:\n${planLine(row, 0)}\n` +
-                        `   [this battery's pricing cells ALREADY use these price trade-offs: ${[...covered.keys()].join("; ")}. ` +
-                        `This cell must reason about a DIFFERENT price trade-off in this circumstance - the client brand's own tiers, total cost over time, financing vs buying outright, trade-in math. ` +
-                        `Do not reuse this wording: "${d.c.text}"]` },
+                        (i === brandSteer
+                          ? `   [none of this battery's pricing cells names ${input.brand}: THIS cell must NAME ${input.brand} and reason about its own price math - its tiers or lines against each other, its fee vs what it returns, its financing or trade-in - in this circumstance. ` +
+                            `Do not reuse this wording: "${d.c.text}"]`
+                          : `   [this battery's pricing cells ALREADY use these price trade-offs: ${[...covered.keys()].join("; ")}. ` +
+                            `This cell must reason about a DIFFERENT price trade-off in this circumstance - the client brand's own tiers, total cost over time, financing vs buying outright, trade-in math. ` +
+                            `Do not reuse this wording: "${d.c.text}"]`) },
                   ],
                   response_format: { type: "json_schema", json_schema: { name: "grid_cells", strict: true, schema: CELLS_SCHEMA } },
                 });
@@ -3217,8 +3247,9 @@ export async function generateGrid(input: {
                 const cand = { stage: d.c.stage, angle: d.c.angle, text: humanize(text2), situation: d.c.situation };
                 const intent = stageDesignIntent(d.c.stage, input.brand, undefined, d.c.angle, d.c.situation);
                 const mechOk = seedRule(cand).length === 0;
+                const brandOk = i !== brandSteer || textNamesBrand(cand.text, input.brand);
                 const designOk = !intent || (await checkDesignFidelity({ candidates: [{ text: cand.text, design: intent }], meta: input.meta }))[0].voices;
-                if (mechOk && designOk) {
+                if (mechOk && brandOk && designOk) {
                   d.c.text = cand.text;
                   d.c.qtype = questionTypeOf(d.c, input.brand, input.category);
                   d.c.spec = deriveCheckSpec(d.c, input.brand, input.competitors, input.category);
@@ -3226,7 +3257,7 @@ export async function generateGrid(input: {
                   dirty.add(d.u);
                   console.warn(`pricing trade-off diversity: healed: ${cand.text.slice(0, 80)}`);
                 } else {
-                  console.warn(`pricing trade-off diversity: regeneration rejected - original stands`);
+                  console.warn(`pricing trade-off diversity: regeneration rejected (${mechOk ? "" : "mech "}${brandOk ? "" : "brand "}${designOk ? "" : "design"}) - original stands`);
                 }
               } catch (err) {
                 console.error("pricing diversity regeneration failed open:", err);
