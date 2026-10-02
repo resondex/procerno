@@ -1,6 +1,7 @@
 import { createHash } from "crypto";
 import { tagCosts, withCostContext } from "../cost_log";
 import { anthropicClient, openaiClient } from "./providers";
+import { ModeratorsShape } from "./instrument_shapes";
 import { INSTRUMENT_HELPER_MODEL } from "./models";
 import {
   AMBIGUOUS_FORMS, angleRivals, categoryNounOf, checkBattery, checkCandidateSignature, checkPromptAgainstSpec, classAnglesOf,
@@ -190,7 +191,13 @@ const GEN_DEADLINE_MS = 235_000;
  * remove a key from the set and then quiesce() BEFORE its final value
  * write, so a stale beat can never land after the value and re-mask it
  * as pending. stop() also quiesces. */
-function startHeartbeat(keys: () => string[], meta: CacheMeta | undefined): {
+function startHeartbeat(
+  keys: () => string[], meta: CacheMeta | undefined,
+  /** Extra fields each beat preserves on a key's marker - a provisional
+   * unit's claim carries its CELLS so a platform kill mid-re-judge loses
+   * nothing (2026-10-02 review round 4, minor b). */
+  payloadOf?: (key: string) => Record<string, unknown> | undefined
+): {
   quiesce: () => Promise<void>;
   stop: () => Promise<void>;
 } {
@@ -203,7 +210,7 @@ function startHeartbeat(keys: () => string[], meta: CacheMeta | undefined): {
     if (ks.length > 0) {
       inflight = Promise.all(
         ks.map((k) =>
-          store.cacheSet(k, JSON.stringify({ __pending: Date.now() }), meta).catch(() => {})
+          store.cacheSet(k, JSON.stringify({ __pending: Date.now(), ...(payloadOf?.(k) ?? {}) }), meta).catch(() => {})
         )
       );
     }
@@ -748,11 +755,20 @@ export async function classifyJourney(input: {
     }],
   } as never);
   const blocks = (res as { content: { type: string; input?: unknown; text?: string }[] }).content;
+  // A malformed read must THROW (retried, never cached) rather than flow a
+  // bad base downstream: the routes now validate base, so a cached bad read
+  // would 400 every request in its category for six months (2026-10-02
+  // review round 4, item 4). The regex fallback especially was unvalidated.
+  const validated = (raw: unknown): Moderators => {
+    const v = ModeratorsShape.safeParse(raw);
+    if (!v.success) throw new Error(`journey classification returned a malformed base: ${v.error.issues[0]?.message ?? "invalid"}`);
+    return v.data as Moderators;
+  };
   const tool = blocks.find((b) => b.type === "tool_use");
-  if (tool?.input) return tool.input as Moderators;
+  if (tool?.input) return validated(tool.input);
   const text = blocks.filter((b) => b.type === "text").map((b) => b.text ?? "").join("");
   const m = text.match(/\{[\s\S]*\}/);
-  if (m) return JSON.parse(m[0]) as Moderators;
+  if (m) return validated(JSON.parse(m[0]));
   throw new Error("journey classification returned no tool call");
 }
 
@@ -2539,6 +2555,9 @@ export async function generateGrid(input: {
    * WITHOUT (exhausted units) and why a retry answer was given, so the
    * route and the wizard can say so instead of a silent hole. */
   report?: { missing: { stage: string; situation: string | null; angle: string }[]; reason?: "unjudged" | "pending" };
+  /** An explicit user action retries exhausted units (each click = one more
+   * bounded attempt); automatic paths respect the hour-long marker. */
+  retryExhausted?: boolean;
   /** Background warm: never wait on another request's in-flight write. */
   noWait?: boolean;
   meta?: CacheMeta;
@@ -2748,9 +2767,11 @@ export async function generateGrid(input: {
     // concurrent request claimed between our read and now - leave the unit
     // to them; it resolves as a hole here and the caller's retry lands on
     // their finished, cached result.
+    const markerFor = (u: number) =>
+      JSON.stringify(pre.has(u) ? { __pending: Date.now(), cells: pre.get(u) } : { __pending: Date.now() });
     const wonClaims = await Promise.all(
       idxs.map((u) =>
-        store.cacheClaim(unitKeys[u], expected.get(u) ?? null, JSON.stringify({ __pending: Date.now() }), CACHE_TTL_MS, stampOf(input))
+        store.cacheClaim(unitKeys[u], expected.get(u) ?? null, markerFor(u), CACHE_TTL_MS, stampOf(input))
       )
     );
     const lost = idxs.filter((_, k) => !wonClaims[k]);
@@ -2761,7 +2782,15 @@ export async function generateGrid(input: {
     // in-flight set the moment their group settles, and each final write
     // quiesces first so a stale beat can never re-mask it as pending.
     const inFlight = new Set(idxs);
-    const hb = startHeartbeat(() => [...inFlight].map((u) => unitKeys[u]), stampOf(input));
+    const keyToUnit = new Map(idxs.map((u) => [unitKeys[u], u] as const));
+    const hb = startHeartbeat(
+      () => [...inFlight].map((u) => unitKeys[u]),
+      stampOf(input),
+      (k) => {
+        const u = keyToUnit.get(k);
+        return u !== undefined && pre.has(u) ? { cells: pre.get(u) } : undefined;
+      }
+    );
     try {
     const groups: number[][] = [];
     let cur: number[] = [];
@@ -2854,10 +2883,22 @@ export async function generateGrid(input: {
           // unit retries. Same-stage swaps hide from the stage guard, so
           // the situation and angle echoes are checked against the other
           // rows of this group too.
-          if (c.stage && c.stage !== row.stage.key && byKey.has(c.stage)) return;
+          if (c.stage && c.stage !== row.stage.key && byKey.has(c.stage)) {
+            console.warn(`echo guard drop (stage): row ${row.stage.key} echoed ${c.stage}`);
+            return;
+          }
+          // Only PINNED rows judge the situation echo (2026-10-02 round 4):
+          // an invariant row with reach=<scenarios> plausibly echoes one of
+          // its own scope labels, and that is looseness, not a swap.
           const echoSit = c.situation && c.situation.trim() && c.situation.trim() !== "-" ? c.situation.trim() : null;
-          if (echoSit && echoSit !== (row.situation ?? null) && scenarioLabels.has(echoSit)) return;
-          if (c.angle && c.angle !== planAngle(row) && rows.some((r) => r !== row && planAngle(r) === c.angle)) return;
+          if (row.situation && echoSit && echoSit !== row.situation && scenarioLabels.has(echoSit)) {
+            console.warn(`echo guard drop (situation): row "${row.situation}" echoed "${echoSit}"`);
+            return;
+          }
+          if (c.angle && c.angle !== planAngle(row) && rows.some((r) => r !== row && planAngle(r) === c.angle)) {
+            console.warn(`echo guard drop (angle): row ${planAngle(row)} echoed ${c.angle}`);
+            return;
+          }
           // #4 (2026-10-02 review): stage and layer are the PLAN row's too -
           // the writer echoing a different valid stage used to cache the
           // cell under the row's key with the wrong stage, and echoing a
@@ -3727,9 +3768,12 @@ export async function generateGrid(input: {
           return;
         } else {
           try {
-            const j = JSON.parse(raw) as { __pending?: number; tries?: number; at?: number };
+            const j = JSON.parse(raw) as { __pending?: number; tries?: number; at?: number; cells?: GridCell[] };
+            // A killed re-judge left its provisional cells ON the marker -
+            // recover them so the retry re-judges instead of redrawing.
+            if (Array.isArray(j.cells) && j.cells.length > 0) preCells.set(u, scrub(j.cells));
             const fresh = typeof j.at === "number" && Date.now() - j.at < 60 * 60 * 1000;
-            if (j.__pending === 0 && (j.tries ?? 0) >= 3 && fresh) {
+            if (j.__pending === 0 && (j.tries ?? 0) >= 3 && fresh && !input.retryExhausted) {
               console.error(`grid unit exhausted after ${j.tries} attempts - shipping the battery without it [${units[u][0]?.stage.key} ${units[u][0]?.situation ?? "-"}]`);
               exhausted.add(u);
               resolved[u] = [];
@@ -3740,8 +3784,9 @@ export async function generateGrid(input: {
               });
               return;
             }
-            // An hour-old exhaustion (or a thrown-only marker) starts fresh.
-            triesIn.set(u, fresh ? (j.tries ?? 0) : 0);
+            // An hour-old exhaustion (or a thrown-only marker) starts
+            // fresh; so does a user-forced retry.
+            triesIn.set(u, fresh && !input.retryExhausted ? (j.tries ?? 0) : 0);
           } catch { /* not a marker - claim below */ }
         }
       }

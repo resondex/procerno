@@ -559,6 +559,9 @@ export interface GridSetupArgs {
   setState: (s: GridState | null | ((prev: GridState | null) => GridState | null)) => void;
   setBusy: (b: string | null) => void;
   setError: (e: string | null) => void;
+  /** Notice slot that survives the advance to the Prompts step (goTo wipes
+   * setError) - the short-battery message lives here (2026-10-02 round 4). */
+  setNotice?: (n: string | null) => void;
   /** The wizard's setup id - every spend request carries it so the ledger
    * books setup costs to the tracker before the project exists. */
   setupId?: string | null;
@@ -997,15 +1000,17 @@ export function useGridSetup(a: GridSetupArgs) {
         scenarios: a.state.scenarios,
         stageKeys: effectiveKeptStages(a.state),
         worries: a.state.worries,
+        retryExhausted: true,
       }
     );
     a.setBusy(null);
     if (!data) return null;
     // Exhausted plan rows (2026-10-02): the battery shipped without them -
-    // say so instead of a silent hole; a retry regenerates them.
+    // say so in the slot the step change KEEPS (goTo wipes setError), with
+    // an action that works: the confirm click retries exhausted units.
     if (data.missing && data.missing.length > 0)
-      a.setError(
-        `${data.missing.length} planned question${data.missing.length === 1 ? "" : "s"} could not be written - the rest are ready; retry in a moment to fill the gap${data.missing.length === 1 ? "" : "s"}.`
+      (a.setNotice ?? a.setError)(
+        `${data.missing.length} planned question${data.missing.length === 1 ? "" : "s"} could not be written - the rest are ready. Go back to the coverage step and confirm again to retry the missing one${data.missing.length === 1 ? "" : "s"}.`
       );
     const composed: GridCellUi[] = data.cells.map((c) => ({
       ...c, uid: cellUid(), original: c.text, phrasings: [],

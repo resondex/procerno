@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { ModeratorsShape } from "@/lib/engine/instrument_shapes";
 import { z } from "zod";
 import { requireAuth, requireProject } from "@/lib/auth";
 import { store } from "@/lib/store";
@@ -51,7 +52,7 @@ const putSchema = z.object({
   competitors: z.array(z.string().trim().min(1)).max(12),
   engines: z.array(z.string()).optional(),
   grid: z.object({
-    moderators: z.record(z.string(), z.unknown()),
+    moderators: ModeratorsShape,
     cells: z
       .array(
         z.object({

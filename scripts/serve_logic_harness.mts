@@ -180,6 +180,20 @@ check("3e claim loses on stale expectation", w === false && (await store.cacheGe
 w = await store.cacheClaim(ckey, null, "M3", 3600_000, {});
 check("3e claim loses on absent expectation vs fresh row", w === false);
 
+// --- case 3f: a KILLED re-judge left its provisional cells riding the stale
+// claim marker - the takeover recovers them and re-judges in place instead
+// of redrawing (2026-10-02 round 4, minor b).
+await store.cacheSet(keyOf(prRow), JSON.stringify({ cells: [cellOf(prRow, PR_PASS)], rules: RULES }), {});
+await store.cacheSet(keyOf(ceRow), JSON.stringify({ __pending: Date.now() - 60_000, cells: [cellOf(ceRow, CE_PASS)] }), {});
+t0 = Date.now();
+out = await inst.generateGrid(gridInput());
+ms = Date.now() - t0;
+let rec3f = "";
+let recText = "";
+try { const v = JSON.parse((await store.cacheGet(keyOf(ceRow), 365 * 24 * 3600 * 1000)) ?? "") as { provisional?: boolean; cells?: { text: string }[] }; rec3f = v.provisional ? "provisional" : "other"; recText = v.cells?.[0]?.text ?? ""; } catch { rec3f = "parse"; }
+check("3f killed re-judge: cells recovered from the stale marker, text preserved, still provisional",
+  out === null && rec3f === "provisional" && recText === CE_PASS && ms < 10_000, `(${ms}ms, ${rec3f})`);
+
 // --- case 4: 60s-old marker is orphaned immediately (old code waited 180s) ---
 await store.cacheSet(keyOf(prRow), JSON.stringify({ __pending: Date.now() - 60_000 }), {});
 await store.cacheSet(keyOf(ceRow), JSON.stringify({ __pending: Date.now() - 60_000 }), {});

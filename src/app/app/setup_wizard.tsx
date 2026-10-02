@@ -387,6 +387,7 @@ export function SetupWizard({ mode, brand, draft, engineOptions, onClose, onCrea
   const [worryCap, setWorryCap] = useState<number | null>(null);
 
   const gridApi = useGridSetup({
+    setNotice: setPromptsNotice,
     setupId: draftId,
     brand, category, competitors: allCompetitors(), audience, rosterRoles, rosterClasses,
     maxScenarios: scenarioCap,

@@ -65,6 +65,9 @@ const Body = z.object({
   /** Background warm: fill the cache but never wait on another request's
    * in-flight write - the confirm that needs results does the waiting. */
   warm: z.boolean().optional(),
+  /** An explicit user confirm retries units the automatic paths gave up on
+   * (the 3-attempt exhaustion marker). Never set by the background warm. */
+  retryExhausted: z.boolean().optional(),
 });
 
 /** Gate 2: write one seed prompt per masked cell for the confirmed read. */
@@ -100,6 +103,7 @@ export async function POST(req: Request) {
     rosterClasses: parsed.data.rosterClasses,
     worries: parsed.data.worries,
     noWait: parsed.data.warm,
+    retryExhausted: parsed.data.retryExhausted,
     report,
     meta: { source: cacheSource(auth) },
   });
