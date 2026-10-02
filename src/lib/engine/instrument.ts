@@ -114,7 +114,7 @@ const STYLE_VERSION = "s29";
  * 7's unversioned serve-time re-check had no terminal state). Bump when
  * a deterministic check changes meaning; bumping costs one free re-judge
  * per unit, and model calls only for units the new rules reject. */
-export const SEED_RULES_VERSION = "r7"; // r4 (2026-10-01): r2 calendar-year/60-word/segment-vocab; r3 category-naming labels exempt from substring leak; r4 'standardization' in segment vocabulary; r5 directionless-switch string check; r6 punctuation-blind label-leak matching; r7 switch-direction regex tolerates intervening words
+export const SEED_RULES_VERSION = "r8"; // r4 (2026-10-01): r2 calendar-year/60-word/segment-vocab; r3 category-naming labels exempt from substring leak; r4 'standardization' in segment vocabulary; r5 directionless-switch string check; r6 punctuation-blind label-leak matching; r7-r8 switch direction detected by absence (no OS, no roster brand near switch vocabulary); cheaper bolt-on token on non-price concerns
 
 /** Brand forms that double as ordinary English words: only these demand a
  * capitalized occurrence to count as naming the brand ("2-3 services max"
@@ -3242,22 +3242,46 @@ export async function generateGrid(input: {
                   ],
                   response_format: { type: "json_schema", json_schema: { name: "grid_cells", strict: true, schema: CELLS_SCHEMA } },
                 });
-                const text2 = (JSON.parse(res2.choices[0]?.message?.content ?? "{}") as { cells?: { text?: string }[] }).cells?.[0]?.text?.trim();
-                if (!text2) return;
-                const cand = { stage: d.c.stage, angle: d.c.angle, text: humanize(text2), situation: d.c.situation };
+                let text2 = (JSON.parse(res2.choices[0]?.message?.content ?? "{}") as { cells?: { text?: string }[] }).cells?.[0]?.text?.trim();
                 const intent = stageDesignIntent(d.c.stage, input.brand, undefined, d.c.angle, d.c.situation);
-                const mechOk = seedRule(cand).length === 0;
-                const brandOk = i !== brandSteer || textNamesBrand(cand.text, input.brand);
-                const designOk = !intent || (await checkDesignFidelity({ candidates: [{ text: cand.text, design: intent }], meta: input.meta }))[0].voices;
-                if (mechOk && brandOk && designOk) {
-                  d.c.text = cand.text;
+                const judge = async (t: string) => {
+                  const cand = { stage: d.c.stage, angle: d.c.angle, text: humanize(t), situation: d.c.situation };
+                  const mechOk = seedRule(cand).length === 0;
+                  const brandOk = i !== brandSteer || textNamesBrand(cand.text, input.brand);
+                  const verdict = intent ? (await checkDesignFidelity({ candidates: [{ text: cand.text, design: intent }], meta: input.meta }))[0] : null;
+                  return { cand, mechOk, brandOk, designOk: !intent || !!verdict?.voices, reason: verdict?.reason ?? "" };
+                };
+                let v = text2 ? await judge(text2) : null;
+                // One steered retry (s29 audit F2: rejected dedup regens made
+                // the battery converge back to the fee monoculture - the
+                // rejection reason steers the second try).
+                if (text2 && v && !(v.mechOk && v.brandOk && v.designOk) && Date.now() <= deadlineAt) {
+                  const why = !v.designOk ? `it did not satisfy the design: ${v.reason}` : !v.mechOk ? "it broke a mechanical rule" : `it must name ${input.brand}`;
+                  const resR = await openaiClient().chat.completions.create({
+                    model: CELLS_MODEL,
+                    messages: [
+                      { role: "system", content: CELL_WRITER_SYSTEM + "Return one cell object for the plan line." },
+                      { role: "user", content:
+                          `Client brand: ${input.brand}\nCategory: ${input.category}\n` +
+                          `Rivals: ${rivals.map(primaryBrandName).join(", ")}\nAudience: ${input.audience ?? "unknown"}\n\n` +
+                          `Cell plan:\n${planLine(row, 0)}\n` +
+                          `   [this battery's pricing cells ALREADY use these price trade-offs: ${[...covered.keys()].join("; ")} - this cell must reason about a DIFFERENT price trade-off with the asker's usage as input. ` +
+                          `The last attempt was rejected because ${why}. Do not reuse: "${d.c.text}" / "${text2}"]` },
+                    ],
+                    response_format: { type: "json_schema", json_schema: { name: "grid_cells", strict: true, schema: CELLS_SCHEMA } },
+                  });
+                  text2 = (JSON.parse(resR.choices[0]?.message?.content ?? "{}") as { cells?: { text?: string }[] }).cells?.[0]?.text?.trim();
+                  v = text2 ? await judge(text2) : null;
+                }
+                if (v && v.mechOk && v.brandOk && v.designOk) {
+                  d.c.text = v.cand.text;
                   d.c.qtype = questionTypeOf(d.c, input.brand, input.category);
                   d.c.spec = deriveCheckSpec(d.c, input.brand, input.competitors, input.category);
                   delete d.c.seedFlags;
                   dirty.add(d.u);
-                  console.warn(`pricing trade-off diversity: healed: ${cand.text.slice(0, 80)}`);
+                  console.warn(`pricing trade-off diversity: healed: ${v.cand.text.slice(0, 80)}`);
                 } else {
-                  console.warn(`pricing trade-off diversity: regeneration rejected (${mechOk ? "" : "mech "}${brandOk ? "" : "brand "}${designOk ? "" : "design"}) - original stands`);
+                  console.warn(`pricing trade-off diversity: regeneration rejected (${v ? `${v.mechOk ? "" : "mech "}${v.brandOk ? "" : "brand "}${v.designOk ? "" : "design"}` : "empty"}) - original stands`);
                 }
               } catch (err) {
                 console.error("pricing diversity regeneration failed open:", err);
@@ -3388,14 +3412,28 @@ export async function generateGrid(input: {
         check: "segment_vocabulary" as const,
         detail: `"${seg[0]}" is planning vocabulary no buyer uses about themselves - voice the size or stakes in plain words ("we're about 120 people and doubling", "picking one tool for the whole company")`,
       });
-    // r5 (2026-10-01): a directionless switch is a STRING, not a judgment -
-    // the design check passed "from one mobile platform to another" twice,
-    // and which products get named then depends on each engine's guess.
-    const sw = c.text.match(/\b(?:from one(?:\s+\w+){0,2}\s+(?:platform|ecosystem)s?\s+to\s+(?:another|the other)|switch(?:ing)?(?:\s+\w+)?\s+(?:platforms|ecosystems)|moving(?:\s+between)?(?:\s+\w+)?\s+(?:platforms|ecosystems)|between (?:platforms|ecosystems))\b/i);
-    if (sw && !/\b(?:from|to|off|onto)\s+(?:iOS|Android|iPhone)\b/i.test(c.text))
+    // r8 (2026-10-01): a directionless switch is detected by ABSENCE, not a
+    // banned-phrase list - the writer dodged four widenings of the list
+    // ("one mobile platform" / "one phone platform" / "my current platform
+    // to the other platform"). Switch vocabulary near platform/ecosystem
+    // with no OS named and no roster brand carrying the direction = flagged.
+    const sw = c.text.match(/\b(?:switch|mov(?:e|ing)|leav(?:e|ing)|chang(?:e|ing)|jump(?:ing)?|coming|going)\w*\b[^.!?\n]{0,60}\b(?:platform|ecosystem)s?\b|\b(?:platform|ecosystem)s?\b[^.!?\n]{0,60}\b(?:switch|mov(?:e|ing)|chang(?:e|ing))\w*/i);
+    if (
+      sw &&
+      !/\b(?:iOS|Android)\b/i.test(c.text) &&
+      ![input.brand, ...input.competitors].some((b) => textNamesBrand(c.text, b))
+    )
       out.push({
         check: "seed_switch_direction" as const,
-        detail: `"${sw[0]}" never says which way - state the direction in platform words ("from iOS to Android"), or every answer guesses and the guess decides which products get named`,
+        detail: `"${sw[0].trim()}" never says which way - state the direction in platform words ("from iOS to Android"), or every answer guesses and the guess decides which products get named`,
+      });
+    // r8: the "cheaper" bolt-on on a non-price concern keeps re-rolling in
+    // (third recurrence) - it is a token, not a judgment. Price concerns
+    // keep their cheaper talk.
+    if (c.concern && !/price|pricey|pricing|fee|cost|expensive|afford|cheap/i.test(c.concern) && /\bcheap(?:er|est)?\b/i.test(c.text))
+      out.push({
+        check: "concern_price_bolt_on" as const,
+        detail: `the cell's concern is "${c.concern}" but the text bolts on a cheaper-options remark - price has its own cells, and the bolt-on muddies whose worry drove the exit`,
       });
     return out;
   };
