@@ -98,7 +98,7 @@ const CACHE_TTL_MS = 183 * 24 * 3600 * 1000;
 // VERDICT asks, premium_worth holds the tier-as-class open-choice form
 // (never one named brand's own worth) - writer rules and design lines
 // changed together.
-const STYLE_VERSION = "s22";
+const STYLE_VERSION = "s23";
 
 /** Versions the DETERMINISTIC seed-check set (everything seedRule runs:
  * checkPromptAgainstSpec + blind_missing_category + scenario_label_leak).
@@ -114,7 +114,7 @@ const STYLE_VERSION = "s22";
  * 7's unversioned serve-time re-check had no terminal state). Bump when
  * a deterministic check changes meaning; bumping costs one free re-judge
  * per unit, and model calls only for units the new rules reject. */
-export const SEED_RULES_VERSION = "r4"; // r4 (2026-10-01): r2 calendar-year/60-word/segment-vocab; r3 category-naming labels exempt from substring leak; r4 'standardization' added to segment vocabulary
+export const SEED_RULES_VERSION = "r5"; // r4 (2026-10-01): r2 calendar-year/60-word/segment-vocab; r3 category-naming labels exempt from substring leak; r4 'standardization' in segment vocabulary; r5 directionless-switch string check
 
 /** Brand forms that double as ordinary English words: only these demand a
  * capitalized occurrence to count as naming the brand ("2-3 services max"
@@ -1954,8 +1954,10 @@ const CELL_WRITER_SYSTEM =
           "'for my trip'), no spec or size qualifier, no criteria list that " +
           "implies a situation: any such detail becomes a fact every " +
           "paraphrase must keep, and the measurement is the head-to-head " +
-          "itself, never one buyer's story. The shape is '<brand> or " +
-          "<rival> for <category> - which would you go with, and why?' " +
+          "itself, never one buyer's story. EVERY comparison asks for the " +
+          "PICK - a 'where does each win' strengths tour with no 'which " +
+          "would you go with' is not a head-to-head. The shape is '<brand> " +
+          "or <rival> for <category> - which would you go with, and why?' " +
           "(drop the 'for <category>' clause only when both names are " +
           "unambiguous product names - a bank or multi-product company " +
           "name like Chase or Citi keeps it - and make it read " +
@@ -2921,16 +2923,17 @@ export async function generateGrid(input: {
                 candidates: seedTargets.map((x) => ({ text: x.c.text, design: x.intent })),
                 meta: input.meta,
               });
-              const low = seedTargets.filter((_, k) => !verdicts[k].voices && !verdicts[k].unchecked);
-              // Second opinion at MEDIUM effort before any heal or flag: the
-              // low tier's gray zone re-rolls 1-2 false kills per battery at
-              // this volume, and a false kill costs a heal plus a noise chip.
-              const second = low.length > 0
-                ? await checkDesignFidelity({ candidates: low.map((x) => ({ text: x.c.text, design: x.intent })), meta: input.meta, effort: "medium" })
-                : [];
-              const bad = low
-                .map((x, k) => ({ ...x, reason: second[k]?.reason ?? "" }))
-                .filter((_, k) => !second[k].voices && !second[k].unchecked);
+              // The LOW verdict is the kill decision: the 2026-09-29 bakeoff
+              // validated low against the opus-medium reference (99.2%), and
+              // an s22 experiment with a medium-effort second opinion CLEARED
+              // real defects (directionless switch cells, a lost teen
+              // circumstance) - medium is more lenient here, not more
+              // accurate. A gray-zone false kill just rewrites a fine seed
+              // into another fine seed, or ships a chip a human can dismiss;
+              // a silent defect ships a broken measurement.
+              const bad = seedTargets
+                .map((x, k) => ({ ...x, reason: verdicts[k].reason }))
+                .filter((_, k) => !verdicts[k].voices && !verdicts[k].unchecked);
               // Independent per cell - concurrent, like the brand-rule heal.
               await Promise.all(bad.map(async (x) => {
                 console.warn(`seed design check flagged [${x.c.stage}]: ${x.c.text.slice(0, 90)}`);
@@ -2960,7 +2963,7 @@ export async function generateGrid(input: {
                 // otherwise the terminal verdict flags the "fix".
                 const mech2ok = !!text2 && seedRule({ ...x.c, text: text2 }).length === 0;
                 const again = mech2ok
-                  ? (await checkDesignFidelity({ candidates: [{ text: text2!, design: x.intent }], meta: input.meta, effort: "medium" }))[0]
+                  ? (await checkDesignFidelity({ candidates: [{ text: text2!, design: x.intent }], meta: input.meta }))[0]
                   : null;
                 if (again?.voices) {
                   console.warn(`seed self-healed [${x.c.stage}]: ${text2!.slice(0, 90)}`);
@@ -3292,6 +3295,15 @@ export async function generateGrid(input: {
       out.push({
         check: "segment_vocabulary" as const,
         detail: `"${seg[0]}" is planning vocabulary no buyer uses about themselves - voice the size or stakes in plain words ("we're about 120 people and doubling", "picking one tool for the whole company")`,
+      });
+    // r5 (2026-10-01): a directionless switch is a STRING, not a judgment -
+    // the design check passed "from one mobile platform to another" twice,
+    // and which products get named then depends on each engine's guess.
+    const sw = c.text.match(/\b(?:from one (?:mobile )?(?:platform|ecosystem) to (?:another|the other)|switch(?:ing)? (?:platforms|ecosystems)|moving (?:between )?(?:platforms|ecosystems)|between (?:platforms|ecosystems))\b/i);
+    if (sw && !/\b(?:from|to|off|onto)\s+(?:iOS|Android|iPhone)\b/i.test(c.text))
+      out.push({
+        check: "seed_switch_direction" as const,
+        detail: `"${sw[0]}" never says which way - state the direction in platform words ("from iOS to Android"), or every answer guesses and the guess decides which products get named`,
       });
     return out;
   };

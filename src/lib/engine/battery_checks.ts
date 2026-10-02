@@ -249,6 +249,11 @@ export function stageDesignIntent(stage: string, brand: string, concern?: string
       return `Question design (leaving a rival): the asker is moving away from ${angle} and asks what to consider instead, stating the move PLAINLY with no reason given. A reason that says what ${angle} lacks or who it fails ("too lightweight for a dev team") steers the answer toward one kind of replacement and does not satisfy the design, and so does the asker's team or segment identity ("for our dev team", "for a software engineering team") - the category word is the only anchor. Naming ${brand} does not satisfy it either.`;
     return null;
   }
+  // Head-to-head seeds were never design-checked (comparison had no intent):
+  // "where does each win?" strengths tours shipped without a pick ask, and
+  // the head-to-head view scores a WINNER (2026-10-01 s22 audit, F3).
+  if (stage === "comparison" && angle && angle !== "generic")
+    return `Question design (head-to-head): the question weighs ${brand} against its designed counterpart and ASKS FOR THE PICK - "which would you go with", "which one", and why. A strengths tour ("where does each win", "pros and cons") that never asks which to pick does not satisfy the design.`;
   // A scenario-pinned cell's SEED must carry its circumstance (audit M1
   // recurrence, 2026-10-01: two Mid-market cells read as generic feature
   // asks). Any pinned stage without a more specific design above gets this
@@ -393,7 +398,7 @@ export interface BatteryFinding {
     // a calendar year goes stale on the next wave and breaks the trend; a
     // 60+ word seed is a requirements list however casual the words; segment
     // vocabulary is the plan's register, not a buyer's.
-    | "seed_calendar_year" | "seed_overlong" | "segment_vocabulary"
+    | "seed_calendar_year" | "seed_overlong" | "segment_vocabulary" | "seed_switch_direction"
     | "seed_number_changed" | "duplicate_paraphrase";
   /** The offending prompt text (or the seed, for cell-level findings). */
   text: string;
