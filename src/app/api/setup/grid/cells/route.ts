@@ -10,6 +10,7 @@ import {
   type Moderators,
   type ScenarioSpec,
 } from "@/lib/engine/instrument";
+import { ModeratorsShape } from "@/lib/engine/instrument_shapes";
 
 // 300, not 120: a hard category's market read alone runs 90-120s of
 // gpt-5 reasoning - the old budget killed first reads at the wall and
@@ -46,7 +47,7 @@ const Body = z.object({
     .max(36)
     .optional(),
   audience: z.string().trim().max(160).optional(),
-  base: z.record(z.string(), z.unknown()),
+  base: ModeratorsShape,
   /** The ACTIVE scenarios as confirmed at gate 1, with their journeys. */
   scenarios: z
     .array(
@@ -79,7 +80,7 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: "bad request" }, { status: 400 });
   }
   const { brand, category, competitors, audience, stageKeys } = parsed.data;
-  const base = parsed.data.base as unknown as Moderators;
+  const base: Moderators = parsed.data.base;
   const scenarios = parsed.data.scenarios as unknown as (ScenarioSpec & { journey: Journey | null })[];
   const kept = new Set(stageKeys);
   const stages = participationMask(base, scenarios).filter((s) => kept.has(s.key));

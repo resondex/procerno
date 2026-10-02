@@ -8,6 +8,7 @@ import {
   type Moderators,
   type ScenarioSpec,
 } from "@/lib/engine/instrument";
+import { ModeratorsShape } from "@/lib/engine/instrument_shapes";
 
 export const maxDuration = 120;
 
@@ -26,7 +27,7 @@ const Body = z.object({
    * Absent = every competitor same_seat (the untyped behavior). */
   rosterRoles: z.record(z.string().max(80), z.enum(["same_seat", "upstream"])).optional(),
   audience: z.string().trim().max(160).optional(),
-  base: z.record(z.string(), z.unknown()),
+  base: ModeratorsShape,
   scenarios: z
     .array(
       z.object({
@@ -73,7 +74,7 @@ export async function POST(req: Request) {
     category: parsed.data.category,
     competitors: parsed.data.competitors,
     audience: parsed.data.audience || null,
-    base: parsed.data.base as unknown as Moderators,
+    base: parsed.data.base,
     scenarios: parsed.data.scenarios as ScenarioSpec[],
     cell: parsed.data.cell,
     avoid: parsed.data.avoid,

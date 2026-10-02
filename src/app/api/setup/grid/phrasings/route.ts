@@ -9,6 +9,7 @@ import {
   type Moderators,
   type ScenarioSpec,
 } from "@/lib/engine/instrument";
+import { ModeratorsShape } from "@/lib/engine/instrument_shapes";
 import type { CellCheckSpec } from "@/lib/engine/battery_checks";
 
 // 300, not 120: a hard category's market read alone runs 90-120s of
@@ -31,7 +32,7 @@ const Body = z.object({
    * Absent = every competitor same_seat (the untyped behavior). */
   rosterRoles: z.record(z.string().max(80), z.enum(["same_seat", "upstream"])).optional(),
   audience: z.string().trim().max(160).optional(),
-  base: z.record(z.string(), z.unknown()),
+  base: ModeratorsShape,
   scenarios: z
     .array(
       z.object({
@@ -95,7 +96,7 @@ export async function POST(req: Request) {
     category,
     competitors,
     audience: audience || null,
-    base: parsed.data.base as unknown as Moderators,
+    base: parsed.data.base,
     scenarios: parsed.data.scenarios as unknown as (ScenarioSpec & { journey: Journey | null })[],
     cells: cells.map((c) => ({ ...c, spec: (c.spec ?? null) as CellCheckSpec | null })),
     count,

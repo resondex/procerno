@@ -11,6 +11,7 @@ import {
   type Moderators,
   type ScenarioSpec,
 } from "@/lib/engine/instrument";
+import { ModeratorsShape } from "@/lib/engine/instrument_shapes";
 
 export const maxDuration = 120;
 
@@ -25,7 +26,7 @@ const Body = z.object({
   brand: z.string().trim().min(1).max(80),
   category: z.string().trim().min(1).max(120),
   audience: z.string().trim().max(160).optional(),
-  base: z.record(z.string(), z.unknown()),
+  base: ModeratorsShape,
   scenarios: z
     .array(
       z.object({
@@ -55,7 +56,7 @@ export async function POST(req: Request) {
   if (!parsed.success) {
     return NextResponse.json({ error: "bad request" }, { status: 400 });
   }
-  const base = parsed.data.base as unknown as Moderators;
+  const base: Moderators = parsed.data.base;
   const scenarios = parsed.data.scenarios as unknown as (ScenarioSpec & { journey: Journey | null })[];
   const offered = participationMask(base, scenarios)
     .filter((s) => s.recommended && (WORRY_STANCE_STAGES as readonly string[]).includes(s.key))

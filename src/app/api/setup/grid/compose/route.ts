@@ -14,6 +14,7 @@ import {
   type ScenarioFit,
   type ScenarioSpec,
 } from "@/lib/engine/instrument";
+import { ModeratorsShape } from "@/lib/engine/instrument_shapes";
 
 // 300, not 120: a hard category's market read alone runs 90-120s of
 // gpt-5 reasoning - the old budget killed first reads at the wall and
@@ -42,7 +43,7 @@ const Body = z.object({
   category: z.string().trim().min(1).max(120),
   audience: z.string().trim().max(160).optional(),
   /** Edited read: recompute the mask from these - pure code, no model. */
-  base: z.record(z.string(), z.unknown()).optional(),
+  base: ModeratorsShape.optional(),
   scenarios: z.array(ScenarioShape).min(1).max(4).optional(),
   /** Background warm: fill the cache but never wait on another request's
    * in-flight read - the confirm that needs results does the waiting. */
@@ -73,7 +74,7 @@ export async function POST(req: Request) {
   let reserve: ScenarioSpec[] | undefined;
   let stages;
   if (parsed.data.base && parsed.data.scenarios) {
-    base = parsed.data.base as unknown as Moderators;
+    base = parsed.data.base;
     // A4 in code on the edited path too: one deviating journey per grid.
     let deltaGranted = false;
     scenarios = parsed.data.scenarios.map((s) => {
