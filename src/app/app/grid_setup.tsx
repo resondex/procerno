@@ -987,7 +987,7 @@ export function useGridSetup(a: GridSetupArgs) {
     // The wizard keys its narrated progress captions on this exact string.
     a.setBusy(CELLS_BUSY);
     a.setError(null);
-    const data = await post<{ cells: Omit<GridCellUi, "phrasings">[] }>(
+    const data = await post<{ cells: Omit<GridCellUi, "phrasings">[]; missing?: { stage: string }[] }>(
       "/api/setup/grid/cells",
       {
         brand: a.brand, category: a.category, competitors: a.competitors, rosterRoles: a.rosterRoles,
@@ -1001,6 +1001,12 @@ export function useGridSetup(a: GridSetupArgs) {
     );
     a.setBusy(null);
     if (!data) return null;
+    // Exhausted plan rows (2026-10-02): the battery shipped without them -
+    // say so instead of a silent hole; a retry regenerates them.
+    if (data.missing && data.missing.length > 0)
+      a.setError(
+        `${data.missing.length} planned question${data.missing.length === 1 ? "" : "s"} could not be written - the rest are ready; retry in a moment to fill the gap${data.missing.length === 1 ? "" : "s"}.`
+      );
     const composed: GridCellUi[] = data.cells.map((c) => ({
       ...c, uid: cellUid(), original: c.text, phrasings: [],
     }));

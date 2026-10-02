@@ -2528,6 +2528,10 @@ export async function generateGrid(input: {
    * (self-versioning request data). Absent = the legacy concern-plan
    * zip, byte-identical. */
   worries?: WorryPick[];
+  /** Out-parameter (2026-10-02 review round 3): rows the battery shipped
+   * WITHOUT (exhausted units) and why a retry answer was given, so the
+   * route and the wizard can say so instead of a silent hole. */
+  report?: { missing: { stage: string; situation: string | null; angle: string }[]; reason?: "unjudged" | "pending" };
   /** Background warm: never wait on another request's in-flight write. */
   noWait?: boolean;
   meta?: CacheMeta;
@@ -2765,7 +2769,13 @@ export async function generateGrid(input: {
           await hb.quiesce();
           await Promise.all(
             group.map((u) =>
-              store.cacheSet(unitKeys[u], JSON.stringify({ __pending: 0 }), stampOf(input)).catch(() => {})
+              store.cacheSet(
+                unitKeys[u],
+                pre.has(u)
+                  ? JSON.stringify({ cells: pre.get(u), provisional: true })
+                  : JSON.stringify({ __pending: 0 }),
+                stampOf(input)
+              ).catch(() => {})
             )
           );
           return;
@@ -3115,7 +3125,7 @@ export async function generateGrid(input: {
               unitKeys[u],
               cells.length > 0
                 ? JSON.stringify(complete ? { cells, rules: SEED_RULES_VERSION } : { cells, provisional: true })
-                : JSON.stringify({ __pending: 0, tries: (triesOf.get(u) ?? 0) + 1 }),
+                : JSON.stringify({ __pending: 0, tries: (triesOf.get(u) ?? 0) + 1, at: Date.now() }),
               stampOf(input)
             );
           })
@@ -3129,9 +3139,20 @@ export async function generateGrid(input: {
           console.error(`grid cells group failed (${group.length} units) - markers released:`, err);
           group.forEach((u) => inFlight.delete(u));
           await hb.quiesce();
+          // A thrown call is a vendor blip, not an attempt - it must not
+          // count toward exhaustion (an outage would otherwise ship a short
+          // battery that sticks). A pre-seeded unit writes its cells back
+          // provisional: the claim overwrote them, and releasing to a bare
+          // marker here would lose the very text re-judge-in-place keeps.
           await Promise.all(
             group.map((u) =>
-              store.cacheSet(unitKeys[u], JSON.stringify({ __pending: 0, tries: (triesOf.get(u) ?? 0) + 1 }), stampOf(input)).catch(() => {})
+              store.cacheSet(
+                unitKeys[u],
+                pre.has(u)
+                  ? JSON.stringify({ cells: pre.get(u), provisional: true })
+                  : JSON.stringify({ __pending: 0, tries: triesOf.get(u) ?? 0 }),
+                stampOf(input)
+              ).catch(() => {})
             )
           );
         }
@@ -3655,14 +3676,21 @@ export async function generateGrid(input: {
           return;
         } else {
           try {
-            const j = JSON.parse(raw) as { __pending?: number; tries?: number };
-            if (j.__pending === 0 && (j.tries ?? 0) >= 3) {
+            const j = JSON.parse(raw) as { __pending?: number; tries?: number; at?: number };
+            const fresh = typeof j.at === "number" && Date.now() - j.at < 60 * 60 * 1000;
+            if (j.__pending === 0 && (j.tries ?? 0) >= 3 && fresh) {
               console.error(`grid unit exhausted after ${j.tries} attempts - shipping the battery without it [${units[u][0]?.stage.key} ${units[u][0]?.situation ?? "-"}]`);
               exhausted.add(u);
               resolved[u] = [];
+              input.report?.missing.push({
+                stage: units[u][0]?.stage.key ?? "?",
+                situation: units[u][0]?.situation ?? null,
+                angle: units[u][0] ? planAngle(units[u][0]) : "?",
+              });
               return;
             }
-            triesIn.set(u, j.tries ?? 0);
+            // An hour-old exhaustion (or a thrown-only marker) starts fresh.
+            triesIn.set(u, fresh ? (j.tries ?? 0) : 0);
           } catch { /* not a marker - claim below */ }
         }
       }
@@ -3695,9 +3723,12 @@ export async function generateGrid(input: {
         if (raw && at === null) {
           const v = valueOf(raw);
           if (v && v.cells.length > 0) {
-            // The other generator just wrote this under the current
-            // rules - no re-judge needed.
+            // The other generator just wrote this. PROVISIONAL still means
+            // unjudged (2026-10-02 review round 3, gap #2): accept the cells
+            // for the response shape but answer retry, or the confirm that
+            // waited on a warm would hand unjudged seeds to the draft.
             resolved[u] = scrub(v.cells);
+            if (v.provisional) provisionalOut.add(u);
             open.delete(u);
             return;
           }
@@ -3737,7 +3768,12 @@ export async function generateGrid(input: {
   // text preserved). Exhausted units are the deliberate exception: after 3
   // failed attempts the battery ships without them, logged, so a never-
   // producible cell cannot re-create the init stall loop.
-  return resolved.some((r, u) => (r === null || r.length === 0) && !exhausted.has(u)) && !input.noWait
+  const holes = resolved.some((r, u) => (r === null || r.length === 0) && !exhausted.has(u));
+  if (input.report && !input.noWait) {
+    if (provisionalOut.size > 0) input.report.reason = "unjudged";
+    else if (holes) input.report.reason = "pending";
+  }
+  return holes && !input.noWait
     ? null
     : provisionalOut.size > 0 && !input.noWait
       ? null

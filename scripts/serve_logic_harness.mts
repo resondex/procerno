@@ -145,12 +145,27 @@ check("3b provisional re-judges in place: text preserved, still provisional, res
 // without it (logged hole) instead of blocking the wizard forever on the
 // retry response (2026-10-02 review: the stall-loop shape, bounded).
 await store.cacheSet(keyOf(prRow), JSON.stringify({ cells: [cellOf(prRow, PR_PASS)], rules: RULES }), {});
-await store.cacheSet(keyOf(ceRow), JSON.stringify({ __pending: 0, tries: 3 }), {});
+await store.cacheSet(keyOf(ceRow), JSON.stringify({ __pending: 0, tries: 3, at: Date.now() }), {});
+t0 = Date.now();
+const report3c: { missing: { stage: string }[] } = { missing: [] };
+out = await inst.generateGrid({ ...gridInput(), report: report3c });
+ms = Date.now() - t0;
+check("3c exhausted unit ships the battery short instead of blocking",
+  Array.isArray(out) && out.length === 1 && out[0].text === PR_PASS && report3c.missing.length === 1 && ms < 10_000,
+  `(${ms}ms, cells=${Array.isArray(out) ? out.length : "null"}, missing=${report3c.missing.length})`);
+
+// --- case 3d: an exhaustion marker older than an hour EXPIRES - the unit is
+// claimed again with a reset count (an outage must not ship a short battery
+// that sticks; 2026-10-02 review round 3, item 1).
+await store.cacheSet(keyOf(prRow), JSON.stringify({ cells: [cellOf(prRow, PR_PASS)], rules: RULES }), {});
+await store.cacheSet(keyOf(ceRow), JSON.stringify({ __pending: 0, tries: 3, at: Date.now() - 61 * 60 * 1000 }), {});
 t0 = Date.now();
 out = await inst.generateGrid(gridInput());
 ms = Date.now() - t0;
-check("3c exhausted unit ships the battery short instead of blocking",
-  Array.isArray(out) && out.length === 1 && out[0].text === PR_PASS && ms < 10_000, `(${ms}ms, cells=${Array.isArray(out) ? out.length : "null"})`);
+let tries3d = -1;
+try { tries3d = (JSON.parse((await store.cacheGet(keyOf(ceRow), 365 * 24 * 3600 * 1000)) ?? "") as { tries?: number }).tries ?? -1; } catch { /* keep -1 */ }
+check("3d hour-old exhaustion expires: claimed again, count reset (thrown call does not increment)",
+  out === null && tries3d === 0 && ms < 10_000, `(${ms}ms, tries=${tries3d})`);
 
 // --- case 4: 60s-old marker is orphaned immediately (old code waited 180s) ---
 await store.cacheSet(keyOf(prRow), JSON.stringify({ __pending: Date.now() - 60_000 }), {});

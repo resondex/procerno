@@ -86,6 +86,7 @@ export async function POST(req: Request) {
   if (stages.length === 0) {
     return NextResponse.json({ error: "keep at least one stage" }, { status: 400 });
   }
+  const report: { missing: { stage: string; situation: string | null; angle: string }[]; reason?: "unjudged" | "pending" } = { missing: [] };
   const cells = await generateGrid({
     brand,
     category,
@@ -98,15 +99,21 @@ export async function POST(req: Request) {
     rosterClasses: parsed.data.rosterClasses,
     worries: parsed.data.worries,
     noWait: parsed.data.warm,
+    report,
     meta: { source: cacheSource(auth) },
   });
   if (!cells) {
     return parsed.data.warm
       ? NextResponse.json({ pending: true })
       : NextResponse.json(
-          { error: "the prompts are still being written - try again in a moment" },
+          {
+            error:
+              report.reason === "unjudged"
+                ? "the prompt checker is briefly unavailable - your prompts are written and will be checked when you retry in a moment"
+                : "the prompts are still being written - try again in a moment",
+          },
           { status: 502 }
         );
   }
-  return NextResponse.json({ cells });
+  return NextResponse.json({ cells, ...(report.missing.length > 0 ? { missing: report.missing } : {}) });
 }
