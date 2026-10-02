@@ -114,7 +114,7 @@ const STYLE_VERSION = "s29";
  * 7's unversioned serve-time re-check had no terminal state). Bump when
  * a deterministic check changes meaning; bumping costs one free re-judge
  * per unit, and model calls only for units the new rules reject. */
-export const SEED_RULES_VERSION = "r11"; // r4 (2026-10-01): r2 calendar-year/60-word/segment-vocab; r3 category-naming labels exempt from substring leak; r4 'standardization' in segment vocabulary; r5 directionless-switch string check; r6 punctuation-blind label-leak matching; r7-r8 switch direction detected by absence (no OS, no roster brand near switch vocabulary); cheaper bolt-on token on non-price concerns
+export const SEED_RULES_VERSION = "r12"; // r4 (2026-10-01): r2 calendar-year/60-word/segment-vocab; r3 category-naming labels exempt from substring leak; r4 'standardization' in segment vocabulary; r5 directionless-switch string check; r6 punctuation-blind label-leak matching; r7-r8 switch direction detected by absence (no OS, no roster brand near switch vocabulary); cheaper bolt-on token on non-price concerns
 
 /** Brand forms that double as ordinary English words: only these demand a
  * capitalized occurrence to count as naming the brand ("2-3 services max"
@@ -3445,6 +3445,28 @@ export async function generateGrid(input: {
         check: "class_category_tail" as const,
         detail: `the class phrase already carries the category - drop the redundant "for ${input.category}" tail ("${input.brand} or a Visa card for credit cards" is not how anyone talks)`,
       });
+    // r12 (2026-10-02 Netflix fresh-walk audit): a seed that STATES a
+    // product's price asserts the writer's stale world knowledge ("Netflix
+    // Standard is about 15" was 2023-24 pricing) - every answer starts from
+    // a false premise and the gap grows per wave, the calendar-year disease
+    // in dollar form. The asker's OWN numbers (their spend, size, budget, a
+    // deal offered to them, a payment-plan rate) are circumstance and stay.
+    {
+      const priceAssert = /(?:\b(?:is|are|costs?|runs?|charges?|priced at|goes for)\s+(?:about |around |roughly |like )?~?\$?\d|\bat\s+\$\d)/gi;
+      const unitAfter = /^[\d.,k\s-]*(?:engineers?|people|employees?|users?|seats?|agents?|devs?|requesters?|hours?|trips?|nights?|photos?|videos?|gb|tb|times|lines|stores?|squads?|percent|%)\b/i;
+      const dealBefore = /(?:trade[- ]?in|credits?|budget|bill|spend\w*|offer\w*|deal)[^.!?]{0,16}$/i;
+      const planAfter = /^[\d.,k\s-]*(?:a month\b|\/mo\b|per month|monthly)/i;
+      for (const m of c.text.matchAll(priceAssert)) {
+        const after = c.text.slice((m.index ?? 0) + m[0].length - 1);
+        const before = c.text.slice(Math.max(0, (m.index ?? 0) - 28), m.index);
+        if (unitAfter.test(after) || dealBefore.test(before) || planAfter.test(after)) continue;
+        out.push({
+          check: "seed_states_price" as const,
+          detail: `the seed states a product's price ("...${c.text.slice(Math.max(0, (m.index ?? 0) - 20), (m.index ?? 0) + m[0].length + 10).trim()}...") - prices date and every answer then starts from a false premise; name the tier or product and ASK what it costs or which nets out better (the asker's own spend, budget or a deal offered to them is circumstance and stays)`,
+        });
+        break;
+      }
+    }
     // r8: the "cheaper" bolt-on on a non-price concern keeps re-rolling in
     // (third recurrence) - it is a token, not a judgment. Price concerns
     // keep their cheaper talk.

@@ -182,7 +182,7 @@ export function seedDesignLine(
   // concern (2026-09-30) names the subject outright - the strongest form.
   if (DOUBT_CHECK_STAGES.has(stage)) {
     const keepLeave = stage === "churn_triggers" || stage === "renewal"
-      ? ` The asker weighs STAYING with ${brand} against LEAVING it, and the leave option stays stated - a fix-it or tune-it rewording that drops the option of leaving does not satisfy the design.`
+      ? ` The asker weighs STAYING with ${brand} against LEAVING it, and the leave option stays stated - a fix-it or tune-it rewording that drops the option of leaving does not satisfy the design, and neither does a choice between two ways of leaving (pause vs cancel): staying must genuinely be on the table.`
       : "";
     return concern
       ? `Question design (doubt): the question voices the buyer's concern about ${brand} on THIS designed subject: ${concern}. THAT worry must be the question's MAIN point - a question whose main worry is something else does not satisfy the design even if it mentions the subject in passing. A value-math request without the stated worry does not voice it, an eligibility or rules lookup does not voice it even when the rules are unfavorable to the asker ("am I likely to be ineligible?" is a lookup, not a doubt), and the question never asks for a price, a cost figure or the money accounting - the money question belongs to the pricing cells.${keepLeave} Same concern, differently worded by a different person. Designed as: "${seed}"`
@@ -221,7 +221,7 @@ export function stageDesignIntent(stage: string, brand: string, concern?: string
     // just methods - "what should we be paying, given <usage>" is pricing's
     // accounting question and slipped the method-only wording.
     const keepLeave = stage === "churn_triggers" || stage === "renewal"
-      ? ` The asker weighs STAYING with ${brand} against LEAVING it, and the leave option is stated outright - a fix-it or tune-it ask with no option of leaving does not satisfy the design.`
+      ? ` The asker weighs STAYING with ${brand} against LEAVING it, and the leave option is stated outright - a fix-it or tune-it ask with no option of leaving does not satisfy the design, and neither does a choice between two ways of leaving (pause vs cancel): staying must genuinely be on the table.`
       : "";
     const stance = stage === "objections"
       ? ` The asker is a PROSPECT weighing the purchase - an existing customer's keep-or-cancel doubt belongs to the churn/renewal cells, so "should I drop/cancel it" does not satisfy an objection's design.`
@@ -235,7 +235,7 @@ export function stageDesignIntent(stage: string, brand: string, concern?: string
     // examples were fee-shaped and the checker refused a legitimate
     // financing-vs-unlocked trade-off while "best value phone for my
     // budget" discovery asks slipped into pricing cells).
-    return `Question design (value math): the question reasons about a price/value TRADE-OFF in ${brand}'s market, WITH the asker's usage or situation as an input, leaving the verdict to the answer - either naming ${brand} (its tiers, its fee or total-cost math, trade-in or financing on it) or generic to the category's price structure (paid vs free, fee vs no-fee, financing vs buying outright, paying up for a higher tier vs the base). Financing, trade-in or price figures are PRICES, not usage: the asker's own usage (what they do with it, how long they keep it, what they spend on what) must also be present. A "which product is the best value for my budget" ask is an open-choice question, not pricing, and does not satisfy the design; a bare "is it worth it?" with no usage inputs is a doubt; presupposing the verdict ("a ripoff") is neither.`;
+    return `Question design (value math): the question reasons about a price/value TRADE-OFF in ${brand}'s market, WITH the asker's usage or situation as an input, leaving the verdict to the answer - either naming ${brand} (its tiers, its fee or total-cost math, trade-in or financing on it) or generic to the category's price structure (paid vs free, fee vs no-fee, financing vs buying outright, paying up for a higher tier vs the base). Financing, trade-in or price figures are PRICES, not usage: the asker's own usage (what they do with it, how long they keep it, what they spend on what) must also be present. The question ASKS what things cost - it never states a product's price or fee ("Premium is $23"), which is the writer's dated knowledge and a false premise; the asker's own spend, budget or an offer made to them is circumstance and belongs. A "which product is the best value for my budget" ask is an open-choice question, not pricing, and does not satisfy the design; a bare "is it worth it?" with no usage inputs is a doubt; presupposing the verdict ("a ripoff") is neither.`;
   // Alternatives seeds (audit J10/J11, 2026-10-01): an offensive seed that
   // gives a REASON for leaving the rival ("too lightweight for our dev
   // team") steers every answer toward one kind of replacement - often the
@@ -416,7 +416,7 @@ export interface BatteryFinding {
     // a calendar year goes stale on the next wave and breaks the trend; a
     // 60+ word seed is a requirements list however casual the words; segment
     // vocabulary is the plan's register, not a buyer's.
-    | "seed_calendar_year" | "seed_overlong" | "segment_vocabulary" | "seed_switch_direction" | "concern_price_bolt_on" | "seed_multi_ask" | "class_category_tail"
+    | "seed_calendar_year" | "seed_overlong" | "segment_vocabulary" | "seed_switch_direction" | "concern_price_bolt_on" | "seed_multi_ask" | "class_category_tail" | "seed_states_price"
     | "seed_number_changed" | "duplicate_paraphrase";
   /** The offending prompt text (or the seed, for cell-level findings). */
   text: string;
