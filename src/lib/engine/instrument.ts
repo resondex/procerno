@@ -98,7 +98,7 @@ const CACHE_TTL_MS = 183 * 24 * 3600 * 1000;
 // VERDICT asks, premium_worth holds the tier-as-class open-choice form
 // (never one named brand's own worth) - writer rules and design lines
 // changed together.
-const STYLE_VERSION = "s16";
+const STYLE_VERSION = "s17";
 
 /** Versions the DETERMINISTIC seed-check set (everything seedRule runs:
  * checkPromptAgainstSpec + blind_missing_category + scenario_label_leak).
@@ -1993,12 +1993,16 @@ const CELL_WRITER_SYSTEM =
           "TWO OR THREE round figures at most - a seed is one chat " +
           "message, never a spreadsheet, and the numbers must be " +
           "internally consistent (a budget that excludes one of the " +
-          "options compared is a broken question). A brand-named pricing " +
-          "ask keeps the brand at the center, not incidental to carrier or " +
-          "plan arithmetic. At least ONE pricing cell per battery stays " +
-          "generic to the category (paid vs free, fee vs no-fee), and a " +
-          "generic pricing ask ends by asking which option they'd get, so " +
-          "it still invites named picks.\n" +
+          "options compared is a broken question). Every pricing ask " +
+          "reasons about a price TRADE-OFF - the brand's tiers, fee or " +
+          "total-cost math, trade-in or financing, or the category's price " +
+          "structure (paid vs free, fee vs no-fee, financing vs buying " +
+          "outright, paying up vs the base tier) - NEVER 'which product is " +
+          "the best value for my budget' (that is discovery's question). " +
+          "Where the category has a price structure, ONE pricing cell " +
+          "stays generic to it; where the trade-off lands on products " +
+          "('a no-fee card or one of the premium ones'), end by asking " +
+          "which they'd get.\n" +
           "- A doubt cell (objections, churn, renewal, repertoire) STATES " +
           "the worry as the asker's own claim or feeling, something the " +
           "answer can confirm OR REBUT - never a neutral rules, " +

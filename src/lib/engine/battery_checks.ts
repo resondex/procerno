@@ -227,8 +227,12 @@ export function stageDesignIntent(stage: string, brand: string, concern?: string
   }
   if (stage === "pricing")
     // G6: generic pricing cells never name the brand, so the intent accepts
-    // both forms rather than pushing every cell to within_brand.
-    return `Question design (value math): the question asks for a price/value accounting in ${brand}'s market - either naming ${brand} (its tiers, its fee math) or generic to the category (paid vs free, fee vs no-fee) - WITH the asker's usage or situation as an input: what they spend, how they'd use it, their size, then what it costs vs what they'd get back, leaving the verdict to the answer. A bare "is it worth it?" carrying no usage inputs is a doubt, not a pricing ask; so is presupposing the verdict ("a ripoff", "not worth it, right?").`;
+    // both forms rather than pushing every cell to within_brand. The generic
+    // form reasons about the category's price STRUCTURE (s17: the first
+    // examples were fee-shaped and the checker refused a legitimate
+    // financing-vs-unlocked trade-off while "best value phone for my
+    // budget" discovery asks slipped into pricing cells).
+    return `Question design (value math): the question reasons about a price/value TRADE-OFF in ${brand}'s market, WITH the asker's usage or situation as an input, leaving the verdict to the answer - either naming ${brand} (its tiers, its fee or total-cost math, trade-in or financing on it) or generic to the category's price structure (paid vs free, fee vs no-fee, financing vs buying outright, paying up for a higher tier vs the base). A "which product is the best value for my budget" ask is an open-choice question, not pricing, and does not satisfy the design; a bare "is it worth it?" with no usage inputs is a doubt; presupposing the verdict ("a ripoff") is neither.`;
   // Alternatives seeds (audit J10/J11, 2026-10-01): an offensive seed that
   // gives a REASON for leaving the rival ("too lightweight for our dev
   // team") steers every answer toward one kind of replacement - often the
