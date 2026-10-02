@@ -12,6 +12,7 @@ import {
   CoverageGate,
   ScenarioReviewModal,
   ScenariosGate,
+  CELLS_BUSY,
   gridCellCount,
   recommendedWorryPairs,
   gridPromptCount,
@@ -202,7 +203,7 @@ const READ_STAGES: [number, string][] = [
  * engine's. (No concern-planning caption: worry batteries skip that call,
  * so it would narrate work that isn't happening.) */
 const CELLS_STAGES: [number, string][] = [
-  [0, "Writing your questions…"],
+  [0, CELLS_BUSY],
   [40, "Writing them the way real buyers would ask…"],
   [80, "Polishing the wording…"],
   [120, "Nearly there…"],
@@ -1724,7 +1725,7 @@ export function SetupWizard({ mode, brand, draft, engineOptions, onClose, onCrea
             // The cell write gets the same narrated treatment as the
             // market read - the coverage map gives way to elapsed-driven
             // captions instead of a frozen page behind a disabled button.
-            busy?.startsWith("Writing your questions") ? (
+            busy === CELLS_BUSY ? (
               <StagedProgress stages={CELLS_STAGES} />
             ) : (
               <CoverageGate

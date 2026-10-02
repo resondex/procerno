@@ -239,6 +239,24 @@ export interface ScenarioRow {
 export const MAX_SCENARIOS = 4;
 /** Near-neighbor draws per card before we ask the user to write their own. */
 export const MAX_VARIANTS = 3;
+
+/** The cells-write busy phrase - value, not process. The wizard's
+ * narrated captions trigger on this exact string. */
+export const CELLS_BUSY = "Turning your market into questions…";
+
+/** The prompts write narrated inside its inline counter chip - vague by
+ * design (progression, never mechanics), elapsed-driven like the other
+ * narrated waits; the caption refreshes as each batch lands. */
+const PHRASING_CAPTIONS: [number, string][] = [
+  [0, "Writing your prompts…"],
+  [30, "Asking each question in different voices…"],
+  [70, "Wording them the way real people type…"],
+  [110, "Nearly there…"],
+];
+function phrasingCaption(startedAt: number): string {
+  const secs = (Date.now() - startedAt) / 1000;
+  return [...PHRASING_CAPTIONS].reverse().find(([at]) => secs >= at)?.[1] ?? PHRASING_CAPTIONS[0][1];
+}
 /** "New prompt" draws per cell before we ask the user to write their own. */
 export const MAX_REGENS = 3;
 
@@ -966,10 +984,8 @@ export function useGridSetup(a: GridSetupArgs) {
   /** Gate 2: one seed prompt per masked cell. */
   async function writeCells(): Promise<GridState | null> {
     if (!a.state) return null;
-    // "questions", not "prompts": the UI's vocabulary is questions (cells)
-    // -> prompts (the 10 buyer wordings each). The wizard also keys its
-    // narrated progress captions on this prefix.
-    a.setBusy("Writing your questions…");
+    // The wizard keys its narrated progress captions on this exact string.
+    a.setBusy(CELLS_BUSY);
     a.setError(null);
     const data = await post<{ cells: Omit<GridCellUi, "phrasings">[] }>(
       "/api/setup/grid/cells",
@@ -1047,7 +1063,8 @@ export function useGridSetup(a: GridSetupArgs) {
     // wall time is the slowest batch, not the sum.
     const total = batches.reduce((n, b) => n + b.idx.length, 0);
     let done = 0;
-    a.setBusy(`Writing your prompts… (0/${total})`);
+    const startedAt = Date.now();
+    a.setBusy(`${phrasingCaption(startedAt)} (0/${total})`);
     const outcomes = await Promise.all(
       batches.map(async ({ idx }) => {
         const data = await post<{ phrasings: GridPhrasing[][] }>(
@@ -1084,7 +1101,7 @@ export function useGridSetup(a: GridSetupArgs) {
           };
         });
         done += idx.length;
-        a.setBusy(`Writing your prompts… (${done}/${total})`);
+        a.setBusy(`${phrasingCaption(startedAt)} (${done}/${total})`);
         return true;
       })
     );
