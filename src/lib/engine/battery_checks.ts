@@ -180,15 +180,19 @@ export function seedDesignLine(
   // could drift into nine limited-drops objections and pass - each still
   // voiced a doubt about the brand, just not the designed one. A PLANNED
   // concern (2026-09-30) names the subject outright - the strongest form.
-  if (DOUBT_CHECK_STAGES.has(stage))
+  if (DOUBT_CHECK_STAGES.has(stage)) {
+    const keepLeave = stage === "churn_triggers" || stage === "renewal"
+      ? ` The asker weighs STAYING with ${brand} against LEAVING it, and the leave option stays stated - a fix-it or tune-it rewording that drops the option of leaving does not satisfy the design.`
+      : "";
     return concern
-      ? `Question design (doubt): the question voices the buyer's concern about ${brand} on THIS designed subject: ${concern}. THAT worry must be the question's MAIN point - a question whose main worry is something else does not satisfy the design even if it mentions the subject in passing. A value-math request without the stated worry does not voice it, an eligibility or rules lookup does not voice it even when the rules are unfavorable to the asker, and the question never asks how to calculate or compare costs - method asks belong to the pricing cells. Same concern, differently worded by a different person. Designed as: "${seed}"`
-      : `Question design (doubt): the question voices the SAME concern about ${brand} as the designed question below - the same subject and worry, differently worded by a different person. A DIFFERENT concern about ${brand} does not satisfy the design, and neither does a value-math request without the stated worry, an eligibility or rules lookup (even when the rules are unfavorable), or an ask for how to calculate or compare costs. Designed as: "${seed}"`;
+      ? `Question design (doubt): the question voices the buyer's concern about ${brand} on THIS designed subject: ${concern}. THAT worry must be the question's MAIN point - a question whose main worry is something else does not satisfy the design even if it mentions the subject in passing. A value-math request without the stated worry does not voice it, an eligibility or rules lookup does not voice it even when the rules are unfavorable to the asker, and the question never asks for a price, a cost figure or the money accounting - the money question belongs to the pricing cells.${keepLeave} Same concern, differently worded by a different person. Designed as: "${seed}"`
+      : `Question design (doubt): the question voices the SAME concern about ${brand} as the designed question below - the same subject and worry, differently worded by a different person. A DIFFERENT concern about ${brand} does not satisfy the design, and neither does a value-math request without the stated worry, an eligibility or rules lookup (even when the rules are unfavorable), or an ask for a price, a cost figure or the money accounting.${keepLeave} Designed as: "${seed}"`;
+  }
   // The circumstance/doubt boundary (DECIDED 2026-10-01): pricing is value
   // MATH, worries are VERDICTS - each design line polices its own side so
   // the two instruments cannot trade clothes.
   if (stage === "pricing")
-    return `Question design (value math): the question asks for ${brand}'s price/value accounting WITH the asker's usage or situation as an input - what they spend, how they'd use it, their size - then what it costs vs what they'd get back, leaving the verdict to the answer. A bare "is it worth it?" carrying no usage inputs is a doubt, not a pricing ask, and does not satisfy the design; neither does presupposing the verdict ("a ripoff", "that huge fee"). Designed as: "${seed}"`;
+    return `Question design (value math): the question asks for a price/value accounting - the same one as the designed question below, naming ${brand} only if the designed question does - WITH the asker's usage or situation as an input, leaving the verdict to the answer. A bare "is it worth it?" carrying no usage inputs is a doubt, not a pricing ask, and does not satisfy the design; neither does presupposing the verdict ("a ripoff", "that huge fee"). Designed as: "${seed}"`;
   if (stage === "premium_worth")
     return `Question design (premium tier): the question weighs the category's premium maker(s) as a TIER against basic/store options and invites named picks - from either side (is the expensive one worth it, is the cheap one good enough). Judging one named brand's own worth does not satisfy the design. Designed as: "${seed}"`;
   if (!PLAN_CHECK_STAGES.has(stage))
@@ -210,11 +214,21 @@ export function seedDesignLine(
 /** The design intent a doubt/plan STAGE demands, independent of any seed -
  * the yardstick for judging seeds themselves (seed-as-design cannot judge
  * the seed). */
-export function stageDesignIntent(stage: string, brand: string, concern?: string | null, angle?: string | null): string | null {
-  if (DOUBT_CHECK_STAGES.has(stage))
-    return `Question design (doubt): the question itself voices the buyer's concern, complaint or "is it still worth it" doubt about ${brand}, stated as the asker's own claim or feeling that an answer could confirm or rebut. A neutral lookup, spec request, how-to or value-math request on the same topic does not satisfy the design - the math ask belongs to the pricing cells - and an eligibility or rules lookup does not voice a doubt even when the rules are unfavorable to the asker. A doubt question never asks how to calculate or compare costs.${concern ? ` The DESIGNED concern is: ${concern} - the question must voice that worry, not a different one.` : ""}`;
+export function stageDesignIntent(stage: string, brand: string, concern?: string | null, angle?: string | null, situation?: string | null): string | null {
+  if (DOUBT_CHECK_STAGES.has(stage)) {
+    // G1/G2 (2026-10-01 seed audit): churn/renewal demand the stay-or-leave
+    // choice stated outright, and the money ban covers cost FIGURES, not
+    // just methods - "what should we be paying, given <usage>" is pricing's
+    // accounting question and slipped the method-only wording.
+    const keepLeave = stage === "churn_triggers" || stage === "renewal"
+      ? ` The asker weighs STAYING with ${brand} against LEAVING it, and the leave option is stated outright - a fix-it or tune-it ask with no option of leaving does not satisfy the design.`
+      : "";
+    return `Question design (doubt): the question itself voices the buyer's concern, complaint or "is it still worth it" doubt about ${brand}, stated as the asker's own claim or feeling that an answer could confirm or rebut. A neutral lookup, spec request, how-to or value-math request on the same topic does not satisfy the design - the math ask belongs to the pricing cells - and an eligibility or rules lookup does not voice a doubt even when the rules are unfavorable to the asker. A doubt question never asks for a price, a cost figure or the money accounting, with or without usage details.${keepLeave}${concern ? ` The DESIGNED concern is: ${concern} - the question must voice that worry, not a different one.` : ""}`;
+  }
   if (stage === "pricing")
-    return `Question design (value math): the question asks for ${brand}'s price/value accounting WITH the asker's usage or situation as an input - what they spend, how they'd use it, their size - then what it costs vs what they'd get back, leaving the verdict to the answer. A bare "is it worth it?" carrying no usage inputs is a doubt, not a pricing ask; so is presupposing the verdict ("a ripoff", "not worth it, right?").`;
+    // G6: generic pricing cells never name the brand, so the intent accepts
+    // both forms rather than pushing every cell to within_brand.
+    return `Question design (value math): the question asks for a price/value accounting in ${brand}'s market - either naming ${brand} (its tiers, its fee math) or generic to the category (paid vs free, fee vs no-fee) - WITH the asker's usage or situation as an input: what they spend, how they'd use it, their size, then what it costs vs what they'd get back, leaving the verdict to the answer. A bare "is it worth it?" carrying no usage inputs is a doubt, not a pricing ask; so is presupposing the verdict ("a ripoff", "not worth it, right?").`;
   // Alternatives seeds (audit J10/J11, 2026-10-01): an offensive seed that
   // gives a REASON for leaving the rival ("too lightweight for our dev
   // team") steers every answer toward one kind of replacement - often the
@@ -228,6 +242,12 @@ export function stageDesignIntent(stage: string, brand: string, concern?: string
       return `Question design (leaving a rival): the asker is moving away from ${angle} and asks what to consider instead, stating the move PLAINLY with no reason given. A reason that says what ${angle} lacks or who it fails ("too lightweight for a dev team") steers the answer toward one kind of replacement and does not satisfy the design; naming ${brand} does not satisfy it either.`;
     return null;
   }
+  // A scenario-pinned cell's SEED must carry its circumstance (audit M1
+  // recurrence, 2026-10-01: two Mid-market cells read as generic feature
+  // asks). Any pinned stage without a more specific design above gets this
+  // yardstick; invariant cells (situation null) are untouched.
+  if (situation)
+    return `Question design (circumstance): the question carries the asker's own circumstance matching this buying scenario: ${situation}. The circumstance must live in the question's own words (their size, moment or situation) - a question that would read the same with no circumstance at all does not satisfy the design. The scenario name itself is OUR planning label: the question must express the circumstance in a buyer's plain words, never that label's wording.`;
   if (stage === "premium_worth")
     return `Question design (premium tier): the question weighs the category's premium maker(s) as a TIER against basic/store options and invites named picks - from either side. Judging one named brand's own worth does not satisfy it - that is a worry cell's job.`;
   if (!PLAN_CHECK_STAGES.has(stage)) return null;
@@ -362,6 +382,11 @@ export interface BatteryFinding {
     // s11: a quantity in a comparison SEED (circumstance-neutrality's
     // mechanical slice - seed-only, raised by the engine's seedRule).
     | "comparison_seed_quantity"
+    // r2 seed checks (audit G3/G4/G5, 2026-10-01 - seed-only, engine seedRule):
+    // a calendar year goes stale on the next wave and breaks the trend; a
+    // 60+ word seed is a requirements list however casual the words; segment
+    // vocabulary is the plan's register, not a buyer's.
+    | "seed_calendar_year" | "seed_overlong" | "segment_vocabulary"
     | "seed_number_changed" | "duplicate_paraphrase";
   /** The offending prompt text (or the seed, for cell-level findings). */
   text: string;

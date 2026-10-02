@@ -98,7 +98,7 @@ const CACHE_TTL_MS = 183 * 24 * 3600 * 1000;
 // VERDICT asks, premium_worth holds the tier-as-class open-choice form
 // (never one named brand's own worth) - writer rules and design lines
 // changed together.
-const STYLE_VERSION = "s14";
+const STYLE_VERSION = "s15";
 
 /** Versions the DETERMINISTIC seed-check set (everything seedRule runs:
  * checkPromptAgainstSpec + blind_missing_category + scenario_label_leak).
@@ -114,7 +114,7 @@ const STYLE_VERSION = "s14";
  * 7's unversioned serve-time re-check had no terminal state). Bump when
  * a deterministic check changes meaning; bumping costs one free re-judge
  * per unit, and model calls only for units the new rules reject. */
-const SEED_RULES_VERSION = "r1";
+export const SEED_RULES_VERSION = "r2"; // r2 (2026-10-01): calendar-year, 60-word ceiling, segment vocabulary
 
 /** Brand forms that double as ordinary English words: only these demand a
  * capitalized occurrence to count as naming the brand ("2-3 services max"
@@ -1928,11 +1928,16 @@ const CELL_WRITER_SYSTEM =
           "- angle=<rival name>: for comparison-type stages, name the client " +
           "brand AND that rival; for alternatives-type stages, ask for " +
           "alternatives to that rival (client brand NOT named), stating the " +
-          "move PLAINLY with no reason given ('We're moving off Asana - " +
-          "what should we look at?'): a leave-reason that says what the " +
-          "rival lacks or who it fails ('too lightweight for our dev team') " +
-          "steers the answer toward one kind of replacement and poisons the " +
-          "measurement.\n" +
+          "move PLAINLY with no reason given: a leave-reason that says what " +
+          "the rival lacks or who it fails ('too lightweight for our dev " +
+          "team') steers the answer toward one kind of replacement and " +
+          "poisons the measurement. That plainness is a SHAPE, not a " +
+          "sentence to copy: vary the voice across these cells ('Done with " +
+          "my iPhone - what phone should I get instead?', 'leaving " +
+          "monday.com. name a few solid alternatives to try'), write 'I' " +
+          "for personal products and 'we' for team tools, use the name a " +
+          "buyer types ('iPhone', never the roster string 'Apple iPhone'), " +
+          "and keep the category clear in each ask.\n" +
           "- A comparison cell (angle=<rival> or angle=class) is " +
           "CIRCUMSTANCE-NEUTRAL: ask the head-to-head about the category " +
           "plainly - which one, which would you pick and why, where does " +
@@ -1945,21 +1950,34 @@ const CELL_WRITER_SYSTEM =
           "itself, never one buyer's story. The shape is '<brand> or " +
           "<rival> for <category> - which would you go with, and why?' " +
           "(drop the 'for <category>' clause when the names alone make the " +
-          "category obvious).\n" +
+          "category obvious, and make it read grammatically - 'as a " +
+          "project management tool', never a plural category pasted into a " +
+          "singular slot).\n" +
           "- angle=defensive: an EXISTING customer of the client brand, " +
           "weighing a move away, asks for alternatives to it by name - " +
           "never a prospect ('if we don't go with it').\n" +
           "- angle=class(<class>): a head-to-head of the client brand against " +
           "a CLASS of products, not a company - name the client brand and " +
-          "speak the class naturally, the way a buyer does ('or should I just " +
-          "get a Visa card?'). NEVER name any specific rival company, issuer " +
+          "speak the class naturally, the way a buyer does ('or should I " +
+          "get a Visa card?' - no belittling 'just': the two sides are " +
+          "weighed even). NEVER name any specific rival company, issuer " +
           "or product: the class itself is the counterpart. Never append a " +
           "redundant category clause the class already carries ('a Visa " +
-          "card for credit cards').\n" +
+          "card for credit cards'), and keep a battery's class cells " +
+          "parallel in shape so their rates compare.\n" +
           "- Retention and loyalty stages speak as an existing customer and " +
           "MUST name the client brand: a churn, renewal, support, expansion, " +
           "ecosystem or advocacy ask that leaves the brand implied ('my " +
-          "subscription', 'the service') is a defect, never a variant.\n" +
+          "subscription', 'the service') is a defect, never a variant. The " +
+          "relationship is stated as fact ('Amex is my main card'), never " +
+          "hypothetically ('if Amex is my main card').\n" +
+          "- Churn and renewal cells END with the stay-or-go choice stated " +
+          "outright ('...or is it time to move off Jira?'): a fix-it or " +
+          "tune-it ask with no option of leaving is a support question, not " +
+          "churn. The leave side stays plain - never 'something cheaper' or " +
+          "'simpler', and never an ask for alternatives by name, unless the " +
+          "cell's own concern is price: price has its own cells, and " +
+          "bolting it on muddies whose worry drove the exit.\n" +
           "- situation: weave the circumstance in naturally, as the asker's " +
           "OWN situation ('this would be my first credit card', 'we're " +
           "about 120 people and doubling') - never as a topic opener " +
@@ -1969,15 +1987,26 @@ const CELL_WRITER_SYSTEM =
           "'enterprise standardization' are OUR words - buyers say their " +
           "size and stakes in plain words).\n" +
           "- pricing cells ask for the accounting with the asker's usage as " +
-          "an INPUT - what they spend, how they'd use it, their size - and " +
-          "leave the verdict to the answer: never a bare 'is it worth it?' " +
-          "with no usage (that is a worry, not a pricing ask), never a " +
-          "presupposed verdict ('that huge fee').\n" +
+          "an INPUT and leave the verdict to the answer: never a bare 'is " +
+          "it worth it?' with no usage (that is a worry, not a pricing " +
+          "ask), never a presupposed verdict ('that huge fee'). Usage is " +
+          "TWO OR THREE round figures at most - a seed is one chat " +
+          "message, never a spreadsheet, and the numbers must be " +
+          "internally consistent (a budget that excludes one of the " +
+          "options compared is a broken question). A brand-named pricing " +
+          "ask keeps the brand at the center, not incidental to carrier or " +
+          "plan arithmetic. At least ONE pricing cell per battery stays " +
+          "generic to the category (paid vs free, fee vs no-fee), and a " +
+          "generic pricing ask ends by asking which option they'd get, so " +
+          "it still invites named picks.\n" +
           "- A doubt cell (objections, churn, renewal, repertoire) STATES " +
           "the worry as the asker's own claim or feeling, something the " +
-          "answer can confirm or rebut - never a neutral rules, eligibility " +
-          "or how-to lookup on the topic, and never an ask for how to " +
-          "calculate or compare costs (method asks belong to pricing).\n" +
+          "answer can confirm OR REBUT - never a neutral rules, " +
+          "eligibility or how-to lookup on the topic, never an ask that " +
+          "only sizes an assumed problem ('how far behind is it?' presumes " +
+          "the gap - ask 'is it actually behind?'), and never an ask for a " +
+          "price, a cost figure or the cost accounting (the money question " +
+          "belongs to pricing).\n" +
           "- concern(<subject>) on a plan line: that cell's doubt is ABOUT " +
           "that subject and nothing else - voice THAT worry inside the " +
           "cell's circumstance. A doubt about a different subject is " +
@@ -2011,12 +2040,25 @@ const CELL_WRITER_SYSTEM =
           "or ask what the thing does - never end in 'what specs or " +
           "criteria should I care about' (that is the criteria cell's " +
           "question).\n" +
-          "- One prompt asks at most two or three things and reads ONE way: " +
-          "a five-part requirements ask is survey-speak whatever the words, " +
-          "and an ask with two readings measures neither.\n" +
+          "- One prompt asks at most two or three things, stays under about " +
+          "55 words, and reads ONE way: a five-part requirements ask is " +
+          "survey-speak whatever the words, and an ask with two readings " +
+          "measures neither. When the circumstance is a platform or " +
+          "ecosystem switch, say the DIRECTION in platform words ('moving " +
+          "from iOS to Android') - OS names are direction vocabulary, not " +
+          "brand names, while 'switching platforms' alone makes every " +
+          "answer guess which way.\n" +
+          "- Never a calendar year in a prompt ('in 2026'): trackers re-ask " +
+          "prompts for years and a dated prompt goes stale - say 'right " +
+          "now'.\n" +
+          "- Sibling cells of one stage VARY voice and framing: four cells " +
+          "that are one sentence with the name swapped read machine-written, " +
+          "and a persona the scenario contradicts (a 12-person startup " +
+          "with a CFO) breaks the voice.\n" +
           "- Never use planning vocabulary in a prompt: 'spec-driven', " +
-          "'trust-driven', 'think/feel', journey or scenario terms are " +
-          "OURS, not the asker's.\n" +
+          "'trust-driven', 'think/feel', 'value math', 'run the math', " +
+          "segment labels ('mid-market', 'SMB', 'enterprise-wide'), journey " +
+          "or scenario terms are OURS, not the asker's.\n" +
           "- journey(...): that cell's buyer decides that way - write the " +
           "prompt in that buyer's register.\n" +
           "- reach=<scenarios>: this single cell is asked by buyers in those " +
@@ -2834,7 +2876,7 @@ export async function generateGrid(input: {
         if (process.env.PHRASINGS_CHECKS !== "0" && flat.length > 0) {
           try {
             const seedTargets = flat
-              .map((c, i) => ({ c, i, intent: stageDesignIntent(c.stage, input.brand, c.concern, c.angle) }))
+              .map((c, i) => ({ c, i, intent: stageDesignIntent(c.stage, input.brand, c.concern, c.angle, c.situation) }))
               .filter((x): x is { c: GridCell; i: number; intent: string } => !!x.intent);
             if (seedTargets.length > 0 && Date.now() > deadlineAt) complete = false;
             if (seedTargets.length > 0 && Date.now() <= deadlineAt) {
@@ -3006,7 +3048,7 @@ export async function generateGrid(input: {
                 const text2 = (JSON.parse(res2.choices[0]?.message?.content ?? "{}") as { cells?: { text?: string }[] }).cells?.[0]?.text?.trim();
                 if (!text2) return;
                 const cand = { stage: d.c.stage, angle: d.c.angle, text: humanize(text2), situation: d.c.situation };
-                const intent = stageDesignIntent(d.c.stage, input.brand, undefined, d.c.angle);
+                const intent = stageDesignIntent(d.c.stage, input.brand, undefined, d.c.angle, d.c.situation);
                 const mechOk = seedRule(cand).length === 0;
                 const designOk = !intent || (await checkDesignFidelity({ candidates: [{ text: cand.text, design: intent }], meta: input.meta }))[0].voices;
                 if (mechOk && designOk) {
@@ -3081,6 +3123,31 @@ export async function generateGrid(input: {
         detail:
           `comparison seeds are circumstance-neutral - drop the number${spec.quantities.length > 1 ? "s" : ""} ` +
           `(${spec.quantities.join(", ")}): a spend level, frequency or size qualifier conditions the head-to-head on one writer-chosen segment`,
+      });
+    // r2 (2026-10-01 seed audit): three cheap deterministic nets.
+    // A calendar year goes stale on the next wave and editing it later
+    // changes the prompt's identity, breaking the trend.
+    const yr = c.text.match(/\b20[2-4]\d\b/);
+    if (yr)
+      out.push({
+        check: "seed_calendar_year" as const,
+        detail: `the prompt says "${yr[0]}" - trackers re-ask prompts for years, so a calendar year goes stale; say "right now" instead`,
+      });
+    // A 60+ word seed is a requirements list however casual the words
+    // (every over-ceiling seed in the s14 audit was a number-stuffed
+    // pricing spreadsheet or a five-part feature list).
+    const words = c.text.trim().split(/\s+/).length;
+    if (words > 60)
+      out.push({
+        check: "seed_overlong" as const,
+        detail: `${words} words - a prompt is one chat message, not a requirements list; keep the circumstance to one sentence and ask at most two or three things (aim well under 60 words)`,
+      });
+    // Segment vocabulary is the plan's register, not a buyer's.
+    const seg = c.text.match(/\b(mid-?market|enterprise[- ]wide|enterprise standard(?:i[sz]ation)?|SMBs?)\b/i);
+    if (seg)
+      out.push({
+        check: "segment_vocabulary" as const,
+        detail: `"${seg[0]}" is planning vocabulary no buyer uses about themselves - voice the size or stakes in plain words ("we're about 120 people and doubling", "picking one tool for the whole company")`,
       });
     return out;
   };
@@ -3308,7 +3375,7 @@ export async function regenerateCell(input: {
   // the one seed path that skipped every check): mechanical brand rule,
   // then the doubt/plan design intent, one steered retry, and null rather
   // than an unchecked seed - the client keeps what it has.
-  const intent = process.env.PHRASINGS_CHECKS !== "0" ? stageDesignIntent(input.cell.stage, input.brand, input.cell.concern, input.cell.angle) : null;
+  const intent = process.env.PHRASINGS_CHECKS !== "0" ? stageDesignIntent(input.cell.stage, input.brand, input.cell.concern, input.cell.angle, input.cell.situation) : null;
   let text: string | null = null;
   let note: string | null = null;
   for (let attempt = 0; attempt < 3 && !text; attempt++) {

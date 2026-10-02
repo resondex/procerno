@@ -76,6 +76,7 @@ const gridInput = () => ({
   audience: null, base, scenarios, stages, meta: { source: "harness" },
 });
 
+const RULES = inst.SEED_RULES_VERSION;
 const results: string[] = [];
 const check = (name: string, ok: boolean, detail = "") => {
   results.push(`${ok ? "ok  " : "FAIL"} ${name}${detail ? ` ${detail}` : ""}`);
@@ -83,8 +84,8 @@ const check = (name: string, ok: boolean, detail = "") => {
 };
 
 // --- case 1: terminal-flagged unit serves as-is, no model call ---
-await store.cacheSet(keyOf(prRow), JSON.stringify({ cells: [cellOf(prRow, PR_FAIL, ["names the target brand"])], rules: "r1" }), {});
-await store.cacheSet(keyOf(ceRow), JSON.stringify({ cells: [cellOf(ceRow, CE_FAIL, ["blind seed never speaks the category"])], rules: "r1" }), {});
+await store.cacheSet(keyOf(prRow), JSON.stringify({ cells: [cellOf(prRow, PR_FAIL, ["names the target brand"])], rules: RULES }), {});
+await store.cacheSet(keyOf(ceRow), JSON.stringify({ cells: [cellOf(ceRow, CE_FAIL, ["blind seed never speaks the category"])], rules: RULES }), {});
 let t0 = Date.now();
 let out = await inst.generateGrid(gridInput());
 let ms = Date.now() - t0;
@@ -105,7 +106,7 @@ check("2 legacy passing serves without regeneration", Array.isArray(out) && out.
   `(${ms}ms, cells=${out?.length ?? "null"})`);
 const raw2 = await Promise.all(keys.map((k) => store.cacheGet(k, 365 * 24 * 3600 * 1000)));
 check("2 entries upgraded to {cells, rules}", raw2.every((r) => {
-  try { const v = JSON.parse(r ?? ""); return !Array.isArray(v) && v.rules === "r1" && Array.isArray(v.cells); } catch { return false; }
+  try { const v = JSON.parse(r ?? ""); return !Array.isArray(v) && v.rules === RULES && Array.isArray(v.cells); } catch { return false; }
 }));
 
 // --- case 3: old-era failing -> one regeneration attempt (throws on key), markers released ---
@@ -121,7 +122,7 @@ check("3 old-era failing regenerates once (null on key error, fast)", out === nu
 check("3 failed attempt released its marker (__pending: 0)", released3, `raw=${(raw3 ?? "").slice(0, 60)}`);
 const raw3b = await store.cacheGet(keyOf(ceRow), 365 * 24 * 3600 * 1000);
 let ceUpgraded = false;
-try { const v = JSON.parse(raw3b ?? ""); ceUpgraded = v.rules === "r1" && v.cells?.[0]?.text === CE_PASS; } catch { /* leave false */ }
+try { const v = JSON.parse(raw3b ?? ""); ceUpgraded = v.rules === RULES && v.cells?.[0]?.text === CE_PASS; } catch { /* leave false */ }
 check("3 the passing old-era sibling upgraded instead of regenerating", ceUpgraded);
 
 // --- case 4: 60s-old marker is orphaned immediately (old code waited 180s) ---
