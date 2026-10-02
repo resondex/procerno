@@ -37,10 +37,16 @@ const PROFILE_SCHEMA = {
   required: ["category", "competitors", "audience"],
 } as const;
 
-/** Cache-first profile estimation — one live call per brand per ~6 months. */
+/** Cache-first profile estimation — one live call per brand per ~6 months.
+ * analyze2 (2026-10-02): the key carries the model and a prompt version —
+ * the unversioned "analyze" key kept serving pre-widening 4-6-rival
+ * profiles for six months, silently defeating the 5-8 ranked prefill for
+ * every previously analyzed brand (the Linear fix never reached a
+ * re-created jira tracker). Bump the version marker when the profile
+ * prompt's meaning changes. */
 export async function getBrandProfile(brand: string): Promise<BrandProfile> {
   tagCosts({ purpose: "setup:brand_profile" });
-  const key = cacheKey("analyze", [brand]);
+  const key = cacheKey("analyze2", [BRAND_PROFILE_MODEL, "p2-5to8", brand]);
   const hit = await store.cacheGet(key, CACHE_TTL_MS);
   if (hit) return JSON.parse(hit) as BrandProfile;
   const profile = await suggestBrandProfile(brand);

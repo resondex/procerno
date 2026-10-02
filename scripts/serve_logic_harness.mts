@@ -125,6 +125,19 @@ let ceUpgraded = false;
 try { const v = JSON.parse(raw3b ?? ""); ceUpgraded = v.rules === RULES && v.cells?.[0]?.text === CE_PASS; } catch { /* leave false */ }
 check("3 the passing old-era sibling upgraded instead of regenerating", ceUpgraded);
 
+// --- case 3b: a PROVISIONAL unit (deadline cut / checker outage) re-enters
+// generation instead of being stamped terminal by the mech-only re-judge
+// (2026-10-02 review finding #2: the skipped design layer was never retried).
+await store.cacheSet(keyOf(prRow), JSON.stringify({ cells: [cellOf(prRow, PR_PASS)], rules: RULES }), {});
+await store.cacheSet(keyOf(ceRow), JSON.stringify({ cells: [cellOf(ceRow, CE_PASS)], provisional: true }), {});
+t0 = Date.now();
+out = await inst.generateGrid(gridInput());
+ms = Date.now() - t0;
+const raw3c = await store.cacheGet(keyOf(ceRow), 365 * 24 * 3600 * 1000);
+let prov3c = "";
+try { const v = JSON.parse(raw3c ?? ""); prov3c = v.__pending === 0 ? "retryable" : v.rules === RULES ? "stamped" : "other"; } catch { prov3c = "parse"; }
+check("3b provisional unit re-enters generation (throws on key, not stamped)", out === null && prov3c === "retryable" && ms < 10_000, `(${ms}ms, ${prov3c})`);
+
 // --- case 4: 60s-old marker is orphaned immediately (old code waited 180s) ---
 await store.cacheSet(keyOf(prRow), JSON.stringify({ __pending: Date.now() - 60_000 }), {});
 await store.cacheSet(keyOf(ceRow), JSON.stringify({ __pending: Date.now() - 60_000 }), {});

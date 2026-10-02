@@ -2535,6 +2535,11 @@ export async function generateGrid(input: {
   tagCosts({ purpose: "setup:cells" });
   // Wall-clock budget for the whole pass - see GEN_DEADLINE_MS.
   const deadlineAt = Date.now() + GEN_DEADLINE_MS;
+  // #7 (2026-10-02 review): the deadline only gated heal STARTS, so a heal
+  // started at deadline-minus-epsilon could chain regenerations past the
+  // platform kill. Heals now start only with ~a typical chain's room left;
+  // skipped heals write the unit provisional and the next drive finishes.
+  const healDeadlineAt = deadlineAt - 45_000;
   // TYPED ROSTER (2026-09-30): from here on input.competitors means the
   // rivals a buyer weighs - the SAME-SEAT list, in roster order. It feeds
   // the angle slots, the writer's rivals, every check-spec's brand sets and
@@ -2675,11 +2680,11 @@ export async function generateGrid(input: {
    * the unit was last judged under. A bare `GridCell[]` is the legacy
    * shape, read as rules-unknown so the serve path judges it once and
    * upgrades in place or regenerates. */
-  const valueOf = (raw: string): { cells: GridCell[]; rules?: string } | null => {
+  const valueOf = (raw: string): { cells: GridCell[]; rules?: string; provisional?: boolean } | null => {
     try {
-      const v = JSON.parse(raw) as { __pending?: number; cells?: GridCell[]; rules?: string } | GridCell[];
+      const v = JSON.parse(raw) as { __pending?: number; cells?: GridCell[]; rules?: string; provisional?: boolean } | GridCell[];
       if (Array.isArray(v)) return { cells: v };
-      return Array.isArray(v.cells) ? { cells: v.cells, rules: v.rules } : null;
+      return Array.isArray(v.cells) ? { cells: v.cells, rules: v.rules, provisional: v.provisional } : null;
     } catch {
       return null;
     }
@@ -2788,8 +2793,12 @@ export async function generateGrid(input: {
         (parsed.cells ?? []).forEach((c, i) => {
           // Positional alignment: answer row i belongs to plan row i.
           const row = rows[i];
-          const st = byKey.get(c.stage);
-          if (!row || !st || !c.text?.trim()) return;
+          if (!row || !c.text?.trim()) return;
+          // #4 (2026-10-02 review): stage and layer are the PLAN row's too -
+          // the writer echoing a different valid stage used to cache the
+          // cell under the row's key with the wrong stage, and echoing a
+          // label dropped the cell silently (the s27 angle fix, completed).
+          const st = row.stage;
           const norm = c.text.trim().toLowerCase().replace(/\s+/g, " ");
           if (seen.has(norm)) return; // cheap dedupe; no embeddings needed at this scale
           seen.add(norm);
@@ -2936,13 +2945,26 @@ export async function generateGrid(input: {
               // accurate. A gray-zone false kill just rewrites a fine seed
               // into another fine seed, or ships a chip a human can dismiss;
               // a silent defect ships a broken measurement.
+              // #1 (2026-10-02 review): an UNCHECKED verdict (checker outage,
+              // fail-open) must never be stamped as judged - the phrasings
+              // path has this guard, the seed path did not, so an Anthropic
+              // outage shipped a whole battery terminal with zero design
+              // judgment. Unchecked -> the unit writes provisional and the
+              // next serve re-enters generation with a fresh budget.
+              if (verdicts.some((v) => v.unchecked)) complete = false;
               const bad = seedTargets
                 .map((x, k) => ({ ...x, reason: verdicts[k].reason }))
                 .filter((_, k) => !verdicts[k].voices && !verdicts[k].unchecked);
               // Independent per cell - concurrent, like the brand-rule heal.
-              await Promise.all(bad.map(async (x) => {
+              // #3 (2026-10-02 review): the per-cell try/catch is load-bearing
+              // in two ways - without it one vendor error rejected the
+              // Promise.all (abandoning every other known-off-design cell,
+              // unflagged) while the orphaned sibling promises kept running
+              // and could mutate cell text AFTER the spec recompute and
+              // cache write.
+              await Promise.all(bad.map(async (x) => { try {
                 console.warn(`seed design check flagged [${x.c.stage}]: ${x.c.text.slice(0, 90)}`);
-                if (Date.now() > deadlineAt) {
+                if (Date.now() > healDeadlineAt) {
                   complete = false;
                   return;
                 }
@@ -2974,7 +2996,7 @@ export async function generateGrid(input: {
                 // three AmEx worry cells anchored on the famous acceptance
                 // doubt and one retry never shook it - still terminal, just
                 // two tries instead of one).
-                if (!again?.voices && Date.now() <= deadlineAt) {
+                if (!again?.voices && !again?.unchecked && Date.now() <= healDeadlineAt) {
                   const why = again ? `it voiced the wrong thing: ${again.reason}` : text2 ? "it broke a mechanical rule" : "it returned nothing";
                   const res3 = await openaiClient().chat.completions.create({
                     model: CELLS_MODEL,
@@ -2996,7 +3018,12 @@ export async function generateGrid(input: {
                     ? (await checkDesignFidelity({ candidates: [{ text: text2!, design: x.intent }], meta: input.meta }))[0]
                     : null;
                 }
-                if (again?.voices) {
+                if (again?.unchecked) {
+                  // #1: the re-check never ran (outage) - this is neither a
+                  // heal nor a verdict. Ship provisional, not flagged.
+                  complete = false;
+                  console.warn(`seed design re-check UNCHECKED [${x.c.stage}] - unit ships provisional`);
+                } else if (again?.voices) {
                   console.warn(`seed self-healed [${x.c.stage}]: ${text2!.slice(0, 90)}`);
                   flat[x.i].text = humanize(text2!);
                 } else {
@@ -3005,7 +3032,12 @@ export async function generateGrid(input: {
                   designFlagged.set(x.i, `off-design: ${x.reason || "does not voice the cell's design"}`);
                   console.warn(`seed regeneration still off-design [${x.c.stage}] - seed ships flagged for the gate`);
                 }
-              }));
+              } catch (err) {
+                // A thrown heal leaves a KNOWN off-design cell - flag it with
+                // the verdict we have rather than shipping it clean.
+                designFlagged.set(x.i, `off-design: ${x.reason || "does not voice the cell's design"}`);
+                console.error(`seed design heal threw [${x.c.stage}] - seed ships flagged:`, err);
+              } }));
             }
           } catch (err) {
             console.error("seed design healing failed open:", err);
@@ -3048,7 +3080,7 @@ export async function generateGrid(input: {
             return store.cacheSet(
               unitKeys[u],
               cells.length > 0
-                ? JSON.stringify(complete ? { cells, rules: SEED_RULES_VERSION } : { cells })
+                ? JSON.stringify(complete ? { cells, rules: SEED_RULES_VERSION } : { cells, provisional: true })
                 : JSON.stringify({ __pending: 0 }),
               stampOf(input)
             );
@@ -3122,7 +3154,7 @@ export async function generateGrid(input: {
             await Promise.all(dups.slice(0, 4).map(async (i) => {
               const d = doubt[i];
               const row = rowFor(units[d.u] ?? [], d.c) ?? (units[d.u] ?? [])[0];
-              if (!row || Date.now() > deadlineAt) return;
+              if (!row || Date.now() > healDeadlineAt) return;
               console.warn(`concern diversity: [${d.c.stage}] duplicates "${concerns[i]}" - regenerating | ${d.c.text.slice(0, 80)}`);
               try {
                 const res2 = await openaiClient().chat.completions.create({
@@ -3144,7 +3176,8 @@ export async function generateGrid(input: {
                 const cand = { stage: d.c.stage, angle: d.c.angle, text: humanize(text2), situation: d.c.situation };
                 const intent = stageDesignIntent(d.c.stage, input.brand, undefined, d.c.angle, d.c.situation);
                 const mechOk = seedRule(cand).length === 0;
-                const designOk = !intent || (await checkDesignFidelity({ candidates: [{ text: cand.text, design: intent }], meta: input.meta }))[0].voices;
+                const dv = intent ? (await checkDesignFidelity({ candidates: [{ text: cand.text, design: intent }], meta: input.meta }))[0] : null;
+                const designOk = !intent || (!!dv?.voices && !dv?.unchecked);
                 if (mechOk && designOk) {
                   d.c.text = cand.text;
                   d.c.qtype = questionTypeOf(d.c, input.brand, input.category);
@@ -3222,7 +3255,7 @@ export async function generateGrid(input: {
             await Promise.all(dups.slice(0, 4).map(async (i) => {
               const d = pricing[i];
               const row = rowFor(units[d.u] ?? [], d.c) ?? (units[d.u] ?? [])[0];
-              if (!row || Date.now() > deadlineAt) return;
+              if (!row || Date.now() > healDeadlineAt) return;
               console.warn(`pricing trade-off diversity: duplicates "${shapes[i]}" - regenerating | ${d.c.text.slice(0, 80)}`);
               try {
                 const res2 = await openaiClient().chat.completions.create({
@@ -3249,13 +3282,13 @@ export async function generateGrid(input: {
                   const mechOk = seedRule(cand).length === 0;
                   const brandOk = i !== brandSteer || textNamesBrand(cand.text, input.brand);
                   const verdict = intent ? (await checkDesignFidelity({ candidates: [{ text: cand.text, design: intent }], meta: input.meta }))[0] : null;
-                  return { cand, mechOk, brandOk, designOk: !intent || !!verdict?.voices, reason: verdict?.reason ?? "" };
+                  return { cand, mechOk, brandOk, designOk: !intent || (!!verdict?.voices && !verdict.unchecked), reason: verdict?.reason ?? "" };
                 };
                 let v = text2 ? await judge(text2) : null;
                 // One steered retry (s29 audit F2: rejected dedup regens made
                 // the battery converge back to the fee monoculture - the
                 // rejection reason steers the second try).
-                if (text2 && v && !(v.mechOk && v.brandOk && v.designOk) && Date.now() <= deadlineAt) {
+                if (text2 && v && !(v.mechOk && v.brandOk && v.designOk) && Date.now() <= healDeadlineAt) {
                   const why = !v.designOk ? `it did not satisfy the design: ${v.reason}` : !v.mechOk ? "it broke a mechanical rule" : `it must name ${input.brand}`;
                   const resR = await openaiClient().chat.completions.create({
                     model: CELLS_MODEL,
@@ -3289,7 +3322,7 @@ export async function generateGrid(input: {
             }));
             // At least one pricing cell names the brand - judged on the
             // FINAL post-heal texts, with its own regen when violated.
-            if (!pricing.some((d) => textNamesBrand(d.c.text, input.brand)) && Date.now() <= deadlineAt) {
+            if (!pricing.some((d) => textNamesBrand(d.c.text, input.brand)) && Date.now() <= healDeadlineAt) {
               brandSteer = pricing.length - 1;
               const d = pricing[brandSteer];
               const row = rowFor(units[d.u] ?? [], d.c) ?? (units[d.u] ?? [])[0];
@@ -3315,7 +3348,8 @@ export async function generateGrid(input: {
                     const intent = stageDesignIntent(d.c.stage, input.brand, undefined, d.c.angle, d.c.situation);
                     const mechOk = seedRule(cand).length === 0;
                     const brandOk = textNamesBrand(cand.text, input.brand);
-                    const designOk = !intent || (await checkDesignFidelity({ candidates: [{ text: cand.text, design: intent }], meta: input.meta }))[0].voices;
+                    const dv = intent ? (await checkDesignFidelity({ candidates: [{ text: cand.text, design: intent }], meta: input.meta }))[0] : null;
+                const designOk = !intent || (!!dv?.voices && !dv?.unchecked);
                     if (mechOk && brandOk && designOk) {
                       d.c.text = cand.text;
                       d.c.qtype = questionTypeOf(d.c, input.brand, input.category);
@@ -3488,6 +3522,14 @@ export async function generateGrid(input: {
         const at = pendingMarkerAt(raw);
         if (at === null) {
           const v = valueOf(raw);
+          // #2 (2026-10-02 review): a PROVISIONAL unit (deadline cut or
+          // checker outage) was never design-judged, and the mech-only
+          // re-judge below would have stamped it terminal with the design
+          // layer skipped forever. It re-enters generation instead.
+          if (v && v.provisional) {
+            mine.push(u);
+            return;
+          }
           if (v && v.cells.length > 0) {
             const served = scrub(v.cells);
             // RULES REACH CACHED CELLS - once per rules era (2026-09-30,
@@ -3588,7 +3630,11 @@ export async function generateGrid(input: {
   // (someone else still generating) mean an incomplete grid: a real
   // request reports retry-shortly rather than shipping holes; a warm
   // returns the partial set for the phrasings chain.
-  return resolved.some((r) => r === null) && !input.noWait
+  // #5 (2026-10-02 review): an EMPTY unit (a dropped or failed cell) is as
+  // incomplete as an unresolved one - nothing downstream re-requests cells,
+  // so a planned-59-shipped-58 battery would persist through create. The
+  // unit is already marked retryable; the caller's retry regenerates it.
+  return resolved.some((r) => r === null || r.length === 0) && !input.noWait
     ? null
     : all.length > 0
       ? all
