@@ -323,6 +323,41 @@ const AMEX_V = ["Chase", "Capital One", "Visa", "Discover"];
   const p8 = bc.checkPromptAgainstSpec({ text: "Is a phone from Nothing worth it, or which phones would you pick?", spec: blindP1, category: CAT["Google Pixel"] });
   expect("r13: one-word rival 'Nothing' - capitalized mid-sentence is a leak", p8.some((x: any) => x.check === "blind_names_brand"), p8);
   console.log("   note r13 residual: sentence-initial 'Nothing fancy' reads as the one-word rival:", JSON.stringify(p6));
+  // r13 review: everyday-word names are decided by the vault lexicon, not
+  // a roster-fitted list - the fleet's Ring (rival) and Purple (target).
+  const NEST = ["Ring", "Ecobee", "Honeywell Home"];
+  const blindN = specOf({ stage: "discovery", angle: "generic", text: "Which smart thermostats should I look at?" }, "Google Nest", NEST, "smart home devices");
+  const n1 = bc.checkPromptAgainstSpec({ text: "I barely hear the doorbell ring upstairs. Which smart home devices should I look at?", spec: blindN, category: "smart home devices" });
+  expect("lexicon: 'the doorbell ring' is not Ring", n1.length === 0, n1);
+  const n2 = bc.checkPromptAgainstSpec({ text: "Ring or something else - which smart home devices should I look at?", spec: blindN, category: "smart home devices" });
+  expect("lexicon: 'Ring' (even sentence-initial) is the rival", n2.some((x: any) => x.check === "blind_names_brand"), n2);
+  const MATT = ["Casper", "Tempur-Pedic", "Saatva"];
+  const blindM = specOf({ stage: "discovery", angle: "generic", text: "Which mattresses are best for back pain?" }, "Purple", MATT, "mattresses");
+  const m1 = bc.checkPromptAgainstSpec({ text: "Our bedroom is all purple and gray. Which mattresses are best for back pain?", spec: blindM, category: "mattresses" });
+  expect("lexicon: lowercase 'purple' is not the target", m1.length === 0, m1);
+  const m2 = bc.checkPromptAgainstSpec({ text: "Is a Purple better than the rest of the mattresses for back pain?", spec: blindM, category: "mattresses" });
+  expect("lexicon: capitalized 'Purple' is the target", m2.some((x: any) => x.check === "blind_names_brand"), m2);
+  const mustM = specOf({ stage: "renewal", angle: "generic", text: "My Purple mattress is sagging. Keep it or replace it?" }, "Purple", MATT, "mattresses");
+  const m3 = bc.checkPromptAgainstSpec({ text: mustM.seed, spec: mustM, category: "mattresses" });
+  expect("lexicon: must-name 'Purple' passes", m3.length === 0, m3);
+  // Coined names stay case-blind: the casual all-lowercase register.
+  const JA = ["Asana", "Trello", "Linear"];
+  const blindJa = specOf({ stage: "discovery", angle: "generic", text: "Which project management software should a small dev team use?" }, "Jira", JA, CAT.jira);
+  const ja = bc.checkPromptAgainstSpec({ text: "is asana or something like it the right project management software for a small dev team?", spec: blindJa, category: CAT.jira });
+  expect("lexicon: lowercase coined 'asana' still leaks", ja.some((x: any) => x.check === "blind_names_brand"), ja);
+  // Alias forms run through the same filters (r13 review): an everyday
+  // alias is case-guarded; a stopword or category alias is dropped.
+  const XF = { "American Express": ["amex", "gold", "max", "cards"] };
+  const ax1 = bc.checkPromptAgainstSpec({ text: "Which credit cards are the gold standard for groceries?", spec: blindA, category: CAT["American Express"], extraForms: XF });
+  expect("aliases: lowercase everyday alias 'gold' is not the brand", ax1.length === 0, ax1);
+  const ax2 = bc.checkPromptAgainstSpec({ text: "Which credit cards should I look at - max rewards, no fee?", spec: blindA, category: CAT["American Express"], extraForms: XF });
+  expect("aliases: stopword alias 'max' and category alias 'cards' are dropped", ax2.length === 0, ax2);
+  const ax3 = bc.checkPromptAgainstSpec({ text: "Is the Gold the best of the credit cards for groceries?", spec: blindA, category: CAT["American Express"], extraForms: XF });
+  expect("aliases: capitalized 'Gold' names the brand", ax3.some((x: any) => x.check === "blind_names_brand"), ax3);
+  const mx = bc.checkPromptAgainstSpec({ text: "My Gold annual fee hits next month. Keep it another year or cancel?", spec: mustA, category: CAT["American Express"], extraForms: XF });
+  expect("aliases: must-name satisfied by a capitalized everyday alias", mx.length === 0, mx);
+  const mx2 = bc.checkPromptAgainstSpec({ text: "Is the gold standard card's annual fee worth it another year, or cancel?", spec: mustA, category: CAT["American Express"], extraForms: XF });
+  expect("aliases: must-name NOT satisfied by lowercase everyday 'gold'", mx2.some((x: any) => x.check === "must_name_missing_target"), mx2);
 }
 console.log(`5. spec era: ${fails === 0 ? "ALL PASS" : `${fails} FAILURE(S)`}`);
 

@@ -13,8 +13,9 @@ import { matchKey } from "./metrics";
  *   flagged and eight rewritten to the full name in one walk, every
  *   "Amex"-only paraphrase would be rejected, and a blind seed saying
  *   "Amex" would pass undetected.
- * The cache key is the dictionary seed's (sorted brand list), so setup pays
- * the call once and project creation reuses it. Fails open to no aliases. */
+ * The cache key is shared with the dictionary seed (sorted brand list +
+ * model + prompt version), so setup pays the call once and project creation
+ * reuses it. Fails open to no aliases. */
 
 const CACHE_TTL_MS = 183 * 24 * 3600 * 1000; // ~6 months
 
@@ -38,9 +39,15 @@ const ALIAS_SCHEMA = {
   required: ["entries"],
 } as const;
 
+/** Bump with any change to the alias prompt. The key carries the model and
+ * this version (r13 review: the unversioned, model-less key was the same
+ * shape as the brand-profile 'analyze' key that served stale profiles for
+ * six months). Shared with the dictionary seed, so both move together. */
+const ALIAS_PROMPT_VERSION = "a2";
+
 function aliasCacheKey(brands: string[]): string {
   const normalized = [[...brands].sort().join(",")].map((p) => p.trim().toLowerCase()).join("|");
-  return `aliases:${createHash("sha256").update(normalized).digest("hex")}`;
+  return `aliases:${ALIAS_PROMPT_VERSION}:${DICT_SEED_MODEL}:${createHash("sha256").update(normalized).digest("hex")}`;
 }
 
 /** The raw model reply ({canonical, aliases}[]), cached. Throws on a model

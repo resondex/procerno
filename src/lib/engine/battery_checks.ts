@@ -10,6 +10,8 @@
  * of every hand-fixed prompt must flag, the fixed battery must pass
  * (~/Documents/procerno_eval/internal_models/conformance/checker_fixture.md).
  */
+
+import { EVERYDAY_WORDS } from "./everyday_words";
 /* -------------------- typed competitor roster (2026-09-30) ----------------
  * Every competitor is typed by WHO IT SELLS TO; its per-tracker ROLE is the
  * intersection with the tracker's audience (engine/roster.ts classifies,
@@ -239,7 +241,7 @@ export function stageDesignIntent(stage: string, brand: string, concern?: string
     // examples were fee-shaped and the checker refused a legitimate
     // financing-vs-unlocked trade-off while "best value phone for my
     // budget" discovery asks slipped into pricing cells).
-    return `Question design (value math): the question reasons about a price/value TRADE-OFF in ${brand}'s market, WITH the asker's usage or situation as an input, leaving the verdict to the answer - either naming ${brand} (its tiers, its fee or total-cost math, trade-in or financing on it) or generic to the category's price structure (paid vs free, fee vs no-fee, financing vs buying outright, paying up for a higher tier vs the base). Financing, trade-in or price figures are PRICES, not usage: the asker's own usage (what they do with it, how long they keep it, what they spend on what) must also be present. The question ASKS what things cost - it never states a product's price or fee ("Premium is $23"), which is the writer's dated knowledge and a false premise; the asker's own spend, budget or an offer made to them is circumstance and belongs. A "which product is the best value for my budget" ask is an open-choice question, not pricing, and does not satisfy the design; a bare "is it worth it?" with no usage inputs is a doubt; presupposing the verdict ("a ripoff") is neither. Not naming ${brand} is fine - a generic trade-off any product in the category could answer (refurbished vs new, paid vs free, fee vs no-fee, a higher tier vs the base) satisfies the design. The one exception: a question that describes ONE specific product's own plan structure while leaving its name out (that product's plan or tier ladder, its add-on marketplace, its billing model) is that product's question with the name removed - answers name it anyway and count as unprompted - and does not satisfy the design.`;
+    return `Question design (value math): the question reasons about a price/value TRADE-OFF in ${brand}'s market, WITH the asker's usage or situation as an input, leaving the verdict to the answer - either naming ${brand} (its tiers, its fee or total-cost math, trade-in or financing on it) or generic to the category's price structure (paid vs free, fee vs no-fee, financing vs buying outright, paying up for a higher tier vs the base, total cost over time - upfront vs ongoing). A total-cost-over-time question names BOTH options it weighs ("pay more upfront for X or less now for Y, over 3 years"); a cost estimate for one option ("what will this cost over time?") weighs nothing and does not satisfy the design. Financing, trade-in or price figures are PRICES, not usage: the asker's own usage (what they do with it, how long they keep it, what they spend on what) must also be present. The question ASKS what things cost - it never states a product's price or fee ("Premium is $23"), which is the writer's dated knowledge and a false premise; the asker's own spend, budget or an offer made to them is circumstance and belongs. A "which product is the best value for my budget" ask is an open-choice question, not pricing, and does not satisfy the design; a bare "is it worth it?" with no usage inputs is a doubt; presupposing the verdict ("a ripoff") is neither. Not naming ${brand} is fine - a generic trade-off any product in the category could answer (refurbished vs new, paid vs free, fee vs no-fee, a higher tier vs the base) satisfies the design. The one exception: a question that describes ONE specific product's own plan structure while leaving its name out (that product's plan or tier ladder, its add-on marketplace, its billing model) is that product's question with the name removed - answers name it anyway and count as unprompted - and does not satisfy the design.`;
   // Alternatives seeds (audit J10/J11, 2026-10-01): an offensive seed that
   // gives a REASON for leaving the rival ("too lightweight for our dev
   // team") steers every answer toward one kind of replacement - often the
@@ -268,7 +270,14 @@ export function stageDesignIntent(stage: string, brand: string, concern?: string
   // Open-choice seeds must invite NAMED picks (s24 audit F3: a
   // social_validation cell became a features-gush ask and named nothing).
   const pickClause = OPEN_PICK_STAGES.has(stage)
-    ? ` The ask must invite NAMED products or brands ("which ones", "name a few worth a look") - a features-only, what-do-people-value or where-to-look ask does not satisfy the design.`
+    ? ` The ask must invite NAMED products or brands ("which ones", "name a few worth a look") - a features-only, what-do-people-value or where-to-look ask does not satisfy the design.` +
+      // Tyler 2026-10-02 (round-5 D5, "eSIM and a microSD slot" on Pixel):
+      // a screen the client can never pass measures nothing about it - the
+      // same logic as the switch-direction rule. World knowledge, so it is
+      // the checker's judgment, not a string check.
+      (stage === "feature_screening"
+        ? ` The screened features must leave ${brand} an eligible answer: a requirement ${brand} cannot meet by construction (hardware or capabilities its products do not have) excludes it before the answer starts and does not satisfy the design.`
+        : "")
     : "";
   // A scenario-pinned cell's SEED must carry its circumstance (audit M1
   // recurrence, 2026-10-01: two Mid-market cells read as generic feature
@@ -359,6 +368,27 @@ function labelSpellings(name: string): Map<string, string> | null {
   return new Map(words.map((w) => [w.toLowerCase(), w]));
 }
 
+/** Dictionary alias forms, keyed and filtered like configured names (r13
+ * review): a single-word alias that is a stopword, a generic token or
+ * category vocabulary never identifies the brand. Everyday single-word
+ * aliases survive but are case-guarded where they are matched. */
+function aliasKeys(extraForms: string[] | undefined, excludeTokens?: Set<string>): string[] {
+  const out: string[] = [];
+  for (const f of extraForms ?? []) {
+    const fk = key(f);
+    if (!fk) continue;
+    if (!fk.includes(" ") && (STOP_FORMS.has(fk) || GENERIC_TOKENS.has(fk) || isCategoryToken(fk, excludeTokens))) continue;
+    out.push(fk);
+  }
+  return out;
+}
+
+/** A single word that is everyday English - the vault lexicon or the
+ * hand-kept AMBIGUOUS_FORMS - names a brand only when capitalized. */
+function everydayWord(form: string): boolean {
+  return !form.includes(" ") && (AMBIGUOUS_FORMS.has(form) || EVERYDAY_WORDS.has(form));
+}
+
 /** The keyed surface forms brandPatterns matches (see there). */
 function brandForms(name: string, opts?: { required?: boolean; extraForms?: string[]; excludeTokens?: Set<string> }): string[] {
   const out = new Set<string>();
@@ -380,10 +410,7 @@ function brandForms(name: string, opts?: { required?: boolean; extraForms?: stri
   for (const tok of k.split(" ")) {
     if (tok.length > (useParen ? 2 : 3) && !STOP_FORMS.has(tok) && !isCategoryToken(tok, opts?.excludeTokens)) out.add(tok);
   }
-  for (const f of opts?.extraForms ?? []) {
-    const fk = key(f);
-    if (fk) out.add(fk);
-  }
+  for (const fk of aliasKeys(opts?.extraForms, opts?.excludeTokens)) out.add(fk);
   return [...out];
 }
 
@@ -765,12 +792,6 @@ export const AMBIGUOUS_FORMS = new Set([
   // and one honest Jira seed was rewritten to drop "issues", Jira's own
   // noun; "my bank", "chase the points", "discover new cards" are AmEx
   // sentences, not rivals. Capitalized they still count.
-  "issues", "projects", "devops", "linear", "chase", "discover", "capital", "bank", "express",
-  // A ONE-word everyday name gets no label-casing guard (that covers words
-  // split out of multi-word names), so it lives here: the round-4 Pixel
-  // roster named the rival plain "Nothing" - 28 of 3,561 seeds say
-  // "nothing", none capitalized.
-  "nothing",
 ]);
 
 /** Tokens that never identify a brand on their own ("monday.com" is not
@@ -809,11 +830,15 @@ export function namesRequiredBrand(
       for (let j = i + 2; j <= toks.length; j++) forms.add(toks.slice(i, j).join(" "));
     }
   }
-  for (const f of opts?.extraForms ?? []) {
-    const fk = key(f);
-    if (fk) forms.add(fk);
+  const caseGuarded = new Set<string>();
+  for (const fk of aliasKeys(opts?.extraForms, opts?.excludeTokens)) {
+    if (everydayWord(fk) && !forms.has(fk)) caseGuarded.add(fk);
+    else forms.add(fk);
   }
-  return [...forms].some((f) => new RegExp(`\\b${esc(f)}s?\\b`).test(t));
+  if ([...forms].some((f) => new RegExp(`\\b${esc(f)}s?\\b`).test(t))) return true;
+  // An everyday alias ("gold" for a card line) counts only capitalized.
+  return [...caseGuarded].some((f) =>
+    new RegExp(`(?<![A-Za-z0-9])(?:${esc(f[0].toUpperCase() + f.slice(1))}|${esc(f.toUpperCase())})(?:s|'s)?(?![A-Za-z0-9])`).test(text));
 }
 
 /** Forbidden-brand detection: precision-first. The same patterns as
@@ -846,7 +871,7 @@ export function namesForbiddenBrand(
     const re = new RegExp(`(?<![A-Za-z0-9])(${esc(sp[0])}${esc(sp.slice(1))})(?:s|'s)?(?![A-Za-z0-9])`, "gi");
     for (const m of raw.matchAll(re)) {
       const w = m[1];
-      const caseOk = w === w.toUpperCase() || (firstUpper ? w[0] !== w[0].toLowerCase() : w[0] === w[0].toLowerCase());
+      const caseOk = !firstUpper || w === w.toUpperCase() || w[0] !== w[0].toLowerCase();
       if (!caseOk) continue;
       const pre = raw.slice(0, m.index ?? 0).trimEnd();
       if (firstUpper && (pre === "" || /[.!?:"\u201c(]$/.test(pre))) continue; // sentence-initial capital
@@ -861,7 +886,11 @@ export function namesForbiddenBrand(
     // sentence starts); a lowercase label ("monday.com") keeps the
     // case guard, which wants it capitalized.
     if (split(form) && upperLabel(form)) { if (labelCased(form)) return true; continue; }
-    if (AMBIGUOUS_FORMS.has(form)) { if (capitalized(form)) return true; continue; }
+    // One-word names and single-word aliases that are everyday English
+    // ("Ring", "Nothing", "Purple"; vault lexicon) count only capitalized -
+    // a sentence start still counts, since "Chase isn't working for me"
+    // names the bank; coined words ("hulu", "asana") stay case-blind.
+    if (everydayWord(form)) { if (capitalized(form)) return true; continue; }
     if (split(form)) { if (labelCased(form)) return true; continue; }
     if (new RegExp(`\\b${esc(form)}s?\\b`).test(t)) return true;
   }
