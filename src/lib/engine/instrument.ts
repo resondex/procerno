@@ -3416,8 +3416,13 @@ const PHRASINGS_CHUNK = 8;
  * overlap filter, so give it more candidates to survive it. */
 const PHRASINGS_EXTRA_RETRY = 6;
 /** Retry rounds during the initial write: the served batch arrives full
- * instead of getting healed later by a visible top-up. */
-const PHRASINGS_RETRY_ROUNDS = 2;
+ * instead of getting healed later by a visible top-up. 2 -> 3 (Tyler
+ * 2026-10-01): the AmEx walk left seven constraint-dense cells at 7-9/10
+ * after two rounds; a third fresh-roll round usually buys the last slots.
+ * Still bounded - the loop exits early whenever a round adds nothing. No
+ * STYLE bump: a short cached set is still a valid set, not a semantics
+ * change (the manual top-up covers old entries). */
+const PHRASINGS_RETRY_ROUNDS = 3;
 /** Wait budget on someone else's in-flight work; the 300s route leaves
  * room to wait out a slow write plus its retry pass. Staleness itself is
  * heartbeat-based (ORPHAN_MS) like the cell path: generators beat while
