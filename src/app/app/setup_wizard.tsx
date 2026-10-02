@@ -202,22 +202,22 @@ const READ_STAGES: [number, string][] = [
  * engine's. (No concern-planning caption: worry batteries skip that call,
  * so it would narrate work that isn't happening.) */
 const CELLS_STAGES: [number, string][] = [
-  [0, "Writing your questions - the way real buyers would ask them…"],
-  [45, "Giving every question a second read…"],
-  [75, "Rewriting the ones that don't sound right…"],
-  [105, "Making sure no two questions ask the same thing…"],
-  [140, "Still writing - a full set takes two to three minutes…"],
+  [0, "Writing your questions…"],
+  [40, "Writing them the way real buyers would ask…"],
+  [80, "Polishing the wording…"],
+  [120, "Nearly there…"],
+  [150, "Still writing - a full set takes a few minutes…"],
 ];
 
 /** The worries pool draw narrated: one model call, so the captions walk
  * its internal order - enumerate the worry-space, tag the stances, write
  * the buyer wording, draft the recommended plan. */
 const WORRIES_STAGES: [number, string][] = [
-  [0, "Reading what buyers complain about…"],
-  [12, "Sorting the worries by who voices them - prospects, customers, the renewal moment…"],
-  [35, "Writing each worry in buyers' own words…"],
-  [60, "Drafting the recommended measurement plan…"],
-  [95, "Still listening - a talked-about brand carries many worries…"],
+  [0, "Listening to your market…"],
+  [25, "Gathering the worries buyers voice…"],
+  [55, "Putting them in buyers' own words…"],
+  [85, "Nearly there…"],
+  [115, "Still listening…"],
 ];
 
 function StagedProgress({ stages }: { stages: readonly [number, string][] }) {
