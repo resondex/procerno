@@ -98,7 +98,7 @@ const CACHE_TTL_MS = 183 * 24 * 3600 * 1000;
 // VERDICT asks, premium_worth holds the tier-as-class open-choice form
 // (never one named brand's own worth) - writer rules and design lines
 // changed together.
-const STYLE_VERSION = "s21";
+const STYLE_VERSION = "s22";
 
 /** Versions the DETERMINISTIC seed-check set (everything seedRule runs:
  * checkPromptAgainstSpec + blind_missing_category + scenario_label_leak).
@@ -1618,21 +1618,26 @@ Reply with ONLY: {"voices_design": true|false, "reason": "<one short sentence>"}
 export async function checkDesignFidelity(input: {
   candidates: { text: string; design: string }[];
   meta?: CacheMeta;
+  /** Effort override: seed-check escalation re-judges low-effort failures
+   * at medium before healing or flagging (the low tier's documented ~1%
+   * gray zone is 1-2 false chips per battery at seed-check volume). */
+  effort?: string;
 }): Promise<{ voices: boolean; reason: string; unchecked?: boolean }[]> {
   const a = await anthropicClient();
   // Scoped, not tagCosts: mutating the shared request context here bled the
   // design_check purpose onto concurrent writer calls in the same request
   // (the stray gpt-5-mini design_check ledger rows).
+  const effort = input.effort ?? DESIGN_CHECK_EFFORT;
   return withCostContext({ purpose: "setup:design_check" }, () => Promise.all(
     input.candidates.map(async (c) => {
-      const key = cacheKey("design_check1", [DESIGN_CHECK_MODEL, DESIGN_CHECK_EFFORT, c.design, c.text.trim()]);
+      const key = cacheKey("design_check1", [DESIGN_CHECK_MODEL, effort, c.design, c.text.trim()]);
       const hit = await store.cacheGet(key, CACHE_TTL_MS);
       if (hit) return JSON.parse(hit) as { voices: boolean; reason: string };
       try {
         const res = await a.messages.create({
           model: DESIGN_CHECK_MODEL,
           max_tokens: 2000,
-          output_config: { effort: DESIGN_CHECK_EFFORT },
+          output_config: { effort },
           system: DESIGN_CHECK_SYSTEM,
           messages: [{ role: "user", content: `${c.design}\n\nQuestion: ${c.text}` }],
         } as never);
@@ -2916,7 +2921,16 @@ export async function generateGrid(input: {
                 candidates: seedTargets.map((x) => ({ text: x.c.text, design: x.intent })),
                 meta: input.meta,
               });
-              const bad = seedTargets.filter((_, k) => !verdicts[k].voices);
+              const low = seedTargets.filter((_, k) => !verdicts[k].voices && !verdicts[k].unchecked);
+              // Second opinion at MEDIUM effort before any heal or flag: the
+              // low tier's gray zone re-rolls 1-2 false kills per battery at
+              // this volume, and a false kill costs a heal plus a noise chip.
+              const second = low.length > 0
+                ? await checkDesignFidelity({ candidates: low.map((x) => ({ text: x.c.text, design: x.intent })), meta: input.meta, effort: "medium" })
+                : [];
+              const bad = low
+                .map((x, k) => ({ ...x, reason: second[k]?.reason ?? "" }))
+                .filter((_, k) => !second[k].voices && !second[k].unchecked);
               // Independent per cell - concurrent, like the brand-rule heal.
               await Promise.all(bad.map(async (x) => {
                 console.warn(`seed design check flagged [${x.c.stage}]: ${x.c.text.slice(0, 90)}`);
@@ -2946,13 +2960,15 @@ export async function generateGrid(input: {
                 // otherwise the terminal verdict flags the "fix".
                 const mech2ok = !!text2 && seedRule({ ...x.c, text: text2 }).length === 0;
                 const again = mech2ok
-                  ? (await checkDesignFidelity({ candidates: [{ text: text2!, design: x.intent }], meta: input.meta }))[0]
+                  ? (await checkDesignFidelity({ candidates: [{ text: text2!, design: x.intent }], meta: input.meta, effort: "medium" }))[0]
                   : null;
                 if (again?.voices) {
                   console.warn(`seed self-healed [${x.c.stage}]: ${text2!.slice(0, 90)}`);
                   flat[x.i].text = humanize(text2!);
                 } else {
-                  designFlagged.set(x.i, `off-design: ${again?.reason || verdicts[seedTargets.indexOf(x)]?.reason || "does not voice the cell's design"}`);
+                  // The flag describes the text that SHIPS (the original -
+                  // the rejected regen's reason described discarded text).
+                  designFlagged.set(x.i, `off-design: ${x.reason || "does not voice the cell's design"}`);
                   console.warn(`seed regeneration still off-design [${x.c.stage}] - seed ships flagged for the gate`);
                 }
               }));
