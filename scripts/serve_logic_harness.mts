@@ -126,8 +126,9 @@ try { const v = JSON.parse(raw3b ?? ""); ceUpgraded = v.rules === RULES && v.cel
 check("3 the passing old-era sibling upgraded instead of regenerating", ceUpgraded);
 
 // --- case 3b: a PROVISIONAL unit (deadline cut / checker outage) re-enters
-// generation instead of being stamped terminal by the mech-only re-judge
-// (2026-10-02 review finding #2: the skipped design layer was never retried).
+// generation WITH its cells - no writer redraw, the judgment pipeline runs,
+// and with the checker unreachable it ships provisional again (never
+// stamped, never flagged, response answers retry). 2026-10-02 review #1/#2.
 await store.cacheSet(keyOf(prRow), JSON.stringify({ cells: [cellOf(prRow, PR_PASS)], rules: RULES }), {});
 await store.cacheSet(keyOf(ceRow), JSON.stringify({ cells: [cellOf(ceRow, CE_PASS)], provisional: true }), {});
 t0 = Date.now();
@@ -135,8 +136,21 @@ out = await inst.generateGrid(gridInput());
 ms = Date.now() - t0;
 const raw3c = await store.cacheGet(keyOf(ceRow), 365 * 24 * 3600 * 1000);
 let prov3c = "";
-try { const v = JSON.parse(raw3c ?? ""); prov3c = v.__pending === 0 ? "retryable" : v.rules === RULES ? "stamped" : "other"; } catch { prov3c = "parse"; }
-check("3b provisional unit re-enters generation (throws on key, not stamped)", out === null && prov3c === "retryable" && ms < 10_000, `(${ms}ms, ${prov3c})`);
+let text3c = "";
+try { const v = JSON.parse(raw3c ?? ""); prov3c = v.__pending === 0 ? "retryable" : v.provisional ? "provisional" : v.rules === RULES ? "stamped" : "other"; text3c = v.cells?.[0]?.text ?? ""; } catch { prov3c = "parse"; }
+check("3b provisional re-judges in place: text preserved, still provisional, response retries",
+  out === null && prov3c === "provisional" && text3c === CE_PASS && ms < 10_000, `(${ms}ms, ${prov3c})`);
+
+// --- case 3c: a unit that failed 3 attempts is EXHAUSTED - the battery ships
+// without it (logged hole) instead of blocking the wizard forever on the
+// retry response (2026-10-02 review: the stall-loop shape, bounded).
+await store.cacheSet(keyOf(prRow), JSON.stringify({ cells: [cellOf(prRow, PR_PASS)], rules: RULES }), {});
+await store.cacheSet(keyOf(ceRow), JSON.stringify({ __pending: 0, tries: 3 }), {});
+t0 = Date.now();
+out = await inst.generateGrid(gridInput());
+ms = Date.now() - t0;
+check("3c exhausted unit ships the battery short instead of blocking",
+  Array.isArray(out) && out.length === 1 && out[0].text === PR_PASS && ms < 10_000, `(${ms}ms, cells=${Array.isArray(out) ? out.length : "null"})`);
 
 // --- case 4: 60s-old marker is orphaned immediately (old code waited 180s) ---
 await store.cacheSet(keyOf(prRow), JSON.stringify({ __pending: Date.now() - 60_000 }), {});

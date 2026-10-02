@@ -2718,7 +2718,16 @@ export async function generateGrid(input: {
   /** Generate the given units, grouped into ~CELL_CHUNK-cell model calls
    * (a unit never splits), and cache each unit on its own key. Markers are
    * claimed FIRST so concurrent identical requests join this work. */
-  const generate = async (idxs: number[], seen: Set<string>): Promise<void> => {
+  const generate = async (
+    idxs: number[], seen: Set<string>,
+    /** Provisional units re-enter WITH their cells (2026-10-02 review): the
+     * writer call is skipped and only the judgment pipeline (mech checks,
+     * heals, design pass, terminal verdict) runs - a redraw would waste
+     * warmed paraphrases and re-roll settled text. */
+    pre: Map<number, GridCell[]> = new Map(),
+    /** Prior retry counts for empty units (bounded liveness - see A5). */
+    triesOf: Map<number, number> = new Map()
+  ): Promise<void> => {
     if (idxs.length === 0) return;
     await Promise.all(
       idxs.map((u) => store.cacheSet(unitKeys[u], JSON.stringify({ __pending: Date.now() }), stampOf(input)))
@@ -2733,6 +2742,7 @@ export async function generateGrid(input: {
     let cur: number[] = [];
     let count = 0;
     for (const u of idxs) {
+      if (pre.has(u)) continue; // pre-seeded units group separately below
       if (count > 0 && count + units[u].length > CELL_CHUNK) {
         groups.push(cur);
         cur = [];
@@ -2742,6 +2752,8 @@ export async function generateGrid(input: {
       count += units[u].length;
     }
     if (cur.length > 0) groups.push(cur);
+    const preUnits = idxs.filter((u) => pre.has(u));
+    for (let k = 0; k < preUnits.length; k += CELL_CHUNK) groups.push(preUnits.slice(k, k + CELL_CHUNK));
     await Promise.all(
       groups.map(async (group) => {
         try {
@@ -2763,7 +2775,16 @@ export async function generateGrid(input: {
         // retried on the next serve, never frozen as final.
         let complete = process.env.PHRASINGS_CHECKS !== "0";
         const rows = group.flatMap((u) => units[u]);
+        const isPre = group.every((u) => pre.has(u));
         const planText = rows.map(planLine).join("\n");
+        const parsed = isPre
+          ? { cells: rows.map((row) => {
+              const c = (pre.get(unitOf.get(row)!) ?? [])[0];
+              return c
+                ? { stage: row.stage.key, situation: c.situation, angle: c.angle, text: c.text }
+                : { stage: "", situation: null as string | null, angle: "", text: "" };
+            }) }
+          : await (async () => {
         const res = await openaiClient().chat.completions.create({
           model: CELLS_MODEL,
           messages: [
@@ -2786,14 +2807,20 @@ export async function generateGrid(input: {
             json_schema: { name: "grid_cells", strict: true, schema: CELLS_SCHEMA },
           },
         });
-        const parsed = JSON.parse(res.choices[0]?.message?.content ?? "{}") as {
+        return JSON.parse(res.choices[0]?.message?.content ?? "{}") as {
           cells: { stage: string; situation: string | null; angle: string; text: string }[];
         };
+          })();
         const produced = new Map<number, GridCell[]>();
         (parsed.cells ?? []).forEach((c, i) => {
           // Positional alignment: answer row i belongs to plan row i.
           const row = rows[i];
           if (!row || !c.text?.trim()) return;
+          // A misordered reply puts one row's text on another row with no
+          // signal now that identity comes from the plan (2026-10-02
+          // review): a VALID echoed stage that disagrees with the row's is
+          // that signal - drop the cell, the unit retries.
+          if (c.stage && c.stage !== row.stage.key && byKey.has(c.stage)) return;
           // #4 (2026-10-02 review): stage and layer are the PLAN row's too -
           // the writer echoing a different valid stage used to cache the
           // cell under the row's key with the wrong stage, and echoing a
@@ -3040,7 +3067,11 @@ export async function generateGrid(input: {
               } }));
             }
           } catch (err) {
-            console.error("seed design healing failed open:", err);
+            // #2 gap (2026-10-02 review): a thrown design pass (client init,
+            // cache read) means NOTHING here was judged - provisional, never
+            // stamped final.
+            complete = false;
+            console.error("seed design healing failed - unit ships provisional:", err);
           }
         }
         // The heals above rewrite seed text after qtype was stamped at
@@ -3075,13 +3106,16 @@ export async function generateGrid(input: {
           group.map((u) => {
             const cells = produced.get(u) ?? [];
             resolved[u] = cells;
-            // An empty unit stamps itself retryable instead of caching
-            // the failure.
+            if (!complete && cells.length > 0) provisionalOut.add(u);
+            // An empty unit stamps itself retryable instead of caching the
+            // failure - with a bounded try count, so a unit that can never
+            // produce a cell degrades to a logged hole instead of blocking
+            // the wizard forever (the stall-loop shape, 2026-10-02 review).
             return store.cacheSet(
               unitKeys[u],
               cells.length > 0
                 ? JSON.stringify(complete ? { cells, rules: SEED_RULES_VERSION } : { cells, provisional: true })
-                : JSON.stringify({ __pending: 0 }),
+                : JSON.stringify({ __pending: 0, tries: (triesOf.get(u) ?? 0) + 1 }),
               stampOf(input)
             );
           })
@@ -3097,286 +3131,16 @@ export async function generateGrid(input: {
           await hb.quiesce();
           await Promise.all(
             group.map((u) =>
-              store.cacheSet(unitKeys[u], JSON.stringify({ __pending: 0 }), stampOf(input)).catch(() => {})
+              store.cacheSet(unitKeys[u], JSON.stringify({ __pending: 0, tries: (triesOf.get(u) ?? 0) + 1 }), stampOf(input)).catch(() => {})
             )
           );
         }
       })
     );
-    // CROSS-CELL CONCERN DIVERSITY (2026-09-29 audit): every per-cell check
-    // passes when all of a brand's doubt cells converge on ONE worry (jira:
-    // four performance objections; Netflix: price six times) - the doubt
-    // dashboard then measures a single concern per brand. One cheap
-    // labeling call over this generation's doubt seeds; duplicates get one
-    // regeneration steered away from the concerns already covered. Runs
-    // battery-wide, after every group has landed; changed units re-cache.
-    // Past the deadline it is skipped whole (fail-open, like a thrown
-    // labeling call): the units are already written and the pass is a
-    // safety net for legacy no-concern cells only.
-    if (process.env.PHRASINGS_CHECKS !== "0" && Date.now() <= deadlineAt) {
-      try {
-        // Planned-concern cells are diverse by construction and enforced
-        // per-cell by the design check - the dedup pass is the safety net
-        // for LEGACY doubt cells that carry no assigned concern.
-        const doubt: { u: number; c: GridCell }[] = [];
-        // Battery-wide means the WHOLE battery: served units included (the
-        // s24 eviction reroll saw only its 2 fresh units, skipped the pass
-        // on length, and silently dropped Pixel's brand-named pricing cell).
-        // A rewrite of a served unit re-caches terminal like any heal.
-        for (let u = 0; u < units.length; u++) for (const c of resolved[u] ?? []) if (DOUBT_CHECK_STAGES.has(c.stage) && !c.concern) doubt.push({ u, c });
-        if (doubt.length >= 2) {
-          const labelConcerns = async (texts: string[]): Promise<string[]> => {
-            const a = await anthropicClient();
-            const res = await withCostContext({ purpose: "setup:cells" }, () => a.messages.create({
-              model: DESIGN_CHECK_MODEL,
-              max_tokens: 1500,
-              output_config: { effort: DESIGN_CHECK_EFFORT },
-              system: `Each question below voices a buyer's concern about ${input.brand}. Label each question's core concern with ONE COARSE class: price/fees, performance/reliability, complexity/admin burden, catalog/content, policy/trust, support/service, compatibility/lock-in, quality/durability - or a 2-3 word class at that same altitude. Two settings of the same worry (peak-load speed vs cross-region speed) are the SAME class. Reply with ONLY JSON: {"concerns": ["...", ...]} - one label per question, in order.`,
-              messages: [{ role: "user", content: texts.map((t, i) => `${i + 1}. ${t}`).join("\n") }],
-            } as never));
-            const text = (res as { content: { type: string; text?: string }[] }).content
-              .filter((b) => b.type === "text").map((b) => b.text ?? "").join("").trim();
-            const j = JSON.parse(text.match(/\{[\s\S]*\}/)?.[0] ?? text) as { concerns?: string[] };
-            return (j.concerns ?? []).map((s) => String(s));
-          };
-          const concerns = await labelConcerns(doubt.map((d) => d.c.text));
-          if (concerns.length === doubt.length) {
-            const norm = (s: string) => s.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
-            const covered = new Map<string, number>();
-            const dups: number[] = [];
-            concerns.forEach((lab, i) => {
-              const k = norm(lab);
-              if (covered.has(k)) dups.push(i);
-              else covered.set(k, i);
-            });
-            const dirty = new Set<number>();
-            // Independent per cell - concurrent, like the seed heals.
-            await Promise.all(dups.slice(0, 4).map(async (i) => {
-              const d = doubt[i];
-              const row = rowFor(units[d.u] ?? [], d.c) ?? (units[d.u] ?? [])[0];
-              if (!row || Date.now() > healDeadlineAt) return;
-              console.warn(`concern diversity: [${d.c.stage}] duplicates "${concerns[i]}" - regenerating | ${d.c.text.slice(0, 80)}`);
-              try {
-                const res2 = await openaiClient().chat.completions.create({
-                  model: CELLS_MODEL,
-                  messages: [
-                    { role: "system", content: CELL_WRITER_SYSTEM + "Return one cell object for the plan line." },
-                    { role: "user", content:
-                        `Client brand: ${input.brand}\nCategory: ${input.category}\n` +
-                        `Rivals: ${rivals.map(primaryBrandName).join(", ")}\nAudience: ${input.audience ?? "unknown"}\n\n` +
-                        `Cell plan:\n${planLine(row, 0)}\n` +
-                        `   [this battery ALREADY covers these concerns about ${input.brand}: ${[...covered.keys()].join("; ")}. ` +
-                        `This cell must voice a DIFFERENT real concern buyers have about ${input.brand} in ${input.category}. ` +
-                        `Do not reuse this wording: "${d.c.text}"]` },
-                  ],
-                  response_format: { type: "json_schema", json_schema: { name: "grid_cells", strict: true, schema: CELLS_SCHEMA } },
-                });
-                const text2 = (JSON.parse(res2.choices[0]?.message?.content ?? "{}") as { cells?: { text?: string }[] }).cells?.[0]?.text?.trim();
-                if (!text2) return;
-                const cand = { stage: d.c.stage, angle: d.c.angle, text: humanize(text2), situation: d.c.situation };
-                const intent = stageDesignIntent(d.c.stage, input.brand, undefined, d.c.angle, d.c.situation);
-                const mechOk = seedRule(cand).length === 0;
-                const dv = intent ? (await checkDesignFidelity({ candidates: [{ text: cand.text, design: intent }], meta: input.meta }))[0] : null;
-                const designOk = !intent || (!!dv?.voices && !dv?.unchecked);
-                if (mechOk && designOk) {
-                  d.c.text = cand.text;
-                  d.c.qtype = questionTypeOf(d.c, input.brand, input.category);
-                  d.c.spec = deriveCheckSpec(d.c, input.brand, input.competitors, input.category);
-                  // The swap passed the mechanical check, so any flag the
-                  // original wore no longer describes this cell.
-                  delete d.c.seedFlags;
-                  dirty.add(d.u);
-                  console.warn(`concern diversity: healed [${d.c.stage}]: ${cand.text.slice(0, 80)}`);
-                } else {
-                  console.warn(`concern diversity: regeneration rejected [${d.c.stage}] - original stands`);
-                }
-              } catch (err) {
-                console.error("concern diversity regeneration failed open:", err);
-              }
-            }));
-            // A dirty unit's swap passed both checks, so the rewrite is
-            // terminal under the current rules like any full heal.
-            await Promise.all(
-              [...dirty].map((u) =>
-                store.cacheSet(unitKeys[u], JSON.stringify({ cells: resolved[u] ?? [], rules: SEED_RULES_VERSION }), stampOf(input)).catch(() => {})
-              )
-            );
-          }
-        }
-      } catch (err) {
-        console.error("concern diversity pass failed open:", err);
-      }
-    }
-    // CROSS-CELL PRICING TRADE-OFF DIVERSITY (2026-10-01 s20 audit): the
-    // writer rule "a battery uses a trade-off shape in at most one pricing
-    // cell" had no checker behind it, and AmEx shipped three fee-vs-no-fee
-    // cells while jira asked free-vs-paid twice - per-cell design checks
-    // cannot see cross-cell sameness. Same mechanism as the concern pass:
-    // one cheap labeling call over this generation's pricing seeds,
-    // duplicates get one regeneration steered to a different trade-off.
-    if (process.env.PHRASINGS_CHECKS !== "0" && Date.now() <= deadlineAt) {
-      try {
-        const pricing: { u: number; c: GridCell }[] = [];
-        for (let u = 0; u < units.length; u++) for (const c of resolved[u] ?? []) if (c.stage === "pricing") pricing.push({ u, c });
-        if (pricing.length >= 2) {
-          const labelShapes = async (texts: string[]): Promise<string[]> => {
-            const a = await anthropicClient();
-            const res = await withCostContext({ purpose: "setup:cells" }, () => a.messages.create({
-              model: DESIGN_CHECK_MODEL,
-              max_tokens: 1500,
-              output_config: { effort: DESIGN_CHECK_EFFORT },
-              system: `Each question below asks about price or value in ${input.brand}'s market. Label each question's core price TRADE-OFF by the TWO OPTIONS being weighed: fee vs no-fee, free vs paid, monthly vs annual billing, tier vs tier, financing vs buying outright, carrier credits vs unlocked, trade-in vs resale, total cost over time, pay up vs base - or a 2-4 word options pair at that same altitude. Wording, products and spend amounts do not change the class: two questions weighing the SAME two options are the SAME class however differently phrased, and paying MORE OR LESS for the same product line - no-fee vs fee, mid-tier vs premium, cheaper line vs flagship - is ONE class ("which price level") whatever the tier names. Reply with ONLY JSON: {"shapes": ["...", ...]} - one label per question, in order.`,
-              messages: [{ role: "user", content: texts.map((t, i) => `${i + 1}. ${t}`).join("\n") }],
-            } as never));
-            const text = (res as { content: { type: string; text?: string }[] }).content
-              .filter((b) => b.type === "text").map((b) => b.text ?? "").join("").trim();
-            const j = JSON.parse(text.match(/\{[\s\S]*\}/)?.[0] ?? text) as { shapes?: string[] };
-            return (j.shapes ?? []).map((s) => String(s));
-          };
-          const shapes = await labelShapes(pricing.map((d) => d.c.text));
-          if (shapes.length === pricing.length) {
-            const norm = (s: string) => s.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
-            const covered = new Map<string, number>();
-            const dups: number[] = [];
-            shapes.forEach((lab, i) => {
-              const k = norm(lab);
-              if (covered.has(k)) dups.push(i);
-              else covered.set(k, i);
-            });
-            // At least one pricing cell names the brand and does its own
-            // math (s20 writer rule; s23 shipped four generic AmEx cells -
-            // writer-only rules regress). If none does, steer one duplicate
-            // (or the last cell) into the brand's own tier/fee question.
-            // Brand presence is enforced AFTER the duplicate heals (below):
-            // evaluating it here let a dup heal replace the battery's only
-            // brand-named cell right after the check had passed (s26 AmEx).
-            let brandSteer = -1;
-            const dirty = new Set<number>();
-            await Promise.all(dups.slice(0, 4).map(async (i) => {
-              const d = pricing[i];
-              const row = rowFor(units[d.u] ?? [], d.c) ?? (units[d.u] ?? [])[0];
-              if (!row || Date.now() > healDeadlineAt) return;
-              console.warn(`pricing trade-off diversity: duplicates "${shapes[i]}" - regenerating | ${d.c.text.slice(0, 80)}`);
-              try {
-                const res2 = await openaiClient().chat.completions.create({
-                  model: CELLS_MODEL,
-                  messages: [
-                    { role: "system", content: CELL_WRITER_SYSTEM + "Return one cell object for the plan line." },
-                    { role: "user", content:
-                        `Client brand: ${input.brand}\nCategory: ${input.category}\n` +
-                        `Rivals: ${rivals.map(primaryBrandName).join(", ")}\nAudience: ${input.audience ?? "unknown"}\n\n` +
-                        `Cell plan:\n${planLine(row, 0)}\n` +
-                        (i === brandSteer
-                          ? `   [none of this battery's pricing cells names ${input.brand}: THIS cell must NAME ${input.brand} and reason about its own price math - its tiers or lines against each other, its fee vs what it returns, its financing or trade-in - in this circumstance. ` +
-                            `Do not reuse this wording: "${d.c.text}"]`
-                          : `   [this battery's pricing cells ALREADY use these price trade-offs: ${[...covered.keys()].join("; ")}. ` +
-                            `This cell must reason about a DIFFERENT price trade-off in this circumstance - the client brand's own tiers, total cost over time, financing vs buying outright, trade-in math. ` +
-                            `Do not reuse this wording: "${d.c.text}"]`) },
-                  ],
-                  response_format: { type: "json_schema", json_schema: { name: "grid_cells", strict: true, schema: CELLS_SCHEMA } },
-                });
-                let text2 = (JSON.parse(res2.choices[0]?.message?.content ?? "{}") as { cells?: { text?: string }[] }).cells?.[0]?.text?.trim();
-                const intent = stageDesignIntent(d.c.stage, input.brand, undefined, d.c.angle, d.c.situation);
-                const judge = async (t: string) => {
-                  const cand = { stage: d.c.stage, angle: d.c.angle, text: humanize(t), situation: d.c.situation };
-                  const mechOk = seedRule(cand).length === 0;
-                  const brandOk = i !== brandSteer || textNamesBrand(cand.text, input.brand);
-                  const verdict = intent ? (await checkDesignFidelity({ candidates: [{ text: cand.text, design: intent }], meta: input.meta }))[0] : null;
-                  return { cand, mechOk, brandOk, designOk: !intent || (!!verdict?.voices && !verdict.unchecked), reason: verdict?.reason ?? "" };
-                };
-                let v = text2 ? await judge(text2) : null;
-                // One steered retry (s29 audit F2: rejected dedup regens made
-                // the battery converge back to the fee monoculture - the
-                // rejection reason steers the second try).
-                if (text2 && v && !(v.mechOk && v.brandOk && v.designOk) && Date.now() <= healDeadlineAt) {
-                  const why = !v.designOk ? `it did not satisfy the design: ${v.reason}` : !v.mechOk ? "it broke a mechanical rule" : `it must name ${input.brand}`;
-                  const resR = await openaiClient().chat.completions.create({
-                    model: CELLS_MODEL,
-                    messages: [
-                      { role: "system", content: CELL_WRITER_SYSTEM + "Return one cell object for the plan line." },
-                      { role: "user", content:
-                          `Client brand: ${input.brand}\nCategory: ${input.category}\n` +
-                          `Rivals: ${rivals.map(primaryBrandName).join(", ")}\nAudience: ${input.audience ?? "unknown"}\n\n` +
-                          `Cell plan:\n${planLine(row, 0)}\n` +
-                          `   [this battery's pricing cells ALREADY use these price trade-offs: ${[...covered.keys()].join("; ")} - this cell must reason about a DIFFERENT price trade-off with the asker's usage as input. ` +
-                          `The last attempt was rejected because ${why}. Do not reuse: "${d.c.text}" / "${text2}"]` },
-                    ],
-                    response_format: { type: "json_schema", json_schema: { name: "grid_cells", strict: true, schema: CELLS_SCHEMA } },
-                  });
-                  text2 = (JSON.parse(resR.choices[0]?.message?.content ?? "{}") as { cells?: { text?: string }[] }).cells?.[0]?.text?.trim();
-                  v = text2 ? await judge(text2) : null;
-                }
-                if (v && v.mechOk && v.brandOk && v.designOk) {
-                  d.c.text = v.cand.text;
-                  d.c.qtype = questionTypeOf(d.c, input.brand, input.category);
-                  d.c.spec = deriveCheckSpec(d.c, input.brand, input.competitors, input.category);
-                  delete d.c.seedFlags;
-                  dirty.add(d.u);
-                  console.warn(`pricing trade-off diversity: healed: ${v.cand.text.slice(0, 80)}`);
-                } else {
-                  console.warn(`pricing trade-off diversity: regeneration rejected (${v ? `${v.mechOk ? "" : "mech "}${v.brandOk ? "" : "brand "}${v.designOk ? "" : "design"}` : "empty"}) - original stands`);
-                }
-              } catch (err) {
-                console.error("pricing diversity regeneration failed open:", err);
-              }
-            }));
-            // At least one pricing cell names the brand - judged on the
-            // FINAL post-heal texts, with its own regen when violated.
-            if (!pricing.some((d) => textNamesBrand(d.c.text, input.brand)) && Date.now() <= healDeadlineAt) {
-              brandSteer = pricing.length - 1;
-              const d = pricing[brandSteer];
-              const row = rowFor(units[d.u] ?? [], d.c) ?? (units[d.u] ?? [])[0];
-              console.warn(`pricing diversity: no cell names ${input.brand} - steering [${brandSteer}] to the brand's own math`);
-              if (row) {
-                try {
-                  const res3 = await openaiClient().chat.completions.create({
-                    model: CELLS_MODEL,
-                    messages: [
-                      { role: "system", content: CELL_WRITER_SYSTEM + "Return one cell object for the plan line." },
-                      { role: "user", content:
-                          `Client brand: ${input.brand}\nCategory: ${input.category}\n` +
-                          `Rivals: ${rivals.map(primaryBrandName).join(", ")}\nAudience: ${input.audience ?? "unknown"}\n\n` +
-                          `Cell plan:\n${planLine(row, 0)}\n` +
-                          `   [none of this battery's pricing cells names ${input.brand}: THIS cell must NAME ${input.brand} and reason about its own price math - its tiers or lines against each other, its fee vs what it returns, its financing or trade-in - in this circumstance. ` +
-                          `Do not reuse this wording: "${d.c.text}"]` },
-                    ],
-                    response_format: { type: "json_schema", json_schema: { name: "grid_cells", strict: true, schema: CELLS_SCHEMA } },
-                  });
-                  const text3 = (JSON.parse(res3.choices[0]?.message?.content ?? "{}") as { cells?: { text?: string }[] }).cells?.[0]?.text?.trim();
-                  if (text3) {
-                    const cand = { stage: d.c.stage, angle: d.c.angle, text: humanize(text3), situation: d.c.situation };
-                    const intent = stageDesignIntent(d.c.stage, input.brand, undefined, d.c.angle, d.c.situation);
-                    const mechOk = seedRule(cand).length === 0;
-                    const brandOk = textNamesBrand(cand.text, input.brand);
-                    const dv = intent ? (await checkDesignFidelity({ candidates: [{ text: cand.text, design: intent }], meta: input.meta }))[0] : null;
-                const designOk = !intent || (!!dv?.voices && !dv?.unchecked);
-                    if (mechOk && brandOk && designOk) {
-                      d.c.text = cand.text;
-                      d.c.qtype = questionTypeOf(d.c, input.brand, input.category);
-                      d.c.spec = deriveCheckSpec(d.c, input.brand, input.competitors, input.category);
-                      delete d.c.seedFlags;
-                      dirty.add(d.u);
-                      console.warn(`pricing diversity: brand cell restored: ${cand.text.slice(0, 80)}`);
-                    } else {
-                      console.warn(`pricing diversity: brand steer rejected (${mechOk ? "" : "mech "}${brandOk ? "" : "brand "}${designOk ? "" : "design"}) - original stands`);
-                    }
-                  }
-                } catch (err) {
-                  console.error("pricing brand steer failed open:", err);
-                }
-              }
-            }
-            await Promise.all(
-              [...dirty].map((u) =>
-                store.cacheSet(unitKeys[u], JSON.stringify({ cells: resolved[u] ?? [], rules: SEED_RULES_VERSION }), stampOf(input)).catch(() => {})
-              )
-            );
-          }
-        }
-      } catch (err) {
-        console.error("pricing trade-off diversity pass failed open:", err);
-      }
-    }
+    // Battery-wide passes moved to runBatteryPasses (2026-10-02 review gap
+    // #3): skipped or thrown passes used to be lost forever once units were
+    // terminal - a completion marker now retries them on the next serve.
+    await maybeRunPasses();
     } finally {
       await hb.stop();
     }
@@ -3512,8 +3276,322 @@ export async function generateGrid(input: {
     return out;
   };
 
+  /** Battery-wide invariants (concern diversity; pricing trade-off diversity
+   * + brand presence), extracted from generate's tail (2026-10-02 review gap
+   * #3): a pass skipped by the deadline or a thrown labeling call left the
+   * battery permanently without its guarantees, because the units were
+   * already terminal and a fully-cached serve never re-entered generate. A
+   * completion marker (keyed on the unit-key set, so it self-versions with
+   * the eras) is written only when both passes ran uncut; a serve that finds
+   * it absent re-runs them. */
+  const passesKey = cacheKey("grid_passes1", [...unitKeys]);
+  let passesCut = false;
+  const runBatteryPasses = async (): Promise<void> => {
+    passesCut = false;
+    // CROSS-CELL CONCERN DIVERSITY (2026-09-29 audit): every per-cell check
+    // passes when all of a brand's doubt cells converge on ONE worry (jira:
+    // four performance objections; Netflix: price six times) - the doubt
+    // dashboard then measures a single concern per brand. One cheap
+    // labeling call over this generation's doubt seeds; duplicates get one
+    // regeneration steered away from the concerns already covered. Runs
+    // battery-wide, after every group has landed; changed units re-cache.
+    // Past the deadline it is skipped whole (fail-open, like a thrown
+    // labeling call): the units are already written and the pass is a
+    // safety net for legacy no-concern cells only.
+    if (process.env.PHRASINGS_CHECKS !== "0" && Date.now() > deadlineAt) passesCut = true;
+    if (process.env.PHRASINGS_CHECKS !== "0" && Date.now() <= deadlineAt) {
+      try {
+        // Planned-concern cells are diverse by construction and enforced
+        // per-cell by the design check - the dedup pass is the safety net
+        // for LEGACY doubt cells that carry no assigned concern.
+        const doubt: { u: number; c: GridCell }[] = [];
+        // Battery-wide means the WHOLE battery: served units included (the
+        // s24 eviction reroll saw only its 2 fresh units, skipped the pass
+        // on length, and silently dropped Pixel's brand-named pricing cell).
+        // A rewrite of a served unit re-caches terminal like any heal.
+        for (let u = 0; u < units.length; u++) for (const c of resolved[u] ?? []) if (DOUBT_CHECK_STAGES.has(c.stage) && !c.concern) doubt.push({ u, c });
+        if (doubt.length >= 2) {
+          const labelConcerns = async (texts: string[]): Promise<string[]> => {
+            const a = await anthropicClient();
+            const res = await withCostContext({ purpose: "setup:cells" }, () => a.messages.create({
+              model: DESIGN_CHECK_MODEL,
+              max_tokens: 1500,
+              output_config: { effort: DESIGN_CHECK_EFFORT },
+              system: `Each question below voices a buyer's concern about ${input.brand}. Label each question's core concern with ONE COARSE class: price/fees, performance/reliability, complexity/admin burden, catalog/content, policy/trust, support/service, compatibility/lock-in, quality/durability - or a 2-3 word class at that same altitude. Two settings of the same worry (peak-load speed vs cross-region speed) are the SAME class. Reply with ONLY JSON: {"concerns": ["...", ...]} - one label per question, in order.`,
+              messages: [{ role: "user", content: texts.map((t, i) => `${i + 1}. ${t}`).join("\n") }],
+            } as never));
+            const text = (res as { content: { type: string; text?: string }[] }).content
+              .filter((b) => b.type === "text").map((b) => b.text ?? "").join("").trim();
+            const j = JSON.parse(text.match(/\{[\s\S]*\}/)?.[0] ?? text) as { concerns?: string[] };
+            return (j.concerns ?? []).map((s) => String(s));
+          };
+          const concerns = await labelConcerns(doubt.map((d) => d.c.text));
+          if (concerns.length === doubt.length) {
+            const norm = (s: string) => s.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+            const covered = new Map<string, number>();
+            const dups: number[] = [];
+            concerns.forEach((lab, i) => {
+              const k = norm(lab);
+              if (covered.has(k)) dups.push(i);
+              else covered.set(k, i);
+            });
+            const dirty = new Set<number>();
+            // Independent per cell - concurrent, like the seed heals.
+            await Promise.all(dups.slice(0, 4).map(async (i) => {
+              const d = doubt[i];
+              const row = rowFor(units[d.u] ?? [], d.c) ?? (units[d.u] ?? [])[0];
+              if (!row) return;
+              if (Date.now() > healDeadlineAt) { passesCut = true; return; }
+              console.warn(`concern diversity: [${d.c.stage}] duplicates "${concerns[i]}" - regenerating | ${d.c.text.slice(0, 80)}`);
+              try {
+                const res2 = await openaiClient().chat.completions.create({
+                  model: CELLS_MODEL,
+                  messages: [
+                    { role: "system", content: CELL_WRITER_SYSTEM + "Return one cell object for the plan line." },
+                    { role: "user", content:
+                        `Client brand: ${input.brand}\nCategory: ${input.category}\n` +
+                        `Rivals: ${rivals.map(primaryBrandName).join(", ")}\nAudience: ${input.audience ?? "unknown"}\n\n` +
+                        `Cell plan:\n${planLine(row, 0)}\n` +
+                        `   [this battery ALREADY covers these concerns about ${input.brand}: ${[...covered.keys()].join("; ")}. ` +
+                        `This cell must voice a DIFFERENT real concern buyers have about ${input.brand} in ${input.category}. ` +
+                        `Do not reuse this wording: "${d.c.text}"]` },
+                  ],
+                  response_format: { type: "json_schema", json_schema: { name: "grid_cells", strict: true, schema: CELLS_SCHEMA } },
+                });
+                const text2 = (JSON.parse(res2.choices[0]?.message?.content ?? "{}") as { cells?: { text?: string }[] }).cells?.[0]?.text?.trim();
+                if (!text2) return;
+                const cand = { stage: d.c.stage, angle: d.c.angle, text: humanize(text2), situation: d.c.situation };
+                const intent = stageDesignIntent(d.c.stage, input.brand, undefined, d.c.angle, d.c.situation);
+                const mechOk = seedRule(cand).length === 0;
+                const dv = intent ? (await checkDesignFidelity({ candidates: [{ text: cand.text, design: intent }], meta: input.meta }))[0] : null;
+                const designOk = !intent || (!!dv?.voices && !dv?.unchecked);
+                if (mechOk && designOk) {
+                  d.c.text = cand.text;
+                  d.c.qtype = questionTypeOf(d.c, input.brand, input.category);
+                  d.c.spec = deriveCheckSpec(d.c, input.brand, input.competitors, input.category);
+                  // The swap passed the mechanical check, so any flag the
+                  // original wore no longer describes this cell.
+                  delete d.c.seedFlags;
+                  dirty.add(d.u);
+                  console.warn(`concern diversity: healed [${d.c.stage}]: ${cand.text.slice(0, 80)}`);
+                } else {
+                  console.warn(`concern diversity: regeneration rejected [${d.c.stage}] - original stands`);
+                }
+              } catch (err) {
+                console.error("concern diversity regeneration failed open:", err);
+              }
+            }));
+            // A dirty unit's swap passed both checks, so the rewrite is
+            // terminal under the current rules like any full heal.
+            await Promise.all(
+              [...dirty].map((u) =>
+                store.cacheSet(unitKeys[u], JSON.stringify({ cells: resolved[u] ?? [], rules: SEED_RULES_VERSION }), stampOf(input)).catch(() => {})
+              )
+            );
+          }
+        }
+      } catch (err) {
+        passesCut = true;
+        console.error("concern diversity pass failed open:", err);
+      }
+    }
+    // CROSS-CELL PRICING TRADE-OFF DIVERSITY (2026-10-01 s20 audit): the
+    // writer rule "a battery uses a trade-off shape in at most one pricing
+    // cell" had no checker behind it, and AmEx shipped three fee-vs-no-fee
+    // cells while jira asked free-vs-paid twice - per-cell design checks
+    // cannot see cross-cell sameness. Same mechanism as the concern pass:
+    // one cheap labeling call over this generation's pricing seeds,
+    // duplicates get one regeneration steered to a different trade-off.
+    if (process.env.PHRASINGS_CHECKS !== "0" && Date.now() > deadlineAt) passesCut = true;
+    if (process.env.PHRASINGS_CHECKS !== "0" && Date.now() <= deadlineAt) {
+      try {
+        const pricing: { u: number; c: GridCell }[] = [];
+        for (let u = 0; u < units.length; u++) for (const c of resolved[u] ?? []) if (c.stage === "pricing") pricing.push({ u, c });
+        if (pricing.length >= 2) {
+          const labelShapes = async (texts: string[]): Promise<string[]> => {
+            const a = await anthropicClient();
+            const res = await withCostContext({ purpose: "setup:cells" }, () => a.messages.create({
+              model: DESIGN_CHECK_MODEL,
+              max_tokens: 1500,
+              output_config: { effort: DESIGN_CHECK_EFFORT },
+              system: `Each question below asks about price or value in ${input.brand}'s market. Label each question's core price TRADE-OFF by the TWO OPTIONS being weighed: fee vs no-fee, free vs paid, monthly vs annual billing, tier vs tier, financing vs buying outright, carrier credits vs unlocked, trade-in vs resale, total cost over time, pay up vs base - or a 2-4 word options pair at that same altitude. Wording, products and spend amounts do not change the class: two questions weighing the SAME two options are the SAME class however differently phrased, and paying MORE OR LESS for the same product line - no-fee vs fee, mid-tier vs premium, cheaper line vs flagship - is ONE class ("which price level") whatever the tier names. Reply with ONLY JSON: {"shapes": ["...", ...]} - one label per question, in order.`,
+              messages: [{ role: "user", content: texts.map((t, i) => `${i + 1}. ${t}`).join("\n") }],
+            } as never));
+            const text = (res as { content: { type: string; text?: string }[] }).content
+              .filter((b) => b.type === "text").map((b) => b.text ?? "").join("").trim();
+            const j = JSON.parse(text.match(/\{[\s\S]*\}/)?.[0] ?? text) as { shapes?: string[] };
+            return (j.shapes ?? []).map((s) => String(s));
+          };
+          const shapes = await labelShapes(pricing.map((d) => d.c.text));
+          if (shapes.length === pricing.length) {
+            const norm = (s: string) => s.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+            const covered = new Map<string, number>();
+            const dups: number[] = [];
+            shapes.forEach((lab, i) => {
+              const k = norm(lab);
+              if (covered.has(k)) dups.push(i);
+              else covered.set(k, i);
+            });
+            // At least one pricing cell names the brand and does its own
+            // math (s20 writer rule; s23 shipped four generic AmEx cells -
+            // writer-only rules regress). If none does, steer one duplicate
+            // (or the last cell) into the brand's own tier/fee question.
+            // Brand presence is enforced AFTER the duplicate heals (below):
+            // evaluating it here let a dup heal replace the battery's only
+            // brand-named cell right after the check had passed (s26 AmEx).
+            let brandSteer = -1;
+            const dirty = new Set<number>();
+            await Promise.all(dups.slice(0, 4).map(async (i) => {
+              const d = pricing[i];
+              const row = rowFor(units[d.u] ?? [], d.c) ?? (units[d.u] ?? [])[0];
+              if (!row) return;
+              if (Date.now() > healDeadlineAt) { passesCut = true; return; }
+              console.warn(`pricing trade-off diversity: duplicates "${shapes[i]}" - regenerating | ${d.c.text.slice(0, 80)}`);
+              try {
+                const res2 = await openaiClient().chat.completions.create({
+                  model: CELLS_MODEL,
+                  messages: [
+                    { role: "system", content: CELL_WRITER_SYSTEM + "Return one cell object for the plan line." },
+                    { role: "user", content:
+                        `Client brand: ${input.brand}\nCategory: ${input.category}\n` +
+                        `Rivals: ${rivals.map(primaryBrandName).join(", ")}\nAudience: ${input.audience ?? "unknown"}\n\n` +
+                        `Cell plan:\n${planLine(row, 0)}\n` +
+                        (i === brandSteer
+                          ? `   [none of this battery's pricing cells names ${input.brand}: THIS cell must NAME ${input.brand} and reason about its own price math - its tiers or lines against each other, its fee vs what it returns, its financing or trade-in - in this circumstance. ` +
+                            `Do not reuse this wording: "${d.c.text}"]`
+                          : `   [this battery's pricing cells ALREADY use these price trade-offs: ${[...covered.keys()].join("; ")}. ` +
+                            `This cell must reason about a DIFFERENT price trade-off in this circumstance - the client brand's own tiers, total cost over time, financing vs buying outright, trade-in math. ` +
+                            `Do not reuse this wording: "${d.c.text}"]`) },
+                  ],
+                  response_format: { type: "json_schema", json_schema: { name: "grid_cells", strict: true, schema: CELLS_SCHEMA } },
+                });
+                let text2 = (JSON.parse(res2.choices[0]?.message?.content ?? "{}") as { cells?: { text?: string }[] }).cells?.[0]?.text?.trim();
+                const intent = stageDesignIntent(d.c.stage, input.brand, undefined, d.c.angle, d.c.situation);
+                const judge = async (t: string) => {
+                  const cand = { stage: d.c.stage, angle: d.c.angle, text: humanize(t), situation: d.c.situation };
+                  const mechOk = seedRule(cand).length === 0;
+                  const brandOk = i !== brandSteer || textNamesBrand(cand.text, input.brand);
+                  const verdict = intent ? (await checkDesignFidelity({ candidates: [{ text: cand.text, design: intent }], meta: input.meta }))[0] : null;
+                  return { cand, mechOk, brandOk, designOk: !intent || (!!verdict?.voices && !verdict.unchecked), reason: verdict?.reason ?? "" };
+                };
+                let v = text2 ? await judge(text2) : null;
+                // One steered retry (s29 audit F2: rejected dedup regens made
+                // the battery converge back to the fee monoculture - the
+                // rejection reason steers the second try).
+                if (text2 && v && !(v.mechOk && v.brandOk && v.designOk) && Date.now() <= healDeadlineAt) {
+                  const why = !v.designOk ? `it did not satisfy the design: ${v.reason}` : !v.mechOk ? "it broke a mechanical rule" : `it must name ${input.brand}`;
+                  const resR = await openaiClient().chat.completions.create({
+                    model: CELLS_MODEL,
+                    messages: [
+                      { role: "system", content: CELL_WRITER_SYSTEM + "Return one cell object for the plan line." },
+                      { role: "user", content:
+                          `Client brand: ${input.brand}\nCategory: ${input.category}\n` +
+                          `Rivals: ${rivals.map(primaryBrandName).join(", ")}\nAudience: ${input.audience ?? "unknown"}\n\n` +
+                          `Cell plan:\n${planLine(row, 0)}\n` +
+                          `   [this battery's pricing cells ALREADY use these price trade-offs: ${[...covered.keys()].join("; ")} - this cell must reason about a DIFFERENT price trade-off with the asker's usage as input. ` +
+                          `The last attempt was rejected because ${why}. Do not reuse: "${d.c.text}" / "${text2}"]` },
+                    ],
+                    response_format: { type: "json_schema", json_schema: { name: "grid_cells", strict: true, schema: CELLS_SCHEMA } },
+                  });
+                  text2 = (JSON.parse(resR.choices[0]?.message?.content ?? "{}") as { cells?: { text?: string }[] }).cells?.[0]?.text?.trim();
+                  v = text2 ? await judge(text2) : null;
+                }
+                if (v && v.mechOk && v.brandOk && v.designOk) {
+                  d.c.text = v.cand.text;
+                  d.c.qtype = questionTypeOf(d.c, input.brand, input.category);
+                  d.c.spec = deriveCheckSpec(d.c, input.brand, input.competitors, input.category);
+                  delete d.c.seedFlags;
+                  dirty.add(d.u);
+                  console.warn(`pricing trade-off diversity: healed: ${v.cand.text.slice(0, 80)}`);
+                } else {
+                  console.warn(`pricing trade-off diversity: regeneration rejected (${v ? `${v.mechOk ? "" : "mech "}${v.brandOk ? "" : "brand "}${v.designOk ? "" : "design"}` : "empty"}) - original stands`);
+                }
+              } catch (err) {
+                console.error("pricing diversity regeneration failed open:", err);
+              }
+            }));
+            // At least one pricing cell names the brand - judged on the
+            // FINAL post-heal texts, with its own regen when violated.
+            if (!pricing.some((d) => textNamesBrand(d.c.text, input.brand)) && Date.now() > healDeadlineAt) passesCut = true;
+            if (!pricing.some((d) => textNamesBrand(d.c.text, input.brand)) && Date.now() <= healDeadlineAt) {
+              brandSteer = pricing.length - 1;
+              const d = pricing[brandSteer];
+              const row = rowFor(units[d.u] ?? [], d.c) ?? (units[d.u] ?? [])[0];
+              console.warn(`pricing diversity: no cell names ${input.brand} - steering [${brandSteer}] to the brand's own math`);
+              if (row) {
+                try {
+                  const res3 = await openaiClient().chat.completions.create({
+                    model: CELLS_MODEL,
+                    messages: [
+                      { role: "system", content: CELL_WRITER_SYSTEM + "Return one cell object for the plan line." },
+                      { role: "user", content:
+                          `Client brand: ${input.brand}\nCategory: ${input.category}\n` +
+                          `Rivals: ${rivals.map(primaryBrandName).join(", ")}\nAudience: ${input.audience ?? "unknown"}\n\n` +
+                          `Cell plan:\n${planLine(row, 0)}\n` +
+                          `   [none of this battery's pricing cells names ${input.brand}: THIS cell must NAME ${input.brand} and reason about its own price math - its tiers or lines against each other, its fee vs what it returns, its financing or trade-in - in this circumstance. ` +
+                          `Do not reuse this wording: "${d.c.text}"]` },
+                    ],
+                    response_format: { type: "json_schema", json_schema: { name: "grid_cells", strict: true, schema: CELLS_SCHEMA } },
+                  });
+                  const text3 = (JSON.parse(res3.choices[0]?.message?.content ?? "{}") as { cells?: { text?: string }[] }).cells?.[0]?.text?.trim();
+                  if (text3) {
+                    const cand = { stage: d.c.stage, angle: d.c.angle, text: humanize(text3), situation: d.c.situation };
+                    const intent = stageDesignIntent(d.c.stage, input.brand, undefined, d.c.angle, d.c.situation);
+                    const mechOk = seedRule(cand).length === 0;
+                    const brandOk = textNamesBrand(cand.text, input.brand);
+                    const dv = intent ? (await checkDesignFidelity({ candidates: [{ text: cand.text, design: intent }], meta: input.meta }))[0] : null;
+                const designOk = !intent || (!!dv?.voices && !dv?.unchecked);
+                    if (mechOk && brandOk && designOk) {
+                      d.c.text = cand.text;
+                      d.c.qtype = questionTypeOf(d.c, input.brand, input.category);
+                      d.c.spec = deriveCheckSpec(d.c, input.brand, input.competitors, input.category);
+                      delete d.c.seedFlags;
+                      dirty.add(d.u);
+                      console.warn(`pricing diversity: brand cell restored: ${cand.text.slice(0, 80)}`);
+                    } else {
+                      console.warn(`pricing diversity: brand steer rejected (${mechOk ? "" : "mech "}${brandOk ? "" : "brand "}${designOk ? "" : "design"}) - original stands`);
+                    }
+                  }
+                } catch (err) {
+                  console.error("pricing brand steer failed open:", err);
+                }
+              }
+            }
+            await Promise.all(
+              [...dirty].map((u) =>
+                store.cacheSet(unitKeys[u], JSON.stringify({ cells: resolved[u] ?? [], rules: SEED_RULES_VERSION }), stampOf(input)).catch(() => {})
+              )
+            );
+          }
+        }
+      } catch (err) {
+        passesCut = true;
+        console.error("pricing trade-off diversity pass failed open:", err);
+      }
+    }
+  };
+  const maybeRunPasses = async (): Promise<void> => {
+    if (process.env.PHRASINGS_CHECKS === "0") return;
+    try {
+      await runBatteryPasses();
+      if (!passesCut) await store.cacheSet(passesKey, "1", stampOf(input));
+      else console.warn("battery passes cut short - retried on the next serve");
+    } catch (err) {
+      console.error("battery passes failed open:", err);
+    }
+  };
+
+
   const mine: number[] = [];
   const theirs: number[] = [];
+  /** Units written provisional THIS run: the response must answer retry,
+   * not hand unjudged cells to the draft (2026-10-02 review, gap #1). */
+  const provisionalOut = new Set<number>();
+  /** Units that failed 3+ generation attempts: ship the battery without
+   * them (logged loud) rather than blocking the wizard forever. */
+  const exhausted = new Set<number>();
+  const preCells = new Map<number, GridCell[]>();
+  const triesIn = new Map<number, number>();
   {
     const raws = await Promise.all(unitKeys.map((k) => store.cacheGet(k, CACHE_TTL_MS)));
     const upgrades: Promise<unknown>[] = [];
@@ -3527,6 +3605,7 @@ export async function generateGrid(input: {
           // re-judge below would have stamped it terminal with the design
           // layer skipped forever. It re-enters generation instead.
           if (v && v.provisional) {
+            if (v.cells.length > 0) preCells.set(u, scrub(v.cells));
             mine.push(u);
             return;
           }
@@ -3574,6 +3653,17 @@ export async function generateGrid(input: {
         } else if (Date.now() - at < ORPHAN_MS) {
           theirs.push(u);
           return;
+        } else {
+          try {
+            const j = JSON.parse(raw) as { __pending?: number; tries?: number };
+            if (j.__pending === 0 && (j.tries ?? 0) >= 3) {
+              console.error(`grid unit exhausted after ${j.tries} attempts - shipping the battery without it [${units[u][0]?.stage.key} ${units[u][0]?.situation ?? "-"}]`);
+              exhausted.add(u);
+              resolved[u] = [];
+              return;
+            }
+            triesIn.set(u, j.tries ?? 0);
+          } catch { /* not a marker - claim below */ }
         }
       }
       mine.push(u);
@@ -3624,7 +3714,15 @@ export async function generateGrid(input: {
     // finished, cached result.
   };
 
-  await Promise.all([generate(mine, seen), waitForTheirs()]);
+  await Promise.all([generate(mine, seen, preCells, triesIn), waitForTheirs()]);
+  // Gap #3 (2026-10-02 review): a fully-cached serve never entered generate,
+  // so battery passes skipped by an earlier deadline or thrown labeling call
+  // were lost forever. The completion marker brings them back.
+  if (mine.length === 0 && !input.noWait && process.env.PHRASINGS_CHECKS !== "0"
+      && resolved.every((r) => r !== null && r.length > 0)) {
+    const passesDone = await store.cacheGet(passesKey, CACHE_TTL_MS).catch(() => null);
+    if (!passesDone) await maybeRunPasses();
+  }
   const all = resolved.flatMap((r) => r ?? []);
   // Ternaries, not if-guards - see composeInstrument. Unresolved units
   // (someone else still generating) mean an incomplete grid: a real
@@ -3634,11 +3732,18 @@ export async function generateGrid(input: {
   // incomplete as an unresolved one - nothing downstream re-requests cells,
   // so a planned-59-shipped-58 battery would persist through create. The
   // unit is already marked retryable; the caller's retry regenerates it.
-  return resolved.some((r) => r === null || r.length === 0) && !input.noWait
+  // A provisional unit's cells were never fully judged - in wait mode the
+  // caller gets retry, same as a hole; the retry re-judges IN PLACE (cheap,
+  // text preserved). Exhausted units are the deliberate exception: after 3
+  // failed attempts the battery ships without them, logged, so a never-
+  // producible cell cannot re-create the init stall loop.
+  return resolved.some((r, u) => (r === null || r.length === 0) && !exhausted.has(u)) && !input.noWait
     ? null
-    : all.length > 0
-      ? all
-      : null;
+    : provisionalOut.size > 0 && !input.noWait
+      ? null
+      : all.length > 0
+        ? all
+        : null;
 }
 
 /**

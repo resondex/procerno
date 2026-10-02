@@ -70,7 +70,7 @@ const Body = z.object({
     .max(30),
   count: z.number().int().min(2).max(20).default(10),
   /** All planned concerns in the battery - sibling-bleed guard. */
-  avoidConcerns: z.array(z.string().trim().max(120)).max(12).optional(),
+  avoidConcerns: z.array(z.string().trim().max(120)).max(36).optional(),
   force: z.boolean().optional(),
   /** Background warm: fill the cache but never wait on another request's
    * in-flight work - the confirm that needs results does the waiting. */

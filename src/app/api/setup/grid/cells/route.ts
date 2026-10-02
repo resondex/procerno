@@ -43,7 +43,7 @@ const Body = z.object({
         stage: z.enum(["objections", "churn_triggers", "renewal"]),
       })
     )
-    .max(12)
+    .max(36)
     .optional(),
   audience: z.string().trim().max(160).optional(),
   base: z.record(z.string(), z.unknown()),
