@@ -98,7 +98,7 @@ const CACHE_TTL_MS = 183 * 24 * 3600 * 1000;
 // VERDICT asks, premium_worth holds the tier-as-class open-choice form
 // (never one named brand's own worth) - writer rules and design lines
 // changed together.
-const STYLE_VERSION = "s24";
+const STYLE_VERSION = "s25";
 
 /** Versions the DETERMINISTIC seed-check set (everything seedRule runs:
  * checkPromptAgainstSpec + blind_missing_category + scenario_label_leak).
@@ -3059,7 +3059,11 @@ export async function generateGrid(input: {
         // per-cell by the design check - the dedup pass is the safety net
         // for LEGACY doubt cells that carry no assigned concern.
         const doubt: { u: number; c: GridCell }[] = [];
-        for (const u of idxs) for (const c of resolved[u] ?? []) if (DOUBT_CHECK_STAGES.has(c.stage) && !c.concern) doubt.push({ u, c });
+        // Battery-wide means the WHOLE battery: served units included (the
+        // s24 eviction reroll saw only its 2 fresh units, skipped the pass
+        // on length, and silently dropped Pixel's brand-named pricing cell).
+        // A rewrite of a served unit re-caches terminal like any heal.
+        for (let u = 0; u < units.length; u++) for (const c of resolved[u] ?? []) if (DOUBT_CHECK_STAGES.has(c.stage) && !c.concern) doubt.push({ u, c });
         if (doubt.length >= 2) {
           const labelConcerns = async (texts: string[]): Promise<string[]> => {
             const a = await anthropicClient();
@@ -3152,7 +3156,7 @@ export async function generateGrid(input: {
     if (process.env.PHRASINGS_CHECKS !== "0" && Date.now() <= deadlineAt) {
       try {
         const pricing: { u: number; c: GridCell }[] = [];
-        for (const u of idxs) for (const c of resolved[u] ?? []) if (c.stage === "pricing") pricing.push({ u, c });
+        for (let u = 0; u < units.length; u++) for (const c of resolved[u] ?? []) if (c.stage === "pricing") pricing.push({ u, c });
         if (pricing.length >= 2) {
           const labelShapes = async (texts: string[]): Promise<string[]> => {
             const a = await anthropicClient();
@@ -3160,7 +3164,7 @@ export async function generateGrid(input: {
               model: DESIGN_CHECK_MODEL,
               max_tokens: 1500,
               output_config: { effort: DESIGN_CHECK_EFFORT },
-              system: `Each question below asks about price or value in ${input.brand}'s market. Label each question's core price TRADE-OFF with ONE COARSE class: fee vs no-fee, free vs paid, tier vs tier, financing vs buying outright, trade-in math, total cost over time, pay up vs base - or a 2-3 word class at that same altitude. The products or spend amounts involved do not change the class: two fee-vs-no-fee questions about different cards are the SAME class. Reply with ONLY JSON: {"shapes": ["...", ...]} - one label per question, in order.`,
+              system: `Each question below asks about price or value in ${input.brand}'s market. Label each question's core price TRADE-OFF by the TWO OPTIONS being weighed: fee vs no-fee, free vs paid, monthly vs annual billing, tier vs tier, financing vs buying outright, carrier credits vs unlocked, trade-in vs resale, total cost over time, pay up vs base - or a 2-4 word options pair at that same altitude. Wording, products and spend amounts do not change the class: two questions weighing the SAME two options are the SAME class however differently phrased. Reply with ONLY JSON: {"shapes": ["...", ...]} - one label per question, in order.`,
               messages: [{ role: "user", content: texts.map((t, i) => `${i + 1}. ${t}`).join("\n") }],
             } as never));
             const text = (res as { content: { type: string; text?: string }[] }).content

@@ -254,12 +254,24 @@ export function stageDesignIntent(stage: string, brand: string, concern?: string
   // the head-to-head view scores a WINNER (2026-10-01 s22 audit, F3).
   if (stage === "comparison" && angle && angle !== "generic")
     return `Question design (head-to-head): the question weighs ${brand} against its designed counterpart and ASKS FOR THE PICK - "which would you go with", "which one", and why. A strengths tour ("where does each win", "pros and cons") that never asks which to pick does not satisfy the design.`;
+  // Awareness seeds drifted into tier comparisons and reassurance asks
+  // (2026-10-01 s24 audit F4): the asker does not know the solution space
+  // yet, and this stage reports only how often brands get named unprompted.
+  if (PRE_CATEGORY_STAGES.has(stage))
+    return `Question design (awareness): the asker describes a pain or asks what this kind of product actually does for them, ending with the ask for a way out ("how do people handle this?", "what actually fixes this?"). A premium-vs-cheap tier comparison, a which-brand ask, a specs/criteria ask, or a yes/no reassurance ask ("is this common?") does not satisfy the design.${situation ? ` The question also carries the asker's own circumstance matching: ${situation}.` : ""}`;
+  // Open-choice seeds must invite NAMED picks (s24 audit F3: a
+  // social_validation cell became a features-gush ask and named nothing).
+  const pickClause = OPEN_PICK_STAGES.has(stage)
+    ? ` The ask must invite NAMED products or brands ("which ones", "name a few worth a look") - a features-only, what-do-people-value or where-to-look ask does not satisfy the design.`
+    : "";
   // A scenario-pinned cell's SEED must carry its circumstance (audit M1
   // recurrence, 2026-10-01: two Mid-market cells read as generic feature
   // asks). Any pinned stage without a more specific design above gets this
   // yardstick; invariant cells (situation null) are untouched.
   if (situation)
-    return `Question design (circumstance): the question carries the asker's own circumstance matching this buying scenario: ${situation}. The circumstance must live in the question's own words (their size, moment or situation) - a question that would read the same with no circumstance at all does not satisfy the design. When the circumstance is a switch or move (platforms, ecosystems, providers), the DIRECTION must be stated ("from iOS to Android") - "switching platforms" or "from one platform to another" without the direction does not satisfy it, because which products get named then depends on the answer's guess. Judge by SUBSTANCE, not label restatement: the circumstance counts when the question's facts fit that scenario's buyer - it need not restate every attribute of the scenario name, and when the scenario name IS the plain buyer phrase for the circumstance ("first credit card", "replacing my everyday card") using those words is correct, not a leak. Only a scenario name in planning register must be re-voiced in the buyer's own words.`;
+    return `Question design (circumstance): the question carries the asker's own circumstance matching this buying scenario: ${situation}. The circumstance must live in the question's own words (their size, moment or situation) - a question that would read the same with no circumstance at all does not satisfy the design. When the circumstance is a switch or move (platforms, ecosystems, providers), the DIRECTION must be stated ("from iOS to Android") - "switching platforms" or "from one platform to another" without the direction does not satisfy it, because which products get named then depends on the answer's guess. Judge by SUBSTANCE, not label restatement: the circumstance counts when the question's facts fit that scenario's buyer - it need not restate every attribute of the scenario name, and when the scenario name IS the plain buyer phrase for the circumstance ("first credit card", "replacing my everyday card") using those words is correct, not a leak. Only a scenario name in planning register must be re-voiced in the buyer's own words.${pickClause}`;
+  if (pickClause)
+    return `Question design (open choice): the buyer wants NAMES.${pickClause}`;
   if (stage === "premium_worth")
     return `Question design (premium tier): the question weighs the category's premium maker(s) as a TIER against basic/store options and invites named picks - from either side. Judging one named brand's own worth does not satisfy it - that is a worry cell's job.`;
   if (!PLAN_CHECK_STAGES.has(stage)) return null;
@@ -280,6 +292,10 @@ export function stageDesignIntent(stage: string, brand: string, concern?: string
  * category-noun rule exempts them; the stage hint governs how the OWNED
  * object is named ("my phone", never "my pocket gadget"). */
 export const PRE_CATEGORY_STAGES = new Set(["problem_recognition", "category_education"]);
+
+/** Open-choice stages whose seeds must invite NAMED picks (premium_worth
+ * carries its own tier intent). */
+const OPEN_PICK_STAGES = new Set(["discovery", "shortlist", "feature_screening", "use_case", "social_validation"]);
 
 export const BLIND_STAGES = new Set([
   "problem_recognition", "category_education", "discovery", "shortlist",
