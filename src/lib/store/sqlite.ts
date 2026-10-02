@@ -1,4 +1,4 @@
-import Database from "better-sqlite3";
+import type Database from "better-sqlite3";
 import path from "path";
 import fs from "fs";
 import type {
@@ -32,7 +32,11 @@ declare global {
 
 function createDb(): Database.Database {
   fs.mkdirSync(DB_DIR, { recursive: true });
-  const db = new Database(DB_PATH);
+  // Loaded lazily: prod runs on Postgres, and next.config.ts keeps the native
+  // add-on out of the deployed functions, so a top-level import would crash.
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const BetterSqlite = require("better-sqlite3") as typeof Database;
+  const db = new BetterSqlite(DB_PATH);
   db.pragma("journal_mode = WAL");
   db.exec(`
     CREATE TABLE IF NOT EXISTS projects (
