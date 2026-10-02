@@ -98,7 +98,7 @@ const CACHE_TTL_MS = 183 * 24 * 3600 * 1000;
 // VERDICT asks, premium_worth holds the tier-as-class open-choice form
 // (never one named brand's own worth) - writer rules and design lines
 // changed together.
-const STYLE_VERSION = "s18";
+const STYLE_VERSION = "s19";
 
 /** Versions the DETERMINISTIC seed-check set (everything seedRule runs:
  * checkPromptAgainstSpec + blind_missing_category + scenario_label_leak).
@@ -1931,7 +1931,9 @@ const CELL_WRITER_SYSTEM =
           "move PLAINLY with no reason given: a leave-reason that says what " +
           "the rival lacks or who it fails ('too lightweight for our dev " +
           "team') steers the answer toward one kind of replacement and " +
-          "poisons the measurement. That plainness is a SHAPE, not a " +
+          "poisons the measurement - and so does the asker's team or segment " +
+          "identity ('for our dev team'): the category word is the ONLY " +
+          "anchor. That plainness is a SHAPE, not a " +
           "sentence to copy: vary the voice across these cells ('Done with " +
           "my iPhone - what phone should I get instead?', 'leaving " +
           "monday.com. name a few solid alternatives to try'), write 'I' " +
@@ -2001,7 +2003,10 @@ const CELL_WRITER_SYSTEM =
           "total-cost math, trade-in or financing, or the category's price " +
           "structure (paid vs free, fee vs no-fee, financing vs buying " +
           "outright, paying up vs the base tier) - NEVER 'which product is " +
-          "the best value for my budget' (that is discovery's question). " +
+          "the best value for my budget' (that is discovery's question) - a " +
+          "budget circumstance makes the pricing cell the BRAND's tier " +
+          "question ('the cheaper line at 450, or pay up for the regular " +
+          "one?'), never an open which-phone ask. " +
           "Financing or trade-in numbers are PRICES, not usage: say what " +
           "the asker does with it or how long they keep it too. VARY the " +
           "trade-off across a battery's pricing cells - never four cells " +
