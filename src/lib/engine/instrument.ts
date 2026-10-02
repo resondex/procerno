@@ -114,7 +114,7 @@ const STYLE_VERSION = "s29";
  * 7's unversioned serve-time re-check had no terminal state). Bump when
  * a deterministic check changes meaning; bumping costs one free re-judge
  * per unit, and model calls only for units the new rules reject. */
-export const SEED_RULES_VERSION = "r9"; // r4 (2026-10-01): r2 calendar-year/60-word/segment-vocab; r3 category-naming labels exempt from substring leak; r4 'standardization' in segment vocabulary; r5 directionless-switch string check; r6 punctuation-blind label-leak matching; r7-r8 switch direction detected by absence (no OS, no roster brand near switch vocabulary); cheaper bolt-on token on non-price concerns
+export const SEED_RULES_VERSION = "r10"; // r4 (2026-10-01): r2 calendar-year/60-word/segment-vocab; r3 category-naming labels exempt from substring leak; r4 'standardization' in segment vocabulary; r5 directionless-switch string check; r6 punctuation-blind label-leak matching; r7-r8 switch direction detected by absence (no OS, no roster brand near switch vocabulary); cheaper bolt-on token on non-price concerns
 
 /** Brand forms that double as ordinary English words: only these demand a
  * capitalized occurrence to count as naming the brand ("2-3 services max"
@@ -3426,6 +3426,16 @@ export async function generateGrid(input: {
       out.push({
         check: "seed_switch_direction" as const,
         detail: `"${sw[0].trim()}" never says which way - state the direction in platform words ("from iOS to Android"), or every answer guesses and the guess decides which products get named`,
+      });
+    // r10: a multi-ask pile-up is countable - the brand-steer regen packed
+    // FOUR trade-offs into one Pixel pricing cell (under the word ceiling,
+    // over everything else). Two question marks is natural chat ("which
+    // one? and why?" - 21 of 165 current seeds); three or more is a
+    // questionnaire. Calibrated: catches exactly that one cell.
+    if ((c.text.match(/\?/g) ?? []).length >= 3)
+      out.push({
+        check: "seed_multi_ask" as const,
+        detail: `the prompt asks ${(c.text.match(/\?/g) ?? []).length} separate questions - one prompt asks at most two or three things, and one circumstance carries ONE core ask`,
       });
     // r8: the "cheaper" bolt-on on a non-price concern keeps re-rolling in
     // (third recurrence) - it is a token, not a judgment. Price concerns
