@@ -98,7 +98,7 @@ const CACHE_TTL_MS = 183 * 24 * 3600 * 1000;
 // VERDICT asks, premium_worth holds the tier-as-class open-choice form
 // (never one named brand's own worth) - writer rules and design lines
 // changed together.
-const STYLE_VERSION = "s28";
+const STYLE_VERSION = "s29";
 
 /** Versions the DETERMINISTIC seed-check set (everything seedRule runs:
  * checkPromptAgainstSpec + blind_missing_category + scenario_label_leak).
@@ -2069,9 +2069,11 @@ const CELL_WRITER_SYSTEM =
           "never contorted around ('the thing in my pocket') - and no " +
           "product term only one roster brand is known for ('charge card' " +
           "points every answer at American Express).\n" +
-          "- problem_recognition describes the pain and ends asking for a " +
-          "way out ('how do people handle this?', 'what actually fixes " +
-          "this?'). category_education asks what this kind of product " +
+          "- problem_recognition speaks as someone who does NOT yet have " +
+          "this kind of product (an owner doubting what they pay for is a " +
+          "worry cell, not awareness), describes the pain, and ends " +
+          "asking for a way out ('how do people handle this?', 'what " +
+          "actually fixes this?'). category_education asks what this kind of product " +
           "actually does and how people use it - nothing is broken there, " +
           "so never 'what fixes this'. Neither stage asks a yes/no " +
           "reassurance question ('is this a common problem?'), a " +
@@ -2087,7 +2089,10 @@ const CELL_WRITER_SYSTEM =
           "brand names. 'Switching platforms', 'moving between ecosystems' " +
           "and 'from one platform to another' are NOT directions: every " +
           "answer then guesses which way, and the guess decides which " +
-          "products get named.\n" +
+          "products get named. The direction must leave the CLIENT brand " +
+          "an eligible answer - a switch toward a platform the client " +
+          "doesn't run on (toward iOS, on an Android brand's study) " +
+          "excludes it by construction.\n" +
           "- Never a calendar year in a prompt ('in 2026'): trackers re-ask " +
           "prompts for years and a dated prompt goes stale - say 'right " +
           "now'.\n" +
