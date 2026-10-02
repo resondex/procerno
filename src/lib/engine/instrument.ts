@@ -11,6 +11,7 @@ import {
 } from "./battery_checks";
 export { MUST_NAME_STAGES };
 import { store } from "../store";
+import { brandAliasForms } from "./brand_aliases";
 import type { CacheMeta } from "../types";
 
 /**
@@ -115,7 +116,7 @@ const STYLE_VERSION = "s29";
  * 7's unversioned serve-time re-check had no terminal state). Bump when
  * a deterministic check changes meaning; bumping costs one free re-judge
  * per unit, and model calls only for units the new rules reject. */
-export const SEED_RULES_VERSION = "r12"; // r4 (2026-10-01): r2 calendar-year/60-word/segment-vocab; r3 category-naming labels exempt from substring leak; r4 'standardization' in segment vocabulary; r5 directionless-switch string check; r6 punctuation-blind label-leak matching; r7-r8 switch direction detected by absence (no OS, no roster brand near switch vocabulary); cheaper bolt-on token on non-price concerns
+export const SEED_RULES_VERSION = "r13"; // r13 (2026-10-02 cold-walk audit): verb-less stated prices ("Gold at 250"); word-anchored price-concern test + money bolt-ons; brand checks read dictionary alias forms ("amex") and case-guard category-word roster tokens ("issues", "chase", "bank"); a word of one rival's name inside another's full name never names it ("Bank of America" is not "U.S. Bank"); category-word tokens are containment-aware ("phone" in smartphones) and a word split out of a multi-word name counts only in the label's casing, not sentence-initial ("Nothing" of "Nothing Phone"). r4 (2026-10-01): r2 calendar-year/60-word/segment-vocab; r3 category-naming labels exempt from substring leak; r4 'standardization' in segment vocabulary; r5 directionless-switch string check; r6 punctuation-blind label-leak matching; r7-r8 switch direction detected by absence (no OS, no roster brand near switch vocabulary); cheaper bolt-on token on non-price concerns
 
 /** Brand forms that double as ordinary English words: only these demand a
  * capitalized occurrence to count as naming the brand ("2-3 services max"
@@ -767,8 +768,8 @@ export async function classifyJourney(input: {
   const tool = blocks.find((b) => b.type === "tool_use");
   if (tool?.input) return validated(tool.input);
   const text = blocks.filter((b) => b.type === "text").map((b) => b.text ?? "").join("");
-  const m = text.match(/\{[\s\S]*\}/);
-  if (m) return validated(JSON.parse(m[0]));
+  const m = firstJsonObject(text);
+  if (m) return validated(JSON.parse(m));
   throw new Error("journey classification returned no tool call");
 }
 
@@ -1669,7 +1670,7 @@ export async function checkDesignFidelity(input: {
           .trim().replace(/^```(?:json)?\s*/, "").replace(/\s*```$/, "");
         // Opus occasionally wraps the JSON in prose - take the object, not
         // the whole reply (the classifyJourney pattern).
-        const j = JSON.parse(text.match(/\{[\s\S]*\}/)?.[0] ?? text) as { voices_design: boolean; reason?: string };
+        const j = JSON.parse(firstJsonObject(text) ?? text) as { voices_design: boolean; reason?: string };
         const out = { voices: !!j.voices_design, reason: j.reason ?? "" };
         await store.cacheSet(key, JSON.stringify(out), input.meta);
         return out;
@@ -2580,6 +2581,10 @@ export async function generateGrid(input: {
   // Class angles read the FULL typed roster (they are upstream entries by
   // definition) before the same-seat narrowing below.
   const classAngles = classAnglesOf(input.competitors, input.rosterRoles, input.rosterClasses);
+  // r13: the dictionary seed's alias forms ("amex" for American Express),
+  // read from the FULL roster so the cache key is the one project creation
+  // reuses - every brand check below speaks the same vocabulary.
+  const aliasForms = await brandAliasForms([input.brand, ...input.competitors]);
   input = { ...input, competitors: sameSeatOf(input.competitors, input.rosterRoles) };
   const rivals = angleRivals(input.competitors);
   const allLabels = input.scenarios.map((s) => s.label);
@@ -2702,7 +2707,7 @@ export async function generateGrid(input: {
       const text = humanize(c.text);
       const spec = c.spec && c.spec.seed === text.trim()
         ? c.spec
-        : deriveCheckSpec({ ...c, text }, input.brand, input.competitors, input.category);
+        : deriveCheckSpec({ ...c, text }, input.brand, input.competitors, input.category, aliasForms);
       return { ...c, text, spec };
     });
   /** A unit's stored value: `{cells, rules}` since the terminal-state era
@@ -2923,7 +2928,7 @@ export async function generateGrid(input: {
             ...(row.classPhrase ? { classPhrase: row.classPhrase, classBrand: row.classBrand } : {}),
             text: humanize(c.text.trim()),
           };
-          cell.qtype = questionTypeOf(cell, input.brand, input.category);
+          cell.qtype = questionTypeOf(cell, input.brand, input.category, aliasForms);
           const list = produced.get(u);
           if (list) list.push(cell);
           else produced.set(u, [cell]);
@@ -3158,8 +3163,8 @@ export async function generateGrid(input: {
         // the final healed seed: everything downstream (paraphrase
         // signature, mechanical battery, design check) reads it.
         flat.forEach((c) => {
-          c.qtype = questionTypeOf(c, input.brand, input.category);
-          c.spec = deriveCheckSpec(c, input.brand, input.competitors, input.category);
+          c.qtype = questionTypeOf(c, input.brand, input.category, aliasForms);
+          c.spec = deriveCheckSpec(c, input.brand, input.competitors, input.category, aliasForms);
         });
         // TERMINAL VERDICT (SEED_RULES_VERSION): whatever the one steered
         // regen per check could not fix ships FLAGGED - the violation
@@ -3237,11 +3242,12 @@ export async function generateGrid(input: {
     stage: string; angle: string; text: string; situation?: string | null; concern?: string | null;
     classPhrase?: string | null; classBrand?: string | null;
   }) => {
-    const spec = deriveCheckSpec(c, input.brand, input.competitors, input.category);
+    const spec = deriveCheckSpec(c, input.brand, input.competitors, input.category, aliasForms);
     const out = checkPromptAgainstSpec({
       text: c.text,
       spec,
       category: input.category,
+      extraForms: aliasForms,
     });
     // A blind SEED must speak the category's language ("my phone",
     // "tortilla chips") - three rounds of instructions failed to stop
@@ -3304,7 +3310,7 @@ export async function generateGrid(input: {
     if (
       sw &&
       !/\b(?:iOS|Android)\b/i.test(c.text) &&
-      ![input.brand, ...input.competitors].some((b) => textNamesBrand(c.text, b))
+      ![input.brand, ...input.competitors].some((b) => textNamesBrand(c.text, b, { extraForms: aliasForms[b] }))
     )
       out.push({
         check: "seed_switch_direction" as const,
@@ -3349,14 +3355,51 @@ export async function generateGrid(input: {
         });
         break;
       }
+      // r13 (2026-10-02 cold-walk audit): the verb-less form - "American
+      // Express Gold at 250 or Platinum at 695?", "Pixel A-series around
+      // 450" - slipped the verb/"$" patterns above (the writer's own pricing
+      // example still reads "the cheaper line at 450"). A product word
+      // (capitalized mid-sentence, or hyphenated like "A-series") directly
+      // followed by at/around/about/roughly and a figure is a stated price.
+      // Calibrated on 3,009 seeds from every walk: 9 hits, all stated
+      // prices; a financing rate ("at 0% for 24 months") is an offer, not
+      // a price, and stays.
+      if (!out.some((f) => f.check === "seed_states_price")) {
+        const tierPrice = /\b((?:[A-Z][A-Za-z0-9+]*|[A-Za-z0-9]+-[A-Za-z0-9]+))\s+(?:at|around|about|roughly)\s+~?\$?(?=\d)/g;
+        for (const m of c.text.matchAll(tierPrice)) {
+          const at = m.index ?? 0;
+          const pre = c.text.slice(0, at).trimEnd();
+          if (pre === "" || /[.!?:"\u201c]$/.test(pre)) continue; // sentence-initial capital is not a product word
+          const after = c.text.slice(at + m[0].length);
+          const before = c.text.slice(Math.max(0, at - 28), at);
+          if (unitAfter.test(after) || dealBefore.test(before) || planAfter.test(after) || /^\d[\d.,]*\s*%/.test(after)) continue;
+          out.push({
+            check: "seed_states_price" as const,
+            detail: `the seed states a product's price ("...${c.text.slice(at, at + m[0].length + 8).trim()}...") - prices date and every answer then starts from a false premise; name the tier or product and ASK what it costs or which nets out better (the asker's own spend, budget or a deal offered to them is circumstance and stays)`,
+          });
+          break;
+        }
+      }
     }
     // r8: the "cheaper" bolt-on on a non-price concern keeps re-rolling in
     // (third recurrence) - it is a token, not a judgment. Price concerns
     // keep their cheaper talk.
-    if (c.concern && !/price|pricey|pricing|fee|cost|expensive|afford|cheap/i.test(c.concern) && /\bcheap(?:er|est)?\b/i.test(c.text))
+    // r13 (2026-10-02 cold-walk audit): the concern test is word-anchored
+    // (unanchored "fee" matched "feel", silently exempting "Support feels
+    // slow", "Ads tier feels wrong", "Rewards feel locked-in"), and the
+    // money preamble joins "cheaper" ("worried about wasting money if they
+    // cancel shows" on a canceled-shows worry; "wastes my money", "worth
+    // paying for" from the round-4 walk). Calibrated on 544 non-price doubt
+    // cells across every walk: 5 hits, all true; plain "paying for" was
+    // rejected (it flags relationship statements, "We're paying for Jira").
+    if (
+      c.concern &&
+      !/\b(?:price[sd]?|pricey|pricing|fees?|costs?|costly|expensive|afford\w*|cheap\w*|money|value|worth)\b/i.test(c.concern) &&
+      /\bcheap(?:er|est)?\b|\bwast(?:e|es|ed|ing)\b[^.?!]{0,12}\bmoney\b|\bworth paying\b|\bfinancial(?:ly)?\b/i.test(c.text)
+    )
       out.push({
         check: "concern_price_bolt_on" as const,
-        detail: `the cell's concern is "${c.concern}" but the text bolts on a cheaper-options remark - price has its own cells, and the bolt-on muddies whose worry drove the exit`,
+        detail: `the cell's concern is "${c.concern}" but the text bolts on a money remark (cheaper options, wasting money, financial risk) - price has its own cells, and the bolt-on muddies whose worry drove the answer`,
       });
     return out;
   };
@@ -3408,7 +3451,7 @@ export async function generateGrid(input: {
             } as never));
             const text = (res as { content: { type: string; text?: string }[] }).content
               .filter((b) => b.type === "text").map((b) => b.text ?? "").join("").trim();
-            const j = JSON.parse(text.match(/\{[\s\S]*\}/)?.[0] ?? text) as { concerns?: string[] };
+            const j = JSON.parse(firstJsonObject(text) ?? text) as { concerns?: string[] };
             return (j.concerns ?? []).map((s) => String(s));
           };
           const concerns = await labelConcerns(doubt.map((d) => d.c.text));
@@ -3459,8 +3502,8 @@ export async function generateGrid(input: {
                 const designOk = !intent || (!!dv?.voices && !dv?.unchecked);
                 if (mechOk && designOk) {
                   d.c.text = cand.text;
-                  d.c.qtype = questionTypeOf(d.c, input.brand, input.category);
-                  d.c.spec = deriveCheckSpec(d.c, input.brand, input.competitors, input.category);
+                  d.c.qtype = questionTypeOf(d.c, input.brand, input.category, aliasForms);
+                  d.c.spec = deriveCheckSpec(d.c, input.brand, input.competitors, input.category, aliasForms);
                   // The swap passed the mechanical check, so any flag the
                   // original wore no longer describes this cell.
                   delete d.c.seedFlags;
@@ -3511,7 +3554,7 @@ export async function generateGrid(input: {
             } as never));
             const text = (res as { content: { type: string; text?: string }[] }).content
               .filter((b) => b.type === "text").map((b) => b.text ?? "").join("").trim();
-            const j = JSON.parse(text.match(/\{[\s\S]*\}/)?.[0] ?? text) as { shapes?: string[] };
+            const j = JSON.parse(firstJsonObject(text) ?? text) as { shapes?: string[] };
             return (j.shapes ?? []).map((s) => String(s));
           };
           const shapes = await labelShapes(pricing.map((d) => d.c.text));
@@ -3561,17 +3604,18 @@ export async function generateGrid(input: {
                 const intent = stageDesignIntent(d.c.stage, input.brand, undefined, d.c.angle, d.c.situation);
                 const judge = async (t: string) => {
                   const cand = { stage: d.c.stage, angle: d.c.angle, text: humanize(t), situation: d.c.situation };
-                  const mechOk = seedRule(cand).length === 0;
-                  const brandOk = i !== brandSteer || textNamesBrand(cand.text, input.brand);
+                  const mechFails = seedRule(cand).map((f) => f.detail);
+                  const mechOk = mechFails.length === 0;
+                  const brandOk = i !== brandSteer || textNamesBrand(cand.text, input.brand, { extraForms: aliasForms[input.brand] });
                   const verdict = intent ? (await checkDesignFidelity({ candidates: [{ text: cand.text, design: intent }], meta: input.meta }))[0] : null;
-                  return { cand, mechOk, brandOk, designOk: !intent || (!!verdict?.voices && !verdict.unchecked), reason: verdict?.reason ?? "" };
+                  return { cand, mechOk, mechFails, brandOk, designOk: !intent || (!!verdict?.voices && !verdict.unchecked), reason: verdict?.reason ?? "" };
                 };
                 let v = text2 ? await judge(text2) : null;
                 // One steered retry (s29 audit F2: rejected dedup regens made
                 // the battery converge back to the fee monoculture - the
                 // rejection reason steers the second try).
                 if (text2 && v && !(v.mechOk && v.brandOk && v.designOk) && Date.now() <= healDeadlineAt) {
-                  const why = !v.designOk ? `it did not satisfy the design: ${v.reason}` : !v.mechOk ? "it broke a mechanical rule" : `it must name ${input.brand}`;
+                  const why = !v.designOk ? `it did not satisfy the design: ${v.reason}` : !v.mechOk ? `it broke a mechanical rule: ${v.mechFails.join("; ")}` : `it must name ${input.brand}`;
                   const resR = await openaiClient().chat.completions.create({
                     model: CELLS_MODEL,
                     messages: [
@@ -3590,13 +3634,13 @@ export async function generateGrid(input: {
                 }
                 if (v && v.mechOk && v.brandOk && v.designOk) {
                   d.c.text = v.cand.text;
-                  d.c.qtype = questionTypeOf(d.c, input.brand, input.category);
-                  d.c.spec = deriveCheckSpec(d.c, input.brand, input.competitors, input.category);
+                  d.c.qtype = questionTypeOf(d.c, input.brand, input.category, aliasForms);
+                  d.c.spec = deriveCheckSpec(d.c, input.brand, input.competitors, input.category, aliasForms);
                   delete d.c.seedFlags;
                   dirty.add(d.u);
                   console.warn(`pricing trade-off diversity: healed: ${v.cand.text.slice(0, 80)}`);
                 } else {
-                  console.warn(`pricing trade-off diversity: regeneration rejected (${v ? `${v.mechOk ? "" : "mech "}${v.brandOk ? "" : "brand "}${v.designOk ? "" : "design"}` : "empty"}) - original stands`);
+                  console.warn(`pricing trade-off diversity: regeneration rejected (${v ? [v.mechOk ? "" : `mech: ${v.mechFails.join("; ")}`, v.brandOk ? "" : "brand", v.designOk ? "" : `design: ${v.reason}`].filter(Boolean).join(" | ") : "empty"}) - original stands | ${v?.cand.text.slice(0, 120) ?? ""}`);
                 }
               } catch (err) {
                 console.error("pricing diversity regeneration failed open:", err);
@@ -3604,45 +3648,65 @@ export async function generateGrid(input: {
             }));
             // At least one pricing cell names the brand - judged on the
             // FINAL post-heal texts, with its own regen when violated.
-            if (!pricing.some((d) => textNamesBrand(d.c.text, input.brand)) && Date.now() > healDeadlineAt) passesCut = true;
-            if (!pricing.some((d) => textNamesBrand(d.c.text, input.brand)) && Date.now() <= healDeadlineAt) {
+            const namesTarget = (t: string) => textNamesBrand(t, input.brand, { extraForms: aliasForms[input.brand] });
+            if (!pricing.some((d) => namesTarget(d.c.text)) && Date.now() > healDeadlineAt) passesCut = true;
+            if (!pricing.some((d) => namesTarget(d.c.text)) && Date.now() <= healDeadlineAt) {
               brandSteer = pricing.length - 1;
               const d = pricing[brandSteer];
               const row = rowFor(units[d.u] ?? [], d.c) ?? (units[d.u] ?? [])[0];
               console.warn(`pricing diversity: no cell names ${input.brand} - steering [${brandSteer}] to the brand's own math`);
               if (row) {
                 try {
-                  const res3 = await openaiClient().chat.completions.create({
-                    model: CELLS_MODEL,
-                    messages: [
-                      { role: "system", content: CELL_WRITER_SYSTEM + "Return one cell object for the plan line." },
-                      { role: "user", content:
-                          `Client brand: ${input.brand}\nCategory: ${input.category}\n` +
-                          `Rivals: ${rivals.map(primaryBrandName).join(", ")}\nAudience: ${input.audience ?? "unknown"}\n\n` +
-                          `Cell plan:\n${planLine(row, 0)}\n` +
-                          `   [none of this battery's pricing cells names ${input.brand}: THIS cell must NAME ${input.brand} and reason about its own price math - its tiers or lines against each other, its fee vs what it returns, its financing or trade-in - in this circumstance. ` +
-                          `Do not reuse this wording: "${d.c.text}"]` },
-                    ],
-                    response_format: { type: "json_schema", json_schema: { name: "grid_cells", strict: true, schema: CELLS_SCHEMA } },
-                  });
-                  const text3 = (JSON.parse(res3.choices[0]?.message?.content ?? "{}") as { cells?: { text?: string }[] }).cells?.[0]?.text?.trim();
-                  if (text3) {
+                  // Two attempts (2026-10-02 round-4 audit N1: one rejected
+                  // steer left the Pixel battery permanently without a
+                  // brand-named pricing cell, invisible at the gate - the
+                  // pass still marked itself complete). The retry is told the
+                  // exact rule it broke; a still-failing steer flags the
+                  // cell so the gap reaches the human.
+                  let lastWhy = "";
+                  let restored = false;
+                  for (let attempt = 0; attempt < 2 && !restored; attempt++) {
+                    if (attempt > 0 && Date.now() > healDeadlineAt) break;
+                    const res3 = await openaiClient().chat.completions.create({
+                      model: CELLS_MODEL,
+                      messages: [
+                        { role: "system", content: CELL_WRITER_SYSTEM + "Return one cell object for the plan line." },
+                        { role: "user", content:
+                            `Client brand: ${input.brand}\nCategory: ${input.category}\n` +
+                            `Rivals: ${rivals.map(primaryBrandName).join(", ")}\nAudience: ${input.audience ?? "unknown"}\n\n` +
+                            `Cell plan:\n${planLine(row, 0)}\n` +
+                            `   [none of this battery's pricing cells names ${input.brand}: THIS cell must NAME ${input.brand} and reason about its own price math - its tiers or lines against each other, its fee vs what it returns, its financing or trade-in - in this circumstance. ` +
+                            `Do not reuse this wording: "${d.c.text}"` +
+                            (lastWhy ? `. The last attempt was rejected because ${lastWhy}` : "") + `]` },
+                      ],
+                      response_format: { type: "json_schema", json_schema: { name: "grid_cells", strict: true, schema: CELLS_SCHEMA } },
+                    });
+                    const text3 = (JSON.parse(res3.choices[0]?.message?.content ?? "{}") as { cells?: { text?: string }[] }).cells?.[0]?.text?.trim();
+                    if (!text3) { lastWhy = "it came back empty"; continue; }
                     const cand = { stage: d.c.stage, angle: d.c.angle, text: humanize(text3), situation: d.c.situation };
                     const intent = stageDesignIntent(d.c.stage, input.brand, undefined, d.c.angle, d.c.situation);
-                    const mechOk = seedRule(cand).length === 0;
-                    const brandOk = textNamesBrand(cand.text, input.brand);
+                    const mechFails = seedRule(cand).map((f) => f.detail);
+                    const brandOk = namesTarget(cand.text);
                     const dv = intent ? (await checkDesignFidelity({ candidates: [{ text: cand.text, design: intent }], meta: input.meta }))[0] : null;
-                const designOk = !intent || (!!dv?.voices && !dv?.unchecked);
-                    if (mechOk && brandOk && designOk) {
+                    const designOk = !intent || (!!dv?.voices && !dv?.unchecked);
+                    if (mechFails.length === 0 && brandOk && designOk) {
                       d.c.text = cand.text;
-                      d.c.qtype = questionTypeOf(d.c, input.brand, input.category);
-                      d.c.spec = deriveCheckSpec(d.c, input.brand, input.competitors, input.category);
+                      d.c.qtype = questionTypeOf(d.c, input.brand, input.category, aliasForms);
+                      d.c.spec = deriveCheckSpec(d.c, input.brand, input.competitors, input.category, aliasForms);
                       delete d.c.seedFlags;
                       dirty.add(d.u);
+                      restored = true;
                       console.warn(`pricing diversity: brand cell restored: ${cand.text.slice(0, 80)}`);
                     } else {
-                      console.warn(`pricing diversity: brand steer rejected (${mechOk ? "" : "mech "}${brandOk ? "" : "brand "}${designOk ? "" : "design"}) - original stands`);
+                      lastWhy = !designOk ? `it did not satisfy the design: ${dv?.reason ?? ""}` : mechFails.length ? `it broke a mechanical rule: ${mechFails.join("; ")}` : `it must name ${input.brand}`;
+                      console.warn(`pricing diversity: brand steer rejected (${lastWhy}) | ${cand.text.slice(0, 120)}`);
                     }
+                  }
+                  if (!restored) {
+                    const flag = `no pricing cell names ${input.brand} - the engine could not steer one there (${lastWhy || "out of time"}); rewrite this cell to name ${input.brand} and weigh its own tiers, fee or price math against the asker's usage`;
+                    d.c.seedFlags = [...(d.c.seedFlags ?? []).filter((f) => !f.startsWith("no pricing cell names")), flag];
+                    dirty.add(d.u);
+                    console.warn(`pricing diversity: brand steer failed - flagged [${brandSteer}] for the gate`);
                   }
                 } catch (err) {
                   console.error("pricing brand steer failed open:", err);
@@ -3916,6 +3980,10 @@ export async function regenerateCell(input: {
   meta?: CacheMeta;
 }): Promise<{ text: string; spec: CellCheckSpec } | null> {
   tagCosts({ purpose: "setup:cells" });
+  // r13: the dictionary seed's alias forms ("amex" for American Express),
+  // read from the FULL roster so the cache key is the one project creation
+  // reuses - every brand check below speaks the same vocabulary.
+  const aliasForms = await brandAliasForms([input.brand, ...input.competitors]);
   input = { ...input, competitors: sameSeatOf(input.competitors, input.rosterRoles) };
   // Every alternate draw carries its own check-spec, derived from the
   // cell's design and the drawn seed - the same contract as generateGrid.
@@ -3924,7 +3992,7 @@ export async function regenerateCell(input: {
     deriveCheckSpec({
       stage: input.cell.stage, angle: input.cell.angle, text, concern: input.cell.concern,
       ...(input.cell.classPhrase ? { classPhrase: input.cell.classPhrase, classBrand: input.cell.classBrand } : {}),
-    }, input.brand, input.competitors, input.category);
+    }, input.brand, input.competitors, input.category, aliasForms);
   const rivals = angleRivals(input.competitors);
   const stages = participationMask(input.base, input.scenarios);
   const st = stages.find((x) => x.key === input.cell.stage);
@@ -4009,7 +4077,7 @@ export async function regenerateCell(input: {
     if (avoidNorm.some((t) => t.toLowerCase() === cand.toLowerCase())) return null;
     const problems =
       process.env.PHRASINGS_CHECKS !== "0"
-        ? checkPromptAgainstSpec({ text: cand, spec: specFor(cand), category: input.category }).map((m) => m.detail)
+        ? checkPromptAgainstSpec({ text: cand, spec: specFor(cand), category: input.category, extraForms: aliasForms }).map((m) => m.detail)
         : [];
     // Alternate draws honor the blind category-noun rule too - this path
     // skipped it, which is how a "pocket camera" seed survived redraws.
@@ -4042,6 +4110,30 @@ export async function regenerateCell(input: {
  * longer word - "purchases" must not read as the rival "Chase", nor
  * "discovering" as Discover. Boundaries are non-alphanumeric, so
  * "jira's" and "Chase Sapphire" match while "purchase" cannot. */
+/** The first complete top-level JSON object in a reply (string-aware brace
+ * scan). The greedy /\{[\s\S]*\}/ spanned two objects when the checker
+ * emitted a second one, and the parse threw (2026-10-02 cold walk: a
+ * Netflix drive went provisional on "Unexpected non-whitespace character
+ * after JSON"). */
+export function firstJsonObject(s: string): string | null {
+  const start = s.indexOf("{");
+  if (start < 0) return null;
+  let depth = 0, inStr = false, esc = false;
+  for (let i = start; i < s.length; i++) {
+    const ch = s[i];
+    if (inStr) {
+      if (esc) esc = false;
+      else if (ch === "\\") esc = true;
+      else if (ch === '"') inStr = false;
+      continue;
+    }
+    if (ch === '"') inStr = true;
+    else if (ch === "{") depth++;
+    else if (ch === "}" && --depth === 0) return s.slice(start, i + 1);
+  }
+  return null;
+}
+
 /** A brand label's speakable name: "Amazon (beauty)" -> "Amazon". The
  * parenthetical is a DISPLAY disambiguator - buyers never type it and
  * engines never say it, so any text shown to a model uses this form. */
@@ -4207,6 +4299,10 @@ export async function generatePhrasings(input: {
   // Same-seat rivals only (see generateGrid): the writer's rivals, the
   // signature filter, the spec brand sets, checkBattery's scope and the
   // cache keys all read this list. No roles = the input list itself.
+  // r13: the dictionary seed's alias forms ("amex" for American Express),
+  // read from the FULL roster so the cache key is the one project creation
+  // reuses - every brand check below speaks the same vocabulary.
+  const aliasForms = await brandAliasForms([input.brand, ...input.competitors]);
   input = { ...input, competitors: sameSeatOf(input.competitors, input.rosterRoles) };
   const want = Math.max(0, input.count - 1);
   if (want === 0 || input.cells.length === 0) return input.cells.map(() => []);
@@ -4590,7 +4686,7 @@ export async function generatePhrasings(input: {
         // a blind seed that names a brand is not a paraphrase, it is a leak.
         // Spec cells: every required brand named (tolerant), no forbidden
         // brand named (strict) - the design, not the seed's spelling.
-        if (spec ? !checkCandidateSignature(text, spec, { category: input.category }).ok : sigOf(text) !== sig) {
+        if (spec ? !checkCandidateSignature(text, spec, { category: input.category, extraForms: aliasForms }).ok : sigOf(text) !== sig) {
           culls.sig++;
           continue;
         }
@@ -4761,6 +4857,7 @@ export async function generatePhrasings(input: {
           // upstream brands are out of scope by TYPE (free vocabulary).
           competitors: input.competitors,
           category: input.category,
+          extraForms: aliasForms,
           cells: cellIdxs.map((j) => ({
             stage: subset[j].stage, angle: subset[j].angle, text: subset[j].text,
             phrasings: got[j].map((ph) => ph.text),

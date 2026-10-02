@@ -1,3 +1,4 @@
+import { brandAliasForms } from "@/lib/engine/brand_aliases";
 import { NextResponse } from "next/server";
 import { tagSetupFromRequest } from "@/lib/cost_log";
 import { z } from "zod";
@@ -76,6 +77,9 @@ export async function POST(req: Request) {
   }
   // Typed roster: every check below scopes to the SAME-SEAT rivals -
   // upstream brands are free vocabulary (no roles = the full list).
+  // r13: the same alias vocabulary generation checks with ("amex"), read
+  // from the full roster (the dictionary seed's cache key).
+  const aliasForms = await brandAliasForms([parsed.data.brand, ...parsed.data.competitors]);
   const competitors = sameSeatOf(parsed.data.competitors, parsed.data.rosterRoles);
   // Spec-era candidates get their cell's design re-derived from the seed
   // (the edited text itself for a seed edit). A seed is judged against
@@ -91,7 +95,7 @@ export async function POST(req: Request) {
         stage: c.stageKey, angle: c.angle, text: seedText,
         ...(c.classPhrase ? { classPhrase: c.classPhrase, classBrand: c.classBrand } : {}),
       },
-      parsed.data.brand, competitors, parsed.data.category
+      parsed.data.brand, competitors, parsed.data.category, aliasForms
     );
   });
   const withDesign = parsed.data.candidates
@@ -146,11 +150,11 @@ export async function POST(req: Request) {
     if (!c.stageKey) return;
     const spec = specs[i];
     const mech = spec
-      ? checkPromptAgainstSpec({ text: c.text, spec, category: parsed.data.category })
+      ? checkPromptAgainstSpec({ text: c.text, spec, category: parsed.data.category, extraForms: aliasForms })
       : checkPromptBrandRule({
           text: c.text, stage: c.stageKey, angle: c.angle,
           brand: parsed.data.brand, competitors,
-          category: parsed.data.category,
+          category: parsed.data.category, extraForms: aliasForms,
         });
     if (mech.length > 0) {
       const v = verdicts[i];

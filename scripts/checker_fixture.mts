@@ -261,6 +261,69 @@ const AMEX_V = ["Chase", "Capital One", "Visa", "Discover"];
   expect("a stale carried spec is re-derived, never trusted", re?.requiredBrands.includes("Netflix"));
   expect("no carried spec = legacy path (null)", bc.resolveCellSpec({ stage: "renewal", angle: "generic", text: "x" }, "Netflix", COMP.Netflix) === null);
 }
+{
+  // (r13, 2026-10-02 cold-walk audit) category-word roster tokens are
+  // case-guarded: "import issues" does not name "GitHub Issues / Projects"
+  // (one Jira seed was flagged and another rewritten to drop "issues"),
+  // "my bank" does not name Bank of America - capitalized they still do.
+  const JR = ["ClickUp", "Asana", "GitHub Issues / Projects", "Azure DevOps", "Linear"];
+  const blindJ = specOf({ stage: "feature_screening", angle: "generic", text: "Which project management software can import issues with full history? Name a few." },
+    "Jira", JR, CAT.jira);
+  const jb = bc.checkPromptAgainstSpec({ text: blindJ.seed, spec: blindJ, category: CAT.jira });
+  expect("r13: 'import issues' in a blind Jira seed names no rival", jb.length === 0, jb);
+  const jb2 = bc.checkPromptAgainstSpec({ text: "Is GitHub Issues enough, or which project management software would you pick?", spec: blindJ, category: CAT.jira });
+  expect("r13: 'GitHub Issues' still names the rival", jb2.some((x: any) => x.check === "blind_names_brand"), jb2);
+  const jb3 = bc.checkPromptAgainstSpec({ text: "Our devops team needs a linear flow from backlog to release - which project management software fits?", spec: blindJ, category: CAT.jira });
+  expect("r13: lowercase 'devops' / 'linear' are not Azure DevOps / Linear", jb3.length === 0, jb3);
+  const jb4 = bc.checkPromptAgainstSpec({ text: "Is Linear better than the rest of the project management software out there?", spec: blindJ, category: CAT.jira });
+  expect("r13: capitalized 'Linear' is the rival", jb4.some((x: any) => x.check === "blind_names_brand"), jb4);
+  const AX = ["Chase", "Capital One", "Discover", "Citi", "Bank of America"];
+  const blindA = specOf({ stage: "discovery", angle: "generic", text: "Which credit cards should I look at for groceries?" }, "American Express", AX, CAT["American Express"]);
+  const ab = bc.checkPromptAgainstSpec({ text: "My bank keeps pushing its own credit cards, but I want to discover options that chase grocery points. Which should I look at?", spec: blindA, category: CAT["American Express"] });
+  expect("r13: 'my bank' / 'discover' / 'chase' lowercase name no issuer", ab.length === 0, ab);
+  const ab2 = bc.checkPromptAgainstSpec({ text: "As an American who travels abroad, which credit cards should I look at?", spec: blindA, category: CAT["American Express"] });
+  expect("r13: 'American' alone does not name American Express", ab2.length === 0, ab2);
+  // Alias forms: "Amex" names American Express in a must-name seed and
+  // leaks in a blind one, once the dictionary's alias forms reach the check.
+  const mustA = specOf({ stage: "renewal", angle: "generic", text: "My Amex annual fee just hit. Keep it another year or cancel?" }, "American Express", AX, CAT["American Express"]);
+  const ma = bc.checkPromptAgainstSpec({ text: mustA.seed, spec: mustA, category: CAT["American Express"], extraForms: FORMS });
+  expect("r13: 'Amex' satisfies must-name with alias forms", ma.length === 0, ma);
+  const ab3 = bc.checkPromptAgainstSpec({ text: "Is Amex or something else the best credit card for groceries?", spec: blindA, category: CAT["American Express"], extraForms: FORMS });
+  expect("r13: 'Amex' in a blind seed is a leak with alias forms", ab3.some((x: any) => x.check === "blind_names_brand"), ab3);
+  const pr = bc.deriveCheckSpec({ stage: "pricing", angle: "generic", text: "Is my Amex Gold worth it at my grocery spend, or a no-fee card?" }, "American Express", AX, CAT["American Express"], FORMS);
+  expect("r13: a pricing seed about 'my Amex' types within_brand with alias forms", pr.qtype === "within_brand", pr.qtype);
+  // A word of one rival's name inside another's full name never names it:
+  // "Bank of America" is not "U.S. Bank" (round-2 cold walk).
+  const AX2 = ["Chase", "Bank of America", "U.S. Bank", "Wells Fargo"];
+  const cmp = specOf({ stage: "comparison", angle: "Bank of America", text: "American Express or Bank of America for credit cards: what's your pick, and why?" }, "American Express", AX2, CAT["American Express"]);
+  const cb = bc.checkPromptAgainstSpec({ text: cmp.seed, spec: cmp, category: CAT["American Express"] });
+  expect("r13: 'Bank of America' does not also name 'U.S. Bank'", cb.length === 0, cb);
+  const cb2 = bc.checkPromptAgainstSpec({ text: "American Express, Bank of America or U.S. Bank: what's your pick?", spec: cmp, category: CAT["American Express"] });
+  expect("r13: 'U.S. Bank' named outright is still a leak", cb2.some((x: any) => x.check === "comparison_names_extra_rival"), cb2);
+  // Everyday-word names (round-3 cold walk): "Nothing Phone" on a
+  // smartphones study - "phone" is category vocabulary, "Nothing" counts
+  // only in the label's casing and never as a sentence's first word.
+  const PX = ["Apple iPhone", "Samsung Galaxy", "OnePlus", "Nothing Phone"];
+  const blindP = specOf({ stage: "use_case", angle: "generic", text: "My old phone is laggy. Which phones would you pick?" }, "Google Pixel", PX, CAT["Google Pixel"]);
+  const p1 = bc.checkPromptAgainstSpec({ text: "My old phone is laggy and nothing feels smooth. Which phones would you pick?", spec: blindP, category: CAT["Google Pixel"] });
+  expect("r13: 'phone' / lowercase 'nothing' name no rival", p1.length === 0, p1);
+  const p2 = bc.checkPromptAgainstSpec({ text: "Nothing beats a long battery. Which phones would you pick?", spec: blindP, category: CAT["Google Pixel"] });
+  expect("r13: sentence-initial 'Nothing' is not the brand", p2.length === 0, p2);
+  const p3 = bc.checkPromptAgainstSpec({ text: "Is the Nothing Phone any good, or which phones would you pick?", spec: blindP, category: CAT["Google Pixel"] });
+  expect("r13: 'Nothing Phone' named outright is a leak", p3.some((x: any) => x.check === "blind_names_brand"), p3);
+  const p4 = bc.checkPromptAgainstSpec({ text: "Thinking about a Galaxy or something from Nothing. Which phones would you pick?", spec: blindP, category: CAT["Google Pixel"] });
+  expect("r13: mid-sentence 'Nothing' and 'Galaxy' are leaks", p4.some((x: any) => x.check === "blind_names_brand" && /Nothing Phone/.test(x.detail) || /Samsung/.test(x.detail)), p4);
+  const p5 = bc.checkPromptAgainstSpec({ text: "been on my iphone forever, which phones would you pick?", spec: blindP, category: CAT["Google Pixel"] });
+  expect("r13: lowercase 'iphone' (alias) still leaks", p5.some((x: any) => x.check === "blind_names_brand"), p5);
+  const PX1 = ["Apple iPhone", "Samsung Galaxy", "Nothing"];
+  const blindP1 = specOf({ stage: "use_case", angle: "generic", text: "My old phone is laggy. Which phones would you pick?" }, "Google Pixel", PX1, CAT["Google Pixel"]);
+  const p6 = bc.checkPromptAgainstSpec({ text: "Nothing fancy, my old phone just lags. Which phones would you pick?", spec: blindP1, category: CAT["Google Pixel"] });
+  const p7 = bc.checkPromptAgainstSpec({ text: "I need nothing fancy. Which phones would you pick?", spec: blindP1, category: CAT["Google Pixel"] });
+  expect("r13: one-word rival 'Nothing' - lowercase 'nothing' is not the brand", p7.length === 0, p7);
+  const p8 = bc.checkPromptAgainstSpec({ text: "Is a phone from Nothing worth it, or which phones would you pick?", spec: blindP1, category: CAT["Google Pixel"] });
+  expect("r13: one-word rival 'Nothing' - capitalized mid-sentence is a leak", p8.some((x: any) => x.check === "blind_names_brand"), p8);
+  console.log("   note r13 residual: sentence-initial 'Nothing fancy' reads as the one-word rival:", JSON.stringify(p6));
+}
 console.log(`5. spec era: ${fails === 0 ? "ALL PASS" : `${fails} FAILURE(S)`}`);
 
 // =====================================================================

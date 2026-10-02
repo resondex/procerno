@@ -153,9 +153,13 @@ const STAGE_TYPE: Record<string, QuestionType> = {
  * keep-or-leave doubt; a rival's cell = open choice with a prompted rival).
  * Advocacy's critic-quoting cells type as doubt at labeling time via their
  * design lines; the stored default is settled_customer. */
-export function questionTypeOf(cell: { stage: string; angle: string; text: string }, brand: string, category?: string): QuestionType {
+export function questionTypeOf(
+  cell: { stage: string; angle: string; text: string }, brand: string, category?: string,
+  /** Dictionary alias forms per brand (r13): a pricing seed about "my Amex" is within-brand. */
+  extraForms?: Record<string, string[]>
+): QuestionType {
   if (cell.stage === "pricing")
-    return textNamesBrand(cell.text, brand, { excludeTokens: new Set(key(category ?? "").split(" ").filter(Boolean)) })
+    return textNamesBrand(cell.text, brand, { extraForms: extraForms?.[brand], excludeTokens: new Set(key(category ?? "").split(" ").filter(Boolean)) })
       ? "within_brand" : "open_choice";
   if (cell.stage === "alternatives")
     return cell.angle === "defensive" ? "doubt" : "open_choice";
@@ -235,7 +239,7 @@ export function stageDesignIntent(stage: string, brand: string, concern?: string
     // examples were fee-shaped and the checker refused a legitimate
     // financing-vs-unlocked trade-off while "best value phone for my
     // budget" discovery asks slipped into pricing cells).
-    return `Question design (value math): the question reasons about a price/value TRADE-OFF in ${brand}'s market, WITH the asker's usage or situation as an input, leaving the verdict to the answer - either naming ${brand} (its tiers, its fee or total-cost math, trade-in or financing on it) or generic to the category's price structure (paid vs free, fee vs no-fee, financing vs buying outright, paying up for a higher tier vs the base). Financing, trade-in or price figures are PRICES, not usage: the asker's own usage (what they do with it, how long they keep it, what they spend on what) must also be present. The question ASKS what things cost - it never states a product's price or fee ("Premium is $23"), which is the writer's dated knowledge and a false premise; the asker's own spend, budget or an offer made to them is circumstance and belongs. A "which product is the best value for my budget" ask is an open-choice question, not pricing, and does not satisfy the design; a bare "is it worth it?" with no usage inputs is a doubt; presupposing the verdict ("a ripoff") is neither.`;
+    return `Question design (value math): the question reasons about a price/value TRADE-OFF in ${brand}'s market, WITH the asker's usage or situation as an input, leaving the verdict to the answer - either naming ${brand} (its tiers, its fee or total-cost math, trade-in or financing on it) or generic to the category's price structure (paid vs free, fee vs no-fee, financing vs buying outright, paying up for a higher tier vs the base). Financing, trade-in or price figures are PRICES, not usage: the asker's own usage (what they do with it, how long they keep it, what they spend on what) must also be present. The question ASKS what things cost - it never states a product's price or fee ("Premium is $23"), which is the writer's dated knowledge and a false premise; the asker's own spend, budget or an offer made to them is circumstance and belongs. A "which product is the best value for my budget" ask is an open-choice question, not pricing, and does not satisfy the design; a bare "is it worth it?" with no usage inputs is a doubt; presupposing the verdict ("a ripoff") is neither. Not naming ${brand} is fine - a generic trade-off any product in the category could answer (refurbished vs new, paid vs free, fee vs no-fee, a higher tier vs the base) satisfies the design. The one exception: a question that describes ONE specific product's own plan structure while leaving its name out (that product's plan or tier ladder, its add-on marketplace, its billing model) is that product's question with the name removed - answers name it anyway and count as unprompted - and does not satisfy the design.`;
   // Alternatives seeds (audit J10/J11, 2026-10-01): an offensive seed that
   // gives a REASON for leaving the rival ("too lightweight for our dev
   // team") steers every answer toward one kind of replacement - often the
@@ -307,7 +311,11 @@ export const BLIND_STAGES = new Set([
 /** Short brand forms that are ordinary English words - never matched blind
  * (the "one+" -> "one" and "Max" lessons; prod's detection is model-first
  * for the same reason). */
-const STOP_FORMS = new Set(["one", "max", "mini", "pro", "plus", "air", "go", "fire", "prime", "mission", "video", "music", "cloud"]);
+// "american"/"america" (r13, 2026-10-02 cold-walk audit): nationality words
+// that are always capitalized, so the case guard below cannot separate
+// them - a token of "American Express" / "Bank of America" never names the
+// brand on its own (the full name and the dictionary aliases still do).
+const STOP_FORMS = new Set(["one", "max", "mini", "pro", "plus", "air", "go", "fire", "prime", "mission", "video", "music", "cloud", "american", "america"]);
 
 /** Brand tokens that are also technical nouns in specific collocations -
  * scrubbed before matching ("pixel size" is a sensor term, not the brand). */
@@ -323,6 +331,32 @@ const key = (s: string) => (s || "").toLowerCase().replace(/[^a-z0-9]+/g, " ").t
 
 function brandPatterns(name: string, opts?: { required?: boolean; extraForms?: string[]; excludeTokens?: Set<string> }): RegExp[] {
   return brandForms(name, opts).map((n) => new RegExp(`\\b${n.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}s?\\b`));
+}
+
+/** Is a brand-name token category vocabulary? Exact match, a plural of
+ * a category word or a piece of one (r13, 2026-10-02 cold-walk round 3:
+ * "Nothing Phone" on a smartphones study made every blind "phone" a rival
+ * mention; "projects" in "GitHub Issues / Projects" on project management
+ * software). Mirrors textNamesCategory's containment, one direction only -
+ * a category word inside a brand token ("iphone" holds "phone") is fine. */
+function isCategoryToken(tok: string, cat?: Set<string>): boolean {
+  if (!cat) return false;
+  for (const c of cat) {
+    if (c === tok || c === `${tok}s` || tok === `${c}s`) return true;
+    if (c.length >= 4 && tok.length >= 4 && c.includes(tok)) return true;
+  }
+  return false;
+}
+
+/** A multi-word name's tokens -> their spelling in the label ("Nothing
+ * Phone" -> nothing: "Nothing"). Null for a one-word name. */
+function labelSpellings(name: string): Map<string, string> | null {
+  const base = name.replace(/\s*\([^)]*\)/g, "").trim();
+  const paren = [...name.matchAll(/\(([^)]*)\)/g)].map((m) => m[1]).join(" ");
+  const label = STOP_FORMS.has(key(base)) && key(paren).length >= 3 ? paren : base || name;
+  const words = label.split(/[^A-Za-z0-9]+/).filter(Boolean);
+  if (words.length < 2) return null;
+  return new Map(words.map((w) => [w.toLowerCase(), w]));
 }
 
 /** The keyed surface forms brandPatterns matches (see there). */
@@ -344,7 +378,7 @@ function brandForms(name: string, opts?: { required?: boolean; extraForms?: stri
   // that appear in the study CATEGORY ("Ulta Beauty" in "beauty retailers")
   // are category vocabulary, never brand evidence.
   for (const tok of k.split(" ")) {
-    if (tok.length > (useParen ? 2 : 3) && !STOP_FORMS.has(tok) && !opts?.excludeTokens?.has(tok)) out.add(tok);
+    if (tok.length > (useParen ? 2 : 3) && !STOP_FORMS.has(tok) && !isCategoryToken(tok, opts?.excludeTokens)) out.add(tok);
   }
   for (const f of opts?.extraForms ?? []) {
     const fk = key(f);
@@ -476,7 +510,7 @@ export function checkPromptBrandRule(input: {
     out.push({ check: "scenario_label_leak", detail: `copies the scenario label "${label}"` });
   const catTokens = new Set(key(input.category ?? "").split(" ").filter(Boolean));
   const target = textNamesBrand(text, brand, { extraForms: input.extraForms?.[brand], excludeTokens: catTokens });
-  const rivalsNamed = input.competitors.filter((c) => textNamesBrand(text, c, { extraForms: input.extraForms?.[c], excludeTokens: catTokens }));
+  const rivalsNamed = input.competitors.filter((c) => textNamesBrand(withoutOtherBrands(text, c, [brand, ...input.competitors]), c, { extraForms: input.extraForms?.[c], excludeTokens: catTokens }));
   // The cell's own angle brand is never an "extra" rival - match by name
   // containment in both directions so label variants ("Amazon (Beauty)")
   // resolve to their angle spelling.
@@ -726,6 +760,17 @@ export interface CellCheckSpec {
 export const AMBIGUOUS_FORMS = new Set([
   "max", "visa", "citi", "prime", "go", "one", "mini", "pro", "plus",
   "air", "fire", "mission", "video", "music", "cloud", "monday",
+  // r13 (2026-10-02 cold-walk audit): roster tokens that are everyday words
+  // in their category - "import issues" named "GitHub Issues / Projects"
+  // and one honest Jira seed was rewritten to drop "issues", Jira's own
+  // noun; "my bank", "chase the points", "discover new cards" are AmEx
+  // sentences, not rivals. Capitalized they still count.
+  "issues", "projects", "devops", "linear", "chase", "discover", "capital", "bank", "express",
+  // A ONE-word everyday name gets no label-casing guard (that covers words
+  // split out of multi-word names), so it lives here: the round-4 Pixel
+  // roster named the rival plain "Nothing" - 28 of 3,561 seeds say
+  // "nothing", none capitalized.
+  "nothing",
 ]);
 
 /** Tokens that never identify a brand on their own ("monday.com" is not
@@ -760,7 +805,7 @@ export function namesRequiredBrand(
     if (toks.length > 1) forms.add(toks.join(""));
     for (let i = 0; i < toks.length; i++) {
       const tok = toks[i];
-      if (tok.length >= 3 && !STOP_FORMS.has(tok) && !GENERIC_TOKENS.has(tok) && !opts?.excludeTokens?.has(tok)) forms.add(tok);
+      if (tok.length >= 3 && !STOP_FORMS.has(tok) && !GENERIC_TOKENS.has(tok) && !isCategoryToken(tok, opts?.excludeTokens)) forms.add(tok);
       for (let j = i + 2; j <= toks.length; j++) forms.add(toks.slice(i, j).join(" "));
     }
   }
@@ -785,8 +830,40 @@ export function namesForbiddenBrand(
     const cap = form[0].toUpperCase() + form.slice(1);
     return new RegExp(`(?:^|[^A-Za-z0-9])(?:${esc(cap)}|${esc(form.toUpperCase())})(?:s|'s)?(?![A-Za-z0-9])`).test(raw);
   };
+  // r13 (2026-10-02 cold-walk round 3): a word split out of a multi-word
+  // name ("Nothing" of "Nothing Phone", "Issues" of "GitHub Issues", "Bank"
+  // of "U.S. Bank") names the brand only when written the label's way - its
+  // first letter cased as in the label - and not as a sentence's first
+  // word. Every fresh roster draws new everyday-word names, so a word list
+  // cannot keep up; the label's own casing can. A token the dictionary
+  // aliases list as what people call the brand ("pixel", "iphone",
+  // "galaxy") stays case-blind.
+  const spellings = labelSpellings(name);
+  const aliasKeys = new Set((opts?.extraForms ?? []).map(key));
+  const labelCased = (form: string) => {
+    const sp = spellings!.get(form)!;
+    const firstUpper = sp[0] !== sp[0].toLowerCase();
+    const re = new RegExp(`(?<![A-Za-z0-9])(${esc(sp[0])}${esc(sp.slice(1))})(?:s|'s)?(?![A-Za-z0-9])`, "gi");
+    for (const m of raw.matchAll(re)) {
+      const w = m[1];
+      const caseOk = w === w.toUpperCase() || (firstUpper ? w[0] !== w[0].toLowerCase() : w[0] === w[0].toLowerCase());
+      if (!caseOk) continue;
+      const pre = raw.slice(0, m.index ?? 0).trimEnd();
+      if (firstUpper && (pre === "" || /[.!?:"\u201c(]$/.test(pre))) continue; // sentence-initial capital
+      return true;
+    }
+    return false;
+  };
+  const split = (form: string) => !!spellings?.has(form) && !aliasKeys.has(form);
+  const upperLabel = (form: string) => { const sp = spellings!.get(form)!; return sp[0] !== sp[0].toLowerCase(); };
   for (const form of brandForms(name, opts)) {
-    if (AMBIGUOUS_FORMS.has(form) ? capitalized(form) : new RegExp(`\\b${esc(form)}s?\\b`).test(t)) return true;
+    // A capitalized label word takes the label rule first (it also skips
+    // sentence starts); a lowercase label ("monday.com") keeps the
+    // case guard, which wants it capitalized.
+    if (split(form) && upperLabel(form)) { if (labelCased(form)) return true; continue; }
+    if (AMBIGUOUS_FORMS.has(form)) { if (capitalized(form)) return true; continue; }
+    if (split(form)) { if (labelCased(form)) return true; continue; }
+    if (new RegExp(`\\b${esc(form)}s?\\b`).test(t)) return true;
   }
   const primary = key(speakable(name));
   return STOP_FORMS.has(primary) && AMBIGUOUS_FORMS.has(primary) && capitalized(primary);
@@ -853,7 +930,11 @@ export function deriveCheckSpec(
   },
   brand: string,
   competitors: string[],
-  category?: string
+  category?: string,
+  /** Dictionary alias forms per brand (r13): the seed's brand reading
+   * ("Amex" names American Express) uses the same vocabulary the
+   * candidate checks do. Absent = configured spellings only. */
+  extraForms?: Record<string, string[]>
 ): CellCheckSpec {
   const seed = cell.text.trim();
   const cls = classOfCell(cell);
@@ -864,8 +945,8 @@ export function deriveCheckSpec(
   const rivals = roster.slice(1);
   const ang = brandMode === "comparison" || brandMode === "alternatives_offensive" ? angleEntry(cell.angle, rivals) : null;
   const isAngle = (r: string) => ang !== null && (r === ang || speakable(r).toLowerCase() === speakable(ang).toLowerCase());
-  const seedNames = (b: string) => textNamesBrand(seed, b, { excludeTokens: catTokens });
-  const qtype = questionTypeOf({ stage: cell.stage, angle: cell.angle, text: seed }, brand, category);
+  const seedNames = (b: string) => textNamesBrand(seed, b, { extraForms: extraForms?.[b], excludeTokens: catTokens });
+  const qtype = questionTypeOf({ stage: cell.stage, angle: cell.angle, text: seed }, brand, category, extraForms);
   let required: string[];
   switch (brandMode) {
     case "blind": required = []; break;
@@ -975,6 +1056,24 @@ export function resolveCellSpec(
 /** Does a candidate carry exactly the cell's brand design? The signature
  * filter's spec form: every required brand named (tolerant), no forbidden
  * brand named (strict). */
+/** The text with every OTHER tracked brand's full name removed - so a
+ * word of one rival's name inside another's never names it ("Bank of
+ * America" is not "U.S. Bank"; r13, 2026-10-02 cold-walk round 2: an
+ * AmEx-vs-Bank-of-America comparison was flagged for also naming U.S.
+ * Bank). A brand whose name contains this one's ("Amazon Prime Video" vs
+ * "Prime Video") is never scrubbed - that would hide the brand itself. */
+export function withoutOtherBrands(text: string, brand: string, roster: string[]): string {
+  const own = key(speakable(brand));
+  let out = text;
+  for (const other of roster) {
+    const ok = key(speakable(other));
+    if (!ok || ok === own || ` ${ok} `.includes(` ${own} `)) continue;
+    const re = new RegExp(`(?<![A-Za-z0-9])${ok.split(" ").map(esc).join("[^A-Za-z0-9]+")}(?![A-Za-z0-9])`, "gi");
+    out = out.replace(re, " ");
+  }
+  return out;
+}
+
 export function checkCandidateSignature(
   text: string, spec: CellCheckSpec, opts?: { category?: string; extraForms?: Record<string, string[]> }
 ): { ok: boolean; missing: string[]; leaked: string[] } {
@@ -982,8 +1081,9 @@ export function checkCandidateSignature(
   const missing = spec.requiredBrands.filter(
     (b) => !namesRequiredBrand(text, b, { extraForms: opts?.extraForms?.[b], excludeTokens })
   );
+  const roster = [...spec.requiredBrands, ...spec.forbiddenBrands, ...(spec.angleBrand ? [spec.angleBrand] : [])];
   const leaked = spec.forbiddenBrands.filter(
-    (b) => namesForbiddenBrand(text, b, { extraForms: opts?.extraForms?.[b], excludeTokens })
+    (b) => namesForbiddenBrand(withoutOtherBrands(text, b, roster), b, { extraForms: opts?.extraForms?.[b], excludeTokens })
   );
   // A class cell's expected signature is {target + classBrand}: the class
   // must actually be evoked, detected case-blind and format-tolerant like

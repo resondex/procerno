@@ -5,6 +5,7 @@ import { store } from "../store";
 import { primaryBrandName } from "./instrument";
 import { generatePromptBattery, type PromptSpec } from "./prompts";
 import { matchKey } from "./metrics";
+import { suggestBrandAliases } from "./brand_aliases";
 import {
   BATTERY_MODEL,
   BRAND_PROFILE_MODEL,
@@ -89,26 +90,6 @@ export async function getBattery(
 // from collected answers (open-coded discovery -> clustering -> ratified),
 // never generated from priors. See AGENTS.md discovery-pilot findings.
 
-const ALIAS_SCHEMA = {
-  type: "object",
-  additionalProperties: false,
-  properties: {
-    entries: {
-      type: "array",
-      items: {
-        type: "object",
-        additionalProperties: false,
-        properties: {
-          canonical: { type: "string" },
-          aliases: { type: "array", items: { type: "string" } },
-        },
-        required: ["canonical", "aliases"],
-      },
-    },
-  },
-  required: ["entries"],
-} as const;
-
 /** Seed the project dictionary: known aliases for target + competitors.
  * The first brand is the target (role derived from the project, never
  * stored); the rest arrive marked as tracked competitors. */
@@ -121,34 +102,7 @@ export async function seedDictionary(
   const brandKeys = new Set(brands.map(matchKey));
   let suggested: { canonical: string; aliases: string[] }[] = [];
   try {
-    const key = cacheKey("aliases", [[...brands].sort().join(",")]);
-    const hit = await store.cacheGet(key, CACHE_TTL_MS);
-    if (hit) {
-      suggested = JSON.parse(hit);
-    } else {
-      const res = await openaiClient().chat.completions.create({
-        model: DICT_SEED_MODEL,
-        messages: [
-          {
-            role: "system",
-            content:
-              "For each brand, list the alternate names, abbreviations, and " +
-              "spellings an AI answer might use for the SAME brand (e.g. " +
-              "'American Express' → ['amex', 'americanexpress']). Lowercase " +
-              "aliases. Only genuinely equivalent names — never other brands.",
-          },
-          { role: "user", content: JSON.stringify(brands) },
-        ],
-        response_format: {
-          type: "json_schema",
-          json_schema: { name: "aliases", strict: true, schema: ALIAS_SCHEMA },
-        },
-      });
-      suggested = JSON.parse(
-        res.choices[0]?.message?.content ?? '{"entries":[]}'
-      ).entries;
-      await store.cacheSet(key, JSON.stringify(suggested));
-    }
+    suggested = await suggestBrandAliases(brands);
   } catch (err) {
     console.error("alias seeding fell back to bare entries:", err);
   }
