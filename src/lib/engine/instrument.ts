@@ -98,7 +98,7 @@ const CACHE_TTL_MS = 183 * 24 * 3600 * 1000;
 // VERDICT asks, premium_worth holds the tier-as-class open-choice form
 // (never one named brand's own worth) - writer rules and design lines
 // changed together.
-const STYLE_VERSION = "s20";
+const STYLE_VERSION = "s21";
 
 /** Versions the DETERMINISTIC seed-check set (everything seedRule runs:
  * checkPromptAgainstSpec + blind_missing_category + scenario_label_leak).
@@ -3118,6 +3118,94 @@ export async function generateGrid(input: {
         }
       } catch (err) {
         console.error("concern diversity pass failed open:", err);
+      }
+    }
+    // CROSS-CELL PRICING TRADE-OFF DIVERSITY (2026-10-01 s20 audit): the
+    // writer rule "a battery uses a trade-off shape in at most one pricing
+    // cell" had no checker behind it, and AmEx shipped three fee-vs-no-fee
+    // cells while jira asked free-vs-paid twice - per-cell design checks
+    // cannot see cross-cell sameness. Same mechanism as the concern pass:
+    // one cheap labeling call over this generation's pricing seeds,
+    // duplicates get one regeneration steered to a different trade-off.
+    if (process.env.PHRASINGS_CHECKS !== "0" && Date.now() <= deadlineAt) {
+      try {
+        const pricing: { u: number; c: GridCell }[] = [];
+        for (const u of idxs) for (const c of resolved[u] ?? []) if (c.stage === "pricing") pricing.push({ u, c });
+        if (pricing.length >= 2) {
+          const labelShapes = async (texts: string[]): Promise<string[]> => {
+            const a = await anthropicClient();
+            const res = await withCostContext({ purpose: "setup:cells" }, () => a.messages.create({
+              model: DESIGN_CHECK_MODEL,
+              max_tokens: 1500,
+              output_config: { effort: DESIGN_CHECK_EFFORT },
+              system: `Each question below asks about price or value in ${input.brand}'s market. Label each question's core price TRADE-OFF with ONE COARSE class: fee vs no-fee, free vs paid, tier vs tier, financing vs buying outright, trade-in math, total cost over time, pay up vs base - or a 2-3 word class at that same altitude. The products or spend amounts involved do not change the class: two fee-vs-no-fee questions about different cards are the SAME class. Reply with ONLY JSON: {"shapes": ["...", ...]} - one label per question, in order.`,
+              messages: [{ role: "user", content: texts.map((t, i) => `${i + 1}. ${t}`).join("\n") }],
+            } as never));
+            const text = (res as { content: { type: string; text?: string }[] }).content
+              .filter((b) => b.type === "text").map((b) => b.text ?? "").join("").trim();
+            const j = JSON.parse(text.match(/\{[\s\S]*\}/)?.[0] ?? text) as { shapes?: string[] };
+            return (j.shapes ?? []).map((s) => String(s));
+          };
+          const shapes = await labelShapes(pricing.map((d) => d.c.text));
+          if (shapes.length === pricing.length) {
+            const norm = (s: string) => s.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+            const covered = new Map<string, number>();
+            const dups: number[] = [];
+            shapes.forEach((lab, i) => {
+              const k = norm(lab);
+              if (covered.has(k)) dups.push(i);
+              else covered.set(k, i);
+            });
+            const dirty = new Set<number>();
+            await Promise.all(dups.slice(0, 4).map(async (i) => {
+              const d = pricing[i];
+              const row = rowFor(units[d.u] ?? [], d.c) ?? (units[d.u] ?? [])[0];
+              if (!row || Date.now() > deadlineAt) return;
+              console.warn(`pricing trade-off diversity: duplicates "${shapes[i]}" - regenerating | ${d.c.text.slice(0, 80)}`);
+              try {
+                const res2 = await openaiClient().chat.completions.create({
+                  model: CELLS_MODEL,
+                  messages: [
+                    { role: "system", content: CELL_WRITER_SYSTEM + "Return one cell object for the plan line." },
+                    { role: "user", content:
+                        `Client brand: ${input.brand}\nCategory: ${input.category}\n` +
+                        `Rivals: ${rivals.map(primaryBrandName).join(", ")}\nAudience: ${input.audience ?? "unknown"}\n\n` +
+                        `Cell plan:\n${planLine(row, 0)}\n` +
+                        `   [this battery's pricing cells ALREADY use these price trade-offs: ${[...covered.keys()].join("; ")}. ` +
+                        `This cell must reason about a DIFFERENT price trade-off in this circumstance - the client brand's own tiers, total cost over time, financing vs buying outright, trade-in math. ` +
+                        `Do not reuse this wording: "${d.c.text}"]` },
+                  ],
+                  response_format: { type: "json_schema", json_schema: { name: "grid_cells", strict: true, schema: CELLS_SCHEMA } },
+                });
+                const text2 = (JSON.parse(res2.choices[0]?.message?.content ?? "{}") as { cells?: { text?: string }[] }).cells?.[0]?.text?.trim();
+                if (!text2) return;
+                const cand = { stage: d.c.stage, angle: d.c.angle, text: humanize(text2), situation: d.c.situation };
+                const intent = stageDesignIntent(d.c.stage, input.brand, undefined, d.c.angle, d.c.situation);
+                const mechOk = seedRule(cand).length === 0;
+                const designOk = !intent || (await checkDesignFidelity({ candidates: [{ text: cand.text, design: intent }], meta: input.meta }))[0].voices;
+                if (mechOk && designOk) {
+                  d.c.text = cand.text;
+                  d.c.qtype = questionTypeOf(d.c, input.brand, input.category);
+                  d.c.spec = deriveCheckSpec(d.c, input.brand, input.competitors, input.category);
+                  delete d.c.seedFlags;
+                  dirty.add(d.u);
+                  console.warn(`pricing trade-off diversity: healed: ${cand.text.slice(0, 80)}`);
+                } else {
+                  console.warn(`pricing trade-off diversity: regeneration rejected - original stands`);
+                }
+              } catch (err) {
+                console.error("pricing diversity regeneration failed open:", err);
+              }
+            }));
+            await Promise.all(
+              [...dirty].map((u) =>
+                store.cacheSet(unitKeys[u], JSON.stringify({ cells: resolved[u] ?? [], rules: SEED_RULES_VERSION }), stampOf(input)).catch(() => {})
+              )
+            );
+          }
+        }
+      } catch (err) {
+        console.error("pricing trade-off diversity pass failed open:", err);
       }
     }
     } finally {
