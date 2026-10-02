@@ -223,7 +223,10 @@ export function stageDesignIntent(stage: string, brand: string, concern?: string
     const keepLeave = stage === "churn_triggers" || stage === "renewal"
       ? ` The asker weighs STAYING with ${brand} against LEAVING it, and the leave option is stated outright - a fix-it or tune-it ask with no option of leaving does not satisfy the design.`
       : "";
-    return `Question design (doubt): the question itself voices the buyer's concern, complaint or "is it still worth it" doubt about ${brand}, stated as the asker's own claim or feeling that an answer could confirm or rebut. A neutral lookup, spec request, how-to or value-math request on the same topic does not satisfy the design - the math ask belongs to the pricing cells - and an eligibility or rules lookup does not voice a doubt even when the rules are unfavorable to the asker ("am I likely to be ineligible?", "can I check before applying?" are lookups, not doubts). A doubt question never asks for a price, a cost figure or the money accounting, with or without usage details.${keepLeave}${concern ? ` The DESIGNED concern is: ${concern} - the question must voice that worry, not a different one.` : ""}`;
+    const stance = stage === "objections"
+      ? ` The asker is a PROSPECT weighing the purchase - an existing customer's keep-or-cancel doubt belongs to the churn/renewal cells, so "should I drop/cancel it" does not satisfy an objection's design.`
+      : "";
+    return `Question design (doubt): the question itself voices the buyer's concern, complaint or "is it still worth it" doubt about ${brand}, stated as the asker's own claim or feeling that an answer could confirm or rebut.${stance} A neutral lookup, spec request, how-to or value-math request on the same topic does not satisfy the design - the math ask belongs to the pricing cells - and an eligibility or rules lookup does not voice a doubt even when the rules are unfavorable to the asker ("am I likely to be ineligible?", "can I check before applying?" are lookups, not doubts). A doubt question never asks for a price, a cost figure or the money accounting, with or without usage details.${keepLeave}${concern ? ` The DESIGNED concern is: ${concern} - the question must voice that worry, not a different one.` : ""}`;
   }
   if (stage === "pricing")
     // G6: generic pricing cells never name the brand, so the intent accepts

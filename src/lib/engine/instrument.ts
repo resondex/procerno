@@ -98,7 +98,7 @@ const CACHE_TTL_MS = 183 * 24 * 3600 * 1000;
 // VERDICT asks, premium_worth holds the tier-as-class open-choice form
 // (never one named brand's own worth) - writer rules and design lines
 // changed together.
-const STYLE_VERSION = "s19";
+const STYLE_VERSION = "s20";
 
 /** Versions the DETERMINISTIC seed-check set (everything seedRule runs:
  * checkPromptAgainstSpec + blind_missing_category + scenario_label_leak).
@@ -2006,7 +2006,10 @@ const CELL_WRITER_SYSTEM =
           "the best value for my budget' (that is discovery's question) - a " +
           "budget circumstance makes the pricing cell the BRAND's tier " +
           "question ('the cheaper line at 450, or pay up for the regular " +
-          "one?'), never an open which-phone ask. " +
+          "one?'), never an open which-phone ask. A battery uses a given " +
+          "trade-off shape in at most ONE pricing cell (four fee-vs-no-fee " +
+          "cells measure one question four times), and at least one " +
+          "pricing cell names the client brand and does its own math. " +
           "Financing or trade-in numbers are PRICES, not usage: say what " +
           "the asker does with it or how long they keep it too. VARY the " +
           "trade-off across a battery's pricing cells - never four cells " +
@@ -2014,6 +2017,12 @@ const CELL_WRITER_SYSTEM =
           "pricing cell stays generic to it; where the trade-off lands on " +
           "products ('a no-fee card or one of the premium ones'), end by " +
           "asking which they'd get.\n" +
+          "- Objections speak as a PROSPECT weighing the purchase - 'should " +
+          "I drop or cancel it' is a churn/renewal question, never an " +
+          "objection. A confusion- or complexity-shaped concern is voiced " +
+          "as DISTRUST ('these bonus rules feel designed to trip you up - " +
+          "will I actually get it?'), never as a request to explain the " +
+          "rules.\n" +
           "- A doubt cell (objections, churn, renewal, repertoire) STATES " +
           "the worry as the asker's own claim or feeling, something the " +
           "answer can confirm OR REBUT - never a neutral rules, " +
@@ -4351,7 +4360,7 @@ function jaccard(a: Set<string>, b: Set<string>): number {
 /** Real people type hyphens and straight quotes; model output leans on em
  * dashes and curly quotes, which reads as machine-written to the engines. */
 export function humanize(t: string): string {
-  return t
+  const out = t
     .replace(/[\u2010\u2011]/g, "-")
     .replace(/\s*[—–]\s*/g, " - ")
     .replace(/~\s*(?=\d)/g, "about ")
@@ -4361,6 +4370,14 @@ export function humanize(t: string): string {
     .replace(/…/g, "...")
     .replace(/  +/g, " ")
     .trim();
+  // A prompt wrapped whole in quote marks is the writer quoting itself, not
+  // something a person types (s20: a jira seed shipped in literal quotes).
+  // Only a full matched wrap whose quote character never recurs inside is
+  // stripped - a prompt that quotes someone (my boss said "...") is kept.
+  const q = out[0];
+  const wrapped =
+    out.length > 2 && (q === '"' || q === "'") && out.endsWith(q) && !out.slice(1, -1).includes(q);
+  return wrapped ? out.slice(1, -1).trim() : out;
 }
 
 /* ------------------------------ orchestrator ---------------------------- */
