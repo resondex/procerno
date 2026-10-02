@@ -97,9 +97,23 @@ export function classAnglesOf(
     for (const [n, p] of Object.entries(classes)) if (key(n) === k) return (p ?? "").trim();
     return "";
   };
+  // "a Mastercard card" -> "a Mastercard": when the brand token itself ends
+  // with the class head noun, the classifier's "<brand> <noun>" template
+  // doubles it and no buyer talks that way (audit J9). Collapsed at read
+  // time so existing drafts heal without re-classification; the changed
+  // phrase self-versions through every cache key that carries it.
+  const dedupeHead = (p: string): string => {
+    const parts = p.trim().split(/\s+/);
+    if (parts.length >= 2) {
+      const last = key(parts[parts.length - 1]);
+      const prev = key(parts[parts.length - 2]);
+      if (last && prev !== last && prev.endsWith(last)) return parts.slice(0, -1).join(" ");
+    }
+    return p.trim();
+  };
   const out: ClassAngle[] = [];
   for (const c of upstreamOf(competitors, roles)) {
-    const classPhrase = phraseOf(c);
+    const classPhrase = dedupeHead(phraseOf(c));
     if (classPhrase) out.push({ classBrand: c, classPhrase });
     if (out.length >= CLASS_SLOTS) break;
   }
@@ -168,13 +182,13 @@ export function seedDesignLine(
   // concern (2026-09-30) names the subject outright - the strongest form.
   if (DOUBT_CHECK_STAGES.has(stage))
     return concern
-      ? `Question design (doubt): the question voices the buyer's concern about ${brand} on THIS designed subject: ${concern}. THAT worry must be the question's MAIN point - a question whose main worry is something else does not satisfy the design even if it mentions the subject in passing. A value-math request without the stated worry does not voice it. Same concern, differently worded by a different person. Designed as: "${seed}"`
-      : `Question design (doubt): the question voices the SAME concern about ${brand} as the designed question below - the same subject and worry, differently worded by a different person. A DIFFERENT concern about ${brand} does not satisfy the design, and neither does a value-math request without the stated worry. Designed as: "${seed}"`;
+      ? `Question design (doubt): the question voices the buyer's concern about ${brand} on THIS designed subject: ${concern}. THAT worry must be the question's MAIN point - a question whose main worry is something else does not satisfy the design even if it mentions the subject in passing. A value-math request without the stated worry does not voice it, an eligibility or rules lookup does not voice it even when the rules are unfavorable to the asker, and the question never asks how to calculate or compare costs - method asks belong to the pricing cells. Same concern, differently worded by a different person. Designed as: "${seed}"`
+      : `Question design (doubt): the question voices the SAME concern about ${brand} as the designed question below - the same subject and worry, differently worded by a different person. A DIFFERENT concern about ${brand} does not satisfy the design, and neither does a value-math request without the stated worry, an eligibility or rules lookup (even when the rules are unfavorable), or an ask for how to calculate or compare costs. Designed as: "${seed}"`;
   // The circumstance/doubt boundary (DECIDED 2026-10-01): pricing is value
   // MATH, worries are VERDICTS - each design line polices its own side so
   // the two instruments cannot trade clothes.
   if (stage === "pricing")
-    return `Question design (value math): the question asks for ${brand}'s price/value accounting - what it costs, whether it pays off for the asker's usage - and leaves the verdict to the answer. A question that presupposes the verdict ("a ripoff", "not worth it, right?") is a doubt, not a pricing ask, and does not satisfy the design. Designed as: "${seed}"`;
+    return `Question design (value math): the question asks for ${brand}'s price/value accounting WITH the asker's usage or situation as an input - what they spend, how they'd use it, their size - then what it costs vs what they'd get back, leaving the verdict to the answer. A bare "is it worth it?" carrying no usage inputs is a doubt, not a pricing ask, and does not satisfy the design; neither does presupposing the verdict ("a ripoff", "that huge fee"). Designed as: "${seed}"`;
   if (stage === "premium_worth")
     return `Question design (premium tier): the question weighs the category's premium maker(s) as a TIER against basic/store options and invites named picks - from either side (is the expensive one worth it, is the cheap one good enough). Judging one named brand's own worth does not satisfy the design. Designed as: "${seed}"`;
   if (!PLAN_CHECK_STAGES.has(stage))
@@ -196,11 +210,24 @@ export function seedDesignLine(
 /** The design intent a doubt/plan STAGE demands, independent of any seed -
  * the yardstick for judging seeds themselves (seed-as-design cannot judge
  * the seed). */
-export function stageDesignIntent(stage: string, brand: string, concern?: string | null): string | null {
+export function stageDesignIntent(stage: string, brand: string, concern?: string | null, angle?: string | null): string | null {
   if (DOUBT_CHECK_STAGES.has(stage))
-    return `Question design (doubt): the question itself voices the buyer's concern, complaint or "is it still worth it" doubt about ${brand}. A neutral lookup, spec request, how-to or value-math request on the same topic does not satisfy the design - the math ask belongs to the pricing cells.${concern ? ` The DESIGNED concern is: ${concern} - the question must voice that worry, not a different one.` : ""}`;
+    return `Question design (doubt): the question itself voices the buyer's concern, complaint or "is it still worth it" doubt about ${brand}, stated as the asker's own claim or feeling that an answer could confirm or rebut. A neutral lookup, spec request, how-to or value-math request on the same topic does not satisfy the design - the math ask belongs to the pricing cells - and an eligibility or rules lookup does not voice a doubt even when the rules are unfavorable to the asker. A doubt question never asks how to calculate or compare costs.${concern ? ` The DESIGNED concern is: ${concern} - the question must voice that worry, not a different one.` : ""}`;
   if (stage === "pricing")
-    return `Question design (value math): the question asks for ${brand}'s price/value accounting - what it costs, whether it pays off for the asker's usage - and leaves the verdict to the answer. A question that presupposes the verdict ("a ripoff", "not worth it, right?") is a doubt, not a pricing ask.`;
+    return `Question design (value math): the question asks for ${brand}'s price/value accounting WITH the asker's usage or situation as an input - what they spend, how they'd use it, their size - then what it costs vs what they'd get back, leaving the verdict to the answer. A bare "is it worth it?" carrying no usage inputs is a doubt, not a pricing ask; so is presupposing the verdict ("a ripoff", "not worth it, right?").`;
+  // Alternatives seeds (audit J10/J11, 2026-10-01): an offensive seed that
+  // gives a REASON for leaving the rival ("too lightweight for our dev
+  // team") steers every answer toward one kind of replacement - often the
+  // client's own positioning - and inflates names-us-on-exit by
+  // construction; a defensive seed voiced as a prospect ("if we don't go
+  // with it") measures a different circumstance than the exit scan.
+  if (stage === "alternatives") {
+    if (angle === "defensive")
+      return `Question design (exit scan): an existing ${brand} customer weighing a move away asks, naming ${brand}, what else is out there. A prospect who merely has not chosen ${brand} yet ("if we don't go with it") does not satisfy the design.`;
+    if (angle && angle !== "generic")
+      return `Question design (leaving a rival): the asker is moving away from ${angle} and asks what to consider instead, stating the move PLAINLY with no reason given. A reason that says what ${angle} lacks or who it fails ("too lightweight for a dev team") steers the answer toward one kind of replacement and does not satisfy the design; naming ${brand} does not satisfy it either.`;
+    return null;
+  }
   if (stage === "premium_worth")
     return `Question design (premium tier): the question weighs the category's premium maker(s) as a TIER against basic/store options and invites named picks - from either side. Judging one named brand's own worth does not satisfy it - that is a worry cell's job.`;
   if (!PLAN_CHECK_STAGES.has(stage)) return null;

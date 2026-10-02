@@ -500,8 +500,10 @@ const classSeed = "worth paying for American Express over just getting a Visa ca
   const ROLES3 = { Visa: "upstream", Mastercard: "upstream", UnionPay: "upstream" } as const;
   const CLASSES = { Visa: "a Visa card", Mastercard: "a Mastercard card", Chase: "a Chase card" };
   const angles = bc.classAnglesOf(MIXED, ROLES3, CLASSES);
-  expect("classAnglesOf: upstream entries with a phrase, roster order (UnionPay has none; same-seat Chase never)",
-    JSON.stringify(angles) === JSON.stringify([{ classBrand: "Visa", classPhrase: "a Visa card" }, { classBrand: "Mastercard", classPhrase: "a Mastercard card" }]), angles);
+  // "a Mastercard card" collapses to "a Mastercard" at read time (audit J9:
+  // the brand token already ends with the class head noun).
+  expect("classAnglesOf: upstream entries with a phrase, roster order (UnionPay has none; same-seat Chase never; doubled head noun collapsed)",
+    JSON.stringify(angles) === JSON.stringify([{ classBrand: "Visa", classPhrase: "a Visa card" }, { classBrand: "Mastercard", classPhrase: "a Mastercard" }]), angles);
   const capped = bc.classAnglesOf(MIXED, ROLES3, { ...CLASSES, UnionPay: "a UnionPay card" });
   expect(`classAnglesOf caps at CLASS_SLOTS (${bc.CLASS_SLOTS})`, capped.length === bc.CLASS_SLOTS && capped[1].classBrand === "Mastercard", capped);
   const stages = [

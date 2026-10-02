@@ -418,11 +418,13 @@ export async function suggestBrandProfile(
           "qualifier, and only when the market truly needs it; never stack " +
           "qualifiers, and never use a lone broad word like 'software' or " +
           "'companies'.\n" +
-          "- competitors: the 4 to 6 brands buyers most often weigh against it. " +
-          "Lead with the mainstream market leaders in the category, not niche " +
-          "or same-subculture alternatives - but ALWAYS include a fast-rising " +
-          "challenger if AI assistants increasingly recommend one (the rival " +
-          "eating recommendations matters more than a fading incumbent).\n" +
+          "- competitors: the 5 to 8 brands buyers most often weigh against it, " +
+          "RANKED by how often AI assistants actually name them today - not by " +
+          "incumbency or brand age. Mainstream market leaders belong on the " +
+          "list, but a fast-rising challenger that assistants increasingly " +
+          "recommend ALWAYS makes it and outranks a fading incumbent: the " +
+          "rival eating recommendations is the one worth tracking. Skip niche " +
+          "or same-subculture alternatives nobody weighs seriously.\n" +
           "The category label must be broad enough to contain every " +
           "competitor listed - never name a category that excludes one of " +
           "them (e.g. not 'Android smartphones' with iPhone as a rival).\n" +
@@ -448,7 +450,7 @@ export async function suggestBrandProfile(
     competitors: (parsed.competitors ?? [])
       .map((c) => c.trim())
       .filter(Boolean)
-      .slice(0, 6),
+      .slice(0, 8),
     audience: parsed.audience?.trim() ?? "",
   };
 }

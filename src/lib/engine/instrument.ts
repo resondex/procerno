@@ -98,7 +98,7 @@ const CACHE_TTL_MS = 183 * 24 * 3600 * 1000;
 // VERDICT asks, premium_worth holds the tier-as-class open-choice form
 // (never one named brand's own worth) - writer rules and design lines
 // changed together.
-const STYLE_VERSION = "s13";
+const STYLE_VERSION = "s14";
 
 /** Versions the DETERMINISTIC seed-check set (everything seedRule runs:
  * checkPromptAgainstSpec + blind_missing_category + scenario_label_leak).
@@ -541,7 +541,7 @@ export function stageLibrary(m: Moderators): LibraryStage[] {
     {
       key: "pricing", label: "Pricing / value", layer: "decision",
       situational: true, rivals: "none", tag: "judges", recommended: true,
-      hint: "Cost and value-for-money asks; some generic to the category (including paid-vs-free where free options exist), some naming the client brand (including its own tiers).",
+      hint: "Cost and value-for-money asks anchored in the asker's own usage; some generic to the category (including paid-vs-free where free options exist), some naming the client brand (including its own tiers).",
       why: "Cost and value questions reach every buyer, whatever the journey.",
     },
     {
@@ -1927,7 +1927,12 @@ const CELL_WRITER_SYSTEM =
           "case for it): there, name the CLIENT brand only, never a rival.\n" +
           "- angle=<rival name>: for comparison-type stages, name the client " +
           "brand AND that rival; for alternatives-type stages, ask for " +
-          "alternatives to that rival (client brand NOT named).\n" +
+          "alternatives to that rival (client brand NOT named), stating the " +
+          "move PLAINLY with no reason given ('We're moving off Asana - " +
+          "what should we look at?'): a leave-reason that says what the " +
+          "rival lacks or who it fails ('too lightweight for our dev team') " +
+          "steers the answer toward one kind of replacement and poisons the " +
+          "measurement.\n" +
           "- A comparison cell (angle=<rival> or angle=class) is " +
           "CIRCUMSTANCE-NEUTRAL: ask the head-to-head about the category " +
           "plainly - which one, which would you pick and why, where does " +
@@ -1938,21 +1943,41 @@ const CELL_WRITER_SYSTEM =
           "implies a situation: any such detail becomes a fact every " +
           "paraphrase must keep, and the measurement is the head-to-head " +
           "itself, never one buyer's story. The shape is '<brand> or " +
-          "<rival> for <category> - which would you go with, and why?'\n" +
-          "- angle=defensive: ask for alternatives to the client brand by name.\n" +
+          "<rival> for <category> - which would you go with, and why?' " +
+          "(drop the 'for <category>' clause when the names alone make the " +
+          "category obvious).\n" +
+          "- angle=defensive: an EXISTING customer of the client brand, " +
+          "weighing a move away, asks for alternatives to it by name - " +
+          "never a prospect ('if we don't go with it').\n" +
           "- angle=class(<class>): a head-to-head of the client brand against " +
           "a CLASS of products, not a company - name the client brand and " +
           "speak the class naturally, the way a buyer does ('or should I just " +
           "get a Visa card?'). NEVER name any specific rival company, issuer " +
-          "or product: the class itself is the counterpart.\n" +
+          "or product: the class itself is the counterpart. Never append a " +
+          "redundant category clause the class already carries ('a Visa " +
+          "card for credit cards').\n" +
           "- Retention and loyalty stages speak as an existing customer and " +
           "MUST name the client brand: a churn, renewal, support, expansion, " +
           "ecosystem or advocacy ask that leaves the brand implied ('my " +
           "subscription', 'the service') is a defect, never a variant.\n" +
-          "- situation: weave the circumstance in naturally; do not label " +
-          "it, and NEVER copy the scenario's label text into the prompt " +
+          "- situation: weave the circumstance in naturally, as the asker's " +
+          "OWN situation ('this would be my first credit card', 'we're " +
+          "about 120 people and doubling') - never as a topic opener " +
+          "('First card question:'), NEVER the scenario's label text " +
           "('Party hosting cart' is a plan label, not something a person " +
-          "types).\n" +
+          "types), and never the plan's segment vocabulary ('mid-market', " +
+          "'enterprise standardization' are OUR words - buyers say their " +
+          "size and stakes in plain words).\n" +
+          "- pricing cells ask for the accounting with the asker's usage as " +
+          "an INPUT - what they spend, how they'd use it, their size - and " +
+          "leave the verdict to the answer: never a bare 'is it worth it?' " +
+          "with no usage (that is a worry, not a pricing ask), never a " +
+          "presupposed verdict ('that huge fee').\n" +
+          "- A doubt cell (objections, churn, renewal, repertoire) STATES " +
+          "the worry as the asker's own claim or feeling, something the " +
+          "answer can confirm or rebut - never a neutral rules, eligibility " +
+          "or how-to lookup on the topic, and never an ask for how to " +
+          "calculate or compare costs (method asks belong to pricing).\n" +
           "- concern(<subject>) on a plan line: that cell's doubt is ABOUT " +
           "that subject and nothing else - voice THAT worry inside the " +
           "cell's circumstance. A doubt about a different subject is " +
@@ -1982,6 +2007,13 @@ const CELL_WRITER_SYSTEM =
           "category anchors what is being measured. Blind means no BRAND " +
           "names - the plain category noun ('my phone') is normal speech, " +
           "never contorted around ('the thing in my pocket').\n" +
+          "- problem_recognition and category_education describe the pain " +
+          "or ask what the thing does - never end in 'what specs or " +
+          "criteria should I care about' (that is the criteria cell's " +
+          "question).\n" +
+          "- One prompt asks at most two or three things and reads ONE way: " +
+          "a five-part requirements ask is survey-speak whatever the words, " +
+          "and an ask with two readings measures neither.\n" +
           "- Never use planning vocabulary in a prompt: 'spec-driven', " +
           "'trust-driven', 'think/feel', journey or scenario terms are " +
           "OURS, not the asker's.\n" +
@@ -2802,7 +2834,7 @@ export async function generateGrid(input: {
         if (process.env.PHRASINGS_CHECKS !== "0" && flat.length > 0) {
           try {
             const seedTargets = flat
-              .map((c, i) => ({ c, i, intent: stageDesignIntent(c.stage, input.brand, c.concern) }))
+              .map((c, i) => ({ c, i, intent: stageDesignIntent(c.stage, input.brand, c.concern, c.angle) }))
               .filter((x): x is { c: GridCell; i: number; intent: string } => !!x.intent);
             if (seedTargets.length > 0 && Date.now() > deadlineAt) complete = false;
             if (seedTargets.length > 0 && Date.now() <= deadlineAt) {
@@ -2828,7 +2860,7 @@ export async function generateGrid(input: {
                         `Client brand: ${input.brand}\nCategory: ${input.category}\n` +
                         `Rivals: ${rivals.map(primaryBrandName).join(", ")}\nAudience: ${input.audience ?? "unknown"}\n\n` +
                         `Cell plan:\n${planLine(row, 0)}\n` +
-                        `   [previous attempt was OFF-DESIGN and was rejected: it read as a neutral lookup. ` +
+                        `   [previous attempt was OFF-DESIGN and was rejected: it did not voice the cell's design. ` +
                         `${x.intent} Do not reuse this wording: "${x.c.text}"]` },
                   ],
                   response_format: { type: "json_schema", json_schema: { name: "grid_cells", strict: true, schema: CELLS_SCHEMA } },
@@ -2974,7 +3006,7 @@ export async function generateGrid(input: {
                 const text2 = (JSON.parse(res2.choices[0]?.message?.content ?? "{}") as { cells?: { text?: string }[] }).cells?.[0]?.text?.trim();
                 if (!text2) return;
                 const cand = { stage: d.c.stage, angle: d.c.angle, text: humanize(text2), situation: d.c.situation };
-                const intent = stageDesignIntent(d.c.stage, input.brand);
+                const intent = stageDesignIntent(d.c.stage, input.brand, undefined, d.c.angle);
                 const mechOk = seedRule(cand).length === 0;
                 const designOk = !intent || (await checkDesignFidelity({ candidates: [{ text: cand.text, design: intent }], meta: input.meta }))[0].voices;
                 if (mechOk && designOk) {
@@ -3276,7 +3308,7 @@ export async function regenerateCell(input: {
   // the one seed path that skipped every check): mechanical brand rule,
   // then the doubt/plan design intent, one steered retry, and null rather
   // than an unchecked seed - the client keeps what it has.
-  const intent = process.env.PHRASINGS_CHECKS !== "0" ? stageDesignIntent(input.cell.stage, input.brand, input.cell.concern) : null;
+  const intent = process.env.PHRASINGS_CHECKS !== "0" ? stageDesignIntent(input.cell.stage, input.brand, input.cell.concern, input.cell.angle) : null;
   let text: string | null = null;
   let note: string | null = null;
   for (let attempt = 0; attempt < 3 && !text; attempt++) {
