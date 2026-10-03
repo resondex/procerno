@@ -22,6 +22,7 @@ import type {
   Run,
   RunSchedule,
 } from "@/lib/types";
+import { InlineSpinner } from "../../components/spinner";
 
 export interface Detail {
   /** True when the signed-in user is staff — gates hidden switches. */
@@ -636,10 +637,7 @@ export default function ProjectDashboard({
                 className="btn-primary inline-flex items-center gap-2"
               >
                 {launching && (
-                  <span
-                    aria-hidden="true"
-                    className="h-4 w-4 rounded-full border-2 border-white/30 border-t-white animate-spin"
-                  />
+                  <InlineSpinner tone="on-primary" />
                 )}
                 {launching
                   ? "Starting…"

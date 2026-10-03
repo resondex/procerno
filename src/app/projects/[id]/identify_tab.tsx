@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { DictionaryEntry } from "@/lib/types";
 import { matchKey } from "@/lib/brand_key";
 import { flaggedIgnorePrefix, ignoreSurfaces } from "@/lib/ignore_rules";
+import { InlineSpinner } from "../../components/spinner";
 
 const OTHER_CANONICAL = "Other";
 
@@ -1213,10 +1214,7 @@ export default function IdentifyTab({
     return (
       <div className="grid gap-4 py-8 justify-center">
         <p className="text-[13px] text-ink-3">
-          <span
-            aria-hidden="true"
-            className="inline-block h-3 w-3 mr-1.5 align-[-1px] rounded-full border-2 border-line border-t-primary animate-spin"
-          />
+          <InlineSpinner className="mr-1.5" />
           Preparing your brand board…
         </p>
       </div>
@@ -1252,10 +1250,7 @@ export default function IdentifyTab({
             className="btn-primary px-3 py-1.5 text-[13px] inline-flex items-center gap-2"
           >
             {confirming && (
-              <span
-                aria-hidden="true"
-                className="h-3.5 w-3.5 rounded-full border-2 border-white/30 border-t-white animate-spin"
-              />
+              <InlineSpinner tone="on-primary" />
             )}
             {confirming
               ? "Saving…"
@@ -1269,10 +1264,7 @@ export default function IdentifyTab({
         <p className="text-[13px] text-ink-3">
           {suggesting ? (
             <>
-              <span
-                aria-hidden="true"
-                className="inline-block h-3 w-3 mr-1.5 align-[-1px] rounded-full border-2 border-line border-t-primary animate-spin"
-              />
+              <InlineSpinner className="mr-1.5" />
               Sorting {unplacedPending.length || "new"} names into suggested
               groups…
             </>
@@ -1353,10 +1345,7 @@ export default function IdentifyTab({
             </div>
             {examples.loading ? (
               <p className="text-[13px] text-ink-3">
-                <span
-                  aria-hidden="true"
-                  className="inline-block h-3 w-3 mr-1.5 align-[-1px] rounded-full border-2 border-line border-t-primary animate-spin"
-                />
+                <InlineSpinner className="mr-1.5" />
                 Pulling examples from the collected answers…
               </p>
             ) : (

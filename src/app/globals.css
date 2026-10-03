@@ -144,3 +144,89 @@ body {
 .pulse-dot {
   animation: pulse-dot 1.4s ease-in-out infinite;
 }
+
+/* Procerno spinner (components/spinner.tsx). Geometry in em: 1em = the
+   tallest bar, so font-size sets the size. */
+.pspin {
+  --spin-c: var(--primary);
+  --spin-hi: color-mix(in srgb, var(--primary) 70%, var(--surface));
+  display: inline-block;
+  perspective: 7.5em;
+  flex: none;
+  line-height: 0;
+}
+.pspin-on-primary {
+  --spin-c: var(--primary-ink);
+  --spin-hi: color-mix(in srgb, var(--primary-ink) 70%, transparent);
+}
+.pspin-lg { font-size: 48px; margin-bottom: 0.3em; }
+.pspin-inline { font-size: 1.1em; vertical-align: -0.15em; }
+.pspin-bars {
+  position: relative;
+  display: flex;
+  align-items: flex-end;
+  gap: 0.16em;
+  height: 1em;
+  transform-style: preserve-3d;
+  transform: rotateX(-12deg) rotateY(-24deg);
+  animation: pspin-drift 7s ease-in-out infinite alternate;
+}
+.pspin-plane {
+  position: absolute;
+  left: -0.39em;
+  right: -0.39em;
+  bottom: 0;
+  height: 0.82em;
+  transform-origin: bottom;
+  transform: rotateX(90deg);
+  border-top: 1px solid color-mix(in srgb, var(--spin-c) 25%, transparent);
+}
+.pspin-bars i {
+  display: block;
+  width: 0.232em;
+  position: relative;
+  transform-style: preserve-3d;
+  transform-origin: bottom;
+  border-radius: 0.107em 0.107em 0.036em 0.036em;
+  background: linear-gradient(180deg, var(--spin-hi) 0%, var(--spin-c) 55%);
+  animation: pspin-settle 2.8s cubic-bezier(0.45, 0, 0.2, 1) infinite;
+}
+.pspin-bars i::after {
+  content: "";
+  position: absolute;
+  top: 0.054em;
+  bottom: 0;
+  right: 0;
+  width: 0.143em;
+  transform-origin: right;
+  transform: rotateY(90deg);
+  background: color-mix(in srgb, var(--spin-c) 55%, var(--ink));
+  opacity: 0.55;
+}
+.pspin-bars i::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 100%;
+  height: 45%;
+  margin-top: 0.036em;
+  border-radius: 0.036em 0.036em 0.107em 0.107em;
+  background: linear-gradient(180deg, color-mix(in srgb, var(--spin-c) 32%, transparent), transparent 85%);
+}
+.pspin-bars i:nth-of-type(1) { height: 45%; opacity: 0.5; }
+.pspin-bars i:nth-of-type(2) { height: 72%; opacity: 0.75; animation-delay: 0.22s; }
+.pspin-bars i:nth-of-type(3) { height: 100%; animation-delay: 0.44s; }
+@keyframes pspin-drift {
+  from { transform: rotateX(-12deg) rotateY(-30deg); }
+  to { transform: rotateX(-12deg) rotateY(-16deg); }
+}
+@keyframes pspin-settle {
+  0% { transform: scaleY(0.62); }
+  35%, 60% { transform: scaleY(1); }
+  100% { transform: scaleY(0.62); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .pspin-bars { animation: none; }
+  .pspin-bars i { animation: pulse-dot 1.4s ease-in-out infinite; }
+}

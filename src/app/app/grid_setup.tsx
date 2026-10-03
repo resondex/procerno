@@ -2,6 +2,7 @@
 
 import { useState, type ReactNode } from "react";
 import { deriveCheckSpec, sameSeatOf, type CellCheckSpec, type RosterClasses, type RosterRoles } from "@/lib/engine/battery_checks";
+import { InlineSpinner } from "../components/spinner";
 
 /**
  * Buyer Landscape setup pieces: the state shape, the gate API calls, and
@@ -2920,10 +2921,7 @@ export function CellsGate({
                           <div className="flex items-center gap-3 border-t border-dashed border-line pt-1.5 text-[11px]">
                             {pending !== null && pending.uid === c.uid ? (
                               <span className="flex items-center gap-1.5 font-medium text-primary">
-                                <span
-                                  aria-hidden="true"
-                                  className="h-3 w-3 rounded-full border-2 border-primary/30 border-t-primary animate-spin"
-                                />
+                                <InlineSpinner />
                                 {pending.kind === "near"
                                   ? written ? "Writing a near variant and its prompts…" : "Writing a near variant…"
                                   : written ? "Writing a new question and its prompts…" : "Writing a new prompt…"}
@@ -3062,10 +3060,7 @@ export function CellsGate({
                       <div className="flex flex-wrap items-center gap-4 pt-0.5 text-[13px]">
                         {stagePending === stage ? (
                           <span className="flex items-center gap-1.5 text-[11px] font-medium text-primary">
-                            <span
-                              aria-hidden="true"
-                              className="h-3 w-3 rounded-full border-2 border-primary/30 border-t-primary animate-spin"
-                            />
+                            <InlineSpinner />
                             {written ? "Writing a suggested question and its prompts…" : "Writing a suggested question…"}
                           </span>
                         ) : adding?.stage === stage && adding.phase === "rival" ? (

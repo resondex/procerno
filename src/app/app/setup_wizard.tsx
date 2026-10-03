@@ -29,6 +29,7 @@ import {
   type ScenarioRow,
 } from "./grid_setup";
 import { deriveCheckSpec, rosterRoleOf, sameSeatOf, type RosterClasses, type RosterRole, type RosterRoles } from "@/lib/engine/battery_checks";
+import { Spinner, InlineSpinner } from "../components/spinner";
 
 /**
  * The setup wizard: a rail of steps, one gate at a time, a fixed footer that
@@ -230,7 +231,7 @@ function StagedProgress({ stages }: { stages: readonly [number, string][] }) {
   const msg = [...stages].reverse().find(([at]) => secs >= at)?.[1] ?? stages[0][1];
   return (
     <div className="grid gap-4 py-16 text-center justify-items-center">
-      <span aria-hidden="true" className="h-7 w-7 rounded-full border-[3px] border-line border-t-primary animate-spin" />
+      <Spinner />
       <p className="m-0 text-sm font-medium">{msg}</p>
     </div>
   );
@@ -1598,7 +1599,7 @@ export function SetupWizard({ mode, brand, draft, engineOptions, onClose, onCrea
           {step === "market" && (
             suggesting ? (
               <div className="grid gap-4 py-16 text-center justify-items-center">
-                <span aria-hidden="true" className="h-7 w-7 rounded-full border-[3px] border-line border-t-primary animate-spin" />
+                <Spinner />
                 <p className="text-sm font-medium">Estimating your market…</p>
                 <p className="text-[13px] text-ink-3">category · competitors · audience</p>
               </div>
@@ -1606,7 +1607,7 @@ export function SetupWizard({ mode, brand, draft, engineOptions, onClose, onCrea
               <StagedProgress stages={READ_STAGES} />
             ) : busy ? (
               <div className="grid gap-4 py-16 text-center justify-items-center">
-                <span aria-hidden="true" className="h-7 w-7 rounded-full border-[3px] border-line border-t-primary animate-spin" />
+                <Spinner />
                 <p className="text-sm font-medium">{busy}</p>
               </div>
             ) : (
@@ -1756,7 +1757,7 @@ export function SetupWizard({ mode, brand, draft, engineOptions, onClose, onCrea
                 <div className="flex justify-end gap-4">
                   {busy !== null ? (
                     <span className="flex items-center gap-2 text-[13px] font-medium text-primary">
-                      <span aria-hidden="true" className="h-3.5 w-3.5 rounded-full border-2 border-primary/30 border-t-primary animate-spin" />
+                      <InlineSpinner />
                       {busy}
                     </span>
                   ) : (
@@ -1932,7 +1933,7 @@ export function SetupWizard({ mode, brand, draft, engineOptions, onClose, onCrea
               className="btn-primary shrink-0 inline-flex items-center gap-2"
             >
               {(busy !== null || submitting) && (
-                <span aria-hidden="true" className="h-4 w-4 rounded-full border-2 border-white/30 border-t-white animate-spin" />
+                <InlineSpinner tone="on-primary" />
               )}
               {footerAction.label}
             </button>
