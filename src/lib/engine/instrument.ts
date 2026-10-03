@@ -4313,7 +4313,11 @@ export interface Phrasing {
 // clothes) on ~30 of 47 sampled, and 0 with the hint; the other stages
 // were unchanged by it. p7 added word-boundary brand signatures (the
 // "purchases"-reads-as-Chase poisoning) and init retries to quota.
-const PHRASINGS_VERSION = "p8";
+// "p9" (2026-10-03 init audit): the retry's [overused: ...] list never
+// names the category, the cell's circumstance/worry or its stage's ask
+// verbs (avoidExempt) - retries were being steered away from the very
+// words that define the question.
+const PHRASINGS_VERSION = "p9";
 // Over-generate so the overlap filter can be strict and still fill the set.
 const PHRASINGS_EXTRA = 3;
 /** Blind cells get a wider first-pass margin: with no brand tokens to
@@ -4869,12 +4873,15 @@ export async function generatePhrasings(input: {
         // ask's essential vocabulary on narrow-lexicon cells, so retries
         // returned candidates that failed the signature or drifted the
         // circumstance. Brand tokens never appear (contentWords).
+        // p9: words that DEFINE the ask are never "worn" either (see
+        // avoidExempt) - they recur in every faithful paraphrase by design.
         const counts = new Map<string, number>();
         for (const t of [subset[j].text, ...got[j].map((p) => p.text)]) {
           for (const w of contentWords(t)) counts.set(w, (counts.get(w) ?? 0) + 1);
         }
+        const exempt = avoidExempt(subset[j], input.category);
         return [...counts.entries()]
-          .filter(([, n]) => n >= 2)
+          .filter(([w, n]) => n >= 2 && !exempt.has(w))
           .sort((a, b) => b[1] - a[1])
           .map(([w]) => w)
           .slice(0, 18);
@@ -5145,6 +5152,53 @@ const STOP = new Set(
 
 function wordSet(t: string): Set<string> {
   return new Set(norm(t).split(" ").filter((w) => w.length > 2 && !STOP.has(w)));
+}
+
+/** The words a stage's ask is made of: the verbs that carry its question
+ * (comparisons ask for the pick, churn/renewal keep staying on the table,
+ * open-choice invites named picks, pricing weighs cost). */
+const STAGE_ASK_WORDS: Record<string, string> = {
+  comparison: "pick choose choosing between versus better",
+  churn_triggers: "keep keeping stay staying stick cancel canceling cancelling leave leaving switch switching worth",
+  renewal: "renew renewing renewal keep keeping stay staying stick cancel canceling cancelling leave leaving switch switching worth",
+  objections: "worth worried worry concern",
+  pricing: "worth cost costs price pay paying value",
+  premium_worth: "worth premium name names pick picks recommend",
+  discovery: "name names recommend recommendations suggest pick picks options brands",
+  shortlist: "name names recommend recommendations suggest pick picks options brands shortlist",
+  use_case: "name names recommend recommendations suggest pick picks options brands",
+  social_validation: "name names recommend recommendations pick picks brands",
+  feature_screening: "name names recommend which options brands",
+  alternatives: "alternatives alternative instead name names recommend options brands",
+  repertoire: "name names recommend pick picks brands",
+};
+
+/** Words the worn-words retry list must never contain (p9, 2026-10-03
+ * init audit): the overused list counted every content word in 2+ texts,
+ * so the CATEGORY ("project management", "tortilla chips" - on 30-36 of
+ * ~50 cells' lists), the cell's circumstance and worry, and the stage's
+ * ask verbs ("pick", "keep", "cancel") were the first words a retry was
+ * told to avoid - the source of category words dropped, comparisons that
+ * stopped asking for the pick and churn sets that lost the stay option,
+ * all concentrated at the appended retry positions. Singular/plural
+ * variants are included so "chip" and "chips" are both exempt. */
+function avoidExempt(
+  cell: { stage: string; situation: string | null; concern?: string | null; classPhrase?: string | null },
+  category: string
+): Set<string> {
+  const out = new Set<string>();
+  const add = (t: string | null | undefined) => {
+    for (const w of wordSet(t ?? "")) {
+      out.add(w);
+      out.add(w.endsWith("s") ? w.slice(0, -1) : `${w}s`);
+    }
+  };
+  add(category);
+  add(cell.situation);
+  add(cell.concern);
+  add(cell.classPhrase);
+  add(STAGE_ASK_WORDS[cell.stage]);
+  return out;
 }
 
 function jaccard(a: Set<string>, b: Set<string>): number {
