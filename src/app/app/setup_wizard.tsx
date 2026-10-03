@@ -204,7 +204,7 @@ const CELLS_STAGES: [number, string][] = [
   [30, "Putting each buyer's situation into words…"],
   [70, "Asking the way a real person would type it…"],
   [110, "Keeping every question to one clear ask…"],
-  [150, "Still working - finalizing the details…"],
+  [150, "Nearly there - finalizing the details…"],
 ];
 
 /** The worries pool draw narrated: one model call, so the captions walk
