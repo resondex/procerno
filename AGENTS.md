@@ -692,6 +692,74 @@ Results:
 
 **Correction to the r13 note above.** The market step CANNOT reorder competitors - it only removes or appends - so the "gate drag" stopgap for Linear never existed. Decision 3 replaces it.
 
+## Init decisions built (2026-10-03)
+
+All four decisions are built.
+
+**Decision 2 (abc43ef).**
+- `shortlist` is in RETIRED_STAGES and out of `stageLibrary`. Discovery keeps its label and hint, so no Discovery cell re-keys.
+- `problem_recognition` and `objections` are recommended only when `involvement === "considered"`. `comparison` is recommended everywhere, which retires the "habitual buyers don't run head-to-heads" rationale.
+- The mask runs per scenario journey, so a habitual column inside a considered market drops those stages only in that column.
+- Worry stances come from the recommended doubt stages, so habitual categories are offered only the in-relationship stance with no code change.
+- The setup banner's "How much thought" chip already lets the user flip `involvement`.
+
+**Decision 3 (3da4504).** Head-to-head picks ride `rosterRoles` as two new values:
+- `same_seat` = a picked direct rival;
+- `bench` = a direct rival with no head-to-head;
+- `adjacent` = out of category (decision 3b).
+
+Mechanics:
+- `angleRivals` takes only `same_seat` (at most ANGLE_SLOTS, no backfill) once any bench or adjacent entry exists. A roster with neither keeps the old "first 4 in list order" behavior and keys byte-identically (fixture section 6).
+- `sameSeatOf` still drops only upstream, so bench and adjacent brands stay writer rivals and stay forbidden in blind cells.
+- `ROSTER_ROLE_VALUES` feeds every route's zod enum.
+
+`classifyRoster` (`roster3`) now returns:
+- `inCategory` (which drives adjacent);
+- `parent` / `clientParent` (the sister-brand tag, decision 3c);
+- a code-normalized `h2hRank` + `h2hReason`;
+- buyability judged against the category's buyers, not platform wording in the audience (the Pixel "Android" audience had typed iPhone upstream).
+
+Wizard behavior:
+- The top 4 by rank are pre-picked as `same_seat` and the rest are `bench`.
+- Chips carry a head-to-head toggle (max 4, with a counter), a "same parent" tag, and a role pill that cycles rival -> upstream -> adjacent.
+- `materializePicks` converts a legacy roster into explicit picks on the first toggle.
+
+**Build correction to the decisions doc:** every cell key and the writer's "Rivals:" line carry the 4 slot rivals, so a pick change after cells exist redraws the whole battery, not just one rival's cells. That's free in the normal flow, where picks are made at the market step before generation.
+
+**Decision 4 (80e0bc2).**
+- **Scenario read (`scenarios_journeys14`):** written to the room rule - who, situation and wanted outcome, in outcome language, contested by the category's leading brands.
+- **Fit advisory (`scenario_fit7`):** gets the same rule plus "a room in a different category is not missing core", and a suggestion that names the client is dropped mechanically.
+- **New `checkRooms` + `/api/setup/grid/rooms`:**
+  - one sonnet-low call, cached per room;
+  - inputs are the rooms plus the tracker's DIRECT rivals (same_seat + bench);
+  - returns contenders, `contested` (at least half the rivals), one-brand `pitch` wording, and mechanically found brand `names`.
+  - The scenarios gate shows a chip per card ("Contested: N of M rivals", or amber "Few of your rivals compete here", "Names X", "Worded like a pitch") and hides an advisory suggestion that fails the check.
+- **Profile audience (`analyze2` p3-segment):** a buyer segment, never the client's positioning.
+- **Blind stages (`outcomeClause`):** the seed and paraphrase design lines now reject needs worded the way the client markets itself. The design line changed, so cached cells re-judge through the design-check keys.
+
+**Decision 1 (e57f5be, STYLE s29 -> s30).**
+- Pricing is a scenario row: every pricing cell names the client and asks its value question (worth it vs its own cheaper tier or a generic cheaper option) with the column's usage as input.
+- The spec requires the target and flags `must_name_missing_target`.
+- The design lines, the writer paragraph and the stage hint are rewritten. The "cheaper line at 450" example is gone, and shortlist is out of the writer's open-choice list.
+- The cross-cell pricing trade-off diversity pass and its brand steer are removed (about 200 lines).
+- The fixture now asserts that legacy generic pricing prompts are flagged must-name.
+
+**Verification:** tsc is clean, all checker_fixture sections pass (with new decision 3 and decision 1 assertions), the serve_logic_harness passes, and lint is clean on the touched UI files.
+
+**NOT verified live** - every new model behavior needs a spend-gated cold walk:
+- roster3's rank, adjacent and parent output;
+- the contest chips;
+- the room-rule scenario read;
+- the s30 pricing cells;
+- the outcome clause.
+
+The market-step and scenarios-gate UI was not clicked through. The local dev config's DATABASE_URL points at prod, so a wizard walk would write drafts there.
+
+**Still open:**
+- the dashboard portfolio-routing view for sister-brand head-to-heads (per-type views workstream);
+- persisting roles, picks and parents on the project (today they live in the draft only, as before);
+- saved drafts keep their stored cells - anything regenerated uses s30, and their contest chips appear when the scenarios gate is opened.
+
 ## To do (added 2026-09-27, Tyler)
 
 - **Worry identity needs canonicalization across redraws (noted 2026-10-01).** A cell's concern is frozen text ("Annual fee feels high"); trend continuity and the recommended-vs-decided record depend on string equality, so a pool redraw (edit-setup, a future re-walk) that words the same worry differently silently breaks attribution - the taxonomy/dictionary lesson in miniature. Before any flow lets a worry-era tracker redraw its pool: match redrawn worries to existing intents.concern values (embedding or LLM pairing, like the consolidation one-to-one match) and keep the ratified wording. Related latent gap, fix first: edit_setup.ts does not reconstruct grid.worries/worryPool from intents (derivable: stage + concern NOT NULL), so edit-setup on a worry-era tracker would redraw and re-prefill as if fresh, discarding the tracker's actual picks. No worry-era tracker exists yet; close before the first one gets edited.

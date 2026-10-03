@@ -1,6 +1,6 @@
 # Init decisions (2026-10-03)
 
-**All four are DECIDED, including Decision 3's companion rules 3b and 3c (confirmed 2026-10-03). None are built yet.**
+**All four are DECIDED and BUILT (2026-10-03; commits abc43ef, 3da4504, 80e0bc2, e57f5be). Build notes and what is still open: AGENTS.md "Init decisions built".**
 
 **Where these come from.** All three surfaced in the 2026-10-03 init audit (`INIT_AUDIT_2026-10-03.md`).
 
@@ -215,7 +215,7 @@ Example habitual worry cell (one stance): "I buy Doritos a lot but they've gotte
 ### What changes in the engine (to build)
 
 1. `stageLibrary`:
-   - remove `shortlist`, folding its hint into `discovery` (label "Discovery / shortlist");
+   - remove `shortlist` (**as built:** Discovery keeps its label and hint unchanged, so no Discovery cell re-keys);
    - `problem_recognition` recommended only when `involvement === "considered"`;
    - `comparison` recommended always;
    - `objections` recommended only when considered.
@@ -295,7 +295,7 @@ The left-out brands include Linear, the rival a software-dev buyer weighs most, 
    - the `adjacent` role;
    - a `parent` field.
 3. **Slot filling:** `angleRivals` reads the stored head-to-head picks when present, and falls back to "first 4 direct rivals in list order" for drafts without picks.
-   - The picks ride the cells request as data, so they self-version: unchanged picks keep every cached cell, and only cells for swapped-in rivals generate.
+   - The picks ride the cells request as data, so they self-version: unchanged picks keep every cached cell. **Build correction (2026-10-03):** every cell's cache key and the writer's "Rivals:" line carry the 4 slot rivals, so changing a pick after cells exist re-keys and redraws the whole battery, not just the swapped rival's cells. Picks are normally made at the market step, before any cell is generated, so this costs nothing in the usual flow.
    - Picks persist in the draft and on the project, like worries.
 4. **Dashboard:** a portfolio-routing view for sister-brand head-to-heads, built with the per-type dashboard views.
 5. **Records:** AGENTS.md's nonexistent "gate drag" stopgap is corrected.
