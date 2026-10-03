@@ -273,14 +273,21 @@ const AMEX_V = ["Chase", "Capital One", "Visa", "Discover"];
   expect("r13: 'import issues' in a blind Jira seed names no rival", jb.length === 0, jb);
   const jb2 = bc.checkPromptAgainstSpec({ text: "Is GitHub Issues enough, or which project management software would you pick?", spec: blindJ, category: CAT.jira });
   expect("r13: 'GitHub Issues' still names the rival", jb2.some((x: any) => x.check === "blind_names_brand"), jb2);
-  const jb3 = bc.checkPromptAgainstSpec({ text: "Our devops team needs a linear flow from backlog to release - which project management software fits?", spec: blindJ, category: CAT.jira });
-  expect("r13: lowercase 'devops' / 'linear' are not Azure DevOps / Linear", jb3.length === 0, jb3);
+  // Review 2026-10-02: "linear" (6% lowercase in the vault) and "devops"
+  // (too rare to call) are not everyday, so lowercase they DO count - the
+  // accepted cost of catching lowercase leaks; a false hit costs a regen.
+  const jb3 = bc.checkCandidateSignature("Our devops team needs a linear flow from backlog to release - which project management software fits?", blindJ, { category: CAT.jira });
+  expect("r13: lowercase 'devops' / 'linear' count (not everyday by vault share)", jb3.leaked.includes("Azure DevOps") && jb3.leaked.includes("Linear"), jb3);
   const jb4 = bc.checkPromptAgainstSpec({ text: "Is Linear better than the rest of the project management software out there?", spec: blindJ, category: CAT.jira });
   expect("r13: capitalized 'Linear' is the rival", jb4.some((x: any) => x.check === "blind_names_brand"), jb4);
   const AX = ["Chase", "Capital One", "Discover", "Citi", "Bank of America"];
   const blindA = specOf({ stage: "discovery", angle: "generic", text: "Which credit cards should I look at for groceries?" }, "American Express", AX, CAT["American Express"]);
-  const ab = bc.checkPromptAgainstSpec({ text: "My bank keeps pushing its own credit cards, but I want to discover options that chase grocery points. Which should I look at?", spec: blindA, category: CAT["American Express"] });
-  expect("r13: 'my bank' / 'discover' / 'chase' lowercase name no issuer", ab.length === 0, ab);
+  const ab = bc.checkPromptAgainstSpec({ text: "My bank keeps pushing its own credit cards. Which should I look at?", spec: blindA, category: CAT["American Express"] });
+  expect("r13: 'my bank' names no issuer", ab.length === 0, ab);
+  // "chase" / "discover" are brand-dominated in the vault (5% / 17%
+  // lowercase), so lowercase they count - "chase or amex?" is the bank.
+  const abc = bc.checkCandidateSignature("chase or discover for groceries - which credit cards should I look at?", blindA, { category: CAT["American Express"] });
+  expect("r13: lowercase 'chase' / 'discover' count (brand-dominated)", abc.leaked.includes("Chase") && abc.leaked.includes("Discover"), abc);
   const ab2 = bc.checkPromptAgainstSpec({ text: "As an American who travels abroad, which credit cards should I look at?", spec: blindA, category: CAT["American Express"] });
   expect("r13: 'American' alone does not name American Express", ab2.length === 0, ab2);
   // Alias forms: "Amex" names American Express in a must-name seed and
@@ -333,8 +340,11 @@ const AMEX_V = ["Chase", "Capital One", "Visa", "Discover"];
   expect("lexicon: 'Ring' (even sentence-initial) is the rival", n2.some((x: any) => x.check === "blind_names_brand"), n2);
   const MATT = ["Casper", "Tempur-Pedic", "Saatva"];
   const blindM = specOf({ stage: "discovery", angle: "generic", text: "Which mattresses are best for back pain?" }, "Purple", MATT, "mattresses");
-  const m1 = bc.checkPromptAgainstSpec({ text: "Our bedroom is all purple and gray. Which mattresses are best for back pain?", spec: blindM, category: "mattresses" });
-  expect("lexicon: lowercase 'purple' is not the target", m1.length === 0, m1);
+  // The TARGET's own one-word name is never case-guarded (review
+  // 2026-10-02): a leaked target is the costlier miss, a false hit costs a
+  // regeneration. Rivals keep the guard (the Ring cases above).
+  const m1 = bc.checkPromptAgainstSpec({ text: "is purple any good for back pain, or which mattresses would you pick?", spec: blindM, category: "mattresses" });
+  expect("lexicon: lowercase target 'purple' in a blind cell is a leak", m1.some((x: any) => x.check === "blind_names_brand"), m1);
   const m2 = bc.checkPromptAgainstSpec({ text: "Is a Purple better than the rest of the mattresses for back pain?", spec: blindM, category: "mattresses" });
   expect("lexicon: capitalized 'Purple' is the target", m2.some((x: any) => x.check === "blind_names_brand"), m2);
   const mustM = specOf({ stage: "renewal", angle: "generic", text: "My Purple mattress is sagging. Keep it or replace it?" }, "Purple", MATT, "mattresses");
@@ -345,6 +355,26 @@ const AMEX_V = ["Chase", "Capital One", "Visa", "Discover"];
   const blindJa = specOf({ stage: "discovery", angle: "generic", text: "Which project management software should a small dev team use?" }, "Jira", JA, CAT.jira);
   const ja = bc.checkPromptAgainstSpec({ text: "is asana or something like it the right project management software for a small dev team?", spec: blindJa, category: CAT.jira });
   expect("lexicon: lowercase coined 'asana' still leaks", ja.some((x: any) => x.check === "blind_names_brand"), ja);
+  // Lowercase blind mentions of every example target and its main rivals
+  // (review 2026-10-02: an absolute-count lexicon held "jira", "netflix",
+  // "apple", "pixel", and split-word label casing hid "samsung" - the
+  // writer's lowercase register made all of these invisible leaks).
+  const LOWER: [string, string[], string, string, string][] = [
+    ["Jira", ["Asana", "Trello", "Linear"], CAT.jira, "is jira any good for a small dev team, or which project management software would you pick?", "Jira"],
+    ["Jira", ["Asana", "Trello", "Linear"], CAT.jira, "jira or asana for project management - which would you pick?", "Asana"],
+    ["Netflix", ["Hulu", "Disney+", "Amazon Prime Video"], CAT.Netflix, "thinking about netflix vs the rest of the streaming services for the kids", "Netflix"],
+    ["Netflix", ["Hulu", "Disney+", "Amazon Prime Video"], CAT.Netflix, "is hulu the best of the streaming services for kids?", "Hulu"],
+    ["Google Pixel", ["Apple iPhone", "Samsung Galaxy", "OnePlus"], CAT["Google Pixel"], "my pixel keeps dropping calls - which phones hold signal better?", "Google Pixel"],
+    ["Google Pixel", ["Apple iPhone", "Samsung Galaxy", "OnePlus"], CAT["Google Pixel"], "apple or samsung for a teenager - which phones would you pick?", "Apple iPhone"],
+    ["Google Pixel", ["Apple iPhone", "Samsung Galaxy", "OnePlus"], CAT["Google Pixel"], "apple or samsung for a teenager - which phones would you pick?", "Samsung Galaxy"],
+    ["American Express", ["Chase", "Citi", "Capital One"], CAT["American Express"], "is american express worth it, or which credit cards would you pick?", "American Express"],
+    ["American Express", ["Chase", "Citi", "Capital One"], CAT["American Express"], "citi or something else - which credit cards would you pick?", "Citi"],
+  ];
+  for (const [tgt, rv, cat, text, leak] of LOWER) {
+    const sp = specOf({ stage: "discovery", angle: "generic", text: `Which ${cat} would you pick?` }, tgt, rv, cat);
+    const f = bc.checkCandidateSignature(text, sp, { category: cat });
+    expect(`lowercase blind leak: "${text.slice(0, 40)}..." names ${leak}`, !f.ok && f.leaked.includes(leak), f);
+  }
   // Alias forms run through the same filters (r13 review): an everyday
   // alias is case-guarded; a stopword or category alias is dropped.
   const XF = { "American Express": ["amex", "gold", "max", "cards"] };

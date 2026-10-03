@@ -11,7 +11,7 @@
  * (~/Documents/procerno_eval/internal_models/conformance/checker_fixture.md).
  */
 
-import { EVERYDAY_WORDS } from "./everyday_words";
+import { BRAND_DOMINATED, COMMON_WORDS } from "./everyday_words";
 /* -------------------- typed competitor roster (2026-09-30) ----------------
  * Every competitor is typed by WHO IT SELLS TO; its per-tracker ROLE is the
  * intersection with the tracker's audience (engine/roster.ts classifies,
@@ -383,10 +383,31 @@ function aliasKeys(extraForms: string[] | undefined, excludeTokens?: Set<string>
   return out;
 }
 
-/** A single word that is everyday English - the vault lexicon or the
- * hand-kept AMBIGUOUS_FORMS - names a brand only when capitalized. */
-function everydayWord(form: string): boolean {
-  return !form.includes(" ") && (AMBIGUOUS_FORMS.has(form) || EVERYDAY_WORDS.has(form));
+/** Is a single word everyday English, so it names a brand only when
+ * capitalized? Two tiers from the response vault (review 2026-10-02):
+ * - a LABEL word (the brand's own name, or a word of a multi-word name) is
+ *   everyday when common in lowercase AND not brand-dominated - "ring",
+ *   "nothing", "issues" yes; "jira", "netflix", "pixel", "apple", "chase"
+ *   no, because engines write them capitalized nearly always and the label
+ *   itself says the word is the brand;
+ * - an ALIAS that is not a label word is everyday when merely common -
+ *   "gold" for American Express is a brand form only capitalized, however
+ *   often the vault capitalizes "Gold" for the card.
+ * The hand-kept AMBIGUOUS_FORMS count as everyday in both tiers. */
+function everydayWord(form: string, tier: "label" | "alias"): boolean {
+  if (form.includes(" ")) return false;
+  if (AMBIGUOUS_FORMS.has(form)) return true;
+  if (!COMMON_WORDS.has(form)) return false;
+  return tier === "alias" || !BRAND_DOMINATED.has(form);
+}
+
+/** A name's own keyed words: the full key and each of its words (after the
+ * same parenthetical handling as brandForms). */
+function labelWords(name: string): Set<string> {
+  const base = name.replace(/\s*\([^)]*\)/g, "").trim();
+  const paren = [...name.matchAll(/\(([^)]*)\)/g)].map((m) => m[1]).join(" ");
+  const k = key(STOP_FORMS.has(key(base)) && key(paren).length >= 3 ? paren : base || name);
+  return new Set([k, ...k.split(" ")]);
 }
 
 /** The keyed surface forms brandPatterns matches (see there). */
@@ -785,7 +806,10 @@ export interface CellCheckSpec {
  * Max, "do I need a visa" is not Visa). Shared with the legacy signature
  * filter in instrument.ts. */
 export const AMBIGUOUS_FORMS = new Set([
-  "max", "visa", "citi", "prime", "go", "one", "mini", "pro", "plus",
+  // "citi" removed (review 2026-10-02): no recorded reason, the vault
+  // lexicon rates it coined (1 lowercase use vs 2,600 capitalized), and the
+  // guard was hiding a real lowercase mention ("citi or american express").
+  "max", "visa", "prime", "go", "one", "mini", "pro", "plus",
   "air", "fire", "mission", "video", "music", "cloud", "monday",
   // r13 (2026-10-02 cold-walk audit): roster tokens that are everyday words
   // in their category - "import issues" named "GitHub Issues / Projects"
@@ -832,7 +856,7 @@ export function namesRequiredBrand(
   }
   const caseGuarded = new Set<string>();
   for (const fk of aliasKeys(opts?.extraForms, opts?.excludeTokens)) {
-    if (everydayWord(fk) && !forms.has(fk)) caseGuarded.add(fk);
+    if (!forms.has(fk) && everydayWord(fk, "alias")) caseGuarded.add(fk);
     else forms.add(fk);
   }
   if ([...forms].some((f) => new RegExp(`\\b${esc(f)}s?\\b`).test(t))) return true;
@@ -847,7 +871,15 @@ export function namesRequiredBrand(
  * capitalized - and a brand whose whole name is an ambiguous stopword
  * ("Max") counts when capitalized, as the legacy signature did. */
 export function namesForbiddenBrand(
-  text: string, name: string, opts?: { extraForms?: string[]; excludeTokens?: Set<string> }
+  text: string, name: string, opts?: {
+    extraForms?: string[]; excludeTokens?: Set<string>;
+    /** The study's client brand: its own one-word name is never
+     * case-guarded (review 2026-10-02). A target leaking into a blind cell
+     * is the costliest miss - a lowercase "purple" or "target" there is
+     * more likely the brand than not - while a false hit only costs a
+     * regeneration. Rivals keep the guard. */
+    isTarget?: boolean;
+  }
 ): boolean {
   const raw = text.replace(new RegExp(TERM_COLLISIONS.source, "gi"), " ");
   const t = key(raw);
@@ -855,16 +887,12 @@ export function namesForbiddenBrand(
     const cap = form[0].toUpperCase() + form.slice(1);
     return new RegExp(`(?:^|[^A-Za-z0-9])(?:${esc(cap)}|${esc(form.toUpperCase())})(?:s|'s)?(?![A-Za-z0-9])`).test(raw);
   };
-  // r13 (2026-10-02 cold-walk round 3): a word split out of a multi-word
-  // name ("Nothing" of "Nothing Phone", "Issues" of "GitHub Issues", "Bank"
-  // of "U.S. Bank") names the brand only when written the label's way - its
-  // first letter cased as in the label - and not as a sentence's first
-  // word. Every fresh roster draws new everyday-word names, so a word list
-  // cannot keep up; the label's own casing can. A token the dictionary
-  // aliases list as what people call the brand ("pixel", "iphone",
-  // "galaxy") stays case-blind.
+  // r13 (2026-10-02): everyday words inside brand names. Every fresh roster
+  // draws new everyday-word names (GitHub Issues, U.S. Bank, Nothing Phone,
+  // Ring), so no word list keeps up; the vault lexicon decides which words
+  // are everyday (everydayWord), and the label's own casing decides how an
+  // everyday split word must be written to count (labelCased).
   const spellings = labelSpellings(name);
-  const aliasKeys = new Set((opts?.extraForms ?? []).map(key));
   const labelCased = (form: string) => {
     const sp = spellings!.get(form)!;
     const firstUpper = sp[0] !== sp[0].toLowerCase();
@@ -879,19 +907,29 @@ export function namesForbiddenBrand(
     }
     return false;
   };
-  const split = (form: string) => !!spellings?.has(form) && !aliasKeys.has(form);
+  const own = labelWords(name);
   const upperLabel = (form: string) => { const sp = spellings!.get(form)!; return sp[0] !== sp[0].toLowerCase(); };
+  const wholeName = key(speakable(name));
   for (const form of brandForms(name, opts)) {
-    // A capitalized label word takes the label rule first (it also skips
-    // sentence starts); a lowercase label ("monday.com") keeps the
-    // case guard, which wants it capitalized.
-    if (split(form) && upperLabel(form)) { if (labelCased(form)) return true; continue; }
-    // One-word names and single-word aliases that are everyday English
-    // ("Ring", "Nothing", "Purple"; vault lexicon) count only capitalized -
-    // a sentence start still counts, since "Chase isn't working for me"
-    // names the bank; coined words ("hulu", "asana") stay case-blind.
-    if (everydayWord(form)) { if (capitalized(form)) return true; continue; }
-    if (split(form)) { if (labelCased(form)) return true; continue; }
+    if (own.has(form) && spellings?.has(form)) {
+      // A word split out of a multi-word name: an everyday one ("Issues",
+      // "Bank", "Nothing") counts only written the label's way and never
+      // as a sentence's first word (a lowercase label word like "monday"
+      // of monday.com wants a capital); a coined or brand-dominated one
+      // ("samsung", "apple", "pixel") stays case-blind - the writer's
+      // lowercase register names brands that way ("apple or samsung").
+      if (everydayWord(form, "label")) { if (upperLabel(form) ? labelCased(form) : capitalized(form)) return true; continue; }
+    } else if (own.has(form)) {
+      // A one-word name: everyday ("Ring", "Nothing") counts only
+      // capitalized - a sentence start still counts, since "Chase isn't
+      // working for me" names the bank. Never for the study's own target
+      // (see isTarget).
+      if (everydayWord(form, "label") && !(opts?.isTarget && form === wholeName)) { if (capitalized(form)) return true; continue; }
+    } else if (everydayWord(form, "alias")) {
+      // An alias that is not a word of the name ("gold"): capitalized only.
+      if (capitalized(form)) return true;
+      continue;
+    }
     if (new RegExp(`\\b${esc(form)}s?\\b`).test(t)) return true;
   }
   const primary = key(speakable(name));
@@ -1112,7 +1150,7 @@ export function checkCandidateSignature(
   );
   const roster = [...spec.requiredBrands, ...spec.forbiddenBrands, ...(spec.angleBrand ? [spec.angleBrand] : [])];
   const leaked = spec.forbiddenBrands.filter(
-    (b) => namesForbiddenBrand(withoutOtherBrands(text, b, roster), b, { extraForms: opts?.extraForms?.[b], excludeTokens })
+    (b) => namesForbiddenBrand(withoutOtherBrands(text, b, roster), b, { extraForms: opts?.extraForms?.[b], excludeTokens, isTarget: b === spec.target })
   );
   // A class cell's expected signature is {target + classBrand}: the class
   // must actually be evoked, detected case-blind and format-tolerant like

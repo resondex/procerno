@@ -116,7 +116,7 @@ const STYLE_VERSION = "s29";
  * 7's unversioned serve-time re-check had no terminal state). Bump when
  * a deterministic check changes meaning; bumping costs one free re-judge
  * per unit, and model calls only for units the new rules reject. */
-export const SEED_RULES_VERSION = "r13"; // r13 (2026-10-02 cold-walk audit + review): verb-less stated prices ("Gold at 250"); word-anchored price-concern test + money bolt-ons; brand checks read filtered dictionary alias forms ("amex"); everyday words inside brand names never name the brand - category tokens containment-aware, split words of multi-word names in label casing and not sentence-initial, one-word names and aliases in the vault everyday-word lexicon capitalized only, other brands' full names scrubbed first. r4 (2026-10-01): r2 calendar-year/60-word/segment-vocab; r3 category-naming labels exempt from substring leak; r4 'standardization' in segment vocabulary; r5 directionless-switch string check; r6 punctuation-blind label-leak matching; r7-r8 switch direction detected by absence (no OS, no roster brand near switch vocabulary); cheaper bolt-on token on non-price concerns
+export const SEED_RULES_VERSION = "r14"; // r14 (2026-10-02 review): everyday-word lexicon by lowercase SHARE in two tiers (label words: common and not brand-dominated - "jira", "netflix", "pixel", "apple", "chase" count lowercase again; aliases: merely common - "gold" stays capital-only), coined split words case-blind ("apple or samsung"), the target's own one-word name never case-guarded, "citi" off the case-guard list, and a monthly figure is the asker's plan only in first-person / spend / offer context ("the Pro about 20 a month more" is a stated price). r13 (2026-10-02 cold-walk audit + review): verb-less stated prices ("Gold at 250"); word-anchored price-concern test + money bolt-ons; brand checks read filtered dictionary alias forms ("amex"); everyday words inside brand names never name the brand - category tokens containment-aware, split words of multi-word names in label casing and not sentence-initial, one-word names and aliases in the vault everyday-word lexicon capitalized only, other brands' full names scrubbed first. r4 (2026-10-01): r2 calendar-year/60-word/segment-vocab; r3 category-naming labels exempt from substring leak; r4 'standardization' in segment vocabulary; r5 directionless-switch string check; r6 punctuation-blind label-leak matching; r7-r8 switch direction detected by absence (no OS, no roster brand near switch vocabulary); cheaper bolt-on token on non-price concerns
 
 /** Brand forms that double as ordinary English words: only these demand a
  * capitalized occurrence to count as naming the brand ("2-3 services max"
@@ -3345,10 +3345,23 @@ export async function generateGrid(input: {
       const unitAfter = /^[\d.,k\s-]*(?:engineers?|people|employees?|users?|seats?|agents?|devs?|requesters?|hours?|trips?|nights?|photos?|videos?|gb|tb|times|lines|stores?|squads?|percent|%)\b/i;
       const dealBefore = /(?:trade[- ]?in|credits?|budget|bill|spend\w*|offer\w*|deal)[^.!?]{0,16}$/i;
       const planAfter = /^[\d.,k\s-]*(?:a month\b|\/mo\b|per month|monthly)/i;
+      // A monthly figure is the asker's plan only in the asker's own
+      // context (review 2026-10-02: "Holiday promos have the Pro about 20 a
+      // month more than the regular" passed as if it were their bill). The
+      // same sentence, up to and including the matched words, must carry a
+      // first-person word or a spend / budget / bill / offer / deal /
+      // trade-in word. Calibrated on 3,561 seeds: exactly that one seed
+      // newly flags; every asker-owned figure and received offer still passes.
+      const ownPlanContext = (at: number, len: number) => {
+        const head = c.text.slice(0, at + len);
+        const ss = Math.max(head.lastIndexOf(".", at - 1), head.lastIndexOf("?", at - 1), head.lastIndexOf("!", at - 1), head.lastIndexOf(":", at - 1)) + 1;
+        return /\b(?:I|I'm|I'll|I'd|we|we're|we'll|my|our|me|us)\b|\b(?:spend\w*|budget\w*|bill\w*|offer\w*|deals?|trade[- ]?ins?|groceries|dining|gas|travel|ads)\b/i.test(head.slice(ss));
+      };
+      const askersPlan = (after: string, at: number, len: number) => planAfter.test(after) && ownPlanContext(at, len);
       for (const m of c.text.matchAll(priceAssert)) {
         const after = c.text.slice((m.index ?? 0) + m[0].length - 1);
         const before = c.text.slice(Math.max(0, (m.index ?? 0) - 28), m.index);
-        if (unitAfter.test(after) || dealBefore.test(before) || planAfter.test(after)) continue;
+        if (unitAfter.test(after) || dealBefore.test(before) || askersPlan(after, m.index ?? 0, m[0].length)) continue;
         out.push({
           check: "seed_states_price" as const,
           detail: `the seed states a product's price ("...${c.text.slice(Math.max(0, (m.index ?? 0) - 20), (m.index ?? 0) + m[0].length + 10).trim()}...") - prices date and every answer then starts from a false premise; name the tier or product and ASK what it costs or which nets out better (the asker's own spend, budget or a deal offered to them is circumstance and stays)`,
@@ -3372,7 +3385,7 @@ export async function generateGrid(input: {
           if (pre === "" || /[.!?:"\u201c]$/.test(pre)) continue; // sentence-initial capital is not a product word
           const after = c.text.slice(at + m[0].length);
           const before = c.text.slice(Math.max(0, at - 28), at);
-          if (unitAfter.test(after) || dealBefore.test(before) || planAfter.test(after) || /^\d[\d.,]*\s*%/.test(after)) continue;
+          if (unitAfter.test(after) || dealBefore.test(before) || askersPlan(after, at, m[0].length) || /^\d[\d.,]*\s*%/.test(after)) continue;
           out.push({
             check: "seed_states_price" as const,
             detail: `the seed states a product's price ("...${c.text.slice(at, at + m[0].length + 8).trim()}...") - prices date and every answer then starts from a false premise; name the tier or product and ASK what it costs or which nets out better (the asker's own spend, budget or a deal offered to them is circumstance and stays)`,
