@@ -1094,7 +1094,7 @@ export async function nearScenarios(input: {
   // scenario_near_pool3 (2026-10-02): the defining need stays fixed (Pixel's
   // "Flagship photography & AI" drew "Refurbished flagship" - kept the word,
   // swapped the need for price).
-  const key = cacheKey("scenario_near_pool3", [
+  const key = cacheKey("scenario_near_pool4", [
     input.category, input.audience, input.of.label, input.of.description, avoid.join("|"),
   ]);
   const hit = await store.cacheGet(key, CACHE_TTL_MS);
@@ -1115,11 +1115,13 @@ export async function nearScenarios(input: {
           "NEED - what this buyer is after, the thing that makes it this " +
           "scenario (a buyer after the best camera and AI stays after the " +
           "best camera and AI) - and moves ONE concrete circumstance around " +
-          "it (scale, constraint, occasion, who it is for, how they buy), a " +
+          "it (scale, occasion, who it is for, where or how it gets used), a " +
           "DIFFERENT detail per variant, so each reads noticeably but not " +
           "radically different. A variant that keeps a word of the label " +
-          "but trades the defining need for another one (price, a different " +
-          "goal) is a different scenario, not a near variant. Order them closest-first. Every variant must still " +
+          "but trades the defining need for another one is a different " +
+          "scenario, not a near variant - and NEVER introduce a money " +
+          "angle (lower cost, budget, refurbished, financing, deals) unless " +
+          "the original situation is itself about price. Order them closest-first. Every variant must still " +
           "change what a competent advisor would recommend, stay about " +
           "the decision (never the speaker), and differ from the others " +
           "and from everything already listed. Scenarios describe " +
