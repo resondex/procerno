@@ -1391,13 +1391,17 @@ export async function reviewJourneyFit(input: {
   // "journey_fit3": suggestions carry stagesIn (the stage delta the flip
   // would cause) so cached entries always have it. fit2 framed reasons
   // against the market norm, hinged on audience width.
-  const key = cacheKey("journey_fit4", [
+  // journey_fit5 (2026-10-02): recurring-membership wording + majority of
+  // three samples (gpt-5-mini cannot run at temperature 0; one AmEx walk
+  // cached an empty advisory where the same prompt usually suggests
+  // subscription - the warning was a coin flip).
+  const key = cacheKey("journey_fit5", [
     input.brand, input.category,
     dims.map((d) => String(input.base[d])).join("|"),
   ]);
   const hit = await store.cacheGet(key, CACHE_TTL_MS);
   if (hit) return JSON.parse(hit) as JourneyFit;
-  const res = await openaiClient().chat.completions.create({
+  const sample = () => openaiClient().chat.completions.create({
     model: INSTRUMENT_HELPER_MODEL,
     reasoning_effort: "low",
     messages: [
@@ -1413,7 +1417,15 @@ export async function reviewJourneyFit(input: {
           "Suggest a change ONLY for a clear BUSINESS-MODEL-level " +
           "difference - a subscription-first brand in a category mostly " +
           "rebought off the shelf, a committee-sold brand in a solo-buyer " +
-          "category. Never suggest because the brand is premium, popular, " +
+          "category. When the PRODUCT ITSELF is an account or membership " +
+          "that renews by default with a recurring fee (an annual-fee card, " +
+          "a warehouse membership, an auto-renewing plan), that is a " +
+          "subscription-style relationship even when the category is mostly " +
+          "bought once - its buyers re-decide at every renewal. A one-off " +
+          "product whose maker ALSO sells add-on services (a phone with a " +
+          "cloud plan) is not. Status, prestige or a loyal fan base is never " +
+          "a reason to change head-or-heart, and a product shared at home " +
+          "is not a household decision unless the household decides together. Never suggest because the brand is premium, popular, " +
           "or big; only when its buyers' PROCESS differs. At most TWO " +
           "suggestions; MOST brands match their category, and an empty " +
           "list is the common, correct answer. suggested must be a valid " +
@@ -1444,9 +1456,23 @@ export async function reviewJourneyFit(input: {
       json_schema: { name: "journey_fit", strict: true, schema: JOURNEY_FIT_SCHEMA },
     },
   });
-  const parsed = JSON.parse(res.choices[0]?.message?.content ?? "{}") as {
-    suggestions?: { dimension: string; suggested: string; reason: string }[];
-  };
+  const runs = await Promise.all([sample(), sample(), sample()]);
+  type Sug = { dimension: string; suggested: string; reason: string };
+  const samples = runs.map((r) => (JSON.parse(r.choices[0]?.message?.content ?? "{}") as { suggestions?: Sug[] }).suggestions ?? []);
+  // Keep a suggestion only when at least two of three samples make it (same
+  // dimension and value); its reason comes from the first sample that does.
+  const votes = new Map<string, { n: number; s: Sug }>();
+  for (const list of samples) {
+    const seen = new Set<string>();
+    for (const sg of list) {
+      const k = `${sg.dimension}=${sg.suggested}`;
+      if (seen.has(k)) continue;
+      seen.add(k);
+      const v = votes.get(k);
+      if (v) v.n++; else votes.set(k, { n: 1, s: sg });
+    }
+  }
+  const parsed = { suggestions: [...votes.values()].filter((v) => v.n >= 2).sort((a, b) => b.n - a.n).map((v) => v.s) };
   const plainText = (t: string) => humanize((t ?? "").replace(/\s*[—–]\s*/g, " - "));
   const valid = (d: string, v: string) =>
     ((MODERATOR_PROPS as Record<string, { enum?: readonly string[] }>)[d]?.enum ?? []).includes(v);
