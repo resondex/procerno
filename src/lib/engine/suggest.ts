@@ -47,7 +47,11 @@ const PROFILE_SCHEMA = {
  * prompt's meaning changes. */
 export async function getBrandProfile(brand: string): Promise<BrandProfile> {
   tagCosts({ purpose: "setup:brand_profile" });
-  const key = cacheKey("analyze2", [BRAND_PROFILE_MODEL, "p2-5to8", brand]);
+  // p3-segment (2026-10-03, init decision 4): the audience is the
+  // category's buyer segment, never the client's positioning - Pixel's
+  // "clean, Google-powered Android" audience leaked into its scenarios,
+  // its blind cells and its roster typing (iPhone read as upstream).
+  const key = cacheKey("analyze2", [BRAND_PROFILE_MODEL, "p3-segment", brand]);
   const hit = await store.cacheGet(key, CACHE_TTL_MS);
   if (hit) return JSON.parse(hit) as BrandProfile;
   const profile = await suggestBrandProfile(brand);
@@ -388,7 +392,13 @@ export async function suggestBrandProfile(
           "The category label must be broad enough to contain every " +
           "competitor listed - never name a category that excludes one of " +
           "them (e.g. not 'Android smartphones' with iPhone as a rival).\n" +
-          "- audience: the primary buyer audience in a short phrase.\n" +
+          "- audience: the category's primary buyers in a short phrase - WHO " +
+          "they are and what they are trying to get done, in category terms " +
+          "('people choosing a new smartphone - upgraders and switchers', " +
+          "'software development teams'). Never the brand's own positioning " +
+          "or selling points, and never a platform or ecosystem preference " +
+          "that rules rivals out ('buyers wanting a clean Android phone' " +
+          "excludes iPhone buyers).\n" +
           "If the brand is ambiguous or unknown, pick the most likely commercial " +
           "interpretation and answer anyway.",
       },

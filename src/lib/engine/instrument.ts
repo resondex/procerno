@@ -811,9 +811,12 @@ export async function readScenarios(input: {
   tagCosts({ purpose: "setup:scenarios" });
   // "scenarios_journeys12": the read is SPLIT - Claude Opus classifies
   // the base journey (see JOURNEY_MODEL), gpt-5 writes the scenarios
-  // against that given base. v11 tightened the guide boundaries; the
-  // guide and scenario rules are unchanged here.
-  const key = cacheKey("scenarios_journeys13", [
+  // against that given base. v11 tightened the guide boundaries.
+  // 14 (2026-10-03, init decision 4): rooms are written to the positive
+  // room rule - a buyer occasion (who, situation, wanted outcome) in the
+  // buyer's outcome language, contested by the category's leading
+  // brands - instead of only "never name a brand".
+  const key = cacheKey("scenarios_journeys14", [
     input.category, input.audience, input.forBrand ?? "",
   ]);
   const read = await coalesced<{
@@ -842,7 +845,17 @@ export async function readScenarios(input: {
           "way a strategist would title a slide ('Solo founder pick', " +
           "'Enterprise procurement') - never analytical or methodology " +
           "words like 'default', 'habitual', 'segment', 'use case'. " +
-          "Descriptions one short sentence. Scenarios describe circumstances, never a specific brand or product - 'migrating from a legacy tracker', not 'migrating from X'. Spend the " +
+          "Descriptions one short sentence. Each scenario is a ROOM: a " +
+          "buyer occasion in this category - who the buyer is, the " +
+          "situation they are in, and the outcome they want ('shoots a " +
+          "lot, wants the best camera phone, keeps it for years'). Write it " +
+          "in the buyer's outcome language - the need every serious " +
+          "contender's pitch speaks to - and describe circumstances by " +
+          "what is happening ('migrating from a legacy tracker'), never by " +
+          "a specific brand or product. A room is CONTESTED: most of the " +
+          "category's leading brands are plausible contenders for that " +
+          "buyer; a room only one product line serves, or one that belongs " +
+          "to a different category, is not this market's room. Spend the " +
           "slots on DIFFERENT axes of circumstance (scale, composition, " +
           "constraint, occasion, recipient), not variants of one.\n" +
           "2) per scenario, deviates: true ONLY if that scenario's buyer " +
@@ -893,7 +906,10 @@ export async function readScenarios(input: {
               "genuinely competes - centered on product types it actually " +
               "sells today - and its flagship line's occasion must be in " +
               "the core four. The wording stays brand-blind as ever: " +
-              "describe the circumstance, never name any brand."
+              "describe the circumstance in the buyer's outcome language, " +
+              "never name any brand, and keep each room contested - one " +
+              "the brand's rivals compete in too, not one built on the " +
+              "brand's own selling points."
             : ""),
       },
       {
@@ -1600,7 +1616,12 @@ export async function reviewScenarioFit(input: {
   // own scenario check before it is offered (the AmEx "Dining & groceries
   // rewards" suggestion was flagged "mixed decision factors" one screen
   // later by reviewScenarios).
-  const key = cacheKey("scenario_fit6", [
+  // scenario_fit7 (2026-10-03, init decision 4): the suggestion is written
+  // to the room rule (buyer occasion, outcome language, contested, in the
+  // category) - fit6 proposed "Buying the top-tier Pixel..." on Pixel and
+  // Jira Service Management's help-desk room on Jira - and a suggestion
+  // that names the client brand is dropped mechanically.
+  const key = cacheKey("scenario_fit7", [
     input.brand, input.category, input.audience ?? "",
     input.scenarios.map((s) => `${s.label.trim()}|${s.description.trim()}`).join("~"),
   ]);
@@ -1624,7 +1645,16 @@ export async function reviewScenarioFit(input: {
           "RECOMMEND adding - a flagship product line with no scenario, or " +
           "a buying occasion central to how THIS brand is bought that the " +
           "set does not cover. Propose at most one (label 2-4 plain words, " +
-          "description one short sentence in buyer language). The bar is a " +
+          "description one short sentence in buyer language). Write it as a " +
+          "ROOM: a buyer occasion in THIS category - who the buyer is, their " +
+          "situation, the outcome they want - in the buyer's outcome " +
+          "language every serious contender's pitch speaks to. Never name " +
+          "the brand or any product, and never build the room from the " +
+          "brand's own selling points; the room must be one the brand's " +
+          "rivals compete in too. A room the brand serves with a product in " +
+          "a DIFFERENT category (a separate product line sold to a " +
+          "different kind of buyer) is not a missing core room for this " +
+          "study. The bar is a " +
           "real recommendation the strategist would defend, never brain" +
           "storming - if nothing clearly earns a place, null. Many scenario " +
           "sets are complete; null is a normal answer.\n" +
@@ -1669,6 +1699,11 @@ export async function reviewScenarioFit(input: {
         }
       : null,
   };
+  // Decision 4: a suggested room never names the client (mechanical - the
+  // prompt rule alone let "the top-tier Pixel" through).
+  if (fit.missingCore && textNamesBrand(`${fit.missingCore.label}. ${fit.missingCore.description}`, input.brand)) {
+    fit.missingCore = null;
+  }
   // Our own suggestion must pass our own check: run it through the gate's
   // scenario review. A flagged suggestion is offered as the review's
   // corrected version; one the review cannot correct is not offered.
@@ -1690,6 +1725,111 @@ export async function reviewScenarioFit(input: {
   }
   await store.cacheSet(key, JSON.stringify(fit), stampOf(input));
   return fit;
+}
+
+/** One room's contest verdict (init decision 4). */
+export interface RoomCheck {
+  label: string;
+  /** Direct rivals (names as given) that are plausible contenders for
+   * this room's buyer. */
+  contenders: string[];
+  /** How many direct rivals were weighed. */
+  rivals: number;
+  /** Most of the direct rivals contend (at least half). */
+  contested: boolean;
+  /** A phrase in the room worded as one brand's own selling point rather
+   * than the buyer's outcome; empty when none. */
+  pitch: string;
+  /** Tracked brands (client or rivals) the room's text names. */
+  names: string[];
+}
+
+/**
+ * The scenarios gate's contest check (init decision 4, 2026-10-03): for
+ * each room, which of the tracker's DIRECT rivals compete for its buyer,
+ * and whether its wording borrows one brand's pitch. Brands tailor their
+ * pitch to the rooms that matter, so a room the client is strong in is
+ * fine - the test is whether the rivals are in the room too. Runs per
+ * tracker (the market read is shared across a category and never sees a
+ * roster), cached per room, one batched call for the uncached rooms.
+ * Brand names are found mechanically. Fails open to no verdicts.
+ */
+export async function checkRooms(input: {
+  brand: string;
+  category: string;
+  /** Direct rivals only (same_seat + bench) - upstream and adjacent
+   * brands are not the room's contenders by definition. */
+  rivals: string[];
+  rooms: Situation[];
+  meta?: CacheMeta;
+}): Promise<RoomCheck[]> {
+  tagCosts({ purpose: "setup:room_check" });
+  const rivals = [...new Set(input.rivals.map((r) => r.trim()).filter(Boolean))];
+  const rooms = input.rooms.filter((r) => r.label.trim());
+  if (rooms.length === 0) return [];
+  const namesOf = (r: Situation) =>
+    [input.brand, ...rivals].filter((b) => textNamesBrand(`${r.label}. ${r.description}`, b));
+  const keyOf = (r: Situation) => cacheKey("room_check1", [
+    DESIGN_CHECK_MODEL, input.brand, input.category, [...rivals].map((x) => x.toLowerCase()).sort().join(","),
+    `${r.label.trim()}|${r.description.trim()}`,
+  ]);
+  const keys = rooms.map(keyOf);
+  let cached: Map<string, string>;
+  try { cached = await store.cacheGetMany(keys, CACHE_TTL_MS); } catch { cached = new Map(); }
+  const verdicts = new Map<number, { contenders: string[]; pitch: string }>();
+  rooms.forEach((_, i) => {
+    const hit = cached.get(keys[i]);
+    if (hit) { try { verdicts.set(i, JSON.parse(hit)); } catch { /* re-judge */ } }
+  });
+  const misses = rooms.map((_, i) => i).filter((i) => !verdicts.has(i));
+  if (misses.length > 0 && rivals.length > 0) {
+    try {
+      const a = await anthropicClient();
+      const res = await a.messages.create({
+        model: DESIGN_CHECK_MODEL,
+        max_tokens: 1500,
+        output_config: { effort: DESIGN_CHECK_EFFORT },
+        system:
+          `Each buying room below is a buyer occasion in the ${input.category} market. For each room give:\n` +
+          `- contenders: which of these brands are plausible contenders for that room's buyer - ${rivals.join(", ")} - names exactly as given. A brand contends when a buyer in that room would reasonably consider it; it need not be the favorite.\n` +
+          `- pitch: if the room's wording borrows ONE specific brand's own selling-point vocabulary (its signature feature names, taglines or platform labels) instead of the buyer's outcome language, quote that phrase; otherwise an empty string. Buyer outcomes every contender speaks to ("wants the best camera", "needs it running this week") are not pitch.\n` +
+          `Reply with ONLY JSON: {"rooms": [{"contenders": [...], "pitch": "..."}, ...]} - one entry per room, in order.`,
+        messages: [{
+          role: "user",
+          content: misses.map((i, k) => `${k + 1}. ${rooms[i].label}: ${rooms[i].description}`).join("\n"),
+        }],
+      } as never);
+      const text = (res as { content: { type: string; text?: string }[] }).content
+        .filter((b) => b.type === "text").map((b) => b.text ?? "").join("").trim();
+      const j = JSON.parse(firstJsonObject(text) ?? text) as { rooms?: { contenders?: string[]; pitch?: string }[] };
+      const byKey = new Map(rivals.map((r) => [r.toLowerCase(), r]));
+      await Promise.all(misses.map(async (i, k) => {
+        const row = j.rooms?.[k];
+        if (!row) return;
+        // Only names we sent survive - the model never adds a brand.
+        const contenders = [...new Set((row.contenders ?? []).map((c) => byKey.get(String(c).trim().toLowerCase())).filter((c): c is string => !!c))];
+        const v = { contenders, pitch: humanize(String(row.pitch ?? "").replace(/\s*[—–]\s*/g, " - ")).slice(0, 80) };
+        verdicts.set(i, v);
+        await store.cacheSet(keys[i], JSON.stringify(v), stampOf(input)).catch(() => {});
+      }));
+    } catch (err) {
+      console.error("room check failed open:", err);
+    }
+  }
+  return rooms.flatMap((r, i) => {
+    const v = verdicts.get(i);
+    const names = namesOf(r);
+    if (!v && rivals.length > 0) return names.length > 0 ? [{ label: r.label, contenders: [], rivals: rivals.length, contested: true, pitch: "", names }] : [];
+    const contenders = v?.contenders ?? [];
+    return [{
+      label: r.label,
+      contenders,
+      rivals: rivals.length,
+      contested: rivals.length === 0 || contenders.length >= Math.ceil(rivals.length / 2),
+      pitch: v?.pitch ?? "",
+      names,
+    }];
+  });
 }
 
 /** Why a prompt edit was flagged: drift, brand design, coherence, or a

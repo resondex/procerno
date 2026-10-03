@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, type ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { deriveCheckSpec, sameSeatOf, type CellCheckSpec, type RosterClasses, type RosterRoles } from "@/lib/engine/battery_checks";
 import { InlineSpinner } from "../components/spinner";
 
@@ -1563,13 +1563,29 @@ function TagChip({ tag }: { tag: GridStage["tag"] }) {
 
 /** Step "Buying scenarios": one card per scenario - tick, label,
  * description, and the journey. Nothing else competes for the screen. */
+/** The contest check's verdict for one room (/api/setup/grid/rooms). */
+interface RoomCheckUi {
+  label: string;
+  contenders: string[];
+  rivals: number;
+  contested: boolean;
+  pitch: string;
+  names: string[];
+}
+
 export function ScenariosGate({
   state, setState, onRecompose, onRecomposeBase, onSuggestScenario, onNearScenario, onWarmReview, busy,
   maxScenarios = MAX_SCENARIOS, readDelta, fitBrand, fitCategory, onRebuildForBrand,
-  onBackToCategory,
+  onBackToCategory, rivals, setupId,
 }: {
   state: GridState;
   setState: (s: GridState) => void;
+  /** The tracker's DIRECT rivals (same_seat + bench) - the contest check
+   * asks which of them compete in each room (init decision 4). Omit to
+   * disable the chips. */
+  rivals?: string[];
+  /** Cost attribution header for the contest check. */
+  setupId?: string;
   onRecompose: (base: GridState["moderators"], rows: ScenarioRow[], cells?: GridCellUi[]) => void;
   /** A "Your market buys" edit - same recompose, but the wizard narrates
    * what changed via `readDelta`. */
@@ -1641,7 +1657,49 @@ export function ScenariosGate({
     !rows.some((r) => r.label.trim().toLowerCase() === fit.missingCore!.label.trim().toLowerCase())
       ? fit.missingCore
       : null;
-  const showFit = !fitDismissed && (fitFlags.length > 0 || fitMissing !== null);
+  // Contest check (init decision 4): which direct rivals compete in each
+  // room, any one-brand pitch wording, any tracked brand a room names.
+  // Debounced on the room text; cached server-side per room, so editing
+  // one card re-checks only that card.
+  const roomKey = (r: { label: string; description: string }) => `${r.label.trim()}|${r.description.trim()}`;
+  const [roomChecks, setRoomChecks] = useState<Record<string, RoomCheckUi>>({});
+  const checkRooms = [
+    ...rows.filter((r) => r.label.trim()),
+    ...(fitMissing ? [{ label: fitMissing.label, description: fitMissing.description }] : []),
+  ].map((r) => ({ label: r.label.trim(), description: r.description.trim() }));
+  const checkSig = rivals && fitBrand && fitCategory
+    ? JSON.stringify([fitBrand, fitCategory, rivals, checkRooms])
+    : "";
+  useEffect(() => {
+    if (!checkSig) return;
+    const [brand, category, rv, rooms] = JSON.parse(checkSig) as [string, string, string[], { label: string; description: string }[]];
+    if (rooms.length === 0) return;
+    const t = setTimeout(() => {
+      void fetch("/api/setup/grid/rooms", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", ...(setupId ? { "x-setup-id": setupId } : {}) },
+        body: JSON.stringify({ brand, category, rivals: rv, rooms: rooms.slice(0, 10) }),
+      })
+        .then((r) => (r.ok ? r.json() : null))
+        .then((d: { checks?: RoomCheckUi[] } | null) => {
+          if (!d?.checks) return;
+          const next: Record<string, RoomCheckUi> = {};
+          d.checks.forEach((c) => {
+            const room = rooms.find((x) => x.label === c.label.trim());
+            if (room) next[roomKey(room)] = c;
+          });
+          setRoomChecks(next);
+        })
+        .catch(() => {});
+    }, 800);
+    return () => clearTimeout(t);
+  }, [checkSig, setupId]);
+  /** A suggested room that fails the room rule is never offered. */
+  const missingCheck = fitMissing ? roomChecks[roomKey(fitMissing)] : undefined;
+  const fitMissingShown = fitMissing && !(missingCheck && (!missingCheck.contested || missingCheck.names.length > 0 || missingCheck.pitch))
+    ? fitMissing
+    : null;
+  const showFit = !fitDismissed && (fitFlags.length > 0 || fitMissingShown !== null);
 
   return (
     <div className="grid gap-3 max-w-4xl">
@@ -1883,10 +1941,10 @@ export function ScenariosGate({
               - a fresh read focused on occasions it competes in.
             </p>
           )}
-          {fitMissing && (
+          {fitMissingShown && (
             <p className="m-0">
-              <span className="font-medium">You may wish to consider a {fitMissing.label.toLowerCase()} scenario:</span>{" "}
-              {fitMissing.reason}{" "}
+              <span className="font-medium">You may wish to consider a {fitMissingShown.label.toLowerCase()} scenario:</span>{" "}
+              {fitMissingShown.reason}{" "}
               <button
                 type="button"
                 disabled={busy}
@@ -1898,8 +1956,8 @@ export function ScenariosGate({
                     [
                       ...rows,
                       {
-                        label: fitMissing.label,
-                        description: fitMissing.description,
+                        label: fitMissingShown.label,
+                        description: fitMissingShown.description,
                         journey: null,
                         suggested: true,
                         on: active.length < cap,
@@ -1907,8 +1965,8 @@ export function ScenariosGate({
                         // near-neighbor draws anchor on it and "Reset to
                         // suggested" returns to it (without these, reset
                         // kept the last draw - Pixel walk, 2026-10-02).
-                        original: { label: fitMissing.label, description: fitMissing.description },
-                        first: { label: fitMissing.label, description: fitMissing.description },
+                        original: { label: fitMissingShown.label, description: fitMissingShown.description },
+                        first: { label: fitMissingShown.label, description: fitMissingShown.description },
                       },
                     ],
                     active.length < cap
@@ -2042,6 +2100,35 @@ export function ScenariosGate({
                   {MAX_VARIANTS} variations tried - edit the text above to make it yours
                 </span>
               ))}
+            {(() => {
+              const c = roomChecks[roomKey(sc)];
+              if (!c || !sc.label.trim()) return null;
+              const who = c.contenders.length > 0 ? c.contenders.join(", ") : "none of your rivals";
+              if (c.names.length > 0)
+                return (
+                  <span className="text-warning" title="Describe the buyer's situation and the outcome they want - a room that names a brand answers its own questions.">
+                    Names {c.names.join(", ")}
+                  </span>
+                );
+              if (!c.contested)
+                return (
+                  <span className="text-warning" title={`Contenders: ${who}. A room most of your rivals compete in measures a real contest - try a near neighbor, or keep it if the niche is deliberate.`}>
+                    Few of your rivals compete here ({c.contenders.length} of {c.rivals})
+                  </span>
+                );
+              if (c.rivals === 0) return null;
+              if (c.pitch)
+                return (
+                  <span className="text-warning" title={`"${c.pitch}" reads like one brand's pitch - describe the buyer's outcome instead.`}>
+                    Worded like a pitch
+                  </span>
+                );
+              return (
+                <span className="text-ink-3" title={`Contenders: ${who}`}>
+                  Contested: {c.contenders.length} of {c.rivals} rivals
+                </span>
+              );
+            })()}
             <label
               className="flex items-center gap-1.5 text-ink-3 whitespace-nowrap"
               title={

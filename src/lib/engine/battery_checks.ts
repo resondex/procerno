@@ -193,6 +193,17 @@ export function questionTypeOf(
  * seed until cells carry stored design lines. problem_resolution has its
  * own wording - the generic plan line mis-flagged 15 conforming support
  * asks in the harness. */
+/** Init decision 4 (2026-10-03): a brand-blind cell voices the room's
+ * buyer need in OUTCOME language every serious contender's pitch speaks
+ * to. Brands tailor their pitch to the rooms that matter, so the client
+ * being strong in a room is fine - but a criterion worded the way the
+ * client markets itself ("clean software and fast updates", "stock
+ * Android" on a Pixel tracker) answers the blind question for it. */
+function outcomeClause(stage: string, brand: string): string {
+  if (!BLIND_STAGES.has(stage)) return "";
+  return ` The buyer's needs are voiced as OUTCOMES any serious contender could answer ("stays fast and keeps getting updates for years") - a need worded the way ${brand} markets itself (its signature feature names, taglines or platform labels) steers the unprompted answer toward ${brand} and does not satisfy the design.`;
+}
+
 export function seedDesignLine(
   stage: string, brand: string, seed: string, concern?: string | null,
   /** A class-angle comparison cell's class (2026-10-01): the design is a
@@ -221,12 +232,12 @@ export function seedDesignLine(
   if (stage === "pricing")
     return `Question design (value math): the question asks for a price/value accounting - the same one as the designed question below, naming ${brand} only if the designed question does - WITH the asker's usage or situation as an input (financing, trade-in or price figures are prices, not usage), leaving the verdict to the answer. A bare "is it worth it?" carrying no usage inputs is a doubt, not a pricing ask, and does not satisfy the design; neither does presupposing the verdict ("a ripoff", "that huge fee"). Designed as: "${seed}"`;
   if (stage === "premium_worth")
-    return `Question design (premium tier): the question weighs the category's premium maker(s) as a TIER against basic/store options and invites named picks - from either side (is the expensive one worth it, is the cheap one good enough). Judging one named brand's own worth does not satisfy the design. Designed as: "${seed}"`;
+    return `Question design (premium tier): the question weighs the category's premium maker(s) as a TIER against basic/store options and invites named picks - from either side (is the expensive one worth it, is the cheap one good enough). Judging one named brand's own worth does not satisfy the design.${outcomeClause(stage, brand)} Designed as: "${seed}"`;
   if (!PLAN_CHECK_STAGES.has(stage))
     // Every other stage gets the generic same-question line (2026-09-29:
     // open/awareness/comparison cells drifted with no consistency check -
     // Netflix's discovery cell became "what should I look for" in 7 of 9).
-    return `Question design: the question asks the SAME designed question below - same subject, same circumstance, same kind of ask - differently worded by a different person. A different subject, a different ask, or a features-only rewrite of a which-one question does not satisfy the design. Designed as: "${seed}"`;
+    return `Question design: the question asks the SAME designed question below - same subject, same circumstance, same kind of ask - differently worded by a different person. A different subject, a different ask, or a features-only rewrite of a which-one question does not satisfy the design.${outcomeClause(stage, brand)} Designed as: "${seed}"`;
   const intent =
     stage === "problem_resolution"
       ? `an existing ${brand} customer has a problem with ${brand} or its product and wants it fixed`
@@ -285,9 +296,9 @@ export function stageDesignIntent(stage: string, brand: string, concern?: string
   // (2026-10-01 s24 audit F4): the asker does not know the solution space
   // yet, and this stage reports only how often brands get named unprompted.
   if (stage === "problem_recognition")
-    return `Question design (awareness): the asker describes a pain and ends asking for a way out ("how do people handle this?", "what actually fixes this?"). The asker does NOT yet have this kind of product - someone already holding one and doubting it ("I'm paying a big fee for perks I barely use") is a worry about the product, not awareness, and does not satisfy the design. A premium-vs-cheap tier comparison, a which-brand ask, a specs/criteria ask, or a yes/no reassurance ask ("is this common?") does not satisfy the design.${situation ? ` The question also carries the asker's own circumstance matching: ${situation}.` : ""}`;
+    return `Question design (awareness): the asker describes a pain and ends asking for a way out ("how do people handle this?", "what actually fixes this?"). The asker does NOT yet have this kind of product - someone already holding one and doubting it ("I'm paying a big fee for perks I barely use") is a worry about the product, not awareness, and does not satisfy the design. A premium-vs-cheap tier comparison, a which-brand ask, a specs/criteria ask, or a yes/no reassurance ask ("is this common?") does not satisfy the design.${situation ? ` The question also carries the asker's own circumstance matching: ${situation}.` : ""}${outcomeClause(stage, brand)}`;
   if (stage === "category_education")
-    return `Question design (awareness): the asker wants to understand what this kind of product actually does and how people use it - nothing is broken, so a "what fixes this" ask does not fit. A premium-vs-cheap tier comparison, a which-brand ask, a specs/criteria ask, or a yes/no reassurance ask does not satisfy the design.${situation ? ` The question also carries the asker's own circumstance matching: ${situation}.` : ""}`;
+    return `Question design (awareness): the asker wants to understand what this kind of product actually does and how people use it - nothing is broken, so a "what fixes this" ask does not fit. A premium-vs-cheap tier comparison, a which-brand ask, a specs/criteria ask, or a yes/no reassurance ask does not satisfy the design.${situation ? ` The question also carries the asker's own circumstance matching: ${situation}.` : ""}${outcomeClause(stage, brand)}`;
   // Open-choice seeds must invite NAMED picks (s24 audit F3: a
   // social_validation cell became a features-gush ask and named nothing).
   const pickClause = OPEN_PICK_STAGES.has(stage)
@@ -305,11 +316,11 @@ export function stageDesignIntent(stage: string, brand: string, concern?: string
   // asks). Any pinned stage without a more specific design above gets this
   // yardstick; invariant cells (situation null) are untouched.
   if (situation)
-    return `Question design (circumstance): the question carries the asker's own circumstance matching this buying scenario: ${situation}. The circumstance must live in the question's own words (their size, moment or situation) - a question that would read the same with no circumstance at all does not satisfy the design. When the circumstance is a switch or move (platforms, ecosystems, providers), the DIRECTION must be stated ("from iOS to Android") - "switching platforms" or "from one platform to another" without the direction does not satisfy it, because which products get named then depends on the answer's guess - AND the stated direction must leave ${brand} an eligible answer: a switch toward a platform or ecosystem ${brand} does not run on excludes it by construction and does not satisfy the design. Judge by SUBSTANCE, not label restatement: the circumstance counts when the question's facts fit that scenario's buyer - it need not restate every attribute of the scenario name, and when the scenario name IS the plain buyer phrase for the circumstance ("first credit card", "replacing my everyday card") using those words is correct, not a leak. Only a scenario name in planning register must be re-voiced in the buyer's own words.${pickClause}`;
+    return `Question design (circumstance): the question carries the asker's own circumstance matching this buying scenario: ${situation}. The circumstance must live in the question's own words (their size, moment or situation) - a question that would read the same with no circumstance at all does not satisfy the design. When the circumstance is a switch or move (platforms, ecosystems, providers), the DIRECTION must be stated ("from iOS to Android") - "switching platforms" or "from one platform to another" without the direction does not satisfy it, because which products get named then depends on the answer's guess - AND the stated direction must leave ${brand} an eligible answer: a switch toward a platform or ecosystem ${brand} does not run on excludes it by construction and does not satisfy the design. Judge by SUBSTANCE, not label restatement: the circumstance counts when the question's facts fit that scenario's buyer - it need not restate every attribute of the scenario name, and when the scenario name IS the plain buyer phrase for the circumstance ("first credit card", "replacing my everyday card") using those words is correct, not a leak. Only a scenario name in planning register must be re-voiced in the buyer's own words.${pickClause}${outcomeClause(stage, brand)}`;
   if (pickClause)
-    return `Question design (open choice): the buyer wants NAMES.${pickClause}`;
+    return `Question design (open choice): the buyer wants NAMES.${pickClause}${outcomeClause(stage, brand)}`;
   if (stage === "premium_worth")
-    return `Question design (premium tier): the question weighs the category's premium maker(s) as a TIER against basic/store options and invites named picks - from either side. Judging one named brand's own worth does not satisfy it - that is a worry cell's job.`;
+    return `Question design (premium tier): the question weighs the category's premium maker(s) as a TIER against basic/store options and invites named picks - from either side. Judging one named brand's own worth does not satisfy it - that is a worry cell's job.${outcomeClause(stage, brand)}`;
   if (!PLAN_CHECK_STAGES.has(stage)) return null;
   const intent =
     stage === "problem_resolution"

@@ -1825,6 +1825,8 @@ export function SetupWizard({ mode, brand, draft, engineOptions, onClose, onCrea
               maxScenarios={scenarioCap}
               fitBrand={brand}
               fitCategory={category}
+              rivals={allCompetitors().filter((c) => { const r = rosterRoleOf(c, rosterRoles); return r === "same_seat" || r === "bench"; })}
+              setupId={draftId ?? undefined}
               onRebuildForBrand={() => void gridApi.compose(undefined, true)}
               onBackToCategory={() => gridApi.restoreCategoryView()}
             />
