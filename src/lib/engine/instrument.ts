@@ -1091,10 +1091,11 @@ export async function nearScenarios(input: {
 }): Promise<Situation[]> {
   tagCosts({ purpose: "setup:scenario_near" });
   const avoid = input.exclude.map((s) => s.label.trim().toLowerCase()).filter(Boolean).sort();
-  // scenario_near_pool3 (2026-10-02): the defining need stays fixed (Pixel's
-  // "Flagship photography & AI" drew "Refurbished flagship" - kept the word,
-  // swapped the need for price).
-  const key = cacheKey("scenario_near_pool4", [
+  // scenario_near_pool5 (2026-10-02, Tyler): a near variant is the same buyer
+  // with the same need and ONE phrase changed. pool3/4 still swapped in new
+  // buyers ("vlogger", "gift for partner") or a refurbished price angle -
+  // which read as "Suggest another", not a near neighbor.
+  const key = cacheKey("scenario_near_pool5", [
     input.category, input.audience, input.of.label, input.of.description, avoid.join("|"),
   ]);
   const hit = await store.cacheGet(key, CACHE_TTL_MS);
@@ -1111,26 +1112,23 @@ export async function nearScenarios(input: {
         role: "system",
         content:
           "Propose exactly THREE near variants of a given buyer situation " +
-          "for a research instrument. Each keeps the situation's DEFINING " +
-          "NEED - what this buyer is after, the thing that makes it this " +
-          "scenario (a buyer after the best camera and AI stays after the " +
-          "best camera and AI) - and moves ONE concrete circumstance around " +
-          "it (scale, occasion, who it is for, where or how it gets used), a " +
-          "DIFFERENT detail per variant, so each reads noticeably but not " +
-          "radically different. A variant that keeps a word of the label " +
-          "but trades the defining need for another one is a different " +
-          "scenario, not a near variant - and NEVER introduce a money " +
+          "for a research instrument. A near variant is the SAME buyer with " +
+          "the SAME need, adjusted - not a new buyer, persona or occasion. " +
+          "Reuse the original's label and wording and change ONE phrase: a " +
+          "different emphasis within the same need (low-light photos " +
+          "instead of photos in general, video instead of stills), a " +
+          "tighter or looser constraint, or the setting it gets used in. " +
+          "Change a different phrase per variant, keep each label within a " +
+          "word or two of the original, and order them closest-first. Each " +
+          "variant should shift what an advisor would emphasize, differ " +
+          "from the others and from everything already listed, and stay " +
+          "about the decision (never the speaker). NEVER introduce a money " +
           "angle (lower cost, budget, refurbished, financing, deals) unless " +
-          "the original situation is itself about price. Order them closest-first. Every variant must still " +
-          "change what a competent advisor would recommend, stay about " +
-          "the decision (never the speaker), and differ from the others " +
-          "and from everything already listed. Scenarios describe " +
+          "the original situation is itself about price. Scenarios describe " +
           "circumstances, never a specific brand or product - 'migrating " +
-          "from a legacy tracker', not 'migrating from X'. Labels 2-4 " +
-          "plain words naming the buyer or the circumstance the way a " +
-          "strategist would title a slide - never analytical or " +
-          "methodology words like 'default', 'habitual', 'segment', 'use " +
-          "case'. Descriptions one short sentence.",
+          "from a legacy tracker', not 'migrating from X'. Labels 2-4 plain " +
+          "words, never analytical or methodology words like 'default', " +
+          "'habitual', 'segment', 'use case'. Descriptions one short sentence.",
       },
       {
         role: "user",
@@ -1148,11 +1146,17 @@ export async function nearScenarios(input: {
   const parsed = JSON.parse(res.choices[0]?.message?.content ?? "{}") as {
     situations: Situation[];
   };
-  const seen = new Set(avoid);
+  // De-duplicate on label AND description: a near variant may keep the
+  // original's label and change one phrase of the description. Only an
+  // already-listed label (another card) or an exact copy is dropped.
+  const norm = (t: string) => t.trim().toLowerCase().replace(/\s+/g, " ");
+  const ofKey = `${norm(input.of.label)}|${norm(input.of.description)}`;
+  const listed = new Set(avoid.filter((l) => l !== norm(input.of.label)));
+  const seen = new Set<string>([ofKey]);
   const pool: Situation[] = [];
   for (const s of parsed.situations ?? []) {
-    const k = s.label.trim().toLowerCase();
-    if (!k || seen.has(k)) continue;
+    const k = `${norm(s.label)}|${norm(s.description)}`;
+    if (!s.label.trim() || seen.has(k) || listed.has(norm(s.label))) continue;
     seen.add(k);
     pool.push({ label: humanize(s.label.trim()), description: humanize(s.description.trim()) });
     if (pool.length === 3) break;
