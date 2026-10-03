@@ -1902,6 +1902,12 @@ export function ScenariosGate({
                         journey: null,
                         suggested: true,
                         on: active.length < cap,
+                        // Like "Suggest another": the card's home wording, so
+                        // near-neighbor draws anchor on it and "Reset to
+                        // suggested" returns to it (without these, reset
+                        // kept the last draw - Pixel walk, 2026-10-02).
+                        original: { label: fitMissing.label, description: fitMissing.description },
+                        first: { label: fitMissing.label, description: fitMissing.description },
                       },
                     ],
                     active.length < cap

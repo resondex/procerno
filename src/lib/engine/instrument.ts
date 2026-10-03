@@ -1091,7 +1091,10 @@ export async function nearScenarios(input: {
 }): Promise<Situation[]> {
   tagCosts({ purpose: "setup:scenario_near" });
   const avoid = input.exclude.map((s) => s.label.trim().toLowerCase()).filter(Boolean).sort();
-  const key = cacheKey("scenario_near_pool2", [
+  // scenario_near_pool3 (2026-10-02): the defining need stays fixed (Pixel's
+  // "Flagship photography & AI" drew "Refurbished flagship" - kept the word,
+  // swapped the need for price).
+  const key = cacheKey("scenario_near_pool3", [
     input.category, input.audience, input.of.label, input.of.description, avoid.join("|"),
   ]);
   const hit = await store.cacheGet(key, CACHE_TTL_MS);
@@ -1108,11 +1111,15 @@ export async function nearScenarios(input: {
         role: "system",
         content:
           "Propose exactly THREE near variants of a given buyer situation " +
-          "for a research instrument. Each keeps its general circumstance " +
-          "- the same axis - and moves ONE concrete detail (scale, " +
-          "constraint, occasion, composition, use-case), a DIFFERENT " +
-          "detail per variant, so each reads noticeably but not radically " +
-          "different. Order them closest-first. Every variant must still " +
+          "for a research instrument. Each keeps the situation's DEFINING " +
+          "NEED - what this buyer is after, the thing that makes it this " +
+          "scenario (a buyer after the best camera and AI stays after the " +
+          "best camera and AI) - and moves ONE concrete circumstance around " +
+          "it (scale, constraint, occasion, who it is for, how they buy), a " +
+          "DIFFERENT detail per variant, so each reads noticeably but not " +
+          "radically different. A variant that keeps a word of the label " +
+          "but trades the defining need for another one (price, a different " +
+          "goal) is a different scenario, not a near variant. Order them closest-first. Every variant must still " +
           "change what a competent advisor would recommend, stay about " +
           "the decision (never the speaker), and differ from the others " +
           "and from everything already listed. Scenarios describe " +
