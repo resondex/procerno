@@ -197,17 +197,10 @@ const READ_STAGES: [number, string][] = [
   [105, "Still thinking - a hard market can take about two minutes…"],
 ];
 
-/** The cell write narrated, same mechanism: captions pinned to the order
- * generateGrid actually works in - the writer groups, the per-cell
- * review, the heals, the variety check - in the user's language, not the
- * engine's. (No concern-planning caption: worry batteries skip that call,
- * so it would narrate work that isn't happening.) */
+/** The cell write: one steady caption for the whole wait (Tyler,
+ * 2026-10-02 - the rotating captions are retired here). */
 const CELLS_STAGES: [number, string][] = [
   [0, CELLS_BUSY],
-  [40, "Writing them the way real buyers would ask…"],
-  [80, "Polishing the wording…"],
-  [120, "Nearly there…"],
-  [150, "Still writing - a full set takes a few minutes…"],
 ];
 
 /** The worries pool draw narrated: one model call, so the captions walk
