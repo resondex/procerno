@@ -1623,7 +1623,7 @@ export type CellFlag = "target" | "branding" | "unclear" | "design";
 const DESIGN_CHECK_MODEL = process.env.DESIGN_CHECK_MODEL ?? "claude-sonnet-5";
 const DESIGN_CHECK_EFFORT = process.env.DESIGN_CHECK_EFFORT ?? "low";
 
-const DESIGN_CHECK_SYSTEM = `You check survey questions against their design. Each question was written for a cell with a stated design:
+export const DESIGN_CHECK_SYSTEM = `You check survey questions against their design. Each question was written for a cell with a stated design:
 - Doubt design: the question should itself voice a concern, complaint, doubt or "is it still worth it / should I cut it" about the named brand or option.
 - Plan design: the question should itself carry a customer's plan with the named brand (use it for more, find products that work with it, recommend or defend it to someone).
 - Same-question design (no doubt/plan named): the question should ask the same designed question - same subject, same circumstance, same kind of ask. A which-one ask rewritten as a features-only or where-to-research ask does not satisfy it.

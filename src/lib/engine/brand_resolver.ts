@@ -80,7 +80,10 @@ export function resolveNamedBrands(
     if (!phraseInText(text, name)) { notInText.push(name); continue; }
     const k = matchKey(name);
     const toks = famTokens(name);
-    const hits = forms.filter((f) => f.keys.has(k) || coRefers(toks, f.seqs));
+    // Plural-tolerant ("Had Pixels for a while" listed "Pixels"; validation
+    // 2026-10-02): try the name as written, then with a trailing s dropped.
+    const sing = toks.map((t) => (t.length > 3 && t.endsWith("s") ? t.slice(0, -1) : t));
+    const hits = forms.filter((f) => f.keys.has(k) || f.keys.has(matchKey(sing.join(" "))) || coRefers(toks, f.seqs) || coRefers(sing, f.seqs));
     if (hits.length === 0) unresolved.push(name);
     for (const h of hits) brands.add(h.b);
   }

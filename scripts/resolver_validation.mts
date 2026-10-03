@@ -18,7 +18,8 @@
  *   report - metrics + the shadow-exit numbers.
  * Spends money in run/adjudicate - Tyler's go per run.
  *
- * Usage: OUT=<dir> npx tsx scripts/resolver_validation.mts dry|run|adjudicate|report
+ * Batch (half price): batch-run replaces run, batch-adjudicate replaces adjudicate.
+ * Usage: OUT=<dir> npx tsx scripts/resolver_validation.mts dry|run|batch-run|adjudicate|batch-adjudicate|report
  */
 import fs from "node:fs";
 import path from "node:path";
@@ -227,6 +228,114 @@ const ADJ_SYSTEM = `You establish ground truth for survey-question checks. Judge
 - excludes_client: the question requires something the CLIENT brand clearly cannot offer (a hardware feature its products lack, a platform it does not run on, a service it does not provide), so the client could not be a valid answer. False when unsure.
 Reply with ONLY: {"named": ["<tracked brand names exactly as listed>"], "states_price": true|false, "money_remark": true|false, "excludes_client": true|false}`;
 
+// ------------------------------------------------------------- batch path
+// The Batch API at half price (Tyler 2026-10-02): the same requests the live
+// path makes - model, effort, system prompt, user message - submitted as one
+// batch, parsed exactly as checkDesignFidelity parses, archived raw.
+const BATCH_BASE = "https://api.anthropic.com/v1/messages/batches";
+const BH = { "x-api-key": process.env.ANTHROPIC_API_KEY!, "anthropic-version": "2023-06-01", "Content-Type": "application/json" };
+const PRICE: Record<string, { in: number; out: number }> = { "claude-sonnet-5": { in: 3, out: 15 }, "claude-opus-5-5": { in: 4, out: 20 } };
+
+function designRequest(custom_id: string, it: Item, v2: boolean, effort: string) {
+  return {
+    custom_id,
+    params: {
+      model: "claude-sonnet-5", max_tokens: 2000,
+      ...(effort === "default" ? {} : { output_config: { effort } }),
+      system: v2 ? inst.DESIGN_CHECK_SYSTEM_V2 : inst.DESIGN_CHECK_SYSTEM,
+      messages: [{ role: "user", content: v2
+        ? `${designLine(it)}\n\nClient brand: ${it.tracker}\n\nQuestion: ${it.text}`
+        : `${designLine(it)}\n\nQuestion: ${it.text}` }],
+    },
+  };
+}
+function adjRequest(custom_id: string, it: Item) {
+  return {
+    custom_id,
+    params: {
+      model: "claude-opus-5-5", max_tokens: 3000, output_config: { effort: "medium" }, system: ADJ_SYSTEM,
+      messages: [{ role: "user", content: `Category: ${it.category}\nClient brand: ${it.tracker}\nTracked brands: ${[it.tracker, ...it.competitors].join("; ")}\n${it.concern ? `The question's designed worry: ${it.concern}\n` : ""}\nQuestion: ${it.text}` }],
+    },
+  };
+}
+
+async function submitAndCollect(name: string, requests: { custom_id: string; params: any }[]): Promise<Map<string, { text: string; usage: any; model: string } | null>> {
+  const idFile = path.join(OUT, `${name}.batch_id`);
+  let id: string;
+  if (fs.existsSync(idFile)) { id = fs.readFileSync(idFile, "utf8").trim(); console.log(`${name}: resuming batch ${id}`); }
+  else {
+    console.log(`${name}: submitting ${requests.length} requests`);
+    const r = await fetch(BATCH_BASE, { method: "POST", headers: BH, body: JSON.stringify({ requests }) });
+    if (!r.ok) throw new Error(`submit HTTP ${r.status}: ${(await r.text()).slice(0, 400)}`);
+    id = (await r.json()).id; fs.writeFileSync(idFile, id + "\n"); console.log(`${name}: batch ${id}`);
+  }
+  let url = "";
+  for (;;) {
+    const b = await (await fetch(`${BATCH_BASE}/${id}`, { headers: BH })).json();
+    const c = b.request_counts;
+    console.log(`${name}: ${b.processing_status} - ok ${c.succeeded}, errored ${c.errored}, processing ${c.processing}`);
+    if (b.processing_status === "ended") { url = b.results_url; break; }
+    await new Promise((res) => setTimeout(res, Number(process.env.POLL_SECONDS ?? 60) * 1000));
+  }
+  const raw = await (await fetch(url, { headers: BH })).text();
+  fs.writeFileSync(path.join(OUT, `${name}.raw.jsonl`), raw);
+  const out = new Map<string, { text: string; usage: any; model: string } | null>();
+  for (const line of raw.split("\n").filter(Boolean)) {
+    const r = JSON.parse(line);
+    const m = r.result?.type === "succeeded" ? r.result.message : null;
+    out.set(r.custom_id, m ? { text: m.content.filter((x: any) => x.type === "text").map((x: any) => x.text).join(""), usage: m.usage, model: m.model } : null);
+  }
+  return out;
+}
+
+function costOf(res: Map<string, { usage: any; model: string } | null>): number {
+  let usd = 0;
+  for (const v of res.values()) if (v) {
+    const p = PRICE[v.model] ?? PRICE[Object.keys(PRICE).find((k) => v.model.startsWith(k)) ?? "claude-sonnet-5"];
+    usd += ((v.usage.input_tokens + (v.usage.cache_creation_input_tokens ?? 0) + (v.usage.cache_read_input_tokens ?? 0)) * p.in + v.usage.output_tokens * p.out) / 1e6 / 2; // batch = half price
+  }
+  return usd;
+}
+
+function parseVerdict(text: string, v2: boolean) {
+  const t = text.trim().replace(/^```(?:json)?\s*/, "").replace(/\s*```$/, "");
+  const j = JSON.parse(firstJsonObject(t) ?? t);
+  const out: any = { voices: !!j.voices_design, reason: j.reason ?? "" };
+  if (v2) {
+    out.brandsNamed = Array.isArray(j.brands_named) ? j.brands_named.filter((x: unknown) => typeof x === "string") : [];
+    out.statesPrice = !!j.states_price; out.moneyRemark = !!j.money_remark; out.excludesClient = !!j.excludes_client;
+  }
+  return out;
+}
+
+if (PHASE === "batch-run") {
+  const al = await aliasMap(sel);
+  writeL("aliases.jsonl", [...al.entries()].map(([k, v]) => ({ roster: k, aliases: v })));
+  const sub = shuffle(sel, 3).slice(0, 600);
+  const seeds = shuffle(sel.filter((x) => x.source === "walk"), 4).slice(0, 500);
+  const reqs = [
+    ...sel.map((it, i) => designRequest(`A_${i}`, it, true, "low")),
+    ...sub.map((it, i) => designRequest(`V_${i}`, it, false, "low")),
+    ...seeds.map((it, i) => designRequest(`B_${i}`, it, true, "default")),
+  ];
+  const res = await submitAndCollect("design", reqs);
+  const take = (prefix: string, xs: Item[], v2: boolean, file: string) => {
+    let bad = 0;
+    writeL(file, xs.map((it, i) => {
+      const r = res.get(`${prefix}_${i}`);
+      try { if (!r) throw new Error("errored"); return { id: it.id, v: parseVerdict(r.text, v2) }; }
+      catch { bad++; return { id: it.id, v: { voices: true, reason: "", unchecked: true } }; }
+    }));
+    console.log(`${file}: ${xs.length} (${bad} errored/unparsed)`);
+  };
+  take("A", sel, true, "armA_v2_low.jsonl");
+  take("V", sub, false, "v1_subset.jsonl");
+  take("B", seeds, true, "armB_v2_default.jsonl");
+  console.log(`batch spend: $${costOf(res).toFixed(2)}`);
+  fs.writeFileSync(path.join(OUT, "spend_design.txt"), costOf(res).toFixed(2) + "\n");
+  process.exit(0);
+}
+
 if (PHASE === "adjudicate") {
   const al = new Map<string, Record<string, string[]>>(readL("aliases.jsonl").map((r: any) => [r.roster, r.aliases]));
   const A = new Map(readL("armA_v2_low.jsonl").map((r: any) => [r.id, r.v]));
@@ -258,6 +367,36 @@ if (PHASE === "adjudicate") {
     return row;
   });
   console.log("adjudicated:", rows.length, "parse errors:", rows.filter((r: any) => r.truth.error).length);
+  process.exit(0);
+}
+
+if (PHASE === "batch-adjudicate") {
+  const al = new Map<string, Record<string, string[]>>(readL("aliases.jsonl").map((r: any) => [r.roster, r.aliases]));
+  const A = new Map(readL("armA_v2_low.jsonl").map((r: any) => [r.id, r.v]));
+  const differs = (o: Facts, n: Facts) =>
+    o.named.slice().sort().join("|") !== n.named.slice().sort().join("|") || o.statesPrice !== n.statesPrice || o.moneyBoltOn !== n.moneyBoltOn;
+  const dis: Item[] = [], agree: Item[] = [];
+  for (const it of sel) {
+    const v = A.get(it.id); if (!v || v.unchecked) continue;
+    const a = al.get(rosterKey(it)) ?? {};
+    (differs(oldPath(it, a), newPath(it, v, a)) ? dis : agree).push(it);
+  }
+  const fleet = sel.filter((x) => x.source === "fleet");
+  const sample = shuffle(agree.filter((x) => x.source !== "fleet"), 5).slice(0, 300);
+  const todo = [...new Map([...dis, ...sample, ...fleet].map((x) => [x.id, x])).values()];
+  console.log(`adjudicating: ${dis.length} disagreements, ${sample.length} sampled agreements (of ${agree.length}), ${fleet.length} fleet -> ${todo.length} unique`);
+  const res = await submitAndCollect("adjudicate", todo.map((it, i) => adjRequest(`J_${i}`, it)));
+  const disIds = new Set(dis.map((x) => x.id)), sampIds = new Set(sample.map((x) => x.id));
+  let bad = 0;
+  writeL("truth.jsonl", todo.map((it, i) => {
+    const r = res.get(`J_${i}`);
+    let truth: any;
+    try { if (!r) throw new Error("errored"); const t = r.text.trim(); truth = JSON.parse(firstJsonObject(t) ?? t); }
+    catch { bad++; truth = { error: r?.text?.slice(0, 200) ?? "errored" }; }
+    return { id: it.id, kind: disIds.has(it.id) ? "disagree" : sampIds.has(it.id) ? "agree_sample" : "fleet", truth };
+  }));
+  console.log(`truth.jsonl: ${todo.length} (${bad} errored/unparsed); batch spend: $${costOf(res).toFixed(2)}`);
+  fs.writeFileSync(path.join(OUT, "spend_adjudicate.txt"), costOf(res).toFixed(2) + "\n");
   process.exit(0);
 }
 
