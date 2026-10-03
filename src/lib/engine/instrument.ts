@@ -1559,6 +1559,9 @@ export async function reviewScenarioFit(input: {
   brand: string;
   category: string;
   scenarios: Situation[];
+  /** The study audience - the suggested scenario is pre-checked with the
+   * same reviewScenarios call the gate runs, which takes it. */
+  audience?: string | null;
   meta?: CacheMeta;
 }): Promise<ScenarioFit> {
   tagCosts({ purpose: "setup:scenario_fit" });
@@ -1567,8 +1570,12 @@ export async function reviewScenarioFit(input: {
   // "scenario_fit4": tentative voice - advice reads as "you may want
   // to", never a verdict. fit3 softened the bar; fit2 over-suppressed;
   // fit1 suggested on every brand.
-  const key = cacheKey("scenario_fit5", [
-    input.brand, input.category,
+  // scenario_fit6 (2026-10-02): the suggested scenario passes the gate's
+  // own scenario check before it is offered (the AmEx "Dining & groceries
+  // rewards" suggestion was flagged "mixed decision factors" one screen
+  // later by reviewScenarios).
+  const key = cacheKey("scenario_fit6", [
+    input.brand, input.category, input.audience ?? "",
     input.scenarios.map((s) => `${s.label.trim()}|${s.description.trim()}`).join("~"),
   ]);
   const hit = await store.cacheGet(key, CACHE_TTL_MS);
@@ -1636,6 +1643,25 @@ export async function reviewScenarioFit(input: {
         }
       : null,
   };
+  // Our own suggestion must pass our own check: run it through the gate's
+  // scenario review. A flagged suggestion is offered as the review's
+  // corrected version; one the review cannot correct is not offered.
+  if (fit.missingCore) {
+    try {
+      const [v] = await reviewScenarios({
+        category: input.category, audience: input.audience ?? null,
+        candidates: [{ label: fit.missingCore.label, description: fit.missingCore.description }],
+        others: input.scenarios, meta: input.meta,
+      });
+      if (v && !v.ok) {
+        const fixed = v.suggestion;
+        const changed = fixed && (fixed.label.trim() !== fit.missingCore.label.trim() || fixed.description.trim() !== fit.missingCore.description.trim());
+        fit.missingCore = changed ? { ...fit.missingCore, label: plain(fixed.label), description: plain(fixed.description) } : null;
+      }
+    } catch (err) {
+      console.error("scenario fit pre-check failed open:", err);
+    }
+  }
   await store.cacheSet(key, JSON.stringify(fit), stampOf(input));
   return fit;
 }

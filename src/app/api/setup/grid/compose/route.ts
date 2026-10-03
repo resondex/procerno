@@ -125,6 +125,7 @@ export async function POST(req: Request) {
         brand: parsed.data.brand,
         category: parsed.data.category,
         scenarios: scenarios.map((s) => ({ label: s.label, description: s.description })),
+        audience: parsed.data.audience || null,
         meta: { source: cacheSource(auth) },
       }).catch(() => null),
       reviewJourneyFit({

@@ -82,6 +82,7 @@ export async function buildEditSetupDraft(project: Project) {
       brand: project.brand,
       category: project.category,
       scenarios: scenarios.map((s) => ({ label: s.label, description: s.description })),
+      audience: project.audience ?? null,
       meta: { brand: project.brand, source: "edit_setup" },
     }).catch(() => null),
     reviewJourneyFit({
