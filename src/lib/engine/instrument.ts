@@ -461,16 +461,25 @@ export type LibraryStage = ComposedStage & {
  * their stage lists; generateGrid / generatePhrasings drop them so no cell
  * is planned or paraphrased for a retired stage. problem_resolution:
  * removed 2026-10-02 (Tyler) - do not re-add until more R&D. */
-export const RETIRED_STAGES: ReadonlySet<string> = new Set(["problem_resolution"]);
+// shortlist: merged into discovery 2026-10-03 (Tyler, init decision 2) -
+// in a single AI question "name a few" and "name 3 or 4" are the same ask
+// with the same coded result, so the battery measured it twice per column.
+export const RETIRED_STAGES: ReadonlySet<string> = new Set(["problem_resolution", "shortlist"]);
 
 export function stageLibrary(m: Moderators): LibraryStage[] {
   const considered = m.involvement === "considered";
   return [
     {
+      // Considered markets only (init decision 2, 2026-10-03): the stage's
+      // buyer is someone outside the category, and a habitual market has
+      // none - everyone already buys it, so the cells came out as
+      // complaints about "my chips".
       key: "problem_recognition", label: "Problem recognition", layer: "awareness",
-      situational: true, rivals: "none", tag: "rules", recommended: true,
+      situational: true, rivals: "none", tag: "rules", recommended: considered,
       hint: "Pain-phrased and pre-category: the buyer describes the problem without knowing the SOLUTION category exists. Never name the category as a solution, a brand, or ask for a product type - but the thing the buyer already owns is named plainly and naturally ('my phone', 'my chips'), never contorted around ('my pocket gadget', 'my current setup').",
-      why: "Every journey starts here - buyers describe the pain before they know the category exists.",
+      why: considered
+        ? "A considered journey starts here - buyers describe the pain before they know the category exists."
+        : "Habitual buyers are already in the category - there's no pre-category moment to measure.",
     },
     {
       key: "category_education", label: "Category education", layer: "awareness",
@@ -488,12 +497,6 @@ export function stageLibrary(m: Moderators): LibraryStage[] {
       situational: true, rivals: "none", tag: "picks", recommended: true,
       hint: "Open category discovery: 'best X for ...' style asks, no brands named.",
       why: "'Best X for ...' is the front door of AI-assisted buying in every market.",
-    },
-    {
-      key: "shortlist", label: "Shortlist", layer: "consideration",
-      situational: true, rivals: "none", tag: "picks", recommended: true,
-      hint: "The buyer asks for a small set of options to consider.",
-      why: "Every buyer narrows to a few options - this cut is where brands live or die.",
     },
     {
       // Situational since 2026-08-24: the taught criteria differ by
@@ -531,14 +534,18 @@ export function stageLibrary(m: Moderators): LibraryStage[] {
     {
       key: "comparison",
       label: m.verifiability === "taste" ? "Dupes & alternatives" : "Comparison",
+      // Every market since init decision 3 (2026-10-03): "Doritos or Takis
+      // for game day?" is a real habitual ask, and the rivals are now the
+      // user's head-to-head picks. The old rationale ("habitual buyers
+      // don't run head-to-heads") is retired.
       layer: "decision", situational: true, rivals: "each", tag: "picks",
-      recommended: considered,
+      recommended: true,
       hint: m.verifiability === "taste"
         ? "Head-to-head and 'similar to X but cheaper/different' asks naming the rival."
         : "Head-to-head asks naming the client brand against the rival.",
       why: considered
         ? "A considered market weighs finalists head-to-head before committing."
-        : "Habitual buyers don't run head-to-heads - the shelf question (Premium vs. basic) carries this moment.",
+        : "Buyers still weigh one brand against another at the shelf - head-to-heads show who wins those moments.",
     },
     {
       // The habitual journey's comparison moment: the shelf question where
@@ -555,10 +562,16 @@ export function stageLibrary(m: Moderators): LibraryStage[] {
         : "Your considered market decomposes this moment into Shortlist, Comparison, and Pricing instead.",
     },
     {
+      // Considered markets only (init decision 2, 2026-10-03): the stage's
+      // buyer is a prospect who isn't a customer yet. In a habitual market
+      // the prospect is already an eater, so a worry is asked once, in the
+      // in-relationship stance (Churn triggers).
       key: "objections", label: "Objections / risk", layer: "decision",
-      situational: true, rivals: "none", tag: "judges", recommended: true,
+      situational: true, rivals: "none", tag: "judges", recommended: considered,
       hint: `The buyer voices the category's dominant worry (${m.risk}) about the client brand by name.`,
-      why: `Every market has a dominant worry - here it's ${m.risk} risk, voiced about you by name.`,
+      why: considered
+        ? `Every market has a dominant worry - here it's ${m.risk} risk, voiced about you by name before buying.`
+        : "Habitual buyers are already customers - their worries are asked once, as Churn triggers.",
     },
     {
       key: "pricing", label: "Pricing / value", layer: "decision",
