@@ -9,6 +9,11 @@ const REPO = "/Users/tylersolloway/Documents/GitHub/procerno";
 const V02 = `${process.env.HOME}/Documents/procerno_eval/labeling/v02_relabel`;
 const CONF = `${process.env.HOME}/Documents/procerno_eval/internal_models/conformance`;
 const bc = await import(`${REPO}/src/lib/engine/battery_checks`);
+// r15: replay the REAL brand judge's recorded verdicts for the corpus's
+// ambiguous one-word hits (scripts/record_judge_verdicts.mts) - the fixture
+// makes no model calls.
+for (const v of JSON.parse(fs.readFileSync(`${REPO}/scripts/fixtures/brand_judge_verdicts.json`, "utf8")))
+  bc.setBrandVerdict(v.text, v.brand, v.form, v.refers);
 
 const COMP: Record<string, string[]> = {
   jira: ["Asana", "monday.com", "Linear", "ClickUp"],
@@ -185,6 +190,8 @@ const AMEX_V = ["Chase", "Capital One", "Visa", "Discover"];
   expect("comparison: a third tracked brand is a leak", !leak.ok && leak.missing.length === 0 && leak.leaked.includes("Chase"), leak);
   const blind = specOf({ stage: "discovery", angle: "generic", text: "best travel card if I need a visa for most trips?" },
     "American Express", AMEX_V, "credit cards");
+  // r15: the brand judge decides this ambiguous one-word hit; unjudged it counts as named (safe default).
+  bc.setBrandVerdict("which card is best when I also need a visa for trips?", "Visa", "visa", false);
   const bv = bc.checkPromptAgainstSpec({ text: "which card is best when I also need a visa for trips?", spec: blind, category: "credit cards" });
   expect("blind cell: lowercase 'visa' (travel document) is not the brand", bv.length === 0, bv);
   const bv2 = bc.checkPromptAgainstSpec({ text: "is a Visa card better than Discover for trips?", spec: blind, category: "credit cards" });
@@ -237,6 +244,9 @@ const AMEX_V = ["Chase", "Capital One", "Visa", "Discover"];
   const pv = bc.checkCandidateSignature("Netflix vs Prime Video for 5 of us?", cmp, { category: CAT.Netflix });
   expect("comparison: 'Prime Video' sub-phrase names Amazon Prime Video", pv.ok, pv);
   const blind = specOf({ stage: "discovery", angle: "generic", text: "cheapest way to stream 2-3 services max?" }, "Netflix", COMP.Netflix, CAT.Netflix);
+  const unjudged = bc.checkCandidateSignature("I want 2-3 services max, which ones?", blind, { category: CAT.Netflix });
+  expect("r15: unjudged '2-3 services max' counts as Max (safe default)", !unjudged.ok, unjudged);
+  bc.setBrandVerdict("I want 2-3 services max, which ones?", "Max (HBO)", "max", false);
   const m1 = bc.checkCandidateSignature("I want 2-3 services max, which ones?", blind, { category: CAT.Netflix });
   expect("blind: '2-3 services max' is not Max", m1.ok, m1);
   const m2 = bc.checkCandidateSignature("is HBO worth it or should I pick something cheaper?", blind, { category: CAT.Netflix });
@@ -269,6 +279,7 @@ const AMEX_V = ["Chase", "Capital One", "Visa", "Discover"];
   const JR = ["ClickUp", "Asana", "GitHub Issues / Projects", "Azure DevOps", "Linear"];
   const blindJ = specOf({ stage: "feature_screening", angle: "generic", text: "Which project management software can import issues with full history? Name a few." },
     "Jira", JR, CAT.jira);
+  bc.setBrandVerdict(blindJ.seed, "GitHub Issues / Projects", "issues", false);
   const jb = bc.checkPromptAgainstSpec({ text: blindJ.seed, spec: blindJ, category: CAT.jira });
   expect("r13: 'import issues' in a blind Jira seed names no rival", jb.length === 0, jb);
   const jb2 = bc.checkPromptAgainstSpec({ text: "Is GitHub Issues enough, or which project management software would you pick?", spec: blindJ, category: CAT.jira });
@@ -282,6 +293,8 @@ const AMEX_V = ["Chase", "Capital One", "Visa", "Discover"];
   expect("r13: capitalized 'Linear' is the rival", jb4.some((x: any) => x.check === "blind_names_brand"), jb4);
   const AX = ["Chase", "Capital One", "Discover", "Citi", "Bank of America"];
   const blindA = specOf({ stage: "discovery", angle: "generic", text: "Which credit cards should I look at for groceries?" }, "American Express", AX, CAT["American Express"]);
+  // r15: the brand judge decides this ambiguous one-word hit; unjudged it counts as named (safe default).
+  bc.setBrandVerdict("My bank keeps pushing its own credit cards. Which should I look at?", "Bank of America", "bank", false);
   const ab = bc.checkPromptAgainstSpec({ text: "My bank keeps pushing its own credit cards. Which should I look at?", spec: blindA, category: CAT["American Express"] });
   expect("r13: 'my bank' names no issuer", ab.length === 0, ab);
   // "chase" / "discover" are brand-dominated in the vault (5% / 17%
@@ -307,13 +320,19 @@ const AMEX_V = ["Chase", "Capital One", "Visa", "Discover"];
   expect("r13: 'Bank of America' does not also name 'U.S. Bank'", cb.length === 0, cb);
   const cb2 = bc.checkPromptAgainstSpec({ text: "American Express, Bank of America or U.S. Bank: what's your pick?", spec: cmp, category: CAT["American Express"] });
   expect("r13: 'U.S. Bank' named outright is still a leak", cb2.some((x: any) => x.check === "comparison_names_extra_rival"), cb2);
+  const usa = bc.checkCandidateSignature("We spend mostly in the U.S. with a few trips abroad. Which cards would fit?", cmp, { category: CAT["American Express"] });
+  expect("r15: 'in the U.S.' does not name U.S. Bank", !usa.leaked.includes("U.S. Bank"), usa);
   // Everyday-word names (round-3 cold walk): "Nothing Phone" on a
   // smartphones study - "phone" is category vocabulary, "Nothing" counts
   // only in the label's casing and never as a sentence's first word.
   const PX = ["Apple iPhone", "Samsung Galaxy", "OnePlus", "Nothing Phone"];
   const blindP = specOf({ stage: "use_case", angle: "generic", text: "My old phone is laggy. Which phones would you pick?" }, "Google Pixel", PX, CAT["Google Pixel"]);
+  // r15: the brand judge decides this ambiguous one-word hit; unjudged it counts as named (safe default).
+  bc.setBrandVerdict("My old phone is laggy and nothing feels smooth. Which phones would you pick?", "Nothing Phone", "nothing", false);
   const p1 = bc.checkPromptAgainstSpec({ text: "My old phone is laggy and nothing feels smooth. Which phones would you pick?", spec: blindP, category: CAT["Google Pixel"] });
   expect("r13: 'phone' / lowercase 'nothing' name no rival", p1.length === 0, p1);
+  // r15: the brand judge decides this ambiguous one-word hit; unjudged it counts as named (safe default).
+  bc.setBrandVerdict("Nothing beats a long battery. Which phones would you pick?", "Nothing Phone", "nothing", false);
   const p2 = bc.checkPromptAgainstSpec({ text: "Nothing beats a long battery. Which phones would you pick?", spec: blindP, category: CAT["Google Pixel"] });
   expect("r13: sentence-initial 'Nothing' is not the brand", p2.length === 0, p2);
   const p3 = bc.checkPromptAgainstSpec({ text: "Is the Nothing Phone any good, or which phones would you pick?", spec: blindP, category: CAT["Google Pixel"] });
@@ -325,6 +344,8 @@ const AMEX_V = ["Chase", "Capital One", "Visa", "Discover"];
   const PX1 = ["Apple iPhone", "Samsung Galaxy", "Nothing"];
   const blindP1 = specOf({ stage: "use_case", angle: "generic", text: "My old phone is laggy. Which phones would you pick?" }, "Google Pixel", PX1, CAT["Google Pixel"]);
   const p6 = bc.checkPromptAgainstSpec({ text: "Nothing fancy, my old phone just lags. Which phones would you pick?", spec: blindP1, category: CAT["Google Pixel"] });
+  // r15: the brand judge decides this ambiguous one-word hit; unjudged it counts as named (safe default).
+  bc.setBrandVerdict("I need nothing fancy. Which phones would you pick?", "Nothing", "nothing", false);
   const p7 = bc.checkPromptAgainstSpec({ text: "I need nothing fancy. Which phones would you pick?", spec: blindP1, category: CAT["Google Pixel"] });
   expect("r13: one-word rival 'Nothing' - lowercase 'nothing' is not the brand", p7.length === 0, p7);
   const p8 = bc.checkPromptAgainstSpec({ text: "Is a phone from Nothing worth it, or which phones would you pick?", spec: blindP1, category: CAT["Google Pixel"] });
@@ -334,6 +355,8 @@ const AMEX_V = ["Chase", "Capital One", "Visa", "Discover"];
   // a roster-fitted list - the fleet's Ring (rival) and Purple (target).
   const NEST = ["Ring", "Ecobee", "Honeywell Home"];
   const blindN = specOf({ stage: "discovery", angle: "generic", text: "Which smart thermostats should I look at?" }, "Google Nest", NEST, "smart home devices");
+  // r15: the brand judge decides this ambiguous one-word hit; unjudged it counts as named (safe default).
+  bc.setBrandVerdict("I barely hear the doorbell ring upstairs. Which smart home devices should I look at?", "Ring", "ring", false);
   const n1 = bc.checkPromptAgainstSpec({ text: "I barely hear the doorbell ring upstairs. Which smart home devices should I look at?", spec: blindN, category: "smart home devices" });
   expect("lexicon: 'the doorbell ring' is not Ring", n1.length === 0, n1);
   const n2 = bc.checkPromptAgainstSpec({ text: "Ring or something else - which smart home devices should I look at?", spec: blindN, category: "smart home devices" });
@@ -378,6 +401,8 @@ const AMEX_V = ["Chase", "Capital One", "Visa", "Discover"];
   // Alias forms run through the same filters (r13 review): an everyday
   // alias is case-guarded; a stopword or category alias is dropped.
   const XF = { "American Express": ["amex", "gold", "max", "cards"] };
+  // r15: the brand judge decides this ambiguous one-word hit; unjudged it counts as named (safe default).
+  bc.setBrandVerdict("Which credit cards are the gold standard for groceries?", "American Express", "gold", false);
   const ax1 = bc.checkPromptAgainstSpec({ text: "Which credit cards are the gold standard for groceries?", spec: blindA, category: CAT["American Express"], extraForms: XF });
   expect("aliases: lowercase everyday alias 'gold' is not the brand", ax1.length === 0, ax1);
   const ax2 = bc.checkPromptAgainstSpec({ text: "Which credit cards should I look at - max rewards, no fee?", spec: blindA, category: CAT["American Express"], extraForms: XF });
@@ -386,8 +411,10 @@ const AMEX_V = ["Chase", "Capital One", "Visa", "Discover"];
   expect("aliases: capitalized 'Gold' names the brand", ax3.some((x: any) => x.check === "blind_names_brand"), ax3);
   const mx = bc.checkPromptAgainstSpec({ text: "My Gold annual fee hits next month. Keep it another year or cancel?", spec: mustA, category: CAT["American Express"], extraForms: XF });
   expect("aliases: must-name satisfied by a capitalized everyday alias", mx.length === 0, mx);
+  // r15: the must-name side is tolerant by design (any name form or alias
+  // satisfies it); only the forbidden side consults the judge.
   const mx2 = bc.checkPromptAgainstSpec({ text: "Is the gold standard card's annual fee worth it another year, or cancel?", spec: mustA, category: CAT["American Express"], extraForms: XF });
-  expect("aliases: must-name NOT satisfied by lowercase everyday 'gold'", mx2.some((x: any) => x.check === "must_name_missing_target"), mx2);
+  expect("aliases: must-name side stays tolerant (an alias satisfies it)", mx2.length === 0, mx2);
 }
 console.log(`5. spec era: ${fails === 0 ? "ALL PASS" : `${fails} FAILURE(S)`}`);
 

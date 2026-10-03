@@ -338,16 +338,17 @@ const TECH_TOKENS = /\b(4k|5g|8k|1080p?|720p?|2160p?|24\/7|mp[34]|wi-?fi ?[67]|u
 
 const key = (s: string) => (s || "").toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
 
-function brandPatterns(name: string, opts?: { required?: boolean; extraForms?: string[]; excludeTokens?: Set<string> }): RegExp[] {
-  return brandForms(name, opts).map((n) => new RegExp(`\\b${n.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}s?\\b`));
+/** Patterns over a brand's whole vocabulary - its name forms AND every
+ * word of the name - for QUANTITY scrubbing only ("Pixel 9" carries no
+ * quantity). Never used to decide whether a text names a brand. */
+function vocabPatterns(name: string): RegExp[] {
+  const forms = new Set(brandNameForms(name));
+  for (const f of [...forms]) for (const tok of f.split(" ")) if (tok.length > 2) forms.add(tok);
+  return [...forms].map((n) => new RegExp(`\\b${esc(n)}s?\\b`));
 }
 
 /** Is a brand-name token category vocabulary? Exact match, a plural of
- * a category word or a piece of one (r13, 2026-10-02 cold-walk round 3:
- * "Nothing Phone" on a smartphones study made every blind "phone" a rival
- * mention; "projects" in "GitHub Issues / Projects" on project management
- * software). Mirrors textNamesCategory's containment, one direction only -
- * a category word inside a brand token ("iphone" holds "phone") is fine. */
+ * a category word or a piece of one - such an alias never names a brand. */
 function isCategoryToken(tok: string, cat?: Set<string>): boolean {
   if (!cat) return false;
   for (const c of cat) {
@@ -357,21 +358,9 @@ function isCategoryToken(tok: string, cat?: Set<string>): boolean {
   return false;
 }
 
-/** A multi-word name's tokens -> their spelling in the label ("Nothing
- * Phone" -> nothing: "Nothing"). Null for a one-word name. */
-function labelSpellings(name: string): Map<string, string> | null {
-  const base = name.replace(/\s*\([^)]*\)/g, "").trim();
-  const paren = [...name.matchAll(/\(([^)]*)\)/g)].map((m) => m[1]).join(" ");
-  const label = STOP_FORMS.has(key(base)) && key(paren).length >= 3 ? paren : base || name;
-  const words = label.split(/[^A-Za-z0-9]+/).filter(Boolean);
-  if (words.length < 2) return null;
-  return new Map(words.map((w) => [w.toLowerCase(), w]));
-}
-
-/** Dictionary alias forms, keyed and filtered like configured names (r13
- * review): a single-word alias that is a stopword, a generic token or
- * category vocabulary never identifies the brand. Everyday single-word
- * aliases survive but are case-guarded where they are matched. */
+/** Dictionary alias forms, keyed and filtered like configured names: a
+ * single-word alias that is a stopword, a generic token or category
+ * vocabulary never identifies the brand. */
 function aliasKeys(extraForms: string[] | undefined, excludeTokens?: Set<string>): string[] {
   const out: string[] = [];
   for (const f of extraForms ?? []) {
@@ -383,56 +372,157 @@ function aliasKeys(extraForms: string[] | undefined, excludeTokens?: Set<string>
   return out;
 }
 
-/** Is a single word everyday English, so it names a brand only when
- * capitalized? Two tiers from the response vault (review 2026-10-02):
- * - a LABEL word (the brand's own name, or a word of a multi-word name) is
- *   everyday when common in lowercase AND not brand-dominated - "ring",
- *   "nothing", "issues" yes; "jira", "netflix", "pixel", "apple", "chase"
- *   no, because engines write them capitalized nearly always and the label
- *   itself says the word is the brand;
- * - an ALIAS that is not a label word is everyday when merely common -
- *   "gold" for American Express is a brand form only capitalized, however
- *   often the vault capitalizes "Gold" for the card.
- * The hand-kept AMBIGUOUS_FORMS count as everyday in both tiers. */
-function everydayWord(form: string, tier: "label" | "alias"): boolean {
-  if (form.includes(" ")) return false;
-  if (AMBIGUOUS_FORMS.has(form)) return true;
-  if (!COMMON_WORDS.has(form)) return false;
-  return tier === "alias" || !BRAND_DOMINATED.has(form);
-}
+/* ------------------------- brand mentions (r15) ---------------------------
+ * Tyler's option B (2026-10-02), after one day of seven string patches:
+ * a text names a brand when it contains one of the brand's NAME FORMS as a
+ * whole phrase - the speakable name, the alternates its label declares
+ * ("HBO" of "Max (HBO)", "GitHub Projects" of "GitHub (Issues/Projects)"),
+ * a word of a multi-word name that is not category vocabulary ("samsung",
+ * "galaxy"), or a dictionary alias ("amex", "prime video") - in any case.
+ * No casing rules, no target exemptions, no per-roster word lists.
+ * Strings decide whole names and aliases. A ONE-WORD hit is decided by
+ * context unless its writing settles it:
+ *   - a coined one-word name, alias or product word ("hulu", "jira",
+ *     "iPhone") however written, or an everyday one written with a capital
+ *     mid-sentence ("...or Ring?") or opening a sentence when brand-
+ *     dominated ("Chase isn't working for me") -> the brand;
+ *   - an everyday word written lowercase ("the doorbell ring", "my pixel"),
+ *     a sentence-opening everyday word ("Nothing beats..."), or a MAKER
+ *     word of a longer name ("Google" of Google Pixel in "Google Play
+ *     Services", "Practice" of Practice Fusion) -> a model verdict, primed server-side by
+ *     brand_judge before the checks run and read here from BRAND_VERDICTS.
+ *     No verdict = named (the conservative default: at worst a needless
+ *     rewrite, never a missed leak).
+ * Validated against the 2026-10-02 resolver corpus (RESOLVER_VALIDATION). */
 
-/** A name's own keyed words: the full key and each of its words (after the
- * same parenthetical handling as brandForms). */
-function labelWords(name: string): Set<string> {
-  const base = name.replace(/\s*\([^)]*\)/g, "").trim();
-  const paren = [...name.matchAll(/\(([^)]*)\)/g)].map((m) => m[1]).join(" ");
-  const k = key(STOP_FORMS.has(key(base)) && key(paren).length >= 3 ? paren : base || name);
-  return new Set([k, ...k.split(" ")]);
-}
-
-/** The keyed surface forms brandPatterns matches (see there). */
-function brandForms(name: string, opts?: { required?: boolean; extraForms?: string[]; excludeTokens?: Set<string> }): string[] {
+/** A brand's name forms, keyed (lowercase, single-spaced). */
+export function brandNameForms(name: string, opts?: { extraForms?: string[]; excludeTokens?: Set<string> }): string[] {
   const out = new Set<string>();
-  // A parenthetical in a brand name is a qualifier, not a name - "Azure
-  // DevOps (Boards)" must never match "kanban boards". Exception: when the
-  // base is itself a stopworded common word ("Max (HBO)"), the parenthetical
-  // IS the effective name.
-  const base = name.replace(/\s*\([^)]*\)/g, "").trim();
-  const paren = [...name.matchAll(/\(([^)]*)\)/g)].map((m) => m[1]).join(" ");
-  const useParen = STOP_FORMS.has(key(base)) && key(paren).length >= 3;
-  name = useParen ? paren : base || name;
-  const k = key(name);
-  if (k && (opts?.required || !STOP_FORMS.has(k))) out.add(k);
-  // Every distinctive token of a multi-word name identifies the brand in
-  // context ("been on pixel", "my iphone friend") - the live battery names
-  // brands by their product token more often than by the full name. Tokens
-  // that appear in the study CATEGORY ("Ulta Beauty" in "beauty retailers")
-  // are category vocabulary, never brand evidence.
-  for (const tok of k.split(" ")) {
-    if (tok.length > (useParen ? 2 : 3) && !STOP_FORMS.has(tok) && !isCategoryToken(tok, opts?.excludeTokens)) out.add(tok);
+  const base = name.replace(/\s*\([^)]*\)/g, " ").replace(/\s+/g, " ").trim();
+  const parens = [...name.matchAll(/\(([^)]*)\)/g)].map((m) => m[1].trim()).filter(Boolean);
+  const maker = key(base).split(" ")[0] ?? "";
+  if (base.includes("/")) {
+    // "GitHub Issues / Projects": the head, and the maker with each alternative.
+    const [head, ...alts] = base.split("/").map((x) => x.trim()).filter(Boolean);
+    out.add(key(head));
+    for (const a of alts) out.add(key(a).split(" ").length > 1 || !maker ? key(a) : `${maker} ${key(a)}`);
+  } else if (key(base)) out.add(key(base));
+  for (const p of parens) {
+    // A parenthetical is a display qualifier ("Chase (credit cards)"); it is
+    // the effective NAME only when the base is a stopworded word ("Max
+    // (HBO)" - people say "HBO Max"). Slash alternatives inside it pair with
+    // the maker ("GitHub (Issues/Projects)" -> "github issues", "github
+    // projects"), never standalone ("issues" is not GitHub).
+    const alts = p.split("/").map((x) => key(x)).filter(Boolean);
+    if (STOP_FORMS.has(key(base))) for (const a of alts) out.add(a);
+    else if (alts.length > 1 && maker) for (const a of alts) out.add(`${maker} ${a}`);
+  }
+  // Each word of a multi-word name is a candidate too ("samsung", "galaxy",
+  // "pixel", "iphone") - people name rivals by maker or line, and the
+  // alias list cannot be trusted to carry every such handle. Category
+  // vocabulary ("phone" of "Nothing Phone") never is; an everyday word
+  // ("issues", "bank") is a candidate decided in context like any other
+  // ambiguous form, never by a casing rule.
+  for (const f of [...out]) {
+    const toks = f.split(" ");
+    if (toks.length < 2) continue;
+    for (const tok of toks) if (tok.length >= 3 && !STOP_FORMS.has(tok) && !GENERIC_TOKENS.has(tok) && !isCategoryToken(tok, opts?.excludeTokens)) out.add(tok);
+    // Contiguous multi-word parts are definite too ("prime video" of Amazon
+    // Prime Video) - a name people shorten is still that name.
+    // A part must carry a real word: "u s" of U.S. Bank is not a name ("mostly
+    // in the U.S." flagged a blind AmEx seed in the r15 walk).
+    for (let i = 0; i < toks.length; i++) for (let j = i + 2; j <= toks.length; j++) {
+      const part = toks.slice(i, j);
+      if (j - i < toks.length && part.some((t) => t.length >= 3 && !STOP_FORMS.has(t) && !GENERIC_TOKENS.has(t))) out.add(part.join(" "));
+    }
   }
   for (const fk of aliasKeys(opts?.extraForms, opts?.excludeTokens)) out.add(fk);
-  return [...out];
+  return [...out].filter((f) => f.length >= 2);
+}
+
+/** The MAKER words of a multi-word name - its first word when that is not
+ * itself the whole name or an alias ("google" of Google Pixel, "apple" of
+ * Apple iPhone, "bank" of Bank of America). A maker has other products
+ * ("Google Play Services", "Apple TV"), so a maker-word hit is always
+ * judged in context, capitalized or not. The other words of a name
+ * ("iphone", "galaxy", "issues") follow the one-word rules. */
+function makerWordForms(name: string, opts?: { extraForms?: string[]; excludeTokens?: Set<string> }): Set<string> {
+  // From the LABEL's own forms only - an alias like "casper sleep" must not
+  // turn "casper" (the whole name) into a maker word.
+  const own = brandNameForms(name, { excludeTokens: opts?.excludeTokens });
+  const base = key(name.replace(/\s*\([^)]*\)/g, " "));
+  const makers = new Set(own.filter((f) => f.includes(" ")).map((w) => w.split(" ")[0]));
+  // An alias equal to the maker word ("bloom" for Bloom Nutrition) is just
+  // as ambiguous ("full bloom") - it stays a maker word.
+  return new Set([...makers].filter((f) => f !== base));
+}
+
+/** Model verdicts for ambiguous one-word hits: "does <form> in <text>
+ * refer to <brand>?" Filled by brand_judge (server) before checks run;
+ * empty in the browser, where every ambiguous hit counts as named. */
+const BRAND_VERDICTS = new Map<string, boolean>();
+export function brandVerdictKey(text: string, brand: string, form: string): string {
+  return `${key(brand)}|${form}|${key(text)}`;
+}
+export function setBrandVerdict(text: string, brand: string, form: string, refers: boolean): void {
+  if (BRAND_VERDICTS.size > 50_000) BRAND_VERDICTS.clear();
+  BRAND_VERDICTS.set(brandVerdictKey(text, brand, form), refers);
+}
+
+/** An everyday word as a brand form: the vault lexicon or the hand list. */
+function ambiguousWord(form: string): boolean {
+  return !form.includes(" ") && (AMBIGUOUS_FORMS.has(form) || COMMON_WORDS.has(form));
+}
+
+/** Whether a text names a brand, and which ambiguous forms still lack a
+ * verdict (each counted as named until judged). */
+export function brandMentions(
+  text: string, name: string, opts?: {
+    extraForms?: string[]; excludeTokens?: Set<string>;
+    /** The other tracked brands: their full names are scrubbed before
+     * matching ("Bank of America" is not "U.S. Bank"); verdicts stay keyed
+     * by the ORIGINAL text, so the judge and the check see the same hits. */
+    others?: string[];
+  }
+): { named: boolean; pending: string[] } {
+  const original = text;
+  if (opts?.others) text = withoutOtherBrands(text, name, [name, ...opts.others]);
+  // A definite hit (an unambiguous form, or an ambiguous one the context or
+  // a verdict settles) names the brand outright and nothing is queued; only
+  // a text whose sole evidence is unjudged ambiguous hits goes to the judge
+  // ("Done with monday.com" never asks about "monday" - validation
+  // 2026-10-02: 12 needless judge calls, each a literal-minded "no").
+  const pending: string[] = [];
+  const maker = makerWordForms(name, opts);
+  for (const form of brandNameForms(name, opts)) {
+    const body = form.split(" ").map(esc).join("[^A-Za-z0-9+]*");
+    const re = new RegExp(`(?<![A-Za-z0-9])(${body})(?:s|es|'s)?(?![A-Za-z0-9])`, "gi");
+    for (const m of text.matchAll(re)) {
+      // A whole multi-word name ("prime video", "bank of america") is definite.
+      if (form.includes(" ")) return { named: true, pending: [] };
+      const v = BRAND_VERDICTS.get(brandVerdictKey(original, name, form));
+      if (v === true) return { named: true, pending: [] };
+      if (v === false) continue;
+      if (!maker.has(form)) {
+        // A one-word name, alias or product word: a coined word ("hulu",
+        // "jira", "iPhone") is the brand however it is written; an everyday
+        // word is the brand when written with a capital mid-sentence
+        // ("...or Ring?") or opening a sentence when brand-dominated ("Chase
+        // isn't working for me").
+        if (!ambiguousWord(form)) return { named: true, pending: [] };
+        const w = m[1];
+        const pre = text.slice(0, m.index ?? 0).trimEnd();
+        const sentenceStart = pre === "" || /[.!?:"\u201c(\n-]$/.test(pre);
+        const capital = /[A-Z]/.test(w);
+        if (capital && !sentenceStart) return { named: true, pending: [] };
+        if (capital && sentenceStart && BRAND_DOMINATED.has(form)) return { named: true, pending: [] };
+      }
+      // Lowercase, a sentence-opening everyday word, or a maker word:
+      // context decides (brand_judge). Unjudged = named.
+      if (!pending.includes(form)) pending.push(form);
+    }
+  }
+  return { named: pending.length > 0, pending };
 }
 
 /** Does the text speak the category's language? A word of the category
@@ -465,8 +555,7 @@ export function textNamesCategory(text: string, category: string): boolean {
 export function textNamesBrand(
   text: string, brand: string, opts?: { required?: boolean; extraForms?: string[]; excludeTokens?: Set<string> }
 ): boolean {
-  const t = key(text).replace(TERM_COLLISIONS, " ");
-  return brandPatterns(brand, opts).some((p) => p.test(t));
+  return brandMentions(text, brand, opts).named;
 }
 
 export interface BatteryCheckCell {
@@ -558,7 +647,7 @@ export function checkPromptBrandRule(input: {
     out.push({ check: "scenario_label_leak", detail: `copies the scenario label "${label}"` });
   const catTokens = new Set(key(input.category ?? "").split(" ").filter(Boolean));
   const target = textNamesBrand(text, brand, { extraForms: input.extraForms?.[brand], excludeTokens: catTokens });
-  const rivalsNamed = input.competitors.filter((c) => textNamesBrand(withoutOtherBrands(text, c, [brand, ...input.competitors]), c, { extraForms: input.extraForms?.[c], excludeTokens: catTokens }));
+  const rivalsNamed = input.competitors.filter((c) => namesForbiddenBrand(text, c, { extraForms: input.extraForms?.[c], excludeTokens: catTokens, others: [brand, ...input.competitors].filter((x) => x !== c) }));
   // The cell's own angle brand is never an "extra" rival - match by name
   // containment in both directions so label variants ("Amazon (Beauty)")
   // resolve to their angle spelling.
@@ -671,7 +760,7 @@ export function checkBattery(input: {
   scenarioLabels?: string[];
 }): BatteryFinding[] {
   const findings: BatteryFinding[] = [];
-  const brandVocab = [input.brand, ...input.competitors].flatMap((b) => brandPatterns(b, { required: true }));
+  const brandVocab = [input.brand, ...input.competitors].flatMap((b) => vocabPatterns(b));
   input.cells.forEach((cell, i) => {
     const texts = [cell.text, ...cell.phrasings];
     const seen = new Set<string>();
@@ -801,21 +890,16 @@ export interface CellCheckSpec {
   classBrand?: string;
 }
 
-/** Brand forms that double as ordinary English words: in FORBIDDEN
- * detection these count only when capitalized ("2-3 services max" is not
- * Max, "do I need a visa" is not Visa). Shared with the legacy signature
- * filter in instrument.ts. */
+/** Brand forms that double as ordinary English words beyond the vault
+ * lexicon ("do I need a visa" is not Visa - the vault rarely sees the
+ * travel document). A hit on one is decided in context (brandMentions).
+ * Shared with the legacy signature filter in instrument.ts. */
 export const AMBIGUOUS_FORMS = new Set([
   // "citi" removed (review 2026-10-02): no recorded reason, the vault
   // lexicon rates it coined (1 lowercase use vs 2,600 capitalized), and the
   // guard was hiding a real lowercase mention ("citi or american express").
   "max", "visa", "prime", "go", "one", "mini", "pro", "plus",
   "air", "fire", "mission", "video", "music", "cloud", "monday",
-  // r13 (2026-10-02 cold-walk audit): roster tokens that are everyday words
-  // in their category - "import issues" named "GitHub Issues / Projects"
-  // and one honest Jira seed was rewritten to drop "issues", Jira's own
-  // noun; "my bank", "chase the points", "discover new cards" are AmEx
-  // sentences, not rivals. Capitalized they still count.
 ]);
 
 /** Tokens that never identify a brand on their own ("monday.com" is not
@@ -854,86 +938,15 @@ export function namesRequiredBrand(
       for (let j = i + 2; j <= toks.length; j++) forms.add(toks.slice(i, j).join(" "));
     }
   }
-  const caseGuarded = new Set<string>();
-  for (const fk of aliasKeys(opts?.extraForms, opts?.excludeTokens)) {
-    if (!forms.has(fk) && everydayWord(fk, "alias")) caseGuarded.add(fk);
-    else forms.add(fk);
-  }
-  if ([...forms].some((f) => new RegExp(`\\b${esc(f)}s?\\b`).test(t))) return true;
-  // An everyday alias ("gold" for a card line) counts only capitalized.
-  return [...caseGuarded].some((f) =>
-    new RegExp(`(?<![A-Za-z0-9])(?:${esc(f[0].toUpperCase() + f.slice(1))}|${esc(f.toUpperCase())})(?:s|'s)?(?![A-Za-z0-9])`).test(text));
+  for (const fk of aliasKeys(opts?.extraForms, opts?.excludeTokens)) forms.add(fk);
+  return [...forms].some((f) => new RegExp(`\\b${esc(f)}s?\\b`).test(t));
 }
 
-/** Forbidden-brand detection: precision-first. The same patterns as
- * textNamesBrand (STOP_FORMS, TERM_COLLISIONS, category tokens excluded),
- * with the ambiguous-word case guard: an ambiguous form counts only when
- * capitalized - and a brand whose whole name is an ambiguous stopword
- * ("Max") counts when capitalized, as the legacy signature did. */
+/** Forbidden-brand detection: the brand-mention core (see brandMentions). */
 export function namesForbiddenBrand(
-  text: string, name: string, opts?: {
-    extraForms?: string[]; excludeTokens?: Set<string>;
-    /** The study's client brand: its own one-word name is never
-     * case-guarded (review 2026-10-02). A target leaking into a blind cell
-     * is the costliest miss - a lowercase "purple" or "target" there is
-     * more likely the brand than not - while a false hit only costs a
-     * regeneration. Rivals keep the guard. */
-    isTarget?: boolean;
-  }
+  text: string, name: string, opts?: { extraForms?: string[]; excludeTokens?: Set<string>; others?: string[] }
 ): boolean {
-  const raw = text.replace(new RegExp(TERM_COLLISIONS.source, "gi"), " ");
-  const t = key(raw);
-  const capitalized = (form: string) => {
-    const cap = form[0].toUpperCase() + form.slice(1);
-    return new RegExp(`(?:^|[^A-Za-z0-9])(?:${esc(cap)}|${esc(form.toUpperCase())})(?:s|'s)?(?![A-Za-z0-9])`).test(raw);
-  };
-  // r13 (2026-10-02): everyday words inside brand names. Every fresh roster
-  // draws new everyday-word names (GitHub Issues, U.S. Bank, Nothing Phone,
-  // Ring), so no word list keeps up; the vault lexicon decides which words
-  // are everyday (everydayWord), and the label's own casing decides how an
-  // everyday split word must be written to count (labelCased).
-  const spellings = labelSpellings(name);
-  const labelCased = (form: string) => {
-    const sp = spellings!.get(form)!;
-    const firstUpper = sp[0] !== sp[0].toLowerCase();
-    const re = new RegExp(`(?<![A-Za-z0-9])(${esc(sp[0])}${esc(sp.slice(1))})(?:s|'s)?(?![A-Za-z0-9])`, "gi");
-    for (const m of raw.matchAll(re)) {
-      const w = m[1];
-      const caseOk = !firstUpper || w === w.toUpperCase() || w[0] !== w[0].toLowerCase();
-      if (!caseOk) continue;
-      const pre = raw.slice(0, m.index ?? 0).trimEnd();
-      if (firstUpper && (pre === "" || /[.!?:"\u201c(]$/.test(pre))) continue; // sentence-initial capital
-      return true;
-    }
-    return false;
-  };
-  const own = labelWords(name);
-  const upperLabel = (form: string) => { const sp = spellings!.get(form)!; return sp[0] !== sp[0].toLowerCase(); };
-  const wholeName = key(speakable(name));
-  for (const form of brandForms(name, opts)) {
-    if (own.has(form) && spellings?.has(form)) {
-      // A word split out of a multi-word name: an everyday one ("Issues",
-      // "Bank", "Nothing") counts only written the label's way and never
-      // as a sentence's first word (a lowercase label word like "monday"
-      // of monday.com wants a capital); a coined or brand-dominated one
-      // ("samsung", "apple", "pixel") stays case-blind - the writer's
-      // lowercase register names brands that way ("apple or samsung").
-      if (everydayWord(form, "label")) { if (upperLabel(form) ? labelCased(form) : capitalized(form)) return true; continue; }
-    } else if (own.has(form)) {
-      // A one-word name: everyday ("Ring", "Nothing") counts only
-      // capitalized - a sentence start still counts, since "Chase isn't
-      // working for me" names the bank. Never for the study's own target
-      // (see isTarget).
-      if (everydayWord(form, "label") && !(opts?.isTarget && form === wholeName)) { if (capitalized(form)) return true; continue; }
-    } else if (everydayWord(form, "alias")) {
-      // An alias that is not a word of the name ("gold"): capitalized only.
-      if (capitalized(form)) return true;
-      continue;
-    }
-    if (new RegExp(`\\b${esc(form)}s?\\b`).test(t)) return true;
-  }
-  const primary = key(speakable(name));
-  return STOP_FORMS.has(primary) && AMBIGUOUS_FORMS.has(primary) && capitalized(primary);
+  return brandMentions(text, name, opts).named;
 }
 
 /** The scoring mode a stage x angle designs - the same branches
@@ -963,7 +976,7 @@ const SPELLED: Record<string, number> = {
  * Spelled forms are read on the SEED side only - they can only widen what
  * a paraphrase may say ("four" -> "4"), never add a flag. */
 export function seedQuantities(seed: string, brand: string, competitors: string[]): string[] {
-  const vocab = [brand, ...competitors].flatMap((b) => brandPatterns(b, { required: true }));
+  const vocab = [brand, ...competitors].flatMap((b) => vocabPatterns(b));
   const out = new Set(quantities(seed, vocab).filter((n) => parseFloat(n) > 2));
   for (const w of key(seed).split(" ")) if (SPELLED[w]) out.add(String(SPELLED[w]));
   return [...out];
@@ -1150,7 +1163,7 @@ export function checkCandidateSignature(
   );
   const roster = [...spec.requiredBrands, ...spec.forbiddenBrands, ...(spec.angleBrand ? [spec.angleBrand] : [])];
   const leaked = spec.forbiddenBrands.filter(
-    (b) => namesForbiddenBrand(withoutOtherBrands(text, b, roster), b, { extraForms: opts?.extraForms?.[b], excludeTokens, isTarget: b === spec.target })
+    (b) => namesForbiddenBrand(text, b, { extraForms: opts?.extraForms?.[b], excludeTokens, others: roster.filter((x) => x !== b) })
   );
   // A class cell's expected signature is {target + classBrand}: the class
   // must actually be evoked, detected case-blind and format-tolerant like

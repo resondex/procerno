@@ -43,7 +43,10 @@ const ALIAS_SCHEMA = {
  * this version (r13 review: the unversioned, model-less key was the same
  * shape as the brand-profile 'analyze' key that served stale profiles for
  * six months). Shared with the dictionary seed, so both move together. */
-const ALIAS_PROMPT_VERSION = "a2";
+// a3 (2026-10-02, option B): short names and product-line names
+// ("athena", "athenaone" were missing - every check path missed a blind
+// "athena vs nextgen" without them).
+const ALIAS_PROMPT_VERSION = "a3";
 
 function aliasCacheKey(brands: string[]): string {
   const normalized = [[...brands].sort().join(",")].map((p) => p.trim().toLowerCase()).join("|");
@@ -62,10 +65,13 @@ export async function suggestBrandAliases(brands: string[]): Promise<{ canonical
       {
         role: "system",
         content:
-          "For each brand, list the alternate names, abbreviations, and " +
-          "spellings an AI answer might use for the SAME brand (e.g. " +
-          "'American Express' → ['amex', 'americanexpress']). Lowercase " +
-          "aliases. Only genuinely equivalent names — never other brands.",
+          "For each brand, list the names an AI answer or a person might use " +
+          "for the SAME brand: abbreviations, short names, alternate " +
+          "spellings, and the names of its own product lines (e.g. " +
+          "'American Express' → ['amex', 'americanexpress']; 'Google Pixel' " +
+          "→ ['pixel']; 'Samsung Galaxy' → ['galaxy']). Lowercase. Never " +
+          "another company's brand, and never a generic word for the " +
+          "product type.",
       },
       { role: "user", content: JSON.stringify(brands) },
     ],

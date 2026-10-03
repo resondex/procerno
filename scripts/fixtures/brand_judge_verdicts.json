@@ -1,0 +1,110 @@
+[
+ {
+  "text": "I take lots of low-light family shots and night photos of the skyline, plus I film concerts from a few rows back. Want high-quality 4K and RAW stills I can edit. What camera tech (stabilization, pixel size, night mode, RAW support) actually delivers, and what's a good mobile workflow?",
+  "brand": "Google Pixel",
+  "form": "pixel",
+  "refers": false
+ },
+ {
+  "text": "been on pixel for a few years now. stick with it again or switch to a different premium android? what would you check before deciding?",
+  "brand": "Google Pixel",
+  "form": "pixel",
+  "refers": true
+ },
+ {
+  "text": "Since the last Android update, my phone is draining 15-20% overnight with no use and Google Play Services near the top. Any step-by-step fixes I can try that won't wipe my data?",
+  "brand": "Google Pixel",
+  "form": "google",
+  "refers": false
+ },
+ {
+  "text": "Since the recent Android update my battery drops 20-30% overnight and I see Google Play Services using a lot of juice. Step-by-step fixes that won't erase my data?",
+  "brand": "Google Pixel",
+  "form": "google",
+  "refers": false
+ },
+ {
+  "text": "After the last update my phone loses battery while idle and Google Play Services is high in battery settings. How to troubleshoot without factory reset?",
+  "brand": "Google Pixel",
+  "form": "google",
+  "refers": false
+ },
+ {
+  "text": "Phone started draining much faster after update, Google Play Services shows heavy usage. What are non-destructive fixes I can try?",
+  "brand": "Google Pixel",
+  "form": "google",
+  "refers": false
+ },
+ {
+  "text": "Battery now empties overnight since the update and Google Play Services is near top of battery list. Any stepwise things to do that keep my apps and photos?",
+  "brand": "Google Pixel",
+  "form": "google",
+  "refers": false
+ },
+ {
+  "text": "Following the system update my device loses charge when unused and Google Play Services looks active. Walk me through fixes that won't wipe data.",
+  "brand": "Google Pixel",
+  "form": "google",
+  "refers": false
+ },
+ {
+  "text": "Updated Android and now the phone dies faster at night, Google Play Services shows high background activity. What clear steps can I try to fix this without resetting?",
+  "brand": "Google Pixel",
+  "form": "google",
+  "refers": false
+ },
+ {
+  "text": "Since updating, overnight battery loss is noticeable and Google Play Services is consuming power. Non-data-wiping troubleshooting steps, please.",
+  "brand": "Google Pixel",
+  "form": "google",
+  "refers": false
+ },
+ {
+  "text": "My handset started draining a bunch of battery after the update and Google Play Services tops the list. How do I fix it without losing my settings?",
+  "brand": "Google Pixel",
+  "form": "google",
+  "refers": false
+ },
+ {
+  "text": "After the update my battery drops a lot while idle; Google Play Services is hogging battery. Any safe step-by-step remedies that keep my content?",
+  "brand": "Google Pixel",
+  "form": "google",
+  "refers": false
+ },
+ {
+  "text": "Considering buying matching phones, a watch, and buds for family. Anything to be careful about around Google/account sign-ins and backup transfers if I'm setting them up?",
+  "brand": "Google Pixel",
+  "form": "google",
+  "refers": false
+ },
+ {
+  "text": "I want to cancel our cable subscription. Critical: live local channels, reliable NFL and college streams, a proper program guide, and cloud recording that doesn't max out. Two TVs plus a tablet should work at once. Is that realistic without a set-top box?",
+  "brand": "Max (HBO)",
+  "form": "max",
+  "refers": false
+ },
+ {
+  "text": "household base: two adults (dramas, comedies, some anime), two kids under 10 (animation, nature docs). devices are a smart TV, a streaming stick, and a couple tablets. budget about 40 a month. we'd like 2-3 services max and rotate one slot each month. can you suggest a core stack and a rotation plan?",
+  "brand": "Max (HBO)",
+  "form": "max",
+  "refers": false
+ },
+ {
+  "text": "Road trip coming up. Set me up with a kid-safe plan for a 6-year-old: separate profile locked by PIN, max rating around TV-Y7, autoplay off, daily time limit, and downloads only for the tablet with English and Spanish audio. Which services can do that and how to set it up fast?",
+  "brand": "Max (HBO)",
+  "form": "max",
+  "refers": false
+ },
+ {
+  "text": "I'm prepping for a long drive with my six-year-old. Which platforms let me create a PIN-locked kids profile, set a max rating around early-kids content, turn off autoplay, enforce a daily limit, and download shows only to one tablet in two languages? Need step-by-step fast setup.",
+  "brand": "Max (HBO)",
+  "form": "max",
+  "refers": false
+ },
+ {
+  "text": "Not using Amazon shopping perks anymore. If I cancel Prime Video, what services give me plenty of films and some originals without a shopping membership attached?",
+  "brand": "Amazon Prime Video",
+  "form": "amazon",
+  "refers": false
+ }
+]

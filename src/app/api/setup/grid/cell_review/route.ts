@@ -1,4 +1,5 @@
 import { brandAliasForms } from "@/lib/engine/brand_aliases";
+import { primeBrandVerdicts } from "@/lib/engine/brand_judge";
 import { NextResponse } from "next/server";
 import { tagSetupFromRequest } from "@/lib/cost_log";
 import { z } from "zod";
@@ -143,6 +144,13 @@ export async function POST(req: Request) {
       return withDesign.map(() => ({ voices: true, reason: "" }));
     }),
   ]);
+  // r15 brand judge: verdicts for ambiguous one-word brand hits on each
+  // edit's forbidden brands, before the sync brand rules read them.
+  await primeBrandVerdicts({
+    items: parsed.data.candidates.flatMap((c, i) => (specs[i] ? [{ text: c.text, brands: specs[i]!.forbiddenBrands }] : [])),
+    roster: [parsed.data.brand, ...competitors], aliases: aliasForms, category: parsed.data.category,
+    meta: { source: cacheSource(auth) },
+  }).catch((err) => console.error("cell_review brand judge failed open:", err));
   // Deterministic brand rules on every edit that carries a stage key - a
   // check the model cannot be sweet-talked out of, run BEFORE the confirm
   // proceeds to paraphrase generation.

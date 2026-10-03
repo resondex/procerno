@@ -12,6 +12,7 @@ import {
 export { MUST_NAME_STAGES };
 import { store } from "../store";
 import { brandAliasForms } from "./brand_aliases";
+import { primeBrandVerdicts } from "./brand_judge";
 import type { CacheMeta } from "../types";
 
 /**
@@ -116,7 +117,7 @@ const STYLE_VERSION = "s29";
  * 7's unversioned serve-time re-check had no terminal state). Bump when
  * a deterministic check changes meaning; bumping costs one free re-judge
  * per unit, and model calls only for units the new rules reject. */
-export const SEED_RULES_VERSION = "r14"; // r14 (2026-10-02 review): everyday-word lexicon by lowercase SHARE in two tiers (label words: common and not brand-dominated - "jira", "netflix", "pixel", "apple", "chase" count lowercase again; aliases: merely common - "gold" stays capital-only), coined split words case-blind ("apple or samsung"), the target's own one-word name never case-guarded, "citi" off the case-guard list, and a monthly figure is the asker's plan only in first-person / spend / offer context ("the Pro about 20 a month more" is a stated price). r13 (2026-10-02 cold-walk audit + review): verb-less stated prices ("Gold at 250"); word-anchored price-concern test + money bolt-ons; brand checks read filtered dictionary alias forms ("amex"); everyday words inside brand names never name the brand - category tokens containment-aware, split words of multi-word names in label casing and not sentence-initial, one-word names and aliases in the vault everyday-word lexicon capitalized only, other brands' full names scrubbed first. r4 (2026-10-01): r2 calendar-year/60-word/segment-vocab; r3 category-naming labels exempt from substring leak; r4 'standardization' in segment vocabulary; r5 directionless-switch string check; r6 punctuation-blind label-leak matching; r7-r8 switch direction detected by absence (no OS, no roster brand near switch vocabulary); cheaper bolt-on token on non-price concerns
+export const SEED_RULES_VERSION = "r15"; // r15 (2026-10-02, Tyler's option B): brand mentions = whole names, declared alternates, name words and dictionary aliases, with every ambiguous one-word hit (an everyday word written lowercase or opening a sentence, or a maker word like "Google" of Google Pixel) decided in context by the brand judge (haiku, cached) - no casing rules, no target exemption, no roster word lists. r14 (2026-10-02 review): everyday-word lexicon by lowercase SHARE in two tiers (label words: common and not brand-dominated - "jira", "netflix", "pixel", "apple", "chase" count lowercase again; aliases: merely common - "gold" stays capital-only), coined split words case-blind ("apple or samsung"), the target's own one-word name never case-guarded, "citi" off the case-guard list, and a monthly figure is the asker's plan only in first-person / spend / offer context ("the Pro about 20 a month more" is a stated price). r13 (2026-10-02 cold-walk audit + review): verb-less stated prices ("Gold at 250"); word-anchored price-concern test + money bolt-ons; brand checks read filtered dictionary alias forms ("amex"); everyday words inside brand names never name the brand - category tokens containment-aware, split words of multi-word names in label casing and not sentence-initial, one-word names and aliases in the vault everyday-word lexicon capitalized only, other brands' full names scrubbed first. r4 (2026-10-01): r2 calendar-year/60-word/segment-vocab; r3 category-naming labels exempt from substring leak; r4 'standardization' in segment vocabulary; r5 directionless-switch string check; r6 punctuation-blind label-leak matching; r7-r8 switch direction detected by absence (no OS, no roster brand near switch vocabulary); cheaper bolt-on token on non-price concerns
 
 /** Brand forms that double as ordinary English words: only these demand a
  * capitalized occurrence to count as naming the brand ("2-3 services max"
@@ -3039,6 +3040,7 @@ export async function generateGrid(input: {
         // a design re-read from its own spelling (seedRule, hoisted to
         // generate() scope so the cross-cell diversity pass shares it).
         if (process.env.PHRASINGS_CHECKS !== "0" && flat.length > 0) {
+          await primeCells(flat);
           const flagged = flat
             .map((c, i) => ({ c, i, mech: seedRule(c) }))
             .filter((x) => x.mech.length > 0);
@@ -3069,6 +3071,7 @@ export async function generateGrid(input: {
               });
               const cell2 = (JSON.parse(res2.choices[0]?.message?.content ?? "{}") as { cells?: { text?: string }[] }).cells?.[0];
               const text2 = cell2?.text?.trim();
+              if (text2) await primeCells([{ ...c, text: text2 }]);
               if (text2 && seedRule({ stage: c.stage, angle: c.angle, text: text2, classPhrase: c.classPhrase, classBrand: c.classBrand }).length === 0) {
                 console.warn(`seed brand rule healed [${c.stage}]: ${text2.slice(0, 90)}`);
                 flat[i].text = humanize(text2);
@@ -3151,6 +3154,7 @@ export async function generateGrid(input: {
                 // A design heal must also pass the mechanical rules (the
                 // brand-rule and concern-diversity heals already do this) -
                 // otherwise the terminal verdict flags the "fix".
+                if (text2) await primeCells([{ ...x.c, text: text2 }]);
                 let mech2ok = !!text2 && seedRule({ ...x.c, text: text2 }).length === 0;
                 let again = mech2ok
                   ? (await checkDesignFidelity({ candidates: [{ text: text2!, design: x.intent }], meta: input.meta }))[0]
@@ -3176,6 +3180,7 @@ export async function generateGrid(input: {
                     response_format: { type: "json_schema", json_schema: { name: "grid_cells", strict: true, schema: CELLS_SCHEMA } },
                   });
                   text2 = (JSON.parse(res3.choices[0]?.message?.content ?? "{}") as { cells?: { text?: string }[] }).cells?.[0]?.text?.trim();
+                  if (text2) await primeCells([{ ...x.c, text: text2 }]);
                   mech2ok = !!text2 && seedRule({ ...x.c, text: text2 }).length === 0;
                   again = mech2ok
                     ? (await checkDesignFidelity({ candidates: [{ text: text2!, design: x.intent }], meta: input.meta }))[0]
@@ -3226,6 +3231,7 @@ export async function generateGrid(input: {
         // pass may stamp the version; a deadline-cut pass writes the unit
         // provisional so the next serve retries with a fresh budget.
         if (complete) {
+          await primeCells(flat);
           flat.forEach((c, i) => {
             const mech = seedRule(c);
             const design = designFlagged.get(i);
@@ -3289,6 +3295,17 @@ export async function generateGrid(input: {
     }
   };
 
+  // r15 brand judge: before the sync seed check reads a text, ambiguous
+  // one-word brand hits on the cell's FORBIDDEN brands get their verdicts
+  // (cached; model only on a miss). See brand_judge / brandMentions.
+  const primeCells = async (cells: { stage: string; angle: string; text: string; concern?: string | null; classPhrase?: string | null; classBrand?: string | null }[]) => {
+    const items = cells.filter((c) => c.text).map((c) => ({
+      text: c.text,
+      brands: deriveCheckSpec(c, input.brand, input.competitors, input.category, aliasForms).forbiddenBrands,
+    }));
+    if (items.length > 0)
+      await primeBrandVerdicts({ items, roster: [input.brand, ...input.competitors], aliases: aliasForms, category: input.category, meta: input.meta });
+  };
     // The free deterministic seed check, shared by the per-group heal and
   // the battery-wide concern-diversity pass below.
   const seedRule = (c: {
@@ -3491,8 +3508,9 @@ export async function generateGrid(input: {
                 });
                 const text2 = (JSON.parse(res2.choices[0]?.message?.content ?? "{}") as { cells?: { text?: string }[] }).cells?.[0]?.text?.trim();
                 if (!text2) return;
-                const cand = { stage: d.c.stage, angle: d.c.angle, text: humanize(text2), situation: d.c.situation };
+                const cand = { stage: d.c.stage, angle: d.c.angle, text: humanize(text2), situation: d.c.situation, concern: d.c.concern };
                 const intent = stageDesignIntent(d.c.stage, input.brand, undefined, d.c.angle, d.c.situation);
+                await primeCells([cand]);
                 const mechOk = seedRule(cand).length === 0;
                 const dv = intent ? (await checkDesignFidelity({ candidates: [{ text: cand.text, design: intent }], meta: input.meta }))[0] : null;
                 const designOk = !intent || (!!dv?.voices && !dv?.unchecked);
@@ -3600,6 +3618,7 @@ export async function generateGrid(input: {
                 const intent = stageDesignIntent(d.c.stage, input.brand, undefined, d.c.angle, d.c.situation);
                 const judge = async (t: string) => {
                   const cand = { stage: d.c.stage, angle: d.c.angle, text: humanize(t), situation: d.c.situation };
+                  await primeCells([cand]);
                   const mechFails = seedRule(cand).map((f) => f.detail);
                   const mechOk = mechFails.length === 0;
                   const brandOk = i !== brandSteer || textNamesBrand(cand.text, input.brand, { extraForms: aliasForms[input.brand] });
@@ -3681,6 +3700,7 @@ export async function generateGrid(input: {
                     if (!text3) { lastWhy = "it came back empty"; continue; }
                     const cand = { stage: d.c.stage, angle: d.c.angle, text: humanize(text3), situation: d.c.situation };
                     const intent = stageDesignIntent(d.c.stage, input.brand, undefined, d.c.angle, d.c.situation);
+                    await primeCells([cand]);
                     const mechFails = seedRule(cand).map((f) => f.detail);
                     const brandOk = namesTarget(cand.text);
                     const dv = intent ? (await checkDesignFidelity({ candidates: [{ text: cand.text, design: intent }], meta: input.meta }))[0] : null;
@@ -3768,6 +3788,16 @@ export async function generateGrid(input: {
     const raws = await Promise.all(unitKeys.map((k) => store.cacheGet(k, CACHE_TTL_MS)));
     raws.forEach((raw, u) => expectedRaw.set(u, raw ?? null));
     const upgrades: Promise<unknown>[] = [];
+    // r15: every cached cell about to be re-judged under new rules gets its
+    // brand-judge verdicts first, in one batch (the loop below is sync).
+    if (process.env.PHRASINGS_CHECKS !== "0") {
+      const rejudge = raws.flatMap((raw) => {
+        if (!raw || pendingMarkerAt(raw) !== null) return [];
+        const v = valueOf(raw);
+        return v && !v.provisional && v.cells.length > 0 && v.rules !== SEED_RULES_VERSION ? scrub(v.cells) : [];
+      });
+      if (rejudge.length > 0) await primeCells(rejudge);
+    }
     raws.forEach((raw, u) => {
       if (raw) {
         const at = pendingMarkerAt(raw);
@@ -4071,6 +4101,8 @@ export async function regenerateCell(input: {
     const cand = await draw(note);
     if (!cand) return null;
     if (avoidNorm.some((t) => t.toLowerCase() === cand.toLowerCase())) return null;
+    if (process.env.PHRASINGS_CHECKS !== "0")
+      await primeBrandVerdicts({ items: [{ text: cand, brands: specFor(cand).forbiddenBrands }], roster: [input.brand, ...input.competitors], aliases: aliasForms, category: input.category, meta: input.meta });
     const problems =
       process.env.PHRASINGS_CHECKS !== "0"
         ? checkPromptAgainstSpec({ text: cand, spec: specFor(cand), category: input.category, extraForms: aliasForms }).map((m) => m.detail)
@@ -4548,6 +4580,20 @@ export async function generatePhrasings(input: {
     };
     input.onRaw?.(parsed);
     const result: Phrasing[][] = subset.map(() => []);
+    // r15 brand judge: verdicts for every candidate's ambiguous one-word hits
+    // on its cell's forbidden brands, before the sync signature check.
+    if (process.env.PHRASINGS_CHECKS !== "0") {
+      const items = (parsed.cells ?? []).flatMap((c) => {
+        const sp = subset[c.index] ? specOf.get(subset[c.index]) : undefined;
+        if (!sp) return [];
+        return (c.phrasings ?? []).map((ph) => ({
+          text: humanize((ph.text ?? "").trim()).replace(/^asker:\s*[^-:]{1,40}[-:]\s*/i, ""),
+          brands: sp.forbiddenBrands,
+        })).filter((x) => x.text);
+      });
+      if (items.length > 0)
+        await primeBrandVerdicts({ items, roster: [input.brand, ...input.competitors], aliases: aliasForms, category: input.category, meta: input.meta });
+    }
     for (const c of parsed.cells ?? []) {
       const seed = subset[c.index];
       if (!seed) continue;
