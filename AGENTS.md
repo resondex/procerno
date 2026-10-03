@@ -645,6 +645,53 @@ After r13/r14 stacked seven string patches in one day (each fresh roster - GitHu
 
 The "Problem resolution" stage is out of the setup grid and is NOT to be re-added until more R&D (see the group-3 settled-customer scorer and the evidence-grounded problem_resolution redesign in the To do list). Implementation: removed from stageLibrary; RETIRED_STAGES (instrument.ts) drops it from saved drafts' stage lists in generateGrid and gives any leftover cell no paraphrases in generatePhrasings. Cell cache keys are per cell, so no other cached cell is re-keyed. Prompts already in existing projects are untouched. The stage's design intents and types remain in battery_checks for legacy cells.
 
+## Setup-gate fixes from Tyler's walkthroughs (2026-10-02)
+
+- **Journey-fit advisory (a5d74f5):** products with a recurring fee read as subscription. The read is the majority of three samples, not a single roll - one roll flipped Renewal on and off between opens.
+- **Scenario advisory (6459e90):** a suggested scenario must pass the scenarios gate's own check before it is offered. We had been offering scenarios our own checker then flagged.
+- **Near neighbors (b90e073, e829469, 9f15a20):**
+  - a near neighbor is the SAME buyer with the SAME need, one phrase changed - not "suggest another";
+  - it never introduces a money angle unless the scenario is about price;
+  - advisory-added cards reset to their original suggestion, not to the previous near neighbor.
+- **Worries gate (723351d):** worries are offered at a doubt stage the user added by hand (Renewal on a one-shot read), not only at stages the mask recommends.
+
+## Paraphrase retries p9 (2026-10-03)
+
+The retry's `[overused: ...]` list (words in 2+ of a cell's texts, brand tokens excluded) also counted:
+- the CATEGORY - "project", "management", "tortilla", "chips" were on 30-36 of ~50 cells' lists;
+- the cell's circumstance and worry;
+- the stage's ask verbs ("pick"/"choose" on comparisons, "keep"/"cancel"/"renew" on churn and renewal).
+
+So retries were told to steer away from the words that define the question. That is the measured source of three of the init audit's largest paraphrase-drift classes (category words dropped, comparisons that stop asking for the pick, churn sets that lose the stay option), and it explains why that drift sat at paraphrase positions 6-8, where retry output is appended.
+
+`avoidExempt` (instrument.ts) now exempts:
+- category tokens;
+- the scenario label, concern and class phrase;
+- a per-stage ask-word list (`STAGE_ASK_WORDS`).
+
+All exemptions include singular/plural variants. `PHRASINGS_VERSION` p8 -> p9 re-keys paraphrase sets only; seeds and saved drafts' stored paraphrases are untouched. The real-output effect has NOT been measured yet - it needs a paraphrase generation run.
+
+## Init audit + three decisions (2026-10-03)
+
+**The audit.** Four independent passes over five brands (Jira, AmEx, Pixel, Doritos, Netflix):
+- an r15 cold walk + seed audit;
+- a cell audit of Tyler's saved drafts;
+- a paraphrase audit of the saved drafts;
+- an analyst fix pass on the saved drafts.
+
+Results:
+- Report: `INIT_AUDIT_2026-10-03.md`. Data, patches and change logs: `~/Documents/procerno_eval/init_audit_2026-10-03/`.
+- Zero S1s across 20 audits; every battery is ready after gate edits. The one blocker is the saved Pixel pricing cell stating "699 / 999", whose flag was never resolved at the gate.
+- The analyst changed 13.9% of prompts (346 of 2,490) and touched 38% of cells.
+- Cold walk spend was ~$3.79 (a floor - the log may be incomplete).
+
+**The decisions** (`DECISIONS_INIT_2026-10-03.md`, all DECIDED, none built):
+1. **Pricing is a scenario row.** Every pricing cell asks "is <brand> worth it vs a cheaper option, for this buyer". The trade-off diversity pass and the one-cell-per-shape rule go. This needs a STYLE bump.
+2. **No two rows ask the same question.** Discovery + Shortlist merge in every category. Each stage runs only where its buyer exists - habitual categories (`involvement`): Problem recognition off, one worry stance, Comparison on.
+3. **The user toggles up to 4 head-to-head rivals at the market step,** pre-picked at init with reasons. Out-of-category brands are `adjacent` (measured, no toggle). Sister brands are toggleable, tagged "same parent", and reported as portfolio routing.
+
+**Correction to the r13 note above.** The market step CANNOT reorder competitors - it only removes or appends - so the "gate drag" stopgap for Linear never existed. Decision 3 replaces it.
+
 ## To do (added 2026-09-27, Tyler)
 
 - **Worry identity needs canonicalization across redraws (noted 2026-10-01).** A cell's concern is frozen text ("Annual fee feels high"); trend continuity and the recommended-vs-decided record depend on string equality, so a pool redraw (edit-setup, a future re-walk) that words the same worry differently silently breaks attribution - the taxonomy/dictionary lesson in miniature. Before any flow lets a worry-era tracker redraw its pool: match redrawn worries to existing intents.concern values (embedding or LLM pairing, like the consolidation one-to-one match) and keep the ratified wording. Related latent gap, fix first: edit_setup.ts does not reconstruct grid.worries/worryPool from intents (derivable: stage + concern NOT NULL), so edit-setup on a worry-era tracker would redraw and re-prefill as if fresh, discarding the tracker's actual picks. No worry-era tracker exists yet; close before the first one gets edited.
