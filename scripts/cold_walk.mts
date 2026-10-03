@@ -44,13 +44,32 @@ for (const brand of BRANDS) {
   console.log(`  competitors (${profile.competitors.length}):`, profile.competitors.join(", "));
 
   const roster = await classifyRoster({ brand, category: profile.category, audience: profile.audience, competitors: profile.competitors });
-  const rosterRoles = Object.fromEntries(roster.competitors.map((v) => [v.name, v.role]));
+  // Decision 3 (2026-10-03): mirror the market step - the classifier's
+  // same_seat verdicts become head-to-head picks by h2hRank (top
+  // ANGLE_SLOTS picked, the rest bench); upstream/adjacent pass through.
+  const { ANGLE_SLOTS } = await import(`${REPO}/src/lib/engine/battery_checks.ts`);
+  const rosterRoles: Record<string, string> = {};
+  let picked = 0;
+  for (const v of [...roster.competitors].sort((a, b) => (a.h2hRank || 1e9) - (b.h2hRank || 1e9))) {
+    if (v.role !== "same_seat") { rosterRoles[v.name] = v.role; continue; }
+    rosterRoles[v.name] = picked < ANGLE_SLOTS ? "same_seat" : "bench";
+    if (rosterRoles[v.name] === "same_seat") picked++;
+  }
+  const rosterDetail = roster.competitors.map((v) => ({ name: v.name, role: rosterRoles[v.name], h2hRank: v.h2hRank, h2hReason: v.h2hReason, parent: v.parent, inCategory: v.inCategory, note: v.note }));
   const rosterClasses = Object.fromEntries(roster.competitors.filter((v) => v.consumerSalient && v.classPhrase).map((v) => [v.name, v.classPhrase!]));
   console.log(`[2 roster] roles:`, JSON.stringify(rosterRoles), "classes:", JSON.stringify(rosterClasses));
 
   const compose = await inst.composeInstrument({ category: profile.category, audience: profile.audience, forBrand: brand });
   if (!compose) { console.error(`${brand}: compose returned null`); continue; }
   console.log(`[3 market read] scenarios:`, compose.scenarios.map((s: { label: string }) => s.label).join(" | "));
+  // Decision 4: the fit advisory (recorded, not applied - defaults are
+  // accepted) and the contest check over every room plus its suggestion.
+  const fit = await inst.reviewScenarioFit({ brand, category: profile.category, scenarios: compose.scenarios.map((s: { label: string; description: string }) => ({ label: s.label, description: s.description })), audience: profile.audience }).catch(() => null);
+  const directRivals = Object.entries(rosterRoles).filter(([, r]) => r === "same_seat" || r === "bench").map(([n]) => n);
+  const rooms = [...compose.scenarios, ...(compose.reserve ?? []), ...(fit?.missingCore ? [fit.missingCore] : [])]
+    .map((s: { label: string; description: string }) => ({ label: s.label, description: s.description }));
+  const roomChecks = await inst.checkRooms({ brand, category: profile.category, rivals: directRivals, rooms }).catch(() => []);
+  console.log(`[3b rooms]`, roomChecks.map((c: { label: string; contenders: string[]; rivals: number; pitch: string; names: string[] }) => `${c.label}: ${c.contenders.length}/${c.rivals}${c.pitch ? ` pitch="${c.pitch}"` : ""}${c.names.length ? ` names=${c.names.join("+")}` : ""}`).join(" | "));
 
   const offered = compose.stages
     .filter((s: { key: string; recommended: boolean }) => s.recommended && (inst.WORRY_STANCE_STAGES as readonly string[]).includes(s.key))
@@ -87,7 +106,11 @@ for (const brand of BRANDS) {
     scope: c.scope ?? null, qtype: c.qtype, seedFlags: c.seedFlags ?? null, text: c.text,
   }));
   fs.writeFileSync(path.join(OUT, `cold_seeds_${slug}.json`), JSON.stringify(seeds, null, 2));
-  fs.writeFileSync(path.join(OUT, `cold_context_${slug}.json`), JSON.stringify({ profile, rosterRoles, rosterClasses, scenarios: compose.scenarios, picks, keptStages: [...kept], missing: report.missing }, null, 2));
+  fs.writeFileSync(path.join(OUT, `cold_context_${slug}.json`), JSON.stringify({
+    profile, rosterRoles, rosterDetail, clientParent: roster.clientParent, rosterClasses,
+    scenarios: compose.scenarios, reserve: compose.reserve ?? [], fit, roomChecks,
+    picks, keptStages: [...kept], missing: report.missing,
+  }, null, 2));
   console.log(`${brand}: ${seeds.length} seeds in ${((Date.now() - t0) / 1000).toFixed(0)}s -> cold_seeds_${slug}.json${report.missing.length ? ` (MISSING ${report.missing.length} rows)` : ""}`);
 }
 process.exit(0);
