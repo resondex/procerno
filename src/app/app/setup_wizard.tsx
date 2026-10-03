@@ -197,10 +197,14 @@ const READ_STAGES: [number, string][] = [
   [105, "Still thinking - a hard market can take about two minutes…"],
 ];
 
-/** The cell write: one steady caption for the whole wait (Tyler,
- * 2026-10-02 - the rotating captions are retired here). */
+/** The cell write narrated - option B, the buyer's-eye captions (Tyler,
+ * 2026-10-02), elapsed-driven like the other narrated waits. */
 const CELLS_STAGES: [number, string][] = [
   [0, CELLS_BUSY],
+  [30, "Putting each buyer's situation into words…"],
+  [70, "Asking the way a real person would type it…"],
+  [110, "Keeping every question to one clear ask…"],
+  [150, "Still working - finalizing the details…"],
 ];
 
 /** The worries pool draw narrated: one model call, so the captions walk
