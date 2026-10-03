@@ -1,6 +1,6 @@
-# Three init decisions (2026-10-03)
+# Init decisions (2026-10-03)
 
-**All three are DECIDED, including Decision 3's companion rules 3b and 3c (confirmed 2026-10-03).**
+**All four are DECIDED, including Decision 3's companion rules 3b and 3c (confirmed 2026-10-03). None are built yet.**
 
 **Where these come from.** All three surfaced in the 2026-10-03 init audit (`INIT_AUDIT_2026-10-03.md`).
 
@@ -302,6 +302,85 @@ The left-out brands include Linear, the rival a software-dev buyer weighs most, 
 
 ---
 
+## Decision 4 - DECIDED (Tyler, 2026-10-03): scenarios are contested buyer occasions, described in the buyer's outcome language
+
+**Grid area:** the scenario columns. These are the rooms that every scenario row (Problem recognition, Discovery / shortlist, Criteria, Feature screening, Use-case fit, Pricing / value) is asked in.
+
+### The rule
+
+A scenario (a "room") is:
+1. **A buyer occasion in the confirmed category** - who the buyer is, the situation they're in, and the outcome they want.
+2. **Written in the buyer's outcome language** - the need every contender's pitch speaks to ("wants the best camera they can get"), not one brand's pitch vocabulary.
+3. **Contested** - most of the direct rivals are plausible contenders for that buyer.
+
+**Brands tailor their selling points to the rooms that matter, so the client being strong in a room is expected and fine.** The rival test doesn't ask whether a room favors the client. It asks whether the rivals are in the room too:
+- a Pixel-strong room where iPhone, Galaxy and OnePlus all compete passes;
+- a room that is really the client's other product's category fails.
+
+The same three rules apply wherever buyer circumstance is written:
+- the scenario read;
+- the fit advisory's suggestions;
+- the audience line;
+- brand-blind cells, where the writer voices the room's buyer need.
+
+### How brand knowledge reaches scenarios today
+
+Brand knowledge reaches the scenarios at three places, plus the cell writer:
+
+1. **Fit advisory suggestions.** After the scenario read, a brand-aware check proposes a "missing core" scenario from the client's portfolio. Your saved drafts accepted two:
+   - Pixel - *Flagship photography & AI*: "Buying **the top-tier Pixel** for best camera, AI features, and performance...". It names the client and is built on Pixel's pitch.
+   - Jira - *IT/service desk adoption*: "selects a service-management platform (helpdesk, incident, change)". The advisory's reason was "Jira offers Jira Service Management as a distinct product". None of Jira's project-management rivals compete there.
+2. **The audience line.** The brand profile writes it at the market step, and the scenario read and every cell writer read it.
+   - Pixel: "buyers wanting a **clean, Google-powered Android** smartphone". That's why "clean Android" appears in three of Pixel's four scenario descriptions.
+3. **The brand-aware scenario read (`forBrand`).** An optional mode the advisory offers to multi-product brands, so that rooms are occasions that brand competes in. Room choice is brand-driven by design; wording is told to stay blind.
+4. **The cell writer.** Every cell's spec carries the target brand, so a brand-blind Discovery cell is written knowing it's for Pixel.
+   - Saved Pixel: 12 of 17 blind cells use "clean software and fast updates" as the buyer's criteria.
+
+The default scenario read itself sees only category and audience, not the brand. With a neutral audience and no advisory additions, its rooms come out clean, as Doritos and AmEx show.
+
+### What it will be
+
+| | today | with the rule |
+| --- | --- | --- |
+| Pixel scenario | *Flagship photography & AI* - "Buying the top-tier Pixel for best camera, AI features..." | *Photo-first flagship buyer* - "shoots a lot, wants the best camera phone at the top of the market, keeps it for years". iPhone, Galaxy and Pixel all contend. |
+| Pixel audience | "buyers wanting a clean, Google-powered Android smartphone" | "people choosing a new smartphone - upgraders and switchers" |
+| Pixel blind-cell criteria | "clean software and fast updates" | "a phone that stays fast and keeps getting updates for years" - an outcome Samsung and Apple also promise |
+| Jira scenario | *IT/service desk adoption* (Jira Service Management's category) | fails the rival test; the advisory proposes a contested room instead, e.g. *Small team picking its first tracker* |
+
+### In practice - what the user sees
+
+- **At the market step,** the audience reads as a buyer segment ("people choosing a new smartphone"), not a tagline. It stays editable.
+- **At the scenarios gate,** every scenario card carries a contest chip: *"Contested: iPhone, Galaxy, OnePlus, Motorola (4 of 5 rivals)"*.
+  - A room with few contenders shows amber - *"Few of your rivals compete here (1 of 6)"* - with the reason and a one-click near-neighbor swap toward a contested version.
+  - The user can keep it anyway. It's a call, not a block, because a niche room can be deliberate.
+- **Advisory suggestions** arrive already written to the rule and already contest-checked. A suggestion that fails is never offered.
+- **Your saved Pixel and Jira drafts** get the amber chip on *Flagship photography & AI* (wording, and the name check) and on *IT/service desk adoption* (contest) the next time they're opened. Nothing changes until you act.
+
+### In practice - what changes in the engine (to build)
+
+1. **Scenario read (`readScenarios`).**
+   - The prompt is rewritten in the three positive rules.
+   - The cache key bumps (`scenarios_journeys13` -> 14), so new trackers get rule-written rooms. Saved drafts keep their reviewed scenarios.
+2. **Contest check (new, at the scenarios gate).**
+   - One call per battery to the design-check model (claude-sonnet-5, low effort), with each room plus the tracker's direct-rival list. It returns which rivals contend in each room and whether the wording carries one brand's pitch vocabulary.
+   - Cached per room set and roster; a few cents per tracker.
+   - It runs per tracker because the base read is category-level and shared, and it never sees a roster.
+3. **Fit advisory.**
+   - Its suggestion prompt gets the three rules.
+   - Before a suggestion is offered, it must pass the contest check and the r15 brand-mention check on its label and description. This extends last night's pre-check (6459e90).
+4. **Audience (brand profile).**
+   - The prompt asks for "who the buyers are and what they're trying to get done, in category terms".
+   - The profile cache key version bumps, so new profiles get it and saved drafts keep theirs.
+5. **Scenario gate brand check.** Every scenario label and description, including user-typed ones, runs through the r15 brand-mention check. "the top-tier Pixel" gets a flag wherever it came from.
+6. **Brand-blind cells.**
+   - The design intent for every blind stage adds: "voice the room's buyer need as an outcome any contender's pitch could answer".
+   - The design check is given the direct-rival list so it can judge that. It enforces per seed and per paraphrase.
+   - The design line changes, so cached cells re-judge through the design-check keys (sonnet calls, not free) and only failing cells regenerate.
+   - **No STYLE bump.**
+7. **Records:** AGENTS.md gets the rule.
+
+---
+
 ## Summary
 
 | # | decision | recommendation | biggest visible effect |
@@ -309,3 +388,4 @@ The left-out brands include Linear, the rival a software-dev buyer weighs most, 
 | 1 | pricing - DECIDED | Pricing is a scenario row: every cell asks "is <brand> worth it vs a cheaper option, for this buyer"; the trade-off diversity pass is removed | Pixel/Doritos/Netflix pricing rows go from 1 brand-value cell + 3 unbranded payment-mechanics cells to 4 comparable brand-value cells, one per buyer type |
 | 2 | duplicate rows + stage buyer fit - DECIDED | Discovery + Shortlist merged in every category; habitual categories (existing `involvement` classification): Problem recognition off, one worry stance (in-relationship), Comparison on | every battery 4 cells lighter; habitual brands like Doritos 43 -> ~33-35 with head-to-heads added and no repeated questions |
 | 3 | head-to-head rivals - DECIDED | user toggles up to 4 head-to-head rivals at the market step, pre-selected from an init recommendation with reasons; 3b: out-of-category brands typed `adjacent` (measured, no toggle); 3c: sister brands toggleable, tagged "same parent", reported as portfolio routing | Jira can carry Linear; Doritos's head-to-heads go to tortilla-chip brands; cost stays at 4 rivals |
+| 4 | scenarios - DECIDED | rooms are contested buyer occasions in the category, in the buyer's outcome language; a contest chip at the scenarios gate (which rivals compete per room); the same rules for advisory suggestions, the audience line and blind cells | Pixel's "top-tier Pixel" room and Jira's help-desk room get flagged; audience reads as a segment; blind cells stop borrowing the client's pitch words |
