@@ -517,6 +517,32 @@ const AMEX_ROLES = { Visa: "upstream", Mastercard: "upstream" } as const;
   const kTyped = inst.gridCellCacheKey(args(bc.sameSeatOf(AMEX_ROSTER, AMEX_ROLES)), row);
   const kUntyped = inst.gridCellCacheKey(args(AMEX_ROSTER), row);
   expect("a roster whose same-seat list differs re-keys", kTyped !== kUntyped);
+  // Decision 3 (2026-10-03): head-to-head picks ride rosterRoles as
+  // same_seat (picked) / bench / adjacent. A pick-free roster keeps the old
+  // slots and keys; picks decide the slots with no backfill; bench and
+  // adjacent brands stay in the brand-check scope.
+  const JIRA7 = ["Asana", "Trello", "Monday.com", "ClickUp", "GitHub Issues", "Azure DevOps", "Linear"];
+  expect("pick-free roster: slots are the first 4 in order",
+    JSON.stringify(bc.angleRivals(JIRA7, { Asana: "same_seat" })) === JSON.stringify(["Asana", "Trello", "Monday.com", "ClickUp"]));
+  const picks = { Asana: "same_seat", Trello: "bench", "Monday.com": "same_seat", ClickUp: "bench", "GitHub Issues": "same_seat", "Azure DevOps": "bench", Linear: "same_seat" } as const;
+  expect("picks decide the slots, in roster order",
+    JSON.stringify(bc.angleRivals(JIRA7, picks)) === JSON.stringify(["Asana", "Monday.com", "GitHub Issues", "Linear"]), bc.angleRivals(JIRA7, picks));
+  const three = { ...picks, Linear: "bench" } as const;
+  expect("three picks = three slots, never a backfill", bc.angleRivals(JIRA7, three).length === 3, bc.angleRivals(JIRA7, three));
+  expect("bench rivals stay in the brand-check scope", bc.sameSeatOf(JIRA7, picks).length === 7);
+  const DOR = ["Tostitos", "Takis", "Cheetos", "Lay's", "Pringles", "Mission"];
+  const dorRoles = { Tostitos: "same_seat", Takis: "same_seat", Cheetos: "adjacent", "Lay's": "adjacent", Pringles: "adjacent", Mission: "same_seat" } as const;
+  expect("adjacent brands never hold a slot",
+    JSON.stringify(bc.angleRivals(DOR, dorRoles)) === JSON.stringify(["Tostitos", "Takis", "Mission"]), bc.angleRivals(DOR, dorRoles));
+  expect("adjacent brands stay forbidden in blind cells",
+    specOf({ stage: "discovery", angle: "generic", text: "best tortilla chips for game day?" }, "Doritos", bc.sameSeatOf(DOR, dorRoles), "tortilla chips").forbiddenBrands.includes("Cheetos"));
+  const jargs = (roles?: Record<string, string>) => ({ brand: "Jira", category: "project management software", competitors: JIRA7, audience: "software teams", base, scenarios: [], count: 10, rosterRoles: roles });
+  const jrow = { stage: "discovery", situation: null, angle: "generic", scope: null };
+  expect("pick-free roles key byte-identically to no roles",
+    inst.gridCellCacheKey(jargs(undefined), jrow) === inst.gridCellCacheKey(jargs({ Asana: "same_seat" }), jrow)
+    && inst.phrasingCacheKey(jargs(undefined), cellK) === inst.phrasingCacheKey(jargs({ Asana: "same_seat" }), cellK));
+  expect("a changed pick re-keys (the writer's Rivals line changes)",
+    inst.gridCellCacheKey(jargs(undefined), jrow) !== inst.gridCellCacheKey(jargs(picks), jrow));
 }
 console.log(`6. typed roster: ${fails === fails5 ? "ALL PASS" : `${fails - fails5} FAILURE(S)`}`);
 

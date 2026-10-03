@@ -7,7 +7,7 @@ import { cacheSource, requireAuthOrDemo } from "@/lib/auth";
 import { apiKeyConfigured } from "@/lib/engine/providers";
 import { checkDesignFidelity, reviewCells, type CellFlag } from "@/lib/engine/instrument";
 import {
-  checkPromptAgainstSpec, checkPromptBrandRule, deriveCheckSpec, sameSeatOf, stageDesignIntent, type CellCheckSpec,
+  checkPromptAgainstSpec, checkPromptBrandRule, deriveCheckSpec, ROSTER_ROLE_VALUES, sameSeatOf, stageDesignIntent, type CellCheckSpec,
 } from "@/lib/engine/battery_checks";
 import { store } from "@/lib/store";
 
@@ -19,7 +19,7 @@ const Body = z.object({
   competitors: z.array(z.string().trim().min(1).max(80)).max(12),
   /** Typed roster (2026-09-30): competitor -> same_seat | upstream.
    * Absent = every competitor same_seat (the untyped behavior). */
-  rosterRoles: z.record(z.string().max(80), z.enum(["same_seat", "upstream"])).optional(),
+  rosterRoles: z.record(z.string().max(80), z.enum(ROSTER_ROLE_VALUES)).optional(),
   audience: z.string().trim().max(160).optional(),
   /** The user-edited or user-written prompts to check, each with its
    * cell's design context; `original` is the last machine wording. */

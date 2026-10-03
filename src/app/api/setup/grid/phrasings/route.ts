@@ -11,6 +11,7 @@ import {
 } from "@/lib/engine/instrument";
 import { ModeratorsShape } from "@/lib/engine/instrument_shapes";
 import type { CellCheckSpec } from "@/lib/engine/battery_checks";
+import { ROSTER_ROLE_VALUES } from "@/lib/engine/battery_checks";
 
 // 300, not 120: a hard category's market read alone runs 90-120s of
 // gpt-5 reasoning - the old budget killed first reads at the wall and
@@ -30,7 +31,7 @@ const Body = z.object({
   competitors: z.array(z.string().trim().min(1).max(80)).max(12),
   /** Typed roster (2026-09-30): competitor -> same_seat | upstream.
    * Absent = every competitor same_seat (the untyped behavior). */
-  rosterRoles: z.record(z.string().max(80), z.enum(["same_seat", "upstream"])).optional(),
+  rosterRoles: z.record(z.string().max(80), z.enum(ROSTER_ROLE_VALUES)).optional(),
   audience: z.string().trim().max(160).optional(),
   base: ModeratorsShape,
   scenarios: z

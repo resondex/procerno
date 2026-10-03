@@ -28,7 +28,7 @@ import {
   type ScenarioReviewItem,
   type ScenarioRow,
 } from "./grid_setup";
-import { deriveCheckSpec, rosterRoleOf, sameSeatOf, type RosterClasses, type RosterRole, type RosterRoles } from "@/lib/engine/battery_checks";
+import { ANGLE_SLOTS, angleRivals, deriveCheckSpec, rosterRoleOf, sameSeatOf, type RosterClasses, type RosterRole, type RosterRoles } from "@/lib/engine/battery_checks";
 import { Spinner, InlineSpinner } from "../components/spinner";
 
 /**
@@ -280,6 +280,14 @@ interface WizardDraft {
   /** Who the client brand sells to - stored only (future second-seat
    * signal). */
   clientSellsTo?: string[];
+  /** Init decision 3 (2026-10-03): the classifier's one-line reason per
+   * recommended head-to-head rival (toggle tooltip). */
+  rosterReasons?: Record<string, string>;
+  /** Parent company per competitor, and the client's - a competitor that
+   * shares the client's parent wears a "same parent" tag (sister brand:
+   * its head-to-heads report as portfolio routing). */
+  rosterParents?: Record<string, string>;
+  clientParent?: string;
 }
 
 interface Props {
@@ -318,6 +326,11 @@ export function SetupWizard({ mode, brand, draft, engineOptions, onClose, onCrea
   const [rosterNotes, setRosterNotes] = useState<Record<string, string>>(saved?.rosterNotes ?? {});
   const [rosterClasses, setRosterClasses] = useState<RosterClasses | undefined>(saved?.rosterClasses);
   const [clientSellsTo, setClientSellsTo] = useState<string[] | undefined>(saved?.clientSellsTo);
+  const [rosterReasons, setRosterReasons] = useState<Record<string, string>>(saved?.rosterReasons ?? {});
+  const [rosterParents, setRosterParents] = useState<Record<string, string>>(saved?.rosterParents ?? {});
+  const [clientParent, setClientParent] = useState<string | undefined>(saved?.clientParent);
+  /** Transient note when a 5th head-to-head is attempted. */
+  const [h2hNote, setH2hNote] = useState<string | null>(null);
   const [audience, setAudience] = useState(draft?.audience ?? "");
   const [prompts, setPrompts] = useState<DraftPrompt[] | null>(draft?.prompts ?? null);
   const [editing, setEditing] = useState(false);
@@ -466,7 +479,12 @@ export function SetupWizard({ mode, brand, draft, engineOptions, onClose, onCrea
   function rivalsKey(comps: string[], roles: RosterRoles | undefined, classes?: RosterClasses): string {
     return comps
       .map((c) => {
-        if (rosterRoleOf(c, roles) !== "upstream") return c;
+        const r = rosterRoleOf(c, roles);
+        // bench/adjacent (decision 3) change which rivals hold the
+        // head-to-head slots; same_seat keeps the bare name so drafts
+        // saved before decision 3 never read as stale.
+        if (r === "bench" || r === "adjacent") return `${c}#${r}`;
+        if (r !== "upstream") return c;
         const cls = classes?.[c]?.trim();
         return cls ? `${c}#upstream#class:${cls}` : `${c}#upstream`;
       })
@@ -490,16 +508,41 @@ export function SetupWizard({ mode, brand, draft, engineOptions, onClose, onCrea
     const data = await res.json().catch(() => null);
     const roster = data?.roster as
       | {
-          competitors: { name: string; role: RosterRole; note: string; consumerSalient?: boolean; classPhrase?: string }[];
-          clientSellsTo: string[]; failedOpen?: boolean;
+          competitors: {
+            name: string; role: RosterRole; note: string; consumerSalient?: boolean; classPhrase?: string;
+            parent?: string; h2hRank?: number; h2hReason?: string;
+          }[];
+          clientSellsTo: string[]; clientParent?: string; failedOpen?: boolean;
         }
       | undefined;
     if (!roster || roster.failedOpen) return;
+    // Decision 3: the classifier's same_seat verdicts become head-to-head
+    // pre-picks - the top ANGLE_SLOTS by its rank are same_seat (picked),
+    // the rest bench. A name filled later (hand-added) is picked only
+    // while a slot is free. A role the user set is never overwritten.
     setRosterRoles((prev) => {
       const next: RosterRoles = fresh ? {} : { ...(prev ?? {}) };
-      for (const v of roster.competitors) if (fresh || !(v.name in next)) next[v.name] = v.role;
+      const incoming = roster.competitors
+        .filter((v) => fresh || !(v.name in next))
+        .sort((a, b) => (a.h2hRank || 1e9) - (b.h2hRank || 1e9));
+      for (const v of incoming) {
+        if (v.role !== "same_seat") { next[v.name] = v.role; continue; }
+        const picked = Object.values(next).filter((r) => r === "same_seat").length;
+        next[v.name] = picked < ANGLE_SLOTS ? "same_seat" : "bench";
+      }
       return next;
     });
+    setRosterReasons((prev) => {
+      const next = fresh ? {} : { ...prev };
+      for (const v of roster.competitors) if ((fresh || !(v.name in next)) && v.h2hReason) next[v.name] = v.h2hReason;
+      return next;
+    });
+    setRosterParents((prev) => {
+      const next = fresh ? {} : { ...prev };
+      for (const v of roster.competitors) if ((fresh || !(v.name in next)) && v.parent) next[v.name] = v.parent;
+      return next;
+    });
+    if (roster.clientParent) setClientParent(roster.clientParent);
     setRosterNotes((prev) => {
       const next = fresh ? {} : { ...prev };
       for (const v of roster.competitors) if (fresh || !(v.name in next)) next[v.name] = v.note;
@@ -519,12 +562,53 @@ export function SetupWizard({ mode, brand, draft, engineOptions, onClose, onCrea
     setClientSellsTo(roster.clientSellsTo);
   }
 
-  /** The chip toggle - the human gate on the classifier's facts. */
+  /** The role pill - the human gate on the classifier's facts. Cycles
+   * rival -> upstream -> adjacent -> rival; a brand coming back as a rival
+   * lands on the bench (its head-to-head is the separate toggle). */
   function toggleRole(c: string) {
-    setRosterRoles((prev) => ({
-      ...(prev ?? {}),
-      [c]: rosterRoleOf(c, prev) === "upstream" ? "same_seat" : "upstream",
-    }));
+    setRosterRoles((prev) => {
+      const r = rosterRoleOf(c, prev);
+      const nextRole: RosterRole = r === "upstream" ? "adjacent" : r === "adjacent" ? "bench" : "upstream";
+      return { ...materializePicks(prev), [c]: nextRole };
+    });
+  }
+
+  /** A pre-decision-3 roster (no bench/adjacent entries) means "the first
+   * ANGLE_SLOTS rivals in list order". Before the first explicit pick,
+   * write that out as picks + bench so the toggle edits what the battery
+   * actually uses. */
+  function materializePicks(prev: RosterRoles | undefined): RosterRoles {
+    const comps = allCompetitors();
+    const roles: RosterRoles = { ...(prev ?? {}) };
+    const hasPicks = comps.some((c) => { const r = rosterRoleOf(c, roles); return r === "bench" || r === "adjacent"; });
+    if (hasPicks) return roles;
+    const slots = new Set(angleRivals(comps, roles));
+    for (const c of comps) {
+      if (rosterRoleOf(c, roles) === "upstream") continue;
+      roles[c] = slots.has(c) ? "same_seat" : "bench";
+    }
+    return roles;
+  }
+
+  /** The head-to-head toggle: at most ANGLE_SLOTS rivals hold a
+   * Comparison + Alternatives cell; every rival stays measured. */
+  function toggleH2H(c: string) {
+    // Reads the current roles directly (not inside a setState updater) so
+    // the note and the roles move together - updaters run on React's
+    // schedule and must stay pure.
+    const roles = materializePicks(rosterRoles);
+    if (rosterRoleOf(c, roles) === "same_seat") {
+      setRosterRoles({ ...roles, [c]: "bench" });
+      setH2hNote(null);
+      return;
+    }
+    const picked = allCompetitors().filter((x) => rosterRoleOf(x, roles) === "same_seat").length;
+    if (picked >= ANGLE_SLOTS) {
+      setH2hNote(`${ANGLE_SLOTS} is the max - turn one off first.`);
+      return;
+    }
+    setRosterRoles({ ...roles, [c]: "same_seat" });
+    setH2hNote(null);
   }
 
   async function estimate() {
@@ -576,6 +660,9 @@ export function SetupWizard({ mode, brand, draft, engineOptions, onClose, onCrea
       ...(rosterRoles ? { rosterRoles, rosterNotes } : {}),
       ...(rosterClasses ? { rosterClasses } : {}),
       ...(clientSellsTo ? { clientSellsTo } : {}),
+      ...(Object.keys(rosterReasons).length > 0 ? { rosterReasons } : {}),
+      ...(Object.keys(rosterParents).length > 0 ? { rosterParents } : {}),
+      ...(clientParent ? { clientParent } : {}),
     };
     // Bounded, never-throwing: a stalled save must not wedge the "Saving"
     // label or hang requestClose - the next step transition saves again.
@@ -1626,32 +1713,79 @@ export function SetupWizard({ mode, brand, draft, engineOptions, onClose, onCrea
                 </label>
                 <label className="grid gap-1.5 text-sm font-semibold uppercase tracking-wide text-primary">
                   Competitors
+                  {competitors.length > 0 && rosterRoles && (
+                    <span className="text-[13px] font-normal normal-case tracking-normal text-ink-3">
+                      {competitors.filter((c) => rosterRoleOf(c, rosterRoles) === "same_seat").length > ANGLE_SLOTS &&
+                      !competitors.some((c) => ["bench", "adjacent"].includes(rosterRoleOf(c, rosterRoles)))
+                        ? `The first ${ANGLE_SLOTS} rivals get a head-to-head and a switching question - toggle to choose. Every rival is still measured.`
+                        : `${Math.min(ANGLE_SLOTS, angleRivals(competitors, rosterRoles).length)} of ${ANGLE_SLOTS} head-to-heads - these rivals get a head-to-head and a switching question. Every rival is still measured.`}
+                      {h2hNote && <span className="ml-2 text-danger">{h2hNote}</span>}
+                    </span>
+                  )}
                   {competitors.length > 0 && (
                     <div className="flex flex-wrap gap-1.5 normal-case tracking-normal">
-                      {competitors.map((c) => (
-                        <span key={c} className="inline-flex items-center gap-1.5 rounded-full bg-primary-soft px-3 py-1 text-[13px] font-medium text-primary">
-                          {c}
-                          {rosterRoles && (
-                            <button
-                              type="button"
-                              onClick={(e) => { e.preventDefault(); toggleRole(c); }}
-                              title={`${rosterNotes[c] ? `${rosterNotes[c]}. ` : ""}${
-                                rosterRoleOf(c, rosterRoles) === "upstream" && rosterClasses?.[c]
-                                  ? `Buyers still choose by it as a class - one question weighs ${brand} against ${rosterClasses[c]}. `
-                                  : ""
-                              }Click to switch - an upstream brand gets no rival questions of its own.`}
-                              className={`rounded-full px-1.5 text-[11px] font-medium leading-5 ${
-                                rosterRoleOf(c, rosterRoles) === "upstream"
-                                  ? "bg-warning/10 text-warning"
-                                  : "bg-primary/10 text-primary/80"
-                              }`}
-                            >
-                              {rosterRoleOf(c, rosterRoles) === "upstream" ? "upstream - sells to the trade" : "rival"}
-                            </button>
-                          )}
-                          <button type="button" aria-label={`remove ${c}`} onClick={() => setCompetitors(competitors.filter((x) => x !== c))} className="text-primary/70 hover:text-danger leading-none">×</button>
-                        </span>
-                      ))}
+                      {competitors.map((c) => {
+                        const role = rosterRoleOf(c, rosterRoles);
+                        const direct = role === "same_seat" || role === "bench";
+                        const h2h = rosterRoles ? angleRivals(competitors, rosterRoles).includes(c) : false;
+                        const parent = rosterParents[c]?.trim();
+                        const sister = !!parent && !!clientParent && parent.toLowerCase() === clientParent.trim().toLowerCase()
+                          && parent.toLowerCase() !== c.trim().toLowerCase();
+                        return (
+                          <span key={c} className="inline-flex items-center gap-1.5 rounded-full bg-primary-soft px-3 py-1 text-[13px] font-medium text-primary">
+                            {c}
+                            {rosterRoles && direct && (
+                              <button
+                                type="button"
+                                onClick={(e) => { e.preventDefault(); toggleH2H(c); }}
+                                title={`${rosterReasons[c] ? `${rosterReasons[c]}. ` : ""}${
+                                  h2h ? "Gets a head-to-head and a switching question. Click to remove." : "Measured in open questions. Click to give it a head-to-head."
+                                }`}
+                                className={`rounded-full px-1.5 text-[11px] font-medium leading-5 ${
+                                  h2h ? "bg-primary text-primary-ink" : "border border-primary/30 text-primary/80"
+                                }`}
+                              >
+                                {h2h ? "head-to-head" : "+ head-to-head"}
+                              </button>
+                            )}
+                            {sister && (
+                              <span
+                                title={`Same parent company as ${brand}. Its head-to-heads report as portfolio routing, separate from your competitive win rate.`}
+                                className="rounded-full bg-warning/10 px-1.5 text-[11px] font-medium leading-5 text-warning"
+                              >
+                                same parent: {parent}
+                              </span>
+                            )}
+                            {rosterRoles && (
+                              <button
+                                type="button"
+                                onClick={(e) => { e.preventDefault(); toggleRole(c); }}
+                                title={`${rosterNotes[c] ? `${rosterNotes[c]}. ` : ""}${
+                                  role === "upstream" && rosterClasses?.[c]
+                                    ? `Buyers still choose by it as a class - one question weighs ${brand} against ${rosterClasses[c]}. `
+                                    : ""
+                                }${
+                                  role === "adjacent"
+                                    ? `Not ${category || "in this category"} - measured, but never a head-to-head. `
+                                    : role === "upstream"
+                                      ? "An upstream brand gets no rival questions of its own. "
+                                      : ""
+                                }Click to change its role.`}
+                                className={`rounded-full px-1.5 text-[11px] font-medium leading-5 ${
+                                  role === "upstream"
+                                    ? "bg-warning/10 text-warning"
+                                    : role === "adjacent"
+                                      ? "bg-ink-3/10 text-ink-3"
+                                      : "bg-primary/10 text-primary/80"
+                                }`}
+                              >
+                                {role === "upstream" ? "upstream - sells to the trade" : role === "adjacent" ? `adjacent - not ${category || "this category"}` : "rival"}
+                              </button>
+                            )}
+                            <button type="button" aria-label={`remove ${c}`} onClick={() => setCompetitors(competitors.filter((x) => x !== c))} className="text-primary/70 hover:text-danger leading-none">×</button>
+                          </span>
+                        );
+                      })}
                     </div>
                   )}
                   <input

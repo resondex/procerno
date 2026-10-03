@@ -21,29 +21,43 @@ import { BRAND_DOMINATED, COMMON_WORDS } from "./everyday_words";
  * - upstream: it sells to the rivals / the trade, not the audience (Visa
  *   and Mastercard on an AmEx consumer tracker) - no cells ever; it is
  *   free vocabulary and concern-planner context ("weather").
- * Absent roles = every competitor same_seat = the untyped behavior,
- * byte-identical. Order is preserved: the roster's own order still decides
- * which same-seat rivals get the angle slots. */
-export type RosterRole = "same_seat" | "upstream";
+ * - bench (init decision 3, 2026-10-03): a direct rival the user did not
+ *   pick for a head-to-head - writer rival and forbidden in blind cells
+ *   like same_seat, measured on the dashboard, but no angle slot;
+ * - adjacent (init decision 3b): buyable but outside the confirmed
+ *   category (Cheetos on a tortilla-chip tracker) - same rights as bench,
+ *   and never offered a head-to-head toggle.
+ * same_seat is therefore "direct rival WITH a head-to-head" once a roster
+ * carries any bench or adjacent entry; a roster with neither (every
+ * draft before decision 3) keeps the old meaning, so it keys and plans
+ * byte-identically: the first ANGLE_SLOTS same-seat rivals in roster order.
+ * Absent roles = every competitor same_seat = the untyped behavior. */
+export type RosterRole = "same_seat" | "upstream" | "bench" | "adjacent";
 export type RosterRoles = Record<string, RosterRole>;
+/** Every role value - the routes' zod enums read this so they never drift. */
+export const ROSTER_ROLE_VALUES = ["same_seat", "upstream", "bench", "adjacent"] as const;
 
-/** The angle-slot budget: comparison / alternatives cells go to the first
- * this-many same-seat rivals. */
+/** The angle-slot budget: comparison / alternatives cells go to at most
+ * this many rivals (the user's head-to-head picks). */
 export const ANGLE_SLOTS = 4;
+
+const isRole = (r: unknown): r is RosterRole => (ROSTER_ROLE_VALUES as readonly unknown[]).includes(r);
 
 /** A competitor's role: exact name first, then a case/punctuation-blind
  * match; anything unlisted (a hand-added rival) is same_seat. */
 export function rosterRoleOf(name: string, roles?: RosterRoles | null): RosterRole {
   if (!roles) return "same_seat";
   const exact = roles[name];
-  if (exact === "upstream" || exact === "same_seat") return exact;
+  if (isRole(exact)) return exact;
   const k = key(name);
-  for (const [n, r] of Object.entries(roles)) if (key(n) === k) return r === "upstream" ? "upstream" : "same_seat";
+  for (const [n, r] of Object.entries(roles)) if (key(n) === k) return isRole(r) ? r : "same_seat";
   return "same_seat";
 }
 
-/** The rivals a buyer actually weighs, in roster order. Returns the input
- * array itself when nothing is upstream, so untyped callers see no change. */
+/** The rivals a buyer actually weighs, in roster order - everything but
+ * upstream (bench and adjacent brands stay in the brand-check scope: they
+ * are writer rivals and forbidden in blind cells). Returns the input array
+ * itself when nothing is upstream, so untyped callers see no change. */
 export function sameSeatOf(competitors: string[], roles?: RosterRoles | null): string[] {
   if (!roles || !competitors.some((c) => rosterRoleOf(c, roles) === "upstream")) return competitors;
   return competitors.filter((c) => rosterRoleOf(c, roles) !== "upstream");
@@ -55,11 +69,18 @@ export function upstreamOf(competitors: string[], roles?: RosterRoles | null): s
   return competitors.filter((c) => rosterRoleOf(c, roles) === "upstream");
 }
 
-/** The comparison / alternatives angle slots for a roster: the first
- * ANGLE_SLOTS same-seat rivals - an upstream entry never holds a slot, and
- * never pushes a same-seat rival out of one by its list position. */
+/** The comparison / alternatives angle slots for a roster. With any bench
+ * or adjacent entry present, the slots are the user's head-to-head picks
+ * (the same_seat entries, in roster order, at most ANGLE_SLOTS - fewer
+ * picks mean fewer cells, never a backfill). Without them it is the old
+ * rule: the first ANGLE_SLOTS non-upstream rivals in roster order. An
+ * upstream entry never holds a slot. */
 export function angleRivals(competitors: string[], roles?: RosterRoles | null): string[] {
-  return sameSeatOf(competitors, roles).slice(0, ANGLE_SLOTS);
+  const seated = sameSeatOf(competitors, roles);
+  if (!roles || !seated.some((c) => { const r = rosterRoleOf(c, roles); return r === "bench" || r === "adjacent"; })) {
+    return seated.slice(0, ANGLE_SLOTS);
+  }
+  return seated.filter((c) => rosterRoleOf(c, roles) === "same_seat").slice(0, ANGLE_SLOTS);
 }
 
 /* ---------------------- class-angle cells (2026-10-01) ---------------------

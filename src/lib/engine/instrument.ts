@@ -2343,6 +2343,9 @@ export function gridCellCacheKey(
   args: {
     brand: string; category: string; competitors: string[];
     audience: string | null; base: Moderators; scenarios: ScenarioSpec[];
+    /** Head-to-head picks (decision 3) decide the slots; absent or
+     * pick-free rosters key exactly as before. */
+    rosterRoles?: RosterRoles;
   },
   row: {
     stage: string; situation: string | null; angle: string; scope: string | null; concern?: string | null;
@@ -2351,7 +2354,7 @@ export function gridCellCacheKey(
 ): string {
   // args.competitors is the SAME-SEAT list (generateGrid resolves roles
   // first), so an untyped roster keys exactly as before.
-  const rivals = angleRivals(args.competitors);
+  const rivals = angleRivals(args.competitors, args.rosterRoles);
   const s = row.situation ? args.scenarios.find((x) => x.label === row.situation) : undefined;
   const sctx = s ? `${s.label}|${s.description}|${journeyNote(args.base, s) ?? ""}` : "";
   return cacheKey("grid_cell1", [
@@ -2370,6 +2373,7 @@ export function phrasingCacheKey(
   args: {
     brand: string; competitors: string[]; audience: string | null;
     count: number; base: Moderators; scenarios: ScenarioSpec[];
+    rosterRoles?: RosterRoles;
   },
   cell: {
     situation: string | null; mode?: string | null; text: string; spec?: unknown; concern?: string | null;
@@ -2377,7 +2381,7 @@ export function phrasingCacheKey(
   },
   avoidConcerns?: string[]
 ): string {
-  const rivals = angleRivals(args.competitors);
+  const rivals = angleRivals(args.competitors, args.rosterRoles);
   const s = cell.situation ? args.scenarios.find((x) => x.label === cell.situation) : undefined;
   const jnote = s ? journeyNote(args.base, s) ?? "" : "";
   return cacheKey("phrasings", [
@@ -2723,7 +2727,7 @@ export async function generateGrid(input: {
   // reuses - every brand check below speaks the same vocabulary.
   const aliasForms = await brandAliasForms([input.brand, ...input.competitors]);
   input = { ...input, competitors: sameSeatOf(input.competitors, input.rosterRoles) };
-  const rivals = angleRivals(input.competitors);
+  const rivals = angleRivals(input.competitors, input.rosterRoles);
   const allLabels = input.scenarios.map((s) => s.label);
   const plan = planGridCells(input.stages, allLabels, rivals, classAngles, input.worries);
 
@@ -4102,7 +4106,7 @@ export async function regenerateCell(input: {
       stage: input.cell.stage, angle: input.cell.angle, text, concern: input.cell.concern,
       ...(input.cell.classPhrase ? { classPhrase: input.cell.classPhrase, classBrand: input.cell.classBrand } : {}),
     }, input.brand, input.competitors, input.category, aliasForms);
-  const rivals = angleRivals(input.competitors);
+  const rivals = angleRivals(input.competitors, input.rosterRoles);
   const stages = participationMask(input.base, input.scenarios);
   const st = stages.find((x) => x.key === input.cell.stage);
   if (!st) return null;
@@ -4430,7 +4434,7 @@ export async function generatePhrasings(input: {
   input = { ...input, competitors: sameSeatOf(input.competitors, input.rosterRoles) };
   const want = Math.max(0, input.count - 1);
   if (want === 0 || input.cells.length === 0) return input.cells.map(() => []);
-  const rivals = angleRivals(input.competitors);
+  const rivals = angleRivals(input.competitors, input.rosterRoles);
   // Brand names are MANDATORY vocabulary in branded cells (the same-brands
   // rule), so counting them in the overlap filter or the worn-words list
   // punishes candidates for obeying the rules. Narrow-lexicon stages
