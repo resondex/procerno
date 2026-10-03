@@ -122,9 +122,22 @@ expect("spec path flags the whole rejected corpus", sCaught === rejected.length 
 let sFlags: any[] = [];
 let partitionBad = 0;
 let selfSigBad: any[] = [];
+// Init decision 1 (2026-10-03): every pricing cell must name the client.
+// The fixed battery predates it - its generic pricing prompts are now
+// legitimate must-name misses, asserted as such instead of as clean.
+const legacyGenericPricing = (stage: string, text: string, brand: string, cat: string) =>
+  stage === "pricing" && !bc.textNamesBrand(text, brand, { extraForms: FORMS[brand], excludeTokens: new Set(cat.toLowerCase().split(/[^a-z0-9]+/).filter(Boolean)) });
+let legacyPricing = 0;
+let legacyPricingCaught = 0;
 for (const p of live) {
   const angle = p.angle ?? "generic";
   const spec = specOf({ stage: p.stage, angle, text: p.text }, p.project, COMP[p.project], CAT[p.project]);
+  if (legacyGenericPricing(p.stage, p.text, p.project, CAT[p.project])) {
+    legacyPricing++;
+    const v = bc.checkPromptAgainstSpec({ text: p.text, spec, category: CAT[p.project], extraForms: FORMS });
+    if (v.some((x: any) => x.check === "must_name_missing_target")) legacyPricingCaught++;
+    continue;
+  }
   const all = [p.project, ...COMP[p.project]].sort().join("|");
   const part = [...spec.requiredBrands, ...spec.forbiddenBrands].filter((b: string) => all.includes(b)).sort().join("|");
   if (part !== all) partitionBad++;
@@ -139,6 +152,7 @@ expect("every fixed-battery prompt passes its own spec signature", selfSigBad.le
 for (const f of sFlags.slice(0, 8)) console.log("   ", JSON.stringify(f));
 expect("spec path: 0 false positives on the fixed battery", sFlags.length === 0);
 expect("required + forbidden partition the roster on every fixed-battery cell", partitionBad === 0, { partitionBad });
+expect("decision 1: every legacy generic pricing prompt is flagged must-name", legacyPricingCaught === legacyPricing && legacyPricing > 0, { legacyPricing, legacyPricingCaught });
 
 // 5c. Harness batteries: spec-driven checkBattery vs string-driven, per finding.
 for (const [brand, P] of Object.entries<any>(head.projects)) {
@@ -162,6 +176,8 @@ for (const [brand, P] of Object.entries<any>(head.projects)) {
   let n = 0;
   const lost: string[] = [];
   cells.forEach((c: any) => {
+    // Legacy generic pricing cells are now must-name misses (decision 1).
+    if (legacyGenericPricing(c.stage, c.text, brand, CAT[brand])) return;
     const sp = specOf(c, brand, P.competitors, CAT[brand]);
     for (const t of c.phrasings) {
       n++;

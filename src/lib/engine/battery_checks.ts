@@ -230,7 +230,7 @@ export function seedDesignLine(
   // MATH, worries are VERDICTS - each design line polices its own side so
   // the two instruments cannot trade clothes.
   if (stage === "pricing")
-    return `Question design (value math): the question asks for a price/value accounting - the same one as the designed question below, naming ${brand} only if the designed question does - WITH the asker's usage or situation as an input (financing, trade-in or price figures are prices, not usage), leaving the verdict to the answer. A bare "is it worth it?" carrying no usage inputs is a doubt, not a pricing ask, and does not satisfy the design; neither does presupposing the verdict ("a ripoff", "that huge fee"). Designed as: "${seed}"`;
+    return `Question design (brand value): the question asks whether ${brand} is worth its price for THIS asker, against a cheaper option (${brand}'s own lower tier or a generic cheaper alternative), with the asker's usage as the input and the call left to the answer - the same buyer and usage as the designed question below. Dropping ${brand}, naming a rival instead of the cheaper option, losing the usage, stating a price, or presupposing the verdict ("a ripoff") does not satisfy the design. Designed as: "${seed}"`;
   if (stage === "premium_worth")
     return `Question design (premium tier): the question weighs the category's premium maker(s) as a TIER against basic/store options and invites named picks - from either side (is the expensive one worth it, is the cheap one good enough). Judging one named brand's own worth does not satisfy the design.${outcomeClause(stage, brand)} Designed as: "${seed}"`;
   if (!PLAN_CHECK_STAGES.has(stage))
@@ -267,13 +267,11 @@ export function stageDesignIntent(stage: string, brand: string, concern?: string
     return `Question design (doubt): the question itself voices the buyer's concern, complaint or "is it still worth it" doubt about ${brand}, stated as the asker's own claim or feeling that an answer could confirm or rebut.${stance} A neutral lookup, spec request, how-to or value-math request on the same topic does not satisfy the design - the math ask belongs to the pricing cells - and an eligibility or rules lookup does not voice a doubt even when the rules are unfavorable to the asker ("am I likely to be ineligible?", "can I check before applying?" are lookups, not doubts). A doubt question never asks for a price, a cost figure or the money accounting, with or without usage details.${keepLeave}${concern ? ` The DESIGNED concern is: ${concern} - the question must voice that worry, not a different one, and when that concern is not itself about price, a bolted-on cheaper-options or price remark does not satisfy the design.` : ""}`;
   }
   if (stage === "pricing")
-    // G6: generic pricing cells never name the brand, so the intent accepts
-    // both forms rather than pushing every cell to within_brand. The generic
-    // form reasons about the category's price STRUCTURE (s17: the first
-    // examples were fee-shaped and the checker refused a legitimate
-    // financing-vs-unlocked trade-off while "best value phone for my
-    // budget" discovery asks slipped into pricing cells).
-    return `Question design (value math): the question reasons about a price/value TRADE-OFF in ${brand}'s market, WITH the asker's usage or situation as an input, leaving the verdict to the answer - either naming ${brand} (its tiers, its fee or total-cost math, trade-in or financing on it) or generic to the category's price structure (paid vs free, fee vs no-fee, financing vs buying outright, paying up for a higher tier vs the base, total cost over time - upfront vs ongoing). A total-cost-over-time question names BOTH options it weighs ("pay more upfront for X or less now for Y, over 3 years"); a cost estimate for one option ("what will this cost over time?") weighs nothing and does not satisfy the design. Financing, trade-in or price figures are PRICES, not usage: the asker's own usage (what they do with it, how long they keep it, what they spend on what) must also be present. The question ASKS what things cost - it never states a product's price or fee ("Premium is $23"), which is the writer's dated knowledge and a false premise; the asker's own spend, budget or an offer made to them is circumstance and belongs. A "which product is the best value for my budget" ask is an open-choice question, not pricing, and does not satisfy the design; a bare "is it worth it?" with no usage inputs is a doubt; presupposing the verdict ("a ripoff") is neither. Not naming ${brand} is fine - a generic trade-off any product in the category could answer (refurbished vs new, paid vs free, fee vs no-fee, a higher tier vs the base) satisfies the design. The one exception: a question that describes ONE specific product's own plan structure while leaving its name out (that product's plan or tier ladder, its add-on marketplace, its billing model) is that product's question with the name removed - answers name it anyway and count as unprompted - and does not satisfy the design.`;
+    // Init decision 1 (2026-10-03): pricing is a SCENARIO row - the same
+    // brand-value question in every column, only the buyer changes. The
+    // generic price-structure form (G6) and the trade-off variety rule are
+    // retired; price-structure doubts belong to the worry cells.
+    return `Question design (brand value): the question names ${brand} and asks whether it is worth its price for THIS asker, weighed against a cheaper option - ${brand}'s own lower tier or plan, or a generic cheaper alternative ("a store brand", "a cheaper phone") - with the asker's own usage as the input (what they do with it, how often, how long they keep it), and leaves the call to the answer ("worth paying for, or take the cheaper option?"). A question that does not name ${brand}, names a rival as the cheaper option (head-to-heads belong to comparison), carries no usage (a bare "is it worth it?" is a worry), presupposes the verdict ("that huge fee"), or turns into an open "which product is the best value" ask does not satisfy the design. The question ASKS what things cost - it never states a product's price or fee, which is the writer's dated knowledge and a false premise; the asker's own budget or an offer made to them is circumstance and belongs. Financing or trade-in figures are prices, not usage.`;
   // Alternatives seeds (audit J10/J11, 2026-10-01): an offensive seed that
   // gives a REASON for leaving the rival ("too lightweight for our dev
   // team") steers every answer toward one kind of replacement - often the
@@ -1068,7 +1066,9 @@ export function deriveCheckSpec(
     case "comparison": required = [brand, ...(ang ? [ang] : [])]; break;
     case "alternatives_defensive": required = [brand]; break;
     case "alternatives_offensive": required = ang ? [ang] : []; break;
-    case "pricing": required = qtype === "within_brand" ? [brand] : []; break;
+    // Init decision 1 (2026-10-03): every pricing cell asks the client
+    // brand's value question, so the target is always required.
+    case "pricing": required = [brand]; break;
     default: required = roster.filter(seedNames);
   }
   // The angle may be a label not on the roster; everything tracked that
@@ -1256,6 +1256,9 @@ export function checkPromptAgainstSpec(input: {
         out.push({ check: "alternatives_names_extra_rival", detail: `alternatives for ${spec.angle} also names ${rivalLeaks.join(", ")}` });
       break;
     case "pricing":
+      // Decision 1: the target is required (see deriveCheckSpec), so a
+      // pricing prompt that drops it is caught like any must-name miss.
+      if (misses(target)) out.push({ check: "must_name_missing_target", detail: `pricing must name ${target}` });
       if (rivalLeaks.length > 0) out.push({ check: "pricing_names_rival", detail: `pricing names ${rivalLeaks.join(", ")}` });
       break;
   }

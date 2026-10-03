@@ -101,7 +101,13 @@ const CACHE_TTL_MS = 183 * 24 * 3600 * 1000;
 // VERDICT asks, premium_worth holds the tier-as-class open-choice form
 // (never one named brand's own worth) - writer rules and design lines
 // changed together.
-const STYLE_VERSION = "s29";
+// "s30" (2026-10-03, init decision 1): pricing is a SCENARIO row - every
+// pricing cell names the client brand and asks its value question (worth
+// it vs a cheaper option) for the column's buyer; the trade-off-diversity
+// rule, the generic-structure cells and the "cheaper line at 450" example
+// are gone. Also drops shortlist from the writer's open-choice list
+// (decision 2 retired the stage).
+const STYLE_VERSION = "s30";
 
 /** Versions the DETERMINISTIC seed-check set (everything seedRule runs:
  * checkPromptAgainstSpec + blind_missing_category + scenario_label_leak).
@@ -576,8 +582,8 @@ export function stageLibrary(m: Moderators): LibraryStage[] {
     {
       key: "pricing", label: "Pricing / value", layer: "decision",
       situational: true, rivals: "none", tag: "judges", recommended: true,
-      hint: "Cost and value-for-money asks anchored in the asker's own usage; some generic to the category (including paid-vs-free where free options exist), some naming the client brand (including its own tiers).",
-      why: "Cost and value questions reach every buyer, whatever the journey.",
+      hint: "The client brand's value question for this buyer: name the brand, weigh its price against a cheaper option (its own lower tier, or a generic cheaper alternative), with the asker's own usage as the input, and ask for the call. Same question in every column - only the buyer changes. Never a rival, never a stated price.",
+      why: "Whether the assistant says you're worth the money - and for which buyers - reaches every market.",
     },
     {
       // Situational since 2026-08-24: the justification an assistant writes
@@ -2297,32 +2303,22 @@ const CELL_WRITER_SYSTEM =
           "types), and never the plan's segment vocabulary ('mid-market', " +
           "'enterprise standardization' are OUR words - buyers say their " +
           "size and stakes in plain words).\n" +
-          "- pricing cells ask for the accounting with the asker's usage as " +
-          "an INPUT and leave the verdict to the answer: never a bare 'is " +
-          "it worth it?' with no usage (that is a worry, not a pricing " +
-          "ask), never a presupposed verdict ('that huge fee'). Usage is " +
-          "TWO OR THREE round figures at most - a seed is one chat " +
-          "message, never a spreadsheet, and the numbers must be " +
-          "internally consistent (a budget that excludes one of the " +
-          "options compared is a broken question). Every pricing ask " +
-          "reasons about a price TRADE-OFF - the brand's tiers, fee or " +
-          "total-cost math, trade-in or financing, or the category's price " +
-          "structure (paid vs free, fee vs no-fee, financing vs buying " +
-          "outright, paying up vs the base tier) - NEVER 'which product is " +
-          "the best value for my budget' (that is discovery's question) - a " +
-          "budget circumstance makes the pricing cell the BRAND's tier " +
-          "question ('the cheaper line at 450, or pay up for the regular " +
-          "one?'), never an open which-phone ask. A battery uses a given " +
-          "trade-off shape in at most ONE pricing cell (four fee-vs-no-fee " +
-          "cells measure one question four times), and at least one " +
-          "pricing cell names the client brand and does its own math. " +
-          "Financing or trade-in numbers are PRICES, not usage: say what " +
-          "the asker does with it or how long they keep it too. VARY the " +
-          "trade-off across a battery's pricing cells - never four cells " +
-          "on one shape. Where the category has a price structure, ONE " +
-          "pricing cell stays generic to it; where the trade-off lands on " +
-          "products ('a no-fee card or one of the premium ones'), end by " +
-          "asking which they'd get.\n" +
+          "- pricing cells ask the CLIENT BRAND'S value question for this " +
+          "column's buyer: name the client brand, weigh its price against " +
+          "a cheaper option - its own lower tier or plan, or a generic " +
+          "cheaper alternative ('a store brand', 'a cheaper phone', 'a " +
+          "no-annual-fee card') - give the asker's usage as the INPUT, and " +
+          "ask for the call ('worth paying for, or take the cheaper " +
+          "option?'). Every pricing cell asks the SAME value question; " +
+          "only the buyer changes from column to column. Never name a " +
+          "rival (head-to-heads belong to comparison), never state a " +
+          "price (ask what things cost; the asker's own budget or an " +
+          "offer made to them is circumstance), never a bare 'is it worth " +
+          "it?' with no usage (that is a worry), never a presupposed " +
+          "verdict ('that huge fee'). Usage is TWO OR THREE round figures " +
+          "at most - one chat message, never a spreadsheet - and what the " +
+          "asker does with it or how long they keep it counts as usage; " +
+          "financing or trade-in numbers do not.\n" +
           "- Objections speak as a PROSPECT weighing the purchase - 'should " +
           "I drop or cancel it' is a churn/renewal question, never an " +
           "objection. A confusion- or complexity-shaped concern is voiced " +
@@ -2349,7 +2345,7 @@ const CELL_WRITER_SYSTEM =
           "say 'the latest <line>' - never a specific model-year pairing " +
           "('Pixel 9 Pro vs iPhone 15 Pro'). Engines correct a stale model " +
           "premise instead of answering the question.\n" +
-          "- Open-choice stages (discovery, shortlist, use_case, " +
+          "- Open-choice stages (discovery, use_case, " +
           "social_validation, feature_screening, premium_worth): the ask " +
           "must invite NAMED picks - 'which ones', 'name a few worth a " +
           "look' - never 'what should I look for', 'where do I find " +
@@ -3644,8 +3640,8 @@ export async function generateGrid(input: {
     return out;
   };
 
-  /** Battery-wide invariants (concern diversity; pricing trade-off diversity
-   * + brand presence), extracted from generate's tail (2026-10-02 review gap
+  /** Battery-wide invariants (concern diversity; the pricing diversity pass
+   * was removed by init decision 1), extracted from generate's tail (2026-10-02 review gap
    * #3): a pass skipped by the deadline or a thrown labeling call left the
    * battery permanently without its guarantees, because the units were
    * already terminal and a fully-cached serve never re-entered generate. A
@@ -3771,203 +3767,12 @@ export async function generateGrid(input: {
         console.error("concern diversity pass failed open:", err);
       }
     }
-    // CROSS-CELL PRICING TRADE-OFF DIVERSITY (2026-10-01 s20 audit): the
-    // writer rule "a battery uses a trade-off shape in at most one pricing
-    // cell" had no checker behind it, and AmEx shipped three fee-vs-no-fee
-    // cells while jira asked free-vs-paid twice - per-cell design checks
-    // cannot see cross-cell sameness. Same mechanism as the concern pass:
-    // one cheap labeling call over this generation's pricing seeds,
-    // duplicates get one regeneration steered to a different trade-off.
-    if (process.env.PHRASINGS_CHECKS !== "0" && Date.now() > deadlineAt) passesCut = true;
-    if (process.env.PHRASINGS_CHECKS !== "0" && Date.now() <= deadlineAt) {
-      try {
-        const pricing: { u: number; c: GridCell }[] = [];
-        for (let u = 0; u < units.length; u++) for (const c of resolved[u] ?? []) if (c.stage === "pricing") pricing.push({ u, c });
-        if (pricing.length >= 2) {
-          const labelShapes = async (texts: string[]): Promise<string[]> => {
-            const a = await anthropicClient();
-            const res = await withCostContext({ purpose: "setup:cells" }, () => a.messages.create({
-              model: DESIGN_CHECK_MODEL,
-              max_tokens: 1500,
-              output_config: { effort: DESIGN_CHECK_EFFORT },
-              system: `Each question below asks about price or value in ${input.brand}'s market. Label each question's core price TRADE-OFF by the TWO OPTIONS being weighed: fee vs no-fee, free vs paid, monthly vs annual billing, tier vs tier, financing vs buying outright, carrier credits vs unlocked, trade-in vs resale, total cost over time, pay up vs base - or a 2-4 word options pair at that same altitude. Wording, products and spend amounts do not change the class: two questions weighing the SAME two options are the SAME class however differently phrased, and paying MORE OR LESS for the same product line - no-fee vs fee, mid-tier vs premium, cheaper line vs flagship - is ONE class ("which price level") whatever the tier names. Reply with ONLY JSON: {"shapes": ["...", ...]} - one label per question, in order.`,
-              messages: [{ role: "user", content: texts.map((t, i) => `${i + 1}. ${t}`).join("\n") }],
-            } as never));
-            const text = (res as { content: { type: string; text?: string }[] }).content
-              .filter((b) => b.type === "text").map((b) => b.text ?? "").join("").trim();
-            const j = JSON.parse(firstJsonObject(text) ?? text) as { shapes?: string[] };
-            return (j.shapes ?? []).map((s) => String(s));
-          };
-          const shapes = await labelShapes(pricing.map((d) => d.c.text));
-          if (shapes.length === pricing.length) {
-            const norm = (s: string) => s.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
-            const covered = new Map<string, number>();
-            const dups: number[] = [];
-            shapes.forEach((lab, i) => {
-              const k = norm(lab);
-              if (covered.has(k)) dups.push(i);
-              else covered.set(k, i);
-            });
-            // At least one pricing cell names the brand and does its own
-            // math (s20 writer rule; s23 shipped four generic AmEx cells -
-            // writer-only rules regress). If none does, steer one duplicate
-            // (or the last cell) into the brand's own tier/fee question.
-            // Brand presence is enforced AFTER the duplicate heals (below):
-            // evaluating it here let a dup heal replace the battery's only
-            // brand-named cell right after the check had passed (s26 AmEx).
-            let brandSteer = -1;
-            const dirty = new Set<number>();
-            await Promise.all(dups.slice(0, 4).map(async (i) => {
-              const d = pricing[i];
-              const row = rowFor(units[d.u] ?? [], d.c) ?? (units[d.u] ?? [])[0];
-              if (!row) return;
-              if (Date.now() > healDeadlineAt) { passesCut = true; return; }
-              console.warn(`pricing trade-off diversity: duplicates "${shapes[i]}" - regenerating | ${d.c.text.slice(0, 80)}`);
-              try {
-                const res2 = await openaiClient().chat.completions.create({
-                  model: CELLS_MODEL,
-                  messages: [
-                    { role: "system", content: CELL_WRITER_SYSTEM + "Return one cell object for the plan line." },
-                    { role: "user", content:
-                        `Client brand: ${input.brand}\nCategory: ${input.category}\n` +
-                        `Rivals: ${rivals.map(primaryBrandName).join(", ")}\nAudience: ${input.audience ?? "unknown"}\n\n` +
-                        `Cell plan:\n${planLine(row, 0)}\n` +
-                        (i === brandSteer
-                          ? `   [none of this battery's pricing cells names ${input.brand}: THIS cell must NAME ${input.brand} and reason about its own price math - its tiers or lines against each other, its fee vs what it returns, its financing or trade-in - in this circumstance. ` +
-                            `Do not reuse this wording: "${d.c.text}"]`
-                          : `   [this battery's pricing cells ALREADY use these price trade-offs: ${[...covered.keys()].join("; ")}. ` +
-                            `This cell must reason about a DIFFERENT price trade-off in this circumstance - the client brand's own tiers, total cost over time, financing vs buying outright, trade-in math. ` +
-                            `Do not reuse this wording: "${d.c.text}"]`) },
-                  ],
-                  response_format: { type: "json_schema", json_schema: { name: "grid_cells", strict: true, schema: CELLS_SCHEMA } },
-                });
-                let text2 = (JSON.parse(res2.choices[0]?.message?.content ?? "{}") as { cells?: { text?: string }[] }).cells?.[0]?.text?.trim();
-                const intent = stageDesignIntent(d.c.stage, input.brand, undefined, d.c.angle, d.c.situation);
-                const judge = async (t: string) => {
-                  const cand = { stage: d.c.stage, angle: d.c.angle, text: humanize(t), situation: d.c.situation };
-                  await primeCells([cand]);
-                  const mechFails = seedRule(cand).map((f) => f.detail);
-                  const mechOk = mechFails.length === 0;
-                  const brandOk = i !== brandSteer || textNamesBrand(cand.text, input.brand, { extraForms: aliasForms[input.brand] });
-                  const verdict = intent ? (await checkDesignFidelity({ candidates: [{ text: cand.text, design: intent }], meta: input.meta }))[0] : null;
-                  return { cand, mechOk, mechFails, brandOk, designOk: !intent || (!!verdict?.voices && !verdict.unchecked), reason: verdict?.reason ?? "" };
-                };
-                let v = text2 ? await judge(text2) : null;
-                // One steered retry (s29 audit F2: rejected dedup regens made
-                // the battery converge back to the fee monoculture - the
-                // rejection reason steers the second try).
-                if (text2 && v && !(v.mechOk && v.brandOk && v.designOk) && Date.now() <= healDeadlineAt) {
-                  const why = !v.designOk ? `it did not satisfy the design: ${v.reason}` : !v.mechOk ? `it broke a mechanical rule: ${v.mechFails.join("; ")}` : `it must name ${input.brand}`;
-                  const resR = await openaiClient().chat.completions.create({
-                    model: CELLS_MODEL,
-                    messages: [
-                      { role: "system", content: CELL_WRITER_SYSTEM + "Return one cell object for the plan line." },
-                      { role: "user", content:
-                          `Client brand: ${input.brand}\nCategory: ${input.category}\n` +
-                          `Rivals: ${rivals.map(primaryBrandName).join(", ")}\nAudience: ${input.audience ?? "unknown"}\n\n` +
-                          `Cell plan:\n${planLine(row, 0)}\n` +
-                          `   [this battery's pricing cells ALREADY use these price trade-offs: ${[...covered.keys()].join("; ")} - this cell must reason about a DIFFERENT price trade-off with the asker's usage as input. ` +
-                          `The last attempt was rejected because ${why}. Do not reuse: "${d.c.text}" / "${text2}"]` },
-                    ],
-                    response_format: { type: "json_schema", json_schema: { name: "grid_cells", strict: true, schema: CELLS_SCHEMA } },
-                  });
-                  text2 = (JSON.parse(resR.choices[0]?.message?.content ?? "{}") as { cells?: { text?: string }[] }).cells?.[0]?.text?.trim();
-                  v = text2 ? await judge(text2) : null;
-                }
-                if (v && v.mechOk && v.brandOk && v.designOk) {
-                  d.c.text = v.cand.text;
-                  d.c.qtype = questionTypeOf(d.c, input.brand, input.category, aliasForms);
-                  d.c.spec = deriveCheckSpec(d.c, input.brand, input.competitors, input.category, aliasForms);
-                  delete d.c.seedFlags;
-                  dirty.add(d.u);
-                  console.warn(`pricing trade-off diversity: healed: ${v.cand.text.slice(0, 80)}`);
-                } else {
-                  console.warn(`pricing trade-off diversity: regeneration rejected (${v ? [v.mechOk ? "" : `mech: ${v.mechFails.join("; ")}`, v.brandOk ? "" : "brand", v.designOk ? "" : `design: ${v.reason}`].filter(Boolean).join(" | ") : "empty"}) - original stands | ${v?.cand.text.slice(0, 120) ?? ""}`);
-                }
-              } catch (err) {
-                console.error("pricing diversity regeneration failed open:", err);
-              }
-            }));
-            // At least one pricing cell names the brand - judged on the
-            // FINAL post-heal texts, with its own regen when violated.
-            const namesTarget = (t: string) => textNamesBrand(t, input.brand, { extraForms: aliasForms[input.brand] });
-            if (!pricing.some((d) => namesTarget(d.c.text)) && Date.now() > healDeadlineAt) passesCut = true;
-            if (!pricing.some((d) => namesTarget(d.c.text)) && Date.now() <= healDeadlineAt) {
-              brandSteer = pricing.length - 1;
-              const d = pricing[brandSteer];
-              const row = rowFor(units[d.u] ?? [], d.c) ?? (units[d.u] ?? [])[0];
-              console.warn(`pricing diversity: no cell names ${input.brand} - steering [${brandSteer}] to the brand's own math`);
-              if (row) {
-                try {
-                  // Two attempts (2026-10-02 round-4 audit N1: one rejected
-                  // steer left the Pixel battery permanently without a
-                  // brand-named pricing cell, invisible at the gate - the
-                  // pass still marked itself complete). The retry is told the
-                  // exact rule it broke; a still-failing steer flags the
-                  // cell so the gap reaches the human.
-                  let lastWhy = "";
-                  let restored = false;
-                  for (let attempt = 0; attempt < 2 && !restored; attempt++) {
-                    if (attempt > 0 && Date.now() > healDeadlineAt) break;
-                    const res3 = await openaiClient().chat.completions.create({
-                      model: CELLS_MODEL,
-                      messages: [
-                        { role: "system", content: CELL_WRITER_SYSTEM + "Return one cell object for the plan line." },
-                        { role: "user", content:
-                            `Client brand: ${input.brand}\nCategory: ${input.category}\n` +
-                            `Rivals: ${rivals.map(primaryBrandName).join(", ")}\nAudience: ${input.audience ?? "unknown"}\n\n` +
-                            `Cell plan:\n${planLine(row, 0)}\n` +
-                            `   [none of this battery's pricing cells names ${input.brand}: THIS cell must NAME ${input.brand} and reason about its own price math - its tiers or lines against each other, its fee vs what it returns, its financing or trade-in - in this circumstance. ` +
-                            `Do not reuse this wording: "${d.c.text}"` +
-                            (lastWhy ? `. The last attempt was rejected because ${lastWhy}` : "") + `]` },
-                      ],
-                      response_format: { type: "json_schema", json_schema: { name: "grid_cells", strict: true, schema: CELLS_SCHEMA } },
-                    });
-                    const text3 = (JSON.parse(res3.choices[0]?.message?.content ?? "{}") as { cells?: { text?: string }[] }).cells?.[0]?.text?.trim();
-                    if (!text3) { lastWhy = "it came back empty"; continue; }
-                    const cand = { stage: d.c.stage, angle: d.c.angle, text: humanize(text3), situation: d.c.situation };
-                    const intent = stageDesignIntent(d.c.stage, input.brand, undefined, d.c.angle, d.c.situation);
-                    await primeCells([cand]);
-                    const mechFails = seedRule(cand).map((f) => f.detail);
-                    const brandOk = namesTarget(cand.text);
-                    const dv = intent ? (await checkDesignFidelity({ candidates: [{ text: cand.text, design: intent }], meta: input.meta }))[0] : null;
-                    const designOk = !intent || (!!dv?.voices && !dv?.unchecked);
-                    if (mechFails.length === 0 && brandOk && designOk) {
-                      d.c.text = cand.text;
-                      d.c.qtype = questionTypeOf(d.c, input.brand, input.category, aliasForms);
-                      d.c.spec = deriveCheckSpec(d.c, input.brand, input.competitors, input.category, aliasForms);
-                      delete d.c.seedFlags;
-                      dirty.add(d.u);
-                      restored = true;
-                      console.warn(`pricing diversity: brand cell restored: ${cand.text.slice(0, 80)}`);
-                    } else {
-                      lastWhy = !designOk ? `it did not satisfy the design: ${dv?.reason ?? ""}` : mechFails.length ? `it broke a mechanical rule: ${mechFails.join("; ")}` : `it must name ${input.brand}`;
-                      console.warn(`pricing diversity: brand steer rejected (${lastWhy}) | ${cand.text.slice(0, 120)}`);
-                    }
-                  }
-                  if (!restored) {
-                    const flag = `no pricing cell names ${input.brand} - the engine could not steer one there (${lastWhy || "out of time"}); rewrite this cell to name ${input.brand} and weigh its own tiers, fee or price math against the asker's usage`;
-                    d.c.seedFlags = [...(d.c.seedFlags ?? []).filter((f) => !f.startsWith("no pricing cell names")), flag];
-                    dirty.add(d.u);
-                    console.warn(`pricing diversity: brand steer failed - flagged [${brandSteer}] for the gate`);
-                  }
-                } catch (err) {
-                  console.error("pricing brand steer failed open:", err);
-                }
-              }
-            }
-            await Promise.all(
-              [...dirty].map((u) =>
-                store.cacheSet(unitKeys[u], JSON.stringify({ cells: resolved[u] ?? [], rules: SEED_RULES_VERSION }), stampOf(input)).catch(() => {})
-              )
-            );
-          }
-        }
-      } catch (err) {
-        passesCut = true;
-        console.error("pricing trade-off diversity pass failed open:", err);
-      }
-    }
+    // The cross-cell PRICING TRADE-OFF DIVERSITY pass (s20, 2026-10-01) and
+    // its brand-named-cell steer were removed by init decision 1
+    // (2026-10-03): pricing is a scenario row - every pricing cell asks the
+    // brand's value question for its column's buyer, so "same trade-off in
+    // every column" is the design, not a defect, and must-name is enforced
+    // per cell by the spec.
     return passesCut;
   };
   /** One coalesced run of the battery passes per unit-key era: concurrent
