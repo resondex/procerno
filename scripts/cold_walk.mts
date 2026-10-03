@@ -68,7 +68,8 @@ for (const brand of BRANDS) {
   const directRivals = Object.entries(rosterRoles).filter(([, r]) => r === "same_seat" || r === "bench").map(([n]) => n);
   const rooms = [...compose.scenarios, ...(compose.reserve ?? []), ...(fit?.missingCore ? [fit.missingCore] : [])]
     .map((s: { label: string; description: string }) => ({ label: s.label, description: s.description }));
-  const roomChecks = await inst.checkRooms({ brand, category: profile.category, rivals: directRivals, rooms }).catch(() => []);
+  const picksH2H = Object.entries(rosterRoles).filter(([, r]) => r === "same_seat").map(([n]) => n);
+  const roomChecks = await inst.checkRooms({ brand, category: profile.category, rivals: directRivals, picks: picksH2H, rooms }).catch(() => []);
   console.log(`[3b rooms]`, roomChecks.map((c: { label: string; contenders: string[]; rivals: number; pitch: string; names: string[] }) => `${c.label}: ${c.contenders.length}/${c.rivals}${c.pitch ? ` pitch="${c.pitch}"` : ""}${c.names.length ? ` names=${c.names.join("+")}` : ""}`).join(" | "));
 
   const offered = compose.stages

@@ -12,6 +12,8 @@ const Body = z.object({
   category: z.string().trim().min(1).max(120),
   /** Direct rivals only (same_seat + bench). */
   rivals: z.array(z.string().trim().min(1).max(80)).max(12),
+  /** The head-to-head picks - the contest bar reads them. */
+  picks: z.array(z.string().trim().min(1).max(80)).max(12).optional(),
   rooms: z
     .array(
       z.object({
@@ -45,6 +47,7 @@ export async function POST(req: Request) {
       brand: parsed.data.brand,
       category: parsed.data.category,
       rivals: parsed.data.rivals,
+      picks: parsed.data.picks,
       rooms: parsed.data.rooms,
       meta: { brand: parsed.data.brand, source: cacheSource(auth) },
     });

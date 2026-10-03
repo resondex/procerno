@@ -822,7 +822,11 @@ export async function readScenarios(input: {
   // room rule - a buyer occasion (who, situation, wanted outcome) in the
   // buyer's outcome language, contested by the category's leading
   // brands - instead of only "never name a brand".
-  const key = cacheKey("scenarios_journeys14", [
+  // 15 (2026-10-03, rooms rec A): the brand-aware read no longer forces
+  // "its flagship line's occasion" into the core four (it produced Pixel's
+  // Android-only "flagship upgrade" room), and no room builds in a
+  // platform or ecosystem preference that rules out a leading contender.
+  const key = cacheKey("scenarios_journeys15", [
     input.category, input.audience, input.forBrand ?? "",
   ]);
   const read = await coalesced<{
@@ -861,7 +865,10 @@ export async function readScenarios(input: {
           "a specific brand or product. A room is CONTESTED: most of the " +
           "category's leading brands are plausible contenders for that " +
           "buyer; a room only one product line serves, or one that belongs " +
-          "to a different category, is not this market's room. Spend the " +
+          "to a different category, is not this market's room. A room never " +
+          "builds in a platform or ecosystem preference that rules out a " +
+          "leading contender ('upgrading my Android phone' excludes iPhone " +
+          "buyers - say 'upgrading a phone I've had for years'). Spend the " +
           "slots on DIFFERENT axes of circumstance (scale, composition, " +
           "constraint, occasion, recipient), not variants of one.\n" +
           "2) per scenario, deviates: true ONLY if that scenario's buyer " +
@@ -910,8 +917,7 @@ export async function readScenarios(input: {
             ? "\nThis instrument is fielded FOR ONE BRAND, named below. " +
               "Every scenario must be an occasion where that brand " +
               "genuinely competes - centered on product types it actually " +
-              "sells today - and its flagship line's occasion must be in " +
-              "the core four. The wording stays brand-blind as ever: " +
+              "sells today. The wording stays brand-blind as ever: " +
               "describe the circumstance in the buyer's outcome language, " +
               "never name any brand, and keep each room contested - one " +
               "the brand's rivals compete in too, not one built on the " +
@@ -1741,7 +1747,11 @@ export interface RoomCheck {
   contenders: string[];
   /** How many direct rivals were weighed. */
   rivals: number;
-  /** Most of the direct rivals contend (at least half). */
+  /** Contested (rooms rec A, 2026-10-03): at least half of the
+   * head-to-head picks AND at least 2 direct rivals contend. Premium rooms
+   * are contested by a subset of issuers by market structure, so "half of
+   * ALL direct rivals" raised false ambers on AmEx. Without picks, half of
+   * the direct rivals. */
   contested: boolean;
   /** A phrase in the room worded as one brand's own selling point rather
    * than the buyer's outcome; empty when none. */
@@ -1766,6 +1776,8 @@ export async function checkRooms(input: {
   /** Direct rivals only (same_seat + bench) - upstream and adjacent
    * brands are not the room's contenders by definition. */
   rivals: string[];
+  /** The head-to-head picks (the contest bar reads them). */
+  picks?: string[];
   rooms: Situation[];
   meta?: CacheMeta;
 }): Promise<RoomCheck[]> {
@@ -1773,8 +1785,19 @@ export async function checkRooms(input: {
   const rivals = [...new Set(input.rivals.map((r) => r.trim()).filter(Boolean))];
   const rooms = input.rooms.filter((r) => r.label.trim());
   if (rooms.length === 0) return [];
+  const roomText = (r: Situation) => `${r.label}. ${r.description}`;
+  // Ambiguous one-word hits ("DevOps" of Azure DevOps) go to the brand
+  // judge first, exactly as the seed checks do - an unjudged hit counts as
+  // named, which made the chip read "Names Azure DevOps" on a room that
+  // only says DevOps.
+  try {
+    await primeBrandVerdicts({
+      items: rooms.map((r) => ({ text: roomText(r), brands: [input.brand, ...rivals] })),
+      roster: [input.brand, ...rivals], aliases: {}, category: input.category, meta: input.meta,
+    });
+  } catch { /* fail open: unjudged hits count as named */ }
   const namesOf = (r: Situation) =>
-    [input.brand, ...rivals].filter((b) => textNamesBrand(`${r.label}. ${r.description}`, b));
+    [input.brand, ...rivals].filter((b) => textNamesBrand(roomText(r), b));
   const keyOf = (r: Situation) => cacheKey("room_check1", [
     DESIGN_CHECK_MODEL, input.brand, input.category, [...rivals].map((x) => x.toLowerCase()).sort().join(","),
     `${r.label.trim()}|${r.description.trim()}`,
@@ -1827,14 +1850,17 @@ export async function checkRooms(input: {
     const names = namesOf(r);
     if (!v && rivals.length > 0) return names.length > 0 ? [{ label: r.label, contenders: [], rivals: rivals.length, contested: true, pitch: "", names }] : [];
     const contenders = v?.contenders ?? [];
-    return [{
-      label: r.label,
-      contenders,
-      rivals: rivals.length,
-      contested: rivals.length === 0 || contenders.length >= Math.ceil(rivals.length / 2),
-      pitch: v?.pitch ?? "",
-      names,
-    }];
+    const picks = (input.picks ?? []).filter((p) => rivals.includes(p));
+    const contested = rivals.length === 0
+      ? true
+      : picks.length > 0
+        ? contenders.filter((c) => picks.includes(c)).length >= Math.ceil(picks.length / 2) && contenders.length >= Math.min(2, rivals.length)
+        : contenders.length >= Math.ceil(rivals.length / 2);
+    // A pitch flag must quote words the room actually contains (Doritos'
+    // "Scoops" flag quoted a Tostitos line the room never mentioned).
+    const pitchRaw = (v?.pitch ?? "").trim().replace(/^["']|["']$/g, "");
+    const pitch = pitchRaw && roomText(r).toLowerCase().includes(pitchRaw.toLowerCase()) ? pitchRaw : "";
+    return [{ label: r.label, contenders, rivals: rivals.length, contested, pitch, names }];
   });
 }
 

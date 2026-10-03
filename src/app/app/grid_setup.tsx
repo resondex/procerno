@@ -1576,7 +1576,7 @@ interface RoomCheckUi {
 export function ScenariosGate({
   state, setState, onRecompose, onRecomposeBase, onSuggestScenario, onNearScenario, onWarmReview, busy,
   maxScenarios = MAX_SCENARIOS, readDelta, fitBrand, fitCategory, onRebuildForBrand,
-  onBackToCategory, rivals, setupId,
+  onBackToCategory, rivals, picks, setupId,
 }: {
   state: GridState;
   setState: (s: GridState) => void;
@@ -1584,6 +1584,8 @@ export function ScenariosGate({
    * asks which of them compete in each room (init decision 4). Omit to
    * disable the chips. */
   rivals?: string[];
+  /** The head-to-head picks - the contest bar reads them. */
+  picks?: string[];
   /** Cost attribution header for the contest check. */
   setupId?: string;
   onRecompose: (base: GridState["moderators"], rows: ScenarioRow[], cells?: GridCellUi[]) => void;
@@ -1668,17 +1670,17 @@ export function ScenariosGate({
     ...(fitMissing ? [{ label: fitMissing.label, description: fitMissing.description }] : []),
   ].map((r) => ({ label: r.label.trim(), description: r.description.trim() }));
   const checkSig = rivals && fitBrand && fitCategory
-    ? JSON.stringify([fitBrand, fitCategory, rivals, checkRooms])
+    ? JSON.stringify([fitBrand, fitCategory, rivals, checkRooms, picks ?? []])
     : "";
   useEffect(() => {
     if (!checkSig) return;
-    const [brand, category, rv, rooms] = JSON.parse(checkSig) as [string, string, string[], { label: string; description: string }[]];
+    const [brand, category, rv, rooms, pk] = JSON.parse(checkSig) as [string, string, string[], { label: string; description: string }[], string[]];
     if (rooms.length === 0) return;
     const t = setTimeout(() => {
       void fetch("/api/setup/grid/rooms", {
         method: "POST",
         headers: { "Content-Type": "application/json", ...(setupId ? { "x-setup-id": setupId } : {}) },
-        body: JSON.stringify({ brand, category, rivals: rv, rooms: rooms.slice(0, 10) }),
+        body: JSON.stringify({ brand, category, rivals: rv, picks: pk, rooms: rooms.slice(0, 10) }),
       })
         .then((r) => (r.ok ? r.json() : null))
         .then((d: { checks?: RoomCheckUi[] } | null) => {
@@ -2112,7 +2114,7 @@ export function ScenariosGate({
                 );
               if (!c.contested)
                 return (
-                  <span className="text-warning" title={`Contenders: ${who}. A room most of your rivals compete in measures a real contest - try a near neighbor, or keep it if the niche is deliberate.`}>
+                  <span className="text-warning" title={`Contenders: ${who}. A room your head-to-head rivals compete in measures a real contest - try a near neighbor, or keep it if the niche is deliberate.`}>
                     Few of your rivals compete here ({c.contenders.length} of {c.rivals})
                   </span>
                 );
