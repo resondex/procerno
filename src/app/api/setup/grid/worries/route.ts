@@ -39,6 +39,12 @@ const Body = z.object({
     .max(4),
   /** Background warm: fill the cache, never wait on in-flight work. */
   warm: z.boolean().optional(),
+  /** Stages the user switched on beyond the read's recommendations (the
+   * coverage ticks, or the journey advisory's "keep the market view and
+   * add Renewal"). A worry stage among them is offered too - otherwise an
+   * added Renewal had no worries to pick and the coverage step said "no
+   * worries picked" (AmEx walk, 2026-10-02). */
+  keptStages: z.array(z.string().max(40)).max(40).optional(),
 });
 
 /** The worries gate's candidate pool: the brand's doubt-space, stance-
@@ -58,9 +64,12 @@ export async function POST(req: Request) {
   }
   const base: Moderators = parsed.data.base;
   const scenarios = parsed.data.scenarios as unknown as (ScenarioSpec & { journey: Journey | null })[];
-  const offered = participationMask(base, scenarios)
-    .filter((s) => s.recommended && (WORRY_STANCE_STAGES as readonly string[]).includes(s.key))
+  const isWorryStage = (k: string) => (WORRY_STANCE_STAGES as readonly string[]).includes(k);
+  const recommended = participationMask(base, scenarios)
+    .filter((s) => s.recommended && isWorryStage(s.key))
     .map((s) => s.key);
+  // Mask order first, then any worry stage the user added.
+  const offered = [...new Set([...recommended, ...(parsed.data.keptStages ?? []).filter(isWorryStage)])];
   const worries = await generateWorries({
     brand: parsed.data.brand,
     category: parsed.data.category,

@@ -957,6 +957,7 @@ export function useGridSetup(a: GridSetupArgs) {
         audience: a.audience || undefined,
         base: st.moderators,
         scenarios: st.scenarios,
+        keptStages: st.keptStages,
       }
     );
     a.setBusy(null);
@@ -979,6 +980,7 @@ export function useGridSetup(a: GridSetupArgs) {
         brand: a.brand, category: a.category,
         audience: a.audience || undefined,
         base: st.moderators, scenarios: st.scenarios,
+        keptStages: st.keptStages,
         warm: true,
       }),
     }).catch(() => {});
@@ -2571,7 +2573,21 @@ export function WorriesGate({
   cap: number | null;
   busy: boolean;
 }) {
-  const pool = state.worryPool ?? [];
+  // A worry stage the user switched on AFTER the pool was drawn (the journey
+  // advisory's "keep the market view and add Renewal", or a coverage tick)
+  // gets chips on the existing pool instead of a redraw that would reword
+  // the worries and orphan the picks: renewal is the existing customer's
+  // pay-again moment, so every worry already offered to existing customers
+  // (churn) is offered at renewal too, and vice versa (AmEx walk,
+  // 2026-10-02: an added Renewal showed "no worries picked" with none
+  // offered).
+  const drawnFor = new Set(state.worryOffered ?? []);
+  const added = ["renewal", "churn_triggers"].filter((k) => state.keptStages.includes(k) && !drawnFor.has(k));
+  const pool = (state.worryPool ?? []).map((w) => {
+    const extra = added.filter((k) => !w.stances.includes(k) &&
+      w.stances.some((x) => x === "churn_triggers" || x === "renewal"));
+    return extra.length > 0 ? { ...w, stances: [...w.stances, ...extra] } : w;
+  });
   const picks = state.worries ?? [];
   const planned = new Set(
     recommendedWorryPairs(pool).map((p) => `${p.concern}|${p.stage}`)

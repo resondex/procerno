@@ -1332,3 +1332,8 @@ export function moneyBoltOn(text: string, concern?: string | null): boolean {
     /\bcheap(?:er|est)?\b|\bwast(?:e|es|ed|ing)\b[^.?!]{0,12}\bmoney\b|\bworth paying\b|\bfinancial(?:ly)?\b/i.test(text)
   );
 }
+
+/** The stages a worry can be taken at (pre-purchase objections, in-
+ * relationship churn and renewal). Here (pure) so the wizard and the
+ * worries route share one list; instrument.ts re-exports it. */
+export const WORRY_STANCE_STAGES = ["objections", "churn_triggers", "renewal"] as const;

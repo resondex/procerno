@@ -2393,7 +2393,8 @@ function planAngle(p: { angle: string; classPhrase?: string | null }): string {
  * STANCE): pre-purchase -> objections, an existing customer's
  * leave-trigger -> churn_triggers, the pay-again moment -> renewal.
  * repertoire stays on the legacy path (never recommended). */
-export const WORRY_STANCE_STAGES = ["objections", "churn_triggers", "renewal"] as const;
+export { WORRY_STANCE_STAGES } from "./battery_checks";
+import { WORRY_STANCE_STAGES } from "./battery_checks";
 export type WorryStance = (typeof WORRY_STANCE_STAGES)[number];
 
 export interface WorryCandidate {
