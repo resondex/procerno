@@ -457,6 +457,12 @@ export type LibraryStage = ComposedStage & {
  * a model call. This is the part that makes the battery an instrument rather
  * than a suggestion.
  */
+/** Stages removed from the grid. Saved drafts may still carry them in
+ * their stage lists; generateGrid / generatePhrasings drop them so no cell
+ * is planned or paraphrased for a retired stage. problem_resolution:
+ * removed 2026-10-02 (Tyler) - do not re-add until more R&D. */
+export const RETIRED_STAGES: ReadonlySet<string> = new Set(["problem_resolution"]);
+
 export function stageLibrary(m: Moderators): LibraryStage[] {
   const considered = m.involvement === "considered";
   return [
@@ -596,12 +602,9 @@ export function stageLibrary(m: Moderators): LibraryStage[] {
           ? "Your market buys on replenishment - Repertoire carries the repeat decision."
           : "A one-shot market has no renewal moment.",
     },
-    {
-      key: "problem_resolution", label: "Problem resolution", layer: "retention",
-      situational: false, rivals: "none", tag: "steers", recommended: true,
-      hint: "A support-style ask naming the client brand: something about it is broken or messy, how to fix it.",
-      why: "Support moments are where satisfied customers quietly become switchers.",
-    },
+    // "problem_resolution" REMOVED 2026-10-02 (Tyler): out of the grid and
+    // not to be re-added until more R&D. RETIRED_STAGES also drops it from
+    // saved drafts' stage lists at the generation boundary.
     {
       key: "expansion", label: "Expansion", layer: "loyalty",
       situational: false, rivals: "none", tag: "steers", recommended: true,
@@ -2618,6 +2621,7 @@ export async function generateGrid(input: {
   meta?: CacheMeta;
 }): Promise<GridCell[] | null> {
   tagCosts({ purpose: "setup:cells" });
+  input = { ...input, stages: input.stages.filter((st) => !RETIRED_STAGES.has(st.key)) };
   // Wall-clock budget for the whole pass - see GEN_DEADLINE_MS.
   const deadlineAt = Date.now() + GEN_DEADLINE_MS;
   // #7 (2026-10-02 review): the deadline only gated heal STARTS, so a heal
@@ -4324,6 +4328,15 @@ export async function generatePhrasings(input: {
   meta?: CacheMeta;
 }): Promise<Phrasing[][]> {
   tagCosts({ purpose: "setup:phrasings" });
+  // Retired stages get no paraphrases (a saved draft may still hold such a
+  // cell): run on the live cells and give retired positions an empty set.
+  if (input.cells.some((c) => RETIRED_STAGES.has(c.stage))) {
+    const live = input.cells.map((c, i) => ({ c, i })).filter((x) => !RETIRED_STAGES.has(x.c.stage));
+    const got = await generatePhrasings({ ...input, cells: live.map((x) => x.c) });
+    const out: Phrasing[][] = input.cells.map(() => []);
+    live.forEach((x, k) => { out[x.i] = got[k] ?? []; });
+    return out;
+  }
   // Same-seat rivals only (see generateGrid): the writer's rivals, the
   // signature filter, the spec brand sets, checkBattery's scope and the
   // cache keys all read this list. No roles = the input list itself.
