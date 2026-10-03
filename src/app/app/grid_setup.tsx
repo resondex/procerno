@@ -242,7 +242,7 @@ export const MAX_VARIANTS = 3;
 
 /** The cells-write busy phrase - value, not process. The wizard's
  * narrated captions trigger on this exact string. */
-export const CELLS_BUSY = "Turning your market into questions…";
+export const CELLS_BUSY = "Turning your market into queries…";
 
 /** The prompts write narrated inside its inline counter chip - vague by
  * design (progression, never mechanics), elapsed-driven like the other
