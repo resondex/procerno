@@ -6,7 +6,7 @@ import { INSTRUMENT_HELPER_MODEL } from "./models";
 import {
   AMBIGUOUS_FORMS, angleRivals, categoryNounOf, checkBattery, checkCandidateSignature, checkPromptAgainstSpec, classAnglesOf,
   deriveCheckSpec, DOUBT_CHECK_STAGES, MUST_NAME_STAGES, PRE_CATEGORY_STAGES, questionTypeOf, resolveCellSpec, scenarioLabelLeak, seedDesignLine, specWriterNote,
-  sameSeatOf, stageDesignIntent, TERM_COLLISIONS, textNamesBrand, textNamesCategory, upstreamOf,
+  sameSeatOf, stageDesignIntent, statedPriceFinding, moneyBoltOn, TERM_COLLISIONS, textNamesBrand, textNamesCategory, upstreamOf,
   type CellCheckSpec, type ClassAngle, type QuestionType, type RosterClasses, type RosterRoles,
 } from "./battery_checks";
 export { MUST_NAME_STAGES };
@@ -1630,6 +1630,37 @@ const DESIGN_CHECK_SYSTEM = `You check survey questions against their design. Ea
 Decide whether THIS question voices its design. A neutral information request, a how-to, or a lookup that never states or asks the concern (or plan) does NOT voice it, even if it is on the same topic. When the design includes 'Designed as: "..."', the question must carry the SAME specific concern or plan as that designed question - the same subject, not merely any concern or plan of the same kind about the same brand. Different wording, register, backstory and detail are expected and fine; a different subject is not. Judge only the question's words, never what an answer might say.
 Reply with ONLY: {"voices_design": true|false, "reason": "<one short sentence>"}`;
 
+/** The extended verdict (2026-10-02, Tyler's resolver plan): the SAME
+ * design judgment - the v1 instructions verbatim, so the validated
+ * voices_design behavior carries over (validation re-measures it) - plus
+ * the semantic facts the string checks kept approximating: which names the
+ * question uses (verbatim, for brand_resolver), whether it states a price,
+ * whether it remarks on money, whether it rules the client out. Gated by
+ * DESIGN_CHECK_V2 until the validation run and the shadow cycle pass. */
+export const DESIGN_CHECK_V2 = process.env.DESIGN_CHECK_V2 === "1";
+export const DESIGN_CHECK_SYSTEM_V2 = DESIGN_CHECK_SYSTEM.replace(
+  /\nReply with ONLY: [\s\S]*$/,
+  `
+
+Also report four facts about the question's own words (never about what an answer might say):
+- brands_named: every brand, company, product line or product name the question names, copied EXACTLY as written - same spelling and case, lowercase stays lowercase ("is acme any good" -> "acme"; nicknames and short forms count). Casual or lowercase writing still counts as naming the brand. Do NOT list ordinary words that only look like a brand in context ("our target audience", "an apple a day", "on the dot"), generic product types, or the asker's own people and places. Empty list when none.
+- states_price: true when the question itself states what a specific product, plan, tier or fee costs - or a price gap between products - as a fact ("the Gold plan is $40", "the big model costs about 300 more"). False for the asker's own spending, budget or bill, and for a price or deal the asker says they were offered or quoted.
+- money_remark: true when the question remarks on money at all - cost, price, paying, fees, wasting money, being cheaper, value for money.
+- excludes_client: true only when the question requires something the client brand named below clearly cannot offer (a hardware feature its products lack, a platform it does not run on), so the client could not be a valid answer. False when unsure.
+Reply with ONLY: {"voices_design": true|false, "reason": "<one short sentence>", "brands_named": ["..."], "states_price": true|false, "money_remark": true|false, "excludes_client": true|false}`
+);
+
+export interface DesignVerdict {
+  voices: boolean;
+  reason: string;
+  unchecked?: boolean;
+  /** V2 only: names the question uses, verbatim (resolve with brand_resolver). */
+  brandsNamed?: string[];
+  statesPrice?: boolean;
+  moneyRemark?: boolean;
+  excludesClient?: boolean;
+}
+
 /**
  * Design-fidelity check for doubt/plan cells: does each paraphrase still
  * voice the design its cell declares? Paraphrase drift here is silent and
@@ -1640,13 +1671,19 @@ Reply with ONLY: {"voices_design": true|false, "reason": "<one short sentence>"}
  * labeling/v02_relabel/design_check.mts.
  */
 export async function checkDesignFidelity(input: {
-  candidates: { text: string; design: string }[];
+  /** client: the study's brand, shown to the V2 verdict for excludes_client. */
+  candidates: { text: string; design: string; client?: string }[];
   meta?: CacheMeta;
   /** Effort override: seed-check escalation re-judges low-effort failures
    * at medium before healing or flagging (the low tier's documented ~1%
    * gray zone is 1-2 false chips per battery at seed-check volume). */
   effort?: string;
-}): Promise<{ voices: boolean; reason: string; unchecked?: boolean }[]> {
+  /** Force the extended V2 verdict regardless of DESIGN_CHECK_V2 (the
+   * validation harness compares both prompts on the same texts). */
+  v2?: boolean;
+  /** Model override (validation arm B: a stronger seed-tier checker). */
+  model?: string;
+}): Promise<DesignVerdict[]> {
   const a = await anthropicClient();
   // Scoped, not tagCosts: mutating the shared request context here bled the
   // design_check purpose onto concurrent writer calls in the same request
@@ -1654,24 +1691,40 @@ export async function checkDesignFidelity(input: {
   const effort = input.effort ?? DESIGN_CHECK_EFFORT;
   return withCostContext({ purpose: "setup:design_check" }, () => Promise.all(
     input.candidates.map(async (c) => {
-      const key = cacheKey("design_check1", [DESIGN_CHECK_MODEL, effort, c.design, c.text.trim()]);
+      const v2 = input.v2 ?? DESIGN_CHECK_V2;
+      const model = input.model ?? DESIGN_CHECK_MODEL;
+      // V1 keys are untouched (design_check1); V2 has its own key space.
+      const key = v2
+        ? cacheKey("design_check2", [model, effort, c.design, c.client ?? "", c.text.trim()])
+        : cacheKey("design_check1", [model, effort, c.design, c.text.trim()]);
       const hit = await store.cacheGet(key, CACHE_TTL_MS);
-      if (hit) return JSON.parse(hit) as { voices: boolean; reason: string };
+      if (hit) return JSON.parse(hit) as DesignVerdict;
       try {
         const res = await a.messages.create({
-          model: DESIGN_CHECK_MODEL,
+          model,
           max_tokens: 2000,
-          output_config: { effort },
-          system: DESIGN_CHECK_SYSTEM,
-          messages: [{ role: "user", content: `${c.design}\n\nQuestion: ${c.text}` }],
+          ...(effort === "default" ? {} : { output_config: { effort } }),
+          system: v2 ? DESIGN_CHECK_SYSTEM_V2 : DESIGN_CHECK_SYSTEM,
+          messages: [{ role: "user", content: v2
+            ? `${c.design}\n\nClient brand: ${c.client ?? "(none)"}\n\nQuestion: ${c.text}`
+            : `${c.design}\n\nQuestion: ${c.text}` }],
         } as never);
         const text = (res as { content: { type: string; text?: string }[] }).content
           .filter((b) => b.type === "text").map((b) => b.text ?? "").join("")
           .trim().replace(/^```(?:json)?\s*/, "").replace(/\s*```$/, "");
         // Opus occasionally wraps the JSON in prose - take the object, not
         // the whole reply (the classifyJourney pattern).
-        const j = JSON.parse(firstJsonObject(text) ?? text) as { voices_design: boolean; reason?: string };
-        const out = { voices: !!j.voices_design, reason: j.reason ?? "" };
+        const j = JSON.parse(firstJsonObject(text) ?? text) as {
+          voices_design: boolean; reason?: string;
+          brands_named?: unknown; states_price?: boolean; money_remark?: boolean; excludes_client?: boolean;
+        };
+        const out: DesignVerdict = { voices: !!j.voices_design, reason: j.reason ?? "" };
+        if (v2) {
+          out.brandsNamed = Array.isArray(j.brands_named) ? j.brands_named.filter((x): x is string => typeof x === "string") : [];
+          out.statesPrice = !!j.states_price;
+          out.moneyRemark = !!j.money_remark;
+          out.excludesClient = !!j.excludes_client;
+        }
         await store.cacheSet(key, JSON.stringify(out), input.meta);
         return out;
       } catch (err) {
@@ -3334,82 +3387,12 @@ export async function generateGrid(input: {
         check: "class_category_tail" as const,
         detail: `the class phrase already carries the category - drop the redundant "for ${input.category}" tail ("${input.brand} or a Visa card for credit cards" is not how anyone talks)`,
       });
-    // r12 (2026-10-02 Netflix fresh-walk audit): a seed that STATES a
-    // product's price asserts the writer's stale world knowledge ("Netflix
-    // Standard is about 15" was 2023-24 pricing) - every answer starts from
-    // a false premise and the gap grows per wave, the calendar-year disease
-    // in dollar form. The asker's OWN numbers (their spend, size, budget, a
-    // deal offered to them, a payment-plan rate) are circumstance and stay.
-    {
-      const priceAssert = /(?:\b(?:is|are|costs?|runs?|charges?|priced at|goes for)\s+(?:about |around |roughly |like )?~?\$?\d|\bat\s+\$\d)/gi;
-      const unitAfter = /^[\d.,k\s-]*(?:engineers?|people|employees?|users?|seats?|agents?|devs?|requesters?|hours?|trips?|nights?|photos?|videos?|gb|tb|times|lines|stores?|squads?|percent|%)\b/i;
-      const dealBefore = /(?:trade[- ]?in|credits?|budget|bill|spend\w*|offer\w*|deal)[^.!?]{0,16}$/i;
-      const planAfter = /^[\d.,k\s-]*(?:a month\b|\/mo\b|per month|monthly)/i;
-      // A monthly figure is the asker's plan only in the asker's own
-      // context (review 2026-10-02: "Holiday promos have the Pro about 20 a
-      // month more than the regular" passed as if it were their bill). The
-      // same sentence, up to and including the matched words, must carry a
-      // first-person word or a spend / budget / bill / offer / deal /
-      // trade-in word. Calibrated on 3,561 seeds: exactly that one seed
-      // newly flags; every asker-owned figure and received offer still passes.
-      const ownPlanContext = (at: number, len: number) => {
-        const head = c.text.slice(0, at + len);
-        const ss = Math.max(head.lastIndexOf(".", at - 1), head.lastIndexOf("?", at - 1), head.lastIndexOf("!", at - 1), head.lastIndexOf(":", at - 1)) + 1;
-        return /\b(?:I|I'm|I'll|I'd|we|we're|we'll|my|our|me|us)\b|\b(?:spend\w*|budget\w*|bill\w*|offer\w*|deals?|trade[- ]?ins?|groceries|dining|gas|travel|ads)\b/i.test(head.slice(ss));
-      };
-      const askersPlan = (after: string, at: number, len: number) => planAfter.test(after) && ownPlanContext(at, len);
-      for (const m of c.text.matchAll(priceAssert)) {
-        const after = c.text.slice((m.index ?? 0) + m[0].length - 1);
-        const before = c.text.slice(Math.max(0, (m.index ?? 0) - 28), m.index);
-        if (unitAfter.test(after) || dealBefore.test(before) || askersPlan(after, m.index ?? 0, m[0].length)) continue;
-        out.push({
-          check: "seed_states_price" as const,
-          detail: `the seed states a product's price ("...${c.text.slice(Math.max(0, (m.index ?? 0) - 20), (m.index ?? 0) + m[0].length + 10).trim()}...") - prices date and every answer then starts from a false premise; name the tier or product and ASK what it costs or which nets out better (the asker's own spend, budget or a deal offered to them is circumstance and stays)`,
-        });
-        break;
-      }
-      // r13 (2026-10-02 cold-walk audit): the verb-less form - "American
-      // Express Gold at 250 or Platinum at 695?", "Pixel A-series around
-      // 450" - slipped the verb/"$" patterns above (the writer's own pricing
-      // example still reads "the cheaper line at 450"). A product word
-      // (capitalized mid-sentence, or hyphenated like "A-series") directly
-      // followed by at/around/about/roughly and a figure is a stated price.
-      // Calibrated on 3,009 seeds from every walk: 9 hits, all stated
-      // prices; a financing rate ("at 0% for 24 months") is an offer, not
-      // a price, and stays.
-      if (!out.some((f) => f.check === "seed_states_price")) {
-        const tierPrice = /\b((?:[A-Z][A-Za-z0-9+]*|[A-Za-z0-9]+-[A-Za-z0-9]+))\s+(?:at|around|about|roughly)\s+~?\$?(?=\d)/g;
-        for (const m of c.text.matchAll(tierPrice)) {
-          const at = m.index ?? 0;
-          const pre = c.text.slice(0, at).trimEnd();
-          if (pre === "" || /[.!?:"\u201c]$/.test(pre)) continue; // sentence-initial capital is not a product word
-          const after = c.text.slice(at + m[0].length);
-          const before = c.text.slice(Math.max(0, at - 28), at);
-          if (unitAfter.test(after) || dealBefore.test(before) || askersPlan(after, at, m[0].length) || /^\d[\d.,]*\s*%/.test(after)) continue;
-          out.push({
-            check: "seed_states_price" as const,
-            detail: `the seed states a product's price ("...${c.text.slice(at, at + m[0].length + 8).trim()}...") - prices date and every answer then starts from a false premise; name the tier or product and ASK what it costs or which nets out better (the asker's own spend, budget or a deal offered to them is circumstance and stays)`,
-          });
-          break;
-        }
-      }
-    }
-    // r8: the "cheaper" bolt-on on a non-price concern keeps re-rolling in
-    // (third recurrence) - it is a token, not a judgment. Price concerns
-    // keep their cheaper talk.
-    // r13 (2026-10-02 cold-walk audit): the concern test is word-anchored
-    // (unanchored "fee" matched "feel", silently exempting "Support feels
-    // slow", "Ads tier feels wrong", "Rewards feel locked-in"), and the
-    // money preamble joins "cheaper" ("worried about wasting money if they
-    // cancel shows" on a canceled-shows worry; "wastes my money", "worth
-    // paying for" from the round-4 walk). Calibrated on 544 non-price doubt
-    // cells across every walk: 5 hits, all true; plain "paying for" was
-    // rejected (it flags relationship statements, "We're paying for Jira").
-    if (
-      c.concern &&
-      !/\b(?:price[sd]?|pricey|pricing|fees?|costs?|costly|expensive|afford\w*|cheap\w*|money|value|worth)\b/i.test(c.concern) &&
-      /\bcheap(?:er|est)?\b|\bwast(?:e|es|ed|ing)\b[^.?!]{0,12}\bmoney\b|\bworth paying\b|\bfinancial(?:ly)?\b/i.test(c.text)
-    )
+    // Stated prices (r12-r14) and money bolt-ons on non-price worries
+    // (r8-r14) - pure functions in battery_checks so the validation harness
+    // and the resolver shadow can run them on any text.
+    const sp = statedPriceFinding(c.text);
+    if (sp) out.push({ check: "seed_states_price" as const, detail: sp });
+    if (moneyBoltOn(c.text, c.concern))
       out.push({
         check: "concern_price_bolt_on" as const,
         detail: `the cell's concern is "${c.concern}" but the text bolts on a money remark (cheaper options, wasting money, financial risk) - price has its own cells, and the bolt-on muddies whose worry drove the answer`,

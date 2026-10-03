@@ -90,7 +90,8 @@ export interface FamilyPlan {
   rootOf: Map<string, string>;
 }
 
-export const famTokens = (s: string) => norm(s).split(/[^a-z0-9+]+/).filter(Boolean);
+export { famTokens } from "./brand_family";
+import { containsSeq, famTokens } from "./brand_family";
 
 /** Alternate-name forms declared inside a tracked name's parenthetical:
  * "Max (HBO)" -> [max], [hbo]; "GitHub (Issues/Projects)" -> [github],
@@ -104,16 +105,7 @@ export function declaredForms(name: string): string[][] {
   return out;
 }
 
-export function containsSeq(hay: string[], needle: string[]): boolean {
-  if (needle.length === 0 || needle.length > hay.length) return false;
-  outer: for (let i = 0; i + needle.length <= hay.length; i++) {
-    for (let j = 0; j < needle.length; j++) {
-      if (hay[i + j] !== needle[j]) continue outer;
-    }
-    return true;
-  }
-  return false;
-}
+export { containsSeq } from "./brand_family";
 
 export function buildFamilyPlan(
   pending: DictionaryEntry[],

@@ -1237,3 +1237,85 @@ export function specWriterNote(spec: CellCheckSpec): string | null {
   const names = missing.map(speakable).join(" and ");
   return `[this cell's design names ${names}: every paraphrase names ${names}]`;
 }
+
+/** The stated-price finding detail for a text, or null (r12-r14; see the
+ * calibration notes inline). Pure - shared by the engine's seed rule, the
+ * resolver shadow and the validation harness. */
+export function statedPriceFinding(text: string): string | null {
+  // r12 (2026-10-02 Netflix fresh-walk audit): a seed that STATES a
+  // product's price asserts the writer's stale world knowledge ("Netflix
+  // Standard is about 15" was 2023-24 pricing) - every answer starts from
+  // a false premise and the gap grows per wave, the calendar-year disease
+  // in dollar form. The asker's OWN numbers (their spend, size, budget, a
+  // deal offered to them, a payment-plan rate) are circumstance and stay.
+  const priceAssert = /(?:\b(?:is|are|costs?|runs?|charges?|priced at|goes for)\s+(?:about |around |roughly |like )?~?\$?\d|\bat\s+\$\d)/gi;
+  const unitAfter = /^[\d.,k\s-]*(?:engineers?|people|employees?|users?|seats?|agents?|devs?|requesters?|hours?|trips?|nights?|photos?|videos?|gb|tb|times|lines|stores?|squads?|percent|%)\b/i;
+  const dealBefore = /(?:trade[- ]?in|credits?|budget|bill|spend\w*|offer\w*|deal)[^.!?]{0,16}$/i;
+  const planAfter = /^[\d.,k\s-]*(?:a month\b|\/mo\b|per month|monthly)/i;
+  // A monthly figure is the asker's plan only in the asker's own
+  // context (review 2026-10-02: "Holiday promos have the Pro about 20 a
+  // month more than the regular" passed as if it were their bill). The
+  // same sentence, up to and including the matched words, must carry a
+  // first-person word or a spend / budget / bill / offer / deal /
+  // trade-in word. Calibrated on 3,561 seeds: exactly that one seed
+  // newly flags; every asker-owned figure and received offer still passes.
+  const ownPlanContext = (at: number, len: number) => {
+    const head = text.slice(0, at + len);
+    const ss = Math.max(head.lastIndexOf(".", at - 1), head.lastIndexOf("?", at - 1), head.lastIndexOf("!", at - 1), head.lastIndexOf(":", at - 1)) + 1;
+    return /\b(?:I|I'm|I'll|I'd|we|we're|we'll|my|our|me|us)\b|\b(?:spend\w*|budget\w*|bill\w*|offer\w*|deals?|trade[- ]?ins?|groceries|dining|gas|travel|ads)\b/i.test(head.slice(ss));
+  };
+  const askersPlan = (after: string, at: number, len: number) => planAfter.test(after) && ownPlanContext(at, len);
+  for (const m of text.matchAll(priceAssert)) {
+    const after = text.slice((m.index ?? 0) + m[0].length - 1);
+    const before = text.slice(Math.max(0, (m.index ?? 0) - 28), m.index);
+    if (unitAfter.test(after) || dealBefore.test(before) || askersPlan(after, m.index ?? 0, m[0].length)) continue;
+    return `the seed states a product's price ("...${text.slice(Math.max(0, (m.index ?? 0) - 20), (m.index ?? 0) + m[0].length + 10).trim()}...") - prices date and every answer then starts from a false premise; name the tier or product and ASK what it costs or which nets out better (the asker's own spend, budget or a deal offered to them is circumstance and stays)`;
+  }
+  // r13 (2026-10-02 cold-walk audit): the verb-less form - "American
+  // Express Gold at 250 or Platinum at 695?", "Pixel A-series around
+  // 450" - slipped the verb/"$" patterns above (the writer's own pricing
+  // example still reads "the cheaper line at 450"). A product word
+  // (capitalized mid-sentence, or hyphenated like "A-series") directly
+  // followed by at/around/about/roughly and a figure is a stated price.
+  // Calibrated on 3,009 seeds from every walk: 9 hits, all stated
+  // prices; a financing rate ("at 0% for 24 months") is an offer, not
+  // a price, and stays.
+  {
+    const tierPrice = /\b((?:[A-Z][A-Za-z0-9+]*|[A-Za-z0-9]+-[A-Za-z0-9]+))\s+(?:at|around|about|roughly)\s+~?\$?(?=\d)/g;
+    for (const m of text.matchAll(tierPrice)) {
+      const at = m.index ?? 0;
+      const pre = text.slice(0, at).trimEnd();
+      if (pre === "" || /[.!?:"\u201c]$/.test(pre)) continue; // sentence-initial capital is not a product word
+      const after = text.slice(at + m[0].length);
+      const before = text.slice(Math.max(0, at - 28), at);
+      if (unitAfter.test(after) || dealBefore.test(before) || askersPlan(after, at, m[0].length) || /^\d[\d.,]*\s*%/.test(after)) continue;
+      return `the seed states a product's price ("...${text.slice(at, at + m[0].length + 8).trim()}...") - prices date and every answer then starts from a false premise; name the tier or product and ASK what it costs or which nets out better (the asker's own spend, budget or a deal offered to them is circumstance and stays)`;
+    }
+  }
+  return null;
+}
+
+// r8: the "cheaper" bolt-on on a non-price concern keeps re-rolling in
+// (third recurrence) - it is a token, not a judgment. Price concerns
+// keep their cheaper talk.
+// r13 (2026-10-02 cold-walk audit): the concern test is word-anchored
+// (unanchored "fee" matched "feel", silently exempting "Support feels
+// slow", "Ads tier feels wrong", "Rewards feel locked-in"), and the
+// money preamble joins "cheaper" ("worried about wasting money if they
+// cancel shows" on a canceled-shows worry; "wastes my money", "worth
+// paying for" from the round-4 walk). Calibrated on 544 non-price doubt
+// cells across every walk: 5 hits, all true; plain "paying for" was
+// rejected (it flags relationship statements, "We're paying for Jira").
+/** Is a worry itself about price (word-anchored: "feels" is not "fee")? */
+export function isPriceConcern(concern: string): boolean {
+  return /\b(?:price[sd]?|pricey|pricing|fees?|costs?|costly|expensive|afford\w*|cheap\w*|money|value|worth)\b/i.test(concern);
+}
+
+/** A money remark bolted onto a NON-price worry (r8-r14). */
+export function moneyBoltOn(text: string, concern?: string | null): boolean {
+  return !!(
+    concern &&
+    !isPriceConcern(concern) &&
+    /\bcheap(?:er|est)?\b|\bwast(?:e|es|ed|ing)\b[^.?!]{0,12}\bmoney\b|\bworth paying\b|\bfinancial(?:ly)?\b/i.test(text)
+  );
+}

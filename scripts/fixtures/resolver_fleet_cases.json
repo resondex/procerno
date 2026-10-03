@@ -1,0 +1,1783 @@
+[
+ {
+  "id": "fleet001",
+  "tracker": "Google Nest",
+  "category": "smart home devices",
+  "competitors": [
+   "Ring",
+   "Ecobee",
+   "Amazon Echo",
+   "Arlo",
+   "Wyze"
+  ],
+  "stage": "discovery",
+  "concern": null,
+  "text": "The doorbell ring is so quiet I miss deliveries. Which smart home devices would you get to fix that?",
+  "truth": {
+   "brands": [],
+   "statesPrice": false,
+   "moneyRemark": false,
+   "excludesClient": false
+  }
+ },
+ {
+  "id": "fleet002",
+  "tracker": "Google Nest",
+  "category": "smart home devices",
+  "competitors": [
+   "Ring",
+   "Ecobee",
+   "Amazon Echo",
+   "Arlo",
+   "Wyze"
+  ],
+  "stage": "discovery",
+  "concern": null,
+  "text": "thinking ring or something else for a video doorbell - which smart home devices would you pick?",
+  "truth": {
+   "brands": [
+    "Ring"
+   ],
+   "statesPrice": false,
+   "moneyRemark": false,
+   "excludesClient": false
+  }
+ },
+ {
+  "id": "fleet003",
+  "tracker": "Google Nest",
+  "category": "smart home devices",
+  "competitors": [
+   "Ring",
+   "Ecobee",
+   "Amazon Echo",
+   "Arlo",
+   "Wyze"
+  ],
+  "stage": "use_case",
+  "concern": null,
+  "text": "Empty nest now, so the house is mostly unused on weekdays. Which smart thermostats save the most when nobody's home?",
+  "truth": {
+   "brands": [],
+   "statesPrice": false,
+   "moneyRemark": false,
+   "excludesClient": false
+  }
+ },
+ {
+  "id": "fleet004",
+  "tracker": "Google Nest",
+  "category": "smart home devices",
+  "competitors": [
+   "Ring",
+   "Ecobee",
+   "Amazon Echo",
+   "Arlo",
+   "Wyze"
+  ],
+  "stage": "use_case",
+  "concern": null,
+  "text": "is a nest thermostat worth it for a drafty two-story house, or which ones would you pick?",
+  "truth": {
+   "brands": [
+    "Google Nest"
+   ],
+   "statesPrice": false,
+   "moneyRemark": false,
+   "excludesClient": false
+  }
+ },
+ {
+  "id": "fleet005",
+  "tracker": "Google Nest",
+  "category": "smart home devices",
+  "competitors": [
+   "Ring",
+   "Ecobee",
+   "Amazon Echo",
+   "Arlo",
+   "Wyze"
+  ],
+  "stage": "shortlist",
+  "concern": null,
+  "text": "Name 3 smart home cameras that work well outdoors. Not interested in anything from Wyze.",
+  "truth": {
+   "brands": [
+    "Wyze"
+   ],
+   "statesPrice": false,
+   "moneyRemark": false,
+   "excludesClient": false
+  }
+ },
+ {
+  "id": "fleet006",
+  "tracker": "Google Nest",
+  "category": "smart home devices",
+  "competitors": [
+   "Ring",
+   "Ecobee",
+   "Amazon Echo",
+   "Arlo",
+   "Wyze"
+  ],
+  "stage": "feature_screening",
+  "concern": null,
+  "text": "Which smart thermostats work natively with Apple HomeKit and Siri with no bridge? Name a few.",
+  "truth": {
+   "brands": [],
+   "statesPrice": false,
+   "moneyRemark": false,
+   "excludesClient": true
+  }
+ },
+ {
+  "id": "fleet007",
+  "tracker": "Google Nest",
+  "category": "smart home devices",
+  "competitors": [
+   "Ring",
+   "Ecobee",
+   "Amazon Echo",
+   "Arlo",
+   "Wyze"
+  ],
+  "stage": "feature_screening",
+  "concern": null,
+  "text": "Which smart thermostats support room sensors and learn a schedule on their own? Name a few worth a look.",
+  "truth": {
+   "brands": [],
+   "statesPrice": false,
+   "moneyRemark": false,
+   "excludesClient": false
+  }
+ },
+ {
+  "id": "fleet008",
+  "tracker": "Google Nest",
+  "category": "smart home devices",
+  "competitors": [
+   "Ring",
+   "Ecobee",
+   "Amazon Echo",
+   "Arlo",
+   "Wyze"
+  ],
+  "stage": "pricing",
+  "concern": null,
+  "text": "For Nest, is the Learning Thermostat about $280 worth it over the cheaper model for a 3-bedroom house?",
+  "truth": {
+   "brands": [
+    "Google Nest"
+   ],
+   "statesPrice": true,
+   "moneyRemark": true,
+   "excludesClient": false
+  }
+ },
+ {
+  "id": "fleet009",
+  "tracker": "Google Nest",
+  "category": "smart home devices",
+  "competitors": [
+   "Ring",
+   "Ecobee",
+   "Amazon Echo",
+   "Arlo",
+   "Wyze"
+  ],
+  "stage": "pricing",
+  "concern": null,
+  "text": "We heat about 1,800 sq ft and our gas bill runs around $160 a month in winter. Would a smart thermostat pay for itself in a couple of years?",
+  "truth": {
+   "brands": [],
+   "statesPrice": false,
+   "moneyRemark": true,
+   "excludesClient": false
+  }
+ },
+ {
+  "id": "fleet010",
+  "tracker": "Google Nest",
+  "category": "smart home devices",
+  "competitors": [
+   "Ring",
+   "Ecobee",
+   "Amazon Echo",
+   "Arlo",
+   "Wyze"
+  ],
+  "stage": "comparison",
+  "concern": null,
+  "text": "Google Nest or Ecobee for a smart thermostat - which would you pick and why?",
+  "truth": {
+   "brands": [
+    "Google Nest",
+    "Ecobee"
+   ],
+   "statesPrice": false,
+   "moneyRemark": false,
+   "excludesClient": false
+  }
+ },
+ {
+  "id": "fleet011",
+  "tracker": "Google Nest",
+  "category": "smart home devices",
+  "competitors": [
+   "Ring",
+   "Ecobee",
+   "Amazon Echo",
+   "Arlo",
+   "Wyze"
+  ],
+  "stage": "comparison",
+  "concern": null,
+  "text": "nest vs arlo for outdoor cameras: which one would you go with?",
+  "truth": {
+   "brands": [
+    "Google Nest",
+    "Arlo"
+   ],
+   "statesPrice": false,
+   "moneyRemark": false,
+   "excludesClient": false
+  }
+ },
+ {
+  "id": "fleet012",
+  "tracker": "Google Nest",
+  "category": "smart home devices",
+  "competitors": [
+   "Ring",
+   "Ecobee",
+   "Amazon Echo",
+   "Arlo",
+   "Wyze"
+  ],
+  "stage": "objections",
+  "concern": "Privacy and data use",
+  "text": "Thinking about Nest cams, but I'm uneasy about Google having video of my house. Is that a real privacy risk, or am I overthinking it?",
+  "truth": {
+   "brands": [
+    "Google Nest"
+   ],
+   "statesPrice": false,
+   "moneyRemark": false,
+   "excludesClient": false
+  }
+ },
+ {
+  "id": "fleet013",
+  "tracker": "Google Nest",
+  "category": "smart home devices",
+  "competitors": [
+   "Ring",
+   "Ecobee",
+   "Amazon Echo",
+   "Arlo",
+   "Wyze"
+  ],
+  "stage": "churn_triggers",
+  "concern": "App reliability",
+  "text": "Our Nest app keeps losing the cameras and wasting money on a subscription that doesn't work. Keep it or switch?",
+  "truth": {
+   "brands": [
+    "Google Nest"
+   ],
+   "statesPrice": false,
+   "moneyRemark": true,
+   "excludesClient": false
+  }
+ },
+ {
+  "id": "fleet014",
+  "tracker": "Google Nest",
+  "category": "smart home devices",
+  "competitors": [
+   "Ring",
+   "Ecobee",
+   "Amazon Echo",
+   "Arlo",
+   "Wyze"
+  ],
+  "stage": "discovery",
+  "concern": null,
+  "text": "I want an echo of the old chime in a smart doorbell - which smart home devices would you pick?",
+  "truth": {
+   "brands": [],
+   "statesPrice": false,
+   "moneyRemark": false,
+   "excludesClient": false
+  }
+ },
+ {
+  "id": "fleet015",
+  "tracker": "Google Nest",
+  "category": "smart home devices",
+  "competitors": [
+   "Ring",
+   "Ecobee",
+   "Amazon Echo",
+   "Arlo",
+   "Wyze"
+  ],
+  "stage": "discovery",
+  "concern": null,
+  "text": "Would an Echo Show be the best hub, or which smart home devices should I look at?",
+  "truth": {
+   "brands": [
+    "Amazon Echo"
+   ],
+   "statesPrice": false,
+   "moneyRemark": false,
+   "excludesClient": false
+  }
+ },
+ {
+  "id": "fleet016",
+  "tracker": "Google Nest",
+  "category": "smart home devices",
+  "competitors": [
+   "Ring",
+   "Ecobee",
+   "Amazon Echo",
+   "Arlo",
+   "Wyze"
+  ],
+  "stage": "problem_recognition",
+  "concern": null,
+  "text": "The house is freezing in the morning and roasting by noon. How do people fix uneven heating without rewiring everything?",
+  "truth": {
+   "brands": [],
+   "statesPrice": false,
+   "moneyRemark": false,
+   "excludesClient": false
+  }
+ },
+ {
+  "id": "fleet017",
+  "tracker": "Google Nest",
+  "category": "smart home devices",
+  "competitors": [
+   "Ring",
+   "Ecobee",
+   "Amazon Echo",
+   "Arlo",
+   "Wyze"
+  ],
+  "stage": "social_validation",
+  "concern": null,
+  "text": "Which smart doorbells do neighbors actually rave about? Name a couple.",
+  "truth": {
+   "brands": [],
+   "statesPrice": false,
+   "moneyRemark": false,
+   "excludesClient": false
+  }
+ },
+ {
+  "id": "fleet018",
+  "tracker": "Google Nest",
+  "category": "smart home devices",
+  "competitors": [
+   "Ring",
+   "Ecobee",
+   "Amazon Echo",
+   "Arlo",
+   "Wyze"
+  ],
+  "stage": "alternatives",
+  "concern": null,
+  "text": "Moving away from Ring. What smart home devices should I look at instead?",
+  "truth": {
+   "brands": [
+    "Ring"
+   ],
+   "statesPrice": false,
+   "moneyRemark": false,
+   "excludesClient": false
+  }
+ },
+ {
+  "id": "fleet019",
+  "tracker": "Purple",
+  "category": "mattresses",
+  "competitors": [
+   "Casper",
+   "Tempur-Pedic",
+   "Saatva",
+   "Nectar",
+   "Tuft & Needle"
+  ],
+  "stage": "discovery",
+  "concern": null,
+  "text": "Our bedroom is all purple and gray. Which mattresses are best for back pain?",
+  "truth": {
+   "brands": [],
+   "statesPrice": false,
+   "moneyRemark": false,
+   "excludesClient": false
+  }
+ },
+ {
+  "id": "fleet020",
+  "tracker": "Purple",
+  "category": "mattresses",
+  "competitors": [
+   "Casper",
+   "Tempur-Pedic",
+   "Saatva",
+   "Nectar",
+   "Tuft & Needle"
+  ],
+  "stage": "discovery",
+  "concern": null,
+  "text": "is purple worth it for a side sleeper, or which mattresses would you pick?",
+  "truth": {
+   "brands": [
+    "Purple"
+   ],
+   "statesPrice": false,
+   "moneyRemark": false,
+   "excludesClient": false
+  }
+ },
+ {
+  "id": "fleet021",
+  "tracker": "Purple",
+  "category": "mattresses",
+  "competitors": [
+   "Casper",
+   "Tempur-Pedic",
+   "Saatva",
+   "Nectar",
+   "Tuft & Needle"
+  ],
+  "stage": "discovery",
+  "concern": null,
+  "text": "I sleep hot and wake up sore. Which mattresses would you pick for that?",
+  "truth": {
+   "brands": [],
+   "statesPrice": false,
+   "moneyRemark": false,
+   "excludesClient": false
+  }
+ },
+ {
+  "id": "fleet022",
+  "tracker": "Purple",
+  "category": "mattresses",
+  "competitors": [
+   "Casper",
+   "Tempur-Pedic",
+   "Saatva",
+   "Nectar",
+   "Tuft & Needle"
+  ],
+  "stage": "shortlist",
+  "concern": null,
+  "text": "Shortlist 3 mattresses for a heavy back sleeper. Skip anything from casper.",
+  "truth": {
+   "brands": [
+    "Casper"
+   ],
+   "statesPrice": false,
+   "moneyRemark": false,
+   "excludesClient": false
+  }
+ },
+ {
+  "id": "fleet023",
+  "tracker": "Purple",
+  "category": "mattresses",
+  "competitors": [
+   "Casper",
+   "Tempur-Pedic",
+   "Saatva",
+   "Nectar",
+   "Tuft & Needle"
+  ],
+  "stage": "comparison",
+  "concern": null,
+  "text": "Purple or Saatva for a couple with different firmness needs - which would you pick?",
+  "truth": {
+   "brands": [
+    "Purple",
+    "Saatva"
+   ],
+   "statesPrice": false,
+   "moneyRemark": false,
+   "excludesClient": false
+  }
+ },
+ {
+  "id": "fleet024",
+  "tracker": "Purple",
+  "category": "mattresses",
+  "competitors": [
+   "Casper",
+   "Tempur-Pedic",
+   "Saatva",
+   "Nectar",
+   "Tuft & Needle"
+  ],
+  "stage": "comparison",
+  "concern": null,
+  "text": "purple vs tempur-pedic, which would you actually buy?",
+  "truth": {
+   "brands": [
+    "Purple",
+    "Tempur-Pedic"
+   ],
+   "statesPrice": false,
+   "moneyRemark": false,
+   "excludesClient": false
+  }
+ },
+ {
+  "id": "fleet025",
+  "tracker": "Purple",
+  "category": "mattresses",
+  "competitors": [
+   "Casper",
+   "Tempur-Pedic",
+   "Saatva",
+   "Nectar",
+   "Tuft & Needle"
+  ],
+  "stage": "pricing",
+  "concern": null,
+  "text": "Is the Purple Plus about $1,800 queen worth it over the original for someone who sleeps 7 hours a night?",
+  "truth": {
+   "brands": [
+    "Purple"
+   ],
+   "statesPrice": true,
+   "moneyRemark": true,
+   "excludesClient": false
+  }
+ },
+ {
+  "id": "fleet026",
+  "tracker": "Purple",
+  "category": "mattresses",
+  "competitors": [
+   "Casper",
+   "Tempur-Pedic",
+   "Saatva",
+   "Nectar",
+   "Tuft & Needle"
+  ],
+  "stage": "pricing",
+  "concern": null,
+  "text": "I'd keep a mattress 10 years and my budget is around $1,500. Spend more on a hybrid or save with all-foam?",
+  "truth": {
+   "brands": [],
+   "statesPrice": false,
+   "moneyRemark": true,
+   "excludesClient": false
+  }
+ },
+ {
+  "id": "fleet027",
+  "tracker": "Purple",
+  "category": "mattresses",
+  "competitors": [
+   "Casper",
+   "Tempur-Pedic",
+   "Saatva",
+   "Nectar",
+   "Tuft & Needle"
+  ],
+  "stage": "objections",
+  "concern": "Feel takes getting used to",
+  "text": "Thinking about a Purple mattress but people say the grid feels weird at first. Is that true, or does everyone adjust?",
+  "truth": {
+   "brands": [
+    "Purple"
+   ],
+   "statesPrice": false,
+   "moneyRemark": false,
+   "excludesClient": false
+  }
+ },
+ {
+  "id": "fleet028",
+  "tracker": "Purple",
+  "category": "mattresses",
+  "competitors": [
+   "Casper",
+   "Tempur-Pedic",
+   "Saatva",
+   "Nectar",
+   "Tuft & Needle"
+  ],
+  "stage": "objections",
+  "concern": "Durability doubts",
+  "text": "Considering Purple, but I worry I'd be wasting money if it sags in three years. Do they really last?",
+  "truth": {
+   "brands": [
+    "Purple"
+   ],
+   "statesPrice": false,
+   "moneyRemark": true,
+   "excludesClient": false
+  }
+ },
+ {
+  "id": "fleet029",
+  "tracker": "Purple",
+  "category": "mattresses",
+  "competitors": [
+   "Casper",
+   "Tempur-Pedic",
+   "Saatva",
+   "Nectar",
+   "Tuft & Needle"
+  ],
+  "stage": "feature_screening",
+  "concern": null,
+  "text": "Which mattresses use only innerspring coils with no foam layers at all? Name a few.",
+  "truth": {
+   "brands": [],
+   "statesPrice": false,
+   "moneyRemark": false,
+   "excludesClient": true
+  }
+ },
+ {
+  "id": "fleet030",
+  "tracker": "Purple",
+  "category": "mattresses",
+  "competitors": [
+   "Casper",
+   "Tempur-Pedic",
+   "Saatva",
+   "Nectar",
+   "Tuft & Needle"
+  ],
+  "stage": "feature_screening",
+  "concern": null,
+  "text": "Which mattresses have a 100-night or longer home trial and free returns? Name a few worth a look.",
+  "truth": {
+   "brands": [],
+   "statesPrice": false,
+   "moneyRemark": false,
+   "excludesClient": false
+  }
+ },
+ {
+  "id": "fleet031",
+  "tracker": "Purple",
+  "category": "mattresses",
+  "competitors": [
+   "Casper",
+   "Tempur-Pedic",
+   "Saatva",
+   "Nectar",
+   "Tuft & Needle"
+  ],
+  "stage": "discovery",
+  "concern": null,
+  "text": "Looking for something like a nectar of the gods for my back. Which mattresses would you pick?",
+  "truth": {
+   "brands": [],
+   "statesPrice": false,
+   "moneyRemark": false,
+   "excludesClient": false
+  }
+ },
+ {
+  "id": "fleet032",
+  "tracker": "Purple",
+  "category": "mattresses",
+  "competitors": [
+   "Casper",
+   "Tempur-Pedic",
+   "Saatva",
+   "Nectar",
+   "Tuft & Needle"
+  ],
+  "stage": "discovery",
+  "concern": null,
+  "text": "Would Nectar be the best budget pick, or which mattresses would you go with?",
+  "truth": {
+   "brands": [
+    "Nectar"
+   ],
+   "statesPrice": false,
+   "moneyRemark": false,
+   "excludesClient": false
+  }
+ },
+ {
+  "id": "fleet033",
+  "tracker": "Purple",
+  "category": "mattresses",
+  "competitors": [
+   "Casper",
+   "Tempur-Pedic",
+   "Saatva",
+   "Nectar",
+   "Tuft & Needle"
+  ],
+  "stage": "alternatives",
+  "concern": null,
+  "text": "Done with my Tuft & Needle. Which mattresses should I try next?",
+  "truth": {
+   "brands": [
+    "Tuft & Needle"
+   ],
+   "statesPrice": false,
+   "moneyRemark": false,
+   "excludesClient": false
+  }
+ },
+ {
+  "id": "fleet034",
+  "tracker": "Purple",
+  "category": "mattresses",
+  "competitors": [
+   "Casper",
+   "Tempur-Pedic",
+   "Saatva",
+   "Nectar",
+   "Tuft & Needle"
+  ],
+  "stage": "use_case",
+  "concern": null,
+  "text": "Bought my first house and need a guest-room bed people won't complain about. Which mattresses would you pick?",
+  "truth": {
+   "brands": [],
+   "statesPrice": false,
+   "moneyRemark": false,
+   "excludesClient": false
+  }
+ },
+ {
+  "id": "fleet035",
+  "tracker": "AG1",
+  "category": "greens powders",
+  "competitors": [
+   "Bloom Nutrition",
+   "Huel",
+   "Ritual",
+   "Garden of Life",
+   "Amazing Grass"
+  ],
+  "stage": "discovery",
+  "concern": null,
+  "text": "My morning ritual is coffee and nothing else. Which greens powders are actually worth adding?",
+  "truth": {
+   "brands": [],
+   "statesPrice": false,
+   "moneyRemark": false,
+   "excludesClient": false
+  }
+ },
+ {
+  "id": "fleet036",
+  "tracker": "AG1",
+  "category": "greens powders",
+  "competitors": [
+   "Bloom Nutrition",
+   "Huel",
+   "Ritual",
+   "Garden of Life",
+   "Amazing Grass"
+  ],
+  "stage": "discovery",
+  "concern": null,
+  "text": "is ritual's multivitamin enough, or which greens powders would you pick?",
+  "truth": {
+   "brands": [
+    "Ritual"
+   ],
+   "statesPrice": false,
+   "moneyRemark": false,
+   "excludesClient": false
+  }
+ },
+ {
+  "id": "fleet037",
+  "tracker": "AG1",
+  "category": "greens powders",
+  "competitors": [
+   "Bloom Nutrition",
+   "Huel",
+   "Ritual",
+   "Garden of Life",
+   "Amazing Grass"
+  ],
+  "stage": "discovery",
+  "concern": null,
+  "text": "My garden is in full bloom but I still don't eat my vegetables. Which greens powders would you pick?",
+  "truth": {
+   "brands": [],
+   "statesPrice": false,
+   "moneyRemark": false,
+   "excludesClient": false
+  }
+ },
+ {
+  "id": "fleet038",
+  "tracker": "AG1",
+  "category": "greens powders",
+  "competitors": [
+   "Bloom Nutrition",
+   "Huel",
+   "Ritual",
+   "Garden of Life",
+   "Amazing Grass"
+  ],
+  "stage": "discovery",
+  "concern": null,
+  "text": "bloom or something else for a greens powder that tastes ok - which would you pick?",
+  "truth": {
+   "brands": [
+    "Bloom Nutrition"
+   ],
+   "statesPrice": false,
+   "moneyRemark": false,
+   "excludesClient": false
+  }
+ },
+ {
+  "id": "fleet039",
+  "tracker": "AG1",
+  "category": "greens powders",
+  "competitors": [
+   "Bloom Nutrition",
+   "Huel",
+   "Ritual",
+   "Garden of Life",
+   "Amazing Grass"
+  ],
+  "stage": "shortlist",
+  "concern": null,
+  "text": "Name 3 greens powders with third-party testing. Not Amazing Grass, I've tried it.",
+  "truth": {
+   "brands": [
+    "Amazing Grass"
+   ],
+   "statesPrice": false,
+   "moneyRemark": false,
+   "excludesClient": false
+  }
+ },
+ {
+  "id": "fleet040",
+  "tracker": "AG1",
+  "category": "greens powders",
+  "competitors": [
+   "Bloom Nutrition",
+   "Huel",
+   "Ritual",
+   "Garden of Life",
+   "Amazing Grass"
+  ],
+  "stage": "comparison",
+  "concern": null,
+  "text": "AG1 or Huel Daily Greens - which would you pick and why?",
+  "truth": {
+   "brands": [
+    "AG1",
+    "Huel"
+   ],
+   "statesPrice": false,
+   "moneyRemark": false,
+   "excludesClient": false
+  }
+ },
+ {
+  "id": "fleet041",
+  "tracker": "AG1",
+  "category": "greens powders",
+  "competitors": [
+   "Bloom Nutrition",
+   "Huel",
+   "Ritual",
+   "Garden of Life",
+   "Amazing Grass"
+  ],
+  "stage": "comparison",
+  "concern": null,
+  "text": "ag1 vs garden of life for a daily greens - which one?",
+  "truth": {
+   "brands": [
+    "AG1",
+    "Garden of Life"
+   ],
+   "statesPrice": false,
+   "moneyRemark": false,
+   "excludesClient": false
+  }
+ },
+ {
+  "id": "fleet042",
+  "tracker": "AG1",
+  "category": "greens powders",
+  "competitors": [
+   "Bloom Nutrition",
+   "Huel",
+   "Ritual",
+   "Garden of Life",
+   "Amazing Grass"
+  ],
+  "stage": "pricing",
+  "concern": null,
+  "text": "Is AG1 at about $79 a month worth it versus a cheaper greens powder if I take it 5 days a week?",
+  "truth": {
+   "brands": [
+    "AG1"
+   ],
+   "statesPrice": true,
+   "moneyRemark": true,
+   "excludesClient": false
+  }
+ },
+ {
+  "id": "fleet043",
+  "tracker": "AG1",
+  "category": "greens powders",
+  "competitors": [
+   "Bloom Nutrition",
+   "Huel",
+   "Ritual",
+   "Garden of Life",
+   "Amazing Grass"
+  ],
+  "stage": "pricing",
+  "concern": null,
+  "text": "I spend about $60 a month on supplements already. Would one greens powder replace them, or cost more overall?",
+  "truth": {
+   "brands": [],
+   "statesPrice": false,
+   "moneyRemark": true,
+   "excludesClient": false
+  }
+ },
+ {
+  "id": "fleet044",
+  "tracker": "AG1",
+  "category": "greens powders",
+  "competitors": [
+   "Bloom Nutrition",
+   "Huel",
+   "Ritual",
+   "Garden of Life",
+   "Amazing Grass"
+  ],
+  "stage": "objections",
+  "concern": "Hype over substance",
+  "text": "Thinking about AG1, but it feels like influencer hype. Is there real evidence it does anything, or is that a fair worry?",
+  "truth": {
+   "brands": [
+    "AG1"
+   ],
+   "statesPrice": false,
+   "moneyRemark": false,
+   "excludesClient": false
+  }
+ },
+ {
+  "id": "fleet045",
+  "tracker": "AG1",
+  "category": "greens powders",
+  "competitors": [
+   "Bloom Nutrition",
+   "Huel",
+   "Ritual",
+   "Garden of Life",
+   "Amazing Grass"
+  ],
+  "stage": "objections",
+  "concern": "Taste",
+  "text": "Considering AG1 but I hear it tastes like grass clippings. True, or overblown?",
+  "truth": {
+   "brands": [
+    "AG1"
+   ],
+   "statesPrice": false,
+   "moneyRemark": false,
+   "excludesClient": false
+  }
+ },
+ {
+  "id": "fleet046",
+  "tracker": "AG1",
+  "category": "greens powders",
+  "competitors": [
+   "Bloom Nutrition",
+   "Huel",
+   "Ritual",
+   "Garden of Life",
+   "Amazing Grass"
+  ],
+  "stage": "feature_screening",
+  "concern": null,
+  "text": "Which greens powders are a single ingredient, just creatine and nothing else? Name a few.",
+  "truth": {
+   "brands": [],
+   "statesPrice": false,
+   "moneyRemark": false,
+   "excludesClient": true
+  }
+ },
+ {
+  "id": "fleet047",
+  "tracker": "AG1",
+  "category": "greens powders",
+  "competitors": [
+   "Bloom Nutrition",
+   "Huel",
+   "Ritual",
+   "Garden of Life",
+   "Amazing Grass"
+  ],
+  "stage": "feature_screening",
+  "concern": null,
+  "text": "Which greens powders come in single-serve travel packs and are NSF Certified for Sport? Name a few.",
+  "truth": {
+   "brands": [],
+   "statesPrice": false,
+   "moneyRemark": false,
+   "excludesClient": false
+  }
+ },
+ {
+  "id": "fleet048",
+  "tracker": "AG1",
+  "category": "greens powders",
+  "competitors": [
+   "Bloom Nutrition",
+   "Huel",
+   "Ritual",
+   "Garden of Life",
+   "Amazing Grass"
+  ],
+  "stage": "churn_triggers",
+  "concern": "Price creep",
+  "text": "AG1 keeps getting pricier and I'm not sure it's worth it anymore. Keep my subscription or cancel?",
+  "truth": {
+   "brands": [
+    "AG1"
+   ],
+   "statesPrice": false,
+   "moneyRemark": true,
+   "excludesClient": false
+  }
+ },
+ {
+  "id": "fleet049",
+  "tracker": "AG1",
+  "category": "greens powders",
+  "competitors": [
+   "Bloom Nutrition",
+   "Huel",
+   "Ritual",
+   "Garden of Life",
+   "Amazing Grass"
+  ],
+  "stage": "problem_recognition",
+  "concern": null,
+  "text": "I'm tired by 2pm and barely eat vegetables. How do people fix that without overhauling their whole diet?",
+  "truth": {
+   "brands": [],
+   "statesPrice": false,
+   "moneyRemark": false,
+   "excludesClient": false
+  }
+ },
+ {
+  "id": "fleet050",
+  "tracker": "AG1",
+  "category": "greens powders",
+  "competitors": [
+   "Bloom Nutrition",
+   "Huel",
+   "Ritual",
+   "Garden of Life",
+   "Amazing Grass"
+  ],
+  "stage": "social_validation",
+  "concern": null,
+  "text": "Which greens powders do runners actually swear by? Name a couple.",
+  "truth": {
+   "brands": [],
+   "statesPrice": false,
+   "moneyRemark": false,
+   "excludesClient": false
+  }
+ },
+ {
+  "id": "fleet051",
+  "tracker": "PwC",
+  "category": "professional services firms",
+  "competitors": [
+   "Deloitte",
+   "EY",
+   "KPMG",
+   "Accenture",
+   "McKinsey"
+  ],
+  "stage": "discovery",
+  "concern": null,
+  "text": "We need an audit partner for a mid-size manufacturer. Which professional services firms would you shortlist?",
+  "truth": {
+   "brands": [],
+   "statesPrice": false,
+   "moneyRemark": false,
+   "excludesClient": false
+  }
+ },
+ {
+  "id": "fleet052",
+  "tracker": "PwC",
+  "category": "professional services firms",
+  "competitors": [
+   "Deloitte",
+   "EY",
+   "KPMG",
+   "Accenture",
+   "McKinsey"
+  ],
+  "stage": "discovery",
+  "concern": null,
+  "text": "is pwc a good fit for a first audit after raising a series B, or which firms would you pick?",
+  "truth": {
+   "brands": [
+    "PwC"
+   ],
+   "statesPrice": false,
+   "moneyRemark": false,
+   "excludesClient": false
+  }
+ },
+ {
+  "id": "fleet053",
+  "tracker": "PwC",
+  "category": "professional services firms",
+  "competitors": [
+   "Deloitte",
+   "EY",
+   "KPMG",
+   "Accenture",
+   "McKinsey"
+  ],
+  "stage": "comparison",
+  "concern": null,
+  "text": "PwC or Deloitte for a SOX readiness project - which would you pick?",
+  "truth": {
+   "brands": [
+    "PwC",
+    "Deloitte"
+   ],
+   "statesPrice": false,
+   "moneyRemark": false,
+   "excludesClient": false
+  }
+ },
+ {
+  "id": "fleet054",
+  "tracker": "PwC",
+  "category": "professional services firms",
+  "competitors": [
+   "Deloitte",
+   "EY",
+   "KPMG",
+   "Accenture",
+   "McKinsey"
+  ],
+  "stage": "comparison",
+  "concern": null,
+  "text": "pwc vs kpmg for tax advisory, which one would you hire?",
+  "truth": {
+   "brands": [
+    "PwC",
+    "KPMG"
+   ],
+   "statesPrice": false,
+   "moneyRemark": false,
+   "excludesClient": false
+  }
+ },
+ {
+  "id": "fleet055",
+  "tracker": "PwC",
+  "category": "professional services firms",
+  "competitors": [
+   "Deloitte",
+   "EY",
+   "KPMG",
+   "Accenture",
+   "McKinsey"
+  ],
+  "stage": "shortlist",
+  "concern": null,
+  "text": "Name 3 professional services firms for a data migration. Not interested in accenture.",
+  "truth": {
+   "brands": [
+    "Accenture"
+   ],
+   "statesPrice": false,
+   "moneyRemark": false,
+   "excludesClient": false
+  }
+ },
+ {
+  "id": "fleet056",
+  "tracker": "PwC",
+  "category": "professional services firms",
+  "competitors": [
+   "Deloitte",
+   "EY",
+   "KPMG",
+   "Accenture",
+   "McKinsey"
+  ],
+  "stage": "discovery",
+  "concern": null,
+  "text": "Hey, quick one: which professional services firms do growing fintechs use for audits?",
+  "truth": {
+   "brands": [],
+   "statesPrice": false,
+   "moneyRemark": false,
+   "excludesClient": false
+  }
+ },
+ {
+  "id": "fleet057",
+  "tracker": "PwC",
+  "category": "professional services firms",
+  "competitors": [
+   "Deloitte",
+   "EY",
+   "KPMG",
+   "Accenture",
+   "McKinsey"
+  ],
+  "stage": "discovery",
+  "concern": null,
+  "text": "Would EY be the strongest for transfer pricing, or which professional services firms would you pick?",
+  "truth": {
+   "brands": [
+    "EY"
+   ],
+   "statesPrice": false,
+   "moneyRemark": false,
+   "excludesClient": false
+  }
+ },
+ {
+  "id": "fleet058",
+  "tracker": "PwC",
+  "category": "professional services firms",
+  "competitors": [
+   "Deloitte",
+   "EY",
+   "KPMG",
+   "Accenture",
+   "McKinsey"
+  ],
+  "stage": "pricing",
+  "concern": null,
+  "text": "Is a Big Four audit at roughly $400k worth it over a mid-tier firm for a company our size?",
+  "truth": {
+   "brands": [],
+   "statesPrice": true,
+   "moneyRemark": true,
+   "excludesClient": false
+  }
+ },
+ {
+  "id": "fleet059",
+  "tracker": "PwC",
+  "category": "professional services firms",
+  "competitors": [
+   "Deloitte",
+   "EY",
+   "KPMG",
+   "Accenture",
+   "McKinsey"
+  ],
+  "stage": "pricing",
+  "concern": null,
+  "text": "Our current auditor billed us about $180k last year. Would switching to a bigger firm cost more than it saves in investor confidence?",
+  "truth": {
+   "brands": [],
+   "statesPrice": false,
+   "moneyRemark": true,
+   "excludesClient": false
+  }
+ },
+ {
+  "id": "fleet060",
+  "tracker": "PwC",
+  "category": "professional services firms",
+  "competitors": [
+   "Deloitte",
+   "EY",
+   "KPMG",
+   "Accenture",
+   "McKinsey"
+  ],
+  "stage": "objections",
+  "concern": "Junior staffing",
+  "text": "Thinking about PwC, but I hear the work gets pushed to junior staff. Is that real, or a myth?",
+  "truth": {
+   "brands": [
+    "PwC"
+   ],
+   "statesPrice": false,
+   "moneyRemark": false,
+   "excludesClient": false
+  }
+ },
+ {
+  "id": "fleet061",
+  "tracker": "PwC",
+  "category": "professional services firms",
+  "competitors": [
+   "Deloitte",
+   "EY",
+   "KPMG",
+   "Accenture",
+   "McKinsey"
+  ],
+  "stage": "feature_screening",
+  "concern": null,
+  "text": "Which professional services firms can also give us formal legal opinions as a licensed US law firm? Name a few.",
+  "truth": {
+   "brands": [],
+   "statesPrice": false,
+   "moneyRemark": false,
+   "excludesClient": true
+  }
+ },
+ {
+  "id": "fleet062",
+  "tracker": "PwC",
+  "category": "professional services firms",
+  "competitors": [
+   "Deloitte",
+   "EY",
+   "KPMG",
+   "Accenture",
+   "McKinsey"
+  ],
+  "stage": "use_case",
+  "concern": null,
+  "text": "We're a 300-person SaaS company preparing for an IPO. Which professional services firms would you pick?",
+  "truth": {
+   "brands": [],
+   "statesPrice": false,
+   "moneyRemark": false,
+   "excludesClient": false
+  }
+ },
+ {
+  "id": "fleet063",
+  "tracker": "PwC",
+  "category": "professional services firms",
+  "competitors": [
+   "Deloitte",
+   "EY",
+   "KPMG",
+   "Accenture",
+   "McKinsey"
+  ],
+  "stage": "alternatives",
+  "concern": null,
+  "text": "We're moving off McKinsey for strategy work. Which professional services firms should we look at?",
+  "truth": {
+   "brands": [
+    "McKinsey"
+   ],
+   "statesPrice": false,
+   "moneyRemark": false,
+   "excludesClient": false
+  }
+ },
+ {
+  "id": "fleet064",
+  "tracker": "PwC",
+  "category": "professional services firms",
+  "competitors": [
+   "Deloitte",
+   "EY",
+   "KPMG",
+   "Accenture",
+   "McKinsey"
+  ],
+  "stage": "churn_triggers",
+  "concern": "Rising fees",
+  "text": "Our PwC fees keep climbing every year. Stick with them or switch firms?",
+  "truth": {
+   "brands": [
+    "PwC"
+   ],
+   "statesPrice": false,
+   "moneyRemark": true,
+   "excludesClient": false
+  }
+ },
+ {
+  "id": "fleet065",
+  "tracker": "athenahealth",
+  "category": "electronic health records",
+  "competitors": [
+   "Epic",
+   "Oracle Health",
+   "eClinicalWorks",
+   "NextGen",
+   "Practice Fusion"
+  ],
+  "stage": "discovery",
+  "concern": null,
+  "text": "That was an epic fail of a go-live at my last clinic. Which electronic health records are easiest to roll out?",
+  "truth": {
+   "brands": [],
+   "statesPrice": false,
+   "moneyRemark": false,
+   "excludesClient": false
+  }
+ },
+ {
+  "id": "fleet066",
+  "tracker": "athenahealth",
+  "category": "electronic health records",
+  "competitors": [
+   "Epic",
+   "Oracle Health",
+   "eClinicalWorks",
+   "NextGen",
+   "Practice Fusion"
+  ],
+  "stage": "discovery",
+  "concern": null,
+  "text": "is epic overkill for a 6-doctor practice, or which EHRs would you pick?",
+  "truth": {
+   "brands": [
+    "Epic"
+   ],
+   "statesPrice": false,
+   "moneyRemark": false,
+   "excludesClient": false
+  }
+ },
+ {
+  "id": "fleet067",
+  "tracker": "athenahealth",
+  "category": "electronic health records",
+  "competitors": [
+   "Epic",
+   "Oracle Health",
+   "eClinicalWorks",
+   "NextGen",
+   "Practice Fusion"
+  ],
+  "stage": "discovery",
+  "concern": null,
+  "text": "We need something like an oracle for prior auths. Which electronic health records handle that best?",
+  "truth": {
+   "brands": [],
+   "statesPrice": false,
+   "moneyRemark": false,
+   "excludesClient": false
+  }
+ },
+ {
+  "id": "fleet068",
+  "tracker": "athenahealth",
+  "category": "electronic health records",
+  "competitors": [
+   "Epic",
+   "Oracle Health",
+   "eClinicalWorks",
+   "NextGen",
+   "Practice Fusion"
+  ],
+  "stage": "comparison",
+  "concern": null,
+  "text": "athenahealth or eClinicalWorks for a small primary care practice - which would you pick?",
+  "truth": {
+   "brands": [
+    "athenahealth",
+    "eClinicalWorks"
+   ],
+   "statesPrice": false,
+   "moneyRemark": false,
+   "excludesClient": false
+  }
+ },
+ {
+  "id": "fleet069",
+  "tracker": "athenahealth",
+  "category": "electronic health records",
+  "competitors": [
+   "Epic",
+   "Oracle Health",
+   "eClinicalWorks",
+   "NextGen",
+   "Practice Fusion"
+  ],
+  "stage": "comparison",
+  "concern": null,
+  "text": "athena vs nextgen for orthopedics, which would you go with?",
+  "truth": {
+   "brands": [
+    "athenahealth",
+    "NextGen"
+   ],
+   "statesPrice": false,
+   "moneyRemark": false,
+   "excludesClient": false
+  }
+ },
+ {
+  "id": "fleet070",
+  "tracker": "athenahealth",
+  "category": "electronic health records",
+  "competitors": [
+   "Epic",
+   "Oracle Health",
+   "eClinicalWorks",
+   "NextGen",
+   "Practice Fusion"
+  ],
+  "stage": "comparison",
+  "concern": null,
+  "text": "Athenahealth or Epic for a growing multi-site group - which would you choose?",
+  "truth": {
+   "brands": [
+    "athenahealth",
+    "Epic"
+   ],
+   "statesPrice": false,
+   "moneyRemark": false,
+   "excludesClient": false
+  }
+ },
+ {
+  "id": "fleet071",
+  "tracker": "athenahealth",
+  "category": "electronic health records",
+  "competitors": [
+   "Epic",
+   "Oracle Health",
+   "eClinicalWorks",
+   "NextGen",
+   "Practice Fusion"
+  ],
+  "stage": "shortlist",
+  "concern": null,
+  "text": "Name 3 electronic health records for behavioral health. Not Practice Fusion.",
+  "truth": {
+   "brands": [
+    "Practice Fusion"
+   ],
+   "statesPrice": false,
+   "moneyRemark": false,
+   "excludesClient": false
+  }
+ },
+ {
+  "id": "fleet072",
+  "tracker": "athenahealth",
+  "category": "electronic health records",
+  "competitors": [
+   "Epic",
+   "Oracle Health",
+   "eClinicalWorks",
+   "NextGen",
+   "Practice Fusion"
+  ],
+  "stage": "pricing",
+  "concern": null,
+  "text": "Is athenaOne at about 7% of collections worth it over a flat per-provider EHR for a practice doing $2M a year?",
+  "truth": {
+   "brands": [
+    "athenahealth"
+   ],
+   "statesPrice": true,
+   "moneyRemark": true,
+   "excludesClient": false
+  }
+ },
+ {
+  "id": "fleet073",
+  "tracker": "athenahealth",
+  "category": "electronic health records",
+  "competitors": [
+   "Epic",
+   "Oracle Health",
+   "eClinicalWorks",
+   "NextGen",
+   "Practice Fusion"
+  ],
+  "stage": "pricing",
+  "concern": null,
+  "text": "We pay about $900 per provider a month for our EHR now. Would a percentage-of-collections model cost us more?",
+  "truth": {
+   "brands": [],
+   "statesPrice": false,
+   "moneyRemark": true,
+   "excludesClient": false
+  }
+ },
+ {
+  "id": "fleet074",
+  "tracker": "athenahealth",
+  "category": "electronic health records",
+  "competitors": [
+   "Epic",
+   "Oracle Health",
+   "eClinicalWorks",
+   "NextGen",
+   "Practice Fusion"
+  ],
+  "stage": "objections",
+  "concern": "Billing support quality",
+  "text": "Thinking about athenahealth, but I hear their billing support is slow. Fair worry, or outdated?",
+  "truth": {
+   "brands": [
+    "athenahealth"
+   ],
+   "statesPrice": false,
+   "moneyRemark": false,
+   "excludesClient": false
+  }
+ },
+ {
+  "id": "fleet075",
+  "tracker": "athenahealth",
+  "category": "electronic health records",
+  "competitors": [
+   "Epic",
+   "Oracle Health",
+   "eClinicalWorks",
+   "NextGen",
+   "Practice Fusion"
+  ],
+  "stage": "feature_screening",
+  "concern": null,
+  "text": "Which electronic health records can run fully on-premise on our own servers with no cloud at all? Name a few.",
+  "truth": {
+   "brands": [],
+   "statesPrice": false,
+   "moneyRemark": false,
+   "excludesClient": true
+  }
+ },
+ {
+  "id": "fleet076",
+  "tracker": "athenahealth",
+  "category": "electronic health records",
+  "competitors": [
+   "Epic",
+   "Oracle Health",
+   "eClinicalWorks",
+   "NextGen",
+   "Practice Fusion"
+  ],
+  "stage": "feature_screening",
+  "concern": null,
+  "text": "Which electronic health records include built-in patient texting and online check-in? Name a few worth a look.",
+  "truth": {
+   "brands": [],
+   "statesPrice": false,
+   "moneyRemark": false,
+   "excludesClient": false
+  }
+ },
+ {
+  "id": "fleet077",
+  "tracker": "athenahealth",
+  "category": "electronic health records",
+  "competitors": [
+   "Epic",
+   "Oracle Health",
+   "eClinicalWorks",
+   "NextGen",
+   "Practice Fusion"
+  ],
+  "stage": "discovery",
+  "concern": null,
+  "text": "Would Oracle Health make sense for a small clinic, or which EHRs would you pick?",
+  "truth": {
+   "brands": [
+    "Oracle Health"
+   ],
+   "statesPrice": false,
+   "moneyRemark": false,
+   "excludesClient": false
+  }
+ },
+ {
+  "id": "fleet078",
+  "tracker": "athenahealth",
+  "category": "electronic health records",
+  "competitors": [
+   "Epic",
+   "Oracle Health",
+   "eClinicalWorks",
+   "NextGen",
+   "Practice Fusion"
+  ],
+  "stage": "churn_triggers",
+  "concern": "Downtime",
+  "text": "athenahealth went down twice this month and it's wasting money in lost visits. Keep it or switch?",
+  "truth": {
+   "brands": [
+    "athenahealth"
+   ],
+   "statesPrice": false,
+   "moneyRemark": true,
+   "excludesClient": false
+  }
+ },
+ {
+  "id": "fleet079",
+  "tracker": "athenahealth",
+  "category": "electronic health records",
+  "competitors": [
+   "Epic",
+   "Oracle Health",
+   "eClinicalWorks",
+   "NextGen",
+   "Practice Fusion"
+  ],
+  "stage": "problem_recognition",
+  "concern": null,
+  "text": "Our front desk spends hours on paper intake and insurance checks. How do practices usually fix this?",
+  "truth": {
+   "brands": [],
+   "statesPrice": false,
+   "moneyRemark": false,
+   "excludesClient": false
+  }
+ },
+ {
+  "id": "fleet080",
+  "tracker": "athenahealth",
+  "category": "electronic health records",
+  "competitors": [
+   "Epic",
+   "Oracle Health",
+   "eClinicalWorks",
+   "NextGen",
+   "Practice Fusion"
+  ],
+  "stage": "use_case",
+  "concern": null,
+  "text": "Opening a 3-provider pediatric practice next spring. Which electronic health records would you pick?",
+  "truth": {
+   "brands": [],
+   "statesPrice": false,
+   "moneyRemark": false,
+   "excludesClient": false
+  }
+ }
+]
