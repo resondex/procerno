@@ -1632,6 +1632,9 @@ interface RoomCheckUi {
   capability?: boolean;
   platformSwitch?: boolean;
   noChoice?: boolean;
+  /** Other rooms in the checked set that ask this room's question. */
+  sameAs?: string[];
+  decides?: string;
 }
 
 export function ScenariosGate({
@@ -1771,13 +1774,19 @@ export function ScenariosGate({
     return () => clearTimeout(t);
   }, [checkSig, setupId, editingRoom]);
   /** Every flag a room's check raised, worst first; empty when it passes. */
+  const tickedLabels = new Set(active.map((r) => r.label.trim()));
   const roomFlags = (c: RoomCheckUi): { text: string; title: string }[] => {
     const who = c.contenders.length > 0 ? c.contenders.join(", ") : "none of your rivals";
     const out: { text: string; title: string }[] = [];
     if (c.names.length > 0)
       out.push({ text: `Names ${c.names.join(", ")}`, title: "Describe the buyer's situation - a room that names a brand answers its own questions." });
     if (c.capability)
-      out.push({ text: "A feature, not a situation", title: "This reads as a product feature being adopted, not a buyer's situation - every question in its column would ask about that one feature." });
+      out.push({ text: "A feature, not a situation", title: "This buyer is defined by what they value in the product, not by their situation - every question in its column would ask about that one thing." });
+    // Same question as a TICKED room only - duplicating a reserve or
+    // unticked room costs nothing.
+    const dupes = (c.sameAs ?? []).filter((l) => tickedLabels.has(l.trim()) && l.trim() !== c.label.trim());
+    if (dupes.length > 0)
+      out.push({ text: `Asks the same question as ${dupes.join(", ")}`, title: `Both rooms come down to the same decisive factor${c.decides ? ` (${c.decides})` : ""} and favor the same brands - a second column measures nothing new. Swap one for a room with its own answer.` });
     if (c.noChoice)
       out.push({ text: "No real choice made here", title: "The buyer here barely chooses (a default, an auto-renew, whatever is in stock) - there is little for an answer to steer." });
     if (c.platformSwitch)

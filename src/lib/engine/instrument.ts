@@ -895,7 +895,14 @@ export async function readScenarios(input: {
   // 19 (2026-10-03, room walk v7): the buyer is actively choosing between
   // products (no-choice rooms rose once the active-choice examples were
   // gone), and labels are sentence case.
-  const key = cacheKey("scenarios_journeys19", [
+  // 20 (2026-10-04): a room earns its column only if it changes the answer -
+  // two rooms whose buyer would get the same advice are one question asked
+  // twice, whatever the trigger or moment (fresh draws for one brand spent
+  // every core slot on trigger rooms with one answer). Asking the read to
+  // LABEL each room's decisive factor was tried the same day and reverted:
+  // the schema field steered the writer to preference-shaped rooms on every
+  // brand. The same-answer pass (checkRooms) is the enforcement.
+  const key = cacheKey("scenarios_journeys20", [
     input.category, input.audience, input.forBrand ?? "",
   ]);
   const read = await coalesced<{
@@ -948,7 +955,10 @@ export async function readScenarios(input: {
           "that names something the product does, rather than something " +
           "happening to the buyer, is a capability). Spend the " +
           "slots on DIFFERENT axes of circumstance (scale, composition, " +
-          "constraint, occasion, recipient), not variants of one.\n" +
+          "constraint, occasion, recipient), not variants of one. Two rooms " +
+          "whose buyers would get the SAME advice are one question asked " +
+          "twice, whatever the trigger or moment that brought each buyer " +
+          "there; the second never earns a core slot.\n" +
           "2) per scenario, deviates: true ONLY if that scenario's buyer " +
           "DECIDES BY A DIFFERENT PROCESS than the base - differing on " +
           "involvement, verifiability, think_feel, or decision_unit. " +
@@ -972,7 +982,8 @@ export async function readScenarios(input: {
           "brand has to win, vivid enough that a strategist would present " +
           "it by name: a concrete moment, each core room on a different " +
           "axis, each changing what an advisor recommends, none a " +
-          "demographic. Your market's rooms come from your market.\n" +
+          "demographic, no two core rooms with the same answer. Your " +
+          "market's rooms come from your market.\n" +
           "Before returning, audit the core four for coverage: rank this " +
           "market's buying rooms by how much revenue moves through them, " +
           "ensuring a diverse sampling, and check none of the biggest is " +
@@ -1209,7 +1220,11 @@ export async function nearScenarios(input: {
   // headline label naming the adjusted angle, not the original label with
   // a sentence change; and adjustments stay circumstance-shaped (the room
   // rule: no feature emphasis like "low-light photos").
-  const key = cacheKey("scenario_near_pool8", [
+  // pool9 (2026-10-04, Tyler): a variant REPLACES one detail, never adds
+  // one - pool8 came back as the original plus a qualifier. Rule in the
+  // prompt plus a mechanical guard: a variant whose words contain all of
+  // the original's is an addition and is dropped.
+  const key = cacheKey("scenario_near_pool9", [
     input.category, input.audience, input.of.label, input.of.description, avoid.join("|"),
   ]);
   const hit = await store.cacheGet(key, CACHE_TTL_MS);
@@ -1228,12 +1243,17 @@ export async function nearScenarios(input: {
           "Propose exactly THREE near variants of a given buyer situation " +
           "for a research instrument. A near variant is the SAME buyer with " +
           "the SAME need, adjusted - not a new buyer, persona or occasion. " +
-          "Keep the original's wording and change ONE part of the " +
-          "circumstance: a tighter or looser constraint, a different timing " +
-          "or setting, a different scale, or who else is involved - never a " +
-          "list of wanted features. Give each variant its OWN label: a " +
-          "slight change of the original headline that names the adjusted " +
-          "angle, never the original label unchanged. Change a different part per " +
+          "Keep the original's wording and REPLACE one part of the " +
+          "circumstance with a different one: a tighter or looser constraint " +
+          "in place of the original's, a different timing or setting in place " +
+          "of the original's, a different scale, or someone else involved " +
+          "instead - never a list of wanted features. Never ADD a detail: the " +
+          "variant has the same number of details as the original and about " +
+          "the same length; the original's sentence with a qualifier tacked " +
+          "on is not a variant. Give each variant its OWN label: a slight " +
+          "change of the original headline that names the adjusted angle, " +
+          "never the original label unchanged and never the original label " +
+          "with words added. Change a different part per " +
           "variant and order them closest-first. Each " +
           "variant should shift what an advisor would emphasize, differ " +
           "from the others and from everything already listed, and stay " +
@@ -1268,10 +1288,18 @@ export async function nearScenarios(input: {
   const ofKey = `${norm(input.of.label)}|${norm(input.of.description)}`;
   const listed = new Set(avoid.filter((l) => l !== norm(input.of.label)));
   const seen = new Set<string>([ofKey]);
+  // Addition guard: a variant that keeps every content word of the
+  // original (label or description) only tacked something on.
+  const content = (t: string) => new Set([...norm(t).matchAll(/[a-z0-9']+/g)].map((m) => m[0]).filter((w) => w.length > 2));
+  const isAddition = (orig: string, v: string) => {
+    const o = content(orig); const w = content(v);
+    return o.size > 0 && [...o].every((x) => w.has(x)) && w.size > o.size;
+  };
   const pool: Situation[] = [];
   for (const s of parsed.situations ?? []) {
     const k = `${norm(s.label)}|${norm(s.description)}`;
     if (!s.label.trim() || seen.has(k) || listed.has(norm(s.label))) continue;
+    if (isAddition(input.of.label, s.label) || isAddition(input.of.description, s.description)) continue;
     seen.add(k);
     pool.push({ label: roomLabel(humanize(s.label.trim())), description: humanize(s.description.trim()) });
     if (pool.length === 3) break;
@@ -1712,7 +1740,10 @@ export async function reviewScenarioFit(input: {
   // scenario_fit10 (2026-10-04, Tyler): the advisory sees the study
   // audience and never suggests a room for a different kind of buyer (it
   // never got the audience, and offered Pixel a corporate procurement room).
-  const key = cacheKey("scenario_fit10", [
+  // scenario_fit11 (2026-10-04): a missing room is never a buyer defined by
+  // what they value in the product - that is the brand's selling point
+  // wearing a buyer (the Pixel camera suggestion).
+  const key = cacheKey("scenario_fit11", [
     input.brand, input.category, input.audience ?? "",
     input.scenarios.map((s) => `${s.label.trim()}|${s.description.trim()}`).join("~"),
   ]);
@@ -1742,7 +1773,10 @@ export async function reviewScenarioFit(input: {
           "features they want, with a buyer actively choosing between " +
           "products (never one who rebuys or renews without comparing). Never name " +
           "the brand or any product, and never build the room from the " +
-          "brand's own selling points; the room must be one the brand's " +
+          "brand's own selling points - a buyer defined by what they value " +
+          "in the product (a capability, quality or priority the brand is " +
+          "known for) is the brand's pitch wearing a buyer, not a room; the " +
+          "room must be one the brand's " +
           "rivals compete in too. A room the brand serves with a product in " +
           "a DIFFERENT category (a separate product line sold to a " +
           "different kind of buyer) is not a missing core room for this " +
@@ -1859,6 +1893,12 @@ export interface RoomCheck {
    * any direction its seeds must state locks a leading brand out
    * (Pixel's "Cross-ecosystem switcher"). */
   platformSwitch: boolean;
+  /** Same-answer pass (2026-10-04): labels of OTHER rooms in the checked
+   * set that ask this room's question - same decisive factor, same
+   * favored contenders. Empty when the room's answer is its own. */
+  sameAs: string[];
+  /** The decisive factor the pass read for this room (display/debug). */
+  decides?: string;
 }
 
 /**
@@ -1898,14 +1938,117 @@ const roomJudgedFail = (c: RoomCheck) =>
  * chips and contest repair read the same result).
  */
 export async function checkRooms(input: RoomCheckInput): Promise<RoomCheck[]> {
-  const first = await checkRoomsPass(input, 1);
+  const [first, same] = await Promise.all([
+    checkRoomsPass(input, 1),
+    sameAnswerRooms(input).catch((err) => {
+      console.error("same-answer pass failed open:", err);
+      return new Map<string, { sameAs: string[]; decides: string }>();
+    }),
+  ]);
+  const withSame = (c: RoomCheck): RoomCheck => {
+    const v = same.get(c.label);
+    return v ? { ...c, sameAs: v.sameAs, decides: v.decides } : c;
+  };
   const failing = first.filter(roomJudgedFail).map((c) => c.label);
-  if (failing.length === 0) return first;
+  if (failing.length === 0) return first.map(withSame);
   const second = await checkRoomsPass(
     { ...input, rooms: input.rooms.filter((r) => failing.includes(r.label)) }, 2,
   ).catch(() => [] as RoomCheck[]);
   const passed = new Map(second.filter((c) => !roomJudgedFail(c)).map((c) => [c.label, c]));
-  return first.map((c) => passed.get(c.label) ?? c);
+  return first.map((c) => withSame(passed.get(c.label) ?? c));
+}
+
+/**
+ * Same-answer pass (2026-10-04): a room earns a column only if it changes
+ * what a competent advisor recommends. One call over the whole set reads,
+ * per room, the decisive factor and the contenders it favors, and groups
+ * rooms that ask the same question. A group is accepted only when its
+ * members' favored sets agree (a mechanical guard on the judgment).
+ * Cached on the set, order-independent. Fails open to no groups.
+ */
+async function sameAnswerRooms(input: RoomCheckInput): Promise<Map<string, { sameAs: string[]; decides: string }>> {
+  const out = new Map<string, { sameAs: string[]; decides: string }>();
+  const rooms = input.rooms.filter((r) => r.label.trim());
+  if (rooms.length < 2) return out;
+  tagCosts({ purpose: "setup:room_same" });
+  const rivals = [...new Set(input.rivals.map((r) => r.trim()).filter(Boolean))];
+  const names = [input.brand, ...rivals];
+  const sorted = [...rooms].sort((a, b) => a.label.localeCompare(b.label));
+  // room_same2 (2026-10-04): framed on the ADVISOR's answer - the shortlist
+  // and the attribute that ranks it - with shortlist agreement as the
+  // mechanical guard. same1 asked for "the decisive factor" and the model
+  // echoed each room's trigger ("discounted now", "need it today"), so
+  // four trigger rooms with one answer grouped as nothing.
+  // room_same3 (2026-10-04): a group also forms MECHANICALLY when two rooms
+  // carry the identical top-two shortlist and the identical why string -
+  // on the five brands' sets the model wrote the same why verbatim for
+  // true duplicates (two "fast setup" rooms, two "breadth of content
+  // library" rooms) while leaving its groups list empty.
+  const key = cacheKey("room_same3", [
+    DESIGN_CHECK_MODEL, input.category, names.map((x) => x.toLowerCase()).sort().join(","),
+    sorted.map((r) => `${r.label.trim()}|${r.description.trim()}`).join("~"),
+  ]);
+  type Verdict = { decides: Record<string, string>; groups: string[][] };
+  let v: Verdict | null = null;
+  try {
+    const hit = await store.cacheGet(key, CACHE_TTL_MS);
+    if (hit) v = JSON.parse(hit) as Verdict;
+  } catch { /* re-judge */ }
+  if (!v) {
+    const a = await anthropicClient();
+    const res = await a.messages.create({
+      model: DESIGN_CHECK_MODEL,
+      max_tokens: 1500,
+      output_config: { effort: DESIGN_CHECK_EFFORT },
+      system:
+        `Each buying room below is a buyer occasion in the ${input.category} market. A room earns a place in a research instrument only if it changes the ANSWER a competent advisor gives. Put yourself in the advisor's seat for each room and give:\n` +
+        `- shortlist: the 2 or 3 brands the advisor would put in front of that buyer, best first, from exactly these names - ${names.join(", ")}.\n` +
+        `- why: the ONE product attribute the advisor ranks that shortlist on for this buyer (what makes the first pick first), a short phrase. The buyer's trigger or moment is not a why.\n` +
+        `Then list groups: sets of rooms (by number) where the advisor would give the SAME shortlist for the SAME why - the buyers arrived differently, but the advice is one answer. Rooms with a different why are different questions even when the shortlist matches (the room changes the reason, and the reason is what the instrument measures). Rooms with a different shortlist are different questions. Most sets have no groups; some have one.\n` +
+        `Reply with ONLY JSON: {"rooms": [{"shortlist": [...], "why": "..."}, ...], "groups": [[1, 3], ...]} - one rooms entry per room, in order.`,
+      messages: [{
+        role: "user",
+        content: sorted.map((r, k) => `${k + 1}. ${r.label}: ${r.description}`).join("\n"),
+      }],
+    } as never);
+    const text = (res as { content: { type: string; text?: string }[] }).content
+      .filter((b) => b.type === "text").map((b) => b.text ?? "").join("").trim();
+    const j = JSON.parse(firstJsonObject(text) ?? text) as { rooms?: { shortlist?: string[]; why?: string }[]; groups?: number[][] };
+    // Guard: group members must share their top-two shortlist (as a set).
+    const tiltOf = (k: number) => new Set((j.rooms?.[k]?.shortlist ?? []).slice(0, 2).map((t) => matchKey(String(t))).filter(Boolean));
+    const agree = (x: Set<string>, y: Set<string>) => {
+      if (x.size === 0 || y.size === 0) return x.size === y.size;
+      return [...x].every((t) => y.has(t)) && [...y].every((t) => x.has(t));
+    };
+    const groups: string[][] = [];
+    const whyOf = (k: number) => String(j.rooms?.[k]?.why ?? "").trim().toLowerCase().replace(/[^a-z0-9 ]+/g, " ").replace(/\s+/g, " ");
+    const byAnswer = new Map<string, number[]>();
+    sorted.forEach((_, k) => {
+      const t = [...tiltOf(k)].sort().join("|");
+      const w = whyOf(k);
+      if (!t || !w) return;
+      const a = `${t}~${w}`;
+      byAnswer.set(a, [...(byAnswer.get(a) ?? []), k]);
+    });
+    for (const idx of byAnswer.values()) if (idx.length >= 2) groups.push(idx.map((n) => sorted[n].label));
+    for (const g of j.groups ?? []) {
+      const idx = [...new Set(g.map((n) => Number(n) - 1).filter((n) => Number.isInteger(n) && n >= 0 && n < sorted.length))];
+      if (idx.length < 2) continue;
+      // Keep only members whose tilt agrees with the group's first member.
+      const kept = idx.filter((n, i) => i === 0 || agree(tiltOf(idx[0]), tiltOf(n)));
+      if (kept.length >= 2) groups.push(kept.map((n) => sorted[n].label));
+    }
+    v = {
+      decides: Object.fromEntries(sorted.map((r, k) => [r.label, humanize(`${(j.rooms?.[k]?.shortlist ?? []).slice(0, 2).join(", ")} - ${String(j.rooms?.[k]?.why ?? "")}`).slice(0, 120)])),
+      groups,
+    };
+    await store.cacheSet(key, JSON.stringify(v), stampOf(input)).catch(() => {});
+  }
+  for (const r of sorted) {
+    const sameAs = v.groups.filter((g) => g.includes(r.label)).flat().filter((l) => l !== r.label);
+    out.set(r.label, { sameAs: [...new Set(sameAs)], decides: v.decides[r.label] ?? "" });
+  }
+  return out;
 }
 
 async function checkRoomsPass(input: RoomCheckInput, pass: number): Promise<RoomCheck[]> {
@@ -1926,7 +2069,13 @@ async function checkRoomsPass(input: RoomCheckInput, pass: number): Promise<Room
   } catch { /* fail open: unjudged hits count as named */ }
   const namesOf = (r: Situation) =>
     [input.brand, ...rivals].filter((b) => textNamesBrand(roomText(r), b));
-  const keyOf = (r: Situation) => cacheKey("room_check5", [
+  // room_check7 (2026-10-04): capability also covers a room that gives NO
+  // buyer situation at all, only what they want from the product (check6's
+  // "defined by what they value" fired on every room with a preference -
+  // Netflix's kids room, AmEx's balance transfer - and churned the settled
+  // sets); platformSwitch needs a stated or implied direction - openness
+  // is not a switch; choosing quickly is still choosing.
+  const keyOf = (r: Situation) => cacheKey("room_check7", [
     DESIGN_CHECK_MODEL, input.brand, input.category, [...rivals].map((x) => x.toLowerCase()).sort().join(","),
     `${r.label.trim()}|${r.description.trim()}`,
     ...(pass > 1 ? [`pass${pass}`] : []),
@@ -1951,9 +2100,9 @@ async function checkRoomsPass(input: RoomCheckInput, pass: number): Promise<Room
           `Each buying room below is a buyer occasion in the ${input.category} market. For each room give:\n` +
           `- contenders: which of these brands are plausible contenders for that room's buyer - ${rivals.join(", ")} - names exactly as given. A brand contends when a buyer in that room would reasonably consider it; it need not be the favorite.\n` +
           `- pitch: if the room's wording borrows ONE specific brand's own selling-point vocabulary (its signature feature names, taglines or platform labels) instead of the buyer's outcome language, quote that phrase; otherwise an empty string. Buyer outcomes every contender speaks to are not pitch.\n` +
-          `- capability: true when the room is a product capability or feature being adopted rather than a buyer's circumstance (who they are and what situation they are in).\n` +
-          `- platformSwitch: true when the room is about switching between competing platforms or ecosystems - any direction a question must state rules a leading brand out. Moving off an old or homegrown solution is NOT a platform switch.\n` +
-          `- noChoice: true when the room's buyer makes no real choice between products - accepting the next model by default without comparing - so there is nothing for an answer to steer.\n` +
+          `- capability: true when the room is a product capability or feature being adopted rather than a buyer's circumstance, OR when the room gives no buyer situation at all - nothing about who they are or what is happening to them, only what they want from the product. A room that states a situation is a situation, whatever its buyer prefers or weighs; wanting something is not a capability.\n` +
+          `- platformSwitch: true ONLY when the room states or implies a DIRECTION between competing platforms or ecosystems (from one to another) - a direction a question must state rules a leading brand out. A buyer who has stayed with one maker or platform and is not committed to it this time is openness, not a switch. Moving off an old or homegrown solution is NOT a platform switch.\n` +
+          `- noChoice: true when the room's buyer makes no real choice between products - accepting the next model by default without comparing - so there is nothing for an answer to steer. Choosing quickly, or under time pressure, is still choosing.\n` +
           `Reply with ONLY JSON: {"rooms": [{"contenders": [...], "pitch": "...", "capability": false, "platformSwitch": false, "noChoice": false}, ...]} - one entry per room, in order.`,
         messages: [{
           role: "user",
@@ -2014,7 +2163,7 @@ async function checkRoomsPass(input: RoomCheckInput, pass: number): Promise<Room
   return rooms.flatMap((r, i) => {
     const v = verdicts.get(i);
     const names = namesOf(r);
-    if (!v && rivals.length > 0) return names.length > 0 ? [{ label: r.label, contenders: [], rivals: rivals.length, inPool: 0, pool: rivals.length, contested: true, pitch: "", names, capability: false, platformSwitch: false, noChoice: false }] : [];
+    if (!v && rivals.length > 0) return names.length > 0 ? [{ label: r.label, contenders: [], rivals: rivals.length, inPool: 0, pool: rivals.length, contested: true, pitch: "", names, capability: false, platformSwitch: false, noChoice: false, sameAs: [] }] : [];
     const contenders = v?.contenders ?? [];
     const picks = (input.picks ?? []).filter((p) => rivals.includes(p));
     const pool = picks.length > 0 ? picks.length : rivals.length;
@@ -2028,7 +2177,7 @@ async function checkRoomsPass(input: RoomCheckInput, pass: number): Promise<Room
     // "Scoops" flag quoted a Tostitos line the room never mentioned).
     const pitchRaw = (v?.pitch ?? "").trim().replace(/^["']|["']$/g, "");
     const pitch = pitchRaw && roomText(r).toLowerCase().includes(pitchRaw.toLowerCase()) ? pitchRaw : "";
-    return [{ label: r.label, contenders, rivals: rivals.length, inPool, pool, contested, pitch, names, capability: v?.capability === true, platformSwitch: v?.platformSwitch === true, noChoice: v?.noChoice === true }];
+    return [{ label: r.label, contenders, rivals: rivals.length, inPool, pool, contested, pitch, names, capability: v?.capability === true, platformSwitch: v?.platformSwitch === true, noChoice: v?.noChoice === true, sameAs: [] }];
   });
 }
 
@@ -2063,15 +2212,30 @@ export async function contestRoomSet(input: {
   const roomWords = (r: ScenarioSpec) => wordSet(`${r.label} ${r.description}`);
   const tooClose = (r: ScenarioSpec, keep: ScenarioSpec[]) =>
     keep.some((k) => jaccard(roomWords(r), roomWords(k)) >= 0.3);
-  scenarios.forEach((s, i) => {
-    if (!by.has(s.label) || passes(s)) return;
+  // A replacement must not ask a question a staying room already asks
+  // (same-answer pass), nor near-duplicate its wording.
+  const sameQuestion = (r: ScenarioSpec, keep: ScenarioSpec[]) =>
+    (by.get(r.label)?.sameAs ?? []).some((l) => keep.some((k) => k.label === l));
+  const swapOut = (i: number) => {
+    const s = scenarios[i];
     const keep = scenarios.filter((_, k) => k !== i);
-    const j = reserve.findIndex((r) => by.has(r.label) && passes(r) && !tooClose(r, keep));
+    const j = reserve.findIndex((r) => by.has(r.label) && passes(r) && !tooClose(r, keep) && !sameQuestion(r, keep));
     if (j < 0) return;
     const incoming = reserve[j];
     reserve = [...reserve.slice(0, j), ...reserve.slice(j + 1), { ...s, journey: null }];
     scenarios[i] = { ...incoming, journey: null };
     swaps.push({ out: s.label, in: incoming.label });
+  };
+  scenarios.forEach((s, i) => {
+    if (!by.has(s.label) || passes(s)) return;
+    swapOut(i);
+  });
+  // Same-answer duplicates among the core (2026-10-04): the earlier room
+  // (the read ranked it higher) stays; each later room that asks its
+  // question is swapped for a reserve room with an answer of its own.
+  scenarios.forEach((s, i) => {
+    if (!sameQuestion(s, scenarios.slice(0, i))) return;
+    swapOut(i);
   });
   return { scenarios, reserve, checks, swaps };
 }
