@@ -906,7 +906,12 @@ export async function readScenarios(input: {
   // replacing the product is not a circumstance - a buyer who "upgrades
   // for" a quality has a priority, not a room. Two of four prod rooms were
   // that shape under 20 and the room check could not reliably split them.
-  const key = cacheKey("scenarios_journeys21", [
+  // 22 (2026-10-04, Tyler): a want becomes a room when it comes from the
+  // buyer's life - the room states the circumstance that creates the want
+  // (who they shoot, where they use it), never the want alone. Priority
+  // segments are real where a category is bought by priority; 21 kept the
+  // writer from drawing them at all.
+  const key = cacheKey("scenarios_journeys22", [
     input.category, input.audience, input.forBrand ?? "",
   ]);
   const read = await coalesced<{
@@ -962,7 +967,10 @@ export async function readScenarios(input: {
           "a buyer who upgrades FOR a quality, feature or use they want the " +
           "product to excel at has a priority, not a room - the room is what " +
           "is happening to them, who they are buying for, a constraint, a " +
-          "setting or a moment, and the answer decides what matters. Spend the " +
+          "setting or a moment, and the answer decides what matters. A want " +
+          "BECOMES a room when it comes from the buyer's life: state the " +
+          "circumstance that creates it - who they do it for, where or how " +
+          "often they use the product - and never the want alone. Spend the " +
           "slots on DIFFERENT axes of circumstance (scale, composition, " +
           "constraint, occasion, recipient), not variants of one. Two rooms " +
           "whose buyers would get the SAME advice are one question asked " +
