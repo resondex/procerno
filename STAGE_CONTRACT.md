@@ -121,3 +121,7 @@ Some overlap between the two, and with Discovery, is fine: it is the same buyer 
 ## Problem recognition is one plain pain (Tyler, 2026-10-04, STYLE s40)
 
 One pain in a plain sentence, then a plain ask for a way out: about 10-25 words, one symptom, never a list of symptoms or a polished description.
+
+## Category education asks what kinds there are (Tyler, 2026-10-04, STYLE s41)
+
+The buyer asks what kinds of products the category has and how they differ, or whether they need one at all, in plain words - never which brand. Recommended for every considered market (was: considered and rational). Read unchanged: whether the AI names the brand when it explains the category.

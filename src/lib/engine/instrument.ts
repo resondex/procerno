@@ -147,7 +147,10 @@ const CACHE_TTL_MS = 183 * 24 * 3600 * 1000;
 // "s40" (2026-10-04, Tyler): Problem recognition is one pain in a plain
 // sentence plus a plain ask for a way out (10-25 words, one symptom) - the
 // seeds had become 40-50-word symptom lists in consultant voice.
-const STYLE_VERSION = "s40";
+// "s41" (2026-10-04, Tyler): Category education asks what kinds the
+// category has and how they differ (or whether they need one at all) -
+// "what does a smartphone do?" is not a question anyone asks.
+const STYLE_VERSION = "s41";
 
 /** Versions the DETERMINISTIC seed-check set (everything seedRule runs:
  * checkPromptAgainstSpec + blind_missing_category + scenario_label_leak).
@@ -530,13 +533,13 @@ export function stageLibrary(m: Moderators): LibraryStage[] {
     {
       key: "category_education", label: "Category education", layer: "awareness",
       situational: false, rivals: "none", tag: "rules",
-      recommended: m.think_feel === "think" && considered,
-      hint: "The buyer asks what the category is or does ('what does a X actually do').",
-      why: m.think_feel === "think" && considered
-        ? "A considered, rational market studies the category before shortlisting."
-        : m.think_feel !== "think"
-          ? "Identity-led buyers don't pause to study the category definition."
-          : "Habitual buyers don't stop to learn what the category is.",
+      // Reframed 2026-10-04 (Tyler): nobody asks what a mature category
+      // does; buyers in any considered market ask what KINDS there are.
+      recommended: considered,
+      hint: "The buyer asks what kinds of products the category has and how they differ, or whether they need one at all - a plain question in their own words, never which brand to buy.",
+      why: considered
+        ? "A considered market asks what kinds there are before shortlisting - and the answer names example brands."
+        : "Habitual buyers don't stop to sort the category into kinds.",
     },
     {
       key: "discovery", label: "Discovery", layer: "awareness",
@@ -2584,12 +2587,14 @@ const CELL_WRITER_SYSTEM =
           "(that is a worry cell). They state ONE pain in a plain sentence " +
           "and ask for a way out in their own words - about 10-25 words, one " +
           "symptom, never a list of symptoms or a polished description; vary " +
-          "it across cells, never the same closing every time. category_education asks what this kind of " +
-          "product actually does and how people use it - nothing is broken " +
-          "there, so never 'what fixes this'. Neither stage asks a yes/no " +
-          "reassurance question, a " +
+          "it across cells, never the same closing every time. Problem " +
+          "recognition never asks a yes/no reassurance question, a " +
           "premium-vs-cheap tier question, or 'what specs or criteria " +
           "should I care about' (that is the criteria cell's question).\n" +
+          "- category_education: the buyer asks what kinds of products the " +
+          "category has and how they differ, or whether they need one at " +
+          "all, in plain words - never which brand to buy, and nothing is " +
+          "broken there, so never 'what fixes this'.\n" +
           "- criteria: the situation plus an ask for what actually matters - " +
           "NEVER offering candidate criteria for the answer to rank or " +
           "complete: the " +
