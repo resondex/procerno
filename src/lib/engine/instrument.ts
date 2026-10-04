@@ -2072,6 +2072,10 @@ export async function contestRoomSet(input: {
  * there). The gate shows the pairs and the user edits them; the confirmed
  * map rides the cells request. Fails open to null (writer chooses).
  */
+/** The value-lines read (sonnet, medium effort). Opus was tried and was
+ * worse: exact model numbers, sub-brands as lines, empty replies. */
+const VALUE_LINES_MODEL = process.env.VALUE_LINES_MODEL ?? process.env.DESIGN_CHECK_MODEL ?? "claude-sonnet-5";
+
 export async function planValueLines(input: {
   brand: string; category: string; audience: string | null;
   rooms: { label: string; description: string }[];
@@ -2080,53 +2084,73 @@ export async function planValueLines(input: {
   if (input.rooms.length === 0) return null;
   tagCosts({ purpose: "setup:value_lines" });
   const rooms = input.rooms.map((r) => ({ label: r.label.trim(), description: r.description.trim() }));
-  const key = cacheKey("value_lines7", [
-    DESIGN_CHECK_MODEL, input.brand, input.category, input.audience ?? "",
+  const key = cacheKey("value_lines14", [
+    VALUE_LINES_MODEL, input.brand, input.category, input.audience ?? "",
     rooms.map((r) => `${r.label}|${r.description}`).join("~"),
   ]);
   return coalesced<Record<string, ValueLine | null>>(key, { meta: input.meta }, async () => {
-    const a = await anthropicClient();
-    let j: { tiers?: unknown[]; lines?: { name?: string; tier?: number }[]; rooms?: { label?: string; line?: string | null }[] } | null = null;
-    for (const extra of ["", " Escape any quote marks inside strings."]) {
-      const res = await a.messages.create({
-        model: DESIGN_CHECK_MODEL, max_tokens: 4000, output_config: { effort: "medium" },
-        system:
-          `For the brand ${input.brand} in ${input.category}, give: ` +
-          `tiers - the price tiers of the category as a buyer in the given audience shops it, from most to least expensive: each tier is a KIND of product that several different makers sell, described in a few plain words the way a buyer says it - never a maker or brand, and never the plans, sizes or packs of one product - 3 to 5 tiers. When the audience spans separate markets (personal and business buyers), the ladder is the one this brand's main buyers shop; ` +
-          `lines - the brand's distinct current product lines in this category by their real names as buyers say them, each with the index of the tier it sits in. A line is a separate product people choose between by name; plans, subscription levels, editions, flavors, sizes and varieties of one product are NOT lines. A brand that sells one product has one line, its own name; ` +
-          `rooms - for each buying room given, the MOST PREMIUM of those lines a buyer in that room could realistically buy, or null when the brand has no line that buyer would buy. ` +
-          `Reply with ONLY JSON: {"tiers": ["..."], "lines": [{"name": "...", "tier": 0}], "rooms": [{"label": "...", "line": "..."}]} - rooms in the order given, labels exactly as given, room lines copied exactly from lines.${extra}`,
-        messages: [{ role: "user", content: `Audience: ${input.audience ?? "unknown"}\nRooms:\n${rooms.map((r, i) => `${i + 1}. ${r.label}: ${r.description}`).join("\n")}` }],
-      } as never);
-      const text = (res as { content: { type: string; text?: string }[] }).content
-        .filter((b) => b.type === "text").map((b) => b.text ?? "").join("").trim();
-      try { j = JSON.parse(firstJsonObject(text) ?? text); break; } catch { /* retry */ }
-    }
-    if (!j?.rooms) throw new Error("value lines reply was not valid JSON");
-    // The step down is MECHANICAL (2026-10-04): the model ranks the
-    // category's tiers and places each line; the counterpart is the tier
-    // directly beneath the line's. Asked to pick the step itself, the
-    // model swung between skipping a tier and dropping to the bottom.
-    const tiers = (Array.isArray(j.tiers) ? j.tiers : []).map((t) => humanize(String(t ?? "")).trim()).filter(Boolean);
-    const lines = (Array.isArray(j.lines) ? j.lines : [])
-      .map((l) => ({ name: humanize(String(l?.name ?? "")).trim(), tier: Number(l?.tier) }))
-      .filter((l) => l.name);
-    // One product line = the brand name, mechanically (the model kept
-    // naming plans and flavors as lines when told not to).
-    const single = lines.length <= 1;
-    const out: Record<string, ValueLine | null> = {};
-    for (const r of j.rooms ?? []) {
-      const label = rooms.find((x) => x.label.toLowerCase() === String(r.label ?? "").trim().toLowerCase())?.label;
-      if (!label) continue;
-      const chosen = r.line ? lines.find((l) => l.name.toLowerCase() === String(r.line).trim().toLowerCase()) ?? (single ? lines[0] : undefined) : undefined;
+    // Majority of three (the journey-fit precedent): a single read varied
+    // on one brand in four (a plan named as a line, a sub-brand, a skipped
+    // tier). Three parallel reads; the line most of them name wins, and
+    // the counterpart most often paired with it.
+    const one = async (): Promise<ValueLine | null> => {
+      const a = await anthropicClient();
+      let j: { tiers?: unknown[]; lines?: { name?: string; tier?: number }[]; premium?: string } | null = null;
+      for (const extra of ["", " Escape any quote marks inside strings."]) {
+        const res = await a.messages.create({
+          model: VALUE_LINES_MODEL, max_tokens: 6000, output_config: { effort: "medium" },
+          system:
+            `For the brand ${input.brand} in ${input.category}, give: ` +
+            `tiers - the price tiers of the category as a buyer in the given audience shops it, from most to least expensive: each tier is a KIND of product that several different makers sell, described in a few plain words the way a buyer says it - never a maker or brand, and never the plans, sizes or packs of one product - 3 to 5 tiers. When the audience spans separate markets (personal and business buyers), the ladder is the one this brand's main buyers shop; ` +
+            `lines - the brand's distinct current product lines in this category by their real names as buyers say them, each with the index of the tier it sits in. A line is a separate product people choose between by name; plans, subscription levels, editions, flavors, sizes and varieties of one product are NOT lines. A brand that sells one product has one line, its own name. Never an exact model number or year - the line as buyers name it; ` +
+            `premium - the brand's MOST PREMIUM line that buyers in the given audience can buy or apply for directly, copied exactly from lines - never an invitation-only product, never one sold only as an add-on to another of the brand's products, and never a separate layer aimed at a different buyer than the given audience. ` +
+            `Reply with ONLY JSON: {"tiers": ["..."], "lines": [{"name": "...", "tier": 0}], "premium": "..."}.${extra}`,
+          messages: [{ role: "user", content: `Audience: ${input.audience ?? "unknown"}\nRooms:\n${rooms.map((r, i) => `${i + 1}. ${r.label}: ${r.description}`).join("\n")}` }],
+        } as never);
+        const text = (res as { content: { type: string; text?: string }[] }).content
+          .filter((b) => b.type === "text").map((b) => b.text ?? "").join("").trim();
+        try { j = JSON.parse(firstJsonObject(text) ?? text); break; } catch { /* retry */ }
+      }
+      if (!j?.lines) throw new Error("value lines reply was not valid JSON");
+      // The step down is MECHANICAL (2026-10-04): the model ranks the
+      // category's tiers and places each line; the counterpart is the tier
+      // directly beneath the line's. Asked to pick the step itself, the
+      // model swung between skipping a tier and dropping to the bottom.
+      const tiers = (Array.isArray(j.tiers) ? j.tiers : []).map((t) => humanize(String(t ?? "")).trim()).filter(Boolean);
+      const lines = (Array.isArray(j.lines) ? j.lines : [])
+        .map((l) => ({ name: humanize(String(l?.name ?? "")).trim(), tier: Number(l?.tier) }))
+        .filter((l) => l.name);
+      // One product line = the brand name, mechanically (the model kept
+      // naming plans and flavors as lines when told not to).
+      // Lines that all sit in one price tier are variants of one product
+      // (the model named flavors and sub-brands as "lines"): one line.
+      const single = lines.length <= 1 || new Set(lines.map((l) => l.tier)).size <= 1;
+      // Tyler 2026-10-04: default to the brand's MOST PREMIUM line, one pair
+      // for every room (the room still changes who is asking). Per-room line
+      // picks varied run to run; the gate edits any column.
+      const chosen = lines.find((l) => l.name.toLowerCase() === String(j!.premium ?? "").trim().toLowerCase())
+        ?? [...lines].sort((x, y) => (x.tier || 0) - (y.tier || 0))[0];
       // A one-product brand's step down is "cheaper <category>",
       // mechanically: the model described its own plans as the tier below
       // (Netflix vs "basic plan", Jira vs "Standard team plan").
       const below = single
         ? `cheaper ${input.category.trim()}`
         : chosen && Number.isInteger(chosen.tier) ? tiers[chosen.tier + 1] : undefined;
-      out[label] = chosen && below ? { line: single ? input.brand : chosen.name, counterpart: below } : null;
-    }
+      const pair: ValueLine | null = chosen && below ? { line: single ? input.brand : chosen.name, counterpart: below } : null;
+      return pair;
+    };
+    const reads = (await Promise.all([one(), one(), one()].map((p) => p.catch(() => null)))).filter((x): x is ValueLine => !!x);
+    const tally = (xs: string[]) => {
+      const m = new Map<string, { v: string; n: number }>();
+      for (const x of xs) { const k = x.toLowerCase(); const e = m.get(k); if (e) e.n++; else m.set(k, { v: x, n: 1 }); }
+      return [...m.values()].sort((a, b) => b.n - a.n)[0];
+    };
+    const lineWin = tally(reads.map((r) => r.line));
+    const pair: ValueLine | null = lineWin
+      ? { line: lineWin.v, counterpart: tally(reads.filter((r) => r.line.toLowerCase() === lineWin.v.toLowerCase()).map((r) => r.counterpart))!.v }
+      : null;
+    const out: Record<string, ValueLine | null> = {};
+    for (const r of rooms) out[r.label] = pair;
     console.warn(`value lines [${input.brand}]: ${Object.entries(out).map(([k, v]) => `${k} -> ${v ? `${v.line} vs ${v.counterpart}` : "none"}`).join("; ")}`);
     return out;
   });
