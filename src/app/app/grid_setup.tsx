@@ -2899,6 +2899,23 @@ export function WorriesGate({
       setState({ ...state, worries: [...picks, { concern: worry, stage }] });
     }
   };
+  /** The card itself: with any chip lit it clears the whole worry; with
+   * none lit it lights the recommended plan (the natural stance when the
+   * pool predates plans). It used to toggle the natural stance alone, so a
+   * card lit at renewal flipped customer-leaving ON instead of clearing
+   * (Tyler, 2026-10-04). */
+  const toggleCard = (w: WorryUi) => {
+    if (busy) return;
+    const lit = w.stances.filter((s) => has(w.worry, s));
+    if (lit.length > 0) {
+      setState({ ...state, worries: picks.filter((p) => p.concern !== w.worry) });
+      return;
+    }
+    const plan = (w.recommend?.length ? w.recommend : [w.recommended]).filter((s) => w.stances.includes(s));
+    const room = cap === null ? plan.length : Math.max(0, cap - picks.length);
+    const add = plan.slice(0, room).map((stage) => ({ concern: w.worry, stage }));
+    if (add.length > 0) setState({ ...state, worries: [...picks, ...add] });
+  };
   return (
     <div className="grid gap-3 max-w-3xl">
       <p className="m-0 text-[12px] text-ink-2">
@@ -2919,7 +2936,8 @@ export function WorriesGate({
           >
             <button
               type="button"
-              onClick={() => toggle(w.worry, w.recommended)}
+              onClick={() => toggleCard(w)}
+              title={pickedAny ? "Clear this worry" : "Pick this worry at its recommended moment"}
               className="text-left"
             >
               <span className="text-[14px] font-semibold">{w.worry}</span>
