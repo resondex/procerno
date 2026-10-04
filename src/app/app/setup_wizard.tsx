@@ -1800,7 +1800,10 @@ export function SetupWizard({ mode, brand, draft, engineOptions, onClose, onCrea
                     onKeyDown={(e) => {
                       if (e.key === "Enter" || e.key === ",") { e.preventDefault(); addCompetitor(); }
                     }}
-                    onBlur={() => { if (compDraft.trim()) addCompetitor(); }}
+                    // No commit on blur: clicking a chip's × blurs this input
+                    // first, so a half-typed name was being added as a rival by
+                    // the removal click (Tyler, 2026-10-04). Enter and comma add;
+                    // confirmMarket folds in anything still typed.
                     placeholder={competitors.length === 0 ? "e.g. Qualtrics - press Enter after each" : "add another…"}
                   />
                 </label>
