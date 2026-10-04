@@ -902,7 +902,11 @@ export async function readScenarios(input: {
   // LABEL each room's decisive factor was tried the same day and reverted:
   // the schema field steered the writer to preference-shaped rooms on every
   // brand. The same-answer pass (checkRooms) is the enforcement.
-  const key = cacheKey("scenarios_journeys20", [
+  // 21 (2026-10-04, Tyler's Pixel walk): the act of buying, upgrading or
+  // replacing the product is not a circumstance - a buyer who "upgrades
+  // for" a quality has a priority, not a room. Two of four prod rooms were
+  // that shape under 20 and the room check could not reliably split them.
+  const key = cacheKey("scenarios_journeys21", [
     input.category, input.audience, input.forBrand ?? "",
   ]);
   const read = await coalesced<{
@@ -953,7 +957,12 @@ export async function readScenarios(input: {
           "direction rules a leading maker out). A room is a buyer's " +
           "circumstance, never a product capability or feature (a label " +
           "that names something the product does, rather than something " +
-          "happening to the buyer, is a capability). Spend the " +
+          "happening to the buyer, is a capability). The act of buying, " +
+          "upgrading or replacing the product is not a circumstance either: " +
+          "a buyer who upgrades FOR a quality, feature or use they want the " +
+          "product to excel at has a priority, not a room - the room is what " +
+          "is happening to them, who they are buying for, a constraint, a " +
+          "setting or a moment, and the answer decides what matters. Spend the " +
           "slots on DIFFERENT axes of circumstance (scale, composition, " +
           "constraint, occasion, recipient), not variants of one. Two rooms " +
           "whose buyers would get the SAME advice are one question asked " +
@@ -2075,7 +2084,12 @@ async function checkRoomsPass(input: RoomCheckInput, pass: number): Promise<Room
   // Netflix's kids room, AmEx's balance transfer - and churned the settled
   // sets); platformSwitch needs a stated or implied direction - openness
   // is not a switch; choosing quickly is still choosing.
-  const keyOf = (r: Situation) => cacheKey("room_check7", [
+  // room_check8 (2026-10-04, Tyler's Pixel walk): a room whose ONLY
+  // situation is buying, upgrading or replacing the product, with the buyer
+  // otherwise defined by a product priority, is a capability room - check7
+  // let a creator-upgrading-for-camera room and a gamer-upgrading-for-
+  // performance room through on the thin "upgrades" clause.
+  const keyOf = (r: Situation) => cacheKey("room_check8", [
     DESIGN_CHECK_MODEL, input.brand, input.category, [...rivals].map((x) => x.toLowerCase()).sort().join(","),
     `${r.label.trim()}|${r.description.trim()}`,
     ...(pass > 1 ? [`pass${pass}`] : []),
@@ -2100,7 +2114,7 @@ async function checkRoomsPass(input: RoomCheckInput, pass: number): Promise<Room
           `Each buying room below is a buyer occasion in the ${input.category} market. For each room give:\n` +
           `- contenders: which of these brands are plausible contenders for that room's buyer - ${rivals.join(", ")} - names exactly as given. A brand contends when a buyer in that room would reasonably consider it; it need not be the favorite.\n` +
           `- pitch: if the room's wording borrows ONE specific brand's own selling-point vocabulary (its signature feature names, taglines or platform labels) instead of the buyer's outcome language, quote that phrase; otherwise an empty string. Buyer outcomes every contender speaks to are not pitch.\n` +
-          `- capability: true when the room is a product capability or feature being adopted rather than a buyer's circumstance, OR when the room gives no buyer situation at all - nothing about who they are or what is happening to them, only what they want from the product. A room that states a situation is a situation, whatever its buyer prefers or weighs; wanting something is not a capability.\n` +
+          `- capability: true when the room is a product capability or feature being adopted rather than a buyer's circumstance, OR when the buyer is defined by a product priority (a quality, feature or use they want the product to excel at) and the room's only situation is that they are buying, upgrading or replacing the product - a shopping act is not a circumstance. A room with a circumstance of its own (something happening to the buyer, who they are buying for, a constraint, a setting, a moment) is a situation, whatever its buyer prefers or weighs.\n` +
           `- platformSwitch: true ONLY when the room states or implies a DIRECTION between competing platforms or ecosystems (from one to another) - a direction a question must state rules a leading brand out. A buyer who has stayed with one maker or platform and is not committed to it this time is openness, not a switch. Moving off an old or homegrown solution is NOT a platform switch.\n` +
           `- noChoice: true when the room's buyer makes no real choice between products - accepting the next model by default without comparing - so there is nothing for an answer to steer. Choosing quickly, or under time pressure, is still choosing.\n` +
           `Reply with ONLY JSON: {"rooms": [{"contenders": [...], "pitch": "...", "capability": false, "platformSwitch": false, "noChoice": false}, ...]} - one entry per room, in order.`,
