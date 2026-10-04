@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState, type ReactNode } from "react";
-import { deriveCheckSpec, sameSeatOf, type CellCheckSpec, type RosterClasses, type RosterRoles } from "@/lib/engine/battery_checks";
+import { angleRivals, deriveCheckSpec, rosterRoleOf, sameSeatOf, type CellCheckSpec, type RosterClasses, type RosterRoles } from "@/lib/engine/battery_checks";
 import { InlineSpinner } from "../components/spinner";
 
 /**
@@ -633,6 +633,14 @@ export function useGridSetup(a: GridSetupArgs) {
       category: a.category,
       audience: a.audience || undefined,
       ...(forBrand && !edit ? { forBrand: true } : {}),
+      // Contest repair (contract audit v4): the fresh read swaps uncontested
+      // core rooms for passing reserve rooms against this roster.
+      ...(!edit && a.competitors.length > 0
+        ? {
+            rivals: a.competitors.filter((c) => { const r = rosterRoleOf(c, a.rosterRoles); return r === "same_seat" || r === "bench"; }),
+            picks: angleRivals(a.competitors, a.rosterRoles),
+          }
+        : {}),
       ...(edit && activeRows.length > 0
         ? {
             base: edit.base,

@@ -59,8 +59,22 @@ for (const brand of BRANDS) {
   const rosterClasses = Object.fromEntries(roster.competitors.filter((v) => v.consumerSalient && v.classPhrase).map((v) => [v.name, v.classPhrase!]));
   console.log(`[2 roster] roles:`, JSON.stringify(rosterRoles), "classes:", JSON.stringify(rosterClasses));
 
-  const compose = await inst.composeInstrument({ category: profile.category, audience: profile.audience, forBrand: brand });
+  // The wizard's DEFAULT path (contract audit v4): the category read, then
+  // contest repair against this roster - the walks had been testing the
+  // brand-aware rebuild instead of what a user sees first.
+  const compose = await inst.composeInstrument({ category: profile.category, audience: profile.audience });
   if (!compose) { console.error(`${brand}: compose returned null`); continue; }
+  {
+    const dr = Object.entries(rosterRoles).filter(([, r]) => r === "same_seat" || r === "bench").map(([n]) => n);
+    const pk = Object.entries(rosterRoles).filter(([, r]) => r === "same_seat").map(([n]) => n);
+    const repaired = await inst.contestRoomSet({ brand, category: profile.category, rivals: dr, picks: pk, scenarios: compose.scenarios, reserve: compose.reserve ?? [] });
+    if (repaired.swaps.length > 0) {
+      console.log(`[3a contest repair]`, repaired.swaps.map((x: { out: string; in: string }) => `${x.out} -> ${x.in}`).join(" | "));
+      compose.scenarios = repaired.scenarios;
+      compose.reserve = repaired.reserve;
+      compose.stages = inst.participationMask(compose.base, compose.scenarios);
+    }
+  }
   console.log(`[3 market read] scenarios:`, compose.scenarios.map((s: { label: string }) => s.label).join(" | "));
   // Decision 4: the fit advisory (recorded, not applied - defaults are
   // accepted) and the contest check over every room plus its suggestion.

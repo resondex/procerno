@@ -13,6 +13,7 @@ import {
   type Moderators,
   type ScenarioFit,
   type ScenarioSpec,
+  contestRoomSet,
 } from "@/lib/engine/instrument";
 import { ModeratorsShape } from "@/lib/engine/instrument_shapes";
 
@@ -48,6 +49,11 @@ const Body = z.object({
   /** Background warm: fill the cache but never wait on another request's
    * in-flight read - the confirm that needs results does the waiting. */
   warm: z.boolean().optional(),
+  /** The tracker's direct rivals and head-to-head picks (decision 3):
+   * with them, a fresh read is contest-repaired - core rooms that name a
+   * brand, borrow a pitch or aren't contested swap in passing reserve rooms. */
+  rivals: z.array(z.string().trim().min(1).max(80)).max(12).optional(),
+  picks: z.array(z.string().trim().min(1).max(80)).max(12).optional(),
 });
 
 /**
@@ -103,6 +109,19 @@ export async function POST(req: Request) {
           );
     }
     ({ base, scenarios, reserve, stages } = composed);
+    if (!parsed.data.warm && parsed.data.brand && (parsed.data.rivals?.length ?? 0) > 0) {
+      const repaired = await contestRoomSet({
+        brand: parsed.data.brand, category: parsed.data.category,
+        rivals: parsed.data.rivals!, picks: parsed.data.picks,
+        scenarios, reserve: reserve ?? [],
+        meta: { brand: parsed.data.brand, source: cacheSource(auth) },
+      }).catch(() => null);
+      if (repaired && repaired.swaps.length > 0) {
+        scenarios = repaired.scenarios;
+        reserve = repaired.reserve;
+        stages = participationMask(base, scenarios);
+      }
+    }
   }
   // The fit advisory ships WITH the compose so the scenarios gate never
   // renders before its advice exists. The WARM path computes it too -

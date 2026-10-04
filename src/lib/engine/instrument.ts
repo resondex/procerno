@@ -13,6 +13,7 @@ export { MUST_NAME_STAGES };
 import { store } from "../store";
 import { brandAliasForms } from "./brand_aliases";
 import { primeBrandVerdicts } from "./brand_judge";
+import { matchKey } from "../brand_key";
 import type { CacheMeta } from "../types";
 
 /**
@@ -121,7 +122,13 @@ const CACHE_TTL_MS = 183 * 24 * 3600 * 1000;
 // quoted shapes; criteria never offers candidate criteria; repertoire is
 // habit, not a worry; business_case / expansion / ecosystem / advocacy
 // get their contract asks.
-const STYLE_VERSION = "s32";
+// "s33" (2026-10-03, contract audit v4): use_case asks for ONE pick for
+// ONE job (it had been left in the open-choice "name a few" rule), each
+// use-case cell a different job; switch directions name both platforms
+// with no quoted example (every Pixel heal copied "from iOS to Android");
+// churn/renewal leaving is a live option, never a token "or"; Value names
+// the product LINE; rewrite steers never swap in another client strength.
+const STYLE_VERSION = "s33";
 
 /** Versions the DETERMINISTIC seed-check set (everything seedRule runs:
  * checkPromptAgainstSpec + blind_missing_category + scenario_label_leak).
@@ -847,7 +854,12 @@ export async function readScenarios(input: {
   // years") that every cell in the column inherited: rows converged, the
   // client's selling points rode in, and one need dominated blind cells.
   // The contested / in-category / no-platform-lock rules stay.
-  const key = cacheKey("scenarios_journeys16", [
+  // 17 (2026-10-03, contract audit v4): a room is never a product
+  // capability (Jira's "Portfolio and roadmaps rollout" collapsed its whole
+  // column onto one feature), and never a platform-switch room in a
+  // platform-tied category - any stated direction locks a leading maker out
+  // (Pixel's "Ecosystem switcher" excluded iPhone from six cells).
+  const key = cacheKey("scenarios_journeys17", [
     input.category, input.audience, input.forBrand ?? "",
   ]);
   const read = await coalesced<{
@@ -888,7 +900,13 @@ export async function readScenarios(input: {
           "to a different category, is not this market's room. A room never " +
           "builds in a platform or ecosystem preference that rules out a " +
           "leading contender ('upgrading my Android phone' excludes iPhone " +
-          "buyers - say 'upgrading a phone I've had for years'). Spend the " +
+          "buyers - say 'upgrading a phone I've had for years'), and is never " +
+          "built on switching between competing platforms or ecosystems when " +
+          "the category's leading brands are tied to them (any stated " +
+          "direction rules a leading maker out). A room is a buyer's " +
+          "circumstance, never a product capability or feature ('rolling " +
+          "out roadmaps' is a feature; 'a fast-growing team outgrowing its " +
+          "first tool' is a circumstance). Spend the " +
           "slots on DIFFERENT axes of circumstance (scale, composition, " +
           "constraint, occasion, recipient), not variants of one.\n" +
           "2) per scenario, deviates: true ONLY if that scenario's buyer " +
@@ -1820,7 +1838,7 @@ export async function checkRooms(input: {
   } catch { /* fail open: unjudged hits count as named */ }
   const namesOf = (r: Situation) =>
     [input.brand, ...rivals].filter((b) => textNamesBrand(roomText(r), b));
-  const keyOf = (r: Situation) => cacheKey("room_check1", [
+  const keyOf = (r: Situation) => cacheKey("room_check2", [
     DESIGN_CHECK_MODEL, input.brand, input.category, [...rivals].map((x) => x.toLowerCase()).sort().join(","),
     `${r.label.trim()}|${r.description.trim()}`,
   ]);
@@ -1852,13 +1870,41 @@ export async function checkRooms(input: {
       } as never);
       const text = (res as { content: { type: string; text?: string }[] }).content
         .filter((b) => b.type === "text").map((b) => b.text ?? "").join("").trim();
-      const j = JSON.parse(firstJsonObject(text) ?? text) as { rooms?: { contenders?: string[]; pitch?: string }[] };
-      const byKey = new Map(rivals.map((r) => [r.toLowerCase(), r]));
+      // Malformed JSON (an unescaped quote inside a pitch phrase) left three
+      // brands' rooms unchecked in the 2026-10-03 draws: parse defensively,
+      // then ask once more for strict JSON before failing open.
+      const parse = (t: string) => { try { return JSON.parse(firstJsonObject(t) ?? t) as { rooms?: { contenders?: string[]; pitch?: string }[] }; } catch { return null; } };
+      let j = parse(text);
+      if (!j) {
+        const res2 = await a.messages.create({
+          model: DESIGN_CHECK_MODEL, max_tokens: 1500, output_config: { effort: DESIGN_CHECK_EFFORT },
+          system: "Reply with ONLY valid JSON, no prose. Quote marks inside strings must be escaped; if a pitch phrase contains a quote mark, drop it from the phrase.",
+          messages: [{ role: "user", content: `Rewrite this as valid JSON of the shape {"rooms": [{"contenders": [...], "pitch": "..."}]}:\n${text}` }],
+        } as never);
+        j = parse((res2 as { content: { type: string; text?: string }[] }).content.filter((b) => b.type === "text").map((b) => b.text ?? "").join("").trim());
+      }
+      if (!j) throw new Error("room check reply was not valid JSON");
+      // Names map back by brand key across a label's forms - "Samsung
+      // (Galaxy)" is also "Samsung Galaxy", "Samsung" and "Galaxy" (the
+      // exact-string map dropped Samsung and Apple from every Pixel room).
+      const formsOf = (r: string) => {
+        const base = r.replace(/\s*\([^)]*\)/g, " ").trim();
+        const paren = [...r.matchAll(/\(([^)]*)\)/g)].map((m) => m[1]);
+        return [r, base, `${base} ${paren.join(" ")}`, ...paren, ...base.split("/"), ...paren.flatMap((x) => x.split("/"))]
+          .map((f) => matchKey(f)).filter(Boolean);
+      };
+      const rivalForms = rivals.map((r) => ({ r, forms: new Set(formsOf(r)) }));
+      const resolve = (name: string): string | undefined => {
+        const k = matchKey(name);
+        if (!k) return undefined;
+        return rivalForms.find((x) => x.forms.has(k))?.r
+          ?? rivalForms.find((x) => [...x.forms].some((f) => f.length > 3 && (k.includes(f) || f.includes(k))))?.r;
+      };
       await Promise.all(misses.map(async (i, k) => {
         const row = j.rooms?.[k];
         if (!row) return;
         // Only names we sent survive - the model never adds a brand.
-        const contenders = [...new Set((row.contenders ?? []).map((c) => byKey.get(String(c).trim().toLowerCase())).filter((c): c is string => !!c))];
+        const contenders = [...new Set((row.contenders ?? []).map((c) => resolve(String(c))).filter((c): c is string => !!c))];
         const v = { contenders, pitch: humanize(String(row.pitch ?? "").replace(/\s*[—–]\s*/g, " - ")).slice(0, 80) };
         verdicts.set(i, v);
         await store.cacheSet(keys[i], JSON.stringify(v), stampOf(input)).catch(() => {});
@@ -1884,6 +1930,43 @@ export async function checkRooms(input: {
     const pitch = pitchRaw && roomText(r).toLowerCase().includes(pitchRaw.toLowerCase()) ? pitchRaw : "";
     return [{ label: r.label, contenders, rivals: rivals.length, contested, pitch, names }];
   });
+}
+
+/**
+ * Contest-repair a fresh scenario set (contract audit v4, 2026-10-03): a
+ * core room that names a tracked brand, borrows one brand's pitch, or is
+ * not contested by the tracker's head-to-head rivals is replaced by the
+ * best passing reserve room, and the replaced room joins the reserve so
+ * the user can bring it back. Runs per tracker (needs the roster). Fails
+ * open: no verdicts, no swaps.
+ */
+export async function contestRoomSet(input: {
+  brand: string; category: string; rivals: string[]; picks?: string[];
+  scenarios: ScenarioSpec[]; reserve: ScenarioSpec[]; meta?: CacheMeta;
+}): Promise<{ scenarios: ScenarioSpec[]; reserve: ScenarioSpec[]; checks: RoomCheck[]; swaps: { out: string; in: string }[] }> {
+  const all = [...input.scenarios, ...input.reserve];
+  const checks = await checkRooms({
+    brand: input.brand, category: input.category, rivals: input.rivals, picks: input.picks,
+    rooms: all.map((s) => ({ label: s.label, description: s.description })), meta: input.meta,
+  }).catch(() => [] as RoomCheck[]);
+  const by = new Map(checks.map((c) => [c.label, c]));
+  const passes = (s: ScenarioSpec) => {
+    const c = by.get(s.label);
+    return !c || (c.contested && c.names.length === 0 && !c.pitch);
+  };
+  const scenarios = [...input.scenarios];
+  let reserve = [...input.reserve];
+  const swaps: { out: string; in: string }[] = [];
+  scenarios.forEach((s, i) => {
+    if (!by.has(s.label) || passes(s)) return;
+    const j = reserve.findIndex((r) => by.has(r.label) && passes(r));
+    if (j < 0) return;
+    const incoming = reserve[j];
+    reserve = [...reserve.slice(0, j), ...reserve.slice(j + 1), { ...s, journey: null }];
+    scenarios[i] = { ...incoming, journey: null };
+    swaps.push({ out: s.label, in: incoming.label });
+  });
+  return { scenarios, reserve, checks, swaps };
 }
 
 /** Why a prompt edit was flagged: drift, brand design, coherence, or a
@@ -2343,12 +2426,14 @@ const CELL_WRITER_SYSTEM =
           "subscription', 'the service') is a defect, never a variant. The " +
           "relationship is stated as fact ('Amex is my main card'), never " +
           "hypothetically ('if Amex is my main card').\n" +
-          "- Churn and renewal cells keep LEAVING possible and never " +
-          "foreclose STAYING: the asker is weighing it, not announcing a " +
-          "decision. Both options need not be spelled out ('is Netflix " +
-          "still worth it with these price hikes?' qualifies); a fix-it or " +
-          "how-to ask with no option of leaving is a support question, not " +
-          "churn, and pause vs cancel is two ways of leaving. A renewal " +
+          "- Churn and renewal cells make LEAVING a live option the question " +
+          "actually weighs, and never foreclose STAYING: the asker is " +
+          "deciding whether to keep the brand, not announcing a decision and " +
+          "not asking for a fix. Both options need not be spelled out ('is " +
+          "Netflix still worth it with these price hikes?' qualifies), but a " +
+          "fix-it or how-to ask with a token 'or' tacked on is a support " +
+          "question, not churn, and pause vs cancel is two ways of leaving. " +
+          "A renewal " +
           "cell's trigger is the bill or renewal coming due; a churn cell's " +
           "trigger is its stated worry. Name the brand ONCE, and vary the " +
           "wording across cells. The leave side stays plain - never " +
@@ -2372,8 +2457,10 @@ const CELL_WRITER_SYSTEM =
           "plan, which keeps every answer inside the brand - give the " +
           "asker's usage in plain words ('we watch most nights', 'I keep a " +
           "phone 3 or 4 years'; numbers are allowed, never required), and " +
-          "ask for the call. When the brand sells several distinct " +
-          "products, say which one is being weighed. Every value cell asks " +
+          "ask for the call. When the brand sells several distinct product " +
+          "lines, name the LINE being weighed ('an Amex travel card', 'a " +
+          "Pixel Pro') - never an exact model, edition or year. Every value " +
+          "cell asks " +
           "the SAME question; only the buyer changes. Never name a rival " +
           "(head-to-heads belong to comparison), never state a price (the " +
           "asker's own budget or an offer made to them is circumstance), " +
@@ -2406,13 +2493,17 @@ const CELL_WRITER_SYSTEM =
           "say 'the latest <line>' - never a specific model-year pairing " +
           "('Pixel 9 Pro vs iPhone 15 Pro'). Engines correct a stale model " +
           "premise instead of answering the question.\n" +
-          "- Open-choice stages (discovery, use_case, " +
+          "- Open-choice stages (discovery, " +
           "social_validation, feature_screening, premium_worth): the ask " +
           "must invite NAMED picks - 'which ones', 'name a few worth a " +
           "look' - never 'what should I look for', 'where do I find " +
           "reviews', or a features-only essay ask. When the category is a " +
           "RETAILER category, the ask is which retailer to buy from, not " +
           "which product to buy.\n" +
+          "- use_case: the situation plus ONE concrete job, asking which ONE " +
+          "product to pick for that job - not a list ('name a few' belongs to " +
+          "discovery). Each use-case cell in a battery names a DIFFERENT job, " +
+          "one buyers in that situation commonly need done.\n" +
           "- premium_worth: weigh the category's premium maker(s) as a " +
           "TIER against basic/store options and invite named picks; never " +
           "ask whether one named brand is worth it - that form belongs to " +
@@ -2461,9 +2552,10 @@ const CELL_WRITER_SYSTEM =
           "requirements is survey-speak even in a short prompt (pick the " +
           "two or three this asker would actually type), and an ask with " +
           "two readings measures neither. When the circumstance is a platform or " +
-          "ecosystem switch, say the DIRECTION in platform words ('moving " +
-          "from iOS to Android') - OS names are direction vocabulary, not " +
-          "brand names. 'Switching platforms', 'moving between ecosystems' " +
+          "ecosystem switch, state the DIRECTION by naming both platforms " +
+          "(the one being left and the one being joined) - OS names are " +
+          "direction vocabulary, not brand names. 'Switching platforms', " +
+          "'moving between ecosystems' " +
           "and 'from one platform to another' are NOT directions: every " +
           "answer then guesses which way, and the guess decides which " +
           "products get named. The direction must leave the CLIENT brand " +
@@ -3450,7 +3542,7 @@ export async function generateGrid(input: {
                         `Rivals: ${rivals.map(primaryBrandName).join(", ")}\nAudience: ${input.audience ?? "unknown"}\n\n` +
                         `Cell plan:\n${planLine(row, 0)}\n` +
                         `   [previous attempt was OFF-DESIGN and was rejected: it did not voice the cell's design. ` +
-                        `${x.intent} Do not reuse this wording: "${x.c.text}"]` },
+                        `${x.intent}${swapRule(x.c.stage)} Do not reuse this wording: "${x.c.text}"]` },
                   ],
                   response_format: { type: "json_schema", json_schema: { name: "grid_cells", strict: true, schema: CELLS_SCHEMA } },
                 });
@@ -3478,7 +3570,7 @@ export async function generateGrid(input: {
                           `Client brand: ${input.brand}\nCategory: ${input.category}\n` +
                           `Rivals: ${rivals.map(primaryBrandName).join(", ")}\nAudience: ${input.audience ?? "unknown"}\n\n` +
                           `Cell plan:\n${planLine(row, 0)}\n` +
-                          `   [two attempts were rejected. The design: ${x.intent} ` +
+                          `   [two attempts were rejected. The design: ${x.intent}${swapRule(x.c.stage)} ` +
                           `The last attempt failed because ${why}. ` +
                           `Do not reuse these wordings: "${x.c.text}" / "${text2 ?? ""}"]` },
                     ],
@@ -3689,7 +3781,7 @@ export async function generateGrid(input: {
     )
       out.push({
         check: "seed_switch_direction" as const,
-        detail: `"${sw[0].trim()}" never says which way - state the direction in platform words ("from iOS to Android"), or every answer guesses and the guess decides which products get named`,
+        detail: `"${sw[0].trim()}" never says which way - state the direction by naming both platforms (the one left and the one joined), or every answer guesses and the guess decides which products get named`,
       });
     // r10: a multi-ask pile-up is countable - the brand-steer regen packed
     // FOUR trade-offs into one Pixel pricing cell (under the word ceiling,
@@ -5196,6 +5288,15 @@ const STOP = new Set(
 
 function wordSet(t: string): Set<string> {
   return new Set(norm(t).split(" ").filter((w) => w.length > 2 && !STOP.has(w)));
+}
+
+/** Rewrite steer for capability / job stages (2026-10-03 contract audit:
+ * a rejected AmEx feature screen swapped "lounge access" for "hotel elite
+ * status" - another of the client's signature perks). */
+function swapRule(stage: string): string {
+  return stage === "feature_screening" || stage === "use_case"
+    ? " If you replace the capability or job, pick one buyers commonly ask about across the category - never another of the client brand's signature strengths."
+    : "";
 }
 
 /** The words a stage's ask is made of: the verbs that carry its question
