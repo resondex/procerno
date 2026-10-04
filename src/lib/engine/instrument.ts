@@ -144,7 +144,10 @@ const CACHE_TTL_MS = 183 * 24 * 3600 * 1000;
 // screening is the need plus "which has the best features", Use-case is the
 // outcome the buyer wants plus "which will do that best". The s38
 // capability planner was reverted (people filter on jobs, not capabilities).
-const STYLE_VERSION = "s39";
+// "s40" (2026-10-04, Tyler): Problem recognition is one pain in a plain
+// sentence plus a plain ask for a way out (10-25 words, one symptom) - the
+// seeds had become 40-50-word symptom lists in consultant voice.
+const STYLE_VERSION = "s40";
 
 /** Versions the DETERMINISTIC seed-check set (everything seedRule runs:
  * checkPromptAgainstSpec + blind_missing_category + scenario_label_leak).
@@ -519,7 +522,7 @@ export function stageLibrary(m: Moderators): LibraryStage[] {
       // complaints about "my chips".
       key: "problem_recognition", label: "Problem recognition", layer: "awareness",
       situational: true, rivals: "none", tag: "rules", recommended: considered,
-      hint: "Pain-phrased and pre-category: the buyer describes the problem and asks for a way out, in their own words, without knowing the SOLUTION category is the answer. Never name the category as a solution, a brand, or ask for a product type. Whatever the buyer already owns is named with the plain category noun, never contorted around - but the asker is never a current customer of the client brand doubting it.",
+      hint: "Pain-phrased and pre-category: ONE pain in a plain sentence, then a plain ask for a way out - about 10-25 words, one symptom, never a list of symptoms - without knowing the SOLUTION category is the answer. Never name the category as a solution, a brand, or ask for a product type. Whatever the buyer already owns is named with the plain category noun, never contorted around - but the asker is never a current customer of the client brand doubting it.",
       why: considered
         ? "A considered journey starts here - buyers describe the pain before they know the category exists."
         : "Habitual buyers are already in the category - there's no pre-category moment to measure.",
@@ -2578,9 +2581,10 @@ const CELL_WRITER_SYSTEM =
           "- problem_recognition: the asker has a pain and isn't shopping for " +
           "a solution yet - they may own an older or makeshift product, but " +
           "never as a current customer of the client brand doubting it " +
-          "(that is a worry cell). They describe the pain and ask for a way " +
-          "out in their own words - vary it across cells, never the same " +
-          "closing every time. category_education asks what this kind of " +
+          "(that is a worry cell). They state ONE pain in a plain sentence " +
+          "and ask for a way out in their own words - about 10-25 words, one " +
+          "symptom, never a list of symptoms or a polished description; vary " +
+          "it across cells, never the same closing every time. category_education asks what this kind of " +
           "product actually does and how people use it - nothing is broken " +
           "there, so never 'what fixes this'. Neither stage asks a yes/no " +
           "reassurance question, a " +

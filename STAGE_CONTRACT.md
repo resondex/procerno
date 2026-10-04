@@ -117,3 +117,7 @@ Both stages ask in plain buyer words and read which brands come up:
 - **Use-case fit** gives the outcome the buyer wants, in everyday words, then asks which one will do that best.
 
 Some overlap between the two, and with Discovery, is fine: it is the same buyer asked two different ways, to see how the engines respond. The earlier "ONE checkable capability" design was dropped (people filter on jobs and needs, not capabilities), and with it the s38 capability planner.
+
+## Problem recognition is one plain pain (Tyler, 2026-10-04, STYLE s40)
+
+One pain in a plain sentence, then a plain ask for a way out: about 10-25 words, one symptom, never a list of symptoms or a polished description.
