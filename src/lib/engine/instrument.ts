@@ -132,7 +132,10 @@ const CACHE_TTL_MS = 183 * 24 * 3600 * 1000;
 // product feature), enforced battery-wide by the use-case job pass; the
 // engine's own rules lose their category examples ("years of updates",
 // "SSO, reporting and automations") that generated seeds were copying.
-const STYLE_VERSION = "s34";
+// "s35" (2026-10-03, Tyler: no category or brand examples in prompt text): every category or brand example the writers saw is replaced by a
+// description of the element - seeds were copying them ("Done with my iPhone",
+// carrier trade-in, "a phone I've had for years", "a cheaper phone").
+const STYLE_VERSION = "s35";
 
 /** Versions the DETERMINISTIC seed-check set (everything seedRule runs:
  * checkPromptAgainstSpec + blind_missing_category + scenario_label_leak).
@@ -507,7 +510,7 @@ export function stageLibrary(m: Moderators): LibraryStage[] {
       // complaints about "my chips".
       key: "problem_recognition", label: "Problem recognition", layer: "awareness",
       situational: true, rivals: "none", tag: "rules", recommended: considered,
-      hint: "Pain-phrased and pre-category: the buyer describes the problem and asks for a way out, in their own words, without knowing the SOLUTION category is the answer. Never name the category as a solution, a brand, or ask for a product type. The thing the buyer already owns is named plainly ('my phone'), never contorted around ('my pocket gadget') - but the asker is never a current customer of the client brand doubting it.",
+      hint: "Pain-phrased and pre-category: the buyer describes the problem and asks for a way out, in their own words, without knowing the SOLUTION category is the answer. Never name the category as a solution, a brand, or ask for a product type. Whatever the buyer already owns is named with the plain category noun, never contorted around - but the asker is never a current customer of the client brand doubting it.",
       why: considered
         ? "A considered journey starts here - buyers describe the pain before they know the category exists."
         : "Habitual buyers are already in the category - there's no pre-category moment to measure.",
@@ -572,7 +575,7 @@ export function stageLibrary(m: Moderators): LibraryStage[] {
       layer: "decision", situational: true, rivals: "each", tag: "picks",
       recommended: true,
       hint: m.verifiability === "taste"
-        ? "Names the client brand and the rival and asks which one to pick (a dupe or 'similar but cheaper' framing is fine as long as it asks for the pick)."
+        ? "Names the client brand and the rival and asks which one to pick (any framing is fine as long as it asks for the pick)."
         : "Names the client brand and the rival and asks which one to pick, and why - no situation, no criteria.",
       why: considered
         ? "A considered market weighs finalists head-to-head before committing."
@@ -618,7 +621,7 @@ export function stageLibrary(m: Moderators): LibraryStage[] {
       key: "business_case", label: "Business case", layer: "decision",
       situational: true, rivals: "none", tag: "judges",
       recommended: m.decision_unit === "committee",
-      hint: "An internal champion in this situation asks for help justifying the client brand, by name, to a CFO, procurement or a security review - no rival named.",
+      hint: "An internal champion in this situation asks for help justifying the client brand, by name, to the people who sign off on the purchase - no rival named.",
       why: m.decision_unit === "committee"
         ? "Committee-bought: someone has to justify the pick internally, and assistants write that case."
         : `A ${m.decision_unit === "household" ? "household" : "solo"} buyer doesn't have to sell the decision internally.`,
@@ -652,7 +655,7 @@ export function stageLibrary(m: Moderators): LibraryStage[] {
     {
       key: "expansion", label: "Expansion", layer: "loyalty",
       situational: false, rivals: "none", tag: "steers", recommended: true,
-      hint: "A satisfied customer names the client brand and ONE specific growth step (more teams, seats or uses) and asks whether to grow with it - no rival named, never a support or fix-it ask.",
+      hint: "A satisfied customer names the client brand and ONE specific way of using it more, natural for this category, and asks whether to do it - no rival named, never a support or fix-it ask.",
       why: "Happy customers ask whether to use you for more - growth the assistant can steer.",
     },
     {
@@ -863,7 +866,7 @@ export async function readScenarios(input: {
   // column onto one feature), and never a platform-switch room in a
   // platform-tied category - any stated direction locks a leading maker out
   // (Pixel's "Ecosystem switcher" excluded iPhone from six cells).
-  const key = cacheKey("scenarios_journeys17", [
+  const key = cacheKey("scenarios_journeys18", [
     input.category, input.audience, input.forBrand ?? "",
   ]);
   const read = await coalesced<{
@@ -889,13 +892,11 @@ export async function readScenarios(input: {
           "ONLY if it changes what a competent advisor would recommend - " +
           "facts about the decision, never facts about the speaker. Labels " +
           "are 2-4 plain words naming the buyer or the circumstance the " +
-          "way a strategist would title a slide ('Solo founder pick', " +
-          "'Enterprise procurement') - never analytical or methodology " +
+          "way a strategist would title a slide - never analytical or methodology " +
           "words like 'default', 'habitual', 'segment', 'use case'. " +
           "Descriptions ONE short plain sentence. Each scenario is a ROOM: " +
           "a buyer occasion in this category - who the buyer is and the " +
-          "situation they are in ('existing carrier customer upgrading " +
-          "with trade-in credits', 'migrating from a legacy tracker'). " +
+          "situation they are in. " +
           "Describe what is happening, never a list of features or criteria " +
           "the buyer wants - the answer decides what matters - and never a " +
           "specific brand or product. A room is CONTESTED: most of the " +
@@ -903,14 +904,15 @@ export async function readScenarios(input: {
           "buyer; a room only one product line serves, or one that belongs " +
           "to a different category, is not this market's room. A room never " +
           "builds in a platform or ecosystem preference that rules out a " +
-          "leading contender ('upgrading my Android phone' excludes iPhone " +
-          "buyers - say 'upgrading a phone I've had for years'), and is never " +
+          "leading contender (naming one platform or ecosystem shuts out " +
+          "the brands tied to the others - describe the situation without " +
+          "it), and is never " +
           "built on switching between competing platforms or ecosystems when " +
           "the category's leading brands are tied to them (any stated " +
           "direction rules a leading maker out). A room is a buyer's " +
-          "circumstance, never a product capability or feature ('rolling " +
-          "out roadmaps' is a feature; 'a fast-growing team outgrowing its " +
-          "first tool' is a circumstance). Spend the " +
+          "circumstance, never a product capability or feature (a label " +
+          "that names something the product does, rather than something " +
+          "happening to the buyer, is a capability). Spend the " +
           "slots on DIFFERENT axes of circumstance (scale, composition, " +
           "constraint, occasion, recipient), not variants of one.\n" +
           "2) per scenario, deviates: true ONLY if that scenario's buyer " +
@@ -934,18 +936,9 @@ export async function readScenarios(input: {
           "deviates is false, journey just repeats the base values.\n" +
           "What good looks like - each scenario is a room the client's " +
           "brand has to win, vivid enough that a strategist would present " +
-          "it by name. For 'email marketing platforms / e-commerce brands' " +
-          "the core set might be: 'First store setup' (a shop owner wiring " +
-          "up email before launch weekend), 'Agency managing brands' (one " +
-          "team running campaigns for a dozen clients), 'Outgrowing the " +
-          "starter tool' (lists too big, automations too crude, " +
-          "deliverability slipping), 'Marketing team consolidation' " +
-          "(email, SMS and reviews pulled into one stack under one budget " +
-          "owner). Notice: concrete moments, different axes, each changes " +
-          "what an advisor recommends, none is a demographic. Write YOUR " +
-          "category at that standard - the example is a bar for quality, " +
-          "never a template for content, and never a template for SHAPE: " +
-          "your market's rooms are its own.\n" +
+          "it by name: a concrete moment, each core room on a different " +
+          "axis, each changing what an advisor recommends, none a " +
+          "demographic. Your market's rooms come from your market.\n" +
           "Before returning, audit the core four for coverage: rank this " +
           "market's buying rooms by how much revenue moves through them, " +
           "ensuring a diverse sampling, and check none of the biggest is " +
@@ -1092,7 +1085,7 @@ const SITUATION_TEMPLATE: Record<Moderators["decision_unit"], string> = {
   household:
     "buyer circumstances for a consumer purchase: occasions, recipients (buying for self vs someone else), and constraints (budget, sensitivities). ",
   solo:
-    "buyer circumstances for an individual considered purchase: use-cases, budget tiers, and ecosystem/compatibility constraints. ",
+    "buyer circumstances for an individual considered purchase: use-cases, budget tiers, and constraints. ",
 };
 
 /**
@@ -1111,7 +1104,7 @@ export async function suggestScenario(input: {
 }): Promise<Situation | null> {
   tagCosts({ purpose: "setup:scenario_suggest" });
   const avoid = input.exclude.map((s) => s.label.trim().toLowerCase()).filter(Boolean).sort();
-  const key = cacheKey("scenario_more4", [
+  const key = cacheKey("scenario_more5", [
     input.category, input.audience, input.decisionUnit, avoid.join("|"),
   ]);
   const hit = await store.cacheGet(key, CACHE_TTL_MS);
@@ -1130,7 +1123,7 @@ export async function suggestScenario(input: {
           "competent advisor would recommend - facts about the decision, never " +
           "facts about the speaker. It must be genuinely different from every " +
           "situation already listed (a different axis of circumstance, not a " +
-          "variant of one). Scenarios describe circumstances, never a specific brand or product - 'migrating from a legacy tracker', not 'migrating from X'. Use " + SITUATION_TEMPLATE[input.decisionUnit] +
+          "variant of one). Scenarios describe circumstances, never a specific brand or product. Use " + SITUATION_TEMPLATE[input.decisionUnit] +
           "Label 2-4 plain words naming the buyer or the circumstance the " +
           "way a strategist would title a slide - never analytical or " +
           "methodology words like 'default', 'habitual', 'segment', 'use " +
@@ -1182,7 +1175,7 @@ export async function nearScenarios(input: {
   // headline label naming the adjusted angle, not the original label with
   // a sentence change; and adjustments stay circumstance-shaped (the room
   // rule: no feature emphasis like "low-light photos").
-  const key = cacheKey("scenario_near_pool6", [
+  const key = cacheKey("scenario_near_pool7", [
     input.category, input.audience, input.of.label, input.of.description, avoid.join("|"),
   ]);
   const hit = await store.cacheGet(key, CACHE_TTL_MS);
@@ -1206,16 +1199,14 @@ export async function nearScenarios(input: {
           "or setting, a different scale, or who else is involved - never a " +
           "list of wanted features. Give each variant its OWN label: a " +
           "slight change of the original headline that names the adjusted " +
-          "angle ('Carrier trade-in upgrade' -> 'Carrier upgrade at launch'), " +
-          "never the original label unchanged. Change a different part per " +
+          "angle, never the original label unchanged. Change a different part per " +
           "variant and order them closest-first. Each " +
           "variant should shift what an advisor would emphasize, differ " +
           "from the others and from everything already listed, and stay " +
           "about the decision (never the speaker). NEVER introduce a money " +
-          "angle (lower cost, budget, refurbished, financing, deals) unless " +
+          "angle unless " +
           "the original situation is itself about price. Scenarios describe " +
-          "circumstances, never a specific brand or product - 'migrating " +
-          "from a legacy tracker', not 'migrating from X'. Labels 2-4 plain " +
+          "circumstances, never a specific brand or product. Labels 2-4 plain " +
           "words, never analytical or methodology words like 'default', " +
           "'habitual', 'segment', 'use case'. Descriptions one short sentence.",
       },
@@ -1859,7 +1850,7 @@ export async function checkRooms(input: {
   } catch { /* fail open: unjudged hits count as named */ }
   const namesOf = (r: Situation) =>
     [input.brand, ...rivals].filter((b) => textNamesBrand(roomText(r), b));
-  const keyOf = (r: Situation) => cacheKey("room_check4", [
+  const keyOf = (r: Situation) => cacheKey("room_check5", [
     DESIGN_CHECK_MODEL, input.brand, input.category, [...rivals].map((x) => x.toLowerCase()).sort().join(","),
     `${r.label.trim()}|${r.description.trim()}`,
   ]);
@@ -1882,10 +1873,10 @@ export async function checkRooms(input: {
         system:
           `Each buying room below is a buyer occasion in the ${input.category} market. For each room give:\n` +
           `- contenders: which of these brands are plausible contenders for that room's buyer - ${rivals.join(", ")} - names exactly as given. A brand contends when a buyer in that room would reasonably consider it; it need not be the favorite.\n` +
-          `- pitch: if the room's wording borrows ONE specific brand's own selling-point vocabulary (its signature feature names, taglines or platform labels) instead of the buyer's outcome language, quote that phrase; otherwise an empty string. Buyer outcomes every contender speaks to ("wants the best camera", "needs it running this week") are not pitch.\n` +
-          `- capability: true when the room is a product capability or feature being adopted ("rolling out portfolio planning", "adopting roadmaps") rather than a buyer's circumstance (who they are and what situation they are in).\n` +
-          `- platformSwitch: true when the room is about switching between competing platforms or ecosystems (leaving one phone platform for another, moving between app ecosystems) - any direction a question must state rules a leading brand out. Moving off a legacy or homegrown tool is NOT a platform switch.\n` +
-          `- noChoice: true when the room's buyer makes no real choice between products - accepting the next model by default, auto-renewing, taking whatever is in stock without comparing - so there is nothing for an answer to steer.\n` +
+          `- pitch: if the room's wording borrows ONE specific brand's own selling-point vocabulary (its signature feature names, taglines or platform labels) instead of the buyer's outcome language, quote that phrase; otherwise an empty string. Buyer outcomes every contender speaks to are not pitch.\n` +
+          `- capability: true when the room is a product capability or feature being adopted rather than a buyer's circumstance (who they are and what situation they are in).\n` +
+          `- platformSwitch: true when the room is about switching between competing platforms or ecosystems - any direction a question must state rules a leading brand out. Moving off an old or homegrown solution is NOT a platform switch.\n` +
+          `- noChoice: true when the room's buyer makes no real choice between products - accepting the next model by default without comparing - so there is nothing for an answer to steer.\n` +
           `Reply with ONLY JSON: {"rooms": [{"contenders": [...], "pitch": "...", "capability": false, "platformSwitch": false, "noChoice": false}, ...]} - one entry per room, in order.`,
         messages: [{
           role: "user",
@@ -2230,7 +2221,7 @@ export async function reviewCells(input: {
   // and buyer-style blends on the same audit corpus.
   // review5: must-name brand rule for the A3 + settled-customer stages
   // (2026-09-27) - brand-free wording there is now a branding flag.
-  const key = cacheKey("cell_review5", [
+  const key = cacheKey("cell_review6", [
     input.brand, input.category, input.audience, input.competitors.join(","),
     input.candidates.map(fp).join("~"),
   ]);
@@ -2248,10 +2239,10 @@ export async function reviewCells(input: {
       // the writer to name it) - both may name the client, never a rival.
       ? MUST_NAME_STAGES.has(c.stageKey ?? c.stage)
         ? `must name ${input.brand}: the stage concerns the customer's own ` +
-          `${input.brand}, and a wording that leaves it implied ("my ` +
-          `subscription", "the service") breaks the measurement` +
+          `${input.brand}, and a wording that leaves it implied breaks the ` +
+          `measurement` +
           (c.stage === "advocacy"
-            ? ` - a rival may appear only as the counterpart being persuaded ("my iPhone friend says...")`
+            ? ` - a rival may appear only as the counterpart being persuaded`
             : ` - never a rival`)
         // Tags are narrative only (2026-09-28 demotion): the sole surviving
         // beneficiary of the old judges/steers tag rule is pricing, whose
@@ -2404,9 +2395,7 @@ const CELL_WRITER_SYSTEM =
           "never one picked because it suits the client), the asker's usage " +
           "a value ask needs. Fragments happen; details are unpolished. " +
           "NEVER ad-copy patterns - no parallel lists of " +
-          "three, no balanced drama ('X is impossible and Y is a " +
-          "nightmare'), no polished metaphors, no rhetorical closers " +
-          "('get everyone on the same page'). If it would read well on a " +
+          "three, no balanced drama, no polished metaphors, no rhetorical closers. If it would read well on a " +
           "landing page, rewrite it until it reads like a chat message.\n" +
           "Rules:\n" +
           "- angle=generic: never name any brand - blind prompts are the " +
@@ -2417,57 +2406,47 @@ const CELL_WRITER_SYSTEM =
           "brand AND that rival; for alternatives-type stages, ask for " +
           "alternatives to that rival (client brand NOT named), stating the " +
           "move PLAINLY with no reason given: a leave-reason that says what " +
-          "the rival lacks or who it fails ('too lightweight for our dev " +
-          "team') steers the answer toward one kind of replacement and " +
-          "poisons the measurement - and so does the asker's team or segment " +
-          "identity ('for our dev team'): the category word is the ONLY " +
-          "anchor. That plainness is a SHAPE, not a " +
-          "sentence to copy: vary the voice across these cells ('Done with " +
-          "my iPhone - what phone should I get instead?', 'leaving " +
-          "monday.com. name a few solid alternatives to try'), write 'I' " +
-          "for personal products and 'we' for team tools, use the name a " +
-          "buyer types ('iPhone', never the roster string 'Apple iPhone'), " +
-          "and keep the category clear in each ask.\n" +
+          "the rival lacks or who it fails steers the answer toward one kind " +
+          "of replacement and poisons the measurement - and so does the " +
+          "asker's team or segment identity: the category word is the ONLY " +
+          "anchor. Vary the voice across these cells, write 'I' for personal " +
+          "products and 'we' for team tools, use the name a buyer types " +
+          "rather than a roster string, and keep the category clear in each " +
+          "ask.\n" +
           "- A comparison cell (angle=<rival> or angle=class) is " +
           "CIRCUMSTANCE-NEUTRAL: ask the head-to-head about the category " +
           "plainly - which one, which would you pick and why, where does " +
           "each win - and give the asker NO situation at all. No role or " +
-          "identity (a student, a founder, a parent), no usage amounts or " +
-          "frequencies, no occasion or project ('setting up', 'replacing', " +
-          "'for my trip'), no spec or size qualifier, no criteria list that " +
+          "identity, no usage amounts or frequencies, no occasion or " +
+          "project, no spec or size qualifier, no criteria list that " +
           "implies a situation: any such detail becomes a fact every " +
           "paraphrase must keep, and the measurement is the head-to-head " +
           "itself, never one buyer's story. EVERY comparison names both " +
           "brands and asks which one the answer would pick, and why - a " +
           "strengths tour that never asks for the pick is not a " +
           "head-to-head. Wording is free and varies across a battery's " +
-          "comparison cells; keep the category clear (a bank or " +
-          "multi-product company name like Chase or Citi needs it) and " +
-          "grammatical ('as a project management tool', never a plural " +
+          "comparison cells; keep the category clear (a company that sells " +
+          "in several categories needs it) and grammatical (never a plural " +
           "category pasted into a singular slot).\n" +
           "- angle=defensive: an EXISTING customer of the client brand, " +
           "weighing a move away, asks for alternatives to it by name - " +
-          "never a prospect ('if we don't go with it').\n" +
+          "never a prospect who simply hasn't chosen it.\n" +
           "- angle=class(<class>): a head-to-head of the client brand against " +
           "a CLASS of products, not a company - name the client brand and " +
-          "speak the class naturally, the way a buyer does ('or should I " +
-          "get a Visa card?' - no belittling 'just': the two sides are " +
-          "weighed even). NEVER name any specific rival company, issuer " +
+          "speak the class naturally, the way a buyer does, with no " +
+          "belittling 'just': the two sides are weighed even. NEVER name any specific rival company, issuer " +
           "or product: the class itself is the counterpart. Never append a " +
-          "redundant category clause the class already carries ('a Visa " +
-          "card for credit cards'), and keep a battery's class cells " +
+          "redundant category clause the class already carries, and keep a battery's class cells " +
           "parallel in shape so their rates compare.\n" +
           "- Retention and loyalty stages speak as an existing customer and " +
           "MUST name the client brand: a churn, renewal, support, expansion, " +
-          "ecosystem or advocacy ask that leaves the brand implied ('my " +
-          "subscription', 'the service') is a defect, never a variant. The " +
-          "relationship is stated as fact ('Amex is my main card'), never " +
-          "hypothetically ('if Amex is my main card').\n" +
+          "ecosystem or advocacy ask that leaves the brand implied is a " +
+          "defect, never a variant. The relationship is stated as fact, " +
+          "never hypothetically.\n" +
           "- Churn and renewal cells make LEAVING a live option the question " +
           "actually weighs, and never foreclose STAYING: the asker is " +
           "deciding whether to keep the brand, not announcing a decision and " +
-          "not asking for a fix. Both options need not be spelled out ('is " +
-          "Netflix still worth it with these price hikes?' qualifies), but a " +
+          "not asking for a fix. Both options need not be spelled out, but a " +
           "fix-it or how-to ask with a token 'or' tacked on is a support " +
           "question, not churn, and pause vs cancel is two ways of leaving. " +
           "A renewal " +
@@ -2479,43 +2458,36 @@ const CELL_WRITER_SYSTEM =
           "price has its own cells, and bolting it on muddies whose worry " +
           "drove the exit.\n" +
           "- situation: weave the circumstance in naturally, as the asker's " +
-          "OWN situation ('this would be my first credit card', 'we're " +
-          "about 120 people and doubling') - never as a topic opener " +
-          "('First card question:'), NEVER the scenario's label text " +
-          "('Party hosting cart' is a plan label, not something a person " +
-          "types), and never the plan's segment vocabulary ('mid-market', " +
-          "'enterprise standardization' are OUR words - buyers say their " +
-          "size and stakes in plain words).\n" +
+          "OWN situation - never as a topic opener, NEVER the scenario's " +
+          "label text (a plan label is not something a person types), and " +
+          "never the plan's segment vocabulary (buyers say their size and " +
+          "stakes in plain words).\n" +
           "- Value cells (stage key pricing) ask the CLIENT BRAND'S value " +
           "question for this column's buyer: name the client brand, set it " +
-          "against a GENERIC cheaper alternative in the category ('a " +
-          "cheaper phone', 'store-brand chips', 'a no-annual-fee card', 'a " +
-          "cheaper streaming service') - NEVER the brand's own lower tier or " +
+          "against a GENERIC cheaper alternative in the category, described " +
+          "by what it is, not by name - NEVER the brand's own lower tier or " +
           "plan, which keeps every answer inside the brand - give the " +
-          "asker's usage in plain words ('we watch most nights', 'I keep a " +
-          "phone 3 or 4 years'; numbers are allowed, never required), and " +
-          "ask for the call. When the brand sells several distinct product " +
-          "lines, name the LINE being weighed ('an Amex travel card', 'a " +
-          "Pixel Pro') - never an exact model, edition or year. Every value " +
+          "asker's usage in plain words (numbers are allowed, never " +
+          "required), and ask for the call. When the brand sells several " +
+          "distinct product lines, name the LINE being weighed - never an " +
+          "exact model, edition or year. Every value " +
           "cell asks " +
           "the SAME question; only the buyer changes. Never name a rival " +
           "(head-to-heads belong to comparison), never state a price (the " +
           "asker's own budget or an offer made to them is circumstance), " +
           "never a bare 'is it worth it?' with no usage (that is a worry), " +
-          "never a presupposed verdict ('that huge fee'), never a " +
+          "never a presupposed verdict, never a " +
           "spreadsheet of figures.\n" +
           "- Objections speak as a PROSPECT weighing the purchase - 'should " +
           "I drop or cancel it' is a churn/renewal question, never an " +
           "objection. A confusion- or complexity-shaped concern is voiced " +
-          "as DISTRUST ('these bonus rules feel designed to trip you up - " +
-          "will I actually get it?'), never as a request to explain the " +
-          "rules.\n" +
+          "as DISTRUST, never as a request to explain the rules.\n" +
           "- A doubt cell (objections, churn, renewal) STATES " +
           "the worry as the asker's own claim or feeling, something the " +
           "answer can confirm OR REBUT - never a neutral rules, " +
           "eligibility or how-to lookup on the topic, never an ask that " +
-          "only sizes an assumed problem ('how far behind is it?' presumes " +
-          "the gap - ask 'is it actually behind?'), and never an ask for a " +
+          "only sizes an assumed problem (ask whether the problem is real, " +
+          "not how big it is), and never an ask for a " +
           "price, a cost figure or the cost accounting (the money question " +
           "belongs to pricing).\n" +
           "- concern(<subject>) on a plan line: that cell's doubt is ABOUT " +
@@ -2526,15 +2498,13 @@ const CELL_WRITER_SYSTEM =
           "a concern(...) note: EACH cell voices a DIFFERENT real concern " +
           "buyers have about the client brand - never the same worry " +
           "(price, fees, performance) recycled across cells.\n" +
-          "- Product names date: name product LINES ('Pixel vs iPhone') or " +
-          "say 'the latest <line>' - never a specific model-year pairing " +
-          "('Pixel 9 Pro vs iPhone 15 Pro'). Engines correct a stale model " +
+          "- Product names date: name product LINES or say 'the latest " +
+          "<line>' - never a specific model or model year. Engines correct a stale model " +
           "premise instead of answering the question.\n" +
           "- Open-choice stages (discovery, " +
           "social_validation, feature_screening, premium_worth): the ask " +
-          "must invite NAMED picks - 'which ones', 'name a few worth a " +
-          "look' - never 'what should I look for', 'where do I find " +
-          "reviews', or a features-only essay ask. When the category is a " +
+          "must invite NAMED picks - never an ask for what to look for, " +
+          "where to find reviews, or a features-only essay. When the category is a " +
           "RETAILER category, the ask is which retailer to buy from, not " +
           "which product to buy.\n" +
           "- use_case: the situation plus ONE job to be done, asking which ONE " +
@@ -2551,13 +2521,11 @@ const CELL_WRITER_SYSTEM =
           "ask whether one named brand is worth it - that form belongs to " +
           "the worry cells.\n" +
           "- The category term is vocabulary: use the study category's own " +
-          "words ('tortilla chips', 'beauty retailers'), never a looser " +
-          "genericization ('chips', 'stores') in blind cells - the " +
+          "words, never a looser or broader word for it in blind cells - the " +
           "category anchors what is being measured. Blind means no BRAND " +
-          "names - the plain category noun ('my phone') is normal speech, " +
-          "never contorted around ('the thing in my pocket') - and no " +
-          "product term only one roster brand is known for ('charge card' " +
-          "points every answer at American Express).\n" +
+          "names - the plain category noun is normal speech, never contorted " +
+          "around - and no product term only one roster brand is known for " +
+          "(it points every answer at that brand).\n" +
           "- problem_recognition: the asker has a pain and isn't shopping for " +
           "a solution yet - they may own an older or makeshift product, but " +
           "never as a current customer of the client brand doubting it " +
@@ -2566,24 +2534,24 @@ const CELL_WRITER_SYSTEM =
           "closing every time. category_education asks what this kind of " +
           "product actually does and how people use it - nothing is broken " +
           "there, so never 'what fixes this'. Neither stage asks a yes/no " +
-          "reassurance question ('is this a common problem?'), a " +
+          "reassurance question, a " +
           "premium-vs-cheap tier question, or 'what specs or criteria " +
           "should I care about' (that is the criteria cell's question).\n" +
           "- criteria: the situation plus an ask for what actually matters - " +
           "NEVER offering candidate criteria for the answer to rank or " +
-          "complete ('is it SSO, reporting or something else?'): the " +
+          "complete: the " +
           "measurement is what the answer chooses to teach.\n" +
           "- repertoire: a buyer who usually picks the client brand names it " +
           "and asks whether to stick with it or try something else; the " +
           "trigger is habit or wanting variety, never a stated worry " +
           "(worries belong to churn).\n" +
           "- business_case: an internal champion in this situation asks for " +
-          "help justifying the client brand, by name, to a CFO, procurement " +
-          "or a security review - never a rival named, never a pricing " +
+          "help justifying the client brand, by name, to the people who sign " +
+          "off on the purchase - never a rival named, never a pricing " +
           "question.\n" +
           "- expansion: a satisfied customer names the client brand and ONE " +
-          "specific growth step (more teams, seats or uses) and asks whether " +
-          "to grow with it - never a rival, never a support or fix-it ask.\n" +
+          "specific way of using it more, natural for this category, and asks " +
+          "whether to do it - never a rival, never a support or fix-it ask.\n" +
           "- ecosystem: an existing customer names the client brand and asks " +
           "what to pair with it for ONE specific need.\n" +
           "- advocacy: a customer names the client brand and the person " +
@@ -2594,35 +2562,30 @@ const CELL_WRITER_SYSTEM =
           "requirements is survey-speak even in a short prompt (pick the " +
           "two or three this asker would actually type), and an ask with " +
           "two readings measures neither. ONLY when the circumstance is a " +
-          "switch between competing platforms or ecosystems (phone operating " +
-          "systems, app ecosystems), state the DIRECTION by naming both " +
-          "platforms (the one being left and the one being joined) - OS names " +
-          "are direction vocabulary, not brand names; moving off a legacy " +
-          "tool or replacing a card needs no named source. 'Switching platforms', " +
-          "'moving between ecosystems' " +
-          "and 'from one platform to another' are NOT directions: every " +
+          "switch between competing platforms or ecosystems, state the " +
+          "DIRECTION by naming both platforms (the one being left and the " +
+          "one being joined) - platform names are direction vocabulary, not " +
+          "brand names; any other change of tool or provider needs no named " +
+          "source. A switch with no stated direction is NOT a direction: every " +
           "answer then guesses which way, and the guess decides which " +
           "products get named. The direction must leave the CLIENT brand " +
           "an eligible answer - a switch toward a platform the client " +
-          "doesn't run on (toward iOS, on an Android brand's study) " +
-          "excludes it by construction.\n" +
+          "doesn't run on excludes it by construction.\n" +
           "- Never a calendar year in a prompt ('in 2026'): trackers re-ask " +
-          "prompts for years and a dated prompt goes stale - say 'right " +
-          "now'.\n" +
+          "prompts for years and a dated prompt goes stale.\n" +
           "- Sibling cells of one stage VARY voice and framing: four cells " +
           "that are one sentence with the name swapped read machine-written, " +
-          "and a persona the scenario contradicts (a 12-person startup " +
-          "with a CFO) breaks the voice.\n" +
+          "and a persona the scenario contradicts breaks the voice.\n" +
           "- Never use planning vocabulary in a prompt: 'spec-driven', " +
           "'trust-driven', 'think/feel', 'value math', 'run the math', " +
-          "segment labels ('mid-market', 'SMB', 'enterprise-wide'), journey " +
-          "or scenario terms are OURS, not the asker's.\n" +
+          "segment labels, journey or scenario terms are OURS, not the " +
+          "asker's.\n" +
           "- journey(...): that cell's buyer decides that way - write the " +
           "prompt in that buyer's register.\n" +
           "- reach=<scenarios>: this single cell is asked by buyers in those " +
           "scenarios only - voice it for them.\n" +
           "- Punctuation people actually type: never an em dash, never the " +
-          "tilde character - write 'about 10', not '~10'.\n" +
+          "tilde character.\n" +
           "- The text field holds ONLY the final prompt exactly as the " +
           "person would type it: never a note to yourself, a correction " +
           "('sorry', 'instead:'), a reference to the seed or this task, or " +
@@ -2848,8 +2811,7 @@ export async function generateWorries(input: {
             "performance, complexity, policy/trust, availability, service, " +
             "lock-in, ...), most widely-voiced first. At most TWO " +
             "price/cost/value-class worries in the whole list, and a price " +
-            "worry is ATTITUDE-shaped (the fee feels high, not worth " +
-            "renewing) - never a request to run the value math; the " +
+            "worry is ATTITUDE-shaped (how the cost feels to the buyer) - never a request to run the value math; the " +
             "pricing battery owns the math. Real worries " +
             "people actually raise, never invented ones.\n" +
             "For each worry give: `worry` (2-6 plain words), `detail` (ONE " +
@@ -3813,7 +3775,7 @@ export async function generateGrid(input: {
     if (seg)
       out.push({
         check: "segment_vocabulary" as const,
-        detail: `"${seg[0]}" is planning vocabulary no buyer uses about themselves - voice the size or stakes in plain words ("we're about 120 people and doubling", "picking one tool for the whole company")`,
+        detail: `"${seg[0]}" is planning vocabulary no buyer uses about themselves - voice the size or stakes in plain words`,
       });
     // r8 (2026-10-01): a directionless switch is detected by ABSENCE, not a
     // banned-phrase list - the writer dodged four widenings of the list
@@ -3846,7 +3808,7 @@ export async function generateGrid(input: {
     if (spec.brandMode === "comparison_class" && new RegExp(`\\bfor\\s+${input.category.trim().replace(/[.*+?^${}()|[\]\\]/g, "\\$&").replace(/\\s+/g, "\\\\s+")}\\b`, "i").test(c.text))
       out.push({
         check: "class_category_tail" as const,
-        detail: `the class phrase already carries the category - drop the redundant "for ${input.category}" tail ("${input.brand} or a Visa card for credit cards" is not how anyone talks)`,
+        detail: `the class phrase already carries the category - drop the redundant "for ${input.category}" tail - it is not how anyone talks`,
       });
     // Stated prices (r12-r14) and money bolt-ons on non-price worries
     // (r8-r14) - pure functions in battery_checks so the validation harness
@@ -4634,7 +4596,9 @@ export interface Phrasing {
 // names the category, the cell's circumstance/worry or its stage's ask
 // verbs (avoidExempt) - retries were being steered away from the very
 // words that define the question.
-const PHRASINGS_VERSION = "p9";
+// "p10" (2026-10-03, Tyler: no category or brand examples in prompt text): the paraphrase writer's examples (roles, category terms,
+// spec terms, qualifiers) are described, never quoted.
+const PHRASINGS_VERSION = "p10";
 // Over-generate so the overlap filter can be strict and still fill the set.
 const PHRASINGS_EXTRA = 3;
 /** Blind cells get a wider first-pass margin: with no brand tokens to
@@ -4839,7 +4803,7 @@ export async function generatePhrasings(input: {
       return brandSignature(c.text, input.brand, rivals) === ""
         ? MUST_NAME_STAGES.has(c.stage)
           ? `\n   [this stage must name ${input.brand}: every paraphrase names ${input.brand} (the seed's blind wording is a legacy defect - do not preserve it), never a rival]`
-          : `\n   [deliberately blind variant: name NO brand - the guidance's subject stays implied ("my subscription", "the service"), never named]`
+          : `\n   [deliberately blind variant: name NO brand - the guidance's subject stays implied by the category noun, never named]`
         : "";
     };
     const cellText = subset
@@ -4895,15 +4859,12 @@ export async function generatePhrasings(input: {
             "symptoms); describe the circumstance in your own words or leave " +
             "details out entirely. NUMBERS are different: a number in the " +
             "seed is a FACT of the designed question - keep it exactly as " +
-            "written or leave it out, NEVER swap it for a different value " +
-            "('0% for 24 months' must never become 'about 18 months'), and " +
+            "written or leave it out, NEVER swap it for a different value, and " +
             "never add a number the seed does not carry. Standard spec terms " +
-            "are vocabulary, not quantities - 4K, 5G, HDR10, USB-C stay as " +
-            "written. Some askers give backstory, some just ask.\n" +
-            "Vary, across the set: who is asking (pick realistic roles for the " +
-            "audience - e.g. founder, engineering manager, IT director, " +
-            "procurement, a parent, a gift buyer - and tag each with `asker`), " +
-            "register (casual forum post to formal RFP language), length (a " +
+            "are vocabulary, not quantities - they stay as written. Some askers give backstory, some just ask.\n" +
+            "Vary, across the set: who is asking (pick roles realistic for THIS audience and " +
+            "circumstance, and tag each with `asker`), register (casual to " +
+            "formal, as fits the audience), length (a " +
             "terse 8-word ask to a two-sentence backstory), and question form.\n" +
             "Rules:\n" +
             "- If the seed names NO brand, name NO brand or product in any " +
@@ -4912,23 +4873,20 @@ export async function generatePhrasings(input: {
             "brand - the note wins, every paraphrase names it.\n" +
             "- NEVER import a brand from the Rivals line above into a " +
             "paraphrase whose seed does not name it - the roster is context " +
-            "for you, not vocabulary for the asker (a Pixel owner wondering " +
-            "about switching does not recite four competitor names).\n" +
+            "for you, not vocabulary for the asker.\n" +
             "- If the seed names brands, every paraphrase names exactly those " +
             "same brands and no others.\n" +
             "- Never change the circumstance or the decision being made; never " +
             "add a new constraint the seed does not have.\n" +
-            "- Keep the seed's category term exactly: 'tortilla chips' stays " +
-            "'tortilla chips', never 'chips' or 'snacks' - the category term " +
-            "is part of the measurement. Never copy a scenario label's text " +
+            "- Keep the seed's category term exactly, never a shorter or " +
+            "broader word for it - the category term is part of the " +
+            "measurement. Never copy a scenario label's text " +
             "into a paraphrase.\n" +
             "- Defining qualifiers in the seed are FACTS, like its numbers: " +
-            "a genre, cuisine, nationality, material or format ('Korean " +
-            "thrillers', 'mineral sunscreen') stays exactly as written - " +
-            "'Korean' never becomes 'Asian', 'subtitled' or 'foreign'.\n" +
-            "- Blind means no BRAND names. The plain category noun ('my " +
-            "phone', 'tortilla chips') is normal speech - never contort " +
-            "around it ('the thing in my pocket', 'my carried device').\n" +
+            "a genre, cuisine, nationality, material or format stays exactly " +
+            "as written, never broadened to a wider class.\n" +
+            "- Blind means no BRAND names. The plain category noun is normal " +
+            "speech - never contort around it.\n" +
             "- Never use planning vocabulary in a prompt: 'spec-driven', " +
             "'trust-driven', 'think/feel', journey or scenario terms are " +
             "OURS, not the asker's.\n" +
@@ -4941,7 +4899,7 @@ export async function generatePhrasings(input: {
             "- No verbatim repeats, no trivial reorderings; each paraphrase " +
             "should be something a different person would plausibly type.\n" +
             "- Punctuation people actually type: never an em dash, never the " +
-            "tilde character - write 'about 10', not '~10'.\n" +
+            "tilde character.\n" +
             "- The text field holds ONLY the final prompt exactly as the " +
             "person would type it: never a note to yourself, a correction " +
             "('sorry', 'instead:'), a reference to the seed or this task, " +

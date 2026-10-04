@@ -51,7 +51,8 @@ export async function getBrandProfile(brand: string): Promise<BrandProfile> {
   // category's buyer segment, never the client's positioning - Pixel's
   // "clean, Google-powered Android" audience leaked into its scenarios,
   // its blind cells and its roster typing (iPhone read as upstream).
-  const key = cacheKey("analyze2", [BRAND_PROFILE_MODEL, "p3-segment", brand]);
+  // p4-noexamples (2026-10-03, Tyler: no category or brand examples in prompt text).
+  const key = cacheKey("analyze2", [BRAND_PROFILE_MODEL, "p4-noexamples", brand]);
   const hit = await store.cacheGet(key, CACHE_TTL_MS);
   if (hit) return JSON.parse(hit) as BrandProfile;
   const profile = await suggestBrandProfile(brand);
@@ -377,8 +378,7 @@ export async function suggestBrandProfile(
           "You help set up brand-visibility tracking for AI answer engines. " +
           "Given a brand, identify:\n" +
           "- category: the competitive category as a short plural noun phrase, " +
-          "worded the way a buyer would actually type it — 'CRM software', " +
-          "'assisted living communities', 'electric SUVs'. At most ONE " +
+          "worded the way a buyer would actually type it. At most ONE " +
           "qualifier, and only when the market truly needs it; never stack " +
           "qualifiers, and never use a lone broad word like 'software' or " +
           "'companies'.\n" +
@@ -391,14 +391,12 @@ export async function suggestBrandProfile(
           "or same-subculture alternatives nobody weighs seriously.\n" +
           "The category label must be broad enough to contain every " +
           "competitor listed - never name a category that excludes one of " +
-          "them (e.g. not 'Android smartphones' with iPhone as a rival).\n" +
+          "them.\n" +
           "- audience: the category's primary buyers in a short phrase - WHO " +
-          "they are and what they are trying to get done, in category terms " +
-          "('people choosing a new smartphone - upgraders and switchers', " +
-          "'software development teams'). Never the brand's own positioning " +
+          "they are and what they are trying to get done, in category terms. " +
+          "Never the brand's own positioning " +
           "or selling points, and never a platform or ecosystem preference " +
-          "that rules rivals out ('buyers wanting a clean Android phone' " +
-          "excludes iPhone buyers).\n" +
+          "that rules rivals out.\n" +
           "If the brand is ambiguous or unknown, pick the most likely commercial " +
           "interpretation and answer anyway.",
       },

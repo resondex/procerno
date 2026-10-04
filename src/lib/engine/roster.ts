@@ -33,8 +33,9 @@ import type { RosterRole } from "./battery_checks";
  * company (sister-brand tag), head-to-head rank + reason (the market
  * step's pre-picks), and buyability judged against the category's buyers
  * rather than a platform preference worded into the audience (Pixel's
- * "Android" audience had typed Apple iPhone upstream). */
-const ROSTER_VERSION = "roster3";
+ * "Android" audience had typed Apple iPhone upstream).
+ * roster4 (2026-10-03, Tyler: no category or brand examples in prompt text). */
+const ROSTER_VERSION = "roster4";
 const CACHE_TTL_MS = 183 * 24 * 3600 * 1000; // ~6 months, like other setup calls
 
 export interface RosterVerdict {
@@ -159,9 +160,8 @@ export async function classifyRoster(input: {
           content:
             "You type the competitors on a brand-tracking study by WHO EACH " +
             "BRAND SELLS TO. For the client brand and each competitor:\n" +
-            "- sellsTo: the brand's customer sets as short plain noun phrases " +
-            "(e.g. 'consumers', 'small businesses', 'enterprises', 'banks', " +
-            "'merchants', 'retailers', 'software teams'). A brand selling to " +
+            "- sellsTo: the brand's customer sets as short plain noun phrases. " +
+            "A brand selling to " +
             "several sets lists them all.\n" +
             "For each COMPETITOR also:\n" +
             "- audienceBuyable: true when the study's AUDIENCE is among the " +
@@ -169,38 +169,32 @@ export async function classifyRoster(input: {
             "FROM THAT BRAND, as an alternative to the client brand. False " +
             "when the brand sells to the client's rivals, intermediaries or " +
             "the trade, and reaches the audience only through another " +
-            "seller's product (a payment network behind banks' cards, an " +
-            "ingredient or component supplier behind finished goods, a " +
-            "wholesaler behind retailers). Selling to businesses is NOT by " +
+            "seller's product (a supplier whose offering reaches buyers only " +
+            "inside another company's product). Selling to businesses is NOT by " +
             "itself false: when the audience IS businesses, a B2B rival " +
             "selling to them is buyable. A brand that sells to both " +
             "consumers and businesses is buyable by either audience. Judge " +
             "buyability by whether the category's buyers can buy it, never " +
             "by a platform or ecosystem preference worded into the audience " +
-            "(an audience described as wanting Android can still buy an " +
-            "iPhone - a maker selling its finished product to buyers is " +
-            "buyable).\n" +
+            "(a maker selling its finished product to the category's buyers " +
+            "is buyable).\n" +
             "- note: ONE short plain line saying who it sells to relative to " +
-            "the audience (e.g. 'payment network - sells to card issuers and " +
-            "merchants, not cardholders').\n" +
+            "the audience.\n" +
             "- consumerSalient: ONLY for a competitor with audienceBuyable " +
             "false - true when the audience still CHOOSES BY this brand as a " +
-            "class of products they buy from other sellers (buyers ask for " +
-            "'a Visa card' or 'an Intel laptop'); false when buyers rarely " +
+            "class of products they buy from other sellers (buyers ask for a " +
+            "product by this brand's name); false when buyers rarely " +
             "think of the brand when choosing. Always false when " +
             "audienceBuyable is true.\n" +
             "- classPhrase: when consumerSalient is true, the natural phrase " +
             "a buyer uses for the brand as a product class, with its " +
-            "article ('a Visa card', 'a Mastercard card'); otherwise an " +
-            "empty string.\n" +
+            "article; otherwise an empty string.\n" +
             "- inCategory: true when the brand's competing offering is a " +
             "product in the study's CATEGORY as named. False for a brand " +
             "buyers might reach for on the same occasion that is a " +
-            "different kind of product (a cheese-puff or potato-chip brand " +
-            "on a 'tortilla chips' study; a help-desk tool on a 'project " +
-            "management software' study).\n" +
-            "- parent: the brand's parent company as commonly known " +
-            "('Atlassian', 'PepsiCo'), or the brand's own name when it is " +
+            "different kind of product.\n" +
+            "- parent: the brand's parent company as commonly known, " +
+            "or the brand's own name when it is " +
             "independent.\n" +
             "- h2hRank: for competitors that are audienceBuyable AND " +
             "inCategory, rank them 1, 2, 3, ... by how often buyers weigh " +
