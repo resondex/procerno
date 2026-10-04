@@ -1174,7 +1174,11 @@ export async function nearScenarios(input: {
   // with the same need and ONE phrase changed. pool3/4 still swapped in new
   // buyers ("vlogger", "gift for partner") or a refurbished price angle -
   // which read as "Suggest another", not a near neighbor.
-  const key = cacheKey("scenario_near_pool5", [
+  // pool6 (2026-10-03, Tyler): each variant gets its OWN slightly changed
+  // headline label naming the adjusted angle, not the original label with
+  // a sentence change; and adjustments stay circumstance-shaped (the room
+  // rule: no feature emphasis like "low-light photos").
+  const key = cacheKey("scenario_near_pool6", [
     input.category, input.audience, input.of.label, input.of.description, avoid.join("|"),
   ]);
   const hit = await store.cacheGet(key, CACHE_TTL_MS);
@@ -1193,12 +1197,14 @@ export async function nearScenarios(input: {
           "Propose exactly THREE near variants of a given buyer situation " +
           "for a research instrument. A near variant is the SAME buyer with " +
           "the SAME need, adjusted - not a new buyer, persona or occasion. " +
-          "Reuse the original's label and wording and change ONE phrase: a " +
-          "different emphasis within the same need (low-light photos " +
-          "instead of photos in general, video instead of stills), a " +
-          "tighter or looser constraint, or the setting it gets used in. " +
-          "Change a different phrase per variant, keep each label within a " +
-          "word or two of the original, and order them closest-first. Each " +
+          "Keep the original's wording and change ONE part of the " +
+          "circumstance: a tighter or looser constraint, a different timing " +
+          "or setting, a different scale, or who else is involved - never a " +
+          "list of wanted features. Give each variant its OWN label: a " +
+          "slight change of the original headline that names the adjusted " +
+          "angle ('Carrier trade-in upgrade' -> 'Carrier upgrade at launch'), " +
+          "never the original label unchanged. Change a different part per " +
+          "variant and order them closest-first. Each " +
           "variant should shift what an advisor would emphasize, differ " +
           "from the others and from everything already listed, and stay " +
           "about the decision (never the speaker). NEVER introduce a money " +
@@ -1801,6 +1807,10 @@ export interface RoomCheck {
   /** The room is a product capability or feature, not a buyer's
    * circumstance (Jira's "Portfolio planning at scale"). */
   capability: boolean;
+  /** The buyer in the room makes no real choice (accepts a default,
+   * renews automatically, takes whatever is in stock) - nothing for an
+   * answer to steer (Pixel's "Upgrade program autopilot"). */
+  noChoice: boolean;
   /** The room is a switch between competing platforms or ecosystems -
    * any direction its seeds must state locks a leading brand out
    * (Pixel's "Cross-ecosystem switcher"). */
@@ -1845,14 +1855,14 @@ export async function checkRooms(input: {
   } catch { /* fail open: unjudged hits count as named */ }
   const namesOf = (r: Situation) =>
     [input.brand, ...rivals].filter((b) => textNamesBrand(roomText(r), b));
-  const keyOf = (r: Situation) => cacheKey("room_check3", [
+  const keyOf = (r: Situation) => cacheKey("room_check4", [
     DESIGN_CHECK_MODEL, input.brand, input.category, [...rivals].map((x) => x.toLowerCase()).sort().join(","),
     `${r.label.trim()}|${r.description.trim()}`,
   ]);
   const keys = rooms.map(keyOf);
   let cached: Map<string, string>;
   try { cached = await store.cacheGetMany(keys, CACHE_TTL_MS); } catch { cached = new Map(); }
-  const verdicts = new Map<number, { contenders: string[]; pitch: string; capability?: boolean; platformSwitch?: boolean }>();
+  const verdicts = new Map<number, { contenders: string[]; pitch: string; capability?: boolean; platformSwitch?: boolean; noChoice?: boolean }>();
   rooms.forEach((_, i) => {
     const hit = cached.get(keys[i]);
     if (hit) { try { verdicts.set(i, JSON.parse(hit)); } catch { /* re-judge */ } }
@@ -1871,7 +1881,8 @@ export async function checkRooms(input: {
           `- pitch: if the room's wording borrows ONE specific brand's own selling-point vocabulary (its signature feature names, taglines or platform labels) instead of the buyer's outcome language, quote that phrase; otherwise an empty string. Buyer outcomes every contender speaks to ("wants the best camera", "needs it running this week") are not pitch.\n` +
           `- capability: true when the room is a product capability or feature being adopted ("rolling out portfolio planning", "adopting roadmaps") rather than a buyer's circumstance (who they are and what situation they are in).\n` +
           `- platformSwitch: true when the room is about switching between competing platforms or ecosystems (leaving one phone platform for another, moving between app ecosystems) - any direction a question must state rules a leading brand out. Moving off a legacy or homegrown tool is NOT a platform switch.\n` +
-          `Reply with ONLY JSON: {"rooms": [{"contenders": [...], "pitch": "...", "capability": false, "platformSwitch": false}, ...]} - one entry per room, in order.`,
+          `- noChoice: true when the room's buyer makes no real choice between products - accepting the next model by default, auto-renewing, taking whatever is in stock without comparing - so there is nothing for an answer to steer.\n` +
+          `Reply with ONLY JSON: {"rooms": [{"contenders": [...], "pitch": "...", "capability": false, "platformSwitch": false, "noChoice": false}, ...]} - one entry per room, in order.`,
         messages: [{
           role: "user",
           content: misses.map((i, k) => `${k + 1}. ${rooms[i].label}: ${rooms[i].description}`).join("\n"),
@@ -1882,13 +1893,13 @@ export async function checkRooms(input: {
       // Malformed JSON (an unescaped quote inside a pitch phrase) left three
       // brands' rooms unchecked in the 2026-10-03 draws: parse defensively,
       // then ask once more for strict JSON before failing open.
-      const parse = (t: string) => { try { return JSON.parse(firstJsonObject(t) ?? t) as { rooms?: { contenders?: string[]; pitch?: string; capability?: boolean; platformSwitch?: boolean }[] }; } catch { return null; } };
+      const parse = (t: string) => { try { return JSON.parse(firstJsonObject(t) ?? t) as { rooms?: { contenders?: string[]; pitch?: string; capability?: boolean; platformSwitch?: boolean; noChoice?: boolean }[] }; } catch { return null; } };
       let j = parse(text);
       if (!j) {
         const res2 = await a.messages.create({
           model: DESIGN_CHECK_MODEL, max_tokens: 1500, output_config: { effort: DESIGN_CHECK_EFFORT },
           system: "Reply with ONLY valid JSON, no prose. Quote marks inside strings must be escaped; if a pitch phrase contains a quote mark, drop it from the phrase.",
-          messages: [{ role: "user", content: `Rewrite this as valid JSON of the shape {"rooms": [{"contenders": [...], "pitch": "...", "capability": false, "platformSwitch": false}]}:\n${text}` }],
+          messages: [{ role: "user", content: `Rewrite this as valid JSON of the shape {"rooms": [{"contenders": [...], "pitch": "...", "capability": false, "platformSwitch": false, "noChoice": false}]}:\n${text}` }],
         } as never);
         j = parse((res2 as { content: { type: string; text?: string }[] }).content.filter((b) => b.type === "text").map((b) => b.text ?? "").join("").trim());
       }
@@ -1919,6 +1930,7 @@ export async function checkRooms(input: {
           pitch: humanize(String(row.pitch ?? "").replace(/\s*[—–]\s*/g, " - ")).slice(0, 80),
           capability: row.capability === true,
           platformSwitch: row.platformSwitch === true,
+          noChoice: row.noChoice === true,
         };
         verdicts.set(i, v);
         await store.cacheSet(keys[i], JSON.stringify(v), stampOf(input)).catch(() => {});
@@ -1930,7 +1942,7 @@ export async function checkRooms(input: {
   return rooms.flatMap((r, i) => {
     const v = verdicts.get(i);
     const names = namesOf(r);
-    if (!v && rivals.length > 0) return names.length > 0 ? [{ label: r.label, contenders: [], rivals: rivals.length, contested: true, pitch: "", names, capability: false, platformSwitch: false }] : [];
+    if (!v && rivals.length > 0) return names.length > 0 ? [{ label: r.label, contenders: [], rivals: rivals.length, contested: true, pitch: "", names, capability: false, platformSwitch: false, noChoice: false }] : [];
     const contenders = v?.contenders ?? [];
     const picks = (input.picks ?? []).filter((p) => rivals.includes(p));
     const contested = rivals.length === 0
@@ -1942,7 +1954,7 @@ export async function checkRooms(input: {
     // "Scoops" flag quoted a Tostitos line the room never mentioned).
     const pitchRaw = (v?.pitch ?? "").trim().replace(/^["']|["']$/g, "");
     const pitch = pitchRaw && roomText(r).toLowerCase().includes(pitchRaw.toLowerCase()) ? pitchRaw : "";
-    return [{ label: r.label, contenders, rivals: rivals.length, contested, pitch, names, capability: v?.capability === true, platformSwitch: v?.platformSwitch === true }];
+    return [{ label: r.label, contenders, rivals: rivals.length, contested, pitch, names, capability: v?.capability === true, platformSwitch: v?.platformSwitch === true, noChoice: v?.noChoice === true }];
   });
 }
 
@@ -1966,7 +1978,7 @@ export async function contestRoomSet(input: {
   const by = new Map(checks.map((c) => [c.label, c]));
   const passes = (s: ScenarioSpec) => {
     const c = by.get(s.label);
-    return !c || (c.contested && c.names.length === 0 && !c.pitch && !c.capability && !c.platformSwitch);
+    return !c || (c.contested && c.names.length === 0 && !c.pitch && !c.capability && !c.platformSwitch && !c.noChoice);
   };
   const scenarios = [...input.scenarios];
   let reserve = [...input.reserve];

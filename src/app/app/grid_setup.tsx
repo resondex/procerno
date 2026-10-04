@@ -1581,6 +1581,7 @@ interface RoomCheckUi {
   names: string[];
   capability?: boolean;
   platformSwitch?: boolean;
+  noChoice?: boolean;
 }
 
 export function ScenariosGate({
@@ -1708,7 +1709,7 @@ export function ScenariosGate({
   }, [checkSig, setupId]);
   /** A suggested room that fails the room rule is never offered. */
   const missingCheck = fitMissing ? roomChecks[roomKey(fitMissing)] : undefined;
-  const fitMissingShown = fitMissing && !(missingCheck && (!missingCheck.contested || missingCheck.names.length > 0 || missingCheck.pitch || missingCheck.capability || missingCheck.platformSwitch))
+  const fitMissingShown = fitMissing && !(missingCheck && (!missingCheck.contested || missingCheck.names.length > 0 || missingCheck.pitch || missingCheck.capability || missingCheck.platformSwitch || missingCheck.noChoice))
     ? fitMissing
     : null;
   const showFit = !fitDismissed && (fitFlags.length > 0 || fitMissingShown !== null);
@@ -2126,6 +2127,12 @@ export function ScenariosGate({
                 return (
                   <span className="text-warning" title="This reads as a product feature being adopted, not a buyer's situation - every question in its column would ask about that one feature.">
                     A feature, not a situation
+                  </span>
+                );
+              if (c.noChoice)
+                return (
+                  <span className="text-warning" title="The buyer here barely chooses (a default, an auto-renew, whatever is in stock) - there is little for an answer to steer.">
+                    No real choice made here
                   </span>
                 );
               if (c.platformSwitch)

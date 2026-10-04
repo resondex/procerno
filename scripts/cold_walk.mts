@@ -39,11 +39,23 @@ const { suggestBrandProfile } = await import(`${REPO}/src/lib/engine/suggest.ts`
 
 for (const brand of BRANDS) {
   const t0 = Date.now();
-  const profile = await suggestBrandProfile(brand);
+  // FIXED_CTX_DIR (2026-10-03): reuse a previous walk's profile and roster
+  // so a re-walk varies only what changed in the engine (the profile and
+  // roster re-roll on every fresh walk, which made rounds incomparable).
+  const slug0 = brand.toLowerCase().replace(/[^a-z0-9]+/g, "_");
+  const fixedCtx = process.env.FIXED_CTX_DIR
+    ? JSON.parse(fs.readFileSync(path.join(process.env.FIXED_CTX_DIR, `cold_context_${slug0}.json`), "utf8"))
+    : null;
+  const profile = fixedCtx ? fixedCtx.profile : await suggestBrandProfile(brand);
   console.log(`\n=== ${brand}\n[1 profile] category="${profile.category}" audience="${profile.audience}"`);
   console.log(`  competitors (${profile.competitors.length}):`, profile.competitors.join(", "));
 
-  const roster = await classifyRoster({ brand, category: profile.category, audience: profile.audience, competitors: profile.competitors });
+  const roster = fixedCtx
+    ? {
+        competitors: (fixedCtx.rosterDetail ?? []).map((v: Record<string, unknown>) => ({ ...v, role: (v.role === "bench" ? "same_seat" : v.role), consumerSalient: !!fixedCtx.rosterClasses?.[v.name as string], classPhrase: fixedCtx.rosterClasses?.[v.name as string] })),
+        clientParent: fixedCtx.clientParent,
+      }
+    : await classifyRoster({ brand, category: profile.category, audience: profile.audience, competitors: profile.competitors });
   // Decision 3 (2026-10-03): mirror the market step - the classifier's
   // same_seat verdicts become head-to-head picks by h2hRank (top
   // ANGLE_SLOTS picked, the rest bench); upstream/adjacent pass through.
