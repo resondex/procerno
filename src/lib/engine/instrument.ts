@@ -866,7 +866,11 @@ export async function readScenarios(input: {
   // column onto one feature), and never a platform-switch room in a
   // platform-tied category - any stated direction locks a leading maker out
   // (Pixel's "Ecosystem switcher" excluded iPhone from six cells).
-  const key = cacheKey("scenarios_journeys18", [
+  // 18 (2026-10-03): no category examples in the prompt (Tyler's rule).
+  // 19 (2026-10-03, room walk v7): the buyer is actively choosing between
+  // products (no-choice rooms rose once the active-choice examples were
+  // gone), and labels are sentence case.
+  const key = cacheKey("scenarios_journeys19", [
     input.category, input.audience, input.forBrand ?? "",
   ]);
   const read = await coalesced<{
@@ -894,12 +898,17 @@ export async function readScenarios(input: {
           "are 2-4 plain words naming the buyer or the circumstance the " +
           "way a strategist would title a slide - never analytical or methodology " +
           "words like 'default', 'habitual', 'segment', 'use case'. " +
-          "Descriptions ONE short plain sentence. Each scenario is a ROOM: " +
+          "Labels are in sentence case. Descriptions ONE short plain sentence. Each scenario is a ROOM: " +
           "a buyer occasion in this category - who the buyer is and the " +
           "situation they are in. " +
           "Describe what is happening, never a list of features or criteria " +
           "the buyer wants - the answer decides what matters - and never a " +
-          "specific brand or product. A room is CONTESTED: most of the " +
+          "specific brand or product. " +
+          "A room's buyer is actively CHOOSING between products in the " +
+          "category - comparing, or at least open to options; a buyer who " +
+          "rebuys, renews or takes the next version of what they have " +
+          "without looking at anything else is not a room, because there is " +
+          "nothing for an answer to steer. A room is CONTESTED: most of the " +
           "category's leading brands are plausible contenders for that " +
           "buyer; a room only one product line serves, or one that belongs " +
           "to a different category, is not this market's room. A room never " +
@@ -1003,7 +1012,7 @@ export async function readScenarios(input: {
   // house style bans. (Ternary, not an if-guard - see composeInstrument.)
   const clean = (sc: ScenarioSpec): ScenarioSpec => ({
     ...sc,
-    label: humanize(sc.label),
+    label: roomLabel(humanize(sc.label)),
     description: humanize(sc.description),
   });
   return read === null
@@ -1104,13 +1113,13 @@ export async function suggestScenario(input: {
 }): Promise<Situation | null> {
   tagCosts({ purpose: "setup:scenario_suggest" });
   const avoid = input.exclude.map((s) => s.label.trim().toLowerCase()).filter(Boolean).sort();
-  const key = cacheKey("scenario_more5", [
+  const key = cacheKey("scenario_more6", [
     input.category, input.audience, input.decisionUnit, avoid.join("|"),
   ]);
   const hit = await store.cacheGet(key, CACHE_TTL_MS);
   if (hit) {
     const cached = JSON.parse(hit) as Situation;
-    return { label: humanize(cached.label), description: humanize(cached.description) };
+    return { label: roomLabel(humanize(cached.label)), description: humanize(cached.description) };
   }
   const res = await openaiClient().chat.completions.create({
     model: INSTRUMENT_HELPER_MODEL,
@@ -1123,11 +1132,11 @@ export async function suggestScenario(input: {
           "competent advisor would recommend - facts about the decision, never " +
           "facts about the speaker. It must be genuinely different from every " +
           "situation already listed (a different axis of circumstance, not a " +
-          "variant of one). Scenarios describe circumstances, never a specific brand or product. Use " + SITUATION_TEMPLATE[input.decisionUnit] +
+          "variant of one), with a buyer actively choosing between products - never one who rebuys or renews without comparing. Scenarios describe circumstances, never a specific brand or product. Use " + SITUATION_TEMPLATE[input.decisionUnit] +
           "Label 2-4 plain words naming the buyer or the circumstance the " +
-          "way a strategist would title a slide - never analytical or " +
-          "methodology words like 'default', 'habitual', 'segment', 'use " +
-          "case'. Description one short sentence.",
+          "way a strategist would title a slide, in sentence case - never " +
+          "analytical or methodology words like 'default', 'habitual', " +
+          "'segment', 'use case'. Description one short sentence.",
       },
       {
         role: "user",
@@ -1149,7 +1158,7 @@ export async function suggestScenario(input: {
   );
   if (!fresh) return null;
   await store.cacheSet(key, JSON.stringify(fresh), stampOf(input));
-  return { label: humanize(fresh.label), description: humanize(fresh.description) };
+  return { label: roomLabel(humanize(fresh.label)), description: humanize(fresh.description) };
 }
 
 /**
@@ -1175,13 +1184,13 @@ export async function nearScenarios(input: {
   // headline label naming the adjusted angle, not the original label with
   // a sentence change; and adjustments stay circumstance-shaped (the room
   // rule: no feature emphasis like "low-light photos").
-  const key = cacheKey("scenario_near_pool7", [
+  const key = cacheKey("scenario_near_pool8", [
     input.category, input.audience, input.of.label, input.of.description, avoid.join("|"),
   ]);
   const hit = await store.cacheGet(key, CACHE_TTL_MS);
   if (hit) {
     return (JSON.parse(hit) as Situation[]).map((s) => ({
-      label: humanize(s.label),
+      label: roomLabel(humanize(s.label)),
       description: humanize(s.description),
     }));
   }
@@ -1205,9 +1214,10 @@ export async function nearScenarios(input: {
           "from the others and from everything already listed, and stay " +
           "about the decision (never the speaker). NEVER introduce a money " +
           "angle unless " +
-          "the original situation is itself about price. Scenarios describe " +
+          "the original situation is itself about price, and never turn the " +
+          "buyer into one who no longer compares products. Scenarios describe " +
           "circumstances, never a specific brand or product. Labels 2-4 plain " +
-          "words, never analytical or methodology words like 'default', " +
+          "words in sentence case, never analytical or methodology words like 'default', " +
           "'habitual', 'segment', 'use case'. Descriptions one short sentence.",
       },
       {
@@ -1238,7 +1248,7 @@ export async function nearScenarios(input: {
     const k = `${norm(s.label)}|${norm(s.description)}`;
     if (!s.label.trim() || seen.has(k) || listed.has(norm(s.label))) continue;
     seen.add(k);
-    pool.push({ label: humanize(s.label.trim()), description: humanize(s.description.trim()) });
+    pool.push({ label: roomLabel(humanize(s.label.trim())), description: humanize(s.description.trim()) });
     if (pool.length === 3) break;
   }
   if (pool.length > 0) await store.cacheSet(key, JSON.stringify(pool), stampOf(input));
@@ -1674,7 +1684,7 @@ export async function reviewScenarioFit(input: {
   // that names the client brand is dropped mechanically.
   // scenario_fit8 (2026-10-03): the suggested room is circumstance-only,
   // like the scenario read (v16) - no wanted-features list.
-  const key = cacheKey("scenario_fit8", [
+  const key = cacheKey("scenario_fit9", [
     input.brand, input.category, input.audience ?? "",
     input.scenarios.map((s) => `${s.label.trim()}|${s.description.trim()}`).join("~"),
   ]);
@@ -1701,7 +1711,8 @@ export async function reviewScenarioFit(input: {
           "description one short sentence in buyer language). Write it as a " +
           "ROOM: a buyer occasion in THIS category - who the buyer is and " +
           "their situation, in one short plain sentence, never a list of " +
-          "features they want. Never name " +
+          "features they want, with a buyer actively choosing between " +
+          "products (never one who rebuys or renews without comparing). Never name " +
           "the brand or any product, and never build the room from the " +
           "brand's own selling points; the room must be one the brand's " +
           "rivals compete in too. A room the brand serves with a product in " +
@@ -1746,7 +1757,7 @@ export async function reviewScenarioFit(input: {
       .map((f) => ({ label: f.label, reason: plain(f.reason) })),
     missingCore: parsed.missing_core
       ? {
-          label: plain(parsed.missing_core.label),
+          label: roomLabel(plain(parsed.missing_core.label)),
           description: plain(parsed.missing_core.description),
           reason: plain(parsed.missing_core.reason),
         }
@@ -1822,7 +1833,7 @@ export interface RoomCheck {
  * roster), cached per room, one batched call for the uncached rooms.
  * Brand names are found mechanically. Fails open to no verdicts.
  */
-export async function checkRooms(input: {
+type RoomCheckInput = {
   brand: string;
   category: string;
   /** Direct rivals only (same_seat + bench) - upstream and adjacent
@@ -1832,7 +1843,34 @@ export async function checkRooms(input: {
   picks?: string[];
   rooms: Situation[];
   meta?: CacheMeta;
-}): Promise<RoomCheck[]> {
+};
+
+/** A room check result fails when the judgment says the room is not a
+ * contested buyer occasion. Brand names are a mechanical find, not a
+ * judgment, so they never trigger a second opinion. */
+const roomJudgedFail = (c: RoomCheck) =>
+  !c.contested || !!c.pitch || c.capability || c.platformSwitch || c.noChoice;
+
+/**
+ * Room check with a second opinion (2026-10-03 room walk v7: 4 of 7
+ * swapped-out rooms passed a re-check - one low-effort roll was deciding
+ * the swap). A room whose first check fails on a judgment gets ONE more
+ * independent check, cached under its own key; it fails only when both
+ * fail, and a passing second check becomes the room's verdict (the gate
+ * chips and contest repair read the same result).
+ */
+export async function checkRooms(input: RoomCheckInput): Promise<RoomCheck[]> {
+  const first = await checkRoomsPass(input, 1);
+  const failing = first.filter(roomJudgedFail).map((c) => c.label);
+  if (failing.length === 0) return first;
+  const second = await checkRoomsPass(
+    { ...input, rooms: input.rooms.filter((r) => failing.includes(r.label)) }, 2,
+  ).catch(() => [] as RoomCheck[]);
+  const passed = new Map(second.filter((c) => !roomJudgedFail(c)).map((c) => [c.label, c]));
+  return first.map((c) => passed.get(c.label) ?? c);
+}
+
+async function checkRoomsPass(input: RoomCheckInput, pass: number): Promise<RoomCheck[]> {
   tagCosts({ purpose: "setup:room_check" });
   const rivals = [...new Set(input.rivals.map((r) => r.trim()).filter(Boolean))];
   const rooms = input.rooms.filter((r) => r.label.trim());
@@ -1853,6 +1891,7 @@ export async function checkRooms(input: {
   const keyOf = (r: Situation) => cacheKey("room_check5", [
     DESIGN_CHECK_MODEL, input.brand, input.category, [...rivals].map((x) => x.toLowerCase()).sort().join(","),
     `${r.label.trim()}|${r.description.trim()}`,
+    ...(pass > 1 ? [`pass${pass}`] : []),
   ]);
   const keys = rooms.map(keyOf);
   let cached: Map<string, string>;
@@ -5490,6 +5529,24 @@ function jaccard(a: Set<string>, b: Set<string>): number {
   let inter = 0;
   for (const w of a) if (b.has(w)) inter++;
   return inter / (a.size + b.size - inter);
+}
+
+/** Room labels in sentence case (2026-10-03 room walk v7: with the example
+ * labels gone, 8 of 60 came back in Title Case). Every word after the first
+ * that is a plain capitalized word is lowercased, hyphen parts included;
+ * acronyms, figures and mixed-case words (all caps, digits, an inner
+ * capital) are kept. Rooms never name brands, so the cost is the rare
+ * proper noun after the first word. */
+export function roomLabel(label: string): string {
+  const t = label.trim();
+  if (!t) return t;
+  const plainCap = /^[A-Z][a-z'’]+$/;
+  return t.split(/(\s+)/).map((w, i) => {
+    if (/^\s+$/.test(w)) return w;
+    return w.split("-").map((part, k) =>
+      (i === 0 && k === 0) || !plainCap.test(part) ? part : part.toLowerCase(),
+    ).join("-");
+  }).join("").replace(/^[a-z]/, (c) => c.toUpperCase());
 }
 
 /** Real people type hyphens and straight quotes; model output leans on em
