@@ -1983,9 +1983,16 @@ export async function contestRoomSet(input: {
   const scenarios = [...input.scenarios];
   let reserve = [...input.reserve];
   const swaps: { out: string; in: string }[] = [];
+  // A replacement must not near-duplicate a room that stays (Doritos'
+  // "Warehouse club stock-up" replaced a failing room and nearly repeated
+  // "Family pantry restock", 2026-10-03 audit).
+  const roomWords = (r: ScenarioSpec) => wordSet(`${r.label} ${r.description}`);
+  const tooClose = (r: ScenarioSpec, keep: ScenarioSpec[]) =>
+    keep.some((k) => jaccard(roomWords(r), roomWords(k)) >= 0.3);
   scenarios.forEach((s, i) => {
     if (!by.has(s.label) || passes(s)) return;
-    const j = reserve.findIndex((r) => by.has(r.label) && passes(r));
+    const keep = scenarios.filter((_, k) => k !== i);
+    const j = reserve.findIndex((r) => by.has(r.label) && passes(r) && !tooClose(r, keep));
     if (j < 0) return;
     const incoming = reserve[j];
     reserve = [...reserve.slice(0, j), ...reserve.slice(j + 1), { ...s, journey: null }];
@@ -3079,7 +3086,9 @@ export async function generateGrid(input: {
   // Fails open: unassigned rows keep the legacy free-pick + dedup path.
   // A CONFIRMED worry list (the worries module) IS the plan - the zip
   // below is the legacy path for batteries without one.
-  const doubtRows = plan.filter((r) => DOUBT_CHECK_STAGES.has(r.stage.key));
+  // Repertoire is a habit question, not a worry (stage contract) - it never
+  // takes a planned concern.
+  const doubtRows = plan.filter((r) => DOUBT_CHECK_STAGES.has(r.stage.key) && r.stage.key !== "repertoire");
   if (!input.worries && doubtRows.length >= 2 && process.env.PHRASINGS_CHECKS !== "0") {
     try {
       // The plan is CACHED per battery: warm and write must agree on the
@@ -3181,9 +3190,10 @@ export async function generateGrid(input: {
   // entries were written with one, and the derivation is pure, so a
   // mismatch (humanize drift, pre-spec entry) re-derives rather than
   // serving a stale or missing design.
+  const rosterLabels = [input.brand, ...input.competitors];
   const scrub = (cells: GridCell[]): GridCell[] =>
     cells.map((c) => {
-      const text = humanize(c.text);
+      const text = stripRosterParens(humanize(c.text), rosterLabels);
       const spec = c.spec && c.spec.seed === text.trim()
         ? c.spec
         : deriveCheckSpec({ ...c, text }, input.brand, input.competitors, input.category, aliasForms);
@@ -3875,7 +3885,9 @@ export async function generateGrid(input: {
         // s24 eviction reroll saw only its 2 fresh units, skipped the pass
         // on length, and silently dropped Pixel's brand-named pricing cell).
         // A rewrite of a served unit re-caches terminal like any heal.
-        for (let u = 0; u < units.length; u++) for (const c of resolved[u] ?? []) if (DOUBT_CHECK_STAGES.has(c.stage)) doubt.push({ u, c });
+        // Repertoire is habit, not a worry (stage contract, 2026-10-03): the
+        // pass wrote a worry into Doritos' habit cell.
+        for (let u = 0; u < units.length; u++) for (const c of resolved[u] ?? []) if (DOUBT_CHECK_STAGES.has(c.stage) && c.stage !== "repertoire") doubt.push({ u, c });
         const concernless = doubt.filter((d) => !d.c.concern);
         if (concernless.length >= 1 && doubt.length >= 2) {
           const labelConcerns = async (texts: string[]): Promise<string[]> => {
@@ -4396,6 +4408,21 @@ export function firstJsonObject(s: string): string | null {
   return null;
 }
 
+/** Remove a roster label's display disambiguator when a writer copies it
+ * into prompt text ("Done with my iPhone (Apple)" from the label "Apple
+ * (iPhone)", 2026-10-03 audit): a parenthetical that is just another form
+ * of a tracked label - its base or its parenthetical part - is dropped. */
+export function stripRosterParens(text: string, labels: string[]): string {
+  const forms = new Set<string>();
+  for (const l of labels) {
+    if (!/\(/.test(l)) continue;
+    forms.add(primaryBrandName(l).toLowerCase());
+    for (const m of l.matchAll(/\(([^)]*)\)/g)) for (const part of m[1].split("/")) if (part.trim()) forms.add(part.trim().toLowerCase());
+  }
+  if (forms.size === 0) return text;
+  return text.replace(/\s*\(([^)]{1,40})\)/g, (all, inner: string) => (forms.has(inner.trim().toLowerCase()) ? "" : all));
+}
+
 /** A brand label's speakable name: "Amazon (beauty)" -> "Amazon". The
  * parenthetical is a DISPLAY disambiguator - buyers never type it and
  * engines never say it, so any text shown to a model uses this form. */
@@ -4834,7 +4861,7 @@ export async function generatePhrasings(input: {
         const sp = subset[c.index] ? specOf.get(subset[c.index]) : undefined;
         if (!sp) return [];
         return (c.phrasings ?? []).map((ph) => ({
-          text: humanize((ph.text ?? "").trim()).replace(/^asker:\s*[^-:]{1,40}[-:]\s*/i, ""),
+          text: stripRosterParens(humanize((ph.text ?? "").trim()), [input.brand, ...input.competitors]).replace(/^asker:\s*[^-:]{1,40}[-:]\s*/i, ""),
           brands: sp.forbiddenBrands,
         })).filter((x) => x.text);
       });
@@ -4969,7 +4996,7 @@ export async function generatePhrasings(input: {
         // The writer occasionally merges its asker metadata into the
         // text ("asker: parent - two big dogs..."); the label belongs in
         // the field, never in a served prompt.
-        const text = humanize((p.text ?? "").trim()).replace(/^asker:\s*[^-:]{1,40}[-:]\s*/i, "");
+        const text = stripRosterParens(humanize((p.text ?? "").trim()), [input.brand, ...input.competitors]).replace(/^asker:\s*[^-:]{1,40}[-:]\s*/i, "");
         if (!text) { culls.empty++; continue; }
         // The signature check is the blind/branded discipline: a paraphrase of
         // a blind seed that names a brand is not a paraphrase, it is a leak.

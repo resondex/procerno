@@ -78,6 +78,13 @@ for (const brand of BRANDS) {
   if (!compose) { console.error(`${brand}: compose returned null`); continue; }
   // FIXED_ROOMS=1 with FIXED_CTX_DIR: reuse that walk's (already repaired)
   // rooms too, so a re-walk isolates seed-side changes from room draws.
+  // The buying style (base journey) re-classifies on every fresh read -
+  // Netflix's flipped and dropped three stages between rounds. A fixed walk
+  // reuses the saved base when the context has it.
+  if (fixedCtx?.base) {
+    compose.base = fixedCtx.base;
+    compose.stages = inst.participationMask(compose.base, compose.scenarios);
+  }
   if (fixedCtx && process.env.FIXED_ROOMS === "1" && Array.isArray(fixedCtx.scenarios)) {
     compose.scenarios = fixedCtx.scenarios;
     compose.reserve = fixedCtx.reserve ?? [];
@@ -141,7 +148,7 @@ for (const brand of BRANDS) {
   }));
   fs.writeFileSync(path.join(OUT, `cold_seeds_${slug}.json`), JSON.stringify(seeds, null, 2));
   fs.writeFileSync(path.join(OUT, `cold_context_${slug}.json`), JSON.stringify({
-    profile, rosterRoles, rosterDetail, clientParent: roster.clientParent, rosterClasses,
+    profile, rosterRoles, rosterDetail, clientParent: roster.clientParent, rosterClasses, base: compose.base,
     scenarios: compose.scenarios, reserve: compose.reserve ?? [], fit, roomChecks,
     picks, keptStages: [...kept], missing: report.missing,
   }, null, 2));
