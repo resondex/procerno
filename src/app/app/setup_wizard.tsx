@@ -620,26 +620,30 @@ export function SetupWizard({ mode, brand, draft, engineOptions, onClose, onCrea
       body: JSON.stringify({ brand, skipBattery: true }),
       signal: AbortSignal.timeout(120_000),
     }).catch(() => null);
-    setSuggesting(false);
     if (!res) {
+      setSuggesting(false);
       setError("estimation timed out - fill in the details manually");
       return;
     }
     const data = await res.json().catch(() => ({}));
     if (!res.ok) {
+      setSuggesting(false);
       setError((data.error ?? "estimation failed") + " - fill in the details manually");
       return;
     }
+    // Warm the ~45s market read while the roster is typed and the user
+    // reviews the form - by confirm time it is cached.
+    gridApi.warmRead(data.profile.category, data.profile.audience);
+    // The market read lands WHOLE (Tyler 2026-10-04): the roster typing
+    // (head-to-head picks, same-parent tags, roles) finishes before the
+    // form shows, so nobody moves on with untyped pills and the list-order
+    // fallback. classifyRoster fails open; the form still lands then.
+    await classifyRoster(data.profile.category, data.profile.audience, data.profile.competitors, true);
     setCategory(data.profile.category);
     setCompetitors(data.profile.competitors);
     setCompDraft("");
     setAudience(data.profile.audience);
-    // Type the estimated roster by who each rival sells to - silent; the
-    // pills show "rival" until the verdicts land.
-    void classifyRoster(data.profile.category, data.profile.audience, data.profile.competitors, true);
-    // Warm the ~45s market read while the user reviews the form - by
-    // confirm time it is cached and the scenarios gate opens instantly.
-    gridApi.warmRead(data.profile.category, data.profile.audience);
+    setSuggesting(false);
   }
 
   /* ------------------------------ persistence ----------------------------- */
@@ -1688,7 +1692,7 @@ export function SetupWizard({ mode, brand, draft, engineOptions, onClose, onCrea
               <div className="grid gap-4 py-16 text-center justify-items-center">
                 <Spinner />
                 <p className="text-sm font-medium">Estimating your market…</p>
-                <p className="text-[13px] text-ink-3">category · competitors · audience</p>
+                <p className="text-[13px] text-ink-3">category · competitors · head-to-head rivals · audience</p>
               </div>
             ) : busy?.startsWith("Reading") ? (
               <StagedProgress stages={READ_STAGES} />
