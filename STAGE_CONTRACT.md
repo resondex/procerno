@@ -125,3 +125,9 @@ One pain in a plain sentence, then a plain ask for a way out: about 10-25 words,
 ## Category education asks what kinds there are (Tyler, 2026-10-04, STYLE s41)
 
 The buyer asks what kinds of products the category has and how they differ, or whether they need one at all, in plain words - never which brand. Recommended for every considered market (was: considered and rational). Read unchanged: whether the AI names the brand when it explains the category.
+
+## Value, Social validation and Premium vs basic in short buyer formulas (Tyler, 2026-10-04, STYLE s42)
+
+- **Value:** the situation in a few words, then "is <brand or its line> worth it over <counterpart>?", with at most one usage detail, about 12-25 words. The counterpart is the next tier down from the brand's line in the category, described by tier or price level, never by name. The cheapest option only when the line sits one step above it (store-brand chips vs Doritos is right; the bottom of the phone market vs a flagship is not).
+- **Social validation:** which <category> do people love, recommend or swear by most, optionally saying who, about 8-15 words. Never asks for ratings, reviews or communities.
+- **Premium vs basic:** are the premium options actually better than the cheaper ones, or are the cheaper ones good enough, about 10-18 words. Never asks for picks on each side; the answer names brands on its own.

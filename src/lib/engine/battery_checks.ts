@@ -232,9 +232,9 @@ export function seedDesignLine(
   // MATH, worries are VERDICTS - each design line polices its own side so
   // the two instruments cannot trade clothes.
   if (stage === "pricing")
-    return `Question design (value): the question asks whether ${brand} is worth its price for THIS asker over a GENERIC cheaper alternative in the category, with the asker's usage as the input and the call left to the answer - the same buyer and usage as the designed question below. Dropping ${brand}, swapping the cheaper alternative for ${brand}'s own lower tier or a named rival, losing the usage, stating a price, or presupposing the verdict does not satisfy the design. Designed as: "${seed}"`;
+    return `Question design (value): the question asks whether ${brand} is worth its price for THIS asker over a more affordable option in the category, with the asker's situation as the input and the call left to the answer - the same buyer and counterpart as the designed question below. Dropping ${brand}, swapping the counterpart for ${brand}'s own lower tier or a named rival, losing the situation, stating a price, or presupposing the verdict does not satisfy the design. Designed as: "${seed}"`;
   if (stage === "premium_worth")
-    return `Question design (premium tier): the question weighs the category's premium maker(s) as a TIER against basic/store options and invites named picks - from either side (is the expensive one worth it, is the cheap one good enough). Judging one named brand's own worth does not satisfy the design.${outcomeClause(stage, brand)} Designed as: "${seed}"`;
+    return `Question design (premium tier): the question asks whether the category's premium options are actually better than the cheaper ones, or whether the cheaper ones are good enough. Judging one named brand's own worth does not satisfy the design.${outcomeClause(stage, brand)} Designed as: "${seed}"`;
   if (!PLAN_CHECK_STAGES.has(stage))
     // Every other stage gets the generic same-question line (2026-09-29:
     // open/awareness/comparison cells drifted with no consistency check -
@@ -278,7 +278,7 @@ export function stageDesignIntent(stage: string, brand: string, concern?: string
     // brand-value question in every column, only the buyer changes. The
     // generic price-structure form (G6) and the trade-off variety rule are
     // retired; price-structure doubts belong to the worry cells.
-    return `Question design (value): the question names ${brand} and asks whether it is worth its price for THIS asker over a GENERIC cheaper alternative in the category, described by what it is rather than by name, with the asker's own usage as the input in plain words (numbers allowed, never required), and leaves the call to the answer. ${brand}'s own lower tier or plan as the counterpart does not satisfy the design - it keeps every answer inside ${brand} and can never return "not worth it" - and neither does naming a rival, carrying no usage (a bare "is it worth it?" is a worry), presupposing the verdict, or turning into an open "which product is the best value" ask. When ${brand} sells several distinct product lines, the question names the LINE being weighed - never an exact model, edition or year; a bare brand-level mention lets the answer pick among ${brand}'s own lines and does not satisfy the design. The question ASKS what things cost - it never states a product's price or fee; the asker's own budget or an offer made to them is circumstance.`;
+    return `Question design (value): the question names ${brand} and asks whether it is worth its price for THIS asker over the next tier down from its line in the category - the more affordable option a buyer in this situation would realistically weigh it against, described by its tier or price level, never by name; the cheapest option only when the brand's line sits just one step above it, with the asker's situation (and at most one usage detail) as the input, and leaves the call to the answer. A list of several usage details does not satisfy the design. ${brand}'s own lower tier or plan as the counterpart does not satisfy the design - it keeps every answer inside ${brand} and can never return "not worth it" - and neither does naming a rival, carrying no situation (a bare "is it worth it?" is a worry), presupposing the verdict, or turning into an open "which product is the best value" ask. When ${brand} sells several distinct product lines, the question names the LINE being weighed - never an exact model, edition or year; a bare brand-level mention lets the answer pick among ${brand}'s own lines and does not satisfy the design. The question ASKS what things cost - it never states a product's price or fee; the asker's own budget or an offer made to them is circumstance.`;
   // Alternatives seeds (audit J10/J11, 2026-10-01): an offensive seed that
   // gives a REASON for leaving the rival ("too lightweight for our dev
   // team") steers every answer toward one kind of replacement - often the
@@ -335,7 +335,7 @@ export function stageDesignIntent(stage: string, brand: string, concern?: string
   if (contractClause)
     return `Question design:${contractClause}${outcomeClause(stage, brand)}`;
   if (stage === "premium_worth")
-    return `Question design (premium tier): the question weighs the category's premium maker(s) as a TIER against basic/store options and invites named picks - from either side. Judging one named brand's own worth does not satisfy it - that is a worry cell's job.${outcomeClause(stage, brand)}`;
+    return `Question design (premium tier): the question asks whether the category's premium options are actually better than the cheaper ones, or whether the cheaper ones are good enough - it need not ask for picks. Judging one named brand's own worth does not satisfy it - that is a worry cell's job.${outcomeClause(stage, brand)}`;
   if (!PLAN_CHECK_STAGES.has(stage)) return null;
   const intent =
     stage === "problem_resolution"

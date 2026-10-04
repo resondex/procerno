@@ -150,7 +150,10 @@ const CACHE_TTL_MS = 183 * 24 * 3600 * 1000;
 // "s41" (2026-10-04, Tyler): Category education asks what kinds the
 // category has and how they differ (or whether they need one at all) -
 // "what does a smartphone do?" is not a question anyone asks.
-const STYLE_VERSION = "s41";
+// "s42" (2026-10-04, Tyler): Value, Social validation and Premium vs basic
+// in short buyer formulas; Value's counterpart is the next tier down from
+// the brand's line, not always the bottom of the market.
+const STYLE_VERSION = "s42";
 
 /** Versions the DETERMINISTIC seed-check set (everything seedRule runs:
  * checkPromptAgainstSpec + blind_missing_category + scenario_label_leak).
@@ -576,8 +579,8 @@ export function stageLibrary(m: Moderators): LibraryStage[] {
       key: "social_validation", label: "Social validation", layer: "consideration",
       situational: false, rivals: "none", tag: "picks", recommended: true,
       hint: m.think_feel === "feel"
-        ? "What people love, compliment, or identify with - social proof in identity terms - inviting named brands or products."
-        : "What people actually use and rate well - reviews, communities, popularity - inviting named brands or products.",
+        ? "One short plain question: which ones do people love or identify with most."
+        : "One short plain question: which ones do people love, recommend or swear by most.",
       why: "Proof from other people moves every market.",
     },
     {
@@ -605,7 +608,7 @@ export function stageLibrary(m: Moderators): LibraryStage[] {
       label: considered ? "Premium vs. basic brands" : "Splurge or save",
       layer: "decision", situational: false, rivals: "none", tag: "picks",
       recommended: !considered,
-      hint: "Across brands, not tiers: whether the premium maker genuinely beats the basic/store option - asked from both sides (is the expensive one worth it, is the cheap one good enough). Never one named brand's own worth - that form is a worry cell's job.",
+      hint: "One short plain question: are the premium options actually better than the cheaper ones, or are the cheaper ones good enough. Never ask for picks on each side, never one named brand's own worth - that form is a worry cell's job.",
       why: !considered
         ? "A habitual market compresses comparison into one shelf question: is the premium maker worth it."
         : "Your considered market decomposes this moment into Shortlist, Comparison, and Pricing instead.",
@@ -625,7 +628,7 @@ export function stageLibrary(m: Moderators): LibraryStage[] {
     {
       key: "pricing", label: "Pricing / value", layer: "decision",
       situational: true, rivals: "none", tag: "judges", recommended: true,
-      hint: "Value: name the client brand, set it against a GENERIC cheaper alternative in the category (never its own lower tier), give the asker's usage in plain words, and ask for the call - is it worth the price over the cheaper option? Same question in every column - only the buyer changes. Never a rival, never a stated price.",
+      hint: "Value, in one short shape: the situation in a few words, then is the client brand (or its line) worth it over the next tier down in the category, with at most one usage detail. Never its own lower tier, never a rival, never a stated price, never a list of usage. Same question in every column - only the buyer changes.",
       why: "Whether the assistant says you're worth the money - and for which buyers - reaches every market.",
     },
     {
@@ -2518,19 +2521,19 @@ const CELL_WRITER_SYSTEM =
           "OWN situation: never carry a detail, need or constraint from " +
           "another plan line's situation into it.\n" +
           "- Value cells (stage key pricing) ask the CLIENT BRAND'S value " +
-          "question for this column's buyer: name the client brand, set it " +
-          "against a GENERIC cheaper alternative in the category, described " +
-          "by what it is, not by name - NEVER the brand's own lower tier or " +
-          "plan, which keeps every answer inside the brand - give the " +
-          "asker's usage in plain words (numbers are allowed, never " +
-          "required), and ask for the call. When the brand sells several " +
+          "question for this column's buyer, in one short shape: the " +
+          "situation in a few words, then is <brand or its line> worth it " +
+          "over <counterpart>, with at most ONE usage detail - never a list " +
+          "of what the asker does, about 12-25 words. The counterpart is " +
+          "the next tier down from that line in the category - the more affordable option a buyer in this situation would realistically weigh it against, described by its tier or price level, never by name; the cheapest option only when the brand's line sits just one step above it - NEVER the brand's own lower tier or plan, which " +
+          "keeps every answer inside the brand. When the brand sells several " +
           "distinct product lines, name the LINE being weighed - never an " +
           "exact model, edition or year. Every value " +
           "cell asks " +
           "the SAME question; only the buyer changes. Never name a rival " +
           "(head-to-heads belong to comparison), never state a price (the " +
           "asker's own budget or an offer made to them is circumstance), " +
-          "never a bare 'is it worth it?' with no usage (that is a worry), " +
+          "never a bare 'is it worth it?' with no situation (that is a worry), " +
           "never a presupposed verdict, never a " +
           "spreadsheet of figures.\n" +
           "- Objections speak as a PROSPECT weighing the purchase - 'should " +
@@ -2557,7 +2560,7 @@ const CELL_WRITER_SYSTEM =
           "<line>' - never a specific model or model year. Engines correct a stale model " +
           "premise instead of answering the question.\n" +
           "- Open-choice stages (discovery, " +
-          "social_validation, premium_worth): the ask " +
+          "social_validation): the ask " +
           "must invite NAMED picks - never an ask for what to look for, " +
           "where to find reviews, or a features-only essay. When the category is a " +
           "RETAILER category, the ask is which retailer to buy from, not " +
@@ -2571,10 +2574,16 @@ const CELL_WRITER_SYSTEM =
           "buying situation repeated, never a list. Each use-case cell in a " +
           "battery names a DIFFERENT outcome, one buyers in that situation " +
           "commonly want.\n" +
-          "- premium_worth: weigh the category's premium maker(s) as a " +
-          "TIER against basic/store options and invite named picks; never " +
-          "ask whether one named brand is worth it - that form belongs to " +
-          "the worry cells.\n" +
+          "- premium_worth: one short plain question - are the premium options " +
+          "in the category actually better than the cheaper ones, or are " +
+          "the cheaper ones good enough - about 10-18 words. Never ask the " +
+          "answer to name picks on each side (it names brands on its own), " +
+          "and never ask whether one named brand is worth it - that form " +
+          "belongs to the worry cells.\n" +
+          "- social_validation: one short plain question - which <category> " +
+          "do people love, recommend or swear by most, optionally saying " +
+          "who (people like the asker) - about 8-15 words. Never ask for " +
+          "ratings, reviews or communities to be pointed out.\n" +
           "- The category term is vocabulary: use the study category's own " +
           "words, never a looser or broader word for it in blind cells - the " +
           "category anchors what is being measured. Blind means no BRAND " +
