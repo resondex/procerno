@@ -870,7 +870,11 @@ export async function readScenarios(input: {
   // 19 (2026-10-03, room walk v7): the buyer is actively choosing between
   // products (no-choice rooms rose once the active-choice examples were
   // gone), and labels are sentence case.
-  const key = cacheKey("scenarios_journeys19", [
+  // 20 (2026-10-03, Tyler): tried "wants or will decide on" - no effect,
+  // reverted. 21: the active-choice rule says "a real choice to make right
+  // now" instead of "comparing", which invited criteria lists ("compares
+  // rates, fees, and benefits").
+  const key = cacheKey("scenarios_journeys21", [
     input.category, input.audience, input.forBrand ?? "",
   ]);
   const read = await coalesced<{
@@ -904,10 +908,10 @@ export async function readScenarios(input: {
           "Describe what is happening, never a list of features or criteria " +
           "the buyer wants - the answer decides what matters - and never a " +
           "specific brand or product. " +
-          "A room's buyer is actively CHOOSING between products in the " +
-          "category - comparing, or at least open to options; a buyer who " +
-          "rebuys, renews or takes the next version of what they have " +
-          "without looking at anything else is not a room, because there is " +
+          "A room's buyer has a real choice to make in the category right " +
+          "now; a buyer who will rebuy, renew or take the next version of " +
+          "what they already have without considering anything else is not " +
+          "a room, because there is " +
           "nothing for an answer to steer. A room is CONTESTED: most of the " +
           "category's leading brands are plausible contenders for that " +
           "buyer; a room only one product line serves, or one that belongs " +
@@ -1113,7 +1117,7 @@ export async function suggestScenario(input: {
 }): Promise<Situation | null> {
   tagCosts({ purpose: "setup:scenario_suggest" });
   const avoid = input.exclude.map((s) => s.label.trim().toLowerCase()).filter(Boolean).sort();
-  const key = cacheKey("scenario_more6", [
+  const key = cacheKey("scenario_more7", [
     input.category, input.audience, input.decisionUnit, avoid.join("|"),
   ]);
   const hit = await store.cacheGet(key, CACHE_TTL_MS);
@@ -1132,7 +1136,7 @@ export async function suggestScenario(input: {
           "competent advisor would recommend - facts about the decision, never " +
           "facts about the speaker. It must be genuinely different from every " +
           "situation already listed (a different axis of circumstance, not a " +
-          "variant of one), with a buyer actively choosing between products - never one who rebuys or renews without comparing. Scenarios describe circumstances, never a specific brand or product. Use " + SITUATION_TEMPLATE[input.decisionUnit] +
+          "variant of one), with a buyer who has a real choice to make - never one who will rebuy or renew without considering anything else. Scenarios describe circumstances, never a specific brand or product. Use " + SITUATION_TEMPLATE[input.decisionUnit] +
           "Label 2-4 plain words naming the buyer or the circumstance the " +
           "way a strategist would title a slide, in sentence case - never " +
           "analytical or methodology words like 'default', 'habitual', " +
@@ -1184,7 +1188,7 @@ export async function nearScenarios(input: {
   // headline label naming the adjusted angle, not the original label with
   // a sentence change; and adjustments stay circumstance-shaped (the room
   // rule: no feature emphasis like "low-light photos").
-  const key = cacheKey("scenario_near_pool8", [
+  const key = cacheKey("scenario_near_pool9", [
     input.category, input.audience, input.of.label, input.of.description, avoid.join("|"),
   ]);
   const hit = await store.cacheGet(key, CACHE_TTL_MS);
@@ -1215,7 +1219,7 @@ export async function nearScenarios(input: {
           "about the decision (never the speaker). NEVER introduce a money " +
           "angle unless " +
           "the original situation is itself about price, and never turn the " +
-          "buyer into one who no longer compares products. Scenarios describe " +
+          "buyer into one with no real choice to make. Scenarios describe " +
           "circumstances, never a specific brand or product. Labels 2-4 plain " +
           "words in sentence case, never analytical or methodology words like 'default', " +
           "'habitual', 'segment', 'use case'. Descriptions one short sentence.",
@@ -1684,7 +1688,7 @@ export async function reviewScenarioFit(input: {
   // that names the client brand is dropped mechanically.
   // scenario_fit8 (2026-10-03): the suggested room is circumstance-only,
   // like the scenario read (v16) - no wanted-features list.
-  const key = cacheKey("scenario_fit9", [
+  const key = cacheKey("scenario_fit10", [
     input.brand, input.category, input.audience ?? "",
     input.scenarios.map((s) => `${s.label.trim()}|${s.description.trim()}`).join("~"),
   ]);
@@ -1711,8 +1715,9 @@ export async function reviewScenarioFit(input: {
           "description one short sentence in buyer language). Write it as a " +
           "ROOM: a buyer occasion in THIS category - who the buyer is and " +
           "their situation, in one short plain sentence, never a list of " +
-          "features they want, with a buyer actively choosing between " +
-          "products (never one who rebuys or renews without comparing). Never name " +
+          "features they want, with a buyer who has a real choice to make " +
+          "(never one who will rebuy or renew without considering anything " +
+          "else). Never name " +
           "the brand or any product, and never build the room from the " +
           "brand's own selling points; the room must be one the brand's " +
           "rivals compete in too. A room the brand serves with a product in " +
