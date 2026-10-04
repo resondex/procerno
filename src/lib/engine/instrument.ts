@@ -4040,22 +4040,40 @@ export async function generateGrid(input: {
           if (!jobs) jobs = parseJobs(await ask(" Escape any quote marks inside strings."));
           if (jobs && jobs.length === uc.length) {
             const norm = (s: string) => s.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
-            const seen = new Map<string, number>();
-            const bad: { i: number; why: string }[] = [];
-            jobs.forEach((j, i) => {
-              const k = norm(j.job ?? "");
-              if (j.feature) bad.push({ i, why: "it names a product feature, not a job" });
-              else if (j.restatesRoom) bad.push({ i, why: "it repeats the buying situation instead of naming a job" });
-              else if (j.sameAsScreen) bad.push({ i, why: "it asks about the same thing as its column's feature screen" });
-              else if (k && seen.has(k)) bad.push({ i, why: `it repeats another use-case job (${j.job})` });
-              if (k && !seen.has(k)) seen.set(k, i);
-            });
+            const findBad = (js: NonNullable<typeof jobs>) => {
+              const seen = new Map<string, number>();
+              const out: { i: number; why: string }[] = [];
+              js.forEach((j, i) => {
+                const k = norm(j.job ?? "");
+                if (j.feature) out.push({ i, why: "it names a product feature, not a job" });
+                else if (j.restatesRoom) out.push({ i, why: "it repeats the buying situation instead of naming a job" });
+                else if (j.sameAsScreen) out.push({ i, why: "it asks about the same thing as its column's feature screen" });
+                else if (k && seen.has(k)) out.push({ i, why: `it repeats another use-case job (${j.job})` });
+                if (k && !seen.has(k)) seen.set(k, i);
+              });
+              return out;
+            };
+            const bad = findBad(jobs);
             const covered = jobs.map((j) => j.job).filter(Boolean).join("; ");
             const dirty = new Set<number>();
+            // A job the pass could not fix ships FLAGGED, like every other
+            // failed heal (2026-10-04 audit v6: a rejected job whose rewrite
+            // also failed shipped with no flag). The off-design prefix keeps
+            // the flag through a rules-era re-judge.
+            const flagJob = (i: number, why: string) => {
+              const d = uc[i];
+              const flag = `off-design: use-case job - ${why}`;
+              d.c.seedFlags = [...(d.c.seedFlags ?? []).filter((f) => !f.startsWith("off-design: use-case job")), flag];
+              dirty.add(d.u);
+              console.warn(`seed ships flagged-terminal [use_case]: job | ${d.c.text.slice(0, 80)}`);
+            };
+            // Past the rewrite cap, rejected jobs are flagged, never silent.
+            for (const { i, why } of bad.slice(4)) flagJob(i, why);
+            const healed = new Set<number>();
             await Promise.all(bad.slice(0, 4).map(async ({ i, why }) => {
               const d = uc[i];
               const row = rowFor(units[d.u] ?? [], d.c) ?? (units[d.u] ?? [])[0];
-              if (!row) return;
+              if (!row) { flagJob(i, why); return; }
               if (Date.now() > healDeadlineAt) { passesCut = true; return; }
               const screen = d.c.situation ? screenBySit.get(d.c.situation) : undefined;
               console.warn(`use-case jobs: [${d.c.situation ?? "-"}] rejected because ${why} | ${d.c.text.slice(0, 80)}`);
@@ -4076,7 +4094,7 @@ export async function generateGrid(input: {
                   response_format: { type: "json_schema", json_schema: { name: "grid_cells", strict: true, schema: CELLS_SCHEMA } },
                 });
                 const text2 = (JSON.parse(res2.choices[0]?.message?.content ?? "{}") as { cells?: { text?: string }[] }).cells?.[0]?.text?.trim();
-                if (!text2) return;
+                if (!text2) { flagJob(i, why); return; }
                 const cand = { stage: d.c.stage, angle: d.c.angle, text: stripRosterParens(humanize(text2), [input.brand, ...input.competitors]), situation: d.c.situation, concern: d.c.concern };
                 const intent = stageDesignIntent(d.c.stage, input.brand, undefined, d.c.angle, d.c.situation);
                 await primeCells([cand]);
@@ -4088,14 +4106,30 @@ export async function generateGrid(input: {
                   d.c.spec = deriveCheckSpec(d.c, input.brand, input.competitors, input.category, aliasForms);
                   delete d.c.seedFlags;
                   dirty.add(d.u);
+                  healed.add(i);
                   console.warn(`use-case jobs: healed: ${cand.text.slice(0, 80)}`);
                 } else {
                   console.warn(`use-case jobs: rewrite rejected - original stands`);
+                  flagJob(i, why);
                 }
               } catch (err) {
+                // An outage is not a verdict on the rewrite: leave the unit
+                // provisional so the next serve retries.
+                passesCut = true;
                 console.error("use-case job rewrite failed open:", err);
               }
             }));
+            // Rewrites are judged against the job rules too, in the context
+            // of the battery as it now stands (audit v6: a heal became a copy
+            // of its column's feature screen). A heal that still fails ships
+            // flagged; an unreadable re-check leaves the units provisional.
+            if (healed.size > 0) {
+              let again = parseJobs(await ask());
+              if (!again) again = parseJobs(await ask(" Escape any quote marks inside strings."));
+              if (again && again.length === uc.length) {
+                for (const { i, why } of findBad(again)) if (healed.has(i)) flagJob(i, why);
+              } else passesCut = true;
+            }
             await Promise.all(
               [...dirty].map((u) =>
                 store.cacheSet(unitKeys[u], JSON.stringify({ cells: resolved[u] ?? [], rules: SEED_RULES_VERSION }), stampOf(input)).catch(() => {})
