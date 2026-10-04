@@ -2080,22 +2080,23 @@ export async function planValueLines(input: {
   if (input.rooms.length === 0) return null;
   tagCosts({ purpose: "setup:value_lines" });
   const rooms = input.rooms.map((r) => ({ label: r.label.trim(), description: r.description.trim() }));
-  const key = cacheKey("value_lines1", [
+  const key = cacheKey("value_lines3", [
     DESIGN_CHECK_MODEL, input.brand, input.category, input.audience ?? "",
     rooms.map((r) => `${r.label}|${r.description}`).join("~"),
   ]);
   return coalesced<Record<string, ValueLine | null>>(key, { meta: input.meta }, async () => {
     const a = await anthropicClient();
-    let j: { rooms?: { label?: string; line?: string | null; counterpart?: string | null }[] } | null = null;
+    let j: { lines?: unknown[]; rooms?: { label?: string; line?: string | null; counterpart?: string | null }[] } | null = null;
     for (const extra of ["", " Escape any quote marks inside strings."]) {
       const res = await a.messages.create({
         model: DESIGN_CHECK_MODEL, max_tokens: 1500, output_config: { effort: DESIGN_CHECK_EFFORT },
         system:
-          `For the brand ${input.brand} in ${input.category}, and for each buying room given: ` +
-          `line - the brand's MOST PREMIUM current product line that a buyer in that room could realistically buy, by its real name as buyers say it (the brand's name alone when it sells a single product; never an exact model, edition or year); ` +
-          `counterpart - the generic option one tier below that line in the category, described by its tier or price level and never by name (a plainly cheaper option where the category has no named tiers), never one of ${input.brand}'s own products. ` +
-          `When ${input.brand} has no line a buyer in that room would buy, give null for both. ` +
-          `Reply with ONLY JSON: {"rooms": [{"label": "...", "line": "...", "counterpart": "..."}, ...]} - rooms in the order given, labels exactly as given.${extra}`,
+          `For the brand ${input.brand} in ${input.category}: ` +
+          `lines - the brand's distinct current product lines in this category, by their real names as buyers say them. A line is a separate product people choose between by name; plans, subscription levels, editions, flavors, sizes and varieties of one product are NOT lines. A brand that sells one product has one line, its own name. ` +
+          `Then for each buying room given: line - the MOST PREMIUM of those lines a buyer in that room could realistically buy (never an exact model or year); ` +
+          `counterpart - the cheaper option from other makers that sits one step below that line, as a buyer would describe it in a few words: the category's tier directly beneath the line where the category has clear tiers, otherwise the cheaper alternative a buyer would realistically choose instead. Never name a maker, and never a plan, tier or product of ${input.brand} itself. ` +
+          `When the brand has no line a buyer in that room would buy, give null for both. ` +
+          `Reply with ONLY JSON: {"lines": ["..."], "rooms": [{"label": "...", "line": "...", "counterpart": "..."}, ...]} - rooms in the order given, labels exactly as given.${extra}`,
         messages: [{ role: "user", content: `Audience: ${input.audience ?? "unknown"}\nRooms:\n${rooms.map((r, i) => `${i + 1}. ${r.label}: ${r.description}`).join("\n")}` }],
       } as never);
       const text = (res as { content: { type: string; text?: string }[] }).content
@@ -2103,11 +2104,14 @@ export async function planValueLines(input: {
       try { j = JSON.parse(firstJsonObject(text) ?? text); break; } catch { /* retry */ }
     }
     if (!j?.rooms) throw new Error("value lines reply was not valid JSON");
+    // One product line = the brand name, mechanically (the model kept
+    // naming plans and flavors as lines when told not to).
+    const single = !Array.isArray(j.lines) || j.lines.filter((x) => String(x ?? "").trim()).length <= 1;
     const out: Record<string, ValueLine | null> = {};
     for (const r of j.rooms) {
       const label = rooms.find((x) => x.label.toLowerCase() === String(r.label ?? "").trim().toLowerCase())?.label;
       if (!label) continue;
-      const line = humanize(String(r.line ?? "")).trim();
+      const line = r.line ? (single ? input.brand : humanize(String(r.line)).trim()) : "";
       const counterpart = humanize(String(r.counterpart ?? "")).trim();
       out[label] = line && counterpart ? { line, counterpart } : null;
     }
