@@ -306,19 +306,15 @@ export function stageDesignIntent(stage: string, brand: string, concern?: string
     return `Question design (awareness): the asker wants to understand what this kind of product actually does and how people use it - nothing is broken, so a "what fixes this" ask does not fit. A premium-vs-cheap tier comparison, a which-brand ask, a specs/criteria ask, or a yes/no reassurance ask does not satisfy the design.${situation ? ` The question also carries the asker's own circumstance matching: ${situation}.` : ""}${outcomeClause(stage, brand)}`;
   // Open-choice seeds must invite NAMED picks (s24 audit F3: a
   // social_validation cell became a features-gush ask and named nothing).
+  // Tyler 2026-10-04 (s39): Feature screening and Use-case are formulaic
+  // and in buyer words - the need plus "which has the best features", and
+  // the outcome the buyer wants plus "which will do that best".
   const pickClause = OPEN_PICK_STAGES.has(stage)
-    ? (stage === "use_case"
-        ? ` The ask is for ONE pick for ONE job - something the buyer is trying to get done, stated without naming a product feature or capability. A product feature restated as the job, the buying situation itself restated as the job, or a list ask (which belongs to discovery) does not satisfy the design.`
-        : ` The ask must invite NAMED products or brands - a features-only, what-do-people-value or where-to-look ask does not satisfy the design.`) +
-      // Tyler 2026-10-02 (round-5 D5, "eSIM and a microSD slot" on Pixel):
-      // a screen the client can never pass measures nothing about it - the
-      // same logic as the switch-direction rule. World knowledge, so it is
-      // the checker's judgment, not a string check.
-      (stage === "feature_screening"
-        ? ` The question screens on ONE capability that buyers in this category commonly screen for - two or more capabilities do not satisfy the design, and neither does a capability chosen because it is ${brand}'s own signature strength. The capability must also leave ${brand} an eligible answer: a requirement ${brand} cannot meet by construction (hardware or capabilities its products do not have) excludes it before the answer starts and does not satisfy the design.`
-        : stage === "use_case"
-          ? ` The question names ONE concrete job buyers in this situation commonly need done and asks which to pick for it - a list of needs, or a job chosen because it is ${brand}'s own signature strength, does not satisfy the design.`
-          : "")
+    ? stage === "feature_screening"
+      ? ` The question states the buyer's need in plain words and asks which product has the best features for it, leaving the answer to decide which features matter. Naming a specific feature, listing features, or a need chosen because it suits ${brand} does not satisfy the design.`
+      : stage === "use_case"
+        ? ` The question names one outcome the buyer wants, in everyday words, and asks which product will do that best. A product feature named as the outcome, the buying situation restated, a list of needs, a list ask (which belongs to discovery), or an outcome chosen because it is ${brand}'s own signature strength does not satisfy the design.`
+        : ` The ask must invite NAMED products or brands - a features-only, what-do-people-value or where-to-look ask does not satisfy the design.`
     : "";
   // Stage contract (2026-10-03): criteria and business_case carry their
   // contract asks on top of the circumstance yardstick.

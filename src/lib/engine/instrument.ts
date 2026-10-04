@@ -140,7 +140,11 @@ const CACHE_TTL_MS = 183 * 24 * 3600 * 1000;
 // column's feature screen - the writer sees every plan line in its chunk).
 // (s36 was a scratch-worktree test of removing generic examples; never
 // shipped, so the version is skipped.)
-const STYLE_VERSION = "s37";
+// "s39" (2026-10-04, Tyler): formulaic stages in buyer words - Feature
+// screening is the need plus "which has the best features", Use-case is the
+// outcome the buyer wants plus "which will do that best". The s38
+// capability planner was reverted (people filter on jobs, not capabilities).
+const STYLE_VERSION = "s39";
 
 /** Versions the DETERMINISTIC seed-check set (everything seedRule runs:
  * checkPromptAgainstSpec + blind_missing_category + scenario_label_leak).
@@ -551,15 +555,15 @@ export function stageLibrary(m: Moderators): LibraryStage[] {
       key: "feature_screening", label: "Feature screening", layer: "consideration",
       situational: true, rivals: "none", tag: "picks",
       recommended: m.verifiability === "spec",
-      hint: "Which options have ONE specific capability that buyers in this category commonly screen for - the capability is the whole ask, never one item in a feature list, and never chosen because it suits the client brand.",
+      hint: "The buyer's need in plain words, then which one has the best features for it - the answer decides which features matter. Never a specific feature named, never a list of features, never a need chosen because it suits the client brand.",
       why: m.verifiability === "spec"
-        ? "A spec-driven market shops by capability, so attribute asks decide who makes the cut."
+        ? "A spec-driven market shops on features, so feature-first asks decide who makes the cut."
         : `Your market verifies by ${m.verifiability}, not specs - buyers don't shop from an attribute checklist.`,
     },
     {
       key: "use_case", label: "Use-case fit", layer: "consideration",
       situational: true, rivals: "none", tag: "picks", recommended: true,
-      hint: "ONE job to be done in this situation - something the buyer is trying to get done, stated without naming a product feature - asking which ONE product to pick for it. Never a list of needs, never a feature restated as a job, never the situation itself, and never a job chosen because it suits the client brand.",
+      hint: "What the buyer actually wants done, in their own everyday words with a natural detail, then which one will do that best. Never a product feature named, never a list of needs, never the situation itself, and never an outcome chosen because it suits the client brand.",
       why: "Concrete-need asks are where assistants match options to situations.",
     },
     {
@@ -2434,10 +2438,9 @@ const CELL_WRITER_SYSTEM =
           "matters, and a criteria " +
           "list both steers it and makes every stage ask the same thing. " +
           "The only detail beyond the situation is what the stage itself " +
-          "is about: the ONE capability a feature screen asks after, the " +
-          "ONE job a use-case ask names (each one buyers commonly ask about, " +
-          "never one picked because it suits the client), the asker's usage " +
-          "a value ask needs. Fragments happen; details are unpolished. " +
+          "is about: the ONE outcome a use-case ask names (one buyers commonly " +
+          "want, never one picked because it suits the client), the asker's " +
+          "usage a value ask needs. Fragments happen; details are unpolished. " +
           "NEVER ad-copy patterns - no parallel lists of " +
           "three, no balanced drama, no polished metaphors, no rhetorical closers. If it would read well on a " +
           "landing page, rewrite it until it reads like a chat message.\n" +
@@ -2548,20 +2551,20 @@ const CELL_WRITER_SYSTEM =
           "<line>' - never a specific model or model year. Engines correct a stale model " +
           "premise instead of answering the question.\n" +
           "- Open-choice stages (discovery, " +
-          "social_validation, feature_screening, premium_worth): the ask " +
+          "social_validation, premium_worth): the ask " +
           "must invite NAMED picks - never an ask for what to look for, " +
           "where to find reviews, or a features-only essay. When the category is a " +
           "RETAILER category, the ask is which retailer to buy from, not " +
           "which product to buy.\n" +
-          "- use_case: the situation plus ONE job to be done, asking which ONE " +
-          "product to pick for it - not a list (that belongs to discovery). A " +
-          "job is something the buyer is trying to get done in their life or " +
-          "work, stated WITHOUT naming a product feature or capability: if " +
-          "the job is really a feature with the words rearranged, or just the " +
-          "buying situation repeated, it is not a job. Each use-case cell in " +
-          "a battery names a DIFFERENT job, one buyers in that situation " +
-          "commonly need done, and never the capability its column's " +
-          "feature screen already asks about.\n" +
+          "- feature_screening: the buyer's need in plain words, then which one " +
+          "has the best features for it. Never name a specific feature or " +
+          "list features - the answer decides which features matter.\n" +
+          "- use_case: what the buyer actually wants done, in their own " +
+          "everyday words with a natural detail, then which one will do that " +
+          "best. Never a product feature named as the outcome, never the " +
+          "buying situation repeated, never a list. Each use-case cell in a " +
+          "battery names a DIFFERENT outcome, one buyers in that situation " +
+          "commonly want.\n" +
           "- premium_worth: weigh the category's premium maker(s) as a " +
           "TIER against basic/store options and invite named picks; never " +
           "ask whether one named brand is worth it - that form belongs to " +
@@ -4010,10 +4013,8 @@ export async function generateGrid(input: {
     if (process.env.PHRASINGS_CHECKS !== "0" && Date.now() <= deadlineAt) {
       try {
         const uc: { u: number; c: GridCell }[] = [];
-        const screenBySit = new Map<string, string>();
         for (let u = 0; u < units.length; u++) for (const c of resolved[u] ?? []) {
           if (c.stage === "use_case") uc.push({ u, c });
-          if (c.stage === "feature_screening" && c.situation) screenBySit.set(c.situation, c.text);
         }
         if (uc.length >= 1) {
           const roomOf = new Map(input.scenarios.map((s) => [s.label, s.description]));
@@ -4027,21 +4028,19 @@ export async function generateGrid(input: {
               `job - the job in 2-5 words, as a task the buyer gets done; ` +
               `feature - true when the "job" is really a product feature or capability rather than a task; ` +
               `restatesRoom - true when the "job" is just the buying situation itself; ` +
-              `sameAsScreen - true when the job is the same thing the column's feature-screening question asks about. ` +
-              `Reply with ONLY valid JSON: {"jobs": [{"job": "...", "feature": false, "restatesRoom": false, "sameAsScreen": false}, ...]} - one entry per question, in order.${extra}`,
+              `Reply with ONLY valid JSON: {"jobs": [{"job": "...", "feature": false, "restatesRoom": false}, ...]} - one entry per question, in order.${extra}`,
             messages: [{
               role: "user",
               content: uc.map((d, i) => {
                 const room = d.c.situation ? `${d.c.situation}: ${roomOf.get(d.c.situation) ?? ""}` : "none";
-                const screen = d.c.situation ? screenBySit.get(d.c.situation) : undefined;
-                return `${i + 1}. Situation: ${room}\n   Feature screen in this column: ${screen ?? "none"}\n   Question: ${d.c.text}`;
+                return `${i + 1}. Situation: ${room}\n   Question: ${d.c.text}`;
               }).join("\n"),
             }],
           } as never));
           const parseJobs = (res: unknown) => {
             const text = (res as { content: { type: string; text?: string }[] }).content
               .filter((b) => b.type === "text").map((b) => b.text ?? "").join("").trim();
-            try { return (JSON.parse(firstJsonObject(text) ?? text) as { jobs?: { job?: string; feature?: boolean; restatesRoom?: boolean; sameAsScreen?: boolean }[] }).jobs ?? null; } catch { return null; }
+            try { return (JSON.parse(firstJsonObject(text) ?? text) as { jobs?: { job?: string; feature?: boolean; restatesRoom?: boolean }[] }).jobs ?? null; } catch { return null; }
           };
           let jobs = parseJobs(await ask());
           if (!jobs) jobs = parseJobs(await ask(" Escape any quote marks inside strings."));
@@ -4054,7 +4053,6 @@ export async function generateGrid(input: {
                 const k = norm(j.job ?? "");
                 if (j.feature) out.push({ i, why: "it names a product feature, not a job" });
                 else if (j.restatesRoom) out.push({ i, why: "it repeats the buying situation instead of naming a job" });
-                else if (j.sameAsScreen) out.push({ i, why: "it asks about the same thing as its column's feature screen" });
                 else if (k && seen.has(k)) out.push({ i, why: `it repeats another use-case job (${j.job})` });
                 if (k && !seen.has(k)) seen.set(k, i);
               });
@@ -4082,7 +4080,6 @@ export async function generateGrid(input: {
               const row = rowFor(units[d.u] ?? [], d.c) ?? (units[d.u] ?? [])[0];
               if (!row) { flagJob(i, why); return; }
               if (Date.now() > healDeadlineAt) { passesCut = true; return; }
-              const screen = d.c.situation ? screenBySit.get(d.c.situation) : undefined;
               console.warn(`use-case jobs: [${d.c.situation ?? "-"}] rejected because ${why} | ${d.c.text.slice(0, 80)}`);
               try {
                 const res2 = await openaiClient().chat.completions.create({
@@ -4094,9 +4091,8 @@ export async function generateGrid(input: {
                         `Rivals: ${rivals.map(primaryBrandName).join(", ")}\nAudience: ${input.audience ?? "unknown"}\n\n` +
                         `Cell plan:\n${planLine(row, 0)}\n` +
                         `   [the previous attempt was rejected because ${why}. This battery's use-case jobs so far: ${covered}. ` +
-                        `Name ONE DIFFERENT job buyers in this situation commonly need done - a task stated without any product feature word, not the situation itself` +
-                        `${screen ? `, and not what this column's feature screen asks about ("${screen}")` : ""}. ` +
-                        `Ask which ONE product to pick for it.${swapRule("use_case")} Do not reuse this wording: "${d.c.text}"]` },
+                        `Name ONE DIFFERENT outcome buyers in this situation commonly want, in everyday words without any product feature word, not the situation itself. ` +
+                        `Ask which one will do that best.${swapRule("use_case")} Do not reuse this wording: "${d.c.text}"]` },
                   ],
                   response_format: { type: "json_schema", json_schema: { name: "grid_cells", strict: true, schema: CELLS_SCHEMA } },
                 });
@@ -5514,7 +5510,7 @@ function wordSet(t: string): Set<string> {
  * status" - another of the client's signature perks). */
 function swapRule(stage: string): string {
   return stage === "feature_screening" || stage === "use_case"
-    ? " If you replace the capability or job, pick one buyers commonly ask about across the category - never another of the client brand's signature strengths."
+    ? " If you replace the need or outcome, pick one buyers commonly have across the category - never another of the client brand's signature strengths."
     : "";
 }
 
