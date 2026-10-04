@@ -76,7 +76,14 @@ for (const brand of BRANDS) {
   // brand-aware rebuild instead of what a user sees first.
   const compose = await inst.composeInstrument({ category: profile.category, audience: profile.audience });
   if (!compose) { console.error(`${brand}: compose returned null`); continue; }
-  {
+  // FIXED_ROOMS=1 with FIXED_CTX_DIR: reuse that walk's (already repaired)
+  // rooms too, so a re-walk isolates seed-side changes from room draws.
+  if (fixedCtx && process.env.FIXED_ROOMS === "1" && Array.isArray(fixedCtx.scenarios)) {
+    compose.scenarios = fixedCtx.scenarios;
+    compose.reserve = fixedCtx.reserve ?? [];
+    compose.stages = inst.participationMask(compose.base, compose.scenarios);
+  }
+  if (!(fixedCtx && process.env.FIXED_ROOMS === "1")) {
     const dr = Object.entries(rosterRoles).filter(([, r]) => r === "same_seat" || r === "bench").map(([n]) => n);
     const pk = Object.entries(rosterRoles).filter(([, r]) => r === "same_seat").map(([n]) => n);
     const repaired = await inst.contestRoomSet({ brand, category: profile.category, rivals: dr, picks: pk, scenarios: compose.scenarios, reserve: compose.reserve ?? [] });

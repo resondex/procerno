@@ -2577,10 +2577,12 @@ const CELL_WRITER_SYSTEM =
           "55 words, and reads ONE way: a list of four or more features or " +
           "requirements is survey-speak even in a short prompt (pick the " +
           "two or three this asker would actually type), and an ask with " +
-          "two readings measures neither. When the circumstance is a platform or " +
-          "ecosystem switch, state the DIRECTION by naming both platforms " +
-          "(the one being left and the one being joined) - OS names are " +
-          "direction vocabulary, not brand names. 'Switching platforms', " +
+          "two readings measures neither. ONLY when the circumstance is a " +
+          "switch between competing platforms or ecosystems (phone operating " +
+          "systems, app ecosystems), state the DIRECTION by naming both " +
+          "platforms (the one being left and the one being joined) - OS names " +
+          "are direction vocabulary, not brand names; moving off a legacy " +
+          "tool or replacing a card needs no named source. 'Switching platforms', " +
           "'moving between ecosystems' " +
           "and 'from one platform to another' are NOT directions: every " +
           "answer then guesses which way, and the guess decides which " +
