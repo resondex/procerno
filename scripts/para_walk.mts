@@ -24,7 +24,10 @@ const seeds = JSON.parse(fs.readFileSync(path.join(process.env.SEEDS_DIR!, `cold
 const competitors: string[] = sameSeatOf(ctx.profile.competitors, ctx.rosterRoles);
 const aliasForms = await brandAliasForms([brand, ...competitors]);
 const cells = seeds.map((c: Record<string, unknown>) => {
-  const cell = { stage: c.stage, situation: c.situation ?? null, angle: c.angle, mode: c.scope ?? null, text: c.text, concern: c.concern ?? null, classPhrase: c.classPhrase ?? null, classBrand: c.classBrand ?? null };
+  // Older walk files lack classBrand: recover it from the roster's class
+  // phrases (the class cell's upstream brand), as the wizard carries it.
+  const classBrand = c.classBrand ?? (c.classPhrase ? Object.entries(ctx.rosterClasses ?? {}).find(([, v]) => v === c.classPhrase)?.[0] ?? null : null);
+  const cell = { stage: c.stage, situation: c.situation ?? null, angle: c.angle, mode: c.scope ?? null, text: c.text, concern: c.concern ?? null, classPhrase: c.classPhrase ?? null, classBrand, valueLine: c.valueLine ?? null };
   return { ...cell, spec: deriveCheckSpec(cell as never, brand, competitors, ctx.profile.category, aliasForms) };
 });
 const avoidConcerns = [...new Set(cells.map((c: { concern: string | null }) => c.concern).filter(Boolean))] as string[];

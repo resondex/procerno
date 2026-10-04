@@ -612,6 +612,23 @@ export function keepsCategoryTerm(seed: string, para: string, category: string):
   return anchors.every((a) => has(para, a));
 }
 
+/** The span of the seed that spells the category term, first anchor word
+ * through last ("credit card" in "my credit card balance"), when the seed
+ * carries the full term within 5 words; else null. The owned-noun note
+ * keeps this span (p13) so it agrees with the full-term check. */
+export function categorySpanIn(text: string, category: string): string | null {
+  const anchors = categoryAnchors(category);
+  if (anchors.length < 2) return null;
+  const stem = (w: string) => w.replace(/(ies|es|s)$/, "");
+  const words = text.split(/\s+/);
+  const bare = words.map((w) => key(w));
+  const i = bare.findIndex((w) => stem(w) === stem(anchors[0]));
+  if (i < 0) return null;
+  const j = bare.findIndex((w, k) => k > i && k - i <= 4 && stem(w) === stem(anchors[1]));
+  if (j < 0) return null;
+  return words.slice(i, j + 1).join(" ").replace(/[^A-Za-z0-9\s'-]+$/g, "");
+}
+
 export function textNamesCategory(text: string, category: string): boolean {
   const words = key(text).split(" ").filter((w) => w.length >= 4);
   for (const tok of key(category).split(" ")) {

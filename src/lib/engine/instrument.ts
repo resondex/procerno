@@ -4,7 +4,7 @@ import { anthropicClient, openaiClient } from "./providers";
 import { ModeratorsShape } from "./instrument_shapes";
 import { INSTRUMENT_HELPER_MODEL } from "./models";
 import {
-  AMBIGUOUS_FORMS, angleRivals, categoryNounOf, checkBattery, checkCandidateSignature, checkPromptAgainstSpec, classAnglesOf,
+  AMBIGUOUS_FORMS, angleRivals, categoryNounOf, categorySpanIn, checkBattery, checkCandidateSignature, checkPromptAgainstSpec, classAnglesOf,
   deriveCheckSpec, DOUBT_CHECK_STAGES, MUST_NAME_STAGES, PRE_CATEGORY_STAGES, questionTypeOf, resolveCellSpec, scenarioLabelLeak, seedDesignLine, specWriterNote,
   sameSeatOf, stageDesignIntent, statedPriceFinding, moneyBoltOn, TERM_COLLISIONS, textNamesBrand, textNamesCategory, upstreamOf,
   type CellCheckSpec, type ClassAngle, type QuestionType, type RosterClasses, type RosterRoles, type ValueLine,
@@ -4866,7 +4866,10 @@ export interface Phrasing {
 // "p12" (2026-10-04): blind paraphrases keep the full category term
 // (string-checked), Social validation keeps its ask word, and no
 // paraphrase runs more than 10 words past its seed.
-const PHRASINGS_VERSION = "p12";
+// "p13" (2026-10-04): the owned-noun note keeps the seed's full category
+// term (it fought the p12 full-term check: 0/9 kept), category words never
+// count as overlap, and the note lost its category examples.
+const PHRASINGS_VERSION = "p13";
 /** Ask words a paraphrase of these stages must keep (p11). */
 const PARA_ASK_WORD: Record<string, RegExp> = {
   feature_screening: /\bfeatures?\b/i,
@@ -4982,9 +4985,15 @@ export async function generatePhrasings(input: {
   const brandTokens = new Set(
     [input.brand, ...rivals].flatMap((b) => [...wordSet(b)])
   );
+  // The category term's words are REQUIRED (p12 full-term check), so like
+  // brand tokens they never count as copying in the overlap filter (p13:
+  // short formula seeds lost 6-8 of 9 drafts to it).
+  const catStem = (w: string) => w.replace(/(ies|es|s)$/, "");
+  const catWords = new Set(norm(input.category).split(" ").filter((w) => w.length >= 3).map(catStem));
   const contentWords = (t: string): Set<string> => {
     const s = wordSet(t);
     for (const b of brandTokens) s.delete(b);
+    for (const w of [...s]) if (catWords.has(catStem(w))) s.delete(w);
     return s;
   };
   // Per-cell cache entries: one edited question re-buys only itself, any
@@ -5093,8 +5102,8 @@ export async function generatePhrasings(input: {
           // continuity check rejects paraphrases that trade "chips" for
           // "snacks", but nothing told the writer which word to keep -
           // the Doritos crumbs cell starved to 0/9 on exactly this.
-          (PRE_CATEGORY_STAGES.has(c.stage) && categoryNounOf(c.text, input.category)
-            ? `\n   [owned noun: every paraphrase keeps the word "${categoryNounOf(c.text, input.category)}" (or a direct form of it) - substituting a broader word like "snacks" or "device" changes what is measured and the paraphrase will be rejected]`
+          (PRE_CATEGORY_STAGES.has(c.stage) && (categorySpanIn(c.text, input.category) ?? categoryNounOf(c.text, input.category))
+            ? `\n   [owned noun: every paraphrase keeps "${categorySpanIn(c.text, input.category) ?? categoryNounOf(c.text, input.category)}" (or a direct form of it) - substituting a shorter or broader word changes what is measured and the paraphrase will be rejected]`
             : "") +
           // But the seed's own brand pattern outranks the guidance: the
           // blind VARIANT of a client-anchored stage exists to measure
