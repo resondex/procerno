@@ -4863,11 +4863,15 @@ export interface Phrasing {
 // Feature screening and Value), plain register (never formal), and a
 // length near the seed's - the p10 sets drifted formal and a quarter of
 // feature-screen paraphrases stopped asking about features.
-const PHRASINGS_VERSION = "p11";
+// "p12" (2026-10-04): blind paraphrases keep the full category term
+// (string-checked), Social validation keeps its ask word, and no
+// paraphrase runs more than 10 words past its seed.
+const PHRASINGS_VERSION = "p12";
 /** Ask words a paraphrase of these stages must keep (p11). */
 const PARA_ASK_WORD: Record<string, RegExp> = {
   feature_screening: /\bfeatures?\b/i,
   pricing: /\bworth\b/i,
+  social_validation: /\b(love|loved|loves|recommend\w*|swear|favou?rites?|popular|rave\w*|go-to)\b/i,
 };
 // Over-generate so the overlap filter can be strict and still fill the set.
 const PHRASINGS_EXTRA = 3;
@@ -5370,6 +5374,10 @@ export async function generatePhrasings(input: {
         // stops asking "worth" is a comparison - countable, so counted.
         const askWord = PARA_ASK_WORD[seed.stage];
         if (askWord && !askWord.test(text)) { culls.ask++; continue; }
+        // Length near the seed's (p12): no paraphrase runs more than 10
+        // words past its seed - the long tail was where lists and formal
+        // backstory came back.
+        if (text.split(/\s+/).length > seed.text.split(/\s+/).length + 10) { culls.ask++; continue; }
         const n = norm(text);
         if (seen.has(n)) { culls.dup++; continue; }
         // A paraphrase that shares most of its words with the seed or a sibling

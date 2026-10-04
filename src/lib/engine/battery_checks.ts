@@ -594,6 +594,24 @@ export function categoryNounOf(text: string, category: string): string | null {
   return null;
 }
 
+/** The category term's anchor words (p12, 2026-10-04): its first and last
+ * words of 3+ letters ("credit" + "cards"; "tortilla" + "chips"), plural-
+ * blind. A paraphrase that keeps only the head noun ("cards") or only the
+ * modifier has widened or shifted what is being measured. */
+export function categoryAnchors(category: string): string[] {
+  const toks = key(category).split(" ").filter((w) => w.length >= 3 && w !== "and");
+  if (toks.length < 2) return [];
+  return [...new Set([toks[0], toks[toks.length - 1]])];
+}
+export function keepsCategoryTerm(seed: string, para: string, category: string): boolean {
+  const anchors = categoryAnchors(category);
+  if (anchors.length === 0) return true;
+  const stem = (w: string) => w.replace(/(ies|es|s)$/, "");
+  const has = (t: string, a: string) => key(t).split(" ").some((w) => stem(w) === stem(a));
+  if (!anchors.every((a) => has(seed, a))) return true;
+  return anchors.every((a) => has(para, a));
+}
+
 export function textNamesCategory(text: string, category: string): boolean {
   const words = key(text).split(" ").filter((w) => w.length >= 4);
   for (const tok of key(category).split(" ")) {
@@ -831,6 +849,16 @@ export function checkBattery(input: {
         !textNamesCategory(t, input.category)
       )
         findings.push({ cell: i, check: "blind_missing_category", text: t, detail: `paraphrase drops the owned category noun the seed uses` });
+      // The full category term (p12): a blind paraphrase keeps the seed's
+      // category term, not a looser word for it ("cards" for "credit
+      // cards" widens the measurement). Blind = no required brand.
+      else if (
+        t !== cell.text &&
+        input.category &&
+        (!cell.spec || cell.spec.requiredBrands.length === 0) &&
+        !keepsCategoryTerm(cell.text, t, input.category)
+      )
+        findings.push({ cell: i, check: "blind_missing_category", text: t, detail: `paraphrase loosens the category term "${input.category}"` });
       // Path-independent: a prompt that copies a scenario LABEL - any
       // scenario's, full or as a "Label:" opener - shipped the plan's
       // vocabulary instead of voicing the circumstance.
