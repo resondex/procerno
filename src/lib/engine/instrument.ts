@@ -160,7 +160,7 @@ const CACHE_TTL_MS = 183 * 24 * 3600 * 1000;
 // one-tier-down counterpart per room (planValueLines, confirmed at the
 // gate; default = the brand's most premium line that fits the room; no
 // Value cell where none fits) and carries no usage detail.
-const STYLE_VERSION = "s44";
+const STYLE_VERSION = "s45"; // s45 (2026-10-04 seed review): doubt hints - the asker's own one-doubt claim, never a fact to confirm, hearsay, a sizing ask or the Value question; stance decides the asker; worry cells carry no reach limit.
 
 /** Versions the DETERMINISTIC seed-check set (everything seedRule runs:
  * checkPromptAgainstSpec + blind_missing_category + scenario_label_leak).
@@ -176,7 +176,7 @@ const STYLE_VERSION = "s44";
  * 7's unversioned serve-time re-check had no terminal state). Bump when
  * a deterministic check changes meaning; bumping costs one free re-judge
  * per unit, and model calls only for units the new rules reject. */
-export const SEED_RULES_VERSION = "r15"; // r15 (2026-10-02, Tyler's option B): brand mentions = whole names, declared alternates, name words and dictionary aliases, with every ambiguous one-word hit (an everyday word written lowercase or opening a sentence, or a maker word like "Google" of Google Pixel) decided in context by the brand judge (haiku, cached) - no casing rules, no target exemption, no roster word lists. r14 (2026-10-02 review): everyday-word lexicon by lowercase SHARE in two tiers (label words: common and not brand-dominated - "jira", "netflix", "pixel", "apple", "chase" count lowercase again; aliases: merely common - "gold" stays capital-only), coined split words case-blind ("apple or samsung"), the target's own one-word name never case-guarded, "citi" off the case-guard list, and a monthly figure is the asker's plan only in first-person / spend / offer context ("the Pro about 20 a month more" is a stated price). r13 (2026-10-02 cold-walk audit + review): verb-less stated prices ("Gold at 250"); word-anchored price-concern test + money bolt-ons; brand checks read filtered dictionary alias forms ("amex"); everyday words inside brand names never name the brand - category tokens containment-aware, split words of multi-word names in label casing and not sentence-initial, one-word names and aliases in the vault everyday-word lexicon capitalized only, other brands' full names scrubbed first. r4 (2026-10-01): r2 calendar-year/60-word/segment-vocab; r3 category-naming labels exempt from substring leak; r4 'standardization' in segment vocabulary; r5 directionless-switch string check; r6 punctuation-blind label-leak matching; r7-r8 switch direction detected by absence (no OS, no roster brand near switch vocabulary); cheaper bolt-on token on non-price concerns
+export const SEED_RULES_VERSION = "r16"; // r16 (2026-10-04 seed review): doubt design intent - own claim, one doubt, open verdict; facts to confirm, rule/ingredient lookups, hearsay, sizing asks and the Value worth-it ask fail; objections never voiced by a current user, churn/renewal always by one, no third option beside stay and leave. // r15 (2026-10-02, Tyler's option B): brand mentions = whole names, declared alternates, name words and dictionary aliases, with every ambiguous one-word hit (an everyday word written lowercase or opening a sentence, or a maker word like "Google" of Google Pixel) decided in context by the brand judge (haiku, cached) - no casing rules, no target exemption, no roster word lists. r14 (2026-10-02 review): everyday-word lexicon by lowercase SHARE in two tiers (label words: common and not brand-dominated - "jira", "netflix", "pixel", "apple", "chase" count lowercase again; aliases: merely common - "gold" stays capital-only), coined split words case-blind ("apple or samsung"), the target's own one-word name never case-guarded, "citi" off the case-guard list, and a monthly figure is the asker's plan only in first-person / spend / offer context ("the Pro about 20 a month more" is a stated price). r13 (2026-10-02 cold-walk audit + review): verb-less stated prices ("Gold at 250"); word-anchored price-concern test + money bolt-ons; brand checks read filtered dictionary alias forms ("amex"); everyday words inside brand names never name the brand - category tokens containment-aware, split words of multi-word names in label casing and not sentence-initial, one-word names and aliases in the vault everyday-word lexicon capitalized only, other brands' full names scrubbed first. r4 (2026-10-01): r2 calendar-year/60-word/segment-vocab; r3 category-naming labels exempt from substring leak; r4 'standardization' in segment vocabulary; r5 directionless-switch string check; r6 punctuation-blind label-leak matching; r7-r8 switch direction detected by absence (no OS, no roster brand near switch vocabulary); cheaper bolt-on token on non-price concerns
 
 /** Brand forms that double as ordinary English words: only these demand a
  * capitalized occurrence to count as naming the brand ("2-3 services max"
@@ -627,7 +627,7 @@ export function stageLibrary(m: Moderators): LibraryStage[] {
       // in-relationship stance (Churn triggers).
       key: "objections", label: "Objections / risk", layer: "decision",
       situational: true, rivals: "none", tag: "judges", recommended: considered,
-      hint: `A prospect states the planned worry about the client brand, by name, as their own claim the answer can confirm or rebut (absent a planned worry: the category's dominant ${m.risk} worry).`,
+      hint: `A prospect who does not yet have the client brand states the planned worry about it, by name, as their OWN one-sentence claim the answer can agree or disagree with - never a question whether a stated rule, policy or fact is accurate, never what others say, never a request to size the problem, and never whether it is worth its price over cheaper options (absent a planned worry: the category's dominant ${m.risk} worry).`,
       why: considered
         ? `Every market has a dominant worry - here it's ${m.risk} risk, voiced about you by name before buying.`
         : "Habitual buyers are already customers - their worries are asked once, as Churn triggers.",
@@ -654,7 +654,7 @@ export function stageLibrary(m: Moderators): LibraryStage[] {
     {
       key: "churn_triggers", label: "Churn triggers", layer: "retention",
       situational: false, rivals: "none", tag: "steers", recommended: true,
-      hint: "An existing customer states a worry about the client brand, by name, leaving the option of leaving open without foreclosing staying.",
+      hint: "A current customer, speaking from their own use, states one worry about the client brand, by name, as their own claim - never a fact to confirm or what others say - and weighs staying against leaving, with no third option.",
       why: "Every install base has doubters - this is where assistant-induced churn starts.",
     },
     {
@@ -667,7 +667,7 @@ export function stageLibrary(m: Moderators): LibraryStage[] {
       key: "renewal", label: "Renewal", layer: "retention",
       situational: false, rivals: "none", tag: "judges",
       recommended: m.rhythm === "subscription",
-      hint: "An existing customer whose renewal or bill is coming due asks whether the client brand, named, is still worth paying for - leaving possible, staying not foreclosed.",
+      hint: "A current customer whose renewal or bill is coming due asks, from their own use, whether the client brand, named, is still worth keeping - leaving possible, staying not foreclosed, no third option such as a different plan or tier.",
       why: m.rhythm === "subscription"
         ? "A subscription market re-decides at every renewal."
         : m.rhythm === "replenishment"
@@ -3348,9 +3348,12 @@ export function planGridCells<S extends {
     // intent), never from a scenario. Absent worries = the legacy
     // shapes below, untouched.
     if (worries && (WORRY_STANCE_STAGES as readonly string[]).includes(st.key)) {
+      // No reach limit on a worry row (2026-10-04): the stance supplies the
+      // asker; a column-limited reach made the writer voice every worry for
+      // the one room whose journey switched the stage on.
       for (const w of worries) {
         if (w.stage === st.key)
-          plan.push({ stage: st, situation: null, angle: "generic", scope, concern: w.concern });
+          plan.push({ stage: st, situation: null, angle: "generic", scope: null, concern: w.concern });
       }
       continue;
     }

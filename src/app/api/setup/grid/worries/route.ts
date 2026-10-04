@@ -65,7 +65,11 @@ export async function POST(req: Request) {
   const base: Moderators = parsed.data.base;
   const scenarios = parsed.data.scenarios as unknown as (ScenarioSpec & { journey: Journey | null })[];
   const isWorryStage = (k: string) => (WORRY_STANCE_STAGES as readonly string[]).includes(k);
-  const recommended = participationMask(base, scenarios)
+  // Stances follow the BASE journey (2026-10-04): a deviating room's journey
+  // never adds a stance - with one considered room in a habitual market the
+  // mask offered objections, the planner put every worry there, and the
+  // invariant worry cells came out voiced for that room with no churn read.
+  const recommended = participationMask(base, scenarios.map((s) => ({ ...s, journey: null })))
     .filter((s) => s.recommended && isWorryStage(s.key))
     .map((s) => s.key);
   // Mask order first, then any worry stage the user added.
