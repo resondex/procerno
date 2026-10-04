@@ -153,7 +153,10 @@ const CACHE_TTL_MS = 183 * 24 * 3600 * 1000;
 // "s42" (2026-10-04, Tyler): Value, Social validation and Premium vs basic
 // in short buyer formulas; Value's counterpart is the next tier down from
 // the brand's line, not always the bottom of the market.
-const STYLE_VERSION = "s42";
+// "s43" (2026-10-04 walk v7 iteration): Feature screening held to 10-20
+// words with no task or usage list; Value accepts a plainly cheaper
+// option as the counterpart where the category has no named tiers.
+const STYLE_VERSION = "s43";
 
 /** Versions the DETERMINISTIC seed-check set (everything seedRule runs:
  * checkPromptAgainstSpec + blind_missing_category + scenario_label_leak).
@@ -2525,7 +2528,7 @@ const CELL_WRITER_SYSTEM =
           "situation in a few words, then is <brand or its line> worth it " +
           "over <counterpart>, with at most ONE usage detail - never a list " +
           "of what the asker does, about 12-25 words. The counterpart is " +
-          "the next tier down from that line in the category - the more affordable option a buyer in this situation would realistically weigh it against, described by its tier or price level, never by name; the cheapest option only when the brand's line sits just one step above it - NEVER the brand's own lower tier or plan, which " +
+          "the next tier down from that line in the category - the more affordable option a buyer in this situation would realistically weigh it against, described by its tier or price level (where the category has no named tiers, a plainly cheaper option is the right description), never by name; the cheapest option only when the brand's line sits just one step above it - NEVER the brand's own lower tier or plan, which " +
           "keeps every answer inside the brand. When the brand sells several " +
           "distinct product lines, name the LINE being weighed - never an " +
           "exact model, edition or year. Every value " +
@@ -2565,9 +2568,12 @@ const CELL_WRITER_SYSTEM =
           "where to find reviews, or a features-only essay. When the category is a " +
           "RETAILER category, the ask is which retailer to buy from, not " +
           "which product to buy.\n" +
-          "- feature_screening: the buyer's need in plain words, then which one " +
-          "has the best features for it. Never name a specific feature or " +
-          "list features - the answer decides which features matter.\n" +
+          "- feature_screening: one short shape - the buyer's situation or need " +
+          "in a few words, then which <category> has the best features " +
+          "(optionally for whom, in a few words) - about 10-20 words. Never " +
+          "name a specific feature, list features or usage, or describe a " +
+          "task to get done (that is the use-case cell) - the answer decides " +
+          "which features matter.\n" +
           "- use_case: what the buyer actually wants done, in their own " +
           "everyday words with a natural detail, then which one will do that " +
           "best. Never a product feature named as the outcome, never the " +
