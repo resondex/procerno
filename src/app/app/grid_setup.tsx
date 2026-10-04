@@ -61,8 +61,6 @@ export interface GridCellUi {
   /** Doubt cells (s9+): the planned concern this cell measures - part of
    * the design, sent with every generation request. */
   concern?: string | null;
-  /** Feature screens (item 2): the capability assigned from the category list. */
-  capability?: string | null;
   /** Class-angle comparison cells (2026-10-01; angle "class"): the class
    * the client brand is weighed against ("a Visa card") and the upstream
    * brand it evokes ("Visa"). Part of the design - sent with every
@@ -1257,7 +1255,7 @@ export function useGridSetup(a: GridSetupArgs) {
       audience: a.audience || undefined,
       base: a.state.moderators,
       scenarios: a.state.scenarios,
-      cell: { stage: c.stage, situation: c.situation, angle: c.angle, mode: c.mode ?? null, concern: c.concern ?? undefined, capability: c.capability ?? undefined, ...classFields(c) },
+      cell: { stage: c.stage, situation: c.situation, angle: c.angle, mode: c.mode ?? null, concern: c.concern ?? undefined, ...classFields(c) },
       avoid: alts,
       // Near mode keeps this prompt's ask and moves one detail.
       nearTo: near ? c.text : undefined,
