@@ -830,10 +830,9 @@ export function useGridSetup(a: GridSetupArgs) {
     const drawn: GridState = { ...a.state, reserve };
     if (active < cap) {
       a.setState(drawn);
-      const next = await compose({ base: drawn.moderators, rows: nextRows });
+      await compose({ base: drawn.moderators, rows: nextRows });
     } else {
-      const next = withScenarioRows(drawn, nextRows);
-      a.setState(next);
+      a.setState(withScenarioRows(drawn, nextRows));
     }
   }
 
