@@ -7,7 +7,7 @@ import {
   AMBIGUOUS_FORMS, angleRivals, categoryNounOf, checkBattery, checkCandidateSignature, checkPromptAgainstSpec, classAnglesOf,
   deriveCheckSpec, DOUBT_CHECK_STAGES, MUST_NAME_STAGES, PRE_CATEGORY_STAGES, questionTypeOf, resolveCellSpec, scenarioLabelLeak, seedDesignLine, specWriterNote,
   sameSeatOf, stageDesignIntent, statedPriceFinding, moneyBoltOn, TERM_COLLISIONS, textNamesBrand, textNamesCategory, upstreamOf,
-  type CellCheckSpec, type ClassAngle, type QuestionType, type RosterClasses, type RosterRoles,
+  type CellCheckSpec, type ClassAngle, type QuestionType, type RosterClasses, type RosterRoles, type ValueLine,
 } from "./battery_checks";
 export { MUST_NAME_STAGES };
 import { store } from "../store";
@@ -156,7 +156,11 @@ const CACHE_TTL_MS = 183 * 24 * 3600 * 1000;
 // "s43" (2026-10-04 walk v7 iteration): Feature screening held to 10-20
 // words with no task or usage list; Value accepts a plainly cheaper
 // option as the counterpart where the category has no named tiers.
-const STYLE_VERSION = "s43";
+// "s44" (2026-10-04, Tyler): Value names a real product line and a generic
+// one-tier-down counterpart per room (planValueLines, confirmed at the
+// gate; default = the brand's most premium line that fits the room; no
+// Value cell where none fits) and carries no usage detail.
+const STYLE_VERSION = "s44";
 
 /** Versions the DETERMINISTIC seed-check set (everything seedRule runs:
  * checkPromptAgainstSpec + blind_missing_category + scenario_label_leak).
@@ -631,7 +635,7 @@ export function stageLibrary(m: Moderators): LibraryStage[] {
     {
       key: "pricing", label: "Pricing / value", layer: "decision",
       situational: true, rivals: "none", tag: "judges", recommended: true,
-      hint: "Value, in one short shape: the situation in a few words, then is the client brand (or its line) worth it over the next tier down in the category, with at most one usage detail. Never its own lower tier, never a rival, never a stated price, never a list of usage. Same question in every column - only the buyer changes.",
+      hint: "Value, in one short shape: the situation in a few words, then is the client brand's line worth it over the next tier down in the category - no usage detail. Never its own lower tier, never a rival, never a stated price. Same question in every column - only the buyer changes.",
       why: "Whether the assistant says you're worth the money - and for which buyers - reaches every market.",
     },
     {
@@ -2057,6 +2061,61 @@ export async function contestRoomSet(input: {
   return { scenarios, reserve, checks, swaps };
 }
 
+/**
+ * Value lines (2026-10-04, Tyler): a Value question has two ends - which of
+ * the brand's products, and what it is weighed against - and the verdict
+ * depends on the gap. Left to the writer, multi-line brands got no line
+ * (flagship vs the bottom of the market) or a guessed one. One cached call
+ * per tracker proposes, for each room, the brand's MOST PREMIUM line a
+ * buyer in that room could buy (real product name) and the generic option
+ * one tier below it; null where no line fits the room (no Value cell
+ * there). The gate shows the pairs and the user edits them; the confirmed
+ * map rides the cells request. Fails open to null (writer chooses).
+ */
+export async function planValueLines(input: {
+  brand: string; category: string; audience: string | null;
+  rooms: { label: string; description: string }[];
+  meta?: CacheMeta;
+}): Promise<Record<string, ValueLine | null> | null> {
+  if (input.rooms.length === 0) return null;
+  tagCosts({ purpose: "setup:value_lines" });
+  const rooms = input.rooms.map((r) => ({ label: r.label.trim(), description: r.description.trim() }));
+  const key = cacheKey("value_lines1", [
+    DESIGN_CHECK_MODEL, input.brand, input.category, input.audience ?? "",
+    rooms.map((r) => `${r.label}|${r.description}`).join("~"),
+  ]);
+  return coalesced<Record<string, ValueLine | null>>(key, { meta: input.meta }, async () => {
+    const a = await anthropicClient();
+    let j: { rooms?: { label?: string; line?: string | null; counterpart?: string | null }[] } | null = null;
+    for (const extra of ["", " Escape any quote marks inside strings."]) {
+      const res = await a.messages.create({
+        model: DESIGN_CHECK_MODEL, max_tokens: 1500, output_config: { effort: DESIGN_CHECK_EFFORT },
+        system:
+          `For the brand ${input.brand} in ${input.category}, and for each buying room given: ` +
+          `line - the brand's MOST PREMIUM current product line that a buyer in that room could realistically buy, by its real name as buyers say it (the brand's name alone when it sells a single product; never an exact model, edition or year); ` +
+          `counterpart - the generic option one tier below that line in the category, described by its tier or price level and never by name (a plainly cheaper option where the category has no named tiers), never one of ${input.brand}'s own products. ` +
+          `When ${input.brand} has no line a buyer in that room would buy, give null for both. ` +
+          `Reply with ONLY JSON: {"rooms": [{"label": "...", "line": "...", "counterpart": "..."}, ...]} - rooms in the order given, labels exactly as given.${extra}`,
+        messages: [{ role: "user", content: `Audience: ${input.audience ?? "unknown"}\nRooms:\n${rooms.map((r, i) => `${i + 1}. ${r.label}: ${r.description}`).join("\n")}` }],
+      } as never);
+      const text = (res as { content: { type: string; text?: string }[] }).content
+        .filter((b) => b.type === "text").map((b) => b.text ?? "").join("").trim();
+      try { j = JSON.parse(firstJsonObject(text) ?? text); break; } catch { /* retry */ }
+    }
+    if (!j?.rooms) throw new Error("value lines reply was not valid JSON");
+    const out: Record<string, ValueLine | null> = {};
+    for (const r of j.rooms) {
+      const label = rooms.find((x) => x.label.toLowerCase() === String(r.label ?? "").trim().toLowerCase())?.label;
+      if (!label) continue;
+      const line = humanize(String(r.line ?? "")).trim();
+      const counterpart = humanize(String(r.counterpart ?? "")).trim();
+      out[label] = line && counterpart ? { line, counterpart } : null;
+    }
+    console.warn(`value lines [${input.brand}]: ${Object.entries(out).map(([k, v]) => `${k} -> ${v ? `${v.line} vs ${v.counterpart}` : "none"}`).join("; ")}`);
+    return out;
+  });
+}
+
 /** Why a prompt edit was flagged: drift, brand design, coherence, or a
  * doubt/plan cell whose paraphrase no longer voices its design. */
 export type CellFlag = "target" | "branding" | "unclear" | "design";
@@ -2525,9 +2584,12 @@ const CELL_WRITER_SYSTEM =
           "another plan line's situation into it.\n" +
           "- Value cells (stage key pricing) ask the CLIENT BRAND'S value " +
           "question for this column's buyer, in one short shape: the " +
-          "situation in a few words, then is <brand or its line> worth it " +
-          "over <counterpart>, with at most ONE usage detail - never a list " +
-          "of what the asker does, about 12-25 words. The counterpart is " +
+          "situation in a few words, then is <its line> worth it over " +
+          "<counterpart>? - about 10-20 words, no usage detail (the " +
+          "situation already says who is buying). A value(line=...; " +
+          "counterpart=...) note on the plan line names both ends: weigh " +
+          "exactly that line against exactly that counterpart. Without the " +
+          "note, the counterpart is " +
           "the next tier down from that line in the category - the more affordable option a buyer in this situation would realistically weigh it against, described by its tier or price level (where the category has no named tiers, a plainly cheaper option is the right description), never by name; the cheapest option only when the brand's line sits just one step above it - NEVER the brand's own lower tier or plan, which " +
           "keeps every answer inside the brand. When the brand sells several " +
           "distinct product lines, name the LINE being weighed - never an " +
@@ -2683,6 +2745,8 @@ export interface GridCell {
    * measures, assigned at grid-plan time from the brand's enumerated
    * doubt-space. The writer voices it; the design check enforces it. */
   concern?: string;
+  /** Value cells only (2026-10-04): the line weighed and its counterpart. */
+  valueLine?: ValueLine;
   /** Class-angle comparison cells only (2026-10-01): the class the client
    * brand is weighed against ("a Visa card") and the upstream roster brand
    * it evokes ("Visa"). Such cells carry angle "class"; qtype stays
@@ -2739,7 +2803,7 @@ export function gridCellCacheKey(
   },
   row: {
     stage: string; situation: string | null; angle: string; scope: string | null; concern?: string | null;
-    classPhrase?: string | null; classBrand?: string | null;
+    classPhrase?: string | null; classBrand?: string | null; valueLine?: ValueLine | null;
   }
 ): string {
   // args.competitors is the SAME-SEAT list (generateGrid resolves roles
@@ -2755,6 +2819,8 @@ export function gridCellCacheKey(
     // data, 2026-10-01) - appended ONLY when present, so every other unit
     // keys byte-identically to before.
     ...(row.classPhrase ? [`class:${row.classBrand ?? ""}:${row.classPhrase}`] : []),
+    // A Value row's line and counterpart (2026-10-04) - same contract.
+    ...(row.valueLine ? [`value:${row.valueLine.line}|${row.valueLine.counterpart}`] : []),
   ]);
 }
 
@@ -2790,6 +2856,9 @@ export interface CellPlanRow<S extends { key: string } = MaskedStage> {
   angle: string;
   scope: string | null;
   concern?: string;
+  /** Value rows only (2026-10-04): the brand's product line this column's
+   * Value cell weighs and the generic option one tier below it. */
+  valueLine?: ValueLine;
   /** Class-angle rows only: angle "class" plus the class it voices. */
   classPhrase?: string;
   classBrand?: string;
@@ -3081,6 +3150,11 @@ export async function generateGrid(input: {
    * (self-versioning request data). Absent = the legacy concern-plan
    * zip, byte-identical. */
   worries?: WorryPick[];
+  /** Value lines per room (2026-10-04): the line each column's Value cell
+   * weighs and its one-tier-down counterpart, as confirmed at the gate.
+   * null for a room = no Value cell there. Absent = the engine's default
+   * (planValueLines). */
+  valueLines?: Record<string, ValueLine | null>;
   /** Out-parameter (2026-10-02 review round 3): rows the battery shipped
    * WITHOUT (exhausted units) and why a retry answer was given, so the
    * route and the wizard can say so instead of a silent hole. */
@@ -3207,6 +3281,28 @@ export async function generateGrid(input: {
     }
   }
 
+  // Value lines (2026-10-04): each Value row weighs a named line against
+  // its one-tier-down counterpart - the gate-confirmed map when sent, else
+  // the engine default. A room mapped to null gets no Value cell.
+  const valueRows = plan.filter((r) => r.stage.key === "pricing" && r.situation);
+  if (valueRows.length > 0) {
+    let lines = input.valueLines;
+    if (!lines && process.env.PHRASINGS_CHECKS !== "0") {
+      lines = (await planValueLines({
+        brand: input.brand, category: input.category, audience: input.audience,
+        rooms: input.scenarios.map((sc) => ({ label: sc.label, description: sc.description })), meta: input.meta,
+      }).catch((err) => { console.error("value lines failed open:", err); return null; })) ?? undefined;
+    }
+    if (lines) {
+      for (const r of valueRows) {
+        const v = lines[r.situation as string];
+        if (v) r.valueLine = { line: v.line.trim(), counterpart: v.counterpart.trim() };
+      }
+      const drop = new Set(valueRows.filter((r) => lines![r.situation as string] === null));
+      if (drop.size > 0) for (let i = plan.length - 1; i >= 0; i--) if (drop.has(plan[i])) plan.splice(i, 1);
+    }
+  }
+
   // Per-CELL cache units, keyed only on what the cell actually depends
   // on: its stage, angle, reach, and ITS OWN scenario (label,
   // description, journey note) - never the siblings. Editing one
@@ -3226,7 +3322,7 @@ export async function generateGrid(input: {
   const unitKeys = plan.map((r) =>
     gridCellCacheKey(input, {
       stage: r.stage.key, situation: r.situation, angle: r.angle, scope: r.scope, concern: r.concern ?? null,
-      classPhrase: r.classPhrase ?? null, classBrand: r.classBrand ?? null,
+      classPhrase: r.classPhrase ?? null, classBrand: r.classBrand ?? null, valueLine: r.valueLine ?? null,
     })
   );
   const resolved: (GridCell[] | null)[] = units.map(() => null);
@@ -3268,6 +3364,7 @@ export async function generateGrid(input: {
       `${i + 1}. stage=${p.stage.key} situation=${p.situation ?? "-"} angle=${planAngle(p)}` +
       `${p.scope ? ` reach=${p.scope}` : ""}${jn ? ` journey(${jn})` : ""}` +
       `${p.concern ? ` concern(${p.concern})` : ""}` +
+      `${p.valueLine ? ` value(line=${p.valueLine.line}; counterpart=${p.valueLine.counterpart})` : ""}` +
       `\n   guidance: ${p.stage.hint}` +
       (p.classPhrase ? `\n   class contract: the counterpart is the CLASS "${p.classPhrase}", never a named rival company or product` : "")
     );
@@ -3458,6 +3555,7 @@ export async function generateGrid(input: {
             angle: row.classPhrase ? "class" : primaryBrandName(row.angle),
             mode: row.scope ?? null,
             concern: row.concern,
+            ...(row.valueLine ? { valueLine: row.valueLine } : {}),
             ...(row.classPhrase ? { classPhrase: row.classPhrase, classBrand: row.classBrand } : {}),
             text: humanize(c.text.trim()),
           };
@@ -3574,7 +3672,7 @@ export async function generateGrid(input: {
         if (process.env.PHRASINGS_CHECKS !== "0" && flat.length > 0) {
           try {
             const seedTargets = flat
-              .map((c, i) => ({ c, i, intent: stageDesignIntent(c.stage, input.brand, c.concern, c.angle, c.situation) }))
+              .map((c, i) => ({ c, i, intent: stageDesignIntent(c.stage, input.brand, c.concern, c.angle, c.situation, c.valueLine) }))
               .filter((x): x is { c: GridCell; i: number; intent: string } => !!x.intent);
             if (seedTargets.length > 0 && Date.now() > deadlineAt) complete = false;
             if (seedTargets.length > 0 && Date.now() <= deadlineAt) {
@@ -4427,6 +4525,8 @@ export async function regenerateCell(input: {
   scenarios: ScenarioSpec[];
   cell: {
     stage: string; situation: string | null; angle: string; mode: string | null; concern?: string | null;
+    /** Value cells (2026-10-04): the line and counterpart survive redraws. */
+    valueLine?: ValueLine | null;
     /** Class-angle comparison cells (2026-10-01): the class survives redraws. */
     classPhrase?: string | null; classBrand?: string | null;
   };
@@ -4466,6 +4566,7 @@ export async function regenerateCell(input: {
     input.nearTo ? `near:${input.nearTo.trim().toLowerCase()}` : "",
     // Class cells only - every other draw keys as before.
     ...(input.cell.classPhrase ? [`class:${input.cell.classBrand ?? ""}:${input.cell.classPhrase}`] : []),
+    ...(input.cell.valueLine ? [`value:${input.cell.valueLine.line}|${input.cell.valueLine.counterpart}`] : []),
   ]);
   const hit = await store.cacheGet(key, CACHE_TTL_MS);
   if (hit) {
@@ -4479,6 +4580,7 @@ export async function regenerateCell(input: {
     `1. stage=${st.key} situation=${input.cell.situation ?? "-"} angle=${planAngle(input.cell)}` +
     `${input.cell.mode ? ` reach=${input.cell.mode}` : ""}${jn ? ` journey(${jn})` : ""}` +
     `${input.cell.concern ? ` concern(${input.cell.concern})` : ""}` +
+    `${input.cell.valueLine ? ` value(line=${input.cell.valueLine.line}; counterpart=${input.cell.valueLine.counterpart})` : ""}` +
     `\n   guidance: ${st.hint}` +
     (input.cell.classPhrase ? `\n   class contract: the counterpart is the CLASS "${input.cell.classPhrase}", never a named rival company or product` : "");
   const draw = async (rejectNote: string | null): Promise<string | null> => {
@@ -4528,7 +4630,7 @@ export async function regenerateCell(input: {
   // the one seed path that skipped every check): mechanical brand rule,
   // then the doubt/plan design intent, one steered retry, and null rather
   // than an unchecked seed - the client keeps what it has.
-  const intent = process.env.PHRASINGS_CHECKS !== "0" ? stageDesignIntent(input.cell.stage, input.brand, input.cell.concern, input.cell.angle, input.cell.situation) : null;
+  const intent = process.env.PHRASINGS_CHECKS !== "0" ? stageDesignIntent(input.cell.stage, input.brand, input.cell.concern, input.cell.angle, input.cell.situation, input.cell.valueLine) : null;
   let text: string | null = null;
   let note: string | null = null;
   for (let attempt = 0; attempt < 3 && !text; attempt++) {

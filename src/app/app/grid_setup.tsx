@@ -61,6 +61,8 @@ export interface GridCellUi {
   /** Doubt cells (s9+): the planned concern this cell measures - part of
    * the design, sent with every generation request. */
   concern?: string | null;
+  /** Value cells (2026-10-04): the line weighed and its counterpart. */
+  valueLine?: ValueLineUi | null;
   /** Class-angle comparison cells (2026-10-01; angle "class"): the class
    * the client brand is weighed against ("a Visa card") and the upstream
    * brand it evokes ("Visa"). Part of the design - sent with every
@@ -310,8 +312,17 @@ export interface GridState {
    * rides the cell and the dashboard attributes by it. Absent = legacy
    * concern-zip battery (old drafts). */
   worries?: { concern: string; stage: string }[];
+  /** Value lines per room (2026-10-04): the brand's product line each
+   * column's Value cell weighs and the generic option one tier below it,
+   * proposed by the engine (most premium fitting line) and editable on the
+   * coverage step. null = no Value cell for that room. Absent = not yet
+   * proposed (the engine default applies). */
+  valueLines?: Record<string, ValueLineUi | null>;
   cells: GridCellUi[];
 }
+
+/** A Value cell's two ends (engine ValueLine, UI copy). */
+export interface ValueLineUi { line: string; counterpart: string }
 
 /** A worries-gate candidate (engine WorryCandidate, UI copy). */
 export interface WorryUi {
@@ -976,6 +987,34 @@ export function useGridSetup(a: GridSetupArgs) {
     return next;
   }
 
+  /** Value lines (2026-10-04): propose the line and one-tier-down
+   * counterpart per room when the coverage step opens. Rooms the user
+   * already set keep their edits; only rooms without an entry take the
+   * engine's proposal. */
+  async function loadValueLines(fresh?: GridState | null): Promise<void> {
+    const st = fresh ?? a.state;
+    if (!st || st.scenarios.length === 0 || st.scenarios.some((s) => !s.label.trim())) return;
+    const have = st.valueLines ?? {};
+    if (st.scenarios.every((s) => s.label in have)) return;
+    const res = await fetch("/api/setup/grid/value_lines", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", ...(a.setupId ? { "x-setup-id": a.setupId } : {}) },
+      body: JSON.stringify({
+        brand: a.brand, category: a.category, audience: a.audience || undefined,
+        scenarios: st.scenarios.map((s) => ({ label: s.label, description: s.description })),
+      }),
+    }).catch(() => null);
+    const data = res && res.ok ? ((await res.json().catch(() => null)) as { valueLines?: Record<string, ValueLineUi | null> } | null) : null;
+    if (!data?.valueLines) return;
+    const latest = a.state ?? st;
+    const merged: Record<string, ValueLineUi | null> = {};
+    for (const sc of latest.scenarios) {
+      const cur = latest.valueLines?.[sc.label];
+      merged[sc.label] = cur !== undefined ? cur : (data.valueLines[sc.label] ?? null);
+    }
+    a.setState({ ...latest, valueLines: merged });
+  }
+
   /** Silent pool warm - fired while the user reviews the scenarios, so
    * the worries gate opens on a cache hit. */
   function warmWorries(fresh?: GridState | null): void {
@@ -1011,6 +1050,7 @@ export function useGridSetup(a: GridSetupArgs) {
         scenarios: a.state.scenarios,
         stageKeys: effectiveKeptStages(a.state),
         worries: a.state.worries,
+        valueLines: a.state.valueLines,
         retryExhausted: true,
       }
     );
@@ -1255,7 +1295,7 @@ export function useGridSetup(a: GridSetupArgs) {
       audience: a.audience || undefined,
       base: a.state.moderators,
       scenarios: a.state.scenarios,
-      cell: { stage: c.stage, situation: c.situation, angle: c.angle, mode: c.mode ?? null, concern: c.concern ?? undefined, ...classFields(c) },
+      cell: { stage: c.stage, situation: c.situation, angle: c.angle, mode: c.mode ?? null, concern: c.concern ?? undefined, valueLine: c.valueLine ?? undefined, ...classFields(c) },
       avoid: alts,
       // Near mode keeps this prompt's ask and moves one detail.
       nearTo: near ? c.text : undefined,
@@ -1466,6 +1506,7 @@ export function useGridSetup(a: GridSetupArgs) {
         audience: a.audience || undefined,
         base: st.moderators, scenarios: st.scenarios, stageKeys: effectiveKeptStages(st),
         worries: st.worries,
+        valueLines: st.valueLines,
         warm: true,
       }),
     })
@@ -1537,7 +1578,7 @@ export function useGridSetup(a: GridSetupArgs) {
     compose, writeCells, writePhrasings, topUpPhrasings, suggestScenario, nearScenario,
     suggestCell, addOwnCell,
     prefetchNearPools, warmRead, warmCells, warmPhrasings,
-    fetchWorries, warmWorries,
+    fetchWorries, warmWorries, loadValueLines,
     regenerateCell, cycleCell, restoreCategoryView,
   };
 }
@@ -2373,6 +2414,42 @@ export function ScenarioReviewModal({
  * on the scenarios step; columns are read-only here - scenarios are the
  * previous step; stage ticks are the only control (A8: no dot painting,
  * participation stays derived). */
+/** One column's Value line on the coverage step: "<line> vs <counterpart>",
+ * click to edit both ends, or set "none" (no Value cell for that room). */
+function ValueLineEditor({ value, disabled, onChange }: {
+  value: ValueLineUi | null;
+  disabled: boolean;
+  onChange: (v: ValueLineUi | null) => void;
+}) {
+  const [editing, setEditing] = useState(false);
+  const [line, setLine] = useState(value?.line ?? "");
+  const [counterpart, setCounterpart] = useState(value?.counterpart ?? "");
+  if (editing) {
+    return (
+      <div className="grid gap-1 text-left">
+        <input value={line} onChange={(e) => setLine(e.target.value)} placeholder="product line" maxLength={80}
+          className="w-full rounded border border-line px-1 py-0.5 text-[10px]" />
+        <input value={counterpart} onChange={(e) => setCounterpart(e.target.value)} placeholder="compared with" maxLength={120}
+          className="w-full rounded border border-line px-1 py-0.5 text-[10px]" />
+        <div className="flex gap-2 text-[10px]">
+          <button type="button" className="font-medium text-primary hover:opacity-80" disabled={!line.trim() || !counterpart.trim()}
+            onClick={() => { onChange({ line: line.trim(), counterpart: counterpart.trim() }); setEditing(false); }}>done</button>
+          <button type="button" className="text-ink-3 hover:opacity-80" onClick={() => { onChange(null); setEditing(false); }}>none</button>
+          <button type="button" className="text-ink-3 hover:opacity-80" onClick={() => setEditing(false)}>cancel</button>
+        </div>
+      </div>
+    );
+  }
+  return (
+    <button type="button" disabled={disabled}
+      onClick={() => { setLine(value?.line ?? ""); setCounterpart(value?.counterpart ?? ""); setEditing(true); }}
+      title="The product line this column's Value question weighs, and what it is compared with - click to change"
+      className="text-[10px] leading-tight text-primary hover:opacity-80">
+      {value ? (<><span className="font-medium">{value.line}</span><br /><span className="text-ink-3">vs {value.counterpart}</span></>) : <span className="text-ink-3">no Value cell</span>}
+    </button>
+  );
+}
+
 export function CoverageGate({
   state, setState, busy, onEditWorries,
 }: {
@@ -2504,6 +2581,23 @@ export function CoverageGate({
               {isKept ? "one cell per rival · every buyer" : "-"}
             </span>
           </td>
+        ) : s.key === "pricing" && isKept && state.valueLines ? (
+          // Value lines (2026-10-04): each column shows the line its Value
+          // cell weighs and the one-tier-down counterpart - editable, or
+          // "none" for a room the brand has no product for.
+          active.map((sc) => (
+            <td key={sc.label} className="px-1.5 py-1 text-center align-top">
+              {effective.includes(sc.label) ? (
+                <ValueLineEditor
+                  value={state.valueLines?.[sc.label] ?? null}
+                  disabled={busy}
+                  onChange={(v) => setState({ ...state, valueLines: { ...(state.valueLines ?? {}), [sc.label]: v } })}
+                />
+              ) : (
+                <span className="inline-block h-2.5 w-2.5 rounded-full border border-dashed border-line" />
+              )}
+            </td>
+          ))
         ) : s.situational || s.rivals !== "none" ? (
           active.map((sc) => {
             const inCol = isKept && effective.includes(sc.label);

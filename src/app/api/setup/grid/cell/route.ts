@@ -46,6 +46,8 @@ const Body = z.object({
     mode: z.string().trim().max(300).nullable(),
     /** The cell's planned concern (s9+): part of the design, survives redraws. */
     concern: z.string().trim().max(120).nullable().optional(),
+    /** Value cells (2026-10-04): the line and counterpart survive redraws. */
+    valueLine: z.object({ line: z.string().trim().min(1).max(80), counterpart: z.string().trim().min(1).max(120) }).nullable().optional(),
     /** Class-angle comparison cells (2026-10-01): the class phrase
      * and the upstream brand it evokes. Absent on every other cell. */
     classPhrase: z.string().trim().max(60).nullable().optional(),

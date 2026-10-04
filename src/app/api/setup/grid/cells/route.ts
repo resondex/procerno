@@ -47,6 +47,10 @@ const Body = z.object({
     )
     .max(36)
     .optional(),
+  /** Value lines per room (2026-10-04), as confirmed at the gate: the line
+   * each column's Value cell weighs and its one-tier-down counterpart;
+   * null = no Value cell for that room. Absent = the engine default. */
+  valueLines: z.record(z.string().max(60), z.object({ line: z.string().trim().min(1).max(80), counterpart: z.string().trim().min(1).max(120) }).nullable()).optional(),
   audience: z.string().trim().max(160).optional(),
   base: ModeratorsShape,
   /** The ACTIVE scenarios as confirmed at gate 1, with their journeys. */
@@ -103,6 +107,7 @@ export async function POST(req: Request) {
     rosterRoles: parsed.data.rosterRoles,
     rosterClasses: parsed.data.rosterClasses,
     worries: parsed.data.worries,
+    valueLines: parsed.data.valueLines,
     noWait: parsed.data.warm,
     retryExhausted: parsed.data.retryExhausted,
     report,

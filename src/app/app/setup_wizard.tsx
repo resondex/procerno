@@ -442,7 +442,7 @@ export function SetupWizard({ mode, brand, draft, engineOptions, onClose, onCrea
     // (Deferred a tick: landOnWorries sets busy state, which an effect
     // body must not do synchronously.)
     if (step === "worries") void Promise.resolve().then(() => landOnWorries());
-    if (step === "stages") gridApi.warmCells();
+    if (step === "stages") { gridApi.warmCells(); void gridApi.loadValueLines(); }
     if (step === "prompts" && mode === "grid") gridApi.warmPhrasings();
     return () => { alive = false; };
     // eslint-disable-next-line react-hooks/exhaustive-deps -- mount-only
@@ -707,7 +707,7 @@ export function SetupWizard({ mode, brand, draft, engineOptions, onClose, onCrea
     // seeds are reviewed. Silent; failures cost nothing.
     if (k === "scenarios") { void gridApi.prefetchNearPools(g); gridApi.warmWorries(g); }
     if (k === "worries") void landOnWorries(g);
-    if (k === "stages") gridApi.warmCells(g);
+    if (k === "stages") { gridApi.warmCells(g); void gridApi.loadValueLines(g); }
     if (k === "prompts" && mode === "grid") gridApi.warmPhrasings(g);
   }
 
