@@ -41,6 +41,7 @@ for (const brand of process.argv.slice(2)) {
     swaps: rep.swaps,
     final: rep.scenarios.map((s: { label: string; description: string }) => ({ label: s.label, description: s.description, check: by.get(s.label) ?? null })),
   };
+  void 0;
   console.log(`${DRAW} ${brand}: ${rep.scenarios.map((s: { label: string }) => s.label).join(" | ")}${rep.swaps.length ? `  (swapped: ${rep.swaps.map((x: { out: string; in: string }) => `${x.out} -> ${x.in}`).join("; ")})` : ""}`);
 }
 fs.writeFileSync(path.join(OUT, `draw_${DRAW}.json`), JSON.stringify(out, null, 2));

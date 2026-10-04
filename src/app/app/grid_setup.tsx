@@ -1579,6 +1579,8 @@ interface RoomCheckUi {
   contested: boolean;
   pitch: string;
   names: string[];
+  capability?: boolean;
+  platformSwitch?: boolean;
 }
 
 export function ScenariosGate({
@@ -1706,7 +1708,7 @@ export function ScenariosGate({
   }, [checkSig, setupId]);
   /** A suggested room that fails the room rule is never offered. */
   const missingCheck = fitMissing ? roomChecks[roomKey(fitMissing)] : undefined;
-  const fitMissingShown = fitMissing && !(missingCheck && (!missingCheck.contested || missingCheck.names.length > 0 || missingCheck.pitch))
+  const fitMissingShown = fitMissing && !(missingCheck && (!missingCheck.contested || missingCheck.names.length > 0 || missingCheck.pitch || missingCheck.capability || missingCheck.platformSwitch))
     ? fitMissing
     : null;
   const showFit = !fitDismissed && (fitFlags.length > 0 || fitMissingShown !== null);
@@ -2118,6 +2120,18 @@ export function ScenariosGate({
                 return (
                   <span className="text-warning" title="Describe the buyer's situation and the outcome they want - a room that names a brand answers its own questions.">
                     Names {c.names.join(", ")}
+                  </span>
+                );
+              if (c.capability)
+                return (
+                  <span className="text-warning" title="This reads as a product feature being adopted, not a buyer's situation - every question in its column would ask about that one feature.">
+                    A feature, not a situation
+                  </span>
+                );
+              if (c.platformSwitch)
+                return (
+                  <span className="text-warning" title="A switch between platforms forces each question to state a direction, which rules a leading brand out of the whole column.">
+                    Platform switch locks out a rival
                   </span>
                 );
               if (!c.contested)
