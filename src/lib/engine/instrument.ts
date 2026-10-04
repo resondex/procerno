@@ -911,7 +911,13 @@ export async function readScenarios(input: {
   // (who they shoot, where they use it), never the want alone. Priority
   // segments are real where a category is bought by priority; 21 kept the
   // writer from drawing them at all.
-  const key = cacheKey("scenarios_journeys22", [
+  // 23 (2026-10-04, Tyler): the organization-purchase room is expected
+  // only when the GIVEN base read's decision unit is a committee; a
+  // one-person or household base never gets an employer's or an
+  // organization's purchase as a room. "Categories sold to organizations"
+  // was read loosely (phones are sold to organizations too) and kept
+  // conjuring a work room - a stipend, an employer's approved list.
+  const key = cacheKey("scenarios_journeys23", [
     input.category, input.audience, input.forBrand ?? "",
   ]);
   const read = await coalesced<{
@@ -1004,10 +1010,14 @@ export async function readScenarios(input: {
           "Before returning, audit the core four for coverage: rank this " +
           "market's buying rooms by how much revenue moves through them, " +
           "ensuring a diverse sampling, and check none of the biggest is " +
-          "missing. In categories sold to organizations, the " +
+          "missing. When the base read's decision_unit is committee, the " +
           "large-organization purchase is almost always one of them; if a " +
           "top room is absent it replaces the weakest scenario in the " +
-          "core set. If the market genuinely has a second decision " +
+          "core set. When the base read's decision_unit is solo or " +
+          "household, no room is an organization's or an employer's " +
+          "purchase, and no buyer's circumstance is set by an employer's " +
+          "requirements, policy or allowance - that buyer belongs to a " +
+          "different market. If the market genuinely has a second decision " +
           "process - a scenario whose buyer decides differently - its " +
           "room stays in the core set alongside the revenue-ranked ones." +
           (input.forBrand
