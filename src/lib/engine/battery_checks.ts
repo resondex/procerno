@@ -254,7 +254,7 @@ export function seedDesignLine(
 /** The design intent a doubt/plan STAGE demands, independent of any seed -
  * the yardstick for judging seeds themselves (seed-as-design cannot judge
  * the seed). */
-export function stageDesignIntent(stage: string, brand: string, concern?: string | null, angle?: string | null, situation?: string | null): string | null {
+export function stageDesignIntent(stage: string, brand: string, concern?: string | null, angle?: string | null, situation?: string | null, capability?: string | null): string | null {
   // Stage contract (2026-10-03): repertoire's trigger is habit or wanting
   // variety, not a worry - it keeps the doubt stage's must-name and
   // premise plumbing but gets its own design.
@@ -315,7 +315,7 @@ export function stageDesignIntent(stage: string, brand: string, concern?: string
       // same logic as the switch-direction rule. World knowledge, so it is
       // the checker's judgment, not a string check.
       (stage === "feature_screening"
-        ? ` The question screens on ONE capability that buyers in this category commonly screen for - two or more capabilities do not satisfy the design, and neither does a capability chosen because it is ${brand}'s own signature strength. The capability must also leave ${brand} an eligible answer: a requirement ${brand} cannot meet by construction (hardware or capabilities its products do not have) excludes it before the answer starts and does not satisfy the design.`
+        ? ` The question screens on ONE capability that buyers in this category commonly screen for - two or more capabilities do not satisfy the design, and neither does a capability chosen because it is ${brand}'s own signature strength. The capability must also leave ${brand} an eligible answer: a requirement ${brand} cannot meet by construction (hardware or capabilities its products do not have) excludes it before the answer starts and does not satisfy the design.${capability ? ` The DESIGNED capability is: ${capability} - the question screens on that capability, in any natural wording; a different capability does not satisfy the design.` : ""}`
         : stage === "use_case"
           ? ` The question names ONE concrete job buyers in this situation commonly need done and asks which to pick for it - a list of needs, or a job chosen because it is ${brand}'s own signature strength, does not satisfy the design.`
           : "")

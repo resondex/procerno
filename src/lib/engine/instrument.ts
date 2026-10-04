@@ -140,7 +140,9 @@ const CACHE_TTL_MS = 183 * 24 * 3600 * 1000;
 // column's feature screen - the writer sees every plan line in its chunk).
 // (s36 was a scratch-worktree test of removing generic examples; never
 // shipped, so the version is skipped.)
-const STYLE_VERSION = "s37";
+// "s38" (2026-10-04, item 2): feature screens ask about a capability
+// assigned per column from a brand-blind category list (planCapabilities).
+const STYLE_VERSION = "s38";
 
 /** Versions the DETERMINISTIC seed-check set (everything seedRule runs:
  * checkPromptAgainstSpec + blind_missing_category + scenario_label_leak).
@@ -2041,6 +2043,87 @@ export async function contestRoomSet(input: {
   return { scenarios, reserve, checks, swaps };
 }
 
+/**
+ * Feature-screen capabilities (item 2, 2026-10-04): the writer kept
+ * screening on the client's own signature strength (audits v4-v6), and an
+ * instruction alone never held. The capability now comes from a list built
+ * WITHOUT the brand: one call lists what buyers in the category commonly
+ * filter on and ranks the list per room. A second call, which does see the
+ * brand, only removes capabilities the client cannot meet (a screen it fails
+ * by construction measures nothing). Assignment is mechanical: each room
+ * takes its highest-ranked eligible capability not already used by another
+ * room. Fails open: no plan, no assignment (the writer chooses, as before).
+ */
+export async function planCapabilities(input: {
+  brand: string; category: string; audience: string | null;
+  rooms: { label: string; description: string }[];
+  meta?: CacheMeta;
+}): Promise<Map<string, string> | null> {
+  if (input.rooms.length === 0) return null;
+  tagCosts({ purpose: "setup:capabilities" });
+  const a = await anthropicClient();
+  const call = async (system: string, user: string): Promise<Record<string, unknown> | null> => {
+    for (const extra of ["", " Escape any quote marks inside strings."]) {
+      const res = await a.messages.create({
+        model: DESIGN_CHECK_MODEL, max_tokens: 2000, output_config: { effort: DESIGN_CHECK_EFFORT },
+        system: system + extra, messages: [{ role: "user", content: user }],
+      } as never);
+      const text = (res as { content: { type: string; text?: string }[] }).content
+        .filter((b) => b.type === "text").map((b) => b.text ?? "").join("").trim();
+      try { return JSON.parse(firstJsonObject(text) ?? text) as Record<string, unknown>; } catch { /* retry */ }
+    }
+    return null;
+  };
+  const rooms = input.rooms.map((r) => ({ label: r.label.trim(), description: r.description.trim() }));
+  const planKey = cacheKey("capability_plan1", [
+    DESIGN_CHECK_MODEL, input.category, input.audience ?? "",
+    rooms.map((r) => `${r.label}|${r.description}`).join("~"),
+  ]);
+  const plan = await coalesced<{ capabilities: string[]; ranked: Record<string, string[]> }>(planKey, { meta: input.meta }, async () => {
+    const j = await call(
+      `You list the capabilities buyers of ${input.category} commonly filter on when choosing one - features or properties a product either has or lacks, stated in 2-6 plain words the way a buyer says them. ` +
+      `Give 10 to 15, most commonly screened first, and never name a brand or product. ` +
+      `Then, for each buying room given, rank the 3 capabilities from your list that a buyer in that room would most likely screen on. ` +
+      `Reply with ONLY JSON: {"capabilities": ["..."], "rooms": [{"label": "...", "ranked": ["...", "...", "..."]}]} - rooms in the order given, labels exactly as given, ranked entries copied exactly from your list.`,
+      `Category: ${input.category}\nAudience: ${input.audience ?? "unknown"}\nRooms:\n` +
+        rooms.map((r, i) => `${i + 1}. ${r.label}: ${r.description}`).join("\n"),
+    );
+    const caps = Array.isArray(j?.capabilities) ? (j!.capabilities as unknown[]).map((x) => humanize(String(x))).filter(Boolean).slice(0, 15) : [];
+    const ranked: Record<string, string[]> = {};
+    const capKey = new Map(caps.map((c) => [c.toLowerCase(), c]));
+    for (const r of (Array.isArray(j?.rooms) ? j!.rooms : []) as { label?: string; ranked?: unknown[] }[]) {
+      const label = rooms.find((x) => x.label.toLowerCase() === String(r.label ?? "").trim().toLowerCase())?.label;
+      if (!label) continue;
+      ranked[label] = (r.ranked ?? []).map((x) => capKey.get(humanize(String(x)).toLowerCase())).filter((x): x is string => !!x);
+    }
+    if (caps.length === 0) throw new Error("capability plan returned no list");
+    return { capabilities: caps, ranked };
+  });
+  if (!plan) return null;
+  // Eligibility is the ONLY brand-aware step: it removes, never chooses.
+  const eligKey = cacheKey("capability_elig1", [DESIGN_CHECK_MODEL, input.brand, input.category, plan.capabilities.join("~")]);
+  const elig = await coalesced<{ lacks: string[] }>(eligKey, { meta: input.meta }, async () => {
+    const j = await call(
+      `For the brand given, mark which of these ${input.category} capabilities its current products do NOT offer at all. Only a clear lack counts; when unsure, it offers it. ` +
+      `Reply with ONLY JSON: {"lacks": ["..."]} - entries copied exactly from the list.`,
+      `Brand: ${input.brand}\nCapabilities:\n${plan.capabilities.map((c) => `- ${c}`).join("\n")}`,
+    );
+    const set = new Map(plan.capabilities.map((c) => [c.toLowerCase(), c]));
+    return { lacks: ((j?.lacks ?? []) as unknown[]).map((x) => set.get(humanize(String(x)).toLowerCase())).filter((x): x is string => !!x) };
+  }).catch(() => ({ lacks: [] as string[] }));
+  const lacks = new Set((elig?.lacks ?? []).map((c) => c.toLowerCase()));
+  const ok = (c: string) => !lacks.has(c.toLowerCase());
+  const used = new Set<string>();
+  const out = new Map<string, string>();
+  for (const r of rooms) {
+    const pick = (plan.ranked[r.label] ?? []).find((c) => ok(c) && !used.has(c))
+      ?? plan.capabilities.find((c) => ok(c) && !used.has(c));
+    if (pick) { used.add(pick); out.set(r.label, pick); }
+  }
+  console.warn(`capabilities [${input.category}]: ${[...out].map(([k, v]) => `${k} -> ${v}`).join("; ")}${lacks.size ? ` (client lacks: ${[...lacks].join(", ")})` : ""}`);
+  return out.size > 0 ? out : null;
+}
+
 /** Why a prompt edit was flagged: drift, brand design, coherence, or a
  * doubt/plan cell whose paraphrase no longer voices its design. */
 export type CellFlag = "target" | "branding" | "unclear" | "design";
@@ -2540,6 +2623,9 @@ const CELL_WRITER_SYSTEM =
           "that subject and nothing else - voice THAT worry inside the " +
           "cell's circumstance. A doubt about a different subject is " +
           "wrong, however well written.\n" +
+          "- capability(<capability>) on a feature-screening plan line: the " +
+          "screen asks about exactly that capability, in the words a buyer " +
+          "would use - never a different one.\n" +
           "- Doubt cells (objections, churn, renewal) WITHOUT " +
           "a concern(...) note: EACH cell voices a DIFFERENT real concern " +
           "buyers have about the client brand - never the same worry " +
@@ -2656,6 +2742,9 @@ export interface GridCell {
    * measures, assigned at grid-plan time from the brand's enumerated
    * doubt-space. The writer voices it; the design check enforces it. */
   concern?: string;
+  /** Feature-screening cells only (item 2, 2026-10-04): the capability the
+   * screen asks about, from the brand-blind category list. */
+  capability?: string;
   /** Class-angle comparison cells only (2026-10-01): the class the client
    * brand is weighed against ("a Visa card") and the upstream roster brand
    * it evokes ("Visa"). Such cells carry angle "class"; qtype stays
@@ -2712,7 +2801,7 @@ export function gridCellCacheKey(
   },
   row: {
     stage: string; situation: string | null; angle: string; scope: string | null; concern?: string | null;
-    classPhrase?: string | null; classBrand?: string | null;
+    classPhrase?: string | null; classBrand?: string | null; capability?: string | null;
   }
 ): string {
   // args.competitors is the SAME-SEAT list (generateGrid resolves roles
@@ -2728,6 +2817,8 @@ export function gridCellCacheKey(
     // data, 2026-10-01) - appended ONLY when present, so every other unit
     // keys byte-identically to before.
     ...(row.classPhrase ? [`class:${row.classBrand ?? ""}:${row.classPhrase}`] : []),
+    // A feature screen's assigned capability (item 2) - same contract.
+    ...(row.capability ? [`cap:${row.capability}`] : []),
   ]);
 }
 
@@ -2763,6 +2854,9 @@ export interface CellPlanRow<S extends { key: string } = MaskedStage> {
   angle: string;
   scope: string | null;
   concern?: string;
+  /** Feature-screening rows only (item 2, 2026-10-04): the capability the
+   * screen asks about, assigned from a brand-blind category list. */
+  capability?: string;
   /** Class-angle rows only: angle "class" plus the class it voices. */
   classPhrase?: string;
   classBrand?: string;
@@ -3180,6 +3274,23 @@ export async function generateGrid(input: {
     }
   }
 
+  // Item 2 (2026-10-04): each column's feature screen asks about a
+  // capability assigned from a brand-blind category list (planCapabilities).
+  // Request data riding the unit keys; fails open to the writer's choice.
+  const fsRows = plan.filter((r) => r.stage.key === "feature_screening" && r.situation);
+  if (fsRows.length > 0 && process.env.PHRASINGS_CHECKS !== "0") {
+    try {
+      const rooms = [...new Set(fsRows.map((r) => r.situation as string))]
+        .map((l) => input.scenarios.find((sc) => sc.label === l))
+        .filter((sc): sc is ScenarioSpec => !!sc)
+        .map((sc) => ({ label: sc.label, description: sc.description }));
+      const caps = await planCapabilities({ brand: input.brand, category: input.category, audience: input.audience, rooms, meta: input.meta });
+      if (caps) for (const r of fsRows) { const c = caps.get(r.situation as string); if (c) r.capability = c; }
+    } catch (err) {
+      console.error("capability plan failed open:", err);
+    }
+  }
+
   // Per-CELL cache units, keyed only on what the cell actually depends
   // on: its stage, angle, reach, and ITS OWN scenario (label,
   // description, journey note) - never the siblings. Editing one
@@ -3199,7 +3310,7 @@ export async function generateGrid(input: {
   const unitKeys = plan.map((r) =>
     gridCellCacheKey(input, {
       stage: r.stage.key, situation: r.situation, angle: r.angle, scope: r.scope, concern: r.concern ?? null,
-      classPhrase: r.classPhrase ?? null, classBrand: r.classBrand ?? null,
+      classPhrase: r.classPhrase ?? null, classBrand: r.classBrand ?? null, capability: r.capability ?? null,
     })
   );
   const resolved: (GridCell[] | null)[] = units.map(() => null);
@@ -3241,6 +3352,7 @@ export async function generateGrid(input: {
       `${i + 1}. stage=${p.stage.key} situation=${p.situation ?? "-"} angle=${planAngle(p)}` +
       `${p.scope ? ` reach=${p.scope}` : ""}${jn ? ` journey(${jn})` : ""}` +
       `${p.concern ? ` concern(${p.concern})` : ""}` +
+      `${p.capability ? ` capability(${p.capability})` : ""}` +
       `\n   guidance: ${p.stage.hint}` +
       (p.classPhrase ? `\n   class contract: the counterpart is the CLASS "${p.classPhrase}", never a named rival company or product` : "")
     );
@@ -3431,6 +3543,7 @@ export async function generateGrid(input: {
             angle: row.classPhrase ? "class" : primaryBrandName(row.angle),
             mode: row.scope ?? null,
             concern: row.concern,
+            ...(row.capability ? { capability: row.capability } : {}),
             ...(row.classPhrase ? { classPhrase: row.classPhrase, classBrand: row.classBrand } : {}),
             text: humanize(c.text.trim()),
           };
@@ -3547,7 +3660,7 @@ export async function generateGrid(input: {
         if (process.env.PHRASINGS_CHECKS !== "0" && flat.length > 0) {
           try {
             const seedTargets = flat
-              .map((c, i) => ({ c, i, intent: stageDesignIntent(c.stage, input.brand, c.concern, c.angle, c.situation) }))
+              .map((c, i) => ({ c, i, intent: stageDesignIntent(c.stage, input.brand, c.concern, c.angle, c.situation, c.capability) }))
               .filter((x): x is { c: GridCell; i: number; intent: string } => !!x.intent);
             if (seedTargets.length > 0 && Date.now() > deadlineAt) complete = false;
             if (seedTargets.length > 0 && Date.now() <= deadlineAt) {
@@ -4407,6 +4520,8 @@ export async function regenerateCell(input: {
   scenarios: ScenarioSpec[];
   cell: {
     stage: string; situation: string | null; angle: string; mode: string | null; concern?: string | null;
+    /** Feature screens (item 2): the assigned capability survives redraws. */
+    capability?: string | null;
     /** Class-angle comparison cells (2026-10-01): the class survives redraws. */
     classPhrase?: string | null; classBrand?: string | null;
   };
@@ -4446,6 +4561,7 @@ export async function regenerateCell(input: {
     input.nearTo ? `near:${input.nearTo.trim().toLowerCase()}` : "",
     // Class cells only - every other draw keys as before.
     ...(input.cell.classPhrase ? [`class:${input.cell.classBrand ?? ""}:${input.cell.classPhrase}`] : []),
+    ...(input.cell.capability ? [`cap:${input.cell.capability}`] : []),
   ]);
   const hit = await store.cacheGet(key, CACHE_TTL_MS);
   if (hit) {
@@ -4459,6 +4575,7 @@ export async function regenerateCell(input: {
     `1. stage=${st.key} situation=${input.cell.situation ?? "-"} angle=${planAngle(input.cell)}` +
     `${input.cell.mode ? ` reach=${input.cell.mode}` : ""}${jn ? ` journey(${jn})` : ""}` +
     `${input.cell.concern ? ` concern(${input.cell.concern})` : ""}` +
+    `${input.cell.capability ? ` capability(${input.cell.capability})` : ""}` +
     `\n   guidance: ${st.hint}` +
     (input.cell.classPhrase ? `\n   class contract: the counterpart is the CLASS "${input.cell.classPhrase}", never a named rival company or product` : "");
   const draw = async (rejectNote: string | null): Promise<string | null> => {
@@ -4508,7 +4625,7 @@ export async function regenerateCell(input: {
   // the one seed path that skipped every check): mechanical brand rule,
   // then the doubt/plan design intent, one steered retry, and null rather
   // than an unchecked seed - the client keeps what it has.
-  const intent = process.env.PHRASINGS_CHECKS !== "0" ? stageDesignIntent(input.cell.stage, input.brand, input.cell.concern, input.cell.angle, input.cell.situation) : null;
+  const intent = process.env.PHRASINGS_CHECKS !== "0" ? stageDesignIntent(input.cell.stage, input.brand, input.cell.concern, input.cell.angle, input.cell.situation, input.cell.capability) : null;
   let text: string | null = null;
   let note: string | null = null;
   for (let attempt = 0; attempt < 3 && !text; attempt++) {
