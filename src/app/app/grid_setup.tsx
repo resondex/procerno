@@ -785,20 +785,25 @@ export function useGridSetup(a: GridSetupArgs) {
   }
 
   /** Gate 1 helper: one more scenario, distinct from everything listed.
-   * Drawn from the market read's cached reserve pool when one remains
-   * (instant); the model is only asked once the pool runs dry.
-   * Suggestions always inherit the base journey. */
-  async function suggestScenario(): Promise<void> {
+   * `fromReserve` names one of the market read's alternates (the gate
+   * shows them in a fold - 2026-10-04); without it, the model is asked for
+   * a fresh room distinct from the rows AND the reserve, since the reserve
+   * is already on screen. Suggestions always inherit the base journey. */
+  async function suggestScenario(fromReserve?: string): Promise<void> {
     if (!a.state) return;
     const rows = scenarioRows(a.state);
     const listed = new Set(rows.map((r) => r.label.trim().toLowerCase()));
     const pool = (a.state.reserve ?? []).filter((s) => !listed.has(s.label.trim().toLowerCase()));
     let scenario: { label: string; description: string };
     let reserve = a.state.reserve;
-    if (pool.length > 0) {
-      scenario = pool[0];
+    const picked = fromReserve
+      ? pool.find((s) => s.label.trim().toLowerCase() === fromReserve.trim().toLowerCase())
+      : undefined;
+    if (picked) {
+      scenario = picked;
       reserve = (a.state.reserve ?? []).filter((s) => s.label !== scenario.label);
     } else {
+      if (fromReserve) return;
       a.setBusy("Thinking of another scenario…");
       a.setError(null);
       const data = await post<{ scenario: { label: string; description: string } }>(
@@ -807,7 +812,7 @@ export function useGridSetup(a: GridSetupArgs) {
           category: a.category,
           audience: a.audience || undefined,
           decisionUnit: a.state.moderators.decision_unit,
-          exclude: rows.map(({ label, description }) => ({ label, description })),
+          exclude: [...rows, ...pool].map(({ label, description }) => ({ label, description })),
         }
       );
       a.setBusy(null);
@@ -1617,6 +1622,10 @@ interface RoomCheckUi {
   label: string;
   contenders: string[];
   rivals: number;
+  /** Contenders among the judged pool / the pool's size - the numbers
+   * behind `contested` (head-to-head picks when picks exist). */
+  inPool?: number;
+  pool?: number;
   contested: boolean;
   pitch: string;
   names: string[];
@@ -1626,7 +1635,7 @@ interface RoomCheckUi {
 }
 
 export function ScenariosGate({
-  state, setState, onRecompose, onRecomposeBase, onSuggestScenario, onNearScenario, onWarmReview, busy,
+  state, setState, onRecompose, onRecomposeBase, onSuggestScenario, onAddReserve, onNearScenario, onWarmReview, busy,
   maxScenarios = MAX_SCENARIOS, readDelta, fitBrand, fitCategory, onRebuildForBrand,
   onBackToCategory, rivals, picks, setupId,
 }: {
@@ -1645,6 +1654,8 @@ export function ScenariosGate({
    * what changed via `readDelta`. */
   onRecomposeBase: (base: GridState["moderators"], rows: ScenarioRow[]) => void;
   onSuggestScenario: () => void;
+  /** Bring one of the market read's reserve rooms into the table. */
+  onAddReserve?: (label: string) => void;
   /** Draw a near variant of card i - same circumstance, one detail moved. */
   onNearScenario: (i: number) => void;
   /** Silent cache warm for the confirm-time quality check - fired on
@@ -1717,22 +1728,33 @@ export function ScenariosGate({
   // one card re-checks only that card.
   const roomKey = (r: { label: string; description: string }) => `${r.label.trim()}|${r.description.trim()}`;
   const [roomChecks, setRoomChecks] = useState<Record<string, RoomCheckUi>>({});
+  // Ticked rows first, then the rest, then the advisory's suggestion - the
+  // route caps the list, so the rooms in the grid are never the ones cut.
+  const reserveRooms = (state.reserve ?? []).filter(
+    (s) => s.label.trim() && !rows.some((r) => r.label.trim().toLowerCase() === s.label.trim().toLowerCase())
+  );
   const checkRooms = [
-    ...rows.filter((r) => r.label.trim()),
+    ...rows.filter((r) => r.on && r.label.trim()),
+    ...rows.filter((r) => !r.on && r.label.trim()),
     ...(fitMissing ? [{ label: fitMissing.label, description: fitMissing.description }] : []),
-  ].map((r) => ({ label: r.label.trim(), description: r.description.trim() }));
+    ...reserveRooms,
+  ].map((r) => ({ label: r.label.trim(), description: r.description.trim() })).slice(0, 16);
   const checkSig = rivals && fitBrand && fitCategory
     ? JSON.stringify([fitBrand, fitCategory, rivals, checkRooms, picks ?? []])
     : "";
+  // The check fires on field BLUR, never on keystrokes: it used to debounce
+  // on the room text, so every pause while typing a description was a new
+  // room, a server cache miss and a model call (2026-10-04).
+  const [editingRoom, setEditingRoom] = useState(false);
   useEffect(() => {
-    if (!checkSig) return;
+    if (!checkSig || editingRoom) return;
     const [brand, category, rv, rooms, pk] = JSON.parse(checkSig) as [string, string, string[], { label: string; description: string }[], string[]];
     if (rooms.length === 0) return;
     const t = setTimeout(() => {
       void fetch("/api/setup/grid/rooms", {
         method: "POST",
         headers: { "Content-Type": "application/json", ...(setupId ? { "x-setup-id": setupId } : {}) },
-        body: JSON.stringify({ brand, category, rivals: rv, picks: pk, rooms: rooms.slice(0, 10) }),
+        body: JSON.stringify({ brand, category, rivals: rv, picks: pk, rooms }),
       })
         .then((r) => (r.ok ? r.json() : null))
         .then((d: { checks?: RoomCheckUi[] } | null) => {
@@ -1742,17 +1764,42 @@ export function ScenariosGate({
             const room = rooms.find((x) => x.label === c.label.trim());
             if (room) next[roomKey(room)] = c;
           });
-          setRoomChecks(next);
+          setRoomChecks((prev) => ({ ...prev, ...next }));
         })
         .catch(() => {});
-    }, 800);
+    }, 300);
     return () => clearTimeout(t);
-  }, [checkSig, setupId]);
-  /** A suggested room that fails the room rule is never offered. */
+  }, [checkSig, setupId, editingRoom]);
+  /** Every flag a room's check raised, worst first; empty when it passes. */
+  const roomFlags = (c: RoomCheckUi): { text: string; title: string }[] => {
+    const who = c.contenders.length > 0 ? c.contenders.join(", ") : "none of your rivals";
+    const out: { text: string; title: string }[] = [];
+    if (c.names.length > 0)
+      out.push({ text: `Names ${c.names.join(", ")}`, title: "Describe the buyer's situation - a room that names a brand answers its own questions." });
+    if (c.capability)
+      out.push({ text: "A feature, not a situation", title: "This reads as a product feature being adopted, not a buyer's situation - every question in its column would ask about that one feature." });
+    if (c.noChoice)
+      out.push({ text: "No real choice made here", title: "The buyer here barely chooses (a default, an auto-renew, whatever is in stock) - there is little for an answer to steer." });
+    if (c.platformSwitch)
+      out.push({ text: "Platform switch locks out a rival", title: "A switch between platforms forces each question to state a direction, which rules a leading brand out of the whole column." });
+    if (!c.contested && c.rivals > 0) {
+      const pool = c.pool ?? c.rivals;
+      const n = c.inPool ?? c.contenders.length;
+      const of = c.pool !== undefined && c.pool !== c.rivals ? "head-to-head rivals" : "rivals";
+      out.push({ text: `Few of your rivals compete here (${n} of ${pool} ${of})`, title: `Contenders: ${who}. A room your head-to-head rivals compete in measures a real contest - try a near neighbor, or keep it if the niche is deliberate.` });
+    }
+    if (c.pitch)
+      out.push({ text: "Worded like a pitch", title: `"${c.pitch}" reads like one brand's pitch - describe the buyer's outcome instead.` });
+    return out;
+  };
+  /** A suggested room that fails the room rule is never offered - and it
+   * is held back until its check lands (it used to show, then vanish).
+   * With no check possible (no roster yet) it shows at once. */
   const missingCheck = fitMissing ? roomChecks[roomKey(fitMissing)] : undefined;
-  const fitMissingShown = fitMissing && !(missingCheck && (!missingCheck.contested || missingCheck.names.length > 0 || missingCheck.pitch || missingCheck.capability || missingCheck.platformSwitch || missingCheck.noChoice))
-    ? fitMissing
-    : null;
+  const fitMissingShown =
+    fitMissing && (checkSig ? missingCheck !== undefined && roomFlags(missingCheck).length === 0 : true)
+      ? fitMissing
+      : null;
   const showFit = !fitDismissed && (fitFlags.length > 0 || fitMissingShown !== null);
 
   return (
@@ -2070,6 +2117,11 @@ export function ScenariosGate({
               aria-label={sc.on ? "remove from grid" : "add to grid"}
               checked={sc.on}
               disabled={busy || (!sc.on && active.length >= cap)}
+              title={
+                !sc.on && active.length >= cap
+                  ? `Your plan runs ${cap} buying scenarios - untick one to make room for this one`
+                  : undefined
+              }
               onChange={(e) => updateRow(i, { on: e.target.checked }, true)}
             />
             <input
@@ -2078,7 +2130,9 @@ export function ScenariosGate({
               value={sc.label}
               placeholder="label"
               onChange={(e) => updateRow(i, { label: e.target.value })}
+              onFocus={() => setEditingRoom(true)}
               onBlur={() => {
+                setEditingRoom(false);
                 if (sc.on) onRecompose(state.moderators, rows);
                 onWarmReview?.();
               }}
@@ -2091,7 +2145,8 @@ export function ScenariosGate({
             value={sc.description}
             placeholder="one sentence describing the circumstance"
             onChange={(e) => updateRow(i, { description: e.target.value })}
-            onBlur={() => onWarmReview?.()}
+            onFocus={() => setEditingRoom(true)}
+            onBlur={() => { setEditingRoom(false); onWarmReview?.(); }}
           />
           {sc.journey && sc.on && (
             <div className="flex flex-wrap items-center gap-1.5">
@@ -2157,47 +2212,22 @@ export function ScenariosGate({
             {(() => {
               const c = roomChecks[roomKey(sc)];
               if (!c || !sc.label.trim()) return null;
-              const who = c.contenders.length > 0 ? c.contenders.join(", ") : "none of your rivals";
-              if (c.names.length > 0)
+              const flags = roomFlags(c);
+              if (flags.length > 0)
                 return (
-                  <span className="text-warning" title="Describe the buyer's situation and the outcome they want - a room that names a brand answers its own questions.">
-                    Names {c.names.join(", ")}
-                  </span>
-                );
-              if (c.capability)
-                return (
-                  <span className="text-warning" title="This reads as a product feature being adopted, not a buyer's situation - every question in its column would ask about that one feature.">
-                    A feature, not a situation
-                  </span>
-                );
-              if (c.noChoice)
-                return (
-                  <span className="text-warning" title="The buyer here barely chooses (a default, an auto-renew, whatever is in stock) - there is little for an answer to steer.">
-                    No real choice made here
-                  </span>
-                );
-              if (c.platformSwitch)
-                return (
-                  <span className="text-warning" title="A switch between platforms forces each question to state a direction, which rules a leading brand out of the whole column.">
-                    Platform switch locks out a rival
-                  </span>
-                );
-              if (!c.contested)
-                return (
-                  <span className="text-warning" title={`Contenders: ${who}. A room your head-to-head rivals compete in measures a real contest - try a near neighbor, or keep it if the niche is deliberate.`}>
-                    Few of your rivals compete here ({c.contenders.length} of {c.rivals})
+                  <span className="flex flex-wrap items-center gap-x-3 gap-y-1">
+                    {flags.map((f) => (
+                      <span key={f.text} className="text-warning" title={f.title}>{f.text}</span>
+                    ))}
                   </span>
                 );
               if (c.rivals === 0) return null;
-              if (c.pitch)
-                return (
-                  <span className="text-warning" title={`"${c.pitch}" reads like one brand's pitch - describe the buyer's outcome instead.`}>
-                    Worded like a pitch
-                  </span>
-                );
+              const who = c.contenders.length > 0 ? c.contenders.join(", ") : "none of your rivals";
+              const pool = c.pool ?? c.rivals;
+              const n = c.inPool ?? c.contenders.length;
               return (
                 <span className="text-ink-3" title={`Contenders: ${who}`}>
-                  Contested: {c.contenders.length} of {c.rivals} rivals
+                  Contested: {n} of {pool} {pool !== c.rivals ? "head-to-head rivals" : "rivals"}
                 </span>
               );
             })()}
@@ -2249,6 +2279,15 @@ export function ScenariosGate({
           </div>
         </div>
       ))}
+      {reserveRooms.length > 0 && onAddReserve && (
+        <ReserveFold
+          rooms={reserveRooms}
+          flagsOf={(r) => { const c = roomChecks[roomKey(r)]; return c ? roomFlags(c) : []; }}
+          atCap={active.length >= cap}
+          busy={busy}
+          onAdd={onAddReserve}
+        />
+      )}
       <div className="flex flex-wrap items-center gap-4">
         <button
           type="button"
@@ -2291,6 +2330,59 @@ export function ScenariosGate({
           Reset to suggested
         </button>
       </div>
+    </div>
+  );
+}
+
+/** The market read's alternates (2026-10-04): the rooms the read ranked
+ * behind the core set, shown as a fold instead of hidden behind "Suggest
+ * another" - the user sees the whole set the read produced and swaps
+ * deliberately. Each card carries its contest chips like a live row. */
+function ReserveFold({ rooms, flagsOf, atCap, busy, onAdd }: {
+  rooms: { label: string; description: string }[];
+  flagsOf: (r: { label: string; description: string }) => { text: string; title: string }[];
+  atCap: boolean;
+  busy: boolean;
+  onAdd: (label: string) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  return (
+    <div className="grid gap-2">
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        className="w-fit text-[12px] font-medium text-ink-3 hover:text-ink"
+      >
+        {open ? "▾" : "▸"} {rooms.length} more {rooms.length === 1 ? "room" : "rooms"} we considered
+      </button>
+      {open && rooms.map((r) => {
+        const flags = flagsOf(r);
+        return (
+          <div key={r.label} className="rounded-lg border border-dashed border-line bg-surface px-4 py-2.5 grid gap-1 opacity-80">
+            <div className="flex items-center gap-3">
+              <span className="text-sm font-medium">{r.label}</span>
+              <span className="flex-1" />
+              <button
+                type="button"
+                disabled={busy}
+                onClick={() => onAdd(r.label)}
+                title={atCap ? "Added unticked - untick a scenario above to bring it into the grid" : "Add to the grid"}
+                className="text-[12px] font-medium text-primary hover:opacity-80 disabled:opacity-50"
+              >
+                {atCap ? "Add unticked" : "Add"}
+              </button>
+            </div>
+            <span className="text-[12px] text-ink-3">{r.description}</span>
+            {flags.length > 0 && (
+              <span className="flex flex-wrap gap-x-3 text-[11px]">
+                {flags.map((f) => (
+                  <span key={f.text} className="text-warning" title={f.title}>{f.text}</span>
+                ))}
+              </span>
+            )}
+          </div>
+        );
+      })}
     </div>
   );
 }

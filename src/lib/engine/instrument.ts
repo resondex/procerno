@@ -1831,6 +1831,12 @@ export interface RoomCheck {
   contenders: string[];
   /** How many direct rivals were weighed. */
   rivals: number;
+  /** The contest verdict's own numbers: `inPool` contenders out of `pool`
+   * judged brands - the head-to-head picks when picks drove the verdict,
+   * else every direct rival. The gate chip prints these, so "N of M"
+   * always matches the test that produced it. */
+  inPool: number;
+  pool: number;
   /** Contested (rooms rec A, 2026-10-03): at least half of the
    * head-to-head picks AND at least 2 direct rivals contend. Premium rooms
    * are contested by a subset of issuers by market structure, so "half of
@@ -2008,19 +2014,21 @@ async function checkRoomsPass(input: RoomCheckInput, pass: number): Promise<Room
   return rooms.flatMap((r, i) => {
     const v = verdicts.get(i);
     const names = namesOf(r);
-    if (!v && rivals.length > 0) return names.length > 0 ? [{ label: r.label, contenders: [], rivals: rivals.length, contested: true, pitch: "", names, capability: false, platformSwitch: false, noChoice: false }] : [];
+    if (!v && rivals.length > 0) return names.length > 0 ? [{ label: r.label, contenders: [], rivals: rivals.length, inPool: 0, pool: rivals.length, contested: true, pitch: "", names, capability: false, platformSwitch: false, noChoice: false }] : [];
     const contenders = v?.contenders ?? [];
     const picks = (input.picks ?? []).filter((p) => rivals.includes(p));
+    const pool = picks.length > 0 ? picks.length : rivals.length;
+    const inPool = picks.length > 0 ? contenders.filter((c) => picks.includes(c)).length : contenders.length;
     const contested = rivals.length === 0
       ? true
       : picks.length > 0
-        ? contenders.filter((c) => picks.includes(c)).length >= Math.ceil(picks.length / 2) && contenders.length >= Math.min(2, rivals.length)
-        : contenders.length >= Math.ceil(rivals.length / 2);
+        ? inPool >= Math.ceil(picks.length / 2) && contenders.length >= Math.min(2, rivals.length)
+        : inPool >= Math.ceil(rivals.length / 2);
     // A pitch flag must quote words the room actually contains (Doritos'
     // "Scoops" flag quoted a Tostitos line the room never mentioned).
     const pitchRaw = (v?.pitch ?? "").trim().replace(/^["']|["']$/g, "");
     const pitch = pitchRaw && roomText(r).toLowerCase().includes(pitchRaw.toLowerCase()) ? pitchRaw : "";
-    return [{ label: r.label, contenders, rivals: rivals.length, contested, pitch, names, capability: v?.capability === true, platformSwitch: v?.platformSwitch === true, noChoice: v?.noChoice === true }];
+    return [{ label: r.label, contenders, rivals: rivals.length, inPool, pool, contested, pitch, names, capability: v?.capability === true, platformSwitch: v?.platformSwitch === true, noChoice: v?.noChoice === true }];
   });
 }
 

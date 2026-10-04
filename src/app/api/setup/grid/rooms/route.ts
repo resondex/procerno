@@ -22,7 +22,9 @@ const Body = z.object({
       })
     )
     .min(1)
-    .max(10),
+    // Eight suggested rooms + custom rows + the advisory's suggestion can
+    // pass ten; rooms past the cap silently showed no chip.
+    .max(16),
 });
 
 /**

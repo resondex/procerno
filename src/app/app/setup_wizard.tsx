@@ -1824,6 +1824,7 @@ export function SetupWizard({ mode, brand, draft, engineOptions, onClose, onCrea
                 void gridApi.compose({ base, rows, cells });
               }}
               onSuggestScenario={() => void gridApi.suggestScenario()}
+              onAddReserve={(label) => void gridApi.suggestScenario(label)}
               onNearScenario={(i) => void gridApi.nearScenario(i)}
               onWarmReview={warmScenarioReview}
               maxScenarios={scenarioCap}
