@@ -131,3 +131,10 @@ The buyer asks what kinds of products the category has and how they differ, or w
 - **Value:** the situation in a few words, then "is <brand or its line> worth it over <counterpart>?", with at most one usage detail, about 12-25 words. The counterpart is the next tier down from the brand's line in the category, described by tier or price level, never by name. The cheapest option only when the line sits one step above it (store-brand chips vs Doritos is right; the bottom of the phone market vs a flagship is not).
 - **Social validation:** which <category> do people love, recommend or swear by most, optionally saying who, about 8-15 words. Never asks for ratings, reviews or communities.
 - **Premium vs basic:** are the premium options actually better than the cheaper ones, or are the cheaper ones good enough, about 10-18 words. Never asks for picks on each side; the answer names brands on its own.
+
+## Value names a premium line against "more affordable" (Tyler, 2026-10-04, STYLE s44)
+
+- **Formula:** the room's situation in a few words, then "is <line> worth it over a more affordable <category>?" No usage detail.
+- **Line:** the brand's most premium line that its audience can buy, one per tracker, by its real name. Plans, flavors, sizes and varieties are never lines (a one-product brand uses its own name). A "premium line" aimed at a different buyer than the audience, or that is only a variant, falls back to the tracked brand name. Read three times, majority wins.
+- **Counterpart:** "more affordable <category>", set in code. The answer engine decides what more affordable means for that buyer. (Asking the model for the tier below a line was unstable: it sorted phones by shape and put a premium card against its own tier.)
+- **Gate:** the coverage step shows each column's pair under the Value row; the client can change either end or set "none" for a room.

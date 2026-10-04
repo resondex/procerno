@@ -2084,7 +2084,7 @@ export async function planValueLines(input: {
   if (input.rooms.length === 0) return null;
   tagCosts({ purpose: "setup:value_lines" });
   const rooms = input.rooms.map((r) => ({ label: r.label.trim(), description: r.description.trim() }));
-  const key = cacheKey("value_lines14", [
+  const key = cacheKey("value_lines19", [
     VALUE_LINES_MODEL, input.brand, input.category, input.audience ?? "",
     rooms.map((r) => `${r.label}|${r.description}`).join("~"),
   ]);
@@ -2130,14 +2130,8 @@ export async function planValueLines(input: {
       // picks varied run to run; the gate edits any column.
       const chosen = lines.find((l) => l.name.toLowerCase() === String(j!.premium ?? "").trim().toLowerCase())
         ?? [...lines].sort((x, y) => (x.tier || 0) - (y.tier || 0))[0];
-      // A one-product brand's step down is "cheaper <category>",
-      // mechanically: the model described its own plans as the tier below
-      // (Netflix vs "basic plan", Jira vs "Standard team plan").
-      const below = single
-        ? `cheaper ${input.category.trim()}`
-        : chosen && Number.isInteger(chosen.tier) ? tiers[chosen.tier + 1] : undefined;
-      const pair: ValueLine | null = chosen && below ? { line: single ? input.brand : chosen.name, counterpart: below } : null;
-      return pair;
+      void tiers;
+      return chosen ? { line: single ? input.brand : chosen.name, counterpart: `more affordable ${input.category.trim()}` } : null;
     };
     const reads = (await Promise.all([one(), one(), one()].map((p) => p.catch(() => null)))).filter((x): x is ValueLine => !!x);
     const tally = (xs: string[]) => {
@@ -2146,9 +2140,34 @@ export async function planValueLines(input: {
       return [...m.values()].sort((a, b) => b.n - a.n)[0];
     };
     const lineWin = tally(reads.map((r) => r.line));
-    const pair: ValueLine | null = lineWin
-      ? { line: lineWin.v, counterpart: tally(reads.filter((r) => r.line.toLowerCase() === lineWin.v.toLowerCase()).map((r) => r.counterpart))!.v }
-      : null;
+    // Tyler 2026-10-04: the counterpart is "more affordable <category>",
+    // mechanically - the model could not reliably name the tier below a
+    // line (it sorted phones by shape, put a premium card against its own
+    // tier). The answer engine decides what "more affordable" means.
+    let line = lineWin?.v ?? null;
+    // Audience check (Tyler 2026-10-04): a "premium line" that serves a
+    // different buyer than the tracker's rooms, or is only a variant of
+    // the main product, falls back to the tracked brand name (Jira's
+    // portfolio product was named every run; a flavor sub-brand once).
+    if (line && line.toLowerCase() !== input.brand.trim().toLowerCase()) {
+      try {
+        const ac = await anthropicClient();
+        const res = await ac.messages.create({
+          model: VALUE_LINES_MODEL, max_tokens: 2000, output_config: { effort: "medium" },
+          system:
+            `Name, in a few words each, the PRIMARY buyer of ${line} (their role, level or department, and company or household type) and the primary buyer of ${input.brand}'s main product. same_buyer is true ONLY when both are the same kind of buyer as the audience below, buying for the same job, AND ${line} is a distinct product line rather than a flavor, size, plan, edition or variety. A more expensive line for the same buyer counts as the same buyer. ` +
+            `variant is true when ${line} is a flavor, size, pack, subscription plan or variety of ${input.brand}'s main product rather than a separately chosen product line. A higher-priced model line sold as its own product (bought instead of the standard one, at its own price) is a line, not a variant. ` +
+            `Answer with ONLY JSON: {"line_buyer": "...", "main_buyer": "...", "same_buyer": true|false, "variant": true|false}.`,
+          messages: [{ role: "user", content: `Brand: ${input.brand}\nCategory: ${input.category}\nAudience: ${input.audience ?? "the category's buyers"}` }],
+        } as never);
+        const text = (res as { content: { type: string; text?: string }[] }).content
+          .filter((b) => b.type === "text").map((b) => b.text ?? "").join("").trim();
+        const v = JSON.parse(firstJsonObject(text) ?? text) as { same_buyer?: boolean; variant?: boolean; line_buyer?: string; main_buyer?: string };
+        console.warn(`value lines audience check [${input.brand}]: ${line} buyer "${v.line_buyer ?? "?"}" vs main "${v.main_buyer ?? "?"}" -> same_buyer ${v.same_buyer}, variant ${v.variant}`);
+        if (v.same_buyer === false || v.variant === true) line = input.brand;
+      } catch { /* fail open: keep the line */ }
+    }
+    const pair: ValueLine | null = line ? { line, counterpart: `more affordable ${input.category.trim()}` } : null;
     const out: Record<string, ValueLine | null> = {};
     for (const r of rooms) out[r.label] = pair;
     console.warn(`value lines [${input.brand}]: ${Object.entries(out).map(([k, v]) => `${k} -> ${v ? `${v.line} vs ${v.counterpart}` : "none"}`).join("; ")}`);

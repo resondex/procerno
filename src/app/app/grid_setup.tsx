@@ -2443,7 +2443,7 @@ function ValueLineEditor({ value, disabled, onChange }: {
   return (
     <button type="button" disabled={disabled}
       onClick={() => { setLine(value?.line ?? ""); setCounterpart(value?.counterpart ?? ""); setEditing(true); }}
-      title="The product line this column's Value question weighs, and what it is compared with - click to change"
+      title="Value asks whether your product is worth paying more for, compared with cheaper options. This is the product we ask about (by default your most premium one) and what it's compared with. Click to change."
       className="text-[10px] leading-tight text-primary hover:opacity-80">
       {value ? (<><span className="font-medium">{value.line}</span><br /><span className="text-ink-3">vs {value.counterpart}</span></>) : <span className="text-ink-3">no Value cell</span>}
     </button>
