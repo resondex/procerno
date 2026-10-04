@@ -52,7 +52,11 @@ export async function getBrandProfile(brand: string): Promise<BrandProfile> {
   // "clean, Google-powered Android" audience leaked into its scenarios,
   // its blind cells and its roster typing (iPhone read as upstream).
   // p4-noexamples (2026-10-03, Tyler: no category or brand examples in prompt text).
-  const key = cacheKey("analyze2", [BRAND_PROFILE_MODEL, "p4-noexamples", brand]);
+  // p5-who (2026-10-04, Tyler): the audience is WHO buys, a few words, never
+  // what they want - "and what they are trying to get done" came back as the
+  // brand's selling points ("...who want strong cameras, smooth performance,
+  // and reliable software support"), and the audience feeds every read.
+  const key = cacheKey("analyze2", [BRAND_PROFILE_MODEL, "p5-who", brand]);
   const hit = await store.cacheGet(key, CACHE_TTL_MS);
   if (hit) return JSON.parse(hit) as BrandProfile;
   const profile = await suggestBrandProfile(brand);
@@ -392,11 +396,13 @@ export async function suggestBrandProfile(
           "The category label must be broad enough to contain every " +
           "competitor listed - never name a category that excludes one of " +
           "them.\n" +
-          "- audience: the category's primary buyers in a short phrase - WHO " +
-          "they are and what they are trying to get done, in category terms. " +
-          "Never the brand's own positioning " +
-          "or selling points, and never a platform or ecosystem preference " +
-          "that rules rivals out.\n" +
+          "- audience: WHO the category's primary buyers are, in at most eight " +
+          "plain words - the kind of person or organization that buys, in " +
+          "category terms. Never what they want, value or look for in the " +
+          "product (no features, qualities or priorities - those are the " +
+          "brand's selling points wearing a buyer), never the brand's own " +
+          "positioning, and never a platform or ecosystem preference that " +
+          "rules rivals out.\n" +
           "If the brand is ambiguous or unknown, pick the most likely commercial " +
           "interpretation and answer anyway.",
       },
@@ -419,8 +425,21 @@ export async function suggestBrandProfile(
       .map((c) => c.trim())
       .filter(Boolean)
       .slice(0, 8),
-    audience: parsed.audience?.trim() ?? "",
+    audience: cleanAudience(parsed.audience ?? ""),
   };
+}
+
+/** The audience is a buyer segment, never a wish list: any clause that
+ * starts listing what the buyer wants is cut, and the phrase is capped
+ * at twelve words. Mechanical, so a model that drifts back to selling
+ * points cannot ship them into the reads. */
+export function cleanAudience(raw: string): string {
+  let a = raw.trim().replace(/\s+/g, " ");
+  const cut = a.search(/\b(?:who|that|which)?\s*(?:want|wants|wanting|need|needs|needing|looking for|seeking|prioriti[sz]e|prioriti[sz]ing|value|valuing|care about|caring about)\b/i);
+  if (cut > 0) a = a.slice(0, cut).replace(/[\s,;:-]+$/, "");
+  const words = a.split(" ");
+  if (words.length > 12) a = words.slice(0, 12).join(" ").replace(/[\s,;:-]+$/, "");
+  return a;
 }
 
 const BATTERY_SCHEMA = {
