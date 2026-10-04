@@ -10,6 +10,7 @@ export const maxDuration = 60;
 const Body = z.object({
   brand: z.string().trim().min(1).max(80),
   category: z.string().trim().min(1).max(120),
+  audience: z.string().trim().max(160).optional(),
   scenarios: z
     .array(
       z.object({
@@ -42,6 +43,7 @@ export async function POST(req: Request) {
       brand: parsed.data.brand,
       category: parsed.data.category,
       scenarios: parsed.data.scenarios,
+      audience: parsed.data.audience || null,
       meta: { source: cacheSource(auth) },
     });
     return NextResponse.json({ fit });

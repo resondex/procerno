@@ -1709,7 +1709,10 @@ export async function reviewScenarioFit(input: {
   // that names the client brand is dropped mechanically.
   // scenario_fit8 (2026-10-03): the suggested room is circumstance-only,
   // like the scenario read (v16) - no wanted-features list.
-  const key = cacheKey("scenario_fit9", [
+  // scenario_fit10 (2026-10-04, Tyler): the advisory sees the study
+  // audience and never suggests a room for a different kind of buyer (it
+  // never got the audience, and offered Pixel a corporate procurement room).
+  const key = cacheKey("scenario_fit10", [
     input.brand, input.category, input.audience ?? "",
     input.scenarios.map((s) => `${s.label.trim()}|${s.description.trim()}`).join("~"),
   ]);
@@ -1743,7 +1746,10 @@ export async function reviewScenarioFit(input: {
           "rivals compete in too. A room the brand serves with a product in " +
           "a DIFFERENT category (a separate product line sold to a " +
           "different kind of buyer) is not a missing core room for this " +
-          "study. The bar is a " +
+          "study, and neither is a room for a different KIND of buyer than " +
+          "the study's audience (organizations buying for their staff when " +
+          "the audience is individual consumers, or the reverse): the " +
+          "audience says who this study measures. The bar is a " +
           "real recommendation the strategist would defend, never brain" +
           "storming - if nothing clearly earns a place, null. Many scenario " +
           "sets are complete; null is a normal answer.\n" +
@@ -1758,6 +1764,7 @@ export async function reviewScenarioFit(input: {
         content: JSON.stringify({
           brand: input.brand,
           category: input.category,
+          audience: input.audience ?? null,
           scenarios: input.scenarios.map((s) => ({ label: s.label, description: s.description })),
         }),
       },
