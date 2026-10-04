@@ -760,7 +760,63 @@ The market-step and scenarios-gate UI was not clicked through. The local dev con
 - persisting roles, picks and parents on the project (today they live in the draft only, as before);
 - saved drafts keep their stored cells - anything regenerated uses s30, and their contest chips appear when the scenarios gate is opened.
 
+## Stage contract - decision 5 (2026-10-03, Tyler)
+
+Every stage answers ONE distinct client question, and that question drives its seeds, its paraphrase checks and its evaluation. The grid (`STAGE_CONTRACT.md`) gives each stage:
+- its client question;
+- who is asking;
+- seed must / must never;
+- what varies across cells;
+- what paraphrases must keep;
+- its brand rule and its read.
+
+**Why:** the decisions cold walk (`INIT_AUDIT_V2_2026-10-03.md`) showed Discovery, Use-case fit and Feature screening collapsing into "name products for my situation" in every column, because four stages fed one "who got named" score and nothing defined what each answered that the others didn't.
+
+**Key rulings:**
+1. **Consideration stages are distinct:**
+   - Criteria is read as *criteria taught*, not brands named;
+   - Feature screening = included under ONE capability;
+   - Use-case fit = the pick for ONE job;
+   - Social validation = who the AI calls popular.
+2. **Pricing is renamed Value (option B):** worth our price over a GENERIC cheaper alternative, for this buyer.
+   - This revises decision 1's "own lower tier OR generic": the own-tier path made Jira, Netflix and Pixel cells unable to return "not worth it".
+   - An optional "tier pick" row is not built.
+3. **Settled-customer questions:**
+   - Business case: confident case vs hedge;
+   - Expansion: back growth vs redirect;
+   - Ecosystem: own / partner / rival around us;
+   - Advocacy: arm the case vs concede the critic.
+
+   They stay in the default grid and are collected now. If no adequate scorer can be built, they default to off.
+4. **Seed principle:** situation in plain words plus the stage's ask, no wanted-features list.
+5. **Refinements (same day):**
+   - **Feature screening / Use-case fit:** the capability or job is one buyers commonly ask about, never chosen because it suits the client (Pixel's "fastest OS updates").
+   - **Problem recognition:** read primarily as category routing.
+   - **Renewal:** sharpened to the bill-coming-due moment - distinct from Churn (a worry) and Repertoire (habit) by its trigger.
+   - **Advocacy:** read primarily as case strength.
+
+**Tested 2026-10-03, uncommitted pending Tyler's keep call:**
+- circumstance-only rooms (`scenarios_journeys16` / `scenario_fit8`), which reverts decision 4's "and the outcome they want" - it read as a feature wish list that every cell inherited;
+- the vaguer-seed writer (STYLE s31).
+
+The test is in `~/Documents/procerno_eval/init_audit_2026-10-03/` (rooms_compare*, cold_v3, SEEDS_COMPARE.md): blind-seed wish lists fell from 5-9 per brand to 1-6.
+
+**Conformance pass (same day, STYLE s32, `STAGE_CONTRACT.md` "Engine conformance"):**
+- Every stage's hint, writer rule, seed check and paraphrase check were aligned to the contract.
+- Value takes a generic counterpart only.
+- Churn and Renewal no longer need a both-options closing.
+- Quoted shapes are gone.
+- Criteria never offers candidates.
+- Repertoire is habit, not a worry.
+- The settled-customer stages have their asks.
+
+s32 supersedes the uncommitted s31 test era (no prod cache ever held s31).
+
+**Still not built:** the Value label rename in the UI, the Criteria read (criteria taught), a value question type, and the settled-customer scorer.
+
 ## To do (added 2026-09-27, Tyler)
+
+- **Social validation vs Discovery - measure after wave one (Tyler 2026-10-03).** Compare the brands Social validation names against Discovery's on the same tracker. If they track closely, merge Social validation into Discovery (stage contract row 7).
 
 - **Worry identity needs canonicalization across redraws (noted 2026-10-01).** A cell's concern is frozen text ("Annual fee feels high"); trend continuity and the recommended-vs-decided record depend on string equality, so a pool redraw (edit-setup, a future re-walk) that words the same worry differently silently breaks attribution - the taxonomy/dictionary lesson in miniature. Before any flow lets a worry-era tracker redraw its pool: match redrawn worries to existing intents.concern values (embedding or LLM pairing, like the consolidation one-to-one match) and keep the ratified wording. Related latent gap, fix first: edit_setup.ts does not reconstruct grid.worries/worryPool from intents (derivable: stage + concern NOT NULL), so edit-setup on a worry-era tracker would redraw and re-prefill as if fresh, discarding the tracker's actual picks. No worry-era tracker exists yet; close before the first one gets edited.
 

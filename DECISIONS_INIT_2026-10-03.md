@@ -1,6 +1,6 @@
 # Init decisions (2026-10-03)
 
-**All four are DECIDED and BUILT (2026-10-03; commits abc43ef, 3da4504, 80e0bc2, e57f5be). Build notes and what is still open: AGENTS.md "Init decisions built".**
+**Decisions 1-4 are DECIDED and BUILT (2026-10-03; commits abc43ef, 3da4504, 80e0bc2, e57f5be); build notes in AGENTS.md "Init decisions built". Decision 5 (the stage contract) is DECIDED, not built, and REVISES decision 1's counterpart rule.**
 
 **Where these come from.** All three surfaced in the 2026-10-03 init audit (`INIT_AUDIT_2026-10-03.md`).
 
@@ -381,6 +381,56 @@ The default scenario read itself sees only category and audience, not the brand.
 
 ---
 
+## Decision 5 - DECIDED (Tyler, 2026-10-03): every stage answers one distinct client question
+
+**The full grid is in `STAGE_CONTRACT.md`:** every stage with its client question, seed instructions and read.
+
+**Why.** The decisions cold walk and its audit (`INIT_AUDIT_V2_2026-10-03.md`, `INIT_AUDIT_V2_EXAMPLES_2026-10-03.md`) kept finding stages that asked the same thing.
+- In every column, Discovery, Use-case fit and Feature screening collapsed into "name some products for my situation".
+- The cause was not wording: four stages fed the same "who got named" score, and nothing said what each answered that the others didn't.
+- A stage's question now drives its seeds, its paraphrase checks and its evaluation.
+
+**What it decides:**
+1. **Consideration stages get distinct questions:**
+   - Discovery = which brands are recommended (the headline);
+   - Criteria = what the AI teaches buyers to value - evaluated as criteria taught, not brands named;
+   - Feature screening = are we included under ONE capability filter;
+   - Use-case fit = are we the pick for ONE job;
+   - Social validation = who the AI calls popular.
+2. **Pricing becomes "Value"** and asks option B: does the AI say we're worth our price over a cheaper alternative, for this buyer?
+   - The counterpart is a GENERIC cheaper alternative in the category, never the brand's own tier.
+   - This **revises decision 1**, which allowed "its own lower tier OR a generic cheaper alternative". The writer took the own-tier path on Jira, Netflix and Pixel, so those cells could never return "not worth it".
+   - A "tier pick" row for within-brand tier steering is optional and not built (off by default).
+3. **The four settled-customer stages get their questions:**
+   - Business case: does the AI build a confident case for us or hedge;
+   - Expansion: does it back growing with us or redirect;
+   - Ecosystem: what does it put around us - own, partner or rival products;
+   - Advocacy: does it arm a customer's case or concede the critic.
+
+   They stay in the default grid and are collected now. If an adequate scorer cannot be built, they default to off.
+4. **The seed principle for every stage:** the asker's situation in plain words plus the stage's ask, with no wanted-features list.
+   - This is from the 2026-10-03 vaguer-seed test (`~/Documents/procerno_eval/init_audit_2026-10-03/SEEDS_COMPARE.md`). Blind-seed wish lists fell from 5-9 per brand to 1-6, and rows read distinct.
+5. **Refinements (same day):**
+   - Feature screening and Use-case fit pick a commonly asked capability or job, never one that suits the client.
+   - Problem recognition reads primarily category routing.
+   - Renewal is the bill-coming-due moment.
+   - Advocacy reads primarily case strength.
+   - Social validation is measured after wave one and merges into Discovery if its named brands track Discovery's closely.
+
+**To build (not built):**
+- the stage hints and design intents rewritten to the contract questions;
+- the Value counterpart rule (STYLE bump) and the label rename;
+- a Criteria evaluation that codes criteria taught instead of brands named;
+- the settled-customer scorer (group-3 workstream).
+
+**Already built but uncommitted:**
+- the circumstance-only room rule (scenario read key 16);
+- the vaguer-seed writer (STYLE s31).
+
+Both were tested in the cold_v3 walk and are pending Tyler's keep / commit call.
+
+---
+
 ## Summary
 
 | # | decision | recommendation | biggest visible effect |
@@ -389,3 +439,4 @@ The default scenario read itself sees only category and audience, not the brand.
 | 2 | duplicate rows + stage buyer fit - DECIDED | Discovery + Shortlist merged in every category; habitual categories (existing `involvement` classification): Problem recognition off, one worry stance (in-relationship), Comparison on | every battery 4 cells lighter; habitual brands like Doritos 43 -> ~33-35 with head-to-heads added and no repeated questions |
 | 3 | head-to-head rivals - DECIDED | user toggles up to 4 head-to-head rivals at the market step, pre-selected from an init recommendation with reasons; 3b: out-of-category brands typed `adjacent` (measured, no toggle); 3c: sister brands toggleable, tagged "same parent", reported as portfolio routing | Jira can carry Linear; Doritos's head-to-heads go to tortilla-chip brands; cost stays at 4 rivals |
 | 4 | scenarios - DECIDED | rooms are contested buyer occasions in the category, in the buyer's outcome language; a contest chip at the scenarios gate (which rivals compete per room); the same rules for advisory suggestions, the audience line and blind cells | Pixel's "top-tier Pixel" room and Jira's help-desk room get flagged; audience reads as a segment; blind cells stop borrowing the client's pitch words |
+| 5 | stage contract - DECIDED | every stage answers one distinct client question (STAGE_CONTRACT.md) that drives its seeds, paraphrase checks and evaluation; Pricing -> Value with a generic cheaper counterpart (revises 1); settled-customer stages kept and collected until a scorer exists | stages stop overlapping; Value can return "not worth it"; one source of truth for writer, checks and audits |

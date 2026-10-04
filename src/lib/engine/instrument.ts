@@ -107,7 +107,21 @@ const CACHE_TTL_MS = 183 * 24 * 3600 * 1000;
 // rule, the generic-structure cells and the "cheaper line at 450" example
 // are gone. Also drops shortlist from the writer's open-choice list
 // (decision 2 retired the stage).
-const STYLE_VERSION = "s30";
+// "s31" (2026-10-03, Tyler - vaguer seeds): prompts are short like real
+// queries - situation in a few plain words plus the ask, no wanted-features
+// list (the answer decides what matters); feature screening asks after ONE
+// capability, use-case fit names ONE job. Criteria lists made Discovery /
+// Use-case / Feature screening converge in every column and carried the
+// client's selling points into blind cells (init audit v2).
+// "s32" (2026-10-03, Tyler - stage contract, STAGE_CONTRACT.md): every
+// stage's writer rule conforms to its one client question - Value against
+// a GENERIC cheaper alternative (never the brand's own tier) with usage in
+// plain words; churn/renewal keep leaving possible without a fixed
+// both-options closing; comparison and problem_recognition lose their
+// quoted shapes; criteria never offers candidate criteria; repertoire is
+// habit, not a worry; business_case / expansion / ecosystem / advocacy
+// get their contract asks.
+const STYLE_VERSION = "s32";
 
 /** Versions the DETERMINISTIC seed-check set (everything seedRule runs:
  * checkPromptAgainstSpec + blind_missing_category + scenario_label_leak).
@@ -482,7 +496,7 @@ export function stageLibrary(m: Moderators): LibraryStage[] {
       // complaints about "my chips".
       key: "problem_recognition", label: "Problem recognition", layer: "awareness",
       situational: true, rivals: "none", tag: "rules", recommended: considered,
-      hint: "Pain-phrased and pre-category: the buyer describes the problem without knowing the SOLUTION category exists. Never name the category as a solution, a brand, or ask for a product type - but the thing the buyer already owns is named plainly and naturally ('my phone', 'my chips'), never contorted around ('my pocket gadget', 'my current setup').",
+      hint: "Pain-phrased and pre-category: the buyer describes the problem and asks for a way out, in their own words, without knowing the SOLUTION category is the answer. Never name the category as a solution, a brand, or ask for a product type. The thing the buyer already owns is named plainly ('my phone'), never contorted around ('my pocket gadget') - but the asker is never a current customer of the client brand doubting it.",
       why: considered
         ? "A considered journey starts here - buyers describe the pain before they know the category exists."
         : "Habitual buyers are already in the category - there's no pre-category moment to measure.",
@@ -501,7 +515,7 @@ export function stageLibrary(m: Moderators): LibraryStage[] {
     {
       key: "discovery", label: "Discovery", layer: "awareness",
       situational: true, rivals: "none", tag: "picks", recommended: true,
-      hint: "Open category discovery: 'best X for ...' style asks, no brands named.",
+      hint: "The buyer's situation in plain words plus an ask for which brands or products to look at - no criteria list, no brands named.",
       why: "'Best X for ...' is the front door of AI-assisted buying in every market.",
     },
     {
@@ -511,14 +525,14 @@ export function stageLibrary(m: Moderators): LibraryStage[] {
       // standing verdict.
       key: "criteria", label: "Criteria formation", layer: "consideration",
       situational: true, rivals: "none", tag: "rules", recommended: true,
-      hint: "The buyer asks what to look for / what matters when choosing.",
+      hint: "The buyer's situation plus an ask for what to look for or what actually matters - never offering candidate criteria for the answer to rank, never asking which brand.",
       why: "Assistants teach buyers what to value before any brand is named.",
     },
     {
       key: "feature_screening", label: "Feature screening", layer: "consideration",
       situational: true, rivals: "none", tag: "picks",
       recommended: m.verifiability === "spec",
-      hint: "Attribute-first asks: which options have a specific capability.",
+      hint: "Which options have ONE specific capability that buyers in this category commonly screen for - the capability is the whole ask, never one item in a feature list, and never chosen because it suits the client brand.",
       why: m.verifiability === "spec"
         ? "A spec-driven market shops by capability, so attribute asks decide who makes the cut."
         : `Your market verifies by ${m.verifiability}, not specs - buyers don't shop from an attribute checklist.`,
@@ -526,15 +540,15 @@ export function stageLibrary(m: Moderators): LibraryStage[] {
     {
       key: "use_case", label: "Use-case fit", layer: "consideration",
       situational: true, rivals: "none", tag: "picks", recommended: true,
-      hint: "Situation-first asks describing a concrete need or workflow.",
+      hint: "ONE concrete job that buyers in this situation commonly need done, asking which to pick for that job - never a list of needs, and never a job chosen because it suits the client brand.",
       why: "Concrete-need asks are where assistants match options to situations.",
     },
     {
       key: "social_validation", label: "Social validation", layer: "consideration",
       situational: false, rivals: "none", tag: "picks", recommended: true,
       hint: m.think_feel === "feel"
-        ? "What people love, compliment, or identify with - social proof in identity terms."
-        : "What people actually use and rate well - reviews, communities, popularity.",
+        ? "What people love, compliment, or identify with - social proof in identity terms - inviting named brands or products."
+        : "What people actually use and rate well - reviews, communities, popularity - inviting named brands or products.",
       why: "Proof from other people moves every market.",
     },
     {
@@ -547,8 +561,8 @@ export function stageLibrary(m: Moderators): LibraryStage[] {
       layer: "decision", situational: true, rivals: "each", tag: "picks",
       recommended: true,
       hint: m.verifiability === "taste"
-        ? "Head-to-head and 'similar to X but cheaper/different' asks naming the rival."
-        : "Head-to-head asks naming the client brand against the rival.",
+        ? "Names the client brand and the rival and asks which one to pick (a dupe or 'similar but cheaper' framing is fine as long as it asks for the pick)."
+        : "Names the client brand and the rival and asks which one to pick, and why - no situation, no criteria.",
       why: considered
         ? "A considered market weighs finalists head-to-head before committing."
         : "Buyers still weigh one brand against another at the shelf - head-to-heads show who wins those moments.",
@@ -574,7 +588,7 @@ export function stageLibrary(m: Moderators): LibraryStage[] {
       // in-relationship stance (Churn triggers).
       key: "objections", label: "Objections / risk", layer: "decision",
       situational: true, rivals: "none", tag: "judges", recommended: considered,
-      hint: `The buyer voices the category's dominant worry (${m.risk}) about the client brand by name.`,
+      hint: `A prospect states the planned worry about the client brand, by name, as their own claim the answer can confirm or rebut (absent a planned worry: the category's dominant ${m.risk} worry).`,
       why: considered
         ? `Every market has a dominant worry - here it's ${m.risk} risk, voiced about you by name before buying.`
         : "Habitual buyers are already customers - their worries are asked once, as Churn triggers.",
@@ -582,7 +596,7 @@ export function stageLibrary(m: Moderators): LibraryStage[] {
     {
       key: "pricing", label: "Pricing / value", layer: "decision",
       situational: true, rivals: "none", tag: "judges", recommended: true,
-      hint: "The client brand's value question for this buyer: name the brand, weigh its price against a cheaper option (its own lower tier, or a generic cheaper alternative), with the asker's own usage as the input, and ask for the call. Same question in every column - only the buyer changes. Never a rival, never a stated price.",
+      hint: "Value: name the client brand, set it against a GENERIC cheaper alternative in the category (never its own lower tier), give the asker's usage in plain words, and ask for the call - is it worth the price over the cheaper option? Same question in every column - only the buyer changes. Never a rival, never a stated price.",
       why: "Whether the assistant says you're worth the money - and for which buyers - reaches every market.",
     },
     {
@@ -593,7 +607,7 @@ export function stageLibrary(m: Moderators): LibraryStage[] {
       key: "business_case", label: "Business case", layer: "decision",
       situational: true, rivals: "none", tag: "judges",
       recommended: m.decision_unit === "committee",
-      hint: "The buyer asks for help justifying the client brand internally ('make the case to my CFO').",
+      hint: "An internal champion in this situation asks for help justifying the client brand, by name, to a CFO, procurement or a security review - no rival named.",
       why: m.decision_unit === "committee"
         ? "Committee-bought: someone has to justify the pick internally, and assistants write that case."
         : `A ${m.decision_unit === "household" ? "household" : "solo"} buyer doesn't have to sell the decision internally.`,
@@ -601,7 +615,7 @@ export function stageLibrary(m: Moderators): LibraryStage[] {
     {
       key: "churn_triggers", label: "Churn triggers", layer: "retention",
       situational: false, rivals: "none", tag: "steers", recommended: true,
-      hint: "An existing customer wonders whether the client brand, named, is still the right choice.",
+      hint: "An existing customer states a worry about the client brand, by name, leaving the option of leaving open without foreclosing staying.",
       why: "Every install base has doubters - this is where assistant-induced churn starts.",
     },
     {
@@ -614,7 +628,7 @@ export function stageLibrary(m: Moderators): LibraryStage[] {
       key: "renewal", label: "Renewal", layer: "retention",
       situational: false, rivals: "none", tag: "judges",
       recommended: m.rhythm === "subscription",
-      hint: "At renewal: is the client brand, named, worth keeping, are there cheaper options.",
+      hint: "An existing customer whose renewal or bill is coming due asks whether the client brand, named, is still worth paying for - leaving possible, staying not foreclosed.",
       why: m.rhythm === "subscription"
         ? "A subscription market re-decides at every renewal."
         : m.rhythm === "replenishment"
@@ -627,26 +641,26 @@ export function stageLibrary(m: Moderators): LibraryStage[] {
     {
       key: "expansion", label: "Expansion", layer: "loyalty",
       situational: false, rivals: "none", tag: "steers", recommended: true,
-      hint: "A happy customer considers using the client brand, named, for more ('roll it out further', 'use it for Y too').",
+      hint: "A satisfied customer names the client brand and ONE specific growth step (more teams, seats or uses) and asks whether to grow with it - no rival named, never a support or fix-it ask.",
       why: "Happy customers ask whether to use you for more - growth the assistant can steer.",
     },
     {
       key: "ecosystem", label: "Ecosystem", layer: "loyalty",
       situational: false, rivals: "none", tag: "steers", recommended: true,
-      hint: "What works well WITH the client brand, named - add-ons, companions, integrations.",
+      hint: "An existing customer names the client brand and asks what to pair with it for ONE specific need - add-ons, companions, integrations.",
       why: "What-works-with-you asks show whether assistants place you at the center of a stack.",
     },
     {
       key: "advocacy", label: "Advocacy", layer: "loyalty",
       situational: false, rivals: "none", tag: "steers", recommended: true,
-      hint: "A customer asks how to defend or recommend the client brand, named, to someone else.",
+      hint: "A customer names the client brand and the person they're trying to convince, often quoting that person's objection, and asks for help making the case.",
       why: "Customers recruiting others is your cheapest funnel - if the assistant backs them.",
     },
     {
       key: "repertoire", label: "Repertoire", layer: "loyalty",
       situational: false, rivals: "none", tag: "steers",
       recommended: m.rhythm === "replenishment",
-      hint: "Deepening the habit: more from the same brand, or is it worth switching from the usual.",
+      hint: "A buyer who usually picks the client brand names it and asks whether to stick with it or try something else - the trigger is habit or wanting variety, not a worry.",
       why: m.rhythm === "replenishment"
         ? "A replenishment market re-asks the habit question at every purchase."
         : m.rhythm === "subscription"
@@ -826,7 +840,14 @@ export async function readScenarios(input: {
   // "its flagship line's occasion" into the core four (it produced Pixel's
   // Android-only "flagship upgrade" room), and no room builds in a
   // platform or ecosystem preference that rules out a leading contender.
-  const key = cacheKey("scenarios_journeys15", [
+  // 16 (2026-10-03, Tyler): rooms go back to the first generation's shape
+  // - who the buyer is and their situation, one short plain sentence - with
+  // NO wanted-features list. v14's "and the outcome they want" read as a
+  // feature wish list ("top-tier camera, screen, and speed", "updates for
+  // years") that every cell in the column inherited: rows converged, the
+  // client's selling points rode in, and one need dominated blind cells.
+  // The contested / in-category / no-platform-lock rules stay.
+  const key = cacheKey("scenarios_journeys16", [
     input.category, input.audience, input.forBrand ?? "",
   ]);
   const read = await coalesced<{
@@ -855,14 +876,13 @@ export async function readScenarios(input: {
           "way a strategist would title a slide ('Solo founder pick', " +
           "'Enterprise procurement') - never analytical or methodology " +
           "words like 'default', 'habitual', 'segment', 'use case'. " +
-          "Descriptions one short sentence. Each scenario is a ROOM: a " +
-          "buyer occasion in this category - who the buyer is, the " +
-          "situation they are in, and the outcome they want ('shoots a " +
-          "lot, wants the best camera phone, keeps it for years'). Write it " +
-          "in the buyer's outcome language - the need every serious " +
-          "contender's pitch speaks to - and describe circumstances by " +
-          "what is happening ('migrating from a legacy tracker'), never by " +
-          "a specific brand or product. A room is CONTESTED: most of the " +
+          "Descriptions ONE short plain sentence. Each scenario is a ROOM: " +
+          "a buyer occasion in this category - who the buyer is and the " +
+          "situation they are in ('existing carrier customer upgrading " +
+          "with trade-in credits', 'migrating from a legacy tracker'). " +
+          "Describe what is happening, never a list of features or criteria " +
+          "the buyer wants - the answer decides what matters - and never a " +
+          "specific brand or product. A room is CONTESTED: most of the " +
           "category's leading brands are plausible contenders for that " +
           "buyer; a room only one product line serves, or one that belongs " +
           "to a different category, is not this market's room. A room never " +
@@ -918,8 +938,8 @@ export async function readScenarios(input: {
               "Every scenario must be an occasion where that brand " +
               "genuinely competes - centered on product types it actually " +
               "sells today. The wording stays brand-blind as ever: " +
-              "describe the circumstance in the buyer's outcome language, " +
-              "never name any brand, and keep each room contested - one " +
+              "describe the circumstance plainly, never name any brand or " +
+              "list wanted features, and keep each room contested - one " +
               "the brand's rivals compete in too, not one built on the " +
               "brand's own selling points."
             : ""),
@@ -1633,7 +1653,9 @@ export async function reviewScenarioFit(input: {
   // category) - fit6 proposed "Buying the top-tier Pixel..." on Pixel and
   // Jira Service Management's help-desk room on Jira - and a suggestion
   // that names the client brand is dropped mechanically.
-  const key = cacheKey("scenario_fit7", [
+  // scenario_fit8 (2026-10-03): the suggested room is circumstance-only,
+  // like the scenario read (v16) - no wanted-features list.
+  const key = cacheKey("scenario_fit8", [
     input.brand, input.category, input.audience ?? "",
     input.scenarios.map((s) => `${s.label.trim()}|${s.description.trim()}`).join("~"),
   ]);
@@ -1658,9 +1680,9 @@ export async function reviewScenarioFit(input: {
           "a buying occasion central to how THIS brand is bought that the " +
           "set does not cover. Propose at most one (label 2-4 plain words, " +
           "description one short sentence in buyer language). Write it as a " +
-          "ROOM: a buyer occasion in THIS category - who the buyer is, their " +
-          "situation, the outcome they want - in the buyer's outcome " +
-          "language every serious contender's pitch speaks to. Never name " +
+          "ROOM: a buyer occasion in THIS category - who the buyer is and " +
+          "their situation, in one short plain sentence, never a list of " +
+          "features they want. Never name " +
           "the brand or any product, and never build the room from the " +
           "brand's own selling points; the room must be one the brand's " +
           "rivals compete in too. A room the brand serves with a product in " +
@@ -2249,9 +2271,19 @@ const CELL_WRITER_SYSTEM =
           "into a chat assistant - varied length and register, some lowercase " +
           "and terse, some with backstory; never survey-speak, never a " +
           "requirements list.\n" +
-          "Typing, not prose: real asks are often short and get to the " +
-          "question fast; fragments happen; details are specific but " +
-          "unpolished. NEVER ad-copy patterns - no parallel lists of " +
+          "Typing, not prose: real asks are short and get to the question " +
+          "fast - the asker's situation in a few plain words, then the ask " +
+          "(10-35 words is normal; a prompt is not a brief). NEVER a wish " +
+          "list of what they want in the product ('great camera, strong " +
+          "battery life and years of updates', 'SSO, reporting and " +
+          "automations'): the ANSWER decides what matters, and a criteria " +
+          "list both steers it and makes every stage ask the same thing. " +
+          "The only detail beyond the situation is what the stage itself " +
+          "is about: the ONE capability a feature screen asks after, the " +
+          "ONE job a use-case ask names (each one buyers commonly ask about, " +
+          "never one picked because it suits the client), the asker's usage " +
+          "a value ask needs. Fragments happen; details are unpolished. " +
+          "NEVER ad-copy patterns - no parallel lists of " +
           "three, no balanced drama ('X is impossible and Y is a " +
           "nightmare'), no polished metaphors, no rhetorical closers " +
           "('get everyone on the same page'). If it would read well on a " +
@@ -2259,7 +2291,7 @@ const CELL_WRITER_SYSTEM =
           "Rules:\n" +
           "- angle=generic: never name any brand - blind prompts are the " +
           "measurement - UNLESS the cell's stage guidance says the buyer " +
-          "names the client brand (objections about it, its pricing, the " +
+          "names the client brand (objections about it, its value, the " +
           "case for it): there, name the CLIENT brand only, never a rival.\n" +
           "- angle=<rival name>: for comparison-type stages, name the client " +
           "brand AND that rival; for alternatives-type stages, ask for " +
@@ -2285,14 +2317,13 @@ const CELL_WRITER_SYSTEM =
           "'for my trip'), no spec or size qualifier, no criteria list that " +
           "implies a situation: any such detail becomes a fact every " +
           "paraphrase must keep, and the measurement is the head-to-head " +
-          "itself, never one buyer's story. EVERY comparison asks for the " +
-          "PICK - a 'where does each win' strengths tour with no 'which " +
-          "would you go with' is not a head-to-head. The shape is '<brand> " +
-          "or <rival> for <category> - which would you go with, and why?' " +
-          "(drop the 'for <category>' clause only when both names are " +
-          "unambiguous product names - a bank or multi-product company " +
-          "name like Chase or Citi keeps it - and make it read " +
-          "grammatically: 'as a project management tool', never a plural " +
+          "itself, never one buyer's story. EVERY comparison names both " +
+          "brands and asks which one the answer would pick, and why - a " +
+          "strengths tour that never asks for the pick is not a " +
+          "head-to-head. Wording is free and varies across a battery's " +
+          "comparison cells; keep the category clear (a bank or " +
+          "multi-product company name like Chase or Citi needs it) and " +
+          "grammatical ('as a project management tool', never a plural " +
           "category pasted into a singular slot).\n" +
           "- angle=defensive: an EXISTING customer of the client brand, " +
           "weighing a move away, asks for alternatives to it by name - " +
@@ -2312,15 +2343,19 @@ const CELL_WRITER_SYSTEM =
           "subscription', 'the service') is a defect, never a variant. The " +
           "relationship is stated as fact ('Amex is my main card'), never " +
           "hypothetically ('if Amex is my main card').\n" +
-          "- Churn and renewal cells END with the stay-or-go choice stated " +
-          "outright ('...or is it time to move off Jira?'): a fix-it or " +
-          "tune-it ask with no option of leaving is a support question, not " +
-          "churn. VARY the stay-or-go wording across cells (not every cell " +
-          "ending in the same clause) and name the brand ONCE. The leave " +
-          "side stays plain - never 'something cheaper' or 'simpler', and " +
-          "never an ask for alternatives by name, unless the cell's own " +
-          "concern is price: price has its own cells, and bolting it on " +
-          "muddies whose worry drove the exit.\n" +
+          "- Churn and renewal cells keep LEAVING possible and never " +
+          "foreclose STAYING: the asker is weighing it, not announcing a " +
+          "decision. Both options need not be spelled out ('is Netflix " +
+          "still worth it with these price hikes?' qualifies); a fix-it or " +
+          "how-to ask with no option of leaving is a support question, not " +
+          "churn, and pause vs cancel is two ways of leaving. A renewal " +
+          "cell's trigger is the bill or renewal coming due; a churn cell's " +
+          "trigger is its stated worry. Name the brand ONCE, and vary the " +
+          "wording across cells. The leave side stays plain - never " +
+          "'something cheaper' or 'simpler', and never an ask for " +
+          "alternatives by name, unless the cell's own concern is price: " +
+          "price has its own cells, and bolting it on muddies whose worry " +
+          "drove the exit.\n" +
           "- situation: weave the circumstance in naturally, as the asker's " +
           "OWN situation ('this would be my first credit card', 'we're " +
           "about 120 people and doubling') - never as a topic opener " +
@@ -2329,29 +2364,29 @@ const CELL_WRITER_SYSTEM =
           "types), and never the plan's segment vocabulary ('mid-market', " +
           "'enterprise standardization' are OUR words - buyers say their " +
           "size and stakes in plain words).\n" +
-          "- pricing cells ask the CLIENT BRAND'S value question for this " +
-          "column's buyer: name the client brand, weigh its price against " +
-          "a cheaper option - its own lower tier or plan, or a generic " +
-          "cheaper alternative ('a store brand', 'a cheaper phone', 'a " +
-          "no-annual-fee card') - give the asker's usage as the INPUT, and " +
-          "ask for the call ('worth paying for, or take the cheaper " +
-          "option?'). Every pricing cell asks the SAME value question; " +
-          "only the buyer changes from column to column. Never name a " +
-          "rival (head-to-heads belong to comparison), never state a " +
-          "price (ask what things cost; the asker's own budget or an " +
-          "offer made to them is circumstance), never a bare 'is it worth " +
-          "it?' with no usage (that is a worry), never a presupposed " +
-          "verdict ('that huge fee'). Usage is TWO OR THREE round figures " +
-          "at most - one chat message, never a spreadsheet - and what the " +
-          "asker does with it or how long they keep it counts as usage; " +
-          "financing or trade-in numbers do not.\n" +
+          "- Value cells (stage key pricing) ask the CLIENT BRAND'S value " +
+          "question for this column's buyer: name the client brand, set it " +
+          "against a GENERIC cheaper alternative in the category ('a " +
+          "cheaper phone', 'store-brand chips', 'a no-annual-fee card', 'a " +
+          "cheaper streaming service') - NEVER the brand's own lower tier or " +
+          "plan, which keeps every answer inside the brand - give the " +
+          "asker's usage in plain words ('we watch most nights', 'I keep a " +
+          "phone 3 or 4 years'; numbers are allowed, never required), and " +
+          "ask for the call. When the brand sells several distinct " +
+          "products, say which one is being weighed. Every value cell asks " +
+          "the SAME question; only the buyer changes. Never name a rival " +
+          "(head-to-heads belong to comparison), never state a price (the " +
+          "asker's own budget or an offer made to them is circumstance), " +
+          "never a bare 'is it worth it?' with no usage (that is a worry), " +
+          "never a presupposed verdict ('that huge fee'), never a " +
+          "spreadsheet of figures.\n" +
           "- Objections speak as a PROSPECT weighing the purchase - 'should " +
           "I drop or cancel it' is a churn/renewal question, never an " +
           "objection. A confusion- or complexity-shaped concern is voiced " +
           "as DISTRUST ('these bonus rules feel designed to trip you up - " +
           "will I actually get it?'), never as a request to explain the " +
           "rules.\n" +
-          "- A doubt cell (objections, churn, renewal, repertoire) STATES " +
+          "- A doubt cell (objections, churn, renewal) STATES " +
           "the worry as the asker's own claim or feeling, something the " +
           "answer can confirm OR REBUT - never a neutral rules, " +
           "eligibility or how-to lookup on the topic, never an ask that " +
@@ -2363,7 +2398,7 @@ const CELL_WRITER_SYSTEM =
           "that subject and nothing else - voice THAT worry inside the " +
           "cell's circumstance. A doubt about a different subject is " +
           "wrong, however well written.\n" +
-          "- Doubt cells (objections, churn, renewal, repertoire) WITHOUT " +
+          "- Doubt cells (objections, churn, renewal) WITHOUT " +
           "a concern(...) note: EACH cell voices a DIFFERENT real concern " +
           "buyers have about the client brand - never the same worry " +
           "(price, fees, performance) recycled across cells.\n" +
@@ -2390,16 +2425,37 @@ const CELL_WRITER_SYSTEM =
           "never contorted around ('the thing in my pocket') - and no " +
           "product term only one roster brand is known for ('charge card' " +
           "points every answer at American Express).\n" +
-          "- problem_recognition speaks as someone who does NOT yet have " +
-          "this kind of product (an owner doubting what they pay for is a " +
-          "worry cell, not awareness), describes the pain, and ends " +
-          "asking for a way out ('how do people handle this?', 'what " +
-          "actually fixes this?'). category_education asks what this kind of product " +
-          "actually does and how people use it - nothing is broken there, " +
-          "so never 'what fixes this'. Neither stage asks a yes/no " +
+          "- problem_recognition: the asker has a pain and isn't shopping for " +
+          "a solution yet - they may own an older or makeshift product, but " +
+          "never as a current customer of the client brand doubting it " +
+          "(that is a worry cell). They describe the pain and ask for a way " +
+          "out in their own words - vary it across cells, never the same " +
+          "closing every time. category_education asks what this kind of " +
+          "product actually does and how people use it - nothing is broken " +
+          "there, so never 'what fixes this'. Neither stage asks a yes/no " +
           "reassurance question ('is this a common problem?'), a " +
           "premium-vs-cheap tier question, or 'what specs or criteria " +
           "should I care about' (that is the criteria cell's question).\n" +
+          "- criteria: the situation plus an ask for what actually matters - " +
+          "NEVER offering candidate criteria for the answer to rank or " +
+          "complete ('is it SSO, reporting or something else?'): the " +
+          "measurement is what the answer chooses to teach.\n" +
+          "- repertoire: a buyer who usually picks the client brand names it " +
+          "and asks whether to stick with it or try something else; the " +
+          "trigger is habit or wanting variety, never a stated worry " +
+          "(worries belong to churn).\n" +
+          "- business_case: an internal champion in this situation asks for " +
+          "help justifying the client brand, by name, to a CFO, procurement " +
+          "or a security review - never a rival named, never a pricing " +
+          "question.\n" +
+          "- expansion: a satisfied customer names the client brand and ONE " +
+          "specific growth step (more teams, seats or uses) and asks whether " +
+          "to grow with it - never a rival, never a support or fix-it ask.\n" +
+          "- ecosystem: an existing customer names the client brand and asks " +
+          "what to pair with it for ONE specific need.\n" +
+          "- advocacy: a customer names the client brand and the person " +
+          "they're convincing, often quoting that person's objection, and " +
+          "asks for help making the case.\n" +
           "- One prompt asks at most two or three things, stays under about " +
           "55 words, and reads ONE way: a list of four or more features or " +
           "requirements is survey-speak even in a short prompt (pick the " +
