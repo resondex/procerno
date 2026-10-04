@@ -2051,10 +2051,8 @@ export async function contestRoomSet(input: {
  * filter on and ranks the list per room. A second call, which does see the
  * brand, only removes capabilities the client cannot meet (a screen it fails
  * by construction measures nothing). Assignment is mechanical: each room
- * takes its highest-ranked eligible capability; rooms may share one (two
- * buyers filtering on the same thing is two valid reads). A room with no
- * eligible ranked capability gets none and the writer chooses. Fails open:
- * no plan, no assignment.
+ * takes its highest-ranked eligible capability not already used by another
+ * room. Fails open: no plan, no assignment (the writer chooses, as before).
  */
 export async function planCapabilities(input: {
   brand: string; category: string; audience: string | null;
@@ -2077,13 +2075,13 @@ export async function planCapabilities(input: {
     return null;
   };
   const rooms = input.rooms.map((r) => ({ label: r.label.trim(), description: r.description.trim() }));
-  const planKey = cacheKey("capability_plan2", [
+  const planKey = cacheKey("capability_plan1", [
     DESIGN_CHECK_MODEL, input.category, input.audience ?? "",
     rooms.map((r) => `${r.label}|${r.description}`).join("~"),
   ]);
   const plan = await coalesced<{ capabilities: string[]; ranked: Record<string, string[]> }>(planKey, { meta: input.meta }, async () => {
     const j = await call(
-      `You list the capabilities buyers of ${input.category} commonly filter on when choosing one. A capability is something a product listing would show as present or absent - never a price or cost, a quality rating, a performance level or a reputation. State each in 2-6 plain words the way a buyer says it. ` +
+      `You list the capabilities buyers of ${input.category} commonly filter on when choosing one - features or properties a product either has or lacks, stated in 2-6 plain words the way a buyer says them. ` +
       `Give 10 to 15, most commonly screened first, and never name a brand or product. ` +
       `Then, for each buying room given, rank the 3 capabilities from your list that a buyer in that room would most likely screen on. ` +
       `Reply with ONLY JSON: {"capabilities": ["..."], "rooms": [{"label": "...", "ranked": ["...", "...", "..."]}]} - rooms in the order given, labels exactly as given, ranked entries copied exactly from your list.`,
@@ -2115,10 +2113,12 @@ export async function planCapabilities(input: {
   }).catch(() => ({ lacks: [] as string[] }));
   const lacks = new Set((elig?.lacks ?? []).map((c) => c.toLowerCase()));
   const ok = (c: string) => !lacks.has(c.toLowerCase());
+  const used = new Set<string>();
   const out = new Map<string, string>();
   for (const r of rooms) {
-    const pick = (plan.ranked[r.label] ?? []).find(ok);
-    if (pick) out.set(r.label, pick);
+    const pick = (plan.ranked[r.label] ?? []).find((c) => ok(c) && !used.has(c))
+      ?? plan.capabilities.find((c) => ok(c) && !used.has(c));
+    if (pick) { used.add(pick); out.set(r.label, pick); }
   }
   console.warn(`capabilities [${input.category}]: ${[...out].map(([k, v]) => `${k} -> ${v}`).join("; ")}${lacks.size ? ` (client lacks: ${[...lacks].join(", ")})` : ""}`);
   return out.size > 0 ? out : null;
