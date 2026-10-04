@@ -435,7 +435,7 @@ export function SetupWizard({ mode, brand, draft, engineOptions, onClose, onCrea
       .catch(() => {});
     // A draft resumed directly onto the scenarios gate never passes goTo;
     // warm its near-variant pools here.
-    if (step === "scenarios") { void gridApi.prefetchNearPools(); gridApi.warmWorries(); }
+    if (step === "scenarios") gridApi.warmWorries();
     // Resumed on the market step with a known category: warm the read.
     if (step === "market" && category.trim()) gridApi.warmRead();
     // Resumed mid-flow: warm whatever the NEXT gate will ask for.
@@ -709,7 +709,7 @@ export function SetupWizard({ mode, brand, draft, engineOptions, onClose, onCrea
     // pools for scenario draws, the worry pool while the scenarios are
     // reviewed, cells while the map is reviewed, paraphrases while the
     // seeds are reviewed. Silent; failures cost nothing.
-    if (k === "scenarios") { void gridApi.prefetchNearPools(g); gridApi.warmWorries(g); }
+    if (k === "scenarios") gridApi.warmWorries(g);
     if (k === "worries") void landOnWorries(g);
     if (k === "stages") { gridApi.warmCells(g); void gridApi.loadValueLines(g); }
     if (k === "prompts" && mode === "grid") gridApi.warmPhrasings(g);

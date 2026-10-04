@@ -830,9 +830,10 @@ export function useGridSetup(a: GridSetupArgs) {
     const drawn: GridState = { ...a.state, reserve };
     if (active < cap) {
       a.setState(drawn);
-      await compose({ base: drawn.moderators, rows: nextRows });
+      const next = await compose({ base: drawn.moderators, rows: nextRows });
     } else {
-      a.setState(withScenarioRows(drawn, nextRows));
+      const next = withScenarioRows(drawn, nextRows);
+      a.setState(next);
     }
   }
 
@@ -873,42 +874,11 @@ export function useGridSetup(a: GridSetupArgs) {
     }
   }
 
-  /** Prefetch the near-variant pool for every suggested card that lacks
-   * one - fired when the scenarios gate lands, silent, in parallel, so
-   * every draw afterwards is instant. Merges into the freshest state.
-   * `fresh` covers callers holding a newer state than this closure. */
-  async function prefetchNearPools(fresh?: GridState | null): Promise<void> {
-    const st = fresh ?? a.state;
-    if (!st) return;
-    const rows = scenarioRows(st);
-    const targets = rows.filter((r) => r.suggested && r.label.trim() && !r.pool);
-    if (targets.length === 0) return;
-    const exclude = rows.map(({ label, description }) => ({ label, description }));
-    const du = String(st.moderators.decision_unit ?? "committee");
-    const results = await Promise.all(
-      targets.map(async (r) => ({
-        key: poolAnchor(r).label,
-        pool: await fetchPool(poolAnchor(r), exclude, du, true).catch(() => null),
-      }))
-    );
-    const byKey = new Map(results.filter((x) => x.pool?.length).map((x) => [x.key, x.pool!]));
-    if (byKey.size === 0) return;
-    a.setState((prev) => {
-      if (!prev) return prev;
-      return withScenarioRows(
-        prev,
-        scenarioRows(prev).map((r) =>
-          !r.pool && byKey.has(poolAnchor(r).label)
-            ? { ...r, pool: byKey.get(poolAnchor(r).label) }
-            : r
-        )
-      );
-    });
-  }
-
   /** Gate 1 helper: a near variant of one card - same circumstance, one
-   * detail moved. Draws walk the card's precomputed pool (instant); the
-   * pool is fetched on demand only if the prefetch hasn't landed yet. */
+   * detail moved. The card's pool of three is fetched on the FIRST click
+   * (low effort, a few seconds) and walked on later clicks. No prefetch:
+   * it spent a model call per card on every setup for a button most
+   * users never press (Tyler, 2026-10-04). */
   async function nearScenario(i: number): Promise<void> {
     if (!a.state) return;
     const rows = scenarioRows(a.state);
@@ -1582,7 +1552,7 @@ export function useGridSetup(a: GridSetupArgs) {
   return {
     compose, writeCells, writePhrasings, topUpPhrasings, suggestScenario, nearScenario,
     suggestCell, addOwnCell,
-    prefetchNearPools, warmRead, warmCells, warmPhrasings,
+    warmRead, warmCells, warmPhrasings,
     fetchWorries, warmWorries, loadValueLines,
     regenerateCell, cycleCell, restoreCategoryView,
   };

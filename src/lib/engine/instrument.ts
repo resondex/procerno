@@ -1176,7 +1176,9 @@ export async function suggestScenario(input: {
 }): Promise<Situation | null> {
   tagCosts({ purpose: "setup:scenario_suggest" });
   const avoid = input.exclude.map((s) => s.label.trim().toLowerCase()).filter(Boolean).sort();
-  const key = cacheKey("scenario_more6", [
+  // more7 (2026-10-04): low reasoning effort - default effort took 10-30s
+  // for one sentence.
+  const key = cacheKey("scenario_more7", [
     input.category, input.audience, input.decisionUnit, avoid.join("|"),
   ]);
   const hit = await store.cacheGet(key, CACHE_TTL_MS);
@@ -1186,6 +1188,7 @@ export async function suggestScenario(input: {
   }
   const res = await openaiClient().chat.completions.create({
     model: INSTRUMENT_HELPER_MODEL,
+    reasoning_effort: "low",
     messages: [
       {
         role: "system",
@@ -1251,7 +1254,8 @@ export async function nearScenarios(input: {
   // one - pool8 came back as the original plus a qualifier. Rule in the
   // prompt plus a mechanical guard: a variant whose words contain all of
   // the original's is an addition and is dropped.
-  const key = cacheKey("scenario_near_pool9", [
+  // pool10 (2026-10-04): low reasoning effort - the live draw took 10-30s.
+  const key = cacheKey("scenario_near_pool10", [
     input.category, input.audience, input.of.label, input.of.description, avoid.join("|"),
   ]);
   const hit = await store.cacheGet(key, CACHE_TTL_MS);
@@ -1263,6 +1267,7 @@ export async function nearScenarios(input: {
   }
   const res = await openaiClient().chat.completions.create({
     model: INSTRUMENT_HELPER_MODEL,
+    reasoning_effort: "low",
     messages: [
       {
         role: "system",
