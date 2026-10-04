@@ -4698,7 +4698,16 @@ export interface Phrasing {
 // words that define the question.
 // "p10" (2026-10-03, Tyler: no category or brand examples in prompt text): the paraphrase writer's examples (roles, category terms,
 // spec terms, qualifiers) are described, never quoted.
-const PHRASINGS_VERSION = "p10";
+// "p11" (2026-10-04): paraphrases keep the seed's ask (string-checked for
+// Feature screening and Value), plain register (never formal), and a
+// length near the seed's - the p10 sets drifted formal and a quarter of
+// feature-screen paraphrases stopped asking about features.
+const PHRASINGS_VERSION = "p11";
+/** Ask words a paraphrase of these stages must keep (p11). */
+const PARA_ASK_WORD: Record<string, RegExp> = {
+  feature_screening: /\bfeatures?\b/i,
+  pricing: /\bworth\b/i,
+};
 // Over-generate so the overlap filter can be strict and still fill the set.
 const PHRASINGS_EXTRA = 3;
 /** Blind cells get a wider first-pass margin: with no brand tokens to
@@ -4961,11 +4970,16 @@ export async function generatePhrasings(input: {
             "seed is a FACT of the designed question - keep it exactly as " +
             "written or leave it out, NEVER swap it for a different value, and " +
             "never add a number the seed does not carry. Standard spec terms " +
-            "are vocabulary, not quantities - they stay as written. Some askers give backstory, some just ask.\n" +
+            "are vocabulary, not quantities - they stay as written. Some askers add a few words of context, some just ask.\n" +
             "Vary, across the set: who is asking (pick roles realistic for THIS audience and " +
             "circumstance, and tag each with `asker`), register (casual to " +
-            "formal, as fits the audience), length (a " +
-            "terse 8-word ask to a two-sentence backstory), and question form.\n" +
+            "plain, the way people type to a chat assistant - never formal or " +
+            "business writing), length (a little shorter or longer than the " +
+            "seed, never a paragraph), and question form.\n" +
+            "Keep the seed's ask: every paraphrase asks the same kind of " +
+            "question with the same closing meaning - a best-features ask " +
+            "keeps asking about features, a worth-it ask keeps asking whether " +
+            "it is worth it, a which-is-best ask keeps asking which is best.\n" +
             "Rules:\n" +
             "- If the seed names NO brand, name NO brand or product in any " +
             "paraphrase. Blind prompts are the measurement. EXCEPTION: a " +
@@ -5175,7 +5189,7 @@ export async function generatePhrasings(input: {
       // to ONE filter (correlated kill - the Asana signature bug looked
       // exactly like bad luck from outside). Count the kills so a starved
       // cell names its eater in the logs instead of needing archaeology.
-      const culls = { empty: 0, sig: 0, dup: 0, overlap: 0 };
+      const culls = { empty: 0, sig: 0, ask: 0, dup: 0, overlap: 0 };
       for (const p of c.phrasings ?? []) {
         // The writer occasionally merges its asker metadata into the
         // text ("asker: parent - two big dogs..."); the label belongs in
@@ -5190,6 +5204,11 @@ export async function generatePhrasings(input: {
           culls.sig++;
           continue;
         }
+        // The stage's ask word (2026-10-04, p11): a feature screen that stops
+        // asking about features is a Discovery question, a Value cell that
+        // stops asking "worth" is a comparison - countable, so counted.
+        const askWord = PARA_ASK_WORD[seed.stage];
+        if (askWord && !askWord.test(text)) { culls.ask++; continue; }
         const n = norm(text);
         if (seen.has(n)) { culls.dup++; continue; }
         // A paraphrase that shares most of its words with the seed or a sibling
@@ -5205,7 +5224,7 @@ export async function generatePhrasings(input: {
       if (prior.length + kept.length < want) {
         console.warn(
           `phrasings cull [${seed.stage}] kept ${prior.length + kept.length}/${want} - ` +
-          `raw ${(c.phrasings ?? []).length}, sig ${culls.sig}, overlap ${culls.overlap}, dup ${culls.dup}, empty ${culls.empty}, sig="${sig}" | ${seed.text.slice(0, 80)}`
+          `raw ${(c.phrasings ?? []).length}, sig ${culls.sig}, ask ${culls.ask}, overlap ${culls.overlap}, dup ${culls.dup}, empty ${culls.empty}, sig="${sig}" | ${seed.text.slice(0, 80)}`
         );
       }
       result[c.index] = kept;
