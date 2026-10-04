@@ -135,7 +135,12 @@ const CACHE_TTL_MS = 183 * 24 * 3600 * 1000;
 // "s35" (2026-10-03, Tyler: no category or brand examples in prompt text): every category or brand example the writers saw is replaced by a
 // description of the element - seeds were copying them ("Done with my iPhone",
 // carrier trade-in, "a phone I've had for years", "a cheaper phone").
-const STYLE_VERSION = "s35";
+// "s37" (2026-10-04): a cell's circumstance comes only from its own
+// situation (audit v6: one column's compliance needs showed up in another
+// column's feature screen - the writer sees every plan line in its chunk).
+// (s36 was a scratch-worktree test of removing generic examples; never
+// shipped, so the version is skipped.)
+const STYLE_VERSION = "s37";
 
 /** Versions the DETERMINISTIC seed-check set (everything seedRule runs:
  * checkPromptAgainstSpec + blind_missing_category + scenario_label_leak).
@@ -2500,7 +2505,9 @@ const CELL_WRITER_SYSTEM =
           "OWN situation - never as a topic opener, NEVER the scenario's " +
           "label text (a plan label is not something a person types), and " +
           "never the plan's segment vocabulary (buyers say their size and " +
-          "stakes in plain words).\n" +
+          "stakes in plain words). A cell's circumstance comes only from its " +
+          "OWN situation: never carry a detail, need or constraint from " +
+          "another plan line's situation into it.\n" +
           "- Value cells (stage key pricing) ask the CLIENT BRAND'S value " +
           "question for this column's buyer: name the client brand, set it " +
           "against a GENERIC cheaper alternative in the category, described " +
