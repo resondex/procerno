@@ -201,7 +201,7 @@ export function questionTypeOf(
  * Android" on a Pixel tracker) answers the blind question for it. */
 function outcomeClause(stage: string, brand: string): string {
   if (!BLIND_STAGES.has(stage)) return "";
-  return ` The buyer's needs are voiced as OUTCOMES any serious contender could answer ("stays fast and keeps getting updates for years") - a need worded the way ${brand} markets itself (its signature feature names, taglines or platform labels) steers the unprompted answer toward ${brand} and does not satisfy the design.`;
+  return ` Any need the buyer mentions is voiced as an OUTCOME in their own words that any serious contender could answer - a need worded the way ${brand} markets itself (its signature feature names, taglines or platform labels) steers the unprompted answer toward ${brand} and does not satisfy the design.`;
 }
 
 export function seedDesignLine(
@@ -308,7 +308,7 @@ export function stageDesignIntent(stage: string, brand: string, concern?: string
   // social_validation cell became a features-gush ask and named nothing).
   const pickClause = OPEN_PICK_STAGES.has(stage)
     ? (stage === "use_case"
-        ? ` The ask is for ONE pick for the job - a list ask ("name a few") belongs to discovery and does not satisfy the design, and neither does a features-only or where-to-look ask.`
+        ? ` The ask is for ONE pick for ONE job - something the buyer is trying to get done, stated without naming a product feature or capability. A product feature restated as the job, the buying situation itself restated as the job, or a list ask ("name a few", which belongs to discovery) does not satisfy the design.`
         : ` The ask must invite NAMED products or brands ("which ones", "name a few worth a look") - a features-only, what-do-people-value or where-to-look ask does not satisfy the design.`) +
       // Tyler 2026-10-02 (round-5 D5, "eSIM and a microSD slot" on Pixel):
       // a screen the client can never pass measures nothing about it - the

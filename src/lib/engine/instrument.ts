@@ -128,7 +128,11 @@ const CACHE_TTL_MS = 183 * 24 * 3600 * 1000;
 // with no quoted example (every Pixel heal copied "from iOS to Android");
 // churn/renewal leaving is a live option, never a token "or"; Value names
 // the product LINE; rewrite steers never swap in another client strength.
-const STYLE_VERSION = "s33";
+// "s34" (2026-10-03): use-case asks a job to be done (a task stated without a
+// product feature), enforced battery-wide by the use-case job pass; the
+// engine's own rules lose their category examples ("years of updates",
+// "SSO, reporting and automations") that generated seeds were copying.
+const STYLE_VERSION = "s34";
 
 /** Versions the DETERMINISTIC seed-check set (everything seedRule runs:
  * checkPromptAgainstSpec + blind_missing_category + scenario_label_leak).
@@ -547,7 +551,7 @@ export function stageLibrary(m: Moderators): LibraryStage[] {
     {
       key: "use_case", label: "Use-case fit", layer: "consideration",
       situational: true, rivals: "none", tag: "picks", recommended: true,
-      hint: "ONE concrete job that buyers in this situation commonly need done, asking which to pick for that job - never a list of needs, and never a job chosen because it suits the client brand.",
+      hint: "ONE job to be done in this situation - something the buyer is trying to get done, stated without naming a product feature - asking which ONE product to pick for it. Never a list of needs, never a feature restated as a job, never the situation itself, and never a job chosen because it suits the client brand.",
       why: "Concrete-need asks are where assistants match options to situations.",
     },
     {
@@ -2390,9 +2394,9 @@ const CELL_WRITER_SYSTEM =
           "Typing, not prose: real asks are short and get to the question " +
           "fast - the asker's situation in a few plain words, then the ask " +
           "(10-35 words is normal; a prompt is not a brief). NEVER a wish " +
-          "list of what they want in the product ('great camera, strong " +
-          "battery life and years of updates', 'SSO, reporting and " +
-          "automations'): the ANSWER decides what matters, and a criteria " +
+          "list of what they want in the product (two or more wanted " +
+          "features or criteria strung together): the ANSWER decides what " +
+          "matters, and a criteria " +
           "list both steers it and makes every stage ask the same thing. " +
           "The only detail beyond the situation is what the stage itself " +
           "is about: the ONE capability a feature screen asks after, the " +
@@ -2533,10 +2537,15 @@ const CELL_WRITER_SYSTEM =
           "reviews', or a features-only essay ask. When the category is a " +
           "RETAILER category, the ask is which retailer to buy from, not " +
           "which product to buy.\n" +
-          "- use_case: the situation plus ONE concrete job, asking which ONE " +
-          "product to pick for that job - not a list ('name a few' belongs to " +
-          "discovery). Each use-case cell in a battery names a DIFFERENT job, " +
-          "one buyers in that situation commonly need done.\n" +
+          "- use_case: the situation plus ONE job to be done, asking which ONE " +
+          "product to pick for it - not a list (that belongs to discovery). A " +
+          "job is something the buyer is trying to get done in their life or " +
+          "work, stated WITHOUT naming a product feature or capability: if " +
+          "the job is really a feature with the words rearranged, or just the " +
+          "buying situation repeated, it is not a job. Each use-case cell in " +
+          "a battery names a DIFFERENT job, one buyers in that situation " +
+          "commonly need done, and never the capability its column's " +
+          "feature screen already asks about.\n" +
           "- premium_worth: weigh the category's premium maker(s) as a " +
           "TIER against basic/store options and invite named picks; never " +
           "ask whether one named brand is worth it - that form belongs to " +
@@ -3860,7 +3869,7 @@ export async function generateGrid(input: {
    * completion marker (keyed on the unit-key set, so it self-versions with
    * the eras) is written only when both passes ran uncut; a serve that finds
    * it absent re-runs them. */
-  const passesKey = cacheKey("grid_passes1", [...unitKeys]);
+  const passesKey = cacheKey("grid_passes2", [...unitKeys]);
   const runBatteryPasses = async (): Promise<boolean> => {
     let passesCut = false;
     // CROSS-CELL CONCERN DIVERSITY (2026-09-29 audit): every per-cell check
@@ -3979,6 +3988,123 @@ export async function generateGrid(input: {
       } catch (err) {
         passesCut = true;
         console.error("concern diversity pass failed open:", err);
+      }
+    }
+    // USE-CASE JOB DIVERSITY (fix 2, 2026-10-03 contract audit): per-cell
+    // checks can't see that two use-case cells name the same job (Doritos:
+    // sheet-pan nachos twice), that a "job" is its column's feature screen
+    // again (AmEx: employee cards with limits) or just the room restated
+    // (Jira: "standardize workflows across all teams"). One labeling call
+    // over the battery's use-case seeds; offenders get one steered rewrite
+    // that must pass the mechanical and design checks, or the original
+    // stands.
+    if (process.env.PHRASINGS_CHECKS !== "0" && Date.now() > deadlineAt) passesCut = true;
+    if (process.env.PHRASINGS_CHECKS !== "0" && Date.now() <= deadlineAt) {
+      try {
+        const uc: { u: number; c: GridCell }[] = [];
+        const screenBySit = new Map<string, string>();
+        for (let u = 0; u < units.length; u++) for (const c of resolved[u] ?? []) {
+          if (c.stage === "use_case") uc.push({ u, c });
+          if (c.stage === "feature_screening" && c.situation) screenBySit.set(c.situation, c.text);
+        }
+        if (uc.length >= 1) {
+          const roomOf = new Map(input.scenarios.map((s) => [s.label, s.description]));
+          const a = await anthropicClient();
+          const ask = (extra = "") => withCostContext({ purpose: "setup:cells" }, () => a.messages.create({
+            model: DESIGN_CHECK_MODEL,
+            max_tokens: 1500,
+            output_config: { effort: DESIGN_CHECK_EFFORT },
+            system:
+              `Each question below asks which product to pick for a job in a buying situation in ${input.category}. For each give: ` +
+              `job - the job in 2-5 words, as a task the buyer gets done; ` +
+              `feature - true when the "job" is really a product feature or capability rather than a task; ` +
+              `restatesRoom - true when the "job" is just the buying situation itself; ` +
+              `sameAsScreen - true when the job is the same thing the column's feature-screening question asks about. ` +
+              `Reply with ONLY valid JSON: {"jobs": [{"job": "...", "feature": false, "restatesRoom": false, "sameAsScreen": false}, ...]} - one entry per question, in order.${extra}`,
+            messages: [{
+              role: "user",
+              content: uc.map((d, i) => {
+                const room = d.c.situation ? `${d.c.situation}: ${roomOf.get(d.c.situation) ?? ""}` : "none";
+                const screen = d.c.situation ? screenBySit.get(d.c.situation) : undefined;
+                return `${i + 1}. Situation: ${room}\n   Feature screen in this column: ${screen ?? "none"}\n   Question: ${d.c.text}`;
+              }).join("\n"),
+            }],
+          } as never));
+          const parseJobs = (res: unknown) => {
+            const text = (res as { content: { type: string; text?: string }[] }).content
+              .filter((b) => b.type === "text").map((b) => b.text ?? "").join("").trim();
+            try { return (JSON.parse(firstJsonObject(text) ?? text) as { jobs?: { job?: string; feature?: boolean; restatesRoom?: boolean; sameAsScreen?: boolean }[] }).jobs ?? null; } catch { return null; }
+          };
+          let jobs = parseJobs(await ask());
+          if (!jobs) jobs = parseJobs(await ask(" Escape any quote marks inside strings."));
+          if (jobs && jobs.length === uc.length) {
+            const norm = (s: string) => s.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+            const seen = new Map<string, number>();
+            const bad: { i: number; why: string }[] = [];
+            jobs.forEach((j, i) => {
+              const k = norm(j.job ?? "");
+              if (j.feature) bad.push({ i, why: "it names a product feature, not a job" });
+              else if (j.restatesRoom) bad.push({ i, why: "it repeats the buying situation instead of naming a job" });
+              else if (j.sameAsScreen) bad.push({ i, why: "it asks about the same thing as its column's feature screen" });
+              else if (k && seen.has(k)) bad.push({ i, why: `it repeats another use-case job (${j.job})` });
+              if (k && !seen.has(k)) seen.set(k, i);
+            });
+            const covered = jobs.map((j) => j.job).filter(Boolean).join("; ");
+            const dirty = new Set<number>();
+            await Promise.all(bad.slice(0, 4).map(async ({ i, why }) => {
+              const d = uc[i];
+              const row = rowFor(units[d.u] ?? [], d.c) ?? (units[d.u] ?? [])[0];
+              if (!row) return;
+              if (Date.now() > healDeadlineAt) { passesCut = true; return; }
+              const screen = d.c.situation ? screenBySit.get(d.c.situation) : undefined;
+              console.warn(`use-case jobs: [${d.c.situation ?? "-"}] rejected because ${why} | ${d.c.text.slice(0, 80)}`);
+              try {
+                const res2 = await openaiClient().chat.completions.create({
+                  model: CELLS_MODEL,
+                  messages: [
+                    { role: "system", content: CELL_WRITER_SYSTEM + "Return one cell object for the plan line." },
+                    { role: "user", content:
+                        `Client brand: ${input.brand}\nCategory: ${input.category}\n` +
+                        `Rivals: ${rivals.map(primaryBrandName).join(", ")}\nAudience: ${input.audience ?? "unknown"}\n\n` +
+                        `Cell plan:\n${planLine(row, 0)}\n` +
+                        `   [the previous attempt was rejected because ${why}. This battery's use-case jobs so far: ${covered}. ` +
+                        `Name ONE DIFFERENT job buyers in this situation commonly need done - a task stated without any product feature word, not the situation itself` +
+                        `${screen ? `, and not what this column's feature screen asks about ("${screen}")` : ""}. ` +
+                        `Ask which ONE product to pick for it.${swapRule("use_case")} Do not reuse this wording: "${d.c.text}"]` },
+                  ],
+                  response_format: { type: "json_schema", json_schema: { name: "grid_cells", strict: true, schema: CELLS_SCHEMA } },
+                });
+                const text2 = (JSON.parse(res2.choices[0]?.message?.content ?? "{}") as { cells?: { text?: string }[] }).cells?.[0]?.text?.trim();
+                if (!text2) return;
+                const cand = { stage: d.c.stage, angle: d.c.angle, text: stripRosterParens(humanize(text2), [input.brand, ...input.competitors]), situation: d.c.situation, concern: d.c.concern };
+                const intent = stageDesignIntent(d.c.stage, input.brand, undefined, d.c.angle, d.c.situation);
+                await primeCells([cand]);
+                const mechOk = seedRule(cand).length === 0;
+                const dv = intent ? (await checkDesignFidelity({ candidates: [{ text: cand.text, design: intent }], meta: input.meta }))[0] : null;
+                if (mechOk && (!intent || (!!dv?.voices && !dv?.unchecked))) {
+                  d.c.text = cand.text;
+                  d.c.qtype = questionTypeOf(d.c, input.brand, input.category, aliasForms);
+                  d.c.spec = deriveCheckSpec(d.c, input.brand, input.competitors, input.category, aliasForms);
+                  delete d.c.seedFlags;
+                  dirty.add(d.u);
+                  console.warn(`use-case jobs: healed: ${cand.text.slice(0, 80)}`);
+                } else {
+                  console.warn(`use-case jobs: rewrite rejected - original stands`);
+                }
+              } catch (err) {
+                console.error("use-case job rewrite failed open:", err);
+              }
+            }));
+            await Promise.all(
+              [...dirty].map((u) =>
+                store.cacheSet(unitKeys[u], JSON.stringify({ cells: resolved[u] ?? [], rules: SEED_RULES_VERSION }), stampOf(input)).catch(() => {})
+              )
+            );
+          }
+        }
+      } catch (err) {
+        passesCut = true;
+        console.error("use-case job pass failed open:", err);
       }
     }
     // The cross-cell PRICING TRADE-OFF DIVERSITY pass (s20, 2026-10-01) and
