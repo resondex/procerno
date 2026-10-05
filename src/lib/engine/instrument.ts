@@ -947,7 +947,9 @@ export async function readScenarios(input: {
   // a row a habitual snack market got a considered room for hosting alone,
   // which switched on three considered stages for the whole battery.
   // 26 (Tyler, option 2): a change in WHO decides also qualifies.
-  const key = cacheKey("scenarios_journeys26", [
+  // 27: the judge carries the read's own answer-not-process exclusions (a
+  // tight budget alone was granted once).
+  const key = cacheKey("scenarios_journeys27", [
     input.category, input.audience, input.forBrand ?? "",
   ]);
   const read = await coalesced<{
@@ -1109,7 +1111,7 @@ export async function readScenarios(input: {
         system:
           `Each line below is a buying room in the ${input.category} market and a stated reason its buyer decides by a different PROCESS than the market's usual one (the usual: ${JSON.stringify(base)}). ` +
           `A reason changes the process when it raises the stakes of a wrong choice - a constraint that makes the wrong choice costly, someone else's rules the buyer must satisfy, or a purchase large or rare enough to be researched - or when it changes WHO decides: one person deciding alone where the market usually decides as a group, or a group deciding where the market usually decides alone. ` +
-          `A reason that only names the occasion, a larger quantity, other people merely being present, or the buyer's mood does not change the process. ` +
+          `A reason that only names the occasion, a larger quantity, other people merely being present, or the buyer's mood does not change the process; nor does a circumstance that changes the ANSWER but not the process - a tight budget, a compliance constraint, a deadline - unless it makes the wrong choice costly enough that the buyer researches where they otherwise would not. ` +
           `Reply with ONLY JSON: {"changes": [true, false, ...]} - one entry per line, in order.`,
         messages: [{ role: "user", content: claims.map(({ s }, k) => `${k + 1}. ${s.label}: ${s.description} | reason: ${s.deviatesBecause}`).join("\n") }],
       } as never);
