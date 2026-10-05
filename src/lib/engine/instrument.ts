@@ -767,6 +767,10 @@ const SCENARIOS_SCHEMA = {
         properties: {
           label: { type: "string" },
           description: { type: "string" },
+          /** journeys24: anything the buyer wants, values or is choosing
+           * FOR goes here, never in the description - the writer, the
+           * checks and the gate read the description only. */
+          want: { type: "string" },
           deviates: { type: "boolean" },
           journey: {
             type: "object",
@@ -780,7 +784,7 @@ const SCENARIOS_SCHEMA = {
             required: ["involvement", "verifiability", "think_feel", "decision_unit"],
           },
         },
-        required: ["label", "description", "deviates", "journey"],
+        required: ["label", "description", "want", "deviates", "journey"],
       },
     },
   },
@@ -917,7 +921,14 @@ export async function readScenarios(input: {
   // organization's purchase as a room. "Categories sold to organizations"
   // was read loosely (phones are sold to organizations too) and kept
   // conjuring a work room - a stipend, an employer's approved list.
-  const key = cacheKey("scenarios_journeys23", [
+  // 24 (2026-10-04, Tyler, option a): the description is the CIRCUMSTANCE
+  // only - who the buyer is and the situation they are in - and any
+  // outcome, product type or quality they want goes in a separate `want`
+  // field that nothing downstream reads. With the description reaching the
+  // seed writer (s48), a room whose main clause was a want ("comparing
+  // cash-back cards", "compares live TV bundles") was restated across its
+  // whole column; a trailing-clause cut could not reach a main clause.
+  const key = cacheKey("scenarios_journeys24", [
     input.category, input.audience, input.forBrand ?? "",
   ]);
   const read = await coalesced<{
@@ -948,9 +959,15 @@ export async function readScenarios(input: {
           "Labels are in sentence case. Descriptions ONE short plain sentence. Each scenario is a ROOM: " +
           "a buyer occasion in this category - who the buyer is and the " +
           "situation they are in. " +
-          "Describe what is happening, never a list of features or criteria " +
-          "the buyer wants - the answer decides what matters - and never a " +
-          "specific brand or product. " +
+          "The description is the CIRCUMSTANCE ONLY: what is happening to " +
+          "the buyer, who they are, where they are, who they are buying for, " +
+          "a constraint or a moment - written so it contains no kind of " +
+          "product, no outcome, no quality and no purpose. Everything the " +
+          "buyer wants, values, is choosing FOR or is comparing goes in the " +
+          "separate want field (one short phrase, or empty) - never in the " +
+          "description, not as its main clause, not as a trailing 'to ...' " +
+          "or 'for ...' clause, not mid-sentence. The answer decides what " +
+          "matters. Never a specific brand or product anywhere. " +
           "A room's buyer is actively CHOOSING between products in the " +
           "category - comparing, or at least open to options; a buyer who " +
           "rebuys, renews or takes the next version of what they have " +
@@ -1045,7 +1062,7 @@ export async function readScenarios(input: {
     },
   });
   const parsed = JSON.parse(res.choices[0]?.message?.content ?? "{}") as {
-    scenarios: { label: string; description: string; deviates: boolean; journey: Journey }[];
+    scenarios: { label: string; description: string; want?: string; deviates: boolean; journey: Journey }[];
   };
   let deltaGranted = false;
   const all: ScenarioSpec[] = (parsed.scenarios ?? [])
@@ -1058,7 +1075,9 @@ export async function readScenarios(input: {
       if (granted) deltaGranted = true;
       return {
         label: s.label.trim(),
-        description: s.description.trim(),
+        // Belt and braces: the structural purpose-clause cut still runs on
+        // the description the model returns.
+        description: circumstanceOnly(s.description.trim()),
         journey: granted ? s.journey : null,
       };
     })
