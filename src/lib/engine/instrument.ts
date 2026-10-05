@@ -160,7 +160,7 @@ const CACHE_TTL_MS = 183 * 24 * 3600 * 1000;
 // one-tier-down counterpart per room (planValueLines, confirmed at the
 // gate; default = the brand's most premium line that fits the room; no
 // Value cell where none fits) and carries no usage detail.
-const STYLE_VERSION = "s47"; // s46 (2026-10-04 seed review batch): problem recognition carries no purchase moment; offensive alternatives state a plain move within the category; head-to-heads add no situation; advocacy convinces a peer or critic, business case an approver. // s45 (2026-10-04 seed review): doubt hints - the asker's own one-doubt claim, never a fact to confirm, hearsay, a sizing ask or the Value question; stance decides the asker; worry cells carry no reach limit.
+const STYLE_VERSION = "s48"; // s46 (2026-10-04 seed review batch): problem recognition carries no purchase moment; offensive alternatives state a plain move within the category; head-to-heads add no situation; advocacy convinces a peer or critic, business case an approver. // s45 (2026-10-04 seed review): doubt hints - the asker's own one-doubt claim, never a fact to confirm, hearsay, a sizing ask or the Value question; stance decides the asker; worry cells carry no reach limit.
 
 /** Versions the DETERMINISTIC seed-check set (everything seedRule runs:
  * checkPromptAgainstSpec + blind_missing_category + scenario_label_leak).
@@ -176,7 +176,7 @@ const STYLE_VERSION = "s47"; // s46 (2026-10-04 seed review batch): problem reco
  * 7's unversioned serve-time re-check had no terminal state). Bump when
  * a deterministic check changes meaning; bumping costs one free re-judge
  * per unit, and model calls only for units the new rules reject. */
-export const SEED_RULES_VERSION = "r18"; // r17 (2026-10-04 seed review batch): awareness_purchase_moment and offensive_alt_no_move nets; design intents - no purchase moment in problem recognition, head-to-heads add no situation, alternatives state a full-sentence move within the category, advocacy vs business-case audience, Value brand-name fallback branch; keep-or-leave narrowed (a within-brand change may be the subject, never the answer). // r16 (2026-10-04 seed review): doubt design intent - own claim, one doubt, open verdict; facts to confirm, rule/ingredient lookups, hearsay, sizing asks and the Value worth-it ask fail; objections never voiced by a current user, churn/renewal always by one, no third option beside stay and leave. // r15 (2026-10-02, Tyler's option B): brand mentions = whole names, declared alternates, name words and dictionary aliases, with every ambiguous one-word hit (an everyday word written lowercase or opening a sentence, or a maker word like "Google" of Google Pixel) decided in context by the brand judge (haiku, cached) - no casing rules, no target exemption, no roster word lists. r14 (2026-10-02 review): everyday-word lexicon by lowercase SHARE in two tiers (label words: common and not brand-dominated - "jira", "netflix", "pixel", "apple", "chase" count lowercase again; aliases: merely common - "gold" stays capital-only), coined split words case-blind ("apple or samsung"), the target's own one-word name never case-guarded, "citi" off the case-guard list, and a monthly figure is the asker's plan only in first-person / spend / offer context ("the Pro about 20 a month more" is a stated price). r13 (2026-10-02 cold-walk audit + review): verb-less stated prices ("Gold at 250"); word-anchored price-concern test + money bolt-ons; brand checks read filtered dictionary alias forms ("amex"); everyday words inside brand names never name the brand - category tokens containment-aware, split words of multi-word names in label casing and not sentence-initial, one-word names and aliases in the vault everyday-word lexicon capitalized only, other brands' full names scrubbed first. r4 (2026-10-01): r2 calendar-year/60-word/segment-vocab; r3 category-naming labels exempt from substring leak; r4 'standardization' in segment vocabulary; r5 directionless-switch string check; r6 punctuation-blind label-leak matching; r7-r8 switch direction detected by absence (no OS, no roster brand near switch vocabulary); cheaper bolt-on token on non-price concerns
+export const SEED_RULES_VERSION = "r20"; // r17 (2026-10-04 seed review batch): awareness_purchase_moment and offensive_alt_no_move nets; design intents - no purchase moment in problem recognition, head-to-heads add no situation, alternatives state a full-sentence move within the category, advocacy vs business-case audience, Value brand-name fallback branch; keep-or-leave narrowed (a within-brand change may be the subject, never the answer). // r16 (2026-10-04 seed review): doubt design intent - own claim, one doubt, open verdict; facts to confirm, rule/ingredient lookups, hearsay, sizing asks and the Value worth-it ask fail; objections never voiced by a current user, churn/renewal always by one, no third option beside stay and leave. // r15 (2026-10-02, Tyler's option B): brand mentions = whole names, declared alternates, name words and dictionary aliases, with every ambiguous one-word hit (an everyday word written lowercase or opening a sentence, or a maker word like "Google" of Google Pixel) decided in context by the brand judge (haiku, cached) - no casing rules, no target exemption, no roster word lists. r14 (2026-10-02 review): everyday-word lexicon by lowercase SHARE in two tiers (label words: common and not brand-dominated - "jira", "netflix", "pixel", "apple", "chase" count lowercase again; aliases: merely common - "gold" stays capital-only), coined split words case-blind ("apple or samsung"), the target's own one-word name never case-guarded, "citi" off the case-guard list, and a monthly figure is the asker's plan only in first-person / spend / offer context ("the Pro about 20 a month more" is a stated price). r13 (2026-10-02 cold-walk audit + review): verb-less stated prices ("Gold at 250"); word-anchored price-concern test + money bolt-ons; brand checks read filtered dictionary alias forms ("amex"); everyday words inside brand names never name the brand - category tokens containment-aware, split words of multi-word names in label casing and not sentence-initial, one-word names and aliases in the vault everyday-word lexicon capitalized only, other brands' full names scrubbed first. r4 (2026-10-01): r2 calendar-year/60-word/segment-vocab; r3 category-naming labels exempt from substring leak; r4 'standardization' in segment vocabulary; r5 directionless-switch string check; r6 punctuation-blind label-leak matching; r7-r8 switch direction detected by absence (no OS, no roster brand near switch vocabulary); cheaper bolt-on token on non-price concerns
 
 /** Brand forms that double as ordinary English words: only these demand a
  * capitalized occurrence to count as naming the brand ("2-3 services max"
@@ -3239,6 +3239,18 @@ export interface WorryPick {
  * per (brand, category, audience, scenario set, offered stances); the
  * confirmed PICKS are decision data stored on the draft/project - this
  * pool is only the menu. */
+/** A room description with its trailing purpose or want clause removed
+ * (s48). Generic English markers only: "to <verb>", "so (that) they",
+ * "wanting", "looking for", "seeking", "who want(s)", "hoping/aiming to".
+ * Cuts only when at least four words remain. */
+export function circumstanceOnly(description: string): string {
+  const d = description.replace(/\s+/g, " ").trim();
+  const m = d.match(/^(.*?\S)(?:,|;|\s)\s*(?:(?:in order )?to (?:manage|keep|get|earn|save|find|make|cover|build|track|stay|avoid|have|pay|stretch|protect|handle|control|watch|run|simplify|cut|boost|maximi[sz]e|minimi[sz]e|improve|reduce|grow|secure|ensure|enjoy|stream|capture|replace|upgrade|consolidate|centrali[sz]e|standardi[sz]e)\b|so (?:that )?(?:they|we|i|she|he|it|everyone)\b|wanting\b|looking for\b|seeking\b|who wants?\b|hoping to\b|aiming to\b)[^.]*\.?$/i);
+  if (!m) return d;
+  const kept = m[1].trim().replace(/[,;:]+$/, "");
+  return kept.split(" ").length >= 4 ? kept + (/[.!?]$/.test(kept) ? "" : ".") : d;
+}
+
 /** Subject words that carry no doubt on their own (worries5 overlap). */
 const STOP_SUBJECT_WORDS = new Set(["the", "and", "for", "with", "its", "their", "our", "your", "about", "over", "too", "not", "very", "feels", "feel", "risk", "risks", "issue", "issues", "problem", "problems", "concern", "concerns", "worry", "worries", "quality"]);
 
@@ -3734,8 +3746,12 @@ export async function generateGrid(input: {
     const d = input.scenarios.find((s) => s.label === situation)?.description;
     return d ? `${situation} - ${humanize(d).replace(/\s+/g, " ").trim()}` : situation;
   };
+  // s48: the description reaches the writer as CIRCUMSTANCE only - a
+  // trailing purpose or want clause ("...to keep cash flow flexible",
+  // "...wanting more rewards") is cut before it rides the plan line, since
+  // the writer carried it into every cell of the column (AmEx re-audit).
   const roomBySituation = new Map(
-    input.scenarios.map((s) => [s.label, humanize(s.description).replace(/\s+/g, " ").trim()] as const)
+    input.scenarios.map((s) => [s.label, circumstanceOnly(humanize(s.description))] as const)
   );
   const roomNote = (situation: string | null) => {
     const d = situation ? roomBySituation.get(situation) : null;
@@ -4331,14 +4347,14 @@ export async function generateGrid(input: {
       const desc = (input.scenarios.find((sc) => sc.label === c.situation)?.description ?? "").toLowerCase();
       const want = desc.match(/\b(?:wants?|wanting|needs?|needing|looking for|seeking|prioriti[sz](?:e|es|ing)|values?)\s+([^.,;:]{6,80})/);
       if (want) {
-        const phrase = want[1].replace(/[^a-z0-9 ]+/g, " ").split(/\s+/).filter((w) => w.length > 2);
-        const text = c.text.toLowerCase();
-        for (let k = 0; k + 3 <= phrase.length; k++) {
-          const tri = phrase.slice(k, k + 3).join(" ");
-          if (text.includes(tri)) {
-            out.push({ check: "room_want_leak" as const, detail: `copies a want from the scenario description ("${tri}") - the room gives the circumstance, the answer decides what matters` });
-            break;
-          }
+        // Word-set containment, any order (s48): a copy with one word
+        // dropped or reordered defeated the exact trigram test.
+        const stop = new Set(["the", "and", "for", "with", "their", "our", "your", "its", "that", "this", "while", "from", "into", "more", "less", "they", "them", "when", "what", "which", "over", "than", "also"]);
+        const phrase = [...new Set(want[1].replace(/[^a-z0-9 ]+/g, " ").split(/\s+/).filter((w) => w.length > 3 && !stop.has(w)))];
+        const textWords = new Set(c.text.toLowerCase().replace(/[^a-z0-9 ]+/g, " ").split(/\s+/));
+        const hit = phrase.filter((w) => textWords.has(w));
+        if (phrase.length >= 3 && hit.length >= 3 && hit.length / phrase.length >= 0.6) {
+          out.push({ check: "room_want_leak" as const, detail: `carries the want from the scenario description (${hit.join(", ")}) - the room gives the circumstance, the answer decides what matters` });
         }
       }
     }
