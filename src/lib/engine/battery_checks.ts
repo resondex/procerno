@@ -247,7 +247,7 @@ export function seedDesignLine(
         ? `a satisfied ${brand} customer names ONE specific way of using ${brand} more, natural for this category, and asks whether to do it - naming a rival or turning into a support or fix-it ask does not satisfy it`
         : stage === "ecosystem"
           ? `an existing ${brand} customer asks what to pair with ${brand} for ONE specific need`
-          : `a ${brand} customer asks for help making the case for ${brand} to a specific person they're convincing, often quoting that person's objection`;
+          : `a ${brand} customer asks for help making the case for ${brand} to a specific person they're convincing - a peer, friend, colleague or the critic themselves, often quoting that person's objection; seeking sign-off from the people who approve the purchase is the business-case cell and does not satisfy it`;
   return `Question design (plan): ${intent}, on the SAME subject as the designed question below - a different plan or subject does not satisfy the design. Designed as: "${seed}"`;
 }
 
@@ -270,7 +270,7 @@ export function stageDesignIntent(stage: string, brand: string, concern?: string
     // just methods - "what should we be paying, given <usage>" is pricing's
     // accounting question and slipped the method-only wording.
     const keepLeave = stage === "churn_triggers" || stage === "renewal"
-      ? ` Leaving ${brand} is a live option the question actually weighs, and staying is never foreclosed - both options need not be spelled out, but a fix-it ask with a token "or" tacked on does not satisfy the design, nor does an asker who has already decided, nor a choice between two ways of leaving, nor a third option beside staying and leaving (a change of plan, tier or product within ${brand} muddies the keep-or-leave read).${stage === "renewal" ? " The trigger is the renewal or bill coming due, not a separate complaint." : ""}`
+      ? ` Leaving ${brand} is a live option the question actually weighs, and staying is never foreclosed - both options need not be spelled out, but a fix-it ask with a token "or" tacked on does not satisfy the design, nor does an asker who has already decided, nor a choice between two ways of leaving. The ask ends in keep or leave: a change of plan, tier or product within ${brand} may be the worry's subject but is never offered as the answer.${stage === "renewal" ? " The trigger is the renewal or bill coming due, not a separate complaint." : ""}`
       : "";
     // r16 (2026-10-04 seed review): the stance decides the asker, and the
     // doubt is the asker's OWN judgment - a fact to confirm ("is that how it
@@ -282,12 +282,17 @@ export function stageDesignIntent(stage: string, brand: string, concern?: string
       : ` The asker is a CURRENT customer of ${brand}, speaking from their own use of it - a prospect who has not bought does not satisfy this design.`;
     return `Question design (doubt): the question itself voices the buyer's concern, complaint or "is it still worth it" doubt about ${brand}, stated as the asker's OWN claim or feeling that an answer could agree or disagree with - one doubt, and the verdict is open either way.${stance} A question whether a stated rule, policy, plan structure, ingredient or fact about ${brand} is accurate does not satisfy the design even when the asker frames it as a feeling - an answer can only confirm or correct it; a doubt reported as what others say or what the asker keeps hearing is not the asker's own claim; a request to size or quantify a problem is not a judgment on whether it is real. A neutral lookup, spec request, how-to or value-math request on the same topic does not satisfy the design - the math ask belongs to the pricing cells - and an eligibility or rules lookup does not voice a doubt even when the rules are unfavorable to the asker. A doubt about price asks whether the price worry is fair, never whether ${brand} is worth its price over cheaper options - that is the Value cell's question. A doubt question never asks for a price, a cost figure or the money accounting, with or without usage details.${keepLeave}${concern ? ` The DESIGNED concern is: ${concern} - the question must voice that worry, not a different one, and when that concern is not itself about price, a bolted-on cheaper-options or price remark does not satisfy the design.` : ""}`;
   }
+  // r17 (2026-10-04 seed review G): when the designed line IS the brand
+  // name (the s44 fallback for one-line brands) the "bare brand-level
+  // mention" clauses contradicted the designed ends - a re-roll could flag
+  // a correct seed.
+  const lineIsBrand = !!valueLine && valueLine.line.trim().toLowerCase() === brand.trim().toLowerCase();
   if (stage === "pricing")
     // Init decision 1 (2026-10-03): pricing is a SCENARIO row - the same
     // brand-value question in every column, only the buyer changes. The
     // generic price-structure form (G6) and the trade-off variety rule are
     // retired; price-structure doubts belong to the worry cells.
-    return `Question design (value): the question names ${brand} and asks whether it is worth its price for THIS asker over the next tier down from its line in the category - the more affordable option a buyer in this situation would realistically weigh it against, described by its tier or price level (where the category has no named tiers, a plainly cheaper option is the right description), never by name; the cheapest option only when the brand's line sits just one step above it, with the asker's situation as the input, and leaves the call to the answer. A list of usage details does not satisfy the design.${valueLine ? ` The DESIGNED ends are: the line "${valueLine.line}" weighed against ${valueLine.counterpart} - the question names that line (in any natural wording of its name) and that counterpart; a different line, a bare brand name, or a different counterpart does not satisfy the design.` : ""} ${brand}'s own lower tier or plan as the counterpart does not satisfy the design - it keeps every answer inside ${brand} and can never return "not worth it" - and neither does naming a rival, carrying no situation (a bare "is it worth it?" is a worry), presupposing the verdict, or turning into an open "which product is the best value" ask. When ${brand} sells several distinct product lines, the question names the LINE being weighed - never an exact model, edition or year; a bare brand-level mention lets the answer pick among ${brand}'s own lines and does not satisfy the design. The question ASKS what things cost - it never states a product's price or fee; the asker's own budget or an offer made to them is circumstance.`;
+    return `Question design (value): the question names ${brand} and asks whether it is worth its price for THIS asker over the next tier down from its line in the category - the more affordable option a buyer in this situation would realistically weigh it against, described by its tier or price level (where the category has no named tiers, a plainly cheaper option is the right description), never by name; the cheapest option only when the brand's line sits just one step above it, with the asker's situation as the input, and leaves the call to the answer. A list of usage details does not satisfy the design.${valueLine ? (lineIsBrand ? ` The DESIGNED ends are: ${brand} itself (its one line is the brand) weighed against ${valueLine.counterpart} - the question names ${brand} and that counterpart; a different counterpart does not satisfy the design.` : ` The DESIGNED ends are: the line "${valueLine.line}" weighed against ${valueLine.counterpart} - the question names that line (in any natural wording of its name) and that counterpart; a different line, a bare brand name, or a different counterpart does not satisfy the design.`) : ""} ${brand}'s own lower tier or plan as the counterpart does not satisfy the design - it keeps every answer inside ${brand} and can never return "not worth it" - and neither does naming a rival, carrying no situation (a bare "is it worth it?" is a worry), presupposing the verdict, or turning into an open "which product is the best value" ask.${lineIsBrand ? "" : ` When ${brand} sells several distinct product lines, the question names the LINE being weighed - never an exact model, edition or year; a bare brand-level mention lets the answer pick among ${brand}'s own lines and does not satisfy the design.`} The question ASKS what things cost - it never states a product's price or fee; the asker's own budget or an offer made to them is circumstance.`;
   // Alternatives seeds (audit J10/J11, 2026-10-01): an offensive seed that
   // gives a REASON for leaving the rival ("too lightweight for our dev
   // team") steers every answer toward one kind of replacement - often the
@@ -298,19 +303,19 @@ export function stageDesignIntent(stage: string, brand: string, concern?: string
     if (angle === "defensive")
       return `Question design (exit scan): an existing ${brand} customer weighing a move away asks, naming ${brand}, what else is out there. A prospect who merely has not chosen ${brand} yet does not satisfy the design.`;
     if (angle && angle !== "generic")
-      return `Question design (leaving a rival): the asker is moving away from ${angle} and asks what to consider instead, stating the move PLAINLY with no reason given. A reason that says what ${angle} lacks or who it fails steers the answer toward one kind of replacement and does not satisfy the design, and so does the asker's team or segment identity - the category word is the only anchor. Naming ${brand} does not satisfy it either.`;
+      return `Question design (leaving a rival): the asker is moving away from ${angle} and asks what to consider instead, stating the move PLAINLY with no reason given. The move is off the asker's use of ${angle} for this category, not off ${angle} as a whole platform, account or company, and it is a full sentence that states the move - a bare "alternatives to ${angle}" with no move stated does not satisfy the design. A reason that says what ${angle} lacks or who it fails steers the answer toward one kind of replacement and does not satisfy the design, and so does the asker's team or segment identity - the category word is the only anchor. Naming ${brand} does not satisfy it either.`;
     return null;
   }
   // Head-to-head seeds were never design-checked (comparison had no intent):
   // "where does each win?" strengths tours shipped without a pick ask, and
   // the head-to-head view scores a WINNER (2026-10-01 s22 audit, F3).
   if (stage === "comparison" && angle && angle !== "generic")
-    return `Question design (head-to-head): the question weighs ${brand} against its designed counterpart and ASKS FOR THE PICK, and why. A strengths tour that never asks which to pick does not satisfy the design.`;
+    return `Question design (head-to-head): the question weighs ${brand} against its designed counterpart and ASKS FOR THE PICK, and why. A strengths tour that never asks which to pick does not satisfy the design, and neither does a situation, criteria or usage added to the head-to-head - the contest is circumstance-neutral.`;
   // Awareness seeds drifted into tier comparisons and reassurance asks
   // (2026-10-01 s24 audit F4): the asker does not know the solution space
   // yet, and this stage reports only how often brands get named unprompted.
   if (stage === "problem_recognition")
-    return `Question design (awareness): the asker states one pain and asks for a way out, in any wording. A list of several symptoms does not satisfy the design. The asker is not shopping for a solution yet - they may own an older or makeshift product, but a current customer of ${brand} doubting it is a worry, not awareness, and does not satisfy the design. A premium-vs-cheap tier comparison, a which-brand ask, a specs/criteria ask, or a yes/no reassurance ask does not satisfy the design.${situation ? ` The question also carries the asker's own circumstance matching: ${situation}.` : ""}${outcomeClause(stage, brand)}`;
+    return `Question design (awareness): the asker states one pain and asks for a way out, in any wording. A list of several symptoms does not satisfy the design. The asker is not shopping for a solution yet - they may own an older or makeshift product, but a current customer of ${brand} doubting it is a worry, not awareness, and does not satisfy the design; and a purchase moment in the question - an upgrade window, a renewal, a deal or promotion, a launch, being due for a new one - makes the asker a shopper and does not satisfy it either: the scenario supplies who the asker is, never a buying moment. A premium-vs-cheap tier comparison, a which-brand ask, a specs/criteria ask, or a yes/no reassurance ask does not satisfy the design.${situation ? ` The question also carries the asker's own circumstance matching: ${situation}.` : ""}${outcomeClause(stage, brand)}`;
   if (stage === "category_education")
     return `Question design (category kinds): the asker wants to know what kinds of products the category has and how they differ, or whether they need one at all - nothing is broken, so an ask for a fix does not fit. A which-brand ask, a specs/criteria ask, or a yes/no reassurance ask does not satisfy the design.${situation ? ` The question also carries the asker's own circumstance matching: ${situation}.` : ""}${outcomeClause(stage, brand)}`;
   // Open-choice seeds must invite NAMED picks (s24 audit F3: a
@@ -331,7 +336,7 @@ export function stageDesignIntent(stage: string, brand: string, concern?: string
     stage === "criteria"
       ? ` The question asks what actually matters and NEVER offers candidate criteria for the answer to rank or complete - the measurement is what the answer chooses to teach - and never asks which brand.`
       : stage === "business_case"
-        ? ` An internal champion asks for help justifying ${brand}, by name, to the people who sign off on the purchase - naming a rival or turning into a pricing question does not satisfy the design.`
+        ? ` An internal champion asks for help justifying ${brand}, by name, to the people who sign off on the purchase - naming a rival, turning into a pricing question, or convincing a peer, friend or critic rather than an approver (that is the advocacy cell) does not satisfy the design.`
         : "";
   // A scenario-pinned cell's SEED must carry its circumstance (audit M1
   // recurrence, 2026-10-01: two Mid-market cells read as generic feature
@@ -679,6 +684,10 @@ export interface BatteryFinding {
     // 60+ word seed is a requirements list however casual the words; segment
     // vocabulary is the plan's register, not a buyer's.
     | "seed_calendar_year" | "seed_overlong" | "segment_vocabulary" | "seed_switch_direction" | "concern_price_bolt_on" | "seed_multi_ask" | "class_category_tail" | "seed_states_price"
+    // r17 (2026-10-04 seed review): a purchase moment in a problem-recognition
+    // seed (the asker is a shopper, not someone with a pain); an offensive
+    // alternatives seed with no move stated (a bare "alternatives to X").
+    | "awareness_purchase_moment" | "offensive_alt_no_move"
     | "seed_number_changed" | "duplicate_paraphrase";
   /** The offending prompt text (or the seed, for cell-level findings). */
   text: string;

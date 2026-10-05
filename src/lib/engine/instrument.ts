@@ -160,7 +160,7 @@ const CACHE_TTL_MS = 183 * 24 * 3600 * 1000;
 // one-tier-down counterpart per room (planValueLines, confirmed at the
 // gate; default = the brand's most premium line that fits the room; no
 // Value cell where none fits) and carries no usage detail.
-const STYLE_VERSION = "s45"; // s45 (2026-10-04 seed review): doubt hints - the asker's own one-doubt claim, never a fact to confirm, hearsay, a sizing ask or the Value question; stance decides the asker; worry cells carry no reach limit.
+const STYLE_VERSION = "s46"; // s46 (2026-10-04 seed review batch): problem recognition carries no purchase moment; offensive alternatives state a plain move within the category; head-to-heads add no situation; advocacy convinces a peer or critic, business case an approver. // s45 (2026-10-04 seed review): doubt hints - the asker's own one-doubt claim, never a fact to confirm, hearsay, a sizing ask or the Value question; stance decides the asker; worry cells carry no reach limit.
 
 /** Versions the DETERMINISTIC seed-check set (everything seedRule runs:
  * checkPromptAgainstSpec + blind_missing_category + scenario_label_leak).
@@ -176,7 +176,7 @@ const STYLE_VERSION = "s45"; // s45 (2026-10-04 seed review): doubt hints - the 
  * 7's unversioned serve-time re-check had no terminal state). Bump when
  * a deterministic check changes meaning; bumping costs one free re-judge
  * per unit, and model calls only for units the new rules reject. */
-export const SEED_RULES_VERSION = "r16"; // r16 (2026-10-04 seed review): doubt design intent - own claim, one doubt, open verdict; facts to confirm, rule/ingredient lookups, hearsay, sizing asks and the Value worth-it ask fail; objections never voiced by a current user, churn/renewal always by one, no third option beside stay and leave. // r15 (2026-10-02, Tyler's option B): brand mentions = whole names, declared alternates, name words and dictionary aliases, with every ambiguous one-word hit (an everyday word written lowercase or opening a sentence, or a maker word like "Google" of Google Pixel) decided in context by the brand judge (haiku, cached) - no casing rules, no target exemption, no roster word lists. r14 (2026-10-02 review): everyday-word lexicon by lowercase SHARE in two tiers (label words: common and not brand-dominated - "jira", "netflix", "pixel", "apple", "chase" count lowercase again; aliases: merely common - "gold" stays capital-only), coined split words case-blind ("apple or samsung"), the target's own one-word name never case-guarded, "citi" off the case-guard list, and a monthly figure is the asker's plan only in first-person / spend / offer context ("the Pro about 20 a month more" is a stated price). r13 (2026-10-02 cold-walk audit + review): verb-less stated prices ("Gold at 250"); word-anchored price-concern test + money bolt-ons; brand checks read filtered dictionary alias forms ("amex"); everyday words inside brand names never name the brand - category tokens containment-aware, split words of multi-word names in label casing and not sentence-initial, one-word names and aliases in the vault everyday-word lexicon capitalized only, other brands' full names scrubbed first. r4 (2026-10-01): r2 calendar-year/60-word/segment-vocab; r3 category-naming labels exempt from substring leak; r4 'standardization' in segment vocabulary; r5 directionless-switch string check; r6 punctuation-blind label-leak matching; r7-r8 switch direction detected by absence (no OS, no roster brand near switch vocabulary); cheaper bolt-on token on non-price concerns
+export const SEED_RULES_VERSION = "r17"; // r17 (2026-10-04 seed review batch): awareness_purchase_moment and offensive_alt_no_move nets; design intents - no purchase moment in problem recognition, head-to-heads add no situation, alternatives state a full-sentence move within the category, advocacy vs business-case audience, Value brand-name fallback branch; keep-or-leave narrowed (a within-brand change may be the subject, never the answer). // r16 (2026-10-04 seed review): doubt design intent - own claim, one doubt, open verdict; facts to confirm, rule/ingredient lookups, hearsay, sizing asks and the Value worth-it ask fail; objections never voiced by a current user, churn/renewal always by one, no third option beside stay and leave. // r15 (2026-10-02, Tyler's option B): brand mentions = whole names, declared alternates, name words and dictionary aliases, with every ambiguous one-word hit (an everyday word written lowercase or opening a sentence, or a maker word like "Google" of Google Pixel) decided in context by the brand judge (haiku, cached) - no casing rules, no target exemption, no roster word lists. r14 (2026-10-02 review): everyday-word lexicon by lowercase SHARE in two tiers (label words: common and not brand-dominated - "jira", "netflix", "pixel", "apple", "chase" count lowercase again; aliases: merely common - "gold" stays capital-only), coined split words case-blind ("apple or samsung"), the target's own one-word name never case-guarded, "citi" off the case-guard list, and a monthly figure is the asker's plan only in first-person / spend / offer context ("the Pro about 20 a month more" is a stated price). r13 (2026-10-02 cold-walk audit + review): verb-less stated prices ("Gold at 250"); word-anchored price-concern test + money bolt-ons; brand checks read filtered dictionary alias forms ("amex"); everyday words inside brand names never name the brand - category tokens containment-aware, split words of multi-word names in label casing and not sentence-initial, one-word names and aliases in the vault everyday-word lexicon capitalized only, other brands' full names scrubbed first. r4 (2026-10-01): r2 calendar-year/60-word/segment-vocab; r3 category-naming labels exempt from substring leak; r4 'standardization' in segment vocabulary; r5 directionless-switch string check; r6 punctuation-blind label-leak matching; r7-r8 switch direction detected by absence (no OS, no roster brand near switch vocabulary); cheaper bolt-on token on non-price concerns
 
 /** Brand forms that double as ordinary English words: only these demand a
  * capitalized occurrence to count as naming the brand ("2-3 services max"
@@ -535,7 +535,7 @@ export function stageLibrary(m: Moderators): LibraryStage[] {
       // complaints about "my chips".
       key: "problem_recognition", label: "Problem recognition", layer: "awareness",
       situational: true, rivals: "none", tag: "rules", recommended: considered,
-      hint: "Pain-phrased and pre-category: ONE pain in a plain sentence, then a plain ask for a way out - about 10-25 words, one symptom, never a list of symptoms - without knowing the SOLUTION category is the answer. Never name the category as a solution, a brand, or ask for a product type. Whatever the buyer already owns is named with the plain category noun, never contorted around - but the asker is never a current customer of the client brand doubting it.",
+      hint: "Pain-phrased and pre-category: ONE pain in a plain sentence, then a plain ask for a way out - about 10-25 words, one symptom, never a list of symptoms - without knowing the SOLUTION category is the answer. Never name the category as a solution, a brand, or ask for a product type. Whatever the buyer already owns is named with the plain category noun, never contorted around - but the asker is never a current customer of the client brand doubting it, and never at a purchase moment (an upgrade window, a renewal, a deal, a launch, being due for a new one): the scenario gives who they are, not a buying moment.",
       why: considered
         ? "A considered journey starts here - buyers describe the pain before they know the category exists."
         : "Habitual buyers are already in the category - there's no pre-category moment to measure.",
@@ -601,7 +601,7 @@ export function stageLibrary(m: Moderators): LibraryStage[] {
       recommended: true,
       hint: m.verifiability === "taste"
         ? "Names the client brand and the rival and asks which one to pick (any framing is fine as long as it asks for the pick)."
-        : "Names the client brand and the rival and asks which one to pick, and why - no situation, no criteria.",
+        : "Names the client brand and the rival and asks which one to pick, and why - no situation, no criteria, no usage.",
       why: considered
         ? "A considered market weighs finalists head-to-head before committing."
         : "Buyers still weigh one brand against another at the shelf - head-to-heads show who wins those moments.",
@@ -646,7 +646,7 @@ export function stageLibrary(m: Moderators): LibraryStage[] {
       key: "business_case", label: "Business case", layer: "decision",
       situational: true, rivals: "none", tag: "judges",
       recommended: m.decision_unit === "committee",
-      hint: "An internal champion in this situation asks for help justifying the client brand, by name, to the people who sign off on the purchase - no rival named.",
+      hint: "An internal champion in this situation asks for help justifying the client brand, by name, to the people who sign off on the purchase (never a peer or friend - that is advocacy) - no rival named.",
       why: m.decision_unit === "committee"
         ? "Committee-bought: someone has to justify the pick internally, and assistants write that case."
         : `A ${m.decision_unit === "household" ? "household" : "solo"} buyer doesn't have to sell the decision internally.`,
@@ -660,7 +660,7 @@ export function stageLibrary(m: Moderators): LibraryStage[] {
     {
       key: "alternatives", label: "Alternatives", layer: "retention",
       situational: false, rivals: "defensive_offensive", tag: "picks", recommended: true,
-      hint: "'Alternatives to X' asks - one for the client brand (defensive) and one per rival (offensive).",
+      hint: "One for the client brand (defensive: an existing customer weighing a move away asks what else is out there) and one per rival (offensive: the asker states plainly, in a full sentence, that they are moving their use of the category off that rival and asks what to get instead - no reason, no identity, never off the rival as a whole platform).",
       why: "'Alternatives to X' is the most-typed switching ask - defensive for you, offensive against each rival.",
     },
     {
@@ -692,7 +692,7 @@ export function stageLibrary(m: Moderators): LibraryStage[] {
     {
       key: "advocacy", label: "Advocacy", layer: "loyalty",
       situational: false, rivals: "none", tag: "steers", recommended: true,
-      hint: "A customer names the client brand and the person they're trying to convince, often quoting that person's objection, and asks for help making the case.",
+      hint: "A customer names the client brand and the person they're trying to convince - a peer, friend, colleague or the critic themselves, never the people who approve the purchase (that is business case) - often quoting that person's objection, and asks for help making the case.",
       why: "Customers recruiting others is your cheapest funnel - if the assistant backs them.",
     },
     {
@@ -2824,6 +2824,11 @@ const CELL_WRITER_SYSTEM =
           "- angle=defensive: an EXISTING customer of the client brand, " +
           "weighing a move away, asks for alternatives to it by name - " +
           "never a prospect who simply hasn't chosen it.\n" +
+          "- angle=<rival> in the alternatives stage: a full sentence that " +
+          "states plainly the asker is moving their use of the category off " +
+          "that rival and asks what to get instead - no reason, no identity, " +
+          "never off the rival as a whole platform or account, never a bare " +
+          "'alternatives to X'.\n" +
           "- angle=class(<class>): a head-to-head of the client brand against " +
           "a CLASS of products, not a company - name the client brand and " +
           "speak the class naturally, the way a buyer does, with no " +
@@ -2936,7 +2941,9 @@ const CELL_WRITER_SYSTEM =
           "- problem_recognition: the asker has a pain and isn't shopping for " +
           "a solution yet - they may own an older or makeshift product, but " +
           "never as a current customer of the client brand doubting it " +
-          "(that is a worry cell). They state ONE pain in a plain sentence " +
+          "(that is a worry cell), and never at a purchase moment: no upgrade " +
+          "window, renewal, deal, launch or being due for a new one - the " +
+          "scenario gives who they are, not a buying moment. They state ONE pain in a plain sentence " +
           "and ask for a way out in their own words - about 10-25 words, one " +
           "symptom, never a list of symptoms or a polished description; vary " +
           "it across cells, never the same closing every time. Problem " +
@@ -2957,15 +2964,17 @@ const CELL_WRITER_SYSTEM =
           "(worries belong to churn).\n" +
           "- business_case: an internal champion in this situation asks for " +
           "help justifying the client brand, by name, to the people who sign " +
-          "off on the purchase - never a rival named, never a pricing " +
-          "question.\n" +
+          "off on the purchase (an approver, never a peer or friend - that is " +
+          "advocacy) - never a rival named, never a pricing question.\n" +
           "- expansion: a satisfied customer names the client brand and ONE " +
           "specific way of using it more, natural for this category, and asks " +
           "whether to do it - never a rival, never a support or fix-it ask.\n" +
           "- ecosystem: an existing customer names the client brand and asks " +
           "what to pair with it for ONE specific need.\n" +
           "- advocacy: a customer names the client brand and the person " +
-          "they're convincing, often quoting that person's objection, and " +
+          "they're convincing - a peer, friend, colleague or the critic " +
+          "themselves, never someone who approves the purchase (that is " +
+          "business case) - often quoting that person's objection, and " +
           "asks for help making the case.\n" +
           "- One prompt asks at most two or three things, stays under about " +
           "55 words, and reads ONE way: a list of four or more features or " +
@@ -4219,6 +4228,29 @@ export async function generateGrid(input: {
         check: "seed_overlong" as const,
         detail: `${words} words - a prompt is one chat message, not a requirements list; keep the circumstance to one sentence and ask at most two or three things (aim well under 60 words)`,
       });
+    // r17: a purchase moment in a problem-recognition seed makes the asker
+    // a shopper (the room's buying moment leaked into the pain cell).
+    if (c.stage === "problem_recognition") {
+      const pm = c.text.match(/\b(?:upgrade|upgrading|upgrades|renewal|renewing|renew|trade-?in|promo(?:tion)?s?|deals?|launch(?:es|ed)?\s*days?|launch(?:es)?\b|release\s*days?|pre-?orders?|due for|eligible for|installment)\b/i);
+      if (pm)
+        out.push({
+          check: "awareness_purchase_moment" as const,
+          detail: `"${pm[0]}" is a buying moment - this asker has a pain and is not shopping yet; keep who they are, drop the purchase occasion`,
+        });
+    }
+    // r17: an offensive alternatives seed must state the move - a bare
+    // "alternatives to X" is a fragment with nothing moving.
+    if (c.stage === "alternatives" && c.angle !== "generic" && c.angle !== "defensive") {
+      // Calibrated on the five drafts' 16 offensive seeds: negation-shaped
+      // moves ("not buying X again", "not staying with X") are moves; the
+      // fragment is the seed that opens on the noun and never says "I/we".
+      const fragment = /^\s*(?:alternatives?|options?|replacements?|substitutes?)\s+(?:to|for)\b/i.test(c.text) && !/\b(?:i|i'm|i've|we|we're|we've|my|our|me|us)\b/i.test(c.text);
+      if (fragment)
+        out.push({
+          check: "offensive_alt_no_move" as const,
+          detail: `no move is stated - the asker says plainly they are moving off ${c.angle} for this category and asks what to get instead`,
+        });
+    }
     // Segment vocabulary is the plan's register, not a buyer's.
     const seg = c.text.match(/\b(mid-?market|enterprise[- ]wide|enterprise standard|standardi[sz]ation|SMBs?)\b/i);
     if (seg)
