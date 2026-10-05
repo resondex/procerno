@@ -1113,7 +1113,10 @@ export async function readScenarios(input: {
       const text = (res as { content: { type: string; text?: string }[] }).content.filter((b) => b.type === "text").map((b) => b.text ?? "").join("").trim();
       const j = JSON.parse(firstJsonObject(text) ?? text) as { changes?: boolean[] };
       claims.forEach(({ i }, k) => { if (j.changes?.[k] === true) stakesOk.add(i); });
-      claims.forEach(({ s, i }, k) => { if (j.changes?.[k] !== true) console.warn(`stakes rule: override refused for "${s.label}" (reason: ${s.deviatesBecause}) - inherits the base`); else void i; });
+      claims.forEach(({ s }, k) => {
+        if (j.changes?.[k] !== true) console.warn(`stakes rule: override refused for "${s.label}" (reason: ${s.deviatesBecause}) - inherits the base`);
+        else console.warn(`stakes rule: override granted for "${s.label}" (reason: ${s.deviatesBecause})`);
+      });
     } catch (err) {
       console.error("stakes judgment failed open:", err);
       claims.forEach(({ i }) => stakesOk.add(i));
