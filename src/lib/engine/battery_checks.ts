@@ -246,7 +246,7 @@ export function seedDesignLine(
       : stage === "expansion"
         ? `a satisfied ${brand} customer names ONE specific way of using ${brand} more, natural for this category, and asks whether to do it - naming a rival or turning into a support or fix-it ask does not satisfy it`
         : stage === "ecosystem"
-          ? `an existing ${brand} customer asks what to pair with ${brand} for ONE specific need`
+          ? `an existing ${brand} customer asks what to pair with ${brand} for ONE specific need - a need ${brand}'s own companions, add-ons or partners could serve; a need defined by where ${brand} is absent or falls short forces a rival answer by construction and does not satisfy it`
           : `a ${brand} customer asks for help making the case for ${brand} to a specific person they're convincing - a peer, friend, colleague or the critic themselves, often quoting that person's objection; seeking sign-off from the people who approve the purchase is the business-case cell and does not satisfy it`;
   return `Question design (plan): ${intent}, on the SAME subject as the designed question below - a different plan or subject does not satisfy the design. Designed as: "${seed}"`;
 }

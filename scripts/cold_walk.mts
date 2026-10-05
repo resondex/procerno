@@ -62,11 +62,20 @@ for (const brand of BRANDS) {
   const { ANGLE_SLOTS } = await import(`${REPO}/src/lib/engine/battery_checks.ts`);
   const rosterRoles: Record<string, string> = {};
   let picked = 0;
-  for (const v of [...roster.competitors].sort((a, b) => (a.h2hRank || 1e9) - (b.h2hRank || 1e9))) {
-    if (v.role !== "same_seat") { rosterRoles[v.name] = v.role; continue; }
-    rosterRoles[v.name] = picked < ANGLE_SLOTS ? "same_seat" : "bench";
-    if (rosterRoles[v.name] === "same_seat") picked++;
+  // Mirrors the wizard (2026-10-04, decision 3c): slots go to different
+  // owners first; a rival sharing a parent with a higher pick or with the
+  // client is deferred, then fills any slot still free.
+  const normP = (t: unknown) => String(t ?? "").trim().toLowerCase();
+  const pickedParents = new Set<string>(roster.clientParent ? [normP(roster.clientParent)] : []);
+  const sorted = [...roster.competitors].sort((a, b) => (a.h2hRank || 1e9) - (b.h2hRank || 1e9));
+  for (const v of sorted) if (v.role !== "same_seat") rosterRoles[v.name] = v.role;
+  const deferred: typeof sorted = [];
+  for (const v of sorted.filter((x) => x.role === "same_seat")) {
+    const p = normP(v.parent);
+    if (picked < ANGLE_SLOTS && !(p && pickedParents.has(p))) { rosterRoles[v.name] = "same_seat"; picked++; if (p) pickedParents.add(p); }
+    else deferred.push(v);
   }
+  for (const v of deferred) { rosterRoles[v.name] = picked < ANGLE_SLOTS ? "same_seat" : "bench"; if (rosterRoles[v.name] === "same_seat") picked++; }
   const rosterDetail = roster.competitors.map((v) => ({ name: v.name, role: rosterRoles[v.name], h2hRank: v.h2hRank, h2hReason: v.h2hReason, parent: v.parent, inCategory: v.inCategory, note: v.note }));
   const rosterClasses = Object.fromEntries(roster.competitors.filter((v) => v.consumerSalient && v.classPhrase).map((v) => [v.name, v.classPhrase!]));
   console.log(`[2 roster] roles:`, JSON.stringify(rosterRoles), "classes:", JSON.stringify(rosterClasses));
