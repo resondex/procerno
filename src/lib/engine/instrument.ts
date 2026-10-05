@@ -176,7 +176,7 @@ const STYLE_VERSION = "s50"; // s50 (batch 2): the scenario label is a title for
  * 7's unversioned serve-time re-check had no terminal state). Bump when
  * a deterministic check changes meaning; bumping costs one free re-judge
  * per unit, and model calls only for units the new rules reject. */
-export const SEED_RULES_VERSION = "r22"; // r22 (batch 2): use-case in a channel room carries who only; label-word stems leak. // r17 (2026-10-04 seed review batch): awareness_purchase_moment and offensive_alt_no_move nets; design intents - no purchase moment in problem recognition, head-to-heads add no situation, alternatives state a full-sentence move within the category, advocacy vs business-case audience, Value brand-name fallback branch; keep-or-leave narrowed (a within-brand change may be the subject, never the answer). // r16 (2026-10-04 seed review): doubt design intent - own claim, one doubt, open verdict; facts to confirm, rule/ingredient lookups, hearsay, sizing asks and the Value worth-it ask fail; objections never voiced by a current user, churn/renewal always by one, no third option beside stay and leave. // r15 (2026-10-02, Tyler's option B): brand mentions = whole names, declared alternates, name words and dictionary aliases, with every ambiguous one-word hit (an everyday word written lowercase or opening a sentence, or a maker word like "Google" of Google Pixel) decided in context by the brand judge (haiku, cached) - no casing rules, no target exemption, no roster word lists. r14 (2026-10-02 review): everyday-word lexicon by lowercase SHARE in two tiers (label words: common and not brand-dominated - "jira", "netflix", "pixel", "apple", "chase" count lowercase again; aliases: merely common - "gold" stays capital-only), coined split words case-blind ("apple or samsung"), the target's own one-word name never case-guarded, "citi" off the case-guard list, and a monthly figure is the asker's plan only in first-person / spend / offer context ("the Pro about 20 a month more" is a stated price). r13 (2026-10-02 cold-walk audit + review): verb-less stated prices ("Gold at 250"); word-anchored price-concern test + money bolt-ons; brand checks read filtered dictionary alias forms ("amex"); everyday words inside brand names never name the brand - category tokens containment-aware, split words of multi-word names in label casing and not sentence-initial, one-word names and aliases in the vault everyday-word lexicon capitalized only, other brands' full names scrubbed first. r4 (2026-10-01): r2 calendar-year/60-word/segment-vocab; r3 category-naming labels exempt from substring leak; r4 'standardization' in segment vocabulary; r5 directionless-switch string check; r6 punctuation-blind label-leak matching; r7-r8 switch direction detected by absence (no OS, no roster brand near switch vocabulary); cheaper bolt-on token on non-price concerns
+export const SEED_RULES_VERSION = "r23"; // r22 (batch 2): use-case in a channel room carries who only; label-word stems leak. // r17 (2026-10-04 seed review batch): awareness_purchase_moment and offensive_alt_no_move nets; design intents - no purchase moment in problem recognition, head-to-heads add no situation, alternatives state a full-sentence move within the category, advocacy vs business-case audience, Value brand-name fallback branch; keep-or-leave narrowed (a within-brand change may be the subject, never the answer). // r16 (2026-10-04 seed review): doubt design intent - own claim, one doubt, open verdict; facts to confirm, rule/ingredient lookups, hearsay, sizing asks and the Value worth-it ask fail; objections never voiced by a current user, churn/renewal always by one, no third option beside stay and leave. // r15 (2026-10-02, Tyler's option B): brand mentions = whole names, declared alternates, name words and dictionary aliases, with every ambiguous one-word hit (an everyday word written lowercase or opening a sentence, or a maker word like "Google" of Google Pixel) decided in context by the brand judge (haiku, cached) - no casing rules, no target exemption, no roster word lists. r14 (2026-10-02 review): everyday-word lexicon by lowercase SHARE in two tiers (label words: common and not brand-dominated - "jira", "netflix", "pixel", "apple", "chase" count lowercase again; aliases: merely common - "gold" stays capital-only), coined split words case-blind ("apple or samsung"), the target's own one-word name never case-guarded, "citi" off the case-guard list, and a monthly figure is the asker's plan only in first-person / spend / offer context ("the Pro about 20 a month more" is a stated price). r13 (2026-10-02 cold-walk audit + review): verb-less stated prices ("Gold at 250"); word-anchored price-concern test + money bolt-ons; brand checks read filtered dictionary alias forms ("amex"); everyday words inside brand names never name the brand - category tokens containment-aware, split words of multi-word names in label casing and not sentence-initial, one-word names and aliases in the vault everyday-word lexicon capitalized only, other brands' full names scrubbed first. r4 (2026-10-01): r2 calendar-year/60-word/segment-vocab; r3 category-naming labels exempt from substring leak; r4 'standardization' in segment vocabulary; r5 directionless-switch string check; r6 punctuation-blind label-leak matching; r7-r8 switch direction detected by absence (no OS, no roster brand near switch vocabulary); cheaper bolt-on token on non-price concerns
 
 /** Brand forms that double as ordinary English words: only these demand a
  * capitalized occurrence to count as naming the brand ("2-3 services max"
@@ -2245,16 +2245,22 @@ async function checkRoomsPass(input: RoomCheckInput, pass: number): Promise<Room
     // Batch 2 (A2): a verdict without the field (older cache) counts the
     // client in; a fresh verdict must list it.
     const clientIn = v ? v.clientIn !== false : true;
-    const contested = rivals.length === 0
+    const rivalsContest = rivals.length === 0
       ? true
-      : clientIn && (picks.length > 0
+      : picks.length > 0
         ? inPool >= Math.ceil(picks.length / 2) && contenders.length >= Math.min(2, rivals.length)
-        : inPool >= Math.ceil(rivals.length / 2));
+        : inPool >= Math.ceil(rivals.length / 2);
+    const contested = clientIn && rivalsContest;
+    // "Built on your strength" means WON BY CONSTRUCTION (AmEx v14 audit):
+    // when the rivals' own count says the room is contested, the client
+    // cannot be the obvious answer by construction, and the judgment is
+    // dropped. The flag stands only on a room the rivals do not contest.
+    const clientLead = v?.clientLead === true && !rivalsContest;
     // A pitch flag must quote words the room actually contains (Doritos'
     // "Scoops" flag quoted a Tostitos line the room never mentioned).
     const pitchRaw = (v?.pitch ?? "").trim().replace(/^["']|["']$/g, "");
     const pitch = pitchRaw && roomText(r).toLowerCase().includes(pitchRaw.toLowerCase()) ? pitchRaw : "";
-    return [{ label: r.label, contenders, rivals: rivals.length, inPool, pool, contested, clientIn, clientLead: v?.clientLead === true, pitch, names, capability: v?.capability === true, platformSwitch: v?.platformSwitch === true, noChoice: v?.noChoice === true, sameAs: [] }];
+    return [{ label: r.label, contenders, rivals: rivals.length, inPool, pool, contested, clientIn, clientLead, pitch, names, capability: v?.capability === true, platformSwitch: v?.platformSwitch === true, noChoice: v?.noChoice === true, sameAs: [] }];
   });
 }
 
@@ -2428,13 +2434,14 @@ export async function planValueLines(input: {
     // different buyer than the tracker's rooms, or is only a variant of
     // the main product, falls back to the tracked brand name (Jira's
     // portfolio product was named every run; a flavor sub-brand once).
+    let lineBuyer: string | null = null;
     if (line && line.toLowerCase() !== input.brand.trim().toLowerCase()) {
       try {
         const ac = await anthropicClient();
         const res = await ac.messages.create({
           model: VALUE_LINES_MODEL, max_tokens: 2000, output_config: { effort: "medium" },
           system:
-            `Name, in a few words each, the PRIMARY buyer of ${line} (their role, level or department, and company or household type) and the primary buyer of ${input.brand}'s main product. same_buyer is true ONLY when both are the same kind of buyer as the audience below, buying for the same job, AND ${line} is a distinct product line rather than a flavor, size, plan, edition or variety. A more expensive line for the same buyer counts as the same buyer. ` +
+            `Name, in a few words each, the PRIMARY buyer of ${line} as ${input.brand} itself markets and sells it (their role, level or department, and company or household type - judged from the product, never restated from the audience below) and the primary buyer of ${input.brand}'s main product. same_buyer is true ONLY when both are the same kind of buyer as the audience below, buying for the same job, AND ${line} is a distinct product line rather than a flavor, size, plan, edition or variety. A more expensive line for the same buyer counts as the same buyer. ` +
             `variant is true when ${line} is a flavor, size, pack, subscription plan or variety of ${input.brand}'s main product rather than a separately chosen product line. A higher-priced model line sold as its own product (bought instead of the standard one, at its own price) is a line, not a variant. ` +
             `Answer with ONLY JSON: {"line_buyer": "...", "main_buyer": "...", "same_buyer": true|false, "variant": true|false}.`,
           messages: [{ role: "user", content: `Brand: ${input.brand}\nCategory: ${input.category}\nAudience: ${input.audience ?? "the category's buyers"}` }],
@@ -2444,6 +2451,7 @@ export async function planValueLines(input: {
         const v = JSON.parse(firstJsonObject(text) ?? text) as { same_buyer?: boolean; variant?: boolean; line_buyer?: string; main_buyer?: string };
         console.warn(`value lines audience check [${input.brand}]: ${line} buyer "${v.line_buyer ?? "?"}" vs main "${v.main_buyer ?? "?"}" -> same_buyer ${v.same_buyer}, variant ${v.variant}`);
         if (v.same_buyer === false || v.variant === true) line = input.brand;
+        else lineBuyer = v.line_buyer ? String(v.line_buyer) : null;
       } catch { /* fail open: keep the line */ }
     }
     const pair: ValueLine | null = line ? { line, counterpart: `more affordable ${input.category.trim()}` } : null;
@@ -2461,7 +2469,7 @@ export async function planValueLines(input: {
           model: VALUE_LINES_MODEL, max_tokens: 800, output_config: { effort: "low" },
           system:
             `Each buying room below is a buyer in ${input.category}. The question asked in every room is whether "${pair.line}" (from ${input.brand}) is worth it over ${pair.counterpart}. For each room say whether that question is a genuine contest for that buyer: ` +
-            `contest - a competent advisor could answer either way for this buyer; leans_no - the room's circumstance (a hard price cap, a strict budget) all but settles it as not worth it, OR the room's buyer is not the kind of buyer "${pair.line}" is sold to (a personal line in a business room, or the reverse); leans_yes - the circumstance (a buyer who only considers the top tier, or never weighs cheaper options) all but settles it as worth it. ` +
+            `contest - a competent advisor could answer either way for this buyer; leans_no - the room's circumstance (a hard price cap, a strict budget) all but settles it as not worth it, OR the room's buyer is not the kind of buyer "${pair.line}" is sold to${lineBuyer ? ` (it is sold to: ${lineBuyer})` : ""} - a personal line in a business room, or the reverse; leans_yes - the circumstance (a buyer who only considers the top tier, or never weighs cheaper options) all but settles it as worth it. ` +
             `Reply with ONLY JSON: {"rooms": ["contest" | "leans_no" | "leans_yes", ...]} - one entry per room, in order.`,
           messages: [{ role: "user", content: rooms.map((r, i) => `${i + 1}. ${r.label}: ${r.description}`).join("\n") }],
         } as never);
@@ -3291,6 +3299,9 @@ export interface WorryCandidate {
   /** Other worries in the pool that share this one's subject (worries5):
    * the gate shows them and the pre-pick keeps only the highest-ranked. */
   overlaps?: string[];
+  /** How overlaps were decided (harness): "model" when the pairing call
+   * returned, "model-none" when it returned no pairs; absent = call failed. */
+  pairedBy?: string;
   /** The MEASUREMENT PLAN (2026-10-01, uncapped allowance): the stances
    * the planner recommends actually fielding - widely voiced at that
    * moment, distinct from the other recommendations, actionable. Pre-lit
@@ -3333,9 +3344,9 @@ export function circumstanceOnly(description: string): string {
     if (m[3] === "to" && det.test(next)) continue;
     // "open to", "due to", "able to", "used to", "close to", "next to",
     // "prior to", "similar to", "up to", "subject to": adjective + to.
-    if (m[3] === "to" && /\b(?:open|due|able|used|close|next|prior|similar|up|subject|back|down|over|access)$/i.test(tail.slice(0, m.index).trim())) continue;
+    if (m[3] === "to" && /\b(?:open|due|able|unable|used|close|next|prior|similar|up|subject|back|down|over|access|required|requires|obliged|forced|expected|asked|told|allowed|supposed|likely|ready|willing|reluctant|free|bound|tied|entitled|eligible|struggling|trying|tries|tried|has|have|had|needs|need|needed|wants|want|wanted|ought|about|going|went|goes|go)$/i.test(tail.slice(0, m.index).trim())) continue;
     const kept = (head + tail.slice(0, m.index)).trim().replace(/[,;:]+$/, "");
-    if (kept.split(" ").length < 4) return d;
+    if (kept.split(" ").length < 5) return d;
     return kept + (/[.!?]$/.test(kept) ? "" : ".");
   }
   return d;
@@ -3375,7 +3386,8 @@ export async function generateWorries(input: {
   // worries7 (batch 2, C6): overlap pairs are decided by one low-effort
   // model call over the pool, with the word test as the guard; never a
   // procedure worry.
-  const key = cacheKey("worries7", [
+  // worries8: the model decides overlap pairs (no word guard); pairedBy recorded.
+  const key = cacheKey("worries8", [
     CONCERNS_MODEL, input.brand, input.category, input.audience,
     input.scenarios.map((s) => s.label).join(","), offered.join(","),
   ]);
@@ -3545,8 +3557,17 @@ export async function generateWorries(input: {
       const na = normSubj(list[i].subject ?? ""), nb = normSubj(list[j].subject ?? "");
       if (na && na === nb) pairs.add(`${i}|${j}`);
     }
-    for (const [i, j] of modelPairs) if (guard(i, j)) pairs.add(`${i}|${j}`);
+    // v14 audits: the word guard both passed a non-pair on detail words
+    // ("family", "watch") and can never accept the same doubt in different
+    // words. The model decides; the guard is kept only as a log. Raw pairs
+    // ride the pool as `pairedBy` so an audit can tell "model found none"
+    // from "the call failed".
+    for (const [i, j] of modelPairs) {
+      pairs.add(`${i}|${j}`);
+      if (!guard(i, j)) console.warn(`worries overlap: model pair without shared words - "${list[i].worry}" / "${list[j].worry}"`);
+    }
     void same;
+    for (const w of list) w.pairedBy = modelPairs.length > 0 || list.length < 2 ? "model" : "model-none";
     for (const p of pairs) {
       const [i, j] = p.split("|").map(Number);
       list[i].overlaps = [...new Set([...(list[i].overlaps ?? []), list[j].worry])];
@@ -4807,7 +4828,7 @@ export async function generateGrid(input: {
                         `Rivals: ${rivals.map(primaryBrandName).join(", ")}\nAudience: ${input.audience ?? "unknown"}\n\n` +
                         `Cell plan:\n${planLine(row, 0)}\n` +
                         `   [the previous attempt was rejected because ${why}. This battery's use-case jobs so far: ${covered}. ` +
-                        `Name ONE DIFFERENT outcome buyers in this situation commonly want, in everyday words without any product feature word, not the situation itself, never a product quality, never a store, sale, promotion or deadline from the scenario (the scenario only says who you are), and never the subject of one of the brand's known worries${(input.worries ?? []).length > 0 ? ` (picked worries: ${[...new Set((input.worries ?? []).map((w) => w.concern))].join("; ")})` : ""}. ` +
+                        `Name ONE DIFFERENT outcome buyers in this situation commonly want, in everyday words without any product feature word, not the situation itself, never a product quality, never a store, carrier, sale, promotion, upgrade window, trade-in credit, financing or deadline from the scenario (the scenario only says who you are), and never the subject of one of the brand's known worries${(input.worries ?? []).length > 0 ? ` (picked worries: ${[...new Set((input.worries ?? []).map((w) => w.concern))].join("; ")})` : ""}. ` +
                         `Ask which one will do that best.${swapRule("use_case")} Do not reuse this wording: "${d.c.text}"]` },
                   ],
                   response_format: { type: "json_schema", json_schema: { name: "grid_cells", strict: true, schema: CELLS_SCHEMA } },
