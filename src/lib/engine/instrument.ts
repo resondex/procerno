@@ -2300,7 +2300,8 @@ export async function planValueLines(input: {
   if (input.rooms.length === 0) return null;
   tagCosts({ purpose: "setup:value_lines" });
   const rooms = input.rooms.map((r) => ({ label: r.label.trim(), description: r.description.trim() }));
-  const key = cacheKey("value_lines19", [
+  // value_lines20 (2026-10-04): + per-room fit (contest / leans_no / leans_yes).
+  const key = cacheKey("value_lines20", [
     VALUE_LINES_MODEL, input.brand, input.category, input.audience ?? "",
     rooms.map((r) => `${r.label}|${r.description}`).join("~"),
   ]);
@@ -2386,6 +2387,32 @@ export async function planValueLines(input: {
     const pair: ValueLine | null = line ? { line, counterpart: `more affordable ${input.category.trim()}` } : null;
     const out: Record<string, ValueLine | null> = {};
     for (const r of rooms) out[r.label] = pair;
+    // Room fit (2026-10-04 seed review H): a room whose circumstance has one
+    // answer - a hard price cap, a buy-the-top habit - measures the room, not
+    // the brand. One low-effort read per room against the chosen pair; the
+    // coverage step chips leaning rooms so the client picks another line or
+    // sets none. Fails open to no fit.
+    if (pair) {
+      try {
+        const a = await anthropicClient();
+        const res = await a.messages.create({
+          model: VALUE_LINES_MODEL, max_tokens: 800, output_config: { effort: "low" },
+          system:
+            `Each buying room below is a buyer in ${input.category}. The question asked in every room is whether "${pair.line}" (from ${input.brand}) is worth it over ${pair.counterpart}. For each room say whether that question is a genuine contest for that buyer: ` +
+            `contest - a competent advisor could answer either way for this buyer; leans_no - the room's circumstance (a hard price cap, a strict budget) all but settles it as not worth it; leans_yes - the circumstance (a buyer who only considers the top tier, or never weighs cheaper options) all but settles it as worth it. ` +
+            `Reply with ONLY JSON: {"rooms": ["contest" | "leans_no" | "leans_yes", ...]} - one entry per room, in order.`,
+          messages: [{ role: "user", content: rooms.map((r, i) => `${i + 1}. ${r.label}: ${r.description}`).join("\n") }],
+        } as never);
+        const text = (res as { content: { type: string; text?: string }[] }).content.filter((b) => b.type === "text").map((b) => b.text ?? "").join("").trim();
+        const j = JSON.parse(firstJsonObject(text) ?? text) as { rooms?: string[] };
+        rooms.forEach((r, i) => {
+          const f = String(j.rooms?.[i] ?? "");
+          if (f === "leans_no" || f === "leans_yes" || f === "contest") out[r.label] = { ...pair, fit: f };
+        });
+      } catch (err) {
+        console.error("value room fit failed open:", err);
+      }
+    }
     console.warn(`value lines [${input.brand}]: ${Object.entries(out).map(([k, v]) => `${k} -> ${v ? `${v.line} vs ${v.counterpart}` : "none"}`).join("; ")}`);
     return out;
   });
@@ -3001,6 +3028,13 @@ const CELL_WRITER_SYSTEM =
           "asker's.\n" +
           "- journey(...): that cell's buyer decides that way - write the " +
           "prompt in that buyer's register.\n" +
+          "- room(...): the buying scenario's own description - WHO the asker " +
+          "is and the situation they are in. The prompt carries that " +
+          "circumstance in the asker's own words. It carries NOTHING the " +
+          "room says the buyer wants, values or is looking for - a want is " +
+          "not a circumstance - and no word of the room's label. Never " +
+          "invent details the room does not give (a team size, a household " +
+          "count, a budget figure).\n" +
           "- reach=<scenarios>: this single cell is asked by buyers in those " +
           "scenarios only - voice it for them.\n" +
           "- Punctuation people actually type: never an em dash, never the " +
@@ -3180,6 +3214,11 @@ export interface WorryCandidate {
   stances: WorryStance[];
   /** The single most natural stance - the chip a card-click toggles. */
   recommended: WorryStance;
+  /** What the doubt is about, 2-4 words (worries5) - the overlap key. */
+  subject?: string;
+  /** Other worries in the pool that share this one's subject (worries5):
+   * the gate shows them and the pre-pick keeps only the highest-ranked. */
+  overlaps?: string[];
   /** The MEASUREMENT PLAN (2026-10-01, uncapped allowance): the stances
    * the planner recommends actually fielding - widely voiced at that
    * moment, distinct from the other recommendations, actionable. Pre-lit
@@ -3198,6 +3237,9 @@ export interface WorryPick {
  * per (brand, category, audience, scenario set, offered stances); the
  * confirmed PICKS are decision data stored on the draft/project - this
  * pool is only the menu. */
+/** Subject words that carry no doubt on their own (worries5 overlap). */
+const STOP_SUBJECT_WORDS = new Set(["the", "and", "for", "with", "its", "their", "our", "your", "about", "over", "too", "not", "very", "feels", "feel", "risk", "risks", "issue", "issues", "problem", "problems", "concern", "concerns", "worry", "worries", "quality"]);
+
 export async function generateWorries(input: {
   brand: string;
   category: string;
@@ -3220,7 +3262,12 @@ export async function generateWorries(input: {
   // worries4: price worries are attitude-shaped per the circumstance/doubt
   // boundary (the pricing battery owns the math). worries3 lacked the
   // hygiene line; worries2 drew empty plans; worries1 predates plans.
-  const key = cacheKey("worries4", [
+  // worries5 (2026-10-04 seed review D): each worry is ONE doubt and carries
+  // a `subject`; after the draw, worries sharing a subject are grouped
+  // (normalized equality, else word overlap) and only the highest-ranked
+  // member keeps its plan - a bundled worry ("compliance and residency")
+  // and a duplicated one (lock-in vs migration out) each cost a cell.
+  const key = cacheKey("worries5", [
     CONCERNS_MODEL, input.brand, input.category, input.audience,
     input.scenarios.map((s) => s.label).join(","), offered.join(","),
   ]);
@@ -3240,7 +3287,11 @@ export async function generateWorries(input: {
             "worry is ATTITUDE-shaped (how the cost feels to the buyer) - never a request to run the value math; the " +
             "pricing battery owns the math. Real worries " +
             "people actually raise, never invented ones.\n" +
-            "For each worry give: `worry` (2-6 plain words), `detail` (ONE " +
+            "Each worry is ONE doubt about one thing: two doubts joined by " +
+            "'and' are two worries, and the same doubt reached from two " +
+            "directions is one worry - list it once. " +
+            "For each worry give: `worry` (2-6 plain words), `subject` (2-4 " +
+            "words naming the ONE thing the doubt is about), `detail` (ONE " +
             "plain sentence of what buyers actually say - their words, not " +
             "marketing language), `stances` (every stage where buyers " +
             "naturally voice it, from the allowed list only), " +
@@ -3258,7 +3309,7 @@ export async function generateWorries(input: {
             "worry carries an empty plan; the top worries always carry at " +
             "least one.\n" +
             `Allowed stances:\n${offered.map((s) => `- ${STANCE_DEF[s]}`).join("\n")}\n` +
-            'Reply with ONLY JSON: {"worries": [{"worry": "...", "detail": "...", "stances": ["..."], "recommended": "...", "plan": ["..."]}]}.',
+            'Reply with ONLY JSON: {"worries": [{"worry": "...", "subject": "...", "detail": "...", "stances": ["..."], "recommended": "...", "plan": ["..."]}]}.',
         },
         {
           role: "user",
@@ -3285,12 +3336,13 @@ export async function generateWorries(input: {
                   type: "object", additionalProperties: false,
                   properties: {
                     worry: { type: "string" },
+                    subject: { type: "string" },
                     detail: { type: "string" },
                     stances: { type: "array", items: { type: "string" } },
                     recommended: { type: "string" },
                     plan: { type: "array", items: { type: "string" } },
                   },
-                  required: ["worry", "detail", "stances", "recommended", "plan"],
+                  required: ["worry", "subject", "detail", "stances", "recommended", "plan"],
                 },
               },
             },
@@ -3299,7 +3351,7 @@ export async function generateWorries(input: {
         },
       },
     });
-    const raw = (JSON.parse(res.choices[0]?.message?.content ?? "{}") as { worries?: (WorryCandidate & { plan?: string[] })[] }).worries ?? [];
+    const raw = (JSON.parse(res.choices[0]?.message?.content ?? "{}") as { worries?: (WorryCandidate & { plan?: string[]; subject?: string })[] }).worries ?? [];
     const seen = new Set<string>();
     const list: WorryCandidate[] = [];
     for (const w of raw) {
@@ -3322,8 +3374,30 @@ export async function generateWorries(input: {
         (s) => safe.includes(s) && (w.plan ?? []).includes(s)
       );
       seen.add(norm);
-      list.push({ worry, detail: String(w.detail ?? "").trim(), stances: safe, recommended, recommend });
+      list.push({ worry, subject: humanize(String(w.subject ?? "").trim()), detail: String(w.detail ?? "").trim(), stances: safe, recommended, recommend });
       if (list.length >= 12) break;
+    }
+    // Overlap groups on the subject: exact normalized match, else two
+    // subjects sharing most of their content words. The earlier member
+    // (most widely voiced first) keeps its plan; later members lose
+    // theirs and name the kept one in `overlaps`.
+    const words = (t: string) => new Set(t.toLowerCase().replace(/[^a-z0-9 ]+/g, " ").split(/\s+/).filter((x) => x.length > 2 && !STOP_SUBJECT_WORDS.has(x)));
+    const same = (a: string, b: string) => {
+      const na = a.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim(), nb = b.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+      if (!na || !nb) return false;
+      if (na === nb) return true;
+      const wa = words(a), wb = words(b);
+      if (wa.size === 0 || wb.size === 0) return false;
+      const inter = [...wa].filter((x) => wb.has(x)).length;
+      return inter / Math.min(wa.size, wb.size) >= 0.67 && inter >= 1;
+    };
+    for (let i = 0; i < list.length; i++) {
+      for (let j = i + 1; j < list.length; j++) {
+        if (!same(list[i].subject ?? "", list[j].subject ?? "")) continue;
+        list[i].overlaps = [...new Set([...(list[i].overlaps ?? []), list[j].worry])];
+        list[j].overlaps = [...new Set([...(list[j].overlaps ?? []), list[i].worry])];
+        if ((list[j].overlaps ?? []).some((o) => list.findIndex((x) => x.worry === o) < j)) list[j].recommend = [];
+      }
     }
     return list.length > 0 ? list : null;
   });
@@ -3645,10 +3719,30 @@ export async function generateGrid(input: {
     input.scenarios.map((s) => [s.label, journeyNote(input.base, s)] as const)
   );
   const scenarioLabels = new Set(input.scenarios.map((sc) => sc.label));
+  // s46 (2026-10-04 seed review I): the room's one-sentence description
+  // rides the plan line. Until now the writer saw only the 2-4 word label
+  // and invented the circumstance from it - a label naming a want became a
+  // wish list across its column, label words leaked, details were made up.
+  // Request data, so every scenario cell re-keys (cache-era case 1).
+  /** The circumstance as the design check should read it: the label plus
+   * the room's description (the label alone let "matching: <label>" pass
+   * any seed that echoed the label's words). */
+  const situationText = (situation: string | null | undefined): string | null | undefined => {
+    if (!situation) return situation;
+    const d = input.scenarios.find((s) => s.label === situation)?.description;
+    return d ? `${situation} - ${humanize(d).replace(/\s+/g, " ").trim()}` : situation;
+  };
+  const roomBySituation = new Map(
+    input.scenarios.map((s) => [s.label, humanize(s.description).replace(/\s+/g, " ").trim()] as const)
+  );
+  const roomNote = (situation: string | null) => {
+    const d = situation ? roomBySituation.get(situation) : null;
+    return d ? ` room(${d})` : "";
+  };
   const planLine = (p: (typeof plan)[number], i: number) => {
     const jn = p.situation ? journeyBySituation.get(p.situation) : null;
     return (
-      `${i + 1}. stage=${p.stage.key} situation=${p.situation ?? "-"} angle=${planAngle(p)}` +
+      `${i + 1}. stage=${p.stage.key} situation=${p.situation ?? "-"}${roomNote(p.situation)} angle=${planAngle(p)}` +
       `${p.scope ? ` reach=${p.scope}` : ""}${jn ? ` journey(${jn})` : ""}` +
       `${p.concern ? ` concern(${p.concern})` : ""}` +
       `${p.valueLine ? ` value(line=${p.valueLine.line}; counterpart=${p.valueLine.counterpart})` : ""}` +
@@ -3959,7 +4053,7 @@ export async function generateGrid(input: {
         if (process.env.PHRASINGS_CHECKS !== "0" && flat.length > 0) {
           try {
             const seedTargets = flat
-              .map((c, i) => ({ c, i, intent: stageDesignIntent(c.stage, input.brand, c.concern, c.angle, c.situation, c.valueLine) }))
+              .map((c, i) => ({ c, i, intent: stageDesignIntent(c.stage, input.brand, c.concern, c.angle, situationText(c.situation), c.valueLine) }))
               .filter((x): x is { c: GridCell; i: number; intent: string } => !!x.intent);
             if (seedTargets.length > 0 && Date.now() > deadlineAt) complete = false;
             if (seedTargets.length > 0 && Date.now() <= deadlineAt) {
@@ -4228,6 +4322,24 @@ export async function generateGrid(input: {
         check: "seed_overlong" as const,
         detail: `${words} words - a prompt is one chat message, not a requirements list; keep the circumstance to one sentence and ask at most two or three things (aim well under 60 words)`,
       });
+    // s46/r17 (I): a want lifted from the room description into the seed -
+    // the description is circumstance-only by the room rule, but a user
+    // edit can add a want, and a seed that copies it steers the column.
+    if (c.situation) {
+      const desc = (input.scenarios.find((sc) => sc.label === c.situation)?.description ?? "").toLowerCase();
+      const want = desc.match(/\b(?:wants?|wanting|needs?|needing|looking for|seeking|prioriti[sz](?:e|es|ing)|values?)\s+([^.,;:]{6,80})/);
+      if (want) {
+        const phrase = want[1].replace(/[^a-z0-9 ]+/g, " ").split(/\s+/).filter((w) => w.length > 2);
+        const text = c.text.toLowerCase();
+        for (let k = 0; k + 3 <= phrase.length; k++) {
+          const tri = phrase.slice(k, k + 3).join(" ");
+          if (text.includes(tri)) {
+            out.push({ check: "room_want_leak" as const, detail: `copies a want from the scenario description ("${tri}") - the room gives the circumstance, the answer decides what matters` });
+            break;
+          }
+        }
+      }
+    }
     // r17: a purchase moment in a problem-recognition seed makes the asker
     // a shopper (the room's buying moment leaked into the pain cell).
     if (c.stage === "problem_recognition") {
@@ -4398,7 +4510,7 @@ export async function generateGrid(input: {
                 const text2 = (JSON.parse(res2.choices[0]?.message?.content ?? "{}") as { cells?: { text?: string }[] }).cells?.[0]?.text?.trim();
                 if (!text2) return;
                 const cand = { stage: d.c.stage, angle: d.c.angle, text: humanize(text2), situation: d.c.situation, concern: d.c.concern };
-                const intent = stageDesignIntent(d.c.stage, input.brand, undefined, d.c.angle, d.c.situation);
+                const intent = stageDesignIntent(d.c.stage, input.brand, undefined, d.c.angle, situationText(d.c.situation));
                 await primeCells([cand]);
                 const mechOk = seedRule(cand).length === 0;
                 const dv = intent ? (await checkDesignFidelity({ candidates: [{ text: cand.text, design: intent }], meta: input.meta }))[0] : null;
@@ -4456,11 +4568,14 @@ export async function generateGrid(input: {
             max_tokens: 1500,
             output_config: { effort: DESIGN_CHECK_EFFORT },
             system:
-              `Each question below asks which product to pick for a job in a buying situation in ${input.category}. For each give: ` +
+              `Each question below asks which product to pick for a job in a buying situation in ${input.category}; the tracked brand is ${input.brand}. For each give: ` +
               `job - the job in 2-5 words, as a task the buyer gets done; ` +
               `feature - true when the "job" is really a product feature or capability rather than a task; ` +
               `restatesRoom - true when the "job" is just the buying situation itself; ` +
-              `Reply with ONLY valid JSON: {"jobs": [{"job": "...", "feature": false, "restatesRoom": false}, ...]} - one entry per question, in order.${extra}`,
+              `attribute - true when the outcome is a product attribute (a quality the product has) or a rank by price or value, rather than something the buyer gets done; ` +
+              `clientStrength - true when the outcome is the tracked brand's own best-known strength, chosen so that brand is the obvious answer; ` +
+              `sameAs - the number of an EARLIER question in this list whose job is the same in substance however worded, or 0; ` +
+              `Reply with ONLY valid JSON: {"jobs": [{"job": "...", "feature": false, "restatesRoom": false, "attribute": false, "clientStrength": false, "sameAs": 0}, ...]} - one entry per question, in order.${extra}`,
             messages: [{
               role: "user",
               content: uc.map((d, i) => {
@@ -4472,7 +4587,7 @@ export async function generateGrid(input: {
           const parseJobs = (res: unknown) => {
             const text = (res as { content: { type: string; text?: string }[] }).content
               .filter((b) => b.type === "text").map((b) => b.text ?? "").join("").trim();
-            try { return (JSON.parse(firstJsonObject(text) ?? text) as { jobs?: { job?: string; feature?: boolean; restatesRoom?: boolean }[] }).jobs ?? null; } catch { return null; }
+            try { return (JSON.parse(firstJsonObject(text) ?? text) as { jobs?: { job?: string; feature?: boolean; restatesRoom?: boolean; attribute?: boolean; clientStrength?: boolean; sameAs?: number }[] }).jobs ?? null; } catch { return null; }
           };
           let jobs = parseJobs(await ask());
           if (!jobs) jobs = parseJobs(await ask(" Escape any quote marks inside strings."));
@@ -4483,9 +4598,13 @@ export async function generateGrid(input: {
               const out: { i: number; why: string }[] = [];
               js.forEach((j, i) => {
                 const k = norm(j.job ?? "");
+                const earlier = Number(j.sameAs ?? 0);
                 if (j.feature) out.push({ i, why: "it names a product feature, not a job" });
+                else if (j.attribute) out.push({ i, why: "it names a product attribute or a price rank as the outcome, not something the buyer gets done" });
+                else if (j.clientStrength) out.push({ i, why: "its outcome is the tracked brand's own signature strength" });
                 else if (j.restatesRoom) out.push({ i, why: "it repeats the buying situation instead of naming a job" });
                 else if (k && seen.has(k)) out.push({ i, why: `it repeats another use-case job (${j.job})` });
+                else if (Number.isInteger(earlier) && earlier >= 1 && earlier - 1 < i) out.push({ i, why: `it asks for the same outcome as another use-case question (${js[earlier - 1]?.job ?? "an earlier one"})` });
                 if (k && !seen.has(k)) seen.set(k, i);
               });
               return out;
@@ -4531,7 +4650,7 @@ export async function generateGrid(input: {
                 const text2 = (JSON.parse(res2.choices[0]?.message?.content ?? "{}") as { cells?: { text?: string }[] }).cells?.[0]?.text?.trim();
                 if (!text2) { flagJob(i, why); return; }
                 const cand = { stage: d.c.stage, angle: d.c.angle, text: stripRosterParens(humanize(text2), [input.brand, ...input.competitors]), situation: d.c.situation, concern: d.c.concern };
-                const intent = stageDesignIntent(d.c.stage, input.brand, undefined, d.c.angle, d.c.situation);
+                const intent = stageDesignIntent(d.c.stage, input.brand, undefined, d.c.angle, situationText(d.c.situation));
                 await primeCells([cand]);
                 const mechOk = seedRule(cand).length === 0;
                 const dv = intent ? (await checkDesignFidelity({ candidates: [{ text: cand.text, design: intent }], meta: input.meta }))[0] : null;

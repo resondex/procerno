@@ -525,8 +525,33 @@ export function SetupWizard({ mode, brand, draft, engineOptions, onClose, onCrea
       const incoming = roster.competitors
         .filter((v) => fresh || !(v.name in next))
         .sort((a, b) => (a.h2hRank || 1e9) - (b.h2hRank || 1e9));
-      for (const v of incoming) {
-        if (v.role !== "same_seat") { next[v.name] = v.role; continue; }
+      // Decision 3c follow-through (2026-10-04 seed review K): slots go to
+      // different owners first - a rival sharing a parent with a higher
+      // pick, or with the client, is demoted below the first other-parent
+      // rival, then fills any slot still free. Same-parent picks report as
+      // portfolio routing, so they are a deliberate choice, never a default.
+      const norm = (t: string | undefined) => (t ?? "").trim().toLowerCase();
+      const pickedParents = new Set<string>();
+      if (roster.clientParent) pickedParents.add(norm(roster.clientParent));
+      for (const [name, role] of Object.entries(next)) {
+        if (role !== "same_seat") continue;
+        const p = norm(roster.competitors.find((v) => v.name === name)?.parent);
+        if (p) pickedParents.add(p);
+      }
+      const direct = incoming.filter((v) => v.role === "same_seat");
+      for (const v of incoming) if (v.role !== "same_seat") next[v.name] = v.role;
+      const deferred: typeof direct = [];
+      for (const v of direct) {
+        const picked = Object.values(next).filter((r) => r === "same_seat").length;
+        const p = norm(v.parent);
+        if (picked < ANGLE_SLOTS && !(p && pickedParents.has(p))) {
+          next[v.name] = "same_seat";
+          if (p) pickedParents.add(p);
+        } else {
+          deferred.push(v);
+        }
+      }
+      for (const v of deferred) {
         const picked = Object.values(next).filter((r) => r === "same_seat").length;
         next[v.name] = picked < ANGLE_SLOTS ? "same_seat" : "bench";
       }

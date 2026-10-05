@@ -322,7 +322,7 @@ export interface GridState {
 }
 
 /** A Value cell's two ends (engine ValueLine, UI copy). */
-export interface ValueLineUi { line: string; counterpart: string }
+export interface ValueLineUi { line: string; counterpart: string; fit?: "contest" | "leans_no" | "leans_yes" }
 
 /** A worries-gate candidate (engine WorryCandidate, UI copy). */
 export interface WorryUi {
@@ -333,6 +333,8 @@ export interface WorryUi {
   /** The measurement plan: stances recommended for fielding (may be
    * empty). Absent on pools drawn before the recommendation era. */
   recommend?: string[];
+  /** Other worries in the pool sharing this one's subject (worries5). */
+  overlaps?: string[];
 }
 
 /** The pool's recommended worry-stance pairs - the gate's pre-pick and
@@ -2515,7 +2517,10 @@ function ValueLineEditor({ value, disabled, onChange }: {
       onClick={() => { setLine(value?.line ?? ""); setCounterpart(value?.counterpart ?? ""); setEditing(true); }}
       title="Value asks whether your product is worth paying more for, compared with cheaper options. This is the product we ask about (by default your most premium one) and what it's compared with. Click to change."
       className="text-[10px] leading-tight text-primary hover:opacity-80">
-      {value ? (<><span className="font-medium">{value.line}</span><br /><span className="text-ink-3">vs {value.counterpart}</span></>) : <span className="text-ink-3">no Value cell</span>}
+      {value ? (<><span className="font-medium">{value.line}</span><br /><span className="text-ink-3">vs {value.counterpart}</span>
+        {(value.fit === "leans_no" || value.fit === "leans_yes") && (
+          <><br /><span className="text-warning" title={value.fit === "leans_no" ? "This buyer's circumstance all but settles it as not worth it - the cell would measure the room's budget, not your brand. Pick a line this buyer would weigh, or set none." : "This buyer never weighs the cheaper option, so the cell would measure the room, not your brand. Pick a line this buyer would weigh, or set none."}>This buyer has one answer</span></>
+        )}</>) : <span className="text-ink-3">no Value cell</span>}
     </button>
   );
 }
@@ -2943,6 +2948,11 @@ export function WorriesGate({
               <span className="text-[14px] font-semibold">{w.worry}</span>
               <span className="block text-[13px] text-ink-2 mt-0.5">{w.detail}</span>
             </button>
+            {(w.overlaps?.length ?? 0) > 0 && (
+              <span className="text-[11px] text-warning" title="These worries come down to the same doubt - picking both measures it twice. Keep one.">
+                Overlaps with {w.overlaps!.join(", ")}
+              </span>
+            )}
             <div className="flex flex-wrap gap-1.5 pt-0.5">
               {w.stances.map((s) => {
                 const active = has(w.worry, s);

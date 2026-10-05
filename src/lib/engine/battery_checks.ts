@@ -256,7 +256,12 @@ export function seedDesignLine(
  * the seed). */
 /** A Value cell's two ends (2026-10-04): the brand's product line it
  * weighs and the generic option one tier below that line. */
-export interface ValueLine { line: string; counterpart: string }
+export interface ValueLine {
+  line: string; counterpart: string;
+  /** Room fit (2026-10-04): whether the Value question is a genuine contest
+   * for this room's buyer, or the room's circumstance settles it. */
+  fit?: "contest" | "leans_no" | "leans_yes";
+}
 
 export function stageDesignIntent(stage: string, brand: string, concern?: string | null, angle?: string | null, situation?: string | null, valueLine?: ValueLine | null): string | null {
   // Stage contract (2026-10-03): repertoire's trigger is habit or wanting
@@ -688,6 +693,8 @@ export interface BatteryFinding {
     // seed (the asker is a shopper, not someone with a pain); an offensive
     // alternatives seed with no move stated (a bare "alternatives to X").
     | "awareness_purchase_moment" | "offensive_alt_no_move"
+    // s46: a want phrase lifted from the scenario description into a seed.
+    | "room_want_leak"
     | "seed_number_changed" | "duplicate_paraphrase";
   /** The offending prompt text (or the seed, for cell-level findings). */
   text: string;
