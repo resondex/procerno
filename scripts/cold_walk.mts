@@ -112,9 +112,11 @@ for (const brand of BRANDS) {
   const roomChecks = await inst.checkRooms({ brand, category: profile.category, rivals: directRivals, picks: picksH2H, rooms }).catch(() => []);
   console.log(`[3b rooms]`, roomChecks.map((c: { label: string; contenders: string[]; rivals: number; pitch: string; names: string[] }) => `${c.label}: ${c.contenders.length}/${c.rivals}${c.pitch ? ` pitch="${c.pitch}"` : ""}${c.names.length ? ` names=${c.names.join("+")}` : ""}`).join(" | "));
 
-  const offered = compose.stages
-    .filter((s: { key: string; recommended: boolean }) => s.recommended && (inst.WORRY_STANCE_STAGES as readonly string[]).includes(s.key))
-    .map((s: { key: string }) => s.key);
+  // Mirrors worries/route.ts (2026-10-04): stances follow the BASE journey -
+  // a deviating room's journey never adds a stance.
+  const offered = inst.participationMask(compose.base, compose.scenarios.map((sc: { journey: unknown }) => ({ ...sc, journey: null })))
+    .filter((st: { recommended: boolean; key: string }) => st.recommended && ["objections", "churn_triggers", "renewal"].includes(st.key))
+    .map((st: { key: string }) => st.key);
   const pool = await inst.generateWorries({ brand, category: profile.category, audience: profile.audience, scenarios: compose.scenarios, offered });
   if (!pool) { console.error(`${brand}: worries returned null`); continue; }
   const planned = pool.flatMap((w: { worry: string; recommend?: string[] }) => (w.recommend ?? []).map((st) => ({ concern: w.worry, stage: st })));
