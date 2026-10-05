@@ -946,7 +946,8 @@ export async function readScenarios(input: {
   // inherits the base (the gate's "buys differently" tick stays). Twice in
   // a row a habitual snack market got a considered room for hosting alone,
   // which switched on three considered stages for the whole battery.
-  const key = cacheKey("scenarios_journeys25", [
+  // 26 (Tyler, option 2): a change in WHO decides also qualifies.
+  const key = cacheKey("scenarios_journeys26", [
     input.category, input.audience, input.forBrand ?? "",
   ]);
   const read = await coalesced<{
@@ -1037,13 +1038,15 @@ export async function readScenarios(input: {
           "among the first four. When " +
           "deviates is false, journey just repeats the base values. " +
           "deviatesBecause: when deviates is true, ONE short phrase naming " +
-          "what raises the stakes so that this buyer decides by a different " +
-          "process - a constraint that makes the wrong choice costly, " +
-          "someone else's rules the buyer must satisfy, or a purchase large " +
-          "or rare enough that the buyer researches it. The occasion itself, " +
-          "a larger quantity, or other people being present is NOT a reason " +
-          "- if that is all there is, deviates is false. Empty when deviates " +
-          "is false.\n" +
+          "why this buyer decides by a different process - either what " +
+          "raises the stakes (a constraint that makes the wrong choice " +
+          "costly, someone else's rules the buyer must satisfy, a purchase " +
+          "large or rare enough that the buyer researches it) or a change in " +
+          "WHO decides (one person deciding alone where the market decides as " +
+          "a group, or a group where the market decides alone). The occasion " +
+          "itself, a larger quantity, or other people merely being present is " +
+          "NOT a reason - if that is all there is, deviates is false. Empty " +
+          "when deviates is false.\n" +
           "What good looks like - each scenario is a room the client's " +
           "brand has to win, vivid enough that a strategist would present " +
           "it by name: a concrete moment, each core room on a different " +
@@ -1105,8 +1108,8 @@ export async function readScenarios(input: {
         model: DESIGN_CHECK_MODEL, max_tokens: 400, output_config: { effort: DESIGN_CHECK_EFFORT },
         system:
           `Each line below is a buying room in the ${input.category} market and a stated reason its buyer decides by a different PROCESS than the market's usual one (the usual: ${JSON.stringify(base)}). ` +
-          `A reason changes the process when it raises the stakes of a wrong choice - a constraint that makes the wrong choice costly, someone else's rules the buyer must satisfy, or a purchase large or rare enough to be researched. ` +
-          `A reason that only names the occasion, a larger quantity, other people being present, or the buyer's mood does not change the process. ` +
+          `A reason changes the process when it raises the stakes of a wrong choice - a constraint that makes the wrong choice costly, someone else's rules the buyer must satisfy, or a purchase large or rare enough to be researched - or when it changes WHO decides: one person deciding alone where the market usually decides as a group, or a group deciding where the market usually decides alone. ` +
+          `A reason that only names the occasion, a larger quantity, other people merely being present, or the buyer's mood does not change the process. ` +
           `Reply with ONLY JSON: {"changes": [true, false, ...]} - one entry per line, in order.`,
         messages: [{ role: "user", content: claims.map(({ s }, k) => `${k + 1}. ${s.label}: ${s.description} | reason: ${s.deviatesBecause}`).join("\n") }],
       } as never);
