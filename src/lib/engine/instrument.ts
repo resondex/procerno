@@ -734,6 +734,10 @@ export interface Journey {
 export interface ScenarioSpec {
   label: string;
   description: string;
+  /** journeys24: what the room's buyer wants, is choosing for or comparing
+   * - carried for the record and the walk harness; nothing downstream
+   * reads it (the writer, the checks and the gate see the description). */
+  want?: string;
   /** Structural journey delta; null = inherits the base read. Granted only
    * when this scenario's buyer DECIDES BY A DIFFERENT PROCESS - a
    * circumstance (budget, constraint) never grants one (spec axiom A3). */
@@ -1078,6 +1082,7 @@ export async function readScenarios(input: {
         // Belt and braces: the structural purpose-clause cut still runs on
         // the description the model returns.
         description: circumstanceOnly(s.description.trim()),
+        ...(s.want?.trim() ? { want: humanize(s.want.trim()) } : {}),
         journey: granted ? s.journey : null,
       };
     })
@@ -4156,7 +4161,7 @@ export async function generateGrid(input: {
               // and could mutate cell text AFTER the spec recompute and
               // cache write.
               await Promise.all(bad.map(async (x) => { try {
-                console.warn(`seed design check flagged [${x.c.stage}]: ${x.c.text.slice(0, 90)}`);
+                console.warn(`seed design check flagged [${x.c.stage}]: ${x.c.text.slice(0, 90)} | verdict: ${String(x.reason ?? verdicts[x.i]?.reason ?? "").slice(0, 160)}`);
                 if (Date.now() > healDeadlineAt) {
                   complete = false;
                   return;

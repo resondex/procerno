@@ -132,6 +132,12 @@ for (const brand of BRANDS) {
   const picks = planned.length > 0 ? planned : pool.map((w: { worry: string; recommended: string }) => ({ concern: w.worry, stage: w.recommended }));
   console.log(`[4 worries] pool ${pool.length}, picks ${picks.length}`);
 
+  // Value lines + per-room fit (harness extension, 2026-10-04): the same
+  // call generateGrid makes when none are given, run here so the verdicts
+  // land in the context for the audit.
+  const valueLines = await inst.planValueLines({ brand, category: profile.category, audience: profile.audience, rooms: compose.scenarios.map((s: { label: string; description: string }) => ({ label: s.label, description: s.description })) }).catch(() => null);
+  console.log(`[4b value] ${valueLines ? Object.entries(valueLines).map(([k, v]) => `${k}: ${v ? `${(v as { line: string }).line}${(v as { fit?: string }).fit ? ` [${(v as { fit?: string }).fit}]` : ""}` : "none"}`).join("; ") : "none"}`);
+
   const kept = new Set<string>(compose.stages.filter((s: { recommended: boolean }) => s.recommended).map((s: { key: string }) => s.key));
   for (const p of picks) kept.add(p.stage);
   const stages = compose.stages.filter((s: { key: string }) => kept.has(s.key));
@@ -145,6 +151,7 @@ for (const brand of BRANDS) {
       brand, category: profile.category, competitors: profile.competitors,
       audience: profile.audience || null, base: compose.base, scenarios: compose.scenarios,
       stages, rosterRoles, rosterClasses, worries: picks, report,
+      ...(valueLines ? { valueLines } : {}),
       meta: { source: "script:cold-walk" },
     } as never);
     console.log(`drive ${drive + 1}: ${cells ? cells.length + " cells" : `null (${report.reason ?? "holes"})`} in ${((Date.now() - td) / 1000).toFixed(1)}s, flagged: ${cells?.filter((c: { seedFlags?: string[] }) => c.seedFlags?.length).length ?? "-"}`);
@@ -162,6 +169,10 @@ for (const brand of BRANDS) {
     profile, rosterRoles, rosterDetail, clientParent: roster.clientParent, rosterClasses, base: compose.base,
     scenarios: compose.scenarios, reserve: compose.reserve ?? [], fit, roomChecks,
     picks, keptStages: [...kept], missing: report.missing,
+    // Harness extension (2026-10-04): the worries pool with subjects and
+    // overlap groups, the Value lines with per-room fit, and the offered
+    // stances - so the gate's chips can be audited from the walk.
+    worryPool: pool, offered, valueLines,
   }, null, 2));
   console.log(`${brand}: ${seeds.length} seeds in ${((Date.now() - t0) / 1000).toFixed(0)}s -> cold_seeds_${slug}.json${report.missing.length ? ` (MISSING ${report.missing.length} rows)` : ""}`);
 }
