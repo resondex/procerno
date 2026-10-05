@@ -738,6 +738,8 @@ export interface ScenarioSpec {
    * - carried for the record and the walk harness; nothing downstream
    * reads it (the writer, the checks and the gate see the description). */
   want?: string;
+  /** journeys25: the process-changing reason the override was granted. */
+  journeyWhy?: string;
   /** Structural journey delta; null = inherits the base read. Granted only
    * when this scenario's buyer DECIDES BY A DIFFERENT PROCESS - a
    * circumstance (budget, constraint) never grants one (spec axiom A3). */
@@ -776,6 +778,9 @@ const SCENARIOS_SCHEMA = {
            * checks and the gate read the description only. */
           want: { type: "string" },
           deviates: { type: "boolean" },
+          /** journeys25 (stakes rule): the process-changing reason a room
+           * deviates; empty when it does not. The grant requires it. */
+          deviatesBecause: { type: "string" },
           journey: {
             type: "object",
             additionalProperties: false,
@@ -788,7 +793,7 @@ const SCENARIOS_SCHEMA = {
             required: ["involvement", "verifiability", "think_feel", "decision_unit"],
           },
         },
-        required: ["label", "description", "want", "deviates", "journey"],
+        required: ["label", "description", "want", "deviates", "deviatesBecause", "journey"],
       },
     },
   },
@@ -932,7 +937,16 @@ export async function readScenarios(input: {
   // seed writer (s48), a room whose main clause was a want ("comparing
   // cash-back cards", "compares live TV bundles") was restated across its
   // whole column; a trailing-clause cut could not reach a main clause.
-  const key = cacheKey("scenarios_journeys24", [
+  // 25 (2026-10-05, Tyler, stakes rule): a journey override must state what
+  // raises the stakes - a reason that changes the PROCESS (a constraint that
+  // makes the wrong choice costly, someone else's rules to satisfy, a
+  // purchase large or rare enough to research), never the occasion, the
+  // quantity or guests being present. The grant requires the stated reason
+  // and a one-line judgment that it changes the process; a refused room
+  // inherits the base (the gate's "buys differently" tick stays). Twice in
+  // a row a habitual snack market got a considered room for hosting alone,
+  // which switched on three considered stages for the whole battery.
+  const key = cacheKey("scenarios_journeys25", [
     input.category, input.audience, input.forBrand ?? "",
   ]);
   const read = await coalesced<{
@@ -1021,7 +1035,15 @@ export async function readScenarios(input: {
           "not a small team. The DEFAULT is no deviation: most " +
           "markets have ZERO deviating scenarios; at most one, and only " +
           "among the first four. When " +
-          "deviates is false, journey just repeats the base values.\n" +
+          "deviates is false, journey just repeats the base values. " +
+          "deviatesBecause: when deviates is true, ONE short phrase naming " +
+          "what raises the stakes so that this buyer decides by a different " +
+          "process - a constraint that makes the wrong choice costly, " +
+          "someone else's rules the buyer must satisfy, or a purchase large " +
+          "or rare enough that the buyer researches it. The occasion itself, " +
+          "a larger quantity, or other people being present is NOT a reason " +
+          "- if that is all there is, deviates is false. Empty when deviates " +
+          "is false.\n" +
           "What good looks like - each scenario is a room the client's " +
           "brand has to win, vivid enough that a strategist would present " +
           "it by name: a concrete moment, each core room on a different " +
@@ -1066,15 +1088,45 @@ export async function readScenarios(input: {
     },
   });
   const parsed = JSON.parse(res.choices[0]?.message?.content ?? "{}") as {
-    scenarios: { label: string; description: string; want?: string; deviates: boolean; journey: Journey }[];
+    scenarios: { label: string; description: string; want?: string; deviates: boolean; deviatesBecause?: string; journey: Journey }[];
   };
+  // Stakes judgment (journeys25): for each core room that claims a
+  // deviation with a reason, one low-effort call decides whether the reason
+  // changes how the buyer decides or only describes the occasion. Runs
+  // only when a room claims (most reads: none). Fails open to the claim.
+  const claims = (parsed.scenarios ?? []).slice(0, CORE_SCENARIOS)
+    .map((s, i) => ({ s, i }))
+    .filter(({ s }) => s.deviates && String(s.deviatesBecause ?? "").trim());
+  const stakesOk = new Set<number>();
+  if (claims.length > 0) {
+    try {
+      const a = await anthropicClient();
+      const res = await a.messages.create({
+        model: DESIGN_CHECK_MODEL, max_tokens: 400, output_config: { effort: DESIGN_CHECK_EFFORT },
+        system:
+          `Each line below is a buying room in the ${input.category} market and a stated reason its buyer decides by a different PROCESS than the market's usual one (the usual: ${JSON.stringify(base)}). ` +
+          `A reason changes the process when it raises the stakes of a wrong choice - a constraint that makes the wrong choice costly, someone else's rules the buyer must satisfy, or a purchase large or rare enough to be researched. ` +
+          `A reason that only names the occasion, a larger quantity, other people being present, or the buyer's mood does not change the process. ` +
+          `Reply with ONLY JSON: {"changes": [true, false, ...]} - one entry per line, in order.`,
+        messages: [{ role: "user", content: claims.map(({ s }, k) => `${k + 1}. ${s.label}: ${s.description} | reason: ${s.deviatesBecause}`).join("\n") }],
+      } as never);
+      const text = (res as { content: { type: string; text?: string }[] }).content.filter((b) => b.type === "text").map((b) => b.text ?? "").join("").trim();
+      const j = JSON.parse(firstJsonObject(text) ?? text) as { changes?: boolean[] };
+      claims.forEach(({ i }, k) => { if (j.changes?.[k] === true) stakesOk.add(i); });
+      claims.forEach(({ s, i }, k) => { if (j.changes?.[k] !== true) console.warn(`stakes rule: override refused for "${s.label}" (reason: ${s.deviatesBecause}) - inherits the base`); else void i; });
+    } catch (err) {
+      console.error("stakes judgment failed open:", err);
+      claims.forEach(({ i }) => stakesOk.add(i));
+    }
+  }
   let deltaGranted = false;
   const all: ScenarioSpec[] = (parsed.scenarios ?? [])
     .slice(0, 8)
     .map((s, i) => {
       // A3/A4 in code: a delta must really differ, only one is granted,
       // and only in the core set (reserve rows inherit like suggestions).
-      const wants = i < CORE_SCENARIOS && s.deviates && !sameJourney(base, s.journey);
+      // journeys25: and only with a stated, judged process-changing reason.
+      const wants = i < CORE_SCENARIOS && s.deviates && !sameJourney(base, s.journey) && stakesOk.has(i);
       const granted = wants && !deltaGranted;
       if (granted) deltaGranted = true;
       return {
@@ -1083,6 +1135,7 @@ export async function readScenarios(input: {
         // the description the model returns.
         description: circumstanceOnly(s.description.trim()),
         ...(s.want?.trim() ? { want: humanize(s.want.trim()) } : {}),
+        ...(granted && s.deviatesBecause?.trim() ? { journeyWhy: humanize(s.deviatesBecause.trim()) } : {}),
         journey: granted ? s.journey : null,
       };
     })
