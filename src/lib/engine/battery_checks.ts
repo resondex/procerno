@@ -347,8 +347,15 @@ export function stageDesignIntent(stage: string, brand: string, concern?: string
   // recurrence, 2026-10-01: two Mid-market cells read as generic feature
   // asks). Any pinned stage without a more specific design above gets this
   // yardstick; invariant cells (situation null) are untouched.
+  // r22 (batch 2, C7): in a use-case cell the scenario supplies WHO the
+  // asker is; a buying channel or moment in the scenario is not the job
+  // and is not carried (every Pixel use-case cell in a channel room was
+  // healed into "promo ends tonight, I need a phone that lasts").
+  const channelClause = stage === "use_case"
+    ? ` For a use-case question the scenario supplies WHO the asker is; a buying channel or moment in the scenario - a store, a sale, a promotion window, a deadline - is not the job and is not carried into the question, and a question that omits it is correct, not off-design.`
+    : "";
   if (situation)
-    return `Question design (circumstance): the question carries the asker's own circumstance matching this buying scenario: ${situation}. The circumstance must live in the question's own words (their size, moment or situation) - a question that would read the same with no circumstance at all does not satisfy the design. ONLY when the circumstance is a switch between competing PLATFORMS or ECOSYSTEMS must its direction be stated by naming both platforms - "switching platforms" without the direction does not satisfy it, because which products get named then depends on the answer's guess - and the stated direction must leave ${brand} an eligible answer. Every other change of tool, provider or product needs NO named source or destination: a blind question never names brands, so describing the old solution generically fully satisfies the circumstance. Judge by SUBSTANCE, not label restatement: the circumstance counts when the question's facts fit that scenario's buyer - it need not restate every attribute of the scenario name, and when the scenario name IS the plain buyer phrase for the circumstance, using those words is correct, not a leak. Only a scenario name in planning register must be re-voiced in the buyer's own words.${pickClause}${contractClause}${outcomeClause(stage, brand)}`;
+    return `Question design (circumstance): the question carries the asker's own circumstance matching this buying scenario: ${situation}.${channelClause} The circumstance must live in the question's own words (their size, moment or situation) - a question that would read the same with no circumstance at all does not satisfy the design. ONLY when the circumstance is a switch between competing PLATFORMS or ECOSYSTEMS must its direction be stated by naming both platforms - "switching platforms" without the direction does not satisfy it, because which products get named then depends on the answer's guess - and the stated direction must leave ${brand} an eligible answer. Every other change of tool, provider or product needs NO named source or destination: a blind question never names brands, so describing the old solution generically fully satisfies the circumstance. Judge by SUBSTANCE, not label restatement: the circumstance counts when the question's facts fit that scenario's buyer - it need not restate every attribute of the scenario name, and when the scenario name IS the plain buyer phrase for the circumstance, using those words is correct, not a leak. Only a scenario name in planning register must be re-voiced in the buyer's own words.${pickClause}${contractClause}${outcomeClause(stage, brand)}`;
   if (pickClause)
     return `Question design (open choice): the buyer wants NAMES.${pickClause}${outcomeClause(stage, brand)}`;
   if (contractClause)
@@ -840,6 +847,20 @@ export function scenarioLabelLeak(text: string, labels: (string | null | undefin
     // the label "Carrier trade in upgrade" - hyphens and commas must not
     // hide a copy.
     if (label.length >= 8 && ` ${key(t)} `.includes(` ${key(label)} `)) return label;
+    // r22 (batch 2, A4): a planning-register label WORD leaks by its stem -
+    // "unification" came through as "unify" / "unifying" in four cells.
+    // Only nominalizations (-ation / -ization / -ment, 10+ letters) outside
+    // the category's vocabulary: plain buyer nouns in a label ("business",
+    // "roommates") are the buyer's own words (r3) and never leak by stem.
+    // Calibrated on the 111 v12 scenario seeds: the wide 8-letter rule hit
+    // nine plain nouns and zero planning words.
+    const catTokens = new Set(key(category ?? "").split(" ").filter(Boolean));
+    for (const w of key(label).split(" ")) {
+      if (w.length < 10 || catTokens.has(w) || !/(?:ation|ization|isation|ment)s?$/.test(w)) continue;
+      const stem = w.slice(0, 6);
+      const re = new RegExp(`\\b${stem}[a-z]*\\b`);
+      if (re.test(key(t))) return label;
+    }
   }
   const m = text.match(/^([A-Za-z][A-Za-z0-9 &/-]{3,40}):/);
   if (m) {

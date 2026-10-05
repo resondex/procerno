@@ -160,7 +160,7 @@ const CACHE_TTL_MS = 183 * 24 * 3600 * 1000;
 // one-tier-down counterpart per room (planValueLines, confirmed at the
 // gate; default = the brand's most premium line that fits the room; no
 // Value cell where none fits) and carries no usage detail.
-const STYLE_VERSION = "s49"; // s46 (2026-10-04 seed review batch): problem recognition carries no purchase moment; offensive alternatives state a plain move within the category; head-to-heads add no situation; advocacy convinces a peer or critic, business case an approver. // s45 (2026-10-04 seed review): doubt hints - the asker's own one-doubt claim, never a fact to confirm, hearsay, a sizing ask or the Value question; stance decides the asker; worry cells carry no reach limit.
+const STYLE_VERSION = "s50"; // s50 (batch 2): the scenario label is a title for us, never words for the prompt; use-case heals carry no buying channel. // s46 (2026-10-04 seed review batch): problem recognition carries no purchase moment; offensive alternatives state a plain move within the category; head-to-heads add no situation; advocacy convinces a peer or critic, business case an approver. // s45 (2026-10-04 seed review): doubt hints - the asker's own one-doubt claim, never a fact to confirm, hearsay, a sizing ask or the Value question; stance decides the asker; worry cells carry no reach limit.
 
 /** Versions the DETERMINISTIC seed-check set (everything seedRule runs:
  * checkPromptAgainstSpec + blind_missing_category + scenario_label_leak).
@@ -176,7 +176,7 @@ const STYLE_VERSION = "s49"; // s46 (2026-10-04 seed review batch): problem reco
  * 7's unversioned serve-time re-check had no terminal state). Bump when
  * a deterministic check changes meaning; bumping costs one free re-judge
  * per unit, and model calls only for units the new rules reject. */
-export const SEED_RULES_VERSION = "r21"; // r17 (2026-10-04 seed review batch): awareness_purchase_moment and offensive_alt_no_move nets; design intents - no purchase moment in problem recognition, head-to-heads add no situation, alternatives state a full-sentence move within the category, advocacy vs business-case audience, Value brand-name fallback branch; keep-or-leave narrowed (a within-brand change may be the subject, never the answer). // r16 (2026-10-04 seed review): doubt design intent - own claim, one doubt, open verdict; facts to confirm, rule/ingredient lookups, hearsay, sizing asks and the Value worth-it ask fail; objections never voiced by a current user, churn/renewal always by one, no third option beside stay and leave. // r15 (2026-10-02, Tyler's option B): brand mentions = whole names, declared alternates, name words and dictionary aliases, with every ambiguous one-word hit (an everyday word written lowercase or opening a sentence, or a maker word like "Google" of Google Pixel) decided in context by the brand judge (haiku, cached) - no casing rules, no target exemption, no roster word lists. r14 (2026-10-02 review): everyday-word lexicon by lowercase SHARE in two tiers (label words: common and not brand-dominated - "jira", "netflix", "pixel", "apple", "chase" count lowercase again; aliases: merely common - "gold" stays capital-only), coined split words case-blind ("apple or samsung"), the target's own one-word name never case-guarded, "citi" off the case-guard list, and a monthly figure is the asker's plan only in first-person / spend / offer context ("the Pro about 20 a month more" is a stated price). r13 (2026-10-02 cold-walk audit + review): verb-less stated prices ("Gold at 250"); word-anchored price-concern test + money bolt-ons; brand checks read filtered dictionary alias forms ("amex"); everyday words inside brand names never name the brand - category tokens containment-aware, split words of multi-word names in label casing and not sentence-initial, one-word names and aliases in the vault everyday-word lexicon capitalized only, other brands' full names scrubbed first. r4 (2026-10-01): r2 calendar-year/60-word/segment-vocab; r3 category-naming labels exempt from substring leak; r4 'standardization' in segment vocabulary; r5 directionless-switch string check; r6 punctuation-blind label-leak matching; r7-r8 switch direction detected by absence (no OS, no roster brand near switch vocabulary); cheaper bolt-on token on non-price concerns
+export const SEED_RULES_VERSION = "r22"; // r22 (batch 2): use-case in a channel room carries who only; label-word stems leak. // r17 (2026-10-04 seed review batch): awareness_purchase_moment and offensive_alt_no_move nets; design intents - no purchase moment in problem recognition, head-to-heads add no situation, alternatives state a full-sentence move within the category, advocacy vs business-case audience, Value brand-name fallback branch; keep-or-leave narrowed (a within-brand change may be the subject, never the answer). // r16 (2026-10-04 seed review): doubt design intent - own claim, one doubt, open verdict; facts to confirm, rule/ingredient lookups, hearsay, sizing asks and the Value worth-it ask fail; objections never voiced by a current user, churn/renewal always by one, no third option beside stay and leave. // r15 (2026-10-02, Tyler's option B): brand mentions = whole names, declared alternates, name words and dictionary aliases, with every ambiguous one-word hit (an everyday word written lowercase or opening a sentence, or a maker word like "Google" of Google Pixel) decided in context by the brand judge (haiku, cached) - no casing rules, no target exemption, no roster word lists. r14 (2026-10-02 review): everyday-word lexicon by lowercase SHARE in two tiers (label words: common and not brand-dominated - "jira", "netflix", "pixel", "apple", "chase" count lowercase again; aliases: merely common - "gold" stays capital-only), coined split words case-blind ("apple or samsung"), the target's own one-word name never case-guarded, "citi" off the case-guard list, and a monthly figure is the asker's plan only in first-person / spend / offer context ("the Pro about 20 a month more" is a stated price). r13 (2026-10-02 cold-walk audit + review): verb-less stated prices ("Gold at 250"); word-anchored price-concern test + money bolt-ons; brand checks read filtered dictionary alias forms ("amex"); everyday words inside brand names never name the brand - category tokens containment-aware, split words of multi-word names in label casing and not sentence-initial, one-word names and aliases in the vault everyday-word lexicon capitalized only, other brands' full names scrubbed first. r4 (2026-10-01): r2 calendar-year/60-word/segment-vocab; r3 category-naming labels exempt from substring leak; r4 'standardization' in segment vocabulary; r5 directionless-switch string check; r6 punctuation-blind label-leak matching; r7-r8 switch direction detected by absence (no OS, no roster brand near switch vocabulary); cheaper bolt-on token on non-price concerns
 
 /** Brand forms that double as ordinary English words: only these demand a
  * capitalized occurrence to count as naming the brand ("2-3 services max"
@@ -1949,6 +1949,13 @@ export interface RoomCheck {
    * any direction its seeds must state locks a leading brand out
    * (Pixel's "Cross-ecosystem switcher"). */
   platformSwitch: boolean;
+  /** Batch 2 (A2): the client is judged like a rival - true when the model
+   * lists it among the room's plausible contenders. A room the client
+   * cannot win is not contested, whatever the rival count. */
+  clientIn: boolean;
+  /** Batch 2 (A2): the room is built on what the client is known for, so
+   * the client is the obvious answer by construction. */
+  clientLead: boolean;
   /** Same-answer pass (2026-10-04): labels of OTHER rooms in the checked
    * set that ask this room's question - same decisive factor, same
    * favored contenders. Empty when the room's answer is its own. */
@@ -1983,7 +1990,7 @@ type RoomCheckInput = {
  * contested buyer occasion. Brand names are a mechanical find, not a
  * judgment, so they never trigger a second opinion. */
 const roomJudgedFail = (c: RoomCheck) =>
-  !c.contested || !!c.pitch || c.capability || c.platformSwitch || c.noChoice;
+  !c.contested || !!c.pitch || c.capability || c.platformSwitch || c.noChoice || c.clientLead;
 
 /**
  * Room check with a second opinion (2026-10-03 room walk v7: 4 of 7
@@ -2136,7 +2143,9 @@ async function checkRoomsPass(input: RoomCheckInput, pass: number): Promise<Room
   // otherwise defined by a product priority, is a capability room - check7
   // let a creator-upgrading-for-camera room and a gamer-upgrading-for-
   // performance room through on the thin "upgrades" clause.
-  const keyOf = (r: Situation) => cacheKey("room_check8", [
+  // room_check9 (batch 2, A2): the client is judged among the contenders
+  // and a room built on its lead strength is flagged.
+  const keyOf = (r: Situation) => cacheKey("room_check9", [
     DESIGN_CHECK_MODEL, input.brand, input.category, [...rivals].map((x) => x.toLowerCase()).sort().join(","),
     `${r.label.trim()}|${r.description.trim()}`,
     ...(pass > 1 ? [`pass${pass}`] : []),
@@ -2144,7 +2153,7 @@ async function checkRoomsPass(input: RoomCheckInput, pass: number): Promise<Room
   const keys = rooms.map(keyOf);
   let cached: Map<string, string>;
   try { cached = await store.cacheGetMany(keys, CACHE_TTL_MS); } catch { cached = new Map(); }
-  const verdicts = new Map<number, { contenders: string[]; pitch: string; capability?: boolean; platformSwitch?: boolean; noChoice?: boolean }>();
+  const verdicts = new Map<number, { contenders: string[]; clientIn?: boolean; pitch: string; capability?: boolean; platformSwitch?: boolean; noChoice?: boolean; clientLead?: boolean }>();
   rooms.forEach((_, i) => {
     const hit = cached.get(keys[i]);
     if (hit) { try { verdicts.set(i, JSON.parse(hit)); } catch { /* re-judge */ } }
@@ -2159,12 +2168,13 @@ async function checkRoomsPass(input: RoomCheckInput, pass: number): Promise<Room
         output_config: { effort: DESIGN_CHECK_EFFORT },
         system:
           `Each buying room below is a buyer occasion in the ${input.category} market. For each room give:\n` +
-          `- contenders: which of these brands are plausible contenders for that room's buyer - ${rivals.join(", ")} - names exactly as given. A brand contends when a buyer in that room would reasonably consider it; it need not be the favorite.\n` +
+          `- contenders: which of these brands are plausible contenders for that room's buyer - ${[input.brand, ...rivals].join(", ")} - names exactly as given. A brand contends when a buyer in that room would reasonably consider it; it need not be the favorite.\n` +
+          `- clientLead: true when the room is built on what ${input.brand} is known for, so ${input.brand} is the obvious answer for that buyer by construction rather than one contender among several.\n` +
           `- pitch: if the room's wording borrows ONE specific brand's own selling-point vocabulary (its signature feature names, taglines or platform labels) instead of the buyer's outcome language, quote that phrase; otherwise an empty string. Buyer outcomes every contender speaks to are not pitch.\n` +
           `- capability: true when the room is a product capability or feature being adopted rather than a buyer's circumstance, OR when the buyer is defined by a product priority (a quality, feature or use they want the product to excel at) and the room's only situation is that they are buying, upgrading or replacing the product - a shopping act is not a circumstance. A room with a circumstance of its own (something happening to the buyer, who they are buying for, a constraint, a setting, a moment) is a situation, whatever its buyer prefers or weighs.\n` +
           `- platformSwitch: true ONLY when the room states or implies a DIRECTION between competing platforms or ecosystems (from one to another) - a direction a question must state rules a leading brand out. A buyer who has stayed with one maker or platform and is not committed to it this time is openness, not a switch. Moving off an old or homegrown solution is NOT a platform switch.\n` +
           `- noChoice: true when the room's buyer makes no real choice between products - accepting the next model by default without comparing - so there is nothing for an answer to steer. Choosing quickly, or under time pressure, is still choosing.\n` +
-          `Reply with ONLY JSON: {"rooms": [{"contenders": [...], "pitch": "...", "capability": false, "platformSwitch": false, "noChoice": false}, ...]} - one entry per room, in order.`,
+          `Reply with ONLY JSON: {"rooms": [{"contenders": [...], "pitch": "...", "capability": false, "platformSwitch": false, "noChoice": false, "clientLead": false}, ...]} - one entry per room, in order.`,
         messages: [{
           role: "user",
           content: misses.map((i, k) => `${k + 1}. ${rooms[i].label}: ${rooms[i].description}`).join("\n"),
@@ -2175,13 +2185,13 @@ async function checkRoomsPass(input: RoomCheckInput, pass: number): Promise<Room
       // Malformed JSON (an unescaped quote inside a pitch phrase) left three
       // brands' rooms unchecked in the 2026-10-03 draws: parse defensively,
       // then ask once more for strict JSON before failing open.
-      const parse = (t: string) => { try { return JSON.parse(firstJsonObject(t) ?? t) as { rooms?: { contenders?: string[]; pitch?: string; capability?: boolean; platformSwitch?: boolean; noChoice?: boolean }[] }; } catch { return null; } };
+      const parse = (t: string) => { try { return JSON.parse(firstJsonObject(t) ?? t) as { rooms?: { contenders?: string[]; pitch?: string; capability?: boolean; platformSwitch?: boolean; noChoice?: boolean; clientLead?: boolean }[] }; } catch { return null; } };
       let j = parse(text);
       if (!j) {
         const res2 = await a.messages.create({
           model: DESIGN_CHECK_MODEL, max_tokens: 1500, output_config: { effort: DESIGN_CHECK_EFFORT },
           system: "Reply with ONLY valid JSON, no prose. Quote marks inside strings must be escaped; if a pitch phrase contains a quote mark, drop it from the phrase.",
-          messages: [{ role: "user", content: `Rewrite this as valid JSON of the shape {"rooms": [{"contenders": [...], "pitch": "...", "capability": false, "platformSwitch": false, "noChoice": false}]}:\n${text}` }],
+          messages: [{ role: "user", content: `Rewrite this as valid JSON of the shape {"rooms": [{"contenders": [...], "pitch": "...", "capability": false, "platformSwitch": false, "noChoice": false, "clientLead": false}]}:\n${text}` }],
         } as never);
         j = parse((res2 as { content: { type: string; text?: string }[] }).content.filter((b) => b.type === "text").map((b) => b.text ?? "").join("").trim());
       }
@@ -2195,7 +2205,7 @@ async function checkRoomsPass(input: RoomCheckInput, pass: number): Promise<Room
         return [r, base, `${base} ${paren.join(" ")}`, ...paren, ...base.split("/"), ...paren.flatMap((x) => x.split("/"))]
           .map((f) => matchKey(f)).filter(Boolean);
       };
-      const rivalForms = rivals.map((r) => ({ r, forms: new Set(formsOf(r)) }));
+      const rivalForms = [input.brand, ...rivals].map((r) => ({ r, forms: new Set(formsOf(r)) }));
       const resolve = (name: string): string | undefined => {
         const k = matchKey(name);
         if (!k) return undefined;
@@ -2206,13 +2216,16 @@ async function checkRoomsPass(input: RoomCheckInput, pass: number): Promise<Room
         const row = j.rooms?.[k];
         if (!row) return;
         // Only names we sent survive - the model never adds a brand.
-        const contenders = [...new Set((row.contenders ?? []).map((c) => resolve(String(c))).filter((c): c is string => !!c))];
+        const all = [...new Set((row.contenders ?? []).map((c) => resolve(String(c))).filter((c): c is string => !!c))];
+        const contenders = all.filter((c) => c !== input.brand);
         const v = {
           contenders,
+          clientIn: all.includes(input.brand),
           pitch: humanize(String(row.pitch ?? "").replace(/\s*[—–]\s*/g, " - ")).slice(0, 80),
           capability: row.capability === true,
           platformSwitch: row.platformSwitch === true,
           noChoice: row.noChoice === true,
+          clientLead: row.clientLead === true,
         };
         verdicts.set(i, v);
         await store.cacheSet(keys[i], JSON.stringify(v), stampOf(input)).catch(() => {});
@@ -2224,21 +2237,24 @@ async function checkRoomsPass(input: RoomCheckInput, pass: number): Promise<Room
   return rooms.flatMap((r, i) => {
     const v = verdicts.get(i);
     const names = namesOf(r);
-    if (!v && rivals.length > 0) return names.length > 0 ? [{ label: r.label, contenders: [], rivals: rivals.length, inPool: 0, pool: rivals.length, contested: true, pitch: "", names, capability: false, platformSwitch: false, noChoice: false, sameAs: [] }] : [];
+    if (!v && rivals.length > 0) return names.length > 0 ? [{ label: r.label, contenders: [], rivals: rivals.length, inPool: 0, pool: rivals.length, contested: true, clientIn: true, clientLead: false, pitch: "", names, capability: false, platformSwitch: false, noChoice: false, sameAs: [] }] : [];
     const contenders = v?.contenders ?? [];
     const picks = (input.picks ?? []).filter((p) => rivals.includes(p));
     const pool = picks.length > 0 ? picks.length : rivals.length;
     const inPool = picks.length > 0 ? contenders.filter((c) => picks.includes(c)).length : contenders.length;
+    // Batch 2 (A2): a verdict without the field (older cache) counts the
+    // client in; a fresh verdict must list it.
+    const clientIn = v ? v.clientIn !== false : true;
     const contested = rivals.length === 0
       ? true
-      : picks.length > 0
+      : clientIn && (picks.length > 0
         ? inPool >= Math.ceil(picks.length / 2) && contenders.length >= Math.min(2, rivals.length)
-        : inPool >= Math.ceil(rivals.length / 2);
+        : inPool >= Math.ceil(rivals.length / 2));
     // A pitch flag must quote words the room actually contains (Doritos'
     // "Scoops" flag quoted a Tostitos line the room never mentioned).
     const pitchRaw = (v?.pitch ?? "").trim().replace(/^["']|["']$/g, "");
     const pitch = pitchRaw && roomText(r).toLowerCase().includes(pitchRaw.toLowerCase()) ? pitchRaw : "";
-    return [{ label: r.label, contenders, rivals: rivals.length, inPool, pool, contested, pitch, names, capability: v?.capability === true, platformSwitch: v?.platformSwitch === true, noChoice: v?.noChoice === true, sameAs: [] }];
+    return [{ label: r.label, contenders, rivals: rivals.length, inPool, pool, contested, clientIn, clientLead: v?.clientLead === true, pitch, names, capability: v?.capability === true, platformSwitch: v?.platformSwitch === true, noChoice: v?.noChoice === true, sameAs: [] }];
   });
 }
 
@@ -2262,7 +2278,7 @@ export async function contestRoomSet(input: {
   const by = new Map(checks.map((c) => [c.label, c]));
   const passes = (s: ScenarioSpec) => {
     const c = by.get(s.label);
-    return !c || (c.contested && c.names.length === 0 && !c.pitch && !c.capability && !c.platformSwitch && !c.noChoice);
+    return !c || (c.contested && c.names.length === 0 && !c.pitch && !c.capability && !c.platformSwitch && !c.noChoice && !c.clientLead);
   };
   const scenarios = [...input.scenarios];
   let reserve = [...input.reserve];
@@ -2298,6 +2314,25 @@ export async function contestRoomSet(input: {
     if (!sameQuestion(s, scenarios.slice(0, i))) return;
     swapOut(i);
   });
+  // Batch 2 (A3, 2026-10-05): a swap changes the set, and same-answer
+  // groups are a property of the set - re-check the FINAL core + reserve
+  // once (per-room verdicts are cached; one fresh same-answer call) and
+  // swap any kept duplicate the first pass could not see. One round.
+  if (swaps.length > 0) {
+    const again = await checkRooms({
+      brand: input.brand, category: input.category, rivals: input.rivals, picks: input.picks,
+      rooms: [...scenarios, ...reserve].map((s) => ({ label: s.label, description: s.description })), meta: input.meta,
+    }).catch(() => [] as RoomCheck[]);
+    if (again.length > 0) {
+      by.clear();
+      for (const c of again) by.set(c.label, c);
+      scenarios.forEach((s, i) => {
+        if (!sameQuestion(s, scenarios.slice(0, i))) return;
+        swapOut(i);
+      });
+      return { scenarios, reserve, checks: again, swaps };
+    }
+  }
   return { scenarios, reserve, checks, swaps };
 }
 
@@ -2325,7 +2360,10 @@ export async function planValueLines(input: {
   tagCosts({ purpose: "setup:value_lines" });
   const rooms = input.rooms.map((r) => ({ label: r.label.trim(), description: r.description.trim() }));
   // value_lines20 (2026-10-04): + per-room fit (contest / leans_no / leans_yes).
-  const key = cacheKey("value_lines20", [
+  // value_lines21 (batch 2, B5): the premium line is in the SAME FORM as
+  // the category's mainstream product; a room whose buyer type the line
+  // is not sold to leans_no.
+  const key = cacheKey("value_lines21", [
     VALUE_LINES_MODEL, input.brand, input.category, input.audience ?? "",
     rooms.map((r) => `${r.label}|${r.description}`).join("~"),
   ]);
@@ -2344,7 +2382,7 @@ export async function planValueLines(input: {
             `For the brand ${input.brand} in ${input.category}, give: ` +
             `tiers - the price tiers of the category as a buyer in the given audience shops it, from most to least expensive: each tier is a KIND of product that several different makers sell, described in a few plain words the way a buyer says it - never a maker or brand, and never the plans, sizes or packs of one product - 3 to 5 tiers. When the audience spans separate markets (personal and business buyers), the ladder is the one this brand's main buyers shop; ` +
             `lines - the brand's distinct current product lines in this category by their real names as buyers say them, each with the index of the tier it sits in. A line is a separate product people choose between by name; plans, subscription levels, editions, flavors, sizes and varieties of one product are NOT lines. A brand that sells one product has one line, its own name. Never an exact model number or year - the line as buyers name it; ` +
-            `premium - the brand's MOST PREMIUM line that buyers in the given audience can buy or apply for directly, copied exactly from lines - never an invitation-only product, never one sold only as an add-on to another of the brand's products, and never a separate layer aimed at a different buyer than the given audience. ` +
+            `premium - the brand's MOST PREMIUM line that buyers in the given audience can buy or apply for directly, copied exactly from lines - never an invitation-only product, never one sold only as an add-on to another of the brand's products, never a separate layer aimed at a different buyer than the given audience, and ALWAYS in the same form as the category's mainstream product: a line whose form changes what the product is (it folds, is a different size or device class, a different kind of account or card) is a separate line, never the premium tier of the mainstream one. ` +
             `Reply with ONLY JSON: {"tiers": ["..."], "lines": [{"name": "...", "tier": 0}], "premium": "..."}.${extra}`,
           messages: [{ role: "user", content: `Audience: ${input.audience ?? "unknown"}\nRooms:\n${rooms.map((r, i) => `${i + 1}. ${r.label}: ${r.description}`).join("\n")}` }],
         } as never);
@@ -2423,7 +2461,7 @@ export async function planValueLines(input: {
           model: VALUE_LINES_MODEL, max_tokens: 800, output_config: { effort: "low" },
           system:
             `Each buying room below is a buyer in ${input.category}. The question asked in every room is whether "${pair.line}" (from ${input.brand}) is worth it over ${pair.counterpart}. For each room say whether that question is a genuine contest for that buyer: ` +
-            `contest - a competent advisor could answer either way for this buyer; leans_no - the room's circumstance (a hard price cap, a strict budget) all but settles it as not worth it; leans_yes - the circumstance (a buyer who only considers the top tier, or never weighs cheaper options) all but settles it as worth it. ` +
+            `contest - a competent advisor could answer either way for this buyer; leans_no - the room's circumstance (a hard price cap, a strict budget) all but settles it as not worth it, OR the room's buyer is not the kind of buyer "${pair.line}" is sold to (a personal line in a business room, or the reverse); leans_yes - the circumstance (a buyer who only considers the top tier, or never weighs cheaper options) all but settles it as worth it. ` +
             `Reply with ONLY JSON: {"rooms": ["contest" | "leans_no" | "leans_yes", ...]} - one entry per room, in order.`,
           messages: [{ role: "user", content: rooms.map((r, i) => `${i + 1}. ${r.label}: ${r.description}`).join("\n") }],
         } as never);
@@ -3059,6 +3097,9 @@ const CELL_WRITER_SYSTEM =
           "asker's.\n" +
           "- journey(...): that cell's buyer decides that way - write the " +
           "prompt in that buyer's register.\n" +
+          "- situation=<label> is the column's title for OUR records, never " +
+          "words for the prompt: no word of it, in any form, appears in the " +
+          "prompt - the circumstance comes from room(...) alone.\n" +
           "- room(...): the buying scenario's own description - WHO the asker " +
           "is and the situation they are in. The prompt carries that " +
           "circumstance in the asker's own words. It carries NOTHING the " +
@@ -3331,7 +3372,10 @@ export async function generateWorries(input: {
   // member keeps its plan - a bundled worry ("compliance and residency")
   // and a duplicated one (lock-in vs migration out) each cost a cell.
   // worries6: a worry is a judgment, never a checkable fact.
-  const key = cacheKey("worries6", [
+  // worries7 (batch 2, C6): overlap pairs are decided by one low-effort
+  // model call over the pool, with the word test as the guard; never a
+  // procedure worry.
+  const key = cacheKey("worries7", [
     CONCERNS_MODEL, input.brand, input.category, input.audience,
     input.scenarios.map((s) => s.label).join(","), offered.join(","),
   ]);
@@ -3353,7 +3397,9 @@ export async function generateWorries(input: {
             "people actually raise, never invented ones.\n" +
             "Each worry is ONE doubt about one thing: two doubts joined by " +
             "'and' are two worries, and the same doubt reached from two " +
-            "directions is one worry - list it once. A worry is a JUDGMENT " +
+            "directions is one worry - list it once. Never a worry whose " +
+            "answer is a procedure (how to cancel, pause, return or reach " +
+            "support) - that is a how-to, not a doubt. A worry is a JUDGMENT " +
             "an answer could take either side of - never a checkable fact " +
             "about what the brand sells, supports, offers or where it is " +
             "stocked, which every answer would confirm or correct the same " +
@@ -3459,13 +3505,53 @@ export async function generateWorries(input: {
       const inter = [...wa].filter((x) => wb.has(x)).length;
       return inter / Math.min(wa.size, wb.size) >= 0.67 && inter >= 1;
     };
-    for (let i = 0; i < list.length; i++) {
-      for (let j = i + 1; j < list.length; j++) {
-        if (!same(list[i].subject ?? "", list[j].subject ?? "")) continue;
-        list[i].overlaps = [...new Set([...(list[i].overlaps ?? []), list[j].worry])];
-        list[j].overlaps = [...new Set([...(list[j].overlaps ?? []), list[i].worry])];
-        if ((list[j].overlaps ?? []).some((o) => list.findIndex((x) => x.worry === o) < j)) list[j].recommend = [];
+    // Batch 2 (C6): the model names same-doubt pairs; a pair is accepted
+    // when the model names it AND the two share a subject word or two
+    // content words of their details (the guard), or when the subjects
+    // are identical after normalization. A shared word alone no longer
+    // groups ("flavor availability" vs "flavor quality").
+    let modelPairs: [number, number][] = [];
+    if (list.length >= 2) {
+      try {
+        const a = await anthropicClient();
+        const res = await a.messages.create({
+          model: DESIGN_CHECK_MODEL, max_tokens: 600, output_config: { effort: DESIGN_CHECK_EFFORT },
+          system:
+            `Below are worries buyers voice about one brand. Two worries are the SAME doubt when an answer that settles one settles the other - the buyer is doubting the same thing about the brand, however differently each is worded. Different doubts that happen to share a word are not the same. ` +
+            `Reply with ONLY JSON: {"same": [[1, 4], ...]} - pairs of numbers; empty when none.`,
+          messages: [{ role: "user", content: list.map((w, k) => `${k + 1}. ${w.worry} (${w.subject ?? ""}): ${w.detail}`).join("\n") }],
+        } as never);
+        const text = (res as { content: { type: string; text?: string }[] }).content.filter((b) => b.type === "text").map((b) => b.text ?? "").join("").trim();
+        const j = JSON.parse(firstJsonObject(text) ?? text) as { same?: number[][] };
+        modelPairs = (j.same ?? []).map((p) => [Number(p[0]) - 1, Number(p[1]) - 1] as [number, number])
+          .filter(([x, y]) => Number.isInteger(x) && Number.isInteger(y) && x >= 0 && y >= 0 && x < list.length && y < list.length && x !== y)
+          .map(([x, y]) => (x < y ? [x, y] : [y, x]) as [number, number]);
+      } catch (err) {
+        console.error("worries overlap pairing failed open:", err);
       }
+    }
+    const detailWords = (t: string) => new Set(t.toLowerCase().replace(/[^a-z0-9 ]+/g, " ").split(/\s+/).filter((x) => x.length > 3 && !STOP_SUBJECT_WORDS.has(x)));
+    const normSubj = (t: string) => t.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+    const guard = (i: number, j: number) => {
+      const a = list[i], b = list[j];
+      const na = normSubj(a.subject ?? ""), nb = normSubj(b.subject ?? "");
+      if (na && na === nb) return true;
+      if ([...words(a.subject ?? "")].some((w) => words(b.subject ?? "").has(w))) return true;
+      const da = detailWords(a.detail), db = detailWords(b.detail);
+      return [...da].filter((w) => db.has(w)).length >= 2;
+    };
+    const pairs = new Set<string>();
+    for (let i = 0; i < list.length; i++) for (let j = i + 1; j < list.length; j++) {
+      const na = normSubj(list[i].subject ?? ""), nb = normSubj(list[j].subject ?? "");
+      if (na && na === nb) pairs.add(`${i}|${j}`);
+    }
+    for (const [i, j] of modelPairs) if (guard(i, j)) pairs.add(`${i}|${j}`);
+    void same;
+    for (const p of pairs) {
+      const [i, j] = p.split("|").map(Number);
+      list[i].overlaps = [...new Set([...(list[i].overlaps ?? []), list[j].worry])];
+      list[j].overlaps = [...new Set([...(list[j].overlaps ?? []), list[i].worry])];
+      list[j].recommend = [];
     }
     return list.length > 0 ? list : null;
   });
@@ -3541,7 +3627,12 @@ export function planGridCells<S extends {
         plan.push({ stage: st, situation: label, angle: "generic", scope: null });
       }
     } else {
-      plan.push({ stage: st, situation: null, angle: "generic", scope });
+      // Batch 2 (A1, 2026-10-05): a TOPIC row carries no reach limit. The
+      // mask still decides whether the stage runs (any room's journey can
+      // switch it on - decision 2), but its one cell is voiced from the
+      // base, never for the single room that switched it on (Netflix's
+      // category education "for a long sports season").
+      plan.push({ stage: st, situation: null, angle: "generic", scope: null });
     }
   }
   return plan;
@@ -4716,7 +4807,7 @@ export async function generateGrid(input: {
                         `Rivals: ${rivals.map(primaryBrandName).join(", ")}\nAudience: ${input.audience ?? "unknown"}\n\n` +
                         `Cell plan:\n${planLine(row, 0)}\n` +
                         `   [the previous attempt was rejected because ${why}. This battery's use-case jobs so far: ${covered}. ` +
-                        `Name ONE DIFFERENT outcome buyers in this situation commonly want, in everyday words without any product feature word, not the situation itself, never a product quality, and never the subject of one of the brand's known worries${(input.worries ?? []).length > 0 ? ` (picked worries: ${[...new Set((input.worries ?? []).map((w) => w.concern))].join("; ")})` : ""}. ` +
+                        `Name ONE DIFFERENT outcome buyers in this situation commonly want, in everyday words without any product feature word, not the situation itself, never a product quality, never a store, sale, promotion or deadline from the scenario (the scenario only says who you are), and never the subject of one of the brand's known worries${(input.worries ?? []).length > 0 ? ` (picked worries: ${[...new Set((input.worries ?? []).map((w) => w.concern))].join("; ")})` : ""}. ` +
                         `Ask which one will do that best.${swapRule("use_case")} Do not reuse this wording: "${d.c.text}"]` },
                   ],
                   response_format: { type: "json_schema", json_schema: { name: "grid_cells", strict: true, schema: CELLS_SCHEMA } },

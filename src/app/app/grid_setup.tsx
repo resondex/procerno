@@ -1606,6 +1606,9 @@ interface RoomCheckUi {
   /** Other rooms in the checked set that ask this room's question. */
   sameAs?: string[];
   decides?: string;
+  /** Batch 2: the client is among the room's contenders; the room is built on its strength. */
+  clientIn?: boolean;
+  clientLead?: boolean;
 }
 
 export function ScenariosGate({
@@ -1762,6 +1765,10 @@ export function ScenariosGate({
       out.push({ text: "No real choice made here", title: "The buyer here barely chooses (a default, an auto-renew, whatever is in stock) - there is little for an answer to steer." });
     if (c.platformSwitch)
       out.push({ text: "Platform switch locks out a rival", title: "A switch between platforms forces each question to state a direction, which rules a leading brand out of the whole column." });
+    if (c.clientLead)
+      out.push({ text: "Built on your strength", title: "This room is built on what your brand is known for, so your brand is the obvious answer by construction - the column would measure your pitch, not a contest. Try a near neighbor." });
+    if (c.clientIn === false && c.rivals > 0)
+      out.push({ text: "You're not a contender here", title: "Buyers in this room would not consider your brand, so no answer can name you - the column measures a market you are not in. Swap it for a room you compete in." });
     if (!c.contested && c.rivals > 0) {
       const pool = c.pool ?? c.rivals;
       const n = c.inPool ?? c.contenders.length;
