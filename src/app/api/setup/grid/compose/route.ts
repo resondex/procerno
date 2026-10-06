@@ -30,6 +30,8 @@ const JourneyShape = z.object({
 });
 
 const ScenarioShape = z.object({
+  /** journeys29: the room's wanted qualities - display only. */
+  want: z.string().trim().max(160).optional(),
   label: z.string().trim().min(1).max(60),
   description: z.string().trim().max(240),
   journey: JourneyShape.nullable(),

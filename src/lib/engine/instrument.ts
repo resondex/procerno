@@ -952,7 +952,16 @@ export async function readScenarios(input: {
   // spender :: an individual who puts most expenses on cards"). The judge
   // now runs AFTER the read on the room text plus the dimensions the read
   // says differ, and names the reason itself.
-  const key = cacheKey("scenarios_journeys28", [
+  // 29 (2026-10-05, Tyler): option (a) cut too deep - "no kind of product,
+  // no outcome, no purpose" stripped the buying act and the usage out of
+  // the description, leaving a demographic ("an adult managing shared
+  // monthly expenses"). The description keeps WHO, the situation, WHAT
+  // they are choosing and HOW they will use it; the want field holds only
+  // the qualities and outcomes they want. The gate shows the want as a
+  // second line; the writer still sees the description alone. The
+  // structural purpose cut is off the read path (the want field does
+  // that job now, and the cut was taking usage with it).
+  const key = cacheKey("scenarios_journeys29", [
     input.category, input.audience, input.forBrand ?? "",
   ]);
   const read = await coalesced<{
@@ -983,15 +992,15 @@ export async function readScenarios(input: {
           "Labels are in sentence case. Descriptions ONE short plain sentence. Each scenario is a ROOM: " +
           "a buyer occasion in this category - who the buyer is and the " +
           "situation they are in. " +
-          "The description is the CIRCUMSTANCE ONLY: what is happening to " +
-          "the buyer, who they are, where they are, who they are buying for, " +
-          "a constraint or a moment - written so it contains no kind of " +
-          "product, no outcome, no quality and no purpose. Everything the " +
-          "buyer wants, values, is choosing FOR or is comparing goes in the " +
-          "separate want field (one short phrase, or empty) - never in the " +
-          "description, not as its main clause, not as a trailing 'to ...' " +
-          "or 'for ...' clause, not mid-sentence. The answer decides what " +
-          "matters. Never a specific brand or product anywhere. " +
+          "The description is the buyer's circumstance: who they are, what " +
+          "is happening to them, where they are or who they are buying for, " +
+          "WHAT they are choosing and HOW they will use it (the kind of " +
+          "product and its use are circumstance). It never names a quality, " +
+          "feature, outcome or benefit the buyer wants - those go in the " +
+          "separate want field (one short phrase, or empty), never in the " +
+          "description, not as a trailing 'for ...' clause, not mid-sentence. " +
+          "The answer decides what matters. Never a specific brand or " +
+          "product anywhere. " +
           "A room's buyer is actively CHOOSING between products in the " +
           "category - comparing, or at least open to options; a buyer who " +
           "rebuys, renews or takes the next version of what they have " +
@@ -1136,9 +1145,7 @@ export async function readScenarios(input: {
       if (granted) deltaGranted = true;
       return {
         label: s.label.trim(),
-        // Belt and braces: the structural purpose-clause cut still runs on
-        // the description the model returns.
-        description: circumstanceOnly(s.description.trim()),
+        description: s.description.trim(),
         ...(s.want?.trim() ? { want: humanize(s.want.trim()) } : {}),
         ...(granted && stakesWhy.get(i) ? { journeyWhy: stakesWhy.get(i) } : {}),
         journey: granted ? s.journey : null,
@@ -3975,14 +3982,14 @@ export async function generateGrid(input: {
     const d = input.scenarios.find((s) => s.label === situation)?.description;
     // The same cut the writer sees - a heal steered on the full description
     // put the purpose clause straight back (AmEx v11 audit).
-    return d ? `${situation} - ${circumstanceOnly(humanize(d))}` : situation;
+    return d ? `${situation} - ${humanize(d).replace(/\s+/g, " ").trim()}` : situation;
   };
   // s48: the description reaches the writer as CIRCUMSTANCE only - a
   // trailing purpose or want clause ("...to keep cash flow flexible",
   // "...wanting more rewards") is cut before it rides the plan line, since
   // the writer carried it into every cell of the column (AmEx re-audit).
   const roomBySituation = new Map(
-    input.scenarios.map((s) => [s.label, circumstanceOnly(humanize(s.description))] as const)
+    input.scenarios.map((s) => [s.label, humanize(s.description).replace(/\s+/g, " ").trim()] as const)
   );
   const roomNote = (situation: string | null) => {
     const d = situation ? roomBySituation.get(situation) : null;
