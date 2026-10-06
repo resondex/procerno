@@ -2652,8 +2652,11 @@ export function CoverageGate({
     const effective = cols.length > 0 ? cols : activeLabels;
     return (
       <tr key={s.key} className={isKept ? "" : "opacity-50"}>
-        <td className="px-3 py-1">
-          <label className="flex flex-wrap items-center gap-x-2 gap-y-0.5">
+        {/* The stage column never gives way to the scenario columns: with
+            long room labels it got squeezed until every chip dropped under
+            its stage name and the map doubled in height (2026-10-06). */}
+        <td className="px-3 py-1 whitespace-nowrap">
+          <label className="flex items-center gap-x-2">
             <input
               type="checkbox"
               checked={isKept}
@@ -2822,7 +2825,7 @@ export function CoverageGate({
         <table className="w-full border-collapse text-[12px]">
           <thead>
             <tr className="bg-surface-1">
-              <th className="px-3 py-2 text-left font-medium text-ink-3 whitespace-nowrap">stage</th>
+              <th className="px-3 py-2 text-left font-medium text-ink-3 whitespace-nowrap w-px">stage</th>
               {active.map((sc) => (
                 <th key={sc.label} className="px-2 py-2 text-center font-medium">
                   <span className={sc.journey ? "text-warning" : "text-ink"}>{sc.label}</span>
