@@ -833,4 +833,22 @@ const fails9 = fails;
   expect("'keep hearing' is hearsay", instr.HEARSAY_OPENER.test("I keep hearing X isn't accepted much - is that true?"));
 }
 console.log(`10. p15 paraphrase guards: ${fails === fails9 ? "ALL PASS" : `${fails - fails9} FAILURE(S)`}`);
+
+console.log("11. p17 paraphrase guards");
+const fails10 = fails;
+{
+  const instr = await import(`${REPO}/src/lib/engine/instrument`);
+  expect("'in full' kept by substance", instr.keepsQualifiers("I pay my statement in full each month; is X worth it?", "I clear my statement balance each month; is X worth it?"));
+  expect("'in full' lost fails", !instr.keepsQualifiers("I pay my statement in full each month; is X worth it?", "Because I always pay monthly, is X worth it?"));
+  expect("'over time' kept as spread payments", instr.keepsQualifiers("I need to pay it down over time.", "I want to spread the payments across months."));
+  expect("seed without a qualifier constrains nothing", instr.keepsQualifiers("I want one card for everything.", "I pay monthly and want one card."));
+  expect("purpose added is caught", instr.addsPurposeOrDestination("I take several trips a year and want one card.", "I fly for work several times a year and want one card.") === "for work");
+  expect("purpose already in the seed passes", instr.addsPurposeOrDestination("I travel abroad a few times a year.", "I go overseas a few times a year.") === null);
+  expect("criteria 'consider getting' is caught", instr.criteriaAsksForProducts("What should I look at, and then what should I consider getting?", "credit cards"));
+  expect("'I've been told' is hearsay", instr.HEARSAY_OPENER.test("I've been told X is painful if you carry a balance."));
+  expect("head-to-head keeps the category noun",
+    bc.keepsCategoryNoun("If you're choosing a credit card, X or Y, which one and why?", "X or Y, which card would you pick and why?", "credit cards") &&
+    !bc.keepsCategoryNoun("If you're choosing a credit card, X or Y, which one and why?", "X or Y - which would you pick and why?", "credit cards"));
+}
+console.log(`11. p17 paraphrase guards: ${fails === fails10 ? "ALL PASS" : `${fails - fails10} FAILURE(S)`}`);
 if (fails > 0) process.exitCode = 1;

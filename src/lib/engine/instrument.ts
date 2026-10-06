@@ -5608,21 +5608,50 @@ export interface Phrasing {
 // one failure (a kept opening clause); the guards are mechanical: a
 // class-cell paraphrase keeps the class phrase, a criteria paraphrase's
 // second ask never asks for products or brands, "keep hearing" is hearsay.
-const PHRASINGS_VERSION = "p16";
+// "p17" (2026-10-06, AmEx round 5): the five residual classes as guards -
+// head-to-heads and offensive alternatives keep the seed's category term;
+// a criteria second ask never asks for a product by verb ("consider
+// getting"); "I've been told" is hearsay; a scenario seed's payment or
+// timing qualifier ("in full", "on time", "over time") survives in
+// substance; no purpose or destination word is added to a scenario seed
+// that lacks it. Plus two writer sentences (worry = own claim; criteria's
+// second ask = what to consider).
+const PHRASINGS_VERSION = "p17";
+/** p17: generic payment and timing qualifiers a scenario seed may carry,
+ * each with the rewordings that keep it in substance. */
+const QUALIFIER_SHAPES: [RegExp, RegExp][] = [
+  [/\bin full\b/i, /\b(?:in full|full (?:balance|amount|statement)|pa(?:y|ys|ying|id) (?:it |them |everything |the balance |(?:my|the|their|our) (?:card|balance|statement|bill|charges) )?off|clear(?:s|ed|ing)? (?:my|the|their|our|every|each)|never carry|don'?t carry|no (?:carried )?balance|zero balance|without carrying|never revolve|full-balance|pa(?:y|ys|ying|id) (?:my|the|their|our) (?:\w+ )?balance)\b/i],
+  [/\bon time\b/i, /\b(?:on time|never late|by the due date|before (?:it'?s|the) due|on schedule)\b/i],
+  [/\bup ?front\b/i, /\b(?:up ?front|in advance|ahead of time|all at once)\b/i],
+  [/\bover time\b/i, /\b(?:over time|over (?:several |a few |some |many |the next few |the coming )?(?:months|years|weeks)|across (?:several |a few |some |many )?(?:months|years|weeks)|in insta?llments|into (?:\w+ )?(?:payments|insta?llments|chunks)|spread (?:it |them |out|the|my)|stretch(?:ed|ing)? (?:it |the |a )|financ(?:e|ed|ing)|pa(?:y|ying|id) (?:it |them |for it )?(?:down|off|gradually|slowly)|month (?:to|by) month|monthly payments?|bit by bit|little by little|amortiz(?:e|ed|ing))\b/i],
+];
+export function keepsQualifiers(seed: string, para: string): boolean {
+  return QUALIFIER_SHAPES.every(([inSeed, keeps]) => !inSeed.test(seed) || keeps.test(para));
+}
+/** p17: purpose and destination words that change a buying circumstance
+ * when added to a seed that lacks them. Generic English, no category. */
+const PURPOSE_WORDS = /\b(?:abroad|overseas|international(?:ly)?|foreign|for work|work (?:trips?|travel)|business (?:trips?|travel|journeys?)|vacations?|getaways?|holidays?|leisure|honeymoon|conferences?|commut(?:e|es|ing)|for school|for college)\b/i;
+export function addsPurposeOrDestination(seed: string, para: string): string | null {
+  const m = para.match(PURPOSE_WORDS);
+  if (!m) return null;
+  return PURPOSE_WORDS.test(seed) ? null : m[0];
+}
 /** p16: a criteria second ask that asks for products or brands (the
  * category's words, or generic product words) instead of what to consider. */
 export function criteriaAsksForProducts(text: string, category: string): boolean {
   const cat = category.toLowerCase().split(/\s+/).filter((w) => w.length >= 3).map((w) => w.replace(/(ies|es|s)$/, ""));
   const nouns = [...cat.map((w) => `${w}\\w*`), "brands?", "products?", "options?", "ones?", "names?"].join("|");
   const re = new RegExp(`(?:given (?:that|those|this)|then|after(?:wards| that)?|from there|with that in mind|because of that|once i \\w+)[^?.;]*?\\b(?:which|what)\\s+(?:\\w+\\s+){0,2}?(?:${nouns})\\b`, "i");
-  return re.test(text);
+  // p17: or by verb - "what should I consider getting / choosing".
+  const verb = /\b(?:consider|think about|look at)\s+(?:getting|choosing|picking|buying|applying for|signing up for|going with|switching to)\b/i;
+  return re.test(text) || verb.test(text);
 }
 /** p15: a paraphrase whose first COPY_OPENING words equal the seed's or a
  * kept sibling's copied its opening clause. Calibrated on two AmEx rounds:
  * 4 words hits 20-22% of output (cell 39's template 8 of 9), 5 hits 15%. */
 const COPY_OPENING = 4;
 /** p15: a worry voiced as someone else's claim. */
-export const HEARSAY_OPENER = /\b(?:i(?:'ve| have)? (?:heard|read|seen)|i (?:keep|kept) (?:hearing|reading|seeing)|i hear|people (?:say|are saying|keep saying)|folks say|everyone says|they say|word is|rumou?rs?|(?:a )?friend (?:told|says|said)|(?:reviews|reddit|forums?) say)\b/i;
+export const HEARSAY_OPENER = /\b(?:i(?:'ve| have)? (?:heard|read|seen)|i(?:'ve| have)? been told|i was told|someone told me|i (?:keep|kept) (?:hearing|reading|seeing)|i hear|people (?:say|are saying|keep saying)|folks say|everyone says|they say|word is|rumou?rs?|(?:a )?friend (?:told|says|said)|(?:reviews|reddit|forums?) say)\b/i;
 /** p15: longest run of consecutive shared tokens between two token lists. */
 export function longestSharedRunWords(a: string[], b: string[]): string[] {
   let best: string[] = [];
@@ -5985,6 +6014,11 @@ export async function generatePhrasings(input: {
             "same brands and no others.\n" +
             "- Never change the circumstance or the decision being made; never " +
             "add a new constraint the seed does not have.\n" +
+            "- A worry seed (objections, churn, renewal) stays the asker's " +
+            "OWN claim in every paraphrase - never something they were told, " +
+            "heard or read.\n" +
+            "- A criteria seed's second ask stays 'what should I consider' - " +
+            "never what to get, choose, buy, apply for or sign up for.\n" +
             "- Keep the seed's category term exactly, never a shorter or " +
             "broader word for it - the category term is part of the " +
             "measurement. Never copy a scenario label's text " +
@@ -6242,6 +6276,13 @@ export async function generatePhrasings(input: {
         // p15: a stated frequency in a scenario seed is the room's input to
         // the answer - the paraphrase keeps it at the same level.
         if (seed.situation && !keepsFrequency(seed.text, text)) { culls.ask++; continue; }
+        // p17: a payment or timing qualifier survives in substance; no
+        // purpose or destination is added to a circumstance that lacks it.
+        if (seed.situation && !keepsQualifiers(seed.text, text)) { culls.ask++; if (process.env.PHRASINGS_DEBUG) console.warn(`  cull qualifier [${seed.stage}]: ${text}`); continue; }
+        if (seed.situation) {
+          const added = addsPurposeOrDestination(seed.text, text);
+          if (added) { culls.ask++; if (process.env.PHRASINGS_DEBUG) console.warn(`  cull purpose("${added}") [${seed.stage}]: ${text}`); continue; }
+        }
         // Length near the seed's (p12): no paraphrase runs more than 10
         // words past its seed - the long tail was where lists and formal
         // backstory came back.

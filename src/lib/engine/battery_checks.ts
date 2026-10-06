@@ -629,6 +629,16 @@ export function categoryAnchors(category: string): string[] {
   if (toks.length < 2) return [];
   return [...new Set([toks[0], toks[toks.length - 1]])];
 }
+/** p17: the category's head noun (its last anchor word) survives when the
+ * seed carries it; stem-tolerant ("card" / "cards"). */
+export function keepsCategoryNoun(seed: string, para: string, category: string): boolean {
+  const anchors = categoryAnchors(category);
+  if (anchors.length === 0) return true;
+  const noun = anchors[anchors.length - 1];
+  const stem = (w: string) => w.replace(/(ies|es|s)$/, "");
+  const has = (t: string) => key(t).split(" ").some((w) => stem(w) === stem(noun));
+  return !has(seed) || has(para);
+}
 export function keepsCategoryTerm(seed: string, para: string, category: string): boolean {
   const anchors = categoryAnchors(category);
   if (anchors.length === 0) return true;
@@ -920,11 +930,26 @@ export function checkBattery(input: {
       // The full category term (p12): a blind paraphrase keeps the seed's
       // category term, not a looser word for it ("cards" for "credit
       // cards" widens the measurement). Blind = no required brand.
+      // p17: head-to-heads and offensive alternatives keep it too - with
+      // bank-sized rivals, "X or Y, which would you pick" without the
+      // category is no longer a pick in the category.
       else if (
         t !== cell.text &&
         input.category &&
         (!cell.spec || cell.spec.requiredBrands.length === 0) &&
         !keepsCategoryTerm(cell.text, t, input.category)
+      )
+        findings.push({ cell: i, check: "blind_missing_category", text: t, detail: `paraphrase loosens the category term "${input.category}"` });
+      // p17: a head-to-head or offensive alternatives paraphrase keeps at
+      // least the category's head noun when the seed has it - with bank-
+      // sized rivals, "X or Y, which would you pick" is no longer a pick in
+      // the category. The full term is not demanded here (the blind rule
+      // is), only the noun.
+      else if (
+        t !== cell.text &&
+        input.category &&
+        (cell.stage === "comparison" || cell.stage === "alternatives") &&
+        !keepsCategoryNoun(cell.text, t, input.category)
       )
         findings.push({ cell: i, check: "blind_missing_category", text: t, detail: `paraphrase loosens the category term "${input.category}"` });
       // Path-independent: a prompt that copies a scenario LABEL - any
