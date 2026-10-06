@@ -1036,7 +1036,9 @@ export function useGridSetup(a: GridSetupArgs) {
     const st = fresh ?? a.state;
     if (!st || st.scenarios.length === 0 || st.scenarios.some((s) => !s.label.trim())) return;
     const have = st.valueLines ?? {};
-    if (st.scenarios.every((s) => s.label in have)) return;
+    // Drafts from before the chooser have lines for every room but no
+    // catalog: fetch anyway (cached server side), keep the stored lines.
+    if (st.scenarios.every((s) => s.label in have) && (st.valueCatalog?.length ?? 0) > 0) return;
     const res = await fetch("/api/setup/grid/value_lines", {
       method: "POST",
       headers: { "Content-Type": "application/json", ...(a.setupId ? { "x-setup-id": a.setupId } : {}) },
