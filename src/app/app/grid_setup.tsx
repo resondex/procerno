@@ -2601,89 +2601,76 @@ function ValueLineEditor({ value, disabled, onChange, options, recommended, cate
   value: ValueLineUi | null;
   disabled: boolean;
   onChange: (v: ValueLineUi | null) => void;
-  /** The brand's lines (2026-10-06, Tyler): offered as a list with the
-   * engine's pick marked recommended, plus "other" and "none". */
+  /** The brand's lines (2026-10-06, Tyler): offered as an always-visible
+   * list with the engine's pick marked recommended, plus "other" and
+   * "none". No open/close state - the click-to-edit version opened a
+   * select already set to the current line, so choosing it did nothing. */
   options?: ValueCatalogLineUi[];
   recommended?: string | null;
   category?: string;
 }) {
-  const [editing, setEditing] = useState(false);
-  const [line, setLine] = useState(value?.line ?? "");
-  const [counterpart, setCounterpart] = useState(value?.counterpart ?? "");
   const OTHER = "__other__"; const NONE = "__none__";
-  const inList = (name: string | undefined) => !!name && (options ?? []).some((o) => o.name.toLowerCase() === name.toLowerCase());
-  if (editing && options && options.length > 0) {
-    const selected = value === null ? NONE : inList(value?.line) ? (options.find((o) => o.name.toLowerCase() === value!.line.toLowerCase())?.name ?? OTHER) : OTHER;
-    const [custom, setCustom] = [line, setLine];
-    const defaultCounterpart = `more affordable ${category ?? ""}`.trim();
+  const same = (a?: string | null, b?: string | null) => !!a && !!b && a.toLowerCase() === b.toLowerCase();
+  const inList = (name?: string | null) => (options ?? []).find((o) => same(o.name, name))?.name;
+  const defaultCounterpart = `more affordable ${category ?? ""}`.trim();
+  const [custom, setCustom] = useState(value && !inList(value.line) ? value.line : "");
+  const [counterpart, setCounterpart] = useState(value?.counterpart ?? defaultCounterpart);
+  const [otherOpen, setOtherOpen] = useState(!!value && !inList(value.line));
+  const title = "Value asks whether your product is worth paying more for, compared with cheaper options. This is the product line we ask about for this buyer and what it is compared with. The engine's pick is marked recommended; choose any line, your own, or none.";
+  if (!options || options.length === 0) {
+    // No catalog (older draft, catalog still loading): the plain editor.
     return (
-      <div className="grid gap-1 text-left">
-        <select
-          className="w-full rounded border border-line px-1 py-0.5 text-[10px]"
-          value={selected}
-          onChange={(e) => {
-            const v = e.target.value;
-            if (v === NONE) { onChange(null); setEditing(false); return; }
-            if (v === OTHER) { setCustom(""); return; }
-            // A changed line drops the engine's fit chip - it was judged
-            // for the pick, not this choice.
-            onChange({ line: v, counterpart: value?.counterpart ?? defaultCounterpart });
-            setEditing(false);
-          }}
-        >
-          {options.map((o) => (
-            <option key={o.name} value={o.name} title={o.for}>
-              {o.name}{recommended && o.name.toLowerCase() === recommended.toLowerCase() ? " (recommended)" : ""}{o.org ? " - business" : ""}
-            </option>
-          ))}
-          <option value={OTHER}>Other...</option>
-          <option value={NONE}>No Value cell</option>
-        </select>
-        {selected === OTHER && (
-          <>
-            <input value={custom} onChange={(e) => setCustom(e.target.value)} placeholder="product line" maxLength={80}
-              className="w-full rounded border border-line px-1 py-0.5 text-[10px]" />
-            <input value={counterpart} onChange={(e) => setCounterpart(e.target.value)} placeholder="compared with" maxLength={120}
-              className="w-full rounded border border-line px-1 py-0.5 text-[10px]" />
-            <div className="flex gap-2 text-[10px]">
-              <button type="button" className="font-medium text-primary hover:opacity-80" disabled={!custom.trim()}
-                onClick={() => { onChange({ line: custom.trim(), counterpart: counterpart.trim() || defaultCounterpart }); setEditing(false); }}>done</button>
-              <button type="button" className="text-ink-3 hover:opacity-80" onClick={() => setEditing(false)}>cancel</button>
-            </div>
-          </>
-        )}
-        {selected !== OTHER && (
-          <div className="flex gap-2 text-[10px]"><button type="button" className="text-ink-3 hover:opacity-80" onClick={() => setEditing(false)}>cancel</button></div>
-        )}
+      <div className="grid gap-1 text-left" title={title}>
+        <input value={custom || value?.line || ""} onChange={(e) => { setCustom(e.target.value); if (e.target.value.trim()) onChange({ line: e.target.value.trim(), counterpart: counterpart.trim() || defaultCounterpart }); }} placeholder="product line" maxLength={80} disabled={disabled}
+          className="w-full rounded border border-line px-1 py-0.5 text-[10px]" />
+        <input value={counterpart} onChange={(e) => { setCounterpart(e.target.value); if (value) onChange({ line: value.line, counterpart: e.target.value.trim() || defaultCounterpart }); }} placeholder="compared with" maxLength={120} disabled={disabled}
+          className="w-full rounded border border-line px-1 py-0.5 text-[10px]" />
       </div>
     );
   }
-  if (editing) {
-    return (
-      <div className="grid gap-1 text-left">
-        <input value={line} onChange={(e) => setLine(e.target.value)} placeholder="product line" maxLength={80}
-          className="w-full rounded border border-line px-1 py-0.5 text-[10px]" />
-        <input value={counterpart} onChange={(e) => setCounterpart(e.target.value)} placeholder="compared with" maxLength={120}
-          className="w-full rounded border border-line px-1 py-0.5 text-[10px]" />
-        <div className="flex gap-2 text-[10px]">
-          <button type="button" className="font-medium text-primary hover:opacity-80" disabled={!line.trim() || !counterpart.trim()}
-            onClick={() => { onChange({ line: line.trim(), counterpart: counterpart.trim() }); setEditing(false); }}>done</button>
-          <button type="button" className="text-ink-3 hover:opacity-80" onClick={() => { onChange(null); setEditing(false); }}>none</button>
-          <button type="button" className="text-ink-3 hover:opacity-80" onClick={() => setEditing(false)}>cancel</button>
-        </div>
-      </div>
-    );
-  }
+  const selected = otherOpen ? OTHER : value === null ? NONE : (inList(value.line) ?? OTHER);
   return (
-    <button type="button" disabled={disabled}
-      onClick={() => { setLine(inList(value?.line) ? "" : (value?.line ?? "")); setCounterpart(value?.counterpart ?? ""); setEditing(true); }}
-      title="Value asks whether your product is worth paying more for, compared with cheaper options. This is the product we ask about (by default your most premium one) and what it's compared with. Click to change."
-      className="text-[10px] leading-tight text-primary hover:opacity-80">
-      {value ? (<><span className="font-medium">{value.line}</span>{recommended && value.line.toLowerCase() === recommended.toLowerCase() ? <span className="text-ink-3"> (recommended)</span> : null}<br /><span className="text-ink-3">vs {value.counterpart}</span>
-        {(value.fit === "leans_no" || value.fit === "leans_yes") && (
-          <><br /><span className="text-warning" title={value.fit === "leans_no" ? "This buyer's circumstance all but settles it as not worth it - the cell would measure the room's budget, not your brand. Pick a line this buyer would weigh, or set none." : "This buyer never weighs the cheaper option, so the cell would measure the room, not your brand. Pick a line this buyer would weigh, or set none."}>This buyer has one answer</span></>
-        )}</>) : <span className="text-ink-3">no Value cell</span>}
-    </button>
+    <div className="grid gap-1 text-left" title={title}>
+      <select
+        className="w-full rounded border border-line px-1 py-0.5 text-[10px]"
+        value={selected}
+        disabled={disabled}
+        onChange={(e) => {
+          const v = e.target.value;
+          if (v === NONE) { setOtherOpen(false); onChange(null); return; }
+          if (v === OTHER) { setOtherOpen(true); return; }
+          setOtherOpen(false);
+          // A changed line drops the engine's fit chip - it was judged for
+          // the pick, not this choice.
+          onChange({ line: v, counterpart: value?.counterpart ?? defaultCounterpart });
+        }}
+      >
+        {options.map((o) => (
+          <option key={o.name} value={o.name} title={o.for}>
+            {o.name}{same(o.name, recommended) ? " (recommended)" : ""}{o.org ? " - business" : ""}
+          </option>
+        ))}
+        <option value={OTHER}>Other...</option>
+        <option value={NONE}>No Value cell</option>
+      </select>
+      {selected === OTHER && (
+        <>
+          <input value={custom} onChange={(e) => { setCustom(e.target.value); if (e.target.value.trim()) onChange({ line: e.target.value.trim(), counterpart: counterpart.trim() || defaultCounterpart }); }} placeholder="product line" maxLength={80} disabled={disabled}
+            className="w-full rounded border border-line px-1 py-0.5 text-[10px]" />
+          <input value={counterpart} onChange={(e) => { setCounterpart(e.target.value); if (custom.trim()) onChange({ line: custom.trim(), counterpart: e.target.value.trim() || defaultCounterpart }); }} placeholder="compared with" maxLength={120} disabled={disabled}
+            className="w-full rounded border border-line px-1 py-0.5 text-[10px]" />
+        </>
+      )}
+      {value && selected !== OTHER && (
+        <span className="text-[10px] leading-tight text-ink-3">vs {value.counterpart}</span>
+      )}
+      {value && recommended && !same(value.line, recommended) && (
+        <span className="text-[10px] leading-tight text-ink-3" title="The engine's pick for this buyer">recommended: {recommended}</span>
+      )}
+      {value && (value.fit === "leans_no" || value.fit === "leans_yes") && (
+        <span className="text-[10px] leading-tight text-warning" title={value.fit === "leans_no" ? "This buyer's circumstance all but settles it as not worth it - the cell would measure the room's budget, not your brand. Pick a line this buyer would weigh, or set none." : "This buyer never weighs the cheaper option, so the cell would measure the room, not your brand. Pick a line this buyer would weigh, or set none."}>This buyer has one answer</span>
+      )}
+    </div>
   );
 }
 
