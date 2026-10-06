@@ -276,6 +276,9 @@ export interface GridState {
   step: "compose" | "cells" | "phrasings";
   /** The market's base read; scenarios inherit it unless they deviate. */
   moderators: Record<string, unknown> & { rationale?: string };
+  /** The base read as first offered by the fresh compose (2026-10-06) -
+   * the setup decision record diffs the confirmed read against it. */
+  moderatorsOffered?: Record<string, unknown>;
   stages: GridStage[];
   keptStages: string[];
   /** The ACTIVE scenarios with their journeys - what the planner uses.
@@ -441,6 +444,57 @@ export function scenarioRows(g: GridState): ScenarioRow[] {
     g.scenarioRows ??
     g.scenarios.map((s) => ({ ...s, suggested: true, on: true, original: { label: s.label, description: s.description } }))
   );
+}
+
+/** The setup's offered-vs-accepted record (2026-10-06, Tyler): what the
+ * engine first offered at each gate and what was sent for analysis. Built
+ * from the draft's own provenance fields at create; stored on the project
+ * as setup_decision. */
+export function buildSetupDecision(g: GridState): Record<string, unknown> {
+  const rows = scenarioRows(g);
+  const sameText = (a?: { label: string; description: string } | null, b?: { label: string; description: string } | null) =>
+    !!a && !!b && a.label.trim() === b.label.trim() && a.description.trim() === b.description.trim();
+  const roomHow = (r: ScenarioRow): string => {
+    if (!r.suggested) return "own";
+    const cur = { label: r.label, description: r.description };
+    if (sameText(cur, r.first)) return "offered";
+    if (sameText(cur, r.original)) return (r.variants ?? 0) > 0 ? "near_variant" : "reworded";
+    return "edited";
+  };
+  const cellHow = (c: GridCellUi): string => {
+    if (c.custom) return "own";
+    if (c.original && c.text.trim() !== c.original.trim()) return (c.nears ?? 0) > 0 ? "near_variant_or_edited" : (c.regens ?? 0) > 0 ? "redrawn_or_edited" : "edited";
+    return (c.nears ?? 0) > 0 ? "near_variant" : (c.regens ?? 0) > 0 ? "redrawn" : "offered";
+  };
+  return {
+    version: 1,
+    base: { offered: g.moderatorsOffered ?? null, decided: g.moderators },
+    rooms: {
+      offered: rows.filter((r) => r.suggested).map((r) => r.first ?? r.original ?? { label: r.label, description: r.description }),
+      reserve: g.reserve ?? [],
+      decided: rows.filter((r) => r.on).map((r) => ({ label: r.label, description: r.description, journey: r.journey, how: roomHow(r) })),
+      off: rows.filter((r) => !r.on).map((r) => r.label),
+    },
+    stages: {
+      recommended: g.stages.filter((s) => s.recommended).map((s) => s.key),
+      kept: g.keptStages,
+      stageRooms: g.stageRooms ?? null,
+    },
+    valueLines: {
+      recommended: g.valueRecommended ?? null,
+      decided: Object.fromEntries(Object.entries(g.valueLines ?? {}).map(([k, v]) => [k, v ? { line: v.line, counterpart: v.counterpart } : null])),
+    },
+    worries: g.worries && g.worryPool ? { pool: g.worryPool.map((w) => w.worry), decided: g.worries } : null,
+    cells: g.cells.filter((c) => c.text.trim()).map((c) => ({
+      stage: c.stage, situation: c.situation, angle: c.angle, concern: c.concern ?? null,
+      offered: c.original ?? null, decided: c.text, how: cellHow(c),
+      phrasings: {
+        offered: c.phrasings.filter((p) => p.original ?? p.text).length,
+        decided: c.phrasings.filter((p) => p.text.trim()).length,
+        edited: c.phrasings.filter((p) => p.text.trim() && p.original && p.text.trim() !== p.original.trim()).length,
+      },
+    })),
+  };
 }
 
 export function withScenarioRows(g: GridState, rows: ScenarioRow[]): GridState {
@@ -767,6 +821,7 @@ export function useGridSetup(a: GridSetupArgs) {
       {
         step: "compose",
         moderators: data.base,
+        moderatorsOffered: edit ? a.state?.moderatorsOffered ?? data.base : data.base,
         stages: data.stages,
         keptStages: data.stages.filter((s) => s.recommended).map((s) => s.key),
         fit: data.fit ?? a.state?.fit ?? null,

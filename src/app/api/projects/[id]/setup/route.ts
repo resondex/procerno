@@ -53,6 +53,9 @@ const putSchema = z.object({
   engines: z.array(z.string()).optional(),
   grid: z.object({
     moderators: ModeratorsShape,
+    /** The setup's offered-vs-accepted record (2026-10-06): replaces the
+     * project's setup_decision on an edit-setup. */
+    setupDecision: z.record(z.string(), z.unknown()).optional(),
     cells: z
       .array(
         z.object({
@@ -153,6 +156,9 @@ export async function PUT(
       )
     )
   );
+  if (grid.setupDecision) {
+    await store.setSetupDecision(id, JSON.stringify(grid.setupDecision));
+  }
   // Attribute the re-seed's model spend to the project being edited.
   tagCosts({ projectId: id });
   await seedDictionary(id, [brand, ...competitors]);

@@ -15,6 +15,7 @@ import {
   CELLS_BUSY,
   gridCellCount,
   recommendedWorryPairs,
+  buildSetupDecision,
   gridPromptCount,
   namesAny,
   normalizeGrid,
@@ -1427,6 +1428,7 @@ export function SetupWizard({ mode, brand, draft, engineOptions, onClose, onCrea
             journeys: Object.fromEntries(
               grid!.scenarios.map((sc) => [sc.label, sc.journey])
             ),
+            setupDecision: buildSetupDecision(grid!),
             cells: grid!.cells
               .filter((c) => c.text.trim())
               .map((c) => ({
@@ -1468,6 +1470,7 @@ export function SetupWizard({ mode, brand, draft, engineOptions, onClose, onCrea
                 journeys: Object.fromEntries(
                   grid!.scenarios.map((sc) => [sc.label, sc.journey])
                 ),
+                setupDecision: buildSetupDecision(grid!),
                 cells: grid!.cells
                   .filter((c) => c.text.trim())
                   .map((c) => ({

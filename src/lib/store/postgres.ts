@@ -67,6 +67,8 @@ function ensureSchema(): Promise<void> {
       // The worries gate's recommended-vs-decided record (2026-10-01) -
       // the worry recommender's training data.
       await sql`ALTER TABLE projects ADD COLUMN IF NOT EXISTS worry_decision TEXT`;
+      // The whole setup's offered-vs-accepted record (2026-10-06).
+      await sql`ALTER TABLE projects ADD COLUMN IF NOT EXISTS setup_decision TEXT`;
       await sql`ALTER TABLE projects ADD COLUMN IF NOT EXISTS dictionary_status TEXT NOT NULL DEFAULT 'pending'`;
       await sql`ALTER TABLE projects ADD COLUMN IF NOT EXISTS brand_observations TEXT`;
       await sql`ALTER TABLE projects ADD COLUMN IF NOT EXISTS dictionary_version INTEGER NOT NULL DEFAULT 1`;
@@ -1151,6 +1153,11 @@ export const pgStore: Store = {
     await sql`UPDATE projects SET reason_taxonomy = ${JSON.stringify(codes)},
       taxonomy_decision = ${decisionJson},
       taxonomy_status = 'ratified' WHERE id = ${projectId}`;
+  },
+
+  async setSetupDecision(projectId, decisionJson) {
+    const sql = await db();
+    await sql`UPDATE projects SET setup_decision = ${decisionJson} WHERE id = ${projectId}`;
   },
 
   async setWorryDecision(projectId, decisionJson) {

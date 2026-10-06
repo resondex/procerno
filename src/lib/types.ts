@@ -931,6 +931,11 @@ export interface Store {
   /** The worries gate's recommended-vs-decided record (JSON) - the worry
    * recommender's training data, written once at create. */
   setWorryDecision(projectId: string, decisionJson: string): Promise<void>;
+  /** The whole setup's offered-vs-accepted record (JSON, 2026-10-06, Tyler):
+   * base read, rooms, stages and per-room scope, Value lines, cells and
+   * paraphrases - what the engine offered and what was sent for analysis.
+   * Written once at create and on every edit-setup. */
+  setSetupDecision(projectId: string, decisionJson: string): Promise<void>;
   /** Ratify the confirmed code list with its decision record;
    * status -> ratified. */
   ratifyTaxonomy(projectId: string, codes: string[], decisionJson: string): Promise<void>;

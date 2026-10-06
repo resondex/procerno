@@ -60,6 +60,9 @@ const createSchema = z.object({
             .max(40),
         })
         .optional(),
+      /** The setup's offered-vs-accepted record (2026-10-06, Tyler): stored
+       * on the project as setup_decision, opaque to this route. */
+      setupDecision: z.record(z.string(), z.unknown()).optional(),
       journeys: z
         .record(
           z.string(),
@@ -246,6 +249,9 @@ export async function POST(req: Request) {
     );
     if (grid.worryDecision) {
       await store.setWorryDecision(project.id, JSON.stringify(grid.worryDecision));
+    }
+    if (grid.setupDecision) {
+      await store.setSetupDecision(project.id, JSON.stringify(grid.setupDecision));
     }
   } else {
     await store.insertPrompts(
