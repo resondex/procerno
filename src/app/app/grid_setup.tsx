@@ -891,20 +891,29 @@ export function useGridSetup(a: GridSetupArgs) {
     if (!row?.label.trim()) return;
     const used = row.variants ?? 0;
     if (used >= MAX_VARIANTS) return;
-    let pool = row.pool;
-    if (!pool || pool.length === 0) {
+    let pool = row.pool ?? [];
+    // 2026-10-06: a pool can come back short (the engine's addition guard
+    // drops variants), and the draw used to re-serve the LAST variant once
+    // past the end - a click that changed nothing. Past the end, fetch
+    // more, excluding every variant already drawn; still nothing = say so.
+    if (used >= pool.length) {
       a.setBusy("Finding a near neighbor…");
       a.setError(null);
-      pool = (await fetchPool(
+      const more = await fetchPool(
         poolAnchor(row),
-        rows.map(({ label, description }) => ({ label, description })),
+        [...rows.map(({ label, description }) => ({ label, description })), ...pool],
         String(a.state.moderators.decision_unit ?? "committee"),
         false
-      )) ?? undefined;
+      );
       a.setBusy(null);
-      if (!pool || pool.length === 0) return;
+      const fresh = (more ?? []).filter((v) => !pool.some((p) => p.label === v.label && p.description === v.description));
+      if (fresh.length === 0) {
+        a.setError("No further near neighbor came back for this room - edit the text to make it yours, or try again.");
+        return;
+      }
+      pool = [...pool, ...fresh];
     }
-    const variant = pool[Math.min(used, pool.length - 1)];
+    const variant = pool[used];
     // The draw is the rejection signal for the current wording - logged
     // for OUR visibility only, never read back into generation.
     void fetch("/api/setup/grid/feedback", {

@@ -1353,7 +1353,13 @@ export async function nearScenarios(input: {
   // prompt plus a mechanical guard: a variant whose words contain all of
   // the original's is an addition and is dropped.
   // pool10 (2026-10-04): low reasoning effort - the live draw took 10-30s.
-  const key = cacheKey("scenario_near_pool10", [
+  // pool11 (2026-10-06): the addition guard emptied the pool on 2 of 8
+  // journeys30 rooms (every variant kept all the original's words), which
+  // the gate showed as a draw that changed nothing. One steered retry
+  // naming the kept variants; if the pool is still short, the least
+  // additive rejects fill it - a variant with a tacked-on qualifier beats
+  // no variant at all.
+  const key = cacheKey("scenario_near_pool11", [
     input.category, input.audience, input.of.label, input.of.description, avoid.join("|"),
   ]);
   const hit = await store.cacheGet(key, CACHE_TTL_MS);
@@ -1363,7 +1369,7 @@ export async function nearScenarios(input: {
       description: humanize(s.description),
     }));
   }
-  const res = await openaiClient().chat.completions.create({
+  const ask = (steer: string) => openaiClient().chat.completions.create({
     model: INSTRUMENT_HELPER_MODEL,
     reasoning_effort: "low",
     messages: [
@@ -1400,7 +1406,7 @@ export async function nearScenarios(input: {
         content:
           `Category: ${input.category}\nAudience: ${input.audience ?? "unknown"}\n` +
           `Vary this situation:\n- ${input.of.label}: ${input.of.description}\n` +
-          `Already listed (avoid all of these):\n${input.exclude.map((s) => `- ${s.label}: ${s.description}`).join("\n") || "- (none)"}`,
+          `Already listed (avoid all of these):\n${input.exclude.map((s) => `- ${s.label}: ${s.description}`).join("\n") || "- (none)"}${steer}`,
       },
     ],
     response_format: {
@@ -1408,9 +1414,8 @@ export async function nearScenarios(input: {
       json_schema: { name: "situations", strict: true, schema: SITUATIONS_SCHEMA },
     },
   });
-  const parsed = JSON.parse(res.choices[0]?.message?.content ?? "{}") as {
-    situations: Situation[];
-  };
+  const parse = (res: Awaited<ReturnType<typeof ask>>) =>
+    (JSON.parse(res.choices[0]?.message?.content ?? "{}") as { situations?: Situation[] }).situations ?? [];
   // De-duplicate on label AND description: a near variant may keep the
   // original's label and change one phrase of the description. Only an
   // already-listed label (another card) or an exact copy is dropped.
@@ -1426,13 +1431,34 @@ export async function nearScenarios(input: {
     return o.size > 0 && [...o].every((x) => w.has(x)) && w.size > o.size;
   };
   const pool: Situation[] = [];
-  for (const s of parsed.situations ?? []) {
-    const k = `${norm(s.label)}|${norm(s.description)}`;
-    if (!s.label.trim() || seen.has(k) || listed.has(norm(s.label))) continue;
-    if (isAddition(input.of.label, s.label) || isAddition(input.of.description, s.description)) continue;
-    seen.add(k);
-    pool.push({ label: roomLabel(humanize(s.label.trim())), description: humanize(s.description.trim()) });
-    if (pool.length === 3) break;
+  const additions: Situation[] = [];
+  const take = (list: Situation[]) => {
+    for (const s of list) {
+      const k = `${norm(s.label)}|${norm(s.description)}`;
+      if (!s.label.trim() || seen.has(k) || listed.has(norm(s.label))) continue;
+      seen.add(k);
+      const clean = { label: roomLabel(humanize(s.label.trim())), description: humanize(s.description.trim()) };
+      if (isAddition(input.of.label, s.label) || isAddition(input.of.description, s.description)) { additions.push(clean); continue; }
+      pool.push(clean);
+      if (pool.length === 3) break;
+    }
+  };
+  take(parse(await ask("")));
+  if (pool.length < 3) {
+    const kept = additions.map((s) => `- ${s.label}: ${s.description}`).join("\n");
+    const retry = await ask(
+      `\nA previous attempt only ADDED to the original instead of replacing one part of it${kept ? ` (${additions.length} rejected):\n${kept}` : ""}. ` +
+      `Each variant must drop one detail of the original and put a different one in its place - same length, same number of details.`
+    ).then(parse).catch((err: unknown) => { console.error("near variants retry failed open:", err); return [] as Situation[]; });
+    take(retry);
+  }
+  // Short pool: the least additive rejects (fewest words over the
+  // original) fill the remaining slots - a qualifier tacked on is a weaker
+  // variant than a replaced detail, but a card with nothing to draw is
+  // worse (the gate showed it as a draw that changed nothing).
+  if (pool.length < 3 && additions.length > 0) {
+    const over = (s: Situation) => content(s.description).size - content(input.of.description).size;
+    for (const s of additions.sort((x, y) => over(x) - over(y))) { if (pool.length === 3) break; pool.push(s); }
   }
   if (pool.length > 0) await store.cacheSet(key, JSON.stringify(pool), stampOf(input));
   return pool;
