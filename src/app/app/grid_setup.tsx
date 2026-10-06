@@ -103,6 +103,10 @@ export interface GridCellUi {
   userAlts?: string[];
   /** Paraphrases beyond the seed text; empty until gate 3. */
   phrasings: GridPhrasing[];
+  /** The engine's paraphrase set as it first landed for the CURRENT seed
+   * (2026-10-06): the setup decision record's "offered" side, kept
+   * through edits and deletions. Reset when a new set is written. */
+  phrasingsOffered?: string[];
   /** The wording the current set was generated for. When the live text
    * drifts from this (a post-write edit), the set is stale: it gets
    * banked on blur and the missing-paraphrases gate takes over. */
@@ -160,17 +164,21 @@ export function rebindSituation(cells: GridCellUi[], from: string, to: string): 
 export function swapPhrasings(
   c: GridCellUi,
   nextText: string
-): Pick<GridCellUi, "phrasings" | "phrasingsByText" | "phrasedFor"> {
+): Pick<GridCellUi, "phrasings" | "phrasingsByText" | "phrasedFor" | "phrasingsOffered"> {
   // The set is banked under the wording it was GENERATED for - the live
   // text may have drifted since (a post-write edit).
   const owner = (c.phrasedFor ?? c.text).trim();
   const bank = c.phrasings.some((p) => p.text.trim())
     ? { ...(c.phrasingsByText ?? {}), [owner]: c.phrasings }
     : c.phrasingsByText;
+  const restored = bank?.[nextText.trim()] ?? [];
   return {
-    phrasings: bank?.[nextText.trim()] ?? [],
+    phrasings: restored,
     phrasingsByText: bank,
     phrasedFor: nextText,
+    // A restored set's offered side is its machine wordings; a fresh set
+    // (none banked) starts with none and gets it when the set lands.
+    phrasingsOffered: restored.length > 0 ? restored.map((p) => p.original ?? p.text) : undefined,
   };
 }
 
@@ -422,6 +430,7 @@ export function normalizeGrid(g: GridState | null): GridState | null {
         text: scrubPrompt(ph.text),
         original: scrubPrompt(ph.original ?? ph.text),
       })),
+      phrasingsOffered: c.phrasingsOffered?.map(scrubPrompt),
       phrasingsByText: c.phrasingsByText
         ? Object.fromEntries(
             Object.entries(c.phrasingsByText).map(([k, set]) => [
@@ -484,16 +493,27 @@ export function buildSetupDecision(g: GridState): Record<string, unknown> {
       recommended: g.valueRecommended ?? null,
       decided: Object.fromEntries(Object.entries(g.valueLines ?? {}).map(([k, v]) => [k, v ? { line: v.line, counterpart: v.counterpart } : null])),
     },
-    worries: g.worries && g.worryPool ? { pool: g.worryPool.map((w) => w.worry), decided: g.worries } : null,
-    cells: g.cells.filter((c) => c.text.trim()).map((c) => ({
-      stage: c.stage, situation: c.situation, angle: c.angle, concern: c.concern ?? null,
-      offered: c.original ?? null, decided: c.text, how: cellHow(c),
-      phrasings: {
-        offered: c.phrasings.filter((p) => p.original ?? p.text).length,
-        decided: c.phrasings.filter((p) => p.text.trim()).length,
-        edited: c.phrasings.filter((p) => p.text.trim() && p.original && p.text.trim() !== p.original.trim()).length,
-      },
-    })),
+    worries: g.worryPool
+      ? {
+          offered: g.worryPool.map((w) => ({ worry: w.worry, detail: w.detail, recommended: w.recommended, plan: w.recommend ?? [] })),
+          decided: g.worries ?? [],
+        }
+      : null,
+    cells: g.cells.filter((c) => c.text.trim()).map((c) => {
+      const offered = c.phrasingsOffered ?? c.phrasings.map((p) => p.original ?? p.text);
+      const decided = c.phrasings.filter((p) => p.text.trim()).map((p) => ({ text: p.text, asker: p.asker || null, offered: p.original ?? null }));
+      const decidedTexts = new Set(decided.map((d) => d.text.trim()));
+      return {
+        stage: c.stage, situation: c.situation, angle: c.angle, concern: c.concern ?? null,
+        seed: { offered: c.original ?? null, decided: c.text, how: cellHow(c) },
+        paraphrases: {
+          offered,
+          decided,
+          dropped: offered.filter((t) => !decidedTexts.has(t.trim()) && !decided.some((d) => d.offered?.trim() === t.trim())),
+          edited: decided.filter((d) => d.offered && d.text.trim() !== d.offered.trim()).length,
+        },
+      };
+    }),
   };
 }
 
@@ -1296,6 +1316,7 @@ export function useGridSetup(a: GridSetupArgs) {
             // the edit-review compares against; the cell remembers which
             // seed wording this set belongs to.
             phrasings: (data.phrasings[k] ?? []).map((ph) => ({ ...ph, original: ph.text })),
+            phrasingsOffered: (data.phrasings[k] ?? []).map((ph) => ph.text),
             phrasedFor: merged[i].text,
           };
         });
@@ -1378,7 +1399,10 @@ export function useGridSetup(a: GridSetupArgs) {
             if (have().some((t) => similarText(t, ph.text))) continue;
             kept.push({ ...ph, original: ph.text });
           }
-          merged[i] = { ...merged[i], phrasings: kept, phrasedFor: merged[i].text };
+          merged[i] = {
+            ...merged[i], phrasings: kept, phrasedFor: merged[i].text,
+            phrasingsOffered: [...new Set([...(merged[i].phrasingsOffered ?? []), ...kept.map((p) => p.original ?? p.text)])],
+          };
         }
         done++;
         a.setBusy(`Topping up prompts… (${done}/${idx.length})`);
@@ -1481,6 +1505,7 @@ export function useGridSetup(a: GridSetupArgs) {
             nears: near ? (q.nears ?? 0) + 1 : q.nears,
             phrasingsByText: swap.phrasingsByText,
             phrasings: generated.length > 0 ? generated : swap.phrasings,
+            phrasingsOffered: generated.length > 0 ? generated.map((p) => p.original ?? p.text) : swap.phrasingsOffered,
             phrasedFor: data.text,
           };
         }),
