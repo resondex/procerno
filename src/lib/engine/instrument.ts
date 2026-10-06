@@ -160,7 +160,7 @@ const CACHE_TTL_MS = 183 * 24 * 3600 * 1000;
 // one-tier-down counterpart per room (planValueLines, confirmed at the
 // gate; default = the brand's most premium line that fits the room; no
 // Value cell where none fits) and carries no usage detail.
-const STYLE_VERSION = "s50"; // s50 (batch 2): the scenario label is a title for us, never words for the prompt; use-case heals carry no buying channel. // s46 (2026-10-04 seed review batch): problem recognition carries no purchase moment; offensive alternatives state a plain move within the category; head-to-heads add no situation; advocacy convinces a peer or critic, business case an approver. // s45 (2026-10-04 seed review): doubt hints - the asker's own one-doubt claim, never a fact to confirm, hearsay, a sizing ask or the Value question; stance decides the asker; worry cells carry no reach limit.
+const STYLE_VERSION = "s51"; // s51 (journeys30): the writer reads the room's circumstance line, never the natural description; problem recognition sets the pain in the category's own territory; criteria asks what to look at and, given that, what to consider. // s50 (batch 2): the scenario label is a title for us, never words for the prompt; use-case heals carry no buying channel. // s46 (2026-10-04 seed review batch): problem recognition carries no purchase moment; offensive alternatives state a plain move within the category; head-to-heads add no situation; advocacy convinces a peer or critic, business case an approver. // s45 (2026-10-04 seed review): doubt hints - the asker's own one-doubt claim, never a fact to confirm, hearsay, a sizing ask or the Value question; stance decides the asker; worry cells carry no reach limit.
 
 /** Versions the DETERMINISTIC seed-check set (everything seedRule runs:
  * checkPromptAgainstSpec + blind_missing_category + scenario_label_leak).
@@ -176,7 +176,7 @@ const STYLE_VERSION = "s50"; // s50 (batch 2): the scenario label is a title for
  * 7's unversioned serve-time re-check had no terminal state). Bump when
  * a deterministic check changes meaning; bumping costs one free re-judge
  * per unit, and model calls only for units the new rules reject. */
-export const SEED_RULES_VERSION = "r23"; // r22 (batch 2): use-case in a channel room carries who only; label-word stems leak. // r17 (2026-10-04 seed review batch): awareness_purchase_moment and offensive_alt_no_move nets; design intents - no purchase moment in problem recognition, head-to-heads add no situation, alternatives state a full-sentence move within the category, advocacy vs business-case audience, Value brand-name fallback branch; keep-or-leave narrowed (a within-brand change may be the subject, never the answer). // r16 (2026-10-04 seed review): doubt design intent - own claim, one doubt, open verdict; facts to confirm, rule/ingredient lookups, hearsay, sizing asks and the Value worth-it ask fail; objections never voiced by a current user, churn/renewal always by one, no third option beside stay and leave. // r15 (2026-10-02, Tyler's option B): brand mentions = whole names, declared alternates, name words and dictionary aliases, with every ambiguous one-word hit (an everyday word written lowercase or opening a sentence, or a maker word like "Google" of Google Pixel) decided in context by the brand judge (haiku, cached) - no casing rules, no target exemption, no roster word lists. r14 (2026-10-02 review): everyday-word lexicon by lowercase SHARE in two tiers (label words: common and not brand-dominated - "jira", "netflix", "pixel", "apple", "chase" count lowercase again; aliases: merely common - "gold" stays capital-only), coined split words case-blind ("apple or samsung"), the target's own one-word name never case-guarded, "citi" off the case-guard list, and a monthly figure is the asker's plan only in first-person / spend / offer context ("the Pro about 20 a month more" is a stated price). r13 (2026-10-02 cold-walk audit + review): verb-less stated prices ("Gold at 250"); word-anchored price-concern test + money bolt-ons; brand checks read filtered dictionary alias forms ("amex"); everyday words inside brand names never name the brand - category tokens containment-aware, split words of multi-word names in label casing and not sentence-initial, one-word names and aliases in the vault everyday-word lexicon capitalized only, other brands' full names scrubbed first. r4 (2026-10-01): r2 calendar-year/60-word/segment-vocab; r3 category-naming labels exempt from substring leak; r4 'standardization' in segment vocabulary; r5 directionless-switch string check; r6 punctuation-blind label-leak matching; r7-r8 switch direction detected by absence (no OS, no roster brand near switch vocabulary); cheaper bolt-on token on non-price concerns
+export const SEED_RULES_VERSION = "r24"; // r24 (journeys30): problem-recognition design intent requires category territory; criteria design intent carries the two-part ask. // r22 (batch 2): use-case in a channel room carries who only; label-word stems leak. // r17 (2026-10-04 seed review batch): awareness_purchase_moment and offensive_alt_no_move nets; design intents - no purchase moment in problem recognition, head-to-heads add no situation, alternatives state a full-sentence move within the category, advocacy vs business-case audience, Value brand-name fallback branch; keep-or-leave narrowed (a within-brand change may be the subject, never the answer). // r16 (2026-10-04 seed review): doubt design intent - own claim, one doubt, open verdict; facts to confirm, rule/ingredient lookups, hearsay, sizing asks and the Value worth-it ask fail; objections never voiced by a current user, churn/renewal always by one, no third option beside stay and leave. // r15 (2026-10-02, Tyler's option B): brand mentions = whole names, declared alternates, name words and dictionary aliases, with every ambiguous one-word hit (an everyday word written lowercase or opening a sentence, or a maker word like "Google" of Google Pixel) decided in context by the brand judge (haiku, cached) - no casing rules, no target exemption, no roster word lists. r14 (2026-10-02 review): everyday-word lexicon by lowercase SHARE in two tiers (label words: common and not brand-dominated - "jira", "netflix", "pixel", "apple", "chase" count lowercase again; aliases: merely common - "gold" stays capital-only), coined split words case-blind ("apple or samsung"), the target's own one-word name never case-guarded, "citi" off the case-guard list, and a monthly figure is the asker's plan only in first-person / spend / offer context ("the Pro about 20 a month more" is a stated price). r13 (2026-10-02 cold-walk audit + review): verb-less stated prices ("Gold at 250"); word-anchored price-concern test + money bolt-ons; brand checks read filtered dictionary alias forms ("amex"); everyday words inside brand names never name the brand - category tokens containment-aware, split words of multi-word names in label casing and not sentence-initial, one-word names and aliases in the vault everyday-word lexicon capitalized only, other brands' full names scrubbed first. r4 (2026-10-01): r2 calendar-year/60-word/segment-vocab; r3 category-naming labels exempt from substring leak; r4 'standardization' in segment vocabulary; r5 directionless-switch string check; r6 punctuation-blind label-leak matching; r7-r8 switch direction detected by absence (no OS, no roster brand near switch vocabulary); cheaper bolt-on token on non-price concerns
 
 /** Brand forms that double as ordinary English words: only these demand a
  * capitalized occurrence to count as naming the brand ("2-3 services max"
@@ -535,7 +535,7 @@ export function stageLibrary(m: Moderators): LibraryStage[] {
       // complaints about "my chips".
       key: "problem_recognition", label: "Problem recognition", layer: "awareness",
       situational: true, rivals: "none", tag: "rules", recommended: considered,
-      hint: "Pain-phrased and pre-category: ONE pain in a plain sentence, then a plain ask for a way out - about 10-25 words, one symptom, never a list of symptoms - without knowing the SOLUTION category is the answer. Never name the category as a solution, a brand, or ask for a product type. Whatever the buyer already owns is named with the plain category noun, never contorted around - but the asker is never a current customer of the client brand doubting it, and never at a purchase moment (an upgrade window, a renewal, a deal, a launch, being due for a new one): the scenario gives who they are, not a buying moment.",
+      hint: "Pain-phrased and pre-category: ONE pain in a plain sentence, then a plain ask for a way out - about 10-25 words, one symptom, never a list of symptoms - without knowing the SOLUTION category is the answer. The pain sits in the category's own territory: the asker names what they already use or do, in the category's plain words (the thing they have, or the activity the category exists for), so the question cannot be read as another category's problem. Never name the category as the solution, a brand, or ask for a product type. Whatever the buyer already owns is named with the plain category noun, never contorted around - but the asker is never a current customer of the client brand doubting it, and never at a purchase moment (an upgrade window, a renewal, a deal, a launch, being due for a new one): the scenario gives who they are, not a buying moment.",
       why: considered
         ? "A considered journey starts here - buyers describe the pain before they know the category exists."
         : "Habitual buyers are already in the category - there's no pre-category moment to measure.",
@@ -564,7 +564,7 @@ export function stageLibrary(m: Moderators): LibraryStage[] {
       // standing verdict.
       key: "criteria", label: "Criteria formation", layer: "consideration",
       situational: true, rivals: "none", tag: "rules", recommended: true,
-      hint: "The buyer's situation plus an ask for what to look for or what actually matters - never offering candidate criteria for the answer to rank, never asking which brand.",
+      hint: "The buyer's situation plus a two-part ask: what should I look at, and given that, what should I consider? - never offering candidate criteria for the answer to rank, never asking which brand.",
       why: "Assistants teach buyers what to value before any brand is named.",
     },
     {
@@ -734,10 +734,13 @@ export interface Journey {
 export interface ScenarioSpec {
   label: string;
   description: string;
-  /** journeys24: what the room's buyer wants, is choosing for or comparing
-   * - carried for the record and the walk harness; nothing downstream
-   * reads it (the writer, the checks and the gate see the description). */
-  want?: string;
+  /** journeys30: the room as the seed writer and the design checks see it
+   * - who the buyer is, what is happening, what they are choosing and how
+   * they will use it, with everything they WANT left out. The description
+   * stays natural (wants and all) for the gate; the separation happens at
+   * serve time. Absent on a user-written or edited room and on pre-30
+   * drafts: generateGrid derives one (roomCircumstances). */
+  circumstance?: string;
   /** journeys25: the process-changing reason the override was granted. */
   journeyWhy?: string;
   /** Structural journey delta; null = inherits the base read. Granted only
@@ -773,10 +776,9 @@ const SCENARIOS_SCHEMA = {
         properties: {
           label: { type: "string" },
           description: { type: "string" },
-          /** journeys24: anything the buyer wants, values or is choosing
-           * FOR goes here, never in the description - the writer, the
-           * checks and the gate read the description only. */
-          want: { type: "string" },
+          /** journeys30: the room restated without anything the buyer
+           * wants - what the seed writer and the design checks read. */
+          circumstance: { type: "string" },
           deviates: { type: "boolean" },
           journey: {
             type: "object",
@@ -790,7 +792,7 @@ const SCENARIOS_SCHEMA = {
             required: ["involvement", "verifiability", "think_feel", "decision_unit"],
           },
         },
-        required: ["label", "description", "want", "deviates", "journey"],
+        required: ["label", "description", "circumstance", "deviates", "journey"],
       },
     },
   },
@@ -955,13 +957,15 @@ export async function readScenarios(input: {
   // 29 (2026-10-05, Tyler): option (a) cut too deep - "no kind of product,
   // no outcome, no purpose" stripped the buying act and the usage out of
   // the description, leaving a demographic ("an adult managing shared
-  // monthly expenses"). The description keeps WHO, the situation, WHAT
-  // they are choosing and HOW they will use it; the want field holds only
-  // the qualities and outcomes they want. The gate shows the want as a
-  // second line; the writer still sees the description alone. The
-  // structural purpose cut is off the read path (the want field does
-  // that job now, and the cut was taking usage with it).
-  const key = cacheKey("scenarios_journeys29", [
+  // monthly expenses").
+  // 30 (2026-10-05, Tyler): the want-less descriptions read robotic and
+  // too factual whatever they kept. The description rule returns to the
+  // natural pre-24 wording (what is happening, wants and all, same-answer
+  // principle kept) and the separation moves to serve time: the read also
+  // returns a `circumstance` line - the room restated with everything the
+  // buyer wants left out - and ONLY that line reaches the seed writer and
+  // the design checks. The gate shows the natural description.
+  const key = cacheKey("scenarios_journeys30", [
     input.category, input.audience, input.forBrand ?? "",
   ]);
   const read = await coalesced<{
@@ -992,15 +996,17 @@ export async function readScenarios(input: {
           "Labels are in sentence case. Descriptions ONE short plain sentence. Each scenario is a ROOM: " +
           "a buyer occasion in this category - who the buyer is and the " +
           "situation they are in. " +
-          "The description is the buyer's circumstance: who they are, what " +
-          "is happening to them, where they are or who they are buying for, " +
-          "WHAT they are choosing and HOW they will use it (the kind of " +
-          "product and its use are circumstance). It never names a quality, " +
-          "feature, outcome or benefit the buyer wants - those go in the " +
-          "separate want field (one short phrase, or empty), never in the " +
-          "description, not as a trailing 'for ...' clause, not mid-sentence. " +
-          "The answer decides what matters. Never a specific brand or " +
-          "product anywhere. " +
+          "Describe what is happening, never a list of features or criteria " +
+          "the buyer wants - the answer decides what matters - and never a " +
+          "specific brand or product. " +
+          "Also return circumstance: the same room restated for a question " +
+          "writer who must not know what the buyer wants - who the buyer " +
+          "is, what is happening to them, where they are or who they are " +
+          "buying for, what they are choosing and how they will use it, in " +
+          "one short plain sentence. It leaves out every quality, feature, " +
+          "outcome or benefit the buyer wants or is choosing for, says " +
+          "nothing the description does not say, and uses none of the " +
+          "label's words. " +
           "A room's buyer is actively CHOOSING between products in the " +
           "category - comparing, or at least open to options; a buyer who " +
           "rebuys, renews or takes the next version of what they have " +
@@ -1095,7 +1101,7 @@ export async function readScenarios(input: {
     },
   });
   const parsed = JSON.parse(res.choices[0]?.message?.content ?? "{}") as {
-    scenarios: { label: string; description: string; want?: string; deviates: boolean; journey: Journey }[];
+    scenarios: { label: string; description: string; circumstance?: string; deviates: boolean; journey: Journey }[];
   };
   // Stakes judgment (journeys25): for each core room that claims a
   // deviation with a reason, one low-effort call decides whether the reason
@@ -1146,7 +1152,7 @@ export async function readScenarios(input: {
       return {
         label: s.label.trim(),
         description: s.description.trim(),
-        ...(s.want?.trim() ? { want: humanize(s.want.trim()) } : {}),
+        ...(s.circumstance?.trim() ? { circumstance: humanize(s.circumstance.trim()) } : {}),
         ...(granted && stakesWhy.get(i) ? { journeyWhy: stakesWhy.get(i) } : {}),
         journey: granted ? s.journey : null,
       };
@@ -1166,6 +1172,7 @@ export async function readScenarios(input: {
     ...sc,
     label: roomLabel(humanize(sc.label)),
     description: humanize(sc.description),
+    ...(sc.circumstance ? { circumstance: humanize(sc.circumstance) } : {}),
   });
   return read === null
     ? null
@@ -3111,8 +3118,14 @@ const CELL_WRITER_SYSTEM =
           "window, renewal, deal, launch or being due for a new one - the " +
           "scenario gives who they are, not a buying moment. They state ONE pain in a plain sentence " +
           "and ask for a way out in their own words - about 10-25 words, one " +
-          "symptom, never a list of symptoms or a polished description; vary " +
-          "it across cells, never the same closing every time. Problem " +
+          "symptom, never a list of symptoms or a polished description. The " +
+          "pain is set in the category's own territory: the asker names what " +
+          "they already use or do, in the category's plain words (the thing " +
+          "they have, or the activity the category exists for), so the " +
+          "question cannot be read as another category's problem - a pain " +
+          "that could belong to any category draws off-topic answers. The " +
+          "category is never named as the solution. Vary the wording across " +
+          "cells, never the same closing every time. Problem " +
           "recognition never asks a yes/no reassurance question, a " +
           "premium-vs-cheap tier question, or 'what specs or criteria " +
           "should I care about' (that is the criteria cell's question).\n" +
@@ -3120,10 +3133,11 @@ const CELL_WRITER_SYSTEM =
           "category has and how they differ, or whether they need one at " +
           "all, in plain words - never which brand to buy, and nothing is " +
           "broken there, so never 'what fixes this'.\n" +
-          "- criteria: the situation plus an ask for what actually matters - " +
-          "NEVER offering candidate criteria for the answer to rank or " +
-          "complete: the " +
-          "measurement is what the answer chooses to teach.\n" +
+          "- criteria: the situation plus a two-part ask in the buyer's own " +
+          "words: what should I look at, and given that, what should I " +
+          "consider? - NEVER offering candidate criteria for the answer to " +
+          "rank or complete: the measurement is what the answer chooses to " +
+          "teach.\n" +
           "- repertoire: a buyer who usually picks the client brand names it " +
           "and asks whether to stick with it or try something else; the " +
           "trigger is habit or wanting variety, never a stated worry " +
@@ -3385,42 +3399,6 @@ export interface WorryPick {
  * per (brand, category, audience, scenario set, offered stances); the
  * confirmed PICKS are decision data stored on the draft/project - this
  * pool is only the menu. */
-/** A room description with its trailing purpose or want clause removed
- * (s48, structural since the v11 Jira audit - a verb list built from one
- * brand's rooms missed every other brand's). After the room's choosing
- * verb and its object, a clause opened by "to <infinitive>", "in order
- * to", "for <gerund>", "so (that)", "wanting", "looking for", "seeking",
- * "who want(s)", "hoping/aiming to" is the purpose, and it is cut. A
- * "to" followed by a determiner, pronoun, number or capitalised word is a
- * destination ("moved to a new city"), not a purpose. Cuts only when at
- * least four words remain. */
-export function circumstanceOnly(description: string): string {
-  const d = description.replace(/\s+/g, " ").trim();
-  const chooser = /\b(?:choos\w*|pick\w*|select\w*|compar\w*|decid\w*|shop\w*|weigh\w*|evaluat\w*|buy\w*|sign\w*|consider\w*|replac\w*|switch\w*|search\w*|look\w*|upgrad\w*|hunt\w*|browse\w*|narrow\w*|settl\w*|need\w*|want\w*)\b/i;
-  const cm = d.match(chooser);
-  // No choosing verb, no cut (2026-10-05): every real purpose clause sits
-  // after one ("choosing a card to...", "compares bundles to..."); without
-  // the anchor the cut took verb complements ("expects to pay it down",
-  // "pays to park", "plans to retire") and gutted the room.
-  if (!cm) return d;
-  const from = (cm.index ?? 0) + cm[0].length;
-  const head = d.slice(0, from);
-  const tail = d.slice(from);
-  const det = /^(?:a|an|the|their|our|my|his|her|its|this|that|these|those|one|two|three|four|five|six|seven|eight|nine|ten|another|some|all|each|every|most|many|few|several|which|whom|him|them|us|me|it|[A-Z0-9])/;
-  const re = /(?:,|;|\s)\s*(?:(in order to)\s+(\w+)|(to)\s+(\w+)|(for)\s+(\w+ing)\b|(so)\s+(?:that\s+)?(\w+)|(wanting|seeking|hoping to|aiming to)\s+(\w+)|(looking for|who wants?)\s+(\w+))/g;
-  let m: RegExpExecArray | null;
-  while ((m = re.exec(tail))) {
-    const next = m[2] ?? m[4] ?? m[6] ?? m[8] ?? m[10] ?? m[12] ?? "";
-    if (m[3] === "to" && det.test(next)) continue;
-    // "open to", "due to", "able to", "used to", "close to", "next to",
-    // "prior to", "similar to", "up to", "subject to": adjective + to.
-    if (m[3] === "to" && /\b(?:open|due|able|unable|used|close|next|prior|similar|up|subject|back|down|over|access|required|requires|obliged|forced|expected|asked|told|allowed|supposed|likely|ready|willing|reluctant|free|bound|tied|entitled|eligible|struggling|trying|tries|tried|has|have|had|needs|need|needed|wants|want|wanted|ought|about|going|went|goes|go)$/i.test(tail.slice(0, m.index).trim())) continue;
-    const kept = (head + tail.slice(0, m.index)).trim().replace(/[,;:]+$/, "");
-    if (kept.split(" ").length < 5) return d;
-    return kept + (/[.!?]$/.test(kept) ? "" : ".");
-  }
-  return d;
-}
 
 /** Subject words that carry no doubt on their own (worries5 overlap). */
 const STOP_SUBJECT_WORDS = new Set(["the", "and", "for", "with", "its", "their", "our", "your", "about", "over", "too", "not", "very", "feels", "feel", "risk", "risks", "issue", "issues", "problem", "problems", "concern", "concerns", "worry", "worries", "quality"]);
@@ -3741,6 +3719,47 @@ function journeyNote(base: Moderators, s: ScenarioSpec): string | null {
  * model choice); the model only writes the prompt texts. Bulk generation
  * is fine here - this is tooling, not measurement.
  */
+/** journeys30: the room as the seed writer and the design checks see it -
+ * who, what is happening, what is chosen and how it will be used, with
+ * everything the buyer wants left out. The market read returns it beside
+ * the natural description; a room without one (user-written or edited,
+ * or a pre-journeys30 draft) gets it derived here, one low-effort call
+ * cached per (category, description), failing open to the description. */
+async function roomCircumstances(input: { category: string; scenarios: ScenarioSpec[]; meta?: CacheMeta }): Promise<Map<string, string>> {
+  const out = new Map<string, string>();
+  const tidy = (t: string) => humanize(t).replace(/\s+/g, " ").trim();
+  await Promise.all(input.scenarios.map(async (s) => {
+    const desc = tidy(s.description);
+    if (s.circumstance?.trim()) { out.set(s.label, tidy(s.circumstance)); return; }
+    if (!desc) return;
+    const key = cacheKey("room_circumstance1", [input.category, desc]);
+    try {
+      const hit = await store.cacheGet(key, CACHE_TTL_MS);
+      if (hit) { out.set(s.label, JSON.parse(hit) as string); return; }
+      const a = await anthropicClient();
+      const res = await withCostContext({ purpose: "setup:cells" }, () => a.messages.create({
+        model: DESIGN_CHECK_MODEL,
+        max_tokens: 200,
+        output_config: { effort: "low" },
+        system:
+          `A buying scenario in ${input.category} is given. Restate it for a question writer who must not know what the buyer wants: ` +
+          `who the buyer is, what is happening to them, where they are or who they are buying for, what they are choosing and how they will use it, in one short plain sentence. ` +
+          `Leave out every quality, feature, outcome or benefit the buyer wants or is choosing for. Say nothing the scenario does not say. Never a brand or product name. Return only the sentence.`,
+        messages: [{ role: "user", content: desc }],
+      }));
+      const text = tidy((res as { content: { type: string; text?: string }[] }).content.filter((b) => b.type === "text").map((b) => b.text ?? "").join(""));
+      if (text && text.split(/\s+/).length >= 4 && text.length <= 300) {
+        await store.cacheSet(key, JSON.stringify(text), input.meta);
+        out.set(s.label, text);
+      } else out.set(s.label, desc);
+    } catch (err) {
+      console.error("room circumstance failed open:", err);
+      out.set(s.label, desc);
+    }
+  }));
+  return out;
+}
+
 export async function generateGrid(input: {
   brand: string;
   category: string;
@@ -3977,20 +3996,18 @@ export async function generateGrid(input: {
   /** The circumstance as the design check should read it: the label plus
    * the room's description (the label alone let "matching: <label>" pass
    * any seed that echoed the label's words). */
+  // journeys30: the writer, the design checks and the heal steers all read
+  // the room's CIRCUMSTANCE line (the read's want-free restatement, or one
+  // derived here for rooms without it) - never the natural description,
+  // which carries what the buyer wants and steered whole columns when it
+  // reached the writer (AmEx re-audit). One source for all three, so a
+  // heal can never put back what the writer never saw.
+  const roomBySituation = await roomCircumstances({ category: input.category, scenarios: input.scenarios, meta: input.meta });
   const situationText = (situation: string | null | undefined): string | null | undefined => {
     if (!situation) return situation;
-    const d = input.scenarios.find((s) => s.label === situation)?.description;
-    // The same cut the writer sees - a heal steered on the full description
-    // put the purpose clause straight back (AmEx v11 audit).
-    return d ? `${situation} - ${humanize(d).replace(/\s+/g, " ").trim()}` : situation;
+    const d = roomBySituation.get(situation);
+    return d ? `${situation} - ${d}` : situation;
   };
-  // s48: the description reaches the writer as CIRCUMSTANCE only - a
-  // trailing purpose or want clause ("...to keep cash flow flexible",
-  // "...wanting more rewards") is cut before it rides the plan line, since
-  // the writer carried it into every cell of the column (AmEx re-audit).
-  const roomBySituation = new Map(
-    input.scenarios.map((s) => [s.label, humanize(s.description).replace(/\s+/g, " ").trim()] as const)
-  );
   const roomNote = (situation: string | null) => {
     const d = situation ? roomBySituation.get(situation) : null;
     return d ? ` room(${d})` : "";
@@ -4578,9 +4595,11 @@ export async function generateGrid(input: {
         check: "seed_overlong" as const,
         detail: `${words} words - a prompt is one chat message, not a requirements list; keep the circumstance to one sentence and ask at most two or three things (aim well under 60 words)`,
       });
-    // s46/r17 (I): a want lifted from the room description into the seed -
-    // the description is circumstance-only by the room rule, but a user
-    // edit can add a want, and a seed that copies it steers the column.
+    // s46/r17 (I): a want lifted from the room description into the seed.
+    // journeys30: the description is natural again (wants and all) and the
+    // writer sees only the circumstance line - this net catches a want
+    // that still reached a seed (a circumstance line that kept it, or a
+    // user edit).
     if (c.situation) {
       const desc = (input.scenarios.find((sc) => sc.label === c.situation)?.description ?? "").toLowerCase();
       const want = desc.match(/\b(?:wants?|wanting|needs?|needing|looking for|seeking|prioriti[sz](?:e|es|ing)|values?)\s+([^.,;:]{6,80})/);
@@ -4817,7 +4836,7 @@ export async function generateGrid(input: {
           if (c.stage === "use_case") uc.push({ u, c });
         }
         if (uc.length >= 1) {
-          const roomOf = new Map(input.scenarios.map((s) => [s.label, s.description]));
+          const roomOf = roomBySituation;
           const a = await anthropicClient();
           const ask = (extra = "") => withCostContext({ purpose: "setup:cells" }, () => a.messages.create({
             model: DESIGN_CHECK_MODEL,

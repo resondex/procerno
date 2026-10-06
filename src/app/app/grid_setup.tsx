@@ -218,9 +218,10 @@ interface JourneyFitUi {
 export interface ScenarioRow {
   label: string;
   description: string;
-  /** journeys29: the qualities and outcomes this room's buyer wants - shown
-   * as a second line on the card; the writer and the checks never see it. */
-  want?: string;
+  /** journeys30: the room restated without what the buyer wants - the only
+   * form of the room the question writer sees. Comes from the market read;
+   * cleared when the description is edited (the server derives a fresh one). */
+  circumstance?: string;
   /** Structural journey delta; null = inherits the base read. */
   journey: Journey | null;
   /** Came from the model - never deletable, only unticked. */
@@ -274,7 +275,7 @@ export interface GridState {
   keptStages: string[];
   /** The ACTIVE scenarios with their journeys - what the planner uses.
    * Kept in sync with scenarioRows by withScenarioRows(). */
-  scenarios: { label: string; description: string; want?: string; journey: Journey | null }[];
+  scenarios: { label: string; description: string; circumstance?: string; journey: Journey | null }[];
   scenarioRows?: ScenarioRow[];
   /** Alternates from the market read, not yet shown - "Suggest another"
    * draws from here first (instant); the model is only asked once the pool
@@ -428,7 +429,7 @@ export function withScenarioRows(g: GridState, rows: ScenarioRow[]): GridState {
     scenarioRows: rows,
     scenarios: rows
       .filter((r) => r.on)
-      .map(({ label, description, want, journey }) => ({ label, description, want, journey })),
+      .map(({ label, description, circumstance, journey }) => ({ label, description, circumstance, journey })),
   };
 }
 
@@ -639,7 +640,7 @@ export function useGridSetup(a: GridSetupArgs) {
     const activeRows = edit?.rows.filter((r) => r.on && r.label.trim()) ?? [];
     const data = await post<{
       base: GridState["moderators"];
-      scenarios: { label: string; description: string; want?: string; journey: Journey | null }[];
+      scenarios: { label: string; description: string; circumstance?: string; journey: Journey | null }[];
       reserve?: { label: string; description: string }[];
       stages: GridStage[];
       fit?: ScenarioFitUi | null;
@@ -660,7 +661,7 @@ export function useGridSetup(a: GridSetupArgs) {
       ...(edit && activeRows.length > 0
         ? {
             base: edit.base,
-            scenarios: activeRows.map(({ label, description, want, journey }) => ({ label, description, want, journey })),
+            scenarios: activeRows.map(({ label, description, circumstance, journey }) => ({ label, description, circumstance, journey })),
           }
         : {}),
     });
@@ -677,14 +678,14 @@ export function useGridSetup(a: GridSetupArgs) {
     if (forBrand && !edit && a.state) {
       const keptBase = a.state.moderators;
       const masked = await post<{
-        scenarios: { label: string; description: string; want?: string; journey: Journey | null }[];
+        scenarios: { label: string; description: string; circumstance?: string; journey: Journey | null }[];
         stages: GridStage[];
       }>("/api/setup/grid/compose", {
         brand: a.brand,
         category: a.category,
         audience: a.audience || undefined,
         base: keptBase,
-        scenarios: data.scenarios.map(({ label, description, want, journey }) => ({ label, description, want, journey })),
+        scenarios: data.scenarios.map(({ label, description, circumstance, journey }) => ({ label, description, circumstance, journey })),
       });
       a.setBusy(null);
       if (!masked) return null;
@@ -2134,15 +2135,10 @@ export function ScenariosGate({
             maxLength={240}
             value={sc.description}
             placeholder="one sentence describing the circumstance"
-            onChange={(e) => updateRow(i, { description: e.target.value })}
+            onChange={(e) => updateRow(i, { description: e.target.value, circumstance: undefined })}
             onFocus={() => setEditingRoom(true)}
             onBlur={() => { setEditingRoom(false); onWarmReview?.(); }}
           />
-          {sc.want?.trim() && (
-            <p className="m-0 text-[12px] text-ink-3" title="What this buyer wants from the product. Shown for you; the question writer sees only the circumstance above, so the answer decides what matters.">
-              Wants: {sc.want}
-            </p>
-          )}
           {sc.journey && sc.on && (
             <div className="flex flex-wrap items-center gap-1.5">
               <span className="text-[10px] uppercase tracking-wide text-warning font-semibold">this buyer:</span>

@@ -37,9 +37,9 @@ for (const brand of process.argv.slice(2)) {
   const by = new Map(rep.checks.map((c: { label: string }) => [c.label, c]));
   out[brand] = {
     category, audience, picks, rivals,
-    drawn: read.scenarios.map((s: { label: string; description: string; want?: string; journey?: unknown; journeyWhy?: string }) => ({ label: s.label, description: s.description, want: s.want ?? null, journey: s.journey ?? null, journeyWhy: s.journeyWhy ?? null })),
+    drawn: read.scenarios.map((s: { label: string; description: string; circumstance?: string; journey?: unknown; journeyWhy?: string }) => ({ label: s.label, description: s.description, circumstance: s.circumstance ?? null, journey: s.journey ?? null, journeyWhy: s.journeyWhy ?? null })),
     swaps: rep.swaps,
-    final: rep.scenarios.map((s: { label: string; description: string; want?: string; journey?: unknown; journeyWhy?: string }) => ({ label: s.label, description: s.description, want: s.want ?? null, journey: s.journey ?? null, journeyWhy: s.journeyWhy ?? null, check: by.get(s.label) ?? null })),
+    final: rep.scenarios.map((s: { label: string; description: string; circumstance?: string; journey?: unknown; journeyWhy?: string }) => ({ label: s.label, description: s.description, circumstance: s.circumstance ?? null, journey: s.journey ?? null, journeyWhy: s.journeyWhy ?? null, check: by.get(s.label) ?? null })),
     reserve: rep.reserve.map((s: { label: string; description: string }) => ({ label: s.label, description: s.description, check: by.get(s.label) ?? null })),
   };
   void 0;

@@ -59,6 +59,8 @@ const Body = z.object({
       z.object({
         label: z.string().trim().min(1).max(60),
         description: z.string().trim().max(240),
+        /** journeys30: the want-free restatement the writer reads; absent = derived server side. */
+        circumstance: z.string().trim().max(240).optional(),
         journey: JourneyShape.nullable(),
       })
     )
