@@ -5951,9 +5951,10 @@ export async function generatePhrasings(input: {
             "opening situation and the question alike - the way a different " +
             "person would say it. The brand names, the category term, any " +
             "number and the words the stage's ask depends on stay as they " +
-            "are; everything else is yours to say differently. A paraphrase " +
-            "that keeps the seed's opening clause and changes only the " +
-            "question is not a paraphrase. Do not copy the seed's qualitative details (its examples, " +
+            "are; the circumstance is said the way that person would put it - " +
+            "the same facts in different words, never the seed's own phrasing " +
+            "of them. A paraphrase that keeps the seed's opening clause and " +
+            "changes only the question is not a paraphrase. Do not copy the seed's qualitative details (its examples, " +
             "its list of symptoms); describe the circumstance in your own " +
             "words or leave details out entirely. A stated frequency or " +
             "amount in the seed (how often, how many, how much) is a fact of " +
@@ -6251,7 +6252,16 @@ export async function generatePhrasings(input: {
         // is a thesaurus pass, not another person asking; drop it. Brand
         // tokens are excluded - required words can't count as copying.
         const ws = cellWords(text);
-        if (keptWords.some((k) => jaccard(k, ws) > (opts?.maxOverlap ?? MAX_OVERLAP))) { culls.overlap++; continue; }
+        // p16: with required vocabulary exempt, a formula cell (a head-to-
+        // head, a short use case) leaves two or three residual words, and
+        // any two faithful candidates then look identical to jaccard. Below
+        // four residual words the overlap test is meaningless; the opening
+        // and duplicate guards carry the thesaurus-pass case there.
+        if (ws.size >= 4 && keptWords.some((k) => k.size >= 4 && jaccard(k, ws) > (opts?.maxOverlap ?? MAX_OVERLAP))) {
+          culls.overlap++;
+          if (process.env.PHRASINGS_DEBUG) console.warn(`  cull overlap(words) [${seed.stage}]: ${text}`);
+          continue;
+        }
         // p15: a copied OPENING is a copy whatever the exempt-word sets say -
         // with brand, category and ask words exempt, a short seed left the
         // overlap filter almost nothing to compare, and nine paraphrases
@@ -6261,7 +6271,11 @@ export async function generatePhrasings(input: {
         // rejected: at 5-7 masked tokens it hit 32-58% of faithful output,
         // mostly the required ask formula "which <category> should I...".)
         const opening = openingOf(text);
-        if (keptOpenings.has(opening)) { culls.overlap++; continue; }
+        if (keptOpenings.has(opening)) {
+          culls.overlap++;
+          if (process.env.PHRASINGS_DEBUG) console.warn(`  cull overlap(opening "${opening}") [${seed.stage}]: ${text}`);
+          continue;
+        }
         keptOpenings.add(opening);
         seen.add(n);
         keptWords.push(ws);
