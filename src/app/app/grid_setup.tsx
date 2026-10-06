@@ -3220,7 +3220,11 @@ export function CellsGate({
   const [open, setOpen] = useState<ReadonlySet<string>>(new Set());
   /** The one cell currently writing - only its card waits. Keyed by uid
    * so deletions elsewhere can't shift the wait onto the wrong card. */
-  const [pending, setPending] = useState<{ uid: string; kind: "new" | "near" } | null>(null);
+  // Per-cell (2026-10-06, Tyler): one draw used to disable every other
+  // card's buttons until it finished. Each cell's draw is its own entry;
+  // only that card waits.
+  const [pendingMap, setPendingMap] = useState<Record<string, "new" | "near">>({});
+  const pendingOf = (uid: string | undefined): "new" | "near" | null => (uid ? pendingMap[uid] ?? null : null);
   /** A stage-level add in progress: picking a rival and/or scenario. */
   const [adding, setAdding] = useState<{
     stage: string;
@@ -3234,14 +3238,13 @@ export function CellsGate({
   const written = state.step === "phrasings";
   const countOf = (c: GridCellUi) => 1 + c.phrasings.filter((p) => p.text.trim()).length;
   const draw = async (i: number, kind: "new" | "near") => {
-    if (pending !== null) return;
     const uid = state.cells[i]?.uid;
-    if (!uid) return;
-    setPending({ uid, kind });
+    if (!uid || pendingMap[uid]) return;
+    setPendingMap((m) => ({ ...m, [uid]: kind }));
     try {
       await (kind === "near" ? onNearCell(i) : onRegenerate(i));
     } finally {
-      setPending(null);
+      setPendingMap((m) => { const n = { ...m }; delete n[uid]; return n; });
     }
   };
   const commitAdd = async (
@@ -3343,7 +3346,7 @@ export function CellsGate({
                         <div
                           key={c.uid ?? c.i}
                           className={`grid gap-1.5 rounded-lg border border-line bg-surface px-3.5 py-2.5 ${
-                            pending !== null && pending.uid === c.uid ? "opacity-50 pointer-events-none" : ""
+                            pendingOf(c.uid) ? "opacity-50 pointer-events-none" : ""
                           }`}
                         >
                           <div className="flex items-center gap-2 flex-wrap">
@@ -3393,7 +3396,7 @@ export function CellsGate({
                             className="input w-full resize-none field-sizing-content text-sm"
                             rows={1}
                             value={c.text}
-                            readOnly={pending !== null && pending.uid === c.uid}
+                            readOnly={pendingOf(c.uid) !== null}
                             ref={(el) => {
                               if (el && c.custom && c.text === "" && c.uid && !focusedOnce.has(c.uid)) {
                                 focusedOnce.add(c.uid);
@@ -3432,10 +3435,10 @@ export function CellsGate({
                             }}
                           />
                           <div className="flex items-center gap-3 border-t border-dashed border-line pt-1.5 text-[11px]">
-                            {pending !== null && pending.uid === c.uid ? (
+                            {pendingOf(c.uid) ? (
                               <span className="flex items-center gap-1.5 font-medium text-primary">
                                 <InlineSpinner />
-                                {pending.kind === "near"
+                                {pendingOf(c.uid) === "near"
                                   ? written ? "Writing a near variant and its prompts…" : "Writing a near variant…"
                                   : written ? "Writing a new question and its prompts…" : "Writing a new prompt…"}
                               </span>
@@ -3444,7 +3447,7 @@ export function CellsGate({
                                 {(c.regens ?? 0) < MAX_REGENS ? (
                                   <button
                                     type="button"
-                                    disabled={busy || pending !== null}
+                                    disabled={busy || pendingOf(c.uid) !== null}
                                     onClick={() => void draw(c.i, "new")}
                                     title="Ask this cell's question a different way - a new ask, not another wording"
                                     className="font-medium text-primary hover:opacity-80 disabled:opacity-50"
@@ -3461,7 +3464,7 @@ export function CellsGate({
                                   ((c.nears ?? 0) < MAX_VARIANTS ? (
                                     <button
                                       type="button"
-                                      disabled={busy || pending !== null}
+                                      disabled={busy || pendingOf(c.uid) !== null}
                                       onClick={() => void draw(c.i, "near")}
                                       title="Right ask, wrong details? Same question with one detail moved"
                                       className="font-medium text-primary hover:opacity-80 disabled:opacity-50"
@@ -3642,7 +3645,7 @@ export function CellsGate({
                             </button>
                             <button
                               type="button"
-                              disabled={atCap || busy || pending !== null}
+                              disabled={atCap || busy}
                               onClick={() => beginAdd(stage, "suggest")}
                               title={atCap ? "Custom-question allowance used - delete a question to free a slot" : "Have another question written for this stage"}
                               className="font-medium text-primary hover:opacity-80 disabled:opacity-40"
