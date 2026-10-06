@@ -795,7 +795,8 @@ const fails8 = fails;
   expect("full-label copy still leaks",
     bc.scenarioLabelLeak("Client delivery collaboration is our thing - what should we use?", ["Client delivery collaboration"], "project management software") === "Client delivery collaboration");
   // Criteria dependency connector.
-  const dep = (t: string) => inst.CRITERIA_DEPENDENCY.test(t);
+  const instr = await import(`${REPO}/src/lib/engine/instrument`);
+  const dep = (t: string) => instr.CRITERIA_DEPENDENCY.test(t);
   expect("criteria with 'given that' passes", dep("I'm picking a main card. What should I look at, and given that, what should I consider?"));
   expect("criteria with 'then' passes", dep("I need a new card. What should I look at, and then what should I consider?"));
   expect("criteria with two unconnected asks fails", !dep("I'm choosing a card for travel. What should I look at, and what should I consider?"));
