@@ -115,8 +115,13 @@ export interface GridCellUi {
 
 /** A class-angle cell's class fields for a request body; {} otherwise, so
  * every other cell's request is unchanged. */
-function classFields(c: Pick<GridCellUi, "classPhrase" | "classBrand">): { classPhrase?: string; classBrand?: string } {
-  return c.classPhrase ? { classPhrase: c.classPhrase, classBrand: c.classBrand ?? undefined } : {};
+function classFields(c: Pick<GridCellUi, "classPhrase" | "classBrand" | "valueLine">): { classPhrase?: string; classBrand?: string; valueLine?: ValueLineUi | null } {
+  return {
+    ...(c.classPhrase ? { classPhrase: c.classPhrase, classBrand: c.classBrand ?? undefined } : {}),
+    // p14: the Value line rides to the paraphrase engine so paraphrases
+    // are held to the line and a cheaper counterpart.
+    ...(c.valueLine ? { valueLine: { line: c.valueLine.line, counterpart: c.valueLine.counterpart } } : {}),
+  };
 }
 
 /** The angle as a reader sees it. */
@@ -2819,7 +2824,7 @@ export function CoverageGate({
             <tr className="bg-surface-1">
               <th className="px-3 py-2 text-left font-medium text-ink-3 whitespace-nowrap">stage</th>
               {active.map((sc) => (
-                <th key={sc.label} className="px-2 py-2 text-center font-medium whitespace-nowrap">
+                <th key={sc.label} className="px-2 py-2 text-center font-medium">
                   <span className={sc.journey ? "text-warning" : "text-ink"}>{sc.label}</span>
                   <span className="block text-[9px] font-normal text-ink-3">
                     {sc.journey ? "buys differently" : "buys like the market"}

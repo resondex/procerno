@@ -5523,7 +5523,18 @@ export interface Phrasing {
 // "p13" (2026-10-04): the owned-noun note keeps the seed's full category
 // term (it fought the p12 full-term check: 0/9 kept), category words never
 // count as overlap, and the note lost its category examples.
-const PHRASINGS_VERSION = "p13";
+// "p14" (2026-10-06, AmEx paraphrase audit): every S2 was a Value cell -
+// the overlap cull counted the cell's REQUIRED words (the line, the
+// counterpart, the ask words, the room words) as copying, so faithful
+// paraphrases died and the drifted ones survived ("the premium card",
+// "mid-tier cards", a balance-carrier for a pay-in-full asker). Now: a
+// Value paraphrase must name the line and a cheaper generic counterpart
+// (string-checked), and the overlap filter ignores each cell's required
+// vocabulary (avoidExempt + the Value line and counterpart), as it already
+// ignored brand and category words.
+const PHRASINGS_VERSION = "p14";
+/** Words that say "cheaper" in a Value counterpart (p14). */
+const CHEAPER_WORDS = /\b(?:cheap(?:er|est)?|(?:more |most )?affordable|less (?:expensive|costly|pricey)|lower[- ](?:cost|priced?|end)|low(?:er)?[- ]cost|budget(?:[- ]friendly)?|inexpensive|no[- ]fee|entry[- ]level|basic)\b/i;
 /** Ask words a paraphrase of these stages must keep (p11). */
 const PARA_ASK_WORD: Record<string, RegExp> = {
   feature_screening: /\bfeatures?\b/i,
@@ -5591,6 +5602,8 @@ export async function generatePhrasings(input: {
      * comparison_class spec, writer note and design line. */
     classPhrase?: string | null;
     classBrand?: string | null;
+    /** Value cells (p14): the line and counterpart every paraphrase keeps. */
+    valueLine?: ValueLine | null;
   }[];
   /** Total phrasings wanted per cell including the seed. */
   count: number;
@@ -6011,7 +6024,24 @@ export async function generatePhrasings(input: {
       }
       const prior = opts?.have?.[c.index] ?? [];
       const seen = new Set<string>([norm(seed.text), ...prior.map((p) => norm(p.text))]);
-      const keptWords: Set<string>[] = [contentWords(seed.text), ...prior.map((p) => contentWords(p.text))];
+      // p14: the cell's required vocabulary never counts as copying - the
+      // room's words, the concern, the class phrase, the stage's ask words
+      // and (Value) the line and counterpart recur in every faithful
+      // paraphrase by design.
+      const cellExempt = avoidExempt(seed, input.category);
+      if (seed.valueLine) { for (const w of wordSet(`${seed.valueLine.line} ${seed.valueLine.counterpart}`)) { cellExempt.add(w); cellExempt.add(w.endsWith("s") ? w.slice(0, -1) : `${w}s`); } }
+      const cellWords = (t: string): Set<string> => { const ws = contentWords(t); for (const w of [...ws]) if (cellExempt.has(w)) ws.delete(w); return ws; };
+      // p14: a Value paraphrase keeps the line's own words (beyond the brand
+      // and the category) and a cheaper generic counterpart.
+      const lineWords = seed.stage === "pricing" && seed.valueLine
+        ? [...wordSet(seed.valueLine.line)].filter((w) => !brandTokens.has(w) && !catWords.has(catStem(w)) && w.length >= 3)
+        : [];
+      const keepsLine = (t: string) => {
+        if (seed.stage !== "pricing" || !seed.valueLine) return true;
+        const ws = wordSet(t);
+        return lineWords.every((w) => ws.has(w) || ws.has(`${w}s`) || ws.has(w.replace(/s$/, ""))) && CHEAPER_WORDS.test(t);
+      };
+      const keptWords: Set<string>[] = [cellWords(seed.text), ...prior.map((p) => cellWords(p.text))];
       const kept: Phrasing[] = [];
       // Cull accounting (2026-09-28): a cell whose batch dies usually dies
       // to ONE filter (correlated kill - the Asana signature bug looked
@@ -6037,6 +6067,7 @@ export async function generatePhrasings(input: {
         // stops asking "worth" is a comparison - countable, so counted.
         const askWord = PARA_ASK_WORD[seed.stage];
         if (askWord && !askWord.test(text)) { culls.ask++; continue; }
+        if (!keepsLine(text)) { culls.ask++; continue; }
         // Length near the seed's (p12): no paraphrase runs more than 10
         // words past its seed - the long tail was where lists and formal
         // backstory came back.
@@ -6046,7 +6077,7 @@ export async function generatePhrasings(input: {
         // A paraphrase that shares most of its words with the seed or a sibling
         // is a thesaurus pass, not another person asking; drop it. Brand
         // tokens are excluded - required words can't count as copying.
-        const ws = contentWords(text);
+        const ws = cellWords(text);
         if (keptWords.some((k) => jaccard(k, ws) > (opts?.maxOverlap ?? MAX_OVERLAP))) { culls.overlap++; continue; }
         seen.add(n);
         keptWords.push(ws);

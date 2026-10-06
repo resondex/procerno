@@ -68,6 +68,8 @@ const Body = z.object({
          * and the upstream brand it evokes. Absent on every other cell. */
         classPhrase: z.string().trim().max(60).nullable().optional(),
         classBrand: z.string().trim().max(80).nullable().optional(),
+        /** Value cells (p14): the line and counterpart the paraphrases must keep. */
+        valueLine: z.object({ line: z.string().trim().min(1).max(80), counterpart: z.string().trim().min(1).max(120) }).nullable().optional(),
       })
     )
     .min(1)
