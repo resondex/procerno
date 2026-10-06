@@ -3391,7 +3391,12 @@ export function circumstanceOnly(description: string): string {
   const d = description.replace(/\s+/g, " ").trim();
   const chooser = /\b(?:choos\w*|pick\w*|select\w*|compar\w*|decid\w*|shop\w*|weigh\w*|evaluat\w*|buy\w*|sign\w*|consider\w*|replac\w*|switch\w*|search\w*|look\w*|upgrad\w*|hunt\w*|browse\w*|narrow\w*|settl\w*|need\w*|want\w*)\b/i;
   const cm = d.match(chooser);
-  const from = cm ? (cm.index ?? 0) + cm[0].length : 0;
+  // No choosing verb, no cut (2026-10-05): every real purpose clause sits
+  // after one ("choosing a card to...", "compares bundles to..."); without
+  // the anchor the cut took verb complements ("expects to pay it down",
+  // "pays to park", "plans to retire") and gutted the room.
+  if (!cm) return d;
+  const from = (cm.index ?? 0) + cm[0].length;
   const head = d.slice(0, from);
   const tail = d.slice(from);
   const det = /^(?:a|an|the|their|our|my|his|her|its|this|that|these|those|one|two|three|four|five|six|seven|eight|nine|ten|another|some|all|each|every|most|many|few|several|which|whom|him|them|us|me|it|[A-Z0-9])/;
