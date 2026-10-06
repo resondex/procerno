@@ -741,9 +741,13 @@ export function SetupWizard({ mode, brand, draft, engineOptions, onClose, onCrea
   }
 
 
-  async function requestClose() {
+  /** Close is OPTIMISTIC (Tyler, 2026-10-05): the modal goes on the click
+   * and the draft save completes behind it - the x used to wait on the
+   * save, which on a slow store read as an ignored click. persist never
+   * throws and the drafts list revalidates on its own. */
+  function requestClose() {
     const dirty = step !== "market" || prompts !== null || grid !== null;
-    if (dirty && busy === null) await persist(step);
+    if (dirty && busy === null) void persist(step);
     onClose();
   }
 
@@ -771,7 +775,7 @@ export function SetupWizard({ mode, brand, draft, engineOptions, onClose, onCrea
       }
       // Closing mid-write is safe: nothing aborts on unmount, and the
       // completion handler persists the finished result to the draft.
-      void requestClose();
+      requestClose();
     };
   });
   useEffect(() => {
@@ -1676,7 +1680,7 @@ export function SetupWizard({ mode, brand, draft, engineOptions, onClose, onCrea
         <span className="flex-1" />
         <button
           type="button"
-          onClick={() => void requestClose()}
+          onClick={() => requestClose()}
           disabled={submitting}
           className="text-left text-[13px] font-medium text-primary hover:opacity-80 disabled:opacity-50 px-2"
         >
@@ -1704,7 +1708,7 @@ export function SetupWizard({ mode, brand, draft, engineOptions, onClose, onCrea
           <button
             type="button"
             aria-label="close"
-            onClick={() => void requestClose()}
+            onClick={() => requestClose()}
             className="text-ink-3 hover:text-ink text-xl leading-none"
           >
             ×
