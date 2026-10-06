@@ -4,7 +4,13 @@
     {
       "name": "procerno",
       "runtimeExecutable": "npm",
-      "runtimeArgs": ["run", "dev", "--", "--port", "3200"],
+      "runtimeArgs": [
+        "run",
+        "dev",
+        "--",
+        "--port",
+        "3200"
+      ],
       "port": 3200
     },
     {
@@ -37,6 +43,23 @@
         "3210"
       ],
       "port": 3210
+    },
+    {
+      "name": "procerno-local-sqlite",
+      "runtimeExecutable": "env",
+      "runtimeArgs": [
+        "DATABASE_URL=",
+        "NEXT_PUBLIC_SUPABASE_URL=",
+        "NEXT_PUBLIC_SUPABASE_ANON_KEY=",
+        "RUN_COLLECT_ONLY=1",
+        "npm",
+        "run",
+        "dev",
+        "--",
+        "--port",
+        "3240"
+      ],
+      "port": 3240
     }
   ]
 }
