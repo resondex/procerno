@@ -778,9 +778,6 @@ const SCENARIOS_SCHEMA = {
            * checks and the gate read the description only. */
           want: { type: "string" },
           deviates: { type: "boolean" },
-          /** journeys25 (stakes rule): the process-changing reason a room
-           * deviates; empty when it does not. The grant requires it. */
-          deviatesBecause: { type: "string" },
           journey: {
             type: "object",
             additionalProperties: false,
@@ -793,7 +790,7 @@ const SCENARIOS_SCHEMA = {
             required: ["involvement", "verifiability", "think_feel", "decision_unit"],
           },
         },
-        required: ["label", "description", "want", "deviates", "deviatesBecause", "journey"],
+        required: ["label", "description", "want", "deviates", "journey"],
       },
     },
   },
@@ -949,7 +946,13 @@ export async function readScenarios(input: {
   // 26 (Tyler, option 2): a change in WHO decides also qualifies.
   // 27: the judge carries the read's own answer-not-process exclusions (a
   // tight budget alone was granted once).
-  const key = cacheKey("scenarios_journeys27", [
+  // 28: the stakes rule is OUT of the room-writing prompt - the prompt and
+  // schema are byte-identical to 24 again. Asking the read for a reason
+  // thinned every brand's rooms toward segment labels ("Heavy everyday
+  // spender :: an individual who puts most expenses on cards"). The judge
+  // now runs AFTER the read on the room text plus the dimensions the read
+  // says differ, and names the reason itself.
+  const key = cacheKey("scenarios_journeys28", [
     input.category, input.audience, input.forBrand ?? "",
   ]);
   const read = await coalesced<{
@@ -1038,17 +1041,7 @@ export async function readScenarios(input: {
           "not a small team. The DEFAULT is no deviation: most " +
           "markets have ZERO deviating scenarios; at most one, and only " +
           "among the first four. When " +
-          "deviates is false, journey just repeats the base values. " +
-          "deviatesBecause: when deviates is true, ONE short phrase naming " +
-          "why this buyer decides by a different process - either what " +
-          "raises the stakes (a constraint that makes the wrong choice " +
-          "costly, someone else's rules the buyer must satisfy, a purchase " +
-          "large or rare enough that the buyer researches it) or a change in " +
-          "WHO decides (one person deciding alone where the market decides as " +
-          "a group, or a group where the market decides alone). The occasion " +
-          "itself, a larger quantity, or other people merely being present is " +
-          "NOT a reason - if that is all there is, deviates is false. Empty " +
-          "when deviates is false.\n" +
+          "deviates is false, journey just repeats the base values.\n" +
           "What good looks like - each scenario is a room the client's " +
           "brand has to win, vivid enough that a strategist would present " +
           "it by name: a concrete moment, each core room on a different " +
@@ -1093,7 +1086,7 @@ export async function readScenarios(input: {
     },
   });
   const parsed = JSON.parse(res.choices[0]?.message?.content ?? "{}") as {
-    scenarios: { label: string; description: string; want?: string; deviates: boolean; deviatesBecause?: string; journey: Journey }[];
+    scenarios: { label: string; description: string; want?: string; deviates: boolean; journey: Journey }[];
   };
   // Stakes judgment (journeys25): for each core room that claims a
   // deviation with a reason, one low-effort call decides whether the reason
@@ -1101,8 +1094,10 @@ export async function readScenarios(input: {
   // only when a room claims (most reads: none). Fails open to the claim.
   const claims = (parsed.scenarios ?? []).slice(0, CORE_SCENARIOS)
     .map((s, i) => ({ s, i }))
-    .filter(({ s }) => s.deviates && String(s.deviatesBecause ?? "").trim());
+    .filter(({ s }) => s.deviates && !sameJourney(base, s.journey));
   const stakesOk = new Set<number>();
+  const stakesWhy = new Map<number, string>();
+  const diffOf = (j: Journey) => (Object.keys(j) as (keyof Journey)[]).filter((k) => String(j[k]) !== String(base[k])).map((k) => `${k}: ${base[k]} -> ${j[k]}`).join(", ");
   if (claims.length > 0) {
     try {
       const a = await anthropicClient();
@@ -1112,15 +1107,17 @@ export async function readScenarios(input: {
           `Each line below is a buying room in the ${input.category} market and a stated reason its buyer decides by a different PROCESS than the market's usual one (the usual: ${JSON.stringify(base)}). ` +
           `A reason changes the process when it raises the stakes of a wrong choice - a constraint that makes the wrong choice costly, someone else's rules the buyer must satisfy, or a purchase large or rare enough to be researched - or when it changes WHO decides: one person deciding alone where the market usually decides as a group, or a group deciding where the market usually decides alone. ` +
           `A reason that only names the occasion, a larger quantity, other people merely being present, or the buyer's mood does not change the process; nor does a circumstance that changes the ANSWER but not the process - a tight budget, a compliance constraint, a deadline - unless it makes the wrong choice costly enough that the buyer researches where they otherwise would not. ` +
-          `Reply with ONLY JSON: {"changes": [true, false, ...]} - one entry per line, in order.`,
-        messages: [{ role: "user", content: claims.map(({ s }, k) => `${k + 1}. ${s.label}: ${s.description} | reason: ${s.deviatesBecause}`).join("\n") }],
+          `For each line, name in a few words the reason this room's buyer would decide that way, judged from the room alone, and say whether that reason changes the process. ` +
+          `Reply with ONLY JSON: {"rooms": [{"reason": "...", "changes": true}, ...]} - one entry per line, in order.`,
+        messages: [{ role: "user", content: claims.map(({ s }, k) => `${k + 1}. ${s.label}: ${s.description} | proposed change: ${diffOf(s.journey)}`).join("\n") }],
       } as never);
       const text = (res as { content: { type: string; text?: string }[] }).content.filter((b) => b.type === "text").map((b) => b.text ?? "").join("").trim();
-      const j = JSON.parse(firstJsonObject(text) ?? text) as { changes?: boolean[] };
-      claims.forEach(({ i }, k) => { if (j.changes?.[k] === true) stakesOk.add(i); });
-      claims.forEach(({ s }, k) => {
-        if (j.changes?.[k] !== true) console.warn(`stakes rule: override refused for "${s.label}" (reason: ${s.deviatesBecause}) - inherits the base`);
-        else console.warn(`stakes rule: override granted for "${s.label}" (reason: ${s.deviatesBecause})`);
+      const j = JSON.parse(firstJsonObject(text) ?? text) as { rooms?: { reason?: string; changes?: boolean }[] };
+      claims.forEach(({ s, i }, k) => {
+        const r = j.rooms?.[k];
+        const why = humanize(String(r?.reason ?? "")).trim();
+        if (r?.changes === true) { stakesOk.add(i); stakesWhy.set(i, why); console.warn(`stakes rule: override granted for "${s.label}" (reason: ${why})`); }
+        else console.warn(`stakes rule: override refused for "${s.label}" (reason: ${why || "none given"}) - inherits the base`);
       });
     } catch (err) {
       console.error("stakes judgment failed open:", err);
@@ -1143,7 +1140,7 @@ export async function readScenarios(input: {
         // the description the model returns.
         description: circumstanceOnly(s.description.trim()),
         ...(s.want?.trim() ? { want: humanize(s.want.trim()) } : {}),
-        ...(granted && s.deviatesBecause?.trim() ? { journeyWhy: humanize(s.deviatesBecause.trim()) } : {}),
+        ...(granted && stakesWhy.get(i) ? { journeyWhy: stakesWhy.get(i) } : {}),
         journey: granted ? s.journey : null,
       };
     })
