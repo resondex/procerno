@@ -177,7 +177,7 @@ const STYLE_VERSION = "s52"; // s52 (2026-10-06): criteria's second ask is condi
  * a deterministic check changes meaning; bumping costs one free re-judge
  * per unit, and model calls only for units the new rules reject. */
 /** r25: the connector that conditions criteria's second ask on its first. */
-export const CRITERIA_DEPENDENCY = /\b(?:given (?:that|those|this|all that)|then|from there|with that in mind|based on (?:that|those)|knowing that|once i know|in light of that|after that|and from that|depending on that)\b/i;
+export const CRITERIA_DEPENDENCY = /\b(?:given (?:that|those|this|all that|what i find|those answers)|then|from there|with that (?:in mind|info|known|answered)|based on (?:that|those)|because of that|knowing (?:that|those|this)|once i (?:know|do|have|see)|in light of that|after(?:wards?| that)?|and from that|depending on that|on that basis|accordingly|having (?:done|looked at|checked) that)\b/i;
 export const SEED_RULES_VERSION = "r25"; // r25 (2026-10-06): label stems that are vault-everyday words never leak; criteria_no_dependency net + design intent; feature-screening channel clause. // r24 (journeys30): problem-recognition design intent requires category territory; criteria design intent carries the two-part ask. // r22 (batch 2): use-case in a channel room carries who only; label-word stems leak. // r17 (2026-10-04 seed review batch): awareness_purchase_moment and offensive_alt_no_move nets; design intents - no purchase moment in problem recognition, head-to-heads add no situation, alternatives state a full-sentence move within the category, advocacy vs business-case audience, Value brand-name fallback branch; keep-or-leave narrowed (a within-brand change may be the subject, never the answer). // r16 (2026-10-04 seed review): doubt design intent - own claim, one doubt, open verdict; facts to confirm, rule/ingredient lookups, hearsay, sizing asks and the Value worth-it ask fail; objections never voiced by a current user, churn/renewal always by one, no third option beside stay and leave. // r15 (2026-10-02, Tyler's option B): brand mentions = whole names, declared alternates, name words and dictionary aliases, with every ambiguous one-word hit (an everyday word written lowercase or opening a sentence, or a maker word like "Google" of Google Pixel) decided in context by the brand judge (haiku, cached) - no casing rules, no target exemption, no roster word lists. r14 (2026-10-02 review): everyday-word lexicon by lowercase SHARE in two tiers (label words: common and not brand-dominated - "jira", "netflix", "pixel", "apple", "chase" count lowercase again; aliases: merely common - "gold" stays capital-only), coined split words case-blind ("apple or samsung"), the target's own one-word name never case-guarded, "citi" off the case-guard list, and a monthly figure is the asker's plan only in first-person / spend / offer context ("the Pro about 20 a month more" is a stated price). r13 (2026-10-02 cold-walk audit + review): verb-less stated prices ("Gold at 250"); word-anchored price-concern test + money bolt-ons; brand checks read filtered dictionary alias forms ("amex"); everyday words inside brand names never name the brand - category tokens containment-aware, split words of multi-word names in label casing and not sentence-initial, one-word names and aliases in the vault everyday-word lexicon capitalized only, other brands' full names scrubbed first. r4 (2026-10-01): r2 calendar-year/60-word/segment-vocab; r3 category-naming labels exempt from substring leak; r4 'standardization' in segment vocabulary; r5 directionless-switch string check; r6 punctuation-blind label-leak matching; r7-r8 switch direction detected by absence (no OS, no roster brand near switch vocabulary); cheaper bolt-on token on non-price concerns
 
 /** Brand forms that double as ordinary English words: only these demand a
@@ -5593,7 +5593,67 @@ export interface Phrasing {
 // (string-checked), and the overlap filter ignores each cell's required
 // vocabulary (avoidExempt + the Value line and counterpart), as it already
 // ignored brand and category words.
-const PHRASINGS_VERSION = "p14";
+// "p15" (2026-10-06, AmEx round 2): the writer's "NOT a rewording of the
+// seed" read as "leave the seed's clause alone" - cell 39 kept its opening
+// nine times and varied only the question. Now: reword the whole prompt,
+// never a run of four+ seed words; the cull drops a copied run of five+
+// (exemption-proof) and the retry names the copied run; doubt
+// paraphrases never open as hearsay; criteria paraphrases keep the
+// connector; a scenario seed's stated frequency stays at its level.
+const PHRASINGS_VERSION = "p15";
+/** p15: a paraphrase whose first COPY_OPENING words equal the seed's or a
+ * kept sibling's copied its opening clause. Calibrated on two AmEx rounds:
+ * 4 words hits 20-22% of output (cell 39's template 8 of 9), 5 hits 15%. */
+const COPY_OPENING = 4;
+/** p15: a worry voiced as someone else's claim. */
+export const HEARSAY_OPENER = /\b(?:i(?:'ve| have)? (?:heard|read|seen)|i hear|people (?:say|are saying|keep saying)|folks say|everyone says|they say|word is|rumou?rs?|(?:a )?friend (?:told|says|said)|(?:reviews|reddit|forums?) say)\b/i;
+/** p15: longest run of consecutive shared tokens between two token lists. */
+export function longestSharedRunWords(a: string[], b: string[]): string[] {
+  let best: string[] = [];
+  const idx = new Map<string, number[]>();
+  b.forEach((w, j) => { const l = idx.get(w); if (l) l.push(j); else idx.set(w, [j]); });
+  for (let i = 0; i < a.length; i++) {
+    for (const j of idx.get(a[i]) ?? []) {
+      let k = 0;
+      while (i + k < a.length && j + k < b.length && a[i + k] === b[j + k]) k++;
+      if (k > best.length) best = a.slice(i, i + k);
+    }
+  }
+  return best;
+}
+export function longestSharedRun(a: string[], b: string[]): number { return longestSharedRunWords(a, b).length; }
+/** p15: how often / how many, as a coarse level, so a paraphrase can be
+ * held to the seed's level without matching its words. 0 = none stated. */
+const FREQ_LEVELS: [RegExp, number][] = [
+  [/\b(?:rarely|hardly ever|almost never|once in a while|now and then|occasionally)\b/i, 1],
+  [/\b(?:once|one time|a single|only one)\b/i, 1],
+  [/\b(?:twice|two times|a couple(?: of)?|a pair of)\b/i, 2],
+  [/\b(?:a few|three|3|some)\b/i, 3],
+  [/\b(?:several|a handful of|a number of|multiple|four|five|4|5)\b/i, 4],
+  [/\b(?:regularly|often|frequent(?:ly)?|a lot|lots of|many|plenty of|all the time|constantly|every (?:week|month|day|weekend)|weekly|daily|most (?:days|weeks|months)|heavy|heavily)\b/i, 6],
+];
+export function frequencyLevel(t: string): number {
+  // The scale words count only when they describe frequency or amount,
+  // which a period word, "times" or a trip/visit noun signals; a bare
+  // "some" or "once" elsewhere in the sentence is not a frequency.
+  const hasPeriod = /\b(?:a|per|each|every)\s+(?:year|month|week|day|quarter)\b|\b(?:annually|yearly|monthly|weekly|daily|a year|a month|a week)\b|\btimes?\b|\b(?:trips?|visits?)\b/i.test(t);
+  let level = 0;
+  for (const [re, n] of FREQ_LEVELS) if (re.test(t)) level = Math.max(level, n);
+  if (level <= 4 && !hasPeriod) return 0;
+  return level;
+}
+/** p15: a paraphrase keeps the seed's stated COUNT (a couple, a few,
+ * several, a handful ... times a year) at the same level, within one step,
+ * and never drops it or vagues it up ("a lot"). A seed whose frequency is
+ * only a cadence or a vague word ("every month", "often") constrains
+ * nothing - calibrated: cadence enforcement culled faithful "pay in full
+ * monthly" paraphrases that said "always pay off my statement". */
+export function keepsFrequency(seed: string, para: string): boolean {
+  const a = frequencyLevel(seed);
+  if (a === 0 || a >= 6) return true;
+  const b = frequencyLevel(para);
+  return b !== 0 && Math.abs(a - b) <= 1;
+}
 /** Words that say "cheaper" in a Value counterpart (p14). */
 const CHEAPER_WORDS = /\b(?:cheap(?:er|est)?|(?:more |most )?affordable|less (?:expensive|costly|pricey)|lower[- ](?:cost|priced?|end)|low(?:er)?[- ]cost|budget(?:[- ]friendly)?|inexpensive|no[- ]fee|entry[- ]level|basic)\b/i;
 /** Ask words a paraphrase of these stages must keep (p11). */
@@ -5784,6 +5844,9 @@ export async function generatePhrasings(input: {
       /** Worn-out content words per subset position - the writer is told
        * to find other ways into the ask. */
       avoidWords?: string[][];
+      /** p15: per deficient cell, the longest run of seed words its kept
+       * paraphrases copied (4+ words), named to the retry. */
+      copied?: (string | null)[];
       /** Overlap ceiling override for the last-resort round. */
       maxOverlap?: number;
     }
@@ -5849,6 +5912,9 @@ export async function generatePhrasings(input: {
             : "") +
           (opts?.avoidWords?.[i]?.length
             ? `\n   [overused: ${opts.avoidWords[i].join(", ")}]`
+            : "") +
+          (opts?.copied?.[i]
+            ? `\n   [copied: "${opts.copied[i]}" - this run of the seed's words was carried over by the existing paraphrases; say that part differently]`
             : "")
       )
       .join("\n");
@@ -5865,10 +5931,17 @@ export async function generatePhrasings(input: {
             "question - same circumstance, same intent, same brands named - in " +
             "the wordings people actually type into a chat assistant.\n" +
             "Each paraphrase is a DIFFERENT PERSON in the same circumstance " +
-            "describing it their own way - NOT a rewording of the seed. Do not " +
-            "copy the seed's qualitative details (its examples, its list of " +
-            "symptoms); describe the circumstance in your own words or leave " +
-            "details out entirely. NUMBERS are different: a number in the " +
+            "describing it their own way. Reword the WHOLE prompt - the " +
+            "opening situation and the question alike: a paraphrase keeps the " +
+            "seed's meaning, never its sentences, and nothing is carried over " +
+            "word for word except brand names, the category term and any " +
+            "number (never a run of four or more consecutive words from the " +
+            "seed). Do not copy the seed's qualitative details (its examples, " +
+            "its list of symptoms); describe the circumstance in your own " +
+            "words or leave details out entirely. A stated frequency or " +
+            "amount in the seed (how often, how many, how much) is a fact of " +
+            "the question: say it in other words at the same level, never " +
+            "more or less often, more or fewer, and never drop it. NUMBERS are different: a number in the " +
             "seed is a FACT of the designed question - keep it exactly as " +
             "written or leave it out, NEVER swap it for a different value, and " +
             "never add a number the seed does not carry. Standard spec terms " +
@@ -5920,6 +5993,9 @@ export async function generatePhrasings(input: {
             "person would type it: never a note to yourself, a correction " +
             "('sorry', 'instead:'), a reference to the seed or this task, " +
             "or a bracketed annotation.\n" +
+            "- A seed may carry [copied: ...]: a run of the seed's own words " +
+            "the existing paraphrases kept verbatim - every new paraphrase " +
+            "words that part differently.\n" +
             "- A seed may carry [overused: ...]: content words its existing " +
             "phrasings already lean on. Do not build new phrasings around " +
             "those words - find other angles into the same ask (different " +
@@ -6103,6 +6179,8 @@ export async function generatePhrasings(input: {
         return lineWords.every((w) => ws.has(w) || ws.has(`${w}s`) || ws.has(w.replace(/s$/, ""))) && CHEAPER_WORDS.test(t);
       };
       const keptWords: Set<string>[] = [cellWords(seed.text), ...prior.map((p) => cellWords(p.text))];
+      const openingOf = (t: string): string => norm(t).split(" ").filter(Boolean).slice(0, COPY_OPENING).join(" ");
+      const keptOpenings = new Set<string>([openingOf(seed.text), ...prior.map((p) => openingOf(p.text))]);
       const kept: Phrasing[] = [];
       // Cull accounting (2026-09-28): a cell whose batch dies usually dies
       // to ONE filter (correlated kill - the Asana signature bug looked
@@ -6129,6 +6207,14 @@ export async function generatePhrasings(input: {
         const askWord = PARA_ASK_WORD[seed.stage];
         if (askWord && !askWord.test(text)) { culls.ask++; continue; }
         if (!keepsLine(text)) { culls.ask++; continue; }
+        // p15 (AmEx paraphrase audit, round 2): a worry voiced as hearsay
+        // measures rumor-correction, not confirm-or-rebut (the r16 seed rule).
+        if (DOUBT_CHECK_STAGES.has(seed.stage) && HEARSAY_OPENER.test(text)) { culls.ask++; continue; }
+        // p15: criteria's second ask stays conditioned on the first (r25).
+        if (seed.stage === "criteria" && !CRITERIA_DEPENDENCY.test(text)) { culls.ask++; continue; }
+        // p15: a stated frequency in a scenario seed is the room's input to
+        // the answer - the paraphrase keeps it at the same level.
+        if (seed.situation && !keepsFrequency(seed.text, text)) { culls.ask++; continue; }
         // Length near the seed's (p12): no paraphrase runs more than 10
         // words past its seed - the long tail was where lists and formal
         // backstory came back.
@@ -6140,6 +6226,17 @@ export async function generatePhrasings(input: {
         // tokens are excluded - required words can't count as copying.
         const ws = cellWords(text);
         if (keptWords.some((k) => jaccard(k, ws) > (opts?.maxOverlap ?? MAX_OVERLAP))) { culls.overlap++; continue; }
+        // p15: a copied OPENING is a copy whatever the exempt-word sets say -
+        // with brand, category and ask words exempt, a short seed left the
+        // overlap filter almost nothing to compare, and nine paraphrases
+        // kept the seed's opening clause word for word (AmEx cell 39). The
+        // first COPY_OPENING words identical to the seed's or a kept
+        // sibling's is culled. (A shared-run guard was measured and
+        // rejected: at 5-7 masked tokens it hit 32-58% of faithful output,
+        // mostly the required ask formula "which <category> should I...".)
+        const opening = openingOf(text);
+        if (keptOpenings.has(opening)) { culls.overlap++; continue; }
+        keptOpenings.add(opening);
         seen.add(n);
         keptWords.push(ws);
         kept.push({ text, asker: (p.asker ?? "").trim() });
@@ -6204,7 +6301,17 @@ export async function generatePhrasings(input: {
           .map(([w]) => w)
           .slice(0, 18);
       });
-      const again = await pass(subs, { extra: PHRASINGS_EXTRA_RETRY, have, avoidWords });
+      // p15: name the longest run of seed words the kept paraphrases copied.
+      const copied = deficient.map((j) => {
+        const seedToks = norm(subset[j].text).split(" ").filter((w) => w && !brandTokens.has(w));
+        let best: string[] = [];
+        for (const p of got[j]) {
+          const r = longestSharedRunWords(seedToks, norm(p.text).split(" ").filter((w) => w && !brandTokens.has(w)));
+          if (r.length > best.length) best = r;
+        }
+        return best.length >= 4 ? best.join(" ") : null;
+      });
+      const again = await pass(subs, { extra: PHRASINGS_EXTRA_RETRY, have, avoidWords, copied });
       let progressed = false;
       deficient.forEach((j, k) => {
         if (again[k].length > 0) progressed = true;

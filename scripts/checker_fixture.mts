@@ -808,4 +808,22 @@ const fails8 = fails;
   expect("feature-screening design intent without a scenario is unchanged", !/buying channel or moment/.test(fsBare ?? ""));
 }
 console.log(`9. r25 nets: ${fails === fails8 ? "ALL PASS" : `${fails - fails8} FAILURE(S)`}`);
+
+console.log("10. p15 paraphrase guards");
+const fails9 = fails;
+{
+  const instr = await import(`${REPO}/src/lib/engine/instrument`);
+  expect("count frequency kept at level passes", instr.keepsFrequency("I travel several times a year; is X worth it?", "I make a handful of trips each year; is X worth it?"));
+  expect("count frequency vagued up fails", !instr.keepsFrequency("I travel several times a year; is X worth it?", "I travel for work a lot - is X worth it?"));
+  expect("count frequency scaled down fails", !instr.keepsFrequency("I travel several times a year; is X worth it?", "I travel a couple times annually; is X worth it?"));
+  expect("count frequency dropped fails", !instr.keepsFrequency("I travel several times a year; is X worth it?", "Leisure traveler here, is X worth it?"));
+  expect("cadence-only seed constrains nothing", instr.keepsFrequency("I pay in full every month and want one card.", "I always pay off my statement and want one card."));
+  expect("seed without a frequency constrains nothing", instr.keepsFrequency("I want one card for everything.", "I travel a lot and want one card."));
+  expect("hearsay opener detected", instr.HEARSAY_OPENER.test("I heard X is rough if you carry a balance - is that the case?"));
+  expect("own claim is not hearsay", !instr.HEARSAY_OPENER.test("I'm worried X is a bad pick if I carry a balance. Is that fair?"));
+  expect("longest shared run", instr.longestSharedRunWords("i'm moving my card off x what should i get".split(" "), "i'm moving my card off x which one next".split(" ")).join(" ") === "i'm moving my card off x");
+  expect("criteria connector widened (afterward, because of that, once i do)",
+    ["What should I check, and what should I consider afterward?", "What should I look at, and because of that, what should I consider?", "What should I evaluate, and once I do, what should I weigh?"].every((t) => instr.CRITERIA_DEPENDENCY.test(t)));
+}
+console.log(`10. p15 paraphrase guards: ${fails === fails9 ? "ALL PASS" : `${fails - fails9} FAILURE(S)`}`);
 if (fails > 0) process.exitCode = 1;
