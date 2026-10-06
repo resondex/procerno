@@ -1032,13 +1032,13 @@ export function useGridSetup(a: GridSetupArgs) {
    * counterpart per room when the coverage step opens. Rooms the user
    * already set keep their edits; only rooms without an entry take the
    * engine's proposal. */
-  async function loadValueLines(fresh?: GridState | null): Promise<void> {
+  async function loadValueLines(fresh?: GridState | null): Promise<GridState | null> {
     const st = fresh ?? a.state;
-    if (!st || st.scenarios.length === 0 || st.scenarios.some((s) => !s.label.trim())) return;
+    if (!st || st.scenarios.length === 0 || st.scenarios.some((s) => !s.label.trim())) return st ?? null;
     const have = st.valueLines ?? {};
     // Drafts from before the chooser have lines for every room but no
     // catalog: fetch anyway (cached server side), keep the stored lines.
-    if (st.scenarios.every((s) => s.label in have) && (st.valueCatalog?.length ?? 0) > 0) return;
+    if (st.scenarios.every((s) => s.label in have) && (st.valueCatalog?.length ?? 0) > 0) return st;
     const res = await fetch("/api/setup/grid/value_lines", {
       method: "POST",
       headers: { "Content-Type": "application/json", ...(a.setupId ? { "x-setup-id": a.setupId } : {}) },
@@ -1048,7 +1048,7 @@ export function useGridSetup(a: GridSetupArgs) {
       }),
     }).catch(() => null);
     const data = res && res.ok ? ((await res.json().catch(() => null)) as { valueLines?: Record<string, ValueLineUi | null>; valueCatalog?: ValueCatalogLineUi[] } | null) : null;
-    if (!data?.valueLines) return;
+    if (!data?.valueLines) return null;
     const latest = a.state ?? st;
     const merged: Record<string, ValueLineUi | null> = {};
     const recommended: Record<string, string | null> = { ...(latest.valueRecommended ?? {}) };
@@ -1057,7 +1057,43 @@ export function useGridSetup(a: GridSetupArgs) {
       merged[sc.label] = cur !== undefined ? cur : (data.valueLines[sc.label] ?? null);
       if (!(sc.label in recommended)) recommended[sc.label] = data.valueLines[sc.label]?.line ?? null;
     }
-    a.setState({ ...latest, valueLines: merged, valueRecommended: recommended, ...(data.valueCatalog?.length ? { valueCatalog: data.valueCatalog } : {}) });
+    const next: GridState = { ...latest, valueLines: merged, valueRecommended: recommended, ...(data.valueCatalog?.length ? { valueCatalog: data.valueCatalog } : {}) };
+    a.setState(next);
+    return next;
+  }
+
+  /** Per-room defaults for kept situational stages the mask reaches
+   * nowhere (the Business case case), judged BEFORE the coverage map is
+   * offered (Tyler 2026-10-06: warmed on the worries gate, landed before
+   * the map opens). Mirrors the CoverageGate effect, which stays as the
+   * fallback for stages ticked on the map itself. */
+  async function loadStageRooms(fresh?: GridState | null): Promise<GridState | null> {
+    const st = fresh ?? a.state;
+    if (!st || st.scenarios.length === 0 || st.scenarios.some((s) => !s.label.trim())) return st ?? null;
+    const labels = st.scenarios.map((s) => s.label);
+    const kept = new Set(st.keptStages);
+    const todo = st.stages.filter((s) =>
+      s.situational && s.key !== "pricing" && kept.has(s.key) &&
+      !s.columns.some((c) => labels.includes(c)) && !st.stageRooms?.[s.key]
+    );
+    if (todo.length === 0) return st;
+    const results = await Promise.all(todo.map(async (s) => {
+      const res = await fetch("/api/setup/grid/stage_rooms", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", ...(a.setupId ? { "x-setup-id": a.setupId } : {}) },
+        body: JSON.stringify({ brand: a.brand, category: a.category, stageKey: s.key, stageLabel: s.label, hint: s.hint ?? `${s.label} - ${s.why ?? ""}`, rooms: st.scenarios.map(({ label, description }) => ({ label, description })) }),
+      }).catch(() => null);
+      const d = res && res.ok ? ((await res.json().catch(() => null)) as { rooms?: string[] | null } | null) : null;
+      return [s.key, d?.rooms ?? null] as const;
+    }));
+    const latest = a.state ?? st;
+    const stageRooms = { ...(latest.stageRooms ?? {}) };
+    for (const [key, rooms] of results) {
+      if (rooms && rooms.length > 0 && !stageRooms[key]) stageRooms[key] = rooms.filter((l) => latest.scenarios.some((sc) => sc.label === l));
+    }
+    const next: GridState = { ...latest, stageRooms };
+    a.setState(next);
+    return next;
   }
 
   /** Silent pool warm - fired while the user reviews the scenarios, so
@@ -1624,7 +1660,7 @@ export function useGridSetup(a: GridSetupArgs) {
     compose, writeCells, writePhrasings, topUpPhrasings, suggestScenario, nearScenario, rewordScenario,
     suggestCell, addOwnCell,
     warmRead, warmCells, warmPhrasings,
-    fetchWorries, warmWorries, loadValueLines,
+    fetchWorries, warmWorries, loadValueLines, loadStageRooms,
     regenerateCell, cycleCell, restoreCategoryView,
   };
 }

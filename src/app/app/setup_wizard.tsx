@@ -412,11 +412,33 @@ export function SetupWizard({ mode, brand, draft, engineOptions, onClose, onCrea
   async function landOnWorries(g: GridState | null = grid) {
     const st = await gridApi.fetchWorries(g);
     if (!st) return;
+    // Warm what the coverage map needs while the worries are reviewed
+    // (Tyler 2026-10-06): the Value lines and catalog, and the per-room
+    // defaults for stages the mask reaches nowhere. enterCoverage awaits
+    // both, so the map never opens before they have landed.
+    void gridApi.loadValueLines(st);
+    void gridApi.loadStageRooms(st);
     if (st.worries === undefined && (st.worryPool?.length ?? 0) > 0) {
       // Pre-pick = the pool's recommended measurement plan; the user's
       // deviation from it is recorded at create (worry_decision).
       const picks = recommendedWorryPairs(st.worryPool ?? []).slice(0, worryCap ?? Infinity);
       setGrid({ ...st, worries: picks });
+    }
+  }
+
+  /** The coverage map opens only once its recommendations have landed:
+   * the Value lines per room and the per-room stage defaults. Both are
+   * warmed on the worries gate, so this is normally a cache hit. */
+  async function enterCoverage(g: GridState | null = grid) {
+    if (!g) return;
+    setBusy("Preparing your coverage map…");
+    setError(null);
+    try {
+      const g1 = (await gridApi.loadValueLines(g)) ?? g;
+      const g2 = (await gridApi.loadStageRooms(g1)) ?? g1;
+      goTo("stages", g2);
+    } finally {
+      setBusy(null);
     }
   }
 
@@ -809,7 +831,7 @@ export function SetupWizard({ mode, brand, draft, engineOptions, onClose, onCrea
         // rival count.
         const kept: GridState = { ...grid, step: "compose", cells: [] };
         setGrid(kept);
-        goTo("stages", kept);
+        void enterCoverage(kept);
         return;
       }
       setGrid(null);
@@ -1560,7 +1582,7 @@ export function SetupWizard({ mode, brand, draft, engineOptions, onClose, onCrea
       : "";
     footerAction = {
       label: busy ?? "These are my worries",
-      onClick: () => goTo("stages"),
+      onClick: () => void enterCoverage(),
       disabled:
         busy !== null || !grid.worryPool || picked === 0 ||
         (worryCap !== null && picked > worryCap),
