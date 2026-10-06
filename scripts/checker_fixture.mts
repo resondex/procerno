@@ -782,4 +782,29 @@ const fails7 = fails;
   expect("worry rows key apart per concern", k("high fees") !== k("slow support"));
 }
 console.log(`8. worries module: ${fails === fails7 ? "ALL PASS" : `${fails - fails7} FAILURE(S)`}`);
+
+console.log("9. r25 nets");
+const fails8 = fails;
+{
+  // Label stems: a vault-everyday nominalization is the buyer's word; a
+  // planning-register one still leaks by stem.
+  expect("everyday label word does not leak by stem (collaboration -> collaborate)",
+    bc.scenarioLabelLeak("We manage client projects and clients ask for status. How do we let them collaborate?", ["Client delivery collaboration"], "project management software") === null);
+  expect("planning-register label word still leaks by stem (unification -> unificat...)",
+    bc.scenarioLabelLeak("We're pushing unification of how we track work after the merger.", ["Post-acquisition unification"], "project management software") === "Post-acquisition unification");
+  expect("full-label copy still leaks",
+    bc.scenarioLabelLeak("Client delivery collaboration is our thing - what should we use?", ["Client delivery collaboration"], "project management software") === "Client delivery collaboration");
+  // Criteria dependency connector.
+  const dep = (t: string) => inst.CRITERIA_DEPENDENCY.test(t);
+  expect("criteria with 'given that' passes", dep("I'm picking a main card. What should I look at, and given that, what should I consider?"));
+  expect("criteria with 'then' passes", dep("I need a new card. What should I look at, and then what should I consider?"));
+  expect("criteria with two unconnected asks fails", !dep("I'm choosing a card for travel. What should I look at, and what should I consider?"));
+  expect("criteria 'focus on, and how should I choose' fails", !dep("My phone's paid off. What should I focus on, and how should I choose?"));
+  // Feature screening in a scenario carries the no-channel clause; use case keeps its own.
+  const fsIntent = bc.stageDesignIntent("feature_screening", "Acme", undefined, "generic", "Carrier switch :: a buyer changing networks during a promotion");
+  expect("feature-screening design intent in a scenario rejects a buying channel", /buying channel or moment/.test(fsIntent ?? ""));
+  const fsBare = bc.stageDesignIntent("feature_screening", "Acme", undefined, "generic", null);
+  expect("feature-screening design intent without a scenario is unchanged", !/buying channel or moment/.test(fsBare ?? ""));
+}
+console.log(`9. r25 nets: ${fails === fails8 ? "ALL PASS" : `${fails - fails8} FAILURE(S)`}`);
 if (fails > 0) process.exitCode = 1;

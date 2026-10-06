@@ -160,7 +160,7 @@ const CACHE_TTL_MS = 183 * 24 * 3600 * 1000;
 // one-tier-down counterpart per room (planValueLines, confirmed at the
 // gate; default = the brand's most premium line that fits the room; no
 // Value cell where none fits) and carries no usage detail.
-const STYLE_VERSION = "s51"; // s51 (journeys30): the writer reads the room's circumstance line, never the natural description; problem recognition sets the pain in the category's own territory; criteria asks what to look at and, given that, what to consider. // s50 (batch 2): the scenario label is a title for us, never words for the prompt; use-case heals carry no buying channel. // s46 (2026-10-04 seed review batch): problem recognition carries no purchase moment; offensive alternatives state a plain move within the category; head-to-heads add no situation; advocacy convinces a peer or critic, business case an approver. // s45 (2026-10-04 seed review): doubt hints - the asker's own one-doubt claim, never a fact to confirm, hearsay, a sizing ask or the Value question; stance decides the asker; worry cells carry no reach limit.
+const STYLE_VERSION = "s52"; // s52 (2026-10-06): criteria's second ask is conditioned on the first; feature screening in a scenario leaves the buying channel or moment out. // s51 (journeys30): the writer reads the room's circumstance line, never the natural description; problem recognition sets the pain in the category's own territory; criteria asks what to look at and, given that, what to consider. // s50 (batch 2): the scenario label is a title for us, never words for the prompt; use-case heals carry no buying channel. // s46 (2026-10-04 seed review batch): problem recognition carries no purchase moment; offensive alternatives state a plain move within the category; head-to-heads add no situation; advocacy convinces a peer or critic, business case an approver. // s45 (2026-10-04 seed review): doubt hints - the asker's own one-doubt claim, never a fact to confirm, hearsay, a sizing ask or the Value question; stance decides the asker; worry cells carry no reach limit.
 
 /** Versions the DETERMINISTIC seed-check set (everything seedRule runs:
  * checkPromptAgainstSpec + blind_missing_category + scenario_label_leak).
@@ -176,7 +176,9 @@ const STYLE_VERSION = "s51"; // s51 (journeys30): the writer reads the room's ci
  * 7's unversioned serve-time re-check had no terminal state). Bump when
  * a deterministic check changes meaning; bumping costs one free re-judge
  * per unit, and model calls only for units the new rules reject. */
-export const SEED_RULES_VERSION = "r24"; // r24 (journeys30): problem-recognition design intent requires category territory; criteria design intent carries the two-part ask. // r22 (batch 2): use-case in a channel room carries who only; label-word stems leak. // r17 (2026-10-04 seed review batch): awareness_purchase_moment and offensive_alt_no_move nets; design intents - no purchase moment in problem recognition, head-to-heads add no situation, alternatives state a full-sentence move within the category, advocacy vs business-case audience, Value brand-name fallback branch; keep-or-leave narrowed (a within-brand change may be the subject, never the answer). // r16 (2026-10-04 seed review): doubt design intent - own claim, one doubt, open verdict; facts to confirm, rule/ingredient lookups, hearsay, sizing asks and the Value worth-it ask fail; objections never voiced by a current user, churn/renewal always by one, no third option beside stay and leave. // r15 (2026-10-02, Tyler's option B): brand mentions = whole names, declared alternates, name words and dictionary aliases, with every ambiguous one-word hit (an everyday word written lowercase or opening a sentence, or a maker word like "Google" of Google Pixel) decided in context by the brand judge (haiku, cached) - no casing rules, no target exemption, no roster word lists. r14 (2026-10-02 review): everyday-word lexicon by lowercase SHARE in two tiers (label words: common and not brand-dominated - "jira", "netflix", "pixel", "apple", "chase" count lowercase again; aliases: merely common - "gold" stays capital-only), coined split words case-blind ("apple or samsung"), the target's own one-word name never case-guarded, "citi" off the case-guard list, and a monthly figure is the asker's plan only in first-person / spend / offer context ("the Pro about 20 a month more" is a stated price). r13 (2026-10-02 cold-walk audit + review): verb-less stated prices ("Gold at 250"); word-anchored price-concern test + money bolt-ons; brand checks read filtered dictionary alias forms ("amex"); everyday words inside brand names never name the brand - category tokens containment-aware, split words of multi-word names in label casing and not sentence-initial, one-word names and aliases in the vault everyday-word lexicon capitalized only, other brands' full names scrubbed first. r4 (2026-10-01): r2 calendar-year/60-word/segment-vocab; r3 category-naming labels exempt from substring leak; r4 'standardization' in segment vocabulary; r5 directionless-switch string check; r6 punctuation-blind label-leak matching; r7-r8 switch direction detected by absence (no OS, no roster brand near switch vocabulary); cheaper bolt-on token on non-price concerns
+/** r25: the connector that conditions criteria's second ask on its first. */
+export const CRITERIA_DEPENDENCY = /\b(?:given (?:that|those|this|all that)|then|from there|with that in mind|based on (?:that|those)|knowing that|once i know|in light of that|after that|and from that|depending on that)\b/i;
+export const SEED_RULES_VERSION = "r25"; // r25 (2026-10-06): label stems that are vault-everyday words never leak; criteria_no_dependency net + design intent; feature-screening channel clause. // r24 (journeys30): problem-recognition design intent requires category territory; criteria design intent carries the two-part ask. // r22 (batch 2): use-case in a channel room carries who only; label-word stems leak. // r17 (2026-10-04 seed review batch): awareness_purchase_moment and offensive_alt_no_move nets; design intents - no purchase moment in problem recognition, head-to-heads add no situation, alternatives state a full-sentence move within the category, advocacy vs business-case audience, Value brand-name fallback branch; keep-or-leave narrowed (a within-brand change may be the subject, never the answer). // r16 (2026-10-04 seed review): doubt design intent - own claim, one doubt, open verdict; facts to confirm, rule/ingredient lookups, hearsay, sizing asks and the Value worth-it ask fail; objections never voiced by a current user, churn/renewal always by one, no third option beside stay and leave. // r15 (2026-10-02, Tyler's option B): brand mentions = whole names, declared alternates, name words and dictionary aliases, with every ambiguous one-word hit (an everyday word written lowercase or opening a sentence, or a maker word like "Google" of Google Pixel) decided in context by the brand judge (haiku, cached) - no casing rules, no target exemption, no roster word lists. r14 (2026-10-02 review): everyday-word lexicon by lowercase SHARE in two tiers (label words: common and not brand-dominated - "jira", "netflix", "pixel", "apple", "chase" count lowercase again; aliases: merely common - "gold" stays capital-only), coined split words case-blind ("apple or samsung"), the target's own one-word name never case-guarded, "citi" off the case-guard list, and a monthly figure is the asker's plan only in first-person / spend / offer context ("the Pro about 20 a month more" is a stated price). r13 (2026-10-02 cold-walk audit + review): verb-less stated prices ("Gold at 250"); word-anchored price-concern test + money bolt-ons; brand checks read filtered dictionary alias forms ("amex"); everyday words inside brand names never name the brand - category tokens containment-aware, split words of multi-word names in label casing and not sentence-initial, one-word names and aliases in the vault everyday-word lexicon capitalized only, other brands' full names scrubbed first. r4 (2026-10-01): r2 calendar-year/60-word/segment-vocab; r3 category-naming labels exempt from substring leak; r4 'standardization' in segment vocabulary; r5 directionless-switch string check; r6 punctuation-blind label-leak matching; r7-r8 switch direction detected by absence (no OS, no roster brand near switch vocabulary); cheaper bolt-on token on non-price concerns
 
 /** Brand forms that double as ordinary English words: only these demand a
  * capitalized occurrence to count as naming the brand ("2-3 services max"
@@ -2964,7 +2966,10 @@ const CELL_WRITER_SYSTEM =
           "(optionally for whom, in a few words) - about 10-20 words. Never " +
           "name a specific feature, list features or usage, or describe a " +
           "task to get done (that is the use-case cell) - the answer decides " +
-          "which features matter.\n" +
+          "which features matter. In a scenario the room supplies WHO the " +
+          "asker is; a buying channel or moment in the room (a store, a " +
+          "carrier, a sale, a promotion, a deadline) is not the need and is " +
+          "left out.\n" +
           "- use_case: what the buyer actually wants done, in their own " +
           "everyday words with a natural detail, then which one will do that " +
           "best. Never a product feature named as the outcome, never the " +
@@ -3011,9 +3016,11 @@ const CELL_WRITER_SYSTEM =
           "broken there, so never 'what fixes this'.\n" +
           "- criteria: the situation plus a two-part ask in the buyer's own " +
           "words: what should I look at, and given that, what should I " +
-          "consider? - NEVER offering candidate criteria for the answer to " +
-          "rank or complete: the measurement is what the answer chooses to " +
-          "teach.\n" +
+          "consider? The second part is conditioned on the first - 'given " +
+          "that', 'then', 'from there' or an equivalent - never two " +
+          "unconnected asks. NEVER offering candidate criteria for the " +
+          "answer to rank or complete: the measurement is what the answer " +
+          "chooses to teach.\n" +
           "- repertoire: a buyer who usually picks the client brand names it " +
           "and asks whether to stick with it or try something else; the " +
           "trigger is habit or wanting variety, never a stated worry " +
@@ -4513,6 +4520,15 @@ export async function generateGrid(input: {
           detail: `"${pm[0]}" is a buying moment - this asker has a pain and is not shopping yet; keep who they are, drop the purchase occasion`,
         });
     }
+    // r25: a criteria seed carries the dependency between its two asks -
+    // "what should I look at, and GIVEN THAT, what should I consider".
+    // Three of twenty cold_v16 criteria seeds dropped it ("and what should
+    // I consider", "and how should I choose"); calibrated: exactly those.
+    if (c.stage === "criteria" && !CRITERIA_DEPENDENCY.test(c.text))
+      out.push({
+        check: "criteria_no_dependency" as const,
+        detail: `the second ask is not conditioned on the first - say what to look at, and given that, what to consider`,
+      });
     // r17: an offensive alternatives seed must state the move - a bare
     // "alternatives to X" is a fragment with nothing moving.
     if (c.stage === "alternatives" && c.angle !== "generic" && c.angle !== "defensive") {

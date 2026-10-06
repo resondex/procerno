@@ -339,7 +339,7 @@ export function stageDesignIntent(stage: string, brand: string, concern?: string
   // contract asks on top of the circumstance yardstick.
   const contractClause =
     stage === "criteria"
-      ? ` The question asks, in the buyer's own words, what they should look at and, given that, what they should consider - both parts, in any natural wording - and NEVER offers candidate criteria for the answer to rank or complete - the measurement is what the answer chooses to teach - and never asks which brand. An ask with only one of the two parts does not satisfy the design.`
+      ? ` The question asks, in the buyer's own words, what they should look at and, GIVEN THAT, what they should consider - two parts, the second conditioned on the first ("given that", "then", "from there", or an equivalent), in any natural wording - and NEVER offers candidate criteria for the answer to rank or complete - the measurement is what the answer chooses to teach - and never asks which brand. An ask with only one of the two parts, or two parts with no dependency between them, does not satisfy the design.`
       : stage === "business_case"
         ? ` An internal champion asks for help justifying ${brand}, by name, to the people who sign off on the purchase - naming a rival, turning into a pricing question, or convincing a peer, friend or critic rather than an approver (that is the advocacy cell) does not satisfy the design.`
         : "";
@@ -351,8 +351,10 @@ export function stageDesignIntent(stage: string, brand: string, concern?: string
   // asker is; a buying channel or moment in the scenario is not the job
   // and is not carried (every Pixel use-case cell in a channel room was
   // healed into "promo ends tonight, I need a phone that lasts").
-  const channelClause = stage === "use_case"
-    ? ` For a use-case question the scenario supplies WHO the asker is; a buying channel or moment in the scenario - a store, a sale, a promotion window, a deadline - is not the job and is not carried into the question, and a question that omits it is correct, not off-design.`
+  // r25: feature screening gets the same rule as use case - the carrier-promo
+  // room's screen carried the promo into the ask (Pixel cold_v16).
+  const channelClause = stage === "use_case" || stage === "feature_screening"
+    ? ` For this question the scenario supplies WHO the asker is; a buying channel or moment in the scenario - a store, a carrier, a sale, a promotion window, a deadline - is not the need and is not carried into the question, and a question that omits it is correct, not off-design; a question that carries one does not satisfy the design.`
     : "";
   if (situation && stage === "use_case")
     return `Question design (use-case in a scenario): the question comes from the person this scenario describes - ${situation} - and names ONE outcome that person wants done, in everyday words, then asks which product will do that best. The scenario contributes WHO is asking, nothing more: anything about where, when or on what terms they are buying - a store, a carrier, a sale, a promotion, an upgrade window, trade-in credits, financing, a deadline - is a buying moment, not a circumstance, and a question that leaves every such detail out is correct, not off-design; a question that carries one does not satisfy the design. The person must be recognisable in the question's own words (who they are, who they are buying for, their setting or constraint), without restating the scenario.${pickClause}${outcomeClause(stage, brand)}`;
@@ -703,7 +705,7 @@ export interface BatteryFinding {
     // alternatives seed with no move stated (a bare "alternatives to X").
     | "awareness_purchase_moment" | "offensive_alt_no_move"
     // s46: a want phrase lifted from the scenario description into a seed.
-    | "room_want_leak"
+    | "room_want_leak" | "criteria_no_dependency"
     | "seed_number_changed" | "duplicate_paraphrase";
   /** The offending prompt text (or the seed, for cell-level findings). */
   text: string;
@@ -856,9 +858,14 @@ export function scenarioLabelLeak(text: string, labels: (string | null | undefin
     // "roommates") are the buyer's own words (r3) and never leak by stem.
     // Calibrated on the 111 v12 scenario seeds: the wide 8-letter rule hit
     // nine plain nouns and zero planning words.
+    // r25 (2026-10-06): a nominalization real answers write in plain speech
+    // (vault COMMON_WORDS - "collaboration", "integration") is the buyer's
+    // own word and never leaks by stem; the rule keeps planning register the
+    // vault never uses lowercase ("unification"). The Jira "Client delivery
+    // collaboration" room flagged "let them collaborate" (cold_v16).
     const catTokens = new Set(key(category ?? "").split(" ").filter(Boolean));
     for (const w of key(label).split(" ")) {
-      if (w.length < 10 || catTokens.has(w) || !/(?:ation|ization|isation|ment)s?$/.test(w)) continue;
+      if (w.length < 10 || catTokens.has(w) || COMMON_WORDS.has(w) || !/(?:ation|ization|isation|ment)s?$/.test(w)) continue;
       const stem = w.slice(0, 6);
       const re = new RegExp(`\\b${stem}[a-z]*\\b`);
       if (re.test(key(t))) return label;
