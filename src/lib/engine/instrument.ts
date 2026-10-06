@@ -2073,118 +2073,20 @@ const roomJudgedFail = (c: RoomCheck) =>
  * chips and contest repair read the same result).
  */
 export async function checkRooms(input: RoomCheckInput): Promise<RoomCheck[]> {
-  const [first, same] = await Promise.all([
-    checkRoomsPass(input, 1),
-    sameAnswerRooms(input).catch((err) => {
-      console.error("same-answer pass failed open:", err);
-      return new Map<string, { sameAs: string[]; decides: string }>();
-    }),
-  ]);
-  const withSame = (c: RoomCheck): RoomCheck => {
-    const v = same.get(c.label);
-    return v ? { ...c, sameAs: v.sameAs, decides: v.decides } : c;
-  };
+  // 2026-10-05 (Tyler): the same-answer pass (room_same3) is retired -
+  // whether two closely related rooms ask one question is the user's
+  // judgment at the gate, and of two related rooms one may be the better
+  // one. sameAs stays in the shape, always empty.
+  const first = await checkRoomsPass(input, 1);
   const failing = first.filter(roomJudgedFail).map((c) => c.label);
-  if (failing.length === 0) return first.map(withSame);
+  if (failing.length === 0) return first;
   const second = await checkRoomsPass(
     { ...input, rooms: input.rooms.filter((r) => failing.includes(r.label)) }, 2,
   ).catch(() => [] as RoomCheck[]);
   const passed = new Map(second.filter((c) => !roomJudgedFail(c)).map((c) => [c.label, c]));
-  return first.map((c) => withSame(passed.get(c.label) ?? c));
+  return first.map((c) => passed.get(c.label) ?? c);
 }
 
-/**
- * Same-answer pass (2026-10-04): a room earns a column only if it changes
- * what a competent advisor recommends. One call over the whole set reads,
- * per room, the decisive factor and the contenders it favors, and groups
- * rooms that ask the same question. A group is accepted only when its
- * members' favored sets agree (a mechanical guard on the judgment).
- * Cached on the set, order-independent. Fails open to no groups.
- */
-async function sameAnswerRooms(input: RoomCheckInput): Promise<Map<string, { sameAs: string[]; decides: string }>> {
-  const out = new Map<string, { sameAs: string[]; decides: string }>();
-  const rooms = input.rooms.filter((r) => r.label.trim());
-  if (rooms.length < 2) return out;
-  tagCosts({ purpose: "setup:room_same" });
-  const rivals = [...new Set(input.rivals.map((r) => r.trim()).filter(Boolean))];
-  const names = [input.brand, ...rivals];
-  const sorted = [...rooms].sort((a, b) => a.label.localeCompare(b.label));
-  // room_same2 (2026-10-04): framed on the ADVISOR's answer - the shortlist
-  // and the attribute that ranks it - with shortlist agreement as the
-  // mechanical guard. same1 asked for "the decisive factor" and the model
-  // echoed each room's trigger ("discounted now", "need it today"), so
-  // four trigger rooms with one answer grouped as nothing.
-  // room_same3 (2026-10-04): a group also forms MECHANICALLY when two rooms
-  // carry the identical top-two shortlist and the identical why string -
-  // on the five brands' sets the model wrote the same why verbatim for
-  // true duplicates (two "fast setup" rooms, two "breadth of content
-  // library" rooms) while leaving its groups list empty.
-  const key = cacheKey("room_same3", [
-    DESIGN_CHECK_MODEL, input.category, names.map((x) => x.toLowerCase()).sort().join(","),
-    sorted.map((r) => `${r.label.trim()}|${r.description.trim()}`).join("~"),
-  ]);
-  type Verdict = { decides: Record<string, string>; groups: string[][] };
-  let v: Verdict | null = null;
-  try {
-    const hit = await store.cacheGet(key, CACHE_TTL_MS);
-    if (hit) v = JSON.parse(hit) as Verdict;
-  } catch { /* re-judge */ }
-  if (!v) {
-    const a = await anthropicClient();
-    const res = await a.messages.create({
-      model: DESIGN_CHECK_MODEL,
-      max_tokens: 1500,
-      output_config: { effort: DESIGN_CHECK_EFFORT },
-      system:
-        `Each buying room below is a buyer occasion in the ${input.category} market. A room earns a place in a research instrument only if it changes the ANSWER a competent advisor gives. Put yourself in the advisor's seat for each room and give:\n` +
-        `- shortlist: the 2 or 3 brands the advisor would put in front of that buyer, best first, from exactly these names - ${names.join(", ")}.\n` +
-        `- why: the ONE product attribute the advisor ranks that shortlist on for this buyer (what makes the first pick first), a short phrase. The buyer's trigger or moment is not a why.\n` +
-        `Then list groups: sets of rooms (by number) where the advisor would give the SAME shortlist for the SAME why - the buyers arrived differently, but the advice is one answer. Rooms with a different why are different questions even when the shortlist matches (the room changes the reason, and the reason is what the instrument measures). Rooms with a different shortlist are different questions. Most sets have no groups; some have one.\n` +
-        `Reply with ONLY JSON: {"rooms": [{"shortlist": [...], "why": "..."}, ...], "groups": [[1, 3], ...]} - one rooms entry per room, in order.`,
-      messages: [{
-        role: "user",
-        content: sorted.map((r, k) => `${k + 1}. ${r.label}: ${r.description}`).join("\n"),
-      }],
-    } as never);
-    const text = (res as { content: { type: string; text?: string }[] }).content
-      .filter((b) => b.type === "text").map((b) => b.text ?? "").join("").trim();
-    const j = JSON.parse(firstJsonObject(text) ?? text) as { rooms?: { shortlist?: string[]; why?: string }[]; groups?: number[][] };
-    // Guard: group members must share their top-two shortlist (as a set).
-    const tiltOf = (k: number) => new Set((j.rooms?.[k]?.shortlist ?? []).slice(0, 2).map((t) => matchKey(String(t))).filter(Boolean));
-    const agree = (x: Set<string>, y: Set<string>) => {
-      if (x.size === 0 || y.size === 0) return x.size === y.size;
-      return [...x].every((t) => y.has(t)) && [...y].every((t) => x.has(t));
-    };
-    const groups: string[][] = [];
-    const whyOf = (k: number) => String(j.rooms?.[k]?.why ?? "").trim().toLowerCase().replace(/[^a-z0-9 ]+/g, " ").replace(/\s+/g, " ");
-    const byAnswer = new Map<string, number[]>();
-    sorted.forEach((_, k) => {
-      const t = [...tiltOf(k)].sort().join("|");
-      const w = whyOf(k);
-      if (!t || !w) return;
-      const a = `${t}~${w}`;
-      byAnswer.set(a, [...(byAnswer.get(a) ?? []), k]);
-    });
-    for (const idx of byAnswer.values()) if (idx.length >= 2) groups.push(idx.map((n) => sorted[n].label));
-    for (const g of j.groups ?? []) {
-      const idx = [...new Set(g.map((n) => Number(n) - 1).filter((n) => Number.isInteger(n) && n >= 0 && n < sorted.length))];
-      if (idx.length < 2) continue;
-      // Keep only members whose tilt agrees with the group's first member.
-      const kept = idx.filter((n, i) => i === 0 || agree(tiltOf(idx[0]), tiltOf(n)));
-      if (kept.length >= 2) groups.push(kept.map((n) => sorted[n].label));
-    }
-    v = {
-      decides: Object.fromEntries(sorted.map((r, k) => [r.label, humanize(`${(j.rooms?.[k]?.shortlist ?? []).slice(0, 2).join(", ")} - ${String(j.rooms?.[k]?.why ?? "")}`).slice(0, 120)])),
-      groups,
-    };
-    await store.cacheSet(key, JSON.stringify(v), stampOf(input)).catch(() => {});
-  }
-  for (const r of sorted) {
-    const sameAs = v.groups.filter((g) => g.includes(r.label)).flat().filter((l) => l !== r.label);
-    out.set(r.label, { sameAs: [...new Set(sameAs)], decides: v.decides[r.label] ?? "" });
-  }
-  return out;
-}
 
 async function checkRoomsPass(input: RoomCheckInput, pass: number): Promise<RoomCheck[]> {
   tagCosts({ purpose: "setup:room_check" });
@@ -2322,7 +2224,9 @@ async function checkRoomsPass(input: RoomCheckInput, pass: number): Promise<Room
       : picks.length > 0
         ? inPool >= Math.ceil(picks.length / 2) && contenders.length >= Math.min(2, rivals.length)
         : inPool >= Math.ceil(rivals.length / 2);
-    const contested = clientIn && rivalsContest;
+    // 2026-10-05 (Tyler): whether the client is a contender in a room is
+    // the user's judgment - clientIn is recorded, never gates or chips.
+    const contested = rivalsContest;
     // "Built on your strength" means WON BY CONSTRUCTION (AmEx v14 audit):
     // when the rivals' own count says the room is contested, the client
     // cannot be the obvious answer by construction, and the judgment is
@@ -2367,14 +2271,10 @@ export async function contestRoomSet(input: {
   const roomWords = (r: ScenarioSpec) => wordSet(`${r.label} ${r.description}`);
   const tooClose = (r: ScenarioSpec, keep: ScenarioSpec[]) =>
     keep.some((k) => jaccard(roomWords(r), roomWords(k)) >= 0.3);
-  // A replacement must not ask a question a staying room already asks
-  // (same-answer pass), nor near-duplicate its wording.
-  const sameQuestion = (r: ScenarioSpec, keep: ScenarioSpec[]) =>
-    (by.get(r.label)?.sameAs ?? []).some((l) => keep.some((k) => k.label === l));
   const swapOut = (i: number) => {
     const s = scenarios[i];
     const keep = scenarios.filter((_, k) => k !== i);
-    const j = reserve.findIndex((r) => by.has(r.label) && passes(r) && !tooClose(r, keep) && !sameQuestion(r, keep));
+    const j = reserve.findIndex((r) => by.has(r.label) && passes(r) && !tooClose(r, keep));
     if (j < 0) return;
     const incoming = reserve[j];
     reserve = [...reserve.slice(0, j), ...reserve.slice(j + 1), { ...s, journey: null }];
@@ -2385,32 +2285,8 @@ export async function contestRoomSet(input: {
     if (!by.has(s.label) || passes(s)) return;
     swapOut(i);
   });
-  // Same-answer duplicates among the core (2026-10-04): the earlier room
-  // (the read ranked it higher) stays; each later room that asks its
-  // question is swapped for a reserve room with an answer of its own.
-  scenarios.forEach((s, i) => {
-    if (!sameQuestion(s, scenarios.slice(0, i))) return;
-    swapOut(i);
-  });
-  // Batch 2 (A3, 2026-10-05): a swap changes the set, and same-answer
-  // groups are a property of the set - re-check the FINAL core + reserve
-  // once (per-room verdicts are cached; one fresh same-answer call) and
-  // swap any kept duplicate the first pass could not see. One round.
-  if (swaps.length > 0) {
-    const again = await checkRooms({
-      brand: input.brand, category: input.category, rivals: input.rivals, picks: input.picks,
-      rooms: [...scenarios, ...reserve].map((s) => ({ label: s.label, description: s.description })), meta: input.meta,
-    }).catch(() => [] as RoomCheck[]);
-    if (again.length > 0) {
-      by.clear();
-      for (const c of again) by.set(c.label, c);
-      scenarios.forEach((s, i) => {
-        if (!sameQuestion(s, scenarios.slice(0, i))) return;
-        swapOut(i);
-      });
-      return { scenarios, reserve, checks: again, swaps };
-    }
-  }
+  // Same-answer duplicate swaps and the client-not-a-contender swap are
+  // retired (2026-10-05, Tyler): both are the user's judgment at the gate.
   return { scenarios, reserve, checks, swaps };
 }
 
@@ -3719,39 +3595,51 @@ function journeyNote(base: Moderators, s: ScenarioSpec): string | null {
  * model choice); the model only writes the prompt texts. Bulk generation
  * is fine here - this is tooling, not measurement.
  */
-/** journeys30: the room as the seed writer and the design checks see it -
- * who, what is happening, what is chosen and how it will be used, with
- * everything the buyer wants left out. The market read returns it beside
- * the natural description; a room without one (user-written or edited,
- * or a pre-journeys30 draft) gets it derived here, one low-effort call
- * cached per (category, description), failing open to the description. */
-async function roomCircumstances(input: { category: string; scenarios: ScenarioSpec[]; meta?: CacheMeta }): Promise<Map<string, string>> {
+/** The room as the seed writer and the design checks see it (2026-10-05,
+ * Tyler: how a room is described to the user and what the writer is fed
+ * are two different things, and the writer never needs the room verbatim).
+ * ALWAYS derived from the description at serve time - the market read is
+ * never edited for this - by a deletion-only call: every phrase saying
+ * what the buyer wants, values, prefers or hopes the product does is
+ * removed and nothing is added. Mechanically guarded: a result whose
+ * content words are not all in the description is rejected (one retry,
+ * then the description itself). Cached per (category, description). */
+export async function roomCircumstances(input: { category: string; scenarios: ScenarioSpec[]; meta?: CacheMeta }): Promise<Map<string, string>> {
   const out = new Map<string, string>();
   const tidy = (t: string) => humanize(t).replace(/\s+/g, " ").trim();
+  const stem = (w: string) => w.replace(/(ing|ers|er|ed|es|s)$/, "");
+  const words = (t: string) => new Set(t.toLowerCase().replace(/[^a-z0-9' ]+/g, " ").split(/\s+/).filter((w) => w.length > 3).map(stem));
   await Promise.all(input.scenarios.map(async (s) => {
     const desc = tidy(s.description);
-    if (s.circumstance?.trim()) { out.set(s.label, tidy(s.circumstance)); return; }
     if (!desc) return;
-    const key = cacheKey("room_circumstance1", [input.category, desc]);
+    const key = cacheKey("room_circumstance3", [input.category, desc]);
     try {
       const hit = await store.cacheGet(key, CACHE_TTL_MS);
       if (hit) { out.set(s.label, JSON.parse(hit) as string); return; }
       const a = await anthropicClient();
-      const res = await withCostContext({ purpose: "setup:cells" }, () => a.messages.create({
+      const have = words(desc);
+      const ask = (extra: string) => withCostContext({ purpose: "setup:cells" }, () => a.messages.create({
         model: DESIGN_CHECK_MODEL,
         max_tokens: 200,
         output_config: { effort: "low" },
         system:
-          `A buying scenario in ${input.category} is given. Restate it for a question writer who must not know what the buyer wants: ` +
-          `who the buyer is, what is happening to them, where they are or who they are buying for, what they are choosing and how they will use it, in one short plain sentence. ` +
-          `Leave out every quality, feature, outcome or benefit the buyer wants or is choosing for. Say nothing the scenario does not say. Never a brand or product name. Return only the sentence.`,
+          `You edit one sentence describing a buyer in ${input.category}, by DELETION ONLY. Remove every phrase that says what the buyer wants, values, prefers, prioritises, is looking for or hopes the product will do for them - a quality, feature, benefit, result or purpose they are after, including a purpose clause ("to achieve ..." / "so that ...") and an evaluative word describing the buyer by what they care about. ` +
+          `Keep who the buyer is, what is happening to them, who or what they are buying for, any constraint or rule they are under (a restriction, a requirement they must satisfy, a budget, a deadline), what kind of product they are choosing and the plain activity they will use it for. ` +
+          `Keep the remaining words in their original order, repairing grammar only where a deletion breaks it. Add no word that is not in the sentence. If nothing needs removing, return the sentence unchanged. Return only the sentence.${extra}`,
         messages: [{ role: "user", content: desc }],
       }));
-      const text = tidy((res as { content: { type: string; text?: string }[] }).content.filter((b) => b.type === "text").map((b) => b.text ?? "").join(""));
-      if (text && text.split(/\s+/).length >= 4 && text.length <= 300) {
-        await store.cacheSet(key, JSON.stringify(text), input.meta);
-        out.set(s.label, text);
-      } else out.set(s.label, desc);
+      const textOf = (res: unknown) => tidy((res as { content: { type: string; text?: string }[] }).content.filter((b) => b.type === "text").map((b) => b.text ?? "").join(""));
+      const ok = (t: string) => t.split(/\s+/).length >= 4 && t.length <= desc.length + 20 && [...words(t)].every((w) => have.has(w));
+      let text = textOf(await ask(""));
+      if (!ok(text)) {
+        const added = [...words(text)].filter((w) => !have.has(w));
+        console.warn(`room circumstance rejected (${added.length ? `added: ${added.join(", ")}` : "shape"}): ${text}`);
+        text = textOf(await ask(` Your previous attempt added words that are not in the sentence${added.length ? ` (${added.join(", ")})` : ""}; delete only.`));
+      }
+      const final = ok(text) ? text : desc;
+      if (!ok(text)) console.warn(`room circumstance fell back to the description: ${desc}`);
+      await store.cacheSet(key, JSON.stringify(final), input.meta);
+      out.set(s.label, final);
     } catch (err) {
       console.error("room circumstance failed open:", err);
       out.set(s.label, desc);

@@ -1752,7 +1752,6 @@ export function ScenariosGate({
     return () => clearTimeout(t);
   }, [checkSig, setupId, editingRoom]);
   /** Every flag a room's check raised, worst first; empty when it passes. */
-  const tickedLabels = new Set(active.map((r) => r.label.trim()));
   const roomFlags = (c: RoomCheckUi): { text: string; title: string }[] => {
     const who = c.contenders.length > 0 ? c.contenders.join(", ") : "none of your rivals";
     const out: { text: string; title: string }[] = [];
@@ -1760,19 +1759,12 @@ export function ScenariosGate({
       out.push({ text: `Names ${c.names.join(", ")}`, title: "Describe the buyer's situation - a room that names a brand answers its own questions." });
     if (c.capability)
       out.push({ text: "A feature, not a situation", title: "This buyer is defined by what they value in the product, not by their situation - every question in its column would ask about that one thing." });
-    // Same question as a TICKED room only - duplicating a reserve or
-    // unticked room costs nothing.
-    const dupes = (c.sameAs ?? []).filter((l) => tickedLabels.has(l.trim()) && l.trim() !== c.label.trim());
-    if (dupes.length > 0)
-      out.push({ text: `Asks the same question as ${dupes.join(", ")}`, title: `Both rooms come down to the same decisive factor${c.decides ? ` (${c.decides})` : ""} and favor the same brands - a second column measures nothing new. Swap one for a room with its own answer.` });
     if (c.noChoice)
       out.push({ text: "No real choice made here", title: "The buyer here barely chooses (a default, an auto-renew, whatever is in stock) - there is little for an answer to steer." });
     if (c.platformSwitch)
       out.push({ text: "Platform switch locks out a rival", title: "A switch between platforms forces each question to state a direction, which rules a leading brand out of the whole column." });
     if (c.clientLead)
       out.push({ text: "Built on your strength", title: "This room is built on what your brand is known for, so your brand is the obvious answer by construction - the column would measure your pitch, not a contest. Try a near neighbor." });
-    if (c.clientIn === false && c.rivals > 0)
-      out.push({ text: "You're not a contender here", title: "Buyers in this room would not consider your brand, so no answer can name you - the column measures a market you are not in. Swap it for a room you compete in." });
     if (!c.contested && c.rivals > 0) {
       const pool = c.pool ?? c.rivals;
       const n = c.inPool ?? c.contenders.length;
