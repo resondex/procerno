@@ -334,11 +334,19 @@ export interface GridState {
    * coverage step. null = no Value cell for that room. Absent = not yet
    * proposed (the engine default applies). */
   valueLines?: Record<string, ValueLineUi | null>;
+  /** The brand's product lines from the Value read (2026-10-06): the
+   * chooser's list. Absent until the coverage step first loads lines. */
+  valueCatalog?: ValueCatalogLineUi[];
+  /** The engine's pick per room, kept so the chooser can mark it
+   * "recommended" after the user changes the line. */
+  valueRecommended?: Record<string, string | null>;
   cells: GridCellUi[];
 }
 
 /** A Value cell's two ends (engine ValueLine, UI copy). */
 export interface ValueLineUi { line: string; counterpart: string; fit?: "contest" | "leans_no" | "leans_yes" }
+/** A brand product line the Value chooser offers (engine ValueCatalogLine). */
+export interface ValueCatalogLineUi { name: string; for: string; org: boolean }
 
 /** A worries-gate candidate (engine WorryCandidate, UI copy). */
 export interface WorryUi {
@@ -1037,15 +1045,17 @@ export function useGridSetup(a: GridSetupArgs) {
         scenarios: st.scenarios.map((s) => ({ label: s.label, description: s.description })),
       }),
     }).catch(() => null);
-    const data = res && res.ok ? ((await res.json().catch(() => null)) as { valueLines?: Record<string, ValueLineUi | null> } | null) : null;
+    const data = res && res.ok ? ((await res.json().catch(() => null)) as { valueLines?: Record<string, ValueLineUi | null>; valueCatalog?: ValueCatalogLineUi[] } | null) : null;
     if (!data?.valueLines) return;
     const latest = a.state ?? st;
     const merged: Record<string, ValueLineUi | null> = {};
+    const recommended: Record<string, string | null> = { ...(latest.valueRecommended ?? {}) };
     for (const sc of latest.scenarios) {
       const cur = latest.valueLines?.[sc.label];
       merged[sc.label] = cur !== undefined ? cur : (data.valueLines[sc.label] ?? null);
+      if (!(sc.label in recommended)) recommended[sc.label] = data.valueLines[sc.label]?.line ?? null;
     }
-    a.setState({ ...latest, valueLines: merged });
+    a.setState({ ...latest, valueLines: merged, valueRecommended: recommended, ...(data.valueCatalog?.length ? { valueCatalog: data.valueCatalog } : {}) });
   }
 
   /** Silent pool warm - fired while the user reviews the scenarios, so
@@ -2585,14 +2595,67 @@ export function ScenarioReviewModal({
  * participation stays derived). */
 /** One column's Value line on the coverage step: "<line> vs <counterpart>",
  * click to edit both ends, or set "none" (no Value cell for that room). */
-function ValueLineEditor({ value, disabled, onChange }: {
+function ValueLineEditor({ value, disabled, onChange, options, recommended, category }: {
   value: ValueLineUi | null;
   disabled: boolean;
   onChange: (v: ValueLineUi | null) => void;
+  /** The brand's lines (2026-10-06, Tyler): offered as a list with the
+   * engine's pick marked recommended, plus "other" and "none". */
+  options?: ValueCatalogLineUi[];
+  recommended?: string | null;
+  category?: string;
 }) {
   const [editing, setEditing] = useState(false);
   const [line, setLine] = useState(value?.line ?? "");
   const [counterpart, setCounterpart] = useState(value?.counterpart ?? "");
+  const OTHER = "__other__"; const NONE = "__none__";
+  const inList = (name: string | undefined) => !!name && (options ?? []).some((o) => o.name.toLowerCase() === name.toLowerCase());
+  if (editing && options && options.length > 0) {
+    const selected = value === null ? NONE : inList(value?.line) ? (options.find((o) => o.name.toLowerCase() === value!.line.toLowerCase())?.name ?? OTHER) : OTHER;
+    const [custom, setCustom] = [line, setLine];
+    const defaultCounterpart = `more affordable ${category ?? ""}`.trim();
+    return (
+      <div className="grid gap-1 text-left">
+        <select
+          className="w-full rounded border border-line px-1 py-0.5 text-[10px]"
+          value={selected}
+          onChange={(e) => {
+            const v = e.target.value;
+            if (v === NONE) { onChange(null); setEditing(false); return; }
+            if (v === OTHER) { setCustom(""); return; }
+            // A changed line drops the engine's fit chip - it was judged
+            // for the pick, not this choice.
+            onChange({ line: v, counterpart: value?.counterpart ?? defaultCounterpart });
+            setEditing(false);
+          }}
+        >
+          {options.map((o) => (
+            <option key={o.name} value={o.name} title={o.for}>
+              {o.name}{recommended && o.name.toLowerCase() === recommended.toLowerCase() ? " (recommended)" : ""}{o.org ? " - business" : ""}
+            </option>
+          ))}
+          <option value={OTHER}>Other...</option>
+          <option value={NONE}>No Value cell</option>
+        </select>
+        {selected === OTHER && (
+          <>
+            <input value={custom} onChange={(e) => setCustom(e.target.value)} placeholder="product line" maxLength={80}
+              className="w-full rounded border border-line px-1 py-0.5 text-[10px]" />
+            <input value={counterpart} onChange={(e) => setCounterpart(e.target.value)} placeholder="compared with" maxLength={120}
+              className="w-full rounded border border-line px-1 py-0.5 text-[10px]" />
+            <div className="flex gap-2 text-[10px]">
+              <button type="button" className="font-medium text-primary hover:opacity-80" disabled={!custom.trim()}
+                onClick={() => { onChange({ line: custom.trim(), counterpart: counterpart.trim() || defaultCounterpart }); setEditing(false); }}>done</button>
+              <button type="button" className="text-ink-3 hover:opacity-80" onClick={() => setEditing(false)}>cancel</button>
+            </div>
+          </>
+        )}
+        {selected !== OTHER && (
+          <div className="flex gap-2 text-[10px]"><button type="button" className="text-ink-3 hover:opacity-80" onClick={() => setEditing(false)}>cancel</button></div>
+        )}
+      </div>
+    );
+  }
   if (editing) {
     return (
       <div className="grid gap-1 text-left">
@@ -2611,10 +2674,10 @@ function ValueLineEditor({ value, disabled, onChange }: {
   }
   return (
     <button type="button" disabled={disabled}
-      onClick={() => { setLine(value?.line ?? ""); setCounterpart(value?.counterpart ?? ""); setEditing(true); }}
+      onClick={() => { setLine(inList(value?.line) ? "" : (value?.line ?? "")); setCounterpart(value?.counterpart ?? ""); setEditing(true); }}
       title="Value asks whether your product is worth paying more for, compared with cheaper options. This is the product we ask about (by default your most premium one) and what it's compared with. Click to change."
       className="text-[10px] leading-tight text-primary hover:opacity-80">
-      {value ? (<><span className="font-medium">{value.line}</span><br /><span className="text-ink-3">vs {value.counterpart}</span>
+      {value ? (<><span className="font-medium">{value.line}</span>{recommended && value.line.toLowerCase() === recommended.toLowerCase() ? <span className="text-ink-3"> (recommended)</span> : null}<br /><span className="text-ink-3">vs {value.counterpart}</span>
         {(value.fit === "leans_no" || value.fit === "leans_yes") && (
           <><br /><span className="text-warning" title={value.fit === "leans_no" ? "This buyer's circumstance all but settles it as not worth it - the cell would measure the room's budget, not your brand. Pick a line this buyer would weigh, or set none." : "This buyer never weighs the cheaper option, so the cell would measure the room, not your brand. Pick a line this buyer would weigh, or set none."}>This buyer has one answer</span></>
         )}</>) : <span className="text-ink-3">no Value cell</span>}
@@ -2819,6 +2882,9 @@ export function CoverageGate({
                   value={state.valueLines?.[sc.label] ?? null}
                   disabled={busy}
                   onChange={(v) => setState({ ...state, valueLines: { ...(state.valueLines ?? {}), [sc.label]: v } })}
+                  options={state.valueCatalog}
+                  recommended={state.valueRecommended?.[sc.label] ?? null}
+                  category={category}
                 />
               ) : (
                 <span className="inline-block h-2.5 w-2.5 rounded-full border border-dashed border-line" />

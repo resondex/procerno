@@ -3,7 +3,7 @@ import { tagSetupFromRequest } from "@/lib/cost_log";
 import { z } from "zod";
 import { cacheSource, requireAuthOrDemo } from "@/lib/auth";
 import { apiKeyConfigured } from "@/lib/engine/providers";
-import { planValueLines } from "@/lib/engine/instrument";
+import { planValueLinesFull } from "@/lib/engine/instrument";
 
 export const maxDuration = 120;
 
@@ -31,12 +31,12 @@ export async function POST(req: Request) {
   }
   const parsed = Body.safeParse(await req.json().catch(() => null));
   if (!parsed.success) return NextResponse.json({ error: "bad request" }, { status: 400 });
-  const lines = await planValueLines({
+  const full = await planValueLinesFull({
     brand: parsed.data.brand,
     category: parsed.data.category,
     audience: parsed.data.audience || null,
     rooms: parsed.data.scenarios,
     meta: { source: cacheSource(auth) },
   }).catch(() => null);
-  return NextResponse.json({ valueLines: lines ?? {} });
+  return NextResponse.json({ valueLines: full?.rooms ?? {}, valueCatalog: full?.catalog ?? [] });
 }

@@ -2453,11 +2453,26 @@ export async function contestRoomSet(input: {
  * worse: exact model numbers, sub-brands as lines, empty replies. */
 const VALUE_LINES_MODEL = process.env.VALUE_LINES_MODEL ?? process.env.DESIGN_CHECK_MODEL ?? "claude-sonnet-5";
 
+/** A catalog line the Value chooser offers (2026-10-06, Tyler): the
+ * brand's product lines as the catalog read placed them, with who each is
+ * sold to. The coverage step lists them per room with the engine's pick
+ * marked recommended, plus "other" and "none". */
+export interface ValueCatalogLine { name: string; for: string; org: boolean }
+
 export async function planValueLines(input: {
   brand: string; category: string; audience: string | null;
   rooms: { label: string; description: string }[];
   meta?: CacheMeta;
 }): Promise<Record<string, ValueLine | null> | null> {
+  const full = await planValueLinesFull(input);
+  return full ? full.rooms : null;
+}
+
+export async function planValueLinesFull(input: {
+  brand: string; category: string; audience: string | null;
+  rooms: { label: string; description: string }[];
+  meta?: CacheMeta;
+}): Promise<{ rooms: Record<string, ValueLine | null>; catalog: ValueCatalogLine[] } | null> {
   if (input.rooms.length === 0) return null;
   tagCosts({ purpose: "setup:value_lines" });
   const rooms = input.rooms.map((r) => ({ label: r.label.trim(), description: r.description.trim() }));
@@ -2472,11 +2487,13 @@ export async function planValueLines(input: {
   // never the most premium by default. A line in the category's cheapest
   // tier has no cheaper counterpart, so it is never eligible: the next line
   // up is. The premium-for-every-room behavior stays as the fallback.
-  const key = cacheKey("value_lines22", [
+  // value_lines23 (2026-10-06, Tyler): the catalog rides out with the picks
+  // so the gate can offer the lines as a list with the pick recommended.
+  const key = cacheKey("value_lines23", [
     VALUE_LINES_MODEL, input.brand, input.category, input.audience ?? "",
     rooms.map((r) => `${r.label}|${r.description}`).join("~"),
   ]);
-  return coalesced<Record<string, ValueLine | null>>(key, { meta: input.meta }, async () => {
+  return coalesced<{ rooms: Record<string, ValueLine | null>; catalog: ValueCatalogLine[] }>(key, { meta: input.meta }, async () => {
     const textOf = (res: unknown) => (res as { content: { type: string; text?: string }[] }).content
       .filter((b) => b.type === "text").map((b) => b.text ?? "").join("").trim();
     type Catalog = { tiers: string[]; lines: { name: string; tier: number; for: string; org: boolean }[]; premium: string };
@@ -2543,14 +2560,21 @@ export async function planValueLines(input: {
       // brand itself, not a line.
       lines = lines.map((l) => (forms.includes(l.name.toLowerCase()) && !/\s/.test(l.name) ? { ...l, name: input.brand } : l));
       const kept = lines.filter((l) => known(l.name));
-      if (kept.length > 0) lines = kept;
-      else if (lines.length > 0) console.warn(`value lines [${input.brand}]: no line matched the dictionary alias forms - keeping all ${lines.length}`);
+      console.warn(`value lines [${input.brand}]: catalog read ${lines.map((l) => `${l.name}@${l.tier}${l.org ? "/org" : ""}`).join(", ")}; alias forms ${forms.length}; matched ${kept.map((l) => l.name).join(", ") || "(none)"}`);
+      // A partial match is the alias list's gap, not the catalog's: the
+      // forms for a bare brand are short names, so one card name matching
+      // by accident must not collapse the catalog to one line.
+      if (kept.length >= 2) lines = kept;
+      else if (lines.length > 0) console.warn(`value lines [${input.brand}]: ${kept.length} line(s) matched the dictionary alias forms - keeping all ${lines.length}`);
     } catch { /* fail open */ }
     // One product line = the brand name, mechanically; lines that all sit
     // in one price tier are variants of one product: one line.
     const single = lines.length <= 1 || new Set(lines.map((l) => l.tier)).size <= 1;
     const counterpart = `more affordable ${input.category.trim()}`;
     const out: Record<string, ValueLine | null> = {};
+    const catalog: ValueCatalogLine[] = single
+      ? [{ name: input.brand, for: "", org: false }]
+      : [...lines].sort((x, y) => Number(x.org) - Number(y.org) || x.tier - y.tier).map((l) => ({ name: l.name, for: l.for, org: l.org }));
     if (single) {
       for (const r of rooms) out[r.label] = { line: input.brand, counterpart };
     } else {
@@ -2642,7 +2666,7 @@ export async function planValueLines(input: {
       console.error("value room fit failed open:", err);
     }
     console.warn(`value lines [${input.brand}]: ${Object.entries(out).map(([k, v]) => `${k} -> ${v ? `${v.line} vs ${v.counterpart}${v.fit ? ` (${v.fit})` : ""}` : "none"}`).join("; ")}`);
-    return out;
+    return { rooms: out, catalog };
   });
 }
 
