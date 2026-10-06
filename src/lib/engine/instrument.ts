@@ -1464,6 +1464,85 @@ export async function nearScenarios(input: {
   return pool;
 }
 
+/** "Say it differently" (2026-10-06, Tyler): the SAME room in other words.
+ * Near neighbor changes the substance (one detail replaced); this keeps
+ * the buyer, situation, choice and use exactly and only changes the
+ * wording - and never uses the phrases the user flags (a loyalty-program
+ * term in a travel room read to the engines as a program question, and
+ * the writer's circumstance line would carry it into every seed of the
+ * column). Mechanically guarded: no flagged phrase survives, punctuation
+ * blind, and the result differs from the original; one steered retry,
+ * then null. Cached per (room text, flagged phrases). */
+export async function rewordScenario(input: {
+  category: string;
+  audience: string | null;
+  of: Situation;
+  avoid: string[];
+  meta?: CacheMeta;
+}): Promise<Situation | null> {
+  tagCosts({ purpose: "setup:scenario_reword" });
+  const avoid = [...new Set(input.avoid.map((a) => a.trim().toLowerCase()).filter(Boolean))].sort();
+  const key = cacheKey("scenario_reword1", [input.category, input.audience, input.of.label, input.of.description, avoid.join("|")]);
+  const hit = await store.cacheGet(key, CACHE_TTL_MS);
+  if (hit) return JSON.parse(hit) as Situation;
+  const norm = (t: string) => t.trim().toLowerCase().replace(/[^a-z0-9' ]+/g, " ").replace(/\s+/g, " ").trim();
+  const carries = (t: string) => avoid.filter((a) => ` ${norm(t)} `.includes(` ${norm(a)} `));
+  const ask = (steer: string) => openaiClient().chat.completions.create({
+    model: INSTRUMENT_HELPER_MODEL,
+    reasoning_effort: "low",
+    messages: [
+      {
+        role: "system",
+        content:
+          "Reword ONE buyer situation for a research instrument. Keep exactly the " +
+          "same buyer, the same situation, what they are choosing and how they " +
+          "will use it - add no detail, remove none, change no quantity, " +
+          "frequency or constraint. Change the WORDING throughout: no phrase of " +
+          "three or more words carried over from the original. Prefer plain " +
+          "everyday words over industry, program, product or marketing labels. " +
+          (avoid.length > 0
+            ? `NEVER use these words or phrases, in any form, spelling or hyphenation: ${avoid.map((a) => `"${a}"`).join(", ")}. `
+            : "") +
+          "Never a specific brand or product. The label is 2-4 plain words in " +
+          "sentence case naming the same room in different words - never the " +
+          "original label, never analytical words like 'default', 'segment', " +
+          "'use case'. The description is one short sentence.",
+      },
+      {
+        role: "user",
+        content: `Category: ${input.category}\nAudience: ${input.audience ?? "unknown"}\nReword this situation:\n- ${input.of.label}: ${input.of.description}${steer}`,
+      },
+    ],
+    response_format: { type: "json_schema", json_schema: { name: "situation", strict: true, schema: SITUATION_ONE_SCHEMA } },
+  });
+  const parse = (res: Awaited<ReturnType<typeof ask>>): Situation | null => {
+    try {
+      const p = JSON.parse(res.choices[0]?.message?.content ?? "{}") as Partial<Situation>;
+      if (!p.label?.trim() || !p.description?.trim()) return null;
+      return { label: roomLabel(humanize(p.label.trim())), description: humanize(p.description.trim()) };
+    } catch { return null; }
+  };
+  const ok = (v: Situation | null): v is Situation =>
+    !!v && norm(v.description) !== norm(input.of.description) && carries(`${v.label} ${v.description}`).length === 0;
+  let v: Situation | null = parse(await ask(""));
+  if (!ok(v)) {
+    const first = v as Situation | null;
+    const bad = first ? carries(`${first.label} ${first.description}`) : [];
+    v = await ask(`\nYour previous attempt ${bad.length ? `still used ${bad.map((a) => `"${a}"`).join(", ")}` : "repeated the original"} - reword it again, in different words${bad.length ? ", without those" : ""}.`)
+      .then(parse).catch((err: unknown) => { console.error("reword retry failed open:", err); return null; });
+  }
+  if (!ok(v)) return null;
+  await store.cacheSet(key, JSON.stringify(v), stampOf(input));
+  return v;
+}
+
+const SITUATION_ONE_SCHEMA = {
+  type: "object",
+  additionalProperties: false,
+  properties: { label: { type: "string" }, description: { type: "string" } },
+  required: ["label", "description"],
+} as const;
+
 /** Why a scenario was flagged: mechanics, clarity, or bundled axes. */
 export type ScenarioFlag = "typo" | "phrasing" | "mixed";
 

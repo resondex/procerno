@@ -951,6 +951,36 @@ export function useGridSetup(a: GridSetupArgs) {
     }
   }
 
+  /** "Say it differently" (2026-10-06): the same room in other words, never
+   * using the phrases the user flagged. Not a near-neighbor draw - the
+   * variant counter is untouched and the original is kept for Reset. The
+   * room check re-runs on its own because the room text changed. */
+  async function rewordScenario(i: number, avoid: string[]): Promise<void> {
+    if (!a.state) return;
+    const rows = scenarioRows(a.state);
+    const row = rows[i];
+    if (!row?.label.trim()) return;
+    a.setBusy("Rewording…");
+    a.setError(null);
+    const data = await post<{ scenario: { label: string; description: string } }>("/api/setup/grid/scenario", {
+      category: a.category,
+      audience: a.audience || undefined,
+      decisionUnit: String(a.state.moderators.decision_unit ?? "committee"),
+      exclude: rows.filter((r) => r.label.trim()).map(({ label, description }) => ({ label, description })).slice(-24),
+      reword: { of: { label: row.label, description: row.description }, avoid: avoid.map((x) => x.trim()).filter(Boolean) },
+    });
+    a.setBusy(null);
+    if (!data?.scenario) return;
+    const v = data.scenario;
+    const nextRows = rows.map((r, j) => (j === i ? { ...r, label: v.label, description: v.description, circumstance: undefined } : r));
+    const rebound = rebindSituation(a.state.cells, row.label, v.label);
+    if (row.on) {
+      await compose({ base: a.state.moderators, rows: nextRows, cells: rebound.filter((c) => c.custom) });
+    } else {
+      a.setState(withScenarioRows({ ...a.state, cells: rebound }, nextRows));
+    }
+  }
+
   /** The worries gate's pool: drawn once per battery (server-cached and
    * coalesced), stored on the grid state so the draft carries it. */
   async function fetchWorries(from?: GridState | null): Promise<GridState | null> {
@@ -1564,7 +1594,7 @@ export function useGridSetup(a: GridSetupArgs) {
   }
 
   return {
-    compose, writeCells, writePhrasings, topUpPhrasings, suggestScenario, nearScenario,
+    compose, writeCells, writePhrasings, topUpPhrasings, suggestScenario, nearScenario, rewordScenario,
     suggestCell, addOwnCell,
     warmRead, warmCells, warmPhrasings,
     fetchWorries, warmWorries, loadValueLines,
@@ -1625,7 +1655,7 @@ interface RoomCheckUi {
 }
 
 export function ScenariosGate({
-  state, setState, onRecompose, onRecomposeBase, onSuggestScenario, onAddReserve, onNearScenario, onWarmReview, busy,
+  state, setState, onRecompose, onRecomposeBase, onSuggestScenario, onAddReserve, onNearScenario, onRewordScenario, onWarmReview, busy,
   maxScenarios = MAX_SCENARIOS, readDelta, fitBrand, fitCategory, onRebuildForBrand,
   onBackToCategory, rivals, picks, setupId,
 }: {
@@ -1648,6 +1678,8 @@ export function ScenariosGate({
   onAddReserve?: (label: string) => void;
   /** Draw a near variant of card i - same circumstance, one detail moved. */
   onNearScenario: (i: number) => void;
+  /** Same room in other words, never using the flagged phrases. */
+  onRewordScenario?: (i: number, avoid: string[]) => void;
   /** Silent cache warm for the confirm-time quality check - fired on
    * field blur so the confirm usually lands on a cached verdict. */
   onWarmReview?: () => void;
@@ -1736,6 +1768,8 @@ export function ScenariosGate({
   // on the room text, so every pause while typing a description was a new
   // room, a server cache miss and a model call (2026-10-04).
   const [editingRoom, setEditingRoom] = useState(false);
+  // "Say it differently": which card has the phrase-to-avoid field open.
+  const [rewordFor, setRewordFor] = useState<{ i: number; avoid: string } | null>(null);
   useEffect(() => {
     if (!checkSig || editingRoom) return;
     const [brand, category, rv, rooms, pk] = JSON.parse(checkSig) as [string, string, string[], { label: string; description: string }[], string[]];
@@ -2201,6 +2235,42 @@ export function ScenariosGate({
                   {MAX_VARIANTS} variations tried - edit the text above to make it yours
                 </span>
               ))}
+            {sc.label.trim() !== "" && onRewordScenario && (
+              rewordFor?.i === i ? (
+                <span className="flex items-center gap-1.5">
+                  <input
+                    className="input h-6 w-44 text-[11px]"
+                    placeholder="phrase to avoid (optional)"
+                    value={rewordFor.avoid}
+                    autoFocus
+                    onChange={(e) => setRewordFor({ i, avoid: e.target.value })}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") { onRewordScenario(i, rewordFor.avoid.split(",")); setRewordFor(null); }
+                      if (e.key === "Escape") setRewordFor(null);
+                    }}
+                  />
+                  <button
+                    type="button"
+                    disabled={busy}
+                    onClick={() => { onRewordScenario(i, rewordFor.avoid.split(",")); setRewordFor(null); }}
+                    className="font-medium text-primary hover:opacity-80 disabled:opacity-50"
+                  >
+                    Reword
+                  </button>
+                  <button type="button" onClick={() => setRewordFor(null)} className="text-ink-3 hover:opacity-80">Cancel</button>
+                </span>
+              ) : (
+                <button
+                  type="button"
+                  disabled={busy}
+                  onClick={() => setRewordFor({ i, avoid: "" })}
+                  title="Same room, different words - and never a phrase you name (one that reads as a program, product or industry label)"
+                  className="font-medium text-primary hover:opacity-80 disabled:opacity-50"
+                >
+                  ✎ Say it differently
+                </button>
+              )
+            )}
             {(() => {
               const c = roomChecks[roomKey(sc)];
               if (!c || !sc.label.trim()) return null;

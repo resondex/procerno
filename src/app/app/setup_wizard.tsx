@@ -1858,6 +1858,7 @@ export function SetupWizard({ mode, brand, draft, engineOptions, onClose, onCrea
               onSuggestScenario={() => void gridApi.suggestScenario()}
               onAddReserve={(label) => void gridApi.suggestScenario(label)}
               onNearScenario={(i) => void gridApi.nearScenario(i)}
+              onRewordScenario={(i, avoid) => void gridApi.rewordScenario(i, avoid)}
               onWarmReview={warmScenarioReview}
               maxScenarios={scenarioCap}
               fitBrand={brand}

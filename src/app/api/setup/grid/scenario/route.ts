@@ -3,7 +3,7 @@ import { tagSetupFromRequest } from "@/lib/cost_log";
 import { z } from "zod";
 import { cacheSource, requireAuthOrDemo } from "@/lib/auth";
 import { apiKeyConfigured } from "@/lib/engine/providers";
-import { nearScenarios, suggestScenario, type Moderators } from "@/lib/engine/instrument";
+import { nearScenarios, rewordScenario, suggestScenario, type Moderators } from "@/lib/engine/instrument";
 
 export const maxDuration = 60;
 
@@ -14,6 +14,13 @@ const Body = z.object({
   exclude: z
     .array(z.object({ label: z.string().trim().max(60), description: z.string().trim().max(240) }))
     .max(24),
+  /** With reword, the same scenario in other words, never using `avoid`. */
+  reword: z
+    .object({
+      of: z.object({ label: z.string().trim().min(1).max(60), description: z.string().trim().max(240) }),
+      avoid: z.array(z.string().trim().max(60)).max(8),
+    })
+    .optional(),
   /** With nearTo, propose a near variant of that scenario instead of a new axis. */
   nearTo: z
     .object({ label: z.string().trim().min(1).max(60), description: z.string().trim().max(240) })
@@ -32,6 +39,19 @@ export async function POST(req: Request) {
   const parsed = Body.safeParse(await req.json().catch(() => null));
   if (!parsed.success) {
     return NextResponse.json({ error: "bad request" }, { status: 400 });
+  }
+  if (parsed.data.reword) {
+    const scenario = await rewordScenario({
+      category: parsed.data.category,
+      audience: parsed.data.audience || null,
+      of: parsed.data.reword.of,
+      avoid: parsed.data.reword.avoid,
+      meta: { source: cacheSource(auth) },
+    });
+    if (!scenario) {
+      return NextResponse.json({ error: "no rewording came back - try again, or edit the text" }, { status: 502 });
+    }
+    return NextResponse.json({ scenario });
   }
   if (parsed.data.nearTo) {
     // The variant POOL for one scenario - prefetched at gate landing so
