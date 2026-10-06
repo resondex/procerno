@@ -2178,6 +2178,48 @@ const roomJudgedFail = (c: RoomCheck) =>
  * fail, and a passing second check becomes the room's verdict (the gate
  * chips and contest repair read the same result).
  */
+/** Per-room default for a kept situational stage the mask reaches nowhere
+ * (2026-10-06, Tyler's option 2): one low-effort read of the rooms against
+ * the stage's own "who is asking" (its hint), lighting only the rooms whose
+ * buyer is that asker. The coverage map's dots stay the switch; this only
+ * sets where they start. Empty = no room judged to fit (the caller falls
+ * back to every room so nothing is dropped silently). Fails open to null.
+ * Cached per (stage, hint, rooms). */
+export async function judgeStageRooms(input: {
+  brand: string; category: string; stageKey: string; stageLabel: string; hint: string;
+  rooms: { label: string; description: string }[]; meta?: CacheMeta;
+}): Promise<string[] | null> {
+  const rooms = input.rooms.map((r) => ({ label: r.label.trim(), description: r.description.trim() })).filter((r) => r.label);
+  if (rooms.length === 0) return [];
+  tagCosts({ purpose: "setup:stage_rooms" });
+  const key = cacheKey("stage_rooms2", [
+    DESIGN_CHECK_MODEL, input.brand, input.category, input.stageKey, input.hint,
+    rooms.map((r) => `${r.label}|${r.description}`).join("~"),
+  ]);
+  try {
+    const hit = await store.cacheGet(key, CACHE_TTL_MS);
+    if (hit) return JSON.parse(hit) as string[];
+    const a = await anthropicClient();
+    const res = await withCostContext({ purpose: "setup:stage_rooms" }, () => a.messages.create({
+      model: DESIGN_CHECK_MODEL, max_tokens: 600, output_config: { effort: "low" },
+      system:
+        `A research instrument asks one question per buying room for the stage "${input.stageLabel}" in ${input.category} (the tracked brand is ${input.brand}). The stage's question is asked by a particular kind of person: ${input.hint} ` +
+        `For each buying room below, say whether buyers in that room would have this stage's question - whether some of the people the room describes are that kind of person, given who they are, who they buy for and who else has a say. Judge from the room's own words: true when the room's buyer plausibly is that person (buying for an organization, a team or a household counts as having others to answer to), false only when the room's buyer plainly is not. ` +
+        `Reply with ONLY JSON: {"rooms": [true|false, ...]} - one entry per room, in order.`,
+      messages: [{ role: "user", content: rooms.map((r, i) => `${i + 1}. ${r.label}: ${r.description}`).join("\n") }],
+    }));
+    const text = (res as { content: { type: string; text?: string }[] }).content.filter((b) => b.type === "text").map((b) => b.text ?? "").join("").trim();
+    const j = JSON.parse(firstJsonObject(text) ?? text) as { rooms?: unknown[] };
+    const out = rooms.filter((_, i) => j.rooms?.[i] === true).map((r) => r.label);
+    await store.cacheSet(key, JSON.stringify(out), input.meta);
+    console.warn(`stage rooms [${input.brand}] ${input.stageKey}: ${out.join(", ") || "(none)"}`);
+    return out;
+  } catch (err) {
+    console.error("stage rooms judgment failed open:", err);
+    return null;
+  }
+}
+
 export async function checkRooms(input: RoomCheckInput): Promise<RoomCheck[]> {
   // 2026-10-05 (Tyler): the same-answer pass (room_same3) is retired -
   // whether two closely related rooms ask one question is the user's

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, useState, type ReactNode, useRef } from "react";
 import { angleRivals, deriveCheckSpec, rosterRoleOf, sameSeatOf, type CellCheckSpec, type RosterClasses, type RosterRoles } from "@/lib/engine/battery_checks";
 import { InlineSpinner } from "../components/spinner";
 
@@ -2623,14 +2623,56 @@ function ValueLineEditor({ value, disabled, onChange }: {
 }
 
 export function CoverageGate({
-  state, setState, busy, onEditWorries,
+  state, setState, busy, onEditWorries, brand, category, setupId,
 }: {
   state: GridState;
   setState: (s: GridState) => void;
   busy: boolean;
   /** Back to the Buyer worries gate - the owner of doubt coverage. */
   onEditWorries?: () => void;
+  /** For the per-room default judgment of a kept stage the mask reaches
+   * nowhere; omit to skip the judgment (every room stays lit). */
+  brand?: string;
+  category?: string;
+  setupId?: string;
 }) {
+  // Per-room default (2026-10-06, Tyler's option 2): a kept situational
+  // stage the mask reaches in no room used to light every room. Now one
+  // judgment per such stage lights only the rooms whose buyer is the
+  // stage's asker; the result lands in stageRooms, so the dots start there
+  // and stay editable. Judged once per stage (stageRooms set = judged);
+  // an empty or failed judgment keeps every room lit.
+  const judging = useRef(new Set<string>());
+  const stateRef = useRef(state);
+  useEffect(() => { stateRef.current = state; }, [state]);
+  useEffect(() => {
+    if (!brand || !category) return;
+    const activeRooms = state.scenarios.filter((s) => s.label.trim());
+    if (activeRooms.length === 0) return;
+    const labels = activeRooms.map((s) => s.label);
+    const kept = new Set(state.keptStages);
+    for (const s of state.stages) {
+      if (!s.situational || s.key === "pricing" || !kept.has(s.key)) continue;
+      if (s.columns.some((c) => labels.includes(c))) continue;
+      if (state.stageRooms?.[s.key] || judging.current.has(s.key)) continue;
+      judging.current.add(s.key);
+      void fetch("/api/setup/grid/stage_rooms", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", ...(setupId ? { "x-setup-id": setupId } : {}) },
+        body: JSON.stringify({ brand, category, stageKey: s.key, stageLabel: s.label, hint: s.hint ?? `${s.label} - ${s.why ?? ""}`, rooms: activeRooms.map(({ label, description }) => ({ label, description })) }),
+      })
+        .then((r) => (r.ok ? r.json() : null))
+        .then((d: { rooms?: string[] | null } | null) => {
+          const judged = d?.rooms;
+          if (!judged || judged.length === 0) return;
+          const cur = stateRef.current;
+          if (cur.stageRooms?.[s.key]) return;
+          setState({ ...cur, stageRooms: { ...(cur.stageRooms ?? {}), [s.key]: judged.filter((l) => cur.scenarios.some((sc: { label: string }) => sc.label === l)) } });
+        })
+        .catch(() => {})
+        .finally(() => judging.current.delete(s.key));
+    }
+  }, [brand, category, setupId, state, setState]);
   const [showSkipped, setShowSkipped] = useState(false);
   const folds = useFolds();
   /** Instant hover card for stage explanations - the native title tooltip
