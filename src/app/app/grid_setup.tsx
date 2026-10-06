@@ -302,6 +302,13 @@ export interface GridState {
    * map: these stages are a brand-level recommendation, never labeled
    * "not recommended" (the rules' skip is about the market at large). */
   journeyStageAdds?: Record<string, { key: string; label: string }[]>;
+  /** Per-room scope for a kept situational stage (2026-10-06, Tyler): the
+   * rooms the stage runs in, set by clicking dots on the coverage map. A
+   * stage the mask reaches nowhere used to run in EVERY room when kept
+   * (AmEx's Business case, added on the advisory, minted four cells where
+   * only the business room has an approver). Absent = the mask's columns,
+   * or every room for a stage the mask reaches nowhere. */
+  stageRooms?: Record<string, string[]>;
   /** Fingerprints (label|description) of user-authored scenarios that
    * PASSED the quality check, persisted with the draft so unchanged rows
    * are never rechecked. Deliberately excludes "keep mine" choices - a
@@ -460,7 +467,9 @@ export function gridPromptCount(g: GridState | null): number {
 /** The columns a kept stage runs in, given the active scenario set. A kept
  * stage no journey reaches was forced in by the user: it runs everywhere
  * (mirrors the engine's override semantics). */
-export function stageColumns(st: GridStage, activeLabels: string[]): string[] {
+export function stageColumns(st: GridStage, activeLabels: string[], stageRooms?: Record<string, string[]>): string[] {
+  const explicit = stageRooms?.[st.key];
+  if (explicit) return explicit.filter((c) => activeLabels.includes(c));
   const cols = st.columns.filter((c) => activeLabels.includes(c));
   return cols.length > 0 ? cols : st.recommended ? [] : activeLabels;
 }
@@ -497,8 +506,8 @@ export function gridCellCount(g: GridState | null, rivalCount: number): number {
       if (g.worries && WORRY_STAGES.has(s.key)) {
         return n + g.worries.filter((w) => w.stage === s.key).length;
       }
-      const cols = stageColumns(s, active);
-      const effective = cols.length > 0 ? cols : active;
+      const cols = stageColumns(s, active, g.stageRooms);
+      const effective = g.stageRooms?.[s.key] ? cols : cols.length > 0 ? cols : active;
       if (s.rivals === "each") return n + r;
       if (s.rivals === "defensive_offensive") return n + 1 + r;
       if (s.situational) return n + Math.max(effective.length, 1);
@@ -1073,6 +1082,7 @@ export function useGridSetup(a: GridSetupArgs) {
         base: a.state.moderators,
         scenarios: a.state.scenarios,
         stageKeys: effectiveKeptStages(a.state),
+        stageRooms: a.state.stageRooms,
         worries: a.state.worries,
         valueLines: a.state.valueLines,
         retryExhausted: true,
@@ -1528,7 +1538,7 @@ export function useGridSetup(a: GridSetupArgs) {
         brand: a.brand, category: a.category, competitors: a.competitors, rosterRoles: a.rosterRoles,
         rosterClasses: a.rosterClasses,
         audience: a.audience || undefined,
-        base: st.moderators, scenarios: st.scenarios, stageKeys: effectiveKeptStages(st),
+        base: st.moderators, scenarios: st.scenarios, stageKeys: effectiveKeptStages(st), stageRooms: st.stageRooms,
         worries: st.worries,
         valueLines: st.valueLines,
         warm: true,
@@ -2648,8 +2658,18 @@ export function CoverageGate({
     const wr = worryRow(s.key);
     const isKept = wr ? worriesFor(s.key).length > 0 : kept.has(s.key);
     const brandAdd = advisoryKeys.has(s.key) && isKept;
-    const cols = stageColumns(s, activeLabels);
-    const effective = cols.length > 0 ? cols : activeLabels;
+    const cols = stageColumns(s, activeLabels, state.stageRooms);
+    const explicitRooms = state.stageRooms?.[s.key];
+    const effective = explicitRooms ? cols : cols.length > 0 ? cols : activeLabels;
+    // Per-room toggle (2026-10-06): a kept situational stage's dot is a
+    // switch for that room. The first click pins the stage's rooms to the
+    // set shown, minus or plus the clicked one.
+    const toggleRoom = (label: string) => {
+      if (!isKept || !s.situational || s.key === "pricing" || wr) return;
+      const cur = new Set(effective);
+      if (cur.has(label)) cur.delete(label); else cur.add(label);
+      setState({ ...state, stageRooms: { ...(state.stageRooms ?? {}), [s.key]: activeLabels.filter((l) => cur.has(l)) } });
+    };
     return (
       <tr key={s.key} className={isKept ? "" : "opacity-50"}>
         {/* The stage column never gives way to the scenario columns: with
@@ -2766,20 +2786,24 @@ export function CoverageGate({
         ) : s.situational || s.rivals !== "none" ? (
           active.map((sc) => {
             const inCol = isKept && effective.includes(sc.label);
+            const clickable = isKept && s.situational && s.key !== "pricing" && !wr && !busy;
             return (
               <td key={sc.label} className="px-2 py-1 text-center">
-                <span
-                  className={`inline-block h-2.5 w-2.5 rounded-full ${
+                <button
+                  type="button"
+                  disabled={!clickable}
+                  onClick={() => toggleRoom(sc.label)}
+                  className={`inline-block h-2.5 w-2.5 rounded-full p-0 ${
                     inCol ? "bg-primary" : "border border-dashed border-line"
-                  }`}
+                  } ${clickable ? "cursor-pointer hover:ring-2 hover:ring-primary/30" : "cursor-default"}`}
                   onMouseEnter={(e) => {
                     const r = e.currentTarget.getBoundingClientRect();
                     setTip({
                       x: Math.min(r.left, window.innerWidth - 340),
                       y: r.bottom + 6,
                       hint: inCol
-                        ? `${s.label} runs in ${sc.label}`
-                        : `${sc.label}'s buyer doesn't reach ${s.label}`,
+                        ? `${s.label} runs in ${sc.label}${clickable ? " - click to drop it for this buyer" : ""}`
+                        : `${sc.label}'s buyer doesn't reach ${s.label}${clickable ? " - click to add it for this buyer" : ""}`,
                       verdict: "",
                     });
                   }}

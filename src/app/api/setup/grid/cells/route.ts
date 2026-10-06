@@ -69,6 +69,10 @@ const Body = z.object({
   /** Stage keys the user kept at gate 1; the mask is recomputed server
    * side from the journeys so stage hints never leave the engine. */
   stageKeys: z.array(z.string().trim().min(1)).min(1).max(30),
+  /** Per-room scope for kept situational stages (2026-10-06): stage key ->
+   * room labels. Overrides the mask's columns; an empty list drops the
+   * stage. Absent = the mask (every room for a stage it reaches nowhere). */
+  stageRooms: z.record(z.string().trim().min(1), z.array(z.string().trim().max(60)).max(8)).optional(),
   /** Background warm: fill the cache but never wait on another request's
    * in-flight write - the confirm that needs results does the waiting. */
   warm: z.boolean().optional(),
@@ -93,7 +97,16 @@ export async function POST(req: Request) {
   const base: Moderators = parsed.data.base;
   const scenarios = parsed.data.scenarios as unknown as (ScenarioSpec & { journey: Journey | null })[];
   const kept = new Set(stageKeys);
-  const stages = participationMask(base, scenarios).filter((s) => kept.has(s.key));
+  const labels = new Set(scenarios.map((s) => s.label));
+  const stages = participationMask(base, scenarios)
+    .filter((s) => kept.has(s.key))
+    .map((s) => {
+      const rooms = parsed.data.stageRooms?.[s.key];
+      if (!rooms || !s.situational) return s;
+      return { ...s, columns: rooms.filter((l) => labels.has(l)) };
+    })
+    // An explicit empty room set is the user dropping the stage everywhere.
+    .filter((s) => !(parsed.data.stageRooms?.[s.key] && s.situational && s.columns.length === 0));
   if (stages.length === 0) {
     return NextResponse.json({ error: "keep at least one stage" }, { status: 400 });
   }
