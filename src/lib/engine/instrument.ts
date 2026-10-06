@@ -2641,30 +2641,10 @@ export async function planValueLinesFull(input: {
         if (v.variant === true) for (const r of rooms) if (out[r.label]?.line === line) out[r.label] = { line: input.brand, counterpart };
       } catch { /* fail open: keep the line */ }
     }
-    // Room fit (2026-10-04 seed review H): a room whose circumstance has one
-    // answer - a hard price cap, a buy-the-top habit - measures the room, not
-    // the brand. One low-effort read over the rooms, each against its own
-    // pair; the coverage step chips leaning rooms. Fails open to no fit.
-    try {
-      const a = await anthropicClient();
-      const res = await a.messages.create({
-        model: VALUE_LINES_MODEL, max_tokens: 800, output_config: { effort: "low" },
-        system:
-          `Each buying room below is a buyer in ${input.category}. Each room's question is whether the named ${input.brand} line is worth it over ${counterpart}. For each room say whether that question is a genuine contest for that buyer: ` +
-          `contest - a competent advisor could answer either way for this buyer; leans_no - the room's circumstance (a hard price cap, a strict budget) all but settles it as not worth it, OR the room's buyer is not the kind of buyer the line is sold to - a personal line in a business room, or the reverse; leans_yes - the circumstance (a buyer who only considers the top tier, or never weighs cheaper options) all but settles it as worth it. ` +
-          `Reply with ONLY JSON: {"rooms": ["contest" | "leans_no" | "leans_yes", ...]} - one entry per room, in order.`,
-        messages: [{ role: "user", content: rooms.map((r, i) => `${i + 1}. ${r.label}: ${r.description}\n   line: ${out[r.label]?.line ?? input.brand}`).join("\n") }],
-      } as never);
-      const text = textOf(res);
-      const j = JSON.parse(firstJsonObject(text) ?? text) as { rooms?: string[] };
-      rooms.forEach((r, i) => {
-        const f = String(j.rooms?.[i] ?? "");
-        const cur = out[r.label];
-        if (cur && (f === "leans_no" || f === "leans_yes" || f === "contest")) out[r.label] = { ...cur, fit: f };
-      });
-    } catch (err) {
-      console.error("value room fit failed open:", err);
-    }
+    // Room fit read RETIRED (2026-10-06, Tyler): the "this buyer has one
+    // answer" chip made no sense on a Value cell whose line the user picks,
+    // and its verdict could steer toward rivals. `fit` stays optional on
+    // ValueLine for older drafts; nothing writes or renders it now.
     console.warn(`value lines [${input.brand}]: ${Object.entries(out).map(([k, v]) => `${k} -> ${v ? `${v.line} vs ${v.counterpart}${v.fit ? ` (${v.fit})` : ""}` : "none"}`).join("; ")}`);
     return { rooms: out, catalog };
   });

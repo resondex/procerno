@@ -2661,10 +2661,7 @@ function ValueLineEditor({ value, disabled, onChange, options, recommended, cate
       onClick={() => setEditing(true)}
       title="Value asks whether your product is worth paying more for, compared with cheaper options. This is the product line we ask about for this buyer and what it is compared with. Click to choose another of your lines, your own, or none."
       className="text-[10px] leading-tight text-primary hover:opacity-80">
-      {value ? (<><span className="font-medium">{value.line}</span>{same(value.line, recommended) ? <span className="text-ink-3"> (recommended)</span> : null}<br /><span className="text-ink-3">vs {value.counterpart}</span>
-        {(value.fit === "leans_no" || value.fit === "leans_yes") && (
-          <><br /><span className="text-warning" title={value.fit === "leans_no" ? "This buyer's circumstance all but settles it as not worth it - the cell would measure the room's budget, not your brand. Pick a line this buyer would weigh, or set none." : "The engine judged that this buyer never weighs the cheaper option, so the cell would measure the room, not your brand. Advisory: it clears when you choose a line yourself."}>This buyer has one answer</span></>
-        )}</>) : <span className="text-ink-3">no Value cell</span>}
+      {value ? (<><span className="font-medium">{value.line}</span>{same(value.line, recommended) ? <span className="text-ink-3"> (recommended)</span> : null}<br /><span className="text-ink-3">vs {value.counterpart}</span></>) : <span className="text-ink-3">no Value cell</span>}
     </button>
   );
 }
