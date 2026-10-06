@@ -824,6 +824,13 @@ const fails9 = fails;
   expect("longest shared run", instr.longestSharedRunWords("i'm moving my card off x what should i get".split(" "), "i'm moving my card off x which one next".split(" ")).join(" ") === "i'm moving my card off x");
   expect("criteria connector widened (afterward, because of that, once i do)",
     ["What should I check, and what should I consider afterward?", "What should I look at, and because of that, what should I consider?", "What should I evaluate, and once I do, what should I weigh?"].every((t) => instr.CRITERIA_DEPENDENCY.test(t)));
+  expect("criteria second ask asking for products is caught",
+    instr.criteriaAsksForProducts("I pay in full monthly. What should I look at, and given that, what credit cards should I consider?", "credit cards") &&
+    instr.criteriaAsksForProducts("What should I check, and then which brands should I look at?", "credit cards"));
+  expect("criteria two-part ask without a product ask passes",
+    !instr.criteriaAsksForProducts("I pay in full monthly. What should I look at, and given that, what should I consider?", "credit cards") &&
+    !instr.criteriaAsksForProducts("What matters when comparing credit cards, and given that, what trade-offs should I accept?", "credit cards"));
+  expect("'keep hearing' is hearsay", instr.HEARSAY_OPENER.test("I keep hearing X isn't accepted much - is that true?"));
 }
 console.log(`10. p15 paraphrase guards: ${fails === fails9 ? "ALL PASS" : `${fails - fails9} FAILURE(S)`}`);
 if (fails > 0) process.exitCode = 1;

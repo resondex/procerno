@@ -5600,13 +5600,29 @@ export interface Phrasing {
 // (exemption-proof) and the retry names the copied run; doubt
 // paraphrases never open as hearsay; criteria paraphrases keep the
 // connector; a scenario seed's stated frequency stays at its level.
-const PHRASINGS_VERSION = "p15";
+// "p16" (2026-10-06, AmEx round 3): p15's "nothing carried over except
+// brand names, the category term and numbers" was too rigid (Tyler) - it
+// stripped required wording (the class phrase, criteria's two-part ask
+// turned into a which-cards ask), pushed register formal and doubled the
+// retries. The writer now keeps what the ask depends on and is told the
+// one failure (a kept opening clause); the guards are mechanical: a
+// class-cell paraphrase keeps the class phrase, a criteria paraphrase's
+// second ask never asks for products or brands, "keep hearing" is hearsay.
+const PHRASINGS_VERSION = "p16";
+/** p16: a criteria second ask that asks for products or brands (the
+ * category's words, or generic product words) instead of what to consider. */
+export function criteriaAsksForProducts(text: string, category: string): boolean {
+  const cat = category.toLowerCase().split(/\s+/).filter((w) => w.length >= 3).map((w) => w.replace(/(ies|es|s)$/, ""));
+  const nouns = [...cat.map((w) => `${w}\\w*`), "brands?", "products?", "options?", "ones?", "names?"].join("|");
+  const re = new RegExp(`(?:given (?:that|those|this)|then|after(?:wards| that)?|from there|with that in mind|because of that|once i \\w+)[^?.;]*?\\b(?:which|what)\\s+(?:\\w+\\s+){0,2}?(?:${nouns})\\b`, "i");
+  return re.test(text);
+}
 /** p15: a paraphrase whose first COPY_OPENING words equal the seed's or a
  * kept sibling's copied its opening clause. Calibrated on two AmEx rounds:
  * 4 words hits 20-22% of output (cell 39's template 8 of 9), 5 hits 15%. */
 const COPY_OPENING = 4;
 /** p15: a worry voiced as someone else's claim. */
-export const HEARSAY_OPENER = /\b(?:i(?:'ve| have)? (?:heard|read|seen)|i hear|people (?:say|are saying|keep saying)|folks say|everyone says|they say|word is|rumou?rs?|(?:a )?friend (?:told|says|said)|(?:reviews|reddit|forums?) say)\b/i;
+export const HEARSAY_OPENER = /\b(?:i(?:'ve| have)? (?:heard|read|seen)|i (?:keep|kept) (?:hearing|reading|seeing)|i hear|people (?:say|are saying|keep saying)|folks say|everyone says|they say|word is|rumou?rs?|(?:a )?friend (?:told|says|said)|(?:reviews|reddit|forums?) say)\b/i;
 /** p15: longest run of consecutive shared tokens between two token lists. */
 export function longestSharedRunWords(a: string[], b: string[]): string[] {
   let best: string[] = [];
@@ -5932,11 +5948,12 @@ export async function generatePhrasings(input: {
             "the wordings people actually type into a chat assistant.\n" +
             "Each paraphrase is a DIFFERENT PERSON in the same circumstance " +
             "describing it their own way. Reword the WHOLE prompt - the " +
-            "opening situation and the question alike: a paraphrase keeps the " +
-            "seed's meaning, never its sentences, and nothing is carried over " +
-            "word for word except brand names, the category term and any " +
-            "number (never a run of four or more consecutive words from the " +
-            "seed). Do not copy the seed's qualitative details (its examples, " +
+            "opening situation and the question alike - the way a different " +
+            "person would say it. The brand names, the category term, any " +
+            "number and the words the stage's ask depends on stay as they " +
+            "are; everything else is yours to say differently. A paraphrase " +
+            "that keeps the seed's opening clause and changes only the " +
+            "question is not a paraphrase. Do not copy the seed's qualitative details (its examples, " +
             "its list of symptoms); describe the circumstance in your own " +
             "words or leave details out entirely. A stated frequency or " +
             "amount in the seed (how often, how many, how much) is a fact of " +
@@ -6212,6 +6229,15 @@ export async function generatePhrasings(input: {
         if (DOUBT_CHECK_STAGES.has(seed.stage) && HEARSAY_OPENER.test(text)) { culls.ask++; continue; }
         // p15: criteria's second ask stays conditioned on the first (r25).
         if (seed.stage === "criteria" && !CRITERIA_DEPENDENCY.test(text)) { culls.ask++; continue; }
+        // p16: and never turns into a which-products ask.
+        if (seed.stage === "criteria" && criteriaAsksForProducts(text, input.category)) { culls.ask++; continue; }
+        // p16: a class cell keeps its class phrase ("a <network> card", not
+        // the bare network name) - the signature check only asks that the
+        // class brand be named.
+        if (spec?.brandMode === "comparison_class" && seed.classPhrase) {
+          const phrase = norm(seed.classPhrase).replace(/^(?:a|an|the) /, "");
+          if (phrase && !norm(text).includes(phrase)) { culls.ask++; continue; }
+        }
         // p15: a stated frequency in a scenario seed is the room's input to
         // the answer - the paraphrase keeps it at the same level.
         if (seed.situation && !keepsFrequency(seed.text, text)) { culls.ask++; continue; }
