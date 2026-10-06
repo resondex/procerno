@@ -525,7 +525,7 @@ export type LibraryStage = ComposedStage & {
 // shortlist: merged into discovery 2026-10-03 (Tyler, init decision 2) -
 // in a single AI question "name a few" and "name 3 or 4" are the same ask
 // with the same coded result, so the battery measured it twice per column.
-export const RETIRED_STAGES: ReadonlySet<string> = new Set(["problem_resolution", "shortlist"]);
+export const RETIRED_STAGES: ReadonlySet<string> = new Set(["problem_resolution", "shortlist", "feature_screening"]);
 
 export function stageLibrary(m: Moderators): LibraryStage[] {
   const considered = m.involvement === "considered";
@@ -569,15 +569,14 @@ export function stageLibrary(m: Moderators): LibraryStage[] {
       hint: "The buyer's situation plus a two-part ask: what should I look at, and given that, what should I consider? - never offering candidate criteria for the answer to rank, never asking which brand.",
       why: "Assistants teach buyers what to value before any brand is named.",
     },
-    {
-      key: "feature_screening", label: "Feature screening", layer: "consideration",
-      situational: true, rivals: "none", tag: "picks",
-      recommended: m.verifiability === "spec",
-      hint: "The buyer's need in plain words, then which one has the best features for it - the answer decides which features matter. Never a specific feature named, never a list of features, never a need chosen because it suits the client brand.",
-      why: m.verifiability === "spec"
-        ? "A spec-driven market shops on features, so feature-first asks decide who makes the cut."
-        : `Your market verifies by ${m.verifiability}, not specs - buyers don't shop from an attribute checklist.`,
-    },
+    // "feature_screening" RETIRED 2026-10-06 (Tyler): after the stage
+    // contract dropped its capability-first design (s39), it was Discovery's
+    // question with "best features" appended - across five walked brands
+    // every feature-screening seed shared its room's need with the use-case
+    // seed and differed only in the closing formula. Folded into Discovery
+    // like Shortlist; RETIRED_STAGES drops it from saved drafts' stage
+    // lists at the generation boundary. Writer rule, design intent and
+    // checks stay for legacy cells.
     {
       key: "use_case", label: "Use-case fit", layer: "consideration",
       situational: true, rivals: "none", tag: "picks", recommended: true,
