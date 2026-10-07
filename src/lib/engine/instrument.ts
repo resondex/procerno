@@ -6056,7 +6056,7 @@ export interface Phrasing {
 // substance; no purpose or destination word is added to a scenario seed
 // that lacks it. Plus two writer sentences (worry = own claim; criteria's
 // second ask = what to consider).
-const PHRASINGS_VERSION = "p19"; // p19 (2026-10-07): the writer keeps the category AS THE SEED SAYS IT, never the listed name (Netflix seeds say "streaming services"; 91 of 310 p18 paraphrases bolted in "video streaming services"); plural-slot guard adds verb agreement (a plural term followed by a singular verb). // p18 (2026-10-07, five-brand paraphrase read): relation-shift guard on scenario cells (the buyer's relation to the person in the room never changes) and plural-slot guard (a kept plural category term never sits in a singular slot) - calibrated on 1,835 live paraphrases: 4 + 13 hits, all true.
+const PHRASINGS_VERSION = "p20"; // p20 (2026-10-07): each seed line tells the writer its situation tag is a room title, never paraphrase words (the writer copied "New home setup" as prose and the label-leak check killed 12 of 14 candidates in a pricing cell). // p19 (2026-10-07): the writer keeps the category AS THE SEED SAYS IT, never the listed name (Netflix seeds say "streaming services"; 91 of 310 p18 paraphrases bolted in "video streaming services"); plural-slot guard adds verb agreement (a plural term followed by a singular verb). // p18 (2026-10-07, five-brand paraphrase read): relation-shift guard on scenario cells (the buyer's relation to the person in the room never changes) and plural-slot guard (a kept plural category term never sits in a singular slot) - calibrated on 1,835 live paraphrases: 4 + 13 hits, all true.
 /** Paraphrases a social-validation cell fills to (seed + 4 = 5 prompts); mirrored by phrasingTarget in grid_setup. */
 export const SOCIAL_VALIDATION_PARAPHRASES = 4;
 /** p17: generic payment and timing qualifiers a scenario seed may carry,
@@ -6381,6 +6381,11 @@ export async function generatePhrasings(input: {
           // into solution-seeking asks - real people ask for products,
           // and the writer had no way to know this stage must not.
           (hintOf.get(c.stage) ? `\n   [stage guidance: ${hintOf.get(c.stage)}]` : "") +
+          // p20 (Netflix repro): the situation tag above IS the room's label,
+          // and the writer copied it as prose ("New home setup and deciding
+          // ...") - 12 of 14 candidates in one pricing cell died to the
+          // label-leak check after the cull. Say what the tag is.
+          (c.situation ? `\n   [the situation tag "${c.situation}" is our title for the room, never words for a paraphrase - say the circumstance the way the seed does, in other words]` : "") +
           // The owned noun travels WITH the seed (2026-10-01): the
           // continuity check rejects paraphrases that trade "chips" for
           // "snacks", but nothing told the writer which word to keep -
