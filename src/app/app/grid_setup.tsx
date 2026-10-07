@@ -15,6 +15,12 @@ import { InlineSpinner } from "../components/spinner";
  */
 
 export const PHRASING_COUNT = 10;
+/** Prompts a cell fills to, seed included. Social validation is one clause
+ * with no circumstance and fills to 5 (Tyler 2026-10-07); every other stage
+ * to PHRASING_COUNT. Mirrors SOCIAL_VALIDATION_PARAPHRASES on the server. */
+export function phrasingTarget(stage: string): number {
+  return stage === "social_validation" ? 5 : PHRASING_COUNT;
+}
 /** Cells per paraphrase request - keeps each call well inside the function limit. */
 const PHRASING_BATCH = 8;
 
@@ -1399,7 +1405,7 @@ export function useGridSetup(a: GridSetupArgs) {
     // and cached the set ("finished work is kept") - excluding them left
     // the footer's only button unable to heal exactly that cell.
     const idx = st.cells
-      .map((c, i) => (c.text.trim() && countIn(c) < PHRASING_COUNT ? i : -1))
+      .map((c, i) => (c.text.trim() && countIn(c) < phrasingTarget(c.stage) ? i : -1))
       .filter((i) => i >= 0);
     if (idx.length === 0) return st;
     a.setError(null);
@@ -1426,7 +1432,7 @@ export function useGridSetup(a: GridSetupArgs) {
           const kept = [...c.phrasings];
           const have = () => [c.text, ...kept.filter((p) => p.text.trim()).map((p) => p.text)];
           for (const ph of data.phrasings[0] ?? []) {
-            if (1 + kept.filter((p) => p.text.trim()).length >= PHRASING_COUNT) break;
+            if (1 + kept.filter((p) => p.text.trim()).length >= phrasingTarget(c.stage)) break;
             if (have().some((t) => similarText(t, ph.text))) continue;
             kept.push({ ...ph, original: ph.text });
           }
@@ -3513,8 +3519,8 @@ export function CellsGate({
                         {live.length}/{scells.length} questions
                       </span>
                       {written ? (
-                        <span className={prompts < scells.length * PHRASING_COUNT ? "text-warning" : ""}>
-                          {prompts}/{scells.length * PHRASING_COUNT} prompts
+                        <span className={prompts < scells.length * phrasingTarget(stage) ? "text-warning" : ""}>
+                          {prompts}/{scells.length * phrasingTarget(stage)} prompts
                         </span>
                       ) : (
                         <>
@@ -3557,12 +3563,12 @@ export function CellsGate({
                             {written && (
                               <span
                                 className={`rounded-full px-2 py-px text-[9.5px] font-medium ${
-                                  countOf(c) >= PHRASING_COUNT
+                                  countOf(c) >= phrasingTarget(c.stage)
                                     ? "bg-primary-soft text-primary"
                                     : "bg-warning/10 text-warning"
                                 }`}
                               >
-                                {countOf(c)}/{PHRASING_COUNT} prompts
+                                {countOf(c)}/{phrasingTarget(c.stage)} prompts
                               </span>
                             )}
                             <button
@@ -3739,8 +3745,8 @@ export function CellsGate({
                               ))}
                               <button
                                 type="button"
-                                disabled={countOf(c) >= PHRASING_COUNT}
-                                title={countOf(c) >= PHRASING_COUNT ? `The set is full at ${PHRASING_COUNT} - remove one to add your own` : undefined}
+                                disabled={countOf(c) >= phrasingTarget(c.stage)}
+                                title={countOf(c) >= phrasingTarget(c.stage) ? `The set is full at ${phrasingTarget(c.stage)} - remove one to add your own` : undefined}
                                 onClick={() =>
                                   setState({
                                     ...state,

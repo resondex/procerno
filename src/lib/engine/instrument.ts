@@ -6057,6 +6057,8 @@ export interface Phrasing {
 // that lacks it. Plus two writer sentences (worry = own claim; criteria's
 // second ask = what to consider).
 const PHRASINGS_VERSION = "p18"; // p18 (2026-10-07, five-brand paraphrase read): relation-shift guard on scenario cells (the buyer's relation to the person in the room never changes) and plural-slot guard (a kept plural category term never sits in a singular slot) - calibrated on 1,835 live paraphrases: 4 + 13 hits, all true.
+/** Paraphrases a social-validation cell fills to (seed + 4 = 5 prompts); mirrored by phrasingTarget in grid_setup. */
+export const SOCIAL_VALIDATION_PARAPHRASES = 4;
 /** p17: generic payment and timing qualifiers a scenario seed may carry,
  * each with the rewordings that keep it in substance. */
 const QUALIFIER_SHAPES: [RegExp, RegExp][] = [
@@ -6247,6 +6249,11 @@ export async function generatePhrasings(input: {
   const aliasForms = await brandAliasForms([input.brand, ...input.competitors]);
   input = { ...input, competitors: sameSeatOf(input.competitors, input.rosterRoles) };
   const want = Math.max(0, input.count - 1);
+  // Social validation is one clause with no circumstance (Tyler 2026-10-07):
+  // nine rewordings of it are the same five words reordered, and the overlap
+  // cull rightly refuses most of them - the stage fills to 5 prompts (seed +
+  // 4), never retried toward 10.
+  const wantFor = (stage: string) => (stage === "social_validation" ? Math.min(want, SOCIAL_VALIDATION_PARAPHRASES) : want);
   if (want === 0 || input.cells.length === 0) return input.cells.map(() => []);
   const rivals = angleRivals(input.competitors, input.rosterRoles);
   // Brand names are MANDATORY vocabulary in branded cells (the same-brands
@@ -6770,11 +6777,11 @@ export async function generatePhrasings(input: {
         seen.add(n);
         keptWords.push(ws);
         kept.push({ text, asker: (p.asker ?? "").trim() });
-        if (prior.length + kept.length >= want) break;
+        if (prior.length + kept.length >= wantFor(seed.stage)) break;
       }
-      if (prior.length + kept.length < want) {
+      if (prior.length + kept.length < wantFor(seed.stage)) {
         console.warn(
-          `phrasings cull [${seed.stage}] kept ${prior.length + kept.length}/${want} - ` +
+          `phrasings cull [${seed.stage}] kept ${prior.length + kept.length}/${wantFor(seed.stage)} - ` +
           `raw ${(c.phrasings ?? []).length}, sig ${culls.sig}, ask ${culls.ask}, overlap ${culls.overlap}, dup ${culls.dup}, empty ${culls.empty}, sig="${sig}" | ${seed.text.slice(0, 80)}`
         );
       }
@@ -6808,7 +6815,7 @@ export async function generatePhrasings(input: {
     // every cell reaches quota or a round stops helping. The batch is
     // served full; no visible after-the-fact healing.
     for (let round = 0; round < PHRASINGS_RETRY_ROUNDS; round++) {
-      const deficient = got.map((k, j) => (k.length < want ? j : -1)).filter((j) => j >= 0);
+      const deficient = got.map((k, j) => (k.length < wantFor(subset[j].stage) ? j : -1)).filter((j) => j >= 0);
       if (deficient.length === 0) break;
       const subs = deficient.map((j) => subset[j]);
       const have = deficient.map((j) => got[j]);
@@ -6845,7 +6852,7 @@ export async function generatePhrasings(input: {
       let progressed = false;
       deficient.forEach((j, k) => {
         if (again[k].length > 0) progressed = true;
-        got[j] = [...got[j], ...again[k]].slice(0, want);
+        got[j] = [...got[j], ...again[k]].slice(0, wantFor(subset[j].stage));
       });
       if (!progressed) break;
     }
@@ -6857,7 +6864,7 @@ export async function generatePhrasings(input: {
     // final round accepts higher overlap: ten same-ish retellings
     // measure better than three distinct ones. Normal cells fill in
     // the rounds above and never reach this.
-    const starved = got.map((k, j) => (k.length < want ? j : -1)).filter((j) => j >= 0);
+    const starved = got.map((k, j) => (k.length < wantFor(subset[j].stage) ? j : -1)).filter((j) => j >= 0);
     if (starved.length > 0) {
       const again = await pass(starved.map((j) => subset[j]), {
         extra: PHRASINGS_EXTRA_RETRY,
@@ -6865,7 +6872,7 @@ export async function generatePhrasings(input: {
         maxOverlap: RELAXED_OVERLAP,
       });
       starved.forEach((j, k) => {
-        got[j] = [...got[j], ...again[k]].slice(0, want);
+        got[j] = [...got[j], ...again[k]].slice(0, wantFor(subset[j].stage));
       });
     }
     // CHECKS IN GENERATION (2026-09-28, Tyler's checks-first directive):
@@ -6923,7 +6930,7 @@ export async function generatePhrasings(input: {
         const short: number[] = [];
         for (const [j, ks] of dropAt) {
           got[j] = got[j].filter((_, k) => !ks.has(k));
-          if (got[j].length < want) short.push(j);
+          if (got[j].length < wantFor(subset[j].stage)) short.push(j);
         }
         return short;
       };
@@ -6963,7 +6970,7 @@ export async function generatePhrasings(input: {
           if (got[j].length < before)
             console.warn(`battery check dropped [${f.check}] ${subset[j].stage}: ${f.text.slice(0, 90)}`);
         }
-        return cellIdxs.filter((j) => got[j].length < want);
+        return cellIdxs.filter((j) => got[j].length < wantFor(subset[j].stage));
       };
       const all = subset.map((_, j) => j);
       const mechShort = mechanicalFilter(all);
@@ -6978,7 +6985,7 @@ export async function generatePhrasings(input: {
           have: short.map((j) => got[j]),
         });
         short.forEach((j, k) => {
-          got[j] = [...got[j], ...again[k]].slice(0, want);
+          got[j] = [...got[j], ...again[k]].slice(0, wantFor(subset[j].stage));
         });
         const grew = short.filter((j, k) => got[j].length > before[k]);
         mechanicalFilter(grew);

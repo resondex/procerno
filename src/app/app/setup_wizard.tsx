@@ -8,6 +8,7 @@ import {
   CellsGate,
   WorriesGate,
   PHRASING_COUNT,
+  phrasingTarget,
   cellSubMeta,
   CoverageGate,
   ScenarioReviewModal,
@@ -1141,7 +1142,7 @@ export function SetupWizard({ mode, brand, draft, engineOptions, onClose, onCrea
       const gap = next.cells.some(
         (c) =>
           c.text.trim() &&
-          1 + c.phrasings.filter((p) => p.text.trim()).length < PHRASING_COUNT
+          1 + c.phrasings.filter((p) => p.text.trim()).length < phrasingTarget(c.stage)
       );
       if (gap) next = (await gridApi.topUpPhrasings(next)) ?? next;
     }
@@ -1188,7 +1189,7 @@ export function SetupWizard({ mode, brand, draft, engineOptions, onClose, onCrea
         (c) =>
           c.text.trim() &&
           c.phrasings.some((p) => p.text.trim()) &&
-          1 + c.phrasings.filter((p) => p.text.trim()).length < PHRASING_COUNT
+          1 + c.phrasings.filter((p) => p.text.trim()).length < phrasingTarget(c.stage)
       );
     if (!written) {
       if (demo) {
@@ -2053,7 +2054,7 @@ export function SetupWizard({ mode, brand, draft, engineOptions, onClose, onCrea
                         (c) =>
                           c.text.trim() &&
                           c.phrasings.some((p) => p.text.trim()) &&
-                          1 + c.phrasings.filter((p) => p.text.trim()).length < PHRASING_COUNT
+                          1 + c.phrasings.filter((p) => p.text.trim()).length < phrasingTarget(c.stage)
                       ) && (
                         <button
                           type="button"
