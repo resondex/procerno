@@ -1482,6 +1482,11 @@ export function useGridSetup(a: GridSetupArgs) {
       avoid: alts,
       // Near mode keeps this prompt's ask and moves one detail.
       nearTo: near ? c.text : undefined,
+      // r26: a fresh draw of a room-pinned pain or outcome must not land
+      // on a neighbor room's subject - send the stage's other seeds.
+      siblings: !near && c.situation && (c.stage === "problem_recognition" || c.stage === "use_case")
+        ? a.state.cells.filter((x) => x.stage === c.stage && x.situation && x.situation !== c.situation && x.text.trim()).map((x) => x.text.trim()).slice(0, 8)
+        : undefined,
     });
     if (!data) return;
     let generated: GridPhrasing[] = [];

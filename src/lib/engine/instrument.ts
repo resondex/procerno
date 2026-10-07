@@ -178,7 +178,7 @@ const STYLE_VERSION = "s52"; // s52 (2026-10-06): criteria's second ask is condi
  * per unit, and model calls only for units the new rules reject. */
 /** r25: the connector that conditions criteria's second ask on its first. */
 export const CRITERIA_DEPENDENCY = /\b(?:given (?:that|those|this|all that|what i find|those answers)|then|from there|with that (?:in mind|info|known|answered)|based on (?:that|those)|because of that|knowing (?:that|those|this)|once i (?:know|do|have|see)|in light of that|after(?:wards?| that)?|and from that|depending on that|on that basis|accordingly|having (?:done|looked at|checked) that)\b/i;
-export const SEED_RULES_VERSION = "r25"; // r25 (2026-10-06): label stems that are vault-everyday words never leak; criteria_no_dependency net + design intent; feature-screening channel clause. // r24 (journeys30): problem-recognition design intent requires category territory; criteria design intent carries the two-part ask. // r22 (batch 2): use-case in a channel room carries who only; label-word stems leak. // r17 (2026-10-04 seed review batch): awareness_purchase_moment and offensive_alt_no_move nets; design intents - no purchase moment in problem recognition, head-to-heads add no situation, alternatives state a full-sentence move within the category, advocacy vs business-case audience, Value brand-name fallback branch; keep-or-leave narrowed (a within-brand change may be the subject, never the answer). // r16 (2026-10-04 seed review): doubt design intent - own claim, one doubt, open verdict; facts to confirm, rule/ingredient lookups, hearsay, sizing asks and the Value worth-it ask fail; objections never voiced by a current user, churn/renewal always by one, no third option beside stay and leave. // r15 (2026-10-02, Tyler's option B): brand mentions = whole names, declared alternates, name words and dictionary aliases, with every ambiguous one-word hit (an everyday word written lowercase or opening a sentence, or a maker word like "Google" of Google Pixel) decided in context by the brand judge (haiku, cached) - no casing rules, no target exemption, no roster word lists. r14 (2026-10-02 review): everyday-word lexicon by lowercase SHARE in two tiers (label words: common and not brand-dominated - "jira", "netflix", "pixel", "apple", "chase" count lowercase again; aliases: merely common - "gold" stays capital-only), coined split words case-blind ("apple or samsung"), the target's own one-word name never case-guarded, "citi" off the case-guard list, and a monthly figure is the asker's plan only in first-person / spend / offer context ("the Pro about 20 a month more" is a stated price). r13 (2026-10-02 cold-walk audit + review): verb-less stated prices ("Gold at 250"); word-anchored price-concern test + money bolt-ons; brand checks read filtered dictionary alias forms ("amex"); everyday words inside brand names never name the brand - category tokens containment-aware, split words of multi-word names in label casing and not sentence-initial, one-word names and aliases in the vault everyday-word lexicon capitalized only, other brands' full names scrubbed first. r4 (2026-10-01): r2 calendar-year/60-word/segment-vocab; r3 category-naming labels exempt from substring leak; r4 'standardization' in segment vocabulary; r5 directionless-switch string check; r6 punctuation-blind label-leak matching; r7-r8 switch direction detected by absence (no OS, no roster brand near switch vocabulary); cheaper bolt-on token on non-price concerns
+export const SEED_RULES_VERSION = "r26"; // r26 (2026-10-07): room-fit clause in the problem-recognition and use-case design intents (a pain or outcome with no root in the room's circumstance fails); problem-recognition subject pass (one pain per room, never a neighbor room's subject). // r25 (2026-10-06): label stems that are vault-everyday words never leak; criteria_no_dependency net + design intent; feature-screening channel clause. // r24 (journeys30): problem-recognition design intent requires category territory; criteria design intent carries the two-part ask. // r22 (batch 2): use-case in a channel room carries who only; label-word stems leak. // r17 (2026-10-04 seed review batch): awareness_purchase_moment and offensive_alt_no_move nets; design intents - no purchase moment in problem recognition, head-to-heads add no situation, alternatives state a full-sentence move within the category, advocacy vs business-case audience, Value brand-name fallback branch; keep-or-leave narrowed (a within-brand change may be the subject, never the answer). // r16 (2026-10-04 seed review): doubt design intent - own claim, one doubt, open verdict; facts to confirm, rule/ingredient lookups, hearsay, sizing asks and the Value worth-it ask fail; objections never voiced by a current user, churn/renewal always by one, no third option beside stay and leave. // r15 (2026-10-02, Tyler's option B): brand mentions = whole names, declared alternates, name words and dictionary aliases, with every ambiguous one-word hit (an everyday word written lowercase or opening a sentence, or a maker word like "Google" of Google Pixel) decided in context by the brand judge (haiku, cached) - no casing rules, no target exemption, no roster word lists. r14 (2026-10-02 review): everyday-word lexicon by lowercase SHARE in two tiers (label words: common and not brand-dominated - "jira", "netflix", "pixel", "apple", "chase" count lowercase again; aliases: merely common - "gold" stays capital-only), coined split words case-blind ("apple or samsung"), the target's own one-word name never case-guarded, "citi" off the case-guard list, and a monthly figure is the asker's plan only in first-person / spend / offer context ("the Pro about 20 a month more" is a stated price). r13 (2026-10-02 cold-walk audit + review): verb-less stated prices ("Gold at 250"); word-anchored price-concern test + money bolt-ons; brand checks read filtered dictionary alias forms ("amex"); everyday words inside brand names never name the brand - category tokens containment-aware, split words of multi-word names in label casing and not sentence-initial, one-word names and aliases in the vault everyday-word lexicon capitalized only, other brands' full names scrubbed first. r4 (2026-10-01): r2 calendar-year/60-word/segment-vocab; r3 category-naming labels exempt from substring leak; r4 'standardization' in segment vocabulary; r5 directionless-switch string check; r6 punctuation-blind label-leak matching; r7-r8 switch direction detected by absence (no OS, no roster brand near switch vocabulary); cheaper bolt-on token on non-price concerns
 
 /** Brand forms that double as ordinary English words: only these demand a
  * capitalized occurrence to count as naming the brand ("2-3 services max"
@@ -2489,30 +2489,38 @@ export async function planValueLinesFull(input: {
   // up is. The premium-for-every-room behavior stays as the fallback.
   // value_lines23 (2026-10-06, Tyler): the catalog rides out with the picks
   // so the gate can offer the lines as a list with the pick recommended.
-  const key = cacheKey("value_lines23", [
+  // value_lines24 (2026-10-07): a line counts only when it is bought
+  // INSTEAD of another of the brand's lines for the same job (Jira Align
+  // and Jira Service Management are bought alongside Jira or for a
+  // different job, and the read ranked Jira Align as the premium line for a
+  // first team leaving spreadsheets); and when the brand sells one product,
+  // its named plan tiers form the ladder (Netflix fell open to the bare
+  // brand, so the Value question could not ask about a tier).
+  const key = cacheKey("value_lines24", [
     VALUE_LINES_MODEL, input.brand, input.category, input.audience ?? "",
     rooms.map((r) => `${r.label}|${r.description}`).join("~"),
   ]);
   return coalesced<{ rooms: Record<string, ValueLine | null>; catalog: ValueCatalogLine[] }>(key, { meta: input.meta }, async () => {
     const textOf = (res: unknown) => (res as { content: { type: string; text?: string }[] }).content
       .filter((b) => b.type === "text").map((b) => b.text ?? "").join("").trim();
-    type Catalog = { tiers: string[]; lines: { name: string; tier: number; for: string; org: boolean }[]; premium: string };
+    type Catalog = { tiers: string[]; lines: { name: string; tier: number; for: string; org: boolean; instead: boolean }[]; premium: string; plans: string[] };
     // Majority of three (the journey-fit precedent): a single read varied
     // on one brand in four (a plan named as a line, a sub-brand, a skipped
     // tier). Three parallel catalog reads; lines named by at least two
     // survive, each at its majority tier.
     const one = async (): Promise<Catalog> => {
       const a = await anthropicClient();
-      let j: { tiers?: unknown[]; lines?: { name?: string; tier?: number; for?: string; org?: boolean }[]; premium?: string } | null = null;
+      let j: { tiers?: unknown[]; lines?: { name?: string; tier?: number; for?: string; org?: boolean; instead?: boolean }[]; premium?: string; plans?: unknown[] } | null = null;
       for (const extra of ["", " Escape any quote marks inside strings."]) {
         const res = await a.messages.create({
           model: VALUE_LINES_MODEL, max_tokens: 6000, output_config: { effort: "medium" },
           system:
             `For the brand ${input.brand} in ${input.category}, give: ` +
             `tiers - the price tiers of the category as a buyer in the given audience shops it, from most to least expensive: each tier is a KIND of product that several different makers sell, described in a few plain words the way a buyer says it - never a maker or brand, and never the plans, sizes or packs of one product - 3 to 5 tiers. When the audience spans separate markets (personal and business buyers), the ladder is the one this brand's main buyers shop; ` +
-            `lines - the brand's distinct current product lines in this category by their real names as buyers say them, each with the index of the tier it sits in and, as "for", the buyer and the use the brand itself puts that line in front of, in a few plain words (who it is sold to and what they mostly use it for - never a slogan), and as "org" whether the line is sold to organizations (a company, a team, a business) rather than individuals and households. A line is a separate product people choose between by name; plans, subscription levels, editions, flavors, sizes and varieties of one product are NOT lines. A brand that sells one product has one line, its own name. Never an exact model number or year - the line as buyers name it; ` +
-            `premium - the brand's MOST PREMIUM line that buyers in the given audience can buy or apply for directly, copied exactly from lines - never an invitation-only product, never one sold only as an add-on to another of the brand's products, never a separate layer aimed at a different buyer than the given audience, and ALWAYS in the same form as the category's mainstream product: a line whose form changes what the product is (it folds, is a different size or device class, a different kind of account or card) is a separate line, never the premium tier of the mainstream one. ` +
-            `Reply with ONLY JSON: {"tiers": ["..."], "lines": [{"name": "...", "tier": 0, "for": "...", "org": false}], "premium": "..."}.${extra}`,
+            `lines - the brand's distinct current product lines in this category by their real names as buyers say them, each with the index of the tier it sits in and, as "for", the buyer and the use the brand itself puts that line in front of, in a few plain words (who it is sold to and what they mostly use it for - never a slogan), and as "org" whether the line is sold to organizations (a company, a team, a business) rather than individuals and households, and as "instead" whether a buyer of that line's own kind would weigh it AGAINST another of the brand's lines for the same job at a different price (true) - false when the line is bought alongside another of the brand's lines, or does a different job than the brand's main line, so nobody picks between them. A line is a separate product people choose between by name; plans, subscription levels, editions, flavors, sizes and varieties of one product are NOT lines. A brand that sells one product has one line, its own name. Never an exact model number or year - the line as buyers name it; ` +
+            `premium - the brand's MOST PREMIUM line that buyers in the given audience can buy or apply for directly, copied exactly from lines - never an invitation-only product, never one sold only as an add-on to another of the brand's products, never a separate layer aimed at a different buyer than the given audience, and ALWAYS in the same form as the category's mainstream product: a line whose form changes what the product is (it folds, is a different size or device class, a different kind of account or card) is a separate line, never the premium tier of the mainstream one; ` +
+            `plans - when the brand's main line is sold in named plan tiers or editions that buyers choose between by name at different prices, those names from cheapest to most expensive exactly as the brand names them (an empty list when the main line has no named tiers, or when its tiers differ only by size, pack or quantity). ` +
+            `Reply with ONLY JSON: {"tiers": ["..."], "lines": [{"name": "...", "tier": 0, "for": "...", "org": false, "instead": true}], "premium": "...", "plans": ["..."]}.${extra}`,
           messages: [{ role: "user", content: `Audience: ${input.audience ?? "unknown"}\nRooms:\n${rooms.map((r, i) => `${i + 1}. ${r.label}: ${r.description}`).join("\n")}` }],
         } as never);
         const text = textOf(res);
@@ -2521,9 +2529,10 @@ export async function planValueLinesFull(input: {
       if (!j?.lines) throw new Error("value lines reply was not valid JSON");
       const tiers = (Array.isArray(j.tiers) ? j.tiers : []).map((t) => humanize(String(t ?? "")).trim()).filter(Boolean);
       const lines = (Array.isArray(j.lines) ? j.lines : [])
-        .map((l) => ({ name: humanize(String(l?.name ?? "")).trim(), tier: Number(l?.tier), for: humanize(String(l?.for ?? "")).trim(), org: l?.org === true }))
+        .map((l) => ({ name: humanize(String(l?.name ?? "")).trim(), tier: Number(l?.tier), for: humanize(String(l?.for ?? "")).trim(), org: l?.org === true, instead: l?.instead !== false }))
         .filter((l) => l.name && Number.isFinite(l.tier));
-      return { tiers, lines, premium: humanize(String(j.premium ?? "")).trim() };
+      const plans = (Array.isArray(j.plans) ? j.plans : []).map((t) => humanize(String(t ?? "")).trim()).filter(Boolean);
+      return { tiers, lines, premium: humanize(String(j.premium ?? "")).trim(), plans };
     };
     const reads = (await Promise.all([one(), one(), one()].map((p) => p.catch(() => null)))).filter((x): x is Catalog => !!x);
     if (reads.length === 0) return null;
@@ -2539,9 +2548,15 @@ export async function planValueLinesFull(input: {
     // Reads name the same line three ways ("The Platinum Card", "Platinum
     // Card", "Platinum"): merge and match on a normalized key.
     const lineKey = (n: string) => n.toLowerCase().replace(/^the\s+/, "").replace(/\s+(?:card|cards)$/, "").replace(/[^a-z0-9 ]+/g, " ").replace(/\s+/g, " ").trim();
-    const byName = new Map<string, { name: string; tiers: number[]; for: string; orgs: number }>();
-    for (const r of reads) for (const l of r.lines) { const k = lineKey(l.name); const e = byName.get(k); if (e) { e.tiers.push(l.tier); if (!e.for) e.for = l.for; e.orgs += l.org ? 1 : 0; } else byName.set(k, { name: l.name, tiers: [l.tier], for: l.for, orgs: l.org ? 1 : 0 }); }
-    let lines = [...byName.values()].filter((l) => l.tiers.length >= need).map((l) => ({ name: l.name, tier: majority(l.tiers), for: l.for, org: l.orgs * 2 > l.tiers.length }));
+    const byName = new Map<string, { name: string; tiers: number[]; for: string; orgs: number; insteads: number }>();
+    for (const r of reads) for (const l of r.lines) { const k = lineKey(l.name); const e = byName.get(k); if (e) { e.tiers.push(l.tier); if (!e.for) e.for = l.for; e.orgs += l.org ? 1 : 0; e.insteads += l.instead ? 1 : 0; } else byName.set(k, { name: l.name, tiers: [l.tier], for: l.for, orgs: l.org ? 1 : 0, insteads: l.instead ? 1 : 0 }); }
+    const named = [...byName.values()].filter((l) => l.tiers.length >= need);
+    // value_lines24: a line nobody picks INSTEAD of another of the brand's
+    // lines (bought alongside, or for a different job) is not on the Value
+    // ladder - it leaves the catalog and the pool.
+    const alongside = named.filter((l) => l.insteads * 2 <= l.tiers.length);
+    if (alongside.length > 0) console.warn(`value lines [${input.brand}]: not on the ladder (bought alongside or for a different job): ${alongside.map((l) => l.name).join(", ")}`);
+    let lines = named.filter((l) => l.insteads * 2 > l.tiers.length).map((l) => ({ name: l.name, tier: majority(l.tiers), for: l.for, org: l.orgs * 2 > l.tiers.length }));
     const nTiers = majority(reads.map((r) => r.tiers.length));
     const premium = tally(reads.map((r) => r.premium).filter(Boolean))?.v ?? "";
     // Dictionary validation: a line the alias forms have never seen is a
@@ -2569,7 +2584,28 @@ export async function planValueLinesFull(input: {
     } catch { /* fail open */ }
     // One product line = the brand name, mechanically; lines that all sit
     // in one price tier are variants of one product: one line.
-    const single = lines.length <= 1 || new Set(lines.map((l) => l.tier)).size <= 1;
+    let single = lines.length <= 1 || new Set(lines.map((l) => l.tier)).size <= 1;
+    // value_lines24: a one-line brand with named plan tiers gets the plans
+    // as its ladder (cheapest plan ineligible, like the cheapest line), so
+    // the Value question asks about a tier instead of the bare brand. A
+    // plan counts when at least two reads name it; order from the first
+    // read that carries it.
+    let planMode = false;
+    if (single) {
+      const planKey = (n: string) => n.toLowerCase().replace(/[^a-z0-9 ]+/g, " ").replace(/\s+/g, " ").trim();
+      const counts = new Map<string, { name: string; n: number; order: number }>();
+      reads.forEach((r) => r.plans.forEach((pname, i) => { const k = planKey(pname); const e = counts.get(k); if (e) e.n++; else counts.set(k, { name: pname, n: 1, order: i }); }));
+      const plans = [...counts.values()].filter((p) => p.n >= need).sort((x, y) => x.order - y.order).map((p) => p.name);
+      if (plans.length >= 2) {
+        const bw = new Set(wordSet(input.brand));
+        const label = (pname: string) => ([...wordSet(pname)].some((w) => bw.has(w)) ? pname : `${input.brand} ${pname}`);
+        // Cheapest plan first in the read; tier index 0 = most expensive.
+        lines = plans.map((pname, i) => ({ name: label(pname), tier: plans.length - 1 - i, for: "", org: false }));
+        single = false;
+        planMode = true;
+        console.warn(`value lines [${input.brand}]: one line - using its plan tiers as the ladder: ${lines.map((l) => l.name).join(", ")}`);
+      }
+    }
     const counterpart = `more affordable ${input.category.trim()}`;
     const out: Record<string, ValueLine | null> = {};
     const catalog: ValueCatalogLine[] = single
@@ -2592,7 +2628,7 @@ export async function planValueLinesFull(input: {
       const eligible = lines.filter((l) => lines.filter((x) => x.org === l.org).length > 1 ? l.tier < cheapestOf(l.org) : true);
       void nTiers;
       const pool = (eligible.length > 0 ? eligible : lines).sort((x, y) => x.tier - y.tier);
-      const premiumLine = pool.find((l) => lineKey(l.name) === lineKey(premium)) ?? pool[0];
+      const premiumLine = (planMode ? null : pool.find((l) => lineKey(l.name) === lineKey(premium))) ?? pool[0];
       console.warn(`value lines [${input.brand}]: catalog ${lines.map((l) => `${l.name}@${l.tier}${l.org ? "/org" : ""}`).join(", ")}; eligible ${pool.map((l) => l.name).join(", ")}`);
       // Per-room pick, majority of three low-effort reads over the catalog.
       const pick = async (): Promise<string[]> => {
@@ -2600,8 +2636,8 @@ export async function planValueLinesFull(input: {
         const res = await a.messages.create({
           model: VALUE_LINES_MODEL, max_tokens: 1200, output_config: { effort: "low" },
           system:
-            `${input.brand} sells these product lines in ${input.category}, each with who the brand puts it in front of:\n${pool.map((l, i) => `${i + 1}. ${l.name}${l.for ? ` - for: ${l.for}` : ""}${l.org ? " (sold to organizations)" : ""}`).join("\n")}\n` +
-            `For each buying room below, name the ONE line ${input.brand} itself would put in front of that room's buyer - the line that buyer would actually weigh, given who they are and how they will use the product. Never the most premium line by default, never a line sold to a different kind of buyer than the room's (a business line in a personal room, or the reverse), and never a line the room's circumstance rules out. Copy the name exactly from the list. ` +
+            `${input.brand} sells these ${planMode ? "plans" : "product lines"} in ${input.category}${planMode ? ", cheapest first" : ", each with who the brand puts it in front of"}:\n${pool.map((l, i) => `${i + 1}. ${l.name}${l.for ? ` - for: ${l.for}` : ""}${l.org ? " (sold to organizations)" : ""}`).join("\n")}\n` +
+            `For each buying room below, name the ONE ${planMode ? "plan" : "line"} ${input.brand} itself would put in front of that room's buyer - the one that buyer would actually weigh, given who they are and how they will use the product. Never the most premium ${planMode ? "plan" : "line"} by default, never one sold to a different kind of buyer than the room's (a business line in a personal room, or the reverse), and never one the room's circumstance rules out. Copy the name exactly from the list. ` +
             `Reply with ONLY JSON: {"rooms": ["<line name>", ...]} - one entry per room, in order.`,
           messages: [{ role: "user", content: rooms.map((r, i) => `${i + 1}. ${r.label}: ${r.description}`).join("\n") }],
         } as never);
@@ -2625,7 +2661,9 @@ export async function planValueLinesFull(input: {
     // Variant check per distinct chosen line (2026-10-04): a flavor, size,
     // plan or variety of the main product is not a line - fall back to the
     // brand name. (The audience check moved into the per-room pick.)
-    const distinct = [...new Set(Object.values(out).map((v) => v?.line).filter((l): l is string => !!l && l.toLowerCase() !== input.brand.trim().toLowerCase()))];
+    // In plan mode the ladder IS the main product's plans, so the variant
+    // check (which would fold every plan back to the brand) is skipped.
+    const distinct = planMode ? [] : [...new Set(Object.values(out).map((v) => v?.line).filter((l): l is string => !!l && l.toLowerCase() !== input.brand.trim().toLowerCase()))];
     for (const line of distinct) {
       try {
         const ac = await anthropicClient();
@@ -5087,6 +5125,132 @@ export async function generateGrid(input: {
         console.error("use-case job pass failed open:", err);
       }
     }
+    // PROBLEM-RECOGNITION SUBJECT DIVERSITY (r26, 2026-10-07): the writer
+    // fills the pain from the category's stereotype - three of four Pixel
+    // rooms drew camera pains, and the photos room lost its measurement -
+    // and the per-cell design check cannot see that two rooms share a
+    // subject. One labeling call over the battery's problem-recognition
+    // seeds: a pain that repeats another room's, or that belongs to a
+    // different room's buyer more than its own, gets one steered rewrite
+    // that must pass the mechanical and design checks, or the original
+    // ships flagged. Same shape as the use-case job pass above.
+    if (process.env.PHRASINGS_CHECKS !== "0" && Date.now() <= deadlineAt) {
+      try {
+        const pr: { u: number; c: GridCell }[] = [];
+        for (let u = 0; u < units.length; u++) for (const c of resolved[u] ?? []) {
+          if (c.stage === "problem_recognition" && c.situation) pr.push({ u, c });
+        }
+        if (pr.length >= 2) {
+          const a = await anthropicClient();
+          const ask = (extra = "") => withCostContext({ purpose: "setup:cells" }, () => a.messages.create({
+            model: DESIGN_CHECK_MODEL,
+            max_tokens: 1500,
+            output_config: { effort: DESIGN_CHECK_EFFORT },
+            system:
+              `Each question below is a buyer in ${input.category} describing a pain and asking for a way out, written for the buying situation shown with it. For each give: ` +
+              `pain - the pain in 2-5 words, as the thing that is going wrong; ` +
+              `sameAs - the number of an EARLIER question in this list whose pain is the same in substance however worded, or 0; ` +
+              `belongsTo - the number of a DIFFERENT question in this list whose situation this pain fits clearly better than its own (its own situation gives no reason for this pain while another situation is about exactly this), or 0 - a pain any buyer in the category could have fits its own situation and gets 0. ` +
+              `Reply with ONLY valid JSON: {"pains": [{"pain": "...", "sameAs": 0, "belongsTo": 0}, ...]} - one entry per question, in order.${extra}`,
+            messages: [{
+              role: "user",
+              content: pr.map((d, i) => `${i + 1}. Situation: ${d.c.situation}: ${roomBySituation.get(d.c.situation!) ?? ""}\n   Question: ${d.c.text}`).join("\n"),
+            }],
+          } as never));
+          const parsePains = (res: unknown) => {
+            const text = (res as { content: { type: string; text?: string }[] }).content
+              .filter((b) => b.type === "text").map((b) => b.text ?? "").join("").trim();
+            try { return (JSON.parse(firstJsonObject(text) ?? text) as { pains?: { pain?: string; sameAs?: number; belongsTo?: number }[] }).pains ?? null; } catch { return null; }
+          };
+          let pains = parsePains(await ask());
+          if (!pains) pains = parsePains(await ask(" Escape any quote marks inside strings."));
+          if (pains && pains.length === pr.length) {
+            const findBad = (ps: NonNullable<typeof pains>) => {
+              const out: { i: number; why: string }[] = [];
+              ps.forEach((p, i) => {
+                const earlier = Number(p.sameAs ?? 0);
+                const other = Number(p.belongsTo ?? 0);
+                if (Number.isInteger(earlier) && earlier >= 1 && earlier - 1 < i) out.push({ i, why: `it voices the same pain as another scenario's question (${ps[earlier - 1]?.pain ?? "an earlier one"})` });
+                else if (Number.isInteger(other) && other >= 1 && other <= ps.length && other - 1 !== i) out.push({ i, why: `its pain belongs to the "${pr[other - 1]?.c.situation ?? "other"}" scenario's buyer, not this one's` });
+              });
+              return out;
+            };
+            const bad = findBad(pains);
+            const covered = pains.map((p) => p.pain).filter(Boolean).join("; ");
+            const dirty = new Set<number>();
+            const flagPain = (i: number, why: string) => {
+              const d = pr[i];
+              const flag = `off-design: problem-recognition pain - ${why}`;
+              d.c.seedFlags = [...(d.c.seedFlags ?? []).filter((f) => !f.startsWith("off-design: problem-recognition pain")), flag];
+              dirty.add(d.u);
+              console.warn(`seed ships flagged-terminal [problem_recognition]: pain | ${d.c.text.slice(0, 80)}`);
+            };
+            for (const { i, why } of bad.slice(4)) flagPain(i, why);
+            const healed = new Set<number>();
+            await Promise.all(bad.slice(0, 4).map(async ({ i, why }) => {
+              const d = pr[i];
+              const row = rowFor(units[d.u] ?? [], d.c) ?? (units[d.u] ?? [])[0];
+              if (!row) { flagPain(i, why); return; }
+              if (Date.now() > healDeadlineAt) { passesCut = true; return; }
+              console.warn(`problem-recognition pains: [${d.c.situation ?? "-"}] rejected because ${why} | ${d.c.text.slice(0, 80)}`);
+              try {
+                const res2 = await openaiClient().chat.completions.create({
+                  model: CELLS_MODEL,
+                  messages: [
+                    { role: "system", content: CELL_WRITER_SYSTEM + "Return one cell object for the plan line." },
+                    { role: "user", content:
+                        `Client brand: ${input.brand}\nCategory: ${input.category}\n` +
+                        `Rivals: ${rivals.map(primaryBrandName).join(", ")}\nAudience: ${input.audience ?? "unknown"}\n\n` +
+                        `Cell plan:\n${planLine(row, 0)}\n` +
+                        `   [the previous attempt was rejected because ${why}. This battery's problem-recognition pains so far: ${covered}. ` +
+                        `Voice ONE DIFFERENT pain that this scenario's buyer is likely to have given their circumstance - never a pain already listed, never the category's best-known complaint reached for by default, and never a purchase moment. ` +
+                        `Ask for a way out.${swapRule("problem_recognition")} Do not reuse this wording: "${d.c.text}"]` },
+                  ],
+                  response_format: { type: "json_schema", json_schema: { name: "grid_cells", strict: true, schema: CELLS_SCHEMA } },
+                });
+                const text2 = (JSON.parse(res2.choices[0]?.message?.content ?? "{}") as { cells?: { text?: string }[] }).cells?.[0]?.text?.trim();
+                if (!text2) { flagPain(i, why); return; }
+                const cand = { stage: d.c.stage, angle: d.c.angle, text: stripRosterParens(humanize(text2), [input.brand, ...input.competitors]), situation: d.c.situation, concern: d.c.concern };
+                const intent = stageDesignIntent(d.c.stage, input.brand, undefined, d.c.angle, situationText(d.c.situation));
+                await primeCells([cand]);
+                const mechOk = seedRule(cand).length === 0;
+                const dv = intent ? (await checkDesignFidelity({ candidates: [{ text: cand.text, design: intent }], meta: input.meta }))[0] : null;
+                if (mechOk && (!intent || (!!dv?.voices && !dv?.unchecked))) {
+                  d.c.text = cand.text;
+                  d.c.qtype = questionTypeOf(d.c, input.brand, input.category, aliasForms);
+                  d.c.spec = deriveCheckSpec(d.c, input.brand, input.competitors, input.category, aliasForms);
+                  delete d.c.seedFlags;
+                  dirty.add(d.u);
+                  healed.add(i);
+                  console.warn(`problem-recognition pains: healed: ${cand.text.slice(0, 80)}`);
+                } else {
+                  console.warn(`problem-recognition pains: rewrite rejected - original stands`);
+                  flagPain(i, why);
+                }
+              } catch (err) {
+                passesCut = true;
+                console.error("problem-recognition pain rewrite failed open:", err);
+              }
+            }));
+            if (healed.size > 0) {
+              let again = parsePains(await ask());
+              if (!again) again = parsePains(await ask(" Escape any quote marks inside strings."));
+              if (again && again.length === pr.length) {
+                for (const { i, why } of findBad(again)) if (healed.has(i)) flagPain(i, why);
+              } else passesCut = true;
+            }
+            await Promise.all(
+              [...dirty].map((u) =>
+                store.cacheSet(unitKeys[u], JSON.stringify({ cells: resolved[u] ?? [], rules: SEED_RULES_VERSION }), stampOf(input)).catch(() => {})
+              )
+            );
+          }
+        }
+      } catch (err) {
+        passesCut = true;
+        console.error("problem-recognition subject pass failed open:", err);
+      }
+    }
     // The cross-cell PRICING TRADE-OFF DIVERSITY pass (s20, 2026-10-01) and
     // its brand-named-cell steer were removed by init decision 1
     // (2026-10-03): pricing is a scenario row - every pricing cell asks the
@@ -5355,6 +5519,11 @@ export async function regenerateCell(input: {
   /** Near-variant mode: keep THIS prompt's ask, move one concrete detail -
    * the prompts-card sibling of the scenario near neighbor. */
   nearTo?: string;
+  /** r26 (2026-10-07): the same stage's current seeds in the OTHER
+   * scenarios - subjects a redraw must not land on (a Pixel redraw rolled
+   * back into the neighbor room's camera pain). Request data: rides the
+   * key only when present, so draws without it key as before. */
+  siblings?: string[];
   /** Typed roster (see generateGrid). Absent = untyped. */
   rosterRoles?: RosterRoles;
   meta?: CacheMeta;
@@ -5378,6 +5547,7 @@ export async function regenerateCell(input: {
   const st = stages.find((x) => x.key === input.cell.stage);
   if (!st) return null;
   const avoidNorm = input.avoid.map((t) => t.trim()).filter(Boolean);
+  const siblingNorm = (input.siblings ?? []).map((t) => t.trim()).filter(Boolean);
   const key = cacheKey("cell_alt", [
     STYLE_VERSION, input.brand, rivals.join(","), input.audience,
     JSON.stringify(input.base), JSON.stringify(input.scenarios),
@@ -5387,6 +5557,7 @@ export async function regenerateCell(input: {
     // Class cells only - every other draw keys as before.
     ...(input.cell.classPhrase ? [`class:${input.cell.classBrand ?? ""}:${input.cell.classPhrase}`] : []),
     ...(input.cell.valueLine ? [`value:${input.cell.valueLine.line}|${input.cell.valueLine.counterpart}`] : []),
+    ...(siblingNorm.length > 0 ? [`siblings:${siblingNorm.map((t) => t.toLowerCase()).sort().join("~")}`] : []),
   ]);
   const hit = await store.cacheGet(key, CACHE_TTL_MS);
   if (hit) {
@@ -5432,6 +5603,10 @@ export async function regenerateCell(input: {
             (input.nearTo ? `The prompt to vary:\n${input.nearTo.trim()}\n\n` : "") +
             `Previous prompts for this cell (write something DIFFERENT):\n` +
             (avoidNorm.map((t, i) => `${i + 1}. ${t}`).join("\n") || "- (none)") +
+            (siblingNorm.length > 0
+              ? `\n\nThis stage's questions in the OTHER buying scenarios (their subject is taken - this cell's pain or outcome must come from ITS OWN scenario's circumstance and be a different one):\n` +
+                siblingNorm.map((t, i) => `${i + 1}. ${t}`).join("\n")
+              : "") +
             (rejectNote ? `\n\n[your previous draw was rejected: ${rejectNote}]` : ""),
         },
       ],
@@ -5450,7 +5625,15 @@ export async function regenerateCell(input: {
   // the one seed path that skipped every check): mechanical brand rule,
   // then the doubt/plan design intent, one steered retry, and null rather
   // than an unchecked seed - the client keeps what it has.
-  const intent = process.env.PHRASINGS_CHECKS !== "0" ? stageDesignIntent(input.cell.stage, input.brand, input.cell.concern, input.cell.angle, input.cell.situation, input.cell.valueLine) : null;
+  // r26: the design check reads the room's circumstance like generateGrid
+  // does (label - circumstance), so the room-fit clause has something to
+  // judge against; before, a redraw was checked against the label alone.
+  const roomText = input.cell.situation
+    ? await roomCircumstances({ category: input.category, scenarios: input.scenarios, meta: input.meta })
+        .then((m) => { const d = m.get(input.cell.situation!); return d ? `${input.cell.situation} - ${d}` : input.cell.situation; })
+        .catch(() => input.cell.situation)
+    : input.cell.situation;
+  const intent = process.env.PHRASINGS_CHECKS !== "0" ? stageDesignIntent(input.cell.stage, input.brand, input.cell.concern, input.cell.angle, roomText, input.cell.valueLine) : null;
   let text: string | null = null;
   let note: string | null = null;
   for (let attempt = 0; attempt < 3 && !text; attempt++) {

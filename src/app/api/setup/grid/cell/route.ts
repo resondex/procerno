@@ -59,6 +59,8 @@ const Body = z.object({
   avoid: z.array(z.string().trim().min(1).max(2000)).min(1).max(8),
   /** Near-variant mode: keep this prompt's ask, move one detail. */
   nearTo: z.string().trim().min(1).max(2000).optional(),
+  /** r26: the same stage's current seeds in the other scenarios (subjects taken). */
+  siblings: z.array(z.string().trim().min(1).max(2000)).max(8).optional(),
 });
 
 /** Gate 2 helper: one fresh prompt for a single cell, different from every
@@ -84,6 +86,7 @@ export async function POST(req: Request) {
     cell: parsed.data.cell,
     avoid: parsed.data.avoid,
     nearTo: parsed.data.nearTo,
+    siblings: parsed.data.siblings,
     rosterRoles: parsed.data.rosterRoles,
     meta: { source: cacheSource(auth) },
   });
