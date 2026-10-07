@@ -4160,11 +4160,11 @@ export async function generateGrid(input: {
    * the unit was last judged under. A bare `GridCell[]` is the legacy
    * shape, read as rules-unknown so the serve path judges it once and
    * upgrades in place or regenerates. */
-  const valueOf = (raw: string): { cells: GridCell[]; rules?: string; provisional?: boolean } | null => {
+  const valueOf = (raw: string): { cells: GridCell[]; rules?: string; provisional?: boolean; passed?: string } | null => {
     try {
-      const v = JSON.parse(raw) as { __pending?: number; cells?: GridCell[]; rules?: string; provisional?: boolean } | GridCell[];
+      const v = JSON.parse(raw) as { __pending?: number; cells?: GridCell[]; rules?: string; provisional?: boolean; passed?: string } | GridCell[];
       if (Array.isArray(v)) return { cells: v };
-      return Array.isArray(v.cells) ? { cells: v.cells, rules: v.rules, provisional: v.provisional } : null;
+      return Array.isArray(v.cells) ? { cells: v.cells, rules: v.rules, provisional: v.provisional, passed: v.passed } : null;
     } catch {
       return null;
     }
@@ -4895,6 +4895,19 @@ export async function generateGrid(input: {
    * the eras) is written only when both passes ran uncut; a serve that finds
    * it absent re-runs them. */
   const passesKey = cacheKey("grid_passes2", [...unitKeys]);
+  /** Units whose cached value says the battery passes already judged them
+   * under the current rules (2026-10-07, Tyler): a pass judges ONLY the
+   * units it has not stamped - a one-cell regeneration (a Value line change)
+   * no longer re-rolls the use-case or problem-recognition cells beside it.
+   * Stamped units still ride the labeler call as context, listed FIRST so a
+   * duplicate flags the new cell, never the kept one. A rules bump clears
+   * the stamps by construction (they carry the rules version). */
+  const passedUnits = new Set<number>();
+  const stampPassed = (us: Iterable<number>) =>
+    Promise.all([...us].map((u) => {
+      passedUnits.add(u);
+      return store.cacheSet(unitKeys[u], JSON.stringify({ cells: resolved[u] ?? [], rules: SEED_RULES_VERSION, passed: SEED_RULES_VERSION }), stampOf(input)).catch(() => {});
+    }));
   const runBatteryPasses = async (): Promise<boolean> => {
     let passesCut = false;
     // CROSS-CELL CONCERN DIVERSITY (2026-09-29 audit): every per-cell check
@@ -4908,6 +4921,7 @@ export async function generateGrid(input: {
     // labeling call): the units are already written and the pass is a
     // safety net for legacy no-concern cells only.
     if (process.env.PHRASINGS_CHECKS !== "0" && Date.now() > deadlineAt) passesCut = true;
+    let doubtNeedUnits: number[] = [];
     if (process.env.PHRASINGS_CHECKS !== "0" && Date.now() <= deadlineAt) {
       try {
         // ALL doubt cells are labeled (2026-10-02 review round 3, item 6):
@@ -4922,7 +4936,10 @@ export async function generateGrid(input: {
         // Repertoire is habit, not a worry (stage contract, 2026-10-03): the
         // pass wrote a worry into Doritos' habit cell.
         for (let u = 0; u < units.length; u++) for (const c of resolved[u] ?? []) if (DOUBT_CHECK_STAGES.has(c.stage) && c.stage !== "repertoire") doubt.push({ u, c });
-        const concernless = doubt.filter((d) => !d.c.concern);
+        const doubtNeed = doubt.filter((d) => !passedUnits.has(d.u));
+        doubtNeedUnits = [...new Set(doubtNeed.map((d) => d.u))];
+        if (doubtNeed.length === 0 && doubt.length > 0) { console.warn("concern diversity: every doubt unit already judged - skipped"); throw { skipped: true }; }
+        const concernless = doubt.filter((d) => !d.c.concern && !passedUnits.has(d.u));
         if (concernless.length >= 1 && doubt.length >= 2) {
           const labelConcerns = async (texts: string[]): Promise<string[]> => {
             const a = await anthropicClient();
@@ -5011,9 +5028,9 @@ export async function generateGrid(input: {
           }
         }
       } catch (err) {
-        passesCut = true;
-        console.error("concern diversity pass failed open:", err);
+        if (!(err && typeof err === "object" && (err as { skipped?: boolean }).skipped)) { passesCut = true; console.error("concern diversity pass failed open:", err); }
       }
+      if (!passesCut && doubtNeedUnits.length > 0) await stampPassed(doubtNeedUnits);
     }
     // USE-CASE JOB DIVERSITY (fix 2, 2026-10-03 contract audit): per-cell
     // checks can't see that two use-case cells name the same job (Doritos:
@@ -5026,11 +5043,16 @@ export async function generateGrid(input: {
     if (process.env.PHRASINGS_CHECKS !== "0" && Date.now() > deadlineAt) passesCut = true;
     if (process.env.PHRASINGS_CHECKS !== "0" && Date.now() <= deadlineAt) {
       try {
-        const uc: { u: number; c: GridCell }[] = [];
+        const ucAll: { u: number; c: GridCell }[] = [];
         for (let u = 0; u < units.length; u++) for (const c of resolved[u] ?? []) {
-          if (c.stage === "use_case") uc.push({ u, c });
+          if (c.stage === "use_case") ucAll.push({ u, c });
         }
-        if (uc.length >= 1) {
+        // Already-judged units first (context for sameAs/belongsTo), then
+        // the units this run must judge; nothing to judge = skip the pass.
+        const uc = [...ucAll.filter((d) => passedUnits.has(d.u)), ...ucAll.filter((d) => !passedUnits.has(d.u))];
+        const ucNeed = new Set(uc.filter((d) => !passedUnits.has(d.u)).map((d) => d.u));
+        if (ucNeed.size === 0 && uc.length > 0) console.warn("use-case jobs: every unit already judged - skipped");
+        if (uc.length >= 1 && ucNeed.size > 0) {
           const roomOf = roomBySituation;
           const a = await anthropicClient();
           // s53: which rooms define their buyer ONLY by buying terms (a
@@ -5091,7 +5113,7 @@ export async function generateGrid(input: {
               });
               return out;
             };
-            const bad = findBad(jobs);
+            const bad = findBad(jobs).filter(({ i }) => ucNeed.has(uc[i].u));
             const covered = jobs.map((j) => j.job).filter(Boolean).join("; ");
             const dirty = new Set<number>();
             // A job the pass could not fix ships FLAGGED, like every other
@@ -5173,6 +5195,7 @@ export async function generateGrid(input: {
             );
           }
         }
+        if (!passesCut) await stampPassed(ucNeed);
       } catch (err) {
         passesCut = true;
         console.error("use-case job pass failed open:", err);
@@ -5189,11 +5212,15 @@ export async function generateGrid(input: {
     // ships flagged. Same shape as the use-case job pass above.
     if (process.env.PHRASINGS_CHECKS !== "0" && Date.now() <= deadlineAt) {
       try {
-        const pr: { u: number; c: GridCell }[] = [];
+        const prAll: { u: number; c: GridCell }[] = [];
         for (let u = 0; u < units.length; u++) for (const c of resolved[u] ?? []) {
-          if (c.stage === "problem_recognition" && c.situation) pr.push({ u, c });
+          if (c.stage === "problem_recognition" && c.situation) prAll.push({ u, c });
         }
-        if (pr.length >= 2) {
+        const pr = [...prAll.filter((d) => passedUnits.has(d.u)), ...prAll.filter((d) => !passedUnits.has(d.u))];
+        const prNeed = new Set(pr.filter((d) => !passedUnits.has(d.u)).map((d) => d.u));
+        if (prNeed.size === 0 && pr.length > 0) console.warn("problem-recognition pains: every unit already judged - skipped");
+        if (pr.length < 2 && prNeed.size > 0) await stampPassed(prNeed);
+        if (pr.length >= 2 && prNeed.size > 0) {
           const a = await anthropicClient();
           const ask = (extra = "") => withCostContext({ purpose: "setup:cells" }, () => a.messages.create({
             model: DESIGN_CHECK_MODEL,
@@ -5223,7 +5250,7 @@ export async function generateGrid(input: {
               });
               return out;
             };
-            const bad = findBad(pains);
+            const bad = findBad(pains).filter(({ i }) => prNeed.has(pr[i].u));
             const covered = pains.map((p) => p.pain).filter(Boolean).join("; ");
             const dirty = new Set<number>();
             const flagPain = (i: number, why: string) => {
@@ -5294,6 +5321,7 @@ export async function generateGrid(input: {
             );
           }
         }
+        if (!passesCut) await stampPassed(prNeed);
       } catch (err) {
         passesCut = true;
         console.error("problem-recognition subject pass failed open:", err);
@@ -5393,6 +5421,7 @@ export async function generateGrid(input: {
             // (the init cell-creation stalls).
             if (v.rules === SEED_RULES_VERSION || process.env.PHRASINGS_CHECKS === "0") {
               resolved[u] = served;
+              if (v.passed === SEED_RULES_VERSION) passedUnits.add(u);
               return;
             }
             if (served.every((c) => seedRule(c).length === 0)) {

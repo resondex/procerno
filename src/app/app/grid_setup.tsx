@@ -1242,9 +1242,18 @@ export function useGridSetup(a: GridSetupArgs) {
       (a.setNotice ?? a.setError)(
         `${data.missing.length} planned question${data.missing.length === 1 ? "" : "s"} could not be written - the rest are ready. Go back to the coverage step and confirm again to retry the missing one${data.missing.length === 1 ? "" : "s"}.`
       );
-    const composed: GridCellUi[] = data.cells.map((c) => ({
-      ...c, uid: cellUid(), original: c.text, phrasings: [],
-    }));
+    // A cell whose ENGINE text is unchanged keeps the user's version of it
+    // (2026-10-07, Tyler): hand edits, paraphrases, alternates and flags
+    // survive a re-confirm that regenerated only other cells (a Value line
+    // change redraws one pricing cell, not the battery). Identity is the
+    // cell's design (stage, room, angle, concern); the engine text is the
+    // cell's `original`, so an edited cell still matches its own redraw.
+    const prevByKey = new Map<string, GridCellUi>();
+    for (const q of a.state.cells) if (!q.custom && q.original) prevByKey.set(`${q.stage}|${q.situation ?? ""}|${q.angle}|${q.concern ?? ""}|${q.original.trim()}`, q);
+    const composed: GridCellUi[] = data.cells.map((c) => {
+      const prev = prevByKey.get(`${c.stage}|${c.situation ?? ""}|${c.angle}|${c.concern ?? ""}|${c.text.trim()}`);
+      return prev ? { ...prev, spec: c.spec ?? prev.spec } : { ...c, uid: cellUid(), original: c.text, phrasings: [] };
+    });
     // Custom questions survive the recompose: re-append each after its
     // stage's fresh cells, dropping only those whose stage was unticked
     // or whose scenario no longer exists.
