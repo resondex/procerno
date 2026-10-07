@@ -279,6 +279,11 @@ interface WizardDraft {
    * generation keeps running after the modal closes, so the re-request
    * waits on it or hits cache - instead of showing the coverage map again. */
   cellsInFlight?: number;
+  /** Same for the paraphrase write (saved at prompts, dropped once any
+   * paraphrase exists) and the market read (saved at market, dropped once
+   * a grid exists). */
+  phrasingsInFlight?: number;
+  readInFlight?: number;
   /** Typed roster (2026-09-30): competitor -> same_seat | upstream, as
    * classified and then confirmed by the chip toggle. Absent = untyped
    * (every competitor same_seat). */
@@ -332,6 +337,12 @@ export function SetupWizard({ mode, brand, draft, engineOptions, onClose, onCrea
   );
   const [studyName, setStudyName] = useState(saved?.studyName ?? "");
   const [cellsInFlight, setCellsInFlight] = useState<number | null>(saved?.cellsInFlight ?? null);
+  const [phrasingsInFlight, setPhrasingsInFlight] = useState<number | null>(saved?.phrasingsInFlight ?? null);
+  const [readInFlight, setReadInFlight] = useState<number | null>(saved?.readInFlight ?? null);
+  const resumePhrasings =
+    savedStep === "prompts" && !!saved?.phrasingsInFlight && !!saved?.grid && saved.grid.step !== "phrasings" &&
+    !saved.grid.cells.some((c) => c.phrasings.some((ph) => ph.text.trim()));
+  const resumeRead = savedStep === "market" && !!saved?.readInFlight && !saved?.grid;
   // Resume a cell write the previous session started (see WizardDraft.cellsInFlight).
   const resumeWrite = savedStep === "stages" && !!saved?.cellsInFlight && !!saved?.grid && saved.grid.cells.length === 0;
   const resumedRef = useRef(false);
@@ -481,7 +492,7 @@ export function SetupWizard({ mode, brand, draft, engineOptions, onClose, onCrea
     // body must not do synchronously.)
     if (step === "worries") void Promise.resolve().then(() => landOnWorries());
     if (step === "stages" && !resumeWrite) { gridApi.warmCells(); void gridApi.loadValueLines(); }
-    if (step === "prompts" && mode === "grid") gridApi.warmPhrasings();
+    if (step === "prompts" && mode === "grid" && !resumePhrasings) gridApi.warmPhrasings();
     return () => { alive = false; };
     // eslint-disable-next-line react-hooks/exhaustive-deps -- mount-only
   }, []);
@@ -717,8 +728,11 @@ export function SetupWizard({ mode, brand, draft, engineOptions, onClose, onCrea
     p: DraftPrompt[] | null = prompts,
     mp: string[] = machinePrompts,
     rp: string[] = reviewedPrompts,
-    inFlight: number | null = cellsInFlight
+    inFlight: number | null = cellsInFlight,
+    marks: { phrasings?: number | null; read?: number | null } = {}
   ) {
+    const phrasingsMark = marks.phrasings === undefined ? phrasingsInFlight : marks.phrasings;
+    const readMark = marks.read === undefined ? readInFlight : marks.read;
     if (demo || editProjectId) return;
     setSaving(true);
     const wizard: WizardDraft = {
@@ -728,6 +742,11 @@ export function SetupWizard({ mode, brand, draft, engineOptions, onClose, onCrea
       // The in-flight marker only ever rides a save AT the coverage step:
       // landing on prompts (the write landed) drops it by construction.
       ...(at === "stages" && inFlight ? { cellsInFlight: inFlight } : {}),
+      // Paraphrase marker: only while NO paraphrase exists yet, so the save
+      // that lands the written set drops it by construction (same step).
+      ...(at === "prompts" && phrasingsMark && !(g?.cells ?? []).some((c) => c.phrasings.some((ph) => ph.text.trim())) ? { phrasingsInFlight: phrasingsMark } : {}),
+      // Read marker: only while no grid exists (the read lands a grid).
+      ...(at === "market" && readMark && !g ? { readInFlight: readMark } : {}),
       ...(rosterRoles ? { rosterRoles, rosterNotes } : {}),
       ...(rosterClasses ? { rosterClasses } : {}),
       ...(clientSellsTo ? { clientSellsTo } : {}),
@@ -855,8 +874,13 @@ export function SetupWizard({ mode, brand, draft, engineOptions, onClose, onCrea
         return;
       }
       setGrid(null);
+      const started = readInFlight ?? nowStamp();
+      setReadInFlight(started);
+      void persist("market", null, prompts, machinePrompts, reviewedPrompts, cellsInFlight, { read: started });
       const next = await gridApi.compose();
+      setReadInFlight(null);
       if (next) goTo("scenarios", next);
+      else void persist("market", null, prompts, machinePrompts, reviewedPrompts, cellsInFlight, { read: null });
       return;
     }
     if (!readChanged && !rivalsChanged && prompts) {
@@ -1094,11 +1118,20 @@ export function SetupWizard({ mode, brand, draft, engineOptions, onClose, onCrea
     // eslint-disable-next-line react-hooks/exhaustive-deps -- fires once on resume
   }, [resumeWrite]);
 
+
   async function writePhrasings(force = false, onlyMissing = false, from?: GridState) {
     const src = from ?? grid;
     const live = (src?.cells ?? []).filter((c) => c.text.trim());
     const missingBefore = live.filter((c) => !c.phrasings.some((p) => p.text.trim())).length;
+    // A full first write is marked in flight on the draft (resume on reopen).
+    const fullWrite = !onlyMissing && missingBefore === live.length;
+    const started = fullWrite ? (phrasingsInFlight ?? nowStamp()) : null;
+    if (fullWrite) {
+      setPhrasingsInFlight(started);
+      void persist("prompts", src, prompts, machinePrompts, reviewedPrompts, cellsInFlight, { phrasings: started });
+    }
     let next = await gridApi.writePhrasings(force, onlyMissing, from);
+    if (fullWrite) setPhrasingsInFlight(null);
     // Self-heal before serving (2026-09-28): a cell whose paraphrase set
     // came back empty or short gets ONE automatic top-up pass - the same
     // courtesy the demo path always had. A cell that starves through the
@@ -1112,6 +1145,7 @@ export function SetupWizard({ mode, brand, draft, engineOptions, onClose, onCrea
       );
       if (gap) next = (await gridApi.topUpPhrasings(next)) ?? next;
     }
+    if (!next && fullWrite) void persist("prompts", src, prompts, machinePrompts, reviewedPrompts, cellsInFlight, { phrasings: null });
     if (next) {
       goTo("prompts", next);
       // A partial write means a confirm re-landed here: say why, or the
@@ -1124,6 +1158,21 @@ export function SetupWizard({ mode, brand, draft, engineOptions, onClose, onCrea
       }
     }
   }
+
+  const resumedPhrasingsRef = useRef(false);
+  useEffect(() => {
+    if (!resumePhrasings || resumedPhrasingsRef.current) return;
+    resumedPhrasingsRef.current = true;
+    void writePhrasings(false, false);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- fires once on resume
+  }, [resumePhrasings]);
+  const resumedReadRef = useRef(false);
+  useEffect(() => {
+    if (!resumeRead || resumedReadRef.current) return;
+    resumedReadRef.current = true;
+    void confirmMarket();
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- fires once on resume
+  }, [resumeRead]);
 
   /** What the Prompts footer does once the battery is clean - recomputed
    * from the state at hand, so the review can run before ANY of the three
