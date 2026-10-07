@@ -2496,31 +2496,37 @@ export async function planValueLinesFull(input: {
   // first team leaving spreadsheets); and when the brand sells one product,
   // its named plan tiers form the ladder (Netflix fell open to the bare
   // brand, so the Value question could not ask about a tier).
-  const key = cacheKey("value_lines24", [
+  // value_lines25 (2026-10-07, Tyler): the cheapest line is ineligible only
+  // when it is FREE or no-fee (a priced entry line has real cheaper rivals,
+  // and is the Value question for the rooms it exists for); the cheapest
+  // PLAN stays ineligible. The picker names the line the room's buyer would
+  // most likely actually buy, doubt toward the less expensive; five votes,
+  // and a non-unanimous result resolves to the cheapest voted line.
+  const key = cacheKey("value_lines25", [
     VALUE_LINES_MODEL, input.brand, input.category, input.audience ?? "",
     rooms.map((r) => `${r.label}|${r.description}`).join("~"),
   ]);
   return coalesced<{ rooms: Record<string, ValueLine | null>; catalog: ValueCatalogLine[] }>(key, { meta: input.meta }, async () => {
     const textOf = (res: unknown) => (res as { content: { type: string; text?: string }[] }).content
       .filter((b) => b.type === "text").map((b) => b.text ?? "").join("").trim();
-    type Catalog = { tiers: string[]; lines: { name: string; tier: number; for: string; org: boolean; instead: boolean }[]; premium: string; plans: string[] };
+    type Catalog = { tiers: string[]; lines: { name: string; tier: number; for: string; org: boolean; instead: boolean; free: boolean }[]; premium: string; plans: string[] };
     // Majority of three (the journey-fit precedent): a single read varied
     // on one brand in four (a plan named as a line, a sub-brand, a skipped
     // tier). Three parallel catalog reads; lines named by at least two
     // survive, each at its majority tier.
     const one = async (): Promise<Catalog> => {
       const a = await anthropicClient();
-      let j: { tiers?: unknown[]; lines?: { name?: string; tier?: number; for?: string; org?: boolean; instead?: boolean }[]; premium?: string; plans?: unknown[] } | null = null;
+      let j: { tiers?: unknown[]; lines?: { name?: string; tier?: number; for?: string; org?: boolean; instead?: boolean; free?: boolean }[]; premium?: string; plans?: unknown[] } | null = null;
       for (const extra of ["", " Escape any quote marks inside strings."]) {
         const res = await a.messages.create({
           model: VALUE_LINES_MODEL, max_tokens: 6000, output_config: { effort: "medium" },
           system:
             `For the brand ${input.brand} in ${input.category}, give: ` +
             `tiers - the price tiers of the category as a buyer in the given audience shops it, from most to least expensive: each tier is a KIND of product that several different makers sell, described in a few plain words the way a buyer says it - never a maker or brand, and never the plans, sizes or packs of one product - 3 to 5 tiers. When the audience spans separate markets (personal and business buyers), the ladder is the one this brand's main buyers shop; ` +
-            `lines - the brand's distinct current product lines in this category by their real names as buyers say them, each with the index of the tier it sits in and, as "for", the buyer and the use the brand itself puts that line in front of, in a few plain words (who it is sold to and what they mostly use it for - never a slogan), and as "org" whether the line is sold to organizations (a company, a team, a business) rather than individuals and households, and as "instead" whether a buyer of that line's own kind would weigh it AGAINST another of the brand's lines for the same job at a different price (true) - false when the line is bought alongside another of the brand's lines, or does a different job than the brand's main line, so nobody picks between them. A line is a separate product people choose between by name; plans, subscription levels, editions, flavors, sizes and varieties of one product are NOT lines. A brand that sells one product has one line, its own name. Never an exact model number or year - the line as buyers name it; ` +
+            `lines - the brand's distinct current product lines in this category by their real names as buyers say them, each with the index of the tier it sits in and, as "for", the buyer and the use the brand itself puts that line in front of, in a few plain words (who it is sold to and what they mostly use it for - never a slogan), and as "org" whether the line is sold to organizations (a company, a team, a business) rather than individuals and households, and as "instead" whether a buyer of that line's own kind would weigh it AGAINST another of the brand's lines for the same job at a different price (true) - false when the line is bought alongside another of the brand's lines, or does a different job than the brand's main line, so nobody picks between them, and as "free" whether the line costs the buyer nothing to have - no price, no annual or recurring fee (a product bought once at a price is not free, however cheap). A line is a separate product people choose between by name; plans, subscription levels, editions, flavors, sizes and varieties of one product are NOT lines. A brand that sells one product has one line, its own name. Never an exact model number or year - the line as buyers name it; ` +
             `premium - the brand's MOST PREMIUM line that buyers in the given audience can buy or apply for directly, copied exactly from lines - never an invitation-only product, never one sold only as an add-on to another of the brand's products, never a separate layer aimed at a different buyer than the given audience, and ALWAYS in the same form as the category's mainstream product: a line whose form changes what the product is (it folds, is a different size or device class, a different kind of account or card) is a separate line, never the premium tier of the mainstream one; ` +
             `plans - when the brand's main line is sold in named plan tiers or editions that buyers choose between by name at different prices, those names from cheapest to most expensive exactly as the brand names them (an empty list when the main line has no named tiers, or when its tiers differ only by size, pack or quantity). ` +
-            `Reply with ONLY JSON: {"tiers": ["..."], "lines": [{"name": "...", "tier": 0, "for": "...", "org": false, "instead": true}], "premium": "...", "plans": ["..."]}.${extra}`,
+            `Reply with ONLY JSON: {"tiers": ["..."], "lines": [{"name": "...", "tier": 0, "for": "...", "org": false, "instead": true, "free": false}], "premium": "...", "plans": ["..."]}.${extra}`,
           messages: [{ role: "user", content: `Audience: ${input.audience ?? "unknown"}\nRooms:\n${rooms.map((r, i) => `${i + 1}. ${r.label}: ${r.description}`).join("\n")}` }],
         } as never);
         const text = textOf(res);
@@ -2529,7 +2535,7 @@ export async function planValueLinesFull(input: {
       if (!j?.lines) throw new Error("value lines reply was not valid JSON");
       const tiers = (Array.isArray(j.tiers) ? j.tiers : []).map((t) => humanize(String(t ?? "")).trim()).filter(Boolean);
       const lines = (Array.isArray(j.lines) ? j.lines : [])
-        .map((l) => ({ name: humanize(String(l?.name ?? "")).trim(), tier: Number(l?.tier), for: humanize(String(l?.for ?? "")).trim(), org: l?.org === true, instead: l?.instead !== false }))
+        .map((l) => ({ name: humanize(String(l?.name ?? "")).trim(), tier: Number(l?.tier), for: humanize(String(l?.for ?? "")).trim(), org: l?.org === true, instead: l?.instead !== false, free: l?.free === true }))
         .filter((l) => l.name && Number.isFinite(l.tier));
       const plans = (Array.isArray(j.plans) ? j.plans : []).map((t) => humanize(String(t ?? "")).trim()).filter(Boolean);
       return { tiers, lines, premium: humanize(String(j.premium ?? "")).trim(), plans };
@@ -2548,15 +2554,17 @@ export async function planValueLinesFull(input: {
     // Reads name the same line three ways ("The Platinum Card", "Platinum
     // Card", "Platinum"): merge and match on a normalized key.
     const lineKey = (n: string) => n.toLowerCase().replace(/^the\s+/, "").replace(/\s+(?:card|cards)$/, "").replace(/[^a-z0-9 ]+/g, " ").replace(/\s+/g, " ").trim();
-    const byName = new Map<string, { name: string; tiers: number[]; for: string; orgs: number; insteads: number }>();
-    for (const r of reads) for (const l of r.lines) { const k = lineKey(l.name); const e = byName.get(k); if (e) { e.tiers.push(l.tier); if (!e.for) e.for = l.for; e.orgs += l.org ? 1 : 0; e.insteads += l.instead ? 1 : 0; } else byName.set(k, { name: l.name, tiers: [l.tier], for: l.for, orgs: l.org ? 1 : 0, insteads: l.instead ? 1 : 0 }); }
+    const byName = new Map<string, { name: string; tiers: number[]; for: string; orgs: number; insteads: number; frees: number }>();
+    for (const r of reads) for (const l of r.lines) { const k = lineKey(l.name); const e = byName.get(k); if (e) { e.tiers.push(l.tier); if (!e.for) e.for = l.for; e.orgs += l.org ? 1 : 0; e.insteads += l.instead ? 1 : 0; e.frees += l.free ? 1 : 0; } else byName.set(k, { name: l.name, tiers: [l.tier], for: l.for, orgs: l.org ? 1 : 0, insteads: l.instead ? 1 : 0, frees: l.free ? 1 : 0 }); }
     const named = [...byName.values()].filter((l) => l.tiers.length >= need);
     // value_lines24: a line nobody picks INSTEAD of another of the brand's
     // lines (bought alongside, or for a different job) is not on the Value
     // ladder - it leaves the catalog and the pool.
-    const alongside = named.filter((l) => l.insteads * 2 <= l.tiers.length);
+    // A one-line brand's only line has nothing to be weighed against, so the
+    // read marks it "alongside" - it stays (the single-line path below).
+    const alongside = named.length > 1 ? named.filter((l) => l.insteads * 2 <= l.tiers.length) : [];
     if (alongside.length > 0) console.warn(`value lines [${input.brand}]: not on the ladder (bought alongside or for a different job): ${alongside.map((l) => l.name).join(", ")}`);
-    let lines = named.filter((l) => l.insteads * 2 > l.tiers.length).map((l) => ({ name: l.name, tier: majority(l.tiers), for: l.for, org: l.orgs * 2 > l.tiers.length }));
+    let lines = named.filter((l) => !alongside.includes(l)).map((l) => ({ name: l.name, tier: majority(l.tiers), for: l.for, org: l.orgs * 2 > l.tiers.length, free: l.frees * 2 > l.tiers.length }));
     const nTiers = majority(reads.map((r) => r.tiers.length));
     const premium = tally(reads.map((r) => r.premium).filter(Boolean))?.v ?? "";
     // Dictionary validation: a line the alias forms have never seen is a
@@ -2600,7 +2608,7 @@ export async function planValueLinesFull(input: {
         const bw = new Set(wordSet(input.brand));
         const label = (pname: string) => ([...wordSet(pname)].some((w) => bw.has(w)) ? pname : `${input.brand} ${pname}`);
         // Cheapest plan first in the read; tier index 0 = most expensive.
-        lines = plans.map((pname, i) => ({ name: label(pname), tier: plans.length - 1 - i, for: "", org: false }));
+        lines = plans.map((pname, i) => ({ name: label(pname), tier: plans.length - 1 - i, for: "", org: false, free: false }));
         single = false;
         planMode = true;
         console.warn(`value lines [${input.brand}]: one line - using its plan tiers as the ladder: ${lines.map((l) => l.name).join(", ")}`);
@@ -2625,7 +2633,16 @@ export async function planValueLinesFull(input: {
       // every one of them "cheapest" and left the business room a personal
       // line.
       const cheapestOf = (org: boolean) => Math.max(...lines.filter((l) => l.org === org).map((l) => l.tier));
-      const eligible = lines.filter((l) => lines.filter((x) => x.org === l.org).length > 1 ? l.tier < cheapestOf(l.org) : true);
+      // value_lines25: a cheapest LINE is ineligible only when it is free or
+      // no-fee (then "worth it over cheaper" has no counterpart); a priced
+      // entry line stays eligible - it is the Value question for the rooms
+      // it exists for. A cheapest PLAN is always ineligible (an entry tier
+      // of the same product).
+      const eligible = lines.filter((l) => {
+        if (lines.filter((x) => x.org === l.org).length <= 1) return true;
+        if (l.tier < cheapestOf(l.org)) return true;
+        return !planMode && !l.free;
+      });
       void nTiers;
       const pool = (eligible.length > 0 ? eligible : lines).sort((x, y) => x.tier - y.tier);
       const premiumLine = (planMode ? null : pool.find((l) => lineKey(l.name) === lineKey(premium))) ?? pool[0];
@@ -2637,7 +2654,7 @@ export async function planValueLinesFull(input: {
           model: VALUE_LINES_MODEL, max_tokens: 1200, output_config: { effort: "low" },
           system:
             `${input.brand} sells these ${planMode ? "plans" : "product lines"} in ${input.category}${planMode ? ", most expensive first" : ", each with who the brand puts it in front of"}:\n${pool.map((l, i) => `${i + 1}. ${l.name}${l.for ? ` - for: ${l.for}` : ""}${l.org ? " (sold to organizations)" : ""}`).join("\n")}\n` +
-            `For each buying room below, name the ONE ${planMode ? "plan" : "line"} ${input.brand} itself would put in front of that room's buyer - the one that buyer would actually weigh, given who they are and how they will use the product. Never the most premium ${planMode ? "plan" : "line"} by default, never one sold to a different kind of buyer than the room's (a business line in a personal room, or the reverse), and never one the room's circumstance rules out. Copy the name exactly from the list. ` +
+            `For each buying room below, name the ONE ${planMode ? "plan" : "line"} that room's buyer would MOST LIKELY actually end up buying - the typical purchase for someone in that situation, not the one that best matches their aspirations or that ${input.brand} would most like to sell them. When two could both be the typical purchase, name the LESS expensive one. Never the most premium ${planMode ? "plan" : "line"} by default, never one sold to a different kind of buyer than the room's (a business line in a personal room, or the reverse), and never one the room's circumstance rules out. Copy the name exactly from the list. ` +
             `Reply with ONLY JSON: {"rooms": ["<line name>", ...]} - one entry per room, in order.`,
           messages: [{ role: "user", content: rooms.map((r, i) => `${i + 1}. ${r.label}: ${r.description}`).join("\n") }],
         } as never);
@@ -2645,15 +2662,18 @@ export async function planValueLinesFull(input: {
         const j = JSON.parse(firstJsonObject(text) ?? text) as { rooms?: string[] };
         return rooms.map((_, i) => humanize(String(j.rooms?.[i] ?? "")).trim());
       };
-      const picks = (await Promise.all([pick(), pick(), pick()].map((p) => p.catch(() => null)))).filter((x): x is string[] => !!x);
+      const picks = (await Promise.all([pick(), pick(), pick(), pick(), pick()].map((p) => p.catch(() => null)))).filter((x): x is string[] => !!x);
       const inPool = (name: string) => pool.find((l) => lineKey(l.name) === lineKey(name));
       rooms.forEach((r, i) => {
         const votes = picks.map((p) => p[i]).map((n) => inPool(n)?.name ?? "").filter(Boolean);
         const win = tally(votes);
-        // A clear majority wins; a three-way split takes the first valid
-        // vote (every vote was a room-aware pick); no valid vote at all
-        // falls back to the premium line, the pre-22 behavior.
-        const chosen = win && win.n >= 2 ? inPool(win.v)! : votes.length > 0 ? inPool(votes[0])! : premiumLine;
+        // value_lines25: unanimous wins; any split resolves to the CHEAPEST
+        // line among the voted ones (the Value question only has teeth when
+        // "worth it over cheaper" is open); no valid vote at all falls back
+        // to the premium line, the pre-22 behavior.
+        const unanimous = !!win && votes.length > 0 && win.n === votes.length;
+        const cheapestVoted = votes.map((n) => inPool(n)!).sort((x, y) => y.tier - x.tier)[0];
+        const chosen = unanimous ? inPool(win!.v)! : cheapestVoted ?? premiumLine;
         console.warn(`value lines [${input.brand}]: ${r.label} votes [${picks.map((p) => p[i]).join(" | ")}] -> ${chosen.name}`);
         out[r.label] = { line: chosen.name, counterpart };
       });
