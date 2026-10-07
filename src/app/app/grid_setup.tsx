@@ -274,7 +274,7 @@ export const CELLS_BUSY = "Turning your market into queries…";
  * design (progression, never mechanics), elapsed-driven like the other
  * narrated waits; the caption refreshes as each batch lands. */
 const PHRASING_CAPTIONS: [number, string][] = [
-  [0, "Putting your questions in buyers' words…"],
+  [0, "Putting our queries into buyers' words…"],
   [30, "Asking each one in different voices…"],
   [70, "Wording them the way real people type…"],
   [110, "Nearly there…"],
