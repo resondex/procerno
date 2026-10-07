@@ -3251,10 +3251,14 @@ const CELL_WRITER_SYSTEM =
           "the product within that activity (a result they get, a hassle " +
           "removed), not the activity itself; when the room " +
           "defines its buyer only by where, when or on what terms they buy, " +
-          "the outcome is what those terms make the buyer care about over the " +
-          "time they will own or pay for the product - how long it must hold " +
-          "up, what it must stand up to, what must not be given up for the " +
-          "price - stated as the outcome they want, never as a feature. A " +
+          "the outcome FOLLOWS FROM the kind of term: a payment plan, " +
+          "contract or financing term means the product must still serve " +
+          "them well when the payments end; a fixed budget or price cap " +
+          "means the most product for that sum, weighed against what they " +
+          "give up; a channel or deal alone implies nothing and leaves a " +
+          "plain ask. State it as the outcome they want, never as a feature, " +
+          "and never substitute a different ownership want for the one the " +
+          "term implies. A " +
           "subject another room's circumstance owns (its activity, who it " +
           "buys for, what it does with the product) is never used in any " +
           "other room's use-case cell.\n" +
@@ -5151,7 +5155,7 @@ export async function generateGrid(input: {
                         `Rivals: ${rivals.map(primaryBrandName).join(", ")}\nAudience: ${input.audience ?? "unknown"}\n\n` +
                         `Cell plan:\n${planLine(row, 0)}\n` +
                         `   [the previous attempt was rejected because ${why}. This battery's use-case jobs so far: ${covered}. ` +
-                        `Name ONE DIFFERENT outcome buyers in this situation commonly want - one that comes from THIS buyer's own circumstance, never an outcome that belongs to another scenario's buyer${termsRooms.has(d.c.situation ?? "") ? "; this buyer is defined by buying terms, so the outcome is what those terms make them care about over the time they will own or pay for the product (how long it must hold up, what it must stand up to, what must not be given up for the price), stated as the outcome they want" : ""} - in everyday words without any product feature word, not the situation itself, never a product quality, never a store, carrier, sale, promotion, upgrade window, trade-in credit, financing or deadline from the scenario (the scenario only says who you are), and never the subject of one of the brand's known worries${(input.worries ?? []).length > 0 ? ` (picked worries: ${[...new Set((input.worries ?? []).map((w) => w.concern))].join("; ")})` : ""}. ` +
+                        `Name ONE DIFFERENT outcome buyers in this situation commonly want - one that comes from THIS buyer's own circumstance, never an outcome that belongs to another scenario's buyer${termsRooms.has(d.c.situation ?? "") ? "; this buyer is defined by buying terms, and the outcome FOLLOWS FROM the kind of term: a payment plan, contract or financing term means the product must still serve them well when the payments end; a fixed budget or price cap means the most product for that sum, weighed against what they give up; stated as the outcome they want" : ""} - in everyday words without any product feature word, not the situation itself, never a product quality, never a store, carrier, sale, promotion, upgrade window, trade-in credit, financing or deadline from the scenario (the scenario only says who you are), and never the subject of one of the brand's known worries${(input.worries ?? []).length > 0 ? ` (picked worries: ${[...new Set((input.worries ?? []).map((w) => w.concern))].join("; ")})` : ""}. ` +
                         `Ask which one will do that best.${swapRule("use_case")} Do not reuse this wording: "${d.c.text}"]` },
                   ],
                   response_format: { type: "json_schema", json_schema: { name: "grid_cells", strict: true, schema: CELLS_SCHEMA } },
