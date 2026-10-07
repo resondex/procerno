@@ -1124,17 +1124,23 @@ export function useGridSetup(a: GridSetupArgs) {
     }).catch(() => null);
     const data = res && res.ok ? ((await res.json().catch(() => null)) as { valueLines?: Record<string, ValueLineUi | null>; valueCatalog?: ValueCatalogLineUi[] } | null) : null;
     if (!data?.valueLines) return null;
-    const latest = a.state ?? st;
-    const merged: Record<string, ValueLineUi | null> = {};
-    const recommended: Record<string, string | null> = { ...(latest.valueRecommended ?? {}) };
-    for (const sc of latest.scenarios) {
-      const cur = latest.valueLines?.[sc.label];
-      merged[sc.label] = cur !== undefined ? cur : (data.valueLines[sc.label] ?? null);
-      if (!(sc.label in recommended)) recommended[sc.label] = data.valueLines[sc.label]?.line ?? null;
-    }
-    const next: GridState = { ...latest, valueLines: merged, valueRecommended: recommended, ...(data.valueCatalog?.length ? { valueCatalog: data.valueCatalog } : {}) };
-    a.setState(next);
-    return next;
+    // Merge into the CURRENT state, never a captured one: this runs as a
+    // background warm from the worries gate, and a stale `a.state` here
+    // predates the worry pool - writing it back wiped the pool and dropped
+    // the gate to its spinner (2026-10-07).
+    const merge = (cur: GridState): GridState => {
+      const merged: Record<string, ValueLineUi | null> = {};
+      const recommended: Record<string, string | null> = { ...(cur.valueRecommended ?? {}) };
+      for (const sc of cur.scenarios) {
+        const have = cur.valueLines?.[sc.label];
+        merged[sc.label] = have !== undefined ? have : (data.valueLines![sc.label] ?? null);
+        if (!(sc.label in recommended)) recommended[sc.label] = data.valueLines![sc.label]?.line ?? null;
+      }
+      return { ...cur, valueLines: merged, valueRecommended: recommended, ...(data.valueCatalog?.length ? { valueCatalog: data.valueCatalog } : {}) };
+    };
+    let next: GridState | null = null;
+    a.setState((cur) => { if (!cur) return cur; next = merge(cur); return next; });
+    return next ?? merge(st);
   }
 
   /** Per-room defaults for kept situational stages the mask reaches
@@ -1161,14 +1167,16 @@ export function useGridSetup(a: GridSetupArgs) {
       const d = res && res.ok ? ((await res.json().catch(() => null)) as { rooms?: string[] | null } | null) : null;
       return [s.key, d?.rooms ?? null] as const;
     }));
-    const latest = a.state ?? st;
-    const stageRooms = { ...(latest.stageRooms ?? {}) };
-    for (const [key, rooms] of results) {
-      if (rooms && rooms.length > 0 && !stageRooms[key]) stageRooms[key] = rooms.filter((l) => latest.scenarios.some((sc) => sc.label === l));
-    }
-    const next: GridState = { ...latest, stageRooms };
-    a.setState(next);
-    return next;
+    const merge = (cur: GridState): GridState => {
+      const stageRooms = { ...(cur.stageRooms ?? {}) };
+      for (const [key, rooms] of results) {
+        if (rooms && rooms.length > 0 && !stageRooms[key]) stageRooms[key] = rooms.filter((l) => cur.scenarios.some((sc) => sc.label === l));
+      }
+      return { ...cur, stageRooms };
+    };
+    let next: GridState | null = null;
+    a.setState((cur) => { if (!cur) return cur; next = merge(cur); return next; });
+    return next ?? merge(st);
   }
 
   /** Silent pool warm - fired while the user reviews the scenarios, so
