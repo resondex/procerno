@@ -1891,7 +1891,7 @@ export function SetupWizard({ mode, brand, draft, engineOptions, onClose, onCrea
               rivals={allCompetitors().filter((c) => { const r = rosterRoleOf(c, rosterRoles); return r === "same_seat" || r === "bench"; })}
               picks={angleRivals(allCompetitors(), rosterRoles)}
               setupId={draftId ?? undefined}
-              onRebuildForBrand={() => void gridApi.compose(undefined, true)}
+              onRebuildForBrand={() => gridApi.rebuildForBrand()}
               onBackToCategory={() => gridApi.restoreCategoryView()}
             />
           )}

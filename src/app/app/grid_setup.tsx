@@ -308,6 +308,12 @@ export interface GridState {
    * draws from the right pool). The base read is never part of this:
    * a rebuild changes scenarios only. */
   preRebuild?: { rows: ScenarioRow[]; reserve?: { label: string; description: string }[] } | null;
+  /** The brand view as last left (2026-10-07, Tyler): rows and reserve
+   * stashed on "Back to the category view", restored by "rebuild around
+   * <brand>" instead of a fresh read, so edits, additions and ticks made in
+   * either view survive toggling. preRebuild is the mirror slot (the
+   * category view while the brand view is shown). */
+  brandView?: { rows: ScenarioRow[]; reserve?: { label: string; description: string }[] } | null;
   /** Stage keys added via the journey advisory's "keep the market view"
    * action, per dimension. Powers the banner's Undo AND the coverage
    * map: these stages are a brand-level recommendation, never labeled
@@ -726,6 +732,8 @@ export function useGridSetup(a: GridSetupArgs) {
     /** undefined = carry the current view's preRebuild through the edit;
      * null = clear it (restoring the category view). */
     preRebuild?: GridState["preRebuild"];
+    /** undefined = carry; null = clear; a value = stash the brand view. */
+    brandView?: GridState["brandView"];
   }, forBrand = false): Promise<GridState | null> {
     if (!edit?.silent) {
       a.setBusy(
@@ -818,6 +826,7 @@ export function useGridSetup(a: GridSetupArgs) {
             rows: scenarioRows(a.state),
             reserve: a.state.reserve,
           },
+          brandView: null,
           journeyStageAdds: a.state.journeyStageAdds,
         },
         rowsFromSuggested(masked.scenarios, cap)
@@ -858,6 +867,11 @@ export function useGridSetup(a: GridSetupArgs) {
           ? edit.preRebuild !== undefined
             ? edit.preRebuild
             : a.state?.preRebuild ?? null
+          : null,
+        brandView: edit
+          ? edit.brandView !== undefined
+            ? edit.brandView
+            : a.state?.brandView ?? null
           : null,
         // Advisory stage-adds ride through edits; a fresh read resets.
         journeyStageAdds: edit ? a.state?.journeyStageAdds : undefined,
@@ -1741,11 +1755,29 @@ export function useGridSetup(a: GridSetupArgs) {
       cells: a.state.cells,
       reserve: pr.reserve,
       preRebuild: null,
+      // The brand view as left, edits and all - the way back in.
+      brandView: { rows: scenarioRows(a.state), reserve: a.state.reserve },
+    });
+  }
+
+  /** "Rebuild around <brand>": a stashed brand view comes back as left
+   * (pure-code recompose, no read); only a first visit does the fresh
+   * brand-aware read. The category view is stashed either way. */
+  function rebuildForBrand(): void {
+    const bv = a.state?.brandView;
+    if (!a.state || !bv) { void compose(undefined, true); return; }
+    void compose({
+      base: a.state.moderators,
+      rows: bv.rows,
+      cells: a.state.cells,
+      reserve: bv.reserve,
+      preRebuild: { rows: scenarioRows(a.state), reserve: a.state.reserve },
+      brandView: null,
     });
   }
 
   return {
-    compose, writeCells, writePhrasings, topUpPhrasings, suggestScenario, nearScenario, rewordScenario,
+    compose, writeCells, writePhrasings, topUpPhrasings, suggestScenario, nearScenario, rewordScenario, rebuildForBrand,
     suggestCell, addOwnCell,
     warmRead, warmCells, warmPhrasings,
     fetchWorries, warmWorries, loadValueLines, loadStageRooms,
