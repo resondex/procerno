@@ -160,7 +160,7 @@ const CACHE_TTL_MS = 183 * 24 * 3600 * 1000;
 // one-tier-down counterpart per room (planValueLines, confirmed at the
 // gate; default = the brand's most premium line that fits the room; no
 // Value cell where none fits) and carries no usage detail.
-const STYLE_VERSION = "s52"; // s52 (2026-10-06): criteria's second ask is conditioned on the first; feature screening in a scenario leaves the buying channel or moment out. // s51 (journeys30): the writer reads the room's circumstance line, never the natural description; problem recognition sets the pain in the category's own territory; criteria asks what to look at and, given that, what to consider. // s50 (batch 2): the scenario label is a title for us, never words for the prompt; use-case heals carry no buying channel. // s46 (2026-10-04 seed review batch): problem recognition carries no purchase moment; offensive alternatives state a plain move within the category; head-to-heads add no situation; advocacy convinces a peer or critic, business case an approver. // s45 (2026-10-04 seed review): doubt hints - the asker's own one-doubt claim, never a fact to confirm, hearsay, a sizing ask or the Value question; stance decides the asker; worry cells carry no reach limit.
+const STYLE_VERSION = "s53"; // s53 (2026-10-07, Tyler): in a room defined by buying terms (where, when, on what terms) the use-case want and the problem-recognition pain come from what those terms make the buyer care about over owning the product; a subject another room's circumstance owns is never used outside that room (the Pixel camera collapse: three rooms borrowed the photos room's subject). // s52 (2026-10-06): criteria's second ask is conditioned on the first; feature screening in a scenario leaves the buying channel or moment out. // s51 (journeys30): the writer reads the room's circumstance line, never the natural description; problem recognition sets the pain in the category's own territory; criteria asks what to look at and, given that, what to consider. // s50 (batch 2): the scenario label is a title for us, never words for the prompt; use-case heals carry no buying channel. // s46 (2026-10-04 seed review batch): problem recognition carries no purchase moment; offensive alternatives state a plain move within the category; head-to-heads add no situation; advocacy convinces a peer or critic, business case an approver. // s45 (2026-10-04 seed review): doubt hints - the asker's own one-doubt claim, never a fact to confirm, hearsay, a sizing ask or the Value question; stance decides the asker; worry cells carry no reach limit.
 
 /** Versions the DETERMINISTIC seed-check set (everything seedRule runs:
  * checkPromptAgainstSpec + blind_missing_category + scenario_label_leak).
@@ -3245,7 +3245,19 @@ const CELL_WRITER_SYSTEM =
           "best. Never a product feature named as the outcome, never the " +
           "buying situation repeated, never a list. Each use-case cell in a " +
           "battery names a DIFFERENT outcome, one buyers in that situation " +
-          "commonly want.\n" +
+          "commonly want. The outcome is rooted in the room's own circumstance " +
+          "but is never the circumstance restated: when the room names an " +
+          "activity, the outcome is ONE specific thing that buyer wants from " +
+          "the product within that activity (a result they get, a hassle " +
+          "removed), not the activity itself; when the room " +
+          "defines its buyer only by where, when or on what terms they buy, " +
+          "the outcome is what those terms make the buyer care about over the " +
+          "time they will own or pay for the product - how long it must hold " +
+          "up, what it must stand up to, what must not be given up for the " +
+          "price - stated as the outcome they want, never as a feature. A " +
+          "subject another room's circumstance owns (its activity, who it " +
+          "buys for, what it does with the product) is never used in any " +
+          "other room's use-case cell.\n" +
           "- premium_worth: one short plain question - are the premium options " +
           "in the category actually better than the cheaper ones, or are " +
           "the cheaper ones good enough - about 10-18 words. Never ask the " +
@@ -3270,6 +3282,11 @@ const CELL_WRITER_SYSTEM =
           "scenario gives who they are, not a buying moment. They state ONE pain in a plain sentence " +
           "and ask for a way out in their own words - about 10-25 words, one " +
           "symptom, never a list of symptoms or a polished description. The " +
+          "pain comes from the room's own circumstance - when the room " +
+          "defines its buyer only by where, when or on what terms they buy, " +
+          "the pain is one that situation makes likely, never the category's " +
+          "best-known complaint reached for by default - and a pain another " +
+          "room's circumstance owns is never used in any other room's cell. The " +
           "pain is set in the category's own territory: the asker names what " +
           "they already use or do, in the category's plain words (the thing " +
           "they have, or the activity the category exists for), so the " +
@@ -5012,6 +5029,35 @@ export async function generateGrid(input: {
         if (uc.length >= 1) {
           const roomOf = roomBySituation;
           const a = await anthropicClient();
+          // s53: which rooms define their buyer ONLY by buying terms (a
+          // payment plan, a price cap, a channel, an upgrade window) and name
+          // no activity - judged once per room set, cached, because the
+          // per-question labeler missed it among eight fields. In such a
+          // room an ownership-horizon outcome is the buyer's job.
+          const ucRooms = [...new Set(uc.map((d) => d.c.situation).filter((x): x is string => !!x))];
+          const termsRooms = new Set<string>();
+          if (ucRooms.length > 0) {
+            const tkey = cacheKey("room_terms1", [DESIGN_CHECK_MODEL, input.category, ...ucRooms.map((l) => `${l}|${roomOf.get(l) ?? ""}`)]);
+            let tv: Record<string, boolean> | null = null;
+            const hit = await store.cacheGet(tkey, CACHE_TTL_MS).catch(() => null);
+            if (hit) { try { tv = JSON.parse(hit); } catch { tv = null; } }
+            if (!tv) {
+              try {
+                const res = await withCostContext({ purpose: "setup:cells" }, () => a.messages.create({
+                  model: DESIGN_CHECK_MODEL, max_tokens: 600, output_config: { effort: DESIGN_CHECK_EFFORT },
+                  system: `Each buying situation below describes a buyer in ${input.category}. For each, answer terms: true when the situation defines its buyer ONLY by where, when or on what terms they buy (a payment plan, a price cap or budget, a sales channel, an upgrade window, a deal) and names NO activity the buyer does with the product and no person they buy it for; false otherwise. Reply with ONLY JSON: {"rooms": [{"label": "...", "terms": true|false}, ...]} in order.`,
+                  messages: [{ role: "user", content: ucRooms.map((l, i) => `${i + 1}. ${l}: ${roomOf.get(l) ?? ""}`).join("\n") }],
+                } as never));
+                const text = (res as { content: { type: string; text?: string }[] }).content.filter((b) => b.type === "text").map((b) => b.text ?? "").join("");
+                const j = JSON.parse(firstJsonObject(text) ?? text) as { rooms?: { label?: string; terms?: boolean }[] };
+                tv = {};
+                (j.rooms ?? []).forEach((r, i) => { const l = ucRooms.find((x) => x.toLowerCase() === String(r.label ?? "").trim().toLowerCase()) ?? ucRooms[i]; if (l) tv![l] = r.terms === true; });
+                await store.cacheSet(tkey, JSON.stringify(tv), stampOf(input)).catch(() => {});
+              } catch (err) { console.error("room terms read failed open:", err); tv = null; }
+            }
+            for (const [l, t] of Object.entries(tv ?? {})) if (t) termsRooms.add(l);
+            if (termsRooms.size > 0) console.warn(`use-case jobs: terms-defined rooms: ${[...termsRooms].join(", ")}`);
+          }
           const ask = (extra = "") => withCostContext({ purpose: "setup:cells" }, () => a.messages.create({
             model: DESIGN_CHECK_MODEL,
             max_tokens: 1500,
@@ -5020,12 +5066,14 @@ export async function generateGrid(input: {
               `Each question below asks which product to pick for a job in a buying situation in ${input.category}; the tracked brand is ${input.brand}. For each give: ` +
               `job - the job in 2-5 words, as a task the buyer gets done; ` +
               `feature - true when the "job" is really a product feature or capability rather than a task; ` +
-              `restatesRoom - true when the "job" is just the buying situation itself; ` +
+              `restatesRoom - true ONLY when the question names NO outcome beyond the situation itself (who they are and what they do, then which product) - a specific result wanted within the situation's activity is a job, not a restatement, even when it is about that activity; ` +
               `attribute - true ONLY when the outcome is a quality of the product itself (how long it lasts, how fast or reliable it is, how it looks) or a rank by price or value, with no task the buyer does with it - a task done with the product (dipping, sharing, filming, coordinating) is a job, not an attribute; ` +
-              `clientStrength - true ONLY when the outcome is the single thing the tracked brand is famous for above every rival, so naming that brand is the obvious answer; an ordinary job in the category that the brand also does well is NOT its signature strength; ` +
+              `horizon - true when the outcome is stated over the time the buyer will own or pay for the product (it must still hold up when paid off, it must not feel old before they replace it, it must give the most for a fixed sum); ` +
+              `roomActivity - true when the outcome is a result wanted within the activity the situation itself is about (the situation says what this buyer does with the product, and the outcome lives inside that); ` +
+              `clientStrength - true ONLY when the outcome is the single thing the tracked brand is famous for above every rival, so naming that brand is the obvious answer; an ordinary job in the category that the brand also does well is NOT its signature strength, and the situation's own activity is never one (roomActivity true means clientStrength false); ` +
               `sameAs - the number of an EARLIER question in this list whose job is the same in substance however worded, or 0; ` +
               `belongsTo - the number of a DIFFERENT question in this list whose situation this job fits clearly better than its own (its own situation gives no reason for this job while another situation is about exactly this), or 0 - a job any buyer in the category could want fits its own situation and gets 0; ` +
-              `Reply with ONLY valid JSON: {"jobs": [{"job": "...", "feature": false, "restatesRoom": false, "attribute": false, "clientStrength": false, "sameAs": 0, "belongsTo": 0}, ...]} - one entry per question, in order.${extra}`,
+              `Reply with ONLY valid JSON: {"jobs": [{"job": "...", "feature": false, "restatesRoom": false, "attribute": false, "horizon": false, "roomActivity": false, "clientStrength": false, "sameAs": 0, "belongsTo": 0}, ...]} - one entry per question, in order.${extra}`,
             messages: [{
               role: "user",
               content: uc.map((d, i) => {
@@ -5037,7 +5085,7 @@ export async function generateGrid(input: {
           const parseJobs = (res: unknown) => {
             const text = (res as { content: { type: string; text?: string }[] }).content
               .filter((b) => b.type === "text").map((b) => b.text ?? "").join("").trim();
-            try { return (JSON.parse(firstJsonObject(text) ?? text) as { jobs?: { job?: string; feature?: boolean; restatesRoom?: boolean; attribute?: boolean; clientStrength?: boolean; sameAs?: number; belongsTo?: number }[] }).jobs ?? null; } catch { return null; }
+            try { return (JSON.parse(firstJsonObject(text) ?? text) as { jobs?: { job?: string; feature?: boolean; restatesRoom?: boolean; attribute?: boolean; horizon?: boolean; roomActivity?: boolean; clientStrength?: boolean; sameAs?: number; belongsTo?: number }[] }).jobs ?? null; } catch { return null; }
           };
           let jobs = parseJobs(await ask());
           if (!jobs) jobs = parseJobs(await ask(" Escape any quote marks inside strings."));
@@ -5050,9 +5098,15 @@ export async function generateGrid(input: {
                 const k = norm(j.job ?? "");
                 const earlier = Number(j.sameAs ?? 0);
                 const other = Number(j.belongsTo ?? 0);
+                // s53 (Tyler): in a terms-defined room an ownership-horizon
+                // outcome IS the buyer's job ("still works when paid off",
+                // "the most for a fixed sum"); the room's own activity is
+                // never the client's signature strength (a photos room asks
+                // about photos).
+                const ownershipJob = termsRooms.has(uc[i]?.c.situation ?? "") && j.horizon === true;
                 if (j.feature) out.push({ i, why: "it names a product feature, not a job" });
-                else if (j.attribute) out.push({ i, why: "it names a product attribute or a price rank as the outcome, not something the buyer gets done" });
-                else if (j.clientStrength) out.push({ i, why: "its outcome is the tracked brand's own signature strength" });
+                else if (j.attribute && !ownershipJob) out.push({ i, why: "it names a product attribute or a price rank as the outcome, not something the buyer gets done" });
+                else if (j.clientStrength && j.roomActivity !== true) out.push({ i, why: "its outcome is the tracked brand's own signature strength" });
                 else if (j.restatesRoom) out.push({ i, why: "it repeats the buying situation instead of naming a job" });
                 else if (k && seen.has(k)) out.push({ i, why: `it repeats another use-case job (${j.job})` });
                 else if (Number.isInteger(earlier) && earlier >= 1 && earlier - 1 < i) out.push({ i, why: `it asks for the same outcome as another use-case question (${js[earlier - 1]?.job ?? "an earlier one"})` });
@@ -5097,7 +5151,7 @@ export async function generateGrid(input: {
                         `Rivals: ${rivals.map(primaryBrandName).join(", ")}\nAudience: ${input.audience ?? "unknown"}\n\n` +
                         `Cell plan:\n${planLine(row, 0)}\n` +
                         `   [the previous attempt was rejected because ${why}. This battery's use-case jobs so far: ${covered}. ` +
-                        `Name ONE DIFFERENT outcome buyers in this situation commonly want - one that comes from THIS buyer's own circumstance, never an outcome that belongs to another scenario's buyer - in everyday words without any product feature word, not the situation itself, never a product quality, never a store, carrier, sale, promotion, upgrade window, trade-in credit, financing or deadline from the scenario (the scenario only says who you are), and never the subject of one of the brand's known worries${(input.worries ?? []).length > 0 ? ` (picked worries: ${[...new Set((input.worries ?? []).map((w) => w.concern))].join("; ")})` : ""}. ` +
+                        `Name ONE DIFFERENT outcome buyers in this situation commonly want - one that comes from THIS buyer's own circumstance, never an outcome that belongs to another scenario's buyer${termsRooms.has(d.c.situation ?? "") ? "; this buyer is defined by buying terms, so the outcome is what those terms make them care about over the time they will own or pay for the product (how long it must hold up, what it must stand up to, what must not be given up for the price), stated as the outcome they want" : ""} - in everyday words without any product feature word, not the situation itself, never a product quality, never a store, carrier, sale, promotion, upgrade window, trade-in credit, financing or deadline from the scenario (the scenario only says who you are), and never the subject of one of the brand's known worries${(input.worries ?? []).length > 0 ? ` (picked worries: ${[...new Set((input.worries ?? []).map((w) => w.concern))].join("; ")})` : ""}. ` +
                         `Ask which one will do that best.${swapRule("use_case")} Do not reuse this wording: "${d.c.text}"]` },
                   ],
                   response_format: { type: "json_schema", json_schema: { name: "grid_cells", strict: true, schema: CELLS_SCHEMA } },
