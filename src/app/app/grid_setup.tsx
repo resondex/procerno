@@ -3468,6 +3468,10 @@ export function CellsGate({
               const branded = live.filter((c) => namesAny(c.text, brandNames)).length;
               const blind = live.length - branded;
               const prompts = live.reduce((n, c) => n + countOf(c), 0);
+              // Flagged seeds surface at the stage title too (Tyler
+              // 2026-10-07): a folded stage gave no sign that a card inside
+              // needed a call, so nobody knew to open it.
+              const flagged = live.filter((c) => !!c.seedFlags?.length).length;
               const isOpen = open.has(stage);
               return (
                 <div key={stage}>
@@ -3485,6 +3489,14 @@ export function CellsGate({
                       {stageOf(state, stage)?.label ?? stage}
                     </span>
                     <TagChip tag={stageOf(state, stage)?.tag ?? "picks"} />
+                    {flagged > 0 && (
+                      <span
+                        className="rounded-full bg-warning/10 px-2 py-px text-[10px] font-medium text-warning whitespace-nowrap"
+                        title={`${flagged} question${flagged === 1 ? "" : "s"} in this stage need${flagged === 1 ? "s" : ""} your call - open the stage to review`}
+                      >
+                        {flagged === 1 ? "needs your call" : `${flagged} need your call`}
+                      </span>
+                    )}
                     <span className="ml-auto flex gap-3 text-[11px] text-ink-3 whitespace-nowrap">
                       <span className={live.length < scells.length ? "text-warning" : ""}>
                         {live.length}/{scells.length} questions
