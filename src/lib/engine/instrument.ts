@@ -2636,7 +2636,7 @@ export async function planValueLinesFull(input: {
         const res = await a.messages.create({
           model: VALUE_LINES_MODEL, max_tokens: 1200, output_config: { effort: "low" },
           system:
-            `${input.brand} sells these ${planMode ? "plans" : "product lines"} in ${input.category}${planMode ? ", cheapest first" : ", each with who the brand puts it in front of"}:\n${pool.map((l, i) => `${i + 1}. ${l.name}${l.for ? ` - for: ${l.for}` : ""}${l.org ? " (sold to organizations)" : ""}`).join("\n")}\n` +
+            `${input.brand} sells these ${planMode ? "plans" : "product lines"} in ${input.category}${planMode ? ", most expensive first" : ", each with who the brand puts it in front of"}:\n${pool.map((l, i) => `${i + 1}. ${l.name}${l.for ? ` - for: ${l.for}` : ""}${l.org ? " (sold to organizations)" : ""}`).join("\n")}\n` +
             `For each buying room below, name the ONE ${planMode ? "plan" : "line"} ${input.brand} itself would put in front of that room's buyer - the one that buyer would actually weigh, given who they are and how they will use the product. Never the most premium ${planMode ? "plan" : "line"} by default, never one sold to a different kind of buyer than the room's (a business line in a personal room, or the reverse), and never one the room's circumstance rules out. Copy the name exactly from the list. ` +
             `Reply with ONLY JSON: {"rooms": ["<line name>", ...]} - one entry per room, in order.`,
           messages: [{ role: "user", content: rooms.map((r, i) => `${i + 1}. ${r.label}: ${r.description}`).join("\n") }],
