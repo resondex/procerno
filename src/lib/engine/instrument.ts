@@ -6056,7 +6056,7 @@ export interface Phrasing {
 // substance; no purpose or destination word is added to a scenario seed
 // that lacks it. Plus two writer sentences (worry = own claim; criteria's
 // second ask = what to consider).
-const PHRASINGS_VERSION = "p18"; // p18 (2026-10-07, five-brand paraphrase read): relation-shift guard on scenario cells (the buyer's relation to the person in the room never changes) and plural-slot guard (a kept plural category term never sits in a singular slot) - calibrated on 1,835 live paraphrases: 4 + 13 hits, all true.
+const PHRASINGS_VERSION = "p19"; // p19 (2026-10-07): the writer keeps the category AS THE SEED SAYS IT, never the listed name (Netflix seeds say "streaming services"; 91 of 310 p18 paraphrases bolted in "video streaming services"); plural-slot guard adds verb agreement (a plural term followed by a singular verb). // p18 (2026-10-07, five-brand paraphrase read): relation-shift guard on scenario cells (the buyer's relation to the person in the room never changes) and plural-slot guard (a kept plural category term never sits in a singular slot) - calibrated on 1,835 live paraphrases: 4 + 13 hits, all true.
 /** Paraphrases a social-validation cell fills to (seed + 4 = 5 prompts); mirrored by phrasingTarget in grid_setup. */
 export const SOCIAL_VALIDATION_PARAPHRASES = 4;
 /** p17: generic payment and timing qualifiers a scenario seed may carry,
@@ -6466,10 +6466,12 @@ export async function generatePhrasings(input: {
             "heard or read.\n" +
             "- A criteria seed's second ask stays 'what should I consider' - " +
             "never what to get, choose, buy, apply for or sign up for.\n" +
-            "- Keep the seed's category term exactly, never a shorter or " +
-            "broader word for it - the category term is part of the " +
-            "measurement. Never copy a scenario label's text " +
-            "into a paraphrase.\n" +
+            "- Keep the category AS THE SEED SAYS IT - the seed's own words " +
+            "for it, exactly: never a shorter or broader word for it, and " +
+            "never the longer or more formal name the category is listed " +
+            "under when the seed does not use it - the term as the seed " +
+            "says it is part of the measurement. Never copy a scenario " +
+            "label's text into a paraphrase.\n" +
             "- Defining qualifiers in the seed are FACTS, like its numbers: " +
             "a genre, cuisine, nationality, material or format stays exactly " +
             "as written, never broadened to a wider class.\n" +

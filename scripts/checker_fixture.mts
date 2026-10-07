@@ -870,5 +870,7 @@ if (fails > 0) process.exitCode = 1;
   ok("term as a modifier passes", bc.pluralSlot("Doritos or Takis for bagged chips?", "If you had to pick one bagged chips brand, Doritos or Takis, which wins?", "bagged chips") === null);
   ok("quantity phrase passes", bc.pluralSlot("Grabbing a few bags for the house; what bagged chips should I look at?", "I need a few bags of bagged chips for the house - which should I check out?", "bagged chips") === null);
   ok("clause boundary passes", bc.pluralSlot("I go out several times a week. What credit cards should I look at?", "I'm out several times a week - what credit cards make sense for that?", "credit cards") === null);
+  ok("plural term with a singular verb is a slot", bc.pluralSlot("Which streaming service makes picking easiest?", "Which video streaming services makes it simple to pick something?", "video streaming services") === "which video streaming services makes");
+  ok("plural term with a plural verb passes", bc.pluralSlot("Which streaming services should we look at?", "Which video streaming services are worth a look?", "video streaming services") === null);
   console.log("12. p18 paraphrase guards: " + (process.exitCode ? "FAILED" : "ALL PASS"));
 }

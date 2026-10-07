@@ -665,6 +665,11 @@ export function pluralSlot(seed: string, para: string, category: string): string
   const raw = para.toLowerCase();
   const mA = raw.match(new RegExp(`\\b(?:a|an|one|another)\\s+(?!${STOP}\\b)(?:[a-z'+-]+\\s+(?!${STOP}\\b)){0,2}?${termRe}\\b${HEAD}`));
   if (mA) return mA[0];
+  // p19: the plural term as a subject with a singular verb ("which video
+  // streaming services makes it easiest") - the writer bolted the plural
+  // listed name into a singular slot.
+  const mV = raw.match(new RegExp(`\\b(?:which|what)\\s+${termRe}\\s+(?:makes|helps|is|does|has|gives|delivers|works|fits|offers|handles|lets|keeps|gets|nails|covers|pulls|suits|comes|wins|stands)\\b`));
+  if (mV) return mV[0];
   const seedKey = key(seed);
   const seedHasPlural = new RegExp(`\\b${termRe}\\b`).test(seedKey);
   const seedHasSingular = new RegExp(`\\b${singular}\\b`).test(seedKey);
