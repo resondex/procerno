@@ -220,15 +220,20 @@ const WORRIES_STAGES: [number, string][] = [
   [115, "Still listening…"],
 ];
 
-function StagedProgress({ stages }: { stages: readonly [number, string][] }) {
-  const [secs, setSecs] = useState(0);
+/** Wall-clock stamp for the in-flight marker (kept out of the component so
+ * the compiler lint does not read it as an impure call during render). */
+const nowStamp = (): number => Date.now();
+
+function StagedProgress({ stages, startedAt }: { stages: readonly [number, string][]; startedAt?: number | null }) {
+  // A resumed write narrates from when it actually started.
+  const [secs, setSecs] = useState(() => (startedAt ? Math.max(0, Math.round((Date.now() - startedAt) / 1000)) : 0));
   useEffect(() => {
     // Elapsed from the clock, not tick-counting: background tabs throttle
     // timers, and the narration must not fall behind the actual work.
-    const started = Date.now();
+    const started = startedAt ?? Date.now();
     const iv = setInterval(() => setSecs(Math.round((Date.now() - started) / 1000)), 1000);
     return () => clearInterval(iv);
-  }, []);
+  }, [startedAt]);
   const msg = [...stages].reverse().find(([at]) => secs >= at)?.[1] ?? stages[0][1];
   return (
     <div className="grid gap-4 py-16 text-center justify-items-center">
@@ -268,6 +273,12 @@ interface WizardDraft {
   machinePrompts?: string[];
   /** Classic-mode fingerprints (theme|text) that PASSED the check. */
   reviewedPrompts?: string[];
+  /** The cell write was started (ms since epoch) and has not landed
+   * (2026-10-07, Tyler): a draft reopened with this set resumes on the
+   * writing progress and re-requests the cells - the server's coalesced
+   * generation keeps running after the modal closes, so the re-request
+   * waits on it or hits cache - instead of showing the coverage map again. */
+  cellsInFlight?: number;
   /** Typed roster (2026-09-30): competitor -> same_seat | upstream, as
    * classified and then confirmed by the chip toggle. Absent = untyped
    * (every competitor same_seat). */
@@ -320,6 +331,10 @@ export function SetupWizard({ mode, brand, draft, engineOptions, onClose, onCrea
     Math.max(0, steps.findIndex((s) => s.key === savedStep))
   );
   const [studyName, setStudyName] = useState(saved?.studyName ?? "");
+  const [cellsInFlight, setCellsInFlight] = useState<number | null>(saved?.cellsInFlight ?? null);
+  // Resume a cell write the previous session started (see WizardDraft.cellsInFlight).
+  const resumeWrite = savedStep === "stages" && !!saved?.cellsInFlight && !!saved?.grid && saved.grid.cells.length === 0;
+  const resumedRef = useRef(false);
   const [category, setCategory] = useState(draft?.category ?? "");
   const [competitors, setCompetitors] = useState<string[]>(draft?.competitors ?? []);
   const [compDraft, setCompDraft] = useState("");
@@ -465,7 +480,7 @@ export function SetupWizard({ mode, brand, draft, engineOptions, onClose, onCrea
     // (Deferred a tick: landOnWorries sets busy state, which an effect
     // body must not do synchronously.)
     if (step === "worries") void Promise.resolve().then(() => landOnWorries());
-    if (step === "stages") { gridApi.warmCells(); void gridApi.loadValueLines(); }
+    if (step === "stages" && !resumeWrite) { gridApi.warmCells(); void gridApi.loadValueLines(); }
     if (step === "prompts" && mode === "grid") gridApi.warmPhrasings();
     return () => { alive = false; };
     // eslint-disable-next-line react-hooks/exhaustive-deps -- mount-only
@@ -701,7 +716,8 @@ export function SetupWizard({ mode, brand, draft, engineOptions, onClose, onCrea
     g: GridState | null = grid,
     p: DraftPrompt[] | null = prompts,
     mp: string[] = machinePrompts,
-    rp: string[] = reviewedPrompts
+    rp: string[] = reviewedPrompts,
+    inFlight: number | null = cellsInFlight
   ) {
     if (demo || editProjectId) return;
     setSaving(true);
@@ -709,6 +725,9 @@ export function SetupWizard({ mode, brand, draft, engineOptions, onClose, onCrea
       mode, step: at, studyName, grid: g, engineSet,
       machinePrompts: mp,
       reviewedPrompts: rp,
+      // The in-flight marker only ever rides a save AT the coverage step:
+      // landing on prompts (the write landed) drops it by construction.
+      ...(at === "stages" && inFlight ? { cellsInFlight: inFlight } : {}),
       ...(rosterRoles ? { rosterRoles, rosterNotes } : {}),
       ...(rosterClasses ? { rosterClasses } : {}),
       ...(clientSellsTo ? { clientSellsTo } : {}),
@@ -1055,9 +1074,25 @@ export function SetupWizard({ mode, brand, draft, engineOptions, onClose, onCrea
   }
 
   async function writeCells() {
+    // Mark the write in flight on the draft BEFORE the call, so a close
+    // mid-write reopens on the progress view (the server keeps generating).
+    const started = cellsInFlight ?? nowStamp();
+    setCellsInFlight(started);
+    void persist("stages", grid, prompts, machinePrompts, reviewedPrompts, started);
     const next = await gridApi.writeCells();
+    setCellsInFlight(null);
     if (next) goTo("prompts", next);
+    else void persist("stages", grid, prompts, machinePrompts, reviewedPrompts, null);
   }
+
+  // Resumed onto an in-flight write: straight to the progress view and the
+  // (coalesced, cache-first) cells request, instead of the coverage map.
+  useEffect(() => {
+    if (!resumeWrite || resumedRef.current) return;
+    resumedRef.current = true;
+    void writeCells();
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- fires once on resume
+  }, [resumeWrite]);
 
   async function writePhrasings(force = false, onlyMissing = false, from?: GridState) {
     const src = from ?? grid;
@@ -1925,7 +1960,7 @@ export function SetupWizard({ mode, brand, draft, engineOptions, onClose, onCrea
             // market read - the coverage map gives way to elapsed-driven
             // captions instead of a frozen page behind a disabled button.
             busy === CELLS_BUSY ? (
-              <StagedProgress stages={CELLS_STAGES} />
+              <StagedProgress stages={CELLS_STAGES} startedAt={cellsInFlight} />
             ) : (
               <CoverageGate
                 state={grid}
