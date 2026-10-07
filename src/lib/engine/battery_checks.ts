@@ -639,6 +639,77 @@ export function keepsCategoryNoun(seed: string, para: string, category: string):
   const has = (t: string) => key(t).split(" ").some((w) => stem(w) === stem(noun));
   return !has(seed) || has(para);
 }
+/** p18 (2026-10-07 five-brand paraphrase read): the kept plural category
+ * term landed in a SINGULAR slot - "a new project management tools", and
+ * "my American Express credit cards" where the seed said "card" (all 27
+ * AmEx renewal paraphrases). Returns the offending span, or null. Case A:
+ * a singular article right before the term (at most two plain words
+ * between, never a quantity word or "of" - "a few bags of bagged chips" is
+ * fine). Case B: a possessive before the plural term when the seed carried
+ * only the singular head noun (a count change). */
+export function pluralSlot(seed: string, para: string, category: string): string | null {
+  // The FULL category term, not the first/last anchors ("project management
+  // tools" needs "management" in the span; a one-word category is its own term).
+  const words = key(category).split(" ").filter((w) => w.length >= 2 && w !== "and");
+  if (words.length === 0) return null;
+  const noun = words[words.length - 1];
+  if (!/s$/.test(noun)) return null;
+  const singular = noun.replace(/ies$/, "y").replace(/(ses|xes|ches|shes)$/, (m) => m.slice(0, -2)).replace(/s$/, "");
+  const termRe = words.map((a) => a.replace(/[^a-z0-9]/g, "")).join("\\s+");
+  // Words that end the article's own phrase ("a few bags of", "a week -",
+  // "one ... brand"): never part of the span.
+  const STOP = "(?:few|couple|bunch|lot|lots|pair|set|number|variety|mix|range|bag|bags|box|boxes|pack|packs|kind|kinds|type|types|list|handful|selection|assortment|dozen|of|or|and|what|which|who|where|when|how|while|bit|week|weeks|day|days|month|months|year|years|time|times|hour|hours|minute|minutes|mess|break|go|lot)";
+  // The term must be the HEAD of the phrase: followed by end, punctuation or
+  // a function word - "one bagged chips brand" is a modifier, not a slot.
+  const HEAD = `(?=\\s*(?:[.,;:!?)\\-\u2013\u2014]|$|(?:and|or|that|which|to|for|so|instead|from|in|on|at|with|as|than|because|but)\\b))`;
+  const raw = para.toLowerCase();
+  const mA = raw.match(new RegExp(`\\b(?:a|an|one|another)\\s+(?!${STOP}\\b)(?:[a-z'+-]+\\s+(?!${STOP}\\b)){0,2}?${termRe}\\b${HEAD}`));
+  if (mA) return mA[0];
+  const seedKey = key(seed);
+  const seedHasPlural = new RegExp(`\\b${termRe}\\b`).test(seedKey);
+  const seedHasSingular = new RegExp(`\\b${singular}\\b`).test(seedKey);
+  if (seedHasSingular && !seedHasPlural) {
+    // At least one word between the possessive and the term: "my American
+    // Express credit cards" is a count change against a singular seed, a
+    // bare "my smartphones" is ordinary generic plural.
+    const mB = raw.match(new RegExp(`\\b(?:my|your|his|her|this|that)\\s+(?!${STOP}\\b)(?:[a-z'+-]+\\s+(?!${STOP}\\b)){1,3}?${termRe}\\b`));
+    if (mB) return mB[0];
+  }
+  return null;
+}
+
+/** p18: who the asker is buying for is part of a scenario cell's
+ * circumstance - a parent and their teen became "my niece", "my nephew",
+ * "my grandkid", "my younger sibling" in four of nine Pixel paraphrases.
+ * Families of relation words; a paraphrase that names a relation from a
+ * family the seed does not name is a different buyer. Returns the word. */
+const RELATION_FAMILIES: string[][] = [
+  ["teen", "teens", "teenager", "teenagers", "kid", "kids", "child", "children", "son", "daughter", "toddler", "toddlers", "baby", "little one", "little ones", "high schooler", "schooler", "adolescent", "youngster", "youngsters"],
+  ["niece", "nephew", "grandkid", "grandkids", "grandchild", "grandchildren", "grandson", "granddaughter", "godson", "goddaughter"],
+  ["sibling", "siblings", "brother", "sister", "cousin", "cousins"],
+  ["partner", "spouse", "wife", "husband", "boyfriend", "girlfriend", "fiance", "fiancee"],
+  ["roommate", "roommates", "flatmate", "flatmates", "housemate", "housemates"],
+  ["parent", "parents", "mom", "dad", "mother", "father", "grandparent", "grandparents", "grandma", "grandpa"],
+  ["friend", "friends", "buddy", "pal", "colleague", "coworker", "co worker", "mate"],
+];
+export function relationShift(seed: string, para: string): string | null {
+  const famOf = (t: string): Set<number> => {
+    const k = ` ${key(t)} `;
+    const out = new Set<number>();
+    RELATION_FAMILIES.forEach((fam, i) => { if (fam.some((w) => k.includes(` ${w} `))) out.add(i); });
+    return out;
+  };
+  const sf = famOf(seed);
+  if (sf.size === 0) return null;
+  const k = ` ${key(para)} `;
+  for (let i = 0; i < RELATION_FAMILIES.length; i++) {
+    if (sf.has(i)) continue;
+    const w = RELATION_FAMILIES[i].find((x) => k.includes(` ${x} `));
+    if (w) return w;
+  }
+  return null;
+}
+
 export function keepsCategoryTerm(seed: string, para: string, category: string): boolean {
   const anchors = categoryAnchors(category);
   if (anchors.length === 0) return true;

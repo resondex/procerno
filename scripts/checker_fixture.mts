@@ -852,3 +852,23 @@ const fails10 = fails;
 }
 console.log(`11. p17 paraphrase guards: ${fails === fails10 ? "ALL PASS" : `${fails - fails10} FAILURE(S)`}`);
 if (fails > 0) process.exitCode = 1;
+
+
+// 12. p18 paraphrase guards (2026-10-07): relation shift and plural slot.
+{
+  const ok = (label: string, cond: boolean, extra = "") => { if (!cond) { console.error(`   FAIL ${label} ${extra}`); process.exitCode = 1; } else console.log(`   ok   ${label} ${extra}`); };
+  const teen = "First phone for our teen. We need to cut distractions during school and bedtime. Which smartphone does that best?";
+  ok("teen -> niece is a relation shift", bc.relationShift(teen, "Our niece is getting her first smartphone; which smartphone is best for that?") === "niece");
+  ok("teen -> grandkid is a relation shift", bc.relationShift(teen, "Shopping for my grandkid's first smartphone - which is best?") === "grandkid");
+  ok("teen -> my 13-year-old is not", bc.relationShift(teen, "My 13-year-old is getting a first phone - which smartphone handles limits best?") === null);
+  ok("teen -> kid stays in the family", bc.relationShift(teen, "Our kid's first phone - which smartphone keeps school hours quiet?") === null);
+  ok("no relation in the seed constrains nothing", bc.relationShift("Just moved in and setting up the TV. Which services should we start with?", "My roommate and I just moved in - which services should we try?") === null);
+  const card = "Annual fee just posted on my American Express card and it feels high. Should I keep it or cancel?";
+  ok("possessive + brand + plural term against a singular seed", bc.pluralSlot(card, "The annual fee posted on my American Express credit cards and it feels high - keep or cancel?", "credit cards") === "my american express credit cards");
+  ok("bare generic plural passes", bc.pluralSlot("I keep phones four years. Which smartphone lasts?", "I hang on to my smartphones for four years - which one lasts?", "smartphones") === null);
+  ok("article + plural term at the phrase head", bc.pluralSlot("I need a new tool. What should I pick?", "Need a new project management tools - which should I pick?", "project management tools") === "a new project management tools");
+  ok("term as a modifier passes", bc.pluralSlot("Doritos or Takis for bagged chips?", "If you had to pick one bagged chips brand, Doritos or Takis, which wins?", "bagged chips") === null);
+  ok("quantity phrase passes", bc.pluralSlot("Grabbing a few bags for the house; what bagged chips should I look at?", "I need a few bags of bagged chips for the house - which should I check out?", "bagged chips") === null);
+  ok("clause boundary passes", bc.pluralSlot("I go out several times a week. What credit cards should I look at?", "I'm out several times a week - what credit cards make sense for that?", "credit cards") === null);
+  console.log("12. p18 paraphrase guards: " + (process.exitCode ? "FAILED" : "ALL PASS"));
+}

@@ -3,7 +3,7 @@ import { tagCosts, withCostContext } from "../cost_log";
 import { anthropicClient, openaiClient } from "./providers";
 import { ModeratorsShape } from "./instrument_shapes";
 import { INSTRUMENT_HELPER_MODEL } from "./models";
-import {
+import { pluralSlot, relationShift,
   AMBIGUOUS_FORMS, angleRivals, categoryNounOf, categorySpanIn, checkBattery, checkCandidateSignature, checkPromptAgainstSpec, classAnglesOf,
   deriveCheckSpec, DOUBT_CHECK_STAGES, MUST_NAME_STAGES, PRE_CATEGORY_STAGES, questionTypeOf, resolveCellSpec, scenarioLabelLeak, seedDesignLine, specWriterNote,
   sameSeatOf, stageDesignIntent, statedPriceFinding, moneyBoltOn, TERM_COLLISIONS, textNamesBrand, textNamesCategory, upstreamOf,
@@ -6056,7 +6056,7 @@ export interface Phrasing {
 // substance; no purpose or destination word is added to a scenario seed
 // that lacks it. Plus two writer sentences (worry = own claim; criteria's
 // second ask = what to consider).
-const PHRASINGS_VERSION = "p17";
+const PHRASINGS_VERSION = "p18"; // p18 (2026-10-07, five-brand paraphrase read): relation-shift guard on scenario cells (the buyer's relation to the person in the room never changes) and plural-slot guard (a kept plural category term never sits in a singular slot) - calibrated on 1,835 live paraphrases: 4 + 13 hits, all true.
 /** p17: generic payment and timing qualifiers a scenario seed may carry,
  * each with the rewordings that keep it in substance. */
 const QUALIFIER_SHAPES: [RegExp, RegExp][] = [
@@ -6722,7 +6722,16 @@ export async function generatePhrasings(input: {
         if (seed.situation) {
           const added = addsPurposeOrDestination(seed.text, text);
           if (added) { culls.ask++; if (process.env.PHRASINGS_DEBUG) console.warn(`  cull purpose("${added}") [${seed.stage}]: ${text}`); continue; }
+          // p18: who the asker buys for is the room's circumstance - a parent's
+          // teen never becomes a niece, nephew, grandkid or sibling.
+          const rel = relationShift(seed.text, text);
+          if (rel) { culls.ask++; if (process.env.PHRASINGS_DEBUG) console.warn(`  cull relation("${rel}") [${seed.stage}]: ${text}`); continue; }
         }
+        // p18: the kept plural category term never lands in a singular slot
+        // ("a new project management tools", "my <brand> credit cards" for a
+        // seed that said card).
+        const plural = pluralSlot(seed.text, text, input.category);
+        if (plural) { culls.ask++; if (process.env.PHRASINGS_DEBUG) console.warn(`  cull plural("${plural}") [${seed.stage}]: ${text}`); continue; }
         // Length near the seed's (p12): no paraphrase runs more than 10
         // words past its seed - the long tail was where lists and formal
         // backstory came back.
