@@ -1473,7 +1473,7 @@ export function useGridSetup(a: GridSetupArgs) {
     // No global busy: the card shows its own writing state, the rest of
     // the gate stays usable.
     a.setError(null);
-    const data = await post<{ text: string; spec?: CellCheckSpec }>("/api/setup/grid/cell", {
+    const data = await post<{ text: string; spec?: CellCheckSpec; flags?: string[] }>("/api/setup/grid/cell", {
       brand: a.brand, category: a.category, competitors: a.competitors, rosterRoles: a.rosterRoles,
       audience: a.audience || undefined,
       base: a.state.moderators,
@@ -1483,9 +1483,10 @@ export function useGridSetup(a: GridSetupArgs) {
       // Near mode keeps this prompt's ask and moves one detail.
       nearTo: near ? c.text : undefined,
       // r26: a fresh draw of a room-pinned pain or outcome must not land
-      // on a neighbor room's subject - send the stage's other seeds.
-      siblings: !near && c.situation && (c.stage === "problem_recognition" || c.stage === "use_case")
-        ? a.state.cells.filter((x) => x.stage === c.stage && x.situation && x.situation !== c.situation && x.text.trim()).map((x) => x.text.trim()).slice(0, 8)
+      // on a neighbor room's subject - send the stage's other seeds (with
+      // their rooms, so the server can judge the draw on the battery rules).
+      siblings: c.situation && (c.stage === "problem_recognition" || c.stage === "use_case")
+        ? a.state.cells.filter((x) => x.stage === c.stage && x.situation && x.situation !== c.situation && x.text.trim()).map((x) => ({ situation: x.situation, text: x.text.trim() })).slice(0, 8)
         : undefined,
     });
     if (!data) return;
@@ -1523,8 +1524,9 @@ export function useGridSetup(a: GridSetupArgs) {
             ...q,
             text: data.text,
             original: data.text,
-            // A fresh draw replaces whatever wording the flag described.
-            seedFlags: undefined,
+            // A fresh draw replaces whatever wording the flag described;
+            // the server judged it on the battery rules too and says so.
+            seedFlags: data.flags?.length ? data.flags : undefined,
             spec: data.spec ?? q.spec,
             alts: nextAlts,
             altIdx: nextAlts.length - 1,

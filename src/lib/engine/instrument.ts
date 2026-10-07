@@ -5049,7 +5049,7 @@ export async function generateGrid(input: {
               try {
                 const res = await withCostContext({ purpose: "setup:cells" }, () => a.messages.create({
                   model: DESIGN_CHECK_MODEL, max_tokens: 600, output_config: { effort: DESIGN_CHECK_EFFORT },
-                  system: `Each buying situation below describes a buyer in ${input.category}. For each, answer terms: true when the situation defines its buyer ONLY by where, when or on what terms they buy (a payment plan, a price cap or budget, a sales channel, an upgrade window, a deal) and names NO activity the buyer does with the product and no person they buy it for; false otherwise. Reply with ONLY JSON: {"rooms": [{"label": "...", "terms": true|false}, ...]} in order.`,
+                  system: termsRoomSystem(input.category),
                   messages: [{ role: "user", content: ucRooms.map((l, i) => `${i + 1}. ${l}: ${roomOf.get(l) ?? ""}`).join("\n") }],
                 } as never));
                 const text = (res as { content: { type: string; text?: string }[] }).content.filter((b) => b.type === "text").map((b) => b.text ?? "").join("");
@@ -5066,18 +5066,7 @@ export async function generateGrid(input: {
             model: DESIGN_CHECK_MODEL,
             max_tokens: 1500,
             output_config: { effort: DESIGN_CHECK_EFFORT },
-            system:
-              `Each question below asks which product to pick for a job in a buying situation in ${input.category}; the tracked brand is ${input.brand}. For each give: ` +
-              `job - the job in 2-5 words, as a task the buyer gets done; ` +
-              `feature - true when the "job" is really a product feature or capability rather than a task; ` +
-              `restatesRoom - true ONLY when the question names NO outcome beyond the situation itself (who they are and what they do, then which product) - a specific result wanted within the situation's activity is a job, not a restatement, even when it is about that activity; ` +
-              `attribute - true ONLY when the outcome is a quality of the product itself (how long it lasts, how fast or reliable it is, how it looks) or a rank by price or value, with no task the buyer does with it - a task done with the product (dipping, sharing, filming, coordinating) is a job, not an attribute; ` +
-              `horizon - true when the outcome is stated over the time the buyer will own or pay for the product (it must still hold up when paid off, it must not feel old before they replace it, it must give the most for a fixed sum); ` +
-              `roomActivity - true when the outcome is a result wanted within the activity the situation itself is about (the situation says what this buyer does with the product, and the outcome lives inside that); ` +
-              `clientStrength - true ONLY when the outcome is the single thing the tracked brand is famous for above every rival, so naming that brand is the obvious answer; an ordinary job in the category that the brand also does well is NOT its signature strength, and the situation's own activity is never one (roomActivity true means clientStrength false); ` +
-              `sameAs - the number of an EARLIER question in this list whose job is the same in substance however worded, or 0; ` +
-              `belongsTo - the number of a DIFFERENT question in this list whose situation this job fits clearly better than its own (its own situation gives no reason for this job while another situation is about exactly this), or 0 - a job any buyer in the category could want fits its own situation and gets 0; ` +
-              `Reply with ONLY valid JSON: {"jobs": [{"job": "...", "feature": false, "restatesRoom": false, "attribute": false, "horizon": false, "roomActivity": false, "clientStrength": false, "sameAs": 0, "belongsTo": 0}, ...]} - one entry per question, in order.${extra}`,
+            system: jobLabelSystem(input.category, input.brand, extra),
             messages: [{
               role: "user",
               content: uc.map((d, i) => {
@@ -5094,31 +5083,11 @@ export async function generateGrid(input: {
           let jobs = parseJobs(await ask());
           if (!jobs) jobs = parseJobs(await ask(" Escape any quote marks inside strings."));
           if (jobs && jobs.length === uc.length) {
-            const norm = (s: string) => s.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
             const findBad = (js: NonNullable<typeof jobs>) => {
-              const seen = new Map<string, number>();
               const out: { i: number; why: string }[] = [];
-              js.forEach((j, i) => {
-                const k = norm(j.job ?? "");
-                const earlier = Number(j.sameAs ?? 0);
-                const other = Number(j.belongsTo ?? 0);
-                // s53 (Tyler): in a terms-defined room an ownership-horizon
-                // outcome IS the buyer's job ("still works when paid off",
-                // "the most for a fixed sum"); the room's own activity is
-                // never the client's signature strength (a photos room asks
-                // about photos).
-                const ownershipJob = termsRooms.has(uc[i]?.c.situation ?? "") && j.horizon === true;
-                if (j.feature) out.push({ i, why: "it names a product feature, not a job" });
-                else if (j.attribute && !ownershipJob) out.push({ i, why: "it names a product attribute or a price rank as the outcome, not something the buyer gets done" });
-                else if (j.clientStrength && j.roomActivity !== true) out.push({ i, why: "its outcome is the tracked brand's own signature strength" });
-                else if (j.restatesRoom) out.push({ i, why: "it repeats the buying situation instead of naming a job" });
-                else if (k && seen.has(k)) out.push({ i, why: `it repeats another use-case job (${j.job})` });
-                else if (Number.isInteger(earlier) && earlier >= 1 && earlier - 1 < i) out.push({ i, why: `it asks for the same outcome as another use-case question (${js[earlier - 1]?.job ?? "an earlier one"})` });
-                // r27: a job that fits a neighbor room better than its own is
-                // that room's subject borrowed (the Pixel camera jobs in the
-                // price-cap and carrier rooms, beside a photos room).
-                else if (Number.isInteger(other) && other >= 1 && other <= js.length && other - 1 !== i) out.push({ i, why: `its outcome belongs to the "${uc[other - 1]?.c.situation ?? "other"}" scenario's buyer, not this one's` });
-                if (k && !seen.has(k)) seen.set(k, i);
+              js.forEach((_, i) => {
+                const why = jobRuleWhy(js, i, termsRooms.has(uc[i]?.c.situation ?? ""), (k) => uc[k]?.c.situation);
+                if (why) out.push({ i, why });
               });
               return out;
             };
@@ -5230,12 +5199,7 @@ export async function generateGrid(input: {
             model: DESIGN_CHECK_MODEL,
             max_tokens: 1500,
             output_config: { effort: DESIGN_CHECK_EFFORT },
-            system:
-              `Each question below is a buyer in ${input.category} describing a pain and asking for a way out, written for the buying situation shown with it. For each give: ` +
-              `pain - the pain in 2-5 words, as the thing that is going wrong; ` +
-              `sameAs - the number of an EARLIER question in this list whose pain is the same in substance however worded, or 0; ` +
-              `belongsTo - the number of a DIFFERENT question in this list whose situation this pain fits clearly better than its own (its own situation gives no reason for this pain while another situation is about exactly this), or 0 - a pain any buyer in the category could have fits its own situation and gets 0. ` +
-              `Reply with ONLY valid JSON: {"pains": [{"pain": "...", "sameAs": 0, "belongsTo": 0}, ...]} - one entry per question, in order.${extra}`,
+            system: prSubjectSystem(input.category, extra),
             messages: [{
               role: "user",
               content: pr.map((d, i) => `${i + 1}. Situation: ${d.c.situation}: ${roomBySituation.get(d.c.situation!) ?? ""}\n   Question: ${d.c.text}`).join("\n"),
@@ -5584,6 +5548,67 @@ export async function generateGrid(input: {
  * previously offered text. Cached by cell identity + avoid list, so the
  * new and previous draws are all cache-backed and cycling costs nothing.
  */
+/** The use-case job labeler's instructions - shared by the battery pass in
+ * generateGrid and the single-cell redraw (r27/s53: a redraw used to clear a
+ * job flag without ever being judged on the job rules). */
+function jobLabelSystem(category: string, brand: string, extra = ""): string {
+  return `Each question below asks which product to pick for a job in a buying situation in ${category}; the tracked brand is ${brand}. For each give: ` +
+    `job - the job in 2-5 words, as a task the buyer gets done; ` +
+    `feature - true when the "job" is really a product feature or capability rather than a task; ` +
+    `restatesRoom - true ONLY when the question names NO outcome beyond the situation itself (who they are and what they do, then which product) - a specific result wanted within the situation's activity is a job, not a restatement, even when it is about that activity; ` +
+    `attribute - true ONLY when the outcome is a quality of the product itself (how long it lasts, how fast or reliable it is, how it looks) or a rank by price or value, with no task the buyer does with it - a task done with the product (dipping, sharing, filming, coordinating) is a job, not an attribute; ` +
+    `horizon - true when the outcome is stated over the time the buyer will own or pay for the product (it must still hold up when paid off, it must not feel old before they replace it, it must give the most for a fixed sum); ` +
+    `roomActivity - true when the outcome is a result wanted within the activity the situation itself is about (the situation says what this buyer does with the product, and the outcome lives inside that); ` +
+    `clientStrength - true ONLY when the outcome is the single thing the tracked brand is famous for above every rival, so naming that brand is the obvious answer; an ordinary job in the category that the brand also does well is NOT its signature strength, and the situation's own activity is never one (roomActivity true means clientStrength false); ` +
+    `sameAs - the number of an EARLIER question in this list whose job is the same in substance however worded, or 0; ` +
+    `belongsTo - the number of a DIFFERENT question in this list whose situation this job fits clearly better than its own (its own situation gives no reason for this job while another situation is about exactly this), or 0 - a job any buyer in the category could want fits its own situation and gets 0; ` +
+    `Reply with ONLY valid JSON: {"jobs": [{"job": "...", "feature": false, "restatesRoom": false, "attribute": false, "horizon": false, "roomActivity": false, "clientStrength": false, "sameAs": 0, "belongsTo": 0}, ...]} - one entry per question, in order.${extra}`;
+}
+/** The problem-recognition subject labeler's instructions (shared, as above). */
+function prSubjectSystem(category: string, extra = ""): string {
+  return `Each question below is a buyer in ${category} describing a pain and asking for a way out, written for the buying situation shown with it. For each give: ` +
+    `pain - the pain in 2-5 words, as the thing that is going wrong; ` +
+    `sameAs - the number of an EARLIER question in this list whose pain is the same in substance however worded, or 0; ` +
+    `belongsTo - the number of a DIFFERENT question in this list whose situation this pain fits clearly better than its own (its own situation gives no reason for this pain while another situation is about exactly this), or 0 - a pain any buyer in the category could have fits its own situation and gets 0. ` +
+    `Reply with ONLY valid JSON: {"pains": [{"pain": "...", "sameAs": 0, "belongsTo": 0}, ...]} - one entry per question, in order.${extra}`;
+}
+/** The terms-defined-room judge's instructions (shared). */
+function termsRoomSystem(category: string): string {
+  return `Each buying situation below describes a buyer in ${category}. For each, answer terms: true when the situation defines its buyer ONLY by where, when or on what terms they buy (a payment plan, a price cap or budget, a sales channel, an upgrade window, a deal) and names NO activity the buyer does with the product and no person they buy it for; false otherwise. Reply with ONLY JSON: {"rooms": [{"label": "...", "terms": true|false}, ...]} in order.`;
+}
+type JobLabel = { job?: string; feature?: boolean; restatesRoom?: boolean; attribute?: boolean; horizon?: boolean; roomActivity?: boolean; clientStrength?: boolean; sameAs?: number; belongsTo?: number };
+/** Why the use-case job at `i` fails the battery rules, or null. `terms` =
+ * the question's room is terms-defined. Shared by the battery pass and the
+ * redraw so the two can never disagree. */
+function jobRuleWhy(js: JobLabel[], i: number, terms: boolean, situationOf: (k: number) => string | null | undefined): string | null {
+  const j = js[i];
+  if (!j) return null;
+  const norm = (x: string) => x.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+  const earlier = Number(j.sameAs ?? 0);
+  const other = Number(j.belongsTo ?? 0);
+  const ownershipJob = terms && j.horizon === true;
+  if (j.feature) return "it names a product feature, not a job";
+  if (j.attribute && !ownershipJob) return "it names a product attribute or a price rank as the outcome, not something the buyer gets done";
+  if (j.clientStrength && j.roomActivity !== true) return "its outcome is the tracked brand's own signature strength";
+  if (j.restatesRoom) return "it repeats the buying situation instead of naming a job";
+  const k = norm(j.job ?? "");
+  const dup = js.findIndex((o, m) => m < i && k && norm(o.job ?? "") === k);
+  if (dup >= 0) return `it repeats another use-case job (${j.job})`;
+  if (Number.isInteger(earlier) && earlier >= 1 && earlier - 1 < i) return `it asks for the same outcome as another use-case question (${js[earlier - 1]?.job ?? "an earlier one"})`;
+  if (Number.isInteger(other) && other >= 1 && other <= js.length && other - 1 !== i) return `its outcome belongs to the "${situationOf(other - 1) ?? "other"}" scenario's buyer, not this one's`;
+  return null;
+}
+type PainLabel = { pain?: string; sameAs?: number; belongsTo?: number };
+function prSubjectWhy(ps: PainLabel[], i: number, situationOf: (k: number) => string | null | undefined): string | null {
+  const p = ps[i];
+  if (!p) return null;
+  const earlier = Number(p.sameAs ?? 0);
+  const other = Number(p.belongsTo ?? 0);
+  if (Number.isInteger(earlier) && earlier >= 1 && earlier - 1 < i) return `it voices the same pain as another scenario's question (${ps[earlier - 1]?.pain ?? "an earlier one"})`;
+  if (Number.isInteger(other) && other >= 1 && other <= ps.length && other - 1 !== i) return `its pain belongs to the "${situationOf(other - 1) ?? "other"}" scenario's buyer, not this one's`;
+  return null;
+}
+
 export async function regenerateCell(input: {
   brand: string;
   category: string;
@@ -5607,11 +5632,11 @@ export async function regenerateCell(input: {
    * scenarios - subjects a redraw must not land on (a Pixel redraw rolled
    * back into the neighbor room's camera pain). Request data: rides the
    * key only when present, so draws without it key as before. */
-  siblings?: string[];
+  siblings?: (string | { situation: string | null; text: string })[];
   /** Typed roster (see generateGrid). Absent = untyped. */
   rosterRoles?: RosterRoles;
   meta?: CacheMeta;
-}): Promise<{ text: string; spec: CellCheckSpec } | null> {
+}): Promise<{ text: string; spec: CellCheckSpec; flags?: string[] } | null> {
   tagCosts({ purpose: "setup:cells" });
   // r13: the dictionary seed's alias forms ("amex" for American Express),
   // read from the FULL roster so the cache key is the one project creation
@@ -5631,7 +5656,10 @@ export async function regenerateCell(input: {
   const st = stages.find((x) => x.key === input.cell.stage);
   if (!st) return null;
   const avoidNorm = input.avoid.map((t) => t.trim()).filter(Boolean);
-  const siblingNorm = (input.siblings ?? []).map((t) => t.trim()).filter(Boolean);
+  const siblingItems = (input.siblings ?? [])
+    .map((x) => (typeof x === "string" ? { situation: null as string | null, text: x.trim() } : { situation: x.situation ?? null, text: x.text.trim() }))
+    .filter((x) => x.text);
+  const siblingNorm = siblingItems.map((x) => x.text);
   const key = cacheKey("cell_alt", [
     STYLE_VERSION, input.brand, rivals.join(","), input.audience,
     JSON.stringify(input.base), JSON.stringify(input.scenarios),
@@ -5645,8 +5673,12 @@ export async function regenerateCell(input: {
   ]);
   const hit = await store.cacheGet(key, CACHE_TTL_MS);
   if (hit) {
-    const text = humanize(JSON.parse(hit) as string);
-    return { text, spec: specFor(text) };
+    // Legacy entries are a bare string; r27+ entries carry the battery-rule
+    // flags the draw shipped with.
+    const parsed = JSON.parse(hit) as string | { t: string; f?: string[] };
+    const text = humanize(typeof parsed === "string" ? parsed : parsed.t);
+    const flags = typeof parsed === "string" ? undefined : parsed.f;
+    return { text, spec: specFor(text), ...(flags?.length ? { flags } : {}) };
   }
   const jn = input.cell.situation
     ? journeyNote(input.base, input.scenarios.find((sc) => sc.label === input.cell.situation) ?? { label: "", description: "", journey: null })
@@ -5712,13 +5744,69 @@ export async function regenerateCell(input: {
   // r26: the design check reads the room's circumstance like generateGrid
   // does (label - circumstance), so the room-fit clause has something to
   // judge against; before, a redraw was checked against the label alone.
+  const roomMap = await roomCircumstances({ category: input.category, scenarios: input.scenarios, meta: input.meta }).catch(() => new Map<string, string>());
   const roomText = input.cell.situation
-    ? await roomCircumstances({ category: input.category, scenarios: input.scenarios, meta: input.meta })
-        .then((m) => { const d = m.get(input.cell.situation!); return d ? `${input.cell.situation} - ${d}` : input.cell.situation; })
-        .catch(() => input.cell.situation)
+    ? (() => { const d = roomMap.get(input.cell.situation!); return d ? `${input.cell.situation} - ${d}` : input.cell.situation; })()
     : input.cell.situation;
+  // r27/s53: a redraw of a use-case or problem-recognition cell is judged on
+  // the BATTERY rules too (job rules, borrowed subject, same pain), against
+  // the sibling seeds the client sends - before, a redraw cleared the flag
+  // without ever being judged on the rule that raised it. Returns the
+  // reason, or null when the candidate passes.
+  const batteryRule = async (cand: string): Promise<string | null> => {
+    if (process.env.PHRASINGS_CHECKS === "0") return null;
+    const sit = input.cell.situation;
+    if (!sit) return null;
+    if (input.cell.stage !== "use_case" && input.cell.stage !== "problem_recognition") return null;
+    try {
+      const a = await anthropicClient();
+      const items = [...siblingItems, { situation: sit, text: cand }];
+      const last = items.length - 1;
+      const situationOf = (k: number) => items[k]?.situation;
+      const body = items.map((d, i) => `${i + 1}. Situation: ${d.situation ? `${d.situation}: ${roomMap.get(d.situation) ?? ""}` : "none"}\n   Question: ${d.text}`).join("\n");
+      const textOf = (res: unknown) => (res as { content: { type: string; text?: string }[] }).content.filter((b) => b.type === "text").map((b) => b.text ?? "").join("").trim();
+      if (input.cell.stage === "use_case") {
+        let terms = false;
+        const tkey = cacheKey("room_terms1", [DESIGN_CHECK_MODEL, input.category, `${sit}|${roomMap.get(sit) ?? ""}`]);
+        const thit = await store.cacheGet(tkey, CACHE_TTL_MS).catch(() => null);
+        if (thit) { try { terms = (JSON.parse(thit) as Record<string, boolean>)[sit] === true; } catch { /* re-judge */ } }
+        else {
+          const tres = await withCostContext({ purpose: "setup:cells" }, () => a.messages.create({
+            model: DESIGN_CHECK_MODEL, max_tokens: 300, output_config: { effort: DESIGN_CHECK_EFFORT },
+            system: termsRoomSystem(input.category),
+            messages: [{ role: "user", content: `1. ${sit}: ${roomMap.get(sit) ?? ""}` }],
+          } as never));
+          const tj = JSON.parse(firstJsonObject(textOf(tres)) ?? "{}") as { rooms?: { terms?: boolean }[] };
+          terms = tj.rooms?.[0]?.terms === true;
+          await store.cacheSet(tkey, JSON.stringify({ [sit]: terms }), stampOf(input)).catch(() => {});
+        }
+        const res = await withCostContext({ purpose: "setup:cells" }, () => a.messages.create({
+          model: DESIGN_CHECK_MODEL, max_tokens: 1500, output_config: { effort: DESIGN_CHECK_EFFORT },
+          system: jobLabelSystem(input.category, input.brand),
+          messages: [{ role: "user", content: body }],
+        } as never));
+        const js = (JSON.parse(firstJsonObject(textOf(res)) ?? "{}") as { jobs?: JobLabel[] }).jobs ?? [];
+        if (js.length !== items.length) return null;
+        const why = jobRuleWhy(js, last, terms, situationOf);
+        return why ? `use-case job - ${why}` : null;
+      }
+      const res = await withCostContext({ purpose: "setup:cells" }, () => a.messages.create({
+        model: DESIGN_CHECK_MODEL, max_tokens: 1500, output_config: { effort: DESIGN_CHECK_EFFORT },
+        system: prSubjectSystem(input.category),
+        messages: [{ role: "user", content: body }],
+      } as never));
+      const ps = (JSON.parse(firstJsonObject(textOf(res)) ?? "{}") as { pains?: PainLabel[] }).pains ?? [];
+      if (ps.length !== items.length) return null;
+      const why = prSubjectWhy(ps, last, situationOf);
+      return why ? `problem-recognition pain - ${why}` : null;
+    } catch (err) {
+      console.error("redraw battery-rule check failed open:", err);
+      return null;
+    }
+  };
   const intent = process.env.PHRASINGS_CHECKS !== "0" ? stageDesignIntent(input.cell.stage, input.brand, input.cell.concern, input.cell.angle, roomText, input.cell.valueLine) : null;
   let text: string | null = null;
+  let flags: string[] = [];
   let note: string | null = null;
   for (let attempt = 0; attempt < 3 && !text; attempt++) {
     const cand = await draw(note);
@@ -5746,13 +5834,23 @@ export async function regenerateCell(input: {
       const [v] = await checkDesignFidelity({ candidates: [{ text: cand, design: intent }], meta: input.meta });
       if (!v.voices && !v.unchecked) problems.push(`off-design: ${v.reason || "does not voice the cell's design"}`);
     }
-    if (problems.length === 0) { text = cand; break; }
+    if (problems.length === 0) {
+      const why = await batteryRule(cand);
+      if (!why || attempt === 2) {
+        // Past the retry cap a battery-rule failure ships FLAGGED, like the
+        // battery pass does - the card shows the reason instead of a clean chip.
+        text = cand;
+        if (why) { flags = [`off-design: ${why}`]; console.warn(`cell alt ships flagged [${input.cell.stage}]: ${why} | ${cand.slice(0, 90)}`); }
+        break;
+      }
+      problems.push(`the previous draw was rejected because ${why}.`);
+    }
     console.warn(`cell alt rejected [${input.cell.stage}]: ${problems.join("; ")} | ${cand.slice(0, 90)}`);
     note = `${problems.join(" ")} Do not reuse this wording: "${cand}"`;
   }
   if (!text) return null;
-  await store.cacheSet(key, JSON.stringify(text), stampOf(input));
-  return { text, spec: specFor(text) };
+  await store.cacheSet(key, JSON.stringify({ t: text, ...(flags.length ? { f: flags } : {}) }), stampOf(input));
+  return { text, spec: specFor(text), ...(flags.length ? { flags } : {}) };
 }
 
 /* ------------------------------ phrasings ------------------------------- */

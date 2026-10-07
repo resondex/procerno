@@ -60,7 +60,10 @@ const Body = z.object({
   /** Near-variant mode: keep this prompt's ask, move one detail. */
   nearTo: z.string().trim().min(1).max(2000).optional(),
   /** r26: the same stage's current seeds in the other scenarios (subjects taken). */
-  siblings: z.array(z.string().trim().min(1).max(2000)).max(8).optional(),
+  siblings: z.array(z.union([
+    z.string().trim().min(1).max(2000),
+    z.object({ situation: z.string().trim().max(60).nullable(), text: z.string().trim().min(1).max(2000) }),
+  ])).max(8).optional(),
 });
 
 /** Gate 2 helper: one fresh prompt for a single cell, different from every
@@ -95,5 +98,5 @@ export async function POST(req: Request) {
   }
   // The draw's check-spec rides back with it: the client stores it on the
   // cell, and every later check reads it.
-  return NextResponse.json({ text: drawn.text, spec: drawn.spec });
+  return NextResponse.json({ text: drawn.text, spec: drawn.spec, ...(drawn.flags?.length ? { flags: drawn.flags } : {}) });
 }
