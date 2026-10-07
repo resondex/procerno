@@ -635,8 +635,27 @@ export function keepsCategoryNoun(seed: string, para: string, category: string):
   const anchors = categoryAnchors(category);
   if (anchors.length === 0) return true;
   const noun = anchors[anchors.length - 1];
-  const stem = (w: string) => w.replace(/(ies|es|s)$/, "");
+  // p22: "services" stemmed to "servic" and never met "service" (the p17
+  // stem stripped "es" from a singular ending in e); plural-only strip.
+  const stem = (w: string) => w.replace(/ies$/, "y").replace(/s$/, "");
   const has = (t: string) => key(t).split(" ").some((w) => stem(w) === stem(noun));
+  return !has(seed) || has(para);
+}
+/** p22 (2026-10-07, Netflix repro without the category header): the p17
+ * noun keep fires only on the category's HEAD noun ("services"), but a seed
+ * that says "for streaming" carries the category by a modifier, and 8 of 45
+ * offensive-alternatives paraphrases dropped it entirely ("We're leaving
+ * Prime Video. What should we sign up for instead?" - off the platform,
+ * not the category). When the seed carries ANY category word, the paraphrase
+ * carries one (stem-tolerant). */
+export function keepsCategoryWord(seed: string, para: string, category: string): boolean {
+  // Multi-word categories only, like the p17 noun keep (a one-word category
+  // has no anchors and its head-to-heads were never under this rule), and
+  // containment-aware like r13's category tokens: "phone" in "smartphones",
+  // "stream" in "streaming", "service" in "services".
+  const toks = key(category).split(" ").filter((w) => w.length >= 4);
+  if (toks.length < 2) return true;
+  const has = (t: string) => key(t).split(" ").some((w) => w.length >= 4 && toks.some((tok) => tok === w || tok.includes(w) || w.includes(tok)));
   return !has(seed) || has(para);
 }
 /** p18 (2026-10-07 five-brand paraphrase read): the kept plural category
@@ -1025,7 +1044,7 @@ export function checkBattery(input: {
         t !== cell.text &&
         input.category &&
         (cell.stage === "comparison" || cell.stage === "alternatives") &&
-        !keepsCategoryNoun(cell.text, t, input.category)
+        (!keepsCategoryNoun(cell.text, t, input.category) || !keepsCategoryWord(cell.text, t, input.category))
       )
         findings.push({ cell: i, check: "blind_missing_category", text: t, detail: `paraphrase loosens the category term "${input.category}"` });
       // Path-independent: a prompt that copies a scenario LABEL - any

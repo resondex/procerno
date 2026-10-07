@@ -872,5 +872,12 @@ if (fails > 0) process.exitCode = 1;
   ok("clause boundary passes", bc.pluralSlot("I go out several times a week. What credit cards should I look at?", "I'm out several times a week - what credit cards make sense for that?", "credit cards") === null);
   ok("plural term with a singular verb is a slot", bc.pluralSlot("Which streaming service makes picking easiest?", "Which video streaming services makes it simple to pick something?", "video streaming services") === "which video streaming services makes");
   ok("plural term with a plural verb passes", bc.pluralSlot("Which streaming services should we look at?", "Which video streaming services are worth a look?", "video streaming services") === null);
+  // p22: a head-to-head / offensive-alternatives paraphrase keeps SOME category word when the seed has one.
+  ok("alternatives dropping the category word is culled", bc.keepsCategoryWord("I'm moving off Disney+ for video streaming. What should I switch to instead?", "I've decided to stop using Disney+. What should I replace it with?", "video streaming services") === false);
+  ok("'service' meets 'services'", bc.keepsCategoryWord("For a streaming service, would you pick Netflix or Max, and why?", "Moving away from Max. What service should I switch over to?", "video streaming services") === true);
+  ok("'stream' meets 'streaming'", bc.keepsCategoryWord("I'm leaving Max for streaming; what should I get instead?", "Dropping Max - what should I stream on instead?", "video streaming services") === true);
+  ok("one-word category is exempt (p17 scope)", bc.keepsCategoryWord("Google Pixel or Samsung Galaxy for a smartphone, which would you pick and why?", "Between Google Pixel and Samsung Galaxy, which would you pick and why?", "smartphones") === true);
+  ok("seed without a category word constrains nothing", bc.keepsCategoryWord("Netflix or Disney+, which would you pick and why?", "Netflix vs Disney+ - which and why?", "video streaming services") === true);
+  ok("p17 noun keep: 'services' now meets 'service'", bc.keepsCategoryNoun("Which streaming services should we look at?", "Which streaming service should we start with?", "video streaming services") === true);
   console.log("12. p18 paraphrase guards: " + (process.exitCode ? "FAILED" : "ALL PASS"));
 }
