@@ -6056,7 +6056,7 @@ export interface Phrasing {
 // substance; no purpose or destination word is added to a scenario seed
 // that lacks it. Plus two writer sentences (worry = own claim; criteria's
 // second ask = what to consider).
-const PHRASINGS_VERSION = "p22"; // p22 (2026-10-07, Tyler): p18 writer text with the category line removed from the request header - the seed carries the category in the buyer's words. (p19's "as the seed says it" sentence and p20's situation-tag line are out: measured on Netflix, the sentence cost variety and the tag line is re-tested without the header.)
+const PHRASINGS_VERSION = "p23"; // p23 (2026-10-07, piece 1 of the p22 review): the retry's [overused: ...] list never carries the cell's identity - the seed's own content words and the room's derived circumstance (retryExempt), plus ask words for the settled-customer stages - and the retry rule asks for the same details in other words, never new details (34 of the 43 measurement-changing paraphrases on the five drafts sat at retry positions and had lost the circumstance, the person or the quote). // p22 (2026-10-07, Tyler): p18 writer text with the category line removed from the request header - the seed carries the category in the buyer's words. (p19's "as the seed says it" sentence and p20's situation-tag line are out: measured on Netflix, the sentence cost variety and the tag line is re-tested without the header.)
 /** Paraphrases a social-validation cell fills to (seed + 4 = 5 prompts); mirrored by phrasingTarget in grid_setup. */
 export const SOCIAL_VALIDATION_PARAPHRASES = 4;
 /** p17: generic payment and timing qualifiers a scenario seed may carry,
@@ -6498,8 +6498,8 @@ export async function generatePhrasings(input: {
             "words that part differently.\n" +
             "- A seed may carry [overused: ...]: content words its existing " +
             "phrasings already lean on. Do not build new phrasings around " +
-            "those words - find other angles into the same ask (different " +
-            "details, different framing, different vocabulary).\n" +            "- Typing, not prose: fragments happen, specifics are unpolished; " +
+            "those words - say the same details in other words: a different " +
+            "way in, different vocabulary, never a new detail.\n" +            "- Typing, not prose: fragments happen, specifics are unpolished; " +
             "never ad-copy patterns (parallel lists of three, balanced " +
             "drama, rhetorical closers). If it would read well on a landing " +
             "page, it is wrong.\n" +
@@ -6812,6 +6812,10 @@ export async function generatePhrasings(input: {
     try {
     const subset = idx.map((i) => input.cells[i]);
     const got = await pass(subset);
+    // p23: the rooms' derived circumstances (cached per room) feed the retry's exemption list.
+    const roomMap = got.some((k, j) => k.length < wantFor(subset[j].stage))
+      ? await roomCircumstances({ category: input.category, scenarios: input.scenarios, meta: input.meta }).catch(() => new Map<string, string>())
+      : new Map<string, string>();
     // Reasoning models occasionally return a degenerate, near-empty set
     // for a whole batch. One retry on the cells that came up short fills
     // the gap without re-running what already worked.
@@ -6837,7 +6841,7 @@ export async function generatePhrasings(input: {
         for (const t of [subset[j].text, ...got[j].map((p) => p.text)]) {
           for (const w of contentWords(t)) counts.set(w, (counts.get(w) ?? 0) + 1);
         }
-        const exempt = avoidExempt(subset[j], input.category);
+        const exempt = retryExempt(subset[j], input.category, roomMap.get(subset[j].situation ?? ""));
         return [...counts.entries()]
           .filter(([w, n]) => n >= 2 && !exempt.has(w))
           .sort((a, b) => b[1] - a[1])
@@ -7148,6 +7152,10 @@ const STAGE_ASK_WORDS: Record<string, string> = {
   feature_screening: "name names recommend which options brands",
   alternatives: "alternatives alternative instead name names recommend options brands",
   repertoire: "name names recommend pick picks brands",
+  advocacy: "case convince convincing persuade win says said argue",
+  business_case: "case convince approve approval justify budget sign",
+  expansion: "add adding more lean expand use using",
+  ecosystem: "pair pairs pairing add alongside with",
 };
 
 /** Words the worn-words retry list must never contain (p9, 2026-10-03
@@ -7175,6 +7183,30 @@ function avoidExempt(
   add(cell.concern);
   add(cell.classPhrase);
   add(STAGE_ASK_WORDS[cell.stage]);
+  return out;
+}
+
+/** p23: what the RETRY's worn-word list must never carry, beyond
+ * avoidExempt - the seed's own content words and the room's derived
+ * circumstance (the text the seed writer was fed). A worn word is one the
+ * kept paraphrases keep INTRODUCING; the seed's words are the question
+ * and recur in every faithful paraphrase by design. Measured on the five
+ * p22 drafts: the retry was told to avoid "money", "tight", "engineering",
+ * "manager", "slows", "teams", "trips", "pair", "friend" - and invented
+ * substitutes (34 of 43 measurement-changing paraphrases sat at retry
+ * positions). Verbatim copying of the seed is steered by [copied: ...],
+ * not by this list. Kept separate from avoidExempt so the overlap cull's
+ * residual sets are unchanged. */
+function retryExempt(
+  cell: { stage: string; situation: string | null; concern?: string | null; classPhrase?: string | null; text: string },
+  category: string,
+  circumstance: string | null | undefined
+): Set<string> {
+  const out = avoidExempt(cell, category);
+  for (const w of wordSet(`${cell.text} ${circumstance ?? ""}`)) {
+    out.add(w);
+    out.add(w.endsWith("s") ? w.slice(0, -1) : `${w}s`);
+  }
   return out;
 }
 
