@@ -6056,7 +6056,7 @@ export interface Phrasing {
 // substance; no purpose or destination word is added to a scenario seed
 // that lacks it. Plus two writer sentences (worry = own claim; criteria's
 // second ask = what to consider).
-const PHRASINGS_VERSION = "p23"; // p23 piece 2 (2026-10-07): a room-pinned cell's design line carries the room's derived circumstance, so every paraphrase (first batch and retries alike - the design check already runs after the retry rounds) must keep the buyer's circumstance in substance. // p23 piece 1 (2026-10-07, the p22 review): the retry's [overused: ...] list never carries the cell's identity - the seed's own content words and the room's derived circumstance (retryExempt), plus ask words for the settled-customer stages - and the retry rule asks for the same details in other words, never new details (34 of the 43 measurement-changing paraphrases on the five drafts sat at retry positions and had lost the circumstance, the person or the quote). // p22 (2026-10-07, Tyler): p18 writer text with the category line removed from the request header - the seed carries the category in the buyer's words. (p19's "as the seed says it" sentence and p20's situation-tag line are out: measured on Netflix, the sentence cost variety and the tag line is re-tested without the header.)
+const PHRASINGS_VERSION = "p23"; // p23 (2026-10-07, piece 1 of the p22 review): the retry's [overused: ...] list never carries the cell's identity - the seed's own content words and the room's derived circumstance (retryExempt), plus ask words for the settled-customer stages - and the retry rule asks for the same details in other words, never new details (34 of the 43 measurement-changing paraphrases on the five drafts sat at retry positions and had lost the circumstance, the person or the quote). // p22 (2026-10-07, Tyler): p18 writer text with the category line removed from the request header - the seed carries the category in the buyer's words. (p19's "as the seed says it" sentence and p20's situation-tag line are out: measured on Netflix, the sentence cost variety and the tag line is re-tested without the header.)
 /** Paraphrases a social-validation cell fills to (seed + 4 = 5 prompts); mirrored by phrasingTarget in grid_setup. */
 export const SOCIAL_VALIDATION_PARAPHRASES = 4;
 /** p17: generic payment and timing qualifiers a scenario seed may carry,
@@ -6813,11 +6813,7 @@ export async function generatePhrasings(input: {
     const subset = idx.map((i) => input.cells[i]);
     const got = await pass(subset);
     // p23: the rooms' derived circumstances (cached per room) feed the retry's exemption list.
-    // p23: the rooms' derived circumstances (cached per room) feed the retry's
-    // exemption list (piece 1) and the per-paraphrase design check's
-    // circumstance clause (piece 2) - fetched once per batch when any cell
-    // is room-pinned.
-    const roomMap = subset.some((c) => c.situation)
+    const roomMap = got.some((k, j) => k.length < wantFor(subset[j].stage))
       ? await roomCircumstances({ category: input.category, scenarios: input.scenarios, meta: input.meta }).catch(() => new Map<string, string>())
       : new Map<string, string>();
     // Reasoning models occasionally return a degenerate, near-empty set
@@ -6922,19 +6918,6 @@ export async function generatePhrasings(input: {
           const others = (input.avoidConcerns ?? []).filter((x) => x && x.toLowerCase() !== own);
           if (own && others.length > 0)
             line += ` It must NOT primarily voice these OTHER designed concerns the battery covers elsewhere: ${others.join("; ")}.`;
-          // p23 piece 2 (the five-draft paraphrase review): a room-pinned
-          // cell's paraphrase keeps THIS buyer's circumstance in substance.
-          // The generic same-question line let the writer's first batch
-          // drop a short circumstance clause and keep only the pain or the
-          // choice (34 of 43 measurement-changing paraphrases had lost the
-          // circumstance, the person or the quote). The clause carries the
-          // room's derived circumstance - the same text the seed writer was
-          // fed - so synonyms pass and a different buyer, a dropped
-          // circumstance or an added circumstance detail fails. Design
-          // text rides the design_check key, so this self-versions.
-          const circ = subset[j].situation ? roomMap.get(subset[j].situation as string) : null;
-          if (circ)
-            line += ` The asker's circumstance, as designed: "${circ}". Whatever of that circumstance the designed question states, the question keeps in substance, in any words; what the designed question leaves unstated need not be added. A question whose asker is a different kind of buyer, that drops a circumstance the designed question states, or that adds a circumstance detail neither the design nor the designed question states, does not satisfy the design.`;
           got[j].forEach((ph, k) => {
             targets.push({ j, k });
             candidates.push({ text: ph.text, design: line });
