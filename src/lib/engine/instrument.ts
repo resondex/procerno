@@ -6056,7 +6056,7 @@ export interface Phrasing {
 // substance; no purpose or destination word is added to a scenario seed
 // that lacks it. Plus two writer sentences (worry = own claim; criteria's
 // second ask = what to consider).
-const PHRASINGS_VERSION = "p24"; // p24 (2026-10-08, pre-cull audit of the five-brand p23 roll, Tyler): the copied-opening cull is deleted (99 of 392 kills wrong - on a formula seed the opening is the ask), the scenario-label-leak check no longer drops paraphrases (0 of 14 earned), the category guard is one containment-aware word rule (59 of 73 kills wrong), a criteria first ask never names products, non-Latin characters are culled. // p23 (2026-10-07): (a) a room-pinned seed reaches the writer as situation | ask and the "leave details out entirely" licence is gone - the writer's first batch had been dropping short circumstance lead-ins (seedParts); (b) the retry list: the retry's [overused: ...] list never carries the cell's identity - the seed's own content words and the room's derived circumstance (retryExempt), plus ask words for the settled-customer stages - and the retry rule asks for the same details in other words, never new details (34 of the 43 measurement-changing paraphrases on the five drafts sat at retry positions and had lost the circumstance, the person or the quote). // p22 (2026-10-07, Tyler): p18 writer text with the category line removed from the request header - the seed carries the category in the buyer's words. (p19's "as the seed says it" sentence and p20's situation-tag line are out: measured on Netflix, the sentence cost variety and the tag line is re-tested without the header.)
+const PHRASINGS_VERSION = "p25"; // p25 (2026-10-08, Tyler): p24 writer text + a near-duplicate dedupe (<= 2 token edits vs the seed or a kept sibling: served near-dup pairs 20 -> 0 on the five-brand roll, 142 seed echoes culled - telling the writer the seed is prompt 1 changed nothing and was dropped) + a premium-vs-basic plan/tier cull (3 of 9 served -> 0) + the alias-collision fix in brand_aliases. Three writer sentences were rolled and measured as no-ops (seed-is-prompt-1, both-parts-rewritten/qualifiers-are-facts, category-pronoun) and are not in. // p24 (2026-10-08, pre-cull audit of the five-brand p23 roll, Tyler): the copied-opening cull is deleted (99 of 392 kills wrong - on a formula seed the opening is the ask), the scenario-label-leak check no longer drops paraphrases (0 of 14 earned), the category guard is one containment-aware word rule (59 of 73 kills wrong), a criteria first ask never names products, non-Latin characters are culled. // p23 (2026-10-07): (a) a room-pinned seed reaches the writer as situation | ask and the "leave details out entirely" licence is gone - the writer's first batch had been dropping short circumstance lead-ins (seedParts); (b) the retry list: the retry's [overused: ...] list never carries the cell's identity - the seed's own content words and the room's derived circumstance (retryExempt), plus ask words for the settled-customer stages - and the retry rule asks for the same details in other words, never new details (34 of the 43 measurement-changing paraphrases on the five drafts sat at retry positions and had lost the circumstance, the person or the quote). // p22 (2026-10-07, Tyler): p18 writer text with the category line removed from the request header - the seed carries the category in the buyer's words. (p19's "as the seed says it" sentence and p20's situation-tag line are out: measured on Netflix, the sentence cost variety and the tag line is re-tested without the header.)
 /** Paraphrases a social-validation cell fills to (seed + 4 = 5 prompts); mirrored by phrasingTarget in grid_setup. */
 export const SOCIAL_VALIDATION_PARAPHRASES = 4;
 /** p17: generic payment and timing qualifiers a scenario seed may carry,
@@ -6098,6 +6098,18 @@ export function criteriaAsksForProducts(text: string, category: string): boolean
 }
 /** p15: a worry voiced as someone else's claim. */
 export const HEARSAY_OPENER = /\b(?:i(?:'ve| have)? (?:heard|read|seen)|i(?:'ve| have)? been told|i was told|someone told me|i (?:keep|kept) (?:hearing|reading|seeing)|i hear|people (?:say|are saying|keep saying)|folks say|everyone says|they say|word is|rumou?rs?|(?:a )?friend (?:told|says|said)|(?:reviews|reddit|forums?) say)\b/i;
+/** p25: token-level edit distance (insert / delete / substitute) between
+ * two token lists - the near-duplicate dedupe's measure. */
+export function tokenEdits(a: string[], b: string[]): number {
+  const n = a.length, m = b.length;
+  let prev = Array.from({ length: m + 1 }, (_, j) => j);
+  for (let i = 1; i <= n; i++) {
+    const cur = [i];
+    for (let j = 1; j <= m; j++) cur[j] = Math.min(prev[j] + 1, cur[j - 1] + 1, prev[j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1));
+    prev = cur;
+  }
+  return prev[m];
+}
 /** p15: longest run of consecutive shared tokens between two token lists. */
 export function longestSharedRunWords(a: string[], b: string[]): string[] {
   let best: string[] = [];
@@ -6807,6 +6819,22 @@ export async function generatePhrasings(input: {
         if (text.split(/\s+/).length > seed.text.split(/\s+/).length + 10) { culls.ask++; continue; }
         const n = norm(text);
         if (seen.has(n)) { culls.dup++; continue; }
+        // p25: a near-duplicate (<= 2 token edits from the seed or a kept
+        // sibling) is culled and COUNTED - the writer is now told the seed
+        // is prompt 1 and never returned; the count says whether this
+        // dedupe is still doing work (landed-vs-served audit: 251 of 336
+        // raw S2s were seed echoes or one-swap siblings).
+        {
+          const tk = n.split(" ").filter(Boolean);
+          const near = (other: string) => tokenEdits(tk, norm(other).split(" ").filter(Boolean)) <= 2;
+          const hit = near(seed.text) ? "seed" : [...prior, ...kept].some((k) => near(k.text)) ? "sibling" : null;
+          if (hit) { culls.dup++; if (process.env.PHRASINGS_DEBUG) console.warn(`  cull near-dup(${hit}) [${seed.stage}]: ${text}`); continue; }
+        }
+        // p25: premium-vs-basic weighs cheaper SERVICES/PRODUCTS, never one
+        // product's plan or tier (3-6 per roll, all true on the five-brand sets).
+        if (seed.stage === "premium_worth" && !/\b(?:plans?|tiers?)\b/i.test(seed.text) && /\b(?:plans?|tiers?)\b/i.test(text)) {
+          culls.ask++; if (process.env.PHRASINGS_DEBUG) console.warn(`  cull plan-tier [${seed.stage}]: ${text}`); continue;
+        }
         // A paraphrase that shares most of its words with the seed or a sibling
         // is a thesaurus pass, not another person asking; drop it. Brand
         // tokens are excluded - required words can't count as copying.

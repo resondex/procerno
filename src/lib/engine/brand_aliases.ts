@@ -113,5 +113,14 @@ export async function brandAliasForms(brands: string[]): Promise<Record<string, 
       .filter((a) => a.replace(/[^a-z0-9]/g, "").length >= 3 && matchKey(a) !== k && !brandKeys.has(matchKey(a)));
     if (forms.length > 0) out[b] = forms;
   }
+  // p25 (2026-10-08): an alias the model hands to two or more brands is
+  // ambiguous and names neither - one roll put "platinum card" under both
+  // American Express and Capital One, and every paraphrase of the client's
+  // Platinum Value cell then "leaked" a rival (105 signature kills, the
+  // cell shipped 1 of 9). The suggestion is cached per roster, so whichever
+  // roll prod froze could carry the same collision.
+  const owners = new Map<string, number>();
+  for (const list of Object.values(out)) for (const a of new Set(list.map(matchKey))) owners.set(a, (owners.get(a) ?? 0) + 1);
+  for (const [name, list] of Object.entries(out)) out[name] = list.filter((a) => (owners.get(matchKey(a)) ?? 0) < 2);
   return out;
 }
