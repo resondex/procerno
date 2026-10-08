@@ -6057,7 +6057,7 @@ export interface Phrasing {
 // substance; no purpose or destination word is added to a scenario seed
 // that lacks it. Plus two writer sentences (worry = own claim; criteria's
 // second ask = what to consider).
-const PHRASINGS_VERSION = "p26"; // p26 (2026-10-08, writer bakeoff): the paraphrase writer is gpt-6-luna on the contract prompt v3 (the stage keep-list as data) - landed audits on five brands: meaning changes 1.7% vs 3.8%, duplicates 81 vs 251, brand-rule violations 0, every old failure class clean; plus four prompt edits from those audits (asks for 12 so the p0 seed retouch has slack; a seed's leading audience phrase is part of the question; the keep note names parts, never words; discovery asks WHICH). // p25 (2026-10-08, Tyler): p24 writer text + a near-duplicate dedupe (<= 2 token edits vs the seed or a kept sibling: served near-dup pairs 20 -> 0 on the five-brand roll, 142 seed echoes culled - telling the writer the seed is prompt 1 changed nothing and was dropped) + a premium-vs-basic plan/tier cull (3 of 9 served -> 0) + the alias-collision fix in brand_aliases. Three writer sentences were rolled and measured as no-ops (seed-is-prompt-1, both-parts-rewritten/qualifiers-are-facts, category-pronoun) and are not in. // p24 (2026-10-08, pre-cull audit of the five-brand p23 roll, Tyler): the copied-opening cull is deleted (99 of 392 kills wrong - on a formula seed the opening is the ask), the scenario-label-leak check no longer drops paraphrases (0 of 14 earned), the category guard is one containment-aware word rule (59 of 73 kills wrong), a criteria first ask never names products, non-Latin characters are culled. // p23 (2026-10-07): (a) a room-pinned seed reaches the writer as situation | ask and the "leave details out entirely" licence is gone - the writer's first batch had been dropping short circumstance lead-ins (seedParts); (b) the retry list: the retry's [overused: ...] list never carries the cell's identity - the seed's own content words and the room's derived circumstance (retryExempt), plus ask words for the settled-customer stages - and the retry rule asks for the same details in other words, never new details (34 of the 43 measurement-changing paraphrases on the five drafts sat at retry positions and had lost the circumstance, the person or the quote). // p22 (2026-10-07, Tyler): p18 writer text with the category line removed from the request header - the seed carries the category in the buyer's words. (p19's "as the seed says it" sentence and p20's situation-tag line are out: measured on Netflix, the sentence cost variety and the tag line is re-tested without the header.)
+const PHRASINGS_VERSION = "p27"; // p27 (2026-10-08, Tyler): the pricing "worth" word test and the criteria connector test are gone from the paraphrase culls - on the p26 roll they killed 356 and 228 faithful rewordings and drove the retry volume. // p26 (2026-10-08, writer bakeoff): the paraphrase writer is gpt-6-luna on the contract prompt v3 (the stage keep-list as data) - landed audits on five brands: meaning changes 1.7% vs 3.8%, duplicates 81 vs 251, brand-rule violations 0, every old failure class clean; plus four prompt edits from those audits (asks for 12 so the p0 seed retouch has slack; a seed's leading audience phrase is part of the question; the keep note names parts, never words; discovery asks WHICH). // p25 (2026-10-08, Tyler): p24 writer text + a near-duplicate dedupe (<= 2 token edits vs the seed or a kept sibling: served near-dup pairs 20 -> 0 on the five-brand roll, 142 seed echoes culled - telling the writer the seed is prompt 1 changed nothing and was dropped) + a premium-vs-basic plan/tier cull (3 of 9 served -> 0) + the alias-collision fix in brand_aliases. Three writer sentences were rolled and measured as no-ops (seed-is-prompt-1, both-parts-rewritten/qualifiers-are-facts, category-pronoun) and are not in. // p24 (2026-10-08, pre-cull audit of the five-brand p23 roll, Tyler): the copied-opening cull is deleted (99 of 392 kills wrong - on a formula seed the opening is the ask), the scenario-label-leak check no longer drops paraphrases (0 of 14 earned), the category guard is one containment-aware word rule (59 of 73 kills wrong), a criteria first ask never names products, non-Latin characters are culled. // p23 (2026-10-07): (a) a room-pinned seed reaches the writer as situation | ask and the "leave details out entirely" licence is gone - the writer's first batch had been dropping short circumstance lead-ins (seedParts); (b) the retry list: the retry's [overused: ...] list never carries the cell's identity - the seed's own content words and the room's derived circumstance (retryExempt), plus ask words for the settled-customer stages - and the retry rule asks for the same details in other words, never new details (34 of the 43 measurement-changing paraphrases on the five drafts sat at retry positions and had lost the circumstance, the person or the quote). // p22 (2026-10-07, Tyler): p18 writer text with the category line removed from the request header - the seed carries the category in the buyer's words. (p19's "as the seed says it" sentence and p20's situation-tag line are out: measured on Netflix, the sentence cost variety and the tag line is re-tested without the header.)
 /** Paraphrases a social-validation cell fills to (seed + 4 = 5 prompts); mirrored by phrasingTarget in grid_setup. */
 export const SOCIAL_VALIDATION_PARAPHRASES = 4;
 /** p17: generic payment and timing qualifiers a scenario seed may carry,
@@ -6274,7 +6274,12 @@ async function askerRoster(input: { brand: string; category: string; audience: s
 
 const PARA_ASK_WORD: Record<string, RegExp> = {
   feature_screening: /\bfeatures?\b/i,
-  pricing: /\bworth\b/i,
+  // p27 (2026-10-08, Tyler): pricing's literal "worth" is gone - the p26
+  // writer keeps the worth-it ask in other words ("does it justify its
+  // price", "should I pay more for") and the word test killed 356 of them
+  // on one five-brand roll, then retried the writer into its vocabulary.
+  // keepsLine (the line and the generic counterpart) and the design check
+  // carry the Value ask now.
   social_validation: /\b(love|loved|loves|recommend\w*|swear|favou?rites?|popular|rave\w*|go-to)\b/i,
 };
 // Over-generate so the overlap filter can be strict and still fill the set.
@@ -6883,8 +6888,12 @@ export async function generatePhrasings(input: {
         // p15 (AmEx paraphrase audit, round 2): a worry voiced as hearsay
         // measures rumor-correction, not confirm-or-rebut (the r16 seed rule).
         if (DOUBT_CHECK_STAGES.has(seed.stage) && HEARSAY_OPENER.test(text)) { culls.ask++; continue; }
-        // p15: criteria's second ask stays conditioned on the first (r25).
-        if (seed.stage === "criteria" && !CRITERIA_DEPENDENCY.test(text)) { culls.ask++; continue; }
+        // p27: the criteria connector test (p15) is gone from paraphrases -
+        // 228 faithful two-part asks killed on one roll ("where should I focus
+        // first, and what should I weigh") and the retries then produced
+        // "then / afterward" in 26 of 36. The seed rule (r25) is unchanged;
+        // the keep-list and the design check carry the dependency for
+        // paraphrases.
         // p16: and never turns into a which-products ask.
         if (seed.stage === "criteria" && criteriaAsksForProducts(text, input.category)) { culls.ask++; continue; }
         // p16: a class cell keeps its class phrase ("a <network> card", not
