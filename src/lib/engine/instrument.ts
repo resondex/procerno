@@ -6056,7 +6056,7 @@ export interface Phrasing {
 // substance; no purpose or destination word is added to a scenario seed
 // that lacks it. Plus two writer sentences (worry = own claim; criteria's
 // second ask = what to consider).
-const PHRASINGS_VERSION = "p23"; // p23 (2026-10-07, piece 1 of the p22 review): the retry's [overused: ...] list never carries the cell's identity - the seed's own content words and the room's derived circumstance (retryExempt), plus ask words for the settled-customer stages - and the retry rule asks for the same details in other words, never new details (34 of the 43 measurement-changing paraphrases on the five drafts sat at retry positions and had lost the circumstance, the person or the quote). // p22 (2026-10-07, Tyler): p18 writer text with the category line removed from the request header - the seed carries the category in the buyer's words. (p19's "as the seed says it" sentence and p20's situation-tag line are out: measured on Netflix, the sentence cost variety and the tag line is re-tested without the header.)
+const PHRASINGS_VERSION = "p23"; // p23 (2026-10-07): (a) a room-pinned seed reaches the writer as situation | ask and the "leave details out entirely" licence is gone - the writer's first batch had been dropping short circumstance lead-ins (seedParts); (b) the retry list: the retry's [overused: ...] list never carries the cell's identity - the seed's own content words and the room's derived circumstance (retryExempt), plus ask words for the settled-customer stages - and the retry rule asks for the same details in other words, never new details (34 of the 43 measurement-changing paraphrases on the five drafts sat at retry positions and had lost the circumstance, the person or the quote). // p22 (2026-10-07, Tyler): p18 writer text with the category line removed from the request header - the seed carries the category in the buyer's words. (p19's "as the seed says it" sentence and p20's situation-tag line are out: measured on Netflix, the sentence cost variety and the tag line is re-tested without the header.)
 /** Paraphrases a social-validation cell fills to (seed + 4 = 5 prompts); mirrored by phrasingTarget in grid_setup. */
 export const SOCIAL_VALIDATION_PARAPHRASES = 4;
 /** p17: generic payment and timing qualifiers a scenario seed may carry,
@@ -6144,6 +6144,42 @@ export function keepsFrequency(seed: string, para: string): boolean {
 /** Words that say "cheaper" in a Value counterpart (p14). */
 const CHEAPER_WORDS = /\b(?:cheap(?:er|est)?|(?:more |most )?affordable|less (?:expensive|costly|pricey)|lower[- ](?:cost|priced?|end)|low(?:er)?[- ]cost|budget(?:[- ]friendly)?|inexpensive|no[- ]fee|entry[- ]level|basic)\b/i;
 /** Ask words a paraphrase of these stages must keep (p11). */
+/** p23 (2026-10-07, Tyler): a room-pinned seed reaches the paraphrase
+ * writer as its two parts, situation | ask (seedParts). The seeds follow
+ * one formula - what is true of the asker, then the ask - and the writer,
+ * given the seed as one string plus "leave details out entirely", read a
+ * short lead-in ("<two-word circumstance>; <long pain clause>") as a
+ * detail and dropped it in its first batch (4, 1 of 9 kept across rolls;
+ * 9 of 9 with the parts). Invariant cells go over whole: splitting one
+ * exposed an audience lead-in to the invariant-cell note (no role or
+ * identity in the text) and the writer dropped it (9 of 9 -> 3 of 9). A
+ * stage-level structure line was measured on the same rolls and rejected:
+ * on formula stages it collapsed every head-to-head onto one wording (24
+ * near-duplicate pairs on one brand). */
+/** Split a seed into its situation (everything before the final question
+ * sentence) and its ask (that sentence). Null when the seed is a single
+ * ask, ends in two questions, or has no question mark - those are handed
+ * over whole. A one-sentence lead-in with a colon ("<circumstance>: is X
+ * worth it...") splits at the colon. */
+function seedParts(text: string): { situation: string; ask: string } | null {
+  const t = text.trim();
+  if (!t.endsWith("?")) return null;
+  const sents = t.split(/(?<=[.!?]["\u201d]?)\s+(?=\S)/);
+  if (sents.length >= 2) {
+    const ask = sents[sents.length - 1];
+    const situation = sents.slice(0, -1).join(" ");
+    if (/\?["\u201d]?$/.test(situation)) return null;
+    return { situation, ask };
+  }
+  // One sentence: a lead-in closed by a colon, semicolon or comma before
+  // the clause that asks ("<circumstance>, is X worth it...?").
+  const re = /[;:,]\s+(?=(?:is|are|was|what|what's|whats|which|how|should|do|does|can|could|would|will|who|where|any)\b)/gi;
+  let last: number | null = null; let m: RegExpExecArray | null;
+  while ((m = re.exec(t))) last = m.index;
+  if (last != null && last >= 12) return { situation: t.slice(0, last).trim(), ask: t.slice(last + 1).trim() };
+  return null;
+}
+
 const PARA_ASK_WORD: Record<string, RegExp> = {
   feature_screening: /\bfeatures?\b/i,
   pricing: /\bworth\b/i,
@@ -6375,7 +6411,11 @@ export async function generatePhrasings(input: {
     const cellText = subset
       .map(
         (c, i) =>
-          `${i}. [stage=${c.stage} situation=${c.situation ?? "-"} angle=${planAngle(c)}${c.mode ? ` reach=${c.mode}` : ""}] ${c.text}` +
+          `${i}. [stage=${c.stage} situation=${c.situation ?? "-"} angle=${planAngle(c)}${c.mode ? ` reach=${c.mode}` : ""}] ${
+            c.situation != null && seedParts(c.text)
+              ? `situation: ${seedParts(c.text)!.situation} | ask: ${seedParts(c.text)!.ask}`
+              : c.text
+          }` +
           // The stage's guidance rides with every seed: without it the
           // writer drifted problem_recognition ("pre-category") cells
           // into solution-seeking asks - real people ask for products,
@@ -6433,7 +6473,8 @@ export async function generatePhrasings(input: {
             "of them. A paraphrase that keeps the seed's opening clause and " +
             "changes only the question is not a paraphrase. Do not copy the seed's qualitative details (its examples, " +
             "its list of symptoms); describe the circumstance in your own " +
-            "words or leave details out entirely. A stated frequency or " +
+            "words. A room-pinned seed written as situation: ... | ask: ... has two parts. The situation part is a set of facts about the asker: every fact in it is kept in substance, however briefly the seed states it, said in other words. The ask part is kept in function. Neither part is dropped. " +
+            "A stated frequency or " +
             "amount in the seed (how often, how many, how much) is a fact of " +
             "the question: say it in other words at the same level, never " +
             "more or less often, more or fewer, and never drop it. NUMBERS are different: a number in the " +
