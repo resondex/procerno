@@ -2,7 +2,8 @@ import { createHash } from "crypto";
 import { tagCosts, withCostContext } from "../cost_log";
 import { anthropicClient, openaiClient } from "./providers";
 import { ModeratorsShape } from "./instrument_shapes";
-import { INSTRUMENT_HELPER_MODEL } from "./models";
+import { INSTRUMENT_HELPER_MODEL, PHRASINGS_WRITER_MODEL } from "./models";
+import { helperClient } from "./providers";
 import { pluralSlot, relationShift,
   AMBIGUOUS_FORMS, angleRivals, categoryNounOf, categorySpanIn, checkBattery, checkCandidateSignature, checkPromptAgainstSpec, classAnglesOf,
   deriveCheckSpec, DOUBT_CHECK_STAGES, MUST_NAME_STAGES, PRE_CATEGORY_STAGES, questionTypeOf, resolveCellSpec, scenarioLabelLeak, seedDesignLine, specWriterNote,
@@ -6056,7 +6057,7 @@ export interface Phrasing {
 // substance; no purpose or destination word is added to a scenario seed
 // that lacks it. Plus two writer sentences (worry = own claim; criteria's
 // second ask = what to consider).
-const PHRASINGS_VERSION = "p25"; // p25 (2026-10-08, Tyler): p24 writer text + a near-duplicate dedupe (<= 2 token edits vs the seed or a kept sibling: served near-dup pairs 20 -> 0 on the five-brand roll, 142 seed echoes culled - telling the writer the seed is prompt 1 changed nothing and was dropped) + a premium-vs-basic plan/tier cull (3 of 9 served -> 0) + the alias-collision fix in brand_aliases. Three writer sentences were rolled and measured as no-ops (seed-is-prompt-1, both-parts-rewritten/qualifiers-are-facts, category-pronoun) and are not in. // p24 (2026-10-08, pre-cull audit of the five-brand p23 roll, Tyler): the copied-opening cull is deleted (99 of 392 kills wrong - on a formula seed the opening is the ask), the scenario-label-leak check no longer drops paraphrases (0 of 14 earned), the category guard is one containment-aware word rule (59 of 73 kills wrong), a criteria first ask never names products, non-Latin characters are culled. // p23 (2026-10-07): (a) a room-pinned seed reaches the writer as situation | ask and the "leave details out entirely" licence is gone - the writer's first batch had been dropping short circumstance lead-ins (seedParts); (b) the retry list: the retry's [overused: ...] list never carries the cell's identity - the seed's own content words and the room's derived circumstance (retryExempt), plus ask words for the settled-customer stages - and the retry rule asks for the same details in other words, never new details (34 of the 43 measurement-changing paraphrases on the five drafts sat at retry positions and had lost the circumstance, the person or the quote). // p22 (2026-10-07, Tyler): p18 writer text with the category line removed from the request header - the seed carries the category in the buyer's words. (p19's "as the seed says it" sentence and p20's situation-tag line are out: measured on Netflix, the sentence cost variety and the tag line is re-tested without the header.)
+const PHRASINGS_VERSION = "p26"; // p26 (2026-10-08, writer bakeoff): the paraphrase writer is gpt-6-luna on the contract prompt v3 (the stage keep-list as data) - landed audits on five brands: meaning changes 1.7% vs 3.8%, duplicates 81 vs 251, brand-rule violations 0, every old failure class clean; plus four prompt edits from those audits (asks for 12 so the p0 seed retouch has slack; a seed's leading audience phrase is part of the question; the keep note names parts, never words; discovery asks WHICH). // p25 (2026-10-08, Tyler): p24 writer text + a near-duplicate dedupe (<= 2 token edits vs the seed or a kept sibling: served near-dup pairs 20 -> 0 on the five-brand roll, 142 seed echoes culled - telling the writer the seed is prompt 1 changed nothing and was dropped) + a premium-vs-basic plan/tier cull (3 of 9 served -> 0) + the alias-collision fix in brand_aliases. Three writer sentences were rolled and measured as no-ops (seed-is-prompt-1, both-parts-rewritten/qualifiers-are-facts, category-pronoun) and are not in. // p24 (2026-10-08, pre-cull audit of the five-brand p23 roll, Tyler): the copied-opening cull is deleted (99 of 392 kills wrong - on a formula seed the opening is the ask), the scenario-label-leak check no longer drops paraphrases (0 of 14 earned), the category guard is one containment-aware word rule (59 of 73 kills wrong), a criteria first ask never names products, non-Latin characters are culled. // p23 (2026-10-07): (a) a room-pinned seed reaches the writer as situation | ask and the "leave details out entirely" licence is gone - the writer's first batch had been dropping short circumstance lead-ins (seedParts); (b) the retry list: the retry's [overused: ...] list never carries the cell's identity - the seed's own content words and the room's derived circumstance (retryExempt), plus ask words for the settled-customer stages - and the retry rule asks for the same details in other words, never new details (34 of the 43 measurement-changing paraphrases on the five drafts sat at retry positions and had lost the circumstance, the person or the quote). // p22 (2026-10-07, Tyler): p18 writer text with the category line removed from the request header - the seed carries the category in the buyer's words. (p19's "as the seed says it" sentence and p20's situation-tag line are out: measured on Netflix, the sentence cost variety and the tag line is re-tested without the header.)
 /** Paraphrases a social-validation cell fills to (seed + 4 = 5 prompts); mirrored by phrasingTarget in grid_setup. */
 export const SOCIAL_VALIDATION_PARAPHRASES = 4;
 /** p17: generic payment and timing qualifiers a scenario seed may carry,
@@ -6194,6 +6195,81 @@ function seedParts(text: string): { situation: string; ask: string } | null {
   while ((m = re.exec(t))) last = m.index;
   if (last != null && last >= 12) return { situation: t.slice(0, last).trim(), ask: t.slice(last + 1).trim() };
   return null;
+}
+
+/** Writer bakeoff (2026-10-08, Tyler): PHRASINGS_PROMPT=v1|v2|v3 swaps the
+ * paraphrase writer's system text and per-seed notes (unset = today's);
+ * PHRASINGS_RAW_ONLY=1 returns the writer's first pass untouched (no culls,
+ * no retry, no design check) so the writer is measured alone. Neither is
+ * set in prod. */
+const PHRASINGS_PROMPT = process.env.PHRASINGS_PROMPT ?? "v3"; // v3 is the writer's prompt (p26); v0 = the pre-bakeoff 60-line prompt, v1/v2 = measured arms
+const PHRASINGS_RAW_ONLY = process.env.PHRASINGS_RAW_ONLY === "1";
+
+/** V3: the stage contract's keep-list per stage, as data (not a shape). */
+const STAGE_KEEP: Record<string, string> = {
+  problem_recognition: "the asker's circumstance; the one pain, in the category's own territory; an ask for a way out that names no kind of product",
+  category_education: "an ask for what kinds of options exist in the category and how they differ",
+  discovery: "the asker's circumstance; an ask for WHICH options in the category to look at first (an ask for where or how to start is not it)",
+  criteria: "the asker's circumstance; an ask for what to look at, and given that, what to consider",
+  use_case: "the asker's circumstance; the one outcome they want; an ask for which product does that best",
+  social_validation: "an ask for which options people most recommend or swear by",
+  comparison: "both named options; the pick ask, and why",
+  objections: "the brand; the doubt's substance; an open ask whether it is warranted",
+  churn_triggers: "the brand; the asker as its current customer; their complaint; an ask whether to stay or leave",
+  renewal: "the brand; the asker as its current customer with the bill coming due; an ask whether to renew or leave",
+  pricing: "the asker's circumstance; the named line; whether it is worth it over the generic cheaper option named",
+  premium_worth: "whether the category's premium options beat the cheaper services or products, or the cheaper ones are enough",
+  business_case: "the brand; the asker as its buyer or customer; the approver to convince; an ask for how to make the case",
+  expansion: "the brand; the asker as its satisfied customer; the one way of using it more; an ask whether to do it",
+  ecosystem: "the brand; the asker as its customer; the one need; an ask for what to pair with it",
+  advocacy: "the brand; the person being convinced; that person's objection; an ask for how to make the case",
+  alternatives: "the named option the asker is moving off (or, defensive, the brand the asker has); an ask for what to get instead, within the category",
+  repertoire: "the brand; the asker as its habitual buyer; an ask whether to stick with it or try something else",
+};
+
+const V1_CORE = (want: number) =>
+  "You write paraphrases for a research instrument: each seed is one designed question a buyer asks an AI assistant, and we measure the answers per seed. A paraphrase is the SAME question - same facts about the asker, same thing asked, same brands named and no others - typed by a DIFFERENT person in their own words.\n" +
+  `For each seed, write ${want} paraphrases, each a different sentence - the first one included: no paraphrase follows the seed's own sentence order with a word or two changed.\n` +
+  "What stays: every fact the seed states about the asker (including a qualifier like old, small, single-serve, or a stated amount or frequency), the brand names, the category word as the seed says it, any number as written, and what the question asks for (a pick, a worth-it verdict, a way out, what to look at and then what to consider, whether to stay or leave, how to make the case).\n" +
+  "What changes: everything else - the words, the order, the opening, the closing, the register, the length. The seed's own sentences are not a paraphrase; neither is one of your paraphrases with a word swapped.\n";
+const V1_WHO =
+  "Who is asking: different people from this audience, each tagged in `asker`; no role twice. A seed with a situation: part is asked by someone in that situation. A seed without one is asked by anyone from the audience, and the persona shapes voice only - the asker's own role or life does not enter the text. Either way, whatever the seed itself says about who is asking or for whom (an audience phrase, a role, a lead-in such as a group the question is for) is part of the question and stays in every paraphrase.\n";
+const V_NEVER =
+  "Never: a brand the seed does not name; a detail, purpose or constraint the seed does not state; a note to yourself or a label in the text; formal or marketing prose - people type these.\n" +
+  "A seed's bracket notes are part of its question.\n" +
+  "Return one object per seed, carrying the seed's index number exactly as given, each paraphrase as {text, asker}.";
+function versionedSystem(v: string, want: number): string {
+  if (v === "v2")
+    return V1_CORE(want) +
+      "Below each seed are its askers. Write ONE paraphrase per asker: that person, in that situation, asking exactly the seed's question the way they would type it to an assistant. Two askers never produce the same sentence shape. Tag each paraphrase with that asker.\n" +
+      V_NEVER;
+  if (v === "v3")
+    return V1_CORE(want) + V1_WHO +
+      "Each seed's [keep: ...] note is the contract for its stage: the elements every paraphrase of that seed keeps, in any words. It names PARTS of the question, never words to use - its wording never appears in a prompt.\n" +
+      V_NEVER;
+  return V1_CORE(want) + V1_WHO + V_NEVER;
+}
+
+/** V2: one roster call per brand roll - nine askers for the audience and
+ * nine per room - dealt one per paraphrase slot. */
+const rosterCache = new Map<string, { general: string[]; rooms: Record<string, string[]> }>();
+async function askerRoster(input: { brand: string; category: string; audience: string | null; scenarios: { label: string; description: string }[] }, want: number) {
+  const key = [input.brand, input.audience ?? "", ...input.scenarios.map((s) => s.label)].join("|");
+  const hit = rosterCache.get(key); if (hit) return hit;
+  const res = await helperClient(PHRASINGS_WRITER_MODEL).chat.completions.create({
+    model: PHRASINGS_WRITER_MODEL,
+    messages: [
+      { role: "system", content: `Buyers of ${input.category}. Audience: ${input.audience ?? "unknown"}. Write askers: real, different people who might type a question about this category into an AI assistant - each one line: who they are (age bracket, life or work situation) and how they type (fragments, full sentences, lowercase, careful, blunt). No brand names. Return ${want} general askers, and ${want} askers for each room below who are in that room's situation.` },
+      { role: "user", content: input.scenarios.map((s) => `Room "${s.label}": ${s.description}`).join("\n") || "(no rooms)" },
+    ],
+    response_format: { type: "json_schema", json_schema: { name: "askers", strict: true, schema: {
+      type: "object", additionalProperties: false,
+      properties: { general: { type: "array", items: { type: "string" } }, rooms: { type: "array", items: { type: "object", additionalProperties: false, properties: { label: { type: "string" }, askers: { type: "array", items: { type: "string" } } }, required: ["label", "askers"] } } },
+      required: ["general", "rooms"] } } },
+  });
+  const j = JSON.parse(res.choices[0]?.message?.content ?? "{}") as { general?: string[]; rooms?: { label: string; askers: string[] }[] };
+  const out = { general: j.general ?? [], rooms: Object.fromEntries((j.rooms ?? []).map((r) => [r.label, r.askers])) };
+  rosterCache.set(key, out); return out;
 }
 
 const PARA_ASK_WORD: Record<string, RegExp> = {
@@ -6395,6 +6471,14 @@ export async function generatePhrasings(input: {
       maxOverlap?: number;
     }
   ): Promise<Phrasing[][]> {
+    const roster = PHRASINGS_PROMPT === "v2" ? await askerRoster({ brand: input.brand, category: input.category, audience: input.audience, scenarios: input.scenarios }, want) : null;
+    const askersNote = (c: (typeof subset)[number], i: number): string => {
+      if (!roster) return "";
+      const pool = (c.situation && roster.rooms[c.situation]?.length ? roster.rooms[c.situation] : roster.general) ?? [];
+      if (pool.length === 0) return "";
+      const picked = Array.from({ length: want }, (_, k) => pool[(k + i) % pool.length]);
+      return `\n   askers:\n` + picked.map((a, k) => `   ${k + 1}. ${a}`).join("\n");
+    };
     const blindSeed = (c: (typeof subset)[number]) => {
       const spec = specOf.get(c);
       return spec ? spec.requiredBrands.length === 0 : brandSignature(c.text, input.brand, rivals) === "";
@@ -6436,7 +6520,9 @@ export async function generatePhrasings(input: {
           // writer drifted problem_recognition ("pre-category") cells
           // into solution-seeking asks - real people ask for products,
           // and the writer had no way to know this stage must not.
-          (hintOf.get(c.stage) ? `\n   [stage guidance: ${hintOf.get(c.stage)}]` : "") +
+          (PHRASINGS_PROMPT === "v0" || PHRASINGS_PROMPT === "v1" || PHRASINGS_PROMPT === "v2"
+            ? (hintOf.get(c.stage) ? `\n   [stage guidance: ${hintOf.get(c.stage)}]` : "")
+            : (STAGE_KEEP[c.stage] ? `\n   [keep: ${STAGE_KEEP[c.stage]}]` : "")) +
 
           // The owned noun travels WITH the seed (2026-10-01): the
           // continuity check rejects paraphrases that trade "chips" for
@@ -6464,15 +6550,16 @@ export async function generatePhrasings(input: {
             : "") +
           (opts?.copied?.[i]
             ? `\n   [copied: "${opts.copied[i]}" - this run of the seed's words was carried over by the existing paraphrases; say that part differently]`
-            : "")
+            : "") +
+          askersNote(c, i)
       )
       .join("\n");
-    const res = await openaiClient().chat.completions.create({
-      model: INSTRUMENT_HELPER_MODEL,
+    const res = await helperClient(PHRASINGS_WRITER_MODEL).chat.completions.create({
+      model: PHRASINGS_WRITER_MODEL,
       messages: [
         {
           role: "system",
-          content:
+          content: PHRASINGS_PROMPT !== "v0" ? versionedSystem(PHRASINGS_PROMPT, want + extra) : (
             "You write paraphrase sets for a research instrument that measures " +
             "a brand's standing in AI assistant answers. Each seed prompt below " +
             "is one designed question. For EACH seed, write exactly " +
@@ -6566,7 +6653,7 @@ export async function generatePhrasings(input: {
             "scenarios - draw its voices from them. Other seeds serve every " +
             "buyer - vary voices across all of them.\n" +
             `Decision unit: ${input.base.decision_unit}. ` +
-            "Return one object per seed with its index and its paraphrases, in order.",
+            "Return one object per seed with its index and its paraphrases, in order."),
         },
         {
           role: "user",
@@ -6590,6 +6677,18 @@ export async function generatePhrasings(input: {
     const parsed = JSON.parse(res.choices[0]?.message?.content ?? "{}") as {
       cells: { index: number; phrasings: Phrasing[] }[];
     };
+    // Writer bakeoff (2026-10-08): a model that misnumbers its cells (1-based,
+    // or renumbered) lands every paraphrase on the wrong seed. When the
+    // returned indices are not exactly the subset's, and the count matches,
+    // take them in order.
+    if (Array.isArray(parsed.cells) && parsed.cells.length === subset.length) {
+      const idxs = parsed.cells.map((c) => c.index);
+      const exact = idxs.every((x, k) => x === k);
+      if (!exact) {
+        const unique = new Set(idxs).size === idxs.length && idxs.every((x) => x >= 0 && x < subset.length);
+        if (!unique) { console.warn(`phrasings: cell indices ${JSON.stringify(idxs)} do not match the subset - taken in order`); parsed.cells = parsed.cells.map((c, k) => ({ ...c, index: k })); }
+      }
+    }
     input.onRaw?.(parsed);
     const result: Phrasing[][] = subset.map(() => []);
     // r15 brand judge: verdicts for every candidate's ambiguous one-word hits
@@ -6763,6 +6862,7 @@ export async function generatePhrasings(input: {
           .replace(/\s*\|\s*/g, ", ")
           .replace(/^[a-z]/, (ch) => ch.toUpperCase());
         if (!text) { culls.empty++; continue; }
+        if (PHRASINGS_RAW_ONLY) { kept.push({ text, asker: (p.asker ?? "").trim() }); continue; }
         if (process.env.PHRASINGS_DEBUG) console.warn(`  raw(${opts?.have ? "retry" : "first"}) [${seed.stage}] ${seed.text.slice(0, 40)} :: ${text}`);
         // p24: a non-Latin character is never the buyer's ("Just搬 in").
         if (/[^\x00-\x7F\u00C0-\u024F\u2010-\u2027\u2030-\u205E\u20AC]/.test(text)) { culls.ask++; if (process.env.PHRASINGS_DEBUG) console.warn(`  cull script [${seed.stage}]: ${text}`); continue; }
@@ -6900,7 +7000,7 @@ export async function generatePhrasings(input: {
     // phrasings come back, merged on top - and the retry LOOPS until
     // every cell reaches quota or a round stops helping. The batch is
     // served full; no visible after-the-fact healing.
-    for (let round = 0; round < PHRASINGS_RETRY_ROUNDS; round++) {
+    for (let round = 0; round < (PHRASINGS_RAW_ONLY ? 0 : PHRASINGS_RETRY_ROUNDS); round++) {
       const deficient = got.map((k, j) => (k.length < wantFor(subset[j].stage) ? j : -1)).filter((j) => j >= 0);
       if (deficient.length === 0) break;
       const subs = deficient.map((j) => subset[j]);
@@ -6970,7 +7070,7 @@ export async function generatePhrasings(input: {
     // their fix is the writer's instruction, measured by its own A/B.
     // PHRASINGS_CHECKS=0 disables (single-change experiments, emergencies).
     const uncheckedCells = new Set<number>();
-    if (process.env.PHRASINGS_CHECKS !== "0") {
+    if (process.env.PHRASINGS_CHECKS !== "0" && !PHRASINGS_RAW_ONLY) {
       const designFilter = async (cellIdxs: number[]): Promise<number[]> => {
         const targets: { j: number; k: number }[] = [];
         const candidates: { text: string; design: string }[] = [];

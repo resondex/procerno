@@ -278,6 +278,13 @@ export function openaiClient(): OpenAI {
 }
 const client = openaiClient;
 
+/** The OpenAI-compatible client for an internal helper model: OpenAI's own
+ * for gpt-*, xAI's endpoint for grok-* (writer bakeoff, 2026-10-08). */
+export function helperClient(model: string): OpenAI {
+  if (/^grok/i.test(model)) return compatClient({ id: model, label: model, vendor: "xAI", keyEnv: "XAI_API_KEY", baseURL: "https://api.x.ai/v1", mode: "instinct" } as Engine);
+  return openaiClient();
+}
+
 const _compat = new Map<string, OpenAI>();
 function compatClient(engine: Engine): OpenAI {
   const key = engine.baseURL ?? "default";

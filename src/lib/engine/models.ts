@@ -40,6 +40,10 @@ export const INSIGHTS_FALLBACK_MODEL = pick("INSIGHTS_FALLBACK_MODEL", "gpt-5-mi
 /** The instrument's small setup jobs: moderators, scenario suggest / near /
  * review, journey and scenario fit, cell review, phrasings (instrument.ts). */
 export const INSTRUMENT_HELPER_MODEL = pick("INSTRUMENT_HELPER_MODEL", "gpt-5-mini");
+/** The paraphrase writer (p26, 2026-10-08 writer bakeoff): gpt-6-luna on
+ * the contract prompt - 1.7% meaning changes vs gpt-5-mini's 3.8% on the
+ * same seeds, zero brand-rule violations, a third of the cost. */
+export const PHRASINGS_WRITER_MODEL = pick("PHRASINGS_WRITER_MODEL", "gpt-6-luna");
 /** Negative-verbatim explanations (runs/[id]/verbatims). Never followed
  * SUGGEST_MODEL, so it doesn't now. */
 export const VERBATIM_MODEL = process.env.VERBATIM_MODEL ?? "gpt-6-luna";
