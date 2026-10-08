@@ -653,7 +653,9 @@ export function keepsCategoryWord(seed: string, para: string, category: string):
   // has no anchors and its head-to-heads were never under this rule), and
   // containment-aware like r13's category tokens: "phone" in "smartphones",
   // "stream" in "streaming", "service" in "services".
-  const toks = key(category).split(" ").filter((w) => w.length >= 4);
+  // p24: tokens are stemmed ("cards" -> "card") so the containment test
+  // meets a brand word that carries the category word ("a Mastercard").
+  const toks = key(category).split(" ").filter((w) => w.length >= 4).map((w) => w.replace(/ies$/, "y").replace(/s$/, ""));
   if (toks.length < 2) return true;
   const has = (t: string) => key(t).split(" ").some((w) => w.length >= 4 && toks.some((tok) => tok === w || tok.includes(w) || w.includes(tok)));
   return !has(seed) || has(para);
@@ -1028,13 +1030,21 @@ export function checkBattery(input: {
       // p17: head-to-heads and offensive alternatives keep it too - with
       // bank-sized rivals, "X or Y, which would you pick" without the
       // category is no longer a pick in the category.
+      // p24 (pre-cull audit, five brands): the full-term rule culled
+      // "premium streaming services" for lacking "video" and "project
+      // management" for lacking "tool" - 59 of its 73 kills were wrong. One
+      // rule now, for blind cells and head-to-heads/alternatives alike: when
+      // the seed carries a distinctive category word, the paraphrase keeps
+      // one (containment-aware, stemmed - keepsCategoryWord). The ten kills
+      // it was right about ("American Express or Chase, which would you
+      // pick" - a bank comparison) carry no category word at all.
       else if (
         t !== cell.text &&
         input.category &&
         (!cell.spec || cell.spec.requiredBrands.length === 0) &&
-        !keepsCategoryTerm(cell.text, t, input.category)
+        !keepsCategoryWord(cell.text, t, input.category)
       )
-        findings.push({ cell: i, check: "blind_missing_category", text: t, detail: `paraphrase loosens the category term "${input.category}"` });
+        findings.push({ cell: i, check: "blind_missing_category", text: t, detail: `paraphrase drops the category word "${input.category}"` });
       // p17: a head-to-head or offensive alternatives paraphrase keeps at
       // least the category's head noun when the seed has it - with bank-
       // sized rivals, "X or Y, which would you pick" is no longer a pick in
@@ -1044,7 +1054,7 @@ export function checkBattery(input: {
         t !== cell.text &&
         input.category &&
         (cell.stage === "comparison" || cell.stage === "alternatives") &&
-        (!keepsCategoryNoun(cell.text, t, input.category) || !keepsCategoryWord(cell.text, t, input.category))
+        !keepsCategoryWord(cell.text, t, input.category)
       )
         findings.push({ cell: i, check: "blind_missing_category", text: t, detail: `paraphrase loosens the category term "${input.category}"` });
       // Path-independent: a prompt that copies a scenario LABEL - any

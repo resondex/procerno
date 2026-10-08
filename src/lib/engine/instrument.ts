@@ -6056,7 +6056,7 @@ export interface Phrasing {
 // substance; no purpose or destination word is added to a scenario seed
 // that lacks it. Plus two writer sentences (worry = own claim; criteria's
 // second ask = what to consider).
-const PHRASINGS_VERSION = "p23"; // p23 (2026-10-07): (a) a room-pinned seed reaches the writer as situation | ask and the "leave details out entirely" licence is gone - the writer's first batch had been dropping short circumstance lead-ins (seedParts); (b) the retry list: the retry's [overused: ...] list never carries the cell's identity - the seed's own content words and the room's derived circumstance (retryExempt), plus ask words for the settled-customer stages - and the retry rule asks for the same details in other words, never new details (34 of the 43 measurement-changing paraphrases on the five drafts sat at retry positions and had lost the circumstance, the person or the quote). // p22 (2026-10-07, Tyler): p18 writer text with the category line removed from the request header - the seed carries the category in the buyer's words. (p19's "as the seed says it" sentence and p20's situation-tag line are out: measured on Netflix, the sentence cost variety and the tag line is re-tested without the header.)
+const PHRASINGS_VERSION = "p24"; // p24 (2026-10-08, pre-cull audit of the five-brand p23 roll, Tyler): the copied-opening cull is deleted (99 of 392 kills wrong - on a formula seed the opening is the ask), the scenario-label-leak check no longer drops paraphrases (0 of 14 earned), the category guard is one containment-aware word rule (59 of 73 kills wrong), a criteria first ask never names products, non-Latin characters are culled. // p23 (2026-10-07): (a) a room-pinned seed reaches the writer as situation | ask and the "leave details out entirely" licence is gone - the writer's first batch had been dropping short circumstance lead-ins (seedParts); (b) the retry list: the retry's [overused: ...] list never carries the cell's identity - the seed's own content words and the room's derived circumstance (retryExempt), plus ask words for the settled-customer stages - and the retry rule asks for the same details in other words, never new details (34 of the 43 measurement-changing paraphrases on the five drafts sat at retry positions and had lost the circumstance, the person or the quote). // p22 (2026-10-07, Tyler): p18 writer text with the category line removed from the request header - the seed carries the category in the buyer's words. (p19's "as the seed says it" sentence and p20's situation-tag line are out: measured on Netflix, the sentence cost variety and the tag line is re-tested without the header.)
 /** Paraphrases a social-validation cell fills to (seed + 4 = 5 prompts); mirrored by phrasingTarget in grid_setup. */
 export const SOCIAL_VALIDATION_PARAPHRASES = 4;
 /** p17: generic payment and timing qualifiers a scenario seed may carry,
@@ -6086,12 +6086,16 @@ export function criteriaAsksForProducts(text: string, category: string): boolean
   const re = new RegExp(`(?:given (?:that|those|this)|then|after(?:wards| that)?|from there|with that in mind|because of that|once i \\w+)[^?.;]*?\\b(?:which|what)\\s+(?:\\w+\\s+){0,2}?(?:${nouns})\\b`, "i");
   // p17: or by verb - "what should I consider getting / choosing".
   const verb = /\b(?:consider|think about|look at)\s+(?:getting|choosing|picking|buying|applying for|signing up for|going with|switching to)\b/i;
-  return re.test(text) || verb.test(text);
+  // p24: the FIRST ask never names products either ("What streaming
+  // services should we look at, and then..." is Discovery's question) -
+  // 15 of 180 criteria paraphrases on the p23 roll, 1 borderline on p22.
+  // Judged on the final question sentence, before its connector.
+  const sents = text.trim().split(/(?<=[.!?])\s+/);
+  const ask = sents[sents.length - 1] ?? text;
+  const head = ask.split(/\b(?:given (?:that|those|this)|and then|then|after(?:wards| that)?|from there|with that in mind|based on that|because of that|once i \w+)\b/i)[0];
+  const first = new RegExp(`\\b(?:which|what)\\s+(?:\\w+\\s+){0,2}?(?:${nouns})\\b`, "i");
+  return re.test(text) || verb.test(text) || first.test(head);
 }
-/** p15: a paraphrase whose first COPY_OPENING words equal the seed's or a
- * kept sibling's copied its opening clause. Calibrated on two AmEx rounds:
- * 4 words hits 20-22% of output (cell 39's template 8 of 9), 5 hits 15%. */
-const COPY_OPENING = 4;
 /** p15: a worry voiced as someone else's claim. */
 export const HEARSAY_OPENER = /\b(?:i(?:'ve| have)? (?:heard|read|seen)|i(?:'ve| have)? been told|i was told|someone told me|i (?:keep|kept) (?:hearing|reading|seeing)|i hear|people (?:say|are saying|keep saying)|folks say|everyone says|they say|word is|rumou?rs?|(?:a )?friend (?:told|says|said)|(?:reviews|reddit|forums?) say)\b/i;
 /** p15: longest run of consecutive shared tokens between two token lists. */
@@ -6725,8 +6729,6 @@ export async function generatePhrasings(input: {
         return lineWords.every((w) => ws.has(w) || ws.has(`${w}s`) || ws.has(w.replace(/s$/, ""))) && CHEAPER_WORDS.test(t);
       };
       const keptWords: Set<string>[] = [cellWords(seed.text), ...prior.map((p) => cellWords(p.text))];
-      const openingOf = (t: string): string => norm(t).split(" ").filter(Boolean).slice(0, COPY_OPENING).join(" ");
-      const keptOpenings = new Set<string>([openingOf(seed.text), ...prior.map((p) => openingOf(p.text))]);
       const kept: Phrasing[] = [];
       // Cull accounting (2026-09-28): a cell whose batch dies usually dies
       // to ONE filter (correlated kill - the Asana signature bug looked
@@ -6737,8 +6739,21 @@ export async function generatePhrasings(input: {
         // The writer occasionally merges its asker metadata into the
         // text ("asker: parent - two big dogs..."); the label belongs in
         // the field, never in a served prompt.
-        const text = stripRosterParens(humanize((p.text ?? "").trim()), [input.brand, ...input.competitors]).replace(/^asker:\s*[^-:]{1,40}[-:]\s*/i, "");
+        // p23: the writer occasionally copies the seed's part label or
+        // separator into the prompt ("Situation: we're retiring an old
+        // tracker...", "<situation> | is X worth it...") - 12 of 1,800 on the
+        // first five-brand roll. Both are ours, never the buyer's: strip the
+        // label, turn the bar into a comma, restore the sentence's capital.
+        const text = stripRosterParens(humanize((p.text ?? "").trim()), [input.brand, ...input.competitors])
+          .replace(/^asker:\s*[^-:]{1,40}[-:]\s*/i, "")
+          .replace(/^(?:situation|ask)\s*:\s*/i, "")
+          // ... and the part separator (7 of 300 on Doritos: "<situation> | is X worth it...").
+          .replace(/\s*\|\s*/g, ", ")
+          .replace(/^[a-z]/, (ch) => ch.toUpperCase());
         if (!text) { culls.empty++; continue; }
+        if (process.env.PHRASINGS_DEBUG) console.warn(`  raw(${opts?.have ? "retry" : "first"}) [${seed.stage}] ${seed.text.slice(0, 40)} :: ${text}`);
+        // p24: a non-Latin character is never the buyer's ("Just搬 in").
+        if (/[^\x00-\x7F\u00C0-\u024F\u2010-\u2027\u2030-\u205E\u20AC]/.test(text)) { culls.ask++; if (process.env.PHRASINGS_DEBUG) console.warn(`  cull script [${seed.stage}]: ${text}`); continue; }
         // The signature check is the blind/branded discipline: a paraphrase of
         // a blind seed that names a brand is not a paraphrase, it is a leak.
         // Spec cells: every required brand named (tolerant), no forbidden
@@ -6806,21 +6821,13 @@ export async function generatePhrasings(input: {
           if (process.env.PHRASINGS_DEBUG) console.warn(`  cull overlap(words) [${seed.stage}]: ${text}`);
           continue;
         }
-        // p15: a copied OPENING is a copy whatever the exempt-word sets say -
-        // with brand, category and ask words exempt, a short seed left the
-        // overlap filter almost nothing to compare, and nine paraphrases
-        // kept the seed's opening clause word for word (AmEx cell 39). The
-        // first COPY_OPENING words identical to the seed's or a kept
-        // sibling's is culled. (A shared-run guard was measured and
-        // rejected: at 5-7 masked tokens it hit 32-58% of faithful output,
-        // mostly the required ask formula "which <category> should I...".)
-        const opening = openingOf(text);
-        if (keptOpenings.has(opening)) {
-          culls.overlap++;
-          if (process.env.PHRASINGS_DEBUG) console.warn(`  cull overlap(opening "${opening}") [${seed.stage}]: ${text}`);
-          continue;
-        }
-        keptOpenings.add(opening);
+        // p24: the copied-opening cull (p15) is gone - the pre-cull audit of
+        // the five-brand p23 roll scored 99 of its 392 kills wrong: on a
+        // formula seed the first four words ARE the ask ("Which <category>
+        // tools do...", "Are premium <category>...", "<brand> or <brand>")
+        // and it emptied every short cell while the writer had 10-32 good
+        // candidates. The word-overlap cull above and the [copied: ...]
+        // retry note carry the thesaurus-pass case.
         seen.add(n);
         keptWords.push(ws);
         kept.push({ text, asker: (p.asker ?? "").trim() });
@@ -7009,7 +7016,11 @@ export async function generatePhrasings(input: {
         });
         for (const f of findings) {
           const j = cellIdxs[f.cell];
-          if (f.check === "duplicate_paraphrase") {
+          if (f.check === "duplicate_paraphrase" || f.check === "scenario_label_leak") {
+            // p24: a paraphrase echoing a room's title words is the buyer
+            // talking ("Weekly stock-up:", "Game night") - 0 of 14 such
+            // drops were earned on the five-brand audit. Logged, not dropped
+            // (the seed side keeps its label rule).
             console.warn(`battery check [${f.check}] cell ${subset[j]?.stage}: ${f.detail}`);
             continue;
           }
