@@ -6,13 +6,14 @@ import { INSTRUMENT_HELPER_MODEL, PHRASINGS_WRITER_MODEL } from "./models";
 import { helperClient } from "./providers";
 import { pluralSlot, relationShift,
   AMBIGUOUS_FORMS, angleRivals, categoryNounOf, categorySpanIn, checkBattery, checkCandidateSignature, checkPromptAgainstSpec, classAnglesOf,
-  deriveCheckSpec, DOUBT_CHECK_STAGES, MUST_NAME_STAGES, PRE_CATEGORY_STAGES, questionTypeOf, resolveCellSpec, scenarioLabelLeak, seedDesignLine, specWriterNote,
+  deriveCheckSpec, DOUBT_CHECK_STAGES, MUST_NAME_STAGES, PRE_CATEGORY_STAGES, questionTypeOf, resolveCellSpec, scenarioLabelLeak, specWriterNote,
   sameSeatOf, stageDesignIntent, statedPriceFinding, moneyBoltOn, TERM_COLLISIONS, textNamesBrand, textNamesCategory, upstreamOf,
   type CellCheckSpec, type ClassAngle, type QuestionType, type RosterClasses, type RosterRoles, type ValueLine,
 } from "./battery_checks";
 export { MUST_NAME_STAGES };
 import { store } from "../store";
 import { brandAliasForms } from "./brand_aliases";
+import { checkStructure, stageStructure, type StructureCell } from "./stage_structure";
 import { primeBrandVerdicts } from "./brand_judge";
 import { matchKey } from "../brand_key";
 import type { CacheMeta } from "../types";
@@ -6057,7 +6058,7 @@ export interface Phrasing {
 // substance; no purpose or destination word is added to a scenario seed
 // that lacks it. Plus two writer sentences (worry = own claim; criteria's
 // second ask = what to consider).
-const PHRASINGS_VERSION = "p27"; // p27 (2026-10-08, Tyler): the pricing "worth" word test and the criteria connector test are gone from the paraphrase culls - on the p26 roll they killed 356 and 228 faithful rewordings and drove the retry volume. // p26 (2026-10-08, writer bakeoff): the paraphrase writer is gpt-6-luna on the contract prompt v3 (the stage keep-list as data) - landed audits on five brands: meaning changes 1.7% vs 3.8%, duplicates 81 vs 251, brand-rule violations 0, every old failure class clean; plus four prompt edits from those audits (asks for 12 so the p0 seed retouch has slack; a seed's leading audience phrase is part of the question; the keep note names parts, never words; discovery asks WHICH). // p25 (2026-10-08, Tyler): p24 writer text + a near-duplicate dedupe (<= 2 token edits vs the seed or a kept sibling: served near-dup pairs 20 -> 0 on the five-brand roll, 142 seed echoes culled - telling the writer the seed is prompt 1 changed nothing and was dropped) + a premium-vs-basic plan/tier cull (3 of 9 served -> 0) + the alias-collision fix in brand_aliases. Three writer sentences were rolled and measured as no-ops (seed-is-prompt-1, both-parts-rewritten/qualifiers-are-facts, category-pronoun) and are not in. // p24 (2026-10-08, pre-cull audit of the five-brand p23 roll, Tyler): the copied-opening cull is deleted (99 of 392 kills wrong - on a formula seed the opening is the ask), the scenario-label-leak check no longer drops paraphrases (0 of 14 earned), the category guard is one containment-aware word rule (59 of 73 kills wrong), a criteria first ask never names products, non-Latin characters are culled. // p23 (2026-10-07): (a) a room-pinned seed reaches the writer as situation | ask and the "leave details out entirely" licence is gone - the writer's first batch had been dropping short circumstance lead-ins (seedParts); (b) the retry list: the retry's [overused: ...] list never carries the cell's identity - the seed's own content words and the room's derived circumstance (retryExempt), plus ask words for the settled-customer stages - and the retry rule asks for the same details in other words, never new details (34 of the 43 measurement-changing paraphrases on the five drafts sat at retry positions and had lost the circumstance, the person or the quote). // p22 (2026-10-07, Tyler): p18 writer text with the category line removed from the request header - the seed carries the category in the buyer's words. (p19's "as the seed says it" sentence and p20's situation-tag line are out: measured on Netflix, the sentence cost variety and the tag line is re-tested without the header.)
+const PHRASINGS_VERSION = "p28"; // p28 (2026-10-08, Tyler): the paraphrase design check is the STRUCTURE check - one call per cell against the stage's closed list of shape properties (stage_structure.ts, STAGE_STRUCTURE_VERSION ss1), replacing the per-paraphrase same-question line that scored 0 kills in 1,824 while audits found structure violations. The seed-side intents (stageDesignIntent, used by the seed check, heals, alternates and cell_review), seedDesignLine (the spec's stored designLine), STAGE_KEEP and the stage hints still hold the contract in their own prose - migrate them to the table next time it is revisited. // p27 (2026-10-08, Tyler): the pricing "worth" word test and the criteria connector test are gone from the paraphrase culls - on the p26 roll they killed 356 and 228 faithful rewordings and drove the retry volume. // p26 (2026-10-08, writer bakeoff): the paraphrase writer is gpt-6-luna on the contract prompt v3 (the stage keep-list as data) - landed audits on five brands: meaning changes 1.7% vs 3.8%, duplicates 81 vs 251, brand-rule violations 0, every old failure class clean; plus four prompt edits from those audits (asks for 12 so the p0 seed retouch has slack; a seed's leading audience phrase is part of the question; the keep note names parts, never words; discovery asks WHICH). // p25 (2026-10-08, Tyler): p24 writer text + a near-duplicate dedupe (<= 2 token edits vs the seed or a kept sibling: served near-dup pairs 20 -> 0 on the five-brand roll, 142 seed echoes culled - telling the writer the seed is prompt 1 changed nothing and was dropped) + a premium-vs-basic plan/tier cull (3 of 9 served -> 0) + the alias-collision fix in brand_aliases. Three writer sentences were rolled and measured as no-ops (seed-is-prompt-1, both-parts-rewritten/qualifiers-are-facts, category-pronoun) and are not in. // p24 (2026-10-08, pre-cull audit of the five-brand p23 roll, Tyler): the copied-opening cull is deleted (99 of 392 kills wrong - on a formula seed the opening is the ask), the scenario-label-leak check no longer drops paraphrases (0 of 14 earned), the category guard is one containment-aware word rule (59 of 73 kills wrong), a criteria first ask never names products, non-Latin characters are culled. // p23 (2026-10-07): (a) a room-pinned seed reaches the writer as situation | ask and the "leave details out entirely" licence is gone - the writer's first batch had been dropping short circumstance lead-ins (seedParts); (b) the retry list: the retry's [overused: ...] list never carries the cell's identity - the seed's own content words and the room's derived circumstance (retryExempt), plus ask words for the settled-customer stages - and the retry rule asks for the same details in other words, never new details (34 of the 43 measurement-changing paraphrases on the five drafts sat at retry positions and had lost the circumstance, the person or the quote). // p22 (2026-10-07, Tyler): p18 writer text with the category line removed from the request header - the seed carries the category in the buyer's words. (p19's "as the seed says it" sentence and p20's situation-tag line are out: measured on Netflix, the sentence cost variety and the tag line is re-tested without the header.)
 /** Paraphrases a social-validation cell fills to (seed + 4 = 5 prompts); mirrored by phrasingTarget in grid_setup. */
 export const SOCIAL_VALIDATION_PARAPHRASES = 4;
 /** p17: generic payment and timing qualifiers a scenario seed may carry,
@@ -6206,24 +6207,24 @@ const PHRASINGS_PROMPT = process.env.PHRASINGS_PROMPT ?? "v3"; // v3 is the writ
 const PHRASINGS_RAW_ONLY = process.env.PHRASINGS_RAW_ONLY === "1";
 
 /** V3: the stage contract's keep-list per stage, as data (not a shape). */
-const STAGE_KEEP: Record<string, string> = {
+export const STAGE_KEEP: Record<string, string> = {
   problem_recognition: "the asker's circumstance; the one pain, in the category's own territory; an ask for a way out that names no kind of product",
   category_education: "an ask for what kinds of options exist in the category and how they differ",
   discovery: "the asker's circumstance; an ask for WHICH options in the category to look at first (an ask for where or how to start is not it)",
   criteria: "the asker's circumstance; an ask for what to look at, and given that, what to consider",
   use_case: "the asker's circumstance; the one outcome they want; an ask for which product does that best",
   social_validation: "an ask for which options people most recommend or swear by",
-  comparison: "both named options; the pick ask, and why",
+  comparison: "both named options; an ask for which ONE the answerer would pick, and why - never reasons for either side",
   objections: "the brand; the doubt's substance; an open ask whether it is warranted",
   churn_triggers: "the brand; the asker as its current customer; their complaint; an ask whether to stay or leave",
   renewal: "the brand; the asker as its current customer with the bill coming due; an ask whether to renew or leave",
-  pricing: "the asker's circumstance; the named line; whether it is worth it over the generic cheaper option named",
+  pricing: "the asker's circumstance; the named line; a verdict ask - is it worth it over the generic cheaper option named - never whether it is worth considering",
   premium_worth: "whether the category's premium options beat the cheaper services or products, or the cheaper ones are enough",
   business_case: "the brand; the asker as its buyer or customer; the approver to convince; an ask for how to make the case",
   expansion: "the brand; the asker as its satisfied customer; the one way of using it more; an ask whether to do it",
   ecosystem: "the brand; the asker as its customer; the one need; an ask for what to pair with it",
   advocacy: "the brand; the person being convinced; that person's objection; an ask for how to make the case",
-  alternatives: "the named option the asker is moving off (or, defensive, the brand the asker has); an ask for what to get instead, within the category",
+  alternatives: "the named option the asker is moving off, a move already decided, never hypothetical (or, defensive, the brand the asker has); an ask for what to get instead, within the category",
   repertoire: "the brand; the asker as its habitual buyer; an ask whether to stick with it or try something else",
 };
 
@@ -7080,53 +7081,55 @@ export async function generatePhrasings(input: {
     // PHRASINGS_CHECKS=0 disables (single-change experiments, emergencies).
     const uncheckedCells = new Set<number>();
     if (process.env.PHRASINGS_CHECKS !== "0" && !PHRASINGS_RAW_ONLY) {
+      // STRUCTURE check (p28, 2026-10-08, Tyler): each cell's paraphrases
+      // are judged in ONE call against the stage's closed list of shape
+      // properties (stage_structure.ts) - the same contract the writer's
+      // keep note states - instead of a per-paraphrase "same designed
+      // question" line. The same-question line ran at 0 kills in 1,824
+      // while audits found either-way head-to-heads, conditional moves,
+      // "worth considering" Value asks and one-half criteria: structure
+      // violations the checker was never told the structure for. A
+      // paraphrase fails on any property it misses; nothing outside the
+      // list is a failure. Sibling-concern bleed is covered by the doubt
+      // properties naming the seed's subject.
       const designFilter = async (cellIdxs: number[]): Promise<number[]> => {
-        const targets: { j: number; k: number }[] = [];
-        const candidates: { text: string; design: string }[] = [];
+        const targets: number[] = [];
+        const cellsIn: { cell: StructureCell; seed: string; texts: string[] }[] = [];
         for (const j of cellIdxs) {
-          // The STORED design line for spec cells; synthesized from the
-          // seed for legacy ones (the same string - design-check cache
-          // entries carry over).
-          const spec = specOf.get(subset[j]);
-          // Always derived FRESH from the current seed: a carried spec from
-          // an earlier era can hold a null/stale designLine (the Netflix
-          // "Korean thrillers" rephrase silently skipped the check on a
-          // carried s7 spec, 2026-09-29).
-          // A class cell's line is the head-to-head-vs-a-class design (the
-          // same-question check then enforces class framing per paraphrase).
-          let line = seedDesignLine(
-            subset[j].stage, input.brand, subset[j].text, specOf.get(subset[j])?.concern ?? null,
-            subset[j].classPhrase ? { classPhrase: subset[j].classPhrase as string } : null
-          );
-          if (!line) continue;
-          const own = (specOf.get(subset[j])?.concern ?? "").toLowerCase();
-          const others = (input.avoidConcerns ?? []).filter((x) => x && x.toLowerCase() !== own);
-          if (own && others.length > 0)
-            line += ` It must NOT primarily voice these OTHER designed concerns the battery covers elsewhere: ${others.join("; ")}.`;
-          got[j].forEach((ph, k) => {
-            targets.push({ j, k });
-            candidates.push({ text: ph.text, design: line });
-          });
+          if (got[j].length === 0) continue;
+          const c = subset[j];
+          const cell: StructureCell = {
+            stage: c.stage, angle: c.angle, situation: c.situation ?? null,
+            classPhrase: c.classPhrase ?? null, valueLine: c.valueLine ?? null,
+            concern: specOf.get(c)?.concern ?? c.concern ?? null,
+          };
+          if (!stageStructure(cell, input.brand)) continue;
+          targets.push(j);
+          cellsIn.push({ cell, seed: c.text, texts: got[j].map((ph) => ph.text) });
         }
-        if (candidates.length === 0) return [];
-        const verdicts = await checkDesignFidelity({ candidates, meta: input.meta });
-        const dropAt = new Map<number, Set<number>>();
+        if (cellsIn.length === 0) return [];
+        const verdicts = await checkStructure({ brand: input.brand, cells: cellsIn, meta: input.meta });
+        const short: number[] = [];
         verdicts.forEach((v, i) => {
+          const j = targets[i];
+          if (!v) return;
           // An unchecked verdict serves (fail open) but poisons the cell's
           // cacheability - the next request re-runs the check instead of
           // inheriting a stale pass for the cache TTL.
-          if (v.unchecked) uncheckedCells.add(targets[i].j);
-          if (!v.voices) {
-            const t = targets[i];
-            (dropAt.get(t.j) ?? dropAt.set(t.j, new Set()).get(t.j)!).add(t.k);
-            console.warn(`phrasings design check dropped [${subset[t.j].stage}]: ${got[t.j][t.k]?.text.slice(0, 90)} - ${v.reason}`);
+          if (v.unchecked) { uncheckedCells.add(j); return; }
+          const props = stageStructure(cellsIn[i].cell, input.brand)?.properties ?? [];
+          const drop = new Set<number>();
+          v.fails.forEach((fs, k) => {
+            if (fs.length === 0) return;
+            drop.add(k);
+            const f = fs[0];
+            console.warn(`phrasings structure check dropped [${subset[j].stage}] property ${f.property} (${(props[f.property - 1] ?? "").slice(0, 60)}): ${got[j][k]?.text.slice(0, 90)} - ${f.reason}`);
+          });
+          if (drop.size > 0) {
+            got[j] = got[j].filter((_, k) => !drop.has(k));
+            if (got[j].length < wantFor(subset[j].stage)) short.push(j);
           }
         });
-        const short: number[] = [];
-        for (const [j, ks] of dropAt) {
-          got[j] = got[j].filter((_, k) => !ks.has(k));
-          if (got[j].length < wantFor(subset[j].stage)) short.push(j);
-        }
         return short;
       };
       // Mechanical drops (free) run BEFORE the paid design pass and share
