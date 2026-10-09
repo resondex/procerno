@@ -906,5 +906,8 @@ if (fails > 0) process.exitCode = 1;
   ok("worth it passes", ss.structureStringFail(val, "Is Brand Plus worth it over cheaper widgets?") === null);
   ok("one-half criteria", ss.structureStringFail(crit, "What should I consider after figuring out what to look for? I'm buying a widget.")?.property === 3);
   ok("two-part criteria passes", ss.structureStringFail(crit, "I'm buying a widget. What should I look at, and given that, what should I consider?") === null);
+  ok("folded criteria (before weighing the rest, no second ask)", ss.structureStringFail(crit, "We're picking a widget for the kids. What should we inspect before deciding what else matters?")?.property === 3);
+  ok("'before deciding, and what should I consider' is two asks", ss.structureStringFail(crit, "I'm choosing a widget. What should I assess before deciding, and what should I consider from there?") === null);
+  ok("social validation keeps the seed's audience as a property", (ss.stageStructure({ stage: "social_validation", angle: "generic" }, "Brand")?.properties[0] ?? "").includes("audience"));
   console.log("13. stage structure: " + (process.exitCode ? "FAILED" : "ALL PASS"));
 }

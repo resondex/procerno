@@ -58,7 +58,12 @@ import type { ValueLine } from "./battery_checks";
  * actually") - the forced tool gave the model nowhere to think except the
  * fail list. Each fail now carries `clear`; a fail the model marks unclear
  * is recorded in the log but never drops the paraphrase. */
-export const STAGE_STRUCTURE_VERSION = "ss4";
+/** ss5 (2026-10-09, p28 served audits): social validation keeps any
+ * audience the seed states (Jira's cell lost "software teams" in all four);
+ * a criteria paraphrase that folds the two asks into "what should we look
+ * at before weighing the rest" is one-half criteria (6 on Netflix, none
+ * caught by the model or the first string form). */
+export const STAGE_STRUCTURE_VERSION = "ss5";
 
 export interface StructureCell {
   stage: string;
@@ -135,7 +140,7 @@ export function stageStructure(cell: StructureCell, brand: string): { shape: str
       ] };
     case "social_validation":
       return { shape: "social validation", properties: [
-        "Asks what people actually use, love, recommend or swear by.",
+        "Asks what people actually use, love, recommend or swear by; keeps any audience the seed states (who the people are), compressed or implied is fine.",
         "Forces named brands or products in the answer.",
         "Names none itself.",
       ] };
@@ -249,6 +254,11 @@ const EITHER_WAY = /\b(?:or (?:the other way|vice versa|the reverse)|over \w[\w 
 const CONDITIONAL_MOVE = /^\s*(?:if|suppose|say|assuming|in case|once) (?:i|we)('d| would|'ll| will|'m| am|'re| are)? ?(?:stop|leave|leaving|drop|quit|cancel|move off|moving off|move on|moving on|switch(?:ing)? (?:from|away)|ditch|give up|walk away|get rid of|were to|off\b)\b|\b(?:if|once) (?:i|we)(?:'m|'re| am| are)? (?:leav|switch|mov|stop|dropp|ditch)\w*\b.*\?/i;
 const WORTH_CONSIDERING = /\bworth (?:considering|a look|looking at|a thought|thinking about|exploring)\b/i;
 const HALF_CRITERIA = /^\s*what should (?:i|we) (?:consider|weigh|think about|factor in)\b.*\b(?:after|once) (?:(?:i|we|i've|we've) )?(?:look|figur|decid|settl|work)\w*\b/i;
+/** The folded form: one ask whose object is "before weighing / deciding the
+ * rest" and no second ask after it (calibrated on the p26 and p28 rolls: 0
+ * and 6 hits, all one-half; a sentence that goes on to ", and what should
+ * I consider" is two asks and is exempt). */
+const FOLDED_CRITERIA = /\bwhat should (?:i|we) (?:look at|inspect|assess|examine|review|check|pay attention to|consider)\b[^?]{0,60}\bbefore (?:(?:i|we) )?(?:weigh|decid|consider|settl|choos|pick)\w*\b(?![^?]*,? and what)/i;
 
 export function structureStringFail(cell: StructureCell, text: string): StructureFail | null {
   const a = cell.angle.trim().toLowerCase();
@@ -256,6 +266,7 @@ export function structureStringFail(cell: StructureCell, text: string): Structur
   if (cell.stage === "alternatives" && a !== "defensive" && a !== "generic" && a !== "" && CONDITIONAL_MOVE.test(text)) return { property: 2, reason: "the move is conditional (string form)", clear: true };
   if (cell.stage === "pricing" && WORTH_CONSIDERING.test(text)) return { property: 3, reason: "asks whether it is worth considering, forces no verdict (string form)", clear: true };
   if (cell.stage === "criteria" && HALF_CRITERIA.test(text)) return { property: 3, reason: "asks only what to consider and treats what to look at as settled (string form)", clear: true };
+  if (cell.stage === "criteria" && FOLDED_CRITERIA.test(text)) return { property: 3, reason: "folds the two asks into one - what to look at before weighing the rest - with no second ask (string form)", clear: true };
   return null;
 }
 
