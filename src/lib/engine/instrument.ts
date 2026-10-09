@@ -7120,9 +7120,14 @@ export async function generatePhrasings(input: {
           const props = stageStructure(cellsIn[i].cell, input.brand)?.properties ?? [];
           const drop = new Set<number>();
           v.fails.forEach((fs, k) => {
-            if (fs.length === 0) return;
+            // A borderline call (clear: false) is logged, never dropped.
+            const clear = fs.filter((f) => f.clear);
+            if (clear.length === 0) {
+              if (fs.length > 0) console.warn(`phrasings structure check borderline [${subset[j].stage}] property ${fs[0].property}: ${got[j][k]?.text.slice(0, 90)} - ${fs[0].reason}`);
+              return;
+            }
             drop.add(k);
-            const f = fs[0];
+            const f = clear[0];
             console.warn(`phrasings structure check dropped [${subset[j].stage}] property ${f.property} (${(props[f.property - 1] ?? "").slice(0, 60)}): ${got[j][k]?.text.slice(0, 90)} - ${f.reason}`);
           });
           if (drop.size > 0) {

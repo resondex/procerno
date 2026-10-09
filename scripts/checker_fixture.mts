@@ -881,3 +881,30 @@ if (fails > 0) process.exitCode = 1;
   ok("p17 noun keep: 'services' now meets 'service'", bc.keepsCategoryNoun("Which streaming services should we look at?", "Which streaming service should we start with?", "video streaming services") === true);
   console.log("12. p18 paraphrase guards: " + (process.exitCode ? "FAILED" : "ALL PASS"));
 }
+
+
+// 13. Stage structure (p28, 2026-10-09): the table covers every live stage, and the four string readings fire on their shapes only.
+{
+  const ok = (label: string, cond: boolean, extra = "") => { if (!cond) { console.error(`   FAIL ${label} ${extra}`); process.exitCode = 1; } else console.log(`   ok   ${label} ${extra}`); };
+  const ss = await import("../src/lib/engine/stage_structure.ts");
+  const live = ["problem_recognition", "category_education", "discovery", "criteria", "use_case", "social_validation", "premium_worth", "comparison", "objections", "churn_triggers", "renewal", "repertoire", "pricing", "business_case", "expansion", "ecosystem", "advocacy"];
+  ok("every live stage has a shape", live.every((st) => ss.stageStructure({ stage: st, angle: "generic", situation: "room" }, "Brand") !== null));
+  ok("offensive and defensive alternatives have different shapes", ss.stageStructure({ stage: "alternatives", angle: "Rival" }, "Brand")?.shape !== ss.stageStructure({ stage: "alternatives", angle: "defensive" }, "Brand")?.shape);
+  ok("generic alternatives and retired stages have none", ss.stageStructure({ stage: "alternatives", angle: "generic" }, "Brand") === null && ss.stageStructure({ stage: "feature_screening", angle: "generic" }, "Brand") === null);
+  ok("a class head-to-head names the class", (ss.stageStructure({ stage: "comparison", angle: "class", classPhrase: "a Visa card" }, "Brand")?.properties[0] ?? "").includes("a Visa card"));
+  ok("a Value cell names its line and counterpart", (ss.stageStructure({ stage: "pricing", angle: "generic", situation: "r", valueLine: { line: "Brand Plus", counterpart: "a cheaper mid-tier option" } }, "Brand")?.properties[1] ?? "").includes("Brand Plus"));
+  const h2h = { stage: "comparison", angle: "Rival" }; const alt = { stage: "alternatives", angle: "Rival" }; const def = { stage: "alternatives", angle: "defensive" }; const val = { stage: "pricing", angle: "generic" }; const crit = { stage: "criteria", angle: "generic" };
+  ok("either-way head-to-head", ss.structureStringFail(h2h, "Why would you choose Brand over Rival, or Rival over Brand, for a widget?")?.property === 2);
+  ok("'or the other way around'", ss.structureStringFail(h2h, "Would you pick Brand over Rival, or the other way around? Why?")?.property === 2);
+  ok("a plain pick passes", ss.structureStringFail(h2h, "Brand or Rival for a widget: which would you choose, and why?") === null);
+  ok("conditional move", ss.structureStringFail(alt, "If I leave Rival, what should I get instead?")?.property === 2);
+  ok("'once I'm off' is conditional", ss.structureStringFail(alt, "Once I'm off Rival, where should I go instead?")?.property === 2);
+  ok("trailing 'if I'm leaving' is conditional", ss.structureStringFail(alt, "Which widget should I get next if I'm leaving Rival?")?.property === 2);
+  ok("a decided move passes", ss.structureStringFail(alt, "I'm leaving Rival for widgets. What should I get instead?") === null);
+  ok("defensive alternatives are not read for the move", ss.structureStringFail(def, "If I leave Brand, which widgets should I consider next?") === null);
+  ok("worth considering", ss.structureStringFail(val, "Is Brand Plus worth considering over cheaper widgets?")?.property === 3);
+  ok("worth it passes", ss.structureStringFail(val, "Is Brand Plus worth it over cheaper widgets?") === null);
+  ok("one-half criteria", ss.structureStringFail(crit, "What should I consider after figuring out what to look for? I'm buying a widget.")?.property === 3);
+  ok("two-part criteria passes", ss.structureStringFail(crit, "I'm buying a widget. What should I look at, and given that, what should I consider?") === null);
+  console.log("13. stage structure: " + (process.exitCode ? "FAILED" : "ALL PASS"));
+}

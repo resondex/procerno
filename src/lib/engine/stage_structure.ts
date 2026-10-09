@@ -38,7 +38,27 @@ import type { ValueLine } from "./battery_checks";
 
 /** Bump when a property's meaning changes (cache-era rule: the table is
  * checker text the request cannot see). */
-export const STAGE_STRUCTURE_VERSION = "ss1";
+/** ss2 (2026-10-08): wording calibrated on the first 206-cell run (ss1:
+ * 169 flags, ~70 earned) - a plain I/we states the asker; possession or
+ * use states the customer; one side of keep-or-leave stated still leaves
+ * the other open; renewing mentioned is the bill due; "which first" still
+ * forces options; a pick asked as a recommendation or better pick is a
+ * pick; "its price" states no price; a second ask that treats the first
+ * as already answered is one-half criteria; borderline passes. */
+/** ss3 (2026-10-08): the second run (ss2: 149 flags, ~70 earned) read
+ * "a plain I or we is enough" as "I or we required" and flagged every
+ * paraphrase that carried the asker implicitly ("for a game-night crowd",
+ * "our teen's first phone"); the current-customer properties did the same.
+ * A checker cannot tell implicit from absent, so presence properties are
+ * now CONTRADICTION properties: the paraphrase may compress or imply who
+ * is asking, it may not change or add to it. The shape asks (one pick, a
+ * verdict, a decided move, two linked asks) stay as they were. */
+/** ss4 (2026-10-09): on the ss3 run about a dozen listed failures carried
+ * a reason that said the property passes ("borderline pass", "acceptable
+ * actually") - the forced tool gave the model nowhere to think except the
+ * fail list. Each fail now carries `clear`; a fail the model marks unclear
+ * is recorded in the log but never drops the paraphrase. */
+export const STAGE_STRUCTURE_VERSION = "ss4";
 
 export interface StructureCell {
   stage: string;
@@ -60,8 +80,8 @@ export function stageStructure(cell: StructureCell, brand: string): { shape: str
   const b = brand.trim();
   const pinned = !!cell.situation;
   const circumstance = pinned
-    ? "States the asker's circumstance from the seed (the facts about who is asking and their situation), in any words."
-    : "Keeps whatever the seed states about who is asking or for whom, in any words.";
+    ? "Keeps the asker's circumstance from the seed (the facts about who is asking and their situation) - in any words, compressed or implied is fine, with or without an I or we; it fails only when a fact about the asker is changed, dropped entirely, or added."
+    : "Keeps whatever the seed states about who is asking or for whom - compressed or implied is fine; it fails only when that is changed or something about the asker is added.";
   switch (cell.stage) {
     case "problem_recognition":
       return { shape: "problem recognition", properties: [
@@ -73,20 +93,20 @@ export function stageStructure(cell: StructureCell, brand: string): { shape: str
     case "discovery":
       return { shape: "discovery", properties: [
         circumstance,
-        "Forces a set of named options in the category - an ask for WHICH ones to look at or get. An ask for where to start, how to begin, or what to look for does not force options and fails.",
+        "Forces a set of named options in the category - an ask for WHICH ones to look at, consider or get (asking which to look at FIRST still forces options). An ask for where to start, how to begin, or what to look for does not force options and fails.",
         "Names no brand and lists no wanted features.",
       ] };
     case "criteria":
       return { shape: "criteria", properties: [
         circumstance,
-        "Asks what to look at (the first ask).",
-        "Asks, conditioned on the answer to the first ask, what to consider (any connector; the dependency is the shape, not the word). A paraphrase with only one of the two asks fails.",
-        "Forces no product: neither ask names or requests products or options; offers no candidate criteria; names no brand.",
+        "Asks what to look at (the first ask) - asking which criteria, factors or things to look at IS this ask.",
+        "Asks, conditioned on the answer to the first ask, what to consider (any connector; the dependency is the shape, not the word). A paraphrase with only one of the two asks fails, including one that asks only what to consider and treats what to look at as already settled.",
+        "Forces no product: neither ask names or requests products or options; offers no candidate criteria of its own (asking which criteria matter is not offering them); names no brand.",
       ] };
     case "use_case":
       return { shape: "use-case fit", properties: [
         pinned
-          ? "States who the asker is, from the seed; where the seed's situation is only a buying moment or channel, the paraphrase may leave it out."
+          ? "Keeps who the asker is, from the seed - in any words, compressed or implied is fine, third person or no I or we is fine; it fails only when the person is changed or someone else is added. Where the seed's situation is only a buying moment or channel, the paraphrase may leave it out."
           : circumstance,
         "States ONE outcome the asker wants - the seed's outcome - in their own words (not a feature, not a list).",
         "Forces one best product for that outcome (which one does that best).",
@@ -103,8 +123,8 @@ export function stageStructure(cell: StructureCell, brand: string): { shape: str
       return { shape: "value", properties: [
         "States the asker's circumstance from the seed, in a few words.",
         ends,
-        "Forces a worth-it verdict: is the line worth it over the counterpart, for this asker. An ask whether it is worth considering, worth a look, or what to think about forces no verdict and fails; an ask whether it is worth more, or whether to pay the difference, is a verdict.",
-        "Names no rival; states no price or fee as a fact; presupposes no verdict.",
+        "Forces a worth-it verdict: is the line worth it over the counterpart, for this asker. The verdict may be asked as a choice between the two, as an opinion, or as whether it is worth more or worth paying the difference. An ask whether it is worth considering, worth a look, or what to think about forces no verdict and fails.",
+        "Names no rival; states no price or fee as a FIGURE (an amount) - words like its price, the price, the cost or the fee state no figure and pass; presupposes no verdict.",
       ] };
     }
     case "category_education":
@@ -136,9 +156,9 @@ export function stageStructure(cell: StructureCell, brand: string): { shape: str
       const rival = cell.angle;
       return { shape: "head-to-head", properties: [
         `Names ${b} and ${rival}, and no other brand.`,
-        "Forces ONE pick between them - which one the answerer would choose. An ask for reasons on either side, for what would make someone choose one over the other, for a comparison or a breakdown, or an ask that runs both ways forces no single pick and fails.",
+        "Forces ONE pick between them - which one the answerer would choose, recommend or call the better pick; a compare lead-in that ends in that pick still forces it. An ask for reasons on either side, for what would make someone choose one over the other, or an ask that runs both ways forces no single pick and fails.",
         "Asks why.",
-        "Adds no situation, criteria or usage the seed does not state.",
+        "Adds no situation, criteria or usage the seed does not state (the category word, a buying or for-yourself frame, and asking the answerer's own choice are not additions).",
       ] };
     }
     case "objections":
@@ -150,16 +170,16 @@ export function stageStructure(cell: StructureCell, brand: string): { shape: str
       ] };
     case "churn_triggers":
       return { shape: "churn", properties: [
-        `Names ${b}; the asker is its current customer.`,
+        `Names ${b}; the asker is not recast as a prospect who has never had ${b} - speaking as someone who has or uses it, however briefly or implicitly (even in a would-you question), passes; it fails only when the paraphrase says or clearly implies the asker does not have it.`,
         `States the worry - the seed's worry, same subject${cell.concern ? ` (${cell.concern})` : ""}.`,
-        "Leaves both staying and leaving possible: neither is foreclosed, and both need not be spelled out. A fix-it ask with no option of leaving, an asker who has already decided, or a choice between two ways of leaving fails.",
+        "Leaves both staying and leaving possible: a question that asks only whether to stay, only whether to leave, or whether one beats the other still leaves the other open and passes. Only a fix-it ask with no option of leaving, an asker who has already decided, or a choice between two ways of leaving fails.",
         "Asks for no price, cost figure or accounting.",
       ] };
     case "renewal":
       return { shape: "renewal", properties: [
         `Names ${b}; the asker is its current customer.`,
-        "States that the renewal or bill is coming due.",
-        "Asks whether to keep paying; leaves both keep and cancel possible.",
+        "States that the renewal or bill is coming due - any mention of renewing, another year, or the fee posting states it.",
+        "Asks whether to keep paying; asking only whether to renew, only whether to cancel, or whether one beats the other still leaves both possible and passes.",
         "Asks for no price, cost figure or accounting.",
       ] };
     case "repertoire":
@@ -184,9 +204,9 @@ export function stageStructure(cell: StructureCell, brand: string): { shape: str
       ] };
     case "ecosystem":
       return { shape: "ecosystem", properties: [
-        `Names ${b}; the asker states they are a current customer.`,
+        `Names ${b}; the asker is not recast as someone without ${b} - having or using it may be stated briefly or left implied; it fails only when the paraphrase says or clearly implies the asker does not have it.`,
         `States ONE need - the seed's need - that ${b}'s own companions, add-ons or partners could serve; a need defined by where ${b} is absent or falls short fails.`,
-        `Asks what to pair with ${b} for it; forces no third-party-only answer.`,
+        `Asks what to pair, use or go with ${b} for it, in any words; forces no third-party-only answer.`,
         "Names no rival.",
       ] };
     case "advocacy":
@@ -207,7 +227,7 @@ export function stageStructure(cell: StructureCell, brand: string): { shape: str
       if (a === "generic" || a === "") return null;
       return { shape: "offensive alternatives", properties: [
         `Names ${cell.angle} as the option being left, and no other brand (never ${b}).`,
-        "States the move as decided. A conditional move (if I leave, if I move on, I may switch, suppose I drop it) fails.",
+        "States the move as decided: the asker is leaving, has left, is done, plans to, is ready to, or will not buy it again - any of these passes, and so does asking what replaces it as the asker's next one. Only a conditional or undecided move fails: if I leave, once I leave, I may switch, I'm considering leaving, suppose I drop it.",
         "Asks what to get instead, within the category.",
         "Gives no reason for leaving, and no team, segment or identity the seed does not state.",
       ] };
@@ -215,6 +235,28 @@ export function stageStructure(cell: StructureCell, brand: string): { shape: str
     default:
       return null;
   }
+}
+
+/**
+ * Mechanical readings of four properties whose failing shape has a
+ * reliable string form (the draft's "Regexes" rule: named for the
+ * property, not a p-number). Calibrated on the 206 p26 served cells: every
+ * hit is a paraphrase the model also failed when it looked, and the model
+ * misses 2-3 of them per run (either-way head-to-heads, one-half criteria)
+ * from call-to-call noise. Free, so they run before the model call.
+ */
+const EITHER_WAY = /\b(?:or (?:the other way|vice versa|the reverse)|over \w[\w ]{0,30}, or \w[\w ]{0,30} over|(?:rather|instead) than \w[\w ]{0,30}, or \w[\w ]{0,30} (?:rather|instead) than)\b|\bwhy would you (?:choose|pick|go with)\b.*\bor\b.*\bover\b/i;
+const CONDITIONAL_MOVE = /^\s*(?:if|suppose|say|assuming|in case|once) (?:i|we)('d| would|'ll| will|'m| am|'re| are)? ?(?:stop|leave|leaving|drop|quit|cancel|move off|moving off|move on|moving on|switch(?:ing)? (?:from|away)|ditch|give up|walk away|get rid of|were to|off\b)\b|\b(?:if|once) (?:i|we)(?:'m|'re| am| are)? (?:leav|switch|mov|stop|dropp|ditch)\w*\b.*\?/i;
+const WORTH_CONSIDERING = /\bworth (?:considering|a look|looking at|a thought|thinking about|exploring)\b/i;
+const HALF_CRITERIA = /^\s*what should (?:i|we) (?:consider|weigh|think about|factor in)\b.*\b(?:after|once) (?:(?:i|we|i've|we've) )?(?:look|figur|decid|settl|work)\w*\b/i;
+
+export function structureStringFail(cell: StructureCell, text: string): StructureFail | null {
+  const a = cell.angle.trim().toLowerCase();
+  if (cell.stage === "comparison" && EITHER_WAY.test(text)) return { property: 2, reason: "asks for reasons either way, forces no single pick (string form)", clear: true };
+  if (cell.stage === "alternatives" && a !== "defensive" && a !== "generic" && a !== "" && CONDITIONAL_MOVE.test(text)) return { property: 2, reason: "the move is conditional (string form)", clear: true };
+  if (cell.stage === "pricing" && WORTH_CONSIDERING.test(text)) return { property: 3, reason: "asks whether it is worth considering, forces no verdict (string form)", clear: true };
+  if (cell.stage === "criteria" && HALF_CRITERIA.test(text)) return { property: 3, reason: "asks only what to consider and treats what to look at as settled (string form)", clear: true };
+  return null;
 }
 
 export const STRUCTURE_CHECK_MODEL = process.env.STRUCTURE_CHECK_MODEL ?? process.env.DESIGN_CHECK_MODEL ?? "claude-sonnet-5";
@@ -225,7 +267,7 @@ export const STRUCTURE_CHECK_SYSTEM =
   "The seed is the designed question. Each numbered property describes the SHAPE the question must have - what it forces the answer to be - never the words it must use. " +
   "For each paraphrase, decide for every property whether the paraphrase satisfies it. A property is satisfied in any wording, register or order; different detail, backstory and phrasing are expected and fine. " +
   "Judge only the paraphrase's own words, never what an answer might say. Nothing outside the numbered list is a failure. " +
-  "Report only the properties a paraphrase fails, each with a one-line reason. Respond ONLY by calling the structure_verdict tool.";
+  "Report the properties a paraphrase fails, each with a one-line reason and whether the failure is clear; mark a borderline or arguable call clear: false. Respond ONLY by calling the structure_verdict tool.";
 
 const STRUCTURE_SCHEMA = {
   type: "object",
@@ -246,8 +288,9 @@ const STRUCTURE_SCHEMA = {
               properties: {
                 property: { type: "integer", description: "The failed property's number." },
                 reason: { type: "string", description: "One short sentence." },
+                clear: { type: "boolean", description: "true only when the property is clearly failed; false for a borderline or arguable call." },
               },
-              required: ["property", "reason"],
+              required: ["property", "reason", "clear"],
             },
           },
         },
@@ -258,7 +301,7 @@ const STRUCTURE_SCHEMA = {
   required: ["verdicts"],
 };
 
-export interface StructureFail { property: number; reason: string; }
+export interface StructureFail { property: number; reason: string; /** false = the model called it borderline; logged, never dropped. */ clear: boolean; }
 export interface StructureVerdict {
   /** Per paraphrase (same order as `texts`): the failed properties. */
   fails: StructureFail[][];
@@ -330,9 +373,10 @@ export async function checkStructure(input: {
             const fo = asObj(f); if (!fo) continue;
             const property = Number(fo.property);
             if (!Number.isInteger(property) || property < 1 || property > s.properties.length) continue;
-            fails[idx].push({ property, reason: String(fo.reason ?? "") });
+            fails[idx].push({ property, reason: String(fo.reason ?? ""), clear: fo.clear !== false });
           }
         }
+        texts.forEach((t, i) => { const sf = structureStringFail(cell, t); if (sf && !fails[i].some((f) => f.property === sf.property && f.clear)) fails[i].unshift(sf); });
         const out: StructureVerdict = { fails };
         await store.cacheSet(key, JSON.stringify(out), input.meta);
         return out;

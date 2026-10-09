@@ -29,16 +29,17 @@ for (const [brand, slug] of Object.entries(brands)) {
   });
   const t0 = Date.now();
   const verdicts = await checkStructure({ brand, cells });
-  verdicts.forEach((v: { fails: { property: number; reason: string }[][]; unchecked?: boolean } | null, i: number) => {
+  verdicts.forEach((v: { fails: { property: number; reason: string; clear: boolean }[][]; unchecked?: boolean } | null, i: number) => {
     const c = served[i];
     const s = stageStructure(cells[i].cell, brand);
     if (!s) { uncovered++; out.push({ brand: slug, stage: c.stage, situation: c.situation, seed: c.seed, phrasings: c.phrasings, fails: [], uncovered: true }); return; }
     calls++;
     const fails = v && !v.unchecked
-      ? v.fails.flatMap((fs, k) => fs.length ? [{ index: k + 1, property: fs[0].property, text: s.properties[fs[0].property - 1], reason: fs.map((f) => `${f.property}: ${f.reason}`).join(" | ") }] : [])
+      ? v.fails.flatMap((fs, k) => { const c = fs.filter((f) => f.clear); return c.length ? [{ index: k + 1, property: c[0].property, text: s.properties[c[0].property - 1], reason: c.map((f) => `${f.property}: ${f.reason}`).join(" | "), borderline: fs.length - c.length }] : []; })
       : [];
     flagged += fails.length;
-    out.push({ brand: slug, stage: c.stage, situation: c.situation, seed: c.seed, phrasings: c.phrasings, fails, error: v?.unchecked ? "unchecked" : undefined });
+    const borderline = v && !v.unchecked ? v.fails.flatMap((fs, k) => fs.length && !fs.some((f) => f.clear) ? [{ index: k + 1, property: fs[0].property, reason: fs[0].reason }] : []) : [];
+    out.push({ brand: slug, stage: c.stage, situation: c.situation, seed: c.seed, phrasings: c.phrasings, fails, borderline, error: v?.unchecked ? "unchecked" : undefined });
   });
   console.log(`${brand}: ${served.length} cells in ${Math.round((Date.now() - t0) / 1000)}s`);
 }
