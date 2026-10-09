@@ -63,7 +63,11 @@ import type { ValueLine } from "./battery_checks";
  * a criteria paraphrase that folds the two asks into "what should we look
  * at before weighing the rest" is one-half criteria (6 on Netflix, none
  * caught by the model or the first string form). */
-export const STAGE_STRUCTURE_VERSION = "ss5";
+/** ss6 (2026-10-09, p29 roll): the criteria no-product property read the
+ * category's own name ("streaming service" for a seed that said "a
+ * service") as naming a product and emptied one cell (17 of 18 dropped).
+ * The category word is the buyer's vocabulary, never a product. */
+export const STAGE_STRUCTURE_VERSION = "ss6";
 
 export interface StructureCell {
   stage: string;
@@ -106,7 +110,7 @@ export function stageStructure(cell: StructureCell, brand: string): { shape: str
         circumstance,
         "Asks what to look at (the first ask) - asking which criteria, factors or things to look at IS this ask.",
         "Asks, conditioned on the answer to the first ask, what to consider (any connector; the dependency is the shape, not the word). A paraphrase with only one of the two asks fails, including one that asks only what to consider and treats what to look at as already settled.",
-        "Forces no product: neither ask names or requests products or options; offers no candidate criteria of its own (asking which criteria matter is not offering them); names no brand.",
+        "Forces no product: neither ask asks for, names or requests a product, brand or option to pick; offers no candidate criteria of its own (asking which criteria matter is not offering them); names no brand. The category's own name (the kind of thing being bought) is the buyer's vocabulary, not a product, and passes.",
       ] };
     case "use_case":
       return { shape: "use-case fit", properties: [
