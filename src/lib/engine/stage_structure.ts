@@ -73,7 +73,10 @@ import type { ValueLine } from "./battery_checks";
  * slipped the verb list. Calibrated on four rolls (720 criteria
  * paraphrases): 0 / 6 / 4 / 3 hits, every one a one-ask sentence; a
  * sentence that goes on to "and then consider" is two asks and exempt. */
-export const STAGE_STRUCTURE_VERSION = "ss7";
+/** ss8 (2026-10-09, p30 audits): "what makes you pick one over the other"
+ * is the either-way shape without the X-over-Y wording; one hit on p26 and
+ * one on p30, both missed by the model, none on p28/p29. */
+export const STAGE_STRUCTURE_VERSION = "ss8";
 
 export interface StructureCell {
   stage: string;
@@ -260,7 +263,7 @@ export function stageStructure(cell: StructureCell, brand: string): { shape: str
  * misses 2-3 of them per run (either-way head-to-heads, one-half criteria)
  * from call-to-call noise. Free, so they run before the model call.
  */
-const EITHER_WAY = /\b(?:or (?:the other way|vice versa|the reverse)|over \w[\w ]{0,30}, or \w[\w ]{0,30} over|(?:rather|instead) than \w[\w ]{0,30}, or \w[\w ]{0,30} (?:rather|instead) than)\b|\bwhy would you (?:choose|pick|go with)\b.*\bor\b.*\bover\b/i;
+const EITHER_WAY = /\b(?:or (?:the other way|vice versa|the reverse)|over \w[\w ]{0,30}, or \w[\w ]{0,30} over|(?:rather|instead) than \w[\w ]{0,30}, or \w[\w ]{0,30} (?:rather|instead) than|one over the other|one or the other)\b|\bwhy would you (?:choose|pick|go with)\b.*\bor\b.*\bover\b/i;
 const CONDITIONAL_MOVE = /^\s*(?:if|suppose|say|assuming|in case|once) (?:i|we)('d| would|'ll| will|'m| am|'re| are)? ?(?:stop|leave|leaving|drop|quit|cancel|move off|moving off|move on|moving on|switch(?:ing)? (?:from|away)|ditch|give up|walk away|get rid of|were to|off\b)\b|\b(?:if|once) (?:i|we)(?:'m|'re| am| are)? (?:leav|switch|mov|stop|dropp|ditch)\w*\b.*\?/i;
 const WORTH_CONSIDERING = /\bworth (?:considering|a look|looking at|a thought|thinking about|exploring)\b/i;
 const HALF_CRITERIA = /^\s*what should (?:i|we) (?:consider|weigh|think about|factor in)\b.*\b(?:after|once) (?:(?:i|we|i've|we've) )?(?:look|figur|decid|settl|work)\w*\b/i;

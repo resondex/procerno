@@ -897,6 +897,7 @@ if (fails > 0) process.exitCode = 1;
   ok("either-way head-to-head", ss.structureStringFail(h2h, "Why would you choose Brand over Rival, or Rival over Brand, for a widget?")?.property === 2);
   ok("'or the other way around'", ss.structureStringFail(h2h, "Would you pick Brand over Rival, or the other way around? Why?")?.property === 2);
   ok("a plain pick passes", ss.structureStringFail(h2h, "Brand or Rival for a widget: which would you choose, and why?") === null);
+  ok("'what makes you pick one over the other' is either-way", ss.structureStringFail(h2h, "What makes you pick one over the other for a widget: Brand or Rival?")?.property === 2);
   ok("conditional move", ss.structureStringFail(alt, "If I leave Rival, what should I get instead?")?.property === 2);
   ok("'once I'm off' is conditional", ss.structureStringFail(alt, "Once I'm off Rival, where should I go instead?")?.property === 2);
   ok("trailing 'if I'm leaving' is conditional", ss.structureStringFail(alt, "Which widget should I get next if I'm leaving Rival?")?.property === 2);
