@@ -67,7 +67,13 @@ import type { ValueLine } from "./battery_checks";
  * category's own name ("streaming service" for a seed that said "a
  * service") as naming a product and emptied one cell (17 of 18 dropped).
  * The category word is the buyer's vocabulary, never a product. */
-export const STAGE_STRUCTURE_VERSION = "ss6";
+/** ss7 (2026-10-09, p29 audits): the folded criteria form is read by its
+ * "before <deciding>" clause alone - "what deserves attention before I
+ * decide", "what should I focus on / look for ... before considering" all
+ * slipped the verb list. Calibrated on four rolls (720 criteria
+ * paraphrases): 0 / 6 / 4 / 3 hits, every one a one-ask sentence; a
+ * sentence that goes on to "and then consider" is two asks and exempt. */
+export const STAGE_STRUCTURE_VERSION = "ss7";
 
 export interface StructureCell {
   stage: string;
@@ -262,7 +268,7 @@ const HALF_CRITERIA = /^\s*what should (?:i|we) (?:consider|weigh|think about|fa
  * rest" and no second ask after it (calibrated on the p26 and p28 rolls: 0
  * and 6 hits, all one-half; a sentence that goes on to ", and what should
  * I consider" is two asks and is exempt). */
-const FOLDED_CRITERIA = /\bwhat should (?:i|we) (?:look at|inspect|assess|examine|review|check|pay attention to|consider)\b[^?]{0,60}\bbefore (?:(?:i|we) )?(?:weigh|decid|consider|settl|choos|pick)\w*\b(?![^?]*,? and what)/i;
+const FOLDED_CRITERIA = /\bbefore (?:(?:i|we) )?(?:decid|weigh|consider|settl|choos|pick|figur|narrow)\w*\b(?![^?]*\b(?:and|then)(?: then)? (?:what|consider|weigh|take into|factor|think about)\b)/i;
 
 export function structureStringFail(cell: StructureCell, text: string): StructureFail | null {
   const a = cell.angle.trim().toLowerCase();
