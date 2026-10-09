@@ -44,7 +44,11 @@ export async function GET(
 const patchSchema = z.object({
   schedule: z.enum(["none", "weekly", "monthly"]).optional(),
   /** Editing the core engine panel is an epoch change for the trend. */
-  engines: z.array(z.string().trim().min(1)).min(1).max(8).optional(),
+  // max 32, not 8 (2026-10-09, Tyler): every tracker carries an 11-engine
+  // panel, so any toggle in the core-panel modal sent 10-12 ids, failed the
+  // old cap with a silent 400, and the optimistic tick vanished on the next
+  // refresh - "the selections aren't saved".
+  engines: z.array(z.string().trim().min(1)).min(1).max(32).optional(),
   /** Per-project availability of the evidence drawer. */
   evidenceDrawer: z.boolean().optional(),
   /** Staff-only: let human labels override the coder. */
@@ -66,7 +70,7 @@ export async function PATCH(
   const body = await req.json().catch(() => null);
   const parsed = patchSchema.safeParse(body);
   if (!parsed.success) {
-    return NextResponse.json({ error: "invalid schedule" }, { status: 400 });
+    return NextResponse.json({ error: "invalid request" }, { status: 400 });
   }
   if (parsed.data.archived === false && project.archived_at && auth.userId !== null) {
     // Unarchiving brings the tracker back under the plan's tracker limit.

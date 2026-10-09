@@ -234,7 +234,7 @@ export function seedDesignLine(
   if (stage === "pricing")
     return `Question design (value): the question asks whether ${brand} is worth its price for THIS asker over a more affordable option in the category, with the asker's situation as the input and the call left to the answer - the same buyer and counterpart as the designed question below. Dropping ${brand}, swapping the counterpart for ${brand}'s own lower tier or a named rival, losing the situation, stating a price, or presupposing the verdict does not satisfy the design. Designed as: "${seed}"`;
   if (stage === "premium_worth")
-    return `Question design (premium tier): the question asks whether the category's premium options are actually better than the cheaper ones, or whether the cheaper ones are good enough. Judging one named brand's own worth does not satisfy the design.${outcomeClause(stage, brand)} Designed as: "${seed}"`;
+    return `Question design (premium tier): the question asks whether the category's premium options are actually better than the cheaper ones, or whether the cheaper ones are good enough, AND invites a pick (which would you get) so the answer names who sits at each end. Judging one named brand's own worth does not satisfy the design.${outcomeClause(stage, brand)} Designed as: "${seed}"`;
   if (!PLAN_CHECK_STAGES.has(stage))
     // Every other stage gets the generic same-question line (2026-09-29:
     // open/awareness/comparison cells drifted with no consistency check -
@@ -333,7 +333,7 @@ export function stageDesignIntent(stage: string, brand: string, concern?: string
       ? ` The question states the buyer's situation or need in a few words and asks which product has the best features, leaving the answer to decide which features matter. Naming a specific feature, listing features or usage, describing a task to get done, or a need chosen because it suits ${brand} does not satisfy the design.`
       : stage === "use_case"
         ? ` The question names one outcome the buyer wants, in everyday words, and asks which product will do that best. A product feature named as the outcome, the buying situation restated, a list of needs, a list ask (which belongs to discovery), or an outcome chosen because it is ${brand}'s own signature strength does not satisfy the design.`
-        : ` The ask must invite NAMED products or brands - a features-only, what-do-people-value or where-to-look ask does not satisfy the design.`
+        : ` The ask must invite NAMED products or brands - a features-only, what-do-people-value or where-to-look ask does not satisfy the design. An ask for which <category> to look at or get, in the category's own name (the kind of product the buyer is choosing among), DOES invite named products - the category's name is the buyer's vocabulary, never a request for categories.`
     : "";
   // Stage contract (2026-10-03): criteria and business_case carry their
   // contract asks on top of the circumstance yardstick.
@@ -365,7 +365,7 @@ export function stageDesignIntent(stage: string, brand: string, concern?: string
   if (contractClause)
     return `Question design:${contractClause}${outcomeClause(stage, brand)}`;
   if (stage === "premium_worth")
-    return `Question design (premium tier): the question asks whether the category's premium options are actually better than the cheaper ones, or whether the cheaper ones are good enough - it need not ask for picks. Judging one named brand's own worth does not satisfy it - that is a worry cell's job.${outcomeClause(stage, brand)}`;
+    return `Question design (premium tier): the question asks whether the category's premium options are actually better than the cheaper ones, or whether the cheaper ones are good enough, AND invites a pick - which would you get - so the answer names who sits at the premium end and the basic end (the cell's read is tier advocacy plus who gets named). A tier verdict with no pick invitation does not satisfy it. Judging one named brand's own worth does not satisfy it either - that is a worry cell's job.${outcomeClause(stage, brand)}`;
   if (!PLAN_CHECK_STAGES.has(stage)) return null;
   const intent =
     stage === "problem_resolution"
