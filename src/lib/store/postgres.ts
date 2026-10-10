@@ -199,6 +199,16 @@ function ensureSchema(): Promise<void> {
       await sql`CREATE INDEX IF NOT EXISTS cost_log_project ON cost_log(project_id)`;
       await sql`ALTER TABLE cost_log ADD COLUMN IF NOT EXISTS rnd BOOLEAN NOT NULL DEFAULT FALSE`;
       await sql`ALTER TABLE cost_log ADD COLUMN IF NOT EXISTS setup_id TEXT`;
+      // Exact collection accounting (2026-10-10): engine attribution, batch
+      // flag, cache tokens, vendor-reported cost, write-time USD, raw usage.
+      await sql`ALTER TABLE cost_log ADD COLUMN IF NOT EXISTS engine TEXT`;
+      await sql`ALTER TABLE cost_log ADD COLUMN IF NOT EXISTS batch BOOLEAN NOT NULL DEFAULT FALSE`;
+      await sql`ALTER TABLE cost_log ADD COLUMN IF NOT EXISTS cached_input_tokens INTEGER NOT NULL DEFAULT 0`;
+      await sql`ALTER TABLE cost_log ADD COLUMN IF NOT EXISTS cache_write_tokens INTEGER NOT NULL DEFAULT 0`;
+      await sql`ALTER TABLE cost_log ADD COLUMN IF NOT EXISTS vendor_cost_usd DOUBLE PRECISION`;
+      await sql`ALTER TABLE cost_log ADD COLUMN IF NOT EXISTS cost_usd DOUBLE PRECISION`;
+      await sql`ALTER TABLE cost_log ADD COLUMN IF NOT EXISTS usage_raw TEXT`;
+      await sql`CREATE INDEX IF NOT EXISTS cost_log_run ON cost_log(run_id)`;
       await sql`CREATE TABLE IF NOT EXISTS dictionary_entries (
         id TEXT PRIMARY KEY,
         project_id TEXT NOT NULL REFERENCES projects(id),
@@ -794,7 +804,7 @@ export const pgStore: Store = {
     return rows.map((r) => ({
       id: r.id as string,
       run_id: r.run_id as string,
-      vendor: r.vendor as "openai" | "anthropic",
+      vendor: r.vendor as "openai" | "anthropic" | "google",
       endpoint: r.endpoint as string,
       provider_batch_id: r.provider_batch_id as string,
       status: r.status as "submitted" | "ingested" | "failed",
@@ -1194,6 +1204,13 @@ export const pgStore: Store = {
       searches: input.searches ?? 0,
       setup_id: input.setupId ?? null,
       rnd: input.rnd ?? false,
+      engine: input.engine ?? null,
+      batch: input.batch ?? false,
+      cached_input_tokens: input.cachedInputTokens ?? 0,
+      cache_write_tokens: input.cacheWriteTokens ?? 0,
+      vendor_cost_usd: input.vendorCostUsd ?? null,
+      cost_usd: input.costUsd ?? null,
+      usage_raw: input.usageRaw ?? null,
     })}`;
   },
 
@@ -1206,22 +1223,29 @@ export const pgStore: Store = {
 
   async summarizeCostLog() {
     const sql = await db();
-    const rows = await sql`SELECT project_id, purpose, model,
+    const rows = await sql`SELECT project_id, purpose, model, engine,
         COUNT(*)::int AS calls,
         COALESCE(SUM(input_tokens), 0)::bigint AS input_tokens,
+        COALESCE(SUM(cached_input_tokens), 0)::bigint AS cached_input_tokens,
         COALESCE(SUM(output_tokens), 0)::bigint AS output_tokens,
-        COALESCE(SUM(searches), 0)::int AS searches
+        COALESCE(SUM(searches), 0)::int AS searches,
+        COALESCE(SUM(cost_usd), 0)::float8 AS cost_usd,
+        COUNT(*) FILTER (WHERE cost_usd IS NULL)::int AS unpriced_calls
       FROM cost_log
-      GROUP BY project_id, purpose, model
-      ORDER BY purpose, model`;
+      GROUP BY project_id, purpose, model, engine
+      ORDER BY purpose, model, engine`;
     return rows.map((r) => ({
       project_id: (r.project_id as string | null) ?? null,
       purpose: r.purpose as string,
       model: r.model as string,
+      engine: (r.engine as string | null) ?? null,
       calls: Number(r.calls),
       input_tokens: Number(r.input_tokens),
+      cached_input_tokens: Number(r.cached_input_tokens),
       output_tokens: Number(r.output_tokens),
       searches: Number(r.searches),
+      cost_usd: Number(r.cost_usd),
+      unpriced_calls: Number(r.unpriced_calls),
     }));
   },
 

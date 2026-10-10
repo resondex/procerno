@@ -3,7 +3,8 @@ import { nameAppearsBounded } from "./mention_filter";
 import type { ExtractedMention, ExtractionResult } from "../types";
 import { matchKey } from "../brand_key";
 
-import { logCost } from "../cost_log";
+import { logCost, withCostContext } from "../cost_log";
+import { fromAnthropicUsage, fromChatUsage, fromResponsesBody, totalInput } from "./usage";
 
 export interface ExtractionContext {
   targetBrand: string;
@@ -215,11 +216,9 @@ function meterOpenAI(c: OpenAI): OpenAI {
   chat.create = ((body: { model?: string }, opts?: unknown) => {
     const p = chatCreate(body as never, opts as never);
     void (p as Promise<unknown>).then((res) => {
-      const u = (res as { usage?: { prompt_tokens?: number; completion_tokens?: number } })?.usage;
       logCost({
         model: body?.model ?? "unknown",
-        inputTokens: u?.prompt_tokens ?? 0,
-        outputTokens: u?.completion_tokens ?? 0,
+        usage: fromChatUsage((res as { usage?: unknown })?.usage),
       });
     }, () => {});
     return p;
@@ -229,16 +228,7 @@ function meterOpenAI(c: OpenAI): OpenAI {
   responses.create = ((body: { model?: string }, opts?: unknown) => {
     const p = respCreate(body as never, opts as never);
     void (p as Promise<unknown>).then((res) => {
-      const r = res as {
-        usage?: { input_tokens?: number; output_tokens?: number };
-        output?: { type: string }[];
-      };
-      logCost({
-        model: body?.model ?? "unknown",
-        inputTokens: r?.usage?.input_tokens ?? 0,
-        outputTokens: r?.usage?.output_tokens ?? 0,
-        searches: (r?.output ?? []).filter((o) => o.type === "web_search_call").length,
-      });
+      logCost({ model: body?.model ?? "unknown", usage: fromResponsesBody(res) });
     }, () => {});
     return p;
   }) as unknown as typeof responses.create;
@@ -252,14 +242,9 @@ function meterAnthropic(a: AnthropicSdk): AnthropicSdk {
   messages.create = ((body: { model?: string }, opts?: unknown) => {
     const p = create(body as never, opts as never);
     void (p as Promise<unknown>).then((res) => {
-      const u = (res as { usage?: unknown })?.usage as
-        | { output_tokens?: number; server_tool_use?: { web_search_requests?: number } }
-        | undefined;
       logCost({
         model: body?.model ?? "unknown",
-        inputTokens: claudeBilledInput(u),
-        outputTokens: u?.output_tokens ?? 0,
-        searches: u?.server_tool_use?.web_search_requests ?? 0,
+        usage: fromAnthropicUsage((res as { usage?: unknown })?.usage),
       });
     }, () => {});
     return p;
@@ -361,7 +346,9 @@ export async function completeWithEngine(
     throw new Error(`${engine.keyEnv} is not configured for ${engine.label}`);
   }
   const model = engine.apiModel ?? engine.id;
-  return withRetry(async () => {
+  // Every ledger row this answer writes (retries included) is attributed
+  // to the engine, not just the API model it calls.
+  return withCostContext({ engine: engine.id }, () => withRetry(async () => {
     if (engine.sdk === "anthropic") {
       const a = await anthropicClient();
       const res = await a.messages.create(
@@ -395,8 +382,9 @@ export async function completeWithEngine(
         output_tokens?: number;
         server_tool_use?: { web_search_requests?: number };
       };
+      const billed = fromAnthropicUsage(res.usage);
       return {
-        usage: { input: usage.input_tokens ?? null, output: usage.output_tokens ?? null },
+        usage: { input: totalInput(billed), output: billed.outputTokens },
         text: res.content
           .filter((b): b is Extract<typeof b, { type: "text" }> => b.type === "text")
           .map((b) => b.text)
@@ -427,7 +415,9 @@ export async function completeWithEngine(
         { timeout: 300_000 }
       );
       const output = (res as unknown as { output?: { type: string; content?: { type: string; annotations?: { type: string; url?: string }[] }[] }[] }).output ?? [];
-      const searches = output.filter((i) => i.type === "web_search_call").length;
+      // Billed searches (tool_usage.web_search.num_requests), not the count
+      // of web_search_call items - open_page/find actions are items too.
+      const billed = fromResponsesBody(res);
       const urls = new Set<string>();
       for (const item of output) {
         for (const part of item.content ?? []) {
@@ -443,12 +433,12 @@ export async function completeWithEngine(
         usage?: { input_tokens?: number; output_tokens?: number };
       };
       return {
-        usage: { input: r.usage?.input_tokens ?? null, output: r.usage?.output_tokens ?? null },
+        usage: { input: totalInput(billed), output: billed.outputTokens },
         text: r.output_text ?? "",
         finishReason:
           r.incomplete_details?.reason ?? (r.status === "completed" ? "stop" : r.status ?? null),
         citations: urls.size > 0 ? [...urls] : null,
-        searchCount: searches,
+        searchCount: billed.searches,
       };
     }
     const c = engine.baseURL ? compatClient(engine) : client();
@@ -467,17 +457,20 @@ export async function completeWithEngine(
         ?.map((r) => r.url)
         .filter((u): u is string => Boolean(u)) ??
       null;
+    // Reasoning/thinking tokens that some vendors keep out of
+    // completion_tokens (Gemini, xAI) are billed output - see usage.ts.
+    const billed = fromChatUsage(res.usage);
     return {
       usage: {
-        input: res.usage?.prompt_tokens ?? null,
-        output: res.usage?.completion_tokens ?? null,
+        input: res.usage ? totalInput(billed) : null,
+        output: res.usage ? billed.outputTokens : null,
       },
       text: res.choices[0]?.message?.content ?? "",
       finishReason: res.choices[0]?.finish_reason ?? null,
       citations: citations && citations.length > 0 ? citations : null,
       searchCount: null,
     };
-  });
+  }));
 }
 
 const EXTRACT_MODEL = process.env.EXTRACT_MODEL ?? "gpt-4o-mini";

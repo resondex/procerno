@@ -14,7 +14,7 @@ import { generatePromptBattery } from "@/lib/engine/prompts";
 import { questionTypeOf } from "@/lib/engine/battery_checks";
 import { seedDictionary } from "@/lib/engine/suggest";
 import { humanize, namesAnyBrand } from "@/lib/engine/instrument";
-import { apiKeyConfigured, availableEngines, currentEngineIds, getEngine } from "@/lib/engine/providers";
+import { apiKeyConfigured, availableEngines, currentEngineIds, ENGINES, getEngine } from "@/lib/engine/providers";
 
 const createSchema = z.object({
   name: z.string().trim().min(1).optional(),
@@ -24,8 +24,11 @@ const createSchema = z.object({
   category: z.string().trim().min(1),
   audience: z.string().trim().optional(),
   /** The tracker's core engine panel — scheduled runs and headline metrics
-   * use exactly this set. Defaults to the default-tier engine per vendor. */
-  engines: z.array(z.string().trim().min(1)).max(8).optional(),
+   * use exactly this set. Defaults to the default-tier engine per vendor.
+   * The cap tracks the registry (retired ids included, they resolve to
+   * successors) - a hardcoded 8 rejected every full-panel Confirm with a
+   * 400, the same defect the PATCH route had. */
+  engines: z.array(z.string().trim().min(1)).max(ENGINES.length).optional(),
   // User-reviewed battery from /api/prompts/generate; templates when absent.
   prompts: z
     .array(

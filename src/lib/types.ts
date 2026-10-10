@@ -258,7 +258,7 @@ export interface Run {
 export interface RunBatch {
   id: string;
   run_id: string;
-  vendor: "openai" | "anthropic";
+  vendor: "openai" | "anthropic" | "google";
   /** Provider endpoint the batch targets ("messages" for Anthropic). */
   endpoint: string;
   provider_batch_id: string;
@@ -648,10 +648,18 @@ export interface CostSummaryRow {
   project_id: string | null;
   purpose: string;
   model: string;
+  /** Answer engine id; null for internal jobs and pre-2026-10-10 rows. */
+  engine: string | null;
   calls: number;
   input_tokens: number;
+  cached_input_tokens: number;
   output_tokens: number;
   searches: number;
+  /** Sum of exact write-time costs over the rows that carry one. */
+  cost_usd: number;
+  /** Rows in the group written before exact costing (cost_usd null) -
+   * those still price from the token columns. */
+  unpriced_calls: number;
 }
 
 export interface Store {
@@ -959,9 +967,22 @@ export interface Store {
     runId?: string | null;
     purpose: string;
     model: string;
+    /** Base-rate (uncached) input tokens. */
     inputTokens: number;
     outputTokens: number;
     searches?: number;
+    /** Answer engine id the call collected for (null for internal jobs). */
+    engine?: string | null;
+    /** Vendor batch job (tokens at 50%). */
+    batch?: boolean;
+    cachedInputTokens?: number;
+    cacheWriteTokens?: number;
+    /** Cost the vendor itself reported on the response, when it does. */
+    vendorCostUsd?: number | null;
+    /** Exact USD cost of the call, priced at write time. */
+    costUsd?: number | null;
+    /** The vendor's raw usage JSON, for audit. */
+    usageRaw?: string | null;
     /** Setup-phase spend books against the wizard's setup id until the
      * project exists; attachSetupCosts transfers it at create. */
     setupId?: string | null;

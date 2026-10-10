@@ -1,5 +1,7 @@
 import { AsyncLocalStorage } from "node:async_hooks";
 import { store } from "./store";
+import { billedCost } from "./pricing";
+import type { BilledUsage } from "./engine/usage";
 
 /**
  * The token-spend ledger. Every vendor API call made through the metered
@@ -24,6 +26,10 @@ export interface CostContext {
    * real cost of a tracker stays readable (production COGS = NOT rnd).
    * Normal product-path spend is never rnd, whoever owns the tracker. */
   rnd?: boolean;
+  /** The answer engine (registry id) the call collected for. Search
+   * variants call the vendor under their base model name, so the API model
+   * alone cannot tell gpt-5.6-sol from gpt-5.6-sol-search - this can. */
+  engine?: string | null;
 }
 
 const als = new AsyncLocalStorage<CostContext>();
@@ -47,21 +53,47 @@ export function tagCosts(ctx: CostContext): void {
 
 /** Append one vendor call's usage to the ledger. Fire-and-forget: a
  * ledger miss is logged, never thrown - metering must not break the work
- * it measures. Zero-usage results are skipped. */
+ * it measures. Zero-usage results are skipped.
+ *
+ * Pass `usage` (lib/engine/usage.ts) wherever the vendor response is at
+ * hand: the row then carries cached/cache-write tokens, every reasoning
+ * token, the billed search count, the vendor's own cost where it reports
+ * one, and the exact USD cost priced at write time (cost_usd). The bare
+ * input/output/searches form remains for callers that only have totals. */
 export function logCost(entry: {
   model: string;
-  inputTokens: number;
-  outputTokens: number;
+  inputTokens?: number;
+  outputTokens?: number;
   searches?: number;
+  usage?: BilledUsage;
   purpose?: string;
   projectId?: string | null;
   runId?: string | null;
   setupId?: string | null;
   rnd?: boolean;
+  engine?: string | null;
+  /** Vendor batch job: tokens bill at 50% of list. */
+  batch?: boolean;
 }): void {
-  const searches = entry.searches ?? 0;
-  if (entry.inputTokens + entry.outputTokens + searches === 0) return;
+  const u: BilledUsage = entry.usage ?? {
+    inputTokens: entry.inputTokens ?? 0,
+    cachedInputTokens: 0,
+    cacheWriteTokens: 0,
+    outputTokens: entry.outputTokens ?? 0,
+    searches: entry.searches ?? 0,
+    vendorCostUsd: null,
+    raw: null,
+  };
+  const searches = entry.searches ?? u.searches;
+  if (
+    u.inputTokens + u.cachedInputTokens + u.cacheWriteTokens + u.outputTokens + searches === 0 &&
+    !u.vendorCostUsd
+  ) {
+    return;
+  }
   const ctx = currentCostContext();
+  const engine = entry.engine ?? ctx.engine ?? null;
+  const batch = entry.batch ?? false;
   void store
     .insertCostEntry({
       projectId: entry.projectId ?? ctx.projectId ?? null,
@@ -70,9 +102,18 @@ export function logCost(entry: {
       purpose: entry.purpose ?? ctx.purpose ?? "untagged",
       rnd: entry.rnd ?? ctx.rnd ?? false,
       model: entry.model,
-      inputTokens: entry.inputTokens,
-      outputTokens: entry.outputTokens,
+      engine,
+      batch,
+      inputTokens: u.inputTokens,
+      cachedInputTokens: u.cachedInputTokens,
+      cacheWriteTokens: u.cacheWriteTokens,
+      outputTokens: u.outputTokens,
       searches,
+      vendorCostUsd: u.vendorCostUsd,
+      // Priced under the engine id when there is one: search variants carry
+      // the per-search fee their base model's row does not.
+      costUsd: billedCost(engine ?? entry.model, { ...u, searches }, { batch }),
+      usageRaw: u.raw === null || u.raw === undefined ? null : JSON.stringify(u.raw),
     })
     .catch((err) => console.error("cost ledger write failed:", err));
 }

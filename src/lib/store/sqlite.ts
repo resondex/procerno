@@ -381,6 +381,19 @@ function createDb(): Database.Database {
   if (!costCols.some((c) => c.name === "setup_id")) {
     db.exec("ALTER TABLE cost_log ADD COLUMN setup_id TEXT");
   }
+  for (const [col, ddl] of [
+    ["engine", "TEXT"],
+    ["batch", "INTEGER NOT NULL DEFAULT 0"],
+    ["cached_input_tokens", "INTEGER NOT NULL DEFAULT 0"],
+    ["cache_write_tokens", "INTEGER NOT NULL DEFAULT 0"],
+    ["vendor_cost_usd", "REAL"],
+    ["cost_usd", "REAL"],
+    ["usage_raw", "TEXT"],
+  ] as const) {
+    if (!costCols.some((c) => c.name === col)) {
+      db.exec(`ALTER TABLE cost_log ADD COLUMN ${col} ${ddl}`);
+    }
+  }
   const dictCols = db.prepare("PRAGMA table_info(dictionary_entries)").all() as {
     name: string;
   }[];
@@ -1458,8 +1471,9 @@ export const sqliteStore: Store = {
   async insertCostEntry(input) {
     getDb()
       .prepare(
-        `INSERT INTO cost_log (id, project_id, run_id, purpose, model, input_tokens, output_tokens, searches, setup_id, rnd)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+        `INSERT INTO cost_log (id, project_id, run_id, purpose, model, input_tokens, output_tokens, searches, setup_id, rnd,
+           engine, batch, cached_input_tokens, cache_write_tokens, vendor_cost_usd, cost_usd, usage_raw)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
       )
       .run(
         crypto.randomUUID(),
@@ -1471,7 +1485,14 @@ export const sqliteStore: Store = {
         input.outputTokens,
         input.searches ?? 0,
         input.setupId ?? null,
-        input.rnd ? 1 : 0
+        input.rnd ? 1 : 0,
+        input.engine ?? null,
+        input.batch ? 1 : 0,
+        input.cachedInputTokens ?? 0,
+        input.cacheWriteTokens ?? 0,
+        input.vendorCostUsd ?? null,
+        input.costUsd ?? null,
+        input.usageRaw ?? null
       );
   },
 
@@ -1485,14 +1506,17 @@ export const sqliteStore: Store = {
   async summarizeCostLog() {
     return getDb()
       .prepare(
-        `SELECT project_id, purpose, model,
+        `SELECT project_id, purpose, model, engine,
            COUNT(*) AS calls,
            COALESCE(SUM(input_tokens), 0) AS input_tokens,
+           COALESCE(SUM(cached_input_tokens), 0) AS cached_input_tokens,
            COALESCE(SUM(output_tokens), 0) AS output_tokens,
-           COALESCE(SUM(searches), 0) AS searches
+           COALESCE(SUM(searches), 0) AS searches,
+           COALESCE(SUM(cost_usd), 0) AS cost_usd,
+           SUM(CASE WHEN cost_usd IS NULL THEN 1 ELSE 0 END) AS unpriced_calls
          FROM cost_log
-         GROUP BY project_id, purpose, model
-         ORDER BY purpose, model`
+         GROUP BY project_id, purpose, model, engine
+         ORDER BY purpose, model, engine`
       )
       .all() as import("../types").CostSummaryRow[];
   },

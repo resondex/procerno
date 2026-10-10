@@ -65,25 +65,31 @@ export async function loadAdminData(auth: AuthContext) {
   if (staff) {
     const projectNames = new Map(projects.map((pr) => [pr.id, pr.brand]));
     const summary = await store.summarizeCostLog();
-    costLedger = summary.map((row) => ({
-      project: row.project_id ? projectNames.get(row.project_id) ?? "(deleted)" : null,
-      purpose: row.purpose,
-      model: row.model,
-      calls: row.calls,
-      inTokens: row.input_tokens,
-      outTokens: row.output_tokens,
-      searches: row.searches,
-      cost:
-        Math.round(
-          ((answerCost(row.model, row.input_tokens, row.output_tokens, 0) -
-            // answerCost adds one perRequest fee; this row is `calls` answers.
-            requestFee(row.model, 1)) *
-            // Vendor batches bill tokens at 50% of list; tool fees don't discount.
-            (row.purpose === "run:answer_batch" ? 0.5 : 1) +
-            requestFee(row.model, row.calls) +
-            searchFee(row.model, row.searches)) * 10000
-        ) / 10000,
-    }));
+    costLedger = summary.map((row) => {
+      // Rows written since 2026-10-10 carry their exact write-time cost;
+      // older rows price from token totals (approximate: no cache, batch or
+      // reasoning breakdown). A group straddling the switch prorates.
+      const legacy =
+        (answerCost(row.model, row.input_tokens, row.output_tokens, 0) -
+          // answerCost adds one perRequest fee; this row is `calls` answers.
+          requestFee(row.model, 1)) *
+          // Vendor batches bill tokens at 50% of list; tool fees don't discount.
+          (row.purpose === "run:answer_batch" ? 0.5 : 1) +
+        requestFee(row.model, row.calls) +
+        searchFee(row.model, row.searches);
+      const cost =
+        row.cost_usd + (row.calls > 0 ? legacy * (row.unpriced_calls / row.calls) : 0);
+      return {
+        project: row.project_id ? projectNames.get(row.project_id) ?? "(deleted)" : null,
+        purpose: row.purpose,
+        model: row.engine ?? row.model,
+        calls: row.calls,
+        inTokens: row.input_tokens + row.cached_input_tokens,
+        outTokens: row.output_tokens,
+        searches: row.searches,
+        cost: Math.round(cost * 10000) / 10000,
+      };
+    });
   }
   return {
     staff,
