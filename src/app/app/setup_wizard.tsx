@@ -315,7 +315,14 @@ interface Props {
   engineOptions: EngineOption[];
   onClose: () => void;
   onCreated: (projectId: string) => void;
-  onDraftsChanged: () => void;
+  /** Called after every draft save with the saved row, so the host can
+   * merge it into its list synchronously (a reopen before the list
+   * re-fetched used to hydrate from the stale row - the engine panel
+   * "didn't save", 2026-10-09). */
+  onDraftsChanged: (saved?: SetupDraft) => void;
+  /** The close-time save, so the host can wait on it before reopening
+   * the same draft. */
+  onCloseSave?: (draftId: string | null, done: Promise<void>) => void;
   /** Demo mode: the full setup experience, but nothing persists - no
    * drafts saved, no tracker created, no run started. */
   demo?: boolean;
@@ -325,7 +332,7 @@ interface Props {
   editProjectId?: string;
 }
 
-export function SetupWizard({ mode, brand, draft, engineOptions, onClose, onCreated, onDraftsChanged, demo = false, editProjectId }: Props) {
+export function SetupWizard({ mode, brand, draft, engineOptions, onClose, onCreated, onDraftsChanged, onCloseSave, demo = false, editProjectId }: Props) {
   const steps = STEPS[mode];
   const saved = (draft?.wizard ?? null) as WizardDraft | null;
 
@@ -775,7 +782,7 @@ export function SetupWizard({ mode, brand, draft, engineOptions, onClose, onCrea
     if (res?.ok) {
       const data = await res.json().catch(() => ({}));
       if (data.draft?.id) setDraftId(data.draft.id);
-      onDraftsChanged();
+      onDraftsChanged(data.draft ?? undefined);
     }
   }
 
@@ -809,7 +816,10 @@ export function SetupWizard({ mode, brand, draft, engineOptions, onClose, onCrea
    * throws and the drafts list revalidates on its own. */
   function requestClose() {
     const dirty = step !== "market" || prompts !== null || grid !== null;
-    if (dirty && busy === null) void persist(step);
+    if (dirty && busy === null) {
+      const done = persist(step);
+      onCloseSave?.(draftId, done);
+    }
     onClose();
   }
 

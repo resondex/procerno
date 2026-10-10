@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import type { Project, Run, SetupDraft } from "@/lib/types";
@@ -65,7 +65,12 @@ export default function AppHome({
       : null
   );
 
-  async function refreshDrafts() {
+  // A save in flight for a draft the user may reopen before it lands: the
+  // wizard hands its close-time save here, resumeDraft waits on it.
+  const pendingSaves = useRef<Map<string, Promise<void>>>(new Map());
+  async function refreshDrafts(saved?: SetupDraft) {
+    // The saved row merges in synchronously - the re-fetch confirms it.
+    if (saved?.id) setDrafts((prev) => (prev.some((d) => d.id === saved.id) ? prev.map((d) => (d.id === saved.id ? saved : d)) : [saved, ...prev]));
     const res = await fetch("/api/drafts");
     if (res.ok) setDrafts((await res.json()).drafts ?? []);
   }
@@ -75,7 +80,20 @@ export default function AppHome({
     setWizard({ mode, brand: brand.trim(), draft: null });
   }
 
-  function resumeDraft(d: SetupDraft) {
+  async function resumeDraft(d: SetupDraft) {
+    // Reopening a draft whose close-time save is still in flight used to
+    // hydrate the wizard from the stale list row and then save THAT back
+    // over the newer row. Wait for the save, then open the fresh row.
+    const pending = pendingSaves.current.get(d.id);
+    if (pending) {
+      await pending;
+      const res = await fetch("/api/drafts").catch(() => null);
+      if (res?.ok) {
+        const list: SetupDraft[] = (await res.json()).drafts ?? [];
+        setDrafts(list);
+        d = list.find((x) => x.id === d.id) ?? d;
+      }
+    }
     const mode = ((d.wizard as { mode?: SetupMode } | null)?.mode ?? "classic") as SetupMode;
     setWizard({ mode, brand: d.brand, draft: d });
   }
@@ -197,7 +215,7 @@ function draftStatus(d: SetupDraft): string {
                 <div className="flex items-center gap-4 shrink-0">
                   <button
                     type="button"
-                    onClick={() => resumeDraft(d)}
+                    onClick={() => void resumeDraft(d)}
                     className="text-sm font-semibold text-primary hover:opacity-80"
                   >
                     Continue →
@@ -345,7 +363,12 @@ function draftStatus(d: SetupDraft): string {
               engineOptions={engineOptions}
               onClose={() => setWizard(null)}
               onCreated={(id) => router.push(`/projects/${id}`)}
-              onDraftsChanged={() => void refreshDrafts()}
+              onDraftsChanged={(saved) => void refreshDrafts(saved)}
+              onCloseSave={(id, done) => {
+                if (!id) return;
+                pendingSaves.current.set(id, done);
+                void done.finally(() => { if (pendingSaves.current.get(id) === done) pendingSaves.current.delete(id); });
+              }}
             />
           </div>
         </div>
