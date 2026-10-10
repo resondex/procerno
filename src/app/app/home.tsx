@@ -362,7 +362,9 @@ function draftStatus(d: SetupDraft): string {
               editProjectId={wizard.editProjectId}
               engineOptions={engineOptions}
               onClose={() => setWizard(null)}
-              onCreated={(id) => router.push(`/projects/${id}`)}
+              onCreated={(id, opts) =>
+                router.push(`/projects/${id}${opts?.starting ? "?starting=1" : ""}`)
+              }
               onDraftsChanged={(saved) => void refreshDrafts(saved)}
               onCloseSave={(id, done) => {
                 if (!id) return;

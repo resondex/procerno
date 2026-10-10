@@ -18,7 +18,7 @@ export default async function ProjectPage({
   searchParams,
 }: {
   params: Promise<{ id: string }>;
-  searchParams: Promise<{ run?: string }>;
+  searchParams: Promise<{ run?: string; starting?: string }>;
 }) {
   const { id } = await params;
   const sp = await searchParams;
@@ -52,6 +52,7 @@ export default async function ProjectPage({
       id={id}
       initialDetail={initialDetail}
       initialRunId={sp.run ?? null}
+      starting={sp.starting === "1"}
       initialGateStep={initialGateStep}
     />
   );

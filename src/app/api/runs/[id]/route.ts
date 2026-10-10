@@ -34,12 +34,23 @@ export async function GET(
       waitUntil(pollRunBatches(run.id).then(() => driveAndChain(run.id, origin)));
     }
   }
-  const [prompts, intents, completed, byModel] = await Promise.all([
+  const [prompts, intents, completed, byModel, batches] = await Promise.all([
     store.listPrompts(run.project_id),
     store.listIntents(run.project_id),
     store.countResponses(id),
     store.countResponsesByModel(id),
+    run.pipeline === "batch" ? store.listRunBatches(id) : Promise.resolve([]),
   ]);
+  // Engines whose answers ride a still-open vendor batch: they land all at
+  // once when the vendor finishes (minutes to 24h), so the dashboard must
+  // not extrapolate a finish time from the live engines' pace.
+  const batched = [
+    ...new Set(
+      batches
+        .filter((b) => b.status === "submitted")
+        .flatMap((b) => b.manifest.map((m) => m.engine))
+    ),
+  ];
   // The run's own prompt set: a skip wave never asks the worries surface.
   const liveCount = promptsForRun(run, prompts, intents).length;
   const models = run.models.length > 0 ? run.models : [run.model];
@@ -56,6 +67,7 @@ export async function GET(
       model: m,
       completed: byModel[m] ?? 0,
     })),
+    batched,
   });
 }
 

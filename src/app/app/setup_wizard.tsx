@@ -314,7 +314,9 @@ interface Props {
   draft: SetupDraft | null;
   engineOptions: EngineOption[];
   onClose: () => void;
-  onCreated: (projectId: string) => void;
+  /** `starting`: a first run is being launched in the background - the
+   * dashboard opens on its "Setting up" phase instead of waiting here. */
+  onCreated: (projectId: string, opts?: { starting?: boolean }) => void;
   /** Called after every draft save with the saved row, so the host can
    * merge it into its list synchronously (a reopen before the list
    * re-fetched used to hydrate from the stale row - the engine panel
@@ -1580,41 +1582,46 @@ export function SetupWizard({ mode, brand, draft, engineOptions, onClose, onCrea
           : { prompts: prompts!.filter((p) => p.text.trim()) }),
       }),
     }).catch(() => null);
-    setSubmitting(false);
     if (!res) {
+      setSubmitting(false);
       setError("that took too long - check your trackers before retrying (it may have been created)");
       return;
     }
     const data = await res.json().catch(() => ({}));
     if (!res.ok) {
+      setSubmitting(false);
       setError(data.error ?? "something went wrong");
       return;
     }
+    // The tracker exists: hand over to its dashboard NOW, on its "Setting
+    // up" phase. The run launch (engine checks + batch submission, several
+    // seconds) and the draft cleanup continue in the background - client
+    // navigation keeps them alive. Awaiting them here left the button
+    // reverted to "Create tracker & run" for ~5s after a successful create.
     if (draftId) {
       // Best effort - a stale draft chip beats a hung create.
-      await fetch(`/api/drafts/${draftId}`, {
+      void fetch(`/api/drafts/${draftId}`, {
         method: "DELETE",
         signal: AbortSignal.timeout(15_000),
-      }).catch(() => {});
-      onDraftsChanged();
+      })
+        .catch(() => {})
+        .finally(() => onDraftsChanged());
     }
     const panel: string[] = data.project.engine_set?.length ? data.project.engine_set : engineSet;
-    try {
-      await fetch(`/api/projects/${data.project.id}/runs`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        signal: AbortSignal.timeout(45_000),
-        body: JSON.stringify({
-          model: panel[0] ?? "gpt-5.6-luna",
-          ...(panel.length > 0 ? { models: panel } : {}),
-          // The Landscape samples by paraphrase, not by repeating a wording.
-          repeats: usingGrid ? 1 : FIRST_RUN_REPEATS,
-        }),
-      });
-    } catch {
+    void fetch(`/api/projects/${data.project.id}/runs`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      signal: AbortSignal.timeout(45_000),
+      body: JSON.stringify({
+        model: panel[0] ?? "gpt-5.6-luna",
+        ...(panel.length > 0 ? { models: panel } : {}),
+        // The Landscape samples by paraphrase, not by repeating a wording.
+        repeats: usingGrid ? 1 : FIRST_RUN_REPEATS,
+      }),
+    }).catch(() => {
       // The tracker exists either way; the dashboard's Run control reports.
-    }
-    onCreated(data.project.id);
+    });
+    onCreated(data.project.id, { starting: true });
   }
 
   /* --------------------------------- counts -------------------------------- */
@@ -1756,7 +1763,7 @@ export function SetupWizard({ mode, brand, draft, engineOptions, onClose, onCrea
           disabled: submitting || engineSet.length === 0 || promptCount < 4,
         }
       : {
-          label: submitting ? "Starting your first run…" : "Create tracker & run",
+          label: submitting ? "Setting up…" : "Create tracker & run",
           onClick: () => void create(),
           disabled: submitting || engineSet.length === 0 || promptCount < 4,
         };

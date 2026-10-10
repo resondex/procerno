@@ -43,6 +43,12 @@ interface Progress {
   promptCount: number;
   perEngineTotal: number;
   perEngine: { model: string; completed: number }[];
+  /** Run status: "pending" = still setting up (engine checks, batch
+   * submission). */
+  status: string;
+  /** Engines whose answers ride an open vendor batch - they land all at
+   * once, so no finish time is extrapolated for them. */
+  batched: string[];
 }
 
 type OpenModal =
@@ -59,6 +65,7 @@ export default function ProjectDashboard({
   initialDetail,
   initialRunId,
   initialGateStep = null,
+  starting = false,
 }: {
   id: string;
   /** Server-loaded: the page arrives WITH its data - no skeleton, no
@@ -68,6 +75,10 @@ export default function ProjectDashboard({
   /** The dictionary-gate step from the request's cookie, so the server
    * render opens on the user's saved step instead of flashing 1/3. */
   initialGateStep?: 2 | 3 | null;
+  /** Arrived straight from Create (?starting=1): the first run is still
+   * being launched in the background, so show "Setting up" until it
+   * appears instead of an idle tracker. */
+  starting?: boolean;
 }) {
   const [detail, setDetail] = useState<Detail | null>(initialDetail);
   const [progress, setProgress] = useState<Progress | null>(null);
@@ -152,6 +163,8 @@ export default function ProjectDashboard({
             promptCount: pd.promptCount ?? 0,
             perEngineTotal: pd.perEngineTotal ?? 0,
             perEngine: pd.perEngine ?? [],
+            status: pd.run.status,
+            batched: pd.batched ?? [],
           });
         })
       );
@@ -231,6 +244,26 @@ export default function ProjectDashboard({
   const initPhase =
     (detail?.runs.length ?? 0) > 0 &&
     !detail?.runs.some((r) => r.status === "complete");
+  // Just created, run launch still in flight: poll the detail until the
+  // run row exists (bounded - a failed launch falls back to the idle view,
+  // where the Run control reports).
+  const [awaitingRun, setAwaitingRun] = useState(
+    starting && (initialDetail.runs?.length ?? 0) === 0
+  );
+  const noRunsYet = (detail?.runs.length ?? 0) === 0;
+  useEffect(() => {
+    if (!awaitingRun || !noRunsYet) return;
+    const startedAt = Date.now();
+    const t = setInterval(() => {
+      if (Date.now() - startedAt > 90_000) {
+        setAwaitingRun(false);
+        return;
+      }
+      void refresh();
+    }, 2000);
+    return () => clearInterval(t);
+  }, [awaitingRun, noRunsYet, refresh]);
+
   const hasActiveRun = detail?.runs.some(
     (r) => r.status === "pending" || r.status === "running" || r.status === "collected"
   );
@@ -272,6 +305,8 @@ export default function ProjectDashboard({
           promptCount: d.promptCount ?? 0,
           perEngineTotal: d.perEngineTotal ?? 0,
           perEngine: d.perEngine ?? [],
+          status: d.run.status,
+          batched: d.batched ?? [],
         });
         const status: string = d.run.status;
         if (polledStatus.current !== null && polledStatus.current !== status) {
@@ -497,6 +532,23 @@ export default function ProjectDashboard({
           onClick={() => setOpenModal("health")}
         />
       </div>
+
+      {awaitingRun && noRunsYet && (
+        <RunProgress
+          progress={{
+            completed: 0,
+            total: 0,
+            promptCount: detail?.prompts.length ?? 0,
+            perEngineTotal: 0,
+            perEngine: [],
+            status: "pending",
+            batched: [],
+          }}
+          engines={engines}
+          brand={project.brand}
+          startedAt={new Date().toISOString()}
+        />
+      )}
 
       {activeRun && progress && (progress.total === 0 || progress.completed < progress.total) && (
         <RunProgress
@@ -1868,8 +1920,10 @@ function RunProgress({
   brand: string;
   startedAt: string;
 }) {
-  const { completed, total, promptCount, perEngineTotal, perEngine } = progress;
+  const { completed, total, promptCount, perEngineTotal, perEngine, batched } = progress;
   const collecting = completed < total || total === 0;
+  // Engine checks and batch submission happen before the first answer.
+  const settingUp = progress.status === "pending";
   const pct = total > 0 ? Math.min(100, (completed / total) * 100) : 0;
 
   // A ticking clock so the estimate keeps falling between poll responses.
@@ -1879,25 +1933,39 @@ function RunProgress({
     return () => clearInterval(t);
   }, []);
 
-  const assistants = new Map<string, { done: number; target: number }>();
+  const batchedSet = new Set(batched);
+  const assistants = new Map<string, { done: number; target: number; batched: boolean }>();
   for (const e of perEngine) {
     const vendor = engines.find((x) => x.id === e.model)?.vendor ?? "Other";
     const name = ASSISTANT_NAME[vendor] ?? vendor;
-    const g = assistants.get(name) ?? { done: 0, target: 0 };
+    const g = assistants.get(name) ?? { done: 0, target: 0, batched: false };
     g.done += e.completed;
     g.target += perEngineTotal;
+    if (batchedSet.has(e.model)) g.batched = true;
     assistants.set(name, g);
   }
   const list = [...assistants.entries()];
+  const waitingOn = list.filter(([, g]) => g.batched).map(([name]) => name);
 
-  // Wait for a real sample before promising a number — the first few seconds
-  // of any run read far too fast or far too slow to extrapolate from.
+  // Finish-time estimate from the LIVE engines only: batched engines
+  // answer all at once when their vendor finishes, so extrapolating the
+  // live pace over them promised a time that meant nothing. Wait for a
+  // real sample before promising a number - the first few seconds of any
+  // run read far too fast or far too slow to extrapolate from.
+  const live = perEngine.filter((e) => !batchedSet.has(e.model));
+  const liveDone = live.reduce((a, e) => a + Math.min(e.completed, perEngineTotal), 0);
+  const liveTotal = live.length * perEngineTotal;
   let eta: string | null = null;
   const elapsed = now - new Date(startedAt).getTime();
-  if (collecting && completed >= 8 && elapsed > 8000) {
-    const mins = Math.round(((total - completed) * elapsed) / completed / 60000);
+  if (collecting && liveDone < liveTotal && liveDone >= 8 && elapsed > 8000) {
+    const mins = Math.round(((liveTotal - liveDone) * elapsed) / liveDone / 60000);
     eta = mins <= 1 ? "less than a minute left" : `about ${mins} minutes left`;
+    if (waitingOn.length > 0) eta = `Live answers: ${eta}.`;
   }
+  const batchNote =
+    waitingOn.length > 0
+      ? `${waitingOn.join(", ")} answer in batches - those arrive all at once when the provider finishes, usually within a few hours and at most 24.`
+      : null;
 
   return (
     <section className="card p-5 grid gap-3">
@@ -1905,15 +1973,17 @@ function RunProgress({
         <div className="grid gap-0.5">
           <h2 className="flex items-center gap-2 text-sm font-semibold">
             <span className="pulse-dot inline-block h-1.5 w-1.5 rounded-full bg-primary" />
-            {collecting ? "Collecting answers" : "Analyzing answers"}
+            {settingUp ? "Setting up" : collecting ? "Collecting answers" : "Analyzing answers"}
           </h2>
           <p className="text-[13px] text-ink-3">
-            {collecting
-              ? `Asking ${list.length} AI assistant${list.length === 1 ? "" : "s"} your ${promptCount} question${promptCount === 1 ? "" : "s"}, several times each.`
-              : `Reading what every assistant said about ${brand}.`}
+            {settingUp
+              ? `Checking each AI assistant and sending out your ${promptCount} question${promptCount === 1 ? "" : "s"}.`
+              : collecting
+                ? `Asking ${list.length} AI assistant${list.length === 1 ? "" : "s"} your ${promptCount} question${promptCount === 1 ? "" : "s"}.`
+                : `Reading what every assistant said about ${brand}.`}
           </p>
         </div>
-        {collecting && (
+        {collecting && !settingUp && (
           <span className="text-sm font-semibold tabular-nums text-primary">
             {Math.round(pct)}%
           </span>
@@ -1929,7 +1999,7 @@ function RunProgress({
         />
       </div>
 
-      {collecting && list.length > 0 && (
+      {collecting && !settingUp && list.length > 0 && (
         <div className="flex flex-wrap gap-1.5">
           {list.map(([name, g]) => {
             const done = g.target > 0 && g.done >= g.target;
@@ -1944,6 +2014,7 @@ function RunProgress({
               >
                 {done && <span aria-hidden="true">✓</span>}
                 {name}
+                {!done && g.batched && <span className="font-normal">· in batch</span>}
               </span>
             );
           })}
@@ -1951,9 +2022,12 @@ function RunProgress({
       )}
 
       <p className="text-[12px] text-ink-3">
-        {collecting
-          ? (eta ?? "Working out how long this will take…")
-          : "Almost there — this last step usually takes under a minute."}
+        {settingUp
+          ? "This takes a few seconds."
+          : collecting
+            ? [eta, batchNote].filter(Boolean).join(" ") ||
+              "Working out how long this will take…"
+            : "Almost there — this last step usually takes under a minute."}
       </p>
     </section>
   );
