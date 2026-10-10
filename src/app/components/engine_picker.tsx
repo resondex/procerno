@@ -13,6 +13,27 @@ export interface EngineOption {
   locked?: boolean;
   /** Retired engine: kept so stored answers resolve, never offered. */
   retired?: boolean;
+  /** The engine a retired id collects on now. */
+  successor?: string;
+}
+
+/** A saved panel as it would run today: retired ids become their
+ * successors, duplicates collapse, order kept. Mirrors the server's
+ * currentEngineIds so a draft never carries ids the picker cannot show
+ * (a stale gemini-flash-latest made five drafts read "14 engines" for a
+ * 13-engine run). */
+export function currentEngineSet(ids: string[], options: EngineOption[]): string[] {
+  const byId = new Map(options.map((o) => [o.id, o]));
+  const resolve = (id: string): string => {
+    const seen = new Set<string>();
+    let cur = id;
+    while (byId.get(cur)?.successor && !seen.has(cur)) {
+      seen.add(cur);
+      cur = byId.get(cur)!.successor!;
+    }
+    return cur;
+  };
+  return [...new Set(ids.map(resolve))];
 }
 
 export type EngineModeChoice = "instinct" | "search" | "both";
@@ -25,7 +46,9 @@ export function defaultEnginesFor(
 ): string[] {
   const wanted: string[] = [];
   if (choice !== "search") {
-    wanted.push("gpt-5.6-luna", "claude-sonnet-5", "gemini-flash-latest");
+    // The free-tier Gemini is pinned (gemini-flash-latest was retired
+    // 2026-09-28 - it now serves the paid tier's Flash).
+    wanted.push("gpt-5.6-luna", "claude-sonnet-5", "gemini-3.6-flash");
   }
   if (choice !== "instinct") {
     wanted.push("gpt-5.6-luna-search", "claude-sonnet-5-search", "sonar");

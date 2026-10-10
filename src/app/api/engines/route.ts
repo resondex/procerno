@@ -17,6 +17,7 @@ export async function GET() {
       keyEnv: e.keyEnv,
       mode: e.mode,
       retired: Boolean(e.successor),
+      successor: e.successor,
       locked: !planAllowsEngine(plan, e.id),
     })),
   });

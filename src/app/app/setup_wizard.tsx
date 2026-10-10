@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import type { PromptTheme, SetupDraft } from "@/lib/types";
-import { EnginePicker, defaultEnginesFor, type EngineOption } from "@/app/components/engine_picker";
+import { EnginePicker, currentEngineSet, defaultEnginesFor, type EngineOption } from "@/app/components/engine_picker";
 import {
   CellReviewModal,
   CellsGate,
@@ -388,7 +388,11 @@ export function SetupWizard({ mode, brand, draft, engineOptions, onClose, onCrea
   const [reviewedPrompts, setReviewedPrompts] = useState<string[]>(saved?.reviewedPrompts ?? []);
   /** What the last "Your market buys" edit changed downstream. */
   const [readDelta, setReadDelta] = useState<string | null>(null);
-  const [chosenEngines, setChosenEngines] = useState<string[] | null>(saved?.engineSet ?? null);
+  // Saved panels resolve retired ids to their successors on load; the
+  // next autosave writes the cleaned list back.
+  const [chosenEngines, setChosenEngines] = useState<string[] | null>(
+    saved?.engineSet ? currentEngineSet(saved.engineSet, engineOptions) : null
+  );
   // Until the user touches the panel, it is the default for what this
   // deployment can reach - derived, so it tracks the options as they load.
   const engineSet = chosenEngines ?? defaultEnginesFor("both", engineOptions);

@@ -18,6 +18,7 @@ export default async function DemoPage() {
     keyEnv: e.keyEnv,
     mode: e.mode,
     retired: Boolean(e.successor),
+    successor: e.successor,
   }));
   return <DemoHome initialDenied={!auth} initialEngines={engines} />;
 }

@@ -62,6 +62,7 @@ export default async function AppHomePage({
     keyEnv: e.keyEnv,
     mode: e.mode,
     retired: Boolean(e.successor),
+    successor: e.successor,
   }));
   // Wire format parity with the API routes (dates as strings).
   const wire = JSON.parse(JSON.stringify({ withRuns, drafts, editSetup }));

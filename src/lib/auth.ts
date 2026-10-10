@@ -241,8 +241,15 @@ export const PLAN_ENGINE_ALLOWANCE: Record<Plan, string[] | null> = {
 /** True when the plan's panel includes the engine. */
 export function planAllowsEngine(plan: Plan, engineId: string): boolean {
   const allowance = PLAN_ENGINE_ALLOWANCE[plan];
-  // Retired ids check as their successors (the engine a run would use).
-  return allowance === null || allowance.includes(currentEngineId(engineId));
+  // Retired ids check as their successors (the engine a run would use) -
+  // on BOTH sides: the allowance lists name engines as they were when the
+  // tier was priced, so an entry whose engine was since retired permits
+  // its successor. Resolving only the requested id blocked Gemini Flash,
+  // Claude and Grok on every non-enterprise plan.
+  return (
+    allowance === null ||
+    allowance.map(currentEngineId).includes(currentEngineId(engineId))
+  );
 }
 
 /** Auth context, or a ready-to-return 401 when auth is on and nobody's in. */
