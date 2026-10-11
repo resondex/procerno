@@ -689,12 +689,45 @@ export function runInBackground(runId: string): Promise<void> {
  * fresh invocation via the run's /continue endpoint so no single function
  * has to outlive maxDuration.
  */
+/** One driver per run at a time. Every trigger - the run launch, the chunk
+ * hop, the batch cron, the dashboard's opportunistic poll, stalled-run
+ * resume - lands in driveAndChain, and each used to start its own chunk:
+ * on the AmEx batch run (2026-10-10) ~9 overlapping chains each re-sent
+ * every still-pending live task, so Grok was called 4,204 times for 455
+ * stored answers (the unique index dropped the duplicate answers, the
+ * vendor billed every call). The lease lives in llm_cache via the CAS
+ * claim; a holder that dies is reclaimable once the lease outlives the
+ * longest possible chunk (maxDuration 300s). */
+export const RUN_LEASE_MS = 310_000;
+const LEASE_RELEASED = "released";
+
+export async function claimRunLease(key: string): Promise<string | null> {
+  const token = `lease:${crypto.randomUUID()}`;
+  return (await store.cacheClaim(key, LEASE_RELEASED, token, RUN_LEASE_MS)) ? token : null;
+}
+
+export async function releaseRunLease(key: string, token: string): Promise<void> {
+  // Only the holder releases (CAS on its own token).
+  await store.cacheClaim(key, token, LEASE_RELEASED, RUN_LEASE_MS).catch(() => false);
+}
+
 export async function driveAndChain(
   runId: string,
   origin: string
 ): Promise<void> {
+  const leaseKey = `run_drive:${runId}`;
+  const token = await claimRunLease(leaseKey).catch(() => null);
+  if (!token) return; // another driver holds the run; it chains on itself
+  let released = false;
+  const release = async () => {
+    if (released) return;
+    released = true;
+    await releaseRunLease(leaseKey, token);
+  };
   try {
     const outcome = await driveRunChunk(runId, VERCEL_CHUNK_BUDGET_MS);
+    // Release BEFORE any hop: the next invocation must be able to claim.
+    await release();
     if (outcome === "finalize") {
       // Fresh invocation, fresh budget. If the hop cannot be made at all,
       // finalize inline rather than leaving the run stuck in "running".
@@ -725,5 +758,7 @@ export async function driveAndChain(
   } catch (err) {
     console.error(`procerno run ${runId} crashed:`, err);
     await store.updateRunStatus(runId, "failed", String(err));
+  } finally {
+    await release();
   }
 }

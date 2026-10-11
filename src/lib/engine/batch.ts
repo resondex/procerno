@@ -475,6 +475,25 @@ const TERMINAL_FAILED = ["failed", "expired", "cancelled"];
  * open.
  */
 export async function pollRunBatches(runId: string): Promise<{ open: number }> {
+  // One poller per run at a time: two concurrent ingests of the same
+  // finished batch would both ledger every answer (the response insert
+  // dedupes, the cost rows would not). A poll that finds the lease held
+  // reports its batches as still open; the holder finishes the job.
+  const { claimRunLease, releaseRunLease } = await import("./runner");
+  const leaseKey = `run_poll:${runId}`;
+  const token = await claimRunLease(leaseKey).catch(() => null);
+  if (!token) {
+    const open = (await store.listRunBatches(runId)).filter((b) => b.status === "submitted").length;
+    return { open };
+  }
+  try {
+    return await pollRunBatchesHeld(runId);
+  } finally {
+    await releaseRunLease(leaseKey, token);
+  }
+}
+
+async function pollRunBatchesHeld(runId: string): Promise<{ open: number }> {
   const rows = (await store.listRunBatches(runId)).filter((b) => b.status === "submitted");
   let open = 0;
   for (const row of rows) {
