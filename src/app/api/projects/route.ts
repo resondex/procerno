@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { waitUntil } from "@vercel/functions";
 import { ModeratorsShape } from "@/lib/engine/instrument_shapes";
 import { z } from "zod";
 import { store } from "@/lib/store";
@@ -265,6 +266,13 @@ export async function POST(req: Request) {
   // The seed's model spend belongs to the project that now exists - without
   // the tag it landed in the ledger unattributed.
   tagCosts({ projectId: project.id });
-  await seedDictionary(project.id, [brand, ...competitors]);
+  // Off the response path: nothing reads the dictionary until discovery,
+  // hours into the first run, and the alias call can take seconds - the
+  // Create click waited on it before the dashboard could open.
+  const seeding = seedDictionary(project.id, [brand, ...competitors]).catch((err) =>
+    console.error(`dictionary seed failed for ${project.id}:`, err)
+  );
+  if (process.env.VERCEL) waitUntil(seeding);
+  else await seeding;
   return NextResponse.json({ project }, { status: 201 });
 }

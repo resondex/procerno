@@ -533,7 +533,12 @@ export default function ProjectDashboard({
         />
       </div>
 
-      {awaitingRun && noRunsYet && (
+      {/* "Setting up" from arrival until the run's first progress reading:
+          before the run row exists (launch still in flight), and in the beat
+          between the row appearing and its progress fetch landing - that
+          beat used to flash the idle view. */}
+      {((awaitingRun && noRunsYet) ||
+        (activeRun && !progress && (activeRun.status === "pending" || activeRun.status === "running"))) && (
         <RunProgress
           progress={{
             completed: 0,
@@ -1993,9 +1998,9 @@ function RunProgress({
       <div className="h-1.5 w-full overflow-hidden rounded-full bg-line">
         <div
           className={`h-full rounded-full bg-primary ${
-            collecting ? "transition-[width] duration-700" : "animate-pulse"
+            collecting && !settingUp ? "transition-[width] duration-700" : "animate-pulse"
           }`}
-          style={{ width: collecting ? `${pct}%` : "100%" }}
+          style={{ width: collecting && !settingUp ? `${pct}%` : "100%" }}
         />
       </div>
 

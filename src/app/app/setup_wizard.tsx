@@ -1775,6 +1775,29 @@ export function SetupWizard({ mode, brand, draft, engineOptions, onClose, onCrea
 
   /* --------------------------------- render -------------------------------- */
 
+  // Create clicked: the setup is final, so the wizard steps aside at once
+  // for the same "Setting up" card the dashboard opens on - no dead seconds
+  // on a spinning button while the tracker is written.
+  if (submitting && !editProjectId) {
+    return (
+      <div className="flex h-full min-h-0 items-start justify-center p-8">
+        <section className="card p-5 grid gap-3 w-full max-w-2xl">
+          <h2 className="flex items-center gap-2 text-sm font-semibold">
+            <span className="pulse-dot inline-block h-1.5 w-1.5 rounded-full bg-primary" />
+            Setting up
+          </h2>
+          <p className="text-[13px] text-ink-3">
+            {`Creating your tracker and sending your ${promptCount} question${promptCount === 1 ? "" : "s"} to ${engineSet.length} AI assistant${engineSet.length === 1 ? "" : "s"}.`}
+          </p>
+          <div className="h-1.5 w-full overflow-hidden rounded-full bg-line">
+            <div className="h-full w-full rounded-full bg-primary animate-pulse" />
+          </div>
+          <p className="text-[12px] text-ink-3">This takes a few seconds.</p>
+        </section>
+      </div>
+    );
+  }
+
   return (
     <div className="flex h-full min-h-0">
       {/* rail */}
