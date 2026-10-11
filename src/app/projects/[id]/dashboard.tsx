@@ -241,9 +241,6 @@ export default function ProjectDashboard({
   // Init phase: a first run exists but nothing has measured yet - the
   // pipeline card (collect -> codebook -> brands -> code) is the only path,
   // so the standing tools sit disabled until the first measure lands.
-  const initPhase =
-    (detail?.runs.length ?? 0) > 0 &&
-    !detail?.runs.some((r) => r.status === "complete");
   // Just created, run launch still in flight: poll the detail until the
   // run row exists (bounded - a failed launch falls back to the idle view,
   // where the Run control reports).
@@ -251,6 +248,14 @@ export default function ProjectDashboard({
     starting && (initialDetail.runs?.length ?? 0) === 0
   );
   const noRunsYet = (detail?.runs.length ?? 0) === 0;
+  // The first run is being launched but its row does not exist yet: the
+  // page reads as a run in progress (Setting up card, tools disabled), not
+  // as an idle tracker - "Launch your first run" flashed here for ~2s.
+  const launchingFirstRun = awaitingRun && noRunsYet;
+  const initPhase =
+    launchingFirstRun ||
+    ((detail?.runs.length ?? 0) > 0 &&
+      !detail?.runs.some((r) => r.status === "complete"));
   useEffect(() => {
     if (!awaitingRun || !noRunsYet) return;
     const startedAt = Date.now();
@@ -489,12 +494,12 @@ export default function ProjectDashboard({
       <div className="flex flex-wrap items-center gap-3">
         <TaskButton
           label={
-            activeRun
+            activeRun || launchingFirstRun
               ? "Run in progress…"
               : "Run"
           }
           primary
-          bubble={needsFirstRun && !archived ? "dot" : null}
+          bubble={needsFirstRun && !launchingFirstRun && !archived ? "dot" : null}
           onClick={() => setOpenModal("run")}
           disabled={initPhase || archived}
         />
@@ -537,7 +542,7 @@ export default function ProjectDashboard({
           before the run row exists (launch still in flight), and in the beat
           between the row appearing and its progress fetch landing - that
           beat used to flash the idle view. */}
-      {((awaitingRun && noRunsYet) ||
+      {(launchingFirstRun ||
         (activeRun && !progress && (activeRun.status === "pending" || activeRun.status === "running"))) && (
         <RunProgress
           progress={{
@@ -616,7 +621,7 @@ export default function ProjectDashboard({
           />
         </>
       ) : (
-        !activeRun && (
+        !activeRun && !launchingFirstRun && (
           <div className="card px-5 py-10 text-center text-sm text-ink-3">
             Launch your first run to start measuring — results land here.
           </div>
