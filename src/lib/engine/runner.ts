@@ -743,8 +743,18 @@ export async function driveAndChain(
         await finalizeRun(runId);
       }
     } else if (outcome === "waiting") {
-      // Vendor batches are out; the hourly batch cron resumes this run.
-      return;
+      // Vendor batches are out (and the live engines have nothing to do
+      // right now). The run checks back on itself: a wait hop sleeps, polls
+      // the batches, then hands back here. Relying on the batch cron (daily
+      // on Hobby) or a watched dashboard left two runs parked for 9+ hours
+      // on 2026-10-11 - Jira's finished Claude batch never ingested, and
+      // Pixel's Grok tasks stopped when its chain went to "waiting".
+      await fetch(`${origin}/api/runs/${runId}/continue?wait=1`, {
+        method: "POST",
+        headers: process.env.CRON_SECRET
+          ? { authorization: `Bearer ${process.env.CRON_SECRET}` }
+          : undefined,
+      });
     } else if (outcome === "continue") {
       // Server-to-server hop carries no session cookies; the continue route
       // accepts the cron secret as chain credentials.
