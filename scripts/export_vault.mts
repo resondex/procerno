@@ -40,7 +40,12 @@ const gz = zlib.gzipSync(Buffer.from(body, "utf8"), { level: 9 });
 fs.writeFileSync(out, gz);
 const sha = crypto.createHash("sha256").update(gz).digest("hex");
 const manifest = path.join(VAULT, `MANIFEST_${stamp}.txt`);
+// Several exports in one minute share a manifest: unlock it to append, then
+// lock both. (Without this the second append in a batch found the manifest
+// immutable and the flags were left inconsistent - 2026-10-11.)
+if (fs.existsSync(manifest)) execFileSync("chflags", ["nouchg", manifest]);
 fs.appendFileSync(manifest, `${sha}  ${file}  rows=${rows.length}  status=${run.status}\n`);
 execFileSync("chflags", ["uchg", out, manifest]);
+for (const f of [out, manifest]) if (!execFileSync("ls", ["-lO", f]).toString().includes("uchg")) { console.error(`${f}: uchg flag did not stick`); process.exit(1); }
 console.log(`${file}  rows=${rows.length}  prompts=${prompts.length}  sha256=${sha}\nmanifest ${path.basename(manifest)}; both chflags uchg`);
 await sql.end(); process.exit(0);
