@@ -914,3 +914,27 @@ if (fails > 0) process.exitCode = 1;
   ok("social validation keeps the seed's audience as a property", (ss.stageStructure({ stage: "social_validation", angle: "generic" }, "Brand")?.properties[0] ?? "").includes("audience"));
   console.log("13. stage structure: " + (process.exitCode ? "FAILED" : "ALL PASS"));
 }
+
+
+// 14. Definition overlap (2026-10-11): two scope sentences claiming the same distinctive terms are flagged; category, brand, stop and generic words never count.
+{
+  const ok = (label: string, cond: boolean, extra = "") => { if (!cond) { console.error(`   FAIL ${label} ${extra}`); process.exitCode = 1; } else console.log(`   ok   ${label} ${extra}`); };
+  const dov = await import("../src/lib/engine/definition_overlap.ts");
+  const defs = [
+    { code: "monthly price", text: "Headline subscription price level, affordability, increases and promo rates." },
+    { code: "plan tiers", text: "Which tier to choose, what each tier includes, and tier pricing differences." },
+    { code: "catalog rotation", text: "Titles leaving and arriving, licensing churn, library stability." },
+    { code: "kids content", text: "Children's titles, profiles and parental controls." },
+  ];
+  const noCat = dov.definitionOverlaps(defs, { category: "widgets", brand: "Brand" });
+  ok("clean sheet: no pair", noCat.length === 0, JSON.stringify(noCat));
+  const v5ish = dov.definitionOverlaps([...defs.slice(2), { code: "monthly price", text: "Headline price level, price points and tiers, affordability, increases." }, { code: "plan tiers", text: "Tier choice, what each tier includes, tier pricing and price points." }], { category: "widgets" });
+  ok("tiers + pricing claimed twice flags the pair", v5ish.length === 1 && v5ish[0].a === "monthly price" && v5ish[0].b === "plan tiers" && v5ish[0].terms.length >= 2, JSON.stringify(v5ish));
+  ok("one shared stem is not an overlap", dov.definitionOverlaps([{ code: "a", text: "Delivery speed and reliability." }, { code: "b", text: "Return policy speed and fees." }]).length === 0);
+  ok("category and brand words never count", dov.definitionOverlaps([{ code: "a", text: "Widget Brand pricing for widgets." }, { code: "b", text: "Widget Brand support for widgets." }], { category: "widgets", brand: "Widget Brand" }).length === 0);
+  ok("generic scope words never count", dov.definitionOverlaps([{ code: "a", text: "Overall quality and features of the options." }, { code: "b", text: "Specific features and quality levels." }]).length === 0);
+  ok("stems meet across inflections (pricing / price, tiers / tier)", dov.definitionStems("pricing tiers", new Set()).has("prici") && dov.definitionStems("price tier", new Set()).has("tier"));
+  const by = dov.overlapsByCode([{ a: "x", b: "y", terms: ["t1", "t2"] }]);
+  ok("per-code index is symmetric", by.x?.[0].code === "y" && by.y?.[0].code === "x");
+  console.log("14. definition overlap: " + (process.exitCode ? "FAILED" : "ALL PASS"));
+}

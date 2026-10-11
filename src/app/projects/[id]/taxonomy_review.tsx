@@ -79,6 +79,7 @@ export default function TaxonomyReview({
         ? (JSON.parse(project.taxonomy_proposal) as {
             codes: ProposedCode[];
             micros?: Record<string, Micro[]>;
+            overlaps?: { a: string; b: string; terms: string[] }[];
           })
         : null;
     } catch {
@@ -87,6 +88,18 @@ export default function TaxonomyReview({
   }, [project.taxonomy_proposal]);
   const codes = useMemo(() => proposal?.codes ?? [], [proposal]);
   const micros = useMemo(() => proposal?.micros ?? {}, [proposal]);
+  // Scope-sentence overlaps (definition_overlap.ts): per code, the codes
+  // whose definitions claim the same distinctive terms. A term two codes
+  // claim is a boundary the coder will draw inconsistently - merge, or
+  // reword one definition before confirming.
+  const overlapsOf = useMemo(() => {
+    const by: Record<string, { code: string; terms: string[] }[]> = {};
+    for (const o of proposal?.overlaps ?? []) {
+      (by[o.a] ??= []).push({ code: o.b, terms: o.terms });
+      (by[o.b] ??= []).push({ code: o.a, terms: o.terms });
+    }
+    return by;
+  }, [proposal]);
   const byCode = useMemo(
     () => Object.fromEntries(codes.map((c) => [c.code, c])),
     [codes]
@@ -372,6 +385,14 @@ export default function TaxonomyReview({
           {isReview && (
             <span className="rounded-full bg-warning/10 px-2 py-0.5 text-[11px] font-semibold text-warning">
               needs your call
+            </span>
+          )}
+          {(overlapsOf[c.code] ?? []).length > 0 && (
+            <span
+              className="rounded-full bg-warning/10 px-2 py-0.5 text-[11px] font-semibold text-warning"
+              title={`Both definitions claim: ${(overlapsOf[c.code] ?? []).map((o) => `${o.code} (${o.terms.join(", ")})`).join("; ")}. A term two codes claim is a boundary the coder draws inconsistently - merge them, or reword one definition.`}
+            >
+              {`Overlaps with ${(overlapsOf[c.code] ?? []).map((o) => o.code).join(", ")}`}
             </span>
           )}
           <button

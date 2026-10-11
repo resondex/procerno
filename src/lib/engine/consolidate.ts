@@ -17,6 +17,8 @@ import { logCost, tagCosts } from "../cost_log";
  * Ledger: discovery:consolidate per project (embedding row + the Opus row).
  */
 
+import { definitionOverlaps, type DefinitionOverlap } from "./definition_overlap";
+
 const EMBED_MODEL = "text-embedding-3-large";
 const CONSOLIDATE_MODEL = process.env.CONSOLIDATE_MODEL ?? "claude-opus-5";
 
@@ -43,6 +45,11 @@ export interface TaxonomyProposal {
   /** Per code: its member phrases, capped to the top 30 by mention count -
    * the review screen's reassignment UI without the multi-thousand tail. */
   micros: Record<string, { p: string; n: number }[]>;
+  /** Pairs of codes whose scope sentences claim the same distinctive terms
+   * (definition_overlap.ts). The review card chips them: a term two
+   * definitions claim is a boundary the labeler will draw inconsistently.
+   * Absent on proposals made before 2026-10-11. */
+  overlaps?: DefinitionOverlap[];
 }
 
 const norm = (s: string) => (s ?? "").trim().toLowerCase();
@@ -67,7 +74,7 @@ function normalize(v: Float32Array): Float32Array {
 export async function consolidateTaxonomy(
   brandName: string,
   discoveryRows: DiscoveryRow[],
-  opts: { floor?: number; tau?: number } = {}
+  opts: { floor?: number; tau?: number; category?: string | null } = {}
 ): Promise<TaxonomyProposal> {
   const floor = opts.floor ?? 0.01;
   const tau = opts.tau ?? 0.6;
@@ -272,5 +279,9 @@ export async function consolidateTaxonomy(
     source: "in-run discovery, embeddings-first consolidation",
     codes,
     micros,
+    overlaps: definitionOverlaps(
+      codes.map((c) => ({ code: c.code, text: c.why })),
+      { category: opts.category ?? null, brand: brandName }
+    ),
   };
 }

@@ -110,7 +110,8 @@ export async function bootstrapRunChunk(
         .map((r) => ({
           responseId: r.id,
           phrases: JSON.parse(r.discovery_codes!) as string[],
-        }))
+        })),
+      { category: project.category }
     );
     await store.setTaxonomyProposal(project.id, JSON.stringify(proposal));
   }
