@@ -317,6 +317,11 @@ interface Props {
   /** `starting`: a first run is being launched in the background - the
    * dashboard opens on its "Setting up" phase instead of waiting here. */
   onCreated: (projectId: string, opts?: { starting?: boolean }) => void;
+  /** Create clicked (info) / create failed (null): the host shows the
+   * tracker's "Setting up" card on the page while the tracker is written,
+   * and hides this modal - kept mounted so a failure returns to it with
+   * its error. */
+  onCreating?: (info: { name: string; promptCount: number } | null) => void;
   /** Called after every draft save with the saved row, so the host can
    * merge it into its list synchronously (a reopen before the list
    * re-fetched used to hydrate from the stale row - the engine panel
@@ -334,7 +339,7 @@ interface Props {
   editProjectId?: string;
 }
 
-export function SetupWizard({ mode, brand, draft, engineOptions, onClose, onCreated, onDraftsChanged, onCloseSave, demo = false, editProjectId }: Props) {
+export function SetupWizard({ mode, brand, draft, engineOptions, onClose, onCreated, onCreating, onDraftsChanged, onCloseSave, demo = false, editProjectId }: Props) {
   const steps = STEPS[mode];
   const saved = (draft?.wizard ?? null) as WizardDraft | null;
 
@@ -1552,6 +1557,7 @@ export function SetupWizard({ mode, brand, draft, engineOptions, onClose, onCrea
       onCreated(editProjectId);
       return;
     }
+    onCreating?.({ name: studyName.trim() || brand, promptCount });
     const res = await fetch("/api/projects", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -1588,12 +1594,14 @@ export function SetupWizard({ mode, brand, draft, engineOptions, onClose, onCrea
     }).catch(() => null);
     if (!res) {
       setSubmitting(false);
+      onCreating?.(null);
       setError("that took too long - check your trackers before retrying (it may have been created)");
       return;
     }
     const data = await res.json().catch(() => ({}));
     if (!res.ok) {
       setSubmitting(false);
+      onCreating?.(null);
       setError(data.error ?? "something went wrong");
       return;
     }
@@ -1775,28 +1783,6 @@ export function SetupWizard({ mode, brand, draft, engineOptions, onClose, onCrea
 
   /* --------------------------------- render -------------------------------- */
 
-  // Create clicked: the setup is final, so the wizard steps aside at once
-  // for the same "Setting up" card the dashboard opens on - no dead seconds
-  // on a spinning button while the tracker is written.
-  if (submitting && !editProjectId) {
-    return (
-      <div className="flex h-full min-h-0 items-start justify-center p-8">
-        <section className="card p-5 grid gap-3 w-full max-w-2xl">
-          <h2 className="flex items-center gap-2 text-sm font-semibold">
-            <span className="pulse-dot inline-block h-1.5 w-1.5 rounded-full bg-primary" />
-            Setting up
-          </h2>
-          <p className="text-[13px] text-ink-3">
-            {`Creating your tracker and sending your ${promptCount} question${promptCount === 1 ? "" : "s"} to ${engineSet.length} AI assistant${engineSet.length === 1 ? "" : "s"}.`}
-          </p>
-          <div className="h-1.5 w-full overflow-hidden rounded-full bg-line">
-            <div className="h-full w-full rounded-full bg-primary animate-pulse" />
-          </div>
-          <p className="text-[12px] text-ink-3">This takes a few seconds.</p>
-        </section>
-      </div>
-    );
-  }
 
   return (
     <div className="flex h-full min-h-0">

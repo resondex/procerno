@@ -59,6 +59,9 @@ export default function AppHome({
   // The open setup, if any: which question set, which brand, resuming what.
   // editProjectId marks the zero-run edit-setup flow: Save replaces the
   // tracker's instrument in place instead of creating a new one.
+  // Create in flight: { tracker name, prompt count } while the tracker is
+  // written; the page shows its "Setting up" card and the wizard hides.
+  const [creating, setCreating] = useState<{ name: string; promptCount: number } | null>(null);
   const [wizard, setWizard] = useState<{ mode: SetupMode; brand: string; draft: SetupDraft | null; editProjectId?: string } | null>(
     initialEditSetup
       ? { mode: "grid", brand: initialEditSetup.draft.brand, draft: initialEditSetup.draft, editProjectId: initialEditSetup.id }
@@ -136,7 +139,33 @@ function draftStatus(d: SetupDraft): string {
   }
 
   return (
-    <div className="grid gap-10 max-w-2xl">
+    <div className={creating ? "grid gap-8" : "grid gap-10 max-w-2xl"}>
+      {creating ? (
+        // Create clicked: the page already shows the tracker the way its
+        // dashboard will open - title and "Setting up" card in the same
+        // place - so the hand-off to /projects/<id> changes nothing visible.
+        <>
+          <h1 className="text-2xl font-semibold tracking-tight">
+            {creating.name} — LLM visibility
+          </h1>
+          <section className="card p-5 grid gap-3">
+            <div className="grid gap-0.5">
+              <h2 className="flex items-center gap-2 text-sm font-semibold">
+                <span className="pulse-dot inline-block h-1.5 w-1.5 rounded-full bg-primary" />
+                Setting up
+              </h2>
+              <p className="text-[13px] text-ink-3">
+                {`Checking each AI assistant and sending out your ${creating.promptCount} question${creating.promptCount === 1 ? "" : "s"}.`}
+              </p>
+            </div>
+            <div className="h-1.5 w-full overflow-hidden rounded-full bg-line">
+              <div className="h-full w-full rounded-full bg-primary animate-pulse" />
+            </div>
+            <p className="text-[12px] text-ink-3">This takes a few seconds.</p>
+          </section>
+        </>
+      ) : (
+        <>
       <section>
         <div className="flex items-baseline justify-between">
           <h1 className="text-2xl font-semibold tracking-tight mb-2">Your trackers</h1>
@@ -347,8 +376,10 @@ function draftStatus(d: SetupDraft): string {
           </div>
         </div>
       )}
+        </>
+      )}
       {wizard && (
-        <div className="fixed inset-0 z-50 bg-black/40 p-[3vh_3vw]">
+        <div className={`fixed inset-0 z-50 bg-black/40 p-[3vh_3vw] ${creating ? "hidden" : ""}`}>
           <div
             role="dialog"
             aria-modal="true"
@@ -362,6 +393,7 @@ function draftStatus(d: SetupDraft): string {
               editProjectId={wizard.editProjectId}
               engineOptions={engineOptions}
               onClose={() => setWizard(null)}
+              onCreating={setCreating}
               onCreated={(id, opts) =>
                 router.push(`/projects/${id}${opts?.starting ? "?starting=1" : ""}`)
               }
