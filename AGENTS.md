@@ -913,6 +913,10 @@ The five example drafts were edit-reviewed (EDIT_REVIEW_P31_2026-10-09.md: 126 p
 Also fixed: the project PATCH route capped `engines` at 8 while every tracker carries an 11-engine panel, so any toggle in the dashboard's core-panel modal was a silent 400 and the tick vanished on the next refresh.
 Note: s54 is a STYLE bump - a draft that has not been confirmed redraws its seeds on next open (the client keeps a hand-edited cell only when the engine text for that design is unchanged).
 
+## Settled-customer codebook drafted (2026-10-10, Tyler: "do 1 through 3 without spend")
+
+The group-3 scorer workstream started without spend: CODING_DECISIONS.md section 10 holds the PROPOSED codebook for business_case / expansion / ecosystem / advocacy (relationship verdict, redirects, a stage field per stage, pairings with own / third_party / substitute, premise on quoted critics, brand-agnostic reasons on the confirmed list); `labeling/build_batch.mts --mode settled` + `labeling/instructions_settled.md` build it (the four existing modes verified byte-identical before and after); `labeling/g3/draw_sample.py` drew 390 answers (30 per brand x stage, twelve engines incl. the GPT-5.6 collections; 195-row nested rerun subset) and the four request files are built; `labeling/g3/validate_settled.py` validates results. Nothing submitted - the ~$10 + ~$5 labels wait on Tyler's go, then the scorer choice. Netflix and Pixel rows were asked brand-free (pre-A3 vault prompts) - a pilot artifact noted in the record.
+
 ## To do (added 2026-09-27, Tyler)
 
 - **Social validation vs Discovery - measure after wave one (Tyler 2026-10-03).** Compare the brands Social validation names against Discovery's on the same tracker. If they track closely, merge Social validation into Discovery (stage contract row 7).

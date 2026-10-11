@@ -16,6 +16,7 @@ Status tags: **DECIDED** (in force), **PROPOSED** (recommended, awaiting Tyler),
 | Labeling prompt | `labeling/build_batch.mts --mode v02_full --defs --design`, no precedents | **FROZEN 2026-09-27 (v02_frozen_2026-09-27)**: the b2c tightened negative rule folded into the baseline (verified byte-identical to the tested arm); B2 signals and B7 roles are read-time computations, so no other B change touches the prompt. Do not edit without a new freeze decision. |
 | Codebook | gate-confirmed code list + confirmed scope sentence per code (v4 contract) | DECIDED 2026-09-25 |
 | Brand resolution | the confirmed dictionary is fed to the labeler (and the coder); each mention carries its dictionary entry; post-hoc resolution stays as a safety net | DECIDED 2026-09-27 (test pending) |
+| Settled-customer codebook (group 3) | own labeling mode (`--mode settled`, `instructions_settled.md`): relationship verdict + stage field + redirects + pairings, reasons brand-agnostic on the confirmed list | PROPOSED 2026-10-10 (section 10; 390-row sample built, labels need Tyler's go) |
 
 ---
 
@@ -153,5 +154,32 @@ The working checklist with options, recommendations and costs is `V02_OPEN_DECIS
 8. B7 - decided (role replaces per-mention framing, built as a split of recommended); go for its isolated test (~$5 + ~$5 second run).
 9. B10 - decided (naming rule + doubt check on the 377 branded prompts without a line; B6a present-by-reference decided with it); go for the doubt check (~$1.70).
 10. B11 - score alongside the category for framing and the doubt verdict; isolated test (two runs).
-11. Group-3 scorer (problem resolution, expansion, ecosystem, advocacy): taxonomy draft - workstream after v0.2.
+11. Group-3 scorer (business case, expansion, ecosystem, advocacy): codebook DRAFTED 2026-10-10 (section 10) - go needed for the 390-row reference sample (~$10) and the 195-row rerun (~$5); then the scorer choice.
 12. Labeling route for the rest of v0.2 (in-session plan allowance vs Batch API vs mix).
+
+---
+
+## 10. Settled-customer codebook (group 3) - PROPOSED 2026-10-10
+
+**Scope.** The four stages the stage contract (2026-10-03) marks "settled customer (scorer to build)": business_case (row 12), expansion (16), ecosystem (17), advocacy (18). This moves business_case out of the 2026-09-27 split's group 1 ("buyer doubt"), following the later contract: its asker already has the brand and its read is case strength, not a buyer's verdict. problem_resolution is not in this codebook - it left the grid on 2026-10-02 pending the evidence-grounded redesign; its legacy cells stay unscored. The stage comes from the cell (the request's design line), never from the labeler, exactly like the doubt design.
+
+**Why a separate codebook.** The buyer-choice fields are constant or misleading here (AmEx v0.2 labels: ecosystem "picks" were companion apps; the asker already owns the brand, so O-TEST and target framing answer a question nobody asked). The client question is "does the AI keep and grow our customers": arm or concede, back or redirect, surround us with our own things or with rivals'.
+
+**Fields (every group-3 answer).**
+- `relationship_verdict`: strengthens | neutral | weakens - by DIRECTION, the F-rule logic transposed to a customer: more committed to the brand for what they asked, no position or balanced, less committed. A caution the question asked for never weakens by itself; a caveat inside a standing endorsement does not flip it.
+- `redirect_to`: every brand the answer tells this customer to use INSTEAD of the brand (or instead of extending it) for the ask, as written. A companion recommended ALONGSIDE the brand is a pairing, not a redirect. Rival-or-not is resolved at read time from the confirmed dictionary (the B5 principle: the labeler records names, the dictionary decides category).
+- `mentions` (brand + framing, the v0.2 wording verbatim) and `reasons` + `uncoded_reason` (brand-agnostic, the confirmed list with scope sentences) - the arguments the AI uses for and against us with our own customers. `quote`: the verbatim phrase deciding the verdict.
+- Stage field, exactly one per row:
+  - business_case `case_strength`: strong (builds the affirmative case; caveats minor) | hedged (qualifies it so materially the champion could not present it with confidence) | undermined (argues the case is weak or steers elsewhere).
+  - expansion `growth_stance`: backs (supports the step with the brand; how-to guidance and execution cautions still back) | neutral | redirects (another product or a specialist for the step, or against the step).
+  - ecosystem `pairings[]`: every product put forward for the ONE need, each with `maker_relation` own | third_party | substitute and `framing` recommended | mentioned | negative. The read is the share of recommended pairings that are own / partner / rival, with third_party split into partner vs rival at read time by the dictionary; a recommended substitute is also a redirect.
+  - advocacy `case_strength`: strong (equips a confident case, rebuttals where a critic is quoted) | partial (points for the brand but concedes material ground or lands on "both are fine") | concedes. Plus `premise_verdict` / `premise_quote` on rows whose cell quotes a critic (the existing doubt design line rides along; n/a otherwise) - the Objections read, kept separate from case strength, per the contract.
+
+**Reads this produces (dashboard, per tracker).** Business case: strong / hedged / undermined, redirect rate. Expansion: backs / neutral / redirects, redirect targets. Ecosystem: own vs partner vs rival share of recommended pairings, rival intrusion rate. Advocacy: strong / partial / concedes, and confirms / rebuts on quoted critics. All four: the relationship verdict distribution and the reason codes argued. None feeds the headline win / pick / visibility rates (section 8 presentation rule).
+
+**Labeling mode.** `labeling/build_batch.mts --mode settled --design <stages.json>` with template `labeling/instructions_settled.md` (no category or brand examples in the text). The design line names the stage and the contract's asker ("an internal champion asking for help justifying <brand> to someone who signs off", ...). Reads the 2026-09-19 vault runs AND the 2026-09-26 GPT-5.6 collections, so the sample spans twelve engines; a row whose stage is not one of the four is a build error. The four existing modes were rebuilt before and after the change and are byte-identical. Validator `labeling/g3/validate_settled.py` (hard: ids, stage = design, enums, stage field on the right stage, off-list codes, premise only with a doubt line, quotes verbatim; reports: per-stage distributions, redirects, pairings, incidence, uncoded clusters).
+
+**Sample (drawn, not labeled).** `labeling/g3/draw_sample.py`, seed 20261010: 30 answers per (brand, stage) cell, engines round-robin - jira 120 (the only tracker with business_case cells: 450 answers in the pool), AmEx 90, Netflix 90, Pixel 90 = **390**; nested rerun subset 15 per cell = **195** for labeler self-agreement (the 2026-09-27 lesson: Opus-vs-Opus agreement is the only honest ceiling). Request files `labeling/g3/requests_<brand>_settled.jsonl` are built (Opus 5.5, high, one answer per request, cached system prompt). Estimated cost ~$10 for the sample and ~$5 for the rerun at the v0.2 rate (~$23/1K rows). **Known limitation:** the Netflix and Pixel vault prompts predate the A3 must-name rewrites, so 180 of the 390 rows were asked brand-free ("my current flagship"); the design line supplies the asker's identity and the labels still exercise every field, but mentions of the brand itself will be rare on those rows. The five new trackers' settled-customer cells all name the brand, so this is a pilot artifact, not a property of the codebook.
+
+**Open for Tyler.** (1) Go for the 390 + 195 rows. (2) After the labels: scorer route - prompted coder (Opus or grok on the same template) measured against the labels, or a warm start of v0.1 if prompted accuracy is weak; the premise field already exists in the v0.2 recipe. (3) Whether `neutral` should be allowed on business_case and advocacy (today those stage fields have no neutral: a champion either gets a case or does not) - the sample will show whether the labeler reaches for `hedged` / `partial` as a neutral.
+
