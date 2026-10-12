@@ -31,7 +31,21 @@ export interface DiscoveryCode {
 // default, ~900 reasoning tokens per answer billed as output - $0.0033 an
 // answer measured 2026-10-11). The September "$5 census" was priced from a
 // stale table; the true xAI bill was roughly ten times that.
-const DISCOVERY_MODEL = process.env.DISCOVERY_MODEL ?? "grok-4.3";
+const DISCOVERY_MODEL = process.env.DISCOVERY_MODEL ?? "gpt-6-luna";
+
+/** Request parameters per discovery model (2026-10-11 tests, 300 answers x 2
+ * runs each, `~/Documents/procerno_eval/discovery_tests_2026-10-11/`):
+ * gpt-6-luna with reasoning OFF matches grok-4.3's argument space (48 of 50
+ * top phrases both ways, 36 of 40 top brands) at the same density, with far
+ * better self-consistency (count correlation 0.90 vs 0.62; brands Jaccard
+ * 0.88 vs grok-luna 0.78) and ~15x lower cost ($0.0002 vs $0.0033 an
+ * answer). The newer OpenAI models reject max_tokens and reason by default -
+ * at a 600 cap they burned the whole budget thinking and returned nothing.
+ * grok keeps the prod settings it was validated under. */
+function discoveryParams(model: string, cap: number): Record<string, unknown> {
+  if (/^gpt-[5-9]/.test(model)) return { max_completion_tokens: Math.max(cap, 2000), reasoning_effort: "none" };
+  return { temperature: 0, max_tokens: cap };
+}
 
 const SYSTEM =
   "You code one AI assistant answer for a brand-visibility study. Be literal: " +
@@ -122,8 +136,7 @@ export async function runOpenDiscovery(
   const one = async (a: DiscoveryAnswer) => {
     const res = await c.chat.completions.create({
       model: DISCOVERY_MODEL,
-      temperature: 0,
-      max_tokens: 600,
+      ...discoveryParams(DISCOVERY_MODEL, 600),
       messages: [
         { role: "system", content: SYSTEM },
         { role: "user", content: `Question: ${a.prompt}\n\nAnswer:\n${a.text}` },
@@ -210,8 +223,7 @@ export async function runBrandDiscovery(
   const one = async (a: DiscoveryAnswer) => {
     const res = await c.chat.completions.create({
       model: DISCOVERY_MODEL,
-      temperature: 0,
-      max_tokens: 500,
+      ...discoveryParams(DISCOVERY_MODEL, 500),
       messages: [
         { role: "system", content: BRANDS_SYSTEM },
         { role: "user", content: `Question: ${a.prompt}\n\nAnswer:\n${a.text}` },
