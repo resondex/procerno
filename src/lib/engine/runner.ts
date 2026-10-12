@@ -90,6 +90,10 @@ export async function driveRunChunk(
   if (run.status === "complete" || run.status === "failed") return run.status;
   const project = await store.getProject(run.project_id);
   if (!project) throw new Error(`project ${run.project_id} not found`);
+  // Second layer of the same guard as findStalledRuns: whatever trigger
+  // reaches a chunk (cron sweep, /continue, batch poll, dashboard), an
+  // archived tracker never spends another cent - its runs stay as they are.
+  if (project.archived_at) return "coding_blocked";
   const prompts = await loadRunPrompts(run);
   const knownBrands = [project.brand, ...project.competitors];
   const extractionCtx = {
