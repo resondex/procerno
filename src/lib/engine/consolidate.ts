@@ -1,5 +1,6 @@
 import { anthropicClient, openaiClient } from "./providers";
 import { logCost, tagCosts } from "../cost_log";
+import { fromAnthropicUsage } from "./usage";
 
 /**
  * Embeddings-first taxonomy consolidation - the production port of the
@@ -188,7 +189,16 @@ export async function consolidateTaxonomy(
   // If it recurs, set CONSOLIDATE_EFFORT=low or move the call to the
   // Batch API poller.
   const anthropic = await anthropicClient();
-  const res = await anthropic.messages.create(
+  // STREAMED, then assembled: a non-streaming call sends no response bytes
+  // until the whole reply is ready, and Node's fetch aborts a request with
+  // no headers after 300s - so any Opus call over five minutes died at the
+  // transport and the SDK's one retry paid for it twice (Pixel's 35K-token
+  // call failed three times offline on 2026-10-11; AmEx and Jira "succeeded"
+  // in 617s / 713s only because the retry finished under 300s). Streaming
+  // keeps bytes flowing from the first token; the request, model and
+  // output are unchanged. The metering wrapper covers messages.create only,
+  // so the usage is logged here from the final message.
+  const stream = anthropic.messages.stream(
     {
       model: CONSOLIDATE_MODEL,
       max_tokens: 60000,
@@ -196,12 +206,10 @@ export async function consolidateTaxonomy(
       output_config: { effort: "medium" },
       messages: [{ role: "user", content: prompt }],
     } as never,
-    // Pixel's call wrote 35K output tokens in 387s in prod and exceeded 900s
-    // twice offline (2026-10-11); with an explicit timeout the SDK allows a
-    // non-streaming call past 10 minutes. Prod is still bounded by the
-    // continue route's 800s - this ceiling is for offline draws.
     { timeout: 1_500_000 }
   );
+  const res = await stream.finalMessage();
+  logCost({ model: CONSOLIDATE_MODEL, usage: fromAnthropicUsage((res as { usage?: unknown }).usage) });
   const text = (res as { content: { type: string; text?: string }[] }).content
     .map((b) => (b.type === "text" ? (b.text ?? "") : ""))
     .join("");
