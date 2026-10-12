@@ -3,7 +3,7 @@ import { planAllowsEngine } from "@/lib/auth";
 import { waitUntil } from "@vercel/functions";
 import { store } from "@/lib/store";
 import { apiKeyConfigured, currentEngineIds } from "@/lib/engine/providers";
-import { driveAndChain, findStalledRuns, runInBackground } from "@/lib/engine/runner";
+import { continueRun, findStalledRuns, runInBackground } from "@/lib/engine/runner";
 import { batchableEngine, hasOpenBatches, pollRunBatches, submitRunBatches } from "@/lib/engine/batch";
 import { planRunSurfaces } from "@/lib/engine/surfaces";
 
@@ -56,7 +56,7 @@ export async function GET(req: Request) {
       if (!(await hasOpenBatches(r.id))) continue;
       polled.push(r.id);
       if (process.env.VERCEL) {
-        waitUntil(pollRunBatches(r.id).then(() => driveAndChain(r.id, origin)));
+        waitUntil(pollRunBatches(r.id).then(() => continueRun(r.id, origin)));
       } else {
         void pollRunBatches(r.id).then(() => runInBackground(r.id));
       }
@@ -100,7 +100,7 @@ export async function GET(req: Request) {
       }
     }
     if (process.env.VERCEL) {
-      waitUntil(driveAndChain(run.id, origin));
+      waitUntil(continueRun(run.id, origin));
     } else {
       void runInBackground(run.id);
     }
@@ -109,7 +109,7 @@ export async function GET(req: Request) {
 
   const resumed = await findStalledRuns();
   for (const id of resumed) {
-    if (process.env.VERCEL) waitUntil(driveAndChain(id, origin));
+    if (process.env.VERCEL) waitUntil(continueRun(id, origin));
     else void runInBackground(id);
   }
   return NextResponse.json({ ok: true, launched, polled, resumed });

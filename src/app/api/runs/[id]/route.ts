@@ -3,7 +3,7 @@ import { waitUntil } from "@vercel/functions";
 import { store } from "@/lib/store";
 import { requireAuth, requireRun } from "@/lib/auth";
 import { hasOpenBatches, pollRunBatches } from "@/lib/engine/batch";
-import { driveAndChain } from "@/lib/engine/runner";
+import { continueRun } from "@/lib/engine/runner";
 import { promptsForRun } from "@/lib/engine/surfaces";
 
 /** Per-run throttle for the opportunistic batch poll below (Hobby-plan
@@ -31,7 +31,7 @@ export async function GET(
     if (Date.now() - last > POLL_EVERY_MS && (await hasOpenBatches(run.id))) {
       lastPoll.set(run.id, Date.now());
       const origin = new URL(_req.url).origin;
-      waitUntil(pollRunBatches(run.id).then(() => driveAndChain(run.id, origin)));
+      waitUntil(pollRunBatches(run.id).then(() => continueRun(run.id, origin)));
     }
   }
   const [prompts, intents, completed, byModel, batches] = await Promise.all([

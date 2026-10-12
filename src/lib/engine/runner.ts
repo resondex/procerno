@@ -309,6 +309,11 @@ export async function findStalledRuns(staleMs = 45 * 60 * 1000): Promise<string[
   const stalled: string[] = [];
   const cutoff = Date.now() - staleMs;
   for (const project of await store.listProjects()) {
+    // An archived tracker's runs are parked for good: the four September
+    // trackers sit archived with ratified codebooks and "collected" runs,
+    // and without this line clearing RUN_COLLECT_ONLY would send 18,790
+    // held answers into the coding wave (2026-10-11).
+    if (project.archived_at) continue;
     for (const run of await store.listRuns(project.id)) {
       if (!["pending", "running", "collected"].includes(run.status)) continue;
       if (run.status === "collected" && process.env.RUN_COLLECT_ONLY) continue;
@@ -709,6 +714,21 @@ export async function claimRunLease(key: string): Promise<string | null> {
 export async function releaseRunLease(key: string, token: string): Promise<void> {
   // Only the holder releases (CAS on its own token).
   await store.cacheClaim(key, token, LEASE_RELEASED, RUN_LEASE_MS).catch(() => false);
+}
+
+/** Hand a run's next drive to a FRESH invocation (the continue route),
+ * for callers that have already spent part of their own time budget - a
+ * batch poll ingesting thousands of answers, or a cron looping over runs.
+ * Driving inline there could outlive maxDuration: the function was killed
+ * after its chunk, the hop to the next chunk was lost, and the run sat
+ * (Doritos, 2026-10-11: one Sonar Pro retry waited 7h). */
+export async function continueRun(runId: string, origin: string): Promise<void> {
+  await fetch(`${origin}/api/runs/${runId}/continue`, {
+    method: "POST",
+    headers: process.env.CRON_SECRET
+      ? { authorization: `Bearer ${process.env.CRON_SECRET}` }
+      : undefined,
+  }).catch((err) => console.error(`continue hop failed for run ${runId}:`, err));
 }
 
 export async function driveAndChain(
