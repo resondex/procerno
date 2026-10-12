@@ -735,6 +735,26 @@ export async function continueRun(runId: string, origin: string): Promise<void> 
   }).catch((err) => console.error(`continue hop failed for run ${runId}:`, err));
 }
 
+/** The chunk hop is the only thing keeping a run alive between invocations;
+ * a single failed fetch strands the run until the daily cron's stalled sweep
+ * or a viewed dashboard (Jira's redone census finished its chunk at
+ * 18:14Z on 2026-10-12 and never consolidated - no hop was logged). Three
+ * attempts with backoff; a hop that still fails is logged loudly. */
+async function hop(url: string, runId: string): Promise<void> {
+  const headers = process.env.CRON_SECRET ? { authorization: `Bearer ${process.env.CRON_SECRET}` } : undefined;
+  for (let attempt = 1; attempt <= 3; attempt++) {
+    try {
+      const res = await fetch(url, { method: "POST", headers });
+      if (res.ok || res.status === 202) return;
+      console.error(`procerno run ${runId}: hop ${url} returned ${res.status} (attempt ${attempt})`);
+    } catch (err) {
+      console.error(`procerno run ${runId}: hop ${url} failed (attempt ${attempt}):`, err);
+    }
+    await new Promise((r) => setTimeout(r, 1500 * attempt));
+  }
+  console.error(`procerno run ${runId}: hop ${url} gave up after 3 attempts - the run waits for the stalled sweep`);
+}
+
 export async function driveAndChain(
   runId: string,
   origin: string
@@ -773,21 +793,11 @@ export async function driveAndChain(
       // on Hobby) or a watched dashboard left two runs parked for 9+ hours
       // on 2026-10-11 - Jira's finished Claude batch never ingested, and
       // Pixel's Grok tasks stopped when its chain went to "waiting".
-      await fetch(`${origin}/api/runs/${runId}/continue?wait=1`, {
-        method: "POST",
-        headers: process.env.CRON_SECRET
-          ? { authorization: `Bearer ${process.env.CRON_SECRET}` }
-          : undefined,
-      });
+      await hop(`${origin}/api/runs/${runId}/continue?wait=1`, runId);
     } else if (outcome === "continue") {
       // Server-to-server hop carries no session cookies; the continue route
       // accepts the cron secret as chain credentials.
-      await fetch(`${origin}/api/runs/${runId}/continue`, {
-        method: "POST",
-        headers: process.env.CRON_SECRET
-          ? { authorization: `Bearer ${process.env.CRON_SECRET}` }
-          : undefined,
-      });
+      await hop(`${origin}/api/runs/${runId}/continue`, runId);
     }
   } catch (err) {
     console.error(`procerno run ${runId} crashed:`, err);
