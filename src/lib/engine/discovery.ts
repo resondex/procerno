@@ -42,6 +42,27 @@ const DISCOVERY_MODEL = process.env.DISCOVERY_MODEL ?? "gpt-6-luna";
  * answer). The newer OpenAI models reject max_tokens and reason by default -
  * at a 600 cap they burned the whole budget thinking and returned nothing.
  * grok keeps the prod settings it was validated under. */
+/** One discovery call is a short list; a call that has not answered in 45s
+ * is wedged (rate-limit backoff, a hung socket) and the worker's own retry
+ * handles it. The client default of 150s x 2 attempts let one wedged call
+ * pin a worker for ten minutes against the route's five-minute limit: on
+ * 2026-10-11 three bootstrap chunks were killed mid-pass with no hand-off
+ * (last calls 04:22Z, nothing until a manual kick an hour later). */
+const CALL_OPTS = { timeout: 45_000, maxRetries: 0 } as const;
+
+/** Workers check the deadline only between tasks; a task in flight at the
+ * deadline must not keep the chunk alive past the function limit. The pass
+ * returns at the deadline (plus a short grace) with whatever landed - every
+ * result is persisted as it arrives, so the next drive picks up the rest. */
+async function untilDeadline<T>(work: Promise<T>, deadlineMs: number | undefined): Promise<void> {
+  if (!deadlineMs) { await work; return; }
+  const grace = 8_000;
+  let timer: NodeJS.Timeout | undefined;
+  const clock = new Promise<void>((r) => { timer = setTimeout(r, Math.max(0, deadlineMs + grace - Date.now())); });
+  await Promise.race([work.then(() => undefined), clock]);
+  if (timer) clearTimeout(timer);
+}
+
 function discoveryParams(model: string, cap: number): Record<string, unknown> {
   if (/^gpt-[5-9]/.test(model)) return { max_completion_tokens: Math.max(cap, 2000), reasoning_effort: "none" };
   return { temperature: 0, max_tokens: cap };
@@ -141,7 +162,7 @@ export async function runOpenDiscovery(
         { role: "system", content: SYSTEM },
         { role: "user", content: `Question: ${a.prompt}\n\nAnswer:\n${a.text}` },
       ],
-    });
+    }, CALL_OPTS);
     const raw = (res.choices[0]?.message?.content ?? "").trim();
     const parsed = JSON.parse(raw.replace(/^```(?:json)?|```$/g, "").trim()) as {
       reasons_open?: string[];
@@ -170,8 +191,9 @@ export async function runOpenDiscovery(
         opts.onProgress?.(out.length, failed, pool.length);
     }
   };
-  await Promise.all(
-    Array.from({ length: opts.concurrency ?? 16 }, worker)
+  await untilDeadline(
+    Promise.all(Array.from({ length: opts.concurrency ?? 16 }, worker)),
+    opts.deadlineMs
   );
   opts.onProgress?.(out.length, failed, pool.length);
   return out;
@@ -228,7 +250,7 @@ export async function runBrandDiscovery(
         { role: "system", content: BRANDS_SYSTEM },
         { role: "user", content: `Question: ${a.prompt}\n\nAnswer:\n${a.text}` },
       ],
-    });
+    }, CALL_OPTS);
     const raw = (res.choices[0]?.message?.content ?? "").trim();
     const parsed = JSON.parse(raw.replace(/^```(?:json)?|```$/g, "").trim()) as {
       brands?: string[];
@@ -262,7 +284,10 @@ export async function runBrandDiscovery(
         opts.onProgress?.(out.length, failed, pool.length);
     }
   };
-  await Promise.all(Array.from({ length: opts.concurrency ?? 16 }, worker));
+  await untilDeadline(
+    Promise.all(Array.from({ length: opts.concurrency ?? 16 }, worker)),
+    opts.deadlineMs
+  );
   opts.onProgress?.(out.length, failed, pool.length);
   return out;
 }
