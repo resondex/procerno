@@ -618,6 +618,15 @@ export default function IdentifyTab({
     return next;
   }
 
+  /** A bucket's group anchor: an active brand's canonical, or the name a
+   * proposed new brand was created from. Its family variants (auto pills)
+   * render collapsed behind it and travel with it on drag. */
+  function isGroupAnchor(p: Pill, b: Bucket) {
+    if (p.kind !== "canonical") return false;
+    if (b.kind === "brand") return p.homeStatus === "active";
+    return b.kind === "new" && b.entryId !== null && p.entryId === b.entryId;
+  }
+
   function movePill(pillNorm: string, toKey: string) {
     setBuckets((prev) => {
       const src = prev.find((b) => b.pills.some((p) => p.norm === pillNorm));
@@ -625,10 +634,10 @@ export default function IdentifyTab({
       const pill = src.pills.find((p) => p.norm === pillNorm)!;
       // Dragging a group's anchor name takes the whole group with it — the
       // grouping IS the anchor's entry, so its variants travel together.
-      const groupMove =
-        pill.kind === "canonical" &&
-        pill.homeStatus === "active" &&
-        src.kind === "brand";
+      // A proposed new brand's anchor counts too: its collapsed variants
+      // would otherwise stay behind, invisible, in a bucket that never
+      // empties.
+      const groupMove = isGroupAnchor(pill, src);
       const moving = (groupMove ? src.pills : [pill]).map((p) => ({
         ...p,
         moved: true,
@@ -1094,8 +1103,7 @@ export default function IdentifyTab({
     const autos = pills.filter(collapsible);
     // Order: anchor first, plain pills, flagged-for-review LAST; the
     // expanded group renders as one enclosed cluster after the anchor.
-    const isAnchor = (p: Pill) =>
-      p.kind === "canonical" && p.homeStatus === "active" && b.kind === "brand";
+    const isAnchor = (p: Pill) => isGroupAnchor(p, b);
     const loose = pills.filter((p) => !collapsible(p));
     const shown = [
       ...loose.filter((p) => isAnchor(p)),
@@ -1121,7 +1129,7 @@ export default function IdentifyTab({
             title={
               p.note
                 ? undefined
-                : p.kind === "canonical" && p.homeStatus === "active"
+                : isAnchor(p) && autos.length > 0
                   ? "Group anchor — dragging it moves the whole group"
                   : p.confirmed && !p.moved
                     ? "Confirmed"
@@ -1141,10 +1149,7 @@ export default function IdentifyTab({
             onClick={
               p.note
                 ? () => openExamples(p.name, p.noteTarget ?? null)
-                : p.kind === "canonical" &&
-                    p.homeStatus === "active" &&
-                    b.kind === "brand" &&
-                    autos.length > 0
+                : isAnchor(p) && autos.length > 0
                   ? () =>
                       setVariantsOpen((prev) => {
                         const next = new Set(prev);
@@ -1156,10 +1161,7 @@ export default function IdentifyTab({
             }
           >
             {p.name}
-            {p.kind === "canonical" &&
-              p.homeStatus === "active" &&
-              b.kind === "brand" &&
-              autos.length > 0 && (
+            {isAnchor(p) && autos.length > 0 && (
                 <span className="ml-1.5 text-[11px] font-normal opacity-60">
                   {open
                     ? "· collapse"
