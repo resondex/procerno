@@ -196,3 +196,45 @@ Principles (Tyler's focus: generating the training labels properly): labels only
 
 Stages: (0) Doritos vaulted; discovery + consolidation on all five (~$17, go); the five codebook + dictionary gates confirmed; confirmed lists, scope sentences and dictionaries exported. (1) Pilot - one combined stratified draw across the five vaults with a nested rerun; arms built with the builder's variant mechanism (baseline v0.2, dictionary-in-prompt, keep-or-leave stance field, awareness what-counts line, settled mode); ~$20-25 on go; validate, score self-agreement / awareness pick rate / decisive lean / incidence; blind review artifact; FREEZE the v0.2 prompt. (2) Training labels - held-out tracker and size chosen by Tyler (full ~$600 or v4-sized ~13K rows ~$300); draw by question so no held-out question leaks across engines; sets A/B via v0.2, set C via settled; validate, rerun, incidence, spot check. (3) Train on the 9B base (~$30), evaluate on the held-out tracker incl. the new fields; v0.2 to prod if it holds the v0.1 bar. (4) Set C scorer: prompted on the settled template vs the labels; warm start only if short. To build before stage 1: the generalized draw, the stance variant, the awareness line, the dictionary export, scorer additions. Tyler's gates: discovery go, codebook/dictionary confirms, pilot submit, blind review, held-out + size, training submit, spot check, train launch.
 
+---
+
+## 12. Field sets by stage - the coding contract in one table (DECIDED 2026-10-12, Tyler)
+
+Three field sets. Every live stage is in exactly one; within a set the labels are identical and only the dashboard READ differs. Status is per set, never per stage.
+
+**Set A - buyer choice.** Fields: outcome, top_pick, target_framing, reasons (brand-agnostic, the confirmed codebook with scope sentences), plus brand mentions from the separate brands pass. Emitted by procerno_reason_coder v0.1 (decided; prod flip and mentions pass unbuilt).
+
+| stage | funnel layer | read |
+| --- | --- | --- |
+| problem_recognition | awareness | brand-named rate + how often the AI already points to products; never win/pick |
+| category_education | awareness | brand-named rate only |
+| discovery | consideration | headline win / pick / visibility |
+| criteria | consideration | criteria taught (mention bar, not argue bar) - read NOT built |
+| use_case | consideration | headline |
+| social_validation | consideration | headline; measured against discovery after wave one, may merge |
+| premium_worth | decision | headline - tier advocacy + who gets named |
+| comparison (entity, class) | decision | prompted head-to-head win rate, own view, never pooled |
+| alternatives (offensive) | decision | own view: named when a rival's leaver asks |
+| alternatives (defensive) | decision | own view: do we hold the undecided customer, where do they go |
+| pricing (Value) | decision | within-brand view per room, never the headline |
+| repertoire | retention | pick read for habitual markets |
+
+**Set B - buyer choice + premise.** Set A plus premise_verdict (confirms | rebuts | mixed) and premise_quote judged against the cell's doubt line (never inferred). Same coder; the field exists in the v0.2 labeling mode, the coder is not yet trained to emit it - a prompted judgment on these rows until v0.2.
+
+| stage | funnel layer | read |
+| --- | --- | --- |
+| objections | decision | confirmed / rebutted; defend / concede / redirect |
+| churn_triggers | retention | keep vs leave from outcome (keep = pick) + confirmed / rebutted |
+| renewal | retention | same, at the bill-due moment |
+
+**Set C - settled customer.** relationship_verdict (strengthens | neutral | weakens), redirect_to, one stage field, pairings (ecosystem), premise on advocacy cells that quote a critic, reasons, mentions, quote. Codebook: section 10. Scorer: not chosen; labels from the new data (section 11).
+
+| stage | funnel layer | stage field / read |
+| --- | --- | --- |
+| business_case | decision | case_strength strong / hedged / undermined; redirect rate |
+| expansion | loyalty | growth_stance backs / neutral / redirects, and to whom |
+| ecosystem | loyalty | pairings own / third_party / substitute; own vs partner vs rival share, rival intrusion |
+| advocacy | loyalty | case_strength strong / partial / concedes; confirms / rebuts when a critic is quoted |
+
+Status by set: A - coder decided, flip and views unbuilt. B - as A plus the premise field pending v0.2. C - codebook drafted, labels and scorer pending. No per-type view exists yet, so every A and B stage still shows pooled in one branded row. Retired (no cells, no set): shortlist, feature_screening, problem_resolution. Reasons are coded brand-agnostically on every row by the same codebook; mentions come from the brands pass on every row.
+
