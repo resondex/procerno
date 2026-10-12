@@ -78,6 +78,9 @@ export const SEARCH_CAP = 3;
 /** Extraction-coder-only models: routable like engines, never selectable
  * as answer engines. */
 const CODER_ONLY: Record<string, Pick<Engine, "id" | "keyEnv" | "baseURL">> = {
+  // Discovery model. "grok-4-fast" is kept only as an alias for ledger rows
+  // that carry the old id; it has resolved to grok-4.3 since xAI retired it.
+  "grok-4.3": { id: "grok-4.3", keyEnv: "XAI_API_KEY", baseURL: "https://api.x.ai/v1" },
   "grok-4-fast": { id: "grok-4-fast", keyEnv: "XAI_API_KEY", baseURL: "https://api.x.ai/v1" },
 };
 

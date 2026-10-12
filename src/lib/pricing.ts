@@ -55,7 +55,12 @@ export const ENGINE_PRICES: Record<
   // Extraction coders that never serve as answer engines.
   "gpt-4o-mini": { in: 0.15, out: 0.6 },
   "grok-4.6": { in: 2, out: 6 },
-  "grok-4-fast": { in: 0.2, out: 0.5 },
+  // "grok-4-fast" was retired by xAI on 2026-08-15; the id is an alias that
+  // resolves to grok-4.3 (confirmed 2026-10-11 against xAI's language-models
+  // endpoint and a billed call). Every discovery call since 2026-09-22 ran on
+  // grok-4.3 at these rates, with reasoning tokens billed as output.
+  "grok-4.3": { in: 1.25, out: 2.5 },
+  "grok-4-fast": { in: 1.25, out: 2.5 },
 };
 
 /** Answer cost in USD for ONE answer's tokens (callers summing many

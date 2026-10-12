@@ -26,7 +26,12 @@ export interface DiscoveryCode {
   reasons_open: string[];
 }
 
-const DISCOVERY_MODEL = process.env.DISCOVERY_MODEL ?? "grok-4-fast";
+// grok-4.3 by its real id: "grok-4-fast" was retired 2026-08-15 and every
+// call under that alias has been served by grok-4.3 (reasoning on by
+// default, ~900 reasoning tokens per answer billed as output - $0.0033 an
+// answer measured 2026-10-11). The September "$5 census" was priced from a
+// stale table; the true xAI bill was roughly ten times that.
+const DISCOVERY_MODEL = process.env.DISCOVERY_MODEL ?? "grok-4.3";
 
 const SYSTEM =
   "You code one AI assistant answer for a brand-visibility study. Be literal: " +
