@@ -148,18 +148,21 @@ Status tags: **DECIDED** (in force), **PROPOSED** (recommended, awaiting Tyler),
 
 The working checklist with options, recommendations and costs is `V02_OPEN_DECISIONS.md` (A = cells and prompts, B = prompt freeze, C = labels).
 
-1. B2 - decided (two signals: recommended + criticized); go for its isolated test (~$5).
-2. B3 - decided (information requests only); go for its isolated test (~$5).
-3. B4 - decided (generic pays-vs-delivers rule); tests pending. Held-out plan (section H): run the bootstrap in prod or locally, who confirms the gates, sample size.
-4. B5 - decided as a reporting to-do (computed in-category flag); no prompt change.
-5. Go for the dictionary-in-prompt test (~$10, two arms on the 200-answer set).
-6. Branded-answer reporting by question type (B10 option 3; includes objection-stage defend / concede / redirect) - on the AGENTS.md To do list.
+Checklist refreshed 2026-10-12 - the isolated-test round (section 5) and today's amendments resolved most of the old items; the stale list contradicted section 5 (notably B7).
+
+1. B2 - RESOLVED: the brand-level signals are read-time computations off per-mention framings (B7 consequence); the b2c tightened negative wording passed its retest and is in the frozen baseline. No test outstanding.
+2. B3 - RESOLVED: passed its isolated test; folded into the baseline at the 2026-10-12 freeze amendment.
+3. B4 - RESOLVED: passed within noise; folded into the baseline 2026-10-12. The contract-era pilot is the held-out check it was waiting for (plan H superseded with section 8's held-out decision).
+4. B5 - decided as a reporting to-do (computed in-category flag); no prompt change. Lands with the per-type views.
+5. Dictionary-in-prompt - FAILED its first isolated test (B1 gravity well: detection 9.96 -> 8.32 brands/answer, unlisted names forced into entries); the rework is a PILOT ARM, not a standalone test.
+6. Branded-answer reporting by question type (B10 option 3; includes objection-stage defend / concede / redirect) - placed in section 11: the per-type views sit between stage 3 and anything customer-visible.
 7. B8 - decided (no adds for v0.2); coder uncoded_reason output + residue-to-gate loop recorded as R&D exploration (AGENTS.md To do).
-8. B7 - decided (role replaces per-mention framing, built as a split of recommended); go for its isolated test (~$5 + ~$5 second run).
-9. B10 - decided (naming rule + doubt check on the 377 branded prompts without a line; B6a present-by-reference decided with it); go for the doubt check (~$1.70).
-10. B11 - score alongside the category for framing and the doubt verdict; isolated test (two runs).
-11. Group-3 scorer (business case, expansion, ecosystem, advocacy): codebook DRAFTED 2026-10-10 (section 10). Reference sample waits for the five new runs to be collected and vaulted (Tyler, 2026-10-10); then ~$10 + ~$5 of labels, then the scorer choice.
-12. Labeling route for the rest of v0.2 (in-session plan allowance vs Batch API vs mix).
+8. B7 - RESOLVED the other way: NO labeled role field (branch_winner unstable decoupled, 94.1%); roles are read-time computations from fields already labeled. Per-mention framing stays; prod needs it from the brands pass (section 12 Set A, 2026-10-12).
+9. B10 - RESOLVED: doubt check ran; 39 branded prompts got design lines at the freeze.
+10. B11 - RESOLVED: failed its pass rule (score crosses thresholds exactly as often as categories flip); categories stay, the score-as-borderline-flag joins the coder-confidence R&D idea.
+11. Group-3 scorer: codebook drafted (section 10, amended 2026-10-12); five new runs vaulted, stages files complete incl. the extracted critic lines (approved 2026-10-12). Labels ride the pilot's settled arm; then the scorer choice (prompted first, warm start if short).
+12. Labeling route for the rest of v0.2 (in-session plan allowance vs Batch API vs mix) - still open.
+13. Pilot submission go (~$20-25, section 11 stage 1) once the five build items are done - the gate most of the above now waits behind.
 
 ---
 
