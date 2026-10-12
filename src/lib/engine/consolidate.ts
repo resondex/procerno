@@ -196,7 +196,11 @@ export async function consolidateTaxonomy(
       output_config: { effort: "medium" },
       messages: [{ role: "user", content: prompt }],
     } as never,
-    { timeout: 900_000 }
+    // Pixel's call wrote 35K output tokens in 387s in prod and exceeded 900s
+    // twice offline (2026-10-11); with an explicit timeout the SDK allows a
+    // non-streaming call past 10 minutes. Prod is still bounded by the
+    // continue route's 800s - this ceiling is for offline draws.
+    { timeout: 1_500_000 }
   );
   const text = (res as { content: { type: string; text?: string }[] }).content
     .map((b) => (b.type === "text" ? (b.text ?? "") : ""))
