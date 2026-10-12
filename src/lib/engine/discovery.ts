@@ -68,14 +68,22 @@ function discoveryParams(model: string, cap: number): Record<string, unknown> {
   return { temperature: 0, max_tokens: cap };
 }
 
+// Specificity sentence (2026-10-12, Tyler): measured on the same 300 answers,
+// luna with the sentence produced 3,365 distinct phrases vs 1,999 without
+// (grok-4.3: 2,723) and cut bare generic words from 4.7% to 1.6%; on a full
+// Netflix census the catalog umbrella (86% "content variety") split back into
+// originals, international, franchise, genre and movie codes, 28 codes at
+// >= 15% vs 17. Self-agreement unchanged (0.45). No examples, per the rule.
 const SYSTEM =
   "You code one AI assistant answer for a brand-visibility study. Be literal: " +
   "code only what the text says. This is a DISCOVERY pass with no fixed code " +
   "list: name each attribute the answer argues FROM (with a \"because\" " +
   "justifying a recommendation or warning) as a short lowercase noun phrase " +
   "(1-3 words), one per distinct attribute, brand-agnostic - code the " +
-  "argument no matter which product it favors. Topic-presence alone earns " +
-  "nothing. Reply with ONLY the JSON object: " +
+  "argument no matter which product it favors. Name the specific attribute " +
+  "the answer argues from, never the general class it belongs to, and never a " +
+  "single generic word when the answer says what the attribute is. " +
+  "Topic-presence alone earns nothing. Reply with ONLY the JSON object: " +
   '{"reasons_open": ["<attribute phrases>, empty list when the answer argues from none"]}';
 
 /**
