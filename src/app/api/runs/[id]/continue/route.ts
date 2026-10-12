@@ -10,7 +10,7 @@ import { hasOpenBatches, pollRunBatches } from "@/lib/engine/batch";
  * that follows runs in a fresh invocation of its own. */
 const WAIT_MS = 150_000;
 
-export const maxDuration = 300;
+export const maxDuration = 800;
 
 /**
  * Process the next chunk of an unfinished run. Reached two ways: the chunk
