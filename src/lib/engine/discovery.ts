@@ -1,6 +1,6 @@
 import { coderCompatClient } from "./providers";
 import { tagCosts } from "../cost_log";
-import { boundedNames } from "./mention_filter";
+import { boundedNames, nameAppearsBounded } from "./mention_filter";
 
 /**
  * Taxonomy discovery: open-code answers with NO code list - the labeler
@@ -215,7 +215,9 @@ export async function runOpenDiscovery(
 // bootstrap census and the steady-state coder emit the same name vocabulary
 // and every downstream calibration (family layer, co-occurrence guard, 1%
 // floor) transfers between phases.
-const BRANDS_SYSTEM =
+// The detection rules, shared by both reply shapes so the framing mode can
+// never detect a different name set than the names-only pass.
+const BRANDS_DETECT =
   "You extract brand mentions from one AI assistant answer for a " +
   "brand-visibility study. List every company, brand, product, or service " +
   "named, including ones named only as integrations or adjacent tools. " +
@@ -225,13 +227,101 @@ const BRANDS_SYSTEM =
   "brands is one entry PER brand. Name the PRODUCT, not its parts: a " +
   "feature, module, view, add-on, edition, or pricing tier of a product is " +
   "the product itself - one entry per distinct product, deduped to the " +
-  "most complete form the answer uses. Reply with ONLY the JSON object: " +
+  "most complete form the answer uses. ";
+
+// Names-only pass (prod, the dictionary gate's input). Byte-identical to the
+// pre-split literal - verified when the framing mode was added 2026-10-12.
+const BRANDS_SYSTEM =
+  BRANDS_DETECT +
+  "Reply with ONLY the JSON object: " +
   '{"brands": ["<names>"]}';
+
+// Per-name framing (CODING_DECISIONS section 12 Set A, Tyler 2026-10-12):
+// v0.1 emits only the TARGET's framing, so rival mentions need theirs from
+// this pass or the read-time roles (B7) and brand signals (B2) compute empty.
+// The rules are the labeler's frozen v02 FRAMING block (prod's framingRules
+// v2 plus the b2c negative rule), with its quoted phrases described instead
+// of quoted - no examples in prompt text, per the standing rule.
+const BRANDS_FRAMING_SYSTEM =
+  BRANDS_DETECT +
+  "For each name, give its framing in this answer - decide by DIRECTION, " +
+  "not enthusiasm. recommended = the answer points THIS reader toward it: " +
+  "an outright pick, a stated default, a best-for-your-situation, the top " +
+  "of a ranking presented as advice, a conditional branch with a strong " +
+  "directive verb, or advice to keep or renew something the reader already " +
+  "uses. mentioned = listed, compared factually, or named as an adjacent " +
+  "product or integration; also praise with no direction (a description " +
+  "that never tells the reader what to do), market-position superlatives " +
+  "not tied to advice, weak-verb hedges, and opinions the answer attributes " +
+  "to others rather than stating as its own verdict. negative = the answer " +
+  "itself steers THIS reader away from it, or a caveat disqualifies it for " +
+  "THIS reader's stated situation. Two things never count as negative: a " +
+  "caution the question itself asked for (a list of pitfalls there is the " +
+  "answer doing its job, not a stance), and a caveat inside a standing " +
+  "endorsement - a reader still being sent to it keeps it recommended. " +
+  "Reply with ONLY the JSON object: " +
+  '{"brands": [{"name": "<name>", "framing": "recommended|mentioned|negative"}]}';
+
+/** The brands-pass system prompt for a reply shape (exported for the
+ * byte-identity check and offline pilots). */
+export function brandsSystemPrompt(framing = false): string {
+  return framing ? BRANDS_FRAMING_SYSTEM : BRANDS_SYSTEM;
+}
+
+export type BrandFramingValue = "recommended" | "mentioned" | "negative";
+export interface BrandFraming {
+  name: string;
+  /** null when the model returned no valid framing for this name. */
+  framing: BrandFramingValue | null;
+}
 
 export interface BrandMentions {
   responseId: string;
   engine: string;
   brands: string[];
+  /** Framing mode only: one entry per name in `brands`, same order. Never
+   * stored by prod - the caller gets it, discovery_brands stays names. */
+  framings?: BrandFraming[];
+}
+
+const FRAMING_VALUES = new Set<string>(["recommended", "mentioned", "negative"]);
+
+/** Parse a brands-pass reply. Names-only mode is the pre-framing parser
+ * unchanged; framing mode accepts {name, framing} entries (a bare string
+ * entry is kept with framing null) and applies the same boundary
+ * validation to the names. */
+export function parseBrandsReply(
+  text: string,
+  content: string,
+  framing = false
+): { brands: string[]; framings?: BrandFraming[] } {
+  const raw = content.trim();
+  const json = JSON.parse(raw.replace(/^```(?:json)?|```$/g, "").trim()) as {
+    brands?: unknown[];
+  };
+  if (!framing) {
+    // Boundary validation: a detected name must actually appear in the
+    // answer as a token-bounded match ("Marvel" inside "Marvelous" doesn't).
+    return {
+      brands: boundedNames(
+        text,
+        ((json.brands ?? []) as string[]).filter((b) => typeof b === "string" && b.trim())
+      ),
+    };
+  }
+  const entries: BrandFraming[] = [];
+  for (const e of json.brands ?? []) {
+    const name =
+      typeof e === "string" ? e : e && typeof e === "object" ? (e as { name?: unknown }).name : null;
+    if (typeof name !== "string" || !name.trim()) continue;
+    const f =
+      e && typeof e === "object"
+        ? String((e as { framing?: unknown }).framing ?? "").trim().toLowerCase()
+        : "";
+    entries.push({ name, framing: FRAMING_VALUES.has(f) ? (f as BrandFramingValue) : null });
+  }
+  const kept = entries.filter((e) => nameAppearsBounded(text, e.name));
+  return { brands: kept.map((e) => e.name), framings: kept };
 }
 
 export async function runBrandDiscovery(
@@ -243,8 +333,13 @@ export async function runBrandDiscovery(
     onProgress?: (done: number, failed: number, total: number) => void;
     onResult?: (row: BrandMentions) => Promise<void>;
     deadlineMs?: number;
+    /** Ask for a framing per name (rows carry `framings`). Off by default:
+     * the prompt, request and parsed names are then exactly the names-only
+     * pass. The framing reply is longer, so its output cap is raised. */
+    framing?: boolean;
   } = {}
 ): Promise<BrandMentions[]> {
+  const framing = opts.framing === true;
   const pool = sampleForDiscovery(answers, opts.coverage ?? 1, opts.seed);
   const c = coderCompatClient(DISCOVERY_MODEL);
   const out: BrandMentions[] = [];
@@ -253,36 +348,28 @@ export async function runBrandDiscovery(
   const one = async (a: DiscoveryAnswer) => {
     const res = await c.chat.completions.create({
       model: DISCOVERY_MODEL,
-      ...discoveryParams(DISCOVERY_MODEL, 500),
+      ...discoveryParams(DISCOVERY_MODEL, framing ? 1200 : 500),
       messages: [
-        { role: "system", content: BRANDS_SYSTEM },
+        { role: "system", content: brandsSystemPrompt(framing) },
         { role: "user", content: `Question: ${a.prompt}\n\nAnswer:\n${a.text}` },
       ],
     }, CALL_OPTS);
-    const raw = (res.choices[0]?.message?.content ?? "").trim();
-    const parsed = JSON.parse(raw.replace(/^```(?:json)?|```$/g, "").trim()) as {
-      brands?: string[];
-    };
-    // Boundary validation: a detected name must actually appear in the
-    // answer as a token-bounded match ("Marvel" inside "Marvelous" doesn't).
-    return boundedNames(
-      a.text,
-      (parsed.brands ?? []).filter((b) => typeof b === "string" && b.trim())
-    );
+    return parseBrandsReply(a.text, res.choices[0]?.message?.content ?? "", framing);
   };
   const worker = async () => {
     while (cursor < pool.length) {
       if (opts.deadlineMs && Date.now() >= opts.deadlineMs) return;
       const a = pool[cursor++];
       try {
-        let brands: string[];
+        let parsed: { brands: string[]; framings?: BrandFraming[] };
         try {
-          brands = await one(a);
+          parsed = await one(a);
         } catch {
           await new Promise((r) => setTimeout(r, 2500));
-          brands = await one(a);
+          parsed = await one(a);
         }
-        const row = { responseId: a.id, engine: a.engine, brands };
+        const row: BrandMentions = { responseId: a.id, engine: a.engine, brands: parsed.brands };
+        if (framing) row.framings = parsed.framings ?? [];
         await opts.onResult?.(row);
         out.push(row);
       } catch {
