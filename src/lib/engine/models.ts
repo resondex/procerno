@@ -19,8 +19,10 @@
 const pick = (own: string, fallback: string) =>
   process.env[own] ?? process.env.SUGGEST_MODEL ?? fallback;
 
-/** Brand-board verdicts (dict_suggest.ts). Part of the verdict cache key. */
-export const DICT_SUGGEST_MODEL = pick("DICT_SUGGEST_MODEL", "gpt-5-mini");
+/** Brand-board verdicts (dict_suggest.ts). Part of the verdict cache key.
+ * gpt-6-luna with the v10 rules since 2026-10-14 (Tyler); verdicts cached
+ * under gpt-5-mini keys keep serving through dict_suggest's fallback. */
+export const DICT_SUGGEST_MODEL = pick("DICT_SUGGEST_MODEL", "gpt-6-luna");
 /** Setup pre-fill: category, competitors, audience (suggest.ts). */
 export const BRAND_PROFILE_MODEL = pick("BRAND_PROFILE_MODEL", "gpt-5-mini");
 /** Starting aliases for the target and competitors (suggest.ts). */

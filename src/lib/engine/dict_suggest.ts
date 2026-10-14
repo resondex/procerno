@@ -20,8 +20,16 @@ const CACHE_TTL_MS = 183 * 24 * 3600 * 1000; // ~6 months
 // family ROOTS reach the model. Validated 2026-09-23: two fresh Pixel runs
 // produced IDENTICAL boards, 69/71 matching the Tyler-ratified board (both
 // stable diffs are the rules being more consistent than the ratified roll).
-// In the cache key so behavior changes bypass stale suggestions.
-const SUGGEST_RULES_VERSION = "v8";
+// v10 (2026-10-14, Tyler; "v9" was only ever a notes label for v8's
+// relationship typing, never a key) = v8 plus four relationship rules -
+// co-brand partners and third-party add-ons are affiliated, content_of is
+// only the target's own content, and a parent company's competing sibling
+// brand is approve. Shipped with the move to gpt-6-luna: on Tyler's nine
+// confirmed boards the served board matched his final selections 91-93%
+// (gpt-5-mini on v8: 86% on the October five). AGENTS.md, dictionary A3/A4.
+// In the cache key so behavior changes bypass stale suggestions; v8 verdicts
+// still serve through PRIOR_RULES_VERSIONS.
+const SUGGEST_RULES_VERSION = "v10";
 
 const SCHEMA = {
   type: "object",
@@ -202,7 +210,7 @@ const nameKey = (projectId: string, name: string) =>
  * verdict (the confirmed boards' auto-ignore receipts depend on it) and only
  * never-seen names are judged under the new rules. Leave a version out only
  * when its verdicts must be re-judged on purpose. */
-const PRIOR_RULES_VERSIONS: string[] = [];
+const PRIOR_RULES_VERSIONS: string[] = ["v8"];
 /** Models whose cached verdicts a read may fall back to, besides the current
  * one. gpt-5-mini wrote every verdict to date and shuts down on the API 2026-12-11. */
 const PRIOR_MODELS = ["gpt-5-mini"];
@@ -684,7 +692,7 @@ async function rejectedVerdictRows(
   return out;
 }
 
-/** The v7 disposition rules (Tyler-calibrated, harness-validated), exported
+/** The v10 disposition rules (Tyler-calibrated, harness-validated), exported
  * so evals can run the byte-identical production prompt against other
  * models. */
 export function suggestSystemPrompt(
@@ -735,8 +743,27 @@ export function suggestSystemPrompt(
           "sells - choosing it IS choosing the target), affiliated (a " +
           "sibling product or corporate relative sold separately - praising " +
           "it is NOT praising the target), content_of (content or " +
-          "programming carried by the target). Use none for approve and " +
-          "ignore.\n" +
+          "programming the target's own company makes and sells under the " +
+          "target's name). Use none for approve and ignore.\n" +
+          "A co-brand partner - another company whose name appears on a " +
+          "product the target's company sells - is affiliated, never " +
+          "product_of or same_offering: it is its own company, and its name " +
+          "alone does not mean the target's product was chosen.\n" +
+          "A third-party app, plugin, add-on, or integration that ANOTHER " +
+          "company builds for an active brand's platform or marketplace is " +
+          "affiliated, never product_of: its maker is a different company, " +
+          "and naming it does not mean the target's product was chosen.\n" +
+          "Content another company makes or owns - including that " +
+          "company's own channel, network, or catalog - is never " +
+          "content_of, even when the target carries or licenses it: it " +
+          "belongs to that company, so judge it as its own company under " +
+          "the rules above.\n" +
+          "A brand that an active brand's own parent company sells " +
+          "separately in this category, which a buyer would choose INSTEAD " +
+          "of the active brand, is approve, never merge: sharing a parent " +
+          "company does not make two competing brands one offering. A " +
+          "sibling product from another category, or one used alongside the " +
+          "active brand, stays affiliated.\n" +
           "Every suggestion needs a one-line rationale.\n" +
           `Active brands: ${activeNames.join(", ")}.\n` +
           "Also treat pending names as potential merge targets for OTHER " +

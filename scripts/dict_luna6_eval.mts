@@ -33,6 +33,9 @@ const { suggestSystemPrompt, buildFamilyPlan } = await import(`${REPO}/src/lib/e
 const { openaiClient } = await import(`${REPO}/src/lib/engine/providers`);
 const postgres = (await import(`${REPO}/node_modules/postgres/src/index.js`)).default;
 
+// NOTE (2026-10-14): the A3/A4 rules shipped in prod as v10, so the prod
+// prompt already contains them - run with NO rule flags to test v10 as is
+// (CONTENT_RULE=1 now throws: its anchor is gone; the others would double up).
 const OUT = process.env.OUT_DIR ?? `${process.env.HOME}/Documents/procerno_eval/dict_bakeoff/luna6`;
 // Candidate rule (test A, 2026-09-26): co-brand partners are affiliated, so
 // the co-occurrence guard measures them instead of product_of waving them
