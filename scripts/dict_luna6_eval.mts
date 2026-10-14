@@ -67,6 +67,16 @@ const CONTENT_RULE =
   "channel, network, or catalog - is never content_of, even when the target " +
   "carries or licenses it: it belongs to that company, so judge it as its " +
   "own company under the rules above.\n";
+// Candidate rule (test A4, 2026-10-14): the approve line says "from a
+// DIFFERENT maker" while the GRAIN rule keeps separately sold products apart,
+// so luna typed a parent company's competing sibling brands affiliated and
+// the guard ignored or merged them. SIBLING_RULE=1 settles it.
+const SIBLING_RULE =
+  "A brand that an active brand's own parent company sells separately in " +
+  "this category, which a buyer would choose INSTEAD of the active brand, is " +
+  "approve, never merge: sharing a parent company does not make two " +
+  "competing brands one offering. A sibling product from another category, " +
+  "or one used alongside the active brand, stays affiliated.\n";
 const systemPrompt = (category: string, seeds: string[]) => {
   let base = suggestSystemPrompt(category, seeds);
   if (process.env.CONTENT_RULE === "1") {
@@ -77,7 +87,8 @@ const systemPrompt = (category: string, seeds: string[]) => {
   const i = base.indexOf("ignore.\nEvery suggestion needs");
   if (i < 0) throw new Error("co-brand rule anchor not found in the prod prompt");
   const rules = COBRAND_RULE + (process.env.ADDON_RULE === "1" ? ADDON_RULE : "") +
-    (process.env.CONTENT_RULE === "1" ? CONTENT_RULE : "");
+    (process.env.CONTENT_RULE === "1" ? CONTENT_RULE : "") +
+    (process.env.SIBLING_RULE === "1" ? SIBLING_RULE : "");
   return base.slice(0, i + "ignore.\n".length) + rules + base.slice(i + "ignore.\n".length);
 };
 if (process.env.PRINT_PROMPT === "1") {
@@ -218,8 +229,9 @@ async function probeTemp0(model: string) {
 const arms: { label: string; model: string; temp0: boolean }[] = [
   { label: "gpt-5-mini", model: "gpt-5-mini", temp0: false },
   { label: "gpt-6-luna", model: "gpt-6-luna", temp0: false },
+  { label: "gpt-6-sol", model: "gpt-6-sol", temp0: false },
 ];
-if (await probeTemp0("gpt-6-luna")) arms.push({ label: "gpt-6-luna-t0", model: "gpt-6-luna", temp0: true });
+if ((!process.env.ARMS || process.env.ARMS.includes("gpt-6-luna-t0")) && await probeTemp0("gpt-6-luna")) arms.push({ label: "gpt-6-luna-t0", model: "gpt-6-luna", temp0: true });
 // ARMS=gpt-6-luna runs only the named arms (comma-separated labels).
 if (process.env.ARMS) {
   const keep = new Set(process.env.ARMS.split(","));
@@ -279,7 +291,7 @@ const sameTarget = (c: Case, v: string | undefined, t: string) => {
 };
 console.log("\n| arm | brand | roots | unanimous across runs | action = board | action+target = board | action = board (excl. guard-flipped) |");
 console.log("| --- | --- | --- | --- | --- | --- | --- |");
-const PRICE: Record<string, [number, number]> = { "gpt-5-mini": [0.25, 2], "gpt-6-luna": [0.1, 0.5] };
+const PRICE: Record<string, [number, number]> = { "gpt-5-mini": [0.25, 2], "gpt-6-luna": [0.1, 0.5], "gpt-6-sol": [2, 10] };
 for (const arm of arms) {
   let tot = { roots: 0, unan: 0, a: 0, at: 0, ax: 0, nx: 0 };
   for (const c of cases) {
