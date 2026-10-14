@@ -35,8 +35,10 @@ export const PROMPT_LINT_MODEL = pick("PROMPT_LINT_MODEL", "gpt-6-luna");
 export const PROMPT_HEALTH_MODEL = pick("PROMPT_HEALTH_MODEL", "gpt-5-mini");
 /** Study executive summary (study.ts). */
 export const STUDY_SUMMARY_MODEL = pick("STUDY_SUMMARY_MODEL", "gpt-6-luna");
-/** Insights narrative when the Claude writer is unavailable (insights.ts). */
-export const INSIGHTS_FALLBACK_MODEL = pick("INSIGHTS_FALLBACK_MODEL", "gpt-5-mini");
+/** Insights narrative when the Claude writer is unavailable (insights.ts).
+ * Never runs in prod (an Anthropic key is always set); moved off gpt-5-mini
+ * ahead of its January 2027 retirement without a test for that reason. */
+export const INSIGHTS_FALLBACK_MODEL = pick("INSIGHTS_FALLBACK_MODEL", "gpt-6-luna");
 /** The instrument's small setup jobs: moderators, scenario suggest / near /
  * review, journey and scenario fit, cell review, phrasings (instrument.ts). */
 export const INSTRUMENT_HELPER_MODEL = pick("INSTRUMENT_HELPER_MODEL", "gpt-5-mini");

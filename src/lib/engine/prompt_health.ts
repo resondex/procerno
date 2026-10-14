@@ -6,29 +6,32 @@ import { PROMPT_HEALTH_MODEL } from "./models";
 import { promptsForRun } from "./surfaces";
 
 
+// Contract (2026-10-14): the model returns ONLY the defective prompts; a
+// prompt we sent that is absent from the list is healthy and its flag clears.
+// The old one-verdict-per-prompt contract failed two ways: gpt-6-luna returned
+// only the defective prompts anyway (8 of 12 test runs), so flags never
+// cleared, and gpt-5-mini timed out writing 280 verdicts on AmEx's battery.
 const SCHEMA = {
   type: "object",
   additionalProperties: false,
   properties: {
-    results: {
+    defective: {
       type: "array",
       items: {
         type: "object",
         additionalProperties: false,
         properties: {
-          // Anchors each verdict to its prompt. Position alone silently
-          // attached flags to the wrong prompt whenever the model returned
-          // results short, long, or out of order.
+          // Anchors each verdict to its prompt; an id we did not send is
+          // discarded rather than guessed at.
           id: { type: "string" },
-          defective: { type: "boolean" },
-          reason: { type: ["string", "null"] },
+          reason: { type: "string" },
           alternatives: { type: "array", items: { type: "string" } },
         },
-        required: ["id", "defective", "reason", "alternatives"],
+        required: ["id", "reason", "alternatives"],
       },
     },
   },
-  required: ["results"],
+  required: ["defective"],
 } as const;
 
 /**
@@ -99,9 +102,8 @@ export async function analyzePromptHealth(
           "brands those answers recalled with the number of answers naming " +
           "each. Judge by that weight, not by the length of the brand list: " +
           "one stray brand named in a single answer is noise, while a " +
-          "non-category brand named in most answers is evidence. Echo each " +
-          "prompt's id back on its result. Mark a " +
-          "prompt defective=true when a substantial share of recall " +
+          "non-category brand named in most answers is evidence. A " +
+          "prompt is defective when a substantial share of recall " +
           "is OUTSIDE the category — evidence the prompt was read as being " +
           "about something broader or different (e.g. it asked for 'a tool' " +
           "without naming the category at all, so answers ranged across " +
@@ -112,8 +114,9 @@ export async function analyzePromptHealth(
           "answers drifted to; alternatives = exactly 2 rewritten prompts " +
           "that keep the original intent, length, and casual register but " +
           "anchor the category unmistakably. Never include brand names in " +
-          "alternatives. For healthy prompts: reason=null, alternatives=[]. " +
-          "Return one result per prompt.",
+          "alternatives. List ONLY the defective prompts, each with its id " +
+          "echoed back exactly; every prompt you leave out is treated as " +
+          "healthy. An empty list means every prompt is healthy.",
       },
       {
         role: "user",
@@ -132,44 +135,45 @@ export async function analyzePromptHealth(
       json_schema: { name: "health", strict: true, schema: SCHEMA },
     },
   });
-  const results = (
-    JSON.parse(res.choices[0]?.message?.content ?? '{"results":[]}') as {
-      results: {
-        id: string;
-        defective: boolean;
-        reason: string | null;
-        alternatives: string[];
-      }[];
-    }
-  ).results;
+  // No parsable reply means no verdicts: leave every flag as it was. Under
+  // this contract an empty default would read as "all healthy" and clear them.
+  const content = res.choices[0]?.message?.content;
+  let defective: { id: string; reason: string; alternatives: string[] }[];
+  try {
+    defective = (JSON.parse(content ?? "") as { defective: typeof defective }).defective;
+    if (!Array.isArray(defective)) throw new Error("no defective list");
+  } catch {
+    console.warn(
+      `prompt health check (${project.brand}): unreadable reply - flags unchanged`
+    );
+    return;
+  }
 
-  // Match on the prompt's own id. A verdict whose id we did not send is
-  // discarded rather than guessed at, and a prompt the model skipped keeps
-  // whatever flag it already had instead of inheriting its neighbour's.
-  const byId = new Map(results.map((r) => [r.id, r]));
+  const sent = new Set(perPrompt.map((x) => x.prompt.id));
+  const byId = new Map(
+    defective.filter((r) => sent.has(r.id)).map((r) => [r.id, r])
+  );
+  const unknown = defective.length - byId.size;
+  if (unknown > 0) {
+    console.warn(
+      `prompt health check (${project.brand}): ${unknown} verdicts named ids we did not send or repeated an id - discarded`
+    );
+  }
   let flagged = 0;
-  let matched = 0;
   for (const x of perPrompt) {
     const r = byId.get(x.prompt.id);
-    if (!r) continue;
-    matched++;
-    if (r.defective) flagged++;
+    if (r) flagged++;
     await store.setPromptFlag(
       x.prompt.id,
-      r.defective
+      r
         ? {
-            reason: r.reason ?? "answers drifted off-category",
+            reason: r.reason || "answers drifted off-category",
             alternatives: r.alternatives.slice(0, 2),
           }
         : null
     );
   }
-  if (matched !== perPrompt.length) {
-    console.warn(
-      `prompt health check (${project.brand}): ${perPrompt.length - matched} of ${perPrompt.length} prompts got no verdict — their flags are unchanged`
-    );
-  }
   console.log(
-    `prompt health check (${project.brand}): ${flagged}/${matched} prompts flagged`
+    `prompt health check (${project.brand}): ${flagged}/${perPrompt.length} prompts flagged`
   );
 }

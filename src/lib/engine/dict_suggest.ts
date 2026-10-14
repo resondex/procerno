@@ -176,31 +176,53 @@ const nameHash = (name: string) =>
 const nameKey = (projectId: string, name: string) =>
   `dict_suggest:${SUGGEST_RULES_VERSION}:${DICT_SUGGEST_MODEL}:${projectId}:` +
   nameHash(name);
-/** Verdicts cached before keys carried the model (all gpt-5-mini, v8
- * rules). Read through while the rules are still v8, so a model switch
- * leaves every already-reviewed board exactly as it was and only
- * never-seen names reach the new model. A rules bump retires them. */
-const legacyKey = (projectId: string, name: string) =>
-  SUGGEST_RULES_VERSION === "v8"
-    ? `dict_suggest:v8:${projectId}:` + nameHash(name)
-    : null;
+/** Rules versions whose verdicts still serve, newest first. On a rules bump,
+ * move the old SUGGEST_RULES_VERSION here: already-judged names keep their
+ * verdict (the confirmed boards' auto-ignore receipts depend on it) and only
+ * never-seen names are judged under the new rules. Leave a version out only
+ * when its verdicts must be re-judged on purpose. */
+const PRIOR_RULES_VERSIONS: string[] = [];
+/** Models whose cached verdicts a read may fall back to, besides the current
+ * one. gpt-5-mini wrote every verdict to date and retires January 2027. */
+const PRIOR_MODELS = ["gpt-5-mini"];
 
-/** Cached verdicts for many names in ONE batch read: the model-tagged key
- * wins, the legacy key fills in. Keyed by the name as passed. */
+/** Fallback keys for one name, in priority order: current rules before prior
+ * rules, the current model before prior models, then the pre-2026-09-26 keys
+ * that carry no model (all gpt-5-mini, v8 rules). Before this, the fallback
+ * read only those model-less keys, so a model switch would have missed every
+ * verdict written since 2026-09-26. Writes always go to nameKey. */
+const fallbackKeys = (projectId: string, name: string): string[] => {
+  const h = nameHash(name);
+  const models = [...new Set([DICT_SUGGEST_MODEL, ...PRIOR_MODELS])];
+  const keys: string[] = [];
+  for (const v of [SUGGEST_RULES_VERSION, ...PRIOR_RULES_VERSIONS]) {
+    for (const m of models) keys.push(`dict_suggest:${v}:${m}:${projectId}:${h}`);
+    if (v === "v8") keys.push(`dict_suggest:v8:${projectId}:${h}`);
+  }
+  const own = nameKey(projectId, name);
+  return [own, ...keys.filter((k) => k !== own)];
+};
+
+/** Cached verdicts for many names in ONE batch read: the first key in
+ * fallbackKeys order that hits wins. Keyed by the name as passed. */
 async function cachedVerdicts(
   projectId: string,
   names: string[]
 ): Promise<Map<string, string>> {
-  const keys = names.flatMap((n) => {
-    const legacy = legacyKey(projectId, n);
-    return legacy ? [nameKey(projectId, n), legacy] : [nameKey(projectId, n)];
-  });
-  const hits = await store.cacheGetMany(keys, CACHE_TTL_MS);
+  const perName = names.map((n) => [n, fallbackKeys(projectId, n)] as const);
+  const hits = await store.cacheGetMany(
+    perName.flatMap(([, ks]) => ks),
+    CACHE_TTL_MS
+  );
   const out = new Map<string, string>();
-  for (const n of names) {
-    const legacy = legacyKey(projectId, n);
-    const hit = hits.get(nameKey(projectId, n)) ?? (legacy ? hits.get(legacy) : undefined);
-    if (hit) out.set(n, hit);
+  for (const [n, ks] of perName) {
+    for (const k of ks) {
+      const hit = hits.get(k);
+      if (hit) {
+        out.set(n, hit);
+        break;
+      }
+    }
   }
   return out;
 }
