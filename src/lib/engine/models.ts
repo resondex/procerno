@@ -31,8 +31,10 @@ export const JUNK_FILTER_MODEL = pick("JUNK_FILTER_MODEL", "gpt-6-luna");
 export const BATTERY_MODEL = pick("BATTERY_MODEL", "gpt-5-mini");
 /** Battery lint (anchoring / spec-sheet) and its repair round (suggest.ts). */
 export const PROMPT_LINT_MODEL = pick("PROMPT_LINT_MODEL", "gpt-6-luna");
-/** Post-run prompt health audit (prompt_health.ts). */
-export const PROMPT_HEALTH_MODEL = pick("PROMPT_HEALTH_MODEL", "gpt-5-mini");
+/** Post-run prompt health audit (prompt_health.ts). gpt-6-luna since
+ * 2026-10-14 (Tyler): on the defective-only contract it judged every prompt
+ * on every run of the four held runs; gpt-5-mini timed out on AmEx's 280. */
+export const PROMPT_HEALTH_MODEL = pick("PROMPT_HEALTH_MODEL", "gpt-6-luna");
 /** Study executive summary (study.ts). */
 export const STUDY_SUMMARY_MODEL = pick("STUDY_SUMMARY_MODEL", "gpt-6-luna");
 /** Insights narrative when the Claude writer is unavailable (insights.ts).
