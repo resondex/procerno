@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { getAuth, requireProject } from "@/lib/auth";
 import { store } from "@/lib/store";
+import { recordDictionaryConfirm } from "@/lib/engine/dict_decision";
 
 /** The brand-dictionary gate: the second confirmation after the codebook.
  * Marks the dictionary reviewed; coding waits on both gates. Edits to the
@@ -21,5 +22,12 @@ export async function POST(
     );
   }
   await store.confirmDictionary(id);
+  // Close the walk's served-vs-decided record with the confirmed layout,
+  // parents and analysis settings. Never fails the confirm.
+  try {
+    await recordDictionaryConfirm(project);
+  } catch (err) {
+    console.error("dictionary decision record failed:", err);
+  }
   return NextResponse.json({ ok: true, dictionary_status: "confirmed" });
 }

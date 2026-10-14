@@ -356,6 +356,9 @@ function createDb(): Database.Database {
   if (!cols.some((c) => c.name === "setup_decision")) {
     db.exec("ALTER TABLE projects ADD COLUMN setup_decision TEXT");
   }
+  if (!cols.some((c) => c.name === "dictionary_decision")) {
+    db.exec("ALTER TABLE projects ADD COLUMN dictionary_decision TEXT");
+  }
   if (!cols.some((c) => c.name === "dictionary_status")) {
     db.exec(
       "ALTER TABLE projects ADD COLUMN dictionary_status TEXT NOT NULL DEFAULT 'pending'"
@@ -1445,6 +1448,19 @@ export const sqliteStore: Store = {
   async setSetupDecision(projectId, decisionJson) {
     getDb()
       .prepare("UPDATE projects SET setup_decision = ? WHERE id = ?")
+      .run(decisionJson, projectId);
+  },
+
+  async getDictionaryDecision(projectId) {
+    const row = getDb()
+      .prepare("SELECT dictionary_decision FROM projects WHERE id = ?")
+      .get(projectId) as { dictionary_decision: string | null } | undefined;
+    return row?.dictionary_decision ?? null;
+  },
+
+  async setDictionaryDecision(projectId, decisionJson) {
+    getDb()
+      .prepare("UPDATE projects SET dictionary_decision = ? WHERE id = ?")
       .run(decisionJson, projectId);
   },
 

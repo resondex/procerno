@@ -69,6 +69,8 @@ function ensureSchema(): Promise<void> {
       await sql`ALTER TABLE projects ADD COLUMN IF NOT EXISTS worry_decision TEXT`;
       // The whole setup's offered-vs-accepted record (2026-10-06).
       await sql`ALTER TABLE projects ADD COLUMN IF NOT EXISTS setup_decision TEXT`;
+      // The brand-dictionary gate's served-vs-decided record (2026-10-14).
+      await sql`ALTER TABLE projects ADD COLUMN IF NOT EXISTS dictionary_decision TEXT`;
       await sql`ALTER TABLE projects ADD COLUMN IF NOT EXISTS dictionary_status TEXT NOT NULL DEFAULT 'pending'`;
       await sql`ALTER TABLE projects ADD COLUMN IF NOT EXISTS brand_observations TEXT`;
       await sql`ALTER TABLE projects ADD COLUMN IF NOT EXISTS dictionary_version INTEGER NOT NULL DEFAULT 1`;
@@ -1168,6 +1170,17 @@ export const pgStore: Store = {
   async setSetupDecision(projectId, decisionJson) {
     const sql = await db();
     await sql`UPDATE projects SET setup_decision = ${decisionJson} WHERE id = ${projectId}`;
+  },
+
+  async getDictionaryDecision(projectId) {
+    const sql = await db();
+    const rows = await sql`SELECT dictionary_decision FROM projects WHERE id = ${projectId}`;
+    return (rows[0]?.dictionary_decision as string | null | undefined) ?? null;
+  },
+
+  async setDictionaryDecision(projectId, decisionJson) {
+    const sql = await db();
+    await sql`UPDATE projects SET dictionary_decision = ${decisionJson} WHERE id = ${projectId}`;
   },
 
   async setWorryDecision(projectId, decisionJson) {

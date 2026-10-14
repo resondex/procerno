@@ -69,7 +69,28 @@ interface CachedVerdict {
    * framing and top-pick credit must flow); affiliated and content_of keep
    * the measured ignore bands. */
   relationship?: "same_offering" | "product_of" | "affiliated" | "content_of" | "none";
+  /** Which layer settled the served verdict (2026-10-14; older cache entries
+   * carry none - verdictLayer infers it from the rationale): model = the
+   * model's own call; family_active / family_root = the mechanical family
+   * layer; guard_flip = the co-occurrence guard demoted a model merge to
+   * ignore; guard_kept = the guard measured a model merge and kept it;
+   * guard_short_form = a short form of the target, kept without measuring. */
+  layer?: VerdictLayer;
+  /** Guard measurement: share of answers naming this without its proposed
+   * parent, and how many answers named it. */
+  alone?: number;
+  n?: number;
+  /** For guard_flip: the model's own verdict before the guard replaced it. */
+  raw?: { action: CachedVerdict["action"]; merge_into: string | null; relationship?: CachedVerdict["relationship"] };
 }
+
+export type VerdictLayer =
+  | "model"
+  | "family_active"
+  | "family_root"
+  | "guard_flip"
+  | "guard_kept"
+  | "guard_short_form";
 
 const norm = (s: string) => s.trim().toLowerCase();
 
@@ -294,6 +315,7 @@ export async function getDictionarySuggestions(
       action: "merge",
       merge_into: target,
       rationale: `extends the tracked brand "${target}"`,
+      layer: "family_active",
     };
     cached.set(p.id, v);
     writes.push(
@@ -397,9 +419,10 @@ export async function getDictionarySuggestions(
                   seq.every((t, i) => t === satToks[i])
               );
               const verdict: CachedVerdict = leading || declared
-                ? v
+                ? { ...v, layer: "guard_short_form" }
                 : {
                     ...v,
+                    layer: "guard_short_form",
                     rationale: `${v.rationale} (short form of the brand name - review)`,
                   };
               cached.set(p.id, verdict);
@@ -439,6 +462,12 @@ export async function getDictionarySuggestions(
           const alone = 1 - withParent / n;
           const productForm =
             v.relationship === "product_of" || v.relationship === "same_offering";
+          const measured = { alone, n };
+          const raw = {
+            action: v.action,
+            merge_into: v.merge_into,
+            relationship: v.relationship,
+          };
           let next: CachedVerdict | null = null;
           if (productForm) {
             // Picking the product IS picking the target: framing and
@@ -446,23 +475,31 @@ export async function getDictionarySuggestions(
             // bands - the measurement only decides whether to flag.
             next =
               alone <= 0.05
-                ? { ...v, rationale: `${v.rationale} (form of the brand - ${Math.round(alone * 100)}% alone of ${n})` }
-                : { ...v, rationale: `${v.rationale} (named without "${v.merge_into}" in ${Math.round(alone * 100)}% of ${n} answers - review)` };
+                ? { ...v, ...measured, layer: "guard_kept", rationale: `${v.rationale} (form of the brand - ${Math.round(alone * 100)}% alone of ${n})` }
+                : { ...v, ...measured, layer: "guard_kept", rationale: `${v.rationale} (named without "${v.merge_into}" in ${Math.round(alone * 100)}% of ${n} answers - review)` };
           } else if (alone <= 0.05) {
             next = {
               action: "ignore",
               merge_into: null,
+              ...measured,
+              layer: "guard_flip",
+              raw,
               rationale: `vocabulary of "${v.merge_into}" - named alone in only ${Math.round(alone * 100)}% of ${n} answers; the parent already matches those answers, and the argument belongs to the reason codes`,
             };
           } else if (alone >= 0.3) {
             next = {
               action: "ignore",
               merge_into: null,
+              ...measured,
+              layer: "guard_flip",
+              raw,
               rationale: `own-context brand - named WITHOUT "${v.merge_into}" in ${Math.round(alone * 100)}% of ${n} answers; merging would inflate the parent`,
             };
           } else {
             next = {
               ...v,
+              ...measured,
+              layer: "guard_kept",
               rationale: `${v.rationale} (named without "${v.merge_into}" in ${Math.round(alone * 100)}% of ${n} answers - review)`,
             };
           }
@@ -492,17 +529,20 @@ export async function getDictionarySuggestions(
             action: "merge",
             merge_into: root.canonical,
             rationale: `variant of "${root.canonical}"`,
+            layer: "family_root",
           }
         : rootVerdict.action === "merge"
           ? {
               action: "merge",
               merge_into: rootVerdict.merge_into,
               rationale: `follows "${root.canonical}"`,
+              layer: "family_root",
             }
           : {
               action: "ignore",
               merge_into: null,
               rationale: `follows "${root.canonical}"`,
+              layer: "family_root",
             };
     cached.set(p.id, v);
     writes.push(
@@ -528,6 +568,7 @@ export async function getDictionarySuggestions(
         merge_into: target,
         relationship: "same_offering",
         rationale: `extends the tracked brand "${target}"`,
+        layer: "family_active",
       };
       const cur = cached.get(p.id);
       if (!cur || cur.action !== "merge" || cur.merge_into !== target) {
@@ -553,6 +594,7 @@ export async function getDictionarySuggestions(
             merge_into: root.canonical,
             relationship: "same_offering",
             rationale: `variant of "${root.canonical}"`,
+            layer: "family_root",
           }
         : rootVerdict.action === "merge"
           ? {
@@ -560,11 +602,13 @@ export async function getDictionarySuggestions(
               merge_into: rootVerdict.merge_into,
               relationship: rootVerdict.relationship ?? "same_offering",
               rationale: `follows "${root.canonical}"`,
+              layer: "family_root",
             }
           : {
               action: "ignore",
               merge_into: null,
               rationale: `follows "${root.canonical}"`,
+              layer: "family_root",
             };
     const cur = cached.get(p.id);
     if (
@@ -761,6 +805,7 @@ async function suggestBatch(
       merge_into: s.merge_into,
       relationship: s.relationship ?? "none",
       rationale: s.rationale,
+      layer: "model",
     };
     verdicts.set(entry.id, verdict);
     await store.cacheSet(
@@ -770,4 +815,107 @@ async function suggestBatch(
     );
   }
   return verdicts;
+}
+
+/** One name's served verdict as the board received it, with its provenance:
+ * the layer that settled it and the model + rules version whose cache entry
+ * held it. Read for the gate's recommended-vs-decided record (dict_decision);
+ * a pure cache read - never a model call. */
+export interface ServedVerdict {
+  action: CachedVerdict["action"];
+  mergeInto: string | null;
+  relationship: CachedVerdict["relationship"] | null;
+  rationale: string;
+  layer: VerdictLayer;
+  alone: number | null;
+  n: number | null;
+  raw: CachedVerdict["raw"] | null;
+  model: string;
+  rules: string;
+}
+
+/** The layer behind a cached verdict. Entries written before 2026-10-14 carry
+ * no layer field; their rationale strings are fixed templates per layer, so
+ * the layer (and a guard's measured share) reads back from them. */
+export function verdictLayer(v: {
+  layer?: VerdictLayer;
+  rationale?: string;
+}): { layer: VerdictLayer; alone: number | null; n: number | null } {
+  const rat = v.rationale ?? "";
+  const measured = (re: RegExp) => {
+    const m = rat.match(re);
+    return m ? { alone: Number(m[1]) / 100, n: Number(m[2]) } : { alone: null, n: null };
+  };
+  if (v.layer) {
+    // New entries carry the share in alone/n; nothing to read back.
+    return { layer: v.layer, alone: null, n: null };
+  }
+  if (/^extends the tracked brand "/.test(rat)) {
+    return { layer: "family_active", alone: null, n: null };
+  }
+  if (/^(variant of|follows) "/.test(rat)) {
+    return { layer: "family_root", alone: null, n: null };
+  }
+  if (/^vocabulary of "/.test(rat)) {
+    return { layer: "guard_flip", ...measured(/only (\d+)% of (\d+) answers/) };
+  }
+  if (/^own-context brand/.test(rat)) {
+    return { layer: "guard_flip", ...measured(/in (\d+)% of (\d+) answers/) };
+  }
+  if (/\(short form of the brand name - review\)$/.test(rat)) {
+    return { layer: "guard_short_form", alone: null, n: null };
+  }
+  if (/\(form of the brand - \d+% alone of \d+\)$/.test(rat)) {
+    return { layer: "guard_kept", ...measured(/(\d+)% alone of (\d+)\)$/) };
+  }
+  if (/\(named without ".*" in \d+% of \d+ answers - review\)$/.test(rat)) {
+    return { layer: "guard_kept", ...measured(/in (\d+)% of (\d+) answers - review\)$/) };
+  }
+  return { layer: "model", alone: null, n: null };
+}
+
+/** Model + rules version from a verdict cache key: current keys are
+ * dict_suggest:<rules>:<model>:<project>:<hash>; the pre-2026-09-26 keys
+ * dict_suggest:v8:<project>:<hash> are all gpt-5-mini. */
+function keyProvenance(key: string, projectId: string): { model: string; rules: string } {
+  const parts = key.split(":");
+  const rules = parts[1] ?? SUGGEST_RULES_VERSION;
+  if (parts[2] === projectId) return { model: "gpt-5-mini", rules };
+  return { model: parts.slice(2, parts.indexOf(projectId)).join(":") || "unknown", rules };
+}
+
+/** Served verdicts for many names, cache-only (one batch read, the same
+ * fallback order the board reads). Names with no cached verdict are absent -
+ * seeds, user-created entries, or names the board left unjudged. */
+export async function servedVerdicts(
+  projectId: string,
+  names: string[]
+): Promise<Map<string, ServedVerdict>> {
+  const perName = names.map((n) => [n, fallbackKeys(projectId, n)] as const);
+  const hits = await store.cacheGetMany(
+    perName.flatMap(([, ks]) => ks),
+    CACHE_TTL_MS
+  );
+  const out = new Map<string, ServedVerdict>();
+  for (const [name, ks] of perName) {
+    for (const k of ks) {
+      const hit = hits.get(k);
+      if (!hit) continue;
+      const v = JSON.parse(hit) as CachedVerdict;
+      const { layer, alone, n } = verdictLayer(v);
+      out.set(name, {
+        action: v.action,
+        mergeInto: v.merge_into ?? null,
+        relationship: v.relationship ?? null,
+        rationale: v.rationale,
+        layer,
+        alone: v.alone ?? alone,
+        n: v.n ?? n,
+        raw: v.raw ?? null,
+        ...keyProvenance(k, projectId),
+      });
+      break;
+    }
+  }
+  return out;
 }

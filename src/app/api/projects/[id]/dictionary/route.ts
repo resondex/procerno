@@ -4,6 +4,7 @@ import { store } from "@/lib/store";
 import { refreshBrandObservations } from "@/lib/engine/observations";
 import { requireAuth, requireProject } from "@/lib/auth";
 import { matchKey } from "@/lib/brand_key";
+import { recordDictionaryLayout, snapshotServed } from "@/lib/engine/dict_decision";
 
 export async function GET(
   _req: Request,
@@ -342,12 +343,29 @@ export async function POST(
     ...actions.filter((a) => a.action === "merge"),
     ...actions.filter((a) => a.action === "confirm"),
   ];
+  // A batch carrying the name sign-off is the board's layout commit: capture
+  // the board as served BEFORE it applies, for the gate's decision record
+  // (a cache read - never a model call). Recording never fails the batch.
+  const signsOff = ordered.some((a) => a.action === "confirm");
+  const servedBefore = signsOff
+    ? await snapshotServed(project).catch((err) => {
+        console.error("dictionary decision snapshot failed:", err);
+        return null;
+      })
+    : null;
   const errors: string[] = [];
   for (const a of ordered) {
     const err = await applyAction(id, a, project.brand);
     if (err) errors.push(err);
   }
   const version = await store.bumpDictionaryVersion(id);
+  if (servedBefore) {
+    try {
+      await recordDictionaryLayout(project, servedBefore);
+    } catch (err) {
+      console.error("dictionary decision record failed:", err);
+    }
+  }
   // Entry attribution in the observations follows the dictionary - refresh
   // so tier bars and NOT SEEN flags never go stale after a gate decision.
   // Attribution reads canonical/alias matchKeys and entry status, nothing

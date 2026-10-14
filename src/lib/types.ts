@@ -944,6 +944,11 @@ export interface Store {
    * paraphrases - what the engine offered and what was sent for analysis.
    * Written once at create and on every edit-setup. */
   setSetupDecision(projectId: string, decisionJson: string): Promise<void>;
+  /** The brand-dictionary gate's served-vs-decided record (JSON:
+   * DictDecisionRecord, 2026-10-14), one version per gate walk. Read
+   * separately from Project so the record never rides project payloads. */
+  getDictionaryDecision(projectId: string): Promise<string | null>;
+  setDictionaryDecision(projectId: string, decisionJson: string): Promise<void>;
   /** Ratify the confirmed code list with its decision record;
    * status -> ratified. */
   ratifyTaxonomy(projectId: string, codes: string[], decisionJson: string): Promise<void>;
