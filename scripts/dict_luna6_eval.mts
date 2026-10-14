@@ -37,9 +37,11 @@ const OUT = process.env.OUT_DIR ?? `${process.env.HOME}/Documents/procerno_eval/
 // Candidate rule (test A, 2026-09-26): co-brand partners are affiliated, so
 // the co-occurrence guard measures them instead of product_of waving them
 // through. COBRAND_RULE=1 inserts it after the relationship definitions.
+// 2026-10-14: the example list ("an airline, hotel, retailer") is gone - no
+// category examples in prompt text (AGENTS.md, 2026-10-03).
 const COBRAND_RULE =
-  "A co-brand partner - an airline, hotel, retailer, or other company whose " +
-  "name appears on a card, plan, or product the target's company sells - " +
+  "A co-brand partner - another company whose name appears on a product " +
+  "the target's company sells - " +
   "is affiliated, never product_of or same_offering: it is its own company, " +
   "and its name alone does not mean the target's product was chosen.\n";
 // Candidate rule (test A2, 2026-09-27): third-party marketplace apps are
@@ -50,14 +52,38 @@ const ADDON_RULE =
   "builds for an active brand's platform or marketplace is affiliated, never " +
   "product_of: its maker is a different company, and naming it does not mean " +
   "the target's product was chosen.\n";
+// Candidate rule (test A3, 2026-10-14): the prod definition "content or
+// programming carried by the target" invited a carried network to be typed
+// content_of the service carrying it (luna merged every carried sports
+// channel into a streaming service, and the guard kept the 5-30%-alone ones).
+// CONTENT_RULE=1 narrows the definition to the target's own content and adds
+// one sentence for content another company owns.
+const CONTENT_DEF_OLD = "content_of (content or programming carried by the target)";
+const CONTENT_DEF_NEW =
+  "content_of (content or programming the target's own company makes and " +
+  "sells under the target's name)";
+const CONTENT_RULE =
+  "Content another company makes or owns - including that company's own " +
+  "channel, network, or catalog - is never content_of, even when the target " +
+  "carries or licenses it: it belongs to that company, so judge it as its " +
+  "own company under the rules above.\n";
 const systemPrompt = (category: string, seeds: string[]) => {
-  const base = suggestSystemPrompt(category, seeds);
+  let base = suggestSystemPrompt(category, seeds);
+  if (process.env.CONTENT_RULE === "1") {
+    if (!base.includes(CONTENT_DEF_OLD)) throw new Error("content_of definition anchor not found");
+    base = base.replace(CONTENT_DEF_OLD, CONTENT_DEF_NEW);
+  }
   if (process.env.COBRAND_RULE !== "1") return base;
   const i = base.indexOf("ignore.\nEvery suggestion needs");
   if (i < 0) throw new Error("co-brand rule anchor not found in the prod prompt");
-  const rules = COBRAND_RULE + (process.env.ADDON_RULE === "1" ? ADDON_RULE : "");
+  const rules = COBRAND_RULE + (process.env.ADDON_RULE === "1" ? ADDON_RULE : "") +
+    (process.env.CONTENT_RULE === "1" ? CONTENT_RULE : "");
   return base.slice(0, i + "ignore.\n".length) + rules + base.slice(i + "ignore.\n".length);
 };
+if (process.env.PRINT_PROMPT === "1") {
+  console.log(systemPrompt("<category>", ["<brand>", "<rival>"]));
+  process.exit(0);
+}
 fs.mkdirSync(OUT, { recursive: true });
 const RUNS = Number(process.env.RUNS ?? 3);
 const CHUNK = 40;
@@ -98,8 +124,12 @@ const sql = Object.assign(
   (s: TemplateStringsArray, ...v: unknown[]) => ro.begin("read only", (t: any) => t(s, ...v)),
   { end: () => ro.end() }
 );
+// Pinned to the four September trackers whose boards Tyler confirmed: the
+// October trackers reuse three of the brand names (2026-10-14 A3 collided).
+const PROJECT_IDS = (process.env.PROJECT_IDS ??
+  "7354bce6-6c22-432e-a531-99ce3118dc7a,1f7f59f5-a3c6-4f90-b7d3-961e99b4fbe0,2d52f699-30f6-40d3-a3ba-4fd26bdde29b,8b9f8453-c9b5-42fc-b0c2-f2af06a16b57").split(",");
 const projects = await sql`SELECT id, brand, category, competitors FROM projects
-  WHERE brand IN ('jira','American Express','Netflix','Google Pixel') ORDER BY brand`;
+  WHERE id = ANY(${PROJECT_IDS}) ORDER BY brand`;
 type Case = { pid: string; brand: string; category: string; seeds: string[]; roots: string[];
   truth: Record<string, string>; cached: Record<string, any>; guardFlipped: Set<string> };
 const cases: Case[] = [];
@@ -185,6 +215,11 @@ const arms: { label: string; model: string; temp0: boolean }[] = [
   { label: "gpt-6-luna", model: "gpt-6-luna", temp0: false },
 ];
 if (await probeTemp0("gpt-6-luna")) arms.push({ label: "gpt-6-luna-t0", model: "gpt-6-luna", temp0: true });
+// ARMS=gpt-6-luna runs only the named arms (comma-separated labels).
+if (process.env.ARMS) {
+  const keep = new Set(process.env.ARMS.split(","));
+  arms.splice(0, arms.length, ...arms.filter((a) => keep.has(a.label)));
+}
 
 const results: Record<string, Record<string, Record<string, string>[]>> = {}; // arm -> brand -> runs[] of name->verdict
 const meta: Record<string, { calls: number; fails: number; truncated: number; secs: number[]; inTok: number; outTok: number }> = {};
