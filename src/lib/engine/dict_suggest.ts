@@ -183,7 +183,7 @@ const nameKey = (projectId: string, name: string) =>
  * when its verdicts must be re-judged on purpose. */
 const PRIOR_RULES_VERSIONS: string[] = [];
 /** Models whose cached verdicts a read may fall back to, besides the current
- * one. gpt-5-mini wrote every verdict to date and retires January 2027. */
+ * one. gpt-5-mini wrote every verdict to date and shuts down on the API 2026-12-11. */
 const PRIOR_MODELS = ["gpt-5-mini"];
 
 /** Fallback keys for one name, in priority order: current rules before prior
