@@ -119,7 +119,7 @@ const SCHEMA = {
 // "SET SESSION CHARACTERISTICS ... READ ONLY" must never be used here:
 // behind the Supabase transaction pooler it sticks to a shared server
 // connection and leaks to the live app (2026-09-26 incident).
-const ro = postgres(DB_URL, { max: 1 });
+const ro = postgres(DB_URL, { max: 1, prepare: false }); // transaction pooler: no prepared statements
 const sql = Object.assign(
   (s: TemplateStringsArray, ...v: unknown[]) => ro.begin("read only", (t: any) => t(s, ...v)),
   { end: () => ro.end() }
@@ -158,8 +158,12 @@ for (const p of projects) {
   }
   // names with an engine verdict = names that went through the suggestion pass
   const names = Object.keys(truth);
-  const hits = await sql`SELECT key, value FROM llm_cache WHERE key = ANY(${names.map((n) => key(p.id, n))})`;
-  const byKey = new Map(hits.map((h: any) => [h.key, JSON.parse(h.value)]));
+  // Verdicts live under the model-less v8 keys (before 2026-09-26) or the
+  // model-tagged gpt-5-mini keys (after); read both, keyed back to key().
+  const tagged = (n: string) => key(p.id, n).replace("dict_suggest:v8:", "dict_suggest:v8:gpt-5-mini:");
+  const hits = await sql`SELECT key, value FROM llm_cache WHERE key = ANY(${names.flatMap((n) => [key(p.id, n), tagged(n)])})`;
+  const back = new Map(names.map((n) => [tagged(n), key(p.id, n)]));
+  const byKey = new Map(hits.map((h: any) => [back.get(h.key) ?? h.key, JSON.parse(h.value)]));
   const judged = names.filter((n) => byKey.has(key(p.id, n)));
   const seedSet = new Set(seeds.map(norm));
   const seedEntries = entries.filter((e) => seedSet.has(norm(e.canonical))).map((e) => ({
@@ -181,6 +185,7 @@ for (const p of projects) {
   console.log(`${p.brand}: ${names.length} names on board, ${judged.length} with engine verdicts, ${roots.length} family roots (${guardFlipped.size} guard-flipped in prod)`);
 }
 await sql.end();
+if (process.env.CASES_ONLY === "1") process.exit(0);
 
 // ---- model runs ----
 async function judge(model: string, c: Case, batch: string[], temp0: boolean) {
