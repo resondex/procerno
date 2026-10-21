@@ -22,7 +22,14 @@ Object.assign(store as object, {
   },
 });
 
-const projects = await prod`SELECT id, brand, category, audience, competitors FROM projects ORDER BY brand`;
+// PROFILE_ONLY=1 (2026-10-14 rerun): brand profile only, the 11 test-C brands
+// (the profile reads the brand name alone, so one row per name - the October
+// trackers reuse five of these names).
+const PROFILE_ONLY = process.env.PROFILE_ONLY === "1";
+const TEST_C_BRANDS = ["AG1", "American Express", "athenahealth", "Doritos", "Google Nest", "Google Pixel", "jira", "Netflix", "Purple", "PwC", "Sephora"];
+const projects = PROFILE_ONLY
+  ? await prod`SELECT DISTINCT ON (brand) id, brand, category, audience, competitors FROM projects WHERE brand = ANY(${TEST_C_BRANDS}) ORDER BY brand, created_at`
+  : await prod`SELECT id, brand, category, audience, competitors FROM projects ORDER BY brand`;
 const out: Record<string, unknown> = { arm: ARM, profileModel: models.BRAND_PROFILE_MODEL, seedModel: models.DICT_SEED_MODEL, projects: {} };
 for (const p of projects) {
   const competitors = JSON.parse(p.competitors) as string[];
@@ -30,7 +37,7 @@ for (const p of projects) {
   for (let i = 0; i < RUNS; i++) {
     const [profile] = await Promise.all([
       suggestBrandProfile(p.brand).catch((e: Error) => ({ error: e.message })),
-      (async () => { captured = []; await seedDictionary(`eval-${p.id}`, [p.brand, ...competitors]); res.seeds.push(captured); })(),
+      PROFILE_ONLY ? Promise.resolve() : (async () => { captured = []; await seedDictionary(`eval-${p.id}`, [p.brand, ...competitors]); res.seeds.push(captured); })(),
     ]);
     res.profiles.push(profile);
   }

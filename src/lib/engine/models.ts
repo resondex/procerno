@@ -29,8 +29,11 @@ export const BRAND_PROFILE_MODEL = pick("BRAND_PROFILE_MODEL", "gpt-5-mini");
 export const DICT_SEED_MODEL = pick("DICT_SEED_MODEL", "gpt-6-luna");
 /** Post-run filter of non-brand names before they reach the board (suggest.ts). */
 export const JUNK_FILTER_MODEL = pick("JUNK_FILTER_MODEL", "gpt-6-luna");
-/** Legacy prompt-battery drafting (suggest.ts). */
-export const BATTERY_MODEL = pick("BATTERY_MODEL", "gpt-5-mini");
+/** Legacy prompt-battery drafting (suggest.ts) - the classic "Visibility
+ * scan" setup. gpt-6-luna since 2026-10-14 (Tyler: switch without a test,
+ * ahead of gpt-5-mini's 2026-12-11 shutdown). Batteries cached under the
+ * old model keep serving: the battery key carries no model. */
+export const BATTERY_MODEL = pick("BATTERY_MODEL", "gpt-6-luna");
 /** Battery lint (anchoring / spec-sheet) and its repair round (suggest.ts). */
 export const PROMPT_LINT_MODEL = pick("PROMPT_LINT_MODEL", "gpt-6-luna");
 /** Post-run prompt health audit (prompt_health.ts). gpt-6-luna since
