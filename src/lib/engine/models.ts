@@ -23,8 +23,12 @@ const pick = (own: string, fallback: string) =>
  * gpt-6-luna with the v10 rules since 2026-10-14 (Tyler); verdicts cached
  * under gpt-5-mini keys keep serving through dict_suggest's fallback. */
 export const DICT_SUGGEST_MODEL = pick("DICT_SUGGEST_MODEL", "gpt-6-luna");
-/** Setup pre-fill: category, competitors, audience (suggest.ts). */
-export const BRAND_PROFILE_MODEL = pick("BRAND_PROFILE_MODEL", "gpt-5-mini");
+/** Setup pre-fill: category, competitors, audience (suggest.ts). gpt-6-sol
+ * since 2026-10-14 (Tyler): it listed 76% of the competitors the October
+ * trackers' answers name most, vs gpt-5-mini 70% and gpt-6-luna 71%
+ * (internal_models/seed/profile_score_oct14.md). The model is in the profile
+ * cache key, so only brands analyzed from now on get a sol profile. */
+export const BRAND_PROFILE_MODEL = pick("BRAND_PROFILE_MODEL", "gpt-6-sol");
 /** Starting aliases for the target and competitors (suggest.ts). */
 export const DICT_SEED_MODEL = pick("DICT_SEED_MODEL", "gpt-6-luna");
 /** Post-run filter of non-brand names before they reach the board (suggest.ts). */
