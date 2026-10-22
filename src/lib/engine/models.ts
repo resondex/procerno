@@ -55,11 +55,12 @@ export const INSIGHTS_FALLBACK_MODEL = pick("INSIGHTS_FALLBACK_MODEL", "gpt-6-lu
  * since 2026-10-21 (Tyler; helpers bakeoff internal_models/helpers/score.md:
  * better or tied on six of seven jobs, a quarter of the cost). */
 export const INSTRUMENT_HELPER_MODEL = pick("INSTRUMENT_HELPER_MODEL", "gpt-6-luna");
-/** The scenarios-gate room review (reviewScenarios) alone: luna flags 32% of
- * Tyler-confirmed rooms (reads two-factor rooms as "mixed", 70% same-verdict
- * stability vs mini's 90%), so this one job stays on gpt-5-mini until a fix
- * is settled. Must move before the 2026-12-11 gpt-5-mini shutdown. */
-export const SCENARIO_REVIEW_MODEL = pick("SCENARIO_REVIEW_MODEL", "gpt-5-mini");
+/** The scenarios-gate room review (reviewScenarios) alone. gpt-6-luna since
+ * 2026-10-22 (Tyler; mixed-round internal_models/helpers/mixed_round): with
+ * the two-different-buyers mixed line (scenario_review9), false alarms on
+ * confirmed rooms 33% -> 15% at mini-level stability, planted two-buyer
+ * rooms caught 10/10. */
+export const SCENARIO_REVIEW_MODEL = pick("SCENARIO_REVIEW_MODEL", "gpt-6-luna");
 /** The paraphrase writer (p26, 2026-10-08 writer bakeoff): gpt-6-luna on
  * the contract prompt - 1.7% meaning changes vs gpt-5-mini's 3.8% on the
  * same seeds, zero brand-rule violations, a third of the cost. */

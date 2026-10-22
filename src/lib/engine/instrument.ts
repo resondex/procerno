@@ -1616,7 +1616,9 @@ export async function reviewScenarios(input: {
     `${s.label.trim()}|${s.description.trim()}` +
     (s.original ? `<${s.original.label.trim()}|${s.original.description.trim()}` : "");
   // "scenario_review7": originals in the contract, minimal-edit rules.
-  const key = cacheKey("scenario_review8", [
+  // "scenario_review9": the two-different-buyers mixed line (prompt text
+  // changed, so v8 verdicts must not serve under the new contract).
+  const key = cacheKey("scenario_review9", [
     input.category, input.audience,
     input.candidates.map(fp).join("~"), input.others.map((s) => fp(s)).sort().join("~"),
   ]);
@@ -1654,6 +1656,14 @@ export async function reviewScenarios(input: {
           "(two axes of circumstance in one scenario, e.g. company size " +
           "AND budget constraint)? If yes, the fix keeps the dominant " +
           "factor and drops the rest.\n" +
+          // Mixed line drawn at two different buyers (2026-10-22 round,
+          // Tyler's ship): gpt-6-luna read one buyer's two-detail
+          // circumstance as two axes - false alarms on confirmed rooms
+          // 33% -> 15%, planted two-buyer rooms still caught 10/10.
+          "A scenario is mixed only when its parts describe two " +
+          "DIFFERENT buyers or two decisions that would each stand as " +
+          "their own scenario; one buyer whose single circumstance " +
+          "carries several details is ONE axis, not mixed.\n" +
           "On substance beyond these three, accept anything reasonable - " +
           "a safety net for confused or empty entries, not a taste gate. " +
           "Some candidates note the version the user started from " +
