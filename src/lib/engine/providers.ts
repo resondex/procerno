@@ -85,16 +85,23 @@ const CODER_ONLY: Record<string, Pick<Engine, "id" | "keyEnv" | "baseURL">> = {
 };
 
 export const ENGINES: Engine[] = [
-  // ChatGPT surfaces, re-pointed 2026-09-26 to what consumers get: Free runs
-  // GPT-5.6 Luna, Plus runs GPT-5.6 Sol (third-party plan comparisons, Sept
-  // 2026). When ChatGPT moves again, add the new pair and set `successor`
-  // on these - projects and schedules follow without a config change.
-  { id: "gpt-5.6-luna", label: "ChatGPT (free tier)", vendor: "OpenAI", keyEnv: "OPENAI_API_KEY", mode: "instinct" },
-  { id: "gpt-5.6-luna-search", label: "ChatGPT (free tier) + search", vendor: "OpenAI", keyEnv: "OPENAI_API_KEY", mode: "search", apiModel: "gpt-5.6-luna" },
-  { id: "gpt-5.6-sol", label: "ChatGPT (paid tier)", vendor: "OpenAI", keyEnv: "OPENAI_API_KEY", mode: "instinct" },
-  { id: "gpt-5.6-sol-search", label: "ChatGPT (paid tier) + search", vendor: "OpenAI", keyEnv: "OPENAI_API_KEY", mode: "search", apiModel: "gpt-5.6-sol" },
-  // Retired ChatGPT stand-ins (Aug 2025 models) - every run collected
-  // before 2026-09-26 answered on these.
+  // ChatGPT surfaces, re-pointed 2026-10-22 to what consumers get: Free and
+  // Go run GPT-6 Luna, Plus/Pro/Business/Enterprise run GPT-6 Sol (OpenAI's
+  // ChatGPT release notes, 2026-10-07). When ChatGPT moves again, add the
+  // new pair and set `successor` on these - projects and schedules follow
+  // without a config change.
+  { id: "gpt-6-luna", label: "ChatGPT (free tier)", vendor: "OpenAI", keyEnv: "OPENAI_API_KEY", mode: "instinct" },
+  { id: "gpt-6-luna-search", label: "ChatGPT (free tier) + search", vendor: "OpenAI", keyEnv: "OPENAI_API_KEY", mode: "search", apiModel: "gpt-6-luna" },
+  { id: "gpt-6-sol", label: "ChatGPT (paid tier)", vendor: "OpenAI", keyEnv: "OPENAI_API_KEY", mode: "instinct" },
+  { id: "gpt-6-sol-search", label: "ChatGPT (paid tier) + search", vendor: "OpenAI", keyEnv: "OPENAI_API_KEY", mode: "search", apiModel: "gpt-6-sol" },
+  // Retired ChatGPT stand-ins: runs collected 2026-09-26 to 2026-10-22
+  // answered on the GPT-5.6 pair (API shutdown not announced) ...
+  { id: "gpt-5.6-luna", label: "ChatGPT (free tier, gpt-5.6-luna - retired)", vendor: "OpenAI", keyEnv: "OPENAI_API_KEY", mode: "instinct", successor: "gpt-6-luna" },
+  { id: "gpt-5.6-luna-search", label: "ChatGPT (free tier, gpt-5.6-luna - retired) + search", vendor: "OpenAI", keyEnv: "OPENAI_API_KEY", mode: "search", apiModel: "gpt-5.6-luna", successor: "gpt-6-luna-search" },
+  { id: "gpt-5.6-sol", label: "ChatGPT (paid tier, gpt-5.6-sol - retired)", vendor: "OpenAI", keyEnv: "OPENAI_API_KEY", mode: "instinct", successor: "gpt-6-sol" },
+  { id: "gpt-5.6-sol-search", label: "ChatGPT (paid tier, gpt-5.6-sol - retired) + search", vendor: "OpenAI", keyEnv: "OPENAI_API_KEY", mode: "search", apiModel: "gpt-5.6-sol", successor: "gpt-6-sol-search" },
+  // ... and every run before 2026-09-26 answered on the Aug 2025 models
+  // (API shutdown 2026-12-11).
   { id: "gpt-5-mini", label: "ChatGPT (free tier, gpt-5-mini - retired)", vendor: "OpenAI", keyEnv: "OPENAI_API_KEY", mode: "instinct", successor: "gpt-5.6-luna" },
   { id: "gpt-5-mini-search", label: "ChatGPT (free tier, gpt-5-mini - retired) + search", vendor: "OpenAI", keyEnv: "OPENAI_API_KEY", mode: "search", apiModel: "gpt-5-mini", successor: "gpt-5.6-luna-search" },
   { id: "gpt-5", label: "ChatGPT (paid tier, gpt-5 - retired)", vendor: "OpenAI", keyEnv: "OPENAI_API_KEY", mode: "instinct", successor: "gpt-5.6-sol" },

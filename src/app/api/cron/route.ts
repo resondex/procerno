@@ -16,7 +16,7 @@ const INTERVAL_DAYS: Record<string, number> = {
   monthly: 27,
 };
 
-const CRON_MODEL = "gpt-5.6-luna";
+const CRON_MODEL = "gpt-6-luna";
 const CRON_REPEATS = 5;
 
 /** Both store drivers emit UTC; sqlite omits the T and Z, postgres has them. */

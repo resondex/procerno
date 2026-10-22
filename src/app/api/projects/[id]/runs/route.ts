@@ -13,7 +13,7 @@ import { planRunSurfaces } from "@/lib/engine/surfaces";
 export const maxDuration = 300;
 
 const runSchema = z.object({
-  model: z.string().trim().min(1).default("gpt-5.6-luna"),
+  model: z.string().trim().min(1).default("gpt-6-luna"),
   /** Engines to sample. One answer per prompt × repeat × engine. The cap
    * tracks the registry - a hardcoded 8 rejected full panels once the
    * registry grew past it. */

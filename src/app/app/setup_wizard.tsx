@@ -1625,7 +1625,7 @@ export function SetupWizard({ mode, brand, draft, engineOptions, onClose, onCrea
       headers: { "Content-Type": "application/json" },
       signal: AbortSignal.timeout(45_000),
       body: JSON.stringify({
-        model: panel[0] ?? "gpt-5.6-luna",
+        model: panel[0] ?? "gpt-6-luna",
         ...(panel.length > 0 ? { models: panel } : {}),
         // The Landscape samples by paraphrase, not by repeating a wording.
         repeats: usingGrid ? 1 : FIRST_RUN_REPEATS,

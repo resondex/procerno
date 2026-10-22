@@ -48,10 +48,10 @@ export function defaultEnginesFor(
   if (choice !== "search") {
     // The free-tier Gemini is pinned (gemini-flash-latest was retired
     // 2026-09-28 - it now serves the paid tier's Flash).
-    wanted.push("gpt-5.6-luna", "claude-sonnet-5", "gemini-3.6-flash");
+    wanted.push("gpt-6-luna", "claude-sonnet-5", "gemini-3.6-flash");
   }
   if (choice !== "instinct") {
-    wanted.push("gpt-5.6-luna-search", "claude-sonnet-5-search", "sonar");
+    wanted.push("gpt-6-luna-search", "claude-sonnet-5-search", "sonar");
   }
   return wanted.filter((id) =>
     options.some((e) => e.id === id && e.available && !e.locked)
