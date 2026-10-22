@@ -2,7 +2,7 @@ import { createHash } from "crypto";
 import { tagCosts, withCostContext } from "../cost_log";
 import { anthropicClient, openaiClient } from "./providers";
 import { ModeratorsShape } from "./instrument_shapes";
-import { INSTRUMENT_HELPER_MODEL, PHRASINGS_WRITER_MODEL } from "./models";
+import { INSTRUMENT_HELPER_MODEL, SCENARIO_REVIEW_MODEL, PHRASINGS_WRITER_MODEL } from "./models";
 import { helperClient } from "./providers";
 import { pluralSlot, relationShift,
   AMBIGUOUS_FORMS, angleRivals, categoryNounOf, categorySpanIn, checkBattery, checkCandidateSignature, checkPromptAgainstSpec, classAnglesOf,
@@ -1623,7 +1623,7 @@ export async function reviewScenarios(input: {
   const hit = await store.cacheGet(key, CACHE_TTL_MS);
   if (hit) return JSON.parse(hit) as ScenarioVerdict[];
   const res = await openaiClient().chat.completions.create({
-    model: INSTRUMENT_HELPER_MODEL,
+    model: SCENARIO_REVIEW_MODEL,
     // A safety net, not a deep thinker - low effort roughly halves the
     // wait at the gate confirm.
     reasoning_effort: "low",
