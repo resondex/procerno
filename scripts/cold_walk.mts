@@ -123,19 +123,31 @@ for (const brand of BRANDS) {
 
   // Mirrors worries/route.ts (2026-10-04): stances follow the BASE journey -
   // a deviating room's journey never adds a stance.
-  const offered = inst.participationMask(compose.base, compose.scenarios.map((sc: { journey: unknown }) => ({ ...sc, journey: null })))
-    .filter((st: { recommended: boolean; key: string }) => st.recommended && ["objections", "churn_triggers", "renewal"].includes(st.key))
-    .map((st: { key: string }) => st.key);
-  const pool = await inst.generateWorries({ brand, category: profile.category, audience: profile.audience, scenarios: compose.scenarios, offered });
+  // FIXED_PICKS=1 with FIXED_CTX_DIR (2026-10-22, writer-arm isolation):
+  // reuse that walk's worry picks, pool and Value lines, so arms that vary
+  // only CELLS_MODEL write seeds against byte-identical inputs.
+  const fixedPicks = Boolean(fixedCtx && process.env.FIXED_PICKS === "1" && Array.isArray(fixedCtx.picks));
+  const offered = fixedPicks
+    ? (fixedCtx.offered ?? [])
+    : inst.participationMask(compose.base, compose.scenarios.map((sc: { journey: unknown }) => ({ ...sc, journey: null })))
+        .filter((st: { recommended: boolean; key: string }) => st.recommended && ["objections", "churn_triggers", "renewal"].includes(st.key))
+        .map((st: { key: string }) => st.key);
+  const pool = fixedPicks
+    ? fixedCtx.worryPool ?? []
+    : await inst.generateWorries({ brand, category: profile.category, audience: profile.audience, scenarios: compose.scenarios, offered });
   if (!pool) { console.error(`${brand}: worries returned null`); continue; }
   const planned = pool.flatMap((w: { worry: string; recommend?: string[] }) => (w.recommend ?? []).map((st) => ({ concern: w.worry, stage: st })));
-  const picks = planned.length > 0 ? planned : pool.map((w: { worry: string; recommended: string }) => ({ concern: w.worry, stage: w.recommended }));
-  console.log(`[4 worries] pool ${pool.length}, picks ${picks.length}`);
+  const picks = fixedPicks
+    ? fixedCtx.picks
+    : planned.length > 0 ? planned : pool.map((w: { worry: string; recommended: string }) => ({ concern: w.worry, stage: w.recommended }));
+  console.log(`[4 worries] pool ${pool.length}, picks ${picks.length}${fixedPicks ? " (fixed)" : ""}`);
 
   // Value lines + per-room fit (harness extension, 2026-10-04): the same
   // call generateGrid makes when none are given, run here so the verdicts
   // land in the context for the audit.
-  const valueLines = await inst.planValueLines({ brand, category: profile.category, audience: profile.audience, rooms: compose.scenarios.map((s: { label: string; description: string }) => ({ label: s.label, description: s.description })) }).catch(() => null);
+  const valueLines = fixedPicks && fixedCtx.valueLines !== undefined
+    ? fixedCtx.valueLines
+    : await inst.planValueLines({ brand, category: profile.category, audience: profile.audience, rooms: compose.scenarios.map((s: { label: string; description: string }) => ({ label: s.label, description: s.description })) }).catch(() => null);
   console.log(`[4b value] ${valueLines ? Object.entries(valueLines).map(([k, v]) => `${k}: ${v ? `${(v as { line: string }).line}${(v as { fit?: string }).fit ? ` [${(v as { fit?: string }).fit}]` : ""}` : "none"}`).join("; ") : "none"}`);
 
   const kept = new Set<string>(compose.stages.filter((s: { recommended: boolean }) => s.recommended).map((s: { key: string }) => s.key));
