@@ -70,5 +70,7 @@ export const PHRASINGS_WRITER_MODEL = pick("PHRASINGS_WRITER_MODEL", "gpt-6-luna
 export const VERBATIM_MODEL = process.env.VERBATIM_MODEL ?? "gpt-6-luna";
 /** Typed competitor roster: who each competitor sells to, intersected with
  * the tracker's audience (roster.ts, 2026-09-30). One cached call per
- * roster at setup; a world-knowledge job, so the full model. */
-export const ROSTER_MODEL = process.env.ROSTER_MODEL ?? "gpt-5";
+ * roster at setup; a world-knowledge job, so a full model. gpt-6-sol since
+ * 2026-10-23 (Tyler; setup-engine round: 100% role stability, 97% role
+ * agreement with gpt-5). The roster key already carries ROSTER_MODEL. */
+export const ROSTER_MODEL = process.env.ROSTER_MODEL ?? "gpt-6-sol";

@@ -37,10 +37,11 @@ import type { CacheMeta } from "../types";
  * new services, no new vendors.
  */
 
-/** The market read runs on the full model: it is one cached call per
- * category carrying the most leverage in the pipeline - mini's economy
- * is for the high-volume mechanical calls (cells, phrasings, variants). */
-const READ_MODEL = process.env.READ_MODEL ?? "gpt-5";
+/** The market read: one cached call per category carrying the most
+ * leverage in the pipeline. gpt-6-sol since 2026-10-23 (Tyler; setup-engine
+ * round, internal_models/setup_engine/RESULTS.md): draw-to-draw stability
+ * 60% vs gpt-5's 23% at the same market shapes, clean room checks. */
+const READ_MODEL = process.env.READ_MODEL ?? "gpt-6-sol";
 /** The base-journey CLASSIFICATION runs on Claude Opus, split from the
  * scenario write: a 108-call cross-model matrix (2026-09-16, the four
  * contested walks x v8/v10/v11 x haiku/sonnet/opus) showed Claude the
@@ -49,13 +50,17 @@ const READ_MODEL = process.env.READ_MODEL ?? "gpt-5";
  * labels run too vivid for client-facing copy - so Claude classifies,
  * gpt-5 keeps writing. One cached call per category, cost-negligible. */
 const JOURNEY_MODEL = process.env.JOURNEY_MODEL ?? "claude-opus-5";
-/** The cell writer also runs on the full model: the 52-odd seeds are the
- * DESIGNED questions every paraphrase imitates - one-time, cached, cheap.
- * Paraphrase volume stays on mini. */
-const CELLS_MODEL = process.env.CELLS_MODEL ?? "gpt-5";
+/** The cell writer: the 52-odd seeds are the DESIGNED questions every
+ * paraphrase imitates - one-time, cached, cheap. gpt-6-sol since 2026-10-23
+ * (Tyler; five blind audits on byte-identical inputs: 4 measurement defects
+ * vs gpt-5's 11 incl. one S1). A writer-model change is writer semantics,
+ * so it shipped with the s55 STYLE bump. */
+const CELLS_MODEL = process.env.CELLS_MODEL ?? "gpt-6-sol";
 /** Enumerates a brand's doubt-space at grid-plan time (2026-09-30):
- * one small call per fresh battery, same knowledge class as READ_MODEL. */
-const CONCERNS_MODEL = process.env.CONCERNS_MODEL ?? "gpt-5";
+ * one small call per fresh battery, same knowledge class as READ_MODEL.
+ * gpt-6-sol since 2026-10-23 (Tyler; best stance calls in the round, 85%).
+ * Its cache keys already carry CONCERNS_MODEL, so they self-version. */
+const CONCERNS_MODEL = process.env.CONCERNS_MODEL ?? "gpt-6-sol";
 const CACHE_TTL_MS = 183 * 24 * 3600 * 1000;
 /** Versions the WRITING STYLE of cells and phrasings independently of the
  * instrument rules - a style change regenerates prompt text without
@@ -162,7 +167,7 @@ const CACHE_TTL_MS = 183 * 24 * 3600 * 1000;
 // one-tier-down counterpart per room (planValueLines, confirmed at the
 // gate; default = the brand's most premium line that fits the room; no
 // Value cell where none fits) and carries no usage detail.
-const STYLE_VERSION = "s54"; // s54 (2026-10-09, Tyler): premium vs basic invites a pick - "and which would you get" - in the hint, the writer rule and the design intents, per the 2026-10-01 ruling (the stage is the category-tier open-choice cell: tier advocacy plus who gets named); the seed side had said the opposite ("never ask for picks") since s32. // s53 (2026-10-07, Tyler): in a room defined by buying terms (where, when, on what terms) the use-case want and the problem-recognition pain come from what those terms make the buyer care about over owning the product; a subject another room's circumstance owns is never used outside that room (the Pixel camera collapse: three rooms borrowed the photos room's subject). // s52 (2026-10-06): criteria's second ask is conditioned on the first; feature screening in a scenario leaves the buying channel or moment out. // s51 (journeys30): the writer reads the room's circumstance line, never the natural description; problem recognition sets the pain in the category's own territory; criteria asks what to look at and, given that, what to consider. // s50 (batch 2): the scenario label is a title for us, never words for the prompt; use-case heals carry no buying channel. // s46 (2026-10-04 seed review batch): problem recognition carries no purchase moment; offensive alternatives state a plain move within the category; head-to-heads add no situation; advocacy convinces a peer or critic, business case an approver. // s45 (2026-10-04 seed review): doubt hints - the asker's own one-doubt claim, never a fact to confirm, hearsay, a sizing ask or the Value question; stance decides the asker; worry cells carry no reach limit.
+const STYLE_VERSION = "s55"; // s55 (2026-10-23, Tyler): the cell writer moves gpt-5 -> gpt-6-sol (setup-engine round: both sols beat the gpt-5 writer on blind measurement fidelity, 4 defects vs 11; gpt-6-sol at half 5.6-sol's price). Writer-model change = writer semantics, so s54 cells must not serve under keys today's engine produces. // s54 (2026-10-09, Tyler): premium vs basic invites a pick - "and which would you get" - in the hint, the writer rule and the design intents, per the 2026-10-01 ruling (the stage is the category-tier open-choice cell: tier advocacy plus who gets named); the seed side had said the opposite ("never ask for picks") since s32. // s53 (2026-10-07, Tyler): in a room defined by buying terms (where, when, on what terms) the use-case want and the problem-recognition pain come from what those terms make the buyer care about over owning the product; a subject another room's circumstance owns is never used outside that room (the Pixel camera collapse: three rooms borrowed the photos room's subject). // s52 (2026-10-06): criteria's second ask is conditioned on the first; feature screening in a scenario leaves the buying channel or moment out. // s51 (journeys30): the writer reads the room's circumstance line, never the natural description; problem recognition sets the pain in the category's own territory; criteria asks what to look at and, given that, what to consider. // s50 (batch 2): the scenario label is a title for us, never words for the prompt; use-case heals carry no buying channel. // s46 (2026-10-04 seed review batch): problem recognition carries no purchase moment; offensive alternatives state a plain move within the category; head-to-heads add no situation; advocacy convinces a peer or critic, business case an approver. // s45 (2026-10-04 seed review): doubt hints - the asker's own one-doubt claim, never a fact to confirm, hearsay, a sizing ask or the Value question; stance decides the asker; worry cells carry no reach limit.
 
 /** Versions the DETERMINISTIC seed-check set (everything seedRule runs:
  * checkPromptAgainstSpec + blind_missing_category + scenario_label_leak).
@@ -968,8 +973,11 @@ export async function readScenarios(input: {
   // returns a `circumstance` line - the room restated with everything the
   // buyer wants left out - and ONLY that line reaches the seed writer and
   // the design checks. The gate shows the natural description.
+  // READ_MODEL in the key since 2026-10-23 (gpt-5 -> gpt-6-sol): a read
+  // cached under one model never serves another's; drafts keep their
+  // STORED rooms either way - the cache only feeds fresh composes.
   const key = cacheKey("scenarios_journeys30", [
-    input.category, input.audience, input.forBrand ?? "",
+    READ_MODEL, input.category, input.audience, input.forBrand ?? "",
   ]);
   const read = await coalesced<{
     base: Moderators;
