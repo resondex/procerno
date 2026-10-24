@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { PromptTheme, SetupDraft } from "@/lib/types";
 import { EnginePicker, currentEngineSet, defaultEnginesFor, type EngineOption } from "@/app/components/engine_picker";
 import {
@@ -15,12 +15,13 @@ import {
   ScenariosGate,
   CELLS_BUSY,
   gridCellCount,
+  gridCellPlan,
   recommendedWorryPairs,
   buildSetupDecision,
   gridPromptCount,
   namesAny,
   normalizeGrid,
-  rebindSituation,
+  rebindRooms,
   scenarioRows,
   swapPhrasings,
   useGridSetup,
@@ -30,7 +31,7 @@ import {
   type ScenarioReviewItem,
   type ScenarioRow,
 } from "./grid_setup";
-import { ANGLE_SLOTS, angleRivals, deriveCheckSpec, rosterRoleOf, sameSeatOf, type RosterClasses, type RosterRole, type RosterRoles } from "@/lib/engine/battery_checks";
+import { ANGLE_SLOTS, angleRivals, classAnglesOf, deriveCheckSpec, rosterRoleOf, sameSeatOf, type RosterClasses, type RosterRole, type RosterRoles } from "@/lib/engine/battery_checks";
 import { Spinner, InlineSpinner } from "../components/spinner";
 
 /**
@@ -153,40 +154,52 @@ function cellReviewRequest(
       }
     });
   });
-  // The reviewer takes at most 24 - more edits than that between
-  // confirms would be extraordinary; the rest pass this round and get
-  // caught on the next confirm.
-  const authored = all.slice(0, 24);
-  const body = {
-    brand,
-    category,
-    competitors,
-    rosterRoles,
-    audience: audience || undefined,
-    candidates: authored.map(({ c, phr, text, original }) => {
-      const st = stageBy.get(c.stage);
-      return {
-        // s7: a spec-era cell is checked against its typed design - the
-        // server re-derives it from the seed (the edited text itself when
-        // this IS the seed) and returns the seed's new spec.
-        ...(c.spec ? { spec: c.spec, seedEdit: phr == null, seed: c.text } : {}),
-        text,
-        original,
-        stage: st?.label ?? c.stage,
-        stageKey: c.stage,
-        hint: st?.hint ?? null,
-        tag: st?.tag ?? null,
-        situation: c.situation,
-        situationDescription: c.situation ? scDesc.get(c.situation) ?? null : null,
-        angle: c.angle,
-        mode: c.mode ?? null,
-        // Class-angle cells carry their class into the review (spec + rule).
-        ...(c.classPhrase ? { classPhrase: c.classPhrase, classBrand: c.classBrand ?? undefined } : {}),
-      };
-    }),
+  // The reviewer takes at most 24 per request: larger edit sets go as
+  // sequential chunks of 24 (they used to be cut at 24, the rest shipping
+  // unreviewed).
+  const authored = all;
+  const candidate = ({ c, phr, text, original }: (typeof all)[number]) => {
+    const st = stageBy.get(c.stage);
+    return {
+      // s7: a spec-era cell is checked against its typed design - the
+      // server re-derives it from the seed (the edited text itself when
+      // this IS the seed) and returns the seed's new spec.
+      ...(c.spec ? { spec: c.spec, seedEdit: phr == null, seed: c.text } : {}),
+      text,
+      original,
+      stage: st?.label ?? c.stage,
+      stageKey: c.stage,
+      hint: st?.hint ?? null,
+      tag: st?.tag ?? null,
+      situation: c.situation,
+      situationDescription: c.situation ? scDesc.get(c.situation) ?? null : null,
+      angle: c.angle,
+      mode: c.mode ?? null,
+      // The cell's design, so an edit is checked against what its cell
+      // measures (a head-to-head's rival, a worry's concern, a Value
+      // cell's line), not the stage at large.
+      concern: c.concern ?? null,
+      valueLine: c.valueLine ?? null,
+      // Class-angle cells carry their class into the review (spec + rule).
+      ...(c.classPhrase ? { classPhrase: c.classPhrase, classBrand: c.classBrand ?? undefined } : {}),
+    };
   };
-  return { authored, body };
+  const bodies: { brand: string; category: string; competitors: string[]; rosterRoles?: RosterRoles; audience?: string; candidates: ReturnType<typeof candidate>[] }[] = [];
+  for (let k = 0; k < authored.length; k += CELL_REVIEW_BATCH) {
+    bodies.push({
+      brand,
+      category,
+      competitors,
+      rosterRoles,
+      audience: audience || undefined,
+      candidates: authored.slice(k, k + CELL_REVIEW_BATCH).map(candidate),
+    });
+  }
+  return { authored, bodies };
 }
+
+/** The cell_review route's per-request cap. */
+const CELL_REVIEW_BATCH = 24;
 
 /** The market read narrated: elapsed-driven captions matching the order
  * the model actually works in, so a two-minute read on a hard market
@@ -308,6 +321,70 @@ interface WizardDraft {
   clientParent?: string;
 }
 
+/** The roster classifier's reply (/api/setup/roster). */
+interface RosterVerdict {
+  competitors: {
+    name: string; role: RosterRole; note: string; consumerSalient?: boolean; classPhrase?: string;
+    parent?: string; h2hRank?: number; h2hReason?: string;
+  }[];
+  clientSellsTo: string[]; clientParent?: string; failedOpen?: boolean;
+}
+
+/** Roles after a classify (pure). Decision 3: the classifier's same_seat
+ * verdicts become head-to-head pre-picks - the top ANGLE_SLOTS by its rank
+ * are same_seat (picked), the rest bench. A name filled later (hand-added)
+ * is picked only while a slot is free. A role the user set is never
+ * overwritten. */
+function rolesAfterClassify(prev: RosterRoles | undefined, roster: RosterVerdict, fresh: boolean): RosterRoles {
+  const next: RosterRoles = fresh ? {} : { ...(prev ?? {}) };
+  const incoming = roster.competitors
+    .filter((v) => fresh || !(v.name in next))
+    .sort((a, b) => (a.h2hRank || 1e9) - (b.h2hRank || 1e9));
+  // Decision 3c follow-through (2026-10-04 seed review K): slots go to
+  // different owners first - a rival sharing a parent with a higher
+  // pick, or with the client, is demoted below the first other-parent
+  // rival, then fills any slot still free. Same-parent picks report as
+  // portfolio routing, so they are a deliberate choice, never a default.
+  const norm = (t: string | undefined) => (t ?? "").trim().toLowerCase();
+  const pickedParents = new Set<string>();
+  if (roster.clientParent) pickedParents.add(norm(roster.clientParent));
+  for (const [name, role] of Object.entries(next)) {
+    if (role !== "same_seat") continue;
+    const p = norm(roster.competitors.find((v) => v.name === name)?.parent);
+    if (p) pickedParents.add(p);
+  }
+  const direct = incoming.filter((v) => v.role === "same_seat");
+  for (const v of incoming) if (v.role !== "same_seat") next[v.name] = v.role;
+  const deferred: typeof direct = [];
+  for (const v of direct) {
+    const picked = Object.values(next).filter((r) => r === "same_seat").length;
+    const p = norm(v.parent);
+    if (picked < ANGLE_SLOTS && !(p && pickedParents.has(p))) {
+      next[v.name] = "same_seat";
+      if (p) pickedParents.add(p);
+    } else {
+      deferred.push(v);
+    }
+  }
+  for (const v of deferred) {
+    const picked = Object.values(next).filter((r) => r === "same_seat").length;
+    next[v.name] = picked < ANGLE_SLOTS ? "same_seat" : "bench";
+  }
+  return next;
+}
+
+/** Class phrases after a classify (pure): the upstream brands buyers still
+ * choose BY. Same fill semantics as notes; a name the classifier calls
+ * non-salient carries no entry (no class cell). */
+function classesAfterClassify(prev: RosterClasses | undefined, roster: RosterVerdict, fresh: boolean): RosterClasses | undefined {
+  const next: RosterClasses = fresh ? {} : { ...(prev ?? {}) };
+  for (const v of roster.competitors) {
+    if (!fresh && v.name in next) continue;
+    if (v.consumerSalient && v.classPhrase?.trim()) next[v.name] = v.classPhrase.trim();
+  }
+  return Object.keys(next).length > 0 ? next : undefined;
+}
+
 interface Props {
   mode: SetupMode;
   brand: string;
@@ -359,7 +436,10 @@ export function SetupWizard({ mode, brand, draft, engineOptions, onClose, onCrea
     !saved.grid.cells.some((c) => c.phrasings.some((ph) => ph.text.trim()));
   const resumeRead = savedStep === "market" && !!saved?.readInFlight && !saved?.grid;
   // Resume a cell write the previous session started (see WizardDraft.cellsInFlight).
-  const resumeWrite = savedStep === "stages" && !!saved?.cellsInFlight && !!saved?.grid && saved.grid.cells.length === 0;
+  // The marker alone decides (2026-10-24): it rides only saves made while
+  // the write runs, and recomposes now carry cells, so "no cells yet" no
+  // longer tells an unfinished write apart.
+  const resumeWrite = savedStep === "stages" && !!saved?.cellsInFlight && !!saved?.grid;
   const resumedRef = useRef(false);
   const [category, setCategory] = useState(draft?.category ?? "");
   const [competitors, setCompetitors] = useState<string[]>(draft?.competitors ?? []);
@@ -376,7 +456,19 @@ export function SetupWizard({ mode, brand, draft, engineOptions, onClose, onCrea
   const [audience, setAudience] = useState(draft?.audience ?? "");
   const [prompts, setPrompts] = useState<DraftPrompt[] | null>(draft?.prompts ?? null);
   const [editing, setEditing] = useState(false);
-  const [grid, setGrid] = useState<GridState | null>(normalizeGrid(saved?.grid ?? null));
+  const [grid, setGrid] = useState<GridState | null>(() => normalizeGrid(saved?.grid ?? null));
+  /** The grid as of the last update, rendered or not (2026-10-24): every
+   * grid write goes through updateGrid, which applies it here first, so a
+   * result landing after an await merges into the grid as it is NOW -
+   * edits made during the wait survive - and a step change persists what
+   * the user actually sees. */
+  const gridRef = useRef<GridState | null>(grid);
+  function updateGrid(u: GridState | null | ((prev: GridState | null) => GridState | null)): GridState | null {
+    const next = typeof u === "function" ? u(gridRef.current) : u;
+    gridRef.current = next;
+    setGrid(next);
+    return next;
+  }
   /** Flagged user-authored scenarios awaiting a keep/suggestion choice. */
   const [review, setReview] = useState<ScenarioReviewItem[] | null>(null);
   /** Flagged user-edited prompts awaiting a keep/suggestion choice. */
@@ -448,15 +540,15 @@ export function SetupWizard({ mode, brand, draft, engineOptions, onClose, onCrea
     setupId: draftId,
     brand, category, competitors: allCompetitors(), audience, rosterRoles, rosterClasses,
     maxScenarios: scenarioCap,
-    state: grid, setState: setGrid, setBusy, setError,
+    state: grid, setState: updateGrid, getState: () => gridRef.current, setBusy, setError,
   });
 
   /** Landing on the worries gate: make sure the pool exists (usually a
    * cache hit - it warms during the scenarios review), then pre-pick the
    * top worries at their recommended stance the FIRST time only - the
    * user's picks are never overwritten. */
-  async function landOnWorries(g: GridState | null = grid) {
-    const st = await gridApi.fetchWorries(g);
+  async function landOnWorries(from?: GridState | null) {
+    const st = await gridApi.fetchWorries(from === undefined ? gridRef.current : from);
     if (!st) return;
     // Warm what the coverage map needs while the worries are reviewed
     // (Tyler 2026-10-06): the Value lines and catalog, and the per-room
@@ -464,25 +556,30 @@ export function SetupWizard({ mode, brand, draft, engineOptions, onClose, onCrea
     // both, so the map never opens before they have landed.
     void gridApi.loadValueLines(st);
     void gridApi.loadStageRooms(st);
-    if (st.worries === undefined && (st.worryPool?.length ?? 0) > 0) {
-      // Pre-pick = the pool's recommended measurement plan; the user's
-      // deviation from it is recorded at create (worry_decision).
-      const picks = recommendedWorryPairs(st.worryPool ?? []).slice(0, worryCap ?? Infinity);
-      setGrid({ ...st, worries: picks });
-    }
+    // Pre-pick = the pool's recommended measurement plan, the FIRST time
+    // only, on the grid as it is now; the user's deviation from it is
+    // recorded at create (worry_decision).
+    updateGrid((cur) =>
+      cur && cur.worries === undefined && (cur.worryPool?.length ?? 0) > 0
+        ? { ...cur, worries: recommendedWorryPairs(cur.worryPool ?? []).slice(0, worryCap ?? Infinity) }
+        : cur
+    );
   }
 
   /** The coverage map opens only once its recommendations have landed:
    * the Value lines per room and the per-room stage defaults. Both are
    * warmed on the worries gate, so this is normally a cache hit. */
-  async function enterCoverage(g: GridState | null = grid) {
+  async function enterCoverage(from?: GridState | null) {
+    const g = from === undefined ? gridRef.current : from;
     if (!g) return;
     setBusy("Preparing your coverage map…");
     setError(null);
     try {
-      const g1 = (await gridApi.loadValueLines(g)) ?? g;
-      const g2 = (await gridApi.loadStageRooms(g1)) ?? g1;
-      goTo("stages", g2);
+      // Each loader merges into the live grid; a failed one lands nothing
+      // (no Value line is ever set to "none" by a failure).
+      await gridApi.loadValueLines(g);
+      await gridApi.loadStageRooms();
+      goTo("stages", gridRef.current);
     } finally {
       setBusy(null);
     }
@@ -537,94 +634,53 @@ export function SetupWizard({ mode, brand, draft, engineOptions, onClose, onCrea
     // shortly after the typing stops and only fills names it has no role
     // for yet - a role the user toggled is never overwritten.
     if (classifyTimer.current) clearTimeout(classifyTimer.current);
-    classifyTimer.current = setTimeout(() => void classifyRoster(category, audience, comps, false), 1500);
+    classifyTimer.current = setTimeout(() => {
+      classifyTimer.current = null;
+      void classifyRoster(category, audience, comps, false);
+    }, 1500);
   }
 
-  /** The rivals' role key for staleness: a role toggle changes which rivals
-   * hold cells exactly like an add/remove does, and an upstream entry's
-   * class phrase decides its class-angle cell. Untyped = the plain join;
-   * no classes = the role-only key as before. */
+  /** The roster as the written cells depend on it (2026-10-24): the
+   * head-to-head slot rivals (the at-most-ANGLE_SLOTS picks that ride
+   * every cell key and the writer's rivals line) and the class angles.
+   * A bench or adjacent toggle that moves neither leaves the cells as they
+   * are - it used to read as stale and wipe the battery. */
   function rivalsKey(comps: string[], roles: RosterRoles | undefined, classes?: RosterClasses): string {
-    return comps
-      .map((c) => {
-        const r = rosterRoleOf(c, roles);
-        // bench/adjacent (decision 3) change which rivals hold the
-        // head-to-head slots; same_seat keeps the bare name so drafts
-        // saved before decision 3 never read as stale.
-        if (r === "bench" || r === "adjacent") return `${c}#${r}`;
-        if (r !== "upstream") return c;
-        const cls = classes?.[c]?.trim();
-        return cls ? `${c}#upstream#class:${cls}` : `${c}#upstream`;
-      })
-      .join("|");
+    return JSON.stringify([
+      angleRivals(comps, roles),
+      classAnglesOf(comps, roles, classes).map((c) => [c.classBrand, c.classPhrase]),
+    ]);
   }
 
   const classifyTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  /** Type each competitor by who it sells to (/api/setup/roster). fresh =
-   * replace every role (a new estimate); otherwise only names without a
-   * role yet are filled. Silent and fail-open: no roles = untyped. */
-  async function classifyRoster(cat: string, aud: string, comps: string[], fresh: boolean) {
-    if (!cat.trim() || comps.length === 0) return;
+  /** The roster classifier's verdicts (/api/setup/roster); null on any
+   * failure (fail-open: no roles = untyped). */
+  async function fetchRoster(cat: string, aud: string, comps: string[]): Promise<RosterVerdict | null> {
+    if (!cat.trim() || comps.length === 0) return null;
     const res = await fetch("/api/setup/roster", {
       method: "POST",
       headers: { "Content-Type": "application/json", ...(draftId ? { "x-setup-id": draftId } : {}) },
       body: JSON.stringify({ brand, category: cat, audience: aud || undefined, competitors: comps }),
       signal: AbortSignal.timeout(120_000),
     }).catch(() => null);
-    if (!res?.ok) return;
+    if (!res?.ok) return null;
     const data = await res.json().catch(() => null);
-    const roster = data?.roster as
-      | {
-          competitors: {
-            name: string; role: RosterRole; note: string; consumerSalient?: boolean; classPhrase?: string;
-            parent?: string; h2hRank?: number; h2hReason?: string;
-          }[];
-          clientSellsTo: string[]; clientParent?: string; failedOpen?: boolean;
-        }
-      | undefined;
-    if (!roster || roster.failedOpen) return;
-    // Decision 3: the classifier's same_seat verdicts become head-to-head
-    // pre-picks - the top ANGLE_SLOTS by its rank are same_seat (picked),
-    // the rest bench. A name filled later (hand-added) is picked only
-    // while a slot is free. A role the user set is never overwritten.
-    setRosterRoles((prev) => {
-      const next: RosterRoles = fresh ? {} : { ...(prev ?? {}) };
-      const incoming = roster.competitors
-        .filter((v) => fresh || !(v.name in next))
-        .sort((a, b) => (a.h2hRank || 1e9) - (b.h2hRank || 1e9));
-      // Decision 3c follow-through (2026-10-04 seed review K): slots go to
-      // different owners first - a rival sharing a parent with a higher
-      // pick, or with the client, is demoted below the first other-parent
-      // rival, then fills any slot still free. Same-parent picks report as
-      // portfolio routing, so they are a deliberate choice, never a default.
-      const norm = (t: string | undefined) => (t ?? "").trim().toLowerCase();
-      const pickedParents = new Set<string>();
-      if (roster.clientParent) pickedParents.add(norm(roster.clientParent));
-      for (const [name, role] of Object.entries(next)) {
-        if (role !== "same_seat") continue;
-        const p = norm(roster.competitors.find((v) => v.name === name)?.parent);
-        if (p) pickedParents.add(p);
-      }
-      const direct = incoming.filter((v) => v.role === "same_seat");
-      for (const v of incoming) if (v.role !== "same_seat") next[v.name] = v.role;
-      const deferred: typeof direct = [];
-      for (const v of direct) {
-        const picked = Object.values(next).filter((r) => r === "same_seat").length;
-        const p = norm(v.parent);
-        if (picked < ANGLE_SLOTS && !(p && pickedParents.has(p))) {
-          next[v.name] = "same_seat";
-          if (p) pickedParents.add(p);
-        } else {
-          deferred.push(v);
-        }
-      }
-      for (const v of deferred) {
-        const picked = Object.values(next).filter((r) => r === "same_seat").length;
-        next[v.name] = picked < ANGLE_SLOTS ? "same_seat" : "bench";
-      }
-      return next;
-    });
+    const roster = data?.roster as RosterVerdict | undefined;
+    return roster && !roster.failedOpen ? roster : null;
+  }
+
+  /** Type each competitor by who it sells to. fresh = replace every role
+   * (a new estimate); otherwise only names without a role yet are filled.
+   * Returns the roles and classes it lands (computed from `base`, the
+   * values the caller holds), or null when the classifier failed open. */
+  async function classifyRoster(
+    cat: string, aud: string, comps: string[], fresh: boolean,
+    base: { roles: RosterRoles | undefined; classes: RosterClasses | undefined } = { roles: rosterRoles, classes: rosterClasses }
+  ): Promise<{ roles: RosterRoles; classes: RosterClasses | undefined } | null> {
+    const roster = await fetchRoster(cat, aud, comps);
+    if (!roster) return null;
+    setRosterRoles((prev) => rolesAfterClassify(prev, roster, fresh));
     setRosterReasons((prev) => {
       const next = fresh ? {} : { ...prev };
       for (const v of roster.competitors) if ((fresh || !(v.name in next)) && v.h2hReason) next[v.name] = v.h2hReason;
@@ -641,18 +697,12 @@ export function SetupWizard({ mode, brand, draft, engineOptions, onClose, onCrea
       for (const v of roster.competitors) if (fresh || !(v.name in next)) next[v.name] = v.note;
       return next;
     });
-    // Class phrases for the upstream brands buyers still choose BY. Same
-    // fill semantics as notes; a name the classifier calls non-salient
-    // carries no entry (no class cell).
-    setRosterClasses((prev) => {
-      const next: RosterClasses = fresh ? {} : { ...(prev ?? {}) };
-      for (const v of roster.competitors) {
-        if (!fresh && v.name in next) continue;
-        if (v.consumerSalient && v.classPhrase?.trim()) next[v.name] = v.classPhrase.trim();
-      }
-      return Object.keys(next).length > 0 ? next : undefined;
-    });
+    setRosterClasses((prev) => classesAfterClassify(prev, roster, fresh));
     setClientSellsTo(roster.clientSellsTo);
+    return {
+      roles: rolesAfterClassify(base.roles, roster, fresh),
+      classes: classesAfterClassify(base.classes, roster, fresh),
+    };
   }
 
   /** The role pill - the human gate on the classifier's facts. Cycles
@@ -741,19 +791,28 @@ export function SetupWizard({ mode, brand, draft, engineOptions, onClose, onCrea
 
   /* ------------------------------ persistence ----------------------------- */
 
-  async function persist(
+  /** Saves run strictly in call order (2026-10-24): a close-time save of
+   * the grid in hand can never land after the save a finishing write makes
+   * later, and create's draft DELETE waits behind every queued save. */
+  const saveChain = useRef<Promise<void>>(Promise.resolve());
+  const pendingSaves = useRef(0);
+  /** Set once the tracker exists: no draft save may land after create
+   * deleted the draft (it would resurrect it as a chip). */
+  const created = useRef(false);
+
+  function persist(
     at: StepKey,
-    g: GridState | null = grid,
+    gIn?: GridState | null,
     p: DraftPrompt[] | null = prompts,
     mp: string[] = machinePrompts,
     rp: string[] = reviewedPrompts,
     inFlight: number | null = cellsInFlight,
     marks: { phrasings?: number | null; read?: number | null } = {}
   ) {
+    const g = gIn === undefined ? gridRef.current : gIn;
     const phrasingsMark = marks.phrasings === undefined ? phrasingsInFlight : marks.phrasings;
     const readMark = marks.read === undefined ? readInFlight : marks.read;
-    if (demo || editProjectId) return;
-    setSaving(true);
+    if (demo || editProjectId || created.current) return Promise.resolve();
     const wizard: WizardDraft = {
       mode, step: at, studyName, grid: g, engineSet,
       machinePrompts: mp,
@@ -773,37 +832,53 @@ export function SetupWizard({ mode, brand, draft, engineOptions, onClose, onCrea
       ...(Object.keys(rosterParents).length > 0 ? { rosterParents } : {}),
       ...(clientParent ? { clientParent } : {}),
     };
-    // Bounded, never-throwing: a stalled save must not wedge the "Saving"
-    // label or hang requestClose - the next step transition saves again.
-    const res = await fetch("/api/drafts", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        id: draftId ?? undefined,
-        brand,
-        category,
-        audience: audience || undefined,
-        competitors: allCompetitors(),
-        prompts: p,
-        wizard,
-      }),
-      signal: AbortSignal.timeout(30_000),
-    }).catch(() => null);
-    setSaving(false);
-    if (res?.ok) {
-      const data = await res.json().catch(() => ({}));
-      if (data.draft?.id) setDraftId(data.draft.id);
-      onDraftsChanged(data.draft ?? undefined);
-    }
+    // The body is fixed NOW (the state at the call); only the send queues.
+    const body = JSON.stringify({
+      id: draftId ?? undefined,
+      brand,
+      category,
+      audience: audience || undefined,
+      competitors: allCompetitors(),
+      prompts: p,
+      wizard,
+    });
+    pendingSaves.current += 1;
+    setSaving(true);
+    const send = async () => {
+      if (created.current) return;
+      // Bounded, never-throwing: a stalled save must not wedge the
+      // "Saving" label or hang requestClose - the next step transition
+      // saves again.
+      const res = await fetch("/api/drafts", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body,
+        signal: AbortSignal.timeout(30_000),
+      }).catch(() => null);
+      if (res?.ok) {
+        // The response carries a draft SUMMARY (wizard = mode/step/name
+        // only) - only its id is read here; the host merges the summary.
+        const data = await res.json().catch(() => ({}));
+        if (data.draft?.id) setDraftId(data.draft.id);
+        onDraftsChanged(data.draft ?? undefined);
+      }
+    };
+    const done = saveChain.current.then(send, send).finally(() => {
+      pendingSaves.current -= 1;
+      if (pendingSaves.current === 0) setSaving(false);
+    });
+    saveChain.current = done.catch(() => {});
+    return done;
   }
 
   function goTo(
     k: StepKey,
-    g: GridState | null = grid,
+    gIn?: GridState | null,
     p: DraftPrompt[] | null = prompts,
     mp: string[] = machinePrompts,
     rp: string[] = reviewedPrompts
   ) {
+    const g = gIn === undefined ? gridRef.current : gIn;
     setReadDelta(null);
     if (k !== "prompts") setPromptsNotice(null);
     setStep(k);
@@ -826,9 +901,16 @@ export function SetupWizard({ mode, brand, draft, engineOptions, onClose, onCrea
    * save, which on a slow store read as an ignored click. persist never
    * throws and the drafts list revalidates on its own. */
   function requestClose() {
-    const dirty = step !== "market" || prompts !== null || grid !== null;
-    if (dirty && busy === null) {
-      const done = persist(step);
+    // Hidden while create runs (the host shows the tracker's card instead):
+    // a close from there must not save a draft create is about to delete.
+    if (submitting || created.current) return;
+    const dirty = step !== "market" || prompts !== null || gridRef.current !== null;
+    // Saved even mid-work (2026-10-24): the save queues ahead of whatever
+    // the finishing write saves, so the newer result still lands last - and
+    // a quality check that ends flagged (no save of its own) no longer
+    // loses every edit since the last step change.
+    if (dirty) {
+      const done = persist(step, gridRef.current);
       onCloseSave?.(draftId, done);
     }
     onClose();
@@ -846,6 +928,9 @@ export function SetupWizard({ mode, brand, draft, engineOptions, onClose, onCrea
   const escapeRef = useRef<() => void>(() => {});
   useEffect(() => {
     escapeRef.current = () => {
+      // Hidden while create runs (the host has swapped the modal for the
+      // tracker's card): Escape must not reach a modal nobody can see.
+      if (submitting) return;
       // A review overlay is the top layer - Escape dismisses it first;
       // the next Escape closes the wizard.
       if (cellReview) {
@@ -876,26 +961,51 @@ export function SetupWizard({ mode, brand, draft, engineOptions, onClose, onCrea
     const comps = allCompetitors();
     setCompetitors(comps);
     setCompDraft("");
+    // A name still waiting on its classify (the 1.5s timer, or one folded
+    // in from the text field just now) is typed BEFORE the staleness key:
+    // its role decides whether it takes a head-to-head slot, and a classify
+    // landing after the cells were written would leave them on old picks.
+    const pending = classifyTimer.current !== null || compDraft.trim() !== "";
+    if (classifyTimer.current) {
+      clearTimeout(classifyTimer.current);
+      classifyTimer.current = null;
+    }
+    let roles = rosterRoles;
+    let classes = rosterClasses;
+    const untyped = comps.filter((c) => !rosterRoles || !(c in rosterRoles));
+    if (pending && untyped.length > 0) {
+      setBusy("Checking your competitors…");
+      const typed = await classifyRoster(category, audience, comps, false, { roles, classes });
+      setBusy(null);
+      if (typed) {
+        roles = typed.roles;
+        classes = typed.classes;
+      }
+    }
     const readChanged = servedRead !== readKey(category, audience);
-    const rivalsChanged = servedRivals !== rivalsKey(comps, rosterRoles, rosterClasses);
+    const rivalsChanged = servedRivals !== rivalsKey(comps, roles, classes);
     setServedRead(readKey(category, audience));
-    setServedRivals(rivalsKey(comps, rosterRoles, rosterClasses));
+    setServedRivals(rivalsKey(comps, roles, classes));
+    const g0 = gridRef.current;
     if (mode === "grid") {
-      if (!readChanged && grid) {
+      if (!readChanged && g0) {
         if (!rivalsChanged) {
-          goTo(grid.step === "compose" ? "scenarios" : "prompts");
+          goTo(g0.step === "compose" ? "scenarios" : "prompts");
           return;
         }
         // Rivals changed: the scenarios and the mask hold - only the
-        // written questions go stale (rival cells name rivals). Keep the
-        // table, drop the cells, land on the coverage map with the new
-        // rival count.
-        const kept: GridState = { ...grid, step: "compose", cells: [] };
-        setGrid(kept);
+        // head-to-head cells go stale (they name the slot rivals). Keep the
+        // table AND every cell, back to the coverage map with the new rival
+        // count: the next cells write keeps each cell whose engine text is
+        // unchanged, custom questions included (mergeWrittenCells).
+        const kept = updateGrid((g) => (g ? { ...g, step: "compose" } : g));
         void enterCoverage(kept);
         return;
       }
-      setGrid(null);
+      // A new market: nothing of the old grid applies. Cleared here (the
+      // ref too, synchronously), so the fresh compose can't fall back to
+      // the old market's advice.
+      updateGrid(null);
       const started = readInFlight ?? nowStamp();
       setReadInFlight(started);
       void persist("market", null, prompts, machinePrompts, reviewedPrompts, cellsInFlight, { read: started });
@@ -952,11 +1062,11 @@ export function SetupWizard({ mode, brand, draft, engineOptions, onClose, onCrea
    * mine") is deliberately NOT recorded, so it pops up again on the next
    * confirm. A reviewer failure never blocks the gate. */
   async function confirmScenarios() {
-    if (!grid) return;
+    const g = gridRef.current;
+    if (!g) return;
     // The footer button keeps focus in the field (see onMouseDown), so a
     // pending label-blur recompose never ran. If any active label is
     // missing from the composed mask, recompose first - pure code, fast.
-    let g = grid;
     const colLabels = new Set(g.stages.flatMap((s) => s.columns));
     const stale = scenarioRows(g).some(
       (r) => r.on && r.label.trim() && !colLabels.has(r.label.trim())
@@ -969,9 +1079,9 @@ export function SetupWizard({ mode, brand, draft, engineOptions, onClose, onCrea
     const { authored, body } = reviewRequest(g, category, audience);
     if (authored.length === 0) {
       setBusy("Recomposing…");
-      const composed = await recomposing;
+      await recomposing;
       setBusy(null);
-      goTo("worries", composed ?? g);
+      goTo("worries", gridRef.current);
       return;
     }
     setBusy("Checking your scenarios…");
@@ -984,11 +1094,10 @@ export function SetupWizard({ mode, brand, draft, engineOptions, onClose, onCrea
       body: JSON.stringify(body),
       signal: AbortSignal.timeout(90_000),
     }).catch(() => null);
-    const [composed, res] = await Promise.all([recomposing, resP]);
-    if (composed) g = composed;
+    const [, res] = await Promise.all([recomposing, resP]);
     setBusy(null);
     if (!res || !res.ok) {
-      goTo("worries", g);
+      goTo("worries", gridRef.current);
       return;
     }
     const data = await res.json().catch(() => ({}));
@@ -1009,12 +1118,13 @@ export function SetupWizard({ mode, brand, draft, engineOptions, onClose, onCrea
         });
       }
     });
-    let next = g;
+    // Only what the check produced lands, on the grid as it is NOW: an
+    // edit made while "Checking your scenarios…" ran stays (its new wording
+    // simply has no passed fingerprint and is checked next confirm).
     if (passed.length > 0) {
-      next = { ...g, reviewedScenarios: [...(g.reviewedScenarios ?? []), ...passed] };
-      setGrid(next);
+      updateGrid((cur) => (cur ? { ...cur, reviewedScenarios: [...(cur.reviewedScenarios ?? []), ...passed] } : cur));
     }
-    if (flagged.length === 0) goTo("worries", next);
+    if (flagged.length === 0) goTo("worries", gridRef.current);
     else setReview(flagged);
   }
 
@@ -1023,21 +1133,24 @@ export function SetupWizard({ mode, brand, draft, engineOptions, onClose, onCrea
    * rechecked; a kept-mine row is left as-is on purpose - it gets flagged
    * again the next time the gate is confirmed. */
   async function resolveReview() {
-    if (!grid || !review) return;
+    const g = gridRef.current;
+    if (!g || !review) return;
     const byIndex = new Map(review.map((it) => [it.index, it]));
     let changed = false;
-    let cellsAcc = grid.cells;
-    const rows = scenarioRows(grid).map((r, i) => {
+    const renames: [string, string][] = [];
+    const rows = scenarioRows(g).map((r, i) => {
       const it = byIndex.get(i);
+      // The suggestion replaces the wording it was offered for - a row
+      // edited since keeps the user's edit.
       if (!it || it.choice !== "suggestion") return r;
+      if (r.label !== it.current.label || r.description !== it.current.description) return r;
       changed = true;
-      if (it.suggestion.label.trim() !== r.label.trim()) {
-        cellsAcc = rebindSituation(cellsAcc, r.label, it.suggestion.label);
-      }
+      if (it.suggestion.label.trim() !== r.label.trim()) renames.push([r.label, it.suggestion.label]);
       return {
         ...r,
         label: it.suggestion.label,
         description: it.suggestion.description,
+        circumstance: undefined,
         original: { ...it.suggestion },
       };
     });
@@ -1056,11 +1169,10 @@ export function SetupWizard({ mode, brand, draft, engineOptions, onClose, onCrea
     }).catch(() => {});
     setReview(null);
     if (changed) {
-      const next = await gridApi.compose({
-        base: grid.moderators,
-        rows,
-        cells: cellsAcc.filter((c) => c.custom),
-      });
+      // Cells and room-keyed entries follow the renamed rooms; the
+      // recompose then carries the whole battery.
+      updateGrid((cur) => (cur ? rebindRooms(cur, renames) : cur));
+      const next = await gridApi.compose({ base: g.moderators, rows });
       if (next) goTo("worries", next);
     } else {
       goTo("worries");
@@ -1093,7 +1205,7 @@ export function SetupWizard({ mode, brand, draft, engineOptions, onClose, onCrea
   /** A base-read edit: recompose, then narrate what actually changed - a
    * silent recompose reads as broken even when it works. */
   async function recomposeBase(base: GridState["moderators"], rows: ScenarioRow[]) {
-    const prev = grid;
+    const prev = gridRef.current;
     const next = await gridApi.compose({ base, rows });
     if (!next || !prev) return;
     const label = (g: GridState, key: string) =>
@@ -1102,8 +1214,8 @@ export function SetupWizard({ mode, brand, draft, engineOptions, onClose, onCrea
     const nextKept = new Set(next.keptStages);
     const added = next.keptStages.filter((k) => !prevKept.has(k)).map((k) => label(next, k));
     const removed = prev.keptStages.filter((k) => !nextKept.has(k)).map((k) => label(prev, k));
-    const prevCells = gridCellCount(prev, rivalCount);
-    const nextCells = gridCellCount(next, rivalCount);
+    const prevCells = gridCellCount(prev, slotCount, classCount);
+    const nextCells = gridCellCount(next, slotCount, classCount);
     if (added.length === 0 && removed.length === 0 && prevCells === nextCells) {
       setReadDelta(
         "Recomposed - no stage changes: this dimension shapes prompt wording, not the map."
@@ -1124,11 +1236,11 @@ export function SetupWizard({ mode, brand, draft, engineOptions, onClose, onCrea
     // mid-write reopens on the progress view (the server keeps generating).
     const started = cellsInFlight ?? nowStamp();
     setCellsInFlight(started);
-    void persist("stages", grid, prompts, machinePrompts, reviewedPrompts, started);
+    void persist("stages", gridRef.current, prompts, machinePrompts, reviewedPrompts, started);
     const next = await gridApi.writeCells();
     setCellsInFlight(null);
     if (next) goTo("prompts", next);
-    else void persist("stages", grid, prompts, machinePrompts, reviewedPrompts, null);
+    else void persist("stages", gridRef.current, prompts, machinePrompts, reviewedPrompts, null);
   }
 
   // Resumed onto an in-flight write: straight to the progress view and the
@@ -1142,7 +1254,7 @@ export function SetupWizard({ mode, brand, draft, engineOptions, onClose, onCrea
 
 
   async function writePhrasings(force = false, onlyMissing = false, from?: GridState) {
-    const src = from ?? grid;
+    const src = from ?? gridRef.current;
     const live = (src?.cells ?? []).filter((c) => c.text.trim());
     const missingBefore = live.filter((c) => !c.phrasings.some((p) => p.text.trim())).length;
     // A full first write is marked in flight on the draft (resume on reopen).
@@ -1167,7 +1279,7 @@ export function SetupWizard({ mode, brand, draft, engineOptions, onClose, onCrea
       );
       if (gap) next = (await gridApi.topUpPhrasings(next)) ?? next;
     }
-    if (!next && fullWrite) void persist("prompts", src, prompts, machinePrompts, reviewedPrompts, cellsInFlight, { phrasings: null });
+    if (!next && fullWrite) void persist("prompts", gridRef.current, prompts, machinePrompts, reviewedPrompts, cellsInFlight, { phrasings: null });
     if (next) {
       goTo("prompts", next);
       // A partial write means a confirm re-landed here: say why, or the
@@ -1260,38 +1372,55 @@ export function SetupWizard({ mode, brand, draft, engineOptions, onClose, onCrea
    * (same contract as scenarios - passed fingerprints persist, "keep
    * mine" is never recorded, a reviewer failure never blocks). */
   async function confirmPrompts() {
-    if (!grid) return;
+    const g = gridRef.current;
+    if (!g) return;
     setPromptsNotice(null);
-    const { authored, body } = cellReviewRequest(grid, brand, allCompetitors(), category, audience, rosterRoles);
+    const { authored, bodies } = cellReviewRequest(g, brand, allCompetitors(), category, audience, rosterRoles);
     if (authored.length === 0) {
-      proceedPrompts(grid);
+      proceedPrompts(g);
       return;
     }
     setBusy("Checking your prompts…");
     setError(null);
-    const res = await fetch("/api/setup/grid/cell_review", {
-      method: "POST",
-      headers: { "Content-Type": "application/json", ...(draftId ? { "x-setup-id": draftId } : {}) },
-      body: JSON.stringify(body),
-      signal: AbortSignal.timeout(90_000),
-    }).catch(() => null);
+    // One request per chunk of 24, in order. A failed chunk leaves its
+    // prompts unjudged - neither passed nor flagged, so the next confirm
+    // checks them; a check that fails outright never blocks the gate.
+    type Verdict = { ok?: boolean; flags?: CellReviewItem["flags"]; reason?: string; suggestion?: string };
+    const verdicts: (Verdict | "unjudged" | undefined)[] = [];
+    const specs: (GridCellUi["spec"] | undefined)[] = [];
+    let anyJudged = false;
+    for (const body of bodies) {
+      const res = await fetch("/api/setup/grid/cell_review", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", ...(draftId ? { "x-setup-id": draftId } : {}) },
+        body: JSON.stringify(body),
+        signal: AbortSignal.timeout(90_000),
+      }).catch(() => null);
+      const data = res?.ok ? await res.json().catch(() => null) : null;
+      for (let k = 0; k < body.candidates.length; k++) {
+        verdicts.push(data ? data.verdicts?.[k] : "unjudged");
+        specs.push(data ? data.specs?.[k] ?? undefined : undefined);
+      }
+      if (data) anyJudged = true;
+    }
     setBusy(null);
-    if (!res || !res.ok) {
-      proceedPrompts(grid);
+    if (!anyJudged) {
+      proceedPrompts(gridRef.current ?? g);
       return;
     }
-    const data = await res.json().catch(() => ({}));
     const flagged: CellReviewItem[] = [];
     const passed: string[] = [];
     authored.forEach(({ c, i, phr, text }, k) => {
-      const v = data.verdicts?.[k];
+      const v = verdicts[k];
+      if (v === "unjudged") return;
       if (!v || v.ok) {
         passed.push(cellFp(c, text));
       } else {
-        const stage = grid.stages.find((s) => s.key === c.stage);
+        const stage = g.stages.find((s) => s.key === c.stage);
         const sug = (v.suggestion || "").trim();
         flagged.push({
           index: i,
+          uid: c.uid,
           phr,
           meta:
             `${stage?.label ?? c.stage} · ${cellSubMeta(c)}` +
@@ -1308,57 +1437,73 @@ export function SetupWizard({ mode, brand, draft, engineOptions, onClose, onCrea
         });
       }
     });
-    let next = grid;
     // A reviewed seed edit's re-derived spec lands on its cell whatever the
     // verdict - the spec records the design of the text the cell now holds.
-    const specAt = new Map<number, GridCellUi["spec"]>();
-    authored.forEach(({ i, phr }, k) => {
-      const sp = data.specs?.[k];
-      if (phr == null && sp) specAt.set(i, sp);
+    // By uid, and only while the cell still holds the reviewed text: an
+    // edit made during the check keeps its own (unchecked) state.
+    const specByUid = new Map<string, { spec: GridCellUi["spec"]; text: string }>();
+    authored.forEach(({ c, phr, text }, k) => {
+      const sp = specs[k];
+      if (phr == null && sp && c.uid) specByUid.set(c.uid, { spec: sp, text });
     });
-    if (passed.length > 0 || specAt.size > 0) {
-      next = {
-        ...grid,
-        reviewedCells: [...(grid.reviewedCells ?? []), ...passed],
-        cells: grid.cells.map((c, i) => (specAt.has(i) ? { ...c, spec: specAt.get(i) } : c)),
-      };
-      setGrid(next);
+    if (passed.length > 0 || specByUid.size > 0) {
+      updateGrid((cur) =>
+        cur
+          ? {
+              ...cur,
+              reviewedCells: [...(cur.reviewedCells ?? []), ...passed],
+              cells: cur.cells.map((c) => {
+                const s = c.uid ? specByUid.get(c.uid) : undefined;
+                return s && c.text.trim() === s.text.trim() ? { ...c, spec: s.spec } : c;
+              }),
+            }
+          : cur
+      );
     }
+    const next = gridRef.current ?? g;
     if (flagged.length === 0) proceedPrompts(next);
     else setCellReview(flagged);
   }
 
   /** Apply the prompt-review choices and continue. An accepted suggestion
-   * becomes the cell's machine baseline (and clears its paraphrases, so
-   * the missing-fill regenerates them for the new wording); a kept-mine
-   * cell is left as-is on purpose - it gets flagged again next confirm. */
+   * becomes the cell's machine baseline (`original` - the engine seed is
+   * untouched) and clears its paraphrases, so the missing-fill regenerates
+   * them for the new wording; a kept-mine cell is left as-is on purpose -
+   * it gets flagged again next confirm. */
   function resolveCellReview() {
-    if (!grid || !cellReview) return;
+    if (!cellReview) return;
     // Paraphrase fixes land before their cell's seed fix: a seed change
     // banks the (now corrected) set under the old wording.
     const ordered = [...cellReview].sort((a, b) => (a.phr == null ? 1 : 0) - (b.phr == null ? 1 : 0));
-    const cells = [...grid.cells];
-    for (const it of ordered) {
-      if (it.choice !== "suggestion" || !it.suggestion.trim()) continue;
-      const c = cells[it.index];
-      if (!c) continue;
-      if (it.phr == null) {
-        // The old wording's set is banked, not thrown away - cycling back
-        // to it later restores its paraphrases for free.
-        cells[it.index] = {
-          ...c, text: it.suggestion, original: it.suggestion, ...swapPhrasings(c, it.suggestion),
-          spec: c.spec ? deriveCheckSpec({ ...c, text: it.suggestion }, brand, sameSeatOf(allCompetitors(), rosterRoles), category) : c.spec,
-        };
-      } else {
-        cells[it.index] = {
-          ...c,
-          phrasings: c.phrasings.map((ph, m) =>
-            m === it.phr ? { ...ph, text: it.suggestion, original: it.suggestion } : ph
-          ),
-        };
+    const next = updateGrid((g) => {
+      if (!g) return g;
+      const cells = [...g.cells];
+      for (const it of ordered) {
+        if (it.choice !== "suggestion" || !it.suggestion.trim()) continue;
+        const at = it.uid ? cells.findIndex((q) => q.uid === it.uid) : it.index;
+        const c = cells[at];
+        if (!c) continue;
+        if (it.phr == null) {
+          // Only over the wording it was offered for.
+          if (c.text.trim() !== it.current.trim()) continue;
+          // The old wording's set is banked, not thrown away - cycling back
+          // to it later restores its paraphrases for free.
+          cells[at] = {
+            ...c, text: it.suggestion, original: it.suggestion, ...swapPhrasings(c, it.suggestion),
+            spec: c.spec ? deriveCheckSpec({ ...c, text: it.suggestion }, brand, sameSeatOf(allCompetitors(), rosterRoles), category) : c.spec,
+          };
+        } else {
+          if ((c.phrasings[it.phr]?.text ?? "").trim() !== it.current.trim()) continue;
+          cells[at] = {
+            ...c,
+            phrasings: c.phrasings.map((ph, m) =>
+              m === it.phr ? { ...ph, text: it.suggestion, original: it.suggestion } : ph
+            ),
+          };
+        }
       }
-    }
-    const next: GridState = { ...grid, cells };
+      return { ...g, cells };
+    });
     // Log what the user chose - visibility only, fire and forget.
     void fetch("/api/setup/grid/feedback", {
       method: "POST",
@@ -1373,8 +1518,7 @@ export function SetupWizard({ mode, brand, draft, engineOptions, onClose, onCrea
       }),
     }).catch(() => {});
     setCellReview(null);
-    setGrid(next);
-    proceedPrompts(next);
+    if (next) proceedPrompts(next);
   }
 
   /** Classic-mode confirm: user-written prompts get the same quality
@@ -1415,6 +1559,8 @@ export function SetupWizard({ mode, brand, draft, engineOptions, onClose, onCrea
           situationDescription: null,
           angle: "open",
           mode: null,
+          concern: null,
+          valueLine: null,
         })),
       }),
       signal: AbortSignal.timeout(90_000),
@@ -1490,17 +1636,20 @@ export function SetupWizard({ mode, brand, draft, engineOptions, onClose, onCrea
   /** Silent warm of the confirm-time prompt check: same request the
    * confirm will make, fired on field blur, cached server-side. */
   function warmCellReview() {
-    if (!grid) return;
-    const { authored, body } = cellReviewRequest(grid, brand, allCompetitors(), category, audience, rosterRoles);
+    const g = gridRef.current;
+    if (!g) return;
+    const { authored, bodies } = cellReviewRequest(g, brand, allCompetitors(), category, audience, rosterRoles);
     if (authored.length === 0) return;
-    const payload = JSON.stringify(body);
+    const payload = JSON.stringify(bodies);
     if (lastWarm.current.cell === payload) return;
     lastWarm.current.cell = payload;
-    void fetch("/api/setup/grid/cell_review", {
-      method: "POST",
-      headers: { "Content-Type": "application/json", ...(draftId ? { "x-setup-id": draftId } : {}) },
-      body: JSON.stringify(body),
-    }).catch(() => {});
+    for (const body of bodies) {
+      void fetch("/api/setup/grid/cell_review", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", ...(draftId ? { "x-setup-id": draftId } : {}) },
+        body: JSON.stringify(body),
+      }).catch(() => {});
+    }
   }
 
   async function create() {
@@ -1551,7 +1700,9 @@ export function SetupWizard({ mode, brand, draft, engineOptions, onClose, onCrea
       if (!res) { setError("that took too long - try again"); return; }
       if (!res.ok) {
         const data = await res.json().catch(() => ({}));
-        setError(data.error ?? "something went wrong");
+        // 409: the previous save of this setup is still being written -
+        // the server's message already says to retry.
+        setError(data.error ?? (res.status === 409 ? "this tracker's setup is still being saved - try again in a moment" : "something went wrong"));
         return;
       }
       onCreated(editProjectId);
@@ -1574,6 +1725,16 @@ export function SetupWizard({ mode, brand, draft, engineOptions, onClose, onCrea
           ? {
               grid: {
                 moderators: grid!.moderators,
+                // Recommended-vs-decided: the worry recommender's training
+                // data - same shape as the edit-setup save.
+                ...(grid!.worries && grid!.worryPool
+                  ? {
+                      worryDecision: {
+                        recommended: recommendedWorryPairs(grid!.worryPool),
+                        decided: grid!.worries,
+                      },
+                    }
+                  : {}),
                 journeys: Object.fromEntries(
                   grid!.scenarios.map((sc) => [sc.label, sc.journey])
                 ),
@@ -1599,23 +1760,30 @@ export function SetupWizard({ mode, brand, draft, engineOptions, onClose, onCrea
       return;
     }
     const data = await res.json().catch(() => ({}));
-    if (!res.ok) {
+    // Any 2xx carrying a project is the tracker: a re-submitted setup id
+    // that already became one comes back 200 with the existing project.
+    if (!res.ok || !data.project?.id) {
       setSubmitting(false);
       onCreating?.(null);
-      setError(data.error ?? "something went wrong");
+      // 409: another create of this setup is in flight - retryable, and the
+      // server's message says so.
+      setError(data.error ?? (res.status === 409 ? "a tracker is already being created - try again in a moment" : "something went wrong"));
       return;
     }
+    // No draft save may land from here on (a queued one would resurrect
+    // the draft after the DELETE below).
+    created.current = true;
     // The tracker exists: hand over to its dashboard NOW, on its "Setting
     // up" phase. The run launch (engine checks + batch submission, several
     // seconds) and the draft cleanup continue in the background - client
     // navigation keeps them alive. Awaiting them here left the button
     // reverted to "Create tracker & run" for ~5s after a successful create.
     if (draftId) {
-      // Best effort - a stale draft chip beats a hung create.
-      void fetch(`/api/drafts/${draftId}`, {
-        method: "DELETE",
-        signal: AbortSignal.timeout(15_000),
-      })
+      // Best effort - a stale draft chip beats a hung create. Queued behind
+      // any save still in flight, so no save lands after the delete.
+      const id = draftId;
+      void saveChain.current
+        .then(() => fetch(`/api/drafts/${id}`, { method: "DELETE", signal: AbortSignal.timeout(15_000) }))
         .catch(() => {})
         .finally(() => onDraftsChanged());
     }
@@ -1638,11 +1806,19 @@ export function SetupWizard({ mode, brand, draft, engineOptions, onClose, onCrea
 
   /* --------------------------------- counts -------------------------------- */
 
-  // Upstream brands hold no cells and are free vocabulary: counts, the
-  // custom-cell rival picker and the branded/blind pill read same-seat only.
-  const seated = sameSeatOf(allCompetitors(), rosterRoles);
-  const rivalCount = seated.length;
-  const brandNames = [brand, ...seated];
+  // Upstream brands hold no cells and are free vocabulary: the custom-cell
+  // rival picker and the branded/blind pill read same-seat only. Memoized:
+  // a stable list lets the Prompts gate cache its branded/blind reads
+  // instead of recomputing them for every cell on every keystroke.
+  const rosterNow = compDraft.trim().replace(/,+$/, "");
+  const brandNames = useMemo(() => {
+    const comps = [...new Set(rosterNow ? [...competitors, rosterNow] : competitors)].slice(0, 12);
+    return [brand, ...sameSeatOf(comps, rosterRoles)];
+  }, [brand, competitors, rosterNow, rosterRoles]);
+  /** What the cells write plans per roster (mirrors the engine): the
+   * head-to-head slot rivals and the class-angle cells. */
+  const slotCount = angleRivals(allCompetitors(), rosterRoles).length;
+  const classCount = classAnglesOf(allCompetitors(), rosterRoles, rosterClasses).length;
   const promptCount =
     mode === "grid" ? gridPromptCount(grid) : (prompts ?? []).filter((p) => p.text.trim()).length;
   const passes = mode === "grid" ? 1 : FIRST_RUN_REPEATS;
@@ -1668,12 +1844,16 @@ export function SetupWizard({ mode, brand, draft, engineOptions, onClose, onCrea
   /* --------------------------------- footer -------------------------------- */
 
   let footerLeft: string = "";
-  let footerAction: { label: string; onClick: () => void; disabled: boolean } | null = null;
+  // The footer's action is named, not a closure: the handlers read the
+  // live grid (a ref), and a ref-reading function held in a render value
+  // trips the compiler's refs rule. onFooterClick dispatches.
+  type FooterRun = "market" | "scenarios" | "worries" | "stages" | "prompts" | "classic" | "demoClose" | "demoFinish" | "create";
+  let footerAction: { label: string; run: FooterRun; disabled: boolean } | null = null;
   if (step === "market") {
     footerLeft = suggesting ? "Estimating your market…" : "";
     footerAction = {
       label: busy ?? "This is my market",
-      onClick: () => void confirmMarket(),
+      run: "market",
       disabled: suggesting || busy !== null || !category.trim(),
     };
   } else if (step === "scenarios" && grid) {
@@ -1684,7 +1864,7 @@ export function SetupWizard({ mode, brand, draft, engineOptions, onClose, onCrea
         : `${active} of ${scenarioCap} scenarios`;
     footerAction = {
       label: busy ?? "These are my buyers",
-      onClick: () => void confirmScenarios(),
+      run: "scenarios",
       disabled:
         busy !== null || active === 0 || active > scenarioCap ||
         grid.scenarios.some((s) => !s.label.trim()),
@@ -1699,17 +1879,20 @@ export function SetupWizard({ mode, brand, draft, engineOptions, onClose, onCrea
       : "";
     footerAction = {
       label: busy ?? "These are my worries",
-      onClick: () => void enterCoverage(),
+      run: "worries",
       disabled:
         busy !== null || !grid.worryPool || picked === 0 ||
         (worryCap !== null && picked > worryCap),
     };
   } else if (step === "stages" && grid) {
-    const cells = gridCellCount(grid, rivalCount);
-    footerLeft = `${grid.keptStages.length} stages · ${grid.scenarios.length} scenarios → ${cells} questions → ~${cells * 10} prompts`;
+    const plan = gridCellPlan(grid, slotCount, classCount);
+    const cells = plan.reduce((n, s) => n + s.cells, 0);
+    // Per stage at its own depth (Social validation fills to 5).
+    const promptsPlanned = plan.reduce((n, s) => n + s.cells * phrasingTarget(s.stage), 0);
+    footerLeft = `${grid.keptStages.length} stages · ${grid.scenarios.length} scenarios → ${cells} questions → ~${promptsPlanned} prompts`;
     footerAction = {
       label: busy ?? "This is my coverage",
-      onClick: () => void writeCells(),
+      run: "stages",
       disabled: busy !== null || grid.keptStages.length === 0 || grid.scenarios.some((s) => !s.label.trim()),
     };
   } else if (step === "prompts" && mode === "grid" && grid) {
@@ -1727,7 +1910,7 @@ export function SetupWizard({ mode, brand, draft, engineOptions, onClose, onCrea
       }`;
       footerAction = {
         label: busy ?? "These are my questions - write the prompts",
-        onClick: () => void confirmPrompts(),
+        run: "prompts",
         disabled: busy !== null || live.length < 4,
       };
     } else if (missing) {
@@ -1736,7 +1919,7 @@ export function SetupWizard({ mode, brand, draft, engineOptions, onClose, onCrea
       } - some questions still need prompts`;
       footerAction = {
         label: busy ?? "These are my questions - write the missing prompts",
-        onClick: () => void confirmPrompts(),
+        run: "prompts",
         disabled: busy !== null || live.length < 4,
       };
     } else {
@@ -1745,7 +1928,7 @@ export function SetupWizard({ mode, brand, draft, engineOptions, onClose, onCrea
       }`;
       footerAction = {
         label: busy ?? "These are my prompts",
-        onClick: () => void confirmPrompts(),
+        run: "prompts",
         disabled: busy !== null || promptCount < 4,
       };
     }
@@ -1753,7 +1936,7 @@ export function SetupWizard({ mode, brand, draft, engineOptions, onClose, onCrea
     footerLeft = `${promptCount} prompts`;
     footerAction = {
       label: busy ?? "These are my prompts",
-      onClick: () => void confirmClassicPrompts(),
+      run: "classic",
       disabled: busy !== null || promptCount < 4,
     };
   } else if (step === "engines") {
@@ -1762,23 +1945,35 @@ export function SetupWizard({ mode, brand, draft, engineOptions, onClose, onCrea
     }${engineSet.length || 1} engine${engineSet.length === 1 ? "" : "s"} = ${answers.toLocaleString()} answers`;
     footerAction = demo
       ? demoDone
-        ? { label: "Close demo", onClick: onClose, disabled: false }
+        ? { label: "Close demo", run: "demoClose", disabled: false }
         : {
             label: "Finish demo",
-            onClick: () => setDemoDone(true),
+            run: "demoFinish",
             disabled: engineSet.length === 0 || promptCount < 4,
           }
       : editProjectId
       ? {
           label: submitting ? "Saving setup…" : "Save setup - no run starts",
-          onClick: () => void create(),
+          run: "create",
           disabled: submitting || engineSet.length === 0 || promptCount < 4,
         }
       : {
           label: submitting ? "Setting up…" : "Create tracker & run",
-          onClick: () => void create(),
+          run: "create",
           disabled: submitting || engineSet.length === 0 || promptCount < 4,
         };
+  }
+
+  function onFooterClick(run: FooterRun) {
+    if (run === "market") void confirmMarket();
+    else if (run === "scenarios") void confirmScenarios();
+    else if (run === "worries") void enterCoverage();
+    else if (run === "stages") void writeCells();
+    else if (run === "prompts") void confirmPrompts();
+    else if (run === "classic") void confirmClassicPrompts();
+    else if (run === "demoClose") onClose();
+    else if (run === "demoFinish") setDemoDone(true);
+    else void create();
   }
 
   /* --------------------------------- render -------------------------------- */
@@ -1795,7 +1990,11 @@ export function SetupWizard({ mode, brand, draft, engineOptions, onClose, onCrea
           const state = i < stepIndex ? "done" : i === stepIndex ? "current" : i <= reached ? "reached" : "ahead";
           const clickable =
             (state === "done" || state === "reached") && busy === null && !submitting &&
-            !(s.key === "engines" && !promptsReady);
+            !(s.key === "engines" && !promptsReady) &&
+            // A recomposed grid has no written battery for its new mask: the
+            // coverage map's confirm writes it (the carried cells there are
+            // the merge's input, not a battery to show as current).
+            !(s.key === "prompts" && mode === "grid" && grid?.step === "compose");
           return (
             <button
               key={s.key}
@@ -1849,7 +2048,8 @@ export function SetupWizard({ mode, brand, draft, engineOptions, onClose, onCrea
             type="button"
             aria-label="close"
             onClick={() => requestClose()}
-            className="text-ink-3 hover:text-ink text-xl leading-none"
+            disabled={submitting}
+            className="text-ink-3 hover:text-ink text-xl leading-none disabled:opacity-40"
           >
             ×
           </button>
@@ -1987,13 +2187,13 @@ export function SetupWizard({ mode, brand, draft, engineOptions, onClose, onCrea
           {step === "scenarios" && grid && (
             <ScenariosGate
               state={grid}
-              setState={setGrid}
+              setState={updateGrid}
               busy={busy !== null}
               readDelta={readDelta}
               onRecomposeBase={(base, rows) => void recomposeBase(base, rows)}
-              onRecompose={(base, rows, cells) => {
+              onRecompose={(base, rows) => {
                 setReadDelta(null);
-                void gridApi.compose({ base, rows, cells });
+                void gridApi.compose({ base, rows });
               }}
               onSuggestScenario={() => void gridApi.suggestScenario()}
               onAddReserve={(label) => void gridApi.suggestScenario(label)}
@@ -2028,7 +2228,7 @@ export function SetupWizard({ mode, brand, draft, engineOptions, onClose, onCrea
             ) : (
               <WorriesGate
                 state={grid}
-                setState={setGrid}
+                setState={updateGrid}
                 cap={worryCap}
                 busy={busy !== null}
               />
@@ -2044,7 +2244,7 @@ export function SetupWizard({ mode, brand, draft, engineOptions, onClose, onCrea
             ) : (
               <CoverageGate
                 state={grid}
-                setState={setGrid}
+                setState={updateGrid}
                 busy={busy !== null}
                 onEditWorries={() => goTo("worries")}
                 brand={brand}
@@ -2125,13 +2325,13 @@ export function SetupWizard({ mode, brand, draft, engineOptions, onClose, onCrea
               )}
               <CellsGate
                 state={grid}
-                setState={setGrid}
+                setState={updateGrid}
                 brandNames={brandNames}
                 busy={busy !== null}
                 onRegenerate={(i) => gridApi.regenerateCell(i)}
                 onNearCell={(i) => gridApi.regenerateCell(i, true)}
                 onSuggestCell={(k, sit, angle) => gridApi.suggestCell(k, sit, angle)}
-                onAddOwn={(k, sit, angle) => setGrid((g) => (g ? gridApi.addOwnCell(g, k, sit, angle) : g))}
+                onAddOwn={(k, sit, angle) => updateGrid((g) => (g ? gridApi.addOwnCell(g, k, sit, angle) : g))}
                 customUsed={customUsed}
                 customAllowance={customAllowance}
                 onCycle={(i, dir) => gridApi.cycleCell(i, dir)}
@@ -2246,7 +2446,7 @@ export function SetupWizard({ mode, brand, draft, engineOptions, onClose, onCrea
               // fires first, starts a recompose, and the busy state
               // swallows this click - the button "does nothing" once.
               onMouseDown={(e) => e.preventDefault()}
-              onClick={footerAction.onClick}
+              onClick={() => footerAction && onFooterClick(footerAction.run)}
               disabled={footerAction.disabled}
               className="btn-primary shrink-0 inline-flex items-center gap-2"
             >

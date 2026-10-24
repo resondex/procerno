@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, type ReactNode, useRef } from "react";
+import { useEffect, useMemo, useState, type ReactNode, useRef } from "react";
 import { angleRivals, deriveCheckSpec, rosterRoleOf, sameSeatOf, type CellCheckSpec, type RosterClasses, type RosterRoles } from "@/lib/engine/battery_checks";
 import { InlineSpinner } from "../components/spinner";
 
@@ -102,6 +102,12 @@ export interface GridCellUi {
   /** The last machine-offered wording - a cell whose text differs from
    * this was edited by the user, and gets the quality check at confirm. */
   original?: string;
+  /** The text the cells write served for this cell's design (2026-10-24).
+   * Never changed by a redraw, cycle, edit or accepted review suggestion -
+   * only the next cells write sets it. The post-write merge keys on it,
+   * and the setup decision record reports it as the seed "offered".
+   * Absent on custom cells. */
+  engineSeed?: string;
   /** Wordings in `alts` that the USER wrote (captured when cycling away
    * from a manual edit). Cycling back to one keeps it subject to the
    * confirm-time quality check - edit -> cycle away -> cycle back must
@@ -154,14 +160,147 @@ function similarText(a: string, b: string): boolean {
   return inter / (A.size + B.size - inter) > 0.5;
 }
 
-/** A scenario rename follows through to the cells that reference it -
- * custom questions must not be orphaned (and later silently dropped)
- * because their buyer's label changed wording. */
-export function rebindSituation(cells: GridCellUi[], from: string, to: string): GridCellUi[] {
-  const f = from.trim();
-  const t = to.trim();
-  if (!f || !t || f === t) return cells;
-  return cells.map((c) => (c.situation === f ? { ...c, situation: t } : c));
+/** A scenario rename follows through everywhere: custom questions must
+ * not be orphaned (and later silently dropped) because their buyer's
+ * label changed wording, and nothing keyed by the room may be either.
+ * Rename rooms everywhere the grid keys on a room label (2026-10-24):
+ * cells, the active scenario list, per-room stage scope, Value lines and
+ * the Value recommendation. The pairs apply simultaneously, so a Reset
+ * that swaps two labels can't chain. The rows themselves are the caller's
+ * (it passes them to the recompose or to withScenarioRows). */
+export function rebindRooms(g: GridState, pairs: [string, string][]): GridState {
+  const map = new Map<string, string>();
+  for (const [f0, t0] of pairs) {
+    const f = f0.trim();
+    const t = t0.trim();
+    if (f && t && f !== t) map.set(f, t);
+  }
+  if (map.size === 0) return g;
+  const ren = (l: string): string => map.get(l.trim()) ?? l;
+  function reKey<V>(rec: Record<string, V> | undefined): Record<string, V> | undefined {
+    return rec ? Object.fromEntries(Object.entries(rec).map(([k, v]) => [ren(k), v])) : rec;
+  }
+  return {
+    ...g,
+    cells: g.cells.map((c) => (c.situation !== null && map.has(c.situation.trim()) ? { ...c, situation: ren(c.situation) } : c)),
+    scenarios: g.scenarios.map((s) => (map.has(s.label.trim()) ? { ...s, label: ren(s.label) } : s)),
+    stageRooms: g.stageRooms
+      ? Object.fromEntries(Object.entries(g.stageRooms).map(([k, v]) => [k, v.map(ren)]))
+      : g.stageRooms,
+    valueLines: reKey(g.valueLines),
+    valueRecommended: reKey(g.valueRecommended),
+  };
+}
+
+/** Per-room stage scope after a room removal: entries keep only active
+ * rooms; an entry the pruning empties is dropped (re-judged), never left
+ * empty - an explicit empty list is the user dropping the stage. */
+function pruneStageRooms(sr: Record<string, string[]>, active: string[]): Record<string, string[]> {
+  const out: Record<string, string[]> = {};
+  for (const [k, v] of Object.entries(sr)) {
+    const kept = v.filter((l) => active.includes(l));
+    if (v.length > 0 && kept.length === 0) continue;
+    out[k] = kept;
+  }
+  return out;
+}
+
+/** The base read's dimensions match (what the mask and the worry stances
+ * are computed from). */
+function sameRead(a: Record<string, unknown>, b: Record<string, unknown>): boolean {
+  return MODERATOR_FIELDS.every((f) => String(a[f.key] ?? "") === String(b[f.key] ?? ""));
+}
+
+function sameJourney(a: Journey | null | undefined, b: Journey | null | undefined): boolean {
+  if (!a || !b) return !a && !b;
+  return JOURNEY_FIELDS.every((f) => String(a[f.key as keyof Journey]) === String(b[f.key as keyof Journey]));
+}
+
+/** What a recompose carries from the state it replaces (2026-10-24): the
+ * whole battery - every cell, engine-written included, so the next cells
+ * write can keep each one whose engine text is unchanged - plus the
+ * coverage decisions keyed by room. Worry picks ride only while the base
+ * read is unchanged (the stances offered follow it); per-room stage scope
+ * only while the mask is (same base, same journeys, no room added). */
+function carriedBattery(
+  g: GridState,
+  o: { sameBase: boolean; keepScope: boolean; activeLabels: string[] }
+): Partial<GridState> & { cells: GridCellUi[] } {
+  return {
+    cells: g.cells,
+    baselineCellCount: g.cells.filter((c) => !c.custom).length,
+    reviewedCells: g.reviewedCells,
+    valueLines: g.valueLines,
+    valueCatalog: g.valueCatalog,
+    valueRecommended: g.valueRecommended,
+    ...(o.sameBase ? { worryPool: g.worryPool, worryOffered: g.worryOffered, worries: g.worries } : {}),
+    ...(o.keepScope && g.stageRooms ? { stageRooms: pruneStageRooms(g.stageRooms, o.activeLabels) } : {}),
+  };
+}
+
+/** The design a cell measures - the post-write merge's identity. */
+function designKey(c: Pick<GridCellUi, "stage" | "situation" | "angle" | "concern">): string {
+  return `${c.stage}|${c.situation ?? ""}|${c.angle}|${c.concern ?? ""}`;
+}
+
+/** Land a cells write on the grid (2026-10-24).
+ *
+ * THE CELLS-PRESERVATION INVARIANT: a non-custom cell's `engineSeed` is
+ * the text the cells write last served for its design (stage, room,
+ * angle, concern), and nothing but a cells write changes it - redraws,
+ * cycles, hand edits and accepted review suggestions move `text` and
+ * `original` only. Every recompose carries ALL cells forward, and here a
+ * prior cell (its text, history, flags and paraphrases) is kept whenever
+ * the engine serves the same text for the same design again; when the
+ * engine text changed the composed cell wins. Prior cells with no match in
+ * the served battery (removed rooms, re-keyed designs) drop; custom cells
+ * re-append after their stage while the stage is kept and the room is
+ * active. */
+export function mergeWrittenCells(g: GridState, served: Omit<GridCellUi, "phrasings">[]): GridState {
+  const prev = new Map<string, GridCellUi>();
+  for (const q of g.cells) {
+    if (!q.custom && q.engineSeed != null) prev.set(`${designKey(q)}|${q.engineSeed.trim()}`, q);
+  }
+  const composed: GridCellUi[] = served.map((c) => {
+    const k = `${designKey(c)}|${c.text.trim()}`;
+    const p = prev.get(k);
+    if (!p) return { ...c, uid: cellUid(), original: c.text, engineSeed: c.text, phrasings: [] };
+    prev.delete(k);
+    const unchanged = p.text.trim() === c.text.trim();
+    return {
+      ...p,
+      // Design metadata is the engine's; the content is the user's.
+      layer: c.layer, qtype: c.qtype, mode: c.mode,
+      valueLine: c.valueLine, classPhrase: c.classPhrase, classBrand: c.classBrand,
+      engineSeed: c.text,
+      // Spec and flags describe a text: the served ones only fit a cell
+      // still showing the served text.
+      spec: unchanged ? c.spec ?? p.spec : p.spec,
+      seedFlags: unchanged ? c.seedFlags : p.seedFlags,
+    };
+  });
+  const keptStages = new Set(effectiveKeptStages(g));
+  const activeLabels = new Set(g.scenarios.map((sc) => sc.label));
+  const customs = g.cells.filter(
+    (c) => c.custom && keptStages.has(c.stage) && (c.situation === null || activeLabels.has(c.situation))
+  );
+  const cells = [...composed];
+  for (const c of customs) {
+    const last = cells.map((q, j) => (q.stage === c.stage ? j : -1)).reduce((m, j) => Math.max(m, j), -1);
+    cells.splice(last >= 0 ? last + 1 : cells.length, 0, c);
+  }
+  // Kept cells that carry paraphrase sets put the grid on the paraphrase
+  // step (whatever step the recompose left it on): the new cells show as
+  // missing their prompts and the missing-fill writes only those - a full
+  // rewrite would discard the kept sets' hand edits.
+  const keepsSets = composed.some((c) => c.phrasings.some((p) => p.text.trim()));
+  return { ...g, step: keepsSets ? "phrasings" : "cells", baselineCellCount: composed.length, cells };
+}
+
+/** Concerns across a battery - the paraphrase guard. Built from the SAME
+ * state a request writes from, so the warm and the write key alike. */
+function avoidConcernsOf(cells: GridCellUi[]): string[] {
+  return [...new Set(cells.map((x) => x.concern).filter((x): x is string => !!x))];
 }
 
 /** Bank the cell's written paraphrases under its current wording, and pull
@@ -428,6 +567,17 @@ export function normalizeGrid(g: GridState | null): GridState | null {
       // Drafts from before the prompt review carry no machine baseline -
       // treat the saved text as it, so nothing is retroactively flagged.
       original: scrubPrompt(c.original ?? c.text),
+      // Drafts from before engineSeed: the composed seed is alts[0] once a
+      // draw happened (unless that slot holds the user's own wording),
+      // else the machine baseline.
+      engineSeed: c.custom
+        ? c.engineSeed
+        : scrubPrompt(
+            c.engineSeed ??
+              ((c.regens || c.nears) && c.alts?.[0] && !(c.userAlts ?? []).includes(c.alts[0])
+                ? c.alts[0]
+                : c.original ?? c.text)
+          ),
       concern: c.concern ?? null,
       // Pre-phrasedFor drafts: assume the set belongs to the current text
       // (same assumption `original` makes), so the edit-after-write flow
@@ -437,6 +587,9 @@ export function normalizeGrid(g: GridState | null): GridState | null {
       // live text, so cycling to a draft-frozen wording can't reintroduce
       // banned punctuation and bank lookups keep matching.
       alts: c.alts?.map(scrubPrompt),
+      // Same scrub, or a user wording would stop matching its alts slot
+      // and cycling back to it would launder it into the baseline.
+      userAlts: c.userAlts?.map(scrubPrompt),
       phrasings: c.phrasings.map((ph) => ({
         ...ph,
         text: scrubPrompt(ph.text),
@@ -482,10 +635,16 @@ export function buildSetupDecision(g: GridState): Record<string, unknown> {
     if (sameText(cur, r.original)) return (r.variants ?? 0) > 0 ? "near_variant" : "reworded";
     return "edited";
   };
+  // The seed offered is the engine's (engineSeed, never moved by a draw);
+  // `original` is the last machine wording the cell accepted (a draw, a
+  // cycle, or an accepted review suggestion).
   const cellHow = (c: GridCellUi): string => {
     if (c.custom) return "own";
-    if (c.original && c.text.trim() !== c.original.trim()) return (c.nears ?? 0) > 0 ? "near_variant_or_edited" : (c.regens ?? 0) > 0 ? "redrawn_or_edited" : "edited";
-    return (c.nears ?? 0) > 0 ? "near_variant" : (c.regens ?? 0) > 0 ? "redrawn" : "offered";
+    const text = c.text.trim();
+    if (text === (c.engineSeed ?? c.original ?? text).trim()) return "offered";
+    const drew = (c.nears ?? 0) > 0 ? "near_variant" : (c.regens ?? 0) > 0 ? "redrawn" : null;
+    if (c.original != null && text === c.original.trim()) return drew ?? "review_suggestion";
+    return drew ? `${drew}_or_edited` : "edited";
   };
   return {
     version: 1,
@@ -517,7 +676,7 @@ export function buildSetupDecision(g: GridState): Record<string, unknown> {
       const decidedTexts = new Set(decided.map((d) => d.text.trim()));
       return {
         stage: c.stage, situation: c.situation, angle: c.angle, concern: c.concern ?? null,
-        seed: { offered: c.original ?? null, decided: c.text, how: cellHow(c) },
+        seed: { offered: c.engineSeed ?? c.original ?? null, decided: c.text, how: cellHow(c) },
         paraphrases: {
           offered,
           decided,
@@ -587,26 +746,64 @@ export function effectiveKeptStages(g: GridState): string[] {
   return [...kept];
 }
 
-export function gridCellCount(g: GridState | null, rivalCount: number): number {
-  if (!g) return 0;
-  const r = Math.min(rivalCount, 4);
+/** Cells per kept stage, mirroring the cells route + the engine planner
+ * (2026-10-24): head-to-heads come from the angle slots (the at-most-4
+ * head-to-head picks), the comparison stage adds one class cell per class
+ * angle, a Value room set to "No Value cell" holds none, and a situational
+ * stage whose per-room scope is empty is dropped. */
+export function gridCellPlan(g: GridState | null, slotRivals: number, classCells = 0): { stage: string; cells: number }[] {
+  if (!g) return [];
+  const r = Math.min(slotRivals, 4);
   const kept = new Set(effectiveKeptStages(g));
   const active = g.scenarios.map((s) => s.label);
   return g.stages
     .filter((s) => kept.has(s.key))
-    .reduce((n, s) => {
+    .map((s) => {
       // Worries module: a doubt stage holds one cell per worry the user
       // assigned to it - zero is a deliberate pick, not a gap.
       if (g.worries && WORRY_STAGES.has(s.key)) {
-        return n + g.worries.filter((w) => w.stage === s.key).length;
+        return { stage: s.key, cells: g.worries.filter((w) => w.stage === s.key).length };
       }
+      if (s.rivals === "each") return { stage: s.key, cells: r + (s.key === "comparison" ? classCells : 0) };
+      if (s.rivals === "defensive_offensive") return { stage: s.key, cells: 1 + r };
+      if (!s.situational) return { stage: s.key, cells: 1 };
+      const explicit = g.stageRooms?.[s.key];
       const cols = stageColumns(s, active, g.stageRooms);
-      const effective = g.stageRooms?.[s.key] ? cols : cols.length > 0 ? cols : active;
-      if (s.rivals === "each") return n + r;
-      if (s.rivals === "defensive_offensive") return n + 1 + r;
-      if (s.situational) return n + Math.max(effective.length, 1);
-      return n + 1;
-    }, 0);
+      if (explicit && cols.length === 0) return { stage: s.key, cells: 0 };
+      const effective = explicit ? cols : cols.length > 0 ? cols : active;
+      const rooms = s.key === "pricing" && g.valueLines
+        ? effective.filter((l) => g.valueLines![l] !== null)
+        : effective;
+      return { stage: s.key, cells: rooms.length };
+    });
+}
+
+export function gridCellCount(g: GridState | null, slotRivals: number, classCells = 0): number {
+  return gridCellPlan(g, slotRivals, classCells).reduce((n, s) => n + s.cells, 0);
+}
+
+/** Compiled brand matchers per name list - namesAny runs several times
+ * per cell per render, and compiling a regex per brand per call was the
+ * bulk of a keystroke's work on a full battery. */
+const matcherCache = new Map<string, RegExp[]>();
+function brandMatchers(names: string[]): RegExp[] {
+  const k = names.join("\u0001");
+  const hit = matcherCache.get(k);
+  if (hit) return hit;
+  const out: RegExp[] = [];
+  for (const n of names) {
+    const b = n.trim();
+    if (!b) continue;
+    const primary = b.replace(/\s*\([^)]*\)/g, " ").replace(/\s+/g, " ").trim();
+    const forms = primary && primary !== b ? [b, primary] : [b];
+    for (const f of forms) {
+      const esc = f.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+      out.push(new RegExp(`(?:^|[^a-z0-9])${esc}(?:$|[^a-z0-9])`, "i"));
+    }
+  }
+  if (matcherCache.size > 50) matcherCache.clear();
+  matcherCache.set(k, out);
+  return out;
 }
 
 export function namesAny(text: string, names: string[]): boolean {
@@ -615,16 +812,7 @@ export function namesAny(text: string, names: string[]): boolean {
   // the rival Chase. A parenthetical label ("Amazon (beauty)") also
   // matches its speakable name ("Amazon") - the parenthetical is display
   // only and never occurs in natural text.
-  return names.some((n) => {
-    const b = n.trim();
-    if (!b) return false;
-    const primary = b.replace(/\s*\([^)]*\)/g, " ").replace(/\s+/g, " ").trim();
-    const forms = primary && primary !== b ? [b, primary] : [b];
-    return forms.some((f) => {
-      const esc = f.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-      return new RegExp(`(?:^|[^a-z0-9])${esc}(?:$|[^a-z0-9])`, "i").test(text);
-    });
-  });
+  return brandMatchers(names).some((re) => re.test(text));
 }
 
 /** The base read, as editable dimensions. Changing one recomposes the mask
@@ -683,6 +871,11 @@ export interface GridSetupArgs {
   maxScenarios?: number;
   state: GridState | null;
   setState: (s: GridState | null | ((prev: GridState | null) => GridState | null)) => void;
+  /** The grid as of the last setState call, including updates React has
+   * not rendered yet (2026-10-24). Every result that lands after an await
+   * merges into THIS, never into the render-time `state` it started from -
+   * edits made during the wait must survive. Absent = `state`. */
+  getState?: () => GridState | null;
   setBusy: (b: string | null) => void;
   setError: (e: string | null) => void;
   /** Notice slot that survives the advance to the Prompts step (goTo wipes
@@ -695,6 +888,18 @@ export interface GridSetupArgs {
 
 export function useGridSetup(a: GridSetupArgs) {
   const cap = a.maxScenarios ?? MAX_SCENARIOS;
+  /** The latest grid (see GridSetupArgs.getState). */
+  const cur = (): GridState | null => (a.getState ? a.getState() : a.state);
+  /** Merge an operation's result into the latest grid and return what
+   * landed - the functional-update pattern, with the result in hand. */
+  function apply(fn: (g: GridState) => GridState): GridState | null {
+    const base = cur();
+    if (!base) return null;
+    // Functional, so a host without getState still merges into the live
+    // grid; with getState the updater runs on `base` itself.
+    a.setState((prev) => (prev ? fn(prev) : prev));
+    return cur() === base ? fn(base) : cur();
+  }
   async function post<T>(path: string, body: unknown): Promise<T | null> {
     // A hard client-side bound: without it one stalled request freezes the
     // gate's busy state forever (Promise.all never resolves). The server
@@ -726,10 +931,6 @@ export function useGridSetup(a: GridSetupArgs) {
   async function compose(edit?: {
     base: GridState["moderators"];
     rows: ScenarioRow[];
-    /** Cells to carry through the recompose (already rebound if a
-     * scenario was renamed); defaults to the current grid's. Only the
-     * CUSTOM ones survive - composed cells are the recompose's to remake. */
-    cells?: GridCellUi[];
     /** Caller owns the busy indicator (it is running this alongside
      * something else); errors still surface. */
     silent?: boolean;
@@ -741,6 +942,10 @@ export function useGridSetup(a: GridSetupArgs) {
     /** undefined = carry; null = clear; a value = stash the brand view. */
     brandView?: GridState["brandView"];
   }, forBrand = false): Promise<GridState | null> {
+    // Cells are no longer a parameter (2026-10-24): every recompose carries
+    // the WHOLE current battery - a renamed room is rebound on the grid
+    // (rebindRooms) before this runs - and the next cells write keeps each
+    // cell whose engine text is unchanged (mergeWrittenCells).
     if (!edit?.silent) {
       a.setBusy(
         edit ? "Recomposing…" : forBrand ? `Rebuilding scenarios for ${a.brand}…` : "Reading your market…"
@@ -785,8 +990,9 @@ export function useGridSetup(a: GridSetupArgs) {
     // the mask is recomposed against the base in hand (pure code,
     // instant). The view being replaced is kept for "Back to the
     // category view"; the journey advisory stays one-shot.
-    if (forBrand && !edit && a.state) {
-      const keptBase = a.state.moderators;
+    const before = cur();
+    if (forBrand && !edit && before) {
+      const keptBase = before.moderators;
       const masked = await post<{
         scenarios: { label: string; description: string; circumstance?: string; journey: Journey | null }[];
         stages: GridStage[];
@@ -799,12 +1005,13 @@ export function useGridSetup(a: GridSetupArgs) {
       });
       a.setBusy(null);
       if (!masked) return null;
+      const live = cur() ?? before;
       // Stage overrides survive the rebuild exactly as they survive an
       // edited recompose: a kept-but-not-recommended stage (an advisory
       // add like Renewal) was silently dropped here - the rebuild reset
       // keptStages to rules-only, and the save then persisted the loss.
-      const prevByKey = new Map(a.state.stages.map((s) => [s.key, s]));
-      const prevKept = new Set(a.state.keptStages);
+      const prevByKey = new Map(live.stages.map((s) => [s.key, s]));
+      const prevKept = new Set(live.keptStages);
       const rebuildKept = masked.stages
         .filter((s) => {
           const prev = prevByKey.get(s.key);
@@ -814,85 +1021,112 @@ export function useGridSetup(a: GridSetupArgs) {
           return overridden ? wasKept : s.recommended;
         })
         .map((s) => s.key);
+      const rebuiltRows = rowsFromSuggested(masked.scenarios, cap);
       const next: GridState = withScenarioRows(
         {
+          // New rooms: per-room stage scope is re-judged; the base is kept,
+          // so the worry picks ride.
+          ...carriedBattery(live, {
+            sameBase: true, keepScope: false,
+            activeLabels: rebuiltRows.filter((r) => r.on).map((r) => r.label.trim()),
+          }),
           step: "compose",
           moderators: keptBase,
+          moderatorsOffered: live.moderatorsOffered,
           stages: masked.stages,
           keptStages: rebuildKept,
           // Fit advises on the AWARE set (the fresh read computed it);
           // journey advice never refreshes here - the base didn't move.
-          fit: data.fit ?? a.state.fit ?? null,
-          journeyFit: a.state.journeyFit ?? null,
+          fit: data.fit ?? live.fit ?? null,
+          journeyFit: live.journeyFit ?? null,
           scenarios: [],
           reserve: data.reserve,
-          reviewedScenarios: a.state.reviewedScenarios,
-          cells: [],
-          preRebuild: a.state.preRebuild ?? {
-            rows: scenarioRows(a.state),
-            reserve: a.state.reserve,
+          reviewedScenarios: live.reviewedScenarios,
+          preRebuild: live.preRebuild ?? {
+            rows: scenarioRows(live),
+            reserve: live.reserve,
           },
           brandView: null,
-          journeyStageAdds: a.state.journeyStageAdds,
+          journeyStageAdds: live.journeyStageAdds,
         },
-        rowsFromSuggested(masked.scenarios, cap)
+        rebuiltRows
       );
       a.setState(next);
       return next;
     }
     if (!edit?.silent) a.setBusy(null);
-    let rows: ScenarioRow[];
-    if (edit) {
-      // Keep the user's table (ticks, custom rows, off rows); take the
-      // server's clamped journeys for the rows it saw (A4 enforcement).
-      const byLabel = new Map(data.scenarios.map((s) => [s.label, s.journey] as const));
-      rows = edit.rows.map((r) =>
-        r.on && byLabel.has(r.label) ? { ...r, journey: byLabel.get(r.label) ?? null } : r
+    if (!edit) {
+      // A FRESH read (2026-10-24) - a new market, or the first read. Nothing
+      // of any earlier grid applies: no fallback to its fit or journey
+      // advice (a category change used to show the old market's advice
+      // whenever the new read's advisory failed open), its checked rooms,
+      // or its cells.
+      const next: GridState = withScenarioRows(
+        {
+          step: "compose",
+          moderators: data.base,
+          moderatorsOffered: data.base,
+          stages: data.stages,
+          keptStages: data.stages.filter((s) => s.recommended).map((s) => s.key),
+          fit: data.fit ?? null,
+          journeyFit: data.journeyFit ?? null,
+          scenarios: [],
+          reserve: data.reserve,
+          preRebuild: null,
+          brandView: null,
+          cells: [],
+        },
+        rowsFromSuggested(data.scenarios, cap)
       );
-    } else {
-      rows = rowsFromSuggested(data.scenarios, cap);
+      a.setState(next);
+      return next;
     }
+    const prevState = cur();
+    // Keep the user's table (ticks, custom rows, off rows); take the
+    // server's clamped journeys for the rows it saw (A4 enforcement).
+    const byLabel = new Map(data.scenarios.map((s) => [s.label, s.journey] as const));
+    const rows: ScenarioRow[] = edit.rows.map((r) =>
+      r.on && byLabel.has(r.label) ? { ...r, journey: byLabel.get(r.label) ?? null } : r
+    );
+    const activeLabels = rows.filter((r) => r.on && r.label.trim()).map((r) => r.label.trim());
+    const sameBase = !!prevState && sameRead(prevState.moderators, data.base);
+    const prevJourney = new Map((prevState?.scenarios ?? []).map((s) => [s.label.trim(), s.journey] as const));
+    // The mask is unchanged except for removed rooms: same base, same
+    // journeys, no room added (renames were rebound before this ran).
+    const keepScope = sameBase && rows
+      .filter((r) => r.on && r.label.trim())
+      .every((r) => prevJourney.has(r.label.trim()) && sameJourney(prevJourney.get(r.label.trim()), r.journey));
     const next: GridState = withScenarioRows(
       {
+        ...(prevState ? carriedBattery(prevState, { sameBase, keepScope, activeLabels }) : { cells: [] }),
         step: "compose",
         moderators: data.base,
-        moderatorsOffered: edit ? a.state?.moderatorsOffered ?? data.base : data.base,
+        moderatorsOffered: prevState?.moderatorsOffered ?? data.base,
         stages: data.stages,
         keptStages: data.stages.filter((s) => s.recommended).map((s) => s.key),
-        fit: data.fit ?? a.state?.fit ?? null,
-        journeyFit: data.journeyFit ?? a.state?.journeyFit ?? null,
+        fit: data.fit ?? prevState?.fit ?? null,
+        journeyFit: data.journeyFit ?? prevState?.journeyFit ?? null,
         scenarios: [],
         // An edited recompose returns no reserve; the pool carries over
         // (or the restore's explicit pool), as do the already-checked
-        // scenario fingerprints. Custom questions survive the recompose
-        // (a fresh read wipes everything).
-        reserve: data.reserve ?? edit?.reserve ?? a.state?.reserve,
-        // A pill edit inside the brand view keeps the way back; a fresh
-        // read (or an explicit null from the restore) clears it.
-        preRebuild: edit
-          ? edit.preRebuild !== undefined
-            ? edit.preRebuild
-            : a.state?.preRebuild ?? null
-          : null,
-        brandView: edit
-          ? edit.brandView !== undefined
-            ? edit.brandView
-            : a.state?.brandView ?? null
-          : null,
-        // Advisory stage-adds ride through edits; a fresh read resets.
-        journeyStageAdds: edit ? a.state?.journeyStageAdds : undefined,
-        reviewedScenarios: a.state?.reviewedScenarios,
-        baselineCellCount: edit ? 0 : undefined,
-        cells: edit ? (edit.cells ?? a.state?.cells ?? []).filter((c) => c.custom) : [],
+        // scenario fingerprints.
+        reserve: data.reserve ?? edit.reserve ?? prevState?.reserve,
+        // A pill edit inside the brand view keeps the way back; the
+        // restore's explicit null clears it.
+        preRebuild: edit.preRebuild !== undefined ? edit.preRebuild : prevState?.preRebuild ?? null,
+        brandView: edit.brandView !== undefined ? edit.brandView : prevState?.brandView ?? null,
+        // Advisory stage-adds ride through edits.
+        journeyStageAdds: prevState?.journeyStageAdds,
+        reviewedScenarios: prevState?.reviewedScenarios,
       },
       rows
     );
     // An edited recompose keeps the user's OVERRIDES (ticks that disagreed
     // with the old recommendation); everything else follows the new
     // recommendations, so a read change moves the defaults with it.
-    if (edit && a.state) {
-      const prevByKey = new Map(a.state.stages.map((s) => [s.key, s]));
-      const prevKept = new Set(a.state.keptStages);
+    if (prevState) {
+      const prevByKey = new Map(prevState.stages.map((s) => [s.key, s]));
+      const prevKept = new Set(prevState.keptStages);
       next.keptStages = data.stages
         .filter((s) => {
           const prev = prevByKey.get(s.key);
@@ -913,18 +1147,19 @@ export function useGridSetup(a: GridSetupArgs) {
    * a fresh room distinct from the rows AND the reserve, since the reserve
    * is already on screen. Suggestions always inherit the base journey. */
   async function suggestScenario(fromReserve?: string): Promise<void> {
-    if (!a.state) return;
-    const rows = scenarioRows(a.state);
-    const listed = new Set(rows.map((r) => r.label.trim().toLowerCase()));
-    const pool = (a.state.reserve ?? []).filter((s) => !listed.has(s.label.trim().toLowerCase()));
+    const st0 = cur();
+    if (!st0) return;
+    const listedIn = (g: GridState) => new Set(scenarioRows(g).map((r) => r.label.trim().toLowerCase()));
+    const poolIn = (g: GridState) => {
+      const listed = listedIn(g);
+      return (g.reserve ?? []).filter((s) => !listed.has(s.label.trim().toLowerCase()));
+    };
     let scenario: { label: string; description: string };
-    let reserve = a.state.reserve;
     const picked = fromReserve
-      ? pool.find((s) => s.label.trim().toLowerCase() === fromReserve.trim().toLowerCase())
+      ? poolIn(st0).find((s) => s.label.trim().toLowerCase() === fromReserve.trim().toLowerCase())
       : undefined;
     if (picked) {
       scenario = picked;
-      reserve = (a.state.reserve ?? []).filter((s) => s.label !== scenario.label);
     } else {
       if (fromReserve) return;
       a.setBusy("Thinking of another scenario…");
@@ -934,14 +1169,22 @@ export function useGridSetup(a: GridSetupArgs) {
         {
           category: a.category,
           audience: a.audience || undefined,
-          decisionUnit: a.state.moderators.decision_unit,
-          exclude: [...rows, ...pool].map(({ label, description }) => ({ label, description })),
+          decisionUnit: st0.moderators.decision_unit,
+          // The route takes 24; the most recent rows and alternates win.
+          exclude: [...scenarioRows(st0), ...poolIn(st0)].map(({ label, description }) => ({ label, description })).slice(-24),
         }
       );
       a.setBusy(null);
       if (!data) return;
       scenario = data.scenario;
     }
+    // Land on the grid as it is NOW - rows edited, added or ticked while
+    // the model was thinking stay as the user left them.
+    const st = cur();
+    if (!st) return;
+    const rows = scenarioRows(st);
+    if (listedIn(st).has(scenario.label.trim().toLowerCase())) return;
+    const reserve = (st.reserve ?? []).filter((s) => s.label !== scenario.label);
     const active = rows.filter((r) => r.on).length;
     const nextRows: ScenarioRow[] = [
       ...rows,
@@ -950,7 +1193,7 @@ export function useGridSetup(a: GridSetupArgs) {
         original: { ...scenario }, first: { ...scenario },
       },
     ];
-    const drawn: GridState = { ...a.state, reserve };
+    const drawn: GridState = { ...st, reserve };
     if (active < cap) {
       a.setState(drawn);
       await compose({ base: drawn.moderators, rows: nextRows });
@@ -1002,8 +1245,9 @@ export function useGridSetup(a: GridSetupArgs) {
    * it spent a model call per card on every setup for a button most
    * users never press (Tyler, 2026-10-04). */
   async function nearScenario(i: number): Promise<void> {
-    if (!a.state) return;
-    const rows = scenarioRows(a.state);
+    const st0 = cur();
+    if (!st0) return;
+    const rows = scenarioRows(st0);
     const row = rows[i];
     if (!row?.label.trim()) return;
     const used = row.variants ?? 0;
@@ -1019,7 +1263,7 @@ export function useGridSetup(a: GridSetupArgs) {
       const more = await fetchPool(
         poolAnchor(row),
         [...rows.map(({ label, description }) => ({ label, description })), ...pool],
-        String(a.state.moderators.decision_unit ?? "committee"),
+        String(st0.moderators.decision_unit ?? "committee"),
         false
       );
       a.setBusy(null);
@@ -1044,27 +1288,35 @@ export function useGridSetup(a: GridSetupArgs) {
         drawn: variant,
       }),
     }).catch(() => {});
-    const nextRows = rows.map((r, j) =>
-      j === i
-        ? {
-            ...r,
-            label: variant.label,
-            description: variant.description,
-            original: { ...variant },
-            variants: used + 1,
-            pool,
-          }
-        : r
-    );
-    const rebound = rebindSituation(a.state.cells, row.label, variant.label);
-    if (row.on) {
-      await compose({
-        base: a.state.moderators,
-        rows: nextRows,
-        cells: rebound.filter((c) => c.custom),
-      });
+    await swapRoom(row, (r) => ({
+      ...r,
+      label: variant.label,
+      description: variant.description,
+      circumstance: undefined,
+      original: { ...variant },
+      variants: used + 1,
+      pool,
+    }));
+  }
+
+  /** Land a room replacement (near neighbor, reword) on the grid as it is
+   * NOW: the row is found again by its wording - a row the user edited or
+   * removed while the draw ran keeps the user's version and the draw is
+   * dropped - and every label-keyed entry follows the rename. */
+  async function swapRoom(row: ScenarioRow, patch: (r: ScenarioRow) => ScenarioRow): Promise<void> {
+    const st = cur();
+    if (!st) return;
+    const rows = scenarioRows(st);
+    const j = rows.findIndex((r) => r.label === row.label && r.description === row.description);
+    if (j < 0) return;
+    const swapped = patch(rows[j]);
+    const nextRows = rows.map((r, k) => (k === j ? swapped : r));
+    const rebound = rebindRooms(st, [[rows[j].label, swapped.label]]);
+    if (rows[j].on) {
+      a.setState(rebound);
+      await compose({ base: st.moderators, rows: nextRows });
     } else {
-      a.setState(withScenarioRows({ ...a.state, cells: rebound }, nextRows));
+      a.setState(withScenarioRows(rebound, nextRows));
     }
   }
 
@@ -1073,8 +1325,9 @@ export function useGridSetup(a: GridSetupArgs) {
    * variant counter is untouched and the original is kept for Reset. The
    * room check re-runs on its own because the room text changed. */
   async function rewordScenario(i: number, avoid: string[]): Promise<void> {
-    if (!a.state) return;
-    const rows = scenarioRows(a.state);
+    const st0 = cur();
+    if (!st0) return;
+    const rows = scenarioRows(st0);
     const row = rows[i];
     if (!row?.label.trim()) return;
     a.setBusy("Rewording…");
@@ -1082,28 +1335,22 @@ export function useGridSetup(a: GridSetupArgs) {
     const data = await post<{ scenario: { label: string; description: string } }>("/api/setup/grid/scenario", {
       category: a.category,
       audience: a.audience || undefined,
-      decisionUnit: String(a.state.moderators.decision_unit ?? "committee"),
+      decisionUnit: String(st0.moderators.decision_unit ?? "committee"),
       exclude: rows.filter((r) => r.label.trim()).map(({ label, description }) => ({ label, description })).slice(-24),
       reword: { of: { label: row.label, description: row.description }, avoid: avoid.map((x) => x.trim()).filter(Boolean) },
     });
     a.setBusy(null);
     if (!data?.scenario) return;
     const v = data.scenario;
-    const nextRows = rows.map((r, j) => (j === i ? { ...r, label: v.label, description: v.description, circumstance: undefined } : r));
-    const rebound = rebindSituation(a.state.cells, row.label, v.label);
-    if (row.on) {
-      await compose({ base: a.state.moderators, rows: nextRows, cells: rebound.filter((c) => c.custom) });
-    } else {
-      a.setState(withScenarioRows({ ...a.state, cells: rebound }, nextRows));
-    }
+    await swapRoom(row, (r) => ({ ...r, label: v.label, description: v.description, circumstance: undefined }));
   }
 
   /** The worries gate's pool: drawn once per battery (server-cached and
    * coalesced), stored on the grid state so the draft carries it. */
   async function fetchWorries(from?: GridState | null): Promise<GridState | null> {
-    const st = from ?? a.state;
+    const st = from ?? cur();
     if (!st) return null;
-    if (st.worryPool && st.worryPool.length > 0) return st;
+    if (st.worryPool && st.worryPool.length > 0) return cur() ?? st;
     a.setBusy("Reading the worries buyers raise…");
     a.setError(null);
     const data = await post<{ worries: WorryUi[]; offered: string[] }>(
@@ -1118,9 +1365,7 @@ export function useGridSetup(a: GridSetupArgs) {
     );
     a.setBusy(null);
     if (!data) return null;
-    const next: GridState = { ...st, worryPool: data.worries, worryOffered: data.offered };
-    a.setState(next);
-    return next;
+    return apply((g) => ({ ...g, worryPool: data.worries, worryOffered: data.offered }));
   }
 
   /** Value lines (2026-10-04): propose the line and one-tier-down
@@ -1128,7 +1373,7 @@ export function useGridSetup(a: GridSetupArgs) {
    * already set keep their edits; only rooms without an entry take the
    * engine's proposal. */
   async function loadValueLines(fresh?: GridState | null): Promise<GridState | null> {
-    const st = fresh ?? a.state;
+    const st = fresh ?? cur();
     if (!st || st.scenarios.length === 0 || st.scenarios.some((s) => !s.label.trim())) return st ?? null;
     const have = st.valueLines ?? {};
     // Drafts from before the chooser have lines for every room but no
@@ -1142,25 +1387,28 @@ export function useGridSetup(a: GridSetupArgs) {
         scenarios: st.scenarios.map((s) => ({ label: s.label, description: s.description })),
       }),
     }).catch(() => null);
+    // A failed read (non-200, or no payload) lands NOTHING: a room is set
+    // to null ("No Value cell") only when a successful read says so - a
+    // missing entry stays undefined and the engine default applies.
     const data = res && res.ok ? ((await res.json().catch(() => null)) as { valueLines?: Record<string, ValueLineUi | null>; valueCatalog?: ValueCatalogLineUi[] } | null) : null;
     if (!data?.valueLines) return null;
+    const lines = data.valueLines;
     // Merge into the CURRENT state, never a captured one: this runs as a
-    // background warm from the worries gate, and a stale `a.state` here
+    // background warm from the worries gate, and a stale snapshot here
     // predates the worry pool - writing it back wiped the pool and dropped
-    // the gate to its spinner (2026-10-07).
-    const merge = (cur: GridState): GridState => {
-      const merged: Record<string, ValueLineUi | null> = {};
-      const recommended: Record<string, string | null> = { ...(cur.valueRecommended ?? {}) };
-      for (const sc of cur.scenarios) {
-        const have = cur.valueLines?.[sc.label];
-        merged[sc.label] = have !== undefined ? have : (data.valueLines![sc.label] ?? null);
-        if (!(sc.label in recommended)) recommended[sc.label] = data.valueLines![sc.label]?.line ?? null;
+    // the gate to its spinner (2026-10-07). Only rooms the read was asked
+    // about take its verdict; a room added since waits for the next read.
+    const asked = new Set(st.scenarios.map((s) => s.label));
+    return apply((g) => {
+      const merged: Record<string, ValueLineUi | null> = { ...(g.valueLines ?? {}) };
+      const recommended: Record<string, string | null> = { ...(g.valueRecommended ?? {}) };
+      for (const sc of g.scenarios) {
+        if (!asked.has(sc.label)) continue;
+        if (merged[sc.label] === undefined) merged[sc.label] = lines[sc.label] ?? null;
+        if (!(sc.label in recommended)) recommended[sc.label] = lines[sc.label]?.line ?? null;
       }
-      return { ...cur, valueLines: merged, valueRecommended: recommended, ...(data.valueCatalog?.length ? { valueCatalog: data.valueCatalog } : {}) };
-    };
-    let next: GridState | null = null;
-    a.setState((cur) => { if (!cur) return cur; next = merge(cur); return next; });
-    return next ?? merge(st);
+      return { ...g, valueLines: merged, valueRecommended: recommended, ...(data.valueCatalog?.length ? { valueCatalog: data.valueCatalog } : {}) };
+    });
   }
 
   /** Per-room defaults for kept situational stages the mask reaches
@@ -1169,7 +1417,7 @@ export function useGridSetup(a: GridSetupArgs) {
    * the map opens). Mirrors the CoverageGate effect, which stays as the
    * fallback for stages ticked on the map itself. */
   async function loadStageRooms(fresh?: GridState | null): Promise<GridState | null> {
-    const st = fresh ?? a.state;
+    const st = fresh ?? cur();
     if (!st || st.scenarios.length === 0 || st.scenarios.some((s) => !s.label.trim())) return st ?? null;
     const labels = st.scenarios.map((s) => s.label);
     const kept = new Set(st.keptStages);
@@ -1187,22 +1435,27 @@ export function useGridSetup(a: GridSetupArgs) {
       const d = res && res.ok ? ((await res.json().catch(() => null)) as { rooms?: string[] | null } | null) : null;
       return [s.key, d?.rooms ?? null] as const;
     }));
-    const merge = (cur: GridState): GridState => {
-      const stageRooms = { ...(cur.stageRooms ?? {}) };
+    // Merged into the CURRENT grid. A judgment lands only while the rooms it
+    // judged are still the active rooms - a room added, removed or renamed
+    // meanwhile leaves the stage to the next load - and never over a scope
+    // already set (the user's dots, or another judgment).
+    const judgedFor = JSON.stringify(st.scenarios.map(({ label, description }) => [label, description]));
+    return apply((g) => {
+      if (JSON.stringify(g.scenarios.map(({ label, description }) => [label, description])) !== judgedFor) return g;
+      const stageRooms = { ...(g.stageRooms ?? {}) };
       for (const [key, rooms] of results) {
-        if (rooms && rooms.length > 0 && !stageRooms[key]) stageRooms[key] = rooms.filter((l) => cur.scenarios.some((sc) => sc.label === l));
+        if (!rooms || rooms.length === 0 || stageRooms[key]) continue;
+        const lit = rooms.filter((l) => g.scenarios.some((sc) => sc.label === l));
+        if (lit.length > 0) stageRooms[key] = lit;
       }
-      return { ...cur, stageRooms };
-    };
-    let next: GridState | null = null;
-    a.setState((cur) => { if (!cur) return cur; next = merge(cur); return next; });
-    return next ?? merge(st);
+      return { ...g, stageRooms };
+    });
   }
 
   /** Silent pool warm - fired while the user reviews the scenarios, so
    * the worries gate opens on a cache hit. */
   function warmWorries(fresh?: GridState | null): void {
-    const st = fresh ?? a.state;
+    const st = fresh ?? cur();
     if (!st || st.worryPool?.length) return;
     if (st.scenarios.length === 0 || st.scenarios.some((s) => !s.label.trim())) return;
     void fetch("/api/setup/grid/worries", {
@@ -1220,7 +1473,8 @@ export function useGridSetup(a: GridSetupArgs) {
 
   /** Gate 2: one seed prompt per masked cell. */
   async function writeCells(): Promise<GridState | null> {
-    if (!a.state) return null;
+    const st = cur();
+    if (!st) return null;
     // The wizard keys its narrated progress captions on this exact string.
     a.setBusy(CELLS_BUSY);
     a.setError(null);
@@ -1230,12 +1484,12 @@ export function useGridSetup(a: GridSetupArgs) {
         brand: a.brand, category: a.category, competitors: a.competitors, rosterRoles: a.rosterRoles,
         rosterClasses: a.rosterClasses,
         audience: a.audience || undefined,
-        base: a.state.moderators,
-        scenarios: a.state.scenarios,
-        stageKeys: effectiveKeptStages(a.state),
-        stageRooms: a.state.stageRooms,
-        worries: a.state.worries,
-        valueLines: a.state.valueLines,
+        base: st.moderators,
+        scenarios: st.scenarios,
+        stageKeys: effectiveKeptStages(st),
+        stageRooms: st.stageRooms,
+        worries: st.worries,
+        valueLines: st.valueLines,
         retryExhausted: true,
       }
     );
@@ -1249,41 +1503,11 @@ export function useGridSetup(a: GridSetupArgs) {
         `${data.missing.length} planned question${data.missing.length === 1 ? "" : "s"} could not be written - the rest are ready. Go back to the coverage step and confirm again to retry the missing one${data.missing.length === 1 ? "" : "s"}.`
       );
     // A cell whose ENGINE text is unchanged keeps the user's version of it
-    // (2026-10-07, Tyler): hand edits, paraphrases, alternates and flags
-    // survive a re-confirm that regenerated only other cells (a Value line
-    // change redraws one pricing cell, not the battery). Identity is the
-    // cell's design (stage, room, angle, concern); the engine text is the
-    // cell's `original`, so an edited cell still matches its own redraw.
-    const prevByKey = new Map<string, GridCellUi>();
-    for (const q of a.state.cells) if (!q.custom && q.original) prevByKey.set(`${q.stage}|${q.situation ?? ""}|${q.angle}|${q.concern ?? ""}|${q.original.trim()}`, q);
-    const composed: GridCellUi[] = data.cells.map((c) => {
-      const prev = prevByKey.get(`${c.stage}|${c.situation ?? ""}|${c.angle}|${c.concern ?? ""}|${c.text.trim()}`);
-      return prev ? { ...prev, spec: c.spec ?? prev.spec } : { ...c, uid: cellUid(), original: c.text, phrasings: [] };
-    });
-    // Custom questions survive the recompose: re-append each after its
-    // stage's fresh cells, dropping only those whose stage was unticked
-    // or whose scenario no longer exists.
-    const keptStages = new Set(a.state.keptStages);
-    const activeLabels = new Set(a.state.scenarios.map((sc) => sc.label));
-    const customs = a.state.cells.filter(
-      (c) =>
-        c.custom &&
-        keptStages.has(c.stage) &&
-        (c.situation === null || activeLabels.has(c.situation))
-    );
-    const cells = [...composed];
-    for (const c of customs) {
-      const last = cells.map((q, j) => (q.stage === c.stage ? j : -1)).reduce((m, j) => Math.max(m, j), -1);
-      cells.splice(last >= 0 ? last + 1 : cells.length, 0, c);
-    }
-    const next: GridState = {
-      ...a.state,
-      step: "cells",
-      baselineCellCount: composed.length,
-      cells,
-    };
-    a.setState(next);
-    return next;
+    // (2026-10-07, Tyler): hand edits, redraws, paraphrases, alternates and
+    // flags survive a re-confirm that regenerated only other cells (a Value
+    // line change redraws one pricing cell, not the battery). See
+    // mergeWrittenCells for the invariant this rests on.
+    return apply((g) => mergeWrittenCells(g, data.cells));
   }
 
   /** Gate 3: paraphrase sets, in small batches so no request runs long.
@@ -1292,7 +1516,7 @@ export function useGridSetup(a: GridSetupArgs) {
   async function writePhrasings(
     force = false, onlyMissing = false, from?: GridState
   ): Promise<GridState | null> {
-    const st = from ?? a.state;
+    const st = from ?? cur();
     if (!st) return null;
     a.setError(null);
     // Blanked cards keep their place in the grid - the write just skips
@@ -1341,7 +1565,7 @@ export function useGridSetup(a: GridSetupArgs) {
               ...classFields(merged[i]),
             })),
             count: PHRASING_COUNT,
-            avoidConcerns: [...new Set((a.state?.cells ?? []).map((x) => x.concern).filter((x): x is string => !!x))],
+            avoidConcerns: avoidConcernsOf(st.cells),
             force,
           }
         );
@@ -1369,27 +1593,22 @@ export function useGridSetup(a: GridSetupArgs) {
     // set written for a since-edited cell carries phrasedFor so the
     // stale-edit machinery treats it honestly.
     const generatedIdx = new Set(batches.flatMap((b) => b.idx));
-    const writtenByUid = new Map<string, { phrasings: GridPhrasing[]; text: string }>();
+    const writtenByUid = new Map<string, { phrasings: GridPhrasing[]; offered?: string[]; text: string }>();
     for (const k of generatedIdx) {
       const m = merged[k];
-      if (m.uid) writtenByUid.set(m.uid, { phrasings: m.phrasings, text: m.text });
+      if (m.uid) writtenByUid.set(m.uid, { phrasings: m.phrasings, offered: m.phrasingsOffered, text: m.text });
     }
-    a.setState((prev) => {
-      if (!prev) return prev;
-      return {
-        ...prev,
-        step: "phrasings",
-        cells: prev.cells.map((q) => {
-          const w = q.uid ? writtenByUid.get(q.uid) : undefined;
-          return w ? { ...q, phrasings: w.phrasings, phrasedFor: w.text } : q;
-        }),
-      };
-    });
-    const nextCells = st.cells.map((c, i) => {
-      const k = liveIdx.indexOf(i);
-      return k >= 0 ? merged[k] : c;
-    });
-    return { ...st, step: "phrasings", cells: nextCells };
+    // The offered side lands with the set, or the setup decision record
+    // keeps the previous set's (a rewrite) or none (deletions never show
+    // as dropped).
+    return apply((prev) => ({
+      ...prev,
+      step: "phrasings",
+      cells: prev.cells.map((q) => {
+        const w = q.uid ? writtenByUid.get(q.uid) : undefined;
+        return w ? { ...q, phrasings: w.phrasings, phrasingsOffered: w.offered, phrasedFor: w.text } : q;
+      }),
+    }));
   }
 
   /** Top up cells sitting below the quota without touching what they
@@ -1397,7 +1616,7 @@ export function useGridSetup(a: GridSetupArgs) {
    * of anything kept. Cells at zero are the missing-fill's job, not
    * this one's. */
   async function topUpPhrasings(from?: GridState): Promise<GridState | null> {
-    const st = from ?? a.state;
+    const st = from ?? cur();
     if (!st) return null;
     const countIn = (c: GridCellUi) => 1 + c.phrasings.filter((p) => p.text.trim()).length;
     // Empty cells are included: a cell with ZERO paraphrases is almost
@@ -1420,7 +1639,7 @@ export function useGridSetup(a: GridSetupArgs) {
           audience: a.audience || undefined,
           base: st.moderators, scenarios: st.scenarios,
           cells: [{ stage: c.stage, situation: c.situation, angle: c.angle, mode: c.mode ?? null, text: c.text, spec: c.spec ?? undefined, concern: c.concern ?? undefined, ...classFields(c) }],
-          avoidConcerns: [...new Set((a.state?.cells ?? []).map((x) => x.concern).filter((x): x is string => !!x))],
+          avoidConcerns: avoidConcernsOf(st.cells),
           count: PHRASING_COUNT,
           // A SHORT set must force: the cache holds the same short set that
           // created the gap. An EMPTY cell must NOT force: its completed
@@ -1452,17 +1671,13 @@ export function useGridSetup(a: GridSetupArgs) {
       const m = merged[i];
       if (m !== st.cells[i] && m.uid) toppedByUid.set(m.uid, m);
     });
-    a.setState((prev) => {
-      if (!prev) return prev;
-      return {
-        ...prev,
-        cells: prev.cells.map((q) => {
-          const m = q.uid ? toppedByUid.get(q.uid) : undefined;
-          return m ? { ...q, phrasings: m.phrasings, phrasedFor: m.phrasedFor } : q;
-        }),
-      };
-    });
-    return { ...st, cells: merged };
+    return apply((prev) => ({
+      ...prev,
+      cells: prev.cells.map((q) => {
+        const m = q.uid ? toppedByUid.get(q.uid) : undefined;
+        return m ? { ...q, phrasings: m.phrasings, phrasingsOffered: m.phrasingsOffered, phrasedFor: m.phrasedFor } : q;
+      }),
+    }));
   }
 
   /** The cell's offered-prompt history, capturing a live manual edit into
@@ -1480,40 +1695,44 @@ export function useGridSetup(a: GridSetupArgs) {
    * Once the paraphrases have been written, the draw brings its own set
    * along too - the new prompt arrives complete, no missing-fill dance. */
   async function regenerateCell(i: number, near = false): Promise<void> {
-    if (!a.state) return;
-    const c = a.state.cells[i];
+    const st = cur();
+    if (!st) return;
+    const c = st.cells[i];
     if (!c) return;
     if (near ? (c.nears ?? 0) >= MAX_VARIANTS : (c.regens ?? 0) >= MAX_REGENS) return;
     const { alts } = cellHistory(c);
+    // The route takes 1-8 non-empty texts: a blank custom card has offered
+    // nothing yet, and an empty entry 400'd the draw.
+    const offered = [...new Set(alts.map((t) => t.trim()).filter(Boolean))].slice(-8);
     // No global busy: the card shows its own writing state, the rest of
     // the gate stays usable.
     a.setError(null);
     const data = await post<{ text: string; spec?: CellCheckSpec; flags?: string[] }>("/api/setup/grid/cell", {
       brand: a.brand, category: a.category, competitors: a.competitors, rosterRoles: a.rosterRoles,
       audience: a.audience || undefined,
-      base: a.state.moderators,
-      scenarios: a.state.scenarios,
+      base: st.moderators,
+      scenarios: st.scenarios,
       cell: { stage: c.stage, situation: c.situation, angle: c.angle, mode: c.mode ?? null, concern: c.concern ?? undefined, valueLine: c.valueLine ?? undefined, ...classFields(c) },
-      avoid: alts,
+      avoid: offered.length > 0 ? offered : ["(no prompts yet)"],
       // Near mode keeps this prompt's ask and moves one detail.
-      nearTo: near ? c.text : undefined,
+      nearTo: near && c.text.trim() ? c.text : undefined,
       // r26: a fresh draw of a room-pinned pain or outcome must not land
       // on a neighbor room's subject - send the stage's other seeds (with
       // their rooms, so the server can judge the draw on the battery rules).
       siblings: c.situation && (c.stage === "problem_recognition" || c.stage === "use_case")
-        ? a.state.cells.filter((x) => x.stage === c.stage && x.situation && x.situation !== c.situation && x.text.trim()).map((x) => ({ situation: x.situation, text: x.text.trim() })).slice(0, 8)
+        ? st.cells.filter((x) => x.stage === c.stage && x.situation && x.situation !== c.situation && x.text.trim()).map((x) => ({ situation: x.situation, text: x.text.trim() })).slice(0, 8)
         : undefined,
     });
     if (!data) return;
     let generated: GridPhrasing[] = [];
-    if (a.state.step === "phrasings") {
+    if (st.step === "phrasings") {
       const pd = await post<{ phrasings: GridPhrasing[][] }>("/api/setup/grid/phrasings", {
         brand: a.brand, category: a.category, competitors: a.competitors, rosterRoles: a.rosterRoles,
         audience: a.audience || undefined,
-        base: a.state.moderators,
-        scenarios: a.state.scenarios,
+        base: st.moderators,
+        scenarios: st.scenarios,
         cells: [{ stage: c.stage, situation: c.situation, angle: c.angle, mode: c.mode ?? null, text: data.text, spec: data.spec, concern: c.concern ?? undefined, ...classFields(c) }],
-        avoidConcerns: [...new Set((a.state?.cells ?? []).map((x) => x.concern).filter((x): x is string => !!x))],
+        avoidConcerns: avoidConcernsOf(st.cells),
         count: PHRASING_COUNT,
       });
       // A failed set is not fatal - the missing-paraphrases gate catches it.
@@ -1535,6 +1754,9 @@ export function useGridSetup(a: GridSetupArgs) {
           // the freshly generated set (when the write already ran) wins
           // over whatever the bank holds for the new text.
           const swap = swapPhrasings(q, data.text);
+          // `original` becomes the draw (the machine wording the cell now
+          // shows); `engineSeed` is untouched, so the next cells write still
+          // recognizes this as the user's version of the same design.
           return {
             ...q,
             text: data.text,
@@ -1566,10 +1788,11 @@ export function useGridSetup(a: GridSetupArgs) {
     situation: string | null,
     angle = "generic"
   ): Promise<void> {
-    if (!a.state) return;
-    const stage = a.state.stages.find((x) => x.key === stageKey);
+    const st = cur();
+    if (!st) return;
+    const stage = st.stages.find((x) => x.key === stageKey);
     if (!stage) return;
-    const existing = a.state.cells.filter((c) => c.stage === stageKey);
+    const existing = st.cells.filter((c) => c.stage === stageKey);
     // Avoid everything this stage has ever shown - including wordings the
     // user cycled away from - so a suggestion can't re-mint a rejected ask.
     const avoid = [
@@ -1584,8 +1807,8 @@ export function useGridSetup(a: GridSetupArgs) {
     const data = await post<{ text: string; spec?: CellCheckSpec }>("/api/setup/grid/cell", {
       brand: a.brand, category: a.category, competitors: a.competitors, rosterRoles: a.rosterRoles,
       audience: a.audience || undefined,
-      base: a.state.moderators,
-      scenarios: a.state.scenarios,
+      base: st.moderators,
+      scenarios: st.scenarios,
       cell: { stage: stageKey, situation, angle, mode: null },
       avoid: avoid.length > 0 ? avoid : ["(no prompts yet)"],
     });
@@ -1650,8 +1873,9 @@ export function useGridSetup(a: GridSetupArgs) {
 
   /** Cycle a cell through its offered prompts (pure client, instant). */
   function cycleCell(i: number, dir: 1 | -1): void {
-    if (!a.state) return;
-    const c = a.state.cells[i];
+    const st = cur();
+    if (!st) return;
+    const c = st.cells[i];
     if (!c) return;
     const { alts, idx } = cellHistory(c);
     if (alts.length < 2) return;
@@ -1662,13 +1886,14 @@ export function useGridSetup(a: GridSetupArgs) {
     const userAlts = new Set(c.userAlts ?? []);
     if (c.text.trim() && c.original != null && c.text !== c.original) userAlts.add(c.text);
     const cycledToUser = userAlts.has(alts[next]);
-    a.setState({
-      ...a.state,
-      cells: a.state.cells.map((q, j) =>
-        j === i
-          // A cycled-to MACHINE wording becomes the accepted baseline; its
-          // paraphrases come back from the bank when it has been written
-          // before - cycling back is free.
+    apply((g) => ({
+      ...g,
+      cells: g.cells.map((q) =>
+        q.uid === c.uid
+          // A cycled-to MACHINE wording becomes the accepted baseline (the
+          // review's `original`; engineSeed never moves); its paraphrases
+          // come back from the bank when it has been written before -
+          // cycling back is free.
           ? {
               ...q, text: alts[next],
               original: cycledToUser ? q.original : alts[next],
@@ -1681,7 +1906,7 @@ export function useGridSetup(a: GridSetupArgs) {
             }
           : q
       ),
-    });
+    }));
   }
 
   /* ------------------------- cache warmers ------------------------------
@@ -1700,7 +1925,7 @@ export function useGridSetup(a: GridSetupArgs) {
   }
 
   function warmCells(fresh?: GridState | null): void {
-    const st = fresh ?? a.state;
+    const st = fresh ?? cur();
     if (!st || st.keptStages.length === 0 || st.scenarios.length === 0) return;
     if (st.scenarios.some((s) => !s.label.trim())) return;
     void fetch("/api/setup/grid/cells", {
@@ -1729,7 +1954,7 @@ export function useGridSetup(a: GridSetupArgs) {
   }
 
   function warmPhrasings(fresh?: GridState | null): void {
-    const st = fresh ?? a.state;
+    const st = fresh ?? cur();
     if (!st) return;
     const cells = st.cells.filter((c) => c.text.trim());
     if (cells.length === 0) return;
@@ -1757,7 +1982,10 @@ export function useGridSetup(a: GridSetupArgs) {
               ...classFields(cells[i]),
             })),
             count: PHRASING_COUNT,
-            avoidConcerns: [...new Set((a.state?.cells ?? []).map((x) => x.concern).filter((x): x is string => !!x))],
+            // From the state being warmed, exactly as the write builds it
+            // from the state it writes - a guard taken from any other
+            // state keys differently and the warm is never read.
+            avoidConcerns: avoidConcernsOf(st.cells),
             warm: true,
           }),
         }).catch(() => {});
@@ -1769,16 +1997,16 @@ export function useGridSetup(a: GridSetupArgs) {
    * reserve pool) that was in hand before it. Pure-code recompose - the
    * base was never changed by the rebuild, so nothing else moves. */
   function restoreCategoryView(): void {
-    const pr = a.state?.preRebuild;
-    if (!a.state || !pr) return;
+    const st = cur();
+    const pr = st?.preRebuild;
+    if (!st || !pr) return;
     void compose({
-      base: a.state.moderators,
+      base: st.moderators,
       rows: pr.rows,
-      cells: a.state.cells,
       reserve: pr.reserve,
       preRebuild: null,
       // The brand view as left, edits and all - the way back in.
-      brandView: { rows: scenarioRows(a.state), reserve: a.state.reserve },
+      brandView: { rows: scenarioRows(st), reserve: st.reserve },
     });
   }
 
@@ -1786,14 +2014,14 @@ export function useGridSetup(a: GridSetupArgs) {
    * (pure-code recompose, no read); only a first visit does the fresh
    * brand-aware read. The category view is stashed either way. */
   function rebuildForBrand(): void {
-    const bv = a.state?.brandView;
-    if (!a.state || !bv) { void compose(undefined, true); return; }
+    const st = cur();
+    const bv = st?.brandView;
+    if (!st || !bv) { void compose(undefined, true); return; }
     void compose({
-      base: a.state.moderators,
+      base: st.moderators,
       rows: bv.rows,
-      cells: a.state.cells,
       reserve: bv.reserve,
-      preRebuild: { rows: scenarioRows(a.state), reserve: a.state.reserve },
+      preRebuild: { rows: scenarioRows(st), reserve: st.reserve },
       brandView: null,
     });
   }
@@ -1874,7 +2102,9 @@ export function ScenariosGate({
   picks?: string[];
   /** Cost attribution header for the contest check. */
   setupId?: string;
-  onRecompose: (base: GridState["moderators"], rows: ScenarioRow[], cells?: GridCellUi[]) => void;
+  /** Recompose the mask for these rows. Everything else - cells included
+   * - comes from the grid as it stands; a rename rebinds the grid first. */
+  onRecompose: (base: GridState["moderators"], rows: ScenarioRow[]) => void;
   /** A "Your market buys" edit - same recompose, but the wizard narrates
    * what changed via `readDelta`. */
   onRecomposeBase: (base: GridState["moderators"], rows: ScenarioRow[]) => void;
@@ -1925,16 +2155,52 @@ export function ScenariosGate({
   const marketStyle = JOURNEY_FIELDS
     .map((f) => displayOf(f.key, state.moderators[f.key]))
     .join(" · ");
-  const setRows = (next: ScenarioRow[], recompose = false, cells?: GridCellUi[]) => {
-    if (recompose) onRecompose(state.moderators, next, (cells ?? state.cells).filter((c) => c.custom));
-    else setState(withScenarioRows(cells ? { ...state, cells } : state, next));
+  /** `rebound` is the grid with any renamed rooms already rebound
+   * (rebindRooms) - on a recompose it lands first, rows untouched, so the
+   * recompose sees the renames but still tells added rooms apart. */
+  const setRows = (next: ScenarioRow[], recompose = false, rebound?: GridState) => {
+    if (recompose) {
+      if (rebound) setState(rebound);
+      onRecompose(state.moderators, next);
+    } else setState(withScenarioRows(rebound ?? state, next));
   };
   const updateRow = (i: number, patch: Partial<ScenarioRow>, recompose = false) => {
-    // A label edit renames the scenario - custom questions bound to it
-    // follow the new wording instead of being orphaned.
-    const cells =
-      patch.label !== undefined ? rebindSituation(state.cells, rows[i].label, patch.label) : undefined;
-    setRows(rows.map((r, j) => (j === i ? { ...r, ...patch } : r)), recompose, cells);
+    setRows(rows.map((r, j) => (j === i ? { ...r, ...patch } : r)), recompose);
+  };
+  // Label edits (2026-10-24). focusLabel: the label as the field was
+  // entered - blur recomposes only when it actually changed (an unchanged
+  // blur used to recompose and, before carried cells, wipe the battery).
+  // boundLabel: the label the room's cells and entries are bound to right
+  // now - each keystroke rebinds from it, and clearing the field keeps it,
+  // so retyping a cleared label still finds the room's cells.
+  const focusLabel = useRef<Record<number, string>>({});
+  const boundLabel = useRef<Record<number, string>>({});
+  const onLabelFocus = (i: number) => {
+    focusLabel.current[i] = rows[i].label.trim();
+    if (rows[i].label.trim()) boundLabel.current[i] = rows[i].label.trim();
+  };
+  const onLabelChange = (i: number, value: string) => {
+    const from = boundLabel.current[i] ?? rows[i].label.trim();
+    const to = value.trim();
+    let rebound: GridState | undefined;
+    // Passing through another room's label mid-typing must not merge the
+    // two rooms' cells: the binding waits until the label is unique.
+    const taken = rows.some((r, j) => j !== i && r.label.trim() === to);
+    if (from && to && from !== to && !taken) {
+      rebound = rebindRooms(state, [[from, to]]);
+      boundLabel.current[i] = to;
+    }
+    setRows(rows.map((r, j) => (j === i ? { ...r, label: value } : r)), false, rebound);
+  };
+  const onLabelBlur = (i: number) => {
+    const sc = rows[i];
+    const now = sc.label.trim();
+    // Labels are stored trimmed: the routes trim them, and a trailing
+    // space left every label-keyed entry (Value line, stage scope) keyed
+    // on a label no server answer carries.
+    const next = now !== sc.label ? rows.map((r, j) => (j === i ? { ...r, label: now } : r)) : rows;
+    if (sc.on && now && now !== focusLabel.current[i]) setRows(next, true);
+    else if (next !== rows) setRows(next);
   };
 
   const fitFlags = fit
@@ -2360,11 +2626,11 @@ export function ScenariosGate({
               maxLength={60}
               value={sc.label}
               placeholder="label"
-              onChange={(e) => updateRow(i, { label: e.target.value })}
-              onFocus={() => setEditingRoom(true)}
+              onChange={(e) => onLabelChange(i, e.target.value)}
+              onFocus={() => { setEditingRoom(true); onLabelFocus(i); }}
               onBlur={() => {
                 setEditingRoom(false);
-                if (sc.on) onRecompose(state.moderators, rows);
+                onLabelBlur(i);
                 onWarmReview?.();
               }}
             />
@@ -2537,7 +2803,12 @@ export function ScenariosGate({
               <button
                 type="button"
                 aria-label="delete scenario"
-                onClick={() => setRows(rows.filter((_, j) => j !== i), true)}
+                onClick={() => {
+                  // Row indexes shift: the per-field label refs restart.
+                  focusLabel.current = {};
+                  boundLabel.current = {};
+                  setRows(rows.filter((_, j) => j !== i), true);
+                }}
                 className="ml-auto text-ink-3 hover:text-danger text-[15px] leading-none"
               >
                 ×
@@ -2577,20 +2848,23 @@ export function ScenariosGate({
           onClick={() => {
             // Back to the compose-time originals; pools survive so the
             // three near-neighbor draws are available again, instantly.
-            // Custom questions follow each reverting label.
-            let cells = state.cells;
+            // Cells and room-keyed entries follow each reverting label.
+            const renames: [string, string][] = [];
             const nextRows = rows
               .filter((r) => r.suggested)
               .map((r, i) => {
                 const home = r.first ?? r.original ?? { label: r.label, description: r.description };
-                if (home.label !== r.label) cells = rebindSituation(cells, r.label, home.label);
+                if (home.label !== r.label) renames.push([r.label, home.label]);
                 return {
                   ...r, ...home,
+                  circumstance: undefined,
                   original: { ...home },
                   journey: null, on: i < cap, variants: 0,
                 };
               });
-            setRows(nextRows, true, cells);
+            focusLabel.current = {};
+            boundLabel.current = {};
+            setRows(nextRows, true, rebindRooms(state, renames));
           }}
           className="text-[13px] font-medium text-ink-3 hover:text-ink"
         >
@@ -2776,7 +3050,9 @@ export function ScenarioReviewModal({
 /** One column's Value line on the coverage step: "<line> vs <counterpart>",
  * click to edit both ends, or set "none" (no Value cell for that room). */
 function ValueLineEditor({ value, disabled, onChange, options, recommended, category }: {
-  value: ValueLineUi | null;
+  /** undefined = not proposed yet (the engine default applies at the
+   * write); null = the user chose no Value cell. */
+  value: ValueLineUi | null | undefined;
   disabled: boolean;
   onChange: (v: ValueLineUi | null) => void;
   /** The brand's lines (2026-10-06, Tyler): the compact display opens, on
@@ -2839,7 +3115,7 @@ function ValueLineEditor({ value, disabled, onChange, options, recommended, cate
       onClick={() => setEditing(true)}
       title="Value asks whether your product is worth paying more for, compared with cheaper options. This is the product line we ask about for this buyer and what it is compared with. Click to choose another of your lines, your own, or none."
       className="text-[10px] leading-tight text-primary hover:opacity-80">
-      {value ? (<><span className="font-medium">{value.line}</span>{same(value.line, recommended) ? <span className="text-ink-3"> (recommended)</span> : null}<br /><span className="text-ink-3">vs {value.counterpart}</span></>) : <span className="text-ink-3">no Value cell</span>}
+      {value ? (<><span className="font-medium">{value.line}</span>{same(value.line, recommended) ? <span className="text-ink-3"> (recommended)</span> : null}<br /><span className="text-ink-3">vs {value.counterpart}</span></>) : value === null ? <span className="text-ink-3">no Value cell</span> : <span className="text-ink-3">line picked at write</span>}
     </button>
   );
 }
@@ -2848,7 +3124,9 @@ export function CoverageGate({
   state, setState, busy, onEditWorries, brand, category, setupId,
 }: {
   state: GridState;
-  setState: (s: GridState) => void;
+  /** Takes an updater too: the per-room judgment lands after a fetch and
+   * must merge into the grid as it is then. */
+  setState: (s: GridState | ((prev: GridState | null) => GridState | null)) => void;
   busy: boolean;
   /** Back to the Buyer worries gate - the owner of doubt coverage. */
   onEditWorries?: () => void;
@@ -2865,8 +3143,11 @@ export function CoverageGate({
   // and stay editable. Judged once per stage (stageRooms set = judged);
   // an empty or failed judgment keeps every room lit.
   const judging = useRef(new Set<string>());
-  const stateRef = useRef(state);
-  useEffect(() => { stateRef.current = state; }, [state]);
+  const mounted = useRef(true);
+  useEffect(() => {
+    mounted.current = true;
+    return () => { mounted.current = false; };
+  }, []);
   useEffect(() => {
     if (!brand || !category) return;
     const activeRooms = state.scenarios.filter((s) => s.label.trim());
@@ -2878,6 +3159,7 @@ export function CoverageGate({
       if (s.columns.some((c) => labels.includes(c))) continue;
       if (state.stageRooms?.[s.key] || judging.current.has(s.key)) continue;
       judging.current.add(s.key);
+      const judgedFor = JSON.stringify(activeRooms.map(({ label, description }) => [label, description]));
       void fetch("/api/setup/grid/stage_rooms", {
         method: "POST",
         headers: { "Content-Type": "application/json", ...(setupId ? { "x-setup-id": setupId } : {}) },
@@ -2886,10 +3168,18 @@ export function CoverageGate({
         .then((r) => (r.ok ? r.json() : null))
         .then((d: { rooms?: string[] | null } | null) => {
           const judged = d?.rooms;
-          if (!judged || judged.length === 0) return;
-          const cur = stateRef.current;
-          if (cur.stageRooms?.[s.key]) return;
-          setState({ ...cur, stageRooms: { ...(cur.stageRooms ?? {}), [s.key]: judged.filter((l) => cur.scenarios.some((sc: { label: string }) => sc.label === l)) } });
+          // Left the map, or nothing to light: the warm path (loadStageRooms)
+          // owns the stage from here.
+          if (!judged || judged.length === 0 || !mounted.current) return;
+          setState((cur) => {
+            // Stale: the rooms changed while it was judged, or a scope was
+            // set meanwhile (the user's dots, or the warm's judgment).
+            if (!cur || cur.stageRooms?.[s.key]) return cur;
+            const active = cur.scenarios.filter((sc) => sc.label.trim());
+            if (JSON.stringify(active.map(({ label, description }) => [label, description])) !== judgedFor) return cur;
+            const lit = judged.filter((l) => cur.scenarios.some((sc) => sc.label === l));
+            return lit.length > 0 ? { ...cur, stageRooms: { ...(cur.stageRooms ?? {}), [s.key]: lit } } : cur;
+          });
         })
         .catch(() => {})
         .finally(() => judging.current.delete(s.key));
@@ -3038,7 +3328,7 @@ export function CoverageGate({
             <td key={sc.label} className="px-1.5 py-1 text-center align-top">
               {effective.includes(sc.label) ? (
                 <ValueLineEditor
-                  value={state.valueLines?.[sc.label] ?? null}
+                  value={state.valueLines?.[sc.label]}
                   disabled={busy}
                   onChange={(v) => setState({ ...state, valueLines: { ...(state.valueLines ?? {}), [sc.label]: v } })}
                   options={state.valueCatalog}
@@ -3415,6 +3705,14 @@ export function CellsGate({
   const [openPhr, setOpenPhr] = useState<string | null>(null);
   const written = state.step === "phrasings";
   const countOf = (c: GridCellUi) => 1 + c.phrasings.filter((p) => p.text.trim()).length;
+  /** Branded/blind per cell, computed once per cells change (it was run
+   * three times per cell per render, on every keystroke). */
+  const brandedOf = useMemo(() => {
+    const m = new Map<GridCellUi, boolean>();
+    for (const c of state.cells) m.set(c, namesAny(c.text, brandNames));
+    return m;
+  }, [state.cells, brandNames]);
+  const isBranded = (c: GridCellUi): boolean => brandedOf.get(c) ?? namesAny(c.text, brandNames);
   const draw = async (i: number, kind: "new" | "near") => {
     const uid = state.cells[i]?.uid;
     if (!uid || pendingMap[uid]) return;
@@ -3482,7 +3780,7 @@ export function CellsGate({
               // Stats count only cells with text - a blanked card still
               // shows for editing, but ships nothing (matching the footer).
               const live = scells.filter((c) => c.text.trim());
-              const branded = live.filter((c) => namesAny(c.text, brandNames)).length;
+              const branded = live.filter((c) => isBranded(state.cells[c.i])).length;
               const blind = live.length - branded;
               const prompts = live.reduce((n, c) => n + countOf(c), 0);
               // Flagged seeds surface at the stage title too (Tyler
@@ -3545,12 +3843,12 @@ export function CellsGate({
                             </span>
                             <span
                               className={`rounded-full px-2 py-px text-[9.5px] font-medium ${
-                                namesAny(c.text, brandNames)
+                                isBranded(state.cells[c.i])
                                   ? "bg-warning/10 text-warning"
                                   : "bg-primary-soft text-primary"
                               }`}
                             >
-                              {namesAny(c.text, brandNames) ? "branded" : "blind"}
+                              {isBranded(state.cells[c.i]) ? "branded" : "blind"}
                             </span>
                             {!!c.seedFlags?.length && (
                               <span
@@ -3870,6 +4168,9 @@ export function CellsGate({
 export interface CellReviewItem {
   /** Cell index in the grid (prompt index, in classic mode). */
   index: number;
+  /** The cell's uid (grid mode): the choice lands on THIS cell even if
+   * cells moved while the check ran. */
+  uid?: string;
   /** Set when the flagged text is a paraphrase: its index in the cell's
    * set. Absent = the seed prompt itself. */
   phr?: number;
