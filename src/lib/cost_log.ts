@@ -118,9 +118,45 @@ export function logCost(entry: {
     .catch((err) => console.error("cost ledger write failed:", err));
 }
 
-/** Tag the request's spend with the wizard's setup id when the client sent
- * one (x-setup-id) - one line at the top of every setup route handler. */
-export function tagSetupFromRequest(req: Request): void {
+const SETUP_ID_RE = /^[0-9a-f-]{36}$/i;
+
+/** Ownership verdicts per (user, setup id), memoized per instance: a setup
+ * walk sends dozens of requests under one id, and a draft's owner never
+ * changes. Only positive verdicts are kept for long - a draft saved a
+ * moment after its first spend call must be able to pass. */
+const ownedMemo = new Map<string, { ok: boolean; at: number }>();
+const OWNED_OK_MS = 30 * 60_000;
+const OWNED_NO_MS = 15_000;
+
+/** True when `setupId` is a stored draft owned by this caller. Dev mode
+ * (userId null with auth off) owns the user-less drafts, as listing does.
+ * One primary-key probe per request at most (memoized), never per model
+ * call. */
+export async function ownsSetup(setupId: string, userId: string | null): Promise<boolean> {
+  if (!SETUP_ID_RE.test(setupId)) return false;
+  const k = `${userId ?? "-"}|${setupId}`;
+  const hit = ownedMemo.get(k);
+  if (hit && Date.now() - hit.at < (hit.ok ? OWNED_OK_MS : OWNED_NO_MS)) return hit.ok;
+  const row = await store.getSetupDraftOwner(setupId).catch(() => null);
+  const ok = row !== null && row.user_id === userId;
+  if (ownedMemo.size > 2000) ownedMemo.clear();
+  ownedMemo.set(k, { ok, at: Date.now() });
+  return ok;
+}
+
+/** The wizard's setup id (x-setup-id) this request's spend books to, or
+ * null. The id is client-chosen, so it is honored only when it names a
+ * draft the caller owns: spend under anyone else's id (or before the
+ * first draft save) books untagged. The demo session never owns a draft
+ * (it cannot store one). Call AFTER auth and tag in the handler itself -
+ * `tagCosts({ setupId: await setupIdFromRequest(req, auth) })` - because
+ * tagCosts inside an awaited helper would not reach the caller's context. */
+export async function setupIdFromRequest(
+  req: Request,
+  auth: { userId: string | null; email: string | null }
+): Promise<string | null> {
+  if (auth.email === "demo" && auth.userId === null) return null;
   const id = req.headers.get("x-setup-id");
-  if (id && /^[0-9a-f-]{36}$/i.test(id)) tagCosts({ setupId: id });
+  if (!id || !SETUP_ID_RE.test(id)) return null;
+  return (await ownsSetup(id, auth.userId)) ? id : null;
 }

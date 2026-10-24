@@ -52,6 +52,7 @@ export default function AppHome({
   const [confirmDelete, setConfirmDelete] = useState<SetupDraft | null>(null);
   const [showArchived, setShowArchived] = useState(false);
   const [unarchiveError, setUnarchiveError] = useState<string | null>(null);
+  const [resumeError, setResumeError] = useState<string | null>(null);
   const activeProjects = projects.filter((p) => !p.archived_at);
   const archivedProjects = projects.filter((p) => p.archived_at);
   const isAdmin = initialIsAdmin;
@@ -88,17 +89,24 @@ export default function AppHome({
     // hydrate the wizard from the stale list row and then save THAT back
     // over the newer row. Wait for the save, then open the fresh row.
     const pending = pendingSaves.current.get(d.id);
-    if (pending) {
-      await pending;
-      const res = await fetch("/api/drafts").catch(() => null);
-      if (res?.ok) {
-        const list: SetupDraft[] = (await res.json()).drafts ?? [];
-        setDrafts(list);
-        d = list.find((x) => x.id === d.id) ?? d;
-      }
+    if (pending) await pending;
+    // The list carries only each draft's summary (2026-10-24 egress fix);
+    // the wizard state comes from the full row. Never open on the summary:
+    // the wizard would save it back over the real state.
+    setResumeError(null);
+    const res = await fetch(`/api/drafts/${d.id}`).catch(() => null);
+    const full: SetupDraft | null = res?.ok ? ((await res.json().catch(() => ({}))).draft ?? null) : null;
+    if (!full) {
+      setResumeError(
+        res?.status === 404
+          ? "That setup no longer exists"
+          : "Could not open that setup - try again in a moment"
+      );
+      if (res?.status === 404) setDrafts((prev) => prev.filter((x) => x.id !== d.id));
+      return;
     }
-    const mode = ((d.wizard as { mode?: SetupMode } | null)?.mode ?? "classic") as SetupMode;
-    setWizard({ mode, brand: d.brand, draft: d });
+    const mode = ((full.wizard as { mode?: SetupMode } | null)?.mode ?? "classic") as SetupMode;
+    setWizard({ mode, brand: full.brand, draft: full });
   }
 
   async function unarchive(id: string) {
@@ -234,6 +242,7 @@ function draftStatus(d: SetupDraft): string {
       {drafts.length > 0 && (
         <section>
           <h2 className="section-label mb-3">Saved setups</h2>
+          {resumeError && <p className="text-sm text-danger mb-2">{resumeError}</p>}
           <ul className="grid gap-2">
             {drafts.map((d) => (
               <li key={d.id} className="card flex items-center justify-between gap-4 px-5 py-3.5">

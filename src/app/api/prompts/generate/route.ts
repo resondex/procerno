@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
-import { requireAuth } from "@/lib/auth";
-import { tagSetupFromRequest } from "@/lib/cost_log";
+import { requireMember } from "@/lib/auth";
+import { setupIdFromRequest, tagCosts } from "@/lib/cost_log";
 import { apiKeyConfigured } from "@/lib/engine/providers";
 import { getBattery } from "@/lib/engine/suggest";
 import { generatePromptBattery } from "@/lib/engine/prompts";
@@ -17,11 +17,11 @@ const schema = z.object({
 
 /** Generate an editable prompt battery for review before tracker creation. */
 export async function POST(req: Request) {
-  const auth = await requireAuth();
+  const auth = await requireMember();
   if (auth instanceof NextResponse) return auth;
   // Classic-battery spend books to the wizard's setup id like every other
   // setup route, so attachSetupCosts can transfer it at create.
-  tagSetupFromRequest(req);
+  tagCosts({ setupId: await setupIdFromRequest(req, auth) });
   const parsed = schema.safeParse(await req.json().catch(() => null));
   if (!parsed.success) {
     return NextResponse.json(

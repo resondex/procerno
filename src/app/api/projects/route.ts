@@ -8,33 +8,45 @@ import {
   isStaff,
   PLAN_SCENARIO_CAPS,
   PLAN_TRACKER_LIMITS,
-  requireAuth,
+  requireMember,
 } from "@/lib/auth";
-import { tagCosts } from "@/lib/cost_log";
+import { ownsSetup, tagCosts } from "@/lib/cost_log";
 import { generatePromptBattery } from "@/lib/engine/prompts";
-import { questionTypeOf } from "@/lib/engine/battery_checks";
 import { seedDictionary } from "@/lib/engine/suggest";
-import { humanize, namesAnyBrand } from "@/lib/engine/instrument";
-import { apiKeyConfigured, availableEngines, currentEngineIds, ENGINES, getEngine } from "@/lib/engine/providers";
+import { availableEngines, currentEngineIds, ENGINES, getEngine } from "@/lib/engine/providers";
+import {
+  CellShape,
+  claimWriteLease,
+  instrumentRows,
+  JourneysShape,
+  releaseWriteLease,
+  scenarioCount,
+  SetupDecisionShape,
+  WorryDecisionShape,
+} from "./instrument_write";
+
+// Create writes the project and its whole instrument in one request; the
+// per-user lease (instrument_write.ts) is sized above this.
+export const maxDuration = 120;
 
 const createSchema = z.object({
-  name: z.string().trim().min(1).optional(),
+  name: z.string().trim().min(1).max(120).optional(),
   setupId: z.string().uuid().optional(),
-  brand: z.string().trim().min(1),
-  competitors: z.array(z.string().trim().min(1)).max(12).default([]),
-  category: z.string().trim().min(1),
-  audience: z.string().trim().optional(),
+  brand: z.string().trim().min(1).max(80),
+  competitors: z.array(z.string().trim().min(1).max(80)).max(12).default([]),
+  category: z.string().trim().min(1).max(120),
+  audience: z.string().trim().max(160).optional(),
   /** The tracker's core engine panel — scheduled runs and headline metrics
    * use exactly this set. Defaults to the default-tier engine per vendor.
    * The cap tracks the registry (retired ids included, they resolve to
    * successors) - a hardcoded 8 rejected every full-panel Confirm with a
    * 400, the same defect the PATCH route had. */
-  engines: z.array(z.string().trim().min(1)).max(ENGINES.length).optional(),
+  engines: z.array(z.string().trim().min(1).max(80)).max(ENGINES.length).optional(),
   // User-reviewed battery from /api/prompts/generate; templates when absent.
   prompts: z
     .array(
       z.object({
-        text: z.string().trim().min(1),
+        text: z.string().trim().min(1).max(2000),
         theme: z.enum([
           "discovery",
           "recommendation",
@@ -47,71 +59,29 @@ const createSchema = z.object({
     .min(4)
     .max(30)
     .optional(),
-  /** Grid-built battery from /api/setup/grid, as reviewed in the setup UI.
+  /** Grid-built battery from the setup wizard's /api/setup/grid/* gates.
    * Mutually exclusive with `prompts`; the classic path is untouched. */
   grid: z
     .object({
-      moderators: z.record(z.string(), z.unknown()),
+      /** Validated like every setup route validates it: a read this route
+       * stored unchecked (a >600-char rationale) 400'd every later call. */
+      moderators: ModeratorsShape,
       /** The worries gate's recommended-vs-decided record - stored on the
        * project (worry_decision) as the recommender's training data. */
-      worryDecision: z
-        .object({
-          recommended: z
-            .array(z.object({ concern: z.string().trim().min(1).max(80), stage: z.string().trim().min(1).max(40) }))
-            .max(40),
-          decided: z
-            .array(z.object({ concern: z.string().trim().min(1).max(80), stage: z.string().trim().min(1).max(40) }))
-            .max(40),
-        })
-        .optional(),
+      worryDecision: WorryDecisionShape.optional(),
       /** The setup's offered-vs-accepted record (2026-10-06, Tyler): stored
        * on the project as setup_decision, opaque to this route. */
-      setupDecision: z.record(z.string(), z.unknown()).optional(),
-      journeys: z
-        .record(
-          z.string(),
-          z
-            .object({
-              involvement: z.enum(["considered", "habitual"]),
-              verifiability: z.enum(["spec", "taste", "trust"]),
-              think_feel: z.enum(["think", "feel"]),
-              decision_unit: z.enum(["solo", "household", "committee"]),
-            })
-            .nullable()
-        )
-        .optional(),
-      cells: z
-        .array(
-          z.object({
-            stage: z.string().trim().min(1),
-            layer: z.string().trim().min(1),
-            situation: z.string().trim().nullable(),
-            angle: z.string().trim().min(1),
-            mode: z.string().trim().nullable().optional(),
-            qtype: z.string().trim().max(40).nullable().optional(),
-            concern: z.string().trim().max(80).nullable().optional(),
-            text: z.string().trim().min(1),
-            /** The confirmed paraphrase set for this cell; each becomes its
-             * own prompt under the same intent, carrying its buyer voice. */
-            phrasings: z
-              .array(
-                z.object({
-                  text: z.string().trim().min(1),
-                  asker: z.string().trim().optional(),
-                })
-              )
-              .max(20)
-              .optional(),
-          })
-        )
-        .min(4)
-        .max(80),
+      setupDecision: SetupDecisionShape.optional(),
+      journeys: JourneysShape.optional(),
+      cells: z.array(CellShape).min(4).max(80),
     })
     .optional(),
 });
 
 export async function GET() {
-  const auth = await requireAuth();
+  // Members only: every share-link viewer is the same "share" user, so a
+  // share context listing by userId would see the others' trackers.
+  const auth = await requireMember();
   if (auth instanceof NextResponse) return auth;
   // Staff see every tracker; members also see their orgs' trackers.
   let projects;
@@ -128,17 +98,15 @@ export async function GET() {
       projects = [...projects, ...orgProjects.filter((p) => !seen.has(p.id))];
     }
   }
-  const withRuns = await Promise.all(
-    projects.map(async (p) => ({
-      ...p,
-      latestRun: (await store.listRuns(p.id))[0] ?? null,
-    }))
-  );
+  // One roundtrip for every tracker's newest run (was listRuns per
+  // project, every run row shipped to read [0]).
+  const latest = await store.latestRuns(projects.map((p) => p.id));
+  const withRuns = projects.map((p) => ({ ...p, latestRun: latest[p.id] ?? null }));
   return NextResponse.json({ projects: withRuns });
 }
 
 export async function POST(req: Request) {
-  const auth = await requireAuth();
+  const auth = await requireMember();
   if (auth instanceof NextResponse) return auth;
   const body = await req.json().catch(() => null);
   const parsed = createSchema.safeParse(body);
@@ -147,6 +115,39 @@ export async function POST(req: Request) {
       { error: parsed.error.issues[0]?.message ?? "invalid input" },
       { status: 400 }
     );
+  }
+  // One create at a time per user: a double-submit (or a retry while the
+  // first is still writing) gets a 409 instead of a second tracker, and
+  // the plan-limit check below runs inside the lease, so two creates can
+  // no longer both pass it.
+  const leaseKey = `create_project:${auth.userId ?? "dev"}`;
+  const lease = await claimWriteLease(leaseKey);
+  if (!lease) {
+    return NextResponse.json(
+      { error: "a tracker is already being created - try again in a moment" },
+      { status: 409 }
+    );
+  }
+  try {
+    return await create(auth, parsed.data);
+  } finally {
+    await releaseWriteLease(leaseKey, lease);
+  }
+}
+
+async function create(
+  auth: { userId: string | null; email: string | null },
+  data: z.infer<typeof createSchema>
+): Promise<NextResponse> {
+  // Idempotent per setup: a re-submit of a setup that already became a
+  // tracker returns that tracker instead of a duplicate.
+  const createdKey = data.setupId ? `setup_created:${data.setupId}` : null;
+  if (createdKey) {
+    const prior = await store.cacheGet(createdKey, 7 * 24 * 3600 * 1000).catch(() => null);
+    const existing = prior ? await store.getProject(prior).catch(() => null) : null;
+    if (existing && existing.user_id === auth.userId && !existing.archived_at) {
+      return NextResponse.json({ project: existing }, { status: 200 });
+    }
   }
 
   if (auth.userId !== null) {
@@ -165,10 +166,8 @@ export async function POST(req: Request) {
       );
     }
     // The wizard enforces the scenario cap too; this is the authority.
-    if (parsed.data.grid) {
-      const scenarios = new Set(
-        parsed.data.grid.cells.map((c) => c.situation).filter(Boolean)
-      ).size;
+    if (data.grid) {
+      const scenarios = scenarioCount(data.grid.cells);
       const cap = PLAN_SCENARIO_CAPS[plan];
       if (scenarios > cap) {
         return NextResponse.json(
@@ -181,8 +180,8 @@ export async function POST(req: Request) {
     }
   }
 
-  const { brand, competitors, category } = parsed.data;
-  const audience = parsed.data.audience || null;
+  const { brand, competitors, category } = data;
+  const audience = data.audience || null;
   // No seed taxonomy at creation: the reason taxonomy is discovered from the
   // collected answers (open-coded discovery pass -> clustering -> ratified),
   // never guessed up front. Measured 2026-09-22: generated seeds anticipate
@@ -190,7 +189,7 @@ export async function POST(req: Request) {
   // suppress discovery of the rest (absorption into nearby listed codes).
   const reasonTaxonomy: string[] = [];
   const requestedEngines = currentEngineIds(
-    (parsed.data.engines ?? []).filter((m) => getEngine(m))
+    (data.engines ?? []).filter((m) => getEngine(m))
   );
   const engineSet =
     requestedEngines.length > 0
@@ -198,9 +197,12 @@ export async function POST(req: Request) {
       : availableEngines()
           .slice(0, 1)
           .map((e) => e.id);
-  const grid = parsed.data.grid;
+  const grid = data.grid;
+  // Rows are built (aliases read) BEFORE the project exists, so nothing
+  // between createProject and the instrument write can fail slowly.
+  const rows = grid ? await instrumentRows(grid.cells, brand, competitors, category) : null;
   const project = await store.createProject({
-    name: parsed.data.name ?? brand,
+    name: data.name ?? brand,
     brand,
     competitors,
     category,
@@ -212,56 +214,44 @@ export async function POST(req: Request) {
     scenarioJourneys: grid?.journeys ? JSON.stringify(grid.journeys) : null,
     instrumentVersion: grid ? 1 : 0,
   });
-  if (parsed.data.setupId) {
-    // Transfer setup-phase ledger rows onto the project the moment it
-    // exists - the tracker's costs are one series from wizard open.
-    // Both instrument modes: classic batteries spend through the wizard
-    // too, not only the grid.
-    await store.attachSetupCosts(project.id, parsed.data.setupId).catch(() => 0);
+  try {
+    if (rows && grid) {
+      // Intents and prompts in ONE transaction: a failure leaves no
+      // half-written battery.
+      await store.replaceInstrument(project.id, { reset: null, cells: rows });
+      if (grid.worryDecision) {
+        await store.setWorryDecision(project.id, JSON.stringify(grid.worryDecision));
+      }
+      if (grid.setupDecision) {
+        await store.setSetupDecision(project.id, JSON.stringify(grid.setupDecision));
+      }
+    } else {
+      await store.insertPrompts(
+        project.id,
+        data.prompts ?? generatePromptBattery({ brand, category, audience })
+      );
+    }
+  } catch (err) {
+    // The tracker never existed for the user: remove the shell so a retry
+    // starts clean (and it never counts against the plan).
+    console.error(`create: instrument write failed for ${project.id}:`, err);
+    await store.deleteProject(project.id).catch(() => {});
+    return NextResponse.json(
+      { error: "the tracker could not be saved - try again" },
+      { status: 500 }
+    );
   }
-  if (grid) {
-    // Grid path: intents carry the stage identity; prompts carry the stage
-    // as their theme UNLESS the text names the brand or a rival, in which
-    // case the prompt stores "branded" so the unbranded funnel stays blind.
-    // Each cell's seed prompt and its paraphrases all hang off one intent;
-    // the theme is decided per prompt, so a paraphrase that names a brand is
-    // fenced off individually even if its seed is blind.
-    const intents = await store.insertIntents(
-      project.id,
-      grid.cells.map((c) => ({
-        stage: c.stage, layer: c.layer, situation: c.situation, angle: c.angle,
-        // House punctuation on the way in - covers text frozen in drafts
-        // that predate the humanize coverage.
-        mode: c.mode ?? null,
-        qtype: c.qtype ?? questionTypeOf({ stage: c.stage, angle: c.angle, text: c.text }, project.brand, category),
-        concern: c.concern ?? null,
-        text: humanize(c.text),
-      }))
-    );
-    await store.insertPrompts(
-      project.id,
-      grid.cells.flatMap((c, i) =>
-        [{ text: c.text, asker: null as string | null }, ...(c.phrasings ?? []).map((p) => ({ text: p.text, asker: (p.asker || null) as string | null }))].map(
-          ({ text, asker }) => ({
-            text: humanize(text),
-            theme: namesAnyBrand(text, brand, competitors) ? "branded" : c.stage,
-            intentId: intents[i]?.id ?? null,
-            asker,
-          })
-        )
-      )
-    );
-    if (grid.worryDecision) {
-      await store.setWorryDecision(project.id, JSON.stringify(grid.worryDecision));
-    }
-    if (grid.setupDecision) {
-      await store.setSetupDecision(project.id, JSON.stringify(grid.setupDecision));
-    }
-  } else {
-    await store.insertPrompts(
-      project.id,
-      parsed.data.prompts ?? generatePromptBattery({ brand, category, audience })
-    );
+  if (data.setupId && (await ownsSetup(data.setupId, auth.userId))) {
+    // Transfer setup-phase ledger rows onto the project the moment it
+    // exists - the tracker's costs are one series from wizard open. Only
+    // a setup id that names the caller's own draft: the id is client-
+    // chosen, and attaching someone else's setup would move their spend
+    // onto this tracker. Both instrument modes: classic batteries spend
+    // through the wizard too, not only the grid.
+    await store.attachSetupCosts(project.id, data.setupId).catch(() => 0);
+  }
+  if (createdKey) {
+    await store.cacheSet(createdKey, project.id, { brand, category, source: "create", projectId: project.id }).catch(() => {});
   }
   // The seed's model spend belongs to the project that now exists - without
   // the tag it landed in the ledger unattributed.

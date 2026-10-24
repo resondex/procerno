@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
-import { tagSetupFromRequest } from "@/lib/cost_log";
+import { setupIdFromRequest, tagCosts } from "@/lib/cost_log";
 import { z } from "zod";
-import { cacheSource, requireAuthOrDemo } from "@/lib/auth";
+import { cacheSource, requireMemberOrDemo } from "@/lib/auth";
 import { apiKeyConfigured } from "@/lib/engine/providers";
 import { reviewScenarioFit } from "@/lib/engine/instrument";
 
@@ -28,9 +28,9 @@ const Body = z.object({
  * scenarios gate never blocks on it, and a failure returns empty advice.
  */
 export async function POST(req: Request) {
-  tagSetupFromRequest(req);
-  const auth = await requireAuthOrDemo();
+  const auth = await requireMemberOrDemo();
   if (auth instanceof NextResponse) return auth;
+  tagCosts({ setupId: await setupIdFromRequest(req, auth) });
   if (!apiKeyConfigured()) {
     return NextResponse.json({ error: "OPENAI_API_KEY is not configured" }, { status: 503 });
   }

@@ -893,6 +893,33 @@ export const pgStore: Store = {
     return rows.map(rowToDraft);
   },
 
+  async listSetupDraftMeta(userId) {
+    const sql = await db();
+    // Egress (2026-10-24): the wizard blob is the bulk of a draft row and
+    // the list renders only its summary - the projection runs in the
+    // database, so the blob never leaves it. Drafts are written by
+    // JSON.stringify, so the ::json cast is safe.
+    const rows =
+      userId === null
+        ? await sql`SELECT id, user_id, brand, category, competitors, audience, prompts, updated_at,
+            CASE WHEN wizard IS NULL THEN NULL ELSE json_build_object(
+              'mode', wizard::json->>'mode', 'step', wizard::json->>'step',
+              'studyName', wizard::json->>'studyName')::text END AS wizard
+            FROM setup_drafts WHERE user_id IS NULL ORDER BY updated_at DESC`
+        : await sql`SELECT id, user_id, brand, category, competitors, audience, prompts, updated_at,
+            CASE WHEN wizard IS NULL THEN NULL ELSE json_build_object(
+              'mode', wizard::json->>'mode', 'step', wizard::json->>'step',
+              'studyName', wizard::json->>'studyName')::text END AS wizard
+            FROM setup_drafts WHERE user_id = ${userId} ORDER BY updated_at DESC`;
+    return rows.map(rowToDraft);
+  },
+
+  async getSetupDraftOwner(id) {
+    const sql = await db();
+    const rows = await sql`SELECT user_id FROM setup_drafts WHERE id = ${id}`;
+    return rows.length > 0 ? { user_id: (rows[0].user_id as string | null) ?? null } : null;
+  },
+
   async deleteSetupDraft(id) {
     const sql = await db();
     await sql`DELETE FROM setup_drafts WHERE id = ${id}`;
@@ -1053,6 +1080,16 @@ export const pgStore: Store = {
     return rows.map(rowToRun);
   },
 
+  async latestRuns(projectIds) {
+    if (projectIds.length === 0) return {};
+    const sql = await db();
+    const rows = await sql`SELECT DISTINCT ON (project_id) * FROM runs
+      WHERE project_id = ANY(${projectIds}) ORDER BY project_id, created_at DESC`;
+    const out: Record<string, Run> = {};
+    for (const r of rows) out[r.project_id as string] = rowToRun(r);
+    return out;
+  },
+
   async updateRunStatus(id, status, error) {
     const sql = await db();
     if (status === "running") {
@@ -1175,6 +1212,12 @@ export const pgStore: Store = {
   async setSetupDecision(projectId, decisionJson) {
     const sql = await db();
     await sql`UPDATE projects SET setup_decision = ${decisionJson} WHERE id = ${projectId}`;
+  },
+
+  async getSetupDecision(projectId) {
+    const sql = await db();
+    const rows = await sql`SELECT setup_decision FROM projects WHERE id = ${projectId}`;
+    return (rows[0]?.setup_decision as string | null | undefined) ?? null;
   },
 
   async getDictionaryDecision(projectId) {
@@ -1303,6 +1346,56 @@ export const pgStore: Store = {
       await tx`DELETE FROM prompts WHERE project_id = ${projectId}`;
       await tx`DELETE FROM intents WHERE project_id = ${projectId}`;
       await tx`DELETE FROM dictionary_entries WHERE project_id = ${projectId}`;
+    });
+  },
+
+  async replaceInstrument(projectId, input) {
+    const sql = await db();
+    const intentRows = input.cells.map((c) => ({
+      id: crypto.randomUUID(),
+      project_id: projectId,
+      stage: c.intent.stage,
+      layer: c.intent.layer,
+      situation: c.intent.situation,
+      angle: c.intent.angle,
+      mode: c.intent.mode ?? null,
+      qtype: c.intent.qtype ?? null,
+      concern: c.intent.concern ?? null,
+      text: c.intent.text,
+    }));
+    const promptRows = input.cells.flatMap((c, i) =>
+      c.prompts.map((p) => ({
+        id: crypto.randomUUID(),
+        project_id: projectId,
+        text: p.text,
+        theme: p.theme,
+        intent_id: intentRows[i].id,
+        asker: p.asker ?? null,
+      }))
+    );
+    const reset = input.reset;
+    await sql.begin(async (tx) => {
+      if (reset) {
+        await tx`UPDATE projects SET
+          name = ${reset.name},
+          category = ${reset.category},
+          audience = ${reset.audience},
+          competitors = ${JSON.stringify(reset.competitors)},
+          moderators = ${reset.moderators},
+          scenario_journeys = ${reset.scenarioJourneys},
+          engine_set = ${JSON.stringify(reset.engineSet)},
+          reason_taxonomy = ${JSON.stringify(reset.reasonTaxonomy)}
+          WHERE id = ${projectId}`;
+        await tx`DELETE FROM prompts WHERE project_id = ${projectId}`;
+        await tx`DELETE FROM intents WHERE project_id = ${projectId}`;
+        await tx`DELETE FROM dictionary_entries WHERE project_id = ${projectId}`;
+      }
+      if (intentRows.length > 0) {
+        await tx`INSERT INTO intents ${tx(intentRows, "id", "project_id", "stage", "layer", "situation", "angle", "mode", "qtype", "concern", "text")}`;
+      }
+      if (promptRows.length > 0) {
+        await tx`INSERT INTO prompts ${tx(promptRows, "id", "project_id", "text", "theme", "intent_id", "asker")}`;
+      }
     });
   },
 

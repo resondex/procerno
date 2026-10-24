@@ -758,6 +758,41 @@ export interface Store {
       reasonTaxonomy: string[];
     }
   ): Promise<void>;
+  /** Write a tracker's grid instrument in ONE transaction (2026-10-24):
+   * with `reset`, the edit-setup reset (setup fields updated; prompts,
+   * intents and dictionary wiped) runs first in the same transaction, so a
+   * failure never leaves a tracker without an instrument and two writers
+   * can never interleave reset and inserts. Each cell is one intent plus
+   * its prompts (seed first). Callers on the reset path must verify no
+   * runs exist, as for resetInstrument. */
+  replaceInstrument(
+    projectId: string,
+    input: {
+      reset: {
+        name: string;
+        category: string;
+        audience: string | null;
+        competitors: string[];
+        moderators: string | null;
+        scenarioJourneys: string | null;
+        engineSet: string[];
+        reasonTaxonomy: string[];
+      } | null;
+      cells: {
+        intent: {
+          stage: string;
+          layer: string;
+          situation: string | null;
+          angle: string;
+          mode?: string | null;
+          qtype?: string | null;
+          concern?: string | null;
+          text: string;
+        };
+        prompts: { text: string; theme: PromptTheme; asker?: string | null }[];
+      }[];
+    }
+  ): Promise<void>;
   /** Per-project switches for the evidence drawer and human override. */
   updateProjectFlags(
     id: string,
@@ -839,6 +874,13 @@ export interface Store {
   }): Promise<SetupDraft>;
   getSetupDraft(id: string): Promise<SetupDraft | null>;
   listSetupDrafts(userId: string | null): Promise<SetupDraft[]>;
+  /** The drafts list WITHOUT the wizard blob (2026-10-24 egress fix):
+   * every column but `wizard`, which comes back reduced to the summary
+   * the list renders - { mode, step, studyName } - or null. Resuming a
+   * draft reads the full row with getSetupDraft. */
+  listSetupDraftMeta(userId: string | null): Promise<SetupDraft[]>;
+  /** Ownership probe for a draft id (no blob read): null = no such draft. */
+  getSetupDraftOwner(id: string): Promise<{ user_id: string | null } | null>;
   deleteSetupDraft(id: string): Promise<void>;
   insertIntents(
     projectId: string,
@@ -885,6 +927,10 @@ export interface Store {
   updateRunBatchStatus(id: string, status: RunBatch["status"]): Promise<void>;
   getRun(id: string): Promise<Run | null>;
   listRuns(projectId: string): Promise<Run[]>;
+  /** The newest run per project, one roundtrip for many projects (the
+   * trackers list reads only listRuns(id)[0]). Projects with no run are
+   * absent from the record. */
+  latestRuns(projectIds: string[]): Promise<Record<string, Run>>;
   updateRunStatus(
     id: string,
     status: RunStatus,
@@ -947,6 +993,8 @@ export interface Store {
    * paraphrases - what the engine offered and what was sent for analysis.
    * Written once at create and on every edit-setup. */
   setSetupDecision(projectId: string, decisionJson: string): Promise<void>;
+  /** The stored setup_decision JSON (not part of the Project payload). */
+  getSetupDecision(projectId: string): Promise<string | null>;
   /** The brand-dictionary gate's served-vs-decided record (JSON:
    * DictDecisionRecord, 2026-10-14), one version per gate walk. Read
    * separately from Project so the record never rides project payloads. */

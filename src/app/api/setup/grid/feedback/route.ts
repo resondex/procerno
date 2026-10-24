@@ -1,7 +1,6 @@
 import { NextResponse } from "next/server";
-import { tagSetupFromRequest } from "@/lib/cost_log";
 import { z } from "zod";
-import { requireAuthOrDemo } from "@/lib/auth";
+import { requireMemberOrDemo } from "@/lib/auth";
 import { store } from "@/lib/store";
 
 const Situation = z.object({
@@ -59,8 +58,7 @@ const Body = z.discriminatedUnion("kind", [
  * read back into generation: one user's rejections say nothing about
  * quality. */
 export async function POST(req: Request) {
-  tagSetupFromRequest(req);
-  const auth = await requireAuthOrDemo();
+  const auth = await requireMemberOrDemo();
   if (auth instanceof NextResponse) return auth;
   const parsed = Body.safeParse(await req.json().catch(() => null));
   if (!parsed.success) {

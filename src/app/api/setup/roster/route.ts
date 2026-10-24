@@ -1,9 +1,10 @@
 import { NextResponse } from "next/server";
-import { tagSetupFromRequest } from "@/lib/cost_log";
+import { setupIdFromRequest, tagCosts } from "@/lib/cost_log";
 import { z } from "zod";
-import { requireAuthOrDemo } from "@/lib/auth";
+import { requireMemberOrDemo } from "@/lib/auth";
 import { apiKeyConfigured } from "@/lib/engine/providers";
 import { classifyRoster } from "@/lib/engine/roster";
+import { engineFailed } from "../engine_error";
 
 export const maxDuration = 120;
 
@@ -18,9 +19,9 @@ const Body = z.object({
  * role for this tracker's audience (same_seat | upstream). Cache-first;
  * fails open to all same_seat. The wizard's chip toggle is the gate. */
 export async function POST(req: Request) {
-  tagSetupFromRequest(req);
-  const auth = await requireAuthOrDemo();
+  const auth = await requireMemberOrDemo();
   if (auth instanceof NextResponse) return auth;
+  tagCosts({ setupId: await setupIdFromRequest(req, auth) });
   if (!apiKeyConfigured()) {
     return NextResponse.json({ error: "OPENAI_API_KEY is not configured" }, { status: 503 });
   }
@@ -28,11 +29,15 @@ export async function POST(req: Request) {
   if (!parsed.success) {
     return NextResponse.json({ error: "bad request" }, { status: 400 });
   }
-  const roster = await classifyRoster({
-    brand: parsed.data.brand,
-    category: parsed.data.category,
-    audience: parsed.data.audience || null,
-    competitors: parsed.data.competitors,
-  });
-  return NextResponse.json({ roster });
+  try {
+    const roster = await classifyRoster({
+      brand: parsed.data.brand,
+      category: parsed.data.category,
+      audience: parsed.data.audience || null,
+      competitors: parsed.data.competitors,
+    });
+    return NextResponse.json({ roster });
+  } catch (err) {
+    return engineFailed("roster", err, "the competitor read could not be written - try again in a moment");
+  }
 }

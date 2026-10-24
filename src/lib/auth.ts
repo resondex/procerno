@@ -125,7 +125,10 @@ export async function projectAccess(
   if (auth.shareProjectId) {
     return auth.shareProjectId === project.id ? "viewer" : null;
   }
-  if (auth.userId === null) return "owner"; // auth disabled: dev mode
+  // A null userId is the dev-mode owner ONLY when auth is genuinely off.
+  // With auth on, a null userId is a demo session - it owns nothing (and
+  // must not fall through to the unowned-legacy rule below either).
+  if (auth.userId === null) return authEnabled() ? null : "owner";
   if (await isStaff(auth)) return "staff";
   if (project.org_id) {
     if (!auth.email) return null;
@@ -151,15 +154,17 @@ export function canAccessProject(
   auth: AuthContext
 ): boolean {
   // Legacy sync check used by non-org paths; org projects use projectAccess.
-  return (
-    auth.userId === null ||
-    project.user_id === null ||
-    project.user_id === auth.userId
-  );
+  // A share link reaches exactly its own project; a null userId is the
+  // dev-mode owner only when auth is off (with auth on it is a demo session).
+  if (auth.shareProjectId) return auth.shareProjectId === project.id;
+  if (auth.userId === null) return !authEnabled();
+  return project.user_id === null || project.user_id === auth.userId;
 }
 
 export async function getPlanFor(auth: AuthContext): Promise<Plan> {
-  if (auth.shareProjectId) return "enterprise"; // read-only shared view
+  // Read-only shared view. Never reaches tracker creation or any spend
+  // route: those require a member (requireMember / requireMemberOrDemo).
+  if (auth.shareProjectId) return "enterprise";
   if (auth.userId === null) return "enterprise"; // dev mode: no limits
   if (await isStaff(auth)) return "enterprise"; // staff: no limits
   return store.getPlan(auth.userId);
@@ -261,6 +266,25 @@ export async function requireAuth(): Promise<AuthContext | NextResponse> {
   return auth;
 }
 
+/** A share-link context (public read-only link, no session). */
+export function isShareContext(auth: AuthContext): boolean {
+  return Boolean(auth.shareProjectId);
+}
+
+/** Auth for routes that WRITE or SPEND outside a single project's scope
+ * (setup generation, tracker create/list, drafts): a signed-in member, or
+ * dev mode. A share link is read-only access to exactly one project's
+ * dashboard - it gets a 401 here. requireAuth stays share-tolerant
+ * because the shared dashboard's own routes (project, runs, metrics,
+ * engines) go through it and scope via requireProject. */
+export async function requireMember(): Promise<AuthContext | NextResponse> {
+  const auth = await getAuth();
+  if (!auth || isShareContext(auth)) {
+    return NextResponse.json({ error: "sign in required" }, { status: 401 });
+  }
+  return auth;
+}
+
 const DEMO_COOKIE = "ap_demo";
 
 /** Auth, or a demo session: the unlisted /demo page sets this cookie
@@ -270,6 +294,23 @@ const DEMO_COOKIE = "ap_demo";
 export async function requireAuthOrDemo(): Promise<AuthContext | NextResponse> {
   const auth = await getAuth();
   if (auth) return auth;
+  const key = process.env.DEMO_ACCESS_KEY;
+  if (key) {
+    const cookieStore = await cookies();
+    if (cookieStore.get(DEMO_COOKIE)?.value === key) {
+      return { userId: null, email: "demo" };
+    }
+  }
+  return NextResponse.json({ error: "sign in required" }, { status: 401 });
+}
+
+/** requireAuthOrDemo for the setup-time generation routes: a member, dev
+ * mode, or a demo session - never a share link. A share-link holder who
+ * also carries the demo cookie walks the wizard as the demo, like anyone
+ * else with that cookie. */
+export async function requireMemberOrDemo(): Promise<AuthContext | NextResponse> {
+  const auth = await getAuth();
+  if (auth && !isShareContext(auth)) return auth;
   const key = process.env.DEMO_ACCESS_KEY;
   if (key) {
     const cookieStore = await cookies();

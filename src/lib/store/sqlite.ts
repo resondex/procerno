@@ -1112,6 +1112,32 @@ export const sqliteStore: Store = {
     return rows.map(parseDraft);
   },
 
+  async listSetupDraftMeta(userId) {
+    // Same projection as Postgres: the wizard blob reduced in the database
+    // to the summary the list renders.
+    const cols = `id, user_id, brand, category, competitors, audience, prompts, updated_at,
+      CASE WHEN wizard IS NULL THEN NULL ELSE json_object(
+        'mode', json_extract(wizard, '$.mode'), 'step', json_extract(wizard, '$.step'),
+        'studyName', json_extract(wizard, '$.studyName')) END AS wizard`;
+    const rows = (
+      userId === null
+        ? getDb()
+            .prepare(`SELECT ${cols} FROM setup_drafts WHERE user_id IS NULL ORDER BY updated_at DESC`)
+            .all()
+        : getDb()
+            .prepare(`SELECT ${cols} FROM setup_drafts WHERE user_id = ? ORDER BY updated_at DESC`)
+            .all(userId)
+    ) as Record<string, string | null>[];
+    return rows.map(parseDraft);
+  },
+
+  async getSetupDraftOwner(id) {
+    const row = getDb()
+      .prepare("SELECT user_id FROM setup_drafts WHERE id = ?")
+      .get(id) as { user_id: string | null } | undefined;
+    return row ? { user_id: row.user_id ?? null } : null;
+  },
+
   async deleteSetupDraft(id) {
     getDb().prepare("DELETE FROM setup_drafts WHERE id = ?").run(id);
   },
@@ -1291,6 +1317,20 @@ export const sqliteStore: Store = {
     ).map(parseRun);
   },
 
+  async latestRuns(projectIds) {
+    // Same rows as listRuns(id)[0]; local SQLite has no egress to save, so
+    // one indexed point query per project keeps the ordering identical.
+    const stmt = getDb().prepare(
+      "SELECT * FROM runs WHERE project_id = ? ORDER BY created_at DESC, rowid DESC LIMIT 1"
+    );
+    const out: Record<string, Run> = {};
+    for (const id of projectIds) {
+      const row = stmt.get(id) as Record<string, unknown> | undefined;
+      if (row) out[id] = parseRun(row);
+    }
+    return out;
+  },
+
   async updateRunStatus(id, status, error) {
     const db = getDb();
     if (status === "running") {
@@ -1457,6 +1497,13 @@ export const sqliteStore: Store = {
       .run(decisionJson, projectId);
   },
 
+  async getSetupDecision(projectId) {
+    const row = getDb()
+      .prepare("SELECT setup_decision FROM projects WHERE id = ?")
+      .get(projectId) as { setup_decision: string | null } | undefined;
+    return row?.setup_decision ?? null;
+  },
+
   async getDictionaryDecision(projectId) {
     const row = getDb()
       .prepare("SELECT dictionary_decision FROM projects WHERE id = ?")
@@ -1587,6 +1634,43 @@ export const sqliteStore: Store = {
       db.prepare("DELETE FROM dictionary_entries WHERE project_id = ?").run(projectId);
     });
     reset();
+  },
+
+  async replaceInstrument(projectId, input) {
+    const db = getDb();
+    const insIntent = db.prepare(
+      "INSERT INTO intents (id, project_id, stage, layer, situation, angle, mode, qtype, concern, text) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+    );
+    const insPrompt = db.prepare(
+      "INSERT INTO prompts (id, project_id, text, theme, intent_id, asker) VALUES (?, ?, ?, ?, ?, ?)"
+    );
+    const reset = input.reset;
+    const write = db.transaction(() => {
+      if (reset) {
+        db.prepare(
+          `UPDATE projects SET name = ?, category = ?, audience = ?,
+           competitors = ?, moderators = ?, scenario_journeys = ?, engine_set = ?, reason_taxonomy = ?
+           WHERE id = ?`
+        ).run(
+          reset.name, reset.category, reset.audience,
+          JSON.stringify(reset.competitors), reset.moderators, reset.scenarioJourneys,
+          JSON.stringify(reset.engineSet), JSON.stringify(reset.reasonTaxonomy),
+          projectId
+        );
+        db.prepare("DELETE FROM prompts WHERE project_id = ?").run(projectId);
+        db.prepare("DELETE FROM intents WHERE project_id = ?").run(projectId);
+        db.prepare("DELETE FROM dictionary_entries WHERE project_id = ?").run(projectId);
+      }
+      for (const c of input.cells) {
+        const intentId = crypto.randomUUID();
+        const i = c.intent;
+        insIntent.run(intentId, projectId, i.stage, i.layer, i.situation, i.angle, i.mode ?? null, i.qtype ?? null, i.concern ?? null, i.text);
+        for (const p of c.prompts) {
+          insPrompt.run(crypto.randomUUID(), projectId, p.text, p.theme, intentId, p.asker ?? null);
+        }
+      }
+    });
+    write();
   },
 
   async deleteProject(projectId) {

@@ -1,9 +1,10 @@
 import { NextResponse } from "next/server";
-import { tagSetupFromRequest } from "@/lib/cost_log";
+import { setupIdFromRequest, tagCosts } from "@/lib/cost_log";
 import { z } from "zod";
-import { cacheSource, requireAuthOrDemo } from "@/lib/auth";
+import { cacheSource, requireMemberOrDemo } from "@/lib/auth";
 import { apiKeyConfigured } from "@/lib/engine/providers";
 import { reviewScenarios } from "@/lib/engine/instrument";
+import { engineFailed } from "../../engine_error";
 import { store } from "@/lib/store";
 
 export const maxDuration = 60;
@@ -31,9 +32,9 @@ const Body = z.object({
  * confirm - verdicts in candidate order, each with a minimal suggested
  * edit when not ok. */
 export async function POST(req: Request) {
-  tagSetupFromRequest(req);
-  const auth = await requireAuthOrDemo();
+  const auth = await requireMemberOrDemo();
   if (auth instanceof NextResponse) return auth;
+  tagCosts({ setupId: await setupIdFromRequest(req, auth) });
   if (!apiKeyConfigured()) {
     return NextResponse.json({ error: "OPENAI_API_KEY is not configured" }, { status: 503 });
   }
@@ -41,13 +42,18 @@ export async function POST(req: Request) {
   if (!parsed.success) {
     return NextResponse.json({ error: "bad request" }, { status: 400 });
   }
-  const verdicts = await reviewScenarios({
-    category: parsed.data.category,
-    audience: parsed.data.audience || null,
-    candidates: parsed.data.candidates,
-    others: parsed.data.others,
-    meta: { source: cacheSource(auth) },
-  });
+  let verdicts: Awaited<ReturnType<typeof reviewScenarios>>;
+  try {
+    verdicts = await reviewScenarios({
+      category: parsed.data.category,
+      audience: parsed.data.audience || null,
+      candidates: parsed.data.candidates,
+      others: parsed.data.others,
+      meta: { source: cacheSource(auth) },
+    });
+  } catch (err) {
+    return engineFailed("scenario_review", err, "the scenario check could not run - try again in a moment");
+  }
   const flagged = verdicts
     .map((v, i) => ({ candidate: parsed.data.candidates[i], verdict: v }))
     .filter((x) => !x.verdict.ok);

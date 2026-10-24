@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
-import { tagSetupFromRequest } from "@/lib/cost_log";
+import { setupIdFromRequest, tagCosts } from "@/lib/cost_log";
 import { z } from "zod";
-import { cacheSource, requireAuthOrDemo } from "@/lib/auth";
+import { cacheSource, requireMemberOrDemo } from "@/lib/auth";
 import { apiKeyConfigured } from "@/lib/engine/providers";
 import { judgeStageRooms } from "@/lib/engine/instrument";
 
@@ -12,7 +12,10 @@ const Body = z.object({
   category: z.string().trim().min(1).max(120),
   stageKey: z.string().trim().min(1).max(40),
   stageLabel: z.string().trim().min(1).max(60),
-  hint: z.string().trim().min(1).max(600),
+  /** The stage's hint as the wizard holds it - the longest real one
+   * (problem_recognition) runs 861 chars; the old 600 cap 400'd it and
+   * the map fell back to every room lit. */
+  hint: z.string().trim().min(1).max(2000),
   rooms: z.array(z.object({ label: z.string().trim().min(1).max(60), description: z.string().trim().max(240) })).min(1).max(8),
 });
 
@@ -23,12 +26,18 @@ const Body = z.object({
  * keeps every room lit).
  */
 export async function POST(req: Request) {
-  tagSetupFromRequest(req);
-  const auth = await requireAuthOrDemo();
+  const auth = await requireMemberOrDemo();
   if (auth instanceof NextResponse) return auth;
+  tagCosts({ setupId: await setupIdFromRequest(req, auth) });
   if (!apiKeyConfigured()) return NextResponse.json({ rooms: null });
   const parsed = Body.safeParse(await req.json().catch(() => null));
   if (!parsed.success) return NextResponse.json({ error: "bad request" }, { status: 400 });
-  const rooms = await judgeStageRooms({ ...parsed.data, meta: { brand: parsed.data.brand, source: cacheSource(auth) } });
+  // Advisory: a thrown judgment is "no judgment" (every room lit), the
+  // same answer as no key - never a bare 500 the map cannot read.
+  const rooms = await judgeStageRooms({ ...parsed.data, meta: { brand: parsed.data.brand, source: cacheSource(auth) } })
+    .catch((err) => {
+      console.error("stage_rooms: judgment failed - every room stays lit:", err);
+      return null;
+    });
   return NextResponse.json({ rooms });
 }

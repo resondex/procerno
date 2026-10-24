@@ -1,12 +1,13 @@
 import { NextResponse } from "next/server";
-import { tagSetupFromRequest } from "@/lib/cost_log";
+import { setupIdFromRequest, tagCosts } from "@/lib/cost_log";
 import { z } from "zod";
-import { requireAuthOrDemo } from "@/lib/auth";
+import { requireMemberOrDemo } from "@/lib/auth";
 import { apiKeyConfigured } from "@/lib/engine/providers";
 import { getBrandProfile, getBattery } from "@/lib/engine/suggest";
+import { engineFailed } from "./engine_error";
 
 const schema = z.object({
-  brand: z.string().trim().min(1),
+  brand: z.string().trim().min(1).max(80),
   /** Grid-mode setup wants the profile only — the decision grid replaces the
    * classic battery, so drafting one here would waste the slowest call. */
   skipBattery: z.boolean().optional(),
@@ -20,9 +21,9 @@ export const maxDuration = 120;
  * ~6-month TTL, returned together.
  */
 export async function POST(req: Request) {
-  tagSetupFromRequest(req);
-  const auth = await requireAuthOrDemo();
+  const auth = await requireMemberOrDemo();
   if (auth instanceof NextResponse) return auth;
+  tagCosts({ setupId: await setupIdFromRequest(req, auth) });
   if (!apiKeyConfigured()) {
     return NextResponse.json(
       { error: "OPENAI_API_KEY is not configured" },
@@ -34,15 +35,19 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: "brand required" }, { status: 400 });
   }
   const brand = parsed.data.brand;
-  const profile = await getBrandProfile(brand);
-  if (parsed.data.skipBattery) {
-    return NextResponse.json({ profile, prompts: null });
+  try {
+    const profile = await getBrandProfile(brand);
+    if (parsed.data.skipBattery) {
+      return NextResponse.json({ profile, prompts: null });
+    }
+    const prompts = await getBattery({
+      brand,
+      category: profile.category,
+      competitors: profile.competitors,
+      audience: profile.audience || null,
+    });
+    return NextResponse.json({ profile, prompts });
+  } catch (err) {
+    return engineFailed("setup", err, "the brand read could not be written - try again in a moment");
   }
-  const prompts = await getBattery({
-    brand,
-    category: profile.category,
-    competitors: profile.competitors,
-    audience: profile.audience || null,
-  });
-  return NextResponse.json({ profile, prompts });
 }

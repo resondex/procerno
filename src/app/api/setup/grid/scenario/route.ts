@@ -1,9 +1,10 @@
 import { NextResponse } from "next/server";
-import { tagSetupFromRequest } from "@/lib/cost_log";
+import { setupIdFromRequest, tagCosts } from "@/lib/cost_log";
 import { z } from "zod";
-import { cacheSource, requireAuthOrDemo } from "@/lib/auth";
+import { cacheSource, requireMemberOrDemo } from "@/lib/auth";
 import { apiKeyConfigured } from "@/lib/engine/providers";
 import { nearScenarios, rewordScenario, suggestScenario, type Moderators } from "@/lib/engine/instrument";
+import { engineFailed } from "../../engine_error";
 
 export const maxDuration = 60;
 
@@ -30,9 +31,9 @@ const Body = z.object({
 /** Gate 1 helper: "suggest another" buying scenario, or with `nearTo` a
  * near variant of one already on the table. */
 export async function POST(req: Request) {
-  tagSetupFromRequest(req);
-  const auth = await requireAuthOrDemo();
+  const auth = await requireMemberOrDemo();
   if (auth instanceof NextResponse) return auth;
+  tagCosts({ setupId: await setupIdFromRequest(req, auth) });
   if (!apiKeyConfigured()) {
     return NextResponse.json({ error: "OPENAI_API_KEY is not configured" }, { status: 503 });
   }
@@ -40,44 +41,48 @@ export async function POST(req: Request) {
   if (!parsed.success) {
     return NextResponse.json({ error: "bad request" }, { status: 400 });
   }
-  if (parsed.data.reword) {
-    const scenario = await rewordScenario({
-      category: parsed.data.category,
-      audience: parsed.data.audience || null,
-      of: parsed.data.reword.of,
-      avoid: parsed.data.reword.avoid,
-      meta: { source: cacheSource(auth) },
-    });
-    if (!scenario) {
-      return NextResponse.json({ error: "no rewording came back - try again, or edit the text" }, { status: 502 });
+  try {
+    if (parsed.data.reword) {
+      const scenario = await rewordScenario({
+        category: parsed.data.category,
+        audience: parsed.data.audience || null,
+        of: parsed.data.reword.of,
+        avoid: parsed.data.reword.avoid,
+        meta: { source: cacheSource(auth) },
+      });
+      if (!scenario) {
+        return NextResponse.json({ error: "no rewording came back - try again, or edit the text" }, { status: 502 });
+      }
+      return NextResponse.json({ scenario });
     }
-    return NextResponse.json({ scenario });
-  }
-  if (parsed.data.nearTo) {
-    // The variant POOL for one scenario - prefetched at gate landing so
-    // draws are instant; the actual draw/rejection events are logged from
-    // the client via /api/setup/grid/feedback.
-    const variants = await nearScenarios({
+    if (parsed.data.nearTo) {
+      // The variant POOL for one scenario - prefetched at gate landing so
+      // draws are instant; the actual draw/rejection events are logged from
+      // the client via /api/setup/grid/feedback.
+      const variants = await nearScenarios({
+        category: parsed.data.category,
+        audience: parsed.data.audience || null,
+        of: parsed.data.nearTo,
+        exclude: parsed.data.exclude.filter((s) => s.label),
+        meta: { source: cacheSource(auth) },
+      });
+      if (variants.length === 0) {
+        return NextResponse.json({ error: "no variants came back - try again" }, { status: 502 });
+      }
+      return NextResponse.json({ variants });
+    }
+    const scenario = await suggestScenario({
       category: parsed.data.category,
       audience: parsed.data.audience || null,
-      of: parsed.data.nearTo,
+      decisionUnit: parsed.data.decisionUnit as Moderators["decision_unit"],
       exclude: parsed.data.exclude.filter((s) => s.label),
       meta: { source: cacheSource(auth) },
     });
-    if (variants.length === 0) {
-      return NextResponse.json({ error: "no variants came back - try again" }, { status: 502 });
+    if (!scenario) {
+      return NextResponse.json({ error: "no new scenario came back - try again" }, { status: 502 });
     }
-    return NextResponse.json({ variants });
+    return NextResponse.json({ scenario });
+  } catch (err) {
+    return engineFailed("scenario", err, "no new scenario came back - try again");
   }
-  const scenario = await suggestScenario({
-    category: parsed.data.category,
-    audience: parsed.data.audience || null,
-    decisionUnit: parsed.data.decisionUnit as Moderators["decision_unit"],
-    exclude: parsed.data.exclude.filter((s) => s.label),
-    meta: { source: cacheSource(auth) },
-  });
-  if (!scenario) {
-    return NextResponse.json({ error: "no new scenario came back - try again" }, { status: 502 });
-  }
-  return NextResponse.json({ scenario });
 }

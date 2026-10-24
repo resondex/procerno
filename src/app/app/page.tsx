@@ -18,7 +18,9 @@ export default async function AppHomePage({
 }) {
   const sp = await searchParams;
   const auth = await getAuth();
-  if (!auth) redirect("/login");
+  // A share link is read-only access to one dashboard, never the trackers
+  // list (every share viewer is the same "share" user).
+  if (!auth || auth.shareProjectId) redirect("/login");
   // Edit setup arrives in the SAME navigation: the tracker's draft is
   // built here, so the wizard is already open on first paint - no bare
   // list, no second fetch, no seconds of waiting.
@@ -44,15 +46,13 @@ export default async function AppHomePage({
     const seen = new Set(projects.map((p) => p.id));
     projects = [...projects, ...orgProjects.filter((p) => !seen.has(p.id))];
   }
-  const [withRuns, drafts] = await Promise.all([
-    Promise.all(
-      projects.map(async (p) => ({
-        ...p,
-        latestRun: (await store.listRuns(p.id))[0] ?? null,
-      }))
-    ),
-    store.listSetupDrafts(auth.userId),
+  // Egress (2026-10-24): one roundtrip for every tracker's newest run, and
+  // the drafts list without its wizard blobs - a resume reads the full row.
+  const [latest, drafts] = await Promise.all([
+    store.latestRuns(projects.map((p) => p.id)),
+    store.listSetupDraftMeta(auth.userId),
   ]);
+  const withRuns = projects.map((p) => ({ ...p, latestRun: latest[p.id] ?? null }));
   const isAdmin = staff || memberships.some((m) => m.role === "admin");
   const engines = ENGINES.map((e) => ({
     id: e.id,

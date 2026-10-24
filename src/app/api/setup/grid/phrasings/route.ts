@@ -1,17 +1,17 @@
 import { NextResponse } from "next/server";
-import { tagSetupFromRequest } from "@/lib/cost_log";
+import { setupIdFromRequest, tagCosts } from "@/lib/cost_log";
 import { z } from "zod";
-import { cacheSource, requireAuthOrDemo } from "@/lib/auth";
+import { cacheSource, requireMemberOrDemo } from "@/lib/auth";
 import { apiKeyConfigured } from "@/lib/engine/providers";
 import {
   generatePhrasings,
   type Journey,
-  type Moderators,
   type ScenarioSpec,
 } from "@/lib/engine/instrument";
 import { ModeratorsShape } from "@/lib/engine/instrument_shapes";
 import type { CellCheckSpec } from "@/lib/engine/battery_checks";
 import { ROSTER_ROLE_VALUES } from "@/lib/engine/battery_checks";
+import { engineFailed } from "../../engine_error";
 
 // 300, not 120: a hard category's market read alone runs 90-120s of
 // gpt-5 reasoning - the old budget killed first reads at the wall and
@@ -31,7 +31,10 @@ const Body = z.object({
   competitors: z.array(z.string().trim().min(1).max(80)).max(12),
   /** Typed roster (2026-09-30): competitor -> same_seat | upstream.
    * Absent = every competitor same_seat (the untyped behavior). */
-  rosterRoles: z.record(z.string().max(80), z.enum(ROSTER_ROLE_VALUES)).optional(),
+  rosterRoles: z
+    .record(z.string().max(80), z.enum(ROSTER_ROLE_VALUES))
+    .refine((r) => Object.keys(r).length <= 24, "too many roster roles")
+    .optional(),
   audience: z.string().trim().max(160).optional(),
   base: ModeratorsShape,
   scenarios: z
@@ -51,11 +54,11 @@ const Body = z.object({
   cells: z
     .array(
       z.object({
-        stage: z.string().trim().min(1),
-        situation: z.string().trim().nullable(),
-        angle: z.string().trim().min(1),
-        mode: z.string().trim().nullable().optional(),
-        text: z.string().trim().min(1),
+        stage: z.string().trim().min(1).max(40),
+        situation: z.string().trim().max(120).nullable(),
+        angle: z.string().trim().min(1).max(80),
+        mode: z.string().trim().max(300).nullable().optional(),
+        text: z.string().trim().min(1).max(2000),
         /** The cell's carried check-spec (s7+). Its presence selects the
          * spec path; the engine re-derives the design from the cell and
          * roster and prefers that over the carried copy, so the shape is
@@ -85,9 +88,9 @@ const Body = z.object({
 
 /** Gate 3: the paraphrase set for each confirmed seed prompt. */
 export async function POST(req: Request) {
-  tagSetupFromRequest(req);
-  const auth = await requireAuthOrDemo();
+  const auth = await requireMemberOrDemo();
   if (auth instanceof NextResponse) return auth;
+  tagCosts({ setupId: await setupIdFromRequest(req, auth) });
   if (!apiKeyConfigured()) {
     return NextResponse.json({ error: "OPENAI_API_KEY is not configured" }, { status: 503 });
   }
@@ -96,20 +99,27 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: "bad request" }, { status: 400 });
   }
   const { brand, category, competitors, audience, cells, count, force, avoidConcerns } = parsed.data;
-  const phrasings = await generatePhrasings({
-    brand,
-    category,
-    competitors,
-    audience: audience || null,
-    base: parsed.data.base,
-    scenarios: parsed.data.scenarios as unknown as (ScenarioSpec & { journey: Journey | null })[],
-    cells: cells.map((c) => ({ ...c, spec: (c.spec ?? null) as CellCheckSpec | null })),
-    count,
-    avoidConcerns,
-    rosterRoles: parsed.data.rosterRoles,
-    force,
-    noWait: parsed.data.warm,
-    meta: { source: cacheSource(auth) },
-  });
+  let phrasings: Awaited<ReturnType<typeof generatePhrasings>>;
+  try {
+    phrasings = await generatePhrasings({
+      brand,
+      category,
+      competitors,
+      audience: audience || null,
+      base: parsed.data.base,
+      scenarios: parsed.data.scenarios as unknown as (ScenarioSpec & { journey: Journey | null })[],
+      cells: cells.map((c) => ({ ...c, spec: (c.spec ?? null) as CellCheckSpec | null })),
+      count,
+      avoidConcerns,
+      rosterRoles: parsed.data.rosterRoles,
+      force,
+      noWait: parsed.data.warm,
+      meta: { source: cacheSource(auth) },
+    });
+  } catch (err) {
+    return parsed.data.warm
+      ? NextResponse.json({ pending: true })
+      : engineFailed("phrasings", err, "the paraphrases could not be written - try again in a moment");
+  }
   return NextResponse.json({ phrasings });
 }

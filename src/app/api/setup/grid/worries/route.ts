@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
-import { tagSetupFromRequest } from "@/lib/cost_log";
+import { setupIdFromRequest, tagCosts } from "@/lib/cost_log";
 import { z } from "zod";
-import { cacheSource, requireAuthOrDemo } from "@/lib/auth";
+import { cacheSource, requireMemberOrDemo } from "@/lib/auth";
 import { apiKeyConfigured } from "@/lib/engine/providers";
 import {
   generateWorries,
@@ -12,8 +12,12 @@ import {
   type ScenarioSpec,
 } from "@/lib/engine/instrument";
 import { ModeratorsShape } from "@/lib/engine/instrument_shapes";
+import { engineFailed } from "../../engine_error";
 
-export const maxDuration = 120;
+// 300, not 120: generateWorries waits up to COALESCE_PENDING_TTL_MS
+// (180s) on another request's in-flight pool - a 120s budget turned that
+// wait into a 504. Fluid Compute allows 300.
+export const maxDuration = 300;
 
 const JourneyShape = z.object({
   involvement: z.enum(["considered", "habitual"]),
@@ -52,9 +56,9 @@ const Body = z.object({
  * The user's PICKS are decision data stored on the draft - this route
  * only serves the menu. */
 export async function POST(req: Request) {
-  tagSetupFromRequest(req);
-  const auth = await requireAuthOrDemo();
+  const auth = await requireMemberOrDemo();
   if (auth instanceof NextResponse) return auth;
+  tagCosts({ setupId: await setupIdFromRequest(req, auth) });
   if (!apiKeyConfigured()) {
     return NextResponse.json({ error: "OPENAI_API_KEY is not configured" }, { status: 503 });
   }
@@ -74,15 +78,22 @@ export async function POST(req: Request) {
     .map((s) => s.key);
   // Mask order first, then any worry stage the user added.
   const offered = [...new Set([...recommended, ...(parsed.data.keptStages ?? []).filter(isWorryStage)])];
-  const worries = await generateWorries({
-    brand: parsed.data.brand,
-    category: parsed.data.category,
-    audience: parsed.data.audience || null,
-    scenarios,
-    offered,
-    noWait: parsed.data.warm,
-    meta: { source: cacheSource(auth) },
-  });
+  let worries: Awaited<ReturnType<typeof generateWorries>>;
+  try {
+    worries = await generateWorries({
+      brand: parsed.data.brand,
+      category: parsed.data.category,
+      audience: parsed.data.audience || null,
+      scenarios,
+      offered,
+      noWait: parsed.data.warm,
+      meta: { source: cacheSource(auth) },
+    });
+  } catch (err) {
+    return parsed.data.warm
+      ? NextResponse.json({ pending: true })
+      : engineFailed("worries", err, "the worries could not be read - try again in a moment");
+  }
   if (!worries) {
     return parsed.data.warm
       ? NextResponse.json({ pending: true })

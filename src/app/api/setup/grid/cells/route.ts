@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
-import { tagSetupFromRequest } from "@/lib/cost_log";
+import { setupIdFromRequest, tagCosts } from "@/lib/cost_log";
 import { z } from "zod";
-import { cacheSource, requireAuthOrDemo } from "@/lib/auth";
+import { cacheSource, requireMemberOrDemo } from "@/lib/auth";
 import { apiKeyConfigured } from "@/lib/engine/providers";
 import {
   generateGrid,
@@ -12,6 +12,7 @@ import {
 } from "@/lib/engine/instrument";
 import { ModeratorsShape } from "@/lib/engine/instrument_shapes";
 import { ROSTER_ROLE_VALUES } from "@/lib/engine/battery_checks";
+import { engineFailed } from "../../engine_error";
 
 // 300, not 120: a hard category's market read alone runs 90-120s of
 // gpt-5 reasoning - the old budget killed first reads at the wall and
@@ -31,11 +32,17 @@ const Body = z.object({
   competitors: z.array(z.string().trim().min(1).max(80)).max(12),
   /** Typed roster (2026-09-30): competitor -> same_seat | upstream.
    * Absent = every competitor same_seat (the untyped behavior). */
-  rosterRoles: z.record(z.string().max(80), z.enum(ROSTER_ROLE_VALUES)).optional(),
+  rosterRoles: z
+    .record(z.string().max(80), z.enum(ROSTER_ROLE_VALUES))
+    .refine((r) => Object.keys(r).length <= 24, "too many roster roles")
+    .optional(),
   /** Class-angle cells (2026-10-01): upstream brand -> buyer class phrase
    * ("a Visa card"). Only upstream entries with a phrase earn a class
    * cell. Absent = no class cells (byte-identical behavior). */
-  rosterClasses: z.record(z.string().max(80), z.string().trim().max(60)).optional(),
+  rosterClasses: z
+    .record(z.string().max(80), z.string().trim().max(60))
+    .refine((r) => Object.keys(r).length <= 24, "too many roster classes")
+    .optional(),
   /** Confirmed worry picks (the worries module, 2026-10-01): one invariant
    * doubt cell per pick. Absent = the legacy concern-plan zip. */
   worries: z
@@ -50,7 +57,10 @@ const Body = z.object({
   /** Value lines per room (2026-10-04), as confirmed at the gate: the line
    * each column's Value cell weighs and its one-tier-down counterpart;
    * null = no Value cell for that room. Absent = the engine default. */
-  valueLines: z.record(z.string().max(60), z.object({ line: z.string().trim().min(1).max(80), counterpart: z.string().trim().min(1).max(120) }).nullable()).optional(),
+  valueLines: z
+    .record(z.string().max(60), z.object({ line: z.string().trim().min(1).max(80), counterpart: z.string().trim().min(1).max(120) }).nullable())
+    .refine((r) => Object.keys(r).length <= 16, "too many Value lines")
+    .optional(),
   audience: z.string().trim().max(160).optional(),
   base: ModeratorsShape,
   /** The ACTIVE scenarios as confirmed at gate 1, with their journeys. */
@@ -72,7 +82,10 @@ const Body = z.object({
   /** Per-room scope for kept situational stages (2026-10-06): stage key ->
    * room labels. Overrides the mask's columns; an empty list drops the
    * stage. Absent = the mask (every room for a stage it reaches nowhere). */
-  stageRooms: z.record(z.string().trim().min(1), z.array(z.string().trim().max(60)).max(8)).optional(),
+  stageRooms: z
+    .record(z.string().trim().min(1).max(40), z.array(z.string().trim().max(60)).max(8))
+    .refine((r) => Object.keys(r).length <= 40, "too many stage scopes")
+    .optional(),
   /** Background warm: fill the cache but never wait on another request's
    * in-flight write - the confirm that needs results does the waiting. */
   warm: z.boolean().optional(),
@@ -83,9 +96,9 @@ const Body = z.object({
 
 /** Gate 2: write one seed prompt per masked cell for the confirmed read. */
 export async function POST(req: Request) {
-  tagSetupFromRequest(req);
-  const auth = await requireAuthOrDemo();
+  const auth = await requireMemberOrDemo();
   if (auth instanceof NextResponse) return auth;
+  tagCosts({ setupId: await setupIdFromRequest(req, auth) });
   if (!apiKeyConfigured()) {
     return NextResponse.json({ error: "OPENAI_API_KEY is not configured" }, { status: 503 });
   }
@@ -111,23 +124,30 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: "keep at least one stage" }, { status: 400 });
   }
   const report: { missing: { stage: string; situation: string | null; angle: string }[]; reason?: "unjudged" | "pending" } = { missing: [] };
-  const cells = await generateGrid({
-    brand,
-    category,
-    competitors,
-    audience: audience || null,
-    base,
-    scenarios,
-    stages,
-    rosterRoles: parsed.data.rosterRoles,
-    rosterClasses: parsed.data.rosterClasses,
-    worries: parsed.data.worries,
-    valueLines: parsed.data.valueLines,
-    noWait: parsed.data.warm,
-    retryExhausted: parsed.data.retryExhausted,
-    report,
-    meta: { source: cacheSource(auth) },
-  });
+  let cells: Awaited<ReturnType<typeof generateGrid>>;
+  try {
+    cells = await generateGrid({
+      brand,
+      category,
+      competitors,
+      audience: audience || null,
+      base,
+      scenarios,
+      stages,
+      rosterRoles: parsed.data.rosterRoles,
+      rosterClasses: parsed.data.rosterClasses,
+      worries: parsed.data.worries,
+      valueLines: parsed.data.valueLines,
+      noWait: parsed.data.warm,
+      retryExhausted: parsed.data.retryExhausted,
+      report,
+      meta: { source: cacheSource(auth) },
+    });
+  } catch (err) {
+    return parsed.data.warm
+      ? NextResponse.json({ pending: true })
+      : engineFailed("cells", err, "the prompts could not be written - try again in a moment");
+  }
   if (!cells) {
     return parsed.data.warm
       ? NextResponse.json({ pending: true })

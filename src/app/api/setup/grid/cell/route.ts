@@ -1,17 +1,19 @@
 import { NextResponse } from "next/server";
-import { tagSetupFromRequest } from "@/lib/cost_log";
+import { setupIdFromRequest, tagCosts } from "@/lib/cost_log";
 import { z } from "zod";
-import { cacheSource, requireAuthOrDemo } from "@/lib/auth";
+import { cacheSource, requireMemberOrDemo } from "@/lib/auth";
 import { apiKeyConfigured } from "@/lib/engine/providers";
 import {
   regenerateCell,
-  type Moderators,
   type ScenarioSpec,
 } from "@/lib/engine/instrument";
 import { ModeratorsShape } from "@/lib/engine/instrument_shapes";
 import { ROSTER_ROLE_VALUES } from "@/lib/engine/battery_checks";
+import { engineFailed } from "../../engine_error";
 
-export const maxDuration = 120;
+// 300, not 120: regenerateCell runs up to three writer + check attempts
+// with no deadline of its own (nothing is cached until one passes).
+export const maxDuration = 300;
 
 const JourneyShape = z.object({
   involvement: z.enum(["considered", "habitual"]),
@@ -26,7 +28,10 @@ const Body = z.object({
   competitors: z.array(z.string().trim().min(1).max(80)).max(12),
   /** Typed roster (2026-09-30): competitor -> same_seat | upstream.
    * Absent = every competitor same_seat (the untyped behavior). */
-  rosterRoles: z.record(z.string().max(80), z.enum(ROSTER_ROLE_VALUES)).optional(),
+  rosterRoles: z
+    .record(z.string().max(80), z.enum(ROSTER_ROLE_VALUES))
+    .refine((r) => Object.keys(r).length <= 24, "too many roster roles")
+    .optional(),
   audience: z.string().trim().max(160).optional(),
   base: ModeratorsShape,
   scenarios: z
@@ -55,8 +60,10 @@ const Body = z.object({
     classPhrase: z.string().trim().max(60).nullable().optional(),
     classBrand: z.string().trim().max(80).nullable().optional(),
   }),
-  /** Every text already offered for this cell. */
-  avoid: z.array(z.string().trim().min(1).max(2000)).min(1).max(8),
+  /** Every text already offered for this cell. Blank entries (a blank
+   * custom card's history) are dropped, never a 400 - the draw then just
+   * has nothing to avoid. */
+  avoid: z.array(z.string().trim().max(2000)).max(8).transform((a) => a.filter(Boolean)),
   /** Near-variant mode: keep this prompt's ask, move one detail. */
   nearTo: z.string().trim().min(1).max(2000).optional(),
   /** r26: the same stage's current seeds in the other scenarios (subjects taken). */
@@ -69,9 +76,9 @@ const Body = z.object({
 /** Gate 2 helper: one fresh prompt for a single cell, different from every
  * previous offer - the "New prompt" button. */
 export async function POST(req: Request) {
-  tagSetupFromRequest(req);
-  const auth = await requireAuthOrDemo();
+  const auth = await requireMemberOrDemo();
   if (auth instanceof NextResponse) return auth;
+  tagCosts({ setupId: await setupIdFromRequest(req, auth) });
   if (!apiKeyConfigured()) {
     return NextResponse.json({ error: "OPENAI_API_KEY is not configured" }, { status: 503 });
   }
@@ -79,20 +86,25 @@ export async function POST(req: Request) {
   if (!parsed.success) {
     return NextResponse.json({ error: "bad request" }, { status: 400 });
   }
-  const drawn = await regenerateCell({
-    brand: parsed.data.brand,
-    category: parsed.data.category,
-    competitors: parsed.data.competitors,
-    audience: parsed.data.audience || null,
-    base: parsed.data.base,
-    scenarios: parsed.data.scenarios as ScenarioSpec[],
-    cell: parsed.data.cell,
-    avoid: parsed.data.avoid,
-    nearTo: parsed.data.nearTo,
-    siblings: parsed.data.siblings,
-    rosterRoles: parsed.data.rosterRoles,
-    meta: { source: cacheSource(auth) },
-  });
+  let drawn: Awaited<ReturnType<typeof regenerateCell>>;
+  try {
+    drawn = await regenerateCell({
+      brand: parsed.data.brand,
+      category: parsed.data.category,
+      competitors: parsed.data.competitors,
+      audience: parsed.data.audience || null,
+      base: parsed.data.base,
+      scenarios: parsed.data.scenarios as ScenarioSpec[],
+      cell: parsed.data.cell,
+      avoid: parsed.data.avoid,
+      nearTo: parsed.data.nearTo,
+      siblings: parsed.data.siblings,
+      rosterRoles: parsed.data.rosterRoles,
+      meta: { source: cacheSource(auth) },
+    });
+  } catch (err) {
+    return engineFailed("cell", err, "no new prompt came back - try again");
+  }
   if (!drawn) {
     return NextResponse.json({ error: "no new prompt came back - try again" }, { status: 502 });
   }
