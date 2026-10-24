@@ -17,7 +17,9 @@ import { tagCosts } from "../cost_log";
 import { CATEGORY_REACH_MODEL } from "./models";
 import type { CacheMeta } from "../types";
 
-const REACH_VERSION = "cr1";
+// cr2 (2026-10-24): packaging format alone never puts a product outside
+// the label (cr1 read a canister brand as outside a "bagged" label).
+const REACH_VERSION = "cr2";
 const CACHE_TTL_MS = 183 * 24 * 3600 * 1000;
 
 export type CategoryReach = {
@@ -77,7 +79,9 @@ export async function checkCategoryReach(input: {
             "it competes WITH here falls OUTSIDE the label's wording - a " +
             "buyer reading the label would not expect that product under " +
             "it. A company that also sells other things is outside only " +
-            "when its competing product here is outside the wording. " +
+            "when its competing product here is outside the wording. A " +
+            "product's container or packaging format alone never puts it " +
+            "outside the label - only what the product IS can. " +
             "List the outside competitors with what each sells in this " +
             "market (a few plain words). If any are outside, propose ONE " +
             "wider label: plain buyer vocabulary, five words or fewer, " +
