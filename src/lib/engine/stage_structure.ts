@@ -76,7 +76,15 @@ import type { ValueLine } from "./battery_checks";
 /** ss8 (2026-10-09, p30 audits): "what makes you pick one over the other"
  * is the either-way shape without the X-over-Y wording; one hit on p26 and
  * one on p30, both missed by the model, none on p28/p29. */
-export const STAGE_STRUCTURE_VERSION = "ss8";
+/** ss9 (2026-10-24 setup audit): Value's circumstance property is the
+ * ss3 contradiction form like every other stage's (it was still a presence
+ * property); premium vs basic carries the s54 pick invitation as its own
+ * property (the old "leaves room for named picks" passed a paraphrase that
+ * dropped "and which would you get"); the objection property no longer
+ * calls a fact question an acceptable voicing (the r16 seed intent: a fact
+ * to confirm is not a doubt verdict). The string readings now also run
+ * when the model call fails. */
+export const STAGE_STRUCTURE_VERSION = "ss9";
 
 export interface StructureCell {
   stage: string;
@@ -139,7 +147,7 @@ export function stageStructure(cell: StructureCell, brand: string): { shape: str
           : `Names the line "${vl.line}" (in any natural wording of its name) and weighs it against ${vl.counterpart} (a generic cheaper counterpart, described by tier or price level, never by name, never ${b}'s own lower tier).`
         : `Names ${b}'s line from the seed and weighs it against a generic cheaper counterpart in the category (described by tier or price level, never by name, never ${b}'s own lower tier).`;
       return { shape: "value", properties: [
-        "States the asker's circumstance from the seed, in a few words.",
+        circumstance,
         ends,
         "Forces a worth-it verdict: is the line worth it over the counterpart, for this asker. The verdict may be asked as a choice between the two, as an opinion, or as whether it is worth more or worth paying the difference. An ask whether it is worth considering, worth a look, or what to think about forces no verdict and fails.",
         "Names no rival; states no price or fee as a FIGURE (an amount) - words like its price, the price, the cost or the fee state no figure and pass; presupposes no verdict.",
@@ -160,7 +168,8 @@ export function stageStructure(cell: StructureCell, brand: string): { shape: str
     case "premium_worth":
       return { shape: "premium vs basic", properties: [
         "Weighs the category's premium options against its basic or store options as TIERS.",
-        "Forces a tier verdict (are the premium ones worth it, or are the basic ones enough) and leaves room for named picks.",
+        "Forces a tier verdict (are the premium ones worth it, or are the basic ones enough).",
+        "Invites a pick - which one the answerer would get, choose or recommend - in any words, compressed is fine; it fails only when the invitation is gone and the question asks for the tier verdict alone.",
         `Judges no single brand's own worth; names no brand.`,
       ] };
     case "comparison": {
@@ -182,7 +191,7 @@ export function stageStructure(cell: StructureCell, brand: string): { shape: str
     case "objections":
       return { shape: "objection", properties: [
         `Names ${b}.`,
-        `States one doubt about ${b} - the seed's doubt, same subject${cell.concern ? ` (${cell.concern})` : ""} - as the asker's own claim. Hearsay, a fact question or a how-common question are acceptable voicings of it.`,
+        `States one doubt about ${b} - the seed's doubt, same subject${cell.concern ? ` (${cell.concern})` : ""} - as the asker's own worry, in any words, compressed or implied. It fails only when the doubt is changed, or turned into a question whether a stated fact, rule or policy about ${b} is accurate - an answer can only confirm or correct a fact, never give a verdict on a worry.`,
         "Leaves the verdict open: the answer can confirm or rebut the doubt.",
         `The asker is not a current customer of ${b}; carries no second worry; asks for no price, cost figure or accounting; is not an ask whether ${b} is worth it over a cheaper option.`,
       ] };
@@ -261,7 +270,8 @@ export function stageStructure(cell: StructureCell, brand: string): { shape: str
  * property, not a p-number). Calibrated on the 206 p26 served cells: every
  * hit is a paraphrase the model also failed when it looked, and the model
  * misses 2-3 of them per run (either-way head-to-heads, one-half criteria)
- * from call-to-call noise. Free, so they run before the model call.
+ * from call-to-call noise. Free, so they run on every set - after a model
+ * reply and when the model call fails alike (ss9).
  */
 const EITHER_WAY = /\b(?:or (?:the other way|vice versa|the reverse)|over \w[\w ]{0,30}, or \w[\w ]{0,30} over|(?:rather|instead) than \w[\w ]{0,30}, or \w[\w ]{0,30} (?:rather|instead) than|one over the other|one or the other)\b|\bwhy would you (?:choose|pick|go with)\b.*\bor\b.*\bover\b/i;
 const CONDITIONAL_MOVE = /^\s*(?:if|suppose|say|assuming|in case|once) (?:i|we)('d| would|'ll| will|'m| am|'re| are)? ?(?:stop|leave|leaving|drop|quit|cancel|move off|moving off|move on|moving on|switch(?:ing)? (?:from|away)|ditch|give up|walk away|get rid of|were to|off\b)\b|\b(?:if|once) (?:i|we)(?:'m|'re| am| are)? (?:leav|switch|mov|stop|dropp|ditch)\w*\b.*\?/i;
@@ -329,7 +339,8 @@ export interface StructureFail { property: number; reason: string; /** false = t
 export interface StructureVerdict {
   /** Per paraphrase (same order as `texts`): the failed properties. */
   fails: StructureFail[][];
-  /** The checker could not be reached - every paraphrase served, nothing cached. */
+  /** The model checker could not be reached - nothing is cached. `fails`
+   * then carries only the string readings (clear); everything else serves. */
   unchecked?: boolean;
 }
 
@@ -359,7 +370,9 @@ export async function checkStructure(input: {
   model?: string;
   effort?: string;
 }): Promise<(StructureVerdict | null)[]> {
-  const a = await anthropicClient();
+  // A client that cannot be built is an outage like any failed call: the
+  // string readings below still run on every set.
+  const a = await anthropicClient().catch((err) => { console.error("structure check client failed:", err); return null; });
   const model = input.model ?? STRUCTURE_CHECK_MODEL;
   const effort = input.effort ?? STRUCTURE_CHECK_EFFORT;
   return withCostContext({ purpose: "setup:structure_check" }, () => Promise.all(
@@ -371,11 +384,18 @@ export async function checkStructure(input: {
       const key = `structure_check:${STAGE_STRUCTURE_VERSION}:${createHash("sha256").update(normalized).digest("hex")}`;
       const hit = await store.cacheGet(key, 183 * 24 * 3600 * 1000);
       if (hit) return JSON.parse(hit) as StructureVerdict;
+      // The free string readings run whatever happens to the model call.
+      const strings = texts.map((t) => structureStringFail(cell, t));
+      const withStrings = (fails: StructureFail[][]): StructureFail[][] => {
+        fails.forEach((fs, i) => { const sf = strings[i]; if (sf && !fs.some((f) => f.property === sf.property && f.clear)) fs.unshift(sf); });
+        return fails;
+      };
       const user =
         `Stage shape: ${s.shape}\nSeed: ${seed}\n\nProperties every paraphrase must satisfy:\n` +
         s.properties.map((p, i) => `${i + 1}. ${p}`).join("\n") +
         `\n\nParaphrases:\n` + texts.map((t, i) => `${i + 1}. ${t}`).join("\n");
       try {
+        if (!a) throw new Error("anthropic client unavailable");
         const res = await a.messages.create({
           model,
           max_tokens: 3000,
@@ -400,13 +420,15 @@ export async function checkStructure(input: {
             fails[idx].push({ property, reason: String(fo.reason ?? ""), clear: fo.clear !== false });
           }
         }
-        texts.forEach((t, i) => { const sf = structureStringFail(cell, t); if (sf && !fails[i].some((f) => f.property === sf.property && f.clear)) fails[i].unshift(sf); });
-        const out: StructureVerdict = { fails };
+        const out: StructureVerdict = { fails: withStrings(fails) };
         await store.cacheSet(key, JSON.stringify(out), input.meta);
         return out;
       } catch (err) {
         console.error("structure check failed:", err);
-        return { fails: texts.map(() => []), unchecked: true };
+        // Unchecked by the model, but the string readings still stand: their
+        // clear fails ride the verdict so a caller can drop them while it
+        // serves everything else.
+        return { fails: withStrings(texts.map(() => [])), unchecked: true };
       }
     })
   ));

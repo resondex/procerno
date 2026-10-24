@@ -406,6 +406,9 @@ const STOP_FORMS = new Set(["one", "max", "mini", "pro", "plus", "air", "go", "f
 /** Brand tokens that are also technical nouns in specific collocations -
  * scrubbed before matching ("pixel size" is a sensor term, not the brand). */
 export const TERM_COLLISIONS = /\b(pixel (?:size|sizes|binning|count|density)|keyboard shortcuts?)\b/g;
+/** TERM_COLLISIONS over raw (unkeyed) text: case-blind, any spacing - the
+ * forbidden path matches the original writing, not its key. */
+const TERM_COLLISIONS_RAW = new RegExp(TERM_COLLISIONS.source.replace(/ /g, "\\s+"), "gi");
 
 /** Numeric tokens that are vocabulary, not quantities - repeating them is
  * topic fidelity, not propagation (a 4K cell says 4K in every paraphrase;
@@ -435,6 +438,23 @@ function isCategoryToken(tok: string, cat?: Set<string>): boolean {
   return false;
 }
 
+/** An everyday word as a word of a brand LABEL (r14's label-word rule):
+ * the vault lexicon or a stopword, unless the vault writes it mostly
+ * capitalized (brand-dominated: "chase", "prime", "apple"). */
+function everydayLabelWord(tok: string): boolean {
+  return (COMMON_WORDS.has(tok) || STOP_FORMS.has(tok)) && !BRAND_DOMINATED.has(tok);
+}
+
+/** A word that can carry a multi-word name part on its own (2026-10-24
+ * setup audit S1.4): 3+ letters, not a generic token, not category
+ * vocabulary, not everyday English. "s bank" of U.S. Bank, "bank of" of
+ * Bank of America and "credit cards" of a "<maker> Credit Cards" label
+ * carry none and are not names; "prime video" carries a brand-dominated
+ * word and is. */
+function distinctiveWord(tok: string, cat?: Set<string>): boolean {
+  return tok.length >= 3 && !GENERIC_TOKENS.has(tok) && !isCategoryToken(tok, cat) && !everydayLabelWord(tok);
+}
+
 /** Dictionary alias forms, keyed and filtered like configured names: a
  * single-word alias that is a stopword, a generic token or category
  * vocabulary never identifies the brand. */
@@ -459,10 +479,13 @@ function aliasKeys(extraForms: string[] | undefined, excludeTokens?: Set<string>
  * No casing rules, no target exemptions, no per-roster word lists.
  * Strings decide whole names and aliases. A ONE-WORD hit is decided by
  * context unless its writing settles it:
- *   - a coined one-word name, alias or product word ("hulu", "jira",
- *     "iPhone") however written, or an everyday one written with a capital
- *     mid-sentence ("...or Ring?") or opening a sentence when brand-
- *     dominated ("Chase isn't working for me") -> the brand;
+ *   - a coined one-word name, alias or product word ("hulu", "asana",
+ *     "iPhone" - not in the vault lexicon) however written, or a lexicon
+ *     word written with a capital mid-sentence ("...or Ring?", "...or
+ *     Jira?") or opening a sentence when brand-dominated ("Chase isn't
+ *     working for me", "Jira keeps timing out") -> the brand. "jira",
+ *     "netflix" and "pixel" ARE in the lexicon (brand-dominated), so
+ *     written lowercase they go to the judge like any everyday word;
  *   - an everyday word written lowercase ("the doorbell ring", "my pixel"),
  *     a sentence-opening everyday word ("Nothing beats..."), or a MAKER
  *     word of a longer name ("Google" of Google Pixel in "Google Play
@@ -507,10 +530,16 @@ export function brandNameForms(name: string, opts?: { extraForms?: string[]; exc
     // Contiguous multi-word parts are definite too ("prime video" of Amazon
     // Prime Video) - a name people shorten is still that name.
     // A part must carry a real word: "u s" of U.S. Bank is not a name ("mostly
-    // in the U.S." flagged a blind AmEx seed in the r15 walk).
+    // in the U.S." flagged a blind AmEx seed in the r15 walk). 2026-10-24
+    // (setup audit S1.4): and that word must be distinctive - neither
+    // everyday English nor category vocabulary. "s bank" named U.S. Bank in
+    // "my partner's bank", "bank of" named Bank of America in "my bank of
+    // choice", and a "<maker> Credit Cards" label made every "credit cards"
+    // a definite mention. A part without one is simply not a form; its
+    // single words still reach the one-word rules (and the judge) above.
     for (let i = 0; i < toks.length; i++) for (let j = i + 2; j <= toks.length; j++) {
       const part = toks.slice(i, j);
-      if (j - i < toks.length && part.some((t) => t.length >= 3 && !STOP_FORMS.has(t) && !GENERIC_TOKENS.has(t))) out.add(part.join(" "));
+      if (j - i < toks.length && part.some((t) => !STOP_FORMS.has(t) && distinctiveWord(t, opts?.excludeTokens))) out.add(part.join(" "));
     }
   }
   for (const fk of aliasKeys(opts?.extraForms, opts?.excludeTokens)) out.add(fk);
@@ -537,11 +566,19 @@ function makerWordForms(name: string, opts?: { extraForms?: string[]; excludeTok
 /** Model verdicts for ambiguous one-word hits: "does <form> in <text>
  * refer to <brand>?" Filled by brand_judge (server) before checks run;
  * empty in the browser, where every ambiguous hit counts as named. */
+/* The key is case- and punctuation-blind (key(text)), so a lowercase twin
+ * shares a verdict with a capitalized text. brandMentions therefore reads a
+ * verdict only for a hit its own writing sends to the judge - never before
+ * the casing rules - so a "no" judged on "the doorbell ring" cannot hide a
+ * capitalized mid-sentence "Ring" (2026-10-24 setup audit). */
 const BRAND_VERDICTS = new Map<string, boolean>();
 export function brandVerdictKey(text: string, brand: string, form: string): string {
   return `${key(brand)}|${form}|${key(text)}`;
 }
 export function setBrandVerdict(text: string, brand: string, form: string, refers: boolean): void {
+  // Dropping verdicts is the safe direction: an unjudged hit counts as
+  // named, so a cleared map can only add a needless rewrite, never hide a
+  // mention (the server re-primes from its cache before the next check).
   if (BRAND_VERDICTS.size > 50_000) BRAND_VERDICTS.clear();
   BRAND_VERDICTS.set(brandVerdictKey(text, brand, form), refers);
 }
@@ -564,6 +601,11 @@ export function brandMentions(
 ): { named: boolean; pending: string[] } {
   const original = text;
   if (opts?.others) text = withoutOtherBrands(text, name, [name, ...opts.others]);
+  // Technical collocations ("pixel size" is a sensor term) are scrubbed here
+  // as on the required side (namesRequiredBrand), per the precision-first
+  // promise of the forbidden path (2026-10-24 setup audit: "Pixel size
+  // matters to me." opening a sentence named Google Pixel outright).
+  text = text.replace(TERM_COLLISIONS_RAW, " ");
   // A definite hit (an unambiguous form, or an ambiguous one the context or
   // a verdict settles) names the brand outright and nothing is queued; only
   // a text whose sole evidence is unjudged ambiguous hits goes to the judge
@@ -577,9 +619,6 @@ export function brandMentions(
     for (const m of text.matchAll(re)) {
       // A whole multi-word name ("prime video", "bank of america") is definite.
       if (form.includes(" ")) return { named: true, pending: [] };
-      const v = BRAND_VERDICTS.get(brandVerdictKey(original, name, form));
-      if (v === true) return { named: true, pending: [] };
-      if (v === false) continue;
       if (!maker.has(form)) {
         // A one-word name, alias or product word: a coined word ("hulu",
         // "jira", "iPhone") is the brand however it is written; an everyday
@@ -595,7 +634,11 @@ export function brandMentions(
         if (capital && sentenceStart && BRAND_DOMINATED.has(form)) return { named: true, pending: [] };
       }
       // Lowercase, a sentence-opening everyday word, or a maker word:
-      // context decides (brand_judge). Unjudged = named.
+      // context decides (brand_judge). Unjudged = named. The verdict is read
+      // only here, after the casing rules (see BRAND_VERDICTS).
+      const v = BRAND_VERDICTS.get(brandVerdictKey(original, name, form));
+      if (v === true) return { named: true, pending: [] };
+      if (v === false) continue;
       if (!pending.includes(form)) pending.push(form);
     }
   }
@@ -736,15 +779,6 @@ export function relationShift(seed: string, para: string): string | null {
   return null;
 }
 
-export function keepsCategoryTerm(seed: string, para: string, category: string): boolean {
-  const anchors = categoryAnchors(category);
-  if (anchors.length === 0) return true;
-  const stem = (w: string) => w.replace(/(ies|es|s)$/, "");
-  const has = (t: string, a: string) => key(t).split(" ").some((w) => stem(w) === stem(a));
-  if (!anchors.every((a) => has(seed, a))) return true;
-  return anchors.every((a) => has(para, a));
-}
-
 /** The span of the seed that spells the category term, first anchor word
  * through last ("credit card" in "my credit card balance"), when the seed
  * carries the full term within 5 words; else null. The owned-noun note
@@ -752,7 +786,11 @@ export function keepsCategoryTerm(seed: string, para: string, category: string):
 export function categorySpanIn(text: string, category: string): string | null {
   const anchors = categoryAnchors(category);
   if (anchors.length < 2) return null;
-  const stem = (w: string) => w.replace(/(ies|es|s)$/, "");
+  // Plural-only strip (p22's fix, 2026-10-24 setup audit): the old
+  // (ies|es|s) stem left "service" / "phone" whole but cut "services" /
+  // "phones" to "servic" / "phon", so a singular seed word never met a
+  // plural anchor and the owned-noun span came back null.
+  const stem = (w: string) => w.replace(/ies$/, "y").replace(/s$/, "");
   const words = text.split(/\s+/);
   const bare = words.map((w) => key(w));
   const i = bare.findIndex((w) => stem(w) === stem(anchors[0]));
@@ -771,9 +809,16 @@ export function textNamesCategory(text: string, category: string): boolean {
   return false;
 }
 
+/** Does a text name a brand? Default: the forbidden-side core
+ * (brandMentions - precision-first, judge-aware). `required: true` asks
+ * the design-side question instead (namesRequiredBrand - tolerant, case-
+ * blind): whether a label variant or a text the design guarantees carries
+ * the brand. Before 2026-10-24 the flag was accepted and ignored at all
+ * five call sites (setup audit S3). */
 export function textNamesBrand(
   text: string, brand: string, opts?: { required?: boolean; extraForms?: string[]; excludeTokens?: Set<string> }
 ): boolean {
+  if (opts?.required) return namesRequiredBrand(text, brand, { extraForms: opts.extraForms, excludeTokens: opts.excludeTokens });
   return brandMentions(text, brand, opts).named;
 }
 
@@ -889,7 +934,7 @@ export function checkPromptBrandRule(input: {
   } else if (stage === "comparison") {
     if (!target) out.push({ check: "comparison_missing_target", detail: `comparison must name ${brand}` });
     if (angle !== "generic" && angle !== "defensive") {
-      if (!textNamesBrand(text, angle, { required: true }))
+      if (!textNamesBrand(text, angle, { required: true, extraForms: input.extraForms?.[angle], excludeTokens: catTokens }))
         out.push({ check: "comparison_missing_rival", detail: `comparison cell for ${angle}` });
       // A comparison cell measures EXACTLY its designed pair - a third
       // tracked brand in the prompt contaminates the head-to-head (the
@@ -906,7 +951,7 @@ export function checkPromptBrandRule(input: {
         out.push({ check: "alternatives_names_extra_rival", detail: `defensive alternatives names ${rivalsNamed.join(", ")}` });
     } else if (angle !== "generic") {
       if (target) out.push({ check: "offensive_alt_names_target", detail: `offensive alternatives must not name ${brand}` });
-      if (!textNamesBrand(text, angle, { required: true }))
+      if (!textNamesBrand(text, angle, { required: true, extraForms: input.extraForms?.[angle], excludeTokens: catTokens }))
         out.push({ check: "offensive_alt_missing_rival", detail: `alternatives cell for ${angle}` });
       const extra = rivalsNamed.filter((r) => !isAngleBrand(r));
       if (extra.length > 0)
@@ -930,13 +975,18 @@ export function checkPromptBrandRule(input: {
 function quantities(text: string, brandVocab: RegExp[]): string[] {
   let t = ` ${text.toLowerCase()} `.replace(TECH_TOKENS, " ");
   for (const p of brandVocab) t = t.replace(new RegExp(`${p.source}\\s*\\d+[a-z]*`, "g"), " ");
+  // Years out BEFORE the formats are normalized: only a bare 4-digit 20xx
+  // token reads as a year. Filtering after normalization dropped "2,000"
+  // and "2k" as the year 2000 (2026-10-24 setup audit: "a team of 2,000"
+  // passed seed_number_changed while "2,500" flagged).
+  t = t.replace(/(?<![\d.,])20\d\d(?!\d|\.\d|,\d{3}(?!\d)|\s*k(?![a-z0-9]))/g, " ");
   // Thousands separators out ("60,000" -> "60000"), then the k suffix
   // expanded ("60k" -> "60000"). "m" stays untouched - it is ambiguous
   // (millions, minutes, meters) and both sides of a real mismatch
   // normalize identically anyway.
   while (/\d,\d{3}(?!\d)/.test(t)) t = t.replace(/(\d),(\d{3})(?!\d)/g, "$1$2");
   t = t.replace(/(\d+(?:\.\d+)?)\s*k(?![a-z0-9])/g, (_, n) => String(Math.round(parseFloat(n) * 1000)));
-  return [...t.matchAll(/\d+(?:\.\d+)?/g)].map((m) => m[0]).filter((n) => !/^20\d\d$/.test(n));
+  return [...t.matchAll(/\d+(?:\.\d+)?/g)].map((m) => m[0]);
 }
 
 /** A prompt leaking a scenario label: the full label verbatim, or a short
@@ -970,12 +1020,16 @@ export function scenarioLabelLeak(text: string, labels: (string | null | undefin
     // own word and never leaks by stem; the rule keeps planning register the
     // vault never uses lowercase ("unification"). The Jira "Client delivery
     // collaboration" room flagged "let them collaborate" (cold_v16).
+    // 2026-10-24 (setup audit S3): the TEXT word carrying the stem must be
+    // planning register too - a word the vault writes lowercase in plain
+    // speech is the buyer's own word whatever label it shares a stem with
+    // ("Tool modernization" flagged "a modern tool").
     const catTokens = new Set(key(category ?? "").split(" ").filter(Boolean));
     for (const w of key(label).split(" ")) {
       if (w.length < 10 || catTokens.has(w) || COMMON_WORDS.has(w) || !/(?:ation|ization|isation|ment)s?$/.test(w)) continue;
       const stem = w.slice(0, 6);
-      const re = new RegExp(`\\b${stem}[a-z]*\\b`);
-      if (re.test(key(t))) return label;
+      const re = new RegExp(`\\b${stem}[a-z]*\\b`, "g");
+      if ([...key(t).matchAll(re)].some((m) => !COMMON_WORDS.has(m[0]))) return label;
     }
   }
   const m = text.match(/^([A-Za-z][A-Za-z0-9 &/-]{3,40}):/);
@@ -1196,23 +1250,50 @@ const esc = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
  * counts - full name, any distinctive token ("iPhone" for "Apple iPhone",
  * "Monday" for "monday.com"), any contiguous sub-phrase ("Prime Video"),
  * the compact form ("oneplus" / "one plus"), the parenthetical alias
- * ("HBO"), dictionary aliases. Category words never count. */
+ * ("HBO"), dictionary aliases. Category words never count.
+ * 2026-10-24 (setup audit S2): the r15 real-word guards apply here too - a
+ * multi-word part needs a distinctive word ("u s" and "s bank" never
+ * satisfy U.S. Bank), and a single word of the label that is everyday
+ * English never does ("bank", or "issues" of "GitHub (Issues/Projects)").
+ * The full name, its compact and dotted-initial forms, and the MAKER word
+ * (the label's first word: "google", "github", "bank" of Bank of America)
+ * stay tolerant - a maker word satisfying must-name is the recorded known
+ * gap, unchanged. */
 export function namesRequiredBrand(
   text: string, name: string, opts?: { extraForms?: string[]; excludeTokens?: Set<string> }
 ): boolean {
   const t = key(text).replace(TERM_COLLISIONS, " ");
   const forms = new Set<string>();
+  const cat = opts?.excludeTokens;
   const base = key(name.replace(/\s*\([^)]*\)/g, ""));
   const paren = key([...name.matchAll(/\(([^)]*)\)/g)].map((m) => m[1]).join(" "));
+  const maker = base.split(" ")[0] ?? "";
   for (const f of [base, paren]) {
     if (!f) continue;
-    forms.add(f);
     const toks = f.split(" ");
-    if (toks.length > 1) forms.add(toks.join(""));
+    // The base IS the name; a parenthetical is a qualifier ("Amazon
+    // (Beauty)", "GitHub (Issues/Projects)") that names the brand only when
+    // it carries a distinctive word ("Max (HBO)").
+    if (f === base || toks.some((tok) => distinctiveWord(tok, cat))) {
+      forms.add(f);
+      if (toks.length > 1) forms.add(toks.join(""));
+    }
+    // Dotted initials written together: "U.S. Bank" keys to "u s bank" and
+    // is commonly written "US Bank".
+    if (f === base && toks.length > 2 && toks[0].length === 1 && toks[1].length === 1) {
+      let k = 0;
+      while (k < toks.length && toks[k].length === 1) k++;
+      if (k < toks.length) forms.add([toks.slice(0, k).join(""), ...toks.slice(k)].join(" "));
+    }
     for (let i = 0; i < toks.length; i++) {
       const tok = toks[i];
-      if (tok.length >= 3 && !STOP_FORMS.has(tok) && !GENERIC_TOKENS.has(tok) && !isCategoryToken(tok, opts?.excludeTokens)) forms.add(tok);
-      for (let j = i + 2; j <= toks.length; j++) forms.add(toks.slice(i, j).join(" "));
+      if (tok.length >= 3 && !STOP_FORMS.has(tok) && !GENERIC_TOKENS.has(tok) && !isCategoryToken(tok, cat) &&
+          ((f === base && tok === maker) || !everydayLabelWord(tok))) forms.add(tok);
+      for (let j = i + 2; j <= toks.length; j++) {
+        const part = toks.slice(i, j);
+        // The whole base was added above; proper parts need a distinctive word.
+        if (!(f === base && i === 0 && j === toks.length) && part.some((p) => distinctiveWord(p, cat))) forms.add(part.join(" "));
+      }
     }
   }
   for (const fk of aliasKeys(opts?.extraForms, opts?.excludeTokens)) forms.add(fk);
@@ -1396,14 +1477,19 @@ export function resolveCellSpec(
     stage: string; angle: string; text: string; spec?: unknown; concern?: string | null;
     classPhrase?: string | null; classBrand?: string | null;
   },
-  brand: string, competitors: string[], category?: string
+  brand: string, competitors: string[], category?: string,
+  /** Dictionary alias forms per brand - the same vocabulary generation
+   * derived the carried spec with (2026-10-24 setup audit: without it a
+   * rival named only by alias flipped from required to forbidden on the
+   * paraphrase pass and every faithful paraphrase was culled). */
+  extraForms?: Record<string, string[]>
 ): CellCheckSpec | null {
   // A class-angle cell is spec-era by construction: it has no legacy
   // string-derived design to fall back to (the string path would read
   // angle "class" as a rival named "class").
-  if (classOfCell(cell)) return deriveCheckSpec(cell, brand, competitors, category);
+  if (classOfCell(cell)) return deriveCheckSpec(cell, brand, competitors, category, extraForms);
   if (!cell.spec || typeof cell.spec !== "object") return null;
-  const derived = deriveCheckSpec(cell, brand, competitors, category);
+  const derived = deriveCheckSpec(cell, brand, competitors, category, extraForms);
   // A seed edit re-deriving is routine; the same seed yielding a different
   // design (roster change, derivation fix, tampered copy) is worth a line.
   const carried = cell.spec as Partial<CellCheckSpec>;
@@ -1420,15 +1506,24 @@ export function resolveCellSpec(
  * America" is not "U.S. Bank"; r13, 2026-10-02 cold-walk round 2: an
  * AmEx-vs-Bank-of-America comparison was flagged for also naming U.S.
  * Bank). A brand whose name contains this one's ("Amazon Prime Video" vs
- * "Prime Video") is never scrubbed - that would hide the brand itself. */
+ * "Prime Video") is never scrubbed - that would hide the brand itself.
+ * The other direction too (2026-10-24 setup audit): a tracked name
+ * CONTAINED in the brand under test ("Apple" in "Apple TV+") is scrubbed
+ * only outside the brand's own full name - "Is Apple TV+ worth it?" still
+ * names Apple TV+, while a bare "Apple" elsewhere is still Apple's. */
 export function withoutOtherBrands(text: string, brand: string, roster: string[]): string {
   const own = key(speakable(brand));
+  const pattern = (k: string) => new RegExp(`(?<![A-Za-z0-9])${k.split(" ").map(esc).join("[^A-Za-z0-9]+")}(?![A-Za-z0-9])`, "gi");
   let out = text;
   for (const other of roster) {
     const ok = key(speakable(other));
     if (!ok || ok === own || ` ${ok} `.includes(` ${own} `)) continue;
-    const re = new RegExp(`(?<![A-Za-z0-9])${ok.split(" ").map(esc).join("[^A-Za-z0-9]+")}(?![A-Za-z0-9])`, "gi");
-    out = out.replace(re, " ");
+    if (own && ` ${own} `.includes(` ${ok} `)) {
+      const spans = [...out.matchAll(pattern(own))].map((m) => [m.index ?? 0, (m.index ?? 0) + m[0].length]);
+      out = out.replace(pattern(ok), (s: string, at: number) => (spans.some(([a, b]) => at < b && at + s.length > a) ? s : " "));
+      continue;
+    }
+    out = out.replace(pattern(ok), " ");
   }
   return out;
 }

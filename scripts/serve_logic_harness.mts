@@ -13,6 +13,17 @@
  *  4 a 60s-old pending marker is orphaned immediately (old code trusted
  *    it for 180s) - takeover attempted, fast null, markers released
  *  5 a fresh pending marker with noWait returns pending without claiming
+ *
+ * 2026-10-24 setup audit (r29 / p32) additions:
+ *  1  the passes completion marker lives under a key carrying the rules version
+ *  2b an old-era unit whose design verdict is NOT cached re-judges in place
+ *     (the serve-time re-judge runs the design layer, not only the free checks)
+ *  3g a PROVISIONAL unit reaching the battery passes is never stamped
+ *  6  the phrasings claim is a CAS: a concurrent writer's value wins, never
+ *     overwritten by our marker
+ *  7  the stakes judge fails CLOSED when the model call throws
+ * Seeded design verdicts (designCheckCacheKey) stand in for the checker, so
+ * the old-era upgrade cases stay free.
  */
 import fs from "node:fs";
 import os from "node:os";
@@ -77,6 +88,24 @@ const gridInput = () => ({
 });
 
 const RULES = inst.SEED_RULES_VERSION;
+
+// r29: the rules re-judge reads the design layer too. Seed the verdicts the
+// checker would have cached at generation for the passing texts, under the
+// same intent the engine builds (the room circumstance fails open to the
+// description without a key, so the situation reads "label - description").
+const sitText = (r: { situation: string | null }) =>
+  r.situation ? `${r.situation} - ${scenarios.find((s) => s.label === r.situation)?.description ?? ""}` : r.situation;
+const intentOf = (r: { stage: { key: string }; situation: string | null; angle: string }) =>
+  bc.stageDesignIntent(r.stage.key, "Acme", undefined, r.angle, sitText(r), undefined) as string | null;
+const seedVerdict = async (r: typeof prRow, text: string) => {
+  const intent = intentOf(r);
+  if (intent) await store.cacheSet(inst.designCheckCacheKey(intent, text), JSON.stringify({ voices: true, reason: "harness" }), {});
+};
+await seedVerdict(prRow, PR_PASS);
+await seedVerdict(ceRow, CE_PASS);
+// Passing texts with NO cached verdict (the checker would have to run).
+const PR_PASS2 = "Deadlines keep slipping on my team and nobody tracks who is doing what. How do people fix that?";
+const CE_PASS2 = "What should I understand before picking project management software for the very first time?";
 const results: string[] = [];
 const check = (name: string, ok: boolean, detail = "") => {
   results.push(`${ok ? "ok  " : "FAIL"} ${name}${detail ? ` ${detail}` : ""}`);
@@ -94,6 +123,12 @@ check("1 terminal-flagged serves as-is", Array.isArray(out) && out.length === 2 
   `(${ms}ms, cells=${out?.length ?? "null"})`);
 check("1 flags survive the serve", Array.isArray(out) && out.every((c: { seedFlags?: string[] }) => (c.seedFlags?.length ?? 0) > 0));
 check("1 no wait, no generation", ms < 5_000, `(${ms}ms)`);
+// The passes ran over the all-cached battery and left their completion
+// marker under the CURRENT rules' key - never one a rules bump would keep.
+const marker1 = await store.cacheGet(inst.gridPassesCacheKey(keys), 365 * 24 * 3600 * 1000);
+const markerOld = await store.cacheGet(inst.gridPassesCacheKey(keys, "r28"), 365 * 24 * 3600 * 1000);
+check("1 passes marker keyed on the rules version", marker1 === JSON.stringify("1") && markerOld === null &&
+  inst.gridPassesCacheKey(keys) !== inst.gridPassesCacheKey(keys, "r28"), `(marker=${marker1}, old=${markerOld})`);
 
 // --- case 2: legacy bare array, passing -> upgraded in place ---
 await store.cacheSet(keyOf(prRow), JSON.stringify([cellOf(prRow, PR_PASS)]), {});
@@ -108,6 +143,21 @@ const raw2 = await Promise.all(keys.map((k) => store.cacheGet(k, 365 * 24 * 3600
 check("2 entries upgraded to {cells, rules}", raw2.every((r) => {
   try { const v = JSON.parse(r ?? ""); return !Array.isArray(v) && v.rules === RULES && Array.isArray(v.cells); } catch { return false; }
 }));
+
+// --- case 2b: old-era, mechanically passing, but its design verdict is not
+// cached: the design layer cannot be read for free (no checker here), so the
+// unit is NOT upgraded - it re-enters generation with its text, ships
+// provisional, and the response answers retry.
+await store.cacheSet(keyOf(prRow), JSON.stringify([cellOf(prRow, PR_PASS)]), {});
+await store.cacheSet(keyOf(ceRow), JSON.stringify({ cells: [cellOf(ceRow, CE_PASS2)], rules: "r0" }), {});
+t0 = Date.now();
+out = await inst.generateGrid(gridInput());
+ms = Date.now() - t0;
+let state2b = "";
+let text2b = "";
+try { const v = JSON.parse((await store.cacheGet(keyOf(ceRow), 365 * 24 * 3600 * 1000)) ?? "") as { provisional?: boolean; rules?: string; cells?: { text: string }[] }; state2b = v.provisional ? "provisional" : v.rules === RULES ? "stamped" : "other"; text2b = v.cells?.[0]?.text ?? ""; } catch { state2b = "parse"; }
+check("2b unverified design layer: not upgraded, re-judged in place (text kept, provisional, retry)",
+  out === null && state2b === "provisional" && text2b === CE_PASS2 && ms < 10_000, `(${ms}ms, ${state2b})`);
 
 // --- case 3: old-era failing -> one regeneration attempt (throws on key), markers released ---
 await store.cacheSet(keyOf(prRow), JSON.stringify({ cells: [cellOf(prRow, PR_FAIL)], rules: "r0" }), {});
@@ -129,8 +179,10 @@ check("3 the passing old-era sibling upgraded instead of regenerating", ceUpgrad
 // generation WITH its cells - no writer redraw, the judgment pipeline runs,
 // and with the checker unreachable it ships provisional again (never
 // stamped, never flagged, response answers retry). 2026-10-02 review #1/#2.
+// CE_PASS2 has no cached design verdict - a cached one would rightly let
+// the re-judge finish and stamp the unit.
 await store.cacheSet(keyOf(prRow), JSON.stringify({ cells: [cellOf(prRow, PR_PASS)], rules: RULES }), {});
-await store.cacheSet(keyOf(ceRow), JSON.stringify({ cells: [cellOf(ceRow, CE_PASS)], provisional: true }), {});
+await store.cacheSet(keyOf(ceRow), JSON.stringify({ cells: [cellOf(ceRow, CE_PASS2)], provisional: true }), {});
 t0 = Date.now();
 out = await inst.generateGrid(gridInput());
 ms = Date.now() - t0;
@@ -139,7 +191,7 @@ let prov3c = "";
 let text3c = "";
 try { const v = JSON.parse(raw3c ?? ""); prov3c = v.__pending === 0 ? "retryable" : v.provisional ? "provisional" : v.rules === RULES ? "stamped" : "other"; text3c = v.cells?.[0]?.text ?? ""; } catch { prov3c = "parse"; }
 check("3b provisional re-judges in place: text preserved, still provisional, response retries",
-  out === null && prov3c === "provisional" && text3c === CE_PASS && ms < 10_000, `(${ms}ms, ${prov3c})`);
+  out === null && prov3c === "provisional" && text3c === CE_PASS2 && ms < 10_000, `(${ms}ms, ${prov3c})`);
 
 // --- case 3c: a unit that failed 3 attempts is EXHAUSTED - the battery ships
 // without it (logged hole) instead of blocking the wizard forever on the
@@ -184,7 +236,7 @@ check("3e claim loses on absent expectation vs fresh row", w === false);
 // claim marker - the takeover recovers them and re-judges in place instead
 // of redrawing (2026-10-02 round 4, minor b).
 await store.cacheSet(keyOf(prRow), JSON.stringify({ cells: [cellOf(prRow, PR_PASS)], rules: RULES }), {});
-await store.cacheSet(keyOf(ceRow), JSON.stringify({ __pending: Date.now() - 60_000, cells: [cellOf(ceRow, CE_PASS)] }), {});
+await store.cacheSet(keyOf(ceRow), JSON.stringify({ __pending: Date.now() - 60_000, cells: [cellOf(ceRow, CE_PASS2)] }), {});
 t0 = Date.now();
 out = await inst.generateGrid(gridInput());
 ms = Date.now() - t0;
@@ -192,7 +244,24 @@ let rec3f = "";
 let recText = "";
 try { const v = JSON.parse((await store.cacheGet(keyOf(ceRow), 365 * 24 * 3600 * 1000)) ?? "") as { provisional?: boolean; cells?: { text: string }[] }; rec3f = v.provisional ? "provisional" : "other"; recText = v.cells?.[0]?.text ?? ""; } catch { rec3f = "parse"; }
 check("3f killed re-judge: cells recovered from the stale marker, text preserved, still provisional",
-  out === null && rec3f === "provisional" && recText === CE_PASS && ms < 10_000, `(${ms}ms, ${rec3f})`);
+  out === null && rec3f === "provisional" && recText === CE_PASS2 && ms < 10_000, `(${ms}ms, ${rec3f})`);
+
+// --- case 3g: a PROVISIONAL unit that reaches the battery passes is never
+// stamped (2026-10-24 audit S1 #2: stampPassed rewrote {cells, rules, passed}
+// over the provisional marker, freezing an unchecked seed as checked). The
+// problem-recognition unit is provisional with a text the checker never
+// judged, so it stays provisional; its sibling is terminal; every unit is
+// resolved, so the passes run - and must leave it alone.
+await store.cacheSet(keyOf(prRow), JSON.stringify({ cells: [cellOf(prRow, PR_PASS2)], provisional: true }), {});
+await store.cacheSet(keyOf(ceRow), JSON.stringify({ cells: [cellOf(ceRow, CE_PASS)], rules: RULES }), {});
+await store.cacheSet(inst.gridPassesCacheKey(keys), JSON.stringify({ __pending: 0 }), {});
+out = await inst.generateGrid(gridInput());
+let state3g = "";
+try { const v = JSON.parse((await store.cacheGet(keyOf(prRow), 365 * 24 * 3600 * 1000)) ?? "") as { provisional?: boolean; passed?: string; rules?: string }; state3g = v.passed ? "stamped-passed" : v.provisional ? "provisional" : v.rules ? "rules-only" : "other"; } catch { state3g = "parse"; }
+const marker3g = await store.cacheGet(inst.gridPassesCacheKey(keys), 365 * 24 * 3600 * 1000);
+check("3g provisional unit never stamped by the passes (they did run)",
+  out === null && state3g === "provisional" && marker3g === JSON.stringify("1") && !!prRow.situation,
+  `(${state3g}, passes=${marker3g}, situation=${prRow.situation})`);
 
 // --- case 4: 60s-old marker is orphaned immediately (old code waited 180s) ---
 await store.cacheSet(keyOf(prRow), JSON.stringify({ __pending: Date.now() - 60_000 }), {});
@@ -214,6 +283,42 @@ let untouched5 = false;
 try { untouched5 = JSON.parse(raw5 ?? "").__pending === freshAt; } catch { /* leave false */ }
 check("5 fresh marker + noWait returns pending fast", out === null && ms < 5_000, `(${ms}ms)`);
 check("5 the fresh claim was not stolen", untouched5);
+
+// --- case 6: the phrasings claim is a CAS (2026-10-24 audit). A concurrent
+// request finishes the cell between our scan and our claim: the claim must
+// lose, its value must survive, and this request serves it.
+{
+  const pInput = {
+    brand: "Acme", category: "project management software", competitors: [], audience: null,
+    base, scenarios, count: 10,
+  };
+  const pCell = { stage: ceRow.stage.key, situation: ceRow.situation, angle: ceRow.angle, mode: null, text: CE_PASS };
+  const pkey = inst.phrasingCacheKey(pInput, pCell);
+  const theirs = [{ text: "What do I need to know before choosing project management software for the first time?", asker: "harness" }];
+  const orig = store.cacheClaim.bind(store);
+  let injected = false;
+  (store as { cacheClaim: typeof store.cacheClaim }).cacheClaim = async (k, exp, marker, age, meta) => {
+    if (k === pkey && !injected) { injected = true; await store.cacheSet(pkey, JSON.stringify(theirs), {}); }
+    return orig(k, exp, marker, age, meta);
+  };
+  let got: { text: string }[][] = [];
+  try { got = await inst.generatePhrasings({ ...pInput, cells: [pCell] }); }
+  finally { (store as { cacheClaim: typeof store.cacheClaim }).cacheClaim = orig; }
+  const after = await store.cacheGet(pkey, 365 * 24 * 3600 * 1000);
+  check("6 phrasings claim lost to a concurrent writer: its value survives and is served",
+    injected && after === JSON.stringify(theirs) && got[0]?.[0]?.text === theirs[0].text, `(injected=${injected}, served=${got[0]?.length ?? 0})`);
+}
+
+// --- case 7: the stakes judge fails CLOSED (2026-10-24 audit): with no key
+// the call throws twice and every claimed deviation is refused - the room
+// inherits the base instead of a cached grant.
+{
+  const verdicts = await inst.judgeStakes({
+    category: "project management software", base: base as never,
+    rooms: [{ label: "Solo founder", description: "Runs the company alone", journey: { involvement: "considered", verifiability: "spec", think_feel: "think", decision_unit: "committee" } }],
+  });
+  check("7 stakes judge refuses on a model error", verdicts.length === 1 && verdicts[0].changes === false, `(${JSON.stringify(verdicts)})`);
+}
 
 console.log(results.join("\n"));
 console.log(process.exitCode ? "SOME CHECKS FAILED" : "ALL PASS");

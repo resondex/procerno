@@ -938,3 +938,80 @@ if (fails > 0) process.exitCode = 1;
   ok("per-code index is symmetric", by.x?.[0].code === "y" && by.y?.[0].code === "x");
   console.log("14. definition overlap: " + (process.exitCode ? "FAILED" : "ALL PASS"));
 }
+
+
+// 15. Setup audit 2026-10-24 (checker stack): the probe-confirmed holes. Every case here is decided mechanically - no judge verdict is recorded or needed.
+{
+  const ok = (label: string, cond: boolean, extra = "") => { if (!cond) { console.error(`   FAIL ${label} ${extra}`); process.exitCode = 1; } else console.log(`   ok   ${label} ${extra}`); };
+  const AC = new Set(["credit", "cards"]);
+  const BANKS = ["American Express", "Chase", "Bank of America", "U.S. Bank", "Wells Fargo"];
+  const mention = (text: string, b: string) => bc.brandMentions(text, b, { excludeTokens: AC, others: BANKS.filter((x) => x !== b) });
+  // S1.4: a multi-word name part is a definite form only with a distinctive word.
+  const partner = mention("My partner's bank keeps pushing a card. Which credit cards should I look at?", "U.S. Bank");
+  ok("'my partner's bank' is no longer a definite U.S. Bank hit ('s bank' part) - the everyday 'bank' goes to the judge", partner.pending.includes("bank"), JSON.stringify(partner));
+  const choice = mention("I'd rather stay with my bank of choice. Which credit cards should I look at?", "Bank of America");
+  ok("'my bank of choice' is no longer a definite Bank of America hit ('bank of' part)", choice.pending.includes("bank"), JSON.stringify(choice));
+  ok("a '<maker> Credit Cards' label never makes 'credit cards' a mention", !bc.brandMentions("Which credit cards should I look at?", "Chase Credit Cards", { excludeTokens: AC }).named);
+  ok("'U.S. Bank' written out is still definite", JSON.stringify(mention("Is U.S. Bank any good for credit cards?", "U.S. Bank")) === JSON.stringify({ named: true, pending: [] }));
+  ok("'Bank of America' written out is still definite", JSON.stringify(mention("Is Bank of America any good for credit cards?", "Bank of America")) === JSON.stringify({ named: true, pending: [] }));
+  ok("a part with a brand-dominated word is still a form ('chase credit')", bc.brandNameForms("Chase Credit Cards", { excludeTokens: AC }).includes("chase credit"));
+  // S2: the required side gets the same guards (the maker-word gap is unchanged).
+  ok("required: 'in the U.S.' does not satisfy U.S. Bank", !bc.namesRequiredBrand("a card from a big issuer in the U.S.", "U.S. Bank", { excludeTokens: AC }));
+  ok("required: 'my bank's card' does not satisfy U.S. Bank", !bc.namesRequiredBrand("my bank's card", "U.S. Bank", { excludeTokens: AC }));
+  ok("required: a bare 'issues' does not satisfy GitHub (Issues/Projects)", !bc.namesRequiredBrand("Should we keep working around these issues?", "GitHub (Issues/Projects)", { excludeTokens: new Set(["project", "management", "tools"]) }));
+  ok("required: 'US Bank' / 'u.s. bank' still satisfy U.S. Bank", bc.namesRequiredBrand("Is US Bank decent?", "U.S. Bank") && bc.namesRequiredBrand("is u.s. bank decent", "U.S. Bank"));
+  ok("required: the maker 'github' and 'GitHub Issues' still satisfy it", bc.namesRequiredBrand("leaving github for good", "GitHub (Issues/Projects)") && bc.namesRequiredBrand("Is GitHub Issues enough?", "GitHub Issues / Projects"));
+  ok("required: 'Prime Video' still satisfies Amazon Prime Video", bc.namesRequiredBrand("Netflix vs Prime Video", "Amazon Prime Video"));
+  console.log("   info maker-word gap (recorded, unchanged): 'my bank's card' satisfies Bank of America =", bc.namesRequiredBrand("my bank's card", "Bank of America"));
+  const cmpUS = bc.deriveCheckSpec({ stage: "comparison", angle: "U.S. Bank", text: "American Express or U.S. Bank for credit cards: which would you pick, and why?" }, "American Express", BANKS.slice(1), "credit cards");
+  const sigUS = bc.checkCandidateSignature("American Express or a big bank in the U.S. for credit cards: which would you pick?", cmpUS, { category: "credit cards" });
+  ok("comparison: a paraphrase that dropped U.S. Bank misses it", !sigUS.ok && sigUS.missing.includes("U.S. Bank"), JSON.stringify(sigUS));
+  // textNamesBrand's required flag routes to the tolerant design-side detector.
+  ok("textNamesBrand required:true is the tolerant detector", bc.textNamesBrand("Netflix vs Prime Video", "Amazon Prime Video", { required: true }) && !bc.textNamesBrand("Netflix vs Prime Video", "Amazon Prime Video"));
+  const legacyPV = bc.checkPromptBrandRule({ text: "We're done with Prime Video for streaming. What should we get instead?", stage: "alternatives", angle: "Amazon Prime Video", brand: "Netflix", competitors: ["Amazon Prime Video", "Hulu"], category: "video streaming services" });
+  ok("legacy offensive alternatives: 'Prime Video' names the angle rival", !legacyPV.some((x: any) => x.check === "offensive_alt_missing_rival"), JSON.stringify(legacyPV));
+  // Technical-term scrub on the forbidden path.
+  const PXR = ["Apple iPhone", "Samsung Galaxy", "OnePlus"];
+  const blindPx = bc.deriveCheckSpec({ stage: "discovery", angle: "generic", text: "Which smartphones should I look at?" }, "Google Pixel", PXR, "smartphones");
+  const px = bc.checkPromptAgainstSpec({ text: "Which phone is best? Pixel size matters to me.", spec: blindPx, category: "smartphones" });
+  ok("blind: sentence-initial 'Pixel size' is a sensor term, not the target", px.length === 0, JSON.stringify(px));
+  const px2 = bc.checkPromptAgainstSpec({ text: "Which phone is best? Is a Pixel worth it?", spec: blindPx, category: "smartphones" });
+  ok("blind: 'a Pixel' mid-sentence is still the target", px2.some((x: any) => x.check === "blind_names_brand"), JSON.stringify(px2));
+  // Quantities: only a bare 4-digit token is a year.
+  ok("'about 2,000 employees' carries the quantity 2000", bc.seedQuantities("about 2,000 employees", "Jira", []).includes("2000"));
+  ok("'about 2k employees' carries the quantity 2000", bc.seedQuantities("about 2k employees", "Jira", []).includes("2000"));
+  ok("a bare year is still not a quantity", bc.seedQuantities("in 2026 we had 40 people", "Jira", []).join() === "40");
+  const qcell = { stage: "use_case", angle: "generic", text: "We're a team of 2,500 people. Which project management tool would handle that best?" };
+  const qspec = bc.deriveCheckSpec(qcell, "Jira", ["Asana"], "project management tools");
+  const qf = bc.checkBattery({ brand: "Jira", competitors: ["Asana"], category: "project management tools", cells: [{ ...qcell, spec: qspec, phrasings: ["With 2,000 of us, which project management tool handles that best?", "We have 2.5k people - which project management tool fits best?"] }] })
+    .filter((f: any) => f.check === "seed_number_changed");
+  ok("'2,000' against a seed of '2,500' flags; '2.5k' does not", qf.length === 1 && qf[0].text.includes("2,000"), JSON.stringify(qf.map((f: any) => f.detail)));
+  // Containment: a tracked name inside the brand under test is not scrubbed out of it.
+  ok("'Apple TV+' names Apple TV+ with Apple on the roster", bc.brandMentions("Is Apple TV+ worth it?", "Apple TV+", { others: ["Apple", "Netflix"] }).named);
+  ok("a bare 'Apple' elsewhere is still scrubbed for Apple TV+", !bc.brandMentions("I use my Apple Watch every day", "Apple TV+", { others: ["Apple", "Netflix"] }).named);
+  ok("'Bank of America' still does not name 'U.S. Bank'", !mention("Bank of America for credit cards?", "U.S. Bank").named);
+  // Verdict cache: a lowercase twin's "no" never hides a capitalized mid-sentence mention.
+  bc.setBrandVerdict("Our doorbell ring is too quiet - which smart home devices help?", "Ring", "ring", false);
+  ok("the twin's verdict still applies to its own lowercase hit", !bc.brandMentions("Our doorbell ring is too quiet - which smart home devices help?", "Ring", {}).named);
+  ok("a capitalized mid-sentence 'Ring' in a key-equal text is named", bc.brandMentions("Our doorbell Ring is too quiet - which smart home devices help?", "Ring", {}).named);
+  // Category span and label stems.
+  ok("categorySpanIn: 'streaming service' meets 'streaming services'", bc.categorySpanIn("Our streaming service bill keeps climbing", "streaming services") === "streaming service");
+  ok("label stem: a plain 'modern' does not leak 'Tool modernization'", bc.scenarioLabelLeak("We want a modern tool that just works", ["Tool modernization"]) === null);
+  ok("label stem: 'modernize' still leaks it", bc.scenarioLabelLeak("We need to modernize how we plan", ["Tool modernization"]) === "Tool modernization");
+  // resolveCellSpec reads the same alias vocabulary generation did.
+  const aliasCell = { stage: "alternatives", angle: "generic", text: "We're moving off Amex. Which credit cards should we look at?" };
+  const carried = bc.deriveCheckSpec(aliasCell, "Jira", ["American Express", "Chase"], "credit cards", FORMS);
+  const resolved = bc.resolveCellSpec({ ...aliasCell, spec: carried }, "Jira", ["American Express", "Chase"], "credit cards", FORMS);
+  ok("resolveCellSpec with alias forms keeps an alias-named brand required", !!resolved && resolved.requiredBrands.includes("American Express"), JSON.stringify(resolved?.requiredBrands));
+  const bare = bc.resolveCellSpec({ ...aliasCell, spec: carried }, "Jira", ["American Express", "Chase"], "credit cards");
+  ok("without alias forms the same cell re-derives differently (the hole)", !!bare && !bare.requiredBrands.includes("American Express"));
+  // Structure table: premium vs basic carries the pick invitation as its own property.
+  const ss = await import("../src/lib/engine/stage_structure.ts");
+  const prem = ss.stageStructure({ stage: "premium_worth", angle: "generic" }, "Brand")?.properties ?? [];
+  ok("premium vs basic: a property fails a paraphrase that drops the pick invitation", prem.some((p: string) => /invites a pick/i.test(p) && /fails only when the invitation is gone/i.test(p)));
+  const valueProps = ss.stageStructure({ stage: "pricing", angle: "generic", situation: "room" }, "Brand")?.properties ?? [];
+  ok("Value's circumstance property is the contradiction form", /fails only when/.test(valueProps[0] ?? ""));
+  const objProps = ss.stageStructure({ stage: "objections", angle: "generic" }, "Brand")?.properties ?? [];
+  ok("objection doubt property no longer accepts a fact question", !/acceptable voicings/.test(objProps[1] ?? "") && /fact, rule or policy/.test(objProps[1] ?? ""));
+  console.log("15. setup audit checker fixes: " + (process.exitCode ? "FAILED" : "ALL PASS"));
+}
