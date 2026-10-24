@@ -56,6 +56,10 @@ const patchSchema = z.object({
   /** Archive (true) or unarchive (false). Trackers are never deleted from
    * the app - archiving hides them and stops runs, all data kept. */
   archived: z.boolean().optional(),
+  /** Category-label rename (the reach advisory's accept, 2026-10-23).
+   * Stored prompts, the confirmed board and cached verdicts are untouched;
+   * every FUTURE judgment (emerged names, discovery, redraws) reads it. */
+  category: z.string().trim().min(2).max(80).optional(),
 });
 
 export async function PATCH(
@@ -98,6 +102,9 @@ export async function PATCH(
   }
   if (parsed.data.schedule) {
     await store.updateProjectSchedule(id, parsed.data.schedule);
+  }
+  if (parsed.data.category) {
+    await store.updateProjectCategory(id, parsed.data.category);
   }
   if (parsed.data.engines) {
     await store.updateProjectEngineSet(id, parsed.data.engines);

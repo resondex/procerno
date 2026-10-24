@@ -1325,6 +1325,39 @@ function AnalysisSettings({
   const parents = [...new Set(active.map(({ e }) => e.parent).filter((p): p is string => !!p))];
   const maxReach = Math.max(1, ...active.map((x) => x.reach));
 
+  // Category-reach advisory (2026-10-23): do the approved competitors fall
+  // outside the category label's wording? Cached server-side; the chip is
+  // advisory - accepting PATCHes the project's category, nothing else.
+  const [reach, setReach] = useState<{
+    category: string;
+    reach: { outside: { name: string; sells: string }[]; suggestion: string | null } | null;
+  } | null>(null);
+  const [reachDone, setReachDone] = useState(false);
+  useEffect(() => {
+    let gone = false;
+    fetch(`/api/projects/${id}/dictionary/category_reach`)
+      .then((r) => (r.ok ? r.json() : null))
+      .then((j) => { if (!gone && j) setReach(j); })
+      .catch(() => {});
+    return () => { gone = true; };
+  }, [id, project.category]);
+  const acceptReach = async () => {
+    const next = reach?.reach?.suggestion;
+    if (!next) return;
+    setReachDone(true);
+    try {
+      const res = await fetch(`/api/projects/${id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ category: next }),
+      });
+      if (!res.ok) throw new Error("refused");
+      await refreshDict();
+    } catch {
+      setReachDone(false);
+    }
+  };
+
   // Optimistic: the pill flips on click; the server call syncs behind it
   // and the override lifts once the refreshed dictionary carries the truth
   // (or immediately, if the server refuses - e.g. the target-brand guard).
@@ -1454,6 +1487,34 @@ function AnalysisSettings({
         names stay in the raw data - rescue them on the brands board if one
         should count.
       </p>
+      {!reachDone && reach?.reach && reach.reach.outside.length > 0 && reach.category === project.category && (
+        <div className="rounded-lg border border-amber-300/60 bg-amber-50 p-3 text-[12px] text-amber-900 grid gap-1.5 dark:bg-amber-950/30 dark:text-amber-200 dark:border-amber-700/50">
+          <div>
+            Your approved competitors reach beyond &ldquo;{project.category}&rdquo;:{" "}
+            {reach.reach.outside.map((o) => `${o.name} (${o.sells})`).join(", ")}.
+            New names from future waves are judged against the label, so an
+            out-of-label brand would be ignored without review.
+          </div>
+          {reach.reach.suggestion && (
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={acceptReach}
+                className="rounded-full bg-amber-400/80 px-2 py-0.5 font-semibold text-amber-950 hover:bg-amber-400 dark:bg-amber-500/80 dark:hover:bg-amber-500"
+              >
+                Use &ldquo;{reach.reach.suggestion}&rdquo;
+              </button>
+              <button
+                type="button"
+                onClick={() => setReachDone(true)}
+                className="rounded-full border border-amber-400/70 px-2 py-0.5 font-medium hover:bg-amber-100 dark:hover:bg-amber-900/40"
+              >
+                Keep &ldquo;{project.category}&rdquo;
+              </button>
+            </div>
+          )}
+        </div>
+      )}
       {parents.map((par) => (
         <div key={par}>
           <p className="section-label mb-1">{par}</p>

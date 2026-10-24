@@ -737,6 +737,9 @@ export interface Store {
   /** All projects when userId is omitted (cron); the user's own otherwise. */
   listProjects(userId?: string): Promise<Project[]>;
   updateProjectSchedule(id: string, schedule: RunSchedule): Promise<void>;
+  /** Category-label rename (the reach advisory's accept); matching, prompts
+   * and cached verdicts are untouched - future judgments read the new label. */
+  updateProjectCategory(id: string, category: string): Promise<void>;
   updateProjectEngineSet(id: string, engineSet: string[]): Promise<void>;
   /** Edit-setup for a ZERO-RUN tracker: update the setup fields and wipe
    * the instrument (intents, prompts, dictionary) so the caller can

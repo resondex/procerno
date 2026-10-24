@@ -903,6 +903,11 @@ export const pgStore: Store = {
     await sql`UPDATE projects SET schedule = ${schedule} WHERE id = ${id}`;
   },
 
+  async updateProjectCategory(id, category) {
+    const sql = await db();
+    await sql`UPDATE projects SET category = ${category} WHERE id = ${id}`;
+  },
+
   async updateProjectFlags(id, flags) {
     const sql = await db();
     if (flags.evidenceDrawer !== undefined) {

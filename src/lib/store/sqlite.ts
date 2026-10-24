@@ -1122,6 +1122,12 @@ export const sqliteStore: Store = {
       .run(schedule, id);
   },
 
+  async updateProjectCategory(id, category) {
+    getDb()
+      .prepare("UPDATE projects SET category = ? WHERE id = ?")
+      .run(category, id);
+  },
+
   async updateProjectFlags(id, flags) {
     const db = getDb();
     if (flags.evidenceDrawer !== undefined) {

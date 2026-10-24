@@ -68,6 +68,10 @@ export const PHRASINGS_WRITER_MODEL = pick("PHRASINGS_WRITER_MODEL", "gpt-6-luna
 /** Negative-verbatim explanations (runs/[id]/verbatims). Never followed
  * SUGGEST_MODEL, so it doesn't now. */
 export const VERBATIM_MODEL = process.env.VERBATIM_MODEL ?? "gpt-6-luna";
+/** Category-reach advisory (engine/category_reach.ts, 2026-10-23): does an
+ * approved competitor fall outside the category label's wording? A bounded
+ * judgment job, so luna (the month's pattern). */
+export const CATEGORY_REACH_MODEL = pick("CATEGORY_REACH_MODEL", "gpt-6-luna");
 /** Typed competitor roster: who each competitor sells to, intersected with
  * the tracker's audience (roster.ts, 2026-09-30). One cached call per
  * roster at setup; a world-knowledge job, so a full model. gpt-6-sol since
