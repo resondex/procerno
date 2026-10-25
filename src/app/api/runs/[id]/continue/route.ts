@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { waitUntil } from "@vercel/functions";
 import { store } from "@/lib/store";
-import { getAuth, canAccessProject } from "@/lib/auth";
+import { getAuth, isShareContext, requireProject } from "@/lib/auth";
 import { claimRunLease, driveAndChain, releaseRunLease, runInBackground } from "@/lib/engine/runner";
 import { hasOpenBatches, pollRunBatches } from "@/lib/engine/batch";
 
@@ -15,7 +15,8 @@ export const maxDuration = 800;
 /**
  * Process the next chunk of an unfinished run. Reached two ways: the chunk
  * chain calls it server-to-server bearing CRON_SECRET (no cookies exist on
- * that path), and a signed-in owner can call it to resume a stuck run.
+ * that path), and a member with write access can call it to resume a stuck
+ * run (never a share link or a read-only member).
  */
 export async function POST(
   req: Request,
@@ -35,10 +36,15 @@ export async function POST(
     if (!auth) {
       return NextResponse.json({ error: "sign in required" }, { status: 401 });
     }
-    const project = await store.getProject(run.project_id);
-    if (!project || !canAccessProject(project, auth)) {
-      return NextResponse.json({ error: "not found" }, { status: 404 });
+    // Driving or finalizing a run spends (collection, junk filter,
+    // suggestions) and can mark a held run complete: write-level access
+    // only. A share link is read-only and never reaches this; a read-only
+    // org member gets requireProject's 403.
+    if (isShareContext(auth)) {
+      return NextResponse.json({ error: "read-only link" }, { status: 403 });
     }
+    const project = await requireProject(run.project_id, auth, { write: true });
+    if (project instanceof NextResponse) return project;
   }
 
   if (run.status === "complete" || run.status === "failed") {

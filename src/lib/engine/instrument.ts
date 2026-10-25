@@ -13,8 +13,8 @@ import { pluralSlot, relationShift,
 export { MUST_NAME_STAGES };
 import { store } from "../store";
 import { brandAliasForms } from "./brand_aliases";
-import { checkStructure, stageStructure, type StructureCell } from "./stage_structure";
-import { primeBrandVerdicts } from "./brand_judge";
+import { checkStructure, stageStructure, structureStringFail, type StructureCell } from "./stage_structure";
+import { pendingJudgments, primeBrandVerdicts } from "./brand_judge";
 import { matchKey } from "../brand_key";
 import type { CacheMeta } from "../types";
 
@@ -186,7 +186,7 @@ const STYLE_VERSION = "s55"; // s55 (2026-10-23, Tyler): the cell writer moves g
  * per unit, and model calls only for units the new rules reject. */
 /** r25: the connector that conditions criteria's second ask on its first. */
 export const CRITERIA_DEPENDENCY = /\b(?:given (?:that|those|this|all that|what i find|those answers)|then|from there|with that (?:in mind|info|known|answered)|based on (?:that|those)|because of that|knowing (?:that|those|this)|once i (?:know|do|have|see)|in light of that|after(?:wards?| that)?|and from that|depending on that|on that basis|accordingly|having (?:done|looked at|checked) that)\b/i;
-export const SEED_RULES_VERSION = "r29"; // r29 (2026-10-24 setup audit): the serve-time rules re-judge runs the design layer too (a cached cell whose design intent changed is checked against it, failures re-judged in place), the battery passes never stamp provisional units or units whose labeler reply was unusable, and the passes marker carries the rules version. // r28 (2026-10-09): the premium-vs-basic design intent requires the pick invitation (with s54); the open-choice pick clause says an ask for which <category> to look at, in the category's own name, invites named products - the cell_review flagged "which streaming services should we look at" as asking for categories, the same misreading ss6 fixed in the structure checker. // r27 (2026-10-07): the per-cell room-fit clauses of r26 are removed (measured: 1 of 4 targeted cells caught, a good cell killed) - subject fit is battery-level only: the use-case job pass gains belongsTo (a job fitting a neighbor room better) beside the problem-recognition subject pass; a use-case cell in a room defined only by a buying moment is satisfied by a plain first-person ask. // r26 (2026-10-07): problem-recognition subject pass (one pain per room, never a neighbor room's subject); redraws judged against the derived room circumstance with the stage's sibling seeds as taken subjects. // r25 (2026-10-06): label stems that are vault-everyday words never leak; criteria_no_dependency net + design intent; feature-screening channel clause. // r24 (journeys30): problem-recognition design intent requires category territory; criteria design intent carries the two-part ask. // r22 (batch 2): use-case in a channel room carries who only; label-word stems leak. // r17 (2026-10-04 seed review batch): awareness_purchase_moment and offensive_alt_no_move nets; design intents - no purchase moment in problem recognition, head-to-heads add no situation, alternatives state a full-sentence move within the category, advocacy vs business-case audience, Value brand-name fallback branch; keep-or-leave narrowed (a within-brand change may be the subject, never the answer). // r16 (2026-10-04 seed review): doubt design intent - own claim, one doubt, open verdict; facts to confirm, rule/ingredient lookups, hearsay, sizing asks and the Value worth-it ask fail; objections never voiced by a current user, churn/renewal always by one, no third option beside stay and leave. // r15 (2026-10-02, Tyler's option B): brand mentions = whole names, declared alternates, name words and dictionary aliases, with every ambiguous one-word hit (an everyday word written lowercase or opening a sentence, or a maker word like "Google" of Google Pixel) decided in context by the brand judge (haiku, cached) - no casing rules, no target exemption, no roster word lists. r14 (2026-10-02 review): everyday-word lexicon by lowercase SHARE in two tiers (label words: common and not brand-dominated - "jira", "netflix", "pixel", "apple", "chase" count lowercase again; aliases: merely common - "gold" stays capital-only), coined split words case-blind ("apple or samsung"), the target's own one-word name never case-guarded, "citi" off the case-guard list, and a monthly figure is the asker's plan only in first-person / spend / offer context ("the Pro about 20 a month more" is a stated price). r13 (2026-10-02 cold-walk audit + review): verb-less stated prices ("Gold at 250"); word-anchored price-concern test + money bolt-ons; brand checks read filtered dictionary alias forms ("amex"); everyday words inside brand names never name the brand - category tokens containment-aware, split words of multi-word names in label casing and not sentence-initial, one-word names and aliases in the vault everyday-word lexicon capitalized only, other brands' full names scrubbed first. r4 (2026-10-01): r2 calendar-year/60-word/segment-vocab; r3 category-naming labels exempt from substring leak; r4 'standardization' in segment vocabulary; r5 directionless-switch string check; r6 punctuation-blind label-leak matching; r7-r8 switch direction detected by absence (no OS, no roster brand near switch vocabulary); cheaper bolt-on token on non-price concerns
+export const SEED_RULES_VERSION = "r30"; // r30 (2026-10-25 re-audit): required-side brand guards widened - capitalized everyday label words and all-caps parenthetical acronyms satisfy must-name; term-collision hits on the forbidden path go to the judge instead of a silent scrub; sibilant plurals in categorySpanIn. // r29 (2026-10-24 setup audit): the serve-time rules re-judge runs the design layer too (a cached cell whose design intent changed is checked against it, failures re-judged in place), the battery passes never stamp provisional units or units whose labeler reply was unusable, and the passes marker carries the rules version. // r28 (2026-10-09): the premium-vs-basic design intent requires the pick invitation (with s54); the open-choice pick clause says an ask for which <category> to look at, in the category's own name, invites named products - the cell_review flagged "which streaming services should we look at" as asking for categories, the same misreading ss6 fixed in the structure checker. // r27 (2026-10-07): the per-cell room-fit clauses of r26 are removed (measured: 1 of 4 targeted cells caught, a good cell killed) - subject fit is battery-level only: the use-case job pass gains belongsTo (a job fitting a neighbor room better) beside the problem-recognition subject pass; a use-case cell in a room defined only by a buying moment is satisfied by a plain first-person ask. // r26 (2026-10-07): problem-recognition subject pass (one pain per room, never a neighbor room's subject); redraws judged against the derived room circumstance with the stage's sibling seeds as taken subjects. // r25 (2026-10-06): label stems that are vault-everyday words never leak; criteria_no_dependency net + design intent; feature-screening channel clause. // r24 (journeys30): problem-recognition design intent requires category territory; criteria design intent carries the two-part ask. // r22 (batch 2): use-case in a channel room carries who only; label-word stems leak. // r17 (2026-10-04 seed review batch): awareness_purchase_moment and offensive_alt_no_move nets; design intents - no purchase moment in problem recognition, head-to-heads add no situation, alternatives state a full-sentence move within the category, advocacy vs business-case audience, Value brand-name fallback branch; keep-or-leave narrowed (a within-brand change may be the subject, never the answer). // r16 (2026-10-04 seed review): doubt design intent - own claim, one doubt, open verdict; facts to confirm, rule/ingredient lookups, hearsay, sizing asks and the Value worth-it ask fail; objections never voiced by a current user, churn/renewal always by one, no third option beside stay and leave. // r15 (2026-10-02, Tyler's option B): brand mentions = whole names, declared alternates, name words and dictionary aliases, with every ambiguous one-word hit (an everyday word written lowercase or opening a sentence, or a maker word like "Google" of Google Pixel) decided in context by the brand judge (haiku, cached) - no casing rules, no target exemption, no roster word lists. r14 (2026-10-02 review): everyday-word lexicon by lowercase SHARE in two tiers (label words: common and not brand-dominated - "jira", "netflix", "pixel", "apple", "chase" count lowercase again; aliases: merely common - "gold" stays capital-only), coined split words case-blind ("apple or samsung"), the target's own one-word name never case-guarded, "citi" off the case-guard list, and a monthly figure is the asker's plan only in first-person / spend / offer context ("the Pro about 20 a month more" is a stated price). r13 (2026-10-02 cold-walk audit + review): verb-less stated prices ("Gold at 250"); word-anchored price-concern test + money bolt-ons; brand checks read filtered dictionary alias forms ("amex"); everyday words inside brand names never name the brand - category tokens containment-aware, split words of multi-word names in label casing and not sentence-initial, one-word names and aliases in the vault everyday-word lexicon capitalized only, other brands' full names scrubbed first. r4 (2026-10-01): r2 calendar-year/60-word/segment-vocab; r3 category-naming labels exempt from substring leak; r4 'standardization' in segment vocabulary; r5 directionless-switch string check; r6 punctuation-blind label-leak matching; r7-r8 switch direction detected by absence (no OS, no roster brand near switch vocabulary); cheaper bolt-on token on non-price concerns
 
 /** Brand forms that double as ordinary English words: only these demand a
  * capitalized occurrence to count as naming the brand ("2-3 services max"
@@ -845,15 +845,14 @@ export async function classifyJourney(input: {
 
 /** The stakes judge (journeys25-28), extracted 2026-10-24 so its failure
  * path is testable: per claimed deviation, the reason the room's buyer
- * would decide by a different process, and whether it does. It FAILS
- * CLOSED (2026-10-24 setup audit): one retry, then every claim is refused -
- * the room inherits the base. The trade-off is deliberate: the result rides
- * the coalesced market read, so a transient error costs a legitimate
- * override until that read expires, which is the cheap direction (the
- * gate's "buys differently" tick restores it by hand), while the old
- * fail-open granted every claimed deviation and cached the grant - one
- * vendor blip reinstated the occasion-only override journeys25-28 exist to
- * stop. Exported for the zero-spend harness. */
+ * would decide by a different process, and whether it does. It never
+ * fails OPEN (2026-10-24 setup audit): the old fail-open granted every
+ * claimed deviation and cached the grant - one vendor blip reinstated the
+ * occasion-only override journeys25-28 exist to stop. Since the 2026-10-25
+ * re-audit it no longer fails closed either: one retry, then it THROWS, so
+ * the coalesced market read caches nothing and the caller retries - the
+ * closed refusal rode that read for its whole TTL, indistinguishable from
+ * a real "no". Exported for the zero-spend harness. */
 export async function judgeStakes(input: {
   category: string;
   base: Moderators;
@@ -881,8 +880,15 @@ export async function judgeStakes(input: {
     try { j = await call(); } catch (err) { console.error(`stakes judgment failed (attempt ${attempt + 1} of 2):`, err); }
   }
   if (!j) {
-    console.error("stakes judgment failed closed - every claimed deviation refused, rooms inherit the base");
-    return input.rooms.map(() => ({ changes: false, reason: "" }));
+    // An exhausted retry is an OUTAGE, not a verdict (2026-10-25 re-audit):
+    // the old fail-closed refusal was indistinguishable from a real "no" and
+    // was cached inside the shared category read for the full TTL. Throwing
+    // lets the read's coalesced() release its claim and cache nothing; the
+    // compose route answers its 502-retry. The trade-off: an outage re-pays
+    // the read on retry rather than freezing a wrong grant or refusal for
+    // 183 days. A model's parsed "no" still caches normally.
+    console.error("stakes judgment failed twice - the read throws, nothing is cached");
+    throw new Error("stakes judgment unavailable");
   }
   return input.rooms.map((_, k) => {
     const r = j!.rooms?.[k];
@@ -1143,7 +1149,8 @@ export async function readScenarios(input: {
   // Stakes judgment (journeys25): for each core room that claims a
   // deviation with a reason, one low-effort call decides whether the reason
   // changes how the buyer decides or only describes the occasion. Runs
-  // only when a room claims (most reads: none). Fails CLOSED (judgeStakes).
+  // only when a room claims (most reads: none). An outage THROWS (judgeStakes),
+  // so the whole read is retried rather than cached with a refusal it never made.
   const claims = (parsed.scenarios ?? []).slice(0, CORE_SCENARIOS)
     .map((s, i) => ({ s, i }))
     .filter(({ s }) => s.deviates && !sameJourney(base, s.journey));
@@ -4176,11 +4183,28 @@ export async function generateGrid(input: {
   const valueRows = plan.filter((r) => r.stage.key === "pricing" && r.situation);
   if (valueRows.length > 0) {
     let lines = input.valueLines;
-    if (!lines && process.env.PHRASINGS_CHECKS !== "0") {
-      lines = (await planValueLines({
+    // A room whose key is MISSING from a sent map gets the engine default
+    // too (2026-10-25 re-audit): the map's presence used to skip defaults
+    // wholesale, so a client that could not resolve one room shipped that
+    // room's Value cell line-less. An explicit null still means "no Value
+    // cell". Same read (same rooms, same key) as the no-map path; the unit
+    // keys carry the line, so this self-versions.
+    const missing = lines ? valueRows.filter((r) => !Object.prototype.hasOwnProperty.call(lines, r.situation as string)) : [];
+    if ((!lines || missing.length > 0) && process.env.PHRASINGS_CHECKS !== "0") {
+      const defaults = (await planValueLines({
         brand: input.brand, category: input.category, audience: input.audience,
         rooms: input.scenarios.map((sc) => ({ label: sc.label, description: sc.description })), meta: input.meta,
       }).catch((err) => { console.error("value lines failed open:", err); return null; })) ?? undefined;
+      if (!lines) lines = defaults;
+      else if (defaults) {
+        lines = { ...lines };
+        for (const r of missing) {
+          const d = defaults[r.situation as string];
+          // A default of null (the engine read no line for the room) stays
+          // missing - only the client's explicit null drops the cell.
+          if (d) lines[r.situation as string] = d;
+        }
+      }
     }
     if (lines) {
       for (const r of valueRows) {
@@ -4224,12 +4248,29 @@ export async function generateGrid(input: {
   // reads the same verdicts the generation-time one did.
   const rosterLabels = [input.brand, ...input.competitors];
   const scrubText = (c: GridCell) => stripRosterParens(humanize(c.text), rosterLabels);
+  // One stale-spec log line per battery serve, and only when the brand
+  // sets moved (2026-10-25 re-audit: it fired for every stale cell on every
+  // serve, on cosmetic differences too).
+  let staleSpecLogged = false;
+  const sameSet = (a: string[], b: string[]) => a.length === b.length && [...a].sort().join("|") === [...b].sort().join("|");
   const scrub = (cells: GridCell[]): GridCell[] =>
     cells.map((c) => {
       const text = scrubText(c);
       const spec = deriveCheckSpec({ ...c, text }, input.brand, input.competitors, input.category, aliasForms);
-      if (c.spec && c.spec.seed === spec.seed && JSON.stringify(c.spec) !== JSON.stringify(spec))
-        console.warn(`check-spec stale for [${c.stage}/${c.angle}] - re-derived | ${text.slice(0, 70)}`);
+      // The brand judge unavailable (2026-10-25 re-audit): a forbidden-brand
+      // hit that is still unjudged after priming would count as a mention
+      // and could flip the derived spec on a judge outage. When the stored
+      // spec was derived for this very text, it serves instead - it was
+      // derived WITH the judge's verdicts. A stored spec for another text is
+      // never trusted (the spec's freshness contract).
+      if (c.spec && c.spec.seed === text && process.env.PHRASINGS_CHECKS !== "0" &&
+          pendingJudgments([text], spec.forbiddenBrands, aliasForms, input.category, rosterLabels).length > 0)
+        return { ...c, text, spec: c.spec };
+      if (!staleSpecLogged && c.spec && c.spec.seed === spec.seed &&
+          (!sameSet(c.spec.forbiddenBrands, spec.forbiddenBrands) || !sameSet(c.spec.requiredBrands, spec.requiredBrands))) {
+        staleSpecLogged = true;
+        console.warn(`check-spec stale for [${c.stage}/${c.angle}] - brand sets re-derived (forbidden ${c.spec.forbiddenBrands.join(",")} -> ${spec.forbiddenBrands.join(",")}; required ${c.spec.requiredBrands.join(",")} -> ${spec.requiredBrands.join(",")}) | ${text.slice(0, 70)} (further stale cells this serve not logged)`);
+      }
       return { ...c, text, spec };
     });
   /** A unit's stored value: `{cells, rules}` since the terminal-state era
@@ -4237,11 +4278,11 @@ export async function generateGrid(input: {
    * the unit was last judged under. A bare `GridCell[]` is the legacy
    * shape, read as rules-unknown so the serve path judges it once and
    * upgrades in place or regenerates. */
-  const valueOf = (raw: string): { cells: GridCell[]; rules?: string; provisional?: boolean; passed?: string } | null => {
+  const valueOf = (raw: string): { cells: GridCell[]; rules?: string; provisional?: boolean; passed?: string; unreviewed?: boolean } | null => {
     try {
-      const v = JSON.parse(raw) as { __pending?: number; cells?: GridCell[]; rules?: string; provisional?: boolean; passed?: string } | GridCell[];
+      const v = JSON.parse(raw) as { __pending?: number; cells?: GridCell[]; rules?: string; provisional?: boolean; passed?: string; unreviewed?: boolean } | GridCell[];
       if (Array.isArray(v)) return { cells: v };
-      return Array.isArray(v.cells) ? { cells: v.cells, rules: v.rules, provisional: v.provisional, passed: v.passed } : null;
+      return Array.isArray(v.cells) ? { cells: v.cells, rules: v.rules, provisional: v.provisional, passed: v.passed, ...(v.unreviewed ? { unreviewed: true } : {}) } : null;
     } catch {
       return null;
     }
@@ -4327,8 +4368,18 @@ export async function generateGrid(input: {
     // concurrent request claimed between our read and now - leave the unit
     // to them; it resolves as a hole here and the caller's retry lands on
     // their finished, cached result.
-    const markerFor = (u: number) =>
-      JSON.stringify(pre.has(u) ? { __pending: Date.now(), cells: pre.get(u) } : { __pending: Date.now() });
+    // Claim and heartbeat markers carry the attempt count and its time
+    // (2026-10-25 re-audit): a takeover of a killed request's claim read no
+    // count and restarted it at 0, so a unit whose generator kept dying was
+    // never bounded. Same shape as the release markers. A provisional
+    // unit's never-reviewed state rides along too (see unreviewed).
+    const payloadFor = (u: number): Record<string, unknown> => ({
+      ...(pre.has(u) ? { cells: pre.get(u) } : {}),
+      ...(pre.has(u) && unreviewed.has(u) ? { unreviewed: true } : {}),
+      tries: triesOf.get(u) ?? 0,
+      ...(atOf.has(u) ? { at: atOf.get(u) } : {}),
+    });
+    const markerFor = (u: number) => JSON.stringify({ __pending: Date.now(), ...payloadFor(u) });
     const wonClaims = await Promise.all(
       idxs.map((u) =>
         store.cacheClaim(unitKeys[u], expected.get(u) ?? null, markerFor(u), CACHE_TTL_MS, stampOf(input))
@@ -4348,7 +4399,7 @@ export async function generateGrid(input: {
       stampOf(input),
       (k) => {
         const u = keyToUnit.get(k);
-        return u !== undefined && pre.has(u) ? { cells: pre.get(u) } : undefined;
+        return u !== undefined ? payloadFor(u) : undefined;
       }
     );
     try {
@@ -4386,7 +4437,7 @@ export async function generateGrid(input: {
               store.cacheSet(
                 unitKeys[u],
                 pre.has(u)
-                  ? JSON.stringify({ cells: pre.get(u), provisional: true })
+                  ? JSON.stringify({ cells: pre.get(u), provisional: true, ...(unreviewed.has(u) ? { unreviewed: true } : {}) })
                   : releaseMarker(u),
                 stampOf(input)
               ).catch(() => {})
@@ -4501,19 +4552,32 @@ export async function generateGrid(input: {
         // units never re-heal (the approved baseline stands), and a
         // checker failure never blocks generation.
         const flat = group.flatMap((u) => produced.get(u) ?? []);
+        const flatUnit = group.flatMap((u) => (produced.get(u) ?? []).map(() => u));
         // A re-judged unit (isPre) skips the writer review (2026-10-24 audit):
         // its text already went through review when it was written, and a
         // second review could rewrite a passing seed during what is meant to
         // be a judgment-only re-entry (text preserved unless a check fails).
-        if (!isPre && flat.length > 0 && Date.now() > healDeadlineAt) complete = false;
-        if (!isPre && flat.length > 0 && Date.now() <= healDeadlineAt) {
+        // EXCEPT a unit whose review never ran (2026-10-25 re-audit): the
+        // writer returned past the heal deadline, or the review call threw,
+        // so it went provisional UNREVIEWED - its finish pass reviews it,
+        // instead of skipping review and landing rules-terminal unreviewed.
+        // A review that cannot run (deadline, outage) keeps the unit
+        // provisional and unreviewed for the next serve, like an unchecked
+        // design verdict - never terminal.
+        const toReview = flat.map((c, i) => ({ c, i })).filter(({ i }) => !isPre || unreviewed.has(flatUnit[i]));
+        const reviewMissed = new Set<number>();
+        if (toReview.length > 0 && Date.now() > healDeadlineAt) {
+          complete = false;
+          toReview.forEach(({ i }) => reviewMissed.add(flatUnit[i]));
+        }
+        if (toReview.length > 0 && Date.now() <= healDeadlineAt) {
           try {
             const verdicts = await reviewCells({
               brand: input.brand,
               category: input.category,
               competitors: input.competitors,
               audience: input.audience,
-              candidates: flat.map((c) => {
+              candidates: toReview.map(({ c }) => {
                 const st = byKey.get(c.stage);
                 return {
                   text: c.text,
@@ -4531,11 +4595,16 @@ export async function generateGrid(input: {
               }),
               meta: input.meta,
             });
-            verdicts.forEach((v, i) => {
-              if (!v.ok && v.suggestion?.trim()) flat[i].text = humanize(v.suggestion.trim());
+            verdicts.forEach((v, k) => {
+              const i = toReview[k]?.i;
+              if (i !== undefined && !v.ok && v.suggestion?.trim()) flat[i].text = humanize(v.suggestion.trim());
             });
-          } catch {
-            // The writer's text stands - healing is best-effort.
+          } catch (err) {
+            // The writer's text stands, but the review did not run: the unit
+            // ships provisional and unreviewed, and the next serve reviews it.
+            complete = false;
+            toReview.forEach(({ i }) => reviewMissed.add(flatUnit[i]));
+            console.error("seed review failed - unit ships provisional, reviewed on the next serve:", err);
           }
         }
         // MECHANICAL SEED CHECK (2026-09-29): the free brand rule runs on
@@ -4774,7 +4843,7 @@ export async function generateGrid(input: {
             return store.cacheSet(
               unitKeys[u],
               cells.length > 0
-                ? JSON.stringify(complete ? { cells, rules: SEED_RULES_VERSION } : { cells, provisional: true })
+                ? JSON.stringify(complete ? { cells, rules: SEED_RULES_VERSION } : { cells, provisional: true, ...(reviewMissed.has(u) ? { unreviewed: true } : {}) })
                 : JSON.stringify({ __pending: 0, tries: (triesOf.get(u) ?? 0) + 1, at: Date.now() }),
               stampOf(input)
             );
@@ -4799,7 +4868,7 @@ export async function generateGrid(input: {
               store.cacheSet(
                 unitKeys[u],
                 pre.has(u)
-                  ? JSON.stringify({ cells: pre.get(u), provisional: true })
+                  ? JSON.stringify({ cells: pre.get(u), provisional: true, ...(unreviewed.has(u) ? { unreviewed: true } : {}) })
                   : releaseMarker(u),
                 stampOf(input)
               ).catch(() => {})
@@ -5372,7 +5441,8 @@ export async function generateGrid(input: {
         const pr = passOrder(prAll);
         const prNeed = new Set(pr.filter((d) => judgeable(d.u)).map((d) => d.u));
         if (prNeed.size === 0 && pr.length > 0) console.warn("problem-recognition pains: every unit already judged - skipped");
-        if (pr.length < 2 && prNeed.size > 0) await stampPassed(prNeed);
+        // A lone problem-recognition unit has nothing to repeat: no labeler
+        // call, and the stamp below (cut stays false) is its only stamp.
         if (pr.length >= 2 && prNeed.size > 0) {
           const a = await anthropicClient();
           const ask = (extra = "") => withCostContext({ purpose: "setup:cells" }, () => a.messages.create({
@@ -5499,31 +5569,47 @@ export async function generateGrid(input: {
    * retryable so the next serve re-enters. Whether this request ran the
    * passes itself or waited on another request's run, they may have
    * rewritten cell text, so resolved is rebuilt from the store afterwards. */
-  const maybeRunPasses = async (): Promise<void> => {
-    if (process.env.PHRASINGS_CHECKS === "0") return;
+  /** Returns "waited" when the completion came from ANOTHER request's run
+   * (this request's generator never ran), "ran" when this request ran them,
+   * null when nothing completed (cut, wait budget, failure). */
+  const maybeRunPasses = async (): Promise<"ran" | "waited" | null> => {
+    if (process.env.PHRASINGS_CHECKS === "0") return null;
     try {
+      let ran = false;
       // noWait honored (2026-10-24 audit): a background warm never sits on
       // another request's live passes run - it returns and the confirm that
       // needs the result does the waiting.
       const out = await coalesced<string>(passesKey, { meta: stampOf(input), noWait: input.noWait }, async () => {
+        ran = true;
         const cut = await runBatteryPasses();
         if (cut) console.warn("battery passes cut short - retried on the next serve");
         return cut ? null : "1";
       });
-      if (out === null) return; // cut, or the wait budget blew - next serve retries
+      if (out === null) return null; // cut, or the wait budget blew - next serve retries
       const freshRaw = await store.cacheGetMany(unitKeys, CACHE_TTL_MS);
       const fresh: (GridCell[] | null)[] = unitKeys.map((k, u) => {
         const raw = freshRaw.get(k);
         const v = raw ? valueOf(raw) : null;
         if (v?.provisional) provisionalOut.add(u);
+        // Another run's stamps count as judged here too, so a re-run below
+        // lists them as context instead of judging them again.
+        if (v?.passed === SEED_RULES_VERSION) passedUnits.add(u);
         return v && v.cells.length > 0 ? v.cells : null;
       });
       await primeServed(fresh);
       fresh.forEach((cells, u) => { if (cells) resolved[u] = scrub(cells); });
+      return ran ? "ran" : "waited";
     } catch (err) {
       console.error("battery passes failed open:", err);
+      return null;
     }
   };
+  /** A cell some battery pass judges (concern diversity, use-case jobs,
+   * problem-recognition subjects) - the units whose stamp says they were. */
+  const passCell = (c: GridCell) =>
+    (DOUBT_CHECK_STAGES.has(c.stage) && c.stage !== "repertoire") ||
+    c.stage === "use_case" ||
+    (c.stage === "problem_recognition" && !!c.situation);
 
 
   const mine: number[] = [];
@@ -5531,6 +5617,10 @@ export async function generateGrid(input: {
   /** Units written provisional THIS run: the response must answer retry,
    * not hand unjudged cells to the draft (2026-10-02 review, gap #1). */
   const provisionalOut = new Set<number>();
+  /** Re-entering units whose seed review never ran (2026-10-25 re-audit):
+   * read from the provisional value or a dead claim's marker. Their finish
+   * pass reviews them; every other re-entry skips review (see generate). */
+  const unreviewed = new Set<number>();
   /** Units that failed 3+ generation attempts: ship the battery without
    * them (logged loud) rather than blocking the wizard forever. */
   const exhausted = new Set<number>();
@@ -5574,6 +5664,7 @@ export async function generateGrid(input: {
           // layer skipped forever. It re-enters generation instead.
           if (v && v.provisional) {
             if (v.cells.length > 0) preCells.set(u, scrub(v.cells));
+            if (v.unreviewed) unreviewed.add(u);
             mine.push(u);
             return;
           }
@@ -5599,10 +5690,18 @@ export async function generateGrid(input: {
             }
             if (served.every((c) => seedRule(c).length === 0)) {
               const clean = served.map((c) => {
-                // A rules-era re-judge can only re-derive MECHANICAL flags;
-                // an off-design flag came from the model check at generation
-                // and must survive the upgrade (the human clears it at the
-                // gate, or an edit/redraw re-keys the cell).
+                // The free checks re-derive MECHANICAL flags; an off-design
+                // flag came from a model judgment and is carried here only
+                // until the design re-judge below decides the cell. Per the
+                // 2026-09-30 invariant a flagged-terminal seed re-enters
+                // generation ONCE per rules bump: a cell whose cached design
+                // verdict now fails (or cannot be read) re-enters with its
+                // text, is healed or lands flagged-terminal under the new
+                // era, and serves as-is until the next bump - never a loop.
+                // A battery-pass flag (use-case job, problem-recognition
+                // pain) on a cell whose design verdict still voices rides
+                // the upgrade, and the passes re-judge that unit once - the
+                // upgrade write drops its passed stamp.
                 const kept = (c.seedFlags ?? []).filter((f) => f.startsWith("off-design:"));
                 const rest = { ...c };
                 if (kept.length > 0) rest.seedFlags = kept;
@@ -5631,10 +5730,13 @@ export async function generateGrid(input: {
           return;
         } else {
           try {
-            const j = JSON.parse(raw) as { __pending?: number; tries?: number; at?: number; cells?: GridCell[] };
+            const j = JSON.parse(raw) as { __pending?: number; tries?: number; at?: number; cells?: GridCell[]; unreviewed?: boolean };
             // A killed re-judge left its provisional cells ON the marker -
             // recover them so the retry re-judges instead of redrawing.
-            if (Array.isArray(j.cells) && j.cells.length > 0) preCells.set(u, scrub(j.cells));
+            if (Array.isArray(j.cells) && j.cells.length > 0) {
+              preCells.set(u, scrub(j.cells));
+              if (j.unreviewed) unreviewed.add(u);
+            }
             const fresh = typeof j.at === "number" && Date.now() - j.at < 60 * 60 * 1000;
             if (j.__pending === 0 && (j.tries ?? 0) >= 3 && fresh && !input.retryExhausted) {
               console.error(`grid unit exhausted after ${j.tries} attempts - shipping the battery without it [${units[u][0]?.stage.key} ${units[u][0]?.situation ?? "-"}]`);
@@ -5748,7 +5850,7 @@ export async function generateGrid(input: {
         if (at === null || Date.now() - at >= ORPHAN_MS) {
           open.delete(u);
           try {
-            const j = JSON.parse(raw ?? "") as { __pending?: number; tries?: number; at?: number; cells?: GridCell[] };
+            const j = JSON.parse(raw ?? "") as { __pending?: number; tries?: number; at?: number; cells?: GridCell[]; unreviewed?: boolean };
             const fresh = typeof j.at === "number" && Date.now() - j.at < 60 * 60 * 1000 && !input.retryExhausted;
             // The other generator just exhausted this unit: honor it, like the scan.
             if (j.__pending === 0 && (j.tries ?? 0) >= 3 && fresh) {
@@ -5761,7 +5863,10 @@ export async function generateGrid(input: {
               });
               return;
             }
-            if (Array.isArray(j.cells) && j.cells.length > 0) preT.set(u, scrub(j.cells));
+            if (Array.isArray(j.cells) && j.cells.length > 0) {
+              preT.set(u, scrub(j.cells));
+              if (j.unreviewed) unreviewed.add(u);
+            }
             if (fresh) {
               triesT.set(u, j.tries ?? 0);
               atT.set(u, j.at!);
@@ -5800,7 +5905,32 @@ export async function generateGrid(input: {
       const live = at !== null && at > 0 && Date.now() - at < ORPHAN_MS;
       if (cur !== null && !live && at !== 0)
         await store.cacheClaim(passesKey, cur, JSON.stringify({ __pending: 0 }), CACHE_TTL_MS, stampOf(input)).catch(() => false);
-      await maybeRunPasses();
+      const how = await maybeRunPasses();
+      // The live run we waited on may not have covered OUR units
+      // (2026-10-25 re-audit): it started before this request finished a
+      // unit (a provisional re-judge completed, an exhausted unit
+      // regenerated), and its completion marker then made every later
+      // serve skip the passes - the unit was never battery-judged for the
+      // rest of the rules era. After a wait, re-read our units: any that a
+      // pass judges and that carries no stamp invalidates the marker (CAS,
+      // so a newer live claim is left alone) and the passes run once more.
+      // Bounded: one retry.
+      if (how === "waited") {
+        const ours = mine.filter((u) => !exhausted.has(u) && !provisionalOut.has(u));
+        const rawMap = ours.length > 0 ? await store.cacheGetMany(ours.map((u) => unitKeys[u]), CACHE_TTL_MS).catch(() => new Map<string, string>()) : new Map<string, string>();
+        const unjudged = ours.filter((u) => {
+          const raw = rawMap.get(unitKeys[u]);
+          const v = raw ? valueOf(raw) : null;
+          return !!v && !v.provisional && v.passed !== SEED_RULES_VERSION && v.cells.some(passCell);
+        });
+        if (unjudged.length > 0) {
+          console.warn(`battery passes: ${unjudged.length} unit(s) finished during another request's run were never judged - running the passes again`);
+          const done = await store.cacheGet(passesKey, CACHE_TTL_MS).catch(() => null);
+          if (done !== null && pendingMarkerAt(done) === null)
+            await store.cacheClaim(passesKey, done, JSON.stringify({ __pending: 0 }), CACHE_TTL_MS, stampOf(input)).catch(() => false);
+          await maybeRunPasses();
+        }
+      }
     } else {
       const done = await store.cacheGet(passesKey, CACHE_TTL_MS).catch(() => null);
       if (!done || pendingMarkerAt(done) !== null) await maybeRunPasses();
@@ -6143,8 +6273,20 @@ export async function regenerateCell(input: {
       );
     }
     if (intent && problems.length === 0) {
-      const [v] = await checkDesignFidelity({ candidates: [{ text: cand, design: intent }], meta: input.meta });
-      if (!v.voices && !v.unchecked) problems.push(`off-design: ${v.reason || "does not voice the cell's design"}`);
+      let [v] = await checkDesignFidelity({ candidates: [{ text: cand, design: intent }], meta: input.meta });
+      // An UNCHECKED verdict is not a pass (2026-10-25 re-audit): it used to
+      // accept the draw and cache it under cell_alt for the full TTL as if
+      // judged. The check is retried once on the same draw (a redraw cannot
+      // fix an outage); still unchecked, the draw ships flagged and is NOT
+      // cached, so the next redraw request checks afresh.
+      if (v.unchecked && Date.now() - startedAt <= REGEN_ATTEMPT_CUTOFF_MS)
+        [v] = await checkDesignFidelity({ candidates: [{ text: cand, design: intent }], meta: input.meta });
+      if (v.unchecked) {
+        console.warn(`cell alt: design check unavailable [${input.cell.stage}] - draw ships flagged, not cached | ${cand.slice(0, 90)}`);
+        const uflags = ["off-design: unchecked - checker unavailable"];
+        return { text: cand, spec: specFor(cand), flags: uflags };
+      }
+      if (!v.voices) problems.push(`off-design: ${v.reason || "does not voice the cell's design"}`);
     }
     if (problems.length === 0) {
       const why = await batteryRule(cand);
@@ -6681,16 +6823,18 @@ export async function generatePhrasings(input: {
   // r13: the dictionary seed's alias forms ("amex" for American Express),
   // read from the FULL roster so the cache key is the one project creation
   // reuses - every brand check below speaks the same vocabulary.
-  const aliasForms = await brandAliasForms([input.brand, ...input.competitors]);
-  input = { ...input, competitors: sameSeatOf(input.competitors, input.rosterRoles) };
   // Wall-clock budget (2026-10-24 setup audit), mirroring generateGrid: the
   // route allows 300s and nothing was cached until the very end, so a slow
   // batch lost every paid pass to the platform kill. Past lateAt no new
   // writer round or check starts; what is done is finalized - complete sets
   // cached, sets the budget cut short stored PROVISIONAL for the next
-  // request to finish in place.
+  // request to finish in place. The clock starts BEFORE the alias call
+  // (2026-10-25 re-audit), like generateGrid, so the real budget is
+  // GEN_DEADLINE_MS from the request's start.
   const deadlineAt = Date.now() + GEN_DEADLINE_MS;
   const lateAt = deadlineAt - 45_000;
+  const aliasForms = await brandAliasForms([input.brand, ...input.competitors]);
+  input = { ...input, competitors: sameSeatOf(input.competitors, input.rosterRoles) };
   const want = Math.max(0, input.count - 1);
   // Social validation is one clause with no circumstance (Tyler 2026-10-07):
   // nine rewordings of it are the same five words reordered, and the overlap
@@ -7344,7 +7488,15 @@ export async function generatePhrasings(input: {
   ): Promise<void> => {
     if (idx.length === 0) return;
     const pre = st.pre ?? new Map<number, Phrasing[]>();
-    const markerFor = (i: number) => JSON.stringify(pre.has(i) ? { __pending: Date.now(), set: pre.get(i) } : { __pending: Date.now() });
+    // Claim and heartbeat markers carry the attempt count and its time
+    // (2026-10-25 re-audit) - a takeover of a killed request's claim used
+    // to restart the count at 0. Same shape as the release markers.
+    const payloadFor = (i: number): Record<string, unknown> => ({
+      ...(pre.has(i) ? { set: pre.get(i) } : {}),
+      tries: st.tries?.get(i) ?? 0,
+      ...(st.ats?.has(i) ? { at: st.ats.get(i) } : {}),
+    });
+    const markerFor = (i: number) => JSON.stringify({ __pending: Date.now(), ...payloadFor(i) });
     // CAS claims (2026-10-24 setup audit), like the grid path: the plain
     // write let two requests that both read a miss both pay the full writer
     // + retries + structure chain for the same cells. A lost claim belongs
@@ -7354,13 +7506,17 @@ export async function generatePhrasings(input: {
       ? await Promise.all(idx.map((i) => store.cacheSet(keys[i], markerFor(i), stampOf(input)).then(() => true)))
       : await Promise.all(idx.map((i) => store.cacheClaim(keys[i], st.expected?.get(i) ?? null, markerFor(i), CACHE_TTL_MS, stampOf(input))));
     const lost = idx.filter((_, k) => !won[k]);
-    if (lost.length > 0) {
-      console.warn(`phrasings claims lost to a concurrent request (${lost.length}) - leaving them to it`);
-      const lostRaw = await store.cacheGetMany(lost.map((i) => keys[i]), CACHE_TTL_MS).catch(() => new Map<string, string>());
-      for (const i of lost) { const v = valueOf(lostRaw.get(keys[i]) ?? ""); if (v && v.length > 0) out[i] = v; }
-    }
     idx = idx.filter((_, k) => won[k]);
-    if (idx.length === 0) return;
+    // A lost claim WAITS for the winner (2026-10-25 re-audit), like the grid
+    // path's waitForTheirs: returning at once served the winner's pending
+    // marker as an empty set, so a confirm racing a warm needed an extra
+    // round trip. Bounded by the same wait budget; past it the cell comes
+    // back empty as before. Runs beside this request's own work.
+    const lostWait = lost.length > 0
+      ? (console.warn(`phrasings claims lost to a concurrent request (${lost.length}) - waiting on it`),
+        waitOn(lost, true).catch((err) => console.error("phrasings wait on a lost claim failed:", err)))
+      : Promise.resolve();
+    if (idx.length === 0) { await lostWait; return; }
     /** A release that is NOT an attempt (thrown call, budget skip): a
      * carried set goes back provisional, otherwise the prior count and its
      * time ride along unchanged. */
@@ -7376,7 +7532,7 @@ export async function generatePhrasings(input: {
     const keyToIdx = new Map(idx.map((i) => [keys[i], i] as const));
     const hb = startHeartbeat(() => [...inFlight].map((i) => keys[i]), stampOf(input), (k) => {
       const i = keyToIdx.get(k);
-      return i !== undefined && pre.has(i) ? { set: pre.get(i) } : undefined;
+      return i !== undefined ? payloadFor(i) : undefined;
     });
     try {
     if (Date.now() > lateAt) {
@@ -7508,9 +7664,24 @@ export async function generatePhrasings(input: {
           cellsIn.push({ cell, seed: c.text, texts: got[j].map((ph) => ph.text) });
         }
         if (cellsIn.length === 0) return [];
-        // Past the budget the paid check does not start: the sets serve but
-        // store provisional, and the next request runs the check in place.
-        if (Date.now() > lateAt) { targets.forEach((j) => uncheckedCells.add(j)); return []; }
+        // Past the budget the paid check does not start: the sets store
+        // provisional and the next request runs the check in place. The
+        // FREE string readings still run (2026-10-25 re-audit) - a clear
+        // string fail drops now, only the model judgment waits.
+        if (Date.now() > lateAt) {
+          const shortLate: number[] = [];
+          targets.forEach((j, i) => {
+            uncheckedCells.add(j);
+            const before = got[j].length;
+            got[j] = got[j].filter((ph) => {
+              const f = structureStringFail(cellsIn[i].cell, ph.text);
+              if (f?.clear) console.warn(`phrasings structure string reading dropped past the budget [${subset[j].stage}] property ${f.property}: ${ph.text.slice(0, 90)} - ${f.reason}`);
+              return !f?.clear;
+            });
+            if (got[j].length < before && got[j].length < wantFor(subset[j].stage)) shortLate.push(j);
+          });
+          return shortLate;
+        }
         const verdicts = await checkStructure({ brand: input.brand, cells: cellsIn, meta: input.meta });
         const short: number[] = [];
         verdicts.forEach((v, i) => {
@@ -7611,7 +7782,10 @@ export async function generatePhrasings(input: {
     await hb.quiesce();
     await Promise.all(
       idx.map((i, j) => {
-        out[i] = got[j];
+        const final = got[j].length > 0 && !uncheckedCells.has(j) && !budgetCut.has(j);
+        // Only a final set is served (2026-10-25 re-audit); a provisional
+        // one is cached for the in-place finish and comes back empty.
+        out[i] = final ? got[j] : [];
         // Three outcomes, every one terminal or re-checkable (2026-10-24
         // audit - an unchecked set used to write a bare retry marker, so a
         // checker outage redid the whole writer chain on every request):
@@ -7623,7 +7797,7 @@ export async function generatePhrasings(input: {
         // writer (3 per hour).
         return store.cacheSet(
           keys[i],
-          got[j].length > 0 && !uncheckedCells.has(j) && !budgetCut.has(j)
+          final
             ? JSON.stringify(got[j])
             : got[j].length > 0
               ? JSON.stringify({ provisional: true, set: got[j] })
@@ -7645,6 +7819,7 @@ export async function generatePhrasings(input: {
       );
     } finally {
       await hb.stop();
+      await lostWait;
     }
   };
 
@@ -7676,10 +7851,12 @@ export async function generatePhrasings(input: {
             out[i] = v;
             return;
           }
-          // Provisional: serve it now, finish it in place below (the
-          // finished set replaces it in this response when it lands).
+          // Provisional: finish it in place below. It is NOT served as it
+          // stands (2026-10-25 re-audit): the client refills only SHORT
+          // sets, so a full-count unchecked set would land in the draft as
+          // final. The cell comes back empty unless the finish lands a
+          // checked set in this response; the client's refill re-requests it.
           if (e.provisional) {
-            out[i] = e.provisional;
             preSets.set(i, e.provisional);
             mine.push(i);
             return;
@@ -7692,9 +7869,9 @@ export async function generatePhrasings(input: {
             console.error(`phrasings cell exhausted after ${e.tries} empty attempts - shipping it empty [${input.cells[i].stage}] ${input.cells[i].text.slice(0, 60)}`);
             return;
           }
-          // A dead claim's carried set is recovered (finished in place);
-          // a fresh count keeps its time.
-          if (e.carried) { out[i] = e.carried; preSets.set(i, e.carried); }
+          // A dead claim's carried set is recovered (finished in place, and
+          // served only once finished); a fresh count keeps its time.
+          if (e.carried) preSets.set(i, e.carried);
           if (typeof e.at === "number" && Date.now() - e.at < 60 * 60 * 1000) {
             triesIn.set(i, e.tries ?? 0);
             atIn.set(i, e.at);
@@ -7706,13 +7883,20 @@ export async function generatePhrasings(input: {
   }
 
   /** Poll for cells another request claimed; a cell whose marker goes
-   * stale (its generator died) is taken over here. */
-  const waitForTheirs = async (): Promise<void> => {
-    if (theirs.length === 0 || input.noWait) return;
-    const open = new Set(theirs);
+   * stale (its generator died) is taken over here. `immediate` reads once
+   * before the first sleep - a lost claim's winner has often already
+   * finished (2026-10-25 re-audit). */
+  const waitOn = async (idxs: number[], immediate = false): Promise<void> => {
+    // A warm never sits waiting; an immediate read still serves what the
+    // winner already finished (the pre-wait behavior of a lost claim).
+    if (idxs.length === 0 || (input.noWait && !immediate)) return;
+    const open = new Set(idxs);
     const deadline = Date.now() + PHRASINGS_WAIT_MS;
-    while (open.size > 0 && Date.now() < deadline) {
-      await new Promise((r) => setTimeout(r, PHRASINGS_POLL_MS));
+    let first = true;
+    while (open.size > 0 && (first || Date.now() < deadline)) {
+      if (!first && input.noWait) break;
+      if (!(first && immediate)) await new Promise((r) => setTimeout(r, PHRASINGS_POLL_MS));
+      first = false;
       const pend = [...open];
       // One batch read per poll (2026-10-24 audit).
       const rawMap = await store.cacheGetMany(pend.map((i) => keys[i]), CACHE_TTL_MS);
@@ -7732,10 +7916,10 @@ export async function generatePhrasings(input: {
             open.delete(i);
             return;
           }
-          // The other request finished provisional: serve it, as the
-          // grid path does; the next request finishes it in place.
+          // The other request finished provisional: never served as final
+          // (2026-10-25 re-audit) - the cell comes back empty, the client's
+          // refill re-requests it, and that request finishes it in place.
           if (e.provisional) {
-            out[i] = e.provisional;
             open.delete(i);
             return;
           }
@@ -7744,7 +7928,7 @@ export async function generatePhrasings(input: {
           open.delete(i);
           if (exhaustedEntry(e, raw)) return;
           // A takeover carries the dead claim's set and count (2026-10-24 audit).
-          if (e.carried) { out[i] = e.carried; preT.set(i, e.carried); }
+          if (e.carried) preT.set(i, e.carried);
           if (typeof e.at === "number" && Date.now() - e.at < 60 * 60 * 1000) {
             triesT.set(i, e.tries ?? 0);
             atT.set(i, e.at);
@@ -7759,6 +7943,7 @@ export async function generatePhrasings(input: {
     // unresolved cells come back empty and the missing-paraphrases gate
     // heals them from the by-then-finished cache.
   };
+  const waitForTheirs = () => waitOn(theirs);
 
   // The writer bounds its own call sizes the way the cell writer does
   // (CELL_CHUNK): one call per ~PHRASINGS_CHUNK cells, chunks in

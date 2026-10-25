@@ -10,6 +10,7 @@ import { buildEditSetupDraft, mergeSetupDecision } from "@/lib/server/edit_setup
 import {
   CellShape,
   claimWriteLease,
+  editSetupLeaseKey,
   instrumentRows,
   JourneysShape,
   releaseWriteLease,
@@ -97,7 +98,7 @@ export async function PUT(
   // One save at a time per tracker: the client gives up at 120s and
   // invites a retry, and two in-flight saves used to interleave reset and
   // inserts (a doubled battery doubles collection cost).
-  const leaseKey = `edit_setup:${id}`;
+  const leaseKey = editSetupLeaseKey(id);
   const lease = await claimWriteLease(leaseKey);
   if (!lease) {
     return NextResponse.json(
@@ -157,12 +158,20 @@ export async function PUT(
       },
       cells: rows,
     });
+    // Decision records are advisory, as at create: the instrument is
+    // already written, so a record failure logs and never fails the save.
     if (grid.setupDecision) {
-      const stored = await store.getSetupDecision(id).catch(() => null);
-      await store.setSetupDecision(id, JSON.stringify(mergeSetupDecision(stored, grid.setupDecision)));
+      try {
+        const stored = await store.getSetupDecision(id).catch(() => null);
+        await store.setSetupDecision(id, JSON.stringify(mergeSetupDecision(stored, grid.setupDecision)));
+      } catch (err) {
+        console.error(`edit-setup: setup decision record failed for ${id}:`, err);
+      }
     }
     if (grid.worryDecision) {
-      await store.setWorryDecision(id, JSON.stringify(grid.worryDecision));
+      await store
+        .setWorryDecision(id, JSON.stringify(grid.worryDecision))
+        .catch((err) => console.error(`edit-setup: worry decision record failed for ${id}:`, err));
     }
     // Attribute the re-seed's model spend to the project being edited.
     tagCosts({ projectId: id });

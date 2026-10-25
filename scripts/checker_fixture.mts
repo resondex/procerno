@@ -970,11 +970,28 @@ if (fails > 0) process.exitCode = 1;
   ok("textNamesBrand required:true is the tolerant detector", bc.textNamesBrand("Netflix vs Prime Video", "Amazon Prime Video", { required: true }) && !bc.textNamesBrand("Netflix vs Prime Video", "Amazon Prime Video"));
   const legacyPV = bc.checkPromptBrandRule({ text: "We're done with Prime Video for streaming. What should we get instead?", stage: "alternatives", angle: "Amazon Prime Video", brand: "Netflix", competitors: ["Amazon Prime Video", "Hulu"], category: "video streaming services" });
   ok("legacy offensive alternatives: 'Prime Video' names the angle rival", !legacyPV.some((x: any) => x.check === "offensive_alt_missing_rival"), JSON.stringify(legacyPV));
-  // Technical-term scrub on the forbidden path.
+  // Technical collocations on the forbidden path (2026-10-25 re-audit): a
+  // brand form inside "Pixel size" is no longer scrubbed to nothing - it is
+  // a PENDING hit the brand judge decides (unjudged = named), because the
+  // scrub also hid a real leak ("Which Pixel size should I get...").
   const PXR = ["Apple iPhone", "Samsung Galaxy", "OnePlus"];
   const blindPx = bc.deriveCheckSpec({ stage: "discovery", angle: "generic", text: "Which smartphones should I look at?" }, "Google Pixel", PXR, "smartphones");
-  const px = bc.checkPromptAgainstSpec({ text: "Which phone is best? Pixel size matters to me.", spec: blindPx, category: "smartphones" });
-  ok("blind: sentence-initial 'Pixel size' is a sensor term, not the target", px.length === 0, JSON.stringify(px));
+  const PX_SENSOR = "Which phone is best? Pixel size matters to me.";
+  const pxM = bc.brandMentions(PX_SENSOR, "Google Pixel", { excludeTokens: new Set(["smartphones"]), others: PXR });
+  ok("blind: 'Pixel size' is a pending hit for the judge, not scrubbed", pxM.pending.includes("pixel"), JSON.stringify(pxM));
+  const pxUnjudged = bc.checkPromptAgainstSpec({ text: PX_SENSOR, spec: blindPx, category: "smartphones" });
+  ok("blind: unjudged 'Pixel size' counts as named (flags)", pxUnjudged.some((x: any) => x.check === "blind_names_brand"), JSON.stringify(pxUnjudged));
+  // Hand-written verdict - tests the plumbing (a recorded "no" clears the
+  // hit), not the judge's actual call.
+  bc.setBrandVerdict(PX_SENSOR, "Google Pixel", "pixel", false);
+  const px = bc.checkPromptAgainstSpec({ text: PX_SENSOR, spec: blindPx, category: "smartphones" });
+  ok("blind: with a recorded 'no' verdict 'Pixel size' is clean", px.length === 0, JSON.stringify(px));
+  const PX_LEAK = "Which Pixel size should I get for small hands?";
+  const leakM = bc.brandMentions(PX_LEAK, "Google Pixel", { excludeTokens: new Set(["smartphones"]), others: PXR });
+  ok("blind: 'Which Pixel size should I get' is pending too - the judge, not the scrub, decides", leakM.named && leakM.pending.includes("pixel"), JSON.stringify(leakM));
+  const pxLeak = bc.checkPromptAgainstSpec({ text: PX_LEAK, spec: blindPx, category: "smartphones" });
+  ok("blind: unjudged 'Which Pixel size should I get' flags", pxLeak.some((x: any) => x.check === "blind_names_brand"), JSON.stringify(pxLeak));
+  ok("required: the scrub still applies on the required side ('pixel size' never satisfies)", !bc.namesRequiredBrand("which pixel size is best", "Google Pixel", { excludeTokens: new Set(["smartphones"]) }));
   const px2 = bc.checkPromptAgainstSpec({ text: "Which phone is best? Is a Pixel worth it?", spec: blindPx, category: "smartphones" });
   ok("blind: 'a Pixel' mid-sentence is still the target", px2.some((x: any) => x.check === "blind_names_brand"), JSON.stringify(px2));
   // Quantities: only a bare 4-digit token is a year.
@@ -1014,4 +1031,50 @@ if (fails > 0) process.exitCode = 1;
   const objProps = ss.stageStructure({ stage: "objections", angle: "generic" }, "Brand")?.properties ?? [];
   ok("objection doubt property no longer accepts a fact question", !/acceptable voicings/.test(objProps[1] ?? "") && /fact, rule or policy/.test(objProps[1] ?? ""));
   console.log("15. setup audit checker fixes: " + (process.exitCode ? "FAILED" : "ALL PASS"));
+}
+
+// 16. Round-2 re-audit 2026-10-25: regressions introduced by section 15's fixes. Every case is decided mechanically - the one verdict above (section 15) is hand-written plumbing, no judge verdict is recorded.
+{
+  const ok = (label: string, cond: boolean, extra = "") => { if (!cond) { console.error(`   FAIL ${label} ${extra}`); process.exitCode = 1; } else console.log(`   ok   ${label} ${extra}`); };
+  const S = (c: string) => new Set(c.split(" "));
+  // 1. An everyday word of the base label satisfies must-name when capitalized.
+  const req: [string, string, string, boolean][] = [
+    ["Jira or Teams: which should we pick?", "Microsoft Teams", "project management tools", true],
+    ["Teams keeps crashing for us. Should we stay?", "Microsoft Teams", "project management tools", true],
+    ["Is the Double Cash card worth it?", "Citi Double Cash", "credit cards", true],
+    ["Amex or Active Cash for groceries?", "Wells Fargo Active Cash", "credit cards", true],
+    ["Is the Learning Thermostat worth it?", "Nest Learning Thermostat", "smart thermostats", true],
+    ["Is the Smart Thermostat Premium worth it?", "Ecobee Smart Thermostat Premium", "smart thermostats", true],
+    ["jira or teams: which should we pick?", "Microsoft Teams", "project management tools", false],
+    ["is the double cash card worth it?", "Citi Double Cash", "credit cards", false],
+    ["a card from a big issuer in the U.S.", "U.S. Bank", "credit cards", false],
+    ["my bank's card", "U.S. Bank", "credit cards", false],
+    ["Should we keep working around these issues?", "GitHub (Issues/Projects)", "project management tools", false],
+    // 2. A parenthetical acronym of the name, written as declared.
+    ["Should we use EY or Deloitte?", "Ernst & Young (EY)", "accounting firms", true],
+    ["Is HP any good for laptops?", "Hewlett-Packard (HP)", "laptops", true],
+    ["Is Ernst & Young any good?", "Ernst & Young (EY)", "accounting firms", true],
+    ["hey, which accounting firm?", "Ernst & Young (EY)", "accounting firms", false],
+    ["a 300 hp engine", "Hewlett-Packard (HP)", "laptops", false],
+    ["Which store is best in the US?", "Amazon (US)", "beauty retailers", false],
+  ];
+  for (const [t, b, c, want] of req) ok(`required: ${JSON.stringify(t)} ${want ? "satisfies" : "does not satisfy"} ${b}`, bc.namesRequiredBrand(t, b, { excludeTokens: S(c) }) === want);
+  // 2, forbidden side (chosen: both sides, case-exact, initials-guarded).
+  const fb: [string, string, string, boolean][] = [
+    ["Should we use EY or Deloitte?", "Ernst & Young (EY)", "accounting firms", true],
+    ["Is HP any good for laptops?", "Hewlett-Packard (HP)", "laptops", true],
+    ["hey, which accounting firm should we use?", "Ernst & Young (EY)", "accounting firms", false],
+    ["Which store is best in the US?", "Amazon (US)", "beauty retailers", false],
+  ];
+  for (const [t, b, c, want] of fb) ok(`forbidden: ${JSON.stringify(t)} ${want ? "names" : "does not name"} ${b}`, bc.brandMentions(t, b, { excludeTokens: S(c) }).named === want);
+  // 4. Sibilant plurals meet their singular.
+  ok("categorySpanIn: 'smart watch' meets 'smart watches'", bc.categorySpanIn("I want a smart watch for runs", "smart watches") === "smart watch");
+  ok("categorySpanIn: 'smart watches' meets 'smart watch'", bc.categorySpanIn("I want smart watches for runs", "smart watch") === "smart watches");
+  ok("categorySpanIn: 'electric toothbrush' meets 'electric toothbrushes'", bc.categorySpanIn("new electric toothbrush please", "electric toothbrushes") === "electric toothbrush");
+  ok("categorySpanIn: 'cable box' meets 'cable boxes'", bc.categorySpanIn("a cable box upgrade", "cable boxes") === "cable box");
+  ok("categorySpanIn: 'streaming service' still meets 'streaming services'", bc.categorySpanIn("Our streaming service bill keeps climbing", "streaming services") === "streaming service");
+  ok("keepsCategoryNoun: a singular 'box' seed is held to the noun", !bc.keepsCategoryNoun("a new cable box", "a new cable thing", "cable boxes") && bc.keepsCategoryNoun("a new cable box", "new cable boxes", "cable boxes"));
+  ok("keepsCategoryNoun: 'watch' / 'watches' meet both ways", bc.keepsCategoryNoun("Which smart watch should I get?", "What smart watches are good?", "smart watches") && bc.keepsCategoryNoun("Which smart watches are good?", "Which smart watch is good?", "smart watch") && !bc.keepsCategoryNoun("Which smart watch should I get?", "Which wearable should I get?", "smart watches"));
+  ok("keepsCategoryNoun: '-ses' plural of an -e noun still meets ('cases' / 'case')", bc.keepsCategoryNoun("Which phone case?", "Which phone cases?", "phone cases"));
+  console.log("16. round-2 re-audit fixes: " + (process.exitCode ? "FAILED" : "ALL PASS"));
 }

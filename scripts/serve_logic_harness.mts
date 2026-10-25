@@ -24,6 +24,19 @@
  *  7  the stakes judge fails CLOSED when the model call throws
  * Seeded design verdicts (designCheckCacheKey) stand in for the checker, so
  * the old-era upgrade cases stay free.
+ *
+ * 2026-10-25 re-audit (r30) additions:
+ *  3h a unit finished during ANOTHER request's live passes run ends up
+ *     stamped (the waiter re-runs the passes once for its own units)
+ *  3i a never-reviewed provisional unit takes the review path on its finish
+ *     pass (review throws here, so it stays provisional + unreviewed instead
+ *     of landing terminal unreviewed)
+ *  3j an old-era unit whose cached design verdict FAILS re-enters generation
+ *     once, lands flagged-terminal, and the next serve serves it as-is
+ *  3k claim markers carry the attempt count and its time
+ *  6b a provisional paraphrase set is never served as final
+ *  7  the stakes judge THROWS on an outage (nothing cached), never a
+ *     fail-closed refusal
  */
 import fs from "node:fs";
 import os from "node:os";
@@ -263,6 +276,96 @@ check("3g provisional unit never stamped by the passes (they did run)",
   out === null && state3g === "provisional" && marker3g === JSON.stringify("1") && !!prRow.situation,
   `(${state3g}, passes=${marker3g}, situation=${prRow.situation})`);
 
+// --- case 3h: a unit this request finishes while ANOTHER request's passes
+// run is live (2026-10-25 re-audit, S2). The problem-recognition unit is
+// provisional with a text whose design verdict is cached, so its re-judge
+// finishes terminal here - but the passes claim is live, so this request
+// waits on it; the other run "completes" (written by the hook below) without
+// having seen our unit. The waiter must re-run the passes once and stamp it.
+{
+  await store.cacheSet(keyOf(prRow), JSON.stringify({ cells: [cellOf(prRow, PR_PASS)], provisional: true }), {});
+  await store.cacheSet(keyOf(ceRow), JSON.stringify({ cells: [cellOf(ceRow, CE_PASS)], rules: RULES }), {});
+  const pk = inst.gridPassesCacheKey(keys);
+  await store.cacheSet(pk, JSON.stringify({ __pending: Date.now() }), {});
+  const origGet = store.cacheGet.bind(store);
+  let fired = false;
+  (store as { cacheGet: typeof store.cacheGet }).cacheGet = async (k, age) => {
+    const v = await origGet(k, age);
+    if (k === pk && !fired) {
+      fired = true;
+      // The other request's run finishes shortly after we start waiting.
+      setTimeout(() => { void store.cacheSet(pk, JSON.stringify("1"), {}); }, 100);
+    }
+    return v;
+  };
+  t0 = Date.now();
+  try { out = await inst.generateGrid(gridInput()); }
+  finally { (store as { cacheGet: typeof store.cacheGet }).cacheGet = origGet; }
+  ms = Date.now() - t0;
+  let st3h = "";
+  try { const v = JSON.parse((await store.cacheGet(keyOf(prRow), 365 * 24 * 3600 * 1000)) ?? "") as { provisional?: boolean; passed?: string; rules?: string }; st3h = v.passed === RULES ? "stamped" : v.provisional ? "provisional" : v.rules === RULES ? "rules-only" : "other"; } catch { st3h = "parse"; }
+  check("3h unit finished during another request's live passes run ends up stamped",
+    fired && Array.isArray(out) && st3h === "stamped" && ms < 15_000, `(${ms}ms, ${st3h}, fired=${fired})`);
+}
+
+// --- case 3i: a provisional unit whose seed REVIEW never ran (writer past
+// the deadline, or a review outage) is reviewed on its finish pass
+// (2026-10-25 re-audit, S3). Its design verdict is cached, so without the
+// review it would land terminal; here the review call throws (no key), so
+// the path being taken shows as the unit staying provisional + unreviewed.
+{
+  await store.cacheSet(keyOf(prRow), JSON.stringify({ cells: [cellOf(prRow, PR_PASS)], provisional: true, unreviewed: true }), {});
+  await store.cacheSet(keyOf(ceRow), JSON.stringify({ cells: [cellOf(ceRow, CE_PASS)], rules: RULES }), {});
+  out = await inst.generateGrid(gridInput());
+  let st3i = "";
+  try { const v = JSON.parse((await store.cacheGet(keyOf(prRow), 365 * 24 * 3600 * 1000)) ?? "") as { provisional?: boolean; unreviewed?: boolean; rules?: string; cells?: { text: string }[] }; st3i = v.provisional && v.unreviewed && v.cells?.[0]?.text === PR_PASS ? "provisional-unreviewed" : v.rules === RULES ? "terminal" : "other"; } catch { st3i = "parse"; }
+  check("3i never-reviewed provisional unit takes the review path (stays provisional + unreviewed, not terminal)",
+    out === null && st3i === "provisional-unreviewed", `(${st3i})`);
+}
+
+// --- case 3j: an old-era unit whose cached design verdict FAILS re-enters
+// generation once, the heal throws (no key) and it lands FLAGGED-terminal
+// under today's rules; the next serve serves it as-is - never a loop.
+{
+  const PR_OFF = "Our deadlines keep sliding and ownership is a mess on my team. What do people usually do about it?";
+  const intent = intentOf(prRow);
+  if (intent) await store.cacheSet(inst.designCheckCacheKey(intent, PR_OFF), JSON.stringify({ voices: false, reason: "harness: off design" }), {});
+  await store.cacheSet(keyOf(prRow), JSON.stringify({ cells: [cellOf(prRow, PR_OFF)], rules: "r0" }), {});
+  await store.cacheSet(keyOf(ceRow), JSON.stringify({ cells: [cellOf(ceRow, CE_PASS)], rules: RULES }), {});
+  out = await inst.generateGrid(gridInput());
+  const readPr = async () => { try { return JSON.parse((await store.cacheGet(keyOf(prRow), 365 * 24 * 3600 * 1000)) ?? "") as { rules?: string; provisional?: boolean; cells?: { text: string; seedFlags?: string[] }[] }; } catch { return null; } };
+  const v1 = await readPr();
+  const flagged1 = !!v1 && v1.rules === RULES && !v1.provisional && (v1.cells?.[0]?.seedFlags ?? []).some((f) => f.startsWith("off-design:"));
+  t0 = Date.now();
+  const out2 = await inst.generateGrid(gridInput());
+  ms = Date.now() - t0;
+  const v2 = await readPr();
+  check("3j failing design verdict on an era bump: re-entered once, landed flagged-terminal",
+    !!intent && flagged1 && v1?.cells?.[0]?.text === PR_OFF, `(intent=${!!intent}, rules=${v1?.rules}, flags=${JSON.stringify(v1?.cells?.[0]?.seedFlags ?? [])})`);
+  check("3j the next serve serves it as-is (no loop)",
+    Array.isArray(out2) && out2.some((c: { text: string; seedFlags?: string[] }) => c.text === PR_OFF && (c.seedFlags?.length ?? 0) > 0) &&
+    JSON.stringify(v2) === JSON.stringify(v1) && ms < 5_000, `(${ms}ms)`);
+  void out;
+}
+
+// --- case 3k: claim markers carry the attempt count and its time
+// (2026-10-25 re-audit) - a takeover of a killed claim keeps the count.
+{
+  const at = Date.now() - 5_000;
+  await store.cacheSet(keyOf(prRow), JSON.stringify({ cells: [cellOf(prRow, PR_PASS)], rules: RULES }), {});
+  await store.cacheSet(keyOf(ceRow), JSON.stringify({ __pending: 0, tries: 2, at }), {});
+  const origClaim = store.cacheClaim.bind(store);
+  let claimed: { tries?: number; at?: number } | null = null;
+  (store as { cacheClaim: typeof store.cacheClaim }).cacheClaim = async (k, exp, marker, age, meta) => {
+    if (k === keyOf(ceRow) && !claimed) { try { claimed = JSON.parse(marker); } catch { /* keep null */ } }
+    return origClaim(k, exp, marker, age, meta);
+  };
+  try { await inst.generateGrid(gridInput()); }
+  finally { (store as { cacheClaim: typeof store.cacheClaim }).cacheClaim = origClaim; }
+  const c3k = claimed as { tries?: number; at?: number } | null;
+  check("3k claim marker carries tries and at", c3k?.tries === 2 && c3k?.at === at, `(${JSON.stringify(c3k)})`);
+}
+
 // --- case 4: 60s-old marker is orphaned immediately (old code waited 180s) ---
 await store.cacheSet(keyOf(prRow), JSON.stringify({ __pending: Date.now() - 60_000 }), {});
 await store.cacheSet(keyOf(ceRow), JSON.stringify({ __pending: Date.now() - 60_000 }), {});
@@ -309,15 +412,40 @@ check("5 the fresh claim was not stolen", untouched5);
     injected && after === JSON.stringify(theirs) && got[0]?.[0]?.text === theirs[0].text, `(injected=${injected}, served=${got[0]?.length ?? 0})`);
 }
 
-// --- case 7: the stakes judge fails CLOSED (2026-10-24 audit): with no key
-// the call throws twice and every claimed deviation is refused - the room
-// inherits the base instead of a cached grant.
+// --- case 6b: a PROVISIONAL paraphrase set (budget cut, or left unchecked
+// by an outage) is never served as final (2026-10-25 re-audit, S2): the
+// client refills only short sets, so a full-count unchecked set landed in
+// the draft. It stays cached provisional; the response carries it empty.
 {
-  const verdicts = await inst.judgeStakes({
-    category: "project management software", base: base as never,
-    rooms: [{ label: "Solo founder", description: "Runs the company alone", journey: { involvement: "considered", verifiability: "spec", think_feel: "think", decision_unit: "committee" } }],
-  });
-  check("7 stakes judge refuses on a model error", verdicts.length === 1 && verdicts[0].changes === false, `(${JSON.stringify(verdicts)})`);
+  const pInput = {
+    brand: "Acme", category: "project management software", competitors: [], audience: null,
+    base, scenarios, count: 10,
+  };
+  const pCell = { stage: ceRow.stage.key, situation: ceRow.situation, angle: ceRow.angle, mode: null, text: CE_PASS2 };
+  const pkey = inst.phrasingCacheKey(pInput, pCell);
+  const set = [{ text: "What should I know before I pick project management software for the first time?", asker: "harness" }];
+  await store.cacheSet(pkey, JSON.stringify({ provisional: true, set }), {});
+  const got = await inst.generatePhrasings({ ...pInput, cells: [pCell] });
+  let still = false;
+  try { const v = JSON.parse((await store.cacheGet(pkey, 365 * 24 * 3600 * 1000)) ?? ""); still = v.provisional === true && Array.isArray(v.set) && v.set.length >= 1; } catch { /* leave false */ }
+  check("6b provisional paraphrase set not served in out (cache keeps it provisional)",
+    Array.isArray(got) && (got[0]?.length ?? -1) === 0 && still, `(served=${got[0]?.length ?? "?"}, provisional=${still})`);
+}
+
+// --- case 7: the stakes judge THROWS on an outage (2026-10-25 re-audit):
+// the old fail-closed refusal was cached inside the shared market read for
+// the full TTL. With no key the call fails twice and the judge throws, so
+// the read's coalesced() releases its claim and caches nothing.
+{
+  let threw = false;
+  let verdicts: unknown = null;
+  try {
+    verdicts = await inst.judgeStakes({
+      category: "project management software", base: base as never,
+      rooms: [{ label: "Solo founder", description: "Runs the company alone", journey: { involvement: "considered", verifiability: "spec", think_feel: "think", decision_unit: "committee" } }],
+    });
+  } catch { threw = true; }
+  check("7 stakes judge throws on a model outage (no cached refusal)", threw && verdicts === null, `(threw=${threw})`);
 }
 
 console.log(results.join("\n"));

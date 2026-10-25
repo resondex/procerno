@@ -219,12 +219,6 @@ async function create(
       // Intents and prompts in ONE transaction: a failure leaves no
       // half-written battery.
       await store.replaceInstrument(project.id, { reset: null, cells: rows });
-      if (grid.worryDecision) {
-        await store.setWorryDecision(project.id, JSON.stringify(grid.worryDecision));
-      }
-      if (grid.setupDecision) {
-        await store.setSetupDecision(project.id, JSON.stringify(grid.setupDecision));
-      }
     } else {
       await store.insertPrompts(
         project.id,
@@ -235,11 +229,28 @@ async function create(
     // The tracker never existed for the user: remove the shell so a retry
     // starts clean (and it never counts against the plan).
     console.error(`create: instrument write failed for ${project.id}:`, err);
-    await store.deleteProject(project.id).catch(() => {});
+    await store.deleteProject(project.id).catch((delErr) => {
+      // The empty shell stays behind (it counts against the plan until
+      // someone archives or deletes it) - say so instead of swallowing it.
+      console.error(`create: removing the empty tracker ${project.id} failed:`, delErr);
+    });
     return NextResponse.json(
       { error: "the tracker could not be saved - try again" },
       { status: 500 }
     );
+  }
+  // The decision records are advisory: written only after the instrument
+  // landed, and never able to fail the create - a failure here used to
+  // trigger the empty-tracker delete on a fully-written tracker.
+  if (grid?.worryDecision) {
+    await store
+      .setWorryDecision(project.id, JSON.stringify(grid.worryDecision))
+      .catch((err) => console.error(`create: worry decision record failed for ${project.id}:`, err));
+  }
+  if (grid?.setupDecision) {
+    await store
+      .setSetupDecision(project.id, JSON.stringify(grid.setupDecision))
+      .catch((err) => console.error(`create: setup decision record failed for ${project.id}:`, err));
   }
   if (data.setupId && (await ownsSetup(data.setupId, auth.userId))) {
     // Transfer setup-phase ledger rows onto the project the moment it

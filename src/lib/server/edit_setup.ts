@@ -1,6 +1,7 @@
 import { store } from "@/lib/store";
 import { tagCosts } from "@/lib/cost_log";
 import {
+  humanize,
   participationMask,
   reviewJourneyFit,
   reviewScenarioFit,
@@ -12,7 +13,12 @@ import { brandAliasForms } from "@/lib/engine/brand_aliases";
 import { deriveCheckSpec, WORRY_STANCE_STAGES } from "@/lib/engine/battery_checks";
 import type { Project } from "@/lib/types";
 
-const norm = (t: string) => t.trim().toLowerCase().replace(/\s+/g, " ");
+/** Text identity for record lookups. Stored intent and prompt text went
+ * through humanize (curly quotes, Unicode hyphens, dashes, ellipses, a
+ * full quote wrap), while the decision record keeps the client's text - so
+ * both sides fold through humanize before comparing, or a cell with
+ * typographic characters loses its provenance. */
+const norm = (t: string) => humanize(t).toLowerCase().replace(/\s+/g, " ").trim();
 
 type Obj = Record<string, unknown>;
 type Room = { label: string; description: string };
@@ -37,6 +43,42 @@ function parseDecision(raw: string | null): Obj | null {
   } catch {
     return null;
   }
+}
+
+/** The base-read enums in ModeratorsShape order; the first value is the
+ * fallback when a legacy value cannot be recovered. */
+const MODERATOR_ENUMS = {
+  verifiability: ["spec", "taste", "trust"],
+  involvement: ["considered", "habitual"],
+  think_feel: ["think", "feel"],
+  decision_unit: ["solo", "household", "committee"],
+  rhythm: ["one_shot", "replenishment", "subscription"],
+  risk: ["performance", "financial", "social", "physical"],
+} as const;
+const RATIONALE_MAX = 600;
+
+/** A legacy stored base read that fails ModeratorsShape (create once
+ * accepted any record), cleaned into one that passes: enum values
+ * normalized ("One-shot" -> one_shot), unrecoverable ones set to the
+ * schema's first value (logged - the setup banner's chips let the user
+ * flip them), the flag coerced, overlong strings clamped to the schema's
+ * caps, unknown fields dropped. Returning the RAW read instead made the
+ * tracker open but every later route call (ModeratorsShape-validated) 400,
+ * so the edit could never be saved. */
+function cleanModerators(raw: Obj, projectId: string): Moderators {
+  const out: Record<string, unknown> = {};
+  for (const [field, values] of Object.entries(MODERATOR_ENUMS)) {
+    const v = str(raw[field])?.trim().toLowerCase().replace(/[\s-]+/g, "_") ?? null;
+    const hit = values.find((x) => x === v);
+    if (!hit) {
+      console.warn(`edit-setup ${projectId}: stored base read ${field}=${JSON.stringify(raw[field])} unrecoverable - using ${values[0]}`);
+    }
+    out[field] = hit ?? values[0];
+  }
+  const flag = raw.channel_retail;
+  out.channel_retail = typeof flag === "boolean" ? flag : str(flag)?.trim().toLowerCase() === "true";
+  out.rationale = (str(raw.rationale) ?? "").slice(0, RATIONALE_MAX);
+  return out as unknown as Moderators;
 }
 
 /** The cell identity the decision record and the stored intents share. */
@@ -74,11 +116,18 @@ export async function buildEditSetupDraft(project: Project) {
   let base: Moderators;
   try {
     const raw = JSON.parse(moderators) as unknown;
+    if (!isObj(raw)) return null;
     const checked = ModeratorsShape.safeParse(raw);
     // A read stored before validation (create accepted any record) still
-    // opens - the wizard's own calls validate it from here on.
-    base = (checked.success ? checked.data : raw) as Moderators;
-    if (!isObj(base)) return null;
+    // opens AND saves: it is cleaned into one the wizard's validated route
+    // calls accept, never handed back raw.
+    if (checked.success) {
+      base = checked.data as Moderators;
+    } else {
+      const cleaned = ModeratorsShape.safeParse(cleanModerators(raw, project.id));
+      if (!cleaned.success) return null;
+      base = cleaned.data as Moderators;
+    }
   } catch {
     return null;
   }
@@ -231,6 +280,13 @@ export async function buildEditSetupDraft(project: Project) {
       original: i.text,
       phrasings,
       phrasedFor: i.text,
+      // The engine's own seed from the record (seed.offered), falling back
+      // to the confirmed text only when the record lacks it. The client's
+      // cells merge keys on (design, engineSeed): a hand-edited seed is
+      // kept through an edit-setup re-confirm exactly when the engine
+      // still writes this seed - with engineSeed = the confirmed text the
+      // engine's output never matched an edited cell and the edit was lost.
+      engineSeed: str(isObj(rec?.seed) ? (rec!.seed as Obj).offered : null) ?? i.text,
       ...(offeredParas ? { phrasingsOffered: offeredParas } : {}),
     };
   });
@@ -250,13 +306,57 @@ export async function buildEditSetupDraft(project: Project) {
     }).catch(() => null),
   ]);
   // Rows rebuilt with their provenance: `first` is the room as the engine
-  // first offered it (matched by label), `original` the wording the
-  // decided row was measured against, so buildSetupDecision recomputes the
-  // same `how` on the way back out.
+  // first offered it, `original` the wording the decided row was measured
+  // against, so buildSetupDecision recomputes the same `how` on the way
+  // back out. A decided room is matched to its offer by the record, not
+  // by label: an unchanged room by its exact text; a reworded, near-variant
+  // or edited room (whose label moved) by order - the record writes both
+  // lists from one row array, so the changed rooms take, in order, the
+  // offers no unchanged room and no unticked label accounts for. Matching
+  // by label sent every renamed room back with first = itself, which the
+  // client reads as "offered".
+  const offerOf = new Map<string, Room>();
+  {
+    const offTicked = new Set(
+      Array.isArray(dRooms?.off) ? (dRooms!.off as unknown[]).filter((x): x is string => typeof x === "string") : []
+    );
+    const decidedList = dRooms && Array.isArray(dRooms.decided) ? dRooms.decided.filter(isObj) : [];
+    const used = new Set<number>();
+    const sameRoom = (a: Room, b: { label: string; description: string }) =>
+      a.label.trim() === b.label.trim() && a.description.trim() === b.description.trim();
+    // Unchanged rooms first: an exact offer.
+    for (const r of decidedList) {
+      const label = str(r.label);
+      if (!label || (str(r.how) ?? "offered") !== "offered") continue;
+      const j = offered.findIndex((o, k) => !used.has(k) && sameRoom(o, { label, description: str(r.description) ?? "" }));
+      if (j >= 0) {
+        used.add(j);
+        offerOf.set(label, offered[j]);
+      }
+    }
+    // Changed rooms in record order take the next unclaimed offer, skipping
+    // offers whose label an unticked row still carries.
+    let j = 0;
+    for (const r of decidedList) {
+      const label = str(r.label);
+      const how = str(r.how) ?? "offered";
+      if (!label || how === "offered" || how === "own") continue;
+      while (j < offered.length && (used.has(j) || offTicked.has(offered[j].label))) j++;
+      if (j < offered.length) {
+        used.add(j);
+        offerOf.set(label, offered[j]);
+        j++;
+      }
+    }
+  }
   const rows = scenarios.map((s) => {
     const how = decided.get(s.label)?.how ?? "offered";
     const cur = { label: s.label, description: s.description };
-    const first = offeredBy.get(s.label) ?? cur;
+    // No offer found for a changed room: leave `first` unset rather than
+    // claim the current wording was offered (an "edited" room then also
+    // leaves `original` unset, so it reads back as edited, not offered).
+    const first: { label: string; description: string } | undefined =
+      offerOf.get(s.label) ?? (how === "offered" || how === "own" ? cur : undefined);
     const original = how === "reworded" || how === "near_variant" ? cur : first;
     return {
       label: s.label,
@@ -351,20 +451,31 @@ export function mergeSetupDecision(storedRaw: string | null, incoming: Obj): Obj
 
   const sCells = Array.isArray(stored.cells) ? stored.cells.filter(isObj) : [];
   const sCellBy = new Map<string, Obj>();
+  const sCellByOffer = new Map<string, Obj>();
   for (const c of sCells) {
     const seed = isObj(c.seed) ? c.seed : null;
     const text = str(seed?.decided);
     if (text) sCellBy.set(`${cellKey(c)}|${norm(text)}`, c);
+    const offer = str(seed?.offered);
+    if (offer && !sCellByOffer.has(`${cellKey(c)}|${norm(offer)}`)) sCellByOffer.set(`${cellKey(c)}|${norm(offer)}`, c);
   }
   const cells = Array.isArray(incoming.cells)
     ? incoming.cells.filter(isObj).map((c) => {
         const seed = isObj(c.seed) ? c.seed : {};
         const offeredText = str(seed.offered);
-        // The cell came through the edit as the stored one when its
-        // offered baseline IS the stored decided text (the edit draft sets
-        // original = the confirmed seed); an engine redraw in the edit has
-        // a different baseline and keeps its own provenance.
-        const prev = offeredText ? sCellBy.get(`${cellKey(c)}|${norm(offeredText)}`) : undefined;
+        const decidedIn = str(seed.decided);
+        // The cell came through the edit as the stored one when (1) its
+        // decided text IS the stored decided text, (2) its offered seed is
+        // the stored engine offer (the edit draft carries engineSeed =
+        // the record's seed.offered, so an edited seed keeps its lineage),
+        // or (3) its offered seed is the stored decided text (edit drafts
+        // from before engineSeed set the baseline to the confirmed seed).
+        // An engine redraw in the edit matches none and keeps its own
+        // provenance.
+        const k = cellKey(c);
+        const prev =
+          (decidedIn ? sCellBy.get(`${k}|${norm(decidedIn)}`) : undefined) ??
+          (offeredText ? sCellByOffer.get(`${k}|${norm(offeredText)}`) ?? sCellBy.get(`${k}|${norm(offeredText)}`) : undefined);
         if (!prev) return c;
         const pSeed = isObj(prev.seed) ? prev.seed : {};
         const decidedText = str(seed.decided) ?? offeredText;
@@ -402,19 +513,45 @@ export function mergeSetupDecision(storedRaw: string | null, incoming: Obj): Obj
       })
     : incoming.cells;
 
-  return {
-    ...stored,
-    ...incoming,
-    base: { ...iBase, offered: iBase.offered ?? sBase.offered ?? null },
-    rooms: {
-      ...iRooms,
-      offered: offeredRooms,
-      reserve: rooms(iRooms.reserve).length > 0 ? iRooms.reserve : (sRooms.reserve ?? []),
-    },
-    valueLines: { ...iValue, recommended: iValue.recommended ?? sValue.recommended ?? null },
-    worries: iWorries
-      ? { ...iWorries, offered: Array.isArray(sWorries?.offered) && (sWorries!.offered as unknown[]).length > 0 ? sWorries!.offered : iWorries.offered }
-      : sWorries,
-    cells,
-  };
+  // THE MERGE RULE, per top-level field: the incoming record owns every
+  // DECIDED side whenever it carries the field at all (null included). The
+  // stored record (a) supplies a whole field only when the incoming record
+  // lacks it entirely, and (b) inside a present field fills only the
+  // OFFERED-history subfields the incoming one leaves empty. A spread of
+  // the stored record under the incoming one would resurrect stored
+  // decided values (worry picks came back after an edit removed them).
+  const has = (k: string) => Object.prototype.hasOwnProperty.call(incoming, k);
+  const out: Obj = { ...stored, ...incoming };
+  out.base = has("base")
+    ? isObj(incoming.base)
+      ? { ...iBase, offered: iBase.offered ?? sBase.offered ?? null }
+      : incoming.base
+    : stored.base;
+  out.rooms = has("rooms")
+    ? isObj(incoming.rooms)
+      ? {
+          ...iRooms,
+          offered: offeredRooms,
+          reserve: rooms(iRooms.reserve).length > 0 ? iRooms.reserve : (sRooms.reserve ?? []),
+        }
+      : incoming.rooms
+    : stored.rooms;
+  out.valueLines = has("valueLines")
+    ? isObj(incoming.valueLines)
+      ? { ...iValue, recommended: iValue.recommended ?? sValue.recommended ?? null }
+      : incoming.valueLines
+    : stored.valueLines;
+  // Worries: decided is always the incoming picks. A present-but-null
+  // incoming (no worries gate in this walk) keeps the stored POOL as
+  // history with no picks - never the stored picks.
+  const sPool = Array.isArray(sWorries?.offered) && (sWorries!.offered as unknown[]).length > 0 ? sWorries!.offered : null;
+  out.worries = has("worries")
+    ? iWorries
+      ? { ...iWorries, offered: sPool ?? iWorries.offered }
+      : sPool
+        ? { offered: sPool, decided: [] }
+        : incoming.worries
+    : stored.worries;
+  out.cells = has("cells") ? cells : stored.cells;
+  return out;
 }

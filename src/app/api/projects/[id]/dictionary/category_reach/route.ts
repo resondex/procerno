@@ -20,7 +20,7 @@ export async function GET(
   const { id } = await params;
   const auth = await getAuth();
   if (!auth) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
-  const project = await requireProject(id, auth);
+  const project = await requireProject(id, auth, { write: true });
   if (project instanceof NextResponse) return project;
   const brandKey = matchKey(project.brand);
   const legacy = new Set(project.competitors.map((c) => c.trim().toLowerCase()));

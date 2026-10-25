@@ -449,8 +449,12 @@ function everydayLabelWord(tok: string): boolean {
  * setup audit S1.4): 3+ letters, not a generic token, not category
  * vocabulary, not everyday English. "s bank" of U.S. Bank, "bank of" of
  * Bank of America and "credit cards" of a "<maker> Credit Cards" label
- * carry none and are not names; "prime video" carries a brand-dominated
- * word and is. */
+ * carry none and are not names. A part whose words are all stopworded
+ * ("prime video" of Amazon Prime Video: both are STOP_FORMS) is not
+ * produced here either; it is a forbidden-side form only when a
+ * dictionary alias supplies it. The required side (namesRequiredBrand)
+ * does accept it as a part of the label, so the two sides disagree on
+ * this name shape today (recorded 2026-10-25, unchanged). */
 function distinctiveWord(tok: string, cat?: Set<string>): boolean {
   return tok.length >= 3 && !GENERIC_TOKENS.has(tok) && !isCategoryToken(tok, cat) && !everydayLabelWord(tok);
 }
@@ -583,6 +587,28 @@ export function setBrandVerdict(text: string, brand: string, form: string, refer
   BRAND_VERDICTS.set(brandVerdictKey(text, brand, form), refers);
 }
 
+/** Parenthetical acronyms of a name, as written (2026-10-25 re-audit): an
+ * all-caps alternate of 2+ letters whose letters are the initials of the
+ * base name's words - "EY" of "Ernst & Young (EY)", "HP" of
+ * "Hewlett-Packard (HP)". The initials test keeps display qualifiers out
+ * ("Amazon (US)" declares no acronym, so "in the US" never names it).
+ * Matched case-SENSITIVELY on both sides: a two-letter key ("hp", "ey")
+ * written lowercase is ordinary text (horsepower, "hey"). */
+function parenAcronyms(name: string): string[] {
+  const initials = key(speakable(name)).split(" ").filter(Boolean).map((w) => w[0]).join("");
+  const out: string[] = [];
+  for (const m of name.matchAll(/\(([^)]*)\)/g)) {
+    for (const alt of m[1].split("/").map((x) => x.trim())) {
+      const letters = alt.replace(/[&.\-\s]/g, "");
+      if (/^[A-Z]{2,}$/.test(letters) && letters.toLowerCase() === initials) out.push(alt);
+    }
+  }
+  return out;
+}
+function acronymHit(text: string, name: string): boolean {
+  return parenAcronyms(name).some((a) => new RegExp(`(?<![A-Za-z0-9])${esc(a)}(?:s|'s)?(?![A-Za-z0-9])`).test(text));
+}
+
 /** An everyday word as a brand form: the vault lexicon or the hand list. */
 function ambiguousWord(form: string): boolean {
   return !form.includes(" ") && (AMBIGUOUS_FORMS.has(form) || COMMON_WORDS.has(form));
@@ -601,11 +627,15 @@ export function brandMentions(
 ): { named: boolean; pending: string[] } {
   const original = text;
   if (opts?.others) text = withoutOtherBrands(text, name, [name, ...opts.others]);
-  // Technical collocations ("pixel size" is a sensor term) are scrubbed here
-  // as on the required side (namesRequiredBrand), per the precision-first
-  // promise of the forbidden path (2026-10-24 setup audit: "Pixel size
-  // matters to me." opening a sentence named Google Pixel outright).
-  text = text.replace(TERM_COLLISIONS_RAW, " ");
+  // A parenthetical acronym of the name ("EY" of "Ernst & Young (EY)"),
+  // written exactly as declared, is the brand (2026-10-25 re-audit).
+  if (acronymHit(text, name)) return { named: true, pending: [] };
+  // Technical collocations ("pixel size" is a sensor term) are not scrubbed
+  // on this side (2026-10-25 re-audit: the 2026-10-24 scrub hid a real
+  // target leak - "Which Pixel size should I get for small hands?" passed
+  // a blind cell). A brand form inside one is decided by the judge like any
+  // ambiguous hit; unjudged = named. The required side keeps the scrub.
+  const termSpans = [...text.matchAll(TERM_COLLISIONS_RAW)].map((m) => [m.index ?? 0, (m.index ?? 0) + m[0].length]);
   // A definite hit (an unambiguous form, or an ambiguous one the context or
   // a verdict settles) names the brand outright and nothing is queued; only
   // a text whose sole evidence is unjudged ambiguous hits goes to the judge
@@ -617,9 +647,11 @@ export function brandMentions(
     const body = form.split(" ").map(esc).join("[^A-Za-z0-9+]*");
     const re = new RegExp(`(?<![A-Za-z0-9])(${body})(?:s|es|'s)?(?![A-Za-z0-9])`, "gi");
     for (const m of text.matchAll(re)) {
+      const at = m.index ?? 0;
+      const inTerm = termSpans.some(([a, b]) => at < b && at + m[0].length > a);
       // A whole multi-word name ("prime video", "bank of america") is definite.
-      if (form.includes(" ")) return { named: true, pending: [] };
-      if (!maker.has(form)) {
+      if (form.includes(" ") && !inTerm) return { named: true, pending: [] };
+      if (!inTerm && !maker.has(form)) {
         // A one-word name, alias or product word: a coined word ("hulu",
         // "jira", "iPhone") is the brand however it is written; an everyday
         // word is the brand when written with a capital mid-sentence
@@ -633,7 +665,8 @@ export function brandMentions(
         if (capital && !sentenceStart) return { named: true, pending: [] };
         if (capital && sentenceStart && BRAND_DOMINATED.has(form)) return { named: true, pending: [] };
       }
-      // Lowercase, a sentence-opening everyday word, or a maker word:
+      // Lowercase, a sentence-opening everyday word, a maker word, or any
+      // form inside a technical collocation ("Pixel size"):
       // context decides (brand_judge). Unjudged = named. The verdict is read
       // only here, after the casing rules (see BRAND_VERDICTS).
       const v = BRAND_VERDICTS.get(brandVerdictKey(original, name, form));
@@ -680,9 +713,27 @@ export function keepsCategoryNoun(seed: string, para: string, category: string):
   const noun = anchors[anchors.length - 1];
   // p22: "services" stemmed to "servic" and never met "service" (the p17
   // stem stripped "es" from a singular ending in e); plural-only strip.
-  const stem = (w: string) => w.replace(/ies$/, "y").replace(/s$/, "");
-  const has = (t: string) => key(t).split(" ").some((w) => stem(w) === stem(noun));
+  // 2026-10-25 re-audit: and sibilant plurals ("watches", "boxes") meet
+  // their singular (pluralMeet).
+  const has = (t: string) => key(t).split(" ").some((w) => pluralMeet(w, noun));
   return !has(seed) || has(para);
+}
+/** Do two words meet as singular / plural of one noun? Each word's
+ * candidate singulars - itself, -ies -> -y, -s dropped, and -es dropped
+ * after a sibilant (ch / sh / x / s / z: "watches" -> "watch", "boxes" ->
+ * "box") - and the two meet when the candidate sets share one. Candidates
+ * rather than one stem because -ses is ambiguous ("cases" -> "case",
+ * "buses" -> "bus"). */
+function pluralMeet(a: string, b: string): boolean {
+  const sing = (w: string): string[] => {
+    const out = [w];
+    if (/ies$/.test(w)) out.push(w.slice(0, -3) + "y");
+    if (/s$/.test(w)) out.push(w.slice(0, -1));
+    if (/(?:ch|sh|x|s|z)es$/.test(w)) out.push(w.slice(0, -2));
+    return out;
+  };
+  const sb = sing(b);
+  return sing(a).some((x) => sb.includes(x));
 }
 /** p22 (2026-10-07, Netflix repro without the category header): the p17
  * noun keep fires only on the category's HEAD noun ("services"), but a seed
@@ -789,13 +840,13 @@ export function categorySpanIn(text: string, category: string): string | null {
   // Plural-only strip (p22's fix, 2026-10-24 setup audit): the old
   // (ies|es|s) stem left "service" / "phone" whole but cut "services" /
   // "phones" to "servic" / "phon", so a singular seed word never met a
-  // plural anchor and the owned-noun span came back null.
-  const stem = (w: string) => w.replace(/ies$/, "y").replace(/s$/, "");
+  // plural anchor and the owned-noun span came back null. 2026-10-25
+  // re-audit: sibilant plurals too ("watches" / "watch") - pluralMeet.
   const words = text.split(/\s+/);
   const bare = words.map((w) => key(w));
-  const i = bare.findIndex((w) => stem(w) === stem(anchors[0]));
+  const i = bare.findIndex((w) => pluralMeet(w, anchors[0]));
   if (i < 0) return null;
-  const j = bare.findIndex((w, k) => k > i && k - i <= 4 && stem(w) === stem(anchors[1]));
+  const j = bare.findIndex((w, k) => k > i && k - i <= 4 && pluralMeet(w, anchors[1]));
   if (j < 0) return null;
   return words.slice(i, j + 1).join(" ").replace(/[^A-Za-z0-9\s'-]+$/g, "");
 }
@@ -1258,12 +1309,18 @@ const esc = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
  * The full name, its compact and dotted-initial forms, and the MAKER word
  * (the label's first word: "google", "github", "bank" of Bank of America)
  * stay tolerant - a maker word satisfying must-name is the recorded known
- * gap, unchanged. */
+ * gap, unchanged. 2026-10-25 (re-audit): an everyday word of the base
+ * label satisfies when written with a capital, and a parenthetical
+ * acronym of the name ("EY", "HP") satisfies written as declared. */
 export function namesRequiredBrand(
   text: string, name: string, opts?: { extraForms?: string[]; excludeTokens?: Set<string> }
 ): boolean {
   const t = key(text).replace(TERM_COLLISIONS, " ");
+  if (acronymHit(text, name)) return true;
   const forms = new Set<string>();
+  // Everyday words of the base label that count only when written with a
+  // capital (see below).
+  const capOnly = new Set<string>();
   const cat = opts?.excludeTokens;
   const base = key(name.replace(/\s*\([^)]*\)/g, ""));
   const paren = key([...name.matchAll(/\(([^)]*)\)/g)].map((m) => m[1]).join(" "));
@@ -1287,8 +1344,18 @@ export function namesRequiredBrand(
     }
     for (let i = 0; i < toks.length; i++) {
       const tok = toks[i];
-      if (tok.length >= 3 && !STOP_FORMS.has(tok) && !GENERIC_TOKENS.has(tok) && !isCategoryToken(tok, cat) &&
-          ((f === base && tok === maker) || !everydayLabelWord(tok))) forms.add(tok);
+      if (tok.length >= 3 && !STOP_FORMS.has(tok) && !GENERIC_TOKENS.has(tok) && !isCategoryToken(tok, cat)) {
+        if ((f === base && tok === maker) || !everydayLabelWord(tok)) forms.add(tok);
+        // 2026-10-25 re-audit: an everyday word of the BASE label still
+        // satisfies when written with a capital, anywhere (sentence starts
+        // included - this side is the tolerant one): "Jira or Teams" names
+        // Microsoft Teams, "the Double Cash card" Citi Double Cash. The
+        // forbidden side counts a capitalized mid-sentence everyday word as
+        // a definite mention, so without this a seed naming its rival that
+        // way failed its own signature. Lowercase ("teams", "issues", "my
+        // bank's card") still never satisfies.
+        else if (f === base) capOnly.add(tok);
+      }
       for (let j = i + 2; j <= toks.length; j++) {
         const part = toks.slice(i, j);
         // The whole base was added above; proper parts need a distinctive word.
@@ -1297,7 +1364,15 @@ export function namesRequiredBrand(
     }
   }
   for (const fk of aliasKeys(opts?.extraForms, opts?.excludeTokens)) forms.add(fk);
-  return [...forms].some((f) => new RegExp(`\\b${esc(f)}s?\\b`).test(t));
+  if ([...forms].some((f) => new RegExp(`\\b${esc(f)}s?\\b`).test(t))) return true;
+  if (capOnly.size === 0) return false;
+  const raw = text.replace(TERM_COLLISIONS_RAW, " ");
+  for (const tok of capOnly) {
+    for (const m of raw.matchAll(new RegExp(`(?<![A-Za-z0-9])${esc(tok)}(?:s|'s)?(?![A-Za-z0-9])`, "gi"))) {
+      if (/[A-Z]/.test(m[0][0])) return true;
+    }
+  }
+  return false;
 }
 
 /** Forbidden-brand detection: the brand-mention core (see brandMentions). */

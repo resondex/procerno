@@ -120,43 +120,52 @@ export function logCost(entry: {
 
 const SETUP_ID_RE = /^[0-9a-f-]{36}$/i;
 
-/** Ownership verdicts per (user, setup id), memoized per instance: a setup
- * walk sends dozens of requests under one id, and a draft's owner never
- * changes. Only positive verdicts are kept for long - a draft saved a
- * moment after its first spend call must be able to pass. */
-const ownedMemo = new Map<string, { ok: boolean; at: number }>();
+/** Positive ownership verdicts per (user, setup id), memoized per
+ * instance: a draft's owner never changes. Negative verdicts are never
+ * cached - a draft saved a moment after a miss must pass on the next ask
+ * (a cached miss made concurrent pre-save calls miss too). */
+const ownedMemo = new Map<string, number>();
 const OWNED_OK_MS = 30 * 60_000;
-const OWNED_NO_MS = 15_000;
 
 /** True when `setupId` is a stored draft owned by this caller. Dev mode
  * (userId null with auth off) owns the user-less drafts, as listing does.
- * One primary-key probe per request at most (memoized), never per model
- * call. */
+ * This is the SECURITY boundary for setup spend: create's attach step
+ * (attachSetupCosts) moves rows onto a project only after this check. */
 export async function ownsSetup(setupId: string, userId: string | null): Promise<boolean> {
   if (!SETUP_ID_RE.test(setupId)) return false;
   const k = `${userId ?? "-"}|${setupId}`;
-  const hit = ownedMemo.get(k);
-  if (hit && Date.now() - hit.at < (hit.ok ? OWNED_OK_MS : OWNED_NO_MS)) return hit.ok;
+  const at = ownedMemo.get(k);
+  if (at !== undefined && Date.now() - at < OWNED_OK_MS) return true;
   const row = await store.getSetupDraftOwner(setupId).catch(() => null);
   const ok = row !== null && row.user_id === userId;
-  if (ownedMemo.size > 2000) ownedMemo.clear();
-  ownedMemo.set(k, { ok, at: Date.now() });
+  if (ok) {
+    if (ownedMemo.size > 2000) ownedMemo.clear();
+    ownedMemo.set(k, Date.now());
+  }
   return ok;
 }
 
 /** The wizard's setup id (x-setup-id) this request's spend books to, or
- * null. The id is client-chosen, so it is honored only when it names a
- * draft the caller owns: spend under anyone else's id (or before the
- * first draft save) books untagged. The demo session never owns a draft
- * (it cannot store one). Call AFTER auth and tag in the handler itself -
+ * null. Format check only: the brand profile and roster classify run
+ * BEFORE the wizard's first draft save, so requiring a stored draft here
+ * booked the walk's first (and often largest) calls untagged.
+ *
+ * Tagging on an unverified id is safe because a tag alone moves nothing:
+ * rows reach a project only through create's attach step, which runs
+ * ownsSetup on the caller first - that check must stay. Setup ids are
+ * random UUIDs held only by the walker's browser, so booking spend under
+ * someone else's id needs that id itself. The demo session tags too; it
+ * can never create, so its rows simply stay setup-tagged. Call AFTER auth
+ * and tag in the handler itself -
  * `tagCosts({ setupId: await setupIdFromRequest(req, auth) })` - because
  * tagCosts inside an awaited helper would not reach the caller's context. */
 export async function setupIdFromRequest(
   req: Request,
-  auth: { userId: string | null; email: string | null }
+  // Kept for the call sites' contract; ownership is checked at attach.
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  _auth: { userId: string | null; email: string | null }
 ): Promise<string | null> {
-  if (auth.email === "demo" && auth.userId === null) return null;
   const id = req.headers.get("x-setup-id");
   if (!id || !SETUP_ID_RE.test(id)) return null;
-  return (await ownsSetup(id, auth.userId)) ? id : null;
+  return id;
 }

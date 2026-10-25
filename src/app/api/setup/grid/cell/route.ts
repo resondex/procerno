@@ -30,7 +30,8 @@ const Body = z.object({
    * Absent = every competitor same_seat (the untyped behavior). */
   rosterRoles: z
     .record(z.string().max(80), z.enum(ROSTER_ROLE_VALUES))
-    .refine((r) => Object.keys(r).length <= 24, "too many roster roles")
+    // 48: drafts saved before the client pruned removed competitors carry stale roles.
+    .refine((r) => Object.keys(r).length <= 48, "too many roster roles")
     .optional(),
   audience: z.string().trim().max(160).optional(),
   base: ModeratorsShape,

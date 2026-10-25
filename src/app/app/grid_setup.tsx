@@ -189,7 +189,21 @@ export function rebindRooms(g: GridState, pairs: [string, string][]): GridState 
       : g.stageRooms,
     valueLines: reKey(g.valueLines),
     valueRecommended: reKey(g.valueRecommended),
+    // The composed-mask record follows the rename too: a rename is the same
+    // room (the stage columns still name the old label, so the scenarios
+    // confirm recomposes anyway).
+    composedSig: g.composedSig ? renameInSig(g.composedSig, ren) : g.composedSig,
   };
+}
+
+/** composedSig with its room labels renamed; unchanged when unreadable. */
+function renameInSig(sig: string, ren: (l: string) => string): string {
+  try {
+    const [base, rooms] = JSON.parse(sig) as [unknown, [string, unknown][]];
+    return JSON.stringify([base, rooms.map(([l, j]) => [ren(l).trim(), j])]);
+  } catch {
+    return sig;
+  }
 }
 
 /** Per-room stage scope after a room removal: entries keep only active
@@ -226,21 +240,56 @@ function carriedBattery(
   g: GridState,
   o: { sameBase: boolean; keepScope: boolean; activeLabels: string[] }
 ): Partial<GridState> & { cells: GridCellUi[] } {
+  // Room-keyed Value entries ride only for rooms still active (2026-10-25):
+  // a removed room's line leaked into the setup record and counted
+  // against the cells route's entry cap.
+  const active = new Set(o.activeLabels.map((l) => l.trim()));
   return {
     cells: g.cells,
     baselineCellCount: g.cells.filter((c) => !c.custom).length,
     reviewedCells: g.reviewedCells,
-    valueLines: g.valueLines,
+    valueLines: onlyRooms(g.valueLines, active),
     valueCatalog: g.valueCatalog,
-    valueRecommended: g.valueRecommended,
+    valueRecommended: onlyRooms(g.valueRecommended, active),
+    removedDesigns: g.removedDesigns,
     ...(o.sameBase ? { worryPool: g.worryPool, worryOffered: g.worryOffered, worries: g.worries } : {}),
     ...(o.keepScope && g.stageRooms ? { stageRooms: pruneStageRooms(g.stageRooms, o.activeLabels) } : {}),
   };
 }
 
+/** A room-keyed record cut to the given rooms (labels compared trimmed). */
+function onlyRooms<V>(rec: Record<string, V> | undefined, rooms: Set<string>): Record<string, V> | undefined {
+  return rec ? Object.fromEntries(Object.entries(rec).filter(([k]) => rooms.has(k.trim()))) : rec;
+}
+
+/** The Value lines a cells request sends (2026-10-25): active rooms only,
+ * and only rooms with an entry - a room whose line never resolved (the
+ * map's "line picked at write") sends no key and the engine default
+ * applies; null stays reserved for the user's explicit "No Value cell". */
+function sentValueLines(g: GridState): Record<string, ValueLineUi | null> | undefined {
+  const cut = onlyRooms(g.valueLines, new Set(g.scenarios.map((s) => s.label.trim())));
+  return cut ? Object.fromEntries(Object.entries(cut).filter(([, v]) => v !== undefined)) : cut;
+}
+
 /** The design a cell measures - the post-write merge's identity. */
 function designKey(c: Pick<GridCellUi, "stage" | "situation" | "angle" | "concern">): string {
   return `${c.stage}|${c.situation ?? ""}|${c.angle}|${c.concern ?? ""}`;
+}
+
+/** A deleted engine question's identity (GridState.removedDesigns). */
+export function removedDesignKey(c: GridCellUi): string | null {
+  return c.custom || c.engineSeed == null ? null : `${designKey(c)}|${c.engineSeed.trim()}`;
+}
+
+/** Angles a custom cell can carry that name no rival. */
+const NON_RIVAL_ANGLES = new Set(["generic", "defensive", "open", "class"]);
+
+/** Whether a custom cell is a head-to-head against a rival no longer among
+ * `rivals` (the direct rivals the add-question picker offers). */
+export function customOffRoster(c: Pick<GridCellUi, "custom" | "angle">, rivals: string[]): boolean {
+  if (!c.custom || NON_RIVAL_ANGLES.has(c.angle)) return false;
+  const k = c.angle.trim().toLowerCase();
+  return !rivals.some((r) => r.trim().toLowerCase() === k);
 }
 
 /** Land a cells write on the grid (2026-10-24).
@@ -255,13 +304,24 @@ function designKey(c: Pick<GridCellUi, "stage" | "situation" | "angle" | "concer
  * engine text changed the composed cell wins. Prior cells with no match in
  * the served battery (removed rooms, re-keyed designs) drop; custom cells
  * re-append after their stage while the stage is kept and the room is
- * active. */
-export function mergeWrittenCells(g: GridState, served: Omit<GridCellUi, "phrasings">[]): GridState {
+ * active - and, for a custom head-to-head, while its rival is still among
+ * `rivals` (omit to skip that check). A served cell the user deleted
+ * (removedDesigns) stays deleted; deletions the write no longer serves are
+ * cleared. */
+export function mergeWrittenCells(g: GridState, served: Omit<GridCellUi, "phrasings">[], rivals?: string[]): GridState {
   const prev = new Map<string, GridCellUi>();
   for (const q of g.cells) {
     if (!q.custom && q.engineSeed != null) prev.set(`${designKey(q)}|${q.engineSeed.trim()}`, q);
   }
-  const composed: GridCellUi[] = served.map((c) => {
+  const removed = new Set(g.removedDesigns ?? []);
+  const stillRemoved = new Set<string>();
+  const kept = served.filter((c) => {
+    const k = `${designKey(c)}|${c.text.trim()}`;
+    if (!removed.has(k)) return true;
+    stillRemoved.add(k);
+    return false;
+  });
+  const composed: GridCellUi[] = kept.map((c) => {
     const k = `${designKey(c)}|${c.text.trim()}`;
     const p = prev.get(k);
     if (!p) return { ...c, uid: cellUid(), original: c.text, engineSeed: c.text, phrasings: [] };
@@ -282,7 +342,8 @@ export function mergeWrittenCells(g: GridState, served: Omit<GridCellUi, "phrasi
   const keptStages = new Set(effectiveKeptStages(g));
   const activeLabels = new Set(g.scenarios.map((sc) => sc.label));
   const customs = g.cells.filter(
-    (c) => c.custom && keptStages.has(c.stage) && (c.situation === null || activeLabels.has(c.situation))
+    (c) => c.custom && keptStages.has(c.stage) && (c.situation === null || activeLabels.has(c.situation)) &&
+      !(rivals && customOffRoster(c, rivals))
   );
   const cells = [...composed];
   for (const c of customs) {
@@ -294,7 +355,16 @@ export function mergeWrittenCells(g: GridState, served: Omit<GridCellUi, "phrasi
   // missing their prompts and the missing-fill writes only those - a full
   // rewrite would discard the kept sets' hand edits.
   const keepsSets = composed.some((c) => c.phrasings.some((p) => p.text.trim()));
-  return { ...g, step: keepsSets ? "phrasings" : "cells", baselineCellCount: composed.length, cells };
+  // The baseline counts deleted engine questions too: deleting ANY
+  // question frees a custom slot, and a deletion now stays deleted.
+  // Room-keyed Value entries of rooms no longer active go with the write.
+  const rooms = new Set([...activeLabels].map((l) => l.trim()));
+  return {
+    ...g, step: keepsSets ? "phrasings" : "cells", baselineCellCount: served.length, cells,
+    removedDesigns: stillRemoved.size > 0 ? [...stillRemoved] : undefined,
+    valueLines: onlyRooms(g.valueLines, rooms),
+    valueRecommended: onlyRooms(g.valueRecommended, rooms),
+  };
 }
 
 /** Concerns across a battery - the paraphrase guard. Built from the SAME
@@ -502,7 +572,65 @@ export interface GridState {
   /** The engine's pick per room, kept so the chooser can mark it
    * "recommended" after the user changes the line. */
   valueRecommended?: Record<string, string | null>;
+  /** Engine questions the user deleted (2026-10-25), as `design|engine
+   * text` (designKey + engineSeed): the post-write merge drops a served
+   * cell that matches, so a deletion survives every re-confirm. An entry
+   * the next write does not serve (the engine redrew that design's text,
+   * or a renamed room re-keyed it) is cleared there - the question is a
+   * new one by then. */
+  removedDesigns?: string[];
+  /** What the mask was last composed for (gridSig: the base read plus each
+   * active room's label and journey). Rows land in the grid when a
+   * recompose is SENT, so a recompose that failed leaves rows ahead of the
+   * mask - the scenarios confirm recomposes whenever this differs. Absent
+   * on older drafts (the label check alone applies). */
+  composedSig?: string;
   cells: GridCellUi[];
+}
+
+/** The mask's inputs as a comparable string - see GridState.composedSig.
+ * Field order is fixed by MODERATOR_FIELDS / JOURNEY_FIELDS, so two equal
+ * reads never differ by key order. */
+function maskSig(base: GridState["moderators"], rooms: { label: string; journey: Journey | null }[]): string {
+  return JSON.stringify([
+    MODERATOR_FIELDS.map((f) => String(base[f.key] ?? "")),
+    rooms.map((r) => [r.label.trim(), journeyFields(r.journey)]),
+  ]);
+}
+
+function journeyFields(j: Journey | null): string[] | null {
+  return j ? JOURNEY_FIELDS.map((f) => String(j[f.key as keyof Journey] ?? "")) : null;
+}
+
+/** A journey as compared against composedSig's room entries. */
+function journeySig(j: Journey | null): string {
+  return JSON.stringify(journeyFields(j));
+}
+
+/** The rooms the mask was last composed for (label -> journeySig), read
+ * back from composedSig; null when the grid carries no record. */
+function composedRooms(g: GridState | null): Map<string, string> | null {
+  if (!g?.composedSig) return null;
+  try {
+    const [, rooms] = JSON.parse(g.composedSig) as [unknown, [string, string[] | null][]];
+    return new Map(rooms.map(([label, j]) => [label, JSON.stringify(j)] as const));
+  } catch {
+    return null;
+  }
+}
+
+/** The grid's current mask inputs (active, labeled rooms). */
+function gridSig(g: GridState): string {
+  return maskSig(g.moderators, scenarioRows(g).filter((r) => r.on && r.label.trim()));
+}
+
+/** Whether the composed mask is behind the scenario table: an active label
+ * no stage column carries, or (when known) mask inputs that changed since
+ * the last successful compose. */
+export function composeStale(g: GridState): boolean {
+  const colLabels = new Set(g.stages.flatMap((s) => s.columns));
+  if (scenarioRows(g).some((r) => r.on && r.label.trim() && !colLabels.has(r.label.trim()))) return true;
+  return g.composedSig !== undefined && g.composedSig !== gridSig(g);
 }
 
 /** A Value cell's two ends (engine ValueLine, UI copy). */
@@ -626,6 +754,7 @@ export function scenarioRows(g: GridState): ScenarioRow[] {
  * as setup_decision. */
 export function buildSetupDecision(g: GridState): Record<string, unknown> {
   const rows = scenarioRows(g);
+  const activeRooms = new Set(g.scenarios.map((s) => s.label.trim()));
   const sameText = (a?: { label: string; description: string } | null, b?: { label: string; description: string } | null) =>
     !!a && !!b && a.label.trim() === b.label.trim() && a.description.trim() === b.description.trim();
   const roomHow = (r: ScenarioRow): string => {
@@ -660,9 +789,10 @@ export function buildSetupDecision(g: GridState): Record<string, unknown> {
       kept: g.keptStages,
       stageRooms: g.stageRooms ?? null,
     },
+    // Active rooms only: a removed room's entry is no decision.
     valueLines: {
-      recommended: g.valueRecommended ?? null,
-      decided: Object.fromEntries(Object.entries(g.valueLines ?? {}).map(([k, v]) => [k, v ? { line: v.line, counterpart: v.counterpart } : null])),
+      recommended: onlyRooms(g.valueRecommended, activeRooms) ?? null,
+      decided: Object.fromEntries(Object.entries(sentValueLines(g) ?? {}).map(([k, v]) => [k, v ? { line: v.line, counterpart: v.counterpart } : null])),
     },
     worries: g.worryPool
       ? {
@@ -856,6 +986,15 @@ export const TAG_INFO: Record<GridStage["tag"], { label: string; cls: string; bl
 
 /* ------------------------------- API calls ------------------------------ */
 
+/** The roster a request is built from. Calls take it explicitly when the
+ * caller holds a newer roster than the render that built the hook (a
+ * classify that landed mid-continuation - 2026-10-25). */
+export interface RosterArgs {
+  competitors: string[];
+  rosterRoles?: RosterRoles;
+  rosterClasses?: RosterClasses;
+}
+
 export interface GridSetupArgs {
   brand: string;
   category: string;
@@ -890,6 +1029,12 @@ export function useGridSetup(a: GridSetupArgs) {
   const cap = a.maxScenarios ?? MAX_SCENARIOS;
   /** The latest grid (see GridSetupArgs.getState). */
   const cur = (): GridState | null => (a.getState ? a.getState() : a.state);
+  /** The roster to build a request from: the caller's, else this render's. */
+  const rosterOf = (ro?: RosterArgs): RosterArgs =>
+    ro ?? { competitors: a.competitors, rosterRoles: a.rosterRoles, rosterClasses: a.rosterClasses };
+  /** Each compose takes a number; a result landing after a newer compose
+   * was sent is dropped (the newer one carries the rows as they are now). */
+  const composeSeq = useRef(0);
   /** Merge an operation's result into the latest grid and return what
    * landed - the functional-update pattern, with the result in hand. */
   function apply(fn: (g: GridState) => GridState): GridState | null {
@@ -941,11 +1086,14 @@ export function useGridSetup(a: GridSetupArgs) {
     preRebuild?: GridState["preRebuild"];
     /** undefined = carry; null = clear; a value = stash the brand view. */
     brandView?: GridState["brandView"];
-  }, forBrand = false): Promise<GridState | null> {
+  }, forBrand = false, ro?: RosterArgs): Promise<GridState | null> {
     // Cells are no longer a parameter (2026-10-24): every recompose carries
     // the WHOLE current battery - a renamed room is rebound on the grid
     // (rebindRooms) before this runs - and the next cells write keeps each
     // cell whose engine text is unchanged (mergeWrittenCells).
+    const seq = ++composeSeq.current;
+    const superseded = () => seq !== composeSeq.current;
+    const roster = rosterOf(ro);
     if (!edit?.silent) {
       a.setBusy(
         edit ? "Recomposing…" : forBrand ? `Rebuilding scenarios for ${a.brand}…` : "Reading your market…"
@@ -953,6 +1101,15 @@ export function useGridSetup(a: GridSetupArgs) {
     }
     a.setError(null);
     const activeRows = edit?.rows.filter((r) => r.on && r.label.trim()) ?? [];
+    // A view swap (Back to the category view / rebuild around the brand)
+    // replaces the whole table when it lands. Any other edited recompose
+    // puts its rows in the grid NOW (2026-10-25): text typed while it runs
+    // edits these rows, and the landing below merges only the server's
+    // journeys into them - it used to rebuild the table from this call's
+    // snapshot and revert whatever was typed during the wait.
+    const swapView = !!edit && (edit.preRebuild !== undefined || edit.brandView !== undefined);
+    const beforeSend = cur();
+    if (edit && !swapView) a.setState((prev) => (prev ? withScenarioRows(prev, edit.rows) : prev));
     const data = await post<{
       base: GridState["moderators"];
       scenarios: { label: string; description: string; circumstance?: string; journey: Journey | null }[];
@@ -967,10 +1124,10 @@ export function useGridSetup(a: GridSetupArgs) {
       ...(forBrand && !edit ? { forBrand: true } : {}),
       // Contest repair (contract audit v4): the fresh read swaps uncontested
       // core rooms for passing reserve rooms against this roster.
-      ...(!edit && a.competitors.length > 0
+      ...(!edit && roster.competitors.length > 0
         ? {
-            rivals: a.competitors.filter((c) => { const r = rosterRoleOf(c, a.rosterRoles); return r === "same_seat" || r === "bench"; }),
-            picks: angleRivals(a.competitors, a.rosterRoles),
+            rivals: roster.competitors.filter((c) => { const r = rosterRoleOf(c, roster.rosterRoles); return r === "same_seat" || r === "bench"; }),
+            picks: angleRivals(roster.competitors, roster.rosterRoles),
           }
         : {}),
       ...(edit && activeRows.length > 0
@@ -980,6 +1137,8 @@ export function useGridSetup(a: GridSetupArgs) {
           }
         : {}),
     });
+    // A newer compose owns the busy state and the landing.
+    if (superseded()) return data ? cur() : null;
     if (!data) {
       if (!edit?.silent) a.setBusy(null);
       return null;
@@ -1003,6 +1162,7 @@ export function useGridSetup(a: GridSetupArgs) {
         base: keptBase,
         scenarios: data.scenarios.map(({ label, description, circumstance, journey }) => ({ label, description, circumstance, journey })),
       });
+      if (superseded()) return masked ? cur() : null;
       a.setBusy(null);
       if (!masked) return null;
       const live = cur() ?? before;
@@ -1051,6 +1211,7 @@ export function useGridSetup(a: GridSetupArgs) {
         },
         rebuiltRows
       );
+      next.composedSig = gridSig(next);
       a.setState(next);
       return next;
     }
@@ -1078,24 +1239,41 @@ export function useGridSetup(a: GridSetupArgs) {
         },
         rowsFromSuggested(data.scenarios, cap)
       );
+      next.composedSig = gridSig(next);
       a.setState(next);
       return next;
     }
     const prevState = cur();
-    // Keep the user's table (ticks, custom rows, off rows); take the
-    // server's clamped journeys for the rows it saw (A4 enforcement).
-    const byLabel = new Map(data.scenarios.map((s) => [s.label, s.journey] as const));
-    const rows: ScenarioRow[] = edit.rows.map((r) =>
-      r.on && byLabel.has(r.label) ? { ...r, journey: byLabel.get(r.label) ?? null } : r
-    );
+    // Keep the user's table as it is NOW (ticks, custom rows, off rows, and
+    // any text typed during the wait); take the server's clamped journeys
+    // (A4 enforcement) for the rows it saw - unless the row's journey was
+    // changed since this was sent (that change has its own recompose).
+    const byLabel = new Map(data.scenarios.map((s) => [s.label.trim(), s.journey] as const));
+    const sentJourney = new Map(activeRows.map((r) => [r.label.trim(), r.journey] as const));
+    const liveRows = swapView || !prevState ? edit.rows : scenarioRows(prevState);
+    const rows: ScenarioRow[] = liveRows.map((r) => {
+      const k = r.label.trim();
+      if (!r.on || !byLabel.has(k)) return r;
+      if (!swapView && sentJourney.has(k) && !sameJourney(sentJourney.get(k), r.journey)) return r;
+      return { ...r, journey: byLabel.get(k) ?? null };
+    });
     const activeLabels = rows.filter((r) => r.on && r.label.trim()).map((r) => r.label.trim());
     const sameBase = !!prevState && sameRead(prevState.moderators, data.base);
-    const prevJourney = new Map((prevState?.scenarios ?? []).map((s) => [s.label.trim(), s.journey] as const));
+    // Against the rooms the mask was last COMPOSED for (rows land in the
+    // grid when a compose is sent, so the grid's own rooms may be ahead of
+    // it); older drafts without the record use the rooms as they were
+    // before this compose put its rows in.
+    const prevComposed = composedRooms(beforeSend);
+    const prevJourney = new Map((beforeSend?.scenarios ?? []).map((s) => [s.label.trim(), s.journey] as const));
     // The mask is unchanged except for removed rooms: same base, same
     // journeys, no room added (renames were rebound before this ran).
     const keepScope = sameBase && rows
       .filter((r) => r.on && r.label.trim())
-      .every((r) => prevJourney.has(r.label.trim()) && sameJourney(prevJourney.get(r.label.trim()), r.journey));
+      .every((r) =>
+        prevComposed
+          ? prevComposed.get(r.label.trim()) === journeySig(r.journey)
+          : prevJourney.has(r.label.trim()) && sameJourney(prevJourney.get(r.label.trim()), r.journey)
+      );
     const next: GridState = withScenarioRows(
       {
         ...(prevState ? carriedBattery(prevState, { sameBase, keepScope, activeLabels }) : { cells: [] }),
@@ -1118,6 +1296,9 @@ export function useGridSetup(a: GridSetupArgs) {
         // Advisory stage-adds ride through edits.
         journeyStageAdds: prevState?.journeyStageAdds,
         reviewedScenarios: prevState?.reviewedScenarios,
+        // The mask is what the server composed: the SENT rooms, with its
+        // journeys - rows typed or changed since show as stale.
+        composedSig: maskSig(data.base, activeRows.map((r) => ({ label: r.label, journey: byLabel.has(r.label.trim()) ? byLabel.get(r.label.trim()) ?? null : r.journey }))),
       },
       rows
     );
@@ -1311,7 +1492,19 @@ export function useGridSetup(a: GridSetupArgs) {
     if (j < 0) return;
     const swapped = patch(rows[j]);
     const nextRows = rows.map((r, k) => (k === j ? swapped : r));
-    const rebound = rebindRooms(st, [[rows[j].label, swapped.label]]);
+    const rebound0 = rebindRooms(st, [[rows[j].label, swapped.label]]);
+    // Same buyer, new wording (2026-10-25): the room's decided Value line
+    // follows the rename, but the engine's recommendation was made for the
+    // old wording - the record must not claim it for the new one.
+    const changed = swapped.label.trim() !== rows[j].label.trim() || swapped.description.trim() !== rows[j].description.trim();
+    const rebound: GridState = changed && rebound0.valueRecommended
+      ? {
+          ...rebound0,
+          valueRecommended: Object.fromEntries(
+            Object.entries(rebound0.valueRecommended).filter(([k]) => k.trim() !== swapped.label.trim())
+          ),
+        }
+      : rebound0;
     if (rows[j].on) {
       a.setState(rebound);
       await compose({ base: st.moderators, rows: nextRows });
@@ -1403,7 +1596,11 @@ export function useGridSetup(a: GridSetupArgs) {
       const merged: Record<string, ValueLineUi | null> = { ...(g.valueLines ?? {}) };
       const recommended: Record<string, string | null> = { ...(g.valueRecommended ?? {}) };
       for (const sc of g.scenarios) {
-        if (!asked.has(sc.label)) continue;
+        // A room the read returned no entry for is UNRESOLVED, not "no
+        // Value cell" (2026-10-25): it stays undefined - the map shows
+        // "line picked at write", the cells request sends no key, and the
+        // engine default applies. Only a returned null means no line.
+        if (!asked.has(sc.label) || !(sc.label in lines)) continue;
         if (merged[sc.label] === undefined) merged[sc.label] = lines[sc.label] ?? null;
         if (!(sc.label in recommended)) recommended[sc.label] = lines[sc.label]?.line ?? null;
       }
@@ -1489,25 +1686,36 @@ export function useGridSetup(a: GridSetupArgs) {
         stageKeys: effectiveKeptStages(st),
         stageRooms: st.stageRooms,
         worries: st.worries,
-        valueLines: st.valueLines,
+        valueLines: sentValueLines(st),
         retryExhausted: true,
       }
     );
     a.setBusy(null);
     if (!data) return null;
+    // Custom head-to-heads whose rival has left the roster are dropped by
+    // the merge (their angle names no rival the battery measures any more);
+    // the notice names them so the text isn't lost silently.
+    const rivals = sameSeatOf(a.competitors, a.rosterRoles);
+    const offRoster = (cur() ?? st).cells.filter((c) => c.text.trim() && customOffRoster(c, rivals));
+    const notes: string[] = [];
     // Exhausted plan rows (2026-10-02): the battery shipped without them -
     // say so in the slot the step change KEEPS (goTo wipes setError), with
     // an action that works: the confirm click retries exhausted units.
     if (data.missing && data.missing.length > 0)
-      (a.setNotice ?? a.setError)(
+      notes.push(
         `${data.missing.length} planned question${data.missing.length === 1 ? "" : "s"} could not be written - the rest are ready. Go back to the coverage step and confirm again to retry the missing one${data.missing.length === 1 ? "" : "s"}.`
       );
+    if (offRoster.length > 0)
+      notes.push(
+        `Removed ${offRoster.length} question${offRoster.length === 1 ? "" : "s"} of your own about a rival no longer on your roster: ${offRoster.map((c) => `"${c.text.trim()}"`).join("; ")}`
+      );
+    if (notes.length > 0) (a.setNotice ?? a.setError)(notes.join(" "));
     // A cell whose ENGINE text is unchanged keeps the user's version of it
     // (2026-10-07, Tyler): hand edits, redraws, paraphrases, alternates and
     // flags survive a re-confirm that regenerated only other cells (a Value
     // line change redraws one pricing cell, not the battery). See
     // mergeWrittenCells for the invariant this rests on.
-    return apply((g) => mergeWrittenCells(g, data.cells));
+    return apply((g) => mergeWrittenCells(g, data.cells, rivals));
   }
 
   /** Gate 3: paraphrase sets, in small batches so no request runs long.
@@ -1680,6 +1888,16 @@ export function useGridSetup(a: GridSetupArgs) {
     }));
   }
 
+  /** The cell's user wordings, with its live text added when that text is
+   * not the last machine wording (`original`; a cell with no machine
+   * wording yet - a hand-added question - counts every text as the
+   * user's). Absent when there are none. */
+  function withUserEdit(c: GridCellUi): string[] | undefined {
+    const out = new Set(c.userAlts ?? []);
+    if (c.text.trim() && c.text.trim() !== (c.original ?? "").trim()) out.add(c.text);
+    return out.size > 0 ? [...out] : undefined;
+  }
+
   /** The cell's offered-prompt history, capturing a live manual edit into
    * its current slot so cycling never loses the user's wording. */
   function cellHistory(c: GridCellUi): { alts: string[]; idx: number } {
@@ -1750,6 +1968,10 @@ export function useGridSetup(a: GridSetupArgs) {
           if (q.uid !== uid) return q;
           const { alts } = cellHistory(q);
           const nextAlts = [...alts, data.text];
+          // cellHistory folds a live hand edit into the history; it is the
+          // USER's wording, so cycling back to it must keep it under review
+          // rather than make it the machine baseline (2026-10-25).
+          const userAlts = withUserEdit(q);
           // The old set is banked under the old wording, not thrown away;
           // the freshly generated set (when the write already ran) wins
           // over whatever the bank holds for the new text.
@@ -1767,6 +1989,7 @@ export function useGridSetup(a: GridSetupArgs) {
             spec: data.spec ?? q.spec,
             alts: nextAlts,
             altIdx: nextAlts.length - 1,
+            userAlts,
             regens: near ? q.regens : (q.regens ?? 0) + 1,
             nears: near ? (q.nears ?? 0) + 1 : q.nears,
             phrasingsByText: swap.phrasingsByText,
@@ -1882,9 +2105,11 @@ export function useGridSetup(a: GridSetupArgs) {
     const next = (idx + dir + alts.length) % alts.length;
     // Remember which banked wordings are the user's own: cycling back to
     // one keeps it under review (original unchanged) instead of promoting
-    // it to the machine baseline unchecked.
-    const userAlts = new Set(c.userAlts ?? []);
-    if (c.text.trim() && c.original != null && c.text !== c.original) userAlts.add(c.text);
+    // it to the machine baseline unchecked. The live text is the user's
+    // whenever it is not the last machine wording - including on a cell
+    // with no machine wording at all (it used to need one, so a hand-added
+    // question's text, redrawn and cycled back to, became the baseline).
+    const userAlts = new Set(withUserEdit(c) ?? []);
     const cycledToUser = userAlts.has(alts[next]);
     apply((g) => ({
       ...g,
@@ -1896,6 +2121,8 @@ export function useGridSetup(a: GridSetupArgs) {
           // cycling back is free.
           ? {
               ...q, text: alts[next],
+              // A user wording keeps the machine baseline it had, so it
+              // still reads as edited (an undefined baseline stays so).
               original: cycledToUser ? q.original : alts[next],
               // The flag described the wording being cycled away from.
               seedFlags: undefined,
@@ -1924,20 +2151,21 @@ export function useGridSetup(a: GridSetupArgs) {
     }).catch(() => {});
   }
 
-  function warmCells(fresh?: GridState | null): void {
+  function warmCells(fresh?: GridState | null, ro?: RosterArgs): void {
     const st = fresh ?? cur();
     if (!st || st.keptStages.length === 0 || st.scenarios.length === 0) return;
     if (st.scenarios.some((s) => !s.label.trim())) return;
+    const roster = rosterOf(ro);
     void fetch("/api/setup/grid/cells", {
       method: "POST",
       headers: { "Content-Type": "application/json", ...(a.setupId ? { "x-setup-id": a.setupId } : {}) },
       body: JSON.stringify({
-        brand: a.brand, category: a.category, competitors: a.competitors, rosterRoles: a.rosterRoles,
-        rosterClasses: a.rosterClasses,
+        brand: a.brand, category: a.category, competitors: roster.competitors, rosterRoles: roster.rosterRoles,
+        rosterClasses: roster.rosterClasses,
         audience: a.audience || undefined,
         base: st.moderators, scenarios: st.scenarios, stageKeys: effectiveKeptStages(st), stageRooms: st.stageRooms,
         worries: st.worries,
-        valueLines: st.valueLines,
+        valueLines: sentValueLines(st),
         warm: true,
       }),
     })
@@ -1948,18 +2176,21 @@ export function useGridSetup(a: GridSetupArgs) {
         // review window on top of the prompts-review window.
         const data = (await r.json().catch(() => null)) as { cells?: GridCellUi[] } | null;
         if (!data?.cells?.length) return;
-        warmPhrasings({ ...st, cells: data.cells.map((c) => ({ ...c, phrasings: [] })) });
+        warmPhrasings({ ...st, cells: data.cells.map((c) => ({ ...c, phrasings: [] })) }, roster);
       })
       .catch(() => {});
   }
 
-  function warmPhrasings(fresh?: GridState | null): void {
+  function warmPhrasings(fresh?: GridState | null, ro?: RosterArgs): void {
     const st = fresh ?? cur();
     if (!st) return;
-    const cells = st.cells.filter((c) => c.text.trim());
+    const roster = rosterOf(ro);
+    // Only the questions still without a set (2026-10-25): a cell that has
+    // one is never rewritten by the missing-fill, so warming it again spent
+    // a paraphrase generation the write would never read (a fresh cell set
+    // after a draw, say, re-warmed the whole battery).
+    const cells = st.cells.filter((c) => c.text.trim() && !c.phrasings.some((p) => p.text.trim()));
     if (cells.length === 0) return;
-    // Once every question has its set, there is nothing left to warm.
-    if (cells.every((c) => c.phrasings.some((p) => p.text.trim()))) return;
     for (const layer of LAYERS) {
       const idx = cells.map((c, i) => (c.layer === layer ? i : -1)).filter((i) => i >= 0);
       for (let k = 0; k < idx.length; k += PHRASING_BATCH) {
@@ -1968,7 +2199,7 @@ export function useGridSetup(a: GridSetupArgs) {
           method: "POST",
           headers: { "Content-Type": "application/json", ...(a.setupId ? { "x-setup-id": a.setupId } : {}) },
           body: JSON.stringify({
-            brand: a.brand, category: a.category, competitors: a.competitors, rosterRoles: a.rosterRoles,
+            brand: a.brand, category: a.category, competitors: roster.competitors, rosterRoles: roster.rosterRoles,
             audience: a.audience || undefined,
             base: st.moderators, scenarios: st.scenarios,
             cells: slice.map((i) => ({
@@ -2090,10 +2321,14 @@ interface RoomCheckUi {
 export function ScenariosGate({
   state, setState, onRecompose, onRecomposeBase, onSuggestScenario, onAddReserve, onNearScenario, onRewordScenario, onWarmReview, busy,
   maxScenarios = MAX_SCENARIOS, readDelta, fitBrand, fitCategory, onRebuildForBrand,
-  onBackToCategory, rivals, picks, setupId,
+  onBackToCategory, rivals, picks, setupId, locked = false,
 }: {
   state: GridState;
   setState: (s: GridState) => void;
+  /** The confirm's quality check is running (2026-10-25): room wording,
+   * additions and deletions are frozen, so nothing changes after the check
+   * read it and goes forward unchecked. */
+  locked?: boolean;
   /** The tracker's DIRECT rivals (same_seat + bench) - the contest check
    * asks which of them compete in each room (init decision 4). Omit to
    * disable the chips. */
@@ -2626,6 +2861,7 @@ export function ScenariosGate({
               maxLength={60}
               value={sc.label}
               placeholder="label"
+              readOnly={locked}
               onChange={(e) => onLabelChange(i, e.target.value)}
               onFocus={() => { setEditingRoom(true); onLabelFocus(i); }}
               onBlur={() => {
@@ -2640,6 +2876,7 @@ export function ScenariosGate({
             rows={1}
             maxLength={240}
             value={sc.description}
+            readOnly={locked}
             placeholder="one sentence describing the circumstance"
             onChange={(e) => updateRow(i, { description: e.target.value, circumstance: undefined })}
             onFocus={() => setEditingRoom(true)}
@@ -2803,13 +3040,14 @@ export function ScenariosGate({
               <button
                 type="button"
                 aria-label="delete scenario"
+                disabled={locked}
                 onClick={() => {
                   // Row indexes shift: the per-field label refs restart.
                   focusLabel.current = {};
                   boundLabel.current = {};
                   setRows(rows.filter((_, j) => j !== i), true);
                 }}
-                className="ml-auto text-ink-3 hover:text-danger text-[15px] leading-none"
+                className="ml-auto text-ink-3 hover:text-danger text-[15px] leading-none disabled:opacity-40"
               >
                 ×
               </button>
@@ -2829,8 +3067,9 @@ export function ScenariosGate({
       <div className="flex flex-wrap items-center gap-4">
         <button
           type="button"
+          disabled={locked}
           onClick={() => setRows([...rows, { label: "", description: "", journey: null, suggested: false, on: active.length < cap }])}
-          className="text-[13px] font-medium text-primary hover:opacity-80"
+          className="text-[13px] font-medium text-primary hover:opacity-80 disabled:opacity-50"
         >
           + Add your own
         </button>
@@ -2866,7 +3105,8 @@ export function ScenariosGate({
             boundLabel.current = {};
             setRows(nextRows, true, rebindRooms(state, renames));
           }}
-          className="text-[13px] font-medium text-ink-3 hover:text-ink"
+          disabled={locked}
+          className="text-[13px] font-medium text-ink-3 hover:text-ink disabled:opacity-50"
         >
           Reset to suggested
         </button>
@@ -3661,10 +3901,14 @@ export function WorriesGate({
 
 export function CellsGate({
   state, setState, brandNames, onRegenerate, onNearCell, onSuggestCell, onAddOwn, onCycle, onWarmReview,
-  customUsed, customAllowance, busy,
+  customUsed, customAllowance, busy, locked = false,
 }: {
   state: GridState;
   setState: (s: GridState) => void;
+  /** The confirm's quality check is running (2026-10-25): prompt text and
+   * deletions are frozen, so nothing changes after the check read it and
+   * ships unchecked. */
+  locked?: boolean;
   brandNames: string[];
   /** Draw a genuinely new prompt for cell i (max MAX_REGENS). */
   onRegenerate: (i: number) => Promise<void> | void;
@@ -3872,10 +4116,18 @@ export function CellsGate({
                             <button
                               type="button"
                               aria-label="remove cell"
-                              onClick={() =>
-                                setState({ ...state, cells: state.cells.filter((_, j) => j !== c.i) })
-                              }
-                              className="ml-auto text-ink-3 hover:text-danger text-[15px] leading-none"
+                              disabled={locked}
+                              onClick={() => {
+                                // An engine question's deletion is recorded,
+                                // so the next cells write doesn't bring it back.
+                                const rk = removedDesignKey(state.cells[c.i]);
+                                setState({
+                                  ...state,
+                                  cells: state.cells.filter((_, j) => j !== c.i),
+                                  ...(rk ? { removedDesigns: [...new Set([...(state.removedDesigns ?? []), rk])] } : {}),
+                                });
+                              }}
+                              className="ml-auto text-ink-3 hover:text-danger text-[15px] leading-none disabled:opacity-40"
                             >
                               ×
                             </button>
@@ -3884,7 +4136,7 @@ export function CellsGate({
                             className="input w-full resize-none field-sizing-content text-sm"
                             rows={1}
                             value={c.text}
-                            readOnly={pendingOf(c.uid) !== null}
+                            readOnly={locked || pendingOf(c.uid) !== null}
                             ref={(el) => {
                               if (el && c.custom && c.text === "" && c.uid && !focusedOnce.has(c.uid)) {
                                 focusedOnce.add(c.uid);
@@ -4009,6 +4261,7 @@ export function CellsGate({
                                     className="input w-full resize-none field-sizing-content text-sm"
                                     rows={1}
                                     value={ph.text}
+                                    readOnly={locked}
                                     onChange={(e) =>
                                       setState({
                                         ...state,
@@ -4027,6 +4280,7 @@ export function CellsGate({
                                   <button
                                     type="button"
                                     aria-label="remove prompt"
+                                    disabled={locked}
                                     onClick={() =>
                                       setState({
                                         ...state,
@@ -4035,7 +4289,7 @@ export function CellsGate({
                                         ),
                                       })
                                     }
-                                    className="text-ink-3 hover:text-danger text-lg leading-none px-1"
+                                    className="text-ink-3 hover:text-danger text-lg leading-none px-1 disabled:opacity-40"
                                   >
                                     ×
                                   </button>
@@ -4043,7 +4297,7 @@ export function CellsGate({
                               ))}
                               <button
                                 type="button"
-                                disabled={countOf(c) >= phrasingTarget(c.stage)}
+                                disabled={locked || countOf(c) >= phrasingTarget(c.stage)}
                                 title={countOf(c) >= phrasingTarget(c.stage) ? `The set is full at ${phrasingTarget(c.stage)} - remove one to add your own` : undefined}
                                 onClick={() =>
                                   setState({

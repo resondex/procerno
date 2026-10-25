@@ -34,14 +34,16 @@ const Body = z.object({
    * Absent = every competitor same_seat (the untyped behavior). */
   rosterRoles: z
     .record(z.string().max(80), z.enum(ROSTER_ROLE_VALUES))
-    .refine((r) => Object.keys(r).length <= 24, "too many roster roles")
+    // 48: drafts saved before the client pruned removed competitors carry stale roles.
+    .refine((r) => Object.keys(r).length <= 48, "too many roster roles")
     .optional(),
   /** Class-angle cells (2026-10-01): upstream brand -> buyer class phrase
    * ("a Visa card"). Only upstream entries with a phrase earn a class
    * cell. Absent = no class cells (byte-identical behavior). */
   rosterClasses: z
     .record(z.string().max(80), z.string().trim().max(60))
-    .refine((r) => Object.keys(r).length <= 24, "too many roster classes")
+    // 48: same stale-draft allowance as rosterRoles.
+    .refine((r) => Object.keys(r).length <= 48, "too many roster classes")
     .optional(),
   /** Confirmed worry picks (the worries module, 2026-10-01): one invariant
    * doubt cell per pick. Absent = the legacy concern-plan zip. */

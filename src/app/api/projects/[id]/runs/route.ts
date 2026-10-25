@@ -7,6 +7,7 @@ import { apiKeyConfigured, currentEngineIds, engineAvailable, ENGINES } from "@/
 import { driveAndChain, runInBackground } from "@/lib/engine/runner";
 import { batchableEngine, submitRunBatches } from "@/lib/engine/batch";
 import { planRunSurfaces } from "@/lib/engine/surfaces";
+import { claimWriteLease, editSetupLeaseKey, releaseWriteLease } from "../../instrument_write";
 
 // Vercel: runs execute as a chain of budgeted chunks — each invocation
 // processes what fits under maxDuration, then hands off via /continue.
@@ -50,15 +51,6 @@ export async function POST(
       { status: 400 }
     );
   }
-  // One run at a time per tracker: a double-click or second tab must not
-  // start a second paid run while one is already in flight.
-  const existing = await store.listRuns(id);
-  if (existing.some((r) => r.status === "pending" || r.status === "running" || r.status === "collected")) {
-    return NextResponse.json(
-      { error: "A run is already in progress for this tracker" },
-      { status: 409 }
-    );
-  }
   // Retired engine ids (a tracker configured before an engine refresh)
   // collect on their successors.
   const requested = currentEngineIds(parsed.data.models ?? [parsed.data.model]);
@@ -90,15 +82,42 @@ export async function POST(
   const paidPlan = auth.userId ? await store.getPlan(auth.userId) : "free";
   const pipeline =
     paidPlan === "enterprise" && models.some(batchableEngine) ? "batch" : "live";
-  const run = await store.createRun({
-    projectId: id,
-    model: models[0],
-    models,
-    repeats: parsed.data.repeats,
-    pipeline,
-    // Manual runs obey the same monthly worries rule as scheduled ones.
-    surfaces: await planRunSurfaces(id),
-  });
+  // The edit-setup lease spans the in-progress check and createRun: a
+  // setup save holds it from its own run check through replaceInstrument,
+  // so a run can never start against an instrument being replaced (and a
+  // save that claims after us sees this run and refuses). A held lease is
+  // a save in flight - refuse with retry wording.
+  const leaseKey = editSetupLeaseKey(id);
+  const lease = await claimWriteLease(leaseKey);
+  if (!lease) {
+    return NextResponse.json(
+      { error: "this tracker's setup is being saved - try the run again in a moment" },
+      { status: 409 }
+    );
+  }
+  let run;
+  try {
+    // One run at a time per tracker: a double-click or second tab must not
+    // start a second paid run while one is already in flight.
+    const existing = await store.listRuns(id);
+    if (existing.some((r) => r.status === "pending" || r.status === "running" || r.status === "collected")) {
+      return NextResponse.json(
+        { error: "A run is already in progress for this tracker" },
+        { status: 409 }
+      );
+    }
+    run = await store.createRun({
+      projectId: id,
+      model: models[0],
+      models,
+      repeats: parsed.data.repeats,
+      pipeline,
+      // Manual runs obey the same monthly worries rule as scheduled ones.
+      surfaces: await planRunSurfaces(id),
+    });
+  } finally {
+    await releaseWriteLease(leaseKey, lease);
+  }
   if (pipeline === "batch") {
     try {
       await submitRunBatches(run.id);

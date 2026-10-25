@@ -6,6 +6,7 @@ import { apiKeyConfigured, currentEngineIds } from "@/lib/engine/providers";
 import { continueRun, findStalledRuns, runInBackground } from "@/lib/engine/runner";
 import { batchableEngine, hasOpenBatches, pollRunBatches, submitRunBatches } from "@/lib/engine/batch";
 import { planRunSurfaces } from "@/lib/engine/surfaces";
+import { claimWriteLease, editSetupLeaseKey, releaseWriteLease } from "../projects/instrument_write";
 
 export const maxDuration = 300;
 
@@ -84,14 +85,30 @@ export async function GET(req: Request) {
     // Scheduled runs take the batch pipeline whenever any engine supports
     // it - a scheduled job trades latency for the 50% collection discount.
     const pipeline = engineSet.some(batchableEngine) ? "batch" : "live";
-    const run = await store.createRun({
-      projectId: project.id,
-      model: engineSet[0],
-      models: engineSet,
-      repeats: CRON_REPEATS,
-      pipeline,
-      surfaces: await planRunSurfaces(project.id),
-    });
+    // Same edit-setup lease as the manual runs POST: a scheduled zero-run
+    // tracker must not start collecting while its setup save is replacing
+    // the instrument. A held lease skips the tracker until the next tick.
+    const leaseKey = editSetupLeaseKey(project.id);
+    const lease = await claimWriteLease(leaseKey);
+    if (!lease) continue;
+    let run;
+    try {
+      // Re-check inside the lease: the listRuns above predates it.
+      const fresh = await store.listRuns(project.id);
+      if (fresh.some((r) => r.status === "pending" || r.status === "running" || r.status === "collected")) {
+        continue;
+      }
+      run = await store.createRun({
+        projectId: project.id,
+        model: engineSet[0],
+        models: engineSet,
+        repeats: CRON_REPEATS,
+        pipeline,
+        surfaces: await planRunSurfaces(project.id),
+      });
+    } finally {
+      await releaseWriteLease(leaseKey, lease);
+    }
     if (pipeline === "batch") {
       try {
         await submitRunBatches(run.id);

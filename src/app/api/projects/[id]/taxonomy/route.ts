@@ -65,7 +65,7 @@ export async function POST(
   const { id } = await params;
   const auth = await getAuth();
   if (!auth) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
-  const project = await requireProject(id, auth);
+  const project = await requireProject(id, auth, { write: true });
   if (project instanceof NextResponse) return project;
   const parsed = decisionSchema.safeParse(await req.json().catch(() => null));
   if (!parsed.success) {
@@ -117,7 +117,7 @@ export async function DELETE(
   const { id } = await params;
   const auth = await getAuth();
   if (!auth) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
-  const project = await requireProject(id, auth);
+  const project = await requireProject(id, auth, { write: true });
   if (project instanceof NextResponse) return project;
   if (project.dictionary_status === "confirmed") {
     return NextResponse.json(

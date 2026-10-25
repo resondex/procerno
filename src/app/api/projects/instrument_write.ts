@@ -129,3 +129,12 @@ export async function releaseWriteLease(key: string, token: string): Promise<voi
   // Only the holder releases (CAS on its own token).
   await store.cacheClaim(key, token, LEASE_RELEASED, WRITE_LEASE_MS).catch(() => false);
 }
+
+/** The per-tracker edit-setup lease key. The setup PUT holds it across its
+ * run check and replaceInstrument; anything that CREATES a run (manual
+ * runs POST, the cron) claims the same key around its own run check and
+ * createRun, so a run can never start between the save's check and its
+ * write - whichever side claims second sees the other's result. */
+export function editSetupLeaseKey(projectId: string): string {
+  return `edit_setup:${projectId}`;
+}

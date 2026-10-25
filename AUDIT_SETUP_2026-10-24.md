@@ -101,3 +101,27 @@ Severity: S1 = security, data loss, or measurement shipped unchecked; S2 = real 
 3. Client: make the scenario-label blur recompose fire only on an actual change (S1.3); fix the `q.original` merge key for redrawn/cycled/accepted cells.
 4. Checker: real-word + category filter on multi-word name parts (S1.4) and the r15 guards in `namesRequiredBrand`.
 5. Routes: raise/drop the hint caps in `cell_review` and `stage_rooms` (or stop sending the hint and read it server-side from `stageLibrary`); make `value_lines` failures non-200 or treat missing keys as unknown.
+
+---
+
+# Re-audit 2026-10-25: verification of the fix round, and round 2
+
+Four fresh adversarial passes re-traced every finding above against the fixed code and read the full diff for regressions. Verdict on the originals: all four S1s genuinely closed; most S2s closed; a handful partial. The fix round also INTRODUCED one S1 and several S2s, all fixed the same day in round 2 (commits after db3ccb8). Verified after round 2: full tsc clean, checker fixture sections 1-16 pass (16 = round-2 cases), serve harness ALL PASS (incl. the race, provisional-set, unreviewed-unit, tries-carry and stakes-throw cases), lint clean.
+
+## Round-2 fixes (regressions from the first fix round, plus near-misses it exposed)
+
+- **S1 (new): share-link viewers could drive and finalize runs** - the canAccessProject rewrite opened /continue and /finalize; a share viewer could finalize a held uncoded run (spend + wrongly `complete`). Those two, plus the pre-existing same-class gaps (taxonomy POST/DELETE, dictionary/confirm, category_reach), now require write-level access; cron-secret path unchanged; share dashboards unaffected.
+- **S2: must-name regressions from the distinctive-word guard** - "Jira or Teams" no longer satisfied Microsoft Teams, "EY" no longer satisfied Ernst & Young (EY). Now: an everyday label word satisfies when CAPITALIZED anywhere (lowercase still refused), and an all-caps parenthetical acronym whose letters are the base name's initials counts on both sides. Known cost, accepted: a sentence-capitalized "Bank" satisfies U.S. Bank on the tolerant side.
+- **S2: the term scrub hid real target leaks** ("Which Pixel size should I get") - a collocation hit on the forbidden spec path now goes to the brand judge as pending (unjudged = named) instead of a silent scrub; the legacy spec-less path keeps the scrub (no judge plumbing there).
+- **S2: passes-claim race** - a unit finished while another request's passes run was live could stay battery-unjudged for the rules era; after waiting out a claim, a request now re-checks its own units' stamps and re-runs once if any is missing.
+- **S2: provisional paraphrase sets reached the client as final** - they are now excluded from the response (the client's refill path re-requests; finish-in-place completes them). During a checker outage those cells come back empty instead of full-but-unchecked.
+- **S2: edits typed during "Checking your prompts..." could ship unchecked** - the gate being checked is now frozen (read-only fields, disabled remove/add) for the check's duration; a reviewed prompt that changed anyway blocks the proceed with a confirm-again error instead of slipping through.
+- **S2: edit-setup still reverted hand-edited seeds on re-confirm** - draft cells now get engineSeed from the record's offered seed (plus humanize-folded record lookups and provenance-aware room matching), so the client merge holds through edit-setup.
+- **Other round-2 items**: stakes-judge outage now throws (compose 502-retry) instead of caching a refusal for 183 days; a never-reviewed provisional unit is reviewed on its finish pass; regenerateCell no longer accepts or caches unchecked design verdicts; claim markers carry tries; the phrasings budget clock starts before the alias read; a lost phrasings claim waits for the winner instead of returning empty; a room missing from the sent valueLines map gets the engine default (null stays "No Value cell"); pre-first-save wizard spend is tagged (attach-time ownership stays the security boundary); decision-record writes at create are advisory and can't delete a written tracker; runs POST claims the edit-setup lease; rosterRoles caps 48 + client pruning; removed rooms' value entries pruned; deleted engine questions stay deleted (removedDesigns); pick changes warn before redrawing an edited battery; cycleCell no longer launders a user edit past review; sibilant plurals in categorySpanIn; legacy base reads are cleaned to pass validation. SEED_RULES r29 -> r30.
+
+## Still open after round 2 (recorded, deliberate)
+
+- dictionary/suggest POST stays read-level: a share viewer can trigger a cached-miss model call (boards are fully pre-warmed by contract, so normally zero); closing it needs a cache-only mode in dict_suggest.
+- The ss9/r16 objections structure property ("fact question" no longer acceptable) is unmeasured against a real paraphrase roll - watch the first p32 roll for over-culling of "does it really..." doubt paraphrases.
+- key()'s ASCII folding (Nestle/L'Oreal/AT&T shapes), the maker-word must-name gap, mention_filter's "+" tokenizer - each needs its own decision/calibration round.
+- Pre-existing, found while tracing: coverage/worry changes made AFTER a cells write don't invalidate the battery (the rail can reach Engines with decisions never applied); narrow pre-fix race where a delayed request re-runs the passes from stale memory after another's completion; "2026,2027" comma-list year edge; edit-mode spend untagged; roster roles still draft-only.
