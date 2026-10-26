@@ -125,3 +125,20 @@ Four fresh adversarial passes re-traced every finding above against the fixed co
 - The ss9/r16 objections structure property ("fact question" no longer acceptable) is unmeasured against a real paraphrase roll - watch the first p32 roll for over-culling of "does it really..." doubt paraphrases.
 - key()'s ASCII folding (Nestle/L'Oreal/AT&T shapes), the maker-word must-name gap, mention_filter's "+" tokenizer - each needs its own decision/calibration round.
 - Pre-existing, found while tracing: coverage/worry changes made AFTER a cells write don't invalidate the battery (the rail can reach Engines with decisions never applied); narrow pre-fix race where a delayed request re-runs the passes from stale memory after another's completion; "2026,2027" comma-list year edge; edit-mode spend untagged; roster roles still draft-only.
+
+---
+
+# Live wizard walk 2026-10-26: the fixed flows, clicked through
+
+Fresh Doritos Buyer Landscape on the `procerno-local-sqlite` config (local store, auth off, RUN_COLLECT_ONLY) - real engine spend, zero prod exposure. **Total $0.66** (local ledger; structure checks $0.29, design checks $0.12, cells $0.09, the rest under 4 cents each). Zero console errors, zero server errors, zero route 400s. Stopped before "Create tracker & run" (collection spend not in scope).
+
+Verified live:
+- **Unchanged label blur fires no recompose** (network-verified twice: zero new requests). A CHANGED label recomposes, and text typed into the description DURING the recompose survives (round-2 fix).
+- **The confirm freeze holds**: text typed during "checking your scenarios" never landed; the scenario review then correctly flagged the typed sentence as a mixed room (hosting circumstance) and offered the suggested edit - accepted, label kept, description swapped.
+- **Worries gate**: habitual market offered every worry at the customer-leaving stance; the overlap chip fired on a real pair (salt vs flavor).
+- **The engineSeed merge, the headline fix**: hand-edited a criteria seed, redrew another cell (cycle counter 2/2), went back to coverage, set one room to No Value cell, re-confirmed - question count 38 -> 37 (only the Value cell dropped), the edited seed AND the redrawn cell survived with history intact. A scenarios round-trip with an unchanged blur also left the battery untouched.
+- **Warm keys match write keys**: at "write the prompts", ~35 of 37 cells served instantly from the coverage-window pre-warm; only the 2 user-changed cells topped up. 364 prompts across 37 questions.
+- **cell_review at confirm**: four calls, all 200 (the hint caps hold - this check 400'd silently before the fix round); edits passed and the wizard reached Engines & first run (364 x 6 = 2,184 answers quoted).
+- **Edit-setup opens instantly** (49ms page render; the pre-fix cold market read was ~2 min). The local store has no landscape tracker, so the full edit-setup rebuild (rooms/value/seed provenance from setup_decision) remains verified by code only - the first real open on one of the five prod trackers is the remaining check, best done by Tyler (open and look; the PUT only fires at the engines-step save).
+
+One finding, driver error not a bug: nothing. The walk surfaced no new defects.
