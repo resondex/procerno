@@ -142,3 +142,5 @@ Verified live:
 - **Edit-setup opens instantly** (49ms page render; the pre-fix cold market read was ~2 min). The local store has no landscape tracker, so the full edit-setup rebuild (rooms/value/seed provenance from setup_decision) remains verified by code only - the first real open on one of the five prod trackers is the remaining check, best done by Tyler (open and look; the PUT only fires at the engines-step save).
 
 One finding, driver error not a bug: nothing. The walk surfaced no new defects.
+
+Addendum 2026-10-26: Tyler opened edit-setup on a prod tracker and confirmed the rebuild looks right from a click-through. Every item from the audit arc is now either fixed-and-verified or recorded above as a deliberate residual.
