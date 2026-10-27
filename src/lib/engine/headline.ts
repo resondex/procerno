@@ -90,7 +90,7 @@ function topCounts(m: Map<string, number>, limit = 12): NamedCount[] {
     .map(([name, n]) => ({ name, n }));
 }
 
-function roleOf(
+export function roleOf(
   key: string,
   targetKey: string,
   entry: DictionaryEntry | null,

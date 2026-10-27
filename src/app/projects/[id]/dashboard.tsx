@@ -6,6 +6,7 @@ import TrendChart from "./trend_chart";
 import RunResults from "./run_results";
 import HeadlineSection from "./headline_view";
 import HeadToHeadSection from "./head_to_head_view";
+import AlternativesSection from "./alternatives_view";
 import TaxonomyReview from "./taxonomy_review";
 import IdentifyTab, { type Suggestion } from "./identify_tab";
 import ParentsTab from "./parents_tab";
@@ -604,6 +605,7 @@ export default function ProjectDashboard({
 
       {headlineRun && <HeadlineSection key={`${headlineRun.id}:${dictVersion}`} runId={headlineRun.id} />}
       {headlineRun && <HeadToHeadSection key={`h2h:${headlineRun.id}:${dictVersion}`} runId={headlineRun.id} />}
+      {headlineRun && <AlternativesSection key={`alt:${headlineRun.id}:${dictVersion}`} runId={headlineRun.id} />}
 
       {shownRun ? (
         <>

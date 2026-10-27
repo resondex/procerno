@@ -1138,3 +1138,17 @@ Fixture read (Opus reference labels; target mentioned / chosen / share of decide
 - Cache key `head_to_head:hh1:<run>:...` (same shape as the headline's).
 
 Fixture read (Opus labels; you win / rival wins / two-way): AmEx vs Chase 0 / 96 / 0%, Capital One 4 / 85 / 4%, Citi 28 / 56 / 33%, Discover 46 / 29 / 61%; class vs Visa 0 / 87 / 0%, Mastercard 2 / 85 / 3%. Jira vs Linear 0 / 88 / 0%, ClickUp 1 / 73 / 1%, GitHub 8 / 77 / 10%, GitLab 36 / 35 / 51%. Pixel 58-93% wins (iPhone the closest, 69% two-way); Netflix 65-94% (Max the closest, 73% two-way; Prime Video has 34% no single pick); Doritos 58-95% (Ruffles the closest, 63% two-way). Every pick resolved to one of the two names - no third-party picks on any tracker. Spot-checked the lopsided rows against the answers (Jira vs Linear, AmEx vs Chase): the labels match the text.
+
+## Alternatives views built (2026-10-27, Tyler's go): capturing rivals' leavers, holding your own
+
+`src/lib/engine/alternatives.ts` (+ route `/api/runs/[id]/alternatives`, section `src/app/projects/[id]/alternatives_view.tsx`), on the shared view plumbing; rules in CODING_DECISIONS section 12. No model calls, no prod writes. Fixture numbers (520 offensive / 130 defensive answers per tracker):
+
+| tracker | leavers' answers naming you / picking you | top captor | defensive: stay / leave / no side | offers an exit |
+| --- | --- | --- | --- | --- |
+| American Express | 82% / 0% | Citi, Wells Fargo (8% each) | 20 / 2 / 78% | 98% |
+| Jira | 94% / 1% | Linear 23% (62 of 130 GitHub leavers) | 0 / 0 / 100% | 100% |
+| Google Pixel | 100% / 38% | Pixel itself; Samsung Galaxy 13% | 0 / 0 / 100% | 100% |
+| Netflix | 99% / 40% | Netflix itself; Max 11% | 0 / 23 / 77% | 100% |
+| Doritos | 49% / 8% | Utz 10% | 0 / 0 / 100% | 100% |
+
+Reads: AmEx is named in 82% of rival leavers' answers but never picked (picks go to no-fee cash-back cards: Citi Double Cash, Wells Fargo Active Cash); Doritos captures Takis leavers (24%) and Cheetos leavers (10%) but is never picked by Lay's or Ruffles leavers. Defensive answers mostly take no side, which is expected under the 2026-10-21 rule (supplying requested alternatives is not a push). Netflix is the only tracker the AI pushes to leave (23%), and AmEx the only one it pushes to stay (20%). Generic-angle cells ("No rival named") ride the offensive view; none exist on the fixture.
