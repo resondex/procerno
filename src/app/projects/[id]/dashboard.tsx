@@ -4,6 +4,7 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } fr
 import Link from "next/link";
 import TrendChart from "./trend_chart";
 import RunResults from "./run_results";
+import HeadlineSection from "./headline_view";
 import TaxonomyReview from "./taxonomy_review";
 import IdentifyTab, { type Suggestion } from "./identify_tab";
 import ParentsTab from "./parents_tab";
@@ -391,6 +392,11 @@ export default function ProjectDashboard({
   const activeRun = runs.find(
     (r) => r.status === "pending" || r.status === "running" || r.status === "collected"
   );
+  // The per-type headline reads answer_codes, which can exist before a run
+  // is complete (reference labels on a collected run); it renders nothing
+  // while the project has no codes source.
+  const headlineRun =
+    shownRun ?? runs.find((r) => r.status === "collected") ?? null;
   const pendingDict = dict.filter((e) => e.status === "pending").length;
   const flaggedPrompts = prompts.filter(
     (p) => p.flagged === 1 && p.retired === 0
@@ -594,6 +600,8 @@ export default function ProjectDashboard({
             onDictApplied={refresh}
           />
         )}
+
+      {headlineRun && <HeadlineSection key={`${headlineRun.id}:${dictVersion}`} runId={headlineRun.id} />}
 
       {shownRun ? (
         <>
