@@ -1,11 +1,10 @@
-import { createHash } from "node:crypto";
-import { store } from "../store";
 import { matchKey } from "../brand_key";
 import { ENGINES } from "./providers";
-import { wilson } from "./metrics";
-import { viewsOf } from "./views";
 import { buildResolver, type Resolver } from "./brand_resolve";
-import type { AnswerCodes, DictionaryEntry, Intent, Project, Prompt, Run } from "../types";
+import { cachedView, cell, poolOf, type RateCell, type ViewData } from "./view_data";
+import type { AnswerCodes, DictionaryEntry, Project, Run } from "../types";
+
+export type { RateCell };
 
 /**
  * The headline view (2026-10-27): win / pick / visibility over open-choice
@@ -26,13 +25,6 @@ import type { AnswerCodes, DictionaryEntry, Intent, Project, Prompt, Run } from 
  * - share of decided: chosen over in-category picks;
  * - negative: a mention framed negative, over answers naming the brand.
  */
-
-export interface RateCell {
-  k: number;
-  n: number;
-  low: number;
-  high: number;
-}
 
 export interface HeadlineBrand {
   key: string;
@@ -88,20 +80,6 @@ export interface HeadlineView {
   byStage: HeadlineSlice[];
   byEngine: HeadlineSlice[];
 }
-
-export interface HeadlineData {
-  run: Run;
-  project: Project;
-  source: string;
-  codes: AnswerCodes[];
-  /** response id -> prompt id and engine, bodies never loaded. */
-  responses: { id: string; prompt_id: string; model: string | null }[];
-  prompts: Prompt[];
-  intents: Intent[];
-  dictionary: DictionaryEntry[];
-}
-
-const cell = (k: number, n: number): RateCell => ({ k, n, ...wilson(k, n) });
 
 const STAGE_ORDER = ["discovery", "use_case", "social_validation", "premium_worth"];
 
@@ -173,40 +151,20 @@ function sliceOf(key: string, label: string, rows: AnswerFacts[], targetKey: str
   };
 }
 
-export function computeHeadline(data: HeadlineData): HeadlineView {
-  const { run, project, source, codes, responses, prompts, intents, dictionary } = data;
+export function computeHeadline(data: ViewData): HeadlineView {
+  const { run, project, source, dictionary } = data;
   const resolve = buildResolver(dictionary);
   const targetKey = resolve(project.brand).key;
   const legacy = new Set(project.competitors.map(matchKey));
-
-  const intentById = new Map(intents.map((i) => [i.id, i]));
-  const stageOfPrompt = new Map<string, string>();
-  for (const p of prompts) {
-    const it = p.intent_id ? intentById.get(p.intent_id) : undefined;
-    if (it && viewsOf(it.stage, it.angle).includes("headline")) stageOfPrompt.set(p.id, it.stage);
-  }
-
-  // Core panel, as metrics.ts: the declared set where it was sampled.
-  const sampled = [...new Set(responses.map((r) => r.model ?? run.model))];
-  const declared = project.engine_set.filter((m) => sampled.includes(m));
-  const core = new Set(declared.length > 0 ? declared : sampled);
-
-  const pool = new Map<string, { stage: string; model: string }>();
-  for (const r of responses) {
-    const stage = stageOfPrompt.get(r.prompt_id);
-    const model = r.model ?? run.model;
-    if (stage && core.has(model)) pool.set(r.id, { stage, model });
-  }
+  const { rows, uncoded, core } = poolOf(data, "headline");
 
   const facts: AnswerFacts[] = [];
   const ruledOut = new Map<string, number>();
   const pending = new Map<string, number>();
   const unknown = new Map<string, number>();
   const outcomes = { pick: 0, conditional: 0, no_pick: 0, clarification: 0 };
-  for (const c of codes) {
-    const at = pool.get(c.response_id);
-    if (!at) continue;
-    const f = factsOf(c, at.stage, at.model, resolve);
+  for (const { code: c, intent, model } of rows) {
+    const f = factsOf(c, intent.stage, model, resolve);
     facts.push(f);
     if (c.outcome && c.outcome in outcomes) outcomes[c.outcome as keyof typeof outcomes]++;
     if (c.outcome === "pick" && c.top_pick && !f.pickInCategory) {
@@ -259,7 +217,7 @@ export function computeHeadline(data: HeadlineData): HeadlineView {
     source,
     brand: project.brand,
     answers: n,
-    uncoded: pool.size - n,
+    uncoded,
     outcomes,
     firmPick: cell(outcomes.pick, n),
     firmPickInCategory: cell(inCategoryPicks, n),
@@ -280,61 +238,7 @@ export function computeHeadline(data: HeadlineData): HeadlineView {
   };
 }
 
-/** Everything the view reads, bodies never loaded. null = the project
- * reads no codes source yet. */
-export async function loadHeadlineData(run: Run, project: Project): Promise<HeadlineData | null> {
-  const source = await store.getCodesSource(project.id);
-  if (!source) return null;
-  const [codes, responses, prompts, intents, dictionary] = await Promise.all([
-    store.listAnswerCodes(run.id, source),
-    store.listResponseMeta(run.id),
-    store.listPrompts(project.id),
-    store.listIntents(project.id),
-    store.getDictionary(project.id),
-  ]);
-  return {
-    run,
-    project,
-    source,
-    codes,
-    responses: responses.map((r) => ({ id: r.id, prompt_id: r.prompt_id, model: r.model })),
-    prompts,
-    intents,
-    dictionary,
-  };
-}
-
-/**
- * Cached on everything that feeds it: the run's data revision (responses,
- * mentions, labels, prompts, answer_codes), the dictionary version and the
- * project fields the view reads. A store that cannot fingerprint (local
- * SQLite) computes fresh every time.
- */
 const HEADLINE_VERSION = "h1";
-export async function computeHeadlineCached(run: Run, project: Project): Promise<HeadlineView | null> {
-  const source = await store.getCodesSource(project.id);
-  if (!source) return null;
-  const rev = await store.runDataRevision(run.id);
-  const projectHash = createHash("sha256")
-    .update(JSON.stringify([project.brand, project.competitors, project.engine_set]))
-    .digest("hex")
-    .slice(0, 12);
-  const key = `headline:${HEADLINE_VERSION}:${run.id}:${source}:${project.dictionary_version}:${projectHash}:${rev}`;
-  if (rev !== null) {
-    const raw = await store.cacheGet(key, 24 * 3600 * 1000);
-    if (raw) return JSON.parse(raw) as HeadlineView;
-  }
-  const data = await loadHeadlineData(run, project);
-  if (!data) return null;
-  const view = computeHeadline(data);
-  if (rev !== null) {
-    await store.cacheSet(key, JSON.stringify(view), {
-      brand: project.brand,
-      category: project.category,
-      projectId: project.id,
-    });
-    // Older generations of this run's view stop being addressed; drop them.
-    await store.cachePurge(`headline:${HEADLINE_VERSION}:${run.id}:`, key);
-  }
-  return view;
+export function computeHeadlineCached(run: Run, project: Project): Promise<HeadlineView | null> {
+  return cachedView("headline", HEADLINE_VERSION, run, project, computeHeadline);
 }
