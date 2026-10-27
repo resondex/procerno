@@ -18,6 +18,7 @@ import type {
   Store,
 } from "../types";
 import { codingColumns } from "../coding_columns";
+import { ANSWER_CODE_COLUMNS, ANSWER_CODE_DDL, answerCodesFromRow, answerCodesToRow } from "../answer_codes";
 import { matchKey } from "../brand_key";
 
 declare global {
@@ -307,6 +308,15 @@ function ensureSchema(): Promise<void> {
       await sql`ALTER TABLE responses ADD COLUMN IF NOT EXISTS discovery_brands TEXT`;
       await sql`UPDATE responses r SET model = ru.model FROM runs ru
         WHERE r.run_id = ru.id AND (r.model IS NULL OR r.model = '')`;
+      // answer_codes (2026-10-27): v2 / Set C codes per (answer, source);
+      // projects.codes_source names the source the views read.
+      await sql.unsafe(`CREATE TABLE IF NOT EXISTS answer_codes (
+        ${ANSWER_CODE_DDL},
+        created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+        PRIMARY KEY (response_id, source)
+      )`);
+      await sql`CREATE INDEX IF NOT EXISTS idx_answer_codes_run ON answer_codes(run_id, source)`;
+      await sql`ALTER TABLE projects ADD COLUMN IF NOT EXISTS codes_source TEXT`;
       await sql`DROP INDEX IF EXISTS idx_responses_task`;
       await sql`CREATE UNIQUE INDEX IF NOT EXISTS idx_responses_task_engine
         ON responses(run_id, prompt_id, repeat_idx, model)`;
@@ -738,9 +748,11 @@ export const pgStore: Store = {
            WHERE r.run_id = ${runId}) AS lab,
         (SELECT count(*)::text || ':' || coalesce(sum(hashtext(p::text)), 0)::text
            FROM prompts p JOIN runs ru ON ru.project_id = p.project_id
-           WHERE ru.id = ${runId}) AS pr`;
+           WHERE ru.id = ${runId}) AS pr,
+        (SELECT count(*)::text || ':' || coalesce(sum(hashtext(c::text)), 0)::text
+           FROM answer_codes c WHERE c.run_id = ${runId}) AS codes`;
     const r = rows[0];
-    return r ? `${r.resp}/${r.men}/${r.lab}/${r.pr}` : null;
+    return r ? `${r.resp}/${r.men}/${r.lab}/${r.pr}/${r.codes}` : null;
   },
 
   async createCodingAssignment(a) {
@@ -1325,6 +1337,7 @@ export const pgStore: Store = {
     const sql = await db();
     await sql.begin(async (tx) => {
       await tx`DELETE FROM mentions WHERE response_id IN (SELECT id FROM responses WHERE run_id = ${runId})`;
+      await tx`DELETE FROM answer_codes WHERE run_id = ${runId}`;
       await tx`DELETE FROM responses WHERE run_id = ${runId}`;
       await tx`DELETE FROM runs WHERE id = ${runId}`;
     });
@@ -1405,6 +1418,7 @@ export const pgStore: Store = {
       await tx`DELETE FROM mentions WHERE response_id IN (
         SELECT r.id FROM responses r JOIN runs ru ON ru.id = r.run_id
         WHERE ru.project_id = ${projectId})`;
+      await tx`DELETE FROM answer_codes WHERE project_id = ${projectId}`;
       await tx`DELETE FROM responses WHERE run_id IN (SELECT id FROM runs WHERE project_id = ${projectId})`;
       await tx`DELETE FROM runs WHERE project_id = ${projectId}`;
       await tx`DELETE FROM prompts WHERE project_id = ${projectId}`;
@@ -1463,5 +1477,37 @@ export const pgStore: Store = {
       JOIN responses r ON r.id = m.response_id
       WHERE r.run_id = ${runId}`;
     return rows.map((r) => ({ ...r }) as unknown as MentionRow);
+  },
+
+  async upsertAnswerCodes(codes) {
+    if (!codes.length) return;
+    const sql = await db();
+    const set = sql.unsafe(
+      ANSWER_CODE_COLUMNS.filter((c) => c !== "response_id" && c !== "source")
+        .map((c) => `${c} = EXCLUDED.${c}`).join(", ") + ", created_at = now()"
+    );
+    for (let i = 0; i < codes.length; i += 500) {
+      const rows = codes.slice(i, i + 500).map(answerCodesToRow);
+      await sql`INSERT INTO answer_codes ${sql(rows, ...ANSWER_CODE_COLUMNS)}
+        ON CONFLICT (response_id, source) DO UPDATE SET ${set}`;
+    }
+  },
+
+  async listAnswerCodes(runId, source) {
+    const sql = await db();
+    const rows = await sql`SELECT ${sql(ANSWER_CODE_COLUMNS as string[])} FROM answer_codes
+      WHERE run_id = ${runId} AND source = ${source}`;
+    return rows.map((r) => answerCodesFromRow(r));
+  },
+
+  async getCodesSource(projectId) {
+    const sql = await db();
+    const rows = await sql`SELECT codes_source FROM projects WHERE id = ${projectId}`;
+    return (rows[0]?.codes_source as string | null | undefined) ?? null;
+  },
+
+  async setCodesSource(projectId, source) {
+    const sql = await db();
+    await sql`UPDATE projects SET codes_source = ${source} WHERE id = ${projectId}`;
   },
 };

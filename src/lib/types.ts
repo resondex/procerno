@@ -364,6 +364,46 @@ export interface MentionRow {
   framing: Framing;
 }
 
+/** One answer's codes under the v2 / Set C contracts (2026-10-27), from one
+ * SOURCE - the reference labeler or a coder. A field is null when its
+ * schema does not ask it; an asked list that came back empty is []. Brands
+ * are stored as written; dictionary resolution is read-time. Column list
+ * and (de)serialization live in answer_codes.ts. */
+export interface AnswerCodes {
+  response_id: string;
+  source: string;
+  run_id: string;
+  project_id: string;
+  contract: string;
+  schema: string;
+  outcome: string | null;
+  top_pick: string | null;
+  tier_stance: string | null;
+  worth_it: string | null;
+  proceed_or_avoid: string | null;
+  keep_or_leave: string | null;
+  premise_verdict: string | null;
+  category_routed: string | null;
+  relationship_verdict: string | null;
+  case_strength: string | null;
+  growth_stance: string | null;
+  clarification_requested: boolean | null;
+  includes_prices: boolean | null;
+  includes_specs: boolean | null;
+  quote: string | null;
+  premise_quote: string | null;
+  reasons: string[] | null;
+  topics: string[] | null;
+  uncoded: string | null;
+  destinations: string[] | null;
+  redirect_to: string[] | null;
+  pairings: { name: string; maker_relation: string; framing: string }[] | null;
+  /** rank = order of first appearance in the answer, 1-based. */
+  mentions: { brand: string; framing: string; rank: number }[] | null;
+  /** v0.4 field; null until a contract that asks it. */
+  decision_rules: { condition: string; choice: string }[] | null;
+}
+
 export interface ExtractedMention {
   brand: string;
   framing: Framing;
@@ -1079,4 +1119,11 @@ export interface Store {
     opts: { textStats: true }
   ): Promise<ResponseStatsRow[]>;
   listMentionsForRun(runId: string): Promise<MentionRow[]>;
+  /** Insert or replace codes keyed by (response_id, source). */
+  upsertAnswerCodes(rows: AnswerCodes[]): Promise<void>;
+  /** A run's codes from one source - no answer bodies. */
+  listAnswerCodes(runId: string, source: string): Promise<AnswerCodes[]>;
+  /** The code source the project's views read (null = none yet). */
+  getCodesSource(projectId: string): Promise<string | null>;
+  setCodesSource(projectId: string, source: string | null): Promise<void>;
 }

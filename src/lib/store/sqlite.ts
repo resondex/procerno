@@ -20,10 +20,13 @@ import type {
   Store,
 } from "../types";
 import { codingColumns } from "../coding_columns";
+import { ANSWER_CODE_COLUMNS, ANSWER_CODE_DDL, answerCodesFromRow, answerCodesToRow } from "../answer_codes";
 import { matchKey } from "../brand_key";
 
-const DB_DIR = path.join(process.cwd(), "data");
-const DB_PATH = path.join(DB_DIR, "answerpoll.db");
+// SQLITE_PATH points the local store at another file (the dashboard
+// fixture, 2026-10-27); default is data/answerpoll.db under the cwd.
+const DB_PATH = process.env.SQLITE_PATH || path.join(process.cwd(), "data", "answerpoll.db");
+const DB_DIR = path.dirname(DB_PATH);
 
 declare global {
   // eslint-disable-next-line no-var
@@ -168,6 +171,12 @@ function createDb(): Database.Database {
     CREATE INDEX IF NOT EXISTS idx_runs_project ON runs(project_id);
     CREATE INDEX IF NOT EXISTS idx_responses_run ON responses(run_id);
     CREATE INDEX IF NOT EXISTS idx_mentions_response ON mentions(response_id);
+    CREATE TABLE IF NOT EXISTS answer_codes (
+      ${ANSWER_CODE_DDL},
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      PRIMARY KEY (response_id, source)
+    );
+    CREATE INDEX IF NOT EXISTS idx_answer_codes_run ON answer_codes(run_id, source);
   `);
   // Databases created before these columns existed need the ALTERs.
   const intentCols = db.prepare("PRAGMA table_info(intents)").all() as { name: string }[];
@@ -358,6 +367,9 @@ function createDb(): Database.Database {
   }
   if (!cols.some((c) => c.name === "dictionary_decision")) {
     db.exec("ALTER TABLE projects ADD COLUMN dictionary_decision TEXT");
+  }
+  if (!cols.some((c) => c.name === "codes_source")) {
+    db.exec("ALTER TABLE projects ADD COLUMN codes_source TEXT");
   }
   if (!cols.some((c) => c.name === "dictionary_status")) {
     db.exec(
@@ -1610,6 +1622,7 @@ export const sqliteStore: Store = {
       db.prepare(
         "DELETE FROM mentions WHERE response_id IN (SELECT id FROM responses WHERE run_id = ?)"
       ).run(runId);
+      db.prepare("DELETE FROM answer_codes WHERE run_id = ?").run(runId);
       db.prepare("DELETE FROM responses WHERE run_id = ?").run(runId);
       db.prepare("DELETE FROM runs WHERE id = ?").run(runId);
     });
@@ -1681,6 +1694,7 @@ export const sqliteStore: Store = {
            SELECT r.id FROM responses r JOIN runs ru ON ru.id = r.run_id
            WHERE ru.project_id = ?)`
       ).run(projectId);
+      db.prepare("DELETE FROM answer_codes WHERE project_id = ?").run(projectId);
       db.prepare(
         "DELETE FROM responses WHERE run_id IN (SELECT id FROM runs WHERE project_id = ?)"
       ).run(projectId);
@@ -1747,5 +1761,35 @@ export const sqliteStore: Store = {
          WHERE r.run_id = ?`
       )
       .all(runId) as MentionRow[];
+  },
+
+  async upsertAnswerCodes(codes) {
+    if (!codes.length) return;
+    const db = getDb();
+    const cols = ANSWER_CODE_COLUMNS;
+    const stmt = db.prepare(
+      `INSERT OR REPLACE INTO answer_codes (${cols.join(", ")}) VALUES (${cols.map((c) => "@" + c).join(", ")})`
+    );
+    db.transaction((rows: typeof codes) => {
+      for (const c of rows) stmt.run(answerCodesToRow(c));
+    })(codes);
+  },
+
+  async listAnswerCodes(runId, source) {
+    const rows = getDb()
+      .prepare(`SELECT ${ANSWER_CODE_COLUMNS.join(", ")} FROM answer_codes WHERE run_id = ? AND source = ?`)
+      .all(runId, source) as Record<string, unknown>[];
+    return rows.map(answerCodesFromRow);
+  },
+
+  async getCodesSource(projectId) {
+    const row = getDb()
+      .prepare("SELECT codes_source FROM projects WHERE id = ?")
+      .get(projectId) as { codes_source: string | null } | undefined;
+    return row?.codes_source ?? null;
+  },
+
+  async setCodesSource(projectId, source) {
+    getDb().prepare("UPDATE projects SET codes_source = ? WHERE id = ?").run(source, projectId);
   },
 };
