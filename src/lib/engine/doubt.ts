@@ -131,7 +131,7 @@ function computeKind<V extends string>(
   verdictOf: (row: PoolRow) => V
 ): DoubtView<V> | null {
   const { project, dictionary } = data;
-  const resolve = buildResolver(dictionary);
+  const resolve = buildResolver(dictionary, data.judged);
   const targetKey = resolve(project.brand).key;
   const { rows: pool, uncoded, core } = poolOf(data, kind === "objections" ? "doubt" : "keep_or_leave");
   if (pool.length === 0 && uncoded === 0) return null;
@@ -228,7 +228,8 @@ export function computeDoubt(data: ViewData): DoubtViews {
   };
 }
 
-const DOUBT_VERSION = "d1";
+// d2 (2026-10-28): names resolve through the context judge (context_judge.ts).
+const DOUBT_VERSION = "d2";
 export function computeDoubtCached(run: Run, project: Project): Promise<DoubtViews | null> {
-  return cachedView("doubt", DOUBT_VERSION, run, project, computeDoubt);
+  return cachedView("doubt", DOUBT_VERSION, run, project, computeDoubt, { judge: true });
 }

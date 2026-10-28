@@ -228,7 +228,7 @@ function tallyOf(rows: { bucket: Bucket }[]) {
 
 async function computeKind(data: ViewData, kind: "entity" | "class"): Promise<HeadToHeadView | null> {
   const { project, dictionary } = data;
-  const resolve = buildResolver(dictionary);
+  const resolve = buildResolver(dictionary, data.judged);
   const targetKey = resolve(project.brand).key;
   const { rows: pool, uncoded, core } = poolOf(
     data,
@@ -345,7 +345,9 @@ export async function computeHeadToHead(data: ViewData): Promise<HeadToHeadViews
   };
 }
 
-const HEAD_TO_HEAD_VERSION = "hh3";
+// hh4 (2026-10-28): names resolve through the context judge (context_judge.ts) -
+// a rival's maker-less products move from "routes elsewhere" to the rival's side.
+const HEAD_TO_HEAD_VERSION = "hh4";
 export function computeHeadToHeadCached(run: Run, project: Project): Promise<HeadToHeadViews | null> {
-  return cachedView("head_to_head", HEAD_TO_HEAD_VERSION, run, project, computeHeadToHead);
+  return cachedView("head_to_head", HEAD_TO_HEAD_VERSION, run, project, computeHeadToHead, { judge: true });
 }

@@ -18,9 +18,13 @@ import type { DictionaryEntry } from "../types";
  *      models the brands pass never saw;
  *   5. family containment over rejected entries - a product of a ruled-out
  *      name is ruled out with it;
- *   6. unknown - not in the dictionary.
- * Only (1) and (4) put a name in the category (B5: the top pick resolves to
- * an approved dictionary brand).
+ *   6. a context-judge verdict (context_judge.ts): the judged MAKER resolves
+ *      through steps 1-5 and the name takes its entry and status (via
+ *      "judge"); a maker the dictionary does not know rolls the name up to
+ *      the maker's own name for counting;
+ *   7. unknown - not in the dictionary.
+ * (1), (4) and a judged maker landing on an active entry put a name in the
+ * category (B5: the top pick resolves to an approved dictionary brand).
  */
 
 export type ResolvedStatus = "active" | "rejected" | "pending" | "unknown";
@@ -33,10 +37,13 @@ export interface Resolved {
   name: string;
   entry: DictionaryEntry | null;
   /** How the name reached its entry. */
-  via: "exact" | "family" | null;
+  via: "exact" | "family" | "judge" | null;
 }
 
-export function buildResolver(entries: DictionaryEntry[]) {
+/** `judged` maps matchKey(name as written) -> the judge's maker name; the
+ * maker resolves through the CURRENT dictionary here, never at judge time,
+ * so board edits re-resolve judged names for free. */
+export function buildResolver(entries: DictionaryEntry[], judged?: Map<string, string>) {
   const exact = new Map<string, DictionaryEntry>();
   const rank = { active: 0, rejected: 1, pending: 2 } as const;
   for (const e of entries) {
@@ -58,26 +65,48 @@ export function buildResolver(entries: DictionaryEntry[]) {
   const memo = new Map<string, Resolved>();
   const label = (e: DictionaryEntry) => e.display_name ?? e.canonical;
 
+  const base = (raw: string, k: string): Resolved => {
+    const e = exact.get(k);
+    if (e) return { status: e.status, key: e.id, name: label(e), entry: e, via: "exact" };
+    const hay = famTokens(raw);
+    let best: { seq: string[]; entry: DictionaryEntry } | null = null;
+    for (const family of families) {
+      for (const f of family) {
+        if (familyContains(hay, f.seq) && (!best || f.seq.length > best.seq.length)) best = f;
+      }
+      if (best) break;
+    }
+    return best
+      ? { status: best.entry.status, key: best.entry.id, name: label(best.entry), entry: best.entry, via: "family" }
+      : { status: "unknown", key: `?${k}`, name: raw.trim(), entry: null, via: null };
+  };
+
   return function resolve(raw: string): Resolved {
     const k = matchKey(raw);
     const hit = memo.get(k);
     if (hit) return hit;
-    let out: Resolved;
-    const e = exact.get(k);
-    if (e) {
-      out = { status: e.status, key: e.id, name: label(e), entry: e, via: "exact" };
-    } else {
-      const hay = famTokens(raw);
-      let best: { seq: string[]; entry: DictionaryEntry } | null = null;
-      for (const family of families) {
-        for (const f of family) {
-          if (familyContains(hay, f.seq) && (!best || f.seq.length > best.seq.length)) best = f;
-        }
-        if (best) break;
+    let out = base(raw, k);
+    if (out.status === "unknown") {
+      const maker = judged?.get(k);
+      if (maker) {
+        // A judged maker is a company name, so it lands on EXACT board
+        // vocabulary only - the family hop is for product names and
+        // mis-files company names that merely share a leading word. And it
+        // never lands through a MAKER-WORD alias (the first word of a
+        // multi-word canonical, aliased in for raw mentions): a bare parent
+        // answer means the judge decided the product is NOT a form of the
+        // tracked brand, so the parent's portfolio must not roll into it
+        // (the r15 maker-word principle). A true product-form verdict
+        // carries the tracked name exactly as listed and still lands.
+        const mk = matchKey(maker);
+        const e = exact.get(mk);
+        const seq = e ? famTokens(e.canonical) : [];
+        const makerWord = e ? seq.length > 1 && mk !== matchKey(e.canonical) && mk === matchKey(seq[0]) : false;
+        out =
+          e && !makerWord
+            ? { status: e.status, key: e.id, name: label(e), entry: e, via: "judge" }
+            : { status: "unknown", key: `?${mk}`, name: maker.trim(), entry: null, via: "judge" };
       }
-      out = best
-        ? { status: best.entry.status, key: best.entry.id, name: label(best.entry), entry: best.entry, via: "family" }
-        : { status: "unknown", key: `?${k}`, name: raw.trim(), entry: null, via: null };
     }
     memo.set(k, out);
     return out;

@@ -125,7 +125,7 @@ export function computeValue(data: ViewData): ValueView | null {
   const { project, dictionary } = data;
   const { rows: pool, uncoded, core } = poolOf(data, "value");
   if (pool.length === 0 && uncoded === 0) return null;
-  const resolve = buildResolver(dictionary);
+  const resolve = buildResolver(dictionary, data.judged);
   const targetKey = resolve(project.brand).key;
   const lines = decidedLines(data.setupDecision);
   const facts = pool.map((r) => factsOf(r, resolve, targetKey));
@@ -181,7 +181,8 @@ export function computeValue(data: ViewData): ValueView | null {
   };
 }
 
-const VALUE_VERSION = "v1";
+// v2 (2026-10-28): names resolve through the context judge (context_judge.ts).
+const VALUE_VERSION = "v2";
 export function computeValueCached(run: Run, project: Project): Promise<ValueView | null> {
-  return cachedView("value", VALUE_VERSION, run, project, computeValue, { setupDecision: true });
+  return cachedView("value", VALUE_VERSION, run, project, computeValue, { setupDecision: true, judge: true });
 }

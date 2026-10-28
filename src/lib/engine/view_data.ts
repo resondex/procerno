@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import { store } from "../store";
 import { wilson } from "./metrics";
 import { viewsOf, type ViewKey } from "./views";
+import { CONTEXT_JUDGE_MODEL, CONTEXT_JUDGE_VERSION, primeContextVerdicts } from "./context_judge";
 import type { AnswerCodes, DictionaryEntry, Intent, Project, Prompt, Run } from "../types";
 
 /**
@@ -34,12 +35,22 @@ export interface ViewData {
   setupDecision?: string | null;
   /** projects.code_groups JSON - loaded only for views that ask for it. */
   codeGroups?: string | null;
+  /** Context-judge verdicts (matchKey -> maker) for names the dictionary
+   * cannot place - loaded only for views that opt in. */
+  judged?: Map<string, string>;
+  /** True while judgeable names remain unjudged: the view computes but is
+   * not cached, so the next open picks up where the slab ended. */
+  judgeIncomplete?: boolean;
 }
 
-/** Project records a view can opt into; each one also keys the view's cache. */
+/** Project records a view can opt into; each one also keys the view's cache.
+ * `judge` opts into the read-time context judge (context_judge.ts); its
+ * version + model ride the cache key, the verdicts themselves do not (they
+ * only grow, and an incomplete set blocks the cache write). */
 export interface ViewExtras {
   setupDecision?: boolean;
   codeGroups?: boolean;
+  judge?: boolean;
 }
 
 /** One coded answer in a view's pool, with its cell and engine. */
@@ -97,7 +108,7 @@ export async function loadViewData(
     opts.setupDecision ? store.getSetupDecision(project.id) : Promise.resolve(undefined),
     opts.codeGroups ? store.getCodeGroups(project.id) : Promise.resolve(undefined),
   ]);
-  return {
+  const data: ViewData = {
     run,
     project,
     source,
@@ -109,6 +120,17 @@ export async function loadViewData(
     ...(setupDecision !== undefined && { setupDecision }),
     ...(codeGroups !== undefined && { codeGroups }),
   };
+  if (opts.judge) {
+    const { judged, incomplete } = await primeContextVerdicts({
+      project,
+      dictionary,
+      codes,
+      meta: { brand: project.brand, category: project.category, projectId: project.id },
+    });
+    data.judged = judged;
+    data.judgeIncomplete = incomplete;
+  }
+  return data;
 }
 
 /**
@@ -132,6 +154,7 @@ export async function cachedView<T>(
   const extras: (string | null)[] = [];
   if (opts.setupDecision) extras.push(await store.getSetupDecision(project.id));
   if (opts.codeGroups) extras.push(await store.getCodeGroups(project.id));
+  if (opts.judge) extras.push(`ctx:${CONTEXT_JUDGE_VERSION}:${CONTEXT_JUDGE_MODEL}`);
   const projectHash = createHash("sha256")
     .update(JSON.stringify(extras.length === 0 ? [project.brand, project.competitors, project.engine_set] : [project.brand, project.competitors, project.engine_set, ...extras]))
     .digest("hex")
@@ -145,7 +168,9 @@ export async function cachedView<T>(
   const data = await loadViewData(run, project, opts);
   if (!data) return null;
   const view = await compute(data);
-  if (rev !== null) {
+  // A half-judged view is served but never cached: the per-name verdict
+  // cache makes the next compute pay only for the remaining slab.
+  if (rev !== null && !data.judgeIncomplete) {
     await store.cacheSet(key, JSON.stringify(view), {
       brand: project.brand,
       category: project.category,

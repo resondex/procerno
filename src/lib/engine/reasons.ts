@@ -225,7 +225,7 @@ export function parseCodeGroups(json: string | null | undefined, confirmed: Set<
 
 export function computeReasons(data: ViewData): ReasonsView {
   const { project, dictionary } = data;
-  const resolve = buildResolver(dictionary);
+  const resolve = buildResolver(dictionary, data.judged);
   const targetKey = resolve(project.brand).key;
   const pick = PICK(resolve, targetKey);
 
@@ -346,7 +346,8 @@ export function computeReasons(data: ViewData): ReasonsView {
   };
 }
 
-const REASONS_VERSION = "r2";
+// r3 (2026-10-28): names resolve through the context judge (context_judge.ts).
+const REASONS_VERSION = "r3";
 export function computeReasonsCached(run: Run, project: Project): Promise<ReasonsView | null> {
-  return cachedView("reasons", REASONS_VERSION, run, project, computeReasons, { codeGroups: true });
+  return cachedView("reasons", REASONS_VERSION, run, project, computeReasons, { codeGroups: true, judge: true });
 }

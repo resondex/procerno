@@ -362,7 +362,7 @@ function computeDefensive(data: ViewData, resolve: Resolver, targetKey: string):
 }
 
 export function computeAlternatives(data: ViewData): AlternativesViews {
-  const resolve = buildResolver(data.dictionary);
+  const resolve = buildResolver(data.dictionary, data.judged);
   const targetKey = resolve(data.project.brand).key;
   return {
     runId: data.run.id,
@@ -373,7 +373,8 @@ export function computeAlternatives(data: ViewData): AlternativesViews {
   };
 }
 
-const ALTERNATIVES_VERSION = "alt1";
+// alt2 (2026-10-28): names resolve through the context judge (context_judge.ts).
+const ALTERNATIVES_VERSION = "alt2";
 export function computeAlternativesCached(run: Run, project: Project): Promise<AlternativesViews | null> {
-  return cachedView("alternatives", ALTERNATIVES_VERSION, run, project, computeAlternatives);
+  return cachedView("alternatives", ALTERNATIVES_VERSION, run, project, computeAlternatives, { judge: true });
 }

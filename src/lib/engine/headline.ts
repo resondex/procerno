@@ -153,7 +153,7 @@ function sliceOf(key: string, label: string, rows: AnswerFacts[], targetKey: str
 
 export function computeHeadline(data: ViewData): HeadlineView {
   const { run, project, source, dictionary } = data;
-  const resolve = buildResolver(dictionary);
+  const resolve = buildResolver(dictionary, data.judged);
   const targetKey = resolve(project.brand).key;
   const legacy = new Set(project.competitors.map(matchKey));
   const { rows, uncoded, core } = poolOf(data, "headline");
@@ -238,7 +238,8 @@ export function computeHeadline(data: ViewData): HeadlineView {
   };
 }
 
-const HEADLINE_VERSION = "h1";
+// h2 (2026-10-28): names resolve through the context judge (context_judge.ts).
+const HEADLINE_VERSION = "h2";
 export function computeHeadlineCached(run: Run, project: Project): Promise<HeadlineView | null> {
-  return cachedView("headline", HEADLINE_VERSION, run, project, computeHeadline);
+  return cachedView("headline", HEADLINE_VERSION, run, project, computeHeadline, { judge: true });
 }
