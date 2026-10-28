@@ -32,6 +32,14 @@ export interface ViewData {
   dictionary: DictionaryEntry[];
   /** projects.setup_decision JSON - loaded only for views that ask for it. */
   setupDecision?: string | null;
+  /** projects.code_groups JSON - loaded only for views that ask for it. */
+  codeGroups?: string | null;
+}
+
+/** Project records a view can opt into; each one also keys the view's cache. */
+export interface ViewExtras {
+  setupDecision?: boolean;
+  codeGroups?: boolean;
 }
 
 /** One coded answer in a view's pool, with its cell and engine. */
@@ -76,17 +84,18 @@ export function poolOf(data: ViewData, view: ViewKey): { rows: PoolRow[]; uncode
 export async function loadViewData(
   run: Run,
   project: Project,
-  opts: { setupDecision?: boolean } = {}
+  opts: ViewExtras = {}
 ): Promise<ViewData | null> {
   const source = await store.getCodesSource(project.id);
   if (!source) return null;
-  const [codes, responses, prompts, intents, dictionary, setupDecision] = await Promise.all([
+  const [codes, responses, prompts, intents, dictionary, setupDecision, codeGroups] = await Promise.all([
     store.listAnswerCodes(run.id, source),
     store.listResponseMeta(run.id),
     store.listPrompts(project.id),
     store.listIntents(project.id),
     store.getDictionary(project.id),
     opts.setupDecision ? store.getSetupDecision(project.id) : Promise.resolve(undefined),
+    opts.codeGroups ? store.getCodeGroups(project.id) : Promise.resolve(undefined),
   ]);
   return {
     run,
@@ -98,6 +107,7 @@ export async function loadViewData(
     intents,
     dictionary,
     ...(setupDecision !== undefined && { setupDecision }),
+    ...(codeGroups !== undefined && { codeGroups }),
   };
 }
 
@@ -113,15 +123,17 @@ export async function cachedView<T>(
   run: Run,
   project: Project,
   compute: (data: ViewData) => T,
-  opts: { setupDecision?: boolean } = {}
+  opts: ViewExtras = {}
 ): Promise<T | null> {
   const source = await store.getCodesSource(project.id);
   if (!source) return null;
   const rev = await store.runDataRevision(run.id);
-  // A view that reads the setup decision keys on it too (its lines can change without a prompt changing).
-  const setup = opts.setupDecision ? await store.getSetupDecision(project.id) : undefined;
+  // A view that reads a project record keys on it too (it can change without a prompt changing).
+  const extras: (string | null)[] = [];
+  if (opts.setupDecision) extras.push(await store.getSetupDecision(project.id));
+  if (opts.codeGroups) extras.push(await store.getCodeGroups(project.id));
   const projectHash = createHash("sha256")
-    .update(JSON.stringify(setup === undefined ? [project.brand, project.competitors, project.engine_set] : [project.brand, project.competitors, project.engine_set, setup]))
+    .update(JSON.stringify(extras.length === 0 ? [project.brand, project.competitors, project.engine_set] : [project.brand, project.competitors, project.engine_set, ...extras]))
     .digest("hex")
     .slice(0, 12);
   const prefix = `${name}:${version}:${run.id}:`;

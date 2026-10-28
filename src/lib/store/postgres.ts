@@ -317,6 +317,8 @@ function ensureSchema(): Promise<void> {
       )`);
       await sql`CREATE INDEX IF NOT EXISTS idx_answer_codes_run ON answer_codes(run_id, source)`;
       await sql`ALTER TABLE projects ADD COLUMN IF NOT EXISTS codes_source TEXT`;
+      // projects.code_groups (2026-10-27): the reasons view's display rollup map.
+      await sql`ALTER TABLE projects ADD COLUMN IF NOT EXISTS code_groups TEXT`;
       await sql`DROP INDEX IF EXISTS idx_responses_task`;
       await sql`CREATE UNIQUE INDEX IF NOT EXISTS idx_responses_task_engine
         ON responses(run_id, prompt_id, repeat_idx, model)`;
@@ -1509,5 +1511,16 @@ export const pgStore: Store = {
   async setCodesSource(projectId, source) {
     const sql = await db();
     await sql`UPDATE projects SET codes_source = ${source} WHERE id = ${projectId}`;
+  },
+
+  async getCodeGroups(projectId) {
+    const sql = await db();
+    const rows = await sql`SELECT code_groups FROM projects WHERE id = ${projectId}`;
+    return (rows[0]?.code_groups as string | null | undefined) ?? null;
+  },
+
+  async setCodeGroups(projectId, groupsJson) {
+    const sql = await db();
+    await sql`UPDATE projects SET code_groups = ${groupsJson} WHERE id = ${projectId}`;
   },
 };

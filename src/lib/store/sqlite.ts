@@ -371,6 +371,9 @@ function createDb(): Database.Database {
   if (!cols.some((c) => c.name === "codes_source")) {
     db.exec("ALTER TABLE projects ADD COLUMN codes_source TEXT");
   }
+  if (!cols.some((c) => c.name === "code_groups")) {
+    db.exec("ALTER TABLE projects ADD COLUMN code_groups TEXT");
+  }
   if (!cols.some((c) => c.name === "dictionary_status")) {
     db.exec(
       "ALTER TABLE projects ADD COLUMN dictionary_status TEXT NOT NULL DEFAULT 'pending'"
@@ -1791,5 +1794,16 @@ export const sqliteStore: Store = {
 
   async setCodesSource(projectId, source) {
     getDb().prepare("UPDATE projects SET codes_source = ? WHERE id = ?").run(source, projectId);
+  },
+
+  async getCodeGroups(projectId) {
+    const row = getDb()
+      .prepare("SELECT code_groups FROM projects WHERE id = ?")
+      .get(projectId) as { code_groups: string | null } | undefined;
+    return row?.code_groups ?? null;
+  },
+
+  async setCodeGroups(projectId, groupsJson) {
+    getDb().prepare("UPDATE projects SET code_groups = ? WHERE id = ?").run(groupsJson, projectId);
   },
 };

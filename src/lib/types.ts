@@ -1126,4 +1126,8 @@ export interface Store {
   /** The code source the project's views read (null = none yet). */
   getCodesSource(projectId: string): Promise<string | null>;
   setCodesSource(projectId: string, source: string | null): Promise<void>;
+  /** The reasons view's display rollup map, JSON {groups: [{name, codes}]};
+   * null = no map (the view shows the fine codes only). Never a labeling grain. */
+  getCodeGroups(projectId: string): Promise<string | null>;
+  setCodeGroups(projectId: string, groupsJson: string | null): Promise<void>;
 }

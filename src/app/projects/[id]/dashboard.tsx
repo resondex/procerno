@@ -9,6 +9,7 @@ import HeadToHeadSection from "./head_to_head_view";
 import AlternativesSection from "./alternatives_view";
 import DoubtSections from "./doubt_view";
 import ValueSection from "./value_view";
+import ReasonsSection from "./reasons_view";
 import TaxonomyReview from "./taxonomy_review";
 import IdentifyTab, { type Suggestion } from "./identify_tab";
 import ParentsTab from "./parents_tab";
@@ -610,6 +611,7 @@ export default function ProjectDashboard({
       {headlineRun && <AlternativesSection key={`alt:${headlineRun.id}:${dictVersion}`} runId={headlineRun.id} />}
       {headlineRun && <DoubtSections key={`doubt:${headlineRun.id}:${dictVersion}`} runId={headlineRun.id} />}
       {headlineRun && <ValueSection key={`value:${headlineRun.id}:${dictVersion}`} runId={headlineRun.id} />}
+      {headlineRun && <ReasonsSection key={`reasons:${headlineRun.id}:${dictVersion}`} runId={headlineRun.id} />}
 
       {shownRun ? (
         <>
