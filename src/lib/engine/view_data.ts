@@ -30,6 +30,8 @@ export interface ViewData {
   prompts: Prompt[];
   intents: Intent[];
   dictionary: DictionaryEntry[];
+  /** projects.setup_decision JSON - loaded only for views that ask for it. */
+  setupDecision?: string | null;
 }
 
 /** One coded answer in a view's pool, with its cell and engine. */
@@ -71,15 +73,20 @@ export function poolOf(data: ViewData, view: ViewKey): { rows: PoolRow[]; uncode
 }
 
 /** Everything the views read. null = the project reads no codes source yet. */
-export async function loadViewData(run: Run, project: Project): Promise<ViewData | null> {
+export async function loadViewData(
+  run: Run,
+  project: Project,
+  opts: { setupDecision?: boolean } = {}
+): Promise<ViewData | null> {
   const source = await store.getCodesSource(project.id);
   if (!source) return null;
-  const [codes, responses, prompts, intents, dictionary] = await Promise.all([
+  const [codes, responses, prompts, intents, dictionary, setupDecision] = await Promise.all([
     store.listAnswerCodes(run.id, source),
     store.listResponseMeta(run.id),
     store.listPrompts(project.id),
     store.listIntents(project.id),
     store.getDictionary(project.id),
+    opts.setupDecision ? store.getSetupDecision(project.id) : Promise.resolve(undefined),
   ]);
   return {
     run,
@@ -90,6 +97,7 @@ export async function loadViewData(run: Run, project: Project): Promise<ViewData
     prompts,
     intents,
     dictionary,
+    ...(setupDecision !== undefined && { setupDecision }),
   };
 }
 
@@ -104,13 +112,16 @@ export async function cachedView<T>(
   version: string,
   run: Run,
   project: Project,
-  compute: (data: ViewData) => T
+  compute: (data: ViewData) => T,
+  opts: { setupDecision?: boolean } = {}
 ): Promise<T | null> {
   const source = await store.getCodesSource(project.id);
   if (!source) return null;
   const rev = await store.runDataRevision(run.id);
+  // A view that reads the setup decision keys on it too (its lines can change without a prompt changing).
+  const setup = opts.setupDecision ? await store.getSetupDecision(project.id) : undefined;
   const projectHash = createHash("sha256")
-    .update(JSON.stringify([project.brand, project.competitors, project.engine_set]))
+    .update(JSON.stringify(setup === undefined ? [project.brand, project.competitors, project.engine_set] : [project.brand, project.competitors, project.engine_set, setup]))
     .digest("hex")
     .slice(0, 12);
   const prefix = `${name}:${version}:${run.id}:`;
@@ -119,7 +130,7 @@ export async function cachedView<T>(
     const raw = await store.cacheGet(key, 24 * 3600 * 1000);
     if (raw) return JSON.parse(raw) as T;
   }
-  const data = await loadViewData(run, project);
+  const data = await loadViewData(run, project, opts);
   if (!data) return null;
   const view = compute(data);
   if (rev !== null) {
