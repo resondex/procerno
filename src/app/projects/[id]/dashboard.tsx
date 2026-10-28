@@ -10,6 +10,7 @@ import AlternativesSection from "./alternatives_view";
 import DoubtSections from "./doubt_view";
 import ValueSection from "./value_view";
 import ReasonsSection from "./reasons_view";
+import AwarenessSections from "./awareness_view";
 import TaxonomyReview from "./taxonomy_review";
 import IdentifyTab, { type Suggestion } from "./identify_tab";
 import ParentsTab from "./parents_tab";
@@ -607,6 +608,7 @@ export default function ProjectDashboard({
         )}
 
       {headlineRun && <HeadlineSection key={`${headlineRun.id}:${dictVersion}`} runId={headlineRun.id} />}
+      {headlineRun && <AwarenessSections key={`awareness:${headlineRun.id}:${dictVersion}`} runId={headlineRun.id} />}
       {headlineRun && <HeadToHeadSection key={`h2h:${headlineRun.id}:${dictVersion}`} runId={headlineRun.id} />}
       {headlineRun && <AlternativesSection key={`alt:${headlineRun.id}:${dictVersion}`} runId={headlineRun.id} />}
       {headlineRun && <DoubtSections key={`doubt:${headlineRun.id}:${dictVersion}`} runId={headlineRun.id} />}
