@@ -19,6 +19,12 @@ import type { AnswerCodes, Intent, Project, Run } from "../types";
  * incidence is the share of answers carrying ANY of its codes (deduped per
  * answer, like a dictionary family). Codes the map leaves out stay their own
  * rows; names the codebook does not hold are ignored.
+ *
+ * A group is MIXED within a type when one member code is argued at least
+ * MIX_LEAN_PTS more often under the type's first verdict than its second and
+ * another is argued that much more often the other way - the group row then
+ * averages a strength and a weakness toward zero. Groups are drawn once by
+ * meaning and never redrawn; the flag is read from each run's own numbers.
  */
 
 export type { RateCell };
@@ -52,6 +58,11 @@ export interface ReasonRow {
   byType: Partial<Record<ViewKey, RateCell>>;
   /** type -> verdict -> incidence among that verdict's answers. */
   byVerdict: Partial<Record<ViewKey, Record<string, RateCell>>>;
+  /**
+   * Group rows only: per type, the member codes leaning toward the type's
+   * first verdict and toward its second, present only when both sides hold one.
+   */
+  mixed: Partial<Record<ViewKey, { toward: string[]; away: string[] }>>;
 }
 
 export interface ReasonsView {
@@ -84,6 +95,13 @@ const TYPE_ORDER: { key: ViewKey; label: string }[] = [
   { key: "settled_ecosystem", label: "Ecosystem" },
   { key: "settled_advocacy", label: "Advocacy" },
 ];
+
+/** Points by which a member code must lean each way for its group to read as mixed. */
+const MIX_LEAN_PTS = 5;
+/** Member codes argued in less than this share of pooled answers never make a group mixed. */
+const MIX_MIN_INCIDENCE = 0.02;
+/** Smallest verdict group the lean is read from (the view's gap column uses the same floor). */
+const MIX_MIN_ANSWERS = 20;
 
 type Bucketer = { buckets: { key: string; label: string }[]; of: (c: AnswerCodes) => string };
 
@@ -275,6 +293,7 @@ export function computeReasons(data: ViewData): ReasonsView {
       pooled: cell(pooled.filter((c) => has(c, members)).length, pooled.length),
       byType,
       byVerdict,
+      mixed: {},
     };
   };
 
@@ -292,12 +311,28 @@ export function computeReasons(data: ViewData): ReasonsView {
   for (const g of parsed?.groups ?? []) for (const c of g.codes) groupOf.set(c, g.name);
 
   const codes = confirmed.map((c) => rowOf(c, c, [c], false, groupOf.get(c) ?? null));
-  const groups = parsed
-    ? [
-        ...parsed.groups.map((g) => rowOf(`group:${g.name}`, g.name, g.codes, true, null)),
-        ...codes.filter((c) => !groupOf.has(c.key)),
-      ]
-    : null;
+  const codeRow = new Map(codes.map((r) => [r.key, r]));
+  const share = (c: RateCell) => (c.n > 0 ? c.k / c.n : 0);
+  const groupRow = (g: { name: string; codes: string[] }) => {
+    const row = rowOf(`group:${g.name}`, g.name, g.codes, true, null);
+    for (const t of types) {
+      const [a, b] = t.verdicts;
+      if (!b || a.answers < MIX_MIN_ANSWERS || b.answers < MIX_MIN_ANSWERS) continue;
+      const toward: string[] = [];
+      const away: string[] = [];
+      for (const code of g.codes) {
+        const r = codeRow.get(code);
+        const v = r?.byVerdict[t.key];
+        if (!r || !v || share(r.pooled) < MIX_MIN_INCIDENCE) continue;
+        const d = (share(v[a.key]) - share(v[b.key])) * 100;
+        if (d >= MIX_LEAN_PTS) toward.push(code);
+        else if (d <= -MIX_LEAN_PTS) away.push(code);
+      }
+      if (toward.length && away.length) row.mixed[t.key] = { toward, away };
+    }
+    return row;
+  };
+  const groups = parsed ? [...parsed.groups.map(groupRow), ...codes.filter((c) => !groupOf.has(c.key))] : null;
 
   return {
     runId: data.run.id,
@@ -311,7 +346,7 @@ export function computeReasons(data: ViewData): ReasonsView {
   };
 }
 
-const REASONS_VERSION = "r1";
+const REASONS_VERSION = "r2";
 export function computeReasonsCached(run: Run, project: Project): Promise<ReasonsView | null> {
   return cachedView("reasons", REASONS_VERSION, run, project, computeReasons, { codeGroups: true });
 }

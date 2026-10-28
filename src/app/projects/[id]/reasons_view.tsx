@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import type { ReasonRow, ReasonsView } from "@/lib/engine/reasons";
 import type { ViewKey } from "@/lib/engine/views";
-import { SortTable, type Col } from "./table";
+import { SortTable, Tip, type Col } from "./table";
 import { rate, rateCol } from "./view_parts";
 
 /**
@@ -48,13 +48,26 @@ export default function ReasonsSection({ runId }: { runId: string }) {
       id: "label",
       label: "Reason",
       val: (r) => r.label,
-      render: (r) => (
-        <span className={r.isGroup ? "font-medium" : ""}>
-          {r.label}
-          {r.isGroup && <span className="ml-2 text-[11px] text-ink-3">{r.codes.length} codes</span>}
-          {!r.isGroup && r.group && <span className="ml-2 text-[11px] text-ink-3">{r.group}</span>}
-        </span>
-      ),
+      render: (r) => {
+        const mix = selected ? r.mixed[selected.key] : undefined;
+        const [a, b] = selected?.verdicts ?? [];
+        return (
+          <span className={r.isGroup ? "font-medium" : ""}>
+            {r.label}
+            {r.isGroup && <span className="ml-2 text-[11px] text-ink-3">{r.codes.length} codes</span>}
+            {!r.isGroup && r.group && <span className="ml-2 text-[11px] text-ink-3">{r.group}</span>}
+            {mix && a && b && (
+              <Tip
+                tip={`This group's reasons pull opposite ways, so the group row can read close to even. Argued more in "${a.label}" answers: ${mix.toward.join(", ")}. Argued more in "${b.label}" answers: ${mix.away.join(", ")}. Untick "Group related reasons" to see each one.`}
+              >
+                <span className="ml-2 cursor-help rounded bg-warning/15 px-1.5 py-0.5 text-[11px] font-normal text-warning">
+                  pulls both ways
+                </span>
+              </Tip>
+            )}
+          </span>
+        );
+      },
     };
     if (!selected) {
       return [
