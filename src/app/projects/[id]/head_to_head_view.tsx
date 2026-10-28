@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import type {
+  ConditionGroup,
   HeadToHeadRow,
   HeadToHeadSlice,
   HeadToHeadView,
@@ -115,8 +116,75 @@ const engineCols: Col<HeadToHeadSlice>[] = [
   rateCol("undecided", "No single pick", TIPS.undecided, (s) => s.undecided),
 ];
 
+/**
+ * The conditions panel (hh2): the head-to-head ask is context-free by
+ * design, so the win rate is the AI's DEFAULT answer; the boundaries it
+ * states inside the answers ("X for large orgs") are grouped per matchup
+ * from the v0.4 decision_rules. Absent entirely on sources without rules.
+ */
+const TOP_GROUPS = 6;
+
+function Direction({ label, groups, more }: { label: string; groups: ConditionGroup[]; more: number }) {
+  if (groups.length === 0) return null;
+  const shown = groups.slice(0, TOP_GROUPS);
+  const rest = groups.length - shown.length + more;
+  return (
+    <div className="min-w-0">
+      <div className="text-[12px] font-medium text-ink-2">{label}</div>
+      <ul className="mt-1 grid gap-0.5">
+        {shown.map((g) => (
+          <li key={g.label} className="text-[12px] leading-snug">
+            <span className="text-ink">{g.label}</span>
+            <span className="text-ink-3"> ({g.n})</span>
+          </li>
+        ))}
+      </ul>
+      {rest > 0 && <div className="mt-0.5 text-[11px] text-ink-3">+{rest} more</div>}
+    </div>
+  );
+}
+
+function Boundaries({ row, brand }: { row: HeadToHeadRow; brand: string }) {
+  const c = row.conditions;
+  if (!c) return null;
+  const won = rate(row.won);
+  const lost = rate(row.lost);
+  const lead =
+    won === 0 && lost === 0
+      ? "the AI mostly makes no single pick"
+      : lost >= won
+        ? `${row.rival} is the default ${pct(row.lost)} of the time`
+        : `${brand} is the default ${pct(row.won)} of the time`;
+  return (
+    <div className="rounded-md border border-line/60 p-3">
+      <div className="text-[13px] font-medium text-ink">{brand} vs {row.rival}</div>
+      <p className="mt-0.5 text-[12px] text-ink-3">
+        On the context-free ask, {lead} - the AI&apos;s stated boundaries:
+      </p>
+      <div className="mt-2 grid gap-3 sm:grid-cols-2">
+        <Direction label={`Routes to ${brand} when`} groups={c.you} more={c.youMore} />
+        <Direction label={`Routes to ${row.rival} when`} groups={c.rival} more={c.rivalMore} />
+      </div>
+      {c.elsewhere.length > 0 && (
+        <div className="mt-3 text-[12px]">
+          <span className="font-medium text-ink-2">Routes elsewhere: </span>
+          <span className="text-ink-3">
+            {c.elsewhere
+              .map((e) => `${e.name} (${e.n})${e.conditions.length > 0 ? ` - ${e.conditions.map((g) => g.label).join("; ")}` : ""}`)
+              .join(", ")}
+          </span>
+        </div>
+      )}
+      <div className="mt-2 text-[11px] text-ink-3">
+        {c.rules} stated rules across {row.answers} answers; {c.unconditional} answers answer unconditionally.
+      </div>
+    </div>
+  );
+}
+
 function KindSection({ view, title, blurb, first }: { view: HeadToHeadView; title: string; blurb: string; first: string }) {
   const others = view.rows.flatMap((r) => r.otherPicks.map((o) => `${o.name} (${o.n}, vs ${r.rival})`));
+  const bounded = view.rows.filter((r) => r.conditions);
   return (
     <section className="card p-6 grid gap-4">
       <div>
@@ -143,6 +211,16 @@ function KindSection({ view, title, blurb, first }: { view: HeadToHeadView; titl
       <SortTable cols={rowCols(first)} rows={view.rows} filename={`head_to_head_${view.kind}.csv`} defaultSort={{ id: "won", dir: 1 }} />
       {others.length > 0 && (
         <p className="text-[12px] text-ink-3">Other picks: {others.join(", ")}.</p>
+      )}
+      {bounded.length > 0 && (
+        <details className="text-[13px]">
+          <summary className="cursor-pointer text-ink-2">When does each side win? The AI&apos;s stated boundaries</summary>
+          <div className="mt-3 grid gap-3">
+            {bounded.map((r) => (
+              <Boundaries key={r.key} row={r} brand={view.brand} />
+            ))}
+          </div>
+        </details>
       )}
       <details className="text-[13px]">
         <summary className="cursor-pointer text-ink-2">By engine, across every {first.toLowerCase()}</summary>

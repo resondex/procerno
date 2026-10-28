@@ -1,6 +1,7 @@
 import { ENGINES } from "./providers";
 import { buildResolver } from "./brand_resolve";
 import { containsSeq, famTokens } from "./brand_family";
+import { definitionStems, excludedWords } from "./definition_overlap";
 import { cachedView, cell, poolOf, type PoolRow, type RateCell, type ViewData } from "./view_data";
 import type { DictionaryEntry, Intent, Project, Run } from "../types";
 
@@ -28,6 +29,48 @@ export interface NamedCount {
   n: number;
 }
 
+/**
+ * The conditions panel (hh2, 2026-10-27, CONDITIONS_PANEL_PLAN_2026-10-27.md):
+ * the head-to-head cells are context-free by design (s10), so the
+ * circumstance-coloring lives inside the answers as stated carve-outs, and
+ * the v0.4 decision_rules capture exactly those. Per matchup, each rule's
+ * choice resolves through the dictionary like a top pick and lands on a
+ * side: routes to you, routes to the rival, or routes to a third brand
+ * (the leakage the two-way record hides). Conditions are grouped by their
+ * distinctive stems (the definition_overlap stemming, category words out) -
+ * deterministic, zero model calls; the group's label is its most frequent
+ * surface wording. Rules are deduplicated per answer by (side, resolved
+ * brand, condition group), since drc2 splits a multi-product branch into
+ * one rule per product repeating the condition.
+ */
+export interface ConditionGroup {
+  /** The group's most frequent surface wording. */
+  label: string;
+  /** Rules in the group after per-answer dedup. */
+  n: number;
+  /** A sample of the carrying answers' response ids. */
+  ids: string[];
+}
+
+export interface ElsewhereBrand {
+  name: string;
+  n: number;
+  conditions: ConditionGroup[];
+}
+
+export interface MatchupConditions {
+  /** All stated rules on this matchup's answers (before dedup). */
+  rules: number;
+  /** Answers whose decision_rules is [] - pure default answers. */
+  unconditional: number;
+  you: ConditionGroup[];
+  /** Condition groups beyond the listed top of `you` / `rival`. */
+  youMore: number;
+  rival: ConditionGroup[];
+  rivalMore: number;
+  elsewhere: ElsewhereBrand[];
+}
+
 export interface HeadToHeadRow {
   /** Rival identity: the dictionary entry id, or "?" + the name when unresolved. */
   key: string;
@@ -44,6 +87,8 @@ export interface HeadToHeadRow {
   /** Won over won + lost - the straight two-way record. */
   winOfDecided: RateCell;
   otherPicks: NamedCount[];
+  /** Absent when the codes source carries no decision_rules (pre-v0.4). */
+  conditions?: MatchupConditions;
 }
 
 export interface HeadToHeadSlice {
@@ -90,6 +135,81 @@ function classBrandOf(
     if (containsSeq(hay, f.seq) && (!best || f.seq.length > best.seq.length)) best = f;
   }
   return best?.entry ?? null;
+}
+
+const GROUP_CAP = 12;
+const ID_CAP = 8;
+
+/** The conditions panel for one matchup - see MatchupConditions above.
+ * Undefined when none of the matchup's answers carry decision_rules. */
+function conditionsOf(
+  list: { row: PoolRow }[],
+  resolve: (name: string) => { key: string; name: string },
+  targetKey: string,
+  rivalKey: string,
+  exclude: Set<string>
+): MatchupConditions | undefined {
+  type Acc = { n: number; surfaces: Map<string, number>; ids: Set<string> };
+  const fresh = (): Acc => ({ n: 0, surfaces: new Map(), ids: new Set() });
+  const sides = { you: new Map<string, Acc>(), rival: new Map<string, Acc>() };
+  const elsewhere = new Map<string, { name: string; n: number; conds: Map<string, Acc> }>();
+  let rules = 0;
+  let unconditional = 0;
+  let any = false;
+  for (const { row } of list) {
+    const dr = row.code.decision_rules;
+    if (dr == null) continue;
+    any = true;
+    if (dr.length === 0) { unconditional++; continue; }
+    const seen = new Set<string>();
+    for (const rule of dr) {
+      rules++;
+      const r = resolve(rule.choice);
+      const side = r.key === targetKey ? "you" : r.key === rivalKey ? "rival" : "elsewhere";
+      const condition = rule.condition.trim();
+      const stems = [...definitionStems(condition, exclude).keys()].sort();
+      const ck = stems.length > 0 ? stems.join("|") : condition.toLowerCase();
+      const dedup = `${side}|${side === "elsewhere" ? r.key : ""}|${ck}`;
+      if (seen.has(dedup)) continue;
+      seen.add(dedup);
+      let acc: Acc;
+      if (side === "elsewhere") {
+        let e = elsewhere.get(r.key);
+        if (!e) { e = { name: r.name, n: 0, conds: new Map() }; elsewhere.set(r.key, e); }
+        e.n++;
+        acc = e.conds.get(ck) ?? fresh();
+        e.conds.set(ck, acc);
+      } else {
+        acc = sides[side].get(ck) ?? fresh();
+        sides[side].set(ck, acc);
+      }
+      acc.n++;
+      acc.surfaces.set(condition, (acc.surfaces.get(condition) ?? 0) + 1);
+      if (acc.ids.size < ID_CAP) acc.ids.add(row.code.response_id);
+    }
+  }
+  if (!any) return undefined;
+  const groups = (m: Map<string, Acc>, cap = GROUP_CAP): ConditionGroup[] =>
+    [...m.values()]
+      .sort((a, b) => b.n - a.n)
+      .slice(0, cap)
+      .map((a) => ({
+        label: [...a.surfaces.entries()].sort((x, y) => y[1] - x[1] || x[0].length - y[0].length)[0][0],
+        n: a.n,
+        ids: [...a.ids],
+      }));
+  return {
+    rules,
+    unconditional,
+    you: groups(sides.you),
+    youMore: Math.max(0, sides.you.size - GROUP_CAP),
+    rival: groups(sides.rival),
+    rivalMore: Math.max(0, sides.rival.size - GROUP_CAP),
+    elsewhere: [...elsewhere.values()]
+      .sort((a, b) => b.n - a.n)
+      .slice(0, 8)
+      .map((e) => ({ name: e.name, n: e.n, conditions: groups(e.conds, 4) })),
+  };
 }
 
 function tallyOf(rows: { bucket: Bucket }[]) {
@@ -162,10 +282,12 @@ function computeKind(data: ViewData, kind: "entity" | "class"): HeadToHeadView |
   const byRival = new Map<string, typeof scored>();
   for (const s of scored) byRival.set(s.rival, [...(byRival.get(s.rival) ?? []), s]);
   const rivalMeta = new Map([...rivalOfIntent.values()].map((r) => [r.key, r]));
+  const exclude = excludedWords([project.category]);
   const rows: HeadToHeadRow[] = [...byRival.entries()].map(([key, list]) => {
     const meta = rivalMeta.get(key)!;
     const others = new Map<string, number>();
     for (const s of list) if (s.otherName) others.set(s.otherName, (others.get(s.otherName) ?? 0) + 1);
+    const conditions = conditionsOf(list, resolve, targetKey, key, exclude);
     return {
       key,
       rival: meta.name,
@@ -173,6 +295,7 @@ function computeKind(data: ViewData, kind: "entity" | "class"): HeadToHeadView |
       cells: new Set(list.map((s) => s.row.intent.id)).size,
       answers: list.length,
       ...tallyOf(list),
+      ...(conditions && { conditions }),
       otherPicks: [...others.entries()]
         .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
         .slice(0, 8)
@@ -211,7 +334,7 @@ export function computeHeadToHead(data: ViewData): HeadToHeadViews {
   };
 }
 
-const HEAD_TO_HEAD_VERSION = "hh1";
+const HEAD_TO_HEAD_VERSION = "hh2";
 export function computeHeadToHeadCached(run: Run, project: Project): Promise<HeadToHeadViews | null> {
   return cachedView("head_to_head", HEAD_TO_HEAD_VERSION, run, project, computeHeadToHead);
 }

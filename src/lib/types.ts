@@ -401,7 +401,7 @@ export interface AnswerCodes {
   /** rank = order of first appearance in the answer, 1-based. */
   mentions: { brand: string; framing: string; rank: number }[] | null;
   /** v0.4 field; null until a contract that asks it. */
-  decision_rules: { condition: string; choice: string }[] | null;
+  decision_rules: { condition: string; choice: string; product?: string }[] | null;
 }
 
 export interface ExtractedMention {

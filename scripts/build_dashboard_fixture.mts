@@ -10,11 +10,13 @@
  * Sources: project config (projects, intents, prompts, runs, dictionary)
  * from prod through per-query read-only transactions; answers from the
  * response vault; codes from ~/Documents/procerno_eval/labeling (v2 training
- * + holdout labels, Set C v1.3). Nothing is written to prod and no model is
- * called. Builds into a temp file and moves it into place only when every
- * check passes: one code row per answer, every label id a vault answer, the
- * router's schema equal to the labeler's on every row, and per-schema field
- * presence as SCHEMA_FIELDS states.
+ * + holdout labels, Set C v1.3; decision_rules from the drc3 recode, landed
+ * 2026-10-27, overlaid onto the v2 rows - Set C stages carry none). Nothing
+ * is written to prod and no model is called. Builds into a temp file and
+ * moves it into place only when every check passes: one code row per answer,
+ * every label id a vault answer, the router's schema equal to the labeler's
+ * on every row, per-schema field presence as SCHEMA_FIELDS states, and
+ * contract-shaped decision_rules on every row of the six recoded schemas.
  */
 import postgres from "postgres"; import fs from "node:fs"; import path from "node:path"; import zlib from "node:zlib";
 import type { AnswerCodes } from "../src/lib/types";
@@ -24,7 +26,20 @@ const OUT = path.resolve(process.argv[2] ?? path.join(REPO, "data", "dashboard_f
 const TMP = `${OUT}.building`;
 const VAULT = `${process.env.HOME}/Documents/procerno_response_vault`;
 const LAB = `${process.env.HOME}/Documents/procerno_eval/labeling`;
+const DR = `${LAB}/v04_dr/recode`;
 const SOURCE = "ref:opus-5-5";
+
+// drc3 rule vocabulary: the choice schema's rules route to a brand (free
+// text, never a product key); the enum schemas take the listed pair and may
+// carry the routed product.
+const DR_ENUM: Record<string, Set<string> | null> = {
+  choice: null,
+  premium: new Set(["premium", "basic"]),
+  value: new Set(["worth", "cheaper"]),
+  churn_renewal: new Set(["keep", "leave"]),
+  objections: new Set(["proceed", "avoid"]),
+  alt_defensive: new Set(["keep", "leave"]),
+};
 
 // The prod URL is read for the config pull only, then removed from the env
 // so the store module below can only ever bind to the fixture sqlite.
@@ -119,6 +134,14 @@ for (const t of TRACKERS) {
   for (const r of readJsonl(`${LAB}/g3/setc/results/requests_${t.slug}_setc.results.jsonl`))
     labels.push({ row: r, schema: r.stage, contract: "setc_v1.3" });
 
+  // The drc3 recode's decision_rules, keyed by answer id (drf_ prefix off).
+  const drRules = new Map<string, unknown>();
+  for (const r of readJsonl(`${DR}/results/${t.slug}_drf.results.jsonl`)) {
+    const id = (r.id as string).replace(/^drf_/, "");
+    if (drRules.has(id)) { fail(`${t.slug}: recode labels ${id} twice`); continue; }
+    drRules.set(id, r.decision_rules);
+  }
+
   const seen = new Set<string>();
   const codes: AnswerCodes[] = [];
   const viewCount: Record<string, number> = {};
@@ -152,9 +175,34 @@ for (const t of TRACKERS) {
       c[f] = f === "mentions" ? ranked(v as { brand: string; framing: string }[], ans.text as string) : v;
     }
     for (const f of asked) if (!(f in c)) fail(`${t.slug}: ${id} (${schema}) is missing asked field ${f}`);
+
+    // decision_rules ride every v2 row of the six recoded schemas (the
+    // awareness and criteria schemas were outside the recode's scope);
+    // each rule is checked against the drc3 shape and vocabulary.
+    if (contract === "v2_2026-10-22" && DR_ENUM[schema] !== undefined) {
+      const rules = drRules.get(id);
+      if (!Array.isArray(rules)) fail(`${t.slug}: ${id} (${schema}) has no recode decision_rules`);
+      else {
+        const en = DR_ENUM[schema];
+        for (const rule of rules as Record<string, unknown>[]) {
+          const bad =
+            Object.keys(rule).some((k) => !["condition", "choice", "product"].includes(k)) ||
+            typeof rule.condition !== "string" || !rule.condition ||
+            typeof rule.choice !== "string" || !rule.choice ||
+            (en === null && "product" in rule) ||
+            (en != null && !en.has(rule.choice)) ||
+            ("product" in rule && (typeof rule.product !== "string" || !rule.product));
+          if (bad) { fail(`${t.slug}: ${id} (${schema}) bad rule ${JSON.stringify(rule).slice(0, 80)}`); break; }
+        }
+        c.decision_rules = rules;
+        c.contract = `${contract}+drc3`;
+        drRules.delete(id);
+      }
+    }
     codes.push(c as unknown as AnswerCodes);
   }
   for (const id of answerById.keys()) if (!seen.has(id)) fail(`${t.slug}: answer ${id} has no label`);
+  for (const id of drRules.keys()) fail(`${t.slug}: recode rules for ${id} matched no v2 row`);
   // Fill every unasked column with null so the row shape is complete.
   const full = codes.map((c) => {
     const o: Record<string, unknown> = { ...c };
