@@ -64,3 +64,23 @@ invalidates automatically. Older-generation keys purged as the existing views do
    two-way record hides) vs folded into other picks.
 2. Scope: head-to-head only for now. The same pattern later serves Value (worth/cheaper conditions)
    and churn/renewal (keep/leave conditions) - separate rounds.
+
+## Embed grouping built (2026-10-28, Tyler's go): tau calibration record
+
+v1 stems measurably fragmented (Jira-Linear "routes to Jira": 945 rules -> ~556 groups), so the
+embed layer shipped: `src/lib/engine/condition_groups.ts` (text-embedding-3-large + leader
+clustering, the consolidate.ts core; one grouping per view so a wording groups identically across
+matchups; ledgered as views:conditions; stems fallback whenever no OpenAI key is present or the
+call fails - the fixture app stays keyless and byte-reproduces the stem grouping). hh2 -> hh3
+(same inputs, different grouping = version bump). Embeddings are not cached per condition: a
+run's conditions are ~$0.003 and the view rides cachedView's revision key.
+
+Tau sweep on the fixture's Jira-Linear and AmEx-Chase (~$0.02, six passes):
+
+| tau | Jira-Linear you/rival groups | AmEx-Chase you/rival | read |
+| --- | --- | --- | --- |
+| 0.45 | 20 / 19 | 19 / 20 | over-merges: "frequently travel internationally" (106) swallowed "want luxury travel perks" (85 + 21 apart at 0.55) |
+| **0.55** | **54 / 42** | **32 / 35** | the keep: wording variance collapsed, distinct conditions apart (luxury perks vs international travel; compliance vs org size) |
+| 0.65 | 118 / 74 | 63 / 55 | re-fragments: one customization idea split four ways |
+
+CONDITION_TAU defaults 0.55 (env-overridable). UI unchanged - groups arrive pre-grouped.

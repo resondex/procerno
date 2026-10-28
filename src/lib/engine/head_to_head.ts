@@ -1,7 +1,8 @@
 import { ENGINES } from "./providers";
 import { buildResolver } from "./brand_resolve";
 import { containsSeq, famTokens } from "./brand_family";
-import { definitionStems, excludedWords } from "./definition_overlap";
+import { excludedWords } from "./definition_overlap";
+import { conditionKeyMap, conditionStemKey } from "./condition_groups";
 import { cachedView, cell, poolOf, type PoolRow, type RateCell, type ViewData } from "./view_data";
 import type { DictionaryEntry, Intent, Project, Run } from "../types";
 
@@ -147,7 +148,7 @@ function conditionsOf(
   resolve: (name: string) => { key: string; name: string },
   targetKey: string,
   rivalKey: string,
-  exclude: Set<string>
+  keyOf: (condition: string) => string
 ): MatchupConditions | undefined {
   type Acc = { n: number; surfaces: Map<string, number>; ids: Set<string> };
   const fresh = (): Acc => ({ n: 0, surfaces: new Map(), ids: new Set() });
@@ -167,8 +168,7 @@ function conditionsOf(
       const r = resolve(rule.choice);
       const side = r.key === targetKey ? "you" : r.key === rivalKey ? "rival" : "elsewhere";
       const condition = rule.condition.trim();
-      const stems = [...definitionStems(condition, exclude).keys()].sort();
-      const ck = stems.length > 0 ? stems.join("|") : condition.toLowerCase();
+      const ck = keyOf(condition);
       const dedup = `${side}|${side === "elsewhere" ? r.key : ""}|${ck}`;
       if (seen.has(dedup)) continue;
       seen.add(dedup);
@@ -226,7 +226,7 @@ function tallyOf(rows: { bucket: Bucket }[]) {
   };
 }
 
-function computeKind(data: ViewData, kind: "entity" | "class"): HeadToHeadView | null {
+async function computeKind(data: ViewData, kind: "entity" | "class"): Promise<HeadToHeadView | null> {
   const { project, dictionary } = data;
   const resolve = buildResolver(dictionary);
   const targetKey = resolve(project.brand).key;
@@ -283,11 +283,22 @@ function computeKind(data: ViewData, kind: "entity" | "class"): HeadToHeadView |
   for (const s of scored) byRival.set(s.rival, [...(byRival.get(s.rival) ?? []), s]);
   const rivalMeta = new Map([...rivalOfIntent.values()].map((r) => [r.key, r]));
   const exclude = excludedWords([project.category]);
+  // One grouping over the whole view's conditions (embeddings-first, stem
+  // fallback) - the same wording groups identically across every matchup.
+  const condCounts = new Map<string, number>();
+  for (const s of scored) {
+    for (const rule of s.row.code.decision_rules ?? []) {
+      const c = rule.condition.trim();
+      condCounts.set(c, (condCounts.get(c) ?? 0) + 1);
+    }
+  }
+  const condKeys = await conditionKeyMap(condCounts, exclude);
+  const keyOf = (c: string) => condKeys.get(c) ?? conditionStemKey(c, exclude);
   const rows: HeadToHeadRow[] = [...byRival.entries()].map(([key, list]) => {
     const meta = rivalMeta.get(key)!;
     const others = new Map<string, number>();
     for (const s of list) if (s.otherName) others.set(s.otherName, (others.get(s.otherName) ?? 0) + 1);
-    const conditions = conditionsOf(list, resolve, targetKey, key, exclude);
+    const conditions = conditionsOf(list, resolve, targetKey, key, keyOf);
     return {
       key,
       rival: meta.name,
@@ -324,17 +335,17 @@ function computeKind(data: ViewData, kind: "entity" | "class"): HeadToHeadView |
   };
 }
 
-export function computeHeadToHead(data: ViewData): HeadToHeadViews {
+export async function computeHeadToHead(data: ViewData): Promise<HeadToHeadViews> {
   return {
     runId: data.run.id,
     source: data.source,
     brand: data.project.brand,
-    entity: computeKind(data, "entity"),
-    class: computeKind(data, "class"),
+    entity: await computeKind(data, "entity"),
+    class: await computeKind(data, "class"),
   };
 }
 
-const HEAD_TO_HEAD_VERSION = "hh2";
+const HEAD_TO_HEAD_VERSION = "hh3";
 export function computeHeadToHeadCached(run: Run, project: Project): Promise<HeadToHeadViews | null> {
   return cachedView("head_to_head", HEAD_TO_HEAD_VERSION, run, project, computeHeadToHead);
 }

@@ -122,7 +122,7 @@ export async function cachedView<T>(
   version: string,
   run: Run,
   project: Project,
-  compute: (data: ViewData) => T,
+  compute: (data: ViewData) => T | Promise<T>,
   opts: ViewExtras = {}
 ): Promise<T | null> {
   const source = await store.getCodesSource(project.id);
@@ -144,7 +144,7 @@ export async function cachedView<T>(
   }
   const data = await loadViewData(run, project, opts);
   if (!data) return null;
-  const view = compute(data);
+  const view = await compute(data);
   if (rev !== null) {
     await store.cacheSet(key, JSON.stringify(view), {
       brand: project.brand,
