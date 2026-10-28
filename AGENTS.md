@@ -1112,6 +1112,12 @@ Four fresh adversarial passes re-traced every 2026-10-24 finding against the fix
 
 Open after round 2, recorded in the audit file: dictionary/suggest stays read-level (bounded spend; boards pre-warmed by contract); the ss9 objections property is unmeasured until the first p32 roll (watch for over-culled "does it really..." doubt paraphrases); key() ASCII folding, the maker-word gap and mention_filter's "+" tokenizer each need their own round; coverage/worry changes after a cells write still don't invalidate the battery.
 
+## Product-fit study (2026-10-26, Tyler's go): the AI's product picks fit; the facts around them go stale
+
+Does the AI pick a product that fits the buyer described in the question? 300 use-case answers (one buyer, one job, one pick) from the five October vault runs, 60 per tracker across all 13 engines (seed 20261026, max 2 per question), judged by claude-opus-5-5 effort high, one per call: fits / defensible / misfit / cannot_judge / no_pick against only the needs the question states, plus a better pick, a stale-fact flag and whether the pick is the tracker's brand. The Batch API submission (msgbatch_01G9XVswNC7RyTNfXVeESBQG) sat 1h45m unstarted and was cancelled at $0; run live on Tyler's go, **$3.83**, 0 failures. Files `~/Documents/procerno_eval/product_fit_2026-10-26/` (build.py, live.mts, score.py, REPORT.md, misfits.md). Local only.
+
+Results: of 224 single-pick answers, 203 fit (91%), 20 defensible, 0 misfit, 1 cannot_judge; 76 answers (25%) made no single pick. By tracker 84% (Jira) to 95% (Doritos); the tracker's own brand 89% vs other brands 92%. Defensible classes: assumed context the buyer never gave (Jira migration picks assuming a specific source tracker), older or discontinued models (Pixel), a stated need only partly met (AmEx), format nitpicks (Doritos), unnamed-content questions (Netflix). 17 answers (8% of picks) stated out-of-date facts about the picked product (old fees and prices, a renamed service, discontinued models and features). Caveats: one unverified judge whose "current facts" are its own model knowledge; zero misfits may reflect leniency or that use-case questions rarely state hard constraints; the planned ~30-row blind human read has not been done.
+
 ## Dashboard foundation built (2026-10-27, Tyler's go): answer_codes, the fixture, the view router
 
 Design and Tyler's five approvals: `DASHBOARD_STORAGE_DESIGN_2026-10-27.md`. Built, with no model calls and no prod writes:

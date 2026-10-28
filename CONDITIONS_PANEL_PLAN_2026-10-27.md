@@ -58,7 +58,7 @@ invalidates automatically. Older-generation keys purged as the existing views do
 - Fixture rebuild passes all checks; tsc, checker_fixture, serve_logic_harness clean; zero model calls
   on the fixture run.
 
-## Tyler's calls (defaults proposed)
+## Tyler's calls (both DECIDED as the defaults, 2026-10-27)
 
 1. Third-brand routings as their own "Routes elsewhere" group (recommended: it is the leakage the
    two-way record hides) vs folded into other picks.
