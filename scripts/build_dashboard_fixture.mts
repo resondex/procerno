@@ -28,6 +28,8 @@ const VAULT = `${process.env.HOME}/Documents/procerno_response_vault`;
 const LAB = `${process.env.HOME}/Documents/procerno_eval/labeling`;
 const DR = `${LAB}/v04_dr/recode`;
 const SOURCE = "ref:opus-5-5";
+/** The confirmed code_groups maps (reasons view), one file per tracker; a tracker without one gets none. */
+const GROUPS = `${process.env.HOME}/Documents/procerno_eval/code_groups_2026-10-27`;
 
 // drc3 rule vocabulary: the choice schema's rules route to a brand (free
 // text, never a product key); the enum schemas take the listed pair and may
@@ -108,7 +110,11 @@ for (const t of TRACKERS) {
   const intents = await ro((tx) => tx`select * from intents where project_id = ${pid}`) as Record<string, unknown>[];
   const prompts = await ro((tx) => tx`select * from prompts where project_id = ${pid}`) as Record<string, unknown>[];
   const dict = await ro((tx) => tx`select * from dictionary_entries where project_id = ${pid}`) as Record<string, unknown>[];
-  copy("projects", [{ ...project, codes_source: SOURCE }]);
+  const groupsFile = `${GROUPS}/code_groups_${t.slug}.json`;
+  const codeGroups = fs.existsSync(groupsFile)
+    ? JSON.stringify({ groups: (JSON.parse(fs.readFileSync(groupsFile, "utf8")) as { groups: { name: string; codes: string[] }[] }).groups })
+    : null;
+  copy("projects", [{ ...project, codes_source: SOURCE, code_groups: codeGroups }]);
   copy("intents", intents);
   copy("prompts", prompts);
   copy("dictionary_entries", dict);
