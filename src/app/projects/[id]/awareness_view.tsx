@@ -14,16 +14,16 @@ import { Legend, pct, range, rate, rateCol, StackBar, type Part } from "./view_p
  */
 
 const routeParts = (category: string): readonly Part<Route>[] => [
-  { key: "category", label: `Sent to ${category}`, color: "bg-primary" },
-  { key: "adjacent", label: "Sent to another kind of solution", color: "bg-warning/60" },
+  { key: "category", label: `Told to get ${category}`, color: "bg-primary" },
+  { key: "adjacent", label: "Solved without getting one", color: "bg-warning/60" },
   { key: "none", label: "No direction", color: "bg-neutral-bar" },
 ];
 
 const routeTips = (category: string, kind: AwarenessBlock["view"]): Record<Route, string> => ({
-  category: `Answers that point the asker to ${category} as the way to solve it.`,
+  category: `Answers that tell the asker to get ${category} as the way to solve it.`,
   adjacent:
     kind === "routing"
-      ? `Answers that point the asker to a different kind of solution - a fix, a habit or another kind of product - instead of ${category}.`
+      ? `Answers that solve it without the asker getting ${category}: fixing or using what they already have, a habit or routine, or another kind of product.`
       : `Answers that steer the newcomer away from ${category} to a different kind of solution.`,
   none:
     kind === "routing"
@@ -43,7 +43,7 @@ const sliceCols = (first: string, category: string, brand: string, kind: Awarene
     { id: "answers", label: "Answers", num: true, val: (s) => s.answers },
     {
       id: "bar",
-      label: "Where it sends them",
+      label: "What it tells them",
       val: (s) => Math.round(rate(s.routed.category) * 1000) / 10,
       render: (s) => <StackBar parts={parts} cells={s.routed} />,
     },
@@ -114,16 +114,16 @@ function RoutingCard({ b, brand, category }: { b: AwarenessBlock; brand: string;
   return (
     <section className="card p-6 grid gap-4">
       <div>
-        <h2 className="section-label mb-1">Problem recognition - where the AI sends a buyer with a problem</h2>
+        <h2 className="section-label mb-1">Problem recognition - does the AI tell someone with a problem to get one</h2>
         <p className="text-[13px] text-ink-3">
-          Questions from people with a problem who don&apos;t yet know they need {category}. {b.answers} answers on the
+          Questions from people describing a problem without naming {category}. {b.answers} answers on the
           core engine panel. Visibility only - these questions have no win or pick rate.
           {b.uncoded > 0 && ` ${b.uncoded} more answers are not coded yet.`}
         </p>
       </div>
       <div className="flex flex-wrap items-baseline gap-x-6 gap-y-1 text-[13px] text-ink-2">
-        <Stat value={pct(b.routed.category)} label={`sent to ${category}`} tip={`${tips.category} ${range(b.routed.category)}`} />
-        <Stat value={pct(b.routed.adjacent)} label="sent elsewhere" tip={`${tips.adjacent} ${range(b.routed.adjacent)}`} />
+        <Stat value={pct(b.routed.category)} label={`told to get ${category}`} tip={`${tips.category} ${range(b.routed.category)}`} />
+        <Stat value={pct(b.routed.adjacent)} label="solved without getting one" tip={`${tips.adjacent} ${range(b.routed.adjacent)}`} />
         <Stat value={pct(b.namesYou)} label={`name ${brand}`} tip={`${namesTip(brand)} ${range(b.namesYou)}`} />
         <Stat value={pct(b.pointsToProducts)} label="recommend a product" tip={`${POINTS_TIP} ${range(b.pointsToProducts)}`} />
       </div>
