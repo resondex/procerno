@@ -2,6 +2,7 @@ import { matchKey } from "../brand_key";
 import { ENGINES } from "./providers";
 import { buildResolver, type Resolver } from "./brand_resolve";
 import { roleOf, type HeadlineBrand } from "./headline";
+import { exitResolver, exitRows, outsideCounts } from "./exits";
 import { cachedView, cell, poolOf, type PoolRow, type RateCell, type ViewData } from "./view_data";
 import type { Project, Run } from "../types";
 
@@ -288,6 +289,7 @@ function computeOffensive(data: ViewData, resolve: Resolver, targetKey: string):
 // ---------- defensive ----------
 
 type Verdict = "keep" | "leave" | "undecided";
+const VERDICTS = ["keep", "leave", "undecided"] as const;
 
 interface HoldFacts {
   model: string;
@@ -310,50 +312,20 @@ function computeDefensive(data: ViewData, resolve: Resolver, targetKey: string):
   const { project, dictionary } = data;
   const { rows: pool, uncoded, core } = poolOf(data, "defensive_hold");
   if (pool.length === 0 && uncoded === 0) return null;
-  const entryByKey = new Map(dictionary.map((e) => [e.id, e]));
-  const legacy = new Set(project.competitors.map(matchKey));
-  const outsideNames = new Map<string, number>();
-
-  const facts: HoldFacts[] = pool.map(({ code: c, model }) => {
+  const answerExits = exitResolver(project, dictionary, resolve, targetKey);
+  const resolved = pool.map(({ code: c }) => answerExits(c.destinations));
+  const facts: HoldFacts[] = pool.map(({ code: c, model }, i) => {
     const verdict: Verdict = c.keep_or_leave === "keep" || c.keep_or_leave === "leave" ? c.keep_or_leave : "undecided";
-    const exits = new Map<string, { name: string; role: DestinationRow["role"] }>();
-    let ownProduct = false;
-    const outsideHere = new Set<string>();
-    for (const d of c.destinations ?? []) {
-      const r = resolve(d);
-      if (r.key === targetKey) {
-        ownProduct = true;
-        continue;
-      }
-      if (r.status === "active") {
-        const entry = entryByKey.get(r.key) ?? null;
-        // An exit to an unanalyzed brand still counts as an exit; only its row is hidden.
-        exits.set(r.key, { name: r.name, role: entry && !entry.analyzed ? "outside" : roleOf(r.key, targetKey, entry, legacy) });
-      } else {
-        exits.set(r.key, { name: r.name, role: "outside" });
-        outsideHere.add(r.name);
-      }
-    }
-    for (const name of outsideHere) outsideNames.set(name, (outsideNames.get(name) ?? 0) + 1);
-    return { model, verdict, exits, ownProduct };
+    return { model, verdict, exits: resolved[i].exits, ownProduct: resolved[i].ownProduct };
   });
 
   const n = facts.length;
-  const dest = new Map<string, DestinationRow & { k: number }>();
-  for (const f of facts) {
-    for (const [key, x] of f.exits) {
-      const d = dest.get(key) ?? { key, name: x.name, role: x.role, offered: cell(0, n), onKeep: 0, onLeave: 0, onUndecided: 0, k: 0 };
-      d.k++;
-      if (f.verdict === "keep") d.onKeep++;
-      else if (f.verdict === "leave") d.onLeave++;
-      else d.onUndecided++;
-      dest.set(key, d);
-    }
-  }
-  const destinations: DestinationRow[] = [...dest.values()]
-    .filter((d) => d.role !== "outside")
-    .map(({ k, ...d }) => ({ ...d, offered: cell(k, n) }))
-    .sort((a, b) => b.offered.k - a.offered.k || a.name.localeCompare(b.name));
+  const destinations: DestinationRow[] = exitRows(facts, VERDICTS).map(({ by, ...d }) => ({
+    ...d,
+    onKeep: by.keep,
+    onLeave: by.leave,
+    onUndecided: by.undecided,
+  }));
 
   const withExits = facts.filter((f) => f.exits.size > 0);
   const exitBy = (v: Verdict) => {
@@ -384,7 +356,7 @@ function computeDefensive(data: ViewData, resolve: Resolver, targetKey: string):
     exitsPerAnswer: withExits.length > 0 ? withExits.reduce((a, f) => a + f.exits.size, 0) / withExits.length : 0,
     ownProduct: cell(count(facts, (f) => f.ownProduct), n),
     destinations,
-    outsideDestinations: topCounts(outsideNames, 12),
+    outsideDestinations: outsideCounts(resolved),
     byEngine,
   };
 }
