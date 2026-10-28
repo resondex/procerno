@@ -112,7 +112,7 @@ for (const t of TRACKERS) {
   const dict = await ro((tx) => tx`select * from dictionary_entries where project_id = ${pid}`) as Record<string, unknown>[];
   const groupsFile = `${GROUPS}/code_groups_${t.slug}.json`;
   const codeGroups = fs.existsSync(groupsFile)
-    ? JSON.stringify({ groups: (JSON.parse(fs.readFileSync(groupsFile, "utf8")) as { groups: { name: string; codes: string[] }[] }).groups })
+    ? JSON.stringify(JSON.parse(fs.readFileSync(groupsFile, "utf8")))
     : null;
   copy("projects", [{ ...project, codes_source: SOURCE, code_groups: codeGroups }]);
   copy("intents", intents);

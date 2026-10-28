@@ -1,7 +1,11 @@
-import { NextResponse } from "next/server";
+import { after, NextResponse } from "next/server";
 import { z } from "zod";
 import { getAuth, requireProject } from "@/lib/auth";
 import { store } from "@/lib/store";
+import { ensureCodeGroups } from "@/lib/engine/code_groups";
+
+// The reason-group draft runs in after() on ratify: one Opus call, well under this.
+export const maxDuration = 300;
 
 /** The taxonomy confirmation endpoint - the one human judgment in the
  * discovery pipeline. GET returns the proposal and status; POST ratifies a
@@ -104,6 +108,9 @@ export async function POST(
     ratified: finalCodes,
   });
   await store.ratifyTaxonomy(id, finalCodes, record);
+  // Reason groups are drawn once per confirmed codebook, after the response
+  // (the gate stays instant): a re-ratify with the same list keeps its map.
+  after(() => ensureCodeGroups(id).then((r) => console.log(`code groups ${id}: ${r}`)));
   return NextResponse.json({ ok: true, reason_taxonomy: finalCodes, status: "ratified" });
 }
 
