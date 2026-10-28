@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import type {
   ConditionGroup,
   HeadToHeadRow,
@@ -10,6 +10,7 @@ import type {
   RateCell,
 } from "@/lib/engine/head_to_head";
 import { SortTable, Tip, type Col } from "./table";
+import { AnswersModal, type AnswersTarget } from "./view_parts";
 
 /**
  * The head-to-head views (2026-10-27): prompted win rate per named rival,
@@ -124,7 +125,52 @@ const engineCols: Col<HeadToHeadSlice>[] = [
  */
 const TOP_GROUPS = 6;
 
-function Direction({ label, groups, more }: { label: string; groups: ConditionGroup[]; more: number }) {
+type OpenAnswers = (target: AnswersTarget) => void;
+
+/** The answers modal's target for one condition group: its sample ids, the
+ * group's wording marked where it appears literally, plus the brand the
+ * group routes to. */
+const groupTarget = (g: ConditionGroup, routes: string, matchup: string): AnswersTarget => ({
+  title: `Routes to ${routes} when: ${g.label}`,
+  subtitle: `${matchup} - ${
+    g.ids.length < g.n
+      ? `a sample of ${g.ids.length} of the ${g.n} answers`
+      : g.n === 1
+        ? "the one answer"
+        : `the ${g.n} answers`
+  } stating this condition.`,
+  ids: g.ids,
+  highlight: [g.label, routes],
+});
+
+function GroupButton({ g, onOpen, children }: { g: ConditionGroup; onOpen: () => void; children: React.ReactNode }) {
+  if (g.ids.length === 0) return <>{children}</>;
+  return (
+    <button
+      type="button"
+      onClick={onOpen}
+      className="text-left underline decoration-ink-3/40 decoration-dotted underline-offset-2 hover:decoration-ink-3"
+    >
+      {children}
+    </button>
+  );
+}
+
+function Direction({
+  label,
+  groups,
+  more,
+  routes,
+  matchup,
+  onOpen,
+}: {
+  label: string;
+  groups: ConditionGroup[];
+  more: number;
+  routes: string;
+  matchup: string;
+  onOpen: OpenAnswers;
+}) {
   if (groups.length === 0) return null;
   const shown = groups.slice(0, TOP_GROUPS);
   const rest = groups.length - shown.length + more;
@@ -134,8 +180,10 @@ function Direction({ label, groups, more }: { label: string; groups: ConditionGr
       <ul className="mt-1 grid gap-0.5">
         {shown.map((g) => (
           <li key={g.label} className="text-[12px] leading-snug">
-            <span className="text-ink">{g.label}</span>
-            <span className="text-ink-3"> ({g.n})</span>
+            <GroupButton g={g} onOpen={() => onOpen(groupTarget(g, routes, matchup))}>
+              <span className="text-ink">{g.label}</span>
+              <span className="text-ink-3"> ({g.n})</span>
+            </GroupButton>
           </li>
         ))}
       </ul>
@@ -144,7 +192,7 @@ function Direction({ label, groups, more }: { label: string; groups: ConditionGr
   );
 }
 
-function Boundaries({ row, brand }: { row: HeadToHeadRow; brand: string }) {
+function Boundaries({ row, brand, onOpen }: { row: HeadToHeadRow; brand: string; onOpen: OpenAnswers }) {
   const c = row.conditions;
   if (!c) return null;
   const won = rate(row.won);
@@ -155,23 +203,36 @@ function Boundaries({ row, brand }: { row: HeadToHeadRow; brand: string }) {
       : lost >= won
         ? `${row.rival} is the default ${pct(row.lost)} of the time`
         : `${brand} is the default ${pct(row.won)} of the time`;
+  const matchup = `${brand} vs ${row.rival}`;
   return (
     <div className="rounded-md border border-line/60 p-3">
-      <div className="text-[13px] font-medium text-ink">{brand} vs {row.rival}</div>
+      <div className="text-[13px] font-medium text-ink">{matchup}</div>
       <p className="mt-0.5 text-[12px] text-ink-3">
         On the context-free ask, {lead} - the AI&apos;s stated boundaries:
       </p>
       <div className="mt-2 grid gap-3 sm:grid-cols-2">
-        <Direction label={`Routes to ${brand} when`} groups={c.you} more={c.youMore} />
-        <Direction label={`Routes to ${row.rival} when`} groups={c.rival} more={c.rivalMore} />
+        <Direction label={`Routes to ${brand} when`} groups={c.you} more={c.youMore} routes={brand} matchup={matchup} onOpen={onOpen} />
+        <Direction label={`Routes to ${row.rival} when`} groups={c.rival} more={c.rivalMore} routes={row.rival} matchup={matchup} onOpen={onOpen} />
       </div>
       {c.elsewhere.length > 0 && (
         <div className="mt-3 text-[12px]">
           <span className="font-medium text-ink-2">Routes elsewhere: </span>
           <span className="text-ink-3">
-            {c.elsewhere
-              .map((e) => `${e.name} (${e.n})${e.conditions.length > 0 ? ` - ${e.conditions.map((g) => g.label).join("; ")}` : ""}`)
-              .join(", ")}
+            {c.elsewhere.map((e, i) => (
+              <span key={e.name}>
+                {i > 0 && ", "}
+                {e.name} ({e.n})
+                {e.conditions.length > 0 && " - "}
+                {e.conditions.map((g, j) => (
+                  <span key={g.label}>
+                    {j > 0 && "; "}
+                    <GroupButton g={g} onOpen={() => onOpen(groupTarget(g, e.name, matchup))}>
+                      {g.label}
+                    </GroupButton>
+                  </span>
+                ))}
+              </span>
+            ))}
           </span>
         </div>
       )}
@@ -182,7 +243,19 @@ function Boundaries({ row, brand }: { row: HeadToHeadRow; brand: string }) {
   );
 }
 
-function KindSection({ view, title, blurb, first }: { view: HeadToHeadView; title: string; blurb: string; first: string }) {
+function KindSection({
+  view,
+  title,
+  blurb,
+  first,
+  onOpen,
+}: {
+  view: HeadToHeadView;
+  title: string;
+  blurb: string;
+  first: string;
+  onOpen: OpenAnswers;
+}) {
   const others = view.rows.flatMap((r) => r.otherPicks.map((o) => `${o.name} (${o.n}, vs ${r.rival})`));
   const bounded = view.rows.filter((r) => r.conditions);
   return (
@@ -215,9 +288,10 @@ function KindSection({ view, title, blurb, first }: { view: HeadToHeadView; titl
       {bounded.length > 0 && (
         <details className="text-[13px]">
           <summary className="cursor-pointer text-ink-2">When does each side win? The AI&apos;s stated boundaries</summary>
+          <p className="mt-2 text-[12px] text-ink-3">Click a condition to read the answers that state it.</p>
           <div className="mt-3 grid gap-3">
             {bounded.map((r) => (
-              <Boundaries key={r.key} row={r} brand={view.brand} />
+              <Boundaries key={r.key} row={r} brand={view.brand} onOpen={onOpen} />
             ))}
           </div>
         </details>
@@ -233,6 +307,8 @@ function KindSection({ view, title, blurb, first }: { view: HeadToHeadView; titl
 export default function HeadToHeadSection({ runId }: { runId: string }) {
   const [views, setViews] = useState<HeadToHeadViews | null | undefined>(undefined);
   const [error, setError] = useState<string | null>(null);
+  const [opened, setOpened] = useState<AnswersTarget | null>(null);
+  const close = useCallback(() => setOpened(null), []);
 
   useEffect(() => {
     let live = true;
@@ -258,6 +334,7 @@ export default function HeadToHeadSection({ runId }: { runId: string }) {
           title="Head-to-head - named rivals"
           blurb={`Questions that set ${views.brand} against one named rival and ask for a pick.`}
           first="Rival"
+          onOpen={setOpened}
         />
       )}
       {views.class && views.class.answers > 0 && (
@@ -266,8 +343,10 @@ export default function HeadToHeadSection({ runId }: { runId: string }) {
           title="Head-to-head - against a class of product"
           blurb={`Questions that set ${views.brand} against a whole class of product rather than one rival. A pick of one specific product from that class counts as another pick, not as the class.`}
           first="Class"
+          onOpen={setOpened}
         />
       )}
+      {opened && <AnswersModal key={opened.ids.join(",")} runId={runId} target={opened} onClose={close} />}
     </>
   );
 }
