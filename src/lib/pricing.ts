@@ -49,6 +49,9 @@ export const ENGINE_PRICES: Record<
   "sonar-pro": { in: 3, out: 15, perRequest: 0.0025 },
   // Internal-job models (GPT-6 list prices checked 2026-09-26, short
   // context). Unlisted models price at the $3/$15 fallback.
+  // Embeddings (consolidation, condition and awareness grouping): input only,
+  // list $0.13/M. Before 2026-10-28 these rows priced at the $3/$15 fallback.
+  "text-embedding-3-large": { in: 0.13, out: 0 },
   "gpt-6-luna": { in: 0.1, out: 0.5 },
   "gpt-6-luna-search": { in: 0.1, out: 0.5, perSearch: 0.01 },
   "gpt-6-sol": { in: 2, out: 10 },
