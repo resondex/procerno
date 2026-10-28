@@ -2,6 +2,8 @@ import { ENGINES } from "./providers";
 import { buildResolver } from "./brand_resolve";
 import { cachedView, cell, poolOf, type PoolRow, type RateCell, type ViewData } from "./view_data";
 import type { ViewKey } from "./views";
+import { excludedWords } from "./definition_overlap";
+import { conditionKeyMap, conditionStemKey } from "./condition_groups";
 import type { Project, Run } from "../types";
 
 /**
@@ -25,6 +27,15 @@ import type { Project, Run } from "../types";
  * Both list the brands named (resolved through the dictionary and the
  * context judge; active entries only) and the topics taught (the confirmed
  * codebook under the discussed bar).
+ *
+ * "Solved without getting one" - how (2026-10-28, Tyler): no field names
+ * the kind of adjacent solution, but the quote anchors the routing phrase
+ * verbatim. The adjacent answers' quotes are grouped at read time through
+ * the conditions panel's core (condition_groups.ts: embeddings + leader
+ * clustering, deterministic stem fallback when keyless), one grouping per
+ * card; a group's label is its most frequent wording, with sample answer
+ * ids for the answers modal. Adjacent answers with no quote are counted
+ * apart, never guessed.
  */
 
 export type { RateCell };
@@ -42,6 +53,13 @@ export interface AwarenessSlice {
   pointsToProducts: RateCell;
 }
 
+/** One group of adjacent routing quotes. */
+export interface WithoutGroup {
+  label: string;
+  cell: RateCell;
+  ids: string[];
+}
+
 export interface AwarenessBlock extends AwarenessSlice {
   view: "routing" | "explainer";
   uncoded: number;
@@ -51,6 +69,16 @@ export interface AwarenessBlock extends AwarenessSlice {
   /** Active brands named, by share of answers; `recommended` counts answers framing it recommended. */
   brands: { name: string; you: boolean; named: RateCell; recommended: number }[];
   topics: { code: string; cell: RateCell }[];
+  /** How the adjacent answers solve it, grouped from their quotes; shares are of the adjacent answers. */
+  without: {
+    groups: WithoutGroup[];
+    /** Adjacent answers outside the shown groups. */
+    rest: number;
+    /** Adjacent answers whose quote is empty. */
+    noQuote: number;
+    /** embed = embeddings grouping; stems = the keyless fallback. */
+    grouping: "embed" | "stems";
+  };
 }
 
 export interface AwarenessView {
@@ -88,7 +116,48 @@ function slice(key: string, label: string, list: Facts[]): AwarenessSlice {
   };
 }
 
-function block(data: ViewData, view: ViewKey, kind: AwarenessBlock["view"]): AwarenessBlock | null {
+const WITHOUT_GROUPS = 8;
+const WITHOUT_IDS = 8;
+
+/** Markdown emphasis and surrounding punctuation off a quote, for grouping and display. */
+const cleanQuote = (q: string) => q.replace(/\*\*?|__?|`/g, "").replace(/\s+/g, " ").trim().replace(/^[-:;,.\s]+|[:;,\s]+$/g, "");
+
+async function withoutGroups(adjacent: Facts[], category: string): Promise<AwarenessBlock["without"]> {
+  const n = adjacent.length;
+  const quoted = adjacent
+    .map((f) => ({ id: f.row.code.response_id, q: cleanQuote(f.row.code.quote ?? "") }))
+    .filter((x) => x.q.length > 0);
+  const counts = new Map<string, number>();
+  for (const x of quoted) counts.set(x.q, (counts.get(x.q) ?? 0) + 1);
+  const exclude = excludedWords([category]);
+  const keys = await conditionKeyMap(counts, exclude, "views:awareness");
+  const keyOf = (q: string) => keys.get(q) ?? conditionStemKey(q, exclude);
+  const acc = new Map<string, { n: number; surfaces: Map<string, number>; ids: string[] }>();
+  for (const x of quoted) {
+    const k = keyOf(x.q);
+    const a = acc.get(k) ?? { n: 0, surfaces: new Map<string, number>(), ids: [] as string[] };
+    a.n++;
+    a.surfaces.set(x.q, (a.surfaces.get(x.q) ?? 0) + 1);
+    if (a.ids.length < WITHOUT_IDS) a.ids.push(x.id);
+    acc.set(k, a);
+  }
+  const sorted = [...acc.values()].sort((a, b) => b.n - a.n);
+  // Groups of one are wording, not a kind of solution; they stay in the rest.
+  const shown = sorted.filter((a) => a.n > 1).slice(0, WITHOUT_GROUPS);
+  const shownN = shown.reduce((s, a) => s + a.n, 0);
+  return {
+    groups: shown.map((a) => ({
+      label: [...a.surfaces.entries()].sort((x, y) => y[1] - x[1] || x[0].length - y[0].length)[0][0],
+      cell: cell(a.n, n),
+      ids: a.ids,
+    })),
+    rest: quoted.length - shownN,
+    noQuote: n - quoted.length,
+    grouping: [...keys.values()].some((k) => k.startsWith("e:")) ? "embed" : "stems",
+  };
+}
+
+async function block(data: ViewData, view: ViewKey, kind: AwarenessBlock["view"]): Promise<AwarenessBlock | null> {
   const { rows: pool, uncoded, core } = poolOf(data, view);
   if (pool.length === 0 && uncoded === 0) return null;
   const resolve = buildResolver(data.dictionary, data.judged);
@@ -138,6 +207,7 @@ function block(data: ViewData, view: ViewKey, kind: AwarenessBlock["view"]): Awa
 
   const labels = new Map(ENGINES.map((e) => [e.id, e.label]));
   return {
+    without: await withoutGroups(facts.filter((f) => f.route === "adjacent"), data.project.category),
     ...slice(kind, kind, facts),
     view: kind,
     uncoded,
@@ -156,9 +226,9 @@ function block(data: ViewData, view: ViewKey, kind: AwarenessBlock["view"]): Awa
   };
 }
 
-export function computeAwareness(data: ViewData): AwarenessView | null {
-  const routing = block(data, "awareness_routing", "routing");
-  const explainer = block(data, "awareness_explainer", "explainer");
+export async function computeAwareness(data: ViewData): Promise<AwarenessView | null> {
+  const routing = await block(data, "awareness_routing", "routing");
+  const explainer = await block(data, "awareness_explainer", "explainer");
   if (!routing && !explainer) return null;
   return {
     runId: data.run.id,
@@ -170,7 +240,8 @@ export function computeAwareness(data: ViewData): AwarenessView | null {
   };
 }
 
-const AWARENESS_VERSION = "a1";
+// a2 (2026-10-28): adjacent quotes grouped at read time.
+const AWARENESS_VERSION = "a2";
 export function computeAwarenessCached(run: Run, project: Project): Promise<AwarenessView | null> {
   return cachedView("awareness", AWARENESS_VERSION, run, project, computeAwareness, { judge: true });
 }

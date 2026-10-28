@@ -1,9 +1,9 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import type { AwarenessBlock, AwarenessSlice, AwarenessView, Route } from "@/lib/engine/awareness";
+import type { AwarenessBlock, AwarenessSlice, AwarenessView, Route, WithoutGroup } from "@/lib/engine/awareness";
 import { SortTable, Tip, type Col } from "./table";
-import { Legend, pct, range, rate, rateCol, StackBar, type Part } from "./view_parts";
+import { AnswersModal, Legend, pct, range, rate, rateCol, StackBar, type AnswersTarget, type Part } from "./view_parts";
 
 /**
  * The awareness views (2026-10-28): problem recognition (where the AI sends
@@ -108,7 +108,57 @@ function Lists({ b }: { b: AwarenessBlock }) {
   );
 }
 
-function RoutingCard({ b, brand, category }: { b: AwarenessBlock; brand: string; category: string }) {
+/** How the "solved without getting one" answers solve it: their routing
+ * quotes grouped at read time, each group opening its sample answers. */
+function Without({ b, runId, title }: { b: AwarenessBlock; runId: string; title: string }) {
+  const [opened, setOpened] = useState<AnswersTarget | null>(null);
+  const w = b.without;
+  const adjacent = b.routed.adjacent.k;
+  if (adjacent === 0) return null;
+  const open = (g: WithoutGroup) =>
+    setOpened({
+      title: g.label,
+      subtitle: `${g.ids.length < g.cell.k ? `A sample of ${g.ids.length} of the ${g.cell.k} answers` : g.cell.k === 1 ? "The one answer" : `The ${g.cell.k} answers`} in this group.`,
+      ids: g.ids,
+      highlight: [g.label],
+    });
+  return (
+    <div className="text-[13px]">
+      <h3 className="text-[12px] font-medium text-ink-2 mb-1">{title}</h3>
+      <p className="text-[12px] text-ink-3 mb-1.5">
+        The {adjacent} answers grouped by the phrase that points the asker their way. Shares are of those {adjacent} answers.
+      </p>
+      {w.groups.length === 0 ? (
+        <p className="text-ink-3">No two answers point the same way.</p>
+      ) : (
+        <ul className="grid gap-1">
+          {w.groups.map((g) => (
+            <li key={g.label} className="flex items-baseline justify-between gap-3">
+              <button
+                type="button"
+                onClick={() => open(g)}
+                className="text-left text-ink-2 underline decoration-ink-3/40 decoration-dotted underline-offset-2 hover:decoration-ink-3"
+              >
+                {g.label}
+              </button>
+              <Tip tip={range(g.cell)}>
+                <span className="cursor-help shrink-0 tabular-nums text-ink-3">{pct(g.cell)}</span>
+              </Tip>
+            </li>
+          ))}
+        </ul>
+      )}
+      <p className="mt-1.5 text-[12px] text-ink-3">
+        {w.rest > 0 && `${w.rest} more answers point their own way. `}
+        {w.noQuote > 0 && `${w.noQuote} have no routing phrase. `}
+        {w.grouping === "stems" && "Grouped by shared words only, so most answers stay ungrouped."}
+      </p>
+      {opened && <AnswersModal key={opened.ids.join(",")} runId={runId} target={opened} onClose={() => setOpened(null)} />}
+    </div>
+  );
+}
+
+function RoutingCard({ b, brand, category, runId }: { b: AwarenessBlock; brand: string; category: string; runId: string }) {
   const parts = routeParts(category);
   const tips = routeTips(category, "routing");
   return (
@@ -141,6 +191,7 @@ function RoutingCard({ b, brand, category }: { b: AwarenessBlock; brand: string;
           defaultSort={{ id: "category", dir: -1 }}
         />
       )}
+      <Without b={b} runId={runId} title="Solved without getting one - how" />
       <Lists b={b} />
       <details className="text-[13px]">
         <summary className="cursor-pointer text-ink-2">By engine</summary>
@@ -155,7 +206,7 @@ function RoutingCard({ b, brand, category }: { b: AwarenessBlock; brand: string;
   );
 }
 
-function ExplainerCard({ b, brand, category }: { b: AwarenessBlock; brand: string; category: string }) {
+function ExplainerCard({ b, brand, category, runId }: { b: AwarenessBlock; brand: string; category: string; runId: string }) {
   const tips = routeTips(category, "explainer");
   return (
     <section className="card p-6 grid gap-4">
@@ -177,6 +228,7 @@ function ExplainerCard({ b, brand, category }: { b: AwarenessBlock; brand: strin
         />
         <Stat value={pct(b.routed.adjacent)} label="steer away" tip={`${tips.adjacent} ${range(b.routed.adjacent)}`} />
       </div>
+      <Without b={b} runId={runId} title="Steered away - to what" />
       <Lists b={b} />
       <details className="text-[13px]">
         <summary className="cursor-pointer text-ink-2">By engine</summary>
@@ -213,9 +265,9 @@ export default function AwarenessSections({ runId }: { runId: string }) {
   if (!view) return null;
   return (
     <>
-      {view.routing && view.routing.answers > 0 && <RoutingCard b={view.routing} brand={view.brand} category={view.category} />}
+      {view.routing && view.routing.answers > 0 && <RoutingCard b={view.routing} brand={view.brand} category={view.category} runId={runId} />}
       {view.explainer && view.explainer.answers > 0 && (
-        <ExplainerCard b={view.explainer} brand={view.brand} category={view.category} />
+        <ExplainerCard b={view.explainer} brand={view.brand} category={view.category} runId={runId} />
       )}
     </>
   );

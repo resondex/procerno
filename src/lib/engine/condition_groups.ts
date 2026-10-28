@@ -18,7 +18,9 @@ import { definitionStems } from "./definition_overlap";
  * caller (most frequent surface form in the accumulated group). Embeddings
  * are not cached per condition - a full run's conditions are ~$0.002 and the
  * computed view rides cachedView's revision key, so prod pays once per
- * recode. Spend is ledgered like consolidation's embedding row.
+ * recode. Spend is ledgered like consolidation's embedding row. The
+ * awareness view groups its adjacent routing quotes through the same core
+ * (purpose views:awareness).
  */
 
 const EMBED_MODEL = "text-embedding-3-large";
@@ -60,7 +62,8 @@ export function conditionStemKey(condition: string, exclude: Set<string>): strin
  */
 export async function conditionKeyMap(
   counts: Map<string, number>,
-  exclude: Set<string>
+  exclude: Set<string>,
+  purpose = "views:conditions"
 ): Promise<Map<string, string>> {
   const out = new Map<string, string>();
   if (counts.size === 0) return out;
@@ -89,7 +92,7 @@ export async function conditionKeyMap(
       embedTokens += res.usage?.total_tokens ?? 0;
       for (const d of res.data) vecs[k + d.index] = normalize(Float32Array.from(d.embedding));
     }
-    logCost({ model: EMBED_MODEL, inputTokens: embedTokens, outputTokens: 0, purpose: "views:conditions" });
+    logCost({ model: EMBED_MODEL, inputTokens: embedTokens, outputTokens: 0, purpose });
 
     // Leader clustering, consolidate.ts style: join the nearest centroid
     // within tau, else found a cluster; centroids track the running mean.
