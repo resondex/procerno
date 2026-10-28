@@ -158,13 +158,50 @@ export interface JudgedNames {
  * each grounded by up to two excerpts from answers that carried the name.
  * Fails open per name; a keyless environment judges nothing and is complete.
  */
-export async function primeContextVerdicts(input: {
+export async function primeContextVerdicts(input: PrimeInput): Promise<JudgedNames> {
+  const { judged, incomplete } = await judgeSlab(input, JUDGE_CAP);
+  return { judged, incomplete };
+}
+
+interface PrimeInput {
   project: Project;
   dictionary: DictionaryEntry[];
   codes: AnswerCodes[];
   meta?: CacheMeta;
-}): Promise<JudgedNames> {
-  const none: JudgedNames = { judged: new Map(), incomplete: false };
+}
+
+/**
+ * Finalize-time warm (the review-phase contract applied to the views): judge
+ * slab after slab until every unknown name has a cached verdict or the
+ * deadline passes, so the first dashboard open after a coding wave reads
+ * only cache. Each slab reads only its own snippet bodies. Stops early when
+ * a slab judges nothing (vendor failing) - the views' lazy path picks up the
+ * remainder. A keyless environment returns before any read.
+ */
+export async function prewarmContextVerdicts(
+  input: PrimeInput,
+  deadline: number
+): Promise<{ judged: number; incomplete: boolean }> {
+  if (input.codes.length === 0 || !keyConfigured()) return { judged: 0, incomplete: false };
+  let total = 0;
+  while (Date.now() < deadline) {
+    const slab = await judgeSlab(input, JUDGE_CAP, deadline);
+    total += slab.done;
+    if (!slab.incomplete) return { judged: total, incomplete: false };
+    if (slab.done === 0) break;
+  }
+  return { judged: total, incomplete: true };
+}
+
+/** One slab: cached verdicts, then up to `cap` model calls until the
+ * deadline (default: DEADLINE_MS from the start of judging). `done` counts
+ * the verdicts this slab added. */
+async function judgeSlab(
+  input: PrimeInput,
+  cap: number,
+  deadlineAt?: number
+): Promise<JudgedNames & { done: number }> {
+  const none = { judged: new Map<string, string>(), incomplete: false, done: 0 };
   if (input.codes.length === 0) return none;
   const resolve = buildResolver(input.dictionary);
   // Unknown names, with up to two carrying responses each for snippets.
@@ -204,12 +241,12 @@ export async function primeContextVerdicts(input: {
       misses.push(i);
     }
   });
-  if (misses.length === 0) return { judged, incomplete: false };
-  if (!keyConfigured()) return { judged, incomplete: false };
+  if (misses.length === 0) return { judged, incomplete: false, done: 0 };
+  if (!keyConfigured()) return { judged, incomplete: false, done: 0 };
 
   // Most frequent first; the slab beyond the cap stays for the next compute.
   misses.sort((a, b) => entries[b][1].n - entries[a][1].n);
-  const slab = misses.slice(0, JUDGE_CAP);
+  const slab = misses.slice(0, cap);
 
   // One batched body read for the slab's snippet sources.
   const ids = [...new Set(slab.flatMap((i) => entries[i][1].ids))];
@@ -242,7 +279,7 @@ export async function primeContextVerdicts(input: {
   const roster = input.dictionary
     .filter((e) => e.status === "active" && e.canonical !== "Other")
     .map((e) => e.canonical);
-  const deadline = Date.now() + DEADLINE_MS;
+  const deadline = deadlineAt ?? Date.now() + DEADLINE_MS;
   let done = 0;
   await withCostContext({ purpose: "views:resolve", projectId: input.project.id }, async () => {
     let next = 0;
@@ -267,5 +304,5 @@ export async function primeContextVerdicts(input: {
       })
     );
   });
-  return { judged, incomplete: done < misses.length };
+  return { judged, incomplete: done < misses.length, done };
 }

@@ -13,6 +13,7 @@ import { analyzePromptHealth } from "./prompt_health";
 import { classifyNonBrands } from "./suggest";
 import { getDictionarySuggestions } from "./dict_suggest";
 import { prewarmDictionaryExamples } from "./dict_examples";
+import { prewarmContextVerdicts } from "./context_judge";
 import { batchableEngine, hasOpenBatches, pollRunBatches } from "./batch";
 import { bootstrapRunChunk } from "./bootstrap";
 import { loadRunPrompts } from "./surfaces";
@@ -603,6 +604,7 @@ async function codeCollectedChunk(
  * prompt health) have finished. Future codebook triggers (drift detection on
  * a ratified taxonomy) belong in this function, before the status flip. */
 export async function finalizeRun(runId: string): Promise<void> {
+  const finalizeStart = Date.now();
   const run = await store.getRun(runId);
   if (!run || run.status === "complete" || run.status === "failed") return;
   const project = await store.getProject(run.project_id);
@@ -670,6 +672,30 @@ export async function finalizeRun(runId: string): Promise<void> {
     await analyzePromptHealth(project.id, runId);
   } catch (err) {
     console.error("prompt health check failed:", err);
+  }
+  // Context-judge verdicts for the names the dictionary cannot place, over
+  // the same inputs the views read, so the first dashboard open is a cache
+  // hit. No codes source (every prod project today) = no-op. 90s soft
+  // budget, clamped to leave the 300s finalize route room for the flip.
+  try {
+    const source = await store.getCodesSource(project.id);
+    const codes = source ? await store.listAnswerCodes(runId, source) : [];
+    if (codes.length > 0) {
+      const warm = await prewarmContextVerdicts(
+        {
+          project,
+          dictionary: await store.getDictionary(project.id),
+          codes,
+          meta: { brand: project.brand, category: project.category, projectId: project.id },
+        },
+        Math.min(Date.now() + 90_000, finalizeStart + 240_000)
+      );
+      if (warm.incomplete) {
+        console.log(`context judge warm: ${warm.judged} judged, names remain for the views`);
+      }
+    }
+  } catch (err) {
+    console.error("context judge warm failed:", err);
   }
   await store.updateRunStatus(runId, "complete", null);
 }
