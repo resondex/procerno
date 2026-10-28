@@ -11,6 +11,8 @@ import DoubtSections from "./doubt_view";
 import ValueSection from "./value_view";
 import ReasonsSection from "./reasons_view";
 import AwarenessSections from "./awareness_view";
+import PremiumSection from "./premium_view";
+import RepertoireSection from "./repertoire_view";
 import TaxonomyReview from "./taxonomy_review";
 import IdentifyTab, { type Suggestion } from "./identify_tab";
 import ParentsTab from "./parents_tab";
@@ -608,10 +610,12 @@ export default function ProjectDashboard({
         )}
 
       {headlineRun && <HeadlineSection key={`${headlineRun.id}:${dictVersion}`} runId={headlineRun.id} />}
+      {headlineRun && <PremiumSection key={`premium:${headlineRun.id}:${dictVersion}`} runId={headlineRun.id} />}
       {headlineRun && <AwarenessSections key={`awareness:${headlineRun.id}:${dictVersion}`} runId={headlineRun.id} />}
       {headlineRun && <HeadToHeadSection key={`h2h:${headlineRun.id}:${dictVersion}`} runId={headlineRun.id} />}
       {headlineRun && <AlternativesSection key={`alt:${headlineRun.id}:${dictVersion}`} runId={headlineRun.id} />}
       {headlineRun && <DoubtSections key={`doubt:${headlineRun.id}:${dictVersion}`} runId={headlineRun.id} />}
+      {headlineRun && <RepertoireSection key={`repertoire:${headlineRun.id}:${dictVersion}`} runId={headlineRun.id} />}
       {headlineRun && <ValueSection key={`value:${headlineRun.id}:${dictVersion}`} runId={headlineRun.id} />}
       {headlineRun && <ReasonsSection key={`reasons:${headlineRun.id}:${dictVersion}`} runId={headlineRun.id} />}
 
