@@ -358,6 +358,7 @@ interface RosterVerdict {
  * is picked only while a slot is free. A role the user set is never
  * overwritten. */
 function rolesAfterClassify(prev: RosterRoles | undefined, roster: RosterVerdict, fresh: boolean): RosterRoles {
+  console.log("[roster] rolesAfterClassify fresh:", fresh, "prev:", JSON.stringify(prev), "incoming:", JSON.stringify(roster.competitors.map((v) => `${v.name}:${v.role}#${v.h2hRank ?? "-"}`)));
   const next: RosterRoles = fresh ? {} : { ...(prev ?? {}) };
   const incoming = roster.competitors
     .filter((v) => fresh || !(v.name in next))
@@ -762,6 +763,7 @@ export function SetupWizard({ mode, brand, draft, engineOptions, onClose, onCrea
     // Computed from the current roles (not in an updater) so the redraw
     // warning sees the change before it lands.
     const r = rosterRoleOf(c, rosterRoles);
+    console.log("[roster] toggleRole", c, "from", r);
     const nextRole: RosterRole = r === "upstream" ? "adjacent" : r === "adjacent" ? "bench" : "upstream";
     const next = { ...materializePicks(rosterRoles), [c]: nextRole };
     if (!confirmPickChange(allCompetitors(), next, rosterClasses)) return;
@@ -791,6 +793,7 @@ export function SetupWizard({ mode, brand, draft, engineOptions, onClose, onCrea
    * removed name's role, class, note, reason and parent used to stay in the
    * draft for good. */
   function removeCompetitor(c: string) {
+    console.log("[roster] removeCompetitor", c, "roles before:", JSON.stringify(rosterRoles));
     const nextRoles = rosterRoles ? withoutName(rosterRoles, c) : undefined;
     const nextClasses = rosterClasses ? withoutName(rosterClasses, c) : undefined;
     const classesLeft = nextClasses && Object.keys(nextClasses).length > 0 ? nextClasses : undefined;
@@ -827,6 +830,7 @@ export function SetupWizard({ mode, brand, draft, engineOptions, onClose, onCrea
     // the note and the roles move together - updaters run on React's
     // schedule and must stay pure.
     const roles = materializePicks(rosterRoles);
+    console.log("[roster] toggleH2H", c, "current:", rosterRoleOf(c, roles), "roles:", JSON.stringify(roles));
     if (rosterRoleOf(c, roles) === "same_seat") {
       const next: RosterRoles = { ...roles, [c]: "bench" };
       if (!confirmPickChange(allCompetitors(), next, rosterClasses)) return;
