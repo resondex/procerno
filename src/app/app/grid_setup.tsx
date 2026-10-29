@@ -3344,7 +3344,7 @@ function ValueLineEditor({ value, disabled, onChange, options, recommended, cate
           </>
         )}
         <button type="button" onClick={() => { onChange(null); setEditing(false); setOther(false); }}
-          className="rounded border border-line px-1.5 py-0.5 text-left text-[10px] leading-tight text-ink-3 hover:bg-surface-1">No Value cell</button>
+          className="rounded border border-line px-1.5 py-0.5 text-left text-[10px] leading-tight text-ink-3 hover:bg-surface-1" title="No Value question for this buyer - the cell is not generated.">NA</button>
         <button type="button" onClick={() => { setEditing(false); setOther(false); }}
           className="px-1.5 py-0.5 text-left text-[10px] text-ink-3 hover:opacity-80">cancel</button>
       </div>
@@ -3355,7 +3355,7 @@ function ValueLineEditor({ value, disabled, onChange, options, recommended, cate
       onClick={() => setEditing(true)}
       title="Value asks whether your product is worth paying more for, compared with cheaper options. This is the product line we ask about for this buyer and what it is compared with. Click to choose another of your lines, your own, or none."
       className="text-[10px] leading-tight text-primary hover:opacity-80">
-      {value ? (<><span className="font-medium">{value.line}</span>{same(value.line, recommended) ? <span className="text-ink-3"> (recommended)</span> : null}<br /><span className="text-ink-3">vs {value.counterpart}</span></>) : value === null ? <span className="text-ink-3">no Value cell</span> : <span className="text-ink-3">line picked at write</span>}
+      {value ? (<><span className="font-medium">{value.line}</span>{same(value.line, recommended) ? <span className="text-ink-3"> (recommended)</span> : null}<br /><span className="text-ink-3">vs {value.counterpart}</span></>) : value === null ? <span className="text-ink-3">NA</span> : <span className="text-ink-3">line picked at write</span>}
     </button>
   );
 }
