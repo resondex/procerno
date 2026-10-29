@@ -2252,7 +2252,7 @@ export function SetupWizard({ mode, brand, draft, engineOptions, onClose, onCrea
                   Category
                   <input className="input w-full" maxLength={120} value={category} onChange={(e) => setCategory(e.target.value)} placeholder="e.g. market research firms" />
                 </label>
-                <label className="grid gap-1.5 text-sm font-semibold uppercase tracking-wide text-primary">
+                <label htmlFor="market-comp-add" className="grid gap-1.5 text-sm font-semibold uppercase tracking-wide text-primary">
                   Competitors
                   {competitors.length > 0 && rosterRoles && (
                     <span className="text-[13px] font-normal normal-case tracking-normal text-ink-3">
@@ -2323,13 +2323,21 @@ export function SetupWizard({ mode, brand, draft, engineOptions, onClose, onCrea
                                 {role === "upstream" ? "upstream - sells to the trade" : role === "adjacent" ? `adjacent - not ${category || "this category"}` : "rival"}
                               </button>
                             )}
-                            <button type="button" aria-label={`remove ${c}`} onClick={() => removeCompetitor(c)} className="text-primary/70 hover:text-danger leading-none">×</button>
+                            {/* preventDefault like the pills: these buttons sit inside the
+                                COMPETITORS <label>, whose implicit control is the FIRST
+                                labelable descendant - the first chip's head-to-head toggle.
+                                Safari forwards a label click to that control even from
+                                another interactive element, so an unshielded x here also
+                                toggled Ulta's pick (2026-10-28, Safari only). htmlFor on
+                                the label pins the association to the text input as well. */}
+                            <button type="button" aria-label={`remove ${c}`} onClick={(e) => { e.preventDefault(); removeCompetitor(c); }} className="text-primary/70 hover:text-danger leading-none">×</button>
                           </span>
                         );
                       })}
                     </div>
                   )}
                   <input
+                    id="market-comp-add"
                     className="input w-full"
                     maxLength={80}
                     value={compDraft}
