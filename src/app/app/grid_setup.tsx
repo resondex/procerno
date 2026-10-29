@@ -796,7 +796,14 @@ export function buildSetupDecision(g: GridState): Record<string, unknown> {
     },
     worries: g.worryPool
       ? {
-          offered: g.worryPool.map((w) => ({ worry: w.worry, detail: w.detail, recommended: w.recommended, plan: w.recommend ?? [] })),
+          // stances / overlaps / offeredStances (2026-10-29): everything
+          // edit-setup needs to rebuild the gate's menu exactly - without
+          // them a worry's unpicked, unplanned stances lost their chips.
+          offered: g.worryPool.map((w) => ({
+            worry: w.worry, detail: w.detail, recommended: w.recommended, plan: w.recommend ?? [],
+            stances: w.stances, ...(w.overlaps?.length ? { overlaps: w.overlaps } : {}),
+          })),
+          ...(g.worryOffered ? { offeredStances: g.worryOffered } : {}),
           decided: g.worries ?? [],
         }
       : null,

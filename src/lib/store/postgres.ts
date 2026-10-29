@@ -1250,6 +1250,12 @@ export const pgStore: Store = {
     await sql`UPDATE projects SET worry_decision = ${decisionJson} WHERE id = ${projectId}`;
   },
 
+  async getWorryDecision(projectId) {
+    const sql = await db();
+    const rows = await sql`SELECT worry_decision FROM projects WHERE id = ${projectId}`;
+    return (rows[0]?.worry_decision as string | null | undefined) ?? null;
+  },
+
   async reopenTaxonomy(projectId) {
     const sql = await db();
     await sql`UPDATE projects SET taxonomy_status = 'proposed'

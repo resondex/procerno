@@ -275,6 +275,7 @@ function createDb(): Database.Database {
     situation TEXT,
     angle TEXT NOT NULL,
     mode TEXT,
+    qtype TEXT,
     concern TEXT,
     text TEXT NOT NULL
   )`);
@@ -1504,6 +1505,13 @@ export const sqliteStore: Store = {
     getDb()
       .prepare("UPDATE projects SET worry_decision = ? WHERE id = ?")
       .run(decisionJson, projectId);
+  },
+
+  async getWorryDecision(projectId) {
+    const row = getDb()
+      .prepare("SELECT worry_decision FROM projects WHERE id = ?")
+      .get(projectId) as { worry_decision: string | null } | undefined;
+    return row?.worry_decision ?? null;
   },
 
   async setSetupDecision(projectId, decisionJson) {

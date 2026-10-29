@@ -85,6 +85,123 @@ function cleanModerators(raw: Obj, projectId: string): Moderators {
 const cellKey = (c: { stage?: unknown; situation?: unknown; angle?: unknown; concern?: unknown }) =>
   `${str(c.stage) ?? ""}|${str(c.situation) ?? ""}|${str(c.angle) ?? ""}|${str(c.concern) ?? ""}`;
 
+type WorryPair = { concern: string; stage: string };
+/** The worries gate's card, as the wizard's WorryUi carries it. */
+type WorryCard = {
+  worry: string;
+  detail: string;
+  stances: string[];
+  recommended: string;
+  recommend: string[];
+  overlaps?: string[];
+};
+
+/**
+ * The worries gate's state rebuilt for edit-setup (2026-10-29): the
+ * tracker's confirmed picks and the menu they were picked from, so the
+ * wizard treats them as existing picks - fetchWorries skips on a non-empty
+ * pool and the gate's pre-pick fires only on undefined picks, so nothing is
+ * drawn or re-prefilled. Concern wording is carried VERBATIM from the
+ * records and intents (trend continuity keys on string identity).
+ *
+ * Picks: worry_decision.decided, else setup_decision.worries.decided, else
+ * the stored worry cells; the stored cells are always unioned in, so no
+ * measured worry cell is ever orphaned from its pick. A worry cell is an
+ * INVARIANT row (stage objections/churn_triggers/renewal, concern set,
+ * situation null, angle generic) - the legacy concern zip also persisted
+ * concerns, but on room-pinned rows too.
+ *
+ * Pool: setup_decision.worries.offered (the full menu; exact stances since
+ * 2026-10-29, rebuilt from recommended + plan + picked stances on older
+ * records), else worry_decision (recommended + decided concerns, no blurb),
+ * else the picks themselves. Every pick's concern and stance is ensured on
+ * its card.
+ *
+ * Returns null for a non-worry-era battery (no worries gate: the grid keeps
+ * `worries` undefined so the cells route stays on the legacy zip path).
+ */
+export function rebuildWorryState(input: {
+  /** setup_decision.worries: undefined = field absent (no record, or a
+   * record from before the worries gate), null = recorded without a pool. */
+  recordWorries: unknown;
+  worryDecisionRaw: string | null;
+  intents: { stage: string; situation: string | null; angle: string; concern?: string | null }[];
+}): { worries: WorryPair[]; worryPool: WorryCard[]; worryOffered: string[] } | null {
+  const stanceSet = new Set<string>(WORRY_STANCE_STAGES);
+  const pairs = (v: unknown): WorryPair[] =>
+    Array.isArray(v)
+      ? v.filter(isObj).flatMap((p) => {
+          const concern = str(p.concern);
+          const stage = str(p.stage);
+          return concern && concern.trim() && stage && stanceSet.has(stage) ? [{ concern, stage }] : [];
+        })
+      : [];
+  const wd = parseDecision(input.worryDecisionRaw);
+  const rec = isObj(input.recordWorries) ? input.recordWorries : null;
+  const doubtCells = input.intents.filter((i) => i.concern && stanceSet.has(i.stage));
+  const cellPicks = doubtCells
+    .filter((i) => !i.situation && i.angle === "generic")
+    .map((i) => ({ concern: i.concern as string, stage: i.stage }));
+
+  // Era: either record says the worries gate ran. Without one, the stored
+  // cells decide - a concern cell pinned to a room is the legacy zip's
+  // signature (worry rows are never room-pinned), so that battery is zip-era.
+  const worryEra =
+    wd !== null || rec !== null ||
+    (cellPicks.length > 0 && !doubtCells.some((i) => i.situation));
+  if (!worryEra) return null;
+
+  const pairKey = (p: WorryPair) => `${p.concern}|${p.stage}`;
+  const recordPicks = wd && Array.isArray(wd.decided) ? pairs(wd.decided) : rec && Array.isArray(rec.decided) ? pairs(rec.decided) : [];
+  const worries: WorryPair[] = [];
+  const seen = new Set<string>();
+  for (const p of [...recordPicks, ...cellPicks]) {
+    if (seen.has(pairKey(p))) continue;
+    seen.add(pairKey(p));
+    worries.push(p);
+  }
+
+  const strings = (v: unknown) => (Array.isArray(v) ? v.filter((x): x is string => typeof x === "string") : []);
+  const stances = (v: unknown) => strings(v).filter((s) => stanceSet.has(s));
+  let pool: WorryCard[];
+  if (rec && Array.isArray(rec.offered)) {
+    pool = rec.offered.filter(isObj).flatMap((w) => {
+      const worry = str(w.worry);
+      if (!worry) return [];
+      const recommended = str(w.recommended) ?? "";
+      const plan = stances(w.plan);
+      const picked = worries.filter((p) => p.concern === worry).map((p) => p.stage);
+      // Recorded stances are the menu exactly; older records rebuild them
+      // from the natural stance, the plan and the stances picked at.
+      const recorded = stances(w.stances);
+      const all = [...new Set([...(recorded.length > 0 ? recorded : [recommended, ...plan]), ...picked].filter((s) => stanceSet.has(s)))];
+      const overlaps = strings(w.overlaps);
+      return [{ worry, detail: str(w.detail) ?? "", stances: all, recommended, recommend: plan, ...(overlaps.length ? { overlaps } : {}) }];
+    });
+  } else {
+    const recommendedPairs = wd && Array.isArray(wd.recommended) ? pairs(wd.recommended) : [];
+    // No record of the recommendation: the picks stand in for it, so the
+    // gate's pre-lit chips and plan count match what was confirmed.
+    const planPairs = wd ? recommendedPairs : worries;
+    const order = [...new Set([...recommendedPairs, ...worries].map((p) => p.concern))];
+    pool = order.map((worry) => {
+      const plan = [...new Set(planPairs.filter((p) => p.concern === worry).map((p) => p.stage))];
+      const all = [...new Set([...recommendedPairs, ...worries].filter((p) => p.concern === worry).map((p) => p.stage))];
+      return { worry, detail: "", stances: all, recommended: plan[0] ?? all[0], recommend: plan };
+    });
+  }
+  // Every pick on a card, at a lit-able stance.
+  for (const p of worries) {
+    const card = pool.find((w) => w.worry === p.concern);
+    if (!card) pool.push({ worry: p.concern, detail: "", stances: [p.stage], recommended: p.stage, recommend: [] });
+    else if (!card.stances.includes(p.stage)) card.stances = [...card.stances, p.stage];
+  }
+  for (const w of pool) if (!stanceSet.has(w.recommended)) w.recommended = w.stances[0] ?? "";
+  const recordedOffered = rec ? stances(rec.offeredStances) : [];
+  const worryOffered = [...new Set([...recordedOffered, ...pool.flatMap((w) => w.stances)])];
+  return { worries, worryPool: pool, worryOffered };
+}
+
 /** A zero-run tracker's instrument rendered back into the wizard-draft
  * shape - shared by the /api setup route and the server-rendered /app
  * page (the Edit setup click opens the wizard in ONE navigation).
@@ -131,15 +248,15 @@ export async function buildEditSetupDraft(project: Project) {
   } catch {
     return null;
   }
-  const [prompts, decisionRaw] = await Promise.all([
+  const [prompts, decisionRaw, worryDecisionRaw] = await Promise.all([
     store.listPrompts(id),
     store.getSetupDecision(id).catch(() => null),
+    store.getWorryDecision(id).catch(() => null),
   ]);
   const decision = parseDecision(decisionRaw);
   const dRooms = isObj(decision?.rooms) ? (decision!.rooms as Obj) : null;
   const dStages = isObj(decision?.stages) ? (decision!.stages as Obj) : null;
   const dValue = isObj(decision?.valueLines) ? (decision!.valueLines as Obj) : null;
-  const dWorries = isObj(decision?.worries) ? (decision!.worries as Obj) : null;
   const dBase = isObj(decision?.base) ? (decision!.base as Obj) : null;
 
   const situations = [...new Set(intents.map((i) => i.situation).filter(Boolean))] as string[];
@@ -191,27 +308,13 @@ export async function buildEditSetupDraft(project: Project) {
       )
     : undefined;
 
-  // Worries: the picks ARE the stored worry cells (stage + concern); the
-  // pool comes back from the record so the gate never redraws (a redraw
-  // rewords the worries and orphans the picks). The record keeps no
-  // per-worry stance list, so a worry's stances are rebuilt from its
-  // natural stance, its plan and the stances it was picked at.
-  const worryStages = new Set<string>(WORRY_STANCE_STAGES);
-  const worryPicks = intents
-    .filter((i) => i.concern && worryStages.has(i.stage))
-    .map((i) => ({ concern: i.concern as string, stage: i.stage }));
-  const worryPool = Array.isArray(dWorries?.offered)
-    ? (dWorries!.offered as unknown[]).filter(isObj).flatMap((w) => {
-        const worry = str(w.worry);
-        if (!worry) return [];
-        const recommended = str(w.recommended) ?? "";
-        const plan = Array.isArray(w.plan) ? w.plan.filter((x): x is string => typeof x === "string") : [];
-        const picked = worryPicks.filter((p) => p.concern === worry).map((p) => p.stage);
-        const stances = [...new Set([recommended, ...plan, ...picked].filter(Boolean))];
-        return [{ worry, detail: str(w.detail) ?? "", stances, recommended, recommend: plan }];
-      })
-    : null;
-  const worryEra = worryPool !== null || worryPicks.length > 0;
+  // Worries: rebuilt from the records so the gate never redraws or
+  // re-prefills (a redraw rewords the worries and orphans the picks).
+  const worryState = rebuildWorryState({
+    recordWorries: decision && Object.prototype.hasOwnProperty.call(decision, "worries") ? decision.worries : undefined,
+    worryDecisionRaw,
+    intents,
+  });
 
   // Per-seed provenance from the record, keyed by cell identity + the
   // decided text (custom questions can share an identity).
@@ -408,8 +511,9 @@ export async function buildEditSetupDraft(project: Project) {
         ...(stageRooms ? { stageRooms } : {}),
         ...(valueLines ? { valueLines } : {}),
         ...(valueRecommended ? { valueRecommended } : {}),
-        ...(worryEra ? { worries: worryPicks } : {}),
-        ...(worryPool ? { worryPool, worryOffered: [...new Set(worryPool.flatMap((w) => w.stances))] } : {}),
+        ...(worryState
+          ? { worries: worryState.worries, worryPool: worryState.worryPool, worryOffered: worryState.worryOffered }
+          : {}),
         baselineCellCount: cells.length,
         cells,
       },

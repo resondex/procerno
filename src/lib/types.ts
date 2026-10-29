@@ -1028,6 +1028,9 @@ export interface Store {
   /** The worries gate's recommended-vs-decided record (JSON) - the worry
    * recommender's training data, written once at create. */
   setWorryDecision(projectId: string, decisionJson: string): Promise<void>;
+  /** The stored worry_decision JSON (not part of the Project payload) -
+   * read by edit-setup to rebuild the worries gate's picks. */
+  getWorryDecision(projectId: string): Promise<string | null>;
   /** The whole setup's offered-vs-accepted record (JSON, 2026-10-06, Tyler):
    * base read, rooms, stages and per-room scope, Value lines, cells and
    * paraphrases - what the engine offered and what was sent for analysis.
