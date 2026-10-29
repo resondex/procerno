@@ -831,7 +831,9 @@ export function SetupWizard({ mode, brand, draft, engineOptions, onClose, onCrea
       const next: RosterRoles = { ...roles, [c]: "bench" };
       if (!confirmPickChange(allCompetitors(), next, rosterClasses)) return;
       setRosterRoles(next);
-      setH2hNote(null);
+      // Say it out loud: a silently dropped pick is how the Safari
+      // label-forwarding bug went unnoticed (2026-10-28).
+      setH2hNote(`${c} no longer gets a head-to-head - click + head-to-head to restore it.`);
       return;
     }
     const picked = allCompetitors().filter((x) => rosterRoleOf(x, roles) === "same_seat").length;

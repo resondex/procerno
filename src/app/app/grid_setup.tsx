@@ -3289,7 +3289,7 @@ export function ScenarioReviewModal({
  * participation stays derived). */
 /** One column's Value line on the coverage step: "<line> vs <counterpart>",
  * click to edit both ends, or set "none" (no Value cell for that room). */
-function ValueLineEditor({ value, disabled, onChange, options, recommended, category }: {
+function ValueLineEditor({ value, disabled, onChange, options, recommended, category, brand }: {
   /** undefined = not proposed yet (the engine default applies at the
    * write); null = the user chose no Value cell. */
   value: ValueLineUi | null | undefined;
@@ -3304,6 +3304,12 @@ function ValueLineEditor({ value, disabled, onChange, options, recommended, cate
   options?: ValueCatalogLineUi[];
   recommended?: string | null;
   category?: string;
+  /** Standing last option: the brand overall - the bare-brand Value ask
+   * (the s44 line-is-the-brand branch). The right question for retailers
+   * and single-product brands, and it was unreachable except by typing the
+   * name into Other (Tyler's Sephora walk, 2026-10-28). Never recommended
+   * when a real catalog exists - the engine's line pick stays the steer. */
+  brand?: string;
 }) {
   const [editing, setEditing] = useState(false);
   const [other, setOther] = useState(false);
@@ -3329,6 +3335,13 @@ function ValueLineEditor({ value, disabled, onChange, options, recommended, cate
             </button>
           );
         })}
+        {!other && brand?.trim() && !(options ?? []).some((o) => same(o.name, brand)) && (
+          <button type="button" title={`The bare-brand Value question: is ${brand.trim()} worth it over a cheaper option, for this buyer.`}
+            onClick={() => pick(brand.trim())}
+            className={`rounded border px-1.5 py-0.5 text-left text-[10px] leading-tight hover:bg-surface-1 ${same(brand, value?.line) ? "border-primary text-primary" : "border-line text-ink"}`}>
+            {brand.trim()}<span className="text-ink-3"> - the brand overall</span>
+          </button>
+        )}
         {!other && (
           <button type="button" onClick={() => { setOther(true); setLine(""); setCounterpart(value?.counterpart ?? defaultCounterpart); }}
             className="rounded border border-line px-1.5 py-0.5 text-left text-[10px] leading-tight text-ink hover:bg-surface-1">Other...</button>
@@ -3355,7 +3368,7 @@ function ValueLineEditor({ value, disabled, onChange, options, recommended, cate
       onClick={() => setEditing(true)}
       title="Value asks whether your product is worth paying more for, compared with cheaper options. This is the product line we ask about for this buyer and what it is compared with. Click to choose another of your lines, your own, or none."
       className="text-[10px] leading-tight text-primary hover:opacity-80">
-      {value ? (<><span className="font-medium">{value.line}</span>{same(value.line, recommended) ? <span className="text-ink-3"> (recommended)</span> : null}<br /><span className="text-ink-3">vs {value.counterpart}</span></>) : value === null ? <span className="text-ink-3">NA</span> : <span className="text-ink-3">line picked at write</span>}
+      {value ? (<><span className="font-medium underline decoration-dotted decoration-primary/50 underline-offset-2">{value.line}</span>{same(value.line, recommended) ? <span className="text-ink-3"> (recommended)</span> : null}<br /><span className="text-ink-3">vs {value.counterpart}</span></>) : value === null ? <span className="text-ink-3">NA</span> : <span className="text-ink-3">line picked at write</span>}
     </button>
   );
 }
@@ -3574,6 +3587,7 @@ export function CoverageGate({
                   options={state.valueCatalog}
                   recommended={state.valueRecommended?.[sc.label] ?? null}
                   category={category}
+                  brand={brand}
                 />
               ) : (
                 <span className="inline-block h-2.5 w-2.5 rounded-full border border-dashed border-line" />
