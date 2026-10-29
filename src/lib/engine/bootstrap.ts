@@ -27,24 +27,18 @@ const DISCOVERY_BODIES_PER_DRIVE = 2000;
  * Runs only while the project's taxonomy is unratified; scheduled runs on a
  * ratified taxonomy take the coding wave + finalize path instead. Every stage
  * is idempotent, so a killed chunk resumes instead of re-spending.
+ *
+ * RUN_COLLECT_ONLY does NOT park the bootstrap (2026-10-29, Tyler: the
+ * default is collection + discovery; the flag holds CODING only, in
+ * runCodingChunk). Before this, the hold bit here too and a new tracker's
+ * first run parked at "collected" with no proposal - the Sephora gap: its
+ * codebook gate never opened until the bootstrap was driven by hand.
  */
 export async function bootstrapRunChunk(
   runId: string,
   project: Project,
   deadline: number
 ): Promise<"continue" | "gated"> {
-  // Operational hold, same contract as coding: with RUN_COLLECT_ONLY set the
-  // run parks at "collected" and never spends a discovery cent. Clear the
-  // env and hit /continue to bootstrap a held run.
-  if (process.env.RUN_COLLECT_ONLY) {
-    await store.updateRunStatus(
-      runId,
-      "collected",
-      "collect-only hold (RUN_COLLECT_ONLY): discovery + codebook deferred"
-    );
-    return "gated";
-  }
-
   // Bodies stay in the database until a stage needs them: a warm re-drive
   // (everything discovered) reads no answer text at all.
   const responses = await store.listResponseMeta(runId);

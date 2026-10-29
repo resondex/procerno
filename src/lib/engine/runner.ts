@@ -308,7 +308,9 @@ function utcMs(ts: string): number {
  * Auto-resume sweep: non-terminal runs with no open vendor batches and no
  * stored progress for `staleMs` are orphans - a died driver process, a
  * dropped chunk hop - and get re-driven by the caller. Held runs
- * (RUN_COLLECT_ONLY + collected) are parked on purpose, not stalled.
+ * (RUN_COLLECT_ONLY + collected: ratified trackers awaiting the coding
+ * flip, plus any run parked under the pre-2026-10-29 bootstrap hold) are
+ * parked on purpose, not stalled.
  */
 export async function findStalledRuns(staleMs = 45 * 60 * 1000): Promise<string[]> {
   const stalled: string[] = [];
@@ -453,7 +455,9 @@ async function codeCollectedChunk(
   // Operational hold: with RUN_COLLECT_ONLY set, runs park at "collected"
   // and never spend a coding cent - used while the coder question (solo vs
   // consensus vs fast) is unsettled. Clear the env and hit /continue to
-  // code a held run.
+  // code a held run. Since 2026-10-29 this is the flag's ONLY bite point:
+  // collection AND the init bootstrap (discovery -> codebook gate) run by
+  // default; only coding is held (Tyler, after the Sephora gate gap).
   if (process.env.RUN_COLLECT_ONLY && uncoded.length > 0) {
     await store.updateRunStatus(
       runId,
