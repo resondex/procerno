@@ -600,7 +600,7 @@ export function stageLibrary(m: Moderators): LibraryStage[] {
       hint: "One short plain question: are the premium options actually better than the cheaper ones, or are the cheaper ones good enough - and which would you get. The pick invitation is part of the question (the read is tier advocacy plus who gets named at each end); never one named brand's own worth - that form is a worry cell's job.",
       why: !considered
         ? "A habitual market compresses comparison into one shelf question: is the premium maker worth it."
-        : "Your considered market decomposes this moment into Shortlist, Comparison, and Pricing instead.",
+        : "Your considered market decomposes this moment into Discovery, Comparison, and Value instead.",
     },
     {
       // Considered markets only (init decision 2, 2026-10-03): the stage's
