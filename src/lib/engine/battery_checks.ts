@@ -867,7 +867,7 @@ export function textNamesCategory(text: string, category: string): boolean {
  * the brand. Before 2026-10-24 the flag was accepted and ignored at all
  * five call sites (setup audit S3). */
 export function textNamesBrand(
-  text: string, brand: string, opts?: { required?: boolean; extraForms?: string[]; excludeTokens?: Set<string> }
+  text: string, brand: string, opts?: { required?: boolean; extraForms?: string[]; excludeTokens?: Set<string>; others?: string[] }
 ): boolean {
   if (opts?.required) return namesRequiredBrand(text, brand, { extraForms: opts.extraForms, excludeTokens: opts.excludeTokens });
   return brandMentions(text, brand, opts).named;

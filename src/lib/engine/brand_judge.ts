@@ -25,7 +25,13 @@ export const BRAND_JUDGE_SYSTEM =
   "Judge only the question's own words. Lowercase or casual spelling can still be the brand. " +
   'Reply with ONLY {"refers": true} or {"refers": false}.';
 
-const cat = (category: string) => new Set(category.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim().split(" ").filter(Boolean));
+/** The category's words, for brandMentions' excludeTokens: a check that
+ * reads mentions WITHOUT these sees hits the judge-primer never judged and
+ * fail-opens them to named (the Sephora "beauty retailers" rooms all read
+ * as naming Ulta Beauty, 2026-10-28) - every mention check that runs after
+ * primeBrandVerdicts must pass the same set. */
+export const categoryTokens = (category: string) => new Set(category.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim().split(" ").filter(Boolean));
+const cat = categoryTokens;
 
 function judgeKey(text: string, brand: string, form: string): string {
   const norm = `${brand.trim().toLowerCase()}|${form}|${text.trim().toLowerCase().replace(/\s+/g, " ")}`;

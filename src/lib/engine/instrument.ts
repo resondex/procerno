@@ -14,7 +14,7 @@ export { MUST_NAME_STAGES };
 import { store } from "../store";
 import { brandAliasForms } from "./brand_aliases";
 import { checkStructure, stageStructure, structureStringFail, type StructureCell } from "./stage_structure";
-import { pendingJudgments, primeBrandVerdicts } from "./brand_judge";
+import { categoryTokens, pendingJudgments, primeBrandVerdicts } from "./brand_judge";
 import { matchKey } from "../brand_key";
 import type { CacheMeta } from "../types";
 
@@ -2293,8 +2293,15 @@ async function checkRoomsPass(input: RoomCheckInput, pass: number): Promise<Room
       roster: [input.brand, ...rivals], aliases: {}, category: input.category, meta: input.meta,
     });
   } catch { /* fail open: unjudged hits count as named */ }
+  // Same options as pendingJudgments' own brandMentions call: category
+  // words excluded, other brands scrubbed. Without them this check sees
+  // hits the primer never judged (nothing pending on its side), and every
+  // unjudged hit fail-opens to named - "beauty retailers" in a room read
+  // as naming Ulta Beauty (2026-10-28, Tyler's Sephora walk).
+  const allBrands = [input.brand, ...rivals];
+  const exTokens = categoryTokens(input.category);
   const namesOf = (r: Situation) =>
-    [input.brand, ...rivals].filter((b) => textNamesBrand(roomText(r), b));
+    allBrands.filter((b) => textNamesBrand(roomText(r), b, { excludeTokens: exTokens, others: allBrands.filter((x) => x !== b) }));
   // room_check7 (2026-10-04): capability also covers a room that gives NO
   // buyer situation at all, only what they want from the product (check6's
   // "defined by what they value" fired on every room with a preference -
