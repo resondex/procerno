@@ -898,6 +898,17 @@ if (fails > 0) process.exitCode = 1;
   ok("'or the other way around'", ss.structureStringFail(h2h, "Would you pick Brand over Rival, or the other way around? Why?")?.property === 2);
   ok("a plain pick passes", ss.structureStringFail(h2h, "Brand or Rival for a widget: which would you choose, and why?") === null);
   ok("'what makes you pick one over the other' is either-way", ss.structureStringFail(h2h, "What makes you pick one over the other for a widget: Brand or Rival?")?.property === 2);
+  // ss10 (2026-10-29): the why-fronted form keeps only the why (the two served Sephora S2s, faithful with neutral names).
+  ok("ss10 'why would you choose X or Y as your <category>' is either-way", ss.structureStringFail(h2h, "Why would you choose Brand or Rival as your widget store?")?.property === 2);
+  ok("ss10 'why would X or Y be your pick' is either-way", ss.structureStringFail(h2h, "Why would Rival or Brand be your pick as a widget store?")?.property === 2);
+  ok("ss10 'what would make you choose X over Y or Y over X' is either-way", ss.structureStringFail(h2h, "For widgets, what would make you choose Rival over Brand or Brand over Rival?")?.property === 2);
+  ok("ss10 a dotted name does not end the sentence", ss.structureStringFail(h2h, "Why would you pick Rival.io or Brand for widgets?")?.property === 2);
+  ok("ss10 a class head-to-head is read too", ss.structureStringFail({ stage: "comparison", angle: "class", classPhrase: "a store-brand widget" }, "Why would you go with Brand or a store-brand widget?")?.property === 2);
+  ok("ss10 why-fronted with a second-sentence pick ask passes", ss.structureStringFail(h2h, "Why choose Rival or Brand as your widget store? Which one would you pick?") === null);
+  ok("ss10 why-fronted with 'and which one would you choose' passes", ss.structureStringFail(h2h, "Why would you go with Brand or Rival for a widget, and which one would you choose?") === null);
+  ok("ss10 'which would you pick and why' passes", ss.structureStringFail(h2h, "Which would you pick and why: Brand or Rival for widgets?") === null);
+  ok("ss10 why-fronted then 'pick one' passes", ss.structureStringFail(h2h, "Why would you choose Brand or Rival for widgets? Pick one.") === null);
+  ok("ss10 the why reading is comparison-only", ss.structureStringFail({ stage: "use_case", angle: "generic" }, "Why would you choose Brand or Rival for widgets?") === null);
   ok("conditional move", ss.structureStringFail(alt, "If I leave Rival, what should I get instead?")?.property === 2);
   ok("'once I'm off' is conditional", ss.structureStringFail(alt, "Once I'm off Rival, where should I go instead?")?.property === 2);
   ok("trailing 'if I'm leaving' is conditional", ss.structureStringFail(alt, "Which widget should I get next if I'm leaving Rival?")?.property === 2);

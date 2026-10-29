@@ -84,7 +84,17 @@ import type { ValueLine } from "./battery_checks";
  * calls a fact question an acceptable voicing (the r16 seed intent: a fact
  * to confirm is not a doubt verdict). The string readings now also run
  * when the model call fails. */
-export const STAGE_STRUCTURE_VERSION = "ss9";
+/** ss10 (2026-10-29, Sephora paraphrase audit): the WHY-FRONTED either-way
+ * form - "Why would you choose X or Y as your <category>?", "Why would X or
+ * Y be your pick?", "What would make you choose X over Y or Y over X?" -
+ * keeps only the why and drops the which; two served Sephora paraphrases
+ * slipped both the string reading (its why branch needed "or ... over") and
+ * the model. A sentence that also asks for the pick ("... Which one would
+ * you pick?") keeps the measurement and is exempt. Calibrated on 59,518
+ * distinct stored texts (4,976 comparison: roll dumps landed and served,
+ * cold walks, draft backups, every vault battery): 18 hits, all comparison,
+ * all either-way; 8 the ss9 form missed; 2 exempt pick asks. */
+export const STAGE_STRUCTURE_VERSION = "ss10";
 
 export interface StructureCell {
   stage: string;
@@ -274,6 +284,16 @@ export function stageStructure(cell: StructureCell, brand: string): { shape: str
  * reply and when the model call fails alike (ss9).
  */
 const EITHER_WAY = /\b(?:or (?:the other way|vice versa|the reverse)|over \w[\w ]{0,30}, or \w[\w ]{0,30} over|(?:rather|instead) than \w[\w ]{0,30}, or \w[\w ]{0,30} (?:rather|instead) than|one over the other|one or the other)\b|\bwhy would you (?:choose|pick|go with)\b.*\bor\b.*\bover\b/i;
+/** ss10: the why-fronted form. One sentence (a dot inside a name such as
+ * "monday.com" does not end it); fires only when no pick ask appears
+ * anywhere in the text (WHY_PICK_ASK). */
+const WHY_VERB = "(?:choose|pick|go with|go for|prefer|opt for|select|favor|favour|lean toward|lean towards|side with|recommend|buy|get|use|shop at|shop with)";
+const ONE_SENTENCE = "(?:[^?.!]|\\.(?=\\S))*";
+const WHY_EITHER = new RegExp(
+  `\\bwhy (?:(?:would|should|might|could|do|does|did|will)\\s+)?(?:(?:you|someone|one|people|anyone|i|we|a [a-z]+)\\s+)?${WHY_VERB}\\b${ONE_SENTENCE}\\bor\\b` +
+  `|\\bwhy (?:would|should|might|could|is|are)\\b${ONE_SENTENCE}\\bor\\b${ONE_SENTENCE}\\b(?:pick|choice|go-to|winner|favorite|favourite|preference|option|bet)\\b` +
+  `|\\bwhat (?:would|might|could|should|does|do) (?:make|lead|push|get) (?:you|someone|one|people|me|us) (?:to )?${WHY_VERB}\\b${ONE_SENTENCE}\\bor\\b`, "i");
+const WHY_PICK_ASK = /\bwhich\b|\b(?:pick|choose|name) (?:one|a winner)\b(?! over)|\bwhat (?:would|do|should) (?:you|i|we) (?:pick|choose|go with|get)\b|\bwho (?:wins|would you pick)\b/i;
 const CONDITIONAL_MOVE = /^\s*(?:if|suppose|say|assuming|in case|once) (?:i|we)('d| would|'ll| will|'m| am|'re| are)? ?(?:stop|leave|leaving|drop|quit|cancel|move off|moving off|move on|moving on|switch(?:ing)? (?:from|away)|ditch|give up|walk away|get rid of|were to|off\b)\b|\b(?:if|once) (?:i|we)(?:'m|'re| am| are)? (?:leav|switch|mov|stop|dropp|ditch)\w*\b.*\?/i;
 const WORTH_CONSIDERING = /\bworth (?:considering|a look|looking at|a thought|thinking about|exploring)\b/i;
 const HALF_CRITERIA = /^\s*what should (?:i|we) (?:consider|weigh|think about|factor in)\b.*\b(?:after|once) (?:(?:i|we|i've|we've) )?(?:look|figur|decid|settl|work)\w*\b/i;
@@ -285,7 +305,7 @@ const FOLDED_CRITERIA = /\bbefore (?:(?:i|we) )?(?:decid|weigh|consider|settl|ch
 
 export function structureStringFail(cell: StructureCell, text: string): StructureFail | null {
   const a = cell.angle.trim().toLowerCase();
-  if (cell.stage === "comparison" && EITHER_WAY.test(text)) return { property: 2, reason: "asks for reasons either way, forces no single pick (string form)", clear: true };
+  if (cell.stage === "comparison" && (EITHER_WAY.test(text) || (WHY_EITHER.test(text) && !WHY_PICK_ASK.test(text)))) return { property: 2, reason: "asks for reasons either way, forces no single pick (string form)", clear: true };
   if (cell.stage === "alternatives" && a !== "defensive" && a !== "generic" && a !== "" && CONDITIONAL_MOVE.test(text)) return { property: 2, reason: "the move is conditional (string form)", clear: true };
   if (cell.stage === "pricing" && WORTH_CONSIDERING.test(text)) return { property: 3, reason: "asks whether it is worth considering, forces no verdict (string form)", clear: true };
   if (cell.stage === "criteria" && HALF_CRITERIA.test(text)) return { property: 3, reason: "asks only what to consider and treats what to look at as settled (string form)", clear: true };
