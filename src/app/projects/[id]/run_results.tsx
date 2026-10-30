@@ -9,6 +9,7 @@ import {
   type WorkbenchTab,
 } from "./views";
 import Workbench, { type WbPreset } from "./workbench";
+import WorkbenchCodes from "./workbench_codes";
 import { SortTable } from "./table";
 import AnswerText from "./answer_text";
 import HumanCodingPanel from "./human_coding_panel";
@@ -57,8 +58,8 @@ export default function RunResults({
  * premium, awareness, reasons - each reading answer_codes under the
  * project's code source. Boardroom and Five questions render from the
  * brand summary (engine/brand_summary.ts), the same data cut for the
- * executive read. Workbench is still being rebuilt on the new measurement
- * and says so instead of rendering zeros from the empty legacy tables.
+ * executive read. The Workbench slices the coded answers in the browser
+ * over one fact-table fetch (workbench_codes.tsx / engine/workbench.ts).
  */
 function CodesResults({
   runId,
@@ -150,17 +151,9 @@ function CodesResults({
           <QuestionsSection key={k("questions")} runId={runId} />
         </div>
       )}
-      {view === "workbench" && (
-        <div className="card px-6 py-10 text-center grid gap-2">
-          <p className="text-sm font-semibold">
-            Workbench is being rebuilt on the new measurement
-          </p>
-          <p className="text-[13px] text-ink-3 mx-auto max-w-prose">
-            This tracker now measures every question type in its own view,
-            read straight from the coded answers. The brief carries the
-            synthesis and By question type the full tables; the Workbench
-            returns once its slicing reads the same data.
-          </p>
+      {visited.has("workbench") && (
+        <div className={show("workbench")}>
+          <WorkbenchCodes key={k("workbench")} runId={runId} />
         </div>
       )}
     </div>
