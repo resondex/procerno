@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import type { BrandSummaryView, RateCell, SummaryBrand } from "@/lib/engine/brand_summary";
+import { SortTable } from "./table";
 
 /**
  * The Boardroom and Five-questions views, answer_codes era (2026-10-30):
@@ -84,6 +85,216 @@ function BarRow({ name, share, max, isTarget, right }: {
 function pickBoard(view: BrandSummaryView, limit: number): SummaryBrand[] {
   const rivals = view.brands.filter((b) => b.role !== "target" && b.chosen.k > 0).slice(0, limit);
   return [view.target, ...rivals].sort((a, b) => rate(b.shareOfDecided) - rate(a.shareOfDecided));
+}
+
+/* ================================================================== */
+/* The brief: the one-screen synthesis                                 */
+/* ================================================================== */
+
+export function BriefSection({ runId }: { runId: string }) {
+  const { view, error } = useBrandSummary(runId);
+  return (
+    <Shell view={view} error={error}>
+      {(v) => <Brief v={v} />}
+    </Shell>
+  );
+}
+
+function Tile({ label, cell, hint }: { label: string; cell: RateCell; hint: string }) {
+  return (
+    <div className="card p-5" title={`${hint} - ${range(cell)}`}>
+      <div className="section-label">{label}</div>
+      <div className="text-[2rem] leading-tight font-semibold tabular-nums mt-1.5">{pct(cell)}</div>
+      <div className="text-[13px] text-ink-2 mt-1">{cell.k} of {cell.n} answers</div>
+    </div>
+  );
+}
+
+function Brief({ v }: { v: BrandSummaryView }) {
+  const byMentioned = [...v.brands].sort((a, b) => rate(b.mentioned) - rate(a.mentioned));
+  const leaderboard = byMentioned.slice(0, 10);
+  if (!leaderboard.some((b) => b.key === v.target.key) && leaderboard.length > 0) {
+    leaderboard[leaderboard.length - 1] = v.target;
+  }
+  const maxMentioned = Math.max(...leaderboard.map((b) => rate(b.mentioned)), 0.01);
+  const board = pickBoard(v, 8);
+  const maxPick = Math.max(...board.map((b) => rate(b.shareOfDecided)), 0.01);
+  const h2h = v.headToHead.slice(0, 6);
+  return (
+    <div className="grid gap-8">
+      <section className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+        <Tile label="Mentioned" cell={v.target.mentioned} hint="Open-choice answers that name you at all" />
+        <Tile label="Recommended" cell={v.target.recommended} hint="Answers that put you forward, by framing or as the pick" />
+        <Tile label="Chosen" cell={v.target.chosen} hint="Answers that crown you as THE pick" />
+        <Tile label="Share of decided" cell={v.target.shareOfDecided} hint="Your picks over every in-category pick" />
+      </section>
+      <p className="text-[13px] text-ink-3 -mt-5">
+        Across {v.answers.toLocaleString()} open-choice answers on the core panel -{" "}
+        {v.firmPick.k} committed to one pick, {v.firmPickInCategory.k} of those to a brand in
+        your category. Questions that name a brand are measured apart, under By question type.
+        {v.uncoded > 0 && ` ${v.uncoded} answers are not coded yet.`}
+      </p>
+
+      <section className="card p-6">
+        <h2 className="section-label mb-1">Brand leaderboard</h2>
+        <p className="text-[13px] text-ink-3 mb-5">
+          Share of open-choice answers naming each brand - tracked rivals and brands the answers
+          volunteered.
+        </p>
+        <div className="grid gap-2.5">
+          {leaderboard.map((b) => (
+            <BarRow
+              key={b.key}
+              name={b.name}
+              isTarget={b.key === v.target.key}
+              share={rate(b.mentioned)}
+              max={maxMentioned}
+              right={`${pct(b.mentioned)} · chosen ${pct(b.chosen)}`}
+            />
+          ))}
+        </div>
+      </section>
+
+      <section className="card p-6">
+        <h2 className="section-label mb-1">Who wins instead</h2>
+        <p className="text-[13px] text-ink-3 mb-5">
+          The brand each answer actually crowned - shares of the {v.firmPickInCategory.k} answers
+          that picked a brand in your category.
+        </p>
+        <div className="grid gap-2.5">
+          {board.map((b) => (
+            <BarRow
+              key={b.key}
+              name={b.name}
+              isTarget={b.key === v.target.key}
+              share={rate(b.shareOfDecided)}
+              max={maxPick}
+              right={`${b.chosen.k} picks · ${pct(b.shareOfDecided)}`}
+            />
+          ))}
+        </div>
+      </section>
+
+      {v.reasonLift.length > 0 && (
+        <section className="card p-6">
+          <h2 className="section-label mb-1">The arguments that decide it</h2>
+          <p className="text-[13px] text-ink-3 mb-4">
+            How often each argument rides along when you win vs when a rival is picked. Positive
+            lift = arguments to feed; negative = the conversations you&apos;re losing.
+          </p>
+          <SortTable
+            filename="arguments.csv"
+            defaultSort={{ id: "lift", dir: -1 }}
+            cols={[
+              { id: "code", label: "Argument",
+                val: (r: BrandSummaryView["reasonLift"][number]) => r.code,
+                render: (r) => <span className="font-medium">{r.code}</span> },
+              { id: "wins", label: "With your wins", num: true,
+                val: (r) => Math.round(rate(r.wins) * 100),
+                render: (r) => pct(r.wins) },
+              { id: "others", label: "With rival picks", num: true,
+                val: (r) => Math.round(rate(r.others) * 100),
+                render: (r) => pct(r.others) },
+              { id: "lift", label: "Lift", num: true,
+                val: (r) => Math.round(r.lift * 100),
+                render: (r) => (
+                  <span className={r.lift > 0.02 ? "text-success font-semibold" : r.lift < -0.02 ? "text-danger font-semibold" : ""}>
+                    {pts(r.lift)}
+                  </span>
+                ) },
+            ]}
+            rows={v.reasonLift}
+          />
+        </section>
+      )}
+
+      {v.byEngine.length > 1 && (
+        <section className="card p-6">
+          <h2 className="section-label mb-1">By engine</h2>
+          <p className="text-[13px] text-ink-3 mb-4">
+            The same open-choice questions answered by each assistant, through the same coding.
+          </p>
+          <SortTable
+            filename="by_engine.csv"
+            defaultSort={{ id: "mentioned", dir: -1 }}
+            cols={[
+              { id: "engine", label: "Engine",
+                val: (e: BrandSummaryView["byEngine"][number]) => e.label,
+                render: (e) => (
+                  <span className="font-medium whitespace-nowrap">
+                    {e.label}
+                    {e.mode === "search" && (
+                      <span className="ml-1.5 rounded-full bg-primary-soft px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-primary">
+                        search
+                      </span>
+                    )}
+                  </span>
+                ) },
+              { id: "answers", label: "Answers", num: true, val: (e) => e.answers },
+              { id: "mentioned", label: "Mentioned", num: true,
+                val: (e) => Math.round(rate(e.mentioned) * 100),
+                render: (e) => pct(e.mentioned) },
+              { id: "chosen", label: "Chosen", num: true,
+                val: (e) => Math.round(rate(e.chosen) * 100),
+                render: (e) => pct(e.chosen) },
+            ]}
+            rows={v.byEngine}
+          />
+        </section>
+      )}
+
+      {(v.buyersDoubt || v.customersDoubt || h2h.length > 0) && (
+        <section className="grid gap-3 sm:grid-cols-3">
+          {v.buyersDoubt && (
+            <div className="card p-5 grid gap-1.5 content-start">
+              <div className="section-label">Buyers&apos; worries</div>
+              <div className="text-[15px] font-semibold">told to go ahead {pct(v.buyersDoubt.proceed)}</div>
+              <p className="text-[13px] text-ink-2">
+                The AI agrees the worry is warranted {pct(v.buyersDoubt.agree)} of the time it
+                takes a side on it.
+              </p>
+              <p className="text-[12px] text-ink-3">{v.buyersDoubt.answers} answers, apart from the headline.</p>
+            </div>
+          )}
+          {v.customersDoubt && (
+            <div className="card p-5 grid gap-1.5 content-start">
+              <div className="section-label">Customers&apos; worries</div>
+              <div className="text-[15px] font-semibold">
+                stay {pct(v.customersDoubt.keep)} - leave {pct(v.customersDoubt.leave)}
+              </div>
+              <p className="text-[13px] text-ink-2">
+                The AI agrees the worry is warranted {pct(v.customersDoubt.agree)} of the time it
+                takes a side on it.
+              </p>
+              <p className="text-[12px] text-ink-3">{v.customersDoubt.answers} answers, apart from the headline.</p>
+            </div>
+          )}
+          {h2h.length > 0 && (
+            <div className="card p-5 grid gap-1.5 content-start">
+              <div className="section-label">Head-to-head record</div>
+              <div className="grid gap-1">
+                {h2h.map((r) => (
+                  <div key={r.key} className="flex items-baseline justify-between gap-3 text-[13px]">
+                    <span className="text-ink-2 truncate">vs {r.rival}</span>
+                    <span className="tabular-nums whitespace-nowrap">
+                      {r.won.k} - {r.lost.k}
+                      <span className="text-ink-3"> · win {pct(r.winOfDecided)}</span>
+                    </span>
+                  </div>
+                ))}
+              </div>
+              <p className="text-[12px] text-ink-3">Prompted contests, never pooled with the open numbers.</p>
+            </div>
+          )}
+        </section>
+      )}
+
+      <p className="text-center text-[13px] text-ink-3">
+        Every question type&apos;s full tables - doubts, value, alternatives, awareness, reasons -
+        live under <span className="font-medium text-ink-2">By question type</span>.
+      </p>
+    </div>
+  );
 }
 
 /* ================================================================== */

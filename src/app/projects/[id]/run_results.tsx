@@ -13,7 +13,7 @@ import { SortTable } from "./table";
 import AnswerText from "./answer_text";
 import HumanCodingPanel from "./human_coding_panel";
 import HeadlineSection from "./headline_view";
-import { BoardroomSection, QuestionsSection } from "./summary_views";
+import { BoardroomSection, BriefSection, QuestionsSection } from "./summary_views";
 import PremiumSection from "./premium_view";
 import AwarenessSections from "./awareness_view";
 import HeadToHeadSection from "./head_to_head_view";
@@ -67,9 +67,17 @@ function CodesResults({
   runId: string;
   refreshToken: number;
 }) {
-  const [view, setView] = useState<
-    "brief" | "boardroom" | "workbench" | "questions"
-  >("brief");
+  type CodesView = "brief" | "types" | "boardroom" | "workbench" | "questions";
+  const [view, setView] = useState<CodesView>("brief");
+  // Views stay MOUNTED once visited, hidden with CSS: switching pills and
+  // coming back must not refetch - the per-type stack alone is nine
+  // requests, a multi-second reload on every return otherwise.
+  const [visited, setVisited] = useState<Set<CodesView>>(() => new Set(["brief"]));
+  const open = (v: CodesView) => {
+    setView(v);
+    setVisited((s) => (s.has(v) ? s : new Set(s).add(v)));
+  };
+  const show = (v: CodesView) => (view === v ? "grid gap-8" : "hidden");
   const k = (name: string) => `${name}:${runId}:${refreshToken}`;
   return (
     <div className="grid gap-8">
@@ -93,6 +101,7 @@ function CodesResults({
         {(
           [
             ["brief", "The brief"],
+            ["types", "By question type"],
             ["boardroom", "Boardroom"],
             ["workbench", "Workbench"],
             ["questions", "Five questions"],
@@ -101,7 +110,7 @@ function CodesResults({
           <button
             key={id}
             type="button"
-            onClick={() => setView(id)}
+            onClick={() => open(id)}
             className={`rounded-full border px-3 py-1 text-[13px] font-medium transition-colors ${
               view === id
                 ? "border-[var(--color-primary)] bg-primary-soft text-primary"
@@ -113,8 +122,13 @@ function CodesResults({
         ))}
       </div>
 
-      {view === "brief" && (
-        <>
+      {visited.has("brief") && (
+        <div className={show("brief")}>
+          <BriefSection key={k("brief")} runId={runId} />
+        </div>
+      )}
+      {visited.has("types") && (
+        <div className={show("types")}>
           <HeadlineSection key={k("headline")} runId={runId} />
           <PremiumSection key={k("premium")} runId={runId} />
           <HeadToHeadSection key={k("h2h")} runId={runId} />
@@ -124,13 +138,17 @@ function CodesResults({
           <RepertoireSection key={k("repertoire")} runId={runId} />
           <AwarenessSections key={k("awareness")} runId={runId} />
           <ReasonsSection key={k("reasons")} runId={runId} />
-        </>
+        </div>
       )}
-      {view === "boardroom" && (
-        <BoardroomSection key={k("boardroom")} runId={runId} />
+      {visited.has("boardroom") && (
+        <div className={show("boardroom")}>
+          <BoardroomSection key={k("boardroom")} runId={runId} />
+        </div>
       )}
-      {view === "questions" && (
-        <QuestionsSection key={k("questions")} runId={runId} />
+      {visited.has("questions") && (
+        <div className={show("questions")}>
+          <QuestionsSection key={k("questions")} runId={runId} />
+        </div>
       )}
       {view === "workbench" && (
         <div className="card px-6 py-10 text-center grid gap-2">
@@ -139,9 +157,9 @@ function CodesResults({
           </p>
           <p className="text-[13px] text-ink-3 mx-auto max-w-prose">
             This tracker now measures every question type in its own view,
-            read straight from the coded answers. The brief carries all of
-            the current numbers; the Workbench returns once its slicing
-            reads the same data.
+            read straight from the coded answers. The brief carries the
+            synthesis and By question type the full tables; the Workbench
+            returns once its slicing reads the same data.
           </p>
         </div>
       )}
