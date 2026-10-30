@@ -319,6 +319,12 @@ function ensureSchema(): Promise<void> {
       await sql`ALTER TABLE projects ADD COLUMN IF NOT EXISTS codes_source TEXT`;
       // projects.code_groups (2026-10-27): the reasons view's display rollup map.
       await sql`ALTER TABLE projects ADD COLUMN IF NOT EXISTS code_groups TEXT`;
+      // projects.reasons_adapter (2026-10-29): two-pass routing - the
+      // tracker's reasons adapter model id; NULL = single-pass coding.
+      await sql`ALTER TABLE projects ADD COLUMN IF NOT EXISTS reasons_adapter TEXT`;
+      // projects.coder_inputs (2026-10-29): the tracker's frozen coder prompt
+      // inputs (flag vocabulary, advocacy criticisms), JSON.
+      await sql`ALTER TABLE projects ADD COLUMN IF NOT EXISTS coder_inputs TEXT`;
       await sql`DROP INDEX IF EXISTS idx_responses_task`;
       await sql`CREATE UNIQUE INDEX IF NOT EXISTS idx_responses_task_engine
         ON responses(run_id, prompt_id, repeat_idx, model)`;
@@ -1528,5 +1534,33 @@ export const pgStore: Store = {
   async setCodeGroups(projectId, groupsJson) {
     const sql = await db();
     await sql`UPDATE projects SET code_groups = ${groupsJson} WHERE id = ${projectId}`;
+  },
+
+  async listAnswerCodeIds(runId, source) {
+    const sql = await db();
+    const rows = await sql`SELECT response_id FROM answer_codes WHERE run_id = ${runId} AND source = ${source}`;
+    return rows.map((r) => r.response_id as string);
+  },
+
+  async getReasonsAdapter(projectId) {
+    const sql = await db();
+    const rows = await sql`SELECT reasons_adapter FROM projects WHERE id = ${projectId}`;
+    return (rows[0]?.reasons_adapter as string | null | undefined) ?? null;
+  },
+
+  async setReasonsAdapter(projectId, adapter) {
+    const sql = await db();
+    await sql`UPDATE projects SET reasons_adapter = ${adapter} WHERE id = ${projectId}`;
+  },
+
+  async getCoderInputs(projectId) {
+    const sql = await db();
+    const rows = await sql`SELECT coder_inputs FROM projects WHERE id = ${projectId}`;
+    return (rows[0]?.coder_inputs as string | null | undefined) ?? null;
+  },
+
+  async setCoderInputs(projectId, inputsJson) {
+    const sql = await db();
+    await sql`UPDATE projects SET coder_inputs = ${inputsJson} WHERE id = ${projectId}`;
   },
 };

@@ -17,6 +17,9 @@ import { prewarmContextVerdicts } from "./context_judge";
 import { batchableEngine, hasOpenBatches, pollRunBatches } from "./batch";
 import { bootstrapRunChunk } from "./bootstrap";
 import { loadRunPrompts } from "./surfaces";
+import { coderSource } from "./coder";
+import { codeWaveChunk, coderBlockKey } from "./coding_wave";
+import type { Project, ResponseMetaRow } from "../types";
 
 // Sized when a run sampled one engine from one vendor. A six-engine panel
 // spreads across four vendors, so 4 global slots left each vendor running
@@ -96,12 +99,6 @@ export async function driveRunChunk(
   // archived tracker never spends another cent - its runs stay as they are.
   if (project.archived_at) return "coding_blocked";
   const prompts = await loadRunPrompts(run);
-  const knownBrands = [project.brand, ...project.competitors];
-  const extractionCtx = {
-    targetBrand: project.brand,
-    knownBrands,
-    reasonCodes: project.reason_taxonomy,
-  };
   tagCosts({ projectId: project.id, runId });
 
   // Engines whose vendor key is missing would fail every task; drop them and
@@ -195,7 +192,7 @@ export async function driveRunChunk(
     if ((project.taxonomy_status ?? "pending") !== "ratified") {
       return bootstrapRunChunk(runId, project, Date.now() + budgetMs);
     }
-    return codeCollectedChunk(runId, run.status, project.id, extractionCtx, Date.now() + budgetMs, {
+    return codeCollectedChunk(runId, run.status, project, Date.now() + budgetMs, {
       expected: total,
     });
   }
@@ -437,15 +434,24 @@ const CODING_BODY_PAGE = 256;
 async function codeCollectedChunk(
   runId: string,
   status: string,
-  projectId: string,
-  ctx: { targetBrand: string; knownBrands: string[]; reasonCodes: string[] },
+  project: Project,
   deadline: number,
   health: { expected: number }
 ): Promise<ChunkOutcome> {
+  const projectId = project.id;
   // Bodies stay in the database until an answer is actually worked on: a
   // chunk reads the whole run's bookkeeping, but only the bodies it codes.
   const responses = await store.listResponseMeta(runId);
-  const uncoded = responses.filter((r) => !r.coder_model && !r.outcome);
+  // Coded = carries answer_codes under THIS coder's source (2026-10-29: the
+  // wave writes procerno_reason_coder's codes to answer_codes, not the
+  // legacy responses coder columns). The source names the coder and, for an
+  // onboarding-tier tracker, its reasons adapter - a new coder or adapter
+  // is a new source and codes the run afresh. Pure reads: nothing here can
+  // spend before the RUN_COLLECT_ONLY hold below.
+  const adapter = await store.getReasonsAdapter(projectId);
+  const source = coderSource(adapter);
+  const coded = new Set(await store.listAnswerCodeIds(runId, source));
+  const uncoded = responses.filter((r) => !coded.has(r.id));
   const bodies = new Map<string, string>();
   const loadBodies = async (ids: string[]) => {
     const missing = ids.filter((id) => !bodies.has(id));
@@ -545,61 +551,34 @@ async function codeCollectedChunk(
   }
   if (uncoded.length === 0) return "finalize";
 
-  let cursor = 0;
-  let coded = 0;
-  const outage: { err: CoderUnavailableError | null } = { err: null };
   // Bodies arrive a page ahead of the workers, one shared fetch per page.
   const pages = new Map<number, Promise<void>>();
-  const bodyOf = async (i: number): Promise<string> => {
+  const bodyOf = async (i: number, rows: ResponseMetaRow[]): Promise<string> => {
     const page = Math.floor(i / CODING_BODY_PAGE);
     if (!pages.has(page)) {
       const start = page * CODING_BODY_PAGE;
       pages.set(
         page,
-        loadBodies(uncoded.slice(start, start + CODING_BODY_PAGE).map((r) => r.id))
+        loadBodies(rows.slice(start, start + CODING_BODY_PAGE).map((r) => r.id))
           // A failed page is retried by the next worker that needs it.
           .catch((err) => { pages.delete(page); throw err; })
       );
     }
     await pages.get(page);
-    return bodies.get(uncoded[i].id) ?? "";
+    return bodies.get(rows[i].id) ?? "";
   };
-  async function worker(): Promise<void> {
-    while (cursor < uncoded.length && Date.now() < deadline && !outage.err) {
-      const i = cursor++;
-      const r = uncoded[i];
-      try {
-        const text = await bodyOf(i);
-        const meter = coderUsageAccumulator(r.coder_usage);
-        const coding = await withCostContext({ purpose: "run:coder" }, () =>
-          extractCodingConsensus(text, { ...ctx, usageSink: meter.sink })
-        );
-        await store.writeResponseCoding(
-          r.id,
-          coding,
-          coding.coderProvenance,
-          coding.mentions,
-          meter.usage
-        );
-        coded++;
-      } catch (err) {
-        if (err instanceof CoderUnavailableError) {
-          outage.err = err;
-          return;
-        }
-        console.error(`coding of response ${r.id} failed:`, err);
-      }
-    }
-  }
-  await Promise.all(
-    Array.from({ length: Math.min(CONCURRENCY, uncoded.length) }, worker)
-  );
-  if (outage.err) {
-    await store.updateRunStatus(runId, "collected", outage.err.message);
-    console.error(`procerno run ${runId} coding halted: ${outage.err.message}`);
+  // The wave itself: procerno_reason_coder on Fireworks (coding_wave.ts).
+  // The deprecated extractCodingConsensus path is no longer called here.
+  const wave = await codeWaveChunk({ runId, project, source, adapter, uncoded, bodyOf, deadline });
+  if (wave.outcome === "blocked") {
+    await store.updateRunStatus(runId, "collected", wave.message);
+    // updateRunStatus drops notes on non-terminal statuses, so the reason is
+    // also kept where it can be read back (coderBlockKey) - besides the log.
+    await store.cacheSet(coderBlockKey(runId), JSON.stringify({ message: wave.message, at: new Date().toISOString() }));
+    console.error(`procerno run ${runId} coding halted: ${wave.message}`);
     return "coding_blocked";
   }
-  return coded < uncoded.length ? "continue" : "finalize";
+  return wave.outcome;
 }
 
 /** Scheduled-run contract: a run is marked "complete" - the user's "run
@@ -615,21 +594,35 @@ export async function finalizeRun(runId: string): Promise<void> {
   if (!project) return;
   tagCosts({ projectId: project.id, runId, purpose: "run:finalize" });
   try {
-    const [runMentions, runResponses] = await Promise.all([
-      store.listMentionsForRun(runId),
-      store.listResponseMeta(runId),
-    ]);
+    // New names come from whatever coded the run: the coder's answer_codes
+    // rows (2026-10-29) when this run has any under the tracker's coder
+    // source, else the legacy mentions table + responses top picks.
+    const coderCodes = await store.listAnswerCodes(
+      runId,
+      coderSource(await store.getReasonsAdapter(project.id))
+    );
+    let names: string[];
+    if (coderCodes.length > 0) {
+      names = coderCodes.flatMap((c) => [
+        ...(c.mentions ?? []).map((m) => m.brand),
+        ...(c.top_pick ? [c.top_pick] : []),
+      ]);
+    } else {
+      const [runMentions, runResponses] = await Promise.all([
+        store.listMentionsForRun(runId),
+        store.listResponseMeta(runId),
+      ]);
+      names = [
+        ...runMentions.map((m) => m.brand),
+        ...runResponses
+          .map((r) => r.top_pick_brand)
+          .filter((b): b is string => Boolean(b)),
+      ];
+    }
     // cleanSurface, same as the observations queue path - a mention's "®"
     // or doubled spaces must not become part of a pill's name.
     await store.queueDictionaryCandidates(project.id, [
-      ...new Set(
-        [
-          ...runMentions.map((m) => m.brand),
-          ...runResponses
-            .map((r) => r.top_pick_brand)
-            .filter((b): b is string => Boolean(b)),
-        ].map(cleanSurface)
-      ),
+      ...new Set(names.map(cleanSurface)),
     ]);
     const dict = await store.getDictionary(project.id);
     const pendingEntries = dict.filter((e) => e.status === "pending");

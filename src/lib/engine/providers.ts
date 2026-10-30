@@ -1757,6 +1757,13 @@ export function coderUsageAccumulator(prior?: string | null): {
   };
 }
 
+/**
+ * @deprecated 2026-10-29 - the coding wave now runs procerno_reason_coder
+ * on Fireworks (engine/coding_wave.ts -> engine/coder.ts) and writes
+ * answer_codes. This legacy consensus path (writing the responses coder
+ * columns + mentions) stays for one release: only recodeRun still calls
+ * it. Remove it with recodeRun's migration.
+ */
 export async function extractCodingConsensus(
   responseText: string,
   ctx: ExtractionContext

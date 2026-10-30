@@ -375,6 +375,12 @@ function createDb(): Database.Database {
   if (!cols.some((c) => c.name === "code_groups")) {
     db.exec("ALTER TABLE projects ADD COLUMN code_groups TEXT");
   }
+  if (!cols.some((c) => c.name === "reasons_adapter")) {
+    db.exec("ALTER TABLE projects ADD COLUMN reasons_adapter TEXT");
+  }
+  if (!cols.some((c) => c.name === "coder_inputs")) {
+    db.exec("ALTER TABLE projects ADD COLUMN coder_inputs TEXT");
+  }
   if (!cols.some((c) => c.name === "dictionary_status")) {
     db.exec(
       "ALTER TABLE projects ADD COLUMN dictionary_status TEXT NOT NULL DEFAULT 'pending'"
@@ -1813,5 +1819,34 @@ export const sqliteStore: Store = {
 
   async setCodeGroups(projectId, groupsJson) {
     getDb().prepare("UPDATE projects SET code_groups = ? WHERE id = ?").run(groupsJson, projectId);
+  },
+
+  async listAnswerCodeIds(runId, source) {
+    const rows = getDb()
+      .prepare("SELECT response_id FROM answer_codes WHERE run_id = ? AND source = ?")
+      .all(runId, source) as { response_id: string }[];
+    return rows.map((r) => r.response_id);
+  },
+
+  async getReasonsAdapter(projectId) {
+    const row = getDb()
+      .prepare("SELECT reasons_adapter FROM projects WHERE id = ?")
+      .get(projectId) as { reasons_adapter: string | null } | undefined;
+    return row?.reasons_adapter ?? null;
+  },
+
+  async setReasonsAdapter(projectId, adapter) {
+    getDb().prepare("UPDATE projects SET reasons_adapter = ? WHERE id = ?").run(adapter, projectId);
+  },
+
+  async getCoderInputs(projectId) {
+    const row = getDb()
+      .prepare("SELECT coder_inputs FROM projects WHERE id = ?")
+      .get(projectId) as { coder_inputs: string | null } | undefined;
+    return row?.coder_inputs ?? null;
+  },
+
+  async setCoderInputs(projectId, inputsJson) {
+    getDb().prepare("UPDATE projects SET coder_inputs = ? WHERE id = ?").run(inputsJson, projectId);
   },
 };

@@ -1133,4 +1133,18 @@ export interface Store {
    * null = no map (the view shows the fine codes only). Never a labeling grain. */
   getCodeGroups(projectId: string): Promise<string | null>;
   setCodeGroups(projectId: string, groupsJson: string | null): Promise<void>;
+  /** Response ids that already carry codes from one source (no bodies, no
+   * code columns) - the coding wave's "already coded" set. */
+  listAnswerCodeIds(runId: string, source: string): Promise<string[]>;
+  /** Two-pass routing (2026-10-29): the tracker's reasons adapter (a
+   * Fireworks model id warm-started from the configured coder); null =
+   * single-pass. Set by hand per onboarding-tier tracker, cleared when a
+   * retrain absorbs the tracker's labels into the base. */
+  getReasonsAdapter(projectId: string): Promise<string | null>;
+  setReasonsAdapter(projectId: string, adapter: string | null): Promise<void>;
+  /** Per-tracker frozen coder prompt inputs (JSON CoderInputs: flag
+   * vocabulary, advocacy criticisms) written by scripts/coder_inputs.mts;
+   * null = not recorded (the coding wave refuses to run). */
+  getCoderInputs(projectId: string): Promise<string | null>;
+  setCoderInputs(projectId: string, inputsJson: string | null): Promise<void>;
 }
