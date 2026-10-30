@@ -84,7 +84,10 @@ export default function ReasonsSection({ runId, room, initialType }: { runId: st
       ];
     }
     const k = selected.key;
-    const verdictCols = selected.verdicts.map((v) =>
+    // Types with no verdict split (criteria) carry one fallback bucket
+    // keyed "all" - identical to the All column, and its id collided with
+    // it (duplicate React keys in the table header). Skip it.
+    const verdictCols = selected.verdicts.filter((v) => v.key !== "all").map((v) =>
       rateCol<ReasonRow>(
         v.key,
         `${v.label} (${v.answers})`,

@@ -28,10 +28,14 @@ import ReasonsSection from "./reasons_view";
  * carries a "measured across all buyers by design" marker - never hidden,
  * never shown as the room's.
  *
- * Mounting: a station's sections mount the first time it is opened and stay
- * mounted (hidden with CSS) on collapse, so reopening never refetches.
- * Room-aware sections mount once per (station, room) visited; the
- * all-buyers sections mount once per station whatever the filter.
+ * Layout (Tyler's pick, 2026-10-30): the funnel strip - six compact
+ * station cards across the top as the persistent map, ONE selected at a
+ * time, the selected station's full read filling the page below.
+ *
+ * Mounting: a station's sections mount the first time it is selected and
+ * stay mounted (hidden with CSS) when another is picked, so returning
+ * never refetches. Room-aware sections mount once per (station, room)
+ * visited; the all-buyers sections mount once per station.
  *
  * Two shared components draw two stations' cards at once and are not split
  * here: DoubtSections renders buyers' worries AND customers' worries (shown
@@ -82,65 +86,61 @@ function MetricLine({ m, filtered }: { m: JourneyMetric; filtered: boolean }) {
   );
 }
 
+/** One cell of the funnel strip: the persistent map across the top. */
 function StationCard({
   s,
   filtered,
-  open,
-  onToggle,
+  selected,
+  onSelect,
 }: {
   s: JourneyStation;
   filtered: boolean;
-  open: boolean;
-  onToggle: () => void;
+  selected: boolean;
+  onSelect: () => void;
 }) {
   const lead = s.lead;
   return (
     <button
       type="button"
-      onClick={onToggle}
-      aria-expanded={open}
-      className={`card p-4 text-left grid gap-2 content-start transition-colors ${
-        open ? "border-[var(--color-primary)]" : "hover:border-ink-3"
+      onClick={onSelect}
+      aria-pressed={selected}
+      className={`card p-3.5 text-left grid gap-1.5 content-start transition-colors ${
+        selected ? "border-[var(--color-primary)] bg-primary-soft/30" : "hover:border-ink-3"
       }`}
     >
-      <div className="flex items-baseline justify-between gap-2">
-        <span className="section-label">{s.label}</span>
-        <span className="text-[11px] text-ink-3">{open ? "Hide" : "Open"}</span>
-      </div>
-      {filtered && s.invariant && (
-        <div>
-          <ByDesign>Measured across all buyers by design</ByDesign>
-        </div>
-      )}
+      <span className={`section-label ${selected ? "text-primary" : ""}`}>{s.label}</span>
       {lead ? (
         <div className={thin(lead) ? "opacity-60" : ""}>
           <Tip tip={`${range(lead.cell)}${thin(lead) ? " - too few answers to read" : ""}`}>
-            <span className="cursor-help text-[1.75rem] leading-tight font-semibold tabular-nums">{pct(lead.cell)}</span>
+            <span className="cursor-help text-[1.6rem] leading-tight font-semibold tabular-nums">{pct(lead.cell)}</span>
           </Tip>
-          <div className="text-[12px] text-ink-2">
+          <div className="text-[11px] leading-snug text-ink-2">
             {lead.label}
-            {filtered && lead.invariant && !s.invariant && (
-              <span className="ml-1.5">
+            {filtered && lead.invariant && (
+              <span className="ml-1">
                 <ByDesign>all buyers</ByDesign>
               </span>
             )}
           </div>
-          <div className="text-[11px] text-ink-3">
-            {thin(lead) ? `Thin - ${lead.cell.n} answers` : `${lead.cell.n} answers`}
-          </div>
         </div>
       ) : (
-        <div className="text-[12px] text-ink-3">
-          {filtered ? "Not asked as this buyer." : "No questions of this kind on this tracker."}
+        <div className="text-[11px] text-ink-3">
+          {filtered ? "Not asked as this buyer." : "No questions of this kind here."}
         </div>
       )}
       {s.metrics.length > 0 && (
-        <ul className="grid gap-0.5 border-t border-line pt-2">
-          {s.metrics.map((m) => (
+        <ul className="grid gap-0.5 border-t border-line pt-1.5">
+          {s.metrics.slice(0, 2).map((m) => (
             <MetricLine key={m.key} m={m} filtered={filtered} />
           ))}
+          {s.metrics.length > 2 && (
+            <li className="text-[11px] text-ink-3">+ {s.metrics.length - 2} more in the read below</li>
+          )}
         </ul>
       )}
+      <span className="text-[11px] text-ink-3">
+        {lead ? (thin(lead) ? `Thin - ${lead.cell.n} answers` : `${lead.cell.n} answers`) : ""}
+      </span>
     </button>
   );
 }
@@ -228,9 +228,9 @@ export default function JourneySection({ runId }: { runId: string }) {
   const [roomKey, setRoomKey] = useState<string>(ALL);
   const [views, setViews] = useState<Record<string, JourneyView | null>>({});
   const [errors, setErrors] = useState<Record<string, string>>({});
-  /** Stations shown now. */
-  const [expanded, setExpanded] = useState<Set<StationKey>>(() => new Set());
-  /** Stations ever opened -> rooms their room-aware sections were mounted for. */
+  /** The one station whose full read fills the page (the funnel-strip rule). */
+  const [selected, setSelected] = useState<StationKey | null>(null);
+  /** Stations ever selected -> rooms their room-aware sections were mounted for. */
   const [mounted, setMounted] = useState<Map<StationKey, string[]>>(() => new Map());
 
   const loaded = roomKey in views;
@@ -260,26 +260,14 @@ export default function JourneySection({ runId }: { runId: string }) {
       return next;
     });
 
-  const toggle = (s: StationKey) => {
-    setExpanded((prev) => {
-      const next = new Set(prev);
-      if (next.has(s)) next.delete(s);
-      else next.add(s);
-      return next;
-    });
+  const select = (s: StationKey) => {
+    setSelected(s);
     mountFor([s], roomKey);
   };
 
   const jump = (s: StationKey) => {
-    setExpanded((prev) => (prev.has(s) ? prev : new Set(prev).add(s)));
-    mountFor([s], roomKey);
+    select(s);
     requestAnimationFrame(() => document.getElementById(`journey-${s}`)?.scrollIntoView({ behavior: "smooth", block: "start" }));
-  };
-
-  const pickRoom = (rk: string) => {
-    setRoomKey(rk);
-    // Open stations mount the new room's sections now; closed ones wait until opened.
-    mountFor([...expanded], rk);
   };
 
   // The rooms list rides every payload; fall back to the all-buyers one while a room loads.
@@ -287,6 +275,24 @@ export default function JourneySection({ runId }: { runId: string }) {
   const rooms = (view ?? views[ALL])?.rooms ?? [];
   const error = errors[roomKey];
   const filtered = roomKey !== ALL;
+
+  // The strip always has one station open. Until the user picks one, the
+  // selection is DERIVED - Consideration (the headline read), else the
+  // first station with questions - so no state is set from an effect; its
+  // sections mount through the same derivation below.
+  const stations = (view ?? views[ALL])?.stations;
+  const effSelected =
+    selected ??
+    (stations
+      ? (stations.find((s) => s.key === "consideration" && s.lead) ?? stations.find((s) => s.lead) ?? stations[0])?.key ?? null
+      : null);
+
+  const pickRoom = (rk: string) => {
+    setRoomKey(rk);
+    // The open station mounts the new room's sections now; the rest wait
+    // until they are selected under it.
+    if (effSelected) mountFor([effSelected], rk);
+  };
 
   if (view === null) return null;
 
@@ -333,26 +339,24 @@ export default function JourneySection({ runId }: { runId: string }) {
       {view && (
         <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-6 gap-3">
           {view.stations.map((s) => (
-            <StationCard key={s.key} s={s} filtered={filtered} open={expanded.has(s.key)} onToggle={() => toggle(s.key)} />
+            <StationCard key={s.key} s={s} filtered={filtered} selected={effSelected === s.key} onSelect={() => select(s.key)} />
           ))}
         </div>
       )}
 
       {(view ?? views[ALL])?.stations
-        .filter((s) => mounted.has(s.key))
+        .filter((s) => mounted.has(s.key) || s.key === effSelected)
         .map((s) => {
-          const roomsMounted = mounted.get(s.key) ?? [];
+          // The derived default mounts for the current room without a click.
+          const roomsMounted = [
+            ...new Set([...(mounted.get(s.key) ?? []), ...(s.key === effSelected ? [roomKey] : [])]),
+          ];
           const aware = ROOM_AWARE.has(s.key);
           return (
-            <section key={s.key} id={`journey-${s.key}`} className={expanded.has(s.key) ? "grid gap-5 scroll-mt-4" : "hidden"}>
-              <div className="flex items-baseline justify-between gap-3 border-b border-line pb-2">
-                <div>
-                  <h2 className="text-[15px] font-semibold">{s.label}</h2>
-                  <p className="text-[12px] text-ink-3">{QUESTION[s.key]}</p>
-                </div>
-                <button type="button" onClick={() => toggle(s.key)} className="text-[12px] text-ink-3 hover:text-ink-2">
-                  Hide
-                </button>
+            <section key={s.key} id={`journey-${s.key}`} className={effSelected === s.key ? "grid gap-5 scroll-mt-4" : "hidden"}>
+              <div className="border-b border-line pb-2">
+                <h2 className="text-[15px] font-semibold">{s.label} - the full read</h2>
+                <p className="text-[12px] text-ink-3">{QUESTION[s.key]}</p>
               </div>
               {aware &&
                 roomsMounted.map((rk) => (
