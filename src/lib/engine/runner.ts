@@ -431,7 +431,10 @@ const RETRY_SKIP_OUTPUT = 12_000;
  * didn't code. */
 const CODING_BODY_PAGE = 256;
 
-async function codeCollectedChunk(
+/** Exported for hand-run admin drivers (scripts/code_runs.mts) that code a
+ * held run in-process WITHOUT the finalize hop; the app reaches it only
+ * through driveRunChunk. */
+export async function codeCollectedChunk(
   runId: string,
   status: string,
   project: Project,

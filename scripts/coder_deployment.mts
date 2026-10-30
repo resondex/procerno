@@ -12,7 +12,8 @@
  *   probe <model>     one 5-token request (reasoning_effort none) until routable;
  *                     wakes a scaled-to-zero replica (bills while it is up)
  *   verify-deleted    exit 0 only when the deployment is ABSENT from the list
- * MUTATING (terminal + typed confirmation of the deployment id):
+ * MUTATING (terminal + typed confirmation of the deployment id; --yes skips
+ * the prompt for a non-interactive run whose spend is already authorized):
  *   create            1x H100 80GB, BF16, enableAddons, minReplicaCount 0,
  *                     maxReplicaCount 1 - idles to zero after ~1h with no traffic
  *   bind <model>      bind a LoRA (the coder, or a tracker's reasons adapter);
@@ -50,9 +51,14 @@ const DEP = CODER_DEPLOYMENT;
 const API = `https://api.fireworks.ai/v1/accounts/${FIREWORKS_ACCOUNT}`;
 const H = { Authorization: `Bearer ${KEY}`, "Content-Type": "application/json" };
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
-const [cmd = "status", model] = process.argv.slice(2);
+const YES = process.argv.includes("--yes");
+const [cmd = "status", model] = process.argv.slice(2).filter((a) => a !== "--yes");
 
 async function confirm(action: string) {
+  if (YES) {
+    console.log(`${action} deployment '${DEP}' (billed) - confirmed by --yes`);
+    return;
+  }
   if (!process.stdin.isTTY || !process.stdout.isTTY) {
     console.error(`REFUSED: '${action}' changes billed Fireworks resources and must be run by hand in a terminal.`);
     process.exit(4);

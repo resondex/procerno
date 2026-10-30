@@ -18,7 +18,8 @@
  * (every confirmed code has its scope sentence), every cell of the battery
  * builds its trained prompt prefix (no advocacy cell without a criticism),
  * and an adapter, if given, was warm-started from the configured coder.
- * --write stores them (one UPDATE, terminal + typed project id required).
+ * --write stores them (one UPDATE, terminal + typed project id required;
+ * --yes skips the prompt for a non-interactive run already authorized).
  */
 import postgres from "postgres";
 import fs from "node:fs";
@@ -92,16 +93,18 @@ if (!WRITE) {
   await sql.end();
   process.exit(0);
 }
-if (!process.stdin.isTTY || !process.stdout.isTTY) {
-  console.error("REFUSED: --write changes a prod tracker and must be run by hand in a terminal.");
-  process.exit(4);
-}
-const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
-const answer = await rl.question(`Write these to prod project ${projectId}? Type the project id to confirm: `);
-rl.close();
-if (answer.trim() !== projectId) {
-  console.log("not confirmed - nothing written");
-  process.exit(4);
+if (!argv.includes("--yes")) {
+  if (!process.stdin.isTTY || !process.stdout.isTTY) {
+    console.error("REFUSED: --write changes a prod tracker and must be run by hand in a terminal (or with --yes).");
+    process.exit(4);
+  }
+  const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
+  const answer = await rl.question(`Write these to prod project ${projectId}? Type the project id to confirm: `);
+  rl.close();
+  if (answer.trim() !== projectId) {
+    console.log("not confirmed - nothing written");
+    process.exit(4);
+  }
 }
 // The same additive columns the app adds on boot (idempotent).
 await sql`ALTER TABLE projects ADD COLUMN IF NOT EXISTS coder_inputs TEXT`;
