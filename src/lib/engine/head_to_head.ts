@@ -1,4 +1,4 @@
-import { ENGINES } from "./providers";
+import { ENGINES, engineDisplayLabel } from "./providers";
 import { buildResolver } from "./brand_resolve";
 import { containsSeq, famTokens } from "./brand_family";
 import { excludedWords } from "./definition_overlap";
@@ -315,7 +315,7 @@ async function computeKind(data: ViewData, kind: "entity" | "class"): Promise<He
   });
   rows.sort((a, b) => b.answers - a.answers || a.rival.localeCompare(b.rival));
 
-  const engineLabel = new Map(ENGINES.map((e) => [e.id, e.label]));
+  const engineLabel = new Map(ENGINES.map((e) => [e.id, engineDisplayLabel(e)]));
   const byEngine: HeadToHeadSlice[] = [...core]
     .map((m) => {
       const list = scored.filter((s) => s.row.model === m);
@@ -347,7 +347,7 @@ export async function computeHeadToHead(data: ViewData): Promise<HeadToHeadViews
 
 // hh4 (2026-10-28): names resolve through the context judge (context_judge.ts) -
 // a rival's maker-less products move from "routes elsewhere" to the rival's side.
-const HEAD_TO_HEAD_VERSION = "hh4";
+const HEAD_TO_HEAD_VERSION = "hh5";
 export function computeHeadToHeadCached(run: Run, project: Project): Promise<HeadToHeadViews | null> {
   return cachedView("head_to_head", HEAD_TO_HEAD_VERSION, run, project, computeHeadToHead, { judge: true });
 }

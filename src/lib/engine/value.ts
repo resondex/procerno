@@ -1,4 +1,4 @@
-import { ENGINES } from "./providers";
+import { ENGINES, engineDisplayLabel } from "./providers";
 import { buildResolver, type Resolver } from "./brand_resolve";
 import { cachedView, cell, poolOf, type PoolRow, type RateCell, type ViewData } from "./view_data";
 import type { Project, Run } from "../types";
@@ -161,7 +161,7 @@ export function computeValue(data: ViewData): ValueView | null {
     .map(([line, list]) => rowOf(line, line, list))
     .sort((a, b) => b.answers - a.answers || a.label.localeCompare(b.label));
 
-  const labels = new Map(ENGINES.map((e) => [e.id, e.label]));
+  const labels = new Map(ENGINES.map((e) => [e.id, engineDisplayLabel(e)]));
   return {
     runId: data.run.id,
     source: data.source,
@@ -182,7 +182,7 @@ export function computeValue(data: ViewData): ValueView | null {
 }
 
 // v2 (2026-10-28): names resolve through the context judge (context_judge.ts).
-const VALUE_VERSION = "v2";
+const VALUE_VERSION = "v3";
 export function computeValueCached(run: Run, project: Project): Promise<ValueView | null> {
   return cachedView("value", VALUE_VERSION, run, project, computeValue, { setupDecision: true, judge: true });
 }

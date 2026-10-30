@@ -1,4 +1,4 @@
-import { ENGINES } from "./providers";
+import { ENGINES, engineDisplayLabel } from "./providers";
 import { buildResolver } from "./brand_resolve";
 import { cachedView, cell, poolOf, type PoolRow, type RateCell, type ViewData } from "./view_data";
 import type { Project, Run } from "../types";
@@ -105,7 +105,7 @@ export function computeRepertoire(data: ViewData): RepertoireView | null {
     for (const p of pairs) m.set(p, (m.get(p) ?? 0) + 1);
     return [...m.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]));
   };
-  const labels = new Map(ENGINES.map((e) => [e.id, e.label]));
+  const labels = new Map(ENGINES.map((e) => [e.id, engineDisplayLabel(e)]));
   return {
     ...sliceOf("all", "All", facts),
     runId: data.run.id,
@@ -122,7 +122,7 @@ export function computeRepertoire(data: ViewData): RepertoireView | null {
   };
 }
 
-const REPERTOIRE_VERSION = "rp1";
+const REPERTOIRE_VERSION = "rp2";
 export function computeRepertoireCached(run: Run, project: Project): Promise<RepertoireView | null> {
   return cachedView("repertoire", REPERTOIRE_VERSION, run, project, computeRepertoire, { judge: true });
 }

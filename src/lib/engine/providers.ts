@@ -179,6 +179,14 @@ export function getEngine(id: string): Engine | undefined {
   return ENGINES.find((e) => e.id === id);
 }
 
+/** Registry labels carry retirement bookkeeping ("gpt-5.6-luna - retired")
+ * for admin and config surfaces; the customer-facing views name the engine
+ * that answered without it - the model id stays, so a 5.6 wave and a 6 wave
+ * still read apart. */
+export function engineDisplayLabel(e: { label: string }): string {
+  return e.label.replace(/ - retired[^)]*/, "");
+}
+
 /** The engine a NEW run collects on for a configured id: retired engines
  * resolve along their successor chain, everything else is itself. Applied
  * where runs are created, so a run's stored engine list, its responses and

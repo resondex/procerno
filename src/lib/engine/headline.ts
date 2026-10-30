@@ -1,5 +1,5 @@
 import { matchKey } from "../brand_key";
-import { ENGINES } from "./providers";
+import { ENGINES, engineDisplayLabel } from "./providers";
 import { buildResolver, type Resolver } from "./brand_resolve";
 import { cachedView, cell, poolOf, type RateCell, type ViewData } from "./view_data";
 import type { AnswerCodes, DictionaryEntry, Project, Run } from "../types";
@@ -208,7 +208,7 @@ export function computeHeadline(data: ViewData): HeadlineView {
   }
   brands.sort((a, b) => b.mentioned.k - a.mentioned.k || a.name.localeCompare(b.name));
 
-  const engineLabel = new Map(ENGINES.map((e) => [e.id, e.label]));
+  const engineLabel = new Map(ENGINES.map((e) => [e.id, engineDisplayLabel(e)]));
   const stages = STAGE_ORDER.filter((s) => facts.some((f) => f.stage === s));
   const models = [...core].filter((m) => facts.some((f) => f.model === m));
 
@@ -239,7 +239,7 @@ export function computeHeadline(data: ViewData): HeadlineView {
 }
 
 // h2 (2026-10-28): names resolve through the context judge (context_judge.ts).
-const HEADLINE_VERSION = "h2";
+const HEADLINE_VERSION = "h3";
 export function computeHeadlineCached(run: Run, project: Project): Promise<HeadlineView | null> {
   return cachedView("headline", HEADLINE_VERSION, run, project, computeHeadline, { judge: true });
 }

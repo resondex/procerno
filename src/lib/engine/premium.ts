@@ -1,4 +1,4 @@
-import { ENGINES } from "./providers";
+import { ENGINES, engineDisplayLabel } from "./providers";
 import { buildResolver } from "./brand_resolve";
 import { cachedView, cell, poolOf, type PoolRow, type RateCell, type ViewData } from "./view_data";
 import type { Project, Run } from "../types";
@@ -134,7 +134,7 @@ export function computePremium(data: ViewData): PremiumView | null {
     };
   });
 
-  const labels = new Map(ENGINES.map((e) => [e.id, e.label]));
+  const labels = new Map(ENGINES.map((e) => [e.id, engineDisplayLabel(e)]));
   return {
     runId: data.run.id,
     source: data.source,
@@ -163,7 +163,7 @@ export function computePremium(data: ViewData): PremiumView | null {
   };
 }
 
-const PREMIUM_VERSION = "p1";
+const PREMIUM_VERSION = "p2";
 export function computePremiumCached(run: Run, project: Project): Promise<PremiumView | null> {
   return cachedView("premium_tier", PREMIUM_VERSION, run, project, computePremium, { judge: true });
 }

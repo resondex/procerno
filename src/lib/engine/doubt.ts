@@ -1,4 +1,4 @@
-import { ENGINES } from "./providers";
+import { ENGINES, engineDisplayLabel } from "./providers";
 import { buildResolver } from "./brand_resolve";
 import { exitResolver, exitRows, outsideCounts, type ExitRow } from "./exits";
 import { cachedView, cell, poolOf, type PoolRow, type RateCell, type ViewData } from "./view_data";
@@ -184,7 +184,7 @@ function computeKind<V extends string>(
     verdicts.map((v) => [v, exitCell(facts.filter((f) => f.verdict === v))])
   ) as Record<V, RateCell>;
 
-  const labels = new Map(ENGINES.map((e) => [e.id, e.label]));
+  const labels = new Map(ENGINES.map((e) => [e.id, engineDisplayLabel(e)]));
   const stages = STAGE_ORDER.filter((s) => facts.some((f) => f.row.intent.stage === s));
 
   return {
@@ -229,7 +229,7 @@ export function computeDoubt(data: ViewData): DoubtViews {
 }
 
 // d2 (2026-10-28): names resolve through the context judge (context_judge.ts).
-const DOUBT_VERSION = "d2";
+const DOUBT_VERSION = "d3";
 export function computeDoubtCached(run: Run, project: Project): Promise<DoubtViews | null> {
   return cachedView("doubt", DOUBT_VERSION, run, project, computeDoubt, { judge: true });
 }

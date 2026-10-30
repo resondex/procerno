@@ -1,5 +1,5 @@
 import { matchKey } from "../brand_key";
-import { ENGINES } from "./providers";
+import { ENGINES, engineDisplayLabel } from "./providers";
 import { buildResolver, type Resolver } from "./brand_resolve";
 import { roleOf } from "./headline";
 import { cachedView, cell, poolOf, type RateCell, type ViewData } from "./view_data";
@@ -196,7 +196,7 @@ export function computeBrandSummary(data: ViewData): BrandSummaryView {
   const target = brands.find((b) => b.key === targetKey)!;
 
   // Engine and mode splits of the target's rates, over the same pool.
-  const engineMeta = new Map(ENGINES.map((e) => [e.id, { label: e.label, mode: e.mode }]));
+  const engineMeta = new Map(ENGINES.map((e) => [e.id, { label: engineDisplayLabel(e), mode: e.mode }]));
   const byEngine = [...core]
     .filter((m) => facts.some((f) => f.model === m))
     .map((m) => {
@@ -305,7 +305,7 @@ export function computeBrandSummary(data: ViewData): BrandSummaryView {
 }
 
 // bs1 (2026-10-30): first version; names resolve through the context judge.
-const BRAND_SUMMARY_VERSION = "bs1";
+const BRAND_SUMMARY_VERSION = "bs2";
 export function computeBrandSummaryCached(run: Run, project: Project): Promise<BrandSummaryView | null> {
   return cachedView("brand_summary", BRAND_SUMMARY_VERSION, run, project, computeBrandSummary, { judge: true });
 }

@@ -1,4 +1,4 @@
-import { ENGINES } from "./providers";
+import { ENGINES, engineDisplayLabel } from "./providers";
 import { buildResolver } from "./brand_resolve";
 import { cachedView, cell, poolOf, type PoolRow, type RateCell, type ViewData } from "./view_data";
 import type { ViewKey } from "./views";
@@ -205,7 +205,7 @@ async function block(data: ViewData, view: ViewKey, kind: AwarenessBlock["view"]
   const topicCount = new Map<string, number>();
   for (const f of facts) for (const t of new Set(f.row.code.topics ?? [])) topicCount.set(t, (topicCount.get(t) ?? 0) + 1);
 
-  const labels = new Map(ENGINES.map((e) => [e.id, e.label]));
+  const labels = new Map(ENGINES.map((e) => [e.id, engineDisplayLabel(e)]));
   return {
     without: await withoutGroups(facts.filter((f) => f.route === "adjacent"), data.project.category),
     ...slice(kind, kind, facts),
@@ -241,7 +241,7 @@ export async function computeAwareness(data: ViewData): Promise<AwarenessView | 
 }
 
 // a2 (2026-10-28): adjacent quotes grouped at read time.
-const AWARENESS_VERSION = "a2";
+const AWARENESS_VERSION = "a3";
 export function computeAwarenessCached(run: Run, project: Project): Promise<AwarenessView | null> {
   return cachedView("awareness", AWARENESS_VERSION, run, project, computeAwareness, { judge: true });
 }

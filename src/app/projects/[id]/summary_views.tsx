@@ -141,7 +141,8 @@ function Boardroom({ v }: { v: BrandSummaryView }) {
       <section className="card p-8 border-l-4 border-l-[var(--color-primary)]">
         <div className="section-label mb-3">The verdict</div>
         <p className="text-xl leading-snug text-ink-2 max-w-[62ch]">
-          When {v.answers} AI answers recommend {v.category},{" "}
+          When {v.answers} AI answers field open buying questions about{" "}
+          {v.category},{" "}
           <span className="font-semibold text-ink">
             {v.brand} is in the room {pct(v.target.mentioned)} of the time - and wins it{" "}
             {pct(v.target.shareOfDecided)} when a brand is picked

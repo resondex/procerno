@@ -1,5 +1,5 @@
 import { matchKey } from "../brand_key";
-import { ENGINES } from "./providers";
+import { ENGINES, engineDisplayLabel } from "./providers";
 import { buildResolver, type Resolver } from "./brand_resolve";
 import { roleOf, type HeadlineBrand } from "./headline";
 import { exitResolver, exitRows, outsideCounts } from "./exits";
@@ -140,7 +140,7 @@ export interface AlternativesViews {
   defensive: DefensiveView | null;
 }
 
-const engineLabels = () => new Map(ENGINES.map((e) => [e.id, e.label]));
+const engineLabels = () => new Map(ENGINES.map((e) => [e.id, engineDisplayLabel(e)]));
 const count = <T>(xs: T[], f: (x: T) => boolean) => xs.filter(f).length;
 const topCounts = (m: Map<string, number>, limit: number): NamedCount[] =>
   [...m.entries()]
@@ -374,7 +374,7 @@ export function computeAlternatives(data: ViewData): AlternativesViews {
 }
 
 // alt2 (2026-10-28): names resolve through the context judge (context_judge.ts).
-const ALTERNATIVES_VERSION = "alt2";
+const ALTERNATIVES_VERSION = "alt3";
 export function computeAlternativesCached(run: Run, project: Project): Promise<AlternativesViews | null> {
   return cachedView("alternatives", ALTERNATIVES_VERSION, run, project, computeAlternatives, { judge: true });
 }
