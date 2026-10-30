@@ -142,14 +142,15 @@ const sliceCols = (first: string): Col<HeadlineSlice>[] => [
   rateCol("firm", "Firm pick in category", TIPS.inCategory, (s) => s.firmPickInCategory),
 ];
 
-export default function HeadlineSection({ runId }: { runId: string }) {
+/** `room` (Journey's buyer filter) asks for one room's cells; absent = every buyer, exactly as before. */
+export default function HeadlineSection({ runId, room }: { runId: string; room?: string }) {
   const [view, setView] = useState<HeadlineView | null | undefined>(undefined);
   const [error, setError] = useState<string | null>(null);
   const [allBrands, setAllBrands] = useState(false);
 
   useEffect(() => {
     let live = true;
-    fetch(`/api/runs/${runId}/headline`)
+    fetch(`/api/runs/${runId}/headline${room ? `?room=${encodeURIComponent(room)}` : ""}`)
       .then(async (r) => {
         if (!r.ok) throw new Error(`headline view failed (${r.status})`);
         const d = (await r.json()) as { view: HeadlineView | null };
@@ -159,7 +160,7 @@ export default function HeadlineSection({ runId }: { runId: string }) {
     return () => {
       live = false;
     };
-  }, [runId]);
+  }, [runId, room]);
 
   if (error) {
     return <div className="card px-5 py-4 text-[13px] text-danger">{error}</div>;
@@ -185,6 +186,12 @@ export default function HeadlineSection({ runId }: { runId: string }) {
           core engine panel. Questions that name a brand are reported in their own views, never here.
           {view.uncoded > 0 && ` ${view.uncoded} more answers are not coded yet.`}
         </p>
+        {room && (
+          <p className="text-[13px] text-ink-3 mt-1">
+            Only questions asked as this buyer: {room}. Social validation and premium vs basic are asked across all
+            buyers by design, so they are not in these numbers.
+          </p>
+        )}
       </section>
 
       {target && (

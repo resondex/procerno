@@ -1,7 +1,7 @@
 import { matchKey } from "../brand_key";
 import { ENGINES, engineDisplayLabel } from "./providers";
 import { buildResolver, type Resolver } from "./brand_resolve";
-import { cachedView, cell, poolOf, type RateCell, type ViewData } from "./view_data";
+import { cachedView, cell, poolOf, type RateCell, type ViewData, type ViewRequest } from "./view_data";
 import type { AnswerCodes, DictionaryEntry, Project, Run } from "../types";
 
 export type { RateCell };
@@ -151,12 +151,15 @@ function sliceOf(key: string, label: string, rows: AnswerFacts[], targetKey: str
   };
 }
 
-export function computeHeadline(data: ViewData): HeadlineView {
+/** `request.room` (Journey's buyer filter) keeps that room's cells only -
+ * discovery and use-case; social validation and premium vs basic are asked
+ * across all buyers and drop out of a filtered pool. */
+export function computeHeadline(data: ViewData, request: ViewRequest = {}): HeadlineView {
   const { run, project, source, dictionary } = data;
   const resolve = buildResolver(dictionary, data.judged);
   const targetKey = resolve(project.brand).key;
   const legacy = new Set(project.competitors.map(matchKey));
-  const { rows, uncoded, core } = poolOf(data, "headline");
+  const { rows, uncoded, core } = poolOf(data, "headline", request);
 
   const facts: AnswerFacts[] = [];
   const ruledOut = new Map<string, number>();
@@ -240,6 +243,7 @@ export function computeHeadline(data: ViewData): HeadlineView {
 
 // h2 (2026-10-28): names resolve through the context judge (context_judge.ts).
 const HEADLINE_VERSION = "h3";
-export function computeHeadlineCached(run: Run, project: Project): Promise<HeadlineView | null> {
-  return cachedView("headline", HEADLINE_VERSION, run, project, computeHeadline, { judge: true });
+export function computeHeadlineCached(run: Run, project: Project, room?: string): Promise<HeadlineView | null> {
+  if (room === undefined) return cachedView("headline", HEADLINE_VERSION, run, project, computeHeadline, { judge: true });
+  return cachedView("headline", HEADLINE_VERSION, run, project, (d) => computeHeadline(d, { room }), { judge: true }, { room });
 }

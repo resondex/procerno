@@ -1,6 +1,6 @@
 import { buildResolver } from "./brand_resolve";
 import { viewsOf, type ViewKey } from "./views";
-import { cachedView, cell, corePanel, type RateCell, type ViewData } from "./view_data";
+import { cachedView, cell, corePanel, type RateCell, type ViewData, type ViewRequest } from "./view_data";
 import type { AnswerCodes, Intent, Project, Run } from "../types";
 
 /**
@@ -223,7 +223,9 @@ export function parseCodeGroups(json: string | null | undefined, confirmed: Set<
   return { groups, unknown };
 }
 
-export function computeReasons(data: ViewData): ReasonsView {
+/** `request.room` (Journey's buyer filter) keeps that room's cells only, the
+ * same strict rule as poolOf: types asked across all buyers drop out. */
+export function computeReasons(data: ViewData, request: ViewRequest = {}): ReasonsView {
   const { project, dictionary } = data;
   const resolve = buildResolver(dictionary, data.judged);
   const targetKey = resolve(project.brand).key;
@@ -234,7 +236,7 @@ export function computeReasons(data: ViewData): ReasonsView {
   const intentOfPrompt = new Map<string, Intent>();
   for (const p of data.prompts) {
     const it = p.intent_id ? intentById.get(p.intent_id) : undefined;
-    if (it) intentOfPrompt.set(p.id, it);
+    if (it && (request.room === undefined || it.situation === request.room)) intentOfPrompt.set(p.id, it);
   }
   const core = corePanel(data);
   const typeOf = new Map<string, ViewKey>();
@@ -348,6 +350,8 @@ export function computeReasons(data: ViewData): ReasonsView {
 
 // r3 (2026-10-28): names resolve through the context judge (context_judge.ts).
 const REASONS_VERSION = "r3";
-export function computeReasonsCached(run: Run, project: Project): Promise<ReasonsView | null> {
-  return cachedView("reasons", REASONS_VERSION, run, project, computeReasons, { codeGroups: true, judge: true });
+export function computeReasonsCached(run: Run, project: Project, room?: string): Promise<ReasonsView | null> {
+  const extras = { codeGroups: true, judge: true };
+  if (room === undefined) return cachedView("reasons", REASONS_VERSION, run, project, computeReasons, extras);
+  return cachedView("reasons", REASONS_VERSION, run, project, (d) => computeReasons(d, { room }), extras, { room });
 }

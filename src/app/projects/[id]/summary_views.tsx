@@ -131,7 +131,7 @@ function Brief({ v }: { v: BrandSummaryView }) {
       <p className="text-[13px] text-ink-3 -mt-5">
         Across {v.answers.toLocaleString()} open-choice answers on the core panel -{" "}
         {v.firmPick.k} committed to one pick, {v.firmPickInCategory.k} of those to a brand in
-        your category. Questions that name a brand are measured apart, under By question type.
+        your category. Questions that name a brand are measured apart, in the Journey view.
         {v.uncoded > 0 && ` ${v.uncoded} answers are not coded yet.`}
       </p>
 
@@ -291,7 +291,7 @@ function Brief({ v }: { v: BrandSummaryView }) {
 
       <p className="text-center text-[13px] text-ink-3">
         Every question type&apos;s full tables - doubts, value, alternatives, awareness, reasons -
-        live under <span className="font-medium text-ink-2">By question type</span>.
+        live under <span className="font-medium text-ink-2">Journey</span> in the Analysis views.
       </p>
     </div>
   );

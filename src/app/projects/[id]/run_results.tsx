@@ -9,20 +9,14 @@ import {
   type WorkbenchTab,
 } from "./views";
 import Workbench, { type WbPreset } from "./workbench";
-import WorkbenchCodes from "./workbench_codes";
 import { SortTable } from "./table";
 import AnswerText from "./answer_text";
 import HumanCodingPanel from "./human_coding_panel";
-import HeadlineSection from "./headline_view";
 import { BoardroomSection, BriefSection, QuestionsSection } from "./summary_views";
-import PremiumSection from "./premium_view";
-import AwarenessSections from "./awareness_view";
-import HeadToHeadSection from "./head_to_head_view";
-import AlternativesSection from "./alternatives_view";
-import DoubtSections from "./doubt_view";
-import RepertoireSection from "./repertoire_view";
-import ValueSection from "./value_view";
-import ReasonsSection from "./reasons_view";
+import JourneySection from "./journey_view";
+import RulesSection from "./rules_view";
+import { MetricsSection } from "./metrics_view";
+import EvidencePanel, { EVIDENCE_CAP, type EvidenceRequest } from "./evidence_panel";
 
 const pct = (x: number) =>
   x > 0 && x < 0.005 ? "<1%" : `${Math.round(x * 100)}%`;
@@ -68,8 +62,11 @@ function CodesResults({
   runId: string;
   refreshToken: number;
 }) {
-  type CodesView = "brief" | "types" | "boardroom" | "workbench" | "questions";
+  type CodesView = "brief" | "boardroom" | "questions" | "journey" | "rules" | "metrics";
   const [view, setView] = useState<CodesView>("brief");
+  // Evidence drill shared by the analysis views: a cell's count opens the
+  // answers behind it.
+  const [evidence, setEvidence] = useState<EvidenceRequest | null>(null);
   // Views stay MOUNTED once visited, hidden with CSS: switching pills and
   // coming back must not refetch - the per-type stack alone is nine
   // requests, a multi-second reload on every return otherwise.
@@ -97,48 +94,44 @@ function CodesResults({
         </p>
       </div>
 
-      <div className="flex flex-wrap items-center gap-1.5 -mt-3">
-        <span className="text-[12px] text-ink-3 mr-1">View:</span>
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-2 -mt-3">
         {(
           [
-            ["brief", "The brief"],
-            ["types", "By question type"],
-            ["boardroom", "Boardroom"],
-            ["workbench", "Workbench"],
-            ["questions", "Five questions"],
+            ["Summary", [
+              ["brief", "The brief"],
+              ["boardroom", "Boardroom"],
+              ["questions", "Five questions"],
+            ]],
+            ["Analysis", [
+              ["journey", "Journey"],
+              ["rules", "Decision rules"],
+              ["metrics", "Metrics"],
+            ]],
           ] as const
-        ).map(([id, label]) => (
-          <button
-            key={id}
-            type="button"
-            onClick={() => open(id)}
-            className={`rounded-full border px-3 py-1 text-[13px] font-medium transition-colors ${
-              view === id
-                ? "border-[var(--color-primary)] bg-primary-soft text-primary"
-                : "border-line text-ink-2 hover:border-ink-3"
-            }`}
-          >
-            {label}
-          </button>
+        ).map(([group, pills]) => (
+          <span key={group} className="flex items-center gap-1.5">
+            <span className="text-[12px] text-ink-3 mr-0.5">{group}:</span>
+            {pills.map(([id, label]) => (
+              <button
+                key={id}
+                type="button"
+                onClick={() => open(id)}
+                className={`rounded-full border px-3 py-1 text-[13px] font-medium transition-colors ${
+                  view === id
+                    ? "border-[var(--color-primary)] bg-primary-soft text-primary"
+                    : "border-line text-ink-2 hover:border-ink-3"
+                }`}
+              >
+                {label}
+              </button>
+            ))}
+          </span>
         ))}
       </div>
 
       {visited.has("brief") && (
         <div className={show("brief")}>
           <BriefSection key={k("brief")} runId={runId} />
-        </div>
-      )}
-      {visited.has("types") && (
-        <div className={show("types")}>
-          <HeadlineSection key={k("headline")} runId={runId} />
-          <PremiumSection key={k("premium")} runId={runId} />
-          <HeadToHeadSection key={k("h2h")} runId={runId} />
-          <AlternativesSection key={k("alt")} runId={runId} />
-          <DoubtSections key={k("doubt")} runId={runId} />
-          <ValueSection key={k("value")} runId={runId} />
-          <RepertoireSection key={k("repertoire")} runId={runId} />
-          <AwarenessSections key={k("awareness")} runId={runId} />
-          <ReasonsSection key={k("reasons")} runId={runId} />
         </div>
       )}
       {visited.has("boardroom") && (
@@ -151,10 +144,33 @@ function CodesResults({
           <QuestionsSection key={k("questions")} runId={runId} />
         </div>
       )}
-      {visited.has("workbench") && (
-        <div className={show("workbench")}>
-          <WorkbenchCodes key={k("workbench")} runId={runId} />
+      {visited.has("journey") && (
+        <div className={show("journey")}>
+          <JourneySection key={k("journey")} runId={runId} />
         </div>
+      )}
+      {visited.has("rules") && (
+        <div className={show("rules")}>
+          <RulesSection
+            key={k("rules")}
+            runId={runId}
+            onEvidence={(ids, title) =>
+              setEvidence({ title, ids: ids.slice(0, EVIDENCE_CAP), total: ids.length })
+            }
+          />
+        </div>
+      )}
+      {visited.has("metrics") && (
+        <div className={show("metrics")}>
+          <MetricsSection key={k("metrics")} runId={runId} />
+        </div>
+      )}
+      {evidence && (
+        <EvidencePanel
+          runId={runId}
+          request={evidence}
+          onClose={() => setEvidence(null)}
+        />
       )}
     </div>
   );

@@ -1,6 +1,6 @@
 import { ENGINES, engineDisplayLabel } from "./providers";
 import { buildResolver, type Resolver } from "./brand_resolve";
-import { cachedView, cell, poolOf, type PoolRow, type RateCell, type ViewData } from "./view_data";
+import { cachedView, cell, poolOf, type PoolRow, type RateCell, type ViewData, type ViewRequest } from "./view_data";
 import type { Project, Run } from "../types";
 
 /**
@@ -121,9 +121,10 @@ function factsOf(row: PoolRow, resolve: Resolver, targetKey: string): Facts {
   };
 }
 
-export function computeValue(data: ViewData): ValueView | null {
+/** `request.room` (Journey's buyer filter) keeps that room's Value cells. */
+export function computeValue(data: ViewData, request: ViewRequest = {}): ValueView | null {
   const { project, dictionary } = data;
-  const { rows: pool, uncoded, core } = poolOf(data, "value");
+  const { rows: pool, uncoded, core } = poolOf(data, "value", request);
   if (pool.length === 0 && uncoded === 0) return null;
   const resolve = buildResolver(dictionary, data.judged);
   const targetKey = resolve(project.brand).key;
@@ -183,6 +184,8 @@ export function computeValue(data: ViewData): ValueView | null {
 
 // v2 (2026-10-28): names resolve through the context judge (context_judge.ts).
 const VALUE_VERSION = "v3";
-export function computeValueCached(run: Run, project: Project): Promise<ValueView | null> {
-  return cachedView("value", VALUE_VERSION, run, project, computeValue, { setupDecision: true, judge: true });
+export function computeValueCached(run: Run, project: Project, room?: string): Promise<ValueView | null> {
+  const extras = { setupDecision: true, judge: true };
+  if (room === undefined) return cachedView("value", VALUE_VERSION, run, project, computeValue, extras);
+  return cachedView("value", VALUE_VERSION, run, project, (d) => computeValue(d, { room }), extras, { room });
 }

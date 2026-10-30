@@ -243,13 +243,27 @@ function ExplainerCard({ b, brand, category, runId }: { b: AwarenessBlock; brand
   );
 }
 
-export default function AwarenessSections({ runId }: { runId: string }) {
+/**
+ * `room` (Journey's buyer filter) asks for one room's problem recognition
+ * cells - category education is asked across all buyers, so a filtered view
+ * has no explainer card. `only` renders one of the two cards. Both absent =
+ * exactly today's behavior.
+ */
+export default function AwarenessSections({
+  runId,
+  room,
+  only,
+}: {
+  runId: string;
+  room?: string;
+  only?: AwarenessBlock["view"];
+}) {
   const [view, setView] = useState<AwarenessView | null | undefined>(undefined);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     let live = true;
-    fetch(`/api/runs/${runId}/awareness`)
+    fetch(`/api/runs/${runId}/awareness${room ? `?room=${encodeURIComponent(room)}` : ""}`)
       .then(async (r) => {
         if (!r.ok) throw new Error(`awareness view failed (${r.status})`);
         const d = (await r.json()) as { view: AwarenessView | null };
@@ -259,14 +273,14 @@ export default function AwarenessSections({ runId }: { runId: string }) {
     return () => {
       live = false;
     };
-  }, [runId]);
+  }, [runId, room]);
 
   if (error) return <div className="card px-5 py-4 text-[13px] text-danger">{error}</div>;
   if (!view) return null;
   return (
     <>
-      {view.routing && view.routing.answers > 0 && <RoutingCard b={view.routing} brand={view.brand} category={view.category} runId={runId} />}
-      {view.explainer && view.explainer.answers > 0 && (
+      {only !== "explainer" && view.routing && view.routing.answers > 0 && <RoutingCard b={view.routing} brand={view.brand} category={view.category} runId={runId} />}
+      {only !== "routing" && view.explainer && view.explainer.answers > 0 && (
         <ExplainerCard b={view.explainer} brand={view.brand} category={view.category} runId={runId} />
       )}
     </>
