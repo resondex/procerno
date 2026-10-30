@@ -33,12 +33,25 @@ export default async function SharePage({
     );
   }
   const runs = await store.listRuns(project.id);
-  const latest = runs.find((r) => r.status === "complete");
+  // answer_codes era: a collected run whose answers carry codes is a
+  // shareable result even while finalize is held - same rule as the
+  // owner's dashboard.
+  let shown = runs.find((r) => r.status === "complete");
+  if (!shown && project.codes_source) {
+    const held = runs.find((r) => r.status === "collected");
+    if (
+      held &&
+      (await store.countAnswerCodes(held.id, project.codes_source)) > 0
+    ) {
+      shown = held;
+    }
+  }
   return (
     <ShareView
       token={token}
       brand={project.brand}
-      runId={latest?.id ?? null}
+      runId={shown?.id ?? null}
+      codes={Boolean(project.codes_source)}
       expiresAt={link.expiresAt}
     />
   );

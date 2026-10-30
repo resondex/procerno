@@ -116,6 +116,9 @@ export interface Project {
   scenario_journeys: string | null;
   /** 0 = classic battery; >=1 = grid-built, bumped on grid edits. */
   instrument_version: number;
+  /** The code source the per-type views read (answer_codes.source);
+   * null = nothing coded yet - the legacy metrics surfaces may render. */
+  codes_source: string | null;
   /** Set when the tracker is archived (ISO timestamp); null = active.
    * Archived trackers keep every run and answer, drop off the main list,
    * take no scheduled or manual runs, and can be unarchived at any time. */
@@ -1136,6 +1139,10 @@ export interface Store {
   /** Response ids that already carry codes from one source (no bodies, no
    * code columns) - the coding wave's "already coded" set. */
   listAnswerCodeIds(runId: string, source: string): Promise<string[]>;
+  /** How many of a run's answers carry codes from one source - the
+   * dashboard's "is this run measured" check, a count so the id list
+   * never ships to the client path that only needs the number. */
+  countAnswerCodes(runId: string, source: string): Promise<number>;
   /** Two-pass routing (2026-10-29): the tracker's reasons adapter (a
    * Fireworks model id warm-started from the configured coder); null =
    * single-pass. Set by hand per onboarding-tier tracker, cleared when a

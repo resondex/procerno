@@ -4,15 +4,6 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } fr
 import Link from "next/link";
 import TrendChart from "./trend_chart";
 import RunResults from "./run_results";
-import HeadlineSection from "./headline_view";
-import HeadToHeadSection from "./head_to_head_view";
-import AlternativesSection from "./alternatives_view";
-import DoubtSections from "./doubt_view";
-import ValueSection from "./value_view";
-import ReasonsSection from "./reasons_view";
-import AwarenessSections from "./awareness_view";
-import PremiumSection from "./premium_view";
-import RepertoireSection from "./repertoire_view";
 import TaxonomyReview from "./taxonomy_review";
 import IdentifyTab, { type Suggestion } from "./identify_tab";
 import ParentsTab from "./parents_tab";
@@ -44,6 +35,12 @@ export interface Detail {
   /** What the next run would collect - the worries surface rides monthly
    * waves only (engine/surfaces.ts). */
   nextRun?: NextRunPlan;
+  /** The active run's stored answers - the honest count before (or
+   * without) a progress poll. */
+  activeAnswers?: number;
+  /** How many of the active run's answers carry codes under codesSource.
+   * >0 on a collected run = measured-but-held: coded while finalize waits. */
+  activeCoded?: number;
 }
 
 interface Progress {
@@ -180,7 +177,13 @@ export default function ProjectDashboard({
     } else {
       setProgress(null);
     }
-    if (d.runs.filter((r) => r.status === "complete").length >= 2) {
+    // The trend still computes from the legacy metrics path (mentions),
+    // which is empty under answer_codes-only coding - skip the fetch on
+    // code-source projects until the trend reads answer_codes.
+    if (
+      !d.project.codes_source &&
+      d.runs.filter((r) => r.status === "complete").length >= 2
+    ) {
       followUps.push(
         fetch(`/api/projects/${id}/trend`).then(async (tr) => {
           if (tr.ok) setTrend((await tr.json()).trend);
@@ -294,6 +297,15 @@ export default function ProjectDashboard({
     ((detail?.project.taxonomy_status ?? "pending") === "proposed" ||
       ((detail?.project.taxonomy_status ?? "pending") === "ratified" &&
         detail?.project.dictionary_status !== "confirmed"));
+  // Measured-but-held: the collected run's answers already carry codes
+  // under the project's code source while finalize is held (the coding
+  // hold). Nothing changes server-side until the hold lifts, so the card
+  // reads as measured and the background poll stops - without this, the
+  // pipeline card pulsed "Coding answers" forever over a fully coded run.
+  const codedHeld =
+    detail?.runs.find((r) => r.id === activeRunId)?.status === "collected" &&
+    Boolean(detail?.project.codes_source) &&
+    (detail?.activeCoded ?? 0) > 0;
   // Last run status the poll saw - a CHANGE is what triggers the heavy
   // refresh, so every transition lands (running -> collected used to slip
   // through: the tick only refreshed on terminal states, and the codebook
@@ -334,10 +346,13 @@ export default function ProjectDashboard({
       }
     };
     void tick();
-    if (humanGated) return; // one tick for the counters, no interval
+    // One tick for the counters, no interval: the pipeline is waiting on a
+    // human (gates) or on the coding hold (measured-but-held) - polling
+    // would ask the same question every 2.5s for the whole review session.
+    if (humanGated || codedHeld) return;
     const t = setInterval(tick, 2500);
     return () => clearInterval(t);
-  }, [activeRunId, refresh, humanGated]);
+  }, [activeRunId, refresh, humanGated, codedHeld]);
 
   async function launchRun() {
     if (launching || hasActiveRun) return;
@@ -400,11 +415,14 @@ export default function ProjectDashboard({
   const activeRun = runs.find(
     (r) => r.status === "pending" || r.status === "running" || r.status === "collected"
   );
-  // The per-type headline reads answer_codes, which can exist before a run
-  // is complete (reference labels on a collected run); it renders nothing
-  // while the project has no codes source.
-  const headlineRun =
-    shownRun ?? runs.find((r) => r.status === "collected") ?? null;
+  // answer_codes era: results can exist before a run is "complete" - a
+  // collected run whose answers carry codes while finalize is held. The
+  // results block then mounts on that run, in its codes form (the brief =
+  // the per-type views; the legacy metrics path stays off).
+  const codesEra = Boolean(project.codes_source);
+  const resultsRun = codesEra
+    ? (shownRun ?? (codedHeld ? (activeRun ?? null) : null))
+    : shownRun;
   const pendingDict = dict.filter((e) => e.status === "pending").length;
   const flaggedPrompts = prompts.filter(
     (p) => p.flagged === 1 && p.retired === 0
@@ -508,7 +526,10 @@ export default function ProjectDashboard({
       <div className="flex flex-wrap items-center gap-3">
         <TaskButton
           label={
-            activeRun || launchingFirstRun
+            // Measured-but-held reads as done, not in progress - the wave
+            // is coded and nothing is running; the next run waits on the
+            // hold, so the button stays disabled but stops claiming work.
+            (activeRun || launchingFirstRun) && !codedHeld
               ? "Run in progress…"
               : "Run"
           }
@@ -523,16 +544,21 @@ export default function ProjectDashboard({
           disabled={initPhase || archived}
           onClick={() => setOpenModal("schedule")}
         />
+        {/* Measured-but-held counts as out of init for the standing tools:
+            the run is coded and the views render, so the dictionary (whose
+            edits re-resolve every view at read time), run history, settings
+            and prompt health are usable. Run/Schedule stay init-gated - no
+            new collection from this state. */}
         <TaskButton
           label="Run history"
           bubble={null}
-          disabled={initPhase}
+          disabled={initPhase && !codedHeld}
           onClick={() => setOpenModal("history")}
         />
         <TaskButton
           label="Brand dictionary"
-          bubble={!initPhase && pendingDict > 0 ? pendingDict : null}
-          disabled={initPhase}
+          bubble={(!initPhase || codedHeld) && pendingDict > 0 ? pendingDict : null}
+          disabled={initPhase && !codedHeld}
           onClick={() => {
             setDictTab("identify");
             setOpenModal("dictionary");
@@ -541,13 +567,13 @@ export default function ProjectDashboard({
         <TaskButton
           label="Settings"
           bubble={null}
-          disabled={initPhase}
+          disabled={initPhase && !codedHeld}
           onClick={() => setOpenModal("settings")}
         />
         <TaskButton
           label="Prompt health"
-          bubble={!initPhase && flaggedPrompts.length > 0 ? flaggedPrompts.length : null}
-          disabled={initPhase}
+          bubble={(!initPhase || codedHeld) && flaggedPrompts.length > 0 ? flaggedPrompts.length : null}
+          disabled={initPhase && !codedHeld}
           onClick={() => setOpenModal("health")}
         />
       </div>
@@ -596,7 +622,12 @@ export default function ProjectDashboard({
           <PipelineNext
             id={id}
             project={project}
-            answers={progress?.total ?? 0}
+            // The progress poll may not have landed (or never runs in the
+            // held states) - fall back to the run's stored answer count so
+            // the card never says "all 0 answers".
+            answers={progress?.total || detail.activeAnswers || 0}
+            coded={codedHeld}
+            codedAnswers={detail.activeCoded ?? 0}
             dictionary={dict}
             suggestions={gateSuggestions}
             initialGateStep={initialGateStep}
@@ -609,24 +640,14 @@ export default function ProjectDashboard({
           />
         )}
 
-      {headlineRun && <HeadlineSection key={`${headlineRun.id}:${dictVersion}`} runId={headlineRun.id} />}
-      {headlineRun && <PremiumSection key={`premium:${headlineRun.id}:${dictVersion}`} runId={headlineRun.id} />}
-      {headlineRun && <AwarenessSections key={`awareness:${headlineRun.id}:${dictVersion}`} runId={headlineRun.id} />}
-      {headlineRun && <HeadToHeadSection key={`h2h:${headlineRun.id}:${dictVersion}`} runId={headlineRun.id} />}
-      {headlineRun && <AlternativesSection key={`alt:${headlineRun.id}:${dictVersion}`} runId={headlineRun.id} />}
-      {headlineRun && <DoubtSections key={`doubt:${headlineRun.id}:${dictVersion}`} runId={headlineRun.id} />}
-      {headlineRun && <RepertoireSection key={`repertoire:${headlineRun.id}:${dictVersion}`} runId={headlineRun.id} />}
-      {headlineRun && <ValueSection key={`value:${headlineRun.id}:${dictVersion}`} runId={headlineRun.id} />}
-      {headlineRun && <ReasonsSection key={`reasons:${headlineRun.id}:${dictVersion}`} runId={headlineRun.id} />}
-
-      {shownRun ? (
+      {resultsRun ? (
         <>
           {completeRuns.length > 1 && (
             <div className="flex items-center gap-3 -mb-2">
               <span className="section-label">Results</span>
               <select
                 className="input w-auto text-[13px]"
-                value={shownRun.id}
+                value={resultsRun.id}
                 onChange={(e) => setSelectedRunId(e.target.value)}
               >
                 {completeRuns.map((r) => (
@@ -638,10 +659,16 @@ export default function ProjectDashboard({
               </select>
             </div>
           )}
+          {/* codes era: the brief = the per-type views over answer_codes.
+              Legacy era: the mentions-based brief, unchanged. The legacy
+              path never renders once a project has a code source - its
+              metrics tables are empty there, and the per-type views
+              replace the pooled rows (presentation rule, 2026-09-27). */}
           <RunResults
-            key={shownRun.id}
-            runId={shownRun.id}
+            key={`${resultsRun.id}:${codesEra ? "codes" : "legacy"}`}
+            runId={resultsRun.id}
             refreshToken={dictVersion}
+            codes={codesEra}
           />
         </>
       ) : (
@@ -652,7 +679,7 @@ export default function ProjectDashboard({
         )
       )}
 
-      {trend && trend.runs.length >= 2 && (
+      {!project.codes_source && trend && trend.runs.length >= 2 && (
         <section className="card p-6">
           <h2 className="section-label mb-1">Trend</h2>
           <p className="text-[13px] text-ink-3 mb-4">
@@ -1576,6 +1603,8 @@ function PipelineNext({
   id,
   project,
   answers,
+  coded = false,
+  codedAnswers = 0,
   dictionary,
   suggestions,
   initialGateStep,
@@ -1585,6 +1614,10 @@ function PipelineNext({
   id: string;
   project: Project;
   answers: number;
+  /** Measured-but-held: the run's answers carry codes while finalize waits
+   * on the coding hold - every pipeline step is done, no waiter. */
+  coded?: boolean;
+  codedAnswers?: number;
   dictionary: DictionaryEntry[];
   /** Pre-warmed brand-board suggestions (fetched during the codebook step). */
   suggestions: Suggestion[] | null;
@@ -1624,16 +1657,27 @@ function PipelineNext({
   };
   const status = optimistic.tax ?? serverTax;
   const dictDone = optimistic.dict ?? serverDict;
-  const steps: { label: string; state: "done" | "now" | "todo" }[] = [
-    { label: "Collect", state: "done" },
-    { label: "Codebook", state: status === "ratified" ? "done" : "now" },
-    {
-      label: "Brands",
-      state: status !== "ratified" ? "todo" : dictDone ? "done" : "now",
-    },
-    { label: "Code", state: status === "ratified" && dictDone ? "now" : "todo" },
-    { label: "Measure", state: "todo" },
-  ];
+  const steps: { label: string; state: "done" | "now" | "todo" }[] = coded
+    ? [
+        { label: "Collect", state: "done" },
+        { label: "Codebook", state: "done" },
+        { label: "Brands", state: "done" },
+        { label: "Code", state: "done" },
+        { label: "Measure", state: "done" },
+      ]
+    : [
+        { label: "Collect", state: "done" },
+        { label: "Codebook", state: status === "ratified" ? "done" : "now" },
+        {
+          label: "Brands",
+          state: status !== "ratified" ? "todo" : dictDone ? "done" : "now",
+        },
+        {
+          label: "Code",
+          state: status === "ratified" && dictDone ? "now" : "todo",
+        },
+        { label: "Measure", state: "todo" },
+      ];
   return (
     <section className="card p-5 grid gap-3">
       <div className="flex flex-wrap items-center gap-2 text-[12px]">
@@ -1705,7 +1749,19 @@ function PipelineNext({
           onBackToCodebook={onRatified}
         />
       )}
-      {status === "ratified" && dictDone && (
+      {coded && (
+        <div className="grid gap-1">
+          <h2 className="text-sm font-semibold text-success">
+            &#10003; This wave is measured
+          </h2>
+          <p className="text-[13px] text-ink-3">
+            All {(codedAnswers || answers).toLocaleString()} answers are coded
+            against your {project.reason_taxonomy.length} confirmed dimensions
+            - the results below read from this wave.
+          </p>
+        </div>
+      )}
+      {!coded && status === "ratified" && dictDone && (
         <div className="grid gap-2">
           <h2 className="flex items-center gap-2 text-sm font-semibold">
             <span className="pulse-dot inline-block h-1.5 w-1.5 rounded-full bg-primary" />

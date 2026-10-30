@@ -592,6 +592,8 @@ function parseProject(row: ProjectRaw): Project {
       (row as unknown as { scenario_journeys?: string | null }).scenario_journeys ?? null,
     instrument_version:
       (row as unknown as { instrument_version?: number }).instrument_version ?? 0,
+    codes_source:
+      (row as unknown as { codes_source?: string | null }).codes_source ?? null,
     archived_at:
       (row as unknown as { archived_at?: string | null }).archived_at ?? null,
   };
@@ -1826,6 +1828,13 @@ export const sqliteStore: Store = {
       .prepare("SELECT response_id FROM answer_codes WHERE run_id = ? AND source = ?")
       .all(runId, source) as { response_id: string }[];
     return rows.map((r) => r.response_id);
+  },
+
+  async countAnswerCodes(runId, source) {
+    const row = getDb()
+      .prepare("SELECT COUNT(*) AS n FROM answer_codes WHERE run_id = ? AND source = ?")
+      .get(runId, source) as { n: number };
+    return row.n;
   },
 
   async getReasonsAdapter(projectId) {

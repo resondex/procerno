@@ -382,6 +382,7 @@ function rowToProject(r: Record<string, unknown>): Project {
     moderators: (r.moderators as string | null) ?? null,
     scenario_journeys: (r.scenario_journeys as string | null) ?? null,
     instrument_version: (r.instrument_version as number) ?? 0,
+    codes_source: (r.codes_source as string | null) ?? null,
     archived_at: iso(r.archived_at) ?? null,
     created_at: iso(r.created_at)!,
   };
@@ -1540,6 +1541,12 @@ export const pgStore: Store = {
     const sql = await db();
     const rows = await sql`SELECT response_id FROM answer_codes WHERE run_id = ${runId} AND source = ${source}`;
     return rows.map((r) => r.response_id as string);
+  },
+
+  async countAnswerCodes(runId, source) {
+    const sql = await db();
+    const rows = await sql`SELECT COUNT(*)::int AS n FROM answer_codes WHERE run_id = ${runId} AND source = ${source}`;
+    return (rows[0]?.n as number) ?? 0;
   },
 
   async getReasonsAdapter(projectId) {

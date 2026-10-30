@@ -33,11 +33,35 @@ export default async function ProjectPage({
     store.getDictionary(id),
     store.listIntents(id),
   ]);
+  const codesSource = project.codes_source;
   const nextRun = planNextRun({ prompts, intents, runs });
+  // Measured-but-held: a collected run whose answers already carry codes
+  // (finalize held) - the first paint must read as measured, not "coding".
+  const activeRun = runs.find(
+    (r) =>
+      r.status === "pending" || r.status === "running" || r.status === "collected"
+  );
+  const [activeAnswers, activeCoded] = activeRun
+    ? await Promise.all([
+        store.countResponses(activeRun.id),
+        codesSource
+          ? store.countAnswerCodes(activeRun.id, codesSource)
+          : Promise.resolve(0),
+      ])
+    : [0, 0];
   // Mirror the API's wire format (dates serialize to strings) so the
   // client-side types hold across both load paths.
   const initialDetail = JSON.parse(
-    JSON.stringify({ project, prompts, runs, staff, dictionary, nextRun })
+    JSON.stringify({
+      project,
+      prompts,
+      runs,
+      staff,
+      dictionary,
+      nextRun,
+      activeAnswers,
+      activeCoded,
+    })
   ) as Detail;
   // The dictionary gate's saved step rides in a cookie so THIS render can
   // open on it - a localStorage-only restore flashed step 1/3 until

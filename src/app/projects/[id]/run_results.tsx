@@ -12,6 +12,15 @@ import Workbench, { type WbPreset } from "./workbench";
 import { SortTable } from "./table";
 import AnswerText from "./answer_text";
 import HumanCodingPanel from "./human_coding_panel";
+import HeadlineSection from "./headline_view";
+import PremiumSection from "./premium_view";
+import AwarenessSections from "./awareness_view";
+import HeadToHeadSection from "./head_to_head_view";
+import AlternativesSection from "./alternatives_view";
+import DoubtSections from "./doubt_view";
+import RepertoireSection from "./repertoire_view";
+import ValueSection from "./value_view";
+import ReasonsSection from "./reasons_view";
 
 const pct = (x: number) =>
   x > 0 && x < 0.005 ? "<1%" : `${Math.round(x * 100)}%`;
@@ -24,10 +33,123 @@ const pct = (x: number) =>
 export default function RunResults({
   runId,
   refreshToken = 0,
+  codes = false,
 }: {
   runId: string;
   /** Bump to refetch in place — current results stay up while the new ones
    * load, so dictionary edits don't flash a skeleton. */
+  refreshToken?: number;
+  /** answer_codes era: the project has a code source, so every figure must
+   * read answer_codes through the per-type views - the legacy metrics path
+   * (mentions) is empty there and must not render as hollow zeros. */
+  codes?: boolean;
+}) {
+  if (codes) {
+    return <CodesResults runId={runId} refreshToken={refreshToken} />;
+  }
+  return <LegacyResults runId={runId} refreshToken={refreshToken} />;
+}
+
+/**
+ * The answer_codes-era results block (2026-10-30). "The brief" is the
+ * per-type views - headline, head-to-head, alternatives, doubts, value,
+ * premium, awareness, reasons - each reading answer_codes under the
+ * project's code source. Boardroom / Workbench / Five questions are
+ * being rebuilt on the same data; until then they say so instead of
+ * rendering zeros from the empty legacy tables.
+ */
+function CodesResults({
+  runId,
+  refreshToken,
+}: {
+  runId: string;
+  refreshToken: number;
+}) {
+  const [view, setView] = useState<
+    "brief" | "boardroom" | "workbench" | "questions"
+  >("brief");
+  const k = (name: string) => `${name}:${runId}:${refreshToken}`;
+  return (
+    <div className="grid gap-8">
+      <div className="flex items-baseline justify-between gap-4 flex-wrap -mb-2">
+        <p className="text-[13px] text-ink-3">
+          Export:{" "}
+          <a
+            href={`/api/runs/${runId}/export?format=csv&table=responses`}
+            className="font-medium text-primary hover:opacity-80"
+          >
+            raw answers
+          </a>
+          <span className="ml-2">
+            - every section below downloads its own table (csv / excel)
+          </span>
+        </p>
+      </div>
+
+      <div className="flex flex-wrap items-center gap-1.5 -mt-3">
+        <span className="text-[12px] text-ink-3 mr-1">View:</span>
+        {(
+          [
+            ["brief", "The brief"],
+            ["boardroom", "Boardroom"],
+            ["workbench", "Workbench"],
+            ["questions", "Five questions"],
+          ] as const
+        ).map(([id, label]) => (
+          <button
+            key={id}
+            type="button"
+            onClick={() => setView(id)}
+            className={`rounded-full border px-3 py-1 text-[13px] font-medium transition-colors ${
+              view === id
+                ? "border-[var(--color-primary)] bg-primary-soft text-primary"
+                : "border-line text-ink-2 hover:border-ink-3"
+            }`}
+          >
+            {label}
+          </button>
+        ))}
+      </div>
+
+      {view === "brief" ? (
+        <>
+          <HeadlineSection key={k("headline")} runId={runId} />
+          <PremiumSection key={k("premium")} runId={runId} />
+          <HeadToHeadSection key={k("h2h")} runId={runId} />
+          <AlternativesSection key={k("alt")} runId={runId} />
+          <DoubtSections key={k("doubt")} runId={runId} />
+          <ValueSection key={k("value")} runId={runId} />
+          <RepertoireSection key={k("repertoire")} runId={runId} />
+          <AwarenessSections key={k("awareness")} runId={runId} />
+          <ReasonsSection key={k("reasons")} runId={runId} />
+        </>
+      ) : (
+        <div className="card px-6 py-10 text-center grid gap-2">
+          <p className="text-sm font-semibold">
+            {view === "boardroom"
+              ? "Boardroom"
+              : view === "workbench"
+                ? "Workbench"
+                : "Five questions"}{" "}
+            is being rebuilt on the new measurement
+          </p>
+          <p className="text-[13px] text-ink-3 mx-auto max-w-prose">
+            This tracker now measures every question type in its own view,
+            read straight from the coded answers. The brief carries all of
+            the current numbers; this view returns once it reads the same
+            data.
+          </p>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function LegacyResults({
+  runId,
+  refreshToken = 0,
+}: {
+  runId: string;
   refreshToken?: number;
 }) {
   const [metrics, setMetrics] = useState<RunMetrics | null>(null);

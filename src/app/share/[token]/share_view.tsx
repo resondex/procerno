@@ -12,11 +12,14 @@ export default function ShareView({
   token,
   brand,
   runId,
+  codes = false,
   expiresAt,
 }: {
   token: string;
   brand: string;
   runId: string | null;
+  /** answer_codes era - the results render as the per-type views. */
+  codes?: boolean;
   expiresAt: string;
 }) {
   // The claim sets the share cookie the results APIs need - the header
@@ -53,10 +56,10 @@ export default function ShareView({
         <p className="text-sm text-ink-2">{claimError}</p>
       ) : !runId ? (
         <p className="text-sm text-ink-3">
-          This tracker has no completed runs yet.
+          This tracker has no measured results yet.
         </p>
       ) : claimed ? (
-        <RunResults runId={runId} />
+        <RunResults runId={runId} codes={codes} />
       ) : null}
     </main>
   );

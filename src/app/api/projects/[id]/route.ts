@@ -29,6 +29,23 @@ export async function GET(
     store.getDictionary(id),
     store.listIntents(id),
   ]);
+  const codesSource = project.codes_source;
+  // A run can be measured before it is "complete": answer_codes rows exist
+  // on a collected run while finalize is held (the coding hold). The counts
+  // let the dashboard tell that state from a run still waiting on coding,
+  // and give the pipeline card an answer count before any progress poll.
+  const activeRun = runs.find(
+    (r) =>
+      r.status === "pending" || r.status === "running" || r.status === "collected"
+  );
+  const [activeAnswers, activeCoded] = activeRun
+    ? await Promise.all([
+        store.countResponses(activeRun.id),
+        codesSource
+          ? store.countAnswerCodes(activeRun.id, codesSource)
+          : Promise.resolve(0),
+      ])
+    : [0, 0];
   // Drives whether staff-only switches are rendered at all. The PATCH route
   // enforces the same check, so a hidden control is a courtesy, not the gate.
   return NextResponse.json({
@@ -37,6 +54,8 @@ export async function GET(
     runs,
     staff,
     dictionary,
+    activeAnswers,
+    activeCoded,
     nextRun: planNextRun({ prompts, intents, runs }),
   });
 }

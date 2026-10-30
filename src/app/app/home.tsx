@@ -294,7 +294,7 @@ function draftStatus(d: SetupDraft): string {
                 <Link prefetch={true} href={`/projects/${p.id}`} className="card block px-5 py-4 transition-colors hover:border-primary">
                   <div className="flex items-baseline justify-between gap-3">
                     <span className="font-semibold text-[15px]">{p.name}</span>
-                    <RunHint run={p.latestRun} taxonomyStatus={p.taxonomy_status} dictionaryStatus={p.dictionary_status} />
+                    <RunHint run={p.latestRun} taxonomyStatus={p.taxonomy_status} dictionaryStatus={p.dictionary_status} codesSource={p.codes_source} />
                   </div>
                   <div className="text-[13px] text-ink-2 mt-1">
                     {p.brand} · {p.category}
@@ -424,10 +424,14 @@ function RunHint({
   run,
   taxonomyStatus,
   dictionaryStatus,
+  codesSource,
 }: {
   run: Run | null;
   taxonomyStatus?: string;
   dictionaryStatus?: string;
+  /** Set once the project's answers are coded into answer_codes - a
+   * collected run past both gates then reads as measured, not queued. */
+  codesSource?: string | null;
 }) {
   if (!run) return <span className="text-xs text-ink-3">ready to run</span>;
   // Collect-then-code: a collected run's real state depends on the two
@@ -438,7 +442,9 @@ function RunHint({
       : taxonomyStatus === "ratified" && dictionaryStatus !== "confirmed"
         ? { label: "confirm brands", cls: "text-warning" }
         : taxonomyStatus === "ratified"
-          ? { label: "coding queued", cls: "text-primary" }
+          ? codesSource
+            ? { label: "measured", cls: "text-success" }
+            : { label: "coding queued", cls: "text-primary" }
           : { label: "measuring arguments", cls: "text-primary" };
   const map: Record<Run["status"], { label: string; cls: string }> = {
     pending: { label: "queued", cls: "text-ink-3" },
