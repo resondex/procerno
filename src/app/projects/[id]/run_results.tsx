@@ -13,6 +13,7 @@ import { SortTable } from "./table";
 import AnswerText from "./answer_text";
 import HumanCodingPanel from "./human_coding_panel";
 import HeadlineSection from "./headline_view";
+import { BoardroomSection, QuestionsSection } from "./summary_views";
 import PremiumSection from "./premium_view";
 import AwarenessSections from "./awareness_view";
 import HeadToHeadSection from "./head_to_head_view";
@@ -54,9 +55,10 @@ export default function RunResults({
  * The answer_codes-era results block (2026-10-30). "The brief" is the
  * per-type views - headline, head-to-head, alternatives, doubts, value,
  * premium, awareness, reasons - each reading answer_codes under the
- * project's code source. Boardroom / Workbench / Five questions are
- * being rebuilt on the same data; until then they say so instead of
- * rendering zeros from the empty legacy tables.
+ * project's code source. Boardroom and Five questions render from the
+ * brand summary (engine/brand_summary.ts), the same data cut for the
+ * executive read. Workbench is still being rebuilt on the new measurement
+ * and says so instead of rendering zeros from the empty legacy tables.
  */
 function CodesResults({
   runId,
@@ -111,7 +113,7 @@ function CodesResults({
         ))}
       </div>
 
-      {view === "brief" ? (
+      {view === "brief" && (
         <>
           <HeadlineSection key={k("headline")} runId={runId} />
           <PremiumSection key={k("premium")} runId={runId} />
@@ -123,21 +125,23 @@ function CodesResults({
           <AwarenessSections key={k("awareness")} runId={runId} />
           <ReasonsSection key={k("reasons")} runId={runId} />
         </>
-      ) : (
+      )}
+      {view === "boardroom" && (
+        <BoardroomSection key={k("boardroom")} runId={runId} />
+      )}
+      {view === "questions" && (
+        <QuestionsSection key={k("questions")} runId={runId} />
+      )}
+      {view === "workbench" && (
         <div className="card px-6 py-10 text-center grid gap-2">
           <p className="text-sm font-semibold">
-            {view === "boardroom"
-              ? "Boardroom"
-              : view === "workbench"
-                ? "Workbench"
-                : "Five questions"}{" "}
-            is being rebuilt on the new measurement
+            Workbench is being rebuilt on the new measurement
           </p>
           <p className="text-[13px] text-ink-3 mx-auto max-w-prose">
             This tracker now measures every question type in its own view,
             read straight from the coded answers. The brief carries all of
-            the current numbers; this view returns once it reads the same
-            data.
+            the current numbers; the Workbench returns once its slicing
+            reads the same data.
           </p>
         </div>
       )}
