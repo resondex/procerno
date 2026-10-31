@@ -110,6 +110,11 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: "no new prompt came back - try again" }, { status: 502 });
   }
   // The draw's check-spec rides back with it: the client stores it on the
-  // cell, and every later check reads it.
-  return NextResponse.json({ text: drawn.text, spec: drawn.spec, ...(drawn.flags?.length ? { flags: drawn.flags } : {}) });
+  // cell, and every later check reads it. An advocacy draw also carries
+  // its quoted criticism (s56), which the client stores on the cell.
+  return NextResponse.json({
+    text: drawn.text, spec: drawn.spec,
+    ...(drawn.flags?.length ? { flags: drawn.flags } : {}),
+    ...(drawn.criticism ? { criticism: drawn.criticism } : {}),
+  });
 }

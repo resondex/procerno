@@ -42,7 +42,10 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
-const REPO = "/Users/tylersolloway/Documents/GitHub/procerno";
+// Resolved from this file, not hardcoded (2026-10-30): the old absolute
+// path always loaded the MAIN checkout's engine, so a worktree session's
+// harness run validated the wrong code.
+const REPO = path.resolve(path.dirname(new URL(import.meta.url).pathname), "..");
 delete process.env.DATABASE_URL;
 delete process.env.OPENAI_API_KEY;
 delete process.env.ANTHROPIC_API_KEY;

@@ -67,6 +67,10 @@ export interface GridCellUi {
   /** Doubt cells (s9+): the planned concern this cell measures - part of
    * the design, sent with every generation request. */
   concern?: string | null;
+  /** Advocacy cells (s56): the critic's quoted objection the seed carries,
+   * declared by the writer; persisted onto the advocacy intent at create
+   * (intents.concern). Moves with the text: a redraw brings its own. */
+  criticism?: string | null;
   /** Value cells (2026-10-04): the line weighed and its counterpart. */
   valueLine?: ValueLineUi | null;
   /** Class-angle comparison cells (2026-10-01; angle "class"): the class
@@ -332,6 +336,9 @@ export function mergeWrittenCells(g: GridState, served: Omit<GridCellUi, "phrasi
       // Design metadata is the engine's; the content is the user's.
       layer: c.layer, qtype: c.qtype, mode: c.mode,
       valueLine: c.valueLine, classPhrase: c.classPhrase, classBrand: c.classBrand,
+      // s56: the criticism belongs to a TEXT - the served one fits only a
+      // cell still showing the served text.
+      criticism: unchanged ? c.criticism ?? p.criticism : p.criticism,
       engineSeed: c.text,
       // Spec and flags describe a text: the served ones only fit a cell
       // still showing the served text.
@@ -813,6 +820,7 @@ export function buildSetupDecision(g: GridState): Record<string, unknown> {
       const decidedTexts = new Set(decided.map((d) => d.text.trim()));
       return {
         stage: c.stage, situation: c.situation, angle: c.angle, concern: c.concern ?? null,
+        ...(c.criticism ? { criticism: c.criticism } : {}),
         seed: { offered: c.engineSeed ?? c.original ?? null, decided: c.text, how: cellHow(c) },
         paraphrases: {
           offered,
@@ -1932,7 +1940,7 @@ export function useGridSetup(a: GridSetupArgs) {
     // No global busy: the card shows its own writing state, the rest of
     // the gate stays usable.
     a.setError(null);
-    const data = await post<{ text: string; spec?: CellCheckSpec; flags?: string[] }>("/api/setup/grid/cell", {
+    const data = await post<{ text: string; spec?: CellCheckSpec; flags?: string[]; criticism?: string }>("/api/setup/grid/cell", {
       brand: a.brand, category: a.category, competitors: a.competitors, rosterRoles: a.rosterRoles,
       audience: a.audience || undefined,
       base: st.moderators,
@@ -1990,6 +1998,9 @@ export function useGridSetup(a: GridSetupArgs) {
             ...q,
             text: data.text,
             original: data.text,
+            // s56: an advocacy draw brings its own quoted criticism; the
+            // old one described the old text, so it never survives a draw.
+            ...(q.stage === "advocacy" ? { criticism: data.criticism ?? null } : {}),
             // A fresh draw replaces whatever wording the flag described;
             // the server judged it on the battery rules too and says so.
             seedFlags: data.flags?.length ? data.flags : undefined,

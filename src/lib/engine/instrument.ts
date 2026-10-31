@@ -7,7 +7,7 @@ import { helperClient } from "./providers";
 import { pluralSlot, relationShift,
   AMBIGUOUS_FORMS, angleRivals, categoryNounOf, categorySpanIn, checkBattery, checkCandidateSignature, checkPromptAgainstSpec, classAnglesOf,
   deriveCheckSpec, DOUBT_CHECK_STAGES, MUST_NAME_STAGES, PRE_CATEGORY_STAGES, questionTypeOf, resolveCellSpec, scenarioLabelLeak, specWriterNote,
-  sameSeatOf, stageDesignIntent, statedPriceFinding, moneyBoltOn, TERM_COLLISIONS, textNamesBrand, textNamesCategory, upstreamOf,
+  sameSeatOf, stageDesignIntent, statedPriceFinding, moneyBoltOn, criticismInText, TERM_COLLISIONS, textNamesBrand, textNamesCategory, upstreamOf,
   type CellCheckSpec, type ClassAngle, type QuestionType, type RosterClasses, type RosterRoles, type ValueLine,
 } from "./battery_checks";
 export { MUST_NAME_STAGES };
@@ -168,7 +168,7 @@ const CACHE_TTL_MS = 183 * 24 * 3600 * 1000;
 // one-tier-down counterpart per room (planValueLines, confirmed at the
 // gate; default = the brand's most premium line that fits the room; no
 // Value cell where none fits) and carries no usage detail.
-const STYLE_VERSION = "s55"; // s55 (2026-10-23, Tyler): the cell writer moves gpt-5 -> gpt-6-sol (setup-engine round: both sols beat the gpt-5 writer on blind measurement fidelity, 4 defects vs 11; gpt-6-sol at half 5.6-sol's price). Writer-model change = writer semantics, so s54 cells must not serve under keys today's engine produces. // s54 (2026-10-09, Tyler): premium vs basic invites a pick - "and which would you get" - in the hint, the writer rule and the design intents, per the 2026-10-01 ruling (the stage is the category-tier open-choice cell: tier advocacy plus who gets named); the seed side had said the opposite ("never ask for picks") since s32. // s53 (2026-10-07, Tyler): in a room defined by buying terms (where, when, on what terms) the use-case want and the problem-recognition pain come from what those terms make the buyer care about over owning the product; a subject another room's circumstance owns is never used outside that room (the Pixel camera collapse: three rooms borrowed the photos room's subject). // s52 (2026-10-06): criteria's second ask is conditioned on the first; feature screening in a scenario leaves the buying channel or moment out. // s51 (journeys30): the writer reads the room's circumstance line, never the natural description; problem recognition sets the pain in the category's own territory; criteria asks what to look at and, given that, what to consider. // s50 (batch 2): the scenario label is a title for us, never words for the prompt; use-case heals carry no buying channel. // s46 (2026-10-04 seed review batch): problem recognition carries no purchase moment; offensive alternatives state a plain move within the category; head-to-heads add no situation; advocacy convinces a peer or critic, business case an approver. // s45 (2026-10-04 seed review): doubt hints - the asker's own one-doubt claim, never a fact to confirm, hearsay, a sizing ask or the Value question; stance decides the asker; worry cells carry no reach limit.
+const STYLE_VERSION = "s56"; // s56 (2026-10-30, the fleet-gate writer batch): (1) advocacy cells ALWAYS quote the critic's objection and the writer returns it in the reply's criticism field - validated by containment (criticismInText) and persisted onto the advocacy intent as intents.concern, the way a worry's concern persists, so the labeling stages file fills its critic line mechanically and fill_critic_lines.mts retires for new batteries; (2) the writer request carries the roster's brand NAME FORMS (the r15 dictionary-alias vocabulary, brandFormsNote) so a blind cell avoids "Amex" without a checker round trip - the avoid-list the r15 note deferred to this bump; (3) STAGE_KEEP.comparison stops the why-led reordering ("Why would you choose X or Y") at the source (the ss10 string check still catches served ones); (4) the r12 ask-a-price-never-state-it rule folded into the writer prompt as a general rule (it was Value-paragraph-only; the checker has had it since r12). // s55 (2026-10-23, Tyler): the cell writer moves gpt-5 -> gpt-6-sol (setup-engine round: both sols beat the gpt-5 writer on blind measurement fidelity, 4 defects vs 11; gpt-6-sol at half 5.6-sol's price). Writer-model change = writer semantics, so s54 cells must not serve under keys today's engine produces. // s54 (2026-10-09, Tyler): premium vs basic invites a pick - "and which would you get" - in the hint, the writer rule and the design intents, per the 2026-10-01 ruling (the stage is the category-tier open-choice cell: tier advocacy plus who gets named); the seed side had said the opposite ("never ask for picks") since s32. // s53 (2026-10-07, Tyler): in a room defined by buying terms (where, when, on what terms) the use-case want and the problem-recognition pain come from what those terms make the buyer care about over owning the product; a subject another room's circumstance owns is never used outside that room (the Pixel camera collapse: three rooms borrowed the photos room's subject). // s52 (2026-10-06): criteria's second ask is conditioned on the first; feature screening in a scenario leaves the buying channel or moment out. // s51 (journeys30): the writer reads the room's circumstance line, never the natural description; problem recognition sets the pain in the category's own territory; criteria asks what to look at and, given that, what to consider. // s50 (batch 2): the scenario label is a title for us, never words for the prompt; use-case heals carry no buying channel. // s46 (2026-10-04 seed review batch): problem recognition carries no purchase moment; offensive alternatives state a plain move within the category; head-to-heads add no situation; advocacy convinces a peer or critic, business case an approver. // s45 (2026-10-04 seed review): doubt hints - the asker's own one-doubt claim, never a fact to confirm, hearsay, a sizing ask or the Value question; stance decides the asker; worry cells carry no reach limit.
 
 /** Versions the DETERMINISTIC seed-check set (everything seedRule runs:
  * checkPromptAgainstSpec + blind_missing_category + scenario_label_leak).
@@ -3410,8 +3410,10 @@ const CELL_WRITER_SYSTEM =
           "- advocacy: a customer names the client brand and the person " +
           "they're convincing - a peer, friend, colleague or the critic " +
           "themselves, never someone who approves the purchase (that is " +
-          "business case) - often quoting that person's objection, and " +
-          "asks for help making the case.\n" +
+          "business case) - QUOTING that person's objection in quotation " +
+          "marks, and asks for help making the case. The quoted objection " +
+          "is the cell's measurement, so every advocacy prompt carries " +
+          "one.\n" +
           "- One prompt asks at most two or three things, stays under about " +
           "55 words, and reads ONE way: a list of four or more features or " +
           "requirements is survey-speak even in a short prompt (pick the " +
@@ -3428,6 +3430,11 @@ const CELL_WRITER_SYSTEM =
           "doesn't run on excludes it by construction.\n" +
           "- Never a calendar year in a prompt ('in 2026'): trackers re-ask " +
           "prompts for years and a dated prompt goes stale.\n" +
+          "- A prompt ASKS what a product costs; it never STATES a " +
+          "product's price, fee or rate as a fact - a stated figure is a " +
+          "claim that dates, and every answer then starts from a false " +
+          "premise. The asker's OWN budget, spend, bill or an offer made " +
+          "to them is circumstance and fine.\n" +
           "- Sibling cells of one stage VARY voice and framing: four cells " +
           "that are one sentence with the name swapped read machine-written, " +
           "and a persona the scenario contradicts breaks the voice.\n" +
@@ -3454,7 +3461,29 @@ const CELL_WRITER_SYSTEM =
           "- The text field holds ONLY the final prompt exactly as the " +
           "person would type it: never a note to yourself, a correction " +
           "('sorry', 'instead:'), a reference to the seed or this task, or " +
-          "a bracketed annotation.\n";
+          "a bracketed annotation.\n" +
+          "- The criticism field: on an advocacy cell, the objection the " +
+          "prompt quotes, in EXACTLY the words quoted (the quote itself, " +
+          "no quotation marks around the value); on every other cell, " +
+          "null.\n";
+
+/** s56: the writer's brand-vocabulary note - each roster brand's name
+ * forms from the dictionary-seed alias read (the r15 vocabulary every
+ * brand check speaks), so a blind cell avoids "Amex" at the source
+ * instead of drawing a checker rewrite. Request data derived from brand +
+ * roster, which already ride every cell key; brands with no form beyond
+ * their own name add nothing and are left out. "" when nothing to say. */
+function brandFormsNote(brand: string, competitors: string[], aliasForms: Record<string, string[]>): string {
+  const lines = [brand, ...competitors]
+    .map((b) => {
+      const forms = [...new Set((aliasForms[b] ?? []).map((f) => f.trim()).filter((f) => f && f.toLowerCase() !== b.toLowerCase()))];
+      return forms.length > 0 ? `- ${b}: ${forms.join(", ")}` : null;
+    })
+    .filter((l): l is string => !!l);
+  return lines.length > 0
+    ? `Brand name forms - every form after a brand's colon NAMES that brand wherever it appears, so a prompt whose rules forbid naming a brand uses none of that brand's forms:\n${lines.join("\n")}\n\n`
+    : "";
+}
 
 export interface GridCell {
   stage: string;
@@ -3475,6 +3504,14 @@ export interface GridCell {
    * measures, assigned at grid-plan time from the brand's enumerated
    * doubt-space. The writer voices it; the design check enforces it. */
   concern?: string;
+  /** Advocacy cells only (s56): the critic's objection the seed quotes,
+   * declared by the writer and containment-checked against the text
+   * (criticismInText). DELIBERATELY a separate field from `concern`: the
+   * doubt-stage checks that read a cell's concern (money bolt-on, the
+   * concern(...) plan note, the doubt design lines) never see it. It maps
+   * to intents.concern at instrument write (instrumentRows), where every
+   * consumer of that column is stage-gated. */
+  criticism?: string;
   /** Value cells only (2026-10-04): the line weighed and its counterpart. */
   valueLine?: ValueLine;
   /** Class-angle comparison cells only (2026-10-01): the class the client
@@ -3512,8 +3549,12 @@ const CELLS_SCHEMA = {
           situation: { type: ["string", "null"] },
           angle: { type: "string" },
           text: { type: "string" },
+          // s56: the advocacy cell's quoted objection, exactly as quoted
+          // in the text; null on every other cell. Persisted onto the
+          // advocacy intent (intents.concern) after a containment check.
+          criticism: { type: ["string", "null"] },
         },
-        required: ["stage", "situation", "angle", "text"],
+        required: ["stage", "situation", "angle", "text", "criticism"],
       },
     },
   },
@@ -4099,6 +4140,16 @@ export async function generateGrid(input: {
   const aliasForms = await brandAliasForms([input.brand, ...input.competitors]);
   input = { ...input, competitors: sameSeatOf(input.competitors, input.rosterRoles) };
   const rivals = angleRivals(input.competitors, input.rosterRoles);
+  // s56: ONE request header for every writer call in this battery - the
+  // client/category/rivals/audience lines plus the roster's brand name
+  // forms, so a blind cell avoids "Amex" at the source. input.competitors
+  // here is the post-narrowing roster (same-seat + bench + adjacent - the
+  // brands blind cells forbid); upstream brands are free vocabulary and
+  // stay out.
+  const writerHeader =
+    `Client brand: ${input.brand}\nCategory: ${input.category}\n` +
+    `Rivals: ${rivals.map(primaryBrandName).join(", ")}\nAudience: ${input.audience ?? "unknown"}\n\n` +
+    brandFormsNote(input.brand, input.competitors, aliasForms);
   const allLabels = input.scenarios.map((s) => s.label);
   const plan = planGridCells(input.stages, allLabels, rivals, classAngles, input.worries);
 
@@ -4468,8 +4519,8 @@ export async function generateGrid(input: {
           ? { cells: rows.map((row) => {
               const c = (pre.get(unitOf.get(row)!) ?? [])[0];
               return c
-                ? { stage: row.stage.key, situation: c.situation, angle: c.angle, text: c.text }
-                : { stage: "", situation: null as string | null, angle: "", text: "" };
+                ? { stage: row.stage.key, situation: c.situation, angle: c.angle, text: c.text, criticism: c.criticism ?? null }
+                : { stage: "", situation: null as string | null, angle: "", text: "", criticism: null as string | null };
             }) }
           : await (async () => {
         const res = await openaiClient().chat.completions.create({
@@ -4484,8 +4535,7 @@ export async function generateGrid(input: {
             {
               role: "user",
               content:
-                `Client brand: ${input.brand}\nCategory: ${input.category}\n` +
-                `Rivals: ${rivals.map(primaryBrandName).join(", ")}\nAudience: ${input.audience ?? "unknown"}\n\n` +
+                writerHeader +
                 `Cell plan:\n${planText}`,
             },
           ],
@@ -4495,7 +4545,7 @@ export async function generateGrid(input: {
           },
         });
         return JSON.parse(res.choices[0]?.message?.content ?? "{}") as {
-          cells: { stage: string; situation: string | null; angle: string; text: string }[];
+          cells: { stage: string; situation: string | null; angle: string; text: string; criticism?: string | null }[];
         };
           })();
         const produced = new Map<number, GridCell[]>();
@@ -4551,6 +4601,12 @@ export async function generateGrid(input: {
             ...(row.classPhrase ? { classPhrase: row.classPhrase, classBrand: row.classBrand } : {}),
             text: humanize(c.text.trim()),
           };
+          // s56: the advocacy cell's declared quoted objection, kept only
+          // when the final text really carries it (the containment guard).
+          if (st.key === "advocacy") {
+            const crit = criticismInText(cell.text, humanize((c.criticism ?? "").trim()));
+            if (crit) cell.criticism = crit;
+          }
           cell.qtype = questionTypeOf(cell, input.brand, input.category, aliasForms);
           const list = produced.get(u);
           if (list) list.push(cell);
@@ -4652,20 +4708,26 @@ export async function generateGrid(input: {
                 messages: [
                   { role: "system", content: CELL_WRITER_SYSTEM + "Return one cell object for the plan line." },
                   { role: "user", content:
-                      `Client brand: ${input.brand}\nCategory: ${input.category}\n` +
-                      `Rivals: ${rivals.map(primaryBrandName).join(", ")}\nAudience: ${input.audience ?? "unknown"}\n\n` +
+                      writerHeader +
                       `Cell plan:\n${planLine(row, 0)}\n` +
                       `   [previous attempt broke the brand rule and was rejected: ${mech.map((m) => m.detail).join(" ")} ` +
                       `Do not reuse this wording: "${c.text}"]` },
                 ],
                 response_format: { type: "json_schema", json_schema: { name: "grid_cells", strict: true, schema: CELLS_SCHEMA } },
               });
-              const cell2 = (JSON.parse(res2.choices[0]?.message?.content ?? "{}") as { cells?: { text?: string }[] }).cells?.[0];
+              const cell2 = (JSON.parse(res2.choices[0]?.message?.content ?? "{}") as { cells?: { text?: string; criticism?: string | null }[] }).cells?.[0];
               const text2 = cell2?.text?.trim();
               if (text2) await primeCells([{ ...c, text: text2 }]);
               if (text2 && seedRule({ stage: c.stage, angle: c.angle, text: text2, classPhrase: c.classPhrase, classBrand: c.classBrand }).length === 0) {
                 console.warn(`seed brand rule healed [${c.stage}]: ${text2.slice(0, 90)}`);
                 flat[i].text = humanize(text2);
+                // s56: a healed advocacy seed carries the heal's own quoted
+                // objection; a broken declaration drops (final-sweep net).
+                if (flat[i].stage === "advocacy") {
+                  const crit = criticismInText(flat[i].text, humanize((cell2?.criticism ?? "").trim()));
+                  if (crit) flat[i].criticism = crit;
+                  else delete flat[i].criticism;
+                }
               } else {
                 console.warn(`seed brand-rule regeneration still failing [${c.stage}] - seed stands, flagged for the gate`);
               }
@@ -4732,16 +4794,16 @@ export async function generateGrid(input: {
                   messages: [
                     { role: "system", content: CELL_WRITER_SYSTEM + "Return one cell object for the plan line." },
                     { role: "user", content:
-                        `Client brand: ${input.brand}\nCategory: ${input.category}\n` +
-                        `Rivals: ${rivals.map(primaryBrandName).join(", ")}\nAudience: ${input.audience ?? "unknown"}\n\n` +
+                        writerHeader +
                         `Cell plan:\n${planLine(row, 0)}\n` +
                         `   [previous attempt was OFF-DESIGN and was rejected: it did not voice the cell's design. ` +
                         `${x.intent}${swapRule(x.c.stage)} Do not reuse this wording: "${x.c.text}"]` },
                   ],
                   response_format: { type: "json_schema", json_schema: { name: "grid_cells", strict: true, schema: CELLS_SCHEMA } },
                 });
-                const cell2 = (JSON.parse(res2.choices[0]?.message?.content ?? "{}") as { cells?: { text?: string }[] }).cells?.[0];
+                const cell2 = (JSON.parse(res2.choices[0]?.message?.content ?? "{}") as { cells?: { text?: string; criticism?: string | null }[] }).cells?.[0];
                 let text2 = cell2?.text?.trim();
+                let crit2 = cell2?.criticism ?? null;
                 // A design heal must also pass the mechanical rules (the
                 // brand-rule and concern-diversity heals already do this) -
                 // otherwise the terminal verdict flags the "fix".
@@ -4769,8 +4831,7 @@ export async function generateGrid(input: {
                     messages: [
                       { role: "system", content: CELL_WRITER_SYSTEM + "Return one cell object for the plan line." },
                       { role: "user", content:
-                          `Client brand: ${input.brand}\nCategory: ${input.category}\n` +
-                          `Rivals: ${rivals.map(primaryBrandName).join(", ")}\nAudience: ${input.audience ?? "unknown"}\n\n` +
+                          writerHeader +
                           `Cell plan:\n${planLine(row, 0)}\n` +
                           `   [two attempts were rejected. The design: ${x.intent}${swapRule(x.c.stage)} ` +
                           `The last attempt failed because ${why}. ` +
@@ -4778,7 +4839,9 @@ export async function generateGrid(input: {
                     ],
                     response_format: { type: "json_schema", json_schema: { name: "grid_cells", strict: true, schema: CELLS_SCHEMA } },
                   });
-                  text2 = (JSON.parse(res3.choices[0]?.message?.content ?? "{}") as { cells?: { text?: string }[] }).cells?.[0]?.text?.trim();
+                  const cell3 = (JSON.parse(res3.choices[0]?.message?.content ?? "{}") as { cells?: { text?: string; criticism?: string | null }[] }).cells?.[0];
+                  text2 = cell3?.text?.trim();
+                  crit2 = cell3?.criticism ?? null;
                   if (text2) await primeCells([{ ...x.c, text: text2 }]);
                   mech2ok = !!text2 && seedRule({ ...x.c, text: text2 }).length === 0;
                   again = mech2ok
@@ -4793,6 +4856,13 @@ export async function generateGrid(input: {
                 } else if (again?.voices) {
                   console.warn(`seed self-healed [${x.c.stage}]: ${text2!.slice(0, 90)}`);
                   flat[x.i].text = humanize(text2!);
+                  // s56: the heal's own quoted objection replaces the old
+                  // one; a broken declaration drops (final-sweep net).
+                  if (flat[x.i].stage === "advocacy") {
+                    const crit = criticismInText(flat[x.i].text, humanize((crit2 ?? "").trim()));
+                    if (crit) flat[x.i].criticism = crit;
+                    else delete flat[x.i].criticism;
+                  }
                 } else {
                   // The flag describes the text that SHIPS (the original -
                   // the rejected regen's reason described discarded text).
@@ -4820,6 +4890,10 @@ export async function generateGrid(input: {
         // the final healed seed: everything downstream (paraphrase
         // signature, mechanical battery, design check) reads it.
         flat.forEach((c) => {
+          // s56: whatever rewrote the text last (a heal, the seed review's
+          // suggestion), a declared criticism the final text no longer
+          // carries is dropped here - the one net every path passes.
+          if (c.stage === "advocacy" && c.criticism && !criticismInText(c.text, c.criticism)) delete c.criticism;
           c.qtype = questionTypeOf(c, input.brand, input.category, aliasForms);
           c.spec = deriveCheckSpec(c, input.brand, input.competitors, input.category, aliasForms);
         });
@@ -5204,8 +5278,7 @@ export async function generateGrid(input: {
                   messages: [
                     { role: "system", content: CELL_WRITER_SYSTEM + "Return one cell object for the plan line." },
                     { role: "user", content:
-                        `Client brand: ${input.brand}\nCategory: ${input.category}\n` +
-                        `Rivals: ${rivals.map(primaryBrandName).join(", ")}\nAudience: ${input.audience ?? "unknown"}\n\n` +
+                        writerHeader +
                         `Cell plan:\n${planLine(row, 0)}\n` +
                         `   [this battery ALREADY covers these concerns about ${input.brand}: ${[...covered.keys()].join("; ")}. ` +
                         `This cell must voice a DIFFERENT real concern buyers have about ${input.brand} in ${input.category}. ` +
@@ -5365,8 +5438,7 @@ export async function generateGrid(input: {
                   messages: [
                     { role: "system", content: CELL_WRITER_SYSTEM + "Return one cell object for the plan line." },
                     { role: "user", content:
-                        `Client brand: ${input.brand}\nCategory: ${input.category}\n` +
-                        `Rivals: ${rivals.map(primaryBrandName).join(", ")}\nAudience: ${input.audience ?? "unknown"}\n\n` +
+                        writerHeader +
                         `Cell plan:\n${planLine(row, 0)}\n` +
                         `   [the previous attempt was rejected because ${why}. This battery's use-case jobs so far: ${covered}. ` +
                         `Name ONE DIFFERENT outcome buyers in this situation commonly want - one that comes from THIS buyer's own circumstance, never an outcome that belongs to another scenario's buyer${termsRooms.has(d.c.situation ?? "") ? "; this buyer is defined by buying terms, and the outcome FOLLOWS FROM the kind of term: a payment plan, contract or financing term means the product must still serve them well when the payments end; a fixed budget or price cap means the most product for that sum, weighed against what they give up; stated as the outcome they want" : ""} - in everyday words without any product feature word, not the situation itself, never a product quality, never a store, carrier, sale, promotion, upgrade window, trade-in credit, financing or deadline from the scenario (the scenario only says who you are), and never the subject of one of the brand's known worries${(input.worries ?? []).length > 0 ? ` (picked worries: ${[...new Set((input.worries ?? []).map((w) => w.concern))].join("; ")})` : ""}. ` +
@@ -5509,8 +5581,7 @@ export async function generateGrid(input: {
                   messages: [
                     { role: "system", content: CELL_WRITER_SYSTEM + "Return one cell object for the plan line." },
                     { role: "user", content:
-                        `Client brand: ${input.brand}\nCategory: ${input.category}\n` +
-                        `Rivals: ${rivals.map(primaryBrandName).join(", ")}\nAudience: ${input.audience ?? "unknown"}\n\n` +
+                        writerHeader +
                         `Cell plan:\n${planLine(row, 0)}\n` +
                         `   [the previous attempt was rejected because ${why}. This battery's problem-recognition pains so far: ${covered}. ` +
                         `Voice ONE DIFFERENT pain that this scenario's buyer is likely to have given their circumstance - never a pain already listed, never the category's best-known complaint reached for by default, and never a purchase moment. ` +
@@ -6078,7 +6149,7 @@ export async function regenerateCell(input: {
   /** Typed roster (see generateGrid). Absent = untyped. */
   rosterRoles?: RosterRoles;
   meta?: CacheMeta;
-}): Promise<{ text: string; spec: CellCheckSpec; flags?: string[] } | null> {
+}): Promise<{ text: string; spec: CellCheckSpec; flags?: string[]; criticism?: string } | null> {
   tagCosts({ purpose: "setup:cells" });
   const startedAt = Date.now();
   // r13: the dictionary seed's alias forms ("amex" for American Express),
@@ -6095,6 +6166,13 @@ export async function regenerateCell(input: {
       ...(input.cell.classPhrase ? { classPhrase: input.cell.classPhrase, classBrand: input.cell.classBrand } : {}),
     }, input.brand, input.competitors, input.category, aliasForms);
   const rivals = angleRivals(input.competitors, input.rosterRoles);
+  // s56: the same request header generateGrid's writer calls carry - the
+  // roster's brand name forms included, so a redraw honors the same
+  // vocabulary the checks speak.
+  const writerHeader =
+    `Client brand: ${input.brand}\nCategory: ${input.category}\n` +
+    `Rivals: ${rivals.map(primaryBrandName).join(", ")}\nAudience: ${input.audience ?? "unknown"}\n\n` +
+    brandFormsNote(input.brand, input.competitors, aliasForms);
   const stages = participationMask(input.base, input.scenarios);
   const st = stages.find((x) => x.key === input.cell.stage);
   if (!st) return null;
@@ -6120,11 +6198,13 @@ export async function regenerateCell(input: {
   const hit = await store.cacheGet(key, CACHE_TTL_MS);
   if (hit) {
     // Legacy entries are a bare string; r27+ entries carry the battery-rule
-    // flags the draw shipped with.
-    const parsed = JSON.parse(hit) as string | { t: string; f?: string[] };
+    // flags the draw shipped with; s56+ advocacy entries carry the drawn
+    // quoted criticism.
+    const parsed = JSON.parse(hit) as string | { t: string; f?: string[]; c?: string };
     const text = humanize(typeof parsed === "string" ? parsed : parsed.t);
     const flags = typeof parsed === "string" ? undefined : parsed.f;
-    return { text, spec: specFor(text), ...(flags?.length ? { flags } : {}) };
+    const crit = typeof parsed === "string" ? undefined : parsed.c;
+    return { text, spec: specFor(text), ...(flags?.length ? { flags } : {}), ...(crit ? { criticism: crit } : {}) };
   }
   const jn = input.cell.situation
     ? journeyNote(input.base, input.scenarios.find((sc) => sc.label === input.cell.situation) ?? { label: "", description: "", journey: null })
@@ -6136,7 +6216,7 @@ export async function regenerateCell(input: {
     `${input.cell.valueLine ? ` value(line=${input.cell.valueLine.line}; counterpart=${input.cell.valueLine.counterpart})` : ""}` +
     `\n   guidance: ${st.hint}` +
     (input.cell.classPhrase ? `\n   class contract: the counterpart is the CLASS "${input.cell.classPhrase}", never a named rival company or product` : "");
-  const draw = async (rejectNote: string | null): Promise<string | null> => {
+  const draw = async (rejectNote: string | null): Promise<{ text: string; criticism: string | null } | null> => {
     const res = await openaiClient().chat.completions.create({
       model: CELLS_MODEL,
       messages: [
@@ -6159,8 +6239,7 @@ export async function regenerateCell(input: {
         {
           role: "user",
           content:
-            `Client brand: ${input.brand}\nCategory: ${input.category}\n` +
-            `Rivals: ${rivals.map(primaryBrandName).join(", ")}\nAudience: ${input.audience ?? "unknown"}\n\n` +
+            writerHeader +
             `Cell plan:\n${planText}\n\n` +
             (input.nearTo ? `The prompt to vary:\n${input.nearTo.trim()}\n\n` : "") +
             `Previous prompts for this cell (write something DIFFERENT):\n` +
@@ -6178,9 +6257,10 @@ export async function regenerateCell(input: {
       },
     });
     const parsed = JSON.parse(res.choices[0]?.message?.content ?? "{}") as {
-      cells: { text?: string }[];
+      cells: { text?: string; criticism?: string | null }[];
     };
-    return humanize((parsed.cells?.[0]?.text ?? "").trim()) || null;
+    const t = humanize((parsed.cells?.[0]?.text ?? "").trim());
+    return t ? { text: t, criticism: parsed.cells?.[0]?.criticism ?? null } : null;
   };
   // "New prompt" / "near variant" / "Suggest another" run the same free
   // checks as generateGrid's writer output (they used to serve raw text -
@@ -6253,18 +6333,21 @@ export async function regenerateCell(input: {
   const intent = process.env.PHRASINGS_CHECKS !== "0" ? stageDesignIntent(input.cell.stage, input.brand, input.cell.concern, input.cell.angle, roomText, input.cell.valueLine) : null;
   let text: string | null = null;
   let flags: string[] = [];
+  /** s56: the accepted draw's declared quoted objection (advocacy cells). */
+  let critRaw: string | null = null;
   let note: string | null = null;
   /** A draw that passed the brand and design checks but failed a battery
    * rule: what ships, flagged, if the budget ends the retries. */
-  let fallback: { text: string; why: string } | null = null;
+  let fallback: { text: string; why: string; crit: string | null } | null = null;
   for (let attempt = 0; attempt < 3 && !text; attempt++) {
     if (attempt > 0 && Date.now() - startedAt > REGEN_ATTEMPT_CUTOFF_MS) {
       console.warn(`cell alt: out of time after ${attempt} attempt(s) [${input.cell.stage}]${fallback ? " - shipping the last checked draw flagged" : " - the client keeps what it has"}`);
-      if (fallback) { text = fallback.text; flags = [`off-design: ${fallback.why}`]; }
+      if (fallback) { text = fallback.text; flags = [`off-design: ${fallback.why}`]; critRaw = fallback.crit; }
       break;
     }
-    const cand = await draw(note);
-    if (!cand) return null;
+    const drawn = await draw(note);
+    if (!drawn) return null;
+    const cand = drawn.text;
     if (avoidNorm.some((t) => t.toLowerCase() === cand.toLowerCase())) return null;
     if (process.env.PHRASINGS_CHECKS !== "0")
       await primeBrandVerdicts({ items: [{ text: cand, brands: specFor(cand).forbiddenBrands }], roster: [input.brand, ...input.competitors], aliases: aliasForms, category: input.category, meta: input.meta });
@@ -6296,17 +6379,19 @@ export async function regenerateCell(input: {
       if (v.unchecked) {
         console.warn(`cell alt: design check unavailable [${input.cell.stage}] - draw ships flagged, not cached | ${cand.slice(0, 90)}`);
         const uflags = ["off-design: unchecked - checker unavailable"];
-        return { text: cand, spec: specFor(cand), flags: uflags };
+        const ucrit = input.cell.stage === "advocacy" ? criticismInText(cand, humanize((drawn.criticism ?? "").trim())) : null;
+        return { text: cand, spec: specFor(cand), flags: uflags, ...(ucrit ? { criticism: ucrit } : {}) };
       }
       if (!v.voices) problems.push(`off-design: ${v.reason || "does not voice the cell's design"}`);
     }
     if (problems.length === 0) {
       const why = await batteryRule(cand);
-      if (why) fallback = { text: cand, why };
+      if (why) fallback = { text: cand, why, crit: drawn.criticism };
       if (!why || attempt === 2) {
         // Past the retry cap a battery-rule failure ships FLAGGED, like the
         // battery pass does - the card shows the reason instead of a clean chip.
         text = cand;
+        critRaw = drawn.criticism;
         if (why) { flags = [`off-design: ${why}`]; console.warn(`cell alt ships flagged [${input.cell.stage}]: ${why} | ${cand.slice(0, 90)}`); }
         break;
       }
@@ -6316,10 +6401,14 @@ export async function regenerateCell(input: {
     note = `${problems.join(" ")} Do not reuse this wording: "${cand}"`;
   }
   if (!text) return null;
+  // s56: the advocacy draw's quoted objection, containment-validated like
+  // generateGrid's parse - absent (a non-advocacy cell, or a declaration
+  // the text does not carry) nothing rides.
+  const criticism = input.cell.stage === "advocacy" ? criticismInText(text, humanize((critRaw ?? "").trim())) : null;
   // Cached the moment it is accepted - nothing paid runs after this, so a
   // client that timed out lands on this draw when it retries.
-  await store.cacheSet(key, JSON.stringify({ t: text, ...(flags.length ? { f: flags } : {}) }), stampOf(input));
-  return { text, spec: specFor(text), ...(flags.length ? { flags } : {}) };
+  await store.cacheSet(key, JSON.stringify({ t: text, ...(flags.length ? { f: flags } : {}), ...(criticism ? { c: criticism } : {}) }), stampOf(input));
+  return { text, spec: specFor(text), ...(flags.length ? { flags } : {}), ...(criticism ? { criticism } : {}) };
 }
 
 /* ------------------------------ phrasings ------------------------------- */
@@ -6657,7 +6746,7 @@ export const STAGE_KEEP: Record<string, string> = {
   criteria: "the asker's circumstance; an ask for what to look at, and given that, what to consider",
   use_case: "the asker's circumstance; the one outcome they want; an ask for which product does that best",
   social_validation: "an ask for which options people most recommend or swear by",
-  comparison: "both named options; an ask for which ONE the answerer would pick, and why - never reasons for either side",
+  comparison: "both named options; an ask for which ONE the answerer would pick, and why - never reasons for either side, and never a sentence led by why ('Why would you choose X or Y') in place of the pick ask: a why-led reordering asks for reasons both ways and loses the pick",
   objections: "the brand; the doubt's substance; an open ask whether it is warranted",
   churn_triggers: "the brand; the asker's own use of it, shown the way the seed shows it, never announced; their complaint; an ask whether to stay or leave",
   renewal: "the brand; the bill or renewal coming due, as the seed says it; the asker's own use of it shown, never announced; an ask whether to renew or leave",

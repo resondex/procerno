@@ -1789,3 +1789,23 @@ export function moneyBoltOn(text: string, concern?: string | null): boolean {
  * relationship churn and renewal). Here (pure) so the wizard and the
  * worries route share one list; instrument.ts re-exports it. */
 export const WORRY_STANCE_STAGES = ["objections", "churn_triggers", "renewal"] as const;
+
+/** s56 (2026-10-30): the advocacy cell's quoted criticism persists
+ * structurally (GridCell.criticism -> intents.concern, the way a worry's
+ * concern does), replacing the hand-reviewed extraction in
+ * labeling/g3/fill_critic_lines.mts for new batteries. The writer declares
+ * the criticism it quoted; this containment check guards that the declared
+ * words really are the prompt's quote - a declared criticism the final
+ * text no longer carries (a heal or a hand edit rewrote the quote) is
+ * dropped, and the stages-file builder falls back to its needs_review
+ * flag. Case, quotes, punctuation and spacing are ignored. Pure, so it
+ * never reads intents.concern's doubt-stage consumers - no doubt-stage
+ * check ever sees an advocacy criticism. Returns the trimmed criticism
+ * when the text carries it, else null. */
+export function criticismInText(text: string, criticism: string | null | undefined): string | null {
+  const crit = criticism?.trim();
+  if (!crit || crit.length < 4 || crit.length > 300) return null;
+  const norm = (s: string) => s.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+  const c = norm(crit);
+  return c && norm(text).includes(c) ? crit : null;
+}

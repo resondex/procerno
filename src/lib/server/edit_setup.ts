@@ -354,7 +354,9 @@ export async function buildEditSetupDraft(project: Project) {
       // they stay on the legacy path rather than derive a wrong design.
       if (i.angle !== "class") {
         spec = deriveCheckSpec(
-          { stage: i.stage, angle: i.angle, text: i.text, concern: i.concern ?? null },
+          // s56: an advocacy intent's concern holds the quoted criticism,
+          // which is not a design concern - the spec derives without it.
+          { stage: i.stage, angle: i.angle, text: i.text, concern: i.stage === "advocacy" ? null : i.concern ?? null },
           project.brand, project.competitors, project.category, aliasForms
         );
       }
@@ -373,7 +375,12 @@ export async function buildEditSetupDraft(project: Project) {
       angle: i.angle,
       mode: i.mode,
       qtype: (i as unknown as { qtype?: string | null }).qtype ?? null,
-      concern: i.concern ?? null,
+      // s56: an advocacy intent's concern column holds the quoted
+      // criticism - rebuild it onto the draft's criticism field, never
+      // concern (the client's designKey and the doubt-shaped checks read
+      // concern; advocacy cells carry none).
+      concern: i.stage === "advocacy" ? null : i.concern ?? null,
+      ...(i.stage === "advocacy" && i.concern ? { criticism: i.concern } : {}),
       ...(valueLine ? { valueLine } : {}),
       ...(spec ? { spec } : {}),
       text: i.text,

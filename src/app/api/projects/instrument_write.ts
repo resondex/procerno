@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { store } from "@/lib/store";
-import { questionTypeOf } from "@/lib/engine/battery_checks";
+import { criticismInText, questionTypeOf } from "@/lib/engine/battery_checks";
 import { brandAliasForms } from "@/lib/engine/brand_aliases";
 import { humanize, namesAnyBrand } from "@/lib/engine/instrument";
 import type { PromptTheme } from "@/lib/types";
@@ -52,6 +52,10 @@ export const CellShape = z.object({
   mode: z.string().trim().max(600).nullable().optional(),
   qtype: z.string().trim().max(40).nullable().optional(),
   concern: z.string().trim().max(120).nullable().optional(),
+  /** Advocacy cells (s56): the critic's quoted objection, declared by the
+   * writer and carried on the draft cell. Persisted as intents.concern
+   * after the containment check below. */
+  criticism: z.string().trim().max(300).nullable().optional(),
   text: z.string().trim().min(1).max(2000),
   /** The confirmed paraphrase set for this cell; each becomes its own
    * prompt under the same intent, carrying its buyer voice. */
@@ -93,7 +97,16 @@ export async function instrumentRows(
       angle: c.angle,
       mode: c.mode ?? null,
       qtype: questionTypeOf({ stage: c.stage, angle: c.angle, text: c.text }, brand, category, aliasForms),
-      concern: c.concern ?? null,
+      // s56: an advocacy cell's concern column holds the quoted criticism
+      // (every consumer of intents.concern is stage-gated, so a worry
+      // reader never sees it), kept only when the confirmed text still
+      // carries the quote - an edit that rewrote it falls back to null and
+      // the stages-file builder's needs_review flag. Other stages keep the
+      // planned concern as before.
+      concern:
+        c.stage === "advocacy"
+          ? criticismInText(c.text, c.criticism ?? c.concern)
+          : c.concern ?? null,
       text: humanize(c.text),
     },
     prompts: [

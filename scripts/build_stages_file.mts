@@ -8,10 +8,14 @@
  *
  * Doubt lines are derived mechanically from the cell: a worry cell (stage
  * objections / churn_triggers / renewal with a concern) gets the v0.2
- * wording with the stored concern. Advocacy cells quote a critic in the
- * seed itself, which no stored field isolates, so each advocacy cell is
- * written with line null and needs_review: true plus its seed text - fill
- * the quoted criticism by hand (one cell per tracker) before labeling.
+ * wording with the stored concern. Advocacy cells store their quoted
+ * criticism structurally too since s56 (2026-10-30; the writer declares
+ * it, containment-checked, persisted as intents.concern) - their critic
+ * line fills mechanically here in fill_critic_lines.mts's exact format,
+ * which RETIRES that extractor for s56+ batteries (it stays in
+ * ~/Documents/procerno_eval/labeling/g3/ for the pre-s56 trackers, whose
+ * advocacy intents carry no concern and still get line null +
+ * needs_review: true with the seed text, as before).
  */
 import postgres from "postgres"; import fs from "node:fs"; import path from "node:path";
 const REPO = path.resolve(path.dirname(new URL(import.meta.url).pathname), "..");
@@ -33,6 +37,11 @@ for (const r of rows) {
   if (DOUBT.has(r.stage) && r.concern) {
     e.type = "doubt";
     e.line = `Question design (doubt): the question voices a concern about ${project.brand}. Doubt: "${r.concern}"`;
+  } else if (r.stage === "advocacy" && r.concern) {
+    // s56: the quoted criticism persists on the intent - the critic line
+    // fills mechanically, in fill_critic_lines.mts's exact format.
+    e.type = "doubt";
+    e.line = `Question design (doubt): the customer quotes a criticism someone raised about ${project.brand}. Criticism: "${r.concern}"`;
   } else if (r.stage === "advocacy") {
     e.type = "doubt"; e.line = null; e.needs_review = true; e.seed = r.seed; advocacy++;
   } else e.type = null;

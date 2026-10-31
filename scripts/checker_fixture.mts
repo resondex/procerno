@@ -5,7 +5,11 @@
  * harness-generated batteries are the negative controls.
  */
 import fs from "node:fs";
-const REPO = "/Users/tylersolloway/Documents/GitHub/procerno";
+import path from "node:path";
+// Resolved from this file, not hardcoded (2026-10-30): the old absolute
+// path always loaded the MAIN checkout's engine, so a worktree session's
+// fixture run validated the wrong code.
+const REPO = path.resolve(path.dirname(new URL(import.meta.url).pathname), "..");
 const V02 = `${process.env.HOME}/Documents/procerno_eval/labeling/v02_relabel`;
 const CONF = `${process.env.HOME}/Documents/procerno_eval/internal_models/conformance`;
 const bc = await import(`${REPO}/src/lib/engine/battery_checks`);
@@ -1088,4 +1092,27 @@ if (fails > 0) process.exitCode = 1;
   ok("keepsCategoryNoun: 'watch' / 'watches' meet both ways", bc.keepsCategoryNoun("Which smart watch should I get?", "What smart watches are good?", "smart watches") && bc.keepsCategoryNoun("Which smart watches are good?", "Which smart watch is good?", "smart watch") && !bc.keepsCategoryNoun("Which smart watch should I get?", "Which wearable should I get?", "smart watches"));
   ok("keepsCategoryNoun: '-ses' plural of an -e noun still meets ('cases' / 'case')", bc.keepsCategoryNoun("Which phone case?", "Which phone cases?", "phone cases"));
   console.log("16. round-2 re-audit fixes: " + (process.exitCode ? "FAILED" : "ALL PASS"));
+}
+
+// =====================================================================
+// 17. s56 ADVOCACY CRITICISM (2026-10-30): the writer-declared quoted
+// objection persists onto the advocacy intent only when the final text
+// still carries it - case, quotes, punctuation and spacing ignored; a
+// declaration the text does not carry (a heal or edit rewrote the quote)
+// drops, and the stages-file builder falls back to needs_review.
+// =====================================================================
+console.log("17. s56 advocacy criticism containment");
+{
+  const ok = (label: string, cond: boolean, extra = "") => { if (!cond) { console.error(`   FAIL ${label} ${extra}`); process.exitCode = 1; } else console.log(`   ok   ${label} ${extra}`); };
+  const seed = 'My brother keeps saying "these cards are all basically the same" - how do I make the case for mine?';
+  ok("verbatim quote is kept, original casing returned",
+    bc.criticismInText(seed, "these cards are all basically the same") === "these cards are all basically the same");
+  ok("curly quotes and punctuation differences still match",
+    bc.criticismInText('He said “it’s overpriced, honestly!” and I froze', "it's overpriced, honestly") === "it's overpriced, honestly");
+  ok("case differences still match", bc.criticismInText("she says THE FEES EAT THE REWARDS every time", "the fees eat the rewards") !== null);
+  ok("a declaration the text does not carry drops", bc.criticismInText(seed, "the rewards are not worth it") === null);
+  ok("a near-miss rewording drops (containment, not fuzzy match)", bc.criticismInText(seed, "these cards are all the same") === null);
+  ok("empty / too-short / overlong declarations drop",
+    bc.criticismInText(seed, "") === null && bc.criticismInText(seed, "the") === null && bc.criticismInText(seed, "x".repeat(301)) === null);
+  console.log("17. s56 advocacy criticism containment: " + (process.exitCode ? "FAILED" : "ALL PASS"));
 }
