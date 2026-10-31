@@ -173,7 +173,10 @@ for (const brand of BRANDS) {
   const slug = brand.toLowerCase().replace(/[^a-z0-9]+/g, "_");
   const seeds = cells.map((c: Record<string, unknown>, i: number) => ({
     i: i + 1, stage: c.stage, situation: c.situation, angle: c.angle,
-    concern: c.concern ?? null, classPhrase: c.classPhrase ?? null, classBrand: c.classBrand ?? null, valueLine: c.valueLine ?? null,
+    concern: c.concern ?? null,
+    // s56: the advocacy cell's structurally persisted quoted criticism.
+    criticism: c.criticism ?? null,
+    classPhrase: c.classPhrase ?? null, classBrand: c.classBrand ?? null, valueLine: c.valueLine ?? null,
     scope: c.scope ?? null, qtype: c.qtype, seedFlags: c.seedFlags ?? null, text: c.text,
   }));
   fs.writeFileSync(path.join(OUT, `cold_seeds_${slug}.json`), JSON.stringify(seeds, null, 2));
