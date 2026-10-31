@@ -1,6 +1,6 @@
 import { ENGINES, engineDisplayLabel } from "./providers";
 import { buildResolver } from "./brand_resolve";
-import { cachedView, cell, poolOf, type PoolRow, type RateCell, type ViewData } from "./view_data";
+import { cachedView, cell, poolOf, type PoolRow, type RateCell, type ViewData, type ViewRequest } from "./view_data";
 import type { ViewKey } from "./views";
 import { excludedWords } from "./definition_overlap";
 import { conditionKeyMap, conditionStemKey } from "./condition_groups";
@@ -157,8 +157,13 @@ async function withoutGroups(adjacent: Facts[], category: string): Promise<Aware
   };
 }
 
-async function block(data: ViewData, view: ViewKey, kind: AwarenessBlock["view"]): Promise<AwarenessBlock | null> {
-  const { rows: pool, uncoded, core } = poolOf(data, view);
+async function block(
+  data: ViewData,
+  view: ViewKey,
+  kind: AwarenessBlock["view"],
+  request: ViewRequest
+): Promise<AwarenessBlock | null> {
+  const { rows: pool, uncoded, core } = poolOf(data, view, request);
   if (pool.length === 0 && uncoded === 0) return null;
   const resolve = buildResolver(data.dictionary, data.judged);
   const targetKey = resolve(data.project.brand).key;
@@ -226,9 +231,12 @@ async function block(data: ViewData, view: ViewKey, kind: AwarenessBlock["view"]
   };
 }
 
-export async function computeAwareness(data: ViewData): Promise<AwarenessView | null> {
-  const routing = await block(data, "awareness_routing", "routing");
-  const explainer = await block(data, "awareness_explainer", "explainer");
+/** `request.room` (Journey's buyer filter) keeps that room's problem
+ * recognition cells; category education is one cell asked across all
+ * buyers, so a filtered view carries no explainer block. */
+export async function computeAwareness(data: ViewData, request: ViewRequest = {}): Promise<AwarenessView | null> {
+  const routing = await block(data, "awareness_routing", "routing", request);
+  const explainer = await block(data, "awareness_explainer", "explainer", request);
   if (!routing && !explainer) return null;
   return {
     runId: data.run.id,
@@ -242,6 +250,7 @@ export async function computeAwareness(data: ViewData): Promise<AwarenessView | 
 
 // a2 (2026-10-28): adjacent quotes grouped at read time.
 const AWARENESS_VERSION = "a3";
-export function computeAwarenessCached(run: Run, project: Project): Promise<AwarenessView | null> {
-  return cachedView("awareness", AWARENESS_VERSION, run, project, computeAwareness, { judge: true });
+export function computeAwarenessCached(run: Run, project: Project, room?: string): Promise<AwarenessView | null> {
+  if (room === undefined) return cachedView("awareness", AWARENESS_VERSION, run, project, computeAwareness, { judge: true });
+  return cachedView("awareness", AWARENESS_VERSION, run, project, (d) => computeAwareness(d, { room }), { judge: true }, { room });
 }

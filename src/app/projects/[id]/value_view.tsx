@@ -56,13 +56,14 @@ const engineCols: Col<ValueSlice>[] = [
   ...WORTH_PARTS.map((p) => rateCol<ValueSlice>(p.key, p.label, TIPS[p.key], (s) => s.worth[p.key])),
 ];
 
-export default function ValueSection({ runId }: { runId: string }) {
+/** `room` (Journey's buyer filter) asks for one room's Value cells; absent = every buyer, exactly as before. */
+export default function ValueSection({ runId, room }: { runId: string; room?: string }) {
   const [view, setView] = useState<ValueView | null | undefined>(undefined);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     let live = true;
-    fetch(`/api/runs/${runId}/value`)
+    fetch(`/api/runs/${runId}/value${room ? `?room=${encodeURIComponent(room)}` : ""}`)
       .then(async (r) => {
         if (!r.ok) throw new Error(`value view failed (${r.status})`);
         const d = (await r.json()) as { view: ValueView | null };
@@ -72,7 +73,7 @@ export default function ValueSection({ runId }: { runId: string }) {
     return () => {
       live = false;
     };
-  }, [runId]);
+  }, [runId, room]);
 
   if (error) return <div className="card px-5 py-4 text-[13px] text-danger">{error}</div>;
   if (!view || view.answers === 0) return null;

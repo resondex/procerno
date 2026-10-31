@@ -20,15 +20,20 @@ const GAP_MIN = 20;
 const TIP_POOLED =
   "Answers that argue from this code, over every coded answer except criteria questions (criteria answers list what to check rather than argue, so they are kept apart).";
 
-export default function ReasonsSection({ runId }: { runId: string }) {
+/**
+ * `room` (Journey's buyer filter) asks for one room's cells - types asked
+ * across all buyers drop out. `initialType` opens on one question type (a
+ * view key, e.g. criteria_taught). Both absent = exactly today's behavior.
+ */
+export default function ReasonsSection({ runId, room, initialType }: { runId: string; room?: string; initialType?: ViewKey }) {
   const [view, setView] = useState<ReasonsView | null | undefined>(undefined);
   const [error, setError] = useState<string | null>(null);
-  const [type, setType] = useState<string>(POOLED);
+  const [type, setType] = useState<string>(initialType ?? POOLED);
   const [grouped, setGrouped] = useState(true);
 
   useEffect(() => {
     let live = true;
-    fetch(`/api/runs/${runId}/reasons`)
+    fetch(`/api/runs/${runId}/reasons${room ? `?room=${encodeURIComponent(room)}` : ""}`)
       .then(async (r) => {
         if (!r.ok) throw new Error(`reasons view failed (${r.status})`);
         const d = (await r.json()) as { view: ReasonsView | null };
@@ -38,7 +43,7 @@ export default function ReasonsSection({ runId }: { runId: string }) {
     return () => {
       live = false;
     };
-  }, [runId]);
+  }, [runId, room]);
 
   const selected = view?.types.find((t) => t.key === type) ?? null;
 
@@ -79,7 +84,10 @@ export default function ReasonsSection({ runId }: { runId: string }) {
       ];
     }
     const k = selected.key;
-    const verdictCols = selected.verdicts.map((v) =>
+    // Types with no verdict split (criteria) carry one fallback bucket
+    // keyed "all" - identical to the All column, and its id collided with
+    // it (duplicate React keys in the table header). Skip it.
+    const verdictCols = selected.verdicts.filter((v) => v.key !== "all").map((v) =>
       rateCol<ReasonRow>(
         v.key,
         `${v.label} (${v.answers})`,
@@ -128,7 +136,7 @@ export default function ReasonsSection({ runId }: { runId: string }) {
       <div className="flex flex-wrap items-center gap-x-5 gap-y-2 text-[13px] text-ink-2">
         <label className="flex items-center gap-2">
           Question type
-          <select className="input w-auto text-[13px]" value={type} onChange={(e) => setType(e.target.value)}>
+          <select className="input w-auto text-[13px]" value={selected ? type : POOLED} onChange={(e) => setType(e.target.value)}>
             <option value={POOLED}>All types ({view.pooledAnswers} answers, criteria apart)</option>
             {view.types.map((t) => (
               <option key={t.key} value={t.key}>
