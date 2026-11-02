@@ -9,7 +9,8 @@ import { computeRepertoireCached } from "./repertoire";
 import { computePremiumCached } from "./premium";
 import { computeReasonsCached } from "./reasons";
 import { computeBrandSummaryCached } from "./brand_summary";
-import { computeRulesCached, type RuleGroup, type RulePool, type RulesView } from "./rules_explorer";
+import { computeRulesCached, type RuleGroup, type RulePool, type RulesView, type SliceGroup } from "./rules_explorer";
+import type { ReasonsView } from "./reasons";
 import { computeSettledCached } from "./settled";
 import { buildResolver, type Resolver } from "./brand_resolve";
 import { STATION_LABEL, stationQuestion, viewsOf, type StationKey, type ViewKey } from "./views";
@@ -44,9 +45,11 @@ export type { RateCell, StationKey };
  * rival leavers, holding your own, repertoire, Set C, category education,
  * social validation, premium vs basic - is never asked in one buyer's
  * voice, so under a room filter it comes back at its all-buyers value
- * marked invariant, never hidden and never presented as the room's. The
- * arguments (brand summary) and the conditions (rules view) are run-wide
- * reads; under a room filter they are listed in the station's `unfiltered`.
+ * marked invariant, never hidden and never presented as the room's. Under a
+ * room filter, Consideration's arguments come from the room-filtered reasons
+ * view and the Consideration and Value conditions from the rules view's
+ * per-room slice; Comparison, Doubts and Customers read invariant pools, so
+ * their conditions stay run-wide and are listed in the station's `unfiltered`.
  */
 
 /** Bumped whenever the payload shape or a number's meaning changes. */
@@ -116,7 +119,7 @@ export interface JourneyStation {
   inventory: InventoryRow[];
   /** The station's "who gets picked" block; [] where it has none. */
   picks: JourneyPick[];
-  /** Top 2 for + top 2 against (brand summary reason lift); [] where not applicable. */
+  /** Top 2 for + top 2 against (brand summary reason lift; under a room filter, the room-filtered reasons view); [] where not applicable. */
   arguments: JourneyArgument[];
   /** Top 3 each from the rules view, restricted to the station's question types. */
   conditions: { win: ConditionLine[]; lose: ConditionLine[] };
@@ -188,6 +191,72 @@ const STATION_POOLS: Record<StationKey, RulePool[]> = {
   customer_base: ["holding", "customer_worries", "expansion", "ecosystem"],
 };
 
+/** Routes carry dictionary brands only (active or rejected entries, by their
+ * entry name); generic "elsewhere" labels and names the dictionary cannot
+ * place are dropped - a line may end with none. */
+function dictionaryRoutes(names: string[], resolve: Resolver): string[] {
+  const seen = new Set<string>();
+  const routes: string[] = [];
+  for (const r of names) {
+    const res = resolve(r);
+    if (res.status !== "active" && res.status !== "rejected") continue;
+    if (seen.has(res.key)) continue;
+    seen.add(res.key);
+    routes.push(res.name);
+  }
+  return routes.slice(0, 3);
+}
+
+/**
+ * Conditions for one room, from the rules view's per-room slice. A room
+ * slice is not split by question type: its rule-bearing answers are the
+ * room-pinned cells, which are only open-choice (discovery, use-case) and
+ * value cells - premium, head-to-heads, worries and the customer pools are
+ * never asked in one buyer's voice. So Consideration and Value under a room
+ * filter both read the room slice as-is (a condition stated in the room's
+ * value cells can show on Consideration and vice versa). The slice's lose
+ * side is "away" groups only (rules_explorer does not slice "elsewhere").
+ */
+function roomConditionsOf(rules: RulesView | null, room: string, resolve: Resolver): { win: ConditionLine[]; lose: ConditionLine[] } {
+  const slice = rules?.rooms.find((r) => r.key === room);
+  if (!slice) return { win: [], lose: [] };
+  const lines = (groups: SliceGroup[]): ConditionLine[] =>
+    groups
+      .slice(0, 3)
+      .map((g) => ({ label: g.label, answers: g.answers, routes: dictionaryRoutes(g.routes.map((r) => r.name), resolve) }));
+  return { win: lines(slice.win), lose: lines(slice.lose) };
+}
+
+/** Both pick buckets must hold this many answers (brand summary's floor). */
+const ARG_MIN_ANSWERS = 20;
+/** A code argued in under this share of the type's answers never lists (brand summary's floor). */
+const ARG_MIN_INCIDENCE = 0.02;
+
+/**
+ * Top 2 for / top 2 against from the room-filtered reasons view: the
+ * open-choice type's code incidence when the answer picks you vs picks
+ * another brand. The reasons view's "Picks another" bucket counts any other
+ * pick (in-category or not), where the brand summary's lift counts other
+ * in-category picks only.
+ */
+function roomArgumentsOf(reasons: ReasonsView | null): JourneyArgument[] {
+  const t = reasons?.types.find((x) => x.key === "headline");
+  if (!reasons || !t) return [];
+  const bucket = (k: string) => t.verdicts.find((v) => v.key === k)?.answers ?? 0;
+  if (bucket("you") < ARG_MIN_ANSWERS || bucket("other") < ARG_MIN_ANSWERS) return [];
+  const lift = reasons.codes
+    .flatMap((c) => {
+      const all = c.byType.headline;
+      const v = c.byVerdict.headline;
+      if (!all || !v?.you || !v.other || all.n === 0 || all.k / all.n < ARG_MIN_INCIDENCE) return [];
+      return [{ code: c.key, wins: v.you, others: v.other, lift: rate(v.you) - rate(v.other) }];
+    })
+    .sort((a, b) => b.lift - a.lift);
+  const forYou = lift.filter((r) => r.lift > 0).slice(0, 2);
+  const against = lift.filter((r) => r.lift < 0).slice(-2).reverse();
+  return [...forYou, ...against].map((r) => ({ code: r.code, forYou: r.lift > 0, inYourPicks: r.wins, inRivalPicks: r.others }));
+}
+
 function conditionsOf(rules: RulesView | null, key: StationKey, resolve: Resolver): { win: ConditionLine[]; lose: ConditionLine[] } {
   const pools = new Set(STATION_POOLS[key]);
   if (!rules || pools.size === 0) return { win: [], lose: [] };
@@ -211,21 +280,7 @@ function conditionsOf(rules: RulesView | null, key: StationKey, resolve: Resolve
     return [...byCond.values()]
       .sort((a, b) => b.answers - a.answers || a.label.localeCompare(b.label))
       .slice(0, 3)
-      .map((x) => {
-        // Routes carry dictionary brands only (active or rejected entries,
-        // by their entry name); generic "elsewhere" labels and names the
-        // dictionary cannot place are dropped - a line may end with none.
-        const seen = new Set<string>();
-        const routes: string[] = [];
-        for (const r of x.routes) {
-          const res = resolve(r);
-          if (res.status !== "active" && res.status !== "rejected") continue;
-          if (seen.has(res.key)) continue;
-          seen.add(res.key);
-          routes.push(res.name);
-        }
-        return { label: x.label, answers: x.answers, routes: routes.slice(0, 3) };
-      });
+      .map((x) => ({ label: x.label, answers: x.answers, routes: dictionaryRoutes(x.routes, resolve) }));
   };
   return {
     win: lines(rules.groups.filter((g) => g.side === "you")),
@@ -293,7 +348,8 @@ export async function computeJourney(run: Run, project: Project, room?: string):
       computeRepertoireCached(run, project),
       computePremiumCached(run, project),
       computeReasonsCached(run, project, room),
-      computeBrandSummaryCached(run, project),
+      // Under a room filter the arguments come from the room-filtered reasons view.
+      filtered ? Promise.resolve(null) : computeBrandSummaryCached(run, project),
       computeRulesCached(run, project),
       computeSettledCached(run, project),
       roomsOf(project),
@@ -301,7 +357,6 @@ export async function computeJourney(run: Run, project: Project, room?: string):
   // Every view reads the same codes source; no source = nothing coded to map.
   const any = headline ?? headlineAll ?? h2h ?? doubt ?? alts;
   if (!any) return null;
-  const unfiltered: ("arguments" | "conditions")[] = filtered ? ["arguments", "conditions"] : [];
   const unfilteredConditions: ("arguments" | "conditions")[] = filtered ? ["conditions"] : [];
   const category = project.category;
   const resolve = buildResolver(await store.getDictionary(project.id));
@@ -367,9 +422,10 @@ export async function computeJourney(run: Run, project: Project, room?: string):
           .sort((a, b) => rate(b.shareOfDecided) - rate(a.shareOfDecided) || a.name.localeCompare(b.name))
           .map((b) => ({ name: b.name, role: roleOfBrand(b.role), cell: b.shareOfDecided }))
       : [],
-    arguments: [...forYou, ...against].map((r) => ({ code: r.code, forYou: r.lift > 0, inYourPicks: r.wins, inRivalPicks: r.others })),
-    conditions: conditionsOf(rules, "consideration", resolve),
-    unfiltered,
+    arguments: filtered
+      ? roomArgumentsOf(reasons)
+      : [...forYou, ...against].map((r) => ({ code: r.code, forYou: r.lift > 0, inYourPicks: r.wins, inRivalPicks: r.others })),
+    conditions: room !== undefined ? roomConditionsOf(rules, room, resolve) : conditionsOf(rules, "consideration", resolve),
   });
 
   // ---------- Comparison ----------
@@ -436,8 +492,7 @@ export async function computeJourney(run: Run, project: Project, room?: string):
           row(`value:${r.key}`, r.label, "worth it", r.answers, r.worth.yes, `${r.line ? `${r.line}, ` : ""}not worth it ${pct(r.worth.no)}${r.instead[0] ? `, ${r.instead[0].name} recommended instead` : ""}`, false)
         )
       : [notAsked("value", "Worth it over a cheaper option", "worth it", false)],
-    conditions: conditionsOf(rules, "value", resolve),
-    unfiltered: unfilteredConditions,
+    conditions: room !== undefined ? roomConditionsOf(rules, room, resolve) : conditionsOf(rules, "value", resolve),
   });
 
   // ---------- Customers ----------

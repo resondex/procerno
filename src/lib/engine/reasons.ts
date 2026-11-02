@@ -80,12 +80,12 @@ export interface ReasonsView {
 }
 
 const TYPE_ORDER: { key: ViewKey; label: string }[] = [
-  { key: "headline", label: "Open choice" },
+  { key: "headline", label: "Which should I get" },
   { key: "head_to_head_entity", label: "Head-to-head" },
   { key: "head_to_head_class", label: "Head-to-head vs a class" },
-  { key: "offensive_capture", label: "Rival leavers" },
+  { key: "offensive_capture", label: "Rivals' leavers" },
   { key: "defensive_hold", label: "Your customers weighing a move" },
-  { key: "repertoire", label: "Repertoire" },
+  { key: "repertoire", label: "Habit - stick with you" },
   { key: "value", label: "Value" },
   { key: "doubt", label: "Buyers' worries" },
   { key: "keep_or_leave", label: "Customers' worries" },
@@ -349,7 +349,7 @@ export function computeReasons(data: ViewData, request: ViewRequest = {}): Reaso
 }
 
 // r3 (2026-10-28): names resolve through the context judge (context_judge.ts).
-const REASONS_VERSION = "r3";
+const REASONS_VERSION = "r4"; // r4: type labels in buyer language (output change for identical inputs)
 export function computeReasonsCached(run: Run, project: Project, room?: string): Promise<ReasonsView | null> {
   const extras = { codeGroups: true, judge: true };
   if (room === undefined) return cachedView("reasons", REASONS_VERSION, run, project, computeReasons, extras);
