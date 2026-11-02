@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import type { BrandStats, Project, RunMetrics } from "@/lib/types";
 import type { InsightsBundle } from "@/lib/engine/insights";
 import {
@@ -14,9 +14,10 @@ import AnswerText from "./answer_text";
 import HumanCodingPanel from "./human_coding_panel";
 import { BoardroomSection, BriefSection, QuestionsSection } from "./summary_views";
 import JourneySection from "./journey_view";
-import RulesSection from "./rules_view";
+import WhySection from "./why_view";
+import RivalsSection from "./rivals_view";
+import BuyersSection from "./buyers_view";
 import { MetricsSection } from "./metrics_view";
-import EvidencePanel, { EVIDENCE_CAP, type EvidenceRequest } from "./evidence_panel";
 
 const pct = (x: number) =>
   x > 0 && x < 0.005 ? "<1%" : `${Math.round(x * 100)}%`;
@@ -62,18 +63,36 @@ function CodesResults({
   runId: string;
   refreshToken: number;
 }) {
-  type CodesView = "brief" | "boardroom" | "questions" | "journey" | "rules" | "metrics";
+  type CodesView = "brief" | "boardroom" | "questions" | "journey" | "why" | "rivals" | "buyers" | "metrics";
   const [view, setView] = useState<CodesView>("brief");
-  // Evidence drill shared by the analysis views: a cell's count opens the
-  // answers behind it.
-  const [evidence, setEvidence] = useState<EvidenceRequest | null>(null);
+  // The global buyer filter of the Analysis tier ("" = all buyers). Stations
+  // and Buyers follow it; Why and Rivals are measured across all buyers.
+  const [room, setRoom] = useState<string>("");
+  // The rooms list, reported up by Stations once its first payload lands.
+  const [rooms, setRooms] = useState<string[]>([]);
+  const reportRooms = useCallback(
+    (rs: string[]) => setRooms((prev) => (prev.length === rs.length && prev.every((r, i) => r === rs[i]) ? prev : rs)),
+    []
+  );
   // Views stay MOUNTED once visited, hidden with CSS: switching pills and
   // coming back must not refetch - the per-type stack alone is nine
   // requests, a multi-second reload on every return otherwise.
   const [visited, setVisited] = useState<Set<CodesView>>(() => new Set(["brief"]));
+  const ANALYSIS: ReadonlySet<CodesView> = new Set(["journey", "why", "rivals", "buyers", "metrics"]);
+  // The buyer bar needs the rooms list on the FIRST Analysis open, whichever
+  // pill it is - Why and Rivals never load the journey payload, so the shell
+  // asks for it once itself (a cached read; Stations reuses it from cache).
+  const [roomsAsked, setRoomsAsked] = useState(false);
   const open = (v: CodesView) => {
     setView(v);
     setVisited((s) => (s.has(v) ? s : new Set(s).add(v)));
+    if (ANALYSIS.has(v) && !roomsAsked) {
+      setRoomsAsked(true);
+      fetch(`/api/runs/${runId}/journey`)
+        .then((r) => (r.ok ? r.json() : null))
+        .then((d) => d?.view?.rooms && reportRooms(d.view.rooms as string[]))
+        .catch(() => {});
+    }
   };
   const show = (v: CodesView) => (view === v ? "grid gap-8" : "hidden");
   const k = (name: string) => `${name}:${runId}:${refreshToken}`;
@@ -104,7 +123,9 @@ function CodesResults({
             ]],
             ["Analysis", [
               ["journey", "Stations"],
-              ["rules", "Decision rules"],
+              ["why", "Why"],
+              ["rivals", "Rivals"],
+              ["buyers", "Buyers"],
               ["metrics", "Metrics"],
             ]],
           ] as const
@@ -129,6 +150,34 @@ function CodesResults({
         ))}
       </div>
 
+      {ANALYSIS.has(view) && rooms.length > 0 && (
+        <div className="grid gap-1.5 -mt-4">
+          <div className="flex flex-wrap items-center gap-1.5">
+            <span className="text-[12px] text-ink-3 mr-1">Buyer:</span>
+            {["", ...rooms].map((rk) => (
+              <button
+                key={rk || "__all"}
+                type="button"
+                onClick={() => setRoom(rk)}
+                aria-pressed={room === rk}
+                className={`rounded-full border px-3 py-1 text-[13px] font-medium transition-colors ${
+                  room === rk
+                    ? "border-[var(--color-primary)] bg-primary-soft text-primary"
+                    : "border-line text-ink-2 hover:border-ink-3"
+                }`}
+              >
+                {rk === "" ? "All buyers" : rk}
+              </button>
+            ))}
+          </div>
+          {room !== "" && (
+            <p className="text-[12px] text-ink-3">
+              Stations and Buyers follow this buyer; Why and Rivals are measured across all buyers.
+            </p>
+          )}
+        </div>
+      )}
+
       {visited.has("brief") && (
         <div className={show("brief")}>
           <BriefSection key={k("brief")} runId={runId} />
@@ -146,17 +195,29 @@ function CodesResults({
       )}
       {visited.has("journey") && (
         <div className={show("journey")}>
-          <JourneySection key={k("journey")} runId={runId} />
+          <JourneySection key={k("journey")} runId={runId} room={room} onRoom={setRoom} onRooms={reportRooms} />
         </div>
       )}
-      {visited.has("rules") && (
-        <div className={show("rules")}>
-          <RulesSection
-            key={k("rules")}
+      {visited.has("why") && (
+        <div className={show("why")}>
+          <WhySection key={k("why")} runId={runId} />
+        </div>
+      )}
+      {visited.has("rivals") && (
+        <div className={show("rivals")}>
+          <RivalsSection key={k("rivals")} runId={runId} />
+        </div>
+      )}
+      {visited.has("buyers") && (
+        <div className={show("buyers")}>
+          <BuyersSection
+            key={k("buyers")}
             runId={runId}
-            onEvidence={(ids, title) =>
-              setEvidence({ title, ids: ids.slice(0, EVIDENCE_CAP), total: ids.length })
-            }
+            onRooms={reportRooms}
+            onPick={(rk) => {
+              setRoom(rk);
+              open("journey");
+            }}
           />
         </div>
       )}
@@ -164,13 +225,6 @@ function CodesResults({
         <div className={show("metrics")}>
           <MetricsSection key={k("metrics")} runId={runId} />
         </div>
-      )}
-      {evidence && (
-        <EvidencePanel
-          runId={runId}
-          request={evidence}
-          onClose={() => setEvidence(null)}
-        />
       )}
     </div>
   );

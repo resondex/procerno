@@ -157,7 +157,7 @@ function StationCard({
 }
 
 /** "Picked when one is 16% - picked in 7% of all answers, named in 89%". */
-function StationHeading({ s, filtered }: { s: JourneyStation; filtered: boolean }) {
+function StationHeading({ s, filtered, onAll }: { s: JourneyStation; filtered: boolean; onAll: () => void }) {
   const lead = s.lead;
   const subs = s.sub;
   return (
@@ -192,9 +192,16 @@ function StationHeading({ s, filtered }: { s: JourneyStation; filtered: boolean 
         </p>
       ) : (
         <p className="text-[13px] text-ink-3">
-          {filtered && ROOM_AWARE.has(s.key)
-            ? "Not asked as this buyer."
-            : "No questions of this kind on this tracker."}
+          {filtered && ROOM_AWARE.has(s.key) ? (
+            <>
+              Not asked as this buyer.{" "}
+              <button type="button" onClick={onAll} className="font-medium text-primary hover:opacity-80">
+                See all buyers
+              </button>
+            </>
+          ) : (
+            "No questions of this kind on this tracker."
+          )}
         </p>
       )}
     </div>
@@ -427,8 +434,23 @@ function invariantBody(key: StationKey, runId: string): ReactNode {
   }
 }
 
-export default function JourneySection({ runId }: { runId: string }) {
-  const [roomKey, setRoomKey] = useState<string>(ALL);
+/**
+ * Controlled by the Analysis navigation: the buyer bar lives in run_results
+ * (global to the lenses), so `room` comes in as a prop ("" = all buyers) and
+ * the rooms list goes back up through `onRooms` once a payload lands.
+ */
+export default function JourneySection({
+  runId,
+  room,
+  onRoom,
+  onRooms,
+}: {
+  runId: string;
+  room: string;
+  onRoom: (room: string) => void;
+  onRooms?: (rooms: string[]) => void;
+}) {
+  const roomKey = room;
   const [views, setViews] = useState<Record<string, JourneyView | null>>({});
   const [errors, setErrors] = useState<Record<string, string>>({});
   /** The one station whose full read fills the page (the funnel-strip rule). */
@@ -445,13 +467,15 @@ export default function JourneySection({ runId }: { runId: string }) {
       .then(async (r) => {
         if (!r.ok) throw new Error(`stations view failed (${r.status})`);
         const d = (await r.json()) as { view: JourneyView | null };
-        if (live) setViews((v) => ({ ...v, [roomKey]: d.view }));
+        if (!live) return;
+        setViews((v) => ({ ...v, [roomKey]: d.view }));
+        if (d.view) onRooms?.(d.view.rooms);
       })
       .catch((e: Error) => live && setErrors((x) => ({ ...x, [roomKey]: e.message })));
     return () => {
       live = false;
     };
-  }, [runId, roomKey, loaded]);
+  }, [runId, roomKey, loaded, onRooms]);
 
   const mountFor = (stations: Iterable<StationKey>, rk: string) =>
     setMounted((prev) => {
@@ -469,9 +493,8 @@ export default function JourneySection({ runId }: { runId: string }) {
     requestAnimationFrame(() => document.getElementById(`journey-${s}`)?.scrollIntoView({ behavior: "smooth", block: "nearest" }));
   };
 
-  // The rooms list rides every payload; fall back to the all-buyers one while a room loads.
+  // Fall back to the all-buyers payload while a room loads.
   const view = views[roomKey];
-  const rooms = (view ?? views[ALL])?.rooms ?? [];
   const error = errors[roomKey];
   const filtered = roomKey !== ALL;
 
@@ -485,10 +508,15 @@ export default function JourneySection({ runId }: { runId: string }) {
       ? (stations.find((s) => s.key === "consideration" && s.lead) ?? stations.find((s) => s.lead) ?? stations[0])?.key ?? null
       : null);
 
-  const pickRoom = (rk: string) => {
-    setRoomKey(rk);
-    if (effSelected) mountFor([effSelected], rk);
-  };
+  // A buyer picked from the global bar keeps the open station's sections for
+  // the room it leaves mounted (returning never refetches). Adjusted during
+  // render - React's pattern for state derived from a changed prop - so no
+  // effect sets state.
+  const [seenRoom, setSeenRoom] = useState(roomKey);
+  if (seenRoom !== roomKey) {
+    setSeenRoom(roomKey);
+    if (effSelected) mountFor([effSelected], seenRoom);
+  }
 
   if (view === null) return null;
 
@@ -505,31 +533,6 @@ export default function JourneySection({ runId }: { runId: string }) {
             Six kinds of buying moment, each with one number - pick a station for everything measured there.
           </p>
         </div>
-        {rooms.length > 0 && (
-          <div className="flex flex-wrap items-center gap-1.5">
-            <span className="text-[12px] text-ink-3 mr-1">Buyer:</span>
-            {[ALL, ...rooms].map((rk) => (
-              <button
-                key={rk || "__all"}
-                type="button"
-                onClick={() => pickRoom(rk)}
-                className={`rounded-full border px-3 py-1 text-[13px] font-medium transition-colors ${
-                  roomKey === rk
-                    ? "border-[var(--color-primary)] bg-primary-soft text-primary"
-                    : "border-line text-ink-2 hover:border-ink-3"
-                }`}
-              >
-                {rk === ALL ? "All buyers" : rk}
-              </button>
-            ))}
-          </div>
-        )}
-        {filtered && (
-          <p className="text-[12px] text-ink-3">
-            Filtered to one buyer: awareness, consideration and value. The rest is never asked in one buyer&apos;s voice, so it
-            shows the numbers for all buyers, marked as such. Read faint numbers as direction only.
-          </p>
-        )}
       </section>
 
       {error && <div className="card px-5 py-4 text-[13px] text-danger">{error}</div>}
@@ -553,7 +556,7 @@ export default function JourneySection({ runId }: { runId: string }) {
           const hasConditions = s.conditions.win.length > 0 || s.conditions.lose.length > 0;
           return (
             <section key={s.key} id={`journey-${s.key}`} className={effSelected === s.key ? "grid gap-5 scroll-mt-4" : "hidden"}>
-              <StationHeading s={s} filtered={filtered} />
+              <StationHeading s={s} filtered={filtered} onAll={() => onRoom(ALL)} />
               {s.picks.length > 0 && <PicksBlock s={s} />}
               {s.arguments.length > 0 && <ArgumentsBlock s={s} filtered={filtered} />}
               {hasConditions && <ConditionsBlock s={s} filtered={filtered} />}

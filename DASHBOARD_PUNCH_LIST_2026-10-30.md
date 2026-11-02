@@ -14,7 +14,7 @@ verified; everything here is presentation unless marked otherwise.
 | The brief | FROZEN - reviewed | re-cut 2026-10-30, Tyler saw it |
 | Boardroom / Five questions | stable, lightly reviewed | verdict wording fixed |
 | Stations (was Journey) | BUILT batch 1 (2026-11-01) - ready for review | question cards, rival anchors, 3-block drill, listed inventory, Set C cards |
-| Decision rules | folds into Why / Rivals / Stations drills | 2026-11-01 ratified structure |
+| Why / Rivals / Buyers lenses | BUILT batch 2 (2026-11-01) - ready for review | Decision rules pill retired into Why's "All conditions" |
 | Metrics pivot | becomes Build a table | presets, grouped measures |
 | Share links | untested by a human | serves coded-held runs |
 
@@ -22,7 +22,7 @@ verified; everything here is presentation unless marked otherwise.
 
 - [x] Analysis tier layout: RATIFIED 2026-11-01 (Tyler: "Holds, list + cards") - three tiers + completeness principle, WORKBENCH_REDESIGN_2026-10-30.md top section. Build pending its go.
 - [x] Surface rule (Tyler 2026-11-01), batch 1: far fewer answer counts - no n on cards, strips, headlines or per cell; hover range / inventory tables / thin warnings only. Applies to every view incl. the frozen Summary ones on their next touch.
-- [ ] Journey: engine filter on the buyer bar (deferred from the build)
+- [ ] Engine filter on the global buyer bar (deferred again in batch 2: the view engines take no engine request data)
 - [x] Set C (business case / expansion / ecosystem / advocacy): verdict cards under Customers (batch 1)
 - [ ] Evidence drill in the per-type sections (today: Metrics + rules samples only)
 - [ ] Journey: leak-severity color on station cards (option C's refinement - decide if wanted)
