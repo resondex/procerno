@@ -125,6 +125,21 @@ for (const t of TRACKERS) {
   const answers = zlib.gunzipSync(fs.readFileSync(path.join(VAULT, vf[0]))).toString("utf8")
     .split("\n").filter(Boolean).map((l) => JSON.parse(l)).filter((r) => r.kind !== "run_meta") as Record<string, unknown>[];
   copy("responses", answers);
+  // The vault predates discovery: carry the discovery brands pass (and the
+  // open codes) from prod so brand observations - the "not seen" tiers on
+  // the board - compute on the fixture exactly as on prod (2026-11-02).
+  {
+    const disc = await ro((tx) => tx<{ id: string; discovery_brands: unknown; discovery_codes: unknown }[]>`
+      select id, discovery_brands, discovery_codes from responses where run_id = ${run.id} and discovery_brands is not null`);
+    const upd = db.prepare("update responses set discovery_brands = ?, discovery_codes = ? where id = ?");
+    const tx = db.transaction((rows: typeof disc) => {
+      // The columns are TEXT JSON on prod and arrive as strings; never re-encode a string.
+      const asText = (v: unknown) => (v == null ? null : typeof v === "string" ? v : JSON.stringify(v));
+      for (const r of rows) upd.run(asText(r.discovery_brands), asText(r.discovery_codes), r.id);
+    });
+    tx(disc);
+    summary.push(`${t.slug}: discovery brands carried for ${disc.length} answers`);
+  }
   const answerById = new Map(answers.map((a) => [a.id as string, a]));
   const intentById = new Map(intents.map((i) => [i.id as string, i]));
   const promptById = new Map(prompts.map((p) => [p.id as string, p]));

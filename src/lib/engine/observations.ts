@@ -97,9 +97,14 @@ export async function computeBrandObservations(projectId: string): Promise<{
     }))
     .sort((a, b) => b.answers - a.answers)
     // attributed names always kept; emerged names only above 1% of answers
-    .filter((o) => o.entry_id !== null || o.answers >= rows * 0.01)
-    .slice(0, 120);
-  return { rows, observed };
+    .filter((o) => o.entry_id !== null || o.answers >= rows * 0.01);
+  // The 120-row cap bounds EMERGED names only (2026-11-02): every surface
+  // form attributed to an entry is a row of its own, so a board with large
+  // alias sets (a bank's 37 card names) used to push attributed brands with
+  // hundreds of answers off the end and read them as "not seen".
+  const attributed = observed.filter((o) => o.entry_id !== null);
+  const emerged = observed.filter((o) => o.entry_id === null).slice(0, 120);
+  return { rows, observed: [...attributed, ...emerged].sort((a, b) => b.answers - a.answers) };
 }
 
 /**
