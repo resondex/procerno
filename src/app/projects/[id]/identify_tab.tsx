@@ -162,6 +162,16 @@ export default function IdentifyTab({
   // (after a drag or a re-render), which left tooltips stuck open, several
   // at once. State guarantees at most ONE, cleared on any drag.
   const [hoverNote, setHoverNote] = useState<string | null>(null);
+  // Where the one open tooltip draws: fixed to the viewport, anchored under
+  // the hovered pill and clamped to the right edge, so it can never be
+  // clipped by the modal's scroll container (Tyler, 2026-11-02).
+  const [hoverPos, setHoverPos] = useState<{ left: number; top: number }>({ left: 0, top: 0 });
+  const TIP_W = 320;
+  const hoverAt = (el: Element) => {
+    const r = el.getBoundingClientRect();
+    const left = Math.max(8, Math.min(r.left, window.innerWidth - TIP_W - 8));
+    setHoverPos({ left, top: r.bottom + 6 });
+  };
   const [suggestSummary, setSuggestSummary] = useState<{
     merged: number;
     proposed: number;
@@ -1125,7 +1135,14 @@ export default function IdentifyTab({
               setHoverNote(null);
             }}
             onDragEnd={() => setDragNorm(null)}
-            onMouseEnter={p.note ? () => setHoverNote(p.norm) : undefined}
+            onMouseEnter={
+              p.note
+                ? (e) => {
+                    hoverAt(e.currentTarget);
+                    setHoverNote(p.norm);
+                  }
+                : undefined
+            }
             onMouseLeave={
               p.note
                 ? () => setHoverNote((cur) => (cur === p.norm ? null : cur))
@@ -1174,7 +1191,10 @@ export default function IdentifyTab({
                 </span>
               )}
             {p.note && hoverNote === p.norm && (
-              <span className="pointer-events-none absolute left-0 top-full z-30 mt-1.5 block w-72 rounded-lg border border-line bg-surface p-3 text-left shadow-lg">
+              <span
+                className="pointer-events-none fixed z-50 block w-72 rounded-lg border border-line bg-surface p-3 text-left shadow-lg"
+                style={{ left: hoverPos.left, top: hoverPos.top }}
+              >
                 <span className="block text-[11px] font-semibold uppercase tracking-wide text-amber-800">
                   Flagged for review
                 </span>
@@ -1251,7 +1271,10 @@ export default function IdentifyTab({
         <span
           key={hk}
           onClick={toggle}
-          onMouseEnter={() => setHoverNote(hk)}
+          onMouseEnter={(e) => {
+            hoverAt(e.currentTarget);
+            setHoverNote(hk);
+          }}
           onMouseLeave={() => setHoverNote((cur) => (cur === hk ? null : cur))}
           className={`relative inline-flex items-center rounded-full border px-2.5 py-1 text-[13px] font-medium select-none cursor-pointer ${
             flagged
@@ -1264,7 +1287,10 @@ export default function IdentifyTab({
             +{n} variant{n === 1 ? "" : "s"}
           </span>
           {hoverNote === hk && (
-            <span className="pointer-events-none absolute left-0 top-full z-30 mt-1.5 block w-80 rounded-lg border border-line bg-surface p-3 text-left shadow-lg">
+            <span
+              className="pointer-events-none fixed z-50 block w-80 rounded-lg border border-line bg-surface p-3 text-left shadow-lg"
+              style={{ left: hoverPos.left, top: hoverPos.top }}
+            >
               <span
                 className={`block text-[11px] font-semibold uppercase tracking-wide ${flagged ? "text-amber-800" : "text-ink-3"}`}
               >
