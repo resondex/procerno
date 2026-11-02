@@ -312,27 +312,11 @@ export default function ProjectDashboard({
     detail?.runs.find((r) => r.id === activeRunId)?.status === "collected" &&
     Boolean(detail?.project.codes_source) &&
     (detail?.activeCoded ?? 0) > 0;
-  // Coded-held runs never ran finalize, so their unplaced brand names were
-  // never queued for the board: queue them once per page load (idempotent
-  // server-side, zero model calls) and refresh the board when any landed.
-  const queuedFor = useRef<string | null>(null);
-  useEffect(() => {
-    if (!codedHeld || !activeRunId || queuedFor.current === activeRunId) return;
-    queuedFor.current = activeRunId;
-    fetch(`/api/projects/${id}/dictionary/queue_unresolved`, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ runId: activeRunId }),
-    })
-      .then((r) => (r.ok ? r.json() : null))
-      .then(async (q: { queued?: number } | null) => {
-        if (!q || !q.queued) return;
-        const dr = await fetch(`/api/projects/${id}/dictionary`);
-        if (dr.ok) setDict((await dr.json()).entries ?? []);
-        setDictVersion((v) => v + 1);
-      })
-      .catch(() => {});
-  }, [codedHeld, activeRunId, id]);
+  // Coded-held runs never ran finalize, so their unplaced brand names are
+  // NOT on the board. The queue route exists (POST /dictionary/queue_unresolved)
+  // but is never fired from the page: a page-load trigger flooded a keyless
+  // fixture with every passing mention (2026-11-02). Queueing for a held run
+  // is an explicit action, same as everything else that writes the board.
   // Last run status the poll saw - a CHANGE is what triggers the heavy
   // refresh, so every transition lands (running -> collected used to slip
   // through: the tick only refreshed on terminal states, and the codebook

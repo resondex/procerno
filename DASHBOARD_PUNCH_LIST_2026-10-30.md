@@ -29,6 +29,8 @@ verified; everything here is presentation unless marked otherwise.
 
 ## Open items - plumbing (scheduled rounds, not review blockers)
 
+- [ ] Coded-held trackers' unplaced names: the queue route (POST /api/projects/[id]/dictionary/queue_unresolved) is never fired from the page any more (2026-11-02: a page-load trigger flooded the keyless fixture with 1,408 pending pills). Running it for the six coded-held prod trackers is an explicit action on Tyler's go; with the judge warm and the admission floors it queues on the order of 100 names per tracker, mostly product forms the family layer merges.
+
 - [ ] Cold-open cost: ~10 independent data loads per tracker open - the shared-load round
 - [ ] wb3 payload cleanup (drop wb1's dead fields)
 - [ ] Trend / deck / study / brands+mentions exports on answer_codes (ports, proposed 2026-10-30)

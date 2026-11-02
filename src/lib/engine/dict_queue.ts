@@ -52,6 +52,26 @@ export function* queueableNamesOf(c: AnswerCodes): Generator<string> {
   }
 }
 
+/** The DECISIVE strings only - a pick, a destination, a redirect, a pairing
+ * or a rule choice. A name that appears only as a passing mention is scenery
+ * unless it clears the board's incidence floor. */
+export function* decisiveNamesOf(c: AnswerCodes): Generator<string> {
+  if (c.top_pick) yield c.top_pick;
+  for (const d of c.destinations ?? []) yield d;
+  for (const r of c.redirect_to ?? []) yield r;
+  for (const p of c.pairings ?? []) yield p.name;
+  if (BRAND_CHOICE_SCHEMAS.has(c.schema)) for (const r of c.decision_rules ?? []) yield r.choice;
+}
+
+/** Admission floors (2026-11-02, after a keyless run queued every passing
+ * mention - 704 names on one tracker): the same bar the emerged-name board
+ * uses. A name named only in passing needs MENTION_FLOOR of the run's coded
+ * answers (the observations aggregation floor); a name that is ever a pick,
+ * destination, redirect, pairing or rule choice needs DECISIVE_FLOOR answers
+ * (the observed-alias floor). */
+export const MENTION_FLOOR = 0.01;
+export const DECISIVE_FLOOR = 3;
+
 export interface QueueResult {
   /** Distinct names (by matchKey) the run's codes carry, placeholders and
    * the tracker's own brand excluded. */
@@ -111,17 +131,37 @@ export async function queueUnresolvedNames(
   });
   const resolve = buildResolver(dictionary, judged);
 
+  // Pass 1: how many answers carry each name, and whether any carries it
+  // decisively. The floors are judged per name, over the whole run.
+  const tally = new Map<string, { name: string; answers: Set<string>; decisive: boolean }>();
+  for (const c of codes) {
+    const decisive = new Set<string>();
+    for (const raw of decisiveNamesOf(c)) if (typeof raw === "string") decisive.add(matchKey(cleanSurface(raw)));
+    for (const raw of queueableNamesOf(c)) {
+      if (typeof raw !== "string" || isPlaceholderName(raw)) continue;
+      const name = cleanSurface(raw);
+      const k = matchKey(name);
+      if (k === targetKey) continue;
+      const t = tally.get(k) ?? { name, answers: new Set<string>(), decisive: false };
+      t.answers.add(c.response_id);
+      if (decisive.has(k)) t.decisive = true;
+      tally.set(k, t);
+    }
+  }
+  const mentionFloor = Math.max(DECISIVE_FLOOR, Math.ceil(codes.length * MENTION_FLOOR));
+  const admitted = [...tally.entries()].filter(
+    ([, t]) => t.answers.size >= (t.decisive ? DECISIVE_FLOOR : mentionFloor)
+  );
+
+  // Pass 2: resolve the admitted names; queue what nothing can place.
   const seen = new Set<string>();
   const planned = new Set<string>(); // matchKeys already headed for the queue
   const toQueue: string[] = [];
   const makers: string[] = [];
   let judgedAway = 0;
-  for (const c of codes) {
-    for (const raw of queueableNamesOf(c)) {
-      if (typeof raw !== "string" || isPlaceholderName(raw)) continue;
-      const name = cleanSurface(raw);
-      const k = matchKey(name);
-      if (k === targetKey || seen.has(k)) continue;
+  {
+    for (const [k, { name }] of admitted) {
+      if (seen.has(k)) continue;
       seen.add(k);
       const r = resolve(name);
       if (r.via === "judge") {
