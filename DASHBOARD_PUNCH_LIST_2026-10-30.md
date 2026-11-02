@@ -15,7 +15,7 @@ verified; everything here is presentation unless marked otherwise.
 | Boardroom / Five questions | stable, lightly reviewed | verdict wording fixed |
 | Stations (was Journey) | BUILT batch 1 (2026-11-01) - ready for review | question cards, rival anchors, 3-block drill, listed inventory, Set C cards |
 | Why / Rivals / Buyers lenses | BUILT batch 2 (2026-11-01) - ready for review | Decision rules pill retired into Why's "All conditions" |
-| Metrics pivot | becomes Build a table | presets, grouped measures |
+| Build a table (was Metrics) | BUILT batch 3 (2026-11-01) - ready for review | presets, one grouped measure select, illegal measures hidden |
 | Share links | untested by a human | serves coded-held runs |
 
 ## Open items - presentation (none block anything)

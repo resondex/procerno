@@ -10,7 +10,6 @@ import {
   POOL_LABEL as ENGINE_POOL_LABEL,
   R,
   illegalReason,
-  legalPools,
   poolAsks,
   type MeasureCtx,
   type MeasureDef,
@@ -20,15 +19,17 @@ import EvidencePanel, { EVIDENCE_CAP, type EvidenceRequest } from "./evidence_pa
 import { SortTable, type Col } from "./table";
 
 /**
- * The Metrics pivot (2026-10-30, WORKBENCH_REDESIGN_2026-10-30.md): any
- * dimension on rows and columns, any LEGAL measure, computed in the browser
- * over the wb2 fact table (one fetch per open). Legality lives in
- * engine/measures.ts alone: a measure is always read inside one pool (the
- * views never pool with each other), measures the pool does not ask are
- * greyed with the reason, and choosing one moves to a pool that asks it.
+ * Build a table (the Metrics pivot renamed; 2026-10-30 chassis, 2026-11-01
+ * ratification in WORKBENCH_REDESIGN_2026-10-30.md): RAW - any dimension on
+ * rows and columns, any LEGAL measure, computed in the browser over the wb2
+ * fact table (one fetch per open). It opens on a "Start from" preset; the
+ * controls (Answers / Measure / Rows / Columns) sit on one line. Legality
+ * lives in engine/measures.ts alone: a measure is always read inside one pool
+ * (the views never pool with each other), and measures or dimensions the
+ * pool does not ask are HIDDEN from the pickers, not greyed.
  *
- * Cells are k of n with the 95% Wilson range on hover; cells under 20
- * answers are muted and starred rather than printed as confident numbers;
+ * Cells print the rate only; "k of n - 95% range" is on hover; cells under
+ * 20 answers are muted and starred rather than printed as confident numbers;
  * rows and columns with no answers drop. Clicking a cell opens the answers
  * it counts (the numerator) in the evidence panel.
  */
@@ -89,6 +90,28 @@ const MEASURE_LABEL: Record<string, string> = {
 const mLabel = (m: MeasureDef) => MEASURE_LABEL[m.id] ?? m.label;
 const mTip = (m: MeasureDef) => (MEASURE_LABEL[m.id] ? `${m.label}: ${m.tip}` : m.tip);
 
+/** "Start from" presets (2026-11-01). Each sets pool, measure, rows and
+ * columns, and resets the brand to the tracker's own; a preset whose pool the
+ * run does not carry is hidden. The view opens on the first present one. */
+interface Preset {
+  id: string;
+  label: string;
+  pool: ViewKey;
+  measure: string;
+  row: DimKey;
+  col: DimKey;
+}
+const PRESETS: Preset[] = [
+  { id: "picked_engine", label: "Picked, by engine", pool: "headline", measure: "chosen", row: "engine", col: "none" },
+  { id: "named_brand", label: "Named, by brand", pool: "headline", measure: "mentioned", row: "brand", col: "none" },
+  { id: "h2h_rival", label: "Win rate by rival", pool: "head_to_head_entity", measure: "h2h_you", row: "rival", col: "none" },
+  { id: "proceed_worry", label: "Go ahead, by worry", pool: "doubt", measure: "proceed", row: "worry", col: "none" },
+  { id: "worth_room", label: "Worth it, by buyer", pool: "value", measure: "worth_yes", row: "room", col: "none" },
+  { id: "keep_worry", label: "Stay, by worry", pool: "keep_or_leave", measure: "keep", row: "worry", col: "none" },
+  { id: "picked_engine_brand", label: "Picked, engine x brand", pool: "headline", measure: "chosen", row: "engine", col: "brand" },
+];
+const BLANK = "blank";
+
 const THIN = 20;
 /** Brand and argument dimensions list at most this many values. */
 const DIM_CAP = 20;
@@ -120,12 +143,12 @@ interface DimValue {
   arg?: number;
 }
 
-const chip = (on: boolean, off = false) =>
+const chip = (on: boolean, dim = false) =>
   `rounded-full border px-2.5 py-0.5 text-[12px] font-medium ${
     on
       ? "border-[var(--color-primary)] bg-primary-soft text-primary"
-      : off
-        ? "border-line/60 text-ink-3/50 hover:border-ink-3/40"
+      : dim
+        ? "border-line/60 text-ink-3/60 hover:border-ink-3/40"
         : "border-line text-ink-3 hover:border-ink-3"
   }`;
 
@@ -134,8 +157,11 @@ export function MetricsSection({ runId, evidence = true }: { runId: string; evid
   const [loaded, setLoaded] = useState(false);
   const [poolPick, setPool] = useState<ViewKey | null>(null);
   const [measurePick, setMeasure] = useState<string | null>(null);
-  const [rowPick, setRow] = useState<DimKey>("engine");
-  const [colPick, setCol] = useState<DimKey>("none");
+  const [rowPick, setRow] = useState<DimKey | null>(null);
+  const [colPick, setCol] = useState<DimKey | null>(null);
+  // The highlighted preset chip: undefined = the opening preset (derived, so
+  // no state is set in an effect), null = a manual change un-highlighted all.
+  const [presetPick, setPresetPick] = useState<string | null | undefined>(undefined);
   const [brandPick, setBrand] = useState<number | null>(null);
   const [argPick, setArg] = useState<number>(0);
   const [drill, setDrill] = useState<EvidenceRequest | null>(null);
@@ -164,19 +190,28 @@ export function MetricsSection({ runId, evidence = true }: { runId: string; evid
     () => POOLS.filter((p) => (poolCounts.get(p.key) ?? 0) > 0).map((p) => p.key),
     [poolCounts]
   );
+  const presets = useMemo(() => PRESETS.filter((p) => present.includes(p.pool)), [present]);
+  const opening: Preset | null = presets[0] ?? null;
   const pool = useMemo<ViewKey | null>(
     () =>
-      poolPick && present.includes(poolPick) ? poolPick : present.includes("headline") ? "headline" : (present[0] ?? null),
-    [poolPick, present]
+      poolPick && present.includes(poolPick)
+        ? poolPick
+        : opening
+          ? opening.pool
+          : present.includes("headline")
+            ? "headline"
+            : (present[0] ?? null),
+    [poolPick, present, opening]
   );
   const measure: MeasureDef | null = useMemo(() => {
     if (!pool) return null;
-    const picked = measurePick ? MEASURE_BY_ID.get(measurePick) : undefined;
+    const pickId = measurePick ?? (poolPick === null && opening ? opening.measure : null);
+    const picked = pickId ? MEASURE_BY_ID.get(pickId) : undefined;
     if (picked && !illegalReason(picked, pool)) return picked;
     const d = POOL_DEFAULT[pool];
     const fallback = d ? MEASURE_BY_ID.get(d) : undefined;
     return fallback && !illegalReason(fallback, pool) ? fallback : (MEASURES.find((m) => !illegalReason(m, pool)) ?? null);
-  }, [pool, measurePick]);
+  }, [pool, measurePick, poolPick, opening]);
 
   const poolRows: WbRow[] = useMemo(
     () => (data?.facts && pool ? data.facts.filter((r) => data.prompts[r[R.prompt]].views.includes(pool)) : []),
@@ -209,8 +244,11 @@ export function MetricsSection({ runId, evidence = true }: { runId: string; evid
     },
     [data, pool, measure, poolRows]
   );
-  const rowDim: DimKey = dimReason(rowPick) ? "none" : rowPick;
-  const colDim: DimKey = dimReason(colPick) || colPick === rowDim ? "none" : colPick;
+  const rowWant: DimKey = rowPick ?? opening?.row ?? "engine";
+  const colWant: DimKey = colPick ?? opening?.col ?? "none";
+  const rowDim: DimKey = dimReason(rowWant) ? "none" : rowWant;
+  const colDim: DimKey = dimReason(colWant) || colWant === rowDim ? "none" : colWant;
+  const activePreset = presetPick === undefined ? (opening?.id ?? null) : presetPick;
 
   const target = data?.target ?? 0;
   const brand = brandPick !== null && data?.brands[brandPick] ? brandPick : target;
@@ -372,14 +410,24 @@ export function MetricsSection({ runId, evidence = true }: { runId: string; evid
     );
   }
 
-  const groups = [...new Set(MEASURES.map((m) => m.group))];
-  const chooseMeasure = (m: MeasureDef) => {
-    setMeasure(m.id);
-    if (illegalReason(m, pool)) {
-      // A measure implies its pool: move to the first pool that asks it.
-      const next = legalPools(m).find((k) => present.includes(k));
-      if (next) setPool(next);
-    }
+  // Only the measures this pool asks, grouped; illegal ones are hidden.
+  const legalMeasures = MEASURES.filter((m) => !illegalReason(m, pool));
+  const groups = [...new Set(legalMeasures.map((m) => m.group))];
+  const manual = () => setPresetPick(null);
+  const applyPreset = (p: Preset) => {
+    setPool(p.pool);
+    setMeasure(p.measure);
+    setRow(p.row);
+    setCol(p.col);
+    setBrand(null);
+    setPresetPick(p.id);
+  };
+  const applyBlank = () => {
+    setPool(pool);
+    setMeasure(measure.id);
+    setRow("none");
+    setCol("none");
+    setPresetPick(BLANK);
   };
   const chosenBrand = data.brands[brand];
 
@@ -438,112 +486,138 @@ export function MetricsSection({ runId, evidence = true }: { runId: string; evid
     ),
   ];
 
-  const dimPicker = (label: string, value: DimKey, set: (k: DimKey) => void, other: DimKey) => (
-    <div className="flex flex-wrap items-center gap-1.5">
-      <span className="w-20 text-[11px] font-semibold uppercase tracking-wide text-ink-3">{label}</span>
-      {DIMS.map((d) => {
-        const reason = d.key !== "none" && d.key === other ? "already on the other axis" : dimReason(d.key);
-        return (
-          <button
-            key={d.key}
-            type="button"
-            className={chip(value === d.key, !!reason)}
-            title={reason ?? undefined}
-            disabled={!!reason}
-            onClick={() => set(d.key)}
-          >
+  const label = (text: string) => (
+    <span className="text-[11px] font-semibold uppercase tracking-wide text-ink-3">{text}</span>
+  );
+  const dimSelect = (text: string, value: DimKey, set: (k: DimKey) => void, other: DimKey | null) => (
+    <label className="flex items-center gap-1.5">
+      {label(text)}
+      <select
+        value={value}
+        onChange={(e) => {
+          set(e.target.value as DimKey);
+          manual();
+        }}
+        className="input w-auto py-0.5 text-[12px]"
+      >
+        {DIMS.filter((d) => d.key === "none" || (d.key !== other && !dimReason(d.key))).map((d) => (
+          <option key={d.key} value={d.key}>
             {d.label}
-          </button>
-        );
-      })}
-    </div>
+          </option>
+        ))}
+      </select>
+    </label>
   );
 
   return (
     <div className="card overflow-hidden">
-      <div className="grid gap-2 border-b border-line px-4 py-3">
-        <div className="flex flex-wrap items-center gap-1.5">
-          <span className="w-20 text-[11px] font-semibold uppercase tracking-wide text-ink-3">Answers</span>
-          <select
-            value={pool}
-            onChange={(e) => setPool(e.target.value as ViewKey)}
-            className="input w-auto py-0.5 text-[12px]"
-          >
-            {present.map((k) => (
-              <option key={k} value={k}>
-                {POOL_LABEL[k]}
-              </option>
+      <div className="grid gap-2.5 border-b border-line px-4 py-3">
+        {presets.length > 0 && (
+          <div className="flex flex-wrap items-center gap-1.5">
+            <span className="mr-1">{label("Start from")}</span>
+            {presets.map((p) => (
+              <button key={p.id} type="button" className={chip(activePreset === p.id)} onClick={() => applyPreset(p)}>
+                {p.label}
+              </button>
             ))}
-          </select>
-          {needsBrand && (
-            <select
-              value={brand}
-              onChange={(e) => setBrand(Number(e.target.value))}
-              className="input ml-1 w-auto py-0.5 text-[12px]"
-              aria-label="Brand"
+            <button
+              type="button"
+              className={chip(activePreset === BLANK, true)}
+              title="Keep these answers and clear rows and columns"
+              onClick={applyBlank}
             >
-              {data.brands.map((b, i) =>
-                b.listed ? (
-                  <option key={i} value={i}>
-                    {b.name}
-                  </option>
-                ) : null
-              )}
-            </select>
-          )}
-          {needsArg && data.args.length > 0 && (
+              Blank
+            </button>
+          </div>
+        )}
+        <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
+          <label className="flex items-center gap-1.5">
+            {label("Answers")}
             <select
-              value={arg}
-              onChange={(e) => setArg(Number(e.target.value))}
-              className="input ml-1 w-auto max-w-[16rem] py-0.5 text-[12px]"
-              aria-label="Argument"
+              value={pool}
+              onChange={(e) => {
+                setPool(e.target.value as ViewKey);
+                manual();
+              }}
+              className="input w-auto py-0.5 text-[12px]"
             >
-              {data.args.map((a, i) => (
-                <option key={i} value={i}>
-                  {a}
+              {present.map((k) => (
+                <option key={k} value={k}>
+                  {POOL_LABEL[k]}
                 </option>
               ))}
             </select>
+          </label>
+          <label className="flex items-center gap-1.5">
+            {label("Measure")}
+            <select
+              value={measure.id}
+              onChange={(e) => {
+                setMeasure(e.target.value);
+                manual();
+              }}
+              className="input w-auto max-w-[16rem] py-0.5 text-[12px]"
+            >
+              {groups.map((g) => (
+                <optgroup key={g} label={g}>
+                  {legalMeasures
+                    .filter((m) => m.group === g)
+                    .map((m) => (
+                      <option key={m.id} value={m.id}>
+                        {mLabel(m)}
+                      </option>
+                    ))}
+                </optgroup>
+              ))}
+            </select>
+          </label>
+          {dimSelect("Rows", rowDim, setRow, null)}
+          {dimSelect("Columns", colDim, setCol, rowDim)}
+          {needsBrand && (
+            <label className="flex items-center gap-1.5">
+              {label("Brand")}
+              <select
+                value={brand}
+                onChange={(e) => {
+                  setBrand(Number(e.target.value));
+                  manual();
+                }}
+                className="input w-auto py-0.5 text-[12px]"
+              >
+                {data.brands.map((b, i) =>
+                  b.listed ? (
+                    <option key={i} value={i}>
+                      {b.name}
+                    </option>
+                  ) : null
+                )}
+              </select>
+            </label>
           )}
-        </div>
-        {dimPicker("Rows", rowDim, setRow, colDim)}
-        {dimPicker("Columns", colDim, setCol, rowDim)}
-        <div className="grid gap-1">
-          <span className="text-[11px] font-semibold uppercase tracking-wide text-ink-3">Measure</span>
-          <div className="grid max-h-48 gap-1.5 overflow-y-auto rounded-lg border border-line/60 p-2">
-            {groups.map((g) => (
-              <div key={g} className="flex flex-wrap items-center gap-1.5">
-                <span className="w-28 shrink-0 text-[11px] text-ink-3">{g}</span>
-                {MEASURES.filter((m) => m.group === g).map((m) => {
-                  const reason = illegalReason(m, pool);
-                  const reachable = !reason || legalPools(m).some((k) => present.includes(k));
-                  return (
-                    <button
-                      key={m.id}
-                      type="button"
-                      className={chip(measure.id === m.id, !!reason)}
-                      title={
-                        reason
-                          ? `${reason}${reachable ? " - choosing it moves to answers that ask it" : " - no question in this run asks it"}`
-                          : mTip(m)
-                      }
-                      disabled={!reachable}
-                      onClick={() => chooseMeasure(m)}
-                    >
-                      {mLabel(m)}
-                    </button>
-                  );
-                })}
-              </div>
-            ))}
-          </div>
+          {needsArg && data.args.length > 0 && (
+            <label className="flex items-center gap-1.5">
+              {label("Argument")}
+              <select
+                value={arg}
+                onChange={(e) => {
+                  setArg(Number(e.target.value));
+                  manual();
+                }}
+                className="input w-auto max-w-[16rem] py-0.5 text-[12px]"
+              >
+                {data.args.map((a, i) => (
+                  <option key={i} value={i}>
+                    {a}
+                  </option>
+                ))}
+              </select>
+            </label>
+          )}
         </div>
       </div>
       <div className="px-4 py-3">
         <p className="text-[12px] text-ink-3">
-          {mTip(measure)}
-          {needsBrand && ` Brand: ${chosenBrand.name}.`} Starred, muted cells have too few answers to read; hover any cell for
-          its count and range.
+          {mTip(measure)} {POOL_LABEL[pool]}. Hover a cell for its range; cells under 20 answers are muted and starred.
         </p>
         {pivot.rows.length === 0 || pivot.cols.length === 0 ? (
           <p className="mt-3 text-[13px] text-ink-3">No answers count toward this measure here.</p>
@@ -551,7 +625,7 @@ export function MetricsSection({ runId, evidence = true }: { runId: string; evid
           <SortTable
             cols={cols}
             rows={pivot.rows.map((v) => ({ v }))}
-            filename={`metrics_${pool}_${measure.id}.csv`}
+            filename={`table_${pool}_${measure.id}.csv`}
             defaultSort={{ id: cols[1].id, dir: -1 }}
           />
         )}

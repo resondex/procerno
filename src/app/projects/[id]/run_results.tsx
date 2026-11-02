@@ -126,7 +126,7 @@ function CodesResults({
               ["why", "Why"],
               ["rivals", "Rivals"],
               ["buyers", "Buyers"],
-              ["metrics", "Metrics"],
+              ["metrics", "Build a table"],
             ]],
           ] as const
         ).map(([group, pills]) => (
