@@ -59,7 +59,9 @@ export function* decisiveNamesOf(c: AnswerCodes): Generator<string> {
   if (c.top_pick) yield c.top_pick;
   for (const d of c.destinations ?? []) yield d;
   for (const r of c.redirect_to ?? []) yield r;
-  for (const p of c.pairings ?? []) yield p.name;
+  // Pairings are deliberately NOT decisive: an ecosystem answer's companion
+  // (a transfer partner, an airline program) is named alongside the brand,
+  // not chosen instead of it, so it never pulls its maker onto the board.
   if (BRAND_CHOICE_SCHEMAS.has(c.schema)) for (const r of c.decision_rules ?? []) yield r.choice;
 }
 
@@ -160,16 +162,20 @@ export async function queueUnresolvedNames(
   const makers: string[] = [];
   let judgedAway = 0;
   {
-    for (const [k, { name }] of admitted) {
+    for (const [k, { name, decisive }] of admitted) {
       if (seen.has(k)) continue;
       seen.add(k);
       const r = resolve(name);
       if (r.via === "judge") {
         // Placed by the judge's cached verdict. A maker on the board takes
         // the name with it; a maker the board does not list is the
-        // brand-grain entry the user would approve, so IT is queued.
+        // brand-grain entry the user would approve, so IT is queued - but
+        // only when its product was DECISIVE somewhere (picked, recommended,
+        // pointed to, chosen in a rule). A maker whose only trace is a
+        // passing mention of a perk or partner (a merchant, a delivery app)
+        // is scenery, not the board's to-do (Tyler, 2026-11-02).
         judgedAway++;
-        if (r.status === "unknown") {
+        if (r.status === "unknown" && decisive) {
           const maker = cleanSurface(r.name);
           const mk = matchKey(maker);
           if (mk !== targetKey && !planned.has(mk) && maker && !isPlaceholderName(maker) && resolve(maker).status === "unknown") {
