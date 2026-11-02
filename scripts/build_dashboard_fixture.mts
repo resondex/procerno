@@ -222,6 +222,22 @@ for (const t of TRACKERS) {
   summary.push(`${String(project.brand).padEnd(18)} run ${t.run}  answers ${answers.length}  coded ${full.length}  views ${
     Object.entries(viewCount).sort((a, b) => b[1] - a[1]).map(([v, n]) => `${v} ${n}`).join(", ")}`);
 }
+// Prod's cached context-judge verdicts for these projects (2026-11-02):
+// the fixture app runs with no API key, so without them every maker-less
+// product name ("<card name>" without its issuer) is unplaceable there and
+// flags where prod resolves it. Cache rows only - no model call here or
+// later; the views read them exactly as prod does.
+{
+  const ids = (db.prepare("select id from projects").all() as { id: string }[]).map((r) => r.id);
+  // The project id rides the key (ctx_judge:<ver>:<model>:<project>:<hash>);
+  // project_id on the row is not guaranteed for older entries.
+  const all = await ro((tx) => tx<Record<string, unknown>[]>`
+    select key, value, created_at, brand, category, source, project_id
+    from llm_cache where key like 'ctx_judge:%'`);
+  const verdicts = all.filter((r) => ids.some((id) => String(r.key).includes(`:${id}:`)));
+  copy("llm_cache", verdicts);
+  summary.push(`context-judge verdicts carried from prod: ${verdicts.length}`);
+}
 await sql.end();
 
 // Round-trip: every run reads back through the store with the same count.
