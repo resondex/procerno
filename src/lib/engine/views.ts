@@ -109,3 +109,59 @@ export const SCHEMA_FIELDS: Record<CodeSchema, readonly string[]> = {
   ecosystem: [...UNIVERSAL, "relationship_verdict", "pairings", "redirect_to", "reasons", "uncoded"],
   advocacy: [...UNIVERSAL, "relationship_verdict", "case_strength", "redirect_to", "premise_verdict", "premise_quote", "reasons", "uncoded"],
 };
+
+/* ------------------------------ stations ------------------------------ */
+
+/**
+ * The Stations home view's six stations (RATIFIED 2026-11-01,
+ * WORKBENCH_REDESIGN_2026-10-30.md): every view routes to exactly one
+ * station, so every collected cell has a home in Analysis. Churn, renewal,
+ * holding your own and Set C live under Customers; Doubts is objections only.
+ * Stations are independent populations, never stages one buyer walks.
+ */
+export type StationKey = "awareness" | "consideration" | "comparison" | "doubts" | "value" | "customer_base";
+
+export const STATION_ORDER: readonly StationKey[] = ["awareness", "consideration", "comparison", "doubts", "value", "customer_base"];
+
+export const STATION_OF: Record<ViewKey, StationKey> = {
+  awareness_routing: "awareness",
+  awareness_explainer: "awareness",
+  headline: "consideration",
+  premium_tier: "consideration",
+  criteria_taught: "consideration",
+  head_to_head_entity: "comparison",
+  head_to_head_class: "comparison",
+  offensive_capture: "comparison",
+  doubt: "doubts",
+  value: "value",
+  keep_or_leave: "customer_base",
+  defensive_hold: "customer_base",
+  repertoire: "customer_base",
+  settled_business_case: "customer_base",
+  settled_expansion: "customer_base",
+  settled_ecosystem: "customer_base",
+  settled_advocacy: "customer_base",
+};
+
+export const STATION_LABEL: Record<StationKey, string> = {
+  awareness: "Awareness",
+  consideration: "Consideration",
+  comparison: "Comparison",
+  doubts: "Doubts",
+  value: "Value",
+  customer_base: "Customers",
+};
+
+/** The buyer-language question a station answers. Only the project's own
+ * brand and category are interpolated - never an example. */
+export function stationQuestion(key: StationKey, brand: string, category: string): string {
+  void brand; // reserved: the questions speak to "you" today
+  switch (key) {
+    case "awareness": return `Someone new to ${category} - are you named?`;
+    case "consideration": return `"Which ${category} should I get?" - are you picked, when one is?`;
+    case "comparison": return "You against a named rival - who wins?";
+    case "doubts": return "A buyer voices a worry about you - told to go ahead?";
+    case "value": return "Is your line worth it over a cheaper option?";
+    case "customer_base": return "A customer weighs leaving or doing more - told to stay?";
+  }
+}

@@ -103,7 +103,7 @@ function CodesResults({
               ["questions", "Five questions"],
             ]],
             ["Analysis", [
-              ["journey", "Journey"],
+              ["journey", "Stations"],
               ["rules", "Decision rules"],
               ["metrics", "Metrics"],
             ]],

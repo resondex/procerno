@@ -135,6 +135,9 @@ export interface Col<T> {
   /** Definition and denominator, from the metric dictionary. */
   tip?: string;
   num?: boolean;
+  /** In the csv / Excel download only, never drawn: base sizes travel with the
+   * data without cluttering the screen (surface rule, 2026-11-01). */
+  csvOnly?: boolean;
   color?: (r: T) => string | undefined;
   val: (r: T) => string | number | null;
   render?: (r: T) => React.ReactNode;
@@ -148,6 +151,7 @@ export interface Col<T> {
 }
 
 export type EvidenceMetric = "mentioned" | "recommended" | "chosen";
+const METRIC_WORD: Record<EvidenceMetric, string> = { mentioned: "named", recommended: "recommended", chosen: "picked" };
 export interface EvidenceTarget {
   metric: EvidenceMetric;
   brand: string;
@@ -173,9 +177,10 @@ export function SortTable<T>({
   onEvidence?: (t: EvidenceTarget) => void;
 }) {
   const [sort, setSort] = useState<{ id: string; dir: 1 | -1 }>(
-    defaultSort ?? { id: cols[1]?.id ?? cols[0].id, dir: -1 }
+    defaultSort ?? { id: cols.filter((c) => !c.csvOnly)[1]?.id ?? cols[0].id, dir: -1 }
   );
   const col = cols.find((c) => c.id === sort.id);
+  const shown = cols.filter((c) => !c.csvOnly);
   const sorted = !col ? rows : [...rows].sort((a, b) => {
     const va = col.val(a);
     const vb = col.val(b);
@@ -199,7 +204,7 @@ export function SortTable<T>({
         <table className="w-full text-sm">
           <thead>
             <tr className="text-left text-[11px] uppercase tracking-wide text-ink-3 border-b border-line">
-              {cols.map((c, i) => (
+              {shown.map((c, i) => (
                 <th
                   key={c.id}
                   onClick={() =>
@@ -209,7 +214,7 @@ export function SortTable<T>({
                         : { id: c.id, dir: -1 }
                     )
                   }
-                  className={`py-2 ${i === cols.length - 1 ? "" : "pr-3"} font-semibold cursor-pointer select-none hover:opacity-70 ${c.num ? "text-center" : ""}`}
+                  className={`py-2 ${i === shown.length - 1 ? "" : "pr-3"} font-semibold cursor-pointer select-none hover:opacity-70 ${c.num ? "text-center" : ""}`}
                 >
                   {/* The arrow always occupies its slot, so sorting a
                       different column never re-measures the header. */}
@@ -237,10 +242,10 @@ export function SortTable<T>({
               <tr key={ri}
                 onClick={onRowClick ? () => onRowClick(r) : undefined}
                 className={`border-b border-line/60 ${onRowClick ? "cursor-pointer hover:bg-primary-soft/20" : ""} ${activeRow?.(r) ? "bg-primary-soft/25" : ""}`}>
-                {cols.map((c, i) => (
+                {shown.map((c, i) => (
                   <td
                     key={c.id}
-                    className={`py-2 ${i === cols.length - 1 ? "" : "pr-3"} ${c.num ? "text-center tabular-nums" : ""}`}
+                    className={`py-2 ${i === shown.length - 1 ? "" : "pr-3"} ${c.num ? "text-center tabular-nums" : ""}`}
                     style={c.color ? { color: c.color(r) } : undefined}
                   >
                     {(() => {
@@ -256,7 +261,7 @@ export function SortTable<T>({
                             e.stopPropagation();
                             onEvidence!(target);
                           }}
-                          title={`See the answers behind this — ${target.metric}, ${target.brand}`}
+                          title={`See the answers behind this - ${METRIC_WORD[target.metric]}, ${target.brand}`}
                           className="underline decoration-dotted decoration-ink-3/60 underline-offset-2 hover:decoration-[var(--color-primary)] hover:text-primary"
                         >
                           {body}

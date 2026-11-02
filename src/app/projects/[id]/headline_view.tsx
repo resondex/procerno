@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import type { HeadlineBrand, HeadlineSlice, HeadlineView, NamedCount, RateCell } from "@/lib/engine/headline";
 import { SortTable, Tip, type Col } from "./table";
+import { BaseNote, fmtN } from "./view_parts";
 
 /**
  * The headline view (2026-10-27): win / pick / visibility over open-choice
@@ -27,22 +28,23 @@ const range = (c: RateCell) =>
   c.n === 0 ? "no answers" : `${c.k} of ${c.n} - 95% range ${Math.round(c.low * 100)}-${Math.round(c.high * 100)}%`;
 
 const TIPS = {
-  mentioned: "Headline answers that name the brand in any framing.",
+  mentioned: "Named: headline answers that name the brand in any framing.",
   recommended: "Headline answers that endorse the brand. The brand an answer picks always counts as recommended.",
-  chosen: "Headline answers whose pick is the brand. Product picks count for their brand through the dictionary.",
-  shareOfDecided: "Of the headline answers that picked a brand in the category, the share that picked this one.",
-  negative: "Answers that criticize the brand or advise against it, as a share of the answers that name it.",
-  firmPick: "Headline answers that commit to one pick, whatever it is.",
-  inCategory: "Firm picks whose pick is an approved brand in the confirmed dictionary.",
+  chosen: "Picked (chosen): headline answers whose pick is the brand. Product picks count for their brand through the dictionary.",
+  shareOfDecided: "Share of decided: of the headline answers that picked a brand in the category, the share that picked this one.",
+  negative: "Named negatively: answers that criticize the brand or advise against it, as a share of the answers that name it.",
+  firmPick: "Firm pick: headline answers that commit to one pick, whatever it is.",
+  inCategory: "Firm pick in category: firm picks whose pick is an approved brand in the confirmed dictionary.",
 };
 
 function Tile({ label, cell, tip }: { label: string; cell: RateCell; tip: string }) {
   return (
-    <div className="card p-5" title={tip}>
-      <div className="section-label">{label}</div>
-      <div className="text-[2rem] leading-tight font-semibold tabular-nums mt-1.5">{pct(cell)}</div>
-      <div className="text-[13px] text-ink-2 mt-1">{range(cell)}</div>
-    </div>
+    <Tip tip={`${tip} ${range(cell)}`}>
+      <div className="card p-5 cursor-help">
+        <div className="section-label">{label}</div>
+        <div className="text-[2rem] leading-tight font-semibold tabular-nums mt-1.5">{pct(cell)}</div>
+      </div>
+    </Tip>
   );
 }
 
@@ -58,10 +60,10 @@ function NameList({ title, items, total }: { title: string; items: NamedCount[];
   if (total === 0) return null;
   return (
     <div className="text-[13px] text-ink-2">
-      <span className="font-medium text-ink">{title}: {total}</span>
-      {items.length > 0 && (
-        <span className="text-ink-3"> - {items.map((x) => `${x.name} (${x.n})`).join(", ")}</span>
-      )}
+      <Tip tip={`${total} picks`}>
+        <span className="font-medium text-ink cursor-help">{title}</span>
+      </Tip>
+      {items.length > 0 && <span className="text-ink-3"> - {items.map((x) => x.name).join(", ")}</span>}
     </div>
   );
 }
@@ -126,20 +128,20 @@ const brandCols: Col<HeadlineBrand>[] = [
       </span>
     ),
   },
-  rateCol("mentioned", "Mentioned", TIPS.mentioned, (b) => b.mentioned),
+  rateCol("mentioned", "Named", TIPS.mentioned, (b) => b.mentioned),
   rateCol("recommended", "Recommended", TIPS.recommended, (b) => b.recommended),
-  rateCol("chosen", "Chosen", TIPS.chosen, (b) => b.chosen),
-  rateCol("sod", "Share of decided", TIPS.shareOfDecided, (b) => b.shareOfDecided),
-  rateCol("negative", "Negative", TIPS.negative, (b) => b.negative),
+  rateCol("chosen", "Picked", TIPS.chosen, (b) => b.chosen),
+  rateCol("sod", "Picked, when one is", TIPS.shareOfDecided, (b) => b.shareOfDecided),
+  rateCol("negative", "Named negatively", TIPS.negative, (b) => b.negative),
 ];
 
 const sliceCols = (first: string): Col<HeadlineSlice>[] => [
   { id: "label", label: first, val: (s) => s.label },
-  { id: "answers", label: "Answers", num: true, val: (s) => s.answers },
-  rateCol("mentioned", "Mentioned", TIPS.mentioned, (s) => s.mentioned),
+  { id: "answers", label: "Answers", num: true, csvOnly: true, val: (s) => s.answers },
+  rateCol("mentioned", "Named", TIPS.mentioned, (s) => s.mentioned),
   rateCol("recommended", "Recommended", TIPS.recommended, (s) => s.recommended),
-  rateCol("chosen", "Chosen", TIPS.chosen, (s) => s.chosen),
-  rateCol("firm", "Firm pick in category", TIPS.inCategory, (s) => s.firmPickInCategory),
+  rateCol("chosen", "Picked", TIPS.chosen, (s) => s.chosen),
+  rateCol("firm", "Picks one in your category", TIPS.inCategory, (s) => s.firmPickInCategory),
 ];
 
 /** `room` (Journey's buyer filter) asks for one room's cells; absent = every buyer, exactly as before. */
@@ -180,26 +182,29 @@ export default function HeadlineSection({ runId, room }: { runId: string; room?:
   return (
     <div className="grid gap-5">
       <section className="card p-6">
-        <h2 className="section-label mb-1">Headline - questions that name no brand</h2>
+        <h2 className="section-label mb-1">Which should I get - questions that name no brand</h2>
         <p className="text-[13px] text-ink-3">
-          {view.answers} answers to open-choice questions ({stages.map((s) => s.label).join(", ")}) on the
-          core engine panel. Questions that name a brand are reported in their own views, never here.
-          {view.uncoded > 0 && ` ${view.uncoded} more answers are not coded yet.`}
+          <Tip tip="Open-choice questions on the core engine panel. Questions that name a brand are reported in their own views, never here.">
+            <span className="cursor-help">
+              {stages.map((s) => s.label).join(", ")}. Questions that name a brand have their own views.
+            </span>
+          </Tip>
+          {view.uncoded > 0 && ` ${view.uncoded} answers are not coded yet.`}
         </p>
         {room && (
           <p className="text-[13px] text-ink-3 mt-1">
             Only questions asked as this buyer: {room}. Social validation and premium vs basic are asked across all
-            buyers by design, so they are not in these numbers.
+            buyers, so they are not in these numbers.
           </p>
         )}
       </section>
 
       {target && (
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-          <Tile label="Mentioned" cell={target.mentioned} tip={TIPS.mentioned} />
+          <Tile label="Named" cell={target.mentioned} tip={TIPS.mentioned} />
           <Tile label="Recommended" cell={target.recommended} tip={TIPS.recommended} />
-          <Tile label="Chosen" cell={target.chosen} tip={TIPS.chosen} />
-          <Tile label="Share of decided" cell={target.shareOfDecided} tip={TIPS.shareOfDecided} />
+          <Tile label="Picked" cell={target.chosen} tip={TIPS.chosen} />
+          <Tile label="Win rate when one is picked" cell={target.shareOfDecided} tip={TIPS.shareOfDecided} />
         </div>
       )}
 
@@ -208,7 +213,7 @@ export default function HeadlineSection({ runId, room }: { runId: string; room?:
           <h2 className="section-label">How often the AI commits to one pick</h2>
           <span className="text-[13px] text-ink-2">
             <Tip tip={`${TIPS.firmPick} ${range(view.firmPick)}`}>
-              <span className="cursor-help">Firm pick {pct(view.firmPick)}</span>
+              <span className="cursor-help">Picks one {pct(view.firmPick)}</span>
             </Tip>
             {" · "}
             <Tip tip={`${TIPS.inCategory} ${range(view.firmPickInCategory)}`}>
@@ -220,7 +225,9 @@ export default function HeadlineSection({ runId, room }: { runId: string; room?:
         {outside > 0 && (
           <div className="grid gap-1 border-t border-line pt-3">
             <div className="text-[13px] text-ink-3">
-              {outside} of {view.outcomes.pick} picks are not an approved brand in your dictionary:
+              <Tip tip={`${outside} of ${view.outcomes.pick} picks`}>
+                <span className="cursor-help">Some picks are not an approved brand in your dictionary:</span>
+              </Tip>
             </div>
             <NameList title="Ruled out on your brand board" items={view.ruledOutPicks} total={view.picks.ruledOut} />
             <NameList title="Not in your dictionary" items={view.notInDictionaryPicks} total={view.picks.notInDictionary} />
@@ -231,7 +238,7 @@ export default function HeadlineSection({ runId, room }: { runId: string; room?:
 
       <section className="card p-6">
         <div className="flex items-baseline justify-between gap-3">
-          <h2 className="section-label">Brands in the headline answers</h2>
+          <h2 className="section-label">Brands in these answers</h2>
           <label className="flex items-center gap-2 text-[13px] text-ink-2">
             <input type="checkbox" checked={allBrands} onChange={(e) => setAllBrands(e.target.checked)} />
             Show every emerged brand
@@ -239,7 +246,7 @@ export default function HeadlineSection({ runId, room }: { runId: string; room?:
         </div>
         {!allBrands && brands.length < view.brands.length && (
           <p className="text-[12px] text-ink-3 mt-1">
-            Emerged brands named in under 5% of answers are hidden ({view.brands.length - brands.length}).
+            Emerged brands named in under 5% of answers are hidden.
           </p>
         )}
         <SortTable
@@ -252,13 +259,16 @@ export default function HeadlineSection({ runId, room }: { runId: string; room?:
 
       <section className="card p-6">
         <h2 className="section-label">{view.brand} by stage</h2>
-        <SortTable cols={sliceCols("Stage")} rows={stages} filename="headline_by_stage.csv" defaultSort={{ id: "answers", dir: -1 }} />
+        <SortTable cols={sliceCols("Stage")} rows={stages} filename="headline_by_stage.csv" defaultSort={{ id: "mentioned", dir: -1 }} />
       </section>
 
       <section className="card p-6">
         <h2 className="section-label">{view.brand} by engine</h2>
         <SortTable cols={sliceCols("Engine")} rows={view.byEngine} filename="headline_by_engine.csv" defaultSort={{ id: "mentioned", dir: -1 }} />
       </section>
+      <BaseNote>
+        Based on {fmtN(view.answers)} answers to questions that name no brand, across {view.byEngine.length} engines.
+      </BaseNote>
     </div>
   );
 }

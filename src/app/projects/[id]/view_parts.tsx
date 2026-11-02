@@ -18,10 +18,48 @@ export const pct = (c: RateCell) => {
 export const range = (c: RateCell) =>
   c.n === 0 ? "no answers" : `${c.k} of ${c.n} - 95% range ${Math.round(c.low * 100)}-${Math.round(c.high * 100)}%`;
 
+/** The one muted base line a section may carry (surface rule, 2026-11-01):
+ * counts never sit on cards, strips or cells; a section states its base once. */
+export function BaseNote({ children }: { children: React.ReactNode }) {
+  return <p className="text-[11px] text-ink-3">{children}</p>;
+}
+
+/** Answer counts for a section's base line: "1,105". */
+export const fmtN = (n: number) => n.toLocaleString("en-US");
+
+/** A ranked list of brand names. The count behind each name is its hover,
+ * never printed; `you` marks the client. */
+export function Names({ items, empty = "-" }: { items: { name: string; n: number; you?: boolean }[]; empty?: string }) {
+  if (items.length === 0) return <>{empty}</>;
+  return (
+    <>
+      {items.map((x, i) => (
+        <span key={x.name}>
+          {i > 0 && ", "}
+          <span title={`${x.n} answers`} className={x.you ? "font-medium text-ink" : undefined}>
+            {x.name}
+          </span>
+        </span>
+      ))}
+    </>
+  );
+}
+
 export function RateText({ cell }: { cell: RateCell }) {
   return (
     <Tip tip={range(cell)}>
       <span className="cursor-help">{pct(cell)}</span>
+    </Tip>
+  );
+}
+
+/** A share of a sub-base drawn as a percent, its "k of n" on hover. */
+export function ShareOf({ k, n }: { k: number; n: number }) {
+  if (n === 0) return <span className="text-ink-3">-</span>;
+  const x = k / n;
+  return (
+    <Tip tip={`${k} of ${n}`}>
+      <span className="cursor-help">{x > 0 && x < 0.005 ? "<1%" : `${Math.round(x * 100)}%`}</span>
     </Tip>
   );
 }

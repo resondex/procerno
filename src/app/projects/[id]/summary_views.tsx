@@ -2,7 +2,8 @@
 
 import { useEffect, useState } from "react";
 import type { BrandSummaryView, RateCell, SummaryBrand } from "@/lib/engine/brand_summary";
-import { SortTable } from "./table";
+import { SortTable, Tip } from "./table";
+import { BaseNote, RateText, fmtN } from "./view_parts";
 
 /**
  * The Boardroom and Five-questions views, answer_codes era (2026-10-30):
@@ -52,21 +53,23 @@ function Shell({ view, error, children }: {
   if (view === null || view.answers === 0)
     return (
       <div className="card px-5 py-4 text-[13px] text-ink-3">
-        No coded open-choice answers yet - this view fills in once the run is measured.
+        No coded &ldquo;which should I get&rdquo; answers yet - this view fills in once the run is measured.
       </div>
     );
   return <>{children(view)}</>;
 }
 
-function BarRow({ name, share, max, isTarget, right }: {
+function BarRow({ name, share, max, isTarget, right, tip }: {
   name: string;
   share: number;
   max: number;
   isTarget?: boolean;
   right: string;
+  /** Hover text for the row - where the counts behind it live. */
+  tip?: string;
 }) {
   return (
-    <div className="grid grid-cols-[11rem_1fr_9rem] items-center gap-3">
+    <div className="grid grid-cols-[11rem_1fr_9rem] items-center gap-3" title={tip}>
       <span className={`truncate text-sm text-right ${isTarget ? "font-semibold text-primary" : "text-ink-2"}`}>
         {name}
       </span>
@@ -102,13 +105,18 @@ export function BriefSection({ runId }: { runId: string }) {
 
 function Tile({ label, cell, hint }: { label: string; cell: RateCell; hint: string }) {
   return (
-    <div className="card p-5" title={`${hint} - ${range(cell)}`}>
-      <div className="section-label">{label}</div>
-      <div className="text-[2rem] leading-tight font-semibold tabular-nums mt-1.5">{pct(cell)}</div>
-      <div className="text-[13px] text-ink-2 mt-1">{cell.k} of {cell.n} answers</div>
-    </div>
+    <Tip tip={`${hint} - ${range(cell)}`}>
+      <div className="card p-5 cursor-help">
+        <div className="section-label">{label}</div>
+        <div className="text-[2rem] leading-tight font-semibold tabular-nums mt-1.5">{pct(cell)}</div>
+      </div>
+    </Tip>
   );
 }
+
+const FIRM_TIP = "Firm pick: answers that commit to one pick, whatever it is.";
+const IN_CAT_TIP = "Firm pick in category: firm picks whose pick is an approved brand in the confirmed dictionary.";
+const SOD_TIP = "Share of decided: your picks over every in-category pick.";
 
 function Brief({ v }: { v: BrandSummaryView }) {
   const byMentioned = [...v.brands].sort((a, b) => rate(b.mentioned) - rate(a.mentioned));
@@ -123,23 +131,28 @@ function Brief({ v }: { v: BrandSummaryView }) {
   return (
     <div className="grid gap-8">
       <section className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-        <Tile label="Mentioned" cell={v.target.mentioned} hint="Open-choice answers that name you at all" />
+        <Tile label="Named" cell={v.target.mentioned} hint="Open-choice answers that name you at all" />
         <Tile label="Recommended" cell={v.target.recommended} hint="Answers that put you forward, by framing or as the pick" />
-        <Tile label="Chosen" cell={v.target.chosen} hint="Answers that crown you as THE pick" />
-        <Tile label="Share of decided" cell={v.target.shareOfDecided} hint="Your picks over every in-category pick" />
+        <Tile label="Picked" cell={v.target.chosen} hint="Chosen: answers that crown you as THE pick" />
+        <Tile label="Win rate when one is picked" cell={v.target.shareOfDecided} hint={SOD_TIP} />
       </section>
       <p className="text-[13px] text-ink-3 -mt-5">
-        Across {v.answers.toLocaleString()} open-choice answers on the core panel -{" "}
-        {v.firmPick.k} committed to one pick, {v.firmPickInCategory.k} of those to a brand in
-        your category. Questions that name a brand are measured apart, in the Journey view.
+        <Tip tip={`${FIRM_TIP} ${range(v.firmPick)}`}>
+          <span className="cursor-help">The AI picks one in {pct(v.firmPick)} of answers</span>
+        </Tip>
+        ,{" "}
+        <Tip tip={`${IN_CAT_TIP} ${range(v.firmPickInCategory)}`}>
+          <span className="cursor-help">one in your category in {pct(v.firmPickInCategory)}</span>
+        </Tip>
+        . Questions that name a brand are measured apart, in the Analysis views.
         {v.uncoded > 0 && ` ${v.uncoded} answers are not coded yet.`}
       </p>
 
       <section className="card p-6">
         <h2 className="section-label mb-1">Brand leaderboard</h2>
         <p className="text-[13px] text-ink-3 mb-5">
-          Share of open-choice answers naming each brand - tracked rivals and brands the answers
-          volunteered.
+          Share of &ldquo;which should I get&rdquo; answers naming each brand - tracked rivals and
+          brands the answers volunteered.
         </p>
         <div className="grid gap-2.5">
           {leaderboard.map((b) => (
@@ -149,7 +162,8 @@ function Brief({ v }: { v: BrandSummaryView }) {
               isTarget={b.key === v.target.key}
               share={rate(b.mentioned)}
               max={maxMentioned}
-              right={`${pct(b.mentioned)} · chosen ${pct(b.chosen)}`}
+              right={`${pct(b.mentioned)} · picked ${pct(b.chosen)}`}
+              tip={`Named in ${range(b.mentioned)}; picked in ${range(b.chosen)}`}
             />
           ))}
         </div>
@@ -158,8 +172,7 @@ function Brief({ v }: { v: BrandSummaryView }) {
       <section className="card p-6">
         <h2 className="section-label mb-1">Who wins instead</h2>
         <p className="text-[13px] text-ink-3 mb-5">
-          The brand each answer actually crowned - shares of the {v.firmPickInCategory.k} answers
-          that picked a brand in your category.
+          The brand each answer actually picked - win rate when a brand in your category is picked.
         </p>
         <div className="grid gap-2.5">
           {board.map((b) => (
@@ -169,7 +182,8 @@ function Brief({ v }: { v: BrandSummaryView }) {
               isTarget={b.key === v.target.key}
               share={rate(b.shareOfDecided)}
               max={maxPick}
-              right={`${b.chosen.k} picks · ${pct(b.shareOfDecided)}`}
+              right={pct(b.shareOfDecided)}
+              tip={range(b.shareOfDecided)}
             />
           ))}
         </div>
@@ -212,7 +226,7 @@ function Brief({ v }: { v: BrandSummaryView }) {
         <section className="card p-6">
           <h2 className="section-label mb-1">By engine</h2>
           <p className="text-[13px] text-ink-3 mb-4">
-            The same open-choice questions answered by each assistant, through the same coding.
+            The same which-should-I-get questions answered by each assistant, through the same coding.
           </p>
           <SortTable
             filename="by_engine.csv"
@@ -230,13 +244,13 @@ function Brief({ v }: { v: BrandSummaryView }) {
                     )}
                   </span>
                 ) },
-              { id: "answers", label: "Answers", num: true, val: (e) => e.answers },
-              { id: "mentioned", label: "Mentioned", num: true,
+              { id: "answers", label: "Answers", num: true, csvOnly: true, val: (e) => e.answers },
+              { id: "mentioned", label: "Named", num: true,
                 val: (e) => Math.round(rate(e.mentioned) * 100),
-                render: (e) => pct(e.mentioned) },
-              { id: "chosen", label: "Chosen", num: true,
+                render: (e) => <RateText cell={e.mentioned} /> },
+              { id: "chosen", label: "Picked", num: true,
                 val: (e) => Math.round(rate(e.chosen) * 100),
-                render: (e) => pct(e.chosen) },
+                render: (e) => <RateText cell={e.chosen} /> },
             ]}
             rows={v.byEngine}
           />
@@ -253,7 +267,6 @@ function Brief({ v }: { v: BrandSummaryView }) {
                 The AI agrees the worry is warranted {pct(v.buyersDoubt.agree)} of the time it
                 takes a side on it.
               </p>
-              <p className="text-[12px] text-ink-3">{v.buyersDoubt.answers} answers, apart from the headline.</p>
             </div>
           )}
           {v.customersDoubt && (
@@ -266,7 +279,6 @@ function Brief({ v }: { v: BrandSummaryView }) {
                 The AI agrees the worry is warranted {pct(v.customersDoubt.agree)} of the time it
                 takes a side on it.
               </p>
-              <p className="text-[12px] text-ink-3">{v.customersDoubt.answers} answers, apart from the headline.</p>
             </div>
           )}
           {h2h.length > 0 && (
@@ -274,12 +286,13 @@ function Brief({ v }: { v: BrandSummaryView }) {
               <div className="section-label">Head-to-head record</div>
               <div className="grid gap-1">
                 {h2h.map((r) => (
-                  <div key={r.key} className="flex items-baseline justify-between gap-3 text-[13px]">
+                  <div
+                    key={r.key}
+                    className="flex items-baseline justify-between gap-3 text-[13px]"
+                    title={`${r.won.k} wins to ${r.lost.k} of ${r.answers} answers`}
+                  >
                     <span className="text-ink-2 truncate">vs {r.rival}</span>
-                    <span className="tabular-nums whitespace-nowrap">
-                      {r.won.k} - {r.lost.k}
-                      <span className="text-ink-3"> · win {pct(r.winOfDecided)}</span>
-                    </span>
+                    <span className="tabular-nums whitespace-nowrap">win {pct(r.winOfDecided)}</span>
                   </div>
                 ))}
               </div>
@@ -291,8 +304,11 @@ function Brief({ v }: { v: BrandSummaryView }) {
 
       <p className="text-center text-[13px] text-ink-3">
         Every question type&apos;s full tables - doubts, value, alternatives, awareness, reasons -
-        live under <span className="font-medium text-ink-2">Journey</span> in the Analysis views.
+        live in the Analysis views.
       </p>
+      <BaseNote>
+        Based on {fmtN(v.answers)} &ldquo;which should I get&rdquo; answers across {v.byEngine.length} engines.
+      </BaseNote>
     </div>
   );
 }
@@ -319,7 +335,7 @@ function Boardroom({ v }: { v: BrandSummaryView }) {
     topRival && {
       label: "Who takes the room",
       title: topRival.name,
-      body: `wins ${pct(topRival.shareOfDecided)} of the answers that picked a brand in your category - you win ${pct(v.target.shareOfDecided)}.`,
+      body: `wins ${pct(topRival.shareOfDecided)} when a brand in your category is picked - you win ${pct(v.target.shareOfDecided)}.`,
       foot: `${topRival.chosen.k} picks to your ${v.target.chosen.k}, of ${v.firmPickInCategory.k} decided answers.`,
     },
     bestLift &&
@@ -352,8 +368,7 @@ function Boardroom({ v }: { v: BrandSummaryView }) {
       <section className="card p-8 border-l-4 border-l-[var(--color-primary)]">
         <div className="section-label mb-3">The verdict</div>
         <p className="text-xl leading-snug text-ink-2 max-w-[62ch]">
-          When {v.answers} AI answers field open buying questions about{" "}
-          {v.category},{" "}
+          When AI answers field open buying questions about {v.category},{" "}
           <span className="font-semibold text-ink">
             {v.brand} is in the room {pct(v.target.mentioned)} of the time - and wins it{" "}
             {pct(v.target.shareOfDecided)} when a brand is picked
@@ -361,7 +376,7 @@ function Boardroom({ v }: { v: BrandSummaryView }) {
           . The gap between those two numbers is the whole assignment.
         </p>
         <p className="text-[13px] text-ink-3 mt-3">
-          Open-choice questions only - questions that name a brand are measured in their own views.
+          &ldquo;Which should I get&rdquo; questions only - questions that name a brand are measured in their own views.
           {v.uncoded > 0 && ` ${v.uncoded} answers are not coded yet.`}
         </p>
       </section>
@@ -369,35 +384,38 @@ function Boardroom({ v }: { v: BrandSummaryView }) {
       <section className="card p-8">
         <div className="grid grid-cols-3 gap-4 text-center">
           {[
-            { label: "Mentioned", cell: v.target.mentioned },
+            { label: "Named", cell: v.target.mentioned },
             { label: "Recommended", cell: v.target.recommended },
-            { label: "Chosen", cell: v.target.chosen },
+            { label: "Picked", cell: v.target.chosen },
           ].map((s, i) => (
-            <div key={s.label} className="relative" title={range(s.cell)}>
+            <div key={s.label} className="relative cursor-help" title={range(s.cell)}>
               {i > 0 && (
                 <span className="absolute -left-2 top-1/2 -translate-y-1/2 text-ink-3">›</span>
               )}
               <div className="text-[11px] font-semibold uppercase tracking-wide text-ink-3">{s.label}</div>
               <div className="text-4xl font-semibold tabular-nums text-primary mt-1.5">{pct(s.cell)}</div>
-              <div className="text-[12px] text-ink-3 mt-1">{s.cell.k} of {s.cell.n} answers</div>
             </div>
           ))}
         </div>
         <p className="text-[13px] text-ink-3 text-center mt-5">
-          Mentioned › recommended › chosen, all of the same {v.answers} answers. The drop between
-          stages says what kind of problem you have. Of the {v.firmPick.k} answers that committed to
-          a pick, {v.firmPickInCategory.k} picked a brand in your category.
+          Named › recommended › picked, all over the same answers. The drop between stages says what
+          kind of problem you have.{" "}
+          <Tip tip={`${FIRM_TIP} ${range(v.firmPick)}. ${IN_CAT_TIP} ${range(v.firmPickInCategory)}`}>
+            <span className="cursor-help">
+              The AI picks one in {pct(v.firmPick)} of answers, one in your category in{" "}
+              {pct(v.firmPickInCategory)}.
+            </span>
+          </Tip>
         </p>
       </section>
 
       {signals.length > 0 && (
         <section className="grid gap-3 sm:grid-cols-3">
           {signals.map((s, i) => (
-            <div key={s.label} className="card p-5 grid gap-1.5 content-start">
+            <div key={s.label} className="card p-5 grid gap-1.5 content-start" title={s.foot}>
               <div className="section-label">Signal {i + 1} - {s.label}</div>
               <div className="text-[15px] font-semibold">{s.title}</div>
               <p className="text-[13px] text-ink-2">{s.body}</p>
-              <p className="text-[12px] text-ink-3">{s.foot}</p>
             </div>
           ))}
         </section>
@@ -406,6 +424,9 @@ function Boardroom({ v }: { v: BrandSummaryView }) {
       <p className="card p-5 text-center text-[13px] text-ink-3">
         Every figure reads from the coded answers - the brief carries the full table behind each one.
       </p>
+      <BaseNote>
+        Based on {fmtN(v.answers)} &ldquo;which should I get&rdquo; answers across {v.byEngine.length} engines.
+      </BaseNote>
     </div>
   );
 }
@@ -466,7 +487,7 @@ function Questions({ v }: { v: BrandSummaryView }) {
       <Q n={1} q="Do the AIs know you?">
         <Big
           cell={v.target.mentioned}
-          sub={`of ${v.answers} open-choice answers name ${v.brand}`}
+          sub={`of "which should I get" answers name ${v.brand}`}
         />
         {low && high && low.key !== high.key && (
           <p className="text-[13px] text-ink-2">
@@ -479,25 +500,32 @@ function Questions({ v }: { v: BrandSummaryView }) {
       <Q n={2} q="Do they choose you?">
         <Big
           cell={v.target.chosen}
-          sub={`of answers crown ${v.brand}${
+          sub={`of answers pick ${v.brand}${
             instinct && search
               ? ` - instinct ${pct(instinct.chosen)} / search ${pct(search.chosen)}`
               : ""
           }`}
         />
         <p className="text-[13px] text-ink-2">
-          {v.firmPick.k} of {v.answers} answers committed to one pick, {v.firmPickInCategory.k} of
-          them to a brand in your category - of those, {v.brand} takes{" "}
-          {pct(v.target.shareOfDecided)}.
+          <Tip tip={`${FIRM_TIP} ${range(v.firmPick)}. ${IN_CAT_TIP} ${range(v.firmPickInCategory)}`}>
+            <span className="cursor-help">
+              The AI picks one in {pct(v.firmPick)} of answers, a brand in your category in{" "}
+              {pct(v.firmPickInCategory)}
+            </span>
+          </Tip>{" "}
+          - <Tip tip={`${SOD_TIP} ${range(v.target.shareOfDecided)}`}>
+            <span className="cursor-help">
+              when one is picked, {v.brand} wins {pct(v.target.shareOfDecided)}
+            </span>
+          </Tip>
+          .
         </p>
       </Q>
 
       <Q n={3} q="Who wins instead, and why?">
         <p className="text-[13px] text-ink-3">
           Shares below are of the{" "}
-          <span className="font-medium text-ink-2">
-            {v.firmPickInCategory.k} answers that picked a brand in your category
-          </span>{" "}
+          <span className="font-medium text-ink-2">answers that picked a brand in your category</span>{" "}
           - the rest hedged or picked outside it, so nobody here won them.
         </p>
         <div className="grid gap-2">
@@ -508,7 +536,8 @@ function Questions({ v }: { v: BrandSummaryView }) {
               isTarget={b.role === "target"}
               share={rate(b.shareOfDecided)}
               max={maxPick}
-              right={`${b.chosen.k} picks - ${pct(b.shareOfDecided)}`}
+              right={pct(b.shareOfDecided)}
+              tip={range(b.shareOfDecided)}
             />
           ))}
         </div>
@@ -533,7 +562,6 @@ function Questions({ v }: { v: BrandSummaryView }) {
             {v.buyersDoubt && (
               <div className="rounded-xl border border-line p-4 grid gap-1">
                 <span className="text-sm font-semibold">Buyers&apos; worries</span>
-                <span className="text-[11px] text-ink-3">{v.buyersDoubt.answers} answers</span>
                 <p className="text-[13px] text-ink-2">
                   Told to go ahead {pct(v.buyersDoubt.proceed)} - told to avoid{" "}
                   {pct(v.buyersDoubt.avoid)}. The AI agrees the worry is warranted{" "}
@@ -544,7 +572,6 @@ function Questions({ v }: { v: BrandSummaryView }) {
             {v.customersDoubt && (
               <div className="rounded-xl border border-line p-4 grid gap-1">
                 <span className="text-sm font-semibold">Customers&apos; worries</span>
-                <span className="text-[11px] text-ink-3">{v.customersDoubt.answers} answers</span>
                 <p className="text-[13px] text-ink-2">
                   Told to stay {pct(v.customersDoubt.keep)} - told to leave{" "}
                   {pct(v.customersDoubt.leave)}. The AI agrees the worry is warranted{" "}
@@ -566,7 +593,7 @@ function Questions({ v }: { v: BrandSummaryView }) {
           <>
             <p className="text-[13px] text-ink-3">
               Prompted contests - the question itself names you and the rival. Bars show your share
-              of the answers either of you won; never pooled with the open-choice numbers above.
+              of the answers either of you won; never pooled with the which-should-I-get numbers above.
             </p>
             <div className="grid gap-2">
               {h2h.map((r) => (
@@ -576,7 +603,8 @@ function Questions({ v }: { v: BrandSummaryView }) {
                   isTarget={rate(r.winOfDecided) >= 0.5}
                   share={rate(r.winOfDecided)}
                   max={maxWin}
-                  right={`${r.won.k} - ${r.lost.k} of ${r.answers} · win ${pct(r.winOfDecided)}`}
+                  right={`win ${pct(r.winOfDecided)}`}
+                  tip={`${r.won.k} wins to ${r.lost.k} of ${r.answers} answers`}
                 />
               ))}
             </div>
@@ -585,6 +613,10 @@ function Questions({ v }: { v: BrandSummaryView }) {
           <p className="text-sm text-ink-3">This battery carries no head-to-head questions.</p>
         )}
       </Q>
+      <BaseNote>
+        Questions 1-3 are based on {fmtN(v.answers)} &ldquo;which should I get&rdquo; answers across{" "}
+        {v.byEngine.length} engines.
+      </BaseNote>
     </div>
   );
 }

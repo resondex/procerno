@@ -11,7 +11,7 @@ import type {
   SliceRules,
 } from "@/lib/engine/rules_explorer";
 import { SortTable, Tip, type Col } from "./table";
-import { RateText, pct, range, rateCol } from "./view_parts";
+import { BaseNote, fmtN, pct, range, rateCol } from "./view_parts";
 
 /**
  * The decision-rules explorer (2026-10-30, WORKBENCH_REDESIGN item 2):
@@ -43,8 +43,8 @@ function wilsonCell(k: number, n: number): RateCell {
 }
 
 const SIDE_TIP = {
-  you: "Answers stating at least one condition under which the AI routes the pick to you, over every answer here that states its rules (an answer with no conditions counts in the denominator).",
-  away: "Answers stating at least one condition under which the AI routes the pick to another brand in your dictionary.",
+  you: "Route to you: answers stating at least one condition under which the AI routes the pick to you, over every answer here that states its rules (an answer with no conditions counts in the denominator).",
+  away: "Route away: answers stating at least one condition under which the AI routes the pick to another brand in your dictionary.",
   elsewhere:
     "Answers stating a condition that routes somewhere outside your dictionary - a ruled-out or unknown name, or a generic destination like a cheaper option.",
 };
@@ -73,7 +73,20 @@ function Evidence({
 }
 
 const answersText = (n: number) => (n === 1 ? "1 answer" : `${n} answers`);
-const routesText = (routes: NamedCount[]) => routes.map((r) => `${r.name} (${r.n})`).join(", ");
+/** Resolved destination names, deduped, at most three - never the raw
+ * strings the answers used, never counts. */
+const routesText = (routes: NamedCount[]) => {
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const r of routes) {
+    const k = r.name.trim().toLowerCase();
+    if (!k || seen.has(k)) continue;
+    seen.add(k);
+    out.push(r.name);
+    if (out.length === 3) break;
+  }
+  return out.join(", ");
+};
 
 /** A group as the current scope sees it (all question types, or one). */
 interface Scoped {
@@ -100,7 +113,8 @@ function GroupList({
 }: {
   title: string;
   items: Scoped[];
-  routesLabel: string;
+  /** null = no destination line (the "you" side: the destination is you). */
+  routesLabel: string | null;
   contested: Map<string, number>;
   otherSide: string;
   onEvidence?: OnEvidence;
@@ -119,18 +133,24 @@ function GroupList({
               <li key={g.id} className={`text-[12px] leading-snug ${few ? "text-ink-3/70" : ""}`}>
                 <div className="flex items-baseline justify-between gap-3">
                   <span className={few ? "" : "text-ink"}>{g.label}</span>
-                  <span className="shrink-0 tabular-nums text-ink-3">
-                    <Evidence ids={ids} title={`${title}: ${g.label}`} onEvidence={onEvidence}>
-                      {answersText(answers)}
-                    </Evidence>
-                    {" - "}
-                    <RateText cell={share} />
-                  </span>
+                  <Tip tip={`Stated in ${answersText(answers)} - ${range(share)}`}>
+                    <span className="shrink-0 cursor-help tabular-nums text-ink-3">
+                      <Evidence ids={ids} title={`${title}: ${g.label}`} onEvidence={onEvidence}>
+                        {answers}
+                      </Evidence>
+                    </span>
+                  </Tip>
                 </div>
-                <div className="text-[11px] text-ink-3">
-                  {routesLabel} {routesText(g.routes)}
-                  {other > 0 && ` - also ${otherSide} in ${answersText(other)}`}
-                </div>
+                {(routesLabel !== null && g.routes.length > 0) || other > 0 ? (
+                  <div className="text-[11px] text-ink-3">
+                    {routesLabel !== null && g.routes.length > 0 && `${routesLabel} ${routesText(g.routes)}`}
+                    {other > 0 && (
+                      <span title={answersText(other)}>
+                        {routesLabel !== null && g.routes.length > 0 ? " - " : ""}also {otherSide}
+                      </span>
+                    )}
+                  </div>
+                ) : null}
               </li>
             );
           })}
@@ -163,17 +183,10 @@ function SliceGroups({
             return (
               <li key={g.id} className={`text-[12px] leading-snug ${few ? "text-ink-3/70" : "text-ink-2"}`}>
                 <span className={few ? "" : "text-ink"}>{g.label}</span>{" "}
-                <span className="text-ink-3">
-                  (
+                <span className="text-ink-3" title={answersText(g.answers)}>
                   <Evidence ids={g.ids} title={`${slice} - ${label.toLowerCase()}: ${g.label}`} onEvidence={onEvidence}>
                     {g.answers}
                   </Evidence>
-                  {g.lift !== null && g.lift >= 1.5 && !few && (
-                    <Tip tip={`Stated ${g.lift}x as often here as across every answer that states its rules.`}>
-                      <span className="cursor-help">, {g.lift}x the overall rate</span>
-                    </Tip>
-                  )}
-                  )
                 </span>
               </li>
             );
@@ -189,25 +202,30 @@ function RoomCard({ room, onEvidence }: { room: SliceRules; onEvidence?: OnEvide
   return (
     <div className={`rounded-md border border-line/60 p-3 ${thin ? "opacity-60" : ""}`}>
       <div className="flex items-baseline justify-between gap-3">
-        <div className="text-[13px] font-medium text-ink">{room.label}</div>
-        <div className="shrink-0 text-[11px] text-ink-3">
-          {thin ? `Thin - ${answersText(room.answers)}` : answersText(room.answers)}
+        <div className="text-[13px] font-medium text-ink">
+          <Tip
+            tip={`${answersText(room.answers)} that state their rules: ${room.pools
+              .map((p) => `${POOL_LABEL[p.pool]} ${p.answers}`)
+              .join(", ")}`}
+          >
+            <span className="cursor-help">{room.label}</span>
+          </Tip>
         </div>
+        {thin && (
+          <div className="shrink-0 text-[11px] text-ink-3">Too few answers to read - {answersText(room.answers)}</div>
+        )}
       </div>
       <div className="mt-1 flex flex-wrap gap-x-4 text-[12px] text-ink-2">
         <Tip tip={`${SIDE_TIP.you} ${range(room.toYou)}`}>
-          <span className="cursor-help">{pct(room.toYou)} route to you</span>
+          <span className="cursor-help">{pct(room.toYou)} - some condition favors you</span>
         </Tip>
         <Tip tip={`${SIDE_TIP.away} ${range(room.away)}`}>
-          <span className="cursor-help">{pct(room.away)} route away</span>
+          <span className="cursor-help">{pct(room.away)} - some condition favors a rival</span>
         </Tip>
       </div>
       <div className="mt-2 grid gap-3 sm:grid-cols-2">
         <SliceGroups label="You win when" groups={room.win} slice={room.label} onEvidence={onEvidence} />
         <SliceGroups label="You lose when" groups={room.lose} slice={room.label} onEvidence={onEvidence} />
-      </div>
-      <div className="mt-2 text-[11px] text-ink-3">
-        {room.pools.map((p) => `${POOL_LABEL[p.pool]} ${p.answers}`).join(", ")}
       </div>
     </div>
   );
@@ -215,13 +233,13 @@ function RoomCard({ room, onEvidence }: { room: SliceRules; onEvidence?: OnEvide
 
 /** Kept in step with RULE_POOL_LABEL (rules_explorer.ts is server-only). */
 const POOL_LABEL: Record<RulePool, string> = {
-  open_choice: "Open choice",
+  open_choice: "Which should I get",
   premium: "Premium vs basic",
   head_to_head: "Head-to-head",
-  rival_leavers: "Rival leavers",
-  repertoire: "Repertoire",
+  rival_leavers: "Rivals' leavers",
+  repertoire: "Habit - stick with you",
   value: "Value",
-  holding: "Holding your own",
+  holding: "Your customers weighing a move",
   buyer_worries: "Buyers' worries",
   customer_worries: "Customers' worries",
   expansion: "Expansion",
@@ -229,6 +247,9 @@ const POOL_LABEL: Record<RulePool, string> = {
 };
 
 const topCondition = (groups: SliceGroup[]) => (groups[0] ? `${groups[0].label} (${groups[0].answers})` : "-");
+
+const OVERLAP_TIP =
+  " The two columns overlap: one answer can state a condition for each side, so they do not add up to 100%.";
 
 const rivalCols = (onEvidence?: OnEvidence): Col<SliceRules>[] => [
   {
@@ -243,24 +264,20 @@ const rivalCols = (onEvidence?: OnEvidence): Col<SliceRules>[] => [
       </span>
     ),
   },
-  { id: "answers", label: "Answers", num: true, val: (r) => r.answers },
-  rateCol("toYou", "Route to you", SIDE_TIP.you, (r) => r.toYou),
-  rateCol("away", "Route away", SIDE_TIP.away, (r) => r.away),
+  { id: "answers", label: "Answers", num: true, csvOnly: true, val: (r) => r.answers },
+  rateCol("toYou", "Some condition favors you", SIDE_TIP.you + OVERLAP_TIP, (r) => r.toYou),
+  rateCol("away", "Some condition favors a rival", SIDE_TIP.away + OVERLAP_TIP, (r) => r.away),
   {
     id: "win",
-    label: "Top condition for you",
+    label: "You win when",
+    tip: "The condition stated most often for routing the pick to you against this rival.",
     val: (r) => topCondition(r.win),
     render: (r) =>
       r.win[0] ? (
-        <span className="text-[12px]">
-          {r.win[0].label}{" "}
-          <span className="text-ink-3">
-            (
-            <Evidence ids={r.win[0].ids} title={`vs ${r.label} - routes to you: ${r.win[0].label}`} onEvidence={onEvidence}>
-              {r.win[0].answers}
-            </Evidence>
-            )
-          </span>
+        <span className="text-[12px]" title={answersText(r.win[0].answers)}>
+          <Evidence ids={r.win[0].ids} title={`vs ${r.label} - you win when: ${r.win[0].label}`} onEvidence={onEvidence}>
+            {r.win[0].label}
+          </Evidence>
         </span>
       ) : (
         "-"
@@ -268,19 +285,15 @@ const rivalCols = (onEvidence?: OnEvidence): Col<SliceRules>[] => [
   },
   {
     id: "lose",
-    label: "Top condition away",
+    label: "You lose when",
+    tip: "The condition stated most often for routing the pick away from you against this rival.",
     val: (r) => topCondition(r.lose),
     render: (r) =>
       r.lose[0] ? (
-        <span className="text-[12px]">
-          {r.lose[0].label}{" "}
-          <span className="text-ink-3">
-            (
-            <Evidence ids={r.lose[0].ids} title={`vs ${r.label} - routes away: ${r.lose[0].label}`} onEvidence={onEvidence}>
-              {r.lose[0].answers}
-            </Evidence>
-            )
-          </span>
+        <span className="text-[12px]" title={answersText(r.lose[0].answers)}>
+          <Evidence ids={r.lose[0].ids} title={`vs ${r.label} - you lose when: ${r.lose[0].label}`} onEvidence={onEvidence}>
+            {r.lose[0].label}
+          </Evidence>
         </span>
       ) : (
         "-"
@@ -319,12 +332,16 @@ function Explorer({ view, onEvidence }: { view: RulesView; onEvidence?: OnEviden
       <div>
         <h2 className="section-label mb-1">Decision rules</h2>
         <p className="text-[13px] text-ink-3">
-          The conditions the AI states for where a buyer should go - &ldquo;if you already use X, pick Y&rdquo; - across{" "}
-          {view.answers} answers on the core engine panel that state their rules ({view.rules} stated rules;{" "}
-          {view.unconditional} answers state none). Conditions are grouped{" "}
-          {view.grouping === "embeddings" ? "by meaning" : "by their shared words"} across every question type, so the
-          same circumstance groups the same way wherever it was said.
-          {view.uncoded > 0 && ` ${view.uncoded} more answers are not coded yet.`}
+          <Tip
+            tip={`${view.answers} answers on the core engine panel that state their rules; ${view.rules} stated rules; ${view.unconditional} answers state none.`}
+          >
+            <span className="cursor-help">
+              The conditions the AI states for where a buyer should go - &ldquo;if you already use X, pick Y&rdquo;.
+            </span>
+          </Tip>{" "}
+          Conditions are grouped {view.grouping === "embeddings" ? "by meaning" : "by their shared words"} across every
+          question type, so the same circumstance groups the same way wherever it was said.
+          {view.uncoded > 0 && ` ${view.uncoded} answers are not coded yet.`}
         </p>
       </div>
 
@@ -338,56 +355,64 @@ function Explorer({ view, onEvidence }: { view: RulesView; onEvidence?: OnEviden
               pool === p.pool ? "border-primary bg-primary-soft text-primary" : "border-line text-ink-2 hover:bg-primary-soft/20"
             }`}
           >
-            {p.label} <span className="tabular-nums text-ink-3">{p.answers}</span>
+            {p.pool ? POOL_LABEL[p.pool] : p.label}
           </button>
         ))}
       </div>
 
-      <div className="flex flex-wrap items-baseline gap-x-6 gap-y-1 text-[13px] text-ink-2">
-        <Tip tip={`${SIDE_TIP.you} ${range(rates.toYou)}`}>
+      <div className="grid gap-0.5 text-[13px] text-ink-2">
+        <Tip tip={`${SIDE_TIP.you}${OVERLAP_TIP} ${range(rates.toYou)}`}>
           <span className="cursor-help">
-            <span className="text-[1.5rem] font-semibold tabular-nums text-ink">{pct(rates.toYou)}</span> state a
-            condition that routes to {view.brand}
+            <span className="font-semibold tabular-nums text-ink">{pct(rates.toYou)}</span> of answers state a condition
+            under which you win.
           </span>
         </Tip>
-        <Tip tip={`${SIDE_TIP.away} ${range(rates.away)}`}>
-          <span className="cursor-help">{pct(rates.away)} one that routes to a rival</span>
+        <Tip tip={`${SIDE_TIP.away}${OVERLAP_TIP} ${range(rates.away)}`}>
+          <span className="cursor-help">
+            <span className="font-semibold tabular-nums text-ink">{pct(rates.away)}</span> of answers state a condition
+            under which a rival wins.
+          </span>
         </Tip>
-        <Tip tip={`${SIDE_TIP.elsewhere} ${range(rates.elsewhere)}`}>
-          <span className="cursor-help">{pct(rates.elsewhere)} one that routes elsewhere</span>
+        <Tip tip={`${SIDE_TIP.elsewhere}${OVERLAP_TIP} ${range(rates.elsewhere)}`}>
+          <span className="cursor-help">
+            <span className="font-semibold tabular-nums text-ink">{pct(rates.elsewhere)}</span> of answers state a condition
+            that points outside your dictionary.
+          </span>
         </Tip>
       </div>
       {scope && scope.answers < THIN && (
-        <p className="text-[12px] text-ink-3">Thin - {answersText(scope.answers)} in this question type; read as direction only.</p>
+        <p className="text-[12px] text-ink-3">
+          Too few answers to read - {answersText(scope.answers)} in this question type; read as direction only.
+        </p>
       )}
 
       <div className="grid gap-5 sm:grid-cols-2">
         <GroupList
-          title={`What routes the pick to ${view.brand}`}
+          title="You win when"
           items={you}
-          routesLabel="As:"
+          routesLabel={null}
           contested={contestedYou}
-          otherSide="routes away"
+          otherSide="favors a rival"
           onEvidence={onEvidence}
         />
         <GroupList
-          title={`What routes it away from ${view.brand}`}
+          title="You lose when"
           items={away}
-          routesLabel="To:"
+          routesLabel="to"
           contested={contestedAway}
-          otherSide="routes to you"
+          otherSide="favors you"
           onEvidence={onEvidence}
         />
       </div>
 
       {elsewhere.length > 0 && (
         <details className="text-[13px]">
-          <summary className="cursor-pointer text-ink-2">Routes elsewhere - outside your dictionary or no brand named</summary>
+          <summary className="cursor-pointer text-ink-2">Points outside your dictionary - or names no brand</summary>
           <div className="mt-3">
             <GroupList
-              title="Routes elsewhere"
+              title="Points elsewhere when"
               items={elsewhere}
-              routesLabel="To:"
+              routesLabel="to"
               contested={new Map()}
               otherSide=""
               onEvidence={onEvidence}
@@ -395,10 +420,14 @@ function Explorer({ view, onEvidence }: { view: RulesView; onEvidence?: OnEviden
           </div>
         </details>
       )}
-      <p className="text-[11px] text-ink-3">
-        Percentages are shares of the answers that state their rules{pool ? ` in ${POOL_LABEL[pool]}` : ""}. {once} more
-        conditions are stated by a single answer or sit past the top of the list.
-      </p>
+      <BaseNote>
+        Each number is how many answers state the condition; hover for its share
+        {pool ? ` in ${POOL_LABEL[pool]}` : ""}.{" "}
+        <span title={`${once} more conditions`}>
+          More conditions are stated by a single answer or sit past the top of the list.
+        </span>{" "}
+        Based on {fmtN(denom)} answers that state their rules.
+      </BaseNote>
     </section>
   );
 }
@@ -434,9 +463,8 @@ export default function RulesSection({ runId, onEvidence }: { runId: string; onE
             <p className="text-[13px] text-ink-3">
               Each buyer&apos;s answers, and the conditions that dominate them: which buyer&apos;s circumstance matches
               the conditions you win on, and which matches the ones you lose on. Only questions asked in one
-              buyer&apos;s voice carry a buyer - open choice and value; head-to-heads, worries and the customer questions
-              are asked across all buyers by design and sit in the explorer above. A multiple marks a condition stated far more often for
-              this buyer than overall.
+              buyer&apos;s voice carry a buyer - which-should-I-get and value; head-to-heads, worries and the customer
+              questions are asked across all buyers and sit in the explorer above.
             </p>
           </div>
           <div className="grid gap-3 sm:grid-cols-2">
@@ -452,16 +480,16 @@ export default function RulesSection({ runId, onEvidence }: { runId: string; onE
           <div>
             <h2 className="section-label mb-1">Decision rules by rival</h2>
             <p className="text-[13px] text-ink-3">
-              The head-to-head answers only, per rival named in the question. &ldquo;Route away&rdquo; counts any rival
-              in your dictionary, not only the one named; the head-to-head section lists each matchup&apos;s full stated
-              boundaries.
+              The head-to-head answers only, per rival named in the question. &ldquo;Favors a rival&rdquo; counts any
+              rival in your dictionary, not only the one named; the head-to-head section lists each matchup&apos;s full
+              stated boundaries.
             </p>
           </div>
           <SortTable
             cols={rivalCols(onEvidence)}
             rows={view.rivals}
             filename="decision_rules_by_rival.csv"
-            defaultSort={{ id: "answers", dir: -1 }}
+            defaultSort={{ id: "toYou", dir: -1 }}
           />
         </section>
       )}

@@ -4,7 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import type { ReasonRow, ReasonsView } from "@/lib/engine/reasons";
 import type { ViewKey } from "@/lib/engine/views";
 import { SortTable, Tip, type Col } from "./table";
-import { rate, rateCol } from "./view_parts";
+import { BaseNote, fmtN, rate, rateCol } from "./view_parts";
 
 /**
  * The reasons view (2026-10-27): how often each confirmed reason code is
@@ -90,7 +90,7 @@ export default function ReasonsSection({ runId, room, initialType }: { runId: st
     const verdictCols = selected.verdicts.filter((v) => v.key !== "all").map((v) =>
       rateCol<ReasonRow>(
         v.key,
-        `${v.label} (${v.answers})`,
+        v.label,
         `Of the ${v.answers} ${selected.label.toLowerCase()} answers that ${v.label.toLowerCase()}, the share arguing from this code.`,
         (r) => r.byVerdict[k]?.[v.key] ?? { k: 0, n: 0, low: 0, high: 0 }
       )
@@ -117,7 +117,7 @@ export default function ReasonsSection({ runId, room, initialType }: { runId: st
             },
           ]
         : [];
-    return [first, rateCol("all", `All (${selected.answers})`, `${selected.label} answers that argue from this code.`, (r) => r.byType[k] ?? { k: 0, n: 0, low: 0, high: 0 }), ...verdictCols, ...gap];
+    return [first, rateCol("all", "All", `${selected.label} answers that argue from this code (${selected.answers} answers).`, (r) => r.byType[k] ?? { k: 0, n: 0, low: 0, high: 0 }), ...verdictCols, ...gap];
   }, [view, selected]);
 
   if (error) return <div className="card px-5 py-4 text-[13px] text-danger">{error}</div>;
@@ -137,10 +137,10 @@ export default function ReasonsSection({ runId, room, initialType }: { runId: st
         <label className="flex items-center gap-2">
           Question type
           <select className="input w-auto text-[13px]" value={selected ? type : POOLED} onChange={(e) => setType(e.target.value)}>
-            <option value={POOLED}>All types ({view.pooledAnswers} answers, criteria apart)</option>
+            <option value={POOLED}>All types (criteria apart)</option>
             {view.types.map((t) => (
               <option key={t.key} value={t.key}>
-                {t.label} ({t.answers})
+                {t.label}
               </option>
             ))}
           </select>
@@ -161,7 +161,14 @@ export default function ReasonsSection({ runId, room, initialType }: { runId: st
         </p>
       )}
       {selected && selected.noReason > 0 && (
-        <p className="text-[12px] text-ink-3">{selected.noReason} of these answers argue from no reason in the codebook.</p>
+        <p className="text-[12px] text-ink-3">
+          <Tip tip={`${selected.noReason} of ${selected.answers} answers`}>
+            <span className="cursor-help">
+              {Math.max(1, Math.round((selected.noReason / Math.max(1, selected.answers)) * 100))}% of these answers argue from no
+              reason in the codebook.
+            </span>
+          </Tip>
+        </p>
       )}
       <SortTable
         key={type}
@@ -175,6 +182,11 @@ export default function ReasonsSection({ runId, room, initialType }: { runId: st
           The reason groups name codes your codebook does not hold: {view.unknownGroupCodes.join(", ")}.
         </p>
       )}
+      <BaseNote>
+        {selected
+          ? `Based on ${fmtN(selected.answers)} ${selected.label.toLowerCase()} answers.`
+          : `Based on ${fmtN(view.pooledAnswers)} answers, criteria questions kept apart.`}
+      </BaseNote>
     </section>
   );
 }

@@ -7,7 +7,7 @@ import {
   MEASURES,
   MEASURE_BY_ID,
   POOLS,
-  POOL_LABEL,
+  POOL_LABEL as ENGINE_POOL_LABEL,
   R,
   illegalReason,
   legalPools,
@@ -68,6 +68,26 @@ const POOL_DEFAULT: Partial<Record<ViewKey, string>> = {
   settled_ecosystem: "rel_strengthens",
   settled_advocacy: "rel_strengthens",
 };
+
+/** Buyer-language names for the surface (2026-11-01 vocabulary); the engine's
+ * contract names stay in measures.ts and in each chip's hover. */
+const POOL_LABEL: Record<ViewKey, string> = {
+  ...ENGINE_POOL_LABEL,
+  headline: "Which should I get",
+  offensive_capture: "Rivals' leavers",
+  defensive_hold: "Your customers weighing a move",
+  repertoire: "Habit - stick with you",
+};
+const MEASURE_LABEL: Record<string, string> = {
+  chosen: "Picked",
+  share_of_decided: "Win rate when one is picked",
+  negative: "Named negatively",
+  firm_pick: "Picks one",
+  premise_rebuts: "Pushes back",
+  exit_named: "Points to another brand",
+};
+const mLabel = (m: MeasureDef) => MEASURE_LABEL[m.id] ?? m.label;
+const mTip = (m: MeasureDef) => (MEASURE_LABEL[m.id] ? `${m.label}: ${m.tip}` : m.tip);
 
 const THIN = 20;
 /** Brand and argument dimensions list at most this many values. */
@@ -375,7 +395,7 @@ export function MetricsSection({ runId, evidence = true }: { runId: string; evid
     ...pivot.cols.map(
       (c): Col<PivotRow> => ({
         id: `c:${c.key}`,
-        label: colDim === "none" ? measure.label : c.label,
+        label: colDim === "none" ? mLabel(measure) : c.label,
         num: true,
         val: (r) => {
           const a = cellOf(r, c);
@@ -386,16 +406,11 @@ export function MetricsSection({ runId, evidence = true }: { runId: string; evid
           if (!a || a.n === 0) return <span className="text-ink-3/50">-</span>;
           const w = wilson(a.k, a.n);
           const thin = a.n < THIN;
-          const tip = `${a.k} of ${a.n} - 95% range ${pct(w.low)}-${pct(w.high)}${thin ? " - fewer than 20 answers, read with care" : ""}`;
+          const tip = `${a.k} of ${a.n} - 95% range ${pct(w.low)}-${pct(w.high)}${thin ? " - too few answers to read, take with care" : ""}`;
           const body = (
-            <span className={`inline-flex flex-col items-center leading-tight ${thin ? "opacity-50" : ""}`} title={tip}>
-              <span>
-                {pct(a.k / a.n)}
-                {thin && <span className="ml-0.5 align-super text-[10px] text-ink-3">*</span>}
-              </span>
-              <span className="text-[10px] text-ink-3">
-                {a.k}/{a.n}
-              </span>
+            <span className={`inline-flex items-center leading-tight ${thin ? "opacity-50" : ""}`} title={tip}>
+              {pct(a.k / a.n)}
+              {thin && <span className="ml-0.5 align-super text-[10px] text-ink-3">*</span>}
             </span>
           );
           if (!evidence || a.k === 0) return body;
@@ -405,7 +420,7 @@ export function MetricsSection({ runId, evidence = true }: { runId: string; evid
               className="rounded px-1 hover:bg-primary-soft/40"
               onClick={() =>
                 setDrill({
-                  title: `${measure.label} - ${[r.v.label, colDim === "none" ? null : c.label].filter(Boolean).join(" x ")}`,
+                  title: `${mLabel(measure)} - ${[r.v.label, colDim === "none" ? null : c.label].filter(Boolean).join(" x ")}`,
                   subtitle: `${POOL_LABEL[pool]}${measure.brand && !r.v.brands && !c.brands ? ` - ${chosenBrand.name}` : ""}`,
                   ids: a.ids,
                   total: a.k,
@@ -448,7 +463,7 @@ export function MetricsSection({ runId, evidence = true }: { runId: string; evid
     <div className="card overflow-hidden">
       <div className="grid gap-2 border-b border-line px-4 py-3">
         <div className="flex flex-wrap items-center gap-1.5">
-          <span className="w-20 text-[11px] font-semibold uppercase tracking-wide text-ink-3">Pool</span>
+          <span className="w-20 text-[11px] font-semibold uppercase tracking-wide text-ink-3">Answers</span>
           <select
             value={pool}
             onChange={(e) => setPool(e.target.value as ViewKey)}
@@ -456,7 +471,7 @@ export function MetricsSection({ runId, evidence = true }: { runId: string; evid
           >
             {present.map((k) => (
               <option key={k} value={k}>
-                {POOL_LABEL[k]} ({poolCounts.get(k)} answers)
+                {POOL_LABEL[k]}
               </option>
             ))}
           </select>
@@ -507,11 +522,15 @@ export function MetricsSection({ runId, evidence = true }: { runId: string; evid
                       key={m.id}
                       type="button"
                       className={chip(measure.id === m.id, !!reason)}
-                      title={reason ? `${reason}${reachable ? " - choosing it moves to a pool that asks it" : " - no pool in this run asks it"}` : m.tip}
+                      title={
+                        reason
+                          ? `${reason}${reachable ? " - choosing it moves to answers that ask it" : " - no question in this run asks it"}`
+                          : mTip(m)
+                      }
                       disabled={!reachable}
                       onClick={() => chooseMeasure(m)}
                     >
-                      {m.label}
+                      {mLabel(m)}
                     </button>
                   );
                 })}
@@ -522,8 +541,9 @@ export function MetricsSection({ runId, evidence = true }: { runId: string; evid
       </div>
       <div className="px-4 py-3">
         <p className="text-[12px] text-ink-3">
-          {measure.tip} {POOL_LABEL[pool]}: {pivot.answers} coded answers on the core panel.
-          {needsBrand && ` Brand: ${chosenBrand.name}.`} Cells under {THIN} answers are muted and starred.
+          {mTip(measure)}
+          {needsBrand && ` Brand: ${chosenBrand.name}.`} Starred, muted cells have too few answers to read; hover any cell for
+          its count and range.
         </p>
         {pivot.rows.length === 0 || pivot.cols.length === 0 ? (
           <p className="mt-3 text-[13px] text-ink-3">No answers count toward this measure here.</p>
@@ -535,6 +555,9 @@ export function MetricsSection({ runId, evidence = true }: { runId: string; evid
             defaultSort={{ id: cols[1].id, dir: -1 }}
           />
         )}
+        <p className="mt-2 text-[11px] text-ink-3">
+          Based on {pivot.answers.toLocaleString("en-US")} answers to {POOL_LABEL[pool].toLowerCase()} questions.
+        </p>
       </div>
       {drill && <EvidencePanel runId={runId} request={drill} onClose={closeDrill} />}
     </div>

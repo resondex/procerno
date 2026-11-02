@@ -1116,3 +1116,40 @@ console.log("17. s56 advocacy criticism containment");
     bc.criticismInText(seed, "") === null && bc.criticismInText(seed, "the") === null && bc.criticismInText(seed, "x".repeat(301)) === null);
   console.log("17. s56 advocacy criticism containment: " + (process.exitCode ? "FAILED" : "ALL PASS"));
 }
+
+// =====================================================================
+// 18. Home for every stage (RATIFIED 2026-11-01, WORKBENCH_REDESIGN_2026-10-30.md): every live stage in the stage library routes to at least one Analysis view, every view has a station, retired stages route nowhere. A new stage cannot ship without a home.
+{
+  const ok = (label: string, cond: boolean, extra = "") => { if (!cond) { console.error(`   FAIL ${label} ${extra}`); process.exitCode = 1; } else console.log(`   ok   ${label} ${extra}`); };
+  const inst = await import(`${REPO}/src/lib/engine/instrument`);
+  const vw = await import(`${REPO}/src/lib/engine/views`);
+  // The library's recommendations vary with the moderators; its key set is read under every combination that changes it.
+  const stageKeys = new Set<string>();
+  for (const involvement of ["considered", "habitual"] as const)
+    for (const decision_unit of ["solo", "household", "committee"] as const)
+      for (const rhythm of ["one_shot", "replenishment", "subscription"] as const)
+        for (const st of inst.stageLibrary({ verifiability: "spec", involvement, think_feel: "think", decision_unit, rhythm, risk: "performance", channel_retail: false, rationale: "" }))
+          stageKeys.add(st.key);
+  ok("stage library is non-empty", stageKeys.size > 0, `(${stageKeys.size} stages)`);
+  for (const key of stageKeys) {
+    if (inst.RETIRED_STAGES.has(key)) continue;
+    // Generic angle covers the angle-routed stages (comparison, alternatives); the class / defensive angles are checked below.
+    ok(`stage ${key} routes to a view`, vw.viewsOf(key, null).length > 0);
+  }
+  for (const [stage, angle] of [["comparison", "class"], ["comparison", "Some Rival"], ["alternatives", "defensive"], ["alternatives", "generic"]] as const)
+    ok(`stage ${stage} (angle ${angle}) routes to a view`, vw.viewsOf(stage, angle).length > 0);
+  for (const key of inst.RETIRED_STAGES) ok(`retired stage ${key} routes nowhere`, vw.viewsOf(key, null).length === 0);
+  const VIEW_KEYS = [
+    "headline", "premium_tier", "repertoire", "head_to_head_entity", "head_to_head_class", "offensive_capture", "defensive_hold",
+    "value", "criteria_taught", "awareness_routing", "awareness_explainer", "doubt", "keep_or_leave",
+    "settled_business_case", "settled_expansion", "settled_ecosystem", "settled_advocacy",
+  ];
+  for (const v of VIEW_KEYS) ok(`view ${v} has a station`, vw.STATION_ORDER.includes(vw.STATION_OF[v]), `(${vw.STATION_OF[v] ?? "none"})`);
+  ok("STATION_OF names no view outside the list", Object.keys(vw.STATION_OF).every((k) => VIEW_KEYS.includes(k)));
+  // Every view a live stage routes to must be in the list (a new ViewKey cannot slip past the station map).
+  const routed = new Set<string>();
+  for (const key of stageKeys) for (const a of [null, "class", "defensive", "generic"]) for (const v of vw.viewsOf(key, a)) routed.add(v);
+  for (const v of routed) ok(`routed view ${v} is in the station map`, VIEW_KEYS.includes(v));
+  for (const s of vw.STATION_ORDER) ok(`station ${s} has a label and a question`, !!vw.STATION_LABEL[s] && vw.stationQuestion(s, "B", "things").length > 0);
+  console.log("18. home for every stage: " + (process.exitCode ? "FAILED" : "ALL PASS"));
+}

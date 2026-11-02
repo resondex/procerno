@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import type { PremiumSlice, PremiumView, Stance, StanceRow } from "@/lib/engine/premium";
 import { SortTable, Tip, type Col } from "./table";
-import { Legend, pct, range, rate, rateCol, StackBar, type Part } from "./view_parts";
+import { BaseNote, fmtN, Legend, Names, pct, range, rate, rateCol, StackBar, type Part } from "./view_parts";
 
 /**
  * The premium tier view (2026-10-28): on the "premium vs basic - which
@@ -33,7 +33,7 @@ const stanceCols = (brand: string): Col<StanceRow>[] => [
     label: "What the AI advocates",
     val: (r) => STANCE_PARTS.find((p) => p.key === r.key)?.label ?? r.key,
   },
-  { id: "answers", label: "Answers", num: true, val: (r) => r.answers },
+  { id: "answers", label: "Answers", num: true, csvOnly: true, val: (r) => r.answers },
   rateCol("rec", `Recommends ${brand}`, `Answers advocating this end that recommend ${brand}.`, (r) => r.recommendsYou),
   rateCol("picks", `Picks ${brand}`, `Answers advocating this end whose single pick is ${brand}.`, (r) => r.picksYou),
   rateCol("firm", "Makes a pick", "Answers advocating this end that commit to one product.", (r) => r.firmPick),
@@ -43,14 +43,7 @@ const stanceCols = (brand: string): Col<StanceRow>[] => [
     val: (r) => r.recommended[0]?.name ?? "",
     render: (r) => (
       <span className="text-[12px] text-ink-2">
-        {r.recommended.length === 0
-          ? "-"
-          : r.recommended.map((b, i) => (
-              <span key={b.name} className={b.you ? "font-medium text-ink" : undefined}>
-                {i > 0 && ", "}
-                {b.name} ({b.n})
-              </span>
-            ))}
+        <Names items={r.recommended} />
       </span>
     ),
   },
@@ -58,7 +51,7 @@ const stanceCols = (brand: string): Col<StanceRow>[] => [
 
 const engineCols = (brand: string): Col<PremiumSlice>[] => [
   { id: "label", label: "Engine", val: (s) => s.label },
-  { id: "answers", label: "Answers", num: true, val: (s) => s.answers },
+  { id: "answers", label: "Answers", num: true, csvOnly: true, val: (s) => s.answers },
   {
     id: "bar",
     label: "What it advocates",
@@ -94,9 +87,9 @@ export default function PremiumSection({ runId }: { runId: string }) {
       <div>
         <h2 className="section-label mb-1">Premium vs basic - which end the AI backs</h2>
         <p className="text-[13px] text-ink-3">
-          Questions asking whether premium {view.category} beat the cheaper ones, and which to get. {view.answers}{" "}
-          answers on the core engine panel. They also count in the headline; this card reads which end they back.
-          {view.uncoded > 0 && ` ${view.uncoded} more answers are not coded yet.`}
+          Questions asking whether premium {view.category} beat the cheaper ones, and which to get. They also count in
+          the which-should-I-get numbers; this card reads which end they back.
+          {view.uncoded > 0 && ` ${view.uncoded} answers are not coded yet.`}
         </p>
       </div>
       <div className="flex flex-wrap items-baseline gap-x-6 gap-y-1 text-[13px] text-ink-2">
@@ -130,12 +123,13 @@ export default function PremiumSection({ runId }: { runId: string }) {
         cols={stanceCols(view.brand)}
         rows={view.byStance.filter((r) => r.answers > 0)}
         filename="premium_by_stance.csv"
-        defaultSort={{ id: "answers", dir: -1 }}
+        defaultSort={{ id: "rec", dir: -1 }}
       />
       <details className="text-[13px]">
         <summary className="cursor-pointer text-ink-2">By engine</summary>
         <SortTable cols={engineCols(view.brand)} rows={view.byEngine} filename="premium_by_engine.csv" defaultSort={{ id: "premium", dir: -1 }} />
       </details>
+      <BaseNote>Based on {fmtN(view.answers)} answers across {view.byEngine.length} engines.</BaseNote>
     </section>
   );
 }

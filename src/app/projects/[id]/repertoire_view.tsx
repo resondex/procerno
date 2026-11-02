@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import type { RepertoireSlice, RepertoireView, Verdict } from "@/lib/engine/repertoire";
 import { SortTable, Tip, type Col } from "./table";
-import { Legend, pct, range, rate, rateCol, StackBar, type Part } from "./view_parts";
+import { BaseNote, fmtN, Legend, Names, pct, range, rate, rateCol, StackBar, type Part } from "./view_parts";
 
 /**
  * The repertoire view (2026-10-28): a habitual buyer of the client asks
@@ -24,14 +24,12 @@ const tips = (brand: string): Record<Verdict, string> => ({
   open: "Answers that make no single pick: it depends, a list to try, or a question back.",
 });
 
-const names = (xs: { name: string; n: number }[]) => xs.map((x) => `${x.name} (${x.n})`).join(", ");
-
 const engineCols = (brand: string): Col<RepertoireSlice>[] => {
   const parts = VERDICT_PARTS(brand);
   const t = tips(brand);
   return [
     { id: "label", label: "Engine", val: (s) => s.label },
-    { id: "answers", label: "Answers", num: true, val: (s) => s.answers },
+    { id: "answers", label: "Answers", num: true, csvOnly: true, val: (s) => s.answers },
     {
       id: "bar",
       label: "Verdict",
@@ -69,11 +67,10 @@ export default function RepertoireSection({ runId }: { runId: string }) {
   return (
     <section className="card p-6 grid gap-4">
       <div>
-        <h2 className="section-label mb-1">Repertoire - does the AI keep a regular buyer</h2>
+        <h2 className="section-label mb-1">Habit - stick with you: does the AI keep a regular buyer</h2>
         <p className="text-[13px] text-ink-3">
-          Questions from someone who usually buys {view.brand}, asking whether to stick with it or try something else.{" "}
-          {view.answers} answers on the core engine panel, reported apart from the headline.
-          {view.uncoded > 0 && ` ${view.uncoded} more answers are not coded yet.`}
+          Questions from someone who usually buys {view.brand}, asking whether to stick with it or try something else.
+          {view.uncoded > 0 && ` ${view.uncoded} answers are not coded yet.`}
         </p>
       </div>
       <div className="flex flex-wrap items-baseline gap-x-6 gap-y-1 text-[13px] text-ink-2">
@@ -102,7 +99,11 @@ export default function RepertoireSection({ runId }: { runId: string }) {
         <Legend parts={parts} cells={view.verdict} />
       </div>
       <div className="grid gap-1 text-[13px] text-ink-2">
-        {view.switchTo.length > 0 && <p>Picked instead: {names(view.switchTo)}.</p>}
+        {view.switchTo.length > 0 && (
+          <p>
+            Picked instead: <Names items={view.switchTo} />.
+          </p>
+        )}
         {view.alsoRecommended.length > 0 && (
           <p>
             Other brands recommended:{" "}
@@ -124,6 +125,7 @@ export default function RepertoireSection({ runId }: { runId: string }) {
         <summary className="cursor-pointer text-ink-2">By engine</summary>
         <SortTable cols={engineCols(view.brand)} rows={view.byEngine} filename="repertoire_by_engine.csv" defaultSort={{ id: "stick", dir: -1 }} />
       </details>
+      <BaseNote>Based on {fmtN(view.answers)} answers across {view.byEngine.length} engines.</BaseNote>
     </section>
   );
 }

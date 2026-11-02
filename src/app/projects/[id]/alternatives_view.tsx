@@ -13,7 +13,7 @@ import type {
   OffensiveView,
 } from "@/lib/engine/alternatives";
 import { SortTable, Tip, type Col } from "./table";
-import { Legend, pct, range, rate, rateCol, StackBar } from "./view_parts";
+import { BaseNote, fmtN, Legend, Names, pct, range, rate, rateCol, ShareOf, StackBar } from "./view_parts";
 
 /**
  * The alternatives views (2026-10-27): offensive capture (a rival's leaver
@@ -22,7 +22,7 @@ import { Legend, pct, range, rate, rateCol, StackBar } from "./view_parts";
  * the run has a codes source.
  */
 
-const names = (xs: NamedCount[]) => xs.map((x) => `${x.name} (${x.n})`).join(", ");
+const names = (xs: NamedCount[]) => xs.map((x) => x.name).join(", ");
 
 // ---------- offensive capture ----------
 
@@ -43,7 +43,7 @@ const CAPTURE_TIPS = {
   outside: "Answers whose pick is not an approved brand in your dictionary.",
   undecided: "Answers that make no single pick: it depends on the buyer, no pick, or a question back.",
   chosen: "Answers whose pick is this brand.",
-  shareOfDecided: "Of the answers that picked an approved brand, the share that picked this one.",
+  shareOfDecided: "Share of decided: of the answers that picked an approved brand, the share that picked this one.",
 };
 
 const captureCols: Col<CaptureRow>[] = [
@@ -58,7 +58,7 @@ const captureCols: Col<CaptureRow>[] = [
       </span>
     ),
   },
-  { id: "answers", label: "Answers", num: true, val: (r) => r.answers },
+  { id: "answers", label: "Answers", num: true, csvOnly: true, val: (r) => r.answers },
   rateCol("named", "Named", CAPTURE_TIPS.named, (r) => r.named),
   rateCol("recommended", "Recommended", CAPTURE_TIPS.recommended, (r) => r.recommended),
   {
@@ -72,8 +72,12 @@ const captureCols: Col<CaptureRow>[] = [
   {
     id: "captors",
     label: "Top picks",
-    val: (r) => r.captors[0]?.name ?? "",
-    render: (r) => <span className="text-[12px] text-ink-2">{names(r.captors) || "-"}</span>,
+    val: (r) => names(r.captors),
+    render: (r) => (
+      <span className="text-[12px] text-ink-2">
+        <Names items={r.captors} />
+      </span>
+    ),
   },
 ];
 
@@ -97,12 +101,12 @@ const captorCols: Col<CaptorBrand>[] = [
   },
   rateCol("named", "Named", CAPTURE_TIPS.named.replace("your brand", "the brand"), (b) => b.named),
   rateCol("chosen", "Picked", CAPTURE_TIPS.chosen, (b) => b.chosen),
-  rateCol("sod", "Share of decided", CAPTURE_TIPS.shareOfDecided, (b) => b.shareOfDecided),
+  rateCol("sod", "Picked, when one is", CAPTURE_TIPS.shareOfDecided, (b) => b.shareOfDecided),
 ];
 
 const captureEngineCols: Col<CaptureSlice>[] = [
   { id: "label", label: "Engine", val: (s) => s.label },
-  { id: "answers", label: "Answers", num: true, val: (s) => s.answers },
+  { id: "answers", label: "Answers", num: true, csvOnly: true, val: (s) => s.answers },
   rateCol("named", "Named", CAPTURE_TIPS.named, (s) => s.named),
   rateCol("captured", "Picks you", CAPTURE_TIPS.captured, (s) => s.captured),
   rateCol("undecided", "No single pick", CAPTURE_TIPS.undecided, (s) => s.undecided),
@@ -116,11 +120,10 @@ function OffensiveSection({ view }: { view: OffensiveView }) {
   return (
     <section className="card p-6 grid gap-4">
       <div>
-        <h2 className="section-label mb-1">Alternatives - capturing a rival&apos;s leavers</h2>
+        <h2 className="section-label mb-1">Rivals&apos; leavers - does the AI send them to you</h2>
         <p className="text-[13px] text-ink-3">
-          Questions from someone leaving a rival who asks what to get instead. {view.answers} answers on the core
-          engine panel, reported apart from the headline.
-          {view.uncoded > 0 && ` ${view.uncoded} more answers are not coded yet.`}
+          Questions from someone leaving a rival who asks what to get instead.
+          {view.uncoded > 0 && ` ${view.uncoded} answers are not coded yet.`}
         </p>
       </div>
       <div className="flex flex-wrap items-baseline gap-x-6 gap-y-1 text-[13px] text-ink-2">
@@ -148,7 +151,9 @@ function OffensiveSection({ view }: { view: OffensiveView }) {
           </label>
           <SortTable cols={captorCols} rows={captors} filename="alternatives_captors.csv" defaultSort={{ id: "chosen", dir: -1 }} />
           {view.outsidePicks.length > 0 && (
-            <p className="text-[12px] text-ink-3">Picks outside your dictionary: {names(view.outsidePicks)}.</p>
+            <p className="text-[12px] text-ink-3">
+              Picks outside your dictionary: <Names items={view.outsidePicks} />.
+            </p>
           )}
         </div>
       </details>
@@ -156,6 +161,7 @@ function OffensiveSection({ view }: { view: OffensiveView }) {
         <summary className="cursor-pointer text-ink-2">By engine, across every rival</summary>
         <SortTable cols={captureEngineCols} rows={view.byEngine} filename="alternatives_capture_by_engine.csv" defaultSort={{ id: "captured", dir: -1 }} />
       </details>
+      <BaseNote>Based on {fmtN(view.answers)} answers across {view.byEngine.length} engines.</BaseNote>
     </section>
   );
 }
@@ -172,7 +178,7 @@ const HOLD_TIPS = {
   keep: "Answers that push your customer to stay. A move to another of your own products counts as staying.",
   leave: "Answers that push your customer to leave. Listing alternatives because the asker asked for them is not a push either way.",
   undecided: "Answers that take no side between staying and leaving.",
-  offersExit: "Answers that name at least one other brand to move to, whatever they advise.",
+  offersExit: "Names an exit: answers that name at least one other brand to move to, whatever they advise.",
   offered: "Answers that name this brand as somewhere to go, whatever they advise.",
 };
 
@@ -183,15 +189,15 @@ function DestinationTable({ view }: { view: DefensiveView }) {
   const byVerdict = (id: "keep" | "leave" | "undecided", label: string, get: (d: DestinationRow) => number): Col<DestinationRow> => ({
     id,
     label,
-    tip: `Of the answers that ${label.toLowerCase()}, how many name this brand as somewhere to go.`,
+    tip: `Of the answers that ${label.toLowerCase()}, the share that name this brand as somewhere to go.`,
     num: true,
-    val: (d) => (n[id] > 0 ? get(d) / n[id] : null),
-    render: (d) => (n[id] > 0 ? <span>{get(d)} of {n[id]}</span> : <span className="text-ink-3">-</span>),
+    val: (d) => (n[id] > 0 ? Math.round((get(d) / n[id]) * 1000) / 10 : null),
+    render: (d) => <ShareOf k={get(d)} n={n[id]} />,
   });
   const cols: Col<DestinationRow>[] = [
     {
       id: "name",
-      label: "Offered exit",
+      label: "Brand pointed to",
       val: (d) => d.name,
       render: (d) => (
         <span>
@@ -200,7 +206,7 @@ function DestinationTable({ view }: { view: DefensiveView }) {
         </span>
       ),
     },
-    rateCol("offered", "Offered", HOLD_TIPS.offered, (d) => d.offered),
+    rateCol("offered", "Pointed to", HOLD_TIPS.offered, (d) => d.offered),
     byVerdict("keep", "Advise staying", (d) => d.onKeep),
     byVerdict("leave", "Advise leaving", (d) => d.onLeave),
     byVerdict("undecided", "Take no side", (d) => d.onUndecided),
@@ -209,11 +215,11 @@ function DestinationTable({ view }: { view: DefensiveView }) {
     <div className="grid gap-2">
       <label className="flex items-center gap-2 text-[13px] text-ink-2">
         <input type="checkbox" checked={all} onChange={(e) => setAll(e.target.checked)} />
-        Show every exit offered
+        Show every brand pointed to
       </label>
       {!all && rows.length < view.destinations.length && (
         <p className="text-[12px] text-ink-3">
-          Emerged brands offered in under 5% of answers are hidden ({view.destinations.length - rows.length}).
+          Emerged brands pointed to in under 5% of answers are hidden.
         </p>
       )}
       <SortTable cols={cols} rows={rows} filename="alternatives_exits.csv" defaultSort={{ id: "offered", dir: -1 }} />
@@ -223,22 +229,25 @@ function DestinationTable({ view }: { view: DefensiveView }) {
 
 const holdEngineCols: Col<HoldSlice>[] = [
   { id: "label", label: "Engine", val: (s) => s.label },
-  { id: "answers", label: "Answers", num: true, val: (s) => s.answers },
+  { id: "answers", label: "Answers", num: true, csvOnly: true, val: (s) => s.answers },
   rateCol("keep", "Advises staying", HOLD_TIPS.keep, (s) => s.verdicts.keep),
   rateCol("leave", "Advises leaving", HOLD_TIPS.leave, (s) => s.verdicts.leave),
   rateCol("undecided", "Takes no side", HOLD_TIPS.undecided, (s) => s.verdicts.undecided),
-  rateCol("exit", "Offers an exit", HOLD_TIPS.offersExit, (s) => s.offersExit),
+  rateCol("exit", "Points to another brand", HOLD_TIPS.offersExit, (s) => s.offersExit),
 ];
 
 function DefensiveSection({ view }: { view: DefensiveView }) {
   return (
     <section className="card p-6 grid gap-4">
       <div>
-        <h2 className="section-label mb-1">Alternatives - holding your own customers</h2>
+        <h2 className="section-label mb-1">
+          <Tip tip="Holding your own: defensive alternatives questions.">
+            <span className="cursor-help">Your customers weighing a move</span>
+          </Tip>
+        </h2>
         <p className="text-[13px] text-ink-3">
-          Questions from someone already on {view.brand} who is weighing a move and asks what to look at instead.{" "}
-          {view.answers} answers on the core engine panel, reported apart from the headline.
-          {view.uncoded > 0 && ` ${view.uncoded} more answers are not coded yet.`}
+          Questions from someone already on {view.brand} who is weighing a move and asks what to look at instead.
+          {view.uncoded > 0 && ` ${view.uncoded} answers are not coded yet.`}
         </p>
       </div>
       <div className="flex flex-wrap items-baseline gap-x-6 gap-y-1 text-[13px] text-ink-2">
@@ -251,10 +260,8 @@ function DefensiveSection({ view }: { view: DefensiveView }) {
         <Tip tip={`${HOLD_TIPS.leave} ${range(view.verdicts.leave)}`}>
           <span className="cursor-help">{pct(view.verdicts.leave)} advise leaving</span>
         </Tip>
-        <Tip tip={`${HOLD_TIPS.offersExit} ${range(view.offersExit)}`}>
-          <span className="cursor-help">
-            {pct(view.offersExit)} offer an exit ({view.exitsPerAnswer.toFixed(1)} brands on average)
-          </span>
+        <Tip tip={`${HOLD_TIPS.offersExit} ${view.exitsPerAnswer.toFixed(1)} brands on average. ${range(view.offersExit)}`}>
+          <span className="cursor-help">{pct(view.offersExit)} point to another brand</span>
         </Tip>
       </div>
       <div className="grid gap-2">
@@ -264,23 +271,32 @@ function DefensiveSection({ view }: { view: DefensiveView }) {
         <Legend parts={VERDICT_PARTS} cells={view.verdicts} />
       </div>
       <p className="text-[12px] text-ink-3">
-        Exits are counted whatever the answer advises: an exit named beside advice to stay is an option shown, not a
-        customer lost.
-        {view.ownProduct.k > 0 && ` ${view.ownProduct.k} answers also offer another ${view.brand} product.`}
+        Other brands are counted whatever the answer advises: a brand named beside advice to stay is an option shown, not
+        a customer lost.
+        {view.ownProduct.k > 0 && (
+          <Tip tip={`${view.ownProduct.k} answers`}>
+            <span className="cursor-help"> Some answers also point to another {view.brand} product.</span>
+          </Tip>
+        )}
       </p>
       <DestinationTable view={view} />
       {view.outsideDestinations.length > 0 && (
-        <p className="text-[12px] text-ink-3">Exits outside your dictionary: {names(view.outsideDestinations)}.</p>
+        <p className="text-[12px] text-ink-3">
+          Brands outside your dictionary: <Names items={view.outsideDestinations} />.
+        </p>
       )}
       <details className="text-[13px]">
         <summary className="cursor-pointer text-ink-2">By engine</summary>
         <SortTable cols={holdEngineCols} rows={view.byEngine} filename="alternatives_hold_by_engine.csv" defaultSort={{ id: "keep", dir: -1 }} />
       </details>
+      <BaseNote>Based on {fmtN(view.answers)} answers across {view.byEngine.length} engines.</BaseNote>
     </section>
   );
 }
 
-export default function AlternativesSection({ runId }: { runId: string }) {
+/** `only` renders one half: "offensive" (rivals' leavers) or "defensive"
+ * (your customers weighing a move). Absent = both, exactly as before. */
+export default function AlternativesSection({ runId, only }: { runId: string; only?: "offensive" | "defensive" }) {
   const [views, setViews] = useState<AlternativesViews | null | undefined>(undefined);
   const [error, setError] = useState<string | null>(null);
 
@@ -302,8 +318,8 @@ export default function AlternativesSection({ runId }: { runId: string }) {
   if (!views) return null;
   return (
     <>
-      {views.offensive && views.offensive.answers > 0 && <OffensiveSection view={views.offensive} />}
-      {views.defensive && views.defensive.answers > 0 && <DefensiveSection view={views.defensive} />}
+      {only !== "defensive" && views.offensive && views.offensive.answers > 0 && <OffensiveSection view={views.offensive} />}
+      {only !== "offensive" && views.defensive && views.defensive.answers > 0 && <DefensiveSection view={views.defensive} />}
     </>
   );
 }

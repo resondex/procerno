@@ -10,7 +10,7 @@ import type {
   RateCell,
 } from "@/lib/engine/head_to_head";
 import { SortTable, Tip, type Col } from "./table";
-import { AnswersModal, type AnswersTarget } from "./view_parts";
+import { AnswersModal, BaseNote, fmtN, type AnswersTarget } from "./view_parts";
 
 /**
  * The head-to-head views (2026-10-27): prompted win rate per named rival,
@@ -95,7 +95,7 @@ const rowCols = (first: string): Col<HeadToHeadRow>[] => [
       </span>
     ),
   },
-  { id: "answers", label: "Answers", num: true, val: (r) => r.answers },
+  { id: "answers", label: "Answers", num: true, csvOnly: true, val: (r) => r.answers },
   {
     id: "bar",
     label: "Record",
@@ -111,7 +111,7 @@ const rowCols = (first: string): Col<HeadToHeadRow>[] => [
 
 const engineCols: Col<HeadToHeadSlice>[] = [
   { id: "label", label: "Engine", val: (s) => s.label },
-  { id: "answers", label: "Answers", num: true, val: (s) => s.answers },
+  { id: "answers", label: "Answers", num: true, csvOnly: true, val: (s) => s.answers },
   rateCol("won", "You win", TIPS.won, (s) => s.won),
   rateCol("lost", "Rival wins", TIPS.lost, (s) => s.lost),
   rateCol("undecided", "No single pick", TIPS.undecided, (s) => s.undecided),
@@ -130,8 +130,8 @@ type OpenAnswers = (target: AnswersTarget) => void;
 /** The answers modal's target for one condition group: its sample ids, the
  * group's wording marked where it appears literally, plus the brand the
  * group routes to. */
-const groupTarget = (g: ConditionGroup, routes: string, matchup: string): AnswersTarget => ({
-  title: `Routes to ${routes} when: ${g.label}`,
+const groupTarget = (g: ConditionGroup, routes: string, matchup: string, heading: string): AnswersTarget => ({
+  title: `${heading}: ${g.label}`,
   subtitle: `${matchup} - ${
     g.ids.length < g.n
       ? `a sample of ${g.ids.length} of the ${g.n} answers`
@@ -158,6 +158,7 @@ function GroupButton({ g, onOpen, children }: { g: ConditionGroup; onOpen: () =>
 
 function Direction({
   label,
+  tip,
   groups,
   more,
   routes,
@@ -165,6 +166,7 @@ function Direction({
   onOpen,
 }: {
   label: string;
+  tip: string;
   groups: ConditionGroup[];
   more: number;
   routes: string;
@@ -176,11 +178,15 @@ function Direction({
   const rest = groups.length - shown.length + more;
   return (
     <div className="min-w-0">
-      <div className="text-[12px] font-medium text-ink-2">{label}</div>
+      <div className="text-[12px] font-medium text-ink-2">
+        <Tip tip={tip}>
+          <span className="cursor-help">{label}</span>
+        </Tip>
+      </div>
       <ul className="mt-1 grid gap-0.5">
         {shown.map((g) => (
           <li key={g.label} className="text-[12px] leading-snug">
-            <GroupButton g={g} onOpen={() => onOpen(groupTarget(g, routes, matchup))}>
+            <GroupButton g={g} onOpen={() => onOpen(groupTarget(g, routes, matchup, label))}>
               <span className="text-ink">{g.label}</span>
               <span className="text-ink-3"> ({g.n})</span>
             </GroupButton>
@@ -206,27 +212,47 @@ function Boundaries({ row, brand, onOpen }: { row: HeadToHeadRow; brand: string;
   const matchup = `${brand} vs ${row.rival}`;
   return (
     <div className="rounded-md border border-line/60 p-3">
-      <div className="text-[13px] font-medium text-ink">{matchup}</div>
+      <div className="text-[13px] font-medium text-ink">
+        <Tip tip={`${c.rules} stated rules across ${row.answers} answers; ${c.unconditional} answers answer unconditionally.`}>
+          <span className="cursor-help">{matchup}</span>
+        </Tip>
+      </div>
       <p className="mt-0.5 text-[12px] text-ink-3">
         On the context-free ask, {lead} - the AI&apos;s stated boundaries:
       </p>
       <div className="mt-2 grid gap-3 sm:grid-cols-2">
-        <Direction label={`Routes to ${brand} when`} groups={c.you} more={c.youMore} routes={brand} matchup={matchup} onOpen={onOpen} />
-        <Direction label={`Routes to ${row.rival} when`} groups={c.rival} more={c.rivalMore} routes={row.rival} matchup={matchup} onOpen={onOpen} />
+        <Direction
+          label="You win when"
+          tip={`Conditions under which the AI routes the pick to ${brand}. The number is how many answers state it.`}
+          groups={c.you}
+          more={c.youMore}
+          routes={brand}
+          matchup={matchup}
+          onOpen={onOpen}
+        />
+        <Direction
+          label="You lose when"
+          tip={`Conditions under which the AI routes the pick to ${row.rival}. The number is how many answers state it.`}
+          groups={c.rival}
+          more={c.rivalMore}
+          routes={row.rival}
+          matchup={matchup}
+          onOpen={onOpen}
+        />
       </div>
       {c.elsewhere.length > 0 && (
         <div className="mt-3 text-[12px]">
-          <span className="font-medium text-ink-2">Routes elsewhere: </span>
+          <span className="font-medium text-ink-2">Goes to another brand: </span>
           <span className="text-ink-3">
             {c.elsewhere.map((e, i) => (
               <span key={e.name}>
                 {i > 0 && ", "}
-                {e.name} ({e.n})
+                <span title={`${e.n} rules`}>{e.name}</span>
                 {e.conditions.length > 0 && " - "}
                 {e.conditions.map((g, j) => (
                   <span key={g.label}>
                     {j > 0 && "; "}
-                    <GroupButton g={g} onOpen={() => onOpen(groupTarget(g, e.name, matchup))}>
+                    <GroupButton g={g} onOpen={() => onOpen(groupTarget(g, e.name, matchup, `Goes to ${e.name} when`))}>
                       {g.label}
                     </GroupButton>
                   </span>
@@ -236,9 +262,6 @@ function Boundaries({ row, brand, onOpen }: { row: HeadToHeadRow; brand: string;
           </span>
         </div>
       )}
-      <div className="mt-2 text-[11px] text-ink-3">
-        {c.rules} stated rules across {row.answers} answers; {c.unconditional} answers answer unconditionally.
-      </div>
     </div>
   );
 }
@@ -256,15 +279,15 @@ function KindSection({
   first: string;
   onOpen: OpenAnswers;
 }) {
-  const others = view.rows.flatMap((r) => r.otherPicks.map((o) => `${o.name} (${o.n}, vs ${r.rival})`));
+  const others = view.rows.flatMap((r) => r.otherPicks.map((o) => `${o.name} (vs ${r.rival})`));
   const bounded = view.rows.filter((r) => r.conditions);
   return (
     <section className="card p-6 grid gap-4">
       <div>
         <h2 className="section-label mb-1">{title}</h2>
         <p className="text-[13px] text-ink-3">
-          {blurb} {view.answers} answers on the core engine panel, reported apart from the headline.
-          {view.uncoded > 0 && ` ${view.uncoded} more answers are not coded yet.`}
+          {blurb}
+          {view.uncoded > 0 && ` ${view.uncoded} answers are not coded yet.`}
         </p>
       </div>
       <div className="flex flex-wrap items-baseline gap-x-6 gap-y-1 text-[13px] text-ink-2">
@@ -300,6 +323,7 @@ function KindSection({
         <summary className="cursor-pointer text-ink-2">By engine, across every {first.toLowerCase()}</summary>
         <SortTable cols={engineCols} rows={view.byEngine} filename={`head_to_head_${view.kind}_by_engine.csv`} defaultSort={{ id: "won", dir: -1 }} />
       </details>
+      <BaseNote>Based on {fmtN(view.answers)} answers across {view.byEngine.length} engines.</BaseNote>
     </section>
   );
 }

@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import type { AwarenessBlock, AwarenessSlice, AwarenessView, Route, WithoutGroup } from "@/lib/engine/awareness";
 import { SortTable, Tip, type Col } from "./table";
-import { AnswersModal, Legend, pct, range, rate, rateCol, StackBar, type AnswersTarget, type Part } from "./view_parts";
+import { AnswersModal, BaseNote, fmtN, Legend, pct, range, rate, rateCol, StackBar, type AnswersTarget, type Part } from "./view_parts";
 
 /**
  * The awareness views (2026-10-28): problem recognition (where the AI sends
@@ -40,7 +40,7 @@ const sliceCols = (first: string, category: string, brand: string, kind: Awarene
   const tips = routeTips(category, kind);
   return [
     { id: "label", label: first, val: (s) => s.label },
-    { id: "answers", label: "Answers", num: true, val: (s) => s.answers },
+    { id: "answers", label: "Answers", num: true, csvOnly: true, val: (s) => s.answers },
     {
       id: "bar",
       label: "What it tells them",
@@ -76,10 +76,10 @@ function Lists({ b }: { b: AwarenessBlock }) {
             {b.brands.map((x) => (
               <li key={x.name} className="flex items-baseline justify-between gap-3">
                 <span className={x.you ? "font-medium text-ink" : "text-ink-2"}>{x.name}</span>
-                <Tip tip={`${range(x.named)}; recommended in ${x.recommended}`}>
+                <Tip tip={`Named in ${range(x.named)}${x.recommended > 0 ? `; recommended in ${x.recommended} answers` : ""}`}>
                   <span className="cursor-help tabular-nums text-ink-3">
                     {pct(x.named)}
-                    {x.recommended > 0 && ` - recommended ${x.recommended}`}
+                    {x.recommended > 0 && " - recommended"}
                   </span>
                 </Tip>
               </li>
@@ -126,7 +126,9 @@ function Without({ b, runId, title }: { b: AwarenessBlock; runId: string; title:
     <div className="text-[13px]">
       <h3 className="text-[12px] font-medium text-ink-2 mb-1">{title}</h3>
       <p className="text-[12px] text-ink-3 mb-1.5">
-        The {adjacent} answers grouped by the phrase that points the asker their way. Shares are of those {adjacent} answers.
+        <Tip tip={`${adjacent} answers`}>
+          <span className="cursor-help">These answers grouped by the phrase that points the asker their way; shares are of them.</span>
+        </Tip>
       </p>
       {w.groups.length === 0 ? (
         <p className="text-ink-3">No two answers point the same way.</p>
@@ -148,11 +150,20 @@ function Without({ b, runId, title }: { b: AwarenessBlock; runId: string; title:
           ))}
         </ul>
       )}
-      <p className="mt-1.5 text-[12px] text-ink-3">
-        {w.rest > 0 && `${w.rest} more answers point their own way. `}
-        {w.noQuote > 0 && `${w.noQuote} have no routing phrase. `}
-        {w.grouping === "stems" && "Grouped by shared words only, so most answers stay ungrouped."}
-      </p>
+      {(w.rest > 0 || w.noQuote > 0 || w.grouping === "stems") && (
+        <p className="mt-1.5 text-[12px] text-ink-3">
+          {(w.rest > 0 || w.noQuote > 0) && (
+            <Tip
+              tip={[w.rest > 0 && `${w.rest} point their own way`, w.noQuote > 0 && `${w.noQuote} have no routing phrase`]
+                .filter(Boolean)
+                .join("; ")}
+            >
+              <span className="cursor-help">The rest point their own way or carry no routing phrase. </span>
+            </Tip>
+          )}
+          {w.grouping === "stems" && "Grouped by shared words only, so most answers stay ungrouped."}
+        </p>
+      )}
       {opened && <AnswersModal key={opened.ids.join(",")} runId={runId} target={opened} onClose={() => setOpened(null)} />}
     </div>
   );
@@ -166,9 +177,9 @@ function RoutingCard({ b, brand, category, runId }: { b: AwarenessBlock; brand: 
       <div>
         <h2 className="section-label mb-1">Problem recognition - does the AI tell someone with a problem to get one</h2>
         <p className="text-[13px] text-ink-3">
-          Questions from people describing a problem without naming {category}. {b.answers} answers on the
-          core engine panel. Visibility only - these questions have no win or pick rate.
-          {b.uncoded > 0 && ` ${b.uncoded} more answers are not coded yet.`}
+          Questions from people describing a problem without naming {category}. Visibility only - these questions have
+          no win or pick rate.
+          {b.uncoded > 0 && ` ${b.uncoded} answers are not coded yet.`}
         </p>
       </div>
       <div className="flex flex-wrap items-baseline gap-x-6 gap-y-1 text-[13px] text-ink-2">
@@ -202,6 +213,7 @@ function RoutingCard({ b, brand, category, runId }: { b: AwarenessBlock; brand: 
           defaultSort={{ id: "category", dir: -1 }}
         />
       </details>
+      <BaseNote>Based on {fmtN(b.answers)} answers across {b.byEngine.length} engines.</BaseNote>
     </section>
   );
 }
@@ -213,9 +225,9 @@ function ExplainerCard({ b, brand, category, runId }: { b: AwarenessBlock; brand
       <div>
         <h2 className="section-label mb-1">Category education - explaining {category} to a newcomer</h2>
         <p className="text-[13px] text-ink-3">
-          Questions from people learning what {category} are. {b.answers} answers on the core engine panel. Visibility
-          only - these questions have no win or pick rate.
-          {b.uncoded > 0 && ` ${b.uncoded} more answers are not coded yet.`}
+          Questions from people learning what {category} are. Visibility only - these questions have no win or pick
+          rate.
+          {b.uncoded > 0 && ` ${b.uncoded} answers are not coded yet.`}
         </p>
       </div>
       <div className="flex flex-wrap items-baseline gap-x-6 gap-y-1 text-[13px] text-ink-2">
@@ -239,6 +251,7 @@ function ExplainerCard({ b, brand, category, runId }: { b: AwarenessBlock; brand
           defaultSort={{ id: "names", dir: -1 }}
         />
       </details>
+      <BaseNote>Based on {fmtN(b.answers)} answers across {b.byEngine.length} engines.</BaseNote>
     </section>
   );
 }
