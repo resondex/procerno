@@ -199,10 +199,25 @@ export default function ProjectDashboard({
     setOpenModal("dictionary");
   }, []);
 
+  // dictVersion re-keys every results view (each one re-resolves brands
+  // through the current dictionary), so bumping it recomputes the whole
+  // dashboard. While the dictionary modal is open, edits only refresh the
+  // modal's own entries; the views recompute ONCE when the modal closes
+  // (Tyler, 2026-11-02: every analyzed toggle used to rerun the engine).
+  const dictDirty = useRef(false);
+  const dictModalOpen = openModal === "dictionary";
   async function refreshDict() {
     const dr = await fetch(`/api/projects/${id}/dictionary`);
     if (dr.ok) setDict((await dr.json()).entries ?? []);
-    setDictVersion((v) => v + 1);
+    if (dictModalOpen) dictDirty.current = true;
+    else setDictVersion((v) => v + 1);
+  }
+  function closeDictionary() {
+    setOpenModal(null);
+    if (dictDirty.current) {
+      dictDirty.current = false;
+      setDictVersion((v) => v + 1);
+    }
   }
 
   async function setFlag(
@@ -919,7 +934,7 @@ export default function ProjectDashboard({
           title="Brand dictionary"
           wide
           tall
-          onClose={() => setOpenModal(null)}
+          onClose={closeDictionary}
           subheader={
             <div className="flex gap-1 border-b border-line">
               {(
