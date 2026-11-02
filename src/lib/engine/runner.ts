@@ -11,6 +11,7 @@ import {
 import { analyzePromptHealth } from "./prompt_health";
 import { prewarmContextVerdicts } from "./context_judge";
 import { queueUnresolvedNames, runPostQueueSteps } from "./dict_queue";
+import { queueJudgedForms } from "./judged_forms";
 import { batchableEngine, hasOpenBatches, pollRunBatches } from "./batch";
 import { bootstrapRunChunk } from "./bootstrap";
 import { loadRunPrompts } from "./surfaces";
@@ -630,6 +631,13 @@ export async function finalizeRun(runId: string): Promise<void> {
       console.log(
         `dictionary queue: ${q.queued} new name(s) pending of ${q.candidates} (${q.makerQueued} judged makers), ${q.judgedAway} placed or ruled out by the context judge`
       );
+    }
+    // Judge-placed product forms of active makers: pending names with a
+    // pre-set, review-flagged merge into the maker (judged_forms.ts). After
+    // the unresolved queue, so a maker it just queued holds its forms back.
+    const jf = await queueJudgedForms(project, { run });
+    if (jf.queued.length > 0) {
+      console.log(`dictionary queue: ${jf.queued.length} judged product form(s) flagged for review under their makers`);
     }
     // Junk filter, suggestions warm, examples warm (shared with the
     // queue_unresolved route). Examples clamped to the finalize route's

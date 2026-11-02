@@ -90,6 +90,9 @@ interface CachedVerdict {
   n?: number;
   /** For guard_flip: the model's own verdict before the guard replaced it. */
   raw?: { action: CachedVerdict["action"]; merge_into: string | null; relationship?: CachedVerdict["relationship"] };
+  /** Who made a verdict no suggestion model made (layer "judge": the
+   * read-time context judge's model). Absent = the model in the cache key. */
+  model?: string;
 }
 
 export type VerdictLayer =
@@ -98,7 +101,10 @@ export type VerdictLayer =
   | "family_root"
   | "guard_flip"
   | "guard_kept"
-  | "guard_short_form";
+  | "guard_short_form"
+  /** the read-time context judge placed this product form under an active
+   * maker (judged_forms.ts) - a review-flagged merge, never a model call */
+  | "judge";
 
 const norm = (s: string) => s.trim().toLowerCase();
 
@@ -231,6 +237,44 @@ const fallbackKeys = (projectId: string, name: string): string[] => {
   const own = nameKey(projectId, name);
   return [own, ...keys.filter((k) => k !== own)];
 };
+
+/** The review rationale for a judge-placed product form. Ends in the
+ * board's "- review)" marker, so every flagged-pill path (identify_tab's
+ * note, the examples pre-warm, the gate decision record) treats it as a
+ * flagged merge. */
+export function judgedFormRationale(maker: string, answers: number): string {
+  return `judged a ${maker} product in ${answers} answer${answers === 1 ? "" : "s"} (confirm to add it as an alias of ${maker} - review)`;
+}
+
+/**
+ * Write the board's verdict for judge-placed product forms (judged_forms.ts)
+ * into the per-name suggestion cache, so the board serves each as a flagged
+ * merge pill under its maker with no model call. Written to the current
+ * key; the record says the judge made it (layer "judge", model = the
+ * context judge's model) and carries the answer count it was admitted on.
+ */
+export async function writeJudgedFormVerdicts(
+  projectId: string,
+  category: string,
+  forms: { form: string; maker: string; answers: number }[],
+  judgeModel: string
+): Promise<void> {
+  await Promise.all(
+    forms.map((f) => {
+      const v: CachedVerdict = {
+        action: "merge",
+        merge_into: f.maker,
+        relationship: "product_of",
+        rationale: judgedFormRationale(f.maker, f.answers),
+        layer: "judge",
+        n: f.answers,
+        raw: { action: "merge", merge_into: f.maker, relationship: "product_of" },
+        model: judgeModel,
+      };
+      return store.cacheSet(nameKey(projectId, f.form), JSON.stringify(v), { category, projectId });
+    })
+  );
+}
 
 /** Cached verdicts for many names in ONE batch read: the first key in
  * fallbackKeys order that hits wins. Keyed by the name as passed. */
@@ -569,6 +613,11 @@ export async function getDictionarySuggestions(
   // otherwise drift apart (BankAmericard merged while "BankAmericard
   // credit card" stayed ignored). Self-healing, no model calls.
   for (const p of pending) {
+    // A judge-placed product form (judged_forms.ts) carries per-name
+    // evidence - its maker, from answer excerpts - which outranks string
+    // arithmetic: "IHG Premier" is Chase's even when a bare "Premier" root
+    // was judged Citi's. Never re-derived from a family root.
+    if (cached.get(p.id)?.layer === "judge") continue;
     const target = plan.activeMerge.get(p.id);
     if (target) {
       const want: CachedVerdict = {
@@ -940,6 +989,9 @@ export async function servedVerdicts(
         n: v.n ?? n,
         raw: v.raw ?? null,
         ...keyProvenance(k, projectId),
+        // A judge-layer verdict was made by the context judge, not the
+        // suggestion model the key names.
+        ...(v.model ? { model: v.model } : {}),
       });
       break;
     }

@@ -5,7 +5,9 @@ import { ignoreSurfaces } from "../ignore_rules";
 import { extractSnippet, extractSnippetExcluding } from "./mention_filter";
 import { containsSeq, famTokens, type DictSuggestion } from "./dict_suggest";
 import { evidenceOwner } from "./observations";
-import type { DictionaryEntry } from "../types";
+import { brandStringsOf } from "./context_judge";
+import { latestCodes } from "./latest_codes";
+import type { AnswerCodes, DictionaryEntry } from "../types";
 
 export interface DictionaryExamples {
   name: string;
@@ -44,6 +46,9 @@ export async function buildDictionaryExamples(
   ctx?: {
     dict: DictionaryEntry[];
     rows: Awaited<ReturnType<typeof store.listProjectBrandRows>>;
+    /** Lazy loader for the latest coded run's codes (the fallback below),
+     * shared across a warm so the codes load at most once. */
+    codes?: () => Promise<AnswerCodes[]>;
   }
 ): Promise<DictionaryExamples> {
   const cacheKey = cacheKeyFor(projectId, name, parent);
@@ -75,6 +80,26 @@ export async function buildDictionaryExamples(
     }
     if (!hasSat) continue;
     (hasParent ? withParent : alone).push(r.responseId);
+  }
+  // Fallback (2026-11-02): a name the detection rows never saw - a
+  // judge-placed product form (judged_forms.ts) is named in the CODES, not
+  // in the brands pass - picks its answers from the latest coded run's
+  // codes instead: answers whose brand fields carry the name, split by
+  // whether they also carry a parent form. The quotes below are still
+  // extracted from the answer text, so an answer whose body never spells
+  // the name contributes nothing.
+  if (withParent.length === 0 && alone.length === 0) {
+    const codes = ctx?.codes ? await ctx.codes() : await latestCodes({ id: projectId });
+    const satKey = matchKey(name);
+    for (const c of codes) {
+      const names = [...brandStringsOf(c)];
+      if (!names.some((n) => matchKey(n) === satKey)) continue;
+      const hasParent =
+        parentSeqs.length > 0 &&
+        names.some((n) => matchKey(n) !== satKey && ownerOf(famTokens(n)) === "parent");
+      (hasParent ? withParent : alone).push(c.response_id);
+      brandsOf.set(c.response_id, names);
+    }
   }
   // Spread the sample across the run instead of taking neighbors.
   const sample = (ids: string[], n: number) => {
@@ -213,6 +238,9 @@ export async function prewarmDictionaryExamples(
   if (misses.length === 0) return 0;
 
   const rows = await store.listProjectBrandRows(projectId);
+  // The codes fallback loads at most once per warm.
+  let codesP: Promise<AnswerCodes[]> | null = null;
+  const codes = () => (codesP ??= latestCodes({ id: projectId }));
   let warmed = 0;
   for (const t of misses) {
     if (Date.now() > deadline - 15_000) break;
@@ -220,6 +248,7 @@ export async function prewarmDictionaryExamples(
       await buildDictionaryExamples(projectId, t.name, t.parent ?? "", {
         dict,
         rows,
+        codes,
       });
       warmed++;
     } catch (err) {

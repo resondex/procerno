@@ -5,6 +5,7 @@ import { runBrandDiscovery, runOpenDiscovery, type DiscoveryAnswer } from "./dis
 import { consolidateTaxonomy } from "./consolidate";
 import { classifyNonBrands } from "./suggest";
 import { refreshBrandObservations, refreshObservedAliases } from "./observations";
+import { queueJudgedForms } from "./judged_forms";
 import { getDictionarySuggestions } from "./dict_suggest";
 import { prewarmDictionaryExamples } from "./dict_examples";
 
@@ -121,6 +122,13 @@ export async function bootstrapRunChunk(
       await refreshObservedAliases(project.id);
     } catch (err) {
       console.error("observed-alias refresh failed:", err);
+    }
+    // Judge-placed product forms of active makers queue as review-flagged
+    // merge pills (judged_forms.ts). Codes-era only - a no-op before coding.
+    try {
+      await queueJudgedForms(project);
+    } catch (err) {
+      console.error("judged-form queue failed:", err);
     }
     try {
       const pending = (await store.getDictionary(project.id)).filter(

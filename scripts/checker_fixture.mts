@@ -1173,3 +1173,67 @@ console.log("17. s56 advocacy criticism containment");
   ok("every brand field is read", names({ schema: "alt_defensive", mentions: [{ brand: "A" }], top_pick: "B", destinations: ["C"], redirect_to: ["D"], pairings: [{ name: "E" }] }).join() === "A,B,C,D,E");
   console.log("19. dictionary queue: " + (process.exitCode ? "FAILED" : "ALL PASS"));
 }
+
+// =====================================================================
+// 20. Judged product forms (2026-11-02, Tyler): a name the context judge
+// places under an ACTIVE maker queues as a review-flagged merge pill; the
+// floor, the waiting makers, the target invariant and "already on the
+// board" decide mechanically. While pending, the form keeps resolving to
+// its maker (brand_resolve step 6).
+// =====================================================================
+{
+  const ok = (label: string, cond: boolean, extra = "") => { if (!cond) { console.error(`   FAIL ${label} ${extra}`); process.exitCode = 1; } else console.log(`   ok   ${label} ${extra}`); };
+  const jf = await import(`${REPO}/src/lib/engine/judged_forms`);
+  const br = await import(`${REPO}/src/lib/engine/brand_resolve`);
+  const ds = await import(`${REPO}/src/lib/engine/dict_suggest`);
+  const E = (id: string, canonical: string, status: string, aliases: string[] = []) => ({ id, project_id: "p", canonical, aliases, display_name: null, status, confirmed: [], parent: null, role: null, analyzed: true, version: 1, created_at: "" });
+  const dict = [
+    E("t", "American Express", "active", ["amex"]),
+    E("c", "Chase", "active"),
+    E("w", "Wells Fargo", "pending"),
+    E("x", "Kohl's", "rejected"),
+    E("s", "Sapphire Preferred", "rejected"),
+    E("o", "Discover", "active"),
+  ];
+  const { matchKey } = await import(`${REPO}/src/lib/brand_key`);
+  const judged = new Map(([
+    ["Sapphire Reserve", "Chase"], ["Freedom Unlimited", "Chase"], ["Ink Cash", "Chase"],
+    ["Active Cash", "Wells Fargo"], ["Kohls Card", "Kohl's"], ["Blue Cash Everyday", "American Express"],
+    ["Sapphire Preferred", "Chase"], ["Obscure Card", "Unknown Bank"],
+  ] as [string, string][]).map(([n, m]) => [matchKey(n), m]));
+  const rows = Array.from({ length: 4 }, (_, i) => ({ responseId: `r${i}`, names: [
+    "Sapphire Reserve", "sapphire reserve", "Active Cash", "Kohls Card", "Blue Cash Everyday", "Sapphire Preferred", "Obscure Card",
+    ...(i < 2 ? ["Ink Cash"] : []), ...(i < 3 ? ["Freedom Unlimited"] : []), "keep", "Chase",
+  ] }));
+  const plan = jf.admitJudgedForms({ dictionary: dict, judged, targetBrand: "American Express", rows });
+  const forms = plan.admitted.map((a: any) => `${a.form}>${a.maker}:${a.answers}`);
+  ok("admitted: forms under an active maker at >=3 answers, one row per answer", forms.join() === "Sapphire Reserve>Chase:4,Freedom Unlimited>Chase:3", forms.join());
+  ok("below the floor waits out (Ink Cash, 2 answers)", !forms.some((f: string) => f.startsWith("Ink Cash")));
+  ok("the target's own product form is never queued", !forms.some((f: string) => f.startsWith("Blue Cash")));
+  ok("already on the board (a rejected entry) is skipped", !forms.some((f: string) => f.startsWith("Sapphire Preferred")));
+  ok("pending, rejected or unknown makers wait (Wells Fargo, Kohl's, Unknown Bank)", plan.waiting === 3, String(plan.waiting));
+  // Idempotency + review: once queued as pending, nothing is admitted again and the view still counts it under Chase.
+  const after = [...dict, E("q1", "Sapphire Reserve", "pending"), E("q2", "Freedom Unlimited", "pending")];
+  ok("idempotent: a queued form is not admitted again", jf.admitJudgedForms({ dictionary: after, judged, targetBrand: "American Express", rows }).admitted.length === 0);
+  const r = br.buildResolver(after, judged)("Sapphire Reserve");
+  ok("a pending judged form keeps resolving to its maker", r.status === "active" && r.entry?.id === "c" && r.via === "judge");
+  const r2 = br.buildResolver(after)("Sapphire Reserve");
+  ok("without the verdict it is a plain pending entry", r2.status === "pending");
+  const r3 = br.buildResolver([...dict, E("q3", "Active Cash", "pending")], judged)("Active Cash");
+  ok("a pending form whose maker is pending stays pending", r3.status === "pending" && r3.entry?.id === "q3");
+  const rat = ds.judgedFormRationale("Chase", 4);
+  ok("rationale carries the board's review marker", /- review\)/.test(rat) && rat.startsWith("judged a Chase product in 4 answers"), rat);
+  ok("verdictLayer reads the judge layer back", ds.verdictLayer({ layer: "judge", rationale: rat }).layer === "judge");
+  // Bare everyday-word forms stay read-time only; coined one-word and multi-word forms queue.
+  const bareJudged = new Map(["Unlimited", "Premier", "Freedom", "Flex", "Simplicity", "Reserve", "Quicksilver", "Savor", "Venture", "Freedom Flex"].map((n) => [matchKey(n), "Chase"]));
+  const bareRows = Array.from({ length: 3 }, (_, i) => ({ responseId: `b${i}`, names: [...bareJudged.keys()].map((k) => ({ unlimited: "Unlimited", premier: "Premier", freedom: "Freedom", flex: "Flex", simplicity: "Simplicity", reserve: "Reserve", quicksilver: "Quicksilver", savor: "Savor", venture: "Venture", freedomflex: "Freedom Flex" } as Record<string, string>)[k]) }));
+  const bare = jf.admitJudgedForms({ dictionary: dict, judged: bareJudged, targetBrand: "American Express", rows: bareRows }).admitted.map((a: any) => a.form).sort();
+  ok("bare everyday one-word forms never queue; coined and multi-word forms do", bare.join() === "Freedom Flex,Quicksilver,Savor,Venture", bare.join());
+  for (const w of ["Unlimited", "Premier", "Freedom", "Flex", "Simplicity", "Reserve"]) ok(`isBareEverydayForm(${w})`, jf.isBareEverydayForm(w) === true);
+  for (const w of ["Quicksilver", "Savor", "Venture", "Freedom Flex", "Sapphire Reserve"]) ok(`not bare: ${w}`, jf.isBareEverydayForm(w) === false);
+  // "null" / "none" / empty cached makers are NULL verdicts.
+  const cj = await import(`${REPO}/src/lib/engine/context_judge`);
+  ok("verdictMaker: artifact strings read as null", ["null", "None", "", "  "].every((m) => cj.verdictMaker({ maker: m }) === null) && cj.verdictMaker({ maker: null }) === null);
+  ok("verdictMaker: a real maker reads through", cj.verdictMaker({ maker: " Chase " }) === "Chase");
+  console.log("20. judged product forms: " + (process.exitCode ? "FAILED" : "ALL PASS"));
+}

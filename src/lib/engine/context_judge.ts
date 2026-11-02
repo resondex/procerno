@@ -80,6 +80,15 @@ export function* brandStringsOf(c: AnswerCodes): Generator<string> {
   if (c.schema === "choice") for (const r of c.decision_rules ?? []) yield r.choice;
 }
 
+/** The maker a cached verdict names, or null for a NULL verdict - including
+ * the pre-2026-11-02 artifacts that stored the word "null" / "none" or an
+ * empty string as the maker. */
+export function verdictMaker(v: { maker?: unknown }): string | null {
+  if (typeof v.maker !== "string") return null;
+  const m = v.maker.trim();
+  return m && !["null", "none"].includes(m.toLowerCase()) ? m : null;
+}
+
 function keyConfigured(): boolean {
   return Boolean(CONTEXT_JUDGE_MODEL.startsWith("gpt-") ? process.env.OPENAI_API_KEY : process.env.ANTHROPIC_API_KEY);
 }
@@ -137,7 +146,7 @@ export async function judgeContextName(
   try {
     const m = JSON.parse(text.slice(text.indexOf("{"), text.lastIndexOf("}") + 1)) as { maker?: unknown };
     if (m.maker === null) return null;
-    if (typeof m.maker === "string" && m.maker.trim()) return m.maker.trim();
+    if (typeof m.maker === "string" && m.maker.trim()) return verdictMaker(m);
   } catch {
     /* unparseable - stays unjudged */
   }
@@ -221,9 +230,19 @@ async function judgeSlab(
   const resolve = buildResolver(input.dictionary);
   // Unknown names, with up to two carrying responses each for snippets.
   const unknown = new Map<string, { name: string; n: number; ids: string[] }>();
+  // Pending names are read from the cache but never judged here: a judged
+  // form queued for review (judged_forms.ts) keeps its verdict, so it keeps
+  // resolving to its maker until the user decides (brand_resolve step 6).
+  const pending = new Map<string, string>();
   for (const c of input.codes) {
     for (const raw of brandStringsOf(c)) {
-      if (resolve(raw).status !== "unknown") continue;
+      const status = resolve(raw).status;
+      if (status === "pending") {
+        const pk = matchKey(raw);
+        if (!pending.has(pk)) pending.set(pk, raw.trim());
+        continue;
+      }
+      if (status !== "unknown") continue;
       const k = matchKey(raw);
       const a = unknown.get(k) ?? { name: raw.trim(), n: 0, ids: [] };
       a.n++;
@@ -231,17 +250,29 @@ async function judgeSlab(
       unknown.set(k, a);
     }
   }
-  if (unknown.size === 0) return none;
+  if (unknown.size === 0 && pending.size === 0) return none;
 
   const entries = [...unknown.entries()];
   const keys = entries.map(([, a]) => judgeKey(input.project.id, a.name));
+  const pendingEntries = [...pending.entries()];
+  const pendingKeys = pendingEntries.map(([, name]) => judgeKey(input.project.id, name));
   let cached: Map<string, string>;
   try {
-    cached = await store.cacheGetMany(keys, CACHE_TTL_MS);
+    cached = await store.cacheGetMany([...keys, ...pendingKeys], CACHE_TTL_MS);
   } catch {
     cached = new Map();
   }
   const judged = new Map<string, string>();
+  pendingEntries.forEach(([k], i) => {
+    const hit = cached.get(pendingKeys[i]);
+    if (!hit) return;
+    try {
+      const maker = verdictMaker(JSON.parse(hit) as { maker?: unknown });
+      if (maker) judged.set(k, maker);
+    } catch {
+      /* unreadable - the pending entry stands */
+    }
+  });
   const misses: number[] = [];
   entries.forEach(([k], i) => {
     const hit = cached.get(keys[i]);
@@ -250,8 +281,8 @@ async function judgeSlab(
       return;
     }
     try {
-      const v = JSON.parse(hit) as { maker: string | null };
-      if (v.maker) judged.set(k, v.maker);
+      const maker = verdictMaker(JSON.parse(hit) as { maker?: unknown });
+      if (maker) judged.set(k, maker);
       else nulls.add(k);
     } catch {
       misses.push(i);

@@ -21,7 +21,9 @@ import type { DictionaryEntry } from "../types";
  *   6. a context-judge verdict (context_judge.ts): the judged MAKER resolves
  *      through steps 1-5 and the name takes its entry and status (via
  *      "judge"); a maker the dictionary does not know rolls the name up to
- *      the maker's own name for counting;
+ *      the maker's own name for counting. A PENDING entry with a verdict
+ *      whose maker lands on an active or rejected entry also resolves via
+ *      the judge (a judged form awaiting review, judged_forms.ts);
  *   7. unknown - not in the dictionary.
  * (1), (4) and a judged maker landing on an active entry put a name in the
  * category (B5: the top pick resolves to an approved dictionary brand).
@@ -81,32 +83,44 @@ export function buildResolver(entries: DictionaryEntry[], judged?: Map<string, s
       : { status: "unknown", key: `?${k}`, name: raw.trim(), entry: null, via: null };
   };
 
+  /** Where a judged maker lands: EXACT board vocabulary only, never a
+   * maker-word alias. Null when the name has no verdict. */
+  const viaJudge = (k: string): Resolved | null => {
+    const maker = judged?.get(k);
+    if (!maker) return null;
+    // A judged maker is a company name, so it lands on EXACT board
+    // vocabulary only - the family hop is for product names and
+    // mis-files company names that merely share a leading word. And it
+    // never lands through a MAKER-WORD alias (the first word of a
+    // multi-word canonical, aliased in for raw mentions): a bare parent
+    // answer means the judge decided the product is NOT a form of the
+    // tracked brand, so the parent's portfolio must not roll into it
+    // (the r15 maker-word principle). A true product-form verdict
+    // carries the tracked name exactly as listed and still lands.
+    const mk = matchKey(maker);
+    const e = exact.get(mk);
+    const seq = e ? famTokens(e.canonical) : [];
+    const makerWord = e ? seq.length > 1 && mk !== matchKey(e.canonical) && mk === matchKey(seq[0]) : false;
+    return e && !makerWord
+      ? { status: e.status, key: e.id, name: label(e), entry: e, via: "judge" }
+      : { status: "unknown", key: `?${mk}`, name: maker.trim(), entry: null, via: "judge" };
+  };
+
   return function resolve(raw: string): Resolved {
     const k = matchKey(raw);
     const hit = memo.get(k);
     if (hit) return hit;
     let out = base(raw, k);
     if (out.status === "unknown") {
-      const maker = judged?.get(k);
-      if (maker) {
-        // A judged maker is a company name, so it lands on EXACT board
-        // vocabulary only - the family hop is for product names and
-        // mis-files company names that merely share a leading word. And it
-        // never lands through a MAKER-WORD alias (the first word of a
-        // multi-word canonical, aliased in for raw mentions): a bare parent
-        // answer means the judge decided the product is NOT a form of the
-        // tracked brand, so the parent's portfolio must not roll into it
-        // (the r15 maker-word principle). A true product-form verdict
-        // carries the tracked name exactly as listed and still lands.
-        const mk = matchKey(maker);
-        const e = exact.get(mk);
-        const seq = e ? famTokens(e.canonical) : [];
-        const makerWord = e ? seq.length > 1 && mk !== matchKey(e.canonical) && mk === matchKey(seq[0]) : false;
-        out =
-          e && !makerWord
-            ? { status: e.status, key: e.id, name: label(e), entry: e, via: "judge" }
-            : { status: "unknown", key: `?${mk}`, name: maker.trim(), entry: null, via: "judge" };
-      }
+      out = viaJudge(k) ?? out;
+    } else if (out.status === "pending") {
+      // A judged form queued for review (judged_forms.ts, 2026-11-02): until
+      // the user confirms or overrides it, it keeps counting where the judge
+      // placed it, so queueing it for review never moves a view's numbers.
+      // Only a REVIEWED landing (active or rejected maker) outranks the
+      // unreviewed pending entry.
+      const j = viaJudge(k);
+      if (j?.entry && j.entry.status !== "pending") out = j;
     }
     memo.set(k, out);
     return out;

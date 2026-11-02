@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { getAuth, requireProject } from "@/lib/auth";
 import { store } from "@/lib/store";
 import { queueUnresolvedNames, runPostQueueSteps } from "@/lib/engine/dict_queue";
+import { queueJudgedForms } from "@/lib/engine/judged_forms";
 import { tagCosts } from "@/lib/cost_log";
 
 // Junk filter + up to 60s suggestions warm + up to 60s examples warm.
@@ -34,10 +35,13 @@ export async function POST(
     return NextResponse.json({ error: "run has no codes under this tracker's codes source" }, { status: 409 });
   }
   const result = await queueUnresolvedNames(project, run);
+  // Judge-placed product forms of active makers (judged_forms.ts) - after
+  // the unresolved queue, so a maker it just queued holds its forms back.
+  const judgedForms = await queueJudgedForms(project, { run });
   // Finalize's post-queue steps, so a coded-held run never judges live
   // during review. Only when this call queued something: a repeat call
   // queues nothing and spends nothing (idempotent). Never fails the call.
-  if (result.queued > 0) {
+  if (result.queued > 0 || judgedForms.queued.length > 0) {
     tagCosts({ projectId: id, runId, purpose: "run:dictionary" });
     try {
       await runPostQueueSteps(project, {
@@ -48,5 +52,5 @@ export async function POST(
       console.error("queue_unresolved post-queue steps failed:", err);
     }
   }
-  return NextResponse.json({ ok: true, ...result });
+  return NextResponse.json({ ok: true, ...result, judgedFormsQueued: judgedForms.queued.length });
 }

@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { store } from "@/lib/store";
 import { refreshBrandObservations } from "@/lib/engine/observations";
+import { queueJudgedForms } from "@/lib/engine/judged_forms";
 import { requireAuth, requireProject } from "@/lib/auth";
 import { matchKey } from "@/lib/brand_key";
 import { recordDictionaryLayout, snapshotServed } from "@/lib/engine/dict_decision";
@@ -386,6 +387,18 @@ export async function POST(
       await refreshBrandObservations(id);
     } catch (err) {
       console.error("observation refresh failed:", err);
+    }
+  }
+  // A maker that just became active (or an alias freed from an entry)
+  // releases its waiting judge-placed forms as review-flagged merge pills
+  // (judged_forms.ts). Only the actions that can RELEASE a waiting form
+  // reload codes - a gate walk's rejects, merges, renames and drags never do.
+  const RELEASE_ACTIONS = new Set(["approve", "promote_alias", "unalias", "move_alias"]);
+  if (ordered.some((a) => RELEASE_ACTIONS.has(a.action))) {
+    try {
+      await queueJudgedForms(project);
+    } catch (err) {
+      console.error("judged-form queue failed:", err);
     }
   }
   return NextResponse.json({
