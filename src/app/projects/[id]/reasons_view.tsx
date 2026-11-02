@@ -1,8 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import type { ReasonRow, ReasonsView } from "@/lib/engine/reasons";
-import type { ViewKey } from "@/lib/engine/views";
+import type { ReasonRow, ReasonTypeKey, ReasonsView } from "@/lib/engine/reasons";
 import { SortTable, Tip, type Col } from "./table";
 import { BaseNote, fmtN, rate, rateCol } from "./view_parts";
 
@@ -33,11 +32,11 @@ export default function ReasonsSection({
 }: {
   runId: string;
   room?: string;
-  initialType?: ViewKey;
+  initialType?: ReasonTypeKey;
   /** Inside a station: only this station's question kinds are offered (and
    * the pooled all-types column is not). Absent = every kind + pooled (the
    * Why lens). */
-  types?: ViewKey[];
+  types?: ReasonTypeKey[];
 }) {
   const [view, setView] = useState<ReasonsView | null | undefined>(undefined);
   const [error, setError] = useState<string | null>(null);
@@ -60,7 +59,7 @@ export default function ReasonsSection({
 
   // The kinds this mount offers; a scoped mount whose kinds the tracker never
   // asked renders nothing.
-  const offered = view ? (types ? view.types.filter((t) => types.includes(t.key as ViewKey)) : view.types) : [];
+  const offered = view ? (types ? view.types.filter((t) => types.includes(t.key)) : view.types) : [];
   const selected = offered.find((t) => t.key === type) ?? (types ? offered[0] ?? null : null);
 
   const cols = useMemo((): Col<ReasonRow>[] => {
@@ -95,7 +94,7 @@ export default function ReasonsSection({
         first,
         rateCol("pooled", "All types", TIP_POOLED, (r) => r.pooled),
         ...view.types.map((t) =>
-          rateCol<ReasonRow>(t.key, t.label, `Answers to ${t.label.toLowerCase()} questions that argue from this code.`, (r) => r.byType[t.key as ViewKey] ?? { k: 0, n: 0, low: 0, high: 0 })
+          rateCol<ReasonRow>(t.key, t.label, `Answers to ${t.label.toLowerCase()} questions that argue from this code.`, (r) => r.byType[t.key] ?? { k: 0, n: 0, low: 0, high: 0 })
         ),
       ];
     }

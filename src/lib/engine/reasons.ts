@@ -35,8 +35,12 @@ export interface ReasonVerdict {
   answers: number;
 }
 
+/** A view key, or a stage sub-type of the open-choice pool
+ * ("headline:discovery" ...): the stage split exists only there (Tyler, 2026-11-01). */
+export type ReasonTypeKey = ViewKey | `headline:${string}`;
+
 export interface ReasonType {
-  key: ViewKey;
+  key: ReasonTypeKey;
   label: string;
   answers: number;
   /** Answers whose reasons list is empty. */
@@ -55,14 +59,14 @@ export interface ReasonRow {
   group: string | null;
   /** Pooled over every type except criteria. */
   pooled: RateCell;
-  byType: Partial<Record<ViewKey, RateCell>>;
+  byType: Partial<Record<ReasonTypeKey, RateCell>>;
   /** type -> verdict -> incidence among that verdict's answers. */
-  byVerdict: Partial<Record<ViewKey, Record<string, RateCell>>>;
+  byVerdict: Partial<Record<ReasonTypeKey, Record<string, RateCell>>>;
   /**
    * Group rows only: per type, the member codes leaning toward the type's
    * first verdict and toward its second, present only when both sides hold one.
    */
-  mixed: Partial<Record<ViewKey, { toward: string[]; away: string[] }>>;
+  mixed: Partial<Record<ReasonTypeKey, { toward: string[]; away: string[] }>>;
 }
 
 export interface ReasonsView {
@@ -78,6 +82,13 @@ export interface ReasonsView {
   /** Map entries that name no confirmed code. */
   unknownGroupCodes: string[];
 }
+
+/** The open-choice pool's stages, offered as sub-types right after it. */
+const HEADLINE_STAGES: { stage: string; label: string }[] = [
+  { stage: "discovery", label: "Discovery" },
+  { stage: "use_case", label: "Use-case fit" },
+  { stage: "social_validation", label: "Social validation" },
+];
 
 const TYPE_ORDER: { key: ViewKey; label: string }[] = [
   { key: "headline", label: "Which should I get" },
@@ -145,7 +156,9 @@ const SETTLED = field(
   "neutral"
 );
 
-function bucketerFor(view: ViewKey, pick: Bucketer): Bucketer {
+function bucketerFor(key: ReasonTypeKey, pick: Bucketer): Bucketer {
+  // A stage sub-type buckets exactly like its pool.
+  const view: ViewKey = key.startsWith("headline:") ? "headline" : (key as ViewKey);
   switch (view) {
     case "headline":
     case "head_to_head_entity":
@@ -188,6 +201,8 @@ function bucketerFor(view: ViewKey, pick: Bucketer): Bucketer {
 
 interface Coded {
   type: ViewKey;
+  /** The cell's stage - the open-choice sub-types split on it. */
+  stage: string;
   verdict: string;
   reasons: Set<string>;
 }
@@ -239,37 +254,47 @@ export function computeReasons(data: ViewData, request: ViewRequest = {}): Reaso
     if (it && (request.room === undefined || it.situation === request.room)) intentOfPrompt.set(p.id, it);
   }
   const core = corePanel(data);
-  const typeOf = new Map<string, ViewKey>();
+  const typeOf = new Map<string, { type: ViewKey; stage: string }>();
   for (const r of data.responses) {
     const it = intentOfPrompt.get(r.prompt_id);
     if (!it || !core.has(r.model ?? data.run.model)) continue;
     const v = viewsOf(it.stage, it.angle)[0];
-    if (v && TYPE_ORDER.some((t) => t.key === v)) typeOf.set(r.id, v);
+    if (v && TYPE_ORDER.some((t) => t.key === v)) typeOf.set(r.id, { type: v, stage: it.stage });
   }
 
   const coded: Coded[] = [];
   for (const c of data.codes) {
-    const type = typeOf.get(c.response_id);
-    if (!type || c.reasons === null) continue;
-    coded.push({ type, verdict: bucketerFor(type, pick).of(c), reasons: new Set(c.reasons) });
+    const t = typeOf.get(c.response_id);
+    if (!t || c.reasons === null) continue;
+    coded.push({ type: t.type, stage: t.stage, verdict: bucketerFor(t.type, pick).of(c), reasons: new Set(c.reasons) });
   }
 
-  const types: ReasonType[] = TYPE_ORDER.flatMap(({ key, label }) => {
+  // Every offered type with the answers it slices: the view keys in order,
+  // and right after the open-choice pool its stage sub-types (an answer sits
+  // in its pool AND its stage sub-type; the pooled column counts it once).
+  const slices: { key: ReasonTypeKey; label: string; list: Coded[] }[] = TYPE_ORDER.flatMap(({ key, label }) => {
     const list = coded.filter((c) => c.type === key);
     if (list.length === 0) return [];
-    return [
-      {
-        key,
-        label,
-        answers: list.length,
-        noReason: list.filter((c) => c.reasons.size === 0).length,
-        verdicts: bucketerFor(key, pick).buckets.map((b) => ({
-          ...b,
-          answers: list.filter((c) => c.verdict === b.key).length,
-        })),
-      },
-    ];
+    const out: { key: ReasonTypeKey; label: string; list: Coded[] }[] = [{ key, label, list }];
+    if (key === "headline")
+      for (const st of HEADLINE_STAGES) {
+        const sub = list.filter((c) => c.stage === st.stage);
+        if (sub.length > 0) out.push({ key: `headline:${st.stage}`, label: st.label, list: sub });
+      }
+    return out;
   });
+  const listOf = new Map(slices.map((x) => [x.key, x.list] as const));
+
+  const types: ReasonType[] = slices.map(({ key, label, list }) => ({
+    key,
+    label,
+    answers: list.length,
+    noReason: list.filter((c) => c.reasons.size === 0).length,
+    verdicts: bucketerFor(key, pick).buckets.map((b) => ({
+      ...b,
+      answers: list.filter((c) => c.verdict === b.key).length,
+    })),
+  }));
 
   const pooled = coded.filter((c) => c.type !== "criteria_taught");
   const has = (c: Coded, members: string[]) => members.some((m) => c.reasons.has(m));
@@ -277,7 +302,7 @@ export function computeReasons(data: ViewData, request: ViewRequest = {}): Reaso
     const byType: ReasonRow["byType"] = {};
     const byVerdict: ReasonRow["byVerdict"] = {};
     for (const t of types) {
-      const list = coded.filter((c) => c.type === t.key);
+      const list = listOf.get(t.key) ?? [];
       byType[t.key] = cell(list.filter((c) => has(c, members)).length, list.length);
       byVerdict[t.key] = Object.fromEntries(
         t.verdicts.map((v) => {
@@ -349,7 +374,7 @@ export function computeReasons(data: ViewData, request: ViewRequest = {}): Reaso
 }
 
 // r3 (2026-10-28): names resolve through the context judge (context_judge.ts).
-const REASONS_VERSION = "r4"; // r4: type labels in buyer language (output change for identical inputs)
+const REASONS_VERSION = "r5"; // r4: type labels in buyer language (output change for identical inputs)
 export function computeReasonsCached(run: Run, project: Project, room?: string): Promise<ReasonsView | null> {
   const extras = { codeGroups: true, judge: true };
   if (room === undefined) return cachedView("reasons", REASONS_VERSION, run, project, computeReasons, extras);

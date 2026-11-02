@@ -394,7 +394,7 @@ function roomAware(key: StationKey, runId: string, roomKey: string): ReactNode {
       return (
         <>
           <HeadlineSection runId={runId} room={room} />
-          <ReasonsSection runId={runId} room={room} types={["headline", "criteria_taught"]} initialType="criteria_taught" />
+          <ReasonsSection runId={runId} room={room} types={["headline", "headline:discovery", "headline:use_case", "headline:social_validation", "criteria_taught"]} initialType="criteria_taught" />
         </>
       );
     case "value":
