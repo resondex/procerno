@@ -416,12 +416,24 @@ export async function computeJourney(run: Run, project: Project, room?: string):
         ? row("criteria_taught", "Criteria", "criteria taught", criteriaType.answers, null, criteriaTop.length > 0 ? `most taught: ${criteriaTop.join(", ")}` : "no criteria taught", false)
         : notAsked("criteria_taught", "Criteria", "criteria taught", false),
     ],
-    picks: hv
-      ? hv.brands
-          .filter((b) => b.chosen.k > 0 || b.role === "target")
-          .sort((a, b) => rate(b.shareOfDecided) - rate(a.shareOfDecided) || a.name.localeCompare(b.name))
-          .map((b) => ({ name: b.name, role: roleOfBrand(b.role), cell: b.shareOfDecided }))
-      : [],
+    // The pick set is the SAME under every buyer (Tyler, 2026-11-01): every
+    // brand picked anywhere across all buyers, plus you. Under a room filter
+    // a brand nobody picked there shows at 0% rather than vanishing - a
+    // tracked rival never chosen for this buyer is a finding, and a stable
+    // set reads across buyers.
+    picks: (() => {
+      const base = (filtered ? headlineAll : headline) ?? null;
+      if (!hv || !base || base.answers === 0) return [];
+      const set = base.brands.filter((b) => b.chosen.k > 0 || b.role === "target");
+      const here = new Map(hv.brands.map((b) => [b.key, b] as const));
+      const decided = hv.brands.find((b) => b.role === "target")?.shareOfDecided.n ?? 0;
+      return set
+        .map((b) => {
+          const h = here.get(b.key);
+          return { name: b.name, role: roleOfBrand(b.role), cell: h ? h.shareOfDecided : cell(0, decided) };
+        })
+        .sort((a, b) => rate(b.cell) - rate(a.cell) || a.name.localeCompare(b.name));
+    })(),
     arguments: filtered
       ? roomArgumentsOf(reasons)
       : [...forYou, ...against].map((r) => ({ code: r.code, forYou: r.lift > 0, inYourPicks: r.wins, inRivalPicks: r.others })),
