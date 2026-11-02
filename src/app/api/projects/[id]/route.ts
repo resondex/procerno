@@ -54,6 +54,7 @@ export async function GET(
     runs,
     staff,
     dictionary,
+    intents,
     activeAnswers,
     activeCoded,
     nextRun: planNextRun({ prompts, intents, runs }),

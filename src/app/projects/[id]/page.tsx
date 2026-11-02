@@ -58,6 +58,7 @@ export default async function ProjectPage({
       runs,
       staff,
       dictionary,
+      intents,
       nextRun,
       activeAnswers,
       activeCoded,

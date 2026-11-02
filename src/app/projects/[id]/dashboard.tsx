@@ -19,11 +19,13 @@ import type {
   DictionaryEntry,
   Project,
   ProjectTrend,
+  Intent,
   Prompt,
   Run,
   RunSchedule,
 } from "@/lib/types";
 import { InlineSpinner } from "../../components/spinner";
+import { PromptHealthBody } from "./prompt_health";
 
 export interface Detail {
   /** True when the signed-in user is staff — gates hidden switches. */
@@ -33,6 +35,8 @@ export interface Detail {
   runs: Run[];
   /** Rides with the detail so first paint needs ONE roundtrip. */
   dictionary?: DictionaryEntry[];
+  /** The tracker's cells - prompt health groups prompts stage -> cell. */
+  intents?: Intent[];
   /** What the next run would collect - the worries surface rides monthly
    * waves only (engine/surfaces.ts). */
   nextRun?: NextRunPlan;
@@ -100,10 +104,6 @@ export default function ProjectDashboard({
   const [dictTab, setDictTab] = useState<"identify" | "parents" | "analyze">(
     "identify"
   );
-  // Example answers revealed per prompt in the prompt-health view.
-  const [examples, setExamples] = useState<
-    Record<string, string[] | "loading">
-  >({});
   // Which run's results are shown. null = follow the latest complete run;
   // set explicitly when the user picks a run (or arrives via ?run=).
   const [selectedRunId, setSelectedRunId] = useState<string | null>(initialRunId);
@@ -1041,154 +1041,13 @@ export default function ProjectDashboard({
 
       {openModal === "health" && (
         <Modal title="Prompt health" wide onClose={() => setOpenModal(null)}>
-          <p className="text-[13px] text-ink-3 mb-4 -mt-1">
-            {flaggedPrompts.length > 0
-              ? `The health check flagged ${flaggedPrompts.length} prompt${flaggedPrompts.length === 1 ? "" : "s"} whose answers drifted off-category. Refield with a suggested alternative — history is preserved, and the replacement fields on the next run.`
-              : "All prompts passed the health check."}
-          </p>
-          <div className="grid gap-3">
-            <details open={flaggedPrompts.length > 0} className="group">
-              <summary className="cursor-pointer list-none flex items-center gap-2 text-sm font-semibold py-1 select-none">
-                <span className="text-ink-3 transition-transform group-open:rotate-90">
-                  ▸
-                </span>
-                Flagged ({flaggedPrompts.length})
-              </summary>
-              {flaggedPrompts.length > 0 ? (
-                <div className="card divide-y divide-line mt-2">
-                  {flaggedPrompts.map((p) => (
-                    <div key={p.id} className="px-5 py-2.5">
-                      <div className="flex items-baseline gap-4 text-sm">
-                        <span className="text-[11px] font-medium uppercase tracking-wide text-ink-3 w-28 shrink-0">
-                          {p.theme.replace("_", " ")}
-                        </span>
-                        <span className="text-ink-2">{p.text}</span>
-                      </div>
-                      <div className="mt-2 ml-32 border-l-2 border-warning/40 pl-3 grid gap-1.5">
-                        {p.flag_reason && (
-                          <p className="text-[13px] text-ink-3">
-                            {p.flag_reason}
-                          </p>
-                        )}
-                        {p.suggested_alternatives.map((alt, i) => (
-                          <div
-                            key={i}
-                            className="flex items-baseline gap-2 text-[13px]"
-                          >
-                            <span className="text-ink-2 flex-1">“{alt}”</span>
-                            <button
-                              type="button"
-                              onClick={async () => {
-                                await fetch(`/api/projects/${id}/prompts`, {
-                                  method: "POST",
-                                  headers: {
-                                    "Content-Type": "application/json",
-                                  },
-                                  body: JSON.stringify({
-                                    action: "replace",
-                                    promptId: p.id,
-                                    text: alt,
-                                  }),
-                                });
-                                refresh();
-                              }}
-                              className="shrink-0 font-medium text-primary hover:opacity-80"
-                            >
-                              Refield with this →
-                            </button>
-                          </div>
-                        ))}
-                        {shownRun && (
-                          <div>
-                            {examples[p.id] === undefined && (
-                              <button
-                                type="button"
-                                onClick={async () => {
-                                  setExamples((x) => ({
-                                    ...x,
-                                    [p.id]: "loading",
-                                  }));
-                                  const res = await fetch(
-                                    `/api/runs/${shownRun.id}/responses?promptId=${p.id}`
-                                  );
-                                  const d = res.ok
-                                    ? await res.json()
-                                    : { responses: [] };
-                                  setExamples((x) => ({
-                                    ...x,
-                                    [p.id]: d.responses
-                                      .slice(0, 3)
-                                      .map(
-                                        (r: { text: string }) => r.text
-                                      ),
-                                  }));
-                                }}
-                                className="text-[13px] font-medium text-primary hover:opacity-80"
-                              >
-                                Show example answers
-                              </button>
-                            )}
-                            {examples[p.id] === "loading" && (
-                              <span className="text-[13px] text-ink-3">
-                                loading…
-                              </span>
-                            )}
-                            {Array.isArray(examples[p.id]) && (
-                              <div className="grid gap-2 mt-1">
-                                {(examples[p.id] as string[]).map((t, i) => (
-                                  <p
-                                    key={i}
-                                    className="text-[13px] leading-relaxed text-ink-2 whitespace-pre-wrap border-l-2 border-line pl-3 max-h-40 overflow-y-auto"
-                                  >
-                                    {t}
-                                  </p>
-                                ))}
-                              </div>
-                            )}
-                          </div>
-                        )}
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              ) : (
-                <p className="text-sm text-ink-3 mt-2 ml-6">
-                  Nothing flagged.
-                </p>
-              )}
-            </details>
-            <details className="group">
-              <summary className="cursor-pointer list-none flex items-center gap-2 text-sm font-semibold py-1 select-none">
-                <span className="text-ink-3 transition-transform group-open:rotate-90">
-                  ▸
-                </span>
-                Healthy (
-                {prompts.filter((p) => p.retired === 0 && p.flagged !== 1)
-                  .length}
-                )
-              </summary>
-              <div className="card divide-y divide-line mt-2">
-                {prompts
-                  .filter((p) => p.retired === 0 && p.flagged !== 1)
-                  .map((p) => (
-                    <div
-                      key={p.id}
-                      className="flex items-baseline gap-4 px-5 py-2.5 text-sm"
-                    >
-                      <span className="text-[11px] font-medium uppercase tracking-wide text-ink-3 w-28 shrink-0">
-                        {p.theme.replace("_", " ")}
-                      </span>
-                      <span className="text-ink-2">{p.text}</span>
-                    </div>
-                  ))}
-              </div>
-            </details>
-          </div>
-          <p className="text-[13px] text-ink-3 mt-3">
-            Headline rates come from the unbranded prompts — the branded
-            probes are reported separately, since naming the brand guarantees
-            a mention.
-          </p>
+          <PromptHealthBody
+            id={id}
+            prompts={prompts}
+            intents={detail.intents ?? []}
+            shownRun={shownRun}
+            refresh={refresh}
+          />
         </Modal>
       )}
     </div>
