@@ -20,8 +20,7 @@ verified; everything here is presentation unless marked otherwise.
 
 ## Open items - presentation (none block anything)
 
-- [ ] Decision rules: layout options to sketch, then settle (like Journey)
-- [ ] Metrics: layout options to sketch, then settle
+- [ ] Analysis tier layout: four options sketched 2026-11-01 (A keep-strip-fix-cards, B scorecard, C four question tabs, D rival ledger; recommendation A with B's Consideration headline) - awaiting Tyler's pick; covers the Decision rules and Metrics layout passes
 - [ ] Journey: engine filter on the buyer bar (deferred from the build)
 - [ ] Set C (business case / expansion / ecosystem / advocacy): no views yet - pointer text only
 - [ ] Evidence drill in the per-type sections (today: Metrics + rules samples only)
@@ -46,4 +45,36 @@ verified; everything here is presentation unless marked otherwise.
 
 ## Filed findings
 
-(nothing filed yet)
+### 2026-11-01 - Analysis tier, fresh-eyes read (Claude, walked on the AmEx fixture)
+
+Root finding: the tier is organized by how the measurement works (station =
+question-type pool, Decision rules = one code field, Metrics = the legality
+layer), not by what the user is asking (where do we stand, where do we lose,
+why). Every view opens with a disclaimer before a meaning. Layout options
+sketched the same day (Tyler: "sketch options"); the sketch page is the
+record, items below are the findings it addresses.
+
+- [ ] Journey cards: six different kinds of number with no anchor (36% names
+      you / 7% chosen / 19% you win / 32% go ahead / 11% worth it / 17% stay);
+      heading says "lose", numbers are all win rates; no best-rival comparison
+      on the card; Comparison promotes "Against a class - you win 1%" to its
+      first sub-line.
+- [ ] Station drill = the old per-type section stack (Consideration is seven
+      cards). A drill wants: the number vs rivals, top reasons, win-when /
+      lose-when, then one "full tables" disclosure.
+- [ ] Contract vocabulary on customer surfaces: share of decided, firm pick
+      in category, names an exit, rebuts it, open choice, holding your own,
+      route to you, all buyers by design, core engine panel. Labels in buyer
+      language, contract words in tooltips.
+- [ ] Decision rules: three headline shares overlap (85 / 62 / 53) and read as
+      a broken pie; "As: American Express (32), Amex Gold (26)..." exposes
+      brand-string resolution; "10.83x the overall rate" on single-digit
+      counts; rival table "route to you 95% / route away 78%" sums past 100.
+      Content is the best in the tier; shape should be three bullets each
+      side per rival and per buyer, counts only.
+- [ ] Metrics: 53 measure chips, mostly greyed, shown to every user. Rename
+      "Build a table", open on presets, grouped dropdown of legal measures.
+- [ ] Doubts draws customers' worries "because one section reads both";
+      Customer base is a card of pointers. Structure explained to the user
+      instead of hidden.
+- [ ] Buyer and engine filters should be one bar global to the tier.
