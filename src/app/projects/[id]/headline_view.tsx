@@ -70,7 +70,7 @@ function NameList({ title, items, total }: { title: string; items: NamedCount[];
 
 const OUTCOME_PARTS = [
   { key: "pick", label: "Picks one", color: "bg-primary" },
-  { key: "conditional", label: "Depends on the buyer", color: "bg-primary/45" },
+  { key: "conditional", label: "Gives rules, no pick", color: "bg-primary/45" },
   { key: "no_pick", label: "No pick", color: "bg-neutral-bar" },
   { key: "clarification", label: "Asks a question back", color: "bg-warning/60" },
 ] as const;

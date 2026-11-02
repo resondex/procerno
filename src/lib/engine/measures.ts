@@ -259,7 +259,7 @@ export const MEASURES: readonly MeasureDef[] = [
 
   // The choice outcome.
   share("outcome", ["pick"], { id: "firm_pick", group: "Outcome", label: "Firm pick", tip: "Answers making one firm pick, over every answer." }),
-  share("outcome", ["conditional"], { id: "conditional", group: "Outcome", label: "Conditional", tip: "Answers whose pick depends on the buyer's situation, over every answer." }),
+  share("outcome", ["conditional"], { id: "conditional", group: "Outcome", label: "Gives rules, no pick", tip: "Answers that state which brand wins under which circumstances and commit to none, over every answer." }),
   share("outcome", ["no_pick"], { id: "no_pick", group: "Outcome", label: "No pick", tip: "Answers that pick nothing, over every answer." }),
   share("outcome", ["clarification"], { id: "clarification", group: "Outcome", label: "Asks to clarify", tip: "Answers that ask the buyer for more before picking, over every answer." }),
   {
