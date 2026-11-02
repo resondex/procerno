@@ -1,9 +1,10 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import type { HeadlineBrand, HeadlineSlice, HeadlineView, NamedCount, RateCell } from "@/lib/engine/headline";
+import type { HeadlineBrand, HeadlineSlice, HeadlineView, RateCell } from "@/lib/engine/headline";
 import { SortTable, Tip, type Col } from "./table";
 import { BaseNote, fmtN } from "./view_parts";
+import { useDictionaryOpener } from "./dict_opener";
 
 /**
  * The headline view (2026-10-27): win / pick / visibility over open-choice
@@ -56,15 +57,44 @@ function RateText({ cell }: { cell: RateCell }) {
   );
 }
 
-function NameList({ title, items, total }: { title: string; items: NamedCount[]; total: number }) {
-  if (total === 0) return null;
+/**
+ * Picks the dictionary cannot count as an approved brand, as ONE line of
+ * counts (2026-11-01, Tyler): an unplaced name is dictionary work, so the
+ * names live on the brand board's pending queue, not on this card. The
+ * counts are the board's to-do size; "awaiting review" opens the board.
+ */
+function DictionaryTodo({ view }: { view: HeadlineView }) {
+  const openDictionary = useDictionaryOpener();
+  const { pending, ruledOut, notInDictionary } = view.picks;
+  // Spec wording: the first part says "picks", later parts continue it -
+  // "<N> picks name brands awaiting ..., <M> name brands you ruled out, ...".
+  const segs = [
+    { key: "pending", n: pending, tail: "awaiting your review on the brand board" },
+    { key: "ruled", n: ruledOut, tail: "you ruled out" },
+    { key: "unknown", n: notInDictionary, tail: "not in your dictionary yet" },
+  ].filter((x) => x.n > 0);
+  if (segs.length === 0) return null;
+  const words = (n: number, first: boolean) =>
+    first ? (n === 1 ? "pick names a brand" : "picks name brands") : n === 1 ? "names a brand" : "name brands";
   return (
-    <div className="text-[13px] text-ink-2">
-      <Tip tip={`${total} picks`}>
-        <span className="font-medium text-ink cursor-help">{title}</span>
-      </Tip>
-      {items.length > 0 && <span className="text-ink-3"> - {items.map((x) => x.name).join(", ")}</span>}
-    </div>
+    <p className="text-[13px] text-ink-3 border-t border-line pt-3">
+      {segs.map((x, i) => {
+        const text = `${fmtN(x.n)} ${words(x.n, i === 0)} ${x.tail}`;
+        return (
+          <span key={x.key}>
+            {i > 0 && ", "}
+            {x.key === "pending" && openDictionary ? (
+              <button type="button" onClick={openDictionary} className="font-medium text-primary hover:opacity-80">
+                {text}
+              </button>
+            ) : (
+              text
+            )}
+          </span>
+        );
+      })}
+      .
+    </p>
   );
 }
 
@@ -222,18 +252,7 @@ export default function HeadlineSection({ runId, room }: { runId: string; room?:
           </span>
         </div>
         <OutcomeBar view={view} />
-        {outside > 0 && (
-          <div className="grid gap-1 border-t border-line pt-3">
-            <div className="text-[13px] text-ink-3">
-              <Tip tip={`${outside} of ${view.outcomes.pick} picks`}>
-                <span className="cursor-help">Some picks are not an approved brand in your dictionary:</span>
-              </Tip>
-            </div>
-            <NameList title="Ruled out on your brand board" items={view.ruledOutPicks} total={view.picks.ruledOut} />
-            <NameList title="Not in your dictionary" items={view.notInDictionaryPicks} total={view.picks.notInDictionary} />
-            <NameList title="Awaiting review" items={view.pendingPicks} total={view.picks.pending} />
-          </div>
-        )}
+        {outside > 0 && <DictionaryTodo view={view} />}
       </section>
 
       <section className="card p-6">

@@ -1,5 +1,4 @@
 import { store } from "../store";
-import { cleanSurface } from "../brand_key";
 import { tagCosts, withCostContext } from "../cost_log";
 import {
   coderUsageAccumulator,
@@ -10,10 +9,8 @@ import {
   getEngine,
 } from "./providers";
 import { analyzePromptHealth } from "./prompt_health";
-import { classifyNonBrands } from "./suggest";
-import { getDictionarySuggestions } from "./dict_suggest";
-import { prewarmDictionaryExamples } from "./dict_examples";
 import { prewarmContextVerdicts } from "./context_judge";
+import { queueUnresolvedNames, runPostQueueSteps } from "./dict_queue";
 import { batchableEngine, hasOpenBatches, pollRunBatches } from "./batch";
 import { bootstrapRunChunk } from "./bootstrap";
 import { loadRunPrompts } from "./surfaces";
@@ -596,87 +593,12 @@ export async function finalizeRun(runId: string): Promise<void> {
   const project = await store.getProject(run.project_id);
   if (!project) return;
   tagCosts({ projectId: project.id, runId, purpose: "run:finalize" });
-  try {
-    // New names come from whatever coded the run: the coder's answer_codes
-    // rows (2026-10-29) when this run has any under the tracker's coder
-    // source, else the legacy mentions table + responses top picks.
-    const coderCodes = await store.listAnswerCodes(
-      runId,
-      coderSource(await store.getReasonsAdapter(project.id))
-    );
-    let names: string[];
-    if (coderCodes.length > 0) {
-      names = coderCodes.flatMap((c) => [
-        ...(c.mentions ?? []).map((m) => m.brand),
-        ...(c.top_pick ? [c.top_pick] : []),
-      ]);
-    } else {
-      const [runMentions, runResponses] = await Promise.all([
-        store.listMentionsForRun(runId),
-        store.listResponseMeta(runId),
-      ]);
-      names = [
-        ...runMentions.map((m) => m.brand),
-        ...runResponses
-          .map((r) => r.top_pick_brand)
-          .filter((b): b is string => Boolean(b)),
-      ];
-    }
-    // cleanSurface, same as the observations queue path - a mention's "®"
-    // or doubled spaces must not become part of a pill's name.
-    await store.queueDictionaryCandidates(project.id, [
-      ...new Set(names.map(cleanSurface)),
-    ]);
-    const dict = await store.getDictionary(project.id);
-    const pendingEntries = dict.filter((e) => e.status === "pending");
-    if (pendingEntries.length > 0) {
-      const nonBrands = await classifyNonBrands(
-        pendingEntries.map((e) => e.canonical)
-      );
-      let excluded = 0;
-      for (const e of pendingEntries) {
-        if (nonBrands.has(e.canonical.trim().toLowerCase())) {
-          await store.upsertDictionaryEntry({
-            id: e.id,
-            projectId: project.id,
-            canonical: e.canonical,
-            aliases: e.aliases,
-            status: "rejected",
-          });
-          excluded++;
-        }
-      }
-      if (excluded > 0) {
-        await store.bumpDictionaryVersion(project.id);
-        console.log(
-          `dictionary junk filter: pre-excluded ${excluded} non-brand name(s)`
-        );
-      }
-    }
-    const suggestions = await getDictionarySuggestions(
-      project.id,
-      project.category
-    );
-    // Same review-phase contract as the bootstrap: every flagged pill's
-    // examples are warm before the run reads "complete". Cache-first, so a
-    // warm project pays one batch read; soft 2-minute budget.
-    await prewarmDictionaryExamples(
-      project.id,
-      suggestions,
-      Date.now() + 120_000
-    );
-  } catch (err) {
-    console.error("dictionary finalize failed:", err);
-  }
-  try {
-    await analyzePromptHealth(project.id, runId);
-  } catch (err) {
-    console.error("prompt health check failed:", err);
-  }
   // Context-judge verdicts for the names the dictionary cannot place, over
   // the same inputs the views read, so the first dashboard open is a cache
-  // hit. No codes source (every prod project today) = no-op. 90s soft
-  // budget, clamped to leave the 300s finalize route room for the flip.
+  // hit - and BEFORE the dictionary queue, so a maker-less product the
+  // judge places under an existing brand never lands as a pending pill.
+  // No codes source = no-op. 90s soft budget, clamped to leave the 300s
+  // finalize route room for the dictionary steps and the flip.
   try {
     const source = await store.getCodesSource(project.id);
     const codes = source ? await store.listAnswerCodes(runId, source) : [];
@@ -696,6 +618,32 @@ export async function finalizeRun(runId: string): Promise<void> {
     }
   } catch (err) {
     console.error("context judge warm failed:", err);
+  }
+  try {
+    // New names: every brand-valued field of whatever coded the run (the
+    // tracker's codes source, else the coder's; else the legacy mentions
+    // table), resolved through the views' resolver and the judge verdicts
+    // warmed above - a name the board or the judge already places is not
+    // queued (dict_queue.ts).
+    const q = await queueUnresolvedNames(project, run);
+    if (q.queued > 0 || q.judgedAway > 0) {
+      console.log(
+        `dictionary queue: ${q.queued} new name(s) pending of ${q.candidates} (${q.makerQueued} judged makers), ${q.judgedAway} placed or ruled out by the context judge`
+      );
+    }
+    // Junk filter, suggestions warm, examples warm (shared with the
+    // queue_unresolved route). Examples clamped to the finalize route's
+    // budget now that the judge warm runs first.
+    await runPostQueueSteps(project, {
+      examplesDeadline: Math.min(Date.now() + 120_000, finalizeStart + 260_000),
+    });
+  } catch (err) {
+    console.error("dictionary finalize failed:", err);
+  }
+  try {
+    await analyzePromptHealth(project.id, runId);
+  } catch (err) {
+    console.error("prompt health check failed:", err);
   }
   await store.updateRunStatus(runId, "complete", null);
 }

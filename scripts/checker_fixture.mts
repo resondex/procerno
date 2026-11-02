@@ -1153,3 +1153,23 @@ console.log("17. s56 advocacy criticism containment");
   for (const s of vw.STATION_ORDER) ok(`station ${s} has a label and a question`, !!vw.STATION_LABEL[s] && vw.stationQuestion(s, "B", "things").length > 0);
   console.log("18. home for every stage: " + (process.exitCode ? "FAILED" : "ALL PASS"));
 }
+
+// =====================================================================
+// 19. Dictionary queue (2026-11-01): verdict words and "none named"
+// placeholders never become pending pills; brand names (incl. parenthetical
+// model names) and the Set C rule stages' brand choices are queueable.
+// =====================================================================
+{
+  const ok = (label: string, cond: boolean, extra = "") => { if (!cond) { console.error(`   FAIL ${label} ${extra}`); process.exitCode = 1; } else console.log(`   ok   ${label} ${extra}`); };
+  const dq = await import(`${REPO}/src/lib/engine/dict_queue`);
+  for (const p of ["", "  ", "keep", "worth", "proceed", "premium", "cheaper", "leave", "avoid", "A cheaper option (none named)", "Leaving (no destination named)", "none", "N/A", "Other", "---"])
+    ok(`placeholder ${JSON.stringify(p)}`, dq.isPlaceholderName(p) === true);
+  for (const b of ["Chase", "Sapphire Reserve", "Nothing Phone (2)", "Max (HBO)", "Premium Plus Card"])
+    ok(`brand ${JSON.stringify(b)} is queueable`, dq.isPlaceholderName(b) === false);
+  const names = (c: object) => [...dq.queueableNamesOf({ mentions: null, top_pick: null, destinations: null, redirect_to: null, pairings: null, decision_rules: null, ...c })];
+  ok("choice rules yield their choice", names({ schema: "choice", decision_rules: [{ condition: "x", choice: "Linear" }] }).includes("Linear"));
+  ok("expansion rules yield their choice", names({ schema: "expansion", decision_rules: [{ condition: "x", choice: "Confluence" }] }).includes("Confluence"));
+  ok("enum-schema rules yield nothing", names({ schema: "value", decision_rules: [{ condition: "x", choice: "cheaper", product: "ClickUp" }] }).length === 0);
+  ok("every brand field is read", names({ schema: "alt_defensive", mentions: [{ brand: "A" }], top_pick: "B", destinations: ["C"], redirect_to: ["D"], pairings: [{ name: "E" }] }).join() === "A,B,C,D,E");
+  console.log("19. dictionary queue: " + (process.exitCode ? "FAILED" : "ALL PASS"));
+}

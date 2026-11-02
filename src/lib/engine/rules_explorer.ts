@@ -216,8 +216,8 @@ const ID_CAP = 5;
 const POOL_ID_CAP = 3;
 const SLICE_TOP = 3;
 
-const ENUM_TOWARD = new Set(["worth", "keep", "proceed"]);
-const GENERIC_AWAY: Record<string, string> = {
+export const ENUM_TOWARD = new Set(["worth", "keep", "proceed"]);
+export const GENERIC_AWAY: Record<string, string> = {
   premium: "A premium option (none named)",
   basic: "A basic option (none named)",
   cheaper: "A cheaper option (none named)",

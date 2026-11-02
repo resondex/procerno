@@ -163,6 +163,18 @@ export async function primeContextVerdicts(input: PrimeInput): Promise<JudgedNam
   return { judged, incomplete };
 }
 
+/**
+ * Cached verdicts only - never a model call, in any environment (cap 0: the
+ * slab is empty, so the call loop and the snippet read never run). For
+ * callers that must not spend, like the dictionary queue (dict_queue.ts).
+ */
+export async function cachedContextVerdicts(
+  input: PrimeInput
+): Promise<{ judged: Map<string, string>; nulls: Set<string> }> {
+  const { judged, nulls } = await judgeSlab(input, 0);
+  return { judged, nulls };
+}
+
 interface PrimeInput {
   project: Project;
   dictionary: DictionaryEntry[];
@@ -200,8 +212,11 @@ async function judgeSlab(
   input: PrimeInput,
   cap: number,
   deadlineAt?: number
-): Promise<JudgedNames & { done: number }> {
-  const none = { judged: new Map<string, string>(), incomplete: false, done: 0 };
+): Promise<JudgedNames & { done: number; nulls: Set<string> }> {
+  // nulls: matchKeys the judge ruled are no product of any maker (content
+  // titles, out-of-category products) - cached or judged this slab.
+  const nulls = new Set<string>();
+  const none = { judged: new Map<string, string>(), incomplete: false, done: 0, nulls };
   if (input.codes.length === 0) return none;
   const resolve = buildResolver(input.dictionary);
   // Unknown names, with up to two carrying responses each for snippets.
@@ -237,12 +252,13 @@ async function judgeSlab(
     try {
       const v = JSON.parse(hit) as { maker: string | null };
       if (v.maker) judged.set(k, v.maker);
+      else nulls.add(k);
     } catch {
       misses.push(i);
     }
   });
-  if (misses.length === 0) return { judged, incomplete: false, done: 0 };
-  if (!keyConfigured()) return { judged, incomplete: false, done: 0 };
+  if (misses.length === 0) return { judged, incomplete: false, done: 0, nulls };
+  if (!keyConfigured()) return { judged, incomplete: false, done: 0, nulls };
 
   // Most frequent first; the slab beyond the cap stays for the next compute.
   misses.sort((a, b) => entries[b][1].n - entries[a][1].n);
@@ -296,6 +312,7 @@ async function judgeSlab(
             if (maker === undefined) continue;
             done++;
             if (maker) judged.set(k, maker);
+            else nulls.add(k);
             await store.cacheSet(keys[i], JSON.stringify({ maker }), input.meta).catch(() => {});
           } catch (err) {
             console.error("context judge failed open:", err);
@@ -304,5 +321,5 @@ async function judgeSlab(
       })
     );
   });
-  return { judged, incomplete: done < misses.length, done };
+  return { judged, incomplete: done < misses.length, done, nulls };
 }

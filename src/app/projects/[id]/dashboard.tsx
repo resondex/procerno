@@ -4,6 +4,7 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } fr
 import Link from "next/link";
 import TrendChart from "./trend_chart";
 import RunResults from "./run_results";
+import { DictionaryOpenerContext } from "./dict_opener";
 import TaxonomyReview from "./taxonomy_review";
 import IdentifyTab, { type Suggestion } from "./identify_tab";
 import ParentsTab from "./parents_tab";
@@ -193,6 +194,11 @@ export default function ProjectDashboard({
     await Promise.all(followUps);
   }, [id]);
 
+  const openDictionary = useCallback(() => {
+    setDictTab("identify");
+    setOpenModal("dictionary");
+  }, []);
+
   async function refreshDict() {
     const dr = await fetch(`/api/projects/${id}/dictionary`);
     if (dr.ok) setDict((await dr.json()).entries ?? []);
@@ -306,6 +312,27 @@ export default function ProjectDashboard({
     detail?.runs.find((r) => r.id === activeRunId)?.status === "collected" &&
     Boolean(detail?.project.codes_source) &&
     (detail?.activeCoded ?? 0) > 0;
+  // Coded-held runs never ran finalize, so their unplaced brand names were
+  // never queued for the board: queue them once per page load (idempotent
+  // server-side, zero model calls) and refresh the board when any landed.
+  const queuedFor = useRef<string | null>(null);
+  useEffect(() => {
+    if (!codedHeld || !activeRunId || queuedFor.current === activeRunId) return;
+    queuedFor.current = activeRunId;
+    fetch(`/api/projects/${id}/dictionary/queue_unresolved`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ runId: activeRunId }),
+    })
+      .then((r) => (r.ok ? r.json() : null))
+      .then(async (q: { queued?: number } | null) => {
+        if (!q || !q.queued) return;
+        const dr = await fetch(`/api/projects/${id}/dictionary`);
+        if (dr.ok) setDict((await dr.json()).entries ?? []);
+        setDictVersion((v) => v + 1);
+      })
+      .catch(() => {});
+  }, [codedHeld, activeRunId, id]);
   // Last run status the poll saw - a CHANGE is what triggers the heavy
   // refresh, so every transition lands (running -> collected used to slip
   // through: the tick only refreshed on terminal states, and the codebook
@@ -559,10 +586,7 @@ export default function ProjectDashboard({
           label="Brand dictionary"
           bubble={(!initPhase || codedHeld) && pendingDict > 0 ? pendingDict : null}
           disabled={initPhase && !codedHeld}
-          onClick={() => {
-            setDictTab("identify");
-            setOpenModal("dictionary");
-          }}
+          onClick={openDictionary}
         />
         <TaskButton
           label="Settings"
@@ -668,12 +692,14 @@ export default function ProjectDashboard({
               path never renders once a project has a code source - its
               metrics tables are empty there, and the per-type views
               replace the pooled rows (presentation rule, 2026-09-27). */}
-          <RunResults
-            key={`${resultsRun.id}:${codesEra ? "codes" : "legacy"}`}
-            runId={resultsRun.id}
-            refreshToken={dictVersion}
-            codes={codesEra}
-          />
+          <DictionaryOpenerContext.Provider value={openDictionary}>
+            <RunResults
+              key={`${resultsRun.id}:${codesEra ? "codes" : "legacy"}`}
+              runId={resultsRun.id}
+              refreshToken={dictVersion}
+              codes={codesEra}
+            />
+          </DictionaryOpenerContext.Provider>
         </>
       ) : (
         !activeRun && !launchingFirstRun && (
