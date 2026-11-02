@@ -5,6 +5,7 @@ import type { DictionaryEntry } from "@/lib/types";
 import { matchKey } from "@/lib/brand_key";
 import { flaggedIgnorePrefix, ignoreSurfaces } from "@/lib/ignore_rules";
 import { InlineSpinner } from "../../components/spinner";
+import { groupLines, type LineGroup } from "@/lib/engine/pill_lines";
 
 const OTHER_CANONICAL = "Other";
 
@@ -151,6 +152,10 @@ export default function IdentifyTab({
   const [confirming, setConfirming] = useState(false);
   // Buckets whose mechanically-placed variant pills are expanded.
   const [variantsOpen, setVariantsOpen] = useState<Set<string>>(new Set());
+  // Product-line chips ("Ink Cash +7 variants") expanded in place, keyed
+  // "<bucket key>::<line key>". Display only - every member stays in the
+  // bucket's pill list and commits on confirm whether shown or not.
+  const [linesOpen, setLinesOpen] = useState<Set<string>>(new Set());
   const [dragNorm, setDragNorm] = useState<string | null>(null);
   // The flagged-pill tooltip is React state, not CSS :hover - hover state
   // goes stale in Chrome when the pill list reflows under the cursor
@@ -1191,6 +1196,98 @@ export default function IdentifyTab({
           </span>
     );
 
+    // Product-line collapse (2026-11-02, Tyler): among this bucket's
+    // pending, never-confirmed, not-hand-moved pills outside the family
+    // cluster, names sharing a first distinctive word collapse into one
+    // "<shortest> +N variants" chip (pill_lines.ts). A pill dragged this
+    // session is moved=true and never re-collapses - the family rule. The
+    // chip itself does not drag: click to expand, then drag pills one by
+    // one. Hidden members commit exactly like shown ones (confirmAll walks
+    // b.pills, not what renders), each as its own merge into this bucket.
+    const rest = shown.filter((p) => !isAnchor(p));
+    const lines = groupLines(
+      rest.filter((p) => !p.moved && !p.confirmed && p.homeStatus === "pending"),
+      (p) => p.name,
+      [b.label, b.originalLabel]
+    );
+    const lineOf = new Map<string, LineGroup<Pill>>();
+    for (const g of lines) for (const m of g.members) lineOf.set(m.norm, g);
+    const commitsAs =
+      b.kind === "ignore"
+        ? "as ignored"
+        : b.kind === "other"
+          ? "into Other"
+          : `as an alias of ${b.label.trim() || b.originalLabel}`;
+    const lineChip = (g: LineGroup<Pill>) => {
+      const k = `${b.key}::${g.key}`;
+      const toggle = () =>
+        setLinesOpen((prev) => {
+          const next = new Set(prev);
+          if (next.has(k)) next.delete(k);
+          else next.add(k);
+          return next;
+        });
+      if (linesOpen.has(k)) {
+        return (
+          <span
+            key={`line:${k}`}
+            className="inline-flex flex-wrap items-center gap-1.5 rounded-xl border border-dashed border-line bg-ink/[0.03] px-1.5 py-1"
+          >
+            <button
+              type="button"
+              onClick={toggle}
+              className="px-1 text-[11px] text-ink-3 hover:text-ink"
+            >
+              {g.label} line · collapse
+            </button>
+            {g.members.map((p) => pillSpan(p))}
+          </span>
+        );
+      }
+      const flagged = g.members.some((p) => p.note);
+      const hk = `line:${k}`;
+      const n = g.members.length - 1;
+      return (
+        <span
+          key={hk}
+          onClick={toggle}
+          onMouseEnter={() => setHoverNote(hk)}
+          onMouseLeave={() => setHoverNote((cur) => (cur === hk ? null : cur))}
+          className={`relative inline-flex items-center rounded-full border px-2.5 py-1 text-[13px] font-medium select-none cursor-pointer ${
+            flagged
+              ? "bg-amber-400/15 border-amber-500/50 text-amber-800"
+              : "bg-danger/10 border-danger/30 text-danger"
+          }`}
+        >
+          {g.label}
+          <span className="ml-1.5 text-[11px] font-normal opacity-60">
+            +{n} variant{n === 1 ? "" : "s"}
+          </span>
+          {hoverNote === hk && (
+            <span className="pointer-events-none absolute left-0 top-full z-30 mt-1.5 block w-80 rounded-lg border border-line bg-surface p-3 text-left shadow-lg">
+              <span
+                className={`block text-[11px] font-semibold uppercase tracking-wide ${flagged ? "text-amber-800" : "text-ink-3"}`}
+              >
+                Same product line - {g.members.length} names
+              </span>
+              <span className="mt-1 block text-[12px] font-normal leading-snug text-ink-2">
+                Click to expand, then drag names one at a time. On confirm
+                each one is saved {commitsAs}.
+              </span>
+              {g.members.map((p) => (
+                <span key={p.norm} className="mt-1.5 block text-[12px] font-normal leading-snug">
+                  <b className="text-ink">{p.name}</b>
+                  {p.note && (
+                    <span className="block text-[11px] text-ink-3">{p.note}</span>
+                  )}
+                </span>
+              ))}
+            </span>
+          )}
+        </span>
+      );
+    };
+
     return (
       <div className="flex flex-wrap gap-1.5 min-h-9 rounded-lg p-1 -m-1">
         {shown.filter((p) => isAnchor(p)).map((p) => pillSpan(p))}
@@ -1199,7 +1296,12 @@ export default function IdentifyTab({
             {autos.map((p) => pillSpan(p))}
           </span>
         )}
-        {shown.filter((p) => !isAnchor(p)).map((p) => pillSpan(p))}
+        {rest.map((p) => {
+          const g = lineOf.get(p.norm);
+          if (!g) return pillSpan(p);
+          // The group renders once, where its first member would sit.
+          return g.members[0].norm === p.norm ? lineChip(g) : null;
+        })}
         {pills.length === 0 && (
           <span className="text-xs text-ink-3 self-center px-1">
             drop names here

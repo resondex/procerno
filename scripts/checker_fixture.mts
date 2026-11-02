@@ -1237,3 +1237,26 @@ console.log("17. s56 advocacy criticism containment");
   ok("verdictMaker: a real maker reads through", cj.verdictMaker({ maker: " Chase " }) === "Chase");
   console.log("20. judged product forms: " + (process.exitCode ? "FAILED" : "ALL PASS"));
 }
+
+// =====================================================================
+// 21. Product-line pill grouping (2026-11-02, Tyler): flagged pills of
+// one product line collapse into "<shortest> +N variants" on the brand
+// board. Display only (pill_lines.ts); members still commit one by one.
+// =====================================================================
+{
+  const ok = (label: string, cond: boolean, extra = "") => { if (!cond) { console.error(`   FAIL ${label} ${extra}`); process.exitCode = 1; } else console.log(`   ok   ${label} ${extra}`); };
+  const pl = await import(`${REPO}/src/lib/engine/pill_lines`);
+  const show = (names: string[], bucket: string) => pl.groupLines(names, (x: string) => x, [bucket]).map((g: any) => `${g.label}+${g.members.length - 1}`).join(",");
+  ok("Ink line under Chase collapses, labelled by the shortest member",
+    show(["Ink Business Cash", "Ink Preferred", "Ink Cash", "Ink Business Unlimited Credit Card", "Ritz-Carlton"], "Chase") === "Ink Cash+3");
+  ok("brand-dominated words stay distinctive (ink, freedom)", pl.lineWord("Freedom Flex", ["Chase"]) === "freedom" && pl.lineWord("Ink Cash", ["Chase"]) === "ink");
+  ok("everyday + generic card words never key (Double Cash, Custom Cash, Active Cash stay plain)",
+    show(["Double Cash", "Custom Cash", "Active Cash"], "Citi") === "");
+  ok("the bucket's own name tokens are skipped (US Bank Cash+ under U.S. Bank has no key)", pl.lineWord("US Bank Cash+", ["U.S. Bank"]) === null);
+  ok("compound -One forms join a 4+ letter key (Savor/SavorOne, Venture/VentureOne)",
+    show(["Savor", "SavorOne", "Venture", "VentureOne", "Spark", "Spark 2% Cash"], "Capital One") === "Savor+1,Venture+1,Spark+1");
+  ok("short keys never prefix-join (AA vs AAdvantage)", show(["AA Executive", "AAdvantage Executive"], "Citi") === "");
+  ok("a group of one stays plain", show(["Sapphire Reserve", "Ink Cash"], "Chase") === "");
+  ok("order-independent keys", show(["SavorOne", "Savor"], "Capital One") === "Savor+1");
+  console.log("21. product-line pills: " + (process.exitCode ? "FAILED" : "ALL PASS"));
+}
