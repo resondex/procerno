@@ -1,9 +1,81 @@
 # Workbench redesign (2026-10-30) - the analyst grid for the typed instrument
 
-Status: RATIFIED 2026-10-30 (Tyler: "we're on the same page. build it all").
-The ratified shape is the "RATIFIED" section directly below; the five candidate
-structures and the worked pool-first model after it are the record of how it
-was reached.
+Status: SUPERSEDED IN PART 2026-11-01 by the three-tier structure below (Tyler:
+"Holds, list + cards"). The 2026-10-30 ratification stands for the chassis
+(wb2, measures.ts legality, room as request data, evidence drill); the
+navigation and the shape of the Analysis tier are replaced.
+
+## RATIFIED 2026-11-01: three tiers, one completeness principle
+
+Sketch record: claude.ai/artifact/2H6gMutwxgQfRvpBUCgE5V (four layout options)
+and claude.ai/artifact/NxeGZPQ7QcTon15cgBpxm1 (the structure drawn on the AmEx
+fixture, incl. the two decisions both ways and the coverage map).
+
+**The principle (Tyler):** we cannot ask a customer to pay for a cell's
+collection and then curate it out of the analysis view - or we should never
+have collected it. So:
+
+- **Summary** CURATES. Its job is automated reports to share out: the brief,
+  Boardroom, Five questions (later Trend), heading toward one wave report with
+  a share link and export. Every number in it links to its home in Analysis.
+- **Analysis** is COMPLETE. One HOME view holds every collected cell; the
+  other views are LENSES - cuts of the same answers - and may be partial.
+  - **Stations** (home): the funnel strip, six cards of one shape - the
+    buyer's question as the title, one number, the best rival's same number
+    as the anchor (where the instrument asks a rival; otherwise the range or
+    the destination), the number of question kinds. The drill under the
+    selected station: who gets picked (or the station's equivalent), the
+    arguments behind it, you win when / you lose when, then the OPEN
+    inventory table of everything measured at that station (decision 1:
+    LISTED, not folded) - every question kind with its reads-as, its number
+    and a beside-it line; a kind the tracker did not ask is a greyed row.
+    Consideration's headline is the win rate when one card is picked (the
+    number with a rival to compare); "picked in N% of all answers" is its
+    sub-line. Churn, renewal, holding-your-own and Set C are drawn under
+    Customers (today they sit under Doubts/Comparison because one component
+    reads both).
+  - **Why**: arguments (lift, share-in-your-picks minus share-in-rivals'),
+    conditions (you win when / you lose when, counts only - no "As:" brand
+    strings, no lift multiples), the doubts table. Partial by design.
+  - **Rivals**: the ledger - pick a rival; named / picked-when-one-is /
+    head-to-head / their leavers as two-number pairs, beat-them-when /
+    they-beat-you-when, argued for each. Omits rival-free cells on purpose.
+  - **Buyers**: the four rooms as one matrix (named, picked, worth it, the
+    line asked, wins on, loses on); a row click applies the buyer filter and
+    opens Stations.
+  - One filter bar (buyer, engine) global to all four.
+- **Build a table** is RAW: the pivot renamed, opening on presets, one
+  grouped measure dropdown, illegal measures hidden not greyed.
+
+**Decision 2 (Set C): simple verdict cards now** under Customers - business
+case (confident vs hedged, relationship), expansion (backs / neutral /
+redirects), ecosystem (relationship + pairings named), advocacy (pushes back
+on the critic, case strength). The fields are in the labels; the dedicated
+scorer later replaces the numbers, not the cards.
+
+**Enforced mechanically:** every stage in the stage library routes (viewsOf)
+to at least one Analysis home and every routed view has a renderer; retired
+stages are the only exception. Goes in checker_fixture so a new stage cannot
+ship without a home.
+
+**Surface rule (Tyler, 2026-11-01):** far fewer answer counts. No n / base
+size on cards, strips, headline lines or per cell; counts live in the hover
+range, the inventory tables and thin-cell warnings only.
+
+**Vocabulary:** customer labels in buyer language (picked; win rate when a
+brand is picked; you win when; points them to another brand; pushes back;
+"which should I get" questions); contract words (share of decided, firm pick
+in category, names an exit, rebuts, open choice, holding your own, route to
+you, by design, core engine panel) move to tooltips.
+
+**Lenses read the one chassis** (the wb2 fact table + the cached rules view),
+never new server engines, so the cold-open cost stays flat as lenses are
+added.
+
+---
+
+Below: the 2026-10-30 ratification and its candidate structures, kept as the
+record of how the chassis was reached.
 
 ## RATIFIED: two tiers, one chassis, four analysis lenses
 

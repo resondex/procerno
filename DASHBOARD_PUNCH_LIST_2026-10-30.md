@@ -13,14 +13,15 @@ verified; everything here is presentation unless marked otherwise.
 | Pipeline card / tracker list | FROZEN - reviewed | measured state, counts, poll |
 | The brief | FROZEN - reviewed | re-cut 2026-10-30, Tyler saw it |
 | Boardroom / Five questions | stable, lightly reviewed | verdict wording fixed |
-| Journey | layout settled (funnel strip) | ready for content review |
-| Decision rules | FIRST DRAFT layout | needs its layout pass (sketches like Journey's) |
-| Metrics pivot | FIRST DRAFT layout | needs its layout pass |
+| Journey | becomes Stations (home view) | 2026-11-01 ratified structure |
+| Decision rules | folds into Why / Rivals / Stations drills | 2026-11-01 ratified structure |
+| Metrics pivot | becomes Build a table | presets, grouped measures |
 | Share links | untested by a human | serves coded-held runs |
 
 ## Open items - presentation (none block anything)
 
-- [ ] Analysis tier layout: four options sketched 2026-11-01 (A keep-strip-fix-cards, B scorecard, C four question tabs, D rival ledger; recommendation A with B's Consideration headline) - awaiting Tyler's pick; covers the Decision rules and Metrics layout passes
+- [x] Analysis tier layout: RATIFIED 2026-11-01 (Tyler: "Holds, list + cards") - three tiers + completeness principle, WORKBENCH_REDESIGN_2026-10-30.md top section. Build pending its go.
+- [ ] Surface rule (Tyler 2026-11-01): far fewer answer counts - no n on cards, strips, headlines or per cell; hover range / inventory tables / thin warnings only. Applies to every view incl. the frozen Summary ones on their next touch.
 - [ ] Journey: engine filter on the buyer bar (deferred from the build)
 - [ ] Set C (business case / expansion / ecosystem / advocacy): no views yet - pointer text only
 - [ ] Evidence drill in the per-type sections (today: Metrics + rules samples only)
