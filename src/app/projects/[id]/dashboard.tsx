@@ -611,8 +611,12 @@ export default function ProjectDashboard({
 
       {/* The pipeline card shows from the moment collection is full - the
           bootstrap keeps the run "running" while discovery + consolidation
-          work, and that state reads as "Measuring your market's arguments". */}
+          work, and that state reads as "Measuring your market's arguments".
+          Once the wave is measured (coded-held) the card has nothing left to
+          ask and goes away - the results below ARE the state (Tyler,
+          2026-11-01). */}
       {activeRun &&
+        !codedHeld &&
         (activeRun.status === "collected"
           ? !progress || (progress.total > 0 && progress.completed >= progress.total)
           : activeRun.status === "running" &&
