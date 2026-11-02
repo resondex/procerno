@@ -394,11 +394,16 @@ function roomAware(key: StationKey, runId: string, roomKey: string): ReactNode {
       return (
         <>
           <HeadlineSection runId={runId} room={room} />
-          <ReasonsSection runId={runId} room={room} initialType="criteria_taught" />
+          <ReasonsSection runId={runId} room={room} types={["headline", "criteria_taught"]} initialType="criteria_taught" />
         </>
       );
     case "value":
-      return <ValueSection runId={runId} room={room} />;
+      return (
+        <>
+          <ValueSection runId={runId} room={room} />
+          <ReasonsSection runId={runId} room={room} types={["value"]} />
+        </>
+      );
     default:
       return null;
   }
@@ -416,10 +421,16 @@ function invariantBody(key: StationKey, runId: string): ReactNode {
         <>
           <HeadToHeadSection runId={runId} />
           <AlternativesSection runId={runId} only="offensive" />
+          <ReasonsSection runId={runId} types={["head_to_head_entity", "head_to_head_class", "offensive_capture"]} />
         </>
       );
     case "doubts":
-      return <DoubtSections runId={runId} only="objections" />;
+      return (
+        <>
+          <DoubtSections runId={runId} only="objections" />
+          <ReasonsSection runId={runId} types={["doubt"]} />
+        </>
+      );
     case "customer_base":
       return (
         <>
@@ -427,6 +438,7 @@ function invariantBody(key: StationKey, runId: string): ReactNode {
           <AlternativesSection runId={runId} only="defensive" />
           <RepertoireSection runId={runId} />
           <SettledSections runId={runId} />
+          <ReasonsSection runId={runId} types={["keep_or_leave", "defensive_hold", "repertoire"]} />
         </>
       );
     default:

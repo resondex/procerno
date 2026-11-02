@@ -7,6 +7,7 @@ import type { DoubtViews, ObjectionVerdict, WorryRow } from "@/lib/engine/doubt"
 import { SortTable, Tip, type Col } from "./table";
 import { BaseNote, Names, rateCol } from "./view_parts";
 import RulesSection from "./rules_view";
+import ReasonsSection from "./reasons_view";
 
 /**
  * Why - an Analysis LENS (RATIFIED 2026-11-01, WORKBENCH_REDESIGN_2026-10-30.md
@@ -217,12 +218,18 @@ export default function WhySection({ runId }: { runId: string }) {
                   <summary className="cursor-pointer text-[12px] text-primary underline decoration-dotted underline-offset-2">
                     All arguments
                   </summary>
-                  <SortTable
-                    cols={liftCols}
-                    rows={lift}
-                    filename="why_arguments.csv"
-                    defaultSort={{ id: "lift", dir: -1 }}
-                  />
+                  <div className="grid gap-4 pt-3">
+                    <SortTable
+                      cols={liftCols}
+                      rows={lift}
+                      filename="why_arguments.csv"
+                      defaultSort={{ id: "lift", dir: -1 }}
+                    />
+                    {/* The full reasons table with every question kind - the
+                        one place the all-types picker lives; each station
+                        shows only its own kinds. */}
+                    <ReasonsSection runId={runId} />
+                  </div>
                 </details>
               </div>
             )}

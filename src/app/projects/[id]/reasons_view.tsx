@@ -25,10 +25,23 @@ const TIP_POOLED =
  * across all buyers drop out. `initialType` opens on one question type (a
  * view key, e.g. criteria_taught). Both absent = exactly today's behavior.
  */
-export default function ReasonsSection({ runId, room, initialType }: { runId: string; room?: string; initialType?: ViewKey }) {
+export default function ReasonsSection({
+  runId,
+  room,
+  initialType,
+  types,
+}: {
+  runId: string;
+  room?: string;
+  initialType?: ViewKey;
+  /** Inside a station: only this station's question kinds are offered (and
+   * the pooled all-types column is not). Absent = every kind + pooled (the
+   * Why lens). */
+  types?: ViewKey[];
+}) {
   const [view, setView] = useState<ReasonsView | null | undefined>(undefined);
   const [error, setError] = useState<string | null>(null);
-  const [type, setType] = useState<string>(initialType ?? POOLED);
+  const [type, setType] = useState<string>(initialType ?? types?.[0] ?? POOLED);
   const [grouped, setGrouped] = useState(true);
 
   useEffect(() => {
@@ -45,7 +58,10 @@ export default function ReasonsSection({ runId, room, initialType }: { runId: st
     };
   }, [runId, room]);
 
-  const selected = view?.types.find((t) => t.key === type) ?? null;
+  // The kinds this mount offers; a scoped mount whose kinds the tracker never
+  // asked renders nothing.
+  const offered = view ? (types ? view.types.filter((t) => types.includes(t.key as ViewKey)) : view.types) : [];
+  const selected = offered.find((t) => t.key === type) ?? (types ? offered[0] ?? null : null);
 
   const cols = useMemo((): Col<ReasonRow>[] => {
     if (!view) return [];
@@ -136,9 +152,9 @@ export default function ReasonsSection({ runId, room, initialType }: { runId: st
       <div className="flex flex-wrap items-center gap-x-5 gap-y-2 text-[13px] text-ink-2">
         <label className="flex items-center gap-2">
           Question type
-          <select className="input w-auto text-[13px]" value={selected ? type : POOLED} onChange={(e) => setType(e.target.value)}>
-            <option value={POOLED}>All types (criteria apart)</option>
-            {view.types.map((t) => (
+          <select className="input w-auto text-[13px]" value={selected ? selected.key : POOLED} onChange={(e) => setType(e.target.value)}>
+            {!types && <option value={POOLED}>All types (criteria apart)</option>}
+            {offered.map((t) => (
               <option key={t.key} value={t.key}>
                 {t.label}
               </option>
