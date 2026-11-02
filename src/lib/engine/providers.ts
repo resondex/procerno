@@ -181,10 +181,15 @@ export function getEngine(id: string): Engine | undefined {
 
 /** Registry labels carry retirement bookkeeping ("gpt-5.6-luna - retired")
  * for admin and config surfaces; the customer-facing views name the engine
- * that answered without it - the model id stays, so a 5.6 wave and a 6 wave
- * still read apart. */
+ * in consumer terms only - the product and its tier, never a model id
+ * (Tyler, 2026-11-02). A retired engine therefore reads exactly like its
+ * successor; the model id still keys every cache and export. */
 export function engineDisplayLabel(e: { label: string }): string {
-  return e.label.replace(/ - retired[^)]*/, "");
+  return e.label
+    // "(free tier, gpt-5.6-luna - retired)" -> "(free tier)"
+    .replace(/,\s*[^(),]*? - retired[^)]*\)/, ")")
+    // "(gpt-4 - retired)" / "(flash-latest - retired, now ...)" -> gone
+    .replace(/\s*\([^()]* - retired[^)]*\)/, "");
 }
 
 /** The engine a NEW run collects on for a configured id: retired engines

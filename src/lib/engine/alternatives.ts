@@ -374,7 +374,7 @@ export function computeAlternatives(data: ViewData): AlternativesViews {
 }
 
 // alt2 (2026-10-28): names resolve through the context judge (context_judge.ts).
-const ALTERNATIVES_VERSION = "alt3";
+const ALTERNATIVES_VERSION = "alt4";
 export function computeAlternativesCached(run: Run, project: Project): Promise<AlternativesViews | null> {
   return cachedView("alternatives", ALTERNATIVES_VERSION, run, project, computeAlternatives, { judge: true });
 }

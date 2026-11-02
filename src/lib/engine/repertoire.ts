@@ -122,7 +122,7 @@ export function computeRepertoire(data: ViewData): RepertoireView | null {
   };
 }
 
-const REPERTOIRE_VERSION = "rp2";
+const REPERTOIRE_VERSION = "rp3";
 export function computeRepertoireCached(run: Run, project: Project): Promise<RepertoireView | null> {
   return cachedView("repertoire", REPERTOIRE_VERSION, run, project, computeRepertoire, { judge: true });
 }

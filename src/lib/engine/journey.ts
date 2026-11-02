@@ -53,7 +53,7 @@ export type { RateCell, StationKey };
  */
 
 /** Bumped whenever the payload shape or a number's meaning changes. */
-export const JOURNEY_VERSION = "j2";
+export const JOURNEY_VERSION = "j3";
 
 export interface JourneyMetric {
   key: string;

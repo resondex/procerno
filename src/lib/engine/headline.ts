@@ -242,7 +242,7 @@ export function computeHeadline(data: ViewData, request: ViewRequest = {}): Head
 }
 
 // h2 (2026-10-28): names resolve through the context judge (context_judge.ts).
-const HEADLINE_VERSION = "h3";
+const HEADLINE_VERSION = "h4";
 export function computeHeadlineCached(run: Run, project: Project, room?: string): Promise<HeadlineView | null> {
   if (room === undefined) return cachedView("headline", HEADLINE_VERSION, run, project, computeHeadline, { judge: true });
   return cachedView("headline", HEADLINE_VERSION, run, project, (d) => computeHeadline(d, { room }), { judge: true }, { room });

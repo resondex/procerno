@@ -229,7 +229,7 @@ export function computeDoubt(data: ViewData): DoubtViews {
 }
 
 // d2 (2026-10-28): names resolve through the context judge (context_judge.ts).
-const DOUBT_VERSION = "d3";
+const DOUBT_VERSION = "d4";
 export function computeDoubtCached(run: Run, project: Project): Promise<DoubtViews | null> {
   return cachedView("doubt", DOUBT_VERSION, run, project, computeDoubt, { judge: true });
 }

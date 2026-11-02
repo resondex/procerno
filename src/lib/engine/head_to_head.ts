@@ -347,7 +347,7 @@ export async function computeHeadToHead(data: ViewData): Promise<HeadToHeadViews
 
 // hh4 (2026-10-28): names resolve through the context judge (context_judge.ts) -
 // a rival's maker-less products move from "routes elsewhere" to the rival's side.
-const HEAD_TO_HEAD_VERSION = "hh5";
+const HEAD_TO_HEAD_VERSION = "hh6";
 export function computeHeadToHeadCached(run: Run, project: Project): Promise<HeadToHeadViews | null> {
   return cachedView("head_to_head", HEAD_TO_HEAD_VERSION, run, project, computeHeadToHead, { judge: true });
 }

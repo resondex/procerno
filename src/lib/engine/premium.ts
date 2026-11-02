@@ -163,7 +163,7 @@ export function computePremium(data: ViewData): PremiumView | null {
   };
 }
 
-const PREMIUM_VERSION = "p2";
+const PREMIUM_VERSION = "p3";
 export function computePremiumCached(run: Run, project: Project): Promise<PremiumView | null> {
   return cachedView("premium_tier", PREMIUM_VERSION, run, project, computePremium, { judge: true });
 }

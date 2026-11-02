@@ -231,7 +231,7 @@ export function computeSettled(data: ViewData): SettledViews {
 }
 
 // s1 (2026-11-01): first version - Set C verdict cards, context-judged names.
-const SETTLED_VERSION = "s1";
+const SETTLED_VERSION = "s2";
 export function computeSettledCached(run: Run, project: Project): Promise<SettledViews | null> {
   return cachedView("settled", SETTLED_VERSION, run, project, computeSettled, { judge: true });
 }

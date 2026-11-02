@@ -447,7 +447,7 @@ export function computeWorkbench(data: ViewData): WorkbenchView {
 
 // wb2 (2026-10-30): typed facts for every coded answer - the output changed
 // for identical inputs, so the cache era moves (cache-era case 2).
-const WORKBENCH_VERSION = "wb2";
+const WORKBENCH_VERSION = "wb3";
 export function computeWorkbenchCached(run: Run, project: Project): Promise<WorkbenchView | null> {
   return cachedView("workbench", WORKBENCH_VERSION, run, project, computeWorkbench, { judge: true });
 }

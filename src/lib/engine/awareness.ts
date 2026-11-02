@@ -249,7 +249,7 @@ export async function computeAwareness(data: ViewData, request: ViewRequest = {}
 }
 
 // a2 (2026-10-28): adjacent quotes grouped at read time.
-const AWARENESS_VERSION = "a3";
+const AWARENESS_VERSION = "a4";
 export function computeAwarenessCached(run: Run, project: Project, room?: string): Promise<AwarenessView | null> {
   if (room === undefined) return cachedView("awareness", AWARENESS_VERSION, run, project, computeAwareness, { judge: true });
   return cachedView("awareness", AWARENESS_VERSION, run, project, (d) => computeAwareness(d, { room }), { judge: true }, { room });

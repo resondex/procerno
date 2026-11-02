@@ -305,7 +305,7 @@ export function computeBrandSummary(data: ViewData): BrandSummaryView {
 }
 
 // bs1 (2026-10-30): first version; names resolve through the context judge.
-const BRAND_SUMMARY_VERSION = "bs2";
+const BRAND_SUMMARY_VERSION = "bs3";
 export function computeBrandSummaryCached(run: Run, project: Project): Promise<BrandSummaryView | null> {
   return cachedView("brand_summary", BRAND_SUMMARY_VERSION, run, project, computeBrandSummary, { judge: true });
 }

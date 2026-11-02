@@ -183,7 +183,7 @@ export function computeValue(data: ViewData, request: ViewRequest = {}): ValueVi
 }
 
 // v2 (2026-10-28): names resolve through the context judge (context_judge.ts).
-const VALUE_VERSION = "v3";
+const VALUE_VERSION = "v4";
 export function computeValueCached(run: Run, project: Project, room?: string): Promise<ValueView | null> {
   const extras = { setupDecision: true, judge: true };
   if (room === undefined) return cachedView("value", VALUE_VERSION, run, project, computeValue, extras);
