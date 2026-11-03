@@ -1,9 +1,9 @@
 import { ENGINES, engineDisplayLabel } from "./providers";
 import { buildResolver } from "./brand_resolve";
-import { cachedView, cell, poolOf, type PoolRow, type RateCell, type ViewData, type ViewRequest } from "./view_data";
+import { cachedView, cell, condCache, facetsOf, poolOf, requestOf, type EngineFacets, type PoolRow, type RateCell, type ViewData, type ViewRequest } from "./view_data";
 import type { ViewKey } from "./views";
 import { excludedWords } from "./definition_overlap";
-import { conditionKeyMap, conditionStemKey } from "./condition_groups";
+import { conditionKeysFor, conditionStemKey, type ConditionKeysCache } from "./condition_groups";
 import type { Project, Run } from "../types";
 
 /**
@@ -65,7 +65,7 @@ export interface AwarenessBlock extends AwarenessSlice {
   uncoded: number;
   /** Room rows (problem recognition); one unlabeled row is dropped. */
   rooms: AwarenessSlice[];
-  byEngine: AwarenessSlice[];
+  byEngine: (AwarenessSlice & EngineFacets)[];
   /** Active brands named, by share of answers; `recommended` counts answers framing it recommended. */
   brands: { name: string; you: boolean; named: RateCell; recommended: number }[];
   topics: { code: string; cell: RateCell }[];
@@ -122,7 +122,24 @@ const WITHOUT_IDS = 8;
 /** Markdown emphasis and surrounding punctuation off a quote, for grouping and display. */
 const cleanQuote = (q: string) => q.replace(/\*\*?|__?|`/g, "").replace(/\s+/g, " ").trim().replace(/^[-:;,.\s]+|[:;,\s]+$/g, "");
 
-async function withoutGroups(adjacent: Facts[], category: string): Promise<AwarenessBlock["without"]> {
+/** Grouping counts over adjacent-routed answers' quotes. */
+function quoteCounts(rows: PoolRow[]): Map<string, number> {
+  const counts = new Map<string, number>();
+  for (const row of rows) {
+    if (row.code.category_routed !== "adjacent") continue;
+    const q = cleanQuote(row.code.quote ?? "");
+    if (q) counts.set(q, (counts.get(q) ?? 0) + 1);
+  }
+  return counts;
+}
+
+async function withoutGroups(
+  adjacent: Facts[],
+  category: string,
+  /** The whole panel's adjacent rows, passed only under the Panel lens. */
+  full: (() => PoolRow[]) | null,
+  cache: ConditionKeysCache | null
+): Promise<AwarenessBlock["without"]> {
   const n = adjacent.length;
   const quoted = adjacent
     .map((f) => ({ id: f.row.code.response_id, q: cleanQuote(f.row.code.quote ?? "") }))
@@ -130,7 +147,10 @@ async function withoutGroups(adjacent: Facts[], category: string): Promise<Aware
   const counts = new Map<string, number>();
   for (const x of quoted) counts.set(x.q, (counts.get(x.q) ?? 0) + 1);
   const exclude = excludedWords([category]);
-  const keys = await conditionKeyMap(counts, exclude, "views:awareness");
+  const keys = await conditionKeysFor(counts, full ? () => quoteCounts(full()) : null, exclude, {
+    purpose: "views:awareness",
+    cache,
+  });
   const keyOf = (q: string) => keys.get(q) ?? conditionStemKey(q, exclude);
   const acc = new Map<string, { n: number; surfaces: Map<string, number>; ids: string[] }>();
   for (const x of quoted) {
@@ -212,13 +232,18 @@ async function block(
 
   const labels = new Map(ENGINES.map((e) => [e.id, engineDisplayLabel(e)]));
   return {
-    without: await withoutGroups(facts.filter((f) => f.route === "adjacent"), data.project.category),
+    without: await withoutGroups(
+      facts.filter((f) => f.route === "adjacent"),
+      data.project.category,
+      request.engines ? () => poolOf(data, view, { room: request.room }).rows : null,
+      condCache(data, `awareness:${kind}`, request)
+    ),
     ...slice(kind, kind, facts),
     view: kind,
     uncoded,
     rooms: rooms.length === 1 && rooms[0].key === "" ? [] : rooms,
     byEngine: [...core]
-      .map((m) => slice(m, labels.get(m) ?? m, facts.filter((f) => f.row.model === m)))
+      .map((m) => ({ ...slice(m, labels.get(m) ?? m, facts.filter((f) => f.row.model === m)), ...facetsOf(m) }))
       .filter((s) => s.answers > 0),
     brands: [...brandCount.entries()]
       .sort((a, b) => b[1].named - a[1].named || a[1].name.localeCompare(b[1].name))
@@ -249,8 +274,9 @@ export async function computeAwareness(data: ViewData, request: ViewRequest = {}
 }
 
 // a2 (2026-10-28): adjacent quotes grouped at read time.
-const AWARENESS_VERSION = "a4";
-export function computeAwarenessCached(run: Run, project: Project, room?: string): Promise<AwarenessView | null> {
-  if (room === undefined) return cachedView("awareness", AWARENESS_VERSION, run, project, computeAwareness, { judge: true });
-  return cachedView("awareness", AWARENESS_VERSION, run, project, (d) => computeAwareness(d, { room }), { judge: true }, { room });
+// a5 (2026-11-03): engine slices carry vendor / tier / mode (the Panel lens's Group-by).
+const AWARENESS_VERSION = "a5";
+export function computeAwarenessCached(run: Run, project: Project, request: ViewRequest = {}): Promise<AwarenessView | null> {
+  const r = requestOf(request, true);
+  return cachedView("awareness", AWARENESS_VERSION, run, project, (d) => computeAwareness(d, r), { judge: true }, r);
 }

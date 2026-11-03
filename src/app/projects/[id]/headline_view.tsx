@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import type { HeadlineBrand, HeadlineSlice, HeadlineView, RateCell } from "@/lib/engine/headline";
 import { SortTable, Tip, type Col } from "./table";
-import { BaseNote, fmtN } from "./view_parts";
+import { BaseNote, fmtN, useEngineSet, viewQuery, EngineTable } from "./view_parts";
 import { useDictionaryOpener } from "./dict_opener";
 
 /**
@@ -180,9 +180,10 @@ export default function HeadlineSection({ runId, room }: { runId: string; room?:
   const [error, setError] = useState<string | null>(null);
   const [allBrands, setAllBrands] = useState(false);
 
+  const q = viewQuery({ room, engines: useEngineSet() });
   useEffect(() => {
     let live = true;
-    fetch(`/api/runs/${runId}/headline${room ? `?room=${encodeURIComponent(room)}` : ""}`)
+    fetch(`/api/runs/${runId}/headline${q}`)
       .then(async (r) => {
         if (!r.ok) throw new Error(`headline view failed (${r.status})`);
         const d = (await r.json()) as { view: HeadlineView | null };
@@ -192,7 +193,7 @@ export default function HeadlineSection({ runId, room }: { runId: string; room?:
     return () => {
       live = false;
     };
-  }, [runId, room]);
+  }, [runId, q]);
 
   if (error) {
     return <div className="card px-5 py-4 text-[13px] text-danger">{error}</div>;
@@ -283,7 +284,7 @@ export default function HeadlineSection({ runId, room }: { runId: string; room?:
 
       <section className="card p-6">
         <h2 className="section-label">{view.brand} by engine</h2>
-        <SortTable cols={sliceCols("Engine")} rows={view.byEngine} filename="headline_by_engine.csv" defaultSort={{ id: "mentioned", dir: -1 }} />
+        <EngineTable cols={sliceCols("Engine")} rows={view.byEngine} filename="headline_by_engine.csv" defaultSort={{ id: "mentioned", dir: -1 }} />
       </section>
       <BaseNote>
         Based on {fmtN(view.answers)} answers to questions that name no brand, across {view.byEngine.length} engines.

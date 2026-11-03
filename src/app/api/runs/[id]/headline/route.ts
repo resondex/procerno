@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { requireAuth, requireRun } from "@/lib/auth";
-import { roomParam } from "@/lib/engine/view_data";
+import { viewRequestParams } from "@/lib/engine/view_data";
 import { computeHeadlineCached } from "@/lib/engine/headline";
 
 /** The headline view (open-choice answers only) read from answer_codes
@@ -15,6 +15,6 @@ export async function GET(
   const { id } = await params;
   const loaded = await requireRun(id, auth);
   if (loaded instanceof NextResponse) return loaded;
-  const view = await computeHeadlineCached(loaded.run, loaded.project, roomParam(req));
+  const view = await computeHeadlineCached(loaded.run, loaded.project, viewRequestParams(req));
   return NextResponse.json({ view });
 }

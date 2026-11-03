@@ -1,7 +1,7 @@
 import { ENGINES, engineDisplayLabel } from "./providers";
 import { buildResolver } from "./brand_resolve";
 import { exitResolver, exitRows, outsideCounts, type ExitRow } from "./exits";
-import { cachedView, cell, poolOf, type PoolRow, type RateCell, type ViewData } from "./view_data";
+import { cachedView, cell, facetsOf, poolOf, requestOf, type EngineFacets, type PoolRow, type RateCell, type ViewData, type ViewRequest } from "./view_data";
 import type { Project, Run } from "../types";
 
 /**
@@ -76,7 +76,7 @@ export interface DoubtView<V extends string> {
   rows: WorryRow<V>[];
   exits: ExitRow<V>[];
   outsideExits: { name: string; n: number }[];
-  byEngine: DoubtSlice<V>[];
+  byEngine: (DoubtSlice<V> & EngineFacets)[];
   byStage: DoubtSlice<V>[];
 }
 
@@ -128,12 +128,13 @@ function computeKind<V extends string>(
   data: ViewData,
   kind: "objections" | "keep_or_leave",
   verdicts: readonly V[],
-  verdictOf: (row: PoolRow) => V
+  verdictOf: (row: PoolRow) => V,
+  request: ViewRequest
 ): DoubtView<V> | null {
   const { project, dictionary } = data;
   const resolve = buildResolver(dictionary, data.judged);
   const targetKey = resolve(project.brand).key;
-  const { rows: pool, uncoded, core } = poolOf(data, kind === "objections" ? "doubt" : "keep_or_leave");
+  const { rows: pool, uncoded, core } = poolOf(data, kind === "objections" ? "doubt" : "keep_or_leave", request);
   if (pool.length === 0 && uncoded === 0) return null;
 
   const answerExits = exitResolver(project, dictionary, resolve, targetKey);
@@ -206,13 +207,13 @@ function computeKind<V extends string>(
     ),
     outsideExits: outsideCounts(resolved),
     byEngine: [...core]
-      .map((m) => sliceOf(m, labels.get(m) ?? m, facts.filter((f) => f.row.model === m), verdicts))
+      .map((m) => ({ ...sliceOf(m, labels.get(m) ?? m, facts.filter((f) => f.row.model === m), verdicts), ...facetsOf(m) }))
       .filter((s) => s.answers > 0),
     byStage: stages.map((s) => sliceOf(s, s, facts.filter((f) => f.row.intent.stage === s), verdicts)),
   };
 }
 
-export function computeDoubt(data: ViewData): DoubtViews {
+export function computeDoubt(data: ViewData, request: ViewRequest = {}): DoubtViews {
   return {
     runId: data.run.id,
     source: data.source,
@@ -220,16 +221,18 @@ export function computeDoubt(data: ViewData): DoubtViews {
     objections: computeKind(data, "objections", OBJECTION_VERDICTS, (r) => {
       const v = r.code.proceed_or_avoid;
       return v === "proceed" || v === "avoid" ? v : "undecided";
-    }),
+    }, request),
     keepOrLeave: computeKind(data, "keep_or_leave", STAY_VERDICTS, (r) => {
       const v = r.code.keep_or_leave;
       return v === "keep" || v === "leave" ? v : "undecided";
-    }),
+    }, request),
   };
 }
 
 // d2 (2026-10-28): names resolve through the context judge (context_judge.ts).
-const DOUBT_VERSION = "d4";
-export function computeDoubtCached(run: Run, project: Project): Promise<DoubtViews | null> {
-  return cachedView("doubt", DOUBT_VERSION, run, project, computeDoubt, { judge: true });
+// d5 (2026-11-03): engine slices carry vendor / tier / mode (the Panel lens's Group-by).
+const DOUBT_VERSION = "d5";
+export function computeDoubtCached(run: Run, project: Project, request: ViewRequest = {}): Promise<DoubtViews | null> {
+  const r = requestOf(request);
+  return cachedView("doubt", DOUBT_VERSION, run, project, (d) => computeDoubt(d, r), { judge: true }, r);
 }

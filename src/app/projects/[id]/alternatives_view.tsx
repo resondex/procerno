@@ -13,7 +13,7 @@ import type {
   OffensiveView,
 } from "@/lib/engine/alternatives";
 import { SortTable, Tip, type Col } from "./table";
-import { BaseNote, fmtN, Legend, Names, pct, range, rate, rateCol, ShareOf, StackBar } from "./view_parts";
+import { BaseNote, fmtN, Legend, Names, pct, range, rate, rateCol, ShareOf, StackBar, useEngineSet, viewQuery, EngineTable } from "./view_parts";
 
 /**
  * The alternatives views (2026-10-27): offensive capture (a rival's leaver
@@ -159,7 +159,7 @@ function OffensiveSection({ view }: { view: OffensiveView }) {
       </details>
       <details className="text-[13px]">
         <summary className="cursor-pointer text-ink-2">By engine, across every rival</summary>
-        <SortTable cols={captureEngineCols} rows={view.byEngine} filename="alternatives_capture_by_engine.csv" defaultSort={{ id: "captured", dir: -1 }} />
+        <EngineTable cols={captureEngineCols} rows={view.byEngine} filename="alternatives_capture_by_engine.csv" defaultSort={{ id: "captured", dir: -1 }} />
       </details>
       <BaseNote>Based on {fmtN(view.answers)} answers across {view.byEngine.length} engines.</BaseNote>
     </section>
@@ -287,7 +287,7 @@ function DefensiveSection({ view }: { view: DefensiveView }) {
       )}
       <details className="text-[13px]">
         <summary className="cursor-pointer text-ink-2">By engine</summary>
-        <SortTable cols={holdEngineCols} rows={view.byEngine} filename="alternatives_hold_by_engine.csv" defaultSort={{ id: "keep", dir: -1 }} />
+        <EngineTable cols={holdEngineCols} rows={view.byEngine} filename="alternatives_hold_by_engine.csv" defaultSort={{ id: "keep", dir: -1 }} />
       </details>
       <BaseNote>Based on {fmtN(view.answers)} answers across {view.byEngine.length} engines.</BaseNote>
     </section>
@@ -300,9 +300,10 @@ export default function AlternativesSection({ runId, only }: { runId: string; on
   const [views, setViews] = useState<AlternativesViews | null | undefined>(undefined);
   const [error, setError] = useState<string | null>(null);
 
+  const q = viewQuery({ engines: useEngineSet() });
   useEffect(() => {
     let live = true;
-    fetch(`/api/runs/${runId}/alternatives`)
+    fetch(`/api/runs/${runId}/alternatives${q}`)
       .then(async (r) => {
         if (!r.ok) throw new Error(`alternatives view failed (${r.status})`);
         const d = (await r.json()) as { views: AlternativesViews | null };
@@ -312,7 +313,7 @@ export default function AlternativesSection({ runId, only }: { runId: string; on
     return () => {
       live = false;
     };
-  }, [runId]);
+  }, [runId, q]);
 
   if (error) return <div className="card px-5 py-4 text-[13px] text-danger">{error}</div>;
   if (!views) return null;

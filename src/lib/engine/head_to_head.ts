@@ -2,8 +2,8 @@ import { ENGINES, engineDisplayLabel } from "./providers";
 import { buildResolver } from "./brand_resolve";
 import { containsSeq, famTokens } from "./brand_family";
 import { excludedWords } from "./definition_overlap";
-import { conditionKeyMap, conditionStemKey } from "./condition_groups";
-import { cachedView, cell, poolOf, type PoolRow, type RateCell, type ViewData } from "./view_data";
+import { conditionKeysFor, conditionStemKey } from "./condition_groups";
+import { cachedView, cell, condCache, facetsOf, poolOf, requestOf, type EngineFacets, type PoolRow, type RateCell, type ViewData, type ViewRequest } from "./view_data";
 import type { DictionaryEntry, Intent, Project, Run } from "../types";
 
 /**
@@ -109,7 +109,7 @@ export interface HeadToHeadView {
   /** Across every rival of this kind - the overall prompted record. */
   overall: { won: RateCell; lost: RateCell; other: RateCell; undecided: RateCell; winOfDecided: RateCell };
   rows: HeadToHeadRow[];
-  byEngine: HeadToHeadSlice[];
+  byEngine: (HeadToHeadSlice & EngineFacets)[];
 }
 
 export interface HeadToHeadViews {
@@ -226,14 +226,12 @@ function tallyOf(rows: { bucket: Bucket }[]) {
   };
 }
 
-async function computeKind(data: ViewData, kind: "entity" | "class"): Promise<HeadToHeadView | null> {
+async function computeKind(data: ViewData, kind: "entity" | "class", request: ViewRequest = {}): Promise<HeadToHeadView | null> {
   const { project, dictionary } = data;
   const resolve = buildResolver(dictionary, data.judged);
   const targetKey = resolve(project.brand).key;
-  const { rows: pool, uncoded, core } = poolOf(
-    data,
-    kind === "entity" ? "head_to_head_entity" : "head_to_head_class"
-  );
+  const viewKey = kind === "entity" ? "head_to_head_entity" : "head_to_head_class";
+  const { rows: pool, uncoded, core } = poolOf(data, viewKey, request);
   if (pool.length === 0 && uncoded === 0) return null;
 
   const forms: { seq: string[]; entry: DictionaryEntry }[] = [];
@@ -285,14 +283,25 @@ async function computeKind(data: ViewData, kind: "entity" | "class"): Promise<He
   const exclude = excludedWords([project.category]);
   // One grouping over the whole view's conditions (embeddings-first, stem
   // fallback) - the same wording groups identically across every matchup.
-  const condCounts = new Map<string, number>();
-  for (const s of scored) {
-    for (const rule of s.row.code.decision_rules ?? []) {
-      const c = rule.condition.trim();
-      condCounts.set(c, (condCounts.get(c) ?? 0) + 1);
+  const countRules = (list: PoolRow[]) => {
+    const counts = new Map<string, number>();
+    for (const row of list) {
+      for (const rule of row.code.decision_rules ?? []) {
+        const c = rule.condition.trim();
+        counts.set(c, (counts.get(c) ?? 0) + 1);
+      }
     }
-  }
-  const condKeys = await conditionKeyMap(condCounts, exclude);
+    return counts;
+  };
+  const condCounts = countRules(scored.map((s) => s.row));
+  // Under the Panel lens the grouping is the whole panel's, looked up - every
+  // engine set groups a wording the same way.
+  const condKeys = await conditionKeysFor(
+    condCounts,
+    request.engines ? () => countRules(poolOf(data, viewKey).rows) : null,
+    exclude,
+    { cache: condCache(data, `head_to_head:${kind}`) }
+  );
   const keyOf = (c: string) => condKeys.get(c) ?? conditionStemKey(c, exclude);
   const rows: HeadToHeadRow[] = [...byRival.entries()].map(([key, list]) => {
     const meta = rivalMeta.get(key)!;
@@ -316,11 +325,11 @@ async function computeKind(data: ViewData, kind: "entity" | "class"): Promise<He
   rows.sort((a, b) => b.answers - a.answers || a.rival.localeCompare(b.rival));
 
   const engineLabel = new Map(ENGINES.map((e) => [e.id, engineDisplayLabel(e)]));
-  const byEngine: HeadToHeadSlice[] = [...core]
+  const byEngine: (HeadToHeadSlice & EngineFacets)[] = [...core]
     .map((m) => {
       const list = scored.filter((s) => s.row.model === m);
       const t = tallyOf(list);
-      return { key: m, label: engineLabel.get(m) ?? m, answers: list.length, won: t.won, lost: t.lost, undecided: t.undecided };
+      return { key: m, label: engineLabel.get(m) ?? m, ...facetsOf(m), answers: list.length, won: t.won, lost: t.lost, undecided: t.undecided };
     })
     .filter((s) => s.answers > 0);
 
@@ -335,19 +344,21 @@ async function computeKind(data: ViewData, kind: "entity" | "class"): Promise<He
   };
 }
 
-export async function computeHeadToHead(data: ViewData): Promise<HeadToHeadViews> {
+export async function computeHeadToHead(data: ViewData, request: ViewRequest = {}): Promise<HeadToHeadViews> {
   return {
     runId: data.run.id,
     source: data.source,
     brand: data.project.brand,
-    entity: await computeKind(data, "entity"),
-    class: await computeKind(data, "class"),
+    entity: await computeKind(data, "entity", request),
+    class: await computeKind(data, "class", request),
   };
 }
 
 // hh4 (2026-10-28): names resolve through the context judge (context_judge.ts) -
 // a rival's maker-less products move from "routes elsewhere" to the rival's side.
-const HEAD_TO_HEAD_VERSION = "hh6";
-export function computeHeadToHeadCached(run: Run, project: Project): Promise<HeadToHeadViews | null> {
-  return cachedView("head_to_head", HEAD_TO_HEAD_VERSION, run, project, computeHeadToHead, { judge: true });
+// hh7 (2026-11-03): engine slices carry vendor / tier / mode (the Panel lens's Group-by).
+const HEAD_TO_HEAD_VERSION = "hh7";
+export function computeHeadToHeadCached(run: Run, project: Project, request: ViewRequest = {}): Promise<HeadToHeadViews | null> {
+  const r = requestOf(request);
+  return cachedView("head_to_head", HEAD_TO_HEAD_VERSION, run, project, (d) => computeHeadToHead(d, r), { judge: true }, r);
 }

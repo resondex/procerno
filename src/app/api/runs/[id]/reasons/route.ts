@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { requireAuth, requireRun } from "@/lib/auth";
-import { roomParam } from "@/lib/engine/view_data";
+import { viewRequestParams } from "@/lib/engine/view_data";
 import { computeReasonsCached } from "@/lib/engine/reasons";
 
 /** The reasons view (per-code incidence by question type and verdict) reads from answer_codes under
@@ -15,6 +15,6 @@ export async function GET(
   const { id } = await params;
   const loaded = await requireRun(id, auth);
   if (loaded instanceof NextResponse) return loaded;
-  const view = await computeReasonsCached(loaded.run, loaded.project, roomParam(req));
+  const view = await computeReasonsCached(loaded.run, loaded.project, viewRequestParams(req));
   return NextResponse.json({ view });
 }

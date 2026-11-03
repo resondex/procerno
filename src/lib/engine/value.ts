@@ -1,6 +1,6 @@
 import { ENGINES, engineDisplayLabel } from "./providers";
 import { buildResolver, type Resolver } from "./brand_resolve";
-import { cachedView, cell, poolOf, type PoolRow, type RateCell, type ViewData, type ViewRequest } from "./view_data";
+import { cachedView, cell, facetsOf, poolOf, requestOf, type EngineFacets, type PoolRow, type RateCell, type ViewData, type ViewRequest } from "./view_data";
 import type { Project, Run } from "../types";
 
 /**
@@ -56,7 +56,7 @@ export interface ValueView {
   instead: { name: string; n: number }[];
   rooms: ValueRow[];
   lines: ValueRow[];
-  byEngine: ValueSlice[];
+  byEngine: (ValueSlice & EngineFacets)[];
 }
 
 interface Facts {
@@ -176,16 +176,16 @@ export function computeValue(data: ViewData, request: ViewRequest = {}): ValueVi
     byEngine: [...core]
       .map((m) => {
         const list = facts.filter((f) => f.row.model === m);
-        return { key: m, label: labels.get(m) ?? m, answers: list.length, worth: worthCells(list) };
+        return { key: m, label: labels.get(m) ?? m, ...facetsOf(m), answers: list.length, worth: worthCells(list) };
       })
       .filter((s) => s.answers > 0),
   };
 }
 
 // v2 (2026-10-28): names resolve through the context judge (context_judge.ts).
-const VALUE_VERSION = "v4";
-export function computeValueCached(run: Run, project: Project, room?: string): Promise<ValueView | null> {
-  const extras = { setupDecision: true, judge: true };
-  if (room === undefined) return cachedView("value", VALUE_VERSION, run, project, computeValue, extras);
-  return cachedView("value", VALUE_VERSION, run, project, (d) => computeValue(d, { room }), extras, { room });
+// v5 (2026-11-03): engine slices carry vendor / tier / mode (the Panel lens's Group-by).
+const VALUE_VERSION = "v5";
+export function computeValueCached(run: Run, project: Project, request: ViewRequest = {}): Promise<ValueView | null> {
+  const r = requestOf(request, true);
+  return cachedView("value", VALUE_VERSION, run, project, (d) => computeValue(d, r), { setupDecision: true, judge: true }, r);
 }

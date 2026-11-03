@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import type { AwarenessBlock, AwarenessSlice, AwarenessView, Route, WithoutGroup } from "@/lib/engine/awareness";
 import { SortTable, Tip, type Col } from "./table";
-import { AnswersModal, BaseNote, fmtN, Legend, pct, range, rate, rateCol, StackBar, type AnswersTarget, type Part } from "./view_parts";
+import { AnswersModal, BaseNote, fmtN, Legend, pct, range, rate, rateCol, StackBar, type AnswersTarget, type Part, useEngineSet, viewQuery, EngineTable } from "./view_parts";
 
 /**
  * The awareness views (2026-10-28): problem recognition (where the AI sends
@@ -206,7 +206,7 @@ function RoutingCard({ b, brand, category, runId }: { b: AwarenessBlock; brand: 
       <Lists b={b} />
       <details className="text-[13px]">
         <summary className="cursor-pointer text-ink-2">By engine</summary>
-        <SortTable
+        <EngineTable
           cols={sliceCols("Engine", category, brand, "routing")}
           rows={b.byEngine}
           filename="problem_recognition_by_engine.csv"
@@ -244,7 +244,7 @@ function ExplainerCard({ b, brand, category, runId }: { b: AwarenessBlock; brand
       <Lists b={b} />
       <details className="text-[13px]">
         <summary className="cursor-pointer text-ink-2">By engine</summary>
-        <SortTable
+        <EngineTable
           cols={sliceCols("Engine", category, brand, "explainer")}
           rows={b.byEngine}
           filename="category_education_by_engine.csv"
@@ -274,9 +274,10 @@ export default function AwarenessSections({
   const [view, setView] = useState<AwarenessView | null | undefined>(undefined);
   const [error, setError] = useState<string | null>(null);
 
+  const q = viewQuery({ room, engines: useEngineSet() });
   useEffect(() => {
     let live = true;
-    fetch(`/api/runs/${runId}/awareness${room ? `?room=${encodeURIComponent(room)}` : ""}`)
+    fetch(`/api/runs/${runId}/awareness${q}`)
       .then(async (r) => {
         if (!r.ok) throw new Error(`awareness view failed (${r.status})`);
         const d = (await r.json()) as { view: AwarenessView | null };
@@ -286,7 +287,7 @@ export default function AwarenessSections({
     return () => {
       live = false;
     };
-  }, [runId, room]);
+  }, [runId, q]);
 
   if (error) return <div className="card px-5 py-4 text-[13px] text-danger">{error}</div>;
   if (!view) return null;

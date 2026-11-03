@@ -7,7 +7,7 @@ import type { HeadlineView } from "@/lib/engine/headline";
 import type { ValueView } from "@/lib/engine/value";
 import type { RulesView, SliceRules } from "@/lib/engine/rules_explorer";
 import { SortTable, type Col } from "./table";
-import { BaseNote, RateText, fmtN, rate } from "./view_parts";
+import { BaseNote, RateText, fmtN, rate, useEngineSet, viewQuery } from "./view_parts";
 
 /**
  * Buyers - a lens of the Analysis tier (RATIFIED 2026-11-01,
@@ -104,10 +104,12 @@ export default function BuyersSection({
   const [rows, setRows] = useState<BuyerRow[] | null | undefined>(undefined);
   const [error, setError] = useState<string | null>(null);
 
+  const engines = useEngineSet();
   useEffect(() => {
     let live = true;
     const base = `/api/runs/${runId}`;
-    getView<JourneyView>(`${base}/journey`)
+    const eq = viewQuery({ engines });
+    getView<JourneyView>(`${base}/journey${eq}`)
       .then(async (j) => {
         const rooms = j?.rooms ?? [];
         if (live) onRooms?.(rooms);
@@ -116,9 +118,9 @@ export default function BuyersSection({
           return;
         }
         const [value, rules, ...heads] = await Promise.all([
-          soft(getView<ValueView>(`${base}/value`)),
-          soft(getView<RulesView>(`${base}/rules`)),
-          ...rooms.map((rm) => soft(getView<HeadlineView>(`${base}/headline?room=${encodeURIComponent(rm)}`))),
+          soft(getView<ValueView>(`${base}/value${eq}`)),
+          soft(getView<RulesView>(`${base}/rules${eq}`)),
+          ...rooms.map((rm) => soft(getView<HeadlineView>(`${base}/headline${viewQuery({ room: rm, engines })}`))),
         ]);
         if (live) setRows(buildRows(rooms, heads as (HeadlineView | null)[], value as ValueView | null, rules as RulesView | null));
       })
@@ -126,7 +128,7 @@ export default function BuyersSection({
     return () => {
       live = false;
     };
-  }, [runId, onRooms]);
+  }, [runId, onRooms, engines]);
 
   if (rows === null) return null;
 

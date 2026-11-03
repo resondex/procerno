@@ -1,11 +1,12 @@
 import { NextResponse } from "next/server";
 import { requireAuth, requireRun } from "@/lib/auth";
 import { computeAlternativesCached } from "@/lib/engine/alternatives";
+import { viewRequestParams } from "@/lib/engine/view_data";
 
 /** The alternatives views (offensive capture, defensive hold) read from answer_codes under
  * the project's codes_source. { views: null } = no codes source yet. */
 export async function GET(
-  _req: Request,
+  req: Request,
   { params }: { params: Promise<{ id: string }> }
 ) {
   const auth = await requireAuth();
@@ -13,6 +14,6 @@ export async function GET(
   const { id } = await params;
   const loaded = await requireRun(id, auth);
   if (loaded instanceof NextResponse) return loaded;
-  const views = await computeAlternativesCached(loaded.run, loaded.project);
+  const views = await computeAlternativesCached(loaded.run, loaded.project, viewRequestParams(req));
   return NextResponse.json({ views });
 }

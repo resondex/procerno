@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import type { PremiumSlice, PremiumView, Stance, StanceRow } from "@/lib/engine/premium";
 import { SortTable, Tip, type Col } from "./table";
-import { BaseNote, fmtN, Legend, Names, pct, range, rate, rateCol, StackBar, type Part } from "./view_parts";
+import { BaseNote, fmtN, Legend, Names, pct, range, rate, rateCol, StackBar, type Part, useEngineSet, viewQuery, EngineTable } from "./view_parts";
 
 /**
  * The premium tier view (2026-10-28): on the "premium vs basic - which
@@ -66,9 +66,10 @@ export default function PremiumSection({ runId }: { runId: string }) {
   const [view, setView] = useState<PremiumView | null | undefined>(undefined);
   const [error, setError] = useState<string | null>(null);
 
+  const q = viewQuery({ engines: useEngineSet() });
   useEffect(() => {
     let live = true;
-    fetch(`/api/runs/${runId}/premium`)
+    fetch(`/api/runs/${runId}/premium${q}`)
       .then(async (r) => {
         if (!r.ok) throw new Error(`premium tier view failed (${r.status})`);
         const d = (await r.json()) as { view: PremiumView | null };
@@ -78,7 +79,7 @@ export default function PremiumSection({ runId }: { runId: string }) {
     return () => {
       live = false;
     };
-  }, [runId]);
+  }, [runId, q]);
 
   if (error) return <div className="card px-5 py-4 text-[13px] text-danger">{error}</div>;
   if (!view || view.answers === 0) return null;
@@ -127,7 +128,7 @@ export default function PremiumSection({ runId }: { runId: string }) {
       />
       <details className="text-[13px]">
         <summary className="cursor-pointer text-ink-2">By engine</summary>
-        <SortTable cols={engineCols(view.brand)} rows={view.byEngine} filename="premium_by_engine.csv" defaultSort={{ id: "premium", dir: -1 }} />
+        <EngineTable cols={engineCols(view.brand)} rows={view.byEngine} filename="premium_by_engine.csv" defaultSort={{ id: "premium", dir: -1 }} />
       </details>
       <BaseNote>Based on {fmtN(view.answers)} answers across {view.byEngine.length} engines.</BaseNote>
     </section>

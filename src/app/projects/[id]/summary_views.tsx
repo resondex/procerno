@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import type { BrandSummaryView, RateCell, SummaryBrand } from "@/lib/engine/brand_summary";
 import { SortTable, Tip } from "./table";
-import { BaseNote, RateText, fmtN } from "./view_parts";
+import { BaseNote, RateText, fmtN, useEngineSet, viewQuery, EngineTable } from "./view_parts";
 
 /**
  * The Boardroom and Five-questions views, answer_codes era (2026-10-30):
@@ -26,9 +26,10 @@ const pts = (x: number) => `${x >= 0 ? "+" : ""}${Math.round(x * 100)} pts`;
 function useBrandSummary(runId: string) {
   const [view, setView] = useState<BrandSummaryView | null | undefined>(undefined);
   const [error, setError] = useState<string | null>(null);
+  const q = viewQuery({ engines: useEngineSet() });
   useEffect(() => {
     let live = true;
-    fetch(`/api/runs/${runId}/brand_summary`)
+    fetch(`/api/runs/${runId}/brand_summary${q}`)
       .then(async (r) => {
         if (!r.ok) throw new Error(`brand summary failed (${r.status})`);
         const d = (await r.json()) as { view: BrandSummaryView | null };
@@ -38,7 +39,7 @@ function useBrandSummary(runId: string) {
     return () => {
       live = false;
     };
-  }, [runId]);
+  }, [runId, q]);
   return { view, error };
 }
 
@@ -228,7 +229,7 @@ function Brief({ v }: { v: BrandSummaryView }) {
           <p className="text-[13px] text-ink-3 mb-4">
             The same which-should-I-get questions answered by each assistant, through the same coding.
           </p>
-          <SortTable
+          <EngineTable
             filename="by_engine.csv"
             defaultSort={{ id: "mentioned", dir: -1 }}
             cols={[

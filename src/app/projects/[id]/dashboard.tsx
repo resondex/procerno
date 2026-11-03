@@ -695,6 +695,7 @@ export default function ProjectDashboard({
             <RunResults
               key={`${resultsRun.id}:${codesEra ? "codes" : "legacy"}`}
               runId={resultsRun.id}
+              projectId={project.id}
               refreshToken={dictVersion}
               codes={codesEra}
             />

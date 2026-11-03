@@ -1,6 +1,6 @@
 import { buildResolver } from "./brand_resolve";
 import { viewsOf, type ViewKey } from "./views";
-import { cachedView, cell, corePanel, type RateCell, type ViewData, type ViewRequest } from "./view_data";
+import { cachedView, cell, coreOf, requestOf, type RateCell, type ViewData, type ViewRequest } from "./view_data";
 import type { AnswerCodes, Intent, Project, Run } from "../types";
 
 /**
@@ -253,7 +253,7 @@ export function computeReasons(data: ViewData, request: ViewRequest = {}): Reaso
     const it = p.intent_id ? intentById.get(p.intent_id) : undefined;
     if (it && (request.room === undefined || it.situation === request.room)) intentOfPrompt.set(p.id, it);
   }
-  const core = corePanel(data);
+  const core = coreOf(data, request);
   const typeOf = new Map<string, { type: ViewKey; stage: string }>();
   for (const r of data.responses) {
     const it = intentOfPrompt.get(r.prompt_id);
@@ -375,8 +375,7 @@ export function computeReasons(data: ViewData, request: ViewRequest = {}): Reaso
 
 // r3 (2026-10-28): names resolve through the context judge (context_judge.ts).
 const REASONS_VERSION = "r5"; // r4: type labels in buyer language (output change for identical inputs)
-export function computeReasonsCached(run: Run, project: Project, room?: string): Promise<ReasonsView | null> {
-  const extras = { codeGroups: true, judge: true };
-  if (room === undefined) return cachedView("reasons", REASONS_VERSION, run, project, computeReasons, extras);
-  return cachedView("reasons", REASONS_VERSION, run, project, (d) => computeReasons(d, { room }), extras, { room });
+export function computeReasonsCached(run: Run, project: Project, request: ViewRequest = {}): Promise<ReasonsView | null> {
+  const r = requestOf(request, true);
+  return cachedView("reasons", REASONS_VERSION, run, project, (d) => computeReasons(d, r), { codeGroups: true, judge: true }, r);
 }

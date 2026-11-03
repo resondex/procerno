@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import type { ReasonRow, ReasonTypeKey, ReasonsView } from "@/lib/engine/reasons";
 import { SortTable, Tip, type Col } from "./table";
-import { BaseNote, fmtN, rate, rateCol } from "./view_parts";
+import { BaseNote, fmtN, rate, rateCol, useEngineSet, viewQuery } from "./view_parts";
 
 /**
  * The reasons view (2026-10-27): how often each confirmed reason code is
@@ -43,9 +43,10 @@ export default function ReasonsSection({
   const [type, setType] = useState<string>(initialType ?? types?.[0] ?? POOLED);
   const [grouped, setGrouped] = useState(true);
 
+  const q = viewQuery({ room, engines: useEngineSet() });
   useEffect(() => {
     let live = true;
-    fetch(`/api/runs/${runId}/reasons${room ? `?room=${encodeURIComponent(room)}` : ""}`)
+    fetch(`/api/runs/${runId}/reasons${q}`)
       .then(async (r) => {
         if (!r.ok) throw new Error(`reasons view failed (${r.status})`);
         const d = (await r.json()) as { view: ReasonsView | null };
@@ -55,7 +56,7 @@ export default function ReasonsSection({
     return () => {
       live = false;
     };
-  }, [runId, room]);
+  }, [runId, q]);
 
   // The kinds this mount offers; a scoped mount whose kinds the tracker never
   // asked renders nothing.

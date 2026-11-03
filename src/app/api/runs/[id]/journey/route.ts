@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { requireAuth, requireRun } from "@/lib/auth";
-import { roomParam } from "@/lib/engine/view_data";
+import { viewRequestParams } from "@/lib/engine/view_data";
 import { computeJourney } from "@/lib/engine/journey";
 
 /** The Journey map: six stations, each with its leak number, distilled from
@@ -16,6 +16,6 @@ export async function GET(
   const { id } = await params;
   const loaded = await requireRun(id, auth);
   if (loaded instanceof NextResponse) return loaded;
-  const view = await computeJourney(loaded.run, loaded.project, roomParam(req));
+  const view = await computeJourney(loaded.run, loaded.project, viewRequestParams(req));
   return NextResponse.json({ view });
 }

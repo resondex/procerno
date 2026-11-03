@@ -3,7 +3,7 @@ import { ENGINES, engineDisplayLabel } from "./providers";
 import { buildResolver, type Resolver } from "./brand_resolve";
 import { roleOf, type HeadlineBrand } from "./headline";
 import { exitResolver, exitRows, outsideCounts } from "./exits";
-import { cachedView, cell, poolOf, type PoolRow, type RateCell, type ViewData } from "./view_data";
+import { cachedView, cell, facetsOf, poolOf, requestOf, type EngineFacets, type PoolRow, type RateCell, type ViewData, type ViewRequest } from "./view_data";
 import type { Project, Run } from "../types";
 
 /**
@@ -82,7 +82,7 @@ export interface OffensiveView {
   rows: CaptureRow[];
   captors: CaptorBrand[];
   outsidePicks: NamedCount[];
-  byEngine: CaptureSlice[];
+  byEngine: (CaptureSlice & EngineFacets)[];
 }
 
 // ---------- defensive hold ----------
@@ -129,7 +129,7 @@ export interface DefensiveView {
   ownProduct: RateCell;
   destinations: DestinationRow[];
   outsideDestinations: NamedCount[];
-  byEngine: HoldSlice[];
+  byEngine: (HoldSlice & EngineFacets)[];
 }
 
 export interface AlternativesViews {
@@ -210,9 +210,9 @@ function captureTally(list: CaptureFacts[], targetKey: string) {
   };
 }
 
-function computeOffensive(data: ViewData, resolve: Resolver, targetKey: string): OffensiveView | null {
+function computeOffensive(data: ViewData, resolve: Resolver, targetKey: string, request: ViewRequest): OffensiveView | null {
   const { project, dictionary } = data;
-  const { rows: pool, uncoded, core } = poolOf(data, "offensive_capture");
+  const { rows: pool, uncoded, core } = poolOf(data, "offensive_capture", request);
   if (pool.length === 0 && uncoded === 0) return null;
   const facts = pool.map((r) => captureFacts(r, resolve, targetKey));
 
@@ -266,11 +266,11 @@ function computeOffensive(data: ViewData, resolve: Resolver, targetKey: string):
   for (const f of facts) if (f.bucket === "outside" && f.pickName) outside.set(f.pickName, (outside.get(f.pickName) ?? 0) + 1);
 
   const labels = engineLabels();
-  const byEngine: CaptureSlice[] = [...core]
+  const byEngine: (CaptureSlice & EngineFacets)[] = [...core]
     .map((m) => {
       const list = facts.filter((f) => f.model === m);
       const t = captureTally(list, targetKey);
-      return { key: m, label: labels.get(m) ?? m, answers: list.length, named: t.named, captured: t.captured, undecided: t.undecided };
+      return { key: m, label: labels.get(m) ?? m, ...facetsOf(m), answers: list.length, named: t.named, captured: t.captured, undecided: t.undecided };
     })
     .filter((s) => s.answers > 0);
 
@@ -308,9 +308,9 @@ function verdictsOf(list: HoldFacts[]): Verdicts {
   };
 }
 
-function computeDefensive(data: ViewData, resolve: Resolver, targetKey: string): DefensiveView | null {
+function computeDefensive(data: ViewData, resolve: Resolver, targetKey: string, request: ViewRequest): DefensiveView | null {
   const { project, dictionary } = data;
-  const { rows: pool, uncoded, core } = poolOf(data, "defensive_hold");
+  const { rows: pool, uncoded, core } = poolOf(data, "defensive_hold", request);
   if (pool.length === 0 && uncoded === 0) return null;
   const answerExits = exitResolver(project, dictionary, resolve, targetKey);
   const resolved = pool.map(({ code: c }) => answerExits(c.destinations));
@@ -333,12 +333,13 @@ function computeDefensive(data: ViewData, resolve: Resolver, targetKey: string):
     return cell(count(list, (f) => f.exits.size > 0), list.length);
   };
   const labels = engineLabels();
-  const byEngine: HoldSlice[] = [...core]
+  const byEngine: (HoldSlice & EngineFacets)[] = [...core]
     .map((m) => {
       const list = facts.filter((f) => f.model === m);
       return {
         key: m,
         label: labels.get(m) ?? m,
+        ...facetsOf(m),
         answers: list.length,
         verdicts: verdictsOf(list),
         offersExit: cell(count(list, (f) => f.exits.size > 0), list.length),
@@ -361,20 +362,22 @@ function computeDefensive(data: ViewData, resolve: Resolver, targetKey: string):
   };
 }
 
-export function computeAlternatives(data: ViewData): AlternativesViews {
+export function computeAlternatives(data: ViewData, request: ViewRequest = {}): AlternativesViews {
   const resolve = buildResolver(data.dictionary, data.judged);
   const targetKey = resolve(data.project.brand).key;
   return {
     runId: data.run.id,
     source: data.source,
     brand: data.project.brand,
-    offensive: computeOffensive(data, resolve, targetKey),
-    defensive: computeDefensive(data, resolve, targetKey),
+    offensive: computeOffensive(data, resolve, targetKey, request),
+    defensive: computeDefensive(data, resolve, targetKey, request),
   };
 }
 
 // alt2 (2026-10-28): names resolve through the context judge (context_judge.ts).
-const ALTERNATIVES_VERSION = "alt4";
-export function computeAlternativesCached(run: Run, project: Project): Promise<AlternativesViews | null> {
-  return cachedView("alternatives", ALTERNATIVES_VERSION, run, project, computeAlternatives, { judge: true });
+// alt5 (2026-11-03): engine slices carry vendor / tier / mode (the Panel lens's Group-by).
+const ALTERNATIVES_VERSION = "alt5";
+export function computeAlternativesCached(run: Run, project: Project, request: ViewRequest = {}): Promise<AlternativesViews | null> {
+  const r = requestOf(request);
+  return cachedView("alternatives", ALTERNATIVES_VERSION, run, project, (d) => computeAlternatives(d, r), { judge: true }, r);
 }

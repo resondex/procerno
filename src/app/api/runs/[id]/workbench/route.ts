@@ -1,12 +1,13 @@
 import { NextResponse } from "next/server";
 import { requireAuth, requireRun } from "@/lib/auth";
 import { computeWorkbenchCached } from "@/lib/engine/workbench";
+import { viewRequestParams } from "@/lib/engine/view_data";
 
 /** The Workbench fact table read from answer_codes under the project's
  * codes_source: one load per open, every filter slices in the browser.
  * { view: null } = no codes source yet. */
 export async function GET(
-  _req: Request,
+  req: Request,
   { params }: { params: Promise<{ id: string }> }
 ) {
   const auth = await requireAuth();
@@ -14,6 +15,6 @@ export async function GET(
   const { id } = await params;
   const loaded = await requireRun(id, auth);
   if (loaded instanceof NextResponse) return loaded;
-  const view = await computeWorkbenchCached(loaded.run, loaded.project);
+  const view = await computeWorkbenchCached(loaded.run, loaded.project, viewRequestParams(req));
   return NextResponse.json({ view });
 }

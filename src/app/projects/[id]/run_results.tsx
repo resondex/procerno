@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState, useSyncExternalStore } from "react";
 import type { BrandStats, Project, RunMetrics } from "@/lib/types";
 import type { InsightsBundle } from "@/lib/engine/insights";
 import {
@@ -18,6 +18,7 @@ import WhySection from "./why_view";
 import RivalsSection from "./rivals_view";
 import BuyersSection from "./buyers_view";
 import { MetricsSection } from "./metrics_view";
+import { EngineSetContext, MODE_LABEL, TIER_LABEL, type EngineRow } from "./view_parts";
 
 const pct = (x: number) =>
   x > 0 && x < 0.005 ? "<1%" : `${Math.round(x * 100)}%`;
@@ -29,10 +30,13 @@ const pct = (x: number) =>
  */
 export default function RunResults({
   runId,
+  projectId,
   refreshToken = 0,
   codes = false,
 }: {
   runId: string;
+  /** Keys the per-project Panel lens preference (absent on share links). */
+  projectId?: string;
   /** Bump to refetch in place — current results stay up while the new ones
    * load, so dictionary edits don't flash a skeleton. */
   refreshToken?: number;
@@ -42,7 +46,7 @@ export default function RunResults({
   codes?: boolean;
 }) {
   if (codes) {
-    return <CodesResults runId={runId} refreshToken={refreshToken} />;
+    return <CodesResults runId={runId} projectId={projectId} refreshToken={refreshToken} />;
   }
   return <LegacyResults runId={runId} refreshToken={refreshToken} />;
 }
@@ -58,11 +62,15 @@ export default function RunResults({
  */
 function CodesResults({
   runId,
+  projectId,
   refreshToken,
 }: {
   runId: string;
+  projectId?: string;
   refreshToken: number;
 }) {
+  // The Panel lens (2026-11-03): the engine set every section reads under.
+  const panel = usePanel(runId, projectId);
   type CodesView = "brief" | "boardroom" | "questions" | "journey" | "why" | "rivals" | "buyers" | "metrics";
   const [view, setView] = useState<CodesView>("brief");
   // The global buyer filter of the Analysis tier ("" = all buyers). Stations
@@ -95,7 +103,9 @@ function CodesResults({
     }
   };
   const show = (v: CodesView) => (view === v ? "grid gap-8" : "hidden");
-  const k = (name: string) => `${name}:${runId}:${refreshToken}`;
+  // The engine set rides every section's key: a new set remounts (refetches)
+  // the mounted sections, the same way a refresh does.
+  const k = (name: string) => `${name}:${runId}:${refreshToken}:${panel.engines?.join(",") ?? "all"}`;
   return (
     <div className="grid gap-8">
       <div className="flex items-baseline justify-between gap-4 flex-wrap -mb-2">
@@ -150,8 +160,11 @@ function CodesResults({
         ))}
       </div>
 
-      {ANALYSIS.has(view) && rooms.length > 0 && (
-        <div className="grid gap-1.5 -mt-4">
+      {((panel.core?.length ?? 0) >= 2 || (ANALYSIS.has(view) && rooms.length > 0)) && (
+      <div className="grid gap-1.5 -mt-4">
+        <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
+          <PanelControl panel={panel} />
+          {ANALYSIS.has(view) && rooms.length > 0 && (
           <div className="flex flex-wrap items-center gap-1.5">
             <span className="text-[12px] text-ink-3 mr-1">Buyer:</span>
             {["", ...rooms].map((rk) => (
@@ -170,13 +183,22 @@ function CodesResults({
               </button>
             ))}
           </div>
-          {room !== "" && (
-            <p className="text-[12px] text-ink-3">
-              Stations and Buyers follow this buyer; Why and Rivals are measured across all buyers.
-            </p>
           )}
         </div>
+        {panel.engines && (
+          <p className="text-[12px] text-ink-3">
+            Every number below is on {panel.engines.length} {panel.engines.length === 1 ? "engine" : "engines"} - {panel.name}.
+          </p>
+        )}
+        {ANALYSIS.has(view) && rooms.length > 0 && room !== "" && (
+          <p className="text-[12px] text-ink-3">
+            Stations and Buyers follow this buyer; Why and Rivals are measured across all buyers.
+          </p>
+        )}
+      </div>
       )}
+
+      <EngineSetContext.Provider value={panel.engines}>
 
       {visited.has("brief") && (
         <div className={show("brief")}>
@@ -225,6 +247,213 @@ function CodesResults({
         <div className={show("metrics")}>
           <MetricsSection key={k("metrics")} runId={runId} />
         </div>
+      )}
+      </EngineSetContext.Provider>
+    </div>
+  );
+}
+
+// ---------- The Panel lens ----------
+
+type CoreEngine = { id: string; label: string } & Pick<EngineRow, "vendor" | "tier" | "mode">;
+interface Preset {
+  id: string;
+  name: string;
+  group: "By mode" | "By tier" | "By vendor";
+  ids: string[];
+}
+interface Panel {
+  /** The active set (sorted ids), null = every core engine. */
+  engines: string[] | null;
+  /** The preset the set matches, else "Custom". */
+  name: string;
+  core: CoreEngine[] | null;
+  presets: Preset[];
+  set: (ids: string[] | null) => void;
+}
+
+const PANEL_EVENT = "procerno-panel";
+const panelKey = (scope: string) => `procerno_panel:${scope}`;
+const isShare = () => typeof window !== "undefined" && window.location.pathname.startsWith("/share/");
+// Where the set lives when storage is blocked (private windows).
+const memPanel = new Map<string, string | null>();
+function readPanel(scope: string): string | null {
+  // A share link carries the lens in its URL (?engines=), never in storage.
+  if (isShare()) return new URLSearchParams(window.location.search).get("engines");
+  try {
+    return window.localStorage.getItem(panelKey(scope));
+  } catch {
+    return memPanel.get(scope) ?? null;
+  }
+}
+function subscribePanel(cb: () => void) {
+  window.addEventListener(PANEL_EVENT, cb);
+  window.addEventListener("storage", cb);
+  return () => {
+    window.removeEventListener(PANEL_EVENT, cb);
+    window.removeEventListener("storage", cb);
+  };
+}
+function writePanel(scope: string, ids: string[] | null) {
+  const value = ids && ids.length > 0 ? ids.join(",") : null;
+  memPanel.set(scope, value);
+  if (isShare()) {
+    const url = new URL(window.location.href);
+    if (value) url.searchParams.set("engines", value);
+    else url.searchParams.delete("engines");
+    window.history.replaceState(window.history.state, "", url);
+  } else {
+    try {
+      // All engines is the default, never stored.
+      if (value) window.localStorage.setItem(panelKey(scope), value);
+      else window.localStorage.removeItem(panelKey(scope));
+    } catch {
+      // storage blocked: memPanel carries the set for this page view
+    }
+  }
+  window.dispatchEvent(new Event(PANEL_EVENT));
+}
+
+function presetsOf(core: CoreEngine[]): Preset[] {
+  const ids = (pick: (e: CoreEngine) => boolean) => core.filter(pick).map((e) => e.id).sort();
+  const out: Preset[] = [];
+  const add = (p: Preset) => {
+    // A preset that is empty or the whole panel is not a lens.
+    if (p.ids.length > 0 && p.ids.length < core.length) out.push(p);
+  };
+  add({ id: "mode:search", name: MODE_LABEL.search, group: "By mode", ids: ids((e) => e.mode === "search") });
+  add({ id: "mode:instinct", name: MODE_LABEL.instinct, group: "By mode", ids: ids((e) => e.mode === "instinct") });
+  // An engine that covers both tiers belongs to both tier sets.
+  add({ id: "tier:free", name: TIER_LABEL.free, group: "By tier", ids: ids((e) => e.tier !== "paid") });
+  add({ id: "tier:paid", name: TIER_LABEL.paid, group: "By tier", ids: ids((e) => e.tier !== "free") });
+  for (const v of [...new Set(core.map((e) => e.vendor))])
+    add({ id: `vendor:${v}`, name: v, group: "By vendor", ids: ids((e) => e.vendor === v) });
+  return out;
+}
+
+/** The engine set for this results block: the saved lens (per project, or
+ * the share link's ?engines=), narrowed to the run's core engines. */
+function usePanel(runId: string, projectId?: string): Panel {
+  const scope = projectId ?? runId;
+  const saved = useSyncExternalStore(subscribePanel, () => readPanel(scope), () => null);
+  const [core, setCore] = useState<CoreEngine[] | null>(null);
+  useEffect(() => {
+    let live = true;
+    // The unfiltered brand summary lists the core engines (a cached read the
+    // brief shares).
+    fetch(`/api/runs/${runId}/brand_summary`)
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => {
+        const list = d?.view?.core as CoreEngine[] | undefined;
+        if (live && Array.isArray(list)) setCore(list);
+      })
+      .catch(() => {});
+    return () => {
+      live = false;
+    };
+  }, [runId]);
+  const presets = useMemo(() => (core ? presetsOf(core) : []), [core]);
+  const engines = useMemo(() => {
+    if (!saved) return null;
+    let ids = [...new Set(saved.split(",").map((s) => s.trim()).filter(Boolean))].sort();
+    if (core) {
+      const known = new Set(core.map((e) => e.id));
+      ids = ids.filter((id) => known.has(id));
+      if (ids.length === 0 || ids.length >= core.length) return null;
+    }
+    return ids.length > 0 ? ids : null;
+  }, [saved, core]);
+  const key = engines?.join(",");
+  const name = engines ? presets.find((p) => p.ids.join(",") === key)?.name ?? "Custom" : "All engines";
+  return { engines, name, core, presets, set: (ids) => writePanel(scope, ids) };
+}
+
+function PanelControl({ panel }: { panel: Panel }) {
+  const [open, setOpen] = useState(false);
+  const [custom, setCustom] = useState(false);
+  if (!panel.core || panel.core.length < 2) return null;
+  const active = panel.engines?.join(",") ?? null;
+  const pill = (on: boolean) =>
+    `rounded-full border px-2.5 py-0.5 text-[12px] font-medium transition-colors ${
+      on ? "border-[var(--color-primary)] bg-primary-soft text-primary" : "border-line text-ink-2 hover:border-ink-3"
+    }`;
+  const pick = (ids: string[] | null) => {
+    panel.set(ids);
+    setOpen(false);
+    setCustom(false);
+  };
+  const groups = (["By mode", "By tier", "By vendor"] as const)
+    .map((g) => [g, panel.presets.filter((p) => p.group === g)] as const)
+    .filter(([, list]) => list.length > 0);
+  const chosen = new Set(panel.engines ?? panel.core.map((e) => e.id));
+  const toggle = (id: string) => {
+    const next = new Set(chosen);
+    if (next.has(id)) next.delete(id);
+    else next.add(id);
+    if (next.size === 0) return;
+    panel.set(next.size >= panel.core!.length ? null : [...next].sort());
+  };
+  return (
+    <div className="relative flex items-center gap-1.5">
+      <span className="text-[12px] text-ink-3 mr-1">Panel:</span>
+      <button
+        type="button"
+        onClick={() => setOpen((o) => !o)}
+        aria-expanded={open}
+        className={`rounded-full border px-3 py-1 text-[13px] font-medium transition-colors ${
+          panel.engines ? "border-[var(--color-primary)] bg-primary-soft text-primary" : "border-line text-ink-2 hover:border-ink-3"
+        }`}
+      >
+        {panel.name} <span className="text-ink-3">▾</span>
+      </button>
+      {open && (
+        <>
+          <div className="fixed inset-0 z-30" onClick={() => { setOpen(false); setCustom(false); }} aria-hidden="true" />
+          <div className="absolute left-0 top-full z-40 mt-1.5 grid w-[min(22rem,calc(100vw-2rem))] gap-3 rounded-xl border border-line bg-[var(--color-surface)] p-3 shadow-xl">
+            <div>
+              <button type="button" onClick={() => pick(null)} className={pill(active === null)}>
+                All engines
+              </button>
+            </div>
+            {groups.map(([g, list]) => (
+              <div key={g} className="grid gap-1">
+                <span className="text-[11px] font-semibold uppercase tracking-wide text-ink-3">{g}</span>
+                <div className="flex flex-wrap gap-1.5">
+                  {list.map((p) => (
+                    <button key={p.id} type="button" onClick={() => pick(p.ids)} className={pill(active === p.ids.join(","))}>
+                      {p.name}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            ))}
+            <div className="grid gap-1">
+              <button
+                type="button"
+                onClick={() => setCustom((c) => !c)}
+                aria-expanded={custom}
+                className="justify-self-start text-[12px] font-medium text-primary hover:opacity-80"
+              >
+                Custom...
+              </button>
+              {custom && (
+                <div className="grid gap-1 pl-1">
+                  {panel.core.map((e) => (
+                    <label key={e.id} className="flex items-center gap-2 text-[13px] text-ink-2">
+                      <input
+                        type="checkbox"
+                        checked={chosen.has(e.id)}
+                        disabled={chosen.has(e.id) && chosen.size === 1}
+                        onChange={() => toggle(e.id)}
+                      />
+                      {e.label}
+                    </label>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+        </>
       )}
     </div>
   );

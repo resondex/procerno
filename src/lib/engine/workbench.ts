@@ -11,7 +11,7 @@ import {
   type WbMention,
   type WbRow,
 } from "./measures";
-import { cachedView, corePanel, type ViewData } from "./view_data";
+import { cachedView, coreOf, facetsOf, requestOf, type EngineFacets, type ViewData, type ViewRequest } from "./view_data";
 import { SCHEMA_FIELDS, schemaOf, viewsOf, type ViewKey } from "./views";
 import type { Intent, Project, Run } from "../types";
 
@@ -68,7 +68,7 @@ export interface WorkbenchBrand {
   listed: boolean;
 }
 
-export interface WorkbenchEngine {
+export interface WorkbenchEngine extends EngineFacets {
   id: string;
   label: string;
   mode: "instinct" | "search";
@@ -152,7 +152,7 @@ const askedOf = new Map(
   Object.entries(SCHEMA_FIELDS).map(([k, v]) => [k, new Set<string>(v)])
 );
 
-export function computeWorkbench(data: ViewData): WorkbenchView {
+export function computeWorkbench(data: ViewData, request: ViewRequest = {}): WorkbenchView {
   const { run, project, source, dictionary } = data;
   const resolve = buildResolver(dictionary, data.judged);
   const targetKey = resolve(project.brand).key;
@@ -206,7 +206,7 @@ export function computeWorkbench(data: ViewData): WorkbenchView {
       rivalKey,
     });
   }
-  const core = corePanel(data);
+  const core = coreOf(data, request);
   const pool = new Map<string, { promptId: string; model: string } & PromptMeta>();
   for (const r of data.responses) {
     const meta = promptMeta.get(r.prompt_id);
@@ -334,7 +334,7 @@ export function computeWorkbench(data: ViewData): WorkbenchView {
   const engineIdx = new Map(engineIds.map((m, i) => [m, i]));
   const engines: WorkbenchEngine[] = engineIds.map((id) => {
     const meta = engineMeta.get(id);
-    return { id, label: meta?.label ?? id, mode: meta?.mode ?? "instinct" };
+    return { ...facetsOf(id), id, label: meta?.label ?? id, mode: meta?.mode ?? "instinct" };
   });
   const intern = () => {
     const list: string[] = [];
@@ -447,7 +447,9 @@ export function computeWorkbench(data: ViewData): WorkbenchView {
 
 // wb2 (2026-10-30): typed facts for every coded answer - the output changed
 // for identical inputs, so the cache era moves (cache-era case 2).
-const WORKBENCH_VERSION = "wb3";
-export function computeWorkbenchCached(run: Run, project: Project): Promise<WorkbenchView | null> {
-  return cachedView("workbench", WORKBENCH_VERSION, run, project, computeWorkbench, { judge: true });
+// wb4 (2026-11-03): engines carry vendor / tier (the Panel lens's Group-by).
+const WORKBENCH_VERSION = "wb4";
+export function computeWorkbenchCached(run: Run, project: Project, request: ViewRequest = {}): Promise<WorkbenchView | null> {
+  const r = requestOf(request);
+  return cachedView("workbench", WORKBENCH_VERSION, run, project, (d) => computeWorkbench(d, r), { judge: true }, r);
 }

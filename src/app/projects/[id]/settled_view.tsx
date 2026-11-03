@@ -3,7 +3,7 @@
 import { useEffect, useState, type ReactNode } from "react";
 import type { RateCell, SettledNamed, SettledViews } from "@/lib/engine/settled";
 import { Tip } from "./table";
-import { pct, range } from "./view_parts";
+import { pct, range, useEngineSet, viewQuery } from "./view_parts";
 
 /**
  * The settled-customer verdict cards (RATIFIED 2026-11-01, decision 2):
@@ -70,9 +70,10 @@ export default function SettledSections({ runId }: { runId: string }) {
   const [view, setView] = useState<SettledViews | null | undefined>(undefined);
   const [error, setError] = useState<string | null>(null);
 
+  const q = viewQuery({ engines: useEngineSet() });
   useEffect(() => {
     let live = true;
-    fetch(`/api/runs/${runId}/settled`)
+    fetch(`/api/runs/${runId}/settled${q}`)
       .then(async (r) => {
         if (!r.ok) throw new Error(`settled view failed (${r.status})`);
         const d = (await r.json()) as { view: SettledViews | null };
@@ -82,7 +83,7 @@ export default function SettledSections({ runId }: { runId: string }) {
     return () => {
       live = false;
     };
-  }, [runId]);
+  }, [runId, q]);
 
   if (error) return <div className="card px-5 py-4 text-[13px] text-danger">{error}</div>;
   if (!view) return null;

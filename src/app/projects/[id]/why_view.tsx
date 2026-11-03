@@ -5,7 +5,7 @@ import type { BrandSummaryView, ReasonLift } from "@/lib/engine/brand_summary";
 import type { RuleGroup, RulesView } from "@/lib/engine/rules_explorer";
 import type { DoubtViews, ObjectionVerdict, WorryRow } from "@/lib/engine/doubt";
 import { SortTable, Tip, type Col } from "./table";
-import { BaseNote, Names, rateCol } from "./view_parts";
+import { BaseNote, Names, rateCol, useEngineSet, viewQuery } from "./view_parts";
 import RulesSection from "./rules_view";
 import ReasonsSection from "./reasons_view";
 
@@ -164,21 +164,23 @@ export default function WhySection({ runId }: { runId: string }) {
   const [data, setData] = useState<Loaded | undefined>(undefined);
   const [error, setError] = useState<string | null>(null);
 
+  const engines = useEngineSet();
   useEffect(() => {
     let live = true;
     const base = `/api/runs/${runId}`;
+    const eq = viewQuery({ engines });
     const soft = <T,>(p: Promise<T | null>) => p.catch(() => null);
     Promise.all([
-      soft(getJson<BrandSummaryView>(`${base}/brand_summary`, "view")),
-      soft(getJson<RulesView>(`${base}/rules`, "view")),
-      soft(getJson<DoubtViews>(`${base}/doubt`, "views")),
+      soft(getJson<BrandSummaryView>(`${base}/brand_summary${eq}`, "view")),
+      soft(getJson<RulesView>(`${base}/rules${eq}`, "view")),
+      soft(getJson<DoubtViews>(`${base}/doubt${eq}`, "views")),
     ])
       .then(([summary, rules, doubt]) => live && setData({ summary, rules, doubt }))
       .catch((e: Error) => live && setError(e.message));
     return () => {
       live = false;
     };
-  }, [runId]);
+  }, [runId, engines]);
 
   if (error) return <div className="card px-5 py-4 text-[13px] text-danger">{error}</div>;
   if (data === undefined) return <div className="card px-5 py-4 text-[13px] text-ink-3">Loading why...</div>;

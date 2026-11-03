@@ -192,6 +192,42 @@ export function engineDisplayLabel(e: { label: string }): string {
     .replace(/\s*\([^()]* - retired[^)]*\)/, "");
 }
 
+/** A consumer tier an engine stands for (2026-11-03, the Panel lens):
+ * parsed from the CURRENT engine's label - a retired engine reads as its
+ * successor, so a stand-in's bookkeeping text ("now serves the paid tier's
+ * Flash") never decides it. "both" = one engine covers free and paid
+ * ("free & paid tiers"), or no tier is stated. */
+export type EngineTier = "free" | "paid" | "both";
+export function engineTier(e: { id: string; label: string }): EngineTier {
+  const label = (getEngine(currentEngineId(e.id)) ?? e).label.toLowerCase();
+  if (/free\s*(&|and)\s*paid/.test(label)) return "both";
+  if (/\bfree tier\b/.test(label)) return "free";
+  if (/\bpaid tier\b/.test(label)) return "paid";
+  return "both";
+}
+
+/** The product an engine belongs to as customers name it - the display
+ * label before its first " (" ("ChatGPT (free tier) + search" -> "ChatGPT"). */
+export function vendorDisplay(e: { label: string }): string {
+  const label = engineDisplayLabel(e);
+  const at = label.indexOf(" (");
+  return (at >= 0 ? label.slice(0, at) : label.replace(/\s*\+\s*search$/i, "")).trim();
+}
+
+/** The three factors engines divide on, carried on every by-engine slice so
+ * the client groups without parsing labels. Unknown ids read as their own
+ * vendor, both tiers, instinct. */
+export interface EngineFacets {
+  vendor: string;
+  tier: EngineTier;
+  mode: EngineMode;
+}
+export function engineFacets(id: string): EngineFacets {
+  const e = getEngine(id);
+  if (!e) return { vendor: id, tier: "both", mode: "instinct" };
+  return { vendor: vendorDisplay(e), tier: engineTier(e), mode: e.mode };
+}
+
 /** The engine a NEW run collects on for a configured id: retired engines
  * resolve along their successor chain, everything else is itself. Applied
  * where runs are created, so a run's stored engine list, its responses and

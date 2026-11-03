@@ -13,7 +13,7 @@ import type {
   StationKey,
 } from "@/lib/engine/journey";
 import { SortTable, Tip, type Col } from "./table";
-import { pct, range, rate } from "./view_parts";
+import { pct, range, rate, useEngineSet, viewQuery } from "./view_parts";
 import HeadlineSection from "./headline_view";
 import PremiumSection from "./premium_view";
 import AwarenessSections from "./awareness_view";
@@ -470,11 +470,12 @@ export default function JourneySection({
   /** Stations ever selected -> rooms their room-aware sections were mounted for. */
   const [mounted, setMounted] = useState<Map<StationKey, string[]>>(() => new Map());
 
+  const engines = useEngineSet();
   const loaded = roomKey in views;
   useEffect(() => {
     if (loaded) return;
     let live = true;
-    const q = roomKey === ALL ? "" : `?room=${encodeURIComponent(roomKey)}`;
+    const q = viewQuery({ room: roomKey === ALL ? null : roomKey, engines });
     fetch(`/api/runs/${runId}/journey${q}`)
       .then(async (r) => {
         if (!r.ok) throw new Error(`stations view failed (${r.status})`);
@@ -487,7 +488,7 @@ export default function JourneySection({
     return () => {
       live = false;
     };
-  }, [runId, roomKey, loaded, onRooms]);
+  }, [runId, roomKey, loaded, onRooms, engines]);
 
   const mountFor = (stations: Iterable<StationKey>, rk: string) =>
     setMounted((prev) => {

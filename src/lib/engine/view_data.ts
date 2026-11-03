@@ -3,6 +3,8 @@ import { store } from "../store";
 import { wilson } from "./metrics";
 import { viewsOf, type ViewKey } from "./views";
 import { CONTEXT_JUDGE_MODEL, CONTEXT_JUDGE_VERSION, primeContextVerdicts } from "./context_judge";
+import { ENGINES, engineFacets, type EngineFacets } from "./providers";
+import type { ConditionKeysCache } from "./condition_groups";
 import type { AnswerCodes, DictionaryEntry, Intent, Project, Prompt, Run } from "../types";
 
 /**
@@ -20,6 +22,11 @@ export interface RateCell {
 }
 
 export const cell = (k: number, n: number): RateCell => ({ k, n, ...wilson(k, n) });
+
+export type { EngineFacets };
+/** Vendor, tier and mode for a by-engine slice (2026-11-03): the client's
+ * Group-by toggle pools slices on them without parsing labels. */
+export const facetsOf = (model: string): EngineFacets => engineFacets(model);
 
 export interface ViewData {
   run: Run;
@@ -41,6 +48,10 @@ export interface ViewData {
   /** True while judgeable names remain unjudged: the view computes but is
    * not cached, so the next open picks up where the slab ended. */
   judgeIncomplete?: boolean;
+  /** The run's data revision when the view is computed through cachedView
+   * (null on a store that cannot fingerprint). Computes use it to key their
+   * own run-scoped caches (the condition grouping); never in a payload. */
+  revision?: string | null;
 }
 
 /** Project records a view can opt into; each one also keys the view's cache.
@@ -79,6 +90,39 @@ export function corePanel(data: ViewData): Set<string> {
  */
 export interface ViewRequest {
   room?: string;
+  /** The Panel lens (2026-11-03): keep only answers from these engines
+   * (registry ids, sorted, deduped), intersected with the core panel - an
+   * engine not on the core panel is ignored. Absent = the whole core panel.
+   * Every view takes it; the by-engine tables shrink to the set. */
+  engines?: string[];
+}
+
+/** The core panel narrowed to a request's engine set (order kept). */
+export function coreOf(data: ViewData, opts: ViewRequest = {}): Set<string> {
+  const core = corePanel(data);
+  if (opts.engines === undefined) return core;
+  const keep = new Set(opts.engines);
+  return new Set([...core].filter((m) => keep.has(m)));
+}
+
+/** A request's engine set in canonical form: registry ids only, deduped,
+ * sorted; undefined when none survive or none were asked. */
+export function normalizeEngines(engines: readonly string[] | undefined): string[] | undefined {
+  if (!engines) return undefined;
+  const known = new Set(ENGINES.map((e) => e.id));
+  const ids = [...new Set(engines.map((e) => e.trim()).filter((e) => known.has(e)))].sort();
+  return ids.length > 0 ? ids : undefined;
+}
+
+/** The request a view route was asked for, with only the fields present -
+ * an unfiltered request is `{}` and keys exactly as before. `room` is kept
+ * only for the room-pinned views (`allowRoom`). */
+export function requestOf(req: ViewRequest = {}, allowRoom = false): ViewRequest {
+  const out: ViewRequest = {};
+  if (allowRoom && req.room !== undefined) out.room = req.room;
+  const engines = normalizeEngines(req.engines);
+  if (engines) out.engines = engines;
+  return out;
 }
 
 /** The answers a view counts on the core panel. `uncoded` = pool answers
@@ -95,7 +139,7 @@ export function poolOf(
     if (it && viewsOf(it.stage, it.angle).includes(view) && (opts.room === undefined || it.situation === opts.room))
       intentOfPrompt.set(p.id, it);
   }
-  const core = corePanel(data);
+  const core = coreOf(data, opts);
   const pool = new Map<string, { intent: Intent; model: string }>();
   for (const r of data.responses) {
     const intent = intentOfPrompt.get(r.prompt_id);
@@ -159,7 +203,8 @@ export async function loadViewData(
  * read. A store that cannot fingerprint (local SQLite) computes fresh.
  *
  * Request data (ViewRequest) is appended to the key as a suffix ONLY when
- * present - `:room:<sha-12 of the room>` - so an unfiltered request keys,
+ * present - `:room:<sha-12 of the room>`, then `:eng:<sha-12 of the sorted
+ * engine ids>` - so an unfiltered request keys,
  * reads, writes and purges exactly as before (cache-era rule case 1). The
  * purge always keeps the unfiltered key as its LIKE prefix, so one
  * generation's unfiltered and per-room entries live side by side and only
@@ -188,16 +233,19 @@ export async function cachedView<T>(
     .slice(0, 12);
   const prefix = `${name}:${version}:${run.id}:`;
   const base = `${prefix}${source}:${project.dictionary_version}:${projectHash}:${rev}`;
-  const key =
-    request.room === undefined
-      ? base
-      : `${base}:room:${createHash("sha256").update(request.room).digest("hex").slice(0, 12)}`;
+  // Fixed suffix order: room, then engines - each only when present.
+  let key = base;
+  if (request.room !== undefined)
+    key += `:room:${createHash("sha256").update(request.room).digest("hex").slice(0, 12)}`;
+  if (request.engines !== undefined)
+    key += `:eng:${createHash("sha256").update(request.engines.join(",")).digest("hex").slice(0, 12)}`;
   if (rev !== null) {
     const raw = await store.cacheGet(key, 24 * 3600 * 1000);
     if (raw) return JSON.parse(raw) as T;
   }
   const data = await loadViewData(run, project, opts);
   if (!data) return null;
+  data.revision = rev;
   const view = await compute(data);
   // A half-judged view is served but never cached: the per-name verdict
   // cache makes the next compute pay only for the remaining slab.
@@ -219,4 +267,38 @@ export async function cachedView<T>(
 export function roomParam(req: Request): string | undefined {
   const room = new URL(req.url).searchParams.get("room");
   return room ? room : undefined;
+}
+
+/** The `?engines=a,b,c` query param (the Panel lens): registry ids only,
+ * deduped and sorted; absent, empty or all-unknown = the whole core panel. */
+export function enginesParam(req: Request): string[] | undefined {
+  const raw = new URL(req.url).searchParams.get("engines");
+  if (!raw) return undefined;
+  return normalizeEngines(raw.split(","));
+}
+
+/** Both request fields a view route reads from its query string. */
+export function viewRequestParams(req: Request): ViewRequest {
+  const out: ViewRequest = {};
+  const room = roomParam(req);
+  if (room !== undefined) out.room = room;
+  const engines = enginesParam(req);
+  if (engines) out.engines = engines;
+  return out;
+}
+
+/** The run-scoped cache a view's condition grouping may use (see
+ * condition_groups.conditionKeysFor): null outside cachedView or on a store
+ * that cannot fingerprint. The room rides the scope - a room's conditions
+ * are their own population. */
+export function condCache(data: ViewData, scope: string, request: ViewRequest = {}): ConditionKeysCache | null {
+  if (!data.revision) return null;
+  const room =
+    request.room !== undefined ? `:room:${createHash("sha256").update(request.room).digest("hex").slice(0, 12)}` : "";
+  return {
+    runId: data.run.id,
+    revision: data.revision,
+    scope: scope + room,
+    meta: { brand: data.project.brand, category: data.project.category, projectId: data.project.id },
+  };
 }

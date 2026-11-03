@@ -11,7 +11,7 @@ import type {
   SliceRules,
 } from "@/lib/engine/rules_explorer";
 import { SortTable, Tip, type Col } from "./table";
-import { BaseNote, fmtN, pct, range, rateCol } from "./view_parts";
+import { BaseNote, fmtN, pct, range, rateCol, useEngineSet, viewQuery } from "./view_parts";
 
 /**
  * The decision-rules explorer (2026-10-30, WORKBENCH_REDESIGN item 2):
@@ -436,9 +436,10 @@ export default function RulesSection({ runId, onEvidence }: { runId: string; onE
   const [view, setView] = useState<RulesView | null | undefined>(undefined);
   const [error, setError] = useState<string | null>(null);
 
+  const q = viewQuery({ engines: useEngineSet() });
   useEffect(() => {
     let live = true;
-    fetch(`/api/runs/${runId}/rules`)
+    fetch(`/api/runs/${runId}/rules${q}`)
       .then(async (r) => {
         if (!r.ok) throw new Error(`decision rules view failed (${r.status})`);
         const d = (await r.json()) as { view: RulesView | null };
@@ -448,7 +449,7 @@ export default function RulesSection({ runId, onEvidence }: { runId: string; onE
     return () => {
       live = false;
     };
-  }, [runId]);
+  }, [runId, q]);
 
   if (error) return <div className="card px-5 py-4 text-[13px] text-danger">{error}</div>;
   if (!view || view.answers === 0) return null;

@@ -14,7 +14,7 @@ import type { ReasonsView } from "./reasons";
 import { computeSettledCached } from "./settled";
 import { buildResolver, type Resolver } from "./brand_resolve";
 import { STATION_LABEL, stationQuestion, viewsOf, type StationKey, type ViewKey } from "./views";
-import { cell, type RateCell } from "./view_data";
+import { cell, type RateCell, type ViewRequest } from "./view_data";
 import type { Project, Run } from "../types";
 
 export type { RateCell, StationKey };
@@ -333,25 +333,31 @@ function stageRow(view: HeadlineView | null, stage: string, label: string, invar
 /** Margin from an even two-way split - the closest and widest rivals. */
 const margin = (r: HeadToHeadRow) => Math.abs(rate(r.winOfDecided) - 0.5);
 
-export async function computeJourney(run: Run, project: Project, room?: string): Promise<JourneyView | null> {
+/** `request.engines` (the Panel lens) narrows every view the map reads;
+ * `request.room` reaches only the room-pinned ones (see above). */
+export async function computeJourney(run: Run, project: Project, request: ViewRequest = {}): Promise<JourneyView | null> {
+  const room = request.room;
   const filtered = room !== undefined;
+  // Every view: the engine set only. Room-pinned views: the room too.
+  const all: ViewRequest = request.engines ? { engines: request.engines } : {};
+  const pinned: ViewRequest = filtered ? { ...all, room } : all;
   const [headline, headlineAll, awareness, awarenessAll, h2h, alts, doubt, value, repertoire, premium, reasons, summary, rules, settled, rooms] =
     await Promise.all([
-      computeHeadlineCached(run, project, room),
-      filtered ? computeHeadlineCached(run, project) : Promise.resolve(null),
-      computeAwarenessCached(run, project, room),
-      filtered ? computeAwarenessCached(run, project) : Promise.resolve(null),
-      computeHeadToHeadCached(run, project),
-      computeAlternativesCached(run, project),
-      computeDoubtCached(run, project),
-      computeValueCached(run, project, room),
-      computeRepertoireCached(run, project),
-      computePremiumCached(run, project),
-      computeReasonsCached(run, project, room),
+      computeHeadlineCached(run, project, pinned),
+      filtered ? computeHeadlineCached(run, project, all) : Promise.resolve(null),
+      computeAwarenessCached(run, project, pinned),
+      filtered ? computeAwarenessCached(run, project, all) : Promise.resolve(null),
+      computeHeadToHeadCached(run, project, all),
+      computeAlternativesCached(run, project, all),
+      computeDoubtCached(run, project, all),
+      computeValueCached(run, project, pinned),
+      computeRepertoireCached(run, project, all),
+      computePremiumCached(run, project, all),
+      computeReasonsCached(run, project, pinned),
       // Under a room filter the arguments come from the room-filtered reasons view.
-      filtered ? Promise.resolve(null) : computeBrandSummaryCached(run, project),
-      computeRulesCached(run, project),
-      computeSettledCached(run, project),
+      filtered ? Promise.resolve(null) : computeBrandSummaryCached(run, project, all),
+      computeRulesCached(run, project, all),
+      computeSettledCached(run, project, all),
       roomsOf(project),
     ]);
   // Every view reads the same codes source; no source = nothing coded to map.

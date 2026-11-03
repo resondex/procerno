@@ -10,7 +10,7 @@ import type {
   RateCell,
 } from "@/lib/engine/head_to_head";
 import { SortTable, Tip, type Col } from "./table";
-import { AnswersModal, BaseNote, fmtN, type AnswersTarget } from "./view_parts";
+import { AnswersModal, BaseNote, fmtN, type AnswersTarget, useEngineSet, viewQuery, EngineTable } from "./view_parts";
 
 /**
  * The head-to-head views (2026-10-27): prompted win rate per named rival,
@@ -321,7 +321,7 @@ function KindSection({
       )}
       <details className="text-[13px]">
         <summary className="cursor-pointer text-ink-2">By engine, across every {first.toLowerCase()}</summary>
-        <SortTable cols={engineCols} rows={view.byEngine} filename={`head_to_head_${view.kind}_by_engine.csv`} defaultSort={{ id: "won", dir: -1 }} />
+        <EngineTable cols={engineCols} rows={view.byEngine} filename={`head_to_head_${view.kind}_by_engine.csv`} defaultSort={{ id: "won", dir: -1 }} />
       </details>
       <BaseNote>Based on {fmtN(view.answers)} answers across {view.byEngine.length} engines.</BaseNote>
     </section>
@@ -334,9 +334,10 @@ export default function HeadToHeadSection({ runId }: { runId: string }) {
   const [opened, setOpened] = useState<AnswersTarget | null>(null);
   const close = useCallback(() => setOpened(null), []);
 
+  const q = viewQuery({ engines: useEngineSet() });
   useEffect(() => {
     let live = true;
-    fetch(`/api/runs/${runId}/head_to_head`)
+    fetch(`/api/runs/${runId}/head_to_head${q}`)
       .then(async (r) => {
         if (!r.ok) throw new Error(`head-to-head view failed (${r.status})`);
         const d = (await r.json()) as { views: HeadToHeadViews | null };
@@ -346,7 +347,7 @@ export default function HeadToHeadSection({ runId }: { runId: string }) {
     return () => {
       live = false;
     };
-  }, [runId]);
+  }, [runId, q]);
 
   if (error) return <div className="card px-5 py-4 text-[13px] text-danger">{error}</div>;
   if (!views) return null;

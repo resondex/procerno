@@ -3,7 +3,7 @@ import { ENGINES, engineDisplayLabel } from "./providers";
 import { buildResolver } from "./brand_resolve";
 import { roleOf } from "./headline";
 import { exitResolver, type ExitRole } from "./exits";
-import { cachedView, cell, poolOf, type PoolRow, type RateCell, type ViewData } from "./view_data";
+import { cachedView, cell, facetsOf, poolOf, requestOf, type EngineFacets, type PoolRow, type RateCell, type ViewData, type ViewRequest } from "./view_data";
 import type { ViewKey } from "./views";
 import type { Project, Run } from "../types";
 
@@ -72,7 +72,7 @@ export interface SettledBase {
   ownProduct: RateCell;
   /** Redirect brands, most named first (top 10). */
   redirects: SettledNamed[];
-  byEngine: SettledSlice[];
+  byEngine: (SettledSlice & EngineFacets)[];
 }
 
 export interface BusinessCaseView extends SettledBase {
@@ -117,7 +117,7 @@ function enumCells<V extends string>(rows: PoolRow[], values: readonly V[], fiel
   return Object.fromEntries(values.map((v) => [v, cell(count(rows, (r) => field(r) === v), rows.length)])) as Record<V, RateCell>;
 }
 
-export function computeSettled(data: ViewData): SettledViews {
+export function computeSettled(data: ViewData, request: ViewRequest = {}): SettledViews {
   const { project, dictionary } = data;
   const resolve = buildResolver(dictionary, data.judged);
   const targetKey = resolve(project.brand).key;
@@ -127,7 +127,7 @@ export function computeSettled(data: ViewData): SettledViews {
   const labels = new Map(ENGINES.map((e) => [e.id, engineDisplayLabel(e)]));
 
   const base = (view: ViewKey, stage: SettledBase["stage"]) => {
-    const { rows, uncoded, core } = poolOf(data, view);
+    const { rows, uncoded, core } = poolOf(data, view, request);
     if (rows.length === 0 && uncoded === 0) return null;
     const n = rows.length;
     const resolved = rows.map((r) => answerExits(r.code.redirect_to));
@@ -154,7 +154,7 @@ export function computeSettled(data: ViewData): SettledViews {
       byEngine: [...core]
         .map((m) => {
           const list = rows.filter((r) => r.model === m);
-          return { key: m, label: labels.get(m) ?? m, answers: list.length, strengthens: cell(count(list, (r) => verdictOf(r) === "strengthens"), list.length) };
+          return { key: m, label: labels.get(m) ?? m, ...facetsOf(m), answers: list.length, strengthens: cell(count(list, (r) => verdictOf(r) === "strengthens"), list.length) };
         })
         .filter((s) => s.answers > 0),
     };
@@ -231,7 +231,9 @@ export function computeSettled(data: ViewData): SettledViews {
 }
 
 // s1 (2026-11-01): first version - Set C verdict cards, context-judged names.
-const SETTLED_VERSION = "s2";
-export function computeSettledCached(run: Run, project: Project): Promise<SettledViews | null> {
-  return cachedView("settled", SETTLED_VERSION, run, project, computeSettled, { judge: true });
+// s3 (2026-11-03): engine slices carry vendor / tier / mode (the Panel lens's Group-by).
+const SETTLED_VERSION = "s3";
+export function computeSettledCached(run: Run, project: Project, request: ViewRequest = {}): Promise<SettledViews | null> {
+  const r = requestOf(request);
+  return cachedView("settled", SETTLED_VERSION, run, project, (d) => computeSettled(d, r), { judge: true }, r);
 }

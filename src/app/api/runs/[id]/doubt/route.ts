@@ -1,11 +1,12 @@
 import { NextResponse } from "next/server";
 import { requireAuth, requireRun } from "@/lib/auth";
 import { computeDoubtCached } from "@/lib/engine/doubt";
+import { viewRequestParams } from "@/lib/engine/view_data";
 
 /** The doubt views (objections, churn and renewal keep-or-leave) read from answer_codes under
  * the project's codes_source. { views: null } = no codes source yet. */
 export async function GET(
-  _req: Request,
+  req: Request,
   { params }: { params: Promise<{ id: string }> }
 ) {
   const auth = await requireAuth();
@@ -13,6 +14,6 @@ export async function GET(
   const { id } = await params;
   const loaded = await requireRun(id, auth);
   if (loaded instanceof NextResponse) return loaded;
-  const views = await computeDoubtCached(loaded.run, loaded.project);
+  const views = await computeDoubtCached(loaded.run, loaded.project, viewRequestParams(req));
   return NextResponse.json({ views });
 }

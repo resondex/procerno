@@ -1,4 +1,6 @@
+import { createHash } from "node:crypto";
 import { openaiClient } from "./providers";
+import { store } from "../store";
 import { logCost } from "../cost_log";
 import { definitionStems } from "./definition_overlap";
 
@@ -280,4 +282,81 @@ export async function conditionKeyMapLarge(
     for (const c of counts.keys()) out.set(c, conditionStemKey(c, exclude));
     return out;
   }
+}
+
+/** Bumped when the cached key-map entry's meaning changes. */
+const CONDITION_KEYS_VERSION = "ck1";
+const CONDITION_KEYS_TTL_MS = 183 * 24 * 3600 * 1000;
+
+/** Where a run-scoped key map may be cached: present only for computes that
+ * ran through cachedView on a store that fingerprints its data. */
+export interface ConditionKeysCache {
+  runId: string;
+  /** runDataRevision - null or absent = no cache. */
+  revision: string | null | undefined;
+  /** The view and population the conditions come from ("head_to_head:entity",
+   * "rules", "awareness:problem_recognition" + the room) - two populations
+   * never share an entry. */
+  scope: string;
+  meta: { brand: string; category: string; projectId: string };
+}
+
+/**
+ * Condition group keys under the Panel lens (2026-11-03). `counts` are the
+ * conditions the view groups; `full` returns the same view's conditions over
+ * the WHOLE core panel and is passed only when the request narrows the
+ * engine set. Unnarrowed, this is conditionKeyMap / conditionKeyMapLarge on
+ * `counts` exactly (the result is also written through to the run cache so a
+ * later engine subset reuses it). Narrowed, the key map is computed once over
+ * the full pool - cached per run, revision, scope, purpose and exclude list -
+ * and the subset's conditions are looked up in it: a subset's conditions are
+ * a subset of the full pool's by construction, so every engine set groups
+ * the same wording into the same group, and no subset pays a new embedding
+ * call. With no OpenAI key the stem fallback is per-wording and runs as
+ * before (no cache).
+ */
+export async function conditionKeysFor(
+  counts: Map<string, number>,
+  full: (() => Map<string, number>) | null,
+  exclude: Set<string>,
+  opts: { purpose?: string; large?: boolean; cache?: ConditionKeysCache | null } = {}
+): Promise<Map<string, string>> {
+  const purpose = opts.purpose ?? "views:conditions";
+  const group = (c: Map<string, number>) =>
+    opts.large ? conditionKeyMapLarge(c, exclude, purpose) : conditionKeyMap(c, exclude, purpose);
+  if (!process.env.OPENAI_API_KEY) return group(counts);
+  const cache = opts.cache && opts.cache.revision ? opts.cache : null;
+  const prefix = cache ? `cond_keys:${CONDITION_KEYS_VERSION}:${cache.runId}:` : "";
+  const key = cache
+    ? `${prefix}${cache.revision}:${cache.scope}:${purpose}:${opts.large ? "L" : "S"}:${CONDITION_TAU}:` +
+      createHash("sha256").update([...exclude].sort().join("|")).digest("hex").slice(0, 12)
+    : "";
+  const write = async (m: Map<string, string>) => {
+    if (!cache || [...m.values()].every((v) => !v.startsWith("e:"))) return; // stem fallback: nothing worth keeping
+    await store.cacheSet(key, JSON.stringify([...m.entries()]), cache.meta);
+    await store.cachePurge(prefix, `${prefix}${cache.revision}:`);
+  };
+  if (!full) {
+    const m = await group(counts);
+    await write(m).catch(() => {});
+    return m;
+  }
+  let fullMap: Map<string, string> | null = null;
+  if (cache) {
+    const raw = await store.cacheGet(key, CONDITION_KEYS_TTL_MS).catch(() => null);
+    if (raw) {
+      try {
+        fullMap = new Map(JSON.parse(raw) as [string, string][]);
+      } catch {
+        fullMap = null;
+      }
+    }
+  }
+  if (!fullMap) {
+    fullMap = await group(full());
+    await write(fullMap).catch(() => {});
+  }
+  const out = new Map<string, string>();
+  for (const c of counts.keys()) out.set(c, fullMap.get(c) ?? conditionStemKey(c, exclude));
+  return out;
 }

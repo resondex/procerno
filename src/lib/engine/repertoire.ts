@@ -1,6 +1,6 @@
 import { ENGINES, engineDisplayLabel } from "./providers";
 import { buildResolver } from "./brand_resolve";
-import { cachedView, cell, poolOf, type PoolRow, type RateCell, type ViewData } from "./view_data";
+import { cachedView, cell, facetsOf, poolOf, requestOf, type EngineFacets, type PoolRow, type RateCell, type ViewData, type ViewRequest } from "./view_data";
 import type { Project, Run } from "../types";
 
 /**
@@ -42,7 +42,7 @@ export interface RepertoireView extends RepertoireSlice {
   switchTo: { name: string; n: number }[];
   /** Other brands recommended, on any answer. */
   alsoRecommended: { name: string; n: number; share: RateCell }[];
-  byEngine: RepertoireSlice[];
+  byEngine: (RepertoireSlice & EngineFacets)[];
 }
 
 interface Facts {
@@ -67,9 +67,9 @@ function sliceOf(key: string, label: string, list: Facts[]): RepertoireSlice {
   };
 }
 
-export function computeRepertoire(data: ViewData): RepertoireView | null {
+export function computeRepertoire(data: ViewData, request: ViewRequest = {}): RepertoireView | null {
   const { project } = data;
-  const { rows: pool, uncoded, core } = poolOf(data, "repertoire");
+  const { rows: pool, uncoded, core } = poolOf(data, "repertoire", request);
   if (pool.length === 0 && uncoded === 0) return null;
   const resolve = buildResolver(data.dictionary, data.judged);
   const targetKey = resolve(project.brand).key;
@@ -117,12 +117,14 @@ export function computeRepertoire(data: ViewData): RepertoireView | null {
       .slice(0, 10)
       .map(([name, k]) => ({ name, n: k, share: cell(k, n) })),
     byEngine: [...core]
-      .map((m) => sliceOf(m, labels.get(m) ?? m, facts.filter((f) => f.row.model === m)))
+      .map((m) => ({ ...sliceOf(m, labels.get(m) ?? m, facts.filter((f) => f.row.model === m)), ...facetsOf(m) }))
       .filter((s) => s.answers > 0),
   };
 }
 
-const REPERTOIRE_VERSION = "rp3";
-export function computeRepertoireCached(run: Run, project: Project): Promise<RepertoireView | null> {
-  return cachedView("repertoire", REPERTOIRE_VERSION, run, project, computeRepertoire, { judge: true });
+// rp4 (2026-11-03): engine slices carry vendor / tier / mode (the Panel lens's Group-by).
+const REPERTOIRE_VERSION = "rp4";
+export function computeRepertoireCached(run: Run, project: Project, request: ViewRequest = {}): Promise<RepertoireView | null> {
+  const r = requestOf(request);
+  return cachedView("repertoire", REPERTOIRE_VERSION, run, project, (d) => computeRepertoire(d, r), { judge: true }, r);
 }

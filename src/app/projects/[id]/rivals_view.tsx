@@ -8,7 +8,7 @@ import type { WorkbenchView } from "@/lib/engine/workbench";
 import type { RateCell } from "@/lib/engine/view_data";
 import { R } from "@/lib/engine/measures";
 import { Tip } from "./table";
-import { BaseNote, pct, range } from "./view_parts";
+import { BaseNote, pct, range, useEngineSet, viewQuery } from "./view_parts";
 
 /**
  * Rivals - an Analysis LENS (RATIFIED 2026-11-01, WORKBENCH_REDESIGN_2026-10-30.md
@@ -251,22 +251,24 @@ export default function RivalsSection({ runId }: { runId: string }) {
   const [error, setError] = useState<string | null>(null);
   const [picked, setPicked] = useState<string | null>(null);
 
+  const engines = useEngineSet();
   useEffect(() => {
     let live = true;
     const base = `/api/runs/${runId}`;
+    const eq = viewQuery({ engines });
     const soft = <T,>(p: Promise<T | null>) => p.catch(() => null);
     Promise.all([
-      soft(getJson<HeadlineView>(`${base}/headline`, "view")),
-      soft(getJson<HeadToHeadViews>(`${base}/head_to_head`, "views")),
-      soft(getJson<AlternativesLite>(`${base}/alternatives`, "views")),
-      soft(getJson<WorkbenchView>(`${base}/workbench`, "view")),
+      soft(getJson<HeadlineView>(`${base}/headline${eq}`, "view")),
+      soft(getJson<HeadToHeadViews>(`${base}/head_to_head${eq}`, "views")),
+      soft(getJson<AlternativesLite>(`${base}/alternatives${eq}`, "views")),
+      soft(getJson<WorkbenchView>(`${base}/workbench${eq}`, "view")),
     ])
       .then(([headline, h2h, alts, wb]) => live && setData({ headline, h2h, alts, wb }))
       .catch((e: Error) => live && setError(e.message));
     return () => {
       live = false;
     };
-  }, [runId]);
+  }, [runId, engines]);
 
   const rivals = useMemo(() => (data ? rivalsOf(data) : []), [data]);
   const picks = useMemo(() => (data?.wb ? pickArguments(data.wb) : null), [data]);

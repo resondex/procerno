@@ -2,7 +2,7 @@ import { matchKey } from "../brand_key";
 import { ENGINES, engineDisplayLabel } from "./providers";
 import { buildResolver, type Resolver } from "./brand_resolve";
 import { roleOf } from "./headline";
-import { cachedView, cell, poolOf, type RateCell, type ViewData } from "./view_data";
+import { cachedView, cell, facetsOf, poolOf, requestOf, type EngineFacets, type RateCell, type ViewData, type ViewRequest } from "./view_data";
 import type { AnswerCodes, Project, Run } from "../types";
 
 export type { RateCell };
@@ -75,7 +75,10 @@ export interface BrandSummaryView {
   /** Active, analyzed brands named in the pool, most chosen first. */
   brands: SummaryBrand[];
   byMode: SummarySlice[];
-  byEngine: SummarySlice[];
+  byEngine: (SummarySlice & EngineFacets)[];
+  /** The engines the pool counts, in panel order - the Panel lens's
+   * options (on an engine-filtered request, the set itself). */
+  core: ({ id: string; label: string } & EngineFacets)[];
   /** Sorted by lift, best first; [] when either pick bucket is too small. */
   reasonLift: ReasonLift[];
   /** Buyers voicing a worry (objections): go ahead / avoid. */
@@ -151,12 +154,12 @@ function sliceOf(
   };
 }
 
-export function computeBrandSummary(data: ViewData): BrandSummaryView {
+export function computeBrandSummary(data: ViewData, request: ViewRequest = {}): BrandSummaryView {
   const { run, project, source, dictionary } = data;
   const resolve = buildResolver(dictionary, data.judged);
   const targetKey = resolve(project.brand).key;
   const legacy = new Set(project.competitors.map(matchKey));
-  const { rows, uncoded, core } = poolOf(data, "headline");
+  const { rows, uncoded, core } = poolOf(data, "headline", request);
 
   const facts = rows.map(({ code, model }) => factsOf(code, model, resolve));
   const n = facts.length;
@@ -201,7 +204,7 @@ export function computeBrandSummary(data: ViewData): BrandSummaryView {
     .filter((m) => facts.some((f) => f.model === m))
     .map((m) => {
       const meta = engineMeta.get(m);
-      return sliceOf(m, meta?.label ?? m, meta?.mode ?? "instinct", 1, facts.filter((f) => f.model === m), targetKey);
+      return { ...sliceOf(m, meta?.label ?? m, meta?.mode ?? "instinct", 1, facts.filter((f) => f.model === m), targetKey), ...facetsOf(m) };
     });
   const byMode = (["instinct", "search"] as const).flatMap((mode) => {
     const engines = byEngine.filter((e) => e.mode === mode);
@@ -234,8 +237,8 @@ export function computeBrandSummary(data: ViewData): BrandSummaryView {
     const judged = codes.filter((c) => c.premise_verdict !== null);
     return cell(judged.filter((c) => c.premise_verdict === "confirms").length, judged.length);
   };
-  const doubt = poolOf(data, "doubt").rows.map((r) => r.code);
-  const keep = poolOf(data, "keep_or_leave").rows.map((r) => r.code);
+  const doubt = poolOf(data, "doubt", request).rows.map((r) => r.code);
+  const keep = poolOf(data, "keep_or_leave", request).rows.map((r) => r.code);
   const buyersDoubt =
     doubt.length === 0
       ? null
@@ -257,7 +260,7 @@ export function computeBrandSummary(data: ViewData): BrandSummaryView {
 
   // Entity head-to-heads: the two-way record per named rival (the full
   // matchup detail, conditions included, lives in the head-to-head view).
-  const h2h = poolOf(data, "head_to_head_entity").rows;
+  const h2h = poolOf(data, "head_to_head_entity", request).rows;
   const byRival = new Map<string, { rival: string; won: number; lost: number; n: number }>();
   for (const { code: c, intent } of h2h) {
     const r = resolve(intent.angle);
@@ -297,6 +300,7 @@ export function computeBrandSummary(data: ViewData): BrandSummaryView {
     brands,
     byMode,
     byEngine,
+    core: [...core].map((id) => ({ id, label: engineMeta.get(id)?.label ?? id, ...facetsOf(id) })),
     reasonLift,
     buyersDoubt,
     customersDoubt,
@@ -305,7 +309,9 @@ export function computeBrandSummary(data: ViewData): BrandSummaryView {
 }
 
 // bs1 (2026-10-30): first version; names resolve through the context judge.
-const BRAND_SUMMARY_VERSION = "bs3";
-export function computeBrandSummaryCached(run: Run, project: Project): Promise<BrandSummaryView | null> {
-  return cachedView("brand_summary", BRAND_SUMMARY_VERSION, run, project, computeBrandSummary, { judge: true });
+// bs4 (2026-11-03): engine slices carry vendor / tier / mode and the payload lists its core engines (the Panel lens).
+const BRAND_SUMMARY_VERSION = "bs4";
+export function computeBrandSummaryCached(run: Run, project: Project, request: ViewRequest = {}): Promise<BrandSummaryView | null> {
+  const r = requestOf(request);
+  return cachedView("brand_summary", BRAND_SUMMARY_VERSION, run, project, (d) => computeBrandSummary(d, r), { judge: true }, r);
 }

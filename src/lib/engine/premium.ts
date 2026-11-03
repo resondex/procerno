@@ -1,6 +1,6 @@
 import { ENGINES, engineDisplayLabel } from "./providers";
 import { buildResolver } from "./brand_resolve";
-import { cachedView, cell, poolOf, type PoolRow, type RateCell, type ViewData } from "./view_data";
+import { cachedView, cell, facetsOf, poolOf, requestOf, type EngineFacets, type PoolRow, type RateCell, type ViewData, type ViewRequest } from "./view_data";
 import type { Project, Run } from "../types";
 
 /**
@@ -58,7 +58,7 @@ export interface PremiumView {
   picksYou: RateCell;
   firmPick: RateCell;
   byStance: StanceRow[];
-  byEngine: PremiumSlice[];
+  byEngine: (PremiumSlice & EngineFacets)[];
 }
 
 interface Facts {
@@ -77,9 +77,9 @@ function stanceCells(list: Facts[]): Record<Stance, RateCell> {
   return Object.fromEntries(STANCES.map((s) => [s, cell(count(list, (f) => f.stance === s), list.length)])) as Record<Stance, RateCell>;
 }
 
-export function computePremium(data: ViewData): PremiumView | null {
+export function computePremium(data: ViewData, request: ViewRequest = {}): PremiumView | null {
   const { project } = data;
-  const { rows: pool, uncoded, core } = poolOf(data, "premium_tier");
+  const { rows: pool, uncoded, core } = poolOf(data, "premium_tier", request);
   if (pool.length === 0 && uncoded === 0) return null;
   const resolve = buildResolver(data.dictionary, data.judged);
   const targetKey = resolve(project.brand).key;
@@ -154,6 +154,7 @@ export function computePremium(data: ViewData): PremiumView | null {
         return {
           key: m,
           label: labels.get(m) ?? m,
+          ...facetsOf(m),
           answers: list.length,
           stance: stanceCells(list),
           picksYou: cell(count(list, (f) => f.pickKey === targetKey), list.length),
@@ -163,7 +164,9 @@ export function computePremium(data: ViewData): PremiumView | null {
   };
 }
 
-const PREMIUM_VERSION = "p3";
-export function computePremiumCached(run: Run, project: Project): Promise<PremiumView | null> {
-  return cachedView("premium_tier", PREMIUM_VERSION, run, project, computePremium, { judge: true });
+// p4 (2026-11-03): engine slices carry vendor / tier / mode (the Panel lens's Group-by).
+const PREMIUM_VERSION = "p4";
+export function computePremiumCached(run: Run, project: Project, request: ViewRequest = {}): Promise<PremiumView | null> {
+  const r = requestOf(request);
+  return cachedView("premium_tier", PREMIUM_VERSION, run, project, (d) => computePremium(d, r), { judge: true }, r);
 }

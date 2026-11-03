@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { requireAuth, requireRun } from "@/lib/auth";
-import { roomParam } from "@/lib/engine/view_data";
+import { viewRequestParams } from "@/lib/engine/view_data";
 import { computeAwarenessCached } from "@/lib/engine/awareness";
 
 /** The awareness views (problem recognition routing, category education explainer) read from answer_codes under
@@ -15,6 +15,6 @@ export async function GET(
   const { id } = await params;
   const loaded = await requireRun(id, auth);
   if (loaded instanceof NextResponse) return loaded;
-  const view = await computeAwarenessCached(loaded.run, loaded.project, roomParam(req));
+  const view = await computeAwarenessCached(loaded.run, loaded.project, viewRequestParams(req));
   return NextResponse.json({ view });
 }

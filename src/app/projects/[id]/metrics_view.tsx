@@ -17,6 +17,7 @@ import {
 } from "@/lib/engine/measures";
 import EvidencePanel, { EVIDENCE_CAP, type EvidenceRequest } from "./evidence_panel";
 import { SortTable, type Col } from "./table";
+import { TIER_LABEL, useEngineSet, viewQuery } from "./view_parts";
 
 /**
  * Build a table (the Metrics pivot renamed; 2026-10-30 chassis, 2026-11-01
@@ -34,7 +35,7 @@ import { SortTable, type Col } from "./table";
  * it counts (the numerator) in the evidence panel.
  */
 
-type DimKey = "none" | "room" | "worry" | "rival" | "stage" | "engine" | "mode" | "brand" | "parent" | "argument";
+type DimKey = "none" | "room" | "worry" | "rival" | "stage" | "engine" | "vendor" | "tier" | "mode" | "brand" | "parent" | "argument";
 
 const DIMS: { key: DimKey; label: string }[] = [
   { key: "none", label: "None" },
@@ -43,6 +44,8 @@ const DIMS: { key: DimKey; label: string }[] = [
   { key: "rival", label: "Rival or class" },
   { key: "stage", label: "Stage" },
   { key: "engine", label: "Engine" },
+  { key: "vendor", label: "Vendor" },
+  { key: "tier", label: "Tier" },
   { key: "mode", label: "Mode" },
   { key: "brand", label: "Brand" },
   { key: "parent", label: "Brand (parent)" },
@@ -167,9 +170,10 @@ export function MetricsSection({ runId, evidence = true }: { runId: string; evid
   const [drill, setDrill] = useState<EvidenceRequest | null>(null);
   const closeDrill = useCallback(() => setDrill(null), []);
 
+  const q = viewQuery({ engines: useEngineSet() });
   useEffect(() => {
     let live = true;
-    fetch(`/api/runs/${runId}/workbench`)
+    fetch(`/api/runs/${runId}/workbench${q}`)
       .then((r) => (r.ok ? r.json() : null))
       .then((d) => live && setData((d?.view as WorkbenchView | null) ?? null))
       .catch(() => {})
@@ -177,7 +181,7 @@ export function MetricsSection({ runId, evidence = true }: { runId: string; evid
     return () => {
       live = false;
     };
-  }, [runId]);
+  }, [runId, q]);
 
   // ---- pools present in this run ----
   const poolCounts = useMemo(() => {
@@ -311,6 +315,17 @@ export function MetricsSection({ runId, evidence = true }: { runId: string; evid
           };
         case "engine":
           return (r) => [{ key: `e${r[R.engine]}`, label: engineOf(r).label }];
+        case "vendor":
+          // Engines pooled by vendor (older payloads carry no vendor: the label).
+          return (r) => {
+            const v = engineOf(r).vendor ?? engineOf(r).label;
+            return [{ key: `v:${v}`, label: v }];
+          };
+        case "tier":
+          return (r) => {
+            const t = engineOf(r).tier ?? "both";
+            return [{ key: `t:${t}`, label: TIER_LABEL[t] }];
+          };
         case "mode":
           return (r) => {
             const m = engineOf(r).mode;

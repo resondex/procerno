@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import type { ExitRow } from "@/lib/engine/exits";
 import type { DoubtSlice, DoubtView, DoubtViews, Premise, WorryRow } from "@/lib/engine/doubt";
 import { SortTable, Tip, type Col } from "./table";
-import { BaseNote, fmtN, Legend, Names, pct, range, rate, rateCol, ShareOf, StackBar, type Part } from "./view_parts";
+import { BaseNote, fmtN, Legend, Names, pct, range, rate, rateCol, ShareOf, StackBar, type Part, useEngineSet, viewQuery, EngineTable } from "./view_parts";
 
 /**
  * The doubt views (2026-10-27): objections (a buyer's worry before buying)
@@ -285,7 +285,7 @@ function DoubtSection<V extends string>({ view, kind }: { view: DoubtView<V>; ki
       )}
       <details className="text-[13px]">
         <summary className="cursor-pointer text-ink-2">By engine</summary>
-        <SortTable cols={sliceCols(kind, "Engine")} rows={view.byEngine} filename={`${kind.csv}_by_engine.csv`} defaultSort={{ id: kind.good, dir: -1 }} />
+        <EngineTable cols={sliceCols(kind, "Engine")} rows={view.byEngine} filename={`${kind.csv}_by_engine.csv`} defaultSort={{ id: kind.good, dir: -1 }} />
       </details>
       <BaseNote>Based on {fmtN(view.answers)} answers across {view.byEngine.length} engines.</BaseNote>
     </section>
@@ -298,9 +298,10 @@ export default function DoubtSections({ runId, only }: { runId: string; only?: "
   const [views, setViews] = useState<DoubtViews | null | undefined>(undefined);
   const [error, setError] = useState<string | null>(null);
 
+  const q = viewQuery({ engines: useEngineSet() });
   useEffect(() => {
     let live = true;
-    fetch(`/api/runs/${runId}/doubt`)
+    fetch(`/api/runs/${runId}/doubt${q}`)
       .then(async (r) => {
         if (!r.ok) throw new Error(`doubt view failed (${r.status})`);
         const d = (await r.json()) as { views: DoubtViews | null };
@@ -310,7 +311,7 @@ export default function DoubtSections({ runId, only }: { runId: string; only?: "
     return () => {
       live = false;
     };
-  }, [runId]);
+  }, [runId, q]);
 
   if (error) return <div className="card px-5 py-4 text-[13px] text-danger">{error}</div>;
   if (!views) return null;

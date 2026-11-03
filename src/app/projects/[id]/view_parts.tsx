@@ -1,10 +1,10 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { createContext, Fragment, useContext, useEffect, useState, useSyncExternalStore } from "react";
 import type { RateCell } from "@/lib/engine/view_data";
 import { InlineSpinner } from "../../components/spinner";
 import AnswerText from "./answer_text";
-import { Tip, type Col } from "./table";
+import { Download, HeadLabel, SortTable, Tip, type Col } from "./table";
 
 /** Shared pieces of the per-type views (alternatives, doubt): rate text with
  * its 95% range, rate columns, stacked bars and their legends. */
@@ -204,6 +204,316 @@ export function AnswersModal({ runId, target, onClose }: { runId: string; target
           ))}
         </div>
       </aside>
+    </div>
+  );
+}
+
+// ---------- The Panel lens (2026-11-03) ----------
+
+/** The engine set every codes-era section reads under: registry ids, sorted;
+ * null = the whole core panel. Provided by the results shell. */
+export const EngineSetContext = createContext<string[] | null>(null);
+export const useEngineSet = () => useContext(EngineSetContext);
+
+/** A view route's query string for the buyer filter and the engine set -
+ * "" when neither is set, so an unfiltered fetch is exactly the old URL. */
+export function viewQuery({ room, engines }: { room?: string | null; engines?: readonly string[] | null }): string {
+  const q = new URLSearchParams();
+  if (room) q.set("room", room);
+  if (engines && engines.length > 0) q.set("engines", engines.join(","));
+  const s = q.toString();
+  return s ? `?${s}` : "";
+}
+
+/** Wilson 95% interval - the same math as engine/metrics.ts wilson(). */
+export function wilsonCell(k: number, n: number): RateCell {
+  if (n === 0) return { k, n, low: 0, high: 0 };
+  const z = 1.96;
+  const p = k / n;
+  const d = 1 + (z * z) / n;
+  const c = (p + (z * z) / (2 * n)) / d;
+  const h = (z * Math.sqrt((p * (1 - p)) / n + (z * z) / (4 * n * n))) / d;
+  return { k, n, low: Math.max(0, c - h), high: Math.min(1, c + h) };
+}
+
+export type EngineTier = "free" | "paid" | "both";
+/** The facets every by-engine slice carries (engine/providers.ts engineFacets). */
+export interface EngineRow {
+  key: string;
+  label: string;
+  answers: number;
+  vendor: string;
+  tier: EngineTier;
+  mode: "instinct" | "search";
+}
+
+export type EngineGroupBy = "engine" | "vendor" | "tier" | "mode";
+const GROUP_BY_LABEL: Record<EngineGroupBy, string> = { engine: "Engine", vendor: "Vendor", tier: "Tier", mode: "Mode" };
+export const TIER_LABEL: Record<EngineTier, string> = { free: "Free tiers", paid: "Paid tiers", both: "Free & paid" };
+export const MODE_LABEL: Record<EngineRow["mode"], string> = { search: "Search on", instinct: "Instinct only" };
+
+const isCell = (v: unknown): v is RateCell =>
+  !!v && typeof v === "object" && typeof (v as RateCell).k === "number" && typeof (v as RateCell).n === "number" &&
+  typeof (v as RateCell).low === "number" && typeof (v as RateCell).high === "number";
+
+/** Pools engine slices into one row: every rate cell becomes sum k / sum n
+ * with its range recomputed, numbers sum, nested records pool field by
+ * field; strings come from the first member (key / label are set after). */
+function poolValue(values: unknown[]): unknown {
+  const first = values[0];
+  if (isCell(first)) {
+    const k = values.reduce<number>((a, v) => a + (v as RateCell).k, 0);
+    const n = values.reduce<number>((a, v) => a + (v as RateCell).n, 0);
+    return wilsonCell(k, n);
+  }
+  if (typeof first === "number") return values.reduce<number>((a, v) => a + (v as number), 0);
+  if (first && typeof first === "object" && !Array.isArray(first)) {
+    const out: Record<string, unknown> = {};
+    for (const key of Object.keys(first)) out[key] = poolValue(values.map((v) => (v as Record<string, unknown>)[key]));
+    return out;
+  }
+  return first;
+}
+export function poolSlices<T extends EngineRow>(members: T[], key: string, label: string): T {
+  const pooled = poolValue(members) as T;
+  const same = <K extends keyof EngineRow>(f: K) => (members.every((m) => m[f] === members[0][f]) ? members[0][f] : undefined);
+  return {
+    ...pooled,
+    key,
+    label,
+    vendor: same("vendor") ?? label,
+    tier: same("tier") ?? "both",
+    mode: same("mode") ?? members[0].mode,
+  };
+}
+
+// One Group-by preference shared by every by-engine table on the page.
+const GROUP_KEY = "procerno_engine_group";
+const GROUP_EVENT = "procerno-engine-group";
+// Where the choice lives when storage is blocked (private windows).
+let memGroup: EngineGroupBy = "engine";
+function readGroup(): EngineGroupBy {
+  try {
+    const v = window.localStorage.getItem(GROUP_KEY);
+    return v === "vendor" || v === "tier" || v === "mode" ? v : "engine";
+  } catch {
+    return memGroup;
+  }
+}
+function subscribeGroup(cb: () => void) {
+  window.addEventListener(GROUP_EVENT, cb);
+  window.addEventListener("storage", cb);
+  return () => {
+    window.removeEventListener(GROUP_EVENT, cb);
+    window.removeEventListener("storage", cb);
+  };
+}
+export function useEngineGroup(): [EngineGroupBy, (g: EngineGroupBy) => void] {
+  const group = useSyncExternalStore(subscribeGroup, readGroup, () => "engine" as EngineGroupBy);
+  const set = (g: EngineGroupBy) => {
+    memGroup = g;
+    try {
+      if (g === "engine") window.localStorage.removeItem(GROUP_KEY);
+      else window.localStorage.setItem(GROUP_KEY, g);
+    } catch {
+      // storage blocked: memGroup carries the choice for this page view
+    }
+    window.dispatchEvent(new Event(GROUP_EVENT));
+  };
+  return [group, set];
+}
+
+const groupOf = (r: EngineRow, by: EngineGroupBy): { key: string; label: string } => {
+  if (by === "vendor") return { key: `v:${r.vendor}`, label: r.vendor };
+  if (by === "tier") return { key: `t:${r.tier}`, label: TIER_LABEL[r.tier] };
+  return { key: `m:${r.mode}`, label: MODE_LABEL[r.mode] };
+};
+
+/**
+ * Every by-engine table (2026-11-03): the section's own columns, with a
+ * Group-by toggle - Engine (one row per engine, the plain sortable table) /
+ * Vendor / Tier / Mode. A grouped row is the POOLED rate over its member
+ * engines (sum k over sum n, its range recomputed), marked pooled and
+ * expandable to the member engines beneath, so it is never read as one
+ * engine. Rows without facets (older payloads) fall back to Engine.
+ */
+export function EngineTable<T extends EngineRow>({
+  cols,
+  rows,
+  filename,
+  defaultSort,
+}: {
+  cols: Col<T>[];
+  rows: T[];
+  filename: string;
+  defaultSort?: { id: string; dir: 1 | -1 };
+}) {
+  const [stored, setGroup] = useEngineGroup();
+  const hasFacets = rows.every((r) => typeof r.vendor === "string" && typeof r.tier === "string");
+  const by: EngineGroupBy = hasFacets ? stored : "engine";
+  const toggle = hasFacets && rows.length > 1 && (
+    <div className="flex flex-wrap items-center gap-1 text-[12px]">
+      <span className="text-ink-3 mr-0.5">Group by:</span>
+      {(Object.keys(GROUP_BY_LABEL) as EngineGroupBy[]).map((g) => (
+        <button
+          key={g}
+          type="button"
+          onClick={() => setGroup(g)}
+          aria-pressed={by === g}
+          className={`rounded-full border px-2 py-0.5 transition-colors ${
+            by === g ? "border-[var(--color-primary)] bg-primary-soft text-primary" : "border-line text-ink-2 hover:border-ink-3"
+          }`}
+        >
+          {GROUP_BY_LABEL[g]}
+        </button>
+      ))}
+    </div>
+  );
+  if (by === "engine") {
+    return (
+      <div className="mt-2 grid gap-1">
+        {toggle}
+        <SortTable cols={cols} rows={rows} filename={filename} defaultSort={defaultSort} />
+      </div>
+    );
+  }
+  return (
+    <div className="mt-2 grid gap-1">
+      {toggle}
+      <GroupedTable cols={cols} rows={rows} by={by} filename={filename} defaultSort={defaultSort} />
+    </div>
+  );
+}
+
+function GroupedTable<T extends EngineRow>({
+  cols,
+  rows,
+  by,
+  filename,
+  defaultSort,
+}: {
+  cols: Col<T>[];
+  rows: T[];
+  by: Exclude<EngineGroupBy, "engine">;
+  filename: string;
+  defaultSort?: { id: string; dir: 1 | -1 };
+}) {
+  const shown = cols.filter((c) => !c.csvOnly);
+  const [sort, setSort] = useState<{ id: string; dir: 1 | -1 }>(defaultSort ?? { id: shown[1]?.id ?? shown[0].id, dir: -1 });
+  const [open, setOpen] = useState<Set<string>>(() => new Set());
+  const buckets = new Map<string, { label: string; members: T[] }>();
+  for (const r of rows) {
+    const g = groupOf(r, by);
+    const b = buckets.get(g.key) ?? { label: g.label, members: [] };
+    b.members.push(r);
+    buckets.set(g.key, b);
+  }
+  const groups = [...buckets.entries()].map(([key, b]) => ({ key, members: b.members, row: poolSlices(b.members, key, b.label) }));
+  const col = cols.find((c) => c.id === sort.id);
+  const cmp = (a: T, b: T) => {
+    if (!col) return 0;
+    const va = col.val(a);
+    const vb = col.val(b);
+    if (va === null && vb === null) return 0;
+    if (va === null) return 1;
+    if (vb === null) return -1;
+    const c = typeof va === "number" && typeof vb === "number" ? va - vb : String(va).localeCompare(String(vb));
+    return sort.dir === 1 ? c : -c;
+  };
+  groups.sort((a, b) => cmp(a.row, b.row));
+  for (const g of groups) g.members.sort(cmp);
+  const first = shown[0];
+  const cellOf = (c: Col<T>, r: T) => (c.render ? c.render(r) : c.val(r) ?? "-");
+  return (
+    <div className="mt-1 grid gap-1">
+      <Download
+        name={filename.replace(/\.csv$/, "")}
+        header={[GROUP_BY_LABEL[by], ...cols.map((c) => c.label)]}
+        rows={() =>
+          groups.flatMap((g) => [
+            [`${g.row.label} (pooled)`, ...cols.map((c) => c.val(g.row))],
+            ...g.members.map((m) => [g.row.label, ...cols.map((c) => c.val(m))]),
+          ])
+        }
+      />
+      <div className="overflow-x-auto">
+        <table className="w-full text-sm">
+          <thead>
+            <tr className="text-left text-[11px] uppercase tracking-wide text-ink-3 border-b border-line">
+              {shown.map((c, i) => {
+                const label = i === 0 ? GROUP_BY_LABEL[by] : c.label;
+                const arrow = sort.id === c.id ? (sort.dir === -1 ? "↓" : "↑") : "";
+                return (
+                  <th
+                    key={c.id}
+                    onClick={() => setSort((prev) => (prev.id === c.id ? { id: c.id, dir: prev.dir === 1 ? -1 : 1 } : { id: c.id, dir: -1 }))}
+                    className={`py-2 ${i === shown.length - 1 ? "" : "pr-3"} font-semibold cursor-pointer select-none hover:opacity-70 ${c.num ? "text-center" : ""}`}
+                  >
+                    {c.tip && i > 0 ? (
+                      <Tip tip={c.tip}>
+                        <span className="cursor-help border-b border-dotted border-ink-3/50">
+                          <HeadLabel label={label} arrow={arrow} />
+                        </span>
+                      </Tip>
+                    ) : (
+                      <HeadLabel label={label} arrow={arrow} />
+                    )}
+                  </th>
+                );
+              })}
+            </tr>
+          </thead>
+          <tbody>
+            {groups.map((g) => {
+              const isOpen = open.has(g.key);
+              return (
+                <Fragment key={g.key}>
+                  <tr className="border-b border-line/60">
+                    {shown.map((c, i) => (
+                      <td key={c.id} className={`py-2 ${i === shown.length - 1 ? "" : "pr-3"} ${c.num ? "text-center tabular-nums" : ""}`}>
+                        {i === 0 ? (
+                          <button
+                            type="button"
+                            aria-expanded={isOpen}
+                            onClick={() =>
+                              setOpen((s) => {
+                                const next = new Set(s);
+                                if (next.has(g.key)) next.delete(g.key);
+                                else next.add(g.key);
+                                return next;
+                              })
+                            }
+                            title={`Pooled over ${g.members.map((m) => m.label).join(", ")}`}
+                            className="inline-flex items-center gap-1.5 text-left font-medium text-ink hover:text-primary"
+                          >
+                            <span className="inline-block w-3 text-ink-3">{isOpen ? "▾" : "▸"}</span>
+                            {g.row.label}
+                            <span className="rounded-full bg-primary-soft px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-primary">
+                              pooled
+                            </span>
+                          </button>
+                        ) : (
+                          cellOf(c, g.row)
+                        )}
+                      </td>
+                    ))}
+                  </tr>
+                  {isOpen &&
+                    g.members.map((m) => (
+                      <tr key={`${g.key}:${m.key}`} className="border-b border-line/40 bg-primary-soft/10 text-ink-2">
+                        {shown.map((c, i) => (
+                          <td key={c.id} className={`py-1.5 ${i === shown.length - 1 ? "" : "pr-3"} ${c.num ? "text-center tabular-nums" : ""} ${i === 0 ? "pl-5" : ""}`}>
+                            {i === 0 ? first && (first.render ? first.render(m) : m.label) : cellOf(c, m)}
+                          </td>
+                        ))}
+                      </tr>
+                    ))}
+                </Fragment>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
     </div>
   );
 }

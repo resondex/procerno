@@ -1,7 +1,7 @@
 import { matchKey } from "../brand_key";
 import { ENGINES, engineDisplayLabel } from "./providers";
 import { buildResolver, type Resolver } from "./brand_resolve";
-import { cachedView, cell, poolOf, type RateCell, type ViewData, type ViewRequest } from "./view_data";
+import { cachedView, cell, facetsOf, poolOf, requestOf, type EngineFacets, type RateCell, type ViewData, type ViewRequest } from "./view_data";
 import type { AnswerCodes, DictionaryEntry, Project, Run } from "../types";
 
 export type { RateCell };
@@ -78,7 +78,7 @@ export interface HeadlineView {
   /** Active, analyzed brands named at least once, most-mentioned first. */
   brands: HeadlineBrand[];
   byStage: HeadlineSlice[];
-  byEngine: HeadlineSlice[];
+  byEngine: (HeadlineSlice & EngineFacets)[];
 }
 
 const STAGE_ORDER = ["discovery", "use_case", "social_validation", "premium_worth"];
@@ -236,14 +236,15 @@ export function computeHeadline(data: ViewData, request: ViewRequest = {}): Head
     brands,
     byStage: stages.map((s) => sliceOf(s, s, facts.filter((f) => f.stage === s), targetKey)),
     byEngine: models.map((m) =>
-      sliceOf(m, engineLabel.get(m) ?? m, facts.filter((f) => f.model === m), targetKey)
+      ({ ...sliceOf(m, engineLabel.get(m) ?? m, facts.filter((f) => f.model === m), targetKey), ...facetsOf(m) })
     ),
   };
 }
 
 // h2 (2026-10-28): names resolve through the context judge (context_judge.ts).
-const HEADLINE_VERSION = "h4";
-export function computeHeadlineCached(run: Run, project: Project, room?: string): Promise<HeadlineView | null> {
-  if (room === undefined) return cachedView("headline", HEADLINE_VERSION, run, project, computeHeadline, { judge: true });
-  return cachedView("headline", HEADLINE_VERSION, run, project, (d) => computeHeadline(d, { room }), { judge: true }, { room });
+// h5 (2026-11-03): engine slices carry vendor / tier / mode (the Panel lens's Group-by).
+const HEADLINE_VERSION = "h5";
+export function computeHeadlineCached(run: Run, project: Project, request: ViewRequest = {}): Promise<HeadlineView | null> {
+  const r = requestOf(request, true);
+  return cachedView("headline", HEADLINE_VERSION, run, project, (d) => computeHeadline(d, r), { judge: true }, r);
 }

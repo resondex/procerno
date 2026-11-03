@@ -2,8 +2,8 @@ import { createHash } from "node:crypto";
 import { buildResolver, type Resolved } from "./brand_resolve";
 import { containsSeq, famTokens } from "./brand_family";
 import { excludedWords } from "./definition_overlap";
-import { conditionKeyMapLarge, conditionStemKey } from "./condition_groups";
-import { cachedView, cell, corePanel, poolOf, type PoolRow, type RateCell, type ViewData } from "./view_data";
+import { conditionKeysFor, conditionStemKey } from "./condition_groups";
+import { cachedView, cell, condCache, coreOf, poolOf, requestOf, type PoolRow, type RateCell, type ViewData, type ViewRequest } from "./view_data";
 import { viewsOf, type ViewKey } from "./views";
 import type { AnswerCodes, DictionaryEntry, Intent, Project, Run } from "../types";
 
@@ -297,22 +297,26 @@ const labelOf = (surfaces: Map<string, number>) =>
 const topNamed = (m: Map<string, NamedCount>, cap: number): NamedCount[] =>
   [...m.values()].sort((a, b) => b.n - a.n || a.name.localeCompare(b.name)).slice(0, cap);
 
-export async function computeRules(data: ViewData): Promise<RulesView> {
+export async function computeRules(data: ViewData, request: ViewRequest = {}): Promise<RulesView> {
   const { project, dictionary } = data;
   const resolve = buildResolver(dictionary, data.judged);
   const target = resolve(project.brand);
   const targetKey = target.key;
 
   // Every rule-bearing question type's coded answers, each answer once.
-  const rows: { row: PoolRow; pool: RulePool }[] = [];
-  const taken = new Set<string>();
-  for (const [view, pool] of RULE_VIEWS) {
-    for (const row of poolOf(data, view).rows) {
-      if (taken.has(row.code.response_id)) continue;
-      taken.add(row.code.response_id);
-      rows.push({ row, pool });
+  const collect = (req: ViewRequest) => {
+    const out: { row: PoolRow; pool: RulePool }[] = [];
+    const taken = new Set<string>();
+    for (const [view, pool] of RULE_VIEWS) {
+      for (const row of poolOf(data, view, req).rows) {
+        if (taken.has(row.code.response_id)) continue;
+        taken.add(row.code.response_id);
+        out.push({ row, pool });
+      }
     }
-  }
+    return out;
+  };
+  const rows = collect(request);
   // Uncoded: answers in those question types on the core panel with no row.
   const ruleViews = new Set(RULE_VIEWS.map(([v]) => v));
   const intentById = new Map(data.intents.map((i) => [i.id, i]));
@@ -324,7 +328,7 @@ export async function computeRules(data: ViewData): Promise<RulesView> {
       })
       .map((p) => p.id)
   );
-  const core = corePanel(data);
+  const core = coreOf(data, request);
   const coded = new Set(data.codes.map((c) => c.response_id));
   let uncoded = 0;
   for (const r of data.responses) {
@@ -335,14 +339,22 @@ export async function computeRules(data: ViewData): Promise<RulesView> {
 
   // ONE grouping over the whole run's conditions.
   const exclude = excludedWords([project.category]);
-  const condCounts = new Map<string, number>();
-  for (const { row } of bearing) {
-    for (const rule of row.code.decision_rules!) {
-      const c = rule.condition.trim();
-      if (c) condCounts.set(c, (condCounts.get(c) ?? 0) + 1);
+  const countRules = (list: { row: PoolRow }[]) => {
+    const counts = new Map<string, number>();
+    for (const { row } of list) {
+      for (const rule of row.code.decision_rules ?? []) {
+        const c = rule.condition.trim();
+        if (c) counts.set(c, (counts.get(c) ?? 0) + 1);
+      }
     }
-  }
-  const condKeys = await conditionKeyMapLarge(condCounts, exclude);
+    return counts;
+  };
+  const condCounts = countRules(bearing);
+  // Under the Panel lens the grouping is the whole panel's, looked up.
+  const condKeys = await conditionKeysFor(condCounts, request.engines ? () => countRules(collect({})) : null, exclude, {
+    large: true,
+    cache: condCache(data, "rules"),
+  });
   const grouping: RulesView["grouping"] = [...condKeys.values()].some((k) => k.startsWith("e:")) ? "embeddings" : "stems";
   const keyOf = (c: string) => condKeys.get(c) ?? conditionStemKey(c, exclude);
 
@@ -623,6 +635,7 @@ export async function computeRules(data: ViewData): Promise<RulesView> {
 
 // ru1 (2026-10-30): first version - one run-wide grouping, context-judged names.
 const RULES_VERSION = "ru1";
-export function computeRulesCached(run: Run, project: Project): Promise<RulesView | null> {
-  return cachedView("rules", RULES_VERSION, run, project, computeRules, { judge: true });
+export function computeRulesCached(run: Run, project: Project, request: ViewRequest = {}): Promise<RulesView | null> {
+  const r = requestOf(request);
+  return cachedView("rules", RULES_VERSION, run, project, (d) => computeRules(d, r), { judge: true }, r);
 }
