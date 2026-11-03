@@ -126,7 +126,7 @@ const PICK = (resolve: ReturnType<typeof buildResolver>, targetKey: string): Buc
 });
 
 const field = (
-  name: "keep_or_leave" | "proceed_or_avoid" | "worth_it" | "relationship_verdict",
+  name: "keep_or_leave" | "proceed_or_avoid" | "worth_it" | "relationship_verdict" | "premise_verdict",
   buckets: { key: string; label: string }[],
   fallback: string
 ): Bucketer => ({
@@ -170,14 +170,17 @@ function bucketerFor(key: ReasonTypeKey, pick: Bucketer): Bucketer {
     case "keep_or_leave":
       return KEEP;
     case "doubt":
+      // A worry's read is the premise verdict (r6): does the AI agree the
+      // worry is warranted or rebut it. Proceed vs avoid was the old split;
+      // avoid is too rare on every tracker to ever clear a floor.
       return field(
-        "proceed_or_avoid",
+        "premise_verdict",
         [
-          { key: "proceed", label: "Go ahead" },
-          { key: "avoid", label: "Avoid" },
-          { key: "undecided", label: "No side" },
+          { key: "confirms", label: "Agrees with the worry" },
+          { key: "rebuts", label: "Rebuts the worry" },
+          { key: "mixed", label: "Mixed or no verdict" },
         ],
-        "undecided"
+        "mixed"
       );
     case "value":
       return field(
@@ -374,7 +377,7 @@ export function computeReasons(data: ViewData, request: ViewRequest = {}): Reaso
 }
 
 // r3 (2026-10-28): names resolve through the context judge (context_judge.ts).
-const REASONS_VERSION = "r5"; // r4: type labels in buyer language (output change for identical inputs)
+const REASONS_VERSION = "r6"; // r6: doubt type buckets by premise verdict; r4: type labels in buyer language (output change for identical inputs)
 export function computeReasonsCached(run: Run, project: Project, request: ViewRequest = {}): Promise<ReasonsView | null> {
   const r = requestOf(request, true);
   return cachedView("reasons", REASONS_VERSION, run, project, (d) => computeReasons(d, r), { codeGroups: true, judge: true }, r);

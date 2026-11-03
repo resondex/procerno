@@ -3,9 +3,10 @@ import { ENGINES, engineDisplayLabel } from "./providers";
 import { buildResolver, type Resolver } from "./brand_resolve";
 import { roleOf } from "./headline";
 import { cachedView, cell, facetsOf, poolOf, requestOf, type EngineFacets, type RateCell, type ViewData, type ViewRequest } from "./view_data";
+import { detectInsights, insightInputs, type Insight } from "./summary_insights";
 import type { AnswerCodes, Project, Run } from "../types";
 
-export type { RateCell };
+export type { RateCell, Insight };
 
 /**
  * The brand summary (2026-10-30): the answer_codes equivalent of the legacy
@@ -41,6 +42,8 @@ export interface SummarySlice {
   answers: number;
   mentioned: RateCell;
   chosen: RateCell;
+  /** The target's picks over the slice's in-category picks (bs5). */
+  decided: RateCell;
 }
 
 /** Share of answers arguing the code when the target is picked vs when
@@ -95,6 +98,9 @@ export interface BrandSummaryView {
     /** Won over won + lost. */
     winOfDecided: RateCell;
   }[];
+  /** Ranked findings across engines, rooms, rivals, arguments, doubts and
+   * the funnel (summary_insights.ts, bs5): at most one per detector, at most 8. */
+  insights: Insight[];
 }
 
 /** Both pick buckets must hold this many answers for lift to be reported. */
@@ -151,6 +157,7 @@ function sliceOf(
     answers: list.length,
     mentioned: cell(list.filter((f) => f.named.has(targetKey)).length, list.length),
     chosen: cell(list.filter((f) => f.pickKey === targetKey).length, list.length),
+    decided: cell(list.filter((f) => f.pickKey === targetKey).length, list.filter((f) => f.pickInCategory).length),
   };
 }
 
@@ -286,7 +293,7 @@ export function computeBrandSummary(data: ViewData, request: ViewRequest = {}): 
     }))
     .sort((a, b) => b.answers - a.answers || a.rival.localeCompare(b.rival));
 
-  return {
+  const summary: Omit<BrandSummaryView, "insights"> = {
     runId: run.id,
     source,
     brand: project.brand,
@@ -306,11 +313,13 @@ export function computeBrandSummary(data: ViewData, request: ViewRequest = {}): 
     customersDoubt,
     headToHead,
   };
+  return { ...summary, insights: detectInsights(summary, insightInputs(data, request)) };
 }
 
 // bs1 (2026-10-30): first version; names resolve through the context judge.
 // bs4 (2026-11-03): engine slices carry vendor / tier / mode and the payload lists its core engines (the Panel lens).
-const BRAND_SUMMARY_VERSION = "bs4";
+// bs5 (2026-11-03): ranked server-side insights (summary_insights.ts) and a per-slice share of decided.
+const BRAND_SUMMARY_VERSION = "bs5";
 export function computeBrandSummaryCached(run: Run, project: Project, request: ViewRequest = {}): Promise<BrandSummaryView | null> {
   const r = requestOf(request);
   return cachedView("brand_summary", BRAND_SUMMARY_VERSION, run, project, (d) => computeBrandSummary(d, r), { judge: true }, r);

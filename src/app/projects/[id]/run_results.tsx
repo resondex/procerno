@@ -12,7 +12,8 @@ import Workbench, { type WbPreset } from "./workbench";
 import { SortTable } from "./table";
 import AnswerText from "./answer_text";
 import HumanCodingPanel from "./human_coding_panel";
-import { BoardroomSection, BriefSection, QuestionsSection } from "./summary_views";
+import { BoardroomSection, BriefSection, QuestionsSection, type OnLook } from "./summary_views";
+import type { StationKey } from "@/lib/engine/journey";
 import JourneySection from "./journey_view";
 import WhySection from "./why_view";
 import RivalsSection from "./rivals_view";
@@ -91,6 +92,15 @@ function CodesResults({
   // pill it is - Why and Rivals never load the journey payload, so the shell
   // asks for it once itself (a cached read; Stations reuses it from cache).
   const [roomsAsked, setRoomsAsked] = useState(false);
+  // The Summary's "where to look" pointer: open the pill it names and, for a
+  // station, select it on the Stations strip.
+  const [jump, setJump] = useState<{ station: StationKey; n: number } | undefined>(undefined);
+  const onLook: OnLook = (look) => {
+    const pill: CodesView =
+      look.pill === "stations" ? "journey" : look.pill === "table" ? "metrics" : look.pill;
+    if (look.station) setJump((j) => ({ station: look.station as StationKey, n: (j?.n ?? 0) + 1 }));
+    open(pill);
+  };
   const open = (v: CodesView) => {
     setView(v);
     setVisited((s) => (s.has(v) ? s : new Set(s).add(v)));
@@ -202,12 +212,12 @@ function CodesResults({
 
       {visited.has("brief") && (
         <div className={show("brief")}>
-          <BriefSection key={k("brief")} runId={runId} />
+          <BriefSection key={k("brief")} runId={runId} onLook={onLook} />
         </div>
       )}
       {visited.has("boardroom") && (
         <div className={show("boardroom")}>
-          <BoardroomSection key={k("boardroom")} runId={runId} />
+          <BoardroomSection key={k("boardroom")} runId={runId} onLook={onLook} />
         </div>
       )}
       {visited.has("questions") && (
@@ -217,7 +227,7 @@ function CodesResults({
       )}
       {visited.has("journey") && (
         <div className={show("journey")}>
-          <JourneySection key={k("journey")} runId={runId} room={room} onRoom={setRoom} onRooms={reportRooms} />
+          <JourneySection key={k("journey")} runId={runId} room={room} onRoom={setRoom} onRooms={reportRooms} jump={jump} />
         </div>
       )}
       {visited.has("why") && (

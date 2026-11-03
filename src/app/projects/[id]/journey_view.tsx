@@ -32,8 +32,9 @@ import SettledSections from "./settled_view";
  *
  * The funnel strip: six station cards of one shape (the buyer's question,
  * one number, the anchor, the number of question kinds), ONE selected at a
- * time, the selected station's full read below - who gets picked, the
- * arguments behind it, you win when / you lose when, the open inventory of
+ * time, the selected station's full read below - the same three blocks on
+ * every station in its own terms (who it routes to, the arguments behind its
+ * verdict, you win when / you lose when; StationBlocks), the open inventory of
  * every question kind routed to the station (a kind the tracker did not ask
  * is a greyed row), then the per-type sections as the full tables.
  *
@@ -217,69 +218,76 @@ function BlockTitle({ children, allBuyers }: { children: ReactNode; allBuyers?: 
   );
 }
 
-/** Who gets picked (or, at Comparison, who wins each head-to-head). */
-function PicksBlock({ s }: { s: JourneyStation }) {
+/** Who the station routes to, in its own terms (the station names the block). */
+function PicksBlock({ s, filtered }: { s: JourneyStation; filtered: boolean }) {
   const comparison = s.key === "comparison";
   const picks = [...s.picks].sort((a, b) => rate(b.cell) - rate(a.cell));
   const max = Math.max(...picks.map((p) => rate(p.cell)), 0.0001);
   return (
     <div className="card p-5">
-      <BlockTitle>{comparison ? "Who wins each head-to-head" : "Who gets picked"}</BlockTitle>
-      {comparison && (
-        <p className="text-[12px] text-ink-3 mb-3">Your win rate against each named rival, when one of the two is picked.</p>
-      )}
-      <div className="grid gap-1.5">
-        {picks.map((p: JourneyPick) => {
-          const you = p.role === "target";
-          return (
-            <div
-              key={`${p.role}:${p.name}`}
-              className={`grid grid-cols-[11rem_1fr_3.5rem] items-center gap-3 ${isThin(p.cell) ? "opacity-60" : ""}`}
-            >
-              <span className={`truncate text-sm text-right ${you ? "font-semibold text-primary" : "text-ink-2"}`}>
-                {comparison ? `vs ${p.name}` : p.name}
-              </span>
-              <div className="h-4 relative">
-                <div
-                  className={`absolute inset-y-0 left-0 rounded-r-[4px] ${you ? "bg-primary" : "bg-neutral-bar"}`}
-                  style={{ width: `${(rate(p.cell) / max) * 100}%` }}
-                />
+      <BlockTitle allBuyers={filtered && s.unfiltered.includes("picks")}>{s.picksLabel}</BlockTitle>
+      <p className="text-[12px] text-ink-3 mb-3">{s.picksNote}</p>
+      {picks.length === 0 ? (
+        <p className="text-[12px] text-ink-3">No brands to show here.</p>
+      ) : (
+        <div className="grid gap-1.5">
+          {picks.map((p: JourneyPick) => {
+            const you = p.role === "target";
+            return (
+              <div
+                key={`${p.role}:${p.name}`}
+                className={`grid grid-cols-[11rem_1fr_3.5rem] items-center gap-3 ${isThin(p.cell) ? "opacity-60" : ""}`}
+              >
+                <span className={`truncate text-sm text-right ${you ? "font-semibold text-primary" : "text-ink-2"}`}>
+                  {comparison ? `vs ${p.name}` : p.name}
+                </span>
+                <div className="h-4 relative">
+                  <div
+                    className={`absolute inset-y-0 left-0 rounded-r-[4px] ${you ? "bg-primary" : "bg-neutral-bar"}`}
+                    style={{ width: `${(rate(p.cell) / max) * 100}%` }}
+                  />
+                </div>
+                <span className="text-sm text-ink-2">
+                  <Rate c={p.cell} label={comparison ? `You win vs ${p.name}` : p.name} />
+                </span>
               </div>
-              <span className="text-sm text-ink-2">
-                <Rate c={p.cell} label={comparison ? `You win vs ${p.name}` : p.name} />
-              </span>
-            </div>
-          );
-        })}
-      </div>
+            );
+          })}
+        </div>
+      )}
     </div>
   );
 }
 
-/** The arguments behind it: up to 4 lines, "for you" / "against". */
+/** The arguments behind the station's verdict: up to 4 lines, "for you" / "against". */
 function ArgumentsBlock({ s, filtered }: { s: JourneyStation; filtered: boolean }) {
   const lines = s.arguments.slice(0, 4);
+  const [yes, no] = s.argumentLabels;
   return (
     <div className="card p-5">
       <BlockTitle allBuyers={filtered && s.unfiltered.includes("arguments")}>The arguments behind it</BlockTitle>
-      <ul className="grid gap-2">
-        {lines.map((a: JourneyArgument) => (
-          <li key={a.code} className="flex flex-wrap items-baseline gap-2 text-[13px]">
-            <span
-              className={`rounded px-1.5 py-0.5 text-[11px] font-medium ${
-                a.forYou ? "bg-success/10 text-success" : "bg-danger/10 text-danger"
-              }`}
-            >
-              {a.forYou ? "for you" : "against"}
-            </span>
-            <span className="font-medium text-ink">{a.code}</span>
-            <span className="text-ink-3">
-              in <Rate c={a.inYourPicks} label="Answers that pick you arguing it" /> of your picks,{" "}
-              <Rate c={a.inRivalPicks} label="Answers that pick a rival arguing it" /> of rivals&apos;
-            </span>
-          </li>
-        ))}
-      </ul>
+      {lines.length === 0 ? (
+        <p className="text-[12px] text-ink-3">{s.argumentsNote ?? "Too few answers on either side to compare the arguments."}</p>
+      ) : (
+        <ul className="grid gap-2">
+          {lines.map((a: JourneyArgument) => (
+            <li key={a.code} className="flex flex-wrap items-baseline gap-2 text-[13px]">
+              <span
+                className={`rounded px-1.5 py-0.5 text-[11px] font-medium ${
+                  a.forYou ? "bg-success/10 text-success" : "bg-danger/10 text-danger"
+                }`}
+              >
+                {a.forYou ? "for you" : "against"}
+              </span>
+              <span className="font-medium text-ink">{a.code}</span>
+              <span className="text-ink-3">
+                argued in <Rate c={a.inYourPicks} label={`Answers ${yes} arguing it`} /> {yes},{" "}
+                <Rate c={a.inRivalPicks} label={`Answers ${no} arguing it`} /> {no}
+              </span>
+            </li>
+          ))}
+        </ul>
+      )}
     </div>
   );
 }
@@ -307,6 +315,13 @@ function ConditionList({ title, lines, lose }: { title: string; lines: Condition
 }
 
 function ConditionsBlock({ s, filtered }: { s: JourneyStation; filtered: boolean }) {
+  if (s.conditions.win.length === 0 && s.conditions.lose.length === 0)
+    return (
+      <div className="card p-5">
+        <BlockTitle allBuyers={filtered && s.unfiltered.includes("conditions")}>When the pick goes your way</BlockTitle>
+        <p className="text-[12px] text-ink-3">No conditions are stated at this station.</p>
+      </div>
+    );
   return (
     <div className="card p-5">
       <BlockTitle allBuyers={filtered && s.unfiltered.includes("conditions")}>When the pick goes your way</BlockTitle>
@@ -320,6 +335,18 @@ function ConditionsBlock({ s, filtered }: { s: JourneyStation; filtered: boolean
 }
 
 /** Everything measured at this station - the open inventory (decision 1: LISTED). */
+/** The three blocks every station carries, in its own terms: who it routes
+ * to, the arguments behind its verdict, the conditions. One component for all. */
+function StationBlocks({ s, filtered }: { s: JourneyStation; filtered: boolean }) {
+  return (
+    <>
+      <PicksBlock s={s} filtered={filtered} />
+      <ArgumentsBlock s={s} filtered={filtered} />
+      <ConditionsBlock s={s} filtered={filtered} />
+    </>
+  );
+}
+
 function InventoryBlock({ s, filtered }: { s: JourneyStation; filtered: boolean }) {
   const muted = (r: InventoryRow) => !r.asked || r.answers < THIN;
   const cols: Col<InventoryRow>[] = [
@@ -456,11 +483,15 @@ export default function JourneySection({
   room,
   onRoom,
   onRooms,
+  jump,
 }: {
   runId: string;
   room: string;
   onRoom: (room: string) => void;
   onRooms?: (rooms: string[]) => void;
+  /** A station the Summary's "where to look" pointer asks to open; `n` makes
+   * each pointer click distinct so the same station can be asked twice. */
+  jump?: { station: StationKey; n: number };
 }) {
   const roomKey = room;
   const [views, setViews] = useState<Record<string, JourneyView | null>>({});
@@ -525,6 +556,13 @@ export default function JourneySection({
   // the room it leaves mounted (returning never refetches). Adjusted during
   // render - React's pattern for state derived from a changed prop - so no
   // effect sets state.
+  // A pointer from the Summary selects its station the same way.
+  const [seenJump, setSeenJump] = useState(0);
+  if (jump && jump.n !== seenJump) {
+    setSeenJump(jump.n);
+    setSelected(jump.station);
+    mountFor([jump.station], roomKey);
+  }
   const [seenRoom, setSeenRoom] = useState(roomKey);
   if (seenRoom !== roomKey) {
     setSeenRoom(roomKey);
@@ -566,13 +604,10 @@ export default function JourneySection({
             ...new Set([...(mounted.get(s.key) ?? []), ...(s.key === effSelected ? [roomKey] : [])]),
           ];
           const aware = ROOM_AWARE.has(s.key);
-          const hasConditions = s.conditions.win.length > 0 || s.conditions.lose.length > 0;
           return (
             <section key={s.key} id={`journey-${s.key}`} className={effSelected === s.key ? "grid gap-5 scroll-mt-4" : "hidden"}>
               <StationHeading s={s} filtered={filtered} onAll={() => onRoom(ALL)} />
-              {s.picks.length > 0 && <PicksBlock s={s} />}
-              {s.arguments.length > 0 && <ArgumentsBlock s={s} filtered={filtered} />}
-              {hasConditions && <ConditionsBlock s={s} filtered={filtered} />}
+              <StationBlocks s={s} filtered={filtered} />
               <InventoryBlock s={s} filtered={filtered} />
 
               <div className="section-label text-ink-3 pt-2">Full tables</div>

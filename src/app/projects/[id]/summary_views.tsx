@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import type { BrandSummaryView, RateCell, SummaryBrand } from "@/lib/engine/brand_summary";
+import type { BrandSummaryView, Insight, RateCell, SummaryBrand } from "@/lib/engine/brand_summary";
 import { SortTable, Tip } from "./table";
 import { BaseNote, RateText, fmtN, useEngineSet, viewQuery, EngineTable } from "./view_parts";
 
@@ -11,7 +11,14 @@ import { BaseNote, RateText, fmtN, useEngineSet, viewQuery, EngineTable } from "
  * headline pool's funnel, outcome split and brand table, plus the doubt and
  * head-to-head rollups. Every figure here also appears in the brief's own
  * sections with its full table; these views are the executive cut.
+ *
+ * Insights (bs5, 2026-11-03) are detected server-side (engine/summary_insights.ts)
+ * and rendered as served: the Boardroom's signal cards, the brief's "What
+ * stands out" strip and question 3's room sentence all read the same list.
  */
+
+/** Where an insight's full table lives; the results block wires it. */
+export type OnLook = (look: Insight["look"]) => void;
 
 const rate = (c: RateCell) => (c.n > 0 ? c.k / c.n : 0);
 const pct = (c: RateCell) => {
@@ -95,14 +102,48 @@ function pickBoard(view: BrandSummaryView, limit: number): SummaryBrand[] {
 /* The brief: the one-screen synthesis                                 */
 /* ================================================================== */
 
-export function BriefSection({ runId }: { runId: string }) {
+export function BriefSection({ runId, onLook }: { runId: string; onLook?: OnLook }) {
   const { view, error } = useBrandSummary(runId);
   return (
     <Shell view={view} error={error}>
-      {(v) => <Brief v={v} />}
+      {(v) => <Brief v={v} onLook={onLook} />}
     </Shell>
   );
 }
+
+/** The "where to look" pointer: a link-style button when wired, plain text otherwise. */
+function LookLink({ look, onLook }: { look: Insight["look"]; onLook?: OnLook }) {
+  if (!onLook) return <span className="text-[12px] text-ink-3">See {look.label}</span>;
+  return (
+    <button
+      type="button"
+      onClick={() => onLook(look)}
+      className="justify-self-start text-[12px] font-medium text-primary hover:underline"
+    >
+      See {look.label} ›
+    </button>
+  );
+}
+
+function InsightCard({ insight, label, onLook }: { insight: Insight; label?: string; onLook?: OnLook }) {
+  return (
+    <div className="card p-5 grid gap-1.5 content-start" title={insight.foot}>
+      {label && <div className="section-label">{label}</div>}
+      <div className="text-[15px] font-semibold">{insight.title}</div>
+      <p className="text-[13px] text-ink-2">{insight.body}</p>
+      <LookLink look={insight.look} onLook={onLook} />
+    </div>
+  );
+}
+
+const KIND_LABEL: Record<Insight["kind"], string> = {
+  engine: "Engines",
+  room: "Buyers",
+  rival: "Rivals",
+  argument: "The arguments",
+  doubt: "The doubts",
+  funnel: "The funnel",
+};
 
 function Tile({ label, cell, hint }: { label: string; cell: RateCell; hint: string }) {
   return (
@@ -119,7 +160,7 @@ const FIRM_TIP = "Firm pick: answers that commit to one pick, whatever it is.";
 const IN_CAT_TIP = "Firm pick in category: firm picks whose pick is an approved brand in the confirmed dictionary.";
 const SOD_TIP = "Share of decided: your picks over every in-category pick.";
 
-function Brief({ v }: { v: BrandSummaryView }) {
+function Brief({ v, onLook }: { v: BrandSummaryView; onLook?: OnLook }) {
   const byMentioned = [...v.brands].sort((a, b) => rate(b.mentioned) - rate(a.mentioned));
   const leaderboard = byMentioned.slice(0, 10);
   if (!leaderboard.some((b) => b.key === v.target.key) && leaderboard.length > 0) {
@@ -129,8 +170,19 @@ function Brief({ v }: { v: BrandSummaryView }) {
   const board = pickBoard(v, 8);
   const maxPick = Math.max(...board.map((b) => rate(b.shareOfDecided)), 0.01);
   const h2h = v.headToHead.slice(0, 6);
+  const standouts = v.insights.slice(0, 3);
   return (
     <div className="grid gap-8">
+      {standouts.length > 0 && (
+        <section className="grid gap-2">
+          <h2 className="section-label">What stands out</h2>
+          <div className="grid gap-3 sm:grid-cols-3">
+            {standouts.map((i) => (
+              <InsightCard key={i.key} insight={i} label={KIND_LABEL[i.kind]} onLook={onLook} />
+            ))}
+          </div>
+        </section>
+      )}
       <section className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
         <Tile label="Named" cell={v.target.mentioned} hint="Open-choice answers that name you at all" />
         <Tile label="Recommended" cell={v.target.recommended} hint="Answers that put you forward, by framing or as the pick" />
@@ -318,52 +370,17 @@ function Brief({ v }: { v: BrandSummaryView }) {
 /* The Boardroom: the 90-second screen                                 */
 /* ================================================================== */
 
-export function BoardroomSection({ runId }: { runId: string }) {
+export function BoardroomSection({ runId, onLook }: { runId: string; onLook?: OnLook }) {
   const { view, error } = useBrandSummary(runId);
   return (
     <Shell view={view} error={error}>
-      {(v) => <Boardroom v={v} />}
+      {(v) => <Boardroom v={v} onLook={onLook} />}
     </Shell>
   );
 }
 
-function Boardroom({ v }: { v: BrandSummaryView }) {
-  const rivals = v.brands.filter((b) => b.role !== "target");
-  const topRival = rivals.find((b) => b.chosen.k > 0) ?? null;
-  const bestLift = v.reasonLift[0];
-  const worstLift = v.reasonLift.length > 1 ? v.reasonLift[v.reasonLift.length - 1] : undefined;
-  const signals = [
-    topRival && {
-      label: "Who takes the room",
-      title: topRival.name,
-      body: `wins ${pct(topRival.shareOfDecided)} when a brand in your category is picked - you win ${pct(v.target.shareOfDecided)}.`,
-      foot: `${topRival.chosen.k} picks to your ${v.target.chosen.k}, of ${v.firmPickInCategory.k} decided answers.`,
-    },
-    bestLift &&
-      worstLift && {
-        label: "The arguments",
-        title: bestLift.code,
-        body: `travels with your wins (${pts(bestLift.lift)} vs answers that pick a rival). The conversations you lose argue ${worstLift.code} (${pts(worstLift.lift)}).`,
-        foot: `Measured over ${v.reasonLift[0].wins.n} wins and ${v.reasonLift[0].others.n} rival picks.`,
-      },
-    (v.buyersDoubt || v.customersDoubt) && {
-      label: "The doubts",
-      title: [
-        v.buyersDoubt && `buyers told to go ahead ${pct(v.buyersDoubt.proceed)}`,
-        v.customersDoubt && `customers told to stay ${pct(v.customersDoubt.keep)}`,
-      ]
-        .filter(Boolean)
-        .join(" - "),
-      body: [
-        v.buyersDoubt && `When a buyer voices a worry about ${v.brand}, the AI agrees it is warranted ${pct(v.buyersDoubt.agree)} of the time.`,
-        v.customersDoubt && `Customers weighing the worry are told to leave ${pct(v.customersDoubt.leave)}.`,
-      ]
-        .filter(Boolean)
-        .join(" "),
-      foot: `${(v.buyersDoubt?.answers ?? 0) + (v.customersDoubt?.answers ?? 0)} worry answers, reported apart from the headline.`,
-    },
-  ].filter(Boolean) as { label: string; title: string; body: string; foot: string }[];
-
+function Boardroom({ v, onLook }: { v: BrandSummaryView; onLook?: OnLook }) {
+  const signals = v.insights;
   return (
     <div className="grid gap-5">
       <section className="card p-8 border-l-4 border-l-[var(--color-primary)]">
@@ -411,13 +428,9 @@ function Boardroom({ v }: { v: BrandSummaryView }) {
       </section>
 
       {signals.length > 0 && (
-        <section className="grid gap-3 sm:grid-cols-3">
+        <section className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
           {signals.map((s, i) => (
-            <div key={s.label} className="card p-5 grid gap-1.5 content-start" title={s.foot}>
-              <div className="section-label">Signal {i + 1} - {s.label}</div>
-              <div className="text-[15px] font-semibold">{s.title}</div>
-              <p className="text-[13px] text-ink-2">{s.body}</p>
-            </div>
+            <InsightCard key={s.key} insight={s} label={`Signal ${i + 1} - ${KIND_LABEL[s.kind]}`} onLook={onLook} />
           ))}
         </section>
       )}
@@ -482,6 +495,7 @@ function Questions({ v }: { v: BrandSummaryView }) {
   const worstLift = v.reasonLift.length > 1 ? v.reasonLift[v.reasonLift.length - 1] : undefined;
   const h2h = v.headToHead.slice(0, 6);
   const maxWin = Math.max(...h2h.map((r) => rate(r.winOfDecided)), 0.01);
+  const roomSpread = v.insights.find((i) => i.key === "room_win");
 
   return (
     <div className="grid gap-4">
@@ -553,6 +567,11 @@ function Questions({ v }: { v: BrandSummaryView }) {
               {worstLift.code} ({pts(worstLift.lift)})
             </span>
             , measured against the answers that picked a rival.
+          </p>
+        )}
+        {roomSpread && (
+          <p className="text-[13px] text-ink-2" title={roomSpread.foot}>
+            By buyer: {roomSpread.body}
           </p>
         )}
       </Q>

@@ -13,9 +13,11 @@ import { computeRulesCached, type RuleGroup, type RulePool, type RulesView, type
 import type { ReasonsView } from "./reasons";
 import { computeSettledCached } from "./settled";
 import { buildResolver, type Resolver } from "./brand_resolve";
+import { roleOf } from "./headline";
+import { matchKey } from "../brand_key";
 import { STATION_LABEL, stationQuestion, viewsOf, type StationKey, type ViewKey } from "./views";
 import { cell, type RateCell, type ViewRequest } from "./view_data";
-import type { Project, Run } from "../types";
+import type { DictionaryEntry, Project, Run } from "../types";
 
 export type { RateCell, StationKey };
 
@@ -50,10 +52,23 @@ export type { RateCell, StationKey };
  * view and the Consideration and Value conditions from the rules view's
  * per-room slice; Comparison, Doubts and Customers read invariant pools, so
  * their conditions stay run-wide and are listed in the station's `unfiltered`.
+ *
+ * j4 (2026-11-03, Tyler): every station carries the same three blocks in its
+ * own terms - who it routes to (picks), the arguments behind its verdict and
+ * the conditions. Picks: Awareness = brands named when the problem is
+ * described; Consideration = who gets picked; Comparison = your two-way win
+ * per rival; Doubts = brands offered as an exit on buyers' worries; Value =
+ * brands recommended instead; Customers = brands offered as a destination on
+ * customers' worries and moves (deduped by resolved brand). Arguments split
+ * the station's own question types by their verdict (picked, win, worth it,
+ * stay; Doubts' premise split is not computed yet), read off the reasons view with the brand summary's floors;
+ * `argumentLabels` names the two sides so the client never guesses. Where a
+ * station's picks follow the room (Awareness, Consideration, Value) the set
+ * is the all-buyers set plus you, zeros where the room picked none.
  */
 
 /** Bumped whenever the payload shape or a number's meaning changes. */
-export const JOURNEY_VERSION = "j3";
+export const JOURNEY_VERSION = "j4";
 
 export interface JourneyMetric {
   key: string;
@@ -104,6 +119,8 @@ export interface JourneyArgument {
   inRivalPicks: RateCell;
 }
 
+export type StationPart = "picks" | "arguments" | "conditions";
+
 export interface JourneyStation {
   key: StationKey;
   label: string;
@@ -117,17 +134,26 @@ export interface JourneyStation {
   kinds: number;
   /** EVERY question kind that routes to this station, asked or not. */
   inventory: InventoryRow[];
-  /** The station's "who gets picked" block; [] where it has none. */
+  /** The station's "who gets picked" block, in the station's terms; [] where it has none. */
   picks: JourneyPick[];
-  /** Top 2 for + top 2 against (brand summary reason lift; under a room filter, the room-filtered reasons view); [] where not applicable. */
+  /** Title of the picks block. */
+  picksLabel: string;
+  /** One line under the picks title: what each rate is a share of. */
+  picksNote: string;
+  /** Top 2 for + top 2 against (Consideration unfiltered: brand summary reason lift;
+   * otherwise the reasons view's verdict split on the station's types); [] where not applicable. */
   arguments: JourneyArgument[];
+  /** The two sides an argument's cells read as: [inYourPicks, inRivalPicks]. */
+  argumentLabels: [string, string];
+  /** Why the arguments block is empty when it is (a reason, not a count). */
+  argumentsNote: string | null;
   /** Top 3 each from the rules view, restricted to the station's question types. */
   conditions: { win: ConditionLine[]; lose: ConditionLine[] };
   /** Every number on the station is measured across all buyers by design. */
   invariant: boolean;
   /** Parts shown at their all-buyers value under a room filter
-   * ("arguments", "conditions"); [] without a filter. */
-  unfiltered: ("arguments" | "conditions")[];
+   * ("picks", "arguments", "conditions"); [] without a filter. */
+  unfiltered: StationPart[];
 }
 
 export interface JourneyView {
@@ -233,28 +259,52 @@ const ARG_MIN_ANSWERS = 20;
 const ARG_MIN_INCIDENCE = 0.02;
 
 /**
- * Top 2 for / top 2 against from the room-filtered reasons view: the
- * open-choice type's code incidence when the answer picks you vs picks
- * another brand. The reasons view's "Picks another" bucket counts any other
- * pick (in-category or not), where the brand summary's lift counts other
- * in-category picks only.
+ * Top 2 for / top 2 against from the reasons view: a code's incidence among
+ * the station's answers on the favorable side of its verdict vs the other
+ * side, pooled over the station's question types (each answer sits in one
+ * type, so the counts add). Both sides must hold ARG_MIN_ANSWERS and the code
+ * must be argued in ARG_MIN_INCIDENCE of the types' answers - the brand
+ * summary's floors. For the open-choice type the sides are "picks you" vs
+ * "picks another" (any other pick, in-category or not - the brand summary's
+ * lift counts other in-category picks only).
  */
-function roomArgumentsOf(reasons: ReasonsView | null): JourneyArgument[] {
-  const t = reasons?.types.find((x) => x.key === "headline");
-  if (!reasons || !t) return [];
-  const bucket = (k: string) => t.verdicts.find((v) => v.key === k)?.answers ?? 0;
-  if (bucket("you") < ARG_MIN_ANSWERS || bucket("other") < ARG_MIN_ANSWERS) return [];
+function argumentsOf(reasons: ReasonsView | null, types: string[], favorable: string, other: string): JourneyArgument[] {
+  const ts = reasons ? reasons.types.filter((x) => types.includes(x.key)) : [];
+  if (!reasons || ts.length === 0) return [];
+  const bucket = (k: string) => ts.reduce((a, t) => a + (t.verdicts.find((v) => v.key === k)?.answers ?? 0), 0);
+  if (bucket(favorable) < ARG_MIN_ANSWERS || bucket(other) < ARG_MIN_ANSWERS) return [];
+  const keys = ts.map((t) => t.key);
+  const sum = (cells: (RateCell | undefined)[]) =>
+    cells.reduce<RateCell | null>((a, c) => (c ? (a ? cell(a.k + c.k, a.n + c.n) : c) : a), null);
   const lift = reasons.codes
     .flatMap((c) => {
-      const all = c.byType.headline;
-      const v = c.byVerdict.headline;
-      if (!all || !v?.you || !v.other || all.n === 0 || all.k / all.n < ARG_MIN_INCIDENCE) return [];
-      return [{ code: c.key, wins: v.you, others: v.other, lift: rate(v.you) - rate(v.other) }];
+      const all = sum(keys.map((k) => c.byType[k]));
+      const fav = sum(keys.map((k) => c.byVerdict[k]?.[favorable]));
+      const oth = sum(keys.map((k) => c.byVerdict[k]?.[other]));
+      if (!all || !fav || !oth || all.n === 0 || all.k / all.n < ARG_MIN_INCIDENCE) return [];
+      return [{ code: c.key, wins: fav, others: oth, lift: rate(fav) - rate(oth) }];
     })
     .sort((a, b) => b.lift - a.lift);
   const forYou = lift.filter((r) => r.lift > 0).slice(0, 2);
   const against = lift.filter((r) => r.lift < 0).slice(-2).reverse();
   return [...forYou, ...against].map((r) => ({ code: r.code, forYou: r.lift > 0, inYourPicks: r.wins, inRivalPicks: r.others }));
+}
+
+/** A picks list never runs longer than this (the awareness view's own brand cap). */
+const PICKS_MAX = 12;
+
+/**
+ * The same-set rule for picks that follow the room: the set is every brand
+ * in the all-buyers list (plus you, when `you` is given), each read from the
+ * room's list, or 0 over the room's base when the room names none.
+ */
+function sameSet(base: JourneyPick[], here: JourneyPick[], roomBase: number, you?: JourneyPick): JourneyPick[] {
+  const at = new Map(here.map((p) => [p.name, p] as const));
+  const set = [...base];
+  if (you && !set.some((p) => p.role === "target")) set.push(you);
+  return set
+    .map((p) => (p.role === "target" && you ? you : { ...p, cell: at.get(p.name)?.cell ?? cell(0, roomBase) }))
+    .sort((a, b) => rate(b.cell) - rate(a.cell) || a.name.localeCompare(b.name));
 }
 
 function conditionsOf(rules: RulesView | null, key: StationKey, resolve: Resolver): { win: ConditionLine[]; lose: ConditionLine[] } {
@@ -297,9 +347,13 @@ function station(
     anchor?: JourneyAnchor | null;
     inventory: InventoryRow[];
     picks?: JourneyPick[];
+    picksLabel: string;
+    picksNote: string;
     arguments?: JourneyArgument[];
+    argumentLabels: [string, string];
+    argumentsNote?: string | null;
     conditions?: { win: ConditionLine[]; lose: ConditionLine[] };
-    unfiltered?: ("arguments" | "conditions")[];
+    unfiltered?: StationPart[];
   }
 ): JourneyStation {
   const sub = (parts.sub ?? []).slice(0, 2);
@@ -314,7 +368,11 @@ function station(
     kinds: parts.inventory.filter((r) => r.asked).length,
     inventory: parts.inventory,
     picks: parts.picks ?? [],
+    picksLabel: parts.picksLabel,
+    picksNote: parts.picksNote,
     arguments: parts.arguments ?? [],
+    argumentLabels: parts.argumentLabels,
+    argumentsNote: parts.argumentsNote ?? null,
     conditions: parts.conditions ?? { win: [], lose: [] },
     invariant: nums.length > 0 && nums.every((x) => x.invariant),
     unfiltered: parts.unfiltered ?? [],
@@ -322,6 +380,19 @@ function station(
 }
 
 const roleOfBrand = (r: string): JourneyPick["role"] => (r === "target" ? "target" : r === "competitor" ? "rival" : "other");
+
+/** A picks role for a brand known only by name, through the current dictionary. */
+function nameRoles(project: Project, dictionary: DictionaryEntry[], resolve: Resolver) {
+  const targetKey = resolve(project.brand).key;
+  const entryById = new Map(dictionary.map((e) => [e.id, e]));
+  const legacy = new Set(project.competitors.map(matchKey));
+  return (name: string): JourneyPick["role"] => {
+    const r = resolve(name);
+    if (r.key === targetKey) return "target";
+    if (r.status !== "active") return "other";
+    return roleOfBrand(roleOf(r.key, targetKey, entryById.get(r.key) ?? null, legacy));
+  };
+}
 
 /** A headline stage row for the consideration inventory. */
 function stageRow(view: HeadlineView | null, stage: string, label: string, invariant: boolean): InventoryRow {
@@ -341,7 +412,7 @@ export async function computeJourney(run: Run, project: Project, request: ViewRe
   // Every view: the engine set only. Room-pinned views: the room too.
   const all: ViewRequest = request.engines ? { engines: request.engines } : {};
   const pinned: ViewRequest = filtered ? { ...all, room } : all;
-  const [headline, headlineAll, awareness, awarenessAll, h2h, alts, doubt, value, repertoire, premium, reasons, summary, rules, settled, rooms] =
+  const [headline, headlineAll, awareness, awarenessAll, h2h, alts, doubt, value, valueAll, repertoire, premium, reasons, reasonsAll, summary, rules, settled, rooms] =
     await Promise.all([
       computeHeadlineCached(run, project, pinned),
       filtered ? computeHeadlineCached(run, project, all) : Promise.resolve(null),
@@ -351,9 +422,13 @@ export async function computeJourney(run: Run, project: Project, request: ViewRe
       computeAlternativesCached(run, project, all),
       computeDoubtCached(run, project, all),
       computeValueCached(run, project, pinned),
+      filtered ? computeValueCached(run, project, all) : Promise.resolve(null),
       computeRepertoireCached(run, project, all),
       computePremiumCached(run, project, all),
       computeReasonsCached(run, project, pinned),
+      // The invariant stations' arguments read the all-buyers reasons view (the
+      // room-filtered one drops every type not asked in one buyer's voice).
+      filtered ? computeReasonsCached(run, project, all) : Promise.resolve(null),
       // Under a room filter the arguments come from the room-filtered reasons view.
       filtered ? Promise.resolve(null) : computeBrandSummaryCached(run, project, all),
       computeRulesCached(run, project, all),
@@ -363,15 +438,38 @@ export async function computeJourney(run: Run, project: Project, request: ViewRe
   // Every view reads the same codes source; no source = nothing coded to map.
   const any = headline ?? headlineAll ?? h2h ?? doubt ?? alts;
   if (!any) return null;
-  const unfilteredConditions: ("arguments" | "conditions")[] = filtered ? ["conditions"] : [];
+  const invariantParts: StationPart[] = filtered ? ["picks", "arguments", "conditions"] : [];
   const category = project.category;
-  const resolve = buildResolver(await store.getDictionary(project.id));
+  const dictionary = await store.getDictionary(project.id);
+  const resolve = buildResolver(dictionary);
+  const roleByName = nameRoles(project, dictionary, resolve);
+  const reasonsBase = filtered ? reasonsAll : reasons;
 
   // ---------- Awareness ----------
   const pr = awareness?.routing && awareness.routing.answers > 0 ? awareness.routing : null;
   const ceSource = filtered ? awarenessAll?.explainer : awareness?.explainer;
   const ce = ceSource && ceSource.answers > 0 ? ceSource : null;
   const prRival = pr ? [...pr.brands].filter((b) => !b.you).sort((a, b) => b.named.k - a.named.k)[0] : undefined;
+  // Picks = brands named when the problem is described (problem recognition,
+  // room-pinned, same-set rule). A tracker that asks no problem recognition
+  // at all reads the category explainer's names instead (asked across all buyers).
+  const prAll = (filtered ? awarenessAll?.routing : awareness?.routing) ?? null;
+  const hasRouting = !!prAll && prAll.answers > 0;
+  const awarenessPickList = (b: { name: string; you: boolean; named: RateCell }[]): JourneyPick[] =>
+    b.map((x) => ({ name: x.name, role: x.you ? "target" : roleByName(x.name), cell: x.named }));
+  const awarenessPicks: JourneyPick[] = (() => {
+    if (hasRouting) {
+      if (!pr) return [];
+      const you: JourneyPick = { name: project.brand, role: "target", cell: pr.namesYou };
+      const youIn = pr.brands.find((b) => b.you);
+      if (youIn) you.name = youIn.name;
+      return sameSet(awarenessPickList(prAll!.brands), awarenessPickList(pr.brands), pr.namesYou.n, you);
+    }
+    if (!ce) return [];
+    return awarenessPickList(ce.brands)
+      .sort((a, b) => rate(b.cell) - rate(a.cell) || a.name.localeCompare(b.name))
+      .slice(0, PICKS_MAX);
+  })();
   const awarenessStation = station("awareness", project, {
     lead: pr ? m("pr_names", "Names you when the problem is described", pr.namesYou, false) : ce ? m("ce_names", "Names you when the category is explained", ce.namesYou, true) : null,
     sub: [
@@ -389,6 +487,17 @@ export async function computeJourney(run: Run, project: Project, request: ViewRe
         ? row("awareness_explainer", "Category education", "names you", ce.answers, ce.namesYou, `points to products ${pct(ce.pointsToProducts)}`, true)
         : notAsked("awareness_explainer", "Category education", "names you", true),
     ],
+    picks: awarenessPicks,
+    picksLabel: "Who it names",
+    picksNote: hasRouting
+      ? "Share of answers to a described problem that name each brand."
+      : "Share of answers explaining the category that name each brand.",
+    // Awareness answers carry topics, never arguments for or against a brand:
+    // the reasons view leaves awareness stages out.
+    arguments: [],
+    argumentLabels: ["when you are named", "when you are not"],
+    argumentsNote: "Awareness answers are coded for the topics they raise, not for arguments for or against a brand.",
+    unfiltered: filtered && !hasRouting && awarenessPicks.length > 0 ? ["picks"] : [],
   });
 
   // ---------- Consideration ----------
@@ -440,9 +549,12 @@ export async function computeJourney(run: Run, project: Project, request: ViewRe
         })
         .sort((a, b) => rate(b.cell) - rate(a.cell) || a.name.localeCompare(b.name));
     })(),
+    picksLabel: "Who gets picked",
+    picksNote: "Each brand's share of the answers that pick one brand in the category.",
     arguments: filtered
-      ? roomArgumentsOf(reasons)
+      ? argumentsOf(reasons, ["headline"], "you", "other")
       : [...forYou, ...against].map((r) => ({ code: r.code, forYou: r.lift > 0, inYourPicks: r.wins, inRivalPicks: r.others })),
+    argumentLabels: ["when you are picked", "when another brand is picked"],
     conditions: room !== undefined ? roomConditionsOf(rules, room, resolve) : conditionsOf(rules, "consideration", resolve),
   });
 
@@ -473,8 +585,12 @@ export async function computeJourney(run: Run, project: Project, request: ViewRe
         : [notAsked("offensive_capture", "A rival's leavers", "picks you", true)]),
     ],
     picks: entity ? entity.rows.map((r) => ({ name: r.rival, role: "rival" as const, cell: r.winOfDecided })) : [],
+    picksLabel: "Who wins each head-to-head",
+    picksNote: "Your win rate against each named rival, when one of the two is picked.",
+    arguments: argumentsOf(reasonsBase, ["head_to_head_entity", "head_to_head_class"], "you", "other"),
+    argumentLabels: ["when you win", "when the rival wins"],
     conditions: conditionsOf(rules, "comparison", resolve),
-    unfiltered: unfilteredConditions,
+    unfiltered: invariantParts,
   });
 
   // ---------- Doubts (buyers' worries only) ----------
@@ -494,13 +610,31 @@ export async function computeJourney(run: Run, project: Project, request: ViewRe
           row(`doubt:${r.key}`, r.concern || "A buyer's worry", "go ahead", r.answers, r.verdicts.proceed, `agrees with the worry ${pct(r.premise.confirms)}, points them to another brand ${pct(r.offersExit)}`, true)
         )
       : [notAsked("doubt", "A buyer's worry", "go ahead", true)],
+    picks: obj ? obj.exits.slice(0, PICKS_MAX).map((x) => ({ name: x.name, role: roleOfBrand(x.role), cell: x.offered })) : [],
+    picksLabel: "Where it sends them instead",
+    picksNote: "Share of answers to a buyer's worry that offer each brand as another option.",
+    // Favorable side = the AI REBUTS the worry (a confirmed worry is the
+    // argument against you).
+    arguments: argumentsOf(reasonsBase, ["doubt"], "rebuts", "confirms"),
+    argumentLabels: ["when it rebuts the worry", "when it agrees the worry is warranted"],
     conditions: conditionsOf(rules, "doubts", resolve),
-    unfiltered: unfilteredConditions,
+    unfiltered: invariantParts,
   });
 
   // ---------- Value ----------
   const val = value && value.answers > 0 ? value : null;
   const topInstead = val?.instead[0];
+  // Picks = brands recommended instead, as a share of the value answers
+  // (room-pinned, same-set rule over the all-buyers list).
+  const insteadList = (v: { worth: { yes: RateCell }; instead: { name: string; n: number }[] }): JourneyPick[] =>
+    v.instead.map((x) => ({ name: x.name, role: roleByName(x.name), cell: cell(x.n, v.worth.yes.n) }));
+  const valBase = (filtered ? valueAll : value) ?? null;
+  const valuePicks: JourneyPick[] =
+    !val || !valBase || valBase.answers === 0
+      ? []
+      : filtered
+        ? sameSet(insteadList(valBase), insteadList(val), val.worth.yes.n)
+        : insteadList(val).sort((a, b) => rate(b.cell) - rate(a.cell) || a.name.localeCompare(b.name));
   const valueStation = station("value", project, {
     lead: val ? m("worth_it", "Worth it", val.worth.yes, false) : null,
     sub: val ? [m("not_worth_it", "Not worth it", val.worth.no, false)] : [],
@@ -510,6 +644,11 @@ export async function computeJourney(run: Run, project: Project, request: ViewRe
           row(`value:${r.key}`, r.label, "worth it", r.answers, r.worth.yes, `${r.line ? `${r.line}, ` : ""}not worth it ${pct(r.worth.no)}${r.instead[0] ? `, ${r.instead[0].name} recommended instead` : ""}`, false)
         )
       : [notAsked("value", "Worth it over a cheaper option", "worth it", false)],
+    picks: valuePicks,
+    picksLabel: "Who is recommended instead",
+    picksNote: "Share of value answers that recommend each brand instead of you.",
+    arguments: argumentsOf(reasons, ["value"], "yes", "no"),
+    argumentLabels: ["when worth it", "when not worth it"],
     conditions: room !== undefined ? roomConditionsOf(rules, room, resolve) : conditionsOf(rules, "value", resolve),
   });
 
@@ -527,6 +666,28 @@ export async function computeJourney(run: Run, project: Project, request: ViewRe
       ? row(`keep_or_leave:${stage}`, label, "told to stay", s.answers, s.verdicts.keep, `told to leave ${pct(s.verdicts.leave)}, agrees with the worry ${pct(s.confirms)}`, true)
       : notAsked(`keep_or_leave:${stage}`, label, "told to stay", true);
   };
+  // Picks = brands offered as a destination on customers' worries (churn,
+  // renewal) and on a customer weighing a move, deduped by resolved brand.
+  // The two pools are disjoint answers, so offers add and the base is both pools.
+  const customerPicks: JourneyPick[] = (() => {
+    const pools = [
+      ...(keep ? [{ n: keep.offersExit.n, rows: keep.exits }] : []),
+      ...(defensive ? [{ n: defensive.offersExit.n, rows: defensive.destinations }] : []),
+    ];
+    const n = pools.reduce((a, p) => a + p.n, 0);
+    if (n === 0) return [];
+    const by = new Map<string, { name: string; role: JourneyPick["role"]; k: number }>();
+    for (const p of pools)
+      for (const r of p.rows) {
+        const cur = by.get(r.key) ?? { name: r.name, role: roleOfBrand(r.role), k: 0 };
+        cur.k += r.offered.k;
+        by.set(r.key, cur);
+      }
+    return [...by.values()]
+      .map((x) => ({ name: x.name, role: x.role, cell: cell(x.k, n) }))
+      .sort((a, b) => rate(b.cell) - rate(a.cell) || a.name.localeCompare(b.name))
+      .slice(0, PICKS_MAX);
+  })();
   const customersStation = station("customer_base", project, {
     lead: keep ? m("worries_stay", "Told to stay", keep.verdicts.keep, true) : null,
     sub: keep ? [m("agrees", "Agrees with the worry", keep.premise.confirms, true)] : [],
@@ -553,8 +714,13 @@ export async function computeJourney(run: Run, project: Project, request: ViewRe
         ? row("settled_advocacy", "Defending you to a critic", "pushes back on the critic", adv.answers, adv.premise.rebuts, `confident case ${pct(adv.caseStrength.strong)}`, true)
         : notAsked("settled_advocacy", "Defending you to a critic", "pushes back on the critic", true),
     ],
+    picks: customerPicks,
+    picksLabel: "Where it sends your customers",
+    picksNote: "Share of answers to a customer's worry or a customer weighing a move that offer each brand as somewhere to go.",
+    arguments: argumentsOf(reasonsBase, ["keep_or_leave", "defensive_hold"], "keep", "leave"),
+    argumentLabels: ["when told to stay", "when told to leave"],
     conditions: conditionsOf(rules, "customer_base", resolve),
-    unfiltered: unfilteredConditions,
+    unfiltered: invariantParts,
   });
 
   return {
