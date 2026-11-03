@@ -91,6 +91,10 @@ export interface WorkbenchPrompt {
   /** Brand index of the rival the cell names (entity head-to-heads, rival
    * leavers) or of a class cell's class brand; -1 = none or unresolved. */
   rival: number;
+  /** wb5: index into `cells` - the question (intent) this prompt words. A
+   * cell's seed and its paraphrases share one index, so the Question
+   * dimension pools ~10 prompts x the panel instead of one prompt's 13. */
+  cell: number;
 }
 
 /** Open-pool answer: [engine, prompt, outcome, pick, mentions, reasons].
@@ -136,6 +140,9 @@ export interface WorkbenchView {
   rooms: string[];
   worries: string[];
   angles: string[];
+  /** wb5: each question's seed wording (intent.text), index-addressed by
+   * prompts' `cell`. */
+  cells: string[];
   /** wb2 argument vocabulary (reasons, and topics on awareness), most
    * carried first; index-addressed by facts. */
   args: string[];
@@ -354,6 +361,7 @@ export function computeWorkbench(data: ViewData, request: ViewRequest = {}): Wor
   const rooms = intern();
   const worries = intern();
   const angles = intern();
+  const cellIds = intern();
   const promptIds = [...new Set(facts.map((f) => f.promptId))];
   const promptIdx = new Map(promptIds.map((p, i) => [p, i]));
   const promptText = new Map(data.prompts.map((p) => [p.id, p.text]));
@@ -370,6 +378,7 @@ export function computeWorkbench(data: ViewData, request: ViewRequest = {}): Wor
       worry: worries.get(it.concern),
       angle: rivalBearing ? angles.get(it.angle) : -1,
       rival: meta.rivalKey ? brandIdx.get(meta.rivalKey)! : -1,
+      cell: cellIds.get(it.id),
     };
   });
   const tally = (lists: string[][]) => {
@@ -439,6 +448,7 @@ export function computeWorkbench(data: ViewData, request: ViewRequest = {}): Wor
     rooms: rooms.list,
     worries: worries.list,
     angles: angles.list,
+    cells: cellIds.list.map((id) => intentById.get(id)?.text ?? ""),
     args,
     responseIds,
     facts: wb2,
@@ -448,7 +458,9 @@ export function computeWorkbench(data: ViewData, request: ViewRequest = {}): Wor
 // wb2 (2026-10-30): typed facts for every coded answer - the output changed
 // for identical inputs, so the cache era moves (cache-era case 2).
 // wb4 (2026-11-03): engines carry vendor / tier (the Panel lens's Group-by).
-const WORKBENCH_VERSION = "wb4";
+// wb5 (2026-11-03): prompts carry their question (cell) + the seed wordings
+// (the Metrics pivot's Question dimension).
+const WORKBENCH_VERSION = "wb5";
 export function computeWorkbenchCached(run: Run, project: Project, request: ViewRequest = {}): Promise<WorkbenchView | null> {
   const r = requestOf(request);
   return cachedView("workbench", WORKBENCH_VERSION, run, project, (d) => computeWorkbench(d, r), { judge: true }, r);

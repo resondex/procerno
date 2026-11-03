@@ -3,7 +3,7 @@ import { ENGINES, engineDisplayLabel } from "./providers";
 import { buildResolver, type Resolver } from "./brand_resolve";
 import { roleOf } from "./headline";
 import { cachedView, cell, facetsOf, poolOf, requestOf, type EngineFacets, type RateCell, type ViewData, type ViewRequest } from "./view_data";
-import { detectInsights, insightInputs, type Insight } from "./summary_insights";
+import { composeVerdict, detectInsights, insightInputs, type Insight } from "./summary_insights";
 import type { AnswerCodes, Project, Run } from "../types";
 
 export type { RateCell, Insight };
@@ -62,6 +62,15 @@ export interface DoubtSummary {
   agree: RateCell;
 }
 
+/** One template sentence of the brief's opening verdict: percentages in
+ * `text`, counts in `foot`, and the station that holds the evidence. */
+export interface VerdictFact {
+  key: string;
+  text: string;
+  foot: string;
+  look?: Insight["look"];
+}
+
 export interface BrandSummaryView {
   runId: string;
   source: string;
@@ -101,6 +110,8 @@ export interface BrandSummaryView {
   /** Ranked findings across engines, rooms, rivals, arguments, doubts and
    * the funnel (summary_insights.ts, bs5): at most one per detector, at most 8. */
   insights: Insight[];
+  /** 3-6 template sentences in fixed order (standing, prompted vs open, concentration, doubts, value, settled), each only when its inputs clear the floors. The brief opens with them. */
+  verdict: VerdictFact[];
 }
 
 /** Both pick buckets must hold this many answers for lift to be reported. */
@@ -293,7 +304,7 @@ export function computeBrandSummary(data: ViewData, request: ViewRequest = {}): 
     }))
     .sort((a, b) => b.answers - a.answers || a.rival.localeCompare(b.rival));
 
-  const summary: Omit<BrandSummaryView, "insights"> = {
+  const summary: Omit<BrandSummaryView, "insights" | "verdict"> = {
     runId: run.id,
     source,
     brand: project.brand,
@@ -313,14 +324,16 @@ export function computeBrandSummary(data: ViewData, request: ViewRequest = {}): 
     customersDoubt,
     headToHead,
   };
-  return { ...summary, insights: detectInsights(summary, insightInputs(data, request)) };
+  const inputs = insightInputs(data, request);
+  return { ...summary, insights: detectInsights(summary, inputs), verdict: composeVerdict(summary, inputs) };
 }
 
 // bs1 (2026-10-30): first version; names resolve through the context judge.
 // bs4 (2026-11-03): engine slices carry vendor / tier / mode and the payload lists its core engines (the Panel lens).
 // bs5 (2026-11-03): ranked server-side insights (summary_insights.ts) and a per-slice share of decided.
-const BRAND_SUMMARY_VERSION = "bs5";
+// bs6 (2026-11-03): the verdict sentences and six cross-pool detectors; loads the setup decision (Value line names).
+const BRAND_SUMMARY_VERSION = "bs6";
 export function computeBrandSummaryCached(run: Run, project: Project, request: ViewRequest = {}): Promise<BrandSummaryView | null> {
   const r = requestOf(request);
-  return cachedView("brand_summary", BRAND_SUMMARY_VERSION, run, project, (d) => computeBrandSummary(d, r), { judge: true }, r);
+  return cachedView("brand_summary", BRAND_SUMMARY_VERSION, run, project, (d) => computeBrandSummary(d, r), { judge: true, setupDecision: true }, r);
 }

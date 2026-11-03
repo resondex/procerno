@@ -1,9 +1,12 @@
 import { computeHeadline } from "./headline";
 import { computeValue, type ValueView } from "./value";
 import { computeDoubt, type DoubtViews, type WorryRow } from "./doubt";
+import { computeSettled, type SettledViews } from "./settled";
+import { computeReasons } from "./reasons";
+import { buildResolver } from "./brand_resolve";
 import { viewsOf } from "./views";
-import { cell, type RateCell, type ViewData, type ViewRequest } from "./view_data";
-import type { BrandSummaryView } from "./brand_summary";
+import { cell, poolOf, type RateCell, type ViewData, type ViewRequest } from "./view_data";
+import type { BrandSummaryView, VerdictFact } from "./brand_summary";
 
 /**
  * Insight detection for the summary documents (2026-11-03): mechanical
@@ -19,9 +22,28 @@ import type { BrandSummaryView } from "./brand_summary";
  * engine spread, so those detectors stay silent). The room filter never
  * applies: the summary is the all-buyers read; the room detectors compare
  * rooms against each other.
+ *
+ * bs6 (2026-11-03) adds the contrasts BETWEEN pools and the concentrations
+ * INSIDE a pool that the cross-tracker findings were built from: prompted
+ * head-to-heads vs the open choice, the share of picks that come from one
+ * buyer room or one question, worries the AI agrees with and still says
+ * proceed or stay, arguments that win but are not taught (and taught ones
+ * that lose), whether the Value doubts stay in-house (the brand's own
+ * cheaper rung) or go to rivals, and the case the AI makes when asked to
+ * defend the brand vs what it concedes when asked about buyers' worries.
+ * Where a detector reads a tension rather than a gap, its effect is a
+ * stated share (agreed_yet_stay: answers that both agree and still say
+ * proceed; advocacy_vs_objection: how far both sides sit above even;
+ * concentrations: the share above an even split). The same inputs feed the
+ * verdict (composeVerdict): fixed-order template sentences the brief opens
+ * with, each only when its inputs clear the floors.
+ *
+ * The prompted head-to-head record is the summary's own entity rollup
+ * (headToHead) - the same rows and rival resolution as computeHeadToHead,
+ * without its condition grouping (an embedding call the summary never makes).
  */
 
-export type InsightKind = "engine" | "room" | "rival" | "argument" | "doubt" | "funnel";
+export type InsightKind = "engine" | "room" | "rival" | "argument" | "doubt" | "funnel" | "question" | "value";
 export type InsightPill = "stations" | "why" | "rivals" | "buyers" | "table";
 
 export interface Insight {
@@ -44,10 +66,16 @@ const MAX_INSIGHTS = 8;
 
 /** The sibling-view inputs the detectors read, all under the summary's request. */
 export interface InsightInputs {
-  /** Per buyer room: the target's share of decided in that room's open-choice answers. */
-  rooms: { room: string; decided: RateCell }[];
+  /** Per buyer room: the target's share of decided in that room's open-choice
+   * answers, its picks there and the room's in-category picks. */
+  rooms: { room: string; decided: RateCell; picks: number; firm: number }[];
   value: ValueView | null;
   doubt: DoubtViews;
+  /** Per open-choice question (cell - seed + paraphrases, named by the seed): picks by resolved active brand key. */
+  questions: { id: string; text: string; answers: number; picks: Record<string, number> }[];
+  settled: SettledViews;
+  /** Criteria-taught incidence per code, most taught first; [] without a criteria pool. */
+  taught: { code: string; rate: RateCell }[];
 }
 
 /** Computed from the summary's own load (one data read, no extra fetches):
@@ -61,9 +89,39 @@ export function insightInputs(data: ViewData, request: ViewRequest = {}): Insigh
   const rooms = [...roomSet].sort().map((room) => {
     const h = computeHeadline(data, { room, ...engines });
     const t = h.brands.find((b) => b.role === "target");
-    return { room, decided: t ? t.shareOfDecided : cell(0, h.firmPickInCategory.k) };
+    return { room, decided: t ? t.shareOfDecided : cell(0, h.firmPickInCategory.k), picks: t ? t.chosen.k : 0, firm: h.firmPickInCategory.k };
   });
-  return { rooms, value: computeValue(data, engines), doubt: computeDoubt(data, engines) };
+  // Per question (the CELL: a seed and its paraphrases pooled, keyed by the
+  // intent like workbench.ts's Question dimension, named by its seed
+  // wording): in-category picks by resolved brand, headline pool.
+  const resolve = buildResolver(data.dictionary, data.judged);
+  const qs = new Map<string, { id: string; text: string; answers: number; picks: Record<string, number> }>();
+  for (const { code, intent } of poolOf(data, "headline", engines).rows) {
+    const q = qs.get(intent.id) ?? { id: intent.id, text: intent.text, answers: 0, picks: {} };
+    q.answers++;
+    if (code.outcome === "pick" && code.top_pick) {
+      const r = resolve(code.top_pick);
+      if (r.status === "active") q.picks[r.key] = (q.picks[r.key] ?? 0) + 1;
+    }
+    qs.set(intent.id, q);
+  }
+  const reasons = computeReasons(data, engines);
+  const criteria = reasons.types.find((t) => t.key === "criteria_taught");
+  const taught =
+    criteria && criteria.answers >= MIN_BASE
+      ? reasons.codes
+          .filter((c) => c.byType.criteria_taught && c.byType.criteria_taught.k > 0)
+          .map((c) => ({ code: c.key, rate: c.byType.criteria_taught! }))
+          .sort((a, b) => b.rate.k - a.rate.k || a.code.localeCompare(b.code))
+      : [];
+  return {
+    rooms,
+    value: computeValue(data, engines),
+    doubt: computeDoubt(data, engines),
+    questions: [...qs.values()],
+    settled: computeSettled(data, engines),
+    taught,
+  };
 }
 
 const rate = (c: RateCell) => (c.n > 0 ? c.k / c.n : 0);
@@ -86,7 +144,7 @@ function ends<T>(items: T[], cellOf: (t: T) => RateCell): { hi: T; lo: T } | nul
   return apart(cellOf(hi), cellOf(lo)) ? { hi, lo } : null;
 }
 
-type Summary = Omit<BrandSummaryView, "insights">;
+type Summary = Omit<BrandSummaryView, "insights" | "verdict">;
 
 function engineSpread(s: Summary): Insight | null {
   const e = ends(s.byEngine, (x) => x.decided);
@@ -320,6 +378,324 @@ function funnelDrop(s: Summary): Insight | null {
   };
 }
 
+/** The prompted head-to-head record pooled over the entity rivals, with the
+ * hardest matchup (lowest win share) that clears the floor. */
+function promptedRecord(s: Summary): { pooled: RateCell; won: number; lost: number; hardest: Summary["headToHead"][number] | null } | null {
+  const won = s.headToHead.reduce((a, r) => a + r.won.k, 0);
+  const lost = s.headToHead.reduce((a, r) => a + r.lost.k, 0);
+  if (won + lost < MIN_BASE) return null;
+  const ok = s.headToHead.filter((r) => r.winOfDecided.n >= MIN_BASE);
+  const hardest = ok.length ? [...ok].sort((a, b) => rate(a.winOfDecided) - rate(b.winOfDecided))[0] : null;
+  return { pooled: cell(won, won + lost), won, lost, hardest };
+}
+
+function promptedVsOpen(s: Summary): Insight | null {
+  const rec = promptedRecord(s);
+  const open = s.target.shareOfDecided;
+  if (!rec || open.n < MIN_BASE) return null;
+  const gap = rate(rec.pooled) - rate(open);
+  if (Math.abs(gap) < 0.15) return null;
+  if (!(gap > 0 ? apart(rec.pooled, open) : apart(open, rec.pooled))) return null;
+  const hard = rec.hardest;
+  const hardText = hard ? ` (${pct(hard.winOfDecided)} against ${hard.rival})` : "";
+  return {
+    key: "prompted_vs_open",
+    kind: "rival",
+    title: gap > 0 ? "Wins the prompted contests, loses the open choice" : "Wins the open choice, loses the prompted contests",
+    body:
+      gap > 0
+        ? `Named against a rival you win ${pct(rec.pooled)} of head-to-heads${hardText}, but when the AI picks freely you win ${pct(open)} of decided answers.`
+        : `When the AI picks freely you win ${pct(open)} of decided answers, but named against a rival you win only ${pct(rec.pooled)} of head-to-heads${hardText}.`,
+    foot: `Head-to-heads: won ${rec.won}, lost ${rec.lost} - ${counts(rec.pooled)}${hard ? `; vs ${hard.rival} ${counts(hard.winOfDecided)}` : ""}. Open choice: ${counts(open)}.`,
+    look: { pill: "stations", station: "comparison", label: "Stations - Comparison" },
+    effect: Math.abs(gap),
+  };
+}
+
+/** The room the target's open-choice picks come from most. */
+function roomConcentration(s: Summary, inp: InsightInputs) {
+  const total = s.target.chosen.k;
+  if (total < MIN_BASE || inp.rooms.length < 2) return null;
+  const top = [...inp.rooms].sort((a, b) => b.picks - a.picks || a.room.localeCompare(b.room))[0];
+  const share = top.picks / total;
+  if (share < 0.5) return null;
+  const outside = cell(total - top.picks, Math.max(0, s.firmPickInCategory.k - top.firm));
+  return { top, share, total, outside, rooms: inp.rooms.length };
+}
+
+function pickConcentrationRoom(s: Summary, inp: InsightInputs): Insight | null {
+  const c = roomConcentration(s, inp);
+  if (!c) return null;
+  return {
+    key: "pick_concentration_room",
+    kind: "room",
+    title: `Your picks come from ${c.top.room}`,
+    body: `${pct(c.share)} of the times the AI picks ${s.brand} in an open choice come from one buyer room, ${c.top.room} - there you win ${pct(c.top.decided)} of decided answers, everywhere else ${pct(c.outside)}.`,
+    foot: `${c.top.picks} of ${c.total} picks from ${c.top.room} (one of ${c.rooms} rooms). Inside: ${counts(c.top.decided)}. Outside: ${counts(c.outside)}.`,
+    look: { pill: "buyers", label: "Buyers" },
+    effect: c.share - 1 / c.rooms,
+  };
+}
+
+const shorten = (t: string, n = 80) => {
+  const x = t.replace(/\s+/g, " ").trim();
+  return x.length <= n ? x : `${x.slice(0, n - 1).replace(/\s+\S*$/, "").replace(/[\s.,;:!?-]+$/, "")}...`;
+};
+
+/** The question (cell) a brand's picks concentrate in, for the target and the top rival. */
+function questionConcentration(s: Summary, inp: InsightInputs, key: string) {
+  const total = inp.questions.reduce((a, q) => a + (q.picks[key] ?? 0), 0);
+  if (total < MIN_BASE || inp.questions.length < 2) return null;
+  const top = [...inp.questions].sort((a, b) => (b.picks[key] ?? 0) - (a.picks[key] ?? 0) || a.id.localeCompare(b.id))[0];
+  const k = top.picks[key] ?? 0;
+  const share = k / total;
+  return share >= 0.3 ? { top, k, total, share, n: inp.questions.length } : null;
+}
+
+function pickConcentrationQuestion(s: Summary, inp: InsightInputs): Insight | null {
+  const rival = s.brands.find((b) => b.role !== "target" && b.chosen.k > 0);
+  const cands = [
+    { who: s.brand, isTarget: true, c: questionConcentration(s, inp, s.target.key) },
+    ...(rival ? [{ who: rival.name, isTarget: false, c: questionConcentration(s, inp, rival.key) }] : []),
+  ].filter((x) => x.c !== null);
+  if (cands.length === 0) return null;
+  const best = cands.sort((a, b) => b.c!.share - a.c!.share)[0];
+  const c = best.c!;
+  const q = shorten(c.top.text);
+  return {
+    key: "pick_concentration_question",
+    kind: "question",
+    title: best.isTarget ? "One question carries your picks" : `One question carries ${best.who}'s picks`,
+    body: `${pct(c.share)} of ${best.isTarget ? "your" : `${best.who}'s`} open-choice picks come from one question: "${q}"`,
+    foot: `${c.k} of ${c.total} picks of ${best.who} from this question (one of ${c.n} open-choice questions, ${c.top.answers} answers, a seed and its paraphrases pooled).`,
+    look: { pill: "stations", station: "consideration", label: "Stations - Consideration" },
+    effect: c.share - 1 / c.n,
+  };
+}
+
+function agreedYetStay(inp: InsightInputs): Insight | null {
+  type C = { who: "buyer" | "customer"; confirmed: RateCell; given: RateCell; verb: string };
+  const cands: C[] = [];
+  const o = inp.doubt.objections;
+  const k = inp.doubt.keepOrLeave;
+  if (o) cands.push({ who: "buyer", confirmed: o.premise.confirms, given: o.matrix.confirms.proceed, verb: "go ahead" });
+  if (k) cands.push({ who: "customer", confirmed: k.premise.confirms, given: k.matrix.confirms.keep, verb: "stay" });
+  const ok = cands.filter((c) => c.confirmed.n >= MIN_BASE && c.given.n >= MIN_BASE && rate(c.confirmed) >= 0.5 && rate(c.given) >= 0.3);
+  if (ok.length === 0) return null;
+  const best = ok.sort((a, b) => rate(b.confirmed) * rate(b.given) - rate(a.confirmed) * rate(a.given))[0];
+  return {
+    key: "agreed_yet_stay",
+    kind: "doubt",
+    title: best.who === "buyer" ? "Agrees with the worry, still says go ahead" : "Agrees with the worry, still says stay",
+    body: `When a ${best.who} raises a worry, the AI agrees it is warranted ${pct(best.confirmed)} of the time it takes a side - and in ${pct(best.given)} of those answers still tells them to ${best.verb}.`,
+    foot: `Agrees: ${counts(best.confirmed)}. Of those, ${best.verb}: ${counts(best.given)}.`,
+    look: { pill: "stations", station: best.who === "buyer" ? "doubts" : "customer_base", label: best.who === "buyer" ? "Stations - Doubts" : "Stations - Customers" },
+    effect: rate(best.confirmed) * rate(best.given),
+  };
+}
+
+function taughtVsWinning(s: Summary, inp: InsightInputs): Insight | null {
+  if (inp.taught.length === 0 || s.reasonLift.length === 0) return null;
+  const top5 = inp.taught.slice(0, 5);
+  const taughtSet = new Set(top5.map((t) => t.code));
+  const best = s.reasonLift[0];
+  const untaught = best.lift > 0 && !taughtSet.has(best.code) && apart(best.wins, best.others) ? best : null;
+  const losing = top5
+    .map((t) => s.reasonLift.find((l) => l.code === t.code))
+    .filter((l): l is NonNullable<typeof l> => !!l && l.lift < 0 && apart(l.others, l.wins))
+    .sort((a, b) => a.lift - b.lift)[0] ?? null;
+  if (!untaught && !losing) return null;
+  const taughtOf = (code: string) => inp.taught.find((t) => t.code === code)?.rate;
+  const parts: string[] = [];
+  const foot: string[] = [];
+  if (untaught) {
+    parts.push(`${untaught.code} travels with your wins (+${pts(untaught.lift)}) but is not among the five criteria the AI teaches buyers to weigh`);
+    const tr = taughtOf(untaught.code);
+    foot.push(`${untaught.code}: ${pct(untaught.wins)} of wins vs ${pct(untaught.others)} of rival picks; taught in ${tr ? counts(tr) : "no"} criteria answers.`);
+  }
+  if (losing) {
+    parts.push(`${untaught ? "it" : "the AI"} teaches buyers to weigh ${losing.code}, which shows up more when a rival is picked (-${pts(losing.lift)})`);
+    foot.push(`${losing.code}: ${pct(losing.wins)} of wins vs ${pct(losing.others)} of rival picks; taught in ${counts(taughtOf(losing.code)!)}.`);
+  }
+  const body = parts.join("; ");
+  const effect = Math.max(untaught ? Math.abs(untaught.lift) : 0, losing ? Math.abs(losing.lift) : 0);
+  return {
+    key: "taught_vs_winning",
+    kind: "argument",
+    title: untaught ? `${untaught.code} wins but is not taught` : `The AI teaches ${losing!.code}, which favors rivals`,
+    body: `${body.charAt(0).toUpperCase()}${body.slice(1)}.`,
+    foot: `${foot.join(" ")} Top five taught: ${top5.map((t) => t.code).join(", ")}.`,
+    look: { pill: "why", label: "Why" },
+    effect,
+  };
+}
+
+function valueInHouse(inp: InsightInputs, brand: string): Insight | null {
+  const v = inp.value;
+  if (!v || v.ownRung.n < MIN_BASE) return null;
+  const own = rate(v.ownRung);
+  const riv = rate(v.recommendsInstead);
+  if (own < 0.3 && riv < 0.3) return null;
+  const inHouse = own >= riv;
+  const top = v.instead.find((i) => i.own === inHouse);
+  const topText = top ? ` - most often ${top.name}` : "";
+  return {
+    key: "value_in_house",
+    kind: "value",
+    title: inHouse ? "The value doubts stay in-house" : "The value doubts go to rivals",
+    body: inHouse
+      ? `When the AI doubts ${brand} is worth the price, ${pct(own)} of those answers point to its own cheaper option${topText}; ${pct(riv)} point to a rival.`
+      : `When the AI doubts ${brand} is worth the price, ${pct(riv)} of those answers point to a rival${topText}; ${pct(own)} point to its own cheaper option.`,
+    foot: `Of answers saying no or it depends: own option ${counts(v.ownRung)}; a rival ${counts(v.recommendsInstead)}.${top ? ` ${top.name}: ${top.n}.` : ""}`,
+    look: { pill: "stations", station: "value", label: "Stations - Value" },
+    effect: Math.abs(own - riv),
+  };
+}
+
+function advocacyVsObjection(inp: InsightInputs): Insight | null {
+  const adv = inp.settled.advocacy;
+  const o = inp.doubt.objections;
+  if (!adv || !o) return null;
+  const strengthens = adv.verdicts.strengthens;
+  const strong = adv.caseStrength.strong;
+  const defend = rate(strengthens) >= rate(strong) ? strengthens : strong;
+  const confirms = o.premise.confirms;
+  if (defend.n < MIN_BASE || confirms.n < MIN_BASE || rate(defend) < 0.5 || rate(confirms) < 0.5) return null;
+  return {
+    key: "advocacy_vs_objection",
+    kind: "doubt",
+    title: "Defends you when asked, concedes when asked neutrally",
+    body: `Asked to defend the brand, the AI strengthens the case ${pct(defend)} of the time; asked about buyers' worries, it agrees they are warranted ${pct(confirms)} of the time.`,
+    foot: `Advocacy: ${counts(defend)}. Buyers' worries agreed: ${counts(confirms)}.`,
+    look: { pill: "stations", station: "customer_base", label: "Stations - Customers" },
+    effect: Math.min(rate(defend), rate(confirms)) - 0.5,
+  };
+}
+
+/**
+ * The verdict the brief opens with: template sentences in fixed order
+ * (standing, prompted vs open, concentration, doubts, value, settled), each
+ * only when its inputs clear the floors. Percentages in `text`, counts in `foot`.
+ */
+export function composeVerdict(s: Summary, inp: InsightInputs): VerdictFact[] {
+  const out: VerdictFact[] = [];
+  const decidedOk = s.firmPickInCategory.k >= MIN_BASE;
+
+  // 1. Standing.
+  if (s.answers >= MIN_BASE) {
+    const rival = s.brands.find((b) => b.role !== "target" && b.chosen.k > 0);
+    let text = `${s.brand} is named in ${pct(s.target.mentioned)} of open-choice answers and picked in ${pct(s.target.chosen)}`;
+    let foot = `Named ${counts(s.target.mentioned)}; picked ${counts(s.target.chosen)}`;
+    if (decidedOk) {
+      text += `, which is ${pct(s.target.shareOfDecided)} of the picks that land on a brand in the category`;
+      foot += `; ${s.target.chosen.k} of ${s.firmPickInCategory.k} decided picks`;
+      if (rival) {
+        text += `, ${rate(rival.shareOfDecided) > rate(s.target.shareOfDecided) ? "behind" : "ahead of"} ${rival.name} at ${pct(rival.shareOfDecided)}`;
+        foot += `; ${rival.name} ${rival.chosen.k}`;
+      }
+    }
+    out.push({ key: "standing", text: `${text}.`, foot: `${foot}.`, look: { pill: "stations", station: "consideration", label: "Stations - Consideration" } });
+  }
+
+  // 2. Prompted vs open.
+  const rec = promptedRecord(s);
+  if (rec && decidedOk) {
+    const hard = rec.hardest ? ` (${pct(rec.hardest.winOfDecided)} against ${rec.hardest.rival})` : "";
+    const gap = rate(rec.pooled) - rate(s.target.shareOfDecided);
+    const openText = `${pct(s.target.shareOfDecided)} of the open choice`;
+    const text =
+      gap >= 0.1
+        ? `It wins ${pct(rec.pooled)} of prompted head-to-heads${hard} but only ${openText}.`
+        : gap <= -0.1
+          ? `It takes ${openText} but wins only ${pct(rec.pooled)} of prompted head-to-heads${hard}.`
+          : `It wins ${pct(rec.pooled)} of prompted head-to-heads${hard} and ${openText}.`;
+    out.push({
+      key: "prompted_vs_open",
+      text,
+      foot: `Head-to-heads won ${rec.won}, lost ${rec.lost}${rec.hardest ? `; vs ${rec.hardest.rival} ${rec.hardest.won.k}-${rec.hardest.lost.k}` : ""}. Open choice ${s.target.chosen.k} of ${s.firmPickInCategory.k} decided picks.`,
+      look: { pill: "stations", station: "comparison", label: "Stations - Comparison" },
+    });
+  }
+
+  // 3. Concentration: one buyer room, else one question.
+  const room = roomConcentration(s, inp);
+  if (room) {
+    out.push({
+      key: "concentration",
+      text: `${pct(room.share)} of its picks come from one buyer room, ${room.top.room}.`,
+      foot: `${room.top.picks} of ${room.total} open-choice picks; ${room.rooms} rooms.`,
+      look: { pill: "buyers", label: "Buyers" },
+    });
+  } else {
+    const q = questionConcentration(s, inp, s.target.key);
+    if (q)
+      out.push({
+        key: "concentration",
+        text: `${pct(q.share)} of its picks come from one question: "${shorten(q.top.text)}"`,
+        foot: `${q.k} of ${q.total} open-choice picks; ${q.n} questions.`,
+        look: { pill: "stations", station: "consideration", label: "Stations - Consideration" },
+      });
+  }
+
+  // 4. Doubts.
+  const b = s.buyersDoubt && s.buyersDoubt.answers >= MIN_BASE && s.buyersDoubt.agree.n >= MIN_BASE ? s.buyersDoubt : null;
+  const c = s.customersDoubt && s.customersDoubt.answers >= MIN_BASE ? s.customersDoubt : null;
+  if (b || c) {
+    const text = b
+      ? `Buyers' worries are confirmed in ${pct(b.agree)} of answers and still told to go ahead in ${pct(b.proceed)}${c ? `; customers are told to stay in ${pct(c.keep)}` : ""}.`
+      : `Customers voicing a worry are told to stay in ${pct(c!.keep)} and to leave in ${pct(c!.leave)}.`;
+    const foot = [b && `Buyers: agrees ${counts(b.agree)}; go ahead ${counts(b.proceed)}.`, c && `Customers: stay ${counts(c.keep)}; leave ${counts(c.leave)}.`]
+      .filter(Boolean)
+      .join(" ");
+    out.push({ key: "doubts", text, foot, look: { pill: "stations", station: b ? "doubts" : "customer_base", label: b ? "Stations - Doubts" : "Stations - Customers" } });
+  }
+
+  // 5. Value.
+  const v = inp.value;
+  if (v && v.answers >= MIN_BASE) {
+    const subject = v.lines.length === 1 ? v.lines[0].label : `${s.brand}'s lines`;
+    const verb = v.lines.length === 1 ? "is" : "are";
+    let tail = "";
+    if (v.ownRung.n >= MIN_BASE) {
+      const own = rate(v.ownRung);
+      const riv = rate(v.recommendsInstead);
+      const topRival = v.instead.find((i) => !i.own);
+      if (own >= 0.5 && own >= riv) tail = "; most of the doubts point to its own cheaper option";
+      else if (riv >= 0.5 && riv > own) tail = `; most of the doubts point to a rival${topRival ? `, led by ${topRival.name}` : ""}`;
+      else if (own >= 0.3 || riv >= 0.3) tail = `; ${pct(own)} of the doubts point to its own cheaper option and ${pct(riv)} to a rival`;
+    }
+    out.push({
+      key: "value",
+      text: `${subject} ${verb} judged worth it in ${pct(v.worth.yes)} of answers${tail}.`,
+      foot: `Worth it ${counts(v.worth.yes)}.${v.ownRung.n > 0 ? ` Of the no and it-depends answers: own option ${v.ownRung.k}, a rival ${v.recommendsInstead.k}, of ${v.ownRung.n}.` : ""}`,
+      look: { pill: "stations", station: "value", label: "Stations - Value" },
+    });
+  }
+
+  // 6. Settled customers.
+  const adv = inp.settled.advocacy && inp.settled.advocacy.answers >= MIN_BASE ? inp.settled.advocacy : null;
+  const bc = inp.settled.businessCase && inp.settled.businessCase.answers >= MIN_BASE ? inp.settled.businessCase : null;
+  const obj = inp.doubt.objections && inp.doubt.objections.premise.confirms.n >= MIN_BASE ? inp.doubt.objections : null;
+  if (adv) {
+    out.push({
+      key: "settled",
+      text: obj
+        ? `Asked to defend it, the AI strengthens the case in ${pct(adv.verdicts.strengthens)}; asked neutrally about buyers' worries, it agrees with them in ${pct(obj.premise.confirms)}.`
+        : `Asked to defend it, the AI strengthens the case in ${pct(adv.verdicts.strengthens)}.`,
+      foot: `Advocacy strengthens ${counts(adv.verdicts.strengthens)}.${obj ? ` Buyers' worries agreed ${counts(obj.premise.confirms)}.` : ""}`,
+      look: { pill: "stations", station: "customer_base", label: "Stations - Customers" },
+    });
+  } else if (bc) {
+    out.push({
+      key: "settled",
+      text: `Asked for a business case, the AI makes a strong one in ${pct(bc.caseStrength.strong)}.`,
+      foot: `Strong case ${counts(bc.caseStrength.strong)}.`,
+      look: { pill: "stations", station: "customer_base", label: "Stations - Customers" },
+    });
+  }
+  return out;
+}
+
 /** Every detector once, ranked by effect, capped. */
 export function detectInsights(s: Summary, inp: InsightInputs): Insight[] {
   const found = [
@@ -334,6 +710,13 @@ export function detectInsights(s: Summary, inp: InsightInputs): Insight[] {
     doubtRollup(s),
     doubtWorry(inp),
     funnelDrop(s),
+    promptedVsOpen(s),
+    pickConcentrationRoom(s, inp),
+    pickConcentrationQuestion(s, inp),
+    agreedYetStay(inp),
+    taughtVsWinning(s, inp),
+    valueInHouse(inp, s.brand),
+    advocacyVsObjection(inp),
   ].filter((x): x is Insight => x !== null && x.effect > 0);
   return found.sort((a, b) => b.effect - a.effect || a.key.localeCompare(b.key)).slice(0, MAX_INSIGHTS);
 }

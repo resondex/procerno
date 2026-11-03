@@ -251,7 +251,29 @@ const topCondition = (groups: SliceGroup[]) => (groups[0] ? `${groups[0].label} 
 const OVERLAP_TIP =
   " The two columns overlap: one answer can state a condition for each side, so they do not add up to 100%.";
 
-const rivalCols = (onEvidence?: OnEvidence): Col<SliceRules>[] => [
+const shortQuestion = (t: string, cap = 90) => (t.length > cap ? `${t.slice(0, cap - 1).trimEnd()}…` : t);
+const stageText = (s?: string) => (s ? s.replace(/_/g, " ").replace(/^./, (c) => c.toUpperCase()) : "");
+
+/** The by-question table reuses the rival columns' win / lose reads. */
+const questionCols = (onEvidence?: OnEvidence): Col<SliceRules>[] => [
+  {
+    id: "question",
+    label: "Question",
+    val: (r) => r.label,
+    render: (r) => (
+      <span className="block max-w-[34rem]" title={r.label}>
+        <span className="mr-2 text-[11px] uppercase tracking-wide text-ink-3">{stageText(r.stage)}</span>
+        {shortQuestion(r.label)}
+      </span>
+    ),
+  },
+  ...rivalCols(onEvidence, "question").filter((c) => c.id !== "rival"),
+];
+
+const rivalCols = (onEvidence?: OnEvidence, scope: "rival" | "question" = "rival"): Col<SliceRules>[] => {
+  const where = scope === "rival" ? "against this rival" : "in this question's answers";
+  const head = (r: SliceRules) => (scope === "rival" ? `vs ${r.label}` : shortQuestion(r.label, 60));
+  return [
   {
     id: "rival",
     label: "Rival",
@@ -270,12 +292,12 @@ const rivalCols = (onEvidence?: OnEvidence): Col<SliceRules>[] => [
   {
     id: "win",
     label: "You win when",
-    tip: "The condition stated most often for routing the pick to you against this rival.",
+    tip: `The condition stated most often for routing the pick to you ${where}.`,
     val: (r) => topCondition(r.win),
     render: (r) =>
       r.win[0] ? (
         <span className="text-[12px]" title={answersText(r.win[0].answers)}>
-          <Evidence ids={r.win[0].ids} title={`vs ${r.label} - you win when: ${r.win[0].label}`} onEvidence={onEvidence}>
+          <Evidence ids={r.win[0].ids} title={`${head(r)} - you win when: ${r.win[0].label}`} onEvidence={onEvidence}>
             {r.win[0].label}
           </Evidence>
         </span>
@@ -286,12 +308,12 @@ const rivalCols = (onEvidence?: OnEvidence): Col<SliceRules>[] => [
   {
     id: "lose",
     label: "You lose when",
-    tip: "The condition stated most often for routing the pick away from you against this rival.",
+    tip: `The condition stated most often for routing the pick away from you ${where}.`,
     val: (r) => topCondition(r.lose),
     render: (r) =>
       r.lose[0] ? (
         <span className="text-[12px]" title={answersText(r.lose[0].answers)}>
-          <Evidence ids={r.lose[0].ids} title={`vs ${r.label} - you lose when: ${r.lose[0].label}`} onEvidence={onEvidence}>
+          <Evidence ids={r.lose[0].ids} title={`${head(r)} - you lose when: ${r.lose[0].label}`} onEvidence={onEvidence}>
             {r.lose[0].label}
           </Evidence>
         </span>
@@ -299,7 +321,8 @@ const rivalCols = (onEvidence?: OnEvidence): Col<SliceRules>[] => [
         "-"
       ),
   },
-];
+  ];
+};
 
 function Explorer({ view, onEvidence }: { view: RulesView; onEvidence?: OnEvidence }) {
   const [pool, setPool] = useState<RulePool | null>(null);
@@ -473,6 +496,23 @@ export default function RulesSection({ runId, onEvidence }: { runId: string; onE
               <RoomCard key={r.key} room={r} onEvidence={onEvidence} />
             ))}
           </div>
+        </section>
+      )}
+
+      {(view.questions ?? []).length > 0 && (
+        <section className="card p-6 grid gap-3">
+          <div>
+            <h2 className="section-label mb-1">Decision rules by question</h2>
+            <p className="text-[13px] text-ink-3">
+              Which-should-I-get questions only, the ones with the most answers that state their rules. One question can carry much of a number; hover a question for its full wording.
+            </p>
+          </div>
+          <SortTable
+            cols={questionCols(onEvidence)}
+            rows={view.questions}
+            filename="decision_rules_by_question.csv"
+            defaultSort={{ id: "toYou", dir: -1 }}
+          />
         </section>
       )}
 

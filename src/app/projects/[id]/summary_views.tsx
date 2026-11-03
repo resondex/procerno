@@ -1,9 +1,9 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import type { BrandSummaryView, Insight, RateCell, SummaryBrand } from "@/lib/engine/brand_summary";
+import type { BrandSummaryView, Insight, RateCell, SummaryBrand, VerdictFact } from "@/lib/engine/brand_summary";
 import { SortTable, Tip } from "./table";
-import { BaseNote, RateText, fmtN, useEngineSet, viewQuery, EngineTable } from "./view_parts";
+import { BaseNote, DotTrack, RateText, fmtN, useEngineSet, viewQuery, EngineTable } from "./view_parts";
 
 /**
  * The Boardroom and Five-questions views, answer_codes era (2026-10-30):
@@ -13,8 +13,10 @@ import { BaseNote, RateText, fmtN, useEngineSet, viewQuery, EngineTable } from "
  * sections with its full table; these views are the executive cut.
  *
  * Insights (bs5, 2026-11-03) are detected server-side (engine/summary_insights.ts)
- * and rendered as served: the Boardroom's signal cards, the brief's "What
- * stands out" strip and question 3's room sentence all read the same list.
+ * and rendered as served: the Boardroom's signal cards, the brief's top three
+ * and question 3's room sentence all read the same list. The brief opens on
+ * the verdict (bs6): template sentences served in fixed order, run together
+ * as one paragraph.
  */
 
 /** Where an insight's full table lives; the results block wires it. */
@@ -92,6 +94,31 @@ function BarRow({ name, share, max, isTarget, right, tip }: {
   );
 }
 
+/** One leaderboard row: named (grey) and picked (blue) on one 0-100% track. */
+function DotRow({ name, isTarget, named, picked }: {
+  name: string;
+  isTarget?: boolean;
+  named: RateCell;
+  picked: RateCell;
+}) {
+  return (
+    <div
+      className={`grid grid-cols-[6.5rem_1fr_5.5rem] sm:grid-cols-[11rem_1fr_9rem] items-center gap-3 ${
+        isTarget ? "-mx-2 rounded-md bg-primary-soft/60 px-2 py-0.5" : ""
+      }`}
+      title={`Named in ${range(named)}; picked in ${range(picked)}`}
+    >
+      <span className={`truncate text-sm text-right ${isTarget ? "font-semibold text-primary" : "text-ink-2"}`}>
+        {name}
+      </span>
+      <DotTrack a={rate(named)} b={rate(picked)} emphasis={isTarget} />
+      <span className={`text-sm tabular-nums ${isTarget ? "font-semibold text-ink" : "text-ink-2"}`}>
+        {pct(named)} · {pct(picked)}
+      </span>
+    </div>
+  );
+}
+
 /** Top rivals by share of decided, the target always on the board. */
 function pickBoard(view: BrandSummaryView, limit: number): SummaryBrand[] {
   const rivals = view.brands.filter((b) => b.role !== "target" && b.chosen.k > 0).slice(0, limit);
@@ -143,7 +170,102 @@ const KIND_LABEL: Record<Insight["kind"], string> = {
   argument: "The arguments",
   doubt: "The doubts",
   funnel: "The funnel",
+  question: "One question",
+  value: "Value",
 };
+
+/** An inline hover note for a sentence inside running prose - Tip's popup,
+ * but an inline box so the sentence wraps with the paragraph. */
+function InlineTip({ tip, children }: { tip: string; children: React.ReactNode }) {
+  const [pos, setPos] = useState<{ x: number; y: number } | null>(null);
+  return (
+    <span
+      className="inline"
+      onMouseEnter={(e) => {
+        const r = (e.currentTarget as HTMLElement).getBoundingClientRect();
+        setPos({ x: r.left + r.width / 2, y: r.top });
+      }}
+      onMouseLeave={() => setPos(null)}
+    >
+      {children}
+      {pos && (
+        <span
+          style={{
+            position: "fixed",
+            left: Math.min(
+              Math.max(pos.x, Math.min(176, window.innerWidth / 2)),
+              window.innerWidth - Math.min(176, window.innerWidth / 2)
+            ),
+            top: pos.y - 8,
+            transform: "translate(-50%, -100%)",
+            zIndex: 50,
+            maxWidth: Math.min(336, window.innerWidth - 16),
+          }}
+          className="pointer-events-none w-max rounded-lg border border-line bg-surface px-3 py-2 text-left text-[12px] font-normal text-ink-2 shadow-lg"
+        >
+          {tip}
+        </span>
+      )}
+    </span>
+  );
+}
+
+/** The verdict: the served sentences run together as one paragraph; a
+ * sentence with somewhere to look opens it on click. */
+function Verdict({ facts, onLook }: { facts: VerdictFact[]; onLook?: OnLook }) {
+  return (
+    <p className="text-[17px] leading-relaxed text-ink max-w-[68ch]">
+      {facts.map((f, i) => {
+        const look = f.look;
+        const body =
+          look && onLook ? (
+            // A span, not a <button>: buttons lay out as atomic boxes and would
+            // break each sentence onto its own line instead of running as prose.
+            <span
+              role="button"
+              tabIndex={0}
+              onClick={() => onLook(look)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" || e.key === " ") {
+                  e.preventDefault();
+                  onLook(look);
+                }
+              }}
+              className="cursor-pointer underline decoration-dotted decoration-line underline-offset-4 hover:text-primary hover:decoration-primary focus-visible:outline-2 focus-visible:outline-primary"
+            >
+              {f.text}
+            </span>
+          ) : (
+            <span className="cursor-help">{f.text}</span>
+          );
+        return (
+          <span key={f.key}>
+            {i > 0 && " "}
+            <InlineTip tip={look && onLook ? `${f.foot} - click for ${look.label}` : f.foot}>{body}</InlineTip>
+          </span>
+        );
+      })}
+    </p>
+  );
+}
+
+/** The top insights as a compact list under the verdict. */
+function InsightList({ insights, onLook }: { insights: Insight[]; onLook?: OnLook }) {
+  return (
+    <ul className="grid gap-3 border-t border-line pt-4">
+      {insights.map((i) => (
+        <li key={i.key} className="grid gap-0.5" title={i.foot}>
+          <div className="flex flex-wrap items-baseline gap-x-2">
+            <span className="text-[11px] font-semibold uppercase tracking-wide text-ink-3">{KIND_LABEL[i.kind]}</span>
+            <span className="text-[14px] font-semibold">{i.title}</span>
+          </div>
+          <p className="text-[13px] text-ink-2">{i.body}</p>
+          <LookLink look={i.look} onLook={onLook} />
+        </li>
+      ))}
+    </ul>
+  );
+}
 
 function Tile({ label, cell, hint }: { label: string; cell: RateCell; hint: string }) {
   return (
@@ -166,14 +288,19 @@ function Brief({ v, onLook }: { v: BrandSummaryView; onLook?: OnLook }) {
   if (!leaderboard.some((b) => b.key === v.target.key) && leaderboard.length > 0) {
     leaderboard[leaderboard.length - 1] = v.target;
   }
-  const maxMentioned = Math.max(...leaderboard.map((b) => rate(b.mentioned)), 0.01);
   const board = pickBoard(v, 8);
   const maxPick = Math.max(...board.map((b) => rate(b.shareOfDecided)), 0.01);
   const h2h = v.headToHead.slice(0, 6);
   const standouts = v.insights.slice(0, 3);
   return (
     <div className="grid gap-8">
-      {standouts.length > 0 && (
+      {(v.verdict ?? []).length > 0 ? (
+        <section className="card p-6 grid gap-4 border-l-4 border-l-[var(--color-primary)]">
+          <h2 className="section-label">The verdict</h2>
+          <Verdict facts={v.verdict ?? []} onLook={onLook} />
+          {standouts.length > 0 && <InsightList insights={standouts} onLook={onLook} />}
+        </section>
+      ) : standouts.length > 0 && (
         <section className="grid gap-2">
           <h2 className="section-label">What stands out</h2>
           <div className="grid gap-3 sm:grid-cols-3">
@@ -204,21 +331,28 @@ function Brief({ v, onLook }: { v: BrandSummaryView; onLook?: OnLook }) {
       <section className="card p-6">
         <h2 className="section-label mb-1">Brand leaderboard</h2>
         <p className="text-[13px] text-ink-3 mb-5">
-          Share of &ldquo;which should I get&rdquo; answers naming each brand - tracked rivals and
-          brands the answers volunteered.
+          Grey is how often the brand is named; blue is how often it is the one the AI says to buy.
+          The distance between them is the conversion gap.
         </p>
         <div className="grid gap-2.5">
           {leaderboard.map((b) => (
-            <BarRow
+            <DotRow
               key={b.key}
               name={b.name}
               isTarget={b.key === v.target.key}
-              share={rate(b.mentioned)}
-              max={maxMentioned}
-              right={`${pct(b.mentioned)} · picked ${pct(b.chosen)}`}
-              tip={`Named in ${range(b.mentioned)}; picked in ${range(b.chosen)}`}
+              named={b.mentioned}
+              picked={b.chosen}
             />
           ))}
+          <div className="grid grid-cols-[6.5rem_1fr_5.5rem] sm:grid-cols-[11rem_1fr_9rem] gap-3 text-[11px] text-ink-3">
+            <span />
+            <div className="flex justify-between tabular-nums">
+              <span>0%</span>
+              <span>50%</span>
+              <span>100%</span>
+            </div>
+            <span>named · picked</span>
+          </div>
         </div>
       </section>
 

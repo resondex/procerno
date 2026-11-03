@@ -35,7 +35,7 @@ import { TIER_LABEL, useEngineSet, viewQuery } from "./view_parts";
  * it counts (the numerator) in the evidence panel.
  */
 
-type DimKey = "none" | "room" | "worry" | "rival" | "stage" | "engine" | "vendor" | "tier" | "mode" | "brand" | "parent" | "argument";
+type DimKey = "none" | "room" | "worry" | "rival" | "stage" | "question" | "engine" | "vendor" | "tier" | "mode" | "brand" | "parent" | "argument";
 
 const DIMS: { key: DimKey; label: string }[] = [
   { key: "none", label: "None" },
@@ -43,6 +43,7 @@ const DIMS: { key: DimKey; label: string }[] = [
   { key: "worry", label: "Worry" },
   { key: "rival", label: "Rival or class" },
   { key: "stage", label: "Stage" },
+  { key: "question", label: "Question" },
   { key: "engine", label: "Engine" },
   { key: "vendor", label: "Vendor" },
   { key: "tier", label: "Tier" },
@@ -131,6 +132,8 @@ const wilson = (k: number, n: number) => {
 };
 const pct = (x: number) => (x > 0 && x < 0.005 ? "<1%" : `${Math.round(x * 100)}%`);
 const titleCase = (s: string) => s.replace(/_/g, " ").replace(/^./, (c) => c.toUpperCase());
+/** A prompt's text shortened for a row (~90 chars) or a column header. */
+const shortText = (t: string, cap: number) => (t.length > cap ? `${t.slice(0, cap - 1).trimEnd()}…` : t);
 
 interface Acc {
   k: number;
@@ -142,6 +145,9 @@ interface Acc {
 interface DimValue {
   key: string;
   label: string;
+  /** Question values: the full prompt text (tooltip, csv) and its stage. */
+  full?: string;
+  group?: string;
   brands?: Set<number>;
   arg?: number;
 }
@@ -313,6 +319,17 @@ export function MetricsSection({ runId, evidence = true }: { runId: string; evid
             const s = P[r[R.prompt]].stage;
             return [{ key: s, label: titleCase(s) }];
           };
+        case "question":
+          // One value per question (cell): its seed and paraphrases pool, the
+          // seed wording names it. Legal wherever stage is - every row
+          // carries its prompt. Pre-wb5 payloads fall back to one per prompt.
+          return (r) => {
+            const i = r[R.prompt];
+            const p = P[i];
+            const cell = p.cell ?? -1;
+            const text = cell >= 0 && data.cells?.[cell] ? data.cells[cell] : p.text;
+            return [{ key: cell >= 0 ? `q${cell}` : `p${i}`, label: shortText(text, 90), full: text, group: titleCase(p.stage) }];
+          };
         case "engine":
           return (r) => [{ key: `e${r[R.engine]}`, label: engineOf(r).label }];
         case "vendor":
@@ -392,6 +409,13 @@ export function MetricsSection({ runId, evidence = true }: { runId: string; evid
           .sort((a, b) => b.k - a.k || a.v.label.localeCompare(b.v.label))
           .slice(0, DIM_CAP)
           .map((s) => s.v);
+      } else if (dim === "question") {
+        // Grouped under the stage, then the questions carrying most of the
+        // numerator first - one question can own a tracker's number.
+        const scored = list.map((v) => ({ v, k: total(v) }));
+        list = scored
+          .sort((a, b) => (a.v.group ?? "").localeCompare(b.v.group ?? "") || b.k - a.k || a.v.label.localeCompare(b.v.label))
+          .map((s) => s.v);
       } else if (dim === "engine") {
         list.sort((a, b) => Number(a.key.slice(1)) - Number(b.key.slice(1)));
       } else {
@@ -448,17 +472,36 @@ export function MetricsSection({ runId, evidence = true }: { runId: string; evid
 
   type PivotRow = { v: DimValue };
   const cellOf = (r: PivotRow, c: DimValue) => pivot.cells.get(`${r.v.key}|${c.key}`);
+  const byQuestion = rowDim === "question";
   const cols: Col<PivotRow>[] = [
+    ...(byQuestion
+      ? [
+          {
+            id: "stage",
+            label: "Stage",
+            val: (r: PivotRow) => r.v.group ?? "",
+            render: (r: PivotRow) => <span className="text-[11px] uppercase tracking-wide text-ink-3">{r.v.group}</span>,
+          },
+        ]
+      : []),
     {
       id: "label",
       label: DIMS.find((d) => d.key === rowDim)?.label ?? "",
-      val: (r) => r.v.label,
-      render: (r) => <span className="font-medium text-ink">{r.v.label}</span>,
+      val: (r) => r.v.full ?? r.v.label,
+      render: (r) =>
+        r.v.full ? (
+          <span className="block max-w-[34rem] font-medium text-ink" title={`${r.v.full}\n(the seed wording; answers pool across its rewordings)`}>
+            {r.v.label}
+          </span>
+        ) : (
+          <span className="font-medium text-ink">{r.v.label}</span>
+        ),
     },
     ...pivot.cols.map(
       (c): Col<PivotRow> => ({
         id: `c:${c.key}`,
-        label: colDim === "none" ? mLabel(measure) : c.label,
+        label: colDim === "none" ? mLabel(measure) : c.full ? shortText(c.full, 40) : c.label,
+        ...(c.full && { tip: `${c.group} - ${c.full} (answers pool across its rewordings)` }),
         num: true,
         val: (r) => {
           const a = cellOf(r, c);
@@ -638,10 +681,11 @@ export function MetricsSection({ runId, evidence = true }: { runId: string; evid
           <p className="mt-3 text-[13px] text-ink-3">No answers count toward this measure here.</p>
         ) : (
           <SortTable
+            key={`${rowDim}|${colDim}`}
             cols={cols}
             rows={pivot.rows.map((v) => ({ v }))}
             filename={`table_${pool}_${measure.id}.csv`}
-            defaultSort={{ id: cols[1].id, dir: -1 }}
+            defaultSort={byQuestion ? { id: "stage", dir: 1 } : { id: cols[1].id, dir: -1 }}
           />
         )}
         <p className="mt-2 text-[11px] text-ink-3">

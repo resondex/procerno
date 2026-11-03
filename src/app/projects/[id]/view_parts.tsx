@@ -28,8 +28,9 @@ export function BaseNote({ children }: { children: React.ReactNode }) {
 export const fmtN = (n: number) => n.toLocaleString("en-US");
 
 /** A ranked list of brand names. The count behind each name is its hover,
- * never printed; `you` marks the client. */
-export function Names({ items, empty = "-" }: { items: { name: string; n: number; you?: boolean }[]; empty?: string }) {
+ * never printed; `you` marks the client; `own` chips the client's own
+ * cheaper line or plan (Value). */
+export function Names({ items, empty = "-" }: { items: { name: string; n: number; you?: boolean; own?: boolean }[]; empty?: string }) {
   if (items.length === 0) return <>{empty}</>;
   return (
     <>
@@ -39,9 +40,37 @@ export function Names({ items, empty = "-" }: { items: { name: string; n: number
           <span title={`${x.n} answers`} className={x.you ? "font-medium text-ink" : undefined}>
             {x.name}
           </span>
+          {x.own && (
+            <span
+              title="Your own cheaper line or plan"
+              className="ml-1 rounded-full bg-primary-soft px-1.5 py-px text-[10px] font-semibold uppercase tracking-wide text-primary"
+            >
+              own
+            </span>
+          )}
         </span>
       ))}
     </>
+  );
+}
+
+/** Two shares on one 0-100% track: a muted dot (`a`), an accent dot (`b`),
+ * a thin connector between them. Used for named vs picked. */
+export function DotTrack({ a, b, emphasis }: { a: number; b: number; emphasis?: boolean }) {
+  const pos = (x: number) => `${Math.max(0, Math.min(1, x)) * 100}%`;
+  const lo = Math.min(a, b);
+  const hi = Math.max(a, b);
+  const dot = "absolute top-1/2 -translate-x-1/2 -translate-y-1/2 rounded-full ring-2 ring-surface";
+  return (
+    <div className="relative h-4" aria-hidden>
+      <div className="absolute inset-x-0 top-1/2 h-px -translate-y-1/2 bg-line" />
+      <div
+        className={`absolute top-1/2 -translate-y-1/2 ${emphasis ? "h-[3px] bg-primary/50" : "h-[2px] bg-neutral-bar"}`}
+        style={{ left: pos(lo), width: `${(Math.min(1, hi) - Math.max(0, lo)) * 100}%` }}
+      />
+      <span className={`${dot} h-3 w-3 bg-ink-3/60`} style={{ left: pos(a) }} />
+      <span className={`${dot} bg-primary ${emphasis ? "h-3.5 w-3.5" : "h-3 w-3"}`} style={{ left: pos(b) }} />
+    </div>
   );
 }
 

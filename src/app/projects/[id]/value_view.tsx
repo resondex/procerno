@@ -25,9 +25,13 @@ const TIPS: Record<Worth, string> = {
 };
 
 const INSTEAD_TIP =
-  "Of the answers that say not worth it or depends, how many recommend another brand by name. The question names no rival, so these are cheaper options the AI puts forward on its own.";
+  "Of the answers that say not worth it or depends, how many recommend a rival brand by name. The question names no rival, so these are cheaper options the AI puts forward on its own.";
 
-const names = (xs: { name: string; n: number }[]) => xs.map((x) => x.name).join(", ");
+const OWN_TIP =
+  "Of the answers that say not worth it or depends, how many point to your own cheaper line or plan instead - the buyer stays with you, one rung down.";
+
+const names = (xs: { name: string; n: number; own?: boolean }[]) =>
+  xs.map((x) => (x.own ? `${x.name} (own)` : x.name)).join(", ");
 
 const rowCols = (first: string, showLine: boolean): Col<ValueRow>[] => [
   { id: "label", label: first, val: (r) => r.label },
@@ -41,7 +45,8 @@ const rowCols = (first: string, showLine: boolean): Col<ValueRow>[] => [
     render: (r) => <StackBar parts={WORTH_PARTS} cells={r.worth} />,
   },
   ...WORTH_PARTS.map((p) => rateCol<ValueRow>(p.key, p.label, TIPS[p.key], (r) => r.worth[p.key])),
-  rateCol("instead", "Recommends another brand", INSTEAD_TIP, (r) => r.recommendsInstead),
+  rateCol("own", "Your own cheaper option", OWN_TIP, (r) => r.ownRung),
+  rateCol("instead", "A rival", INSTEAD_TIP, (r) => r.recommendsInstead),
   {
     id: "names",
     label: "Brands recommended instead",
@@ -102,10 +107,18 @@ export default function ValueSection({ runId, room }: { runId: string; room?: st
         <Tip tip={`${TIPS.no} ${range(view.worth.no)}`}>
           <span className="cursor-help">{pct(view.worth.no)} not worth it</span>
         </Tip>
-        <Tip tip={`${INSTEAD_TIP} ${range(view.recommendsInstead)}`}>
-          <span className="cursor-help">{pct(view.recommendsInstead)} of the doubting answers recommend another brand</span>
-        </Tip>
       </div>
+      <p className="text-[13px] text-ink-2">
+        Of the doubts:{" "}
+        <Tip tip={`${OWN_TIP} ${range(view.ownRung)}`}>
+          <span className="cursor-help font-semibold text-ink">{pct(view.ownRung)}</span>
+        </Tip>{" "}
+        point to your own cheaper option,{" "}
+        <Tip tip={`${INSTEAD_TIP} ${range(view.recommendsInstead)}`}>
+          <span className="cursor-help font-semibold text-ink">{pct(view.recommendsInstead)}</span>
+        </Tip>{" "}
+        to a rival.
+      </p>
       <div className="grid gap-2">
         <div className="h-4">
           <StackBar parts={WORTH_PARTS} cells={view.worth} />
@@ -115,7 +128,7 @@ export default function ValueSection({ runId, room }: { runId: string; room?: st
       <SortTable cols={rowCols("Room", true)} rows={view.rooms} filename="value_by_room.csv" defaultSort={{ id: "yes", dir: -1 }} />
       {view.instead.length > 0 && (
         <p className="text-[12px] text-ink-3">
-          Brands recommended instead, across every room: <Names items={view.instead} />.
+          Recommended instead, across every room: <Names items={view.instead} />.
         </p>
       )}
       {view.lines.length > 1 && (

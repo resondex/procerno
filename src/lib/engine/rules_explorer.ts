@@ -174,6 +174,8 @@ export interface SliceRules extends SideRates {
   label: string;
   /** Head-to-head kind, rivals only. */
   kind?: "entity" | "class";
+  /** The question's stage, questions only. */
+  stage?: string;
   /** False when the rival named by the cell is not an active entry. */
   resolved?: boolean;
   answers: number;
@@ -208,6 +210,9 @@ export interface RulesView {
   rooms: SliceRules[];
   /** Head-to-head rivals (entity, then class). */
   rivals: SliceRules[];
+  /** ru2: the open-choice questions (cells, seed + paraphrases) with the most
+   * rule-bearing answers, top QUESTION_TOP - one question can own a number. */
+  questions: SliceRules[];
 }
 
 const GROUP_CAP = 150;
@@ -215,6 +220,7 @@ const MIN_ANSWERS = 2;
 const ID_CAP = 5;
 const POOL_ID_CAP = 3;
 const SLICE_TOP = 3;
+const QUESTION_TOP = 10;
 
 export const ENUM_TOWARD = new Set(["worth", "keep", "proceed"]);
 export const GENERIC_AWAY: Record<string, string> = {
@@ -263,6 +269,8 @@ interface Acc {
   pools: Map<RulePool, { answers: Set<string>; ids: string[] }>;
   rivals: Map<string, Set<string>>;
   rooms: Map<string, { answers: Set<string>; ids: string[] }>;
+  /** Open-choice answers stating it, per question (intent id). */
+  questions: Map<string, Set<string>>;
   ids: string[];
 }
 
@@ -270,6 +278,7 @@ interface Acc {
 interface SliceAcc {
   label: string;
   kind?: "entity" | "class";
+  stage?: string;
   resolved?: boolean;
   answers: Set<string>;
   rules: number;
@@ -410,6 +419,7 @@ export async function computeRules(data: ViewData, request: ViewRequest = {}): P
   const poolAcc = new Map<RulePool, { answers: number; unconditional: number; rules: number; sides: Record<RuleSide, Set<string>> }>();
   const rooms = new Map<string, SliceAcc>();
   const rivals = new Map<string, SliceAcc>();
+  const questions = new Map<string, SliceAcc>();
   let rules = 0;
   let kept = 0;
   let unconditional = 0;
@@ -437,6 +447,14 @@ export async function computeRules(data: ViewData, request: ViewRequest = {}): P
     if (rival) {
       let s = rivals.get(rival.key);
       if (!s) { s = { ...freshSlice(rival.name), kind: rival.kind, resolved: rival.resolved }; rivals.set(rival.key, s); }
+      slices.push(s);
+    }
+    // One slice per open-choice question (cell: seed + paraphrases, named by
+    // the seed wording), for the by-question table.
+    const question = pool === "open_choice" ? intent.id : null;
+    if (question) {
+      let s = questions.get(question);
+      if (!s) { s = { ...freshSlice(intent.text), stage: intent.stage }; questions.set(question, s); }
       slices.push(s);
     }
     for (const s of slices) {
@@ -469,7 +487,7 @@ export async function computeRules(data: ViewData, request: ViewRequest = {}): P
       if (!a) {
         a = {
           side: d.side, ck, rules: 0, answers: new Set(), surfaces: new Map(), routes: new Map(),
-          pools: new Map(), rivals: new Map(), rooms: new Map(), ids: [],
+          pools: new Map(), rivals: new Map(), rooms: new Map(), questions: new Map(), ids: [],
         };
         groups.set(gk, a);
       }
@@ -490,6 +508,11 @@ export async function computeRules(data: ViewData, request: ViewRequest = {}): P
         const set = a.rivals.get(rival.key) ?? new Set<string>();
         set.add(id);
         a.rivals.set(rival.key, set);
+      }
+      if (question) {
+        const set = a.questions.get(question) ?? new Set<string>();
+        set.add(id);
+        a.questions.set(question, set);
       }
       if (room) {
         let ar = a.rooms.get(room);
@@ -572,6 +595,7 @@ export async function computeRules(data: ViewData, request: ViewRequest = {}): P
       key,
       label: s.label,
       ...(s.kind && { kind: s.kind }),
+      ...(s.stage && { stage: s.stage }),
       ...(s.resolved !== undefined && { resolved: s.resolved }),
       answers: n,
       rules: s.rules,
@@ -599,6 +623,16 @@ export async function computeRules(data: ViewData, request: ViewRequest = {}): P
       })
     )
     .sort((a, b) => (a.kind === b.kind ? 0 : a.kind === "entity" ? -1 : 1) || b.answers - a.answers || a.label.localeCompare(b.label));
+
+  const questionRules = [...questions.entries()]
+    .sort((a, b) => b[1].answers.size - a[1].answers.size || a[1].label.localeCompare(b[1].label))
+    .slice(0, QUESTION_TOP)
+    .map(([key, s]) =>
+      sliceOut(key, s, (a) => {
+        const set = a.questions.get(key);
+        return set ? { answers: set.size, ids: [...set].slice(0, ID_CAP) } : null;
+      })
+    );
 
   const pools: PoolTotals[] = RULE_VIEWS.map(([, pool]) => pool)
     .filter((pool, i, all) => all.indexOf(pool) === i && poolAcc.has(pool))
@@ -630,11 +664,13 @@ export async function computeRules(data: ViewData, request: ViewRequest = {}): P
     more,
     rooms: roomRules,
     rivals: rivalRules,
+    questions: questionRules,
   };
 }
 
 // ru1 (2026-10-30): first version - one run-wide grouping, context-judged names.
-const RULES_VERSION = "ru1";
+// ru2 (2026-11-03): + the by-question slices on open choice (payload change).
+const RULES_VERSION = "ru2";
 export function computeRulesCached(run: Run, project: Project, request: ViewRequest = {}): Promise<RulesView | null> {
   const r = requestOf(request);
   return cachedView("rules", RULES_VERSION, run, project, (d) => computeRules(d, r), { judge: true }, r);
