@@ -4,6 +4,9 @@ import { computeDoubt, type DoubtViews, type WorryRow } from "./doubt";
 import { computeSettled, type SettledViews } from "./settled";
 import { computeReasons } from "./reasons";
 import { buildResolver } from "./brand_resolve";
+import { containsSeq, famTokens } from "./brand_family";
+import { computeAlternatives, type AlternativesViews } from "./alternatives";
+import { computeRules } from "./rules_explorer";
 import { viewsOf } from "./views";
 import { cell, poolOf, type RateCell, type ViewData, type ViewRequest } from "./view_data";
 import type { BrandSummaryView, VerdictFact } from "./brand_summary";
@@ -40,10 +43,38 @@ import type { BrandSummaryView, VerdictFact } from "./brand_summary";
  *
  * The prompted head-to-head record is the summary's own entity rollup
  * (headToHead) - the same rows and rival resolution as computeHeadToHead,
- * without its condition grouping (an embedding call the summary never makes).
+ * without its matchup condition grouping.
+ *
+ * bs7 (2026-11-03) reads three areas the detectors never did:
+ *   switching   - rival leavers (leaver_capture: named but never taken, or
+ *                 the share of decided leavers you take) and your own
+ *                 customers weighing a move (own_defense: how often one
+ *                 rival is the exit shown beside a stay verdict);
+ *   conditions  - the run's decision rules through the rules explorer's
+ *                 compute, so the grouping is the ONE run-wide grouping
+ *                 under the "rules" condition-key cache scope (an
+ *                 embedding call is paid once per run + revision and shared
+ *                 with the explorer; keyless, the deterministic stem keys):
+ *                 away_condition names the largest group routing answers
+ *                 away, how many questions it decides, whether it is a wall
+ *                 (a state the buyer is already in, wall_wording.ts) and
+ *                 whether it names a brand the AI almost never picks;
+ *   engines     - decisiveness by mode (firm in-category picks over
+ *                 open-choice answers), a head-to-head record that runs
+ *                 opposite to the open-choice share by mode, and one engine
+ *                 supplying >= 40% of a brand's open-choice picks (the
+ *                 analysis map's watch threshold).
+ * Effects for the shapes that are not a two-ended spread: the leaver
+ * tension is the named-to-captured drop (the funnel's convention), the
+ * leaver strength the captured share of decided leavers above an even split
+ * among the brands that capture any; own_defense is the top exit's share of
+ * answers minus the stay share; away_condition is the share of the
+ * questions with any away rule that the group appears in; engine pick
+ * concentration is the picks' share above the engine's (or vendor's) own
+ * share of the open-choice answers.
  */
 
-export type InsightKind = "engine" | "room" | "rival" | "argument" | "doubt" | "funnel" | "question" | "value";
+export type InsightKind = "engine" | "room" | "rival" | "argument" | "doubt" | "funnel" | "question" | "value" | "switching" | "condition";
 export type InsightPill = "stations" | "why" | "rivals" | "buyers" | "table";
 
 export interface Insight {
@@ -76,12 +107,34 @@ export interface InsightInputs {
   settled: SettledViews;
   /** Criteria-taught incidence per code, most taught first; [] without a criteria pool. */
   taught: { code: string; rate: RateCell }[];
+  /** bs7: rival leavers and holding your own (computeAlternatives). */
+  alternatives: AlternativesViews;
+  /** bs7: the run's largest away-routing condition groups (top AWAY_TOP by
+   * answers) and the questions with any away rule; null without rules. */
+  away: {
+    groups: {
+      label: string;
+      rules: number;
+      answers: number;
+      cells: number;
+      wall: boolean;
+      routes: { name: string; n: number }[];
+      /** The longest active dictionary form in the wording, the client excluded. */
+      names: { key: string; name: string } | null;
+    }[];
+    cells: number;
+    grouping: "embeddings" | "stems";
+  } | null;
+  /** bs7: open-choice picks per resolved active brand, by engine (model id). */
+  enginePicks: { key: string; total: number; byModel: Record<string, number> }[];
 }
+
+const AWAY_TOP = 3;
 
 /** Computed from the summary's own load (one data read, no extra fetches):
  * the same pure computes the headline, value and doubt routes cache, with
  * the summary's engine set. */
-export function insightInputs(data: ViewData, request: ViewRequest = {}): InsightInputs {
+export async function insightInputs(data: ViewData, request: ViewRequest = {}): Promise<InsightInputs> {
   const engines = request.engines ? { engines: request.engines } : {};
   const roomSet = new Set<string>();
   for (const it of data.intents)
@@ -96,12 +149,19 @@ export function insightInputs(data: ViewData, request: ViewRequest = {}): Insigh
   // wording): in-category picks by resolved brand, headline pool.
   const resolve = buildResolver(data.dictionary, data.judged);
   const qs = new Map<string, { id: string; text: string; answers: number; picks: Record<string, number> }>();
-  for (const { code, intent } of poolOf(data, "headline", engines).rows) {
+  const byBrand = new Map<string, { key: string; total: number; byModel: Record<string, number> }>();
+  for (const { code, intent, model } of poolOf(data, "headline", engines).rows) {
     const q = qs.get(intent.id) ?? { id: intent.id, text: intent.text, answers: 0, picks: {} };
     q.answers++;
     if (code.outcome === "pick" && code.top_pick) {
       const r = resolve(code.top_pick);
-      if (r.status === "active") q.picks[r.key] = (q.picks[r.key] ?? 0) + 1;
+      if (r.status === "active") {
+        q.picks[r.key] = (q.picks[r.key] ?? 0) + 1;
+        const b = byBrand.get(r.key) ?? { key: r.key, total: 0, byModel: {} };
+        b.total++;
+        b.byModel[model] = (b.byModel[model] ?? 0) + 1;
+        byBrand.set(r.key, b);
+      }
     }
     qs.set(intent.id, q);
   }
@@ -114,6 +174,29 @@ export function insightInputs(data: ViewData, request: ViewRequest = {}): Insigh
           .map((c) => ({ code: c.key, rate: c.byType.criteria_taught! }))
           .sort((a, b) => b.rate.k - a.rate.k || a.code.localeCompare(b.code))
       : [];
+  // The run's decision rules: the explorer's own compute (sides, dedup and
+  // the one run-wide condition grouping, cached under its scope).
+  const targetKey = resolve(data.project.brand).key;
+  const forms: { seq: string[]; key: string; name: string }[] = [];
+  for (const e of data.dictionary) {
+    if (e.status !== "active" || e.id === targetKey) continue;
+    for (const f of [e.canonical, ...e.aliases]) {
+      const seq = famTokens(f);
+      if (seq.length) forms.push({ seq, key: e.id, name: e.display_name ?? e.canonical });
+    }
+  }
+  const namesIn = (label: string) => {
+    const hay = famTokens(label);
+    let best: (typeof forms)[number] | null = null;
+    for (const f of forms) if (containsSeq(hay, f.seq) && (!best || f.seq.length > best.seq.length)) best = f;
+    return best ? { key: best.key, name: best.name } : null;
+  };
+  const rules = await computeRules(data, engines);
+  const awayGroups = rules.groups
+    .filter((g) => g.side === "away")
+    .sort((a, b) => b.answers - a.answers || b.rules - a.rules || a.label.localeCompare(b.label))
+    .slice(0, AWAY_TOP)
+    .map((g) => ({ label: g.label, rules: g.rules, answers: g.answers, cells: g.cells, wall: g.wall, routes: g.routes, names: namesIn(g.label) }));
   return {
     rooms,
     value: computeValue(data, engines),
@@ -121,6 +204,9 @@ export function insightInputs(data: ViewData, request: ViewRequest = {}): Insigh
     questions: [...qs.values()],
     settled: computeSettled(data, engines),
     taught,
+    alternatives: computeAlternatives(data, engines),
+    away: rules.answers > 0 ? { groups: awayGroups, cells: rules.cellsBySide.away, grouping: rules.grouping } : null,
+    enginePicks: [...byBrand.values()].sort((a, b) => b.total - a.total || a.key.localeCompare(b.key)),
   };
 }
 
@@ -437,6 +523,9 @@ function pickConcentrationRoom(s: Summary, inp: InsightInputs): Insight | null {
   };
 }
 
+/** "Ruffles'" / "Max's" - possessive of a brand name. */
+const poss = (name: string) => (/s$/i.test(name) ? `${name}'` : `${name}'s`);
+
 const shorten = (t: string, n = 80) => {
   const x = t.replace(/\s+/g, " ").trim();
   return x.length <= n ? x : `${x.slice(0, n - 1).replace(/\s+\S*$/, "").replace(/[\s.,;:!?-]+$/, "")}...`;
@@ -572,6 +661,242 @@ function advocacyVsObjection(inp: InsightInputs): Insight | null {
   };
 }
 
+/* ------------------------------ bs7: switching ----------------------------- */
+
+/** A capture share this low on rival leavers who hear about you is "never taken". */
+const LEAVER_NEVER = 0.05;
+/** The share of leavers' answers naming you before "heard about" is the read. */
+const LEAVER_NAMED = 0.5;
+
+function leaverCapture(inp: InsightInputs): Insight | null {
+  const o = inp.alternatives.offensive;
+  if (!o || o.answers < MIN_BASE) return null;
+  const t = o.overall;
+  const you = o.captors.find((c) => c.role === "target") ?? null;
+  const takers = o.captors.filter((c) => c.chosen.k > 0);
+  const decided = takers.length ? takers[0].shareOfDecided.n : 0;
+  const lead = takers[0] ?? null;
+  // Strength: you are the brand rival leavers are sent to most.
+  if (you && lead && lead.role === "target" && decided >= MIN_BASE && takers.length >= 2) {
+    const sources = o.rows.filter((r) => r.answers >= MIN_BASE && r.key !== "generic");
+    const src = [...sources].sort((a, b) => rate(b.captured) - rate(a.captured) || a.rival.localeCompare(b.rival))[0];
+    const second = takers.find((c) => c.role !== "target");
+    return {
+      key: "leaver_capture",
+      kind: "switching",
+      title: "Rival leavers come to you",
+      body: `When a rival's customer asks what to switch to, the AI picks you in ${pct(t.captured)} of answers and ${pct(you.shareOfDecided)} of those that pick a brand in your category${src ? ` - most often for customers leaving ${src.rival}, at ${pct(src.captured)}` : ""}.`,
+      foot: `Picked ${counts(t.captured)}; of decided leavers ${counts(you.shareOfDecided)}.${second ? ` Next: ${second.name}, ${second.chosen.k}.` : ""}${src ? ` Leaving ${src.rival}: ${counts(src.captured)}.` : ""}`,
+      look: { pill: "stations", station: "comparison", label: "Stations - Comparison" },
+      effect: rate(you.shareOfDecided) - 1 / takers.length,
+    };
+  }
+  // Tension: leavers hear about you and are almost never told to take you.
+  if (rate(t.named) >= LEAVER_NAMED && rate(t.captured) < LEAVER_NEVER && apart(t.named, t.captured)) {
+    const other = takers.find((c) => c.role !== "target") ?? null;
+    return {
+      key: "leaver_capture",
+      kind: "switching",
+      title: "Rival leavers hear about you, then go elsewhere",
+      body: `When a rival's customer asks what to switch to, the AI names you in ${pct(t.named)} of answers and recommends you in ${pct(t.recommended)}, but picks you in ${pct(t.captured)}${other ? ` - ${other.name} takes the most, ${pct(other.shareOfDecided)} of the answers that pick a brand` : ""}.`,
+      foot: `Named ${counts(t.named)}; recommended ${counts(t.recommended)}; picked ${counts(t.captured)}.${other ? ` ${other.name}: ${other.chosen.k} of ${other.shareOfDecided.n} decided.` : ""}`,
+      look: { pill: "stations", station: "comparison", label: "Stations - Comparison" },
+      effect: rate(t.named) - rate(t.captured),
+    };
+  }
+  return null;
+}
+
+function ownDefense(inp: InsightInputs): Insight | null {
+  const d = inp.alternatives.defensive;
+  if (!d || d.answers < MIN_BASE) return null;
+  const top = d.destinations[0];
+  const keep = d.verdicts.keep;
+  if (!top || rate(top.offered) < 0.5 || rate(keep) >= 0.5) return null;
+  // Exits shown about as often as the top one are named with it (a list of
+  // alternatives often carries the same two or three brands every time).
+  const tied = d.destinations.filter((x) => rate(top.offered) - rate(x.offered) <= 0.05).slice(0, 3);
+  const names = tied.map((x) => x.name);
+  const who = names.length === 1 ? names[0] : `${names.slice(0, -1).join(", ")} and ${names[names.length - 1]}`;
+  return {
+    key: "own_defense",
+    kind: "switching",
+    title: `${who} ${names.length === 1 ? "is the exit" : "are the exits"} shown to your customers`,
+    body: `Asked what else to consider, your own customers ${
+      keep.k === 0 && d.verdicts.leave.k === 0
+        ? `are never told to stay or to leave,`
+        : `are told to stay in ${pct(keep)} of answers and to leave in ${pct(d.verdicts.leave)}, the AI takes no side in ${pct(d.verdicts.undecided)},`
+    } and ${names.length === 1 ? `${who} appears in ${pct(top.offered)}` : `${who} each appear in at least ${pct(tied[tied.length - 1].offered)}`}.`,
+    foot: `Stay ${counts(keep)}; leave ${counts(d.verdicts.leave)}; no side ${counts(d.verdicts.undecided)}; another brand shown ${counts(d.offersExit)}; ${tied.map((x) => `${x.name} ${x.offered.k} (${x.onKeep} on stay answers)`).join("; ")}.`,
+    look: { pill: "stations", station: "customer_base", label: "Stations - Customers" },
+    // One rival as the default exit, held down by how often the AI still says stay.
+    effect: Math.min(rate(top.offered), 1 - rate(keep)) - 0.5,
+  };
+}
+
+/* ------------------------------ bs7: conditions ---------------------------- */
+
+/** Condition counts are lower bounds (wordings the grouping did not join are
+ * left out), so the floor is on grouped rules, not MIN_BASE answers. */
+const AWAY_MIN_RULES = 15;
+/** A brand the AI almost never picks in the open choice. */
+const BLOCKER_SHARE = 0.02;
+
+function awayCondition(s: Summary, inp: InsightInputs): Insight | null {
+  const a = inp.away;
+  if (!a || a.cells === 0) return null;
+  const g = a.groups[0];
+  if (!g || g.rules < AWAY_MIN_RULES) return null;
+  const spread = g.cells / a.cells;
+  const to = g.routes[0];
+  let blocker = "";
+  let blockerFoot = "";
+  if (g.names && s.firmPickInCategory.k >= MIN_BASE && g.names.key !== s.target.key) {
+    const b = s.brands.find((x) => x.key === g.names!.key);
+    const share = b ? b.shareOfDecided : cell(0, s.firmPickInCategory.k);
+    if (rate(share) < BLOCKER_SHARE) {
+      blocker = `; it names ${g.names.name}, a brand the AI picks in ${pct(share)} of decided open-choice answers, so it blocks you without winning for it`;
+      blockerFoot = ` ${g.names.name} in the open choice: ${counts(share)}.`;
+    }
+  }
+  // The wall variant: the top group is possession-shaped, or a later one of
+  // the top groups that clears the same floor is.
+  const laterWall = !g.wall ? a.groups.slice(1).find((x) => x.wall && x.rules >= AWAY_MIN_RULES) ?? null : null;
+  const wall = g.wall
+    ? blocker
+      ? ""
+      : " - a state the buyer is already in, not an argument to out-argue"
+    : laterWall
+      ? `; the largest state-shaped one, "${shorten(laterWall.label, 60)}", appears in ${pct(laterWall.cells / a.cells)} of them - a state the buyer is already in, not an argument to out-argue`
+      : "";
+  const wallFoot = laterWall ? ` "${laterWall.label}": at least ${laterWall.rules} rules across ${laterWall.cells} questions.` : "";
+  return {
+    key: "away_condition",
+    kind: "condition",
+    title: g.wall ? `The wall: "${shorten(g.label, 60)}"` : `The condition you lose on: "${shorten(g.label, 60)}"`,
+    body: `The condition that most often routes the AI away from you is "${shorten(g.label)}"${to ? `, sending buyers to ${to.name}` : ""}, and it appears in ${pct(spread)} of the questions where any condition routes away${blocker}${wall}.`,
+    foot: `At least ${g.rules} rules in ${g.answers} answers across ${g.cells} of ${a.cells} questions with an away condition${to ? `; to ${to.name} ${to.n}` : ""}.${blockerFoot}${wallFoot} Counts are lower bounds: ${a.grouping === "stems" ? "conditions are grouped by their words, and" : ""} wordings the grouping did not join are left out.`,
+    look: { pill: "why", label: "Why - decision rules" },
+    effect: spread,
+  };
+}
+
+/* -------------------------------- bs7: engines ----------------------------- */
+
+/** Open-choice answers and in-category firm picks per mode. */
+function modeFirm(s: Summary, mode: "search" | "instinct") {
+  const list = s.byEngine.filter((e) => e.mode === mode);
+  const answers = list.reduce((x, e) => x + e.answers, 0);
+  const firm = list.reduce((x, e) => x + e.decided.n, 0);
+  const won = list.reduce((x, e) => x + e.decided.k, 0);
+  return { engines: list.length, firm: cell(firm, answers), decided: cell(won, firm) };
+}
+
+function engineDecisiveness(s: Summary): Insight | null {
+  const se = modeFirm(s, "search");
+  const ins = modeFirm(s, "instinct");
+  if (se.firm.n < MIN_BASE || ins.firm.n < MIN_BASE) return null;
+  const [hi, lo] = rate(se.firm) >= rate(ins.firm) ? [se, ins] : [ins, se];
+  if (!apart(hi.firm, lo.firm)) return null;
+  const hiName = hi === se ? "search engines" : "instinct engines";
+  const loName = hi === se ? "instinct engines" : "search engines";
+  const shareOk = se.decided.n >= MIN_BASE && ins.decided.n >= MIN_BASE;
+  const shareApart = shareOk && (apart(se.decided, ins.decided) || apart(ins.decided, se.decided));
+  const tail = !shareOk
+    ? "."
+    : shareApart
+      ? `, and of those picks you win ${pct(se.decided)} on search and ${pct(ins.decided)} on instinct.`
+      : ` - your share of those picks does not separate (${pct(se.decided)} on search vs ${pct(ins.decided)} on instinct), so the gap is decisiveness, not preference.`;
+  return {
+    key: "engine_decisiveness",
+    kind: "engine",
+    title: `${hiName.charAt(0).toUpperCase()}${hiName.slice(1)} commit to a pick`,
+    body: `In the open choice, ${hiName} pick one brand in your category in ${pct(hi.firm)} of answers and ${loName} in ${pct(lo.firm)}${tail}`,
+    foot: `Search (${se.engines} engines): firm pick ${counts(se.firm)}, yours ${counts(se.decided)}. Instinct (${ins.engines} engines): firm pick ${counts(ins.firm)}, yours ${counts(ins.decided)}.`,
+    look: { pill: "table", label: "Metrics - by mode" },
+    effect: rate(hi.firm) - rate(lo.firm),
+  };
+}
+
+/** The open-choice gap by mode that a head-to-head flip must run against. */
+const FLIP_MIN_OPEN = 0.05;
+
+function engineHeadToHeadFlip(s: Summary): Insight | null {
+  const se = s.byMode.find((m) => m.key === "search");
+  const ins = s.byMode.find((m) => m.key === "instinct");
+  if (!se || !ins) return null;
+  if (se.h2h.n < MIN_BASE || ins.h2h.n < MIN_BASE || se.decided.n < MIN_BASE || ins.decided.n < MIN_BASE) return null;
+  const h2hGap = rate(se.h2h) - rate(ins.h2h);
+  const openGap = rate(se.decided) - rate(ins.decided);
+  if (!(h2hGap > 0 ? apart(se.h2h, ins.h2h) : apart(ins.h2h, se.h2h))) return null;
+  if (Math.sign(h2hGap) === Math.sign(openGap) || Math.abs(openGap) < FLIP_MIN_OPEN) return null;
+  const h2hHi = h2hGap > 0 ? "search" : "instinct";
+  return {
+    key: "engine_h2h_flip",
+    kind: "engine",
+    title: h2hHi === "search" ? "Search engines back you head-to-head, not in the open choice" : "Instinct engines back you head-to-head, not in the open choice",
+    body: `Named against a rival you win ${pct(se.h2h)} of head-to-heads on search engines and ${pct(ins.h2h)} on instinct engines, while in the open choice you win ${pct(se.decided)} of decided answers on search and ${pct(ins.decided)} on instinct - the two modes rank you in opposite order.`,
+    foot: `Head-to-heads: search ${counts(se.h2h)}, instinct ${counts(ins.h2h)}. Open choice: search ${counts(se.decided)}, instinct ${counts(ins.decided)}.`,
+    look: { pill: "table", label: "Metrics - by mode" },
+    effect: Math.abs(h2hGap),
+  };
+}
+
+/** The analysis map's watch threshold (WATCH_ENGINE_SHARE), at summary level. */
+const ENGINE_CONC_SHARE = 0.4;
+const ENGINE_CONC_MIN_ENGINES = 3;
+
+/**
+ * One engine - or one vendor's assistants pooled - supplies >= 40% of a
+ * brand's open-choice picks (the target or a tracked rival, >= MIN_BASE
+ * picks). The baseline is the unit's own share of the open-choice answers
+ * (a vendor with four engines asks a third of the questions), so the
+ * finding needs the picks' 95% range to clear it; the effect is the share
+ * above that baseline.
+ */
+function enginePickConcentration(s: Summary, inp: InsightInputs): Insight | null {
+  if (s.byEngine.length < ENGINE_CONC_MIN_ENGINES || s.answers === 0) return null;
+  const names = new Map(s.brands.filter((b) => b.role !== "emerged").map((b) => [b.key, b.name]));
+  type Unit = { label: string; models: string[]; answers: number; vendor: boolean };
+  const units: Unit[] = s.byEngine.map((e) => ({ label: e.label, models: [e.key], answers: e.answers, vendor: false }));
+  const vendors = new Map<string, Unit>();
+  for (const e of s.byEngine) {
+    const u = vendors.get(e.vendor) ?? { label: e.vendor, models: [], answers: 0, vendor: true };
+    u.models.push(e.key);
+    u.answers += e.answers;
+    vendors.set(e.vendor, u);
+  }
+  // A one-engine vendor is the engine row already; vendors need two or more
+  // vendors on the panel to be a split at all.
+  if (vendors.size >= 2) for (const u of vendors.values()) if (u.models.length >= 2) units.push(u);
+  type C = { name: string; isTarget: boolean; unit: Unit; picks: RateCell; base: number };
+  const cands: C[] = [];
+  for (const b of inp.enginePicks) {
+    if (b.total < MIN_BASE || !names.has(b.key)) continue;
+    for (const u of units) {
+      const k = u.models.reduce((x, m) => x + (b.byModel[m] ?? 0), 0);
+      const picks = cell(k, b.total);
+      const base = u.answers / s.answers;
+      if (rate(picks) >= ENGINE_CONC_SHARE && picks.low > base) cands.push({ name: names.get(b.key)!, isTarget: b.key === s.target.key, unit: u, picks, base });
+    }
+  }
+  if (cands.length === 0) return null;
+  const best = cands.sort(
+    (a, b) => rate(b.picks) - b.base - (rate(a.picks) - a.base) || b.picks.n - a.picks.n || a.name.localeCompare(b.name)
+  )[0];
+  const whose = best.isTarget ? "your" : poss(best.name);
+  const unit = best.unit.vendor ? `${best.unit.label}'s ${best.unit.models.length} assistants` : best.unit.label;
+  return {
+    key: "engine_pick_concentration",
+    kind: "engine",
+    title: `${best.unit.label} carries ${whose} picks`,
+    body: `${unit} supply ${pct(best.picks)} of ${whose} open-choice picks while asking ${pct(best.base)} of the questions - a read without ${best.unit.vendor ? "them" : "it"} would put ${best.isTarget ? "you" : best.name} far lower.`,
+    foot: `${best.picks.k} of ${best.picks.n} open-choice picks of ${best.name} (95% range ${Math.round(best.picks.low * 100)}-${Math.round(best.picks.high * 100)}%) from ${unit}, which answer ${best.unit.answers} of ${s.answers} open-choice questions.`,
+    look: { pill: "table", label: best.unit.vendor ? "Metrics - by vendor" : "Metrics - by engine" },
+    effect: rate(best.picks) - best.base,
+  };
+}
+
 /**
  * The verdict the brief opens with: template sentences in fixed order
  * (standing, prompted vs open, concentration, doubts, value, settled), each
@@ -698,6 +1023,11 @@ export function composeVerdict(s: Summary, inp: InsightInputs): VerdictFact[] {
 
 /** Every detector once, ranked by effect, capped. */
 export function detectInsights(s: Summary, inp: InsightInputs): Insight[] {
+  return rankedInsights(s, inp).slice(0, MAX_INSIGHTS);
+}
+
+/** Every detector that fires, ranked by effect, uncapped (harnesses read the tail). */
+export function rankedInsights(s: Summary, inp: InsightInputs): Insight[] {
   const found = [
     engineSpread(s),
     modeGap(s),
@@ -717,6 +1047,12 @@ export function detectInsights(s: Summary, inp: InsightInputs): Insight[] {
     taughtVsWinning(s, inp),
     valueInHouse(inp, s.brand),
     advocacyVsObjection(inp),
+    leaverCapture(inp),
+    ownDefense(inp),
+    awayCondition(s, inp),
+    engineDecisiveness(s),
+    engineHeadToHeadFlip(s),
+    enginePickConcentration(s, inp),
   ].filter((x): x is Insight => x !== null && x.effect > 0);
-  return found.sort((a, b) => b.effect - a.effect || a.key.localeCompare(b.key)).slice(0, MAX_INSIGHTS);
+  return found.sort((a, b) => b.effect - a.effect || a.key.localeCompare(b.key));
 }

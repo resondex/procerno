@@ -172,6 +172,8 @@ const KIND_LABEL: Record<Insight["kind"], string> = {
   funnel: "The funnel",
   question: "One question",
   value: "Value",
+  switching: "Switching",
+  condition: "The conditions",
 };
 
 /** An inline hover note for a sentence inside running prose - Tip's popup,

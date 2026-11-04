@@ -44,6 +44,10 @@ export interface SummarySlice {
   chosen: RateCell;
   /** The target's picks over the slice's in-category picks (bs5). */
   decided: RateCell;
+  /** bs7: the prompted entity head-to-heads on the slice's engines - won
+   * over won + lost (n = 0 where no head-to-head was asked). Its own pool,
+   * reported beside the open-choice numbers, never summed with them. */
+  h2h: RateCell;
 }
 
 /** Share of answers arguing the code when the target is picked vs when
@@ -108,7 +112,7 @@ export interface BrandSummaryView {
     winOfDecided: RateCell;
   }[];
   /** Ranked findings across engines, rooms, rivals, arguments, doubts and
-   * the funnel (summary_insights.ts, bs5): at most one per detector, at most 8. */
+   * the funnel (summary_insights.ts, bs5; switching, conditions and engine decisiveness from bs7): at most one per detector, at most 8. */
   insights: Insight[];
   /** 3-6 template sentences in fixed order (standing, prompted vs open, concentration, doubts, value, settled), each only when its inputs clear the floors. The brief opens with them. */
   verdict: VerdictFact[];
@@ -158,9 +162,11 @@ function sliceOf(
   mode: "instinct" | "search",
   engines: number,
   list: Facts[],
-  targetKey: string
+  targetKey: string,
+  h2h: RateCell
 ): SummarySlice {
   return {
+    h2h,
     key,
     label,
     mode,
@@ -172,7 +178,7 @@ function sliceOf(
   };
 }
 
-export function computeBrandSummary(data: ViewData, request: ViewRequest = {}): BrandSummaryView {
+export async function computeBrandSummary(data: ViewData, request: ViewRequest = {}): Promise<BrandSummaryView> {
   const { run, project, source, dictionary } = data;
   const resolve = buildResolver(dictionary, data.judged);
   const targetKey = resolve(project.brand).key;
@@ -215,21 +221,6 @@ export function computeBrandSummary(data: ViewData, request: ViewRequest = {}): 
   }
   brands.sort((a, b) => b.chosen.k - a.chosen.k || b.mentioned.k - a.mentioned.k || a.name.localeCompare(b.name));
   const target = brands.find((b) => b.key === targetKey)!;
-
-  // Engine and mode splits of the target's rates, over the same pool.
-  const engineMeta = new Map(ENGINES.map((e) => [e.id, { label: engineDisplayLabel(e), mode: e.mode }]));
-  const byEngine = [...core]
-    .filter((m) => facts.some((f) => f.model === m))
-    .map((m) => {
-      const meta = engineMeta.get(m);
-      return { ...sliceOf(m, meta?.label ?? m, meta?.mode ?? "instinct", 1, facts.filter((f) => f.model === m), targetKey), ...facetsOf(m) };
-    });
-  const byMode = (["instinct", "search"] as const).flatMap((mode) => {
-    const engines = byEngine.filter((e) => e.mode === mode);
-    if (engines.length === 0) return [];
-    const list = facts.filter((f) => (engineMeta.get(f.model)?.mode ?? "instinct") === mode);
-    return [sliceOf(mode, mode, mode, engines.length, list, targetKey)];
-  });
 
   // Argument lift: wins vs other in-category picks, both buckets big enough.
   const wins = facts.filter((f) => f.pickKey === targetKey && f.reasons !== null);
@@ -280,7 +271,8 @@ export function computeBrandSummary(data: ViewData, request: ViewRequest = {}): 
   // matchup detail, conditions included, lives in the head-to-head view).
   const h2h = poolOf(data, "head_to_head_entity", request).rows;
   const byRival = new Map<string, { rival: string; won: number; lost: number; n: number }>();
-  for (const { code: c, intent } of h2h) {
+  const h2hByModel = new Map<string, { won: number; lost: number }>();
+  for (const { code: c, intent, model } of h2h) {
     const r = resolve(intent.angle);
     const key = r.status === "active" ? r.key : `?${matchKey(intent.angle)}`;
     const name = r.status === "active" ? r.name : intent.angle;
@@ -288,11 +280,46 @@ export function computeBrandSummary(data: ViewData, request: ViewRequest = {}): 
     row.n++;
     if (c.outcome === "pick" && c.top_pick) {
       const p = resolve(c.top_pick);
-      if (p.key === targetKey) row.won++;
-      else if (p.key === key) row.lost++;
+      const em = h2hByModel.get(model) ?? { won: 0, lost: 0 };
+      if (p.key === targetKey) {
+        row.won++;
+        em.won++;
+      } else if (p.key === key) {
+        row.lost++;
+        em.lost++;
+      }
+      h2hByModel.set(model, em);
     }
     byRival.set(key, row);
   }
+  // Engine and mode splits of the target's rates, over the same pool; each
+  // slice carries the prompted head-to-head record on its engines beside it.
+  const h2hCell = (models: string[]): RateCell => {
+    let won = 0;
+    let lost = 0;
+    for (const m of models) {
+      const e = h2hByModel.get(m);
+      if (e) {
+        won += e.won;
+        lost += e.lost;
+      }
+    }
+    return cell(won, won + lost);
+  };
+  const engineMeta = new Map(ENGINES.map((e) => [e.id, { label: engineDisplayLabel(e), mode: e.mode }]));
+  const byEngine = [...core]
+    .filter((m) => facts.some((f) => f.model === m))
+    .map((m) => {
+      const meta = engineMeta.get(m);
+      return { ...sliceOf(m, meta?.label ?? m, meta?.mode ?? "instinct", 1, facts.filter((f) => f.model === m), targetKey, h2hCell([m])), ...facetsOf(m) };
+    });
+  const byMode = (["instinct", "search"] as const).flatMap((mode) => {
+    const engines = byEngine.filter((e) => e.mode === mode);
+    if (engines.length === 0) return [];
+    const list = facts.filter((f) => (engineMeta.get(f.model)?.mode ?? "instinct") === mode);
+    return [sliceOf(mode, mode, mode, engines.length, list, targetKey, h2hCell(engines.map((e) => e.key)))];
+  });
+
   const headToHead = [...byRival.entries()]
     .map(([key, r]) => ({
       key,
@@ -324,7 +351,7 @@ export function computeBrandSummary(data: ViewData, request: ViewRequest = {}): 
     customersDoubt,
     headToHead,
   };
-  const inputs = insightInputs(data, request);
+  const inputs = await insightInputs(data, request);
   return { ...summary, insights: detectInsights(summary, inputs), verdict: composeVerdict(summary, inputs) };
 }
 
@@ -332,7 +359,8 @@ export function computeBrandSummary(data: ViewData, request: ViewRequest = {}): 
 // bs4 (2026-11-03): engine slices carry vendor / tier / mode and the payload lists its core engines (the Panel lens).
 // bs5 (2026-11-03): ranked server-side insights (summary_insights.ts) and a per-slice share of decided.
 // bs6 (2026-11-03): the verdict sentences and six cross-pool detectors; loads the setup decision (Value line names).
-const BRAND_SUMMARY_VERSION = "bs6";
+// bs7 (2026-11-03): engine and mode slices carry the prompted head-to-head record; detectors over rival leavers, holding your own, the run's decision rules (one shared condition grouping) and engine decisiveness / head-to-head flips / one-engine pick concentration.
+const BRAND_SUMMARY_VERSION = "bs7";
 export function computeBrandSummaryCached(run: Run, project: Project, request: ViewRequest = {}): Promise<BrandSummaryView | null> {
   const r = requestOf(request);
   return cachedView("brand_summary", BRAND_SUMMARY_VERSION, run, project, (d) => computeBrandSummary(d, r), { judge: true, setupDecision: true }, r);

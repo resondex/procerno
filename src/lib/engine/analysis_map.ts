@@ -3,6 +3,7 @@ import { containsSeq, famTokens } from "./brand_family";
 import { excludedWords } from "./definition_overlap";
 import { conditionKeysFor, conditionStemKey } from "./condition_groups";
 import { ENUM_TOWARD, GENERIC_AWAY } from "./rules_explorer";
+import { isWallWording } from "./wall_wording";
 import { computeBrandSummary, type BrandSummaryView } from "./brand_summary";
 import { computeValue, type ValueRow } from "./value";
 import { exitResolver } from "./exits";
@@ -170,31 +171,8 @@ const pct = (c: RateCell) => pctOf(rate(c));
 const norm = (s: string) => s.trim().toLowerCase();
 const share = (k: number, n: number) => (n > 0 ? k / n : 0);
 
-/* ---------------------------- the wall detector --------------------------- */
-
-/**
- * Possession / state wording: the buyer already has, uses or is inside
- * something. Calibrated on the five fixture trackers' away groups (the
- * harness prints the table): "already owns Apple devices" flags, "craving
- * bold flavor" does not.
- */
-const WALL_PATTERN =
-  /\b(already|existing|currently|current (?:user|customer|subscriber|member|owner)s?|invested|investment|entrenched|locked[- ]in|tied (?:in)?to|committed to|loyal(?:ty)?|own(?:s|ing)?|owner|has an?|have an?|on an? \w+ (?:plan|account|phone|device)|in(?:side)? the [\w+'-]+ (?:ecosystem|world)|ecosystem user|subscribed|subscriber|member of|pays? for)\b/i;
-/** Possession of a NAMED thing (case-sensitive, so the object must be a
- * proper name): "parents use iPhones", "a Microsoft shop", "GitHub-centric
- * teams". A bare "using" is not a wall ("team using 20% of features"). */
-const WALL_NAMED = /\b(?:use[sd]?|using)\s+(?:an?\s+|the\s+|other\s+)?(?:[A-Z][\w+&'-]*|i[A-Z]\w*)|\b[A-Z][\w+&'-]*\s+(?:shop|house|stack)\b|\b[A-Z][\w+&'-]*-(?:centric|native|based|first)\b/;
-/** Want wording: a preference or a desire, never a state. A want verb
- * without "already" keeps the group out of the walls. */
-const WANT_PATTERN = /\b(crav\w*|love[sd]?|prefer\w*|wants?|wanting|looking for|wish\w*|desire\w*|enjoy\w*|seek\w*|after (?:a|the) )\b/i;
-
-export function isWallWording(texts: string[]): boolean {
-  const joined = texts.join(" | ");
-  if (!WALL_PATTERN.test(joined) && !WALL_NAMED.test(joined)) return false;
-  // A want verb outweighs a stray state word unless the state is explicit.
-  if (WANT_PATTERN.test(joined) && !/\balready\b/i.test(joined)) return false;
-  return true;
-}
+/* The wall detector lives in wall_wording.ts (shared with the summary insights). */
+export { isWallWording };
 
 /* ------------------------------ cell plumbing ----------------------------- */
 
@@ -325,7 +303,7 @@ export async function computeAnalysisMap(data: ViewData, request: ViewRequest = 
   const resolve = buildResolver(dictionary, data.judged);
   const targetKey = resolve(project.brand).key;
   const brand = project.brand;
-  const summary = computeBrandSummary(data, eng);
+  const summary = await computeBrandSummary(data, eng);
   const defaultKey = summary.brands.find((b) => b.role !== "target" && b.chosen.k > 0)?.key ?? null;
 
   /* -- room order: intent situations in setup order -- */
@@ -1366,6 +1344,23 @@ function tensionsOf(
           if (hit) return idOf(hit);
         }
         return strict ? null : fallbackOpen;
+      }
+      case "switching": {
+        // own_defense reads the holding-your-own cell; leaver_capture the
+        // named rival's leaver cell, else the pooled one.
+        if (key === "own_defense") return firstOf("doubts:hold:") ?? (strict ? null : firstOf("fights:leavers:") ?? fallbackOpen);
+        const leavers = specs.filter((x) => x.row === "leavers");
+        const hit = longestMatch(text, leavers, (x) => x.label);
+        return hit ? idOf(hit) : strict ? null : firstOf("fights:leavers:") ?? fallbackOpen;
+      }
+      case "condition": {
+        // The away condition names where it routes; the rival's head-to-head
+        // carries its conditions. Else a wall-badged cell, else the open choice.
+        const h2h = specs.filter((x) => x.row === "h2h");
+        const hit = longestMatch(text, h2h, (x) => x.label);
+        if (hit) return idOf(hit);
+        const walled = ids.find((id) => cells.get(id)!.badges.includes("wall"));
+        return walled ?? (strict ? null : fallbackOpen);
       }
       case "funnel":
       default:

@@ -336,22 +336,32 @@ export async function conditionKeysFor(
     await store.cacheSet(key, JSON.stringify([...m.entries()]), cache.meta);
     await store.cachePurge(prefix, `${prefix}${cache.revision}:`);
   };
+  const read = async (): Promise<Map<string, string> | null> => {
+    if (!cache) return null;
+    const raw = await store.cacheGet(key, CONDITION_KEYS_TTL_MS).catch(() => null);
+    if (!raw) return null;
+    try {
+      return new Map(JSON.parse(raw) as [string, string][]);
+    } catch {
+      return null;
+    }
+  };
   if (!full) {
+    // Unnarrowed, `counts` IS the full pool: a key map another view of the
+    // same scope already wrote (the brand summary and the rules explorer both
+    // group the run's rules under "rules") is reused whole when it covers
+    // every wording - one embedding call per run + revision + scope.
+    const hit = await read();
+    if (hit && [...counts.keys()].every((c) => hit.has(c))) {
+      const out = new Map<string, string>();
+      for (const c of counts.keys()) out.set(c, hit.get(c)!);
+      return out;
+    }
     const m = await group(counts);
     await write(m).catch(() => {});
     return m;
   }
-  let fullMap: Map<string, string> | null = null;
-  if (cache) {
-    const raw = await store.cacheGet(key, CONDITION_KEYS_TTL_MS).catch(() => null);
-    if (raw) {
-      try {
-        fullMap = new Map(JSON.parse(raw) as [string, string][]);
-      } catch {
-        fullMap = null;
-      }
-    }
-  }
+  let fullMap: Map<string, string> | null = await read();
   if (!fullMap) {
     fullMap = await group(full());
     await write(fullMap).catch(() => {});

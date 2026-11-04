@@ -3,6 +3,7 @@ import { buildResolver, type Resolved } from "./brand_resolve";
 import { containsSeq, famTokens } from "./brand_family";
 import { excludedWords } from "./definition_overlap";
 import { conditionKeysFor, conditionStemKey } from "./condition_groups";
+import { isWallWording } from "./wall_wording";
 import { cachedView, cell, condCache, coreOf, poolOf, requestOf, type PoolRow, type RateCell, type ViewData, type ViewRequest } from "./view_data";
 import { viewsOf, type ViewKey } from "./views";
 import type { AnswerCodes, DictionaryEntry, Intent, Project, Run } from "../types";
@@ -150,6 +151,12 @@ export interface RuleGroup {
   rooms: { room: string; answers: number }[];
   /** Up to 5 sample response ids. */
   ids: string[];
+  /** ru3: distinct questions (cells - a seed and its paraphrases) stating it,
+   * across every question type: how many contests the condition decides. */
+  cells: number;
+  /** ru3: possession/state-shaped wording (wall_wording.ts, the analysis
+   * map's wall test) over the label and the top surface wordings. */
+  wall: boolean;
 }
 
 /** One condition group's standing inside a slice (a room or a rival). */
@@ -201,6 +208,8 @@ export interface RulesView {
   /** Answers in a rule-bearing question type with no code row yet. */
   uncoded: number;
   overall: SideRates;
+  /** ru3: distinct cells (questions) with at least one deduplicated rule on each side. */
+  cellsBySide: Record<RuleSide, number>;
   pools: PoolTotals[];
   /** Groups stated by 2+ answers, top GROUP_CAP per side. */
   groups: RuleGroup[];
@@ -271,6 +280,8 @@ interface Acc {
   rooms: Map<string, { answers: Set<string>; ids: string[] }>;
   /** Open-choice answers stating it, per question (intent id). */
   questions: Map<string, Set<string>>;
+  /** Distinct cells (intent ids) stating it. */
+  cells: Set<string>;
   ids: string[];
 }
 
@@ -416,6 +427,7 @@ export async function computeRules(data: ViewData, request: ViewRequest = {}): P
 
   const groups = new Map<string, Acc>();
   const overallSides: Record<RuleSide, Set<string>> = { you: new Set(), away: new Set(), elsewhere: new Set() };
+  const cellSides: Record<RuleSide, Set<string>> = { you: new Set(), away: new Set(), elsewhere: new Set() };
   const poolAcc = new Map<RulePool, { answers: number; unconditional: number; rules: number; sides: Record<RuleSide, Set<string>> }>();
   const rooms = new Map<string, SliceAcc>();
   const rivals = new Map<string, SliceAcc>();
@@ -479,6 +491,7 @@ export async function computeRules(data: ViewData, request: ViewRequest = {}): P
       seen.add(dedup);
       kept++;
       overallSides[d.side].add(id);
+      cellSides[d.side].add(intent.id);
       p.sides[d.side].add(id);
       for (const s of slices) s.sides[d.side].add(id);
 
@@ -487,7 +500,7 @@ export async function computeRules(data: ViewData, request: ViewRequest = {}): P
       if (!a) {
         a = {
           side: d.side, ck, rules: 0, answers: new Set(), surfaces: new Map(), routes: new Map(),
-          pools: new Map(), rivals: new Map(), rooms: new Map(), questions: new Map(), ids: [],
+          pools: new Map(), rivals: new Map(), rooms: new Map(), questions: new Map(), cells: new Set(), ids: [],
         };
         groups.set(gk, a);
       }
@@ -497,6 +510,7 @@ export async function computeRules(data: ViewData, request: ViewRequest = {}): P
       const rt = a.routes.get(rk) ?? { name: d.name, n: 0 };
       rt.n++;
       a.routes.set(rk, rt);
+      a.cells.add(intent.id);
       if (a.answers.has(id)) continue;
       a.answers.add(id);
       if (a.ids.length < ID_CAP) a.ids.push(id);
@@ -558,6 +572,13 @@ export async function computeRules(data: ViewData, request: ViewRequest = {}): P
           .map(([room, v]) => ({ room, answers: v.answers.size }))
           .sort((x, y) => y.answers - x.answers),
         ids: a.ids,
+        cells: a.cells.size,
+        wall: isWallWording(
+          [...a.surfaces.entries()]
+            .sort((x, y) => y[1] - x[1] || (x[0] < y[0] ? -1 : 1))
+            .slice(0, 5)
+            .map(([w]) => w)
+        ),
       });
     });
   }
@@ -659,6 +680,7 @@ export async function computeRules(data: ViewData, request: ViewRequest = {}): P
     kept,
     uncoded,
     overall: sideRates(overallSides, total),
+    cellsBySide: { you: cellSides.you.size, away: cellSides.away.size, elsewhere: cellSides.elsewhere.size },
     pools,
     groups: outGroups,
     more,
@@ -670,7 +692,8 @@ export async function computeRules(data: ViewData, request: ViewRequest = {}): P
 
 // ru1 (2026-10-30): first version - one run-wide grouping, context-judged names.
 // ru2 (2026-11-03): + the by-question slices on open choice (payload change).
-const RULES_VERSION = "ru2";
+// ru3 (2026-11-03): groups carry their distinct cells and the wall test; cellsBySide (payload change).
+const RULES_VERSION = "ru3";
 export function computeRulesCached(run: Run, project: Project, request: ViewRequest = {}): Promise<RulesView | null> {
   const r = requestOf(request);
   return cachedView("rules", RULES_VERSION, run, project, (d) => computeRules(d, r), { judge: true }, r);
