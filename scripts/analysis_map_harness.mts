@@ -22,6 +22,11 @@ process.env.RUN_COLLECT_ONLY = "1";
 const { store } = await import(process.cwd() + "/src/lib/store/index.ts");
 const { loadViewData } = await import(process.cwd() + "/src/lib/engine/view_data.ts");
 const { computeAnalysisMap } = await import(process.cwd() + "/src/lib/engine/analysis_map.ts");
+const { computeBrandSummary } = await import(process.cwd() + "/src/lib/engine/brand_summary.ts");
+const { insightInputs, rankedInsights } = await import(process.cwd() + "/src/lib/engine/summary_insights.ts");
+
+// bs8 detectors: every one that fires (ranked, uncapped) must place onto its own map cell.
+const BS8_KEYS = new Set(["neutralized_differentiator", "conversion_vs_rival", "leak_picks", "leak_problem", "worst_worry", "leave_no_exit"]);
 
 const EXPECTED: Record<string, string> = {
   "american express": "specialist",
@@ -43,6 +48,12 @@ for (const project of projects) {
   const data = await loadViewData(run, project, { setupDecision: true, judge: true });
   if (!data) continue;
   const debug = { walls: [], casting: {} } as unknown as Parameters<typeof computeAnalysisMap>[2] & object;
+  {
+    // rankedInsights reads the summary without its own insights / verdict.
+    const summary = await computeBrandSummary(data, {});
+    const ranked = rankedInsights(summary, await insightInputs(data, {}));
+    (debug as { probeInsights?: unknown }).probeInsights = ranked.filter((i: { key: string }) => BS8_KEYS.has(i.key));
+  }
   const view = await computeAnalysisMap(data, {}, debug);
   const ids = new Set(data.responses.map((r: { id: string }) => r.id));
 
@@ -99,6 +110,13 @@ for (const project of projects) {
     console.log(`  * ${t.title}  [-> ${t.cellId}]\n    ${t.body}`);
   }
   if (view.tensions.length < 3 || view.tensions.length > 5) failures.push(`${project.brand}: ${view.tensions.length} tensions`);
+
+  console.log(`\nBS8 PLACEMENTS:`);
+  for (const pl of (debug as { placements?: { key: string; kind: string; cellId: string | null; how: string }[] }).placements ?? []) {
+    console.log(`  ${pl.key.padEnd(28)} ${pl.kind.padEnd(9)} -> ${pl.cellId} (${pl.how})`);
+    if (pl.how !== "match") failures.push(`${project.brand}: ${pl.key} fell back to a generic cell (${pl.cellId})`);
+    if (!pl.cellId || !seen.has(pl.cellId)) failures.push(`${project.brand}: ${pl.key} places on an unknown cell ${pl.cellId}`);
+  }
 
   for (const w of debug!.walls as { cellId: string; label: string; n: number; rank: number; wall: boolean; samples: string[] }[])
     wallTable.push(`${project.brand.padEnd(17)} | ${w.wall ? "WALL" : "    "} | #${w.rank} n=${String(w.n).padEnd(4)} | ${w.cellId.padEnd(48)} | ${w.label}${w.samples.length > 1 ? `  {${w.samples.slice(1).join(" / ")}}` : ""}`);

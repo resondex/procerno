@@ -4,7 +4,7 @@ import { excludedWords } from "./definition_overlap";
 import { conditionKeysFor, conditionStemKey } from "./condition_groups";
 import { ENUM_TOWARD, GENERIC_AWAY } from "./rules_explorer";
 import { isWallWording } from "./wall_wording";
-import { computeBrandSummary, type BrandSummaryView } from "./brand_summary";
+import { computeBrandSummary, type BrandSummaryView, type Insight } from "./brand_summary";
 import { computeValue, type ValueRow } from "./value";
 import { exitResolver } from "./exits";
 import { ENGINES, engineDisplayLabel } from "./providers";
@@ -295,6 +295,12 @@ export interface CastingFacts {
 export interface AnalysisMapDebug {
   walls: WallProbe[];
   casting: CastingFacts;
+  /** Harness only: insights to place through the tensions' cell matcher
+   * (default: the summary's served insights); results land in `placements`.
+   * `how` is "match" when a bs8 detector found its own cell, "generic" when
+   * it fell back, "other" for the older detectors (not instrumented). */
+  probeInsights?: Insight[];
+  placements?: { key: string; kind: string; cellId: string | null; how: string }[];
 }
 
 export async function computeAnalysisMap(data: ViewData, request: ViewRequest = {}, debug?: AnalysisMapDebug): Promise<AnalysisMapView> {
@@ -1158,7 +1164,9 @@ export async function computeAnalysisMap(data: ViewData, request: ViewRequest = 
   ];
 
   /* -- tensions -- */
-  const tensions = tensionsOf(summary, facts, specs, cellById, brand);
+  const probe = debug ? { insights: debug.probeInsights ?? summary.insights, out: [] as NonNullable<AnalysisMapDebug["placements"]> } : undefined;
+  const tensions = tensionsOf(summary, facts, specs, cellById, brand, probe);
+  if (debug && probe) debug.placements = probe.out;
 
   /* -- honesty line: map answers on the core panel with no code row -- */
   const core = coreOf(data, eng);
@@ -1281,7 +1289,8 @@ function tensionsOf(
   f: CastingFacts,
   specs: CellSpec[],
   cells: Map<string, MapCell>,
-  brand: string
+  brand: string,
+  probe?: { insights: Insight[]; out: { key: string; kind: string; cellId: string | null; how: string }[] }
 ): { title: string; body: string; cellId: string }[] {
   const ids = [...cells.keys()];
   const firstOf = (prefix: string) => ids.find((id) => id.startsWith(prefix)) ?? null;
@@ -1302,6 +1311,18 @@ function tensionsOf(
     cellId: openCells.length ? idOf(openCells[0]) : fallbackOpen,
   });
 
+  // bs8 placement bookkeeping for the harness probe ("match" / "generic").
+  let how = "other";
+  const found = (id: string | null, strict: boolean, fallback: () => string | null): string | null => {
+    if (id) {
+      how = "match";
+      return id;
+    }
+    if (strict) return null;
+    how = "generic";
+    return fallback();
+  };
+  const leakCells = () => ids.filter((id) => cells.get(id)!.badges.includes("leak"));
   const cellFor = (kind: string, key: string, title: string, body: string): string | null => {
     const t = cellForText(kind, key, title, true);
     return t ?? cellForText(kind, key, `${title} ${body}`, false);
@@ -1313,11 +1334,27 @@ function tensionsOf(
         return hit ? idOf(hit) : strict ? null : fallbackOpen;
       }
       case "rival": {
+        if (key === "conversion_vs_rival") {
+          // The rival's fight cell (head-to-head, else its leavers), else an
+          // open-choice cell the rival takes.
+          const fight = longestMatch(text, specs.filter((x) => x.row === "h2h" || x.row === "leavers"), (x) => x.label);
+          const taken = fight ?? longestMatch(text, openCells, (x) => x.taker.name);
+          return found(taken ? idOf(taken) : null, strict, () => firstOf("fights:h2h:") ?? fallbackOpen);
+        }
         const h2h = specs.filter((x) => x.row === "h2h");
         const hit = longestMatch(text, h2h, (x) => x.label);
         return hit ? idOf(hit) : strict ? null : firstOf("fights:h2h:") ?? fallbackOpen;
       }
       case "doubt": {
+        if (key === "worst_worry" || key === "leave_no_exit") {
+          const cust = specs.filter((x) => x.band === "doubts" && x.row === "customers");
+          // The named worry; for no-exit leaves, the worry with the most leave answers.
+          const hit =
+            key === "worst_worry"
+              ? longestMatch(text, cust, (x) => x.label)
+              : [...cust].sort((a, b) => b.them.length - a.them.length || idOf(a).localeCompare(idOf(b)))[0] ?? null;
+          return found(hit ? idOf(hit) : null, strict, () => firstOf("doubts:customers:") ?? firstOf("doubts:"));
+        }
         if (key === "advocacy_vs_objection") return firstOf("settled:settled:advocacy") ?? firstOf("doubts:buyers:");
         const worries = specs.filter((x) => x.band === "doubts" && (x.row === "buyers" || x.row === "customers"));
         const hit = longestMatch(text, worries, (x) => x.label);
@@ -1331,6 +1368,11 @@ function tensionsOf(
         return hit ? idOf(hit) : strict ? null : firstOf("chooses:value:");
       }
       case "argument":
+        if (key === "neutralized_differentiator") {
+          // The rival that takes most of the losses, named in the body.
+          const hit = longestMatch(text, specs.filter((x) => x.row === "h2h"), (x) => x.label);
+          return found(hit ? idOf(hit) : null, strict, () => firstOf("fights:h2h:") ?? firstOf("chooses:criteria:") ?? fallbackOpen);
+        }
         return firstOf("chooses:criteria:") ?? fallbackOpen;
       case "engine": {
         const watched = ids.find((id) => cells.get(id)!.badges.includes("watch") && id.startsWith("chooses:open:"));
@@ -1362,6 +1404,18 @@ function tensionsOf(
         const walled = ids.find((id) => cells.get(id)!.badges.includes("wall"));
         return walled ?? (strict ? null : fallbackOpen);
       }
+      case "leak": {
+        if (key === "leak_problem") {
+          // The room's problem-recognition cell.
+          const hit = longestMatch(text, specs.filter((x) => x.row === "awareness"), (x) => x.label);
+          return found(hit ? idOf(hit) : null, strict, () => leakCells()[0] ?? firstOf("chooses:awareness:") ?? fallbackOpen);
+        }
+        // Out-of-category picks: a leak-badged cell, the named room's first.
+        const leaky = new Set(leakCells());
+        const named = longestMatch(text, specs.filter((x) => leaky.has(idOf(x))), (x) => x.label);
+        // The room is named in the body, so the title-only pass waits for it.
+        return found(named ? idOf(named) : strict ? null : leakCells()[0] ?? null, strict, () => fallbackOpen);
+      }
       case "funnel":
       default:
         return fallbackOpen;
@@ -1378,13 +1432,20 @@ function tensionsOf(
     if (!cellId) continue;
     out.push({ title: ins.title.charAt(0).toUpperCase() + ins.title.slice(1), body: ins.body, cellId });
   }
+  if (probe)
+    for (const ins of probe.insights) {
+      how = "other";
+      const cellId = cellFor(ins.kind, ins.key, ins.title, ins.body);
+      probe.out.push({ key: ins.key, kind: ins.kind, cellId, how });
+    }
   return out;
 }
 
 /* -------------------------------- cache -------------------------------- */
 
 // am1 (2026-11-03): first version.
-const ANALYSIS_MAP_VERSION = "am1";
+// am2 (2026-11-04): the summary's bs8 detectors reach the tensions (new kind "leak"; key-specific placement for the bs8 keys).
+const ANALYSIS_MAP_VERSION = "am2";
 export function computeAnalysisMapCached(run: Run, project: Project, request: ViewRequest = {}): Promise<AnalysisMapView | null> {
   const r = requestOf(request, false);
   return cachedView("analysis_map", ANALYSIS_MAP_VERSION, run, project, (d) => computeAnalysisMap(d, r), { setupDecision: true, judge: true }, r);

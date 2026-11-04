@@ -174,6 +174,7 @@ const KIND_LABEL: Record<Insight["kind"], string> = {
   value: "Value",
   switching: "Switching",
   condition: "The conditions",
+  leak: "Leaving the category",
 };
 
 /** An inline hover note for a sentence inside running prose - Tip's popup,

@@ -72,9 +72,29 @@ import type { BrandSummaryView, VerdictFact } from "./brand_summary";
  * questions with any away rule that the group appears in; engine pick
  * concentration is the picks' share above the engine's (or vendor's) own
  * share of the open-choice answers.
+ *
+ * bs8 (2026-11-04) adds four reads:
+ *   neutralized_differentiator - an argument carried by >= 40% of your
+ *                 prompted head-to-head wins that rides the rival's wins at
+ *                 the same or a higher rate (the rival is credited with it,
+ *                 so it no longer sets you apart);
+ *   conversion_vs_rival - recommendations turned into picks, you vs the
+ *                 rival with the largest share of decided;
+ *   leak        - open-choice firm picks that leave the category
+ *                 (leak_picks) and the buyer room whose problem questions
+ *                 the AI routes outside the category most (leak_problem);
+ *   retention   - the customers' worry whose leave rate sits apart above
+ *                 the rest (worst_worry) and leave verdicts that name no
+ *                 destination (leave_no_exit, read from the doubt view's
+ *                 existing offersExitBy - no view change).
+ * Effects: the neutralized argument is its loss share minus its win share
+ * (a parity argument ranks near zero, one the rival owns ranks high);
+ * conversion and the worst worry are the gap; out-of-category picks are
+ * their share of firm picks (any leak is a loss, there is no even baseline);
+ * the problem leak and the no-exit share are the share above half.
  */
 
-export type InsightKind = "engine" | "room" | "rival" | "argument" | "doubt" | "funnel" | "question" | "value" | "switching" | "condition";
+export type InsightKind = "engine" | "room" | "rival" | "argument" | "doubt" | "funnel" | "question" | "value" | "switching" | "condition" | "leak";
 export type InsightPill = "stations" | "why" | "rivals" | "buyers" | "table";
 
 export interface Insight {
@@ -98,8 +118,9 @@ const MAX_INSIGHTS = 8;
 /** The sibling-view inputs the detectors read, all under the summary's request. */
 export interface InsightInputs {
   /** Per buyer room: the target's share of decided in that room's open-choice
-   * answers, its picks there and the room's in-category picks. */
-  rooms: { room: string; decided: RateCell; picks: number; firm: number }[];
+   * answers, its picks there and the room's in-category picks (bs8: firmAll,
+   * every firm pick, in the category or not). */
+  rooms: { room: string; decided: RateCell; picks: number; firm: number; firmAll: number }[];
   value: ValueView | null;
   doubt: DoubtViews;
   /** Per open-choice question (cell - seed + paraphrases, named by the seed): picks by resolved active brand key. */
@@ -127,6 +148,26 @@ export interface InsightInputs {
   } | null;
   /** bs7: open-choice picks per resolved active brand, by engine (model id). */
   enginePicks: { key: string; total: number; byModel: Record<string, number> }[];
+  /** bs8: reason codes on the pooled entity head-to-heads - answers the
+   * target wins (top pick = the client) and loses (top pick = the cell's
+   * rival), per code with the losses split by rival key. */
+  h2hArgs: {
+    wins: number;
+    losses: number;
+    rivals: Record<string, string>;
+    codes: { code: string; wins: number; losses: number; lossesBy: Record<string, number> }[];
+  };
+  /** bs8: open-choice firm picks (B5) - all of them, the in-category ones,
+   * and the names outside the category (ruled out, pending, unknown); per room. */
+  leak: {
+    firm: number;
+    inCategory: number;
+    names: { name: string; n: number }[];
+    rooms: { room: string; firm: number; outside: number }[];
+  };
+  /** bs8: problem recognition - answers routed outside the category
+   * (category_routed adjacent), overall and per buyer room; null without the pool. */
+  problem: { all: RateCell; rooms: { room: string; out: RateCell }[] } | null;
 }
 
 const AWAY_TOP = 3;
@@ -142,7 +183,7 @@ export async function insightInputs(data: ViewData, request: ViewRequest = {}): 
   const rooms = [...roomSet].sort().map((room) => {
     const h = computeHeadline(data, { room, ...engines });
     const t = h.brands.find((b) => b.role === "target");
-    return { room, decided: t ? t.shareOfDecided : cell(0, h.firmPickInCategory.k), picks: t ? t.chosen.k : 0, firm: h.firmPickInCategory.k };
+    return { room, decided: t ? t.shareOfDecided : cell(0, h.firmPickInCategory.k), picks: t ? t.chosen.k : 0, firm: h.firmPickInCategory.k, firmAll: h.firmPick.k };
   });
   // Per question (the CELL: a seed and its paraphrases pooled, keyed by the
   // intent like workbench.ts's Question dimension, named by its seed
@@ -197,6 +238,59 @@ export async function insightInputs(data: ViewData, request: ViewRequest = {}): 
     .sort((a, b) => b.answers - a.answers || b.rules - a.rules || a.label.localeCompare(b.label))
     .slice(0, AWAY_TOP)
     .map((g) => ({ label: g.label, rules: g.rules, answers: g.answers, cells: g.cells, wall: g.wall, routes: g.routes, names: namesIn(g.label) }));
+
+  // bs8: reason codes on the pooled entity head-to-heads (the summary's own
+  // rival resolution: the cell's angle through the dictionary).
+  const h2hArgs: InsightInputs["h2hArgs"] = { wins: 0, losses: 0, rivals: {}, codes: [] };
+  const codeTally = new Map<string, { code: string; wins: number; losses: number; lossesBy: Record<string, number> }>();
+  for (const { code, intent } of poolOf(data, "head_to_head_entity", engines).rows) {
+    if (code.outcome !== "pick" || !code.top_pick || code.reasons === null) continue;
+    const r = resolve(intent.angle);
+    if (r.status !== "active") continue;
+    const p = resolve(code.top_pick);
+    const side = p.key === targetKey ? "wins" : p.key === r.key ? "losses" : null;
+    if (!side) continue;
+    h2hArgs[side]++;
+    if (side === "losses") h2hArgs.rivals[r.key] = r.name;
+    for (const c of new Set(code.reasons)) {
+      const t = codeTally.get(c) ?? { code: c, wins: 0, losses: 0, lossesBy: {} };
+      t[side]++;
+      if (side === "losses") t.lossesBy[r.key] = (t.lossesBy[r.key] ?? 0) + 1;
+      codeTally.set(c, t);
+    }
+  }
+  h2hArgs.codes = [...codeTally.values()].sort((a, b) => b.wins - a.wins || a.code.localeCompare(b.code));
+
+  // bs8: firm picks that leave the category (the headline's B5 buckets), run level and per room.
+  const runHeadline = computeHeadline(data, engines);
+  const outNames = new Map<string, number>();
+  for (const x of [...runHeadline.ruledOutPicks, ...runHeadline.pendingPicks, ...runHeadline.notInDictionaryPicks])
+    outNames.set(x.name, (outNames.get(x.name) ?? 0) + x.n);
+  const leak: InsightInputs["leak"] = {
+    firm: runHeadline.firmPick.k,
+    inCategory: runHeadline.firmPickInCategory.k,
+    names: [...outNames.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0])).map(([name, n]) => ({ name, n })),
+    rooms: rooms.map((r) => ({ room: r.room, firm: r.firmAll, outside: r.firmAll - r.firm })),
+  };
+
+  // bs8: problem recognition routed outside the category, per room.
+  const routing = poolOf(data, "awareness_routing", engines).rows;
+  let problem: InsightInputs["problem"] = null;
+  if (routing.length > 0) {
+    const byRoom = new Map<string, { out: number; n: number }>();
+    for (const { code, intent } of routing) {
+      if (!intent.situation) continue;
+      const t = byRoom.get(intent.situation) ?? { out: 0, n: 0 };
+      t.n++;
+      if (code.category_routed === "adjacent") t.out++;
+      byRoom.set(intent.situation, t);
+    }
+    problem = {
+      all: cell(routing.filter((r) => r.code.category_routed === "adjacent").length, routing.length),
+      rooms: [...byRoom.entries()].sort((a, b) => a[0].localeCompare(b[0])).map(([room, t]) => ({ room, out: cell(t.out, t.n) })),
+    };
+  }
+
   return {
     rooms,
     value: computeValue(data, engines),
@@ -207,6 +301,9 @@ export async function insightInputs(data: ViewData, request: ViewRequest = {}): 
     alternatives: computeAlternatives(data, engines),
     away: rules.answers > 0 ? { groups: awayGroups, cells: rules.cellsBySide.away, grouping: rules.grouping } : null,
     enginePicks: [...byBrand.values()].sort((a, b) => b.total - a.total || a.key.localeCompare(b.key)),
+    h2hArgs,
+    leak,
+    problem,
   };
 }
 
@@ -897,6 +994,193 @@ function enginePickConcentration(s: Summary, inp: InsightInputs): Insight | null
   };
 }
 
+/* ---------------------- bs8: neutralized differentiator --------------------- */
+
+/** An argument carried by this share of your head-to-head wins is one you win on. */
+const ND_WIN_SHARE = 0.4;
+
+/**
+ * An argument in >= 40% of the target's prompted head-to-head wins (all
+ * entity rivals pooled) whose share of the losses is not significantly
+ * below its share of the wins: the rival is credited with it too. Both the
+ * win and loss buckets, and the code's count in each, clear MIN_BASE. The
+ * strongest shape is losses apart ABOVE wins; among candidates of the same
+ * shape the highest loss share is reported. Effect = loss share - win share,
+ * so a parity argument ranks near zero and one the rival owns ranks high
+ * (a code argued less in losses than in wins never fires).
+ */
+function neutralizedDifferentiator(inp: InsightInputs): Insight | null {
+  const a = inp.h2hArgs;
+  if (a.wins < MIN_BASE || a.losses < MIN_BASE) return null;
+  const cands = a.codes
+    .filter((c) => c.wins >= MIN_BASE && c.losses >= MIN_BASE)
+    .map((c) => ({ ...c, w: cell(c.wins, a.wins), l: cell(c.losses, a.losses) }))
+    .filter((c) => rate(c.w) >= ND_WIN_SHARE && !apart(c.w, c.l) && rate(c.l) > rate(c.w))
+    .map((c) => ({ ...c, above: apart(c.l, c.w) }))
+    .sort((x, y) => Number(y.above) - Number(x.above) || rate(y.l) - rate(x.l) || x.code.localeCompare(y.code));
+  const best = cands[0];
+  if (!best) return null;
+  const [rivalKey, rivalLosses] = Object.entries(best.lossesBy).sort((x, y) => y[1] - x[1] || x[0].localeCompare(y[0]))[0] ?? [null, 0];
+  const rival = rivalKey ? a.rivals[rivalKey] ?? null : null;
+  const rivalText = rival ? `, most often to ${rival}` : "";
+  const cap = (x: string) => x.charAt(0).toUpperCase() + x.slice(1);
+  return {
+    key: "neutralized_differentiator",
+    kind: "argument",
+    title: best.above ? `Your rivals are credited with ${best.code}` : `${cap(best.code)} no longer sets you apart`,
+    body: best.above
+      ? `${cap(best.code)} is argued in ${pct(best.w)} of the head-to-heads you win but ${pct(best.l)} of those you lose${rivalText} - the AI credits your rivals with it more than you.`
+      : `${cap(best.code)} is argued in ${pct(best.w)} of the head-to-heads you win and ${pct(best.l)} of those you lose${rivalText} - it travels with your rivals' wins as often as yours.`,
+    foot: `In wins: ${counts(best.w)}. In losses: ${counts(best.l)}${rival ? `; ${rivalLosses} of those losses to ${rival}` : ""}. Prompted head-to-heads against every named rival, pooled; arguments in under ${Math.round(ND_WIN_SHARE * 100)}% of wins left out.`,
+    look: { pill: "stations", station: "comparison", label: "Stations - Comparison" },
+    effect: rate(best.l) - rate(best.w),
+  };
+}
+
+/* ------------------------- bs8: conversion vs rival ------------------------- */
+
+/**
+ * Recommendations turned into picks (chosen over recommended - the pick
+ * always counts as recommended), the target against the rival with the
+ * largest share of decided; both need MIN_BASE recommendations and the two
+ * ranges must not overlap, either direction. Effect = the gap.
+ */
+function conversionVsRival(s: Summary): Insight | null {
+  const rival = s.brands.find((b) => b.role !== "target" && b.chosen.k > 0);
+  if (!rival) return null;
+  const you = cell(s.target.chosen.k, s.target.recommended.k);
+  const them = cell(rival.chosen.k, rival.recommended.k);
+  if (you.n < MIN_BASE || them.n < MIN_BASE) return null;
+  const rivalAhead = rate(them) > rate(you);
+  if (!(rivalAhead ? apart(them, you) : apart(you, them))) return null;
+  return {
+    key: "conversion_vs_rival",
+    kind: "rival",
+    title: rivalAhead ? `${rival.name} turns its recommendations into picks, you less so` : `You turn recommendations into picks better than ${rival.name}`,
+    body: rivalAhead
+      ? `The AI recommends you but picks ${rival.name} - ${rival.name} is the pick in ${pct(them)} of the open-choice answers that recommend it, you in ${pct(you)} of those that recommend you.`
+      : `When the AI recommends you in an open choice you are the pick in ${pct(you)} of those answers; ${rival.name} in ${pct(them)} of the answers that recommend it.`,
+    foot: `${rival.name}: picked in ${counts(them)} recommending answers. You: ${counts(you)}. ${rival.name} has the largest share of decided open-choice picks among your rivals.`,
+    look: { pill: "rivals", label: "Rivals" },
+    effect: Math.abs(rate(them) - rate(you)),
+  };
+}
+
+/* ------------------------------- bs8: leaks -------------------------------- */
+
+/** The analysis map's leak badge threshold (LEAK_SHARE), at summary level. */
+const LEAK_PICKS_SHARE = 0.1;
+/** Problem questions routed outside the category in at least this share. */
+const LEAK_PROBLEM_SHARE = 0.5;
+
+const listNames = (names: string[]) =>
+  names.length <= 1 ? names.join("") : `${names.slice(0, -1).join(", ")} and ${names[names.length - 1]}`;
+
+/** Firm open-choice picks that leave the category (B5). Effect = the share. */
+function leakPicks(inp: InsightInputs): Insight | null {
+  const l = inp.leak;
+  if (l.firm < MIN_BASE) return null;
+  const outside = cell(l.firm - l.inCategory, l.firm);
+  if (rate(outside) < LEAK_PICKS_SHARE) return null;
+  const top = l.names.slice(0, 3);
+  const room = [...l.rooms]
+    .filter((r) => r.firm >= MIN_BASE && r.outside > 0)
+    .sort((a, b) => b.outside / b.firm - a.outside / a.firm || a.room.localeCompare(b.room))[0];
+  const roomCell = room ? cell(room.outside, room.firm) : null;
+  const roomText = room && roomCell && rate(roomCell) > rate(outside) ? `; in the ${room.room} room it is ${pct(roomCell)}` : "";
+  return {
+    key: "leak_picks",
+    kind: "leak",
+    title: top.length ? `Picks leave the category - led by ${top[0].name}` : "Picks leave the category",
+    body: `${pct(outside)} of the open-choice answers that make a firm pick choose something outside your category${top.length ? `, led by ${listNames(top.map((x) => x.name))}` : ""}${roomText}.`,
+    foot: `${counts(outside)} firm picks outside the category${top.length ? `: ${top.map((x) => `${x.name} ${x.n}`).join(", ")}` : ""}.${room && roomCell ? ` ${room.room}: ${counts(roomCell)}.` : ""} Outside = ruled out on the dictionary board, pending, or not in it.`,
+    look: { pill: "stations", station: "consideration", label: "Stations - Consideration" },
+    effect: rate(outside),
+  };
+}
+
+/**
+ * The buyer room whose problem questions the AI routes outside the category
+ * most (>= 50%, MIN_BASE answers). When that room's range does not clear
+ * the other rooms pooled, the finding is category-wide and is said so (the
+ * run-level rate must then clear 50% too). Effect = the share above half.
+ */
+function leakProblem(inp: InsightInputs): Insight | null {
+  const p = inp.problem;
+  if (!p) return null;
+  const top = p.rooms.filter((r) => r.out.n >= MIN_BASE).sort((a, b) => rate(b.out) - rate(a.out) || a.room.localeCompare(b.room))[0];
+  if (!top || rate(top.out) < LEAK_PROBLEM_SHARE) return null;
+  const others = p.rooms.filter((r) => r.room !== top.room);
+  const rest = cell(
+    others.reduce((x, r) => x + r.out.k, 0),
+    others.reduce((x, r) => x + r.out.n, 0)
+  );
+  const oneRoom = rest.n >= MIN_BASE && apart(top.out, rest);
+  if (!oneRoom && rate(p.all) < LEAK_PROBLEM_SHARE) return null;
+  return {
+    key: "leak_problem",
+    kind: "leak",
+    title: oneRoom ? `${top.room}: the problem is solved outside the category` : "Problem questions are solved outside the category",
+    body: oneRoom
+      ? `In the ${top.room} room, the AI answers ${pct(top.out)} of the problem questions that do not name the category with a solution outside it - ${pct(rest)} in the other rooms.`
+      : `Across every buyer room, the AI answers ${pct(p.all)} of the problem questions that do not name the category with a solution outside it (${pct(top.out)} in the ${top.room} room).`,
+    foot: `${top.room}: ${counts(top.out)}.${rest.n > 0 ? ` Other rooms: ${counts(rest)}.` : ""} All problem-recognition answers: ${counts(p.all)}.`,
+    look: { pill: "stations", station: "awareness", label: "Stations - Awareness" },
+    effect: (oneRoom ? rate(top.out) : rate(p.all)) - LEAK_PROBLEM_SHARE,
+  };
+}
+
+/* ------------------------------ bs8: retention ------------------------------ */
+
+/** The customers' worry whose leave rate sits apart above the pooled rest. Effect = the gap. */
+function worstWorry(inp: InsightInputs): Insight | null {
+  const k = inp.doubt.keepOrLeave;
+  if (!k || k.rows.length < 2) return null;
+  const ok = k.rows.filter((r) => r.answers >= MIN_BASE);
+  if (ok.length === 0) return null;
+  const top = [...ok].sort((a, b) => rate(b.verdicts.leave) - rate(a.verdicts.leave) || a.concern.localeCompare(b.concern))[0];
+  const others = k.rows.filter((r) => r.key !== top.key);
+  const rest = cell(
+    others.reduce((x, r) => x + r.verdicts.leave.k, 0),
+    others.reduce((x, r) => x + r.answers, 0)
+  );
+  if (rest.n < MIN_BASE || !apart(top.verdicts.leave, rest)) return null;
+  const exit = top.topExits[0];
+  const concern = top.concern || "this worry";
+  return {
+    key: "worst_worry",
+    kind: "doubt",
+    title: `The worry that loses customers: ${concern}`,
+    body: `When a customer says "${concern}", the AI tells them to leave in ${pct(top.verdicts.leave)} of answers${exit ? `, most often for ${exit.name}` : ""} - against ${pct(rest)} across their other worries.`,
+    foot: `${concern}: leave ${counts(top.verdicts.leave)}. Other customers' worries: ${counts(rest)}.${exit ? ` ${exit.name}: ${exit.n} answers.` : ""}`,
+    look: { pill: "stations", station: "customer_base", label: "Stations - Customers" },
+    effect: rate(top.verdicts.leave) - rate(rest),
+  };
+}
+
+/** Leave verdicts naming no destination at all. */
+const NO_EXIT_SHARE = 0.5;
+
+/** Of the customers' leave verdicts, the share naming no destination (the
+ * doubt view's offersExitBy.leave, inverted). Effect = the share above half. */
+function leaveNoExit(inp: InsightInputs, brand: string): Insight | null {
+  const k = inp.doubt.keepOrLeave;
+  if (!k) return null;
+  const withExit = k.offersExitBy.leave;
+  if (withExit.n < MIN_BASE) return null;
+  const none = cell(withExit.n - withExit.k, withExit.n);
+  if (rate(none) < NO_EXIT_SHARE) return null;
+  return {
+    key: "leave_no_exit",
+    kind: "doubt",
+    title: "Told to leave, with nowhere to go",
+    body: `When the AI tells a customer weighing a worry to leave ${brand}, ${pct(none)} of those answers name nowhere to go - the cancel is a loss to you without being any rival's gain.`,
+    foot: `Leave answers naming no destination: ${counts(none)}. Leave answers overall: ${counts(k.verdicts.leave)}.`,
+    look: { pill: "stations", station: "customer_base", label: "Stations - Customers" },
+    effect: rate(none) - NO_EXIT_SHARE,
+  };
+}
+
 /**
  * The verdict the brief opens with: template sentences in fixed order
  * (standing, prompted vs open, concentration, doubts, value, settled), each
@@ -1053,6 +1337,12 @@ export function rankedInsights(s: Summary, inp: InsightInputs): Insight[] {
     engineDecisiveness(s),
     engineHeadToHeadFlip(s),
     enginePickConcentration(s, inp),
+    neutralizedDifferentiator(inp),
+    conversionVsRival(s),
+    leakPicks(inp),
+    leakProblem(inp),
+    worstWorry(inp),
+    leaveNoExit(inp, s.brand),
   ].filter((x): x is Insight => x !== null && x.effect > 0);
   return found.sort((a, b) => b.effect - a.effect || a.key.localeCompare(b.key));
 }
