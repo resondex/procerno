@@ -1136,6 +1136,12 @@ export interface Store {
    * null = no map (the view shows the fine codes only). Never a labeling grain. */
   getCodeGroups(projectId: string): Promise<string | null>;
   setCodeGroups(projectId: string, groupsJson: string | null): Promise<void>;
+  /** projects.analysis_decision (2026-11-03): the analysis tier's portfolio
+   * record - suggested vs decided triage per position plus the playbook
+   * flag, stored as JSON (AnalysisDecision in engine/analysis_types). Not
+   * part of the Project payload, like taxonomy_decision / worry_decision. */
+  getAnalysisDecision(projectId: string): Promise<string | null>;
+  setAnalysisDecision(projectId: string, decisionJson: string | null): Promise<void>;
   /** Response ids that already carry codes from one source (no bodies, no
    * code columns) - the coding wave's "already coded" set. */
   listAnswerCodeIds(runId: string, source: string): Promise<string[]>;

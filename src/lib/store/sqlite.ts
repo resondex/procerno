@@ -61,6 +61,7 @@ function createDb(): Database.Database {
       engine_set TEXT NOT NULL DEFAULT '[]',
       org_id TEXT,
       dictionary_version INTEGER NOT NULL DEFAULT 1,
+      analysis_decision TEXT,
       created_at TEXT NOT NULL DEFAULT (datetime('now'))
     );
     CREATE TABLE IF NOT EXISTS dictionary_entries (
@@ -380,6 +381,12 @@ function createDb(): Database.Database {
   }
   if (!cols.some((c) => c.name === "coder_inputs")) {
     db.exec("ALTER TABLE projects ADD COLUMN coder_inputs TEXT");
+  }
+  // projects.analysis_decision (2026-11-03): the analysis tier's portfolio
+  // record (suggested vs decided triage per position). The CREATE above
+  // carries it for fresh databases; this adds it to existing ones.
+  if (!cols.some((c) => c.name === "analysis_decision")) {
+    db.exec("ALTER TABLE projects ADD COLUMN analysis_decision TEXT");
   }
   if (!cols.some((c) => c.name === "dictionary_status")) {
     db.exec(
@@ -1821,6 +1828,19 @@ export const sqliteStore: Store = {
 
   async setCodeGroups(projectId, groupsJson) {
     getDb().prepare("UPDATE projects SET code_groups = ? WHERE id = ?").run(groupsJson, projectId);
+  },
+
+  async getAnalysisDecision(projectId) {
+    const row = getDb()
+      .prepare("SELECT analysis_decision FROM projects WHERE id = ?")
+      .get(projectId) as { analysis_decision: string | null } | undefined;
+    return row?.analysis_decision ?? null;
+  },
+
+  async setAnalysisDecision(projectId, decisionJson) {
+    getDb()
+      .prepare("UPDATE projects SET analysis_decision = ? WHERE id = ?")
+      .run(decisionJson, projectId);
   },
 
   async listAnswerCodeIds(runId, source) {

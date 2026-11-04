@@ -12,8 +12,7 @@ import Workbench, { type WbPreset } from "./workbench";
 import { SortTable } from "./table";
 import AnswerText from "./answer_text";
 import HumanCodingPanel from "./human_coding_panel";
-import { BoardroomSection, BriefSection, QuestionsSection, type OnLook } from "./summary_views";
-import type { StationKey } from "@/lib/engine/journey";
+import AnalysisTier, { type TierView } from "./analysis_views";
 import JourneySection from "./journey_view";
 import WhySection from "./why_view";
 import RivalsSection from "./rivals_view";
@@ -53,13 +52,13 @@ export default function RunResults({
 }
 
 /**
- * The answer_codes-era results block (2026-10-30). "The brief" is the
- * per-type views - headline, head-to-head, alternatives, doubts, value,
- * premium, awareness, reasons - each reading answer_codes under the
- * project's code source. Boardroom and Five questions render from the
- * brand summary (engine/brand_summary.ts), the same data cut for the
- * executive read. The Workbench slices the coded answers in the browser
- * over one fact-table fetch (workbench_codes.tsx / engine/workbench.ts).
+ * The answer_codes-era results block (2026-10-30; analysis tier 2026-11-03).
+ * The primary pills are the analysis tier (analysis_views.tsx,
+ * ANALYSIS_REDESIGN_2026-11-03.md): The Verdict, The Map and The Portfolio,
+ * one component over one /analysis_map fetch. The Verdict absorbed the old
+ * Summary group (The brief, Boardroom, Five questions). Behind them sit the
+ * analyst tools - Stations, Why, Rivals, Buyers and the pivot - each reading
+ * answer_codes under the project's code source.
  */
 function CodesResults({
   runId,
@@ -72,8 +71,11 @@ function CodesResults({
 }) {
   // The Panel lens (2026-11-03): the engine set every section reads under.
   const panel = usePanel(runId, projectId);
-  type CodesView = "brief" | "boardroom" | "questions" | "journey" | "why" | "rivals" | "buyers" | "metrics";
-  const [view, setView] = useState<CodesView>("brief");
+  type CodesView = TierView | "journey" | "why" | "rivals" | "buyers" | "metrics";
+  const [view, setView] = useState<CodesView>("verdict");
+  // The analysis tier is ONE mounted component; its three pills only switch
+  // which subview it shows (the last one, while an analyst tool is open).
+  const [tierView, setTierView] = useState<TierView>("verdict");
   // The global buyer filter of the Analysis tier ("" = all buyers). Stations
   // and Buyers follow it; Why and Rivals are measured across all buyers.
   const [room, setRoom] = useState<string>("");
@@ -86,23 +88,16 @@ function CodesResults({
   // Views stay MOUNTED once visited, hidden with CSS: switching pills and
   // coming back must not refetch - the per-type stack alone is nine
   // requests, a multi-second reload on every return otherwise.
-  const [visited, setVisited] = useState<Set<CodesView>>(() => new Set(["brief"]));
+  const [visited, setVisited] = useState<Set<CodesView>>(() => new Set(["verdict"]));
+  const TIER: ReadonlySet<CodesView> = new Set(["verdict", "map", "portfolio"]);
   const ANALYSIS: ReadonlySet<CodesView> = new Set(["journey", "why", "rivals", "buyers", "metrics"]);
   // The buyer bar needs the rooms list on the FIRST Analysis open, whichever
   // pill it is - Why and Rivals never load the journey payload, so the shell
   // asks for it once itself (a cached read; Stations reuses it from cache).
   const [roomsAsked, setRoomsAsked] = useState(false);
-  // The Summary's "where to look" pointer: open the pill it names and, for a
-  // station, select it on the Stations strip.
-  const [jump, setJump] = useState<{ station: StationKey; n: number } | undefined>(undefined);
-  const onLook: OnLook = (look) => {
-    const pill: CodesView =
-      look.pill === "stations" ? "journey" : look.pill === "table" ? "metrics" : look.pill;
-    if (look.station) setJump((j) => ({ station: look.station as StationKey, n: (j?.n ?? 0) + 1 }));
-    open(pill);
-  };
   const open = (v: CodesView) => {
     setView(v);
+    if (v === "verdict" || v === "map" || v === "portfolio") setTierView(v);
     setVisited((s) => (s.has(v) ? s : new Set(s).add(v)));
     if (ANALYSIS.has(v) && !roomsAsked) {
       setRoomsAsked(true);
@@ -136,12 +131,12 @@ function CodesResults({
       <div className="flex flex-wrap items-center gap-x-3 gap-y-2 -mt-3">
         {(
           [
-            ["Summary", [
-              ["brief", "The brief"],
-              ["boardroom", "Boardroom"],
-              ["questions", "Five questions"],
+            ["", [
+              ["verdict", "The Verdict"],
+              ["map", "The Map"],
+              ["portfolio", "The Portfolio"],
             ]],
-            ["Analysis", [
+            ["Analyst tools", [
               ["journey", "Stations"],
               ["why", "Why"],
               ["rivals", "Rivals"],
@@ -150,8 +145,8 @@ function CodesResults({
             ]],
           ] as const
         ).map(([group, pills]) => (
-          <span key={group} className="flex items-center gap-1.5">
-            <span className="text-[12px] text-ink-3 mr-0.5">{group}:</span>
+          <span key={group || "tier"} className="flex items-center gap-1.5">
+            {group && <span className="text-[12px] text-ink-3 mr-0.5">{group}:</span>}
             {pills.map(([id, label]) => (
               <button
                 key={id}
@@ -210,24 +205,14 @@ function CodesResults({
 
       <EngineSetContext.Provider value={panel.engines}>
 
-      {visited.has("brief") && (
-        <div className={show("brief")}>
-          <BriefSection key={k("brief")} runId={runId} onLook={onLook} />
-        </div>
-      )}
-      {visited.has("boardroom") && (
-        <div className={show("boardroom")}>
-          <BoardroomSection key={k("boardroom")} runId={runId} onLook={onLook} />
-        </div>
-      )}
-      {visited.has("questions") && (
-        <div className={show("questions")}>
-          <QuestionsSection key={k("questions")} runId={runId} />
+      {[...visited].some((v) => TIER.has(v)) && (
+        <div className={TIER.has(view) ? "grid gap-8" : "hidden"}>
+          <AnalysisTier key={k("analysis")} runId={runId} projectId={projectId} view={tierView} onView={open} />
         </div>
       )}
       {visited.has("journey") && (
         <div className={show("journey")}>
-          <JourneySection key={k("journey")} runId={runId} room={room} onRoom={setRoom} onRooms={reportRooms} jump={jump} />
+          <JourneySection key={k("journey")} runId={runId} room={room} onRoom={setRoom} onRooms={reportRooms} />
         </div>
       )}
       {visited.has("why") && (

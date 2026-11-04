@@ -319,6 +319,9 @@ function ensureSchema(): Promise<void> {
       await sql`ALTER TABLE projects ADD COLUMN IF NOT EXISTS codes_source TEXT`;
       // projects.code_groups (2026-10-27): the reasons view's display rollup map.
       await sql`ALTER TABLE projects ADD COLUMN IF NOT EXISTS code_groups TEXT`;
+      // projects.analysis_decision (2026-11-03): the analysis tier's portfolio
+      // record (suggested vs decided triage per position), JSON.
+      await sql`ALTER TABLE projects ADD COLUMN IF NOT EXISTS analysis_decision TEXT`;
       // projects.reasons_adapter (2026-10-29): two-pass routing - the
       // tracker's reasons adapter model id; NULL = single-pass coding.
       await sql`ALTER TABLE projects ADD COLUMN IF NOT EXISTS reasons_adapter TEXT`;
@@ -1535,6 +1538,17 @@ export const pgStore: Store = {
   async setCodeGroups(projectId, groupsJson) {
     const sql = await db();
     await sql`UPDATE projects SET code_groups = ${groupsJson} WHERE id = ${projectId}`;
+  },
+
+  async getAnalysisDecision(projectId) {
+    const sql = await db();
+    const rows = await sql`SELECT analysis_decision FROM projects WHERE id = ${projectId}`;
+    return (rows[0]?.analysis_decision as string | null | undefined) ?? null;
+  },
+
+  async setAnalysisDecision(projectId, decisionJson) {
+    const sql = await db();
+    await sql`UPDATE projects SET analysis_decision = ${decisionJson} WHERE id = ${projectId}`;
   },
 
   async listAnswerCodeIds(runId, source) {
