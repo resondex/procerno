@@ -32,6 +32,21 @@ import EvidencePanel, { EVIDENCE_CAP, type EvidenceRequest } from "./evidence_pa
 
 export type TierView = "verdict" | "map" | "portfolio";
 
+/** Receipts are verbatim slices of LLM answers, so they arrive with raw
+ * markdown in them. Strip the formatting for display only - the verbatim
+ * form stays in the payload, since the evidence drill matches it against
+ * the answer body for highlighting. */
+function plainQuote(s: string): string {
+  return s
+    .replace(/\[([^\]]+)\]\([^)]*\)/g, "$1") // links keep their text
+    .replace(/(\*\*|__)(.*?)\1/g, "$2") // bold
+    .replace(/(\*|_)([^*_]+)\1/g, "$2") // italics
+    .replace(/`+([^`]*)`+/g, "$1") // inline code
+    .replace(/^\s{0,3}(#{1,6}\s+|>\s?|[-*+]\s+|\d+\.\s+)/gm, "") // heads, blockquotes, bullets
+    .replace(/\s*\n\s*/g, " ") // a quote renders as one line
+    .trim();
+}
+
 // ---------- styling: the four verdict colors (colorblind-validated) ----------
 
 const TIER_CSS = `
@@ -606,7 +621,7 @@ function PositionPanel({
                 key={r.responseId}
                 className="my-2.5 rounded-r-md border-l-[3px] border-line bg-canvas px-3.5 py-2.5 text-[13px] leading-relaxed text-ink"
               >
-                &ldquo;{r.quote}&rdquo;
+                &ldquo;{plainQuote(r.quote as string)}&rdquo;
               </blockquote>
             ))}
             <button
