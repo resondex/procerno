@@ -26,6 +26,9 @@ import {
   type BriefPara,
   type BriefSection as BriefSectionT,
   type BriefView,
+  type BriefViz,
+  BRIEF_SCATTER_GEOM,
+  scatterPx,
 } from "@/lib/engine/brief_types";
 import { useEngineSet } from "./view_parts";
 
@@ -122,6 +125,12 @@ const BRIEF_CSS = `
 .pb-card .pb-p{ font-size: 15.5px; line-height: 1.6; }
 .pb-card .pb-p + .pb-p{ margin-top: .75em; }
 .pb-foot{ margin-top: 2.6em; padding-top: .8em; border-top: 1px solid var(--line); font-size: 13.5px; font-style: italic; color: var(--ink-3); }
+.pb-viz{ margin-top: .7em; break-inside: avoid; page-break-inside: avoid; }
+.pb-viz-t{ font-family: var(--font-inter), system-ui, sans-serif; font-size: 15px; line-height: 1.4; font-weight: 600; color: var(--ink); margin: 0; }
+.pb-viz-s{ font-family: var(--font-inter), system-ui, sans-serif; font-size: 12.5px; line-height: 1.45; color: var(--ink-3); margin: .2em 0 0; }
+.pb-viz svg{ display: block; width: 100%; height: auto; margin-top: .9em; overflow: visible; font-family: var(--font-inter), system-ui, -apple-system, sans-serif; font-variant-numeric: tabular-nums; }
+.pb-viz-legend{ display: flex; flex-wrap: wrap; gap: 4px 16px; margin-top: .7em; font-family: var(--font-inter), system-ui, sans-serif; font-size: 12.5px; color: var(--ink-2); }
+.pb-viz-legend i{ display: inline-block; width: 11px; height: 11px; border-radius: 2px; margin-right: 6px; vertical-align: -1px; }
 @keyframes pb-pulse{ 0%,100%{ opacity:.55 } 50%{ opacity:1 } }
 .pb-skel{ animation: pb-pulse 1.4s ease-in-out infinite; background: var(--line); border-radius: 4px; }
 @media (prefers-reduced-motion: reduce){ .pb-skel{ animation:none; } }
@@ -156,6 +165,10 @@ const BRIEF_CSS = `
   html.pb-printing #pb-print-root .pb-list li{ break-inside:avoid; page-break-inside:avoid; }
   html.pb-printing #pb-print-root .pb-noprint{ display:none !important; }
   html.pb-printing #pb-print-root .pb-table-wrap{ overflow:visible !important; }
+  /* The visuals print on the light palette whatever the screen theme. */
+  html.pb-printing #pb-print-root{ --surface:#fff; --ink:#111; --ink-2:#333; --ink-3:#777; --line:#bbb; --primary:#5b7e92; }
+  html.pb-printing #pb-print-root .pb-viz{ break-inside:avoid; page-break-inside:avoid; }
+  html.pb-printing #pb-print-root .pb-viz-s{ color:#555 !important; }
 }
 `;
 
@@ -193,6 +206,278 @@ function Tip({ tip, children }: { tip?: string; children: React.ReactNode }) {
         </span>
       )}
     </span>
+  );
+}
+
+
+// ---------- the visuals (inline SVG from the served BriefViz spec) ----------
+// Grey-first with one accent; every number printed is the served string.
+
+const QUIET = "var(--ink-3)";
+const ACC = "var(--primary)";
+
+/** Greedy word wrap at roughly `n` characters per line. */
+function wrap(t: string, n: number): string[] {
+  const out: string[] = [];
+  let line = "";
+  for (const w of t.split(/\s+/)) {
+    if (line && (line + " " + w).length > n) {
+      out.push(line);
+      line = w;
+    } else line = line ? `${line} ${w}` : w;
+  }
+  if (line) out.push(line);
+  return out;
+}
+
+function FunnelViz({ v }: { v: BriefViz }) {
+  const W = 760;
+  const BAND = 30;
+  const STEP = 52;
+  const labelX = 214;
+  const plotL = 232;
+  const maxW = W - plotL - 64;
+  const cx = plotL + maxW / 2;
+  const width = (a = 0) => Math.max(14, (Math.min(a, 100) / 100) * maxW);
+  const H = v.items.length * STEP - (STEP - BAND) + 4;
+  return (
+    <svg viewBox={`0 0 ${W} ${H}`} role="img" aria-label={v.title}>
+      {v.items.slice(0, -1).map((it, i) => {
+        const a = width(it.a) / 2;
+        const b = width(v.items[i + 1].a) / 2;
+        const y0 = 2 + i * STEP + BAND;
+        const y1 = 2 + (i + 1) * STEP;
+        return <polygon key={`t${i}`} points={`${cx - a},${y0} ${cx + a},${y0} ${cx + b},${y1} ${cx - b},${y1}`} fill={QUIET} fillOpacity={0.14} />;
+      })}
+      {v.items.map((it, i) => {
+        const w = width(it.a);
+        const y = 2 + i * STEP;
+        return (
+          <g key={i}>
+            <text x={labelX} y={y + BAND / 2 + 4.5} textAnchor="end" fontSize={13.5} fontWeight={it.accent ? 600 : 400} fill={it.accent ? "var(--ink)" : "var(--ink-2)"}>
+              {it.label}
+            </text>
+            <rect x={cx - w / 2} y={y} width={w} height={BAND} rx={2} fill={it.accent ? ACC : QUIET} fillOpacity={it.accent ? 1 : 0.5} />
+            <text x={cx + w / 2 + 9} y={y + BAND / 2 + 4.5} fontSize={13.5} fontWeight={it.accent ? 700 : 500} fill={it.accent ? ACC : "var(--ink-2)"}>
+              {it.value}
+            </text>
+          </g>
+        );
+      })}
+    </svg>
+  );
+}
+
+function ScatterViz({ v }: { v: BriefViz }) {
+  const g = BRIEF_SCATTER_GEOM;
+  const xMax = v.xMax ?? 100;
+  const yMax = v.yMax ?? 100;
+  const px = (x: number, y: number) => scatterPx(x, y, xMax, yMax);
+  const o = px(0, 0);
+  const xEnd = px(xMax, 0);
+  const yTop = px(0, yMax);
+  const vl = v.vline !== undefined ? px(v.vline, 0) : null;
+  const dX = v.diag ? Math.min(xMax, yMax * v.diag) : 0;
+  const dEnd = v.diag ? px(dX, dX / v.diag) : null;
+  // Dots: quiet first, the accent last so it draws on top.
+  const items = [...v.items].sort((a, b) => Number(!!a.accent) - Number(!!b.accent));
+  return (
+    <svg viewBox={`0 0 ${g.w} ${g.h}`} role="img" aria-label={v.title}>
+      <line x1={o.x} y1={o.y} x2={xEnd.x} y2={o.y} stroke="var(--line)" strokeWidth={1.2} />
+      <line x1={o.x} y1={o.y} x2={o.x} y2={yTop.y} stroke="var(--line)" strokeWidth={1.2} />
+      <text x={o.x} y={o.y + 17} fontSize={11.5} fill={QUIET} textAnchor="middle">0%</text>
+      <text x={px(50, 0).x} y={o.y + 17} fontSize={11.5} fill={QUIET} textAnchor="middle">50%</text>
+      <text x={xEnd.x} y={o.y + 17} fontSize={11.5} fill={QUIET} textAnchor="end">{xMax}%</text>
+      <text x={o.x - 7} y={yTop.y + 4} fontSize={11.5} fill={QUIET} textAnchor="end">{yMax}%</text>
+      {v.xLabel && (
+        <text x={(o.x + xEnd.x) / 2} y={g.h - 6} fontSize={12.5} fill="var(--ink-2)" textAnchor="middle">
+          {v.xLabel}
+        </text>
+      )}
+      {v.yLabel && (
+        <text transform={`translate(14 ${(o.y + yTop.y) / 2}) rotate(-90)`} fontSize={12.5} fill="var(--ink-2)" textAnchor="middle">
+          {v.yLabel}
+        </text>
+      )}
+      {vl && (
+        <>
+          <line x1={vl.x} y1={o.y} x2={vl.x} y2={yTop.y} stroke={QUIET} strokeWidth={1} strokeDasharray="4 4" />
+          {v.vlineLabel && (
+            <text x={vl.x + 6} y={g.top + 11} fontSize={11.5} fill={QUIET}>
+              {v.vlineLabel}
+            </text>
+          )}
+        </>
+      )}
+      {dEnd && (
+        <>
+          <line x1={o.x} y1={o.y} x2={dEnd.x} y2={dEnd.y} stroke={QUIET} strokeWidth={1} strokeDasharray="4 4" />
+          {v.diagLabel && (
+            <text x={v.diagLabelPx?.x ?? dEnd.x - 4} y={v.diagLabelPx?.y ?? dEnd.y - 8} fontSize={11.5} fill={QUIET} textAnchor="end">
+              {v.diagLabel}
+            </text>
+          )}
+        </>
+      )}
+      {items.map((it, i) => {
+        const p = px(it.a ?? 0, it.b ?? 0);
+        const r = it.accent ? 7 : it.unlabeled ? 4 : 5;
+        // A label the engine set well off its dot gets a quiet leader to the
+        // label's nearest edge (box estimated the way the engine estimates it).
+        const fs = it.accent ? 13.5 : 12.5;
+        const lx = p.x + g.labelDx + (it.dx ?? 0);
+        const ly = p.y + g.labelDy + (it.dy ?? 0);
+        const bx0 = lx;
+        const bx1 = lx + it.label.length * fs * (it.accent ? 0.6 : 0.555);
+        const by0 = ly - fs * 0.78;
+        const by1 = ly + fs * 0.24;
+        const nx = Math.min(Math.max(p.x, bx0), bx1);
+        const ny = Math.min(Math.max(p.y, by0), by1);
+        const dist = Math.hypot(nx - p.x, ny - p.y);
+        const leader = !it.unlabeled && dist > r + 12;
+        return (
+          <g key={i}>
+            {leader && (
+              <line
+                x1={p.x + ((nx - p.x) / dist) * (r + 2)}
+                y1={p.y + ((ny - p.y) / dist) * (r + 2)}
+                x2={nx + ((p.x - nx) / dist) * 3}
+                y2={ny + ((p.y - ny) / dist) * 3}
+                stroke={QUIET}
+                strokeOpacity={0.6}
+                strokeWidth={0.8}
+              />
+            )}
+            <circle cx={p.x} cy={p.y} r={r} fill={it.accent ? ACC : QUIET} fillOpacity={it.accent ? 1 : it.unlabeled ? 0.4 : 0.6} />
+            {!it.unlabeled && (
+              <text
+                x={p.x + g.labelDx + (it.dx ?? 0)}
+                y={p.y + g.labelDy + (it.dy ?? 0)}
+                fontSize={it.accent ? 13.5 : 12.5}
+                fontWeight={it.accent ? 700 : 400}
+                fill={it.accent ? ACC : "var(--ink-2)"}
+              >
+                {it.label}
+              </text>
+            )}
+          </g>
+        );
+      })}
+      {v.clusterNote && v.notePx && (
+        <text x={v.notePx.x} y={v.notePx.y} fontSize={11.5} fontStyle="italic" fill={QUIET}>
+          {(v.noteLines ?? [v.clusterNote]).map((l, i) => (
+            <tspan key={i} x={v.notePx!.x} dy={i === 0 ? 0 : 14}>
+              {l}
+            </tspan>
+          ))}
+        </text>
+      )}
+    </svg>
+  );
+}
+
+function PairsViz({ v }: { v: BriefViz }) {
+  const W = 760;
+  const labelX = 196;
+  const x0 = 210;
+  const BAR = 15;
+  const INNER = 4;
+  const GROUP = BAR * 2 + INNER;
+  const GAP = 22;
+  const maxV = Math.max(1, ...v.items.flatMap((it) => [it.a ?? 0, it.b ?? 0]));
+  const span = W - x0 - 150;
+  const w = (x = 0) => Math.max(2, (x / maxV) * span);
+  const H = v.items.length * (GROUP + GAP) - GAP + 4;
+  return (
+    <svg viewBox={`0 0 ${W} ${H}`} role="img" aria-label={v.title}>
+      {v.items.map((it, i) => {
+        const y = 2 + i * (GROUP + GAP);
+        const lines = wrap(it.label, 26).slice(0, 2);
+        const ly = y + GROUP / 2 + 4.5 - ((lines.length - 1) * 16) / 2;
+        return (
+          <g key={i}>
+            <text x={labelX} y={ly} textAnchor="end" fontSize={13.5} fill="var(--ink)">
+              {lines.map((l, j) => (
+                <tspan key={j} x={labelX} dy={j === 0 ? 0 : 16}>
+                  {l}
+                </tspan>
+              ))}
+            </text>
+            <rect x={x0} y={y} width={w(it.a)} height={BAR} rx={2} fill={ACC} />
+            <text x={x0 + w(it.a) + 7} y={y + BAR - 3} fontSize={13} fontWeight={700} fill={ACC}>
+              {it.value}
+            </text>
+            <rect x={x0} y={y + BAR + INNER} width={w(it.b)} height={BAR} rx={2} fill={QUIET} fillOpacity={0.5} />
+            <text x={x0 + w(it.b) + 7} y={y + BAR * 2 + INNER - 3} fontSize={12.5} fill="var(--ink-2)">
+              {it.who ? `${it.who} ${it.bValue ?? ""}` : it.bValue}
+            </text>
+          </g>
+        );
+      })}
+    </svg>
+  );
+}
+
+function PyramidViz({ v }: { v: BriefViz }) {
+  const W = 760;
+  const n = v.items.length;
+  const frac = (i: number) => (n <= 1 ? 1 : 0.5 + (0.5 * i) / (n - 1));
+  const PAD = 13;
+  const LH = 18;
+  const blocks = v.items.map((it, i) => {
+    const bw = W * frac(i);
+    const lines = wrap(it.note ?? "", Math.floor((bw - 40) / 7.1)).slice(0, 2);
+    return { it, bw, lines, h: PAD * 2 + LH + lines.length * LH };
+  });
+  const GAP = 6;
+  const H = blocks.reduce((a, b) => a + b.h, 0) + GAP * (n - 1) + 2;
+  const tops = blocks.map((_, i) => 1 + blocks.slice(0, i).reduce((a, b) => a + b.h + GAP, 0));
+  return (
+    <svg viewBox={`0 0 ${W} ${H}`} role="img" aria-label={v.title}>
+      {blocks.map((b, i) => {
+        const top = tops[i];
+        const x = (W - b.bw) / 2;
+        const fill = b.it.accent ? "color-mix(in srgb, var(--primary) 17%, var(--surface))" : "color-mix(in srgb, var(--ink) 5%, var(--surface))";
+        return (
+          <g key={i}>
+            <rect x={x} y={top} width={b.bw} height={b.h} rx={4} style={{ fill }} stroke={b.it.accent ? ACC : "var(--line)"} strokeOpacity={b.it.accent ? 0.45 : 1} />
+            <text x={W / 2} y={top + PAD + 13} textAnchor="middle" fontSize={13.5} fontWeight={700} fill={b.it.accent ? ACC : "var(--ink)"}>
+              {b.it.label}
+            </text>
+            {b.lines.map((l, j) => (
+              <text key={j} x={W / 2} y={top + PAD + 13 + LH * (j + 1)} textAnchor="middle" fontSize={13} fill="var(--ink-2)">
+                {l}
+              </text>
+            ))}
+          </g>
+        );
+      })}
+    </svg>
+  );
+}
+
+function Viz({ v }: { v: BriefViz }) {
+  return (
+    <figure className="pb-viz" style={{ margin: 0 }}>
+      <p className="pb-viz-t">{v.title}</p>
+      {v.subtitle && <p className="pb-viz-s">{v.subtitle}</p>}
+      {v.legend && (
+        <div className="pb-viz-legend" aria-hidden="true">
+          <span>
+            <i style={{ background: ACC }} />
+            {v.legend[0]}
+          </span>
+          <span>
+            <i style={{ background: QUIET, opacity: 0.5 }} />
+            {v.legend[1]}
+          </span>
+        </div>
+      )}
+      {v.kind === "funnel" && <FunnelViz v={v} />}
+      {v.kind === "scatter" && <ScatterViz v={v} />}
+      {v.kind === "pairs" && <PairsViz v={v} />}
+      {v.kind === "pyramid" && <PyramidViz v={v} />}
+    </figure>
   );
 }
 
@@ -254,6 +539,8 @@ function Section({ s, lede, wave }: { s: BriefSectionT; lede: boolean; wave: str
   return (
     <section className={`pb-section ${s.heading ? "" : "pb-nohead"} ${lede ? "pb-lede" : ""}`}>
       {s.heading && <h3 className="pb-h">{s.heading}</h3>}
+
+      {s.viz && <Viz v={s.viz} />}
 
       {s.paras && <Paras paras={s.paras} />}
 

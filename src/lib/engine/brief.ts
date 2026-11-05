@@ -19,6 +19,10 @@ import {
   type BriefRow,
   type BriefSection,
   type BriefView,
+  type BriefViz,
+  type BriefVizItem,
+  BRIEF_SCATTER_GEOM,
+  scatterPx,
 } from "./brief_types";
 import type { Project, Run } from "../types";
 
@@ -923,27 +927,29 @@ function funnelFrame(c: Ctx): BriefSection[] {
   const picked = rate(S.chosen);
   const d1 = named - rec;
   const d2 = rec - picked;
+  const L = { named: "In the conversation", rec: "On the shortlist", pick: `The ${c.product} to get`, kept: "Customers told to stay", defended: "Defends when asked" };
   const stagesText = `named in ${P(S.mentioned)}, recommended in ${P(S.recommended)}, picked in ${pctFine(picked)} of answers`;
+  const oneStage = d1 > 0 && d2 > 0 && Math.max(d1, d2) >= 2 * Math.min(d1, d2);
   let thesis: string;
-  if (d1 > 0 && d2 > 0 && Math.max(d1, d2) >= 2 * Math.min(d1, d2))
+  if (oneStage)
     thesis = d1 > d2 ? `${c.name} loses exactly one stage - between named and recommended: ${stagesText}.` : `${c.name} loses exactly one stage - between recommended and picked: ${stagesText}.`;
   else if (d1 > 0 && d2 > 0) thesis = `${c.name} loses ground at both steps: ${stagesText}.`;
   else thesis = `${c.name} holds its ground through the funnel: ${stagesText}.`;
 
   const rows: BriefRow[] = [
-    { label: "Named", value: P(S.mentioned), tip: tipOf(S.mentioned) },
-    { label: "Recommended", value: P(S.recommended), tip: tipOf(S.recommended) },
-    { label: "Picked", value: pctFine(picked), tip: tipOf(S.chosen) },
+    { label: L.named, value: P(S.mentioned), tip: tipOf(S.mentioned) },
+    { label: L.rec, value: P(S.recommended), tip: tipOf(S.recommended) },
+    { label: L.pick, value: pctFine(picked), tip: tipOf(S.chosen) },
   ];
   const paras: BriefPara[] = [
-    { lead: "Named.", text: `When buyers ask what to buy, the AI names ${c.name} in ${P(S.mentioned)} of answers.`, tip: tipOf(S.mentioned) },
+    { lead: `${L.named}.`, text: `When buyers ask what to buy, the AI names ${c.name} in ${P(S.mentioned)} of answers.`, tip: tipOf(S.mentioned) },
     {
-      lead: "Recommended.",
+      lead: `${L.rec}.`,
       text: `It recommends ${c.name} in ${P(S.recommended)} of answers - ${pctN(named > 0 ? rec / named : 0)} of the answers that name it.`,
       tip: `${S.recommended.k} recommending of ${S.mentioned.k} naming.`,
     },
     {
-      lead: "Picked.",
+      lead: `${L.pick}.`,
       text:
         s.firmPickInCategory.k >= MIN
           ? `Only ${P(s.firmPickInCategory)} of answers settle on a single ${c.product}; ${c.name} wins ${P(S.shareOfDecided)} of those settlements, which leaves it the pick in ${pctFine(picked)} of every answer.`
@@ -951,24 +957,42 @@ function funnelFrame(c: Ctx): BriefSection[] {
       tip: `${tipOf(S.chosen)} answers; ${S.chosen.k} of ${s.firmPickInCategory.k} in-category picks.`,
     },
   ];
+  // The hourglass: one band per stage, the stage where the funnel breaks accented.
+  const accent = d1 > d2 ? "rec" : "pick";
+  const items: BriefVizItem[] = [
+    { label: L.named, a: named * 100, value: P(S.mentioned) },
+    { label: L.rec, a: rec * 100, value: P(S.recommended), ...(accent === "rec" ? { accent: true } : {}) },
+    { label: L.pick, a: picked * 100, value: pctFine(picked), ...(accent === "pick" ? { accent: true } : {}) },
+  ];
   if (c.isTarget) {
     const k = s.customersDoubt;
     if (k && k.answers >= MIN) {
-      rows.push({ label: "Kept", value: P(k.keep), tip: tipOf(k.keep) });
-      paras.push({ lead: "Kept.", text: `When your customers raise a worry, the AI tells them to stay in ${P(k.keep)} of answers and to leave in ${P(k.leave)}.`, tip: `Stay ${tipOf(k.keep)}; leave ${tipOf(k.leave)}.` });
+      rows.push({ label: L.kept, value: P(k.keep), tip: tipOf(k.keep) });
+      items.push({ label: L.kept, a: rate(k.keep) * 100, value: P(k.keep) });
+      paras.push({ lead: `${L.kept}.`, text: `When your customers raise a worry, the AI tells them to stay in ${P(k.keep)} of answers and to leave in ${P(k.leave)}.`, tip: `Stay ${tipOf(k.keep)}; leave ${tipOf(k.leave)}.` });
     }
     const adv = c.inputs.settled.advocacy;
     const bc = c.inputs.settled.businessCase;
     if (adv && adv.answers >= MIN) {
-      rows.push({ label: "Defended", value: P(adv.verdicts.strengthens), tip: tipOf(adv.verdicts.strengthens) });
-      paras.push({ lead: "Defended.", text: `Asked to make the case for ${c.brand}, the AI strengthens it in ${P(adv.verdicts.strengthens)} of answers.`, tip: tipOf(adv.verdicts.strengthens) });
+      rows.push({ label: L.defended, value: P(adv.verdicts.strengthens), tip: tipOf(adv.verdicts.strengthens) });
+      items.push({ label: L.defended, a: rate(adv.verdicts.strengthens) * 100, value: P(adv.verdicts.strengthens) });
+      paras.push({ lead: `${L.defended}.`, text: `Asked to make the case for ${c.brand}, the AI strengthens it in ${P(adv.verdicts.strengthens)} of answers.`, tip: tipOf(adv.verdicts.strengthens) });
     } else if (bc && bc.answers >= MIN) {
-      rows.push({ label: "Defended", value: P(bc.caseStrength.strong), tip: tipOf(bc.caseStrength.strong) });
-      paras.push({ lead: "Defended.", text: `Asked for a business case for ${c.brand}, the AI makes a strong one in ${P(bc.caseStrength.strong)} of answers.`, tip: tipOf(bc.caseStrength.strong) });
+      rows.push({ label: L.defended, value: P(bc.caseStrength.strong), tip: tipOf(bc.caseStrength.strong) });
+      items.push({ label: L.defended, a: rate(bc.caseStrength.strong) * 100, value: P(bc.caseStrength.strong) });
+      paras.push({ lead: `${L.defended}.`, text: `Asked for a business case for ${c.brand}, the AI makes a strong one in ${P(bc.caseStrength.strong)} of answers.`, tip: tipOf(bc.caseStrength.strong) });
     }
   }
+  const acc = items.find((i) => i.accent)!;
+  const title = oneStage
+    ? `The funnel pinches at one stage - ${low1(acc.label)}, ${acc.value}`
+    : d1 > 0 && d2 > 0
+      ? `The funnel narrows most at ${low1(acc.label)}, ${acc.value}`
+      : `The funnel holds through every stage - ${low1(acc.label)}, ${acc.value}`;
+  const viz: BriefViz = { kind: "funnel", title, subtitle: "Share of answers at each stage of the AI's verdicts; width is the rate", items };
   return [
     { key: "thesis", paras: [{ text: thesis, tip: `Named ${tipOf(S.mentioned)}; recommended ${tipOf(S.recommended)}; picked ${tipOf(S.chosen)}.` }] },
+    { key: "funnel_viz", viz },
     { key: "stages", heading: "The stages", rows },
     { key: "readings", paras },
   ];
@@ -976,61 +1000,279 @@ function funnelFrame(c: Ctx): BriefSection[] {
 
 /* ---------------------------------- Matrix --------------------------------- */
 
-const median = (xs: number[]) => {
-  const v = [...xs].sort((a, b) => a - b);
-  if (!v.length) return 0;
-  const m = Math.floor(v.length / 2);
-  return v.length % 2 ? v[m] : (v[m - 1] + v[m]) / 2;
+type Quadrant = "The Closers" | "The Showroom" | "The Quiet Closer" | "The Background";
+
+/** "<brand> is <phrase>" for each quadrant (its name carries its own article). */
+const QUAD_PHRASE: Record<Quadrant, string> = {
+  "The Closers": "one of the Closers",
+  "The Showroom": "in the Showroom",
+  "The Quiet Closer": "a Quiet Closer",
+  "The Background": "in the Background",
 };
 
-type Quadrant = "Category leader" | "Showroom brand" | "Quiet converter" | "Bystander";
+/* Scatter label placement, in the UI's own viewBox space (BRIEF_SCATTER_GEOM).
+ * Text width is estimated from character count at the UI's label sizes. */
+type Box = [number, number, number, number]; // x0, y0, x1, y1
+const textW = (t: string, fs: number, bold = false) => t.length * fs * (bold ? 0.6 : 0.555);
+const boxOf = (x: number, y: number, t: string, fs: number, bold = false): Box => [x, y - fs * 0.78, x + textW(t, fs, bold), y + fs * 0.24];
+const overlap = (a: Box, b: Box) => Math.max(0, Math.min(a[2], b[2]) - Math.max(a[0], b[0])) * Math.max(0, Math.min(a[3], b[3]) - Math.max(a[1], b[1]));
+
+interface ScatterPlan {
+  items: BriefVizItem[];
+  diagPx: { x: number; y: number };
+  notePx?: { x: number; y: number };
+  noteLines?: string[];
+}
+
+function placeScatter(pts: { label: string; x: number; y: number; accent: boolean; unlabeled: boolean }[], xMax: number, yMax: number, vline: number, vlineLabel: string, diag: number, diagLabel: string, note: string | null): ScatterPlan {
+  const g = BRIEF_SCATTER_GEOM;
+  const px = (x: number, y: number) => scatterPx(x, y, xMax, yMax);
+  const FS = 12.5;
+  const FS_ACC = 13.5;
+  const FS_REF = 11.5;
+  const obstacles: Box[] = [];
+  // Dots.
+  for (const p of pts) {
+    const q = px(p.x, p.y);
+    const r = (p.accent ? 7 : 5) + 2;
+    obstacles.push([q.x - r, q.y - r, q.x + r, q.y + r]);
+  }
+  // The visibility line (a thin strip) and its label at the top.
+  const v = px(vline, 0);
+  const vStrip: Box = [v.x - 3, g.top, v.x + 3, g.h - g.bottom];
+  obstacles.push(boxOf(v.x + 6, g.top + 11, vlineLabel, FS_REF));
+  // The converting line's label: end-anchored just above the line, at the
+  // rightmost spot along it that clears every dot (the UI draws it there).
+  const dX = Math.min(xMax, yMax * diag);
+  const dl = textW(diagLabel, FS_REF);
+  const dotBoxes = [...obstacles];
+  let diagPx = { x: 0, y: 0 };
+  let diagBox: Box = [0, 0, 0, 0];
+  let diagBest = Infinity;
+  for (let i = 0; i <= 12; i++) {
+    const xx = dX * (1 - i * 0.05);
+    const e = px(xx, xx / diag);
+    const bx: Box = [e.x - 4 - dl, e.y - 8 - FS_REF * 0.78, e.x - 4, e.y - 8 + FS_REF * 0.24];
+    const k = dotBoxes.reduce((a, o) => a + overlap(bx, o), 0) * 10 + i;
+    if (k < diagBest) {
+      diagBest = k;
+      diagPx = { x: Math.round(e.x - 4), y: Math.round(e.y - 8) };
+      diagBox = bx;
+    }
+  }
+  obstacles.push(diagBox);
+  // The diagonal itself: a rect is hit when the line's y over the rect's x-span meets its y-span.
+  const diagHits = (b: Box) => {
+    const x0 = Math.max(b[0], g.left);
+    const x1 = Math.min(b[2], g.w - g.right);
+    if (x1 <= x0) return 0;
+    const yAt = (X: number) => {
+      const dx = ((X - g.left) / (g.w - g.left - g.right)) * xMax;
+      return px(dx, dx / diag).y;
+    };
+    const ya = yAt(x0);
+    const yb = yAt(x1);
+    // A 5px clearance either side: a dashed line grazing a label's baseline still reads as crossing it.
+    return Math.min(ya, yb) <= b[3] + 5 && Math.max(ya, yb) >= b[1] - 5 ? (x1 - x0) * 6 : 0;
+  };
+  const inside = (b: Box) => {
+    const over = Math.max(0, g.left - 4 - b[0]) + Math.max(0, b[2] - (g.w - 2)) + Math.max(0, g.top - 2 - b[1]) + Math.max(0, b[3] - (g.h - g.bottom + 2));
+    return over * 400;
+  };
+  const placed: Box[] = [];
+  const cost = (b: Box) => obstacles.reduce((a, o) => a + overlap(b, o), 0) + overlap(b, vStrip) * 40 + placed.reduce((a, o) => a + overlap(b, o) * 3, 0) + diagHits(b) + inside(b);
+  const out = new Map<string, { dx: number; dy: number }>();
+  const candsOf = new Map<string, [number, number][]>();
+  // Subject first, then by visibility.
+  const order = pts.filter((p) => !p.unlabeled).sort((a, b) => Number(b.accent) - Number(a.accent) || b.x - a.x);
+  for (const p of order) {
+    const q = px(p.x, p.y);
+    const fs = p.accent ? FS_ACC : FS;
+    const w = textW(p.label, fs, p.accent);
+    const r = p.accent ? 7 : 5;
+    const cands: [number, number][] = [
+      [r + 5, 4.5],
+      [-(r + 5) - w, 4.5],
+      [r + 3, -(r + 3)],
+      [-w / 2, -(r + 6)],
+      [r + 3, r + 13],
+      [-w / 2, r + 15],
+      [-(r + 3) - w, -(r + 3)],
+      [-(r + 3) - w, r + 13],
+      [r + 6, -(r + 14)],
+      [r + 6, r + 24],
+      [-w / 2, -(r + 20)],
+      [-w / 2, r + 29],
+    ];
+    // Stacked tiers above the dot for a crowded strip (the UI draws a quiet
+    // leader to any label set this far off its dot).
+    for (let k = 1; k <= 7; k++) for (const ox of [-w / 2, -3, -w + 3]) cands.push([ox, -(r + 6) - k * 15]);
+    let best = cands[0];
+    let bestCost = Infinity;
+    for (const [i, cnd] of cands.entries()) {
+      const bx = boxOf(q.x + cnd[0], q.y + cnd[1], p.label, fs, p.accent);
+      const k = cost(bx) + i * 0.5; // a slight preference for the natural order
+      if (k < bestCost) {
+        bestCost = k;
+        best = cnd;
+      }
+    }
+    placed.push(boxOf(q.x + best[0], q.y + best[1], p.label, fs, p.accent));
+    out.set(p.label, { dx: Math.round(best[0] - g.labelDx), dy: Math.round(best[1] - g.labelDy) });
+    candsOf.set(p.label, cands);
+  }
+  // Two refinement passes: each label re-chooses with every other label in place.
+  for (let pass = 0; pass < 2; pass++)
+    for (const [j, p] of order.entries()) {
+      const q = px(p.x, p.y);
+      const fs = p.accent ? FS_ACC : FS;
+      const others = placed.filter((_, i) => i !== j);
+      const costJ = (b: Box) => obstacles.reduce((a, o) => a + overlap(b, o), 0) + overlap(b, vStrip) * 40 + others.reduce((a, o) => a + overlap(b, o) * 3, 0) + diagHits(b) + inside(b);
+      let bestB = placed[j];
+      let bestK = costJ(bestB);
+      let bestC: [number, number] | null = null;
+      for (const [i, cnd] of candsOf.get(p.label)!.entries()) {
+        const bx = boxOf(q.x + cnd[0], q.y + cnd[1], p.label, fs, p.accent);
+        const k = costJ(bx) + i * 0.5;
+        if (k + 1 < bestK) {
+          bestK = k;
+          bestB = bx;
+          bestC = cnd;
+        }
+      }
+      if (bestC) {
+        placed[j] = bestB;
+        out.set(p.label, { dx: Math.round(bestC[0] - g.labelDx), dy: Math.round(bestC[1] - g.labelDy) });
+      }
+    }
+  // The cluster note: near the unlabeled dots, clear of everything placed.
+  // One line beside the cluster if it fits; else the same words on two
+  // lines beside it; else one line stepping up above it.
+  let notePx: ScatterPlan["notePx"];
+  let noteLines: string[] | undefined;
+  const cl = pts.filter((p) => p.unlabeled);
+  if (note && cl.length) {
+    const qs = cl.map((p) => px(p.x, p.y));
+    const cx = qs.reduce((a, q) => a + q.x, 0) / qs.length;
+    const top = Math.min(...qs.map((q) => q.y));
+    const minX = Math.min(...qs.map((q) => q.x));
+    const maxX = Math.max(...qs.map((q) => q.x));
+    const base = Math.max(...qs.map((q) => q.y));
+    const LINE = 14;
+    const split = (() => {
+      const words = note.split(" ");
+      let bestI = 1;
+      let bestD = Infinity;
+      for (let i = 1; i < words.length; i++) {
+        const d = Math.abs(words.slice(0, i).join(" ").length - words.slice(i).join(" ").length);
+        if (d < bestD) {
+          bestD = d;
+          bestI = i;
+        }
+      }
+      return [words.slice(0, bestI).join(" "), words.slice(bestI).join(" ")];
+    })();
+    const boxes = (x: number, y: number, lines: string[]) => lines.map((l, i) => boxOf(x, y + i * LINE, l, FS_REF));
+    const w1 = textW(note, FS_REF);
+    const cands: { x: number; y: number; lines: string[] }[] = [
+      { x: maxX + 10, y: base - 6, lines: [note] },
+      { x: maxX + 10, y: base - 6 - LINE, lines: split },
+      { x: maxX + 10, y: top - 2 - LINE, lines: split },
+    ];
+    for (const lift of [12, 24, 36, 48, 60, 72, 84, 96, 110, 124])
+      for (const x of [cx - w1 / 2, minX - 4]) cands.push({ x, y: top - lift, lines: [note] });
+    let best = cands[0];
+    let bestCost = Infinity;
+    for (const [i, cnd] of cands.entries()) {
+      const k = boxes(cnd.x, cnd.y, cnd.lines).reduce((a, bx) => a + cost(bx), 0) + i * 0.5;
+      if (k < bestCost) {
+        bestCost = k;
+        best = cnd;
+      }
+    }
+    notePx = { x: Math.round(Math.max(g.left + 2, best.x)), y: Math.round(best.y) };
+    if (best.lines.length > 1) noteLines = best.lines;
+  }
+  const items = pts.map((p) => {
+    const it: BriefVizItem = { label: p.label, a: Math.round(p.x * 10) / 10, b: Math.round(p.y * 10) / 10 };
+    if (p.accent) it.accent = true;
+    if (p.unlabeled) it.unlabeled = true;
+    const n = out.get(p.label);
+    if (n && (n.dx || n.dy)) {
+      it.dx = n.dx;
+      it.dy = n.dy;
+    }
+    return it;
+  });
+  return { items, diagPx, notePx, ...(noteLines ? { noteLines } : {}) };
+}
 
 function matrixFrame(c: Ctx): BriefSection[] {
   const s = c.summary;
   // The selectable brands that register (named in >= 10% of answers or >= 1%
-  // of the picks; the subject and the target always): a long tail of
-  // near-zero brands would pull both medians to zero and make every brand
-  // with a single pick a "leader".
+  // of the picks; the subject and the target always).
   const set = s.brands.filter((b) => b.key === c.subject.key || b.key === c.target.key || rate(b.mentioned) >= 0.1 || rate(b.shareOfDecided) >= 0.01);
-  const medN = median(set.map((b) => rate(b.mentioned)));
-  // The conversion axis is RELATIVE to visibility: a brand converts when it
-  // wins at least as big a share of the picks as it holds of the table's
-  // mentions. A raw share-of-picks median made every above-tail brand a
-  // "leader" (the fixture's AmEx - the archetypal showroom brand - included).
-  const totM = set.reduce((a, b) => a + b.mentioned.k, 0);
-  const mShare = (b: SummaryBrand) => (totM ? b.mentioned.k / totM : 0);
-  const quad = (b: SummaryBrand): Quadrant => {
-    const hn = rate(b.mentioned) > medN;
-    const hs = b.chosen.k > 0 && rate(b.shareOfDecided) >= mShare(b);
-    return hn && hs ? "Category leader" : hn ? "Showroom brand" : hs ? "Quiet converter" : "Bystander";
-  };
+  // The exemplar's lines: visible = named in more than half of answers;
+  // converting = share of picks at least a quarter of the named rate.
+  const visible = (b: SummaryBrand) => rate(b.mentioned) > 0.5;
+  const converting = (b: SummaryBrand) => b.chosen.k > 0 && rate(b.shareOfDecided) >= rate(b.mentioned) / 4;
+  const quad = (b: SummaryBrand): Quadrant => (visible(b) && converting(b) ? "The Closers" : visible(b) ? "The Showroom" : converting(b) ? "The Quiet Closer" : "The Background");
   const sorted = [...set].sort((a, b) => b.mentioned.k - a.mentioned.k || a.name.localeCompare(b.name));
   const rows = sorted.map((b) => [b.name, P(b.mentioned), P(b.shareOfDecided), quad(b)]);
   const hi = sorted.findIndex((b) => b.key === c.subject.key);
   const mine = quad(c.subject);
-  const article = /^[AEIOU]/.test(mine) ? "an" : "a";
+  const conv = converting(c.subject);
   const paras: BriefPara[] = [
     {
-      lead: `${c.name} is ${article} ${low1(mine)}.`,
-      text: `It is named in ${P(c.subject.mentioned)} of answers - the middle of the table is ${pctN(medN)} - and takes ${P(c.subject.shareOfDecided)} of the picks, ${
-        rate(c.subject.shareOfDecided) >= mShare(c.subject) ? "at least as much as" : "less than"
-      } its visibility would predict.`,
-      tip: `Named ${tipOf(c.subject.mentioned)}; ${tipOf(c.subject.shareOfDecided)} picks. Prediction = its share of the table's mentions.`,
+      lead: `${c.name} is ${QUAD_PHRASE[mine]}.`,
+      text: `It is named in ${P(c.subject.mentioned)} of answers and takes ${P(c.subject.shareOfDecided)} of the picks - ${conv ? "at least" : "less than"} a quarter of how often it is named.`,
+      tip: `Named ${tipOf(c.subject.mentioned)}; ${tipOf(c.subject.shareOfDecided)} picks.`,
     },
   ];
-  const showroom = sorted.find((b) => b.key !== c.subject.key && quad(b) === "Showroom brand");
-  const quiet = [...sorted].filter((b) => b.key !== c.subject.key && quad(b) === "Quiet converter").sort((a, b) => b.shareOfDecided.k - a.shareOfDecided.k)[0];
+  const showroom = sorted.find((b) => b.key !== c.subject.key && quad(b) === "The Showroom");
+  const quiet = [...sorted].filter((b) => b.key !== c.subject.key && quad(b) === "The Quiet Closer").sort((a, b) => b.shareOfDecided.k - a.shareOfDecided.k)[0];
   const outl: string[] = [];
   if (showroom)
-    outl.push(
-      `${showroom.name} is ${mine === "Showroom brand" ? "another showroom brand" : "the most visible showroom brand"} - named in ${P(showroom.mentioned)} of answers but only ${P(showroom.shareOfDecided)} of the picks.`
-    );
-  if (quiet) outl.push(`${quiet.name} converts quietly - named in ${P(quiet.mentioned)} of answers yet ${P(quiet.shareOfDecided)} of the picks.`);
+    outl.push(`${showroom.name} is ${mine === "The Showroom" ? "also in the Showroom" : "the most visible brand in the Showroom"} - named in ${P(showroom.mentioned)} of answers but only ${P(showroom.shareOfDecided)} of the picks.`);
+  if (quiet) outl.push(`${quiet.name} is ${mine === "The Quiet Closer" ? "another" : "the"} Quiet Closer - named in ${P(quiet.mentioned)} of answers yet ${P(quiet.shareOfDecided)} of the picks.`);
   if (outl.length) paras.push({ text: outl.join(" ") });
-  paras.push({
-    text: "Category leaders are widely named and win picks at least in proportion to their visibility; showroom brands are widely named but picked less than that visibility would predict; quiet converters the reverse; bystanders are neither named nor picked much.",
+  paras.push({ text: "Visible means named in more than half of answers. Converting means the brand's share of picks is at least a quarter of how often it is named." });
+
+  // The scatter.
+  const pts = sorted.map((b) => {
+    const x = rate(b.mentioned) * 100;
+    const y = rate(b.shareOfDecided) * 100;
+    const accent = b.key === c.subject.key;
+    return { label: b.name, x, y, accent, unlabeled: !accent && y < 2 && x < 30 };
   });
+  const cluster = pts.filter((p) => p.unlabeled).map((p) => p.label);
+  const yMax = Math.max(20, Math.ceil((Math.max(...pts.map((p) => p.y), 0) + 4) / 10) * 10);
+  const VL = "visible: named over 50%";
+  const DL = "converting line";
+  const plan = placeScatter(pts, 100, yMax, 50, VL, 4, DL, cluster.length ? listOf(cluster) : null);
+  const headline = `${P(c.subject.shareOfDecided)} of picks on ${P(c.subject.mentioned)} visibility`;
+  const title =
+    sorted[0]?.key === c.subject.key && !conv
+      ? `The most visible brand converts least - ${headline}`
+      : `${c.name} is ${QUAD_PHRASE[mine]} - ${headline}`;
+  const viz: BriefViz = {
+    kind: "scatter",
+    title,
+    subtitle: "Every brand by how often the AI names it and its share of picks",
+    items: plan.items,
+    xLabel: "named in answers",
+    yLabel: "share of picks",
+    vline: 50,
+    vlineLabel: VL,
+    diag: 4,
+    diagLabel: DL,
+    diagLabelPx: plan.diagPx,
+    xMax: 100,
+    yMax,
+    ...(cluster.length ? { clusterNote: listOf(cluster), ...(plan.notePx ? { notePx: plan.notePx } : {}), ...(plan.noteLines ? { noteLines: plan.noteLines } : {}) } : {}),
+  };
   return [
+    { key: "matrix_viz", viz },
     { key: "matrix", table: { headers: ["Brand", "Named", "Share of picks", "Position"], rows, ...(hi >= 0 ? { highlightRow: hi } : {}) } },
     { key: "reading", paras },
   ];
@@ -1066,7 +1308,88 @@ function jobsFrame(c: Ctx): BriefSection[] {
     paras.push({ lead: r.room, text: parts.join(" "), tip: `${tip}.` });
   }
   if (!paras.length) paras.push({ text: "This tracker asks every buyer the same questions - there are no separate buying situations to read." });
-  return [{ key: "situations", paras }];
+  const out: BriefSection[] = [];
+  const viz = pairsViz(c);
+  if (viz) out.push({ key: "situations_viz", viz });
+  out.push({ key: "situations", paras });
+  return out;
+}
+
+/** The by-situation pairs: the subject's share of picks over the situation's
+ * leader's (the leading rival's where the subject leads), leader-descending. */
+function pairsViz(c: Ctx): BriefViz | null {
+  const groups: { room: string; mine: RateCell; leader: { name: string; share: RateCell }; owns: boolean }[] = [];
+  for (const r of c.rooms) {
+    if (r.answers === 0 || r.firm.k < MIN) continue;
+    const mine = r.brands.find((b) => b.key === c.subject.key);
+    const top = r.brands.filter((b) => b.key !== c.subject.key).sort((a, b) => b.chosen - a.chosen)[0];
+    if (!top) continue;
+    const owns = !!mine && mine.chosen > 0 && mine.chosen >= top.chosen;
+    groups.push({ room: r.room, mine: mine ? mine.share : cell(0, r.firm.k), leader: { name: top.name, share: top.share }, owns });
+  }
+  if (!groups.length) return null;
+  // Ordered by who holds the situation most firmly (the leader's share; the subject's own where it leads).
+  const top = (g: (typeof groups)[number]) => Math.max(rate(g.leader.share), rate(g.mine));
+  groups.sort((a, b) => top(b) - top(a) || a.room.localeCompare(b.room));
+  const owned = groups.filter((g) => g.owns).map((g) => g.room);
+  const title = !owned.length
+    ? `Every situation has an owner - and it is never ${c.name}`
+    : owned.length === groups.length
+      ? `${c.name} owns every buying situation`
+      : `${c.name} owns ${listOf(owned)}; the rest have other owners`;
+  return {
+    kind: "pairs",
+    title,
+    subtitle: `Share of picks by buying situation: ${c.name} against the situation's leader${owned.length ? ", or its closest rival where it leads" : ""}`,
+    legend: [c.name, owned.length ? "the leading rival" : "the situation's leader"],
+    items: groups.map((g) => ({
+      label: g.room,
+      a: rate(g.mine) * 100,
+      value: g.mine.k === 0 ? "0%" : P(g.mine),
+      b: rate(g.leader.share) * 100,
+      bValue: P(g.leader.share),
+      who: g.leader.name,
+      ...(g.owns ? { accent: true } : {}),
+    })),
+  };
+}
+
+/** A 2-4 word tag for a move, for the pyramid's resolution line. */
+function moveTag(m: Move, brand: string): string {
+  switch (m.row) {
+    case "open":
+      return m.label || "the open answer";
+    case "social":
+      return "the popular pick";
+    case "awareness":
+      return "problem questions";
+    case "explainer":
+      return "category lessons";
+    case "value": {
+      const line = m.label.includes(" - ") ? m.label.split(" - ")[1] : "";
+      return `${line || brand} value`;
+    }
+    case "premium":
+      return "premium versus basic";
+    case "criteria":
+      return "the checklist";
+    case "h2h":
+      return `the ${m.label} matchup`;
+    case "leavers":
+      return m.label ? `${poss(m.label)} switchers` : "rival switchers";
+    case "buyers":
+      return "a buyer worry";
+    case "customers":
+      return "a customer worry";
+    case "hold":
+      return "keeping customers";
+    case "repertoire":
+      return "habit buyers";
+    case "settled":
+      return "the customer case";
+    default:
+      return low1(m.lead);
+  }
 }
 
 /* ----------------------------------- Minto --------------------------------- */
@@ -1087,16 +1410,20 @@ function mintoFrame(c: Ctx): BriefSection[] {
 
   // Complication: the sharpest tension, composed in minto's own words.
   let comp: BriefPara | null = null;
+  let compKind: "h2h" | "conv" | "rooms" | null = null;
+  let roomSpread: [RateCell, RateCell] | null = null;
   const won = sm.headToHead.reduce((a, r) => a + r.won.k, 0);
   const lost = sm.headToHead.reduce((a, r) => a + r.lost.k, 0);
   const pooled = cell(won, won + lost);
   const conv = (b: SummaryBrand) => (b.recommended.k > 0 ? b.chosen.k / b.recommended.k : 0);
   if (c.isTarget && pooled.n >= MIN && rate(pooled) - rate(S.shareOfDecided) >= 0.15) {
+    compKind = "h2h";
     comp = {
       text: `Yet when the AI is asked to compare ${c.name} with a rival directly, it picks ${c.name} in ${P(pooled)} of matchups - far more often than it picks ${c.name} unprompted. The preference exists; the open answer does not carry it.`,
       tip: `Matchups ${tipOf(pooled)}; open ${tipOf(S.shareOfDecided)}.`,
     };
   } else if (leader && S.recommended.k >= MIN && leader.recommended.k >= MIN && conv(leader) > conv(S) + 0.1) {
+    compKind = "conv";
     comp = {
       text: `Yet recommendation is not the problem - ${P(S.recommended)} of answers recommend ${c.name}. Conversion is: ${pctN(conv(S))} of those recommendations end in the pick, against ${pctN(conv(leader))} for ${leader.name}.`,
       tip: `${c.name} ${S.chosen.k} of ${S.recommended.k}; ${leader.name} ${leader.chosen.k} of ${leader.recommended.k}.`,
@@ -1106,6 +1433,8 @@ function mintoFrame(c: Ctx): BriefSection[] {
     if (ok.length >= 2 && ok[0].share.low > ok[ok.length - 1].share.high) {
       const hi = ok[0];
       const lo = ok[ok.length - 1];
+      compKind = "rooms";
+      roomSpread = [hi.share, lo.share];
       comp = {
         text: `Yet the standing is uneven: ${c.name} takes ${P(hi.share)} of the picks for ${hi.r.room} but ${lo.share.k === 0 ? "none of them" : `only ${P(lo.share)}`} for ${lo.r.room}.`,
         tip: `${hi.r.room}: ${tipOf(hi.share)}. ${lo.r.room}: ${tipOf(lo.share)}.`,
@@ -1113,6 +1442,44 @@ function mintoFrame(c: Ctx): BriefSection[] {
     }
   }
   if (comp) out.push({ key: "complication", heading: "The complication", paras: [comp] });
+
+  // The pyramid: one short line per level, from the facts above.
+  const sitNote =
+    rate(S.mentioned) >= 0.5
+      ? `The AI knows the brand: named in ${P(S.mentioned)}, recommended in ${P(S.recommended)} - awareness is solved`
+      : `Named in ${P(S.mentioned)}, recommended in ${P(S.recommended)} - awareness is still open`;
+  let compNote = "No single tension stands out this wave";
+  if (compKind === "h2h") compNote = `Picked in ${P(pooled)} of direct matchups, ${P(S.shareOfDecided)} of open picks`;
+  else if (compKind === "conv") compNote = `Only ${pctN(conv(S))} of its recommendations become the pick`;
+  else if (compKind === "rooms" && roomSpread) compNote = `${P(roomSpread[0])} of picks at its best, ${roomSpread[1].k === 0 ? "none" : P(roomSpread[1])} at its worst`;
+  let resNote: string;
+  if (c.isTarget && c.moves.length) {
+    const tags: string[] = [];
+    for (const m of c.moves) {
+      const t = moveTag(m, c.brand);
+      if (tags.some((x) => norm(x) === norm(t))) continue;
+      if (`The moves: ${listOf([...tags, t])}`.length > 88 && tags.length >= 2) break;
+      tags.push(t);
+    }
+    resNote = `The moves: ${listOf(tags)}`;
+  } else if (c.isTarget) resNote = "No contest is lost by a clear margin - keep the standing current";
+  else {
+    const weak = roomsByShare(c);
+    const w = weak.length > 1 ? weak[weak.length - 1] : undefined;
+    resNote = w ? `Where it is exposed: ${w.r.room}` : `The moves in this brief belong to ${c.brand}`;
+  }
+  out.unshift({
+    key: "pyramid",
+    viz: {
+      kind: "pyramid",
+      title: "One argument - situation, complication, resolution",
+      items: [
+        { label: "Situation", note: sitNote },
+        { label: "Complication", note: compNote, accent: true },
+        { label: "Resolution", note: resNote },
+      ],
+    },
+  });
   if (c.isTarget && c.moves.length)
     out.push({
       key: "resolution",
@@ -1243,7 +1610,8 @@ export async function computeBrief(data: ViewData, request: BriefRequest = {}): 
 
 // bf1 (2026-11-04): first version - seven frames, subject shift, the two-pick-numbers convention.
 // bf2 (2026-11-04): Tyler's review - now_what follows the exemplar memo (one-paragraph verdict, funnel break, numbered findings, conditions); the other frames drop the shared verdict block and open on their own structure.
-const BRIEF_VERSION = "bf2";
+// bf3 (2026-11-04): the library exemplars mirrored - funnel stages renamed + hourglass, matrix on the exemplar's quadrants and lines (visible > 50% named, converting = share >= named / 4) + scatter, by-situation pairs, Minto pyramid.
+const BRIEF_VERSION = "bf3";
 
 /**
  * The brief through the cache. cachedView's keying, with the subject as one
