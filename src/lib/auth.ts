@@ -213,6 +213,40 @@ export const PLAN_WORRY_ALLOWANCE: Record<Plan, number | null> = {
   enterprise: null,
 };
 
+/** Model-written briefs (the Brief pill's option B) per tier: the written
+ * memo replaces the composed one for the tracker's readers. Each memo is a
+ * model call (~6 cents a frame, cached per run), so the split follows
+ * spend. PROVISIONAL, like the custom-cell allowance. */
+export const PLAN_WRITTEN_BRIEFS: Record<Plan, boolean> = {
+  free: false,
+  starter: false,
+  growth: false,
+  pro: true,
+  enterprise: true,
+};
+
+/** Which Brief the caller gets: "admin" sees the composed/written toggle,
+ * "written" is served the written memo, "composed" never reaches the writer. */
+export type BriefMode = "admin" | "written" | "composed";
+
+/** The Brief policy as a pure decision, in order: auth off (dev/fixture) ->
+ * admin; a share-link viewer -> composed (an anonymous reader never
+ * triggers generation spend); staff -> admin; else the plan's allowance. */
+export function briefModeFor(c: { authOn: boolean; share: boolean; staff: boolean; plan: Plan }): BriefMode {
+  if (!c.authOn) return "admin";
+  if (c.share) return "composed";
+  if (c.staff) return "admin";
+  return PLAN_WRITTEN_BRIEFS[c.plan] ? "written" : "composed";
+}
+
+export async function briefModeOf(auth: AuthContext): Promise<BriefMode> {
+  const authOn = authEnabled();
+  const share = Boolean(auth.shareProjectId);
+  if (!authOn || share) return briefModeFor({ authOn, share, staff: false, plan: "free" });
+  const staff = await isStaff(auth);
+  return briefModeFor({ authOn, share, staff, plan: staff ? "enterprise" : await getPlanFor(auth) });
+}
+
 /** Engine panel each tier may run, chosen so per-run vendor cost scales
  * with the tier (measured on the jira battery, 520 prompts): the cheap
  * instinct trio ~ $6/run, Growth's mid panel ~ $39, Pro's 8 ~ $56, the

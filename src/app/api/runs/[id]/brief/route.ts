@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { requireAuth, requireRun } from "@/lib/auth";
+import { briefModeOf, requireAuth, requireRun } from "@/lib/auth";
 import { store } from "@/lib/store";
 import { matchKey } from "@/lib/brand_key";
 import { viewRequestParams } from "@/lib/engine/view_data";
@@ -15,12 +15,17 @@ export const maxDuration = 300;
 /** The Brief pill (bf1): all seven memo frames for one subject brand,
  * composed as finished sentences. ?subject=<brand> (absent = the tracker's
  * own brand) and ?engines=a,b,c (the Panel lens). { view: null } = no codes
- * source yet.
+ * source yet. `briefMode` (auth.ts briefModeOf) tells the client which
+ * Brief this caller is served.
  *
  * ?written=1&frame=<frame> (option B, 2026-11-05): the same payload, then
  * that frame's memo through the fact-guarded writer (brief_writer.ts) -
  * returns { memo, written, reason? } instead of the payload. written:false
- * carries the composed memo. */
+ * carries the composed memo. The spend gate is HERE: a "composed" caller
+ * gets reason "plan" and the writer is never called.
+ *
+ * Residual: share links are always composed, so a written-tier tracker's
+ * share links do not show its written memos (they could serve cached-only). */
 export async function GET(
   req: Request,
   { params }: { params: Promise<{ id: string }> }
@@ -38,8 +43,10 @@ export async function GET(
   if (written && !(BRIEF_FRAMES as string[]).includes(frame ?? "")) {
     return NextResponse.json({ error: "unknown frame" }, { status: 400 });
   }
+  const briefMode = await briefModeOf(auth);
+  if (written && briefMode === "composed") return NextResponse.json({ memo: null, written: false, reason: "plan" });
   const view = await computeBriefCached(loaded.run, loaded.project, { ...(engines ? { engines } : {}), ...(subject ? { subject } : {}) });
-  if (!written) return NextResponse.json({ view });
+  if (!written) return NextResponse.json({ view, briefMode });
   const memo = view?.memos[frame as BriefFrame];
   if (!view || !memo) return NextResponse.json({ memo: null, written: false, reason: "unavailable" });
   const source = (await store.getCodesSource(loaded.project.id)) ?? "";

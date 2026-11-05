@@ -1551,6 +1551,7 @@ export async function computeBrief(data: ViewData, request: BriefRequest = {}): 
 
   const engineCount = summary.core.length;
   const month = monthOf(data.run);
+  const wave = await waveOf(data.run);
   const ctx: Ctx = {
     data,
     summary,
@@ -1571,8 +1572,8 @@ export async function computeBrief(data: ViewData, request: BriefRequest = {}): 
     findings: [],
     stagePicks,
     archetype: isTarget ? map.casting.archetype : leaderOfBrands(summary, subject.key) ? "specialist" : "default",
-    footer: `One wave of answers from ${engineCount} AI assistants${month ? `, ${month}` : ""}.`,
-    wave: await waveOf(data.run),
+    footer: `${name} - wave ${wave}${month ? ` - ${month}` : ""}.`,
+    wave,
   };
 
   ctx.findings = findingsOf(ctx);
@@ -1600,7 +1601,8 @@ export async function computeBrief(data: ViewData, request: BriefRequest = {}): 
 // bf1 (2026-11-04): first version - seven frames, subject shift, the two-pick-numbers convention.
 // bf2 (2026-11-04): Tyler's review - now_what follows the exemplar memo (one-paragraph verdict, funnel break, numbered findings, conditions); the other frames drop the shared verdict block and open on their own structure.
 // bf3 (2026-11-04): the library exemplars mirrored - funnel stages renamed + hourglass, matrix on the exemplar's quadrants and lines (visible > 50% named, converting = share >= named / 4) + scatter, by-situation pairs, Minto pyramid.
-const BRIEF_VERSION = "bf5";
+// bf6 (2026-11-05): the footer names the brand, wave and month, never the assistant count.
+const BRIEF_VERSION = "bf6";
 
 /**
  * The brief through the cache. cachedView's keying, with the subject as one

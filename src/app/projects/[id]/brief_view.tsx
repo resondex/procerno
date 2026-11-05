@@ -31,6 +31,7 @@ import {
   scatterPx,
 } from "@/lib/engine/brief_types";
 import { useEngineSet } from "./view_parts";
+import type { BriefMode } from "@/lib/auth";
 
 // ---------- per-project preferences (frame + brand) ----------
 
@@ -39,7 +40,10 @@ const subjectKey = (p: string) => `procerno_brief_subject:${p}`;
 const versionKey = (p: string) => `procerno_brief_version:${p}`;
 
 /** Option B (2026-11-05): the composed memo rewritten as prose by the
- * fact-guarded writer (engine/brief_writer.ts). */
+ * fact-guarded writer (engine/brief_writer.ts). The server's briefMode
+ * decides who sees what: "admin" (staff, dev) gets the A/B toggle and the
+ * fallback notes; "written" is served B automatically and falls back to A
+ * silently; "composed" never fetches B. */
 type BriefVersion = "A" | "B";
 type WrittenResult = { memo: BriefMemo | null; written: boolean; reason?: string } | { error: string };
 
@@ -145,7 +149,7 @@ const BRIEF_CSS = `
 @media print{
   html.pb-printing body > *:not(#pb-print-root){ display:none !important; }
   html.pb-printing, html.pb-printing body{ background:#fff !important; }
-  html.pb-printing #pb-print-root{ display:block !important; padding:0.3in 0.45in; }
+  html.pb-printing #pb-print-root{ display:block !important; padding:0; }
   html.pb-printing #pb-print-root, html.pb-printing #pb-print-root *{
     color:#111 !important; box-shadow:none !important; opacity:1 !important;
     -webkit-print-color-adjust:exact; print-color-adjust:exact;
@@ -641,7 +645,7 @@ function Memo({ memo, subject, tracker, note }: { memo: BriefMemo; subject: stri
             {wave && <span>Wave {wave}</span>}
             {subject !== tracker && <span>A rival of {tracker}</span>}
           </div>
-          {note && <p className="pb-sans pb-meta italic">{note}</p>}
+          {note && <p className="pb-sans pb-meta pb-noprint italic">{note}</p>}
           <hr className="pb-head-rule" />
         </header>
         {memo.sections.map((s, i) => (
@@ -678,6 +682,11 @@ function printMemo(node: HTMLElement, title: string) {
   root.id = "pb-print-root";
   root.appendChild(node.cloneNode(true));
   document.body.appendChild(root);
+  // Page margins for this print only: @page cannot be scoped by a class, and
+  // a rule in BRIEF_CSS would reach every pill's print while the Brief is mounted.
+  const page = document.createElement("style");
+  page.textContent = "@page{ margin: 0.6in 0.65in; }";
+  document.head.appendChild(page);
   const html = document.documentElement;
   const prevTitle = document.title;
   html.classList.add("pb-printing");
@@ -689,6 +698,7 @@ function printMemo(node: HTMLElement, title: string) {
     html.classList.remove("pb-printing");
     document.title = prevTitle;
     root.remove();
+    page.remove();
   };
   printCleanup = cleanup;
   window.addEventListener("afterprint", cleanup);
@@ -711,6 +721,7 @@ export default function BriefSection({ runId, projectId }: { runId: string; proj
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [version, setVersion] = useState<BriefVersion | null>(null);
+  const [mode, setMode] = useState<BriefMode>("composed");
   // Written memos per (frame, subject, engine set); a key absent while B is
   // on screen is still being written.
   const [writtenMemos, setWrittenMemos] = useState<Record<string, WrittenResult>>({});
@@ -728,7 +739,7 @@ export default function BriefSection({ runId, projectId }: { runId: string; proj
     fetch(`/api/runs/${runId}/brief${qs ? `?${qs}` : ""}`)
       .then(async (r) => {
         if (!r.ok) throw new Error(`The brief could not load (${r.status}).`);
-        const d = (await r.json()) as { view: BriefView | null };
+        const d = (await r.json()) as { view: BriefView | null; briefMode?: BriefMode };
         if (!live) return;
         // Hydrate the saved frame here, not in a mount effect.
         setFrame((f) => {
@@ -736,6 +747,7 @@ export default function BriefSection({ runId, projectId }: { runId: string; proj
           const saved = readPref(fKey);
           return isFrame(saved) ? saved : "now_what";
         });
+        setMode(d.briefMode ?? "composed");
         setVersion((v) => v ?? (readPref(vKey) === "B" ? "B" : "A"));
         setView(d.view);
         setError(null);
@@ -756,8 +768,9 @@ export default function BriefSection({ runId, projectId }: { runId: string; proj
   const viewSubject = view?.subject ?? null;
   const wantFrame: BriefFrame = frame ?? "now_what";
   const writtenKey = viewSubject ? `${wantFrame}|${viewSubject}|${engineKey}` : null;
+  const wantB = mode === "written" || (mode === "admin" && version === "B");
   useEffect(() => {
-    if (version !== "B" || !writtenKey || !viewSubject) return;
+    if (!wantB || !writtenKey || !viewSubject) return;
     if (writtenMemos[writtenKey] || inFlight.current.has(writtenKey)) return;
     inFlight.current.add(writtenKey);
     const q = new URLSearchParams();
@@ -774,7 +787,7 @@ export default function BriefSection({ runId, projectId }: { runId: string; proj
       })
       .catch((e: Error) => setWrittenMemos((m) => ({ ...m, [k]: { error: e.message } })))
       .finally(() => inFlight.current.delete(k));
-  }, [version, writtenKey, viewSubject, wantFrame, engineKey, runId, writtenMemos]);
+  }, [wantB, writtenKey, viewSubject, wantFrame, engineKey, runId, writtenMemos]);
 
   useEffect(() => () => printCleanup?.(), []);
 
@@ -790,20 +803,22 @@ export default function BriefSection({ runId, projectId }: { runId: string; proj
 
   const current: BriefFrame = frame ?? "now_what";
   const composed = view.memos[current];
-  const showB = version === "B";
+  const showB = wantB;
+  const admin = mode === "admin";
   const wr = showB && writtenKey ? writtenMemos[writtenKey] : undefined;
   const writing = showB && !wr;
   let memo: BriefMemo | undefined = composed;
   let memoNote: string | undefined;
   if (showB && wr) {
     if ("error" in wr || !wr.written || !wr.memo) {
-      memoNote =
+      if (admin)
+        memoNote =
         !("error" in wr) && wr.reason === "unavailable"
           ? "This environment has no writing model configured, so the written version can't be generated here - showing the composed memo."
           : "The written version is not available for this frame - showing the composed memo.";
     } else {
       memo = wr.memo;
-      memoNote = "Option B - model-written from the measured facts. Every number is checked against the composed memo.";
+      if (admin) memoNote = "Option B - model-written from the measured facts. Every number is checked against the composed memo.";
     }
   }
 
@@ -839,19 +854,21 @@ export default function BriefSection({ runId, projectId }: { runId: string; proj
             ))}
           </select>
         </label>
-        <div role="group" aria-label="Memo version" className="flex overflow-hidden rounded-md border border-line text-[13px] font-medium">
-          {(["A", "B"] as const).map((v) => (
-            <button
-              key={v}
-              type="button"
-              aria-pressed={(version ?? "A") === v}
-              onClick={() => pickVersion(v)}
-              className={`px-2.5 py-1 transition-colors ${(version ?? "A") === v ? "bg-ink text-surface" : "bg-surface text-ink-2 hover:text-ink"} ${v === "B" ? "border-l border-line" : ""}`}
-            >
-              {v === "A" ? "A - Composed" : "B - Written"}
-            </button>
-          ))}
-        </div>
+        {admin && (
+          <div role="group" aria-label="Memo version" className="flex overflow-hidden rounded-md border border-line text-[13px] font-medium">
+            {(["A", "B"] as const).map((v) => (
+              <button
+                key={v}
+                type="button"
+                aria-pressed={(version ?? "A") === v}
+                onClick={() => pickVersion(v)}
+                className={`px-2.5 py-1 transition-colors ${(version ?? "A") === v ? "bg-ink text-surface" : "bg-surface text-ink-2 hover:text-ink"} ${v === "B" ? "border-l border-line" : ""}`}
+              >
+                {v === "A" ? "A - Composed" : "B - Written"}
+              </button>
+            ))}
+          </div>
+        )}
         {view.subjects.length > 1 && (
           <label className="flex items-center gap-1.5">
             <span className="text-[12px] text-ink-3">Brand:</span>
@@ -878,7 +895,11 @@ export default function BriefSection({ runId, projectId }: { runId: string; proj
           Download PDF
         </button>
         {loading && <span className="text-[12px] text-ink-3">Updating...</span>}
-        {writing && <span className="text-[12px] italic text-ink-3">Writing this memo from the measured facts...</span>}
+        {writing && (
+          <span className="text-[12px] italic text-ink-3">
+            {admin ? "Writing this memo from the measured facts..." : "Preparing this memo..."}
+          </span>
+        )}
         {error && view && <span className="text-[12px] text-danger">{error}</span>}
       </div>
 

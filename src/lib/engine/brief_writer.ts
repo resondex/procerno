@@ -27,7 +27,8 @@
  */
 
 import { createHash } from "node:crypto";
-import type { BriefMemo, BriefPara, BriefSection } from "./brief_types";
+import { BRIEF_FRAMES, type BriefMemo, type BriefPara, type BriefSection } from "./brief_types";
+import type { Project, Run } from "../types";
 import { BRIEF_WRITER_MODEL } from "./models";
 
 export const BRIEF_WRITER_VERSION = "bw1";
@@ -366,4 +367,62 @@ export async function writeBrief(memo: BriefMemo, ctx: WriteContext): Promise<{ 
       .catch(() => {});
   }
   return result;
+}
+
+/**
+ * The client brand's written memos, written ahead of the first open: the
+ * brief payload through the route's own cached path (default subject = the
+ * tracker's brand, full engine panel), then each of the seven frames
+ * cache-first. Rivals are never warmed - a rival memo is written only when a
+ * reader asks for it. Frames left when the deadline passes count as skipped;
+ * a frame is only started before the deadline, so one call may run past it.
+ * No key, a non-Claude writer model or no codes source: an all-skipped
+ * no-op that never touches the store. Never throws.
+ */
+export async function prewarmWrittenBriefs(
+  run: Run,
+  project: Project,
+  deadlineMs: number
+): Promise<{ written: number; cached: number; skipped: number }> {
+  const out = { written: 0, cached: 0, skipped: 0 };
+  const model = BRIEF_WRITER_MODEL;
+  if (!process.env.ANTHROPIC_API_KEY || !model.startsWith("claude")) return { ...out, skipped: BRIEF_FRAMES.length };
+  try {
+    const { store } = await import("../store");
+    const source = await store.getCodesSource(project.id);
+    if (!source) return { ...out, skipped: BRIEF_FRAMES.length };
+    const { computeBriefCached } = await import("./brief");
+    const { matchKey } = await import("../brand_key");
+    const { productNoun } = await import("./summary_insights");
+    const view = await computeBriefCached(run, project);
+    if (!view) return { ...out, skipped: BRIEF_FRAMES.length };
+    const ctx: WriteContext = {
+      runId: run.id,
+      source,
+      subjectKey: matchKey(view.subject),
+      brand: view.subject,
+      product: productNoun(project.category),
+      projectId: project.id,
+    };
+    for (const frame of BRIEF_FRAMES) {
+      const memo = view.memos[frame];
+      if (!memo || Date.now() >= deadlineMs) {
+        out.skipped++;
+        continue;
+      }
+      const key = writtenCacheKey(model, ctx, frame, factSheet(memo).text);
+      const hit = await store.cacheGet(key, CACHE_TTL_MS).catch(() => null);
+      if (hit) {
+        out.cached++;
+        continue;
+      }
+      const r = await writeBrief(memo, ctx);
+      if (r.written) out.written++;
+      else out.skipped++;
+    }
+  } catch (err) {
+    console.error("written brief warm failed:", err);
+    out.skipped = BRIEF_FRAMES.length - out.written - out.cached;
+  }
+  return out;
 }
