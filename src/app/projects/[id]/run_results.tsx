@@ -13,6 +13,7 @@ import { SortTable } from "./table";
 import AnswerText from "./answer_text";
 import HumanCodingPanel from "./human_coding_panel";
 import AnalysisTier, { type TierView } from "./analysis_views";
+import BriefSection from "./brief_view";
 import JourneySection from "./journey_view";
 import WhySection from "./why_view";
 import RivalsSection from "./rivals_view";
@@ -55,7 +56,9 @@ export default function RunResults({
  * The answer_codes-era results block (2026-10-30; analysis tier 2026-11-03).
  * The primary pills are the analysis tier (analysis_views.tsx,
  * ANALYSIS_REDESIGN_2026-11-03.md): The Verdict, The Map and The Portfolio,
- * one component over one /analysis_map fetch. The Verdict absorbed the old
+ * one component over one /analysis_map fetch, with The Brief (brief_view.tsx,
+ * BRIEF_PILL_DESIGN_2026-11-04.md - seven memo frames over one /brief fetch)
+ * between The Map and The Portfolio. The Verdict absorbed the old
  * Summary group (The brief, Boardroom, Five questions). Behind them sit the
  * analyst tools - Stations, Why, Rivals, Buyers and the pivot - each reading
  * answer_codes under the project's code source.
@@ -71,7 +74,7 @@ function CodesResults({
 }) {
   // The Panel lens (2026-11-03): the engine set every section reads under.
   const panel = usePanel(runId, projectId);
-  type CodesView = TierView | "journey" | "why" | "rivals" | "buyers" | "metrics";
+  type CodesView = TierView | "brief" | "journey" | "why" | "rivals" | "buyers" | "metrics";
   const [view, setView] = useState<CodesView>("verdict");
   // The analysis tier is ONE mounted component; its three pills only switch
   // which subview it shows (the last one, while an analyst tool is open).
@@ -134,6 +137,7 @@ function CodesResults({
             ["", [
               ["verdict", "The Verdict"],
               ["map", "The Map"],
+              ["brief", "The Brief"],
               ["portfolio", "The Portfolio"],
             ]],
             ["Analyst tools", [
@@ -208,6 +212,11 @@ function CodesResults({
       {[...visited].some((v) => TIER.has(v)) && (
         <div className={TIER.has(view) ? "grid gap-8" : "hidden"}>
           <AnalysisTier key={k("analysis")} runId={runId} projectId={projectId} view={tierView} onView={open} />
+        </div>
+      )}
+      {visited.has("brief") && (
+        <div className={show("brief")}>
+          <BriefSection key={k("brief")} runId={runId} projectId={projectId} />
         </div>
       )}
       {visited.has("journey") && (

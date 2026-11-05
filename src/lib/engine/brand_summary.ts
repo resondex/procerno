@@ -3,7 +3,7 @@ import { ENGINES, engineDisplayLabel } from "./providers";
 import { buildResolver, type Resolver } from "./brand_resolve";
 import { roleOf } from "./headline";
 import { cachedView, cell, facetsOf, poolOf, requestOf, type EngineFacets, type RateCell, type ViewData, type ViewRequest } from "./view_data";
-import { composeVerdict, detectInsights, insightInputs, type Insight } from "./summary_insights";
+import { composeVerdict, detectInsights, insightInputs, type Insight, type InsightInputs } from "./summary_insights";
 import type { AnswerCodes, Project, Run } from "../types";
 
 export type { RateCell, Insight };
@@ -178,7 +178,8 @@ function sliceOf(
   };
 }
 
-export async function computeBrandSummary(data: ViewData, request: ViewRequest = {}): Promise<BrandSummaryView> {
+/** `capture` (the brief, bf1): receives the sibling-view inputs the detectors read, so a caller never computes them twice. */
+export async function computeBrandSummary(data: ViewData, request: ViewRequest = {}, capture?: { inputs?: InsightInputs }): Promise<BrandSummaryView> {
   const { run, project, source, dictionary } = data;
   const resolve = buildResolver(dictionary, data.judged);
   const targetKey = resolve(project.brand).key;
@@ -352,6 +353,7 @@ export async function computeBrandSummary(data: ViewData, request: ViewRequest =
     headToHead,
   };
   const inputs = await insightInputs(data, request);
+  if (capture) capture.inputs = inputs;
   return { ...summary, insights: detectInsights(summary, inputs), verdict: composeVerdict(summary, inputs) };
 }
 
@@ -363,7 +365,8 @@ export async function computeBrandSummary(data: ViewData, request: ViewRequest =
 // bs8 (2026-11-04): detectors for a neutralized differentiator (pooled head-to-head arguments), conversion vs the top rival, picks and problem questions leaving the category, the customers' worst worry and leave verdicts naming no destination.
 // bs9 (2026-11-04): kind quotas on the served list - each firing kind's best insight gets a slot before any kind gets a second (funnel/value exempt: the verdict carries them), remaining slots by rank, cap 12, effect order kept.
 // bs10 (2026-11-04): the rank-fill slots need effect >= 0.3 (quota slots unfloored), so the served list stops where the findings do instead of padding to the cap.
-const BRAND_SUMMARY_VERSION = "bs10";
+// bs11 (2026-11-04): the language pass for the Verdict pill - insight bodies and verdict sentences drop method terms (share of picks, direct matchups, buying situations, with / without web search); the standing sentence carries the commit-rate convention (BRIEF_PILL_DESIGN_2026-11-04.md).
+const BRAND_SUMMARY_VERSION = "bs11";
 export function computeBrandSummaryCached(run: Run, project: Project, request: ViewRequest = {}): Promise<BrandSummaryView | null> {
   const r = requestOf(request);
   return cachedView("brand_summary", BRAND_SUMMARY_VERSION, run, project, (d) => computeBrandSummary(d, r), { judge: true, setupDecision: true }, r);

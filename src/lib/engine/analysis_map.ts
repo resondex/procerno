@@ -4,6 +4,7 @@ import { excludedWords } from "./definition_overlap";
 import { conditionKeysFor, conditionStemKey } from "./condition_groups";
 import { ENUM_TOWARD, GENERIC_AWAY } from "./rules_explorer";
 import { isWallWording } from "./wall_wording";
+import { commitSentence, pctFine } from "./summary_insights";
 import { computeBrandSummary, type BrandSummaryView, type Insight } from "./brand_summary";
 import { computeValue, type ValueRow } from "./value";
 import { exitResolver } from "./exits";
@@ -301,15 +302,46 @@ export interface AnalysisMapDebug {
    * it fell back, "other" for the older detectors (not instrumented). */
   probeInsights?: Insight[];
   placements?: { key: string; kind: string; cellId: string | null; how: string }[];
+  /** The brief (brief.ts, bf1): each cell's sides as counts, filled when
+   * the object is passed - the memo sentences need the numbers a Position
+   * carries only as prose. */
+  cells?: Record<string, MapCellStat>;
+  /** The brief: the summary the map computed (so the brief never pays for a second one). */
+  summary?: BrandSummaryView;
 }
 
-export async function computeAnalysisMap(data: ViewData, request: ViewRequest = {}, debug?: AnalysisMapDebug): Promise<AnalysisMapView> {
+/** One map cell's side counts (exported for the brief). */
+export interface MapCellStat {
+  band: string;
+  row: string;
+  label: string;
+  verdict: CellVerdict;
+  lean: number;
+  you: number;
+  them: number;
+  /** The side-taking denominator. */
+  d: number;
+  n: number;
+  taker: string;
+  takerKind: string;
+  /** The first possession-shaped away condition, when the cell carries the wall badge. */
+  wall: string | null;
+  badges: CellBadge[];
+}
+
+export async function computeAnalysisMap(
+  data: ViewData,
+  request: ViewRequest = {},
+  debug?: AnalysisMapDebug,
+  pre?: { summary?: BrandSummaryView }
+): Promise<AnalysisMapView> {
   const { project, dictionary } = data;
   const eng: ViewRequest = request.engines ? { engines: request.engines } : {};
   const resolve = buildResolver(dictionary, data.judged);
   const targetKey = resolve(project.brand).key;
   const brand = project.brand;
-  const summary = await computeBrandSummary(data, eng);
+  const summary = pre?.summary ?? (await computeBrandSummary(data, eng));
+  if (debug) debug.summary = summary;
   const defaultKey = summary.brands.find((b) => b.role !== "target" && b.chosen.k > 0)?.key ?? null;
 
   /* -- room order: intent situations in setup order -- */
@@ -401,19 +433,19 @@ export async function computeAnalysisMap(data: ViewData, request: ViewRequest = 
       sideD: outsideTakes ? firm.length : inCat.length,
       leakShare,
       note: (v) => {
-        if (v === "nocall") return inCat.length < MIN_SIDE ? `${pct(noPick)} no single pick` : "no side taken";
-        if (v === "yours") return `you ${pct(youC)} of decided${top ? ` - ${top[1].name} ${pct(themC)}` : ""}`;
+        if (v === "nocall") return inCat.length < MIN_SIDE ? `${pct(noPick)} no clear pick` : "no side taken";
+        if (v === "yours") return `you ${pct(youC)} of picks${top ? ` - ${top[1].name} ${pct(themC)}` : ""}`;
         return `${taker.name} ${pct(outsideTakes ? cell(outside.length, firm.length) : themC)} - you ${pct(youC)}`;
       },
       claim: (v) => {
         const lead = `${where}, ${brand} is named in ${pct(named)} of answers`;
         if (v === "nocall")
-          return `${lead}, but the AI makes no single in-category pick in ${pct(cell(rows.length - inCat.length, rows.length))} of them - the choice is left to the buyer.`;
-        if (v === "yours") return `${lead} and takes ${pct(youC)} of the decided picks${top ? `, ahead of ${top[1].name} at ${pct(themC)}` : ""}.`;
-        if (outsideTakes) return `${lead}, yet ${pctOf(leakShare)} of the firm picks leave the category - led by ${taker.name} - and ${brand} takes ${pct(youC)} of the decided picks.`;
+          return `${lead}, but the AI commits to no single pick in your category in ${pct(cell(rows.length - inCat.length, rows.length))} of them - the choice is left to the buyer.`;
+        if (v === "yours") return `${lead} and takes ${pct(youC)} of the picks${top ? `, ahead of ${top[1].name} at ${pct(themC)}` : ""}.`;
+        if (outsideTakes) return `${lead}, yet ${pctOf(leakShare)} of the answers that commit to a pick choose something outside the category - led by ${taker.name} - and ${brand} takes ${pct(youC)} of the picks.`;
         return v === "contested"
-          ? `${lead}; the decided picks split - ${brand} ${pct(youC)}, ${taker.name} ${pct(themC)}.`
-          : `${lead} and takes ${pct(youC)} of the decided picks; ${taker.name} takes ${pct(themC)}.`;
+          ? `${lead}; the picks split - ${brand} ${pct(youC)}, ${taker.name} ${pct(themC)}.`
+          : `${lead} and takes ${pct(youC)} of the picks; ${taker.name} takes ${pct(themC)}.`;
       },
       lift: { wins: you, others: inCat.filter((r) => pickOf(r).key !== targetKey), note: "Share of answers arguing each code when you are picked vs when another brand in the category is." },
     };
@@ -465,7 +497,7 @@ export async function computeAnalysisMap(data: ViewData, request: ViewRequest = 
           : `recommended ${pct(recYou)}${top ? ` - ${top[1].name} ${pct(recTop)}` : ""}`,
       claim: (v) => {
         const lead = `${where}, ${brand} is named in ${pct(named)} of answers and recommended in ${pct(recYou)}`;
-        const route = routed.length >= MIN_SIDE && rate(adjacent) >= 0.1 ? `; ${pct(adjacent)} of the routed answers send the buyer outside the category` : "";
+        const route = routed.length >= MIN_SIDE && rate(adjacent) >= 0.1 ? `; ${pct(adjacent)} of the answers that point to a solution send the buyer outside the category` : "";
         if (v === "nocall") return `${lead} - too few answers recommend any brand to call who the category is explained around${route}.`;
         if (!top) return `${lead}${route}.`;
         return `${lead}, against ${top[1].name} at ${pct(recTop)}${route}.`;
@@ -612,11 +644,11 @@ export async function computeAnalysisMap(data: ViewData, request: ViewRequest = 
       you: won, them: lost,
       taker: { name: rival.name, kind: takerKindOf(rival.key) },
       leakShare: firm.length >= MIN_SIDE ? share(outside.length, firm.length) : 0,
-      note: (v) => (v === "nocall" ? `${pct(undecided)} no single pick` : `${pct(rec)} of decided`),
+      note: (v) => (v === "nocall" ? `${pct(undecided)} no clear pick` : `${pct(rec)} of picks`),
       claim: (v) =>
         v === "nocall"
-          ? `Named against ${rival.name}, the AI declines to pick between you in ${pct(undecided)} of answers.`
-          : `Named against ${rival.name}, ${brand} wins ${pct(rec)} of the decided head-to-heads${undecided.k > 0 ? ` (no single pick in ${pct(undecided)})` : ""}.`,
+          ? `Asked to compare ${brand} with ${rival.name} directly, the AI declines to pick between them in ${pct(undecided)} of answers.`
+          : `Asked to compare ${brand} with ${rival.name} directly, the AI picks ${brand} in ${pct(rec)} of the answers that pick one of them${undecided.k > 0 ? ` (no clear pick in ${pct(undecided)})` : ""}.`,
       lift: { wins: won, others: lost, note: `Within this matchup: share of answers arguing each code when you win vs when ${rival.name} does.` },
     };
   };
@@ -671,10 +703,10 @@ export async function computeAnalysisMap(data: ViewData, request: ViewRequest = 
         ? { name: top[1].name, kind: top[0] === leftKey ? "the brand they are leaving" : takerKindOf(top[0]) }
         : { name: "No single pick", kind: TAKER.undecided },
       leakShare: firm.length >= MIN_SIDE ? share(outside, firm.length) : 0,
-      note: (v) => (v === "nocall" ? `named ${pct(named)}, picked ${pct(picked)}` : `named ${pct(named)}, picked ${pct(picked)}${top ? ` - ${top[1].name} ${pct(topC)} of decided` : ""}`),
+      note: (v) => (v === "nocall" ? `named ${pct(named)}, picked ${pct(picked)}` : `named ${pct(named)}, picked ${pct(picked)}${top ? ` - ${top[1].name} ${pct(topC)} of picks` : ""}`),
       claim: (v) =>
         `${whose}: ${brand} is named in ${pct(named)} of answers and picked in ${pct(picked)}${
-          v === "nocall" ? " - too few firm picks to call who captures them" : top ? `; ${top[1].name} takes ${pct(topC)} of the decided picks against your ${pct(youC)}` : ""
+          v === "nocall" ? " - too few answers commit to a pick to call who captures them" : top ? `; ${top[1].name} takes ${pct(topC)} of the picks against your ${pct(youC)}` : ""
         }.`,
       lift: { wins: you, others: inCat.filter((r) => pickOf(r).key !== targetKey), note: "Share of leaver answers arguing each code when you capture them vs when another brand does." },
     };
@@ -825,7 +857,7 @@ export async function computeAnalysisMap(data: ViewData, request: ViewRequest = 
       settledWatch,
       note: () => `strengthens ${pct(strC)}`,
       claim: (v) => {
-        const lead = `Asked about ${key} as a settled customer, the AI strengthens the relationship in ${pct(strC)} of answers`;
+        const lead = `Asked by your customers about ${key}, the AI strengthens the relationship in ${pct(strC)} of answers`;
         if (settledWatch) return `${lead}; asked neutrally about buyers' worries, it agrees with them in ${pct(objectionsAgree)} - the asker set the side here.`;
         return v === "nocall" ? `${lead} - most answers stay neutral.` : `${lead}${weak.length ? ` and weakens it in ${pct(cell(weak.length, rows.length))}` : ""}.`;
       },
@@ -959,7 +991,7 @@ export async function computeAnalysisMap(data: ViewData, request: ViewRequest = 
     settled: ["settled"],
   };
   const BAND_META: Record<BandSlug, { title: string; sub: string }> = {
-    chooses: { title: "Where the buyer chooses", sub: "These contests vary by buyer room - the rooms you confirmed at setup." },
+    chooses: { title: "Where the buyer chooses", sub: "These contests vary by buying situation - the situations you confirmed at setup." },
     fights: { title: "The named fights", sub: "These contests vary by rival - the buyer is held fixed, so this is relative strength." },
     doubts: { title: "The doubts", sub: "One cell per worry you confirmed at the worries gate." },
     settled: { title: "The settled customer", sub: "Asked-for questions from committed customers - a ceiling, not a standing." },
@@ -1008,6 +1040,14 @@ export async function computeAnalysisMap(data: ViewData, request: ViewRequest = 
         };
         cells.push(mapCell);
         cellById.set(id, mapCell);
+        if (debug?.cells)
+          debug.cells[id] = {
+            band, row: rowSlug, label: s.label, verdict, lean,
+            you: s.you.length, them: s.them.length, d, n: s.rows.length,
+            taker: s.taker.name, takerKind: s.taker.kind,
+            wall: wallGroups[0]?.label ?? null,
+            badges: [...badges],
+          };
 
         /* -- the position -- */
         const inhouse = badges.includes("inhouse") && verdict !== "yours";
@@ -1032,7 +1072,7 @@ export async function computeAnalysisMap(data: ViewData, request: ViewRequest = 
             why = `Asked to defend ${brand}, the AI strengthens the case; asked neutrally about buyers' worries, it agrees with them in ${pct(objectionsAgree)}. The strength appears only when the asker stands on it.`;
           } else if (engineWatch) {
             triage = "overclaimed";
-            why = `${engineName} supplies ${pctOf(engineWatch.share)} of your side of this cell - a one-engine read would overstate the standing.`;
+            why = `${engineName} supplies ${pctOf(engineWatch.share)} of your side of this cell - a read on one AI assistant would overstate the standing.`;
           } else {
             triage = "earned";
             why = verdict === "yours"
@@ -1050,7 +1090,7 @@ export async function computeAnalysisMap(data: ViewData, request: ViewRequest = 
             why = `The largest condition away ("${wallGroups[0].label}") is a state the buyer is already in, not an argument - it is routed around, not out-argued.`;
           } else if (badges.includes("leak")) {
             triage = "strategy_misfit";
-            why = `${pctOf(s.leakShare ?? 0)} of the firm picks here leave the category - the AI answers the buyer's job with something outside it.`;
+            why = `${pctOf(s.leakShare ?? 0)} of the picks here leave the category - the AI answers the buyer's job with something outside it.`;
           } else if (s.criteria) {
             triage = "proof_missing";
             why = s.criteria.winnerUntaught
@@ -1078,7 +1118,7 @@ export async function computeAnalysisMap(data: ViewData, request: ViewRequest = 
           // contested, even or engine-dependent deficit
           if (engineWatch) {
             triage = "overclaimed";
-            why = `${engineName} supplies ${pctOf(engineWatch.share)} of your side of this cell - read it engine by engine before acting.`;
+            why = `${engineName} supplies ${pctOf(engineWatch.share)} of your side of this cell - read it assistant by assistant before acting.`;
           } else {
             triage = "earned";
             why = `The side-taking answers split ${pct(youS)} to ${pct(themS)} - a live contest, not a loss.`;
@@ -1100,7 +1140,7 @@ export async function computeAnalysisMap(data: ViewData, request: ViewRequest = 
               ? "Spend nothing out-arguing the wall; route around it to the buyers it does not hold."
               : badges.includes("leak")
                 ? "Answer the buyer's whole job where the AI reads, or cede the room knowingly - a leak is a strategy call before it is content."
-                : "Own an unconditional case for one median buyer, or accept the lane - the away conditions describe more buyers than yours.",
+                : "Own a case that holds for the typical buyer with no strings attached, or accept the lane - the conditions that send buyers away describe more buyers than yours.",
             "Strategy pulse",
           ],
           product_truth: ["Reality audit before content: confirm the experience against your own data. If the AI is right, the fix is the product.", "Reality audit"],
@@ -1238,7 +1278,6 @@ const HEADING: Record<Archetype, string> = {
 function castingLine(f: CastingFacts, brand: string): CastingLine {
   const archetype = classifyArchetype(f);
   const named = pctOf(f.named);
-  const picked = pctOf(f.picked);
   const you = pctOf(f.shareYou);
   const top = pctOf(f.shareTop);
   const prompted = f.prompted !== null ? pctOf(f.prompted) : null;
@@ -1248,36 +1287,36 @@ function castingLine(f: CastingFacts, brand: string): CastingLine {
       return {
         archetype,
         heading: HEADING.default,
-        casting: `The AI treats ${brand} as the default answer - the brand the open choice lands on when nothing pulls it elsewhere.`,
-        detail: `Named in ${named} of open-choice answers and picked in ${picked} - ${you} of the decided picks${f.topName ? `; ${f.topName} is next at ${top}` : ""}.`,
+        casting: `The AI treats ${brand} as the default answer - the brand it lands on when buyers ask what to buy and nothing pulls it elsewhere.`,
+        detail: `Named in ${named} of answers when buyers ask what to buy, and the pick ${you} of the time the AI commits to one${f.topName ? `; ${f.topName} is next at ${top}` : ""}.`,
       };
     case "challenger":
       return {
         archetype,
         heading: HEADING.challenger,
-        casting: `The AI rates ${brand} the better choice in direct comparisons - and still hands the open choice to ${f.topName}.`,
-        detail: `${prompted} of decided head-to-heads against ${you} of the open choice's decided picks; ${f.topName} takes ${top}.`,
+        casting: `The AI rates ${brand} the better choice in direct comparisons - and still hands the pick to ${f.topName} when buyers ask what to buy.`,
+        detail: `Picked in ${prompted} of direct matchups, against ${you} of the picks when buyers ask what to buy; ${f.topName} takes ${top}.`,
       };
     case "companion":
       return {
         archetype,
         heading: HEADING.companion,
         casting: `The AI recommends ${brand} beside the pick, rarely as the pick.`,
-        detail: `Recommended in ${beside} of the open-choice answers that pick another brand, yet ${you} of the decided picks - ${f.topName} takes ${top}${prompted ? `; named against a rival, it wins ${prompted} of decided head-to-heads` : ""}.`,
+        detail: `Recommended in ${beside} of the answers that pick another brand, yet the pick only ${you} of the time - ${f.topName} takes ${top}${prompted ? `; compared with a rival directly, it wins ${prompted} of matchups` : ""}.`,
       };
     case "reference":
       return {
         archetype,
         heading: HEADING.reference,
         casting: `The AI explains the category through ${brand} - the most-named brand, not its recommendation.`,
-        detail: `Named in ${named} of open-choice answers, more than any rival, and picked in ${picked} - ${you} of the decided picks${prompted ? `; ${prompted} of decided head-to-heads` : ""}.`,
+        detail: `Named in ${named} of answers when buyers ask what to buy, more than any rival, yet the pick only ${you} of the time${prompted ? `; it wins ${prompted} of direct matchups` : ""}.`,
       };
     case "specialist":
       return {
         archetype,
         heading: HEADING.specialist,
         casting: `The AI treats ${brand} as the right choice for a specific buyer, never the default.`,
-        detail: `Named in ${named} of open-choice answers, picked in ${picked} - ${you} of the decided picks, against ${top} for ${f.topName}${prompted ? `; ${prompted} of decided head-to-heads` : ""}.`,
+        detail: `Named in ${named} of answers when buyers ask what to buy, but the pick only ${you} of the time, against ${top} for ${f.topName}${prompted ? `; it wins ${prompted} of direct matchups` : ""}.`,
       };
   }
 }
@@ -1304,10 +1343,10 @@ function tensionsOf(
 
   const out: { title: string; body: string; cellId: string }[] = [];
   out.push({
-    title: `Named in ${pctOf(f.named)}, picked in ${pctOf(f.picked)}`,
-    body: `${brand} is named in ${pctOf(f.named)} of open-choice answers and picked in ${pctOf(f.picked)} - ${pctOf(f.shareYou)} of the picks that land on a brand in the category${
-      f.topName && !f.youTop ? `, against ${pctOf(f.shareTop)} for ${f.topName}` : ""
-    }.`,
+    title: `Named in ${pctOf(f.named)}, picked in ${pctFine(f.picked)}`,
+    body: `${brand} is named in ${pctOf(f.named)} of answers when buyers ask what to buy. ${commitSentence(s.category, brand, s.firmPickInCategory, s.target.shareOfDecided, s.target.chosen)}${
+      f.topName && !f.youTop ? ` ${f.topName} is the pick ${pctOf(f.shareTop)} of the time.` : ""
+    }`,
     cellId: openCells.length ? idOf(openCells[0]) : fallbackOpen,
   });
 
@@ -1447,7 +1486,8 @@ function tensionsOf(
 // am2 (2026-11-04): the summary's bs8 detectors reach the tensions (new kind "leak"; key-specific placement for the bs8 keys).
 // am3 (2026-11-04): the tensions read the bs9 quota-served list (one per kind, wider composition).
 // am4 (2026-11-04): reads the bs10 served list (rank-fill effect floor).
-const ANALYSIS_MAP_VERSION = "am4";
+// am5 (2026-11-04): the brief's language pass - reads bs11, and the casting, tensions, cell notes and position claims say share of picks / direct matchups / buying situations instead of method terms; the first tension carries the commit-rate convention.
+const ANALYSIS_MAP_VERSION = "am5";
 export function computeAnalysisMapCached(run: Run, project: Project, request: ViewRequest = {}): Promise<AnalysisMapView | null> {
   const r = requestOf(request, false);
   return cachedView("analysis_map", ANALYSIS_MAP_VERSION, run, project, (d) => computeAnalysisMap(d, r), { setupDecision: true, judge: true }, r);

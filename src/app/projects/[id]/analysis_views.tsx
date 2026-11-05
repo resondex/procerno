@@ -250,7 +250,7 @@ function VerdictView({ map, onOpen }: { map: AnalysisMapView; onOpen: (cellId: s
       <div className="pa-sans card my-6 px-5 py-4">
         <h3 className="text-[15px] font-semibold text-ink">Known vs picked</h3>
         <p className="mb-3 text-[12px] text-ink-3">
-          Open-choice answers only. Grey: named in the answer. Blue: the one the AI says to buy.
+          When buyers ask what to buy. Grey: named in the answer. Blue: the one the AI says to buy.
         </p>
         <div
           className="grid grid-cols-[7rem_1fr_6.5rem] items-center gap-3 sm:grid-cols-[9rem_1fr_8rem]"
@@ -270,7 +270,7 @@ function VerdictView({ map, onOpen }: { map: AnalysisMapView; onOpen: (cellId: s
           <div className="mt-4 border-t border-line pt-3">
             <h4 className="text-[13px] font-semibold text-ink">Who wins instead</h4>
             <p className="mb-2 text-[12px] text-ink-3">
-              Share of decided open-choice picks - answers with a firm pick in the category.
+              Share of picks - of the answers where the AI commits to one product.
             </p>
             <div className="grid gap-1.5">
               {map.shareOfDecided.map((s) => {

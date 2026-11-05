@@ -334,6 +334,35 @@ const pct = (c: RateCell | number) => {
   const x = typeof c === "number" ? c : rate(c);
   return x > 0 && x < 0.005 ? "<1%" : `${Math.round(x * 100)}%`;
 };
+/** A share in print: one decimal under 10% (so the convention's "6.7% of
+ * all answers" survives rounding), whole points above. */
+export const pctFine = (x: number) => {
+  if (x <= 0) return "0%";
+  if (x < 0.001) return "<0.1%";
+  if (x < 0.1) return `${(Math.round(x * 1000) / 10).toFixed(1).replace(/\.0$/, "")}%`;
+  return `${Math.round(x * 100)}%`;
+};
+
+/** The category's product noun in the singular ("credit cards" -> "credit
+ * card", "beauty retailers" -> "beauty retailer"); unchanged when the last
+ * word is not a regular plural. Mechanical - never a lookup. */
+export function productNoun(category: string): string {
+  const words = category.trim().split(/\s+/);
+  const last = words[words.length - 1] ?? "";
+  let one = last;
+  if (/ies$/i.test(last) && last.length > 4) one = last.slice(0, -3) + "y";
+  else if (/(ches|shes|sses|xes)$/i.test(last)) one = last.slice(0, -2);
+  else if (/[^s]s$/i.test(last) && last.length > 3) one = last.slice(0, -1);
+  words[words.length - 1] = one;
+  return words.join(" ") || "product";
+}
+
+/** The two-pick-numbers convention (BRIEF_PILL_DESIGN_2026-11-04.md): the
+ * commit rate bridges share of picks and Picked whenever both appear. */
+export function commitSentence(category: string, brand: string, commit: RateCell, share: RateCell, picked: RateCell): string {
+  return `The AI commits to one ${productNoun(category)} in ${pct(commit)} of answers. When it does, ${brand} is the pick ${pct(share)} of the time - ${pctFine(rate(picked))} of all answers.`;
+}
+
 const pts = (x: number) => `${Math.round(Math.abs(x) * 100)} points`;
 const counts = (c: RateCell) => `${c.k} of ${c.n} (95% range ${Math.round(c.low * 100)}-${Math.round(c.high * 100)}%)`;
 const apart = (hi: RateCell, lo: RateCell) => hi.low > lo.high;
@@ -359,7 +388,7 @@ function engineSpread(s: Summary): Insight | null {
     key: "engine_spread",
     kind: "engine",
     title: `${e.hi.label} picks you most, ${e.lo.label} least`,
-    body: `When a brand in your category is picked, you win ${pct(e.hi.decided)} on ${e.hi.label} but ${pct(e.lo.decided)} on ${e.lo.label}.`,
+    body: `Your share of picks is ${pct(e.hi.decided)} on ${e.hi.label} but ${pct(e.lo.decided)} on ${e.lo.label}.`,
     foot: `${e.hi.label}: ${counts(e.hi.decided)}. ${e.lo.label}: ${counts(e.lo.decided)}. Engines with fewer than ${MIN_BASE} decided answers are left out.`,
     look: { pill: "table", label: "Metrics - by engine" },
     effect: gap,
@@ -391,8 +420,8 @@ function modeGap(s: Summary): Insight | null {
   return {
     key: "engine_mode",
     kind: "engine",
-    title: searchWins ? "Search helps you" : "Search hurts you",
-    body: `When the assistants search the web you win ${pct(search.decided)} of decided answers; answering from memory, ${pct(instinct.decided)}.`,
+    title: searchWins ? "Web search helps you" : "Web search hurts you",
+    body: `With web search, your share of picks is ${pct(search.decided)}; without web search, ${pct(instinct.decided)}.`,
     foot: `Search (${search.engines} engines): ${counts(search.decided)}. Instinct (${instinct.engines} engines): ${counts(instinct.decided)}.`,
     look: { pill: "table", label: "Metrics - by mode" },
     effect: rate(hi.decided) - rate(lo.decided),
@@ -406,7 +435,7 @@ function vendorGap(s: Summary): Insight | null {
     key: "engine_vendor",
     kind: "engine",
     title: `${e.hi.key} favors you most, ${e.lo.key} least`,
-    body: `Across each vendor's assistants, you win ${pct(e.hi.decided)} of decided answers on ${e.hi.key} and ${pct(e.lo.decided)} on ${e.lo.key}.`,
+    body: `Across each company's AI assistants, your share of picks is ${pct(e.hi.decided)} on ${e.hi.key} and ${pct(e.lo.decided)} on ${e.lo.key}.`,
     foot: `${e.hi.key} (${e.hi.engines} engines): ${counts(e.hi.decided)}. ${e.lo.key} (${e.lo.engines} engines): ${counts(e.lo.decided)}.`,
     look: { pill: "table", label: "Metrics - by vendor" },
     effect: rate(e.hi.decided) - rate(e.lo.decided),
@@ -420,7 +449,7 @@ function roomWin(inp: InsightInputs): Insight | null {
     key: "room_win",
     kind: "room",
     title: `Strongest with ${e.hi.room}, weakest with ${e.lo.room}`,
-    body: `When a brand in your category is picked, you win ${pct(e.hi.decided)} for ${e.hi.room} but ${pct(e.lo.decided)} for ${e.lo.room}.`,
+    body: `Your share of picks is ${pct(e.hi.decided)} for ${e.hi.room} but ${pct(e.lo.decided)} for ${e.lo.room}.`,
     foot: `${e.hi.room}: ${counts(e.hi.decided)}. ${e.lo.room}: ${counts(e.lo.decided)}. Open-choice questions asked for each buyer; rooms under ${MIN_BASE} decided answers left out.`,
     look: { pill: "buyers", label: "Buyers" },
     effect: rate(e.hi.decided) - rate(e.lo.decided),
@@ -450,8 +479,8 @@ function rivalOpen(s: Summary): Insight | null {
   return {
     key: "rival_open",
     kind: "rival",
-    title: rate(top.shareOfDecided) > rate(s.target.shareOfDecided) ? `${top.name} takes the room` : `You lead ${top.name}`,
-    body: `${top.name} wins ${pct(top.shareOfDecided)} when a brand in your category is picked - you win ${pct(s.target.shareOfDecided)}.`,
+    title: rate(top.shareOfDecided) > rate(s.target.shareOfDecided) ? `${top.name} out-picks you` : `You lead ${top.name}`,
+    body: `When buyers ask what to buy, ${top.name} takes ${pct(top.shareOfDecided)} of the picks - you take ${pct(s.target.shareOfDecided)}.`,
     foot: `${top.chosen.k} picks to your ${s.target.chosen.k}, of ${s.firmPickInCategory.k} decided open-choice answers.`,
     look: { pill: "rivals", label: "Rivals" },
     effect: Math.abs(rate(top.shareOfDecided) - rate(s.target.shareOfDecided)),
@@ -469,8 +498,8 @@ function rivalHeadToHead(s: Summary): Insight | null {
     return {
       key: "rival_h2h",
       kind: "rival",
-      title: `Head-to-head with ${worst.rival}`,
-      body: `Asked to choose between you and ${worst.rival}, the AI picks you ${pct(worst.winOfDecided)} of the time one of you is picked.`,
+      title: `Direct matchup with ${worst.rival}`,
+      body: `Asked to choose between you and ${worst.rival}, the AI picks you ${pct(worst.winOfDecided)} of the time it picks one of you.`,
       foot: `${foot(worst)}. Matchups under ${MIN_BASE} decided answers left out.`,
       look: { pill: "rivals", label: "Rivals - head-to-head" },
       effect: Math.abs(rate(worst.winOfDecided) - 0.5),
@@ -479,8 +508,8 @@ function rivalHeadToHead(s: Summary): Insight | null {
   return {
     key: "rival_h2h",
     kind: "rival",
-    title: `Hardest head-to-head: ${worst.rival}`,
-    body: `Named against ${worst.rival} you win ${pct(worst.winOfDecided)} of decided answers; your closest contest is ${closest.rival}, at ${pct(closest.winOfDecided)}.`,
+    title: `Hardest direct matchup: ${worst.rival}`,
+    body: `Asked to compare you with ${worst.rival} directly, the AI picks you ${pct(worst.winOfDecided)} of the time it picks one of you; your closest contest is ${closest.rival}, at ${pct(closest.winOfDecided)}.`,
     foot: `${foot(worst)}. ${foot(closest)}. Matchups under ${MIN_BASE} decided answers left out.`,
     look: { pill: "rivals", label: "Rivals - head-to-head" },
     effect: Math.abs(rate(closest.winOfDecided) - rate(worst.winOfDecided)),
@@ -495,7 +524,7 @@ function argument(s: Summary): Insight | null {
     key: "argument",
     kind: "argument",
     title: best.code,
-    body: `${best.code} travels with your wins (${best.lift >= 0 ? "+" : "-"}${pts(best.lift)} vs answers that pick a rival); the conversations you lose argue ${worst.code} (${worst.lift >= 0 ? "+" : "-"}${pts(worst.lift)}).`,
+    body: `${best.code.charAt(0).toUpperCase()}${best.code.slice(1)} travels with your wins (${best.lift >= 0 ? "+" : "-"}${pts(best.lift)} over answers that pick a rival); the answers you lose argue ${worst.code} (${worst.lift >= 0 ? "+" : "-"}${pts(worst.lift)}).`,
     foot: `${best.code}: ${pct(best.wins)} of ${best.wins.n} wins vs ${pct(best.others)} of ${best.others.n} rival picks. ${worst.code}: ${pct(worst.wins)} vs ${pct(worst.others)}.`,
     look: { pill: "why", label: "Why" },
     effect: best.lift - worst.lift,
@@ -576,7 +605,7 @@ function funnelDrop(s: Summary): Insight | null {
     key: "funnel",
     kind: "funnel",
     title: `The drop is from ${worst.from} to ${worst.to}`,
-    body: `You are ${worst.from} in ${pct(worst.a)} of open-choice answers but ${worst.to} in ${pct(worst.b)} - the biggest step down in the funnel.`,
+    body: `When buyers ask what to buy, you are ${worst.from} in ${pct(worst.a)} of answers but ${worst.to} in ${worst.to === "picked" ? pctFine(worst.b) : pct(worst.b)} - the biggest step down in the funnel.`,
     foot: `Named ${counts(s.target.mentioned)}; recommended ${counts(s.target.recommended)}; picked ${counts(s.target.chosen)}.`,
     look: { pill: "stations", station: "consideration", label: "Stations - Consideration" },
     effect: drop,
@@ -606,11 +635,11 @@ function promptedVsOpen(s: Summary): Insight | null {
   return {
     key: "prompted_vs_open",
     kind: "rival",
-    title: gap > 0 ? "Wins the prompted contests, loses the open choice" : "Wins the open choice, loses the prompted contests",
+    title: gap > 0 ? "Wins when compared directly, loses when buyers ask what to buy" : "Wins when buyers ask what to buy, loses when compared directly",
     body:
       gap > 0
-        ? `Named against a rival you win ${pct(rec.pooled)} of head-to-heads${hardText}, but when the AI picks freely you win ${pct(open)} of decided answers.`
-        : `When the AI picks freely you win ${pct(open)} of decided answers, but named against a rival you win only ${pct(rec.pooled)} of head-to-heads${hardText}.`,
+        ? `Asked to compare you with a rival directly, the AI picks you in ${pct(rec.pooled)} of matchups${hardText}, but when buyers ask what to buy you take ${pct(open)} of the picks.`
+        : `When buyers ask what to buy you take ${pct(open)} of the picks, but asked to compare you with a rival directly, the AI picks you in only ${pct(rec.pooled)} of matchups${hardText}.`,
     foot: `Head-to-heads: won ${rec.won}, lost ${rec.lost} - ${counts(rec.pooled)}${hard ? `; vs ${hard.rival} ${counts(hard.winOfDecided)}` : ""}. Open choice: ${counts(open)}.`,
     look: { pill: "stations", station: "comparison", label: "Stations - Comparison" },
     effect: Math.abs(gap),
@@ -635,7 +664,7 @@ function pickConcentrationRoom(s: Summary, inp: InsightInputs): Insight | null {
     key: "pick_concentration_room",
     kind: "room",
     title: `Your picks come from ${c.top.room}`,
-    body: `${pct(c.share)} of the times the AI picks ${s.brand} in an open choice come from one buyer room, ${c.top.room} - there you win ${pct(c.top.decided)} of decided answers, everywhere else ${pct(c.outside)}.`,
+    body: `${pct(c.share)} of the times the AI picks ${s.brand} when buyers ask what to buy come from one buying situation, ${c.top.room} - there you take ${pct(c.top.decided)} of the picks, everywhere else ${pct(c.outside)}.`,
     foot: `${c.top.picks} of ${c.total} picks from ${c.top.room} (one of ${c.rooms} rooms). Inside: ${counts(c.top.decided)}. Outside: ${counts(c.outside)}.`,
     look: { pill: "buyers", label: "Buyers" },
     effect: c.share - 1 / c.rooms,
@@ -674,7 +703,7 @@ function pickConcentrationQuestion(s: Summary, inp: InsightInputs): Insight | nu
     key: "pick_concentration_question",
     kind: "question",
     title: best.isTarget ? "One question carries your picks" : `One question carries ${best.who}'s picks`,
-    body: `${pct(c.share)} of ${best.isTarget ? "your" : `${best.who}'s`} open-choice picks come from one question: "${q}"`,
+    body: `${pct(c.share)} of ${best.isTarget ? "your" : `${best.who}'s`} picks come from one question: "${q}"`,
     foot: `${c.k} of ${c.total} picks of ${best.who} from this question (one of ${c.n} open-choice questions, ${c.top.answers} answers, a seed and its paraphrases pooled).`,
     look: { pill: "stations", station: "consideration", label: "Stations - Consideration" },
     effect: c.share - 1 / c.n,
@@ -804,7 +833,7 @@ function leaverCapture(inp: InsightInputs): Insight | null {
       key: "leaver_capture",
       kind: "switching",
       title: "Rival leavers come to you",
-      body: `When a rival's customer asks what to switch to, the AI picks you in ${pct(t.captured)} of answers and ${pct(you.shareOfDecided)} of those that pick a brand in your category${src ? ` - most often for customers leaving ${src.rival}, at ${pct(src.captured)}` : ""}.`,
+      body: `When a rival's customer asks what to switch to, the AI picks you in ${pct(t.captured)} of answers - you take ${pct(you.shareOfDecided)} of the picks${src ? ` - most often for customers leaving ${src.rival}, at ${pct(src.captured)}` : ""}.`,
       foot: `Picked ${counts(t.captured)}; of decided leavers ${counts(you.shareOfDecided)}.${second ? ` Next: ${second.name}, ${second.chosen.k}.` : ""}${src ? ` Leaving ${src.rival}: ${counts(src.captured)}.` : ""}`,
       look: { pill: "stations", station: "comparison", label: "Stations - Comparison" },
       effect: rate(you.shareOfDecided) - 1 / takers.length,
@@ -817,7 +846,7 @@ function leaverCapture(inp: InsightInputs): Insight | null {
       key: "leaver_capture",
       kind: "switching",
       title: "Rival leavers hear about you, then go elsewhere",
-      body: `When a rival's customer asks what to switch to, the AI names you in ${pct(t.named)} of answers and recommends you in ${pct(t.recommended)}, but picks you in ${pct(t.captured)}${other ? ` - ${other.name} takes the most, ${pct(other.shareOfDecided)} of the answers that pick a brand` : ""}.`,
+      body: `When a rival's customer asks what to switch to, the AI names you in ${pct(t.named)} of answers and recommends you in ${pct(t.recommended)}, but picks you in ${pct(t.captured)}${other ? ` - ${other.name} takes the most, ${pct(other.shareOfDecided)} of the picks` : ""}.`,
       foot: `Named ${counts(t.named)}; recommended ${counts(t.recommended)}; picked ${counts(t.captured)}.${other ? ` ${other.name}: ${other.chosen.k} of ${other.shareOfDecided.n} decided.` : ""}`,
       look: { pill: "stations", station: "comparison", label: "Stations - Comparison" },
       effect: rate(t.named) - rate(t.captured),
@@ -874,7 +903,7 @@ function awayCondition(s: Summary, inp: InsightInputs): Insight | null {
     const b = s.brands.find((x) => x.key === g.names!.key);
     const share = b ? b.shareOfDecided : cell(0, s.firmPickInCategory.k);
     if (rate(share) < BLOCKER_SHARE) {
-      blocker = `; it names ${g.names.name}, a brand the AI picks in ${pct(share)} of decided open-choice answers, so it blocks you without winning for it`;
+      blocker = `; it names ${g.names.name}, a brand with ${pct(share)} of the picks when buyers ask what to buy, so it blocks you without winning for it`;
       blockerFoot = ` ${g.names.name} in the open choice: ${counts(share)}.`;
     }
   }
@@ -917,20 +946,20 @@ function engineDecisiveness(s: Summary): Insight | null {
   if (se.firm.n < MIN_BASE || ins.firm.n < MIN_BASE) return null;
   const [hi, lo] = rate(se.firm) >= rate(ins.firm) ? [se, ins] : [ins, se];
   if (!apart(hi.firm, lo.firm)) return null;
-  const hiName = hi === se ? "search engines" : "instinct engines";
-  const loName = hi === se ? "instinct engines" : "search engines";
+  const hiName = hi === se ? "with web search" : "without web search";
+  const loName = hi === se ? "without web search" : "with web search";
   const shareOk = se.decided.n >= MIN_BASE && ins.decided.n >= MIN_BASE;
   const shareApart = shareOk && (apart(se.decided, ins.decided) || apart(ins.decided, se.decided));
   const tail = !shareOk
     ? "."
     : shareApart
-      ? `, and of those picks you win ${pct(se.decided)} on search and ${pct(ins.decided)} on instinct.`
-      : ` - your share of those picks does not separate (${pct(se.decided)} on search vs ${pct(ins.decided)} on instinct), so the gap is decisiveness, not preference.`;
+      ? `, and your share of those picks is ${pct(se.decided)} with web search and ${pct(ins.decided)} without.`
+      : ` - your share of those picks does not separate (${pct(se.decided)} with web search vs ${pct(ins.decided)} without), so the gap is how often the AI commits, not who it prefers.`;
   return {
     key: "engine_decisiveness",
     kind: "engine",
-    title: `${hiName.charAt(0).toUpperCase()}${hiName.slice(1)} commit to a pick`,
-    body: `In the open choice, ${hiName} pick one brand in your category in ${pct(hi.firm)} of answers and ${loName} in ${pct(lo.firm)}${tail}`,
+    title: `${hiName.charAt(0).toUpperCase()}${hiName.slice(1)}, the AI commits to a pick more often`,
+    body: `When buyers ask what to buy, the AI commits to one brand in your category in ${pct(hi.firm)} of answers ${hiName} and ${pct(lo.firm)} ${loName}${tail}`,
     foot: `Search (${se.engines} engines): firm pick ${counts(se.firm)}, yours ${counts(se.decided)}. Instinct (${ins.engines} engines): firm pick ${counts(ins.firm)}, yours ${counts(ins.decided)}.`,
     look: { pill: "table", label: "Metrics - by mode" },
     effect: rate(hi.firm) - rate(lo.firm),
@@ -953,8 +982,8 @@ function engineHeadToHeadFlip(s: Summary): Insight | null {
   return {
     key: "engine_h2h_flip",
     kind: "engine",
-    title: h2hHi === "search" ? "Search engines back you head-to-head, not in the open choice" : "Instinct engines back you head-to-head, not in the open choice",
-    body: `Named against a rival you win ${pct(se.h2h)} of head-to-heads on search engines and ${pct(ins.h2h)} on instinct engines, while in the open choice you win ${pct(se.decided)} of decided answers on search and ${pct(ins.decided)} on instinct - the two modes rank you in opposite order.`,
+    title: h2hHi === "search" ? "With web search the AI backs you in direct matchups, not when buyers ask what to buy" : "Without web search the AI backs you in direct matchups, not when buyers ask what to buy",
+    body: `Asked to compare you with a rival directly, the AI picks you in ${pct(se.h2h)} of matchups with web search and ${pct(ins.h2h)} without, while your share of picks when buyers ask what to buy is ${pct(se.decided)} with web search and ${pct(ins.decided)} without - the two run in opposite order.`,
     foot: `Head-to-heads: search ${counts(se.h2h)}, instinct ${counts(ins.h2h)}. Open choice: search ${counts(se.decided)}, instinct ${counts(ins.decided)}.`,
     look: { pill: "table", label: "Metrics - by mode" },
     effect: Math.abs(h2hGap),
@@ -1009,7 +1038,7 @@ function enginePickConcentration(s: Summary, inp: InsightInputs): Insight | null
     key: "engine_pick_concentration",
     kind: "engine",
     title: `${best.unit.label} carries ${whose} picks`,
-    body: `${unit} supply ${pct(best.picks)} of ${whose} open-choice picks while asking ${pct(best.base)} of the questions - a read without ${best.unit.vendor ? "them" : "it"} would put ${best.isTarget ? "you" : best.name} far lower.`,
+    body: `${unit} supply ${pct(best.picks)} of ${whose} picks while answering ${pct(best.base)} of the questions - a read without ${best.unit.vendor ? "them" : "it"} would put ${best.isTarget ? "you" : best.name} far lower.`,
     foot: `${best.picks.k} of ${best.picks.n} open-choice picks of ${best.name} (95% range ${Math.round(best.picks.low * 100)}-${Math.round(best.picks.high * 100)}%) from ${unit}, which answer ${best.unit.answers} of ${s.answers} open-choice questions.`,
     look: { pill: "table", label: best.unit.vendor ? "Metrics - by vendor" : "Metrics - by engine" },
     effect: rate(best.picks) - best.base,
@@ -1051,8 +1080,8 @@ function neutralizedDifferentiator(inp: InsightInputs): Insight | null {
     kind: "argument",
     title: best.above ? `Your rivals are credited with ${best.code}` : `${cap(best.code)} no longer sets you apart`,
     body: best.above
-      ? `${cap(best.code)} is argued in ${pct(best.w)} of the head-to-heads you win but ${pct(best.l)} of those you lose${rivalText} - the AI credits your rivals with it more than you.`
-      : `${cap(best.code)} is argued in ${pct(best.w)} of the head-to-heads you win and ${pct(best.l)} of those you lose${rivalText} - it travels with your rivals' wins as often as yours.`,
+      ? `${cap(best.code)} is argued in ${pct(best.w)} of the direct matchups you win but ${pct(best.l)} of those you lose${rivalText} - the AI credits your rivals with it more than you.`
+      : `${cap(best.code)} is argued in ${pct(best.w)} of the direct matchups you win and ${pct(best.l)} of those you lose${rivalText} - it travels with your rivals' wins as often as yours.`,
     foot: `In wins: ${counts(best.w)}. In losses: ${counts(best.l)}${rival ? `; ${rivalLosses} of those losses to ${rival}` : ""}. Prompted head-to-heads against every named rival, pooled; arguments in under ${Math.round(ND_WIN_SHARE * 100)}% of wins left out.`,
     look: { pill: "stations", station: "comparison", label: "Stations - Comparison" },
     effect: rate(best.l) - rate(best.w),
@@ -1080,8 +1109,8 @@ function conversionVsRival(s: Summary): Insight | null {
     kind: "rival",
     title: rivalAhead ? `${rival.name} turns its recommendations into picks, you less so` : `You turn recommendations into picks better than ${rival.name}`,
     body: rivalAhead
-      ? `The AI recommends you but picks ${rival.name} - ${rival.name} is the pick in ${pct(them)} of the open-choice answers that recommend it, you in ${pct(you)} of those that recommend you.`
-      : `When the AI recommends you in an open choice you are the pick in ${pct(you)} of those answers; ${rival.name} in ${pct(them)} of the answers that recommend it.`,
+      ? `The AI recommends you but picks ${rival.name} - ${rival.name} is the pick in ${pct(them)} of the answers that recommend it, you in ${pct(you)} of those that recommend you.`
+      : `When the AI recommends you, you are the pick in ${pct(you)} of those answers; ${rival.name} in ${pct(them)} of the answers that recommend it.`,
     foot: `${rival.name}: picked in ${counts(them)} recommending answers. You: ${counts(you)}. ${rival.name} has the largest share of decided open-choice picks among your rivals.`,
     look: { pill: "rivals", label: "Rivals" },
     effect: Math.abs(rate(them) - rate(you)),
@@ -1109,12 +1138,12 @@ function leakPicks(inp: InsightInputs): Insight | null {
     .filter((r) => r.firm >= MIN_BASE && r.outside > 0)
     .sort((a, b) => b.outside / b.firm - a.outside / a.firm || a.room.localeCompare(b.room))[0];
   const roomCell = room ? cell(room.outside, room.firm) : null;
-  const roomText = room && roomCell && rate(roomCell) > rate(outside) ? `; in the ${room.room} room it is ${pct(roomCell)}` : "";
+  const roomText = room && roomCell && rate(roomCell) > rate(outside) ? `; for ${room.room} it is ${pct(roomCell)}` : "";
   return {
     key: "leak_picks",
     kind: "leak",
     title: top.length ? `Picks leave the category - led by ${top[0].name}` : "Picks leave the category",
-    body: `${pct(outside)} of the open-choice answers that make a firm pick choose something outside your category${top.length ? `, led by ${listNames(top.map((x) => x.name))}` : ""}${roomText}.`,
+    body: `${pct(outside)} of the answers that commit to a pick choose something outside your category${top.length ? `, led by ${listNames(top.map((x) => x.name))}` : ""}${roomText}.`,
     foot: `${counts(outside)} firm picks outside the category${top.length ? `: ${top.map((x) => `${x.name} ${x.n}`).join(", ")}` : ""}.${room && roomCell ? ` ${room.room}: ${counts(roomCell)}.` : ""} Outside = ruled out on the dictionary board, pending, or not in it.`,
     look: { pill: "stations", station: "consideration", label: "Stations - Consideration" },
     effect: rate(outside),
@@ -1144,8 +1173,8 @@ function leakProblem(inp: InsightInputs): Insight | null {
     kind: "leak",
     title: oneRoom ? `${top.room}: the problem is solved outside the category` : "Problem questions are solved outside the category",
     body: oneRoom
-      ? `In the ${top.room} room, the AI answers ${pct(top.out)} of the problem questions that do not name the category with a solution outside it - ${pct(rest)} in the other rooms.`
-      : `Across every buyer room, the AI answers ${pct(p.all)} of the problem questions that do not name the category with a solution outside it (${pct(top.out)} in the ${top.room} room).`,
+      ? `For ${top.room}, the AI answers ${pct(top.out)} of the problem questions that do not name the category with a solution outside it - ${pct(rest)} for the other buying situations.`
+      : `Across every buying situation, the AI answers ${pct(p.all)} of the problem questions that do not name the category with a solution outside it (${pct(top.out)} for ${top.room}).`,
     foot: `${top.room}: ${counts(top.out)}.${rest.n > 0 ? ` Other rooms: ${counts(rest)}.` : ""} All problem-recognition answers: ${counts(p.all)}.`,
     look: { pill: "stations", station: "awareness", label: "Stations - Awareness" },
     effect: (oneRoom ? rate(top.out) : rate(p.all)) - LEAK_PROBLEM_SHARE,
@@ -1215,17 +1244,20 @@ export function composeVerdict(s: Summary, inp: InsightInputs): VerdictFact[] {
   // 1. Standing.
   if (s.answers >= MIN_BASE) {
     const rival = s.brands.find((b) => b.role !== "target" && b.chosen.k > 0);
-    let text = `${s.brand} is named in ${pct(s.target.mentioned)} of open-choice answers and picked in ${pct(s.target.chosen)}`;
+    let text: string;
     let foot = `Named ${counts(s.target.mentioned)}; picked ${counts(s.target.chosen)}`;
     if (decidedOk) {
-      text += `, which is ${pct(s.target.shareOfDecided)} of the picks that land on a brand in the category`;
-      foot += `; ${s.target.chosen.k} of ${s.firmPickInCategory.k} decided picks`;
+      // The two-pick-numbers convention: commit rate, share of picks, picked of all.
+      text = `${s.brand} is named in ${pct(s.target.mentioned)} of answers when buyers ask what to buy. ${commitSentence(s.category, s.brand, s.firmPickInCategory, s.target.shareOfDecided, s.target.chosen)}`;
+      foot += `; ${s.target.chosen.k} of ${s.firmPickInCategory.k} in-category picks`;
       if (rival) {
-        text += `, ${rate(rival.shareOfDecided) > rate(s.target.shareOfDecided) ? "behind" : "ahead of"} ${rival.name} at ${pct(rival.shareOfDecided)}`;
+        text += ` ${rival.name} is the pick ${pct(rival.shareOfDecided)} of the time, ${rate(rival.shareOfDecided) > rate(s.target.shareOfDecided) ? "ahead of" : "behind"} ${s.brand}.`;
         foot += `; ${rival.name} ${rival.chosen.k}`;
       }
+    } else {
+      text = `${s.brand} is named in ${pct(s.target.mentioned)} of answers when buyers ask what to buy and is the pick in ${pctFine(rate(s.target.chosen))} of all answers.`;
     }
-    out.push({ key: "standing", text: `${text}.`, foot: `${foot}.`, look: { pill: "stations", station: "consideration", label: "Stations - Consideration" } });
+    out.push({ key: "standing", text, foot: `${foot}.`, look: { pill: "stations", station: "consideration", label: "Stations - Consideration" } });
   }
 
   // 2. Prompted vs open.
@@ -1233,13 +1265,13 @@ export function composeVerdict(s: Summary, inp: InsightInputs): VerdictFact[] {
   if (rec && decidedOk) {
     const hard = rec.hardest ? ` (${pct(rec.hardest.winOfDecided)} against ${rec.hardest.rival})` : "";
     const gap = rate(rec.pooled) - rate(s.target.shareOfDecided);
-    const openText = `${pct(s.target.shareOfDecided)} of the open choice`;
+    const openText = `${pct(s.target.shareOfDecided)} of the picks when buyers ask what to buy`;
     const text =
       gap >= 0.1
-        ? `It wins ${pct(rec.pooled)} of prompted head-to-heads${hard} but only ${openText}.`
+        ? `Asked to compare it with a rival directly, the AI picks it in ${pct(rec.pooled)} of matchups${hard} - but it takes only ${openText}.`
         : gap <= -0.1
-          ? `It takes ${openText} but wins only ${pct(rec.pooled)} of prompted head-to-heads${hard}.`
-          : `It wins ${pct(rec.pooled)} of prompted head-to-heads${hard} and ${openText}.`;
+          ? `It takes ${openText}, but asked to compare it with a rival directly, the AI picks it in only ${pct(rec.pooled)} of matchups${hard}.`
+          : `Asked to compare it with a rival directly, the AI picks it in ${pct(rec.pooled)} of matchups${hard}, in line with its ${openText}.`;
     out.push({
       key: "prompted_vs_open",
       text,
@@ -1253,7 +1285,7 @@ export function composeVerdict(s: Summary, inp: InsightInputs): VerdictFact[] {
   if (room) {
     out.push({
       key: "concentration",
-      text: `${pct(room.share)} of its picks come from one buyer room, ${room.top.room}.`,
+      text: `${pct(room.share)} of its picks come from one buying situation, ${room.top.room}.`,
       foot: `${room.top.picks} of ${room.total} open-choice picks; ${room.rooms} rooms.`,
       look: { pill: "buyers", label: "Buyers" },
     });
@@ -1273,7 +1305,7 @@ export function composeVerdict(s: Summary, inp: InsightInputs): VerdictFact[] {
   const c = s.customersDoubt && s.customersDoubt.answers >= MIN_BASE ? s.customersDoubt : null;
   if (b || c) {
     const text = b
-      ? `Buyers' worries are confirmed in ${pct(b.agree)} of answers and still told to go ahead in ${pct(b.proceed)}${c ? `; customers are told to stay in ${pct(c.keep)}` : ""}.`
+      ? `The AI agrees with buyers' worries in ${pct(b.agree)} of the answers that take a side, and still tells buyers to go ahead in ${pct(b.proceed)}${c ? `; customers with a worry are told to stay in ${pct(c.keep)}` : ""}.`
       : `Customers voicing a worry are told to stay in ${pct(c!.keep)} and to leave in ${pct(c!.leave)}.`;
     const foot = [b && `Buyers: agrees ${counts(b.agree)}; go ahead ${counts(b.proceed)}.`, c && `Customers: stay ${counts(c.keep)}; leave ${counts(c.leave)}.`]
       .filter(Boolean)
