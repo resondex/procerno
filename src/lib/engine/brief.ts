@@ -967,7 +967,14 @@ function funnelFrame(c: Ctx): BriefSection[] {
   const accent = d1 > d2 ? "rec" : "pick";
   const items: BriefVizItem[] = [
     { label: L.named, a: named * 100, value: P(S.mentioned) },
-    { label: L.rec, a: rec * 100, value: P(S.recommended), ...(accent === "rec" ? { accent: true } : {}) },
+    {
+      label: L.rec,
+      a: rec * 100,
+      value: P(S.recommended),
+      ...(accent === "rec" ? { accent: true } : {}),
+      // Drawn in the narrowing under this band - the conversion the image otherwise hides.
+      ...(recToPick ? { note: `only ${pctN(conv(S))} of recommendations end as the pick` } : {}),
+    },
     { label: L.pick, a: picked * 100, value: ofPicks ? `${pctFine(picked)} (${ofPicks})` : pctFine(picked), ...(accent === "pick" ? { accent: true } : {}) },
   ];
   if (c.isTarget) {
@@ -1613,7 +1620,8 @@ export async function computeBrief(data: ViewData, request: BriefRequest = {}): 
 // bf3 (2026-11-04): the library exemplars mirrored - funnel stages renamed + hourglass, matrix on the exemplar's quadrants and lines (visible > 50% named, converting = share >= named / 4) + scatter, by-situation pairs, Minto pyramid.
 // bf6 (2026-11-05): the footer names the brand, wave and month, never the assistant count.
 // bf7 (2026-11-05): the funnel's pick stage carries the recommended-to-pick conversion, like the library memo.
-const BRIEF_VERSION = "bf7";
+// bf8 (2026-11-05): the conversion is also drawn in the hourglass, in the narrowing under the shortlist band.
+const BRIEF_VERSION = "bf8";
 
 /**
  * The brief through the cache. cachedView's keying, with the subject as one

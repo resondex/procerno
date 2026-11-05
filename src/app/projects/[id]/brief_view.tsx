@@ -272,6 +272,11 @@ function FunnelViz({ v }: { v: BriefViz }) {
             <text x={cx + w / 2 + 9} y={y + BAND / 2 + 4.5} fontSize={13.5} fontWeight={it.accent ? 700 : 500} fill={it.accent ? ACC : "var(--ink-2)"}>
               {it.value}
             </text>
+            {it.note && (
+              <text x={cx} y={y + BAND + 16} textAnchor="middle" fontSize={11.5} fontStyle="italic" fill="var(--ink-3)">
+                {it.note}
+              </text>
+            )}
           </g>
         );
       })}
