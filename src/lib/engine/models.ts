@@ -78,3 +78,10 @@ export const CATEGORY_REACH_MODEL = pick("CATEGORY_REACH_MODEL", "gpt-6-luna");
  * 2026-10-23 (Tyler; setup-engine round: 100% role stability, 97% role
  * agreement with gpt-5). The roster key already carries ROSTER_MODEL. */
 export const ROSTER_MODEL = process.env.ROSTER_MODEL ?? "gpt-6-sol";
+/** The Brief pill's option B (brief_writer.ts, 2026-11-05): one writing
+ * pass that turns a composed memo into executive prose, every number
+ * guarded mechanically against the composed memo. A generative writing job,
+ * so a full Anthropic model; brief_writer refuses a non-Claude value (falls
+ * back to the composed memo) since the call is Anthropic-only. Part of the
+ * written-memo cache key. */
+export const BRIEF_WRITER_MODEL = pick("BRIEF_WRITER_MODEL", "claude-opus-5-5");

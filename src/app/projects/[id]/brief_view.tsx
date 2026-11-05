@@ -36,6 +36,12 @@ import { useEngineSet } from "./view_parts";
 
 const frameKey = (p: string) => `procerno_brief_frame:${p}`;
 const subjectKey = (p: string) => `procerno_brief_subject:${p}`;
+const versionKey = (p: string) => `procerno_brief_version:${p}`;
+
+/** Option B (2026-11-05): the composed memo rewritten as prose by the
+ * fact-guarded writer (engine/brief_writer.ts). */
+type BriefVersion = "A" | "B";
+type WrittenResult = { memo: BriefMemo | null; written: boolean; reason?: string } | { error: string };
 
 function readPref(key: string | null): string | null {
   if (!key) return null;
@@ -621,7 +627,7 @@ function splitTitle(title: string, frameLabel: string): { head: string; wave: st
   return { head, wave: wave ? wave[1] : null };
 }
 
-function Memo({ memo, subject, tracker }: { memo: BriefMemo; subject: string; tracker: string }) {
+function Memo({ memo, subject, tracker, note }: { memo: BriefMemo; subject: string; tracker: string; note?: string }) {
   const frameLabel = BRIEF_FRAME_LABELS[memo.frame];
   const { head, wave } = splitTitle(memo.title, frameLabel);
   const firstParas = memo.sections.findIndex((s) => !!s.paras);
@@ -635,6 +641,7 @@ function Memo({ memo, subject, tracker }: { memo: BriefMemo; subject: string; tr
             {wave && <span>Wave {wave}</span>}
             {subject !== tracker && <span>A rival of {tracker}</span>}
           </div>
+          {note && <p className="pb-sans pb-meta italic">{note}</p>}
           <hr className="pb-head-rule" />
         </header>
         {memo.sections.map((s, i) => (
@@ -694,6 +701,7 @@ export default function BriefSection({ runId, projectId }: { runId: string; proj
   const engines = useEngineSet();
   const fKey = projectId ? frameKey(projectId) : null;
   const sKey = projectId ? subjectKey(projectId) : null;
+  const vKey = projectId ? versionKey(projectId) : null;
 
   // The brand the reader asked for; null = the saved one (or the server's
   // default, the tracker's own brand). Changing it refetches.
@@ -702,6 +710,11 @@ export default function BriefSection({ runId, projectId }: { runId: string; proj
   const [view, setView] = useState<BriefView | null | undefined>(undefined);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [version, setVersion] = useState<BriefVersion | null>(null);
+  // Written memos per (frame, subject, engine set); a key absent while B is
+  // on screen is still being written.
+  const [writtenMemos, setWrittenMemos] = useState<Record<string, WrittenResult>>({});
+  const inFlight = useRef<Set<string>>(new Set());
   const memoRef = useRef<HTMLDivElement>(null);
 
   const engineKey = engines?.join(",") ?? "";
@@ -723,6 +736,7 @@ export default function BriefSection({ runId, projectId }: { runId: string; proj
           const saved = readPref(fKey);
           return isFrame(saved) ? saved : "now_what";
         });
+        setVersion((v) => v ?? (readPref(vKey) === "B" ? "B" : "A"));
         setView(d.view);
         setError(null);
         setLoading(false);
@@ -735,7 +749,32 @@ export default function BriefSection({ runId, projectId }: { runId: string; proj
     return () => {
       live = false;
     };
-  }, [runId, engineKey, requested, sKey, fKey]);
+  }, [runId, engineKey, requested, sKey, fKey, vKey]);
+
+  // Option B: fetch the written memo for the frame on screen, once per
+  // (frame, subject, engine set). State is set only in the fetch callback.
+  const viewSubject = view?.subject ?? null;
+  const wantFrame: BriefFrame = frame ?? "now_what";
+  const writtenKey = viewSubject ? `${wantFrame}|${viewSubject}|${engineKey}` : null;
+  useEffect(() => {
+    if (version !== "B" || !writtenKey || !viewSubject) return;
+    if (writtenMemos[writtenKey] || inFlight.current.has(writtenKey)) return;
+    inFlight.current.add(writtenKey);
+    const q = new URLSearchParams();
+    q.set("subject", viewSubject);
+    if (engineKey) q.set("engines", engineKey);
+    q.set("written", "1");
+    q.set("frame", wantFrame);
+    const k = writtenKey;
+    fetch(`/api/runs/${runId}/brief?${q.toString()}`)
+      .then(async (r) => {
+        if (!r.ok) throw new Error(`The written version could not load (${r.status}).`);
+        const d = (await r.json()) as { memo: BriefMemo | null; written: boolean; reason?: string };
+        setWrittenMemos((m) => ({ ...m, [k]: d }));
+      })
+      .catch((e: Error) => setWrittenMemos((m) => ({ ...m, [k]: { error: e.message } })))
+      .finally(() => inFlight.current.delete(k));
+  }, [version, writtenKey, viewSubject, wantFrame, engineKey, runId, writtenMemos]);
 
   useEffect(() => () => printCleanup?.(), []);
 
@@ -750,11 +789,28 @@ export default function BriefSection({ runId, projectId }: { runId: string; proj
   if (view === null) return null;
 
   const current: BriefFrame = frame ?? "now_what";
-  const memo = view.memos[current];
+  const composed = view.memos[current];
+  const showB = version === "B";
+  const wr = showB && writtenKey ? writtenMemos[writtenKey] : undefined;
+  const writing = showB && !wr;
+  let memo: BriefMemo | undefined = composed;
+  let memoNote: string | undefined;
+  if (showB && wr) {
+    if ("error" in wr || !wr.written || !wr.memo) {
+      memoNote = "The written version is not available for this frame - showing the composed memo.";
+    } else {
+      memo = wr.memo;
+      memoNote = "Option B - model-written from the measured facts. Every number is checked against the composed memo.";
+    }
+  }
 
   const pickFrame = (f: BriefFrame) => {
     setFrame(f);
     writePref(fKey, f);
+  };
+  const pickVersion = (v: BriefVersion) => {
+    setVersion(v);
+    writePref(vKey, v);
   };
   const pickSubject = (s: string) => {
     if (s === view.subject) return;
@@ -780,6 +836,19 @@ export default function BriefSection({ runId, projectId }: { runId: string; proj
             ))}
           </select>
         </label>
+        <div role="group" aria-label="Memo version" className="flex overflow-hidden rounded-md border border-line text-[13px] font-medium">
+          {(["A", "B"] as const).map((v) => (
+            <button
+              key={v}
+              type="button"
+              aria-pressed={(version ?? "A") === v}
+              onClick={() => pickVersion(v)}
+              className={`px-2.5 py-1 transition-colors ${(version ?? "A") === v ? "bg-ink text-surface" : "bg-surface text-ink-2 hover:text-ink"} ${v === "B" ? "border-l border-line" : ""}`}
+            >
+              {v === "A" ? "A - Composed" : "B - Written"}
+            </button>
+          ))}
+        </div>
         {view.subjects.length > 1 && (
           <label className="flex items-center gap-1.5">
             <span className="text-[12px] text-ink-3">Brand:</span>
@@ -799,18 +868,25 @@ export default function BriefSection({ runId, projectId }: { runId: string; proj
         )}
         <button
           type="button"
-          disabled={!memo || loading}
+          disabled={!memo || loading || writing}
           onClick={() => memoRef.current && memo && printMemo(memoRef.current, memo.title)}
           className="rounded-full border border-line px-3 py-1 text-[13px] font-medium text-ink-2 transition-colors hover:border-ink-3 disabled:opacity-50"
         >
           Download PDF
         </button>
         {loading && <span className="text-[12px] text-ink-3">Updating...</span>}
+        {writing && <span className="text-[12px] italic text-ink-3">Writing this memo from the measured facts...</span>}
         {error && view && <span className="text-[12px] text-danger">{error}</span>}
       </div>
 
       <div ref={memoRef} className={loading ? "opacity-50 transition-opacity" : "transition-opacity"}>
-        {memo ? <Memo memo={memo} subject={view.subject} tracker={view.subjects[0] ?? view.subject} /> : <p className="text-[13px] text-ink-3">This frame has nothing to say yet.</p>}
+        {writing ? (
+          <Skeleton />
+        ) : memo ? (
+          <Memo memo={memo} subject={view.subject} tracker={view.subjects[0] ?? view.subject} note={memoNote} />
+        ) : (
+          <p className="text-[13px] text-ink-3">This frame has nothing to say yet.</p>
+        )}
       </div>
     </div>
   );
