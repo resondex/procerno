@@ -797,7 +797,10 @@ export default function BriefSection({ runId, projectId }: { runId: string; proj
   let memoNote: string | undefined;
   if (showB && wr) {
     if ("error" in wr || !wr.written || !wr.memo) {
-      memoNote = "The written version is not available for this frame - showing the composed memo.";
+      memoNote =
+        !("error" in wr) && wr.reason === "unavailable"
+          ? "This environment has no writing model configured, so the written version can't be generated here - showing the composed memo."
+          : "The written version is not available for this frame - showing the composed memo.";
     } else {
       memo = wr.memo;
       memoNote = "Option B - model-written from the measured facts. Every number is checked against the composed memo.";

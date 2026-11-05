@@ -62,6 +62,29 @@
       "port": 3240
     },
     {
+      "name": "procerno-fixture-written",
+      "runtimeExecutable": "env",
+      "runtimeArgs": [
+        "DATABASE_URL=",
+        "SQLITE_PATH=data/dashboard_fixture.db",
+        "NEXT_PUBLIC_SUPABASE_URL=",
+        "NEXT_PUBLIC_SUPABASE_ANON_KEY=",
+        "RUN_COLLECT_ONLY=1",
+        "OPENAI_API_KEY=",
+        "GEMINI_API_KEY=",
+        "XAI_API_KEY=",
+        "PERPLEXITY_API_KEY=",
+        "FIREWORKS_API_KEY=",
+        "npm",
+        "run",
+        "dev",
+        "--",
+        "--port",
+        "3260"
+      ],
+      "port": 3260
+    },
+    {
       "name": "procerno-fixture",
       "runtimeExecutable": "env",
       "runtimeArgs": [
