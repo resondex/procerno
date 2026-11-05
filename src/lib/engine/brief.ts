@@ -730,20 +730,13 @@ function swotOf(c: Ctx): Swot {
         });
     for (const p of Object.values(c.map.positions)) {
       const st = c.stats[p.cellId];
-      // Matchups are read from the summary above; the settled band is asked-for (the advocacy line below).
+      // Matchups are read from the summary above. The settled band and the doubt rows are the AI
+      // siding with the brand when the asker set it up that way - defensive ground, never a strength.
       if (!st || p.status !== "surplus" || st.row === "h2h" || st.band === "settled") continue;
+      if (st.row === "buyers" || st.row === "customers" || st.row === "hold") continue;
       const wd = cellWords(st.row, st.label, c.brand);
       s.push({ text: sentence(p.claim), short: `your hold ${wd.prep || "here"}`, tip: `${st.you} of ${st.d} side-taking answers.`, kind: st.row, row: st.row, effect: st.n > 0 ? (st.you - st.them) / st.n : 0 });
     }
-    const adv = c.inputs.settled.advocacy;
-    if (adv && adv.answers >= MIN && rate(adv.verdicts.strengthens) >= 0.5)
-      s.push({
-        text: `Asked by your customers to make the case for ${c.brand}, the AI strengthens it in ${P(adv.verdicts.strengthens)} of answers.`,
-        short: "the case the AI makes when asked",
-        tip: tipOf(adv.verdicts.strengthens),
-        kind: "advocacy",
-        effect: rate(adv.verdicts.strengthens) - 0.5,
-      });
     const used = new Set(c.findings.map((f) => f.key));
     for (const i of c.ranked) if (insightIsStrength(i) && !used.has(i.key)) s.push(fromInsight(i, i.kind));
 
@@ -928,7 +921,10 @@ function funnelFrame(c: Ctx): BriefSection[] {
   const d1 = named - rec;
   const d2 = rec - picked;
   const L = { named: "In the conversation", rec: "On the shortlist", pick: `The ${c.product} to get`, kept: "Customers told to stay", defended: "Defends when asked" };
-  const stagesText = `named in ${P(S.mentioned)}, recommended in ${P(S.recommended)}, picked in ${pctFine(picked)} of answers`;
+  // Share of picks is the lead pick number everywhere; the all-answers rate exists only inside
+  // this ladder (the stages must share a denominator) and never without the bridge beside it.
+  const ofPicks = s.firmPickInCategory.k >= MIN ? `${P(S.shareOfDecided)} of picks` : "";
+  const stagesText = `named in ${P(S.mentioned)}, recommended in ${P(S.recommended)}, picked in ${pctFine(picked)} of answers${ofPicks ? ` (${ofPicks})` : ""}`;
   const oneStage = d1 > 0 && d2 > 0 && Math.max(d1, d2) >= 2 * Math.min(d1, d2);
   let thesis: string;
   if (oneStage)
@@ -939,7 +935,7 @@ function funnelFrame(c: Ctx): BriefSection[] {
   const rows: BriefRow[] = [
     { label: L.named, value: P(S.mentioned), tip: tipOf(S.mentioned) },
     { label: L.rec, value: P(S.recommended), tip: tipOf(S.recommended) },
-    { label: L.pick, value: pctFine(picked), tip: tipOf(S.chosen) },
+    { label: L.pick, value: ofPicks ? `${pctFine(picked)} - ${ofPicks}` : pctFine(picked), tip: tipOf(S.chosen) },
   ];
   const paras: BriefPara[] = [
     { lead: `${L.named}.`, text: `When buyers ask what to buy, the AI names ${c.name} in ${P(S.mentioned)} of answers.`, tip: tipOf(S.mentioned) },
@@ -962,7 +958,7 @@ function funnelFrame(c: Ctx): BriefSection[] {
   const items: BriefVizItem[] = [
     { label: L.named, a: named * 100, value: P(S.mentioned) },
     { label: L.rec, a: rec * 100, value: P(S.recommended), ...(accent === "rec" ? { accent: true } : {}) },
-    { label: L.pick, a: picked * 100, value: pctFine(picked), ...(accent === "pick" ? { accent: true } : {}) },
+    { label: L.pick, a: picked * 100, value: ofPicks ? `${pctFine(picked)} - ${ofPicks}` : pctFine(picked), ...(accent === "pick" ? { accent: true } : {}) },
   ];
   if (c.isTarget) {
     const k = s.customersDoubt;
@@ -1611,7 +1607,7 @@ export async function computeBrief(data: ViewData, request: BriefRequest = {}): 
 // bf1 (2026-11-04): first version - seven frames, subject shift, the two-pick-numbers convention.
 // bf2 (2026-11-04): Tyler's review - now_what follows the exemplar memo (one-paragraph verdict, funnel break, numbered findings, conditions); the other frames drop the shared verdict block and open on their own structure.
 // bf3 (2026-11-04): the library exemplars mirrored - funnel stages renamed + hourglass, matrix on the exemplar's quadrants and lines (visible > 50% named, converting = share >= named / 4) + scatter, by-situation pairs, Minto pyramid.
-const BRIEF_VERSION = "bf3";
+const BRIEF_VERSION = "bf4";
 
 /**
  * The brief through the cache. cachedView's keying, with the subject as one

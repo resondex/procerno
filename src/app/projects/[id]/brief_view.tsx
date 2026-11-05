@@ -110,7 +110,8 @@ const BRIEF_CSS = `
 .pb-table tr:last-child td{ border-bottom: 1px solid var(--line); }
 .pb-table tr.pb-hl td{ background: color-mix(in srgb, var(--primary) 13%, var(--surface)); font-weight: 600; }
 .pb-table tr.pb-hl td:first-child{ box-shadow: inset 3px 0 0 var(--primary); }
-.pb-table-wrap{ overflow-x: auto; margin-top: .25em; }
+.pb-table-wrap{ margin-top: .25em; }
+@media (max-width: 640px){ .pb-table-wrap{ overflow-x: auto; } }
 .pb-score td:first-child{ color: var(--ink); }
 .pb-quads{ display: grid; grid-template-columns: 1fr; gap: 14px; margin-top: .4em; }
 @media (min-width: 640px){ .pb-quads{ grid-template-columns: 1fr 1fr; } }
