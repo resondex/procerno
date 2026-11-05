@@ -190,6 +190,15 @@ export interface InsightInputs {
   /** bs8: problem recognition - answers routed outside the category
    * (category_routed adjacent), overall and per buyer room; null without the pool. */
   problem: { all: RateCell; rooms: { room: string; out: RateCell }[] } | null;
+  /** The brief (bf1): both branches of the run's decision rules - the largest
+   * condition groups routing toward the client and away, with the questions
+   * each side appears in. Not read by any detector. null without rules. */
+  conditions?: {
+    toward: { label: string; rules: number; cells: number; wall: boolean; routes: { name: string; n: number }[] }[];
+    away: { label: string; rules: number; cells: number; wall: boolean; routes: { name: string; n: number }[] }[];
+    towardCells: number;
+    awayCells: number;
+  } | null;
 }
 
 const AWAY_TOP = 3;
@@ -326,7 +335,25 @@ export async function insightInputs(data: ViewData, request: ViewRequest = {}): 
     h2hArgs,
     leak,
     problem,
+    conditions:
+      rules.answers > 0
+        ? {
+            toward: sideTop(rules.groups, "you"),
+            away: sideTop(rules.groups, "away"),
+            towardCells: rules.cellsBySide.you,
+            awayCells: rules.cellsBySide.away,
+          }
+        : null,
   };
+}
+
+/** The largest groups on one side of the rules, for the brief's conditions paragraph. */
+function sideTop(groups: Awaited<ReturnType<typeof computeRules>>["groups"], side: "you" | "away") {
+  return groups
+    .filter((g) => g.side === side)
+    .sort((a, b) => b.answers - a.answers || b.rules - a.rules || a.label.localeCompare(b.label))
+    .slice(0, 6)
+    .map((g) => ({ label: g.label, rules: g.rules, cells: g.cells, wall: g.wall, routes: g.routes }));
 }
 
 const rate = (c: RateCell) => (c.n > 0 ? c.k / c.n : 0);

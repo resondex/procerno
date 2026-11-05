@@ -224,7 +224,7 @@ function Section({ s }: { s: BriefSectionT }) {
 
 function Memo({ memo }: { memo: BriefMemo }) {
   return (
-    <article className="pb-memo max-w-[65ch]">
+    <article className="pb-memo max-w-[88ch]">
       <h2 className="text-[1.65rem] font-semibold leading-tight text-ink [text-wrap:balance]">{memo.title}</h2>
       {memo.sections.map((s) => (
         <Section key={s.key} s={s} />
@@ -238,7 +238,7 @@ function Memo({ memo }: { memo: BriefMemo }) {
 
 function Skeleton() {
   return (
-    <div className="max-w-[65ch] grid gap-3" aria-busy="true" aria-label="Loading the brief">
+    <div className="max-w-[88ch] grid gap-3" aria-busy="true" aria-label="Loading the brief">
       <div className="pb-skel h-8 w-3/4" />
       <div className="pb-skel mt-3 h-4 w-full" />
       <div className="pb-skel h-4 w-11/12" />

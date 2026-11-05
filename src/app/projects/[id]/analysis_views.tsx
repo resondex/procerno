@@ -239,7 +239,7 @@ function VerdictView({ map, onOpen }: { map: AnalysisMapView; onOpen: (cellId: s
   const picked = map.dots.picked;
   const maxShare = Math.max(0.0001, ...map.shareOfDecided.map((s) => (s.share.n > 0 ? s.share.k / s.share.n : 0)));
   return (
-    <article className="pa-memo max-w-[72ch]">
+    <article className="pa-memo max-w-[88ch]">
       <div className="pa-sans mb-2.5 text-[11px] uppercase tracking-[0.09em] text-ink-3">
         The verdict{brand ? ` - ${brand}` : ""}
       </div>
@@ -360,7 +360,7 @@ function CellButton({ cell, onOpen, hasPosition }: { cell: MapCell; onOpen: (id:
 function MapView({ map, onOpen }: { map: AnalysisMapView; onOpen: (id: string) => void }) {
   return (
     <div className="grid gap-5">
-      <div className="max-w-[72ch]">
+      <div className="max-w-[88ch]">
         <h2 className="text-lg font-semibold text-ink">The coverage map, measured</h2>
         <p className="mt-1 text-[13px] leading-relaxed text-ink-2">
           Every contest the tracker runs, one cell each. Each band varies by what that contest actually varies by -
