@@ -87,6 +87,8 @@ interface Move {
   lever: string;
   /** The lever's first clause, lower-cased, with the cell's "where" appended. */
   act: string;
+  /** The act without the cell's "where" - the dedupe key when one lever family repeats across moves. */
+  actStem: string;
   family: string;
   watch: string;
   today: string;
@@ -315,7 +317,8 @@ function movesOf(map: AnalysisMapView, stats: Record<string, MapCellStat>, brand
   return picked.map((p) => {
     const st = stats[p.cellId];
     const w = cellWords(st.row, st.label, brand);
-    const act = `${actOf(p, st)}${w.prep ? ` ${w.prep}` : ""}`;
+    const stem = actOf(p, st);
+    const act = `${stem}${w.prep ? ` ${w.prep}` : ""}`;
     return {
       cellId: p.cellId,
       row: st.row,
@@ -324,6 +327,7 @@ function movesOf(map: AnalysisMapView, stats: Record<string, MapCellStat>, brand
       claim: p.claim,
       lever: sentence(p.lever),
       act,
+      actStem: stem,
       family: p.family,
       watch: w.watch,
       today: todayOf(st),
@@ -779,9 +783,15 @@ function swotOf(c: Ctx): Swot {
           kind: "wall",
           effect: st.them / st.d - st.you / st.d,
         });
-    // Opportunities: the moves.
-    for (const m of c.moves)
-      o.push({ text: `${cap(m.act)} - ${m.today}.`, short: `the opening ${m.lead.startsWith("The worry") ? `on ${low1(m.lead)}` : `in ${m.lead}`}`, act: m.act, tip: m.tip, kind: m.row, row: m.row, effect: 1 });
+    // Opportunities: the moves. One lever family repeating verbatim reads
+    // as boilerplate - repeats keep only their "where".
+    const seenAct = new Set<string>();
+    for (const m of c.moves) {
+      const where = m.act.slice(m.actStem.length).trim();
+      const text = seenAct.has(m.actStem) && where ? `The same move ${where} - ${m.today}.` : `${cap(m.act)} - ${m.today}.`;
+      seenAct.add(m.actStem);
+      o.push({ text, short: `the opening ${m.lead.startsWith("The worry") ? `on ${low1(m.lead)}` : `in ${m.lead}`}`, act: m.act, tip: m.tip, kind: m.row, row: m.row, effect: 1 });
+    }
   } else {
     // Rival subject: per buying situation, its matchup with the target, the leading brand.
     for (const r of c.rooms) {
@@ -1107,7 +1117,14 @@ function mintoFrame(c: Ctx): BriefSection[] {
     out.push({
       key: "resolution",
       heading: "The resolution",
-      paras: c.moves.map((m) => ({ lead: leadOf(m.lead), text: `${cap(m.act)} - watch ${m.watch}.`, tip: m.tip })),
+      paras: (() => {
+        const seen = new Set<string>();
+        return c.moves.map((m) => {
+          const rep = seen.has(m.actStem);
+          seen.add(m.actStem);
+          return { lead: leadOf(m.lead), text: rep ? `As above - watch ${m.watch}.` : `${cap(m.act)} - watch ${m.watch}.`, tip: m.tip };
+        });
+      })(),
     });
   return out;
 }
