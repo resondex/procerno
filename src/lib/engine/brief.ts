@@ -932,6 +932,16 @@ function funnelFrame(c: Ctx): BriefSection[] {
   else if (d1 > 0 && d2 > 0) thesis = `${c.name} loses ground at both steps: ${stagesText}.`;
   else thesis = `${c.name} holds its ground through the funnel: ${stagesText}.`;
 
+  // The recommended stage's conversion (the library funnel's stage-3 line):
+  // how many recommendations end as the pick, against the rival that converts best.
+  const conv = (b: SummaryBrand) => (b.recommended.k > 0 ? b.chosen.k / b.recommended.k : 0);
+  const better = s.brands
+    .filter((b) => b.key !== S.key && b.recommended.k >= MIN && conv(b) > conv(S))
+    .sort((a, b) => conv(b) - conv(a) || a.name.localeCompare(b.name))[0];
+  const recToPick =
+    S.recommended.k >= MIN
+      ? ` Only ${pctN(conv(S))} of its recommendations end as the pick${better ? `; ${better.name} turns ${pctN(conv(better))} of its own into picks` : ""}.`
+      : "";
   const rows: BriefRow[] = [
     { label: L.named, value: P(S.mentioned), tip: tipOf(S.mentioned) },
     { label: L.rec, value: P(S.recommended), tip: tipOf(S.recommended) },
@@ -947,10 +957,10 @@ function funnelFrame(c: Ctx): BriefSection[] {
     {
       lead: `${L.pick}.`,
       text:
-        s.firmPickInCategory.k >= MIN
+        (s.firmPickInCategory.k >= MIN
           ? `Only ${P(s.firmPickInCategory)} of answers settle on a single ${c.product}; ${c.name} wins ${P(S.shareOfDecided)} of those settlements, which leaves it the pick in ${pctFine(picked)} of every answer.`
-          : `${c.name} is the pick in ${pctFine(picked)} of all answers.`,
-      tip: `${tipOf(S.chosen)} answers; ${S.chosen.k} of ${s.firmPickInCategory.k} in-category picks.`,
+          : `${c.name} is the pick in ${pctFine(picked)} of all answers.`) + recToPick,
+      tip: `${tipOf(S.chosen)} answers; ${S.chosen.k} of ${s.firmPickInCategory.k} in-category picks; ${S.chosen.k} picks of ${S.recommended.k} recommendations.`,
     },
   ];
   // The hourglass: one band per stage, the stage where the funnel breaks accented.
@@ -1602,7 +1612,8 @@ export async function computeBrief(data: ViewData, request: BriefRequest = {}): 
 // bf2 (2026-11-04): Tyler's review - now_what follows the exemplar memo (one-paragraph verdict, funnel break, numbered findings, conditions); the other frames drop the shared verdict block and open on their own structure.
 // bf3 (2026-11-04): the library exemplars mirrored - funnel stages renamed + hourglass, matrix on the exemplar's quadrants and lines (visible > 50% named, converting = share >= named / 4) + scatter, by-situation pairs, Minto pyramid.
 // bf6 (2026-11-05): the footer names the brand, wave and month, never the assistant count.
-const BRIEF_VERSION = "bf6";
+// bf7 (2026-11-05): the funnel's pick stage carries the recommended-to-pick conversion, like the library memo.
+const BRIEF_VERSION = "bf7";
 
 /**
  * The brief through the cache. cachedView's keying, with the subject as one
