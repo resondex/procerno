@@ -920,7 +920,9 @@ function funnelFrame(c: Ctx): BriefSection[] {
   const picked = rate(S.chosen);
   const d1 = named - rec;
   const d2 = rec - picked;
-  const L = { named: "In the conversation", rec: "On the shortlist", pick: `The ${c.product} to get`, kept: "Customers told to stay" };
+  // One word for the middle stage everywhere: "Recommended" (the scoreboard's
+  // and the views' term) - a second name reads as a second metric.
+  const L = { named: "In the conversation", rec: "Recommended", pick: `The ${c.product} to get`, kept: "Customers told to stay" };
   // Share of picks is the lead pick number everywhere; the all-answers rate exists only inside
   // this ladder (the stages must share a denominator) and never without the bridge beside it.
   const ofPicks = s.firmPickInCategory.k >= MIN ? `${P(S.shareOfDecided)} of picks` : "";
@@ -967,14 +969,7 @@ function funnelFrame(c: Ctx): BriefSection[] {
   const accent = d1 > d2 ? "rec" : "pick";
   const items: BriefVizItem[] = [
     { label: L.named, a: named * 100, value: P(S.mentioned) },
-    {
-      label: L.rec,
-      a: rec * 100,
-      value: P(S.recommended),
-      ...(accent === "rec" ? { accent: true } : {}),
-      // Drawn in the narrowing under this band - the conversion the image otherwise hides.
-      ...(recToPick ? { note: `only ${pctN(conv(S))} of recommendations end as the pick` } : {}),
-    },
+    { label: L.rec, a: rec * 100, value: P(S.recommended), ...(accent === "rec" ? { accent: true } : {}) },
     { label: L.pick, a: picked * 100, value: ofPicks ? `${pctFine(picked)} (${ofPicks})` : pctFine(picked), ...(accent === "pick" ? { accent: true } : {}) },
   ];
   if (c.isTarget) {
@@ -1621,7 +1616,9 @@ export async function computeBrief(data: ViewData, request: BriefRequest = {}): 
 // bf6 (2026-11-05): the footer names the brand, wave and month, never the assistant count.
 // bf7 (2026-11-05): the funnel's pick stage carries the recommended-to-pick conversion, like the library memo.
 // bf8 (2026-11-05): the conversion is also drawn in the hourglass, in the narrowing under the shortlist band.
-const BRIEF_VERSION = "bf8";
+// bf9 (2026-11-05): the gap note is removed (the conversion stays in the pick reading) and the middle stage
+// is "Recommended" everywhere - "On the shortlist" read as a second metric beside the scoreboard's term.
+const BRIEF_VERSION = "bf9";
 
 /**
  * The brief through the cache. cachedView's keying, with the subject as one
