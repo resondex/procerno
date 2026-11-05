@@ -1446,7 +1446,8 @@ function tensionsOf(
 // am1 (2026-11-03): first version.
 // am2 (2026-11-04): the summary's bs8 detectors reach the tensions (new kind "leak"; key-specific placement for the bs8 keys).
 // am3 (2026-11-04): the tensions read the bs9 quota-served list (one per kind, wider composition).
-const ANALYSIS_MAP_VERSION = "am3";
+// am4 (2026-11-04): reads the bs10 served list (rank-fill effect floor).
+const ANALYSIS_MAP_VERSION = "am4";
 export function computeAnalysisMapCached(run: Run, project: Project, request: ViewRequest = {}): Promise<AnalysisMapView | null> {
   const r = requestOf(request, false);
   return cachedView("analysis_map", ANALYSIS_MAP_VERSION, run, project, (d) => computeAnalysisMap(d, r), { setupDecision: true, judge: true }, r);

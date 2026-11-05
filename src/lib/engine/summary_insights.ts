@@ -96,7 +96,10 @@ import type { BrandSummaryView, VerdictFact } from "./brand_summary";
  * Serving (2026-11-04, Tyler's kind-quota call): the served list is no
  * longer the top MAX_INSIGHTS by effect alone - each kind that fires gets
  * its best insight a slot before any kind gets a second, and the remaining
- * slots fill by global rank. funnel and value are exempt from the
+ * slots fill by global rank above FILL_MIN_EFFECT (so a quiet tracker's
+ * list stops where the findings do instead of padding to the cap; the
+ * quota slots carry no floor - effects are not on one scale across
+ * detectors). funnel and value are exempt from the
  * guarantee (never from serving by rank): the verdict's own sentences
  * carry both by construction. The served list is returned in global
  * effect order, so a quota-admitted insight still ranks where its effect
@@ -127,6 +130,12 @@ const MAX_INSIGHTS = 12;
 /** Kinds the verdict's own sentences carry by construction - no guaranteed
  * slot in the served list (they still serve wherever global rank puts them). */
 const QUOTA_EXEMPT: ReadonlySet<InsightKind> = new Set(["funnel", "value"]);
+/** Rank-fill slots (round 2) need this much effect - the quota slots do not,
+ * because effects are not on one scale across detectors (a 0.16 leak can be
+ * a bigger story than a 0.4 engine spread) and each detector already proved
+ * itself statistically to fire. The floor only stops a quiet tracker's list
+ * from padding to the cap with small-gap findings. */
+const FILL_MIN_EFFECT = 0.3;
 
 /** The sibling-view inputs the detectors read, all under the summary's request. */
 export interface InsightInputs {
@@ -1332,9 +1341,9 @@ export function detectInsights(s: Summary, inp: InsightInputs): Insight[] {
     seen.add(i.kind);
     taken.add(i);
   }
-  // Round 2: the remaining slots by global rank, any kind.
+  // Round 2: the remaining slots by global rank, any kind, above the floor.
   for (const i of all) {
-    if (taken.size >= MAX_INSIGHTS) break;
+    if (taken.size >= MAX_INSIGHTS || i.effect < FILL_MIN_EFFECT) break;
     taken.add(i);
   }
   return all.filter((i) => taken.has(i));
