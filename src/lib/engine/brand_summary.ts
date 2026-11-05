@@ -361,7 +361,8 @@ export async function computeBrandSummary(data: ViewData, request: ViewRequest =
 // bs6 (2026-11-03): the verdict sentences and six cross-pool detectors; loads the setup decision (Value line names).
 // bs7 (2026-11-03): engine and mode slices carry the prompted head-to-head record; detectors over rival leavers, holding your own, the run's decision rules (one shared condition grouping) and engine decisiveness / head-to-head flips / one-engine pick concentration.
 // bs8 (2026-11-04): detectors for a neutralized differentiator (pooled head-to-head arguments), conversion vs the top rival, picks and problem questions leaving the category, the customers' worst worry and leave verdicts naming no destination.
-const BRAND_SUMMARY_VERSION = "bs8";
+// bs9 (2026-11-04): kind quotas on the served list - each firing kind's best insight gets a slot before any kind gets a second (funnel/value exempt: the verdict carries them), remaining slots by rank, cap 12, effect order kept.
+const BRAND_SUMMARY_VERSION = "bs9";
 export function computeBrandSummaryCached(run: Run, project: Project, request: ViewRequest = {}): Promise<BrandSummaryView | null> {
   const r = requestOf(request);
   return cachedView("brand_summary", BRAND_SUMMARY_VERSION, run, project, (d) => computeBrandSummary(d, r), { judge: true, setupDecision: true }, r);

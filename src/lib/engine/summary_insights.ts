@@ -92,6 +92,16 @@ import type { BrandSummaryView, VerdictFact } from "./brand_summary";
  * conversion and the worst worry are the gap; out-of-category picks are
  * their share of firm picks (any leak is a loss, there is no even baseline);
  * the problem leak and the no-exit share are the share above half.
+ *
+ * Serving (2026-11-04, Tyler's kind-quota call): the served list is no
+ * longer the top MAX_INSIGHTS by effect alone - each kind that fires gets
+ * its best insight a slot before any kind gets a second, and the remaining
+ * slots fill by global rank. funnel and value are exempt from the
+ * guarantee (never from serving by rank): the verdict's own sentences
+ * carry both by construction. The served list is returned in global
+ * effect order, so a quota-admitted insight still ranks where its effect
+ * puts it. MAX_INSIGHTS is 12 so the guarantee widens the list instead of
+ * evicting large findings (eleven kinds can fire at once).
  */
 
 export type InsightKind = "engine" | "room" | "rival" | "argument" | "doubt" | "funnel" | "question" | "value" | "switching" | "condition" | "leak";
@@ -113,7 +123,10 @@ export interface Insight {
 /** Both ends of a spread need this many decided (or judged) answers -
  * the same floor brand_summary's argument lift uses. */
 const MIN_BASE = 20;
-const MAX_INSIGHTS = 8;
+const MAX_INSIGHTS = 12;
+/** Kinds the verdict's own sentences carry by construction - no guaranteed
+ * slot in the served list (they still serve wherever global rank puts them). */
+const QUOTA_EXEMPT: ReadonlySet<InsightKind> = new Set(["funnel", "value"]);
 
 /** The sibling-view inputs the detectors read, all under the summary's request. */
 export interface InsightInputs {
@@ -1305,9 +1318,26 @@ export function composeVerdict(s: Summary, inp: InsightInputs): VerdictFact[] {
   return out;
 }
 
-/** Every detector once, ranked by effect, capped. */
+/** The served list: each firing kind's best insight gets a slot before any
+ * kind gets a second (QUOTA_EXEMPT kinds aside), the rest fill by global
+ * rank, and the result keeps global effect order. */
 export function detectInsights(s: Summary, inp: InsightInputs): Insight[] {
-  return rankedInsights(s, inp).slice(0, MAX_INSIGHTS);
+  const all = rankedInsights(s, inp);
+  const taken = new Set<Insight>();
+  const seen = new Set<InsightKind>();
+  // Round 1: `all` is effect-sorted, so the first of a kind is its best.
+  for (const i of all) {
+    if (taken.size >= MAX_INSIGHTS) break;
+    if (QUOTA_EXEMPT.has(i.kind) || seen.has(i.kind)) continue;
+    seen.add(i.kind);
+    taken.add(i);
+  }
+  // Round 2: the remaining slots by global rank, any kind.
+  for (const i of all) {
+    if (taken.size >= MAX_INSIGHTS) break;
+    taken.add(i);
+  }
+  return all.filter((i) => taken.has(i));
 }
 
 /** Every detector that fires, ranked by effect, uncapped (harnesses read the tail). */
