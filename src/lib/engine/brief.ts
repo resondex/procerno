@@ -46,8 +46,8 @@ import type { Project, Run } from "../types";
  * treatment family are the map's own templates; this file adds only the
  * "where", the "today" number and the watch metric, each a fixed template
  * per map row. A rival subject has no moves (positions are the client's),
- * and the client-only pools (worries, value, leavers, advocacy, the Kept and
- * Defended stages) are simply absent from its memos.
+ * and the client-only pools (worries, value, leavers, advocacy, the Kept
+ * stage) are simply absent from its memos.
  *
  * Per-situation shares come from computeHeadline per room (the same pool and
  * resolution as the workbench facts table, without its client-side
@@ -920,7 +920,7 @@ function funnelFrame(c: Ctx): BriefSection[] {
   const picked = rate(S.chosen);
   const d1 = named - rec;
   const d2 = rec - picked;
-  const L = { named: "In the conversation", rec: "On the shortlist", pick: `The ${c.product} to get`, kept: "Customers told to stay", defended: "Defends when asked" };
+  const L = { named: "In the conversation", rec: "On the shortlist", pick: `The ${c.product} to get`, kept: "Customers told to stay" };
   // Share of picks is the lead pick number everywhere; the all-answers rate exists only inside
   // this ladder (the stages must share a denominator) and never without the bridge beside it.
   const ofPicks = s.firmPickInCategory.k >= MIN ? `${P(S.shareOfDecided)} of picks` : "";
@@ -935,7 +935,7 @@ function funnelFrame(c: Ctx): BriefSection[] {
   const rows: BriefRow[] = [
     { label: L.named, value: P(S.mentioned), tip: tipOf(S.mentioned) },
     { label: L.rec, value: P(S.recommended), tip: tipOf(S.recommended) },
-    { label: L.pick, value: ofPicks ? `${pctFine(picked)} - ${ofPicks}` : pctFine(picked), tip: tipOf(S.chosen) },
+    { label: L.pick, value: ofPicks ? `${pctFine(picked)} (${ofPicks})` : pctFine(picked), tip: tipOf(S.chosen) },
   ];
   const paras: BriefPara[] = [
     { lead: `${L.named}.`, text: `When buyers ask what to buy, the AI names ${c.name} in ${P(S.mentioned)} of answers.`, tip: tipOf(S.mentioned) },
@@ -958,25 +958,18 @@ function funnelFrame(c: Ctx): BriefSection[] {
   const items: BriefVizItem[] = [
     { label: L.named, a: named * 100, value: P(S.mentioned) },
     { label: L.rec, a: rec * 100, value: P(S.recommended), ...(accent === "rec" ? { accent: true } : {}) },
-    { label: L.pick, a: picked * 100, value: ofPicks ? `${pctFine(picked)} - ${ofPicks}` : pctFine(picked), ...(accent === "pick" ? { accent: true } : {}) },
+    { label: L.pick, a: picked * 100, value: ofPicks ? `${pctFine(picked)} (${ofPicks})` : pctFine(picked), ...(accent === "pick" ? { accent: true } : {}) },
   ];
   if (c.isTarget) {
     const k = s.customersDoubt;
     if (k && k.answers >= MIN) {
       rows.push({ label: L.kept, value: P(k.keep), tip: tipOf(k.keep) });
       items.push({ label: L.kept, a: rate(k.keep) * 100, value: P(k.keep) });
-      paras.push({ lead: `${L.kept}.`, text: `When your customers raise a worry, the AI tells them to stay in ${P(k.keep)} of answers and to leave in ${P(k.leave)}.`, tip: `Stay ${tipOf(k.keep)}; leave ${tipOf(k.leave)}.` });
-    }
-    const adv = c.inputs.settled.advocacy;
-    const bc = c.inputs.settled.businessCase;
-    if (adv && adv.answers >= MIN) {
-      rows.push({ label: L.defended, value: P(adv.verdicts.strengthens), tip: tipOf(adv.verdicts.strengthens) });
-      items.push({ label: L.defended, a: rate(adv.verdicts.strengthens) * 100, value: P(adv.verdicts.strengthens) });
-      paras.push({ lead: `${L.defended}.`, text: `Asked to make the case for ${c.brand}, the AI strengthens it in ${P(adv.verdicts.strengthens)} of answers.`, tip: tipOf(adv.verdicts.strengthens) });
-    } else if (bc && bc.answers >= MIN) {
-      rows.push({ label: L.defended, value: P(bc.caseStrength.strong), tip: tipOf(bc.caseStrength.strong) });
-      items.push({ label: L.defended, a: rate(bc.caseStrength.strong) * 100, value: P(bc.caseStrength.strong) });
-      paras.push({ lead: `${L.defended}.`, text: `Asked for a business case for ${c.brand}, the AI makes a strong one in ${P(bc.caseStrength.strong)} of answers.`, tip: tipOf(bc.caseStrength.strong) });
+      paras.push({
+        lead: `${L.kept}.`,
+        text: `When your customers raise a worry, the AI tells them to stay in ${P(k.keep)} of answers and to leave in ${P(k.leave)}; the other ${pctN(Math.max(0, 1 - rate(k.keep) - rate(k.leave)))} take no side either way.`,
+        tip: `Stay ${tipOf(k.keep)}; leave ${tipOf(k.leave)}.`,
+      });
     }
   }
   const acc = items.find((i) => i.accent)!;
@@ -1607,7 +1600,7 @@ export async function computeBrief(data: ViewData, request: BriefRequest = {}): 
 // bf1 (2026-11-04): first version - seven frames, subject shift, the two-pick-numbers convention.
 // bf2 (2026-11-04): Tyler's review - now_what follows the exemplar memo (one-paragraph verdict, funnel break, numbered findings, conditions); the other frames drop the shared verdict block and open on their own structure.
 // bf3 (2026-11-04): the library exemplars mirrored - funnel stages renamed + hourglass, matrix on the exemplar's quadrants and lines (visible > 50% named, converting = share >= named / 4) + scatter, by-situation pairs, Minto pyramid.
-const BRIEF_VERSION = "bf4";
+const BRIEF_VERSION = "bf5";
 
 /**
  * The brief through the cache. cachedView's keying, with the subject as one

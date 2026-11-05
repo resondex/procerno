@@ -15,7 +15,7 @@ export type BriefFrame =
   | "now_what" // default: the verdict, then the moves - each an opening, the move, and its watch metric
   | "swot" // 2x2 quadrant: strengths / weaknesses / opportunities / threats
   | "tows" // the action form: S-O / W-O / S-T / W-T strategy pairings
-  | "funnel" // Named -> Recommended -> Picked -> Kept -> Defended
+  | "funnel" // Named -> Recommended -> Picked -> Kept
   | "matrix" // visibility vs conversion: every brand placed by named % vs share of firm picks
   | "jobs" // by buying situation: each room, who wins it, what decides it
   | "minto"; // situation - complication - resolution
