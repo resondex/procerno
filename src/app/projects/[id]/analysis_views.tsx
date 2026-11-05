@@ -62,7 +62,8 @@ const TIER_CSS = `
   --pa-theirs-bg:color-mix(in srgb, var(--pa-theirs) 10%, var(--surface));
   --pa-nocall-bg:color-mix(in srgb, var(--pa-nocall) 10%, var(--surface));
 }
-.pa-memo{ font-family: Georgia, ui-serif, "Times New Roman", serif; }
+.pa-memo{ font-family: var(--font-inter), system-ui, -apple-system, sans-serif; font-size: 15.5px; line-height: 1.65; }
+.pa-memo h2, .pa-memo h3, .pa-memo .pa-display{ font-family: var(--font-instrument-serif), Georgia, serif; font-weight: 400; }
 .pa-sans{ font-family: var(--font-inter), system-ui, -apple-system, sans-serif; }
 @keyframes pa-slide{ from{ transform:translateX(100%) } to{ transform:none } }
 @keyframes pa-fade{ from{ opacity:0 } to{ opacity:1 } }

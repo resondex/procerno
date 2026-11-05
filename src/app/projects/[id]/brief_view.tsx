@@ -62,21 +62,28 @@ const BRIEF_CSS = `
 }
 @media (max-width: 639px){ .pb-paper{ padding: 1.6rem 1.15rem 1.4rem; border-radius: 8px; } }
 .pb-memo{
-  font-family: Georgia, "Iowan Old Style", "Palatino Linotype", ui-serif, "Times New Roman", serif;
-  color: var(--ink); font-size: 16.5px; line-height: 1.7; max-width: 88ch;
-  font-variant-numeric: oldstyle-nums proportional-nums;
+  /* The site's own faces: Inter for text, Instrument Serif for display -
+   * Georgia appeared nowhere else in the product (Tyler's catch). */
+  font-family: var(--font-inter), system-ui, -apple-system, sans-serif;
+  color: var(--ink); font-size: 15.5px; line-height: 1.7; max-width: 88ch;
 }
-@media (max-width: 639px){ .pb-memo{ font-size: 16px; line-height: 1.65; } }
+@media (max-width: 639px){ .pb-memo{ font-size: 15px; line-height: 1.65; } }
 .pb-memo .pb-num, .pb-memo table, .pb-memo .pb-score{ font-variant-numeric: lining-nums tabular-nums; }
-.pb-title{ font-size: 30px; line-height: 1.15; font-weight: 600; letter-spacing: -0.01em; margin: 0; text-wrap: balance; }
-@media (max-width: 639px){ .pb-title{ font-size: 25px; } }
+.pb-title{
+  font-family: var(--font-instrument-serif), Georgia, serif;
+  font-size: 40px; line-height: 1.08; font-weight: 400; letter-spacing: 0; margin: 0; text-wrap: balance;
+}
+@media (max-width: 639px){ .pb-title{ font-size: 31px; } }
 .pb-meta{ margin-top: .55rem; font-size: 12.5px; line-height: 1.5; color: var(--ink-3); }
 .pb-meta span + span::before{ content: "\\00B7"; margin: 0 .5em; }
 .pb-head-rule{ margin: 1.5rem 0 0; border: 0; border-top: 1px solid var(--line); }
 .pb-section{ margin-top: 2em; }
 .pb-section:first-of-type.pb-nohead{ margin-top: 1.6em; }
 .pb-section.pb-nohead{ margin-top: 1.1em; }
-.pb-h{ font-size: 20.5px; line-height: 1.3; font-weight: 600; margin: 0 0 .5em; color: var(--ink); }
+.pb-h{
+  font-family: var(--font-instrument-serif), Georgia, serif;
+  font-size: 26px; line-height: 1.2; font-weight: 400; margin: 0 0 .45em; color: var(--ink);
+}
 .pb-p{ margin: 0; }
 .pb-p + .pb-p{ margin-top: .9em; }
 .pb-p b{ font-weight: 700; }
