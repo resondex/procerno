@@ -17,6 +17,7 @@ import {
 } from "@/lib/engine/analysis_types";
 import { DotTrack, useEngineSet, viewQuery } from "./view_parts";
 import EvidencePanel, { EVIDENCE_CAP, type EvidenceRequest } from "./evidence_panel";
+import RulesSection from "./rules_view";
 
 /**
  * The analysis tier (2026-11-03, ANALYSIS_REDESIGN_2026-11-03.md): three
@@ -573,7 +574,7 @@ function PositionPanel({
           </>
         )}
 
-        {(p.toward.length > 0 || p.away.length > 0) && (
+        {(p.toward.length > 0 || p.away.length > 0 || p.cellId.startsWith("overall:market:")) && (
           <>
             <h3 className={h3}>The conditions</h3>
             <div className="grid gap-4 sm:grid-cols-2">
@@ -611,6 +612,24 @@ function PositionPanel({
                 </div>
               ))}
             </div>
+            {/* The pooled open-choice position is the condition ledger's home
+                (2026-11-05): the full decision-rules explorer, every question
+                type, mounts here - the lists above are its top lines. */}
+            {p.cellId.startsWith("overall:market:") && (
+              <details className="mt-4">
+                <summary className="cursor-pointer text-[13px] font-medium text-primary underline decoration-dotted underline-offset-2">
+                  The full condition ledger - every question type
+                </summary>
+                <div className="mt-3 grid gap-5">
+                  <RulesSection
+                    runId={runId}
+                    onEvidence={(evIds, title) =>
+                      setEvidence({ ids: evIds.slice(0, EVIDENCE_CAP), title, total: evIds.length })
+                    }
+                  />
+                </div>
+              </details>
+            )}
           </>
         )}
 

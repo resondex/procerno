@@ -177,7 +177,7 @@ export { isWallWording };
 
 /* ------------------------------ cell plumbing ----------------------------- */
 
-type BandSlug = "chooses" | "fights" | "doubts" | "settled";
+type BandSlug = "overall" | "chooses" | "fights" | "doubts" | "settled";
 
 interface Taker {
   name: string;
@@ -426,7 +426,11 @@ export async function computeAnalysisMap(
         ? { name: top[1].name, kind: takerKindOf(top[0]) }
         : { name: "No single pick", kind: TAKER.undecided };
     const where =
-      row === "open" ? `For ${label}` : row === "social" ? "Asked what most buyers pick" : row === "premium" ? "Asked whether premium beats basic" : rowLabel;
+      row === "open" ? `For ${label}`
+      : row === "market" ? "Across every buying question"
+      : row === "social" ? "Asked what most buyers pick"
+      : row === "premium" ? "Asked whether premium beats basic"
+      : rowLabel;
     return {
       band, row, rowLabel, key, label, wide, rows,
       you, them: outsideTakes ? outside : them, taker,
@@ -451,8 +455,14 @@ export async function computeAnalysisMap(
     };
   };
 
-  /* Band 1: where the buyer chooses */
+  /* Band 0: Overall - every answer pooled before the splits (2026-11-05).
+   * True roll-ups only: the open-choice cell is the headline pool whole (the
+   * Verdict's own base), the switching cell is every rival leaver pooled.
+   * Assistants stay the Panel lens and conditions stay inside positions -
+   * neither is a contest, so neither gets a band row. The pooled open-choice
+   * position is also where the UI mounts the full decision-rules ledger. */
   const headline = pool("headline");
+  if (headline.length) specs.push(choiceSpec("overall", "market", "Open choice", "all", "", headline, true));
   const byRoom = (rows: PoolRow[]) => {
     const m = new Map<string, PoolRow[]>();
     for (const r of rows) {
@@ -676,7 +686,7 @@ export async function computeAnalysisMap(
 
   // Rival leavers.
   const offensive = pool("offensive_capture");
-  const leaverSpec = (key: string, label: string, rows: PoolRow[], wide: boolean, leftKey: string | null): CellSpec => {
+  const leaverSpec = (key: string, label: string, rows: PoolRow[], wide: boolean, leftKey: string | null, band: BandSlug = "fights", row = "leavers"): CellSpec => {
     const firm = rows.filter((r) => pickOf(r).status !== "none");
     const inCat = firm.filter((r) => pickOf(r).status === "active");
     const you = inCat.filter((r) => pickOf(r).key === targetKey);
@@ -696,7 +706,7 @@ export async function computeAnalysisMap(
     const outside = firm.length - inCat.length;
     const whose = wide ? "Buyers leaving a rival" : `Buyers leaving ${label}`;
     return {
-      band: "fights", row: "leavers", rowLabel: "Rival leavers", key, label: wide ? "" : label, wide, rows,
+      band, row, rowLabel: "Rival leavers", key, label: wide ? "" : label, wide, rows,
       you, them: top ? top[1].rows : [],
       sideD: inCat.length,
       taker: top
@@ -729,8 +739,11 @@ export async function computeAnalysisMap(
   }
   const rivalAngles = [...leaverGroups.keys()].filter((k) => k !== "generic").length;
   if (offensive.length) {
+    // The pooled leaver cell lives in the Overall band (2026-11-05, where the
+    // single-angle wide cell used to sit in this band); the fights band keeps
+    // per-rival cells only, and only when there are rivals to split by.
+    specs.push(leaverSpec("all", "", offensive, true, rivalAngles === 1 ? [...leaverGroups.values()].find((g) => g.leftKey)?.leftKey ?? null : null, "overall", "switching"));
     if (rivalAngles >= 2) for (const g of [...leaverGroups.values()].sort((a, b) => a.seq - b.seq)) specs.push(leaverSpec(g.key, g.name, g.rows, false, g.leftKey));
-    else specs.push(leaverSpec("all", "", offensive, true, [...leaverGroups.values()][0]?.leftKey ?? null));
   }
 
   /* Band 3: the doubts */
@@ -985,19 +998,21 @@ export async function computeAnalysisMap(
   };
 
   const ROW_ORDER: Record<BandSlug, string[]> = {
+    overall: ["market", "switching"],
     chooses: ["open", "social", "awareness", "explainer", "value", "premium", "criteria"],
     fights: ["h2h", "leavers"],
     doubts: ["buyers", "customers", "hold", "repertoire"],
     settled: ["settled"],
   };
   const BAND_META: Record<BandSlug, { title: string; sub: string }> = {
+    overall: { title: "Overall", sub: "Every answer pooled, before the splits below. Open a cell for the pooled arguments and conditions - the open-choice one carries the full condition ledger." },
     chooses: { title: "Where the buyer chooses", sub: "These contests vary by buying situation - the situations you confirmed at setup." },
     fights: { title: "The named fights", sub: "These contests vary by rival - the buyer is held fixed, so this is relative strength." },
     doubts: { title: "The doubts", sub: "One cell per worry you confirmed at the worries gate." },
     settled: { title: "The settled customer", sub: "Asked-for questions from committed customers - a ceiling, not a standing." },
   };
 
-  for (const band of ["chooses", "fights", "doubts", "settled"] as BandSlug[]) {
+  for (const band of ["overall", "chooses", "fights", "doubts", "settled"] as BandSlug[]) {
     const rowsOut: MapRow[] = [];
     for (const rowSlug of ROW_ORDER[band]) {
       const inRow = specs.filter((s) => s.band === band && s.row === rowSlug && s.rows.length > 0);
@@ -1347,7 +1362,8 @@ function tensionsOf(
     body: `${brand} is named in ${pctOf(f.named)} of answers when buyers ask what to buy. ${commitSentence(s.category, brand, s.firmPickInCategory, s.target.shareOfDecided, s.target.chosen)}${
       f.topName && !f.youTop ? ` ${f.topName} is the pick ${pctOf(f.shareTop)} of the time.` : ""
     }`,
-    cellId: openCells.length ? idOf(openCells[0]) : fallbackOpen,
+    // The pooled funnel paragraph anchors on the pooled cell itself.
+    cellId: firstOf("overall:market:") ?? (openCells.length ? idOf(openCells[0]) : fallbackOpen),
   });
 
   // bs8 placement bookkeeping for the harness probe ("match" / "generic").
@@ -1429,10 +1445,10 @@ function tensionsOf(
       case "switching": {
         // own_defense reads the holding-your-own cell; leaver_capture the
         // named rival's leaver cell, else the pooled one.
-        if (key === "own_defense") return firstOf("doubts:hold:") ?? (strict ? null : firstOf("fights:leavers:") ?? fallbackOpen);
+        if (key === "own_defense") return firstOf("doubts:hold:") ?? (strict ? null : firstOf("fights:leavers:") ?? firstOf("overall:switching:") ?? fallbackOpen);
         const leavers = specs.filter((x) => x.row === "leavers");
         const hit = longestMatch(text, leavers, (x) => x.label);
-        return hit ? idOf(hit) : strict ? null : firstOf("fights:leavers:") ?? fallbackOpen;
+        return hit ? idOf(hit) : strict ? null : firstOf("fights:leavers:") ?? firstOf("overall:switching:") ?? fallbackOpen;
       }
       case "condition": {
         // The away condition names where it routes; the rival's head-to-head
@@ -1487,7 +1503,8 @@ function tensionsOf(
 // am3 (2026-11-04): the tensions read the bs9 quota-served list (one per kind, wider composition).
 // am4 (2026-11-04): reads the bs10 served list (rank-fill effect floor).
 // am5 (2026-11-04): the brief's language pass - reads bs11, and the casting, tensions, cell notes and position claims say share of picks / direct matchups / buying situations instead of method terms; the first tension carries the commit-rate convention.
-const ANALYSIS_MAP_VERSION = "am5";
+// am6 (2026-11-05): the Overall band - the pooled open-choice cell (the Verdict's base; its position mounts the full decision-rules ledger in the UI) and the pooled rival-leavers cell, which moves here from the fights band's single-angle wide form; the first tension anchors on the pooled cell.
+const ANALYSIS_MAP_VERSION = "am6";
 export function computeAnalysisMapCached(run: Run, project: Project, request: ViewRequest = {}): Promise<AnalysisMapView | null> {
   const r = requestOf(request, false);
   return cachedView("analysis_map", ANALYSIS_MAP_VERSION, run, project, (d) => computeAnalysisMap(d, r), { setupDecision: true, judge: true }, r);
