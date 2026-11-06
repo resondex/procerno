@@ -38,7 +38,15 @@ import type { DictionaryEntry, Intent, Project, Run } from "../types";
  * cached verdicts are read like every other view; condition grouping is the
  * run-wide embeddings grouping with the deterministic stem fallback).
  *
- * BANDS (a row exists only when its cells do; a cell only when it has answers):
+ * BANDS (a row exists only when its cells do; a cell only when it has answers).
+ * Every row that would hold two or more cells opens with a pooled "All" cell
+ * (key "all", MapCell.all) - the row at zero variance, rendered first with a
+ * divider (2026-11-05). The open-choice All cell is the headline pool whole
+ * (the Verdict's base - slightly more than its room cells' sum, since the
+ * pool includes questions asked of no particular buyer) and its position is
+ * where the UI mounts the full decision-rules ledger. Pooled cells never
+ * feed the brief's moves or SWOT strengths (the verdict paragraph carries
+ * the market totals); a sole wide cell is not pooled and stays movable.
  *   "Where the buyer chooses"  - per ROOM (intent situations in setup order):
  *       Open choice (discovery + use-case, per room); Social validation
  *       (base-voiced, one wide cell); Awareness (problem recognition per room;
@@ -177,7 +185,7 @@ export { isWallWording };
 
 /* ------------------------------ cell plumbing ----------------------------- */
 
-type BandSlug = "overall" | "chooses" | "fights" | "doubts" | "settled";
+type BandSlug = "chooses" | "fights" | "doubts" | "settled";
 
 interface Taker {
   name: string;
@@ -200,6 +208,9 @@ interface CellSpec {
   key: string;
   label: string;
   wide?: boolean;
+  /** The row's roll-up cell (key "all") among split siblings: rendered with a
+   * divider, excluded from the brief's moves and strengths. */
+  pooled?: boolean;
   rows: PoolRow[];
   /** Brand side / taker side of the side-taking denominator. */
   you: PoolRow[];
@@ -327,6 +338,8 @@ export interface MapCellStat {
   /** The first possession-shaped away condition, when the cell carries the wall badge. */
   wall: string | null;
   badges: CellBadge[];
+  /** The row's pooled All cell: excluded from the brief's moves and strengths. */
+  pooled: boolean;
 }
 
 export async function computeAnalysisMap(
@@ -426,11 +439,13 @@ export async function computeAnalysisMap(
         ? { name: top[1].name, kind: takerKindOf(top[0]) }
         : { name: "No single pick", kind: TAKER.undecided };
     const where =
-      row === "open" ? `For ${label}`
-      : row === "market" ? "Across every buying question"
-      : row === "social" ? "Asked what most buyers pick"
-      : row === "premium" ? "Asked whether premium beats basic"
-      : rowLabel;
+      row === "open"
+        ? key === "all"
+          ? "Across every open buying question (including the ones asked of no particular buyer)"
+          : `For ${label}`
+        : row === "social" ? "Asked what most buyers pick"
+        : row === "premium" ? "Asked whether premium beats basic"
+        : rowLabel;
     return {
       band, row, rowLabel, key, label, wide, rows,
       you, them: outsideTakes ? outside : them, taker,
@@ -455,14 +470,18 @@ export async function computeAnalysisMap(
     };
   };
 
-  /* Band 0: Overall - every answer pooled before the splits (2026-11-05).
-   * True roll-ups only: the open-choice cell is the headline pool whole (the
-   * Verdict's own base), the switching cell is every rival leaver pooled.
-   * Assistants stay the Panel lens and conditions stay inside positions -
-   * neither is a contest, so neither gets a band row. The pooled open-choice
-   * position is also where the UI mounts the full decision-rules ledger. */
+  /** Mark a spec as its row's roll-up and push it (always first in its row). */
+  const pushAll = (s: CellSpec) => {
+    s.pooled = true;
+    specs.push(s);
+  };
+
+  /* Band 1: where the buyer chooses. The open-choice All cell is the headline
+   * pool whole (the Verdict's own base; its position mounts the full
+   * decision-rules ledger in the UI), not just the room cells' union -
+   * assistants stay the Panel lens and conditions stay inside positions. */
   const headline = pool("headline");
-  if (headline.length) specs.push(choiceSpec("overall", "market", "Open choice", "all", "", headline, true));
+  if (headline.length) pushAll(choiceSpec("chooses", "open", "Open choice", "all", "All buyers", headline));
   const byRoom = (rows: PoolRow[]) => {
     const m = new Map<string, PoolRow[]>();
     for (const r of rows) {
@@ -495,7 +514,16 @@ export async function computeAnalysisMap(
     const recTop = cell(top ? top[1].rows.length : 0, rows.length);
     const routed = rows.filter((r) => r.code.category_routed === "category" || r.code.category_routed === "adjacent");
     const adjacent = cell(rows.filter((r) => r.code.category_routed === "adjacent").length, routed.length);
-    const where = row === "awareness" && !wide ? `In ${label}'s problem questions` : wide ? `On ${rowLabel.toLowerCase()} questions` : rowLabel;
+    const where =
+      row === "awareness" && key === "all" && !wide
+        ? "Across every problem question"
+        : row === "awareness" && key === "general" && !wide
+          ? "In the problem questions asked of no particular buyer"
+          : row === "awareness" && !wide
+            ? `In ${label}'s problem questions`
+            : wide
+              ? `On ${rowLabel.toLowerCase()} questions`
+              : rowLabel;
     return {
       band: "chooses", row, rowLabel, key, label, wide, rows,
       you, them: top ? top[1].rows : [],
@@ -515,9 +543,18 @@ export async function computeAnalysisMap(
     };
   };
   const routing = pool("awareness_routing");
-  for (const [room, rows] of byRoom(routing)) specs.push(awarenessSpec("awareness", "Awareness", norm(room), room, rows, false));
+  const routingRooms = byRoom(routing);
   const routingBase = routing.filter((r) => !r.intent.situation);
-  if (routingBase.length) specs.push(awarenessSpec("awareness", "Awareness", "all", "", routingBase, true));
+  const routingCells = routingRooms.length + (routingBase.length ? 1 : 0);
+  if (routingCells >= 2) pushAll(awarenessSpec("awareness", "Awareness", "all", "All buyers", routing, false));
+  for (const [room, rows] of routingRooms) specs.push(awarenessSpec("awareness", "Awareness", norm(room), room, rows, false));
+  // A base-voiced cell among siblings keys "general" (the All cell owns "all"); alone, it keeps the sole-wide form.
+  if (routingBase.length)
+    specs.push(
+      routingCells >= 2
+        ? awarenessSpec("awareness", "Awareness", "general", "No particular buyer", routingBase, false)
+        : awarenessSpec("awareness", "Awareness", "all", "", routingBase, true)
+    );
   const explainer = pool("awareness_explainer");
   if (explainer.length) specs.push(awarenessSpec("explainer", "Learning the category", "all", "", explainer, true));
 
@@ -527,6 +564,46 @@ export async function computeAnalysisMap(
   const valueRows = pool("value");
   const valueGroups = new Map<string, PoolRow[]>();
   for (const r of valueRows) valueGroups.set(r.intent.situation ?? "", [...(valueGroups.get(r.intent.situation ?? "") ?? []), r]);
+  if (valueGroups.size >= 2) {
+    const yes = valueRows.filter((r) => r.code.worth_it === "yes");
+    const no = valueRows.filter((r) => r.code.worth_it === "no");
+    const worthC = cell(yes.length, valueRows.length);
+    const notC = cell(no.length, valueRows.length);
+    const vRooms = valueView?.rooms ?? [];
+    const own = vRooms.reduce((a, v) => a + v.ownRung.k, 0);
+    const riv = vRooms.reduce((a, v) => a + v.recommendsInstead.k, 0);
+    const doubting = vRooms.reduce((a, v) => a + v.ownRung.n, 0);
+    const inhouseShare = doubting >= MIN_SIDE && own + riv > 0 ? own / (own + riv) : 0;
+    const byName = new Map<string, { name: string; n: number; own: boolean }>();
+    for (const v of vRooms)
+      for (const i of v.instead) {
+        const t = byName.get(`${i.own}|${i.name}`) ?? { name: i.name, n: 0, own: i.own };
+        t.n += i.n;
+        byName.set(`${i.own}|${i.name}`, t);
+      }
+    const tops = [...byName.values()].sort((a, b) => b.n - a.n || a.name.localeCompare(b.name));
+    const ownTop = tops.find((i) => i.own);
+    const rivTop = tops.find((i) => !i.own);
+    const taker: Taker =
+      inhouseShare >= INHOUSE_SHARE && ownTop
+        ? { name: ownTop.name, kind: TAKER.own }
+        : rivTop
+          ? { name: rivTop.name, kind: TAKER.rival }
+          : { name: "A cheaper option, unnamed", kind: TAKER.undecided };
+    pushAll({
+      band: "chooses", row: "value", rowLabel: "Value", key: "all", label: "All buyers", rows: valueRows,
+      you: yes, them: no, taker, inhouseShare,
+      note: (v) => (v === "nocall" ? `${pct(cell(valueRows.length - yes.length - no.length, valueRows.length))} "depends"` : `${pct(worthC)} worth it / ${pct(notC)} not`),
+      claim: (v) => {
+        const lead = `Across every buying situation, ${brand} is judged worth it over a cheaper option in ${pct(worthC)} of answers and not worth it in ${pct(notC)}`;
+        if (v === "nocall") return `${lead} - the rest say it depends, so the AI takes no side here.`;
+        if (doubting >= MIN_SIDE && own + riv > 0)
+          return `${lead}; of the doubts, ${pctOf(share(own, doubting))} point to ${brand}'s own cheaper option and ${pctOf(share(riv, doubting))} to a rival${taker.kind !== TAKER.undecided ? `, led by ${taker.name}` : ""}.`;
+        return `${lead}.`;
+      },
+      lift: { wins: yes, others: no, note: "Share of worth-it answers vs not-worth-it answers arguing each code." },
+    });
+  }
   for (const [room, rows] of [...valueGroups.entries()].sort((a, b) => roomIndex(a[0]) - roomIndex(b[0]))) {
     const vr = valueRowOf.get(room);
     const line = vr?.line ?? null;
@@ -549,7 +626,7 @@ export async function computeAnalysisMap(
           : { name: "A cheaper option, unnamed", kind: TAKER.undecided };
     const subject = line ?? brand;
     specs.push({
-      band: "chooses", row: "value", rowLabel: "Value", key: norm(room) || "all", label, wide: !room, rows,
+      band: "chooses", row: "value", rowLabel: "Value", key: norm(room) || (valueGroups.size >= 2 ? "general" : "all"), label, wide: !room && valueGroups.size < 2, rows,
       you: yes, them: no, taker, inhouseShare,
       note: (v) => (v === "nocall" ? `${pct(cell(rows.length - yes.length - no.length, rows.length))} "depends"` : `${pct(worthC)} worth it / ${pct(notC)} not`),
       claim: (v) => {
@@ -613,7 +690,14 @@ export async function computeAnalysisMap(
           ? withReasons.length < MIN_SIDE ? "too few answers" : "no winning argument measured"
           : v === "theirs" && untaught ? `teaches ${top5[0] ?? "-"}; ${untaught.code} untaught` : `teaches ${top5.slice(0, 2).join(", ")}`,
       claim: (v) => {
-        const where = wide ? "The criteria the AI teaches" : `For ${label}, the criteria the AI teaches`;
+        const where =
+          key === "all" && !wide
+            ? "Across every buying situation, the criteria the AI teaches"
+            : key === "general" && !wide
+              ? "Asked with no particular buyer in mind, the criteria the AI teaches"
+              : wide
+                ? "The criteria the AI teaches"
+                : `For ${label}, the criteria the AI teaches`;
         if (v === "nocall") return `${where} lead with ${taughtText || "no single argument"} - too little to set against your winning arguments.`;
         if (v === "theirs")
           return `${where} lead with ${taughtText}${untaught ? ` - while ${untaught.code}, an argument that travels with your wins, goes untaught` : ", none of them an argument that travels with your wins"}.`;
@@ -623,9 +707,13 @@ export async function computeAnalysisMap(
     };
   };
   const criteria = pool("criteria_taught");
-  for (const [room, rows] of byRoom(criteria)) specs.push(criteriaSpec(norm(room), room, rows, false));
+  const criteriaRooms = byRoom(criteria);
   const criteriaBase = criteria.filter((r) => !r.intent.situation);
-  if (criteriaBase.length) specs.push(criteriaSpec("all", "", criteriaBase, true));
+  const criteriaCells = criteriaRooms.length + (criteriaBase.length ? 1 : 0);
+  if (criteriaCells >= 2) pushAll(criteriaSpec("all", "All buyers", criteria, false));
+  for (const [room, rows] of criteriaRooms) specs.push(criteriaSpec(norm(room), room, rows, false));
+  if (criteriaBase.length)
+    specs.push(criteriaCells >= 2 ? criteriaSpec("general", "No particular buyer", criteriaBase, false) : criteriaSpec("all", "", criteriaBase, true));
 
   /* Band 2: the named fights */
   const forms: { seq: string[]; entry: DictionaryEntry }[] = [];
@@ -662,6 +750,41 @@ export async function computeAnalysisMap(
       lift: { wins: won, others: lost, note: `Within this matchup: share of answers arguing each code when you win vs when ${rival.name} does.` },
     };
   };
+  /** Every prompted matchup pooled: you win vs the named rival wins, whichever rival each question named. */
+  const h2hAllSpec = (groups: { rival: { key: string; name: string }; rows: PoolRow[] }[]): CellSpec => {
+    const rows = groups.flatMap((g) => g.rows);
+    const won: PoolRow[] = [];
+    const lost: PoolRow[] = [];
+    const lostBy = new Map<string, { name: string; k: number }>();
+    for (const g of groups)
+      for (const r of g.rows) {
+        const p = pickOf(r);
+        if (p.key === targetKey) won.push(r);
+        else if (p.key === g.rival.key) {
+          lost.push(r);
+          const t = lostBy.get(g.rival.key) ?? { name: g.rival.name, k: 0 };
+          t.k++;
+          lostBy.set(g.rival.key, t);
+        }
+      }
+    const tough = [...lostBy.values()].sort((a, b) => b.k - a.k || a.name.localeCompare(b.name))[0];
+    const firm = rows.filter((r) => pickOf(r).status !== "none");
+    const outside = firm.filter((r) => pickOf(r).status !== "active");
+    const rec = cell(won.length, won.length + lost.length);
+    const undecided = cell(rows.length - firm.length, rows.length);
+    return {
+      band: "fights", row: "h2h", rowLabel: "Head-to-head", key: "all", label: "All rivals", rows,
+      you: won, them: lost,
+      taker: tough ? { name: tough.name, kind: TAKER.rival } : { name: "No single pick", kind: TAKER.undecided },
+      leakShare: firm.length >= MIN_SIDE ? share(outside.length, firm.length) : 0,
+      note: (v) => (v === "nocall" ? `${pct(undecided)} no clear pick` : `${pct(rec)} of picks across ${groups.length} rivals`),
+      claim: (v) =>
+        v === "nocall"
+          ? `Asked to compare ${brand} with a named rival directly, the AI declines to pick between them in ${pct(undecided)} of answers.`
+          : `Asked to compare ${brand} with a named rival directly, the AI picks ${brand} in ${pct(rec)} of the answers that pick one of them${tough ? `; ${tough.name} wins the most of them against you` : ""}.`,
+      lift: { wins: won, others: lost, note: "Pooled across every matchup: share of answers arguing each code when you win vs when the named rival does." },
+    };
+  };
   const entity = pool("head_to_head_entity");
   const entityGroups = new Map<string, { rival: { key: string; name: string }; key: string; seq: number; rows: PoolRow[] }>();
   for (const r of entity) {
@@ -671,7 +794,6 @@ export async function computeAnalysisMap(
     g.rows.push(r);
     entityGroups.set(rk, g);
   }
-  for (const g of [...entityGroups.values()].sort((a, b) => a.seq - b.seq)) specs.push(h2hSpec(g.key, g.rival, g.rows));
   const classRows = pool("head_to_head_class");
   const classGroups = new Map<string, { rival: { key: string; name: string }; key: string; seq: number; rows: PoolRow[] }>();
   for (const r of classRows) {
@@ -682,11 +804,15 @@ export async function computeAnalysisMap(
     g.rows.push(r);
     classGroups.set(rk, g);
   }
-  for (const g of [...classGroups.values()].sort((a, b) => a.seq - b.seq)) specs.push(h2hSpec(g.key, g.rival, g.rows));
+  const entityList = [...entityGroups.values()].sort((a, b) => a.seq - b.seq);
+  const classList = [...classGroups.values()].sort((a, b) => a.seq - b.seq);
+  if (entityList.length + classList.length >= 2) pushAll(h2hAllSpec([...entityList, ...classList]));
+  for (const g of entityList) specs.push(h2hSpec(g.key, g.rival, g.rows));
+  for (const g of classList) specs.push(h2hSpec(g.key, g.rival, g.rows));
 
   // Rival leavers.
   const offensive = pool("offensive_capture");
-  const leaverSpec = (key: string, label: string, rows: PoolRow[], wide: boolean, leftKey: string | null, band: BandSlug = "fights", row = "leavers"): CellSpec => {
+  const leaverSpec = (key: string, label: string, rows: PoolRow[], wide: boolean, leftKey: string | null): CellSpec => {
     const firm = rows.filter((r) => pickOf(r).status !== "none");
     const inCat = firm.filter((r) => pickOf(r).status === "active");
     const you = inCat.filter((r) => pickOf(r).key === targetKey);
@@ -704,9 +830,9 @@ export async function computeAnalysisMap(
     const topC = cell(top ? top[1].rows.length : 0, inCat.length);
     const picked = cell(you.length, rows.length);
     const outside = firm.length - inCat.length;
-    const whose = wide ? "Buyers leaving a rival" : `Buyers leaving ${label}`;
+    const whose = key === "all" ? "Buyers leaving a rival" : `Buyers leaving ${label}`;
     return {
-      band, row, rowLabel: "Rival leavers", key, label: wide ? "" : label, wide, rows,
+      band: "fights", row: "leavers", rowLabel: "Rival leavers", key, label, wide, rows,
       you, them: top ? top[1].rows : [],
       sideD: inCat.length,
       taker: top
@@ -739,11 +865,11 @@ export async function computeAnalysisMap(
   }
   const rivalAngles = [...leaverGroups.keys()].filter((k) => k !== "generic").length;
   if (offensive.length) {
-    // The pooled leaver cell lives in the Overall band (2026-11-05, where the
-    // single-angle wide cell used to sit in this band); the fights band keeps
-    // per-rival cells only, and only when there are rivals to split by.
-    specs.push(leaverSpec("all", "", offensive, true, rivalAngles === 1 ? [...leaverGroups.values()].find((g) => g.leftKey)?.leftKey ?? null : null, "overall", "switching"));
-    if (rivalAngles >= 2) for (const g of [...leaverGroups.values()].sort((a, b) => a.seq - b.seq)) specs.push(leaverSpec(g.key, g.name, g.rows, false, g.leftKey));
+    const soleLeft = rivalAngles === 1 ? [...leaverGroups.values()].find((g) => g.leftKey)?.leftKey ?? null : null;
+    if (rivalAngles >= 2) {
+      pushAll(leaverSpec("all", "All rivals", offensive, false, null));
+      for (const g of [...leaverGroups.values()].sort((a, b) => a.seq - b.seq)) specs.push(leaverSpec(g.key, g.name, g.rows, false, g.leftKey));
+    } else specs.push(leaverSpec("all", "", offensive, true, soleLeft));
   }
 
   /* Band 3: the doubts */
@@ -768,8 +894,7 @@ export async function computeAnalysisMap(
     }
     return [...m.values()].sort((a, b) => a.seq - b.seq);
   };
-  for (const g of worryGroups(objections)) {
-    const rows = g.rows;
+  const buyersSpec = (key: string, label: string, rows: PoolRow[], who: string): CellSpec => {
     const proceed = rows.filter((r) => r.code.proceed_or_avoid === "proceed");
     const conceded = rows.filter((r) => r.code.proceed_or_avoid === "avoid" || (r.code.premise_verdict === "confirms" && r.code.proceed_or_avoid !== "proceed"));
     const judged = rows.filter((r) => r.code.premise_verdict === "confirms" || r.code.premise_verdict === "mixed" || r.code.premise_verdict === "rebuts");
@@ -777,20 +902,25 @@ export async function computeAnalysisMap(
     const agree = cell(agreed.length, judged.length);
     const go = cell(proceed.length, rows.length);
     const goOfAgreed = cell(agreed.filter((r) => r.code.proceed_or_avoid === "proceed").length, agreed.length);
-    const label = g.concern || "A worry";
-    specs.push({
-      band: "doubts", row: "buyers", rowLabel: "Buyers' worries", key: norm(label), label, rows,
+    return {
+      band: "doubts", row: "buyers", rowLabel: "Buyers' worries", key, label, rows,
       you: proceed, them: conceded,
       taker: exitTaker(conceded, { name: "The worry, conceded", kind: TAKER.undecided }),
       conceded: { agree, goAheadOfAgreed: goOfAgreed },
       exitFallback: topExits(rows).slice(0, COND_TOP),
       note: () => `agreed ${pct(agree)} · go ahead ${pct(go)}`,
       claim: (v) =>
-        `When a buyer worries "${label}", the AI agrees the worry is warranted in ${pct(agree)} of the answers that judge it and tells them to go ahead in ${pct(go)}${
+        `${who}, the AI agrees the worry is warranted in ${pct(agree)} of the answers that judge it and tells them to go ahead in ${pct(go)}${
           v === "nocall" ? " - most answers take no side" : agreed.length >= MIN_SIDE && rate(goOfAgreed) >= 0.3 ? `, including ${pct(goOfAgreed)} of the answers that agree` : ""
         }.`,
       lift: { wins: proceed, others: conceded, note: "Share of go-ahead answers vs conceding answers arguing each code." },
-    });
+    };
+  };
+  const buyerGroups = worryGroups(objections);
+  if (buyerGroups.length >= 2) pushAll(buyersSpec("all", "All worries", objections, "Across every buyer worry"));
+  for (const g of buyerGroups) {
+    const label = g.concern || "A worry";
+    specs.push(buyersSpec(norm(label), label, g.rows, `When a buyer worries "${label}"`));
   }
   const stayRows = pool("keep_or_leave");
   const custGroups = worryGroups(stayRows);
@@ -812,6 +942,7 @@ export async function computeAnalysisMap(
       lift: { wins: keep, others: leave, note: "Share of stay answers vs leave answers arguing each code." },
     };
   };
+  if (custGroups.length >= 2) pushAll(staySpec("customers", "Customers' worries", "all", "All worries", stayRows, false, "Across every customer worry"));
   for (const g of custGroups) {
     const label = g.concern || "A worry";
     const key = (concernCount.get(norm(g.concern)) ?? 0) > 1 ? `${norm(label)}|${g.stage}` : norm(label);
@@ -850,9 +981,30 @@ export async function computeAnalysisMap(
     ["settled_ecosystem", "ecosystem", "Ecosystem"],
     ["settled_advocacy", "advocacy", "Advocacy"],
   ];
-  for (const [view, key, label] of settledStages) {
-    const rows = pool(view);
-    if (!rows.length) continue;
+  const settledPresent = settledStages.map(([view, key, label]) => ({ view, key, label, rows: pool(view) })).filter((s) => s.rows.length > 0);
+  if (settledPresent.length >= 2) {
+    const rows = settledPresent.flatMap((s) => s.rows);
+    const str = rows.filter((r) => r.code.relationship_verdict === "strengthens");
+    const weak = rows.filter((r) => r.code.relationship_verdict === "weakens");
+    const strC = cell(str.length, rows.length);
+    const redirects = new Map<string, number>();
+    for (const r of rows) for (const x of exitsOf(r.code.redirect_to).exits.values()) redirects.set(x.name, (redirects.get(x.name) ?? 0) + 1);
+    const topRed = [...redirects.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))[0];
+    const names = settledPresent.map((s) => s.key);
+    const list = names.length > 1 ? `${names.slice(0, -1).join(", ")} and ${names[names.length - 1]}` : names[0];
+    pushAll({
+      band: "settled", row: "settled", rowLabel: "Settled customers", key: "all", label: "All questions", rows,
+      you: str, them: weak,
+      taker: topRed && topRed[1] >= Math.max(3, rows.length * 0.1) ? { name: topRed[0], kind: TAKER.rival } : { name: "No side taken", kind: TAKER.undecided },
+      note: () => `strengthens ${pct(strC)}`,
+      claim: (v) => {
+        const lead = `Asked by your customers across ${list}, the AI strengthens the relationship in ${pct(strC)} of answers`;
+        return v === "nocall" ? `${lead} - most answers stay neutral.` : `${lead}${weak.length ? ` and weakens it in ${pct(cell(weak.length, rows.length))}` : ""}.`;
+      },
+      lift: { wins: str, others: rows.filter((r) => r.code.relationship_verdict !== "strengthens"), note: "Share of strengthening answers vs the rest arguing each code." },
+    });
+  }
+  for (const { view, key, label, rows } of settledPresent) {
     const str = rows.filter((r) => r.code.relationship_verdict === "strengthens");
     const weak = rows.filter((r) => r.code.relationship_verdict === "weakens");
     const strC = cell(str.length, rows.length);
@@ -998,21 +1150,22 @@ export async function computeAnalysisMap(
   };
 
   const ROW_ORDER: Record<BandSlug, string[]> = {
-    overall: ["market", "switching"],
     chooses: ["open", "social", "awareness", "explainer", "value", "premium", "criteria"],
     fights: ["h2h", "leavers"],
     doubts: ["buyers", "customers", "hold", "repertoire"],
     settled: ["settled"],
   };
   const BAND_META: Record<BandSlug, { title: string; sub: string }> = {
-    overall: { title: "Overall", sub: "Every answer pooled, before the splits below. Open a cell for the pooled arguments and conditions - the open-choice one carries the full condition ledger." },
-    chooses: { title: "Where the buyer chooses", sub: "These contests vary by buying situation - the situations you confirmed at setup." },
+    chooses: {
+      title: "Where the buyer chooses",
+      sub: "These contests vary by buying situation - the situations you confirmed at setup. Each row opens with its All cell, everything pooled; the open-choice one carries the full condition ledger.",
+    },
     fights: { title: "The named fights", sub: "These contests vary by rival - the buyer is held fixed, so this is relative strength." },
     doubts: { title: "The doubts", sub: "One cell per worry you confirmed at the worries gate." },
     settled: { title: "The settled customer", sub: "Asked-for questions from committed customers - a ceiling, not a standing." },
   };
 
-  for (const band of ["overall", "chooses", "fights", "doubts", "settled"] as BandSlug[]) {
+  for (const band of ["chooses", "fights", "doubts", "settled"] as BandSlug[]) {
     const rowsOut: MapRow[] = [];
     for (const rowSlug of ROW_ORDER[band]) {
       const inRow = specs.filter((s) => s.band === band && s.row === rowSlug && s.rows.length > 0);
@@ -1051,6 +1204,7 @@ export async function computeAnalysisMap(
           note: s.note(verdict),
           badges,
           ...(s.wide ? { wide: true } : {}),
+          ...(s.pooled ? { all: true } : {}),
           n: s.rows.length,
         };
         cells.push(mapCell);
@@ -1062,6 +1216,7 @@ export async function computeAnalysisMap(
             taker: s.taker.name, takerKind: s.taker.kind,
             wall: wallGroups[0]?.label ?? null,
             badges: [...badges],
+            pooled: !!s.pooled,
           };
 
         /* -- the position -- */
@@ -1348,7 +1503,11 @@ function tensionsOf(
 ): { title: string; body: string; cellId: string }[] {
   const ids = [...cells.keys()];
   const firstOf = (prefix: string) => ids.find((id) => id.startsWith(prefix)) ?? null;
-  const openCells = specs.filter((x) => x.band === "chooses" && x.row === "open");
+  // Pooled All cells never match by label (an "All buyers" label would catch
+  // stray prose); they serve as generic fallbacks through firstOf, where the
+  // row's first cell is now its All cell.
+  const splitCells = specs.filter((x) => !x.pooled);
+  const openCells = splitCells.filter((x) => x.band === "chooses" && x.row === "open");
   const idOf = (x: CellSpec) => `${x.band}:${x.row}:${x.key}`;
   // Known vs picked points at the open-choice room with the widest named-vs-picked gap.
   const fallbackOpen = firstOf("chooses:open:") ?? firstOf("chooses:social:") ?? ids[0] ?? "";
@@ -1362,8 +1521,8 @@ function tensionsOf(
     body: `${brand} is named in ${pctOf(f.named)} of answers when buyers ask what to buy. ${commitSentence(s.category, brand, s.firmPickInCategory, s.target.shareOfDecided, s.target.chosen)}${
       f.topName && !f.youTop ? ` ${f.topName} is the pick ${pctOf(f.shareTop)} of the time.` : ""
     }`,
-    // The pooled funnel paragraph anchors on the pooled cell itself.
-    cellId: firstOf("overall:market:") ?? (openCells.length ? idOf(openCells[0]) : fallbackOpen),
+    // The pooled funnel paragraph anchors on the open-choice All cell itself.
+    cellId: cells.has("chooses:open:all") ? "chooses:open:all" : openCells.length ? idOf(openCells[0]) : fallbackOpen,
   });
 
   // bs8 placement bookkeeping for the harness probe ("match" / "generic").
@@ -1392,17 +1551,17 @@ function tensionsOf(
         if (key === "conversion_vs_rival") {
           // The rival's fight cell (head-to-head, else its leavers), else an
           // open-choice cell the rival takes.
-          const fight = longestMatch(text, specs.filter((x) => x.row === "h2h" || x.row === "leavers"), (x) => x.label);
+          const fight = longestMatch(text, splitCells.filter((x) => x.row === "h2h" || x.row === "leavers"), (x) => x.label);
           const taken = fight ?? longestMatch(text, openCells, (x) => x.taker.name);
           return found(taken ? idOf(taken) : null, strict, () => firstOf("fights:h2h:") ?? fallbackOpen);
         }
-        const h2h = specs.filter((x) => x.row === "h2h");
+        const h2h = splitCells.filter((x) => x.row === "h2h");
         const hit = longestMatch(text, h2h, (x) => x.label);
         return hit ? idOf(hit) : strict ? null : firstOf("fights:h2h:") ?? fallbackOpen;
       }
       case "doubt": {
         if (key === "worst_worry" || key === "leave_no_exit") {
-          const cust = specs.filter((x) => x.band === "doubts" && x.row === "customers");
+          const cust = splitCells.filter((x) => x.band === "doubts" && x.row === "customers");
           // The named worry; for no-exit leaves, the worry with the most leave answers.
           const hit =
             key === "worst_worry"
@@ -1411,21 +1570,21 @@ function tensionsOf(
           return found(hit ? idOf(hit) : null, strict, () => firstOf("doubts:customers:") ?? firstOf("doubts:"));
         }
         if (key === "advocacy_vs_objection") return firstOf("settled:settled:advocacy") ?? firstOf("doubts:buyers:");
-        const worries = specs.filter((x) => x.band === "doubts" && (x.row === "buyers" || x.row === "customers"));
+        const worries = splitCells.filter((x) => x.band === "doubts" && (x.row === "buyers" || x.row === "customers"));
         const hit = longestMatch(text, worries, (x) => x.label);
         if (hit) return idOf(hit);
         if (strict) return null;
         return firstOf(text.toLowerCase().includes("customer") && !text.toLowerCase().includes("buyer") ? "doubts:customers:" : "doubts:buyers:") ?? firstOf("doubts:");
       }
       case "value": {
-        const vals = specs.filter((x) => x.row === "value");
+        const vals = splitCells.filter((x) => x.row === "value");
         const hit = longestMatch(text, vals, (x) => x.label.split(" - ")[0]);
         return hit ? idOf(hit) : strict ? null : firstOf("chooses:value:");
       }
       case "argument":
         if (key === "neutralized_differentiator") {
           // The rival that takes most of the losses, named in the body.
-          const hit = longestMatch(text, specs.filter((x) => x.row === "h2h"), (x) => x.label);
+          const hit = longestMatch(text, splitCells.filter((x) => x.row === "h2h"), (x) => x.label);
           return found(hit ? idOf(hit) : null, strict, () => firstOf("fights:h2h:") ?? firstOf("chooses:criteria:") ?? fallbackOpen);
         }
         return firstOf("chooses:criteria:") ?? fallbackOpen;
@@ -1445,15 +1604,15 @@ function tensionsOf(
       case "switching": {
         // own_defense reads the holding-your-own cell; leaver_capture the
         // named rival's leaver cell, else the pooled one.
-        if (key === "own_defense") return firstOf("doubts:hold:") ?? (strict ? null : firstOf("fights:leavers:") ?? firstOf("overall:switching:") ?? fallbackOpen);
-        const leavers = specs.filter((x) => x.row === "leavers");
+        if (key === "own_defense") return firstOf("doubts:hold:") ?? (strict ? null : firstOf("fights:leavers:") ?? fallbackOpen);
+        const leavers = splitCells.filter((x) => x.row === "leavers");
         const hit = longestMatch(text, leavers, (x) => x.label);
-        return hit ? idOf(hit) : strict ? null : firstOf("fights:leavers:") ?? firstOf("overall:switching:") ?? fallbackOpen;
+        return hit ? idOf(hit) : strict ? null : firstOf("fights:leavers:") ?? fallbackOpen;
       }
       case "condition": {
         // The away condition names where it routes; the rival's head-to-head
         // carries its conditions. Else a wall-badged cell, else the open choice.
-        const h2h = specs.filter((x) => x.row === "h2h");
+        const h2h = splitCells.filter((x) => x.row === "h2h");
         const hit = longestMatch(text, h2h, (x) => x.label);
         if (hit) return idOf(hit);
         const walled = ids.find((id) => cells.get(id)!.badges.includes("wall"));
@@ -1462,12 +1621,12 @@ function tensionsOf(
       case "leak": {
         if (key === "leak_problem") {
           // The room's problem-recognition cell.
-          const hit = longestMatch(text, specs.filter((x) => x.row === "awareness"), (x) => x.label);
+          const hit = longestMatch(text, splitCells.filter((x) => x.row === "awareness"), (x) => x.label);
           return found(hit ? idOf(hit) : null, strict, () => leakCells()[0] ?? firstOf("chooses:awareness:") ?? fallbackOpen);
         }
         // Out-of-category picks: a leak-badged cell, the named room's first.
         const leaky = new Set(leakCells());
-        const named = longestMatch(text, specs.filter((x) => leaky.has(idOf(x))), (x) => x.label);
+        const named = longestMatch(text, splitCells.filter((x) => leaky.has(idOf(x))), (x) => x.label);
         // The room is named in the body, so the title-only pass waits for it.
         return found(named ? idOf(named) : strict ? null : leakCells()[0] ?? null, strict, () => fallbackOpen);
       }
@@ -1504,7 +1663,8 @@ function tensionsOf(
 // am4 (2026-11-04): reads the bs10 served list (rank-fill effect floor).
 // am5 (2026-11-04): the brief's language pass - reads bs11, and the casting, tensions, cell notes and position claims say share of picks / direct matchups / buying situations instead of method terms; the first tension carries the commit-rate convention.
 // am6 (2026-11-05): the Overall band - the pooled open-choice cell (the Verdict's base; its position mounts the full decision-rules ledger in the UI) and the pooled rival-leavers cell, which moves here from the fights band's single-angle wide form; the first tension anchors on the pooled cell.
-const ANALYSIS_MAP_VERSION = "am6";
+// am7 (2026-11-05): the Overall band folds into first-of-row All cells - every row with 2+ cells opens with its pooled roll-up (open choice = the headline pool whole, still the ledger's home at chooses:open:all; new pooled cells for head-to-head, rival leavers, both worry rows, value, awareness, criteria and the settled band); base-voiced awareness/criteria cells re-key "general" beside siblings; pooled cells are marked (MapCell.all / MapCellStat.pooled) and never match tension text by label.
+const ANALYSIS_MAP_VERSION = "am7";
 export function computeAnalysisMapCached(run: Run, project: Project, request: ViewRequest = {}): Promise<AnalysisMapView | null> {
   const r = requestOf(request, false);
   return cachedView("analysis_map", ANALYSIS_MAP_VERSION, run, project, (d) => computeAnalysisMap(d, r), { setupDecision: true, judge: true }, r);

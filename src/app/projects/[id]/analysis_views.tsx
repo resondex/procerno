@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { Fragment, useCallback, useEffect, useRef, useState } from "react";
 import type { RateCell } from "@/lib/engine/view_data";
 import {
   DEFICIT_TRIAGES,
@@ -385,7 +385,12 @@ function MapView({ map, onOpen }: { map: AnalysisMapView; onOpen: (id: string) =
                 </div>
                 <div className="flex flex-wrap gap-2 p-2">
                   {row.cells.map((cell) => (
-                    <CellButton key={cell.id} cell={cell} onOpen={onOpen} hasPosition={!!map.positions[cell.id]} />
+                    <Fragment key={cell.id}>
+                      <CellButton cell={cell} onOpen={onOpen} hasPosition={!!map.positions[cell.id]} />
+                      {cell.all && row.cells.length > 1 && (
+                        <i aria-hidden className="my-1.5 w-px flex-none self-stretch bg-line" />
+                      )}
+                    </Fragment>
                   ))}
                 </div>
               </div>
@@ -574,7 +579,7 @@ function PositionPanel({
           </>
         )}
 
-        {(p.toward.length > 0 || p.away.length > 0 || p.cellId.startsWith("overall:market:")) && (
+        {(p.toward.length > 0 || p.away.length > 0 || p.cellId === "chooses:open:all") && (
           <>
             <h3 className={h3}>The conditions</h3>
             <div className="grid gap-4 sm:grid-cols-2">
@@ -615,7 +620,7 @@ function PositionPanel({
             {/* The pooled open-choice position is the condition ledger's home
                 (2026-11-05): the full decision-rules explorer, every question
                 type, mounts here - the lists above are its top lines. */}
-            {p.cellId.startsWith("overall:market:") && (
+            {p.cellId === "chooses:open:all" && (
               <details className="mt-4">
                 <summary className="cursor-pointer text-[13px] font-medium text-primary underline decoration-dotted underline-offset-2">
                   The full condition ledger - every question type

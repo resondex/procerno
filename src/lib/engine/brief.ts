@@ -298,7 +298,9 @@ function actOf(p: Position, st: MapCellStat): string {
 
 function movesOf(map: AnalysisMapView, stats: Record<string, MapCellStat>, brand: string): Move[] {
   const deficits = Object.values(map.positions)
-    .filter((p) => p.status === "deficit" && stats[p.cellId])
+    // Pooled All cells are the verdict paragraph's ground, not a move - a
+    // move names the specific contest to act on.
+    .filter((p) => p.status === "deficit" && stats[p.cellId] && !stats[p.cellId].pooled)
     .sort((a, b) => {
       const sa = stats[a.cellId];
       const sb = stats[b.cellId];
@@ -732,7 +734,7 @@ function swotOf(c: Ctx): Swot {
       const st = c.stats[p.cellId];
       // Matchups are read from the summary above. The settled band and the doubt rows are the AI
       // siding with the brand when the asker set it up that way - defensive ground, never a strength.
-      if (!st || p.status !== "surplus" || st.row === "h2h" || st.band === "settled") continue;
+      if (!st || st.pooled || p.status !== "surplus" || st.row === "h2h" || st.band === "settled") continue;
       if (st.row === "buyers" || st.row === "customers" || st.row === "hold") continue;
       const wd = cellWords(st.row, st.label, c.brand);
       s.push({ text: sentence(p.claim), short: `your hold ${wd.prep || "here"}`, tip: `${st.you} of ${st.d} side-taking answers.`, kind: st.row, row: st.row, effect: st.n > 0 ? (st.you - st.them) / st.n : 0 });
@@ -1618,7 +1620,9 @@ export async function computeBrief(data: ViewData, request: BriefRequest = {}): 
 // bf8 (2026-11-05): the conversion is also drawn in the hourglass, in the narrowing under the shortlist band.
 // bf9 (2026-11-05): the gap note is removed (the conversion stays in the pick reading) and the middle stage
 // is "Recommended" everywhere - "On the shortlist" read as a second metric beside the scoreboard's term.
-const BRIEF_VERSION = "bf9";
+// bf10 (2026-11-05): reads the am7 map (first-of-row All cells); pooled cells are excluded from the moves
+// and the SWOT strengths - the verdict paragraph already carries the market totals.
+const BRIEF_VERSION = "bf10";
 
 /**
  * The brief through the cache. cachedView's keying, with the subject as one

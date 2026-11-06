@@ -38,6 +38,9 @@ export interface MapCell {
   badges: CellBadge[];
   /** Spans its whole row (rival leavers, holding your own, criteria). */
   wide?: boolean;
+  /** The row's pooled roll-up cell (key "all"), rendered first with a divider
+   * after it; set only when the row also carries split cells. */
+  all?: boolean;
   /** Answers behind the cell (the tooltip's denominator). */
   n: number;
 }
