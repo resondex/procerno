@@ -467,7 +467,7 @@ function DossierLine({ stage, cell, onOpen, hasPosition }: { stage: string; cell
       onClick={() => hasPosition && onOpen(cell.id)}
       disabled={!hasPosition}
       title={answersTip(cell.n)}
-      className="flex w-full items-baseline gap-2 border-b border-line/50 px-2.5 py-1.5 text-left transition-colors last:border-b-0 enabled:hover:bg-line/20 disabled:cursor-default"
+      className="flex w-full items-baseline gap-2 rounded-[6px] px-2.5 py-1.5 text-left transition-colors enabled:hover:bg-line/25 disabled:cursor-default"
     >
       <span className="w-[96px] flex-none text-[11px] leading-tight text-ink-3">
         {stage}
@@ -521,9 +521,11 @@ function DossierBand({ rows, chooses, rooms, perRow, positions, onOpen }: { rows
         return (
           <div key={key} className={`overflow-hidden rounded-[10px] border bg-surface ${key === "all" ? "border-ink-3/50" : "border-line"}`}>
             <div className="border-b border-line/70 bg-line/15 px-2.5 py-1.5 text-[12.5px] font-semibold text-ink">{headerOf(key)}</div>
-            {lines.map((l) => (
-              <DossierLine key={l.cell.id} stage={l.stage} cell={l.cell} onOpen={onOpen} hasPosition={!!positions[l.cell.id]} />
-            ))}
+            <div className="grid gap-0.5 p-1">
+              {lines.map((l) => (
+                <DossierLine key={l.cell.id} stage={l.stage} cell={l.cell} onOpen={onOpen} hasPosition={!!positions[l.cell.id]} />
+              ))}
+            </div>
           </div>
         );
       })}
