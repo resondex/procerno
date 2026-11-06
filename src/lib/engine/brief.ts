@@ -116,6 +116,55 @@ function insightCell(c: Ctx, i: { key: string; title: string }): string | undefi
   return c.placements.get(k) ?? c.map.insightCells?.find((x) => x.key === i.key && x.title === i.title)?.cellId;
 }
 
+/** bf12: a brief pin promises "the numbers behind this sentence live here",
+ * so each detector pins the cell whose answer pool is its denominator. The
+ * map tensions' matcher answers a different question ("where should this
+ * point you to look") and prefers the most specific cell named in the text -
+ * a pooled finding that names its top captor would pin that rival's split
+ * cell, whose pool is not the sentence's. Pools are row prefixes resolved
+ * through pooledOf (the All cell, else the row's only cell) or literal cell
+ * ids; `match: true` appends the matcher's cell where the named cell carries
+ * part of the story (the captor's own leaver pool, the hardest matchup);
+ * `matchFirst` leads with it where the headline number is the specific
+ * cell's (the backed worry) and the pool is the baseline. Keys absent here
+ * are split-scoped: the matcher's cell IS the denominator (rooms, rivals,
+ * leak_problem's room). */
+type PinRule = { pools: string[] | ((i: { title: string; body: string }) => string[]); match?: boolean; matchFirst?: boolean };
+const PIN_RULES: Record<string, PinRule> = {
+  leaver_capture: { pools: ["fights:leavers:"], match: true },
+  own_defense: { pools: ["doubts:hold:"] },
+  prompted_vs_open: { pools: ["fights:h2h:", OPEN_ALL], match: true },
+  rival_open: { pools: [OPEN_ALL] },
+  neutralized_differentiator: { pools: ["fights:h2h:"], match: true },
+  argument: { pools: [OPEN_ALL] },
+  taught_vs_winning: { pools: ["chooses:criteria:", OPEN_ALL] },
+  doubt_rollup: { pools: ["doubts:buyers:", "doubts:customers:"] },
+  doubt_worry: { pools: (i) => (i.body.includes("a customer raises") ? ["doubts:customers:"] : ["doubts:buyers:"]), matchFirst: true },
+  worst_worry: { pools: ["doubts:customers:"], matchFirst: true },
+  agreed_yet_stay: { pools: (i) => (i.title.endsWith("stay") ? ["doubts:customers:"] : ["doubts:buyers:"]) },
+  funnel: { pools: [OPEN_ALL] },
+  value_in_house: { pools: ["chooses:value:"] },
+  advocacy_vs_objection: { pools: ["settled:settled:", "doubts:buyers:"] },
+  pick_concentration_room: { pools: [OPEN_ALL], match: true },
+  pick_concentration_question: { pools: [OPEN_ALL], match: true },
+  away_condition: { pools: [OPEN_ALL], match: true },
+  leak_picks: { pools: [OPEN_ALL], match: true },
+  leave_no_exit: { pools: ["doubts:customers:"] },
+  conversion_vs_rival: { pools: [OPEN_ALL], match: true },
+};
+
+/** Every pin for an insight, denominator cells first (see PIN_RULES). */
+function insightCells(c: Ctx, i: { key: string; title: string; body?: string }): string[] {
+  const matched = insightCell(c, i);
+  const rule = PIN_RULES[i.key];
+  if (!rule) return matched ? [matched] : [];
+  const srcs = typeof rule.pools === "function" ? rule.pools({ title: i.title, body: i.body ?? "" }) : rule.pools;
+  const pools = srcs.map((s) => (s.endsWith(":") ? pooledOf(c, s) : s)).filter((x): x is string => !!x && !!c.map.positions[x]);
+  const m = (rule.match || rule.matchFirst) && matched ? [matched] : [];
+  const ids = rule.matchFirst ? [...m, ...pools] : [...pools, ...m];
+  return [...new Set(ids.length ? ids : matched ? [matched] : [])];
+}
+
 /* --------------------------------- context -------------------------------- */
 
 interface RoomRead {
@@ -155,6 +204,8 @@ interface Item {
   effect: number;
   /** The map cell the entry was read from, when the engine holds one. */
   cellId?: string;
+  /** All of the entry's pins, denominator cells first (insight-sourced entries). */
+  cellIds?: string[];
 }
 
 interface Ctx {
@@ -176,7 +227,7 @@ interface Ctx {
   vsTarget: { won: RateCell; n: number } | null;
   moves: Move[];
   /** now_what's numbered findings (served insights; rival: composed facts) - the other frames skip them. */
-  findings: { lead: string; text: string; tip?: string; key: string; cellId?: string }[];
+  findings: { lead: string; text: string; tip?: string; key: string; cellIds?: string[] }[];
   /** Ranked insights placed on map cells by the map's own matcher (key + title -> cell id). */
   placements: Map<string, string>;
   /** The subject's headline picks by stage (discovery / use_case / ...). */
@@ -564,17 +615,17 @@ function findingsOf(c: Ctx): Ctx["findings"] {
       .filter((i) => i.kind !== "engine" && !VERDICT_CARRIED.has(i.key) && !(i.key === "pick_concentration_question" && !i.title.includes("your")))
       .sort((a, b) => b.effect - a.effect)
       .slice(0, 5)
-      .map((i) => ({ lead: leadOf(cap(i.title)), text: cap(i.body), tip: i.foot, key: i.key, cellId: insightCell(c, i) }));
+      .map((i) => ({ lead: leadOf(cap(i.title)), text: cap(i.body), tip: i.foot, key: i.key, cellIds: insightCells(c, i) }));
   const out: Ctx["findings"] = [];
   const ranked = roomsByShare(c);
   const best = ranked[0];
   const worst = ranked.length > 1 ? ranked[ranked.length - 1] : undefined;
   if (best && best.share.k > 0)
-    out.push({ key: "best_room", cellId: `chooses:open:${norm(best.r.room)}`, lead: "Its strongest situation.", text: `${best.r.room} is where ${c.name} does best: ${P(best.share)} of the picks there.`, tip: tipOf(best.share) });
+    out.push({ key: "best_room", cellIds: [`chooses:open:${norm(best.r.room)}`], lead: "Its strongest situation.", text: `${best.r.room} is where ${c.name} does best: ${P(best.share)} of the picks there.`, tip: tipOf(best.share) });
   if (worst && worst.top)
     out.push({
       key: "worst_room",
-      cellId: `chooses:open:${norm(worst.r.room)}`,
+      cellIds: [`chooses:open:${norm(worst.r.room)}`],
       lead: "Its weakest situation.",
       text: `${worst.r.room} is its weakest - ${worst.share.k === 0 ? "none" : P(worst.share)} of the picks there, with ${worst.top.name} taking ${P(worst.top.share)}.`,
       tip: `${tipOf(worst.share)}; ${worst.top.name} ${worst.top.chosen}.`,
@@ -583,7 +634,7 @@ function findingsOf(c: Ctx): Ctx["findings"] {
   if (l && l.lift > 0 && l.wins.low > l.others.high)
     out.push({ key: "lift", lead: "The argument it wins on.", text: `${cap(l.code)} is argued in ${P(l.wins)} of the answers that pick ${c.name}, against ${P(l.others)} when another brand is picked.`, tip: `${tipOf(l.wins)}; ${tipOf(l.others)}.` });
   if (c.vsTarget && c.vsTarget.won.n >= MIN)
-    out.push({ key: "vs_target", cellId: rivalCell(c, c.subject.key), lead: `Against ${c.brand}.`, text: `Compared directly with ${c.brand}, the AI sides with ${c.name} ${P(c.vsTarget.won)} of the time it takes a side.`, tip: tipOf(c.vsTarget.won) });
+    out.push({ key: "vs_target", cellIds: [rivalCell(c, c.subject.key)].filter((x): x is string => !!x), lead: `Against ${c.brand}.`, text: `Compared directly with ${c.brand}, the AI sides with ${c.name} ${P(c.vsTarget.won)} of the time it takes a side.`, tip: tipOf(c.vsTarget.won) });
   const lw = c.lift.length > 1 ? c.lift[c.lift.length - 1] : undefined;
   if (lw && lw.lift < 0 && lw.others.low > lw.wins.high)
     out.push({ key: "loss_arg", lead: "The argument it loses on.", text: `${cap(lw.code)} comes up in ${P(lw.others)} of the answers that pick another brand and ${P(lw.wins)} of those that pick ${c.name}.`, tip: `${tipOf(lw.wins)}; ${tipOf(lw.others)}.` });
@@ -639,7 +690,7 @@ function nowWhat(c: Ctx): BriefSection[] {
     { key: "funnel_breaks", paras: [funnelBreaks(c)] },
   ];
   if (c.findings.length)
-    out.push({ key: "findings", heading: "What matters this wave", paras: c.findings.map((f, i) => withCells({ lead: `${i + 1}. ${f.lead}`, text: f.text, ...(f.tip ? { tip: f.tip } : {}) }, cellsOf(c, f.cellId))) });
+    out.push({ key: "findings", heading: "What matters this wave", paras: c.findings.map((f, i) => withCells({ lead: `${i + 1}. ${f.lead}`, text: f.text, ...(f.tip ? { tip: f.tip } : {}) }, cellsOf(c, ...(f.cellIds ?? [])))) });
   const cond = conditionsPara(c);
   if (cond) out.push({ key: "conditions", heading: "The conditions that decide it", paras: [cond] });
   if (c.isTarget)
@@ -705,7 +756,8 @@ const STRENGTH_SHORT: Record<string, string> = {
 
 function fromInsight(c: Ctx, i: Insight, kind: string): Item {
   const short = (insightIsStrength(i) ? STRENGTH_SHORT[i.key] : INSIGHT_SHORT[i.key]) ?? low1(i.title);
-  return { text: i.body, short, tip: i.foot, kind, effect: i.effect, cellId: insightCell(c, i) };
+  const ids = insightCells(c, i);
+  return { text: i.body, short, tip: i.foot, kind, effect: i.effect, cellId: ids[0], cellIds: ids };
 }
 
 function funnelBreak(S: SummaryBrand, name: string): Item | null {
@@ -918,7 +970,7 @@ function swotOf(c: Ctx): Swot {
 }
 
 const asParas = (c: Ctx, items: Item[], empty: string): BriefPara[] =>
-  items.length ? items.map((i) => withCells({ text: i.text, ...(i.tip ? { tip: i.tip } : {}) }, cellsOf(c, i.cellId))) : [{ text: empty }];
+  items.length ? items.map((i) => withCells({ text: i.text, ...(i.tip ? { tip: i.tip } : {}) }, cellsOf(c, ...(i.cellIds ?? [i.cellId])))) : [{ text: empty }];
 
 function swotFrame(c: Ctx, sw: Swot): BriefSection[] {
   const quads: BriefQuad[] = [
@@ -1712,7 +1764,8 @@ export async function computeBrief(data: ViewData, request: BriefRequest = {}): 
 // bf10 (2026-11-05): reads the am7 map (first-of-row All cells); pooled cells are excluded from the moves
 // and the SWOT strengths - the verdict paragraph already carries the market totals.
 // bf11 (2026-11-06): paragraphs and scoreboard rows carry map anchors (BriefPara.cells / BriefRow.cell) - the facts link into The Map.
-const BRIEF_VERSION = "bf11";
+// bf12 (2026-11-06): insight pins are denominator-first (PIN_RULES) - a pooled finding pins the cell whose pool its numbers come from, the matcher's named cell second where it adds the story.
+const BRIEF_VERSION = "bf12";
 
 /**
  * The brief through the cache. cachedView's keying, with the subject as one
