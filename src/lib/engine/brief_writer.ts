@@ -17,7 +17,11 @@
  *   (b) vocabulary - no em dash, no method words, no x-of-y counts;
  *   (c) keeps - every keep is a structure section of the composed memo and
  *       each appears exactly once;
- *   (d) length - written text at most twice the fact sheet.
+ *   (d) length - written text at most twice the fact sheet (anchor tags excluded);
+ *   (e) anchors - each fact line's map anchor travels as a letter-only tag
+ *       ([[ma]], [[mb]], ...; letters so guard (a) never sees them), and
+ *       every tag appears exactly once in the written paragraphs' text.
+ *       Reassembly strips the tags and sets each paragraph's `cells`.
  * A failing reply gets ONE steered retry naming the violations; still
  * failing (or no key / a thrown call) returns the composed memo with
  * written:false. Only written:true results cache - a later open retries.
@@ -27,11 +31,12 @@
  */
 
 import { createHash } from "node:crypto";
-import { BRIEF_FRAMES, type BriefMemo, type BriefPara, type BriefSection } from "./brief_types";
+import { BRIEF_FRAMES, type BriefAnchor, type BriefMemo, type BriefPara, type BriefSection } from "./brief_types";
 import type { Project, Run } from "../types";
 import { BRIEF_WRITER_MODEL } from "./models";
 
-export const BRIEF_WRITER_VERSION = "bw1";
+// bw2 (2026-11-06): fact lines carry anchor tags the writer places; guard (e).
+export const BRIEF_WRITER_VERSION = "bw2";
 const CACHE_TTL_MS = 180 * 24 * 3600 * 1000;
 /** Opus 5.x thinks before it writes and a whole-budget think returns empty
  * text (the recorded batch failure mode), so the budget leaves room for both. */
@@ -48,15 +53,61 @@ function paraLine(p: BriefPara): string {
   return p.lead ? `${p.lead} ${p.text}` : p.text;
 }
 
+export interface SheetAnchor extends BriefAnchor {
+  token: string;
+}
+export interface FactSheet {
+  text: string;
+  keeps: string[];
+  anchors: SheetAnchor[];
+}
+
+/** The nth anchor tag: [[ma]] .. [[mz]], [[maa]], [[mab]], ... (letters only). */
+export function anchorToken(n: number): string {
+  let s = "";
+  let x = n;
+  do {
+    s = String.fromCharCode(97 + (x % 26)) + s;
+    x = Math.floor(x / 26) - 1;
+  } while (x >= 0);
+  return `[[m${s}]]`;
+}
+export const ANCHOR_TOKEN = /\[\[m[a-z]+\]\]/g;
+
+/** Text with every anchor tag removed, spacing and punctuation tidied. */
+export function stripAnchors(t: string): string {
+  return t
+    .replace(ANCHOR_TOKEN, "")
+    .replace(/[ \t]{2,}/g, " ")
+    .replace(/ +([.,;:!?)])/g, "$1")
+    .trim();
+}
+
 /** The composed memo's visible text, in reading order. Tips are never read. */
-export function factSheet(memo: BriefMemo): { text: string; keeps: string[] } {
+export function factSheet(memo: BriefMemo): FactSheet {
   const out: string[] = [`TITLE: ${memo.title}`];
   const keeps: string[] = [];
+  const anchors: SheetAnchor[] = [];
   for (const s of memo.sections) {
     const lines: string[] = [];
+    const keep = isKeepSection(s);
+    // A keep section is reinserted composed, anchors intact - its lines carry no tags.
+    const tagged = (line: string, cells: BriefAnchor[] | undefined) => {
+      if (keep || !cells?.length) return line;
+      const tags: string[] = [];
+      const ids = new Set<string>();
+      for (const c of cells) {
+        if (ids.has(c.id)) continue;
+        ids.add(c.id);
+        const token = anchorToken(anchors.length);
+        anchors.push({ token, id: c.id, label: c.label });
+        tags.push(token);
+      }
+      return `${line} ${tags.join(" ")}`;
+    };
     if (s.heading) lines.push(`## ${s.heading}`);
-    for (const p of s.paras ?? []) lines.push(paraLine(p));
-    for (const r of s.rows ?? []) lines.push(`${r.label}: ${r.value}`);
+    for (const p of s.paras ?? []) lines.push(tagged(paraLine(p), p.cells));
+    for (const r of s.rows ?? []) lines.push(tagged(`${r.label}: ${r.value}`, r.cell ? [r.cell] : undefined));
     if (s.table) {
       lines.push(s.table.headers.join(" | "));
       for (const r of s.table.rows) lines.push(r.join(" | "));
@@ -64,7 +115,7 @@ export function factSheet(memo: BriefMemo): { text: string; keeps: string[] } {
     for (const q of s.quads ?? []) {
       for (let i = 0; i < 2; i++) {
         lines.push(`### ${q.headers[i]}`);
-        for (const p of q.cells[i]) lines.push(paraLine(p));
+        for (const p of q.cells[i]) lines.push(tagged(paraLine(p), p.cells));
       }
     }
     if (s.viz) {
@@ -82,7 +133,7 @@ export function factSheet(memo: BriefMemo): { text: string; keeps: string[] } {
         if (t) lines.push(t);
       }
     }
-    if (isKeepSection(s)) {
+    if (keep) {
       keeps.push(s.key);
       out.push(`[[keep:${s.key}]]\n(kept as drawn - its contents, for reference:)\n${lines.join("\n")}\n[[/keep]]`);
     } else if (lines.length) {
@@ -90,7 +141,7 @@ export function factSheet(memo: BriefMemo): { text: string; keeps: string[] } {
     }
   }
   out.push(`FOOTER: ${memo.footer}`);
-  return { text: out.join("\n\n"), keeps };
+  return { text: out.join("\n\n"), keeps, anchors };
 }
 
 // ---------- the reply ----------
@@ -121,7 +172,7 @@ export const BANNED: { name: string; re: RegExp }[] = [
   { name: "x of y count", re: /\d+ of \d+/ },
 ];
 
-export type Violation = { kind: "numbers" | "vocabulary" | "keeps" | "length" | "shape"; detail: string };
+export type Violation = { kind: "numbers" | "vocabulary" | "keeps" | "length" | "anchors" | "shape"; detail: string };
 
 function writtenStrings(reply: WrittenReply): string[] {
   const out: string[] = [];
@@ -166,8 +217,8 @@ export function parseReply(raw: unknown): WrittenReply | null {
   return out.length ? { sections: out } : null;
 }
 
-/** Every violation of guards (a)-(d), in that order. */
-export function checkReply(reply: WrittenReply, memo: BriefMemo, sheet: { text: string; keeps: string[] }): Violation[] {
+/** Every violation of guards (a)-(e), in that order. */
+export function checkReply(reply: WrittenReply, memo: BriefMemo, sheet: FactSheet): Violation[] {
   const v: Violation[] = [];
   const strings = writtenStrings(reply);
   const allowed = numberTokens(sheet.text);
@@ -194,16 +245,54 @@ export function checkReply(reply: WrittenReply, memo: BriefMemo, sheet: { text: 
     if (unknown.length) parts.push(`keep keys that do not exist: ${unknown.join(", ")}`);
     v.push({ kind: "keeps", detail: parts.join("; ") });
   }
-  // (d) length
-  const written = strings.reduce((n, s) => n + s.length, 0);
-  if (written > 2 * sheet.text.length) v.push({ kind: "length", detail: "the written memo is more than twice as long as the fact sheet" });
+  // (d) length - tags never tip the budget
+  const written = strings.reduce((n, s) => n + stripAnchors(s).length, 0);
+  if (written > 2 * stripAnchors(sheet.text).length) v.push({ kind: "length", detail: "the written memo is more than twice as long as the fact sheet" });
+  // (e) anchors - every sheet tag exactly once, in paragraph text only
+  {
+    const known = new Set(sheet.anchors.map((a) => a.token));
+    const count = new Map<string, number>();
+    const invented = new Set<string>();
+    let misplaced = false;
+    for (const s of reply.sections) {
+      if ("keep" in s) continue;
+      if (s.heading && s.heading.match(ANCHOR_TOKEN)) misplaced = true;
+      for (const p of s.paras) {
+        if (p.lead && p.lead.match(ANCHOR_TOKEN)) misplaced = true;
+        for (const t of p.text.match(ANCHOR_TOKEN) ?? []) {
+          if (!known.has(t)) invented.add(t);
+          else count.set(t, (count.get(t) ?? 0) + 1);
+        }
+      }
+    }
+    const missing = sheet.anchors.map((a) => a.token).filter((t) => !count.has(t));
+    const dup = [...count.entries()].filter(([, n]) => n > 1).map(([t]) => t);
+    const parts: string[] = [];
+    if (missing.length) parts.push(`tags never placed: ${missing.join(" ")}`);
+    if (dup.length) parts.push(`tags used more than once: ${dup.join(" ")}`);
+    if (invented.size) parts.push(`tags that are not in the fact sheet: ${[...invented].join(" ")}`);
+    if (misplaced) parts.push("tags inside a heading or lead - put each at the end of the sentence that states its fact");
+    if (parts.length) v.push({ kind: "anchors", detail: parts.join("; ") });
+  }
   if (!strings.length) v.push({ kind: "shape", detail: "no written text" });
   return v;
 }
 
-/** The B memo: the writer's order, keep tokens replaced by the composed sections. */
-export function reassemble(reply: WrittenReply, memo: BriefMemo): BriefMemo {
+/** The B memo: the writer's order, keep tokens replaced by the composed
+ * sections, anchor tags stripped into each paragraph's `cells`. */
+export function reassemble(reply: WrittenReply, memo: BriefMemo, anchors: SheetAnchor[] = []): BriefMemo {
   const byKey = new Map(memo.sections.map((s) => [s.key, s]));
+  const byToken = new Map(anchors.map((a) => [a.token, a]));
+  const paraOf = (p: BriefPara): BriefPara => {
+    const cells: BriefAnchor[] = [];
+    for (const t of p.text.match(ANCHOR_TOKEN) ?? []) {
+      const a = byToken.get(t);
+      if (a && !cells.some((c) => c.id === a.id)) cells.push({ id: a.id, label: a.label });
+    }
+    const out: BriefPara = { ...(p.lead ? { lead: stripAnchors(p.lead) } : {}), text: stripAnchors(p.text) };
+    if (cells.length) out.cells = cells;
+    return out;
+  };
   const sections: BriefSection[] = [];
   reply.sections.forEach((s, i) => {
     if ("keep" in s) {
@@ -211,7 +300,7 @@ export function reassemble(reply: WrittenReply, memo: BriefMemo): BriefMemo {
       if (orig) sections.push(orig);
       return;
     }
-    sections.push({ key: `w${i}`, ...(s.heading ? { heading: s.heading } : {}), paras: s.paras });
+    sections.push({ key: `w${i}`, ...(s.heading ? { heading: stripAnchors(s.heading) } : {}), paras: s.paras.map(paraOf) });
   });
   return { frame: memo.frame, title: memo.title, sections, footer: memo.footer };
 }
@@ -251,13 +340,15 @@ export const BRIEF_WRITER_SYSTEM = [
   "- No research-method vocabulary: describe what the AI does and what buyers hear, never how it was measured.",
   "- Use \" - \" (space, hyphen, space) for a dash; never an em dash.",
   "- Keep the memo no longer than the fact sheet.",
+  "- Fact lines may end in tags like [[ma]] [[mb]]. When your prose states that line's fact, put its tag at the end of the sentence that states it. Use every tag exactly once, never invent one, and never put one inside a heading or lead.",
   'Reply with ONE JSON object and nothing else: {"sections":[{"heading":"...","paras":[{"lead":"...","text":"..."}]} or {"keep":"<key>"}]}. "heading" and "lead" are optional; "lead" is a short bold opening for a paragraph.',
 ].join("\n");
 
-export function writerUser(sheet: { text: string; keeps: string[] }, ctx: { brand: string; product: string }, steer?: string): string {
+export function writerUser(sheet: FactSheet, ctx: { brand: string; product: string }, steer?: string): string {
   let u =
     `The memo is about ${ctx.brand}; the AI is asked which ${ctx.product} to choose.\n` +
-    `Keep blocks that must each appear exactly once: ${sheet.keeps.length ? sheet.keeps.join(", ") : "none"}.\n\n` +
+    `Keep blocks that must each appear exactly once: ${sheet.keeps.length ? sheet.keeps.join(", ") : "none"}.\n` +
+    `Tags that must each appear exactly once: ${sheet.anchors.length ? sheet.anchors.map((a) => a.token).join(" ") : "none"}.\n\n` +
     `FACT SHEET\n\n${sheet.text}`;
   if (steer) u += `\n\nYour previous reply broke these rules - fix every one and reply again:\n${steer}`;
   return u;
@@ -280,7 +371,7 @@ export function writtenCacheKey(model: string, ctx: WriteContext, frame: string,
 }
 
 /** One writing attempt's outcome. Exposed for the scratch tests. */
-export function judgeText(text: string, memo: BriefMemo, sheet: { text: string; keeps: string[] }): { reply: WrittenReply | null; violations: Violation[] } {
+export function judgeText(text: string, memo: BriefMemo, sheet: FactSheet): { reply: WrittenReply | null; violations: Violation[] } {
   const j = firstJsonObject(text);
   let parsed: unknown = null;
   try {
@@ -312,7 +403,7 @@ export async function writeWith(
       return { memo, written: false, reason: "unavailable" };
     }
     const { reply, violations } = judgeText(text, memo, sheet);
-    if (reply && !violations.length) return { memo: reassemble(reply, memo), written: true };
+    if (reply && !violations.length) return { memo: reassemble(reply, memo, sheet.anchors), written: true };
     first = violations[0];
     steer = violations.map((x) => `- ${x.detail}`).join("\n");
   }

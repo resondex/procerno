@@ -101,6 +101,8 @@ function CodesResults({
   // pill it is - Why and Rivals never load the journey payload, so the shell
   // asks for it once itself (a cached read; Stations reuses it from cache).
   const [roomsAsked, setRoomsAsked] = useState(false);
+  // A brief pin's request to open a map cell; `n` makes a repeat click on the same pin a new request.
+  const [cellReq, setCellReq] = useState<{ id: string; n: number } | null>(null);
   const open = (v: CodesView) => {
     setView(v);
     if (v === "verdict" || v === "map" || v === "portfolio") setTierView(v);
@@ -213,12 +215,20 @@ function CodesResults({
 
       {[...visited].some((v) => TIER.has(v)) && (
         <div className={TIER.has(view) ? "grid gap-8" : "hidden"}>
-          <AnalysisTier key={k("analysis")} runId={runId} projectId={projectId} view={tierView} onView={open} />
+          <AnalysisTier key={k("analysis")} runId={runId} projectId={projectId} view={tierView} onView={open} cellReq={cellReq} />
         </div>
       )}
       {visited.has("brief") && (
         <div className={show("brief")}>
-          <BriefSection key={k("brief")} runId={runId} projectId={projectId} />
+          <BriefSection
+            key={k("brief")}
+            runId={runId}
+            projectId={projectId}
+            onOpenCell={(id) => {
+              setCellReq({ id, n: Date.now() });
+              open("map");
+            }}
+          />
         </div>
       )}
       {visited.has("journey") && (

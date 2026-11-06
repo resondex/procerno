@@ -157,6 +157,10 @@ export interface AnalysisMapView {
   positions: Record<string, Position>;
   /** Pool answers with no code row under the source (honesty line). */
   uncoded: number;
+  /** Every served insight (the summary's list) placed on a map cell by the
+   * tensions' matcher, generic fallbacks included; only ids present in the
+   * map. Match by key AND title - a detector can serve more than one. */
+  insightCells?: { key: string; title: string; cellId: string }[];
 }
 
 /** projects.analysis_decision - the gate pattern (recommended vs decided),

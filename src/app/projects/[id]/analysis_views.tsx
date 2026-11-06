@@ -143,6 +143,7 @@ export default function AnalysisTier({
   projectId,
   view,
   onView,
+  cellReq,
 }: {
   runId: string;
   /** Keys the decision record; absent on share links (read-only). */
@@ -150,6 +151,8 @@ export default function AnalysisTier({
   view: TierView;
   /** Switch the shell's pill (a tension's "Open the position" goes to the Map). */
   onView?: (v: TierView) => void;
+  /** A brief pin's request to open one cell's position; a new `n` is a new request. */
+  cellReq?: { id: string; n: number } | null;
 }) {
   const engines = useEngineSet();
   const q = viewQuery({ engines });
@@ -157,6 +160,13 @@ export default function AnalysisTier({
   const [error, setError] = useState<string | null>(null);
   const [decision, setDecision] = useState<AnalysisDecision | null>(null);
   const [openId, setOpenId] = useState<string | null>(null);
+  // The last pin request applied - adjusted during render (React's derive-from-props
+  // pattern) so a request waits for the map without an effect.
+  const [reqSeen, setReqSeen] = useState<number | null>(null);
+  if (cellReq && cellReq.n !== reqSeen && map && map.positions[cellReq.id]) {
+    setReqSeen(cellReq.n);
+    setOpenId(cellReq.id);
+  }
 
   useEffect(() => {
     let live = true;

@@ -15,12 +15,18 @@
  * root on <body>, <html> gets the pb-printing class, and the print CSS below
  * (scoped to html.pb-printing) hides every other child of <body>. Printing
  * from any other pill never carries the class, so it is unaffected.
+ *
+ * Map pins (2026-11-06): a paragraph's `cells` and a row's `cell` render as
+ * small pin buttons that open that cell's position on The Map pill. They
+ * render only when the shell passes onOpenCell (share links pass none), and
+ * never print.
  */
 
-import { useEffect, useRef, useState } from "react";
+import { createContext, useContext, useEffect, useRef, useState } from "react";
 import {
   BRIEF_FRAMES,
   BRIEF_FRAME_LABELS,
+  type BriefAnchor,
   type BriefFrame,
   type BriefMemo,
   type BriefPara,
@@ -103,6 +109,8 @@ const BRIEF_CSS = `
 .pb-p.pb-beat + .pb-p.pb-beat{ margin-top: 1.15em; }
 .pb-runhead{ display: block; margin-bottom: .15em; }
 .pb-watch{ display: block; margin-top: .3em; font-style: italic; color: var(--ink-2); }
+.pb-pin{ display: inline-block; margin-left: .2em; padding: 0 .1em; font-size: .8em; line-height: 1; vertical-align: .25em; text-decoration: none; cursor: pointer; background: none; border: 0; }
+@media print{ .pb-pin{ display: none !important; } }
 .pb-lede .pb-p:first-of-type{ font-size: 1.07em; line-height: 1.66; }
 .pb-list{ list-style: none; margin: 0; padding: 0; }
 .pb-list li{ display: grid; grid-template-columns: 2.1em 1fr; align-items: baseline; }
@@ -492,6 +500,31 @@ function Viz({ v }: { v: BriefViz }) {
   );
 }
 
+// ---------- map pins ----------
+
+const OpenCellContext = createContext<((id: string) => void) | null>(null);
+
+function Pins({ cells }: { cells?: BriefAnchor[] }) {
+  const onOpen = useContext(OpenCellContext);
+  if (!onOpen || !cells?.length) return null;
+  return (
+    <>
+      {cells.map((c) => (
+        <button
+          key={c.id}
+          type="button"
+          className="pb-pin pb-noprint text-ink-3 hover:text-primary"
+          title={c.label}
+          aria-label={`Open on the map: ${c.label}`}
+          onClick={() => onOpen(c.id)}
+        >
+          {"\u2316"}
+        </button>
+      ))}
+    </>
+  );
+}
+
 // ---------- the memo ----------
 
 const NUMBERED = /^(\d+)\.\s+/;
@@ -509,6 +542,7 @@ function ParaBody({ p, lead }: { p: BriefPara; lead?: string }) {
         {l && (/[.?!:"')]$/.test(l.trim()) ? <b>{l} </b> : <b className="pb-runhead">{l}</b>)}
         {body}
       </Tip>
+      <Pins cells={p.cells} />
       {watch && <span className="pb-watch">{watch}</span>}
     </>
   );
@@ -570,7 +604,10 @@ function Section({ s, lede, wave }: { s: BriefSectionT; lede: boolean; wave: str
                   <td>
                     <Tip tip={r.tip}>{r.label}</Tip>
                   </td>
-                  <td className="pb-r">{r.value}</td>
+                  <td className="pb-r">
+                    {r.value}
+                    <Pins cells={r.cell ? [r.cell] : undefined} />
+                  </td>
                 </tr>
               ))}
             </tbody>
@@ -707,7 +744,16 @@ function printMemo(node: HTMLElement, title: string) {
 
 // ---------- the section ----------
 
-export default function BriefSection({ runId, projectId }: { runId: string; projectId?: string }) {
+export default function BriefSection({
+  runId,
+  projectId,
+  onOpenCell,
+}: {
+  runId: string;
+  projectId?: string;
+  /** Opens a map cell's position on The Map pill; absent on share links (no pins). */
+  onOpenCell?: (id: string) => void;
+}) {
   const engines = useEngineSet();
   const fKey = projectId ? frameKey(projectId) : null;
   const sKey = projectId ? subjectKey(projectId) : null;
@@ -904,13 +950,15 @@ export default function BriefSection({ runId, projectId }: { runId: string; proj
       </div>
 
       <div ref={memoRef} className={loading ? "opacity-50 transition-opacity" : "transition-opacity"}>
-        {writing ? (
-          <Skeleton />
-        ) : memo ? (
-          <Memo memo={memo} subject={view.subject} tracker={view.subjects[0] ?? view.subject} note={memoNote} />
-        ) : (
-          <p className="text-[13px] text-ink-3">This frame has nothing to say yet.</p>
-        )}
+        <OpenCellContext.Provider value={onOpenCell ?? null}>
+          {writing ? (
+            <Skeleton />
+          ) : memo ? (
+            <Memo memo={memo} subject={view.subject} tracker={view.subjects[0] ?? view.subject} note={memoNote} />
+          ) : (
+            <p className="text-[13px] text-ink-3">This frame has nothing to say yet.</p>
+          )}
+        </OpenCellContext.Provider>
       </div>
     </div>
   );

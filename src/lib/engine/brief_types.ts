@@ -32,11 +32,23 @@ export const BRIEF_FRAME_LABELS: Record<BriefFrame, string> = {
   minto: "Situation - complication - resolution",
 };
 
+/** A link from a fact to the analysis-map cell it was read from (2026-11-06).
+ * Rendered as a quiet map pin after the text; a click opens that cell's
+ * position on The Map pill. Never printed. `label` is the position's `where`
+ * and shows only as the pin's tooltip (it may carry analyst wording, which
+ * visible text never does). */
+export interface BriefAnchor {
+  id: string;
+  label: string;
+}
+
 /** One scoreboard or table line. `tip` holds the counts (tooltip only). */
 export interface BriefRow {
   label: string;
   value: string;
   tip?: string;
+  /** The map cell behind the row's number (pin after the value). */
+  cell?: BriefAnchor;
 }
 
 /** One paragraph. `lead` renders bold at the front. `tip` holds counts. */
@@ -44,6 +56,8 @@ export interface BriefPara {
   lead?: string;
   text: string;
   tip?: string;
+  /** One or more map cells behind the paragraph's facts (pins after the text). */
+  cells?: BriefAnchor[];
 }
 
 /** A 2x2 quadrant pair (one grid row: two titled cells side by side). */

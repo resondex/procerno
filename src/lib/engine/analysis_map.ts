@@ -211,6 +211,8 @@ interface CellSpec {
   /** The row's roll-up cell (key "all") among split siblings: rendered with a
    * divider, excluded from the brief's moves and strengths. */
   pooled?: boolean;
+  /** Head-to-head cells: the rival's dictionary key (the brief anchors a matchup by it). */
+  rivalKey?: string;
   rows: PoolRow[];
   /** Brand side / taker side of the side-taking denominator. */
   you: PoolRow[];
@@ -340,6 +342,8 @@ export interface MapCellStat {
   badges: CellBadge[];
   /** The row's pooled All cell: excluded from the brief's moves and strengths. */
   pooled: boolean;
+  /** Head-to-head cells: the rival's dictionary key. */
+  rivalKey?: string;
 }
 
 export async function computeAnalysisMap(
@@ -738,7 +742,7 @@ export async function computeAnalysisMap(
     const rec = cell(won.length, won.length + lost.length);
     const undecided = cell(rows.length - firm.length, rows.length);
     return {
-      band: "fights", row: "h2h", rowLabel: "Head-to-head", key, label: rival.name, rows,
+      band: "fights", row: "h2h", rowLabel: "Head-to-head", key, label: rival.name, rivalKey: rival.key, rows,
       you: won, them: lost,
       taker: { name: rival.name, kind: takerKindOf(rival.key) },
       leakShare: firm.length >= MIN_SIDE ? share(outside.length, firm.length) : 0,
@@ -1217,6 +1221,7 @@ export async function computeAnalysisMap(
             wall: wallGroups[0]?.label ?? null,
             badges: [...badges],
             pooled: !!s.pooled,
+            ...(s.rivalKey ? { rivalKey: s.rivalKey } : {}),
           };
 
         /* -- the position -- */
@@ -1375,7 +1380,8 @@ export async function computeAnalysisMap(
 
   /* -- tensions -- */
   const probe = debug ? { insights: debug.probeInsights ?? summary.insights, out: [] as NonNullable<AnalysisMapDebug["placements"]> } : undefined;
-  const tensions = tensionsOf(summary, facts, specs, cellById, brand, probe);
+  const placed: { key: string; title: string; cellId: string }[] = [];
+  const tensions = tensionsOf(summary, facts, specs, cellById, brand, probe, placed);
   if (debug && probe) debug.placements = probe.out;
 
   /* -- honesty line: map answers on the core panel with no code row -- */
@@ -1391,7 +1397,7 @@ export async function computeAnalysisMap(
   let uncoded = 0;
   for (const r of data.responses) if (mapPrompts.has(r.prompt_id) && core.has(r.model ?? data.run.model) && !coded.has(r.id)) uncoded++;
 
-  return { casting, dots: { named: t.mentioned, picked: t.chosen }, shareOfDecided, tensions, bands, positions, uncoded };
+  return { casting, dots: { named: t.mentioned, picked: t.chosen }, shareOfDecided, tensions, bands, positions, uncoded, insightCells: placed };
 }
 
 /* ------------------------------- casting ------------------------------- */
@@ -1499,7 +1505,8 @@ function tensionsOf(
   specs: CellSpec[],
   cells: Map<string, MapCell>,
   brand: string,
-  probe?: { insights: Insight[]; out: { key: string; kind: string; cellId: string | null; how: string }[] }
+  probe?: { insights: Insight[]; out: { key: string; kind: string; cellId: string | null; how: string }[] },
+  placed?: { key: string; title: string; cellId: string }[]
 ): { title: string; body: string; cellId: string }[] {
   const ids = [...cells.keys()];
   const firstOf = (prefix: string) => ids.find((id) => id.startsWith(prefix)) ?? null;
@@ -1652,6 +1659,11 @@ function tensionsOf(
       const cellId = cellFor(ins.kind, ins.key, ins.title, ins.body);
       probe.out.push({ key: ins.key, kind: ins.kind, cellId, how });
     }
+  if (placed)
+    for (const ins of s.insights) {
+      const cellId = cellFor(ins.kind, ins.key, ins.title, ins.body);
+      if (cellId && cells.has(cellId)) placed.push({ key: ins.key, title: ins.title, cellId });
+    }
   return out;
 }
 
@@ -1664,7 +1676,8 @@ function tensionsOf(
 // am5 (2026-11-04): the brief's language pass - reads bs11, and the casting, tensions, cell notes and position claims say share of picks / direct matchups / buying situations instead of method terms; the first tension carries the commit-rate convention.
 // am6 (2026-11-05): the Overall band - the pooled open-choice cell (the Verdict's base; its position mounts the full decision-rules ledger in the UI) and the pooled rival-leavers cell, which moves here from the fights band's single-angle wide form; the first tension anchors on the pooled cell.
 // am7 (2026-11-05): the Overall band folds into first-of-row All cells - every row with 2+ cells opens with its pooled roll-up (open choice = the headline pool whole, still the ledger's home at chooses:open:all; new pooled cells for head-to-head, rival leavers, both worry rows, value, awareness, criteria and the settled band); base-voiced awareness/criteria cells re-key "general" beside siblings; pooled cells are marked (MapCell.all / MapCellStat.pooled) and never match tension text by label.
-const ANALYSIS_MAP_VERSION = "am7";
+// am8 (2026-11-06): the payload carries insightCells - every served insight placed on its cell - so the brief's facts can link into the map.
+const ANALYSIS_MAP_VERSION = "am8";
 export function computeAnalysisMapCached(run: Run, project: Project, request: ViewRequest = {}): Promise<AnalysisMapView | null> {
   const r = requestOf(request, false);
   return cachedView("analysis_map", ANALYSIS_MAP_VERSION, run, project, (d) => computeAnalysisMap(d, r), { setupDecision: true, judge: true }, r);
