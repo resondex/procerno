@@ -11,6 +11,7 @@ import {
   type CellBadge,
   type CellVerdict,
   type MapCell,
+  type MapRow,
   type Position,
   type PositionStatus,
   type Triage,
@@ -359,6 +360,104 @@ function CellButton({ cell, onOpen, hasPosition }: { cell: MapCell; onOpen: (id:
   );
 }
 
+/** Trial (2026-11-05, Tyler): the chooses band rendered as option C - rooms as
+ * rows, stages as columns. UI-only: the am7 payload, cell ids and positions are
+ * untouched; flip this to false to restore the stage-row rendering everywhere. */
+const TRANSPOSE_CHOOSES = true;
+
+/** Today's stage-row rendering - one labelled row per stage, cells flex-wrapped. */
+function StageRow({ row, positions, onOpen }: { row: MapRow; positions: AnalysisMapView["positions"]; onOpen: (id: string) => void }) {
+  return (
+    <div className="grid grid-cols-1 border-b border-line/60 last:border-b-0 sm:grid-cols-[150px_1fr]">
+      <div className="border-b border-dashed border-line/60 px-2.5 pb-1.5 pt-3 text-[13px] font-medium text-ink sm:border-b-0 sm:border-r sm:border-solid sm:pb-3">
+        {row.stage}
+      </div>
+      <div className="flex flex-wrap gap-2 p-2">
+        {row.cells.map((cell) => (
+          <Fragment key={cell.id}>
+            <CellButton cell={cell} onOpen={onOpen} hasPosition={!!positions[cell.id]} />
+            {cell.all && row.cells.length > 1 && <i aria-hidden className="my-1.5 w-px flex-none self-stretch bg-line" />}
+          </Fragment>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+const cellKeyOf = (id: string) => id.split(":").slice(2).join(":");
+const isRoomKey = (k: string) => k !== "all" && k !== "general";
+
+/** Option C for the chooses band: a row per buyer (All buyers first, "No
+ * particular buyer" last), a column per stage that carries room cells. Stages
+ * with a single every-buyer cell (social validation, learning the category,
+ * premium vs basic) are not columns - the caller keeps rendering them as
+ * today's stage rows beneath. */
+function ChoosesMatrix({ rows, positions, onOpen }: { rows: MapRow[]; positions: AnalysisMapView["positions"]; onOpen: (id: string) => void }) {
+  const cols = rows.map((row) => ({ row, byKey: new Map(row.cells.map((c): [string, MapCell] => [cellKeyOf(c.id), c])) }));
+  const roomKeys: string[] = [];
+  for (const c of cols) for (const k of c.byKey.keys()) if (isRoomKey(k) && !roomKeys.includes(k)) roomKeys.push(k);
+  const hasAll = cols.some((c) => c.byKey.has("all"));
+  const hasGeneral = cols.some((c) => c.byKey.has("general"));
+  const buyers: { key: string; label: string }[] = [
+    ...(hasAll ? [{ key: "all", label: "All buyers" }] : []),
+    ...roomKeys.map((key) => {
+      // The room's display name: a non-Value cell's label; a Value label is "room - line".
+      let label = key;
+      for (const c of cols) {
+        const hit = c.byKey.get(key);
+        if (!hit) continue;
+        if (!hit.id.startsWith("chooses:value:")) {
+          label = hit.label;
+          break;
+        }
+        label = hit.label.split(" - ")[0];
+      }
+      return { key, label };
+    }),
+    ...(hasGeneral ? [{ key: "general", label: "No particular buyer" }] : []),
+  ];
+  const template = { gridTemplateColumns: `minmax(130px, 150px) repeat(${cols.length}, minmax(170px, 1fr))` };
+  return (
+    <div className="overflow-x-auto">
+      <div className="min-w-max sm:min-w-0">
+        <div className="grid border-b border-line/60" style={template}>
+          <div />
+          {cols.map((c) => (
+            <div key={c.row.stage} className="px-2.5 pb-1.5 pt-2 text-[12px] font-medium text-ink">
+              {c.row.stage}
+            </div>
+          ))}
+        </div>
+        {buyers.map((b, bi) => (
+          <div
+            key={b.key}
+            className={`grid border-b last:border-b-0 ${b.key === "all" && buyers.length > 1 ? "border-line" : "border-line/60"}`}
+            style={template}
+          >
+            <div className={`border-r border-line/60 px-2.5 py-2 text-[13px] text-ink ${bi === 0 && hasAll ? "font-semibold" : "font-medium"}`}>
+              {b.label}
+            </div>
+            {cols.map((c) => {
+              const hit = c.byKey.get(b.key);
+              if (!hit) return <div key={c.row.stage} className="p-1.5" />;
+              // Inside a labelled buyer row the room name is redundant; a Value
+              // cell keeps its line name ("Gold Card").
+              const label = hit.id.startsWith("chooses:value:") && hit.label.includes(" - ")
+                ? hit.label.split(" - ").slice(1).join(" - ")
+                : hit.label === b.label ? "" : hit.label;
+              return (
+                <div key={c.row.stage} className="p-1.5 [&>button]:h-full [&>button]:w-full">
+                  <CellButton cell={{ ...hit, label, wide: false, all: false }} onOpen={onOpen} hasPosition={!!positions[hit.id]} />
+                </div>
+              );
+            })}
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 function MapView({ map, onOpen }: { map: AnalysisMapView; onOpen: (id: string) => void }) {
   return (
     <div className="grid gap-5">
@@ -370,34 +469,27 @@ function MapView({ map, onOpen }: { map: AnalysisMapView; onOpen: (id: string) =
           open its position.
         </p>
       </div>
-      {map.bands.map((band) => (
-        <section key={band.title}>
-          <h3 className="text-[11px] font-semibold uppercase tracking-[0.08em] text-ink-3">{band.title}</h3>
-          {band.sub && <p className="mb-2 text-[12px] text-ink-2">{band.sub}</p>}
-          <div className="overflow-hidden rounded-[10px] border border-line bg-surface">
-            {band.rows.map((row) => (
-              <div
-                key={row.stage}
-                className="grid grid-cols-1 border-b border-line/60 last:border-b-0 sm:grid-cols-[150px_1fr]"
-              >
-                <div className="border-b border-dashed border-line/60 px-2.5 pb-1.5 pt-3 text-[13px] font-medium text-ink sm:border-b-0 sm:border-r sm:border-solid sm:pb-3">
-                  {row.stage}
-                </div>
-                <div className="flex flex-wrap gap-2 p-2">
-                  {row.cells.map((cell) => (
-                    <Fragment key={cell.id}>
-                      <CellButton cell={cell} onOpen={onOpen} hasPosition={!!map.positions[cell.id]} />
-                      {cell.all && row.cells.length > 1 && (
-                        <i aria-hidden className="my-1.5 w-px flex-none self-stretch bg-line" />
-                      )}
-                    </Fragment>
-                  ))}
-                </div>
-              </div>
-            ))}
-          </div>
-        </section>
-      ))}
+      {map.bands.map((band) => {
+        const isChooses = band.rows.some((r) => r.cells.some((c) => c.id.startsWith("chooses:")));
+        const matrixRows = TRANSPOSE_CHOOSES && isChooses ? band.rows.filter((r) => r.cells.some((c) => isRoomKey(cellKeyOf(c.id)))) : [];
+        const stripRows = matrixRows.length ? band.rows.filter((r) => !matrixRows.includes(r)) : band.rows;
+        const sub = matrixRows.length
+          ? "Rows are your buyers, columns the reads; the first row pools every buyer, and its open-choice cell carries the full condition ledger. The every-buyer questions keep their own rows below."
+          : band.sub;
+        return (
+          <section key={band.title}>
+            <h3 className="text-[11px] font-semibold uppercase tracking-[0.08em] text-ink-3">{band.title}</h3>
+            {sub && <p className="mb-2 text-[12px] text-ink-2">{sub}</p>}
+            <div className="overflow-hidden rounded-[10px] border border-line bg-surface">
+              {matrixRows.length > 0 && <ChoosesMatrix rows={matrixRows} positions={map.positions} onOpen={onOpen} />}
+              {matrixRows.length > 0 && stripRows.length > 0 && <div className="border-b border-line" />}
+              {stripRows.map((row) => (
+                <StageRow key={row.stage} row={row} positions={map.positions} onOpen={onOpen} />
+              ))}
+            </div>
+          </section>
+        );
+      })}
       <div className="flex flex-wrap items-center gap-x-5 gap-y-2 text-[12px] text-ink-2">
         {(["yours", "contested", "theirs", "nocall"] as const).map((v) => (
           <span key={v} className="flex items-center gap-1.5">
