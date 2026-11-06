@@ -1,6 +1,6 @@
 "use client";
 
-import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { RateCell } from "@/lib/engine/view_data";
 import {
   DEFICIT_TRIAGES,
@@ -363,13 +363,15 @@ function CellButton({ cell, onOpen, hasPosition }: { cell: MapCell; onOpen: (id:
 
 // ---------- Map layout + order preferences (per project, this browser only) ----------
 
-type MapLayout = "aligned" | "matrix";
+type MapLayout = "aligned" | "dossier";
 interface MapPrefs {
   layout: MapLayout;
   /** Buying-situation keys (normalized rooms) in display order. */
   rooms: string[];
   /** The chooses band's row slugs (open / social / awareness / ...) in display order. */
   reads: string[];
+  /** Fixed cells/cards per row (2-6); absent = auto-fit to the width. */
+  perRow?: number;
 }
 
 const mapPrefsKey = (scope: string) => `pa-map-prefs:${scope}`;
@@ -379,7 +381,9 @@ function loadMapPrefs(scope: string): MapPrefs {
     if (raw) {
       const p = JSON.parse(raw) as Partial<MapPrefs>;
       const list = (x: unknown) => (Array.isArray(x) ? x.filter((k): k is string => typeof k === "string") : []);
-      return { layout: p.layout === "matrix" ? "matrix" : "aligned", rooms: list(p.rooms), reads: list(p.reads) };
+      const perRow = typeof p.perRow === "number" && p.perRow >= 2 && p.perRow <= 6 ? Math.round(p.perRow) : undefined;
+      // A stored "matrix" (the retired layout) falls back to aligned.
+      return { layout: p.layout === "dossier" ? "dossier" : "aligned", rooms: list(p.rooms), reads: list(p.reads), perRow };
     }
   } catch {
     /* private window / blocked storage - defaults */
@@ -426,7 +430,7 @@ const innerLabelOf = (c: MapCell) =>
  * its size. A row with only an every-buyer cell (social validation, learning
  * the category, premium) puts it in the All column - that cell IS the row,
  * everything pooled. */
-function AlignedRow({ row, chooses, rooms, positions, onOpen }: { row: MapRow; chooses: boolean; rooms: string[]; positions: AnalysisMapView["positions"]; onOpen: (id: string) => void }) {
+function AlignedRow({ row, chooses, rooms, perRow, positions, onOpen }: { row: MapRow; chooses: boolean; rooms: string[]; perRow?: number; positions: AnalysisMapView["positions"]; onOpen: (id: string) => void }) {
   const allCell = row.cells.find((c) => cellKeyOf(c.id) === "all");
   const rest0 = row.cells.filter((c) => c !== allCell);
   const rest = chooses
@@ -440,7 +444,10 @@ function AlignedRow({ row, chooses, rooms, positions, onOpen }: { row: MapRow; c
       <div className="p-2 sm:border-r sm:border-line/60 [&>button]:h-full [&>button]:w-full">
         {allCell && <CellButton cell={{ ...allCell, wide: false, all: false }} onOpen={onOpen} hasPosition={!!positions[allCell.id]} />}
       </div>
-      <div className="grid content-start gap-2 p-2" style={{ gridTemplateColumns: "repeat(auto-fill, minmax(165px, 1fr))" }}>
+      <div
+        className="grid content-start gap-2 p-2"
+        style={{ gridTemplateColumns: perRow ? `repeat(${perRow}, minmax(0, 1fr))` : "repeat(auto-fill, minmax(165px, 1fr))" }}
+      >
         {rest.map((c) => (
           <CellButton key={c.id} cell={{ ...c, wide: false, all: false }} onOpen={onOpen} hasPosition={!!positions[c.id]} />
         ))}
@@ -449,81 +456,123 @@ function AlignedRow({ row, chooses, rooms, positions, onOpen }: { row: MapRow; c
   );
 }
 
-/** Matrix (option B): within a band, one shared column per thing the band
- * varies by (room / rival / worry / settled question), the All column pinned
- * first, the stage labels pinned left; wider bands scroll sideways. Blank =
- * that contest is not asked there. */
-function BandMatrix({ rows, chooses, rooms, positions, onOpen }: { rows: MapRow[]; chooses: boolean; rooms: string[]; positions: AnalysisMapView["positions"]; onOpen: (id: string) => void }) {
+/** One line inside a dossier card: the question row's name, then the cell's
+ * verdict and note. Clicking it opens the cell's position, like any map cell. */
+function DossierLine({ stage, cell, onOpen, hasPosition }: { stage: string; cell: MapCell; onOpen: (id: string) => void; hasPosition: boolean }) {
+  const c = VCOLOR[cell.verdict];
+  const line = innerLabelOf(cell);
+  return (
+    <button
+      type="button"
+      onClick={() => hasPosition && onOpen(cell.id)}
+      disabled={!hasPosition}
+      title={answersTip(cell.n)}
+      className="flex w-full items-baseline gap-2 border-b border-line/50 px-2.5 py-1.5 text-left transition-colors last:border-b-0 enabled:hover:bg-line/20 disabled:cursor-default"
+    >
+      <span className="w-[96px] flex-none text-[11px] leading-tight text-ink-3">
+        {stage}
+        {line ? ` · ${line}` : ""}
+      </span>
+      <span className="min-w-0">
+        <span className="flex flex-wrap items-center gap-1.5 text-[12.5px] font-semibold" style={{ color: c.fg }}>
+          <i className="inline-block h-1.5 w-1.5 flex-none rounded-full" style={{ background: c.fg }} />
+          {VWORD[cell.verdict]}
+          {cell.badges.map((b) => (
+            <Badge key={b} b={b} />
+          ))}
+        </span>
+        {cell.note && <span className="block text-[11.5px] leading-snug text-ink-2">{cell.note}</span>}
+      </span>
+    </button>
+  );
+}
+
+/** Dossier cards (the round-2 mock's G): the card IS the thing the band varies
+ * by - a buyer, a rival, a worry, a settled question - and the band's question
+ * rows become lines inside it. Every card shares one width whatever the band,
+ * so no band's cells ever read bigger than another's. An All card opens each
+ * band with the pooled lines; rows that exist only pooled (social validation,
+ * learning the category, holding your own) live on it. */
+function DossierBand({ rows, chooses, rooms, perRow, positions, onOpen }: { rows: MapRow[]; chooses: boolean; rooms: string[]; perRow?: number; positions: AnalysisMapView["positions"]; onOpen: (id: string) => void }) {
   const byRow = rows.map((row) => ({ row, byKey: new Map(row.cells.map((c): [string, MapCell] => [cellKeyOf(c.id), c])) }));
   const thingKeys: string[] = [];
   for (const r of byRow) for (const k of r.byKey.keys()) if (isThingKey(k) && !thingKeys.includes(k)) thingKeys.push(k);
   const things = chooses ? orderByPref(thingKeys, (k) => k, rooms) : thingKeys;
-  const labelOf = (key: string) => {
+  const hasGeneral = byRow.some((r) => r.byKey.has("general"));
+  const cards = ["all", ...things, ...(hasGeneral ? ["general"] : [])];
+  const headerOf = (key: string) => {
+    if (key === "general") return "No particular buyer";
     for (const r of byRow) {
       const hit = r.byKey.get(key);
-      if (hit) return chooses ? roomLabelOf(hit) : hit.label;
+      if (hit?.label) return chooses || key === "all" ? roomLabelOf(hit) : hit.label;
     }
-    return key;
-  };
-  const hasAll = byRow.some((r) => r.byKey.has("all"));
-  const hasGeneral = byRow.some((r) => r.byKey.has("general"));
-  const cols = [...(hasAll ? ["all"] : []), ...things, ...(hasGeneral ? ["general"] : [])];
-  const template = { gridTemplateColumns: `130px ${hasAll ? "180px " : ""}repeat(${cols.length - (hasAll ? 1 : 0)}, minmax(170px, 1fr))` };
-  const stickyAll = "sticky left-[130px] z-[2] bg-surface sm:border-r sm:border-line/60";
-  const mapCell = (c: MapCell | undefined, colKey: string) => {
-    if (!c) return <div className="p-1.5" />;
-    return (
-      <div className={`p-1.5 [&>button]:h-full [&>button]:w-full ${colKey === "all" ? stickyAll : ""}`}>
-        <CellButton cell={{ ...c, label: innerLabelOf(c), wide: false, all: false }} onOpen={onOpen} hasPosition={!!positions[c.id]} />
-      </div>
-    );
+    return key === "all" ? "All" : key;
   };
   return (
-    <div className="overflow-x-auto">
-      <div className="min-w-max lg:min-w-0">
-        <div className="grid border-b border-line/60" style={template}>
-          <div className="sticky left-0 z-[2] bg-surface" />
-          {cols.map((k) => (
-            <div key={k} className={`px-2.5 pb-1.5 pt-2 text-[12px] font-semibold text-ink ${k === "all" ? stickyAll : ""}`}>
-              {k === "all" ? "All" : k === "general" ? "No particular buyer" : labelOf(k)}
-            </div>
-          ))}
-        </div>
-        {byRow.map(({ row, byKey }) => (
-          <div key={row.stage} className="grid border-b border-line/60 last:border-b-0" style={template}>
-            <div className="sticky left-0 z-[2] border-r border-line/60 bg-surface px-2.5 py-2 text-[13px] font-medium text-ink">
-              {row.stage}
-            </div>
-            {cols.map((k) => (
-              <Fragment key={k}>{mapCell(byKey.get(k), k)}</Fragment>
+    <div
+      className="grid items-start gap-2.5"
+      style={{ gridTemplateColumns: perRow ? `repeat(${perRow}, minmax(0, 1fr))` : "repeat(auto-fill, minmax(240px, 1fr))" }}
+    >
+      {cards.map((key) => {
+        const lines = byRow
+          .map(({ row, byKey }) => ({ stage: row.stage, cell: byKey.get(key) }))
+          .filter((l): l is { stage: string; cell: MapCell } => !!l.cell);
+        if (lines.length === 0) return null;
+        return (
+          <div key={key} className={`overflow-hidden rounded-[10px] border bg-surface ${key === "all" ? "border-ink-3/50" : "border-line"}`}>
+            <div className="border-b border-line/70 bg-line/15 px-2.5 py-1.5 text-[12.5px] font-semibold text-ink">{headerOf(key)}</div>
+            {lines.map((l) => (
+              <DossierLine key={l.cell.id} stage={l.stage} cell={l.cell} onOpen={onOpen} hasPosition={!!positions[l.cell.id]} />
             ))}
           </div>
-        ))}
-      </div>
+        );
+      })}
     </div>
   );
 }
 
 // ---------- Map settings (layout + order) ----------
 
-function OrderList({ title, note, items, onMove }: { title: string; note?: string; items: { key: string; label: string }[]; onMove: (key: string, dir: -1 | 1) => void }) {
-  const btn = "rounded-[5px] border border-line px-1.5 text-[12px] leading-5 text-ink-2 enabled:hover:border-ink-3 enabled:hover:text-ink disabled:opacity-35";
+/** A drag-to-reorder list. Dragging an item over a sibling reorders live
+ * (sortable style); the parent persists on every move, so dropping anywhere -
+ * or dragging out and letting go - keeps the last order shown. */
+function OrderList({ title, note, items, onReorder }: { title: string; note?: string; items: { key: string; label: string }[]; onReorder: (from: number, to: number) => void }) {
+  const [dragIdx, setDragIdx] = useState<number | null>(null);
   return (
     <div>
       <h4 className="text-[12px] font-semibold text-ink">{title}</h4>
       {note && <p className="mb-1 text-[11.5px] text-ink-3">{note}</p>}
       <ul className="mt-1 grid gap-1">
         {items.map((it, i) => (
-          <li key={it.key} className="flex items-center justify-between gap-2 rounded-[6px] border border-line/70 px-2 py-1 text-[13px] text-ink">
-            <span className="min-w-0 truncate">{it.label}</span>
-            <span className="flex flex-none gap-1">
-              <button type="button" className={btn} disabled={i === 0} onClick={() => onMove(it.key, -1)} aria-label={`Move ${it.label} up`}>
-                &uarr;
-              </button>
-              <button type="button" className={btn} disabled={i === items.length - 1} onClick={() => onMove(it.key, 1)} aria-label={`Move ${it.label} down`}>
-                &darr;
-              </button>
+          <li
+            key={it.key}
+            draggable
+            onDragStart={(e) => {
+              setDragIdx(i);
+              e.dataTransfer.effectAllowed = "move";
+              try {
+                e.dataTransfer.setData("text/plain", it.label);
+              } catch {
+                /* some browsers refuse setData mid-render - drag still works */
+              }
+            }}
+            onDragOver={(e) => {
+              e.preventDefault();
+              if (dragIdx !== null && dragIdx !== i) {
+                onReorder(dragIdx, i);
+                setDragIdx(i);
+              }
+            }}
+            onDrop={(e) => e.preventDefault()}
+            onDragEnd={() => setDragIdx(null)}
+            className={`flex cursor-grab items-center gap-2 rounded-[6px] border bg-surface px-2 py-1 text-[13px] text-ink active:cursor-grabbing ${
+              dragIdx === i ? "border-primary opacity-60" : "border-line/70"
+            }`}
+          >
+            <span aria-hidden className="flex-none select-none text-[11px] leading-none tracking-[0.12em] text-ink-3">
+              ⠿
             </span>
+            <span className="min-w-0 truncate">{it.label}</span>
           </li>
         ))}
       </ul>
@@ -552,12 +601,11 @@ function MapView({ map, onOpen, prefScope }: { map: AnalysisMapView; onOpen: (id
   const readCatalog = useMemo(() => (chooses?.rows ?? []).map((r) => ({ key: rowSlugOf(r), label: r.stage })), [chooses]);
   const orderedRooms = orderByPref(roomCatalog, (x) => x.key, prefs.rooms);
   const orderedReads = orderByPref(readCatalog, (x) => x.key, prefs.reads);
-  const move = (list: "rooms" | "reads", key: string, dir: -1 | 1) => {
+  const reorder = (list: "rooms" | "reads", from: number, to: number) => {
     const keys = (list === "rooms" ? orderedRooms : orderedReads).map((x) => x.key);
-    const i = keys.indexOf(key);
-    const j = i + dir;
-    if (i < 0 || j < 0 || j >= keys.length) return;
-    [keys[i], keys[j]] = [keys[j], keys[i]];
+    if (from < 0 || from >= keys.length || to < 0 || to >= keys.length) return;
+    const [k] = keys.splice(from, 1);
+    keys.splice(to, 0, k);
     update({ ...prefs, [list]: keys });
   };
 
@@ -569,8 +617,8 @@ function MapView({ map, onOpen, prefScope }: { map: AnalysisMapView; onOpen: (id
         <h2 className="text-lg font-semibold text-ink">The coverage map, measured</h2>
         <p className="mt-1 text-[13px] leading-relaxed text-ink-2">
           Every contest the tracker runs, one cell each. Each band varies by what that contest actually varies by -
-          your buyers, your named rivals, the worries you confirmed, the settled-customer questions. The first column
-          pools everything in the row. Click any cell to open its position.
+          your buyers, your named rivals, the worries you confirmed, the settled-customer questions. The All cell -
+          or the All card - pools everything beside it. Click any cell to open its position.
         </p>
       </div>
 
@@ -580,8 +628,8 @@ function MapView({ map, onOpen, prefScope }: { map: AnalysisMapView; onOpen: (id
           <button type="button" className={seg(prefs.layout === "aligned")} onClick={() => update({ ...prefs, layout: "aligned" })}>
             Aligned
           </button>
-          <button type="button" className={seg(prefs.layout === "matrix")} onClick={() => update({ ...prefs, layout: "matrix" })}>
-            Matrix
+          <button type="button" className={seg(prefs.layout === "dossier")} onClick={() => update({ ...prefs, layout: "dossier" })}>
+            Cards
           </button>
           <button type="button" className={seg(arrange)} onClick={() => setArrange(!arrange)}>
             Arrange order {arrange ? "\u25B4" : "\u25BE"}
@@ -589,10 +637,21 @@ function MapView({ map, onOpen, prefScope }: { map: AnalysisMapView; onOpen: (id
         </div>
         {arrange && (
           <div className="grid gap-4 rounded-[10px] border border-line bg-surface p-3 sm:grid-cols-2">
-            <OrderList title="Buying situations" note="Sets the cell order (aligned) or column order (matrix)." items={orderedRooms} onMove={(k, d) => move("rooms", k, d)} />
-            <OrderList title="Question rows" note="The chooses band's rows, the every-buyer questions included." items={orderedReads} onMove={(k, d) => move("reads", k, d)} />
+            <OrderList title="Buying situations" note="Drag to reorder - card order (cards) or cell order within each row (aligned)." items={orderedRooms} onReorder={(f, t) => reorder("rooms", f, t)} />
+            <OrderList title="Question rows" note="Drag to reorder - the chooses band's rows, and the line order inside each card." items={orderedReads} onReorder={(f, t) => reorder("reads", f, t)} />
+            <div className="flex flex-wrap items-center gap-2 text-[12px] sm:col-span-2">
+              <span className="text-ink-3">Cards per row:</span>
+              <button type="button" className={seg(!prefs.perRow)} onClick={() => update({ ...prefs, perRow: undefined })}>
+                Auto
+              </button>
+              {[2, 3, 4, 5].map((n) => (
+                <button key={n} type="button" className={seg(prefs.perRow === n)} onClick={() => update({ ...prefs, perRow: n })}>
+                  {n}
+                </button>
+              ))}
+            </div>
             <div className="sm:col-span-2">
-              <button type="button" className="text-[12px] text-primary underline decoration-dotted underline-offset-2" onClick={() => update({ ...prefs, rooms: [], reads: [] })}>
+              <button type="button" className="text-[12px] text-primary underline decoration-dotted underline-offset-2" onClick={() => update({ ...prefs, rooms: [], reads: [], perRow: undefined })}>
                 Reset to setup order
               </button>
             </div>
@@ -607,15 +666,15 @@ function MapView({ map, onOpen, prefScope }: { map: AnalysisMapView; onOpen: (id
           <section key={band.title}>
             <h3 className="text-[11px] font-semibold uppercase tracking-[0.08em] text-ink-3">{band.title}</h3>
             {band.sub && <p className="mb-2 text-[12px] text-ink-2">{band.sub}</p>}
-            <div className="overflow-hidden rounded-[10px] border border-line bg-surface">
-              {prefs.layout === "matrix" ? (
-                <BandMatrix rows={rows} chooses={isCh} rooms={prefs.rooms} positions={map.positions} onOpen={onOpen} />
-              ) : (
-                rows.map((row) => (
-                  <AlignedRow key={row.stage} row={row} chooses={isCh} rooms={prefs.rooms} positions={map.positions} onOpen={onOpen} />
-                ))
-              )}
-            </div>
+            {prefs.layout === "dossier" ? (
+              <DossierBand rows={rows} chooses={isCh} rooms={prefs.rooms} perRow={prefs.perRow} positions={map.positions} onOpen={onOpen} />
+            ) : (
+              <div className="overflow-hidden rounded-[10px] border border-line bg-surface">
+                {rows.map((row) => (
+                  <AlignedRow key={row.stage} row={row} chooses={isCh} rooms={prefs.rooms} perRow={prefs.perRow} positions={map.positions} onOpen={onOpen} />
+                ))}
+              </div>
+            )}
           </section>
         );
       })}
