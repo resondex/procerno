@@ -15,7 +15,8 @@ import HumanCodingPanel from "./human_coding_panel";
 import AnalysisTier, { type TierView } from "./analysis_views";
 import BriefSection from "./brief_view";
 import JourneySection from "./journey_view";
-import WhySection from "./why_view";
+import RulesSection from "./rules_view";
+import EvidencePanel, { EVIDENCE_CAP, type EvidenceRequest } from "./evidence_panel";
 import RivalsSection from "./rivals_view";
 import BuyersSection from "./buyers_view";
 import { MetricsSection } from "./metrics_view";
@@ -60,8 +61,11 @@ export default function RunResults({
  * BRIEF_PILL_DESIGN_2026-11-04.md - seven memo frames over one /brief fetch)
  * between The Map and The Portfolio. The Verdict absorbed the old
  * Summary group (The brief, Boardroom, Five questions). Behind them sit the
- * analyst tools - Stations, Why, Rivals, Buyers and the pivot - each reading
- * answer_codes under the project's code source.
+ * analyst tools - Stations, Decision rules, Rivals, Buyers and the pivot -
+ * each reading answer_codes under the project's code source. The Why lens
+ * retired 2026-11-05: the per-cell why lives in the Map's position panels,
+ * the pooled headline findings in the Verdict and Brief, and its one unique
+ * artifact - the decision-rules explorer - is the Decision rules pill.
  */
 function CodesResults({
   runId,
@@ -74,13 +78,14 @@ function CodesResults({
 }) {
   // The Panel lens (2026-11-03): the engine set every section reads under.
   const panel = usePanel(runId, projectId);
-  type CodesView = TierView | "brief" | "journey" | "why" | "rivals" | "buyers" | "metrics";
+  type CodesView = TierView | "brief" | "journey" | "rules" | "rivals" | "buyers" | "metrics";
   const [view, setView] = useState<CodesView>("verdict");
   // The analysis tier is ONE mounted component; its three pills only switch
   // which subview it shows (the last one, while an analyst tool is open).
   const [tierView, setTierView] = useState<TierView>("verdict");
   // The global buyer filter of the Analysis tier ("" = all buyers). Stations
-  // and Buyers follow it; Why and Rivals are measured across all buyers.
+  // and Buyers follow it; Decision rules and Rivals are measured across all
+  // buyers.
   const [room, setRoom] = useState<string>("");
   // The rooms list, reported up by Stations once its first payload lands.
   const [rooms, setRooms] = useState<string[]>([]);
@@ -93,7 +98,7 @@ function CodesResults({
   // requests, a multi-second reload on every return otherwise.
   const [visited, setVisited] = useState<Set<CodesView>>(() => new Set(["verdict"]));
   const TIER: ReadonlySet<CodesView> = new Set(["verdict", "map", "portfolio"]);
-  const ANALYSIS: ReadonlySet<CodesView> = new Set(["journey", "why", "rivals", "buyers", "metrics"]);
+  const ANALYSIS: ReadonlySet<CodesView> = new Set(["journey", "rules", "rivals", "buyers", "metrics"]);
   // The buyer bar needs the rooms list on the FIRST Analysis open, whichever
   // pill it is - Why and Rivals never load the journey payload, so the shell
   // asks for it once itself (a cached read; Stations reuses it from cache).
@@ -142,7 +147,7 @@ function CodesResults({
             ]],
             ["Analyst tools", [
               ["journey", "Stations"],
-              ["why", "Why"],
+              ["rules", "Decision rules"],
               ["rivals", "Rivals"],
               ["buyers", "Buyers"],
               ["metrics", "Build a table"],
@@ -201,7 +206,7 @@ function CodesResults({
         )}
         {ANALYSIS.has(view) && rooms.length > 0 && room !== "" && (
           <p className="text-[12px] text-ink-3">
-            Stations and Buyers follow this buyer; Why and Rivals are measured across all buyers.
+            Stations and Buyers follow this buyer; Decision rules and Rivals are measured across all buyers.
           </p>
         )}
       </div>
@@ -224,9 +229,9 @@ function CodesResults({
           <JourneySection key={k("journey")} runId={runId} room={room} onRoom={setRoom} onRooms={reportRooms} />
         </div>
       )}
-      {visited.has("why") && (
-        <div className={show("why")}>
-          <WhySection key={k("why")} runId={runId} />
+      {visited.has("rules") && (
+        <div className={show("rules")}>
+          <RulesPill key={k("rules")} runId={runId} />
         </div>
       )}
       {visited.has("rivals") && (
@@ -254,6 +259,24 @@ function CodesResults({
       )}
       </EngineSetContext.Provider>
     </div>
+  );
+}
+
+/** The Decision rules pill (2026-11-05, Why retired): the full decision-rules
+ * explorer with the evidence drill wired - the condition ledger's own home,
+ * where the Why lens had kept it behind an "All conditions" expander. */
+function RulesPill({ runId }: { runId: string }) {
+  const [drill, setDrill] = useState<EvidenceRequest | null>(null);
+  return (
+    <>
+      <RulesSection
+        runId={runId}
+        onEvidence={(ids, title) =>
+          setDrill({ ids: ids.slice(0, EVIDENCE_CAP), title, total: ids.length })
+        }
+      />
+      {drill && <EvidencePanel runId={runId} request={drill} onClose={() => setDrill(null)} />}
+    </>
   );
 }
 
