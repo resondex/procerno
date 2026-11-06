@@ -362,8 +362,12 @@ function CellButton({ cell, onOpen, hasPosition }: { cell: MapCell; onOpen: (id:
 
 /** Trial (2026-11-05, Tyler): the chooses band rendered as option C - rooms as
  * rows, stages as columns. UI-only: the am7 payload, cell ids and positions are
- * untouched; flip this to false to restore the stage-row rendering everywhere. */
-const TRANSPOSE_CHOOSES = true;
+ * untouched either way. REVERTED same day (Tyler): the every-buyer stages
+ * (social validation, learning the category) kept their own stage rows beneath
+ * the matrix, which put question types and buyers in the same left rail -
+ * confusing. Any future retry must give those strips a visually separate home
+ * (their own sub-band or header) before flipping this back on. */
+const TRANSPOSE_CHOOSES = false;
 
 /** Today's stage-row rendering - one labelled row per stage, cells flex-wrapped. */
 function StageRow({ row, positions, onOpen }: { row: MapRow; positions: AnalysisMapView["positions"]; onOpen: (id: string) => void }) {
