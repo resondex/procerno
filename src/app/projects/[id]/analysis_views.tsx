@@ -1,6 +1,6 @@
 "use client";
 
-import { Fragment, useCallback, useEffect, useRef, useState } from "react";
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { RateCell } from "@/lib/engine/view_data";
 import {
   DEFICIT_TRIAGES,
@@ -10,6 +10,7 @@ import {
   type AnalysisMapView,
   type CellBadge,
   type CellVerdict,
+  type MapBand,
   type MapCell,
   type MapRow,
   type Position,
@@ -216,7 +217,7 @@ export default function AnalysisTier({
     <div className="pa-root grid gap-8">
       <style>{TIER_CSS}</style>
       {view === "verdict" && <VerdictView map={map} onOpen={openFromVerdict} />}
-      {view === "map" && <MapView map={map} onOpen={openPosition} />}
+      {view === "map" && <MapView map={map} onOpen={openPosition} prefScope={projectId ?? "shared"} />}
       {view === "portfolio" && <PortfolioView map={map} decision={decision} onOpen={openPosition} />}
       {position && (
         <PositionPanel
@@ -360,101 +361,142 @@ function CellButton({ cell, onOpen, hasPosition }: { cell: MapCell; onOpen: (id:
   );
 }
 
-/** Trial (2026-11-05, Tyler): the chooses band rendered as option C - rooms as
- * rows, stages as columns. UI-only: the am7 payload, cell ids and positions are
- * untouched either way. REVERTED same day (Tyler): the every-buyer stages
- * (social validation, learning the category) kept their own stage rows beneath
- * the matrix, which put question types and buyers in the same left rail -
- * confusing. Any future retry must give those strips a visually separate home
- * (their own sub-band or header) before flipping this back on. */
-const TRANSPOSE_CHOOSES = false;
+// ---------- Map layout + order preferences (per project, this browser only) ----------
 
-/** Today's stage-row rendering - one labelled row per stage, cells flex-wrapped. */
-function StageRow({ row, positions, onOpen }: { row: MapRow; positions: AnalysisMapView["positions"]; onOpen: (id: string) => void }) {
+type MapLayout = "aligned" | "matrix";
+interface MapPrefs {
+  layout: MapLayout;
+  /** Buying-situation keys (normalized rooms) in display order. */
+  rooms: string[];
+  /** The chooses band's row slugs (open / social / awareness / ...) in display order. */
+  reads: string[];
+}
+
+const mapPrefsKey = (scope: string) => `pa-map-prefs:${scope}`;
+function loadMapPrefs(scope: string): MapPrefs {
+  try {
+    const raw = typeof window === "undefined" ? null : window.localStorage.getItem(mapPrefsKey(scope));
+    if (raw) {
+      const p = JSON.parse(raw) as Partial<MapPrefs>;
+      const list = (x: unknown) => (Array.isArray(x) ? x.filter((k): k is string => typeof k === "string") : []);
+      return { layout: p.layout === "matrix" ? "matrix" : "aligned", rooms: list(p.rooms), reads: list(p.reads) };
+    }
+  } catch {
+    /* private window / blocked storage - defaults */
+  }
+  return { layout: "aligned", rooms: [], reads: [] };
+}
+function saveMapPrefs(scope: string, p: MapPrefs) {
+  try {
+    window.localStorage.setItem(mapPrefsKey(scope), JSON.stringify(p));
+  } catch {
+    /* fine - the choice lasts the session */
+  }
+}
+
+const cellKeyOf = (id: string) => id.split(":").slice(2).join(":");
+const rowSlugOf = (row: MapRow) => row.cells[0]?.id.split(":")[1] ?? "";
+/** A key that names a thing (room / rival / worry / question) - not the row's
+ * pooled "all" cell and not the "general" (no particular buyer) cell. */
+const isThingKey = (k: string) => k !== "all" && k !== "general";
+const isChoosesBand = (band: MapBand) => band.rows.some((r) => r.cells.some((c) => c.id.startsWith("chooses:")));
+
+/** Sort by a stored key order; keys the list does not know keep their natural
+ * order after the known ones (a new room appears at the end, never lost). */
+function orderByPref<T>(items: T[], keyOf: (t: T) => string, pref: string[]): T[] {
+  const nat = new Map(items.map((t, i) => [t, i]));
+  const rank = (t: T) => {
+    const i = pref.indexOf(keyOf(t));
+    return i >= 0 ? i : pref.length + (nat.get(t) ?? 0);
+  };
+  return [...items].sort((a, b) => rank(a) - rank(b));
+}
+
+/** The room's display name: a non-Value cell's label; a Value label is "room - line". */
+const roomLabelOf = (c: MapCell) => (c.id.startsWith("chooses:value:") ? c.label.split(" - ")[0] : c.label);
+/** Inside a labelled column or row the room name is redundant; a Value cell keeps its line name. */
+const innerLabelOf = (c: MapCell) =>
+  c.id.startsWith("chooses:value:") && c.label.includes(" - ") ? c.label.split(" - ").slice(1).join(" - ") : "";
+
+// ---------- The Map: two layouts ----------
+
+/** Aligned (option A + the pinned All column): every row is
+ * [stage label | the row's All cell | the split cells on a fixed column grid],
+ * so the pooled cells line up down the whole map and a wrapped orphan keeps
+ * its size. A row with only an every-buyer cell (social validation, learning
+ * the category, premium) puts it in the All column - that cell IS the row,
+ * everything pooled. */
+function AlignedRow({ row, chooses, rooms, positions, onOpen }: { row: MapRow; chooses: boolean; rooms: string[]; positions: AnalysisMapView["positions"]; onOpen: (id: string) => void }) {
+  const allCell = row.cells.find((c) => cellKeyOf(c.id) === "all");
+  const rest0 = row.cells.filter((c) => c !== allCell);
+  const rest = chooses
+    ? [...orderByPref(rest0.filter((c) => isThingKey(cellKeyOf(c.id))), (c) => cellKeyOf(c.id), rooms), ...rest0.filter((c) => !isThingKey(cellKeyOf(c.id)))]
+    : rest0;
   return (
-    <div className="grid grid-cols-1 border-b border-line/60 last:border-b-0 sm:grid-cols-[150px_1fr]">
+    <div className="grid grid-cols-1 border-b border-line/60 last:border-b-0 sm:grid-cols-[150px_200px_1fr]">
       <div className="border-b border-dashed border-line/60 px-2.5 pb-1.5 pt-3 text-[13px] font-medium text-ink sm:border-b-0 sm:border-r sm:border-solid sm:pb-3">
         {row.stage}
       </div>
-      <div className="flex flex-wrap gap-2 p-2">
-        {row.cells.map((cell) => (
-          <Fragment key={cell.id}>
-            <CellButton cell={cell} onOpen={onOpen} hasPosition={!!positions[cell.id]} />
-            {cell.all && row.cells.length > 1 && <i aria-hidden className="my-1.5 w-px flex-none self-stretch bg-line" />}
-          </Fragment>
+      <div className="p-2 sm:border-r sm:border-line/60 [&>button]:h-full [&>button]:w-full">
+        {allCell && <CellButton cell={{ ...allCell, wide: false, all: false }} onOpen={onOpen} hasPosition={!!positions[allCell.id]} />}
+      </div>
+      <div className="grid content-start gap-2 p-2" style={{ gridTemplateColumns: "repeat(auto-fill, minmax(165px, 1fr))" }}>
+        {rest.map((c) => (
+          <CellButton key={c.id} cell={{ ...c, wide: false, all: false }} onOpen={onOpen} hasPosition={!!positions[c.id]} />
         ))}
       </div>
     </div>
   );
 }
 
-const cellKeyOf = (id: string) => id.split(":").slice(2).join(":");
-const isRoomKey = (k: string) => k !== "all" && k !== "general";
-
-/** Option C for the chooses band: a row per buyer (All buyers first, "No
- * particular buyer" last), a column per stage that carries room cells. Stages
- * with a single every-buyer cell (social validation, learning the category,
- * premium vs basic) are not columns - the caller keeps rendering them as
- * today's stage rows beneath. */
-function ChoosesMatrix({ rows, positions, onOpen }: { rows: MapRow[]; positions: AnalysisMapView["positions"]; onOpen: (id: string) => void }) {
-  const cols = rows.map((row) => ({ row, byKey: new Map(row.cells.map((c): [string, MapCell] => [cellKeyOf(c.id), c])) }));
-  const roomKeys: string[] = [];
-  for (const c of cols) for (const k of c.byKey.keys()) if (isRoomKey(k) && !roomKeys.includes(k)) roomKeys.push(k);
-  const hasAll = cols.some((c) => c.byKey.has("all"));
-  const hasGeneral = cols.some((c) => c.byKey.has("general"));
-  const buyers: { key: string; label: string }[] = [
-    ...(hasAll ? [{ key: "all", label: "All buyers" }] : []),
-    ...roomKeys.map((key) => {
-      // The room's display name: a non-Value cell's label; a Value label is "room - line".
-      let label = key;
-      for (const c of cols) {
-        const hit = c.byKey.get(key);
-        if (!hit) continue;
-        if (!hit.id.startsWith("chooses:value:")) {
-          label = hit.label;
-          break;
-        }
-        label = hit.label.split(" - ")[0];
-      }
-      return { key, label };
-    }),
-    ...(hasGeneral ? [{ key: "general", label: "No particular buyer" }] : []),
-  ];
-  const template = { gridTemplateColumns: `minmax(130px, 150px) repeat(${cols.length}, minmax(170px, 1fr))` };
+/** Matrix (option B): within a band, one shared column per thing the band
+ * varies by (room / rival / worry / settled question), the All column pinned
+ * first, the stage labels pinned left; wider bands scroll sideways. Blank =
+ * that contest is not asked there. */
+function BandMatrix({ rows, chooses, rooms, positions, onOpen }: { rows: MapRow[]; chooses: boolean; rooms: string[]; positions: AnalysisMapView["positions"]; onOpen: (id: string) => void }) {
+  const byRow = rows.map((row) => ({ row, byKey: new Map(row.cells.map((c): [string, MapCell] => [cellKeyOf(c.id), c])) }));
+  const thingKeys: string[] = [];
+  for (const r of byRow) for (const k of r.byKey.keys()) if (isThingKey(k) && !thingKeys.includes(k)) thingKeys.push(k);
+  const things = chooses ? orderByPref(thingKeys, (k) => k, rooms) : thingKeys;
+  const labelOf = (key: string) => {
+    for (const r of byRow) {
+      const hit = r.byKey.get(key);
+      if (hit) return chooses ? roomLabelOf(hit) : hit.label;
+    }
+    return key;
+  };
+  const hasAll = byRow.some((r) => r.byKey.has("all"));
+  const hasGeneral = byRow.some((r) => r.byKey.has("general"));
+  const cols = [...(hasAll ? ["all"] : []), ...things, ...(hasGeneral ? ["general"] : [])];
+  const template = { gridTemplateColumns: `130px ${hasAll ? "180px " : ""}repeat(${cols.length - (hasAll ? 1 : 0)}, minmax(170px, 1fr))` };
+  const stickyAll = "sticky left-[130px] z-[2] bg-surface sm:border-r sm:border-line/60";
+  const mapCell = (c: MapCell | undefined, colKey: string) => {
+    if (!c) return <div className="p-1.5" />;
+    return (
+      <div className={`p-1.5 [&>button]:h-full [&>button]:w-full ${colKey === "all" ? stickyAll : ""}`}>
+        <CellButton cell={{ ...c, label: innerLabelOf(c), wide: false, all: false }} onOpen={onOpen} hasPosition={!!positions[c.id]} />
+      </div>
+    );
+  };
   return (
     <div className="overflow-x-auto">
-      <div className="min-w-max sm:min-w-0">
+      <div className="min-w-max lg:min-w-0">
         <div className="grid border-b border-line/60" style={template}>
-          <div />
-          {cols.map((c) => (
-            <div key={c.row.stage} className="px-2.5 pb-1.5 pt-2 text-[12px] font-medium text-ink">
-              {c.row.stage}
+          <div className="sticky left-0 z-[2] bg-surface" />
+          {cols.map((k) => (
+            <div key={k} className={`px-2.5 pb-1.5 pt-2 text-[12px] font-semibold text-ink ${k === "all" ? stickyAll : ""}`}>
+              {k === "all" ? "All" : k === "general" ? "No particular buyer" : labelOf(k)}
             </div>
           ))}
         </div>
-        {buyers.map((b, bi) => (
-          <div
-            key={b.key}
-            className={`grid border-b last:border-b-0 ${b.key === "all" && buyers.length > 1 ? "border-line" : "border-line/60"}`}
-            style={template}
-          >
-            <div className={`border-r border-line/60 px-2.5 py-2 text-[13px] text-ink ${bi === 0 && hasAll ? "font-semibold" : "font-medium"}`}>
-              {b.label}
+        {byRow.map(({ row, byKey }) => (
+          <div key={row.stage} className="grid border-b border-line/60 last:border-b-0" style={template}>
+            <div className="sticky left-0 z-[2] border-r border-line/60 bg-surface px-2.5 py-2 text-[13px] font-medium text-ink">
+              {row.stage}
             </div>
-            {cols.map((c) => {
-              const hit = c.byKey.get(b.key);
-              if (!hit) return <div key={c.row.stage} className="p-1.5" />;
-              // Inside a labelled buyer row the room name is redundant; a Value
-              // cell keeps its line name ("Gold Card").
-              const label = hit.id.startsWith("chooses:value:") && hit.label.includes(" - ")
-                ? hit.label.split(" - ").slice(1).join(" - ")
-                : hit.label === b.label ? "" : hit.label;
-              return (
-                <div key={c.row.stage} className="p-1.5 [&>button]:h-full [&>button]:w-full">
-                  <CellButton cell={{ ...hit, label, wide: false, all: false }} onOpen={onOpen} hasPosition={!!positions[hit.id]} />
-                </div>
-              );
-            })}
+            {cols.map((k) => (
+              <Fragment key={k}>{mapCell(byKey.get(k), k)}</Fragment>
+            ))}
           </div>
         ))}
       </div>
@@ -462,34 +504,117 @@ function ChoosesMatrix({ rows, positions, onOpen }: { rows: MapRow[]; positions:
   );
 }
 
-function MapView({ map, onOpen }: { map: AnalysisMapView; onOpen: (id: string) => void }) {
+// ---------- Map settings (layout + order) ----------
+
+function OrderList({ title, note, items, onMove }: { title: string; note?: string; items: { key: string; label: string }[]; onMove: (key: string, dir: -1 | 1) => void }) {
+  const btn = "rounded-[5px] border border-line px-1.5 text-[12px] leading-5 text-ink-2 enabled:hover:border-ink-3 enabled:hover:text-ink disabled:opacity-35";
+  return (
+    <div>
+      <h4 className="text-[12px] font-semibold text-ink">{title}</h4>
+      {note && <p className="mb-1 text-[11.5px] text-ink-3">{note}</p>}
+      <ul className="mt-1 grid gap-1">
+        {items.map((it, i) => (
+          <li key={it.key} className="flex items-center justify-between gap-2 rounded-[6px] border border-line/70 px-2 py-1 text-[13px] text-ink">
+            <span className="min-w-0 truncate">{it.label}</span>
+            <span className="flex flex-none gap-1">
+              <button type="button" className={btn} disabled={i === 0} onClick={() => onMove(it.key, -1)} aria-label={`Move ${it.label} up`}>
+                &uarr;
+              </button>
+              <button type="button" className={btn} disabled={i === items.length - 1} onClick={() => onMove(it.key, 1)} aria-label={`Move ${it.label} down`}>
+                &darr;
+              </button>
+            </span>
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
+function MapView({ map, onOpen, prefScope }: { map: AnalysisMapView; onOpen: (id: string) => void; prefScope: string }) {
+  const [prefs, setPrefs] = useState<MapPrefs>(() => loadMapPrefs(prefScope));
+  const [arrange, setArrange] = useState(false);
+  const update = (p: MapPrefs) => {
+    setPrefs(p);
+    saveMapPrefs(prefScope, p);
+  };
+
+  const chooses = map.bands.find(isChoosesBand);
+  const roomCatalog = useMemo(() => {
+    const out: { key: string; label: string }[] = [];
+    for (const row of chooses?.rows ?? [])
+      for (const c of row.cells) {
+        const k = cellKeyOf(c.id);
+        if (isThingKey(k) && !out.some((x) => x.key === k)) out.push({ key: k, label: roomLabelOf(c) });
+      }
+    return out;
+  }, [chooses]);
+  const readCatalog = useMemo(() => (chooses?.rows ?? []).map((r) => ({ key: rowSlugOf(r), label: r.stage })), [chooses]);
+  const orderedRooms = orderByPref(roomCatalog, (x) => x.key, prefs.rooms);
+  const orderedReads = orderByPref(readCatalog, (x) => x.key, prefs.reads);
+  const move = (list: "rooms" | "reads", key: string, dir: -1 | 1) => {
+    const keys = (list === "rooms" ? orderedRooms : orderedReads).map((x) => x.key);
+    const i = keys.indexOf(key);
+    const j = i + dir;
+    if (i < 0 || j < 0 || j >= keys.length) return;
+    [keys[i], keys[j]] = [keys[j], keys[i]];
+    update({ ...prefs, [list]: keys });
+  };
+
+  const seg = (on: boolean) =>
+    `rounded-full border px-3 py-0.5 text-[12px] ${on ? "border-primary font-semibold text-primary" : "border-line text-ink-2 hover:border-ink-3"}`;
   return (
     <div className="grid gap-5">
       <div className="max-w-[88ch]">
         <h2 className="text-lg font-semibold text-ink">The coverage map, measured</h2>
         <p className="mt-1 text-[13px] leading-relaxed text-ink-2">
           Every contest the tracker runs, one cell each. Each band varies by what that contest actually varies by -
-          your buyers, your named rivals, the worries you confirmed, the settled-customer questions. Click any cell to
-          open its position.
+          your buyers, your named rivals, the worries you confirmed, the settled-customer questions. The first column
+          pools everything in the row. Click any cell to open its position.
         </p>
       </div>
+
+      <div className="grid gap-2">
+        <div className="flex flex-wrap items-center gap-2 text-[12px]">
+          <span className="text-ink-3">Layout:</span>
+          <button type="button" className={seg(prefs.layout === "aligned")} onClick={() => update({ ...prefs, layout: "aligned" })}>
+            Aligned
+          </button>
+          <button type="button" className={seg(prefs.layout === "matrix")} onClick={() => update({ ...prefs, layout: "matrix" })}>
+            Matrix
+          </button>
+          <button type="button" className={seg(arrange)} onClick={() => setArrange(!arrange)}>
+            Arrange order {arrange ? "\u25B4" : "\u25BE"}
+          </button>
+        </div>
+        {arrange && (
+          <div className="grid gap-4 rounded-[10px] border border-line bg-surface p-3 sm:grid-cols-2">
+            <OrderList title="Buying situations" note="Sets the cell order (aligned) or column order (matrix)." items={orderedRooms} onMove={(k, d) => move("rooms", k, d)} />
+            <OrderList title="Question rows" note="The chooses band's rows, the every-buyer questions included." items={orderedReads} onMove={(k, d) => move("reads", k, d)} />
+            <div className="sm:col-span-2">
+              <button type="button" className="text-[12px] text-primary underline decoration-dotted underline-offset-2" onClick={() => update({ ...prefs, rooms: [], reads: [] })}>
+                Reset to setup order
+              </button>
+            </div>
+          </div>
+        )}
+      </div>
+
       {map.bands.map((band) => {
-        const isChooses = band.rows.some((r) => r.cells.some((c) => c.id.startsWith("chooses:")));
-        const matrixRows = TRANSPOSE_CHOOSES && isChooses ? band.rows.filter((r) => r.cells.some((c) => isRoomKey(cellKeyOf(c.id)))) : [];
-        const stripRows = matrixRows.length ? band.rows.filter((r) => !matrixRows.includes(r)) : band.rows;
-        const sub = matrixRows.length
-          ? "Rows are your buyers, columns the reads; the first row pools every buyer, and its open-choice cell carries the full condition ledger. The every-buyer questions keep their own rows below."
-          : band.sub;
+        const isCh = isChoosesBand(band);
+        const rows = isCh ? orderByPref(band.rows, rowSlugOf, prefs.reads) : band.rows;
         return (
           <section key={band.title}>
             <h3 className="text-[11px] font-semibold uppercase tracking-[0.08em] text-ink-3">{band.title}</h3>
-            {sub && <p className="mb-2 text-[12px] text-ink-2">{sub}</p>}
+            {band.sub && <p className="mb-2 text-[12px] text-ink-2">{band.sub}</p>}
             <div className="overflow-hidden rounded-[10px] border border-line bg-surface">
-              {matrixRows.length > 0 && <ChoosesMatrix rows={matrixRows} positions={map.positions} onOpen={onOpen} />}
-              {matrixRows.length > 0 && stripRows.length > 0 && <div className="border-b border-line" />}
-              {stripRows.map((row) => (
-                <StageRow key={row.stage} row={row} positions={map.positions} onOpen={onOpen} />
-              ))}
+              {prefs.layout === "matrix" ? (
+                <BandMatrix rows={rows} chooses={isCh} rooms={prefs.rooms} positions={map.positions} onOpen={onOpen} />
+              ) : (
+                rows.map((row) => (
+                  <AlignedRow key={row.stage} row={row} chooses={isCh} rooms={prefs.rooms} positions={map.positions} onOpen={onOpen} />
+                ))
+              )}
             </div>
           </section>
         );
