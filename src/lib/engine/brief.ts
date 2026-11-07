@@ -3,7 +3,7 @@ import { matchKey } from "../brand_key";
 import { store } from "../store";
 import { buildResolver } from "./brand_resolve";
 import { computeBrandSummary, type BrandSummaryView, type SummaryBrand } from "./brand_summary";
-import { computeAnalysisMap, type AnalysisMapDebug, type MapCellStat } from "./analysis_map";
+import { computeAnalysisMap, liftForBrand, type AnalysisMapDebug, type MapCellStat } from "./analysis_map";
 import { computeHeadline } from "./headline";
 import { CONTEXT_JUDGE_MODEL, CONTEXT_JUDGE_VERSION } from "./context_judge";
 import { pctFine, productNoun, rankedInsights, type Insight, type InsightInputs } from "./summary_insights";
@@ -108,6 +108,75 @@ function rivalCell(c: Ctx, key: string): string | undefined {
   return undefined;
 }
 
+/* ------------------------------ citation rule ------------------------------ */
+
+/** bf13 (2026-11-06, the owner's citation ruling): every percentage and
+ * signed point value in visible memo text must be stated by a pin's panel.
+ * A number token is exactly as rendered - "15%", "6.7%", "+30 points". */
+const NUMBER_TOKEN = /\d+(?:\.\d+)?%|[+-]\d+ (?:pts|points)/g;
+export function briefNumberTokens(text: string): Set<string> {
+  return new Set(text.match(NUMBER_TOKEN) ?? []);
+}
+
+/** Everything a position's slide-over visibly states, as one string: the
+ * claim, the triage reason, the lever, both condition lists and the figures
+ * (labels and values - never their tips, which carry counts). */
+export function positionPanelText(p: Position): string {
+  return [
+    p.claim,
+    p.triageWhy,
+    p.lever,
+    ...p.toward.map((x) => x.text),
+    ...p.away.map((x) => x.text),
+    ...(p.figures ?? []).flatMap((f) => [f.label, f.value]),
+  ].join(" \n ");
+}
+
+/** RULE 1 (pin validity), applied to every composed memo: a pin on a unit
+ * whose visible text carries number tokens survives only if its panel states
+ * at least one of them. A unit with no numbers keeps its pins (navigational). */
+function citePins(memo: BriefMemo, map: AnalysisMapView): BriefMemo {
+  const panel = new Map<string, Set<string>>();
+  const tokensOf = (id: string) => {
+    let t = panel.get(id);
+    if (!t) {
+      const p = map.positions[id];
+      t = p ? briefNumberTokens(positionPanelText(p)) : new Set<string>();
+      panel.set(id, t);
+    }
+    return t;
+  };
+  const keeps = (visible: string, id: string) => {
+    const nums = briefNumberTokens(visible);
+    if (nums.size === 0) return true;
+    const t = tokensOf(id);
+    return [...nums].some((n) => t.has(n));
+  };
+  const para = (p: BriefPara): BriefPara => {
+    if (!p.cells?.length) return p;
+    const kept = p.cells.filter((a) => keeps(`${p.lead ?? ""} ${p.text}`, a.id));
+    if (kept.length === p.cells.length) return p;
+    const { cells: _drop, ...rest } = p;
+    void _drop;
+    return kept.length ? { ...rest, cells: kept } : rest;
+  };
+  const row = (r: BriefRow): BriefRow => {
+    if (!r.cell || keeps(`${r.label} ${r.value}`, r.cell.id)) return r;
+    const { cell: _drop, ...rest } = r;
+    void _drop;
+    return rest;
+  };
+  return {
+    ...memo,
+    sections: memo.sections.map((s) => ({
+      ...s,
+      ...(s.paras ? { paras: s.paras.map(para) } : {}),
+      ...(s.rows ? { rows: s.rows.map(row) } : {}),
+      ...(s.quads ? { quads: s.quads.map((q) => ({ ...q, cells: [q.cells[0].map(para), q.cells[1].map(para)] as [BriefPara[], BriefPara[]] })) } : {}),
+    })),
+  };
+}
+
 const placementKey = (key: string, title: string) => `${key}\u0000${title}`;
 
 /** The cell the map placed an insight on (the ranked probe, else the payload's served list). */
@@ -151,7 +220,28 @@ const PIN_RULES: Record<string, PinRule> = {
   leak_picks: { pools: [OPEN_ALL], match: true },
   leave_no_exit: { pools: ["doubts:customers:"] },
   conversion_vs_rival: { pools: [OPEN_ALL], match: true },
+  // bf13: the citation fixes - every number in the finding is stated by a pinned panel.
+  // Both buying situations a spread names (stable title templates).
+  room_win: { pools: (i) => roomPair(i.title, /^Strongest with (.+), weakest with (.+)$/, "chooses:open:") },
+  room_value: { pools: (i) => roomPair(i.title, /^Worth it most for (.+), least for (.+)$/, "chooses:value:") },
+  // The hardest matchup first, the record against every rival (the closest contest) second.
+  rival_h2h: { pools: ["fights:h2h:"], matchFirst: true },
+  // The room's problem cell first; the category-wide rate lives on the pooled cell.
+  leak_problem: { pools: ["chooses:awareness:"], matchFirst: true },
+  // The assistants: the pooled open panel states every brand's per-engine and per-company read.
+  engine_spread: { pools: [OPEN_ALL] },
+  engine_mode: { pools: [OPEN_ALL] },
+  engine_vendor: { pools: [OPEN_ALL] },
+  engine_decisiveness: { pools: [OPEN_ALL] },
+  engine_h2h_flip: { pools: [OPEN_ALL, "fights:h2h:"] },
+  engine_pick_concentration: { pools: [OPEN_ALL] },
 };
+
+/** The two cells a "most X, least Y" title names, by its stable template. */
+function roomPair(title: string, re: RegExp, prefix: string): string[] {
+  const m = re.exec(title);
+  return m ? [`${prefix}${norm(m[1])}`, `${prefix}${norm(m[2])}`] : [];
+}
 
 /** Every pin for an insight, denominator cells first (see PIN_RULES). */
 function insightCells(c: Ctx, i: { key: string; title: string; body?: string }): string[] {
@@ -236,35 +326,6 @@ interface Ctx {
   archetype: string;
   footer: string;
   wave: number;
-}
-
-/** Share of answers arguing each code when `key` is picked vs when another
- * in-category brand is (brand_summary's lift, for any brand). */
-function liftFor(data: ViewData, request: ViewRequest, key: string) {
-  const resolve = buildResolver(data.dictionary, data.judged);
-  const rows = poolOf(data, "headline", request).rows;
-  const facts = rows.map(({ code }) => {
-    let pick: string | null = null;
-    if (code.outcome === "pick" && code.top_pick) {
-      const r = resolve(code.top_pick);
-      if (r.status === "active") pick = r.key;
-    }
-    return { pick, reasons: code.reasons };
-  });
-  const wins = facts.filter((f) => f.pick === key && f.reasons !== null);
-  const others = facts.filter((f) => f.pick !== null && f.pick !== key && f.reasons !== null);
-  if (wins.length < MIN || others.length < MIN) return [];
-  const withR = facts.filter((f) => f.reasons !== null);
-  const counts = new Map<string, number>();
-  for (const f of withR) for (const r of f.reasons!) counts.set(r, (counts.get(r) ?? 0) + 1);
-  return [...counts.entries()]
-    .filter(([, k]) => k / withR.length >= 0.02)
-    .map(([code]) => {
-      const w = cell(wins.filter((f) => f.reasons!.includes(code)).length, wins.length);
-      const o = cell(others.filter((f) => f.reasons!.includes(code)).length, others.length);
-      return { code, wins: w, others: o, lift: rate(w) - rate(o) };
-    })
-    .sort((a, b) => b.lift - a.lift);
 }
 
 function roomDescriptions(json: string | null | undefined): Map<string, string> {
@@ -498,9 +559,12 @@ function verdictPara(c: Ctx): BriefPara {
     tips.push(`${leader.name}: ${tipOf(leader.shareOfDecided)}.`);
   }
   const ranked = roomsByShare(c);
+  // A buying situation the close names (its rival share lives on that cell).
+  let roomPin: string | undefined;
   switch (c.archetype) {
     case "default": {
       const weak = ranked[ranked.length - 1];
+      if (weak && weak.top && weak.top.chosen > 0) roomPin = `chooses:open:${norm(weak.r.room)}`;
       parts.push(
         weak && weak.top && weak.top.chosen > 0
           ? `When nothing pulls the buyer elsewhere, the answer is ${c.name}; the contest is over the buyers something does pull - ${weak.r.room}, where ${weak.top.name} takes ${P(weak.top.share)}.`
@@ -528,7 +592,7 @@ function verdictPara(c: Ctx): BriefPara {
       );
     }
   }
-  return withCells({ text: parts.join(" "), tip: tips.join(" ") }, cellsOf(c, OPEN_ALL));
+  return withCells({ text: parts.join(" "), tip: tips.join(" ") }, cellsOf(c, OPEN_ALL, roomPin));
 }
 
 const STAGE_WORDS: Record<string, string> = {
@@ -632,12 +696,12 @@ function findingsOf(c: Ctx): Ctx["findings"] {
     });
   const l = c.lift[0];
   if (l && l.lift > 0 && l.wins.low > l.others.high)
-    out.push({ key: "lift", lead: "The argument it wins on.", text: `${cap(l.code)} is argued in ${P(l.wins)} of the answers that pick ${c.name}, against ${P(l.others)} when another brand is picked.`, tip: `${tipOf(l.wins)}; ${tipOf(l.others)}.` });
+    out.push({ key: "lift", cellIds: [OPEN_ALL], lead: "The argument it wins on.", text: `${cap(l.code)} is argued in ${P(l.wins)} of the answers that pick ${c.name}, against ${P(l.others)} when another brand is picked.`, tip: `${tipOf(l.wins)}; ${tipOf(l.others)}.` });
   if (c.vsTarget && c.vsTarget.won.n >= MIN)
     out.push({ key: "vs_target", cellIds: [rivalCell(c, c.subject.key)].filter((x): x is string => !!x), lead: `Against ${c.brand}.`, text: `Compared directly with ${c.brand}, the AI sides with ${c.name} ${P(c.vsTarget.won)} of the time it takes a side.`, tip: tipOf(c.vsTarget.won) });
   const lw = c.lift.length > 1 ? c.lift[c.lift.length - 1] : undefined;
   if (lw && lw.lift < 0 && lw.others.low > lw.wins.high)
-    out.push({ key: "loss_arg", lead: "The argument it loses on.", text: `${cap(lw.code)} comes up in ${P(lw.others)} of the answers that pick another brand and ${P(lw.wins)} of those that pick ${c.name}.`, tip: `${tipOf(lw.wins)}; ${tipOf(lw.others)}.` });
+    out.push({ key: "loss_arg", cellIds: [OPEN_ALL], lead: "The argument it loses on.", text: `${cap(lw.code)} comes up in ${P(lw.others)} of the answers that pick another brand and ${P(lw.wins)} of those that pick ${c.name}.`, tip: `${tipOf(lw.wins)}; ${tipOf(lw.others)}.` });
   return out.slice(0, 5);
 }
 
@@ -812,6 +876,7 @@ function swotOf(c: Ctx): Swot {
       tip: `${tipOf(best.wins)} wins; ${tipOf(best.others)} other picks.`,
       kind: "argument",
       effect: best.lift,
+      cellId: OPEN_ALL,
     });
   if (worst && worst.lift < 0 && worst.others.low > worst.wins.high)
     w.push({
@@ -820,6 +885,7 @@ function swotOf(c: Ctx): Swot {
       tip: `${tipOf(worst.wins)} wins; ${tipOf(worst.others)} other picks.`,
       kind: "argument",
       effect: -worst.lift,
+      cellId: OPEN_ALL,
     });
   const fb = funnelBreak(S, c.name);
   if (fb) w.push(fb);
@@ -1652,7 +1718,7 @@ export async function computeBrief(data: ViewData, request: BriefRequest = {}): 
   const inputs = capture.inputs!;
   const ranked = rankedInsights(summary, inputs);
   const debug = { walls: [], casting: {}, cells: {}, probeInsights: ranked } as unknown as AnalysisMapDebug & { cells: Record<string, MapCellStat> };
-  const map = await computeAnalysisMap(data, eng, debug, { summary });
+  const map = await computeAnalysisMap(data, eng, debug, { summary, inputs });
   // The map's own matcher places every ranked insight (the same order as probeInsights).
   const placements = new Map<string, string>();
   (debug.placements ?? []).forEach((pl, i) => {
@@ -1720,7 +1786,7 @@ export async function computeBrief(data: ViewData, request: BriefRequest = {}): 
     name,
     product: productNoun(data.project.category),
     rooms,
-    lift: isTarget ? summary.reasonLift : liftFor(data, eng, subject.key),
+    lift: isTarget ? summary.reasonLift : liftForBrand(data, eng, subject.key),
     vsTarget,
     moves: isTarget ? movesOf(map, stats, brand) : [],
     findings: [],
@@ -1733,12 +1799,8 @@ export async function computeBrief(data: ViewData, request: BriefRequest = {}): 
 
   ctx.findings = findingsOf(ctx);
   const sw = swotOf(ctx);
-  const memo = (frame: BriefFrame, sections: BriefSection[]): BriefMemo => ({
-    frame,
-    title: `${name} - ${BRIEF_FRAME_LABELS[frame]} - wave ${ctx.wave}`,
-    sections,
-    footer: ctx.footer,
-  });
+  const memo = (frame: BriefFrame, sections: BriefSection[]): BriefMemo =>
+    citePins({ frame, title: `${name} - ${BRIEF_FRAME_LABELS[frame]} - wave ${ctx.wave}`, sections, footer: ctx.footer }, map);
   const memos: Record<BriefFrame, BriefMemo> = {
     now_what: memo("now_what", nowWhat(ctx)),
     swot: memo("swot", swotFrame(ctx, sw)),
@@ -1765,7 +1827,8 @@ export async function computeBrief(data: ViewData, request: BriefRequest = {}): 
 // and the SWOT strengths - the verdict paragraph already carries the market totals.
 // bf11 (2026-11-06): paragraphs and scoreboard rows carry map anchors (BriefPara.cells / BriefRow.cell) - the facts link into The Map.
 // bf12 (2026-11-06): insight pins are denominator-first (PIN_RULES) - a pooled finding pins the cell whose pool its numbers come from, the matcher's named cell second where it adds the story.
-const BRIEF_VERSION = "bf12";
+// bf13 (2026-11-06): the citation ruling - after composition every pin on a numbered paragraph or row must share one of its numbers with its panel (RULE 1, citePins); reads the am9 map, whose figures state every cited number (RULE 2, scripts/brief_citation_harness.mts); PIN_RULES gain room_win / room_value (both named situations), rival_h2h and leak_problem (the pooled cell second) and the engine keys (the pooled open panel); the argument findings and SWOT argument items pin the pooled open cell.
+const BRIEF_VERSION = "bf13";
 
 /**
  * The brief through the cache. cachedView's keying, with the subject as one

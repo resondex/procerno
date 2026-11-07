@@ -141,6 +141,11 @@ export interface Position {
   lever: string;
   /** Treatment family from the service ladder, e.g. "Evidence audit". */
   family: string;
+  /** "The numbers" (2026-11-06, the citation ruling): every figure a brief
+   * cites from this cell, stated plainly - label left, value right; counts
+   * stay in `tip` (the hover). Recomputed from the cell's own pool, or the
+   * identical stat where the brief reads the summary. Additive. */
+  figures?: { label: string; value: string; tip?: string }[];
 }
 
 /** The one payload the Map and Verdict tabs read (positions ride along so

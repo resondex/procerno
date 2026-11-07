@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { RateCell } from "@/lib/engine/view_data";
 import {
   DEFICIT_TRIAGES,
@@ -837,6 +837,26 @@ function PositionPanel({
           <p className="mt-2 leading-relaxed text-ink-2">{p.triageWhy}</p>
           {err && <p className="mt-1.5 text-[12px] text-danger">{err}</p>}
         </div>
+
+        {/* The numbers (2026-11-06, the citation ruling): every figure a brief
+            cites from this cell - label left, value right; counts on hover. */}
+        {(p.figures?.length ?? 0) > 0 && (
+          <>
+            <h3 className={h3}>The numbers</h3>
+            <dl className="grid grid-cols-[minmax(0,1fr)_minmax(0,1.25fr)] gap-x-4 text-[13px]">
+              {p.figures!.map((f, i) => (
+                <Fragment key={`${f.label}${i}`}>
+                  <dt title={f.tip} className="border-b border-dashed border-line/70 py-1 text-ink-2">
+                    {f.label}
+                  </dt>
+                  <dd title={f.tip} className="border-b border-dashed border-line/70 py-1 text-right tabular-nums text-ink">
+                    {f.value}
+                  </dd>
+                </Fragment>
+              ))}
+            </dl>
+          </>
+        )}
 
         {p.lifts.length > 0 && (
           <>
