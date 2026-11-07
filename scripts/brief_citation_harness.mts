@@ -22,6 +22,9 @@
  *       with its card (and every pin has a card in view.cards);
  *   (b) RULE 2 - every number token in a unit's visible text appears in at
  *       least one of that unit's surviving pins' cards.
+ *   (c) bf15 (the fact is the link) - on every unit whose text has NO number
+ *       token, every surviving anchor carries an `at` that is a substring of
+ *       the unit's visible text (the phrase the reader clicks).
  * Prints every violation (tracker / subject / frame / section / unit /
  * number) and exits non-zero on any.
  */
@@ -36,7 +39,7 @@ const { loadViewData } = await import(REPO + "/src/lib/engine/view_data.ts");
 const { computeBrief, briefNumberTokens } = await import(REPO + "/src/lib/engine/brief.ts");
 const { cardText } = await import(REPO + "/src/lib/engine/answer_cards.ts");
 
-type Anchor = { id: string; label: string };
+type Anchor = { id: string; label: string; at?: string };
 type Para = { lead?: string; text: string; cells?: Anchor[] };
 type Row = { label: string; value: string; cell?: Anchor };
 
@@ -53,6 +56,7 @@ let pins = 0;
 const rule1: string[] = [];
 const rule2: string[] = [];
 const missing: string[] = [];
+const rule3: string[] = [];
 
 for (const project of projects) {
   const run = (await store.listRuns(project.id))[0];
@@ -77,19 +81,24 @@ for (const project of projects) {
     const who = `${project.brand}${subject ? ` [rival ${subject}]` : ""}`;
     for (const [frame, memo] of Object.entries(view.memos) as [string, { sections: { key: string; paras?: Para[]; rows?: Row[]; quads?: { headers: [string, string]; cells: [Para[], Para[]] }[] }[] }][]) {
       for (const s of memo.sections) {
-        const list: { where: string; visible: string; ids: string[] }[] = [];
-        for (const p of s.paras ?? []) list.push({ where: s.key, visible: `${p.lead ?? ""} ${p.text}`, ids: (p.cells ?? []).map((c) => c.id) });
+        const list: { where: string; visible: string; ids: string[]; anchors: Anchor[] }[] = [];
+        for (const p of s.paras ?? []) list.push({ where: s.key, visible: `${p.lead ?? ""} ${p.text}`, ids: (p.cells ?? []).map((c) => c.id), anchors: p.cells ?? [] });
         for (const q of s.quads ?? [])
           q.cells.forEach((col, i) => {
-            for (const p of col) list.push({ where: `${s.key}/${q.headers[i]}`, visible: `${p.lead ?? ""} ${p.text}`, ids: (p.cells ?? []).map((c) => c.id) });
+            for (const p of col) list.push({ where: `${s.key}/${q.headers[i]}`, visible: `${p.lead ?? ""} ${p.text}`, ids: (p.cells ?? []).map((c) => c.id), anchors: p.cells ?? [] });
           });
-        for (const r of s.rows ?? []) list.push({ where: `${s.key}/row`, visible: `${r.label} ${r.value}`, ids: r.cell ? [r.cell.id] : [] });
+        for (const r of s.rows ?? []) list.push({ where: `${s.key}/row`, visible: `${r.label} ${r.value}`, ids: r.cell ? [r.cell.id] : [], anchors: r.cell ? [r.cell] : [] });
         for (const u of list) {
           units++;
           pins += u.ids.length;
           for (const id of u.ids) tokOf(id); // every pin, numbered or not, must have its card
           const nums = briefNumberTokens(u.visible);
-          if (nums.size === 0) continue;
+          if (nums.size === 0) {
+            for (const a of u.anchors)
+              if (!a.at || !u.visible.includes(a.at))
+                rule3.push(`${who} [${frame}/${u.where}] pin=${a.id} ${a.at ? `at "${a.at}" not in text` : "has no at"}\n     "${u.visible.trim().slice(0, 160)}"`);
+            continue;
+          }
           numbered++;
           tokens += nums.size;
           const head = `${who} [${frame}/${u.where}]`;
@@ -118,10 +127,14 @@ if (rule2.length) {
   console.log(`\nRULE 2 - number tokens with no citing pin: ${rule2.length}`);
   for (const l of rule2) console.log("  " + l);
 }
+if (rule3.length) {
+  console.log(`\nRULE 3 - numberless units' anchors with no present \`at\`: ${rule3.length}`);
+  for (const l of rule3) console.log("  " + l);
+}
 if (missing.length) {
   console.log(`\nPins with no card in view.cards: ${missing.length}`);
   for (const l of [...new Set(missing)]) console.log("  " + l);
 }
-const bad = rule1.length + rule2.length + missing.length;
-console.log(bad ? `\nFAIL: rule 1 ${rule1.length}, rule 2 ${rule2.length}, cardless pins ${missing.length}` : "\nALL PASS - every visible number is cited by a card");
+const bad = rule1.length + rule2.length + rule3.length + missing.length;
+console.log(bad ? `\nFAIL: rule 1 ${rule1.length}, rule 2 ${rule2.length}, rule 3 ${rule3.length}, cardless pins ${missing.length}` : "\nALL PASS - every visible number is cited by a card");
 process.exit(bad ? 1 : 0);

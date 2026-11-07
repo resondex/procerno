@@ -45,6 +45,11 @@ export interface BriefAnchor {
    * trust the card's own kind over this field (the written memo rebuilds
    * anchors as {id, label} only). */
   kind?: AnswerCardKind;
+  /** bf15 (2026-11-07, the fact is the link): on a unit whose visible text has
+   * no number token, the exact substring of that text this anchor links
+   * (a TOWS play's own item, a move's watch phrase). Absent on numbered
+   * units - there the anchor links the numbers its card states. */
+  at?: string;
 }
 
 /** The answer cards (2026-11-07, the owner's ratified shape - public/_position_panel_options.html

@@ -128,6 +128,20 @@ function rowPin(c: Ctx, row: BriefRow, ...ids: (string | null | undefined)[]): B
 
 const withCells = <T extends object>(x: T, cells: Anchor[] | undefined): T => (cells ? { ...x, cells } : x);
 
+/** bf15: anchors for a unit whose visible text may carry no number - each
+ * carries `at`, the exact phrase of the unit it attaches to (the fact link
+ * when there is no number to click). `at` must be a substring of the unit's
+ * visible text; citePins drops it on numbered units and drops an anchor
+ * without a present `at` on numberless ones. */
+function cellsAt(c: Ctx, ...pairs: [string | null | undefined, string][]): Anchor[] | undefined {
+  const out: Anchor[] = [];
+  for (const [id, at] of pairs) {
+    const a = anchor(c, id);
+    if (a && !out.some((x) => x.id === a.id)) out.push({ ...a, at });
+  }
+  return out.length ? out : undefined;
+}
+
 /** A row's pooled cell: its All cell, else the row's only cell (which is the whole pool). */
 function pooledOf(c: Ctx, prefix: string): string | undefined {
   if (c.map.positions[`${prefix}all`]) return `${prefix}all`;
@@ -180,7 +194,9 @@ function citePins(memo: BriefMemo, cards: Map<string, AnswerCard | null>): Brief
   };
   const prune = (visible: string, as: Anchor[]): Anchor[] => {
     const nums = [...briefNumberTokens(visible)];
-    if (nums.length === 0) return as;
+    // bf15: a numberless unit's anchor links its `at` phrase; one with no
+    // present phrase could never render, so it does not ship.
+    if (nums.length === 0) return as.filter((a) => !!a.at && visible.includes(a.at));
     const kept: Anchor[] = [];
     const covered = new Set<string>();
     for (const a of as) {
@@ -188,7 +204,12 @@ function citePins(memo: BriefMemo, cards: Map<string, AnswerCard | null>): Brief
       const shared = nums.filter((n) => t.has(n));
       if (!shared.length) continue;
       if (cards.get(a.id)?.kind !== "cell" && shared.every((n) => covered.has(n))) continue;
-      kept.push(a);
+      // A numbered unit's anchor links its numbers; `at` is for numberless units only.
+      if (a.at !== undefined) {
+        const { at: _at, ...bare } = a;
+        void _at;
+        kept.push(bare);
+      } else kept.push(a);
       for (const n of shared) covered.add(n);
     }
     return kept;
@@ -196,7 +217,7 @@ function citePins(memo: BriefMemo, cards: Map<string, AnswerCard | null>): Brief
   const para = (p: BriefPara): BriefPara => {
     if (!p.cells?.length) return p;
     const kept = prune(`${p.lead ?? ""} ${p.text}`, p.cells);
-    if (kept.length === p.cells.length) return p;
+    if (kept.length === p.cells.length && kept.every((a, i) => a === p.cells![i])) return p;
     const { cells: _drop, ...rest } = p;
     void _drop;
     return kept.length ? { ...rest, cells: kept } : rest;
@@ -1144,10 +1165,11 @@ function pairs(as: Item[], bs: Item[], n = 2): [Item, Item][] {
 
 function towsFrame(c: Ctx, sw: Swot): BriefSection[] {
   // A play pins both cells it pairs, the strength or weakness first.
-  const so = pairs(sw.o, sw.s).map(([o, s]) => withCells({ text: `Use ${s.short} to ${o.act ?? o.short}.`, tip: o.tip }, cellsOf(c, s.cellId, o.cellId)));
-  const wo = pairs(sw.o, sw.w).map(([o, w]) => withCells({ text: `Turn ${w.short} around: ${o.act ?? o.short}.`, tip: o.tip }, cellsOf(c, w.cellId, o.cellId)));
-  const st = pairs(sw.t, sw.s).map(([t, s]) => withCells({ text: `Use ${s.short} to blunt ${t.short}.`, tip: t.tip }, cellsOf(c, s.cellId, t.cellId)));
-  const wt = pairs(sw.t, sw.w).map(([t, w]) => withCells({ text: `Shore up ${w.short} and watch ${t.short}.`, tip: t.tip }, cellsOf(c, w.cellId, t.cellId)));
+  // bf15: each pin links its own item's phrase in the play (`at`).
+  const so = pairs(sw.o, sw.s).map(([o, s]) => withCells({ text: `Use ${s.short} to ${o.act ?? o.short}.`, tip: o.tip }, cellsAt(c, [s.cellId, s.short], [o.cellId, o.act ?? o.short])));
+  const wo = pairs(sw.o, sw.w).map(([o, w]) => withCells({ text: `Turn ${w.short} around: ${o.act ?? o.short}.`, tip: o.tip }, cellsAt(c, [w.cellId, w.short], [o.cellId, o.act ?? o.short])));
+  const st = pairs(sw.t, sw.s).map(([t, s]) => withCells({ text: `Use ${s.short} to blunt ${t.short}.`, tip: t.tip }, cellsAt(c, [s.cellId, s.short], [t.cellId, t.short])));
+  const wt = pairs(sw.t, sw.w).map(([t, w]) => withCells({ text: `Shore up ${w.short} and watch ${t.short}.`, tip: t.tip }, cellsAt(c, [w.cellId, w.short], [t.cellId, t.short])));
   const none = "Nothing to pair in this wave.";
   const or = (p: BriefPara[]) => (p.length ? p : [{ text: none }]);
   return [
@@ -1575,7 +1597,7 @@ function jobsFrame(c: Ctx): BriefSection[] {
       if (st?.wall) parts.push(`The condition "${st.wall}" - a state the buyer is already in - routes buyers away here.`);
     }
     const hasValue = c.isTarget && (valueRooms.get(r.room)?.answers ?? 0) >= MIN;
-    paras.push(withCells({ lead: r.room, text: parts.join(" "), tip: `${tip}.` }, cellsOf(c, `chooses:open:${norm(r.room)}`, hasValue ? `chooses:value:${norm(r.room)}` : null)));
+    paras.push(withCells({ lead: r.room, text: parts.join(" "), tip: `${tip}.` }, cellsAt(c, [`chooses:open:${norm(r.room)}`, r.room], [hasValue ? `chooses:value:${norm(r.room)}` : null, r.room])));
   }
   if (!paras.length) paras.push({ text: "This tracker asks every buyer the same questions - there are no separate buying situations to read." });
   const out: BriefSection[] = [];
@@ -1762,7 +1784,7 @@ function mintoFrame(c: Ctx): BriefSection[] {
         return c.moves.map((m) => {
           const rep = seen.has(m.actStem);
           seen.add(m.actStem);
-          return withCells({ lead: leadOf(m.lead), text: rep ? `As above - watch ${m.watch}.` : `${cap(m.act)} - watch ${m.watch}.`, tip: m.tip }, cellsOf(c, m.cellId));
+          return withCells({ lead: leadOf(m.lead), text: rep ? `As above - watch ${m.watch}.` : `${cap(m.act)} - watch ${m.watch}.`, tip: m.tip }, cellsAt(c, [m.cellId, m.watch]));
         });
       })(),
     });
@@ -1928,7 +1950,8 @@ export async function computeBrief(data: ViewData, request: BriefRequest = {}): 
 // bf12 (2026-11-06): insight pins are denominator-first (PIN_RULES) - a pooled finding pins the cell whose pool its numbers come from, the matcher's named cell second where it adds the story.
 // bf13 (2026-11-06): the citation ruling - after composition every pin on a numbered paragraph or row must share one of its numbers with its panel (RULE 1, citePins); reads the am9 map, whose figures state every cited number (RULE 2, scripts/brief_citation_harness.mts); PIN_RULES gain room_win / room_value (both named situations), rival_h2h and leak_problem (the pooled cell second) and the engine keys (the pooled open panel); the argument findings and SWOT argument items pin the pooled open cell.
 // bf14 (2026-11-07): the answer cards - every pin opens a card that answers one question (cell / brand / engines / condition, answer_cards.ts) and the payload carries them (BriefView.cards); RULE 1 checks a pin against its card's text and drops a brand / engines / condition card whose shared numbers an earlier pin already states; reads the am10 map, whose pooled open-choice panel slimmed back to its own question - every other brand's funnel, the stage / room / question splits, the assistants and the conditions now cite brand, engines and condition cards. No sentence text changed.
-const BRIEF_VERSION = "bf14";
+// bf15 (2026-11-07): the fact is the link - the trailing pins are gone; a number in the sentence opens its card. BriefAnchor gains `at` (the exact phrase a numberless unit's anchor attaches to: a TOWS play's own item, a Minto move's watch phrase, a thin situation's name); citePins strips `at` on numbered units and drops a numberless unit's anchor whose `at` is absent from its text. No sentence text changed.
+const BRIEF_VERSION = "bf15";
 
 /**
  * The brief through the cache. cachedView's keying, with the subject as one

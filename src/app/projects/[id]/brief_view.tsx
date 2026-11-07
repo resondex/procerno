@@ -24,6 +24,14 @@
  * slot under the table). The card's one "go deeper" link opens The Map at a
  * cell or Build a table; it hides when the shell passes no handler (share
  * links), where the cards still open. Pins and cards never print.
+ *
+ * The fact is the link (2026-11-07, bf15 - the owner's ruling): there are no
+ * trailing pins. A number in the sentence is the button that opens its card:
+ * walking a unit's anchors in order, each claims every number token its card
+ * states that no earlier anchor claimed (repeats of a claimed token link to
+ * the same card). A unit with no numbers links each anchor's `at` phrase. A
+ * scoreboard row's value is the link to its row's card. An anchor that claims
+ * nothing renders nothing. Links print as plain text.
  */
 
 import { createContext, Fragment, useContext, useEffect, useRef, useState } from "react";
@@ -114,9 +122,16 @@ const BRIEF_CSS = `
 .pb-p.pb-beat + .pb-p.pb-beat{ margin-top: 1.15em; }
 .pb-runhead{ display: block; margin-bottom: .15em; }
 .pb-watch{ display: block; margin-top: .3em; font-style: italic; color: var(--ink-2); }
-.pb-pin{ display: inline-block; margin-left: .2em; padding: 0 .1em; font-size: .8em; line-height: 1; vertical-align: .25em; text-decoration: none; cursor: pointer; background: none; border: 0; }
-.pb-pin[aria-expanded="true"]{ color: var(--primary); }
-@media print{ .pb-pin, .pb-acard{ display: none !important; } }
+/* A fact link: the number keeps its text color and weight; a dotted rule
+ * under it turns primary on hover and while its card is open. */
+.pb-fact{
+  display: inline; color: inherit; cursor: pointer; text-decoration: none;
+  border-bottom: 1px dotted var(--ink-3); -webkit-box-decoration-break: clone; box-decoration-break: clone;
+}
+.pb-fact:hover, .pb-fact[aria-expanded="true"]{ border-bottom-color: var(--primary); border-bottom-style: solid; color: var(--primary); }
+.pb-fact:focus-visible{ outline: 2px solid var(--primary); outline-offset: 2px; }
+@media print{ .pb-acard{ display: none !important; } .pb-fact{ border-bottom: 0 !important; color: inherit !important; } }
+html.pb-printing .pb-fact{ border-bottom: 0 !important; color: inherit !important; }
 .pb-acard{
   margin: .55em 0 1.1em; max-width: 480px; background: var(--surface); border: 1px solid var(--line);
   border-radius: 12px; padding: 14px 18px 11px; box-shadow: 0 10px 30px rgba(16,24,40,.08);
@@ -539,34 +554,94 @@ const CardContext = createContext<CardCtxT | null>(null);
 
 const KIND_LABEL: Record<AnswerCard["kind"], string> = { cell: "On the map", brand: "Brand", engines: "The assistants", condition: "The conditions" };
 
-/** The pins after a unit's text. A pin toggles its answer card in the unit's
- * slot; with no card (an old payload) it falls back to opening the map. */
-function Pins({ cells, unit }: { cells?: BriefAnchor[]; unit: string }) {
-  const ctx = useContext(CardContext);
+/** Number tokens exactly as the engine reads them (brief.ts NUMBER_TOKEN). */
+const NUMBER_TOKEN = /\d+(?:\.\d+)?%|[+-]\d+ (?:pts|points)/g;
+/** The card's visible text (answer_cards.ts cardText) - never its tips. */
+const cardTextOf = (c: AnswerCard) => [c.crumb, c.headline, ...c.rows.flatMap((r) => [r.label, r.value])].join(" \n ");
+
+/** Which anchor each piece of a unit's text links to: number token -> anchor
+ * (first anchor in order whose card states it), and for a numberless unit
+ * the anchors' `at` phrases. */
+type LinkPlan = { tok: Map<string, BriefAnchor>; at: BriefAnchor[] };
+
+function planLinks(ctx: CardCtxT | null, visible: string, cells?: BriefAnchor[]): LinkPlan | null {
   if (!ctx || !cells?.length) return null;
-  const shown = cells.filter((c) => ctx.cards[c.id] || ctx.onOpenCell);
-  if (!shown.length) return null;
+  const toks = new Set(visible.match(NUMBER_TOKEN) ?? []);
+  const tok = new Map<string, BriefAnchor>();
+  if (toks.size) {
+    for (const a of cells) {
+      const card = ctx.cards[a.id];
+      if (!card) continue;
+      const stated = new Set(cardTextOf(card).match(NUMBER_TOKEN) ?? []);
+      for (const t of toks) if (stated.has(t) && !tok.has(t)) tok.set(t, a);
+    }
+  }
+  const at = toks.size ? [] : cells.filter((a) => !!a.at && visible.includes(a.at) && (ctx.cards[a.id] || ctx.onOpenCell));
+  return tok.size || at.length ? { tok, at } : null;
+}
+
+function FactLink({ a, unit, children }: { a: BriefAnchor; unit: string; children: React.ReactNode }) {
+  const ctx = useContext(CardContext)!;
+  const key = `${unit}::${a.id}`;
+  const has = !!ctx.cards[a.id];
+  const act = () => (has ? ctx.setOpen(ctx.open === key ? null : key) : ctx.onOpenCell?.(a.id));
+  // An inline span with button semantics, not a <button>: a button lays out
+  // as inline-block, so a phrase link spanning lines would break the flow.
   return (
-    <>
-      {shown.map((c) => {
-        const key = `${unit}::${c.id}`;
-        const has = !!ctx.cards[c.id];
-        return (
-          <button
-            key={c.id}
-            type="button"
-            className="pb-pin pb-noprint text-ink-3 hover:text-primary"
-            title={c.label}
-            aria-label={has ? `Show the numbers: ${c.label}` : `Open on the map: ${c.label}`}
-            {...(has ? { "aria-expanded": ctx.open === key } : {})}
-            onClick={() => (has ? ctx.setOpen(ctx.open === key ? null : key) : ctx.onOpenCell?.(c.id))}
-          >
-            {"\u2316"}
-          </button>
-        );
-      })}
-    </>
+    <span
+      role="button"
+      tabIndex={0}
+      className="pb-fact"
+      aria-label={has ? `Show the numbers: ${a.label}` : `Open on the map: ${a.label}`}
+      {...(has ? { "aria-expanded": ctx.open === key } : {})}
+      onClick={act}
+      onKeyDown={(e) => {
+        if (e.key === "Enter" || e.key === " ") {
+          e.preventDefault();
+          act();
+        }
+      }}
+    >
+      {children}
+    </span>
   );
+}
+
+/** One piece of a unit's text with its facts linked. `plan` is shared by
+ * every piece of the unit (lead, body, watch line), so a token claimed in the
+ * lead links the same card in the body. */
+function Linked({ text, plan, unit }: { text: string; plan: LinkPlan | null; unit: string }) {
+  if (!plan || !text) return <>{text}</>;
+  const spans: { s: number; e: number; a: BriefAnchor }[] = [];
+  if (plan.tok.size) {
+    for (const m of text.matchAll(NUMBER_TOKEN)) {
+      const a = plan.tok.get(m[0]);
+      if (a) spans.push({ s: m.index!, e: m.index! + m[0].length, a });
+    }
+  } else {
+    for (const a of plan.at) {
+      const i = text.indexOf(a.at!);
+      if (i < 0) continue;
+      const e = i + a.at!.length;
+      if (spans.some((x) => i < x.e && e > x.s)) continue; // first anchor keeps an overlap
+      spans.push({ s: i, e, a });
+    }
+    spans.sort((x, y) => x.s - y.s);
+  }
+  if (!spans.length) return <>{text}</>;
+  const out: React.ReactNode[] = [];
+  let i = 0;
+  spans.forEach((x, n) => {
+    if (x.s > i) out.push(text.slice(i, x.s));
+    out.push(
+      <FactLink key={n} a={x.a} unit={unit}>
+        {text.slice(x.s, x.e)}
+      </FactLink>
+    );
+    i = x.e;
+  });
+  if (i < text.length) out.push(text.slice(i));
+  return <>{out}</>;
 }
 
 function CardView({ card }: { card: AnswerCard }) {
@@ -621,21 +696,35 @@ function CardSlot({ prefix }: { prefix: string }) {
 const NUMBERED = /^(\d+)\.\s+/;
 
 function ParaBody({ p, lead, unit }: { p: BriefPara; lead?: string; unit: string }) {
+  const ctx = useContext(CardContext);
   const l = lead ?? p.lead;
   // A move's closing "Watch: <metric>." sets on its own quiet line (the
   // served words, unchanged - only the line break is typesetting).
   const w = p.text.lastIndexOf(" Watch: ");
   const body = w > 0 ? p.text.slice(0, w) : p.text;
   const watch = w > 0 ? p.text.slice(w + 1) : null;
+  // The plan reads the served lead (a numbered finding's "1. " carries no token).
+  const plan = planLinks(ctx, `${p.lead ?? ""} ${p.text}`, p.cells);
+  const L = (t: string) => <Linked text={t} plan={plan} unit={unit} />;
   return (
     <>
       <Tip tip={p.tip}>
-        {l && (/[.?!:"')]$/.test(l.trim()) ? <b>{l} </b> : <b className="pb-runhead">{l}</b>)}
-        {body}
+        {l && (/[.?!:"')]$/.test(l.trim()) ? <b>{L(l)} </b> : <b className="pb-runhead">{L(l)}</b>)}
+        {L(body)}
       </Tip>
-      <Pins cells={p.cells} unit={unit} />
-      {watch && <span className="pb-watch">{watch}</span>}
+      {watch && <span className="pb-watch">{L(watch)}</span>}
     </>
+  );
+}
+
+/** A scoreboard row's value is the link to its row's card. */
+function RowValue({ value, a, unit }: { value: string; a: BriefAnchor; unit: string }) {
+  const ctx = useContext(CardContext);
+  if (!ctx || (!ctx.cards[a.id] && !ctx.onOpenCell)) return <>{value}</>;
+  return (
+    <FactLink a={a} unit={unit}>
+      {value}
+    </FactLink>
   );
 }
 
@@ -700,8 +789,11 @@ function Section({ s, lede, wave }: { s: BriefSectionT; lede: boolean; wave: str
                     <Tip tip={r.tip}>{r.label}</Tip>
                   </td>
                   <td className="pb-r">
-                    {r.value}
-                    <Pins cells={r.cell ? [r.cell] : undefined} unit={`${s.key}/rows/${i}`} />
+                    {r.cell ? (
+                      <RowValue value={r.value} a={r.cell} unit={`${s.key}/rows/${i}`} />
+                    ) : (
+                      r.value
+                    )}
                   </td>
                 </tr>
               ))}
