@@ -2,7 +2,9 @@
  * Zero-spend citation harness for the brief (brief.ts) against the analysis
  * map (analysis_map.ts) - the owner's ruling of 2026-11-06: every percentage
  * and signed point value visible in a brief must have a citation, a pin whose
- * position panel visibly states that number.
+ * card visibly states that number. bf14 (2026-11-07): the receipt is the pin's
+ * ANSWER CARD (view.cards - cell, brand, engines or condition; cardText:
+ * crumb, headline, row labels and values, never tips), not the map panel.
  *
  *   npx tsx scripts/brief_citation_harness.mts [brand substring] [--verbose] [--all-subjects]
  *
@@ -17,9 +19,9 @@
  * quadrant cells) and rows (label + value); tips, tables and charts are not
  * units (tips carry counts; tables and charts carry no pins). Asserts:
  *   (a) RULE 1 - no surviving pin on a numbered unit shares zero numbers
- *       with its panel;
+ *       with its card (and every pin has a card in view.cards);
  *   (b) RULE 2 - every number token in a unit's visible text appears in at
- *       least one of that unit's surviving pinned panels.
+ *       least one of that unit's surviving pins' cards.
  * Prints every violation (tracker / subject / frame / section / unit /
  * number) and exits non-zero on any.
  */
@@ -31,8 +33,8 @@ process.env.RUN_COLLECT_ONLY = "1";
 
 const { store } = await import(REPO + "/src/lib/store/index.ts");
 const { loadViewData } = await import(REPO + "/src/lib/engine/view_data.ts");
-const { computeBrief, briefNumberTokens, positionPanelText } = await import(REPO + "/src/lib/engine/brief.ts");
-const { computeAnalysisMap } = await import(REPO + "/src/lib/engine/analysis_map.ts");
+const { computeBrief, briefNumberTokens } = await import(REPO + "/src/lib/engine/brief.ts");
+const { cardText } = await import(REPO + "/src/lib/engine/answer_cards.ts");
 
 type Anchor = { id: string; label: string };
 type Para = { lead?: string; text: string; cells?: Anchor[] };
@@ -50,27 +52,28 @@ let tokens = 0;
 let pins = 0;
 const rule1: string[] = [];
 const rule2: string[] = [];
+const missing: string[] = [];
 
 for (const project of projects) {
   const run = (await store.listRuns(project.id))[0];
   if (!run) continue;
   const data = await loadViewData(run, project, { setupDecision: true, judge: true });
   if (!data) continue;
-  const map = await computeAnalysisMap(data, {});
-  const panelTokens = new Map<string, Set<string>>();
-  const tokOf = (id: string) => {
-    let t = panelTokens.get(id);
-    if (!t) {
-      const p = map.positions[id];
-      t = p ? briefNumberTokens(positionPanelText(p)) : new Set<string>();
-      panelTokens.set(id, t);
-    }
-    return t;
-  };
   const first = await computeBrief(data, {});
   const subjects = (allSubjects ? [undefined, ...first.subjects.slice(1)] : [undefined, first.subjects[1]]).filter((x, i) => i === 0 || !!x) as (string | undefined)[];
   for (const subject of subjects) {
     const view = subject ? await computeBrief(data, { subject }) : first;
+    const cardTokens = new Map<string, Set<string>>();
+    const tokOf = (id: string) => {
+      let t = cardTokens.get(id);
+      if (!t) {
+        const card = view.cards?.[id];
+        if (!card) missing.push(`${project.brand}${subject ? ` [rival ${subject}]` : ""} pin=${id} has no card`);
+        t = card ? briefNumberTokens(cardText(card)) : new Set<string>();
+        cardTokens.set(id, t);
+      }
+      return t;
+    };
     const who = `${project.brand}${subject ? ` [rival ${subject}]` : ""}`;
     for (const [frame, memo] of Object.entries(view.memos) as [string, { sections: { key: string; paras?: Para[]; rows?: Row[]; quads?: { headers: [string, string]; cells: [Para[], Para[]] }[] }[] }][]) {
       for (const s of memo.sections) {
@@ -84,6 +87,7 @@ for (const project of projects) {
         for (const u of list) {
           units++;
           pins += u.ids.length;
+          for (const id of u.ids) tokOf(id); // every pin, numbered or not, must have its card
           const nums = briefNumberTokens(u.visible);
           if (nums.size === 0) continue;
           numbered++;
@@ -114,5 +118,10 @@ if (rule2.length) {
   console.log(`\nRULE 2 - number tokens with no citing pin: ${rule2.length}`);
   for (const l of rule2) console.log("  " + l);
 }
-console.log(rule1.length + rule2.length ? `\nFAIL: rule 1 ${rule1.length}, rule 2 ${rule2.length}` : "\nALL PASS - every visible number is cited");
-process.exit(rule1.length + rule2.length ? 1 : 0);
+if (missing.length) {
+  console.log(`\nPins with no card in view.cards: ${missing.length}`);
+  for (const l of [...new Set(missing)]) console.log("  " + l);
+}
+const bad = rule1.length + rule2.length + missing.length;
+console.log(bad ? `\nFAIL: rule 1 ${rule1.length}, rule 2 ${rule2.length}, cardless pins ${missing.length}` : "\nALL PASS - every visible number is cited by a card");
+process.exit(bad ? 1 : 0);

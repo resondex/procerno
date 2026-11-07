@@ -838,8 +838,9 @@ function PositionPanel({
           {err && <p className="mt-1.5 text-[12px] text-danger">{err}</p>}
         </div>
 
-        {/* The numbers (2026-11-06, the citation ruling): every figure a brief
-            cites from this cell - label left, value right; counts on hover. */}
+        {/* The numbers (2026-11-06, the citation ruling; cell-scoped since
+            am10, 2026-11-07): the figures that answer this cell's question -
+            label left, value right; counts on hover. */}
         {(p.figures?.length ?? 0) > 0 && (
           <>
             <h3 className={h3}>The numbers</h3>
@@ -931,11 +932,14 @@ function PositionPanel({
             </div>
             {/* The pooled open-choice position is the condition ledger's home
                 (2026-11-05): the full decision-rules explorer, every question
-                type, mounts here - the lists above are its top lines. */}
+                type, mounts here - the lists above are its top lines. am10
+                (2026-11-07): it stays collapsed behind "See every condition" so
+                the panel reads as its own story; the brief's condition card
+                links here. */}
             {p.cellId === "chooses:open:all" && (
               <details className="mt-4">
                 <summary className="cursor-pointer text-[13px] font-medium text-primary underline decoration-dotted underline-offset-2">
-                  The full condition ledger - every question type
+                  See every condition
                 </summary>
                 <div className="mt-3 grid gap-5">
                   <RulesSection

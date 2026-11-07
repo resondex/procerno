@@ -228,6 +228,7 @@ function CodesResults({
               setCellReq({ id, n: Date.now() });
               open("map");
             }}
+            onOpenView={(v) => open(v)}
           />
         </div>
       )}

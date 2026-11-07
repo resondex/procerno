@@ -17,15 +17,20 @@
  * from any other pill never carries the class, so it is unaffected.
  *
  * Map pins (2026-11-06): a paragraph's `cells` and a row's `cell` render as
- * small pin buttons that open that cell's position on The Map pill. They
- * render only when the shell passes onOpenCell (share links pass none), and
- * never print.
+ * small pin buttons. Answer cards (2026-11-07, bf14 - the owner's ratified
+ * shape, public/_position_panel_options.html tab 4): a pin no longer jumps to
+ * the map - it toggles its answer card (view.cards[id]) inline under its
+ * paragraph (one open per memo at a time; a scoreboard row's card opens in a
+ * slot under the table). The card's one "go deeper" link opens The Map at a
+ * cell or Build a table; it hides when the shell passes no handler (share
+ * links), where the cards still open. Pins and cards never print.
  */
 
-import { createContext, useContext, useEffect, useRef, useState } from "react";
+import { createContext, Fragment, useContext, useEffect, useRef, useState } from "react";
 import {
   BRIEF_FRAMES,
   BRIEF_FRAME_LABELS,
+  type AnswerCard,
   type BriefAnchor,
   type BriefFrame,
   type BriefMemo,
@@ -110,7 +115,27 @@ const BRIEF_CSS = `
 .pb-runhead{ display: block; margin-bottom: .15em; }
 .pb-watch{ display: block; margin-top: .3em; font-style: italic; color: var(--ink-2); }
 .pb-pin{ display: inline-block; margin-left: .2em; padding: 0 .1em; font-size: .8em; line-height: 1; vertical-align: .25em; text-decoration: none; cursor: pointer; background: none; border: 0; }
-@media print{ .pb-pin{ display: none !important; } }
+.pb-pin[aria-expanded="true"]{ color: var(--primary); }
+@media print{ .pb-pin, .pb-acard{ display: none !important; } }
+.pb-acard{
+  margin: .55em 0 1.1em; max-width: 480px; background: var(--surface); border: 1px solid var(--line);
+  border-radius: 12px; padding: 14px 18px 11px; box-shadow: 0 10px 30px rgba(16,24,40,.08);
+  font-family: var(--font-inter), system-ui, -apple-system, sans-serif; font-size: 12.5px; line-height: 1.5;
+  font-style: normal; font-weight: 400; color: var(--ink);
+}
+.pb-list .pb-acard{ grid-column: 2; }
+.pb-acard-crumb{ font-size: 10.5px; letter-spacing: .08em; text-transform: uppercase; color: var(--ink-3); margin-bottom: 6px; }
+.pb-acard-kind{ display: inline-block; font-size: 10px; font-weight: 700; letter-spacing: .07em; border-radius: 5px; padding: 1px 6px; margin-right: 6px; vertical-align: 1px; }
+.pb-acard-kind.k-cell{ background: color-mix(in srgb, var(--primary) 13%, var(--surface)); color: var(--primary); }
+.pb-acard-kind.k-brand{ background: color-mix(in srgb, #047857 13%, var(--surface)); color: color-mix(in srgb, #059669 80%, var(--ink)); }
+.pb-acard-kind.k-engines{ background: color-mix(in srgb, #6d28d9 13%, var(--surface)); color: color-mix(in srgb, #7c3aed 80%, var(--ink)); }
+.pb-acard-kind.k-condition{ background: color-mix(in srgb, #be185d 13%, var(--surface)); color: color-mix(in srgb, #db2777 80%, var(--ink)); }
+.pb-acard-hl{ font-size: 14.5px; font-weight: 650; line-height: 1.45; margin: 0 0 10px; }
+.pb-acard-row{ display: flex; justify-content: space-between; gap: 16px; padding: 5px 0; border-bottom: 1px dashed var(--line); }
+.pb-acard-row .l{ color: var(--ink-2); min-width: 0; }
+.pb-acard-row .v{ text-align: right; font-variant-numeric: tabular-nums; max-width: 55%; }
+.pb-acard-go{ display: inline-block; margin-top: 10px; font-size: 12.5px; font-weight: 600; color: var(--primary); background: none; border: 0; padding: 0; cursor: pointer; }
+.pb-acard-go:hover{ text-decoration: underline; }
 .pb-lede .pb-p:first-of-type{ font-size: 1.07em; line-height: 1.66; }
 .pb-list{ list-style: none; margin: 0; padding: 0; }
 .pb-list li{ display: grid; grid-template-columns: 2.1em 1fr; align-items: baseline; }
@@ -500,36 +525,102 @@ function Viz({ v }: { v: BriefViz }) {
   );
 }
 
-// ---------- map pins ----------
+// ---------- pins and answer cards ----------
 
-const OpenCellContext = createContext<((id: string) => void) | null>(null);
+type CardCtxT = {
+  cards: Record<string, AnswerCard>;
+  /** `${unit}::${anchor id}` of the one open card, or null. */
+  open: string | null;
+  setOpen: (k: string | null) => void;
+  onOpenCell?: (id: string) => void;
+  onOpenView?: (view: "metrics") => void;
+};
+const CardContext = createContext<CardCtxT | null>(null);
 
-function Pins({ cells }: { cells?: BriefAnchor[] }) {
-  const onOpen = useContext(OpenCellContext);
-  if (!onOpen || !cells?.length) return null;
+const KIND_LABEL: Record<AnswerCard["kind"], string> = { cell: "On the map", brand: "Brand", engines: "The assistants", condition: "The conditions" };
+
+/** The pins after a unit's text. A pin toggles its answer card in the unit's
+ * slot; with no card (an old payload) it falls back to opening the map. */
+function Pins({ cells, unit }: { cells?: BriefAnchor[]; unit: string }) {
+  const ctx = useContext(CardContext);
+  if (!ctx || !cells?.length) return null;
+  const shown = cells.filter((c) => ctx.cards[c.id] || ctx.onOpenCell);
+  if (!shown.length) return null;
   return (
     <>
-      {cells.map((c) => (
-        <button
-          key={c.id}
-          type="button"
-          className="pb-pin pb-noprint text-ink-3 hover:text-primary"
-          title={c.label}
-          aria-label={`Open on the map: ${c.label}`}
-          onClick={() => onOpen(c.id)}
-        >
-          {"\u2316"}
-        </button>
-      ))}
+      {shown.map((c) => {
+        const key = `${unit}::${c.id}`;
+        const has = !!ctx.cards[c.id];
+        return (
+          <button
+            key={c.id}
+            type="button"
+            className="pb-pin pb-noprint text-ink-3 hover:text-primary"
+            title={c.label}
+            aria-label={has ? `Show the numbers: ${c.label}` : `Open on the map: ${c.label}`}
+            {...(has ? { "aria-expanded": ctx.open === key } : {})}
+            onClick={() => (has ? ctx.setOpen(ctx.open === key ? null : key) : ctx.onOpenCell?.(c.id))}
+          >
+            {"\u2316"}
+          </button>
+        );
+      })}
     </>
   );
+}
+
+function CardView({ card }: { card: AnswerCard }) {
+  const ctx = useContext(CardContext);
+  const go = card.go;
+  const canGo = !!go && (go.target === "map" ? !!(go.cellId && ctx?.onOpenCell) : !!ctx?.onOpenView);
+  return (
+    <div className="pb-acard pb-noprint" role="region" aria-label={card.crumb}>
+      <div className="pb-acard-crumb">
+        <span className={`pb-acard-kind k-${card.kind}`}>{KIND_LABEL[card.kind].toUpperCase()}</span>
+        {card.crumb}
+      </div>
+      <p className="pb-acard-hl">{card.headline}</p>
+      {card.rows.map((r, i) => (
+        <div key={i} className="pb-acard-row">
+          <span className="l" title={r.tip}>
+            {r.label}
+          </span>
+          <span className="v" title={r.tip}>
+            {r.value}
+          </span>
+        </div>
+      ))}
+      {canGo && go && (
+        <button
+          type="button"
+          className="pb-acard-go"
+          onClick={() => (go.target === "map" ? ctx!.onOpenCell!(go.cellId!) : ctx!.onOpenView!("metrics"))}
+        >
+          {go.label} {"\u2192"}
+        </button>
+      )}
+    </div>
+  );
+}
+
+/** The open card of any unit whose key starts with `prefix` (a paragraph's
+ * own key, or a scoreboard's row prefix). */
+function CardSlot({ prefix }: { prefix: string }) {
+  const ctx = useContext(CardContext);
+  if (!ctx?.open || !ctx.open.startsWith(prefix)) return null;
+  const id = ctx.open.slice(ctx.open.indexOf("::") + 2);
+  const unit = ctx.open.slice(0, ctx.open.indexOf("::"));
+  // A paragraph slot matches its own unit exactly; a row slot any row under it.
+  if (!prefix.endsWith("/") && unit !== prefix) return null;
+  const card = ctx.cards[id];
+  return card ? <CardView card={card} /> : null;
 }
 
 // ---------- the memo ----------
 
 const NUMBERED = /^(\d+)\.\s+/;
 
-function ParaBody({ p, lead }: { p: BriefPara; lead?: string }) {
+function ParaBody({ p, lead, unit }: { p: BriefPara; lead?: string; unit: string }) {
   const l = lead ?? p.lead;
   // A move's closing "Watch: <metric>." sets on its own quiet line (the
   // served words, unchanged - only the line break is typesetting).
@@ -542,13 +633,13 @@ function ParaBody({ p, lead }: { p: BriefPara; lead?: string }) {
         {l && (/[.?!:"')]$/.test(l.trim()) ? <b>{l} </b> : <b className="pb-runhead">{l}</b>)}
         {body}
       </Tip>
-      <Pins cells={p.cells} />
+      <Pins cells={p.cells} unit={unit} />
       {watch && <span className="pb-watch">{watch}</span>}
     </>
   );
 }
 
-function Paras({ paras }: { paras: BriefPara[] }) {
+function Paras({ paras, base }: { paras: BriefPara[]; base: string }) {
   // Numbered findings ("1. ...") read as their own beats: a hanging number,
   // the rest of the lead bold, the text running inline after it.
   const numbered = paras.length > 1 && paras.every((p) => p.lead && NUMBERED.test(p.lead));
@@ -561,8 +652,9 @@ function Paras({ paras }: { paras: BriefPara[] }) {
             <li key={i}>
               <span className="pb-num">{m ? `${m[1]}.` : `${i + 1}.`}</span>
               <span>
-                <ParaBody p={p} lead={(p.lead ?? "").replace(NUMBERED, "")} />
+                <ParaBody p={p} lead={(p.lead ?? "").replace(NUMBERED, "")} unit={`${base}/p${i}`} />
               </span>
+              <CardSlot prefix={`${base}/p${i}`} />
             </li>
           );
         })}
@@ -572,9 +664,12 @@ function Paras({ paras }: { paras: BriefPara[] }) {
   return (
     <>
       {paras.map((p, i) => (
-        <p key={i} className={beats ? "pb-p pb-beat" : "pb-p"}>
-          <ParaBody p={p} />
-        </p>
+        <Fragment key={i}>
+          <p className={beats ? "pb-p pb-beat" : "pb-p"}>
+            <ParaBody p={p} unit={`${base}/p${i}`} />
+          </p>
+          <CardSlot prefix={`${base}/p${i}`} />
+        </Fragment>
       ))}
     </>
   );
@@ -587,7 +682,7 @@ function Section({ s, lede, wave }: { s: BriefSectionT; lede: boolean; wave: str
 
       {s.viz && <Viz v={s.viz} />}
 
-      {s.paras && <Paras paras={s.paras} />}
+      {s.paras && <Paras paras={s.paras} base={s.key} />}
 
       {s.rows && (
         <div className="pb-table-wrap">
@@ -606,12 +701,13 @@ function Section({ s, lede, wave }: { s: BriefSectionT; lede: boolean; wave: str
                   </td>
                   <td className="pb-r">
                     {r.value}
-                    <Pins cells={r.cell ? [r.cell] : undefined} />
+                    <Pins cells={r.cell ? [r.cell] : undefined} unit={`${s.key}/rows/${i}`} />
                   </td>
                 </tr>
               ))}
             </tbody>
           </table>
+          <CardSlot prefix={`${s.key}/rows/`} />
         </div>
       )}
 
@@ -621,7 +717,7 @@ function Section({ s, lede, wave }: { s: BriefSectionT; lede: boolean; wave: str
             [0, 1].map((ci) => (
               <div key={`${qi}-${ci}`} className="pb-card">
                 <h4 className="pb-card-h">{q.headers[ci]}</h4>
-                <Paras paras={q.cells[ci]} />
+                <Paras paras={q.cells[ci]} base={`${s.key}/q${qi}-${ci}`} />
               </div>
             ))
           )}
@@ -668,11 +764,30 @@ function splitTitle(title: string, frameLabel: string): { head: string; wave: st
   return { head, wave: wave ? wave[1] : null };
 }
 
-function Memo({ memo, subject, tracker, note }: { memo: BriefMemo; subject: string; tracker: string; note?: string }) {
+function Memo({
+  memo,
+  subject,
+  tracker,
+  note,
+  cards,
+  onOpenCell,
+  onOpenView,
+}: {
+  memo: BriefMemo;
+  subject: string;
+  tracker: string;
+  note?: string;
+  cards: Record<string, AnswerCard>;
+  onOpenCell?: (id: string) => void;
+  onOpenView?: (view: "metrics") => void;
+}) {
+  // One open answer card per memo at a time (the memo remounts per frame and subject).
+  const [open, setOpen] = useState<string | null>(null);
   const frameLabel = BRIEF_FRAME_LABELS[memo.frame];
   const { head, wave } = splitTitle(memo.title, frameLabel);
   const firstParas = memo.sections.findIndex((s) => !!s.paras);
   return (
+    <CardContext.Provider value={{ cards, open, setOpen, onOpenCell, onOpenView }}>
     <div className="pb-paper">
       <article className="pb-memo">
         <header>
@@ -691,6 +806,7 @@ function Memo({ memo, subject, tracker, note }: { memo: BriefMemo; subject: stri
         {memo.footer && <p className="pb-foot">{memo.footer}</p>}
       </article>
     </div>
+    </CardContext.Provider>
   );
 }
 
@@ -748,11 +864,14 @@ export default function BriefSection({
   runId,
   projectId,
   onOpenCell,
+  onOpenView,
 }: {
   runId: string;
   projectId?: string;
-  /** Opens a map cell's position on The Map pill; absent on share links (no pins). */
+  /** Opens a map cell's position on The Map pill; absent on share links (cards still open, their map link hides). */
   onOpenCell?: (id: string) => void;
+  /** Opens an analysis pill (an answer card's "Build a table" link); absent on share links. */
+  onOpenView?: (view: "metrics") => void;
 }) {
   const engines = useEngineSet();
   const fKey = projectId ? frameKey(projectId) : null;
@@ -950,15 +1069,22 @@ export default function BriefSection({
       </div>
 
       <div ref={memoRef} className={loading ? "opacity-50 transition-opacity" : "transition-opacity"}>
-        <OpenCellContext.Provider value={onOpenCell ?? null}>
-          {writing ? (
-            <Skeleton />
-          ) : memo ? (
-            <Memo memo={memo} subject={view.subject} tracker={view.subjects[0] ?? view.subject} note={memoNote} />
-          ) : (
-            <p className="text-[13px] text-ink-3">This frame has nothing to say yet.</p>
-          )}
-        </OpenCellContext.Provider>
+        {writing ? (
+          <Skeleton />
+        ) : memo ? (
+          <Memo
+            key={`${current}|${view.subject}|${showB && memo !== composed ? "B" : "A"}`}
+            memo={memo}
+            subject={view.subject}
+            tracker={view.subjects[0] ?? view.subject}
+            note={memoNote}
+            cards={view.cards ?? {}}
+            onOpenCell={onOpenCell}
+            onOpenView={onOpenView}
+          />
+        ) : (
+          <p className="text-[13px] text-ink-3">This frame has nothing to say yet.</p>
+        )}
       </div>
     </div>
   );

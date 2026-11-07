@@ -4,6 +4,7 @@ import { excludedWords } from "./definition_overlap";
 import { conditionKeysFor, conditionStemKey } from "./condition_groups";
 import { ENUM_TOWARD, GENERIC_AWAY } from "./rules_explorer";
 import { isWallWording } from "./wall_wording";
+import { liftLine, type Lift } from "./answer_cards";
 import { commitSentence, insightInputs, pctFine, productNoun, type InsightInputs } from "./summary_insights";
 import { computeBrandSummary, type BrandSummaryView, type Insight } from "./brand_summary";
 import { computeValue, type ValueRow } from "./value";
@@ -242,7 +243,7 @@ interface CellSpec {
   settledWatch?: boolean;
   /** Where rules are thin: exits named on the unfavorable side. */
   exitFallback?: { name: string; n: number }[];
-  /** The panel's "The numbers" block (am9): every figure a brief cites from this cell. */
+  /** The panel's "The numbers" block (am9; cell-scoped since am10): the figures that answer this cell's question. */
   figures?: Figure[];
 }
 
@@ -1085,7 +1086,7 @@ export async function computeAnalysisMap(
   const conv = (b: { chosen: RateCell; recommended: RateCell }) => (b.recommended.k > 0 ? b.chosen.k / b.recommended.k : 0);
   const product = productNoun(project.category);
   {
-    // Open choice, every buyer: the funnel for the target and every brand in the table.
+    // Open choice, every buyer: the target's funnel.
     const S = summary.target;
     const figs: Figure[] = [
       F("Named when buyers ask what to buy", S.mentioned),
@@ -1096,55 +1097,13 @@ export async function computeAnalysisMap(
       F("Picked, of all answers", S.chosen, pctFine(rate(S.chosen))),
       { label: "Recommendations that end as the pick", value: pctOf(conv(S)), tip: `${S.chosen.k} picks of ${S.recommended.k} recommending answers` },
     ];
-    // Per brand, the same funnel in one line - every brand in the table, since
-    // any of them can be a brief's subject (the matrix, the rival briefs, the
-    // conversion comparisons), most picked first.
-    const table = summary.brands.filter((b) => b.key !== S.key);
-    for (const b of table)
-      figs.push({
-        label: b.name,
-        value: listVal([
-          `named ${pct(b.mentioned)}`,
-          `recommended ${pct(b.recommended)} (${pctOf(rate(b.mentioned) > 0 ? rate(b.recommended) / rate(b.mentioned) : 0)} of naming)`,
-          `${pct(b.shareOfDecided)} of picks`,
-          `picked in ${pctFine(rate(b.chosen))} of answers`,
-          `${pctOf(conv(b))} of recommendations picked`,
-        ]),
-        tip: `named ${tipC(b.mentioned)}; recommended ${b.recommended.k}; picked ${b.chosen.k}; ${b.chosen.k} of ${summary.firmPickInCategory.k} in-category picks`,
-      });
-    // Where each brand's picks come from, by question type (the brief's stage split; brands with >= MIN_SIDE picks).
-    const STAGE: Record<string, string> = { discovery: "general questions", use_case: "job-described questions", social_validation: "what most people pick", premium_worth: "premium vs basic" };
-    const hl = pool("headline");
-    for (const b of [S, ...table]) {
-      const by = new Map<string, number>();
-      for (const r of hl) if (r.code.outcome === "pick" && r.code.top_pick && resolve(r.code.top_pick).key === b.key) by.set(r.intent.stage, (by.get(r.intent.stage) ?? 0) + 1);
-      const total = [...by.values()].reduce((a, x) => a + x, 0);
-      if (total < MIN_SIDE) continue;
-      const parts = [...by.entries()].filter(([st, k]) => k > 0 && STAGE[st]).sort((a, c) => c[1] - a[1]).map(([st, k]) => `${pctOf(k / total)} ${STAGE[st]}`);
-      if (parts.length) figs.push({ label: `${b.key === S.key ? brand : b.name}: where its picks come from`, value: listVal(parts), tip: [...by.entries()].map(([st, k]) => `${st} ${k}`).join(", ") + ` of ${total}` });
-    }
-    // The target's picks by buying situation (the room concentration), and the rest.
-    const total = S.chosen.k;
-    if (total > 0 && inputs.rooms.length >= 2) {
-      const rs = [...inputs.rooms].sort((a, c) => c.picks - a.picks || a.room.localeCompare(c.room));
-      figs.push({ label: `${brand}'s picks by buying situation`, value: listVal(rs.filter((r) => r.picks > 0).map((r) => `${r.room} ${pctOf(r.picks / total)}`)), tip: rs.map((r) => `${r.room} ${r.picks}`).join(", ") + ` of ${total}` });
-      const top = rs[0];
-      const outsideC = cell(total - top.picks, Math.max(0, summary.firmPickInCategory.k - top.firm));
-      figs.push(F(`Share of picks outside ${top.room}`, outsideC));
-      for (const r of rs) if (r.firm > 0) figs.push(F(`Share of picks for ${r.room}`, r.decided));
-    }
-    // One question's share of a brand's picks (the question concentration), for brands with >= MIN_SIDE picks.
-    for (const b of [S, ...table]) {
-      const tot = inputs.questions.reduce((a, q) => a + (q.picks[b.key] ?? 0), 0);
-      if (tot < MIN_SIDE || inputs.questions.length < 2) continue;
-      const q = [...inputs.questions].sort((a, c) => (c.picks[b.key] ?? 0) - (a.picks[b.key] ?? 0) || a.id.localeCompare(c.id))[0];
-      const k = q.picks[b.key] ?? 0;
-      figs.push({ label: `${b.key === S.key ? brand : b.name}: picks from its top question`, value: pct(cell(k, tot)), tip: `${k} of ${tot}: "${q.text.replace(/\s+/g, " ").slice(0, 90)}"` });
-    }
-    // Arguments that travel with each brand's picks (top and bottom lift; the target's from the summary).
-    const liftLine = (l: { code: string; wins: RateCell; others: RateCell; lift: number }) =>
-      `${l.code}: ${pct(l.wins)} of its picks, ${pct(l.others)} of other picks (${signedPts(l.lift)})`;
-    const liftFigs = (who: string, lift: { code: string; wins: RateCell; others: RateCell; lift: number }[], extra: string[] = []) => {
+    // am10 (2026-11-07, the answer cards): this panel answers its own
+    // question - the target's funnel, its arguments, the picks that leave the
+    // category. Every other brand's funnel, the stage and question splits, the
+    // assistants and the conditions moved to the brief's answer cards
+    // (answer_cards.ts: brand / engines / condition).
+    // The target's arguments (top and bottom lift, plus the most-taught codes it loses on).
+    const liftFigs = (who: string, lift: Lift[], extra: string[] = []) => {
       if (!lift.length) return;
       const codes = [...new Set([lift[0].code, lift[lift.length - 1].code, ...extra])];
       for (const code of codes) {
@@ -1155,79 +1114,12 @@ export async function computeAnalysisMap(
     const taughtTop = new Set(inputs.taught.slice(0, 5).map((t) => t.code));
     const losingTaught = summary.reasonLift.filter((l) => taughtTop.has(l.code) && l.lift < 0).map((l) => l.code);
     liftFigs(brand, summary.reasonLift, losingTaught);
-    for (const b of table) if (b.chosen.k >= MIN_SIDE) liftFigs(b.name, liftForBrand(data, eng, b.key));
-    // Conditions: the run's largest branch toward each side (the brief's conditions paragraph).
-    const k = inputs.conditions;
-    if (k) {
-      if (k.toward[0] && k.towardCells) figs.push({ label: `Largest branch toward ${brand}: share of the questions where any condition routes to it`, value: pctOf(k.toward[0].cells / k.towardCells), tip: `"${k.toward[0].label}": ${k.toward[0].cells} of ${k.towardCells} questions` });
-      if (k.away[0] && k.awayCells) figs.push({ label: "Largest branch away: share of the questions where any condition routes away", value: pctOf(k.away[0].cells / k.awayCells), tip: `"${k.away[0].label}": ${k.away[0].cells} of ${k.awayCells} questions` });
-      const seen = new Set<string>();
-      for (const g of k.away) {
-        const to = g.routes[0]?.name;
-        if (!to || seen.has(to) || !k.awayCells) continue;
-        seen.add(to);
-        figs.push({ label: `Largest branch toward ${to}`, value: pctOf(g.cells / k.awayCells), tip: `"${g.label}": ${g.cells} of ${k.awayCells} questions` });
-      }
-    }
-    const a = inputs.away;
-    if (a && a.cells > 0) {
-      for (const g of a.groups) figs.push({ label: `Questions where "${g.label.slice(0, 60)}" routes away`, value: pctOf(g.cells / a.cells), tip: `${g.cells} of ${a.cells} questions with an away condition` });
-      const g = a.groups[0];
-      if (g?.names) {
-        const b = summary.brands.find((x) => x.key === g.names!.key);
-        figs.push(F(`${g.names.name}'s share of picks`, b ? b.shareOfDecided : cell(0, summary.firmPickInCategory.k)));
-      }
-    }
     // Picks that leave the category (B5), overall and by buying situation.
     const lk = inputs.leak;
     if (lk.firm > 0) {
       figs.push(F("Picks outside the category", cell(lk.firm - lk.inCategory, lk.firm)));
       const rr = lk.rooms.filter((r) => r.firm > 0 && r.outside > 0);
       if (rr.length) figs.push({ label: "Picks outside the category, by buying situation", value: listVal(rr.map((r) => `${r.room} ${pct(cell(r.outside, r.firm))}`)) });
-    }
-    // The assistants: the target's share of picks by engine, mode and vendor; how often each mode commits.
-    const eng1 = summary.byEngine.filter((e) => e.decided.n > 0);
-    if (eng1.length >= 2) figs.push({ label: `${brand}'s share of picks, by assistant`, value: listVal(eng1.map((e) => `${e.label} ${pct(e.decided)}`)) });
-    const modes = (["search", "instinct"] as const).map((m) => {
-      const list = summary.byEngine.filter((e) => e.mode === m);
-      const answers = list.reduce((x, e) => x + e.answers, 0);
-      const firm = list.reduce((x, e) => x + e.decided.n, 0);
-      const won = list.reduce((x, e) => x + e.decided.k, 0);
-      return { m, firm: cell(firm, answers), decided: cell(won, firm) };
-    });
-    if (modes.every((x) => x.firm.n > 0)) {
-      figs.push({ label: `${brand}'s share of picks, with and without web search`, value: listVal(modes.map((x) => `${x.m === "search" ? "with" : "without"} ${pct(x.decided)}`)) });
-      figs.push({ label: `The AI commits to a pick, with and without web search`, value: listVal(modes.map((x) => `${x.m === "search" ? "with" : "without"} ${pct(x.firm)}`)) });
-    }
-    const vend = new Map<string, { k: number; n: number }>();
-    for (const e of summary.byEngine) {
-      const t = vend.get(e.vendor) ?? { k: 0, n: 0 };
-      t.k += e.decided.k;
-      t.n += e.decided.n;
-      vend.set(e.vendor, t);
-    }
-    if (vend.size >= 2) figs.push({ label: `${brand}'s share of picks, by company`, value: listVal([...vend.entries()].map(([v, t]) => `${v} ${pct(cell(t.k, t.n))}`)) });
-    // One engine or one company supplying a brand's picks (the detector's units and test).
-    if (summary.byEngine.length >= 3 && summary.answers > 0) {
-      type Unit = { label: string; models: string[]; answers: number; vendor: boolean };
-      const units: Unit[] = summary.byEngine.map((e) => ({ label: e.label, models: [e.key], answers: e.answers, vendor: false }));
-      const vs = new Map<string, Unit>();
-      for (const e of summary.byEngine) {
-        const u = vs.get(e.vendor) ?? { label: e.vendor, models: [], answers: 0, vendor: true };
-        u.models.push(e.key);
-        u.answers += e.answers;
-        vs.set(e.vendor, u);
-      }
-      if (vs.size >= 2) for (const u of vs.values()) if (u.models.length >= 2) units.push(u);
-      const nameOf = new Map(summary.brands.filter((b) => b.role !== "emerged").map((b) => [b.key, b.name]));
-      for (const b of inputs.enginePicks) {
-        if (b.total < MIN_SIDE || !nameOf.has(b.key)) continue;
-        const best = units
-          .map((u) => ({ u, picks: cell(u.models.reduce((x, m) => x + (b.byModel[m] ?? 0), 0), b.total), base: u.answers / summary.answers }))
-          .sort((x, y) => rate(y.picks) - y.base - (rate(x.picks) - x.base) || x.u.label.localeCompare(y.u.label))[0];
-        if (best && rate(best.picks) >= WATCH_ENGINE_SHARE)
-          figs.push({ label: `${nameOf.get(b.key)}: ${best.u.vendor ? `${best.u.label}'s ${best.u.models.length} assistants` : best.u.label} supply`, value: `${pct(best.picks)} of its picks (answering ${pctOf(best.base)} of the questions)`, tip: `${best.picks.k} of ${best.picks.n} picks` });
-      }
     }
     addFigs("chooses:open:all", figs);
   }
@@ -2113,7 +2005,8 @@ function tensionsOf(
 // am7 (2026-11-05): the Overall band folds into first-of-row All cells - every row with 2+ cells opens with its pooled roll-up (open choice = the headline pool whole, still the ledger's home at chooses:open:all; new pooled cells for head-to-head, rival leavers, both worry rows, value, awareness, criteria and the settled band); base-voiced awareness/criteria cells re-key "general" beside siblings; pooled cells are marked (MapCell.all / MapCellStat.pooled) and never match tension text by label.
 // am8 (2026-11-06): the payload carries insightCells - every served insight placed on its cell - so the brief's facts can link into the map.
 // am9 (2026-11-06): the citation ruling - positions carry `figures` ("The numbers": every figure a brief cites, stated on the cell whose pool it reads; the open-choice All cell states the whole brand table, the conditions, the assistants and the arguments; the doubt, leaver, hold, value, criteria, awareness and settled cells restate their views' numbers); the head-to-head All cell pools ENTITY rivals only (MECE - class matchups are stated beside it in the figures, never summed into it); leaver cells read a recommended rate.
-const ANALYSIS_MAP_VERSION = "am9";
+// am10 (2026-11-07): the answer cards - the pooled open-choice panel slims back to its own question (the target's funnel, its arguments, the picks leaving the category); every other brand's funnel line, the stage, room and question splits, every brand's lift, the vendor-supply lines, the assistants (company, assistant, mode) and the conditions moved to the brief's answer cards (answer_cards.ts). Every other cell's figures are unchanged.
+const ANALYSIS_MAP_VERSION = "am10";
 export function computeAnalysisMapCached(run: Run, project: Project, request: ViewRequest = {}): Promise<AnalysisMapView | null> {
   const r = requestOf(request, false);
   return cachedView("analysis_map", ANALYSIS_MAP_VERSION, run, project, (d) => computeAnalysisMap(d, r), { setupDecision: true, judge: true }, r);

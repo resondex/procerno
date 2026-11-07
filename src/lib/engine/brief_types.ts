@@ -40,6 +40,32 @@ export const BRIEF_FRAME_LABELS: Record<BriefFrame, string> = {
 export interface BriefAnchor {
   id: string;
   label: string;
+  /** What the pin opens (2026-11-07, the answer cards): absent = "cell" (back-compat).
+   * Every anchor's id is also its key into BriefView.cards; a reader should
+   * trust the card's own kind over this field (the written memo rebuilds
+   * anchors as {id, label} only). */
+  kind?: AnswerCardKind;
+}
+
+/** The answer cards (2026-11-07, the owner's ratified shape - public/_position_panel_options.html
+ * tab 4): every pin opens one small card that answers ONE question. A cell
+ * card is a map cell's own story; a brand card one brand's open-question
+ * funnel; the engines card the assistants split; the condition card what
+ * routes buyers away. The citation contract: every visible number in a
+ * paragraph or row is stated by one of its pins' cards (headline, crumb, or a
+ * row's label or value - never a tip, which carries counts). */
+export type AnswerCardKind = "cell" | "brand" | "engines" | "condition";
+
+export interface AnswerCard {
+  kind: AnswerCardKind;
+  /** The card's quiet top line ("Wells Fargo · open buying questions"). */
+  crumb: string;
+  /** One claim sentence. */
+  headline: string;
+  /** label / value lines; counts in `tip` (title attribute only). */
+  rows: { label: string; value: string; tip?: string }[];
+  /** The one "go deeper" link: The Map (at cellId) or Build a table. */
+  go?: { label: string; target: "map" | "metrics"; cellId?: string };
 }
 
 /** One scoreboard or table line. `tip` holds the counts (tooltip only). */
@@ -162,4 +188,6 @@ export interface BriefView {
   memos: Record<BriefFrame, BriefMemo>;
   /** Engines the payload was computed on (display labels), for the "on N assistants" line. */
   engineCount: number;
+  /** Every pin's answer card, keyed by the anchor id (bf14; only cards a surviving pin opens). */
+  cards?: Record<string, AnswerCard>;
 }
