@@ -65,13 +65,23 @@ export const CONDITION_CARD = "card:conditions";
 
 /* ---------------------------------- cell ---------------------------------- */
 
+const cardRank = (label: string) => (label.endsWith("it wins on") ? 0 : label.endsWith("it loses on") ? 1 : 2);
+
 /** A map cell's own story: the position's claim and its (slimmed) figures. */
 export function cellCard(p: Position): AnswerCard {
   return {
     kind: "cell",
     crumb: p.where,
     headline: p.claim,
-    rows: (p.figures ?? []).map((f) => ({ label: f.label, value: f.value, ...(f.tip ? { tip: f.tip } : {}) })),
+    rows: [
+      ...(p.figures ?? []).map((f) => ({ label: f.label, value: f.value, ...(f.tip ? { tip: f.tip } : {}) })),
+      // am11: the open-choice cell's argument lines (they left its figures for
+      // the panel's arguments section); wins-on, loses-on, then the rest.
+      ...[...p.lifts]
+        .filter((l) => l.card)
+        .sort((a, b) => cardRank(a.card!.label) - cardRank(b.card!.label))
+        .map((l) => ({ ...l.card! })),
+    ],
     go: { label: "Open this contest on the map", target: "map", cellId: p.cellId },
   };
 }

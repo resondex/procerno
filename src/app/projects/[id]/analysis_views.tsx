@@ -765,6 +765,7 @@ function PositionPanel({
   const quotes = p.receipts.filter((r) => r.quote).slice(0, 3);
   const ids = p.receipts.map((r) => r.responseId);
   const liftMax = Math.max(10, ...p.lifts.map((l) => Math.abs(l.value)));
+  const sides = p.liftSides ?? ["your picks", "rivals' picks"];
 
   const h3 = "mt-6 mb-2 border-t border-line pt-3.5 text-[11px] font-semibold uppercase tracking-[0.08em] text-ink-3";
   return (
@@ -867,7 +868,7 @@ function PositionPanel({
                 const w = (Math.min(Math.abs(l.value), liftMax) / liftMax) * 50;
                 const v = Math.round(l.value);
                 return (
-                  <div key={l.label} className="grid grid-cols-[minmax(7.5rem,1fr)_1fr_3rem] items-center gap-2.5 text-[13px]">
+                  <div key={l.label} className="grid grid-cols-[minmax(7.5rem,1fr)_1fr_3rem] items-center gap-x-2.5 gap-y-0.5 text-[13px]">
                     <span className="text-ink-2">{l.label}</span>
                     <div className="relative h-2.5">
                       <span className="absolute inset-y-[-2px] left-1/2 w-px bg-line" />
@@ -884,6 +885,12 @@ function PositionPanel({
                       {v > 0 ? "+" : ""}
                       {v}
                     </span>
+                    {l.wins && l.others && (
+                      // am11: the two shares behind the bar; counts in the tip.
+                      <span className="col-span-full mb-1 text-[11.5px] text-ink-3" title={l.tip}>
+                        {l.wins} of {sides[0]} · {l.others} of {sides[1]}
+                      </span>
+                    )}
                   </div>
                 );
               })}

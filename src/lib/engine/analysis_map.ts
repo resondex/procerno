@@ -4,7 +4,7 @@ import { excludedWords } from "./definition_overlap";
 import { conditionKeysFor, conditionStemKey } from "./condition_groups";
 import { ENUM_TOWARD, GENERIC_AWAY } from "./rules_explorer";
 import { isWallWording } from "./wall_wording";
-import { liftLine, type Lift } from "./answer_cards";
+import { liftLine } from "./answer_cards";
 import { commitSentence, insightInputs, pctFine, productNoun, type InsightInputs } from "./summary_insights";
 import { computeBrandSummary, type BrandSummaryView, type Insight } from "./brand_summary";
 import { computeValue, type ValueRow } from "./value";
@@ -184,6 +184,8 @@ const share = (k: number, n: number) => (n > 0 ? k / n : 0);
 const tipC = (c: RateCell) => `${c.k} of ${c.n}`;
 /** A signed lift in points, as the summary's insights print it ("+30 points"). */
 const signedPts = (x: number) => `${x >= 0 ? "+" : "-"}${Math.round(Math.abs(x) * 100)} points`;
+/** am11: a lift row's two shares for its sub-line, in the brief's formatting. */
+const liftShares = (l: { wins: RateCell; others: RateCell }) => ({ wins: pct(l.wins), others: pct(l.others), tip: `${tipC(l.wins)} · ${tipC(l.others)}` });
 
 /* The wall detector lives in wall_wording.ts (shared with the summary insights). */
 export { isWallWording };
@@ -230,7 +232,9 @@ interface CellSpec {
   /** Notes and claims, filled after the verdict. */
   note: (v: CellVerdict) => string;
   claim: (v: CellVerdict) => string;
-  lift?: { wins: PoolRow[]; others: PoolRow[]; note: string };
+  /** sides: the sub-line's words for the two buckets (default your picks /
+   * rivals' picks). */
+  lift?: { wins: PoolRow[]; others: PoolRow[]; note: string; sides?: [string, string] };
   lifts?: LiftItem[];
   liftNote?: string;
   leakShare?: number;
@@ -618,7 +622,7 @@ export async function computeAnalysisMap(
           return `${lead}; of the doubts, ${pctOf(share(own, doubting))} point to ${brand}'s own cheaper option and ${pctOf(share(riv, doubting))} to a rival${taker.kind !== TAKER.undecided ? `, led by ${taker.name}` : ""}.`;
         return `${lead}.`;
       },
-      lift: { wins: yes, others: no, note: "Share of worth-it answers vs not-worth-it answers arguing each code." },
+      lift: { wins: yes, others: no, note: "Share of worth-it answers vs not-worth-it answers arguing each code.", sides: ["worth-it answers", "not-worth-it answers"] },
     });
   }
   for (const [room, rows] of [...valueGroups.entries()].sort((a, b) => roomIndex(a[0]) - roomIndex(b[0]))) {
@@ -653,7 +657,7 @@ export async function computeAnalysisMap(
           return `${lead}; of the doubts, ${pctOf(share(own, doubting))} point to ${brand}'s own cheaper option and ${pctOf(share(riv, doubting))} to a rival${taker.kind !== TAKER.undecided ? `, led by ${taker.name}` : ""}.`;
         return `${lead}.`;
       },
-      lift: { wins: yes, others: no, note: "Share of worth-it answers vs not-worth-it answers arguing each code." },
+      lift: { wins: yes, others: no, note: "Share of worth-it answers vs not-worth-it answers arguing each code.", sides: ["worth-it answers", "not-worth-it answers"] },
     });
   }
 
@@ -666,6 +670,7 @@ export async function computeAnalysisMap(
   const winners = lift.filter((l) => l.lift > 0 && l.wins.low > l.others.high).slice(0, 3);
   const losers = [...lift].reverse().filter((l) => l.lift < 0 && l.others.low > l.wins.high).slice(0, 3);
   const liftOf = new Map(lift.map((l) => [l.code, l.lift]));
+  const liftRow = new Map(lift.map((l) => [l.code, l]));
   const criteriaSpec = (key: string, label: string, rows: PoolRow[], wide: boolean): CellSpec => {
     const counts = new Map<string, number>();
     const withReasons = rows.filter((r) => r.code.reasons !== null);
@@ -688,6 +693,7 @@ export async function computeAnalysisMap(
       .map((c) => ({
         label: top5.includes(c) ? `${c} (taught ${pct(taughtRate(c))})` : `${c} (untaught)`,
         value: Math.round((liftOf.get(c) ?? 0) * 100),
+        ...liftShares(liftRow.get(c)!),
       }))
       .sort((a, b) => Math.abs(b.value) - Math.abs(a.value))
       .slice(0, LIFT_TOP);
@@ -764,7 +770,7 @@ export async function computeAnalysisMap(
         v === "nocall"
           ? `Asked to compare ${brand} with ${rival.name} directly, the AI declines to pick between them in ${pct(undecided)} of answers.`
           : `Asked to compare ${brand} with ${rival.name} directly, the AI picks ${brand} in ${pct(rec)} of the answers that pick one of them${undecided.k > 0 ? ` (no clear pick in ${pct(undecided)})` : ""}.`,
-      lift: { wins: won, others: lost, note: `Within this matchup: share of answers arguing each code when you win vs when ${rival.name} does.` },
+      lift: { wins: won, others: lost, note: `Within this matchup: share of answers arguing each code when you win vs when ${rival.name} does.`, sides: ["your wins", `${rival.name}'s wins`] },
     };
   };
   /** Every prompted matchup against a NAMED rival pooled (am9: entity rivals
@@ -807,7 +813,7 @@ export async function computeAnalysisMap(
         const l = g.rows.filter((r) => pickOf(r).key === g.rival.key).length;
         return { label: `Asked against the ${g.rival.name} class (not in the pooled number)`, value: `${pct(cell(w, w + l))} of picks`, tip: `${w} won, ${l} lost` };
       }),
-      lift: { wins: won, others: lost, note: "Pooled across every matchup: share of answers arguing each code when you win vs when the named rival does." },
+      lift: { wins: won, others: lost, note: "Pooled across every matchup: share of answers arguing each code when you win vs when the named rival does.", sides: ["your wins", "rivals' wins"] },
     };
   };
   const entity = pool("head_to_head_entity");
@@ -947,7 +953,7 @@ export async function computeAnalysisMap(
         `${who}, the AI agrees the worry is warranted in ${pct(agree)} of the answers that judge it and tells them to go ahead in ${pct(go)}${
           v === "nocall" ? " - most answers take no side" : agreed.length >= MIN_SIDE && rate(goOfAgreed) >= 0.3 ? `, including ${pct(goOfAgreed)} of the answers that agree` : ""
         }.`,
-      lift: { wins: proceed, others: conceded, note: "Share of go-ahead answers vs conceding answers arguing each code." },
+      lift: { wins: proceed, others: conceded, note: "Share of go-ahead answers vs conceding answers arguing each code.", sides: ["go-ahead answers", "conceding answers"] },
     };
   };
   const buyerGroups = worryGroups(objections);
@@ -973,7 +979,7 @@ export async function computeAnalysisMap(
       note: () => `stay ${pct(keepC)} · leave ${pct(leaveC)}`,
       claim: (v) =>
         `${who}, the AI says stay in ${pct(keepC)} of answers and leave in ${pct(leaveC)}${v === "nocall" ? " - most take no side" : taker.kind === TAKER.rival ? `; ${taker.name} is where the leavers are sent most` : ""}.`,
-      lift: { wins: keep, others: leave, note: "Share of stay answers vs leave answers arguing each code." },
+      lift: { wins: keep, others: leave, note: "Share of stay answers vs leave answers arguing each code.", sides: ["stay answers", "leave answers"] },
     };
   };
   if (custGroups.length >= 2) pushAll(staySpec("customers", "Customers' worries", "all", "All worries", stayRows, false, "Across every customer worry"));
@@ -1000,7 +1006,7 @@ export async function computeAnalysisMap(
       note: () => `stick ${pct(stickC)} · switch ${pct(swC)}`,
       claim: (v) =>
         `Asked whether to keep buying ${brand} out of habit, the AI says stick with it in ${pct(stickC)} of answers and switch in ${pct(swC)}${v !== "nocall" && topSw ? `, most often to ${topSw[0]}` : ""}.`,
-      lift: { wins: stick, others: sw, note: "Share of stick answers vs switch answers arguing each code." },
+      lift: { wins: stick, others: sw, note: "Share of stick answers vs switch answers arguing each code.", sides: ["stick answers", "switch answers"] },
     });
   }
 
@@ -1035,7 +1041,7 @@ export async function computeAnalysisMap(
         const lead = `Asked by your customers across ${list}, the AI strengthens the relationship in ${pct(strC)} of answers`;
         return v === "nocall" ? `${lead} - most answers stay neutral.` : `${lead}${weak.length ? ` and weakens it in ${pct(cell(weak.length, rows.length))}` : ""}.`;
       },
-      lift: { wins: str, others: rows.filter((r) => r.code.relationship_verdict !== "strengthens"), note: "Share of strengthening answers vs the rest arguing each code." },
+      lift: { wins: str, others: rows.filter((r) => r.code.relationship_verdict !== "strengthens"), note: "Share of strengthening answers vs the rest arguing each code.", sides: ["strengthening answers", "the rest"] },
     });
   }
   for (const { view, key, label, rows } of settledPresent) {
@@ -1060,7 +1066,7 @@ export async function computeAnalysisMap(
         if (settledWatch) return `${lead}; asked neutrally about buyers' worries, it agrees with them in ${pct(objectionsAgree)} - the asker set the side here.`;
         return v === "nocall" ? `${lead} - most answers stay neutral.` : `${lead}${weak.length ? ` and weakens it in ${pct(cell(weak.length, rows.length))}` : ""}.`;
       },
-      lift: { wins: str, others: rows.filter((r) => r.code.relationship_verdict !== "strengthens"), note: "Share of strengthening answers vs the rest arguing each code." },
+      lift: { wins: str, others: rows.filter((r) => r.code.relationship_verdict !== "strengthens"), note: "Share of strengthening answers vs the rest arguing each code.", sides: ["strengthening answers", "the rest"] },
     });
   }
 
@@ -1102,18 +1108,9 @@ export async function computeAnalysisMap(
     // category. Every other brand's funnel, the stage and question splits, the
     // assistants and the conditions moved to the brief's answer cards
     // (answer_cards.ts: brand / engines / condition).
-    // The target's arguments (top and bottom lift, plus the most-taught codes it loses on).
-    const liftFigs = (who: string, lift: Lift[], extra: string[] = []) => {
-      if (!lift.length) return;
-      const codes = [...new Set([lift[0].code, lift[lift.length - 1].code, ...extra])];
-      for (const code of codes) {
-        const l = lift.find((x) => x.code === code);
-        if (l) figs.push({ label: `${who}: argument ${l === lift[0] ? "it wins on" : l === lift[lift.length - 1] ? "it loses on" : "in the lift"}`, value: liftLine(l), tip: `${tipC(l.wins)} picks; ${tipC(l.others)} other picks` });
-      }
-    };
-    const taughtTop = new Set(inputs.taught.slice(0, 5).map((t) => t.code));
-    const losingTaught = summary.reasonLift.filter((l) => taughtTop.has(l.code) && l.lift < 0).map((l) => l.code);
-    liftFigs(brand, summary.reasonLift, losingTaught);
+    // am11 (2026-11-07): the target's arguments left "The numbers" - they ride
+    // the arguments section's rows (Position.lifts, built from the same
+    // summary.reasonLift objects) and the open-choice card restates them.
     // Picks that leave the category (B5), overall and by buying situation.
     const lk = inputs.leak;
     if (lk.firm > 0) {
@@ -1368,13 +1365,47 @@ export async function computeAnalysisMap(
     const total = w.length + o.length;
     return [...counts.entries()]
       .filter(([, k]) => k / total >= LIFT_MIN_INCIDENCE)
-      .map(([code]) => ({
-        label: code,
-        value: Math.round((share(w.filter((r) => r.code.reasons!.includes(code)).length, w.length) - share(o.filter((r) => r.code.reasons!.includes(code)).length, o.length)) * 100),
-      }))
+      .map(([code]) => {
+        const wc = cell(w.filter((r) => r.code.reasons!.includes(code)).length, w.length);
+        const oc = cell(o.filter((r) => r.code.reasons!.includes(code)).length, o.length);
+        return { label: code, value: Math.round((share(wc.k, wc.n) - share(oc.k, oc.n)) * 100), ...liftShares({ wins: wc, others: oc }) };
+      })
       .filter((l) => l.value !== 0)
       .sort((a, b) => Math.abs(b.value) - Math.abs(a.value) || a.label.localeCompare(b.label))
       .slice(0, LIFT_TOP);
+  };
+  /** am11: the pooled open-choice cell's arguments come from the SAME
+   * summary.reasonLift objects the brief reads (byte-equal shares): its
+   * |lift| top-N selection UNION every code the brief cites there - the
+   * argument it wins on (reasonLift[0]), the one it loses on (the last) and
+   * the most-taught codes it loses on (taught_vs_winning). Each carries the
+   * line its answer card states. */
+  const pooledOpenLifts = (selected: LiftItem[]): LiftItem[] => {
+    const rl = summary.reasonLift;
+    const first = rl[0];
+    const last = rl[rl.length - 1];
+    const taughtTop = new Set(inputs.taught.slice(0, 5).map((t) => t.code));
+    const cited = [first.code, last.code, ...rl.filter((l) => taughtTop.has(l.code) && l.lift < 0).map((l) => l.code)];
+    const byCode = new Map(rl.map((l) => [l.code, l]));
+    const own = new Map(selected.map((x) => [x.label, x]));
+    const codes = [...new Set([...selected.map((x) => x.label), ...cited])];
+    const items: LiftItem[] = [];
+    for (const code of codes) {
+      const l = byCode.get(code);
+      if (!l) {
+        const x = own.get(code);
+        if (x) items.push(x);
+        continue;
+      }
+      const role = l === first ? "it wins on" : l === last ? "it loses on" : "in the lift";
+      items.push({
+        label: code,
+        value: (l.lift < 0 ? -1 : 1) * Math.round(Math.abs(l.lift) * 100),
+        ...liftShares(l),
+        card: { label: `${brand}: argument ${role}`, value: liftLine(l), tip: `${tipC(l.wins)} picks; ${tipC(l.others)} other picks` },
+      });
+    }
+    return items.sort((a, b) => Math.abs(b.value) - Math.abs(a.value) || a.label.localeCompare(b.label));
   };
   const vendorDeficit = (s: CellSpec) => {
     const by = new Map<string, { b: number; t: number }>();
@@ -1569,7 +1600,8 @@ export async function computeAnalysisMap(
         if (conds.bearing < 5 && away.length === 0 && s.exitFallback?.length) away = s.exitFallback.map((x) => ({ text: `Sent to ${x.name}`, n: x.n }));
 
         const numerator = verdict === "yours" ? s.you : verdict === "theirs" ? s.them : verdict === "contested" ? [...s.you, ...s.them] : s.rows;
-        const lifts = s.lifts ?? (s.lift ? liftsOf(s.lift.wins, s.lift.others) : []);
+        let lifts = s.lifts ?? (s.lift ? liftsOf(s.lift.wins, s.lift.others) : []);
+        if (id === "chooses:open:all" && summary.reasonLift.length) lifts = pooledOpenLifts(lifts);
         const liftNote = s.liftNote ?? (lifts.length && s.lift ? s.lift.note : undefined);
         const where = `${s.rowLabel}${s.label ? ` · ${s.label}` : " · every buyer"}`;
         const taker = verdict === "yours" ? { name: "Nobody", kind: TAKER.nobody } : s.taker;
@@ -1587,6 +1619,7 @@ export async function computeAnalysisMap(
           triageWhy: why,
           lifts,
           ...(liftNote ? { liftNote } : {}),
+          ...(lifts.length ? { liftSides: s.lift?.sides ?? (["your picks", "rivals' picks"] as [string, string]) } : {}),
           toward,
           away,
           receipts: receiptsOf(numerator.length ? numerator : s.rows),
@@ -2006,7 +2039,8 @@ function tensionsOf(
 // am8 (2026-11-06): the payload carries insightCells - every served insight placed on its cell - so the brief's facts can link into the map.
 // am9 (2026-11-06): the citation ruling - positions carry `figures` ("The numbers": every figure a brief cites, stated on the cell whose pool it reads; the open-choice All cell states the whole brand table, the conditions, the assistants and the arguments; the doubt, leaver, hold, value, criteria, awareness and settled cells restate their views' numbers); the head-to-head All cell pools ENTITY rivals only (MECE - class matchups are stated beside it in the figures, never summed into it); leaver cells read a recommended rate.
 // am10 (2026-11-07): the answer cards - the pooled open-choice panel slims back to its own question (the target's funnel, its arguments, the picks leaving the category); every other brand's funnel line, the stage, room and question splits, every brand's lift, the vendor-supply lines, the assistants (company, assistant, mode) and the conditions moved to the brief's answer cards (answer_cards.ts). Every other cell's figures are unchanged.
-const ANALYSIS_MAP_VERSION = "am10";
+// am11 (2026-11-07): the open-choice panel's arguments render once - the target's lift rows leave the pooled cell's "The numbers" and its arguments section carries them (every code the brief cites there, from the same summary.reasonLift objects), each lift row now carries its two shares for a sub-line (every cell), and the open-choice card restates the lift lines from Position.lifts.
+const ANALYSIS_MAP_VERSION = "am11";
 export function computeAnalysisMapCached(run: Run, project: Project, request: ViewRequest = {}): Promise<AnalysisMapView | null> {
   const r = requestOf(request, false);
   return cachedView("analysis_map", ANALYSIS_MAP_VERSION, run, project, (d) => computeAnalysisMap(d, r), { setupDecision: true, judge: true }, r);

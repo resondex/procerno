@@ -1951,7 +1951,8 @@ export async function computeBrief(data: ViewData, request: BriefRequest = {}): 
 // bf13 (2026-11-06): the citation ruling - after composition every pin on a numbered paragraph or row must share one of its numbers with its panel (RULE 1, citePins); reads the am9 map, whose figures state every cited number (RULE 2, scripts/brief_citation_harness.mts); PIN_RULES gain room_win / room_value (both named situations), rival_h2h and leak_problem (the pooled cell second) and the engine keys (the pooled open panel); the argument findings and SWOT argument items pin the pooled open cell.
 // bf14 (2026-11-07): the answer cards - every pin opens a card that answers one question (cell / brand / engines / condition, answer_cards.ts) and the payload carries them (BriefView.cards); RULE 1 checks a pin against its card's text and drops a brand / engines / condition card whose shared numbers an earlier pin already states; reads the am10 map, whose pooled open-choice panel slimmed back to its own question - every other brand's funnel, the stage / room / question splits, the assistants and the conditions now cite brand, engines and condition cards. No sentence text changed.
 // bf15 (2026-11-07): the fact is the link - the trailing pins are gone; a number in the sentence opens its card. BriefAnchor gains `at` (the exact phrase a numberless unit's anchor attaches to: a TOWS play's own item, a Minto move's watch phrase, a thin situation's name); citePins strips `at` on numbered units and drops a numberless unit's anchor whose `at` is absent from its text. No sentence text changed.
-const BRIEF_VERSION = "bf15";
+// bf16 (2026-11-07): reads the am11 map - the open-choice card's argument lines now come from the position's lifts (every code the brief cites there, plus the panel's top arguments); the panel states each code once. No sentence text changed.
+const BRIEF_VERSION = "bf16";
 
 /**
  * The brief through the cache. cachedView's keying, with the subject as one

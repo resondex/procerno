@@ -109,6 +109,15 @@ export interface LiftItem {
   /** Signed points (argued-in-your-wins minus argued-in-rival-wins, or the
    * band's own signed read); drawn as bars about zero. */
   value: number;
+  /** am11: the two shares behind the bar, formatted like the brief's own
+   * sentences ("31%"), for the row's sub-line; the tip carries the counts.
+   * Absent on payloads cached before am11. */
+  wins?: string;
+  others?: string;
+  tip?: string;
+  /** am11, the pooled open-choice cell only: the line its answer card states
+   * (the argument rows that left "The numbers"). */
+  card?: { label: string; value: string; tip: string };
 }
 
 export interface ConditionItem {
@@ -134,6 +143,9 @@ export interface Position {
   triageWhy: string;
   lifts: LiftItem[];
   liftNote?: string;
+  /** am11: what the two sides of the lift are ("your picks", "rivals' picks")
+   * - the sub-line's words. */
+  liftSides?: [string, string];
   toward: ConditionItem[];
   away: ConditionItem[];
   receipts: PositionReceipt[];
