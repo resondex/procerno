@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type { Dossier, DossierArg, DossiersView } from "@/lib/engine/dossiers";
 import type { HeadToHeadViews } from "@/lib/engine/head_to_head";
 import { Boundaries } from "./head_to_head_view";
@@ -43,10 +43,12 @@ const DOSS_CSS = `
 .dz-root{ --dz-pos:#0d9488; --dz-neg:#be185d; --dz-amber:#a16207; }
 @media (prefers-color-scheme: dark){ .dz-root{ --dz-pos:#14a08f; --dz-neg:#d2497e; --dz-amber:#d0a03a; } }
 .dz-root{ --dz-amber-bg:color-mix(in srgb, var(--dz-amber) 10%, var(--surface)); }
-.dz-more > summary{ list-style:none; }
-.dz-more > summary::-webkit-details-marker{ display:none; }
-.dz-more > summary .dz-caret::after{ content:" \\25B8"; }
-.dz-more[open] > summary .dz-caret::after{ content:" \\25BE"; }
+@keyframes dz-slide{ from{ transform:translateX(100%) } to{ transform:none } }
+@keyframes dz-fade{ from{ opacity:0 } to{ opacity:1 } }
+.dz-panel{ animation: dz-slide .22s ease; }
+.dz-scrim{ animation: dz-fade .2s ease; }
+@media (prefers-reduced-motion: reduce){ .dz-panel, .dz-scrim{ animation:none; } }
+@media print{ .dz-panel, .dz-scrim{ display:none !important; } }
 `;
 
 const h3 = "mb-2 text-[11px] font-semibold uppercase tracking-[0.08em] text-ink-3";
@@ -71,14 +73,98 @@ function Fig({ label, value }: { label: string; value: string }) {
 
 const Line = ({ children }: { children: React.ReactNode }) => <p className="mt-0.5 text-[13px] leading-relaxed text-ink-2">{children}</p>;
 
-function More({ children }: { children: React.ReactNode }) {
+function SeeMore({ onClick }: { onClick: () => void }) {
   return (
-    <details className="dz-more mt-1.5">
-      <summary className="cursor-pointer select-none text-[12px] font-medium text-ink-3 hover:text-ink-2">
-        <span className="dz-caret">See more</span>
-      </summary>
-      <div className="mt-1.5">{children}</div>
-    </details>
+    <button type="button" onClick={onClick} className="mt-1.5 select-none text-[12px] font-medium text-ink-3 hover:text-ink-2">
+      See more {"▸"}
+    </button>
+  );
+}
+
+type PanelKind = "args" | "routes" | "supply";
+const PANEL_TITLE: Record<PanelKind, string> = {
+  args: "The arguments",
+  routes: "What routes buyers to it",
+  supply: "Who supplies its picks",
+};
+
+/**
+ * The dossier's "See more" slide-over - the map's position panel chrome
+ * (analysis_views PositionPanel: scrim, right-side card, uppercase crumb, the
+ * ruled section heading, Escape / x / backdrop to close). One open at a time;
+ * never printed; no count tooltips.
+ */
+function DossierPanel({ d, kind, onClose }: { d: Dossier; kind: PanelKind; onClose: () => void }) {
+  const closeRef = useRef<HTMLButtonElement>(null);
+  useEffect(() => {
+    closeRef.current?.focus();
+  }, []);
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => e.key === "Escape" && onClose();
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onClose]);
+  const ph3 = "mt-6 mb-2 border-t border-line pt-3.5 text-[11px] font-semibold uppercase tracking-[0.08em] text-ink-3";
+  return (
+    <>
+      <div className="dz-scrim fixed inset-0 z-40 bg-black/35" onClick={onClose} aria-hidden />
+      <aside
+        role="dialog"
+        aria-modal="true"
+        aria-label={`${d.name} - ${PANEL_TITLE[kind]}`}
+        className="dz-panel fixed inset-y-0 right-0 z-[45] w-full max-w-[600px] overflow-y-auto border-l border-line bg-surface px-5 pb-10 pt-5 shadow-2xl sm:px-6"
+      >
+        <button
+          ref={closeRef}
+          type="button"
+          onClick={onClose}
+          aria-label="Close"
+          className="float-right ml-3 grid h-8 w-8 place-items-center rounded-full border border-line text-ink-3 hover:text-ink"
+        >
+          ×
+        </button>
+        <div className="mb-2 text-[11px] uppercase tracking-[0.08em] text-ink-3">
+          {d.name} · {PANEL_TITLE[kind]}
+        </div>
+        {kind === "args" && (
+          <>
+            <h2 className="mb-2.5 max-w-[48ch] text-[1.15rem] font-semibold leading-snug text-ink [text-wrap:balance]">Every argument, by how much more often it is argued in {d.argSides[0]}</h2>
+            <div className={ph3}>Arguments</div>
+            <ArgBars args={d.argsAll} sides={d.argSides} />
+          </>
+        )}
+        {kind === "routes" && (
+          <>
+            <h2 className="mb-2.5 max-w-[48ch] text-[1.15rem] font-semibold leading-snug text-ink [text-wrap:balance]">Every condition that routes buyers to it</h2>
+            <p className="text-[13px] leading-relaxed text-ink-2">
+              Most often stated first, with its share of the questions where any condition routes away from you.
+            </p>
+            <div className={ph3}>Conditions</div>
+            {d.routesAll.map((r) => (
+              <Fig key={r.label} label={`"${r.label}"`} value={r.share} />
+            ))}
+          </>
+        )}
+        {kind === "supply" && (
+          <>
+            <h2 className="mb-2.5 max-w-[48ch] text-[1.15rem] font-semibold leading-snug text-ink [text-wrap:balance]">Where its picks come from, by company and by assistant</h2>
+            <p className="text-[13px] leading-relaxed text-ink-2">Share of its picks, beside the share of the questions each answers.</p>
+            {d.supplyAll.vendors.length > 0 && (
+              <>
+                <div className={ph3}>By company</div>
+                {d.supplyAll.vendors.map((r) => (
+                  <Fig key={r.label} label={r.label} value={`${r.picks} of its picks · answers ${r.answers}`} />
+                ))}
+              </>
+            )}
+            <div className={ph3}>By assistant</div>
+            {d.supplyAll.assistants.map((r) => (
+              <Fig key={r.label} label={r.label} value={`${r.picks} of its picks · answers ${r.answers}`} />
+            ))}
+          </>
+        )}
+      </aside>
+    </>
   );
 }
 
@@ -127,6 +213,8 @@ function DossierPage({
   if (d.cells.leaver && onOpenCell) links.push({ label: "Its leaver cell", go: () => onOpenCell(d.cells.leaver!) });
   if (onOpenView) links.push({ label: "Build a table", go: () => onOpenView("metrics") });
   const more = d.argsAll.length > d.args.length;
+  const [panel, setPanel] = useState<PanelKind | null>(null);
+  const closePanel = useCallback(() => setPanel(null), []);
   return (
     <section className="card px-6 pb-5 pt-5">
       <div className="mb-1 text-[11px] uppercase tracking-[0.08em] text-ink-3">
@@ -173,46 +261,19 @@ function DossierPage({
         {d.args.length > 0 && (
           <Section title="The arguments">
             <ArgBars args={d.args} sides={d.argSides} />
-            {more && (
-              <More>
-                <ArgBars args={d.argsAll} sides={d.argSides} />
-              </More>
-            )}
+            {more && <SeeMore onClick={() => setPanel("args")} />}
           </Section>
         )}
         {d.routes && (
           <Section title="What routes buyers to it">
             <Line>{d.routes}</Line>
-            {d.routesAll.length > 1 && (
-              <More>
-                <p className="mb-1 text-[12px] text-ink-3">Every condition that routes buyers to it, most often stated first, with its share of the questions where any condition routes away from you:</p>
-                {d.routesAll.map((r) => (
-                  <Fig key={r.label} label={`"${r.label}"`} value={r.share} />
-                ))}
-              </More>
-            )}
+            {d.routesAll.length > 1 && <SeeMore onClick={() => setPanel("routes")} />}
           </Section>
         )}
         {d.supply && (
           <Section title="Who supplies its picks">
             <Line>{d.supply}</Line>
-            {d.supplyAll.assistants.length > 0 && (
-              <More>
-                <p className="mb-1 text-[12px] text-ink-3">Share of its picks, beside the share of the questions each answers.</p>
-                {d.supplyAll.vendors.length > 0 && (
-                  <>
-                    <div className="mt-1 text-[11px] font-semibold uppercase tracking-[0.07em] text-ink-3">By company</div>
-                    {d.supplyAll.vendors.map((r) => (
-                      <Fig key={r.label} label={r.label} value={`${r.picks} of its picks · answers ${r.answers}`} />
-                    ))}
-                  </>
-                )}
-                <div className="mt-2 text-[11px] font-semibold uppercase tracking-[0.07em] text-ink-3">By assistant</div>
-                {d.supplyAll.assistants.map((r) => (
-                  <Fig key={r.label} label={r.label} value={`${r.picks} of its picks · answers ${r.answers}`} />
-                ))}
-              </More>
-            )}
+            {d.supplyAll.assistants.length > 0 && <SeeMore onClick={() => setPanel("supply")} />}
           </Section>
         )}
       </div>
@@ -225,6 +286,7 @@ function DossierPage({
           ))}
         </div>
       )}
+      {panel && <DossierPanel d={d} kind={panel} onClose={closePanel} />}
     </section>
   );
 }
