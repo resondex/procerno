@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import type { Dossier, DossierArg, DossiersView } from "@/lib/engine/dossiers";
+import type { Dossier, DossierArg, DossierTheme, DossiersView } from "@/lib/engine/dossiers";
 import type { HeadToHeadViews } from "@/lib/engine/head_to_head";
 import { Boundaries } from "./head_to_head_view";
 import { AnswersModal, type AnswersTarget, useEngineSet, viewQuery } from "./view_parts";
@@ -141,9 +141,7 @@ function DossierPanel({ d, kind, onClose }: { d: Dossier; kind: PanelKind; onClo
               <>
                 <div className={ph3}>Reasons pointing to it</div>
                 <p className="mb-1 text-[12px] leading-snug text-ink-3">Each share is of the questions where the AI gives buyers any reason to leave you.</p>
-                {d.routesAll.map((r) => (
-                  <Fig key={r.label} label={`"${r.label}"`} value={r.share} />
-                ))}
+                <ReasonList flat={d.routesAll ?? []} themes={d.routesThemes ?? []} />
                 {d.routesDefault && <p className="mt-2 text-[12.5px] italic leading-snug text-ink-2">{d.routesDefault}</p>}
               </>
             )}
@@ -151,9 +149,7 @@ function DossierPanel({ d, kind, onClose }: { d: Dossier; kind: PanelKind; onClo
               <>
                 <div className={ph3}>Reasons pointing back to you</div>
                 <p className="mb-1 text-[12px] leading-snug text-ink-3">Each share is of the questions where the AI gives buyers any reason to pick you.</p>
-                {(d.routesBack ?? []).map((r) => (
-                  <Fig key={r.label} label={`"${r.label}"`} value={r.share} />
-                ))}
+                <ReasonList flat={d.routesBack ?? []} themes={d.routesBackThemes ?? []} />
                 {d.routesBackDefault && <p className="mt-2 text-[12.5px] italic leading-snug text-ink-2">{d.routesBackDefault}</p>}
               </>
             )}
@@ -178,6 +174,64 @@ function DossierPanel({ d, kind, onClose }: { d: Dossier; kind: PanelKind; onClo
           </>
         )}
       </aside>
+    </>
+  );
+}
+
+/**
+ * One side's reasons in the slide-over. do3 payloads carry themes (a looser
+ * second grouping over the reasons): a theme row reads like a reason row, and
+ * one with related reasons opens them beneath. Themes render only when at
+ * least one theme gathers more than one reason - otherwise (keyless, an
+ * embedding failure, or a do2 payload) the flat list renders exactly as before.
+ */
+function ReasonList({ flat, themes }: { flat: { label: string; share: string }[]; themes: DossierTheme[] }) {
+  const [open, setOpen] = useState<Set<string>>(() => new Set());
+  if (!themes.some((t) => (t.members ?? []).length > 0)) {
+    return (
+      <>
+        {flat.map((r) => (
+          <Fig key={r.label} label={`"${r.label}"`} value={r.share} />
+        ))}
+      </>
+    );
+  }
+  const toggle = (label: string) =>
+    setOpen((prev) => {
+      const next = new Set(prev);
+      if (next.has(label)) next.delete(label);
+      else next.add(label);
+      return next;
+    });
+  return (
+    <>
+      {themes.map((t) => {
+        const members = t.members ?? [];
+        const related = members.length - 1;
+        const isOpen = open.has(t.label);
+        return (
+          <div key={t.label}>
+            <Fig label={`"${t.label}"`} value={t.share} />
+            {related > 0 && (
+              <button
+                type="button"
+                onClick={() => toggle(t.label)}
+                aria-expanded={isOpen}
+                className="mt-0.5 select-none text-[11.5px] text-ink-3 hover:text-ink-2"
+              >
+                {isOpen ? "Hide related" : `+ ${related} related`} {isOpen ? "▾" : "▸"}
+              </button>
+            )}
+            {isOpen && (
+              <div className="mb-1 ml-4 border-l border-line pl-3">
+                {members.map((m, i) => (
+                  <Fig key={`${i}:${m.label}`} label={`"${m.label}"`} value={m.share} />
+                ))}
+              </div>
+            )}
+          </div>
+        );
+      })}
     </>
   );
 }

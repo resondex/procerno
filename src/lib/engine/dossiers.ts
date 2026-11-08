@@ -2,10 +2,11 @@ import { buildResolver } from "./brand_resolve";
 import { computeBrandSummary, type SummaryBrand } from "./brand_summary";
 import { computeAnalysisMap, type AnalysisMapDebug, type MapCellStat } from "./analysis_map";
 import { brandHeadline, cardSourcesOf, type Lift, conversionOf, funnelRows, liftEnds, pctOf, picksFromRow, supplyLine, topQuestionRow } from "./answer_cards";
-import { computeRules } from "./rules_explorer";
-import { isDefaultCondition } from "./condition_groups";
+import { createHash } from "node:crypto";
+import { computeRules, type RuleGroup } from "./rules_explorer";
+import { conditionThemeKeysFor, isDefaultCondition } from "./condition_groups";
 import type { InsightInputs } from "./summary_insights";
-import { cachedView, requestOf, type RateCell, type ViewData, type ViewRequest } from "./view_data";
+import { cachedView, condCache, requestOf, type RateCell, type ViewData, type ViewRequest } from "./view_data";
 import type { Project, Run } from "../types";
 
 /**
@@ -70,12 +71,27 @@ export interface Dossier {
   routesBack: { label: string; share: string }[];
   /** do2: the default branch toward you, when one exists. */
   routesBackDefault: string | null;
+  /** do3, the slide-over only: routesAll gathered into themes (a looser second
+   * grouping over the group labels). Each theme's share is of the same base as
+   * routesAll, over the UNION of its members' questions - never a sum. */
+  routesThemes: DossierTheme[];
+  /** do3: every toward-you group (not just the top 6), gathered into themes, on routesBack's base. */
+  routesBackThemes: DossierTheme[];
   /** The vendor-supply line, when the detector's threshold clears. */
   supply: string | null;
   /** "See more": its picks split per company and per assistant, each with its share of the questions answered. */
   supplyAll: { vendors: SupplyRow[]; assistants: SupplyRow[] };
   /** Map cell ids for the links (null when the map has no such cell). */
   cells: { h2h: string | null; leaver: string | null };
+}
+
+/** A theme of stated reasons: its largest member's wording, its share over the
+ * union of its members' questions, and the member reasons beneath (empty when
+ * the theme is a single reason). */
+export interface DossierTheme {
+  label: string;
+  share: string;
+  members: { label: string; share: string }[];
 }
 
 export interface SupplyRow {
@@ -142,7 +158,8 @@ export async function computeDossiers(data: ViewData, request: ViewRequest = {})
   // it), so "the largest single reason" means what the brief means by it.
   // do2: a default-shaped branch ("otherwise") is not a reason - it leaves
   // the lists and renders as one default line per side.
-  const rules = await computeRules(data, eng);
+  const cellSets = new Map<string, string[]>();
+  const rules = await computeRules(data, eng, { cellSets });
   const rank = <T extends { answers: number; rules: number; label: string }>(xs: T[]) => [...xs].sort((a, b) => b.answers - a.answers || b.rules - a.rules || a.label.localeCompare(b.label));
   const awayAll = rank(rules.groups.filter((g) => g.side === "away"));
   const awayGroups = awayAll.filter((g) => !isDefaultCondition(g.label));
@@ -156,6 +173,42 @@ export async function computeDossiers(data: ViewData, request: ViewRequest = {})
     backDefault && towardCells > 0
       ? `The default: when no stated reason applies, the AI points buyers back to you (in ${pctOf(backDefault.cells / towardCells)} of those questions).`
       : null;
+  // do3, the slide-over's theme rollup: ONE theme key map over every listed
+  // (non-default) group label on both sides, so a wording themes identically
+  // wherever it appears; weighted by the group's distinct questions. Keyless
+  // or on failure the map is identity, and every theme is one reason.
+  const towardListed = towardAll.filter((g) => !isDefaultCondition(g.label));
+  const themeWeights = new Map<string, number>();
+  for (const g of [...awayGroups, ...towardListed]) themeWeights.set(g.label, (themeWeights.get(g.label) ?? 0) + g.cells);
+  const themeCache = condCache(data, "rules:themes");
+  if (themeCache && request.engines) themeCache.scope += `:eng:${createHash("sha256").update([...request.engines].sort().join("|")).digest("hex").slice(0, 12)}`;
+  const themeKeys = await conditionThemeKeysFor(themeWeights, { cache: themeCache });
+  const themesOf = (pool: RuleGroup[], base: number): DossierTheme[] => {
+    if (base <= 0 || pool.length === 0) return [];
+    const order = new Map(pool.map((g, i) => [g.id, i]));
+    const by = new Map<string, RuleGroup[]>();
+    for (const g of pool) {
+      const k = themeKeys.get(g.label) ?? `i:${g.label}`;
+      const list = by.get(k) ?? [];
+      list.push(g);
+      by.set(k, list);
+    }
+    return [...by.values()]
+      .map((ms) => {
+        const members = [...ms].sort((a, b) => b.cells - a.cells || order.get(a.id)! - order.get(b.id)!);
+        const union = new Set<string>();
+        for (const g of members) for (const c of cellSets.get(g.id) ?? []) union.add(c);
+        return {
+          label: members[0].label,
+          n: union.size,
+          share: pctOf(union.size / base),
+          members: members.length > 1 ? members.map((g) => ({ label: g.label, share: pctOf(g.cells / base) })) : [],
+        };
+      })
+      .sort((a, b) => b.n - a.n || a.label.localeCompare(b.label))
+      .map(({ label, share, members }) => ({ label, share, members }));
+  };
+  const routesBackThemes = themesOf(towardListed, towardCells);
   const captors = offensive ? [...offensive.captors].sort((a, b) => b.chosen.k - a.chosen.k || b.named.k - a.named.k || a.name.localeCompare(b.name)) : [];
 
   const dossiers: Dossier[] = summary.brands
@@ -229,6 +282,7 @@ export async function computeDossiers(data: ViewData, request: ViewRequest = {})
         : null;
       // The default away branch belongs on the dossier of the brand it points to.
       const dflt = awayCells > 0 ? awayDefaults.find((g) => g.routes[0] && resolve(g.routes[0].name).key === b.key) : undefined;
+      const routesThemes = themesOf(mine, awayCells);
       const routesDefault = dflt ? `The default: when no stated reason applies, the AI points buyers to ${b.name} (in ${pctOf(dflt.cells / awayCells)} of those questions).` : null;
 
       // Who supplies its picks, in full: per company and per assistant.
@@ -276,6 +330,8 @@ export async function computeDossiers(data: ViewData, request: ViewRequest = {})
         routesDefault,
         routesBack,
         routesBackDefault,
+        routesThemes,
+        routesBackThemes,
         supply: sup ? `${sup.label} ${sup.value}.` : null,
         supplyAll,
         cells: { h2h: h2hCell, leaver: leaverCell },
@@ -289,7 +345,9 @@ export async function computeDossiers(data: ViewData, request: ViewRequest = {})
 // reason to leave you; the section two-sided (reasons pointing to it AND back
 // to you, each on its own base); default-shaped branches ("otherwise") leave
 // the lists for one default line per side.
-const DOSSIERS_VERSION = "do2";
+// do3 (2026-11-08): the slide-over's theme rollup - routesThemes /
+// routesBackThemes (additive; the flat lists stay for stale clients).
+const DOSSIERS_VERSION = "do3";
 export function computeDossiersCached(run: Run, project: Project, request: ViewRequest = {}): Promise<DossiersView | null> {
   const r = requestOf(request);
   return cachedView("dossiers", DOSSIERS_VERSION, run, project, (d) => computeDossiers(d, r), { judge: true, setupDecision: true }, r);

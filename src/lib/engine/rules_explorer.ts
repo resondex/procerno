@@ -317,7 +317,15 @@ const labelOf = (surfaces: Map<string, number>) =>
 const topNamed = (m: Map<string, NamedCount>, cap: number): NamedCount[] =>
   [...m.values()].sort((a, b) => b.n - a.n || a.name.localeCompare(b.name)).slice(0, cap);
 
-export async function computeRules(data: ViewData, request: ViewRequest = {}): Promise<RulesView> {
+/** Optional out-parameters of computeRules: nothing here reaches the served
+ * payload or its cache. `cellSets` receives, per served group id
+ * (RuleGroup.id), that group's distinct cell (intent) ids - the dossier theme
+ * rollup unions them, since member groups overlap at the question level. */
+export interface RulesCapture {
+  cellSets?: Map<string, string[]>;
+}
+
+export async function computeRules(data: ViewData, request: ViewRequest = {}, capture?: RulesCapture): Promise<RulesView> {
   const { project, dictionary } = data;
   const resolve = buildResolver(dictionary, data.judged);
   const target = resolve(project.brand);
@@ -553,6 +561,7 @@ export async function computeRules(data: ViewData, request: ViewRequest = {}): P
         more[side].answers += a.answers.size;
         return;
       }
+      if (capture?.cellSets) capture.cellSets.set(idOf(a), [...a.cells]);
       outGroups.push({
         id: idOf(a),
         cond: shortHash(a.ck),
