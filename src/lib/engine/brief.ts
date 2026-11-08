@@ -1936,7 +1936,8 @@ export async function computeBrief(data: ViewData, request: BriefRequest = {}): 
 // bf15 (2026-11-07): the fact is the link - the trailing pins are gone; a number in the sentence opens its card. BriefAnchor gains `at` (the exact phrase a numberless unit's anchor attaches to: a TOWS play's own item, a Minto move's watch phrase, a thin situation's name); citePins strips `at` on numbered units and drops a numberless unit's anchor whose `at` is absent from its text. No sentence text changed.
 // bf16 (2026-11-07): reads the am11 map - the open-choice card's argument lines now come from the position's lifts (every code the brief cites there, plus the panel's top arguments); the panel states each code once. No sentence text changed.
 // bf17 (2026-11-07): reads the am12 map - a cell card carries its arguments as `lifts` (+ liftSides) and draws them like the map panel (bars + share sub-lines) instead of the verbose "argument in the lift" text rows; cardText states each lift's label, shares and signed points, so RULE 1 and the number links claim them unchanged. No sentence text changed.
-const BRIEF_VERSION = "bf17";
+// bf18 (2026-11-08): the condition card reads in the reason language (the owner's ruling) - headline "When the AI gives buyers a reason to leave <brand>, the most common is ...", rows "A reason to leave you: ...", "The biggest reason to pick you / to leave you / pointing to <rival>"; a default-shaped branch ("otherwise", isDefaultCondition) leaves the list for one "The default - when no stated reason applies" row unless a brief sentence cites it. Every number the card stated before is still stated. No sentence text changed.
+const BRIEF_VERSION = "bf18";
 
 /**
  * The brief through the cache. cachedView's keying, with the subject as one

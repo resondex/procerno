@@ -7,6 +7,7 @@ import { buildResolver } from "./brand_resolve";
 import { containsSeq, famTokens } from "./brand_family";
 import { computeAlternatives, type AlternativesViews } from "./alternatives";
 import { computeRules } from "./rules_explorer";
+import { isDefaultCondition } from "./condition_groups";
 import { viewsOf } from "./views";
 import { cell, poolOf, type RateCell, type ViewData, type ViewRequest } from "./view_data";
 import type { BrandSummaryView, VerdictFact } from "./brand_summary";
@@ -198,6 +199,11 @@ export interface InsightInputs {
     away: { label: string; rules: number; cells: number; wall: boolean; routes: { name: string; n: number }[] }[];
     towardCells: number;
     awayCells: number;
+    /** 2026-11-08: the largest default-shaped group per side ("otherwise" -
+     * isDefaultCondition), whatever its rank, for the condition card's default
+     * row. The lists above are unchanged (they still carry a default group that
+     * ranks into them, since the brief's sentences cite them). */
+    defaults?: { side: "you" | "away"; label: string; cells: number; routes: { name: string; n: number }[] }[];
   } | null;
 }
 
@@ -342,6 +348,12 @@ export async function insightInputs(data: ViewData, request: ViewRequest = {}): 
             away: sideTop(rules.groups, "away"),
             towardCells: rules.cellsBySide.you,
             awayCells: rules.cellsBySide.away,
+            defaults: (["you", "away"] as const).flatMap((side) => {
+              const g = rules.groups
+                .filter((x) => x.side === side && isDefaultCondition(x.label))
+                .sort((a, b) => b.answers - a.answers || b.rules - a.rules || a.label.localeCompare(b.label))[0];
+              return g ? [{ side, label: g.label, cells: g.cells, routes: g.routes }] : [];
+            }),
           }
         : null,
   };

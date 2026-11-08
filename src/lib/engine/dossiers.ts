@@ -3,6 +3,7 @@ import { computeBrandSummary, type SummaryBrand } from "./brand_summary";
 import { computeAnalysisMap, type AnalysisMapDebug, type MapCellStat } from "./analysis_map";
 import { brandHeadline, cardSourcesOf, type Lift, conversionOf, funnelRows, liftEnds, pctOf, picksFromRow, supplyLine, topQuestionRow } from "./answer_cards";
 import { computeRules } from "./rules_explorer";
+import { isDefaultCondition } from "./condition_groups";
 import type { InsightInputs } from "./summary_insights";
 import { cachedView, requestOf, type RateCell, type ViewData, type ViewRequest } from "./view_data";
 import type { Project, Run } from "../types";
@@ -57,10 +58,18 @@ export interface Dossier {
   /** "See more": its full lift list (every code clearing liftForBrand's floors), best first. */
   argsAll: DossierArg[];
   argSides: [string, string];
-  /** The largest away condition branch that routes buyers to it, when one exists. */
+  /** The largest stated reason to leave you that points buyers to it, when one exists. */
   routes: string | null;
-  /** "See more": every away branch whose top route is this brand, with its share of the away-condition questions. */
+  /** "See more": every stated reason to leave you whose top route is this brand, with its share of the questions where the AI gives any reason to leave you. */
   routesAll: { label: string; share: string }[];
+  /** do2: the default ("otherwise") branch away from you, when its top route is this brand. */
+  routesDefault: string | null;
+  /** do2, the other side of the contest: the stated reasons that point buyers back to
+   * you (the run's toward-you groups, top 6), each with its share of the questions
+   * where the AI gives any reason to pick you - a DIFFERENT base from routesAll's. */
+  routesBack: { label: string; share: string }[];
+  /** do2: the default branch toward you, when one exists. */
+  routesBackDefault: string | null;
   /** The vendor-supply line, when the detector's threshold clears. */
   supply: string | null;
   /** "See more": its picks split per company and per assistant, each with its share of the questions answered. */
@@ -130,12 +139,23 @@ export async function computeDossiers(data: ViewData, request: ViewRequest = {})
   const offensive = inputs.alternatives.offensive;
   // Every away branch the run's rules explorer groups (its own one-per-run
   // grouping), ranked as the condition card ranks them (by answers stating
-  // it), so "the largest branch away" means what the brief means by it.
+  // it), so "the largest single reason" means what the brief means by it.
+  // do2: a default-shaped branch ("otherwise") is not a reason - it leaves
+  // the lists and renders as one default line per side.
   const rules = await computeRules(data, eng);
-  const awayGroups = rules.groups
-    .filter((g) => g.side === "away")
-    .sort((a, b) => b.answers - a.answers || b.rules - a.rules || a.label.localeCompare(b.label));
+  const rank = <T extends { answers: number; rules: number; label: string }>(xs: T[]) => [...xs].sort((a, b) => b.answers - a.answers || b.rules - a.rules || a.label.localeCompare(b.label));
+  const awayAll = rank(rules.groups.filter((g) => g.side === "away"));
+  const awayGroups = awayAll.filter((g) => !isDefaultCondition(g.label));
+  const awayDefaults = awayAll.filter((g) => isDefaultCondition(g.label));
   const awayCells = rules.cellsBySide.away;
+  const towardAll = rank(rules.groups.filter((g) => g.side === "you"));
+  const towardCells = rules.cellsBySide.you;
+  const routesBack = towardCells > 0 ? towardAll.filter((g) => !isDefaultCondition(g.label)).slice(0, 6).map((g) => ({ label: g.label, share: pctOf(g.cells / towardCells) })) : [];
+  const backDefault = towardAll.find((g) => isDefaultCondition(g.label));
+  const routesBackDefault =
+    backDefault && towardCells > 0
+      ? `The default: when no stated reason applies, the AI points buyers back to you (in ${pctOf(backDefault.cells / towardCells)} of those questions).`
+      : null;
   const captors = offensive ? [...offensive.captors].sort((a, b) => b.chosen.k - a.chosen.k || b.named.k - a.named.k || a.name.localeCompare(b.name)) : [];
 
   const dossiers: Dossier[] = summary.brands
@@ -197,15 +217,19 @@ export async function computeDossiers(data: ViewData, request: ViewRequest = {})
       const args: DossierArg[] = ends ? [ends.win, ...(ends.lose ? [ends.lose] : [])].map(toArg) : [];
       const argsAll: DossierArg[] = src.liftOf(b.key).map(toArg);
 
-      // What routes buyers to it: every away branch whose top route is this
-      // brand, in the card's rank, each with its share of the away-condition
-      // questions; the section's line states the first (the condition card's
-      // "Largest branch toward <brand>").
+      // The reasons pointing to it: every stated reason to leave you whose
+      // top route is this brand, in the card's rank, each with its share of
+      // the questions where the AI gives any reason to leave you; the
+      // section's line states the first (the condition card's "The biggest
+      // reason pointing to <brand>").
       const mine = awayGroups.filter((g) => g.routes[0] && resolve(g.routes[0].name).key === b.key);
       const routesAll = awayCells > 0 ? mine.map((g) => ({ label: g.label, share: pctOf(g.cells / awayCells) })) : [];
       const routes = routesAll.length
-        ? `"${routesAll[0].label}" routes buyers to it in ${routesAll[0].share} of the questions where any condition routes away from you${mine[0] === awayGroups[0] ? " - the largest branch away" : ""}.`
+        ? `When the AI gives buyers a reason to leave you, "${routesAll[0].label}" → ${b.name} is one of them in ${routesAll[0].share} of those questions${mine[0] === awayGroups[0] ? " - the largest single reason" : ""}.`
         : null;
+      // The default away branch belongs on the dossier of the brand it points to.
+      const dflt = awayCells > 0 ? awayDefaults.find((g) => g.routes[0] && resolve(g.routes[0].name).key === b.key) : undefined;
+      const routesDefault = dflt ? `The default: when no stated reason applies, the AI points buyers to ${b.name} (in ${pctOf(dflt.cells / awayCells)} of those questions).` : null;
 
       // Who supplies its picks, in full: per company and per assistant.
       const ep = inputs.enginePicks.find((x) => x.key === b.key);
@@ -249,6 +273,9 @@ export async function computeDossiers(data: ViewData, request: ViewRequest = {})
         argSides: ["its picks", "rivals' picks"],
         routes,
         routesAll,
+        routesDefault,
+        routesBack,
+        routesBackDefault,
         supply: sup ? `${sup.label} ${sup.value}.` : null,
         supplyAll,
         cells: { h2h: h2hCell, leaver: leaverCell },
@@ -258,7 +285,11 @@ export async function computeDossiers(data: ViewData, request: ViewRequest = {})
 }
 
 // do1 (2026-11-08): first version - the Rivals pill as brand dossiers.
-const DOSSIERS_VERSION = "do1";
+// do2 (2026-11-08): the owner's three rulings - the routes line reworded as a
+// reason to leave you; the section two-sided (reasons pointing to it AND back
+// to you, each on its own base); default-shaped branches ("otherwise") leave
+// the lists for one default line per side.
+const DOSSIERS_VERSION = "do2";
 export function computeDossiersCached(run: Run, project: Project, request: ViewRequest = {}): Promise<DossiersView | null> {
   const r = requestOf(request);
   return cachedView("dossiers", DOSSIERS_VERSION, run, project, (d) => computeDossiers(d, r), { judge: true, setupDecision: true }, r);

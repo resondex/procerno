@@ -73,10 +73,10 @@ function Fig({ label, value }: { label: string; value: string }) {
 
 const Line = ({ children }: { children: React.ReactNode }) => <p className="mt-0.5 text-[13px] leading-relaxed text-ink-2">{children}</p>;
 
-function SeeMore({ onClick }: { onClick: () => void }) {
+function SeeMore({ onClick, label = "See more" }: { onClick: () => void; label?: string }) {
   return (
     <button type="button" onClick={onClick} className="mt-1.5 select-none text-[12px] font-medium text-ink-3 hover:text-ink-2">
-      See more {"▸"}
+      {label} {"▸"}
     </button>
   );
 }
@@ -84,7 +84,7 @@ function SeeMore({ onClick }: { onClick: () => void }) {
 type PanelKind = "args" | "routes" | "supply";
 const PANEL_TITLE: Record<PanelKind, string> = {
   args: "The arguments",
-  routes: "What routes buyers to it",
+  routes: "The reasons, both ways",
   supply: "Who supplies its picks",
 };
 
@@ -135,14 +135,28 @@ function DossierPanel({ d, kind, onClose }: { d: Dossier; kind: PanelKind; onClo
         )}
         {kind === "routes" && (
           <>
-            <h2 className="mb-2.5 max-w-[48ch] text-[1.15rem] font-semibold leading-snug text-ink [text-wrap:balance]">Every condition that routes buyers to it</h2>
-            <p className="text-[13px] leading-relaxed text-ink-2">
-              Most often stated first, with its share of the questions where any condition routes away from you.
-            </p>
-            <div className={ph3}>Conditions</div>
-            {d.routesAll.map((r) => (
-              <Fig key={r.label} label={`"${r.label}"`} value={r.share} />
-            ))}
+            <h2 className="mb-2.5 max-w-[48ch] text-[1.15rem] font-semibold leading-snug text-ink [text-wrap:balance]">Every reason that points buyers to it - and back to you</h2>
+            <p className="text-[13px] leading-relaxed text-ink-2">Most often stated first. The two lists are read on different questions, so their shares never add up across them.</p>
+            {(d.routesAll.length > 0 || d.routesDefault) && (
+              <>
+                <div className={ph3}>Reasons pointing to it</div>
+                <p className="mb-1 text-[12px] leading-snug text-ink-3">Each share is of the questions where the AI gives buyers any reason to leave you.</p>
+                {d.routesAll.map((r) => (
+                  <Fig key={r.label} label={`"${r.label}"`} value={r.share} />
+                ))}
+                {d.routesDefault && <p className="mt-2 text-[12.5px] italic leading-snug text-ink-2">{d.routesDefault}</p>}
+              </>
+            )}
+            {((d.routesBack ?? []).length > 0 || d.routesBackDefault) && (
+              <>
+                <div className={ph3}>Reasons pointing back to you</div>
+                <p className="mb-1 text-[12px] leading-snug text-ink-3">Each share is of the questions where the AI gives buyers any reason to pick you.</p>
+                {(d.routesBack ?? []).map((r) => (
+                  <Fig key={r.label} label={`"${r.label}"`} value={r.share} />
+                ))}
+                {d.routesBackDefault && <p className="mt-2 text-[12.5px] italic leading-snug text-ink-2">{d.routesBackDefault}</p>}
+              </>
+            )}
           </>
         )}
         {kind === "supply" && (
@@ -264,10 +278,13 @@ function DossierPage({
             {more && <SeeMore onClick={() => setPanel("args")} />}
           </Section>
         )}
-        {d.routes && (
-          <Section title="What routes buyers to it">
-            <Line>{d.routes}</Line>
-            {d.routesAll.length > 1 && <SeeMore onClick={() => setPanel("routes")} />}
+        {(d.routes || d.routesDefault) && (
+          <Section title="The reasons, both ways">
+            {d.routes && <Line>{d.routes}</Line>}
+            {d.routesDefault && <Line>{d.routesDefault}</Line>}
+            {((d.routesAll ?? []).length > 1 || (d.routesBack ?? []).length > 0 || d.routesBackDefault) && (
+              <SeeMore onClick={() => setPanel("routes")} label={(d.routesBack ?? []).length > 0 || d.routesBackDefault ? "Reasons point back to you too - see both sides" : undefined} />
+            )}
           </Section>
         )}
         {d.supply && (

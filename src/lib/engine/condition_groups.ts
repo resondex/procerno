@@ -49,6 +49,28 @@ function normalize(v: Float32Array): Float32Array {
   return out;
 }
 
+/**
+ * A default-shaped branch (2026-11-08, the owner's ruling): "otherwise" is not
+ * a condition - it is what the AI says when no stated reason applies. True
+ * only when the WHOLE wording is the default clause (otherwise / else / by
+ * default / failing that / anything else / if none of these | the above
+ * apply), so a real condition that merely contains one of those words
+ * ("credits require spending you wouldn't otherwise do") never matches.
+ * Conservative and mechanical; the surfaces that read it show the group as
+ * one default line instead of a listed reason.
+ */
+const DEFAULT_CONDITION =
+  /^(?:(?:and|but|or)\s+)?(?:otherwise|or else|else|by default|default|failing that|(?:for\s+)?anything else|(?:for\s+)?everything else|in (?:any|all) other cases|(?:if\s+)?(?:none|neither) of (?:these|those|the above)(?:\s+(?:apply|applies|fit|fits|matter|matters))?)$/;
+export function isDefaultCondition(label: string): boolean {
+  const s = label
+    .toLowerCase()
+    .replace(/[‘’]/g, "'")
+    .replace(/[.,;:!?"()]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  return DEFAULT_CONDITION.test(s);
+}
+
 /** The deterministic fallback key - the stem set, or the lowercased text
  * when no distinctive stem survives. Identical to the hh2 grouping. */
 export function conditionStemKey(condition: string, exclude: Set<string>): string {

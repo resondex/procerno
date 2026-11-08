@@ -6,6 +6,7 @@ import type { Position } from "./analysis_types";
 import { buildResolver } from "./brand_resolve";
 import { liftForBrand } from "./analysis_map";
 import { productNoun } from "./summary_insights";
+import { isDefaultCondition } from "./condition_groups";
 
 /**
  * The answer cards (2026-11-07, the owner's ratified shape -
@@ -323,31 +324,61 @@ export function enginesCard(src: CardSources): AnswerCard | null {
 /* -------------------------------- condition ------------------------------- */
 
 /** What routes buyers away: the run's away condition groups (where each
- * sends buyers), the largest branch toward each side, and the blocker brand's
- * share of picks. Null when the run carries no condition groups. */
+ * sends buyers), the biggest reason toward each side, and the blocker brand's
+ * share of picks. Null when the run carries no condition groups.
+ *
+ * 2026-11-08 (the owner's ruling): worded as reasons to leave / pick you, and
+ * a default-shaped branch ("otherwise" - isDefaultCondition) leaves the list
+ * for one default row. A default group the brief cites (the detector's top
+ * group or its wall, or a "biggest" branch) stays where it is cited - its
+ * number must remain stated - and only its label is restyled. */
 export function conditionCard(src: CardSources, openCellId?: string): AnswerCard | null {
   const s = src.summary;
   const brand = src.brand;
   const k = src.inputs.conditions;
   const a = src.inputs.away;
   const rows: Row[] = [];
+  const shown = new Set<string>();
   if (a && a.cells > 0) {
     // Largest share first (the groups arrive ranked by answers).
-    for (const g of [...a.groups].sort((x, y) => y.cells - x.cells || x.label.localeCompare(y.label)))
-      rows.push({ label: `Questions where "${g.label.slice(0, 60)}" routes away`, value: `${pctOf(g.cells / a.cells)}${g.routes[0] ? ` → ${g.routes[0].name}` : ""}`, tip: `${g.cells} of ${a.cells} questions with an away condition` });
+    for (const g of [...a.groups].sort((x, y) => y.cells - x.cells || x.label.localeCompare(y.label))) {
+      const cited = g === a.groups[0] || g.wall;
+      if (isDefaultCondition(g.label) && !cited) continue;
+      shown.add(`away:${g.label}`);
+      rows.push({
+        label: isDefaultCondition(g.label) ? "The default away from you - when no stated reason applies" : `A reason to leave you: "${g.label.slice(0, 60)}"`,
+        value: `${pctOf(g.cells / a.cells)}${g.routes[0] ? ` → ${g.routes[0].name}` : ""}`,
+        tip: `${g.cells} of ${a.cells} questions with an away condition`,
+      });
+    }
   }
   if (k) {
-    if (k.toward[0] && k.towardCells) rows.push({ label: `Largest branch toward ${brand}`, value: `${pctOf(k.toward[0].cells / k.towardCells)} - "${k.toward[0].label}"`, tip: `${k.toward[0].cells} of ${k.towardCells} questions where any condition routes to it` });
-    if (k.away[0] && k.awayCells) rows.push({ label: "Largest branch away", value: `${pctOf(k.away[0].cells / k.awayCells)} - "${k.away[0].label}"`, tip: `${k.away[0].cells} of ${k.awayCells} questions where any condition routes away` });
+    const big = (g: { label: string }, plain: string, dflt: string) => (isDefaultCondition(g.label) ? dflt : plain);
+    if (k.toward[0] && k.towardCells) {
+      shown.add(`you:${k.toward[0].label}`);
+      rows.push({ label: big(k.toward[0], "The biggest reason to pick you", "The default toward you - when no stated reason applies"), value: `${pctOf(k.toward[0].cells / k.towardCells)} - "${k.toward[0].label}"`, tip: `${k.toward[0].cells} of ${k.towardCells} questions where any condition routes to it` });
+    }
+    if (k.away[0] && k.awayCells) {
+      shown.add(`away:${k.away[0].label}`);
+      rows.push({ label: big(k.away[0], "The biggest reason to leave you", "The default away from you - when no stated reason applies"), value: `${pctOf(k.away[0].cells / k.awayCells)} - "${k.away[0].label}"`, tip: `${k.away[0].cells} of ${k.awayCells} questions where any condition routes away` });
+    }
     const seen = new Set<string>();
     for (const g of k.away) {
       const to = g.routes[0]?.name;
       if (!to || seen.has(to) || !k.awayCells) continue;
       seen.add(to);
-      // The largest away branch is already its own row.
+      // The biggest reason away is already its own row.
       if (g === k.away[0]) continue;
-      rows.push({ label: `Largest branch toward ${to}`, value: `${pctOf(g.cells / k.awayCells)} - "${g.label}"`, tip: `${g.cells} of ${k.awayCells} questions where any condition routes away` });
+      shown.add(`away:${g.label}`);
+      rows.push({ label: big(g, `The biggest reason pointing to ${to}`, `The default pointing to ${to} - when no stated reason applies`), value: `${pctOf(g.cells / k.awayCells)} - "${g.label}"`, tip: `${g.cells} of ${k.awayCells} questions where any condition routes away` });
     }
+    // The default branches: one row per side, unless a cited row above already shows it.
+    const defs = (k.defaults ?? []).filter((d) => d.routes[0] && !shown.has(`${d.side}:${d.label}`));
+    for (const d of defs)
+      rows.push({
+        label: defs.length > 1 ? `The default ${d.side === "you" ? "toward you" : "away from you"} - when no stated reason applies` : "The default - when no stated reason applies",
+        value: `→ ${d.routes[0].name}`,
+      });
   }
   const g = a?.groups[0];
   if (g?.names) {
@@ -355,9 +386,10 @@ export function conditionCard(src: CardSources, openCellId?: string): AnswerCard
     rows.push(F(`${g.names.name}'s share of picks`, b ? b.shareOfDecided : cell(0, s.firmPickInCategory.k)));
   }
   if (!rows.length) return null;
-  const top = g ?? (k?.away[0] ? { label: k.away[0].label, routes: k.away[0].routes } : null);
+  // The headline names the most common STATED reason - a default branch is not one.
+  const top = a?.groups.find((x) => !isDefaultCondition(x.label)) ?? k?.away.find((x) => !isDefaultCondition(x.label)) ?? null;
   const headline = top
-    ? `"${top.label}" is the condition that most often routes the AI away from ${brand}${top.routes[0] ? ` - it sends buyers to ${top.routes[0].name}` : ""}.`
+    ? `When the AI gives buyers a reason to leave ${brand}, the most common is "${top.label}"${top.routes[0] ? ` - it points them to ${top.routes[0].name}` : ""}.`
     : `The AI hands the buyer a rule, not a winner - these are the conditions that decide it.`;
   return {
     kind: "condition",
