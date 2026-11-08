@@ -1,8 +1,11 @@
 import type { AnswerCard } from "./brief_types";
 import type { BrandSummaryView, SummaryBrand } from "./brand_summary";
 import { pctFine, type InsightInputs } from "./summary_insights";
-import { cell, type RateCell } from "./view_data";
+import { cell, poolOf, type RateCell, type ViewData, type ViewRequest } from "./view_data";
 import type { Position } from "./analysis_types";
+import { buildResolver } from "./brand_resolve";
+import { liftForBrand } from "./analysis_map";
+import { productNoun } from "./summary_insights";
 
 /**
  * The answer cards (2026-11-07, the owner's ratified shape -
@@ -112,12 +115,42 @@ export interface CardSources {
   liftOf: (key: string) => Lift[];
 }
 
+/** The card sources over one load (shared by the brief and the brand dossiers,
+ * so both state the same numbers): every brand's open-choice picks by stage
+ * over the headline pool, and each brand's argument lift (the summary's own
+ * for the target, liftForBrand for the rest, computed once per key). */
+export function cardSourcesOf(data: ViewData, eng: ViewRequest, summary: BrandSummaryView, inputs: InsightInputs): { src: CardSources; byStage: Map<string, Map<string, number>> } {
+  const resolve = buildResolver(data.dictionary, data.judged);
+  const byStage = new Map<string, Map<string, number>>();
+  for (const { code, intent } of poolOf(data, "headline", eng).rows)
+    if (code.outcome === "pick" && code.top_pick) {
+      const k = resolve(code.top_pick).key;
+      if (!k) continue;
+      const m = byStage.get(k) ?? new Map<string, number>();
+      m.set(intent.stage, (m.get(intent.stage) ?? 0) + 1);
+      byStage.set(k, m);
+    }
+  const lifts = new Map<string, Lift[]>();
+  const liftOf = (key: string): Lift[] => {
+    if (key === summary.target.key) return summary.reasonLift;
+    let l = lifts.get(key);
+    if (!l) {
+      l = liftForBrand(data, eng, key);
+      lifts.set(key, l);
+    }
+    return l;
+  };
+  const src: CardSources = { summary, inputs, brand: data.project.brand, product: productNoun(data.project.category), stagePicks: (k) => byStage.get(k) ?? new Map(), liftOf };
+  return { src, byStage };
+}
+
 const STAGE: Record<string, string> = { discovery: "general questions", use_case: "job-described questions", social_validation: "what most people pick", premium_worth: "premium vs basic" };
 
 /** One engine or one company's assistants supplying a brand's picks - the
  * engine_pick_concentration detector's units and test (>= 40% of the picks,
- * the 95% range clearing the unit's share of the answers), best gap first. */
-function supplyLine(s: BrandSummaryView, inputs: InsightInputs, key: string): Row | null {
+ * the 95% range clearing the unit's share of the answers), best gap first.
+ * Exported for the brand dossiers (dossiers.ts), which state the same line. */
+export function supplyLine(s: BrandSummaryView, inputs: InsightInputs, key: string): Row | null {
   if (s.byEngine.length < 3 || s.answers === 0) return null;
   const b = inputs.enginePicks.find((x) => x.key === key);
   if (!b || b.total < MIN_SIDE) return null;
@@ -143,6 +176,56 @@ function supplyLine(s: BrandSummaryView, inputs: InsightInputs, key: string): Ro
   };
 }
 
+/* The brand card's pieces, exported so the brand dossiers (dossiers.ts) state
+ * byte-equal numbers: each is the exact row (or object) brandCard uses. */
+
+/** The brand's recommended-to-pick conversion (picks over recommendations). */
+export const conversionOf = conv;
+
+/** The open-question funnel, as the card's first five rows. */
+export function funnelRows(b: SummaryBrand): { named: Row; recommended: Row; share: Row; picked: Row; converts: Row } {
+  const named = rate(b.mentioned);
+  return {
+    named: F("Named", b.mentioned),
+    recommended: { label: "Recommended", value: `${pct(b.recommended)} (${pctOf(named > 0 ? rate(b.recommended) / named : 0)} of the answers that name it)`, tip: `${b.recommended.k} of ${b.recommended.n}; ${b.recommended.k} recommending of ${b.mentioned.k} naming` },
+    share: F("Share of picks", b.shareOfDecided),
+    picked: F("Picked, of all answers", b.chosen, pctFine(rate(b.chosen))),
+    converts: { label: "Recommendations that end as the pick", value: pctOf(conv(b)), tip: `${b.chosen.k} of ${b.recommended.k}` },
+  };
+}
+
+/** Where a brand's picks come from, by question type (null under the floor). */
+export function picksFromRow(src: CardSources, key: string): Row | null {
+  const by = src.stagePicks(key);
+  const total = [...by.values()].reduce((a, x) => a + x, 0);
+  if (total < MIN_SIDE) return null;
+  const parts = [...by.entries()].filter(([st, k]) => k > 0 && STAGE[st]).sort((a, c) => c[1] - a[1]).map(([st, k]) => `${pctOf(k / total)} ${STAGE[st]}`);
+  if (!parts.length) return null;
+  return { label: "Where its picks come from", value: listVal(parts), tip: [...by.entries()].map(([st, k]) => `${st} ${k}`).join(", ") + ` of ${total}` };
+}
+
+/** One question's share of a brand's picks (null under the floor). */
+export function topQuestionRow(src: CardSources, key: string): Row | null {
+  const qs = src.inputs.questions;
+  const qTot = qs.reduce((a, q) => a + (q.picks[key] ?? 0), 0);
+  if (qTot < MIN_SIDE || qs.length < 2) return null;
+  const q = [...qs].sort((a, c) => (c.picks[key] ?? 0) - (a.picks[key] ?? 0) || a.id.localeCompare(c.id))[0];
+  const k = q.picks[key] ?? 0;
+  return { label: "Picks from its top question", value: pct(cell(k, qTot)), tip: `${k} of ${qTot}: "${q.text.replace(/\s+/g, " ").slice(0, 90)}"` };
+}
+
+/** The argument a brand wins on and the one it loses on (its lift list's two ends). */
+export function liftEnds(src: CardSources, key: string): { win: Lift; lose: Lift | null } | null {
+  const lift = src.liftOf(key);
+  if (!lift.length) return null;
+  return { win: lift[0], lose: lift.length > 1 ? lift[lift.length - 1] : null };
+}
+
+/** The brand card's headline sentence. */
+export function brandHeadline(name: string, b: SummaryBrand): string {
+  return `${name} is named in ${pct(b.mentioned)} of answers and takes ${pct(b.shareOfDecided)} of the picks - it turns ${pctOf(conv(b))} of its recommendations into picks.`;
+}
+
 /** One brand's open buying questions: the funnel, where its picks come from,
  * its arguments and the assistant that supplies them. The target's card also
  * carries its picks by buying situation. Null for a brand not in the table. */
@@ -152,21 +235,11 @@ export function brandCard(src: CardSources, key: string): AnswerCard | null {
   const b: SummaryBrand | undefined = isTarget ? s.target : s.brands.find((x) => x.key === key);
   if (!b) return null;
   const name = isTarget ? src.brand : b.name;
-  const named = rate(b.mentioned);
-  const rows: Row[] = [
-    F("Named", b.mentioned),
-    { label: "Recommended", value: `${pct(b.recommended)} (${pctOf(named > 0 ? rate(b.recommended) / named : 0)} of the answers that name it)`, tip: `${b.recommended.k} of ${b.recommended.n}; ${b.recommended.k} recommending of ${b.mentioned.k} naming` },
-    F("Share of picks", b.shareOfDecided),
-    F("Picked, of all answers", b.chosen, pctFine(rate(b.chosen))),
-    { label: "Recommendations that end as the pick", value: pctOf(conv(b)), tip: `${b.chosen.k} of ${b.recommended.k}` },
-  ];
+  const f = funnelRows(b);
+  const rows: Row[] = [f.named, f.recommended, f.share, f.picked, f.converts];
   // Where its picks come from, by question type.
-  const by = src.stagePicks(key);
-  const total = [...by.values()].reduce((a, x) => a + x, 0);
-  if (total >= MIN_SIDE) {
-    const parts = [...by.entries()].filter(([st, k]) => k > 0 && STAGE[st]).sort((a, c) => c[1] - a[1]).map(([st, k]) => `${pctOf(k / total)} ${STAGE[st]}`);
-    if (parts.length) rows.push({ label: "Where its picks come from", value: listVal(parts), tip: [...by.entries()].map(([st, k]) => `${st} ${k}`).join(", ") + ` of ${total}` });
-  }
+  const from = picksFromRow(src, key);
+  if (from) rows.push(from);
   // The target: its picks by buying situation, the rest, and each situation's share.
   const inputs = src.inputs;
   if (isTarget && b.chosen.k > 0 && inputs.rooms.length >= 2) {
@@ -178,25 +251,20 @@ export function brandCard(src: CardSources, key: string): AnswerCard | null {
     for (const r of rs) if (r.firm > 0) rows.push(F(`Share of picks for ${r.room}`, r.decided));
   }
   // One question's share of its picks.
-  const qTot = inputs.questions.reduce((a, q) => a + (q.picks[key] ?? 0), 0);
-  if (qTot >= MIN_SIDE && inputs.questions.length >= 2) {
-    const q = [...inputs.questions].sort((a, c) => (c.picks[key] ?? 0) - (a.picks[key] ?? 0) || a.id.localeCompare(c.id))[0];
-    const k = q.picks[key] ?? 0;
-    rows.push({ label: "Picks from its top question", value: pct(cell(k, qTot)), tip: `${k} of ${qTot}: "${q.text.replace(/\s+/g, " ").slice(0, 90)}"` });
-  }
+  const tq = topQuestionRow(src, key);
+  if (tq) rows.push(tq);
   // The arguments that travel with its picks.
-  const lift = src.liftOf(key);
-  if (lift.length) {
-    rows.push({ label: "The argument it wins on", value: liftLine(lift[0]), tip: `${tipC(lift[0].wins)} picks; ${tipC(lift[0].others)} other picks` });
-    const lo = lift[lift.length - 1];
-    if (lift.length > 1) rows.push({ label: "The argument it loses on", value: liftLine(lo), tip: `${tipC(lo.wins)} picks; ${tipC(lo.others)} other picks` });
+  const ends = liftEnds(src, key);
+  if (ends) {
+    rows.push({ label: "The argument it wins on", value: liftLine(ends.win), tip: `${tipC(ends.win.wins)} picks; ${tipC(ends.win.others)} other picks` });
+    if (ends.lose) rows.push({ label: "The argument it loses on", value: liftLine(ends.lose), tip: `${tipC(ends.lose.wins)} picks; ${tipC(ends.lose.others)} other picks` });
   }
   const sup = supplyLine(s, inputs, key);
   if (sup) rows.push(sup);
   return {
     kind: "brand",
     crumb: `${name} · open buying questions`,
-    headline: `${name} is named in ${pct(b.mentioned)} of answers and takes ${pct(b.shareOfDecided)} of the picks - it turns ${pctOf(conv(b))} of its recommendations into picks.`,
+    headline: brandHeadline(name, b),
     rows,
     go: { label: "Open in Build a table", target: "metrics" },
   };

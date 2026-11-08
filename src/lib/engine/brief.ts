@@ -3,14 +3,14 @@ import { matchKey } from "../brand_key";
 import { store } from "../store";
 import { buildResolver } from "./brand_resolve";
 import { computeBrandSummary, type BrandSummaryView, type SummaryBrand } from "./brand_summary";
-import { computeAnalysisMap, liftForBrand, type AnalysisMapDebug, type MapCellStat } from "./analysis_map";
+import { computeAnalysisMap, type AnalysisMapDebug, type MapCellStat } from "./analysis_map";
 import { computeHeadline } from "./headline";
 import { CONTEXT_JUDGE_MODEL, CONTEXT_JUDGE_VERSION } from "./context_judge";
-import { pctFine, productNoun, rankedInsights, type Insight, type InsightInputs } from "./summary_insights";
-import { cell, loadViewData, poolOf, requestOf, type RateCell, type ViewData, type ViewRequest } from "./view_data";
+import { pctFine, rankedInsights, type Insight, type InsightInputs } from "./summary_insights";
+import { cell, loadViewData, requestOf, type RateCell, type ViewData, type ViewRequest } from "./view_data";
 import { viewsOf } from "./views";
 import type { AnalysisMapView, Position } from "./analysis_types";
-import { BRAND_CARD, CONDITION_CARD, ENGINES_CARD, brandCard, cardText, cellCard, conditionCard, enginesCard, type CardSources } from "./answer_cards";
+import { BRAND_CARD, CONDITION_CARD, ENGINES_CARD, brandCard, cardSourcesOf, cardText, cellCard, conditionCard, enginesCard, type CardSources } from "./answer_cards";
 import {
   BRIEF_FRAME_LABELS,
   type AnswerCard,
@@ -1857,29 +1857,12 @@ export async function computeBrief(data: ViewData, request: BriefRequest = {}): 
   }
 
   // Every brand's picks by stage, over the headline pool (the subject's feeds
-  // the funnel paragraph; every brand's, its answer card).
-  const byStage = new Map<string, Map<string, number>>();
-  for (const { code, intent } of poolOf(data, "headline", eng).rows)
-    if (code.outcome === "pick" && code.top_pick) {
-      const k = resolve(code.top_pick).key;
-      if (!k) continue;
-      const m = byStage.get(k) ?? new Map<string, number>();
-      m.set(intent.stage, (m.get(intent.stage) ?? 0) + 1);
-      byStage.set(k, m);
-    }
+  // the funnel paragraph; every brand's, its answer card) and each brand's
+  // argument lift - shared with the brand dossiers (answer_cards.ts).
+  const { src, byStage } = cardSourcesOf(data, eng, summary, inputs);
   const stagePicks = byStage.get(subject.key) ?? new Map<string, number>();
-  const lifts = new Map<string, ReturnType<typeof liftForBrand>>();
-  const liftOf = (key: string) => {
-    if (key === target.key) return summary.reasonLift;
-    let l = lifts.get(key);
-    if (!l) {
-      l = liftForBrand(data, eng, key);
-      lifts.set(key, l);
-    }
-    return l;
-  };
-  const product = productNoun(data.project.category);
-  const src: CardSources = { summary, inputs, brand, product, stagePicks: (k) => byStage.get(k) ?? new Map(), liftOf };
+  const liftOf = src.liftOf;
+  const product = src.product;
 
   const engineCount = summary.core.length;
   const month = monthOf(data.run);

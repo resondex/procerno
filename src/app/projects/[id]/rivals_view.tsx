@@ -1,419 +1,334 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
-import type { HeadlineBrand, HeadlineView } from "@/lib/engine/headline";
-import type { ConditionGroup, HeadToHeadRow, HeadToHeadViews } from "@/lib/engine/head_to_head";
-import type { CaptureRow } from "@/lib/engine/alternatives";
-import type { WorkbenchView } from "@/lib/engine/workbench";
-import type { RateCell } from "@/lib/engine/view_data";
-import { R } from "@/lib/engine/measures";
-import { Tip } from "./table";
-import { BaseNote, pct, range, useEngineSet, viewQuery } from "./view_parts";
+import { useCallback, useEffect, useState } from "react";
+import type { Dossier, DossierArg, DossiersView } from "@/lib/engine/dossiers";
+import type { HeadToHeadViews } from "@/lib/engine/head_to_head";
+import { Boundaries } from "./head_to_head_view";
+import { AnswersModal, type AnswersTarget, useEngineSet, viewQuery } from "./view_parts";
 
 /**
- * Rivals - an Analysis LENS (RATIFIED 2026-11-01, WORKBENCH_REDESIGN_2026-10-30.md
- * top section): the rival ledger. Pick a rival; four two-number pairs (named
- * at all, picked when one is, head to head, their leavers), then the
- * conditions each side wins on and the arguments argued for each.
+ * Rivals as BRAND DOSSIERS (2026-11-08, the owner's ratified shape -
+ * public/_position_panel_options.html tab 6): one standing page per rival
+ * brand - the brief's brand card promoted to a page, with the brand's own map
+ * cells folded in. One /dossiers fetch (engine/dossiers.ts, do1) carries every
+ * brand; picking a chip switches client-side.
  *
- * A lens, so partial by design: doubts, value and the customer questions
- * never name a rival and live only under Stations. Composes EXISTING cached
- * views client-side - headline, head_to_head, alternatives, and the wb2 fact
- * table for the per-rival arguments - no engine of its own.
+ * Below the dossier, the selected brand's head-to-head boundaries ("When does
+ * each side win?" - the head-to-head view's per-matchup conditions, counts
+ * stripped) stay reachable for brands with a matchup.
  *
- * Surface rule (2026-11-01): no answer counts on the cards; ranges on hover.
- * Condition lines carry their muted count.
+ * No counts anywhere: values are percentages and template sentences; no
+ * count tooltips (the 2026-11-08 standing rule).
  */
 
-/** Picks under this many answers are muted, never read as confident. */
-const THIN = 20;
-const TOP_CONDITIONS = 3;
-const TOP_ARGUMENTS = 4;
-
-interface OffensiveLite {
-  rows: CaptureRow[];
-}
-interface AlternativesLite {
-  offensive: OffensiveLite | null;
-}
-
-interface Loaded {
-  headline: HeadlineView | null;
-  h2h: HeadToHeadViews | null;
-  alts: AlternativesLite | null;
-  wb: WorkbenchView | null;
-}
-
-async function getJson<T>(url: string, field: "view" | "views"): Promise<T | null> {
-  const r = await fetch(url);
-  if (!r.ok) throw new Error(`${url.split("/").pop()} failed (${r.status})`);
-  const d = (await r.json()) as Record<string, T | null>;
-  return d[field] ?? null;
-}
-
-const norm = (s: string) => s.trim().toLowerCase();
-
-/** Wilson 95% interval - the same math as engine/metrics.ts wilson(). */
-function cellOf(k: number, n: number): RateCell {
-  if (n === 0) return { k, n, low: 0, high: 0 };
-  const z = 1.96;
-  const p = k / n;
-  const d = 1 + (z * z) / n;
-  const center = (p + (z * z) / (2 * n)) / d;
-  const m = (z * Math.sqrt((p * (1 - p)) / n + (z * z) / (4 * n * n))) / d;
-  return { k, n, low: Math.max(0, center - m), high: Math.min(1, center + m) };
-}
-
-interface Rival {
-  id: string;
-  key: string;
-  name: string;
-  kind: "entity" | "class";
-  brand: HeadlineBrand | null;
-  h2h: HeadToHeadRow | null;
-  leavers: CaptureRow | null;
-}
-
-/** Every rival the lens can be read against: entity head-to-head rivals and
- * the headline's competitors (head-to-head first, then by share of decided),
- * then class rivals as dim pills. A brand that is a class rival is listed
- * only as its class. */
-function rivalsOf(d: Loaded): Rival[] {
-  const target = d.headline?.brands.find((b) => b.role === "target") ?? null;
-  const brands = (d.headline?.brands ?? []).filter((b) => b.role !== "target");
-  const byKey = new Map(brands.map((b) => [b.key, b]));
-  const byName = new Map(brands.map((b) => [norm(b.name), b]));
-  const leavers = new Map((d.alts?.offensive?.rows ?? []).map((r) => [r.key, r]));
-  const classRows = (d.h2h?.class?.rows ?? []).filter((r) => r.key !== target?.key);
-  const classKeys = new Set(classRows.map((r) => r.key));
-  const entityRows = d.h2h?.entity?.rows ?? [];
-
-  const out = new Map<string, Rival>();
-  for (const r of entityRows) {
-    if (classKeys.has(r.key) || r.key === target?.key) continue;
-    const b = byKey.get(r.key) ?? byName.get(norm(r.rival)) ?? null;
-    out.set(r.key, { id: `e:${r.key}`, key: r.key, name: b?.name ?? r.rival, kind: "entity", brand: b, h2h: r, leavers: leavers.get(r.key) ?? null });
+const brandKey = (projectId: string) => `procerno_dossier_brand:${projectId}`;
+function readPref(key: string | null): string | null {
+  if (!key) return null;
+  try {
+    return window.localStorage.getItem(key);
+  } catch {
+    return null;
   }
-  for (const b of brands) {
-    if (b.role !== "competitor" || out.has(b.key) || classKeys.has(b.key)) continue;
-    out.set(b.key, { id: `e:${b.key}`, key: b.key, name: b.name, kind: "entity", brand: b, h2h: null, leavers: leavers.get(b.key) ?? null });
+}
+function writePref(key: string | null, value: string) {
+  if (!key) return;
+  try {
+    window.localStorage.setItem(key, value);
+  } catch {
+    // storage blocked: the choice holds for this page view only
   }
-  const sod = (r: Rival) => (r.brand && r.brand.shareOfDecided.n > 0 ? r.brand.shareOfDecided.k / r.brand.shareOfDecided.n : -1);
-  const entity = [...out.values()].sort((a, b) => Number(!!b.h2h) - Number(!!a.h2h) || sod(b) - sod(a));
-  const classes: Rival[] = classRows.map((r) => {
-    const b = byKey.get(r.key) ?? byName.get(norm(r.rival)) ?? null;
-    return { id: `c:${r.key}`, key: r.key, name: b?.name ?? r.rival, kind: "class", brand: b, h2h: r, leavers: null };
-  });
-  return [...entity, ...classes];
 }
 
-/** Per pick: how many headline answers picked each brand, and how many of
- * those argue each code (wb2 facts, one row per answer). */
-interface PickArgs {
-  n: number;
-  args: Map<number, number>;
-}
-function pickArguments(wb: WorkbenchView): Map<number, PickArgs> {
-  const out = new Map<number, PickArgs>();
-  for (const f of wb.facts) {
-    const prompt = wb.prompts[f[R.prompt]];
-    if (!prompt || !prompt.views.includes("headline")) continue;
-    const pick = f[R.pick];
-    if (pick < 0) continue;
-    let acc = out.get(pick);
-    if (!acc) out.set(pick, (acc = { n: 0, args: new Map() }));
-    acc.n++;
-    for (const a of f[R.args]) acc.args.set(a, (acc.args.get(a) ?? 0) + 1);
-  }
-  return out;
-}
+const DOSS_CSS = `
+.dz-root{ --dz-pos:#0d9488; --dz-neg:#be185d; --dz-amber:#a16207; }
+@media (prefers-color-scheme: dark){ .dz-root{ --dz-pos:#14a08f; --dz-neg:#d2497e; --dz-amber:#d0a03a; } }
+.dz-root{ --dz-amber-bg:color-mix(in srgb, var(--dz-amber) 10%, var(--surface)); }
+.dz-more > summary{ list-style:none; }
+.dz-more > summary::-webkit-details-marker{ display:none; }
+.dz-more > summary .dz-caret::after{ content:" \\25B8"; }
+.dz-more[open] > summary .dz-caret::after{ content:" \\25BE"; }
+`;
 
-interface ArgLine {
-  code: string;
-  you: RateCell;
-  them: RateCell;
-  diff: number;
-}
+const h3 = "mb-2 text-[11px] font-semibold uppercase tracking-[0.08em] text-ink-3";
 
-function argLines(wb: WorkbenchView, picks: Map<number, PickArgs>, rivalName: string): { you: ArgLine[]; them: ArgLine[]; thin: boolean } | null {
-  const ri = wb.brands.findIndex((b) => norm(b.name) === norm(rivalName));
-  const mine = picks.get(wb.target);
-  const theirs = ri >= 0 ? picks.get(ri) : undefined;
-  if (!mine || !theirs) return null;
-  const codes = new Set([...mine.args.keys(), ...theirs.args.keys()]);
-  const lines: ArgLine[] = [...codes].map((c) => {
-    const you = cellOf(mine.args.get(c) ?? 0, mine.n);
-    const them = cellOf(theirs.args.get(c) ?? 0, theirs.n);
-    return { code: wb.args[c], you, them, diff: you.k / you.n - them.k / them.n };
-  });
-  return {
-    you: lines.filter((l) => l.diff > 0).sort((a, b) => b.diff - a.diff).slice(0, TOP_ARGUMENTS),
-    them: lines.filter((l) => l.diff < 0).sort((a, b) => a.diff - b.diff).slice(0, TOP_ARGUMENTS),
-    thin: mine.n < THIN || theirs.n < THIN,
-  };
-}
-
-function Pct({ c, label, className = "" }: { c: RateCell; label: string; className?: string }) {
-  const thin = c.n > 0 && c.n < THIN;
+function Section({ title, children }: { title: string; children: React.ReactNode }) {
   return (
-    <Tip tip={`${label}: ${range(c)}${thin ? ` - too few answers to read (${c.n})` : ""}`}>
-      <span className={`cursor-help tabular-nums ${thin ? "opacity-60" : ""} ${className}`}>{pct(c)}</span>
-    </Tip>
+    <div className="min-w-0 pt-3.5">
+      <div className={h3}>{title}</div>
+      {children}
+    </div>
   );
 }
 
-function PairCard({
-  label,
-  you,
-  them,
-  youLabel,
-  themLabel,
-  themWord,
-  anchor,
-  empty,
-}: {
-  label: string;
-  you?: RateCell | null;
-  them?: RateCell | null;
-  youLabel: string;
-  themLabel: string;
-  themWord?: string;
-  anchor?: React.ReactNode;
-  empty?: string;
-}) {
+function Fig({ label, value }: { label: string; value: string }) {
   return (
-    <div className="card p-3.5 grid gap-1.5 content-start">
-      <span className="section-label">{label}</span>
-      {you ? (
-        <div className="flex items-baseline gap-1.5">
-          <Pct c={you} label={youLabel} className="text-[1.6rem] leading-tight font-semibold" />
-          {themWord ? (
-            <span className="text-[14px] text-ink-3">{themWord}</span>
-          ) : (
-            <span className="text-[14px] text-ink-3">
-              vs {them ? <Pct c={them} label={themLabel} /> : "-"}
+    <div className="flex justify-between gap-4 border-b border-dashed border-line py-1.5 text-[13px]">
+      <span className="min-w-0 text-ink-2">{label}</span>
+      <span className="max-w-[60%] text-right tabular-nums text-ink">{value}</span>
+    </div>
+  );
+}
+
+const Line = ({ children }: { children: React.ReactNode }) => <p className="mt-0.5 text-[13px] leading-relaxed text-ink-2">{children}</p>;
+
+function More({ children }: { children: React.ReactNode }) {
+  return (
+    <details className="dz-more mt-1.5">
+      <summary className="cursor-pointer select-none text-[12px] font-medium text-ink-3 hover:text-ink-2">
+        <span className="dz-caret">See more</span>
+      </summary>
+      <div className="mt-1.5">{children}</div>
+    </details>
+  );
+}
+
+/** The map panel's argument treatment: diverging bars + the shares beneath. */
+function ArgBars({ args, sides }: { args: DossierArg[]; sides: [string, string] }) {
+  const max = Math.max(10, ...args.map((a) => Math.abs(a.value)));
+  return (
+    <div className="grid gap-0.5">
+      {args.map((a) => {
+        const w = (Math.min(Math.abs(a.value), max) / max) * 50;
+        return (
+          <div key={a.label} className="grid grid-cols-[minmax(7.5rem,1fr)_1fr_2.75rem] items-center gap-x-2.5 gap-y-0.5 text-[13px]">
+            <span className="text-ink">{a.label}</span>
+            <div className="relative h-2.5" aria-hidden>
+              <span className="absolute inset-y-[-2px] left-1/2 w-px bg-line" />
+              <span
+                className="absolute top-px h-2 rounded-[3px]"
+                style={a.value >= 0 ? { left: "50%", width: `${w}%`, background: "var(--dz-pos)" } : { right: "50%", width: `${w}%`, background: "var(--dz-neg)" }}
+              />
+            </div>
+            <span className="text-right text-[12px] tabular-nums text-ink-2">
+              {a.value > 0 ? "+" : ""}
+              {a.value}
             </span>
+            <span className="col-span-full mb-1 text-[11.5px] text-ink-3">
+              {a.wins} of {sides[0]} · {a.others} of {sides[1]}
+            </span>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+function DossierPage({
+  d,
+  onOpenCell,
+  onOpenView,
+}: {
+  d: Dossier;
+  onOpenCell?: (cellId: string) => void;
+  onOpenView?: (v: "metrics") => void;
+}) {
+  const links: { label: string; go: () => void }[] = [];
+  if (d.cells.h2h && onOpenCell) links.push({ label: "Head-to-head on the map", go: () => onOpenCell(d.cells.h2h!) });
+  if (d.cells.leaver && onOpenCell) links.push({ label: "Its leaver cell", go: () => onOpenCell(d.cells.leaver!) });
+  if (onOpenView) links.push({ label: "Build a table", go: () => onOpenView("metrics") });
+  const more = d.argsAll.length > d.args.length;
+  return (
+    <section className="card px-6 pb-5 pt-5">
+      <div className="mb-1 text-[11px] uppercase tracking-[0.08em] text-ink-3">
+        <span className="mr-1.5 inline-block rounded-[5px] bg-primary-soft px-1.5 py-px text-[10px] font-bold tracking-[0.07em] text-primary">BRAND</span>
+        {d.name} · open buying questions
+      </div>
+      <p className="mb-3.5 mt-1 max-w-[68ch] text-[17px] font-semibold leading-snug text-ink [text-wrap:pretty]">{d.headline}</p>
+      <div className="mb-2 grid grid-cols-2 gap-2.5 sm:grid-cols-4">
+        {d.tiles.map((t) => (
+          <div key={t.label} className="rounded-[10px] border border-line px-3 py-2.5">
+            <div className="text-[20px] font-semibold tabular-nums text-ink">{t.value}</div>
+            <div className="mt-0.5 text-[11px] leading-snug text-ink-3">{t.label}</div>
+          </div>
+        ))}
+      </div>
+      <div className="grid gap-x-8 gap-y-1 md:grid-cols-2">
+        {(d.picksFrom.byType || d.picksFrom.topQuestion) && (
+          <Section title="Where its picks come from">
+            {d.picksFrom.byType && <Fig label="By question type" value={d.picksFrom.byType} />}
+            {d.picksFrom.topQuestion && <Fig label="Picks from its top question" value={d.picksFrom.topQuestion} />}
+          </Section>
+        )}
+        <Section title="Against you, head to head">
+          {d.h2h.kind === "record" ? (
+            <>
+              <Fig label={d.h2h.youLabel} value={d.h2h.you} />
+              <Fig label={d.h2h.themLabel} value={d.h2h.them} />
+              {d.h2h.asClass && <p className="mt-1 text-[12px] text-ink-3">Asked against the {d.name} class of product, not one brand.</p>}
+            </>
+          ) : d.h2h.alert ? (
+            <div className="mt-1 rounded-lg px-2.5 py-2 text-[12.5px] leading-snug" style={{ background: "var(--dz-amber-bg)", color: "var(--dz-amber)" }}>
+              {d.h2h.note}
+            </div>
+          ) : (
+            <Line>{d.h2h.note}</Line>
           )}
+        </Section>
+        {d.switching && (
+          <Section title="Switching">
+            <Line>{d.switching}</Line>
+            {d.switchingNoPick && <Line>{d.switchingNoPick}</Line>}
+          </Section>
+        )}
+        {d.args.length > 0 && (
+          <Section title="The arguments">
+            <ArgBars args={d.args} sides={d.argSides} />
+            {more && (
+              <More>
+                <ArgBars args={d.argsAll} sides={d.argSides} />
+              </More>
+            )}
+          </Section>
+        )}
+        {d.routes && (
+          <Section title="What routes buyers to it">
+            <Line>{d.routes}</Line>
+            {d.routesAll.length > 1 && (
+              <More>
+                <p className="mb-1 text-[12px] text-ink-3">Every condition that routes buyers to it, most often stated first, with its share of the questions where any condition routes away from you:</p>
+                {d.routesAll.map((r) => (
+                  <Fig key={r.label} label={`"${r.label}"`} value={r.share} />
+                ))}
+              </More>
+            )}
+          </Section>
+        )}
+        {d.supply && (
+          <Section title="Who supplies its picks">
+            <Line>{d.supply}</Line>
+            {d.supplyAll.assistants.length > 0 && (
+              <More>
+                <p className="mb-1 text-[12px] text-ink-3">Share of its picks, beside the share of the questions each answers.</p>
+                {d.supplyAll.vendors.length > 0 && (
+                  <>
+                    <div className="mt-1 text-[11px] font-semibold uppercase tracking-[0.07em] text-ink-3">By company</div>
+                    {d.supplyAll.vendors.map((r) => (
+                      <Fig key={r.label} label={r.label} value={`${r.picks} of its picks · answers ${r.answers}`} />
+                    ))}
+                  </>
+                )}
+                <div className="mt-2 text-[11px] font-semibold uppercase tracking-[0.07em] text-ink-3">By assistant</div>
+                {d.supplyAll.assistants.map((r) => (
+                  <Fig key={r.label} label={r.label} value={`${r.picks} of its picks · answers ${r.answers}`} />
+                ))}
+              </More>
+            )}
+          </Section>
+        )}
+      </div>
+      {links.length > 0 && (
+        <div className="mt-5 flex flex-wrap gap-x-5 gap-y-1">
+          {links.map((l) => (
+            <button key={l.label} type="button" onClick={l.go} className="text-[12.5px] font-semibold text-primary hover:opacity-80">
+              {l.label} {"→"}
+            </button>
+          ))}
         </div>
-      ) : (
-        <div className="text-[12px] text-ink-3">{empty}</div>
       )}
-      {you && anchor && <span className="text-[12px] leading-snug text-ink-2">{anchor}</span>}
-    </div>
+    </section>
   );
 }
 
-function ConditionLines({ title, groups }: { title: string; groups: ConditionGroup[] }) {
-  return (
-    <div>
-      <div className="text-[13px] font-medium text-ink mb-2">{title}</div>
-      {groups.length === 0 ? (
-        <p className="text-[12px] text-ink-3">No conditions stated here.</p>
-      ) : (
-        <ul className="grid gap-1.5">
-          {groups.slice(0, TOP_CONDITIONS).map((g) => (
-            <li key={g.label} className="text-[13px] text-ink-2">
-              {g.label} <span className="text-[11px] text-ink-3 tabular-nums">{g.n}</span>
-            </li>
-          ))}
-        </ul>
-      )}
-    </div>
-  );
-}
-
-function ArgList({ title, lines, you, them }: { title: string; lines: ArgLine[]; you: string; them: string }) {
-  return (
-    <div>
-      <div className="text-[13px] font-medium text-ink mb-2">{title}</div>
-      {lines.length === 0 ? (
-        <p className="text-[12px] text-ink-3">No argument leans this way.</p>
-      ) : (
-        <ul className="grid gap-1.5">
-          {lines.map((l) => (
-            <li key={l.code} className="text-[13px] text-ink-2">
-              <span className="text-ink">{l.code}</span>
-              <span className="text-ink-3">
-                {" - "}
-                <Pct c={l.you} label={`Answers picking ${you} that argue it`} /> vs{" "}
-                <Pct c={l.them} label={`Answers picking ${them} that argue it`} />
-              </span>
-            </li>
-          ))}
-        </ul>
-      )}
-    </div>
-  );
-}
-
-export default function RivalsSection({ runId }: { runId: string }) {
-  const [data, setData] = useState<Loaded | undefined>(undefined);
+export default function RivalsSection({
+  runId,
+  projectId,
+  onOpenCell,
+  onOpenView,
+}: {
+  runId: string;
+  projectId?: string;
+  onOpenCell?: (cellId: string) => void;
+  onOpenView?: (v: "metrics") => void;
+}) {
+  const [view, setView] = useState<DossiersView | null | undefined>(undefined);
+  const [h2h, setH2h] = useState<HeadToHeadViews | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [picked, setPicked] = useState<string | null>(null);
+  const [showAll, setShowAll] = useState(false);
+  const [opened, setOpened] = useState<AnswersTarget | null>(null);
+  const close = useCallback(() => setOpened(null), []);
+  const pKey = projectId ? brandKey(projectId) : null;
 
   const engines = useEngineSet();
   useEffect(() => {
     let live = true;
-    const base = `/api/runs/${runId}`;
-    const eq = viewQuery({ engines });
-    const soft = <T,>(p: Promise<T | null>) => p.catch(() => null);
-    Promise.all([
-      soft(getJson<HeadlineView>(`${base}/headline${eq}`, "view")),
-      soft(getJson<HeadToHeadViews>(`${base}/head_to_head${eq}`, "views")),
-      soft(getJson<AlternativesLite>(`${base}/alternatives${eq}`, "views")),
-      soft(getJson<WorkbenchView>(`${base}/workbench${eq}`, "view")),
-    ])
-      .then(([headline, h2h, alts, wb]) => live && setData({ headline, h2h, alts, wb }))
+    const q = viewQuery({ engines });
+    fetch(`/api/runs/${runId}/dossiers${q}`)
+      .then(async (r) => {
+        if (!r.ok) throw new Error(`Rivals failed (${r.status})`);
+        const d = (await r.json()) as { view: DossiersView | null };
+        if (!live) return;
+        const saved = readPref(pKey);
+        if (saved && d.view?.dossiers.some((x) => x.key === saved)) setPicked(saved);
+        setView(d.view);
+      })
       .catch((e: Error) => live && setError(e.message));
+    fetch(`/api/runs/${runId}/head_to_head${q}`)
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d: { views: HeadToHeadViews | null } | null) => live && setH2h(d?.views ?? null))
+      .catch(() => {});
     return () => {
       live = false;
     };
-  }, [runId, engines]);
-
-  const rivals = useMemo(() => (data ? rivalsOf(data) : []), [data]);
-  const picks = useMemo(() => (data?.wb ? pickArguments(data.wb) : null), [data]);
+  }, [runId, engines, pKey]);
 
   if (error) return <div className="card px-5 py-4 text-[13px] text-danger">{error}</div>;
-  if (data === undefined) return <div className="card px-5 py-4 text-[13px] text-ink-3">Loading rivals...</div>;
-  if (rivals.length === 0) return null;
+  if (view === undefined) return <div className="card px-5 py-4 text-[13px] text-ink-3">Loading rivals...</div>;
+  if (!view || view.dossiers.length === 0) return null;
 
-  // Derived default: the first pill until the user picks one.
-  const sel = rivals.find((r) => r.id === picked) ?? rivals[0];
-  const you = data.headline?.brand ?? data.wb?.brand ?? "You";
-  const target = data.headline?.brands.find((b) => b.role === "target") ?? null;
-  const args = data.wb && picks ? argLines(data.wb, picks, sel.name) : null;
-  const h = sel.h2h;
-  const cond = h?.conditions;
+  const sel = view.dossiers.find((d) => d.key === picked) ?? view.dossiers[0];
+  const lead = view.dossiers.filter((d) => d.prominent);
+  const rest = view.dossiers.filter((d) => !d.prominent);
+  const chips = showAll || rest.some((d) => d.key === sel.key) ? view.dossiers : lead.length ? lead : view.dossiers;
+  const choose = (k: string) => {
+    setPicked(k);
+    writePref(pKey, k);
+  };
+  const matchup = h2h ? [...(h2h.entity?.rows ?? []), ...(h2h.class?.rows ?? [])].find((r) => r.key === sel.key && r.conditions) ?? null : null;
 
   return (
-    <div className="grid gap-5">
-      <section className="card p-6 grid gap-3">
+    <div className="dz-root grid gap-5">
+      <style>{DOSS_CSS}</style>
+      <section className="card grid gap-3 p-6">
         <div>
           <h2 className="section-label mb-1">Rivals</h2>
-          <h3 className="text-[15px] font-semibold">You against each rival</h3>
-          <p className="text-[13px] text-ink-3 mt-1">
-            Pick a rival to see where you stand with them across every question that puts you side by side.
+          <h3 className="text-[15px] font-semibold">One page per brand</h3>
+          <p className="mt-1 text-[13px] text-ink-3">
+            How the AI treats each brand in open buying questions, where it stands against {view.brand}, and what sends buyers to it.
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-1.5">
-          <span className="text-[12px] text-ink-3 mr-1">Against:</span>
-          {rivals.map((r) => (
+          {chips.map((d) => (
             <button
-              key={r.id}
+              key={d.key}
               type="button"
-              onClick={() => setPicked(r.id)}
-              aria-pressed={sel.id === r.id}
+              onClick={() => choose(d.key)}
+              aria-pressed={sel.key === d.key}
               className={`rounded-full border px-3 py-1 text-[13px] font-medium transition-colors ${
-                sel.id === r.id
-                  ? "border-[var(--color-primary)] bg-primary-soft text-primary"
-                  : r.kind === "class"
-                    ? "border-line text-ink-3 hover:border-ink-3"
-                    : "border-line text-ink-2 hover:border-ink-3"
+                sel.key === d.key ? "border-[var(--color-primary)] bg-primary-soft text-primary" : "border-line text-ink-2 hover:border-ink-3"
               }`}
             >
-              {r.kind === "class" ? (
-                <Tip tip={`A kind of product rather than one brand - questions that set you against any ${r.name} product.`}>
-                  <span>{r.name} (class)</span>
-                </Tip>
-              ) : (
-                r.name
-              )}
+              {d.name}
             </button>
           ))}
+          {rest.length > 0 && chips.length < view.dossiers.length && (
+            <button type="button" onClick={() => setShowAll(true)} className="px-2 py-1 text-[12.5px] font-medium text-ink-3 hover:text-ink-2">
+              More brands {"▸"}
+            </button>
+          )}
         </div>
       </section>
 
-      <div className={`grid grid-cols-2 gap-3 ${sel.kind === "class" ? "md:grid-cols-3" : "md:grid-cols-4"}`}>
-        <PairCard
-          label="Named at all"
-          you={target?.mentioned ?? null}
-          them={sel.brand?.mentioned ?? null}
-          youLabel={`${you} named`}
-          themLabel={`${sel.name} named`}
-          anchor={
-            <Tip tip="Answers to which-should-I-get questions that name the brand at all.">
-              <span className="cursor-help">in &ldquo;which should I get&rdquo; answers</span>
-            </Tip>
-          }
-          empty="Not asked"
-        />
-        <PairCard
-          label="Picked, when one is"
-          you={target?.shareOfDecided ?? null}
-          them={sel.brand?.shareOfDecided ?? null}
-          youLabel={`${you} picked, when one brand is`}
-          themLabel={`${sel.name} picked, when one brand is`}
-          anchor={
-            <Tip tip="Of the which-should-I-get answers that pick one brand in your category (share of decided).">
-              <span className="cursor-help">when the answer picks one brand</span>
-            </Tip>
-          }
-          empty="Not asked"
-        />
-        <PairCard
-          label="Head to head"
-          you={h?.won ?? null}
-          them={h?.lost ?? null}
-          youLabel={`You win vs ${sel.name}`}
-          themLabel={`${sel.name} wins`}
-          anchor={
-            h && (
-              <>
-                <Pct c={h.undecided} label="No single pick" /> no single pick
-              </>
-            )
-          }
-          empty="Not asked head to head"
-        />
-        {sel.kind === "entity" && (
-          <PairCard
-            label="Their leavers"
-            you={sel.leavers?.captured ?? null}
-            youLabel={`${sel.name}'s leavers told to pick you`}
-            themLabel=""
-            themWord="pick you"
-            anchor={
-              sel.leavers && (
-                <>
-                  named in <Pct c={sel.leavers.named} label="Leavers' answers naming you" /> of their leavers&apos; answers
-                </>
-              )
-            }
-            empty="No leaver questions for this rival"
-          />
-        )}
-      </div>
+      <DossierPage key={sel.key} d={sel} onOpenCell={onOpenCell} onOpenView={onOpenView} />
 
-      {(cond || args) && (
-        <section className="card p-6 grid gap-6">
-          {cond && (
-            <div className="grid md:grid-cols-2 gap-5">
-              <ConditionLines title={`You beat ${sel.name} when the buyer`} groups={cond.you} />
-              <ConditionLines title={`${sel.name} beats you when the buyer`} groups={cond.rival} />
-            </div>
-          )}
-          {args && (
-            <div className={`grid md:grid-cols-2 gap-5 ${args.thin ? "opacity-70" : ""}`}>
-              <ArgList title="Argued for you" lines={args.you} you={you} them={sel.name} />
-              <ArgList title={`Argued for ${sel.name}`} lines={args.them} you={you} them={sel.name} />
-            </div>
-          )}
-          {cond && (
-            <p className="text-[11px] text-ink-3">
-              The small number is how many answers state the condition in head-to-head questions. Arguments compare the
-              which-should-I-get answers that pick you with those that pick {sel.name}
-              {args?.thin ? " - too few picks to read as more than direction" : ""}.
-            </p>
-          )}
+      {matchup && (
+        <section className="card grid gap-2 p-6">
+          <h3 className="section-label">When does each side win?</h3>
+          <p className="text-[12px] text-ink-3">The boundaries the AI states when asked to pick between the two. Click a condition to read the answers that state it.</p>
+          <Boundaries row={matchup} brand={view.brand} onOpen={setOpened} bare />
         </section>
       )}
-
-      <div className="grid gap-1">
-        <p className="text-[12px] text-ink-3">
-          Doubts, value and your customers&apos; worries never name a rival; they live under Stations.
-        </p>
-        <BaseNote>Based on the questions that name or pick a rival, across all buyers.</BaseNote>
-      </div>
+      {opened && <AnswersModal key={opened.ids.join(",")} runId={runId} target={opened} onClose={close} />}
     </div>
   );
 }

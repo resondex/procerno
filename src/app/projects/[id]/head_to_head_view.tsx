@@ -130,9 +130,9 @@ type OpenAnswers = (target: AnswersTarget) => void;
 /** The answers modal's target for one condition group: its sample ids, the
  * group's wording marked where it appears literally, plus the brand the
  * group routes to. */
-const groupTarget = (g: ConditionGroup, routes: string, matchup: string, heading: string): AnswersTarget => ({
+const groupTarget = (g: ConditionGroup, routes: string, matchup: string, heading: string, bare = false): AnswersTarget => ({
   title: `${heading}: ${g.label}`,
-  subtitle: `${matchup} - ${
+  subtitle: bare ? `${matchup} - answers stating this condition.` : `${matchup} - ${
     g.ids.length < g.n
       ? `a sample of ${g.ids.length} of the ${g.n} answers`
       : g.n === 1
@@ -164,6 +164,7 @@ function Direction({
   routes,
   matchup,
   onOpen,
+  bare = false,
 }: {
   label: string;
   tip: string;
@@ -172,6 +173,7 @@ function Direction({
   routes: string;
   matchup: string;
   onOpen: OpenAnswers;
+  bare?: boolean;
 }) {
   if (groups.length === 0) return null;
   const shown = groups.slice(0, TOP_GROUPS);
@@ -186,19 +188,22 @@ function Direction({
       <ul className="mt-1 grid gap-0.5">
         {shown.map((g) => (
           <li key={g.label} className="text-[12px] leading-snug">
-            <GroupButton g={g} onOpen={() => onOpen(groupTarget(g, routes, matchup, label))}>
+            <GroupButton g={g} onOpen={() => onOpen(groupTarget(g, routes, matchup, label, bare))}>
               <span className="text-ink">{g.label}</span>
-              <span className="text-ink-3"> ({g.n})</span>
+              {!bare && <span className="text-ink-3"> ({g.n})</span>}
             </GroupButton>
           </li>
         ))}
       </ul>
-      {rest > 0 && <div className="mt-0.5 text-[11px] text-ink-3">+{rest} more</div>}
+      {rest > 0 && !bare && <div className="mt-0.5 text-[11px] text-ink-3">+{rest} more</div>}
     </div>
   );
 }
 
-function Boundaries({ row, brand, onOpen }: { row: HeadToHeadRow; brand: string; onOpen: OpenAnswers }) {
+/** One matchup's stated boundaries. `bare` (the brand dossiers, 2026-11-08):
+ * no counts anywhere - no "(n)" per condition, no count tooltips, no "+N
+ * more", no counts in the answers modal's subtitle. */
+export function Boundaries({ row, brand, onOpen, bare = false }: { row: HeadToHeadRow; brand: string; onOpen: OpenAnswers; bare?: boolean }) {
   const c = row.conditions;
   if (!c) return null;
   const won = rate(row.won);
@@ -213,9 +218,13 @@ function Boundaries({ row, brand, onOpen }: { row: HeadToHeadRow; brand: string;
   return (
     <div className="rounded-md border border-line/60 p-3">
       <div className="text-[13px] font-medium text-ink">
-        <Tip tip={`${c.rules} stated rules across ${row.answers} answers; ${c.unconditional} answers answer unconditionally.`}>
-          <span className="cursor-help">{matchup}</span>
-        </Tip>
+        {bare ? (
+          matchup
+        ) : (
+          <Tip tip={`${c.rules} stated rules across ${row.answers} answers; ${c.unconditional} answers answer unconditionally.`}>
+            <span className="cursor-help">{matchup}</span>
+          </Tip>
+        )}
       </div>
       <p className="mt-0.5 text-[12px] text-ink-3">
         On the context-free ask, {lead} - the AI&apos;s stated boundaries:
@@ -223,21 +232,23 @@ function Boundaries({ row, brand, onOpen }: { row: HeadToHeadRow; brand: string;
       <div className="mt-2 grid gap-3 sm:grid-cols-2">
         <Direction
           label="You win when"
-          tip={`Conditions under which the AI routes the pick to ${brand}. The number is how many answers state it.`}
+          tip={`Conditions under which the AI routes the pick to ${brand}.${bare ? "" : " The number is how many answers state it."}`}
           groups={c.you}
           more={c.youMore}
           routes={brand}
           matchup={matchup}
           onOpen={onOpen}
+          bare={bare}
         />
         <Direction
           label="You lose when"
-          tip={`Conditions under which the AI routes the pick to ${row.rival}. The number is how many answers state it.`}
+          tip={`Conditions under which the AI routes the pick to ${row.rival}.${bare ? "" : " The number is how many answers state it."}`}
           groups={c.rival}
           more={c.rivalMore}
           routes={row.rival}
           matchup={matchup}
           onOpen={onOpen}
+          bare={bare}
         />
       </div>
       {c.elsewhere.length > 0 && (
@@ -247,12 +258,12 @@ function Boundaries({ row, brand, onOpen }: { row: HeadToHeadRow; brand: string;
             {c.elsewhere.map((e, i) => (
               <span key={e.name}>
                 {i > 0 && ", "}
-                <span title={`${e.n} rules`}>{e.name}</span>
+                <span title={bare ? undefined : `${e.n} rules`}>{e.name}</span>
                 {e.conditions.length > 0 && " - "}
                 {e.conditions.map((g, j) => (
                   <span key={g.label}>
                     {j > 0 && "; "}
-                    <GroupButton g={g} onOpen={() => onOpen(groupTarget(g, e.name, matchup, `Goes to ${e.name} when`))}>
+                    <GroupButton g={g} onOpen={() => onOpen(groupTarget(g, e.name, matchup, `Goes to ${e.name} when`, bare))}>
                       {g.label}
                     </GroupButton>
                   </span>

@@ -355,7 +355,7 @@ export interface MapCellStat {
   badges: CellBadge[];
   /** The row's pooled All cell: excluded from the brief's moves and strengths. */
   pooled: boolean;
-  /** Head-to-head cells: the rival's dictionary key. */
+  /** Head-to-head cells: the rival's dictionary key; rival-leaver cells: the brand being left. */
   rivalKey?: string;
 }
 
@@ -865,6 +865,8 @@ export async function computeAnalysisMap(
     const whose = key === "all" ? "Buyers leaving a rival" : `Buyers leaving ${label}`;
     return {
       band: "fights", row: "leavers", rowLabel: "Rival leavers", key, label, wide, rows,
+      // The brand being left (debug.cells only - the brand dossiers link its leaver cell by it).
+      ...(leftKey ? { rivalKey: leftKey } : {}),
       you, them: top ? top[1].rows : [],
       sideD: inCat.length,
       taker: top

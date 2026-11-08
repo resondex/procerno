@@ -239,7 +239,16 @@ function CodesResults({
       )}
       {visited.has("rivals") && (
         <div className={show("rivals")}>
-          <RivalsSection key={k("rivals")} runId={runId} />
+          <RivalsSection
+            key={k("rivals")}
+            runId={runId}
+            projectId={projectId}
+            onOpenCell={(id) => {
+              setCellReq({ id, n: Date.now() });
+              open("map");
+            }}
+            onOpenView={(v) => open(v)}
+          />
         </div>
       )}
       {visited.has("buyers") && (
