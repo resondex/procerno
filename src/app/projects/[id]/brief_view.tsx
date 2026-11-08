@@ -244,42 +244,6 @@ html.pb-printing .pb-fact{ border-bottom: 0 !important; color: inherit !importan
 }
 `;
 
-// ---------- hover note (tooltip only; never printed) ----------
-
-function Tip({ tip, children }: { tip?: string; children: React.ReactNode }) {
-  const [pos, setPos] = useState<{ x: number; y: number } | null>(null);
-  if (!tip) return <>{children}</>;
-  return (
-    <span
-      className="inline cursor-help"
-      onMouseEnter={(e) => {
-        const r = (e.currentTarget as HTMLElement).getBoundingClientRect();
-        setPos({ x: r.left + r.width / 2, y: r.top });
-      }}
-      onMouseLeave={() => setPos(null)}
-    >
-      {children}
-      {pos && (
-        <span
-          style={{
-            position: "fixed",
-            left: Math.min(
-              Math.max(pos.x, Math.min(176, window.innerWidth / 2)),
-              window.innerWidth - Math.min(176, window.innerWidth / 2)
-            ),
-            top: pos.y - 8,
-            transform: "translate(-50%, -100%)",
-            zIndex: 50,
-            maxWidth: Math.min(336, window.innerWidth - 16),
-          }}
-          className="pb-sans pb-noprint pointer-events-none w-max rounded-lg border border-line bg-surface px-3 py-2 text-left text-[12px] font-normal text-ink-2 shadow-lg"
-        >
-          {tip}
-        </span>
-      )}
-    </span>
-  );
-}
 
 
 // ---------- the visuals (inline SVG from the served BriefViz spec) ----------
@@ -687,7 +651,7 @@ function CardLifts({ lifts, sides }: { lifts: NonNullable<AnswerCard["lifts"]>; 
             </span>
             <span className="pb-lift-v">{liftPts(v).replace(" points", "")}</span>
             {l.wins && l.others && (
-              <span className="pb-lift-s" title={l.tip}>
+              <span className="pb-lift-s">
                 {l.wins} of {a} · {l.others} of {b}
               </span>
             )}
@@ -711,10 +675,10 @@ function CardView({ card }: { card: AnswerCard }) {
       <p className="pb-acard-hl">{card.headline}</p>
       {card.rows.map((r, i) => (
         <div key={i} className="pb-acard-row">
-          <span className="l" title={r.tip}>
+          <span className="l">
             {r.label}
           </span>
-          <span className="v" title={r.tip}>
+          <span className="v">
             {r.value}
           </span>
         </div>
@@ -763,10 +727,8 @@ function ParaBody({ p, lead, unit }: { p: BriefPara; lead?: string; unit: string
   const L = (t: string) => <Linked text={t} plan={plan} unit={unit} />;
   return (
     <>
-      <Tip tip={p.tip}>
-        {l && (/[.?!:"')]$/.test(l.trim()) ? <b>{L(l)} </b> : <b className="pb-runhead">{L(l)}</b>)}
-        {L(body)}
-      </Tip>
+      {l && (/[.?!:"')]$/.test(l.trim()) ? <b>{L(l)} </b> : <b className="pb-runhead">{L(l)}</b>)}
+      {L(body)}
       {watch && <span className="pb-watch">{L(watch)}</span>}
     </>
   );
@@ -840,9 +802,7 @@ function Section({ s, lede, wave }: { s: BriefSectionT; lede: boolean; wave: str
             <tbody>
               {s.rows.map((r, i) => (
                 <tr key={i}>
-                  <td>
-                    <Tip tip={r.tip}>{r.label}</Tip>
-                  </td>
+                  <td>{r.label}</td>
                   <td className="pb-r">
                     {r.cell ? (
                       <RowValue value={r.value} a={r.cell} unit={`${s.key}/rows/${i}`} />

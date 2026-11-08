@@ -106,9 +106,6 @@ const pctOf = (c: RateCell) => {
   const x = c.k / c.n;
   return x > 0 && x < 0.005 ? "<1%" : `${Math.round(x * 100)}%`;
 };
-const rangeOf = (c: RateCell) =>
-  c.n === 0 ? "no answers" : `${c.k} of ${c.n} - 95% range ${Math.round(c.low * 100)}-${Math.round(c.high * 100)}%`;
-const answersTip = (n: number) => `${n.toLocaleString("en-US")} ${n === 1 ? "answer" : "answers"} behind this cell`;
 
 function Badge({ b }: { b: CellBadge }) {
   return (
@@ -268,7 +265,6 @@ function VerdictView({ map, onOpen }: { map: AnalysisMapView; onOpen: (cellId: s
         </p>
         <div
           className="grid grid-cols-[7rem_1fr_6.5rem] items-center gap-3 sm:grid-cols-[9rem_1fr_8rem]"
-          title={`Named in ${rangeOf(named)}; picked in ${rangeOf(picked)}`}
         >
           <span className="truncate text-right text-sm font-semibold text-primary">{brand ?? "You"}</span>
           <DotTrack a={named.n > 0 ? named.k / named.n : 0} b={picked.n > 0 ? picked.k / picked.n : 0} emphasis />
@@ -293,7 +289,6 @@ function VerdictView({ map, onOpen }: { map: AnalysisMapView; onOpen: (cellId: s
                   <div
                     key={s.brand}
                     className="grid grid-cols-[7rem_1fr_3rem] items-center gap-3 sm:grid-cols-[9rem_1fr_3rem]"
-                    title={rangeOf(s.share)}
                   >
                     <span className={`truncate text-right text-[13px] ${s.you ? "font-semibold text-primary" : "text-ink-2"}`}>
                       {s.brand}
@@ -348,7 +343,6 @@ function CellButton({ cell, onOpen, hasPosition }: { cell: MapCell; onOpen: (id:
       type="button"
       onClick={() => hasPosition && onOpen(cell.id)}
       disabled={!hasPosition}
-      title={answersTip(cell.n)}
       className={`flex min-w-[150px] flex-col items-start gap-1 rounded-[7px] border border-transparent px-2.5 py-1.5 text-left transition-colors enabled:hover:border-line disabled:cursor-default ${
         cell.wide ? "basis-full" : "flex-[1_1_160px]"
       }`}
@@ -476,7 +470,6 @@ function DossierLine({ stage, cell, onOpen, hasPosition }: { stage: string; cell
       type="button"
       onClick={() => hasPosition && onOpen(cell.id)}
       disabled={!hasPosition}
-      title={answersTip(cell.n)}
       className="flex w-full items-baseline gap-2 rounded-[6px] px-2.5 py-1.5 text-left transition-colors enabled:hover:bg-line/25 disabled:cursor-default"
     >
       <span className="w-[96px] flex-none text-[11px] leading-tight text-ink-3">
@@ -848,10 +841,10 @@ function PositionPanel({
             <dl className="grid grid-cols-[minmax(0,1fr)_minmax(0,1.25fr)] gap-x-4 text-[13px]">
               {p.figures!.map((f, i) => (
                 <Fragment key={`${f.label}${i}`}>
-                  <dt title={f.tip} className="border-b border-dashed border-line/70 py-1 text-ink-2">
+                  <dt className="border-b border-dashed border-line/70 py-1 text-ink-2">
                     {f.label}
                   </dt>
-                  <dd title={f.tip} className="border-b border-dashed border-line/70 py-1 text-right tabular-nums text-ink">
+                  <dd className="border-b border-dashed border-line/70 py-1 text-right tabular-nums text-ink">
                     {f.value}
                   </dd>
                 </Fragment>
@@ -887,7 +880,7 @@ function PositionPanel({
                     </span>
                     {l.wins && l.others && (
                       // am11: the two shares behind the bar; counts in the tip.
-                      <span className="col-span-full mb-1 text-[11.5px] text-ink-3" title={l.tip}>
+                      <span className="col-span-full mb-1 text-[11.5px] text-ink-3">
                         {l.wins} of {sides[0]} · {l.others} of {sides[1]}
                       </span>
                     )}
@@ -919,7 +912,6 @@ function PositionPanel({
                       <li
                         key={c.text + i}
                         className="border-b border-dashed border-line/70 py-1 text-ink"
-                        title={`About ${c.n.toLocaleString("en-US")} answers`}
                       >
                         {c.text}
                         {c.wall && (
