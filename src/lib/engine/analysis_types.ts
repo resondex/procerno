@@ -115,9 +115,6 @@ export interface LiftItem {
   wins?: string;
   others?: string;
   tip?: string;
-  /** am11, the pooled open-choice cell only: the line its answer card states
-   * (the argument rows that left "The numbers"). */
-  card?: { label: string; value: string; tip: string };
 }
 
 export interface ConditionItem {

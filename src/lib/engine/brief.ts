@@ -1952,7 +1952,8 @@ export async function computeBrief(data: ViewData, request: BriefRequest = {}): 
 // bf14 (2026-11-07): the answer cards - every pin opens a card that answers one question (cell / brand / engines / condition, answer_cards.ts) and the payload carries them (BriefView.cards); RULE 1 checks a pin against its card's text and drops a brand / engines / condition card whose shared numbers an earlier pin already states; reads the am10 map, whose pooled open-choice panel slimmed back to its own question - every other brand's funnel, the stage / room / question splits, the assistants and the conditions now cite brand, engines and condition cards. No sentence text changed.
 // bf15 (2026-11-07): the fact is the link - the trailing pins are gone; a number in the sentence opens its card. BriefAnchor gains `at` (the exact phrase a numberless unit's anchor attaches to: a TOWS play's own item, a Minto move's watch phrase, a thin situation's name); citePins strips `at` on numbered units and drops a numberless unit's anchor whose `at` is absent from its text. No sentence text changed.
 // bf16 (2026-11-07): reads the am11 map - the open-choice card's argument lines now come from the position's lifts (every code the brief cites there, plus the panel's top arguments); the panel states each code once. No sentence text changed.
-const BRIEF_VERSION = "bf16";
+// bf17 (2026-11-07): reads the am12 map - a cell card carries its arguments as `lifts` (+ liftSides) and draws them like the map panel (bars + share sub-lines) instead of the verbose "argument in the lift" text rows; cardText states each lift's label, shares and signed points, so RULE 1 and the number links claim them unchanged. No sentence text changed.
+const BRIEF_VERSION = "bf17";
 
 /**
  * The brief through the cache. cachedView's keying, with the subject as one

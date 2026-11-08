@@ -149,6 +149,19 @@ html.pb-printing .pb-fact{ border-bottom: 0 !important; color: inherit !importan
 .pb-acard-row{ display: flex; justify-content: space-between; gap: 16px; padding: 5px 0; border-bottom: 1px dashed var(--line); }
 .pb-acard-row .l{ color: var(--ink-2); min-width: 0; }
 .pb-acard-row .v{ text-align: right; font-variant-numeric: tabular-nums; max-width: 55%; }
+.pb-acard{ --pb-yours:#0d9488; --pb-theirs:#be185d; }
+@media (prefers-color-scheme: dark){ .pb-acard{ --pb-yours:#14a08f; --pb-theirs:#d2497e; } }
+.pb-acard-lifts{ margin-top: 12px; }
+.pb-acard-sub{ font-size: 10.5px; letter-spacing: .08em; text-transform: uppercase; color: var(--ink-3); margin-bottom: 6px; }
+.pb-lift{ display: grid; grid-template-columns: minmax(7rem,1fr) 1fr 2.6rem; align-items: center; column-gap: 10px; row-gap: 1px; padding: 3px 0; }
+.pb-lift-l{ color: var(--ink-2); min-width: 0; }
+.pb-lift-bar{ position: relative; height: 9px; }
+.pb-lift-mid{ position: absolute; top: -2px; bottom: -2px; left: 50%; width: 1px; background: var(--line); }
+.pb-lift-pos, .pb-lift-neg{ position: absolute; top: 1px; height: 7px; border-radius: 3px; }
+.pb-lift-pos{ background: var(--pb-yours); }
+.pb-lift-neg{ background: var(--pb-theirs); }
+.pb-lift-v{ text-align: right; font-size: 12px; font-variant-numeric: tabular-nums; color: var(--ink-2); }
+.pb-lift-s{ grid-column: 1 / -1; font-size: 11px; color: var(--ink-3); }
 .pb-acard-go{ display: inline-block; margin-top: 10px; font-size: 12.5px; font-weight: 600; color: var(--primary); background: none; border: 0; padding: 0; cursor: pointer; }
 .pb-acard-go:hover{ text-decoration: underline; }
 .pb-lede .pb-p:first-of-type{ font-size: 1.07em; line-height: 1.66; }
@@ -557,7 +570,15 @@ const KIND_LABEL: Record<AnswerCard["kind"], string> = { cell: "On the map", bra
 /** Number tokens exactly as the engine reads them (brief.ts NUMBER_TOKEN). */
 const NUMBER_TOKEN = /\d+(?:\.\d+)?%|[+-]\d+ (?:pts|points)/g;
 /** The card's visible text (answer_cards.ts cardText) - never its tips. */
-const cardTextOf = (c: AnswerCard) => [c.crumb, c.headline, ...c.rows.flatMap((r) => [r.label, r.value])].join(" \n ");
+const liftPts = (v: number) => `${v >= 0 ? "+" : "-"}${Math.abs(Math.round(v))} points`;
+/** Mirrors the engine's cardText (answer_cards.ts) - lifts included. */
+const cardTextOf = (c: AnswerCard) =>
+  [
+    c.crumb,
+    c.headline,
+    ...c.rows.flatMap((r) => [r.label, r.value]),
+    ...(c.lifts ?? []).flatMap((l) => [l.label, l.wins ?? "", l.others ?? "", liftPts(l.value)]),
+  ].join(" \n ");
 
 /** Which anchor each piece of a unit's text links to: number token -> anchor
  * (first anchor in order whose card states it), and for a numberless unit
@@ -644,6 +665,39 @@ function Linked({ text, plan, unit }: { text: string; plan: LinkPlan | null; uni
   return <>{out}</>;
 }
 
+/** bf17: a cell card's arguments - the map panel's treatment at card scale. */
+function CardLifts({ lifts, sides }: { lifts: NonNullable<AnswerCard["lifts"]>; sides?: [string, string] }) {
+  const max = Math.max(10, ...lifts.map((l) => Math.abs(l.value)));
+  const [a, b] = sides ?? ["your picks", "rivals' picks"];
+  return (
+    <div className="pb-acard-lifts">
+      <div className="pb-acard-sub">The arguments</div>
+      {lifts.map((l) => {
+        const w = (Math.min(Math.abs(l.value), max) / max) * 50;
+        const v = Math.round(l.value);
+        return (
+          <div key={l.label} className="pb-lift">
+            <span className="pb-lift-l">{l.label}</span>
+            <span className="pb-lift-bar" aria-hidden>
+              <span className="pb-lift-mid" />
+              <span
+                className={v >= 0 ? "pb-lift-pos" : "pb-lift-neg"}
+                style={v >= 0 ? { left: "50%", width: `${w}%` } : { right: "50%", width: `${w}%` }}
+              />
+            </span>
+            <span className="pb-lift-v">{liftPts(v).replace(" points", "")}</span>
+            {l.wins && l.others && (
+              <span className="pb-lift-s" title={l.tip}>
+                {l.wins} of {a} · {l.others} of {b}
+              </span>
+            )}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
 function CardView({ card }: { card: AnswerCard }) {
   const ctx = useContext(CardContext);
   const go = card.go;
@@ -665,6 +719,7 @@ function CardView({ card }: { card: AnswerCard }) {
           </span>
         </div>
       ))}
+      {card.lifts && card.lifts.length > 0 && <CardLifts lifts={card.lifts} sides={card.liftSides} />}
       {canGo && go && (
         <button
           type="button"

@@ -4,7 +4,6 @@ import { excludedWords } from "./definition_overlap";
 import { conditionKeysFor, conditionStemKey } from "./condition_groups";
 import { ENUM_TOWARD, GENERIC_AWAY } from "./rules_explorer";
 import { isWallWording } from "./wall_wording";
-import { liftLine } from "./answer_cards";
 import { commitSentence, insightInputs, pctFine, productNoun, type InsightInputs } from "./summary_insights";
 import { computeBrandSummary, type BrandSummaryView, type Insight } from "./brand_summary";
 import { computeValue, type ValueRow } from "./value";
@@ -1378,8 +1377,8 @@ export async function computeAnalysisMap(
    * summary.reasonLift objects the brief reads (byte-equal shares): its
    * |lift| top-N selection UNION every code the brief cites there - the
    * argument it wins on (reasonLift[0]), the one it loses on (the last) and
-   * the most-taught codes it loses on (taught_vs_winning). Each carries the
-   * line its answer card states. */
+   * the most-taught codes it loses on (taught_vs_winning). am12: the answer
+   * card draws these entries itself (bars + shares). */
   const pooledOpenLifts = (selected: LiftItem[]): LiftItem[] => {
     const rl = summary.reasonLift;
     const first = rl[0];
@@ -1397,12 +1396,10 @@ export async function computeAnalysisMap(
         if (x) items.push(x);
         continue;
       }
-      const role = l === first ? "it wins on" : l === last ? "it loses on" : "in the lift";
       items.push({
         label: code,
         value: (l.lift < 0 ? -1 : 1) * Math.round(Math.abs(l.lift) * 100),
         ...liftShares(l),
-        card: { label: `${brand}: argument ${role}`, value: liftLine(l), tip: `${tipC(l.wins)} picks; ${tipC(l.others)} other picks` },
       });
     }
     return items.sort((a, b) => Math.abs(b.value) - Math.abs(a.value) || a.label.localeCompare(b.label));
@@ -2040,7 +2037,8 @@ function tensionsOf(
 // am9 (2026-11-06): the citation ruling - positions carry `figures` ("The numbers": every figure a brief cites, stated on the cell whose pool it reads; the open-choice All cell states the whole brand table, the conditions, the assistants and the arguments; the doubt, leaver, hold, value, criteria, awareness and settled cells restate their views' numbers); the head-to-head All cell pools ENTITY rivals only (MECE - class matchups are stated beside it in the figures, never summed into it); leaver cells read a recommended rate.
 // am10 (2026-11-07): the answer cards - the pooled open-choice panel slims back to its own question (the target's funnel, its arguments, the picks leaving the category); every other brand's funnel line, the stage, room and question splits, every brand's lift, the vendor-supply lines, the assistants (company, assistant, mode) and the conditions moved to the brief's answer cards (answer_cards.ts). Every other cell's figures are unchanged.
 // am11 (2026-11-07): the open-choice panel's arguments render once - the target's lift rows leave the pooled cell's "The numbers" and its arguments section carries them (every code the brief cites there, from the same summary.reasonLift objects), each lift row now carries its two shares for a sub-line (every cell), and the open-choice card restates the lift lines from Position.lifts.
-const ANALYSIS_MAP_VERSION = "am11";
+// am12 (2026-11-07): the LiftItem.card text lines are gone - the brief's cell answer card now draws the position's lifts as the panel does (bars + share sub-lines). The pooled open-choice cell's lift selection (top N UNION the cited codes) and every lift's wins/others/tip are unchanged.
+const ANALYSIS_MAP_VERSION = "am12";
 export function computeAnalysisMapCached(run: Run, project: Project, request: ViewRequest = {}): Promise<AnalysisMapView | null> {
   const r = requestOf(request, false);
   return cachedView("analysis_map", ANALYSIS_MAP_VERSION, run, project, (d) => computeAnalysisMap(d, r), { setupDecision: true, judge: true }, r);

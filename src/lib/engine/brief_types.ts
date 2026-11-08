@@ -71,6 +71,14 @@ export interface AnswerCard {
   rows: { label: string; value: string; tip?: string }[];
   /** The one "go deeper" link: The Map (at cellId) or Build a table. */
   go?: { label: string; target: "map" | "metrics"; cellId?: string };
+  /** bf17 (2026-11-07): a cell card's arguments, drawn like the map panel's -
+   * a diverging bar per code (`value` = signed points) with the two shares
+   * as a sub-line ("31% of your picks · 1% of rivals' picks"); counts in
+   * `tip` only. cardText states each label, both shares and the signed
+   * points ("+30 points"). */
+  lifts?: { label: string; value: number; wins?: string; others?: string; tip?: string }[];
+  /** The sub-line's two side words ("your picks", "rivals' picks"). */
+  liftSides?: [string, string];
 }
 
 /** One scoreboard or table line. `tip` holds the counts (tooltip only). */

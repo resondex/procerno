@@ -54,8 +54,16 @@ export function liftLine(l: Lift): string {
 
 /** Everything a card's text states, as one string (RULE 1 and the harness read this). */
 export function cardText(card: AnswerCard): string {
-  return [card.crumb, card.headline, ...card.rows.flatMap((r) => [r.label, r.value])].join(" \n ");
+  return [
+    card.crumb,
+    card.headline,
+    ...card.rows.flatMap((r) => [r.label, r.value]),
+    ...(card.lifts ?? []).flatMap((l) => [l.label, l.wins ?? "", l.others ?? "", liftPoints(l.value)]),
+  ].join(" \n ");
 }
+
+/** A lift entry's signed points as the briefs print them ("+30 points"). */
+export const liftPoints = (v: number) => `${v >= 0 ? "+" : "-"}${Math.abs(Math.round(v))} points`;
 
 /* ---------------------------------- keys ---------------------------------- */
 
@@ -65,23 +73,26 @@ export const CONDITION_CARD = "card:conditions";
 
 /* ---------------------------------- cell ---------------------------------- */
 
-const cardRank = (label: string) => (label.endsWith("it wins on") ? 0 : label.endsWith("it loses on") ? 1 : 2);
-
-/** A map cell's own story: the position's claim and its (slimmed) figures. */
+/** A map cell's own story: the position's claim, its (slimmed) figures and -
+ * bf17 - its arguments, drawn as the map panel draws them (bars + shares). */
 export function cellCard(p: Position): AnswerCard {
   return {
     kind: "cell",
     crumb: p.where,
     headline: p.claim,
-    rows: [
-      ...(p.figures ?? []).map((f) => ({ label: f.label, value: f.value, ...(f.tip ? { tip: f.tip } : {}) })),
-      // am11: the open-choice cell's argument lines (they left its figures for
-      // the panel's arguments section); wins-on, loses-on, then the rest.
-      ...[...p.lifts]
-        .filter((l) => l.card)
-        .sort((a, b) => cardRank(a.card!.label) - cardRank(b.card!.label))
-        .map((l) => ({ ...l.card! })),
-    ],
+    rows: (p.figures ?? []).map((f) => ({ label: f.label, value: f.value, ...(f.tip ? { tip: f.tip } : {}) })),
+    ...(p.lifts.length
+      ? {
+          lifts: p.lifts.map((l) => ({
+            label: l.label,
+            value: l.value,
+            ...(l.wins ? { wins: l.wins } : {}),
+            ...(l.others ? { others: l.others } : {}),
+            ...(l.tip ? { tip: l.tip } : {}),
+          })),
+          ...(p.liftSides ? { liftSides: p.liftSides } : {}),
+        }
+      : {}),
     go: { label: "Open this contest on the map", target: "map", cellId: p.cellId },
   };
 }
