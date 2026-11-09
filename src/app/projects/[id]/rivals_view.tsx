@@ -184,10 +184,14 @@ function DossierPanel({ d, kind, onClose }: { d: Dossier; kind: PanelKind; onClo
  * toggle opens everything beneath at once - the situation buckets, each with
  * its own reasons a step further in. Themes render only when at least one has
  * buckets; otherwise (keyless, a failed theme pass, or an older payload) the
- * flat list renders exactly as before.
+ * flat list renders exactly as before. The list leads with the biggest themes
+ * (THEME_TOP; model size priors measured as non-binding) and folds the tail
+ * behind one toggle, so the full fall-out stays reachable.
  */
+const THEME_TOP = 8;
 function ReasonList({ flat, themes }: { flat: { label: string; share: string }[]; themes: DossierTheme[] }) {
   const [open, setOpen] = useState<Set<string>>(() => new Set());
+  const [showAll, setShowAll] = useState(false);
   if (!themes.some((t) => (t.buckets ?? []).length > 0)) {
     return (
       <>
@@ -204,9 +208,11 @@ function ReasonList({ flat, themes }: { flat: { label: string; share: string }[]
       else next.add(label);
       return next;
     });
+  const shown = showAll ? themes : themes.slice(0, THEME_TOP);
+  const folded = themes.length - shown.length;
   return (
     <>
-      {themes.map((t, ti) => {
+      {shown.map((t, ti) => {
         const buckets = t.buckets ?? [];
         const tk = `${ti}:${t.label}`;
         const isOpen = open.has(tk);
@@ -253,6 +259,16 @@ function ReasonList({ flat, themes }: { flat: { label: string; share: string }[]
           </div>
         );
       })}
+      {(folded > 0 || (showAll && themes.length > THEME_TOP)) && (
+        <button
+          type="button"
+          onClick={() => setShowAll((v) => !v)}
+          aria-expanded={showAll}
+          className="mt-1.5 select-none text-[11.5px] text-ink-3 hover:text-ink-2"
+        >
+          {showAll ? "Show the biggest only ▾" : `+ ${folded} smaller reasons ▸`}
+        </button>
+      )}
     </>
   );
 }
