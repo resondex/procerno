@@ -529,7 +529,7 @@ type CardCtxT = {
 };
 const CardContext = createContext<CardCtxT | null>(null);
 
-const KIND_LABEL: Record<AnswerCard["kind"], string> = { cell: "On the map", brand: "Brand", engines: "The assistants", condition: "The conditions" };
+const KIND_LABEL: Record<AnswerCard["kind"], string> = { cell: "On the map", brand: "Brand", engines: "The assistants", condition: "The reasons" };
 
 /** Number tokens exactly as the engine reads them (brief.ts NUMBER_TOKEN). */
 const NUMBER_TOKEN = /\d+(?:\.\d+)?%|[+-]\d+ (?:pts|points)/g;

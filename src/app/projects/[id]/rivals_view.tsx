@@ -42,6 +42,9 @@ function writePref(key: string | null, value: string) {
 const DOSS_CSS = `
 .dz-root{ --dz-pos:#0d9488; --dz-neg:#be185d; --dz-amber:#a16207; }
 @media (prefers-color-scheme: dark){ .dz-root{ --dz-pos:#14a08f; --dz-neg:#d2497e; --dz-amber:#d0a03a; } }
+/* These mirror the map's pa-yours / pa-theirs verdict colors (light and dark). */
+.dz-root{ --dz-yours:#0d9488; --dz-theirs:#be185d; }
+@media (prefers-color-scheme: dark){ .dz-root{ --dz-yours:#14a08f; --dz-theirs:#d2497e; } }
 .dz-root{ --dz-amber-bg:color-mix(in srgb, var(--dz-amber) 10%, var(--surface)); }
 @keyframes dz-slide{ from{ transform:translateX(100%) } to{ transform:none } }
 @keyframes dz-fade{ from{ opacity:0 } to{ opacity:1 } }
@@ -135,24 +138,48 @@ function DossierPanel({ d, kind, onClose }: { d: Dossier; kind: PanelKind; onClo
         )}
         {kind === "routes" && (
           <>
-            <h2 className="mb-2.5 max-w-[48ch] text-[1.15rem] font-semibold leading-snug text-ink [text-wrap:balance]">Every reason that points buyers to it - and back to you</h2>
+            <h2 className="mb-2.5 max-w-[48ch] text-[1.15rem] font-semibold leading-snug text-ink [text-wrap:balance]">Every reason the AI states - to pick you, and to leave you for {d.name}</h2>
             <p className="text-[13px] leading-relaxed text-ink-2">Most often stated first. The two lists are read on different questions, so their shares never add up across them.</p>
-            {(d.routesAll.length > 0 || d.routesDefault) && (
-              <>
-                <div className={ph3}>Reasons pointing to it</div>
-                <p className="mb-1 text-[12px] leading-snug text-ink-3">Each share is of the questions where the AI gives buyers any reason to leave you.</p>
-                <ReasonList flat={d.routesAll ?? []} themes={d.routesThemes ?? []} />
-                {d.routesDefault && <p className="mt-2 text-[12.5px] italic leading-snug text-ink-2">{d.routesDefault}</p>}
-              </>
-            )}
-            {((d.routesBack ?? []).length > 0 || d.routesBackDefault) && (
-              <>
-                <div className={ph3}>Reasons pointing back to you</div>
-                <p className="mb-1 text-[12px] leading-snug text-ink-3">Each share is of the questions where the AI gives buyers any reason to pick you.</p>
-                <ReasonList flat={d.routesBack ?? []} themes={d.routesBackThemes ?? []} />
-                {d.routesBackDefault && <p className="mt-2 text-[12.5px] italic leading-snug text-ink-2">{d.routesBackDefault}</p>}
-              </>
-            )}
+            {/* Same two-column shape as the map's position panel (you on the
+                left, the rival on the right); a side with nothing reads "None
+                measured" so the grid never collapses to one column. */}
+            <div className="mt-4 grid gap-4 sm:grid-cols-2">
+              {(
+                [
+                  [
+                    "Reasons to pick you",
+                    "var(--dz-yours)",
+                    "Each share is of the questions where the AI gives buyers any reason to pick you.",
+                    d.routesBack ?? [],
+                    d.routesBackThemes ?? [],
+                    d.routesBackDefault,
+                  ],
+                  [
+                    "Reasons to leave you",
+                    "var(--dz-theirs)",
+                    "Each share is of the questions where the AI gives buyers any reason to leave you.",
+                    d.routesAll ?? [],
+                    d.routesThemes ?? [],
+                    d.routesDefault,
+                  ],
+                ] as const
+              ).map(([title, color, note, flat, themes, dflt]) => (
+                <div key={title} className="min-w-0">
+                  <h4 className="mb-1.5 text-[13px] font-semibold" style={{ color }}>
+                    {title}
+                  </h4>
+                  {flat.length === 0 && !dflt ? (
+                    <p className="py-1 text-[13px] text-ink-3">None measured</p>
+                  ) : (
+                    <>
+                      <p className="mb-1 text-[12px] leading-snug text-ink-3">{note}</p>
+                      <ReasonList flat={flat} themes={themes} />
+                      {dflt && <p className="mt-2 text-[12.5px] italic leading-snug text-ink-2">{dflt}</p>}
+                    </>
+                  )}
+                </div>
+              ))}
+            </div>
           </>
         )}
         {kind === "supply" && (
@@ -233,7 +260,7 @@ function ReasonList({ flat, themes }: { flat: { label: string; share: string }[]
               </button>
             )}
             {isOpen && (
-              <div className="mb-1 ml-4 border-l border-line pl-3">
+              <div className="mb-1 ml-2 border-l border-line pl-2.5">
                 {buckets.map((b, i) => (
                   <div key={`${i}:${b.scenario}:${b.label}`}>
                     <Fig
@@ -246,7 +273,7 @@ function ReasonList({ flat, themes }: { flat: { label: string; share: string }[]
                       value={b.share}
                     />
                     {(b.members ?? []).length > 0 && (
-                      <div className="ml-4 text-[12px] [&>div]:py-1 [&>div]:text-[12px] [&_span:first-child]:text-ink-3">
+                      <div className="ml-2 text-[12px] [&>div]:py-1 [&>div]:text-[12px] [&_span:first-child]:text-ink-3">
                         {(b.members ?? []).map((m, k) => (
                           <Fig key={`${k}:${m.label}`} label={`"${m.label}"`} value={m.share} />
                         ))}
@@ -494,7 +521,7 @@ export default function RivalsSection({
       {matchup && (
         <section className="card grid gap-2 p-6">
           <h3 className="section-label">When does each side win?</h3>
-          <p className="text-[12px] text-ink-3">The boundaries the AI states when asked to pick between the two. Click a condition to read the answers that state it.</p>
+          <p className="text-[12px] text-ink-3">The boundaries the AI states when asked to pick between the two. Click a reason to read the answers that state it.</p>
           <Boundaries row={matchup} brand={view.brand} onOpen={setOpened} bare />
         </section>
       )}

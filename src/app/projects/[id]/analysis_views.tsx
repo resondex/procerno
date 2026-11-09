@@ -894,12 +894,12 @@ function PositionPanel({
 
         {(p.toward.length > 0 || p.away.length > 0 || p.cellId === "chooses:open:all") && (
           <>
-            <h3 className={h3}>The conditions</h3>
+            <h3 className={h3}>The reasons</h3>
             <div className="grid gap-4 sm:grid-cols-2">
               {(
                 [
-                  ["Route to you", p.toward, "var(--pa-yours)"],
-                  ["Route away", p.away, "var(--pa-theirs)"],
+                  ["Reasons to pick you", p.toward, "var(--pa-yours)"],
+                  ["Reasons to leave you", p.away, "var(--pa-theirs)"],
                 ] as const
               ).map(([title, list, color]) => (
                 <div key={title}>
@@ -932,13 +932,13 @@ function PositionPanel({
             {/* The pooled open-choice position is the condition ledger's home
                 (2026-11-05): the full decision-rules explorer, every question
                 type, mounts here - the lists above are its top lines. am10
-                (2026-11-07): it stays collapsed behind "See every condition" so
+                (2026-11-07): it stays collapsed behind "See every reason" so
                 the panel reads as its own story; the brief's condition card
                 links here. */}
             {p.cellId === "chooses:open:all" && (
               <details className="mt-4">
                 <summary className="cursor-pointer text-[13px] font-medium text-primary underline decoration-dotted underline-offset-2">
-                  See every condition
+                  See every reason
                 </summary>
                 <div className="mt-3 grid gap-5">
                   <RulesSection

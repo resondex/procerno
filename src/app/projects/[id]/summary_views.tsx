@@ -173,7 +173,7 @@ const KIND_LABEL: Record<Insight["kind"], string> = {
   question: "One question",
   value: "Value",
   switching: "Switching",
-  condition: "The conditions",
+  condition: "The reasons",
   leak: "Leaving the category",
 };
 

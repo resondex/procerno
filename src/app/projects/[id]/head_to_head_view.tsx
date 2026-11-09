@@ -132,13 +132,13 @@ type OpenAnswers = (target: AnswersTarget) => void;
  * group routes to. */
 const groupTarget = (g: ConditionGroup, routes: string, matchup: string, heading: string, bare = false): AnswersTarget => ({
   title: `${heading}: ${g.label}`,
-  subtitle: bare ? `${matchup} - answers stating this condition.` : `${matchup} - ${
+  subtitle: bare ? `${matchup} - answers stating this reason.` : `${matchup} - ${
     g.ids.length < g.n
       ? `a sample of ${g.ids.length} of the ${g.n} answers`
       : g.n === 1
         ? "the one answer"
         : `the ${g.n} answers`
-  } stating this condition.`,
+  } stating this reason.`,
   ids: g.ids,
   highlight: [g.label, routes],
 });
@@ -232,7 +232,7 @@ export function Boundaries({ row, brand, onOpen, bare = false }: { row: HeadToHe
       <div className="mt-2 grid gap-3 sm:grid-cols-2">
         <Direction
           label="You win when"
-          tip={`Conditions under which the AI routes the pick to ${brand}.${bare ? "" : " The number is how many answers state it."}`}
+          tip={`Reasons the AI states for routing the pick to ${brand}.${bare ? "" : " The number is how many answers state it."}`}
           groups={c.you}
           more={c.youMore}
           routes={brand}
@@ -242,7 +242,7 @@ export function Boundaries({ row, brand, onOpen, bare = false }: { row: HeadToHe
         />
         <Direction
           label="You lose when"
-          tip={`Conditions under which the AI routes the pick to ${row.rival}.${bare ? "" : " The number is how many answers state it."}`}
+          tip={`Reasons the AI states for routing the pick to ${row.rival}.${bare ? "" : " The number is how many answers state it."}`}
           groups={c.rival}
           more={c.rivalMore}
           routes={row.rival}
@@ -322,7 +322,7 @@ function KindSection({
       {bounded.length > 0 && (
         <details className="text-[13px]">
           <summary className="cursor-pointer text-ink-2">When does each side win? The AI&apos;s stated boundaries</summary>
-          <p className="mt-2 text-[12px] text-ink-3">Click a condition to read the answers that state it.</p>
+          <p className="mt-2 text-[12px] text-ink-3">Click a reason to read the answers that state it.</p>
           <div className="mt-3 grid gap-3">
             {bounded.map((r) => (
               <Boundaries key={r.key} row={r} brand={view.brand} onOpen={onOpen} />
