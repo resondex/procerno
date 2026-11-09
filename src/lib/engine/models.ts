@@ -85,3 +85,9 @@ export const ROSTER_MODEL = process.env.ROSTER_MODEL ?? "gpt-6-sol";
  * back to the composed memo) since the call is Anthropic-only. Part of the
  * written-memo cache key. */
 export const BRIEF_WRITER_MODEL = pick("BRIEF_WRITER_MODEL", "claude-opus-5-5");
+/** The dossier slide-over's reason themes (dossiers.ts, do4, 2026-11-09):
+ * two bounded grouping calls per compute (per buying situation, then across
+ * situations) over the run's condition-group labels. A bounded judgment job,
+ * so luna; OpenAI-only (the call path is the OpenAI client). Part of the
+ * per-call theme cache key. */
+export const DOSSIER_THEME_MODEL = process.env.DOSSIER_THEME_MODEL ?? "gpt-6-luna";

@@ -323,6 +323,10 @@ const topNamed = (m: Map<string, NamedCount>, cap: number): NamedCount[] =>
  * rollup unions them, since member groups overlap at the question level. */
 export interface RulesCapture {
   cellSets?: Map<string, string[]>;
+  /** Per served group id, up to 3 wordings: the label, then the next most
+   * frequent distinct member wordings (labelOf's order) - evidence of what
+   * the label stands for. */
+  surfaces?: Map<string, string[]>;
 }
 
 export async function computeRules(data: ViewData, request: ViewRequest = {}, capture?: RulesCapture): Promise<RulesView> {
@@ -562,6 +566,20 @@ export async function computeRules(data: ViewData, request: ViewRequest = {}, ca
         return;
       }
       if (capture?.cellSets) capture.cellSets.set(idOf(a), [...a.cells]);
+      if (capture?.surfaces) {
+        const ordered = [...a.surfaces.entries()].sort((x, y) => y[1] - x[1] || x[0].length - y[0].length || (x[0] < y[0] ? -1 : 1)).map(([w]) => w);
+        const label = labelOf(a.surfaces);
+        const seen = new Set([label.trim().toLowerCase()]);
+        const out = [label];
+        for (const w of ordered) {
+          if (out.length >= 3) break;
+          const k = w.trim().toLowerCase();
+          if (seen.has(k)) continue;
+          seen.add(k);
+          out.push(w);
+        }
+        capture.surfaces.set(idOf(a), out);
+      }
       outGroups.push({
         id: idOf(a),
         cond: shortHash(a.ck),

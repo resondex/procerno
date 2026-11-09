@@ -62,7 +62,7 @@ function Section({ title, children }: { title: string; children: React.ReactNode
   );
 }
 
-function Fig({ label, value }: { label: string; value: string }) {
+function Fig({ label, value }: { label: React.ReactNode; value: string }) {
   return (
     <div className="flex justify-between gap-4 border-b border-dashed border-line py-1.5 text-[13px]">
       <span className="min-w-0 text-ink-2">{label}</span>
@@ -179,15 +179,16 @@ function DossierPanel({ d, kind, onClose }: { d: Dossier; kind: PanelKind; onClo
 }
 
 /**
- * One side's reasons in the slide-over. do3 payloads carry themes (a looser
- * second grouping over the reasons): a theme row reads like a reason row, and
- * one with related reasons opens them beneath. Themes render only when at
- * least one theme gathers more than one reason - otherwise (keyless, an
- * embedding failure, or a do2 payload) the flat list renders exactly as before.
+ * One side's reasons in the slide-over. Themes come per buying situation and
+ * are merged across situations: a theme row reads like a reason row, and its
+ * toggle opens everything beneath at once - the situation buckets, each with
+ * its own reasons a step further in. Themes render only when at least one has
+ * buckets; otherwise (keyless, a failed theme pass, or an older payload) the
+ * flat list renders exactly as before.
  */
 function ReasonList({ flat, themes }: { flat: { label: string; share: string }[]; themes: DossierTheme[] }) {
   const [open, setOpen] = useState<Set<string>>(() => new Set());
-  if (!themes.some((t) => (t.members ?? []).length > 0)) {
+  if (!themes.some((t) => (t.buckets ?? []).length > 0)) {
     return (
       <>
         {flat.map((r) => (
@@ -205,27 +206,47 @@ function ReasonList({ flat, themes }: { flat: { label: string; share: string }[]
     });
   return (
     <>
-      {themes.map((t) => {
-        const members = t.members ?? [];
-        const related = members.length - 1;
-        const isOpen = open.has(t.label);
+      {themes.map((t, ti) => {
+        const buckets = t.buckets ?? [];
+        const tk = `${ti}:${t.label}`;
+        const isOpen = open.has(tk);
+        const situations = new Set(buckets.map((b) => b.scenario)).size;
+        const related = buckets.length === 1 ? Math.max((buckets[0].members ?? []).length, 1) : buckets.length;
+        const closed = situations > 1 ? `Across ${situations} situations` : `+ ${related} related`;
         return (
-          <div key={t.label}>
+          <div key={tk}>
             <Fig label={`"${t.label}"`} value={t.share} />
-            {related > 0 && (
+            {buckets.length > 0 && (
               <button
                 type="button"
-                onClick={() => toggle(t.label)}
+                onClick={() => toggle(tk)}
                 aria-expanded={isOpen}
                 className="mt-0.5 select-none text-[11.5px] text-ink-3 hover:text-ink-2"
               >
-                {isOpen ? "Hide related" : `+ ${related} related`} {isOpen ? "▾" : "▸"}
+                {isOpen ? "Hide ▾" : `${closed} ▸`}
               </button>
             )}
             {isOpen && (
               <div className="mb-1 ml-4 border-l border-line pl-3">
-                {members.map((m, i) => (
-                  <Fig key={`${i}:${m.label}`} label={`"${m.label}"`} value={m.share} />
+                {buckets.map((b, i) => (
+                  <div key={`${i}:${b.scenario}:${b.label}`}>
+                    <Fig
+                      label={
+                        <>
+                          {`"${b.label}"`}
+                          <span className="text-ink-3">{` · ${b.scenario}`}</span>
+                        </>
+                      }
+                      value={b.share}
+                    />
+                    {(b.members ?? []).length > 0 && (
+                      <div className="ml-4 text-[12px] [&>div]:py-1 [&>div]:text-[12px] [&_span:first-child]:text-ink-3">
+                        {(b.members ?? []).map((m, k) => (
+                          <Fig key={`${k}:${m.label}`} label={`"${m.label}"`} value={m.share} />
+                        ))}
+                      </div>
+                    )}
+                  </div>
                 ))}
               </div>
             )}

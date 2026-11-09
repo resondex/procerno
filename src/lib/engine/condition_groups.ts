@@ -100,10 +100,9 @@ export async function conditionKeyMap(
 }
 
 /**
- * The exact leader pass shared by the condition grouping and the theme
- * rollup: embed the distinct lowercased wordings (count-desc, then
- * lexicographic), join the nearest centroid within `tau`, else found a
- * cluster; centroids track the running mean. Keys are `e:<leader wording>`.
+ * The exact leader pass behind the condition grouping: embed the distinct
+ * lowercased wordings (count-desc, then lexicographic), join the nearest
+ * centroid within `tau`, else found a cluster; centroids track the running mean. Keys are `e:<leader wording>`.
  * Null when no OpenAI key is present or the call fails - the caller picks
  * its own fallback.
  */
@@ -419,131 +418,4 @@ export async function conditionKeysFor(
   return out;
 }
 
-/** The theme rollup's tau (2026-11-08, the dossier slide-over): tau 0.55
- * deliberately keeps same-theme-but-distinct conditions apart, so a rival's
- * full list of reasons reads ungrouped; this second level gathers the served
- * GROUP LABELS into themes for that one surface, by AVERAGE-LINK clustering
- * (averageLinkKeys) - not the leader pass. Calibrated on the fixture's AmEx
- * run, Capital One's 51 away groups. The leader pass first (0.35 / 0.40 /
- * 0.45 / 0.50 -> 4 / 13 / 22 / 38 themes) failed: its running-mean centroid
- * goes generic as tau loosens, so 0.40 made a 23-member fee umbrella that
- * swallowed flat-rate, issuer switches and credit level (and a 58-member
- * umbrella toward you). Average-link (0.30 / 0.35 / 0.40 / 0.45 / 0.50 ->
- * 21 / 27 / 35 / 41 / 48 themes; largest toward-you theme 18 / 12 / 7 / 6 /
- * 4 of 150): flat-rate stays out of the fee family at every tau. 0.35 is the
- * loosest with clean families (the fee-too-high wordings together, dining
- * together, lounges, the premium-without-credits case); 0.30 starts filing
- * Platinum replacement, acceptance backups and a service complaint under the
- * annual fee. The 6-12 target is not reachable with clean families: short
- * labels sit far apart in embedding space, so the fee family still reads as
- * two themes ("don't want to pay an annual fee" / "lower fees"). */
-export const CONDITION_THEME_TAU = Number(process.env.CONDITION_THEME_TAU ?? 0.35);
-
-/**
- * Theme keys over a weighted set of condition GROUP labels (label -> weight,
- * e.g. the group's distinct questions): average-link clustering at
- * CONDITION_THEME_TAU (averageLinkKeys), cached like conditionKeysFor (scope "rules:themes" by
- * convention; the tau rides the cache key). The fallback - no OpenAI key, or
- * the embeddings call fails - is IDENTITY (each label its own theme, keyed
- * `i:<label>`), so the surface reads exactly as the flat list; it is never
- * cached. Only the dossier slide-over reads it; every other surface keeps the
- * tau 0.55 groups as they are.
- */
-export async function conditionThemeKeysFor(
-  weights: Map<string, number>,
-  opts: { purpose?: string; cache?: ConditionKeysCache | null } = {}
-): Promise<Map<string, string>> {
-  const purpose = opts.purpose ?? "views:conditions";
-  const identity = () => new Map([...weights.keys()].map((l) => [l, `i:${l}`] as [string, string]));
-  if (weights.size === 0) return new Map();
-  if (!process.env.OPENAI_API_KEY) return identity();
-  const { read, write } = keyMapCache(opts.cache, purpose, "S", CONDITION_THEME_TAU, new Set());
-  const hit = await read();
-  if (hit && [...weights.keys()].every((l) => hit.has(l))) {
-    return new Map([...weights.keys()].map((l) => [l, hit.get(l)!] as [string, string]));
-  }
-  const m = await averageLinkKeys(weights, CONDITION_THEME_TAU, purpose);
-  if (!m) return identity();
-  await write(m).catch(() => {});
-  return m;
-}
-
-/**
- * The theme pass's own clustering (2026-11-08): AVERAGE-LINK agglomerative
- * over the label embeddings, not the leader pass. The leader pass's
- * running-mean centroid goes generic as tau loosens - the heaviest cluster
- * becomes an umbrella that absorbs flat-rate, issuer switches and credit level
- * (the 0.40 calibration) - so themes need a criterion that weighs every
- * member. Algorithm: embed the distinct lowercased labels (weight-desc, then
- * lexicographic - the embed order); start each label as its own cluster;
- * repeatedly merge the PAIR of clusters with the highest average pairwise
- * cosine similarity while that average is >= tau (ties: the lowest cluster
- * indices); stop when no pair clears tau. Theme key = `e:<heaviest member
- * label>` (by weight; ties by embed order). O(n^3) worst case on ~150-300
- * labels; deterministic given the vectors. Null when no key / on failure.
- */
-async function averageLinkKeys(weights: Map<string, number>, tau: number, purpose: string): Promise<Map<string, string> | null> {
-  if (!process.env.OPENAI_API_KEY) return null;
-  const byLower = new Map<string, number>();
-  for (const [c, n] of weights) {
-    const k = c.toLowerCase();
-    byLower.set(k, (byLower.get(k) ?? 0) + n);
-  }
-  const phrases = [...byLower.keys()].sort((a, b) => byLower.get(b)! - byLower.get(a)! || (a < b ? -1 : 1));
-  try {
-    const vecs: Float32Array[] = new Array(phrases.length);
-    let embedTokens = 0;
-    for (let k = 0; k < phrases.length; k += 2000) {
-      const chunk = phrases.slice(k, k + 2000);
-      const res = await openaiClient().embeddings.create({ model: EMBED_MODEL, input: chunk });
-      embedTokens += res.usage?.total_tokens ?? 0;
-      for (const d of res.data) vecs[k + d.index] = normalize(Float32Array.from(d.embedding));
-    }
-    logCost({ model: EMBED_MODEL, inputTokens: embedTokens, outputTokens: 0, purpose });
-
-    const n = phrases.length;
-    // sum[i][j] = sum of pairwise similarities between clusters i and j.
-    const sum: Float64Array[] = Array.from({ length: n }, () => new Float64Array(n));
-    for (let i = 0; i < n; i++) for (let j = i + 1; j < n; j++) sum[i][j] = sum[j][i] = dot(vecs[i], vecs[j]);
-    const members: number[][] = phrases.map((_, i) => [i]);
-    const alive = new Array<boolean>(n).fill(true);
-    for (;;) {
-      let bi = -1;
-      let bj = -1;
-      let best = -Infinity;
-      for (let i = 0; i < n; i++) {
-        if (!alive[i]) continue;
-        for (let j = i + 1; j < n; j++) {
-          if (!alive[j]) continue;
-          const avg = sum[i][j] / (members[i].length * members[j].length);
-          if (avg > best) {
-            best = avg;
-            bi = i;
-            bj = j;
-          }
-        }
-      }
-      if (bi < 0 || best < tau) break;
-      // Merge bj into bi: linkage sums add.
-      for (let k = 0; k < n; k++) {
-        if (!alive[k] || k === bi || k === bj) continue;
-        sum[bi][k] = sum[k][bi] = sum[bi][k] + sum[bj][k];
-      }
-      members[bi] = members[bi].concat(members[bj]);
-      alive[bj] = false;
-    }
-    const groupOf = new Map<string, string>();
-    for (let i = 0; i < n; i++) {
-      if (!alive[i]) continue;
-      // Embed order is weight-desc, so the lowest index is the heaviest member.
-      const lead = phrases[Math.min(...members[i])];
-      for (const m of members[i]) groupOf.set(phrases[m], `e:${lead}`);
-    }
-    const out = new Map<string, string>();
-    for (const c of weights.keys()) out.set(c, groupOf.get(c.toLowerCase())!);
-    return out;
-  } catch (e) {
-    console.warn(`condition theme embeddings failed, identity fallback: ${e instanceof Error ? e.message : e}`);
-    return null;
-  }
-}
+// The dossier slide-over's embedding theme pass was replaced by the LLM theme pass in dossiers.ts (2026-11-09).
