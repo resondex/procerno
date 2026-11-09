@@ -735,6 +735,11 @@ export const pgStore: Store = {
       WHERE key LIKE ${prefix + "%"} AND key NOT LIKE ${keep + "%"}`;
   },
 
+  async cacheDelete(key) {
+    const sql = await db();
+    await sql`DELETE FROM llm_cache WHERE key = ${key}`;
+  },
+
   async labelsRevisionForRun(runId) {
     const sql = await db();
     const rows = await sql`SELECT count(*)::int AS n,

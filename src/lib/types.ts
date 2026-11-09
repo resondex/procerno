@@ -905,6 +905,9 @@ export interface Store {
   /** Delete cache rows matching prefix except those matching keep — used to
    * drop a run's stale slice snapshots when its cache key generation moves. */
   cachePurge(prefix: string, keep: string): Promise<void>;
+  /** Delete exactly one cache row by key (no LIKE matching). cachePurge cannot
+   * do this: its `keep` is a NOT LIKE prefix, so keep "" spares every row. */
+  cacheDelete(key: string): Promise<void>;
   saveSetupDraft(input: {
     id: string | null;
     userId: string | null;

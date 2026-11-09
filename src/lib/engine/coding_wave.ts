@@ -24,6 +24,7 @@
  */
 import { store } from "../store";
 import { withCostContext } from "../cost_log";
+import { purgeRunRevision } from "./run_revision";
 import type { Intent, Project, ResponseMetaRow } from "../types";
 import {
   buildCoderRequest,
@@ -209,6 +210,8 @@ export async function codeWaveChunk(opts: {
     }
   }
   await Promise.all(Array.from({ length: Math.min(CONCURRENCY, todo.length) }, worker));
+  // Rows were written: drop the memoized revision so views re-key now, not in 5 min.
+  if (coded > 0) await purgeRunRevision(runId);
 
   logCoderGpuEstimate("chunk", (lastEnd - gpu0) / 3_600_000, {
     runId, deployment: CODER_DEPLOYMENT, models, coded, attempts,

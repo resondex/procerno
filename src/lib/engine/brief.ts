@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import { matchKey } from "../brand_key";
 import { store } from "../store";
+import { cachedRunRevision } from "./run_revision";
 import { buildResolver } from "./brand_resolve";
 import { computeBrandSummary, type BrandSummaryView, type SummaryBrand } from "./brand_summary";
 import { computeAnalysisMap, type AnalysisMapDebug, type MapCellStat } from "./analysis_map";
@@ -1953,7 +1954,7 @@ export async function computeBriefCached(run: Run, project: Project, request: Br
   if (sub && sub !== matchKey(project.brand)) r.subject = request.subject!.trim();
   const source = await store.getCodesSource(project.id);
   if (!source) return null;
-  const rev = await store.runDataRevision(run.id);
+  const rev = await cachedRunRevision(run.id);
   const setupDecision = await store.getSetupDecision(project.id);
   const extras = [setupDecision, `ctx:${CONTEXT_JUDGE_VERSION}:${CONTEXT_JUDGE_MODEL}`];
   const projectHash = createHash("sha256")
@@ -1966,7 +1967,7 @@ export async function computeBriefCached(run: Run, project: Project, request: Br
   if (r.subject !== undefined) key += `:sub:${createHash("sha256").update(matchKey(r.subject)).digest("hex").slice(0, 12)}`;
   if (r.engines !== undefined) key += `:eng:${createHash("sha256").update(r.engines.join(",")).digest("hex").slice(0, 12)}`;
   if (rev !== null) {
-    const raw = await store.cacheGet(key, 24 * 3600 * 1000);
+    const raw = await store.cacheGet(key, 183 * 24 * 3600 * 1000);
     if (raw) return JSON.parse(raw) as BriefView;
   }
   const data = await loadViewData(run, project, { setupDecision: true, judge: true });

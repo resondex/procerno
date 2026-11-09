@@ -1028,6 +1028,10 @@ export const sqliteStore: Store = {
       .run(prefix + "%", keep + "%");
   },
 
+  async cacheDelete(key) {
+    getDb().prepare("DELETE FROM llm_cache WHERE key = ?").run(key);
+  },
+
   async labelsRevisionForRun(runId) {
     const row = getDb()
       .prepare(

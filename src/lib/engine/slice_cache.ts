@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import { store } from "@/lib/store";
+import { cachedRunRevision } from "./run_revision";
 import {
   computeRunMetricsFromData,
   loadRunData,
@@ -32,7 +33,7 @@ import type { Project, Run, RunMetrics } from "@/lib/types";
  * only complete runs cache, keyed on the labels revision.
  */
 const L1_TTL_MS = 10 * 60 * 1000;
-const L2_TTL_MS = 24 * 3600 * 1000;
+const L2_TTL_MS = 183 * 24 * 3600 * 1000;
 const L1_MAX = 500;
 const l1 = new Map<string, { at: number; m: RunMetrics }>();
 
@@ -66,7 +67,7 @@ export async function computeSlicesCached(
   queries: SliceQuery[]
 ): Promise<Record<string, RunMetrics>> {
   const dataRev =
-    (await store.runDataRevision(run.id)) ??
+    (await cachedRunRevision(run.id)) ??
     (run.status === "complete" ? await store.labelsRevisionForRun(run.id) : null);
   // No fingerprint: compute fresh and cache nothing.
   if (dataRev === null) {

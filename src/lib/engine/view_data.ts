@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import { store } from "../store";
 import { wilson } from "./metrics";
+import { cachedRunRevision } from "./run_revision";
 import { viewsOf, type ViewKey } from "./views";
 import { CONTEXT_JUDGE_MODEL, CONTEXT_JUDGE_VERSION, primeContextVerdicts } from "./context_judge";
 import { ENGINES, engineFacets, type EngineFacets } from "./providers";
@@ -221,7 +222,7 @@ export async function cachedView<T>(
 ): Promise<T | null> {
   const source = await store.getCodesSource(project.id);
   if (!source) return null;
-  const rev = await store.runDataRevision(run.id);
+  const rev = await cachedRunRevision(run.id);
   // A view that reads a project record keys on it too (it can change without a prompt changing).
   const extras: (string | null)[] = [];
   if (opts.setupDecision) extras.push(await store.getSetupDecision(project.id));
@@ -240,7 +241,7 @@ export async function cachedView<T>(
   if (request.engines !== undefined)
     key += `:eng:${createHash("sha256").update(request.engines.join(",")).digest("hex").slice(0, 12)}`;
   if (rev !== null) {
-    const raw = await store.cacheGet(key, 24 * 3600 * 1000);
+    const raw = await store.cacheGet(key, 183 * 24 * 3600 * 1000);
     if (raw) return JSON.parse(raw) as T;
   }
   const data = await loadViewData(run, project, opts);
