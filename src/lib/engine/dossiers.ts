@@ -157,32 +157,45 @@ function headlineOf(b: SummaryBrand, all: SummaryBrand[], f: ReturnType<typeof f
 
 /** The pseudo-situation for cells asked across all buyers (no room). */
 const EVERY_BUYER = "Every buyer";
-const THEME_VERSION = "dt3";
+const THEME_VERSION = "dt4";
 const THEME_TTL_MS = 183 * 24 * 3600 * 1000;
 const THEME_CONCURRENCY = 6;
+
+/** Which way the pooled reasons point. The pass runs once per side (dt4), so
+ * a theme's name is coined from one direction's members only - the shared-pool
+ * version named the axis both sides pivot on, and the identical label then
+ * read as a contradiction across the two columns. */
+export type ThemeSide = "toward" | "away";
+
+const sidePhrase = (side: ThemeSide) =>
+  side === "toward" ? "points the buyer toward the client's product" : "points the buyer away from the client's product, to a rival";
 
 const THEME_REPLY =
   'Reply with ONLY a JSON object {"themes": [{"name": "...", "members": [indices]}]}. ' +
   "Name each theme in short plain buyer language, two to five words, with no digits and no counts. " +
-  "Every index must appear in exactly one theme.";
+  "A theme's name states what its conditions say, keeping their direction and the qualifier that carries " +
+  "it - how much, with or without a cost, wanted or avoided - never the bare subject area the conditions " +
+  "share. Every index must appear in exactly one theme.";
 
-export const SCENARIO_THEME_SYSTEM =
+export const scenarioThemeSystem = (side: ThemeSide) =>
   "You group short conditions into themes. Each condition is a reason a buyer states, or a circumstance " +
-  "a buyer describes, when an AI assistant points the buyer toward or away from a product. All the " +
+  `a buyer describes, when an AI assistant ${sidePhrase(side)}. All the ` +
   "conditions you are given come from one buying situation, listed most common first. Beneath a condition, " +
   "sample lines show what buyers actually said under it; judge the condition's meaning from them. Group conditions " +
   "that express the same underlying reason, even when they are worded differently. Conditions that state " +
   "the same decision or stance in different words belong together; group by the buyer's underlying reason, " +
   "never by the product area the words mention. A condition that shares no reason with any other stays in " +
-  "a theme of its own. Typical output is three to ten themes. " +
+  "a theme of its own - never gather leftovers into one broad theme, since a name wide enough to cover " +
+  "different reasons marks a wrong grouping. Typical output is three to ten themes. " +
   THEME_REPLY;
 
-export const TOTAL_THEME_SYSTEM =
+export const totalThemeSystem = (side: ThemeSide) =>
   "You merge themes across buying situations. Each theme gathers reasons buyers state when an AI assistant " +
-  "points them toward or away from a product, and each belongs to one buying situation; they are listed " +
+  `${sidePhrase(side)}, and each belongs to one buying situation; they are listed ` +
   "most common first, each with the conditions it holds. Merge themes that express the same underlying " +
   "reason across situations into one theme. Judge each merge by what the member conditions say, not by " +
-  "the theme's name. A theme whose reason is specific to its own situation, or that cannot merge anywhere, " +
+  "the theme's name; a merge is wrong when the members state different reasons, even when one name could " +
+  "cover both. A theme whose reason is specific to its own situation, or that cannot merge anywhere, " +
   "stays a theme of its own. When the list is large, typical output is six to twelve themes. " +
   THEME_REPLY;
 
@@ -327,6 +340,7 @@ const slKey = (situation: string, label: string) => `${situation}\u0000${label}`
 async function themeReasons(
   cells: Map<string, Map<string, Set<string>>>,
   samples: Map<string, string[]>,
+  side: ThemeSide,
   meta: CacheMeta,
   costCtx: { projectId: string; runId: string }
 ): Promise<ThemeMap | null> {
@@ -356,7 +370,7 @@ async function themeReasons(
           const user =
             `Buying situation: ${sit}${sit === EVERY_BUYER ? " (questions asked across all buyers)" : ""}\nConditions, most common first:\n` +
             labels.map((l, k) => `${k}. ${l}${ev[k].map((w) => `\n   sample: ${JSON.stringify(w)}`).join("")}`).join("\n");
-          perSit[i] = { sit, labels, groups: await themeCall(SCENARIO_THEME_SYSTEM, user, { level: "situation", situation: sit, labels, samples: ev }, labels, meta) };
+          perSit[i] = { sit, labels, groups: await themeCall(scenarioThemeSystem(side), user, { level: "situation", side, situation: sit, labels, samples: ev }, labels, meta) };
         }
       })
     );
@@ -378,7 +392,7 @@ async function themeReasons(
     else {
       const items = order.map((i) => ({ scenario: st[i].sit, name: st[i].name, conditions: st[i].labels }));
       const user = `Themes, most common first:\n${items.map((t, k) => `${k}. [${t.scenario}] ${t.name}\n   conditions: ${t.conditions.map((c) => JSON.stringify(c)).join("; ")}`).join("\n")}`;
-      totals = await themeCall(TOTAL_THEME_SYSTEM, user, { level: "total", themes: items }, items.map((t) => t.name), meta);
+      totals = await themeCall(totalThemeSystem(side), user, { level: "total", side, themes: items }, items.map((t) => t.name), meta);
     }
     const totOf = new Array<number>(st.length);
     const totName: string[] = [];
@@ -483,39 +497,53 @@ export async function computeDossiers(data: ViewData, request: ViewRequest = {})
     backDefault && towardCells > 0
       ? `The default: when no stated reason applies, the AI points buyers back to you (in ${pctOf(backDefault.cells / towardCells)} of those questions).`
       : null;
-  // The slide-over's theme tree: ONE two-level theming over every listed
-  // (non-default) group label on both sides, so a wording themes identically
-  // wherever it appears; each label is attributed to the buying situations of
-  // the questions carrying it. Keyless, or when any call fails, every side
-  // gets no themes and the slide-over reads the flat lists.
+  // The slide-over's theme tree: one two-level theming PER SIDE (dt4) over
+  // that side's listed (non-default) group labels, so a theme's name keeps the
+  // side's direction - a wording appearing on both sides may theme and read
+  // differently per side, which is the point: the shared pool named only the
+  // axis both sides pivot on. Each label is attributed to the buying
+  // situations of the questions carrying it. Keyless, or when a side's call
+  // fails, both sides get no themes and the slide-over reads the flat lists.
   const towardListed = towardAll.filter((g) => !isDefaultCondition(g.label));
   const sitOf = new Map(data.intents.map((it) => [it.id, it.situation || EVERY_BUYER]));
-  const labelCells = new Map<string, Map<string, Set<string>>>();
-  // A label's evidence: the other wordings its groups gathered (the label itself is listed once already).
-  const labelSamples = new Map<string, string[]>();
-  for (const g of [...awayGroups, ...towardListed]) {
-    const have = labelSamples.get(g.label) ?? [];
-    for (const w of (surfaces.get(g.id) ?? []).slice(1)) if (have.length < 2 && !have.some((x) => x.toLowerCase() === w.toLowerCase())) have.push(w);
-    labelSamples.set(g.label, have);
-    const per = labelCells.get(g.label) ?? new Map<string, Set<string>>();
-    labelCells.set(g.label, per);
-    for (const c of cellSets.get(g.id) ?? []) {
-      const sit = sitOf.get(c) ?? EVERY_BUYER;
-      const set = per.get(sit) ?? new Set<string>();
-      set.add(c);
-      per.set(sit, set);
+  const poolInputs = (groups: RuleGroup[]) => {
+    const labelCells = new Map<string, Map<string, Set<string>>>();
+    // A label's evidence: the other wordings its groups gathered (the label itself is listed once already).
+    const labelSamples = new Map<string, string[]>();
+    for (const g of groups) {
+      const have = labelSamples.get(g.label) ?? [];
+      for (const w of (surfaces.get(g.id) ?? []).slice(1)) if (have.length < 2 && !have.some((x) => x.toLowerCase() === w.toLowerCase())) have.push(w);
+      labelSamples.set(g.label, have);
+      const per = labelCells.get(g.label) ?? new Map<string, Set<string>>();
+      labelCells.set(g.label, per);
+      for (const c of cellSets.get(g.id) ?? []) {
+        const sit = sitOf.get(c) ?? EVERY_BUYER;
+        const set = per.get(sit) ?? new Set<string>();
+        set.add(c);
+        per.set(sit, set);
+      }
     }
-  }
-  let themeMap: ThemeMap | null = null;
+    return { labelCells, labelSamples };
+  };
+  let towardMap: ThemeMap | null = null;
+  let awayMap: ThemeMap | null = null;
   try {
-    themeMap = await themeReasons(labelCells, labelSamples, { brand: data.project.brand, category: data.project.category, projectId: data.project.id }, { projectId: data.project.id, runId: data.run.id });
+    const meta = { brand: data.project.brand, category: data.project.category, projectId: data.project.id };
+    const costCtx = { projectId: data.project.id, runId: data.run.id };
+    const t = poolInputs(towardListed);
+    const a = poolInputs(awayGroups);
+    [towardMap, awayMap] = await Promise.all([
+      themeReasons(t.labelCells, t.labelSamples, "toward", meta, costCtx),
+      themeReasons(a.labelCells, a.labelSamples, "away", meta, costCtx),
+    ]);
   } catch (e) {
     console.warn(`dossier themes failed, flat lists served: ${e instanceof Error ? e.message : e}`);
     // A failed pass is served flat but the view is not cached, so the next open retries.
     data.judgeIncomplete = true;
+    towardMap = awayMap = null;
   }
-  const themesOf = (pool: RuleGroup[], base: number) => themeTree(pool, base, themeMap, cellSets, sitOf);
-  const routesBackThemes = themesOf(towardListed, towardCells);
+  const themesOf = (pool: RuleGroup[], base: number, tm: ThemeMap | null) => themeTree(pool, base, tm, cellSets, sitOf);
+  const routesBackThemes = themesOf(towardListed, towardCells, towardMap);
   const captors = offensive ? [...offensive.captors].sort((a, b) => b.chosen.k - a.chosen.k || b.named.k - a.named.k || a.name.localeCompare(b.name)) : [];
 
   const dossiers: Dossier[] = summary.brands
@@ -589,7 +617,7 @@ export async function computeDossiers(data: ViewData, request: ViewRequest = {})
         : null;
       // The default away branch belongs on the dossier of the brand it points to.
       const dflt = awayCells > 0 ? awayDefaults.find((g) => g.routes[0] && resolve(g.routes[0].name).key === b.key) : undefined;
-      const routesThemes = themesOf(mine, awayCells);
+      const routesThemes = themesOf(mine, awayCells, awayMap);
       const routesDefault = dflt ? `The default: when no stated reason applies, the AI points buyers to ${b.name} (in ${pctOf(dflt.cells / awayCells)} of those questions).` : null;
 
       // Who supplies its picks, in full: per company and per assistant.
@@ -656,7 +684,10 @@ export async function computeDossiers(data: ViewData, request: ViewRequest = {})
 // routesBackThemes (additive; the flat lists stay for stale clients).
 // do4 (2026-11-09): themes by two LLM grouping calls (per buying situation,
 // then across situations) replace the embedding rollup; themes nest buckets.
-const DOSSIERS_VERSION = "do4";
+// do5 (2026-11-09): the theme pass runs per side (dt4) and names keep the
+// side's direction - the shared pool coined axis names ("the subject both
+// sides pivot on") that read as contradictions across the two columns.
+const DOSSIERS_VERSION = "do5";
 export function computeDossiersCached(run: Run, project: Project, request: ViewRequest = {}): Promise<DossiersView | null> {
   const r = requestOf(request);
   return cachedView("dossiers", DOSSIERS_VERSION, run, project, (d) => computeDossiers(d, r), { judge: true, setupDecision: true }, r);
