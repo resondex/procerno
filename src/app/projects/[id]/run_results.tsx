@@ -105,6 +105,10 @@ function CodesResults({
   const [roomsAsked, setRoomsAsked] = useState(false);
   // A brief pin's request to open a map cell; `n` makes a repeat click on the same pin a new request.
   const [cellReq, setCellReq] = useState<{ id: string; n: number } | null>(null);
+  // A brief answer card's request to open one rival's dossier under Rivals (same `n` rule).
+  const [rivalReq, setRivalReq] = useState<{ key: string; n: number } | null>(null);
+  // A brief answer card's request to open Stations at Consideration (its by-engine table).
+  const [journeyJump, setJourneyJump] = useState<{ station: "consideration"; n: number } | undefined>(undefined);
   const open = (v: CodesView) => {
     setView(v);
     if (v === "verdict" || v === "map" || v === "portfolio") setTierView(v);
@@ -229,13 +233,17 @@ function CodesResults({
               setCellReq({ id, n: Date.now() });
               open("map");
             }}
-            onOpenView={(v) => open(v)}
+            onOpenView={(v, brand) => {
+              if (v === "rivals" && brand) setRivalReq({ key: brand, n: Date.now() });
+              if (v === "journey") setJourneyJump({ station: "consideration", n: Date.now() });
+              open(v);
+            }}
           />
         </div>
       )}
       {visited.has("journey") && (
         <div className={show("journey")}>
-          <JourneySection key={k("journey")} runId={runId} room={room} onRoom={setRoom} onRooms={reportRooms} />
+          <JourneySection key={k("journey")} runId={runId} room={room} onRoom={setRoom} onRooms={reportRooms} jump={journeyJump} />
         </div>
       )}
       {visited.has("rivals") && (
@@ -249,6 +257,7 @@ function CodesResults({
               open("map");
             }}
             onOpenView={(v) => open(v)}
+            focus={rivalReq}
           />
         </div>
       )}

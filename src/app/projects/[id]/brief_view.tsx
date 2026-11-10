@@ -22,7 +22,8 @@
  * the map - it toggles its answer card (view.cards[id]) inline under its
  * paragraph (one open per memo at a time; a scoreboard row's card opens in a
  * slot under the table). The card's one "go deeper" link opens The Map at a
- * cell or Build a table; it hides when the shell passes no handler (share
+ * cell, a rival's dossier under Rivals, Stations, or Build a table (bf20 -
+ * Build a table only as the fallback); it hides when the shell passes no handler (share
  * links), where the cards still open. Pins and cards never print.
  *
  * The fact is the link (2026-11-07, bf15 - the owner's ruling): there are no
@@ -525,8 +526,10 @@ type CardCtxT = {
   open: string | null;
   setOpen: (k: string | null) => void;
   onOpenCell?: (id: string) => void;
-  onOpenView?: (view: "metrics") => void;
+  onOpenView?: (view: BriefGoView, brand?: string) => void;
 };
+/** The analysis pills an answer card's go link can open (the map is onOpenCell). */
+export type BriefGoView = Exclude<NonNullable<AnswerCard["go"]>["target"], "map">;
 const CardContext = createContext<CardCtxT | null>(null);
 
 const KIND_LABEL: Record<AnswerCard["kind"], string> = { cell: "On the map", brand: "Brand", engines: "The assistants", condition: "The reasons" };
@@ -688,7 +691,7 @@ function CardView({ card }: { card: AnswerCard }) {
         <button
           type="button"
           className="pb-acard-go"
-          onClick={() => (go.target === "map" ? ctx!.onOpenCell!(go.cellId!) : ctx!.onOpenView!("metrics"))}
+          onClick={() => (go.target === "map" ? ctx!.onOpenCell!(go.cellId!) : ctx!.onOpenView!(go.target, go.brand))}
         >
           {go.label} {"\u2192"}
         </button>
@@ -886,7 +889,7 @@ function Memo({
   note?: string;
   cards: Record<string, AnswerCard>;
   onOpenCell?: (id: string) => void;
-  onOpenView?: (view: "metrics") => void;
+  onOpenView?: (view: BriefGoView, brand?: string) => void;
 }) {
   // One open answer card per memo at a time (the memo remounts per frame and subject).
   const [open, setOpen] = useState<string | null>(null);
@@ -977,8 +980,8 @@ export default function BriefSection({
   projectId?: string;
   /** Opens a map cell's position on The Map pill; absent on share links (cards still open, their map link hides). */
   onOpenCell?: (id: string) => void;
-  /** Opens an analysis pill (an answer card's "Build a table" link); absent on share links. */
-  onOpenView?: (view: "metrics") => void;
+  /** Opens an analysis pill (an answer card's Rivals dossier / Stations / Build a table link); absent on share links. */
+  onOpenView?: (view: BriefGoView, brand?: string) => void;
 }) {
   const engines = useEngineSet();
   const fKey = projectId ? frameKey(projectId) : null;

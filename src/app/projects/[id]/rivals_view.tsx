@@ -425,13 +425,17 @@ export default function RivalsSection({
   projectId,
   onOpenCell,
   onOpenView,
+  focus,
 }: {
   runId: string;
   projectId?: string;
   onOpenCell?: (cellId: string) => void;
   onOpenView?: (v: "metrics") => void;
+  /** A brief answer card's request to open one brand's dossier; `n` makes a repeat click a new request. */
+  focus?: { key: string; n: number } | null;
 }) {
   const [view, setView] = useState<DossiersView | null | undefined>(undefined);
+  const [focusSeen, setFocusSeen] = useState(0);
   const [h2h, setH2h] = useState<HeadToHeadViews | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [picked, setPicked] = useState<string | null>(null);
@@ -467,6 +471,14 @@ export default function RivalsSection({
   if (view === undefined) return <div className="card px-5 py-4 text-[13px] text-ink-3">Loading rivals...</div>;
   if (!view || view.dossiers.length === 0) return null;
 
+  // A focus request selects its dossier once the view has landed - adjusted
+  // during render (React's derived-state pattern), never from an effect; a key
+  // with no dossier is a no-op. This sits below the loading returns, so a
+  // request that arrives before the data waits for it (it re-runs every render).
+  if (focus && focus.n !== focusSeen) {
+    setFocusSeen(focus.n);
+    if (view.dossiers.some((d) => d.key === focus.key)) setPicked(focus.key);
+  }
   const sel = view.dossiers.find((d) => d.key === picked) ?? view.dossiers[0];
   const lead = view.dossiers.filter((d) => d.prominent);
   const rest = view.dossiers.filter((d) => !d.prominent);

@@ -11,7 +11,8 @@ import { pctFine, type Insight, type InsightInputs } from "./summary_insights";
 import { cell, loadViewData, requestOf, VIEW_CACHE_MS, type RateCell, type ViewData, type ViewRequest } from "./view_data";
 import { viewsOf } from "./views";
 import type { AnalysisMapView, Position } from "./analysis_types";
-import { BRAND_CARD, CONDITION_CARD, ENGINES_CARD, brandCard, cardSourcesOf, cardText, cellCard, conditionCard, enginesCard, type CardSources } from "./answer_cards";
+import { hasDossier } from "./dossiers";
+import { BRAND_CARD, BUILD_A_TABLE, CONDITION_CARD, ENGINES_CARD, brandCard, cardSourcesOf, cardText, cellCard, conditionCard, enginesCard, type CardSources } from "./answer_cards";
 import {
   BRIEF_FRAME_LABELS,
   type AnswerCard,
@@ -86,7 +87,7 @@ type Anchor = BriefAnchor;
 function cardFor(c: Ctx, id: string): AnswerCard | null {
   if (c.cards.has(id)) return c.cards.get(id) ?? null;
   let card: AnswerCard | null = null;
-  if (id.startsWith("card:brand:")) card = brandCard(c.src, id.slice("card:brand:".length));
+  if (id.startsWith("card:brand:")) card = brandCard(c.src, id.slice("card:brand:".length), brandGo(c, id.slice("card:brand:".length)));
   else if (id === ENGINES_CARD) card = enginesCard(c.src);
   else if (id === CONDITION_CARD) card = conditionCard(c.src, c.map.positions[OPEN_ALL] ? OPEN_ALL : undefined);
   else {
@@ -95,6 +96,19 @@ function cardFor(c: Ctx, id: string): AnswerCard | null {
   }
   c.cards.set(id, card);
   return card;
+}
+
+/** bf20 (the owner's ruling: cite a non-Build-a-table surface whenever one
+ * exists): a brand card's go-deeper link. The target's opens the map's pooled
+ * open-questions contest; a rival's opens its dossier under Rivals (gated on
+ * the dossiers' own membership rule, same summary); Build a table only when
+ * neither exists. */
+function brandGo(c: Ctx, key: string): NonNullable<AnswerCard["go"]> {
+  if (key === c.summary.target.key) {
+    return c.map.positions[OPEN_ALL] ? { label: "Open the open-questions contest on the map", target: "map", cellId: OPEN_ALL } : BUILD_A_TABLE;
+  }
+  const b = c.summary.brands.find((x) => x.key === key);
+  return b && hasDossier(c.summary, key) ? { label: `Open the ${b.name} dossier`, target: "rivals", brand: key } : BUILD_A_TABLE;
 }
 
 /** A pin for the cell or card, or nothing when neither exists. `label` is the
@@ -1937,7 +1951,8 @@ export async function computeBrief(data: ViewData, request: BriefRequest = {}): 
 // bf17 (2026-11-07): reads the am12 map - a cell card carries its arguments as `lifts` (+ liftSides) and draws them like the map panel (bars + share sub-lines) instead of the verbose "argument in the lift" text rows; cardText states each lift's label, shares and signed points, so RULE 1 and the number links claim them unchanged. No sentence text changed.
 // bf18 (2026-11-08): the condition card reads in the reason language (the owner's ruling) - headline "When the AI gives buyers a reason to leave <brand>, the most common is ...", rows "A reason to leave you: ...", "The biggest reason to pick you / to leave you / pointing to <rival>"; a default-shaped branch ("otherwise", isDefaultCondition) leaves the list for one "The default - when no stated reason applies" row unless a brief sentence cites it. Every number the card stated before is still stated. No sentence text changed.
 // bf19 (2026-11-09): reads bs12 - the condition insight's title and body (quoted verbatim in the findings) say "reason"; the exemplar's own "The conditions that decide it" section heading is deliberately kept.
-const BRIEF_VERSION = "bf19";
+// bf20 (2026-11-09, the owner's ruling: cite a non-Build-a-table surface whenever one exists): the answer cards' go links repoint - a rival's brand card opens its Rivals dossier (hasDossier, the dossiers' own membership rule), the target's opens the map's pooled open-questions contest, the engines card opens Stations (Consideration's by-engine table); Build a table only as the fallback. Go links are not in the written layer's fact sheet, so written frames stay cached. No sentence text changed.
+const BRIEF_VERSION = "bf20";
 
 /**
  * The brief through the cache. cachedView's keying, with the subject as one

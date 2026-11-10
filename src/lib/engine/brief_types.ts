@@ -69,8 +69,11 @@ export interface AnswerCard {
   headline: string;
   /** label / value lines; counts in `tip` (title attribute only). */
   rows: { label: string; value: string; tip?: string }[];
-  /** The one "go deeper" link: The Map (at cellId) or Build a table. */
-  go?: { label: string; target: "map" | "metrics"; cellId?: string };
+  /** The one "go deeper" link (bf20, the owner's ruling: cite a
+   * non-Build-a-table surface whenever one exists): The Map at `cellId`, a
+   * rival's dossier under Rivals (`brand` = the dossier key), Stations, or
+   * Build a table - the fallback when nothing more specific exists. */
+  go?: { label: string; target: "map" | "metrics" | "rivals" | "journey"; cellId?: string; brand?: string };
   /** bf17 (2026-11-07): a cell card's arguments, drawn like the map panel's -
    * a diverging bar per code (`value` = signed points) with the two shares
    * as a sub-line ("31% of your picks · 1% of rivals' picks"); counts in

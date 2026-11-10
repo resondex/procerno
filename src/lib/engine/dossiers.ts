@@ -1,5 +1,5 @@
 import { buildResolver } from "./brand_resolve";
-import { BRAND_SUMMARY_VERSION, sharedBrandSummary, type SummaryBrand } from "./brand_summary";
+import { BRAND_SUMMARY_VERSION, sharedBrandSummary, type BrandSummaryView, type SummaryBrand } from "./brand_summary";
 import { ANALYSIS_MAP_VERSION, receiptsOf, sharedAnalysisMap } from "./analysis_map";
 import { brandHeadline, cardSourcesOf, type Lift, conversionOf, funnelRows, liftEnds, pctOf, picksFromRow, supplyLine, topQuestionRow } from "./answer_cards";
 import type { RuleGroup } from "./rules_explorer";
@@ -143,6 +143,16 @@ function headlineOf(b: SummaryBrand, all: SummaryBrand[], f: ReturnType<typeof f
 }
 
 
+/** The dossier membership rule: every summary brand but the target that the
+ * AI names at least once. One place, so the brief's "Open the X dossier"
+ * links (hasDossier) can never point at a brand Rivals does not render. */
+const isDossierBrand = (summary: BrandSummaryView, b: SummaryBrand) => b.key !== summary.target.key && b.mentioned.k > 0;
+
+/** Does `key` get a dossier, from the same summary (same engine set) the dossiers read? */
+export function hasDossier(summary: BrandSummaryView, key: string): boolean {
+  return summary.brands.some((b) => b.key === key && isDossierBrand(summary, b));
+}
+
 export async function computeDossiers(data: ViewData, request: ViewRequest = {}): Promise<DossiersView> {
   const eng: ViewRequest = request.engines ? { engines: request.engines } : {};
   // The summary, the map (with its cell stats) and the rules explorer's
@@ -225,7 +235,7 @@ export async function computeDossiers(data: ViewData, request: ViewRequest = {})
   const captors = offensive ? [...offensive.captors].sort((a, b) => b.chosen.k - a.chosen.k || b.named.k - a.named.k || a.name.localeCompare(b.name)) : [];
 
   const dossiers: Dossier[] = summary.brands
-    .filter((b) => b.key !== target.key && b.mentioned.k > 0)
+    .filter((b) => isDossierBrand(summary, b))
     .sort((a, b) => b.chosen.k - a.chosen.k || b.mentioned.k - a.mentioned.k || a.name.localeCompare(b.name))
     .map((b): Dossier => {
       const f = funnelRows(b);

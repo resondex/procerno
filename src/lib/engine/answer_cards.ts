@@ -229,8 +229,10 @@ export function brandHeadline(name: string, b: SummaryBrand): string {
 
 /** One brand's open buying questions: the funnel, where its picks come from,
  * its arguments and the assistant that supplies them. The target's card also
- * carries its picks by buying situation. Null for a brand not in the table. */
-export function brandCard(src: CardSources, key: string): AnswerCard | null {
+ * carries its picks by buying situation. Null for a brand not in the table.
+ * `go` is the caller's (it knows the map and the dossier set); without one
+ * the card falls back to Build a table. */
+export function brandCard(src: CardSources, key: string, go: NonNullable<AnswerCard["go"]> = BUILD_A_TABLE): AnswerCard | null {
   const s = src.summary;
   const isTarget = key === s.target.key;
   const b: SummaryBrand | undefined = isTarget ? s.target : s.brands.find((x) => x.key === key);
@@ -267,9 +269,12 @@ export function brandCard(src: CardSources, key: string): AnswerCard | null {
     crumb: `${name} · open buying questions`,
     headline: brandHeadline(name, b),
     rows,
-    go: { label: "Open in Build a table", target: "metrics" },
+    go,
   };
 }
+
+/** The go-deeper fallback when no more specific surface exists. */
+export const BUILD_A_TABLE: NonNullable<AnswerCard["go"]> = { label: "Open in Build a table", target: "metrics" };
 
 /* --------------------------------- engines -------------------------------- */
 
@@ -318,7 +323,9 @@ export function enginesCard(src: CardSources): AnswerCard | null {
     const sorted = [...eng1].sort((x, y) => rate(y.decided) - rate(x.decided));
     headline = `${poss(brand)} share of picks runs from ${pct(sorted[0].decided)} on ${sorted[0].label} to ${pct(sorted[sorted.length - 1].decided)} on ${sorted[sorted.length - 1].label}.`;
   }
-  return { kind: "engines", crumb: `${brand} · by assistant`, headline, rows, go: { label: "Open in Build a table", target: "metrics" } };
+  // The target's by-engine table sits on Stations' default open (Consideration's
+  // full tables: "<brand> by engine", the shared EngineTable with its grouping).
+  return { kind: "engines", crumb: `${brand} · by assistant`, headline, rows, go: { label: "See it by assistant under Stations", target: "journey" } };
 }
 
 /* -------------------------------- condition ------------------------------- */
