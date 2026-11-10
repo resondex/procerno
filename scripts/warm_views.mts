@@ -75,7 +75,8 @@ for (const pass of [1, 2] as const) {
     }
     if (pass === 2 && !noWritten) {
       const t0 = Date.now();
-      const w = await prewarmWrittenBriefs(run, project, 10 * 60 * 1000);
+      // The third argument is an ABSOLUTE deadline (Date.now() + budget), not a duration.
+      const w = await prewarmWrittenBriefs(run, project, Date.now() + 10 * 60 * 1000);
       process.stdout.write(`written ${w.written} new / ${w.cached} cached / ${w.skipped} skipped ${((Date.now() - t0) / 1000).toFixed(0)}s`);
       if (w.skipped > 0) process.exitCode = 1;
     }
