@@ -31,7 +31,7 @@ import type { AnswerCodes, CacheMeta, DictionaryEntry, Project } from "../types"
 
 export const CONTEXT_JUDGE_MODEL = process.env.CONTEXT_JUDGE_MODEL ?? "gpt-6-luna";
 export const CONTEXT_JUDGE_VERSION = "c3";
-const CACHE_TTL_MS = 183 * 24 * 3600 * 1000;
+const CACHE_TTL_MS = 100 * 365 * 24 * 3600 * 1000; // forever in practice - the saved-tracker rule (2026-11-09): a verdict refreshes only on a judge version or model bump, never by age
 /** Most-frequent-first slab judged per compute; the rest waits for the next. */
 const JUDGE_CAP = 300;
 const DEADLINE_MS = 50_000;

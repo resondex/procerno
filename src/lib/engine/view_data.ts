@@ -435,6 +435,12 @@ export async function loadViewData(
  * generation's unfiltered and per-room entries live side by side and only
  * older generations are dropped, whichever request computes first.
  */
+/** The view cache's read horizon: forever in practice (the saved-tracker
+ * rule, 2026-11-09, Tyler) - a cached view is re-keyed by a version bump,
+ * a recode (revision), a dictionary edit or a project change, never aged
+ * out. There is no age-based sweep; cachePurge drops older generations. */
+export const VIEW_CACHE_MS = 100 * 365 * 24 * 3600 * 1000;
+
 export async function cachedView<T>(
   name: string,
   version: string,
@@ -465,7 +471,7 @@ export async function cachedView<T>(
   if (request.engines !== undefined)
     key += `:eng:${createHash("sha256").update(request.engines.join(",")).digest("hex").slice(0, 12)}`;
   if (rev !== null) {
-    const raw = await store.cacheGet(key, 183 * 24 * 3600 * 1000);
+    const raw = await store.cacheGet(key, VIEW_CACHE_MS);
     if (raw) return JSON.parse(raw) as T;
   }
   const data = await loadViewData(run, project, opts);

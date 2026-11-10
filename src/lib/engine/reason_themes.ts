@@ -55,7 +55,7 @@ export interface DossierTheme {
 /** The pseudo-situation for cells asked across all buyers (no room). */
 export const EVERY_BUYER = "Every buyer";
 export const THEME_VERSION = "dt4";
-export const THEME_TTL_MS = 183 * 24 * 3600 * 1000;
+export const THEME_TTL_MS = 100 * 365 * 24 * 3600 * 1000; // forever in practice - the saved-tracker rule (2026-11-09): re-keyed by THEME_VERSION or the input hash, never aged out
 export const THEME_CONCURRENCY = 6;
 
 /** Which way the pooled reasons point. The pass runs once per side (dt4), so

@@ -36,32 +36,39 @@ const projects = (await store.listProjects()).filter(
     !p.archived_at && (filters.length === 0 || filters.some((f) => p.brand.toLowerCase().includes(f)))
 );
 
+// Two passes: a view computed while the context judge is still working its
+// name tail is served but deliberately NOT cached (judgeIncomplete), so the
+// first pass may leave it warm-but-uncached. By pass 2 the tail is judged
+// and every view writes its cache; a pass-2 time over ~2s means a view is
+// still not caching and deserves a look.
 let warmed = 0;
-for (const project of projects) {
-  const source = await store.getCodesSource(project.id);
-  if (!source) continue;
-  const runs = await store.listRuns(project.id);
-  let run = runs.find((r: { status: string }) => r.status === "complete") ?? null;
-  if (!run) for (const r of runs) if ((await store.countAnswerCodes(r.id, source)) > 0) { run = r; break; }
-  if (!run) continue;
-  process.stdout.write(`${project.brand} (run ${String(run.id).slice(0, 8)}): `);
-  for (const [label, go] of [
-    ["summary", () => computeBrandSummaryCached(run, project)],
-    ["map", () => computeAnalysisMapCached(run, project)],
-    ["dossiers", () => computeDossiersCached(run, project)],
-    ["brief", () => computeBriefCached(run, project)],
-  ] as const) {
-    const t0 = Date.now();
-    try {
-      const view = await go();
-      process.stdout.write(`${label} ${view ? ((Date.now() - t0) / 1000).toFixed(1) + "s" : "null"} · `);
-    } catch (e) {
-      process.stdout.write(`${label} FAILED (${e instanceof Error ? e.message.slice(0, 60) : e}) · `);
-      process.exitCode = 1;
+for (const pass of [1, 2] as const) {
+  for (const project of projects) {
+    const source = await store.getCodesSource(project.id);
+    if (!source) continue;
+    const runs = await store.listRuns(project.id);
+    let run = runs.find((r: { status: string }) => r.status === "complete") ?? null;
+    if (!run) for (const r of runs) if ((await store.countAnswerCodes(r.id, source)) > 0) { run = r; break; }
+    if (!run) continue;
+    process.stdout.write(`[pass ${pass}] ${project.brand} (run ${String(run.id).slice(0, 8)}): `);
+    for (const [label, go] of [
+      ["summary", () => computeBrandSummaryCached(run, project)],
+      ["map", () => computeAnalysisMapCached(run, project)],
+      ["dossiers", () => computeDossiersCached(run, project)],
+      ["brief", () => computeBriefCached(run, project)],
+    ] as const) {
+      const t0 = Date.now();
+      try {
+        const view = await go();
+        process.stdout.write(`${label} ${view ? ((Date.now() - t0) / 1000).toFixed(1) + "s" : "null"} · `);
+      } catch (e) {
+        process.stdout.write(`${label} FAILED (${e instanceof Error ? e.message.slice(0, 60) : e}) · `);
+        process.exitCode = 1;
+      }
     }
+    process.stdout.write("\n");
+    if (pass === 2) warmed++;
   }
-  process.stdout.write("\n");
-  warmed++;
 }
 console.log(`${warmed} tracker(s) warmed.`);
 process.exit(process.exitCode ?? 0);

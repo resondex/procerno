@@ -8,7 +8,7 @@ import { sharedAnalysisMap, type MapCellStat } from "./analysis_map";
 import { computeHeadline } from "./headline";
 import { CONTEXT_JUDGE_MODEL, CONTEXT_JUDGE_VERSION } from "./context_judge";
 import { pctFine, type Insight, type InsightInputs } from "./summary_insights";
-import { cell, loadViewData, requestOf, type RateCell, type ViewData, type ViewRequest } from "./view_data";
+import { cell, loadViewData, requestOf, VIEW_CACHE_MS, type RateCell, type ViewData, type ViewRequest } from "./view_data";
 import { viewsOf } from "./views";
 import type { AnalysisMapView, Position } from "./analysis_types";
 import { BRAND_CARD, CONDITION_CARD, ENGINES_CARD, brandCard, cardSourcesOf, cardText, cellCard, conditionCard, enginesCard, type CardSources } from "./answer_cards";
@@ -1966,7 +1966,7 @@ export async function computeBriefCached(run: Run, project: Project, request: Br
   if (r.subject !== undefined) key += `:sub:${createHash("sha256").update(matchKey(r.subject)).digest("hex").slice(0, 12)}`;
   if (r.engines !== undefined) key += `:eng:${createHash("sha256").update(r.engines.join(",")).digest("hex").slice(0, 12)}`;
   if (rev !== null) {
-    const raw = await store.cacheGet(key, 183 * 24 * 3600 * 1000);
+    const raw = await store.cacheGet(key, VIEW_CACHE_MS);
     if (raw) return JSON.parse(raw) as BriefView;
   }
   const data = await loadViewData(run, project, { setupDecision: true, judge: true });

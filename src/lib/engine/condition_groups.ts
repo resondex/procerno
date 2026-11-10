@@ -324,7 +324,7 @@ export async function conditionKeyMapLarge(
 
 /** Bumped when the cached key-map entry's meaning changes. */
 const CONDITION_KEYS_VERSION = "ck1";
-const CONDITION_KEYS_TTL_MS = 183 * 24 * 3600 * 1000;
+const CONDITION_KEYS_TTL_MS = 100 * 365 * 24 * 3600 * 1000; // forever in practice - the saved-tracker rule (2026-11-09): keyed per run + revision + scope, never aged out
 
 /** Where a run-scoped key map may be cached: present only for computes that
  * ran through cachedView on a store that fingerprints its data. */

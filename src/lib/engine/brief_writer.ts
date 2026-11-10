@@ -37,7 +37,7 @@ import { BRIEF_WRITER_MODEL } from "./models";
 
 // bw2 (2026-11-06): fact lines carry anchor tags the writer places; guard (e).
 export const BRIEF_WRITER_VERSION = "bw2";
-const CACHE_TTL_MS = 180 * 24 * 3600 * 1000;
+const CACHE_TTL_MS = 100 * 365 * 24 * 3600 * 1000; // forever in practice - the saved-tracker rule (2026-11-09): re-keyed by a version bump or a sheet change, never aged out
 /** Opus 5.x thinks before it writes and a whole-budget think returns empty
  * text (the recorded batch failure mode), so the budget leaves room for both. */
 const MAX_TOKENS = 8000;

@@ -39,6 +39,9 @@ function getSql() {
       prepare: false,
       max: 5,
       ssl: local ? undefined : "require",
+      // ensureSchema's IF NOT EXISTS statements raise a NOTICE per existing
+      // object on every cold boot; drop them (errors are unaffected).
+      onnotice: () => {},
     });
   }
   return globalThis.__procerno_sql;

@@ -33,7 +33,7 @@ import type { Project, Run, RunMetrics } from "@/lib/types";
  * only complete runs cache, keyed on the labels revision.
  */
 const L1_TTL_MS = 10 * 60 * 1000;
-const L2_TTL_MS = 183 * 24 * 3600 * 1000;
+const L2_TTL_MS = 100 * 365 * 24 * 3600 * 1000; // forever in practice - the saved-tracker rule (2026-11-09): keyed on the data revision, never aged out
 const L1_MAX = 500;
 const l1 = new Map<string, { at: number; m: RunMetrics }>();
 
