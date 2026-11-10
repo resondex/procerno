@@ -33,7 +33,7 @@ const { computeBrandSummaryCached } = await import(process.cwd() + "/src/lib/eng
 const { computeAnalysisMapCached } = await import(process.cwd() + "/src/lib/engine/analysis_map.ts");
 const { computeDossiersCached } = await import(process.cwd() + "/src/lib/engine/dossiers.ts");
 const { computeBriefCached } = await import(process.cwd() + "/src/lib/engine/brief.ts");
-const { prewarmWrittenBriefs } = await import(process.cwd() + "/src/lib/engine/brief_writer.ts");
+const { prewarmWrittenBriefs, writtenBriefsEntitled } = await import(process.cwd() + "/src/lib/engine/brief_writer.ts");
 
 const args = process.argv.slice(2);
 const noWritten = args.includes("--no-written");
@@ -74,11 +74,18 @@ for (const pass of [1, 2] as const) {
       }
     }
     if (pass === 2 && !noWritten) {
-      const t0 = Date.now();
-      // The third argument is an ABSOLUTE deadline (Date.now() + budget), not a duration.
-      const w = await prewarmWrittenBriefs(run, project, Date.now() + 10 * 60 * 1000);
-      process.stdout.write(`written ${w.written} new / ${w.cached} cached / ${w.skipped} skipped ${((Date.now() - t0) / 1000).toFixed(0)}s`);
-      if (w.skipped > 0) process.exitCode = 1;
+      // Written frames warm only for trackers whose owner is on a written
+      // tier (2026-11-09, Tyler: "only do it for clients") - staff and
+      // composed tiers generate lazily, or hand-run warm_written_briefs.mts.
+      if (!(await writtenBriefsEntitled(project))) {
+        process.stdout.write("written: owner is not a written-tier client - not warmed");
+      } else {
+        const t0 = Date.now();
+        // The third argument is an ABSOLUTE deadline (Date.now() + budget), not a duration.
+        const w = await prewarmWrittenBriefs(run, project, Date.now() + 10 * 60 * 1000);
+        process.stdout.write(`written ${w.written} new / ${w.cached} cached / ${w.skipped} skipped ${((Date.now() - t0) / 1000).toFixed(0)}s`);
+        if (w.skipped > 0) process.exitCode = 1;
+      }
     }
     process.stdout.write("\n");
     if (pass === 2) warmed++;

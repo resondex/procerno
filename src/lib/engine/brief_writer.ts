@@ -470,6 +470,33 @@ export async function writeBrief(memo: BriefMemo, ctx: WriteContext): Promise<{ 
  * No key, a non-Claude writer model or no codes source: an all-skipped
  * no-op that never touches the store. Never throws.
  */
+/** The plans whose dashboards serve written briefs. MUST match auth.ts
+ * PLAN_WRITTEN_BRIEFS (auth imports next/headers, so engine code and
+ * scripts cannot read it; keep the two in sync). */
+const WRITTEN_PLANS = new Set(["pro", "enterprise"]);
+
+/**
+ * Whether this tracker's readers are served written briefs - the owner's
+ * plan (2026-11-09, Tyler: the automatic warms spend Opus only for client
+ * trackers on a written tier). Staff-owned and ownerless trackers read
+ * false: an admin's option-B click generates lazily, or hand-run
+ * scripts/warm_written_briefs.mts, which does not consult this.
+ */
+export async function writtenBriefsEntitled(project: Project): Promise<boolean> {
+  if (!project.user_id) return false;
+  try {
+    const { store } = await import("../store");
+    if (!WRITTEN_PLANS.has(await store.getPlan(project.user_id))) return false;
+    // Staff are not clients: they get the admin toggle, never served written.
+    // A failed staff lookup degrades to plan-only (warm too much, never too
+    // little for a real client).
+    const staff = await store.isStaffUserId(project.user_id).catch(() => false);
+    return !staff;
+  } catch {
+    return false;
+  }
+}
+
 export async function prewarmWrittenBriefs(
   run: Run,
   project: Project,

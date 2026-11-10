@@ -878,6 +878,10 @@ export interface Store {
   }): Promise<void>;
   listHumanCodes(assignmentId: string): Promise<HumanCode[]>;
   getPlan(userId: string): Promise<Plan>;
+  /** Whether this user id belongs to a staff member (postgres joins
+   * auth.users to staff_users by email; sqlite has no auth schema and
+   * always answers false). Failure-tolerant callers treat errors as false. */
+  isStaffUserId(userId: string): Promise<boolean>;
   /** Cached value no older than maxAgeMs, else null. */
   cacheGet(key: string, maxAgeMs: number): Promise<string | null>;
   /** Batch read: one roundtrip for many keys (misses simply absent from the

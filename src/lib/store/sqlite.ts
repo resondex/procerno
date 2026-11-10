@@ -755,6 +755,11 @@ export const sqliteStore: Store = {
     ).map(parseProject);
   },
 
+  async isStaffUserId() {
+    // No auth schema in the sqlite store (dev/fixture); nobody maps to staff.
+    return false;
+  },
+
   async isStaffEmail(email) {
     return Boolean(
       getDb()

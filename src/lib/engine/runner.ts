@@ -10,7 +10,7 @@ import {
 } from "./providers";
 import { analyzePromptHealth } from "./prompt_health";
 import { prewarmContextVerdicts } from "./context_judge";
-import { prewarmWrittenBriefs } from "./brief_writer";
+import { prewarmWrittenBriefs, writtenBriefsEntitled } from "./brief_writer";
 import { queueUnresolvedNames, runPostQueueSteps } from "./dict_queue";
 import { queueJudgedForms } from "./judged_forms";
 import { batchableEngine, hasOpenBatches, pollRunBatches } from "./batch";
@@ -622,12 +622,16 @@ export async function finalizeRun(runId: string): Promise<void> {
     console.error("context judge warm failed:", err);
   }
   // The tracker's own written Briefs (option B), so a written-tier reader's
-  // first open is a cache hit. Cache-first; no key or no codes source is a
-  // no-op. 120s soft budget, clamped to leave the finalize route room.
+  // first open is a cache hit - only when the owner's plan serves written
+  // briefs (writtenBriefsEntitled; staff and composed tiers generate
+  // lazily). Cache-first; no key or no codes source is a no-op. 120s soft
+  // budget, clamped to leave the finalize route room.
   try {
-    const wb = await prewarmWrittenBriefs(run, project, Math.min(Date.now() + 120_000, finalizeStart + 250_000));
-    if (wb.written > 0 || wb.cached > 0) {
-      console.log(`written brief warm: ${wb.written} written, ${wb.cached} cached, ${wb.skipped} skipped`);
+    if (await writtenBriefsEntitled(project)) {
+      const wb = await prewarmWrittenBriefs(run, project, Math.min(Date.now() + 120_000, finalizeStart + 250_000));
+      if (wb.written > 0 || wb.cached > 0) {
+        console.log(`written brief warm: ${wb.written} written, ${wb.cached} cached, ${wb.skipped} skipped`);
+      }
     }
   } catch (err) {
     console.error("written brief warm failed:", err);

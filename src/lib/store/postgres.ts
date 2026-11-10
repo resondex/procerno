@@ -593,6 +593,14 @@ export const pgStore: Store = {
     return rows.length > 0;
   },
 
+  async isStaffUserId(userId) {
+    const sql = await db();
+    const rows = await sql`SELECT 1 FROM staff_users s
+      JOIN auth.users u ON lower(u.email) = s.email
+      WHERE u.id = ${userId}`;
+    return rows.length > 0;
+  },
+
   async listStaff() {
     const sql = await db();
     const rows = await sql`SELECT email FROM staff_users ORDER BY email`;
