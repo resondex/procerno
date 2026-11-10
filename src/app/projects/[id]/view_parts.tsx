@@ -565,8 +565,9 @@ export function plainQuote(s: string): string {
     .trim();
 }
 
-/** A label-left, value-right row on a dashed rule (the panels' figure row). */
-export function Fig({ label, value }: { label: React.ReactNode; value: string }) {
+/** A label-left, value-right row on a dashed rule (the panels' figure row).
+ * `value` is text; a caller may pass a node (a receipt link) instead. */
+export function Fig({ label, value }: { label: React.ReactNode; value: React.ReactNode }) {
   return (
     <div className="flex justify-between gap-4 border-b border-dashed border-line py-1.5 text-[13px]">
       <span className="min-w-0 text-ink-2">{label}</span>
@@ -586,6 +587,53 @@ export function WallChip({ color }: { color: string }) {
   );
 }
 
+/** A reason row ReasonList can carry: the label and its share, plus - for
+ * the Stations blocks (2026-11-10) - the answers behind it (tooltip only),
+ * receipt ids and, on the side that leaves you, where it sends the buyer. */
+export interface ReasonRow {
+  label: string;
+  share: string;
+  wall?: boolean;
+  /** Answers stating it - the tooltip, never printed. */
+  answers?: number;
+  /** Sample response ids: with `onOpen`, the share opens them. */
+  ids?: string[];
+  /** Brands it sends the buyer to. */
+  routes?: string[];
+}
+
+/** Receipt hand-off: the reason's label and its sample answer ids. */
+export type OnOpenReason = (label: string, ids: string[]) => void;
+
+/** The share, as a receipt link when the row carries ids and the caller can open them. */
+function ShareValue({ row, onOpen }: { row: { label: string; share: string; answers?: number; ids?: string[] }; onOpen?: OnOpenReason }) {
+  const counted = row.answers !== undefined ? `${row.answers} ${row.answers === 1 ? "answer" : "answers"}` : null;
+  if (onOpen && row.ids && row.ids.length > 0)
+    return (
+      <button
+        type="button"
+        onClick={() => onOpen(row.label, row.ids!)}
+        title={`${counted ? `${counted} - ` : ""}open the answers`}
+        className="tabular-nums underline decoration-ink-3/40 decoration-dotted underline-offset-2 hover:decoration-ink-3"
+      >
+        {row.share}
+      </button>
+    );
+  if (counted)
+    return (
+      <span title={counted} className="cursor-help">
+        {row.share}
+      </span>
+    );
+  return <>{row.share}</>;
+}
+
+/** Where a reason sends the buyer, in the panels' wording. */
+function Routes({ routes }: { routes?: string[] }) {
+  if (!routes || routes.length === 0) return null;
+  return <div className="-mt-0.5 mb-0.5 text-[11.5px] text-ink-3">Sent to {routes.join(", ")}</div>;
+}
+
 /**
  * One side's reasons - the dossier's slide-over and the map's position panel
  * render it the same way. Themes come per buying situation and are merged
@@ -596,16 +644,26 @@ export function WallChip({ color }: { color: string }) {
  * flat list renders. The list leads with the biggest themes (THEME_TOP) and
  * folds the tail behind one toggle, so the full fall-out stays reachable.
  * Rows flagged wall carry the wall chip in `wallColor`.
+ *
+ * Stations (2026-11-10) add three optional props, none of which changes the
+ * map or the dossier: `every` - the flat list of every stated reason with its
+ * routes, shown under the same "See every reason" fold (and, when no themes
+ * render, the fallback list itself, top THEME_TOP first); `onOpen` - shares
+ * become receipt links where a row carries ids.
  */
 const THEME_TOP = 8;
 export function ReasonList({
   flat,
   themes,
   wallColor,
+  every,
+  onOpen,
 }: {
-  flat: { label: string; share: string; wall?: boolean }[];
-  themes: DossierTheme[];
+  flat: ReasonRow[];
+  themes: (DossierTheme & { answers?: number; ids?: string[] })[];
   wallColor: string;
+  every?: ReasonRow[];
+  onOpen?: OnOpenReason;
 }) {
   const [open, setOpen] = useState<Set<string>>(() => new Set());
   const [showAll, setShowAll] = useState(false);
@@ -615,7 +673,34 @@ export function ReasonList({
       {wall && <WallChip color={wallColor} />}
     </>
   );
+  const flatRows = (rows: ReasonRow[]) =>
+    rows.map((r, i) => (
+      <div key={`${i}:${r.label}`}>
+        <Fig label={quoted(r.label, r.wall)} value={<ShareValue row={r} onOpen={onOpen} />} />
+        <Routes routes={r.routes} />
+      </div>
+    ));
+  const foldButton = (show: boolean) =>
+    show && (
+      <button
+        type="button"
+        onClick={() => setShowAll((v) => !v)}
+        aria-expanded={showAll}
+        className="mt-1.5 select-none text-[11.5px] text-ink-3 hover:text-ink-2"
+      >
+        {showAll ? "Show the biggest only ▾" : "See every reason ▸"}
+      </button>
+    );
   if (!themes.some((t) => (t.buckets ?? []).length > 0)) {
+    if (every) {
+      const shown = showAll ? every : every.slice(0, THEME_TOP);
+      return (
+        <>
+          {flatRows(shown)}
+          {foldButton(every.length > THEME_TOP)}
+        </>
+      );
+    }
     return (
       <>
         {flat.map((r) => (
@@ -644,7 +729,7 @@ export function ReasonList({
         const closed = situations > 1 ? `Across ${situations} situations` : `+ ${related} related`;
         return (
           <div key={tk}>
-            <Fig label={quoted(t.label, t.wall)} value={t.share} />
+            <Fig label={quoted(t.label, t.wall)} value={onOpen || t.answers !== undefined ? <ShareValue row={t} onOpen={onOpen} /> : t.share} />
             {buckets.length > 0 && (
               <button
                 type="button"
@@ -683,16 +768,13 @@ export function ReasonList({
           </div>
         );
       })}
-      {(folded > 0 || (showAll && themes.length > THEME_TOP)) && (
-        <button
-          type="button"
-          onClick={() => setShowAll((v) => !v)}
-          aria-expanded={showAll}
-          className="mt-1.5 select-none text-[11.5px] text-ink-3 hover:text-ink-2"
-        >
-          {showAll ? "Show the biggest only ▾" : "See every reason ▸"}
-        </button>
+      {showAll && every && every.length > 0 && (
+        <div className="mt-3">
+          <div className="mb-0.5 text-[11.5px] font-medium uppercase tracking-wide text-ink-3">Every stated reason</div>
+          {flatRows(every)}
+        </div>
       )}
+      {foldButton(folded > 0 || (showAll && themes.length > THEME_TOP) || (!!every && every.length > 0))}
     </>
   );
 }

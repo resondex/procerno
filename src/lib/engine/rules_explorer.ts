@@ -85,8 +85,10 @@ export const RULE_POOL_LABEL: Record<RulePool, string> = {
 
 /** Views that can carry rules, premium_tier first so premium_worth answers
  * (which also count in the headline) take the premium pool - their rules
- * route to a tier, not a brand. */
-const RULE_VIEWS: [ViewKey, RulePool][] = [
+ * route to a tier, not a brand. Exported (2026-11-10, read-only) so the
+ * Stations reasons can scope the capture to a station's question types by
+ * the same first-match rule computeRules assigns pools with. */
+export const RULE_VIEWS: readonly (readonly [ViewKey, RulePool])[] = [
   ["premium_tier", "premium"],
   ["headline", "open_choice"],
   ["head_to_head_entity", "head_to_head"],

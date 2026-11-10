@@ -1,8 +1,8 @@
 "use client";
 
-import { useEffect, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useState, useSyncExternalStore, type ReactNode } from "react";
+import { useParams } from "next/navigation";
 import type {
-  ConditionLine,
   InventoryRow,
   JourneyArgument,
   JourneyMetric,
@@ -11,9 +11,12 @@ import type {
   JourneyView,
   RateCell,
   StationKey,
+  StationReasonSide,
 } from "@/lib/engine/journey";
 import { SortTable, Tip, type Col } from "./table";
-import { pct, range, rate, useEngineSet, viewQuery } from "./view_parts";
+import { pct, range, rate, ReasonList, useEngineSet, viewQuery } from "./view_parts";
+import EvidencePanel, { EVIDENCE_CAP, type EvidenceRequest } from "./evidence_panel";
+import { argumentsSentence, capFirst, REASON_COPY, reasonsSentence } from "./station_copy";
 import HeadlineSection from "./headline_view";
 import PremiumSection from "./premium_view";
 import AwarenessSections from "./awareness_view";
@@ -34,7 +37,7 @@ import SettledSections from "./settled_view";
  * one number, the anchor, the number of question kinds), ONE selected at a
  * time, the selected station's full read below - the same three blocks on
  * every station in its own terms (who it routes to, the arguments behind its
- * verdict, you win when / you lose when; StationBlocks), the open inventory of
+ * verdict, the reasons on each side of it; StationBlocks), the open inventory of
  * every question kind routed to the station (a kind the tracker did not ask
  * is a greyed row), then the per-type sections as the full tables.
  *
@@ -42,8 +45,17 @@ import SettledSections from "./settled_view";
  * their own answers. The copy never reads them as one buyer's sequence.
  *
  * Surface rule (2026-11-01): no answer counts on cards, headline lines or
- * cells. Counts live in hover ranges, the inventory rows' hover, condition
- * lines (the only honest unit for a condition) and thin-cell warnings.
+ * cells. Counts live in hover ranges, the inventory rows' hover and
+ * thin-cell warnings.
+ *
+ * j5 (2026-11-10, Stations option B + A's sweep): the arguments and reasons
+ * blocks speak the Map panel's grammar - the lift line (bar from the center,
+ * the point gap, the two shares beneath), and ReasonList over the run's dt4
+ * themes scoped to the station, answer-grain shares with their one base note,
+ * the "See every reason" fold to every stated reason with where it sends the
+ * buyer, and receipts on the shares (the evidence drawer). A Summary/Detail
+ * view control (saved per project) folds those two blocks to one sentence
+ * each; a folded block opens in place on a click.
  *
  * The buyer filter reaches only the room-pinned stations (awareness,
  * consideration, value). Everything asked across all buyers keeps its
@@ -259,94 +271,252 @@ function PicksBlock({ s, filtered }: { s: JourneyStation; filtered: boolean }) {
   );
 }
 
-/** The arguments behind the station's verdict: up to 4 lines, "for you" / "against". */
-function ArgumentsBlock({ s, filtered }: { s: JourneyStation; filtered: boolean }) {
+// ---------- the reasons and the arguments (j5, 2026-11-10: Stations option B) ----------
+
+/** Summary or detail for the two blocks, saved per project. */
+type BlockMode = "summary" | "detail";
+const MODE_EVENT = "procerno-station-mode";
+const memMode = new Map<string, BlockMode>();
+const modeKey = (scope: string) => `procerno_station_mode:${scope}`;
+function readMode(scope: string): BlockMode {
+  try {
+    return window.localStorage.getItem(modeKey(scope)) === "summary" ? "summary" : "detail";
+  } catch {
+    return memMode.get(scope) ?? "detail";
+  }
+}
+function subscribeMode(cb: () => void) {
+  window.addEventListener(MODE_EVENT, cb);
+  window.addEventListener("storage", cb);
+  return () => {
+    window.removeEventListener(MODE_EVENT, cb);
+    window.removeEventListener("storage", cb);
+  };
+}
+function useBlockMode(scope: string): [BlockMode, (m: BlockMode) => void] {
+  const mode = useSyncExternalStore(
+    subscribeMode,
+    () => readMode(scope),
+    () => "detail" as BlockMode
+  );
+  const set = (m: BlockMode) => {
+    memMode.set(scope, m);
+    try {
+      if (m === "detail") window.localStorage.removeItem(modeKey(scope));
+      else window.localStorage.setItem(modeKey(scope), m);
+    } catch {
+      // storage blocked: memMode carries the choice for this page view
+    }
+    window.dispatchEvent(new Event(MODE_EVENT));
+  };
+  return [mode, set];
+}
+
+function ModeToggle({ mode, onMode }: { mode: BlockMode; onMode: (m: BlockMode) => void }) {
+  return (
+    <div className="flex flex-wrap items-center gap-1 text-[12px]">
+      <span className="mr-0.5 text-ink-3">Reasons and arguments:</span>
+      {(["summary", "detail"] as BlockMode[]).map((m) => (
+        <button
+          key={m}
+          type="button"
+          onClick={() => onMode(m)}
+          aria-pressed={mode === m}
+          className={`rounded-full border px-2 py-0.5 transition-colors ${
+            mode === m ? "border-[var(--color-primary)] bg-primary-soft text-primary" : "border-line text-ink-2 hover:border-ink-3"
+          }`}
+        >
+          {m === "summary" ? "Summary" : "Detail"}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+/** A block in summary mode: its sentence, expanding in place on a click. */
+function Folded({ sentence, onExpand }: { sentence: string; onExpand: () => void }) {
+  return (
+    <button type="button" onClick={onExpand} className="block w-full text-left">
+      <span className="text-[13.5px] leading-relaxed text-ink">{sentence}</span>{" "}
+      <span className="whitespace-nowrap text-[11.5px] text-ink-3 hover:text-ink-2">Show the detail ▸</span>
+    </button>
+  );
+}
+
+const FOR_COLOR = "var(--color-success)";
+const AGAINST_COLOR = "var(--color-danger)";
+
+/** The Map panel's lift line: a bar from the center (for you right, against
+ * left), the point gap, and the two shares beneath; counts in the tip. */
+function LiftLines({ args, sides }: { args: JourneyArgument[]; sides: [string, string] }) {
+  const rows = args.map((a) => ({ a, value: Math.round((rate(a.inYourPicks) - rate(a.inRivalPicks)) * 100) }));
+  const max = Math.max(10, ...rows.map((r) => Math.abs(r.value)));
+  return (
+    <div className="grid gap-0.5">
+      {rows.map(({ a, value }) => {
+        const w = (Math.min(Math.abs(value), max) / max) * 50;
+        const thin = isThin(a.inYourPicks) || isThin(a.inRivalPicks);
+        return (
+          <div
+            key={a.code}
+            className={`grid grid-cols-[minmax(7.5rem,1fr)_1fr_2.75rem] items-center gap-x-2.5 gap-y-0.5 text-[13px] ${thin ? "opacity-60" : ""}`}
+          >
+            <span className="text-ink">{a.code}</span>
+            <div className="relative h-2.5" aria-hidden>
+              <span className="absolute inset-y-[-2px] left-1/2 w-px bg-line" />
+              <span
+                className="absolute top-px h-2 rounded-[3px]"
+                style={
+                  value >= 0
+                    ? { left: "50%", width: `${w}%`, background: FOR_COLOR }
+                    : { right: "50%", width: `${w}%`, background: AGAINST_COLOR }
+                }
+              />
+            </div>
+            <span className="text-right text-[12px] tabular-nums" style={{ color: a.forYou ? FOR_COLOR : AGAINST_COLOR }}>
+              {value > 0 ? "+" : ""}
+              {value}
+            </span>
+            <Tip tip={`${sides[0]}: ${range(a.inYourPicks)}. ${capFirst(sides[1])}: ${range(a.inRivalPicks)}.${thinTip(a.inYourPicks) || thinTip(a.inRivalPicks)}`}>
+              <span className="col-span-full mb-1 cursor-help text-[11.5px] text-ink-3">
+                {pct(a.inYourPicks)} {sides[0]} · {pct(a.inRivalPicks)} {sides[1]}
+              </span>
+            </Tip>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+/** The arguments behind the station's verdict, in the Map panel's lift format. */
+function ArgumentsBlock({ s, filtered, mode }: { s: JourneyStation; filtered: boolean; mode: BlockMode }) {
+  const [open, setOpen] = useState(false);
   const lines = s.arguments.slice(0, 4);
-  const [yes, no] = s.argumentLabels;
   return (
     <div className="card p-5">
-      <BlockTitle allBuyers={filtered && s.unfiltered.includes("arguments")}>The arguments behind it</BlockTitle>
+      <BlockTitle allBuyers={filtered && s.unfiltered.includes("arguments")}>The arguments</BlockTitle>
       {lines.length === 0 ? (
         <p className="text-[12px] text-ink-3">{s.argumentsNote ?? "Too few answers on either side to compare the arguments."}</p>
+      ) : mode === "summary" && !open ? (
+        <Folded sentence={argumentsSentence(s)} onExpand={() => setOpen(true)} />
       ) : (
-        <ul className="grid gap-2">
-          {lines.map((a: JourneyArgument) => (
-            <li key={a.code} className="flex flex-wrap items-baseline gap-2 text-[13px]">
-              <span
-                className={`rounded px-1.5 py-0.5 text-[11px] font-medium ${
-                  a.forYou ? "bg-success/10 text-success" : "bg-danger/10 text-danger"
-                }`}
-              >
-                {a.forYou ? "for you" : "against"}
-              </span>
-              <span className="font-medium text-ink">{a.code}</span>
-              <span className="text-ink-3">
-                argued in <Rate c={a.inYourPicks} label={`Answers ${yes} arguing it`} /> {yes},{" "}
-                <Rate c={a.inRivalPicks} label={`Answers ${no} arguing it`} /> {no}
-              </span>
-            </li>
-          ))}
-        </ul>
+        <>
+          <LiftLines args={lines} sides={s.argumentLabels} />
+          <p className="mt-2 text-[11px] italic text-ink-3">
+            Each share is of this station&apos;s answers on that side of the verdict - the full table below splits them by question type.
+          </p>
+        </>
       )}
     </div>
   );
 }
 
-function ConditionList({ title, lines, lose }: { title: string; lines: ConditionLine[]; lose: boolean }) {
+/** One side of the reasons: the themed rows (or the flat fallback), receipts on the shares. */
+function ReasonSide({
+  title,
+  color,
+  side,
+  onOpen,
+}: {
+  title: string;
+  color: string;
+  side: StationReasonSide;
+  onOpen: (title: string, label: string, ids: string[]) => void;
+}) {
   return (
-    <div>
-      <div className="text-[13px] font-medium text-ink mb-2">{title}</div>
-      {lines.length === 0 ? (
-        <p className="text-[12px] text-ink-3">No conditions stated here.</p>
+    <div className="min-w-0">
+      <h4 className="mb-1.5 text-[13px] font-semibold" style={{ color }}>
+        {title}
+      </h4>
+      {side.base === 0 ? (
+        <p className="py-1 text-[13px] text-ink-3">None measured</p>
       ) : (
-        <ul className="grid gap-1.5">
-          {lines.slice(0, 3).map((c) => (
-            <li key={c.label} className="text-[13px] text-ink-2">
-              {c.label} <span className="text-[11px] text-ink-3 tabular-nums">{c.answers}</span>
-              {lose && c.routes.length > 0 && (
-                <span className="text-[12px] text-ink-3"> {"->"} {c.routes.join(", ")}</span>
-              )}
-            </li>
-          ))}
-        </ul>
+        <ReasonList
+          flat={side.flat}
+          themes={side.themes}
+          every={side.flat}
+          wallColor={AGAINST_COLOR}
+          onOpen={(label, ids) => onOpen(title, label, ids)}
+        />
       )}
     </div>
   );
 }
 
-function ConditionsBlock({ s, filtered }: { s: JourneyStation; filtered: boolean }) {
-  if (s.conditions.win.length === 0 && s.conditions.lose.length === 0)
+/** The reasons behind the station's verdict - the Map panel's ReasonList, both sides. */
+function ReasonsBlock({
+  s,
+  filtered,
+  mode,
+  onOpen,
+}: {
+  s: JourneyStation;
+  filtered: boolean;
+  mode: BlockMode;
+  onOpen: (title: string, label: string, ids: string[]) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const allBuyers = filtered && s.unfiltered.includes("reasons");
+  if (s.key === "awareness")
     return (
       <div className="card p-5">
-        <BlockTitle allBuyers={filtered && s.unfiltered.includes("conditions")}>When the pick goes your way</BlockTitle>
-        <p className="text-[12px] text-ink-3">No conditions are stated at this station.</p>
+        <BlockTitle>The reasons</BlockTitle>
+        <p className="text-[12px] text-ink-3">Awareness answers are coded for the topics they raise, not for reasons behind a pick.</p>
+      </div>
+    );
+  const copy = REASON_COPY[s.key];
+  const r = s.reasons;
+  if (r.win.base === 0 && r.lose.base === 0)
+    return (
+      <div className="card p-5">
+        <BlockTitle allBuyers={allBuyers}>The reasons</BlockTitle>
+        <p className="text-[12px] text-ink-3">No reasons are stated at this station.</p>
       </div>
     );
   return (
     <div className="card p-5">
-      <BlockTitle allBuyers={filtered && s.unfiltered.includes("conditions")}>When the pick goes your way</BlockTitle>
-      <div className="grid md:grid-cols-2 gap-5">
-        <ConditionList title="You win when the buyer" lines={s.conditions.win} lose={false} />
-        <ConditionList title="You lose when the buyer" lines={s.conditions.lose} lose />
-      </div>
-      <p className="mt-3 text-[11px] text-ink-3">The small number is how many answers state the condition.</p>
+      <BlockTitle allBuyers={allBuyers}>The reasons</BlockTitle>
+      {mode === "summary" && !open ? (
+        <Folded sentence={reasonsSentence(s.key, r)} onExpand={() => setOpen(true)} />
+      ) : (
+        <>
+          <div className="grid gap-5 md:grid-cols-2">
+            <ReasonSide title={copy.win} color={FOR_COLOR} side={r.win} onOpen={onOpen} />
+            <ReasonSide title={copy.lose} color={AGAINST_COLOR} side={r.lose} onOpen={onOpen} />
+          </div>
+          <p className="mt-3 text-[11px] italic text-ink-3">{copy.note}</p>
+        </>
+      )}
     </div>
   );
 }
 
-/** Everything measured at this station - the open inventory (decision 1: LISTED). */
 /** The three blocks every station carries, in its own terms: who it routes
- * to, the arguments behind its verdict, the conditions. One component for all. */
-function StationBlocks({ s, filtered }: { s: JourneyStation; filtered: boolean }) {
+ * to, the arguments behind its verdict, the reasons. One component for all.
+ * Keyed by the mode, so switching Summary/Detail resets each block's own
+ * in-place expansion. */
+function StationBlocks({
+  s,
+  filtered,
+  mode,
+  onOpen,
+}: {
+  s: JourneyStation;
+  filtered: boolean;
+  mode: BlockMode;
+  onOpen: (title: string, label: string, ids: string[]) => void;
+}) {
   return (
     <>
       <PicksBlock s={s} filtered={filtered} />
-      <ArgumentsBlock s={s} filtered={filtered} />
-      <ConditionsBlock s={s} filtered={filtered} />
+      <ArgumentsBlock key={`args:${mode}`} s={s} filtered={filtered} mode={mode} />
+      <ReasonsBlock key={`reasons:${mode}`} s={s} filtered={filtered} mode={mode} onOpen={onOpen} />
     </>
   );
 }
 
+/** Everything measured at this station - the open inventory (decision 1: LISTED). */
 function InventoryBlock({ s, filtered }: { s: JourneyStation; filtered: boolean }) {
   const muted = (r: InventoryRow) => !r.asked || r.answers < THIN;
   const cols: Col<InventoryRow>[] = [
@@ -502,6 +672,12 @@ export default function JourneySection({
   const [mounted, setMounted] = useState<Map<StationKey, string[]>>(() => new Map());
 
   const engines = useEngineSet();
+  // Summary/Detail for the reasons and arguments blocks, saved per project
+  // (the run when no project is in the route, e.g. a share link).
+  const params = useParams<{ id?: string }>();
+  const [mode, setMode] = useBlockMode(typeof params?.id === "string" && params.id ? params.id : runId);
+  const [evidence, setEvidence] = useState<EvidenceRequest | null>(null);
+  const closeEvidence = useCallback(() => setEvidence(null), []);
   const loaded = roomKey in views;
   useEffect(() => {
     if (loaded) return;
@@ -607,7 +783,15 @@ export default function JourneySection({
           return (
             <section key={s.key} id={`journey-${s.key}`} className={effSelected === s.key ? "grid gap-5 scroll-mt-4" : "hidden"}>
               <StationHeading s={s} filtered={filtered} onAll={() => onRoom(ALL)} />
-              <StationBlocks s={s} filtered={filtered} />
+              <ModeToggle mode={mode} onMode={setMode} />
+              <StationBlocks
+                s={s}
+                filtered={filtered}
+                mode={mode}
+                onOpen={(title, label, ids) =>
+                  setEvidence({ title: `${title}: "${label}"`, subtitle: `${s.label} - ${s.question}`, ids: ids.slice(0, EVIDENCE_CAP) })
+                }
+              />
               <InventoryBlock s={s} filtered={filtered} />
 
               <div className="section-label text-ink-3 pt-2">Full tables</div>
@@ -626,6 +810,7 @@ export default function JourneySection({
             </section>
           );
         })}
+      {evidence && <EvidencePanel runId={runId} request={evidence} onClose={closeEvidence} />}
     </div>
   );
 }

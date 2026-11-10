@@ -67,7 +67,7 @@ export default function ReasonsSection({
     if (!view) return [];
     const first: Col<ReasonRow> = {
       id: "label",
-      label: "Reason",
+      label: "Argument",
       val: (r) => r.label,
       render: (r) => {
         const mix = selected ? r.mixed[selected.key] : undefined;
@@ -79,7 +79,7 @@ export default function ReasonsSection({
             {!r.isGroup && r.group && <span className="ml-2 text-[11px] text-ink-3">{r.group}</span>}
             {mix && a && b && (
               <Tip
-                tip={`This group's reasons pull opposite ways, so the group row can read close to even. Argued more in "${a.label}" answers: ${mix.toward.join(", ")}. Argued more in "${b.label}" answers: ${mix.away.join(", ")}. Untick "Group related reasons" to see each one.`}
+                tip={`This group's arguments pull opposite ways, so the group row can read close to even. Argued more in "${a.label}" answers: ${mix.toward.join(", ")}. Argued more in "${b.label}" answers: ${mix.away.join(", ")}. Untick "Group related arguments" to see each one.`}
               >
                 <span className="ml-2 cursor-help rounded bg-warning/15 px-1.5 py-0.5 text-[11px] font-normal text-warning">
                   pulls both ways
@@ -143,31 +143,40 @@ export default function ReasonsSection({
   return (
     <section className="card p-6 grid gap-4">
       <div>
-        <h2 className="section-label mb-1">Reasons - the arguments answers make</h2>
+        <h2 className="section-label mb-1">The arguments - every one in your codebook</h2>
         <p className="text-[13px] text-ink-3">
-          How often each reason in your confirmed codebook is argued, whichever brand it argues for. Pick a question type to
+          How often each argument in your confirmed codebook comes up, whichever brand it argues for. Pick a question type to
           compare the arguments behind each verdict.
         </p>
       </div>
       <div className="flex flex-wrap items-center gap-x-5 gap-y-2 text-[13px] text-ink-2">
-        <label className="flex items-center gap-2">
-          Question type
-          <select className="input w-auto text-[13px]" value={selected ? selected.key : POOLED} onChange={(e) => setType(e.target.value)}>
-            {!types && <option value={POOLED}>All types (criteria apart)</option>}
-            {offered.map((t) => (
-              <option key={t.key} value={t.key}>
+        {/* Question type as chips (2026-11-10), matching every sibling control. */}
+        <div className="flex flex-wrap items-center gap-1 text-[12px]" role="group" aria-label="Question type">
+          <span className="mr-0.5 text-ink-3">Question type:</span>
+          {[...(!types ? [{ key: POOLED, label: "All types (criteria apart)" }] : []), ...offered].map((t) => {
+            const on = (selected ? selected.key : POOLED) === t.key;
+            return (
+              <button
+                key={t.key}
+                type="button"
+                onClick={() => setType(t.key)}
+                aria-pressed={on}
+                className={`rounded-full border px-2 py-0.5 transition-colors ${
+                  on ? "border-[var(--color-primary)] bg-primary-soft text-primary" : "border-line text-ink-2 hover:border-ink-3"
+                }`}
+              >
                 {t.label}
-              </option>
-            ))}
-          </select>
-        </label>
+              </button>
+            );
+          })}
+        </div>
         {view.groups ? (
           <label className="flex items-center gap-2">
             <input type="checkbox" checked={grouped} onChange={(e) => setGrouped(e.target.checked)} />
-            Group related reasons
+            Group related arguments
           </label>
         ) : (
-          <span className="text-[12px] text-ink-3">No reason groups are set for this tracker, so every reason shows on its own.</span>
+          <span className="text-[12px] text-ink-3">No argument groups are set for this tracker, so every argument shows on its own.</span>
         )}
       </div>
       {selected?.key === "criteria_taught" && (
@@ -180,8 +189,8 @@ export default function ReasonsSection({
         <p className="text-[12px] text-ink-3">
           <Tip tip={`${selected.noReason} of ${selected.answers} answers`}>
             <span className="cursor-help">
-              {Math.max(1, Math.round((selected.noReason / Math.max(1, selected.answers)) * 100))}% of these answers argue from no
-              reason in the codebook.
+              {Math.max(1, Math.round((selected.noReason / Math.max(1, selected.answers)) * 100))}% of these answers make no
+              argument in the codebook.
             </span>
           </Tip>
         </p>
@@ -195,7 +204,7 @@ export default function ReasonsSection({
       />
       {view.unknownGroupCodes.length > 0 && (
         <p className="text-[12px] text-warning">
-          The reason groups name codes your codebook does not hold: {view.unknownGroupCodes.join(", ")}.
+          The argument groups name codes your codebook does not hold: {view.unknownGroupCodes.join(", ")}.
         </p>
       )}
       <BaseNote>

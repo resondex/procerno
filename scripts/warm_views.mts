@@ -33,6 +33,7 @@ const { computeBrandSummaryCached } = await import(process.cwd() + "/src/lib/eng
 const { computeAnalysisMapCached } = await import(process.cwd() + "/src/lib/engine/analysis_map.ts");
 const { computeDossiersCached } = await import(process.cwd() + "/src/lib/engine/dossiers.ts");
 const { computeBriefCached } = await import(process.cwd() + "/src/lib/engine/brief.ts");
+const { computeStationReasonsCached } = await import(process.cwd() + "/src/lib/engine/journey.ts");
 const { prewarmWrittenBriefs, writtenBriefsEntitled } = await import(process.cwd() + "/src/lib/engine/brief_writer.ts");
 
 const args = process.argv.slice(2);
@@ -63,6 +64,9 @@ for (const pass of [1, 2] as const) {
       ["map", () => computeAnalysisMapCached(run, project)],
       ["dossiers", () => computeDossiersCached(run, project)],
       ["brief", () => computeBriefCached(run, project)],
+      // The Stations reasons blocks (j5, 2026-11-10) - all-buyers request; a
+      // room-filtered open computes its own suffix-keyed entry on first use.
+      ["stations", () => computeStationReasonsCached(run, project)],
     ] as const) {
       const t0 = Date.now();
       try {
