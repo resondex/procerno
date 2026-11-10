@@ -109,6 +109,9 @@ import type { BrandSummaryView, VerdictFact } from "./brand_summary";
  */
 
 export type InsightKind = "engine" | "room" | "rival" | "argument" | "doubt" | "funnel" | "question" | "value" | "switching" | "condition" | "leak";
+// "why" (2026-11-05) and "buyers" (2026-11-09) are retired pills: `look` is
+// consumed only by the unreferenced summary_views.tsx, so the targets stay as
+// written rather than paying a version bump to repoint a dead field.
 export type InsightPill = "stations" | "why" | "rivals" | "buyers" | "table";
 
 export interface Insight {

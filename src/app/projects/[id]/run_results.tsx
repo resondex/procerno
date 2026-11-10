@@ -16,7 +16,6 @@ import AnalysisTier, { type TierView } from "./analysis_views";
 import BriefSection from "./brief_view";
 import JourneySection from "./journey_view";
 import RivalsSection from "./rivals_view";
-import BuyersSection from "./buyers_view";
 import { MetricsSection } from "./metrics_view";
 import { EngineSetContext, MODE_LABEL, TIER_LABEL, type EngineRow } from "./view_parts";
 
@@ -59,12 +58,15 @@ export default function RunResults({
  * BRIEF_PILL_DESIGN_2026-11-04.md - seven memo frames over one /brief fetch)
  * between The Map and The Portfolio. The Verdict absorbed the old
  * Summary group (The brief, Boardroom, Five questions). Behind them sit the
- * analyst tools - Stations, Rivals, Buyers and the pivot - each reading
+ * analyst tools - Stations, Rivals and the pivot - each reading
  * answer_codes under the project's code source. The Why lens and the brief
  * Decision rules pill both retired 2026-11-05: the per-cell why lives in the
  * Map's position panels, the pooled headline findings in the Verdict and
  * Brief, and the full decision-rules explorer mounts inside the Map's
- * Overall band - the pooled open-choice cell's position panel.
+ * Overall band - the pooled open-choice cell's position panel. The Buyers
+ * lens retired 2026-11-09 (Tyler): the Map's rooms band, the buyer bar +
+ * Stations, the Brief's by-situation frame and the pivot's Buying-situation
+ * rows absorbed its matrix.
  */
 function CodesResults({
   runId,
@@ -77,13 +79,13 @@ function CodesResults({
 }) {
   // The Panel lens (2026-11-03): the engine set every section reads under.
   const panel = usePanel(runId, projectId);
-  type CodesView = TierView | "brief" | "journey" | "rivals" | "buyers" | "metrics";
+  type CodesView = TierView | "brief" | "journey" | "rivals" | "metrics";
   const [view, setView] = useState<CodesView>("verdict");
   // The analysis tier is ONE mounted component; its three pills only switch
   // which subview it shows (the last one, while an analyst tool is open).
   const [tierView, setTierView] = useState<TierView>("verdict");
   // The global buyer filter of the Analysis tier ("" = all buyers). Stations
-  // and Buyers follow it; Rivals is measured across all buyers.
+  // follows it; Rivals is measured across all buyers.
   const [room, setRoom] = useState<string>("");
   // The rooms list, reported up by Stations once its first payload lands.
   const [rooms, setRooms] = useState<string[]>([]);
@@ -96,7 +98,7 @@ function CodesResults({
   // requests, a multi-second reload on every return otherwise.
   const [visited, setVisited] = useState<Set<CodesView>>(() => new Set(["verdict"]));
   const TIER: ReadonlySet<CodesView> = new Set(["verdict", "map", "portfolio"]);
-  const ANALYSIS: ReadonlySet<CodesView> = new Set(["journey", "rivals", "buyers", "metrics"]);
+  const ANALYSIS: ReadonlySet<CodesView> = new Set(["journey", "rivals", "metrics"]);
   // The buyer bar needs the rooms list on the FIRST Analysis open, whichever
   // pill it is - Why and Rivals never load the journey payload, so the shell
   // asks for it once itself (a cached read; Stations reuses it from cache).
@@ -148,7 +150,6 @@ function CodesResults({
             ["Analyst tools", [
               ["journey", "Stations"],
               ["rivals", "Rivals"],
-              ["buyers", "Buyers"],
               ["metrics", "Build a table"],
             ]],
           ] as const
@@ -205,7 +206,7 @@ function CodesResults({
         )}
         {ANALYSIS.has(view) && rooms.length > 0 && room !== "" && (
           <p className="text-[12px] text-ink-3">
-            Stations and Buyers follow this buyer; Rivals is measured across all buyers.
+            Stations follows this buyer; Rivals is measured across all buyers.
           </p>
         )}
       </div>
@@ -248,19 +249,6 @@ function CodesResults({
               open("map");
             }}
             onOpenView={(v) => open(v)}
-          />
-        </div>
-      )}
-      {visited.has("buyers") && (
-        <div className={show("buyers")}>
-          <BuyersSection
-            key={k("buyers")}
-            runId={runId}
-            onRooms={reportRooms}
-            onPick={(rk) => {
-              setRoom(rk);
-              open("journey");
-            }}
           />
         </div>
       )}
