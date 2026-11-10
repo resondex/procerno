@@ -11,8 +11,12 @@
  * run the dashboard shows (latest complete, else the latest coded run). A
  * warm cache answers in milliseconds; a miss computes and writes the cache
  * prod then serves. SPENDS pennies on a miss (views:themes and any unjudged
- * context-judge names, both cached 183 days); written-tier briefs are NOT
- * warmed here - that is scripts/warm_written_briefs.mts, with its own go.
+ * context-judge names), and on pass 2 it also warms each tracker's WRITTEN
+ * brief frames (prewarmWrittenBriefs, the client brand only): a frame whose
+ * fact sheet is unchanged is a cache hit and free, a re-keyed one costs one
+ * Opus write (~6 cents) - so a deploy that changed no brief wording warms
+ * written for $0, and a wording deploy pays what the first click would
+ * have. Pass --no-written to skip that part.
  */
 import fs from "node:fs";
 
@@ -29,8 +33,11 @@ const { computeBrandSummaryCached } = await import(process.cwd() + "/src/lib/eng
 const { computeAnalysisMapCached } = await import(process.cwd() + "/src/lib/engine/analysis_map.ts");
 const { computeDossiersCached } = await import(process.cwd() + "/src/lib/engine/dossiers.ts");
 const { computeBriefCached } = await import(process.cwd() + "/src/lib/engine/brief.ts");
+const { prewarmWrittenBriefs } = await import(process.cwd() + "/src/lib/engine/brief_writer.ts");
 
-const filters = process.argv.slice(2).map((s) => s.toLowerCase());
+const args = process.argv.slice(2);
+const noWritten = args.includes("--no-written");
+const filters = args.filter((a) => !a.startsWith("--")).map((s) => s.toLowerCase());
 const projects = (await store.listProjects()).filter(
   (p: { brand: string; archived_at?: string | null }) =>
     !p.archived_at && (filters.length === 0 || filters.some((f) => p.brand.toLowerCase().includes(f)))
@@ -65,6 +72,12 @@ for (const pass of [1, 2] as const) {
         process.stdout.write(`${label} FAILED (${e instanceof Error ? e.message.slice(0, 60) : e}) · `);
         process.exitCode = 1;
       }
+    }
+    if (pass === 2 && !noWritten) {
+      const t0 = Date.now();
+      const w = await prewarmWrittenBriefs(run, project, 10 * 60 * 1000);
+      process.stdout.write(`written ${w.written} new / ${w.cached} cached / ${w.skipped} skipped ${((Date.now() - t0) / 1000).toFixed(0)}s`);
+      if (w.skipped > 0) process.exitCode = 1;
     }
     process.stdout.write("\n");
     if (pass === 2) warmed++;
