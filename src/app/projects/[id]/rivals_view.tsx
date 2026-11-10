@@ -1,10 +1,10 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import type { Dossier, DossierArg, DossierTheme, DossiersView } from "@/lib/engine/dossiers";
+import type { Dossier, DossierArg, DossiersView } from "@/lib/engine/dossiers";
 import type { HeadToHeadViews } from "@/lib/engine/head_to_head";
 import { Boundaries } from "./head_to_head_view";
-import { AnswersModal, type AnswersTarget, useEngineSet, viewQuery } from "./view_parts";
+import { AnswersModal, type AnswersTarget, Fig, plainQuote, ReasonList, useEngineSet, viewQuery } from "./view_parts";
 
 /**
  * Rivals as BRAND DOSSIERS (2026-11-08, the owner's ratified shape -
@@ -65,15 +65,6 @@ function Section({ title, children }: { title: string; children: React.ReactNode
   );
 }
 
-function Fig({ label, value }: { label: React.ReactNode; value: string }) {
-  return (
-    <div className="flex justify-between gap-4 border-b border-dashed border-line py-1.5 text-[13px]">
-      <span className="min-w-0 text-ink-2">{label}</span>
-      <span className="max-w-[60%] text-right tabular-nums text-ink">{value}</span>
-    </div>
-  );
-}
-
 const Line = ({ children }: { children: React.ReactNode }) => <p className="mt-0.5 text-[13px] leading-relaxed text-ink-2">{children}</p>;
 
 function SeeMore({ onClick, label = "See more" }: { onClick: () => void; label?: string }) {
@@ -84,37 +75,60 @@ function SeeMore({ onClick, label = "See more" }: { onClick: () => void; label?:
   );
 }
 
-type PanelKind = "args" | "routes" | "supply";
-const PANEL_TITLE: Record<PanelKind, string> = {
-  args: "The arguments",
-  routes: "The reasons, both ways",
-  supply: "Who supplies its picks",
-};
+type PanelSection = "args" | "routes" | "supply";
+/** The one panel's section ids, stable so a See-more can scroll to its section. */
+const sectionId = (key: string, sec: PanelSection) => `dz-${sec}-${key.replace(/[^a-z0-9]+/gi, "-")}`;
+
+type PanelLink = { label: string; go: () => void };
 
 /**
- * The dossier's "See more" slide-over - the map's position panel chrome
- * (analysis_views PositionPanel: scrim, right-side card, uppercase crumb, the
- * ruled section heading, Escape / x / backdrop to close). One open at a time;
- * never printed; no count tooltips.
+ * The rival's one panel (option D, 2026-11-09): the map's position-panel
+ * grammar - crumb, claim, "The numbers", "The arguments", "The reasons"
+ * (themed, both ways), "The receipts", who supplies its picks, links. The
+ * card's three See-mores all open it, scrolled to their section. Chrome as
+ * the map's panel (scrim, right-side card, Escape / x / backdrop to close);
+ * never printed; no counts.
  */
-function DossierPanel({ d, kind, onClose }: { d: Dossier; kind: PanelKind; onClose: () => void }) {
+function DossierPanel({
+  d,
+  section,
+  onClose,
+  onOpen,
+  links,
+}: {
+  d: Dossier;
+  section: PanelSection | null;
+  onClose: () => void;
+  onOpen?: (t: AnswersTarget) => void;
+  links: PanelLink[];
+}) {
   const closeRef = useRef<HTMLButtonElement>(null);
+  const asideRef = useRef<HTMLElement>(null);
   useEffect(() => {
     closeRef.current?.focus();
-  }, []);
+    if (section) document.getElementById(sectionId(d.key, section))?.scrollIntoView({ block: "start" });
+    else asideRef.current?.scrollTo({ top: 0 });
+  }, [d.key, section]);
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => e.key === "Escape" && onClose();
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [onClose]);
   const ph3 = "mt-6 mb-2 border-t border-line pt-3.5 text-[11px] font-semibold uppercase tracking-[0.08em] text-ink-3";
+  const receipts = d.receipts ?? [];
+  const openReceipt = (id: string, quote?: string) => {
+    if (!onOpen) return;
+    onClose();
+    onOpen({ title: `${d.name} picked`, subtitle: "Open buying questions", ids: [id], ...(quote ? { highlight: [quote] } : {}) });
+  };
   return (
     <>
       <div className="dz-scrim fixed inset-0 z-40 bg-black/35" onClick={onClose} aria-hidden />
       <aside
+        ref={asideRef}
         role="dialog"
         aria-modal="true"
-        aria-label={`${d.name} - ${PANEL_TITLE[kind]}`}
+        aria-label={`${d.name} - the rival panel`}
         className="dz-panel fixed inset-y-0 right-0 z-[45] w-full max-w-[600px] overflow-y-auto border-l border-line bg-surface px-5 pb-10 pt-5 shadow-2xl sm:px-6"
       >
         <button
@@ -126,176 +140,153 @@ function DossierPanel({ d, kind, onClose }: { d: Dossier; kind: PanelKind; onClo
         >
           ×
         </button>
-        <div className="mb-2 text-[11px] uppercase tracking-[0.08em] text-ink-3">
-          {d.name} · {PANEL_TITLE[kind]}
-        </div>
-        {kind === "args" && (
+        <div className="mb-2 text-[11px] uppercase tracking-[0.08em] text-ink-3">Rival · {d.name} · All buyers</div>
+        <h2 className="mb-2.5 max-w-[48ch] text-[1.15rem] font-semibold leading-snug text-ink [text-wrap:balance]">{d.headline}</h2>
+        {d.switching && (
+          <p className="text-[13px] leading-relaxed text-ink-2">
+            {d.switching}
+            {d.switchingNoPick && ` ${d.switchingNoPick}`}
+          </p>
+        )}
+
+        <div className={ph3}>The numbers</div>
+        {d.tiles.map((t) => (
+          <Fig key={t.label} label={t.label} value={t.value} />
+        ))}
+        {d.h2h.kind === "record" ? (
           <>
-            <h2 className="mb-2.5 max-w-[48ch] text-[1.15rem] font-semibold leading-snug text-ink [text-wrap:balance]">Every argument, by how much more often it is argued in {d.argSides[0]}</h2>
-            <div className={ph3}>Arguments</div>
+            <Fig label={d.h2h.youLabel} value={d.h2h.you} />
+            <Fig label={d.h2h.themLabel} value={d.h2h.them} />
+            {d.h2h.asClass && <p className="mt-1 text-[12px] text-ink-3">Asked against the {d.name} class of product, not one brand.</p>}
+          </>
+        ) : d.h2h.alert ? (
+          <div className="mt-2 rounded-lg px-2.5 py-2 text-[12.5px] leading-snug" style={{ background: "var(--dz-amber-bg)", color: "var(--dz-amber)" }}>
+            {d.h2h.note}
+          </div>
+        ) : (
+          <p className="mt-1.5 text-[13px] leading-relaxed text-ink-2">{d.h2h.note}</p>
+        )}
+
+        {d.argsAll.length > 0 && (
+          <div id={sectionId(d.key, "args")} className="scroll-mt-4">
+            <div className={ph3}>The arguments</div>
             <ArgBars args={d.argsAll} sides={d.argSides} />
-          </>
+          </div>
         )}
-        {kind === "routes" && (
-          <>
-            <h2 className="mb-2.5 max-w-[48ch] text-[1.15rem] font-semibold leading-snug text-ink [text-wrap:balance]">Every reason the AI states - to pick you, and to leave you for {d.name}</h2>
-            <p className="text-[13px] leading-relaxed text-ink-2">Most often stated first. The two lists are read on different questions, so their shares never add up across them.</p>
-            {/* Same two-column shape as the map's position panel (you on the
-                left, the rival on the right); a side with nothing reads "None
-                measured" so the grid never collapses to one column. */}
-            <div className="mt-4 grid gap-4 sm:grid-cols-2">
-              {(
+
+        <div id={sectionId(d.key, "routes")} className="scroll-mt-4">
+          <div className={ph3}>The reasons</div>
+          <p className="text-[13px] leading-relaxed text-ink-2">Most often stated first. The two lists are read on different questions, so their shares never add up across them.</p>
+          {/* Same two-column shape as the map's position panel (you on the
+              left, the rival on the right); a side with nothing reads "None
+              measured" so the grid never collapses to one column. */}
+          <div className="mt-4 grid gap-4 sm:grid-cols-2">
+            {(
+              [
                 [
-                  [
-                    "Reasons to pick you",
-                    "var(--dz-yours)",
-                    "Each share is of the questions where the AI gives buyers any reason to pick you.",
-                    d.routesBack ?? [],
-                    d.routesBackThemes ?? [],
-                    d.routesBackDefault,
-                  ],
-                  [
-                    "Reasons to leave you",
-                    "var(--dz-theirs)",
-                    "Each share is of the questions where the AI gives buyers any reason to leave you.",
-                    d.routesAll ?? [],
-                    d.routesThemes ?? [],
-                    d.routesDefault,
-                  ],
-                ] as const
-              ).map(([title, color, note, flat, themes, dflt]) => (
-                <div key={title} className="min-w-0">
-                  <h4 className="mb-1.5 text-[13px] font-semibold" style={{ color }}>
-                    {title}
-                  </h4>
-                  {flat.length === 0 && !dflt ? (
-                    <p className="py-1 text-[13px] text-ink-3">None measured</p>
-                  ) : (
-                    <>
-                      <p className="mb-1 text-[12px] leading-snug text-ink-3">{note}</p>
-                      <ReasonList flat={flat} themes={themes} />
-                      {dflt && <p className="mt-2 text-[12.5px] italic leading-snug text-ink-2">{dflt}</p>}
-                    </>
-                  )}
-                </div>
-              ))}
-            </div>
+                  "Reasons to pick you",
+                  "var(--dz-yours)",
+                  "Each share is of the questions where the AI gives buyers any reason to pick you.",
+                  d.routesBack ?? [],
+                  d.routesBackThemes ?? [],
+                  d.routesBackDefault,
+                ],
+                [
+                  "Reasons to leave you",
+                  "var(--dz-theirs)",
+                  "Each share is of the questions where the AI gives buyers any reason to leave you.",
+                  d.routesAll ?? [],
+                  d.routesThemes ?? [],
+                  d.routesDefault,
+                ],
+              ] as const
+            ).map(([title, color, note, flat, themes, dflt]) => (
+              <div key={title} className="min-w-0">
+                <h4 className="mb-1.5 text-[13px] font-semibold" style={{ color }}>
+                  {title}
+                </h4>
+                {flat.length === 0 && !dflt ? (
+                  <p className="py-1 text-[13px] text-ink-3">None measured</p>
+                ) : (
+                  <>
+                    <p className="mb-1 text-[12px] leading-snug text-ink-3">{note}</p>
+                    <ReasonList flat={flat} themes={themes} wallColor="var(--dz-theirs)" />
+                    {dflt && <p className="mt-2 text-[12.5px] italic leading-snug text-ink-2">{dflt}</p>}
+                  </>
+                )}
+              </div>
+            ))}
+          </div>
+        </div>
+
+        {receipts.length > 0 && (
+          <>
+            <div className={ph3}>The receipts</div>
+            {receipts.map((r) =>
+              r.quote ? (
+                <button
+                  key={r.responseId}
+                  type="button"
+                  onClick={() => openReceipt(r.responseId, r.quote)}
+                  disabled={!onOpen}
+                  className="block w-full text-left disabled:cursor-default"
+                >
+                  <blockquote className="my-2.5 rounded-r-md border-l-[3px] border-line bg-canvas px-3.5 py-2.5 text-[13px] leading-relaxed text-ink hover:border-ink-3">
+                    &ldquo;{plainQuote(r.quote)}&rdquo;
+                  </blockquote>
+                </button>
+              ) : (
+                <button
+                  key={r.responseId}
+                  type="button"
+                  onClick={() => openReceipt(r.responseId)}
+                  disabled={!onOpen}
+                  className="my-1 block text-[12.5px] font-medium text-primary hover:opacity-80 disabled:cursor-default"
+                >
+                  Read the answer {"→"}
+                </button>
+              )
+            )}
           </>
         )}
-        {kind === "supply" && (
-          <>
-            <h2 className="mb-2.5 max-w-[48ch] text-[1.15rem] font-semibold leading-snug text-ink [text-wrap:balance]">Where its picks come from, by company and by assistant</h2>
+
+        {d.supplyAll.assistants.length > 0 && (
+          <div id={sectionId(d.key, "supply")} className="scroll-mt-4">
+            <div className={ph3}>Who supplies its picks</div>
             <p className="text-[13px] leading-relaxed text-ink-2">Share of its picks, beside the share of the questions each answers.</p>
             {d.supplyAll.vendors.length > 0 && (
               <>
-                <div className={ph3}>By company</div>
+                <div className="mt-3 mb-1 text-[12px] font-semibold text-ink-2">By company</div>
                 {d.supplyAll.vendors.map((r) => (
                   <Fig key={r.label} label={r.label} value={`${r.picks} of its picks · answers ${r.answers}`} />
                 ))}
               </>
             )}
-            <div className={ph3}>By assistant</div>
+            <div className="mt-3 mb-1 text-[12px] font-semibold text-ink-2">By assistant</div>
             {d.supplyAll.assistants.map((r) => (
               <Fig key={r.label} label={r.label} value={`${r.picks} of its picks · answers ${r.answers}`} />
             ))}
-          </>
+          </div>
+        )}
+
+        {links.length > 0 && (
+          <div className="mt-6 flex flex-wrap gap-x-5 gap-y-1 border-t border-line pt-3.5">
+            {links.map((l) => (
+              <button
+                key={l.label}
+                type="button"
+                onClick={() => {
+                  onClose();
+                  l.go();
+                }}
+                className="text-[12.5px] font-semibold text-primary hover:opacity-80"
+              >
+                {l.label} {"→"}
+              </button>
+            ))}
+          </div>
         )}
       </aside>
-    </>
-  );
-}
-
-/**
- * One side's reasons in the slide-over. Themes come per buying situation and
- * are merged across situations: a theme row reads like a reason row, and its
- * toggle opens everything beneath at once - the situation buckets, each with
- * its own reasons a step further in. Themes render only when at least one has
- * buckets; otherwise (keyless, a failed theme pass, or an older payload) the
- * flat list renders exactly as before. The list leads with the biggest themes
- * (THEME_TOP; model size priors measured as non-binding) and folds the tail
- * behind one toggle, so the full fall-out stays reachable.
- */
-const THEME_TOP = 8;
-function ReasonList({ flat, themes }: { flat: { label: string; share: string }[]; themes: DossierTheme[] }) {
-  const [open, setOpen] = useState<Set<string>>(() => new Set());
-  const [showAll, setShowAll] = useState(false);
-  if (!themes.some((t) => (t.buckets ?? []).length > 0)) {
-    return (
-      <>
-        {flat.map((r) => (
-          <Fig key={r.label} label={`"${r.label}"`} value={r.share} />
-        ))}
-      </>
-    );
-  }
-  const toggle = (label: string) =>
-    setOpen((prev) => {
-      const next = new Set(prev);
-      if (next.has(label)) next.delete(label);
-      else next.add(label);
-      return next;
-    });
-  const shown = showAll ? themes : themes.slice(0, THEME_TOP);
-  const folded = themes.length - shown.length;
-  return (
-    <>
-      {shown.map((t, ti) => {
-        const buckets = t.buckets ?? [];
-        const tk = `${ti}:${t.label}`;
-        const isOpen = open.has(tk);
-        const situations = new Set(buckets.map((b) => b.scenario)).size;
-        const related = buckets.length === 1 ? Math.max((buckets[0].members ?? []).length, 1) : buckets.length;
-        const closed = situations > 1 ? `Across ${situations} situations` : `+ ${related} related`;
-        return (
-          <div key={tk}>
-            <Fig label={`"${t.label}"`} value={t.share} />
-            {buckets.length > 0 && (
-              <button
-                type="button"
-                onClick={() => toggle(tk)}
-                aria-expanded={isOpen}
-                className="mt-0.5 select-none text-[11.5px] text-ink-3 hover:text-ink-2"
-              >
-                {isOpen ? "Hide ▾" : `${closed} ▸`}
-              </button>
-            )}
-            {isOpen && (
-              <div className="mb-1 ml-2 border-l border-line pl-2.5">
-                {buckets.map((b, i) => (
-                  <div key={`${i}:${b.scenario}:${b.label}`}>
-                    <Fig
-                      label={
-                        <>
-                          {`"${b.label}"`}
-                          <span className="text-ink-3">{` · ${b.scenario}`}</span>
-                        </>
-                      }
-                      value={b.share}
-                    />
-                    {(b.members ?? []).length > 0 && (
-                      <div className="ml-2 text-[12px] [&>div]:py-1 [&>div]:text-[12px] [&_span:first-child]:text-ink-3">
-                        {(b.members ?? []).map((m, k) => (
-                          <Fig key={`${k}:${m.label}`} label={`"${m.label}"`} value={m.share} />
-                        ))}
-                      </div>
-                    )}
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
-        );
-      })}
-      {(folded > 0 || (showAll && themes.length > THEME_TOP)) && (
-        <button
-          type="button"
-          onClick={() => setShowAll((v) => !v)}
-          aria-expanded={showAll}
-          className="mt-1.5 select-none text-[11.5px] text-ink-3 hover:text-ink-2"
-        >
-          {showAll ? "Show the biggest only ▾" : `+ ${folded} smaller reasons ▸`}
-        </button>
-      )}
     </>
   );
 }
@@ -335,17 +326,20 @@ function DossierPage({
   d,
   onOpenCell,
   onOpenView,
+  onOpen,
 }: {
   d: Dossier;
   onOpenCell?: (cellId: string) => void;
   onOpenView?: (v: "metrics") => void;
+  onOpen?: (t: AnswersTarget) => void;
 }) {
   const links: { label: string; go: () => void }[] = [];
   if (d.cells.h2h && onOpenCell) links.push({ label: "Head-to-head on the map", go: () => onOpenCell(d.cells.h2h!) });
   if (d.cells.leaver && onOpenCell) links.push({ label: "Its leaver cell", go: () => onOpenCell(d.cells.leaver!) });
   if (onOpenView) links.push({ label: "Build a table", go: () => onOpenView("metrics") });
   const more = d.argsAll.length > d.args.length;
-  const [panel, setPanel] = useState<PanelKind | null>(null);
+  // The one panel: open (with the section to scroll to, or null for the top) or closed.
+  const [panel, setPanel] = useState<{ section: PanelSection | null } | null>(null);
   const closePanel = useCallback(() => setPanel(null), []);
   return (
     <section className="card px-6 pb-5 pt-5">
@@ -393,7 +387,7 @@ function DossierPage({
         {d.args.length > 0 && (
           <Section title="The arguments">
             <ArgBars args={d.args} sides={d.argSides} />
-            {more && <SeeMore onClick={() => setPanel("args")} />}
+            {more && <SeeMore onClick={() => setPanel({ section: "args" })} />}
           </Section>
         )}
         {(d.routes || d.routesDefault) && (
@@ -401,14 +395,14 @@ function DossierPage({
             {d.routes && <Line>{d.routes}</Line>}
             {d.routesDefault && <Line>{d.routesDefault}</Line>}
             {((d.routesAll ?? []).length > 1 || (d.routesBack ?? []).length > 0 || d.routesBackDefault) && (
-              <SeeMore onClick={() => setPanel("routes")} label={(d.routesBack ?? []).length > 0 || d.routesBackDefault ? "Reasons point back to you too - see both sides" : undefined} />
+              <SeeMore onClick={() => setPanel({ section: "routes" })} label={(d.routesBack ?? []).length > 0 || d.routesBackDefault ? "Reasons point back to you too - see both sides" : undefined} />
             )}
           </Section>
         )}
         {d.supply && (
           <Section title="Who supplies its picks">
             <Line>{d.supply}</Line>
-            {d.supplyAll.assistants.length > 0 && <SeeMore onClick={() => setPanel("supply")} />}
+            {d.supplyAll.assistants.length > 0 && <SeeMore onClick={() => setPanel({ section: "supply" })} />}
           </Section>
         )}
       </div>
@@ -421,7 +415,7 @@ function DossierPage({
           ))}
         </div>
       )}
-      {panel && <DossierPanel d={d} kind={panel} onClose={closePanel} />}
+      {panel && <DossierPanel d={d} section={panel.section} onClose={closePanel} onOpen={onOpen} links={links} />}
     </section>
   );
 }
@@ -516,7 +510,7 @@ export default function RivalsSection({
         </div>
       </section>
 
-      <DossierPage key={sel.key} d={sel} onOpenCell={onOpenCell} onOpenView={onOpenView} />
+      <DossierPage key={sel.key} d={sel} onOpenCell={onOpenCell} onOpenView={onOpenView} onOpen={setOpened} />
 
       {matchup && (
         <section className="card grid gap-2 p-6">

@@ -282,6 +282,8 @@ interface Acc {
   questions: Map<string, Set<string>>;
   /** Distinct cells (intent ids) stating it. */
   cells: Set<string>;
+  /** intent id -> distinct response ids stating it there (capture-only, never served). */
+  cellAnswers: Map<string, Set<string>>;
   ids: string[];
 }
 
@@ -327,6 +329,9 @@ export interface RulesCapture {
    * frequent distinct member wordings (labelOf's order) - evidence of what
    * the label stands for. */
   surfaces?: Map<string, string[]>;
+  /** Per served group id: intent id -> the distinct response ids stating it
+   * there (the map's answer-grain per-cell theme shares). */
+  cellAnswers?: Map<string, Map<string, Set<string>>>;
 }
 
 export async function computeRules(data: ViewData, request: ViewRequest = {}, capture?: RulesCapture): Promise<RulesView> {
@@ -512,7 +517,7 @@ export async function computeRules(data: ViewData, request: ViewRequest = {}, ca
       if (!a) {
         a = {
           side: d.side, ck, rules: 0, answers: new Set(), surfaces: new Map(), routes: new Map(),
-          pools: new Map(), rivals: new Map(), rooms: new Map(), questions: new Map(), cells: new Set(), ids: [],
+          pools: new Map(), rivals: new Map(), rooms: new Map(), questions: new Map(), cells: new Set(), cellAnswers: new Map(), ids: [],
         };
         groups.set(gk, a);
       }
@@ -523,6 +528,9 @@ export async function computeRules(data: ViewData, request: ViewRequest = {}, ca
       rt.n++;
       a.routes.set(rk, rt);
       a.cells.add(intent.id);
+      const ca = a.cellAnswers.get(intent.id) ?? new Set<string>();
+      ca.add(id);
+      a.cellAnswers.set(intent.id, ca);
       if (a.answers.has(id)) continue;
       a.answers.add(id);
       if (a.ids.length < ID_CAP) a.ids.push(id);
@@ -566,6 +574,7 @@ export async function computeRules(data: ViewData, request: ViewRequest = {}, ca
         return;
       }
       if (capture?.cellSets) capture.cellSets.set(idOf(a), [...a.cells]);
+      if (capture?.cellAnswers) capture.cellAnswers.set(idOf(a), new Map([...a.cellAnswers].map(([c, ids]) => [c, new Set(ids)])));
       if (capture?.surfaces) {
         const ordered = [...a.surfaces.entries()].sort((x, y) => y[1] - x[1] || x[0].length - y[0].length || (x[0] < y[0] ? -1 : 1)).map(([w]) => w);
         const label = labelOf(a.surfaces);

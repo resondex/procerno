@@ -1,4 +1,5 @@
 import type { RateCell } from "./view_data";
+import type { DossierTheme } from "./reason_themes";
 
 /**
  * The analysis tier's contract (2026-11-03, ANALYSIS_REDESIGN_2026-11-03.md,
@@ -145,6 +146,12 @@ export interface Position {
   liftSides?: [string, string];
   toward: ConditionItem[];
   away: ConditionItem[];
+  /** am13 (option D): the reasons as the dossier's theme trees, scoped to
+   * this cell's questions - each share is of the cell's questions where the
+   * AI gives buyers any reason that way. Absent keyless, on a failed theme
+   * pass, or when no reason that way touches the cell (flat lists render). */
+  towardThemes?: DossierTheme[];
+  awayThemes?: DossierTheme[];
   receipts: PositionReceipt[];
   /** The move, in the treatment ladder's terms - a template per triage. */
   lever: string;

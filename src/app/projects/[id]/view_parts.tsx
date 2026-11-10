@@ -2,6 +2,7 @@
 
 import { createContext, Fragment, useContext, useEffect, useState, useSyncExternalStore } from "react";
 import type { RateCell } from "@/lib/engine/view_data";
+import type { DossierTheme } from "@/lib/engine/reason_themes";
 import { InlineSpinner } from "../../components/spinner";
 import AnswerText from "./answer_text";
 import { Download, HeadLabel, SortTable, Tip, type Col } from "./table";
@@ -544,5 +545,154 @@ function GroupedTable<T extends EngineRow>({
         </table>
       </div>
     </div>
+  );
+}
+
+// ---------- The reasons (option D, 2026-11-09): one treatment on both surfaces ----------
+
+/** Receipts are verbatim slices of LLM answers, so they arrive with raw
+ * markdown in them. Strip the formatting for display only - the verbatim
+ * form stays in the payload, since the evidence drill matches it against
+ * the answer body for highlighting. */
+export function plainQuote(s: string): string {
+  return s
+    .replace(/\[([^\]]+)\]\([^)]*\)/g, "$1") // links keep their text
+    .replace(/(\*\*|__)(.*?)\1/g, "$2") // bold
+    .replace(/(\*|_)([^*_]+)\1/g, "$2") // italics
+    .replace(/`+([^`]*)`+/g, "$1") // inline code
+    .replace(/^\s{0,3}(#{1,6}\s+|>\s?|[-*+]\s+|\d+\.\s+)/gm, "") // heads, blockquotes, bullets
+    .replace(/\s*\n\s*/g, " ") // a quote renders as one line
+    .trim();
+}
+
+/** A label-left, value-right row on a dashed rule (the panels' figure row). */
+export function Fig({ label, value }: { label: React.ReactNode; value: string }) {
+  return (
+    <div className="flex justify-between gap-4 border-b border-dashed border-line py-1.5 text-[13px]">
+      <span className="min-w-0 text-ink-2">{label}</span>
+      <span className="max-w-[60%] text-right tabular-nums text-ink">{value}</span>
+    </div>
+  );
+}
+
+export const WALL_TIP = "Lost to something the buyer already has, not to an argument";
+
+/** The map's wall chip: a reason that is a state the buyer is in, not an argument. */
+export function WallChip({ color }: { color: string }) {
+  return (
+    <span className="ml-1.5 rounded-[4px] border px-1 text-[10px] uppercase tracking-wide" style={{ borderColor: color, color }} title={WALL_TIP}>
+      wall
+    </span>
+  );
+}
+
+/**
+ * One side's reasons - the dossier's slide-over and the map's position panel
+ * render it the same way. Themes come per buying situation and are merged
+ * across situations: a theme row reads like a reason row, and its toggle
+ * opens everything beneath at once - the situation buckets, each with its own
+ * reasons a step further in. Themes render only when at least one has
+ * buckets; otherwise (keyless, a failed theme pass, or an older payload) the
+ * flat list renders. The list leads with the biggest themes (THEME_TOP) and
+ * folds the tail behind one toggle, so the full fall-out stays reachable.
+ * Rows flagged wall carry the wall chip in `wallColor`.
+ */
+const THEME_TOP = 8;
+export function ReasonList({
+  flat,
+  themes,
+  wallColor,
+}: {
+  flat: { label: string; share: string; wall?: boolean }[];
+  themes: DossierTheme[];
+  wallColor: string;
+}) {
+  const [open, setOpen] = useState<Set<string>>(() => new Set());
+  const [showAll, setShowAll] = useState(false);
+  const quoted = (label: string, wall?: boolean) => (
+    <>
+      {`"${label}"`}
+      {wall && <WallChip color={wallColor} />}
+    </>
+  );
+  if (!themes.some((t) => (t.buckets ?? []).length > 0)) {
+    return (
+      <>
+        {flat.map((r) => (
+          <Fig key={r.label} label={quoted(r.label, r.wall)} value={r.share} />
+        ))}
+      </>
+    );
+  }
+  const toggle = (label: string) =>
+    setOpen((prev) => {
+      const next = new Set(prev);
+      if (next.has(label)) next.delete(label);
+      else next.add(label);
+      return next;
+    });
+  const shown = showAll ? themes : themes.slice(0, THEME_TOP);
+  const folded = themes.length - shown.length;
+  return (
+    <>
+      {shown.map((t, ti) => {
+        const buckets = t.buckets ?? [];
+        const tk = `${ti}:${t.label}`;
+        const isOpen = open.has(tk);
+        const situations = new Set(buckets.map((b) => b.scenario)).size;
+        const related = buckets.length === 1 ? Math.max((buckets[0].members ?? []).length, 1) : buckets.length;
+        const closed = situations > 1 ? `Across ${situations} situations` : `+ ${related} related`;
+        return (
+          <div key={tk}>
+            <Fig label={quoted(t.label, t.wall)} value={t.share} />
+            {buckets.length > 0 && (
+              <button
+                type="button"
+                onClick={() => toggle(tk)}
+                aria-expanded={isOpen}
+                className="mt-0.5 select-none text-[11.5px] text-ink-3 hover:text-ink-2"
+              >
+                {isOpen ? "Hide ▾" : `${closed} ▸`}
+              </button>
+            )}
+            {isOpen && (
+              <div className="mb-1 ml-2 border-l border-line pl-2.5">
+                {buckets.map((b, i) => (
+                  <div key={`${i}:${b.scenario}:${b.label}`}>
+                    <Fig
+                      label={
+                        <>
+                          {`"${b.label}"`}
+                          {b.wall && <WallChip color={wallColor} />}
+                          <span className="text-ink-3">{` · ${b.scenario}`}</span>
+                        </>
+                      }
+                      value={b.share}
+                    />
+                    {(b.members ?? []).length > 0 && (
+                      <div className="ml-2 text-[12px] [&>div]:py-1 [&>div]:text-[12px] [&_span:first-child]:text-ink-3">
+                        {(b.members ?? []).map((m, k) => (
+                          <Fig key={`${k}:${m.label}`} label={quoted(m.label, m.wall)} value={m.share} />
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        );
+      })}
+      {(folded > 0 || (showAll && themes.length > THEME_TOP)) && (
+        <button
+          type="button"
+          onClick={() => setShowAll((v) => !v)}
+          aria-expanded={showAll}
+          className="mt-1.5 select-none text-[11.5px] text-ink-3 hover:text-ink-2"
+        >
+          {showAll ? "Show the biggest only ▾" : "See every reason ▸"}
+        </button>
+      )}
+    </>
   );
 }

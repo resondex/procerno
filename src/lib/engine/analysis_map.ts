@@ -1,8 +1,9 @@
 import { buildResolver, type Resolved, type Resolver } from "./brand_resolve";
 import { containsSeq, famTokens } from "./brand_family";
 import { excludedWords } from "./definition_overlap";
-import { conditionKeysFor, conditionStemKey } from "./condition_groups";
-import { ENUM_TOWARD, GENERIC_AWAY } from "./rules_explorer";
+import { conditionKeysFor, conditionStemKey, isDefaultCondition } from "./condition_groups";
+import { computeRules, ENUM_TOWARD, GENERIC_AWAY, type RuleGroup, type RulesView } from "./rules_explorer";
+import { poolInputs, rankGroups, situationsOf, themeReasons, themeTreeAnswers, type DossierTheme, type ThemeMap } from "./reason_themes";
 import { isWallWording } from "./wall_wording";
 import { commitSentence, insightInputs, pctFine, productNoun, type InsightInputs } from "./summary_insights";
 import { computeBrandSummary, type BrandSummaryView, type Insight } from "./brand_summary";
@@ -169,7 +170,7 @@ const LIFT_MIN = 10;
 const LIFT_MIN_INCIDENCE = 0.05;
 const LIFT_TOP = 8;
 const COND_TOP = 6;
-const RECEIPTS = 5;
+export const RECEIPTS = 5;
 const WALL_MIN = 5;
 const DEFAULT_MARGIN = 0.05;
 
@@ -363,7 +364,7 @@ export async function computeAnalysisMap(
   data: ViewData,
   request: ViewRequest = {},
   debug?: AnalysisMapDebug,
-  pre?: { summary?: BrandSummaryView; inputs?: InsightInputs }
+  pre?: { summary?: BrandSummaryView; inputs?: InsightInputs; rules?: RulesShared }
 ): Promise<AnalysisMapView> {
   const { project, dictionary } = data;
   const eng: ViewRequest = request.engines ? { engines: request.engines } : {};
@@ -1338,25 +1339,6 @@ export async function computeAnalysisMap(
   const cellById = new Map<string, MapCell>();
   const walls: WallProbe[] = [];
 
-  const quoteOf = (r: PoolRow) => (r.code.quote ?? r.code.premise_quote ?? "").trim();
-  const receiptsOf = (rows: PoolRow[]): PositionReceipt[] => {
-    const withQ = rows.filter((r) => quoteOf(r));
-    const pickFrom = [...withQ, ...rows.filter((r) => !quoteOf(r))];
-    // Spread across engines: one per engine first, in order.
-    const out: PoolRow[] = [];
-    const usedModels = new Set<string>();
-    for (const r of pickFrom) {
-      if (out.length >= RECEIPTS) break;
-      if (usedModels.has(r.model)) continue;
-      usedModels.add(r.model);
-      out.push(r);
-    }
-    for (const r of pickFrom) {
-      if (out.length >= RECEIPTS) break;
-      if (!out.includes(r)) out.push(r);
-    }
-    return out.map((r) => (quoteOf(r) ? { responseId: r.code.response_id, quote: quoteOf(r) } : { responseId: r.code.response_id }));
-  };
   const liftsOf = (wins: PoolRow[], others: PoolRow[]): LiftItem[] => {
     const w = wins.filter((r) => r.code.reasons !== null);
     const o = others.filter((r) => r.code.reasons !== null);
@@ -1420,6 +1402,43 @@ export async function computeAnalysisMap(
     const behind = ok.filter(([, x]) => x.t > x.b).length;
     const ahead = ok.filter(([, x]) => x.b > x.t).length;
     return { behind, ahead, vendors: ok.length };
+  };
+
+  /* -- the reasons' themes (am13, option D): the dossier's own two-level
+   * theme pass over the run's rules-explorer groups, per side - same pools,
+   * same inputs, so the themeCall keys match and both surfaces read one
+   * vocabulary through the dt4 cache. Each position draws its own tree with
+   * that cell's questions as the filter. Keyless or non-gpt -> no themes
+   * (flat lists); a failed pass -> no themes on either side and the view is
+   * served uncached so the next open retries. -- */
+  const rulesShared = pre?.rules ?? (await rulesForThemes(data, eng));
+  const sitOf = situationsOf(data.intents);
+  const towardPool = rankGroups(rulesShared.rules.groups.filter((g) => g.side === "you")).filter((g) => !isDefaultCondition(g.label));
+  const awayPool = rankGroups(rulesShared.rules.groups.filter((g) => g.side === "away")).filter((g) => !isDefaultCondition(g.label));
+  let towardThemeMap: ThemeMap | null = null;
+  let awayThemeMap: ThemeMap | null = null;
+  try {
+    const meta = { brand: project.brand, category: project.category, projectId: project.id };
+    const costCtx = { projectId: project.id, runId: data.run.id };
+    const t = poolInputs(towardPool, rulesShared.surfaces, rulesShared.cellSets, sitOf);
+    const a = poolInputs(awayPool, rulesShared.surfaces, rulesShared.cellSets, sitOf);
+    [towardThemeMap, awayThemeMap] = await Promise.all([
+      themeReasons(t.labelCells, t.labelSamples, "toward", meta, costCtx),
+      themeReasons(a.labelCells, a.labelSamples, "away", meta, costCtx),
+    ]);
+  } catch (e) {
+    console.warn(`map reason themes failed, flat lists served: ${e instanceof Error ? e.message : e}`);
+    data.judgeIncomplete = true;
+    towardThemeMap = awayThemeMap = null;
+  }
+  /** One side's tree scoped to a cell's questions, shares at ANSWER grain
+   * (question grain saturates inside a cell: with every engine answering each
+   * question, nearly every common reason touches every question). A side with
+   * no answer stating any of its reasons in the cell stays undefined. */
+  const cellThemes = (pool: RuleGroup[], tm: ThemeMap | null, cellIntents: Set<string>): DossierTheme[] | undefined => {
+    if (!tm) return undefined;
+    const tree = themeTreeAnswers(pool, tm, rulesShared.cellAnswers, sitOf, cellIntents);
+    return tree.length ? tree : undefined;
   };
 
   const ROW_ORDER: Record<BandSlug, string[]> = {
@@ -1598,6 +1617,10 @@ export async function computeAnalysisMap(
         let away: ConditionItem[] = conds.away.slice(0, COND_TOP).map((g) => ({ text: g.label, n: g.n, ...(wallGroups.includes(g) ? { wall: true } : {}) }));
         if (conds.bearing < 5 && away.length === 0 && s.exitFallback?.length) away = s.exitFallback.map((x) => ({ text: `Sent to ${x.name}`, n: x.n }));
 
+        const cellIntents = new Set(s.rows.map((r) => r.intent.id));
+        const towardThemes = cellThemes(towardPool, towardThemeMap, cellIntents);
+        const awayThemes = cellThemes(awayPool, awayThemeMap, cellIntents);
+
         const numerator = verdict === "yours" ? s.you : verdict === "theirs" ? s.them : verdict === "contested" ? [...s.you, ...s.them] : s.rows;
         let lifts = s.lifts ?? (s.lift ? liftsOf(s.lift.wins, s.lift.others) : []);
         if (id === "chooses:open:all" && summary.reasonLift.length) lifts = pooledOpenLifts(lifts);
@@ -1621,6 +1644,8 @@ export async function computeAnalysisMap(
           ...(lifts.length ? { liftSides: s.lift?.sides ?? (["your picks", "rivals' picks"] as [string, string]) } : {}),
           toward,
           away,
+          ...(towardThemes ? { towardThemes } : {}),
+          ...(awayThemes ? { awayThemes } : {}),
           receipts: receiptsOf(numerator.length ? numerator : s.rows),
           lever,
           family,
@@ -1673,6 +1698,52 @@ export async function computeAnalysisMap(
   for (const r of data.responses) if (mapPrompts.has(r.prompt_id) && core.has(r.model ?? data.run.model) && !coded.has(r.id)) uncoded++;
 
   return { casting, dots: { named: t.mentioned, picked: t.chosen }, shareOfDecided, tensions, bands, positions, uncoded, insightCells: placed };
+}
+
+/* ------------------------------ rule pools ------------------------------ */
+
+/** The rules explorer's groups plus the capture the theme pass reads. */
+export interface RulesShared {
+  rules: RulesView;
+  cellSets: Map<string, string[]>;
+  surfaces: Map<string, string[]>;
+  /** Group id -> intent id -> distinct response ids (answer-grain cell shares). */
+  cellAnswers: Map<string, Map<string, Set<string>>>;
+}
+
+/** computeRules with the theme capture, over the engines-only request (the
+ * dossier computes it the same way and hands it in, so it runs once). */
+export async function rulesForThemes(data: ViewData, eng: ViewRequest): Promise<RulesShared> {
+  const cellSets = new Map<string, string[]>();
+  const surfaces = new Map<string, string[]>();
+  const cellAnswers = new Map<string, Map<string, Set<string>>>();
+  const rules = await computeRules(data, eng, { cellSets, surfaces, cellAnswers });
+  return { rules, cellSets, surfaces, cellAnswers };
+}
+
+/* ------------------------------- receipts ------------------------------- */
+
+const quoteOf = (r: PoolRow) => (r.code.quote ?? r.code.premise_quote ?? "").trim();
+
+/** Up to RECEIPTS answers as receipts: quoted rows first, spread across
+ * engines (one per engine first, in order). Shared with the dossiers' pick
+ * receipts (option D). */
+export function receiptsOf(rows: PoolRow[]): PositionReceipt[] {
+  const withQ = rows.filter((r) => quoteOf(r));
+  const pickFrom = [...withQ, ...rows.filter((r) => !quoteOf(r))];
+  const out: PoolRow[] = [];
+  const usedModels = new Set<string>();
+  for (const r of pickFrom) {
+    if (out.length >= RECEIPTS) break;
+    if (usedModels.has(r.model)) continue;
+    usedModels.add(r.model);
+    out.push(r);
+  }
+  for (const r of pickFrom) {
+    if (out.length >= RECEIPTS) break;
+    if (!out.includes(r)) out.push(r);
+  }
+  return out.map((r) => (quoteOf(r) ? { responseId: r.code.response_id, quote: quoteOf(r) } : { responseId: r.code.response_id }));
 }
 
 /* ------------------------------- figures ------------------------------- */
@@ -2040,7 +2111,8 @@ function tensionsOf(
 // am10 (2026-11-07): the answer cards - the pooled open-choice panel slims back to its own question (the target's funnel, its arguments, the picks leaving the category); every other brand's funnel line, the stage, room and question splits, every brand's lift, the vendor-supply lines, the assistants (company, assistant, mode) and the conditions moved to the brief's answer cards (answer_cards.ts). Every other cell's figures are unchanged.
 // am11 (2026-11-07): the open-choice panel's arguments render once - the target's lift rows leave the pooled cell's "The numbers" and its arguments section carries them (every code the brief cites there, from the same summary.reasonLift objects), each lift row now carries its two shares for a sub-line (every cell), and the open-choice card restates the lift lines from Position.lifts.
 // am12 (2026-11-07): the LiftItem.card text lines are gone - the brief's cell answer card now draws the position's lifts as the panel does (bars + share sub-lines). The pooled open-choice cell's lift selection (top N UNION the cited codes) and every lift's wins/others/tip are unchanged.
-const ANALYSIS_MAP_VERSION = "am12";
+// am13 (2026-11-09): option D - positions carry towardThemes / awayThemes (additive): the dossier's per-side two-level theme trees scoped to each cell's questions, with answer-grain shares (distinct answers in the cell); themes ride the dossier's dt4 cache (identical theme-call inputs, one vocabulary). Flat toward/away, walls, badges, levers and verdicts unchanged.
+const ANALYSIS_MAP_VERSION = "am13";
 export function computeAnalysisMapCached(run: Run, project: Project, request: ViewRequest = {}): Promise<AnalysisMapView | null> {
   const r = requestOf(request, false);
   return cachedView("analysis_map", ANALYSIS_MAP_VERSION, run, project, (d) => computeAnalysisMap(d, r), { setupDecision: true, judge: true }, r);

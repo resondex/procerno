@@ -17,7 +17,7 @@ import {
   type PositionStatus,
   type Triage,
 } from "@/lib/engine/analysis_types";
-import { DotTrack, useEngineSet, viewQuery } from "./view_parts";
+import { DotTrack, plainQuote, ReasonList, useEngineSet, viewQuery, WallChip } from "./view_parts";
 import EvidencePanel, { EVIDENCE_CAP, type EvidenceRequest } from "./evidence_panel";
 import RulesSection from "./rules_view";
 
@@ -34,21 +34,6 @@ import RulesSection from "./rules_view";
  */
 
 export type TierView = "verdict" | "map" | "portfolio";
-
-/** Receipts are verbatim slices of LLM answers, so they arrive with raw
- * markdown in them. Strip the formatting for display only - the verbatim
- * form stays in the payload, since the evidence drill matches it against
- * the answer body for highlighting. */
-function plainQuote(s: string): string {
-  return s
-    .replace(/\[([^\]]+)\]\([^)]*\)/g, "$1") // links keep their text
-    .replace(/(\*\*|__)(.*?)\1/g, "$2") // bold
-    .replace(/(\*|_)([^*_]+)\1/g, "$2") // italics
-    .replace(/`+([^`]*)`+/g, "$1") // inline code
-    .replace(/^\s{0,3}(#{1,6}\s+|>\s?|[-*+]\s+|\d+\.\s+)/gm, "") // heads, blockquotes, bullets
-    .replace(/\s*\n\s*/g, " ") // a quote renders as one line
-    .trim();
-}
 
 // ---------- styling: the four verdict colors (colorblind-validated) ----------
 
@@ -759,6 +744,7 @@ function PositionPanel({
   const ids = p.receipts.map((r) => r.responseId);
   const liftMax = Math.max(10, ...p.lifts.map((l) => Math.abs(l.value)));
   const sides = p.liftSides ?? ["your picks", "rivals' picks"];
+  const themed = (p.towardThemes?.length ?? 0) > 0 || (p.awayThemes?.length ?? 0) > 0;
 
   const h3 = "mt-6 mb-2 border-t border-line pt-3.5 text-[11px] font-semibold uppercase tracking-[0.08em] text-ink-3";
   return (
@@ -892,40 +878,51 @@ function PositionPanel({
           </>
         )}
 
-        {(p.toward.length > 0 || p.away.length > 0 || p.cellId === "chooses:open:all") && (
+        {(p.toward.length > 0 || p.away.length > 0 || themed || p.cellId === "chooses:open:all") && (
           <>
             <h3 className={h3}>The reasons</h3>
+            {/* am13 (option D): the dossier's themed rows - answer-grain shares in the
+                cell's questions, situation expanders, wall chips, the "See
+                every reason" fold. The fallback is per COLUMN: a side with no
+                themes (keyless, a failed theme pass, an older payload, or a
+                side the rules grouping does not cover - the doubt cells' "Sent
+                to X" exit lines live only in the flat list) keeps its flat
+                list, and "None measured" means neither exists. */}
             <div className="grid gap-4 sm:grid-cols-2">
               {(
                 [
-                  ["Reasons to pick you", p.toward, "var(--pa-yours)"],
-                  ["Reasons to leave you", p.away, "var(--pa-theirs)"],
+                  ["Reasons to pick you", p.towardThemes ?? [], p.toward, "var(--pa-yours)", "Each share is of the answers here where the AI gives buyers any reason to pick you."],
+                  ["Reasons to leave you", p.awayThemes ?? [], p.away, "var(--pa-theirs)", "Each share is of the answers here where the AI gives buyers any reason to leave you."],
                 ] as const
-              ).map(([title, list, color]) => (
-                <div key={title}>
+              ).map(([title, themes, list, color, note]) => (
+                <div key={title} className="min-w-0">
                   <h4 className="mb-1.5 text-[13px] font-semibold" style={{ color }}>
                     {title}
                   </h4>
-                  <ul className="text-[13px]">
-                    {list.length === 0 && <li className="py-1 text-ink-3">None measured</li>}
-                    {list.map((c, i) => (
-                      <li
-                        key={c.text + i}
-                        className="border-b border-dashed border-line/70 py-1 text-ink"
-                      >
-                        {c.text}
-                        {c.wall && (
-                          <span
-                            className="ml-1.5 rounded-[4px] border px-1 text-[10px] uppercase tracking-wide"
-                            style={{ borderColor: "var(--pa-theirs)", color: "var(--pa-theirs)" }}
-                            title={BTIP.wall}
-                          >
-                            wall
-                          </span>
-                        )}
-                      </li>
-                    ))}
-                  </ul>
+                  {themes.length > 0 ? (
+                    <>
+                      <p className="mb-1 text-[12px] leading-snug text-ink-3">{note}</p>
+                      <ReasonList
+                        flat={themes.map((t) => ({ label: t.label, share: t.share, ...(t.wall ? { wall: true } : {}) }))}
+                        themes={themes}
+                        wallColor="var(--pa-theirs)"
+                      />
+                    </>
+                  ) : list.length > 0 ? (
+                    <ul className="text-[13px]">
+                      {list.map((c, i) => (
+                        <li
+                          key={c.text + i}
+                          className="border-b border-dashed border-line/70 py-1 text-ink"
+                        >
+                          {c.text}
+                          {c.wall && <WallChip color="var(--pa-theirs)" />}
+                        </li>
+                      ))}
+                    </ul>
+                  ) : (
+                    <p className="py-1 text-[13px] text-ink-3">None measured</p>
+                  )}
                 </div>
               ))}
             </div>
