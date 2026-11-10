@@ -155,7 +155,126 @@ export function poolOf(
   return { rows, uncoded: pool.size - rows.length, core };
 }
 
-/** Everything the views read. null = the project reads no codes source yet. */
+/**
+ * The shared load (2026-11-09): the heavy per-run reads, done once per
+ * (run, source, dictionary version, data revision) and shared by every view
+ * computed in this process - a cold dashboard open fires ~10 view routes at
+ * once, and each used to pay its own full read of the run's coded rows.
+ *
+ * READ-ONLY BY CONTRACT: these arrays and their elements are shared across
+ * concurrent computes. A compute that needs a different order or shape
+ * copies locally (`[...data.codes].sort(...)`, `poolOf`'s fresh arrays);
+ * nothing may sort, push, splice or assign into them or their elements.
+ * The same holds for the shared `judged` Map below.
+ */
+interface SharedLoad {
+  source: string;
+  codes: AnswerCodes[];
+  /** Already mapped to the ViewData shape - mapped once, shared. */
+  responses: { id: string; prompt_id: string; model: string | null }[];
+  prompts: Prompt[];
+  intents: Intent[];
+  dictionary: DictionaryEntry[];
+}
+
+/** Entries expire after this long - the backstop for anything the key cannot
+ * see, and the whole invalidation story on a store that cannot fingerprint
+ * (rev "null"). */
+const SHARED_TTL_MS = 60 * 1000;
+/** Each load holds several MB (a run's coded rows); keep only a few. */
+const SHARED_MAX = 4;
+
+interface MemoEntry<T> {
+  at: number;
+  promise: Promise<T>;
+}
+
+/** A promise memo with TTL (from insertion) and LRU eviction. Concurrent
+ * callers share one in-flight promise; a rejected promise is evicted at
+ * once, so a failure is never served to the next caller. */
+function promiseMemo<T>() {
+  const m = new Map<string, MemoEntry<T>>();
+  const drop = (key: string, entry: MemoEntry<T>) => {
+    if (m.get(key) === entry) m.delete(key);
+  };
+  return {
+    get(key: string, make: () => Promise<T>): Promise<T> {
+      // Expired entries are released on any access, so a warm instance never
+      // keeps a run's rows resident past the TTL for want of a re-read.
+      const now = Date.now();
+      for (const [k, e] of m) if (k !== key && now - e.at > SHARED_TTL_MS) m.delete(k);
+      const hit = m.get(key);
+      if (hit && Date.now() - hit.at <= SHARED_TTL_MS) {
+        // Refresh recency (LRU), never the insertion time (TTL).
+        m.delete(key);
+        m.set(key, hit);
+        return hit.promise;
+      }
+      if (hit) m.delete(key);
+      const entry: MemoEntry<T> = { at: Date.now(), promise: make() };
+      m.set(key, entry);
+      entry.promise.catch(() => drop(key, entry));
+      while (m.size > SHARED_MAX) {
+        const oldest = m.keys().next().value as string;
+        m.delete(oldest);
+      }
+      return entry.promise;
+    },
+    /** Evict `key` if it still holds `promise`. */
+    evict(key: string, promise: Promise<T>) {
+      const hit = m.get(key);
+      if (hit && hit.promise === promise) m.delete(key);
+    },
+    /** Test hook: the entry for a key (to age it or inspect it). */
+    peek(key: string): MemoEntry<T> | undefined {
+      return m.get(key);
+    },
+    clear() {
+      m.clear();
+    },
+  };
+}
+
+const loadMemo = promiseMemo<SharedLoad>();
+const judgeMemo = promiseMemo<{ judged: Map<string, string>; incomplete: boolean }>();
+
+/** Test/diagnostic hooks for the shared load (scripts only). */
+export const sharedLoadMemo = {
+  load: loadMemo,
+  judge: judgeMemo,
+  clear() {
+    loadMemo.clear();
+    judgeMemo.clear();
+  },
+  keyOf: async (run: Run, project: Project, source: string) => sharedKey(run, project, source),
+};
+
+async function sharedKey(run: Run, project: Project, source: string): Promise<string> {
+  const rev = await cachedRunRevision(run.id);
+  return `${run.id}:${source}:${project.dictionary_version}:${rev === null ? "null" : rev}`;
+}
+
+async function readShared(run: Run, project: Project, source: string): Promise<SharedLoad> {
+  const [codes, responses, prompts, intents, dictionary] = await Promise.all([
+    store.listAnswerCodes(run.id, source),
+    store.listResponseMeta(run.id),
+    store.listPrompts(project.id),
+    store.listIntents(project.id),
+    store.getDictionary(project.id),
+  ]);
+  return {
+    source,
+    codes,
+    responses: responses.map((r) => ({ id: r.id, prompt_id: r.prompt_id, model: r.model })),
+    prompts,
+    intents,
+    dictionary,
+  };
+}
+
+/** Everything the views read. null = the project reads no codes source yet.
+ * The heavy reads come from the shared load (read-only, see SharedLoad);
+ * the ViewData wrapper is fresh per call. */
 export async function loadViewData(
   run: Run,
   project: Project,
@@ -163,21 +282,19 @@ export async function loadViewData(
 ): Promise<ViewData | null> {
   const source = await store.getCodesSource(project.id);
   if (!source) return null;
-  const [codes, responses, prompts, intents, dictionary, setupDecision, codeGroups] = await Promise.all([
-    store.listAnswerCodes(run.id, source),
-    store.listResponseMeta(run.id),
-    store.listPrompts(project.id),
-    store.listIntents(project.id),
-    store.getDictionary(project.id),
+  const key = await sharedKey(run, project, source);
+  const [shared, setupDecision, codeGroups] = await Promise.all([
+    loadMemo.get(key, () => readShared(run, project, source)),
     opts.setupDecision ? store.getSetupDecision(project.id) : Promise.resolve(undefined),
     opts.codeGroups ? store.getCodeGroups(project.id) : Promise.resolve(undefined),
   ]);
+  const { codes, responses, prompts, intents, dictionary } = shared;
   const data: ViewData = {
     run,
     project,
     source,
     codes,
-    responses: responses.map((r) => ({ id: r.id, prompt_id: r.prompt_id, model: r.model })),
+    responses,
     prompts,
     intents,
     dictionary,
@@ -185,12 +302,19 @@ export async function loadViewData(
     ...(codeGroups !== undefined && { codeGroups }),
   };
   if (opts.judge) {
-    const { judged, incomplete } = await primeContextVerdicts({
-      project,
-      dictionary,
-      codes,
-      meta: { brand: project.brand, category: project.category, projectId: project.id },
-    });
+    const jkey = `${key}:judge`;
+    const primed = judgeMemo.get(jkey, () =>
+      primeContextVerdicts({
+        project,
+        dictionary,
+        codes,
+        meta: { brand: project.brand, category: project.category, projectId: project.id },
+      })
+    );
+    const { judged, incomplete } = await primed;
+    // An incomplete slab is never kept: the next call re-primes and judging
+    // picks up where the slab ended (the per-name verdict cache).
+    if (incomplete) judgeMemo.evict(jkey, primed);
     data.judged = judged;
     data.judgeIncomplete = incomplete;
   }
