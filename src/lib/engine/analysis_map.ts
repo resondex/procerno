@@ -6,7 +6,7 @@ import { computeRules, ENUM_TOWARD, GENERIC_AWAY, type RuleGroup, type RulesView
 import { poolInputs, rankGroups, situationsOf, themeReasons, themeTreeAnswers, type DossierTheme, type ThemeMap } from "./reason_themes";
 import { isWallWording } from "./wall_wording";
 import { commitSentence, insightInputs, pctFine, productNoun, rankedInsights, type InsightInputs } from "./summary_insights";
-import { computeBrandSummary, sharedBrandSummary, type BrandSummaryView, type Insight } from "./brand_summary";
+import { BRAND_SUMMARY_VERSION, computeBrandSummary, sharedBrandSummary, type BrandSummaryView, type Insight } from "./brand_summary";
 import { computeValue, type ValueRow } from "./value";
 import { exitResolver } from "./exits";
 import { ENGINES, engineDisplayLabel } from "./providers";
@@ -2150,8 +2150,14 @@ function tensionsOf(
 // am12 (2026-11-07): the LiftItem.card text lines are gone - the brief's cell answer card now draws the position's lifts as the panel does (bars + share sub-lines). The pooled open-choice cell's lift selection (top N UNION the cited codes) and every lift's wins/others/tip are unchanged.
 // am13 (2026-11-09): option D - positions carry towardThemes / awayThemes (additive): the dossier's per-side two-level theme trees scoped to each cell's questions, with answer-grain shares (distinct answers in the cell); themes ride the dossier's dt4 cache (identical theme-call inputs, one vocabulary). Flat toward/away, walls, badges, levers and verdicts unchanged.
 // am14 (2026-11-09): the naming sweep - the triage whys, the strategy-misfit lever and the chooses band sub say "reasons" (to pick you / to leave you), the word every visible surface uses since the reasons rename; "conditions" survives only in analyst tools.
-const ANALYSIS_MAP_VERSION = "am14";
+export const ANALYSIS_MAP_VERSION = "am14";
+// The fold (2026-11-09, Tyler): a view's cache key carries the versions of
+// the views whose content it embeds, so the lockstep bump convention is
+// mechanical - the map embeds the summary's insights, casting and verdict.
+// Still manual (embedded content with no key ride): the rules explorer's
+// grouping code and the per-type computes the summary's detectors read.
+const MAP_KEY_VERSION = `${ANALYSIS_MAP_VERSION}.${BRAND_SUMMARY_VERSION}`;
 export function computeAnalysisMapCached(run: Run, project: Project, request: ViewRequest = {}): Promise<AnalysisMapView | null> {
   const r = requestOf(request, false);
-  return cachedView("analysis_map", ANALYSIS_MAP_VERSION, run, project, async (d) => (await sharedAnalysisMap(d, r)).view, { setupDecision: true, judge: true }, r);
+  return cachedView("analysis_map", MAP_KEY_VERSION, run, project, async (d) => (await sharedAnalysisMap(d, r)).view, { setupDecision: true, judge: true }, r);
 }

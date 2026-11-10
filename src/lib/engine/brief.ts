@@ -3,8 +3,8 @@ import { matchKey } from "../brand_key";
 import { store } from "../store";
 import { cachedRunRevision } from "./run_revision";
 import { buildResolver } from "./brand_resolve";
-import { sharedBrandSummary, type BrandSummaryView, type SummaryBrand } from "./brand_summary";
-import { sharedAnalysisMap, type MapCellStat } from "./analysis_map";
+import { BRAND_SUMMARY_VERSION, sharedBrandSummary, type BrandSummaryView, type SummaryBrand } from "./brand_summary";
+import { ANALYSIS_MAP_VERSION, sharedAnalysisMap, type MapCellStat } from "./analysis_map";
 import { computeHeadline } from "./headline";
 import { CONTEXT_JUDGE_MODEL, CONTEXT_JUDGE_VERSION } from "./context_judge";
 import { pctFine, type Insight, type InsightInputs } from "./summary_insights";
@@ -1960,7 +1960,11 @@ export async function computeBriefCached(run: Run, project: Project, request: Br
     .update(JSON.stringify([project.brand, project.competitors, project.engine_set, ...extras]))
     .digest("hex")
     .slice(0, 12);
-  const prefix = `brief:${BRIEF_VERSION}:${run.id}:`;
+  // The fold (2026-11-09): the brief embeds summary insights and map figures,
+  // so their versions ride the key; the written layer stays content-addressed
+  // (the sheet hash), so a fold-triggered recompute whose text is unchanged
+  // re-writes nothing.
+  const prefix = `brief:${BRIEF_VERSION}.${ANALYSIS_MAP_VERSION}.${BRAND_SUMMARY_VERSION}:${run.id}:`;
   const base = `${prefix}${source}:${project.dictionary_version}:${projectHash}:${rev}`;
   let key = base;
   if (r.subject !== undefined) key += `:sub:${createHash("sha256").update(matchKey(r.subject)).digest("hex").slice(0, 12)}`;

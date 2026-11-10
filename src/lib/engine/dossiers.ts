@@ -1,6 +1,6 @@
 import { buildResolver } from "./brand_resolve";
-import { sharedBrandSummary, type SummaryBrand } from "./brand_summary";
-import { receiptsOf, sharedAnalysisMap } from "./analysis_map";
+import { BRAND_SUMMARY_VERSION, sharedBrandSummary, type SummaryBrand } from "./brand_summary";
+import { ANALYSIS_MAP_VERSION, receiptsOf, sharedAnalysisMap } from "./analysis_map";
 import { brandHeadline, cardSourcesOf, type Lift, conversionOf, funnelRows, liftEnds, pctOf, picksFromRow, supplyLine, topQuestionRow } from "./answer_cards";
 import type { RuleGroup } from "./rules_explorer";
 import { isDefaultCondition } from "./condition_groups";
@@ -368,7 +368,10 @@ export async function computeDossiers(data: ViewData, request: ViewRequest = {})
 // sides pivot on") that read as contradictions across the two columns.
 // do6 (2026-11-09): option D - dossiers carry pick receipts for the one-panel slide-over; themes shared with the map via reason_themes.
 const DOSSIERS_VERSION = "do6";
+// The fold (2026-11-09): dossiers embed map cells and summary numbers, so
+// their versions ride the key (see analysis_map's fold note).
+const DOSSIERS_KEY_VERSION = `${DOSSIERS_VERSION}.${ANALYSIS_MAP_VERSION}.${BRAND_SUMMARY_VERSION}`;
 export function computeDossiersCached(run: Run, project: Project, request: ViewRequest = {}): Promise<DossiersView | null> {
   const r = requestOf(request);
-  return cachedView("dossiers", DOSSIERS_VERSION, run, project, (d) => computeDossiers(d, r), { judge: true, setupDecision: true }, r);
+  return cachedView("dossiers", DOSSIERS_KEY_VERSION, run, project, (d) => computeDossiers(d, r), { judge: true, setupDecision: true }, r);
 }
