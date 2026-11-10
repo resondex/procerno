@@ -3,11 +3,11 @@ import { matchKey } from "../brand_key";
 import { store } from "../store";
 import { cachedRunRevision } from "./run_revision";
 import { buildResolver } from "./brand_resolve";
-import { computeBrandSummary, type BrandSummaryView, type SummaryBrand } from "./brand_summary";
-import { computeAnalysisMap, type AnalysisMapDebug, type MapCellStat } from "./analysis_map";
+import { sharedBrandSummary, type BrandSummaryView, type SummaryBrand } from "./brand_summary";
+import { sharedAnalysisMap, type MapCellStat } from "./analysis_map";
 import { computeHeadline } from "./headline";
 import { CONTEXT_JUDGE_MODEL, CONTEXT_JUDGE_VERSION } from "./context_judge";
-import { pctFine, rankedInsights, type Insight, type InsightInputs } from "./summary_insights";
+import { pctFine, type Insight, type InsightInputs } from "./summary_insights";
 import { cell, loadViewData, requestOf, type RateCell, type ViewData, type ViewRequest } from "./view_data";
 import { viewsOf } from "./views";
 import type { AnalysisMapView, Position } from "./analysis_types";
@@ -1807,12 +1807,10 @@ export interface BriefRequest extends ViewRequest {
 
 export async function computeBrief(data: ViewData, request: BriefRequest = {}): Promise<BriefView> {
   const eng: ViewRequest = request.engines ? { engines: request.engines } : {};
-  const capture: { inputs?: InsightInputs } = {};
-  const summary = await computeBrandSummary(data, eng, capture);
-  const inputs = capture.inputs!;
-  const ranked = rankedInsights(summary, inputs);
-  const debug = { walls: [], casting: {}, cells: {}, probeInsights: ranked } as unknown as AnalysisMapDebug & { cells: Record<string, MapCellStat> };
-  const map = await computeAnalysisMap(data, eng, debug, { summary, inputs });
+  // The summary and the map (placements of the full ranked list, cell stats)
+  // from the per-load shared computes (view_data computeMemo). READ-ONLY.
+  const { view: summary, inputs } = await sharedBrandSummary(data, eng);
+  const { view: map, debug, ranked } = await sharedAnalysisMap(data, eng);
   // The map's own matcher places every ranked insight (the same order as probeInsights).
   const placements = new Map<string, string>();
   (debug.placements ?? []).forEach((pl, i) => {

@@ -5,13 +5,13 @@ import { conditionKeysFor, conditionStemKey, isDefaultCondition } from "./condit
 import { computeRules, ENUM_TOWARD, GENERIC_AWAY, type RuleGroup, type RulesView } from "./rules_explorer";
 import { poolInputs, rankGroups, situationsOf, themeReasons, themeTreeAnswers, type DossierTheme, type ThemeMap } from "./reason_themes";
 import { isWallWording } from "./wall_wording";
-import { commitSentence, insightInputs, pctFine, productNoun, type InsightInputs } from "./summary_insights";
-import { computeBrandSummary, type BrandSummaryView, type Insight } from "./brand_summary";
+import { commitSentence, insightInputs, pctFine, productNoun, rankedInsights, type InsightInputs } from "./summary_insights";
+import { computeBrandSummary, sharedBrandSummary, type BrandSummaryView, type Insight } from "./brand_summary";
 import { computeValue, type ValueRow } from "./value";
 import { exitResolver } from "./exits";
 import { ENGINES, engineDisplayLabel } from "./providers";
 import { viewsOf, type ViewKey } from "./views";
-import { cachedView, cell, condCache, coreOf, facetsOf, poolOf, requestOf, type PoolRow, type RateCell, type ViewData, type ViewRequest } from "./view_data";
+import { cachedView, cell, computeMemo, condCache, coreOf, facetsOf, poolOf, requestOf, type PoolRow, type RateCell, type ViewData, type ViewRequest } from "./view_data";
 import {
   type AnalysisMapView,
   type Archetype,
@@ -1721,6 +1721,43 @@ export async function rulesForThemes(data: ViewData, eng: ViewRequest): Promise<
   return { rules, cellSets, surfaces, cellAnswers };
 }
 
+const rulesMemo = computeMemo<RulesShared>("rules_for_themes");
+
+/** rulesForThemes once per load epoch and engine set (view_data
+ * computeMemo): the map and the dossiers read the same groups and capture.
+ * READ-ONLY: the maps and the rules view are shared. */
+export function sharedRules(data: ViewData, eng: ViewRequest): Promise<RulesShared> {
+  const e: ViewRequest = eng.engines ? { engines: eng.engines } : {};
+  return rulesMemo.get(data, e, (d) => rulesForThemes(d, e));
+}
+
+export interface SharedAnalysisMap {
+  view: AnalysisMapView;
+  /** Always collected: every cell's side counts, and the placements of the
+   * summary's full ranked list (probeInsights = `ranked`), as the brief reads them. */
+  debug: AnalysisMapDebug & { cells: Record<string, MapCellStat> };
+  rules: RulesShared;
+  /** rankedInsights(summary, inputs) - the list `debug.placements` follows, index for index. */
+  ranked: Insight[];
+}
+
+const mapMemo = computeMemo<SharedAnalysisMap>("analysis_map");
+
+/** The analysis map once per load epoch and engine set (view_data
+ * computeMemo), built on the shared summary and the shared rules; the map
+ * route, the dossiers and the brief all read it. READ-ONLY. */
+export function sharedAnalysisMap(data: ViewData, eng: ViewRequest): Promise<SharedAnalysisMap> {
+  const e: ViewRequest = eng.engines ? { engines: eng.engines } : {};
+  return mapMemo.get(data, e, async (d) => {
+    const { view: summary, inputs } = await sharedBrandSummary(d, e);
+    const rules = await sharedRules(d, e);
+    const ranked = rankedInsights(summary, inputs);
+    const debug = { walls: [], casting: {}, cells: {}, probeInsights: ranked } as unknown as SharedAnalysisMap["debug"];
+    const view = await computeAnalysisMap(d, e, debug, { summary, inputs, rules });
+    return { view, debug, rules, ranked };
+  });
+}
+
 /* ------------------------------- receipts ------------------------------- */
 
 const quoteOf = (r: PoolRow) => (r.code.quote ?? r.code.premise_quote ?? "").trim();
@@ -2116,5 +2153,5 @@ function tensionsOf(
 const ANALYSIS_MAP_VERSION = "am14";
 export function computeAnalysisMapCached(run: Run, project: Project, request: ViewRequest = {}): Promise<AnalysisMapView | null> {
   const r = requestOf(request, false);
-  return cachedView("analysis_map", ANALYSIS_MAP_VERSION, run, project, (d) => computeAnalysisMap(d, r), { setupDecision: true, judge: true }, r);
+  return cachedView("analysis_map", ANALYSIS_MAP_VERSION, run, project, async (d) => (await sharedAnalysisMap(d, r)).view, { setupDecision: true, judge: true }, r);
 }

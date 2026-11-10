@@ -1,10 +1,9 @@
 import { buildResolver } from "./brand_resolve";
-import { computeBrandSummary, type SummaryBrand } from "./brand_summary";
-import { computeAnalysisMap, receiptsOf, rulesForThemes, type AnalysisMapDebug, type MapCellStat } from "./analysis_map";
+import { sharedBrandSummary, type SummaryBrand } from "./brand_summary";
+import { receiptsOf, sharedAnalysisMap } from "./analysis_map";
 import { brandHeadline, cardSourcesOf, type Lift, conversionOf, funnelRows, liftEnds, pctOf, picksFromRow, supplyLine, topQuestionRow } from "./answer_cards";
 import type { RuleGroup } from "./rules_explorer";
 import { isDefaultCondition } from "./condition_groups";
-import type { InsightInputs } from "./summary_insights";
 import { cachedView, poolOf, requestOf, type RateCell, type ViewData, type ViewRequest } from "./view_data";
 import { poolInputs, rankGroups, situationsOf, themeReasons, themeTree, type DossierTheme, type ThemeMap } from "./reason_themes";
 import type { PositionReceipt } from "./analysis_types";
@@ -146,14 +145,12 @@ function headlineOf(b: SummaryBrand, all: SummaryBrand[], f: ReturnType<typeof f
 
 export async function computeDossiers(data: ViewData, request: ViewRequest = {}): Promise<DossiersView> {
   const eng: ViewRequest = request.engines ? { engines: request.engines } : {};
-  const capture: { inputs?: InsightInputs } = {};
-  const summary = await computeBrandSummary(data, eng, capture);
-  const inputs = capture.inputs!;
-  const debug = { walls: [], casting: {}, cells: {} } as unknown as AnalysisMapDebug & { cells: Record<string, MapCellStat> };
-  // The rules explorer's groups, computed once and handed to the map (its
-  // reason themes read the same capture, so the theme calls key identically).
-  const shared = await rulesForThemes(data, eng);
-  const map = await computeAnalysisMap(data, eng, debug, { summary, inputs, rules: shared });
+  // The summary, the map (with its cell stats) and the rules explorer's
+  // groups come from the per-load shared computes (view_data computeMemo):
+  // the map's reason themes read the same rules capture, so the theme calls
+  // key identically. All READ-ONLY here.
+  const { view: summary, inputs } = await sharedBrandSummary(data, eng);
+  const { view: map, debug, rules: shared } = await sharedAnalysisMap(data, eng);
   const { src } = cardSourcesOf(data, eng, summary, inputs);
   const resolve = buildResolver(data.dictionary, data.judged);
   const brand = data.project.brand;

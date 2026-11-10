@@ -2,7 +2,7 @@ import { matchKey } from "../brand_key";
 import { ENGINES, engineDisplayLabel } from "./providers";
 import { buildResolver, type Resolver } from "./brand_resolve";
 import { roleOf } from "./headline";
-import { cachedView, cell, facetsOf, poolOf, requestOf, type EngineFacets, type RateCell, type ViewData, type ViewRequest } from "./view_data";
+import { cachedView, cell, computeMemo, facetsOf, poolOf, requestOf, type EngineFacets, type RateCell, type ViewData, type ViewRequest } from "./view_data";
 import { composeVerdict, detectInsights, insightInputs, type Insight, type InsightInputs } from "./summary_insights";
 import type { AnswerCodes, Project, Run } from "../types";
 
@@ -357,6 +357,20 @@ export async function computeBrandSummary(data: ViewData, request: ViewRequest =
   return { ...summary, insights: detectInsights(summary, inputs), verdict: composeVerdict(summary, inputs) };
 }
 
+const summaryMemo = computeMemo<{ view: BrandSummaryView; inputs: InsightInputs }>("brand_summary");
+
+/** The brand summary and its detectors' inputs, computed once per load epoch
+ * and engine set and shared by the summary route, the map, the dossiers and
+ * the brief (view_data computeMemo). READ-ONLY: callers copy before reshaping. */
+export function sharedBrandSummary(data: ViewData, eng: ViewRequest): Promise<{ view: BrandSummaryView; inputs: InsightInputs }> {
+  const e: ViewRequest = eng.engines ? { engines: eng.engines } : {};
+  return summaryMemo.get(data, e, async (d) => {
+    const capture: { inputs?: InsightInputs } = {};
+    const view = await computeBrandSummary(d, e, capture);
+    return { view, inputs: capture.inputs! };
+  });
+}
+
 // bs1 (2026-10-30): first version; names resolve through the context judge.
 // bs4 (2026-11-03): engine slices carry vendor / tier / mode and the payload lists its core engines (the Panel lens).
 // bs5 (2026-11-03): ranked server-side insights (summary_insights.ts) and a per-slice share of decided.
@@ -370,5 +384,5 @@ export async function computeBrandSummary(data: ViewData, request: ViewRequest =
 const BRAND_SUMMARY_VERSION = "bs12";
 export function computeBrandSummaryCached(run: Run, project: Project, request: ViewRequest = {}): Promise<BrandSummaryView | null> {
   const r = requestOf(request);
-  return cachedView("brand_summary", BRAND_SUMMARY_VERSION, run, project, (d) => computeBrandSummary(d, r), { judge: true, setupDecision: true }, r);
+  return cachedView("brand_summary", BRAND_SUMMARY_VERSION, run, project, async (d) => (await sharedBrandSummary(d, r)).view, { judge: true, setupDecision: true }, r);
 }

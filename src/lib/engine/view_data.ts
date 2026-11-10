@@ -249,6 +249,106 @@ export const sharedLoadMemo = {
   keyOf: async (run: Run, project: Project, source: string) => sharedKey(run, project, source),
 };
 
+/* ---------------------------- compute memos ---------------------------- */
+
+/**
+ * Per-process memos for the inner computes several views re-derive (the
+ * brand summary, the analysis map, the run's rules with their capture), one
+ * level above the shared load: a cold dashboard open fires the summary, map,
+ * dossiers and brief routes at once, and each used to pay the same seconds
+ * of CPU for the same objects.
+ *
+ * Keying: a WeakMap on `data.codes` - the shared load's array identity IS
+ * the load epoch, so entries die with the load's TTL/LRU eviction (no second
+ * TTL) - then a string over everything else the compute reads that the load
+ * key cannot see: the engine set, the project records the view opted into,
+ * the judged-verdict Map's identity, the data revision and the project
+ * fields. A load whose judge prime is incomplete is never memoized (its
+ * verdicts differ call to call; those views are never cached anyway).
+ *
+ * The compute runs on a shallow copy of the caller's ViewData, so a flag a
+ * compute raises (judgeIncomplete on a failed theme pass) is captured with
+ * the result and re-raised on EVERY caller's own data, and such a result is
+ * evicted once settled so the next open retries. A rejected promise is
+ * evicted at once.
+ *
+ * READ-ONLY BY CONTRACT, like SharedLoad: the memoized results are shared
+ * across concurrent computes; nothing may sort, push, splice or assign into
+ * them or anything they reach.
+ */
+const objectIds = new WeakMap<object, number>();
+let nextObjectId = 1;
+const idOf = (o: object | undefined): string => {
+  if (!o) return "-";
+  let id = objectIds.get(o);
+  if (id === undefined) {
+    id = nextObjectId++;
+    objectIds.set(o, id);
+  }
+  return String(id);
+};
+const sha12 = (s: string) => createHash("sha256").update(s).digest("hex").slice(0, 12);
+
+/** Diagnostic counters per memo (scripts only): fresh computes stored,
+ * memo hits, and unmemoized computes (incomplete judge). */
+export const computeMemoStats: Record<string, { computes: number; hits: number; unmemoized: number }> = {};
+
+interface Settled<T> {
+  value: T;
+  incomplete: boolean;
+}
+
+export function computeMemo<T>(name: string) {
+  const byLoad = new WeakMap<object, Map<string, Promise<Settled<T>>>>();
+  const stats = (computeMemoStats[name] = { computes: 0, hits: 0, unmemoized: 0 });
+  const keyOf = (data: ViewData, eng: ViewRequest) => {
+    const p = data.project;
+    return [
+      (eng.engines ?? []).join(","),
+      sha12(JSON.stringify(data.setupDecision ?? null)),
+      sha12(JSON.stringify(data.codeGroups ?? null)),
+      `j${idOf(data.judged)}`,
+      `r${data.revision ?? "null"}`,
+      sha12(JSON.stringify([p.id, p.brand, p.category, p.competitors, p.engine_set])),
+    ].join("|");
+  };
+  return {
+    async get(data: ViewData, eng: ViewRequest, make: (d: ViewData) => Promise<T>): Promise<T> {
+      if (data.judgeIncomplete) {
+        stats.unmemoized++;
+        return make(data);
+      }
+      let inner = byLoad.get(data.codes);
+      if (!inner) {
+        inner = new Map();
+        byLoad.set(data.codes, inner);
+      }
+      const key = keyOf(data, eng);
+      let promise = inner.get(key);
+      if (promise) stats.hits++;
+      else {
+        stats.computes++;
+        const scratch: ViewData = { ...data };
+        promise = make(scratch).then((value) => ({ value, incomplete: !!scratch.judgeIncomplete }));
+        const own = promise;
+        const mine = inner;
+        mine.set(key, own);
+        own.then(
+          (s) => {
+            if (s.incomplete && mine.get(key) === own) mine.delete(key);
+          },
+          () => {
+            if (mine.get(key) === own) mine.delete(key);
+          }
+        );
+      }
+      const settled = await promise;
+      if (settled.incomplete) data.judgeIncomplete = true;
+      return settled.value;
+    },
+  };
+}
+
 async function sharedKey(run: Run, project: Project, source: string): Promise<string> {
   const rev = await cachedRunRevision(run.id);
   return `${run.id}:${source}:${project.dictionary_version}:${rev === null ? "null" : rev}`;
