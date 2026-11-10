@@ -366,7 +366,8 @@ export async function computeBrandSummary(data: ViewData, request: ViewRequest =
 // bs9 (2026-11-04): kind quotas on the served list - each firing kind's best insight gets a slot before any kind gets a second (funnel/value exempt: the verdict carries them), remaining slots by rank, cap 12, effect order kept.
 // bs10 (2026-11-04): the rank-fill slots need effect >= 0.3 (quota slots unfloored), so the served list stops where the findings do instead of padding to the cap.
 // bs11 (2026-11-04): the language pass for the Verdict pill - insight bodies and verdict sentences drop method terms (share of picks, direct matchups, buying situations, with / without web search); the standing sentence carries the commit-rate convention (BRIEF_PILL_DESIGN_2026-11-04.md).
-const BRAND_SUMMARY_VERSION = "bs11";
+// bs12 (2026-11-09): the condition insight's title, body and foot say "reason" (the reasons rename); kind key unchanged.
+const BRAND_SUMMARY_VERSION = "bs12";
 export function computeBrandSummaryCached(run: Run, project: Project, request: ViewRequest = {}): Promise<BrandSummaryView | null> {
   const r = requestOf(request);
   return cachedView("brand_summary", BRAND_SUMMARY_VERSION, run, project, (d) => computeBrandSummary(d, r), { judge: true, setupDecision: true }, r);

@@ -960,9 +960,9 @@ function awayCondition(s: Summary, inp: InsightInputs): Insight | null {
   return {
     key: "away_condition",
     kind: "condition",
-    title: g.wall ? `The wall: "${shorten(g.label, 60)}"` : `The condition you lose on: "${shorten(g.label, 60)}"`,
-    body: `The condition that most often routes the AI away from you is "${shorten(g.label)}"${to ? `, sending buyers to ${to.name}` : ""}, and it appears in ${pct(spread)} of the questions where any condition routes away${blocker}${wall}.`,
-    foot: `At least ${g.rules} rules in ${g.answers} answers across ${g.cells} of ${a.cells} questions with an away condition${to ? `; to ${to.name} ${to.n}` : ""}.${blockerFoot}${wallFoot} Counts are lower bounds: ${a.grouping === "stems" ? "conditions are grouped by their words, and" : ""} wordings the grouping did not join are left out.`,
+    title: g.wall ? `The wall: "${shorten(g.label, 60)}"` : `The reason you lose on: "${shorten(g.label, 60)}"`,
+    body: `The reason that most often routes the AI away from you is "${shorten(g.label)}"${to ? `, sending buyers to ${to.name}` : ""}, and it appears in ${pct(spread)} of the questions where any reason routes away${blocker}${wall}.`,
+    foot: `At least ${g.rules} rules in ${g.answers} answers across ${g.cells} of ${a.cells} questions with an away reason${to ? `; to ${to.name} ${to.n}` : ""}.${blockerFoot}${wallFoot} Counts are lower bounds: ${a.grouping === "stems" ? "reasons are grouped by their words, and" : ""} wordings the grouping did not join are left out.`,
     look: { pill: "why", label: "Why - decision rules" },
     effect: spread,
   };

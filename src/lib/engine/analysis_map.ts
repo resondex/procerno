@@ -1450,7 +1450,7 @@ export async function computeAnalysisMap(
   const BAND_META: Record<BandSlug, { title: string; sub: string }> = {
     chooses: {
       title: "Where the buyer chooses",
-      sub: "These contests vary by buying situation - the situations you confirmed at setup. Each row opens with its All cell, everything pooled; the open-choice one carries the full condition ledger.",
+      sub: "These contests vary by buying situation - the situations you confirmed at setup. Each row opens with its All cell, everything pooled; the open-choice one carries the full reason ledger.",
     },
     fights: { title: "The named fights", sub: "These contests vary by rival - the buyer is held fixed, so this is relative strength." },
     doubts: { title: "The doubts", sub: "One cell per worry you confirmed at the worries gate." },
@@ -1550,7 +1550,7 @@ export async function computeAnalysisMap(
           const conc = s.conceded;
           if (wallGroups.length) {
             triage = "strategy_misfit";
-            why = `The largest condition away ("${wallGroups[0].label}") is a state the buyer is already in, not an argument - it is routed around, not out-argued.`;
+            why = `The largest reason to leave you ("${wallGroups[0].label}") is a state the buyer is already in, not an argument - it is routed around, not out-argued.`;
           } else if (badges.includes("leak")) {
             triage = "strategy_misfit";
             why = `${pctOf(s.leakShare ?? 0)} of the picks here leave the category - the AI answers the buyer's job with something outside it.`;
@@ -1567,7 +1567,7 @@ export async function computeAnalysisMap(
             why = `The deficit holds on all ${vd.behind} vendors with enough answers to read - consistent enough to read as how the product is, not how it is described.`;
           } else if (median) {
             triage = "strategy_misfit";
-            why = `The conditions away ("${topAway.label}") outweigh the conditions toward you${topToward ? ` ("${topToward.label}")` : ""} - they describe more of the buyers than yours do.`;
+            why = `The reasons to leave you ("${topAway.label}") outweigh the reasons to pick you${topToward ? ` ("${topToward.label}")` : ""} - they describe more of the buyers than yours do.`;
           } else {
             triage = "proof_missing";
             why = `${s.taker.name} takes ${pct(themS)} of the side-taking answers against your ${pct(youS)}, with no wall, leak or cross-vendor consistency behind it - the case the AI reads for you is the gap.`;
@@ -1603,7 +1603,7 @@ export async function computeAnalysisMap(
               ? "Spend nothing out-arguing the wall; route around it to the buyers it does not hold."
               : badges.includes("leak")
                 ? "Answer the buyer's whole job where the AI reads, or cede the room knowingly - a leak is a strategy call before it is content."
-                : "Own a case that holds for the typical buyer with no strings attached, or accept the lane - the conditions that send buyers away describe more buyers than yours.",
+                : "Own a case that holds for the typical buyer with no strings attached, or accept the lane - the reasons that send buyers away describe more buyers than yours.",
             "Strategy pulse",
           ],
           product_truth: ["Reality audit before content: confirm the experience against your own data. If the AI is right, the fix is the product.", "Reality audit"],
@@ -2112,7 +2112,8 @@ function tensionsOf(
 // am11 (2026-11-07): the open-choice panel's arguments render once - the target's lift rows leave the pooled cell's "The numbers" and its arguments section carries them (every code the brief cites there, from the same summary.reasonLift objects), each lift row now carries its two shares for a sub-line (every cell), and the open-choice card restates the lift lines from Position.lifts.
 // am12 (2026-11-07): the LiftItem.card text lines are gone - the brief's cell answer card now draws the position's lifts as the panel does (bars + share sub-lines). The pooled open-choice cell's lift selection (top N UNION the cited codes) and every lift's wins/others/tip are unchanged.
 // am13 (2026-11-09): option D - positions carry towardThemes / awayThemes (additive): the dossier's per-side two-level theme trees scoped to each cell's questions, with answer-grain shares (distinct answers in the cell); themes ride the dossier's dt4 cache (identical theme-call inputs, one vocabulary). Flat toward/away, walls, badges, levers and verdicts unchanged.
-const ANALYSIS_MAP_VERSION = "am13";
+// am14 (2026-11-09): the naming sweep - the triage whys, the strategy-misfit lever and the chooses band sub say "reasons" (to pick you / to leave you), the word every visible surface uses since the reasons rename; "conditions" survives only in analyst tools.
+const ANALYSIS_MAP_VERSION = "am14";
 export function computeAnalysisMapCached(run: Run, project: Project, request: ViewRequest = {}): Promise<AnalysisMapView | null> {
   const r = requestOf(request, false);
   return cachedView("analysis_map", ANALYSIS_MAP_VERSION, run, project, (d) => computeAnalysisMap(d, r), { setupDecision: true, judge: true }, r);

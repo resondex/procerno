@@ -348,7 +348,7 @@ export function conditionCard(src: CardSources, openCellId?: string): AnswerCard
       rows.push({
         label: isDefaultCondition(g.label) ? "The default away from you - when no stated reason applies" : `A reason to leave you: "${g.label.slice(0, 60)}"`,
         value: `${pctOf(g.cells / a.cells)}${g.routes[0] ? ` → ${g.routes[0].name}` : ""}`,
-        tip: `${g.cells} of ${a.cells} questions with an away condition`,
+        tip: `${g.cells} of ${a.cells} questions with an away reason`,
       });
     }
   }
@@ -356,11 +356,11 @@ export function conditionCard(src: CardSources, openCellId?: string): AnswerCard
     const big = (g: { label: string }, plain: string, dflt: string) => (isDefaultCondition(g.label) ? dflt : plain);
     if (k.toward[0] && k.towardCells) {
       shown.add(`you:${k.toward[0].label}`);
-      rows.push({ label: big(k.toward[0], "The biggest reason to pick you", "The default toward you - when no stated reason applies"), value: `${pctOf(k.toward[0].cells / k.towardCells)} - "${k.toward[0].label}"`, tip: `${k.toward[0].cells} of ${k.towardCells} questions where any condition routes to it` });
+      rows.push({ label: big(k.toward[0], "The biggest reason to pick you", "The default toward you - when no stated reason applies"), value: `${pctOf(k.toward[0].cells / k.towardCells)} - "${k.toward[0].label}"`, tip: `${k.toward[0].cells} of ${k.towardCells} questions where any reason routes to it` });
     }
     if (k.away[0] && k.awayCells) {
       shown.add(`away:${k.away[0].label}`);
-      rows.push({ label: big(k.away[0], "The biggest reason to leave you", "The default away from you - when no stated reason applies"), value: `${pctOf(k.away[0].cells / k.awayCells)} - "${k.away[0].label}"`, tip: `${k.away[0].cells} of ${k.awayCells} questions where any condition routes away` });
+      rows.push({ label: big(k.away[0], "The biggest reason to leave you", "The default away from you - when no stated reason applies"), value: `${pctOf(k.away[0].cells / k.awayCells)} - "${k.away[0].label}"`, tip: `${k.away[0].cells} of ${k.awayCells} questions where any reason routes away` });
     }
     const seen = new Set<string>();
     for (const g of k.away) {
@@ -370,7 +370,7 @@ export function conditionCard(src: CardSources, openCellId?: string): AnswerCard
       // The biggest reason away is already its own row.
       if (g === k.away[0]) continue;
       shown.add(`away:${g.label}`);
-      rows.push({ label: big(g, `The biggest reason pointing to ${to}`, `The default pointing to ${to} - when no stated reason applies`), value: `${pctOf(g.cells / k.awayCells)} - "${g.label}"`, tip: `${g.cells} of ${k.awayCells} questions where any condition routes away` });
+      rows.push({ label: big(g, `The biggest reason pointing to ${to}`, `The default pointing to ${to} - when no stated reason applies`), value: `${pctOf(g.cells / k.awayCells)} - "${g.label}"`, tip: `${g.cells} of ${k.awayCells} questions where any reason routes away` });
     }
     // The default branches: one row per side, unless a cited row above already shows it.
     const defs = (k.defaults ?? []).filter((d) => d.routes[0] && !shown.has(`${d.side}:${d.label}`));
@@ -396,6 +396,6 @@ export function conditionCard(src: CardSources, openCellId?: string): AnswerCard
     crumb: "What routes buyers away",
     headline,
     rows,
-    ...(openCellId ? { go: { label: "See every condition", target: "map" as const, cellId: openCellId } } : {}),
+    ...(openCellId ? { go: { label: "See every reason", target: "map" as const, cellId: openCellId } } : {}),
   };
 }
