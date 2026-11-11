@@ -89,7 +89,7 @@ export type { RateCell, StationKey };
  */
 
 /** Bumped whenever the payload shape or a number's meaning changes. */
-export const JOURNEY_VERSION = "j5";
+export const JOURNEY_VERSION = "j6"; // j6 (2026-11-10): the tightened wall test (shown wording only, own-brand complaints excluded)
 
 export interface JourneyMetric {
   key: string;
@@ -378,7 +378,8 @@ export function stationSide(
   cellAnswers: Map<string, Map<string, Set<string>>>,
   sitOf: Map<string, string>,
   intents: Set<string>,
-  routesOf: ((g: RuleGroup[]) => string[]) | null
+  routesOf: ((g: RuleGroup[]) => string[]) | null,
+  own?: string | null
 ): StationReasonSide {
   // Station-scoped answers per group (insertion order = the ranked group
   // order, then intent order: deterministic receipt picks).
@@ -469,7 +470,8 @@ export function stationSide(
   });
   if (tots.size === 0) return { base: n, themes: [], flat };
   const same = (a: string, b: string) => a.trim().toLowerCase() === b.trim().toLowerCase();
-  const wallOf = (label: string) => isWallWording([label]);
+  // routesOf is the away side's marker; an away wording naming the brand itself is no wall.
+  const wallOf = (label: string) => isWallWording([label], routesOf ? own : null);
   const themed: StationReasonTheme[] = [...tots.entries()].map(([t, tot]) => {
     const buckets = [...tot.buckets.entries()]
       .map(([s, b]) => {
@@ -581,7 +583,8 @@ export async function computeStationReasons(data: ViewData, request: ViewRequest
         shared.cellAnswers,
         sitOf,
         intents,
-        routesOf
+        routesOf,
+        project.brand
       ),
     };
   }

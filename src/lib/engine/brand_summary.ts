@@ -382,7 +382,7 @@ export function sharedBrandSummary(data: ViewData, eng: ViewRequest): Promise<{ 
 // bs11 (2026-11-04): the language pass for the Verdict pill - insight bodies and verdict sentences drop method terms (share of picks, direct matchups, buying situations, with / without web search); the standing sentence carries the commit-rate convention (BRIEF_PILL_DESIGN_2026-11-04.md).
 // bs12 (2026-11-09): the condition insight's title, body and foot say "reason" (the reasons rename); kind key unchanged.
 // bs13 (2026-11-10): the plain-wording pass - insight titles, bodies and feet drop "reason", "routes", "wall", "leavers", "travels with your wins" and "closest contest" (what sends buyers away / brings them to you, a fixed situation, rivals' customers, best matchup); the argument insight's title says the code comes up when you win. Keys, kinds, numbers and effects unchanged.
-export const BRAND_SUMMARY_VERSION = "bs13";
+export const BRAND_SUMMARY_VERSION = "bs14"; // bs14 (2026-11-10): the away-condition insight reads the tightened wall flag
 export function computeBrandSummaryCached(run: Run, project: Project, request: ViewRequest = {}): Promise<BrandSummaryView | null> {
   const r = requestOf(request);
   return cachedView("brand_summary", BRAND_SUMMARY_VERSION, run, project, async (d) => (await sharedBrandSummary(d, r)).view, { judge: true, setupDecision: true }, r);

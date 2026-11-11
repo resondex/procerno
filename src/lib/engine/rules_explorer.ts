@@ -624,12 +624,8 @@ export async function computeRules(data: ViewData, request: ViewRequest = {}, ca
           .sort((x, y) => y.answers - x.answers),
         ids: a.ids,
         cells: a.cells.size,
-        wall: isWallWording(
-          [...a.surfaces.entries()]
-            .sort((x, y) => y[1] - x[1] || (x[0] < y[0] ? -1 : 1))
-            .slice(0, 5)
-            .map(([w]) => w)
-        ),
+        // The wording shown, never the group's other members (2026-11-10).
+        wall: isWallWording([labelOf(a.surfaces)], side === "you" ? null : project.brand),
       });
     });
   }
@@ -744,7 +740,7 @@ export async function computeRules(data: ViewData, request: ViewRequest = {}, ca
 // ru1 (2026-10-30): first version - one run-wide grouping, context-judged names.
 // ru2 (2026-11-03): + the by-question slices on open choice (payload change).
 // ru3 (2026-11-03): groups carry their distinct cells and the wall test; cellsBySide (payload change).
-const RULES_VERSION = "ru3";
+const RULES_VERSION = "ru4"; // ru4 (2026-11-10): the wall flag reads the shown wording under the tightened test
 export function computeRulesCached(run: Run, project: Project, request: ViewRequest = {}): Promise<RulesView | null> {
   const r = requestOf(request);
   return cachedView("rules", RULES_VERSION, run, project, (d) => computeRules(d, r), { judge: true }, r);

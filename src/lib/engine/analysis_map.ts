@@ -1527,7 +1527,7 @@ export async function computeAnalysisMap(
    * no answer stating any of its reasons in the cell stays undefined. */
   const cellThemes = (pool: RuleGroup[], tm: ThemeMap | null, cellIntents: Set<string>, side: "toward" | "away"): DossierTheme[] | undefined => {
     if (!tm) return undefined;
-    const tree = themeTreeAnswers(pool, tm, rulesShared.cellAnswers, sitOf, cellIntents, { rules: rulesShared.answerRules, side });
+    const tree = themeTreeAnswers(pool, tm, rulesShared.cellAnswers, sitOf, cellIntents, { rules: rulesShared.answerRules, side, own: project.brand });
     return tree.length ? tree : undefined;
   };
 
@@ -1562,7 +1562,7 @@ export async function computeAnalysisMap(
         // Walls: top-3 away groups, possession-shaped.
         const wallGroups: Group[] = [];
         conds.away.slice(0, 3).forEach((g, i) => {
-          const isWall = g.n >= WALL_MIN && isWallWording([g.label, ...g.surfaces]);
+          const isWall = g.n >= WALL_MIN && isWallWording([g.label], project.brand);
           if (isWall) wallGroups.push(g);
           if (g.n >= WALL_MIN) walls.push({ cellId: id, label: g.label, n: g.n, rank: i + 1, wall: isWall, samples: g.surfaces.slice(0, 3) });
         });
@@ -2283,7 +2283,7 @@ function tensionsOf(
 // am13 (2026-11-09): option D - positions carry towardThemes / awayThemes (additive): the dossier's per-side two-level theme trees scoped to each cell's questions, with answer-grain shares (distinct answers in the cell); themes ride the dossier's dt4 cache (identical theme-call inputs, one vocabulary). Flat toward/away, walls, badges, levers and verdicts unchanged.
 // am14 (2026-11-09): the naming sweep - the triage whys, the strategy-misfit lever and the chooses band sub say "reasons" (to pick you / to leave you), the word every visible surface uses since the reasons rename; "conditions" survives only in analyst tools.
 // am15 (2026-11-10): the one-panel redesign - positions carry brands / youShare (the pick split of pick contests, the figure's own numbers), argsMode / argsRows, lift and condition receipts (AnswerRef), condition shares and away routes, notes (the badges' meaning), and theme receipts / routes; the plain-wording pass renames the moves (Keep it, Publish your case, ...) and rewrites every lever, the triage whys, the criteria claims, the band sub and the "Rivals' customers switching" row. Verdicts, badges and numbers unchanged.
-export const ANALYSIS_MAP_VERSION = "am15";
+export const ANALYSIS_MAP_VERSION = "am16"; // am16 (2026-11-10): the tightened wall test - the wall sentence now advises, so it reads the shown wording only
 // The fold (2026-11-09, Tyler): a view's cache key carries the versions of
 // the views whose content it embeds, so the lockstep bump convention is
 // mechanical - the map embeds the summary's insights, casting and verdict.

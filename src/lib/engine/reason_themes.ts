@@ -80,6 +80,9 @@ export interface ThemeEvidence {
   rules: AnswerRules;
   side: ThemeSide;
   accept?: (r: AnswerRule) => boolean;
+  /** The tracker's own brand: an away-side wording that names it is a
+   * complaint to contest, never a wall (isWallWording's `own`). */
+  own?: string;
 }
 
 export const ROUTE_MIN_SHARE = 0.15;
@@ -428,7 +431,7 @@ export function themeTree(
       totGroups.set(t, tg);
     }
   const same = (a: string, b: string) => a.trim().toLowerCase() === b.trim().toLowerCase();
-  const wallOf = (label: string) => isWallWording([label]);
+  const wallOf = (label: string) => isWallWording([label], evidence?.side === "away" ? evidence.own : null);
   return [...tots.entries()]
     .map(([t, tot]) => {
       const buckets = [...tot.buckets.entries()]
@@ -551,7 +554,7 @@ export function themeTreeAnswers(
   const base = all.size;
   if (base === 0) return [];
   const same = (a: string, b: string) => a.trim().toLowerCase() === b.trim().toLowerCase();
-  const wallOf = (label: string) => isWallWording([label]);
+  const wallOf = (label: string) => isWallWording([label], evidence?.side === "away" ? evidence.own : null);
   return [...tots.entries()]
     .map(([t, tot]) => {
       const buckets = [...tot.buckets.entries()]
