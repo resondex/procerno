@@ -39,15 +39,15 @@ type DimKey = "none" | "room" | "worry" | "rival" | "stage" | "question" | "engi
 
 const DIMS: { key: DimKey; label: string }[] = [
   { key: "none", label: "None" },
-  { key: "room", label: "Buyer room" },
+  { key: "room", label: "Buying situation" },
   { key: "worry", label: "Worry" },
-  { key: "rival", label: "Rival or class" },
-  { key: "stage", label: "Stage" },
+  { key: "rival", label: "Rival" },
+  { key: "stage", label: "Question type" },
   { key: "question", label: "Question" },
-  { key: "engine", label: "Engine" },
-  { key: "vendor", label: "Vendor" },
-  { key: "tier", label: "Tier" },
-  { key: "mode", label: "Mode" },
+  { key: "engine", label: "Assistant" },
+  { key: "vendor", label: "AI company" },
+  { key: "tier", label: "Free or paid" },
+  { key: "mode", label: "Search on or off" },
   { key: "brand", label: "Brand" },
   { key: "parent", label: "Brand (parent)" },
   { key: "argument", label: "Argument" },
@@ -78,9 +78,13 @@ const POOL_DEFAULT: Partial<Record<ViewKey, string>> = {
  * contract names stay in measures.ts and in each chip's hover. */
 const POOL_LABEL: Record<ViewKey, string> = {
   ...ENGINE_POOL_LABEL,
-  headline: "Which should I get",
-  offensive_capture: "Rivals' leavers",
-  defensive_hold: "Your customers weighing a move",
+  // The Map's own row names (2026-11-11), so a pool reads the same here as
+  // on the Map and in By question type.
+  awareness_routing: "Awareness",
+  awareness_explainer: "Learning the category",
+  criteria_taught: "Criteria taught",
+  head_to_head_entity: "Head-to-head",
+  offensive_capture: "Rivals' customers switching",
   repertoire: "Habit - stick with you",
 };
 const MEASURE_LABEL: Record<string, string> = {
@@ -226,18 +230,18 @@ export function MetricsSection({ runId, evidence = true }: { runId: string; evid
         poolRows.some((r) => f(data.prompts[r[R.prompt]]));
       switch (k) {
         case "room":
-          return anyPrompt((p) => p.room >= 0) ? null : "no buyer rooms on this pool";
+          return anyPrompt((p) => p.room >= 0) ? null : "these questions are not asked per buying situation";
         case "worry":
-          return anyPrompt((p) => p.worry >= 0) ? null : "no worries on this pool";
+          return anyPrompt((p) => p.worry >= 0) ? null : "these questions carry no worry";
         case "rival":
-          return anyPrompt((p) => p.rival >= 0 || p.angle >= 0) ? null : "no named rival on this pool";
+          return anyPrompt((p) => p.rival >= 0 || p.angle >= 0) ? null : "these questions name no rival";
         case "brand":
           return measure.brand ? null : "this measure is not per brand";
         case "parent":
           if (!measure.brand) return "this measure is not per brand";
           return data.brands.some((b) => b.listed && b.parent) ? null : "no parent companies set";
         case "argument":
-          return poolAsks(pool, "arguments") ? null : "no arguments coded on this pool";
+          return poolAsks(pool, "arguments") ? null : "no arguments are coded for these questions";
         default:
           return null;
       }
@@ -461,7 +465,7 @@ export function MetricsSection({ runId, evidence = true }: { runId: string; evid
       ? [
           {
             id: "stage",
-            label: "Stage",
+            label: "Question type",
             val: (r: PivotRow) => r.v.group ?? "",
             render: (r: PivotRow) => <span className="text-[11px] uppercase tracking-wide text-ink-3">{r.v.group}</span>,
           },

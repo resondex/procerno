@@ -273,7 +273,11 @@ export function PromptHealthBody({
       <p className="text-[13px] text-ink-3 mb-4 -mt-1">
         {flaggedCount > 0
           ? `The health check flagged ${flaggedCount} prompt${flaggedCount === 1 ? "" : "s"} whose answers drifted off-category. Refield with a suggested alternative — history is preserved, and the replacement fields on the next run.`
-          : "All prompts passed the health check."}
+          : shownRun && shownRun.status !== "complete"
+            ? // The check runs when a wave is finalized; a wave still held has
+              // never been checked, so do not claim a pass (2026-11-11).
+              "The health check has not run on this wave yet. Below is every question this tracker asks."
+            : "All prompts passed the health check."}
       </p>
       <div className="grid gap-1">
         {stages.map((st) => (
@@ -331,8 +335,8 @@ export function PromptHealthBody({
         ))}
       </div>
       <p className="text-[13px] text-ink-3 mt-3">
-        Headline rates come from the unbranded prompts — the branded probes
-        are reported separately, since naming the brand guarantees a mention.
+        The headline numbers come only from questions that do not name your brand. Questions that name it
+        (matchups, worries, value) are reported on their own, since naming the brand guarantees a mention.
       </p>
     </>
   );

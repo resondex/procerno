@@ -754,19 +754,20 @@ function MapPage({
   const seg = (on: boolean) => `rounded-full px-4 py-1 text-[13px] ${on ? "bg-primary-soft font-semibold text-ink" : "text-ink-3 hover:text-ink-2"}`;
   return (
     <section className="pb-10">
-      <h2 className={`${T.h2} mb-1`}>The Map</h2>
-      <p className={`${T.sec} mb-4 max-w-[70ch]`}>
-        {rv
-          ? "Every brand the AI names beside you, biggest taker first. Open one for its numbers, what the AI says about it, what sends buyers to it, and the answers behind each."
-          : `Every contest the AI decides, colored by who holds it. Open any one for what to do, then the evidence: the numbers, what the AI says about the ${ctx.cat.plural} and about the buyer, and the answers behind each.`}
-      </p>
-      <div className="mb-5 inline-flex rounded-full border border-line bg-surface p-[3px]" role="tablist">
-        <button type="button" role="tab" aria-selected={!rv} className={seg(!rv)} onClick={() => setView("contest")}>
-          By contest
-        </button>
-        <button type="button" role="tab" aria-selected={rv} className={seg(rv)} onClick={() => setView("rival")}>
-          By rival
-        </button>
+      {/* One row: the title and the two views. The long description is gone
+          (2026-11-11) - it pushed the map half a screen down and said nothing
+          the legend and the first click do not. */}
+      <div className="mb-3 flex flex-wrap items-center gap-x-4 gap-y-2">
+        <h2 className={T.h2}>The Map</h2>
+        <div className="inline-flex rounded-full border border-line bg-surface p-[3px]" role="tablist">
+          <button type="button" role="tab" aria-selected={!rv} className={seg(!rv)} onClick={() => setView("contest")}>
+            By contest
+          </button>
+          <button type="button" role="tab" aria-selected={rv} className={seg(rv)} onClick={() => setView("rival")}>
+            By rival
+          </button>
+        </div>
+        <span className={`${T.cap} text-ink-3`}>{rv ? "Every brand the AI names beside you. Open one for the detail." : "Open any contest for what to do and the answers behind it."}</span>
       </div>
       {rv ? (
         <RivalGrid dossiers={dossiers} loading={dossiersLoading} ctx={ctx} />
@@ -826,7 +827,7 @@ function ContestMap({
     `rounded-full border px-3 py-0.5 text-[12px] ${on ? "border-primary font-semibold text-primary" : "border-line text-ink-2 hover:border-ink-3"}`;
   const on = mineOnly && mineCount > 0;
   return (
-    <div className="grid gap-5">
+    <div className="grid gap-3">
       <div className="flex flex-wrap items-center gap-x-4 gap-y-2 text-[13px] text-ink-3">
         {(["yours", "contested", "theirs", "nocall"] as const).map((v) => (
           <span key={v} className="flex items-center gap-1.5">
@@ -835,6 +836,15 @@ function ContestMap({
           </span>
         ))}
         <span className="ml-auto flex flex-wrap items-center gap-2">
+          <button type="button" className={seg(prefs.layout === "aligned")} onClick={() => update({ ...prefs, layout: "aligned" })}>
+            Aligned
+          </button>
+          <button type="button" className={seg(prefs.layout === "dossier")} onClick={() => update({ ...prefs, layout: "dossier" })}>
+            Cards
+          </button>
+          <button type="button" className={seg(arrange)} onClick={() => setArrange(!arrange)}>
+            Arrange order {arrange ? "▴" : "▾"}
+          </button>
           <button
             type="button"
             aria-pressed={on}
@@ -853,19 +863,7 @@ function ContestMap({
         </span>
       </div>
 
-      <div className="grid gap-2">
-        <div className="flex flex-wrap items-center gap-2 text-[12px]">
-          <span className="text-ink-3">Layout:</span>
-          <button type="button" className={seg(prefs.layout === "aligned")} onClick={() => update({ ...prefs, layout: "aligned" })}>
-            Aligned
-          </button>
-          <button type="button" className={seg(prefs.layout === "dossier")} onClick={() => update({ ...prefs, layout: "dossier" })}>
-            Cards
-          </button>
-          <button type="button" className={seg(arrange)} onClick={() => setArrange(!arrange)}>
-            Arrange order {arrange ? "▴" : "▾"}
-          </button>
-        </div>
+      <div className={arrange ? "grid gap-2" : "hidden"}>
         {arrange && (
           <div className="grid gap-4 rounded-[10px] border border-line bg-surface p-3 sm:grid-cols-2">
             <OrderList title="Buying situations" note="Drag to reorder - card order (cards) or the order within each row (aligned)." items={orderedRooms} onReorder={(f, t) => reorder("rooms", f, t)} />

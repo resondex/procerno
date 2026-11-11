@@ -141,6 +141,9 @@ export default function ProjectDashboard({
   }, [wantSuggestions, id, gateSuggestions]);
 
   const [unarchiveError, setUnarchiveError] = useState<string | null>(null);
+  const [archiveOpen, setArchiveOpen] = useState(false);
+  const [archiveText, setArchiveText] = useState("");
+  const [archiving, setArchiving] = useState(false);
   const refresh = useCallback(async () => {
     // ONE roundtrip renders the whole page: the dictionary rides with
     // the detail, and the follow-ups (run progress, trend) fetch in
@@ -453,14 +456,14 @@ export default function ProjectDashboard({
   const flaggedPrompts = prompts.filter(
     (p) => p.flagged === 1 && p.retired === 0
   );
-  // The Run button's task bubble: nothing measured yet and nothing running.
+  // Nothing measured yet and nothing running: the empty state offers the first run.
   const needsFirstRun = completeRuns.length === 0 && !activeRun;
   const archived = Boolean(project.archived_at);
 
   return (
     <div className="grid gap-8">
       {/* The tracker header (redesigned 2026-11-10): one card. Name and the
-          two actions people take (share, run) on top; the standing tools as a
+          one action people take (share) on top; the Run button is retired (2026-11-11) - a one-off wave starts from the Schedule dialog; the standing tools as a
           quiet row beneath, so the only pill row on the page is the results
           navigation. */}
       <div>
@@ -477,18 +480,6 @@ export default function ProjectDashboard({
             </div>
             <span className="flex items-center gap-4">
               <ShareButton projectId={id} />
-              <TaskButton
-                label={
-                  // Measured-but-held reads as done, not in progress - the wave
-                  // is coded and nothing is running; the next run waits on the
-                  // hold, so the button stays disabled but stops claiming work.
-                  (activeRun || launchingFirstRun) && !codedHeld ? "Run in progress…" : "Run"
-                }
-                primary
-                bubble={needsFirstRun && !launchingFirstRun && !archived ? "dot" : null}
-                onClick={() => setOpenModal("run")}
-                disabled={initPhase || archived}
-              />
             </span>
           </div>
           <div className="flex flex-wrap items-center gap-x-5 gap-y-2 border-t border-line px-5 py-2.5">
@@ -525,19 +516,9 @@ export default function ProjectDashboard({
               {!archived && (
                 <button
                   type="button"
-                  onClick={async () => {
-                    if (
-                      !confirm(
-                        `Archive the "${project.name}" tracker? It leaves your trackers list and stops running, but every run and answer is kept - you can unarchive it any time.`
-                      )
-                    )
-                      return;
-                    const res = await fetch(`/api/projects/${id}`, {
-                      method: "PATCH",
-                      headers: { "Content-Type": "application/json" },
-                      body: JSON.stringify({ archived: true }),
-                    });
-                    if (res.ok) window.location.href = "/app";
+                  onClick={() => {
+                    setArchiveText("");
+                    setArchiveOpen(true);
                   }}
                   className="text-[13px] text-ink-3 hover:text-ink"
                 >
@@ -684,8 +665,13 @@ export default function ProjectDashboard({
         </>
       ) : (
         !activeRun && !launchingFirstRun && (
-          <div className="card px-5 py-10 text-center text-sm text-ink-3">
-            Launch your first run to start measuring — results land here.
+          <div className="card grid justify-items-center gap-3 px-5 py-10 text-center text-sm text-ink-3">
+            Nothing is measured yet - results land here after the first run.
+            {needsFirstRun && !initPhase && !archived && (
+              <button type="button" onClick={() => setOpenModal("run")} className="btn-primary px-4 py-1.5 text-sm">
+                Start the first run
+              </button>
+            )}
           </div>
         )
       )}
@@ -783,6 +769,50 @@ export default function ProjectDashboard({
         </Modal>
       )}
 
+      {archiveOpen && (
+        <Modal title="Archive this tracker" onClose={() => setArchiveOpen(false)}>
+          <form
+            className="grid gap-4"
+            onSubmit={async (e) => {
+              e.preventDefault();
+              if (archiveText.trim().toLowerCase() !== "archive" || archiving) return;
+              setArchiving(true);
+              const res = await fetch(`/api/projects/${id}`, {
+                method: "PATCH",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ archived: true }),
+              });
+              if (res.ok) window.location.href = "/app";
+              else setArchiving(false);
+            }}
+          >
+            <p className="text-sm text-ink-2">
+              &quot;{project.name}&quot; leaves your trackers list and stops running. Every run and answer is kept, and you
+              can unarchive it any time.
+            </p>
+            <label className="grid gap-1.5 text-sm font-medium">
+              Type &quot;archive&quot; to confirm
+              <input
+                autoFocus
+                value={archiveText}
+                onChange={(e) => setArchiveText(e.target.value)}
+                className="input max-w-56"
+                autoComplete="off"
+                spellCheck={false}
+              />
+            </label>
+            <div className="flex items-center gap-4">
+              <button type="submit" disabled={archiveText.trim().toLowerCase() !== "archive" || archiving} className="btn-primary px-4 py-1.5 text-sm">
+                {archiving ? "Archiving..." : "Archive tracker"}
+              </button>
+              <button type="button" onClick={() => setArchiveOpen(false)} className="text-sm text-ink-3 hover:text-ink">
+                Cancel
+              </button>
+            </div>
+          </form>
+        </Modal>
+      )}
+
       {openModal === "schedule" && (
         <Modal title="Automatic runs" onClose={() => setOpenModal(null)}>
           <div className="grid gap-3">
@@ -834,6 +864,13 @@ export default function ProjectDashboard({
                 }}
               />
             </div>
+            {!initPhase && !archived && (
+              <div className="border-t border-line pt-4">
+                <button type="button" onClick={() => setOpenModal("run")} className="text-[13px] font-medium text-primary hover:opacity-80">
+                  Run one wave now
+                </button>
+              </div>
+            )}
           </div>
         </Modal>
       )}
@@ -986,16 +1023,18 @@ export default function ProjectDashboard({
                 onChange={(e) => setFlag({ evidenceDrawer: e.target.checked })}
               />
               <span>
-                <span className="font-medium">Evidence drawer</span>
+                <span className="font-medium">Show the answers behind the numbers</span>
                 <span className="block text-[13px] text-ink-3">
-                  Lets anyone viewing this tracker click a figure in the
-                  Workbench and read the answers behind it. Switch off to keep
-                  the raw answers out of a client&apos;s hands.
+                  Lets anyone viewing this tracker open &quot;See examples&quot; and read the
+                  answers behind a number. Switch off to keep the raw answers
+                  out of a client&apos;s hands.
                 </span>
               </span>
             </label>
 
-            {detail.staff && (
+            {/* Human review only moves the pre-codes metrics; on a tracker read
+                from answer codes it changes nothing, so it is not offered. */}
+            {detail.staff && !project.codes_source && (
               <label className="flex items-start gap-3 text-sm border-t border-line pt-4">
                 <input
                   type="checkbox"

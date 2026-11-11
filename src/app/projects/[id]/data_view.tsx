@@ -138,7 +138,8 @@ const themeLine = (ts?: DossierTheme[]) => (ts && ts[0] ? `${ts[0].label} ${ts[0
 function sideLine(themes: DossierTheme[] | undefined, flat: Position["toward"]): string {
   const t = themeLine(themes);
   if (t) return t;
-  const c = flat[0];
+  // "otherwise ..." is the AI's default branch, not a reason: skip it.
+  const c = flat.find((x) => !/^otherwise\b/i.test(x.text));
   return c ? `${c.text}${c.share ? ` ${c.share}` : ""}` : "";
 }
 
@@ -161,7 +162,9 @@ function factsOf(c: MapCell, p: Position | undefined): Facts {
     num: f?.value ?? "",
     numLabel: f?.label ?? "",
     numTip: f?.tip,
-    leader: lead ? `${lead.name} ${lead.share}` : p?.taker ?? "",
+    // A contest you hold has no taker: the engine says "Nobody", which under
+    // "Who leads" read as if no one led. You lead it.
+    leader: lead ? `${lead.name} ${lead.share}` : c.verdict === "yours" && (!p?.taker || p.taker === "Nobody") ? "You" : p?.taker ?? "",
     about,
     to: p ? sideLine(p.towardThemes, p.toward) : "",
     away: p ? sideLine(p.awayThemes, p.away) : "",
