@@ -8,12 +8,16 @@ import {
   TRIAGE_LABEL,
   type AnalysisDecision,
   type AnalysisMapView,
+  type AnswerRef,
+  type ArgsMode,
   type CellVerdict,
   type ConditionItem,
   type LiftItem,
   type MapCell,
   type Position,
+  type PositionNotes,
   type PositionReceipt,
+  type RouteShare,
   type Triage,
 } from "@/lib/engine/analysis_types";
 import type { DossierTheme } from "@/lib/engine/reason_themes";
@@ -35,50 +39,12 @@ import { passageOf } from "@/lib/answer_passage";
  * across all buyers. Every "See answers" opens the answer passages inline,
  * fetched lazily by id and cached for the panel's life.
  *
- * The engine contract's new fields are all OPTIONAL and typed locally here
- * (PositionX / DossierX); every feature degrades to today's payload when a
- * field is absent - flat lists with relative bars, lifts only, the receipts'
- * quotes as the proof - and a section with nothing to show says so in a
- * sentence rather than vanishing.
+ * The engine contract's newer fields are all OPTIONAL (analysis_types.ts);
+ * every feature degrades to the older payload when a field is absent - flat
+ * lists with relative bars, lifts only, the receipts' quotes as the proof -
+ * and a section with nothing to show says so in a sentence rather than
+ * vanishing.
  */
-
-// ---------- the engine contract's optional fields, typed locally ----------
-
-export interface AnswerRef {
-  responseId: string;
-  find: string;
-}
-export type RouteShare = { name: string; share: string };
-export type ThemeX = DossierTheme & { receipts?: AnswerRef[]; routes?: RouteShare[] };
-export type CondX = ConditionItem & { receipts?: AnswerRef[]; routes?: RouteShare[]; share?: string };
-export type LiftX = LiftItem & { receipts?: AnswerRef[] };
-export type ArgsMode = "compare" | "rival" | "all" | "topics";
-export interface PositionNotes {
-  wall?: string;
-  inHouse?: true;
-  leak?: true;
-  soft?: "one_assistant" | "asked_for";
-}
-export type PositionX = Omit<Position, "lifts" | "toward" | "away" | "towardThemes" | "awayThemes"> & {
-  lifts: LiftX[];
-  toward: CondX[];
-  away: CondX[];
-  towardThemes?: ThemeX[];
-  awayThemes?: ThemeX[];
-  brands?: { name: string; share: string; proof: PositionReceipt[] }[];
-  youShare?: string;
-  argsMode?: ArgsMode;
-  argsRows?: { label: string; share: string; receipts: AnswerRef[] }[];
-  notes?: PositionNotes;
-};
-export type MapX = Omit<AnalysisMapView, "positions"> & { positions: Record<string, PositionX> };
-export type DossierArgX = DossierArg & { receipts?: AnswerRef[] };
-export type DossierX = Omit<Dossier, "routesThemes" | "routesBackThemes" | "argsAll"> & {
-  routesThemes: ThemeX[];
-  routesBackThemes: ThemeX[];
-  argsAll: DossierArgX[];
-  rooms?: { cellId: string; label: string; them: string; you: string }[];
-};
 
 // ---------- small shared words and helpers ----------
 
@@ -350,9 +316,9 @@ function themeMembers(t: DossierTheme): string[] {
 }
 const themeWall = (t: DossierTheme) => !!t.wall || (t.buckets ?? []).some((b) => b.wall || (b.members ?? []).some((m) => m.wall));
 
-const themeRows = (ts: ThemeX[]): CondRowData[] =>
+const themeRows = (ts: DossierTheme[]): CondRowData[] =>
   ts.slice(0, 8).map((t) => ({ label: t.label, share: t.share, weight: pctNum(t.share), wall: themeWall(t), routes: t.routes, members: themeMembers(t), receipts: t.receipts }));
-const flatRows = (cs: CondX[]): CondRowData[] =>
+const flatRows = (cs: ConditionItem[]): CondRowData[] =>
   // The count drives the bar (shares on one base round alike); the share prints when the payload carries one.
   cs.map((c) => ({ label: c.text, share: c.share, weight: c.n, wall: c.wall, routes: c.routes, receipts: c.receipts, tip: `About ${c.n} answers` }));
 const shareRows = (cs: { label: string; share: string }[]): CondRowData[] => cs.map((c) => ({ label: c.label, share: c.share, weight: pctNum(c.share) }));
@@ -385,7 +351,7 @@ const BUYER_HINT =
   "What the AI says about the buyer when it sends them each way. The number is how often it comes up, among the answers here where the AI says anything like it. Open one to read the answers.";
 
 /** Lift rows: the code, its signed points, the two shares as bars, answers. */
-function LiftRows({ lifts, sides }: { lifts: (LiftX | DossierArgX)[]; sides: [string, string] }) {
+function LiftRows({ lifts, sides }: { lifts: (LiftItem | DossierArg)[]; sides: [string, string] }) {
   return (
     <>
       {lifts.map((l) => (
@@ -484,10 +450,10 @@ export type PanelView =
 
 interface Ctx {
   runId: string;
-  map: MapX;
+  map: AnalysisMapView;
   cells: Map<string, MapCell>;
-  dossiers: DossierX[] | null;
-  findDossier: (name: string) => DossierX | undefined;
+  dossiers: Dossier[] | null;
+  findDossier: (name: string) => Dossier | undefined;
   cat: { plural: string; singular: string };
   decision: AnalysisDecision | null;
   editable: boolean;
@@ -495,12 +461,12 @@ interface Ctx {
   open: (v: PanelView) => void;
   onClose: () => void;
   onBuildTable?: () => void;
-  h2hRow: (d: DossierX) => HeadToHeadRow | null;
+  h2hRow: (d: Dossier) => HeadToHeadRow | null;
   brand: string;
 }
 
 /** The badge meanings as sentences: a fixed situation, your own cheaper option, picks leaving the category. */
-export function notesOf(p: PositionX, cell?: MapCell): PositionNotes {
+export function notesOf(p: Position, cell?: MapCell): PositionNotes {
   if (p.notes) return p.notes;
   const b = cell?.badges ?? [];
   const out: PositionNotes = {};
@@ -531,7 +497,7 @@ const softLine = (n: PositionNotes) =>
       ? "This number is softer than it looks: most of the answers on your side come from one assistant."
       : null;
 
-function MoveBox({ p, ctx, why }: { p: PositionX; ctx: Ctx; why: string[] }) {
+function MoveBox({ p, ctx, why }: { p: Position; ctx: Ctx; why: string[] }) {
   const entry = ctx.decision?.positions[p.cellId];
   const active: Triage = entry?.decided ?? p.triageSuggested;
   const inPlaybook = !!entry?.inPlaybook;
@@ -625,7 +591,7 @@ function MoveBox({ p, ctx, why }: { p: PositionX; ctx: Ctx; why: string[] }) {
   );
 }
 
-function ContestPanel({ p, ctx }: { p: PositionX; ctx: Ctx }) {
+function ContestPanel({ p, ctx }: { p: Position; ctx: Ctx }) {
   const cell = ctx.cells.get(p.cellId);
   const notes = notesOf(p, cell);
   const soft = softLine(notes);
@@ -784,7 +750,7 @@ function ScopeChips({ name, cellId, scoped, ctx }: { name: string; cellId: strin
   );
 }
 
-function RivalScoped({ name, p, ctx }: { name: string; p: PositionX; ctx: Ctx }) {
+function RivalScoped({ name, p, ctx }: { name: string; p: Position; ctx: Ctx }) {
   const b = (p.brands ?? []).find((x) => normName(x.name) === normName(name))!;
   const awayThemes = (p.awayThemes ?? []).filter((t) => (t.routes ?? []).some((r) => normName(r.name) === normName(name)));
   const awayFlat = p.away.filter((c) => (c.routes ?? []).some((r) => normName(r.name) === normName(name)));
@@ -850,7 +816,7 @@ function TwoBar({ you, them }: { you: string; them: string }) {
 }
 
 /** A rival's share beside yours per buying situation: the dossier's rooms, or the open-choice room cells' pick splits. */
-export function roomsOf(d: DossierX, ctx: { map: MapX }): { cellId: string; label: string; them: string; you: string }[] {
+export function roomsOf(d: Dossier, ctx: { map: AnalysisMapView }): { cellId: string; label: string; them: string; you: string }[] {
   if (d.rooms && d.rooms.length > 0) return d.rooms;
   const out: { cellId: string; label: string; them: string; you: string }[] = [];
   for (const band of ctx.map.bands)
@@ -864,7 +830,7 @@ export function roomsOf(d: DossierX, ctx: { map: MapX }): { cellId: string; labe
   return out;
 }
 
-function RivalAll({ d, from, ctx }: { d: DossierX; from?: string | null; ctx: Ctx }) {
+function RivalAll({ d, from, ctx }: { d: Dossier; from?: string | null; ctx: Ctx }) {
   const [evidence, setEvidence] = useState<EvidenceRequest | null>(null);
   const [answers, setAnswers] = useState<AnswersTarget | null>(null);
   const closeAnswers = useCallback(() => setAnswers(null), []);

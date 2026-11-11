@@ -2,8 +2,8 @@
 
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import type { RateCell } from "@/lib/engine/view_data";
-import type { AnalysisDecision, MapBand, MapCell, MapRow, Triage } from "@/lib/engine/analysis_types";
-import type { DossiersView } from "@/lib/engine/dossiers";
+import type { AnalysisDecision, AnalysisMapView, MapBand, MapCell, MapRow, Triage } from "@/lib/engine/analysis_types";
+import type { Dossier, DossiersView } from "@/lib/engine/dossiers";
 import type { HeadToHeadViews } from "@/lib/engine/head_to_head";
 import { useEngineSet, viewQuery } from "./view_parts";
 import {
@@ -15,8 +15,6 @@ import {
   SlideOver,
   VCOLOR,
   VWORD,
-  type DossierX,
-  type MapX,
   type PanelCtx,
   type PanelView,
 } from "./analysis_panel";
@@ -96,7 +94,7 @@ export default function AnalysisHub({
 }) {
   const engines = useEngineSet();
   const q = viewQuery({ engines });
-  const [map, setMap] = useState<MapX | null | undefined>(undefined);
+  const [map, setMap] = useState<AnalysisMapView | null | undefined>(undefined);
   const [error, setError] = useState<string | null>(null);
   const [decision, setDecision] = useState<AnalysisDecision | null>(null);
   const [dossiers, setDossiers] = useState<DossiersView | null | undefined>(undefined);
@@ -117,7 +115,7 @@ export default function AnalysisHub({
     fetch(`/api/runs/${runId}/analysis_map${q}`)
       .then(async (r) => {
         if (!r.ok) throw new Error(`The analysis could not load (${r.status}).`);
-        const d = (await r.json()) as { view: MapX | null };
+        const d = (await r.json()) as { view: AnalysisMapView | null };
         if (live) setMap(d.view);
       })
       .catch((e: Error) => live && setError(e.message));
@@ -177,7 +175,7 @@ export default function AnalysisHub({
     for (const b of map?.bands ?? []) for (const r of b.rows) for (const c of r.cells) m.set(c.id, c);
     return m;
   }, [map]);
-  const list = useMemo(() => (dossiers?.dossiers ?? []) as unknown as DossierX[], [dossiers]);
+  const list = useMemo(() => (dossiers?.dossiers ?? []) as unknown as Dossier[], [dossiers]);
   const findDossier = useCallback(
     (name: string) => {
       const n = normName(name);
@@ -253,7 +251,7 @@ function Overview({
   onGo,
   onRivals,
 }: {
-  map: MapX;
+  map: AnalysisMapView;
   ctx: PanelCtx;
   mine: Set<string>;
   onGo: (to: HubGo) => void;
@@ -533,7 +531,7 @@ const innerLabelOf = (c: MapCell) =>
  * its size. A row with only an every-buyer cell (social validation, learning
  * the category, premium) puts it in the All column - that cell IS the row,
  * everything pooled. */
-function AlignedRow({ row, chooses, rooms, perRow, positions, onOpen }: { row: MapRow; chooses: boolean; rooms: string[]; perRow?: number; positions: MapX["positions"]; onOpen: (id: string) => void }) {
+function AlignedRow({ row, chooses, rooms, perRow, positions, onOpen }: { row: MapRow; chooses: boolean; rooms: string[]; perRow?: number; positions: AnalysisMapView["positions"]; onOpen: (id: string) => void }) {
   const allCell = row.cells.find((c) => cellKeyOf(c.id) === "all");
   const rest0 = row.cells.filter((c) => c !== allCell);
   const rest = chooses
@@ -596,7 +594,7 @@ function DossierLine({ stage, cell, onOpen, hasPosition }: { stage: string; cell
  * so no band's cells ever read bigger than another's. An All card opens each
  * band with the pooled lines; rows that exist only pooled (social validation,
  * learning the category, holding your own) live on it. */
-function DossierBand({ rows, chooses, rooms, perRow, positions, onOpen }: { rows: MapRow[]; chooses: boolean; rooms: string[]; perRow?: number; positions: MapX["positions"]; onOpen: (id: string) => void }) {
+function DossierBand({ rows, chooses, rooms, perRow, positions, onOpen }: { rows: MapRow[]; chooses: boolean; rooms: string[]; perRow?: number; positions: AnalysisMapView["positions"]; onOpen: (id: string) => void }) {
   const byRow = rows.map((row) => ({ row, byKey: new Map(row.cells.map((c): [string, MapCell] => [cellKeyOf(c.id), c])) }));
   const thingKeys: string[] = [];
   for (const r of byRow) for (const k of r.byKey.keys()) if (isThingKey(k) && !thingKeys.includes(k)) thingKeys.push(k);
@@ -697,7 +695,7 @@ function MapPage({
   dossiers,
   dossiersLoading,
 }: {
-  map: MapX;
+  map: AnalysisMapView;
   ctx: PanelCtx;
   view: "contest" | "rival";
   setView: (v: "contest" | "rival") => void;
@@ -705,7 +703,7 @@ function MapPage({
   setMineOnly: (v: boolean) => void;
   mineCount: number;
   prefScope: string;
-  dossiers: DossierX[];
+  dossiers: Dossier[];
   dossiersLoading: boolean;
 }) {
   const rv = view === "rival";
@@ -743,7 +741,7 @@ function ContestMap({
   mineCount,
   prefScope,
 }: {
-  map: MapX;
+  map: AnalysisMapView;
   ctx: PanelCtx;
   mineOnly: boolean;
   setMineOnly: (v: boolean) => void;
@@ -873,7 +871,7 @@ function ContestMap({
 
 // ---------- the Map: by rival ----------
 
-function RivalCard({ d, ctx }: { d: DossierX; ctx: PanelCtx }) {
+function RivalCard({ d, ctx }: { d: Dossier; ctx: PanelCtx }) {
   const up = d.args.find((a) => a.value > 0);
   const down = d.args.find((a) => a.value < 0);
   const share = d.tiles[1];
@@ -925,10 +923,10 @@ function RivalCard({ d, ctx }: { d: DossierX; ctx: PanelCtx }) {
   );
 }
 
-function RivalGrid({ dossiers, loading, ctx }: { dossiers: DossierX[]; loading: boolean; ctx: PanelCtx }) {
+function RivalGrid({ dossiers, loading, ctx }: { dossiers: Dossier[]; loading: boolean; ctx: PanelCtx }) {
   if (loading) return <p className="text-[13px] text-ink-3">Loading the rivals...</p>;
   if (dossiers.length === 0) return <p className="text-[13.5px] text-ink-3">The AI names no other brand often enough to read on its own.</p>;
-  const pc = (d: DossierX) => parseFloat((d.tiles[1]?.value ?? "0").replace(/[^0-9.]/g, "")) || 0;
+  const pc = (d: Dossier) => parseFloat((d.tiles[1]?.value ?? "0").replace(/[^0-9.]/g, "")) || 0;
   const sorted = [...dossiers].sort((a, b) => pc(b) - pc(a));
   const lead = sorted.filter((d) => d.prominent);
   const rest = sorted.filter((d) => !d.prominent);
