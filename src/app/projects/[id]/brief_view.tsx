@@ -95,18 +95,17 @@ const BRIEF_CSS = `
 }
 @media (max-width: 639px){ .pb-paper{ padding: 1.6rem 1.15rem 1.4rem; border-radius: 8px; } }
 .pb-memo{
-  /* The site's own faces: Inter for text, Instrument Serif for display -
-   * Georgia appeared nowhere else in the product (Tyler's catch). */
+  /* Inter throughout, headings in the dashboard's own semibold (2026-11-10,
+   * Tyler): the landing page's italic serif appears nowhere else in the app. */
   font-family: var(--font-inter), system-ui, -apple-system, sans-serif;
   color: var(--ink); font-size: 15.5px; line-height: 1.7; max-width: 88ch;
 }
 @media (max-width: 639px){ .pb-memo{ font-size: 15px; line-height: 1.65; } }
 .pb-memo .pb-num, .pb-memo table, .pb-memo .pb-score{ font-variant-numeric: lining-nums tabular-nums; }
 .pb-title{
-  font-family: var(--font-instrument-serif), Georgia, serif;
-  font-size: 40px; line-height: 1.08; font-weight: 400; letter-spacing: 0; margin: 0; text-wrap: balance;
+  font-size: 30px; line-height: 1.12; font-weight: 600; letter-spacing: -0.02em; margin: 0; text-wrap: balance;
 }
-@media (max-width: 639px){ .pb-title{ font-size: 31px; } }
+@media (max-width: 639px){ .pb-title{ font-size: 25px; } }
 .pb-meta{ margin-top: .55rem; font-size: 12.5px; line-height: 1.5; color: var(--ink-3); }
 .pb-meta span + span::before{ content: "\\00B7"; margin: 0 .5em; }
 .pb-head-rule{ margin: 1.5rem 0 0; border: 0; border-top: 1px solid var(--line); }
@@ -114,8 +113,7 @@ const BRIEF_CSS = `
 .pb-section:first-of-type.pb-nohead{ margin-top: 1.6em; }
 .pb-section.pb-nohead{ margin-top: 1.1em; }
 .pb-h{
-  font-family: var(--font-instrument-serif), Georgia, serif;
-  font-size: 26px; line-height: 1.2; font-weight: 400; margin: 0 0 .45em; color: var(--ink);
+  font-size: 19px; line-height: 1.25; font-weight: 600; letter-spacing: -0.015em; margin: 0 0 .45em; color: var(--ink);
 }
 .pb-p{ margin: 0; }
 .pb-p + .pb-p{ margin-top: .9em; }
@@ -218,10 +216,10 @@ html.pb-printing .pb-fact{ border-bottom: 0 !important; color: inherit !importan
   }
   html.pb-printing #pb-print-root .pb-paper{ border:0 !important; padding:0 !important; background:#fff !important; max-width:none !important; }
   html.pb-printing #pb-print-root .pb-memo{ max-width:none !important; font-size:11pt; line-height:1.55; }
-  html.pb-printing #pb-print-root .pb-title{ font-size:21pt; }
+  html.pb-printing #pb-print-root .pb-title{ font-size:18pt; }
   html.pb-printing #pb-print-root .pb-meta, html.pb-printing #pb-print-root .pb-foot,
   html.pb-printing #pb-print-root .pb-list .pb-num{ color:#555 !important; }
-  html.pb-printing #pb-print-root .pb-h{ font-size:14pt; break-after:avoid; page-break-after:avoid; }
+  html.pb-printing #pb-print-root .pb-h{ font-size:12.5pt; break-after:avoid; page-break-after:avoid; }
   html.pb-printing #pb-print-root .pb-head-rule, html.pb-printing #pb-print-root .pb-foot,
   html.pb-printing #pb-print-root .pb-table td{ border-color:#bbb !important; }
   html.pb-printing #pb-print-root .pb-table{ font-size:10.5pt; }
