@@ -23,10 +23,42 @@
  */
 import { store } from "../store";
 
+/**
+ * 2026-11-10: the 5-minute expiry made the first dashboard open after any
+ * short break pay the full hash (~3.5s) on every view request before a
+ * single cached page could be read. The stored revision now carries the
+ * cheap signature it was computed under (store.runDataSignature: counts and
+ * newest timestamps, milliseconds). Past the 5-minute fresh window a lookup
+ * recomputes only the signature: unchanged means the stored revision is
+ * still right and is kept; changed means the data moved, so the full hash
+ * runs. HARD_TTL_MS bounds the one case the signature cannot see - a row
+ * edited in place by a path that does not stamp created_at (no app path does;
+ * a hand-run SQL update could). purgeRunRevision still forces a fresh hash.
+ */
 const TTL_MS = 5 * 60 * 1000;
+const HARD_TTL_MS = 24 * 60 * 60 * 1000;
 const memo = new Map<string, { rev: string; at: number }>();
 
 const keyOf = (runId: string) => `run_rev:${runId}`;
+
+interface Stored {
+  rev: string;
+  sig: string;
+  /** When the full hash was computed. */
+  hashedAt: number;
+  /** When the signature last confirmed it. */
+  checkedAt: number;
+}
+
+function parseStored(raw: string | null): Stored | null {
+  if (!raw || raw[0] !== "{") return null; // a pre-2026-11-10 row is the bare revision: treat as absent
+  try {
+    const v = JSON.parse(raw) as Partial<Stored>;
+    return typeof v.rev === "string" && typeof v.sig === "string" && typeof v.hashedAt === "number" && typeof v.checkedAt === "number" ? (v as Stored) : null;
+  } catch {
+    return null;
+  }
+}
 
 export async function cachedRunRevision(runId: string): Promise<string | null> {
   const hit = memo.get(runId);
@@ -34,16 +66,31 @@ export async function cachedRunRevision(runId: string): Promise<string | null> {
   if (hit) memo.delete(runId);
 
   const key = keyOf(runId);
-  const raw = await store.cacheGet(key, TTL_MS);
-  if (raw) {
-    memo.set(runId, { rev: raw, at: Date.now() });
-    return raw;
+  const now = Date.now();
+  const stored = parseStored(await store.cacheGet(key, HARD_TTL_MS));
+  if (stored && now - stored.hashedAt <= HARD_TTL_MS) {
+    if (now - stored.checkedAt <= TTL_MS) {
+      memo.set(runId, { rev: stored.rev, at: stored.checkedAt });
+      return stored.rev;
+    }
+    const sig = await store.runDataSignature(runId);
+    if (sig !== null && sig === stored.sig) {
+      // cacheSet keeps the row's original created_at semantics out of it: the
+      // ages that matter ride inside the value.
+      await store.cacheSet(key, JSON.stringify({ ...stored, checkedAt: now } satisfies Stored));
+      memo.set(runId, { rev: stored.rev, at: now });
+      return stored.rev;
+    }
   }
 
+  // Signature first, hash second: a write landing between the two leaves a
+  // stale signature beside a fresh revision, which the next check corrects
+  // with one extra hash - never a stale revision beside a fresh signature.
+  const sig = await store.runDataSignature(runId);
   const rev = await store.runDataRevision(runId);
   if (rev === null) return null;
-  await store.cacheSet(key, rev);
-  memo.set(runId, { rev, at: Date.now() });
+  if (sig !== null) await store.cacheSet(key, JSON.stringify({ rev, sig, hashedAt: now, checkedAt: now } satisfies Stored));
+  memo.set(runId, { rev, at: now });
   return rev;
 }
 

@@ -864,6 +864,11 @@ export interface Store {
    * nothing but one short string leaves it. Moves on any write; null means
    * the store can't fingerprint cheaply and callers should not cache. */
   runDataRevision(runId: string): Promise<string | null>;
+  /** A cheap stand-in for runDataRevision: counts and newest timestamps of the
+   * same tables (prompts hashed outright). It moves whenever an app write
+   * path touches the run, so an unchanged signature means the stored
+   * revision is still good. null where the store cannot fingerprint. */
+  runDataSignature(runId: string): Promise<string | null>;
   createCodingAssignment(a: CodingAssignment): Promise<void>;
   getCodingAssignmentByToken(token: string): Promise<CodingAssignment | null>;
   listCodingAssignments(projectId: string): Promise<CodingAssignment[]>;

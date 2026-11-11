@@ -51,6 +51,23 @@ function ensureSchema(): Promise<void> {
   if (!globalThis.__procerno_schema) {
     const sql = getSql();
     globalThis.__procerno_schema = (async () => {
+      // Once per DEPLOY, not once per server instance (2026-11-10): the ~110
+      // idempotent statements below cost about a second on every cold start,
+      // before any request could read its cache. A deploy's first instance
+      // runs them and leaves a marker row; later instances of the same deploy
+      // read the marker (one query) and skip them. Local runs carry no commit
+      // id and always run the statements, as before.
+      const sha = process.env.VERCEL_GIT_COMMIT_SHA;
+      const marker = sha ? `schema_ok:${sha}` : null;
+      let applied = false;
+      if (marker) {
+        try {
+          applied = (await sql`SELECT 1 FROM llm_cache WHERE key = ${marker}`).length > 0;
+        } catch {
+          applied = false; // a brand-new database has no llm_cache yet
+        }
+      }
+      if (!applied) {
       await sql`CREATE TABLE IF NOT EXISTS projects (
         id TEXT PRIMARY KEY,
         name TEXT NOT NULL,
@@ -319,6 +336,8 @@ function ensureSchema(): Promise<void> {
         PRIMARY KEY (response_id, source)
       )`);
       await sql`CREATE INDEX IF NOT EXISTS idx_answer_codes_run ON answer_codes(run_id, source)`;
+      // runDataSignature's newest-code lookup, without reading the wide rows.
+      await sql`CREATE INDEX IF NOT EXISTS idx_answer_codes_run_created ON answer_codes(run_id, created_at)`;
       await sql`ALTER TABLE projects ADD COLUMN IF NOT EXISTS codes_source TEXT`;
       // projects.code_groups (2026-10-27): the reasons view's display rollup map.
       await sql`ALTER TABLE projects ADD COLUMN IF NOT EXISTS code_groups TEXT`;
@@ -338,6 +357,7 @@ function ensureSchema(): Promise<void> {
       await sql`CREATE INDEX IF NOT EXISTS idx_runs_project ON runs(project_id)`;
       await sql`CREATE INDEX IF NOT EXISTS idx_responses_run ON responses(run_id)`;
       await sql`CREATE INDEX IF NOT EXISTS idx_mentions_response ON mentions(response_id)`;
+      } // end: schema statements, skipped when this deploy already applied them
       // The app reads and writes as the table owner over DATABASE_URL, which
       // bypasses RLS — but Supabase also exposes every public table through
       // its REST API to anyone holding the browser-public anon key. RLS with
@@ -347,6 +367,10 @@ function ensureSchema(): Promise<void> {
         WHERE schemaname = 'public' AND NOT rowsecurity`;
       for (const t of bare) {
         await sql`ALTER TABLE public.${sql(t.tablename as string)} ENABLE ROW LEVEL SECURITY`;
+      }
+      if (marker && !applied) {
+        await sql`INSERT INTO llm_cache (key, value, created_at) VALUES (${marker}, 'ok', now())
+          ON CONFLICT (key) DO NOTHING`;
       }
     })();
   }
@@ -778,6 +802,32 @@ export const pgStore: Store = {
            FROM prompts p JOIN runs ru ON ru.project_id = p.project_id
            WHERE ru.id = ${runId}) AS pr,
         (SELECT count(*)::text || ':' || coalesce(sum(hashtext(c::text)), 0)::text
+           FROM answer_codes c WHERE c.run_id = ${runId}) AS codes`;
+    const r = rows[0];
+    return r ? `${r.resp}/${r.men}/${r.lab}/${r.pr}/${r.codes}` : null;
+  },
+
+  async runDataSignature(runId) {
+    const sql = await db();
+    // Index-only counts and newest timestamps - no row text is read, so this
+    // takes milliseconds where runDataRevision takes seconds. Every app write
+    // path moves it: inserts change a count, and the answer_codes and
+    // answer_labels upserts stamp created_at = now() (answer_codes' newest
+    // timestamp reads idx_answer_codes_run_created; a heap read of the wide
+    // rows measured over a second cold). Answers are immutable once collected,
+    // so their count is enough. Prompts are few and small, so they are hashed
+    // outright (a flag or retire edits a prompt row in place).
+    const rows = await sql`SELECT
+        (SELECT count(*)::text FROM responses r WHERE r.run_id = ${runId}) AS resp,
+        (SELECT count(*)::text FROM mentions m JOIN responses r ON r.id = m.response_id
+           WHERE r.run_id = ${runId}) AS men,
+        (SELECT count(*)::text || ':' || coalesce(max(l.created_at)::text, '')
+           FROM answer_labels l JOIN responses r ON r.id = l.response_id
+           WHERE r.run_id = ${runId}) AS lab,
+        (SELECT count(*)::text || ':' || coalesce(sum(hashtext(p::text)), 0)::text
+           FROM prompts p JOIN runs ru ON ru.project_id = p.project_id
+           WHERE ru.id = ${runId}) AS pr,
+        (SELECT count(*)::text || ':' || coalesce(max(c.created_at)::text, '')
            FROM answer_codes c WHERE c.run_id = ${runId}) AS codes`;
     const r = rows[0];
     return r ? `${r.resp}/${r.men}/${r.lab}/${r.pr}/${r.codes}` : null;

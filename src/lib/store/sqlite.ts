@@ -1054,6 +1054,10 @@ export const sqliteStore: Store = {
     return null;
   },
 
+  async runDataSignature() {
+    return null;
+  },
+
   async createCodingAssignment(a) {
     getDb()
       .prepare(
