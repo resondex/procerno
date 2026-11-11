@@ -186,8 +186,8 @@ const BRAND_PROOF = 3;
 /** am15: argsMode rival / all / topics need this many answers carrying the field. */
 const ARGS_MIN = 10;
 const ARGS_TOP = 5;
-/** am15: lift receipts ride only the top lifts a panel draws - payload stays modest. */
-const REF_ROWS = 5;
+/** am18: every argument row a panel draws carries its example answers. */
+const REF_ROWS = 12;
 
 /* ----------------------------- small helpers ---------------------------- */
 
@@ -1171,7 +1171,29 @@ export async function computeAnalysisMap(
   // Open choice, per buying situation: every brand's share of the picks there.
   for (const sp of specs.filter((x) => x.band === "chooses" && x.row === "open" && x.key !== "all")) {
     const { n, list } = brandSplit(sp.rows);
-    if (list.length) sp.figures = [...(sp.figures ?? []), { label: "Share of the picks here, by brand", value: listVal(list.map((b) => `${b.name} ${pct(cell(b.rows.length, n))}`)), tip: `${n} in-category picks` }];
+    // am18: the same funnel lines the all-buyers cell states, read from this
+    // buying situation's own answers - the two panels list the same numbers.
+    const rs = sp.rows;
+    const firmN = rs.filter((r) => pickOf(r).status !== "none").length;
+    const inCatN = rs.filter((r) => pickOf(r).status === "active").length;
+    const youN = rs.filter((r) => pickOf(r).status === "active" && pickOf(r).key === targetKey).length;
+    const namedN = rs.filter(namesTarget).length;
+    const recN = rs.filter((r) => recommendsOf(r).has(targetKey) || pickOf(r).key === targetKey).length;
+    const chosenC = cell(youN, rs.length);
+    const funnel: Figure[] = [
+      F("Named when buyers ask what to buy", cell(namedN, rs.length)),
+      F("Recommended", cell(recN, rs.length)),
+      { label: "Recommended, of the answers that name it", value: pctOf(namedN > 0 ? recN / namedN : 0), tip: `${recN} recommending of ${namedN} naming` },
+      F(`The AI commits to one ${product}`, cell(inCatN, rs.length)),
+      F("Picked, of all answers", chosenC, pctFine(rate(chosenC))),
+      { label: "Recommendations that end as the pick", value: pctOf(recN > 0 ? youN / recN : 0), tip: `${youN} picks of ${recN} recommending answers` },
+      ...(firmN > 0 ? [F("Picks outside the category", cell(firmN - inCatN, firmN))] : []),
+    ];
+    sp.figures = [
+      ...(sp.figures ?? []),
+      ...funnel,
+      ...(list.length ? [{ label: "Share of the picks here, by brand", value: listVal(list.map((b) => `${b.name} ${pct(cell(b.rows.length, n))}`)), tip: `${n} in-category picks` }] : []),
+    ];
   }
   {
     // Head-to-head, every named rival: each rival's record, and the arguments in wins and losses.
@@ -2289,7 +2311,8 @@ function tensionsOf(
 // am14 (2026-11-09): the naming sweep - the triage whys, the strategy-misfit lever and the chooses band sub say "reasons" (to pick you / to leave you), the word every visible surface uses since the reasons rename; "conditions" survives only in analyst tools.
 // am15 (2026-11-10): the one-panel redesign - positions carry brands / youShare (the pick split of pick contests, the figure's own numbers), argsMode / argsRows, lift and condition receipts (AnswerRef), condition shares and away routes, notes (the badges' meaning), and theme receipts / routes; the plain-wording pass renames the moves (Keep it, Publish your case, ...) and rewrites every lever, the triage whys, the criteria claims, the band sub and the "Rivals' customers switching" row. Verdicts, badges and numbers unchanged.
 // am16 (2026-11-10): the tightened wall test - the wall sentence now advises, so it reads the shown wording only.
-export const ANALYSIS_MAP_VERSION = "am17"; // am17 (2026-11-10): each tension carries `viz` (the Overview finding card's 2-4 bars) - the first from the casting facts, the rest from the bs15 insights
+// am17 (2026-11-10): each tension carries `viz` (the Overview finding card's 2-4 bars).
+export const ANALYSIS_MAP_VERSION = "am18"; // am18 (2026-11-10): each buying situation's open-choice cell states the same funnel figures as the all-buyers cell (named, recommended, commits, picked, outside the category), from its own answers. // // am17 (2026-11-10): each tension carries `viz` (the Overview finding card's 2-4 bars) - the first from the casting facts, the rest from the bs15 insights
 // The fold (2026-11-09, Tyler): a view's cache key carries the versions of
 // the views whose content it embeds, so the lockstep bump convention is
 // mechanical - the map embeds the summary's insights, casting and verdict.

@@ -459,61 +459,93 @@ export default function ProjectDashboard({
 
   return (
     <div className="grid gap-8">
+      {/* The tracker header (redesigned 2026-11-10): one card. Name and the
+          two actions people take (share, run) on top; the standing tools as a
+          quiet row beneath, so the only pill row on the page is the results
+          navigation. */}
       <div>
-        <div className="flex items-baseline justify-between gap-4 flex-wrap">
-          <h1 className="text-2xl font-semibold tracking-tight">
-            {project.name} — LLM visibility
-          </h1>
-          <span className="flex items-center gap-4">
-            {/* Edit-setup: the escape hatch for regretful clicks. Only
-             * while ZERO runs exist - from the first run the instrument
-             * is locked, or the trend would compare different questions.
-             * The server enforces the same rule. */}
-            {runs.length === 0 && (
-              <Link
-                prefetch={true}
-                href={`/app?editSetup=${id}`}
-                className="text-sm font-medium text-primary hover:opacity-80"
-              >
-                Edit setup
-              </Link>
-            )}
-            {/* No prefetch: a prefetched /app payload is cached for minutes
-             * and shows pre-walk gate states after confirms - fetch fresh. */}
-            <Link
-              href="/app"
-              className="text-sm font-medium text-primary hover:opacity-80"
-            >
-              ← all trackers
-            </Link>
-          </span>
-        </div>
-        <div className="flex items-baseline justify-between gap-4 flex-wrap mt-1.5">
-          <span className="flex items-center gap-4">
-            <ShareButton projectId={id} />
-            {!archived && (
-              <button
-                type="button"
-                onClick={async () => {
-                  if (
-                    !confirm(
-                      `Archive the "${project.name}" tracker? It leaves your trackers list and stops running, but every run and answer is kept - you can unarchive it any time.`
+        {/* No prefetch: a prefetched /app payload is cached for minutes and
+            shows pre-walk gate states after confirms - fetch fresh. */}
+        <Link href="/app" className="text-[13px] font-medium text-ink-3 hover:text-ink">
+          ← All trackers
+        </Link>
+        <div className="card mt-2">
+          <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-3 px-5 py-4">
+            <div className="min-w-0">
+              <h1 className="text-2xl font-semibold tracking-tight">{project.name}</h1>
+              <p className="mt-0.5 text-[13px] text-ink-3">What AI assistants say when buyers ask about {project.category || "your category"}</p>
+            </div>
+            <span className="flex items-center gap-4">
+              <ShareButton projectId={id} />
+              <TaskButton
+                label={
+                  // Measured-but-held reads as done, not in progress - the wave
+                  // is coded and nothing is running; the next run waits on the
+                  // hold, so the button stays disabled but stops claiming work.
+                  (activeRun || launchingFirstRun) && !codedHeld ? "Run in progress…" : "Run"
+                }
+                primary
+                bubble={needsFirstRun && !launchingFirstRun && !archived ? "dot" : null}
+                onClick={() => setOpenModal("run")}
+                disabled={initPhase || archived}
+              />
+            </span>
+          </div>
+          <div className="flex flex-wrap items-center gap-x-5 gap-y-2 border-t border-line px-5 py-2.5">
+            <TaskButton label="Schedule" bubble={null} disabled={initPhase || archived} onClick={() => setOpenModal("schedule")} />
+            {/* Measured-but-held counts as out of init for the standing tools:
+                the run is coded and the views render, so the dictionary (whose
+                edits re-resolve every view at read time), run history, settings
+                and prompt health are usable. Run/Schedule stay init-gated - no
+                new collection from this state. */}
+            <TaskButton label="Run history" bubble={null} disabled={initPhase && !codedHeld} onClick={() => setOpenModal("history")} />
+            <TaskButton
+              label="Brand dictionary"
+              bubble={(!initPhase || codedHeld) && pendingDict > 0 ? pendingDict : null}
+              disabled={initPhase && !codedHeld}
+              onClick={openDictionary}
+            />
+            <TaskButton label="Settings" bubble={null} disabled={initPhase && !codedHeld} onClick={() => setOpenModal("settings")} />
+            <TaskButton
+              label="Prompt health"
+              bubble={(!initPhase || codedHeld) && flaggedPrompts.length > 0 ? flaggedPrompts.length : null}
+              disabled={initPhase && !codedHeld}
+              onClick={() => setOpenModal("health")}
+            />
+            <span className="ml-auto flex items-center gap-5">
+              {/* Edit-setup: the escape hatch for regretful clicks. Only
+               * while ZERO runs exist - from the first run the instrument
+               * is locked, or the trend would compare different questions.
+               * The server enforces the same rule. */}
+              {runs.length === 0 && (
+                <Link prefetch={true} href={`/app?editSetup=${id}`} className="text-[13px] font-medium text-primary hover:opacity-80">
+                  Edit setup
+                </Link>
+              )}
+              {!archived && (
+                <button
+                  type="button"
+                  onClick={async () => {
+                    if (
+                      !confirm(
+                        `Archive the "${project.name}" tracker? It leaves your trackers list and stops running, but every run and answer is kept - you can unarchive it any time.`
+                      )
                     )
-                  )
-                    return;
-                  const res = await fetch(`/api/projects/${id}`, {
-                    method: "PATCH",
-                    headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify({ archived: true }),
-                  });
-                  if (res.ok) window.location.href = "/app";
-                }}
-                className="text-[13px] font-medium text-ink-3 hover:text-ink"
-              >
-                Archive tracker
-              </button>
-            )}
-          </span>
+                      return;
+                    const res = await fetch(`/api/projects/${id}`, {
+                      method: "PATCH",
+                      headers: { "Content-Type": "application/json" },
+                      body: JSON.stringify({ archived: true }),
+                    });
+                    if (res.ok) window.location.href = "/app";
+                  }}
+                  className="text-[13px] text-ink-3 hover:text-ink"
+                >
+                  Archive
+                </button>
+              )}
+            </span>
+          </div>
         </div>
       </div>
 
@@ -548,58 +580,6 @@ export default function ProjectDashboard({
           </button>
         </div>
       )}
-
-      <div className="flex flex-wrap items-center gap-3">
-        <TaskButton
-          label={
-            // Measured-but-held reads as done, not in progress - the wave
-            // is coded and nothing is running; the next run waits on the
-            // hold, so the button stays disabled but stops claiming work.
-            (activeRun || launchingFirstRun) && !codedHeld
-              ? "Run in progress…"
-              : "Run"
-          }
-          primary
-          bubble={needsFirstRun && !launchingFirstRun && !archived ? "dot" : null}
-          onClick={() => setOpenModal("run")}
-          disabled={initPhase || archived}
-        />
-        <TaskButton
-          label="Schedule"
-          bubble={null}
-          disabled={initPhase || archived}
-          onClick={() => setOpenModal("schedule")}
-        />
-        {/* Measured-but-held counts as out of init for the standing tools:
-            the run is coded and the views render, so the dictionary (whose
-            edits re-resolve every view at read time), run history, settings
-            and prompt health are usable. Run/Schedule stay init-gated - no
-            new collection from this state. */}
-        <TaskButton
-          label="Run history"
-          bubble={null}
-          disabled={initPhase && !codedHeld}
-          onClick={() => setOpenModal("history")}
-        />
-        <TaskButton
-          label="Brand dictionary"
-          bubble={(!initPhase || codedHeld) && pendingDict > 0 ? pendingDict : null}
-          disabled={initPhase && !codedHeld}
-          onClick={openDictionary}
-        />
-        <TaskButton
-          label="Settings"
-          bubble={null}
-          disabled={initPhase && !codedHeld}
-          onClick={() => setOpenModal("settings")}
-        />
-        <TaskButton
-          label="Prompt health"
-          bubble={(!initPhase || codedHeld) && flaggedPrompts.length > 0 ? flaggedPrompts.length : null}
-          disabled={initPhase && !codedHeld}
-          onClick={() => setOpenModal("health")}
-        />
-      </div>
 
       {/* "Setting up" from arrival until the run's first progress reading:
           before the run row exists (launch still in flight), and in the beat
@@ -1077,15 +1057,15 @@ function TaskButton({
       onClick={onClick}
       disabled={disabled}
       className={`relative ${
-        primary
-          ? "btn-primary"
-          : "card px-4 py-2 text-sm font-semibold text-ink-2 hover:border-primary/40 hover:text-ink"
-      } ${disabled ? "opacity-40 cursor-not-allowed hover:border-line hover:text-ink-2" : ""}`}
+        primary ? "btn-primary" : "inline-flex items-center gap-1.5 text-[13px] font-medium text-ink-2 hover:text-ink"
+      } ${disabled ? "opacity-40 cursor-not-allowed hover:text-ink-2" : ""}`}
     >
       {label}
       {bubble !== null && !disabled && (
         <span
-          className={`absolute -top-1.5 -right-1.5 rounded-full bg-danger text-white ${
+          className={`rounded-full bg-danger text-white ${
+            primary ? "absolute -top-1.5 -right-1.5 " : ""
+          }${
             bubble === "dot"
               ? "h-2.5 w-2.5"
               : "h-4.5 min-w-4.5 px-1 text-[10px] font-bold leading-[1.125rem] text-center"

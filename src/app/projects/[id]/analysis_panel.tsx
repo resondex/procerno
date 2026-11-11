@@ -26,7 +26,8 @@ import type { HeadToHeadRow } from "@/lib/engine/head_to_head";
 import { Boundaries } from "./head_to_head_view";
 import EvidencePanel, { EVIDENCE_CAP, type EvidenceRequest } from "./evidence_panel";
 import RulesSection from "./rules_view";
-import { AnswersModal, Fig, plainQuote, type AnswersTarget } from "./view_parts";
+import { AnswersModal, Fig, type AnswersTarget } from "./view_parts";
+import AnswerText from "./answer_text";
 import { passageOf } from "@/lib/answer_passage";
 import { T } from "./type_scale";
 
@@ -131,73 +132,120 @@ function useBodies(ids: string[]): Bodies | null {
   return b;
 }
 
-/** The answer passages behind one row: the slice around its wording, marked. */
-function Passages({ refs }: { refs: AnswerRef[] }) {
-  const b = useBodies(refs.map((r) => r.responseId));
-  if (refs.length === 0) return null;
-  if (b?.blocked) return <p className="py-1 text-[12px] text-ink-3">The answers behind this are switched off for this tracker.</p>;
+/** What "See examples" opens: the answers behind one row or claim. */
+interface ExamplesTarget {
+  title: string;
+  subtitle?: string;
+  note?: string;
+  refs: AnswerRef[];
+}
+const ExamplesCtx = createContext<((t: ExamplesTarget) => void) | null>(null);
+
+/**
+ * The examples modal: for each answer, the question the buyer asked, the
+ * passage that matters with its sentence marked, and which assistant answered.
+ * Everything appears together once the answers have loaded - nothing trickles
+ * in - and each example can open to the whole answer.
+ */
+function ExamplesModal({ target, onClose }: { target: ExamplesTarget; onClose: () => void }) {
+  const b = useBodies(target.refs.map((r) => r.responseId));
+  const [full, setFull] = useState<Set<number>>(() => new Set());
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => e.key === "Escape" && onClose();
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onClose]);
+  const ready = target.refs.filter((r) => b?.get(r.responseId));
+  const loading = !b?.blocked && ready.length === 0;
   return (
-    <div className="mt-1.5 grid gap-3 pb-2">
-      {refs.map((r, i) => {
-        const body = b?.get(r.responseId);
-        if (!body) return <p key={`${r.responseId}${i}`} className="text-[12px] text-ink-3">Loading the answer...</p>;
-        const p = passageOf(body.text, r.find);
-        return (
-          <div key={`${r.responseId}${i}`} className="border-l-2 border-line pl-2.5 text-[13px] leading-relaxed text-ink-2">
-            {p.before}
-            <mark className="rounded-[3px] bg-primary-soft px-0.5 text-ink">{p.hit}</mark>
-            {p.after}
-            <span className="mt-1 block text-[12px] text-ink-3">
-              {body.engine}
-              {body.promptText ? ` - asked: "${body.promptText}"` : ""}
-            </span>
+    <div
+      className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-black/40 p-4 sm:p-8"
+      onClick={onClose}
+      role="dialog"
+      aria-modal="true"
+      aria-label={target.title}
+    >
+      <aside
+        onClick={(e) => e.stopPropagation()}
+        className="grid w-full max-w-2xl content-start overflow-hidden rounded-xl border border-line bg-[var(--color-surface)] shadow-xl"
+      >
+        <div className="flex items-start justify-between gap-3 border-b border-line p-4">
+          <div className="min-w-0">
+            <div className={T.label}>Examples from the answers</div>
+            <h3 className={`${T.title} mt-1`}>{target.title}</h3>
+            {target.subtitle && <p className="mt-0.5 text-[12px] text-ink-3">{target.subtitle}</p>}
+            {target.note && <p className="mt-1 text-[12px] text-ink-3">{target.note}</p>}
           </div>
-        );
-      })}
+          <button type="button" onClick={onClose} aria-label="Close" className="text-lg leading-none text-ink-3 hover:text-ink">
+            ×
+          </button>
+        </div>
+        <div className="grid max-h-[75vh] content-start gap-5 overflow-y-auto p-4">
+          {b?.blocked && <p className="text-[13px] text-ink-3">The answers behind this are switched off for this tracker.</p>}
+          {loading && <p className="text-[13px] text-ink-3">Loading the examples...</p>}
+          {ready.map((r, i) => {
+            const body = b!.get(r.responseId)!;
+            const ps = passageOf(body.text, r.find);
+            const open = full.has(i);
+            return (
+              <div key={`${r.responseId}${i}`} className={`grid gap-2 ${i > 0 ? "border-t border-line/60 pt-5" : ""}`}>
+                {body.promptText && (
+                  <p className="text-[13px] text-ink-2">
+                    <span className="text-ink-3">A buyer asked: </span>
+                    {body.promptText}
+                  </p>
+                )}
+                {open ? (
+                  <div className="max-h-80 overflow-y-auto border-l-2 border-line pl-3">
+                    <AnswerText text={body.text} />
+                  </div>
+                ) : (
+                  <p className="border-l-2 border-line pl-3 text-[14px] leading-relaxed text-ink-2">
+                    {ps.before}
+                    <mark className="rounded-[3px] bg-primary-soft px-0.5 text-ink">{ps.hit}</mark>
+                    {ps.after}
+                  </p>
+                )}
+                <p className="flex flex-wrap items-baseline justify-between gap-x-3 text-[12px] text-ink-3">
+                  <span>Answered by {body.engine}</span>
+                  <button
+                    type="button"
+                    className="text-primary hover:opacity-80"
+                    onClick={() => {
+                      const n = new Set(full);
+                      if (open) n.delete(i);
+                      else n.add(i);
+                      setFull(n);
+                    }}
+                  >
+                    {open ? "Show the passage only" : "Read the whole answer"}
+                  </button>
+                </p>
+              </div>
+            );
+          })}
+        </div>
+      </aside>
     </div>
   );
 }
 
-/** The one answer quote under a claim, with its assistant and question once loaded. */
-function Proof({ receipts, onFull }: { receipts: PositionReceipt[]; onFull?: (ids: string[], quotes: string[]) => void }) {
+/** The link under a claim: a few of the answers the claim counts. */
+function ExampleLink({ receipts, title, subtitle }: { receipts: PositionReceipt[]; title: string; subtitle?: string }) {
+  const show = useContext(ExamplesCtx);
   const quoted = receipts.filter((r) => r.quote);
-  const first = quoted[0];
-  const b = useBodies(first ? [first.responseId] : []);
-  const [more, setMore] = useState(false);
-  if (!first) return null;
-  const body = b?.get(first.responseId);
-  const rest = quoted.slice(1);
+  const use = quoted.length > 0 ? quoted : receipts;
+  if (!show || use.length === 0) return null;
   return (
-    <div className="mt-3.5">
-      <div className="rounded-[10px] bg-canvas px-3.5 py-2.5">
-        <p className="text-[14px] leading-relaxed text-ink">&ldquo;{plainQuote(first.quote as string)}&rdquo;</p>
-        {body && (
-          <span className="mt-1 block text-[12px] text-ink-3">
-            {body.engine}
-            {body.promptText ? ` - asked: "${body.promptText}"` : ""}
-          </span>
-        )}
-      </div>
-      {(rest.length > 0 || onFull) && (
-        <div className="mt-1.5 flex flex-wrap items-baseline gap-x-4">
-          {rest.length > 0 && (
-            <button type="button" onClick={() => setMore((m) => !m)} aria-expanded={more} className="text-[12px] text-primary hover:opacity-80">
-              {more ? "Hide the other answers" : "See more answers behind this"}
-            </button>
-          )}
-          {onFull && (
-            <button
-              type="button"
-              onClick={() => onFull(receipts.map((r) => r.responseId), quoted.map((r) => r.quote as string))}
-              className="text-[12px] text-ink-3 hover:text-ink-2"
-            >
-              Read the full answers {"→"}
-            </button>
-          )}
-        </div>
-      )}
-      {more && <Passages refs={rest.map((r) => ({ responseId: r.responseId, find: r.quote as string }))} />}
-    </div>
+    <p className="clear-both mt-3">
+      <button
+        type="button"
+        className="text-[13px] font-medium text-primary underline underline-offset-2 hover:opacity-80"
+        onClick={() => show({ title, subtitle, refs: use.map((r) => ({ responseId: r.responseId, find: r.quote ?? "" })) })}
+      >
+        See examples
+      </button>
+    </p>
   );
 }
 
@@ -222,32 +270,28 @@ function Sec({ title, teaser, children, id }: { title: string; teaser: string; c
 const Hint = ({ children }: { children: ReactNode }) => <p className={`${T.cap} mb-2 text-ink-3`}>{children}</p>;
 const None = ({ children }: { children: ReactNode }) => <p className={`${T.body} text-ink-3`}>{children}</p>;
 
-/** A row that opens its answer passages in place (when it carries any). */
-function Openable({ refs, head, extra }: { refs?: AnswerRef[]; head: (open: boolean) => ReactNode; extra?: ReactNode }) {
-  const [open, setOpen] = useState(false);
-  const can = (refs?.length ?? 0) > 0;
+/** A row that opens its example answers in the modal (when it carries any). */
+function Openable({ refs, head, title, note }: { refs?: AnswerRef[]; head: () => ReactNode; title: string; note?: string }) {
+  const show = useContext(ExamplesCtx);
+  const sub = useContext(WhereCtx);
+  const can = !!show && (refs?.length ?? 0) > 0;
   return (
     <div className="border-b border-line/70">
       {can ? (
-        <button type="button" onClick={() => setOpen((o) => !o)} aria-expanded={open} className="block w-full py-2 text-left">
-          {head(open)}
+        <button type="button" onClick={() => show!({ title, subtitle: sub, note, refs: refs! })} className="block w-full py-2 text-left">
+          {head()}
         </button>
       ) : (
-        <div className="py-2">{head(false)}</div>
-      )}
-      {open && (
-        <>
-          {extra}
-          <Passages refs={refs!} />
-        </>
+        <div className="py-2">{head()}</div>
       )}
     </div>
   );
 }
 
-const SeeWord = ({ open }: { open: boolean }) => (
-  <span className={`mt-0.5 block text-[12px] ${open ? "text-ink-3" : "text-primary"}`}>{open ? "Hide the answers" : "See answers"}</span>
-);
+/** Where the open panel is looking (the examples modal's second line). */
+const WhereCtx = createContext<string | undefined>(undefined);
+
+const SeeWord = () => <span className="mt-0.5 block text-[12px] text-primary">See examples</span>;
 
 /** One condition the AI states about the buyer: label, fixed tag, rivals, share, bar, answers. */
 interface CondRowData {
@@ -271,8 +315,9 @@ function CondRows({ rows, color }: { rows: CondRowData[]; color: string }) {
         <Openable
           key={`${i}:${r.label}`}
           refs={r.receipts}
-          extra={r.members && r.members.length > 1 ? <p className="mb-1 text-[12px] text-ink-3">Includes: {r.members.join(" - ")}</p> : null}
-          head={(open) => (
+          title={r.label}
+          note={r.members && r.members.length > 1 ? `Includes: ${r.members.join(" - ")}` : undefined}
+          head={() => (
             <span className="grid grid-cols-[minmax(0,1fr)_2.75rem] items-baseline gap-x-2 gap-y-1 text-[14px]" title={r.tip}>
               <span className="min-w-0 text-ink">
                 {r.label}
@@ -292,7 +337,7 @@ function CondRows({ rows, color }: { rows: CondRowData[]; color: string }) {
               <span className="col-span-full block h-[5px] rounded-[3px] bg-line/60">
                 <i className="block h-full min-w-[3px] rounded-[3px]" style={{ width: `${Math.round((100 * r.weight) / max)}%`, background: color }} />
               </span>
-              {(r.receipts?.length ?? 0) > 0 && <span className="col-span-full"><SeeWord open={open} /></span>}
+              {(r.receipts?.length ?? 0) > 0 && <span className="col-span-full"><SeeWord /></span>}
             </span>
           )}
         />
@@ -349,7 +394,7 @@ const buyerTeaser = (toward: CondRowData[], away: CondRowData[]) =>
     : "Nothing stated";
 
 const BUYER_HINT =
-  "What the AI says about the buyer when it sends them each way. The number is how often it comes up, among the answers here where the AI says anything like it. Open one to read the answers.";
+  "What the AI says about the buyer when it sends them each way. The number is how often it comes up, among the answers here where the AI says anything like it. Open one to see examples.";
 
 /** Lift rows: the code, its signed points, the two shares as bars, answers. */
 function LiftRows({ lifts, sides }: { lifts: (LiftItem | DossierArg)[]; sides: [string, string] }) {
@@ -359,7 +404,8 @@ function LiftRows({ lifts, sides }: { lifts: (LiftItem | DossierArg)[]; sides: [
         <Openable
           key={l.label}
           refs={l.receipts}
-          head={(open) => (
+          title={l.label}
+          head={() => (
             <span className="block text-[14px]" title={"tip" in l ? l.tip : undefined}>
               <span className="flex justify-between gap-3">
                 <b className="font-semibold text-ink">{l.label}</b>
@@ -385,7 +431,7 @@ function LiftRows({ lifts, sides }: { lifts: (LiftItem | DossierArg)[]; sides: [
                   ))}
                 </span>
               )}
-              {(l.receipts?.length ?? 0) > 0 && <SeeWord open={open} />}
+              {(l.receipts?.length ?? 0) > 0 && <SeeWord />}
             </span>
           )}
         />
@@ -598,8 +644,17 @@ function ContestPanel({ p, ctx }: { p: Position; ctx: Ctx }) {
   const soft = softLine(notes);
   const [evidence, setEvidence] = useState<EvidenceRequest | null>(null);
   const cat = ctx.cat;
-  const figs = p.figures ?? [];
   const brands = p.brands ?? [];
+  // The numbers list never repeats what another section draws: the by-brand
+  // split is the next section, and "Share of picks" is "Your share of the
+  // picks here" under another name.
+  const figLabels = new Set((p.figures ?? []).map((f) => f.label));
+  const figs = (p.figures ?? []).filter(
+    (f) =>
+      !(brands.length > 0 && f.label === "Share of the picks here, by brand") &&
+      !(f.label === "Share of picks" && figLabels.has("Your share of the picks here")) &&
+      !f.label.startsWith("Picks outside the category, by")
+  );
   const you = p.youShare ?? "0%";
   const maxW = Math.max(1, ...brands.map((b) => pctNum(b.share)), pctNum(you));
   const sides = p.liftSides ?? ["your picks", "rivals' picks"];
@@ -622,7 +677,7 @@ function ContestPanel({ p, ctx }: { p: Position; ctx: Ctx }) {
     argsBody = (
       <>
         <Hint>
-          What the AI brings up more in {sides[0]} than in {sides[1]}. Open one to read the answers.
+          What the AI brings up more in {sides[0]} than in {sides[1]}. Open one to see examples.
         </Hint>
         <LiftRows lifts={p.lifts} sides={sides} />
       </>
@@ -663,10 +718,7 @@ function ContestPanel({ p, ctx }: { p: Position; ctx: Ctx }) {
       </div>
       <h2 className={h2Cls}>{p.claim}</h2>
       {soft && <p className="clear-both mt-3 border-l-[3px] pl-2.5 text-[13px] text-ink" style={{ borderColor: "var(--pa-contested)" }}>{soft}</p>}
-      <Proof
-        receipts={p.receipts}
-        onFull={(ids, quotes) => setEvidence({ title: p.claim, subtitle: p.where, ids: ids.slice(0, EVIDENCE_CAP), total: ids.length, highlight: quotes })}
-      />
+      <ExampleLink receipts={p.receipts} title={p.where} subtitle="A few of the answers behind this" />
       {p.lever && <MoveBox p={p} ctx={ctx} why={whyLines(notes, cat.plural)} />}
 
       <div className={evh}>The evidence</div>
@@ -757,7 +809,6 @@ function RivalScoped({ name, p, ctx }: { name: string; p: Position; ctx: Ctx }) 
   const awayFlat = p.away.filter((c) => (c.routes ?? []).some((r) => normName(r.name) === normName(name)));
   const sends: CondRowData[] = (awayThemes.length ? themeRows(awayThemes) : flatRows(awayFlat)).map((r) => ({ ...r, routes: [] }));
   const back = (p.towardThemes?.length ?? 0) > 0 ? themeRows(p.towardThemes!) : flatRows(p.toward);
-  const [evidence, setEvidence] = useState<EvidenceRequest | null>(null);
   return (
     <>
       <div className={crumbCls}>
@@ -770,10 +821,7 @@ function RivalScoped({ name, p, ctx }: { name: string; p: Position; ctx: Ctx }) 
         {name} takes {b.share} of the picks in this contest. You take {p.youShare ?? "0%"}.
       </h2>
       <ScopeChips name={name} cellId={p.cellId} scoped ctx={ctx} />
-      <Proof
-        receipts={b.proof}
-        onFull={(ids, quotes) => setEvidence({ title: `${name} picked`, subtitle: p.where, ids, highlight: quotes })}
-      />
+      <ExampleLink receipts={b.proof} title={`Answers that pick ${name}`} subtitle={p.where} />
       <div className={evh}>The evidence</div>
       {sends.length > 0 ? (
         <Sec title="What it says about the buyer" teaser={buyerTeaser(back, sends)}>
@@ -802,7 +850,6 @@ function RivalScoped({ name, p, ctx }: { name: string; p: Position; ctx: Ctx }) 
         <span>{name} across all buyers</span>
         <span className="text-ink-3">the matchup, who supplies its picks {"→"}</span>
       </button>
-      {evidence && <EvidencePanel runId={ctx.runId} request={evidence} onClose={() => setEvidence(null)} />}
     </>
   );
 }
@@ -832,7 +879,6 @@ export function roomsOf(d: Dossier, ctx: { map: AnalysisMapView }): { cellId: st
 }
 
 function RivalAll({ d, from, ctx }: { d: Dossier; from?: string | null; ctx: Ctx }) {
-  const [evidence, setEvidence] = useState<EvidenceRequest | null>(null);
   const [answers, setAnswers] = useState<AnswersTarget | null>(null);
   const closeAnswers = useCallback(() => setAnswers(null), []);
   const fromP = from ? ctx.map.positions[from] : undefined;
@@ -853,10 +899,7 @@ function RivalAll({ d, from, ctx }: { d: Dossier; from?: string | null; ctx: Ctx
       <div className={crumbCls}>Rival - {d.name} - all buyers</div>
       <h2 className={h2Cls}>{d.headline}</h2>
       {showScope && <ScopeChips name={d.name} cellId={from!} scoped={false} ctx={ctx} />}
-      <Proof
-        receipts={d.receipts ?? []}
-        onFull={(ids, quotes) => setEvidence({ title: `${d.name} picked`, subtitle: "Open buying questions", ids, highlight: quotes })}
-      />
+      <ExampleLink receipts={d.receipts ?? []} title={`Answers that pick ${d.name}`} subtitle="When buyers ask what to buy" />
       <div className={evh}>The evidence</div>
       <Sec title="The numbers" teaser={d.tiles[1] ? `${d.tiles[1].label}: ${d.tiles[1].value}` : "Nothing to show"}>
         {d.tiles.map((t) => (
@@ -924,7 +967,7 @@ function RivalAll({ d, from, ctx }: { d: Dossier; from?: string | null; ctx: Ctx
         {h2hRow && (
           <details className="mt-3">
             <summary className="cursor-pointer text-[13px] font-medium text-primary">When does each side win?</summary>
-            <p className="mb-1 mt-2 text-[12px] text-ink-3">What the AI says when asked to pick between the two. Open one to read the answers.</p>
+            <p className="mb-1 mt-2 text-[12px] text-ink-3">What the AI says when asked to pick between the two. Open one to see examples.</p>
             <Boundaries row={h2hRow} brand={ctx.brand} onOpen={setAnswers} bare />
           </details>
         )}
@@ -936,7 +979,7 @@ function RivalAll({ d, from, ctx }: { d: Dossier; from?: string | null; ctx: Ctx
         {args.length > 0 ? (
           <>
             <Hint>
-              What the AI brings up more in {d.argSides[0]} than in {d.argSides[1]}. Open one to read the answers.
+              What the AI brings up more in {d.argSides[0]} than in {d.argSides[1]}. Open one to see examples.
             </Hint>
             <LiftRows lifts={args} sides={d.argSides} />
           </>
@@ -987,7 +1030,6 @@ function RivalAll({ d, from, ctx }: { d: Dossier; from?: string | null; ctx: Ctx
           </button>
         </p>
       )}
-      {evidence && <EvidencePanel runId={ctx.runId} request={evidence} onClose={() => setEvidence(null)} />}
       {answers && <AnswersModal key={answers.ids.join(",")} runId={ctx.runId} target={answers} onClose={closeAnswers} />}
     </>
   );
@@ -998,16 +1040,19 @@ function RivalAll({ d, from, ctx }: { d: Dossier; from?: string | null; ctx: Ctx
 export function SlideOver({ view, ctx }: { view: PanelView; ctx: Ctx }) {
   let body: ReactNode;
   let label: string;
+  let where: string | undefined;
   if (view.kind === "cell") {
     const p = ctx.map.positions[view.id];
     if (!p) return null;
     label = p.where;
+    where = p.where;
     body = <ContestPanel key={p.cellId} p={p} ctx={ctx} />;
   } else {
     const scopedP = view.cell ? ctx.map.positions[view.cell] : undefined;
     const inScope = !!scopedP && (scopedP.brands ?? []).some((x) => normName(x.name) === normName(view.name));
     const d = ctx.findDossier(view.name);
     label = `${view.name}${inScope ? ` - ${scopedP!.where}` : " - all buyers"}`;
+    where = label;
     if (inScope) body = <RivalScoped key={`${view.name}|${view.cell}`} name={view.name} p={scopedP!} ctx={ctx} />;
     else if (d) body = <RivalAll key={`${d.key}|${view.from ?? ""}`} d={d} from={view.from} ctx={ctx} />;
     else
@@ -1022,10 +1067,21 @@ export function SlideOver({ view, ctx }: { view: PanelView; ctx: Ctx }) {
           </>
         );
   }
+  return <Host label={label} where={where} onClose={ctx.onClose}>{body}</Host>;
+}
+
+function Host({ label, where, onClose, children }: { label: string; where?: string; onClose: () => void; children: ReactNode }) {
+  const [examples, setExamples] = useState<ExamplesTarget | null>(null);
+  const close = useCallback(() => setExamples(null), []);
   return (
-    <PanelShell label={label} onClose={ctx.onClose}>
-      {body}
-    </PanelShell>
+    <ExamplesCtx.Provider value={setExamples}>
+      <WhereCtx.Provider value={where}>
+        <PanelShell label={label} onClose={onClose}>
+          {children}
+        </PanelShell>
+        {examples && <ExamplesModal key={examples.refs.map((r) => r.responseId).join(",")} target={examples} onClose={close} />}
+      </WhereCtx.Provider>
+    </ExamplesCtx.Provider>
   );
 }
 

@@ -106,15 +106,14 @@ interface Preset {
   col: DimKey;
 }
 const PRESETS: Preset[] = [
-  { id: "picked_engine", label: "Picked, by engine", pool: "headline", measure: "chosen", row: "engine", col: "none" },
-  { id: "named_brand", label: "Named, by brand", pool: "headline", measure: "mentioned", row: "brand", col: "none" },
-  { id: "h2h_rival", label: "Win rate by rival", pool: "head_to_head_entity", measure: "h2h_you", row: "rival", col: "none" },
-  { id: "proceed_worry", label: "Go ahead, by worry", pool: "doubt", measure: "proceed", row: "worry", col: "none" },
-  { id: "worth_room", label: "Worth it, by buyer", pool: "value", measure: "worth_yes", row: "room", col: "none" },
-  { id: "keep_worry", label: "Stay, by worry", pool: "keep_or_leave", measure: "keep", row: "worry", col: "none" },
-  { id: "picked_engine_brand", label: "Picked, engine x brand", pool: "headline", measure: "chosen", row: "engine", col: "brand" },
+  { id: "picked_engine", label: "How often you are picked, by assistant", pool: "headline", measure: "chosen", row: "engine", col: "none" },
+  { id: "named_brand", label: "How often each brand is named", pool: "headline", measure: "mentioned", row: "brand", col: "none" },
+  { id: "h2h_rival", label: "Direct matchups won, by rival", pool: "head_to_head_entity", measure: "h2h_you", row: "rival", col: "none" },
+  { id: "proceed_worry", label: "Buyers told to go ahead, by worry", pool: "doubt", measure: "proceed", row: "worry", col: "none" },
+  { id: "worth_room", label: "Called worth it, by buyer", pool: "value", measure: "worth_yes", row: "room", col: "none" },
+  { id: "keep_worry", label: "Customers told to stay, by worry", pool: "keep_or_leave", measure: "keep", row: "worry", col: "none" },
+  { id: "picked_engine_brand", label: "Picks by assistant and brand", pool: "headline", measure: "chosen", row: "engine", col: "brand" },
 ];
-const BLANK = "blank";
 
 const THIN = 20;
 /** Brand and argument dimensions list at most this many values. */
@@ -151,15 +150,6 @@ interface DimValue {
   brands?: Set<number>;
   arg?: number;
 }
-
-const chip = (on: boolean, dim = false) =>
-  `rounded-full border px-2.5 py-0.5 text-[12px] font-medium ${
-    on
-      ? "border-[var(--color-primary)] bg-primary-soft text-primary"
-      : dim
-        ? "border-line/60 text-ink-3/60 hover:border-ink-3/40"
-        : "border-line text-ink-3 hover:border-ink-3"
-  }`;
 
 export function MetricsSection({ runId, evidence = true }: { runId: string; evidence?: boolean }) {
   const [data, setData] = useState<WorkbenchView | null>(null);
@@ -461,13 +451,6 @@ export function MetricsSection({ runId, evidence = true }: { runId: string; evid
     setBrand(null);
     setPresetPick(p.id);
   };
-  const applyBlank = () => {
-    setPool(pool);
-    setMeasure(measure.id);
-    setRow("none");
-    setCol("none");
-    setPresetPick(BLANK);
-  };
   const chosenBrand = data.brands[brand];
 
   type PivotRow = { v: DimValue };
@@ -571,26 +554,29 @@ export function MetricsSection({ runId, evidence = true }: { runId: string; evid
     <div className="card overflow-hidden">
       <div className="grid gap-2.5 border-b border-line px-4 py-3">
         {presets.length > 0 && (
-          <div className="flex flex-wrap items-center gap-1.5">
-            <span className="mr-1">{label("Start from")}</span>
-            {presets.map((p) => (
-              <button key={p.id} type="button" className={chip(activePreset === p.id)} onClick={() => applyPreset(p)}>
-                {p.label}
-              </button>
-            ))}
-            <button
-              type="button"
-              className={chip(activePreset === BLANK, true)}
-              title="Keep these answers and clear rows and columns"
-              onClick={applyBlank}
+          <label className="flex flex-wrap items-center gap-2">
+            <span className="text-[13px] font-medium text-ink">Open a ready-made table</span>
+            <select
+              value={activePreset ?? ""}
+              onChange={(e) => {
+                const p = presets.find((x) => x.id === e.target.value);
+                if (p) applyPreset(p);
+              }}
+              className="input w-auto py-0.5 text-[13px]"
             >
-              Blank
-            </button>
-          </div>
+              <option value="">Your own table</option>
+              {presets.map((p) => (
+                <option key={p.id} value={p.id}>
+                  {p.label}
+                </option>
+              ))}
+            </select>
+            <span className="text-[12px] text-ink-3">or change any setting below to build your own.</span>
+          </label>
         )}
         <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
           <label className="flex items-center gap-1.5">
-            {label("Answers")}
+            {label("Questions")}
             <select
               value={pool}
               onChange={(e) => {

@@ -181,7 +181,6 @@ function TypeTable({ map, category, onOpen }: { map: AnalysisMapView; category?:
     [map]
   );
   const [sel, setSel] = useState<string>(() => types[0]?.key ?? "");
-  const [hide, setHide] = useState<Set<ColKey>>(() => new Set<ColKey>(["to"]));
   const st = types.find((t) => t.key === sel) ?? types[0];
   if (!st) return <p className={T.sec}>Nothing is measured here yet.</p>;
   const rows = st.cells.map((c) => factsOf(c, map.positions[c.id]));
@@ -194,20 +193,10 @@ function TypeTable({ map, category, onOpen }: { map: AnalysisMapView; category?:
     ["to", "Sends buyers to you"],
     ["away", "Sends buyers away"],
   ];
-  const cols = COLS.filter(([k]) => !hide.has(k));
+  const cols = COLS;
   const head = (k: ColKey, l: string) => (k === "num" ? numHead : l);
   const rowName = ROW_NAME[bandKind(st.cells[0].id)] ?? "Contest";
   const text = (r: Facts, k: ColKey): string => (k === "stand" ? VWORD[r.verdict] : (r[k] as string));
-  const toggle = (k: ColKey) => {
-    const next = new Set(hide);
-    if (next.has(k)) next.delete(k);
-    else if (cols.length > 1) next.add(k);
-    setHide(next);
-  };
-  const chip = (on: boolean) =>
-    `rounded-full border px-3 py-1 ${T.ctl} transition-colors ${
-      on ? "border-[var(--color-primary)] bg-primary-soft text-primary" : "border-line text-ink-3 hover:border-ink-3"
-    }`;
   return (
     // pa-root carries the four verdict colors (the hub's style block).
     <div className="pa-root grid items-start gap-6 md:grid-cols-[190px_minmax(0,1fr)]">
@@ -230,13 +219,7 @@ function TypeTable({ map, category, onOpen }: { map: AnalysisMapView; category?:
       </nav>
       <div className="min-w-0">
         <div className="mb-3 flex flex-wrap items-center gap-x-3 gap-y-2">
-          <div className="flex flex-wrap gap-1.5">
-            {COLS.map(([k, l]) => (
-              <button key={k} type="button" aria-pressed={!hide.has(k)} className={chip(!hide.has(k))} onClick={() => toggle(k)}>
-                {l}
-              </button>
-            ))}
-          </div>
+          <h3 className={T.title}>{st.stage}</h3>
           <span className="ml-auto">
             <Download
               name={`${st.stage} - by ${rowName.toLowerCase()}`}
@@ -263,7 +246,7 @@ function TypeTable({ map, category, onOpen }: { map: AnalysisMapView; category?:
                 <tr key={r.id} className="border-b border-line/60 align-top last:border-b-0">
                   <td className="min-w-[8rem] px-3 py-2.5 font-semibold text-ink">{r.label}</td>
                   {cols.map(([k]) => (
-                    <td key={k} className={`px-3 py-2.5 text-ink-2 ${k === "leader" ? "min-w-[9rem]" : k === "about" || k === "to" || k === "away" ? "min-w-[11rem]" : ""}`} title={k === "num" ? r.numTip : undefined}>
+                    <td key={k} className={`px-3 py-2.5 text-ink-2 ${k === "leader" ? "min-w-[7.5rem]" : k === "about" || k === "to" || k === "away" ? "min-w-[8.5rem]" : ""}`} title={k === "num" ? r.numTip : undefined}>
                       {k === "stand" ? (
                         <span className="flex items-center gap-1.5 whitespace-nowrap font-semibold" style={{ color: VCOLOR[r.verdict].fg }}>
                           <i className="inline-block h-2 w-2 flex-none rounded-full" style={{ background: VCOLOR[r.verdict].fg }} />
