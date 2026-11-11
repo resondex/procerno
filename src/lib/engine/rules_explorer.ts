@@ -7,6 +7,7 @@ import { isWallWording } from "./wall_wording";
 import { cachedView, cell, condCache, coreOf, poolOf, requestOf, type PoolRow, type RateCell, type ViewData, type ViewRequest } from "./view_data";
 import { viewsOf, type ViewKey } from "./views";
 import type { AnswerCodes, DictionaryEntry, Intent, Project, Run } from "../types";
+import type { AnswerRule } from "./reason_themes";
 
 /**
  * The decision-rules explorer (2026-10-30, WORKBENCH_REDESIGN_2026-10-30.md
@@ -286,6 +287,8 @@ interface Acc {
   cells: Set<string>;
   /** intent id -> distinct response ids stating it there (capture-only, never served). */
   cellAnswers: Map<string, Set<string>>;
+  /** response id -> its statement (capture-only, filled only when answerRules is captured). */
+  said: Map<string, AnswerRule>;
   ids: string[];
 }
 
@@ -334,6 +337,10 @@ export interface RulesCapture {
   /** Per served group id: intent id -> the distinct response ids stating it
    * there (the map's answer-grain per-cell theme shares). */
   cellAnswers?: Map<string, Map<string, Set<string>>>;
+  /** am15: per served group id, response id -> the answer's own wording of
+   * the group, its away destinations, engine and question (the panels'
+   * receipts and routes). */
+  answerRules?: Map<string, Map<string, AnswerRule>>;
 }
 
 export async function computeRules(data: ViewData, request: ViewRequest = {}, capture?: RulesCapture): Promise<RulesView> {
@@ -519,7 +526,7 @@ export async function computeRules(data: ViewData, request: ViewRequest = {}, ca
       if (!a) {
         a = {
           side: d.side, ck, rules: 0, answers: new Set(), surfaces: new Map(), routes: new Map(),
-          pools: new Map(), rivals: new Map(), rooms: new Map(), questions: new Map(), cells: new Set(), cellAnswers: new Map(), ids: [],
+          pools: new Map(), rivals: new Map(), rooms: new Map(), questions: new Map(), cells: new Set(), cellAnswers: new Map(), said: new Map(), ids: [],
         };
         groups.set(gk, a);
       }
@@ -533,6 +540,11 @@ export async function computeRules(data: ViewData, request: ViewRequest = {}, ca
       const ca = a.cellAnswers.get(intent.id) ?? new Set<string>();
       ca.add(id);
       a.cellAnswers.set(intent.id, ca);
+      if (capture?.answerRules) {
+        const st = a.said.get(id) ?? { said: condition, to: [], model: row.model, intent: intent.id };
+        if (d.side === "away" && !st.to.includes(d.name)) st.to.push(d.name);
+        a.said.set(id, st);
+      }
       if (a.answers.has(id)) continue;
       a.answers.add(id);
       if (a.ids.length < ID_CAP) a.ids.push(id);
@@ -577,6 +589,7 @@ export async function computeRules(data: ViewData, request: ViewRequest = {}, ca
       }
       if (capture?.cellSets) capture.cellSets.set(idOf(a), [...a.cells]);
       if (capture?.cellAnswers) capture.cellAnswers.set(idOf(a), new Map([...a.cellAnswers].map(([c, ids]) => [c, new Set(ids)])));
+      if (capture?.answerRules) capture.answerRules.set(idOf(a), new Map(a.said));
       if (capture?.surfaces) {
         const ordered = [...a.surfaces.entries()].sort((x, y) => y[1] - x[1] || x[0].length - y[0].length || (x[0] < y[0] ? -1 : 1)).map(([w]) => w);
         const label = labelOf(a.surfaces);

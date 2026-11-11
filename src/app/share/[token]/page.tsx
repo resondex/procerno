@@ -52,6 +52,7 @@ export default async function SharePage({
       brand={project.brand}
       runId={shown?.id ?? null}
       codes={Boolean(project.codes_source)}
+      category={project.category}
       expiresAt={link.expiresAt}
     />
   );

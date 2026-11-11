@@ -562,6 +562,7 @@ export function plainQuote(s: string): string {
     .replace(/`+([^`]*)`+/g, "$1") // inline code
     .replace(/^\s{0,3}(#{1,6}\s+|>\s?|[-*+]\s+|\d+\.\s+)/gm, "") // heads, blockquotes, bullets
     .replace(/\s*\n\s*/g, " ") // a quote renders as one line
+    .replace(/(^|\s)#{1,6}\s+(?=\S)/g, "$1") // a heading marker left mid-quote
     .trim();
 }
 

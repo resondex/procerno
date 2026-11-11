@@ -14,6 +14,10 @@
  * invariants (no empty cells, a position per cell, receipts are real response
  * ids of the run, unique ids) and the archetype ground truth.
  */
+import type { AnalysisMapView, Position } from "../src/lib/engine/analysis_types";
+import type { DossierTheme } from "../src/lib/engine/reason_themes";
+import type { Dossier } from "../src/lib/engine/dossiers";
+import type { ViewData } from "../src/lib/engine/view_data";
 process.env.DATABASE_URL = "";
 process.env.SQLITE_PATH = process.cwd() + "/data/dashboard_fixture.db";
 for (const k of ["OPENAI_API_KEY", "ANTHROPIC_API_KEY", "GEMINI_API_KEY", "XAI_API_KEY", "PERPLEXITY_API_KEY", "FIREWORKS_API_KEY"]) process.env[k] = "";
@@ -24,6 +28,55 @@ const { loadViewData } = await import(process.cwd() + "/src/lib/engine/view_data
 const { computeAnalysisMap } = await import(process.cwd() + "/src/lib/engine/analysis_map.ts");
 const { computeBrandSummary } = await import(process.cwd() + "/src/lib/engine/brand_summary.ts");
 const { insightInputs, rankedInsights } = await import(process.cwd() + "/src/lib/engine/summary_insights.ts");
+const { computeBrief } = await import(process.cwd() + "/src/lib/engine/brief.ts");
+const { computeDossiers } = await import(process.cwd() + "/src/lib/engine/dossiers.ts");
+
+/* am15 (2026-11-10): the plain-wording pass. Template text on the customer
+ * surfaces (the map, the summary's insights and the composed brief) never
+ * uses these words; data quoted from answers and the codebook is subtracted
+ * first (it is the buyers' and the customer's own wording). */
+const BANNED: [string, RegExp][] = [
+  ["wall", /\bwalls?\b/i],
+  ["routes", /\brout(e|es|ed|ing)\b/i],
+  ["leavers", /\bleavers?\b/i],
+  ["reason", /\breasons?\b/i],
+  ["travels with", /\btravels? with\b/i],
+  ["closest contest", /\bclosest contest\b/i],
+];
+/** Keys whose values are data or plumbing, never template text. */
+const SKIP_KEYS = new Set(["responseId", "find", "quote", "cellId", "id", "key", "cell", "cells", "anchors", "at", "subject", "subjects"]);
+function bannedIn(root: unknown, data: string[], where: string, out: string[]) {
+  const strip = (t: string) => {
+    let x = t.replace(/"[^"]*"/g, '""').replace(/“[^”]*”/g, "");
+    for (const d of data) if (d.length >= 3 && x.includes(d)) x = x.split(d).join(" ");
+    return x;
+  };
+  const walk = (v: unknown, path: string) => {
+    if (typeof v === "string") {
+      const t = strip(v);
+      for (const [name, re] of BANNED) if (re.test(t)) out.push(`${where}${path}: "${name}" in ${JSON.stringify(v.slice(0, 160))}`);
+    } else if (Array.isArray(v)) v.forEach((x, i) => walk(x, `${path}[${i}]`));
+    else if (v && typeof v === "object") for (const [k, x] of Object.entries(v)) if (!SKIP_KEYS.has(k)) walk(x, `${path}.${k}`);
+  };
+  walk(root, "");
+}
+/** Every data string a view may quote: condition / theme / code labels, answers' wordings, brands, the setup's own words. */
+function dataPhrases(view: AnalysisMapView, data: ViewData): string[] {
+  const out = new Set<string>();
+  const add = (s: unknown) => { if (typeof s === "string" && s.trim().length >= 3) out.add(s.trim()); };
+  const theme = (t: DossierTheme) => { add(t.label); for (const b of t.buckets ?? []) { add(b.label); add(b.scenario); for (const m of b.members ?? []) add(m.label); } };
+  for (const p of Object.values(view.positions)) {
+    for (const c of [...p.toward, ...p.away]) add(c.text);
+    for (const t of [...(p.towardThemes ?? []), ...(p.awayThemes ?? [])]) theme(t);
+    for (const l of p.lifts) add(l.label);
+    for (const r of p.argsRows ?? []) add(r.label);
+    add(p.notes?.wall);
+  }
+  for (const it of data.intents) { add(it.text); add(it.concern); add(it.situation); add(it.angle); }
+  for (const e of data.dictionary) { add(e.canonical); add(e.display_name); for (const a of e.aliases ?? []) add(a); }
+  for (const c of data.codes) { for (const x of c.reasons ?? []) add(x); for (const x of c.topics ?? []) add(x); for (const r of c.decision_rules ?? []) add(r.condition.trim()); }
+  return [...out].sort((a, b) => b.length - a.length);
+}
 
 // bs8 detectors: every one that fires (ranked, uncapped) must place onto its own map cell.
 const BS8_KEYS = new Set(["neutralized_differentiator", "conversion_vs_rival", "leak_picks", "leak_problem", "worst_worry", "leave_no_exit"]);
@@ -137,6 +190,60 @@ for (const project of projects) {
         if (!narrow.positions[c.id]) failures.push(`${project.brand}: no position under engine subset ${c.id}`);
       }
   console.log(`\nENGINE SUBSET (${subset.length} engines): ${narrowCells} cells, archetype ${narrow.casting.archetype}`);
+
+  /* -- am15: the one-panel fields -- */
+  const valid = new Set(data.codes.map((c: { response_id: string }) => c.response_id));
+  const realRef = (r: { responseId: string; find?: string }, at: string) => {
+    if (!ids.has(r.responseId) || !valid.has(r.responseId)) failures.push(`${project.brand}: ${at} receipt ${r.responseId} is not a coded answer of the run`);
+    if (r.find !== undefined && !r.find.trim()) failures.push(`${project.brand}: ${at} receipt with an empty find`);
+  };
+  let withBrands = 0, refs = 0;
+  for (const [id, p] of Object.entries(view.positions as Record<string, Position>)) {
+    if (p.brands) {
+      withBrands++;
+      const fig = (p.figures ?? []).find((f: { label: string }) => f.label.startsWith("Share of the picks here, by brand"));
+      if (fig) {
+        const want = new Map<string, string>((fig.value as string).split(" · ").map((x: string) => { const m = /^(.+) (\S+%)$/.exec(x.trim()); return [m?.[1] ?? x, m?.[2] ?? ""]; }));
+        for (const b of p.brands) if (want.get(b.name) !== b.share) failures.push(`${project.brand}: ${id} brands ${b.name} ${b.share} != figure ${want.get(b.name)}`);
+        if (want.get(project.brand) !== undefined && want.get(project.brand) !== p.youShare) failures.push(`${project.brand}: ${id} youShare ${p.youShare} != figure ${want.get(project.brand)}`);
+      }
+      if (p.brands.length > 5) failures.push(`${project.brand}: ${id} lists ${p.brands.length} brands`);
+      for (const b of p.brands) for (const r of b.proof) { realRef(r, `${id} brands`); refs++; if (!r.quote) failures.push(`${project.brand}: ${id} brand proof without a quote`); }
+      if (p.youShare === undefined) failures.push(`${project.brand}: ${id} brands without youShare`);
+    }
+    if (p.argsMode && p.argsMode !== "compare" && !(p.argsRows ?? []).length) failures.push(`${project.brand}: ${id} argsMode ${p.argsMode} without argsRows`);
+    if (p.argsMode === "compare" && (!p.lifts.length || p.argsRows)) failures.push(`${project.brand}: ${id} compare mode must carry lifts and no argsRows`);
+    if (p.lifts.length && p.argsMode !== "compare") failures.push(`${project.brand}: ${id} has lifts but argsMode ${p.argsMode}`);
+    for (const r of p.argsRows ?? []) for (const x of r.receipts) { realRef(x, `${id} argsRows`); refs++; }
+    for (const l of p.lifts) for (const x of l.receipts ?? []) { realRef(x, `${id} lifts`); refs++; }
+    for (const c of [...p.toward, ...p.away]) for (const x of c.receipts ?? []) { realRef(x, `${id} conditions`); refs++; }
+    for (const c of p.toward) if (c.routes) failures.push(`${project.brand}: ${id} toward condition carries routes`);
+    for (const t of [...(p.towardThemes ?? []), ...(p.awayThemes ?? [])]) for (const x of t.receipts ?? []) { realRef(x, `${id} themes`); refs++; }
+    if (p.notes?.wall && !p.away.some((c: { text: string; wall?: boolean }) => c.wall && c.text === p.notes.wall)) failures.push(`${project.brand}: ${id} notes.wall is not its flat wall item`);
+  }
+  const dossiers = await computeDossiers(data, {});
+  for (const d of dossiers.dossiers as Dossier[]) {
+    for (const a of d.argsAll) for (const x of a.receipts ?? []) { realRef(x, `dossier ${d.name} args`); refs++; }
+    for (const t of [...d.routesThemes, ...d.routesBackThemes]) for (const x of t.receipts ?? []) { realRef(x, `dossier ${d.name} themes`); refs++; }
+    for (const r of d.rooms ?? []) {
+      const p = view.positions[r.cellId];
+      const b = p?.brands?.find((x: { name: string }) => x.name === d.name);
+      if (!b || b.share !== r.them || p.youShare !== r.you) failures.push(`${project.brand}: dossier ${d.name} room ${r.cellId} ${r.them}/${r.you} != the position's split`);
+    }
+  }
+  console.log(`\nONE-PANEL FIELDS: ${withBrands} positions with brands, ${refs} answer refs checked`);
+
+  /* -- am15: the plain-wording pass -- */
+  const summaryFull = await computeBrandSummary(data, {});
+  const brief = await computeBrief(data, {});
+  const phrases = dataPhrases(view, data);
+  const banned: string[] = [];
+  const mapText = { casting: view.casting, tensions: view.tensions, bands: view.bands, positions: Object.fromEntries(Object.entries(view.positions as Record<string, Position>).map(([k, p]) => [k, { ...p, toward: undefined, away: undefined, towardThemes: undefined, awayThemes: undefined, notes: undefined }])) };
+  bannedIn(mapText, phrases, "map", banned);
+  bannedIn({ insights: summaryFull.insights, verdict: summaryFull.verdict }, phrases, "summary", banned);
+  bannedIn(brief, phrases, "brief", banned);
+  for (const b of banned) failures.push(`${project.brand}: banned word - ${b}`);
+  console.log(`PLAIN WORDING: ${banned.length} banned-word hits`);
 
   const exp = EXPECTED[project.brand.toLowerCase()];
   if (exp && exp !== view.casting.archetype) failures.push(`${project.brand}: archetype ${view.casting.archetype}, expected ${exp}`);

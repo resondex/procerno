@@ -698,6 +698,7 @@ export default function ProjectDashboard({
               projectId={project.id}
               refreshToken={dictVersion}
               codes={codesEra}
+              category={project.category}
             />
           </DictionaryOpenerContext.Provider>
         </>

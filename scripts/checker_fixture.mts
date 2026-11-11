@@ -1260,3 +1260,26 @@ console.log("17. s56 advocacy criticism containment");
   ok("order-independent keys", show(["SavorOne", "Savor"], "Capital One") === "Savor+1");
   console.log("21. product-line pills: " + (process.exitCode ? "FAILED" : "ALL PASS"));
 }
+
+// =====================================================================
+// 22. Answer passages (2026-11-10, the one-panel redesign): passageOf
+// finds the text an AnswerRef points at - exact first (markdown markers
+// stripped), else the best-matching sentence. Pure, client-safe.
+// =====================================================================
+{
+  const ok = (label: string, cond: boolean, extra = "") => { if (!cond) { console.error(`   FAIL ${label} ${extra}`); process.exitCode = 1; } else console.log(`   ok   ${label} ${extra}`); };
+  const ap = await import(`${REPO}/src/lib/answer_passage`);
+  const body = "## Short answer\n\nFor most people, **the annual fee pays for itself** if you travel often.\n\n- If you prefer simple cash back, pick a no-fee card instead.\n- Lounge access matters to frequent flyers.";
+  const ex = ap.passageOf(body, "the annual fee pays for itself");
+  ok("exact match highlights the span with markdown stripped", ex.hit === "the annual fee pays for itself" && ex.before.endsWith("For most people, ") && !ex.before.includes("#") && !ex.after.includes("*"));
+  const ci = ap.passageOf(body, "THE ANNUAL FEE PAYS FOR ITSELF");
+  ok("exact match is case-insensitive and keeps the answer's casing", ci.hit === "the annual fee pays for itself");
+  const fb = ap.passageOf(body, "Prefer simple cash back rewards");
+  ok("no exact match -> the best-matching sentence", fb.hit.startsWith("If you prefer simple cash back"), JSON.stringify(fb.hit));
+  const code = ap.passageOf(body, "lounge access");
+  ok("a code label matches inside its sentence", code.hit.toLowerCase() === "lounge access" || code.hit.includes("Lounge access"));
+  const empty = ap.passageOf("", "anything");
+  ok("an empty body yields an empty passage", empty.hit === "" && empty.before === "" && empty.after === "");
+  ok("plainText strips links, list and heading markers", ap.plainText("# Title\n- [Card](http://x) **bold**") === "Title Card bold");
+  console.log("22. answer passages: " + (process.exitCode ? "FAILED" : "ALL PASS"));
+}

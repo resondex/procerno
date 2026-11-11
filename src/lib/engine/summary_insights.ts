@@ -551,7 +551,7 @@ function rivalHeadToHead(s: Summary): Insight | null {
     key: "rival_h2h",
     kind: "rival",
     title: `Hardest direct matchup: ${worst.rival}`,
-    body: `Asked to compare you with ${worst.rival} directly, the AI picks you ${pct(worst.winOfDecided)} of the time it picks one of you; your closest contest is ${closest.rival}, at ${pct(closest.winOfDecided)}.`,
+    body: `Asked to compare you with ${worst.rival} directly, the AI picks you ${pct(worst.winOfDecided)} of the time it picks one of you; your best matchup is ${closest.rival}, at ${pct(closest.winOfDecided)}.`,
     foot: `${foot(worst)}. ${foot(closest)}. Matchups under ${MIN_BASE} decided answers left out.`,
     look: { pill: "rivals", label: "Rivals - head-to-head" },
     effect: Math.abs(rate(closest.winOfDecided) - rate(worst.winOfDecided)),
@@ -565,8 +565,8 @@ function argument(s: Summary): Insight | null {
   return {
     key: "argument",
     kind: "argument",
-    title: best.code,
-    body: `${best.code.charAt(0).toUpperCase()}${best.code.slice(1)} travels with your wins (${best.lift >= 0 ? "+" : "-"}${pts(best.lift)} over answers that pick a rival); the answers you lose argue ${worst.code} (${worst.lift >= 0 ? "+" : "-"}${pts(worst.lift)}).`,
+    title: `${best.code.charAt(0).toUpperCase()}${best.code.slice(1)} comes up when you win`,
+    body: `${best.code.charAt(0).toUpperCase()}${best.code.slice(1)} comes up ${pts(best.lift)} ${best.lift >= 0 ? "more" : "less"} often in answers that pick you than in answers that pick a rival. Answers that pick a rival bring up ${worst.code} ${worst.lift <= 0 ? "more" : "less"} (${pts(worst.lift)}).`,
     foot: `${best.code}: ${pct(best.wins)} of ${best.wins.n} wins vs ${pct(best.others)} of ${best.others.n} rival picks. ${worst.code}: ${pct(worst.wins)} vs ${pct(worst.others)}.`,
     look: { pill: "why", label: "Why" },
     effect: best.lift - worst.lift,
@@ -788,7 +788,7 @@ function taughtVsWinning(s: Summary, inp: InsightInputs): Insight | null {
   const parts: string[] = [];
   const foot: string[] = [];
   if (untaught) {
-    parts.push(`${untaught.code} travels with your wins (+${pts(untaught.lift)}) but is not among the five criteria the AI teaches buyers to weigh`);
+    parts.push(`${untaught.code} comes up ${pts(untaught.lift)} more often when you win but is not among the five criteria the AI teaches buyers to weigh`);
     const tr = taughtOf(untaught.code);
     foot.push(`${untaught.code}: ${pct(untaught.wins)} of wins vs ${pct(untaught.others)} of rival picks; taught in ${tr ? counts(tr) : "no"} criteria answers.`);
   }
@@ -874,9 +874,9 @@ function leaverCapture(inp: InsightInputs): Insight | null {
     return {
       key: "leaver_capture",
       kind: "switching",
-      title: "Rival leavers come to you",
+      title: "Rivals' customers come to you",
       body: `When a rival's customer asks what to switch to, the AI picks you in ${pct(t.captured)} of answers - you take ${pct(you.shareOfDecided)} of the picks${src ? ` - most often for customers leaving ${src.rival}, at ${pct(src.captured)}` : ""}.`,
-      foot: `Picked ${counts(t.captured)}; of decided leavers ${counts(you.shareOfDecided)}.${second ? ` Next: ${second.name}, ${second.chosen.k}.` : ""}${src ? ` Leaving ${src.rival}: ${counts(src.captured)}.` : ""}`,
+      foot: `Picked ${counts(t.captured)}; of the switching customers' picks ${counts(you.shareOfDecided)}.${second ? ` Next: ${second.name}, ${second.chosen.k}.` : ""}${src ? ` Leaving ${src.rival}: ${counts(src.captured)}.` : ""}`,
       look: { pill: "stations", station: "comparison", label: "Stations - Comparison" },
       effect: rate(you.shareOfDecided) - 1 / takers.length,
     };
@@ -887,7 +887,7 @@ function leaverCapture(inp: InsightInputs): Insight | null {
     return {
       key: "leaver_capture",
       kind: "switching",
-      title: "Rival leavers hear about you, then go elsewhere",
+      title: "Rivals' customers hear about you, then go elsewhere",
       body: `When a rival's customer asks what to switch to, the AI names you in ${pct(t.named)} of answers and recommends you in ${pct(t.recommended)}, but picks you in ${pct(t.captured)}${other ? ` - ${other.name} takes the most, ${pct(other.shareOfDecided)} of the picks` : ""}.`,
       foot: `Named ${counts(t.named)}; recommended ${counts(t.recommended)}; picked ${counts(t.captured)}.${other ? ` ${other.name}: ${other.chosen.k} of ${other.shareOfDecided.n} decided.` : ""}`,
       look: { pill: "stations", station: "comparison", label: "Stations - Comparison" },
@@ -945,7 +945,7 @@ function awayCondition(s: Summary, inp: InsightInputs): Insight | null {
     const b = s.brands.find((x) => x.key === g.names!.key);
     const share = b ? b.shareOfDecided : cell(0, s.firmPickInCategory.k);
     if (rate(share) < BLOCKER_SHARE) {
-      blocker = `; it names ${g.names.name}, a brand with ${pct(share)} of the picks when buyers ask what to buy, so it blocks you without winning for it`;
+      blocker = `. It names ${g.names.name}, a brand with ${pct(share)} of the picks when buyers ask what to buy, so it blocks you without winning for it`;
       blockerFoot = ` ${g.names.name} in the open choice: ${counts(share)}.`;
     }
   }
@@ -955,17 +955,17 @@ function awayCondition(s: Summary, inp: InsightInputs): Insight | null {
   const wall = g.wall
     ? blocker
       ? ""
-      : " - a state the buyer is already in, not an argument to out-argue"
+      : " - a situation the buyer is already in, not an argument to answer"
     : laterWall
-      ? `; the largest state-shaped one, "${shorten(laterWall.label, 60)}", appears in ${pct(laterWall.cells / a.cells)} of them - a state the buyer is already in, not an argument to out-argue`
+      ? `; the largest fixed situation among them, "${shorten(laterWall.label, 60)}", comes up in ${pct(laterWall.cells / a.cells)} of them - a situation the buyer is already in, not an argument to answer`
       : "";
   const wallFoot = laterWall ? ` "${laterWall.label}": at least ${laterWall.rules} rules across ${laterWall.cells} questions.` : "";
   return {
     key: "away_condition",
     kind: "condition",
-    title: g.wall ? `The wall: "${shorten(g.label, 60)}"` : `The reason you lose on: "${shorten(g.label, 60)}"`,
-    body: `The reason that most often routes the AI away from you is "${shorten(g.label)}"${to ? `, sending buyers to ${to.name}` : ""}, and it appears in ${pct(spread)} of the questions where any reason routes away${blocker}${wall}.`,
-    foot: `At least ${g.rules} rules in ${g.answers} answers across ${g.cells} of ${a.cells} questions with an away reason${to ? `; to ${to.name} ${to.n}` : ""}.${blockerFoot}${wallFoot} Counts are lower bounds: ${a.grouping === "stems" ? "reasons are grouped by their words, and" : ""} wordings the grouping did not join are left out.`,
+    title: g.wall ? `A fixed situation sends buyers away: "${shorten(g.label, 60)}"` : `What sends buyers away most: "${shorten(g.label, 60)}"`,
+    body: `The condition that most often sends buyers away from you is "${shorten(g.label)}"${to ? `, and the AI sends them to ${to.name}` : ""}; it comes up in ${pct(spread)} of the questions where the AI gives any condition that sends buyers away${blocker}${wall}.`,
+    foot: `At least ${g.rules} rules in ${g.answers} answers across ${g.cells} of ${a.cells} questions where the AI gives a condition that sends buyers away${to ? `; to ${to.name} ${to.n}` : ""}.${blockerFoot}${wallFoot} Counts are lower bounds: ${a.grouping === "stems" ? "conditions are grouped by their words, and" : ""} wordings the grouping did not join are left out.`,
     look: { pill: "why", label: "Why - decision rules" },
     effect: spread,
   };
@@ -1123,7 +1123,7 @@ function neutralizedDifferentiator(inp: InsightInputs): Insight | null {
     title: best.above ? `Your rivals are credited with ${best.code}` : `${cap(best.code)} no longer sets you apart`,
     body: best.above
       ? `${cap(best.code)} is argued in ${pct(best.w)} of the direct matchups you win but ${pct(best.l)} of those you lose${rivalText} - the AI credits your rivals with it more than you.`
-      : `${cap(best.code)} is argued in ${pct(best.w)} of the direct matchups you win and ${pct(best.l)} of those you lose${rivalText} - it travels with your rivals' wins as often as yours.`,
+      : `${cap(best.code)} is argued in ${pct(best.w)} of the direct matchups you win and ${pct(best.l)} of those you lose${rivalText} - it comes up in your rivals' wins as often as in yours.`,
     foot: `In wins: ${counts(best.w)}. In losses: ${counts(best.l)}${rival ? `; ${rivalLosses} of those losses to ${rival}` : ""}. Prompted head-to-heads against every named rival, pooled; arguments in under ${Math.round(ND_WIN_SHARE * 100)}% of wins left out.`,
     look: { pill: "stations", station: "comparison", label: "Stations - Comparison" },
     effect: rate(best.l) - rate(best.w),

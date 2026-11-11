@@ -105,6 +105,58 @@ export interface PositionReceipt {
   quote?: string;
 }
 
+/** am15 (the one-panel redesign, 2026-11-10): a pointer into one answer for
+ * the panel's inline passages - the UI fetches the body lazily
+ * (/api/runs/[id]/answer_bodies) and highlights `find` in it
+ * (answer_passage.ts passageOf): the answer's own wording of a condition, a
+ * code label, or the code row's quote. Never the body itself. */
+export interface AnswerRef {
+  responseId: string;
+  find: string;
+}
+
+/** One brand's share of a pick contest (Position.brands). */
+export interface PositionBrand {
+  name: string;
+  /** Its share of the in-category picks here - the same number the
+   * "Share of the picks here, by brand" figure states. */
+  share: string;
+  /** Up to 3 quoted answers where it is the pick, spread across engines. */
+  proof: PositionReceipt[];
+}
+
+/** What the panel's "What the AI says about the <category>" section draws:
+ * compare = the two-sided lifts (Position.lifts; argsRows absent); rival =
+ * your side is under the lift floor, so the share of the rival-pick answers
+ * arguing each code; all = no pick on either side, so the share of the
+ * contest's answers arguing each code; topics = the schema codes topics, not
+ * reasons (awareness, learning the category). */
+export type ArgsMode = "compare" | "rival" | "all" | "topics";
+
+export interface ArgsRow {
+  label: string;
+  share: string;
+  receipts: AnswerRef[];
+}
+
+/** The badges' meaning as data for the panel's plain sentences. */
+export interface PositionNotes {
+  /** The top possession-shaped away condition's wording (the wall badge). */
+  wall?: string;
+  inHouse?: true;
+  leak?: true;
+  /** one_assistant: one engine carries your side (watch); asked_for: the
+   * settled-customer number appears only when the asker sets the side. */
+  soft?: "one_assistant" | "asked_for";
+}
+
+/** Where an away condition (or theme) sends buyers: an active brand and its
+ * share of the condition's answers that name a destination. */
+export interface RouteShare {
+  name: string;
+  share: string;
+}
+
 export interface LiftItem {
   label: string;
   /** Signed points (argued-in-your-wins minus argued-in-rival-wins, or the
@@ -116,6 +168,9 @@ export interface LiftItem {
   wins?: string;
   others?: string;
   tip?: string;
+  /** am15: one answer that picks you (the lift's first side) and one that
+   * picks a rival (its second), both arguing the code, when available. */
+  receipts?: AnswerRef[];
 }
 
 export interface ConditionItem {
@@ -123,6 +178,13 @@ export interface ConditionItem {
   /** Grouped answer count, approximate by construction. */
   n: number;
   wall?: boolean;
+  /** am15: answer-grain share of the contest's rule-bearing answers stating it. */
+  share?: string;
+  /** am15: up to 2 answers stating it (different engines), find = their own wording. */
+  receipts?: AnswerRef[];
+  /** am15, away side only: the active brands it sends buyers to - top 3 with
+   * >= 15% of its answers that name a destination, and at least 2 answers. */
+  routes?: RouteShare[];
 }
 
 export interface Position {
@@ -153,9 +215,9 @@ export interface Position {
   towardThemes?: DossierTheme[];
   awayThemes?: DossierTheme[];
   receipts: PositionReceipt[];
-  /** The move, in the treatment ladder's terms - a template per triage. */
+  /** The move as plain sentences (am15) - a template per triage. */
   lever: string;
-  /** Treatment family from the service ladder, e.g. "Evidence audit". */
+  /** The move's name in plain words (am15), e.g. "Publish your case". */
   family: string;
   /** "The numbers" (2026-11-06, the citation ruling): every figure a brief
    * cites from this cell, stated plainly - label left, value right; counts
@@ -164,6 +226,19 @@ export interface Position {
    * (2026-11-07): cell-scoped only - the brief's brand, engines and condition
    * answer cards carry the figures that are not this cell's question. */
   figures?: { label: string; value: string; tip?: string }[];
+  /** am15: the in-category pick split of a pick contest (open choice, social
+   * validation, premium vs basic, rivals' customers switching) - the top 5
+   * rivals by share, the figure's own numbers. Present only when at least two
+   * brands (you included) clear BRAND_FLOOR picks. */
+  brands?: PositionBrand[];
+  /** Your share of the same picks (present with `brands`). */
+  youShare?: string;
+  /** am15: which arguments block the panel draws (absent when none has content). */
+  argsMode?: ArgsMode;
+  /** am15: top 5 rows for argsMode rival / all / topics. */
+  argsRows?: ArgsRow[];
+  /** am15: the badges' meaning for the panel's sentences (cells keep `badges`). */
+  notes?: PositionNotes;
 }
 
 /** The one payload the Map and Verdict tabs read (positions ride along so

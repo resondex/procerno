@@ -118,7 +118,7 @@ function anchor(c: Ctx, id: string | null | undefined): Anchor | undefined {
   const card = cardFor(c, id);
   if (!card) return undefined;
   if (card.kind === "cell") return { id, label: c.map.positions[id].where, kind: "cell" };
-  const label = card.kind === "brand" ? `${card.crumb.split(" · ")[0]} - how it does in open questions` : card.kind === "engines" ? "The assistants" : "The conditions - what routes buyers away";
+  const label = card.kind === "brand" ? `${card.crumb.split(" · ")[0]} - how it does in open questions` : card.kind === "engines" ? "The assistants" : "The conditions - what sends buyers away";
   return { id, label, kind: card.kind };
 }
 
@@ -532,29 +532,30 @@ function todayOf(st: MapCellStat): string {
  * One template per triage and lever variant - the same variants the map
  * chooses between, never new strategy. */
 function actOf(p: Position, st: MapCellStat): string {
+  // bf21: the am15 plain-wording pass - each phrase restates its lever sentence.
   switch (p.triageSuggested) {
     case "record_wrong":
-      return "correct the record where the AI reads";
+      return "correct the out-of-date facts in the sources the AI draws on";
     case "proof_missing":
       return st.row === "criteria"
-        ? "put your winning argument into what the AI teaches buyers to weigh"
+        ? "get your strongest point into the guides the AI draws on when it teaches buyers what to look for"
         : st.row === "buyers"
-          ? "publish the counter-evidence for this worry where the AI reads"
-          : "publish the evidence for your case where the AI reads";
+          ? "publish the evidence that answers this worry where the AI looks for it"
+          : "publish the evidence for your side where the AI looks for it";
     case "strategy_misfit":
       return st.wall
-        ? "route around the wall to the buyers it does not hold"
+        ? "stop arguing against the fixed situation and aim at the buyers it does not apply to"
         : st.badges.includes("leak")
-          ? "answer the buyer's whole job where the AI reads, or cede the situation knowingly"
-          : "own a case that holds for the typical buyer, or accept the lane";
+          ? "cover everything this buyer needs, or decide to leave this buyer to others"
+          : "build a case that works for the typical buyer, or accept being the specialist";
     case "product_truth":
-      return "confirm the experience against your own data before any content";
+      return "check what the AI says against your own data before writing anything";
     case "earned":
-      return "keep the evidence behind this standing current and visible";
+      return "keep the proof behind this current and easy for the AI to find";
     case "overclaimed":
-      return "substantiate this number where the unprompted answers are made";
+      return "build the proof where buyers ask without being prompted";
     case "windfall":
-      return "size how much demand steps down to your own option versus walks away";
+      return "find out how much of this demand moves to your own cheaper option and how much leaves";
   }
 }
 
@@ -599,7 +600,7 @@ function movesOf(map: AnalysisMapView, stats: Record<string, MapCellStat>, brand
       family: p.family,
       watch: w.watch,
       today: todayOf(st),
-      tip: `${st.you} answers on your side, ${st.them} on ${st.taker}'s, of ${st.d} that take a side; ${st.n} answers in all. Treatment: ${p.family}.`,
+      tip: `${st.you} answers on your side, ${st.them} on ${st.taker}'s, of ${st.d} that take a side; ${st.n} answers in all. The move: ${p.family}.`,
     };
   });
 }
@@ -752,19 +753,19 @@ function conditionsPara(c: Ctx): BriefPara | null {
   }
   const t = toward.slice(0, 3);
   if (t.length) {
-    parts.push(`The branch toward ${c.name}: ${listOf(t.map(q))} - the largest appears in ${pctN(towardCells ? t[0].cells / towardCells : 0)} of the questions where any condition routes ${c.isTarget ? "to it" : "to it from " + c.brand}.`);
+    parts.push(`The branch toward ${c.name}: ${listOf(t.map(q))} - the largest appears in ${pctN(towardCells ? t[0].cells / towardCells : 0)} of the questions where the AI gives any condition that sends buyers to it${c.isTarget ? "" : ` from ${c.brand}`}.`);
     tips.push(t.map((g) => `${g.label}: ${g.rules} rules in ${g.cells} questions`).join("; ") + ".");
   }
   const a = away.slice(0, 3);
   if (a.length) {
     const named = a.map((g) => (g.routes[0] ? `${q(g)} (to ${g.routes[0].name})` : q(g)));
-    parts.push(`The branch away: ${listOf(named)} - the largest appears in ${pctN(awayCells ? a[0].cells / awayCells : 0)} of the questions where any condition routes away.`);
+    parts.push(`The branch away: ${listOf(named)} - the largest appears in ${pctN(awayCells ? a[0].cells / awayCells : 0)} of the questions where the AI gives any condition that sends buyers away.`);
     tips.push(a.map((g) => `${g.label}: ${g.rules} rules in ${g.cells} questions`).join("; ") + ".");
   }
   if (c.isTarget) {
     const walls: string[] = [];
     for (const st of Object.values(c.stats)) if (st.wall && !walls.some((w) => norm(w) === norm(st.wall!))) walls.push(st.wall);
-    if (walls.length) parts.push(`The standing walls - states the buyer is already in, not arguments to out-argue: ${listOf(walls.slice(0, 3).map((w) => `"${w}"`))}.`);
+    if (walls.length) parts.push(`The fixed situations - ones the buyer is already in, not arguments to answer: ${listOf(walls.slice(0, 3).map((w) => `"${w}"`))}.`);
   }
   if (parts.length === 1) return null;
   return withCells({ text: parts.join(" "), tip: tips.join(" ") || undefined }, cellsOf(c, CONDITION_CARD));
@@ -882,7 +883,7 @@ function nowWhat(c: Ctx): BriefSection[] {
 const INSIGHT_SHORT: Record<string, string> = {
   rival_open: "the leading rival's lead in picks",
   conversion_vs_rival: "the leading rival turning recommendations into picks",
-  away_condition: "the condition that most often routes buyers away",
+  away_condition: "the condition that most often sends buyers away",
   own_defense: "the exits shown to your own customers",
   engine_pick_concentration: "dependence on one AI assistant",
   leak_picks: "picks leaving the category",
@@ -906,7 +907,7 @@ const THREAT_KEYS = ["away_condition", "own_defense", "engine_pick_concentration
 /** An insight's direction for the keys that fire both ways (strength or threat). */
 function insightIsStrength(i: Insight): boolean {
   if (i.key === "conversion_vs_rival") return i.title.startsWith("You turn");
-  if (i.key === "leaver_capture") return i.title === "Rival leavers come to you";
+  if (i.key === "leaver_capture") return i.title === "Rivals' customers come to you";
   if (i.key === "rival_open") return i.title.startsWith("You lead");
   if (i.key === "prompted_vs_open") return false;
   return false;
@@ -972,7 +973,7 @@ function swotOf(c: Ctx): Swot {
   const worst = c.lift.length > 1 ? c.lift[c.lift.length - 1] : undefined;
   if (best && best.lift > 0 && best.wins.low > best.others.high)
     s.push({
-      text: `${cap(best.code)} travels with ${c.isTarget ? "your" : poss(c.name)} wins - argued in ${P(best.wins)} of the answers that pick ${c.isTarget ? "you" : c.name} and ${P(best.others)} of those that pick another brand.`,
+      text: `${cap(best.code)} comes up more when ${c.isTarget ? "you win" : `${c.name} wins`} - argued in ${P(best.wins)} of the answers that pick ${c.isTarget ? "you" : c.name} and ${P(best.others)} of those that pick another brand.`,
       short: `the ${best.code} argument`,
       tip: `${tipOf(best.wins)} wins; ${tipOf(best.others)} other picks.`,
       kind: "argument",
@@ -1054,9 +1055,9 @@ function swotOf(c: Ctx): Swot {
     for (const [cellId, st] of Object.entries(c.stats))
       if (st.wall && st.d >= MIN && ["open", "social", "premium", "h2h", "leavers"].includes(st.row) && !wallSeen.has(norm(st.wall)) && wallSeen.add(norm(st.wall)))
         t.push({
-          text: `${st.row === "h2h" ? `Against ${st.label}` : st.label ? `For ${st.label}` : "For every buyer"}, "${st.wall}" routes buyers away - a state the buyer is already in - while ${st.taker} takes ${pctN(st.them / st.d)} of the picks there.`,
-          short: `the "${st.wall}" wall`,
-          tip: `${st.them} of ${st.d} side-taking answers to ${st.taker}.`,
+          text: `${st.row === "h2h" ? `Against ${st.label}` : st.label ? `For ${st.label}` : "For every buyer"}, "${st.wall}" sends buyers away - a situation the buyer is already in - while ${st.taker} takes ${pctN(st.them / st.d)} of the picks there.`,
+          short: `the fixed situation "${st.wall}"`,
+          tip: `${st.them} of ${st.d} answers that take a side go to ${st.taker}.`,
           kind: "wall",
           effect: st.them / st.d - st.you / st.d,
           cellId,
@@ -1609,7 +1610,7 @@ function jobsFrame(c: Ctx): BriefSection[] {
         tip += `; worth it ${tipOf(v.worth.yes)}`;
       }
       const st = c.stats[`chooses:open:${norm(r.room)}`];
-      if (st?.wall) parts.push(`The condition "${st.wall}" - a state the buyer is already in - routes buyers away here.`);
+      if (st?.wall) parts.push(`The condition "${st.wall}" - a situation the buyer is already in - sends buyers away here.`);
     }
     const hasValue = c.isTarget && (valueRooms.get(r.room)?.answers ?? 0) >= MIN;
     paras.push(withCells({ lead: r.room, text: parts.join(" "), tip: `${tip}.` }, cellsAt(c, [`chooses:open:${norm(r.room)}`, r.room], [hasValue ? `chooses:value:${norm(r.room)}` : null, r.room])));
@@ -1952,7 +1953,8 @@ export async function computeBrief(data: ViewData, request: BriefRequest = {}): 
 // bf18 (2026-11-08): the condition card reads in the reason language (the owner's ruling) - headline "When the AI gives buyers a reason to leave <brand>, the most common is ...", rows "A reason to leave you: ...", "The biggest reason to pick you / to leave you / pointing to <rival>"; a default-shaped branch ("otherwise", isDefaultCondition) leaves the list for one "The default - when no stated reason applies" row unless a brief sentence cites it. Every number the card stated before is still stated. No sentence text changed.
 // bf19 (2026-11-09): reads bs12 - the condition insight's title and body (quoted verbatim in the findings) say "reason"; the exemplar's own "The conditions that decide it" section heading is deliberately kept.
 // bf20 (2026-11-09, the owner's ruling: cite a non-Build-a-table surface whenever one exists): the answer cards' go links repoint - a rival's brand card opens its Rivals dossier (hasDossier, the dossiers' own membership rule), the target's opens the map's pooled open-questions contest, the engines card opens Stations (Consideration's by-engine table); Build a table only as the fallback. Go links are not in the written layer's fact sheet, so written frames stay cached. No sentence text changed.
-const BRIEF_VERSION = "bf20";
+// bf21 (2026-11-10): the plain-wording pass - reads bs13 / am15 (new move names, lever sentences and insight wording quoted in the memos); actOf restates the new levers; the conditions paragraph, the condition card, the SWOT wall and the jobs wall lines say what sends buyers away and "a fixed situation" instead of "routes" / "wall" / "reason". The exemplar's "The conditions that decide it" heading is kept. Numbers unchanged.
+const BRIEF_VERSION = "bf21";
 
 /**
  * The brief through the cache. cachedView's keying, with the subject as one

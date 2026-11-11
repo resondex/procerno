@@ -5,8 +5,8 @@ import { brandHeadline, cardSourcesOf, type Lift, conversionOf, funnelRows, lift
 import type { RuleGroup } from "./rules_explorer";
 import { isDefaultCondition } from "./condition_groups";
 import { cachedView, poolOf, requestOf, type RateCell, type ViewData, type ViewRequest } from "./view_data";
-import { poolInputs, rankGroups, situationsOf, themeReasons, themeTree, type DossierTheme, type ThemeMap } from "./reason_themes";
-import type { PositionReceipt } from "./analysis_types";
+import { poolInputs, rankGroups, situationsOf, spreadRefs, themeReasons, themeTree, type AnswerRule, type DossierTheme, type ThemeEvidence, type ThemeMap } from "./reason_themes";
+import type { AnswerRef, PositionReceipt } from "./analysis_types";
 import type { Project, Run } from "../types";
 
 // The theme machinery moved to reason_themes.ts (option D); re-exported for existing importers.
@@ -47,6 +47,8 @@ export interface DossierArg {
   value: number;
   wins: string;
   others: string;
+  /** do7: up to 2 answers where the brand is the pick and the code is argued (different engines). */
+  receipts?: AnswerRef[];
 }
 
 export interface Dossier {
@@ -100,6 +102,9 @@ export interface Dossier {
   receipts: PositionReceipt[];
   /** Map cell ids for the links (null when the map has no such cell). */
   cells: { h2h: string | null; leaver: string | null };
+  /** do7: its share of the picks beside yours in each open-choice buying
+   * situation where it clears the map's brand floor (Position.brands). */
+  rooms?: { cellId: string; label: string; them: string; you: string }[];
 }
 
 export interface SupplyRow {
@@ -190,7 +195,7 @@ export async function computeDossiers(data: ViewData, request: ViewRequest = {})
   const backDefault = towardAll.find((g) => isDefaultCondition(g.label));
   const routesBackDefault =
     backDefault && towardCells > 0
-      ? `The default: when no stated reason applies, the AI points buyers back to you (in ${pctOf(backDefault.cells / towardCells)} of those questions).`
+      ? `The default: when no stated condition applies, the AI points buyers back to you (in ${pctOf(backDefault.cells / towardCells)} of those questions).`
       : null;
   // The slide-over's theme tree: one two-level theming PER SIDE (dt4) over
   // that side's listed (non-default) group labels, so a theme's name keeps the
@@ -218,8 +223,12 @@ export async function computeDossiers(data: ViewData, request: ViewRequest = {})
     data.judgeIncomplete = true;
     towardMap = awayMap = null;
   }
-  const themesOf = (pool: RuleGroup[], base: number, tm: ThemeMap | null) => themeTree(pool, base, tm, cellSets, sitOf);
-  const routesBackThemes = themesOf(towardListed, towardCells, towardMap);
+  const themesOf = (pool: RuleGroup[], base: number, tm: ThemeMap | null, evidence: ThemeEvidence) => themeTree(pool, base, tm, cellSets, sitOf, undefined, evidence);
+  const routesBackThemes = themesOf(towardListed, towardCells, towardMap, { rules: shared.answerRules, side: "toward" });
+  // do7: the open-choice buying situations' pick splits, for each dossier's "By buyer".
+  const roomCells = Object.entries(debug.cells)
+    .filter(([id, st]) => st.row === "open" && !st.pooled && map.positions[id]?.brands?.length)
+    .map(([id, st]) => ({ id, label: st.label, p: map.positions[id] }));
   // do6: the pick receipts - open-choice answers where the brand is the top
   // pick, on the same engine-scoped headline pool the summary reads.
   const picksBy = new Map<string, Parameters<typeof receiptsOf>[0]>();
@@ -283,7 +292,7 @@ export async function computeDossiers(data: ViewData, request: ViewRequest = {})
           const lead = captors[0];
           const tail = rank === 0 ? " - more than any other brand" : rank === 1 && lead ? ` - second only to ${lead.key === target.key ? brand : lead.name}` : "";
           switching = `When a rival's customers ask what to switch to, ${b.name} takes ${pct(c.shareOfDecided)} of the picks${tail}.`;
-          switchingNoPick = noPickLine(offensive.overall.undecided, "rival leavers'");
+          switchingNoPick = noPickLine(offensive.overall.undecided, "the switching customers'");
         }
       }
 
@@ -291,7 +300,12 @@ export async function computeDossiers(data: ViewData, request: ViewRequest = {})
       const ends = liftEnds(src, b.key);
       const toArg = (l: Lift): DossierArg => ({ label: l.code, value: Math.round(l.lift * 100), wins: pct(l.wins), others: pct(l.others) });
       const args: DossierArg[] = ends ? [ends.win, ...(ends.lose ? [ends.lose] : [])].map(toArg) : [];
-      const argsAll: DossierArg[] = src.liftOf(b.key).map(toArg);
+      // do7: each argument row's receipts - answers picking this brand that argue it.
+      const mineRows = picksBy.get(b.key) ?? [];
+      const argsAll: DossierArg[] = src.liftOf(b.key).map((l) => {
+        const refs = spreadRefs(mineRows.filter((r) => r.code.reasons?.includes(l.code)).map((r) => ({ id: r.code.response_id, find: l.code, model: r.model })));
+        return { ...toArg(l), ...(refs.length ? { receipts: refs } : {}) };
+      });
 
       // The reasons pointing to it: every stated reason to leave you whose
       // top route is this brand, in the card's rank, each with its share of
@@ -301,12 +315,17 @@ export async function computeDossiers(data: ViewData, request: ViewRequest = {})
       const mine = awayGroups.filter((g) => g.routes[0] && resolve(g.routes[0].name).key === b.key);
       const routesAll = awayCells > 0 ? mine.map((g) => ({ label: g.label, share: pctOf(g.cells / awayCells) })) : [];
       const routes = routesAll.length
-        ? `When the AI gives buyers a reason to leave you, "${routesAll[0].label}" → ${b.name} is one of them in ${routesAll[0].share} of those questions${mine[0] === awayGroups[0] ? " - the largest single reason" : ""}.`
+        ? `When the AI sends buyers away from you, "${routesAll[0].label}" is one of the conditions that sends them to ${b.name}, in ${routesAll[0].share} of those questions${mine[0] === awayGroups[0] ? " - the most common condition of all" : ""}.`
         : null;
       // The default away branch belongs on the dossier of the brand it points to.
       const dflt = awayCells > 0 ? awayDefaults.find((g) => g.routes[0] && resolve(g.routes[0].name).key === b.key) : undefined;
-      const routesThemes = themesOf(mine, awayCells, awayMap);
-      const routesDefault = dflt ? `The default: when no stated reason applies, the AI points buyers to ${b.name} (in ${pctOf(dflt.cells / awayCells)} of those questions).` : null;
+      const toThis = (r: AnswerRule) => r.to.some((n) => resolve(n).key === b.key);
+      const routesThemes = themesOf(mine, awayCells, awayMap, { rules: shared.answerRules, side: "away", accept: toThis });
+      const rooms = roomCells.flatMap(({ id, label, p }) => {
+        const hit = p.brands!.find((x) => resolve(x.name).key === b.key);
+        return hit ? [{ cellId: id, label, them: hit.share, you: p.youShare ?? "0%" }] : [];
+      });
+      const routesDefault = dflt ? `The default: when no stated condition applies, the AI points buyers to ${b.name} (in ${pctOf(dflt.cells / awayCells)} of those questions).` : null;
 
       // Who supplies its picks, in full: per company and per assistant.
       const ep = inputs.enginePicks.find((x) => x.key === b.key);
@@ -359,6 +378,7 @@ export async function computeDossiers(data: ViewData, request: ViewRequest = {})
         supplyAll,
         receipts: receiptsOf(picksBy.get(b.key) ?? []),
         cells: { h2h: h2hCell, leaver: leaverCell },
+        ...(rooms.length ? { rooms } : {}),
       };
     });
   return { runId: data.run.id, brand, dossiers };
@@ -377,7 +397,8 @@ export async function computeDossiers(data: ViewData, request: ViewRequest = {})
 // side's direction - the shared pool coined axis names ("the subject both
 // sides pivot on") that read as contradictions across the two columns.
 // do6 (2026-11-09): option D - dossiers carry pick receipts for the one-panel slide-over; themes shared with the map via reason_themes.
-const DOSSIERS_VERSION = "do6";
+// do7 (2026-11-10): the one-panel redesign - rooms (its share beside yours per open-choice buying situation, from the map's brands), argsAll receipts, theme receipts and away routes; the routes and default lines say what sends buyers away instead of "reason".
+const DOSSIERS_VERSION = "do7";
 // The fold (2026-11-09): dossiers embed map cells and summary numbers, so
 // their versions ride the key (see analysis_map's fold note).
 const DOSSIERS_KEY_VERSION = `${DOSSIERS_VERSION}.${ANALYSIS_MAP_VERSION}.${BRAND_SUMMARY_VERSION}`;

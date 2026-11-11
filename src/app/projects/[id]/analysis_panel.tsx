@@ -1,0 +1,1065 @@
+"use client";
+
+import { createContext, useCallback, useContext, useEffect, useRef, useState } from "react";
+import type { ReactNode } from "react";
+import {
+  DEFICIT_TRIAGES,
+  SURPLUS_TRIAGES,
+  TRIAGE_LABEL,
+  type AnalysisDecision,
+  type AnalysisMapView,
+  type CellVerdict,
+  type ConditionItem,
+  type LiftItem,
+  type MapCell,
+  type Position,
+  type PositionReceipt,
+  type Triage,
+} from "@/lib/engine/analysis_types";
+import type { DossierTheme } from "@/lib/engine/reason_themes";
+import type { Dossier, DossierArg } from "@/lib/engine/dossiers";
+import type { HeadToHeadRow } from "@/lib/engine/head_to_head";
+import { Boundaries } from "./head_to_head_view";
+import EvidencePanel, { EVIDENCE_CAP, type EvidenceRequest } from "./evidence_panel";
+import RulesSection from "./rules_view";
+import { AnswersModal, Fig, plainQuote, type AnswersTarget } from "./view_parts";
+import { passageOf } from "@/lib/answer_passage";
+
+/**
+ * The one slide-over (2026-11-10, the ratified analysis redesign -
+ * scratchpad template.html): every contest, finding and rival opens here,
+ * decision-first. A contest reads crumb -> claim -> soft caveat -> one answer
+ * quote -> What to do (the move, Add to playbook, the quiet "Change it"
+ * disclosure) -> the evidence, folded, each fold with a one-line teaser. A
+ * rival opens scoped to one contest (from "Who takes the picks here") or
+ * across all buyers. Every "See answers" opens the answer passages inline,
+ * fetched lazily by id and cached for the panel's life.
+ *
+ * The engine contract's new fields are all OPTIONAL and typed locally here
+ * (PositionX / DossierX); every feature degrades to today's payload when a
+ * field is absent - flat lists with relative bars, lifts only, the receipts'
+ * quotes as the proof - and a section with nothing to show says so in a
+ * sentence rather than vanishing.
+ */
+
+// ---------- the engine contract's optional fields, typed locally ----------
+
+export interface AnswerRef {
+  responseId: string;
+  find: string;
+}
+export type RouteShare = { name: string; share: string };
+export type ThemeX = DossierTheme & { receipts?: AnswerRef[]; routes?: RouteShare[] };
+export type CondX = ConditionItem & { receipts?: AnswerRef[]; routes?: RouteShare[]; share?: string };
+export type LiftX = LiftItem & { receipts?: AnswerRef[] };
+export type ArgsMode = "compare" | "rival" | "all" | "topics";
+export interface PositionNotes {
+  wall?: string;
+  inHouse?: true;
+  leak?: true;
+  soft?: "one_assistant" | "asked_for";
+}
+export type PositionX = Omit<Position, "lifts" | "toward" | "away" | "towardThemes" | "awayThemes"> & {
+  lifts: LiftX[];
+  toward: CondX[];
+  away: CondX[];
+  towardThemes?: ThemeX[];
+  awayThemes?: ThemeX[];
+  brands?: { name: string; share: string; proof: PositionReceipt[] }[];
+  youShare?: string;
+  argsMode?: ArgsMode;
+  argsRows?: { label: string; share: string; receipts: AnswerRef[] }[];
+  notes?: PositionNotes;
+};
+export type MapX = Omit<AnalysisMapView, "positions"> & { positions: Record<string, PositionX> };
+export type DossierArgX = DossierArg & { receipts?: AnswerRef[] };
+export type DossierX = Omit<Dossier, "routesThemes" | "routesBackThemes" | "argsAll"> & {
+  routesThemes: ThemeX[];
+  routesBackThemes: ThemeX[];
+  argsAll: DossierArgX[];
+  rooms?: { cellId: string; label: string; them: string; you: string }[];
+};
+
+// ---------- small shared words and helpers ----------
+
+export const VWORD: Record<CellVerdict, string> = { yours: "Yours", contested: "Contested", theirs: "Theirs", nocall: "No call" };
+export const VCOLOR: Record<CellVerdict, { fg: string; bg: string }> = {
+  yours: { fg: "var(--pa-yours)", bg: "var(--pa-yours-bg)" },
+  contested: { fg: "var(--pa-contested)", bg: "var(--pa-contested-bg)" },
+  theirs: { fg: "var(--pa-theirs)", bg: "var(--pa-theirs-bg)" },
+  nocall: { fg: "var(--pa-nocall)", bg: "var(--pa-nocall-bg)" },
+};
+
+/** "What the AI says about the <category>" - the products when the category is missing or long. */
+export function catPhrase(category?: string | null): { plural: string; singular: string } {
+  const c = (category ?? "").trim();
+  if (!c || c.split(/\s+/).length > 4) return { plural: "products", singular: "product" };
+  return { plural: c, singular: c.replace(/(ies)$/i, "y").replace(/(?<!s)s$/i, "") };
+}
+
+export const normName = (s: string) => s.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+const pctNum = (s?: string) => {
+  const m = /(\d+(?:\.\d+)?)/.exec(s ?? "");
+  return m ? parseFloat(m[1]) : 0;
+};
+
+// ---------- answer bodies: fetched lazily by id, cached per panel host ----------
+
+interface Body {
+  id: string;
+  text: string;
+  engine: string;
+  promptText: string;
+}
+interface Bodies {
+  get: (id: string) => Body | undefined;
+  load: (ids: string[]) => Promise<void>;
+  blocked: boolean;
+}
+const BodiesCtx = createContext<Bodies | null>(null);
+
+/** The host's body cache: one Map for every panel it opens, so reopening a panel never refetches. */
+export function BodiesProvider({ runId, children }: { runId: string; children: ReactNode }) {
+  const cache = useRef(new Map<string, Body>());
+  const asked = useRef(new Set<string>());
+  const [blocked, setBlocked] = useState(false);
+  const [, setTick] = useState(0);
+  const load = useCallback(
+    async (ids: string[]) => {
+      const want = [...new Set(ids)].filter((id) => !asked.current.has(id)).slice(0, EVIDENCE_CAP);
+      if (want.length === 0) return;
+      for (const id of want) asked.current.add(id);
+      try {
+        const r = await fetch(`/api/runs/${runId}/answer_bodies`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ ids: want }),
+        });
+        if (r.status === 403) {
+          setBlocked(true);
+          return;
+        }
+        if (!r.ok) throw new Error(String(r.status));
+        const d = (await r.json()) as { answers: Body[] };
+        for (const a of d.answers) cache.current.set(a.id, a);
+        setTick((t) => t + 1);
+      } catch {
+        // let a later open try again
+        for (const id of want) asked.current.delete(id);
+        setTick((t) => t + 1);
+      }
+    },
+    [runId]
+  );
+  const get = useCallback((id: string) => cache.current.get(id), []);
+  return <BodiesCtx.Provider value={{ get, load, blocked }}>{children}</BodiesCtx.Provider>;
+}
+
+function useBodies(ids: string[]): Bodies | null {
+  const b = useContext(BodiesCtx);
+  const key = ids.join(",");
+  useEffect(() => {
+    if (b && key) void b.load(key.split(","));
+  }, [b, key]);
+  return b;
+}
+
+/** The answer passages behind one row: the slice around its wording, marked. */
+function Passages({ refs }: { refs: AnswerRef[] }) {
+  const b = useBodies(refs.map((r) => r.responseId));
+  if (refs.length === 0) return null;
+  if (b?.blocked) return <p className="py-1 text-[12.5px] text-ink-3">The answers behind this are switched off for this tracker.</p>;
+  return (
+    <div className="mt-1.5 grid gap-3 pb-2">
+      {refs.map((r, i) => {
+        const body = b?.get(r.responseId);
+        if (!body) return <p key={`${r.responseId}${i}`} className="text-[12.5px] text-ink-3">Loading the answer...</p>;
+        const p = passageOf(body.text, r.find);
+        return (
+          <div key={`${r.responseId}${i}`} className="border-l-2 border-line pl-2.5 text-[13px] leading-relaxed text-ink-2">
+            {p.before}
+            <mark className="rounded-[3px] bg-primary-soft px-0.5 text-ink">{p.hit}</mark>
+            {p.after}
+            <span className="mt-1 block text-[11.5px] text-ink-3">
+              {body.engine}
+              {body.promptText ? ` - asked: "${body.promptText}"` : ""}
+            </span>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+/** The one answer quote under a claim, with its assistant and question once loaded. */
+function Proof({ receipts, onFull }: { receipts: PositionReceipt[]; onFull?: (ids: string[], quotes: string[]) => void }) {
+  const quoted = receipts.filter((r) => r.quote);
+  const first = quoted[0];
+  const b = useBodies(first ? [first.responseId] : []);
+  const [more, setMore] = useState(false);
+  if (!first) return null;
+  const body = b?.get(first.responseId);
+  const rest = quoted.slice(1);
+  return (
+    <div className="mt-3.5">
+      <div className="rounded-[10px] bg-canvas px-3.5 py-2.5">
+        <p className="text-[14px] leading-relaxed text-ink">&ldquo;{plainQuote(first.quote as string)}&rdquo;</p>
+        {body && (
+          <span className="mt-1 block text-[12px] text-ink-3">
+            {body.engine}
+            {body.promptText ? ` - asked: "${body.promptText}"` : ""}
+          </span>
+        )}
+      </div>
+      {(rest.length > 0 || onFull) && (
+        <div className="mt-1.5 flex flex-wrap items-baseline gap-x-4">
+          {rest.length > 0 && (
+            <button type="button" onClick={() => setMore((m) => !m)} aria-expanded={more} className="text-[12.5px] text-primary hover:opacity-80">
+              {more ? "Hide the other answers" : "See more answers behind this"}
+            </button>
+          )}
+          {onFull && (
+            <button
+              type="button"
+              onClick={() => onFull(receipts.map((r) => r.responseId), quoted.map((r) => r.quote as string))}
+              className="text-[12.5px] text-ink-3 hover:text-ink-2"
+            >
+              Read the full answers {"→"}
+            </button>
+          )}
+        </div>
+      )}
+      {more && <Passages refs={rest.map((r) => ({ responseId: r.responseId, find: r.quote as string }))} />}
+    </div>
+  );
+}
+
+// ---------- folded evidence sections ----------
+
+function Sec({ title, teaser, children, id }: { title: string; teaser: string; children: ReactNode; id?: string }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <div id={id} className="scroll-mt-4 border-t border-line last:border-b">
+      <button type="button" onClick={() => setOpen((o) => !o)} aria-expanded={open} className="grid w-full grid-cols-[minmax(0,1fr)_14px] items-center gap-x-2.5 py-3 text-left">
+        <span className="text-[14.5px] font-semibold text-ink">{title}</span>
+        <span aria-hidden className={`row-span-2 text-[11px] text-ink-3 transition-transform ${open ? "rotate-180" : ""}`}>
+          ▾
+        </span>
+        {!open && <span className="truncate text-[13px] text-ink-3">{teaser}</span>}
+      </button>
+      {open && <div className="pb-4">{children}</div>}
+    </div>
+  );
+}
+
+const Hint = ({ children }: { children: ReactNode }) => <p className="mb-2 text-[12.5px] leading-snug text-ink-3">{children}</p>;
+const None = ({ children }: { children: ReactNode }) => <p className="text-[13.5px] leading-relaxed text-ink-3">{children}</p>;
+
+/** A row that opens its answer passages in place (when it carries any). */
+function Openable({ refs, head, extra }: { refs?: AnswerRef[]; head: (open: boolean) => ReactNode; extra?: ReactNode }) {
+  const [open, setOpen] = useState(false);
+  const can = (refs?.length ?? 0) > 0;
+  return (
+    <div className="border-b border-line/70">
+      {can ? (
+        <button type="button" onClick={() => setOpen((o) => !o)} aria-expanded={open} className="block w-full py-2 text-left">
+          {head(open)}
+        </button>
+      ) : (
+        <div className="py-2">{head(false)}</div>
+      )}
+      {open && (
+        <>
+          {extra}
+          <Passages refs={refs!} />
+        </>
+      )}
+    </div>
+  );
+}
+
+const SeeWord = ({ open }: { open: boolean }) => (
+  <span className={`mt-0.5 block text-[12px] ${open ? "text-ink-3" : "text-primary"}`}>{open ? "Hide the answers" : "See answers"}</span>
+);
+
+/** One condition the AI states about the buyer: label, fixed tag, rivals, share, bar, answers. */
+interface CondRowData {
+  label: string;
+  share?: string;
+  weight: number;
+  wall?: boolean;
+  routes?: RouteShare[];
+  members?: string[];
+  receipts?: AnswerRef[];
+  tip?: string;
+}
+const ROW_TOP = 8;
+function CondRows({ rows, color }: { rows: CondRowData[]; color: string }) {
+  const [all, setAll] = useState(false);
+  const max = Math.max(1, ...rows.map((r) => r.weight));
+  const shown = all ? rows : rows.slice(0, ROW_TOP);
+  return (
+    <>
+      {shown.map((r, i) => (
+        <Openable
+          key={`${i}:${r.label}`}
+          refs={r.receipts}
+          extra={r.members && r.members.length > 1 ? <p className="mb-1 text-[12.5px] text-ink-3">Includes: {r.members.join(" - ")}</p> : null}
+          head={(open) => (
+            <span className="grid grid-cols-[minmax(0,1fr)_2.75rem] items-baseline gap-x-2 gap-y-1 text-[14px]" title={r.tip}>
+              <span className="min-w-0 text-ink">
+                {r.label}
+                {r.wall && (
+                  <span
+                    title="A fact about the buyer, not a preference - it cannot be argued away"
+                    className="ml-1.5 rounded-[4px] border border-ink-3 px-1 align-[1px] text-[10px] uppercase tracking-wide text-ink-3"
+                  >
+                    fixed
+                  </span>
+                )}
+                {r.routes && r.routes.length > 0 && (
+                  <span className="ml-1.5 whitespace-nowrap text-[12px] text-ink-3">{"→ "}{r.routes.slice(0, 2).map((x) => x.name).join(", ")}</span>
+                )}
+              </span>
+              <span className="text-right text-[13px] font-semibold tabular-nums text-ink">{r.share ?? ""}</span>
+              <span className="col-span-full block h-[5px] rounded-[3px] bg-line/60">
+                <i className="block h-full min-w-[3px] rounded-[3px]" style={{ width: `${Math.round((100 * r.weight) / max)}%`, background: color }} />
+              </span>
+              {(r.receipts?.length ?? 0) > 0 && <span className="col-span-full"><SeeWord open={open} /></span>}
+            </span>
+          )}
+        />
+      ))}
+      {rows.length > ROW_TOP && (
+        <button type="button" onClick={() => setAll((a) => !a)} aria-expanded={all} className="mt-1.5 text-[12px] text-ink-3 hover:text-ink-2">
+          {all ? "Show the biggest only ▴" : "Show every one ▾"}
+        </button>
+      )}
+    </>
+  );
+}
+
+function themeMembers(t: DossierTheme): string[] {
+  const out: string[] = [];
+  for (const b of t.buckets ?? []) {
+    if ((b.members ?? []).length === 0) {
+      if (!out.includes(b.label)) out.push(b.label);
+    } else for (const m of b.members) if (!out.includes(m.label)) out.push(m.label);
+  }
+  return out.slice(0, 4);
+}
+const themeWall = (t: DossierTheme) => !!t.wall || (t.buckets ?? []).some((b) => b.wall || (b.members ?? []).some((m) => m.wall));
+
+const themeRows = (ts: ThemeX[]): CondRowData[] =>
+  ts.slice(0, 8).map((t) => ({ label: t.label, share: t.share, weight: pctNum(t.share), wall: themeWall(t), routes: t.routes, members: themeMembers(t), receipts: t.receipts }));
+const flatRows = (cs: CondX[]): CondRowData[] =>
+  // The count drives the bar (shares on one base round alike); the share prints when the payload carries one.
+  cs.map((c) => ({ label: c.text, share: c.share, weight: c.n, wall: c.wall, routes: c.routes, receipts: c.receipts, tip: `About ${c.n} answers` }));
+const shareRows = (cs: { label: string; share: string }[]): CondRowData[] => cs.map((c) => ({ label: c.label, share: c.share, weight: pctNum(c.share) }));
+
+/** "What it says about the buyer": two columns, toward you then away from you. */
+function BuyerColumns({ toward, away, towardTitle, awayTitle }: { toward: CondRowData[]; away: CondRowData[]; towardTitle: string; awayTitle: string }) {
+  return (
+    <div className="grid gap-5 sm:grid-cols-2">
+      {(
+        [
+          [towardTitle, toward, "var(--pa-yours)"],
+          [awayTitle, away, "var(--pa-theirs)"],
+        ] as const
+      ).map(([title, rows, color]) => (
+        <div key={title} className="min-w-0">
+          <h5 className="mb-1 text-[13px] font-semibold text-ink">{title}</h5>
+          {rows.length > 0 ? <CondRows rows={rows} color={color} /> : <None>None stated</None>}
+        </div>
+      ))}
+    </div>
+  );
+}
+
+const buyerTeaser = (toward: CondRowData[], away: CondRowData[]) =>
+  toward.length || away.length
+    ? [toward[0] && `To you: ${toward[0].label}`, away[0] && `Away: ${away[0].label}`].filter(Boolean).join(" - ")
+    : "Nothing stated";
+
+const BUYER_HINT =
+  "What the AI says about the buyer when it sends them each way. The number is how often it comes up, among the answers here where the AI says anything like it. Open one to read the answers.";
+
+/** Lift rows: the code, its signed points, the two shares as bars, answers. */
+function LiftRows({ lifts, sides }: { lifts: (LiftX | DossierArgX)[]; sides: [string, string] }) {
+  return (
+    <>
+      {lifts.map((l) => (
+        <Openable
+          key={l.label}
+          refs={l.receipts}
+          head={(open) => (
+            <span className="block text-[14px]" title={"tip" in l ? l.tip : undefined}>
+              <span className="flex justify-between gap-3">
+                <b className="font-semibold text-ink">{l.label}</b>
+                <span className="tabular-nums text-ink-2">
+                  {l.value > 0 ? "+" : ""}
+                  {Math.round(l.value)} points
+                </span>
+              </span>
+              {l.wins && l.others && (
+                <span className="mt-1 grid grid-cols-2 gap-2.5 text-[12px] text-ink-3">
+                  {(
+                    [
+                      [l.wins, sides[0], "var(--primary)"],
+                      [l.others, sides[1], "var(--neutral-bar)"],
+                    ] as const
+                  ).map(([v, side, c]) => (
+                    <span key={side}>
+                      {v} of {side}
+                      <span className="mt-0.5 block h-1.5 rounded-[3px] bg-line/60">
+                        <i className="block h-full min-w-[2px] rounded-[3px]" style={{ width: `${Math.min(100, pctNum(v))}%`, background: c }} />
+                      </span>
+                    </span>
+                  ))}
+                </span>
+              )}
+              {(l.receipts?.length ?? 0) > 0 && <SeeWord open={open} />}
+            </span>
+          )}
+        />
+      ))}
+    </>
+  );
+}
+
+// ---------- the panel chrome ----------
+
+function PanelShell({ label, onClose, children }: { label: string; onClose: () => void; children: ReactNode }) {
+  const closeRef = useRef<HTMLButtonElement>(null);
+  const asideRef = useRef<HTMLElement>(null);
+  useEffect(() => {
+    closeRef.current?.focus({ preventScroll: true });
+    asideRef.current?.scrollTo({ top: 0 });
+  }, [label]);
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== "Escape") return;
+      // A drill opened over the panel (the full answers) closes first, on its own.
+      if (document.querySelectorAll('[role="dialog"]').length > 1) return;
+      onClose();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onClose]);
+  return (
+    <>
+      <div className="pa-scrim fixed inset-0 z-40 bg-black/40" onClick={onClose} aria-hidden />
+      <aside
+        ref={asideRef}
+        role="dialog"
+        aria-modal="true"
+        aria-label={label}
+        className="pa-panel fixed inset-y-0 right-0 z-[45] w-full max-w-[580px] overflow-y-auto overflow-x-hidden border-l border-line bg-surface px-5 pb-10 pt-5 shadow-2xl sm:px-6"
+      >
+        <button
+          ref={closeRef}
+          type="button"
+          onClick={onClose}
+          className="sticky top-0 float-right ml-3 rounded-lg border border-line bg-surface px-2.5 py-0.5 text-[13px] text-ink-2 hover:text-ink"
+        >
+          Close
+        </button>
+        {children}
+      </aside>
+    </>
+  );
+}
+
+const crumbCls = "flex flex-wrap items-center gap-2 text-[12px] font-semibold uppercase tracking-[0.04em] text-ink-3";
+const h2Cls = "clear-both mt-2.5 font-serif text-[25px] font-normal leading-[1.15] text-ink [text-wrap:balance]";
+const evh = "mb-2 mt-7 text-[11px] font-semibold uppercase tracking-[0.08em] text-ink-3";
+const linkCls = "text-primary underline underline-offset-2 hover:opacity-80";
+const rowLink = "flex w-full justify-between gap-3 border-b border-line py-2.5 text-left text-[14px] text-ink hover:text-primary";
+
+// ---------- the contest panel ----------
+
+export type PanelView =
+  | { kind: "cell"; id: string }
+  | { kind: "rival"; name: string; cell?: string | null; from?: string | null };
+
+interface Ctx {
+  runId: string;
+  map: MapX;
+  cells: Map<string, MapCell>;
+  dossiers: DossierX[] | null;
+  findDossier: (name: string) => DossierX | undefined;
+  cat: { plural: string; singular: string };
+  decision: AnalysisDecision | null;
+  editable: boolean;
+  save: (body: { cellId: string; suggested: Triage; decided?: Triage | null; inPlaybook?: boolean }) => Promise<void>;
+  open: (v: PanelView) => void;
+  onClose: () => void;
+  onBuildTable?: () => void;
+  h2hRow: (d: DossierX) => HeadToHeadRow | null;
+  brand: string;
+}
+
+/** The badge meanings as sentences: a fixed situation, your own cheaper option, picks leaving the category. */
+export function notesOf(p: PositionX, cell?: MapCell): PositionNotes {
+  if (p.notes) return p.notes;
+  const b = cell?.badges ?? [];
+  const out: PositionNotes = {};
+  if (b.includes("wall")) out.wall = p.away.find((x) => x.wall)?.text ?? "";
+  if (b.includes("inhouse")) out.inHouse = true;
+  if (b.includes("leak")) out.leak = true;
+  if (b.includes("watch")) out.soft = p.cellId.startsWith("settled:") ? "asked_for" : "one_assistant";
+  return out;
+}
+
+export function whyLines(n: PositionNotes, cat: string): string[] {
+  const out: string[] = [];
+  if (n.wall !== undefined)
+    out.push(
+      n.wall
+        ? `Many of the buyers sent away here are in a situation you cannot argue against: "${n.wall}". Go around it, not through it.`
+        : "Many of the buyers sent away here are in a situation you cannot argue against. Go around it, not through it."
+    );
+  if (n.inHouse) out.push("Much of the doubt about price here points to your own cheaper option, not to a rival.");
+  if (n.leak) out.push(`Some of the picks here go to products outside ${cat}, so part of this loss is not to a rival on your board.`);
+  return out;
+}
+
+const softLine = (n: PositionNotes) =>
+  n.soft === "asked_for"
+    ? "Read this as a ceiling: it comes from questions where customers ask the AI to make your case. Unprompted, the AI is less favorable."
+    : n.soft === "one_assistant"
+      ? "This number is softer than it looks: most of the answers on your side come from one assistant."
+      : null;
+
+function MoveBox({ p, ctx, why }: { p: PositionX; ctx: Ctx; why: string[] }) {
+  const entry = ctx.decision?.positions[p.cellId];
+  const active: Triage = entry?.decided ?? p.triageSuggested;
+  const inPlaybook = !!entry?.inPlaybook;
+  const options = p.status === "deficit" ? DEFICIT_TRIAGES : SURPLUS_TRIAGES;
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+  const [change, setChange] = useState(false);
+  const run = async (body: Parameters<Ctx["save"]>[0]) => {
+    setBusy(true);
+    setErr(null);
+    try {
+      await ctx.save(body);
+    } catch (e) {
+      setErr((e as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  };
+  const pick = (t: Triage) => {
+    if (t === active) return;
+    void run({ cellId: p.cellId, suggested: p.triageSuggested, decided: t === p.triageSuggested ? null : t });
+  };
+  return (
+    <div className="mt-4 rounded-xl bg-primary-soft px-4 py-3.5">
+      <div className="mb-1 text-[11px] font-semibold uppercase tracking-[0.06em] text-primary">What to do - {p.family}</div>
+      {why.map((s) => (
+        <p key={s} className="mb-2 text-[13.5px] leading-relaxed text-ink-2">
+          {s}
+        </p>
+      ))}
+      <p className="mb-2.5 text-[15px] leading-relaxed text-ink">{p.lever}</p>
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
+        {ctx.editable &&
+          (inPlaybook ? (
+            <>
+              <span className="rounded-lg border border-line bg-surface px-3 py-1 text-[13px] font-medium text-ink">In your playbook</span>
+              <button type="button" disabled={busy} onClick={() => void run({ cellId: p.cellId, suggested: p.triageSuggested, inPlaybook: false })} className="text-[12.5px] text-ink-3 hover:text-ink disabled:opacity-60">
+                Remove
+              </button>
+            </>
+          ) : (
+            <button
+              type="button"
+              disabled={busy}
+              onClick={() => void run({ cellId: p.cellId, suggested: p.triageSuggested, inPlaybook: true })}
+              className="rounded-lg bg-primary px-3 py-1 text-[13px] font-medium text-primary-ink hover:opacity-90 disabled:opacity-60"
+            >
+              Add to playbook
+            </button>
+          ))}
+        <button type="button" onClick={() => setChange((c) => !c)} aria-expanded={change} className="text-[12.5px] text-ink-3 hover:text-ink-2">
+          {ctx.editable ? "Not the right move? Change it" : "Why this move"} {change ? "▴" : "▾"}
+        </button>
+      </div>
+      {change && (
+        <div className="mt-3 border-t border-line pt-3 text-[13px]">
+          <p className="mb-1.5 text-ink-2">{ctx.editable ? "What is going on here, as you read it:" : "The call behind this move:"}</p>
+          <div className="flex flex-wrap gap-1.5">
+            {options.map((t) =>
+              ctx.editable ? (
+                <button
+                  key={t}
+                  type="button"
+                  disabled={busy}
+                  onClick={() => pick(t)}
+                  aria-pressed={t === active}
+                  title={t === p.triageSuggested ? "The suggested call" : undefined}
+                  className={`rounded-md border bg-surface px-2.5 py-0.5 text-[12px] transition-colors disabled:opacity-60 ${
+                    t === active ? "border-[var(--color-primary)] font-semibold text-primary" : "border-line text-ink hover:border-ink-3"
+                  }`}
+                >
+                  {TRIAGE_LABEL[t]}
+                </button>
+              ) : (
+                t === active && (
+                  <span key={t} className="rounded-md border border-[var(--color-primary)] bg-surface px-2.5 py-0.5 text-[12px] font-semibold text-primary">
+                    {TRIAGE_LABEL[t]}
+                  </span>
+                )
+              )
+            )}
+          </div>
+          {entry?.decided && entry.decided !== p.triageSuggested && (
+            <p className="mt-1.5 text-[12px] text-ink-3">Your call - the suggested one was {TRIAGE_LABEL[p.triageSuggested]}.</p>
+          )}
+          <p className="mt-2 leading-relaxed text-ink-2">{p.triageWhy}</p>
+        </div>
+      )}
+      {err && <p className="mt-1.5 text-[12px] text-danger">{err}</p>}
+    </div>
+  );
+}
+
+function ContestPanel({ p, ctx }: { p: PositionX; ctx: Ctx }) {
+  const cell = ctx.cells.get(p.cellId);
+  const notes = notesOf(p, cell);
+  const soft = softLine(notes);
+  const [evidence, setEvidence] = useState<EvidenceRequest | null>(null);
+  const cat = ctx.cat;
+  const figs = p.figures ?? [];
+  const brands = p.brands ?? [];
+  const you = p.youShare ?? "0%";
+  const maxW = Math.max(1, ...brands.map((b) => pctNum(b.share)), pctNum(you));
+  const sides = p.liftSides ?? ["your picks", "rivals' picks"];
+  const up = p.lifts.find((l) => l.value > 0);
+  const down = p.lifts.find((l) => l.value < 0);
+  const mode: ArgsMode | null = p.argsMode ?? (p.lifts.length > 0 ? "compare" : null);
+  const argsRows = p.argsRows ?? [];
+  const toward = (p.towardThemes?.length ?? 0) > 0 ? themeRows(p.towardThemes!) : flatRows(p.toward);
+  const away = (p.awayThemes?.length ?? 0) > 0 ? themeRows(p.awayThemes!) : flatRows(p.away);
+  const pt = `What the AI says about the ${cat.plural}`;
+
+  let argsTeaser = "Not read for these questions";
+  let argsBody: ReactNode = (
+    <None>
+      Too few answers here pick a side to compare what the AI says about the {cat.plural} when it picks you with when it picks a rival.
+    </None>
+  );
+  if (mode === "compare" && p.lifts.length > 0) {
+    argsTeaser = [up && `For you: ${up.label}`, down && `Against you: ${down.label}`].filter(Boolean).join(" - ") || p.lifts[0].label;
+    argsBody = (
+      <>
+        <Hint>
+          What the AI brings up more in {sides[0]} than in {sides[1]}. Open one to read the answers.
+        </Hint>
+        <LiftRows lifts={p.lifts} sides={sides} />
+      </>
+    );
+  } else if ((mode === "rival" || mode === "all" || mode === "topics") && argsRows.length > 0) {
+    argsTeaser = (mode === "rival" ? "When a rival is picked: " : mode === "topics" ? "Covers most: " : "Comes up most: ") + argsRows[0].label;
+    argsBody = (
+      <>
+        <Hint>
+          {mode === "rival"
+            ? `Too few answers pick you here to compare your wins with theirs${p.youShare ? ` (you take ${p.youShare} of the picks)` : ""}. This is what the AI brings up when it picks a rival here.`
+            : mode === "topics"
+              ? "These questions come before the buyer is choosing, so there are no picks to compare. This is what the AI covers most when it answers them."
+              : "The AI rarely picks a side here, so there are no wins and losses to compare. This is what it brings up most across all of these answers."}
+        </Hint>
+        <CondRows rows={argsRows.map((r) => ({ label: r.label, share: r.share, weight: pctNum(r.share), receipts: r.receipts }))} color="var(--neutral-bar)" />
+      </>
+    );
+  } else if (mode === "topics" || mode === "all" || mode === "rival") {
+    argsBody = (
+      <None>
+        These questions come before the buyer is choosing a {cat.singular}, so the answers are read for whether the AI brings you up, not for what it says about the {cat.plural}.
+      </None>
+    );
+  }
+
+  const numbersTeaser = figs[0] ? `${figs[0].label}: ${figs[0].value}` : p.taker ? `Taken by ${p.taker}` : "Nothing to show";
+  return (
+    <>
+      <div className={crumbCls}>
+        {cell && (
+          <span className="flex items-center gap-1.5 normal-case tracking-normal" style={{ color: VCOLOR[cell.verdict].fg }}>
+            <i className="inline-block h-2 w-2 rounded-full" style={{ background: VCOLOR[cell.verdict].fg }} />
+            {VWORD[cell.verdict]}
+          </span>
+        )}
+        <span>{p.where}</span>
+      </div>
+      <h2 className={h2Cls}>{p.claim}</h2>
+      {soft && <p className="clear-both mt-3 border-l-[3px] pl-2.5 text-[13.5px] text-ink" style={{ borderColor: "var(--pa-contested)" }}>{soft}</p>}
+      <Proof
+        receipts={p.receipts}
+        onFull={(ids, quotes) => setEvidence({ title: p.claim, subtitle: p.where, ids: ids.slice(0, EVIDENCE_CAP), total: ids.length, highlight: quotes })}
+      />
+      {p.lever && <MoveBox p={p} ctx={ctx} why={whyLines(notes, cat.plural)} />}
+
+      <div className={evh}>The evidence</div>
+      <Sec title="The numbers" teaser={numbersTeaser}>
+        {p.taker && <Fig label="Who holds it" value={`${p.taker}${p.takerKind ? ` - ${p.takerKind}` : ""}`} />}
+        {figs.length > 0
+          ? figs.map((f, i) => (
+              <div key={`${f.label}${i}`} title={f.tip}>
+                <Fig label={f.label} value={f.value} />
+              </div>
+            ))
+          : <None>No other numbers are tracked for this contest.</None>}
+      </Sec>
+      {brands.length > 0 && (
+        <Sec title="Who takes the picks here" teaser={`${brands[0].name} ${brands[0].share} - you ${you}`}>
+          <Hint>Open a rival to see it in this contest only.</Hint>
+          {brands.map((b) => (
+            <button
+              key={b.name}
+              type="button"
+              onClick={() => ctx.open({ kind: "rival", name: b.name, cell: p.cellId })}
+              className="grid w-full grid-cols-[minmax(0,7.5rem)_minmax(0,1fr)_2.75rem] items-center gap-2.5 border-b border-line py-1.5 text-left text-[13.5px] text-ink hover:text-primary"
+            >
+              <span className="truncate">{b.name}</span>
+              <span className="h-2 overflow-hidden rounded bg-line/60">
+                <i className="block h-full rounded" style={{ width: `${(100 * pctNum(b.share)) / maxW}%`, background: "var(--pa-theirs)" }} />
+              </span>
+              <span className="text-right tabular-nums">{b.share}</span>
+            </button>
+          ))}
+          <div className="grid grid-cols-[minmax(0,7.5rem)_minmax(0,1fr)_2.75rem] items-center gap-2.5 py-1.5 text-[13.5px] font-semibold text-ink">
+            <span>You</span>
+            <span className="h-2 overflow-hidden rounded bg-line/60">
+              <i className="block h-full rounded" style={{ width: `${(100 * pctNum(you)) / maxW}%`, background: "var(--pa-yours)" }} />
+            </span>
+            <span className="text-right tabular-nums">{you}</span>
+          </div>
+        </Sec>
+      )}
+      <Sec title={pt} teaser={argsTeaser}>
+        {argsBody}
+      </Sec>
+      <Sec title="What it says about the buyer" teaser={buyerTeaser(toward, away)}>
+        {toward.length || away.length ? (
+          <>
+            <Hint>{BUYER_HINT}</Hint>
+            <BuyerColumns toward={toward} away={away} towardTitle="Toward you when the buyer..." awayTitle="Away from you when the buyer..." />
+          </>
+        ) : (
+          <None>The AI says nothing about the buyer in this contest - its answer does not change with who is asking.</None>
+        )}
+        {p.cellId === "chooses:open:all" && (
+          <details className="mt-4">
+            <summary className="cursor-pointer text-[13px] font-medium text-primary underline decoration-dotted underline-offset-2">
+              See everything the AI says about the buyer, every question type
+            </summary>
+            <div className="mt-3 grid gap-5">
+              <RulesSection runId={ctx.runId} onEvidence={(ids, title) => setEvidence({ ids: ids.slice(0, EVIDENCE_CAP), title, total: ids.length })} />
+            </div>
+          </details>
+        )}
+      </Sec>
+      {evidence && <EvidencePanel runId={ctx.runId} request={evidence} onClose={() => setEvidence(null)} />}
+    </>
+  );
+}
+
+// ---------- the rival panel ----------
+
+function ScopeChips({ name, cellId, scoped, ctx }: { name: string; cellId: string; scoped: boolean; ctx: Ctx }) {
+  const p = ctx.map.positions[cellId];
+  const seg = (on: boolean) => `rounded-full px-3 py-1 text-[12.5px] ${on ? "bg-primary-soft font-semibold text-ink" : "text-ink-3 hover:text-ink-2"}`;
+  return (
+    <div className="clear-both mt-3 inline-flex max-w-full flex-wrap rounded-full border border-line p-[3px]">
+      <button type="button" className={seg(scoped)} onClick={() => ctx.open({ kind: "rival", name, cell: cellId })}>
+        {p?.where ?? "This contest"}
+      </button>
+      <button type="button" className={seg(!scoped)} onClick={() => ctx.open({ kind: "rival", name, from: cellId })}>
+        All buyers
+      </button>
+    </div>
+  );
+}
+
+function RivalScoped({ name, p, ctx }: { name: string; p: PositionX; ctx: Ctx }) {
+  const b = (p.brands ?? []).find((x) => normName(x.name) === normName(name))!;
+  const awayThemes = (p.awayThemes ?? []).filter((t) => (t.routes ?? []).some((r) => normName(r.name) === normName(name)));
+  const awayFlat = p.away.filter((c) => (c.routes ?? []).some((r) => normName(r.name) === normName(name)));
+  const sends: CondRowData[] = (awayThemes.length ? themeRows(awayThemes) : flatRows(awayFlat)).map((r) => ({ ...r, routes: [] }));
+  const back = (p.towardThemes?.length ?? 0) > 0 ? themeRows(p.towardThemes!) : flatRows(p.toward);
+  const [evidence, setEvidence] = useState<EvidenceRequest | null>(null);
+  return (
+    <>
+      <div className={crumbCls}>
+        <button type="button" className={linkCls} onClick={() => ctx.open({ kind: "cell", id: p.cellId })}>
+          {p.where}
+        </button>
+        <span>- {name}</span>
+      </div>
+      <h2 className={h2Cls}>
+        {name} takes {b.share} of the picks in this contest. You take {p.youShare ?? "0%"}.
+      </h2>
+      <ScopeChips name={name} cellId={p.cellId} scoped ctx={ctx} />
+      <Proof
+        receipts={b.proof}
+        onFull={(ids, quotes) => setEvidence({ title: `${name} picked`, subtitle: p.where, ids, highlight: quotes })}
+      />
+      <div className={evh}>The evidence</div>
+      {sends.length > 0 ? (
+        <Sec title="What it says about the buyer" teaser={buyerTeaser(back, sends)}>
+          <Hint>{BUYER_HINT}</Hint>
+          <BuyerColumns toward={back} away={sends} towardTitle="Back to you when the buyer..." awayTitle={`To ${name} when the buyer...`} />
+        </Sec>
+      ) : (
+        <Sec title="What it says about the buyer" teaser={`Nothing sends buyers to ${name} by name`}>
+          <None>None of the main things the AI says about this buyer sends them to {name} by name. It is picked here without a stated condition.</None>
+        </Sec>
+      )}
+      <Sec title={`What the AI says about the ${ctx.cat.plural}`} teaser="Read across all buyers">
+        <None>Too few answers in one contest to read what the AI says about {name} alone.</None>
+        <p className="mt-2 text-[13.5px]">
+          <button type="button" className={linkCls} onClick={() => ctx.open({ kind: "rival", name, from: p.cellId })}>
+            See it across all buyers
+          </button>
+        </p>
+      </Sec>
+      <div className={evh}>Next</div>
+      <button type="button" className={rowLink} onClick={() => ctx.open({ kind: "cell", id: p.cellId })}>
+        <span>Back to the whole contest</span>
+        <span className="text-ink-3">{p.where} {"→"}</span>
+      </button>
+      <button type="button" className={rowLink} onClick={() => ctx.open({ kind: "rival", name, from: p.cellId })}>
+        <span>{name} across all buyers</span>
+        <span className="text-ink-3">the matchup, who supplies its picks {"→"}</span>
+      </button>
+      {evidence && <EvidencePanel runId={ctx.runId} request={evidence} onClose={() => setEvidence(null)} />}
+    </>
+  );
+}
+
+function TwoBar({ you, them }: { you: string; them: string }) {
+  return (
+    <span className="mt-1.5 flex h-2 overflow-hidden rounded bg-line/60" aria-hidden>
+      <i className="block h-full" style={{ width: `${pctNum(you)}%`, background: "var(--pa-yours)" }} />
+      <i className="block h-full" style={{ width: `${pctNum(them)}%`, background: "var(--pa-theirs)" }} />
+    </span>
+  );
+}
+
+/** A rival's share beside yours per buying situation: the dossier's rooms, or the open-choice room cells' pick splits. */
+export function roomsOf(d: DossierX, ctx: { map: MapX }): { cellId: string; label: string; them: string; you: string }[] {
+  if (d.rooms && d.rooms.length > 0) return d.rooms;
+  const out: { cellId: string; label: string; them: string; you: string }[] = [];
+  for (const band of ctx.map.bands)
+    for (const row of band.rows)
+      for (const c of row.cells) {
+        if (!c.id.startsWith("chooses:open:") || c.id === "chooses:open:all") continue;
+        const p = ctx.map.positions[c.id];
+        const b = p?.brands?.find((x) => normName(x.name) === normName(d.name));
+        if (b) out.push({ cellId: c.id, label: c.label, them: b.share, you: p!.youShare ?? "0%" });
+      }
+  return out;
+}
+
+function RivalAll({ d, from, ctx }: { d: DossierX; from?: string | null; ctx: Ctx }) {
+  const [evidence, setEvidence] = useState<EvidenceRequest | null>(null);
+  const [answers, setAnswers] = useState<AnswersTarget | null>(null);
+  const closeAnswers = useCallback(() => setAnswers(null), []);
+  const fromP = from ? ctx.map.positions[from] : undefined;
+  const showScope = !!fromP && (fromP.brands ?? []).some((x) => normName(x.name) === normName(d.name));
+  const args = d.argsAll
+    .filter((a) => Math.abs(a.value) >= 5)
+    .sort((a, b) => Math.abs(b.value) - Math.abs(a.value))
+    .slice(0, 6);
+  const up = args.find((a) => a.value > 0);
+  const down = args.find((a) => a.value < 0);
+  const rooms = roomsOf(d, ctx);
+  const to = d.routesThemes.length > 0 ? themeRows(d.routesThemes) : shareRows(d.routesAll ?? []);
+  const back = d.routesBackThemes.length > 0 ? themeRows(d.routesBackThemes) : shareRows(d.routesBack ?? []);
+  const h2hRow = ctx.h2hRow(d);
+  const supply = d.supplyAll ?? { vendors: [], assistants: [] };
+  return (
+    <>
+      <div className={crumbCls}>Rival - {d.name} - all buyers</div>
+      <h2 className={h2Cls}>{d.headline}</h2>
+      {showScope && <ScopeChips name={d.name} cellId={from!} scoped={false} ctx={ctx} />}
+      <Proof
+        receipts={d.receipts ?? []}
+        onFull={(ids, quotes) => setEvidence({ title: `${d.name} picked`, subtitle: "Open buying questions", ids, highlight: quotes })}
+      />
+      <div className={evh}>The evidence</div>
+      <Sec title="The numbers" teaser={d.tiles[1] ? `${d.tiles[1].label}: ${d.tiles[1].value}` : "Nothing to show"}>
+        {d.tiles.map((t) => (
+          <Fig key={t.label} label={t.label} value={t.value} />
+        ))}
+        {d.picksFrom.byType && <Fig label="Where its picks come from" value={d.picksFrom.byType} />}
+        {d.picksFrom.topQuestion && <Fig label="Picks from its top question" value={d.picksFrom.topQuestion} />}
+      </Sec>
+      <Sec title="By buyer" teaser={rooms.length ? rooms.map((r) => `${r.label} ${r.them}`).join(" - ") : "Nothing to show"}>
+        {rooms.length > 0 ? (
+          <>
+            <Hint>Its share of the picks in each buying situation, beside yours. Open one to see it there only.</Hint>
+            {rooms.map((r) => (
+              <button key={r.cellId} type="button" className={rowLink} onClick={() => ctx.open({ kind: "rival", name: d.name, cell: r.cellId })}>
+                <span>{r.label}</span>
+                <span className="whitespace-nowrap text-ink-2">
+                  {d.name} <b className="font-semibold text-ink">{r.them}</b> - you <b className="font-semibold text-ink">{r.you}</b> {"→"}
+                </span>
+              </button>
+            ))}
+          </>
+        ) : (
+          <None>{d.name} takes too few picks in any one buying situation to read by buyer.</None>
+        )}
+      </Sec>
+      <Sec title="Against you" teaser={d.h2h.kind === "record" ? `Head-to-head: you ${d.h2h.you} - ${d.name} ${d.h2h.them}` : "Never asked head-to-head"}>
+        {d.h2h.kind === "record" ? (
+          <div className="border-b border-line py-2 text-[14px]">
+            <div className="flex justify-between gap-4">
+              <span className="text-ink-2">Asked to pick between you{d.h2h.asClass ? ` and this kind of ${ctx.cat.singular}` : ""}</span>
+              <b className="whitespace-nowrap font-semibold text-ink">
+                you {d.h2h.you} - {d.name} {d.h2h.them}
+              </b>
+            </div>
+            <TwoBar you={d.h2h.you} them={d.h2h.them} />
+          </div>
+        ) : (
+          <p
+            className={`mb-2 text-[14px] ${d.h2h.alert ? "border-l-[3px] pl-2.5 text-ink" : "text-ink-3"}`}
+            style={d.h2h.alert ? { borderColor: "var(--pa-contested)" } : undefined}
+          >
+            {d.h2h.note}
+          </p>
+        )}
+        {d.switching && (
+          <p className="mt-2.5 text-[14px] leading-relaxed text-ink">
+            {d.switching}
+            {d.switchingNoPick ? ` ${d.switchingNoPick}` : ""}
+          </p>
+        )}
+        {(d.cells.h2h || d.cells.leaver) && (
+          <p className="mt-2.5 flex flex-wrap gap-x-3 text-[13.5px]">
+            {d.cells.h2h && (
+              <button type="button" className={linkCls} onClick={() => ctx.open({ kind: "cell", id: d.cells.h2h! })}>
+                Open the matchup
+              </button>
+            )}
+            {d.cells.leaver && (
+              <button type="button" className={linkCls} onClick={() => ctx.open({ kind: "cell", id: d.cells.leaver! })}>
+                Open its customers switching
+              </button>
+            )}
+          </p>
+        )}
+        {h2hRow && (
+          <details className="mt-3">
+            <summary className="cursor-pointer text-[13px] font-medium text-primary">When does each side win?</summary>
+            <p className="mb-1 mt-2 text-[12px] text-ink-3">What the AI says when asked to pick between the two. Open one to read the answers.</p>
+            <Boundaries row={h2hRow} brand={ctx.brand} onOpen={setAnswers} bare />
+          </details>
+        )}
+      </Sec>
+      <Sec
+        title={`What the AI says about the ${ctx.cat.plural}`}
+        teaser={args.length ? [up && `For it: ${up.label}`, down && `Against it: ${down.label}`].filter(Boolean).join(" - ") : "Too few answers to compare"}
+      >
+        {args.length > 0 ? (
+          <>
+            <Hint>
+              What the AI brings up more in {d.argSides[0]} than in {d.argSides[1]}. Open one to read the answers.
+            </Hint>
+            <LiftRows lifts={args} sides={d.argSides} />
+          </>
+        ) : (
+          <None>Too few answers pick {d.name} to read what the AI says about it.</None>
+        )}
+      </Sec>
+      <Sec title="What it says about the buyer" teaser={buyerTeaser(back, to)}>
+        {to.length || back.length || d.routesDefault || d.routesBackDefault ? (
+          <>
+            <Hint>{BUYER_HINT}</Hint>
+            <BuyerColumns toward={back} away={to} towardTitle="Back to you when the buyer..." awayTitle={`To ${d.name} when the buyer...`} />
+            {(d.routesBackDefault || d.routesDefault) && (
+              <div className="mt-2 grid gap-1 text-[12.5px] italic leading-snug text-ink-2">
+                {d.routesBackDefault && <p>{d.routesBackDefault}</p>}
+                {d.routesDefault && <p>{d.routesDefault}</p>}
+              </div>
+            )}
+          </>
+        ) : (
+          <None>Nothing the AI says about the buyer sends them to {d.name} by name.</None>
+        )}
+      </Sec>
+      <Sec title="Who supplies its picks" teaser={d.supply ? "One company's assistants stand out" : "No one assistant stands out"}>
+        {d.supply ? <p className="mb-2 text-[14px] text-ink">{d.supply}</p> : <None>Its picks are spread across the assistants roughly in line with how many questions each answers.</None>}
+        {supply.assistants.length > 0 && (
+          <>
+            <Hint>Share of its picks, beside the share of the questions each answers.</Hint>
+            {supply.vendors.length > 0 && (
+              <>
+                <div className="mb-1 mt-2 text-[12px] font-semibold text-ink-2">By company</div>
+                {supply.vendors.map((r) => (
+                  <Fig key={r.label} label={r.label} value={`${r.picks} of its picks - answers ${r.answers}`} />
+                ))}
+              </>
+            )}
+            <div className="mb-1 mt-3 text-[12px] font-semibold text-ink-2">By assistant</div>
+            {supply.assistants.map((r) => (
+              <Fig key={r.label} label={r.label} value={`${r.picks} of its picks - answers ${r.answers}`} />
+            ))}
+          </>
+        )}
+      </Sec>
+      {ctx.onBuildTable && (
+        <p className="mt-5 text-[13px]">
+          <button type="button" className={linkCls} onClick={() => { ctx.onClose(); ctx.onBuildTable!(); }}>
+            Build your own table {"→"}
+          </button>
+        </p>
+      )}
+      {evidence && <EvidencePanel runId={ctx.runId} request={evidence} onClose={() => setEvidence(null)} />}
+      {answers && <AnswersModal key={answers.ids.join(",")} runId={ctx.runId} target={answers} onClose={closeAnswers} />}
+    </>
+  );
+}
+
+// ---------- the host ----------
+
+export function SlideOver({ view, ctx }: { view: PanelView; ctx: Ctx }) {
+  let body: ReactNode;
+  let label: string;
+  if (view.kind === "cell") {
+    const p = ctx.map.positions[view.id];
+    if (!p) return null;
+    label = p.where;
+    body = <ContestPanel key={p.cellId} p={p} ctx={ctx} />;
+  } else {
+    const scopedP = view.cell ? ctx.map.positions[view.cell] : undefined;
+    const inScope = !!scopedP && (scopedP.brands ?? []).some((x) => normName(x.name) === normName(view.name));
+    const d = ctx.findDossier(view.name);
+    label = `${view.name}${inScope ? ` - ${scopedP!.where}` : " - all buyers"}`;
+    if (inScope) body = <RivalScoped key={`${view.name}|${view.cell}`} name={view.name} p={scopedP!} ctx={ctx} />;
+    else if (d) body = <RivalAll key={`${d.key}|${view.from ?? ""}`} d={d} from={view.from} ctx={ctx} />;
+    else
+      body =
+        ctx.dossiers === null ? (
+          <p className="clear-both pt-6 text-[13.5px] text-ink-3">Loading {view.name}...</p>
+        ) : (
+          <>
+            <div className={crumbCls}>Rival</div>
+            <h2 className={h2Cls}>{view.name}</h2>
+            <None>The AI does not name this brand often enough to read on its own.</None>
+          </>
+        );
+  }
+  return (
+    <PanelShell label={label} onClose={ctx.onClose}>
+      {body}
+    </PanelShell>
+  );
+}
+
+export type PanelCtx = Ctx;

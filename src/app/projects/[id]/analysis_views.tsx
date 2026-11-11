@@ -1,39 +1,46 @@
 "use client";
 
-import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import type { RateCell } from "@/lib/engine/view_data";
+import type { AnalysisDecision, MapBand, MapCell, MapRow, Triage } from "@/lib/engine/analysis_types";
+import type { DossiersView } from "@/lib/engine/dossiers";
+import type { HeadToHeadViews } from "@/lib/engine/head_to_head";
+import { useEngineSet, viewQuery } from "./view_parts";
 import {
-  DEFICIT_TRIAGES,
-  SURPLUS_TRIAGES,
-  TRIAGE_LABEL,
-  type AnalysisDecision,
-  type AnalysisMapView,
-  type CellBadge,
-  type CellVerdict,
-  type MapBand,
-  type MapCell,
-  type MapRow,
-  type Position,
-  type PositionStatus,
-  type Triage,
-} from "@/lib/engine/analysis_types";
-import { DotTrack, plainQuote, ReasonList, useEngineSet, viewQuery, WallChip } from "./view_parts";
-import EvidencePanel, { EVIDENCE_CAP, type EvidenceRequest } from "./evidence_panel";
-import RulesSection from "./rules_view";
+  BodiesProvider,
+  catPhrase,
+  normName,
+  notesOf,
+  whyLines,
+  SlideOver,
+  VCOLOR,
+  VWORD,
+  type DossierX,
+  type MapX,
+  type PanelCtx,
+  type PanelView,
+} from "./analysis_panel";
 
 /**
- * The analysis tier (2026-11-03, ANALYSIS_REDESIGN_2026-11-03.md): three
- * layers over ONE payload. The Verdict reads as a memo (casting, known vs
- * picked, who wins instead, the ranked tensions); the Map places every
- * contest, banded by what it varies by (rooms / rivals / worries / settled
- * questions); a cell opens its Position (claim, taker, triage, arguments,
- * conditions, receipts, lever); the Portfolio joins the positions with the
- * decision record. Mounted once by the results shell - the three pills only
- * switch which subview shows, so a pill switch or a cell click never
- * refetches.
+ * The analysis hub (2026-11-10, the ratified redesign - scratchpad
+ * template.html + BUILD_SPEC.md): the Overview and the Map over ONE
+ * /analysis_map payload, the rival cards over ONE /dossiers payload, and the
+ * one slide-over (analysis_panel.tsx) every contest, finding and rival opens.
+ * Mounted once by the results shell and never hidden as a whole - only its
+ * pages are - so the slide-over can open over the Data and Brief pages too,
+ * and a page switch never refetches.
+ *
+ * The Overview replaces The Verdict and The Portfolio: the casting, three
+ * headline numbers, the share-of-picks board, the findings each with its own
+ * move, and the playbook. The Map keeps today's banded layouts with a switch
+ * to the rival cards (today's Rivals dossiers); its cells show color and note
+ * only - the badges' meaning moved into the panel as sentences.
  */
 
-export type TierView = "verdict" | "map" | "portfolio";
+export type HubPage = "overview" | "map";
+export type HubGo = "map" | "brief" | "build";
+/** A request from another page to open the slide-over; `n` makes a repeat click a new request. */
+export type PanelReq = { view: PanelView; n: number };
 
 // ---------- styling: the four verdict colors (colorblind-validated) ----------
 
@@ -50,104 +57,59 @@ const TIER_CSS = `
   --pa-theirs-bg:color-mix(in srgb, var(--pa-theirs) 10%, var(--surface));
   --pa-nocall-bg:color-mix(in srgb, var(--pa-nocall) 10%, var(--surface));
 }
-.pa-memo{ font-family: var(--font-inter), system-ui, -apple-system, sans-serif; font-size: 15.5px; line-height: 1.65; }
-.pa-memo h2, .pa-memo h3, .pa-memo .pa-display{ font-family: var(--font-instrument-serif), Georgia, serif; font-weight: 400; }
-.pa-sans{ font-family: var(--font-inter), system-ui, -apple-system, sans-serif; }
-@keyframes pa-slide{ from{ transform:translateX(100%) } to{ transform:none } }
+@keyframes pa-slide{ from{ transform:translateX(24px); opacity:.6 } to{ transform:none; opacity:1 } }
 @keyframes pa-fade{ from{ opacity:0 } to{ opacity:1 } }
-.pa-panel{ animation: pa-slide .22s ease; }
+.pa-panel{ animation: pa-slide .16s ease-out; }
 .pa-scrim{ animation: pa-fade .2s ease; }
 @media (prefers-reduced-motion: reduce){ .pa-panel, .pa-scrim{ animation:none; } }
+@media print{ .pa-panel, .pa-scrim{ display:none !important; } }
 `;
-
-const VWORD: Record<CellVerdict, string> = { yours: "Yours", contested: "Contested", theirs: "Lost", nocall: "No call" };
-const VCOLOR: Record<CellVerdict, { fg: string; bg: string }> = {
-  yours: { fg: "var(--pa-yours)", bg: "var(--pa-yours-bg)" },
-  contested: { fg: "var(--pa-contested)", bg: "var(--pa-contested-bg)" },
-  theirs: { fg: "var(--pa-theirs)", bg: "var(--pa-theirs-bg)" },
-  nocall: { fg: "var(--pa-nocall)", bg: "var(--pa-nocall-bg)" },
-};
-const BWORD: Record<CellBadge, string> = { wall: "wall", leak: "leak", inhouse: "in-house", watch: "watch" };
-const BCOLOR: Record<CellBadge, string> = {
-  wall: "var(--pa-theirs)",
-  leak: "var(--pa-contested)",
-  inhouse: "var(--pa-yours)",
-  watch: "var(--ink-3)",
-};
-const BTIP: Record<CellBadge, string> = {
-  wall: "Lost to something the buyer already has, not to an argument",
-  leak: "Picks leave the category",
-  inhouse: "Caught by your own cheaper option",
-  watch: "The number reads better than the standing",
-};
-const STATUS: Record<PositionStatus, { word: string; v: CellVerdict }> = {
-  deficit: { word: "Deficit", v: "theirs" },
-  surplus: { word: "Surplus", v: "yours" },
-  watch: { word: "Watch", v: "contested" },
-};
 
 const pctOf = (c: RateCell) => {
   if (c.n === 0) return "-";
   const x = c.k / c.n;
   return x > 0 && x < 0.005 ? "<1%" : `${Math.round(x * 100)}%`;
 };
+const tipOf = (c: RateCell) => `${c.k.toLocaleString("en-US")} of ${c.n.toLocaleString("en-US")} answers`;
 
-function Badge({ b }: { b: CellBadge }) {
-  return (
-    <span
-      title={BTIP[b]}
-      className={`rounded-[4px] border bg-surface px-1.5 py-px text-[10px] font-medium uppercase tracking-wide ${
-        b === "watch" ? "border-dashed" : ""
-      }`}
-      style={{ borderColor: BCOLOR[b], color: BCOLOR[b] }}
-    >
-      {BWORD[b]}
-    </span>
-  );
-}
+/** Playbook marks on the map cells: the in-playbook ids and whether to dim the rest. */
+const MarkCtx = createContext<{ mine: Set<string>; mineOnly: boolean }>({ mine: new Set(), mineOnly: false });
 
-function StatusChip({ status }: { status: PositionStatus }) {
-  const s = STATUS[status];
-  return (
-    <span
-      className="rounded-[5px] px-2 py-0.5 text-[12px] font-semibold"
-      style={{ background: VCOLOR[s.v].bg, color: VCOLOR[s.v].fg }}
-    >
-      {s.word}
-    </span>
-  );
-}
+// ---------- the hub ----------
 
-// ---------- the tier ----------
-
-export default function AnalysisTier({
+export default function AnalysisHub({
   runId,
   projectId,
-  view,
-  onView,
-  cellReq,
+  page,
+  category,
+  onGo,
+  panelReq,
 }: {
   runId: string;
   /** Keys the decision record; absent on share links (read-only). */
   projectId?: string;
-  view: TierView;
-  /** Switch the shell's pill (a tension's "Open the position" goes to the Map). */
-  onView?: (v: TierView) => void;
-  /** A brief pin's request to open one cell's position; a new `n` is a new request. */
-  cellReq?: { id: string; n: number } | null;
+  /** The page on screen, or null while the Data or Brief page shows (the slide-over still opens). */
+  page: HubPage | null;
+  category?: string | null;
+  onGo: (to: HubGo) => void;
+  panelReq?: PanelReq | null;
 }) {
   const engines = useEngineSet();
   const q = viewQuery({ engines });
-  const [map, setMap] = useState<AnalysisMapView | null | undefined>(undefined);
+  const [map, setMap] = useState<MapX | null | undefined>(undefined);
   const [error, setError] = useState<string | null>(null);
   const [decision, setDecision] = useState<AnalysisDecision | null>(null);
-  const [openId, setOpenId] = useState<string | null>(null);
-  // The last pin request applied - adjusted during render (React's derive-from-props
-  // pattern) so a request waits for the map without an effect.
+  const [dossiers, setDossiers] = useState<DossiersView | null | undefined>(undefined);
+  const [h2h, setH2h] = useState<HeadToHeadViews | null>(null);
+  const [panel, setPanel] = useState<PanelView | null>(null);
+  const [mapView, setMapView] = useState<"contest" | "rival">("contest");
+  const [mineOnly, setMineOnly] = useState(false);
+  // The last outside request applied - adjusted during render (React's
+  // derive-from-props pattern) so a request waits for the map without an effect.
   const [reqSeen, setReqSeen] = useState<number | null>(null);
-  if (cellReq && cellReq.n !== reqSeen && map && map.positions[cellReq.id]) {
-    setReqSeen(cellReq.n);
-    setOpenId(cellReq.id);
+  if (panelReq && panelReq.n !== reqSeen && map) {
+    setReqSeen(panelReq.n);
+    if (panelReq.view.kind === "rival" || map.positions[panelReq.view.id]) setPanel(panelReq.view);
   }
 
   useEffect(() => {
@@ -155,10 +117,14 @@ export default function AnalysisTier({
     fetch(`/api/runs/${runId}/analysis_map${q}`)
       .then(async (r) => {
         if (!r.ok) throw new Error(`The analysis could not load (${r.status}).`);
-        const d = (await r.json()) as { view: AnalysisMapView | null };
+        const d = (await r.json()) as { view: MapX | null };
         if (live) setMap(d.view);
       })
       .catch((e: Error) => live && setError(e.message));
+    fetch(`/api/runs/${runId}/dossiers${q}`)
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d: { view: DossiersView | null } | null) => live && setDossiers(d?.view ?? null))
+      .catch(() => live && setDossiers(null));
     return () => {
       live = false;
     };
@@ -178,6 +144,18 @@ export default function AnalysisTier({
     };
   }, [projectId]);
 
+  // The matchup boundaries load the first time a rival panel opens.
+  const h2hAsked = useRef(false);
+  const wantH2h = panel?.kind === "rival";
+  useEffect(() => {
+    if (!wantH2h || h2hAsked.current) return;
+    h2hAsked.current = true;
+    fetch(`/api/runs/${runId}/head_to_head${q}`)
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d: { views: HeadToHeadViews | null } | null) => setH2h(d?.views ?? null))
+      .catch(() => {});
+  }, [wantH2h, runId, q]);
+
   const save = useCallback(
     async (body: { cellId: string; suggested: Triage; decided?: Triage | null; inPlaybook?: boolean }) => {
       if (!projectId) throw new Error("Read-only view.");
@@ -192,160 +170,296 @@ export default function AnalysisTier({
     },
     [projectId]
   );
+  const onClose = useCallback(() => setPanel(null), []);
 
-  const openPosition = (id: string) => setOpenId(id);
-  const openFromVerdict = (id: string) => {
-    onView?.("map");
-    setOpenId(id);
-  };
+  const cells = useMemo(() => {
+    const m = new Map<string, MapCell>();
+    for (const b of map?.bands ?? []) for (const r of b.rows) for (const c of r.cells) m.set(c.id, c);
+    return m;
+  }, [map]);
+  const list = useMemo(() => (dossiers?.dossiers ?? []) as unknown as DossierX[], [dossiers]);
+  const findDossier = useCallback(
+    (name: string) => {
+      const n = normName(name);
+      return list.find((d) => normName(d.name) === n || d.key === name);
+    },
+    [list]
+  );
+  const cat = catPhrase(category);
+  const mine = useMemo(
+    () => new Set(Object.entries(decision?.positions ?? {}).filter(([, e]) => e.inPlaybook).map(([id]) => id)),
+    [decision]
+  );
 
-  if (error) return <div className="card px-5 py-4 text-[13px] text-danger">{error}</div>;
-  if (map === undefined)
-    return <div className="card px-5 py-4 text-[13px] text-ink-3">Reading the coded answers...</div>;
+  if (error) return page ? <div className="card px-5 py-4 text-[13px] text-danger">{error}</div> : null;
+  if (map === undefined) return page ? <div className="card px-5 py-4 text-[13px] text-ink-3">Reading the coded answers...</div> : null;
   if (map === null) return null;
 
-  const position = openId ? map.positions[openId] : undefined;
+  const you = map.shareOfDecided.find((s) => s.you);
+  const ctx: PanelCtx = {
+    runId,
+    map,
+    cells,
+    dossiers: dossiers === undefined ? null : list,
+    findDossier,
+    cat,
+    decision,
+    editable: !!projectId,
+    save,
+    open: setPanel,
+    onClose,
+    onBuildTable: () => onGo("build"),
+    h2hRow: (d) => [...(h2h?.entity?.rows ?? []), ...(h2h?.class?.rows ?? [])].find((r) => r.key === d.key && r.conditions) ?? null,
+    brand: you?.brand ?? dossiers?.brand ?? "You",
+  };
+  const goRivals = () => {
+    setMapView("rival");
+    onGo("map");
+  };
+
   return (
-    <div className="pa-root grid gap-8">
-      <style>{TIER_CSS}</style>
-      {view === "verdict" && <VerdictView map={map} onOpen={openFromVerdict} />}
-      {view === "map" && <MapView map={map} onOpen={openPosition} prefScope={projectId ?? "shared"} />}
-      {view === "portfolio" && <PortfolioView map={map} decision={decision} onOpen={openPosition} />}
-      {position && (
-        <PositionPanel
-          key={position.cellId}
-          runId={runId}
-          position={position}
-          entry={decision?.positions[position.cellId]}
-          editable={!!projectId}
-          save={save}
-          onClose={() => setOpenId(null)}
-        />
+    <BodiesProvider runId={runId}>
+      <div className="pa-root">
+        <style>{TIER_CSS}</style>
+        {page === "overview" && <Overview map={map} ctx={ctx} mine={mine} onGo={onGo} onRivals={goRivals} />}
+        {page === "map" && (
+          <MarkCtx.Provider value={{ mine, mineOnly: mineOnly && mine.size > 0 }}>
+            <MapPage
+              map={map}
+              ctx={ctx}
+              view={mapView}
+              setView={setMapView}
+              mineOnly={mineOnly}
+              setMineOnly={setMineOnly}
+              mineCount={mine.size}
+              prefScope={projectId ?? "shared"}
+              dossiers={list}
+              dossiersLoading={dossiers === undefined}
+            />
+          </MarkCtx.Provider>
+        )}
+        {panel && <SlideOver view={panel} ctx={ctx} />}
+      </div>
+    </BodiesProvider>
+  );
+}
+
+// ---------- the Overview ----------
+
+function Overview({
+  map,
+  ctx,
+  mine,
+  onGo,
+  onRivals,
+}: {
+  map: MapX;
+  ctx: PanelCtx;
+  mine: Set<string>;
+  onGo: (to: HubGo) => void;
+  onRivals: () => void;
+}) {
+  const you = map.shareOfDecided.find((s) => s.you);
+  const named = map.dots.named;
+  const commit: RateCell | null = you && map.dots.picked.n > 0 ? { k: you.share.n, n: map.dots.picked.n, low: 0, high: 0 } : null;
+  const shareX = (s: RateCell) => (s.n > 0 ? s.k / s.n : 0);
+  const max = Math.max(0.0001, ...map.shareOfDecided.map((s) => shareX(s.share)));
+  const playbook = Object.values(map.positions).filter((p) => mine.has(p.cellId));
+  const sec = "mt-11";
+  return (
+    <div className="pb-10">
+      <section className="grid items-start gap-9 md:grid-cols-[minmax(0,1.25fr)_minmax(0,1fr)]">
+        <div className="min-w-0">
+          <p className="mb-2 text-[11px] font-semibold uppercase tracking-[0.08em] text-ink-3">How AI assistants cast you</p>
+          <h1 className="font-serif text-[clamp(34px,5vw,46px)] font-normal leading-[1.05] text-ink [text-wrap:balance]">{map.casting.heading}</h1>
+          <p className="mt-3.5 max-w-[68ch] text-[17px] leading-[1.65] text-ink">
+            {map.casting.casting} {map.casting.detail}
+          </p>
+          <p className="mt-3.5 text-[14px]">
+            <button type="button" onClick={() => onGo("brief")} className="text-primary underline underline-offset-2 hover:opacity-80">
+              Read the full brief {"→"}
+            </button>
+          </p>
+          <div className="mt-5 flex flex-wrap gap-7">
+            <div title={tipOf(named)}>
+              <b className="block font-serif text-[44px] font-normal leading-none tabular-nums text-ink">{pctOf(named)}</b>
+              <span className="text-[13px] text-ink-3">named when buyers ask what to buy</span>
+            </div>
+            {you && (
+              <div title={`${you.share.k.toLocaleString("en-US")} of ${you.share.n.toLocaleString("en-US")} picks`}>
+                <b className="block font-serif text-[44px] font-normal leading-none tabular-nums text-primary">{pctOf(you.share)}</b>
+                <span className="text-[13px] text-ink-3">share of picks</span>
+              </div>
+            )}
+            {commit && (
+              <div title={tipOf(commit)}>
+                <b className="block font-serif text-[44px] font-normal leading-none tabular-nums text-ink">{pctOf(commit)}</b>
+                <span className="text-[13px] text-ink-3">of answers commit to one {ctx.cat.singular}</span>
+              </div>
+            )}
+          </div>
+        </div>
+        {map.shareOfDecided.length > 0 && (
+          <div className="card min-w-0 p-[18px]">
+            <h3 className="mb-3 text-[13px] font-semibold text-ink">Share of picks, when the AI commits</h3>
+            {map.shareOfDecided.map((s) => {
+              const d = !s.you ? ctx.findDossier(s.brand) : undefined;
+              const inner = (
+                <>
+                  <span className="truncate">{s.brand}</span>
+                  <span className="h-2.5 overflow-hidden rounded-[5px] bg-line/60">
+                    <i className={`block h-full rounded-[5px] ${s.you ? "bg-primary" : "bg-neutral-bar"}`} style={{ width: `${(100 * shareX(s.share)) / max}%` }} />
+                  </span>
+                  <span className="text-right tabular-nums">{pctOf(s.share)}</span>
+                </>
+              );
+              const cls = `grid w-full grid-cols-[minmax(0,132px)_minmax(0,1fr)_40px] items-center gap-2.5 rounded-md py-1 text-left text-[13px] ${s.you ? "font-semibold text-ink" : "text-ink-2"}`;
+              return d ? (
+                <button
+                  key={s.brand}
+                  type="button"
+                  title={`Open ${s.brand}`}
+                  onClick={() => ctx.open({ kind: "rival", name: d.name })}
+                  className={`${cls} hover:bg-primary-soft`}
+                >
+                  {inner}
+                </button>
+              ) : (
+                <div key={s.brand} className={cls}>
+                  {inner}
+                </div>
+              );
+            })}
+            <p className="mt-2.5 text-[12.5px] text-ink-3">
+              Open a rival for its full view, or{" "}
+              <button type="button" onClick={onRivals} className="text-primary underline underline-offset-2 hover:opacity-80">
+                see all rivals
+              </button>
+              .
+            </p>
+          </div>
+        )}
+      </section>
+
+      {playbook.length > 0 && (
+        <section className={sec}>
+          <div className="card px-[18px] py-4">
+            <h3 className="mb-1.5 text-[11px] font-semibold uppercase tracking-[0.08em] text-ink-3">Your playbook</h3>
+            {playbook.map((p) => (
+              <button
+                key={p.cellId}
+                type="button"
+                onClick={() => ctx.open({ kind: "cell", id: p.cellId })}
+                className="grid w-full grid-cols-[minmax(0,1fr)_auto] items-baseline gap-3 border-t border-line py-2 text-left text-[14.5px] first:border-t-0 hover:text-primary"
+              >
+                <span>
+                  <b className="font-semibold">{p.where}</b> - {p.family}
+                </span>
+                <span className="text-[13px] text-ink-3">Open {"→"}</span>
+              </button>
+            ))}
+          </div>
+        </section>
+      )}
+
+      <section className={sec}>
+        <h2 className="mb-1 font-serif text-[27px] font-normal leading-[1.15] text-ink">What matters this wave</h2>
+        <p className="mb-4 max-w-[70ch] text-[14px] text-ink-3">
+          Each finding comes with its move. Add one to your playbook and it is marked on the Map.
+        </p>
+        <div>
+          {map.tensions.map((t) => {
+            const p = map.positions[t.cellId];
+            const on = mine.has(t.cellId);
+            return (
+              <div key={t.cellId + t.title} className="border-t border-line last:border-b">
+                <button
+                  type="button"
+                  disabled={!p}
+                  onClick={() => p && ctx.open({ kind: "cell", id: t.cellId })}
+                  className="group grid w-full gap-3 pb-3 pt-5 text-left sm:grid-cols-[minmax(0,1fr)_auto] sm:gap-6"
+                >
+                  <span>
+                    <span className="mb-1 block text-[17px] font-semibold leading-snug text-ink">{t.title}</span>
+                    <span className="block text-[14px] leading-relaxed text-ink-2">{t.body}</span>
+                  </span>
+                  {p && <span className="whitespace-nowrap text-[13px] text-ink-3 group-hover:text-primary">See why {"→"}</span>}
+                </button>
+                {p?.lever && (
+                  <div className="mb-5 grid items-center gap-x-4 gap-y-1.5 rounded-xl bg-primary-soft px-4 py-3 sm:grid-cols-[minmax(0,1fr)_auto]">
+                    <span className="text-[11px] font-semibold uppercase tracking-[0.06em] text-primary sm:col-span-2">What to do - {p.family}</span>
+                    <div>
+                      {whyLines(notesOf(p), ctx.cat.plural).map((w) => (
+                        <p key={w} className="mb-1.5 text-[13.5px] leading-relaxed text-ink-2">{w}</p>
+                      ))}
+                      <p className="text-[14.5px] leading-relaxed text-ink">{p.lever}</p>
+                    </div>
+                    {ctx.editable && (
+                      <PlayButton on={on} onClick={() => void ctx.save({ cellId: p.cellId, suggested: p.triageSuggested, inPlaybook: !on })} />
+                    )}
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      </section>
+
+      {map.uncoded > 0 && (
+        <p className="mt-8 border-t border-line pt-3 text-[12px] text-ink-3">
+          A few answers in these pools are not coded yet and sit outside every number here.
+        </p>
       )}
     </div>
   );
 }
 
-// ---------- The Verdict ----------
-
-function VerdictView({ map, onOpen }: { map: AnalysisMapView; onOpen: (cellId: string) => void }) {
-  const you = map.shareOfDecided.find((s) => s.you);
-  const brand = you?.brand;
-  const named = map.dots.named;
-  const picked = map.dots.picked;
-  const maxShare = Math.max(0.0001, ...map.shareOfDecided.map((s) => (s.share.n > 0 ? s.share.k / s.share.n : 0)));
+function PlayButton({ on, onClick }: { on: boolean; onClick: () => void }) {
+  const [busy, setBusy] = useState(false);
   return (
-    <article className="pa-memo max-w-[88ch]">
-      <div className="pa-sans mb-2.5 text-[11px] uppercase tracking-[0.09em] text-ink-3">
-        The verdict{brand ? ` - ${brand}` : ""}
-      </div>
-      <h2 className="text-[1.65rem] font-semibold leading-tight text-ink [text-wrap:balance]">{map.casting.heading}</h2>
-      <p className="mt-2.5 text-[1.12rem] italic leading-relaxed text-ink">{map.casting.casting}</p>
-      <p className="mt-3.5 leading-relaxed text-ink-2">{map.casting.detail}</p>
-
-      <div className="pa-sans card my-6 px-5 py-4">
-        <h3 className="text-[15px] font-semibold text-ink">Known vs picked</h3>
-        <p className="mb-3 text-[12px] text-ink-3">
-          When buyers ask what to buy. Grey: named in the answer. Blue: the one the AI says to buy.
-        </p>
-        <div
-          className="grid grid-cols-[7rem_1fr_6.5rem] items-center gap-3 sm:grid-cols-[9rem_1fr_8rem]"
-        >
-          <span className="truncate text-right text-sm font-semibold text-primary">{brand ?? "You"}</span>
-          <DotTrack a={named.n > 0 ? named.k / named.n : 0} b={picked.n > 0 ? picked.k / picked.n : 0} emphasis />
-          <span className="text-sm tabular-nums text-ink-2">
-            {pctOf(named)} named · {pctOf(picked)} picked
-          </span>
-        </div>
-        <p className="mt-3 text-[12px] text-ink-3">
-          The distance between the two dots is the conversion problem every position below explains.
-        </p>
-
-        {map.shareOfDecided.length > 0 && (
-          <div className="mt-4 border-t border-line pt-3">
-            <h4 className="text-[13px] font-semibold text-ink">Who wins instead</h4>
-            <p className="mb-2 text-[12px] text-ink-3">
-              Share of picks - of the answers where the AI commits to one product.
-            </p>
-            <div className="grid gap-1.5">
-              {map.shareOfDecided.map((s) => {
-                const x = s.share.n > 0 ? s.share.k / s.share.n : 0;
-                return (
-                  <div
-                    key={s.brand}
-                    className="grid grid-cols-[7rem_1fr_3rem] items-center gap-3 sm:grid-cols-[9rem_1fr_3rem]"
-                  >
-                    <span className={`truncate text-right text-[13px] ${s.you ? "font-semibold text-primary" : "text-ink-2"}`}>
-                      {s.brand}
-                    </span>
-                    <div className="relative h-2.5">
-                      <div
-                        className={`absolute inset-y-0 left-0 rounded-r-[3px] ${s.you ? "bg-primary" : "bg-neutral-bar"}`}
-                        style={{ width: `${(x / maxShare) * 100}%` }}
-                      />
-                    </div>
-                    <span className="text-[12px] tabular-nums text-ink-2">{pctOf(s.share)}</span>
-                  </div>
-                );
-              })}
-            </div>
-          </div>
-        )}
-      </div>
-
-      {map.tensions.map((t) => (
-        <div key={t.cellId + t.title} className="my-5 border-l-[3px] border-line pl-4 leading-relaxed text-ink">
-          <b className="font-semibold">{t.title}</b> {t.body}
-          <div>
-            {map.positions[t.cellId] && (
-              <button
-                type="button"
-                onClick={() => onOpen(t.cellId)}
-                className="pa-sans mt-1.5 rounded-full border border-line bg-surface px-3 py-0.5 text-[12px] font-medium text-primary hover:border-ink-3"
-              >
-                Open the position →
-              </button>
-            )}
-          </div>
-        </div>
-      ))}
-
-      {map.uncoded > 0 && (
-        <p className="pa-sans mt-6 border-t border-line pt-3 text-[12px] text-ink-3">
-          A few answers in these pools are not coded yet and sit outside every number here.
-        </p>
-      )}
-    </article>
+    <button
+      type="button"
+      disabled={busy}
+      onClick={async () => {
+        setBusy(true);
+        try {
+          await onClick();
+        } finally {
+          setBusy(false);
+        }
+      }}
+      className={`justify-self-start whitespace-nowrap rounded-lg px-3 py-1 text-[13px] font-medium disabled:opacity-60 ${
+        on ? "border border-line bg-surface text-ink" : "bg-primary text-primary-ink hover:opacity-90"
+      }`}
+    >
+      {on ? "In your playbook" : "Add to playbook"}
+    </button>
   );
 }
 
-// ---------- The Map ----------
+// ---------- the Map: by contest ----------
 
 function CellButton({ cell, onOpen, hasPosition }: { cell: MapCell; onOpen: (id: string) => void; hasPosition: boolean }) {
   const c = VCOLOR[cell.verdict];
+  const m = useContext(MarkCtx);
+  const mine = m.mine.has(cell.id);
   return (
     <button
       type="button"
       onClick={() => hasPosition && onOpen(cell.id)}
       disabled={!hasPosition}
-      className={`flex min-w-[150px] flex-col items-start gap-1 rounded-[7px] border border-transparent px-2.5 py-1.5 text-left transition-colors enabled:hover:border-line disabled:cursor-default ${
-        cell.wide ? "basis-full" : "flex-[1_1_160px]"
-      }`}
+      title={`${cell.n.toLocaleString("en-US")} answers`}
+      className={`flex min-w-0 flex-col items-start gap-1 rounded-[9px] border-[1.5px] px-2.5 py-1.5 text-left transition-[colors,opacity] enabled:hover:border-ink disabled:cursor-default ${
+        mine ? "border-[var(--color-primary)]" : "border-transparent"
+      } ${m.mineOnly && !mine ? "opacity-30" : ""}`}
       style={{ background: c.bg }}
     >
-      {cell.label && <span className="text-[12px] font-semibold text-ink">{cell.label}</span>}
-      <span className="flex items-center gap-1.5 text-[13px] font-semibold" style={{ color: c.fg }}>
+      {cell.label && <span className="text-[12.5px] font-semibold text-ink">{cell.label}</span>}
+      <span className="flex items-center gap-1.5 text-[12.5px] font-semibold" style={{ color: c.fg }}>
         <i className="inline-block h-2 w-2 flex-none rounded-full" style={{ background: c.fg }} />
         {VWORD[cell.verdict]}
       </span>
       {cell.note && <span className="text-[12px] leading-snug text-ink-2">{cell.note}</span>}
-      {cell.badges.length > 0 && (
-        <span className="flex flex-wrap gap-1">
-          {cell.badges.map((b) => (
-            <Badge key={b} b={b} />
-          ))}
-        </span>
-      )}
     </button>
   );
 }
@@ -419,7 +533,7 @@ const innerLabelOf = (c: MapCell) =>
  * its size. A row with only an every-buyer cell (social validation, learning
  * the category, premium) puts it in the All column - that cell IS the row,
  * everything pooled. */
-function AlignedRow({ row, chooses, rooms, perRow, positions, onOpen }: { row: MapRow; chooses: boolean; rooms: string[]; perRow?: number; positions: AnalysisMapView["positions"]; onOpen: (id: string) => void }) {
+function AlignedRow({ row, chooses, rooms, perRow, positions, onOpen }: { row: MapRow; chooses: boolean; rooms: string[]; perRow?: number; positions: MapX["positions"]; onOpen: (id: string) => void }) {
   const allCell = row.cells.find((c) => cellKeyOf(c.id) === "all");
   const rest0 = row.cells.filter((c) => c !== allCell);
   const rest = chooses
@@ -450,12 +564,16 @@ function AlignedRow({ row, chooses, rooms, perRow, positions, onOpen }: { row: M
 function DossierLine({ stage, cell, onOpen, hasPosition }: { stage: string; cell: MapCell; onOpen: (id: string) => void; hasPosition: boolean }) {
   const c = VCOLOR[cell.verdict];
   const line = innerLabelOf(cell);
+  const m = useContext(MarkCtx);
+  const mine = m.mine.has(cell.id);
   return (
     <button
       type="button"
       onClick={() => hasPosition && onOpen(cell.id)}
       disabled={!hasPosition}
-      className="flex w-full items-baseline gap-2 rounded-[6px] px-2.5 py-1.5 text-left transition-colors enabled:hover:bg-line/25 disabled:cursor-default"
+      className={`flex w-full items-baseline gap-2 rounded-[6px] border px-2.5 py-1.5 text-left transition-[colors,opacity] enabled:hover:bg-line/25 disabled:cursor-default ${
+        mine ? "border-[var(--color-primary)]" : "border-transparent"
+      } ${m.mineOnly && !mine ? "opacity-30" : ""}`}
     >
       <span className="w-[96px] flex-none text-[11px] leading-tight text-ink-3">
         {stage}
@@ -465,9 +583,6 @@ function DossierLine({ stage, cell, onOpen, hasPosition }: { stage: string; cell
         <span className="flex flex-wrap items-center gap-1.5 text-[12.5px] font-semibold" style={{ color: c.fg }}>
           <i className="inline-block h-1.5 w-1.5 flex-none rounded-full" style={{ background: c.fg }} />
           {VWORD[cell.verdict]}
-          {cell.badges.map((b) => (
-            <Badge key={b} b={b} />
-          ))}
         </span>
         {cell.note && <span className="block text-[11.5px] leading-snug text-ink-2">{cell.note}</span>}
       </span>
@@ -481,7 +596,7 @@ function DossierLine({ stage, cell, onOpen, hasPosition }: { stage: string; cell
  * so no band's cells ever read bigger than another's. An All card opens each
  * band with the pooled lines; rows that exist only pooled (social validation,
  * learning the category, holding your own) live on it. */
-function DossierBand({ rows, chooses, rooms, perRow, positions, onOpen }: { rows: MapRow[]; chooses: boolean; rooms: string[]; perRow?: number; positions: AnalysisMapView["positions"]; onOpen: (id: string) => void }) {
+function DossierBand({ rows, chooses, rooms, perRow, positions, onOpen }: { rows: MapRow[]; chooses: boolean; rooms: string[]; perRow?: number; positions: MapX["positions"]; onOpen: (id: string) => void }) {
   const byRow = rows.map((row) => ({ row, byKey: new Map(row.cells.map((c): [string, MapCell] => [cellKeyOf(c.id), c])) }));
   const thingKeys: string[] = [];
   for (const r of byRow) for (const k of r.byKey.keys()) if (isThingKey(k) && !thingKeys.includes(k)) thingKeys.push(k);
@@ -570,13 +685,79 @@ function OrderList({ title, note, items, onReorder }: { title: string; note?: st
   );
 }
 
-function MapView({ map, onOpen, prefScope }: { map: AnalysisMapView; onOpen: (id: string) => void; prefScope: string }) {
+function MapPage({
+  map,
+  ctx,
+  view,
+  setView,
+  mineOnly,
+  setMineOnly,
+  mineCount,
+  prefScope,
+  dossiers,
+  dossiersLoading,
+}: {
+  map: MapX;
+  ctx: PanelCtx;
+  view: "contest" | "rival";
+  setView: (v: "contest" | "rival") => void;
+  mineOnly: boolean;
+  setMineOnly: (v: boolean) => void;
+  mineCount: number;
+  prefScope: string;
+  dossiers: DossierX[];
+  dossiersLoading: boolean;
+}) {
+  const rv = view === "rival";
+  const seg = (on: boolean) => `rounded-full px-4 py-1 text-[13.5px] ${on ? "bg-primary-soft font-semibold text-ink" : "text-ink-3 hover:text-ink-2"}`;
+  return (
+    <section className="pb-10">
+      <h2 className="mb-1 font-serif text-[27px] font-normal leading-[1.15] text-ink">The Map</h2>
+      <p className="mb-4 max-w-[70ch] text-[14px] text-ink-3">
+        {rv
+          ? "Every brand the AI names beside you, biggest taker first. Open one for its numbers, what the AI says about it, what sends buyers to it, and the answers behind each."
+          : `Every contest the AI decides, colored by who holds it. Open any one for what to do, then the evidence: the numbers, what the AI says about the ${ctx.cat.plural} and about the buyer, and the answers behind each.`}
+      </p>
+      <div className="mb-5 inline-flex rounded-full border border-line bg-surface p-[3px]" role="tablist">
+        <button type="button" role="tab" aria-selected={!rv} className={seg(!rv)} onClick={() => setView("contest")}>
+          By contest
+        </button>
+        <button type="button" role="tab" aria-selected={rv} className={seg(rv)} onClick={() => setView("rival")}>
+          By rival
+        </button>
+      </div>
+      {rv ? (
+        <RivalGrid dossiers={dossiers} loading={dossiersLoading} ctx={ctx} />
+      ) : (
+        <ContestMap map={map} ctx={ctx} mineOnly={mineOnly} setMineOnly={setMineOnly} mineCount={mineCount} prefScope={prefScope} />
+      )}
+    </section>
+  );
+}
+
+function ContestMap({
+  map,
+  ctx,
+  mineOnly,
+  setMineOnly,
+  mineCount,
+  prefScope,
+}: {
+  map: MapX;
+  ctx: PanelCtx;
+  mineOnly: boolean;
+  setMineOnly: (v: boolean) => void;
+  mineCount: number;
+  prefScope: string;
+}) {
   const [prefs, setPrefs] = useState<MapPrefs>(() => loadMapPrefs(prefScope));
   const [arrange, setArrange] = useState(false);
+  const [hint, setHint] = useState(false);
   const update = (p: MapPrefs) => {
     setPrefs(p);
     saveMapPrefs(prefScope, p);
   };
+  const onOpen = (id: string) => ctx.open({ kind: "cell", id });
 
   const chooses = map.bands.find(isChoosesBand);
   const roomCatalog = useMemo(() => {
@@ -601,15 +782,33 @@ function MapView({ map, onOpen, prefScope }: { map: AnalysisMapView; onOpen: (id
 
   const seg = (on: boolean) =>
     `rounded-full border px-3 py-0.5 text-[12px] ${on ? "border-primary font-semibold text-primary" : "border-line text-ink-2 hover:border-ink-3"}`;
+  const on = mineOnly && mineCount > 0;
   return (
     <div className="grid gap-5">
-      <div className="max-w-[88ch]">
-        <h2 className="text-lg font-semibold text-ink">The coverage map, measured</h2>
-        <p className="mt-1 text-[13px] leading-relaxed text-ink-2">
-          Every contest the tracker runs, one cell each. Each band varies by what that contest actually varies by -
-          your buyers, your named rivals, the worries you confirmed, the settled-customer questions. The All cell -
-          or the All card - pools everything beside it. Click any cell to open its position.
-        </p>
+      <div className="flex flex-wrap items-center gap-x-4 gap-y-2 text-[13px] text-ink-3">
+        {(["yours", "contested", "theirs", "nocall"] as const).map((v) => (
+          <span key={v} className="flex items-center gap-1.5">
+            <i className="inline-block h-[9px] w-[9px] rounded-full" style={{ background: VCOLOR[v].fg }} />
+            {VWORD[v]}
+          </span>
+        ))}
+        <span className="ml-auto flex flex-wrap items-center gap-2">
+          <button
+            type="button"
+            aria-pressed={on}
+            onClick={() => {
+              if (mineCount === 0) {
+                setHint(true);
+                return;
+              }
+              setMineOnly(!mineOnly);
+            }}
+            className={`rounded-full border px-3 py-1 text-[13px] ${on ? "border-[var(--color-primary)] bg-primary-soft text-ink" : "border-line text-ink-2 hover:border-ink-3"}`}
+          >
+            Show my moves
+          </button>
+          {hint && mineCount === 0 && <span className="text-[12px] text-ink-3">Add a move to your playbook first.</span>}
+        </span>
       </div>
 
       <div className="grid gap-2">
@@ -622,13 +821,13 @@ function MapView({ map, onOpen, prefScope }: { map: AnalysisMapView; onOpen: (id
             Cards
           </button>
           <button type="button" className={seg(arrange)} onClick={() => setArrange(!arrange)}>
-            Arrange order {arrange ? "\u25B4" : "\u25BE"}
+            Arrange order {arrange ? "▴" : "▾"}
           </button>
         </div>
         {arrange && (
           <div className="grid gap-4 rounded-[10px] border border-line bg-surface p-3 sm:grid-cols-2">
-            <OrderList title="Buying situations" note="Drag to reorder - card order (cards) or cell order within each row (aligned)." items={orderedRooms} onReorder={(f, t) => reorder("rooms", f, t)} />
-            <OrderList title="Question rows" note="Drag to reorder - the chooses band's rows, and the line order inside each card." items={orderedReads} onReorder={(f, t) => reorder("reads", f, t)} />
+            <OrderList title="Buying situations" note="Drag to reorder - card order (cards) or the order within each row (aligned)." items={orderedRooms} onReorder={(f, t) => reorder("rooms", f, t)} />
+            <OrderList title="Question rows" note="Drag to reorder - the first band's rows, and the line order inside each card." items={orderedReads} onReorder={(f, t) => reorder("reads", f, t)} />
             <div className="flex flex-wrap items-center gap-2 text-[12px] sm:col-span-2">
               <span className="text-ink-3">Cards per row:</span>
               <button type="button" className={seg(!prefs.perRow)} onClick={() => update({ ...prefs, perRow: undefined })}>
@@ -653,9 +852,9 @@ function MapView({ map, onOpen, prefScope }: { map: AnalysisMapView; onOpen: (id
         const isCh = isChoosesBand(band);
         const rows = isCh ? orderByPref(band.rows, rowSlugOf, prefs.reads) : band.rows;
         return (
-          <section key={band.title}>
-            <h3 className="text-[11px] font-semibold uppercase tracking-[0.08em] text-ink-3">{band.title}</h3>
-            {band.sub && <p className="mb-2 text-[12px] text-ink-2">{band.sub}</p>}
+          <section key={band.title} className="mt-2">
+            <h3 className="mb-0.5 font-serif text-[22px] font-normal text-ink">{band.title}</h3>
+            {band.sub && <p className="mb-3 max-w-[72ch] text-[13px] text-ink-3">{band.sub}</p>}
             {prefs.layout === "dossier" ? (
               <DossierBand rows={rows} chooses={isCh} rooms={prefs.rooms} perRow={prefs.perRow} positions={map.positions} onOpen={onOpen} />
             ) : (
@@ -668,436 +867,96 @@ function MapView({ map, onOpen, prefScope }: { map: AnalysisMapView; onOpen: (id
           </section>
         );
       })}
-      <div className="flex flex-wrap items-center gap-x-5 gap-y-2 text-[12px] text-ink-2">
-        {(["yours", "contested", "theirs", "nocall"] as const).map((v) => (
-          <span key={v} className="flex items-center gap-1.5">
-            <i className="inline-block h-2.5 w-2.5 rounded-full" style={{ background: VCOLOR[v].fg }} />
-            {VWORD[v]}
-          </span>
-        ))}
-        {(["wall", "leak", "inhouse", "watch"] as const).map((b) => (
-          <span key={b} className="flex items-center gap-1.5">
-            <Badge b={b} /> {BTIP[b].toLowerCase()}
-          </span>
-        ))}
-      </div>
     </div>
   );
 }
 
-// ---------- The Position ----------
+// ---------- the Map: by rival ----------
 
-function PositionPanel({
-  runId,
-  position: p,
-  entry,
-  editable,
-  save,
-  onClose,
-}: {
-  runId: string;
-  position: Position;
-  entry?: AnalysisDecision["positions"][string];
-  editable: boolean;
-  save: (body: { cellId: string; suggested: Triage; decided?: Triage | null; inPlaybook?: boolean }) => Promise<void>;
-  onClose: () => void;
-}) {
-  const [evidence, setEvidence] = useState<EvidenceRequest | null>(null);
-  const [busy, setBusy] = useState(false);
-  const [err, setErr] = useState<string | null>(null);
-  const closeRef = useRef<HTMLButtonElement>(null);
-  const evidenceOpen = evidence !== null;
+function RivalCard({ d, ctx }: { d: DossierX; ctx: PanelCtx }) {
+  const up = d.args.find((a) => a.value > 0);
+  const down = d.args.find((a) => a.value < 0);
+  const share = d.tiles[1];
+  const named = d.tiles[0];
+  return (
+    <button
+      type="button"
+      onClick={() => ctx.open({ kind: "rival", name: d.name })}
+      className="flex min-w-0 flex-col gap-2.5 rounded-[14px] border border-line bg-surface p-4 text-left transition-colors hover:border-[var(--color-primary)]"
+    >
+      <h3 className="text-[17px] font-semibold text-ink">{d.name}</h3>
+      {share && (
+        <div className="flex flex-wrap items-baseline gap-2 text-[13px] text-ink-3">
+          <b className="text-[30px] font-semibold tabular-nums text-ink">{share.value}</b>
+          share of picks{named ? ` - named in ${named.value}` : ""}
+        </div>
+      )}
+      {d.h2h.kind === "record" ? (
+        <div className="text-[13px] text-ink-3">
+          Head-to-head{d.h2h.asClass ? ` (as a kind of ${ctx.cat.singular})` : ""}: you <b className="font-semibold text-ink">{d.h2h.you}</b> - them{" "}
+          <b className="font-semibold text-ink">{d.h2h.them}</b>
+          <span className="mt-1.5 flex h-2 overflow-hidden rounded bg-line/60" aria-hidden>
+            <i className="block h-full" style={{ width: d.h2h.you, background: "var(--pa-yours)" }} />
+            <i className="block h-full" style={{ width: d.h2h.them, background: "var(--pa-theirs)" }} />
+          </span>
+        </div>
+      ) : (
+        <div
+          className={`text-[13px] ${d.h2h.alert ? "border-l-[3px] pl-2 text-ink" : "text-ink-3"}`}
+          style={d.h2h.alert ? { borderColor: "var(--pa-contested)" } : undefined}
+        >
+          Never asked head-to-head{d.h2h.alert ? " - yet it takes picks from you" : ""}
+        </div>
+      )}
+      {up && (
+        <div className="text-[13px] text-ink-3">
+          Wins on <b className="font-semibold text-ink">{up.label}</b>
+          {down && (
+            <>
+              , loses on <b className="font-semibold text-ink">{down.label}</b>
+            </>
+          )}
+        </div>
+      )}
+      <span className="mt-auto text-[13px] text-primary">
+        Open {d.name} {"→"}
+      </span>
+    </button>
+  );
+}
 
-  useEffect(() => {
-    closeRef.current?.focus();
-  }, []);
-  useEffect(() => {
-    // The evidence drill handles its own Escape; this panel stays open under it.
-    if (evidenceOpen) return;
-    const onKey = (e: KeyboardEvent) => e.key === "Escape" && onClose();
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [onClose, evidenceOpen]);
-
-  const options = p.status === "deficit" ? DEFICIT_TRIAGES : SURPLUS_TRIAGES;
-  const active: Triage = entry?.decided ?? p.triageSuggested;
-  const inPlaybook = !!entry?.inPlaybook;
-
-  const run = async (body: Parameters<typeof save>[0]) => {
-    setBusy(true);
-    setErr(null);
-    try {
-      await save(body);
-    } catch (e) {
-      setErr((e as Error).message);
-    } finally {
-      setBusy(false);
-    }
-  };
-  const pickTriage = (t: Triage) => {
-    if (t === active) return;
-    void run({ cellId: p.cellId, suggested: p.triageSuggested, decided: t === p.triageSuggested ? null : t });
-  };
-  const setPlaybook = (on: boolean) => void run({ cellId: p.cellId, suggested: p.triageSuggested, inPlaybook: on });
-
-  const quotes = p.receipts.filter((r) => r.quote).slice(0, 3);
-  const ids = p.receipts.map((r) => r.responseId);
-  const liftMax = Math.max(10, ...p.lifts.map((l) => Math.abs(l.value)));
-  const sides = p.liftSides ?? ["your picks", "rivals' picks"];
-  const themed = (p.towardThemes?.length ?? 0) > 0 || (p.awayThemes?.length ?? 0) > 0;
-
-  const h3 = "mt-6 mb-2 border-t border-line pt-3.5 text-[11px] font-semibold uppercase tracking-[0.08em] text-ink-3";
+function RivalGrid({ dossiers, loading, ctx }: { dossiers: DossierX[]; loading: boolean; ctx: PanelCtx }) {
+  if (loading) return <p className="text-[13px] text-ink-3">Loading the rivals...</p>;
+  if (dossiers.length === 0) return <p className="text-[13.5px] text-ink-3">The AI names no other brand often enough to read on its own.</p>;
+  const pc = (d: DossierX) => parseFloat((d.tiles[1]?.value ?? "0").replace(/[^0-9.]/g, "")) || 0;
+  const sorted = [...dossiers].sort((a, b) => pc(b) - pc(a));
+  const lead = sorted.filter((d) => d.prominent);
+  const rest = sorted.filter((d) => !d.prominent);
   return (
     <>
-      <div className="pa-scrim fixed inset-0 z-40 bg-black/35" onClick={onClose} aria-hidden />
-      <aside
-        role="dialog"
-        aria-modal="true"
-        aria-label="Position detail"
-        className="pa-panel fixed inset-y-0 right-0 z-[45] w-full max-w-[600px] overflow-y-auto border-l border-line bg-surface px-5 pb-10 pt-5 shadow-2xl sm:px-6"
-      >
-        <button
-          ref={closeRef}
-          type="button"
-          onClick={onClose}
-          aria-label="Close"
-          className="float-right ml-3 grid h-8 w-8 place-items-center rounded-full border border-line text-ink-3 hover:text-ink"
-        >
-          ×
-        </button>
-        <div className="mb-2 text-[11px] uppercase tracking-[0.08em] text-ink-3">{p.where}</div>
-        <h2 className="mb-2.5 max-w-[48ch] text-[1.15rem] font-semibold leading-snug text-ink [text-wrap:balance]">
-          {p.claim}
-        </h2>
-
-        <dl className="my-3.5 grid grid-cols-[6rem_1fr] items-baseline gap-x-3.5 gap-y-1.5 text-[13px]">
-          <dt className="text-[11px] uppercase tracking-[0.07em] text-ink-3">Taken by</dt>
-          <dd className="text-ink">
-            {p.taker} <span className="text-ink-3">· {p.takerKind}</span>
-          </dd>
-          <dt className="text-[11px] uppercase tracking-[0.07em] text-ink-3">Status</dt>
-          <dd>
-            <StatusChip status={p.status} />
-          </dd>
-        </dl>
-
-        <div className="text-[13px]">
-          <span className="text-ink-2">Triage - engine suggests, you decide:</span>
-          <span className="mt-1.5 flex flex-wrap gap-1.5">
-            {options.map((t) => {
-              const on = t === active;
-              return editable ? (
-                <button
-                  key={t}
-                  type="button"
-                  disabled={busy}
-                  onClick={() => pickTriage(t)}
-                  aria-pressed={on}
-                  title={t === p.triageSuggested ? "The engine's suggestion" : undefined}
-                  className={`rounded-md border px-2.5 py-0.5 text-[12px] transition-colors disabled:opacity-60 ${
-                    on ? "border-[var(--color-primary)] font-semibold text-primary" : "border-line text-ink hover:border-ink-3"
-                  }`}
-                >
-                  {TRIAGE_LABEL[t]}
-                </button>
-              ) : (
-                on && (
-                  <span key={t} className="rounded-md border border-[var(--color-primary)] px-2.5 py-0.5 text-[12px] font-semibold text-primary">
-                    {TRIAGE_LABEL[t]}
-                  </span>
-                )
-              );
-            })}
-          </span>
-          {entry?.decided && entry.decided !== p.triageSuggested && (
-            <p className="mt-1.5 text-[12px] text-ink-3">
-              Your call - the engine suggested {TRIAGE_LABEL[p.triageSuggested]}.
-            </p>
-          )}
-          <p className="mt-2 leading-relaxed text-ink-2">{p.triageWhy}</p>
-          {err && <p className="mt-1.5 text-[12px] text-danger">{err}</p>}
-        </div>
-
-        {/* The numbers (2026-11-06, the citation ruling; cell-scoped since
-            am10, 2026-11-07): the figures that answer this cell's question -
-            label left, value right; counts on hover. */}
-        {(p.figures?.length ?? 0) > 0 && (
-          <>
-            <h3 className={h3}>The numbers</h3>
-            <dl className="grid grid-cols-[minmax(0,1fr)_minmax(0,1.25fr)] gap-x-4 text-[13px]">
-              {p.figures!.map((f, i) => (
-                <Fragment key={`${f.label}${i}`}>
-                  <dt className="border-b border-dashed border-line/70 py-1 text-ink-2">
-                    {f.label}
-                  </dt>
-                  <dd className="border-b border-dashed border-line/70 py-1 text-right tabular-nums text-ink">
-                    {f.value}
-                  </dd>
-                </Fragment>
-              ))}
-            </dl>
-          </>
-        )}
-
-        {p.lifts.length > 0 && (
-          <>
-            <h3 className={h3}>The arguments</h3>
-            <div className="grid gap-1">
-              {p.lifts.map((l) => {
-                const w = (Math.min(Math.abs(l.value), liftMax) / liftMax) * 50;
-                const v = Math.round(l.value);
-                return (
-                  <div key={l.label} className="grid grid-cols-[minmax(7.5rem,1fr)_1fr_3rem] items-center gap-x-2.5 gap-y-0.5 text-[13px]">
-                    <span className="text-ink-2">{l.label}</span>
-                    <div className="relative h-2.5">
-                      <span className="absolute inset-y-[-2px] left-1/2 w-px bg-line" />
-                      <span
-                        className="absolute top-px h-2 rounded-[3px]"
-                        style={
-                          l.value >= 0
-                            ? { left: "50%", width: `${w}%`, background: "var(--pa-yours)" }
-                            : { right: "50%", width: `${w}%`, background: "var(--pa-theirs)" }
-                        }
-                      />
-                    </div>
-                    <span className="text-right text-[12px] tabular-nums text-ink-2">
-                      {v > 0 ? "+" : ""}
-                      {v}
-                    </span>
-                    {l.wins && l.others && (
-                      // am11: the two shares behind the bar; counts in the tip.
-                      <span className="col-span-full mb-1 text-[11.5px] text-ink-3">
-                        {l.wins} of {sides[0]} · {l.others} of {sides[1]}
-                      </span>
-                    )}
-                  </div>
-                );
-              })}
-            </div>
-            {p.liftNote && <p className="mt-2 text-[12px] text-ink-3">{p.liftNote}</p>}
-          </>
-        )}
-
-        {(p.toward.length > 0 || p.away.length > 0 || themed || p.cellId === "chooses:open:all") && (
-          <>
-            <h3 className={h3}>The reasons</h3>
-            {/* am13 (option D): the dossier's themed rows - answer-grain shares in the
-                cell's questions, situation expanders, wall chips, the "See
-                every reason" fold. The fallback is per COLUMN: a side with no
-                themes (keyless, a failed theme pass, an older payload, or a
-                side the rules grouping does not cover - the doubt cells' "Sent
-                to X" exit lines live only in the flat list) keeps its flat
-                list, and "None measured" means neither exists. */}
-            <div className="grid gap-4 sm:grid-cols-2">
-              {(
-                [
-                  ["Reasons to pick you", p.towardThemes ?? [], p.toward, "var(--pa-yours)", "Each share is of the answers here where the AI gives buyers any reason to pick you."],
-                  ["Reasons to leave you", p.awayThemes ?? [], p.away, "var(--pa-theirs)", "Each share is of the answers here where the AI gives buyers any reason to leave you."],
-                ] as const
-              ).map(([title, themes, list, color, note]) => (
-                <div key={title} className="min-w-0">
-                  <h4 className="mb-1.5 text-[13px] font-semibold" style={{ color }}>
-                    {title}
-                  </h4>
-                  {themes.length > 0 ? (
-                    <>
-                      <p className="mb-1 text-[12px] leading-snug text-ink-3">{note}</p>
-                      <ReasonList
-                        flat={themes.map((t) => ({ label: t.label, share: t.share, ...(t.wall ? { wall: true } : {}) }))}
-                        themes={themes}
-                        wallColor="var(--pa-theirs)"
-                      />
-                    </>
-                  ) : list.length > 0 ? (
-                    <ul className="text-[13px]">
-                      {list.map((c, i) => (
-                        <li
-                          key={c.text + i}
-                          className="border-b border-dashed border-line/70 py-1 text-ink"
-                        >
-                          {c.text}
-                          {c.wall && <WallChip color="var(--pa-theirs)" />}
-                        </li>
-                      ))}
-                    </ul>
-                  ) : (
-                    <p className="py-1 text-[13px] text-ink-3">None measured</p>
-                  )}
-                </div>
-              ))}
-            </div>
-            {/* The pooled open-choice position is the condition ledger's home
-                (2026-11-05): the full decision-rules explorer, every question
-                type, mounts here - the lists above are its top lines. am10
-                (2026-11-07): it stays collapsed behind "See every reason" so
-                the panel reads as its own story; the brief's condition card
-                links here. */}
-            {p.cellId === "chooses:open:all" && (
-              <details className="mt-4">
-                <summary className="cursor-pointer text-[13px] font-medium text-primary underline decoration-dotted underline-offset-2">
-                  See every reason
-                </summary>
-                <div className="mt-3 grid gap-5">
-                  <RulesSection
-                    runId={runId}
-                    onEvidence={(evIds, title) =>
-                      setEvidence({ ids: evIds.slice(0, EVIDENCE_CAP), title, total: evIds.length })
-                    }
-                  />
-                </div>
-              </details>
-            )}
-          </>
-        )}
-
-        {ids.length > 0 && (
-          <>
-            <h3 className={h3}>The receipts</h3>
-            {quotes.map((r) => (
-              <blockquote
-                key={r.responseId}
-                className="my-2.5 rounded-r-md border-l-[3px] border-line bg-canvas px-3.5 py-2.5 text-[13px] leading-relaxed text-ink"
-              >
-                &ldquo;{plainQuote(r.quote as string)}&rdquo;
-              </blockquote>
-            ))}
-            <button
-              type="button"
-              onClick={() =>
-                setEvidence({
-                  title: p.claim,
-                  subtitle: p.where,
-                  ids: ids.slice(0, EVIDENCE_CAP),
-                  total: ids.length,
-                  highlight: quotes.map((r) => r.quote as string),
-                })
-              }
-              className="mt-1 rounded-full border border-line px-3 py-1 text-[12px] font-medium text-primary hover:border-ink-3"
-            >
-              Open the answers
-            </button>
-          </>
-        )}
-
-        <h3 className={h3}>The lever</h3>
-        <div className="rounded-lg border border-line bg-canvas px-3.5 py-3 text-[14px] leading-relaxed text-ink">
-          {p.lever}
-          <div className="mt-2.5 flex flex-wrap items-center gap-2.5">
-            {editable &&
-              (inPlaybook ? (
-                <>
-                  <button
-                    type="button"
-                    disabled
-                    className="rounded-md border border-[var(--color-primary)] bg-surface px-3 py-1 text-[13px] font-semibold text-primary opacity-60"
-                  >
-                    In the playbook
-                  </button>
-                  <button
-                    type="button"
-                    disabled={busy}
-                    onClick={() => setPlaybook(false)}
-                    className="text-[12px] text-ink-3 underline-offset-2 hover:text-ink hover:underline disabled:opacity-60"
-                  >
-                    Remove
-                  </button>
-                </>
-              ) : (
-                <button
-                  type="button"
-                  disabled={busy}
-                  onClick={() => setPlaybook(true)}
-                  className="rounded-md border border-[var(--color-primary)] bg-surface px-3 py-1 text-[13px] font-semibold text-primary hover:bg-primary-soft disabled:opacity-60"
-                >
-                  Add to playbook
-                </button>
-              ))}
-            <span className="text-[12px] text-ink-2">Treatment family: {p.family}</span>
-          </div>
-        </div>
-      </aside>
-      {evidence && <EvidencePanel runId={runId} request={evidence} onClose={() => setEvidence(null)} />}
-    </>
-  );
-}
-
-// ---------- The Portfolio ----------
-
-function PortfolioView({
-  map,
-  decision,
-  onOpen,
-}: {
-  map: AnalysisMapView;
-  decision: AnalysisDecision | null;
-  onOpen: (id: string) => void;
-}) {
-  // Map order (band, then row, then cell) is the base order; in-playbook first.
-  const order = new Map<string, number>();
-  let i = 0;
-  for (const band of map.bands) for (const row of band.rows) for (const cell of row.cells) order.set(cell.id, i++);
-  const all = Object.values(map.positions).sort((a, b) => {
-    const pa = decision?.positions[a.cellId]?.inPlaybook ? 0 : 1;
-    const pb = decision?.positions[b.cellId]?.inPlaybook ? 0 : 1;
-    return pa - pb || (order.get(a.cellId) ?? 1e9) - (order.get(b.cellId) ?? 1e9);
-  });
-  const treat = all.filter((p) => p.status === "deficit");
-  const manage = all.filter((p) => p.status !== "deficit");
-
-  const card = (p: Position) => {
-    const e = decision?.positions[p.cellId];
-    const triage = e?.decided ?? p.triageSuggested;
-    return (
-      <button
-        key={p.cellId}
-        type="button"
-        onClick={() => onOpen(p.cellId)}
-        className="mb-2.5 w-full rounded-[9px] border border-line bg-surface px-3.5 py-3 text-left transition-colors hover:border-[var(--color-primary)]"
-      >
-        <div className="text-[14px] font-semibold leading-snug text-ink">{p.claim}</div>
-        <div className="mt-2 flex flex-wrap items-center gap-2">
-          <StatusChip status={p.status} />
-          <span className="rounded-[4px] border border-line px-1.5 py-px text-[12px] text-ink">
-            {TRIAGE_LABEL[triage]}
-            {!e?.decided && <span className="ml-1 text-ink-3">suggested</span>}
-          </span>
-          <span className="rounded-[4px] border border-line px-1.5 py-px text-[12px] text-ink-2">{p.family}</span>
-          {e?.inPlaybook && (
-            <span className="rounded-[4px] bg-primary-soft px-1.5 py-px text-[12px] font-semibold text-primary">In playbook</span>
-          )}
-          <span className="text-[11px] text-ink-3">wave 1 - baseline</span>
-        </div>
-      </button>
-    );
-  };
-
-  return (
-    <div className="grid gap-5">
-      <div className="max-w-[72ch]">
-        <h2 className="text-lg font-semibold text-ink">The portfolio</h2>
-        <p className="mt-1 text-[13px] leading-relaxed text-ink-2">
-          Every position, two-sided: deficits get treated, standing gets managed. The engine suggests a triage for each;
-          confirm or change it in the position, and add the ones you will act on to the playbook.
-        </p>
-      </div>
-      <div className="grid gap-5 md:grid-cols-2">
-        {(
-          [
-            ["Treat - deficits", treat],
-            ["Manage - standing", manage],
-          ] as const
-        ).map(([title, list]) => (
-          <div key={title}>
-            <h3 className="mb-2.5 text-[11px] font-semibold uppercase tracking-[0.08em] text-ink-3">{title}</h3>
-            {list.length === 0 ? <p className="text-[13px] text-ink-3">None this wave.</p> : list.map(card)}
-          </div>
+      <div className="grid gap-3.5 [grid-template-columns:repeat(auto-fill,minmax(min(250px,100%),1fr))]">
+        {(lead.length ? lead : sorted).map((d) => (
+          <RivalCard key={d.key} d={d} ctx={ctx} />
         ))}
       </div>
-      <p className="max-w-[72ch] text-[12px] leading-relaxed text-ink-3">
-        Treatment families come from the service ladder. The economical tier - GEO playbook, Evidence audit, Strategy
-        pulse, Reality audit - discovers whether the premium tier is needed: Proof studies, Full studies, Authority
-        study, Opportunity sizing. Next wave every position re-measures and shows whether it moved, held or slipped.
-      </p>
-    </div>
+      {lead.length > 0 && rest.length > 0 && (
+        <div className="mt-6">
+          <h3 className="mb-1.5 text-[13px] font-semibold text-ink-3">More brands the AI names</h3>
+          {rest.map((d) => (
+            <button
+              key={d.key}
+              type="button"
+              onClick={() => ctx.open({ kind: "rival", name: d.name })}
+              className="flex w-full flex-wrap justify-between gap-x-3 border-b border-line py-2.5 text-left text-[14px] text-ink hover:text-primary"
+            >
+              <span>{d.name}</span>
+              <span className="text-ink-3">
+                {d.tiles[1]?.value ?? "-"} of picks{d.tiles[0] ? ` - named in ${d.tiles[0].value}` : ""} {"→"}
+              </span>
+            </button>
+          ))}
+        </div>
+      )}
+    </>
   );
 }

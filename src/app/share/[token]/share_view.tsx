@@ -13,6 +13,7 @@ export default function ShareView({
   brand,
   runId,
   codes = false,
+  category,
   expiresAt,
 }: {
   token: string;
@@ -20,6 +21,8 @@ export default function ShareView({
   runId: string | null;
   /** answer_codes era - the results render as the per-type views. */
   codes?: boolean;
+  /** For "What the AI says about the <category>". */
+  category?: string | null;
   expiresAt: string;
 }) {
   // The claim sets the share cookie the results APIs need - the header
@@ -59,7 +62,7 @@ export default function ShareView({
           This tracker has no measured results yet.
         </p>
       ) : claimed ? (
-        <RunResults runId={runId} codes={codes} />
+        <RunResults runId={runId} codes={codes} category={category} />
       ) : null}
     </main>
   );

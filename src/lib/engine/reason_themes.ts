@@ -7,6 +7,7 @@ import type { RuleGroup } from "./rules_explorer";
 import { withCostContext } from "../cost_log";
 import { store } from "../store";
 import type { CacheMeta, Intent } from "../types";
+import type { AnswerRef, RouteShare } from "./analysis_types";
 
 /**
  * The reason themes (moved out of dossiers.ts 2026-11-09, option D - one
@@ -50,6 +51,89 @@ export interface DossierTheme {
   buckets: DossierThemeBucket[];
   /** Set (true only) when the theme renders flat (buckets empty) and its wording is a wall. */
   wall?: boolean;
+  /** am15 / do7 (additive): up to 2 answers stating a member reason, on
+   * different engines; find = the answer's own wording of it. */
+  receipts?: AnswerRef[];
+  /** am15 / do7, away-side themes only: the active brands the member rules
+   * send buyers to - top 3 with >= 15% of the theme's answers that name a
+   * destination and at least 2 answers. */
+  routes?: RouteShare[];
+}
+
+/** One answer's statement of one rule group (rules_explorer capture, never
+ * served): its own wording, where its rules in the group send buyers (active
+ * brands, away side only), its engine and its question. */
+export interface AnswerRule {
+  said: string;
+  to: string[];
+  model: string;
+  intent: string;
+}
+
+/** Group id -> response id -> that answer's statement of the group. */
+export type AnswerRules = Map<string, Map<string, AnswerRule>>;
+
+/** What a theme tree attaches its evidence from (optional; the tree itself
+ * is unchanged without it). `accept` narrows the receipts (a dossier's
+ * themes take only answers that send buyers to its brand). */
+export interface ThemeEvidence {
+  rules: AnswerRules;
+  side: ThemeSide;
+  accept?: (r: AnswerRule) => boolean;
+}
+
+export const ROUTE_MIN_SHARE = 0.15;
+export const ROUTE_MIN_ANSWERS = 2;
+export const ROUTE_TOP = 3;
+
+/** Up to `k` statements on distinct engines, in order (the first engine's first statement first). */
+export function spreadRefs(items: { id: string; find: string; model: string }[], k = 2): AnswerRef[] {
+  const out: AnswerRef[] = [];
+  const models = new Set<string>();
+  const ids = new Set<string>();
+  for (const x of items) {
+    if (out.length >= k) break;
+    if (models.has(x.model) || ids.has(x.id) || !x.find.trim()) continue;
+    models.add(x.model);
+    ids.add(x.id);
+    out.push({ responseId: x.id, find: x.find });
+  }
+  return out;
+}
+
+/** Where a set of answers is sent: per answer its destination names; the
+ * share is of the answers naming any destination. */
+export function routeShares(destinations: Iterable<string[]>): RouteShare[] {
+  const by = new Map<string, number>();
+  let routed = 0;
+  for (const to of destinations) {
+    const set = new Set(to);
+    if (!set.size) continue;
+    routed++;
+    for (const name of set) by.set(name, (by.get(name) ?? 0) + 1);
+  }
+  if (!routed) return [];
+  return [...by.entries()]
+    .filter(([, k]) => k >= ROUTE_MIN_ANSWERS && k / routed >= ROUTE_MIN_SHARE)
+    .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
+    .slice(0, ROUTE_TOP)
+    .map(([name, k]) => ({ name, share: pctOf(k / routed) }));
+}
+
+/** A theme's receipts and routes from its member groups (largest first). */
+function themeEvidenceOf(groupIds: string[], ev: ThemeEvidence, inCell: (r: AnswerRule) => boolean): Pick<DossierTheme, "receipts" | "routes"> {
+  const statements: { id: string; find: string; model: string }[] = [];
+  const dest = new Map<string, string[]>();
+  for (const gid of groupIds) {
+    for (const [id, r] of ev.rules.get(gid) ?? []) {
+      if (!inCell(r)) continue;
+      if (!ev.accept || ev.accept(r)) statements.push({ id, find: r.said, model: r.model });
+      if (ev.side === "away") dest.set(id, [...(dest.get(id) ?? []), ...r.to]);
+    }
+  }
+  const receipts = spreadRefs(statements);
+  const routes = ev.side === "away" ? routeShares(dest.values()) : [];
+  return { ...(receipts.length ? { receipts } : {}), ...(routes.length ? { routes } : {}) };
 }
 
 /** The pseudo-situation for cells asked across all buyers (no room). */
@@ -315,12 +399,15 @@ export function themeTree(
   sitOf: Map<string, string>,
   /** Intent ids: when present, each group's questions are intersected with it
    * before counting (the map's per-cell trees). Omitted = the run-wide tree. */
-  filter?: Set<string>
+  filter?: Set<string>,
+  /** am15 / do7: attach receipts (and, away side, routes) to each theme. */
+  evidence?: ThemeEvidence
 ): DossierTheme[] {
   if (!tm || base <= 0 || pool.length === 0) return [];
   const order = new Map(pool.map((g, i) => [g.id, i]));
   type Bucket = { union: Set<string>; groups: Map<string, { label: string; n: number; o: number }> };
   const tots = new Map<number, { union: Set<string>; buckets: Map<number, Bucket> }>();
+  const totGroups = new Map<number, Map<string, number>>();
   for (const g of pool)
     for (const c of cellSets.get(g.id) ?? []) {
       if (filter && !filter.has(c)) continue;
@@ -336,6 +423,9 @@ export function themeTree(
       const row = b.groups.get(g.id) ?? { label: g.label, n: 0, o: order.get(g.id)! };
       row.n++;
       b.groups.set(g.id, row);
+      const tg = totGroups.get(t) ?? new Map<string, number>();
+      tg.set(g.id, (tg.get(g.id) ?? 0) + 1);
+      totGroups.set(t, tg);
     }
   const same = (a: string, b: string) => a.trim().toLowerCase() === b.trim().toLowerCase();
   const wallOf = (label: string) => isWallWording([label]);
@@ -361,10 +451,16 @@ export function themeTree(
         .map((x) => x.bucket);
       const label = tm.totName[t];
       const flat = buckets.length === 1 && buckets[0].members.length === 0 && same(buckets[0].label, label);
-      return { n: tot.union.size, theme: { label, share: pctOf(tot.union.size / base), buckets: flat ? [] : buckets, ...(flat && wallOf(label) ? { wall: true } : {}) } };
+      const ev = evidence ? themeEvidenceOf(rankedIds(totGroups.get(t), order), evidence, (r) => !filter || filter.has(r.intent)) : {};
+      return { n: tot.union.size, theme: { label, share: pctOf(tot.union.size / base), buckets: flat ? [] : buckets, ...(flat && wallOf(label) ? { wall: true } : {}), ...ev } };
     })
     .sort((a, b) => b.n - a.n || a.theme.label.localeCompare(b.theme.label))
     .map((x) => x.theme);
+}
+
+/** A theme's member group ids, most-stated first (pool order breaks ties). */
+function rankedIds(m: Map<string, number> | undefined, order: Map<string, number>): string[] {
+  return [...(m ?? new Map<string, number>()).entries()].sort((a, b) => b[1] - a[1] || (order.get(a[0]) ?? 0) - (order.get(b[0]) ?? 0)).map(([id]) => id);
 }
 
 /**
@@ -417,11 +513,14 @@ export function themeTreeAnswers(
   tm: ThemeMap | null,
   cellAnswers: Map<string, Map<string, Set<string>>>,
   sitOf: Map<string, string>,
-  cellIntents: Set<string>
+  cellIntents: Set<string>,
+  /** am15: attach receipts (and, away side, routes) to each theme. */
+  evidence?: ThemeEvidence
 ): DossierTheme[] {
   if (!tm || pool.length === 0) return [];
   const order = new Map(pool.map((g, i) => [g.id, i]));
   const all = new Set<string>();
+  const totGroups = new Map<number, Map<string, number>>();
   type Bucket = { union: Set<string>; groups: Map<string, { label: string; ids: Set<string>; o: number }> };
   const tots = new Map<number, { union: Set<string>; buckets: Map<number, Bucket> }>();
   for (const g of pool) {
@@ -444,6 +543,9 @@ export function themeTreeAnswers(
         b.union.add(id);
         row.ids.add(id);
       }
+      const tg = totGroups.get(t) ?? new Map<string, number>();
+      tg.set(g.id, (tg.get(g.id) ?? 0) + ids.size);
+      totGroups.set(t, tg);
     }
   }
   const base = all.size;
@@ -472,7 +574,8 @@ export function themeTreeAnswers(
         .map((x) => x.bucket);
       const label = tm.totName[t];
       const flat = buckets.length === 1 && buckets[0].members.length === 0 && same(buckets[0].label, label);
-      return { n: tot.union.size, theme: { label, share: pctOf(tot.union.size / base), buckets: flat ? [] : buckets, ...(flat && wallOf(label) ? { wall: true } : {}) } };
+      const ev = evidence ? themeEvidenceOf(rankedIds(totGroups.get(t), order), evidence, (r) => cellIntents.has(r.intent)) : {};
+      return { n: tot.union.size, theme: { label, share: pctOf(tot.union.size / base), buckets: flat ? [] : buckets, ...(flat && wallOf(label) ? { wall: true } : {}), ...ev } };
     })
     .sort((a, b) => b.n - a.n || a.theme.label.localeCompare(b.theme.label))
     .map((x) => x.theme);

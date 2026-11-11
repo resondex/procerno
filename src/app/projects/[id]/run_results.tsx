@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState, useSyncExternalStore } from "react";
+import { useEffect, useMemo, useState, useSyncExternalStore } from "react";
 import type { BrandStats, Project, RunMetrics } from "@/lib/types";
 import type { InsightsBundle } from "@/lib/engine/insights";
 import {
@@ -12,11 +12,10 @@ import Workbench, { type WbPreset } from "./workbench";
 import { SortTable } from "./table";
 import AnswerText from "./answer_text";
 import HumanCodingPanel from "./human_coding_panel";
-import AnalysisTier, { type TierView } from "./analysis_views";
+import AnalysisHub, { type HubGo, type PanelReq } from "./analysis_views";
+import type { PanelView } from "./analysis_panel";
 import BriefSection from "./brief_view";
-import JourneySection from "./journey_view";
-import RivalsSection from "./rivals_view";
-import { MetricsSection } from "./metrics_view";
+import DataPage, { type DataTab } from "./data_view";
 import { EngineSetContext, MODE_LABEL, TIER_LABEL, type EngineRow } from "./view_parts";
 
 const pct = (x: number) =>
@@ -32,6 +31,7 @@ export default function RunResults({
   projectId,
   refreshToken = 0,
   codes = false,
+  category,
 }: {
   runId: string;
   /** Keys the per-project Panel lens preference (absent on share links). */
@@ -43,230 +43,158 @@ export default function RunResults({
    * read answer_codes through the per-type views - the legacy metrics path
    * (mentions) is empty there and must not render as hollow zeros. */
   codes?: boolean;
+  /** The tracker's category, for "What the AI says about the <category>". */
+  category?: string | null;
 }) {
   if (codes) {
-    return <CodesResults runId={runId} projectId={projectId} refreshToken={refreshToken} />;
+    return <CodesResults runId={runId} projectId={projectId} refreshToken={refreshToken} category={category} />;
   }
   return <LegacyResults runId={runId} refreshToken={refreshToken} />;
 }
 
 /**
- * The answer_codes-era results block (2026-10-30; analysis tier 2026-11-03).
- * The primary pills are the analysis tier (analysis_views.tsx,
- * ANALYSIS_REDESIGN_2026-11-03.md): The Verdict, The Map and The Portfolio,
- * one component over one /analysis_map fetch, with The Brief (brief_view.tsx,
- * BRIEF_PILL_DESIGN_2026-11-04.md - seven memo frames over one /brief fetch)
- * between The Map and The Portfolio. The Verdict absorbed the old
- * Summary group (The brief, Boardroom, Five questions). Behind them sit the
- * analyst tools - Stations, Rivals and the pivot - each reading
- * answer_codes under the project's code source. The Why lens and the brief
- * Decision rules pill both retired 2026-11-05: the per-cell why lives in the
- * Map's position panels, the pooled headline findings in the Verdict and
- * Brief, and the full decision-rules explorer mounts inside the Map's
- * Overall band - the pooled open-choice cell's position panel. The Buyers
- * lens retired 2026-11-09 (Tyler): the Map's rooms band, the buyer bar +
- * Stations, the Brief's by-situation frame and the pivot's Buying-situation
- * rows absorbed its matrix.
+ * The answer_codes-era results block (2026-10-30; analysis tier 2026-11-03;
+ * redesigned 2026-11-10 from Tyler's ratified prototype - BUILD_SPEC.md).
+ * One quiet bar: three pages - Overview, Map, Data - the one filter (the
+ * assistant set, the Panel lens) and a Brief button that opens the brief as
+ * its own page. The Overview and the Map are the analysis hub
+ * (analysis_views.tsx) over one /analysis_map fetch, with the one slide-over
+ * (analysis_panel.tsx) every contest and rival opens - from any page. Data
+ * (data_view.tsx) carries the analyst reads: By question type (the Stations
+ * read, with the buyer filter that used to sit on the shell) and Build a
+ * table. The Verdict and the Portfolio folded into the Overview; the Rivals
+ * pill became the Map's "By rival" cards and the rival panel.
  */
+type CodesPage = "overview" | "map" | "data" | "brief";
+
 function CodesResults({
   runId,
   projectId,
   refreshToken,
+  category,
 }: {
   runId: string;
   projectId?: string;
   refreshToken: number;
+  category?: string | null;
 }) {
-  // The Panel lens (2026-11-03): the engine set every section reads under.
+  // The Panel lens (2026-11-03): the assistant set every page reads under.
   const panel = usePanel(runId, projectId);
-  type CodesView = TierView | "brief" | "journey" | "rivals" | "metrics";
-  const [view, setView] = useState<CodesView>("verdict");
-  // The analysis tier is ONE mounted component; its three pills only switch
-  // which subview it shows (the last one, while an analyst tool is open).
-  const [tierView, setTierView] = useState<TierView>("verdict");
-  // The global buyer filter of the Analysis tier ("" = all buyers). Stations
-  // follows it; Rivals is measured across all buyers.
-  const [room, setRoom] = useState<string>("");
-  // The rooms list, reported up by Stations once its first payload lands.
-  const [rooms, setRooms] = useState<string[]>([]);
-  const reportRooms = useCallback(
-    (rs: string[]) => setRooms((prev) => (prev.length === rs.length && prev.every((r, i) => r === rs[i]) ? prev : rs)),
-    []
-  );
-  // Views stay MOUNTED once visited, hidden with CSS: switching pills and
-  // coming back must not refetch - the per-type stack alone is nine
-  // requests, a multi-second reload on every return otherwise.
-  const [visited, setVisited] = useState<Set<CodesView>>(() => new Set(["verdict"]));
-  const TIER: ReadonlySet<CodesView> = new Set(["verdict", "map", "portfolio"]);
-  const ANALYSIS: ReadonlySet<CodesView> = new Set(["journey", "rivals", "metrics"]);
-  // The buyer bar needs the rooms list on the FIRST Analysis open, whichever
-  // pill it is - Why and Rivals never load the journey payload, so the shell
-  // asks for it once itself (a cached read; Stations reuses it from cache).
-  const [roomsAsked, setRoomsAsked] = useState(false);
-  // A brief pin's request to open a map cell; `n` makes a repeat click on the same pin a new request.
-  const [cellReq, setCellReq] = useState<{ id: string; n: number } | null>(null);
-  // A brief answer card's request to open one rival's dossier under Rivals (same `n` rule).
-  const [rivalReq, setRivalReq] = useState<{ key: string; n: number } | null>(null);
-  // A brief answer card's request to open Stations at Consideration (its by-engine table).
+  const [page, setPage] = useState<CodesPage>("overview");
+  const [dataTab, setDataTab] = useState<DataTab>("types");
+  // Pages stay MOUNTED once visited, hidden with CSS: switching and coming
+  // back must not refetch.
+  const [visited, setVisited] = useState<Set<CodesPage>>(() => new Set(["overview"]));
+  // A request from the Brief or Data page to open the slide-over.
+  const [panelReq, setPanelReq] = useState<PanelReq | null>(null);
+  // The brief's request to open Data at Consideration (its by-assistant table).
   const [journeyJump, setJourneyJump] = useState<{ station: "consideration"; n: number } | undefined>(undefined);
-  const open = (v: CodesView) => {
-    setView(v);
-    if (v === "verdict" || v === "map" || v === "portfolio") setTierView(v);
-    setVisited((s) => (s.has(v) ? s : new Set(s).add(v)));
-    if (ANALYSIS.has(v) && !roomsAsked) {
-      setRoomsAsked(true);
-      fetch(`/api/runs/${runId}/journey`)
-        .then((r) => (r.ok ? r.json() : null))
-        .then((d) => d?.view?.rooms && reportRooms(d.view.rooms as string[]))
-        .catch(() => {});
-    }
+  const go = (to: CodesPage) => {
+    setPage(to);
+    setVisited((s) => (s.has(to) ? s : new Set(s).add(to)));
   };
-  const show = (v: CodesView) => (view === v ? "grid gap-8" : "hidden");
-  // The engine set rides every section's key: a new set remounts (refetches)
-  // the mounted sections, the same way a refresh does.
+  const onHubGo = (to: HubGo) => {
+    if (to === "build") {
+      setDataTab("build");
+      go("data");
+    } else go(to);
+  };
+  const openPanel = (view: PanelView) => setPanelReq({ view, n: Date.now() });
+  const show = (v: CodesPage) => (page === v ? "grid gap-8" : "hidden");
+  // The assistant set rides every section's key: a new set remounts
+  // (refetches) the mounted pages, the same way a refresh does.
   const k = (name: string) => `${name}:${runId}:${refreshToken}:${panel.engines?.join(",") ?? "all"}`;
+  const nav = (id: CodesPage, label: string, quiet = false) => (
+    <button
+      key={id}
+      type="button"
+      onClick={() => go(id)}
+      aria-current={page === id ? "page" : undefined}
+      className={`rounded-lg px-3 py-1.5 text-[14px] transition-colors ${quiet ? "font-normal" : "font-medium"} ${
+        page === id ? "bg-primary-soft text-ink" : "text-ink-3 hover:text-ink-2"
+      }`}
+    >
+      {label}
+    </button>
+  );
   return (
-    <div className="grid gap-8">
-      <div className="flex items-baseline justify-between gap-4 flex-wrap -mb-2">
-        <p className="text-[13px] text-ink-3">
-          Export:{" "}
-          <a
-            href={`/api/runs/${runId}/export?format=csv&table=responses`}
-            className="font-medium text-primary hover:opacity-80"
-          >
-            raw answers
-          </a>
-          <span className="ml-2">
-            - every section below downloads its own table (csv / excel)
-          </span>
-        </p>
-      </div>
-
-      <div className="flex flex-wrap items-center gap-x-3 gap-y-2 -mt-3">
-        {(
-          [
-            ["", [
-              ["verdict", "The Verdict"],
-              ["map", "The Map"],
-              ["brief", "The Brief"],
-              ["portfolio", "The Portfolio"],
-            ]],
-            ["Analyst tools", [
-              ["journey", "Stations"],
-              ["rivals", "Rivals"],
-              ["metrics", "Build a table"],
-            ]],
-          ] as const
-        ).map(([group, pills]) => (
-          <span key={group || "tier"} className="flex items-center gap-1.5">
-            {group && <span className="text-[12px] text-ink-3 mr-0.5">{group}:</span>}
-            {pills.map(([id, label]) => (
-              <button
-                key={id}
-                type="button"
-                onClick={() => open(id)}
-                className={`rounded-full border px-3 py-1 text-[13px] font-medium transition-colors ${
-                  view === id
-                    ? "border-[var(--color-primary)] bg-primary-soft text-primary"
-                    : "border-line text-ink-2 hover:border-ink-3"
-                }`}
-              >
-                {label}
-              </button>
-            ))}
-          </span>
-        ))}
-      </div>
-
-      {((panel.core?.length ?? 0) >= 2 || (ANALYSIS.has(view) && rooms.length > 0)) && (
-      <div className="grid gap-1.5 -mt-4">
-        <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
-          <PanelControl panel={panel} />
-          {ANALYSIS.has(view) && rooms.length > 0 && (
-          <div className="flex flex-wrap items-center gap-1.5">
-            <span className="text-[12px] text-ink-3 mr-1">Buyer:</span>
-            {["", ...rooms].map((rk) => (
-              <button
-                key={rk || "__all"}
-                type="button"
-                onClick={() => setRoom(rk)}
-                aria-pressed={room === rk}
-                className={`rounded-full border px-3 py-1 text-[13px] font-medium transition-colors ${
-                  room === rk
-                    ? "border-[var(--color-primary)] bg-primary-soft text-primary"
-                    : "border-line text-ink-2 hover:border-ink-3"
-                }`}
-              >
-                {rk === "" ? "All buyers" : rk}
-              </button>
-            ))}
+    <div className="grid min-w-0 gap-6">
+      <div className="sticky top-0 z-30 -mx-1 rounded-xl border border-line bg-surface px-3 py-2">
+        <div className="flex flex-wrap items-center gap-x-5 gap-y-2">
+          <nav className="flex flex-wrap gap-1" aria-label="Pages">
+            {nav("overview", "Overview")}
+            {nav("map", "Map")}
+            {nav("data", "Data", true)}
+          </nav>
+          <div className="ml-auto flex flex-wrap items-center gap-2">
+            <PanelControl panel={panel} />
+            <button
+              type="button"
+              onClick={() => go("brief")}
+              aria-current={page === "brief" ? "page" : undefined}
+              className={`rounded-lg px-3 py-1.5 text-[13px] font-medium ${
+                page === "brief" ? "border border-[var(--color-primary)] bg-primary-soft text-primary" : "bg-primary text-primary-ink hover:opacity-90"
+              }`}
+            >
+              Brief
+            </button>
           </div>
-          )}
         </div>
         {panel.engines && (
-          <p className="text-[12px] text-ink-3">
-            Every number below is on {panel.engines.length} {panel.engines.length === 1 ? "engine" : "engines"} - {panel.name}.
-          </p>
-        )}
-        {ANALYSIS.has(view) && rooms.length > 0 && room !== "" && (
-          <p className="text-[12px] text-ink-3">
-            Stations follows this buyer; Rivals is measured across all buyers.
+          <p className="mt-1.5 text-[12px] text-ink-3">
+            Every number below is on {panel.engines.length} {panel.engines.length === 1 ? "assistant" : "assistants"} - {panel.name}.{" "}
+            <button type="button" onClick={() => panel.set(null)} className="text-primary underline underline-offset-2 hover:opacity-80">
+              Clear
+            </button>
           </p>
         )}
       </div>
-      )}
 
       <EngineSetContext.Provider value={panel.engines}>
-
-      {[...visited].some((v) => TIER.has(v)) && (
-        <div className={TIER.has(view) ? "grid gap-8" : "hidden"}>
-          <AnalysisTier key={k("analysis")} runId={runId} projectId={projectId} view={tierView} onView={open} cellReq={cellReq} />
-        </div>
-      )}
-      {visited.has("brief") && (
-        <div className={show("brief")}>
-          <BriefSection
-            key={k("brief")}
-            runId={runId}
-            projectId={projectId}
-            onOpenCell={(id) => {
-              setCellReq({ id, n: Date.now() });
-              open("map");
-            }}
-            onOpenView={(v, brand) => {
-              if (v === "rivals" && brand) setRivalReq({ key: brand, n: Date.now() });
-              if (v === "journey") setJourneyJump({ station: "consideration", n: Date.now() });
-              open(v);
-            }}
-          />
-        </div>
-      )}
-      {visited.has("journey") && (
-        <div className={show("journey")}>
-          <JourneySection key={k("journey")} runId={runId} room={room} onRoom={setRoom} onRooms={reportRooms} jump={journeyJump} />
-        </div>
-      )}
-      {visited.has("rivals") && (
-        <div className={show("rivals")}>
-          <RivalsSection
-            key={k("rivals")}
-            runId={runId}
-            projectId={projectId}
-            onOpenCell={(id) => {
-              setCellReq({ id, n: Date.now() });
-              open("map");
-            }}
-            onOpenView={(v) => open(v)}
-            focus={rivalReq}
-          />
-        </div>
-      )}
-      {visited.has("metrics") && (
-        <div className={show("metrics")}>
-          <MetricsSection key={k("metrics")} runId={runId} />
-        </div>
-      )}
+        <AnalysisHub
+          key={k("analysis")}
+          runId={runId}
+          projectId={projectId}
+          page={page === "overview" || page === "map" ? page : null}
+          category={category}
+          onGo={onHubGo}
+          panelReq={panelReq}
+        />
+        {visited.has("data") && (
+          <div className={show("data")}>
+            <DataPage key={k("data")} runId={runId} tab={dataTab} onTab={setDataTab} jump={journeyJump} />
+          </div>
+        )}
+        {visited.has("brief") && (
+          <div className={show("brief")}>
+            <BriefSection
+              key={k("brief")}
+              runId={runId}
+              projectId={projectId}
+              onOpenCell={(id) => openPanel({ kind: "cell", id })}
+              onOpenView={(v, brand) => {
+                if (v === "rivals" && brand) {
+                  openPanel({ kind: "rival", name: brand });
+                  return;
+                }
+                if (v === "journey") {
+                  setJourneyJump({ station: "consideration", n: Date.now() });
+                  setDataTab("types");
+                } else if (v === "metrics") setDataTab("build");
+                go("data");
+              }}
+            />
+          </div>
+        )}
       </EngineSetContext.Provider>
+
+      <p className="text-[12px] text-ink-3">
+        Export:{" "}
+        <a href={`/api/runs/${runId}/export?format=csv&table=responses`} className="font-medium text-primary hover:opacity-80">
+          raw answers
+        </a>
+        <span className="ml-2">- every table on the Data page downloads its own (csv / excel)</span>
+      </p>
     </div>
   );
 }
@@ -382,7 +310,7 @@ function usePanel(runId: string, projectId?: string): Panel {
     return ids.length > 0 ? ids : null;
   }, [saved, core]);
   const key = engines?.join(",");
-  const name = engines ? presets.find((p) => p.ids.join(",") === key)?.name ?? "Custom" : "All engines";
+  const name = engines ? presets.find((p) => p.ids.join(",") === key)?.name ?? "Custom" : "All assistants";
   return { engines, name, core, presets, set: (ids) => writePanel(scope, ids) };
 }
 
@@ -413,7 +341,7 @@ function PanelControl({ panel }: { panel: Panel }) {
   };
   return (
     <div className="relative flex items-center gap-1.5">
-      <span className="text-[12px] text-ink-3 mr-1">Panel:</span>
+      <span className="text-[12px] text-ink-3 mr-1">Assistants:</span>
       <button
         type="button"
         onClick={() => setOpen((o) => !o)}
@@ -427,10 +355,10 @@ function PanelControl({ panel }: { panel: Panel }) {
       {open && (
         <>
           <div className="fixed inset-0 z-30" onClick={() => { setOpen(false); setCustom(false); }} aria-hidden="true" />
-          <div className="absolute left-0 top-full z-40 mt-1.5 grid w-[min(22rem,calc(100vw-2rem))] gap-3 rounded-xl border border-line bg-[var(--color-surface)] p-3 shadow-xl">
+          <div className="absolute right-0 top-full z-40 mt-1.5 grid w-[min(22rem,calc(100vw-2rem))] gap-3 rounded-xl border border-line bg-[var(--color-surface)] p-3 shadow-xl">
             <div>
               <button type="button" onClick={() => pick(null)} className={pill(active === null)}>
-                All engines
+                All assistants
               </button>
             </div>
             {groups.map(([g, list]) => (
