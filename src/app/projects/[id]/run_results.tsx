@@ -14,6 +14,7 @@ import AnswerText from "./answer_text";
 import HumanCodingPanel from "./human_coding_panel";
 import AnalysisHub, { type HubGo, type PanelReq } from "./analysis_views";
 import type { PanelView } from "./analysis_panel";
+import type { AnalysisMapView } from "@/lib/engine/analysis_types";
 import BriefSection from "./brief_view";
 import DataPage, { type DataTab } from "./data_view";
 import { EngineSetContext, MODE_LABEL, TIER_LABEL, type EngineRow } from "./view_parts";
@@ -89,6 +90,8 @@ function CodesResults({
   const [panelReq, setPanelReq] = useState<PanelReq | null>(null);
   // The brief's request to open Data at Consideration (its by-assistant table).
   const [journeyJump, setJourneyJump] = useState<{ station: "consideration"; n: number } | undefined>(undefined);
+  // The hub's map payload, shared with the Data page's question-type tables.
+  const [map, setMap] = useState<AnalysisMapView | null | undefined>(undefined);
   const go = (to: CodesPage) => {
     setPage(to);
     setVisited((s) => (s.has(to) ? s : new Set(s).add(to)));
@@ -110,7 +113,7 @@ function CodesResults({
       type="button"
       onClick={() => go(id)}
       aria-current={page === id ? "page" : undefined}
-      className={`rounded-lg px-3 py-1.5 text-[14px] transition-colors ${quiet ? "font-normal" : "font-medium"} ${
+      className={`rounded-lg px-3 py-1.5 text-sm transition-colors ${quiet ? "font-normal" : "font-medium"} ${
         page === id ? "bg-primary-soft text-ink" : "text-ink-3 hover:text-ink-2"
       }`}
     >
@@ -159,10 +162,20 @@ function CodesResults({
           category={category}
           onGo={onHubGo}
           panelReq={panelReq}
+          onMap={setMap}
         />
         {visited.has("data") && (
           <div className={show("data")}>
-            <DataPage key={k("data")} runId={runId} tab={dataTab} onTab={setDataTab} jump={journeyJump} />
+            <DataPage
+              key={k("data")}
+              runId={runId}
+              map={map}
+              category={category}
+              onOpen={(id) => openPanel({ kind: "cell", id })}
+              tab={dataTab}
+              onTab={setDataTab}
+              jump={journeyJump}
+            />
           </div>
         )}
         {visited.has("brief") && (
@@ -179,7 +192,7 @@ function CodesResults({
                 }
                 if (v === "journey") {
                   setJourneyJump({ station: "consideration", n: Date.now() });
-                  setDataTab("types");
+                  setDataTab("stations");
                 } else if (v === "metrics") setDataTab("build");
                 go("data");
               }}

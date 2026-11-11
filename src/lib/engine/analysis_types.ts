@@ -250,7 +250,16 @@ export interface AnalysisMapView {
   shareOfDecided: { brand: string; you: boolean; share: RateCell }[];
   /** The 3-5 highest-ranked tensions as memo paragraphs, each pointing at
    * a map cell. */
-  tensions: { title: string; body: string; cellId: string }[];
+  tensions: {
+    title: string;
+    body: string;
+    cellId: string;
+    /** 2026-11-10 (am17): the finding card's small chart - 2-4 bars of the
+     * numbers the sentence states (value 0-100, text as the sentence prints
+     * it, hi = the one row the finding is about). Absent when the finding has
+     * no clean numeric rows. */
+    viz?: { label: string; value: number; text: string; hi?: true }[];
+  }[];
   bands: MapBand[];
   positions: Record<string, Position>;
   /** Pool answers with no code row under the source (honesty line). */

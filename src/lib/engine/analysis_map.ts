@@ -5,7 +5,7 @@ import { conditionKeysFor, conditionStemKey, isDefaultCondition } from "./condit
 import { computeRules, ENUM_TOWARD, GENERIC_AWAY, type RuleGroup, type RulesView } from "./rules_explorer";
 import { poolInputs, rankGroups, routeShares, situationsOf, spreadRefs, themeReasons, themeTreeAnswers, type AnswerRules, type DossierTheme, type ThemeMap } from "./reason_themes";
 import { isWallWording } from "./wall_wording";
-import { commitSentence, insightInputs, pctFine, productNoun, rankedInsights, type InsightInputs } from "./summary_insights";
+import { commitSentence, insightBar, insightInputs, pctFine, productNoun, rankedInsights, type InsightInputs } from "./summary_insights";
 import { BRAND_SUMMARY_VERSION, computeBrandSummary, sharedBrandSummary, type BrandSummaryView, type Insight } from "./brand_summary";
 import { computeValue, type ValueRow } from "./value";
 import { exitResolver } from "./exits";
@@ -2106,7 +2106,7 @@ function tensionsOf(
   brand: string,
   probe?: { insights: Insight[]; out: { key: string; kind: string; cellId: string | null; how: string }[] },
   placed?: { key: string; title: string; cellId: string }[]
-): { title: string; body: string; cellId: string }[] {
+): AnalysisMapView["tensions"] {
   const ids = [...cells.keys()];
   const firstOf = (prefix: string) => ids.find((id) => id.startsWith(prefix)) ?? null;
   // Pooled All cells never match by label (an "All buyers" label would catch
@@ -2121,7 +2121,7 @@ function tensionsOf(
   const longestMatch = (text: string, list: CellSpec[], nameOf: (x: CellSpec) => string) =>
     [...list].filter((x) => containsName(text, nameOf(x))).sort((a, b) => nameOf(b).length - nameOf(a).length)[0] ?? null;
 
-  const out: { title: string; body: string; cellId: string }[] = [];
+  const out: AnalysisMapView["tensions"] = [];
   out.push({
     title: `Named in ${pctOf(f.named)}, picked in ${pctFine(f.picked)}`,
     body: `${brand} is named in ${pctOf(f.named)} of answers when buyers ask what to buy. ${commitSentence(s.category, brand, s.firmPickInCategory, s.target.shareOfDecided, s.target.chosen)}${
@@ -2129,6 +2129,11 @@ function tensionsOf(
     }`,
     // The pooled funnel paragraph anchors on the open-choice All cell itself.
     cellId: cells.has("chooses:open:all") ? "chooses:open:all" : openCells.length ? idOf(openCells[0]) : fallbackOpen,
+    viz: [
+      insightBar("Named", f.named, pctOf(f.named)),
+      insightBar("Recommended", s.target.recommended),
+      insightBar("Picked", f.picked, pctFine(f.picked), true),
+    ],
   });
 
   // bs8 placement bookkeeping for the harness probe ("match" / "generic").
@@ -2250,7 +2255,7 @@ function tensionsOf(
     kinds.add(ins.kind);
     const cellId = cellFor(ins.kind, ins.key, ins.title, ins.body);
     if (!cellId) continue;
-    out.push({ title: ins.title.charAt(0).toUpperCase() + ins.title.slice(1), body: ins.body, cellId });
+    out.push({ title: ins.title.charAt(0).toUpperCase() + ins.title.slice(1), body: ins.body, cellId, ...(ins.viz ? { viz: ins.viz } : {}) });
   }
   if (probe)
     for (const ins of probe.insights) {
@@ -2283,7 +2288,8 @@ function tensionsOf(
 // am13 (2026-11-09): option D - positions carry towardThemes / awayThemes (additive): the dossier's per-side two-level theme trees scoped to each cell's questions, with answer-grain shares (distinct answers in the cell); themes ride the dossier's dt4 cache (identical theme-call inputs, one vocabulary). Flat toward/away, walls, badges, levers and verdicts unchanged.
 // am14 (2026-11-09): the naming sweep - the triage whys, the strategy-misfit lever and the chooses band sub say "reasons" (to pick you / to leave you), the word every visible surface uses since the reasons rename; "conditions" survives only in analyst tools.
 // am15 (2026-11-10): the one-panel redesign - positions carry brands / youShare (the pick split of pick contests, the figure's own numbers), argsMode / argsRows, lift and condition receipts (AnswerRef), condition shares and away routes, notes (the badges' meaning), and theme receipts / routes; the plain-wording pass renames the moves (Keep it, Publish your case, ...) and rewrites every lever, the triage whys, the criteria claims, the band sub and the "Rivals' customers switching" row. Verdicts, badges and numbers unchanged.
-export const ANALYSIS_MAP_VERSION = "am16"; // am16 (2026-11-10): the tightened wall test - the wall sentence now advises, so it reads the shown wording only
+// am16 (2026-11-10): the tightened wall test - the wall sentence now advises, so it reads the shown wording only.
+export const ANALYSIS_MAP_VERSION = "am17"; // am17 (2026-11-10): each tension carries `viz` (the Overview finding card's 2-4 bars) - the first from the casting facts, the rest from the bs15 insights
 // The fold (2026-11-09, Tyler): a view's cache key carries the versions of
 // the views whose content it embeds, so the lockstep bump convention is
 // mechanical - the map embeds the summary's insights, casting and verdict.

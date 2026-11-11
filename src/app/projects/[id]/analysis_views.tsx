@@ -6,6 +6,7 @@ import type { AnalysisDecision, AnalysisMapView, MapBand, MapCell, MapRow, Triag
 import type { Dossier, DossiersView } from "@/lib/engine/dossiers";
 import type { HeadToHeadViews } from "@/lib/engine/head_to_head";
 import { useEngineSet, viewQuery } from "./view_parts";
+import { T } from "./type_scale";
 import {
   BodiesProvider,
   catPhrase,
@@ -37,6 +38,8 @@ import {
 
 export type HubPage = "overview" | "map";
 export type HubGo = "map" | "brief" | "build";
+/** One row of a finding's optional small chart (the engine's tension `viz`). */
+type TensionVizRow = NonNullable<AnalysisMapView["tensions"][number]["viz"]>[number];
 /** A request from another page to open the slide-over; `n` makes a repeat click a new request. */
 export type PanelReq = { view: PanelView; n: number };
 
@@ -82,6 +85,7 @@ export default function AnalysisHub({
   category,
   onGo,
   panelReq,
+  onMap,
 }: {
   runId: string;
   /** Keys the decision record; absent on share links (read-only). */
@@ -91,6 +95,8 @@ export default function AnalysisHub({
   category?: string | null;
   onGo: (to: HubGo) => void;
   panelReq?: PanelReq | null;
+  /** Hands the loaded map to the shell, so the Data page reads it without a fetch of its own. */
+  onMap?: (m: AnalysisMapView | null | undefined) => void;
 }) {
   const engines = useEngineSet();
   const q = viewQuery({ engines });
@@ -110,13 +116,21 @@ export default function AnalysisHub({
     if (panelReq.view.kind === "rival" || map.positions[panelReq.view.id]) setPanel(panelReq.view);
   }
 
+  const onMapRef = useRef(onMap);
+  useEffect(() => {
+    onMapRef.current = onMap;
+  });
   useEffect(() => {
     let live = true;
+    onMapRef.current?.(undefined);
     fetch(`/api/runs/${runId}/analysis_map${q}`)
       .then(async (r) => {
         if (!r.ok) throw new Error(`The analysis could not load (${r.status}).`);
         const d = (await r.json()) as { view: AnalysisMapView | null };
-        if (live) setMap(d.view);
+        if (live) {
+          setMap(d.view);
+          onMapRef.current?.(d.view);
+        }
       })
       .catch((e: Error) => live && setError(e.message));
     fetch(`/api/runs/${runId}/dossiers${q}`)
@@ -190,7 +204,7 @@ export default function AnalysisHub({
   );
 
   if (error) return page ? <div className="card px-5 py-4 text-[13px] text-danger">{error}</div> : null;
-  if (map === undefined) return page ? <div className="card px-5 py-4 text-[13px] text-ink-3">Reading the coded answers...</div> : null;
+  if (map === undefined) return page ? <div className={`card px-5 py-4 ${T.sec}`}>Reading the coded answers...</div> : null;
   if (map === null) return null;
 
   const you = map.shareOfDecided.find((s) => s.you);
@@ -244,6 +258,28 @@ export default function AnalysisHub({
 
 // ---------- the Overview ----------
 
+/** A finding's small chart (the engine's optional `viz` on a tension - see
+ * analysis_types.ts). Bars are 0-100; `text` is the display string; `hi` the row to
+ * accent. Decorative: the finding's sentence carries the same numbers. */
+function MiniBars({ rows }: { rows: TensionVizRow[] }) {
+  return (
+    <span className="grid min-w-0 gap-1.5" aria-hidden>
+      {rows.map((r, i) => (
+        <span key={`${r.label}${i}`} className={`grid grid-cols-[minmax(0,8rem)_minmax(0,1fr)_2.75rem] items-center gap-2 ${T.cap} ${r.hi ? "text-ink" : "text-ink-3"}`}>
+          <span className="truncate">{r.label}</span>
+          <span className="h-2 rounded bg-line/60">
+            <i
+              className={`block h-full min-w-[2px] rounded ${r.hi ? "bg-primary" : "bg-neutral-bar"}`}
+              style={{ width: `${Math.max(0, Math.min(100, r.value))}%` }}
+            />
+          </span>
+          <span className="text-right tabular-nums">{r.text}</span>
+        </span>
+      ))}
+    </span>
+  );
+}
+
 function Overview({
   map,
   ctx,
@@ -263,43 +299,44 @@ function Overview({
   const shareX = (s: RateCell) => (s.n > 0 ? s.k / s.n : 0);
   const max = Math.max(0.0001, ...map.shareOfDecided.map((s) => shareX(s.share)));
   const playbook = Object.values(map.positions).filter((p) => mine.has(p.cellId));
+  const tensions = map.tensions;
   const sec = "mt-11";
   return (
     <div className="pb-10">
       <section className="grid items-start gap-9 md:grid-cols-[minmax(0,1.25fr)_minmax(0,1fr)]">
         <div className="min-w-0">
-          <p className="mb-2 text-[11px] font-semibold uppercase tracking-[0.08em] text-ink-3">How AI assistants cast you</p>
-          <h1 className="text-[clamp(26px,3.4vw,32px)] font-semibold leading-[1.1] tracking-tight text-ink [text-wrap:balance]">{map.casting.heading}</h1>
-          <p className="mt-3.5 max-w-[68ch] text-[17px] leading-[1.65] text-ink">
+          <p className={`${T.label} mb-2`}>How AI assistants cast you</p>
+          <h1 className={`${T.hero} [text-wrap:balance]`}>{map.casting.heading}</h1>
+          <p className={`${T.lede} mt-3 max-w-[68ch]`}>
             {map.casting.casting} {map.casting.detail}
           </p>
-          <p className="mt-3.5 text-[14px]">
+          <p className={`${T.body} mt-3`}>
             <button type="button" onClick={() => onGo("brief")} className="text-primary underline underline-offset-2 hover:opacity-80">
               Read the full brief {"→"}
             </button>
           </p>
-          <div className="mt-5 flex flex-wrap gap-7">
-            <div title={tipOf(named)}>
-              <b className="block text-[36px] font-semibold leading-none tracking-tight tabular-nums text-ink">{pctOf(named)}</b>
-              <span className="text-[13px] text-ink-3">named when buyers ask what to buy</span>
+          <div className="mt-6 grid grid-cols-3 gap-5">
+            <div title={tipOf(named)} className="min-w-0">
+              <b className={`${T.num} block text-ink`}>{pctOf(named)}</b>
+              <span className={`${T.sec} mt-1 block`}>named when buyers ask what to buy</span>
             </div>
             {you && (
-              <div title={`${you.share.k.toLocaleString("en-US")} of ${you.share.n.toLocaleString("en-US")} picks`}>
-                <b className="block text-[36px] font-semibold leading-none tracking-tight tabular-nums text-primary">{pctOf(you.share)}</b>
-                <span className="text-[13px] text-ink-3">share of picks</span>
+              <div title={`${you.share.k.toLocaleString("en-US")} of ${you.share.n.toLocaleString("en-US")} picks`} className="min-w-0">
+                <b className={`${T.num} block text-primary`}>{pctOf(you.share)}</b>
+                <span className={`${T.sec} mt-1 block`}>share of picks</span>
               </div>
             )}
             {commit && (
-              <div title={tipOf(commit)}>
-                <b className="block text-[36px] font-semibold leading-none tracking-tight tabular-nums text-ink">{pctOf(commit)}</b>
-                <span className="text-[13px] text-ink-3">of answers commit to one {ctx.cat.singular}</span>
+              <div title={tipOf(commit)} className="min-w-0">
+                <b className={`${T.num} block text-ink`}>{pctOf(commit)}</b>
+                <span className={`${T.sec} mt-1 block`}>of answers commit to one {ctx.cat.singular}</span>
               </div>
             )}
           </div>
         </div>
         {map.shareOfDecided.length > 0 && (
           <div className="card min-w-0 p-[18px]">
-            <h3 className="mb-3 text-[13px] font-semibold text-ink">Share of picks, when the AI commits</h3>
+            <h3 className={`${T.title} mb-3`}>Share of picks, when the AI commits</h3>
             {map.shareOfDecided.map((s) => {
               const d = !s.you ? ctx.findDossier(s.brand) : undefined;
               const inner = (
@@ -311,7 +348,7 @@ function Overview({
                   <span className="text-right tabular-nums">{pctOf(s.share)}</span>
                 </>
               );
-              const cls = `grid w-full grid-cols-[minmax(0,132px)_minmax(0,1fr)_40px] items-center gap-2.5 rounded-md py-1 text-left text-[13px] ${s.you ? "font-semibold text-ink" : "text-ink-2"}`;
+              const cls = `grid w-full grid-cols-[minmax(0,132px)_minmax(0,1fr)_40px] items-center gap-2.5 rounded-md px-1 py-1 text-left text-[13px] ${s.you ? "font-semibold text-ink" : "text-ink-2"}`;
               return d ? (
                 <button
                   key={s.brand}
@@ -328,7 +365,7 @@ function Overview({
                 </div>
               );
             })}
-            <p className="mt-2.5 text-[12.5px] text-ink-3">
+            <p className={`${T.cap} mt-2.5 text-ink-3`}>
               Open a rival for its full view, or{" "}
               <button type="button" onClick={onRivals} className="text-primary underline underline-offset-2 hover:opacity-80">
                 see all rivals
@@ -342,18 +379,18 @@ function Overview({
       {playbook.length > 0 && (
         <section className={sec}>
           <div className="card px-[18px] py-4">
-            <h3 className="mb-1.5 text-[11px] font-semibold uppercase tracking-[0.08em] text-ink-3">Your playbook</h3>
+            <h3 className={`${T.label} mb-1.5`}>Your playbook</h3>
             {playbook.map((p) => (
               <button
                 key={p.cellId}
                 type="button"
                 onClick={() => ctx.open({ kind: "cell", id: p.cellId })}
-                className="grid w-full grid-cols-[minmax(0,1fr)_auto] items-baseline gap-3 border-t border-line py-2 text-left text-[14.5px] first:border-t-0 hover:text-primary"
+                className={`${T.body} grid w-full grid-cols-[minmax(0,1fr)_auto] items-baseline gap-3 border-t border-line py-2 text-left text-ink first:border-t-0 hover:text-primary`}
               >
                 <span>
                   <b className="font-semibold">{p.where}</b> - {p.family}
                 </span>
-                <span className="text-[13px] text-ink-3">Open {"→"}</span>
+                <span className={`${T.sec}`}>Open {"→"}</span>
               </button>
             ))}
           </div>
@@ -361,36 +398,41 @@ function Overview({
       )}
 
       <section className={sec}>
-        <h2 className="mb-1 text-xl font-semibold tracking-tight text-ink">What matters this wave</h2>
-        <p className="mb-4 max-w-[70ch] text-[14px] text-ink-3">
-          Each finding comes with its move. Add one to your playbook and it is marked on the Map.
-        </p>
+        <h2 className={`${T.h2} mb-1`}>What matters this wave</h2>
+        <p className={`${T.sec} mb-4 max-w-[70ch]`}>Each finding comes with its move. Add one to your playbook and it is marked on the Map.</p>
         <div>
-          {map.tensions.map((t) => {
+          {tensions.map((t) => {
             const p = map.positions[t.cellId];
             const on = mine.has(t.cellId);
+            const viz = t.viz && t.viz.length > 0 ? t.viz : null;
             return (
               <div key={t.cellId + t.title} className="border-t border-line last:border-b">
                 <button
                   type="button"
                   disabled={!p}
                   onClick={() => p && ctx.open({ kind: "cell", id: t.cellId })}
-                  className="group grid w-full gap-3 pb-3 pt-5 text-left sm:grid-cols-[minmax(0,1fr)_auto] sm:gap-6"
+                  className={`group grid w-full items-center gap-3 pb-3 pt-5 text-left md:gap-6 ${
+                    viz ? "md:grid-cols-[minmax(0,1.5fr)_minmax(0,1fr)_auto]" : "md:grid-cols-[minmax(0,1fr)_auto]"
+                  }`}
                 >
-                  <span>
-                    <span className="mb-1 block text-[17px] font-semibold leading-snug text-ink">{t.title}</span>
-                    <span className="block text-[14px] leading-relaxed text-ink-2">{t.body}</span>
+                  <span className="min-w-0">
+                    <span className={`${T.title} mb-1 block`}>{t.title}</span>
+                    <span className={`${T.body} block text-ink-2`}>{t.body}</span>
                   </span>
-                  {p && <span className="whitespace-nowrap text-[13px] text-ink-3 group-hover:text-primary">See why {"→"}</span>}
+                  {viz && <MiniBars rows={viz} />}
+                  {p && <span className={`${T.sec} whitespace-nowrap group-hover:text-primary`}>See why {"→"}</span>}
                 </button>
                 {p?.lever && (
                   <div className="mb-5 grid items-center gap-x-4 gap-y-1.5 rounded-xl bg-primary-soft px-4 py-3 sm:grid-cols-[minmax(0,1fr)_auto]">
-                    <span className="text-[11px] font-semibold uppercase tracking-[0.06em] text-primary sm:col-span-2">What to do - {p.family}</span>
-                    <div>
-                      {whyLines(notesOf(p), ctx.cat.plural).map((w) => (
-                        <p key={w} className="mb-1.5 text-[13.5px] leading-relaxed text-ink-2">{w}</p>
+                    <span className={`${T.labelAccent} sm:col-span-2`}>What to do - {p.family}</span>
+                    <div className="min-w-0">
+                      {/* The lever's wording leans on these sentences ("Aim at the buyers it does not apply to"), so they stay with it. */}
+                      {whyLines(notesOf(p, ctx.cells.get(p.cellId)), ctx.cat.plural).map((w) => (
+                        <p key={w} className={`${T.sec} mb-1 text-ink-2`}>
+                          {w}
+                        </p>
                       ))}
-                      <p className="text-[14.5px] leading-relaxed text-ink">{p.lever}</p>
+                      <p className={`${T.body} text-ink`}>{p.lever}</p>
                     </div>
                     {ctx.editable && (
                       <PlayButton on={on} onClick={() => void ctx.save({ cellId: p.cellId, suggested: p.triageSuggested, inPlaybook: !on })} />
@@ -404,7 +446,7 @@ function Overview({
       </section>
 
       {map.uncoded > 0 && (
-        <p className="mt-8 border-t border-line pt-3 text-[12px] text-ink-3">
+        <p className={`${T.cap} mt-8 border-t border-line pt-3 text-ink-3`}>
           A few answers in these pools are not coded yet and sit outside every number here.
         </p>
       )}
@@ -446,18 +488,20 @@ function CellButton({ cell, onOpen, hasPosition }: { cell: MapCell; onOpen: (id:
       type="button"
       onClick={() => hasPosition && onOpen(cell.id)}
       disabled={!hasPosition}
-      title={`${cell.n.toLocaleString("en-US")} answers`}
-      className={`flex min-w-0 flex-col items-start gap-1 rounded-[9px] border-[1.5px] px-2.5 py-1.5 text-left transition-[colors,opacity] enabled:hover:border-ink disabled:cursor-default ${
+      title={`${VWORD[cell.verdict]} - ${cell.n.toLocaleString("en-US")} answers`}
+      className={`flex min-w-0 flex-col items-start gap-0.5 rounded-[10px] border-[1.5px] px-2.5 py-2 text-left transition-[colors,opacity] enabled:hover:border-ink disabled:cursor-default ${
         mine ? "border-[var(--color-primary)]" : "border-transparent"
       } ${m.mineOnly && !mine ? "opacity-30" : ""}`}
       style={{ background: c.bg }}
     >
-      {cell.label && <span className="text-[12.5px] font-semibold text-ink">{cell.label}</span>}
-      <span className="flex items-center gap-1.5 text-[12.5px] font-semibold" style={{ color: c.fg }}>
-        <i className="inline-block h-2 w-2 flex-none rounded-full" style={{ background: c.fg }} />
-        {VWORD[cell.verdict]}
+      <span className={`${T.cap} flex items-baseline gap-1.5 font-semibold text-ink`}>
+        <i className="inline-block h-2 w-2 flex-none translate-y-[-1px] rounded-full" style={{ background: c.fg }} aria-hidden />
+        <span>
+          {cell.label || VWORD[cell.verdict]}
+          {cell.label && <span className="sr-only"> - {VWORD[cell.verdict]}</span>}
+        </span>
       </span>
-      {cell.note && <span className="text-[12px] leading-snug text-ink-2">{cell.note}</span>}
+      {cell.note && <span className={`${T.cap} text-ink-2`}>{cell.note}</span>}
     </button>
   );
 }
@@ -539,7 +583,7 @@ function AlignedRow({ row, chooses, rooms, perRow, positions, onOpen }: { row: M
     : rest0;
   return (
     <div className="grid grid-cols-1 border-b border-line/60 last:border-b-0 sm:grid-cols-[150px_200px_1fr]">
-      <div className="border-b border-dashed border-line/60 px-2.5 pb-1.5 pt-3 text-[13px] font-medium text-ink sm:border-b-0 sm:border-r sm:border-solid sm:pb-3">
+      <div className="border-b border-dashed border-line/60 px-2.5 pb-1.5 pt-3 text-[13px] font-semibold text-ink sm:border-b-0 sm:border-r sm:border-solid sm:pb-3">
         {row.stage}
       </div>
       <div className="p-2 sm:border-r sm:border-line/60 [&>button]:h-full [&>button]:w-full">
@@ -573,16 +617,16 @@ function DossierLine({ stage, cell, onOpen, hasPosition }: { stage: string; cell
         mine ? "border-[var(--color-primary)]" : "border-transparent"
       } ${m.mineOnly && !mine ? "opacity-30" : ""}`}
     >
-      <span className="w-[96px] flex-none text-[11px] leading-tight text-ink-3">
+      <span className={`${T.cap} w-[96px] flex-none text-ink-3`}>
         {stage}
         {line ? ` · ${line}` : ""}
       </span>
       <span className="min-w-0">
-        <span className="flex flex-wrap items-center gap-1.5 text-[12.5px] font-semibold" style={{ color: c.fg }}>
+        <span className={`${T.cap} flex flex-wrap items-center gap-1.5 font-semibold`} style={{ color: c.fg }}>
           <i className="inline-block h-1.5 w-1.5 flex-none rounded-full" style={{ background: c.fg }} />
           {VWORD[cell.verdict]}
         </span>
-        {cell.note && <span className="block text-[11.5px] leading-snug text-ink-2">{cell.note}</span>}
+        {cell.note && <span className={`${T.cap} block text-ink-2`}>{cell.note}</span>}
       </span>
     </button>
   );
@@ -621,7 +665,7 @@ function DossierBand({ rows, chooses, rooms, perRow, positions, onOpen }: { rows
         if (lines.length === 0) return null;
         return (
           <div key={key} className={`overflow-hidden rounded-[10px] border bg-surface ${key === "all" ? "border-ink-3/50" : "border-line"}`}>
-            <div className="border-b border-line/70 bg-line/15 px-2.5 py-1.5 text-[12.5px] font-semibold text-ink">{headerOf(key)}</div>
+            <div className="border-b border-line/70 bg-line/15 px-2.5 py-1.5 text-[13px] font-semibold text-ink">{headerOf(key)}</div>
             <div className="grid gap-0.5 p-1">
               {lines.map((l) => (
                 <DossierLine key={l.cell.id} stage={l.stage} cell={l.cell} onOpen={onOpen} hasPosition={!!positions[l.cell.id]} />
@@ -643,8 +687,8 @@ function OrderList({ title, note, items, onReorder }: { title: string; note?: st
   const [dragIdx, setDragIdx] = useState<number | null>(null);
   return (
     <div>
-      <h4 className="text-[12px] font-semibold text-ink">{title}</h4>
-      {note && <p className="mb-1 text-[11.5px] text-ink-3">{note}</p>}
+      <h4 className={`${T.cap} font-semibold text-ink`}>{title}</h4>
+      {note && <p className={`${T.cap} mb-1 text-ink-3`}>{note}</p>}
       <ul className="mt-1 grid gap-1">
         {items.map((it, i) => (
           <li
@@ -707,11 +751,11 @@ function MapPage({
   dossiersLoading: boolean;
 }) {
   const rv = view === "rival";
-  const seg = (on: boolean) => `rounded-full px-4 py-1 text-[13.5px] ${on ? "bg-primary-soft font-semibold text-ink" : "text-ink-3 hover:text-ink-2"}`;
+  const seg = (on: boolean) => `rounded-full px-4 py-1 text-[13px] ${on ? "bg-primary-soft font-semibold text-ink" : "text-ink-3 hover:text-ink-2"}`;
   return (
     <section className="pb-10">
-      <h2 className="mb-1 text-xl font-semibold tracking-tight text-ink">The Map</h2>
-      <p className="mb-4 max-w-[70ch] text-[14px] text-ink-3">
+      <h2 className={`${T.h2} mb-1`}>The Map</h2>
+      <p className={`${T.sec} mb-4 max-w-[70ch]`}>
         {rv
           ? "Every brand the AI names beside you, biggest taker first. Open one for its numbers, what the AI says about it, what sends buyers to it, and the answers behind each."
           : `Every contest the AI decides, colored by who holds it. Open any one for what to do, then the evidence: the numbers, what the AI says about the ${ctx.cat.plural} and about the buyer, and the answers behind each.`}
@@ -803,9 +847,9 @@ function ContestMap({
             }}
             className={`rounded-full border px-3 py-1 text-[13px] ${on ? "border-[var(--color-primary)] bg-primary-soft text-ink" : "border-line text-ink-2 hover:border-ink-3"}`}
           >
-            Show my moves
+            Show my moves{mineCount > 0 ? ` (${mineCount})` : ""}
           </button>
-          {hint && mineCount === 0 && <span className="text-[12px] text-ink-3">Add a move to your playbook first.</span>}
+          {hint && mineCount === 0 && <span className={`${T.cap} text-ink-3`}>Add a move to your playbook first.</span>}
         </span>
       </div>
 
@@ -851,8 +895,8 @@ function ContestMap({
         const rows = isCh ? orderByPref(band.rows, rowSlugOf, prefs.reads) : band.rows;
         return (
           <section key={band.title} className="mt-2">
-            <h3 className="mb-0.5 text-[16px] font-semibold tracking-tight text-ink">{band.title}</h3>
-            {band.sub && <p className="mb-3 max-w-[72ch] text-[13px] text-ink-3">{band.sub}</p>}
+            <h3 className={`${T.title} mb-0.5`}>{band.title}</h3>
+            {band.sub && <p className={`${T.sec} mb-3 max-w-[72ch]`}>{band.sub}</p>}
             {prefs.layout === "dossier" ? (
               <DossierBand rows={rows} chooses={isCh} rooms={prefs.rooms} perRow={prefs.perRow} positions={map.positions} onOpen={onOpen} />
             ) : (
@@ -882,10 +926,10 @@ function RivalCard({ d, ctx }: { d: Dossier; ctx: PanelCtx }) {
       onClick={() => ctx.open({ kind: "rival", name: d.name })}
       className="flex min-w-0 flex-col gap-2.5 rounded-[14px] border border-line bg-surface p-4 text-left transition-colors hover:border-[var(--color-primary)]"
     >
-      <h3 className="text-[17px] font-semibold text-ink">{d.name}</h3>
+      <h3 className={T.title}>{d.name}</h3>
       {share && (
         <div className="flex flex-wrap items-baseline gap-2 text-[13px] text-ink-3">
-          <b className="text-[30px] font-semibold tabular-nums text-ink">{share.value}</b>
+          <b className={`${T.numSm} text-ink`}>{share.value}</b>
           share of picks{named ? ` - named in ${named.value}` : ""}
         </div>
       )}
@@ -924,8 +968,8 @@ function RivalCard({ d, ctx }: { d: Dossier; ctx: PanelCtx }) {
 }
 
 function RivalGrid({ dossiers, loading, ctx }: { dossiers: Dossier[]; loading: boolean; ctx: PanelCtx }) {
-  if (loading) return <p className="text-[13px] text-ink-3">Loading the rivals...</p>;
-  if (dossiers.length === 0) return <p className="text-[13.5px] text-ink-3">The AI names no other brand often enough to read on its own.</p>;
+  if (loading) return <p className={T.sec}>Loading the rivals...</p>;
+  if (dossiers.length === 0) return <p className={T.sec}>The AI names no other brand often enough to read on its own.</p>;
   const pc = (d: Dossier) => parseFloat((d.tiles[1]?.value ?? "0").replace(/[^0-9.]/g, "")) || 0;
   const sorted = [...dossiers].sort((a, b) => pc(b) - pc(a));
   const lead = sorted.filter((d) => d.prominent);
@@ -939,16 +983,16 @@ function RivalGrid({ dossiers, loading, ctx }: { dossiers: Dossier[]; loading: b
       </div>
       {lead.length > 0 && rest.length > 0 && (
         <div className="mt-6">
-          <h3 className="mb-1.5 text-[13px] font-semibold text-ink-3">More brands the AI names</h3>
+          <h3 className={`${T.label} mb-1.5`}>More brands the AI names</h3>
           {rest.map((d) => (
             <button
               key={d.key}
               type="button"
               onClick={() => ctx.open({ kind: "rival", name: d.name })}
-              className="flex w-full flex-wrap justify-between gap-x-3 border-b border-line py-2.5 text-left text-[14px] text-ink hover:text-primary"
+              className={`${T.body} flex w-full flex-wrap justify-between gap-x-3 border-b border-line py-2.5 text-left text-ink hover:text-primary`}
             >
               <span>{d.name}</span>
-              <span className="text-ink-3">
+              <span className="text-[13px] text-ink-3">
                 {d.tiles[1]?.value ?? "-"} of picks{d.tiles[0] ? ` - named in ${d.tiles[0].value}` : ""} {"→"}
               </span>
             </button>

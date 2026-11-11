@@ -98,22 +98,24 @@ const BRIEF_CSS = `
   /* Inter throughout, headings in the dashboard's own semibold (2026-11-10,
    * Tyler): the landing page's italic serif appears nowhere else in the app. */
   font-family: var(--font-inter), system-ui, -apple-system, sans-serif;
-  color: var(--ink); font-size: 15.5px; line-height: 1.7; max-width: 88ch;
+  color: var(--ink); font-size: 15px; line-height: 1.7; max-width: 88ch;
 }
 @media (max-width: 639px){ .pb-memo{ font-size: 15px; line-height: 1.65; } }
+/* Sizes follow the dashboard's one scale (type_scale.ts): title = hero 24px,
+ * section heads = h2 18px, body = lede 15px, tables = body 14px, meta = 12px. */
 .pb-memo .pb-num, .pb-memo table, .pb-memo .pb-score{ font-variant-numeric: lining-nums tabular-nums; }
 .pb-title{
-  font-size: 30px; line-height: 1.12; font-weight: 600; letter-spacing: -0.02em; margin: 0; text-wrap: balance;
+  font-size: 24px; line-height: 1.2; font-weight: 600; letter-spacing: -0.015em; margin: 0; text-wrap: balance;
 }
-@media (max-width: 639px){ .pb-title{ font-size: 25px; } }
-.pb-meta{ margin-top: .55rem; font-size: 12.5px; line-height: 1.5; color: var(--ink-3); }
+@media (max-width: 639px){ .pb-title{ font-size: 22px; } }
+.pb-meta{ margin-top: .55rem; font-size: 12px; line-height: 1.5; color: var(--ink-3); }
 .pb-meta span + span::before{ content: "\\00B7"; margin: 0 .5em; }
 .pb-head-rule{ margin: 1.5rem 0 0; border: 0; border-top: 1px solid var(--line); }
 .pb-section{ margin-top: 2em; }
 .pb-section:first-of-type.pb-nohead{ margin-top: 1.6em; }
 .pb-section.pb-nohead{ margin-top: 1.1em; }
 .pb-h{
-  font-size: 19px; line-height: 1.25; font-weight: 600; letter-spacing: -0.015em; margin: 0 0 .45em; color: var(--ink);
+  font-size: 18px; line-height: 1.3; font-weight: 600; letter-spacing: -0.01em; margin: 0 0 .45em; color: var(--ink);
 }
 .pb-p{ margin: 0; }
 .pb-p + .pb-p{ margin-top: .9em; }
@@ -134,24 +136,24 @@ html.pb-printing .pb-fact{ border-bottom: 0 !important; color: inherit !importan
 .pb-acard{
   margin: .55em 0 1.1em; max-width: 480px; background: var(--surface); border: 1px solid var(--line);
   border-radius: 12px; padding: 14px 18px 11px; box-shadow: 0 10px 30px rgba(16,24,40,.08);
-  font-family: var(--font-inter), system-ui, -apple-system, sans-serif; font-size: 12.5px; line-height: 1.5;
+  font-family: var(--font-inter), system-ui, -apple-system, sans-serif; font-size: 12px; line-height: 1.5;
   font-style: normal; font-weight: 400; color: var(--ink);
 }
 .pb-list .pb-acard{ grid-column: 2; }
-.pb-acard-crumb{ font-size: 10.5px; letter-spacing: .08em; text-transform: uppercase; color: var(--ink-3); margin-bottom: 6px; }
+.pb-acard-crumb{ font-size: 11px; letter-spacing: .08em; text-transform: uppercase; color: var(--ink-3); margin-bottom: 6px; }
 .pb-acard-kind{ display: inline-block; font-size: 10px; font-weight: 700; letter-spacing: .07em; border-radius: 5px; padding: 1px 6px; margin-right: 6px; vertical-align: 1px; }
 .pb-acard-kind.k-cell{ background: color-mix(in srgb, var(--primary) 13%, var(--surface)); color: var(--primary); }
 .pb-acard-kind.k-brand{ background: color-mix(in srgb, #047857 13%, var(--surface)); color: color-mix(in srgb, #059669 80%, var(--ink)); }
 .pb-acard-kind.k-engines{ background: color-mix(in srgb, #6d28d9 13%, var(--surface)); color: color-mix(in srgb, #7c3aed 80%, var(--ink)); }
 .pb-acard-kind.k-condition{ background: color-mix(in srgb, #be185d 13%, var(--surface)); color: color-mix(in srgb, #db2777 80%, var(--ink)); }
-.pb-acard-hl{ font-size: 14.5px; font-weight: 650; line-height: 1.45; margin: 0 0 10px; }
+.pb-acard-hl{ font-size: 15px; font-weight: 600; line-height: 1.45; margin: 0 0 10px; }
 .pb-acard-row{ display: flex; justify-content: space-between; gap: 16px; padding: 5px 0; border-bottom: 1px dashed var(--line); }
 .pb-acard-row .l{ color: var(--ink-2); min-width: 0; }
 .pb-acard-row .v{ text-align: right; font-variant-numeric: tabular-nums; max-width: 55%; }
 .pb-acard{ --pb-yours:#0d9488; --pb-theirs:#be185d; }
 @media (prefers-color-scheme: dark){ .pb-acard{ --pb-yours:#14a08f; --pb-theirs:#d2497e; } }
 .pb-acard-lifts{ margin-top: 12px; }
-.pb-acard-sub{ font-size: 10.5px; letter-spacing: .08em; text-transform: uppercase; color: var(--ink-3); margin-bottom: 6px; }
+.pb-acard-sub{ font-size: 11px; letter-spacing: .08em; text-transform: uppercase; color: var(--ink-3); margin-bottom: 6px; }
 .pb-lift{ display: grid; grid-template-columns: minmax(7rem,1fr) 1fr 2.6rem; align-items: center; column-gap: 10px; row-gap: 1px; padding: 3px 0; }
 .pb-lift-l{ color: var(--ink-2); min-width: 0; }
 .pb-lift-bar{ position: relative; height: 9px; }
@@ -161,16 +163,16 @@ html.pb-printing .pb-fact{ border-bottom: 0 !important; color: inherit !importan
 .pb-lift-neg{ background: var(--pb-theirs); }
 .pb-lift-v{ text-align: right; font-size: 12px; font-variant-numeric: tabular-nums; color: var(--ink-2); }
 .pb-lift-s{ grid-column: 1 / -1; font-size: 11px; color: var(--ink-3); }
-.pb-acard-go{ display: inline-block; margin-top: 10px; font-size: 12.5px; font-weight: 600; color: var(--primary); background: none; border: 0; padding: 0; cursor: pointer; }
+.pb-acard-go{ display: inline-block; margin-top: 10px; font-size: 12px; font-weight: 600; color: var(--primary); background: none; border: 0; padding: 0; cursor: pointer; }
 .pb-acard-go:hover{ text-decoration: underline; }
 .pb-lede .pb-p:first-of-type{ font-size: 1.07em; line-height: 1.66; }
 .pb-list{ list-style: none; margin: 0; padding: 0; }
 .pb-list li{ display: grid; grid-template-columns: 2.1em 1fr; align-items: baseline; }
 .pb-list li + li{ margin-top: 1.05em; }
 .pb-list .pb-num{ font-weight: 700; color: var(--ink-3); }
-.pb-table{ width: 100%; border-collapse: collapse; font-size: 15.5px; line-height: 1.45; }
+.pb-table{ width: 100%; border-collapse: collapse; font-size: 14px; line-height: 1.45; }
 .pb-table th{
-  font-family: var(--font-inter), system-ui, sans-serif; font-size: 12.5px; font-weight: 600;
+  font-family: var(--font-inter), system-ui, sans-serif; font-size: 12px; font-weight: 600;
   color: var(--ink-2); text-align: left; padding: 9px 12px; border-bottom: 1.5px solid var(--ink-3);
   background: color-mix(in srgb, var(--ink) 3.5%, var(--surface)); vertical-align: bottom;
 }
@@ -193,9 +195,9 @@ html.pb-printing .pb-fact{ border-bottom: 0 !important; color: inherit !importan
   font-family: var(--font-inter), system-ui, sans-serif; font-size: 13px; font-weight: 600;
   color: var(--ink-2); margin: 0 0 .7em; padding-bottom: .55em; border-bottom: 1px solid var(--line);
 }
-.pb-card .pb-p{ font-size: 15.5px; line-height: 1.6; }
+.pb-card .pb-p{ font-size: 14px; line-height: 1.6; }
 .pb-card .pb-p + .pb-p{ margin-top: .75em; }
-.pb-foot{ margin-top: 2.6em; padding-top: .8em; border-top: 1px solid var(--line); font-size: 13.5px; font-style: italic; color: var(--ink-3); }
+.pb-foot{ margin-top: 2.6em; padding-top: .8em; border-top: 1px solid var(--line); font-size: 13px; font-style: italic; color: var(--ink-3); }
 .pb-viz{ margin-top: .7em; break-inside: avoid; page-break-inside: avoid; }
 .pb-viz-t{ font-family: var(--font-inter), system-ui, sans-serif; font-size: 15px; line-height: 1.4; font-weight: 600; color: var(--ink); margin: 0; }
 .pb-viz-s{ font-family: var(--font-inter), system-ui, sans-serif; font-size: 12.5px; line-height: 1.45; color: var(--ink-3); margin: .2em 0 0; }
@@ -1116,64 +1118,75 @@ export default function BriefSection({
   return (
     <div className="grid gap-6">
       <style>{BRIEF_CSS}</style>
-      <div className="pb-sans flex flex-wrap items-center gap-x-4 gap-y-2">
-        <label className="flex items-center gap-1.5">
-          <span className="text-[12px] text-ink-3">Frame:</span>
-          <select className={selectCls} value={current} onChange={(e) => pickFrame(e.target.value as BriefFrame)}>
-            {BRIEF_FRAMES.map((f) => (
-              <option key={f} value={f}>
-                {BRIEF_FRAME_LABELS[f]}
-              </option>
-            ))}
-          </select>
-        </label>
-        {admin && (
-          <div role="group" aria-label="Memo version" className="flex overflow-hidden rounded-md border border-line text-[13px] font-medium">
-            {(["A", "B"] as const).map((v) => (
-              <button
-                key={v}
-                type="button"
-                aria-pressed={(version ?? "A") === v}
-                onClick={() => pickVersion(v)}
-                className={`px-2.5 py-1 transition-colors ${(version ?? "A") === v ? "bg-ink text-surface" : "bg-surface text-ink-2 hover:text-ink"} ${v === "B" ? "border-l border-line" : ""}`}
+      <div className="pb-sans flex flex-wrap items-center gap-x-4 gap-y-2.5">
+        <div role="group" aria-label="Frame" className="flex flex-wrap gap-1.5">
+          {BRIEF_FRAMES.map((f) => (
+            <button
+              key={f}
+              type="button"
+              aria-pressed={f === current}
+              onClick={() => pickFrame(f)}
+              className={`rounded-full border px-3 py-1 text-[13px] font-medium transition-colors ${
+                f === current ? "border-[var(--color-primary)] bg-primary-soft text-primary" : "border-line text-ink-2 hover:border-ink-3"
+              }`}
+            >
+              {BRIEF_FRAME_LABELS[f]}
+            </button>
+          ))}
+        </div>
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-2 sm:ml-auto">
+          {admin && (
+            <div role="group" aria-label="Memo version" className="flex overflow-hidden rounded-md border border-line text-[13px] font-medium">
+              {(["A", "B"] as const).map((v) => (
+                <button
+                  key={v}
+                  type="button"
+                  aria-pressed={(version ?? "A") === v}
+                  onClick={() => pickVersion(v)}
+                  className={`px-2.5 py-1 transition-colors ${(version ?? "A") === v ? "bg-ink text-surface" : "bg-surface text-ink-2 hover:text-ink"} ${v === "B" ? "border-l border-line" : ""}`}
+                >
+                  {v === "A" ? "A - Composed" : "B - Written"}
+                </button>
+              ))}
+            </div>
+          )}
+          {view.subjects.length > 1 && (
+            <label className="flex items-center gap-1.5">
+              <span className="text-[13px] text-ink-3">About</span>
+              <select
+                className={selectCls}
+                value={view.subject}
+                disabled={loading}
+                onChange={(e) => pickSubject(e.target.value)}
               >
-                {v === "A" ? "A - Composed" : "B - Written"}
-              </button>
-            ))}
+                {view.subjects.map((s) => (
+                  <option key={s} value={s}>
+                    {s}
+                  </option>
+                ))}
+              </select>
+            </label>
+          )}
+          <button
+            type="button"
+            disabled={!memo || loading || writing}
+            onClick={() => memoRef.current && memo && printMemo(memoRef.current, memo.title)}
+            className="rounded-lg border border-line bg-surface px-3 py-1 text-[13px] font-medium text-ink transition-colors hover:border-ink-3 disabled:opacity-50"
+          >
+            Download PDF
+          </button>
+        </div>
+        {(loading || writing || (error && view)) && (
+          <div className="flex w-full flex-wrap gap-3">
+            {loading && <span className="text-[12px] text-ink-3">Updating...</span>}
+            {writing && (
+              <span className="text-[12px] italic text-ink-3">
+                {admin ? "Writing this memo from the measured facts..." : "Preparing this memo..."}
+              </span>
+            )}
+            {error && view && <span className="text-[12px] text-danger">{error}</span>}
           </div>
         )}
-        {view.subjects.length > 1 && (
-          <label className="flex items-center gap-1.5">
-            <span className="text-[12px] text-ink-3">Brand:</span>
-            <select
-              className={selectCls}
-              value={view.subject}
-              disabled={loading}
-              onChange={(e) => pickSubject(e.target.value)}
-            >
-              {view.subjects.map((s) => (
-                <option key={s} value={s}>
-                  {s}
-                </option>
-              ))}
-            </select>
-          </label>
-        )}
-        <button
-          type="button"
-          disabled={!memo || loading || writing}
-          onClick={() => memoRef.current && memo && printMemo(memoRef.current, memo.title)}
-          className="rounded-full border border-line px-3 py-1 text-[13px] font-medium text-ink-2 transition-colors hover:border-ink-3 disabled:opacity-50"
-        >
-          Download PDF
-        </button>
-        {loading && <span className="text-[12px] text-ink-3">Updating...</span>}
-        {writing && (
-          <span className="text-[12px] italic text-ink-3">
-            {admin ? "Writing this memo from the measured facts..." : "Preparing this memo..."}
-          </span>
-        )}
-        {error && view && <span className="text-[12px] text-danger">{error}</span>}
       </div>
 
       <div ref={memoRef} className={loading ? "opacity-50 transition-opacity" : "transition-opacity"}>

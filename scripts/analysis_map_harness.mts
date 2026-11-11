@@ -43,6 +43,43 @@ const BANNED: [string, RegExp][] = [
   ["travels with", /\btravels? with\b/i],
   ["closest contest", /\bclosest contest\b/i],
 ];
+/* am17: a finding card's bar labels - no method vocabulary, no counts. */
+const VIZ_BANNED: [string, RegExp][] = [
+  ...BANNED,
+  ["open-choice", /\bopen[- ]choice\b/i],
+  ["cell", /\bcells?\b/i],
+  ["decided", /\bdecided\b/i],
+  ["lift", /\blifts?\b/i],
+  ["count", /\b\d+ of \d+\b/],
+];
+const phraseMemo = new Map<unknown, string[]>();
+function phrasesFor(data: ViewData): string[] {
+  const hit = phraseMemo.get(data);
+  if (hit) return hit;
+  const out = new Set<string>();
+  const add = (x: unknown) => { if (typeof x === "string" && x.trim().length >= 3) out.add(x.trim().toLowerCase()); };
+  for (const it of data.intents) { add(it.concern); add(it.situation); add(it.angle); }
+  for (const e of data.dictionary) { add(e.canonical); add(e.display_name); }
+  for (const c of data.codes) { for (const x of c.reasons ?? []) add(x); for (const r of c.decision_rules ?? []) add(r.condition.trim()); }
+  const list = [...out].sort((a, b) => b.length - a.length);
+  phraseMemo.set(data, list);
+  return list;
+}
+/** A bar label with its quoted data (rooms, worries, brands, conditions - whole or truncated with "...") removed. */
+function vizLabelTemplate(label: string, phrases: string[]): string {
+  let x = label.toLowerCase();
+  const stem = x.replace(/\.\.\.$/, "").trim();
+  for (const d of phrases) {
+    if (x.includes(d)) x = x.split(d).join(" ");
+    else if (stem.length >= 8 && d.startsWith(stem)) x = x.replace(stem, " ");
+    else {
+      // "Your picks from <room...>": the data is the label's tail.
+      const i = stem.length >= 8 ? [...Array(stem.length).keys()].find((k) => k > 0 && stem[k - 1] === " " && stem.length - k >= 8 && d.startsWith(stem.slice(k))) : undefined;
+      if (i !== undefined) x = x.replace(stem.slice(i), " ");
+    }
+  }
+  return x;
+}
 /** Keys whose values are data or plumbing, never template text. */
 const SKIP_KEYS = new Set(["responseId", "find", "quote", "cellId", "id", "key", "cell", "cells", "anchors", "at", "subject", "subjects"]);
 function bannedIn(root: unknown, data: string[], where: string, out: string[]) {
@@ -161,6 +198,21 @@ for (const project of projects) {
   for (const t of view.tensions) {
     if (!seen.has(t.cellId)) failures.push(`${project.brand}: tension points at unknown cell ${t.cellId}`);
     console.log(`  * ${t.title}  [-> ${t.cellId}]\n    ${t.body}`);
+    /* am17: the finding card's small chart. */
+    if (t.viz) {
+      const v = t.viz;
+      if (v.length < 2 || v.length > 4) failures.push(`${project.brand}: tension "${t.title}" viz has ${v.length} rows`);
+      if (v.filter((r) => r.hi).length > 1) failures.push(`${project.brand}: tension "${t.title}" viz has more than one hi`);
+      for (const r of v) {
+        if (!(r.value >= 0 && r.value <= 100)) failures.push(`${project.brand}: tension "${t.title}" viz value ${r.value} outside 0-100`);
+        const plain = /^<?\d+(\.\d)?%$/.test(r.text);
+        if (!plain && !t.title.includes(r.text) && !t.body.includes(r.text)) failures.push(`${project.brand}: tension "${t.title}" viz text ${r.text} is neither in the sentence nor a percentage`);
+        if (!r.label.trim()) failures.push(`${project.brand}: tension "${t.title}" viz row with an empty label`);
+        const lab = vizLabelTemplate(r.label, phrasesFor(data));
+        for (const [name, re] of VIZ_BANNED) if (re.test(lab)) failures.push(`${project.brand}: tension "${t.title}" viz label "${r.label}" uses "${name}"`);
+      }
+      for (const r of v) console.log(`      ${r.hi ? ">" : " "} ${r.label.padEnd(46)} ${String(r.value).padStart(5)}  ${r.text}`);
+    } else console.log(`      (no viz)`);
   }
   if (view.tensions.length < 3 || view.tensions.length > 5) failures.push(`${project.brand}: ${view.tensions.length} tensions`);
 

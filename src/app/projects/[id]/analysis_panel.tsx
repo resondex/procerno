@@ -28,6 +28,7 @@ import EvidencePanel, { EVIDENCE_CAP, type EvidenceRequest } from "./evidence_pa
 import RulesSection from "./rules_view";
 import { AnswersModal, Fig, plainQuote, type AnswersTarget } from "./view_parts";
 import { passageOf } from "@/lib/answer_passage";
+import { T } from "./type_scale";
 
 /**
  * The one slide-over (2026-11-10, the ratified analysis redesign -
@@ -134,19 +135,19 @@ function useBodies(ids: string[]): Bodies | null {
 function Passages({ refs }: { refs: AnswerRef[] }) {
   const b = useBodies(refs.map((r) => r.responseId));
   if (refs.length === 0) return null;
-  if (b?.blocked) return <p className="py-1 text-[12.5px] text-ink-3">The answers behind this are switched off for this tracker.</p>;
+  if (b?.blocked) return <p className="py-1 text-[12px] text-ink-3">The answers behind this are switched off for this tracker.</p>;
   return (
     <div className="mt-1.5 grid gap-3 pb-2">
       {refs.map((r, i) => {
         const body = b?.get(r.responseId);
-        if (!body) return <p key={`${r.responseId}${i}`} className="text-[12.5px] text-ink-3">Loading the answer...</p>;
+        if (!body) return <p key={`${r.responseId}${i}`} className="text-[12px] text-ink-3">Loading the answer...</p>;
         const p = passageOf(body.text, r.find);
         return (
           <div key={`${r.responseId}${i}`} className="border-l-2 border-line pl-2.5 text-[13px] leading-relaxed text-ink-2">
             {p.before}
             <mark className="rounded-[3px] bg-primary-soft px-0.5 text-ink">{p.hit}</mark>
             {p.after}
-            <span className="mt-1 block text-[11.5px] text-ink-3">
+            <span className="mt-1 block text-[12px] text-ink-3">
               {body.engine}
               {body.promptText ? ` - asked: "${body.promptText}"` : ""}
             </span>
@@ -180,7 +181,7 @@ function Proof({ receipts, onFull }: { receipts: PositionReceipt[]; onFull?: (id
       {(rest.length > 0 || onFull) && (
         <div className="mt-1.5 flex flex-wrap items-baseline gap-x-4">
           {rest.length > 0 && (
-            <button type="button" onClick={() => setMore((m) => !m)} aria-expanded={more} className="text-[12.5px] text-primary hover:opacity-80">
+            <button type="button" onClick={() => setMore((m) => !m)} aria-expanded={more} className="text-[12px] text-primary hover:opacity-80">
               {more ? "Hide the other answers" : "See more answers behind this"}
             </button>
           )}
@@ -188,7 +189,7 @@ function Proof({ receipts, onFull }: { receipts: PositionReceipt[]; onFull?: (id
             <button
               type="button"
               onClick={() => onFull(receipts.map((r) => r.responseId), quoted.map((r) => r.quote as string))}
-              className="text-[12.5px] text-ink-3 hover:text-ink-2"
+              className="text-[12px] text-ink-3 hover:text-ink-2"
             >
               Read the full answers {"→"}
             </button>
@@ -207,7 +208,7 @@ function Sec({ title, teaser, children, id }: { title: string; teaser: string; c
   return (
     <div id={id} className="scroll-mt-4 border-t border-line last:border-b">
       <button type="button" onClick={() => setOpen((o) => !o)} aria-expanded={open} className="grid w-full grid-cols-[minmax(0,1fr)_14px] items-center gap-x-2.5 py-3 text-left">
-        <span className="text-[14.5px] font-semibold text-ink">{title}</span>
+        <span className={T.title}>{title}</span>
         <span aria-hidden className={`row-span-2 text-[11px] text-ink-3 transition-transform ${open ? "rotate-180" : ""}`}>
           ▾
         </span>
@@ -218,8 +219,8 @@ function Sec({ title, teaser, children, id }: { title: string; teaser: string; c
   );
 }
 
-const Hint = ({ children }: { children: ReactNode }) => <p className="mb-2 text-[12.5px] leading-snug text-ink-3">{children}</p>;
-const None = ({ children }: { children: ReactNode }) => <p className="text-[13.5px] leading-relaxed text-ink-3">{children}</p>;
+const Hint = ({ children }: { children: ReactNode }) => <p className={`${T.cap} mb-2 text-ink-3`}>{children}</p>;
+const None = ({ children }: { children: ReactNode }) => <p className={`${T.body} text-ink-3`}>{children}</p>;
 
 /** A row that opens its answer passages in place (when it carries any). */
 function Openable({ refs, head, extra }: { refs?: AnswerRef[]; head: (open: boolean) => ReactNode; extra?: ReactNode }) {
@@ -270,7 +271,7 @@ function CondRows({ rows, color }: { rows: CondRowData[]; color: string }) {
         <Openable
           key={`${i}:${r.label}`}
           refs={r.receipts}
-          extra={r.members && r.members.length > 1 ? <p className="mb-1 text-[12.5px] text-ink-3">Includes: {r.members.join(" - ")}</p> : null}
+          extra={r.members && r.members.length > 1 ? <p className="mb-1 text-[12px] text-ink-3">Includes: {r.members.join(" - ")}</p> : null}
           head={(open) => (
             <span className="grid grid-cols-[minmax(0,1fr)_2.75rem] items-baseline gap-x-2 gap-y-1 text-[14px]" title={r.tip}>
               <span className="min-w-0 text-ink">
@@ -278,7 +279,7 @@ function CondRows({ rows, color }: { rows: CondRowData[]; color: string }) {
                 {r.wall && (
                   <span
                     title="A fact about the buyer, not a preference - it cannot be argued away"
-                    className="ml-1.5 rounded-[4px] border border-ink-3 px-1 align-[1px] text-[10px] uppercase tracking-wide text-ink-3"
+                    className="ml-1.5 rounded-[4px] border border-ink-3 px-1 align-[1px] text-[11px] font-semibold uppercase tracking-[0.04em] text-ink-3"
                   >
                     fixed
                   </span>
@@ -436,9 +437,9 @@ function PanelShell({ label, onClose, children }: { label: string; onClose: () =
   );
 }
 
-const crumbCls = "flex flex-wrap items-center gap-2 text-[12px] font-semibold uppercase tracking-[0.04em] text-ink-3";
-const h2Cls = "clear-both mt-2.5 text-[19px] font-semibold leading-snug tracking-tight text-ink [text-wrap:balance]";
-const evh = "mb-2 mt-7 text-[11px] font-semibold uppercase tracking-[0.08em] text-ink-3";
+const crumbCls = `flex flex-wrap items-center gap-2 ${T.label}`;
+const h2Cls = `clear-both mt-2.5 ${T.h2} [text-wrap:balance]`;
+const evh = `mb-2 mt-7 ${T.label}`;
 const linkCls = "text-primary underline underline-offset-2 hover:opacity-80";
 const rowLink = "flex w-full justify-between gap-3 border-b border-line py-2.5 text-left text-[14px] text-ink hover:text-primary";
 
@@ -522,19 +523,19 @@ function MoveBox({ p, ctx, why }: { p: Position; ctx: Ctx; why: string[] }) {
   };
   return (
     <div className="mt-4 rounded-xl bg-primary-soft px-4 py-3.5">
-      <div className="mb-1 text-[11px] font-semibold uppercase tracking-[0.06em] text-primary">What to do - {p.family}</div>
+      <div className={`${T.labelAccent} mb-1`}>What to do - {p.family}</div>
       {why.map((s) => (
-        <p key={s} className="mb-2 text-[13.5px] leading-relaxed text-ink-2">
+        <p key={s} className="mb-2 text-[13px] leading-relaxed text-ink-2">
           {s}
         </p>
       ))}
-      <p className="mb-2.5 text-[15px] leading-relaxed text-ink">{p.lever}</p>
+      <p className={`${T.lede} mb-2.5`}>{p.lever}</p>
       <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
         {ctx.editable &&
           (inPlaybook ? (
             <>
               <span className="rounded-lg border border-line bg-surface px-3 py-1 text-[13px] font-medium text-ink">In your playbook</span>
-              <button type="button" disabled={busy} onClick={() => void run({ cellId: p.cellId, suggested: p.triageSuggested, inPlaybook: false })} className="text-[12.5px] text-ink-3 hover:text-ink disabled:opacity-60">
+              <button type="button" disabled={busy} onClick={() => void run({ cellId: p.cellId, suggested: p.triageSuggested, inPlaybook: false })} className="text-[12px] text-ink-3 hover:text-ink disabled:opacity-60">
                 Remove
               </button>
             </>
@@ -548,7 +549,7 @@ function MoveBox({ p, ctx, why }: { p: Position; ctx: Ctx; why: string[] }) {
               Add to playbook
             </button>
           ))}
-        <button type="button" onClick={() => setChange((c) => !c)} aria-expanded={change} className="text-[12.5px] text-ink-3 hover:text-ink-2">
+        <button type="button" onClick={() => setChange((c) => !c)} aria-expanded={change} className="text-[12px] text-ink-3 hover:text-ink-2">
           {ctx.editable ? "Not the right move? Change it" : "Why this move"} {change ? "▴" : "▾"}
         </button>
       </div>
@@ -661,7 +662,7 @@ function ContestPanel({ p, ctx }: { p: Position; ctx: Ctx }) {
         <span>{p.where}</span>
       </div>
       <h2 className={h2Cls}>{p.claim}</h2>
-      {soft && <p className="clear-both mt-3 border-l-[3px] pl-2.5 text-[13.5px] text-ink" style={{ borderColor: "var(--pa-contested)" }}>{soft}</p>}
+      {soft && <p className="clear-both mt-3 border-l-[3px] pl-2.5 text-[13px] text-ink" style={{ borderColor: "var(--pa-contested)" }}>{soft}</p>}
       <Proof
         receipts={p.receipts}
         onFull={(ids, quotes) => setEvidence({ title: p.claim, subtitle: p.where, ids: ids.slice(0, EVIDENCE_CAP), total: ids.length, highlight: quotes })}
@@ -687,7 +688,7 @@ function ContestPanel({ p, ctx }: { p: Position; ctx: Ctx }) {
               key={b.name}
               type="button"
               onClick={() => ctx.open({ kind: "rival", name: b.name, cell: p.cellId })}
-              className="grid w-full grid-cols-[minmax(0,7.5rem)_minmax(0,1fr)_2.75rem] items-center gap-2.5 border-b border-line py-1.5 text-left text-[13.5px] text-ink hover:text-primary"
+              className="grid w-full grid-cols-[minmax(0,7.5rem)_minmax(0,1fr)_2.75rem] items-center gap-2.5 border-b border-line py-1.5 text-left text-[13px] text-ink hover:text-primary"
             >
               <span className="truncate">{b.name}</span>
               <span className="h-2 overflow-hidden rounded bg-line/60">
@@ -696,7 +697,7 @@ function ContestPanel({ p, ctx }: { p: Position; ctx: Ctx }) {
               <span className="text-right tabular-nums">{b.share}</span>
             </button>
           ))}
-          <div className="grid grid-cols-[minmax(0,7.5rem)_minmax(0,1fr)_2.75rem] items-center gap-2.5 py-1.5 text-[13.5px] font-semibold text-ink">
+          <div className="grid grid-cols-[minmax(0,7.5rem)_minmax(0,1fr)_2.75rem] items-center gap-2.5 py-1.5 text-[13px] font-semibold text-ink">
             <span>You</span>
             <span className="h-2 overflow-hidden rounded bg-line/60">
               <i className="block h-full rounded" style={{ width: `${(100 * pctNum(you)) / maxW}%`, background: "var(--pa-yours)" }} />
@@ -737,7 +738,7 @@ function ContestPanel({ p, ctx }: { p: Position; ctx: Ctx }) {
 
 function ScopeChips({ name, cellId, scoped, ctx }: { name: string; cellId: string; scoped: boolean; ctx: Ctx }) {
   const p = ctx.map.positions[cellId];
-  const seg = (on: boolean) => `rounded-full px-3 py-1 text-[12.5px] ${on ? "bg-primary-soft font-semibold text-ink" : "text-ink-3 hover:text-ink-2"}`;
+  const seg = (on: boolean) => `rounded-full px-3 py-1 text-[12px] ${on ? "bg-primary-soft font-semibold text-ink" : "text-ink-3 hover:text-ink-2"}`;
   return (
     <div className="clear-both mt-3 inline-flex max-w-full flex-wrap rounded-full border border-line p-[3px]">
       <button type="button" className={seg(scoped)} onClick={() => ctx.open({ kind: "rival", name, cell: cellId })}>
@@ -786,7 +787,7 @@ function RivalScoped({ name, p, ctx }: { name: string; p: Position; ctx: Ctx }) 
       )}
       <Sec title={`What the AI says about the ${ctx.cat.plural}`} teaser="Read across all buyers">
         <None>Too few answers in one contest to read what the AI says about {name} alone.</None>
-        <p className="mt-2 text-[13.5px]">
+        <p className="mt-2 text-[13px]">
           <button type="button" className={linkCls} onClick={() => ctx.open({ kind: "rival", name, from: p.cellId })}>
             See it across all buyers
           </button>
@@ -907,7 +908,7 @@ function RivalAll({ d, from, ctx }: { d: Dossier; from?: string | null; ctx: Ctx
           </p>
         )}
         {(d.cells.h2h || d.cells.leaver) && (
-          <p className="mt-2.5 flex flex-wrap gap-x-3 text-[13.5px]">
+          <p className="mt-2.5 flex flex-wrap gap-x-3 text-[13px]">
             {d.cells.h2h && (
               <button type="button" className={linkCls} onClick={() => ctx.open({ kind: "cell", id: d.cells.h2h! })}>
                 Open the matchup
@@ -949,7 +950,7 @@ function RivalAll({ d, from, ctx }: { d: Dossier; from?: string | null; ctx: Ctx
             <Hint>{BUYER_HINT}</Hint>
             <BuyerColumns toward={back} away={to} towardTitle="Back to you when the buyer..." awayTitle={`To ${d.name} when the buyer...`} />
             {(d.routesBackDefault || d.routesDefault) && (
-              <div className="mt-2 grid gap-1 text-[12.5px] italic leading-snug text-ink-2">
+              <div className="mt-2 grid gap-1 text-[12px] italic leading-snug text-ink-2">
                 {d.routesBackDefault && <p>{d.routesBackDefault}</p>}
                 {d.routesDefault && <p>{d.routesDefault}</p>}
               </div>
@@ -1012,7 +1013,7 @@ export function SlideOver({ view, ctx }: { view: PanelView; ctx: Ctx }) {
     else
       body =
         ctx.dossiers === null ? (
-          <p className="clear-both pt-6 text-[13.5px] text-ink-3">Loading {view.name}...</p>
+          <p className="clear-both pt-6 text-[13px] text-ink-3">Loading {view.name}...</p>
         ) : (
           <>
             <div className={crumbCls}>Rival</div>

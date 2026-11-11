@@ -125,7 +125,39 @@ export interface Insight {
   look: { pill: InsightPill; station?: string; label: string };
   /** Points of 1: the gap between the two ends (for the funnel, the drop). */
   effect: number;
+  /** bs15 (2026-11-10): 2-4 small bars for the Overview's finding card - the
+   * same numbers the sentence uses, formatted the way the sentence prints
+   * them; `hi` marks the one row the finding is about. Absent when the
+   * finding has no clean numeric rows. */
+  viz?: InsightBar[];
 }
+
+/** One bar of a finding's small chart: value 0-100 (bar length), text the
+ * display string, label in plain words (no counts). */
+export interface InsightBar {
+  label: string;
+  value: number;
+  text: string;
+  hi?: true;
+}
+
+/** A bar from a share (0-1) or a rate cell; text defaults to the sentences' pct. */
+export function insightBar(label: string, x: number | RateCell, text?: string, hi = false): InsightBar {
+  const r = typeof x === "number" ? x : x.n > 0 ? x.k / x.n : 0;
+  return { label, value: Math.max(0, Math.min(100, Math.round(r * 1000) / 10)), text: text ?? pctShare(r), ...(hi ? { hi: true as const } : {}) };
+}
+const pctShare = (x: number) => (x > 0 && x < 0.005 ? "<1%" : `${Math.round(x * 100)}%`);
+/** 2-4 bars or nothing: a single bar is not a comparison. */
+function vizOf(rows: (InsightBar | null | undefined | false)[]): InsightBar[] | undefined {
+  const r = rows.filter((x): x is InsightBar => !!x).slice(0, 4);
+  return r.length >= 2 ? r : undefined;
+}
+/** Bar labels from data (rooms, worries, conditions) stay short. */
+const lbl = (t: string, n = 44) => {
+  const x = t.replace(/\s+/g, " ").trim();
+  const s = x.length <= n ? x : `${x.slice(0, n - 1).replace(/\s+\S*$/, "").replace(/[\s.,;:!?-]+$/, "")}...`;
+  return s.charAt(0).toUpperCase() + s.slice(1);
+};
 
 /** Both ends of a spread need this many decided (or judged) answers -
  * the same floor brand_summary's argument lift uses. */
@@ -434,6 +466,7 @@ function engineSpread(s: Summary): Insight | null {
     foot: `${e.hi.label}: ${counts(e.hi.decided)}. ${e.lo.label}: ${counts(e.lo.decided)}. Engines with fewer than ${MIN_BASE} decided answers are left out.`,
     look: { pill: "table", label: "Metrics - by engine" },
     effect: gap,
+    viz: vizOf([insightBar(e.hi.label, e.hi.decided), insightBar(e.lo.label, e.lo.decided)]),
   };
 }
 
@@ -467,6 +500,7 @@ function modeGap(s: Summary): Insight | null {
     foot: `Search (${search.engines} engines): ${counts(search.decided)}. Instinct (${instinct.engines} engines): ${counts(instinct.decided)}.`,
     look: { pill: "table", label: "Metrics - by mode" },
     effect: rate(hi.decided) - rate(lo.decided),
+    viz: vizOf([insightBar("With web search", search.decided), insightBar("Without web search", instinct.decided)]),
   };
 }
 
@@ -481,6 +515,7 @@ function vendorGap(s: Summary): Insight | null {
     foot: `${e.hi.key} (${e.hi.engines} engines): ${counts(e.hi.decided)}. ${e.lo.key} (${e.lo.engines} engines): ${counts(e.lo.decided)}.`,
     look: { pill: "table", label: "Metrics - by vendor" },
     effect: rate(e.hi.decided) - rate(e.lo.decided),
+    viz: vizOf([insightBar(e.hi.key, e.hi.decided), insightBar(e.lo.key, e.lo.decided)]),
   };
 }
 
@@ -495,6 +530,7 @@ function roomWin(inp: InsightInputs): Insight | null {
     foot: `${e.hi.room}: ${counts(e.hi.decided)}. ${e.lo.room}: ${counts(e.lo.decided)}. Open-choice questions asked for each buyer; rooms under ${MIN_BASE} decided answers left out.`,
     look: { pill: "buyers", label: "Buyers" },
     effect: rate(e.hi.decided) - rate(e.lo.decided),
+    viz: vizOf([insightBar(lbl(e.hi.room), e.hi.decided), insightBar(lbl(e.lo.room), e.lo.decided)]),
   };
 }
 
@@ -510,6 +546,7 @@ function roomValue(inp: InsightInputs, brand: string): Insight | null {
     foot: `${e.hi.label}: ${counts(e.hi.worth.yes)}. ${e.lo.label}: ${counts(e.lo.worth.yes)}.`,
     look: { pill: "stations", station: "value", label: "Stations - Value" },
     effect: rate(e.hi.worth.yes) - rate(e.lo.worth.yes),
+    viz: vizOf([insightBar(lbl(e.hi.label), e.hi.worth.yes), insightBar(lbl(e.lo.label), e.lo.worth.yes)]),
   };
 }
 
@@ -526,6 +563,7 @@ function rivalOpen(s: Summary): Insight | null {
     foot: `${top.chosen.k} picks to your ${s.target.chosen.k}, of ${s.firmPickInCategory.k} decided open-choice answers.`,
     look: { pill: "rivals", label: "Rivals" },
     effect: Math.abs(rate(top.shareOfDecided) - rate(s.target.shareOfDecided)),
+    viz: vizOf([insightBar(top.name, top.shareOfDecided), insightBar(s.brand, s.target.shareOfDecided, undefined, true)]),
   };
 }
 
@@ -545,6 +583,7 @@ function rivalHeadToHead(s: Summary): Insight | null {
       foot: `${foot(worst)}. Matchups under ${MIN_BASE} decided answers left out.`,
       look: { pill: "rivals", label: "Rivals - head-to-head" },
       effect: Math.abs(rate(worst.winOfDecided) - 0.5),
+      viz: h2hBars(ok, worst.key),
     };
   }
   return {
@@ -555,7 +594,18 @@ function rivalHeadToHead(s: Summary): Insight | null {
     foot: `${foot(worst)}. ${foot(closest)}. Matchups under ${MIN_BASE} decided answers left out.`,
     look: { pill: "rivals", label: "Rivals - head-to-head" },
     effect: Math.abs(rate(closest.winOfDecided) - rate(worst.winOfDecided)),
+    viz: h2hBars(ok, worst.key, closest.key),
   };
+}
+
+/** One bar per named rival's direct-matchup record, the hardest first and
+ * marked; the best matchup always kept; at most four. */
+function h2hBars(ok: Summary["headToHead"], hardest: string, keep?: string): InsightBar[] | undefined {
+  const asc = [...ok].sort((a, b) => rate(a.winOfDecided) - rate(b.winOfDecided) || a.rival.localeCompare(b.rival));
+  let rows = asc.slice(0, 4);
+  const best = keep ? asc.find((r) => r.key === keep) : undefined;
+  if (best && !rows.includes(best)) rows = [...rows.slice(0, 3), best];
+  return vizOf(rows.map((r) => insightBar(`vs ${r.rival}`, r.winOfDecided, undefined, r.key === hardest)));
 }
 
 function argument(s: Summary): Insight | null {
@@ -570,6 +620,7 @@ function argument(s: Summary): Insight | null {
     foot: `${best.code}: ${pct(best.wins)} of ${best.wins.n} wins vs ${pct(best.others)} of ${best.others.n} rival picks. ${worst.code}: ${pct(worst.wins)} vs ${pct(worst.others)}.`,
     look: { pill: "why", label: "Why" },
     effect: best.lift - worst.lift,
+    viz: vizOf([insightBar("In your picks", best.wins, undefined, true), insightBar("In rivals' picks", best.others)]),
   };
 }
 
@@ -604,6 +655,12 @@ function doubtRollup(s: Summary): Insight | null {
     foot,
     look: { pill: "stations", station: b ? "doubts" : "customer_base", label: b ? "Stations - Doubts" : "Stations - Customers" },
     effect,
+    viz: vizOf([
+      b && insightBar("Buyers told to go ahead", b.proceed),
+      b && insightBar("Agrees with buyers' worries", b.agree),
+      c && insightBar("Customers told to stay", c.keep),
+      c && insightBar("Customers told to leave", c.leave),
+    ]),
   };
 }
 
@@ -628,6 +685,10 @@ function doubtWorry(inp: InsightInputs): Insight | null {
     foot: `${top.row.concern}: ${counts(top.row.premise.confirms)}. All ${top.who} worries: ${counts(top.pool)}. Worries under ${MIN_BASE} judged answers left out.`,
     look: { pill: "stations", station: top.who === "buyer" ? "doubts" : "customer_base", label: top.who === "buyer" ? "Stations - Doubts" : "Stations - Customers" },
     effect: gap,
+    viz: vizOf([
+      insightBar(lbl(top.row.concern), top.row.premise.confirms, undefined, true),
+      insightBar(`All ${top.who}s' worries`, top.pool),
+    ]),
   };
 }
 
@@ -651,6 +712,11 @@ function funnelDrop(s: Summary): Insight | null {
     foot: `Named ${counts(s.target.mentioned)}; recommended ${counts(s.target.recommended)}; picked ${counts(s.target.chosen)}.`,
     look: { pill: "stations", station: "consideration", label: "Stations - Consideration" },
     effect: drop,
+    viz: vizOf([
+      insightBar("Named", named),
+      insightBar("Recommended", rec, undefined, worst.to === "recommended"),
+      insightBar("Picked", picked, pctFine(picked), worst.to === "picked"),
+    ]),
   };
 }
 
@@ -685,6 +751,11 @@ function promptedVsOpen(s: Summary): Insight | null {
     foot: `Head-to-heads: won ${rec.won}, lost ${rec.lost} - ${counts(rec.pooled)}${hard ? `; vs ${hard.rival} ${counts(hard.winOfDecided)}` : ""}. Open choice: ${counts(open)}.`,
     look: { pill: "stations", station: "comparison", label: "Stations - Comparison" },
     effect: Math.abs(gap),
+    viz: vizOf([
+      insightBar("Direct matchups won", rec.pooled),
+      insightBar("Share of picks when buyers ask", open, undefined, true),
+      hard && insightBar(`Against ${hard.rival}`, hard.winOfDecided),
+    ]),
   };
 }
 
@@ -710,6 +781,11 @@ function pickConcentrationRoom(s: Summary, inp: InsightInputs): Insight | null {
     foot: `${c.top.picks} of ${c.total} picks from ${c.top.room} (one of ${c.rooms} rooms). Inside: ${counts(c.top.decided)}. Outside: ${counts(c.outside)}.`,
     look: { pill: "buyers", label: "Buyers" },
     effect: c.share - 1 / c.rooms,
+    viz: vizOf([
+      insightBar(`Your picks from ${lbl(c.top.room, 32)}`, c.share, undefined, true),
+      insightBar(`Share of picks there`, c.top.decided),
+      insightBar("Share of picks elsewhere", c.outside),
+    ]),
   };
 }
 
@@ -749,6 +825,10 @@ function pickConcentrationQuestion(s: Summary, inp: InsightInputs): Insight | nu
     foot: `${c.k} of ${c.total} picks of ${best.who} from this question (one of ${c.n} open-choice questions, ${c.top.answers} answers, a seed and its paraphrases pooled).`,
     look: { pill: "stations", station: "consideration", label: "Stations - Consideration" },
     effect: c.share - 1 / c.n,
+    viz: vizOf([
+      insightBar("Picks from this question", c.share, undefined, true),
+      insightBar("If spread evenly", 1 / c.n),
+    ]),
   };
 }
 
@@ -770,6 +850,10 @@ function agreedYetStay(inp: InsightInputs): Insight | null {
     foot: `Agrees: ${counts(best.confirmed)}. Of those, ${best.verb}: ${counts(best.given)}.`,
     look: { pill: "stations", station: best.who === "buyer" ? "doubts" : "customer_base", label: best.who === "buyer" ? "Stations - Doubts" : "Stations - Customers" },
     effect: rate(best.confirmed) * rate(best.given),
+    viz: vizOf([
+      insightBar("Agrees the worry is warranted", best.confirmed),
+      insightBar(`Still told to ${best.verb}`, best.given, undefined, true),
+    ]),
   };
 }
 
@@ -806,6 +890,15 @@ function taughtVsWinning(s: Summary, inp: InsightInputs): Insight | null {
     foot: `${foot.join(" ")} Top five taught: ${top5.map((t) => t.code).join(", ")}.`,
     look: { pill: "why", label: "Why" },
     effect,
+    viz: (() => {
+      const x = untaught ?? losing!;
+      const tr = taughtOf(x.code);
+      return vizOf([
+        insightBar("In your picks", x.wins, undefined, true),
+        insightBar("In rivals' picks", x.others),
+        tr && insightBar("In what the AI teaches buyers", tr),
+      ]);
+    })(),
   };
 }
 
@@ -828,6 +921,7 @@ function valueInHouse(inp: InsightInputs, brand: string): Insight | null {
     foot: `Of answers saying no or it depends: own option ${counts(v.ownRung)}; a rival ${counts(v.recommendsInstead)}.${top ? ` ${top.name}: ${top.n}.` : ""}`,
     look: { pill: "stations", station: "value", label: "Stations - Value" },
     effect: Math.abs(own - riv),
+    viz: vizOf([insightBar("Your own cheaper option", own, undefined, inHouse), insightBar("A rival", riv, undefined, !inHouse)]),
   };
 }
 
@@ -848,6 +942,7 @@ function advocacyVsObjection(inp: InsightInputs): Insight | null {
     foot: `Advocacy: ${counts(defend)}. Buyers' worries agreed: ${counts(confirms)}.`,
     look: { pill: "stations", station: "customer_base", label: "Stations - Customers" },
     effect: Math.min(rate(defend), rate(confirms)) - 0.5,
+    viz: vizOf([insightBar("Makes the case when asked", defend), insightBar("Agrees with buyers' worries", confirms)]),
   };
 }
 
@@ -879,6 +974,11 @@ function leaverCapture(inp: InsightInputs): Insight | null {
       foot: `Picked ${counts(t.captured)}; of the switching customers' picks ${counts(you.shareOfDecided)}.${second ? ` Next: ${second.name}, ${second.chosen.k}.` : ""}${src ? ` Leaving ${src.rival}: ${counts(src.captured)}.` : ""}`,
       look: { pill: "stations", station: "comparison", label: "Stations - Comparison" },
       effect: rate(you.shareOfDecided) - 1 / takers.length,
+      viz: vizOf([
+        insightBar("Picked", t.captured),
+        insightBar("Share of the picks", you.shareOfDecided, undefined, true),
+        src && insightBar(`Leaving ${src.rival}`, src.captured),
+      ]),
     };
   }
   // Tension: leavers hear about you and are almost never told to take you.
@@ -892,6 +992,7 @@ function leaverCapture(inp: InsightInputs): Insight | null {
       foot: `Named ${counts(t.named)}; recommended ${counts(t.recommended)}; picked ${counts(t.captured)}.${other ? ` ${other.name}: ${other.chosen.k} of ${other.shareOfDecided.n} decided.` : ""}`,
       look: { pill: "stations", station: "comparison", label: "Stations - Comparison" },
       effect: rate(t.named) - rate(t.captured),
+      viz: vizOf([insightBar("Named", t.named), insightBar("Recommended", t.recommended), insightBar("Picked", t.captured, undefined, true)]),
     };
   }
   return null;
@@ -921,6 +1022,7 @@ function ownDefense(inp: InsightInputs): Insight | null {
     look: { pill: "stations", station: "customer_base", label: "Stations - Customers" },
     // One rival as the default exit, held down by how often the AI still says stay.
     effect: Math.min(rate(top.offered), 1 - rate(keep)) - 0.5,
+    viz: vizOf([insightBar("Told to stay", keep, undefined, true), ...tied.map((x) => insightBar(`${x.name} shown`, x.offered))]),
   };
 }
 
@@ -968,6 +1070,7 @@ function awayCondition(s: Summary, inp: InsightInputs): Insight | null {
     foot: `At least ${g.rules} rules in ${g.answers} answers across ${g.cells} of ${a.cells} questions where the AI gives a condition that sends buyers away${to ? `; to ${to.name} ${to.n}` : ""}.${blockerFoot}${wallFoot} Counts are lower bounds: ${a.grouping === "stems" ? "conditions are grouped by their words, and" : ""} wordings the grouping did not join are left out.`,
     look: { pill: "why", label: "Why - decision rules" },
     effect: spread,
+    viz: vizOf(a.groups.map((x, i) => insightBar(lbl(x.label, 40), x.cells / a.cells, undefined, i === 0))),
   };
 }
 
@@ -1005,6 +1108,7 @@ function engineDecisiveness(s: Summary): Insight | null {
     foot: `Search (${se.engines} engines): firm pick ${counts(se.firm)}, yours ${counts(se.decided)}. Instinct (${ins.engines} engines): firm pick ${counts(ins.firm)}, yours ${counts(ins.decided)}.`,
     look: { pill: "table", label: "Metrics - by mode" },
     effect: rate(hi.firm) - rate(lo.firm),
+    viz: vizOf([insightBar(hiName.charAt(0).toUpperCase() + hiName.slice(1), hi.firm), insightBar(loName.charAt(0).toUpperCase() + loName.slice(1), lo.firm)]),
   };
 }
 
@@ -1029,6 +1133,12 @@ function engineHeadToHeadFlip(s: Summary): Insight | null {
     foot: `Head-to-heads: search ${counts(se.h2h)}, instinct ${counts(ins.h2h)}. Open choice: search ${counts(se.decided)}, instinct ${counts(ins.decided)}.`,
     look: { pill: "table", label: "Metrics - by mode" },
     effect: Math.abs(h2hGap),
+    viz: vizOf([
+      insightBar("Matchups, with web search", se.h2h),
+      insightBar("Matchups, without web search", ins.h2h),
+      insightBar("Picks, with web search", se.decided),
+      insightBar("Picks, without web search", ins.decided),
+    ]),
   };
 }
 
@@ -1084,6 +1194,7 @@ function enginePickConcentration(s: Summary, inp: InsightInputs): Insight | null
     foot: `${best.picks.k} of ${best.picks.n} open-choice picks of ${best.name} (95% range ${Math.round(best.picks.low * 100)}-${Math.round(best.picks.high * 100)}%) from ${unit}, which answer ${best.unit.answers} of ${s.answers} open-choice questions.`,
     look: { pill: "table", label: best.unit.vendor ? "Metrics - by vendor" : "Metrics - by engine" },
     effect: rate(best.picks) - best.base,
+    viz: vizOf([insightBar(`Picks from ${best.unit.label}`, best.picks, undefined, true), insightBar("Questions it answers", best.base)]),
   };
 }
 
@@ -1127,6 +1238,7 @@ function neutralizedDifferentiator(inp: InsightInputs): Insight | null {
     foot: `In wins: ${counts(best.w)}. In losses: ${counts(best.l)}${rival ? `; ${rivalLosses} of those losses to ${rival}` : ""}. Prompted head-to-heads against every named rival, pooled; arguments in under ${Math.round(ND_WIN_SHARE * 100)}% of wins left out.`,
     look: { pill: "stations", station: "comparison", label: "Stations - Comparison" },
     effect: rate(best.l) - rate(best.w),
+    viz: vizOf([insightBar("In matchups you win", best.w), insightBar("In matchups you lose", best.l, undefined, true)]),
   };
 }
 
@@ -1156,6 +1268,7 @@ function conversionVsRival(s: Summary): Insight | null {
     foot: `${rival.name}: picked in ${counts(them)} recommending answers. You: ${counts(you)}. ${rival.name} has the largest share of decided open-choice picks among your rivals.`,
     look: { pill: "rivals", label: "Rivals" },
     effect: Math.abs(rate(them) - rate(you)),
+    viz: vizOf([insightBar(s.brand, you, undefined, true), insightBar(rival.name, them)]),
   };
 }
 
@@ -1189,6 +1302,10 @@ function leakPicks(inp: InsightInputs): Insight | null {
     foot: `${counts(outside)} firm picks outside the category${top.length ? `: ${top.map((x) => `${x.name} ${x.n}`).join(", ")}` : ""}.${room && roomCell ? ` ${room.room}: ${counts(roomCell)}.` : ""} Outside = ruled out on the dictionary board, pending, or not in it.`,
     look: { pill: "stations", station: "consideration", label: "Stations - Consideration" },
     effect: rate(outside),
+    viz: vizOf([
+      insightBar("Outside the category", outside, undefined, true),
+      roomText && roomCell ? insightBar(lbl(room!.room), roomCell) : insightBar("Inside the category", 1 - rate(outside)),
+    ]),
   };
 }
 
@@ -1220,6 +1337,9 @@ function leakProblem(inp: InsightInputs): Insight | null {
     foot: `${top.room}: ${counts(top.out)}.${rest.n > 0 ? ` Other rooms: ${counts(rest)}.` : ""} All problem-recognition answers: ${counts(p.all)}.`,
     look: { pill: "stations", station: "awareness", label: "Stations - Awareness" },
     effect: (oneRoom ? rate(top.out) : rate(p.all)) - LEAK_PROBLEM_SHARE,
+    viz: oneRoom
+      ? vizOf([insightBar(lbl(top.room), top.out, undefined, true), insightBar("Other buying situations", rest)])
+      : vizOf([insightBar("Every buying situation", p.all, undefined, true), insightBar(lbl(top.room), top.out)]),
   };
 }
 
@@ -1248,6 +1368,7 @@ function worstWorry(inp: InsightInputs): Insight | null {
     foot: `${concern}: leave ${counts(top.verdicts.leave)}. Other customers' worries: ${counts(rest)}.${exit ? ` ${exit.name}: ${exit.n} answers.` : ""}`,
     look: { pill: "stations", station: "customer_base", label: "Stations - Customers" },
     effect: rate(top.verdicts.leave) - rate(rest),
+    viz: vizOf([insightBar(lbl(concern), top.verdicts.leave, undefined, true), insightBar("Their other worries", rest)]),
   };
 }
 
@@ -1271,6 +1392,7 @@ function leaveNoExit(inp: InsightInputs, brand: string): Insight | null {
     foot: `Leave answers naming no destination: ${counts(none)}. Leave answers overall: ${counts(k.verdicts.leave)}.`,
     look: { pill: "stations", station: "customer_base", label: "Stations - Customers" },
     effect: rate(none) - NO_EXIT_SHARE,
+    viz: vizOf([insightBar("Name nowhere to go", none, undefined, true), insightBar("Name somewhere to go", withExit)]),
   };
 }
 
