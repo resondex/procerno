@@ -437,7 +437,7 @@ function PanelShell({ label, onClose, children }: { label: string; onClose: () =
 }
 
 const crumbCls = "flex flex-wrap items-center gap-2 text-[12px] font-semibold uppercase tracking-[0.04em] text-ink-3";
-const h2Cls = "clear-both mt-2.5 font-serif text-[25px] font-normal leading-[1.15] text-ink [text-wrap:balance]";
+const h2Cls = "clear-both mt-2.5 text-[19px] font-semibold leading-snug tracking-tight text-ink [text-wrap:balance]";
 const evh = "mb-2 mt-7 text-[11px] font-semibold uppercase tracking-[0.08em] text-ink-3";
 const linkCls = "text-primary underline underline-offset-2 hover:opacity-80";
 const rowLink = "flex w-full justify-between gap-3 border-b border-line py-2.5 text-left text-[14px] text-ink hover:text-primary";

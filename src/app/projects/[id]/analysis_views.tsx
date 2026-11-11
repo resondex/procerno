@@ -269,7 +269,7 @@ function Overview({
       <section className="grid items-start gap-9 md:grid-cols-[minmax(0,1.25fr)_minmax(0,1fr)]">
         <div className="min-w-0">
           <p className="mb-2 text-[11px] font-semibold uppercase tracking-[0.08em] text-ink-3">How AI assistants cast you</p>
-          <h1 className="font-serif text-[clamp(34px,5vw,46px)] font-normal leading-[1.05] text-ink [text-wrap:balance]">{map.casting.heading}</h1>
+          <h1 className="text-[clamp(26px,3.4vw,32px)] font-semibold leading-[1.1] tracking-tight text-ink [text-wrap:balance]">{map.casting.heading}</h1>
           <p className="mt-3.5 max-w-[68ch] text-[17px] leading-[1.65] text-ink">
             {map.casting.casting} {map.casting.detail}
           </p>
@@ -280,18 +280,18 @@ function Overview({
           </p>
           <div className="mt-5 flex flex-wrap gap-7">
             <div title={tipOf(named)}>
-              <b className="block font-serif text-[44px] font-normal leading-none tabular-nums text-ink">{pctOf(named)}</b>
+              <b className="block text-[36px] font-semibold leading-none tracking-tight tabular-nums text-ink">{pctOf(named)}</b>
               <span className="text-[13px] text-ink-3">named when buyers ask what to buy</span>
             </div>
             {you && (
               <div title={`${you.share.k.toLocaleString("en-US")} of ${you.share.n.toLocaleString("en-US")} picks`}>
-                <b className="block font-serif text-[44px] font-normal leading-none tabular-nums text-primary">{pctOf(you.share)}</b>
+                <b className="block text-[36px] font-semibold leading-none tracking-tight tabular-nums text-primary">{pctOf(you.share)}</b>
                 <span className="text-[13px] text-ink-3">share of picks</span>
               </div>
             )}
             {commit && (
               <div title={tipOf(commit)}>
-                <b className="block font-serif text-[44px] font-normal leading-none tabular-nums text-ink">{pctOf(commit)}</b>
+                <b className="block text-[36px] font-semibold leading-none tracking-tight tabular-nums text-ink">{pctOf(commit)}</b>
                 <span className="text-[13px] text-ink-3">of answers commit to one {ctx.cat.singular}</span>
               </div>
             )}
@@ -361,7 +361,7 @@ function Overview({
       )}
 
       <section className={sec}>
-        <h2 className="mb-1 font-serif text-[27px] font-normal leading-[1.15] text-ink">What matters this wave</h2>
+        <h2 className="mb-1 text-xl font-semibold tracking-tight text-ink">What matters this wave</h2>
         <p className="mb-4 max-w-[70ch] text-[14px] text-ink-3">
           Each finding comes with its move. Add one to your playbook and it is marked on the Map.
         </p>
@@ -710,7 +710,7 @@ function MapPage({
   const seg = (on: boolean) => `rounded-full px-4 py-1 text-[13.5px] ${on ? "bg-primary-soft font-semibold text-ink" : "text-ink-3 hover:text-ink-2"}`;
   return (
     <section className="pb-10">
-      <h2 className="mb-1 font-serif text-[27px] font-normal leading-[1.15] text-ink">The Map</h2>
+      <h2 className="mb-1 text-xl font-semibold tracking-tight text-ink">The Map</h2>
       <p className="mb-4 max-w-[70ch] text-[14px] text-ink-3">
         {rv
           ? "Every brand the AI names beside you, biggest taker first. Open one for its numbers, what the AI says about it, what sends buyers to it, and the answers behind each."
@@ -851,7 +851,7 @@ function ContestMap({
         const rows = isCh ? orderByPref(band.rows, rowSlugOf, prefs.reads) : band.rows;
         return (
           <section key={band.title} className="mt-2">
-            <h3 className="mb-0.5 font-serif text-[22px] font-normal text-ink">{band.title}</h3>
+            <h3 className="mb-0.5 text-[16px] font-semibold tracking-tight text-ink">{band.title}</h3>
             {band.sub && <p className="mb-3 max-w-[72ch] text-[13px] text-ink-3">{band.sub}</p>}
             {prefs.layout === "dossier" ? (
               <DossierBand rows={rows} chooses={isCh} rooms={prefs.rooms} perRow={prefs.perRow} positions={map.positions} onOpen={onOpen} />

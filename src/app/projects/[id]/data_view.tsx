@@ -41,7 +41,7 @@ export default function DataPage({
   return (
     <section className="grid gap-5 pb-10">
       <div>
-        <h2 className="mb-1 font-serif text-[27px] font-normal leading-[1.15] text-ink">Data</h2>
+        <h2 className="mb-1 text-xl font-semibold tracking-tight text-ink">Data</h2>
         <p className="max-w-[70ch] text-[14px] text-ink-3">
           For analysts. Every question type read on its own, and a builder for your own tables. Nothing here is needed to read the wave.
         </p>
