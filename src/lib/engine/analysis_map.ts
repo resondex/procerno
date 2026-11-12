@@ -23,6 +23,7 @@ import {
   type CastingLine,
   type CellBadge,
   type CellVerdict,
+  type BothWaysItem,
   type ConditionItem,
   type LiftItem,
   type MapBand,
@@ -177,6 +178,11 @@ const LIFT_MIN = 10;
 const LIFT_MIN_INCIDENCE = 0.05;
 const LIFT_TOP = 8;
 const COND_TOP = 6;
+/** am21 both-ways: answers needed per side, the smaller side's minimum ratio to the larger, rows shown. */
+const BOTH_MIN = 3;
+const BOTH_RATIO = 1 / 3;
+const BOTH_SHARE = 0.02; // each side at least 2% of the contest's rule-bearing answers
+const BOTH_TOP = 4;
 export const RECEIPTS = 5;
 const WALL_MIN = 5;
 const DEFAULT_MARGIN = 0.05;
@@ -328,6 +334,8 @@ function ruleCard(rule: { choice: string; product?: string }, schema: string): s
 /* ------------------------------- the compute ------------------------------ */
 
 interface Group {
+  /** am21: the condition key - shared across sides, so one reason stated both ways has one key. */
+  ck: string;
   label: string;
   n: number;
   surfaces: string[];
@@ -1373,7 +1381,7 @@ export async function computeAnalysisMap(
   const keyOf = (c: string) => condKeys.get(c) ?? conditionStemKey(c, exclude);
 
   const groupsOf = (rows: PoolRow[]) => {
-    type Acc = { n: number; surfaces: Map<string, number>; answers: Group["answers"] };
+    type Acc = { ck: string; n: number; surfaces: Map<string, number>; answers: Group["answers"] };
     const sides = { you: new Map<string, Acc>(), away: new Map<string, Acc>() };
     const mine = new Map<string, { you: Set<string>; away: Set<string> }>();
     let bearing = 0;
@@ -1401,7 +1409,7 @@ export async function computeAnalysisMap(
           continue;
         }
         seen.add(`${side}|${ck}`);
-        const acc = sides[side].get(ck) ?? { n: 0, surfaces: new Map(), answers: new Map() };
+        const acc = sides[side].get(ck) ?? { ck, n: 0, surfaces: new Map(), answers: new Map() };
         acc.n++;
         acc.surfaces.set(c, (acc.surfaces.get(c) ?? 0) + 1);
         acc.answers.set(rid, { said: c, model: r.model, to: new Set(to ? [to] : []), cards: card ? [card] : [], mixed: 0 });
@@ -1421,7 +1429,7 @@ export async function computeAnalysisMap(
         .sort((a, b) => b.n - a.n)
         .map((a) => {
           const surf = [...a.surfaces.entries()].sort((x, y) => y[1] - x[1] || x[0].length - y[0].length || (x[0] < y[0] ? -1 : 1));
-          return { label: surf[0][0], n: a.n, surfaces: surf.slice(0, 5).map(([s]) => s), answers: a.answers };
+          return { ck: a.ck, label: surf[0][0], n: a.n, surfaces: surf.slice(0, 5).map(([s]) => s), answers: a.answers };
         });
     return { toward: list(sides.you), away: list(sides.away), bearing };
   };
@@ -1434,6 +1442,39 @@ export async function computeAnalysisMap(
       ...(receipts.length ? { receipts } : {}),
       ...(routes.length ? { routes } : {}),
     };
+  };
+
+  /** am21: the conditions a contest states on both sides at similar rates -
+   * the same reason sending some buyers to you and others away. Each side
+   * needs BOTH_MIN answers and BOTH_SHARE of the contest and the smaller side at least BOTH_RATIO of the
+   * larger; ranked by answers on both sides together. */
+  const bothWaysOf = (conds: { toward: Group[]; away: Group[]; bearing: number }): BothWaysItem[] => {
+    const away = new Map(conds.away.filter((g) => !isDefaultCondition(g.label)).map((g) => [g.ck, g]));
+    // One-way answers first, and never the same answer on both sides.
+    const pick = (g: Group, skip: Set<string> = new Set()) =>
+      pickRefs([...g.answers.entries()].filter(([id]) => !skip.has(id)).map(([id, a]) => ({ id, find: a.said, model: a.model, cards: a.cards, mixed: a.mixed })), g.label);
+    return conds.toward
+      .filter((g) => !isDefaultCondition(g.label))
+      .flatMap((t) => {
+        const a = away.get(t.ck);
+        if (!a || Math.min(t.n, a.n) < Math.max(BOTH_MIN, BOTH_SHARE * conds.bearing) || Math.min(t.n, a.n) < BOTH_RATIO * Math.max(t.n, a.n)) return [];
+        return [{ t, a }];
+      })
+      .sort((x, y) => y.t.n + y.a.n - (x.t.n + x.a.n) || x.t.label.localeCompare(y.t.label))
+      .slice(0, BOTH_TOP)
+      .map(({ t, a }) => {
+        const towardRefs = pick(t);
+        const awayRefs = pick(a, new Set(towardRefs.map((r) => r.responseId)));
+        const routes = routeShares([...a.answers.values()].map((x) => [...x.to]));
+        return {
+          text: t.n >= a.n ? t.label : a.label,
+          towardShare: pctOf(t.n / conds.bearing),
+          awayShare: pctOf(a.n / conds.bearing),
+          ...(towardRefs.length ? { towardRefs } : {}),
+          ...(awayRefs.length ? { awayRefs } : {}),
+          ...(routes.length ? { routes } : {}),
+        };
+      });
   };
 
   /* -- finish each cell: verdict, badges, position -- */
@@ -1845,6 +1886,7 @@ export async function computeAnalysisMap(
         // on a side the themes do not cover (the panel draws themes when they exist).
         const toward: ConditionItem[] = conds.toward.slice(0, COND_TOP).map((g) => ({ text: g.label, n: g.n, ...conditionExtras(g, conds.bearing, false, !towardThemes) }));
         let away: ConditionItem[] = conds.away.slice(0, COND_TOP).map((g) => ({ text: g.label, n: g.n, ...(wallGroups.includes(g) ? { wall: true } : {}), ...conditionExtras(g, conds.bearing, true, !awayThemes) }));
+        const bothWays = bothWaysOf(conds);
         if (conds.bearing < 5 && away.length === 0 && s.exitFallback?.length) away = s.exitFallback.map((x) => ({ text: `Sent to ${x.name}`, n: x.n }));
 
         const numerator = verdict === "yours" ? s.you : verdict === "theirs" ? s.them : verdict === "contested" ? [...s.you, ...s.them] : s.rows;
@@ -1905,6 +1947,7 @@ export async function computeAnalysisMap(
           ...(lifts.length ? { liftSides: s.lift?.sides ?? (["your picks", "rivals' picks"] as [string, string]) } : {}),
           toward,
           away,
+          ...(bothWays.length ? { bothWays } : {}),
           ...(towardThemes ? { towardThemes } : {}),
           ...(awayThemes ? { awayThemes } : {}),
           receipts: receiptsOf(numerator.length ? numerator : s.rows),

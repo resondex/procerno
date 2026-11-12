@@ -12,6 +12,7 @@ import {
   type ArgsMode,
   type BrandRead,
   type CellVerdict,
+  type BothWaysItem,
   type ConditionItem,
   type LiftItem,
   type MapCell,
@@ -414,6 +415,41 @@ function BuyerColumns({ toward, away, towardTitle, awayTitle }: { toward: CondRo
   );
 }
 
+/** am21: conditions the AI gives on both sides at similar rates - the same
+ * reason sending some buyers to you and others away. Drawn above the two
+ * columns so a split reason never hides behind two differently named rows. */
+function BothWays({ items }: { items: BothWaysItem[] }) {
+  return (
+    <div className="mb-4 rounded-lg border border-line p-3">
+      <h5 className="text-[13px] font-semibold text-ink">Comes up on both sides</h5>
+      <p className="mt-0.5 text-[12px] text-ink-3">The AI gives these reasons for sending buyers to you and for sending them away - the reason alone does not decide it.</p>
+      <div className="mt-1.5">
+        {items.map((b) => (
+          <Openable
+            key={b.text}
+            refs={[...(b.towardRefs ?? []), ...(b.awayRefs ?? [])]}
+            title={b.text}
+            note="Some of these answers send the buyer to you, some send them away - each says where."
+            head={() => (
+              <span className="block text-[14px]">
+                <span className="text-ink">{b.text}</span>
+                <span className="mt-0.5 flex flex-wrap gap-x-3 text-[12px] tabular-nums">
+                  <span style={{ color: "var(--pa-yours)" }}>Toward you {b.towardShare}</span>
+                  <span style={{ color: "var(--pa-theirs)" }}>
+                    Away {b.awayShare}
+                    {b.routes && b.routes.length > 0 && <span className="text-ink-3">{" → "}{b.routes.slice(0, 2).map((x) => x.name).join(", ")}</span>}
+                  </span>
+                </span>
+                {(b.towardRefs?.length ?? 0) + (b.awayRefs?.length ?? 0) > 0 && <SeeWord />}
+              </span>
+            )}
+          />
+        ))}
+      </div>
+    </div>
+  );
+}
+
 const buyerTeaser = (toward: CondRowData[], away: CondRowData[]) =>
   toward.length || away.length
     ? [toward[0] && `To you: ${toward[0].label}`, away[0] && `Away: ${away[0].label}`].filter(Boolean).join(" - ")
@@ -791,6 +827,7 @@ function ContestPanel({ p, ctx }: { p: Position; ctx: Ctx }) {
         {toward.length || away.length ? (
           <>
             <Hint>{BUYER_HINT}</Hint>
+            {(p.bothWays?.length ?? 0) > 0 && <BothWays items={p.bothWays!} />}
             <BuyerColumns toward={toward} away={away} towardTitle="Toward you when the buyer..." awayTitle="Away from you when the buyer..." />
           </>
         ) : (

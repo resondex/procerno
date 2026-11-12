@@ -222,6 +222,20 @@ export interface ConditionItem {
   routes?: RouteShare[];
 }
 
+/** am21: one stated condition the AI gives in this contest on BOTH sides -
+ * sending some buyers to you and others away - at similar rates. Shares are of
+ * the contest's rule-bearing answers, like ConditionItem.share. */
+export interface BothWaysItem {
+  text: string;
+  towardShare: string;
+  awayShare: string;
+  /** Up to 2 answers per side, each with where it sends the buyer. */
+  towardRefs?: AnswerRef[];
+  awayRefs?: AnswerRef[];
+  /** The active rivals the away side sends buyers to (ConditionItem.routes rule). */
+  routes?: RouteShare[];
+}
+
 export interface Position {
   cellId: string;
   /** "Open choice · Premium traveler" - the cell's address in words. */
@@ -243,6 +257,8 @@ export interface Position {
   liftSides?: [string, string];
   toward: ConditionItem[];
   away: ConditionItem[];
+  /** am21: conditions stated on both sides at similar rates (absent when none). */
+  bothWays?: BothWaysItem[];
   /** am13 (option D): the reasons as the dossier's theme trees, scoped to
    * this cell's questions - each share is of the cell's questions where the
    * AI gives buyers any reason that way. Absent keyless, on a failed theme
