@@ -504,6 +504,10 @@ export const MAX_REGENS = 3;
 
 export interface GridState {
   step: "compose" | "cells" | "phrasings";
+  /** The roster's dictionary alias forms, as the wordings route last
+   * returned them (2026-11-12) - read only by the head-to-head name-order
+   * chip and warning, so an alias-only wording counts toward the split. */
+  aliasForms?: Record<string, string[]>;
   /** The market's base read; scenarios inherit it unless they deviate. */
   moderators: Record<string, unknown> & { rationale?: string };
   /** The base read as first offered by the fresh compose (2026-10-06) -
@@ -943,9 +947,9 @@ export interface OrderImbalance {
 /** The order reading for one head-to-head question, or null for any other
  * question, one with no kept wordings, or one whose order mostly cannot be
  * read. Shared by the card chip and the move-on warning. */
-export function headToHeadOrder(c: GridCellUi, i: number, brand: string, category?: string): (OrderImbalance & { balanced: boolean }) | null {
+export function headToHeadOrder(c: GridCellUi, i: number, brand: string, category?: string, aliasForms?: Record<string, string[]>): (OrderImbalance & { balanced: boolean }) | null {
   if (c.stage !== "comparison" || !c.text.trim()) return null;
-  const sides = orderSidesOf(c, brand);
+  const sides = orderSidesOf(c, brand, aliasForms);
   if (!sides) return null;
   const kept = c.phrasings.map((p) => p.text).filter((t) => t.trim());
   if (kept.length === 0) return null;
@@ -963,7 +967,7 @@ export function headToHeadOrder(c: GridCellUi, i: number, brand: string, categor
 export function headToHeadOrderIssues(g: GridState, brand: string, category?: string): OrderImbalance[] {
   const out: OrderImbalance[] = [];
   g.cells.forEach((c, i) => {
-    const r = headToHeadOrder(c, i, brand, category);
+    const r = headToHeadOrder(c, i, brand, category, g.aliasForms);
     if (r && !r.balanced) out.push({ i: r.i, rival: r.rival, clientFirst: r.clientFirst, rivalFirst: r.rivalFirst, total: r.total });
   });
   return out;
@@ -1817,9 +1821,10 @@ export function useGridSetup(a: GridSetupArgs) {
     let done = 0;
     const startedAt = Date.now();
     a.setBusy(`${phrasingCaption(startedAt)} (0/${total})`);
+    let aliasForms: Record<string, string[]> | undefined;
     const outcomes = await Promise.all(
       batches.map(async ({ idx }) => {
-        const data = await post<{ phrasings: GridPhrasing[][] }>(
+        const data = await post<{ phrasings: GridPhrasing[][]; aliasForms?: Record<string, string[]> }>(
           "/api/setup/grid/phrasings",
           {
             brand: a.brand, category: a.category, competitors: a.competitors, rosterRoles: a.rosterRoles,
@@ -1842,6 +1847,7 @@ export function useGridSetup(a: GridSetupArgs) {
           }
         );
         if (!data) return false;
+        if (data.aliasForms) aliasForms = data.aliasForms;
         idx.forEach((i, k) => {
           merged[i] = {
             ...merged[i],
@@ -1876,6 +1882,7 @@ export function useGridSetup(a: GridSetupArgs) {
     return apply((prev) => ({
       ...prev,
       step: "phrasings",
+      ...(aliasForms ? { aliasForms } : {}),
       cells: prev.cells.map((q) => {
         const w = q.uid ? writtenByUid.get(q.uid) : undefined;
         return w ? { ...q, phrasings: w.phrasings, phrasingsOffered: w.offered, phrasedFor: w.text } : q;
@@ -1903,10 +1910,11 @@ export function useGridSetup(a: GridSetupArgs) {
     let done = 0;
     a.setBusy(`Topping up prompts… (0/${idx.length})`);
     const merged = [...st.cells];
+    let toppedAliases: Record<string, string[]> | undefined;
     await Promise.all(
       idx.map(async (i) => {
         const c = st.cells[i];
-        const data = await post<{ phrasings: GridPhrasing[][] }>("/api/setup/grid/phrasings", {
+        const data = await post<{ phrasings: GridPhrasing[][]; aliasForms?: Record<string, string[]> }>("/api/setup/grid/phrasings", {
           brand: a.brand, category: a.category, competitors: a.competitors, rosterRoles: a.rosterRoles,
           audience: a.audience || undefined,
           base: st.moderators, scenarios: st.scenarios,
@@ -1919,6 +1927,7 @@ export function useGridSetup(a: GridSetupArgs) {
           // response was lost - the non-forced read retrieves it for free.
           force: c.phrasings.some((p) => p.text.trim()),
         });
+        if (data?.aliasForms) toppedAliases = data.aliasForms;
         if (data) {
           const kept = [...c.phrasings];
           const have = () => [c.text, ...kept.filter((p) => p.text.trim()).map((p) => p.text)];
@@ -1945,6 +1954,7 @@ export function useGridSetup(a: GridSetupArgs) {
     });
     return apply((prev) => ({
       ...prev,
+      ...(toppedAliases ? { aliasForms: toppedAliases } : {}),
       cells: prev.cells.map((q) => {
         const m = q.uid ? toppedByUid.get(q.uid) : undefined;
         return m ? { ...q, phrasings: m.phrasings, phrasingsOffered: m.phrasingsOffered, phrasedFor: m.phrasedFor } : q;
@@ -4047,11 +4057,11 @@ export function CellsGate({
     const m = new Map<GridCellUi, OrderImbalance & { balanced: boolean }>();
     if (!written) return m;
     state.cells.forEach((c, i) => {
-      const r = headToHeadOrder(c, i, brandNames[0] ?? "", category);
+      const r = headToHeadOrder(c, i, brandNames[0] ?? "", category, state.aliasForms);
       if (r) m.set(c, r);
     });
     return m;
-  }, [state.cells, brandNames, category, written]);
+  }, [state.cells, state.aliasForms, brandNames, category, written]);
   const draw = async (i: number, kind: "new" | "near") => {
     const uid = state.cells[i]?.uid;
     if (!uid || pendingMap[uid]) return;

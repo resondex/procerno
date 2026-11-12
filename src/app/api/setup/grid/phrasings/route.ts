@@ -11,6 +11,7 @@ import {
 import { ModeratorsShape } from "@/lib/engine/instrument_shapes";
 import type { CellCheckSpec } from "@/lib/engine/battery_checks";
 import { ROSTER_ROLE_VALUES } from "@/lib/engine/battery_checks";
+import { brandAliasForms } from "@/lib/engine/brand_aliases";
 import { engineFailed } from "../../engine_error";
 
 // 300, not 120: a hard category's market read alone runs 90-120s of
@@ -122,5 +123,10 @@ export async function POST(req: Request) {
       ? NextResponse.json({ pending: true })
       : engineFailed("phrasings", err, "the paraphrases could not be written - try again in a moment");
   }
-  return NextResponse.json({ phrasings });
+  // The roster's dictionary alias forms (2026-11-12), so the wizard's
+  // head-to-head name-order chip and warning read the same vocabulary the
+  // engine chose the set with. The same full-roster call generatePhrasings
+  // just made, so it is a cache read; fails open to none.
+  const aliasForms = await brandAliasForms([brand, ...competitors]).catch(() => ({}) as Record<string, string[]>);
+  return NextResponse.json({ phrasings, aliasForms });
 }
