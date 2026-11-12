@@ -311,7 +311,7 @@ export async function computeDossiers(data: ViewData, request: ViewRequest = {})
       // The default away branch belongs on the dossier of the brand it points to.
       const dflt = awayCells > 0 ? awayDefaults.find((g) => g.routes[0] && resolve(g.routes[0].name).key === b.key) : undefined;
       const toThis = (r: AnswerRule) => r.to.some((n) => resolve(n).key === b.key);
-      const routesThemes = themesOf(mine, awayCells, awayMap, { rules: shared.answerRules, side: "away", accept: toThis, own: data.project.brand });
+      const routesThemes = themesOf(mine, awayCells, awayMap, { rules: shared.answerRules, side: "away", accept: toThis, only: (n) => n != null && resolve(n).key === b.key, own: data.project.brand });
       const rooms = roomCells.flatMap(({ id, label, p }) => {
         const hit = p.brands!.find((x) => resolve(x.name).key === b.key);
         return hit ? [{ cellId: id, label, them: hit.share, you: p.youShare ?? "0%" }] : [];
@@ -389,7 +389,7 @@ export async function computeDossiers(data: ViewData, request: ViewRequest = {})
 // sides pivot on") that read as contradictions across the two columns.
 // do6 (2026-11-09): option D - dossiers carry pick receipts for the one-panel slide-over; themes shared with the map via reason_themes.
 // do7 (2026-11-10): the one-panel redesign - rooms (its share beside yours per open-choice buying situation, from the map's brands), argsAll receipts, theme receipts and away routes; the routes and default lines say what sends buyers away instead of "reason".
-const DOSSIERS_VERSION = "do8"; // do8 (2026-11-12): theme examples ranked one-way-first and by fit, with `to`
+const DOSSIERS_VERSION = "do9"; // do9 (2026-11-12): a rival page's examples name only its own products; // do8 (2026-11-12): theme examples ranked one-way-first and by fit, with `to`
 // The fold (2026-11-09): dossiers embed map cells and summary numbers, so
 // their versions ride the key (see analysis_map's fold note).
 const DOSSIERS_KEY_VERSION = `${DOSSIERS_VERSION}.${ANALYSIS_MAP_VERSION}.${BRAND_SUMMARY_VERSION}`;

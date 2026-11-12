@@ -551,10 +551,13 @@ export async function computeRules(data: ViewData, request: ViewRequest = {}, ca
       ca.add(id);
       a.cellAnswers.set(intent.id, ca);
       if (capture?.answerRules) {
-        const st = a.said.get(id) ?? { said: condition, to: [], model: row.model, intent: intent.id, cards: [] };
+        const st = a.said.get(id) ?? { said: condition, to: [], model: row.model, intent: intent.id, cards: [], cardTo: [] };
         if (d.side === "away" && !st.to.includes(d.name)) st.to.push(d.name);
         const card = cardOf(rule, schema, d);
-        if (card && !st.cards!.includes(card)) st.cards!.push(card);
+        if (card && !st.cards!.includes(card)) {
+          st.cards!.push(card);
+          st.cardTo!.push(d.side === "away" ? d.name : null);
+        }
         a.said.set(id, st);
         // am21: which sides each answer states which condition on, for the examples' one-way-only preference.
         const sides = answerSides.get(id) ?? { you: new Set<string>(), away: new Set<string>(), elsewhere: new Set<string>() };

@@ -344,7 +344,7 @@ interface Group {
   n: number;
   surfaces: string[];
   /** am15: response id -> the answer's own wording, engine and away destinations. */
-  answers: Map<string, { said: string; model: string; to: Set<string>; cards: string[]; mixed: number }>;
+  answers: Map<string, { said: string; model: string; to: Set<string>; cards: string[]; cardTo: (string | null)[]; mixed: number }>;
 }
 
 /** One wall-calibration line (exported for the harness). */
@@ -1409,14 +1409,17 @@ export async function computeAnalysisMap(
           // am15: a second rule of the same group in one answer adds only its destination.
           const st = sides[side].get(ck)!.answers.get(rid)!;
           if (to) st.to.add(to);
-          if (card && !st.cards.includes(card)) st.cards.push(card);
+          if (card && !st.cards.includes(card)) {
+            st.cards.push(card);
+            st.cardTo.push(to);
+          }
           continue;
         }
         seen.add(`${side}|${ck}`);
         const acc = sides[side].get(ck) ?? { ck, n: 0, surfaces: new Map(), answers: new Map() };
         acc.n++;
         acc.surfaces.set(c, (acc.surfaces.get(c) ?? 0) + 1);
-        acc.answers.set(rid, { said: c, model: r.model, to: new Set(to ? [to] : []), cards: card ? [card] : [], mixed: 0 });
+        acc.answers.set(rid, { said: c, model: r.model, to: new Set(to ? [to] : []), cards: card ? [card] : [], cardTo: card ? [to] : [], mixed: 0 });
         sides[side].set(ck, acc);
       }
     }
@@ -1438,8 +1441,8 @@ export async function computeAnalysisMap(
     return { toward: list(sides.you), away: list(sides.away), bearing };
   };
   /** am15: a flat condition row's share, receipts and (away) routes. */
-  const conditionExtras = (g: Group, bearing: number, away: boolean, evidence: boolean): { share?: string; receipts?: ConditionItem["receipts"]; routes?: ConditionItem["routes"] } => {
-    const receipts = evidence ? pickRefs([...g.answers.entries()].map(([id, a]) => ({ id, find: a.said, model: a.model, cards: a.cards, mixed: a.mixed })), g.label) : [];
+  const conditionExtras = (g: Group, bearing: number, away: boolean, evidence: boolean, skip?: Set<string>): { share?: string; receipts?: ConditionItem["receipts"]; routes?: ConditionItem["routes"] } => {
+    const receipts = evidence ? pickRefs([...g.answers.entries()].map(([id, a]) => ({ id, find: a.said, model: a.model, cards: a.cards, mixed: a.mixed })), g.label, 2, skip) : [];
     const routes = evidence && away ? routeShares([...g.answers.values()].map((a) => [...a.to])) : [];
     return {
       ...(bearing > 0 ? { share: pctOf(g.n / bearing) } : {}),
@@ -1581,7 +1584,7 @@ export async function computeAnalysisMap(
     // empty) whenever the theme map exists; the flat `sends` stays the fallback.
     if (awayThemeMap) {
       const sendsHere = (gid: string, id: string) => !!rulesShared.answerRules.get(gid)?.get(id)?.to.includes(name);
-      out.sendsThemes = themeTreeAnswers(awayPool, awayThemeMap, rulesShared.cellAnswers, sitOf, cellIntents, { rules: rulesShared.answerRules, side: "away", own: project.brand }, sendsHere).slice(0, SENDS_THEME_TOP);
+      out.sendsThemes = themeTreeAnswers(awayPool, awayThemeMap, rulesShared.cellAnswers, sitOf, cellIntents, { rules: rulesShared.answerRules, side: "away", own: project.brand, only: (n) => n != null && resolve(n).key === key }, sendsHere).slice(0, SENDS_THEME_TOP);
     }
     const compare = liftsOf(itsPicks, yourPicks).map((l) => {
       const refs = liftRefs(l.label, itsPicks, yourPicks);
@@ -1624,7 +1627,8 @@ export async function computeAnalysisMap(
         .sort((a, b) => b.hits.length - a.hits.length || a.g.label.localeCompare(b.g.label))
         .slice(0, COND_TOP)
         .map(({ g, hits }) => {
-          const receipts = pickRefs(hits.map(([id, a]) => ({ id, find: a.said, model: a.model, cards: a.cards, mixed: a.mixed })), g.label);
+          // The examples say where they send the buyer - on this rival's panel, only its own products.
+          const receipts = pickRefs(hits.map(([id, a]) => ({ id, find: a.said, model: a.model, cards: a.cards.filter((_, i) => a.cardTo[i] === name), mixed: a.mixed })), g.label);
           return {
             text: g.label,
             n: hits.length,
@@ -1699,9 +1703,9 @@ export async function computeAnalysisMap(
    * (question grain saturates inside a cell: with every engine answering each
    * question, nearly every common reason touches every question). A side with
    * no answer stating any of its reasons in the cell stays undefined. */
-  const cellThemes = (pool: RuleGroup[], tm: ThemeMap | null, cellIntents: Set<string>, side: "toward" | "away"): DossierTheme[] | undefined => {
+  const cellThemes = (pool: RuleGroup[], tm: ThemeMap | null, cellIntents: Set<string>, side: "toward" | "away", skip?: Set<string>): DossierTheme[] | undefined => {
     if (!tm) return undefined;
-    const tree = themeTreeAnswers(pool, tm, rulesShared.cellAnswers, sitOf, cellIntents, { rules: rulesShared.answerRules, side, own: project.brand });
+    const tree = themeTreeAnswers(pool, tm, rulesShared.cellAnswers, sitOf, cellIntents, { rules: rulesShared.answerRules, side, own: project.brand, skip });
     return tree.length ? tree : undefined;
   };
 
@@ -1881,11 +1885,13 @@ export async function computeAnalysisMap(
 
         const cellIntents = new Set(s.rows.map((r) => r.intent.id));
         const towardThemes = cellThemes(towardPool, towardThemeMap, cellIntents, "toward");
-        const awayThemes = cellThemes(awayPool, awayThemeMap, cellIntents, "away");
         // am15: the flat rows carry their share always; receipts and routes only
         // on a side the themes do not cover (the panel draws themes when they exist).
         const toward: ConditionItem[] = conds.toward.slice(0, COND_TOP).map((g) => ({ text: g.label, n: g.n, ...conditionExtras(g, conds.bearing, false, !towardThemes) }));
-        let away: ConditionItem[] = conds.away.slice(0, COND_TOP).map((g) => ({ text: g.label, n: g.n, ...(wallGroups.includes(g) ? { wall: true } : {}), ...conditionExtras(g, conds.bearing, true, !awayThemes) }));
+        // am21: an answer shown as an example toward you is never an example away from you.
+        const shown = new Set<string>([...(towardThemes ?? []), ...toward].flatMap((x) => (x.receipts ?? []).map((r) => r.responseId)));
+        const awayThemes = cellThemes(awayPool, awayThemeMap, cellIntents, "away", shown);
+        let away: ConditionItem[] = conds.away.slice(0, COND_TOP).map((g) => ({ text: g.label, n: g.n, ...(wallGroups.includes(g) ? { wall: true } : {}), ...conditionExtras(g, conds.bearing, true, !awayThemes, shown) }));
         const bothWays = bothWaysOf(conds);
         if (conds.bearing < 5 && away.length === 0 && s.exitFallback?.length) away = s.exitFallback.map((x) => ({ text: `Sent to ${x.name}`, n: x.n }));
 
@@ -2470,7 +2476,7 @@ function tensionsOf(
 // am17 (2026-11-10): each tension carries `viz` (the Overview finding card's 2-4 bars).
 // am18 (2026-11-10): each buying situation's open-choice cell states the same funnel figures as the all-buyers cell.
 // am22 (2026-11-12): the reasons harmonization - each rival's `here` carries `sendsThemes` (the run's dt4 themes, scoped to the contest and to answers sending the buyer to that rival); the theme pass moves to run_themes.ts (same inputs, same dt4 keys); reads bs17 (the away-condition sentence names its theme). Row names come from question_names.ts (the plain-wording pass: What to buy, What's popular, Spotting the problem, What to look for, Habit, Your customers looking around, Your customers making your case) and the band descriptions are rewritten.
-export const ANALYSIS_MAP_VERSION = "am22"; // am21 (2026-11-12): reason-row examples prefer answers that send the buyer one way only, then the wording closest to the row name, and each carries `to` (the product it sends the buyer to). // am20 (2026-11-12): each rival in a pick contest's `brands` carries `here` (its funnel in that contest, the arguments when it is picked beside your picks, the stated conditions sending picks to it) and the position carries `youRead` - the rival panel's lead read. Additive; theme inputs unchanged. // am19 am19 (2026-11-11): every Overview number opens its answers - `examples` (named, commits), refs on each share-of-picks row and on the tension bars (the first tension's funnel bars and the bs16 insight bars). // am18 (2026-11-10): each buying situation's open-choice cell states the same funnel figures as the all-buyers cell (named, recommended, commits, picked, outside the category), from its own answers. // // am17 (2026-11-10): each tension carries `viz` (the Overview finding card's 2-4 bars) - the first from the casting facts, the rest from the bs15 insights
+export const ANALYSIS_MAP_VERSION = "am23"; // am23 (2026-11-12): an answer shown as an example toward you is never shown away; a rival's panel examples name only its own products in `to`. // am21 (2026-11-12): reason-row examples prefer answers that send the buyer one way only, then the wording closest to the row name, and each carries `to` (the product it sends the buyer to). // am20 (2026-11-12): each rival in a pick contest's `brands` carries `here` (its funnel in that contest, the arguments when it is picked beside your picks, the stated conditions sending picks to it) and the position carries `youRead` - the rival panel's lead read. Additive; theme inputs unchanged. // am19 am19 (2026-11-11): every Overview number opens its answers - `examples` (named, commits), refs on each share-of-picks row and on the tension bars (the first tension's funnel bars and the bs16 insight bars). // am18 (2026-11-10): each buying situation's open-choice cell states the same funnel figures as the all-buyers cell (named, recommended, commits, picked, outside the category), from its own answers. // // am17 (2026-11-10): each tension carries `viz` (the Overview finding card's 2-4 bars) - the first from the casting facts, the rest from the bs15 insights
 // The fold (2026-11-09, Tyler): a view's cache key carries the versions of
 // the views whose content it embeds, so the lockstep bump convention is
 // mechanical - the map embeds the summary's insights, casting and verdict.

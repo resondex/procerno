@@ -70,6 +70,8 @@ export interface AnswerRule {
   intent: string;
   /** am21: the products this answer's rules in the group name, as written. */
   cards?: string[];
+  /** am21: aligned with cards - the active brand each product resolves to (away side), else null. */
+  cardTo?: (string | null)[];
   /** am21: 2 = the same answer states this condition on the other side too,
    * 1 = it sends buyers the other way under some other condition, 0 = one way only. */
   mixed?: number;
@@ -103,6 +105,12 @@ export function refFit(said: string, label: string): number {
   return k / l.size;
 }
 
+/** A statement's products, narrowed to one brand's when `only` is given. */
+export function cardsFor(cards: string[] | undefined, cardTo: (string | null)[] | undefined, only?: (brand: string | null) => boolean): string[] | undefined {
+  if (!only || !cards) return cards;
+  return cards.filter((_, i) => only(cardTo?.[i] ?? null));
+}
+
 /** The "Sent to" string: up to two products, as written, deduped case-blind. */
 export function sentTo(cards: string[] | undefined): string | undefined {
   const out: string[] = [];
@@ -122,8 +130,9 @@ export function sentTo(cards: string[] | undefined): string | undefined {
  * first, then the closest wording to the row's name, then the original
  * order; at most one per engine; each carries where it sends the buyer.
  */
-export function pickRefs(items: RefCandidate[], label: string, k = 2): AnswerRef[] {
+export function pickRefs(items: RefCandidate[], label: string, k = 2, skip?: Set<string>): AnswerRef[] {
   const ranked = items
+    .filter((x) => !skip?.has(x.id))
     .map((x, i) => ({ x, i, fit: refFit(x.find, label) }))
     .sort((a, b) => (a.x.mixed ?? 0) - (b.x.mixed ?? 0) || b.fit - a.fit || a.i - b.i);
   const out: AnswerRef[] = [];
@@ -150,6 +159,10 @@ export interface ThemeEvidence {
   rules: AnswerRules;
   side: ThemeSide;
   accept?: (r: AnswerRule) => boolean;
+  /** am21: answers already shown as examples on the other side - never reused. */
+  skip?: Set<string>;
+  /** am21: a brand's own page - "sent to" lists only the products whose brand passes. */
+  only?: (brand: string | null) => boolean;
   /** The tracker's own brand: an away-side wording that names it is a
    * complaint to contest, never a wall (isWallWording's `own`). */
   own?: string;
@@ -207,11 +220,11 @@ function themeEvidenceOf(
     for (const [id, r] of ev.rules.get(gid) ?? []) {
       if (!inCell(r)) continue;
       if (keep && !keep(gid, id)) continue;
-      if (!ev.accept || ev.accept(r)) statements.push({ id, find: r.said, model: r.model, cards: r.cards, mixed: r.mixed });
+      if (!ev.accept || ev.accept(r)) statements.push({ id, find: r.said, model: r.model, cards: cardsFor(r.cards, r.cardTo, ev.only), mixed: r.mixed });
       if (ev.side === "away") dest.set(id, [...(dest.get(id) ?? []), ...r.to]);
     }
   }
-  const receipts = pickRefs(statements, label);
+  const receipts = pickRefs(statements, label, 2, ev.skip);
   const routes = ev.side === "away" ? routeShares(dest.values()) : [];
   return { ...(receipts.length ? { receipts } : {}), ...(routes.length ? { routes } : {}) };
 }
