@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState, type ReactNode, useRef } from "react";
-import { angleRivals, deriveCheckSpec, rosterRoleOf, sameSeatOf, type CellCheckSpec, type RosterClasses, type RosterRoles } from "@/lib/engine/battery_checks";
+import { angleRivals, deriveCheckSpec, isOrderBalanced, orderBalance, orderSidesOf, rosterRoleOf, sameSeatOf, type CellCheckSpec, type RosterClasses, type RosterRoles } from "@/lib/engine/battery_checks";
 import { InlineSpinner } from "../components/spinner";
 
 /**
@@ -925,6 +925,55 @@ export function gridCellPlan(g: GridState | null, slotRivals: number, classCells
 
 export function gridCellCount(g: GridState | null, slotRivals: number, classCells = 0): number {
   return gridCellPlan(g, slotRivals, classCells).reduce((n, s) => n + s.cells, 0);
+}
+
+/** A head-to-head question whose wordings name one option first too often
+ * (2026-11-12): assistants tend to favor whichever option a question names
+ * first, so a lopsided set tilts the matchup. `total` is seed + kept
+ * wordings; `clientFirst` / `rivalFirst` count the ones whose order reads. */
+export interface OrderImbalance {
+  i: number;
+  /** The rival as the wizard shows it ("Chase", or "a Visa card"). */
+  rival: string;
+  clientFirst: number;
+  rivalFirst: number;
+  total: number;
+}
+
+/** The order reading for one head-to-head question, or null for any other
+ * question, one with no kept wordings, or one whose order mostly cannot be
+ * read. Shared by the card chip and the move-on warning. */
+export function headToHeadOrder(c: GridCellUi, i: number, brand: string, category?: string): (OrderImbalance & { balanced: boolean }) | null {
+  if (c.stage !== "comparison" || !c.text.trim()) return null;
+  const sides = orderSidesOf(c, brand);
+  if (!sides) return null;
+  const kept = c.phrasings.map((p) => p.text).filter((t) => t.trim());
+  if (kept.length === 0) return null;
+  const texts = [c.text, ...kept];
+  const n = orderBalance(texts, sides.a, sides.b, { category });
+  // Unreadable for most wordings: say nothing rather than guess.
+  if (n.unknown > n.a + n.b) return null;
+  return {
+    i, rival: c.classPhrase ?? sides.rival, clientFirst: n.a, rivalFirst: n.b, total: texts.length,
+    balanced: isOrderBalanced(n),
+  };
+}
+
+/** Every unbalanced head-to-head question in the battery. */
+export function headToHeadOrderIssues(g: GridState, brand: string, category?: string): OrderImbalance[] {
+  const out: OrderImbalance[] = [];
+  g.cells.forEach((c, i) => {
+    const r = headToHeadOrder(c, i, brand, category);
+    if (r && !r.balanced) out.push({ i: r.i, rival: r.rival, clientFirst: r.clientFirst, rivalFirst: r.rivalFirst, total: r.total });
+  });
+  return out;
+}
+
+/** "Names you first in 8 of 10" / "Names Chase first in 8 of 10". */
+export function orderSplitText(o: OrderImbalance): string {
+  return o.clientFirst >= o.rivalFirst
+    ? `Names you first in ${o.clientFirst} of ${o.total}`
+    : `Names ${o.rival} first in ${o.rivalFirst} of ${o.total}`;
 }
 
 /** Compiled brand matchers per name list - namesAny runs several times
@@ -3933,10 +3982,13 @@ export function WorriesGate({
 
 export function CellsGate({
   state, setState, brandNames, onRegenerate, onNearCell, onSuggestCell, onAddOwn, onCycle, onWarmReview,
-  customUsed, customAllowance, busy, locked = false,
+  customUsed, customAllowance, busy, locked = false, category,
 }: {
   state: GridState;
   setState: (s: GridState) => void;
+  /** The tracker's category - keeps category words from reading as a
+   * brand name in the head-to-head order chip. */
+  category?: string;
   /** The confirm's quality check is running (2026-10-25): prompt text and
    * deletions are frozen, so nothing changes after the check read it and
    * ships unchecked. */
@@ -3989,6 +4041,17 @@ export function CellsGate({
     return m;
   }, [state.cells, brandNames]);
   const isBranded = (c: GridCellUi): boolean => brandedOf.get(c) ?? namesAny(c.text, brandNames);
+  /** Head-to-head name order per question (2026-11-12), once per cells
+   * change: an unbalanced set gets a quiet chip on its card. */
+  const orderOf = useMemo(() => {
+    const m = new Map<GridCellUi, OrderImbalance & { balanced: boolean }>();
+    if (!written) return m;
+    state.cells.forEach((c, i) => {
+      const r = headToHeadOrder(c, i, brandNames[0] ?? "", category);
+      if (r) m.set(c, r);
+    });
+    return m;
+  }, [state.cells, brandNames, category, written]);
   const draw = async (i: number, kind: "new" | "near") => {
     const uid = state.cells[i]?.uid;
     if (!uid || pendingMap[uid]) return;
@@ -4134,6 +4197,18 @@ export function CellsGate({
                                 needs your call
                               </span>
                             )}
+                            {(() => {
+                              const o = orderOf.get(state.cells[c.i]);
+                              if (!o || o.balanced) return null;
+                              return (
+                                <span
+                                  className="rounded-full border border-warning/40 px-2 py-px text-[9.5px] font-medium text-warning"
+                                  title="Assistants tend to favor whichever option a question names first, so a set that mostly names one option first tilts this matchup. Edit a few wordings to put the other option first."
+                                >
+                                  {orderSplitText(o)}
+                                </span>
+                              );
+                            })()}
                             {written && (
                               <span
                                 className={`rounded-full px-2 py-px text-[9.5px] font-medium ${
@@ -4480,6 +4555,53 @@ const CELL_FLAG_INFO: Record<CellReviewItem["flags"][number], { label: string; c
 /** Overlay shown when the Prompts-gate quality check flags user-edited
  * prompts: each gets the reviewer's reason and a side-by-side choice
  * between the suggested edit (default) and the user's own wording. */
+/** The move-on warning for lopsided head-to-head questions (2026-11-12).
+ * A warning only: "Continue anyway" goes on with nothing changed. */
+export function OrderWarningModal({
+  issues, onBack, onContinue,
+}: {
+  issues: OrderImbalance[];
+  onBack: () => void;
+  onContinue: () => void;
+}) {
+  return (
+    <div className="absolute inset-0 z-20 grid place-items-center bg-black/30 p-6">
+      <div className="w-full max-w-lg max-h-full overflow-y-auto rounded-xl border border-line bg-surface p-5 grid gap-4 shadow-lg">
+        <div className="grid gap-1">
+          <h3 className="text-[15px] font-semibold">
+            {issues.length === 1 ? "A head-to-head question leans one way" : "Some head-to-head questions lean one way"}
+          </h3>
+          <p className="text-[12px] text-ink-2">
+            Assistants tend to favor whichever option a question names first. When most wordings of a
+            head-to-head name the same option first, the result tilts toward that option. Putting the
+            other option first in a few wordings evens it out.
+          </p>
+        </div>
+        <ul className="grid gap-1.5">
+          {issues.map((o) => (
+            <li key={o.i} className="flex items-baseline gap-2 text-[13px]">
+              <span className="font-medium">vs {o.rival}</span>
+              <span className="text-ink-2">{orderSplitText(o).replace(/^Names/, "names")} wordings</span>
+            </li>
+          ))}
+        </ul>
+        <div className="flex items-center justify-end gap-4">
+          <button
+            type="button"
+            onClick={onContinue}
+            className="text-[13px] font-medium text-ink-3 hover:text-ink"
+          >
+            Continue anyway
+          </button>
+          <button type="button" onClick={onBack} className="btn-primary" autoFocus>
+            Go back
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export function CellReviewModal({
   items, onChoice, onBack, onContinue, busy,
 }: {

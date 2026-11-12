@@ -7,6 +7,7 @@ import { helperClient } from "./providers";
 import { pluralSlot, relationShift,
   AMBIGUOUS_FORMS, angleRivals, categoryNounOf, categorySpanIn, checkBattery, checkCandidateSignature, checkPromptAgainstSpec, classAnglesOf,
   deriveCheckSpec, DOUBT_CHECK_STAGES, MUST_NAME_STAGES, PRE_CATEGORY_STAGES, questionTypeOf, resolveCellSpec, scenarioLabelLeak, specWriterNote,
+  nameOrder, orderBalance, orderSidesOf, pickOrderBalanced,
   sameSeatOf, stageDesignIntent, statedPriceFinding, moneyBoltOn, criticismInText, TERM_COLLISIONS, textNamesBrand, textNamesCategory, upstreamOf,
   type CellCheckSpec, type ClassAngle, type QuestionType, type RosterClasses, type RosterRoles, type ValueLine,
 } from "./battery_checks";
@@ -3605,6 +3606,9 @@ export function phrasingCacheKey(
   cell: {
     situation: string | null; mode?: string | null; text: string; spec?: unknown; concern?: string | null;
     classPhrase?: string | null; classBrand?: string | null;
+    /** The cell's stage: only "comparison" changes the key (the order
+     * marker below); every other stage keys exactly as before. */
+    stage?: string;
   },
   avoidConcerns?: string[]
 ): string {
@@ -3616,9 +3620,21 @@ export function phrasingCacheKey(
     JSON.stringify(args.base),
     // Spec-checked and string-checked sets never share an entry: a legacy
     // draft's set must not serve a spec-era cell or the reverse.
-    `${cell.situation ?? ""}|${cell.mode ?? ""}|${cell.text}|${jnote}${cell.spec ? "|spec" : ""}${cell.concern ? `|concern:${cell.concern}` : ""}${avoidConcerns && avoidConcerns.length > 0 ? `|guard:${[...avoidConcerns].sort().join(";")}` : ""}${cell.classPhrase ? `|class:${cell.classBrand ?? ""}:${cell.classPhrase}` : ""}`,
+    // ORDER_MARKER (2026-11-12, head-to-head name-order balance): comparison
+    // cells' sets are now written and chosen to name each option first in
+    // about half the wordings, which changes what the engine produces for
+    // identical inputs on those cells only - so their keys carry the marker
+    // (a pre-balance set is never served under a key today's engine
+    // produces), while every other cell's key stays byte-identical
+    // (cache-era rule case 2, scoped; proven in checker_fixture section 23).
+    `${cell.situation ?? ""}|${cell.mode ?? ""}|${cell.text}|${jnote}${cell.spec ? "|spec" : ""}${cell.concern ? `|concern:${cell.concern}` : ""}${avoidConcerns && avoidConcerns.length > 0 ? `|guard:${[...avoidConcerns].sort().join(";")}` : ""}${cell.classPhrase ? `|class:${cell.classBrand ?? ""}:${cell.classPhrase}` : ""}${cell.stage === "comparison" ? `|${ORDER_MARKER}` : ""}`,
   ]);
 }
+
+/** Head-to-head name-order balance marker (2026-11-12) - rides comparison
+ * cells' paraphrase cache keys only (see phrasingCacheKey). Bump it if the
+ * order selection or the order note changes what comparison sets hold. */
+const ORDER_MARKER = "order1";
 
 /** The battery passes' completion-marker key for a unit-key set (exported
  * for the zero-spend harness). grid_passes3 (2026-10-24 setup audit): the
@@ -6985,7 +7001,44 @@ export async function generatePhrasings(input: {
   const steerSuffix = input.steer
     ? `:fix:${createHash("sha256").update(JSON.stringify([input.steer.avoid, input.steer.note, input.steer.attempt ?? 0])).digest("hex").slice(0, 12)}`
     : "";
-  const keys = input.cells.map((c) => phrasingCacheKey(input, c, input.avoidConcerns) + steerSuffix);
+  // A steered fix (wording_fix.ts) is unchanged by the order balance, so it
+  // keys without the stage (no order marker), exactly as before.
+  const keys = input.cells.map((c) => phrasingCacheKey(input, input.steer ? { ...c, stage: undefined } : c, input.avoidConcerns) + steerSuffix);
+  // Head-to-head name-order balance (2026-11-12): each comparison cell's
+  // two sides (the brand, and the rival or class brand) and its seed's
+  // order. Absent for every other cell, for steered fixes and for raw-only
+  // writer measurement - those paths are unchanged.
+  const orderSides = new Map<(typeof input.cells)[number], { a: string[]; b: string[]; nameA: string; nameB: string; seed: "a" | "b" | null }>();
+  if (!input.steer && !PHRASINGS_RAW_ONLY) {
+    for (const c of input.cells) {
+      const sides = orderSidesOf(c, input.brand, aliasForms);
+      if (!sides) continue;
+      orderSides.set(c, {
+        a: sides.a, b: sides.b,
+        nameA: primaryBrandName(input.brand),
+        nameB: c.classPhrase && c.classBrand ? c.classPhrase : primaryBrandName(sides.rival),
+        seed: nameOrder(c.text, sides.a, sides.b, { category: input.category }),
+      });
+    }
+  }
+  const orderOf = (c: (typeof input.cells)[number], text: string) => {
+    const s = orderSides.get(c);
+    return s ? nameOrder(text, s.a, s.b, { category: input.category }) : null;
+  };
+  /** |a - b| over seed + set (unread wordings never count). */
+  const orderGap = (c: (typeof input.cells)[number], set: Phrasing[]) => {
+    const s = orderSides.get(c);
+    if (!s) return 0;
+    const n = orderBalance([c.text, ...set.map((p) => p.text)], s.a, s.b, { category: input.category });
+    return Math.abs(n.a - n.b);
+  };
+  /** The side a set is short of (the one to ask for first), or null. */
+  const shortSide = (c: (typeof input.cells)[number], set: Phrasing[]): "a" | "b" | null => {
+    const s = orderSides.get(c);
+    if (!s) return null;
+    const n = orderBalance([c.text, ...set.map((p) => p.text)], s.a, s.b, { category: input.category });
+    return n.a - n.b > 1 ? "b" : n.b - n.a > 1 ? "a" : null;
+  };
   const out: Phrasing[][] = input.cells.map(() => []);
   // Each cell's resolved spec, looked up by cell object: pass() and the
   // filters see subsets, never indices into input.cells.
@@ -7065,8 +7118,24 @@ export async function generatePhrasings(input: {
       copied?: (string | null)[];
       /** Overlap ceiling override for the last-resort round. */
       maxOverlap?: number;
+      /** Head-to-head cells whose set is short of one side: the side every
+       * new paraphrase names first (2026-11-12 order balance). */
+      orderFirst?: ("a" | "b" | null)[];
     }
   ): Promise<Phrasing[][]> {
+    /** The head-to-head order note (2026-11-12): the cell's own two option
+     * names as data. First pass: half and half. A retry for a lopsided set:
+     * the short side first, in every new paraphrase. Empty for every other
+     * cell. */
+    const orderNote = (c: (typeof subset)[number], first: "a" | "b" | null): string => {
+      const s = orderSides.get(c);
+      if (!s) return "";
+      if (first) {
+        const [x, y] = first === "a" ? [s.nameA, s.nameB] : [s.nameB, s.nameA];
+        return `\n   [order: every paraphrase names ${x} before ${y}]`;
+      }
+      return `\n   [order: about half of the paraphrases name ${s.nameA} before ${s.nameB}, and the rest name ${s.nameB} before ${s.nameA}]`;
+    };
     const roster = PHRASINGS_PROMPT === "v2" ? await askerRoster({ brand: input.brand, category: input.category, audience: input.audience, scenarios: input.scenarios }, want) : null;
     const askersNote = (c: (typeof subset)[number], i: number): string => {
       if (!roster) return "";
@@ -7147,6 +7216,7 @@ export async function generatePhrasings(input: {
           (opts?.copied?.[i]
             ? `\n   [copied: "${opts.copied[i]}" - this run of the seed's words was carried over by the existing paraphrases; say that part differently]`
             : "") +
+          orderNote(c, opts?.orderFirst?.[i] ?? null) +
           (input.steer ? `\n   [${input.steer.note}]` : "") +
           askersNote(c, i)
       )
@@ -7570,7 +7640,10 @@ export async function generatePhrasings(input: {
         seen.add(n);
         keptWords.push(ws);
         kept.push({ text, asker: (p.asker ?? "").trim() });
-        if (prior.length + kept.length >= wantFor(seed.stage)) break;
+        // A head-to-head cell keeps every surviving candidate: the caller
+        // chooses the set for name-order balance (fitSet), so a lopsided
+        // first quota never crowds out the other side's wordings.
+        if (!orderSides.has(seed) && prior.length + kept.length >= wantFor(seed.stage)) break;
       }
       if (prior.length + kept.length < wantFor(seed.stage)) {
         console.warn(
@@ -7664,7 +7737,26 @@ export async function generatePhrasings(input: {
     const freshJ = subset.map((_, j) => j).filter((j) => !pre.has(idx[j]));
     const firstGot = freshJ.length > 0 ? await pass(freshJ.map((j) => subset[j])) : [];
     const got: Phrasing[][] = subset.map((_, j) => (pre.has(idx[j]) ? [...pre.get(idx[j])!] : []));
-    freshJ.forEach((j, k) => { got[j] = firstGot[k] ?? []; });
+    /** Head-to-head candidates that passed every filter but were not
+     * chosen (2026-11-12 order balance) - offered again at each later merge. */
+    const spares: Phrasing[][] = subset.map(() => []);
+    /** Merge a cell's candidates into its set: every other cell takes the
+     * first wantFor in order (as before); a head-to-head cell takes the
+     * wantFor that leave seed + set closest to half and half, earliest
+     * first, never fewer than the candidates allow. */
+    const fitSet = (j: number, list: Phrasing[]): Phrasing[] => {
+      const c = subset[j];
+      const s = orderSides.get(c);
+      const cap = wantFor(c.stage);
+      if (!s) return list.slice(0, cap);
+      const seen = new Set<string>();
+      const pool = list.filter((p) => { const n = norm(p.text); if (seen.has(n)) return false; seen.add(n); return true; });
+      const chosen = pickOrderBalanced(s.seed, pool.map((p) => ({ item: p, order: orderOf(c, p.text) })), cap);
+      const picked = new Set(chosen);
+      spares[j] = pool.filter((p) => !picked.has(p));
+      return chosen;
+    };
+    freshJ.forEach((j, k) => { got[j] = fitSet(j, firstGot[k] ?? []); });
     /** Cells left short because the budget skipped a round - not a
      * finished short set, so stored provisional rather than final. */
     const budgetCut = new Set<number>();
@@ -7681,11 +7773,16 @@ export async function generatePhrasings(input: {
     // every cell reaches quota or a round stops helping. The batch is
     // served full; no visible after-the-fact healing.
     for (let round = 0; round < (PHRASINGS_RAW_ONLY ? 0 : PHRASINGS_RETRY_ROUNDS); round++) {
-      const deficient = got.map((k, j) => (k.length < wantFor(subset[j].stage) ? j : -1)).filter((j) => j >= 0);
+      // A head-to-head cell that is full but still lopsided on name order
+      // (|a - b| > 1 over seed + set) is deficient too - the same bounded
+      // rounds ask it for wordings that name the short side first.
+      const deficient = got.map((k, j) => (k.length < wantFor(subset[j].stage) || shortSide(subset[j], k) ? j : -1)).filter((j) => j >= 0);
       if (deficient.length === 0) break;
       if (Date.now() > lateAt) { deficient.forEach((j) => budgetCut.add(j)); break; }
       const subs = deficient.map((j) => subset[j]);
-      const have = deficient.map((j) => got[j]);
+      // Head-to-head spares seed the filter too, so a retry never returns a
+      // near-copy of a wording already waiting to be chosen (empty elsewhere).
+      const have = deficient.map((j) => [...got[j], ...spares[j]]);
       const avoidWords = deficient.map((j) => {
         // Only genuinely WORN words (used in 2+ texts) steer the retry.
         // Banning every word ever used - the old build - outlawed the
@@ -7715,11 +7812,14 @@ export async function generatePhrasings(input: {
         }
         return best.length >= 4 ? best.join(" ") : null;
       });
-      const again = await pass(subs, { extra: PHRASINGS_EXTRA_RETRY, have, avoidWords, copied });
+      const orderFirst = deficient.map((j) => shortSide(subset[j], got[j]));
+      const again = await pass(subs, { extra: PHRASINGS_EXTRA_RETRY, have, avoidWords, copied, orderFirst });
       let progressed = false;
       deficient.forEach((j, k) => {
-        if (again[k].length > 0) progressed = true;
-        got[j] = [...got[j], ...again[k]].slice(0, wantFor(subset[j].stage));
+        const before = got[j];
+        got[j] = fitSet(j, [...got[j], ...again[k], ...spares[j]]);
+        // Progress = more wordings, or (head-to-head) a smaller order gap.
+        if (got[j].length > before.length || orderGap(subset[j], got[j]) < orderGap(subset[j], before)) progressed = true;
       });
       if (!progressed) break;
     }
@@ -7736,11 +7836,11 @@ export async function generatePhrasings(input: {
     else if (starved.length > 0) {
       const again = await pass(starved.map((j) => subset[j]), {
         extra: PHRASINGS_EXTRA_RETRY,
-        have: starved.map((j) => got[j]),
+        have: starved.map((j) => [...got[j], ...spares[j]]),
         maxOverlap: RELAXED_OVERLAP,
       });
       starved.forEach((j, k) => {
-        got[j] = [...got[j], ...again[k]].slice(0, wantFor(subset[j].stage));
+        got[j] = fitSet(j, [...got[j], ...again[k], ...spares[j]]);
       });
     }
     // CHECKS IN GENERATION (2026-09-28, Tyler's checks-first directive):
@@ -7883,10 +7983,12 @@ export async function generatePhrasings(input: {
         const before = short.map((j) => got[j].length);
         const again = await pass(short.map((j) => subset[j]), {
           extra: PHRASINGS_EXTRA_RETRY,
-          have: short.map((j) => got[j]),
+          have: short.map((j) => [...got[j], ...spares[j]]),
         });
         short.forEach((j, k) => {
-          got[j] = [...got[j], ...again[k]].slice(0, wantFor(subset[j].stage));
+          // Head-to-head spares re-enter here too; the checks below re-run
+          // over the whole grown set, so a spare is checked before it ships.
+          got[j] = fitSet(j, [...got[j], ...again[k], ...spares[j]]);
         });
         const grew = short.filter((j, k) => got[j].length > before[k]);
         mechanicalFilter(grew);
@@ -7894,6 +7996,16 @@ export async function generatePhrasings(input: {
       }
     }
 
+    // Head-to-head sets still lopsided once retries and budget are spent
+    // serve as they are (the setup wizard warns on them); logged like a cull.
+    if (process.env.PHRASINGS_DEBUG) {
+      subset.forEach((c, j) => {
+        const s = orderSides.get(c);
+        if (!s || !shortSide(c, got[j])) return;
+        const n = orderBalance([c.text, ...got[j].map((p) => p.text)], s.a, s.b, { category: input.category });
+        console.warn(`  order unbalanced [${c.stage}/${c.angle}] ${s.nameA} first ${n.a}, ${s.nameB} first ${n.b}, unread ${n.unknown} | ${c.text.slice(0, 70)}`);
+      });
+    }
     idx.forEach((i) => inFlight.delete(i));
     await hb.quiesce();
     await Promise.all(

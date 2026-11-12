@@ -1382,6 +1382,143 @@ export function namesForbiddenBrand(
   return brandMentions(text, name, opts).named;
 }
 
+/* ---------------------- head-to-head name order (2026-11-12) ---------------
+ * Measured on five trackers: in a close head-to-head the AI picks the
+ * option the question names FIRST more often (the client won 74% of
+ * decided answers named first, 31% named second), and the paraphrase sets
+ * came out lopsided (25-27 of 40 wordings naming the client first on three
+ * trackers). Tyler's ruling: every head-to-head cell's wordings are
+ * BALANCED on name order; the engine aims for it and the setup wizard warns
+ * on an unbalanced cell. This reader is shared by both (pure, no verdicts).
+ *
+ * A side is a list of names or name forms (the brand's label plus its
+ * dictionary aliases where the caller has them). Each entry expands to the
+ * same forms the brand checks use (brandNameForms: the speakable name,
+ * declared alternates, each non-category word of a multi-word name,
+ * distinctive contiguous parts), plus - read-only here, never in a check -
+ * every contiguous multi-word part of the name ("prime video" of Amazon
+ * Prime Video, whose words are both stopworded in the check forms). In a
+ * head-to-head both options are design-named, so a form's context needs no
+ * judge. A hit inside a longer hit of the OTHER side does not count ("Apple"
+ * inside "Apple TV+" is the other side's). */
+
+/** Every keyed form a side's entries yield for the order reader. */
+function orderForms(side: string[], cat?: Set<string>): string[] {
+  const out = new Set<string>();
+  for (const entry of side) {
+    if (!entry || !entry.trim()) continue;
+    for (const f of brandNameForms(entry, { excludeTokens: cat })) out.add(f);
+    const toks = key(speakable(entry)).split(" ").filter(Boolean);
+    for (let i = 0; i < toks.length; i++)
+      for (let j = i + 2; j <= toks.length; j++) out.add(toks.slice(i, j).join(" "));
+    // A compact form ("oneplus" of "One Plus", "appletv") is the same name.
+    if (toks.length > 1) out.add(toks.join(""));
+  }
+  return [...out].filter((f) => f.length >= 2 && !(cat && !f.includes(" ") && isCategoryToken(f, cat)));
+}
+
+/** The spans where any of the forms appear, token-bounded and case-blind,
+ * with the plural / possessive endings the brand checks accept. */
+function formSpans(text: string, forms: string[]): [number, number][] {
+  const spans: [number, number][] = [];
+  for (const form of forms) {
+    const body = form.split(" ").map(esc).join("[^A-Za-z0-9+]*");
+    const re = new RegExp(`(?<![A-Za-z0-9])(${body})(?:s|es|'s|’s)?\\+?(?![A-Za-z0-9])`, "gi");
+    for (const m of text.matchAll(re)) spans.push([m.index ?? 0, (m.index ?? 0) + m[0].length]);
+  }
+  return spans;
+}
+
+/** Which side's name appears first in the text: "a", "b", or null when
+ * either side is absent. `category` keeps category words ("phone",
+ * "card") from counting as a name. */
+export function nameOrder(text: string, a: string[], b: string[], opts?: { category?: string }): "a" | "b" | null {
+  const cat = opts?.category ? new Set(key(opts.category).split(" ").filter(Boolean)) : undefined;
+  const sa = formSpans(text, orderForms(a, cat));
+  const sb = formSpans(text, orderForms(b, cat));
+  const inside = (s: [number, number], others: [number, number][]) =>
+    others.some(([x, y]) => x <= s[0] && s[1] <= y && y - x > s[1] - s[0]);
+  const fa = sa.filter((s) => !inside(s, sb)).map((s) => s[0]);
+  const fb = sb.filter((s) => !inside(s, sa)).map((s) => s[0]);
+  if (fa.length === 0 || fb.length === 0) return null;
+  const ma = Math.min(...fa);
+  const mb = Math.min(...fb);
+  return ma === mb ? null : ma < mb ? "a" : "b";
+}
+
+/** Name order across a cell's wordings (seed included by the caller). */
+export function orderBalance(texts: string[], a: string[], b: string[], opts?: { category?: string }): { a: number; b: number; unknown: number } {
+  const out = { a: 0, b: 0, unknown: 0 };
+  for (const t of texts) {
+    const o = nameOrder(t, a, b, opts);
+    if (o === "a") out.a++;
+    else if (o === "b") out.b++;
+    else out.unknown++;
+  }
+  return out;
+}
+
+/** The order-balance tolerance a confirmed cell may carry: the engine aims
+ * for |a - b| <= 1; two leaves room for the user's own edits. */
+export const ORDER_BALANCE_TOLERANCE = 2;
+
+/** Balanced: the two sides within the tolerance and, once four or more
+ * wordings read, neither side never first. Unknown wordings never count. */
+export function isOrderBalanced(counts: { a: number; b: number }): boolean {
+  if (Math.abs(counts.a - counts.b) > ORDER_BALANCE_TOLERANCE) return false;
+  if (counts.a + counts.b >= 4 && (counts.a === 0 || counts.b === 0)) return false;
+  return true;
+}
+
+/** Choose `want` items from a pool (in preference order) so the seed plus
+ * the chosen come out as balanced on name order as the pool allows: the
+ * smallest |a - b|, then the earliest items (a prefix of each side's
+ * items and of the unread ones). Never returns fewer than
+ * min(want, pool size) - balance never costs a wording. The chosen keep
+ * their pool order. */
+export function pickOrderBalanced<T>(seedOrder: "a" | "b" | null, pool: { item: T; order: "a" | "b" | null }[], want: number): T[] {
+  const n = Math.min(want, pool.length);
+  if (n <= 0) return [];
+  const idxA: number[] = [], idxB: number[] = [], idxU: number[] = [];
+  pool.forEach((p, i) => (p.order === "a" ? idxA : p.order === "b" ? idxB : idxU).push(i));
+  const sa = seedOrder === "a" ? 1 : 0;
+  const sb = seedOrder === "b" ? 1 : 0;
+  let best: { x: number; y: number; u: number; diff: number; cost: number } | null = null;
+  const prefixCost = (idx: number[], k: number) => idx.slice(0, k).reduce((s, v) => s + v, 0);
+  for (let x = 0; x <= Math.min(n, idxA.length); x++) {
+    for (let y = 0; y <= Math.min(n - x, idxB.length); y++) {
+      const u = n - x - y;
+      if (u > idxU.length) continue;
+      const diff = Math.abs(sa + x - (sb + y));
+      const cost = prefixCost(idxA, x) + prefixCost(idxB, y) + prefixCost(idxU, u);
+      if (!best || diff < best.diff || (diff === best.diff && cost < best.cost)) best = { x, y, u, diff, cost };
+    }
+  }
+  if (!best) return pool.slice(0, n).map((p) => p.item);
+  const chosen = new Set([...idxA.slice(0, best.x), ...idxB.slice(0, best.y), ...idxU.slice(0, best.u)]);
+  return pool.filter((_, i) => chosen.has(i)).map((p) => p.item);
+}
+
+/** A head-to-head cell's two order sides, or null for any other cell:
+ * side A = the tracker brand (+ its alias forms), side B = the cell's rival
+ * (the angle) or, for a class-angle cell, the class brand. */
+export function orderSidesOf(
+  cell: { stage: string; angle: string; classPhrase?: string | null; classBrand?: string | null },
+  brand: string,
+  extraForms?: Record<string, string[]>
+): { a: string[]; b: string[]; rival: string } | null {
+  if (cell.stage !== "comparison") return null;
+  const cls = classOfCell(cell);
+  const rival = cls ? cls.classBrand : cell.angle.trim();
+  if (!rival || ["generic", "defensive", "open", "class"].includes(rival.toLowerCase())) return null;
+  const aliasesOf = (n: string) => {
+    if (!extraForms) return [];
+    const hit = Object.keys(extraForms).find((k) => speakable(k).toLowerCase() === speakable(n).toLowerCase());
+    return hit ? extraForms[hit] : [];
+  };
+  return { a: [brand, ...aliasesOf(brand)], b: [rival, ...aliasesOf(rival)], rival };
+}
+
 /** The scoring mode a stage x angle designs - the same branches
  * checkPromptBrandRule walks, named once. */
 export function brandModeOf(stage: string, angle: string): BrandMode {

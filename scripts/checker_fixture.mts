@@ -1283,3 +1283,65 @@ console.log("17. s56 advocacy criticism containment");
   ok("plainText strips links, list and heading markers", ap.plainText("# Title\n- [Card](http://x) **bold**") === "Title Card bold");
   console.log("22. answer passages: " + (process.exitCode ? "FAILED" : "ALL PASS"));
 }
+
+// =====================================================================
+// 23. Head-to-head name order (2026-11-12): the AI favors the option a
+// question names first, so every head-to-head cell's wordings are balanced
+// on name order. The pure order reader (shared by engine and wizard), the
+// balanced selection, and the cache-key scope: comparison cells' paraphrase
+// keys carry the order marker, every other cell's key is byte-identical.
+// =====================================================================
+{
+  const ok = (label: string, cond: boolean, extra = "") => { if (!cond) { console.error(`   FAIL ${label} ${extra}`); process.exitCode = 1; } else console.log(`   ok   ${label} ${extra}`); };
+  const A = ["American Express", "Amex"];
+  ok("client named first", bc.nameOrder("American Express or Chase for travel - which would you pick?", A, ["Chase"]) === "a");
+  ok("rival named first", bc.nameOrder("Chase or American Express for travel?", A, ["Chase"]) === "b");
+  ok("alias form counts (Amex)", bc.nameOrder("Amex vs Capital One, which one and why?", A, ["Capital One"]) === "a");
+  ok("multi-word rival, possessive", bc.nameOrder("Capital One's card or AmEx's - which wins?", A, ["Capital One"]) === "b");
+  ok("one side absent -> null", bc.nameOrder("Is American Express worth it?", A, ["Chase"]) === null);
+  ok("name inside another word does not count (chased)", bc.nameOrder("I chased deals; American Express or Chase?", A, ["Chase"]) === "a");
+  ok("a product word of a multi-word name (iPhone of Apple iPhone)", bc.nameOrder("iPhone or Pixel - which would you get?", ["Google Pixel"], ["Apple iPhone"], { category: "smartphones" }) === "b");
+  ok("maker word of a multi-word name (Galaxy)", bc.nameOrder("Pixel or a Galaxy, which one?", ["Google Pixel"], ["Samsung Galaxy"], { category: "smartphones" }) === "a");
+  ok("contiguous part (Prime Video of Amazon Prime Video)", bc.nameOrder("Prime Video or Netflix - pick one", ["Netflix"], ["Amazon Prime Video"]) === "b");
+  ok("a hit inside the other side's longer name is the other side's (Apple in Apple TV+)",
+    bc.nameOrder("Apple TV+ or Apple Music?", ["Apple Music"], ["Apple TV+"]) === "b");
+  ok("class-angle sides: the class brand is side B", (() => {
+    const s = bc.orderSidesOf({ stage: "comparison", angle: "class", classPhrase: "a Visa card", classBrand: "Visa" }, "American Express", { "American Express": ["amex"] });
+    return !!s && s.b[0] === "Visa" && s.a.includes("amex") && bc.nameOrder("A Visa card or my Amex - which should I carry?", s.a, s.b) === "b";
+  })());
+  ok("non-comparison cells have no sides", bc.orderSidesOf({ stage: "discovery", angle: "generic" }, "Jira") === null);
+  const ob = bc.orderBalance(["Jira or Linear?", "Linear or Jira?", "Jira vs Linear", "Which is better?"], ["Jira"], ["Linear"]);
+  ok("orderBalance counts both sides and unread wordings", ob.a === 2 && ob.b === 1 && ob.unknown === 1, JSON.stringify(ob));
+  ok("balanced within 2", bc.isOrderBalanced({ a: 6, b: 4 }) && bc.isOrderBalanced({ a: 5, b: 5 }) && bc.isOrderBalanced({ a: 1, b: 0 }));
+  ok("unbalanced past 2", !bc.isOrderBalanced({ a: 7, b: 3 }) && !bc.isOrderBalanced({ a: 8, b: 2 }));
+  ok("fewer than 4 read: one side never first can still be balanced (2 vs 0)", bc.isOrderBalanced({ a: 2, b: 0 }) && !bc.isOrderBalanced({ a: 4, b: 0 }));
+  const pool = ["a1", "a2", "a3", "a4", "a5", "a6", "b1", "b2", "u1"].map((x) => ({ item: x, order: x[0] === "a" ? "a" : x[0] === "b" ? "b" : null }));
+  const pick = bc.pickOrderBalanced("a", pool, 6);
+  const pa = pick.filter((x: string) => x[0] === "a").length, pb = pick.filter((x: string) => x[0] === "b").length;
+  ok("selection balances seed + set as far as the pool allows", pick.length === 6 && Math.abs(1 + pa - pb) <= 2 && pb === 2, JSON.stringify(pick));
+  ok("selection never drops below the wanted count", bc.pickOrderBalanced(null, pool.slice(0, 3), 9).length === 3);
+  const even = bc.pickOrderBalanced("a", [...pool.slice(0, 4), { item: "b1", order: "b" }, { item: "b2", order: "b" }, { item: "b3", order: "b" }, { item: "b4", order: "b" }], 5);
+  ok("with enough of both sides the gap is at most 1", Math.abs(1 + even.filter((x: string) => x[0] === "a").length - even.filter((x: string) => x[0] === "b").length) <= 1, JSON.stringify(even));
+
+  // Cache-key scope (cache-era rule): the order marker rides comparison
+  // cells' keys only. A stage-carrying non-comparison cell keys exactly as
+  // the stage-free call (which is the pre-change key, since the pre-change
+  // key never read the stage).
+  delete process.env.DATABASE_URL;
+  const inst = await import(`${REPO}/src/lib/engine/instrument`);
+  const base = { involvement: "considered", verifiability: "spec", think_feel: "think", decision_unit: "solo" };
+  const args = { brand: "American Express", category: "credit cards", competitors: ["Chase", "Capital One"], audience: "US consumers", base, scenarios: [], count: 10 };
+  const stages = ["problem_recognition", "category_education", "discovery", "criteria", "use_case", "social_validation", "objections",
+    "churn_triggers", "renewal", "pricing", "premium_worth", "business_case", "expansion", "ecosystem", "advocacy", "alternatives", "repertoire"];
+  let same = 0;
+  for (const st of stages) {
+    const cell = { situation: null, mode: null, text: "Is American Express worth it for me?", spec: {}, concern: st === "objections" ? "fees" : null };
+    if (inst.phrasingCacheKey(args, { ...cell, stage: st }, ["fees"]) === inst.phrasingCacheKey(args, cell, ["fees"])) same++;
+  }
+  ok("every non-comparison stage keys byte-identically with or without its stage", same === stages.length, `${same}/${stages.length}`);
+  const cmp = { situation: null, mode: null, text: "American Express or Chase - which would you pick?", spec: {} };
+  ok("comparison cells key apart (order marker)", inst.phrasingCacheKey(args, { ...cmp, stage: "comparison" }) !== inst.phrasingCacheKey(args, cmp));
+  const cls = { ...cmp, classPhrase: "a Visa card", classBrand: "Visa" };
+  ok("class-angle comparison cells key apart too", inst.phrasingCacheKey(args, { ...cls, stage: "comparison" }) !== inst.phrasingCacheKey(args, cls));
+  console.log("23. head-to-head name order: " + (process.exitCode ? "FAILED" : "ALL PASS"));
+}

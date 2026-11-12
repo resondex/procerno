@@ -6,6 +6,8 @@ import { EnginePicker, currentEngineSet, defaultEnginesFor, type EngineOption } 
 import {
   CellReviewModal,
   CellsGate,
+  OrderWarningModal,
+  headToHeadOrderIssues,
   WorriesGate,
   PHRASING_COUNT,
   phrasingTarget,
@@ -29,6 +31,7 @@ import {
   type CellReviewItem,
   type GridCellUi,
   type GridState,
+  type OrderImbalance,
   type RosterArgs,
   type ScenarioReviewItem,
   type ScenarioRow,
@@ -980,6 +983,18 @@ export function SetupWizard({ mode, brand, draft, engineOptions, onClose, onCrea
     roster?: { snap: RosterSnap; competitors: string[] }
   ) {
     const g = gIn === undefined ? gridRef.current : gIn;
+    // Head-to-head name order (2026-11-12): every way off the Prompts step
+    // to the engines step (the footer confirm, its top-up hop, the step
+    // rail) passes here, so the warning is asked once, before moving on.
+    // A warning only - "Continue anyway" re-enters with the check skipped.
+    if (k === "engines" && step === "prompts" && mode === "grid" && g && !orderBypass.current) {
+      const issues = headToHeadOrderIssues(g, brand, category);
+      if (issues.length > 0) {
+        setOrderWarn({ issues, args: [k, gIn, p, mp, rp, roster] });
+        return;
+      }
+    }
+    orderBypass.current = false;
     setReadDelta(null);
     if (k !== "prompts") setPromptsNotice(null);
     setStep(k);
@@ -997,6 +1012,11 @@ export function SetupWizard({ mode, brand, draft, engineOptions, onClose, onCrea
     if (k === "prompts" && mode === "grid") gridApi.warmPhrasings(g, ro);
   }
 
+
+  /** Head-to-head order warning (2026-11-12): the lopsided questions and
+   * the goTo call it paused; orderBypass lets "Continue anyway" through. */
+  const [orderWarn, setOrderWarn] = useState<{ issues: OrderImbalance[]; args: Parameters<typeof goTo> } | null>(null);
+  const orderBypass = useRef(false);
 
   /** Close is OPTIMISTIC (Tyler, 2026-10-05): the modal goes on the click
    * and the draft save completes behind it - the x used to wait on the
@@ -2504,6 +2524,7 @@ export function SetupWizard({ mode, brand, draft, engineOptions, onClose, onCrea
                 state={grid}
                 setState={updateGrid}
                 brandNames={brandNames}
+                category={category}
                 busy={busy !== null}
                 locked={checking === "prompts"}
                 onRegenerate={(i) => gridApi.regenerateCell(i)}
@@ -2516,6 +2537,18 @@ export function SetupWizard({ mode, brand, draft, engineOptions, onClose, onCrea
                 onWarmReview={warmCellReview}
               />
             </div>
+          )}
+          {step === "prompts" && orderWarn && (
+            <OrderWarningModal
+              issues={orderWarn.issues}
+              onBack={() => setOrderWarn(null)}
+              onContinue={() => {
+                const args = orderWarn.args;
+                setOrderWarn(null);
+                orderBypass.current = true;
+                goTo(...args);
+              }}
+            />
           )}
           {step === "prompts" && cellReview && (
             <CellReviewModal
