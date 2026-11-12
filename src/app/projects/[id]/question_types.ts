@@ -1,4 +1,5 @@
 import { POOLS, POOL_LABEL as ENGINE_POOL_LABEL } from "@/lib/engine/measures";
+import { ROW_NAME } from "@/lib/engine/question_names";
 import { viewsOf, type ViewKey } from "@/lib/engine/views";
 
 /**
@@ -9,14 +10,21 @@ import { viewsOf, type ViewKey } from "@/lib/engine/views";
  */
 export const QUESTION_TYPE_LABEL: Record<ViewKey, string> = {
   ...ENGINE_POOL_LABEL,
-  // The Map's own row names (2026-11-11), so a pool reads the same in Build
-  // a table, By question type and Prompt health as on the Map.
-  awareness_routing: "Awareness",
-  awareness_explainer: "Learning the category",
-  criteria_taught: "Criteria taught",
-  head_to_head_entity: "Head-to-head",
-  offensive_capture: "Rivals' customers switching",
-  repertoire: "Habit - stick with you",
+  // The Map's own row names (question_names.ts, one list since 2026-11-12),
+  // so a pool reads the same in Build a table, search and the question check
+  // as on the Map. Settled-customer pools keep their own specific names.
+  headline: ROW_NAME.open,
+  awareness_routing: ROW_NAME.awareness,
+  awareness_explainer: ROW_NAME.explainer,
+  criteria_taught: ROW_NAME.criteria,
+  premium_tier: ROW_NAME.premium,
+  head_to_head_entity: ROW_NAME.h2h,
+  offensive_capture: ROW_NAME.leavers,
+  doubt: ROW_NAME.buyers,
+  value: ROW_NAME.value,
+  keep_or_leave: ROW_NAME.customers,
+  defensive_hold: ROW_NAME.hold,
+  repertoire: ROW_NAME.repertoire,
 };
 
 /** Question types in journey order. */

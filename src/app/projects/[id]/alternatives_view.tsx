@@ -241,7 +241,7 @@ function DefensiveSection({ view }: { view: DefensiveView }) {
     <section className="card p-6 grid gap-4">
       <div>
         <h2 className="section-label mb-1">
-          <Tip tip="Holding your own: defensive alternatives questions.">
+          <Tip tip="Your customers looking around: your own customers asking what else to look at.">
             <span className="cursor-help">Your customers weighing a move</span>
           </Tip>
         </h2>

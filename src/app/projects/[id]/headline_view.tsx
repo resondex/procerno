@@ -15,7 +15,7 @@ import { useDictionaryOpener } from "./dict_opener";
 const STAGE_LABEL: Record<string, string> = {
   discovery: "Discovery",
   use_case: "Use-case fit",
-  social_validation: "Social validation",
+  social_validation: "What's popular",
   premium_worth: "Premium vs basic",
 };
 
@@ -224,7 +224,7 @@ export default function HeadlineSection({ runId, room }: { runId: string; room?:
         </p>
         {room && (
           <p className="text-[13px] text-ink-3 mt-1">
-            Only questions asked as this buyer: {room}. Social validation and premium vs basic are asked across all
+            Only questions asked as this buyer: {room}. What's popular and premium vs basic are asked across all
             buyers, so they are not in these numbers.
           </p>
         )}

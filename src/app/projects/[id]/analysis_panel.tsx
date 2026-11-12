@@ -53,7 +53,7 @@ import { T } from "./type_scale";
 
 // ---------- small shared words and helpers ----------
 
-export const VWORD: Record<CellVerdict, string> = { yours: "Yours", contested: "Contested", theirs: "Theirs", nocall: "No call" };
+export const VWORD: Record<CellVerdict, string> = { yours: "Yours", contested: "Contested", theirs: "Theirs", nocall: "No side taken" };
 export const VCOLOR: Record<CellVerdict, { fg: string; bg: string }> = {
   yours: { fg: "var(--pa-yours)", bg: "var(--pa-yours-bg)" },
   contested: { fg: "var(--pa-contested)", bg: "var(--pa-contested-bg)" },
@@ -1080,10 +1080,15 @@ function RivalScoped({ name, p, ctx }: { name: string; p: Position; ctx: Ctx }) 
   const you = p.youRead;
 
   const hasArgs = !!here && ((here.argsMode === "compare" && (here.args?.length ?? 0) > 0) || (here.argsMode === "alone" && (here.argsRows?.length ?? 0) > 0));
-  // Which buyers it is sent: the cell's themes that route to it (prod), else the engine's own flat list for it.
-  const awayThemes = (p.awayThemes ?? []).filter((t) => (t.routes ?? []).some((r) => normName(r.name) === normName(name)));
+  // Which buyers it is sent: the run's reason themes scoped to this contest and
+  // to the answers that send buyers to it (am22 `sendsThemes`, present whenever
+  // the theme map exists); an older payload reads the cell's themes that route
+  // to it; the flat list only when there are no themes at all.
+  const scopedThemes = here?.sendsThemes;
+  const awayThemes = scopedThemes ?? (p.awayThemes ?? []).filter((t) => (t.routes ?? []).some((r) => normName(r.name) === normName(name)));
+  const themed = scopedThemes !== undefined || awayThemes.length > 0;
   const flatSends: CondRowData[] = (here?.sends ?? []).map((c) => ({ label: c.text, share: c.share, weight: c.n, wall: c.wall, receipts: c.receipts, tip: `About ${c.n} answers` }));
-  const sendRows: CondRowData[] = awayThemes.length ? themeRows(awayThemes).map((r) => ({ ...r, routes: [] })) : flatSends;
+  const sendRows: CondRowData[] = themed ? themeRows(awayThemes).map((r) => ({ ...r, routes: [] })) : flatSends;
   const hasSends = sendRows.length > 0;
 
   // The fallbacks: the rival everywhere it appears (its dossier).
@@ -1171,7 +1176,9 @@ function RivalScoped({ name, p, ctx }: { name: string; p: Position; ctx: Ctx }) 
         <>
           <h3 className={secH}>Which buyers it sends to {name}</h3>
           <Hint>
-            {awayThemes.length
+            {scopedThemes
+              ? `What the AI says about the buyer when it sends them to ${name} here. Each share is of the answers here that send buyers to ${name} with a stated condition.`
+              : awayThemes.length
               ? `What the AI says about the buyer when it sends them away from you and on to ${name}. The share is of the answers here that send buyers away from you with a stated condition.`
               : here?.sendsShare
                 ? `In ${here.sendsShare} of the answers here the AI names a condition on the buyer that sends them to ${name}. Each share is of those answers.`
@@ -1304,7 +1311,26 @@ function DossierFolds({ d, ctx }: { d: Dossier; ctx: Ctx }) {
           <details className="mt-3">
             <summary className="cursor-pointer text-[13px] font-medium text-primary">When does each side win?</summary>
             <p className="mb-1 mt-2 text-[12px] text-ink-3">What the AI says when asked to pick between the two. Open one to see examples.</p>
-            <Boundaries row={h2hRow} brand={ctx.brand} onOpen={setAnswers} bare />
+            {h2hRow.conditions?.themes ? (
+              // Grouped reasons in the panel's own bars (2026-11-12), so this
+              // fold reads like "What it says about the buyer" above it.
+              <>
+                <BuyerColumns
+                  toward={themeRows(h2hRow.conditions.themes.you)}
+                  away={themeRows(h2hRow.conditions.themes.rival)}
+                  towardTitle={`${ctx.brand} wins when the buyer...`}
+                  awayTitle={`${d.name} wins when the buyer...`}
+                />
+                {h2hRow.conditions.themes.elsewhere.length > 0 && (
+                  <div className="mt-4">
+                    <h5 className="mb-1 text-[13px] font-semibold text-ink">Another brand gets the pick when the buyer...</h5>
+                    <CondRows rows={themeRows(h2hRow.conditions.themes.elsewhere)} color="var(--neutral-bar)" />
+                  </div>
+                )}
+              </>
+            ) : (
+              <Boundaries row={h2hRow} brand={ctx.brand} onOpen={setAnswers} bare />
+            )}
           </details>
         )}
       </Sec>

@@ -6,8 +6,9 @@ import { computeReasons } from "./reasons";
 import { buildResolver } from "./brand_resolve";
 import { containsSeq, famTokens } from "./brand_family";
 import { computeAlternatives, type AlternativesViews } from "./alternatives";
-import { computeRules } from "./rules_explorer";
+import type { RuleGroup } from "./rules_explorer";
 import { isDefaultCondition } from "./condition_groups";
+import { sharedRunThemes, themeRollup, type ThemeRollup } from "./run_themes";
 import { viewsOf } from "./views";
 import { cell, poolOf, type PoolRow, type RateCell, type ViewData, type ViewRequest } from "./view_data";
 import type { BrandSummaryView, VerdictFact } from "./brand_summary";
@@ -396,6 +397,8 @@ export interface InsightInputs {
       routes: { name: string; n: number }[];
       /** The longest active dictionary form in the wording, the client excluded. */
       names: { key: string; name: string } | null;
+      /** bs17: the reason theme this wording sits under on the Map, when its name differs. */
+      theme?: string;
     }[];
     cells: number;
     grouping: "embeddings" | "stems";
@@ -430,6 +433,9 @@ export interface InsightInputs {
     away: { label: string; rules: number; cells: number; wall: boolean; routes: { name: string; n: number }[] }[];
     towardCells: number;
     awayCells: number;
+    /** bs17: that side's list is reason THEMES (`rules` = statements), as `away.themed`. */
+    towardThemed?: true;
+    awayThemed?: true;
     /** 2026-11-08: the largest default-shaped group per side ("otherwise" -
      * isDefaultCondition), whatever its rank, for the condition card's default
      * row. The lists above are unchanged (they still carry a default group that
@@ -501,12 +507,34 @@ export async function insightInputs(data: ViewData, request: ViewRequest = {}): 
     for (const f of forms) if (containsSeq(hay, f.seq) && (!best || f.seq.length > best.seq.length)) best = f;
     return best ? { key: best.key, name: best.name } : null;
   };
-  const rules = await computeRules(data, engines);
+  // bs17 (2026-11-12, the reasons harmonization): the run's shared rules and
+  // reason themes (run_themes.ts) - the same RulesView computeRules served
+  // here before, plus the dt4 theme maps. With theme maps, the away groups and
+  // the brief's condition branches read THEME rollups (a theme's name, its
+  // statements, answers, questions, fixed-situation test and destinations);
+  // without them (keyless, a failed pass) the raw groups as before.
+  const rt = await sharedRunThemes(data, engines);
+  const rules = rt.rules.rules;
+  const awayThemed = !!rt.away;
+  const towardThemed = !!rt.toward;
+  const awayRoll = themeRollup(rt.awayPool, rt.away, rt.rules, rt.sitOf, "away", data.project.brand);
+  const towardRoll = themeRollup(rt.towardPool, rt.toward, rt.rules, rt.sitOf, "toward", data.project.brand);
+  // bs17 (Tyler 2026-11-12): the away-condition finding DETECTS on the raw
+  // condition groups as before - its numbers count exactly the wording it
+  // names, and a broad theme (one can cover every away question) never
+  // swallows a specific blocker or fixed situation - and its sentence names the
+  // theme the wording sits under, so it reads in the Map's vocabulary.
+  const themeOf = (label: string) => {
+    if (!awayThemed) return undefined;
+    const t = awayRoll.find((x) => x.members.includes(label));
+    return t && t.label.trim().toLowerCase() !== label.trim().toLowerCase() ? t.label : undefined;
+  };
   const awayGroups = rules.groups
     .filter((g) => g.side === "away")
     .sort((a, b) => b.answers - a.answers || b.rules - a.rules || a.label.localeCompare(b.label))
     .slice(0, AWAY_TOP)
-    .map((g) => ({ label: g.label, rules: g.rules, answers: g.answers, cells: g.cells, wall: g.wall, routes: g.routes, names: namesIn(g.label) }));
+    .map((g) => ({ label: g.label, rules: g.rules, answers: g.answers, cells: g.cells, wall: g.wall, routes: g.routes, names: namesIn(g.label), theme: themeOf(g.label) }));
+  const themeTop = (xs: ThemeRollup[]) => xs.slice(0, 6).map((t) => ({ label: t.label, rules: t.rules, cells: t.cells, wall: t.wall, routes: t.routes }));
 
   // bs8: reason codes on the pooled entity head-to-heads (the summary's own
   // rival resolution: the cell's angle through the dictionary).
@@ -577,8 +605,10 @@ export async function insightInputs(data: ViewData, request: ViewRequest = {}): 
     conditions:
       rules.answers > 0
         ? {
-            toward: sideTop(rules.groups, "you"),
-            away: sideTop(rules.groups, "away"),
+            toward: towardThemed ? themeTop(towardRoll) : sideTop(rules.groups, "you"),
+            away: awayThemed ? themeTop(awayRoll) : sideTop(rules.groups, "away"),
+            ...(towardThemed ? { towardThemed: true as const } : {}),
+            ...(awayThemed ? { awayThemed: true as const } : {}),
             towardCells: rules.cellsBySide.you,
             awayCells: rules.cellsBySide.away,
             defaults: (["you", "away"] as const).flatMap((side) => {
@@ -593,7 +623,7 @@ export async function insightInputs(data: ViewData, request: ViewRequest = {}): 
 }
 
 /** The largest groups on one side of the rules, for the brief's conditions paragraph. */
-function sideTop(groups: Awaited<ReturnType<typeof computeRules>>["groups"], side: "you" | "away") {
+function sideTop(groups: RuleGroup[], side: "you" | "away") {
   return groups
     .filter((g) => g.side === side)
     .sort((a, b) => b.answers - a.answers || b.rules - a.rules || a.label.localeCompare(b.label))
@@ -1290,12 +1320,15 @@ function awayCondition(s: Summary, inp: InsightInputs): Insight | null {
       ? `; the largest fixed situation among them, "${shorten(laterWall.label, 60)}", comes up in ${pct(laterWall.cells / a.cells)} of them - a situation the buyer is already in, not an argument to answer`
       : "";
   const wallFoot = laterWall ? ` "${laterWall.label}": at least ${laterWall.rules} rules across ${laterWall.cells} questions.` : "";
+  const toFoot = to ? `; to ${to.name} ${to.n}` : "";
+  const lower = `Counts are lower bounds: ${a.grouping === "stems" ? "conditions are grouped by their words, and" : ""} wordings the grouping did not join are left out.`;
+  const underTheme = g.theme ? `, one of the reasons grouped as "${shorten(g.theme, 60)}"` : "";
   return {
     key: "away_condition",
     kind: "condition",
     title: g.wall ? `A fixed situation sends buyers away: "${shorten(g.label, 60)}"` : `What sends buyers away most: "${shorten(g.label, 60)}"`,
-    body: `The condition that most often sends buyers away from you is "${shorten(g.label)}"${to ? `, and the AI sends them to ${to.name}` : ""}; it comes up in ${pct(spread)} of the questions where the AI gives any condition that sends buyers away${blocker}${wall}.`,
-    foot: `At least ${g.rules} rules in ${g.answers} answers across ${g.cells} of ${a.cells} questions where the AI gives a condition that sends buyers away${to ? `; to ${to.name} ${to.n}` : ""}.${blockerFoot}${wallFoot} Counts are lower bounds: ${a.grouping === "stems" ? "conditions are grouped by their words, and" : ""} wordings the grouping did not join are left out.`,
+    body: `The condition that most often sends buyers away from you is "${shorten(g.label)}"${underTheme}${to ? `, and the AI sends them to ${to.name}` : ""}; it comes up in ${pct(spread)} of the questions where the AI gives any condition that sends buyers away${blocker}${wall}.`,
+    foot: `At least ${g.rules} rules in ${g.answers} answers across ${g.cells} of ${a.cells} questions where the AI gives a condition that sends buyers away${toFoot}.${blockerFoot}${wallFoot} ${lower}`,
     look: { pill: "why", label: "Why - decision rules" },
     effect: spread,
     viz: vizOf(a.groups.map((x, i) => insightBar(lbl(x.label, 40), x.cells / a.cells, undefined, i === 0))),

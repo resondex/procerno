@@ -158,6 +158,11 @@ export interface RivalHere {
   sends: ConditionItem[];
   /** Share of the contest's answers that send buyers to it with a stated condition. */
   sendsShare?: string;
+  /** am22: the same, in the run's reason themes (dt4): the away pool scoped
+   * to this contest's questions and to answers whose rule in the group sends
+   * the buyer to it; shares are of those answers. Present (possibly empty)
+   * whenever the theme map exists - then `sends` is only a fallback. */
+  sendsThemes?: DossierTheme[];
 }
 
 /** What the panel's "What the AI says about the <category>" section draws:

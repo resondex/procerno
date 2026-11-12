@@ -5,7 +5,8 @@ import { brandHeadline, cardSourcesOf, type Lift, conversionOf, funnelRows, lift
 import type { RuleGroup } from "./rules_explorer";
 import { isDefaultCondition } from "./condition_groups";
 import { cachedView, poolOf, requestOf, type RateCell, type ViewData, type ViewRequest } from "./view_data";
-import { poolInputs, rankGroups, situationsOf, spreadRefs, themeReasons, themeTree, type AnswerRule, type DossierTheme, type ThemeEvidence, type ThemeMap } from "./reason_themes";
+import { rankGroups, spreadRefs, themeTree, type AnswerRule, type DossierTheme, type ThemeEvidence, type ThemeMap } from "./reason_themes";
+import { sharedRunThemes } from "./run_themes";
 import type { AnswerRef, PositionReceipt } from "./analysis_types";
 import type { Project, Run } from "../types";
 
@@ -183,7 +184,7 @@ export async function computeDossiers(data: ViewData, request: ViewRequest = {})
   // it), so "the largest single reason" means what the brief means by it.
   // do2: a default-shaped branch ("otherwise") is not a reason - it leaves
   // the lists and renders as one default line per side.
-  const { rules, cellSets, surfaces } = shared;
+  const { rules, cellSets } = shared;
   const rank = rankGroups;
   const awayAll = rank(rules.groups.filter((g) => g.side === "away"));
   const awayGroups = awayAll.filter((g) => !isDefaultCondition(g.label));
@@ -205,24 +206,14 @@ export async function computeDossiers(data: ViewData, request: ViewRequest = {})
   // situations of the questions carrying it. Keyless, or when a side's call
   // fails, both sides get no themes and the slide-over reads the flat lists.
   const towardListed = towardAll.filter((g) => !isDefaultCondition(g.label));
-  const sitOf = situationsOf(data.intents);
-  let towardMap: ThemeMap | null = null;
-  let awayMap: ThemeMap | null = null;
-  try {
-    const meta = { brand: data.project.brand, category: data.project.category, projectId: data.project.id };
-    const costCtx = { projectId: data.project.id, runId: data.run.id };
-    const t = poolInputs(towardListed, surfaces, cellSets, sitOf);
-    const a = poolInputs(awayGroups, surfaces, cellSets, sitOf);
-    [towardMap, awayMap] = await Promise.all([
-      themeReasons(t.labelCells, t.labelSamples, "toward", meta, costCtx),
-      themeReasons(a.labelCells, a.labelSamples, "away", meta, costCtx),
-    ]);
-  } catch (e) {
-    console.warn(`dossier themes failed, flat lists served: ${e instanceof Error ? e.message : e}`);
-    // A failed pass is served flat but the view is not cached, so the next open retries.
-    data.judgeIncomplete = true;
-    towardMap = awayMap = null;
-  }
+  // 2026-11-12: the theme maps are the run's shared pass (run_themes.ts) over
+  // exactly these pools (towardListed / awayGroups are its towardPool /
+  // awayPool), so the dt4 calls key identically. A failed pass leaves both
+  // maps null and marks the view incomplete (served flat, never cached).
+  const rt = await sharedRunThemes(data, eng);
+  const sitOf = rt.sitOf;
+  const towardMap: ThemeMap | null = rt.toward;
+  const awayMap: ThemeMap | null = rt.away;
   const themesOf = (pool: RuleGroup[], base: number, tm: ThemeMap | null, evidence: ThemeEvidence) => themeTree(pool, base, tm, cellSets, sitOf, undefined, evidence);
   const routesBackThemes = themesOf(towardListed, towardCells, towardMap, { rules: shared.answerRules, side: "toward" });
   // do7: the open-choice buying situations' pick splits, for each dossier's "By buyer".

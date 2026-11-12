@@ -237,7 +237,7 @@ const POOL_LABEL: Record<RulePool, string> = {
   premium: "Premium vs basic",
   head_to_head: "Head-to-head",
   rival_leavers: "Rivals' leavers",
-  repertoire: "Habit - stick with you",
+  repertoire: "Habit",
   value: "Value",
   holding: "Your customers weighing a move",
   buyer_worries: "Buyers' worries",

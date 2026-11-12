@@ -68,7 +68,7 @@ export default function RepertoireSection({ runId }: { runId: string }) {
   return (
     <section className="card p-6 grid gap-4">
       <div>
-        <h2 className="section-label mb-1">Habit - stick with you: does the AI keep a regular buyer</h2>
+        <h2 className="section-label mb-1">Habit: does the AI keep a regular buyer</h2>
         <p className="text-[13px] text-ink-3">
           Questions from someone who usually buys {view.brand}, asking whether to stick with it or try something else.
           {view.uncoded > 0 && ` ${view.uncoded} answers are not coded yet.`}

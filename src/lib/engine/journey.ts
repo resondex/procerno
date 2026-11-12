@@ -10,9 +10,9 @@ import { computePremiumCached } from "./premium";
 import { computeReasonsCached } from "./reasons";
 import { computeBrandSummaryCached } from "./brand_summary";
 import { RULE_VIEWS, type RuleGroup, type RulePool } from "./rules_explorer";
-import { sharedRules } from "./analysis_map";
+import { sharedRunThemes } from "./run_themes";
 import { isDefaultCondition } from "./condition_groups";
-import { EVERY_BUYER, poolInputs, rankGroups, situationsOf, slKey, themeReasons, THEME_VERSION, type DossierTheme, type ThemeMap } from "./reason_themes";
+import { EVERY_BUYER, rankGroups, slKey, THEME_VERSION, type DossierTheme, type ThemeMap } from "./reason_themes";
 import { isWallWording } from "./wall_wording";
 import type { ReasonsView } from "./reasons";
 import { computeSettledCached } from "./settled";
@@ -520,31 +520,18 @@ export function stationSide(
  */
 export async function computeStationReasons(data: ViewData, request: ViewRequest = {}): Promise<StationReasonsView> {
   const eng: ViewRequest = request.engines ? { engines: request.engines } : {};
-  const shared = await sharedRules(data, eng);
-  const { project } = data;
-  const sitOf = situationsOf(data.intents);
+  // 2026-11-12: the rules capture, the side pools and both theme maps are the
+  // run's shared pass (run_themes.ts sharedRunThemes) - the very pools this
+  // function used to build inline, so the dt4 calls key identically.
+  const rt = await sharedRunThemes(data, eng);
+  const shared = rt.rules;
+  const { sitOf, towardPool, awayPool } = rt;
   const groups = shared.rules.groups;
-  const towardPool = rankGroups(groups.filter((g) => g.side === "you")).filter((g) => !isDefaultCondition(g.label));
-  const awayPool = rankGroups(groups.filter((g) => g.side === "away")).filter((g) => !isDefaultCondition(g.label));
   // The lose side also lists "elsewhere" (no named in-category destination);
   // the theme pass only ever saw "away", so those carry no theme of their own.
   const elsewherePool = rankGroups(groups.filter((g) => g.side === "elsewhere")).filter((g) => !isDefaultCondition(g.label));
-  let towardMap: ThemeMap | null = null;
-  let awayMap: ThemeMap | null = null;
-  try {
-    const meta = { brand: project.brand, category: project.category, projectId: project.id };
-    const costCtx = { projectId: project.id, runId: data.run.id };
-    const t = poolInputs(towardPool, shared.surfaces, shared.cellSets, sitOf);
-    const a = poolInputs(awayPool, shared.surfaces, shared.cellSets, sitOf);
-    [towardMap, awayMap] = await Promise.all([
-      themeReasons(t.labelCells, t.labelSamples, "toward", meta, costCtx),
-      themeReasons(a.labelCells, a.labelSamples, "away", meta, costCtx),
-    ]);
-  } catch (e) {
-    console.warn(`station reason themes failed, flat lists served: ${e instanceof Error ? e.message : e}`);
-    data.judgeIncomplete = true;
-    towardMap = awayMap = null;
-  }
+  const towardMap: ThemeMap | null = rt.toward;
+  const awayMap: ThemeMap | null = rt.away;
 
   // Intent -> the rule pool computeRules assigns it (the first RULE_VIEWS match).
   const poolOfIntent = new Map<string, RulePool>();
@@ -584,7 +571,7 @@ export async function computeStationReasons(data: ViewData, request: ViewRequest
         sitOf,
         intents,
         routesOf,
-        project.brand
+        data.project.brand
       ),
     };
   }

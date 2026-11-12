@@ -194,12 +194,19 @@ export function routeShares(destinations: Iterable<string[]>): RouteShare[] {
 }
 
 /** A theme's receipts and routes from its member groups (largest first). */
-function themeEvidenceOf(groupIds: string[], ev: ThemeEvidence, inCell: (r: AnswerRule) => boolean, label: string): Pick<DossierTheme, "receipts" | "routes"> {
+function themeEvidenceOf(
+  groupIds: string[],
+  ev: ThemeEvidence,
+  inCell: (r: AnswerRule) => boolean,
+  label: string,
+  keep?: AnswerKeep
+): Pick<DossierTheme, "receipts" | "routes"> {
   const statements: RefCandidate[] = [];
   const dest = new Map<string, string[]>();
   for (const gid of groupIds) {
     for (const [id, r] of ev.rules.get(gid) ?? []) {
       if (!inCell(r)) continue;
+      if (keep && !keep(gid, id)) continue;
       if (!ev.accept || ev.accept(r)) statements.push({ id, find: r.said, model: r.model, cards: r.cards, mixed: r.mixed });
       if (ev.side === "away") dest.set(id, [...(dest.get(id) ?? []), ...r.to]);
     }
@@ -208,6 +215,11 @@ function themeEvidenceOf(groupIds: string[], ev: ThemeEvidence, inCell: (r: Answ
   const routes = ev.side === "away" ? routeShares(dest.values()) : [];
   return { ...(receipts.length ? { receipts } : {}), ...(routes.length ? { routes } : {}) };
 }
+
+/** am22: an answer filter over a side's pool (group id, response id) - the
+ * per-rival trees keep only the answers whose rule in the group sends the
+ * buyer to that rival. Absent = every answer (the untouched path). */
+export type AnswerKeep = (groupId: string, responseId: string) => boolean;
 
 /** The pseudo-situation for cells asked across all buyers (no room). */
 export const EVERY_BUYER = "Every buyer";
@@ -588,7 +600,9 @@ export function themeTreeAnswers(
   sitOf: Map<string, string>,
   cellIntents: Set<string>,
   /** am15: attach receipts (and, away side, routes) to each theme. */
-  evidence?: ThemeEvidence
+  evidence?: ThemeEvidence,
+  /** am22: count (and draw evidence from) only the answers this keeps. */
+  keep?: AnswerKeep
 ): DossierTheme[] {
   if (!tm || pool.length === 0) return [];
   const order = new Map(pool.map((g, i) => [g.id, i]));
@@ -599,7 +613,8 @@ export function themeTreeAnswers(
   for (const g of pool) {
     const per = cellAnswers.get(g.id);
     if (!per) continue;
-    for (const [c, ids] of per) {
+    for (const [c, every] of per) {
+      const ids = keep ? new Set([...every].filter((id) => keep(g.id, id))) : every;
       if (!cellIntents.has(c) || ids.size === 0) continue;
       for (const id of ids) all.add(id);
       const s = tm.stOf.get(slKey(sitOf.get(c) ?? EVERY_BUYER, g.label));
@@ -647,7 +662,7 @@ export function themeTreeAnswers(
         .map((x) => x.bucket);
       const label = tm.totName[t];
       const flat = buckets.length === 1 && buckets[0].members.length === 0 && same(buckets[0].label, label);
-      const ev = evidence ? themeEvidenceOf(rankedIds(totGroups.get(t), order), evidence, (r) => cellIntents.has(r.intent), label) : {};
+      const ev = evidence ? themeEvidenceOf(rankedIds(totGroups.get(t), order), evidence, (r) => cellIntents.has(r.intent), label, keep) : {};
       return { n: tot.union.size, theme: { label, share: pctOf(tot.union.size / base), buckets: flat ? [] : buckets, ...(flat && wallOf(label) ? { wall: true } : {}), ...ev } };
     })
     .sort((a, b) => b.n - a.n || a.theme.label.localeCompare(b.theme.label))

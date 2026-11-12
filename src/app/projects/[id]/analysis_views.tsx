@@ -948,7 +948,7 @@ function ContestMap({
           <button
             type="button"
             aria-pressed={!!prefs.quiet}
-            title="Fold away the contests you already hold and the ones with no call"
+            title="Fold away the contests you already hold and the ones where the AI takes no side"
             onClick={() => {
               setUnfolded(new Set());
               update({ ...prefs, quiet: !prefs.quiet });
@@ -1059,7 +1059,7 @@ function ContestMap({
                     </span>
                   </span>
                 )}
-                {noCall > 0 && <span>{noCall === 1 ? "One contest with no call" : `${noCall} contests with no call`} {folding ? "folded" : "shown"} too.</span>}
+                {noCall > 0 && <span>{noCall === 1 ? "One contest where the AI takes no side" : `${noCall} contests where the AI takes no side`} {folding ? "folded" : "shown"} too.</span>}
                 <button type="button" onClick={() => setUnfolded(flip(unfolded, band.title))} className="text-primary underline underline-offset-2 hover:opacity-80">
                   {folding ? "Show them" : "Fold them again"}
                 </button>

@@ -3,6 +3,9 @@ import { buildResolver } from "./brand_resolve";
 import { containsSeq, famTokens } from "./brand_family";
 import { excludedWords } from "./definition_overlap";
 import { conditionKeysFor, conditionStemKey } from "./condition_groups";
+import { themeTreeAnswers, type AnswerKeep, type DossierTheme, type ThemeMap } from "./reason_themes";
+import type { RuleGroup } from "./rules_explorer";
+import { sharedRunThemes } from "./run_themes";
 import { cachedView, cell, condCache, facetsOf, poolOf, requestOf, type EngineFacets, type PoolRow, type RateCell, type ViewData, type ViewRequest } from "./view_data";
 import type { DictionaryEntry, Intent, Project, Run } from "../types";
 
@@ -70,6 +73,14 @@ export interface MatchupConditions {
   rival: ConditionGroup[];
   rivalMore: number;
   elsewhere: ElsewhereBrand[];
+  /** hh8 (2026-11-12, the reasons harmonization): the same boundaries in the
+   * run's reason themes (dt4, run_themes.ts), scoped to this matchup's
+   * questions: `you` = the toward pool; `rival` = the away pool's answers
+   * whose rule sends the buyer to this rival; `elsewhere` = to another active
+   * brand. Shares are of the answers on that side with a stated condition.
+   * Present whenever the theme map exists (the groups above are then only the
+   * fallback); a rival not in the dictionary gets no rival / elsewhere split. */
+  themes?: { you: DossierTheme[]; rival: DossierTheme[]; elsewhere: DossierTheme[] };
 }
 
 export interface HeadToHeadRow {
@@ -140,6 +151,8 @@ function classBrandOf(
 
 const GROUP_CAP = 12;
 const ID_CAP = 8;
+/** hh8: the most themes a matchup side carries. */
+const THEME_CAP = 12;
 
 /** The conditions panel for one matchup - see MatchupConditions above.
  * Undefined when none of the matchup's answers carry decision_rules. */
@@ -303,11 +316,29 @@ async function computeKind(data: ViewData, kind: "entity" | "class", request: Vi
     { cache: condCache(data, `head_to_head:${kind}`) }
   );
   const keyOf = (c: string) => condKeys.get(c) ?? conditionStemKey(c, exclude);
+  // hh8: the run's shared reason themes (engines-only request, as every other
+  // surface reads them) - null maps keyless or after a failed pass.
+  const rt = scored.some((s) => s.row.code.decision_rules != null) ? await sharedRunThemes(data, request.engines ? { engines: request.engines } : {}) : null;
+  const themesOf = (list: { row: PoolRow }[], rival: { name: string; resolved: boolean }): MatchupConditions["themes"] | undefined => {
+    if (!rt?.toward || !rt.away) return undefined;
+    const intents = new Set(list.map((s) => s.row.intent.id));
+    const said = rt.rules.answerRules;
+    const tree = (pool: RuleGroup[], tm: ThemeMap, side: "toward" | "away", keep?: AnswerKeep) =>
+      themeTreeAnswers(pool, tm, rt.rules.cellAnswers, rt.sitOf, intents, { rules: said, side, own: project.brand }, keep).slice(0, THEME_CAP);
+    const toOf = (gid: string, id: string) => said.get(gid)?.get(id)?.to ?? [];
+    return {
+      you: tree(rt.towardPool, rt.toward, "toward"),
+      rival: rival.resolved ? tree(rt.awayPool, rt.away, "away", (gid, id) => toOf(gid, id).includes(rival.name)) : [],
+      elsewhere: rival.resolved ? tree(rt.awayPool, rt.away, "away", (gid, id) => toOf(gid, id).some((n) => n !== rival.name)) : [],
+    };
+  };
   const rows: HeadToHeadRow[] = [...byRival.entries()].map(([key, list]) => {
     const meta = rivalMeta.get(key)!;
     const others = new Map<string, number>();
     for (const s of list) if (s.otherName) others.set(s.otherName, (others.get(s.otherName) ?? 0) + 1);
-    const conditions = conditionsOf(list, resolve, targetKey, key, keyOf);
+    const flat = conditionsOf(list, resolve, targetKey, key, keyOf);
+    const themes = flat ? themesOf(list, meta) : undefined;
+    const conditions = flat && themes ? { ...flat, themes } : flat;
     return {
       key,
       rival: meta.name,
@@ -357,7 +388,8 @@ export async function computeHeadToHead(data: ViewData, request: ViewRequest = {
 // hh4 (2026-10-28): names resolve through the context judge (context_judge.ts) -
 // a rival's maker-less products move from "routes elsewhere" to the rival's side.
 // hh7 (2026-11-03): engine slices carry vendor / tier / mode (the Panel lens's Group-by).
-const HEAD_TO_HEAD_VERSION = "hh7";
+// hh8 (2026-11-12): the reasons harmonization - each matchup's conditions carry `themes` (you / rival / elsewhere in the run's dt4 reason themes, scoped to the matchup's questions); a failed theme pass serves the view uncached.
+const HEAD_TO_HEAD_VERSION = "hh8";
 export function computeHeadToHeadCached(run: Run, project: Project, request: ViewRequest = {}): Promise<HeadToHeadViews | null> {
   const r = requestOf(request);
   return cachedView("head_to_head", HEAD_TO_HEAD_VERSION, run, project, (d) => computeHeadToHead(d, r), { judge: true }, r);

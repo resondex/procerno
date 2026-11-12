@@ -744,23 +744,27 @@ function conditionsPara(c: Ctx): BriefPara | null {
   let away = k.away;
   let towardCells = k.towardCells;
   let awayCells = k.awayCells;
+  // bf22: a themed side counts statements, not rules (inputs.conditions, bs17).
+  let towardUnit = k.towardThemed ? "statements" : "rules";
+  let awayUnit = k.awayThemed ? "statements" : "rules";
   if (!c.isTarget) {
     // A rival's branches: the client's away branch that routes to it, and the client's own branch.
     toward = k.away.filter((g) => g.routes[0]?.name === c.name);
     away = k.toward;
     towardCells = k.awayCells;
     awayCells = k.towardCells;
+    [towardUnit, awayUnit] = [awayUnit, towardUnit];
   }
   const t = toward.slice(0, 3);
   if (t.length) {
     parts.push(`The branch toward ${c.name}: ${listOf(t.map(q))} - the largest appears in ${pctN(towardCells ? t[0].cells / towardCells : 0)} of the questions where the AI gives any condition that sends buyers to it${c.isTarget ? "" : ` from ${c.brand}`}.`);
-    tips.push(t.map((g) => `${g.label}: ${g.rules} rules in ${g.cells} questions`).join("; ") + ".");
+    tips.push(t.map((g) => `${g.label}: ${g.rules} ${towardUnit} in ${g.cells} questions`).join("; ") + ".");
   }
   const a = away.slice(0, 3);
   if (a.length) {
     const named = a.map((g) => (g.routes[0] ? `${q(g)} (to ${g.routes[0].name})` : q(g)));
     parts.push(`The branch away: ${listOf(named)} - the largest appears in ${pctN(awayCells ? a[0].cells / awayCells : 0)} of the questions where the AI gives any condition that sends buyers away.`);
-    tips.push(a.map((g) => `${g.label}: ${g.rules} rules in ${g.cells} questions`).join("; ") + ".");
+    tips.push(a.map((g) => `${g.label}: ${g.rules} ${awayUnit} in ${g.cells} questions`).join("; ") + ".");
   }
   if (c.isTarget) {
     const walls: string[] = [];
@@ -1954,7 +1958,8 @@ export async function computeBrief(data: ViewData, request: BriefRequest = {}): 
 // bf19 (2026-11-09): reads bs12 - the condition insight's title and body (quoted verbatim in the findings) say "reason"; the exemplar's own "The conditions that decide it" section heading is deliberately kept.
 // bf20 (2026-11-09, the owner's ruling: cite a non-Build-a-table surface whenever one exists): the answer cards' go links repoint - a rival's brand card opens its Rivals dossier (hasDossier, the dossiers' own membership rule), the target's opens the map's pooled open-questions contest, the engines card opens Stations (Consideration's by-engine table); Build a table only as the fallback. Go links are not in the written layer's fact sheet, so written frames stay cached. No sentence text changed.
 // bf21 (2026-11-10): the plain-wording pass - reads bs13 / am15 (new move names, lever sentences and insight wording quoted in the memos); actOf restates the new levers; the conditions paragraph, the condition card, the SWOT wall and the jobs wall lines say what sends buyers away and "a fixed situation" instead of "routes" / "wall" / "reason". The exemplar's "The conditions that decide it" heading is kept. Numbers unchanged.
-const BRIEF_VERSION = "bf21";
+// bf22 (2026-11-12): the reasons harmonization - reads bs17 / am22: the conditions paragraph, the condition card and the away-condition finding name the run's reason THEMES (dt4) where a theme map exists (raw condition groups only without one); the paragraph's tips count statements on a themed side.
+const BRIEF_VERSION = "bf22";
 
 /**
  * The brief through the cache. cachedView's keying, with the subject as one

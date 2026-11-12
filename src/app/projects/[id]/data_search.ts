@@ -95,7 +95,7 @@ function stem(w: string): string {
 /** Journey and everyday words -> the question types they mean. */
 const POOL_WORDS: [string[], ViewKey[]][] = [
   [["awareness", "aware", "problem", "pain", "learn", "learning", "education", "explain", "new to", "category", "first heard", "discover", "discovery"], ["awareness_routing", "awareness_explainer"]],
-  [["consideration", "consider", "open choice", "which to get", "which should", "shortlist", "choose", "choice", "pick", "recommend", "buy", "buying", "purchase"], ["headline"]],
+  [["consideration", "consider", "open choice", "what to buy", "which to get", "which should", "shortlist", "choose", "choice", "pick", "recommend", "buy", "buying", "purchase"], ["headline"]],
   [["consideration", "criteria", "what matters", "factors", "look for", "checklist", "requirements"], ["criteria_taught"]],
   [["consideration", "premium", "basic", "tier", "luxury", "high end", "budget", "upmarket"], ["premium_tier"]],
   [["comparison", "compare", "versus", "vs", "head to head", "rival", "competitor", "competition", "matchup", "battle", "against"], ["head_to_head_entity", "head_to_head_class"]],

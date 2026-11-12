@@ -10,7 +10,8 @@ import type {
   RateCell,
 } from "@/lib/engine/head_to_head";
 import { SortTable, Tip, type Col } from "./table";
-import { AnswersModal, BaseNote, fmtN, type AnswersTarget, useEngineSet, viewQuery, EngineTable } from "./view_parts";
+import { AnswersModal, BaseNote, fmtN, type AnswersTarget, useEngineSet, viewQuery, EngineTable, ReasonList, type ReasonRow } from "./view_parts";
+import type { DossierTheme } from "@/lib/engine/reason_themes";
 
 /**
  * The head-to-head views (2026-10-27): prompted win rate per named rival,
@@ -200,6 +201,57 @@ function Direction({
   );
 }
 
+/** One side of a matchup in the run's reason themes (hh8, 2026-11-12) - the
+ * dossiers' and the Stations' ReasonList, so the boundaries speak the same
+ * themes as the Map panel. A theme's share opens its example answers. */
+function ThemeDirection({
+  label,
+  tip,
+  themes,
+  matchup,
+  onOpen,
+  wallColor,
+  routes = false,
+}: {
+  label: string;
+  tip: string;
+  themes: DossierTheme[];
+  matchup: string;
+  onOpen: OpenAnswers;
+  wallColor: string;
+  routes?: boolean;
+}) {
+  if (themes.length === 0) return null;
+  const byLabel = new Map(themes.map((t) => [t.label, t]));
+  const rows = themes.map((t) => ({ ...t, ids: (t.receipts ?? []).map((r) => r.responseId) }));
+  const flat: ReasonRow[] = rows.map((t) => ({
+    label: t.label,
+    share: t.share,
+    ...(t.wall ? { wall: true } : {}),
+    ids: t.ids,
+    ...(routes && t.routes?.length ? { routes: t.routes.map((r) => r.name) } : {}),
+  }));
+  const open = (title: string, ids: string[]) =>
+    onOpen({
+      title: `${label}: ${title}`,
+      subtitle: `${matchup} - answers stating it.`,
+      ids,
+      highlight: [title, ...(byLabel.get(title)?.receipts ?? []).map((r) => r.find)],
+    });
+  return (
+    <div className="min-w-0">
+      <div className="text-[12px] font-medium text-ink-2">
+        <Tip tip={tip}>
+          <span className="cursor-help">{label}</span>
+        </Tip>
+      </div>
+      <div className="mt-1 text-[12px]">
+        <ReasonList flat={flat} themes={rows} wallColor={wallColor} onOpen={open} />
+      </div>
+    </div>
+  );
+}
+
 /** One matchup's stated boundaries. `bare` (the brand dossiers, 2026-11-08):
  * no counts anywhere - no "(n)" per condition, no count tooltips, no "+N
  * more", no counts in the answers modal's subtitle. */
@@ -229,6 +281,42 @@ export function Boundaries({ row, brand, onOpen, bare = false }: { row: HeadToHe
       <p className="mt-0.5 text-[12px] text-ink-3">
         On the context-free ask, {lead} - the AI&apos;s stated boundaries:
       </p>
+      {c.themes ? (
+        <>
+          <div className="mt-2 grid gap-3 sm:grid-cols-2">
+            <ThemeDirection
+              label="You win when"
+              tip={`What the AI says about the buyer when it sends the pick to ${brand}. Each share is of the answers here that send the pick to ${brand} with a stated condition.`}
+              themes={c.themes.you}
+              matchup={matchup}
+              onOpen={onOpen}
+              wallColor="var(--ink-3)"
+            />
+            <ThemeDirection
+              label="You lose when"
+              tip={`What the AI says about the buyer when it sends the pick to ${row.rival}. Each share is of the answers here that send the pick to ${row.rival} with a stated condition.`}
+              themes={c.themes.rival}
+              matchup={matchup}
+              onOpen={onOpen}
+              wallColor="var(--ink-3)"
+            />
+          </div>
+          {c.themes.elsewhere.length > 0 && (
+            <div className="mt-3">
+              <ThemeDirection
+                label="Goes to another brand when"
+                tip={`What the AI says about the buyer when it sends the pick to a brand other than ${brand} or ${row.rival}.`}
+                themes={c.themes.elsewhere}
+                matchup={matchup}
+                onOpen={onOpen}
+                wallColor="var(--ink-3)"
+                routes
+              />
+            </div>
+          )}
+        </>
+      ) : (
+      <>
       <div className="mt-2 grid gap-3 sm:grid-cols-2">
         <Direction
           label="You win when"
@@ -272,6 +360,8 @@ export function Boundaries({ row, brand, onOpen, bare = false }: { row: HeadToHe
             ))}
           </span>
         </div>
+      )}
+      </>
       )}
     </div>
   );

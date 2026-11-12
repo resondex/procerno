@@ -2,9 +2,11 @@ import { buildResolver, type Resolved, type Resolver } from "./brand_resolve";
 import { containsSeq, famTokens } from "./brand_family";
 import { excludedWords } from "./definition_overlap";
 import { conditionKeysFor, conditionStemKey, isDefaultCondition } from "./condition_groups";
-import { computeRules, ENUM_TOWARD, GENERIC_AWAY, type RuleGroup, type RulesView } from "./rules_explorer";
-import { pickRefs, poolInputs, rankGroups, routeShares, situationsOf, spreadRefs, themeReasons, themeTreeAnswers, type AnswerRules, type DossierTheme, type ThemeMap } from "./reason_themes";
+import { ENUM_TOWARD, GENERIC_AWAY, type RuleGroup } from "./rules_explorer";
+import { pickRefs, routeShares, spreadRefs, themeTreeAnswers, type DossierTheme, type ThemeMap } from "./reason_themes";
+import { rulesForThemes, sharedRules, sharedRunThemes, type RulesShared } from "./run_themes";
 import { isWallWording } from "./wall_wording";
+import { ROW_NAME } from "./question_names";
 import { commitSentence, insightBar, insightInputs, pctFine, productNoun, rankedInsights, type ExampleIndex, type InsightInputs } from "./summary_insights";
 import { BRAND_SUMMARY_VERSION, computeBrandSummary, sharedBrandSummary, type BrandSummaryView, type Insight } from "./brand_summary";
 import { computeValue, type ValueRow } from "./value";
@@ -183,6 +185,8 @@ const BOTH_MIN = 3;
 const BOTH_RATIO = 1 / 3;
 const BOTH_SHARE = 0.02; // each side at least 2% of the contest's rule-bearing answers
 const BOTH_TOP = 4;
+/** am22: the most themes a rival's per-contest `sendsThemes` carries (the panel draws 3, its fold 8). */
+const SENDS_THEME_TOP = 8;
 export const RECEIPTS = 5;
 const WALL_MIN = 5;
 const DEFAULT_MARGIN = 0.05;
@@ -568,7 +572,7 @@ export async function computeAnalysisMap(
    * decision-rules ledger in the UI), not just the room cells' union -
    * assistants stay the Panel lens and conditions stay inside positions. */
   const headline = pool("headline");
-  if (headline.length) pushAll(choiceSpec("chooses", "open", "Open choice", "all", "All buyers", headline));
+  if (headline.length) pushAll(choiceSpec("chooses", "open", ROW_NAME.open, "all", "All buyers", headline));
   const byRoom = (rows: PoolRow[]) => {
     const m = new Map<string, PoolRow[]>();
     for (const r of rows) {
@@ -579,9 +583,9 @@ export async function computeAnalysisMap(
     return [...m.entries()].sort((a, b) => roomIndex(a[0]) - roomIndex(b[0]));
   };
   for (const [room, rows] of byRoom(headline.filter((r) => r.intent.stage === "discovery" || r.intent.stage === "use_case")))
-    specs.push(choiceSpec("chooses", "open", "Open choice", norm(room), room, rows));
+    specs.push(choiceSpec("chooses", "open", ROW_NAME.open, norm(room), room, rows));
   const social = headline.filter((r) => r.intent.stage === "social_validation");
-  if (social.length) specs.push(choiceSpec("chooses", "social", "Social validation", "all", "", social, true));
+  if (social.length) specs.push(choiceSpec("chooses", "social", ROW_NAME.social, "all", "", social, true));
 
   // Awareness (problem recognition per room; a base-voiced one is wide) and category education.
   const awarenessSpec = (row: string, rowLabel: string, key: string, label: string, rows: PoolRow[], wide: boolean): CellSpec => {
@@ -633,17 +637,17 @@ export async function computeAnalysisMap(
   const routingRooms = byRoom(routing);
   const routingBase = routing.filter((r) => !r.intent.situation);
   const routingCells = routingRooms.length + (routingBase.length ? 1 : 0);
-  if (routingCells >= 2) pushAll(awarenessSpec("awareness", "Awareness", "all", "All buyers", routing, false));
-  for (const [room, rows] of routingRooms) specs.push(awarenessSpec("awareness", "Awareness", norm(room), room, rows, false));
+  if (routingCells >= 2) pushAll(awarenessSpec("awareness", ROW_NAME.awareness, "all", "All buyers", routing, false));
+  for (const [room, rows] of routingRooms) specs.push(awarenessSpec("awareness", ROW_NAME.awareness, norm(room), room, rows, false));
   // A base-voiced cell among siblings keys "general" (the All cell owns "all"); alone, it keeps the sole-wide form.
   if (routingBase.length)
     specs.push(
       routingCells >= 2
-        ? awarenessSpec("awareness", "Awareness", "general", "No particular buyer", routingBase, false)
-        : awarenessSpec("awareness", "Awareness", "all", "", routingBase, true)
+        ? awarenessSpec("awareness", ROW_NAME.awareness, "general", "No particular buyer", routingBase, false)
+        : awarenessSpec("awareness", ROW_NAME.awareness, "all", "", routingBase, true)
     );
   const explainer = pool("awareness_explainer");
-  if (explainer.length) specs.push(awarenessSpec("explainer", "Learning the category", "all", "", explainer, true));
+  if (explainer.length) specs.push(awarenessSpec("explainer", ROW_NAME.explainer, "all", "", explainer, true));
 
   // Value per room (computeValue: the v6 own rung, the confirmed lines).
   const valueView = computeValue(data, eng);
@@ -678,7 +682,7 @@ export async function computeAnalysisMap(
           ? { name: rivTop.name, kind: TAKER.rival }
           : { name: "A cheaper option, unnamed", kind: TAKER.undecided };
     pushAll({
-      band: "chooses", row: "value", rowLabel: "Value", key: "all", label: "All buyers", rows: valueRows,
+      band: "chooses", row: "value", rowLabel: ROW_NAME.value, key: "all", label: "All buyers", rows: valueRows,
       you: yes, them: no, taker, inhouseShare,
       note: (v) => (v === "nocall" ? `${pct(cell(valueRows.length - yes.length - no.length, valueRows.length))} "depends"` : `${pct(worthC)} worth it / ${pct(notC)} not`),
       claim: (v) => {
@@ -713,7 +717,7 @@ export async function computeAnalysisMap(
           : { name: "A cheaper option, unnamed", kind: TAKER.undecided };
     const subject = line ?? brand;
     specs.push({
-      band: "chooses", row: "value", rowLabel: "Value", key: norm(room) || (valueGroups.size >= 2 ? "general" : "all"), label, wide: !room && valueGroups.size < 2, rows,
+      band: "chooses", row: "value", rowLabel: ROW_NAME.value, key: norm(room) || (valueGroups.size >= 2 ? "general" : "all"), label, wide: !room && valueGroups.size < 2, rows,
       you: yes, them: no, taker, inhouseShare,
       note: (v) => (v === "nocall" ? `${pct(cell(rows.length - yes.length - no.length, rows.length))} "depends"` : `${pct(worthC)} worth it / ${pct(notC)} not`),
       claim: (v) => {
@@ -729,7 +733,7 @@ export async function computeAnalysisMap(
 
   // Premium vs basic (wide).
   const premium = pool("premium_tier");
-  if (premium.length) specs.push(choiceSpec("chooses", "premium", "Premium vs basic", "all", "", premium, true));
+  if (premium.length) specs.push(choiceSpec("chooses", "premium", ROW_NAME.premium, "all", "", premium, true));
 
   // Criteria taught: per room when room-pinned, else wide.
   const lift = summary.reasonLift;
@@ -767,7 +771,7 @@ export async function computeAnalysisMap(
     const you = withReasons.filter((r) => winTaught.some((w) => r.code.reasons!.includes(w.code)));
     const them = withReasons.filter((r) => loseTaught.some((l) => r.code.reasons!.includes(l.code)));
     return {
-      band: "chooses", row: "criteria", rowLabel: "Criteria taught", key, label, wide, rows,
+      band: "chooses", row: "criteria", rowLabel: ROW_NAME.criteria, key, label, wide, rows,
       you, them: them.length ? them : withReasons.filter((r) => r.code.reasons!.includes(top5[0] ?? "")),
       taker: { name: "The taught checklist", kind: TAKER.undecided },
       verdictOverride: { verdict, lean },
@@ -827,7 +831,7 @@ export async function computeAnalysisMap(
     const rec = cell(won.length, won.length + lost.length);
     const undecided = cell(rows.length - firm.length, rows.length);
     return {
-      band: "fights", row: "h2h", rowLabel: "Head-to-head", key, label: rival.name, rivalKey: rival.key, rows,
+      band: "fights", row: "h2h", rowLabel: ROW_NAME.h2h, key, label: rival.name, rivalKey: rival.key, rows,
       you: won, them: lost,
       taker: { name: rival.name, kind: takerKindOf(rival.key) },
       leakShare: firm.length >= MIN_SIDE ? share(outside.length, firm.length) : 0,
@@ -865,7 +869,7 @@ export async function computeAnalysisMap(
     const rec = cell(won.length, won.length + lost.length);
     const undecided = cell(rows.length - firm.length, rows.length);
     return {
-      band: "fights", row: "h2h", rowLabel: "Head-to-head", key: "all", label: "All rivals", rows,
+      band: "fights", row: "h2h", rowLabel: ROW_NAME.h2h, key: "all", label: "All rivals", rows,
       you: won, them: lost,
       taker: tough ? { name: tough.name, kind: TAKER.rival } : { name: "No single pick", kind: TAKER.undecided },
       leakShare: firm.length >= MIN_SIDE ? share(outside.length, firm.length) : 0,
@@ -931,7 +935,7 @@ export async function computeAnalysisMap(
     const outside = firm.length - inCat.length;
     const whose = key === "all" ? "Buyers leaving a rival" : `Buyers leaving ${label}`;
     return {
-      band: "fights", row: "leavers", rowLabel: "Rivals' customers switching", key, label, wide, rows,
+      band: "fights", row: "leavers", rowLabel: ROW_NAME.leavers, key, label, wide, rows,
       // The brand being left (debug.cells only - the brand dossiers link its leaver cell by it).
       ...(leftKey ? { rivalKey: leftKey } : {}),
       you, them: top ? top[1].rows : [],
@@ -1011,7 +1015,7 @@ export async function computeAnalysisMap(
     const go = cell(proceed.length, rows.length);
     const goOfAgreed = cell(agreed.filter((r) => r.code.proceed_or_avoid === "proceed").length, agreed.length);
     return {
-      band: "doubts", row: "buyers", rowLabel: "Buyers' worries", key, label, rows,
+      band: "doubts", row: "buyers", rowLabel: ROW_NAME.buyers, key, label, rows,
       you: proceed, them: conceded,
       taker: exitTaker(conceded, { name: "The worry, conceded", kind: TAKER.undecided }),
       conceded: { agree, goAheadOfAgreed: goOfAgreed },
@@ -1050,14 +1054,14 @@ export async function computeAnalysisMap(
       lift: { wins: keep, others: leave, note: "Share of stay answers vs leave answers arguing each code.", sides: ["stay answers", "leave answers"] },
     };
   };
-  if (custGroups.length >= 2) pushAll(staySpec("customers", "Customers' worries", "all", "All worries", stayRows, false, "Across every customer worry"));
+  if (custGroups.length >= 2) pushAll(staySpec("customers", ROW_NAME.customers, "all", "All worries", stayRows, false, "Across every customer worry"));
   for (const g of custGroups) {
     const label = g.concern || "A worry";
     const key = (concernCount.get(norm(g.concern)) ?? 0) > 1 ? `${norm(label)}|${g.stage}` : norm(label);
-    specs.push(staySpec("customers", "Customers' worries", key, label, g.rows, false, `When a customer worries "${label}"`));
+    specs.push(staySpec("customers", ROW_NAME.customers, key, label, g.rows, false, `When a customer worries "${label}"`));
   }
   const hold = pool("defensive_hold");
-  if (hold.length) specs.push(staySpec("hold", "Holding your own", "all", "", hold, true, "When your own customer asks what else to look at"));
+  if (hold.length) specs.push(staySpec("hold", ROW_NAME.hold, "all", "", hold, true, "When your own customer asks what else to look at"));
   const repertoire = pool("repertoire");
   if (repertoire.length) {
     const stick = repertoire.filter((r) => pickOf(r).key === targetKey);
@@ -1068,7 +1072,7 @@ export async function computeAnalysisMap(
     const stickC = cell(stick.length, repertoire.length);
     const swC = cell(sw.length, repertoire.length);
     specs.push({
-      band: "doubts", row: "repertoire", rowLabel: "Repertoire", key: "all", label: "", wide: true, rows: repertoire,
+      band: "doubts", row: "repertoire", rowLabel: ROW_NAME.repertoire, key: "all", label: "", wide: true, rows: repertoire,
       you: stick, them: sw,
       taker: topSw ? { name: topSw[0], kind: TAKER.rival } : { name: "No single pick", kind: TAKER.undecided },
       note: () => `stick ${pct(stickC)} · switch ${pct(swC)}`,
@@ -1101,7 +1105,7 @@ export async function computeAnalysisMap(
     const names = settledPresent.map((s) => s.key);
     const list = names.length > 1 ? `${names.slice(0, -1).join(", ")} and ${names[names.length - 1]}` : names[0];
     pushAll({
-      band: "settled", row: "settled", rowLabel: "Settled customers", key: "all", label: "All questions", rows,
+      band: "settled", row: "settled", rowLabel: ROW_NAME.settled, key: "all", label: "All questions", rows,
       you: str, them: weak,
       taker: topRed && topRed[1] >= Math.max(3, rows.length * 0.1) ? { name: topRed[0], kind: TAKER.rival } : { name: "No side taken", kind: TAKER.undecided },
       note: () => `strengthens ${pct(strC)}`,
@@ -1124,7 +1128,7 @@ export async function computeAnalysisMap(
     for (const r of rows) for (const x of exitsOf(r.code.redirect_to).exits.values()) redirects.set(x.name, (redirects.get(x.name) ?? 0) + 1);
     const topRed = [...redirects.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))[0];
     specs.push({
-      band: "settled", row: "settled", rowLabel: "Settled customers", key, label, rows,
+      band: "settled", row: "settled", rowLabel: ROW_NAME.settled, key, label, rows,
       you: str, them: weak,
       taker: topRed && topRed[1] >= Math.max(3, rows.length * 0.1) ? { name: topRed[0], kind: TAKER.rival } : { name: "No side taken", kind: TAKER.undecided },
       settledWatch,
@@ -1569,8 +1573,16 @@ export async function computeAnalysisMap(
   /** am20: a rival inside one contest - its funnel, the arguments when it is
    * picked (beside your picks when you have enough), and the stated conditions
    * on the buyer that send picks to it here. */
-  const rivalHere = (rows: PoolRow[], key: string, name: string, itsPicks: PoolRow[], yourPicks: PoolRow[], away: Group[]): RivalHere => {
+  const rivalHere = (rows: PoolRow[], key: string, name: string, itsPicks: PoolRow[], yourPicks: PoolRow[], away: Group[], cellIntents: Set<string>): RivalHere => {
     const out: RivalHere = { read: brandRead(rows, key, name), sends: [] };
+    // am22: the same stated conditions in the run's themes - the away pool
+    // scoped to this contest's questions, counting only the answers whose
+    // rule in the group sends the buyer to this rival. Present (possibly
+    // empty) whenever the theme map exists; the flat `sends` stays the fallback.
+    if (awayThemeMap) {
+      const sendsHere = (gid: string, id: string) => !!rulesShared.answerRules.get(gid)?.get(id)?.to.includes(name);
+      out.sendsThemes = themeTreeAnswers(awayPool, awayThemeMap, rulesShared.cellAnswers, sitOf, cellIntents, { rules: rulesShared.answerRules, side: "away", own: project.brand }, sendsHere).slice(0, SENDS_THEME_TOP);
+    }
     const compare = liftsOf(itsPicks, yourPicks).map((l) => {
       const refs = liftRefs(l.label, itsPicks, yourPicks);
       return refs.length ? { ...l, receipts: refs } : l;
@@ -1675,26 +1687,14 @@ export async function computeAnalysisMap(
    * that cell's questions as the filter. Keyless or non-gpt -> no themes
    * (flat lists); a failed pass -> no themes on either side and the view is
    * served uncached so the next open retries. -- */
-  const rulesShared = pre?.rules ?? (await rulesForThemes(data, eng));
-  const sitOf = situationsOf(data.intents);
-  const towardPool = rankGroups(rulesShared.rules.groups.filter((g) => g.side === "you")).filter((g) => !isDefaultCondition(g.label));
-  const awayPool = rankGroups(rulesShared.rules.groups.filter((g) => g.side === "away")).filter((g) => !isDefaultCondition(g.label));
-  let towardThemeMap: ThemeMap | null = null;
-  let awayThemeMap: ThemeMap | null = null;
-  try {
-    const meta = { brand: project.brand, category: project.category, projectId: project.id };
-    const costCtx = { projectId: project.id, runId: data.run.id };
-    const t = poolInputs(towardPool, rulesShared.surfaces, rulesShared.cellSets, sitOf);
-    const a = poolInputs(awayPool, rulesShared.surfaces, rulesShared.cellSets, sitOf);
-    [towardThemeMap, awayThemeMap] = await Promise.all([
-      themeReasons(t.labelCells, t.labelSamples, "toward", meta, costCtx),
-      themeReasons(a.labelCells, a.labelSamples, "away", meta, costCtx),
-    ]);
-  } catch (e) {
-    console.warn(`map reason themes failed, flat lists served: ${e instanceof Error ? e.message : e}`);
-    data.judgeIncomplete = true;
-    towardThemeMap = awayThemeMap = null;
-  }
+  // am22: the pass lives in run_themes.ts (sharedRunThemes) - same pools,
+  // same inputs, one memoized pass the map, the Stations, the dossiers, the
+  // summary and the head-to-head view all read.
+  const runThemes = await sharedRunThemes(data, eng);
+  const rulesShared = pre?.rules ?? runThemes.rules;
+  const { sitOf, towardPool, awayPool } = runThemes;
+  const towardThemeMap: ThemeMap | null = runThemes.toward;
+  const awayThemeMap: ThemeMap | null = runThemes.away;
   /** One side's tree scoped to a cell's questions, shares at ANSWER grain
    * (question grain saturates inside a cell: with every engine answering each
    * question, nearly every common reason touches every question). A side with
@@ -1714,11 +1714,11 @@ export async function computeAnalysisMap(
   const BAND_META: Record<BandSlug, { title: string; sub: string }> = {
     chooses: {
       title: "Where the buyer chooses",
-      sub: "These contests vary by buying situation - the situations you confirmed at setup. Each row opens with everything pooled, then one contest per situation; the pooled open-choice contest lists every condition the AI gives buyers.",
+      sub: "One row for each kind of buying question, split by the buying situations you confirmed at setup. The first box in a row counts every buyer together.",
     },
-    fights: { title: "The named fights", sub: "These contests vary by rival - the buyer is held fixed, so this is relative strength." },
-    doubts: { title: "The doubts", sub: "One cell per worry you confirmed at the worries gate." },
-    settled: { title: "The settled customer", sub: "Asked-for questions from committed customers - a ceiling, not a standing." },
+    fights: { title: "The named fights", sub: "Questions that put you next to one rival. The buyer is the same in each, so this shows how you do against each rival." },
+    doubts: { title: "The doubts", sub: "One box for each worry you confirmed at setup." },
+    settled: { title: "Your customers making your case", sub: "Your own customers asking the AI to make the case for you. Read it as a best case, not as where you stand." },
   };
 
   for (const band of ["chooses", "fights", "doubts", "settled"] as BandSlug[]) {
@@ -1915,7 +1915,7 @@ export async function computeAnalysisMap(
                 name: b.name,
                 share: pct(cell(b.rows.length, split.n)),
                 proof: receiptsOf(b.rows.filter((r) => quoteOf(r))).slice(0, BRAND_PROOF),
-                here: rivalHere(s.rows, b.key, b.name, b.rows, youRows, conds.away),
+                here: rivalHere(s.rows, b.key, b.name, b.rows, youRows, conds.away, cellIntents),
               }));
             youShare = pct(cell(youRows.length, split.n));
             youRead = brandRead(s.rows, targetKey!, brand);
@@ -2028,37 +2028,9 @@ export async function computeAnalysisMap(
 
 /* ------------------------------ rule pools ------------------------------ */
 
-/** The rules explorer's groups plus the capture the theme pass reads. */
-export interface RulesShared {
-  rules: RulesView;
-  cellSets: Map<string, string[]>;
-  surfaces: Map<string, string[]>;
-  /** Group id -> intent id -> distinct response ids (answer-grain cell shares). */
-  cellAnswers: Map<string, Map<string, Set<string>>>;
-  /** am15: group id -> response id -> its statement (receipts and routes). */
-  answerRules: AnswerRules;
-}
-
-/** computeRules with the theme capture, over the engines-only request (the
- * dossier computes it the same way and hands it in, so it runs once). */
-export async function rulesForThemes(data: ViewData, eng: ViewRequest): Promise<RulesShared> {
-  const cellSets = new Map<string, string[]>();
-  const surfaces = new Map<string, string[]>();
-  const cellAnswers = new Map<string, Map<string, Set<string>>>();
-  const answerRules: AnswerRules = new Map();
-  const rules = await computeRules(data, eng, { cellSets, surfaces, cellAnswers, answerRules });
-  return { rules, cellSets, surfaces, cellAnswers, answerRules };
-}
-
-const rulesMemo = computeMemo<RulesShared>("rules_for_themes");
-
-/** rulesForThemes once per load epoch and engine set (view_data
- * computeMemo): the map and the dossiers read the same groups and capture.
- * READ-ONLY: the maps and the rules view are shared. */
-export function sharedRules(data: ViewData, eng: ViewRequest): Promise<RulesShared> {
-  const e: ViewRequest = eng.engines ? { engines: eng.engines } : {};
-  return rulesMemo.get(data, e, (d) => rulesForThemes(d, e));
-}
+// RulesShared / rulesForThemes / sharedRules moved to run_themes.ts
+// (2026-11-12, the reasons harmonization); re-exported for their importers.
+export { rulesForThemes, sharedRules, type RulesShared };
 
 export interface SharedAnalysisMap {
   view: AnalysisMapView;
@@ -2497,7 +2469,8 @@ function tensionsOf(
 // am16 (2026-11-10): the tightened wall test - the wall sentence now advises, so it reads the shown wording only.
 // am17 (2026-11-10): each tension carries `viz` (the Overview finding card's 2-4 bars).
 // am18 (2026-11-10): each buying situation's open-choice cell states the same funnel figures as the all-buyers cell.
-export const ANALYSIS_MAP_VERSION = "am21"; // am21 (2026-11-12): reason-row examples prefer answers that send the buyer one way only, then the wording closest to the row name, and each carries `to` (the product it sends the buyer to). // am20 (2026-11-12): each rival in a pick contest's `brands` carries `here` (its funnel in that contest, the arguments when it is picked beside your picks, the stated conditions sending picks to it) and the position carries `youRead` - the rival panel's lead read. Additive; theme inputs unchanged. // am19 am19 (2026-11-11): every Overview number opens its answers - `examples` (named, commits), refs on each share-of-picks row and on the tension bars (the first tension's funnel bars and the bs16 insight bars). // am18 (2026-11-10): each buying situation's open-choice cell states the same funnel figures as the all-buyers cell (named, recommended, commits, picked, outside the category), from its own answers. // // am17 (2026-11-10): each tension carries `viz` (the Overview finding card's 2-4 bars) - the first from the casting facts, the rest from the bs15 insights
+// am22 (2026-11-12): the reasons harmonization - each rival's `here` carries `sendsThemes` (the run's dt4 themes, scoped to the contest and to answers sending the buyer to that rival); the theme pass moves to run_themes.ts (same inputs, same dt4 keys); reads bs17 (the away-condition sentence names its theme). Row names come from question_names.ts (the plain-wording pass: What to buy, What's popular, Spotting the problem, What to look for, Habit, Your customers looking around, Your customers making your case) and the band descriptions are rewritten.
+export const ANALYSIS_MAP_VERSION = "am22"; // am21 (2026-11-12): reason-row examples prefer answers that send the buyer one way only, then the wording closest to the row name, and each carries `to` (the product it sends the buyer to). // am20 (2026-11-12): each rival in a pick contest's `brands` carries `here` (its funnel in that contest, the arguments when it is picked beside your picks, the stated conditions sending picks to it) and the position carries `youRead` - the rival panel's lead read. Additive; theme inputs unchanged. // am19 am19 (2026-11-11): every Overview number opens its answers - `examples` (named, commits), refs on each share-of-picks row and on the tension bars (the first tension's funnel bars and the bs16 insight bars). // am18 (2026-11-10): each buying situation's open-choice cell states the same funnel figures as the all-buyers cell (named, recommended, commits, picked, outside the category), from its own answers. // // am17 (2026-11-10): each tension carries `viz` (the Overview finding card's 2-4 bars) - the first from the casting facts, the rest from the bs15 insights
 // The fold (2026-11-09, Tyler): a view's cache key carries the versions of
 // the views whose content it embeds, so the lockstep bump convention is
 // mechanical - the map embeds the summary's insights, casting and verdict.

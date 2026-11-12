@@ -93,7 +93,7 @@ export default function SettledSections({ runId }: { runId: string }) {
   return (
     <section className="grid gap-3">
       <div>
-        <h3 className="section-label mb-1">Settled customers</h3>
+        <h3 className="section-label mb-1">Your customers making your case</h3>
         <p className="text-[12px] text-ink-3">
           Customers justifying, growing, equipping and defending you. Asked across all buyers.
         </p>
