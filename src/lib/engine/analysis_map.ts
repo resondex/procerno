@@ -182,9 +182,14 @@ const LIFT_TOP = 8;
 const COND_TOP = 6;
 /** am21 both-ways: answers needed per side, the smaller side's minimum ratio to the larger, rows shown. */
 const BOTH_MIN = 3;
-const BOTH_RATIO = 1 / 3;
-const BOTH_SHARE = 0.02; // each side at least 2% of the contest's rule-bearing answers
-const BOTH_TOP = 4;
+const BOTH_RATIO = 1 / 2;
+const BOTH_SHARE = 0.05; // each side at least 5% of the contest's rule-bearing answers
+const BOTH_TOP = 3;
+/** am24: both-ways rows are drawn only where the two sides are different products (a pick between
+ * brands). On yes/no contests (worth it, go ahead, stay) the two sides are one question's two
+ * answers, and the meaning-based grouping pairs a reason with its opposite there. */
+const BOTH_ROWS = new Set(["open", "social", "premium", "leavers", "h2h"]);
+const NEGATED = /\b(?:not|no|never|without|rarely|seldom|hardly|hate|avoid|lack|won't|can't|cannot)\b|n't\b|n’t\b/i;
 /** am22: the most themes a rival's per-contest `sendsThemes` carries (the panel draws 3, its fold 8). */
 const SENDS_THEME_TOP = 8;
 export const RECEIPTS = 5;
@@ -1465,6 +1470,8 @@ export async function computeAnalysisMap(
       .flatMap((t) => {
         const a = away.get(t.ck);
         if (!a || Math.min(t.n, a.n) < Math.max(BOTH_MIN, BOTH_SHARE * conds.bearing) || Math.min(t.n, a.n) < BOTH_RATIO * Math.max(t.n, a.n)) return [];
+        // The grouping reads meaning, not polarity: a reason and its opposite can share a key. Those are two reasons, not one stated both ways.
+        if (NEGATED.test(t.label) !== NEGATED.test(a.label)) return [];
         return [{ t, a }];
       })
       .sort((x, y) => y.t.n + y.a.n - (x.t.n + x.a.n) || x.t.label.localeCompare(y.t.label))
@@ -1892,7 +1899,7 @@ export async function computeAnalysisMap(
         const shown = new Set<string>([...(towardThemes ?? []), ...toward].flatMap((x) => (x.receipts ?? []).map((r) => r.responseId)));
         const awayThemes = cellThemes(awayPool, awayThemeMap, cellIntents, "away", shown);
         let away: ConditionItem[] = conds.away.slice(0, COND_TOP).map((g) => ({ text: g.label, n: g.n, ...(wallGroups.includes(g) ? { wall: true } : {}), ...conditionExtras(g, conds.bearing, true, !awayThemes, shown) }));
-        const bothWays = bothWaysOf(conds);
+        const bothWays = BOTH_ROWS.has(rowSlug) ? bothWaysOf(conds) : [];
         if (conds.bearing < 5 && away.length === 0 && s.exitFallback?.length) away = s.exitFallback.map((x) => ({ text: `Sent to ${x.name}`, n: x.n }));
 
         const numerator = verdict === "yours" ? s.you : verdict === "theirs" ? s.them : verdict === "contested" ? [...s.you, ...s.them] : s.rows;
@@ -2476,7 +2483,7 @@ function tensionsOf(
 // am17 (2026-11-10): each tension carries `viz` (the Overview finding card's 2-4 bars).
 // am18 (2026-11-10): each buying situation's open-choice cell states the same funnel figures as the all-buyers cell.
 // am22 (2026-11-12): the reasons harmonization - each rival's `here` carries `sendsThemes` (the run's dt4 themes, scoped to the contest and to answers sending the buyer to that rival); the theme pass moves to run_themes.ts (same inputs, same dt4 keys); reads bs17 (the away-condition sentence names its theme). Row names come from question_names.ts (the plain-wording pass: What to buy, What's popular, Spotting the problem, What to look for, Habit, Your customers looking around, Your customers making your case) and the band descriptions are rewritten.
-export const ANALYSIS_MAP_VERSION = "am23"; // am23 (2026-11-12): an answer shown as an example toward you is never shown away; a rival's panel examples name only its own products in `to`. // am21 (2026-11-12): reason-row examples prefer answers that send the buyer one way only, then the wording closest to the row name, and each carries `to` (the product it sends the buyer to). // am20 (2026-11-12): each rival in a pick contest's `brands` carries `here` (its funnel in that contest, the arguments when it is picked beside your picks, the stated conditions sending picks to it) and the position carries `youRead` - the rival panel's lead read. Additive; theme inputs unchanged. // am19 am19 (2026-11-11): every Overview number opens its answers - `examples` (named, commits), refs on each share-of-picks row and on the tension bars (the first tension's funnel bars and the bs16 insight bars). // am18 (2026-11-10): each buying situation's open-choice cell states the same funnel figures as the all-buyers cell (named, recommended, commits, picked, outside the category), from its own answers. // // am17 (2026-11-10): each tension carries `viz` (the Overview finding card's 2-4 bars) - the first from the casting facts, the rest from the bs15 insights
+export const ANALYSIS_MAP_VERSION = "am24"; // am24 (2026-11-12): both-ways rows only on pick contests, each side at least 5% and half the other, top 3, never a reason paired with its opposite. // am23 (2026-11-12): an answer shown as an example toward you is never shown away; a rival's panel examples name only its own products in `to`. // am21 (2026-11-12): reason-row examples prefer answers that send the buyer one way only, then the wording closest to the row name, and each carries `to` (the product it sends the buyer to). // am20 (2026-11-12): each rival in a pick contest's `brands` carries `here` (its funnel in that contest, the arguments when it is picked beside your picks, the stated conditions sending picks to it) and the position carries `youRead` - the rival panel's lead read. Additive; theme inputs unchanged. // am19 am19 (2026-11-11): every Overview number opens its answers - `examples` (named, commits), refs on each share-of-picks row and on the tension bars (the first tension's funnel bars and the bs16 insight bars). // am18 (2026-11-10): each buying situation's open-choice cell states the same funnel figures as the all-buyers cell (named, recommended, commits, picked, outside the category), from its own answers. // // am17 (2026-11-10): each tension carries `viz` (the Overview finding card's 2-4 bars) - the first from the casting facts, the rest from the bs15 insights
 // The fold (2026-11-09, Tyler): a view's cache key carries the versions of
 // the views whose content it embeds, so the lockstep bump convention is
 // mechanical - the map embeds the summary's insights, casting and verdict.
