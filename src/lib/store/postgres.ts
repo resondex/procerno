@@ -9,6 +9,7 @@ import type {
   Intent,
   Project,
   Prompt,
+  PromptFlagRow,
   Run,
   ResponseRow,
   ResponseMetaRow,
@@ -285,6 +286,39 @@ function ensureSchema(): Promise<void> {
       await sql`ALTER TABLE prompts ADD COLUMN IF NOT EXISTS flag_reason TEXT`;
       await sql`ALTER TABLE prompts ADD COLUMN IF NOT EXISTS suggested_alternatives TEXT NOT NULL DEFAULT '[]'`;
       await sql`ALTER TABLE prompts ADD COLUMN IF NOT EXISTS retired INTEGER NOT NULL DEFAULT 0`;
+      // Staged replacement wordings (2026-11-11, the question check's
+      // first-wave review): staged and replaced prompts are hidden from
+      // every response / code listing.
+      await sql`ALTER TABLE prompts ADD COLUMN IF NOT EXISTS staged INTEGER NOT NULL DEFAULT 0`;
+      await sql`ALTER TABLE prompts ADD COLUMN IF NOT EXISTS replaces TEXT`;
+      await sql`ALTER TABLE prompts ADD COLUMN IF NOT EXISTS replaced_by TEXT`;
+      // Keeps the hidden-wording filter on every answer listing an index probe.
+      await sql`CREATE INDEX IF NOT EXISTS idx_prompts_hidden ON prompts(id) WHERE staged = 1 OR replaced_by IS NOT NULL`;
+      // The question check's flag log (2026-11-11): one row per (run, prompt).
+      await sql`CREATE TABLE IF NOT EXISTS prompt_flags (
+        id TEXT PRIMARY KEY,
+        project_id TEXT NOT NULL,
+        run_id TEXT NOT NULL,
+        prompt_id TEXT NOT NULL,
+        intent_id TEXT,
+        stage TEXT,
+        kind TEXT NOT NULL,
+        prompt_text TEXT NOT NULL,
+        rate DOUBLE PRECISION,
+        siblings_rate DOUBLE PRECISION,
+        answers INTEGER,
+        reason TEXT,
+        examples TEXT,
+        suggested_text TEXT,
+        suggestion_meta TEXT,
+        staged_prompt_id TEXT,
+        status TEXT NOT NULL DEFAULT 'open',
+        created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+        resolved_at TIMESTAMPTZ,
+        resolved_text TEXT,
+        UNIQUE (run_id, prompt_id)
+      )`;
+      await sql`CREATE INDEX IF NOT EXISTS idx_prompt_flags_project ON prompt_flags(project_id)`;
       await sql`CREATE TABLE IF NOT EXISTS runs (
         id TEXT PRIMARY KEY,
         project_id TEXT NOT NULL REFERENCES projects(id),
@@ -447,6 +481,43 @@ function rowToDraft(r: Record<string, unknown>): SetupDraft {
     wizard: r.wizard ? JSON.parse(r.wizard as string) : null,
     updated_at: iso(r.updated_at)!,
   };
+}
+
+function flagRow(r: Record<string, unknown>): PromptFlagRow {
+  return {
+    id: r.id as string,
+    project_id: r.project_id as string,
+    run_id: r.run_id as string,
+    prompt_id: r.prompt_id as string,
+    intent_id: (r.intent_id as string | null) ?? null,
+    stage: (r.stage as string | null) ?? null,
+    kind: r.kind as string,
+    prompt_text: r.prompt_text as string,
+    rate: r.rate == null ? null : Number(r.rate),
+    siblings_rate: r.siblings_rate == null ? null : Number(r.siblings_rate),
+    answers: r.answers == null ? null : Number(r.answers),
+    reason: (r.reason as string | null) ?? null,
+    examples: (r.examples as string | null) ?? null,
+    suggested_text: (r.suggested_text as string | null) ?? null,
+    suggestion_meta: (r.suggestion_meta as string | null) ?? null,
+    staged_prompt_id: (r.staged_prompt_id as string | null) ?? null,
+    status: r.status as PromptFlagRow["status"],
+    created_at: iso(r.created_at)!,
+    resolved_at: iso(r.resolved_at),
+    resolved_text: (r.resolved_text as string | null) ?? null,
+  };
+}
+
+function promptRow(r: Record<string, unknown>): Prompt {
+  return {
+    ...r,
+    flagged: (r.flagged as number) ?? 0,
+    retired: (r.retired as number) ?? 0,
+    staged: (r.staged as number) ?? 0,
+    replaces: (r.replaces as string | null) ?? null,
+    replaced_by: (r.replaced_by as string | null) ?? null,
+    suggested_alternatives: JSON.parse((r.suggested_alternatives as string) ?? "[]"),
+  } as unknown as Prompt;
 }
 
 /** Every responses column but the answer body (and seq, used only to order). */
@@ -1119,19 +1190,100 @@ export const pgStore: Store = {
   async listPrompts(projectId) {
     const sql = await db();
     const rows =
-      await sql`SELECT id, project_id, text, theme, intent_id, asker, flagged, flag_reason, suggested_alternatives, retired
-        FROM prompts WHERE project_id = ${projectId} ORDER BY seq`;
-    return rows.map(
-      (r) =>
-        ({
-          ...r,
-          flagged: (r.flagged as number) ?? 0,
-          retired: (r.retired as number) ?? 0,
-          suggested_alternatives: JSON.parse(
-            (r.suggested_alternatives as string) ?? "[]"
-          ),
-        }) as unknown as Prompt
-    );
+      await sql`SELECT id, project_id, text, theme, intent_id, asker, flagged, flag_reason, suggested_alternatives, retired,
+          staged, replaces, replaced_by
+        FROM prompts WHERE project_id = ${projectId} AND coalesce(staged, 0) = 0 ORDER BY seq`;
+    return rows.map((r) => promptRow(r));
+  },
+
+  async listStagedPrompts(projectId) {
+    const sql = await db();
+    const rows =
+      await sql`SELECT id, project_id, text, theme, intent_id, asker, flagged, flag_reason, suggested_alternatives, retired,
+          staged, replaces, replaced_by
+        FROM prompts WHERE project_id = ${projectId} AND staged = 1 ORDER BY seq`;
+    return rows.map((r) => promptRow(r));
+  },
+
+  async insertStagedPrompt(projectId, p) {
+    const sql = await db();
+    const id = crypto.randomUUID();
+    await sql`INSERT INTO prompts (id, project_id, text, theme, intent_id, asker, staged, replaces)
+      VALUES (${id}, ${projectId}, ${p.text}, ${p.theme}, ${p.intentId}, ${p.asker}, 1, ${p.replaces})`;
+    return (await this.listStagedPrompts(projectId)).find((x) => x.id === id)!;
+  },
+
+  async acceptStagedPrompt({ stagedId, oldId, flagId, resolvedText }) {
+    const sql = await db();
+    await sql.begin(async (tx) => {
+      await tx`UPDATE prompts SET staged = 0, flagged = 0, flag_reason = NULL, suggested_alternatives = '[]'
+        WHERE id = ${stagedId}`;
+      await tx`UPDATE prompts SET retired = 1, replaced_by = ${stagedId}, flagged = 0, flag_reason = NULL,
+        suggested_alternatives = '[]' WHERE id = ${oldId}`;
+      if (flagId)
+        await tx`UPDATE prompt_flags SET status = 'replaced', staged_prompt_id = ${stagedId},
+          resolved_text = ${resolvedText}, resolved_at = now() WHERE id = ${flagId}`;
+    });
+  },
+
+  async listResponseMetaForPrompts(runId, promptIds) {
+    if (promptIds.length === 0) return [];
+    const sql = await db();
+    const rows = await sql`SELECT ${sql(RESPONSE_META_COLUMNS)} FROM responses
+      WHERE run_id = ${runId} AND prompt_id IN ${sql(promptIds)} ORDER BY seq`;
+    return rows.map((r) => responseMeta(r));
+  },
+
+  async upsertPromptFlag(row) {
+    const sql = await db();
+    // A resolved row (replaced/kept) is never reopened by a re-check; a
+    // cleared row reopens when the flag fires again.
+    const rows = await sql`INSERT INTO prompt_flags (id, project_id, run_id, prompt_id, intent_id, stage, kind,
+        prompt_text, rate, siblings_rate, answers, reason, examples, suggested_text, suggestion_meta,
+        staged_prompt_id, status)
+      VALUES (${crypto.randomUUID()}, ${row.project_id}, ${row.run_id}, ${row.prompt_id}, ${row.intent_id},
+        ${row.stage}, ${row.kind}, ${row.prompt_text}, ${row.rate}, ${row.siblings_rate}, ${row.answers},
+        ${row.reason}, ${row.examples}, ${row.suggested_text ?? null}, ${row.suggestion_meta ?? null},
+        ${row.staged_prompt_id ?? null}, ${row.status})
+      ON CONFLICT (run_id, prompt_id) DO UPDATE SET
+        intent_id = EXCLUDED.intent_id, stage = EXCLUDED.stage, kind = EXCLUDED.kind,
+        prompt_text = EXCLUDED.prompt_text, rate = EXCLUDED.rate, siblings_rate = EXCLUDED.siblings_rate,
+        answers = EXCLUDED.answers, reason = EXCLUDED.reason, examples = EXCLUDED.examples,
+        status = CASE WHEN prompt_flags.status IN ('replaced', 'kept') THEN prompt_flags.status ELSE EXCLUDED.status END,
+        resolved_at = CASE
+          WHEN prompt_flags.status IN ('replaced', 'kept') THEN prompt_flags.resolved_at
+          WHEN EXCLUDED.status = 'cleared' AND prompt_flags.status <> 'cleared' THEN now()
+          WHEN EXCLUDED.status = 'open' THEN NULL
+          ELSE prompt_flags.resolved_at END
+      RETURNING *`;
+    return flagRow(rows[0]);
+  },
+
+  async listPromptFlags(filter = {}) {
+    const sql = await db();
+    const rows = await sql`SELECT * FROM prompt_flags WHERE true
+      ${filter.projectId ? sql`AND project_id = ${filter.projectId}` : sql``}
+      ${filter.runId ? sql`AND run_id = ${filter.runId}` : sql``}
+      ${filter.status ? sql`AND status = ${filter.status}` : sql``}
+      ORDER BY created_at, id`;
+    return rows.map((r) => flagRow(r));
+  },
+
+  async getPromptFlag(id) {
+    const sql = await db();
+    const rows = await sql`SELECT * FROM prompt_flags WHERE id = ${id}`;
+    return rows[0] ? flagRow(rows[0]) : null;
+  },
+
+  async updatePromptFlag(id, patch) {
+    const sql = await db();
+    const allowed = ["suggested_text", "suggestion_meta", "staged_prompt_id", "status", "resolved_text"] as const;
+    const set: Record<string, unknown> = {};
+    for (const k of allowed) if (k in patch) set[k] = patch[k] ?? null;
+    if (Object.keys(set).length === 0) return;
+    await sql`UPDATE prompt_flags SET ${sql(set)}
+      ${patch.status && patch.status !== "open" ? sql`, resolved_at = now()` : patch.status === "open" ? sql`, resolved_at = NULL` : sql``}
+      WHERE id = ${id}`;
   },
 
   async setPromptFlag(promptId, flag) {
@@ -1524,14 +1676,16 @@ export const pgStore: Store = {
   async countResponses(runId) {
     const sql = await db();
     const rows =
-      await sql`SELECT COUNT(*)::int AS n FROM responses WHERE run_id = ${runId}`;
+      await sql`SELECT COUNT(*)::int AS n FROM responses WHERE run_id = ${runId}
+        AND prompt_id NOT IN (SELECT id FROM prompts WHERE staged = 1 OR replaced_by IS NOT NULL)`;
     return rows[0].n as number;
   },
 
   async countResponsesByModel(runId) {
     const sql = await db();
     const rows =
-      await sql`SELECT model, COUNT(*)::int AS n FROM responses WHERE run_id = ${runId} GROUP BY model`;
+      await sql`SELECT model, COUNT(*)::int AS n FROM responses WHERE run_id = ${runId}
+        AND prompt_id NOT IN (SELECT id FROM prompts WHERE staged = 1 OR replaced_by IS NOT NULL) GROUP BY model`;
     return Object.fromEntries(
       rows.map((r) => [r.model as string, r.n as number])
     );
@@ -1540,7 +1694,8 @@ export const pgStore: Store = {
   async listResponses(runId) {
     const sql = await db();
     const rows =
-      await sql`SELECT * FROM responses WHERE run_id = ${runId} ORDER BY seq`;
+      await sql`SELECT * FROM responses WHERE run_id = ${runId}
+        AND prompt_id NOT IN (SELECT id FROM prompts WHERE staged = 1 OR replaced_by IS NOT NULL) ORDER BY seq`;
     return rows.map(
       (r) => ({ ...responseMeta(r), text: r.text }) as ResponseRow
     );
@@ -1554,9 +1709,11 @@ export const pgStore: Store = {
       ? await sql`SELECT ${sql(RESPONSE_META_COLUMNS)},
           left(text, 700) AS text_head,
           coalesce(array_length(regexp_split_to_array(text, '[[:space:]]+'), 1), 1) AS word_count
-          FROM responses WHERE run_id = ${runId} ORDER BY seq`
+          FROM responses WHERE run_id = ${runId}
+          AND prompt_id NOT IN (SELECT id FROM prompts WHERE staged = 1 OR replaced_by IS NOT NULL) ORDER BY seq`
       : await sql`SELECT ${sql(RESPONSE_META_COLUMNS)}
-          FROM responses WHERE run_id = ${runId} ORDER BY seq`;
+          FROM responses WHERE run_id = ${runId}
+          AND prompt_id NOT IN (SELECT id FROM prompts WHERE staged = 1 OR replaced_by IS NOT NULL) ORDER BY seq`;
     return rows.map((r) =>
       opts?.textStats
         ? { ...responseMeta(r), text_head: r.text_head as string, word_count: r.word_count as number }
@@ -1589,7 +1746,9 @@ export const pgStore: Store = {
   async listAnswerCodes(runId, source) {
     const sql = await db();
     const rows = await sql`SELECT ${sql(ANSWER_CODE_COLUMNS as string[])} FROM answer_codes
-      WHERE run_id = ${runId} AND source = ${source}`;
+      WHERE run_id = ${runId} AND source = ${source}
+      AND response_id NOT IN (SELECT r.id FROM responses r WHERE r.run_id = ${runId}
+        AND r.prompt_id IN (SELECT id FROM prompts WHERE staged = 1 OR replaced_by IS NOT NULL))`;
     return rows.map((r) => answerCodesFromRow(r));
   },
 

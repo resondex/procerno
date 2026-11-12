@@ -7,7 +7,16 @@
  *   npx tsx scripts/run_prompt_health.mts Netflix Sephora # SPENDS
  *
  * A tracker reading coded answers is COUNTED (question_fit.ts): no model
- * call, no spend - a live run only writes the flags and the record.
+ * call, no spend - a live run only writes the flags, the flag log
+ * (prompt_flags) and the record (llm_cache prompt_health:ph4:<run>; the
+ * run's ph3 record is deleted, which clears any question-level flag it held).
+ *
+ * --review (coded trackers, first wave only) then prepares the dashboard's
+ * wording review exactly as finalizeRun does: one suggested replacement per
+ * open flag, and with two flags or fewer each replacement collected and
+ * coded ahead (staged). SPENDS (writer passes, one answer per engine, the
+ * coder) - Tyler's per-run go. RUN_COLLECT_ONLY is forced on below, so the
+ * coding half stays held unless the script is changed to allow it.
  * A legacy tracker SPENDS: one gpt-6-luna call per tracker (PROMPT_HEALTH_MODEL, about two
  * cents a tracker), writes the prompts' flags and the "check ran" record
  * (llm_cache prompt_health:ph2:<run>). Needs Tyler's per-run go, like all API
@@ -33,6 +42,7 @@ process.env.RUN_COLLECT_ONLY = "1"; // belt and braces: this script codes nothin
 
 const args = process.argv.slice(2);
 const dry = args.includes("--dry");
+const review = args.includes("--review");
 const top = Number(args.find((a) => a.startsWith("--top="))?.slice(6) ?? 10);
 const filters = args.filter((a) => !a.startsWith("--")).map((s) => s.toLowerCase());
 if (filters.length === 0) {
@@ -42,6 +52,7 @@ if (filters.length === 0) {
 
 const { store } = await import(process.cwd() + "/src/lib/store/index.ts");
 const { analyzePromptHealth, dashboardRun } = await import(process.cwd() + "/src/lib/engine/prompt_health.ts");
+const { prepareFirstWaveReview } = await import(process.cwd() + "/src/lib/engine/wording_review.ts");
 type Item = { id: string; prompt: string; answers: number; recalled_brands: { brand: string; answers: number; status?: string }[] };
 
 console.log(`store: ${process.env.DATABASE_URL ? "POSTGRES (prod)" : `sqlite ${process.env.SQLITE_PATH ?? "(default)"}`} · ${dry ? "DRY - no model call, no writes" : "LIVE - spends and writes"}`);
@@ -62,13 +73,14 @@ for (const project of projects) {
     // Coded tracker: counted, no model call (question_fit.ts).
     const fit = res.fit;
     const prompts = await store.listPrompts(project.id);
-    const intents = await store.listIntents(project.id);
     const textOf = new Map(prompts.map((p: { id: string; text: string }) => [p.id, p.text]));
-    const seedOf = new Map(intents.map((i: { id: string; text: string; stage: string }) => [i.id, `[${i.stage}] ${i.text}`]));
-    console.log(`  ${dry ? "would flag" : res.ran ? "flagged" : `did not run (${res.reason}):`} ${fit.cells.length} questions and ${fit.wordings.length} of ${fit.checked.length} wordings (${fit.unjudged} not judged)`);
-    for (const c of fit.cells) console.log(`    QUESTION ${String(seedOf.get(c.intent)).slice(0, 110)}\n        ${c.reason}`);
-    for (const w of fit.wordings) console.log(`    WORDING  ${String(textOf.get(w.prompt)).slice(0, 110)}\n        ${w.reason}`);
+    console.log(`  ${dry ? "would flag" : res.ran ? "flagged" : `did not run (${res.reason}):`} ${fit.wordings.length} of ${fit.checked.length} wordings (${fit.unjudged} not judged)`);
+    for (const w of fit.wordings) console.log(`    WORDING  [${w.stage}] ${String(textOf.get(w.prompt)).slice(0, 110)}\n        ${w.reason}`);
     if (!dry && !res.ran) process.exitCode = 1;
+    if (review && !dry && res.ran) {
+      const r = await prepareFirstWaveReview(project, run, Date.now() + 240_000);
+      console.log(`  review: ${r.flags} open, ${r.suggested} suggested, ${r.staged} staged`);
+    }
     continue;
   }
   if (!dry) {

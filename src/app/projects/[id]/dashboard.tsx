@@ -26,6 +26,7 @@ import type {
 } from "@/lib/types";
 import { InlineSpinner } from "../../components/spinner";
 import { PromptHealthBody } from "./prompt_health";
+import WordingReview, { WordingReviewBanner, useReviewDeferred } from "./wording_review";
 
 export interface Detail {
   /** True when the signed-in user is staff — gates hidden switches. */
@@ -46,6 +47,9 @@ export interface Detail {
   /** How many of the active run's answers carry codes under codesSource.
    * >0 on a collected run = measured-but-held: coded while finalize waits. */
   activeCoded?: number;
+  /** The first-wave wording review (server-rendered only, for members who
+   * can act on it): how many flagged wordings wait for a decision. */
+  wordingReview?: { open: number } | null;
 }
 
 interface Progress {
@@ -144,6 +148,10 @@ export default function ProjectDashboard({
   const [archiveOpen, setArchiveOpen] = useState(false);
   const [archiveText, setArchiveText] = useState("");
   const [archiving, setArchiving] = useState(false);
+  // The first-wave wording review (2026-11-11): flagged wordings wait for a
+  // decision before the analysis lands, unless the user deferred it.
+  const [reviewOpen, setReviewOpen] = useState(initialDetail.wordingReview?.open ?? 0);
+  const [reviewLater, setReviewLater] = useReviewDeferred(id);
   const refresh = useCallback(async () => {
     // ONE roundtrip renders the whole page: the dictionary rides with
     // the detail, and the follow-ups (run progress, trend) fetch in
@@ -196,6 +204,10 @@ export default function ProjectDashboard({
     }
     await Promise.all(followUps);
   }, [id]);
+  const reviewResolved = useCallback(() => {
+    setReviewOpen(0);
+    void refresh();
+  }, [refresh]);
 
   const openDictionary = useCallback(() => {
     setDictTab("identify");
@@ -628,8 +640,19 @@ export default function ProjectDashboard({
           />
         )}
 
-      {resultsRun ? (
+      {resultsRun && reviewOpen > 0 && !reviewLater ? (
+        // The analysis waits on the flagged wordings (first wave only).
+        <WordingReview
+          projectId={project.id}
+          runId={resultsRun.id}
+          onLater={() => setReviewLater(true)}
+          onResolved={reviewResolved}
+        />
+      ) : resultsRun ? (
         <>
+          {reviewOpen > 0 && (
+            <WordingReviewBanner open={reviewOpen} onReopen={() => setReviewLater(false)} />
+          )}
           {completeRuns.length > 1 && (
             <div className="flex items-center gap-3 -mb-2">
               <span className="section-label">Results</span>

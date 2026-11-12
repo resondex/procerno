@@ -621,6 +621,24 @@ export async function finalizeRun(runId: string): Promise<void> {
   } catch (err) {
     console.error("context judge warm failed:", err);
   }
+  // The question check, then - on a tracker's first wave - the wording
+  // review: one suggested replacement per flagged wording, and with two
+  // flags or fewer those replacements collected and coded ahead (staged,
+  // invisible until accepted), so the dashboard's warning can swap one in
+  // instantly. After the judge warm (the check resolves names through its
+  // cached verdicts), before the status flip. Bounded: a cut-short review
+  // leaves its flags open and the accept does the work on demand.
+  try {
+    await analyzePromptHealth(project.id, runId);
+  } catch (err) {
+    console.error("prompt health check failed:", err);
+  }
+  try {
+    const { prepareFirstWaveReview } = await import("./wording_review");
+    await prepareFirstWaveReview(project, run, Math.min(Date.now() + 150_000, finalizeStart + 180_000));
+  } catch (err) {
+    console.error("wording review failed:", err);
+  }
   // The tracker's own written Briefs (option B), so a written-tier reader's
   // first open is a cache hit - only when the owner's plan serves written
   // briefs (writtenBriefsEntitled; staff and composed tiers generate
@@ -663,11 +681,6 @@ export async function finalizeRun(runId: string): Promise<void> {
     });
   } catch (err) {
     console.error("dictionary finalize failed:", err);
-  }
-  try {
-    await analyzePromptHealth(project.id, runId);
-  } catch (err) {
-    console.error("prompt health check failed:", err);
   }
   await store.updateRunStatus(runId, "complete", null);
 }

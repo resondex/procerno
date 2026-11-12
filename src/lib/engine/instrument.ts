@@ -6907,8 +6907,17 @@ export async function generatePhrasings(input: {
   /** Diagnostic hook: receives the raw parsed model output. */
   onRaw?: (raw: unknown) => void;
   meta?: CacheMeta;
+  /** A replacement wording for a live cell whose wording drifted (the
+   * question check's first-wave review, 2026-11-11 - wording_fix.ts).
+   * `avoid` are texts no result may repeat or near-repeat (the flagged
+   * wording and every existing wording of the cell); `note` rides each seed
+   * as a bracket note. Request data: it rides the cache key as a suffix
+   * ONLY when present (`:fix:<sha-12>`), so the setup's own sets key, read
+   * and write exactly as before and are never overwritten by a fix. Ledger
+   * purpose health:suggest. */
+  steer?: { avoid: string[]; note: string; attempt?: number };
 }): Promise<Phrasing[][]> {
-  tagCosts({ purpose: "setup:phrasings" });
+  tagCosts({ purpose: input.steer ? "health:suggest" : "setup:phrasings" });
   // Retired stages get no paraphrases (a saved draft may still hold such a
   // cell): run on the live cells and give retired positions an empty set.
   if (input.cells.some((c) => RETIRED_STAGES.has(c.stage))) {
@@ -6973,7 +6982,10 @@ export async function generatePhrasings(input: {
   // situation's journey note) - the old composition folded every
   // scenario label into every key, so renaming one scenario re-keyed
   // and redrew all ~500 paraphrases. See phrasingCacheKey.
-  const keys = input.cells.map((c) => phrasingCacheKey(input, c, input.avoidConcerns));
+  const steerSuffix = input.steer
+    ? `:fix:${createHash("sha256").update(JSON.stringify([input.steer.avoid, input.steer.note, input.steer.attempt ?? 0])).digest("hex").slice(0, 12)}`
+    : "";
+  const keys = input.cells.map((c) => phrasingCacheKey(input, c, input.avoidConcerns) + steerSuffix);
   const out: Phrasing[][] = input.cells.map(() => []);
   // Each cell's resolved spec, looked up by cell object: pass() and the
   // filters see subsets, never indices into input.cells.
@@ -7135,6 +7147,7 @@ export async function generatePhrasings(input: {
           (opts?.copied?.[i]
             ? `\n   [copied: "${opts.copied[i]}" - this run of the seed's words was carried over by the existing paraphrases; say that part differently]`
             : "") +
+          (input.steer ? `\n   [${input.steer.note}]` : "") +
           askersNote(c, i)
       )
       .join("\n");
@@ -7408,7 +7421,9 @@ export async function generatePhrasings(input: {
         unionSig(match ?? primaryBrandName(seed.angle));
       }
       const prior = opts?.have?.[c.index] ?? [];
-      const seen = new Set<string>([norm(seed.text), ...prior.map((p) => norm(p.text))]);
+      // A fix (steer) never repeats or near-repeats a wording the cell has.
+      const avoidTexts = input.steer?.avoid ?? [];
+      const seen = new Set<string>([norm(seed.text), ...prior.map((p) => norm(p.text)), ...avoidTexts.map(norm)]);
       // p14: the cell's required vocabulary never counts as copying - the
       // room's words, the concern, the class phrase, the stage's ask words
       // and (Value) the line and counterpart recur in every faithful
@@ -7523,7 +7538,7 @@ export async function generatePhrasings(input: {
         {
           const tk = n.split(" ").filter(Boolean);
           const near = (other: string) => tokenEdits(tk, norm(other).split(" ").filter(Boolean)) <= 2;
-          const hit = near(seed.text) ? "seed" : [...prior, ...kept].some((k) => near(k.text)) ? "sibling" : null;
+          const hit = near(seed.text) ? "seed" : [...prior, ...kept].some((k) => near(k.text)) || avoidTexts.some(near) ? "sibling" : null;
           if (hit) { culls.dup++; if (process.env.PHRASINGS_DEBUG) console.warn(`  cull near-dup(${hit}) [${seed.stage}]: ${text}`); continue; }
         }
         // p25: premium-vs-basic weighs cheaper SERVICES/PRODUCTS, never one

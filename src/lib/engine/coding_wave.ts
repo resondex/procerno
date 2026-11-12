@@ -25,7 +25,7 @@
 import { store } from "../store";
 import { withCostContext } from "../cost_log";
 import { purgeRunRevision } from "./run_revision";
-import type { Intent, Project, ResponseMetaRow } from "../types";
+import type { Intent, Project, Prompt, ResponseMetaRow } from "../types";
 import {
   buildCoderRequest,
   parseCoderInputs,
@@ -67,13 +67,17 @@ export async function codeWaveChunk(opts: {
   /** Answer bodies by id, filled a page ahead of the workers. */
   bodyOf: (i: number, rows: ResponseMetaRow[]) => Promise<string>;
   deadline: number;
+  /** Prompts the answers belong to that store.listPrompts does not return -
+   * a staged replacement wording (wording_review.ts) - so their cells
+   * resolve. */
+  extraPrompts?: Prompt[];
 }): Promise<WaveOutcome> {
   const { runId, project, source, adapter, deadline } = opts;
   const blocked = (message: string): WaveOutcome => ({ outcome: "blocked", message: `coder: ${message}` });
 
   // Cells: the contract schema comes from the answer's intent.
   const [prompts, intents] = await Promise.all([store.listPrompts(project.id), store.listIntents(project.id)]);
-  const promptById = new Map(prompts.map((p) => [p.id, p]));
+  const promptById = new Map([...prompts, ...(opts.extraPrompts ?? [])].map((p) => [p.id, p]));
   const intentById = new Map<string, Intent>(intents.map((i) => [i.id, i]));
   const cellOf = (r: ResponseMetaRow) => {
     const iid = promptById.get(r.prompt_id)?.intent_id;

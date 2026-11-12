@@ -12,8 +12,10 @@ import type {
   OrgMember,
   Project,
   Prompt,
+  PromptFlagRow,
   Run,
   ResponseRow,
+  ResponseMetaRow,
   ResponseStatsRow,
   MentionRow,
   SetupDraft,
@@ -462,6 +464,41 @@ function createDb(): Database.Database {
       db.exec(ddl);
     }
   }
+  // Staged replacement wordings (2026-11-11, the question check's first-wave
+  // review): staged prompts and replaced prompts are hidden from every
+  // response / code listing (HIDDEN_PROMPTS below).
+  for (const [col, ddl] of [
+    ["staged", "INTEGER NOT NULL DEFAULT 0"],
+    ["replaces", "TEXT"],
+    ["replaced_by", "TEXT"],
+  ] as const) {
+    if (!promptCols.some((c) => c.name === col)) db.exec(`ALTER TABLE prompts ADD COLUMN ${col} ${ddl}`);
+  }
+  // The question check's flag log (2026-11-11): one row per (run, prompt).
+  db.exec(`CREATE TABLE IF NOT EXISTS prompt_flags (
+    id TEXT PRIMARY KEY,
+    project_id TEXT NOT NULL,
+    run_id TEXT NOT NULL,
+    prompt_id TEXT NOT NULL,
+    intent_id TEXT,
+    stage TEXT,
+    kind TEXT NOT NULL,
+    prompt_text TEXT NOT NULL,
+    rate REAL,
+    siblings_rate REAL,
+    answers INTEGER,
+    reason TEXT,
+    examples TEXT,
+    suggested_text TEXT,
+    suggestion_meta TEXT,
+    staged_prompt_id TEXT,
+    status TEXT NOT NULL DEFAULT 'open',
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    resolved_at TEXT,
+    resolved_text TEXT,
+    UNIQUE (run_id, prompt_id)
+  )`);
+  db.exec("CREATE INDEX IF NOT EXISTS idx_prompt_flags_project ON prompt_flags(project_id)");
   const respCols = db.prepare("PRAGMA table_info(responses)").all() as {
     name: string;
   }[];
@@ -553,6 +590,14 @@ function parseSurfaces(v: unknown): Run["surfaces"] {
   } catch {
     return null;
   }
+}
+
+/** Prompts whose answers no reader sees (2026-11-11): staged replacement
+ * wordings until accepted, and wordings replaced on their first wave. */
+const HIDDEN_PROMPTS = "(SELECT id FROM prompts WHERE staged = 1 OR replaced_by IS NOT NULL)";
+
+function parseFlagRow(r: Record<string, unknown>): PromptFlagRow {
+  return { ...(r as unknown as PromptFlagRow) };
 }
 
 function getDb(): Database.Database {
@@ -1296,7 +1341,7 @@ export const sqliteStore: Store = {
 
   async listPrompts(projectId) {
     const rows = getDb()
-      .prepare("SELECT * FROM prompts WHERE project_id = ? ORDER BY rowid")
+      .prepare("SELECT * FROM prompts WHERE project_id = ? AND COALESCE(staged, 0) = 0 ORDER BY rowid")
       .all(projectId) as (Omit<Prompt, "suggested_alternatives"> & {
       suggested_alternatives: string;
     })[];
@@ -1304,6 +1349,123 @@ export const sqliteStore: Store = {
       ...r,
       suggested_alternatives: JSON.parse(r.suggested_alternatives ?? "[]"),
     }));
+  },
+
+  async listStagedPrompts(projectId) {
+    const rows = getDb()
+      .prepare("SELECT * FROM prompts WHERE project_id = ? AND staged = 1 ORDER BY rowid")
+      .all(projectId) as (Omit<Prompt, "suggested_alternatives"> & { suggested_alternatives: string })[];
+    return rows.map((r) => ({ ...r, suggested_alternatives: JSON.parse(r.suggested_alternatives ?? "[]") }));
+  },
+
+  async insertStagedPrompt(projectId, p) {
+    const id = crypto.randomUUID();
+    getDb()
+      .prepare(
+        "INSERT INTO prompts (id, project_id, text, theme, intent_id, asker, staged, replaces) VALUES (?, ?, ?, ?, ?, ?, 1, ?)"
+      )
+      .run(id, projectId, p.text, p.theme, p.intentId, p.asker, p.replaces);
+    return (await this.listStagedPrompts(projectId)).find((x) => x.id === id)!;
+  },
+
+  async acceptStagedPrompt({ stagedId, oldId, flagId, resolvedText }) {
+    const db = getDb();
+    db.transaction(() => {
+      db.prepare(
+        "UPDATE prompts SET staged = 0, flagged = 0, flag_reason = NULL, suggested_alternatives = '[]' WHERE id = ?"
+      ).run(stagedId);
+      db.prepare(
+        "UPDATE prompts SET retired = 1, replaced_by = ?, flagged = 0, flag_reason = NULL, suggested_alternatives = '[]' WHERE id = ?"
+      ).run(stagedId, oldId);
+      if (flagId)
+        db.prepare(
+          "UPDATE prompt_flags SET status = 'replaced', staged_prompt_id = ?, resolved_text = ?, resolved_at = datetime('now') WHERE id = ?"
+        ).run(stagedId, resolvedText, flagId);
+    })();
+  },
+
+  async listResponseMetaForPrompts(runId, promptIds) {
+    if (promptIds.length === 0) return [];
+    const ph = promptIds.map(() => "?").join(",");
+    const rows = getDb()
+      .prepare(`SELECT * FROM responses WHERE run_id = ? AND prompt_id IN (${ph}) ORDER BY rowid`)
+      .all(runId, ...promptIds) as Record<string, unknown>[];
+    return rows.map(({ text: _text, ...r }) => {
+      void _text;
+      return {
+        ...r,
+        model: (r.model as string) ?? "",
+        finish_reason: (r.finish_reason as string | null) ?? null,
+        citations: r.citations ? JSON.parse(r.citations as string) : null,
+        coder_model: (r.coder_model as string | null) ?? null,
+        search_count: (r.search_count as number | null) ?? null,
+      } as ResponseMetaRow;
+    });
+  },
+
+  async upsertPromptFlag(row) {
+    const db = getDb();
+    const existing = db
+      .prepare("SELECT * FROM prompt_flags WHERE run_id = ? AND prompt_id = ?")
+      .get(row.run_id, row.prompt_id) as Record<string, unknown> | undefined;
+    if (!existing) {
+      const id = crypto.randomUUID();
+      db.prepare(
+        `INSERT INTO prompt_flags (id, project_id, run_id, prompt_id, intent_id, stage, kind, prompt_text, rate,
+           siblings_rate, answers, reason, examples, suggested_text, suggestion_meta, staged_prompt_id, status)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      ).run(
+        id, row.project_id, row.run_id, row.prompt_id, row.intent_id, row.stage, row.kind, row.prompt_text,
+        row.rate, row.siblings_rate, row.answers, row.reason, row.examples,
+        row.suggested_text ?? null, row.suggestion_meta ?? null, row.staged_prompt_id ?? null, row.status
+      );
+    } else {
+      const resolved = existing.status === "replaced" || existing.status === "kept";
+      const status = resolved ? (existing.status as string) : row.status;
+      db.prepare(
+        `UPDATE prompt_flags SET intent_id = ?, stage = ?, kind = ?, prompt_text = ?, rate = ?, siblings_rate = ?,
+           answers = ?, reason = ?, examples = ?, status = ?,
+           resolved_at = CASE WHEN ? = 'cleared' AND status <> 'cleared' THEN datetime('now')
+                              WHEN ? = 'open' THEN NULL ELSE resolved_at END
+         WHERE id = ?`
+      ).run(
+        row.intent_id, row.stage, row.kind, row.prompt_text, row.rate, row.siblings_rate, row.answers,
+        row.reason, row.examples, status, status, status, existing.id as string
+      );
+    }
+    return parseFlagRow(
+      db.prepare("SELECT * FROM prompt_flags WHERE run_id = ? AND prompt_id = ?").get(row.run_id, row.prompt_id) as Record<string, unknown>
+    );
+  },
+
+  async listPromptFlags(filter = {}) {
+    const where: string[] = [];
+    const args: unknown[] = [];
+    if (filter.projectId) { where.push("project_id = ?"); args.push(filter.projectId); }
+    if (filter.runId) { where.push("run_id = ?"); args.push(filter.runId); }
+    if (filter.status) { where.push("status = ?"); args.push(filter.status); }
+    const rows = getDb()
+      .prepare(`SELECT * FROM prompt_flags ${where.length ? `WHERE ${where.join(" AND ")}` : ""} ORDER BY created_at, rowid`)
+      .all(...args) as Record<string, unknown>[];
+    return rows.map(parseFlagRow);
+  },
+
+  async getPromptFlag(id) {
+    const r = getDb().prepare("SELECT * FROM prompt_flags WHERE id = ?").get(id) as Record<string, unknown> | undefined;
+    return r ? parseFlagRow(r) : null;
+  },
+
+  async updatePromptFlag(id, patch) {
+    const cols = Object.keys(patch).filter((k) =>
+      ["suggested_text", "suggestion_meta", "staged_prompt_id", "status", "resolved_text"].includes(k)
+    ) as (keyof typeof patch)[];
+    if (cols.length === 0) return;
+    const sets = cols.map((c) => `${c} = ?`);
+    if (patch.status && patch.status !== "open") sets.push("resolved_at = datetime('now')");
+    if (patch.status === "open") sets.push("resolved_at = NULL");
+    getDb()
+      .prepare(`UPDATE prompt_flags SET ${sets.join(", ")} WHERE id = ?`)
+      .run(...cols.map((c) => patch[c] ?? null), id);
   },
 
   async setPromptFlag(promptId, flag) {
@@ -1759,7 +1921,7 @@ export const sqliteStore: Store = {
 
   async countResponses(runId) {
     const row = getDb()
-      .prepare("SELECT COUNT(*) AS n FROM responses WHERE run_id = ?")
+      .prepare(`SELECT COUNT(*) AS n FROM responses WHERE run_id = ? AND prompt_id NOT IN ${HIDDEN_PROMPTS}`)
       .get(runId) as { n: number };
     return row.n;
   },
@@ -1767,7 +1929,7 @@ export const sqliteStore: Store = {
   async countResponsesByModel(runId) {
     const rows = getDb()
       .prepare(
-        "SELECT model, COUNT(*) AS n FROM responses WHERE run_id = ? GROUP BY model"
+        `SELECT model, COUNT(*) AS n FROM responses WHERE run_id = ? AND prompt_id NOT IN ${HIDDEN_PROMPTS} GROUP BY model`
       )
       .all(runId) as { model: string; n: number }[];
     return Object.fromEntries(rows.map((r) => [r.model, r.n]));
@@ -1776,7 +1938,7 @@ export const sqliteStore: Store = {
   async listResponses(runId) {
     return (
       getDb()
-        .prepare("SELECT * FROM responses WHERE run_id = ? ORDER BY rowid")
+        .prepare(`SELECT * FROM responses WHERE run_id = ? AND prompt_id NOT IN ${HIDDEN_PROMPTS} ORDER BY rowid`)
         .all(runId) as Record<string, unknown>[]
     ).map(
       (r) =>
@@ -1825,7 +1987,10 @@ export const sqliteStore: Store = {
 
   async listAnswerCodes(runId, source) {
     const rows = getDb()
-      .prepare(`SELECT ${ANSWER_CODE_COLUMNS.join(", ")} FROM answer_codes WHERE run_id = ? AND source = ?`)
+      .prepare(
+        `SELECT ${ANSWER_CODE_COLUMNS.join(", ")} FROM answer_codes WHERE run_id = ? AND source = ?
+         AND response_id NOT IN (SELECT r.id FROM responses r WHERE r.run_id = answer_codes.run_id AND r.prompt_id IN ${HIDDEN_PROMPTS})`
+      )
       .all(runId, source) as Record<string, unknown>[];
     return rows.map(answerCodesFromRow);
   },

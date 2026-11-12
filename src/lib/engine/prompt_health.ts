@@ -8,7 +8,8 @@ import { promptsForRun } from "./surfaces";
 import { healthChecks } from "./prompt_health_rule";
 import { buildResolver } from "./brand_resolve";
 import { cachedContextVerdicts } from "./context_judge";
-import { computeQuestionFit, type CellFlag, type FitResult } from "./question_fit";
+import { computeQuestionFit, type FitResult } from "./question_fit";
+import { logLegacyFlags, logWordingFlags } from "./prompt_flags";
 import type {
   AnswerCodes,
   DictionaryEntry,
@@ -269,8 +270,13 @@ export function healthSystemPrompt(category: string, withStatus: boolean): strin
 /** The "check ran" record: an llm_cache marker per run, written only when a
  * readable verdict list was applied (or there was nothing to send). Its
  * absence means the check never ran on that wave. */
-export const HEALTH_RECORD_VERSION = "ph3";
+// ph4 (2026-11-11): the question-level (cell) findings are gone - the
+// record carries the wording check only. A ph3 record is still READ (minus
+// its cells) so a wave checked before ph4 reads as checked, and a fresh run
+// of the check deletes it, which clears any question-level flag it held.
+export const HEALTH_RECORD_VERSION = "ph4";
 export const healthRecordKey = (runId: string) => `prompt_health:${HEALTH_RECORD_VERSION}:${runId}`;
+const PRIOR_RECORD_KEYS = (runId: string) => [`prompt_health:ph3:${runId}`];
 const FOREVER_MS = 100 * 365 * 24 * 3600 * 1000;
 
 export interface HealthRecord {
@@ -280,18 +286,26 @@ export interface HealthRecord {
   model: string | null;
   sent: number;
   flagged: number;
-  /** Coded trackers: the questions (cells) not producing what their type is
-   * meant to produce (question_fit.ts). Absent on the legacy check. */
-  cells?: CellFlag[];
 }
 
 export async function readHealthRecord(runId: string): Promise<HealthRecord | null> {
   try {
-    const raw = await store.cacheGet(healthRecordKey(runId), FOREVER_MS);
-    return raw ? (JSON.parse(raw) as HealthRecord) : null;
+    for (const key of [healthRecordKey(runId), ...PRIOR_RECORD_KEYS(runId)]) {
+      const raw = await store.cacheGet(key, FOREVER_MS);
+      if (!raw) continue;
+      // A ph3 record's question-level findings are never served.
+      const { at, mode, source, model, sent, flagged } = JSON.parse(raw) as HealthRecord & { cells?: unknown };
+      return { at, mode, source, model, sent, flagged };
+    }
+    return null;
   } catch {
     return null;
   }
+}
+
+/** Drop the pre-ph4 records of a run (their question-level flags with them). */
+async function dropPriorRecords(runId: string): Promise<void> {
+  for (const key of PRIOR_RECORD_KEYS(runId)) await store.cacheDelete(key).catch(() => {});
 }
 
 /** Everything the check reads, built into its input. No model call. */
@@ -342,8 +356,8 @@ export interface HealthResult {
 /**
  * The coded-tracker check (2026-11-11): counted from answer_codes by
  * question_fit.ts - no model call, no key, no spend. Every asked wording it
- * can judge gets its flag set or cleared; question-level findings ride the
- * record. `dry` returns the result without writing.
+ * can judge gets its flag set or cleared, and every flag is logged
+ * (prompt_flags.ts). `dry` returns the result without writing.
  */
 async function analyzeCoded(
   project: Project,
@@ -383,6 +397,9 @@ async function analyzeCoded(
     if (!w && !was.get(id)) continue;
     await store.setPromptFlag(id, w ? { reason: w.reason, alternatives: [] } : null);
   }
+  // Every flag is logged (prompt_flags), and a logged flag that stopped
+  // firing reads "cleared" - never deleted.
+  await logWordingFlags({ project, run, fit, prompts });
   const rec: HealthRecord = {
     at: new Date().toISOString(),
     mode: "codes",
@@ -390,16 +407,14 @@ async function analyzeCoded(
     model: null,
     sent,
     flagged,
-    cells: fit.cells,
   };
   await store.cacheSet(healthRecordKey(run.id), JSON.stringify(rec), {
     brand: project.brand,
     category: project.category,
     projectId: project.id,
   });
-  console.log(
-    `question check (${project.brand}): ${fit.cells.length} questions and ${flagged} of ${sent} wordings flagged`
-  );
+  await dropPriorRecords(run.id);
+  console.log(`question check (${project.brand}): ${flagged} of ${sent} wordings flagged`);
   return { ran: true, sent, flagged, fit };
 }
 
@@ -502,6 +517,12 @@ export async function analyzePromptHealth(
     );
   }
   for (const id of input.stale) await store.setPromptFlag(id, null);
+  await logLegacyFlags({
+    project,
+    runId,
+    items: input.items,
+    flagged: [...byId.values()].map((r) => ({ id: r.id, reason: r.reason || "answers drifted off-category" })),
+  }).catch((err) => console.error("prompt flag log failed:", err));
   await record(flagged);
   console.log(`prompt health check (${project.brand}): ${flagged}/${input.items.length} prompts flagged`);
   return { ran: true, sent: input.items.length, flagged };

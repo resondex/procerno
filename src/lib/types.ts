@@ -228,6 +228,47 @@ export interface Prompt {
   suggested_alternatives: string[];
   /** Retired prompts keep their history but are excluded from future runs. */
   retired: number;
+  /** 1 = a staged replacement wording (2026-11-11): invisible to every
+   * reader until accepted - store.listPrompts never returns it, and its
+   * answers are hidden from every response / code listing. */
+  staged?: number;
+  /** A staged prompt: the live prompt it would replace. */
+  replaces?: string | null;
+  /** Set when this wording was replaced on its first wave by an accepted
+   * replacement: its answers are hidden from every response / code listing
+   * (all runs - the replace path is first-wave only). Also retired. */
+  replaced_by?: string | null;
+}
+
+/** The question check's flag log (2026-11-11): one row per (run, prompt)
+ * flag, append-only in spirit - a flag that stops firing becomes "cleared",
+ * never deleted - for reviewing problems across trackers. */
+export type PromptFlagStatus = "open" | "replaced" | "kept" | "cleared";
+export interface PromptFlagRow {
+  id: string;
+  project_id: string;
+  run_id: string;
+  prompt_id: string;
+  intent_id: string | null;
+  stage: string | null;
+  /** "wording" (counted, question_fit.ts) | "model" (legacy model check). */
+  kind: string;
+  /** The wording as asked. */
+  prompt_text: string;
+  rate: number | null;
+  siblings_rate: number | null;
+  answers: number | null;
+  reason: string | null;
+  /** JSON {off: string[], siblingsOn: string[]} - response ids. */
+  examples: string | null;
+  suggested_text: string | null;
+  /** JSON {model, checks, ...}. */
+  suggestion_meta: string | null;
+  staged_prompt_id: string | null;
+  status: PromptFlagStatus;
+  created_at: string;
+  resolved_at: string | null;
+  resolved_text: string | null;
 }
 
 /** "core" collects on the tracker's cadence; "worries" (concern-bearing
@@ -956,7 +997,37 @@ export interface Store {
     projectId: string,
     prompts: { text: string; theme: PromptTheme; intentId?: string | null; asker?: string | null }[]
   ): Promise<Prompt[]>;
+  /** Every prompt of the project EXCEPT staged replacements (staged = 1). */
   listPrompts(projectId: string): Promise<Prompt[]>;
+  /** The project's staged replacement wordings (never returned by listPrompts). */
+  listStagedPrompts(projectId: string): Promise<Prompt[]>;
+  /** Insert one staged replacement wording for `replaces`; returns it. */
+  insertStagedPrompt(
+    projectId: string,
+    p: { text: string; theme: PromptTheme; intentId: string | null; asker: string | null; replaces: string }
+  ): Promise<Prompt>;
+  /** Accept a staged replacement in ONE transaction: the staged prompt goes
+   * live (staged 0, flag cleared), the old prompt is retired with
+   * replaced_by set and its flag cleared, and the flag log row (when given)
+   * reads "replaced" with the text that went live. */
+  acceptStagedPrompt(input: { stagedId: string; oldId: string; flagId: string | null; resolvedText: string }): Promise<void>;
+  /** A run's response meta for these prompts, INCLUDING hidden (staged or
+   * replaced) ones - the staged collection's done-keys. */
+  listResponseMetaForPrompts(runId: string, promptIds: string[]): Promise<ResponseMetaRow[]>;
+  /** The flag log: insert or update by (run_id, prompt_id). On update the
+   * row's created_at and id are kept; a resolved row (replaced/kept) is
+   * never reopened by a re-check. */
+  upsertPromptFlag(row: Omit<PromptFlagRow, "id" | "created_at" | "resolved_at" | "resolved_text" | "suggested_text" | "suggestion_meta" | "staged_prompt_id"> &
+    Partial<Pick<PromptFlagRow, "suggested_text" | "suggestion_meta" | "staged_prompt_id">>): Promise<PromptFlagRow>;
+  /** Flag log rows, filtered (no filter = every row, every tracker). */
+  listPromptFlags(filter?: { projectId?: string; runId?: string; status?: PromptFlagStatus }): Promise<PromptFlagRow[]>;
+  getPromptFlag(id: string): Promise<PromptFlagRow | null>;
+  /** Patch a flag log row (suggestion, staged prompt, status). A status
+   * change to replaced/kept/cleared stamps resolved_at. */
+  updatePromptFlag(
+    id: string,
+    patch: Partial<Pick<PromptFlagRow, "suggested_text" | "suggestion_meta" | "staged_prompt_id" | "status" | "resolved_text">>
+  ): Promise<void>;
   setPromptFlag(
     promptId: string,
     flag: { reason: string; alternatives: string[] } | null
@@ -1127,6 +1198,10 @@ export interface Store {
   deleteRun(runId: string): Promise<void>;
   /** Delete a project and everything under it: runs, prompts, dictionary. */
   deleteProject(projectId: string): Promise<void>;
+  /** Hidden answers (2026-11-11): every response / code listing below -
+   * countResponses, countResponsesByModel, listResponses, listResponseMeta,
+   * listAnswerCodes - leaves out answers to a staged prompt or to a prompt
+   * with replaced_by set. listResponseMetaForPrompts is the one exception. */
   countResponses(runId: string): Promise<number>;
   /**
    * Answers landed so far per engine. Powers live progress: engines are the

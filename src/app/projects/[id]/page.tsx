@@ -1,9 +1,10 @@
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import { NextResponse } from "next/server";
-import { getAuth, isStaff, requireProject } from "@/lib/auth";
+import { getAuth, isShareContext, isStaff, requireProject } from "@/lib/auth";
 import { store } from "@/lib/store";
 import { planNextRun } from "@/lib/engine/surfaces";
+import { firstWaveReview } from "@/lib/engine/wording_review";
 import ProjectDashboard, { type Detail } from "./dashboard";
 
 /**
@@ -26,12 +27,22 @@ export default async function ProjectPage({
   if (!auth) redirect("/login");
   const project = await requireProject(id, auth);
   if (project instanceof NextResponse) redirect("/app");
-  const [prompts, runs, staff, dictionary, intents] = await Promise.all([
+  // The first-wave wording review (2026-11-11): only a member who can act
+  // on it (write access, never a share link) is shown the warning.
+  const reviewFor = async (): Promise<{ open: number } | null> => {
+    if (isShareContext(auth)) return null;
+    const writable = await requireProject(id, auth, { write: true });
+    if (writable instanceof NextResponse) return null;
+    const r = await firstWaveReview(project).catch(() => null);
+    return r ? { open: r.flags.length } : null;
+  };
+  const [prompts, runs, staff, dictionary, intents, wordingReview] = await Promise.all([
     store.listPrompts(id),
     store.listRuns(id),
     isStaff(auth),
     store.getDictionary(id),
     store.listIntents(id),
+    reviewFor(),
   ]);
   const codesSource = project.codes_source;
   const nextRun = planNextRun({ prompts, intents, runs });
@@ -62,6 +73,7 @@ export default async function ProjectPage({
       nextRun,
       activeAnswers,
       activeCoded,
+      wordingReview,
     })
   ) as Detail;
   // The dictionary gate's saved step rides in a cookie so THIS render can
