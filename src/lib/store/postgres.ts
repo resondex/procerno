@@ -869,9 +869,10 @@ export const pgStore: Store = {
         (SELECT count(*)::text || ':' || coalesce(sum(hashtext(l::text)), 0)::text
            FROM answer_labels l JOIN responses r ON r.id = l.response_id
            WHERE r.run_id = ${runId}) AS lab,
-        (SELECT count(*)::text || ':' || coalesce(sum(hashtext(p::text)), 0)::text
+        (SELECT count(*)::text || ':' || coalesce(sum(hashtext(concat_ws('|', p.id, p.text, p.theme,
+             coalesce(p.intent_id, ''), coalesce(p.asker, ''), p.retired::text, coalesce(p.replaced_by, '')))), 0)::text
            FROM prompts p JOIN runs ru ON ru.project_id = p.project_id
-           WHERE ru.id = ${runId}) AS pr,
+           WHERE ru.id = ${runId} AND coalesce(p.staged, 0) = 0) AS pr,
         (SELECT count(*)::text || ':' || coalesce(sum(hashtext(c::text)), 0)::text
            FROM answer_codes c WHERE c.run_id = ${runId}) AS codes`;
     const r = rows[0];
@@ -895,9 +896,10 @@ export const pgStore: Store = {
         (SELECT count(*)::text || ':' || coalesce(max(l.created_at)::text, '')
            FROM answer_labels l JOIN responses r ON r.id = l.response_id
            WHERE r.run_id = ${runId}) AS lab,
-        (SELECT count(*)::text || ':' || coalesce(sum(hashtext(p::text)), 0)::text
+        (SELECT count(*)::text || ':' || coalesce(sum(hashtext(concat_ws('|', p.id, p.text, p.theme,
+             coalesce(p.intent_id, ''), coalesce(p.asker, ''), p.retired::text, coalesce(p.replaced_by, '')))), 0)::text
            FROM prompts p JOIN runs ru ON ru.project_id = p.project_id
-           WHERE ru.id = ${runId}) AS pr,
+           WHERE ru.id = ${runId} AND coalesce(p.staged, 0) = 0) AS pr,
         (SELECT count(*)::text || ':' || coalesce(max(c.created_at)::text, '')
            FROM answer_codes c WHERE c.run_id = ${runId}) AS codes`;
     const r = rows[0];

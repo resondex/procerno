@@ -16,6 +16,8 @@ import {
   type AnalysisMapView,
   type AnswerRef,
   type Archetype,
+  type BrandRead,
+  type RivalHere,
   type ArgsMode,
   type ArgsRow,
   type CastingLine,
@@ -1473,6 +1475,90 @@ export async function computeAnalysisMap(
     const b = others.find((r) => has(r) && r !== a && (!a || r.model !== a.model)) ?? others.find((r) => has(r) && r !== a);
     return [a, b].filter((r): r is PoolRow => !!r).map((r) => ({ responseId: r.code.response_id, find: code }));
   };
+  /** am20: one brand's funnel inside one contest (the rival panel's lead read). */
+  const brandRead = (rows: PoolRow[], key: string, name: string): BrandRead => {
+    const namedSurf = (r: PoolRow) => (r.code.mentions ?? []).find((m) => resolve(m.brand).key === key)?.brand;
+    const recSurf = (r: PoolRow) => (r.code.mentions ?? []).find((m) => m.framing === "recommended" && resolve(m.brand).key === key)?.brand;
+    const picks = (r: PoolRow) => pickOf(r).key === key;
+    const named = rows.filter((r) => namedSurf(r) || picks(r));
+    const rec = rows.filter((r) => recSurf(r) || picks(r));
+    const picked = rows.filter(picks);
+    const refs = (xs: PoolRow[], find: (r: PoolRow) => string) => spreadRefs(xs.map((r) => ({ id: r.code.response_id, find: find(r), model: r.model })), RECEIPTS);
+    const nC = cell(named.length, rows.length);
+    const rC = cell(rec.length, rows.length);
+    const pC = cell(picked.length, rows.length);
+    const cC = cell(picked.length, rec.length);
+    const nr = refs(named, (r) => namedSurf(r) ?? r.code.top_pick ?? name);
+    const rr = refs(rec, (r) => recSurf(r) ?? r.code.top_pick ?? name);
+    const pr = refs(picked, (r) => quoteOf(r) || r.code.top_pick || name);
+    return {
+      named: pct(nC),
+      recommended: pct(rC),
+      picked: pct(pC),
+      converts: pct(cC),
+      tips: { named: tipC(nC), recommended: tipC(rC), picked: tipC(pC), converts: tipC(cC) },
+      refs: { ...(nr.length ? { named: nr } : {}), ...(rr.length ? { recommended: rr } : {}), ...(pr.length ? { picked: pr } : {}) },
+    };
+  };
+  /** am20: a rival inside one contest - its funnel, the arguments when it is
+   * picked (beside your picks when you have enough), and the stated conditions
+   * on the buyer that send picks to it here. */
+  const rivalHere = (rows: PoolRow[], key: string, name: string, itsPicks: PoolRow[], yourPicks: PoolRow[], away: Group[]): RivalHere => {
+    const out: RivalHere = { read: brandRead(rows, key, name), sends: [] };
+    const compare = liftsOf(itsPicks, yourPicks).map((l) => {
+      const refs = liftRefs(l.label, itsPicks, yourPicks);
+      return refs.length ? { ...l, receipts: refs } : l;
+    });
+    if (compare.length) {
+      out.argsMode = "compare";
+      out.args = compare;
+    } else {
+      const withR = itsPicks.filter((r) => r.code.reasons !== null);
+      if (withR.length >= ARGS_MIN) {
+        const counts = new Map<string, number>();
+        for (const r of withR) for (const c of new Set(r.code.reasons!)) counts.set(c, (counts.get(c) ?? 0) + 1);
+        const argRows = [...counts.entries()]
+          .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
+          .slice(0, ARGS_TOP)
+          .map(([label, k]) => ({
+            label,
+            share: pctOf(k / withR.length),
+            receipts: spreadRefs(withR.filter((r) => r.code.reasons!.includes(label)).map((r) => ({ id: r.code.response_id, find: label, model: r.model }))),
+          }));
+        if (argRows.length) {
+          out.argsMode = "alone";
+          out.argsRows = argRows;
+        }
+      }
+    }
+    // The stated conditions sending picks to it: each away group's answers that route here.
+    const routed = new Set<string>();
+    const per = away
+      .filter((g) => !isDefaultCondition(g.label))
+      .map((g) => {
+        const hits = [...g.answers.entries()].filter(([, a]) => a.to.has(name));
+        for (const [id] of hits) routed.add(id);
+        return { g, hits };
+      })
+      .filter((x) => x.hits.length > 0);
+    if (routed.size > 0) {
+      out.sends = per
+        .sort((a, b) => b.hits.length - a.hits.length || a.g.label.localeCompare(b.g.label))
+        .slice(0, COND_TOP)
+        .map(({ g, hits }) => {
+          const receipts = spreadRefs(hits.map(([id, a]) => ({ id, find: a.said, model: a.model })));
+          return {
+            text: g.label,
+            n: hits.length,
+            share: pctOf(hits.length / routed.size),
+            ...(isWallWording([g.label], project.brand) ? { wall: true } : {}),
+            ...(receipts.length ? { receipts } : {}),
+          };
+        });
+      out.sendsShare = pctOf(routed.size / rows.length);
+    }
+    return out;
+  };
   /** am15: the panel's arguments block when the two-sided lift is absent. */
   const argsBlock = (rows: PoolRow[], lifts: LiftItem[]): { mode?: ArgsMode; rows?: ArgsRow[] } => {
     if (lifts.length) return { mode: "compare" };
@@ -1749,15 +1835,23 @@ export async function computeAnalysisMap(
         // am15: who takes the picks, on the pick contests (the figure's own split).
         let brands: PositionBrand[] | undefined;
         let youShare: string | undefined;
+        let youRead: BrandRead | undefined;
         if (PICK_ROWS.has(rowSlug)) {
           const split = brandSplit(s.rows);
           const clear = split.list.filter((b) => b.rows.length >= BRAND_FLOOR);
           if (clear.length >= 2) {
+            const youRows = split.list.find((b) => b.key === targetKey)?.rows ?? [];
             brands = clear
               .filter((b) => b.key !== targetKey)
               .slice(0, BRANDS_TOP)
-              .map((b) => ({ name: b.name, share: pct(cell(b.rows.length, split.n)), proof: receiptsOf(b.rows.filter((r) => quoteOf(r))).slice(0, BRAND_PROOF) }));
-            youShare = pct(cell(split.list.find((b) => b.key === targetKey)?.rows.length ?? 0, split.n));
+              .map((b) => ({
+                name: b.name,
+                share: pct(cell(b.rows.length, split.n)),
+                proof: receiptsOf(b.rows.filter((r) => quoteOf(r))).slice(0, BRAND_PROOF),
+                here: rivalHere(s.rows, b.key, b.name, b.rows, youRows, conds.away),
+              }));
+            youShare = pct(cell(youRows.length, split.n));
+            youRead = brandRead(s.rows, targetKey!, brand);
           }
         }
         const notes: PositionNotes = {
@@ -1792,7 +1886,7 @@ export async function computeAnalysisMap(
           lever,
           family,
           ...(figures.length ? { figures } : {}),
-          ...(brands && brands.length ? { brands, youShare } : {}),
+          ...(brands && brands.length ? { brands, youShare, ...(youRead ? { youRead } : {}) } : {}),
           ...(args.mode ? { argsMode: args.mode } : {}),
           ...(args.rows ? { argsRows: args.rows } : {}),
           ...(Object.keys(notes).length ? { notes } : {}),
@@ -2335,7 +2429,7 @@ function tensionsOf(
 // am16 (2026-11-10): the tightened wall test - the wall sentence now advises, so it reads the shown wording only.
 // am17 (2026-11-10): each tension carries `viz` (the Overview finding card's 2-4 bars).
 // am18 (2026-11-10): each buying situation's open-choice cell states the same funnel figures as the all-buyers cell.
-export const ANALYSIS_MAP_VERSION = "am19"; // am19 (2026-11-11): every Overview number opens its answers - `examples` (named, commits), refs on each share-of-picks row and on the tension bars (the first tension's funnel bars and the bs16 insight bars). // am18 (2026-11-10): each buying situation's open-choice cell states the same funnel figures as the all-buyers cell (named, recommended, commits, picked, outside the category), from its own answers. // // am17 (2026-11-10): each tension carries `viz` (the Overview finding card's 2-4 bars) - the first from the casting facts, the rest from the bs15 insights
+export const ANALYSIS_MAP_VERSION = "am20"; // am20 (2026-11-12): each rival in a pick contest's `brands` carries `here` (its funnel in that contest, the arguments when it is picked beside your picks, the stated conditions sending picks to it) and the position carries `youRead` - the rival panel's lead read. Additive; theme inputs unchanged. // am19 am19 (2026-11-11): every Overview number opens its answers - `examples` (named, commits), refs on each share-of-picks row and on the tension bars (the first tension's funnel bars and the bs16 insight bars). // am18 (2026-11-10): each buying situation's open-choice cell states the same funnel figures as the all-buyers cell (named, recommended, commits, picked, outside the category), from its own answers. // // am17 (2026-11-10): each tension carries `viz` (the Overview finding card's 2-4 bars) - the first from the casting facts, the rest from the bs15 insights
 // The fold (2026-11-09, Tyler): a view's cache key carries the versions of
 // the views whose content it embeds, so the lockstep bump convention is
 // mechanical - the map embeds the summary's insights, casting and verdict.

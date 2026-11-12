@@ -123,6 +123,38 @@ export interface PositionBrand {
   share: string;
   /** Up to 3 quoted answers where it is the pick, spread across engines. */
   proof: PositionReceipt[];
+  /** am20: the brand inside this one contest - the rival panel's lead read. */
+  here?: RivalHere;
+}
+
+/** am20 (2026-11-12): one brand's funnel inside one contest. Every share is of
+ * the contest's answers except `converts` (its picks per recommendation).
+ * Counts ride `tips` only; `refs` open the answers behind each number. */
+export interface BrandRead {
+  named: string;
+  recommended: string;
+  picked: string;
+  converts: string;
+  tips: { named: string; recommended: string; picked: string; converts: string };
+  refs: { named?: AnswerRef[]; recommended?: AnswerRef[]; picked?: AnswerRef[] };
+}
+
+/** am20: a rival inside one contest - how it gets its picks here, what the AI
+ * argues when it picks it, and which buyers the AI sends to it. */
+export interface RivalHere {
+  read: BrandRead;
+  /** compare: what comes up more when it is picked than when you are (value =
+   * its-picks share minus your-picks share; liftSides ["its picks", "your picks"]);
+   * alone: you are picked too rarely here to compare, so the share of its pick
+   * answers arguing each code (argsRows); absent: too few picks of its own. */
+  argsMode?: "compare" | "alone";
+  args?: LiftItem[];
+  argsRows?: ArgsRow[];
+  /** The conditions on the buyer that send picks to it here, share of the
+   * answers here that send buyers to it with any stated condition. */
+  sends: ConditionItem[];
+  /** Share of the contest's answers that send buyers to it with a stated condition. */
+  sendsShare?: string;
 }
 
 /** What the panel's "What the AI says about the <category>" section draws:
@@ -233,6 +265,8 @@ export interface Position {
   brands?: PositionBrand[];
   /** Your share of the same picks (present with `brands`). */
   youShare?: string;
+  /** am20: your own funnel in this contest, beside each rival's `here.read`. */
+  youRead?: BrandRead;
   /** am15: which arguments block the panel draws (absent when none has content). */
   argsMode?: ArgsMode;
   /** am15: top 5 rows for argsMode rival / all / topics. */

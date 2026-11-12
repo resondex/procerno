@@ -66,6 +66,8 @@ export interface WorkbenchBrand {
   /** False = active but un-analyzed: counted in denominators (a pick of it
    * is still in-category) but hidden from pickers and tables. */
   listed: boolean;
+  /** wb6: the dictionary's other names for it (the Data page's search). */
+  aliases?: string[];
 }
 
 export interface WorkbenchEngine extends EngineFacets {
@@ -332,6 +334,7 @@ export function computeWorkbench(data: ViewData, request: ViewRequest = {}): Wor
       role: roleOf(key, targetKey, entry, legacy),
       parent: entry?.parent ?? null,
       listed: key === targetKey || !entry || entry.analyzed,
+      ...(entry?.aliases?.length ? { aliases: entry.aliases } : {}),
     };
   });
 
@@ -460,7 +463,7 @@ export function computeWorkbench(data: ViewData, request: ViewRequest = {}): Wor
 // wb4 (2026-11-03): engines carry vendor / tier (the Panel lens's Group-by).
 // wb5 (2026-11-03): prompts carry their question (cell) + the seed wordings
 // (the Metrics pivot's Question dimension).
-const WORKBENCH_VERSION = "wb5";
+const WORKBENCH_VERSION = "wb6";
 export function computeWorkbenchCached(run: Run, project: Project, request: ViewRequest = {}): Promise<WorkbenchView | null> {
   const r = requestOf(request);
   return cachedView("workbench", WORKBENCH_VERSION, run, project, (d) => computeWorkbench(d, r), { judge: true }, r);

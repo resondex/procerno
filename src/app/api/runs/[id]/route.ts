@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { waitUntil } from "@vercel/functions";
 import { store } from "@/lib/store";
-import { requireAuth, requireRun } from "@/lib/auth";
+import { authEnabled, isStaff, requireAuth, requireRun } from "@/lib/auth";
 import { hasOpenBatches, pollRunBatches } from "@/lib/engine/batch";
 import { continueRun } from "@/lib/engine/runner";
 import { promptsForRun } from "@/lib/engine/surfaces";
@@ -71,7 +71,9 @@ export async function GET(
   });
 }
 
-/** Delete a run and its data. Prompts, dictionary, and other runs stay. */
+/** Delete a run and its data. Prompts, dictionary, and other runs stay.
+ * Procerno admins only (2026-11-12, Tyler); with auth off (local dev) the
+ * caller is the owner. */
 export async function DELETE(
   _req: Request,
   { params }: { params: Promise<{ id: string }> }
@@ -81,6 +83,9 @@ export async function DELETE(
   const { id } = await params;
   const loaded = await requireRun(id, auth, { write: true });
   if (loaded instanceof NextResponse) return loaded;
+  if (authEnabled() && !(await isStaff(auth))) {
+    return NextResponse.json({ error: "only a Procerno admin can delete a wave" }, { status: 403 });
+  }
   if (loaded.run.status === "running" || loaded.run.status === "pending") {
     return NextResponse.json(
       { error: "stop is not supported — wait for the run to finish first" },

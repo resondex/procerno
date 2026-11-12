@@ -26,6 +26,7 @@ import type {
 } from "@/lib/types";
 import { InlineSpinner } from "../../components/spinner";
 import { PromptHealthBody } from "./prompt_health";
+import RunHistory from "./run_history";
 import WordingReview, { WordingReviewBanner, useReviewDeferred } from "./wording_review";
 
 export interface Detail {
@@ -900,74 +901,20 @@ export default function ProjectDashboard({
 
       {openModal === "history" && (
         <Modal title="Run history" onClose={() => setOpenModal(null)}>
-
-          <ul className="grid gap-2">
-            {runs.map((r) => {
-              const active = r.status === "pending" || r.status === "running" || r.status === "collected";
-              const shown = shownRun?.id === r.id;
-              return (
-                <li
-                  key={r.id}
-                  className={`card flex items-center justify-between gap-4 px-5 py-3.5 ${
-                    shown ? "border-primary/40" : ""
-                  }`}
-                >
-                  <div className="text-sm min-w-0">
-                    <span className="font-semibold">{r.model}</span>
-                    <span className="text-ink-3">
-                      {" "}
-                      · {r.repeats} repeats · {r.created_at}
-                    </span>
-                    {r.error && (
-                      <span className="text-danger"> · {r.error}</span>
-                    )}
-                    {active && progress && (
-                      <ProgressBar
-                        completed={progress.completed}
-                        total={progress.total}
-                      />
-                    )}
-                  </div>
-                  <div className="flex items-center gap-4 shrink-0">
-                    <StatusBadge status={r.status} />
-                    {r.status === "complete" &&
-                      (shown ? (
-                        <span className="text-xs font-semibold uppercase tracking-wide text-primary">
-                          shown above
-                        </span>
-                      ) : (
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setSelectedRunId(r.id);
-                            window.scrollTo({ top: 0, behavior: "smooth" });
-                          }}
-                          className="text-sm font-semibold text-primary hover:opacity-80"
-                        >
-                          View results ↑
-                        </button>
-                      ))}
-                    {!active && (
-                      <button
-                        type="button"
-                        aria-label="delete run"
-                        onClick={async () => {
-                          if (!confirm("Delete this run and its data?")) return;
-                          await fetch(`/api/runs/${r.id}`, {
-                            method: "DELETE",
-                          });
-                          refresh();
-                        }}
-                        className="text-ink-3 hover:text-danger text-lg leading-none"
-                      >
-                        ×
-                      </button>
-                    )}
-                  </div>
-                </li>
-              );
-            })}
-          </ul>
+          <RunHistory
+            projectId={id}
+            schedule={project.schedule}
+            shownRunId={resultsRun?.id ?? null}
+            progress={progress ? { completed: progress.completed, total: progress.total } : null}
+            canSchedule={!initPhase && !archived}
+            canDelete
+            onView={(runId) => {
+              setSelectedRunId(runId);
+              setOpenModal(null);
+              window.scrollTo({ top: 0, behavior: "smooth" });
+            }}
+            onChanged={() => void refresh()}
+          />
         </Modal>
       )}
 
@@ -2114,51 +2061,6 @@ function RunProgress({
             : "Almost there — this last step usually takes under a minute."}
       </p>
     </section>
-  );
-}
-
-function ProgressBar({
-  completed,
-  total,
-}: {
-  completed: number;
-  total: number;
-}) {
-  const pct = total > 0 ? (completed / total) * 100 : 0;
-  return (
-    <div className="flex items-center gap-3">
-      <div className="h-1.5 w-44 rounded-full bg-line overflow-hidden">
-        <div
-          className="h-full rounded-full bg-primary transition-[width] duration-700"
-          style={{ width: `${pct}%` }}
-        />
-      </div>
-      <span className="text-xs tabular-nums text-ink-3">
-        {completed}/{total}
-      </span>
-    </div>
-  );
-}
-
-function StatusBadge({ status }: { status: Run["status"] }) {
-  if (status === "running" || status === "pending" || status === "collected") {
-    return (
-      <span className="inline-flex items-center gap-1.5 rounded-full bg-primary-soft px-2.5 py-1 text-xs font-semibold text-primary">
-        <span className="pulse-dot inline-block h-1.5 w-1.5 rounded-full bg-primary" />
-        {status === "running" ? "running" : status === "collected" ? "coding" : "queued"}
-      </span>
-    );
-  }
-  const styles: Record<"complete" | "failed", string> = {
-    complete: "bg-success/12 text-success",
-    failed: "bg-danger/12 text-danger",
-  };
-  return (
-    <span
-      className={`rounded-full px-2.5 py-1 text-xs font-semibold ${styles[status]}`}
-    >
-      {status}
-    </span>
   );
 }
 

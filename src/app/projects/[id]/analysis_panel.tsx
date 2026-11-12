@@ -1,6 +1,6 @@
 "use client";
 
-import { createContext, useCallback, useContext, useEffect, useRef, useState } from "react";
+import { Fragment, createContext, useCallback, useContext, useEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import {
   DEFICIT_TRIAGES,
@@ -10,6 +10,7 @@ import {
   type AnalysisMapView,
   type AnswerRef,
   type ArgsMode,
+  type BrandRead,
   type CellVerdict,
   type ConditionItem,
   type LiftItem,
@@ -17,6 +18,7 @@ import {
   type Position,
   type PositionNotes,
   type PositionReceipt,
+  type RivalHere,
   type RouteShare,
   type Triage,
 } from "@/lib/engine/analysis_types";
@@ -805,27 +807,275 @@ function ContestPanel({ p, ctx }: { p: Position; ctx: Ctx }) {
 
 // ---------- the rival panel ----------
 
+/** The two scopes of a rival: this one contest, or every contest it appears in (its dossier). */
 function ScopeChips({ name, cellId, scoped, ctx }: { name: string; cellId: string; scoped: boolean; ctx: Ctx }) {
   const p = ctx.map.positions[cellId];
-  const seg = (on: boolean) => `rounded-full px-3 py-1 text-[12px] ${on ? "bg-primary-soft font-semibold text-ink" : "text-ink-3 hover:text-ink-2"}`;
+  const seg = (on: boolean) => `rounded-full px-3 py-1 ${T.cap} ${on ? "bg-primary-soft font-semibold text-ink" : "text-ink-3 hover:text-ink-2"}`;
   return (
     <div className="clear-both mt-3 inline-flex max-w-full flex-wrap rounded-full border border-line p-[3px]">
       <button type="button" className={seg(scoped)} onClick={() => ctx.open({ kind: "rival", name, cell: cellId })}>
-        {p?.where ?? "This contest"}
+        Here: {p?.where ?? "this contest"}
       </button>
       <button type="button" className={seg(!scoped)} onClick={() => ctx.open({ kind: "rival", name, from: cellId })}>
-        All buyers
+        Everywhere {name} appears
       </button>
     </div>
   );
 }
 
+/** "Who takes the picks here", drawn open: every listed brand and you, the focus brand marked. */
+function PicksBars({ p, focus, ctx }: { p: Position; focus: string; ctx: Ctx }) {
+  const show = useShowExamples();
+  const rows = [
+    ...(p.brands ?? []).map((b) => ({ name: b.name, share: b.share, you: false, proof: b.proof })),
+    { name: "You", share: p.youShare ?? "0%", you: true, proof: [] as PositionReceipt[] },
+  ].sort((a, b) => pctNum(b.share) - pctNum(a.share));
+  const max = Math.max(1, ...rows.map((r) => pctNum(r.share)));
+  return (
+    <div>
+      {rows.map((r) => {
+        const isFocus = !r.you && normName(r.name) === normName(focus);
+        const color = r.you ? "var(--pa-yours)" : isFocus ? "var(--pa-theirs)" : "var(--neutral-bar)";
+        const proof = r.proof.filter((x) => x.quote);
+        const onClick = r.you
+          ? undefined
+          : isFocus
+            ? proof.length && show
+              ? () => show({ title: `Answers that pick ${r.name}`, subtitle: p.where, refs: proof.map((x) => ({ responseId: x.responseId, find: x.quote ?? "" })) })
+              : undefined
+            : () => ctx.open({ kind: "rival", name: r.name, cell: p.cellId });
+        const inner = (
+          <>
+            <span className={`truncate ${isFocus || r.you ? "font-semibold" : ""}`}>{r.name}</span>
+            <span className="h-2 overflow-hidden rounded bg-line/60">
+              <i className="block h-full rounded" style={{ width: `${(100 * pctNum(r.share)) / max}%`, background: color }} />
+            </span>
+            <span className={`text-right tabular-nums ${isFocus || r.you ? "font-semibold" : ""}`}>{r.share}</span>
+          </>
+        );
+        const cls = `grid w-full grid-cols-[minmax(0,8rem)_minmax(0,1fr)_2.75rem] items-center gap-2.5 border-b border-line/70 py-1.5 text-left ${T.body} text-ink`;
+        return onClick ? (
+          <button
+            key={r.name}
+            type="button"
+            onClick={onClick}
+            title={isFocus ? "See answers that pick it" : `Open ${r.name} in this contest`}
+            className={`${cls} hover:text-primary`}
+          >
+            {inner}
+          </button>
+        ) : (
+          <div key={r.name} className={cls}>
+            {inner}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+/** The funnel inside one contest: the rival beside you, each number opening its answers. */
+function HowTable({
+  name,
+  them,
+  you,
+  share,
+}: {
+  name: string;
+  them: BrandRead;
+  you?: BrandRead;
+  /** Share of the picks here (the headline's number), so "picked in" - a share of every answer - connects to it. */
+  share?: { them: string; you: string };
+}) {
+  const show = useShowExamples();
+  const where = useContext(WhereCtx);
+  type K = "named" | "recommended" | "picked" | "converts";
+  const rows: [K, string][] = [
+    ["named", "Named in"],
+    ["recommended", "Recommended in"],
+    ["picked", "Picked in"],
+    ["converts", "Recommendations that end as the pick"],
+  ];
+  const shareTip = "Of the answers here where the AI commits to one product";
+  const cellOf = (r: BrandRead | undefined, k: K, who: string, label: string) => {
+    if (!r) return <span className="text-ink-3">-</span>;
+    const refs = k === "converts" ? undefined : r.refs[k];
+    const val = r[k];
+    if (refs?.length && show)
+      return (
+        <button
+          type="button"
+          title={`${r.tips[k]} - see examples`}
+          onClick={() => show({ title: `${label.replace(/ in$/, "")} - ${who}`, subtitle: where, refs })}
+          className="tabular-nums text-primary underline decoration-dotted underline-offset-2 hover:opacity-80"
+        >
+          {val}
+        </button>
+      );
+    return (
+      <span title={r.tips[k]} className="tabular-nums">
+        {val}
+      </span>
+    );
+  };
+  return (
+    <table className={`w-full ${T.body}`}>
+      <thead>
+        <tr className={`${T.cap} text-ink-3`}>
+          <th className="py-1 text-left font-normal">Of the answers here</th>
+          <th className="py-1 text-right font-semibold" style={{ color: "var(--pa-theirs)" }}>
+            {name}
+          </th>
+          {you && (
+            <th className="py-1 pl-3 text-right font-semibold" style={{ color: "var(--pa-yours)" }}>
+              You
+            </th>
+          )}
+        </tr>
+      </thead>
+      <tbody>
+        {rows.map(([k, label]) => (
+          <Fragment key={k}>
+            <tr className="border-t border-line/70">
+              <td className="py-1.5 pr-2 text-ink-2">{label}</td>
+              <td className="py-1.5 text-right text-ink">{cellOf(them, k, name, label)}</td>
+              {you && <td className="py-1.5 pl-3 text-right text-ink">{cellOf(you, k, "you", label)}</td>}
+            </tr>
+            {k === "picked" && share && (
+              <tr className="border-t border-line/70">
+                <td className="py-1.5 pr-2 text-ink-2" title={shareTip}>
+                  Share of the picks
+                  <span className={`${T.cap} block text-ink-3`}>when the AI commits to one</span>
+                </td>
+                <td className="py-1.5 text-right align-top font-semibold tabular-nums text-ink" title={shareTip}>
+                  {share.them}
+                </td>
+                {you && (
+                  <td className="py-1.5 pl-3 text-right align-top font-semibold tabular-nums text-ink" title={shareTip}>
+                    {share.you}
+                  </td>
+                )}
+              </tr>
+            )}
+          </Fragment>
+        ))}
+      </tbody>
+    </table>
+  );
+}
+
+/** One sentence on how the rival gets its picks here: presence or conversion. */
+function howSentence(name: string, them: BrandRead, you: BrandRead | undefined, behind: boolean): string | null {
+  if (!you) return null;
+  const tn = pctNum(them.named);
+  const yn = pctNum(you.named);
+  const tc = pctNum(them.converts);
+  const yc = pctNum(you.converts);
+  if (!behind)
+    return `You lead ${name} here: you are named in ${you.named} of the answers to its ${them.named}, and ${you.converts} of your recommendations end as the pick to its ${them.converts}.`;
+  const converts = tc > yc + 3;
+  if (tn > yn + 5)
+    return converts
+      ? `${name} is named more often than you here (${them.named} to ${you.named}) and turns more of its recommendations into picks (${them.converts} to ${you.converts}).`
+      : `${name} wins here on presence: it is named in ${them.named} of the answers to your ${you.named}.`;
+  if (tn < yn - 5)
+    return converts
+      ? `You are named more often here (${you.named} to ${them.named}), but ${name} turns ${them.converts} of its recommendations into picks to your ${you.converts}.`
+      : `You are named more often here (${you.named} to ${them.named}) and still trail it on picks.`;
+  return converts
+    ? `Named about as often as you here, ${name} turns ${them.converts} of its recommendations into picks to your ${you.converts}.`
+    : `Named about as often as you here, ${name} converts about as well - its lead comes from a few more picks spread across the answers.`;
+}
+
+const flip = (l: LiftItem): LiftItem => ({ ...l, value: -l.value, wins: l.others, others: l.wins, receipts: l.receipts ? [...l.receipts].reverse() : undefined });
+
+/** What the AI says about the category when it picks the rival here, beside when it picks you. */
+function RivalArgs({ name, here }: { name: string; here: RivalHere }) {
+  if (here.argsMode === "compare" && here.args?.length) {
+    const forIt = here.args.filter((l) => l.value > 0).slice(0, 3);
+    const forYou = here.args.filter((l) => l.value < 0).slice(0, 3).map(flip);
+    return (
+      <div className="grid gap-4">
+        {forIt.length > 0 && (
+          <div>
+            <h5 className={`${T.cap} mb-0.5 font-semibold text-ink`}>Comes up more when it picks {name}</h5>
+            <LiftRows lifts={forIt} sides={["its picks", "your picks"]} />
+          </div>
+        )}
+        {forYou.length > 0 && (
+          <div>
+            <h5 className={`${T.cap} mb-0.5 font-semibold text-ink`}>Comes up more when it picks you</h5>
+            <LiftRows lifts={forYou} sides={["your picks", "its picks"]} />
+          </div>
+        )}
+      </div>
+    );
+  }
+  if (here.argsMode === "alone" && here.argsRows?.length)
+    return (
+      <>
+        <Hint>You are picked too rarely here to set the two side by side. This is what comes up most when it picks {name}.</Hint>
+        <CondRows rows={here.argsRows.slice(0, 3).map((r) => ({ label: r.label, share: r.share, weight: pctNum(r.share), receipts: r.receipts }))} color="var(--neutral-bar)" />
+      </>
+    );
+  return null;
+}
+
+/** The rival inside one contest (the owner's ask, 2026-11-12): how big its lead
+ * is, how it gets there, what the AI argues when it picks it, and which buyers
+ * it sends there - drawn open. Where the contest is too thin for a part, ONE
+ * note says so and that part reads the rival everywhere it appears instead.
+ * On the pooled open-choice contest the two scopes are the same answers, so
+ * there is no switch and the dossier's own sections fold in below. */
 function RivalScoped({ name, p, ctx }: { name: string; p: Position; ctx: Ctx }) {
   const b = (p.brands ?? []).find((x) => normName(x.name) === normName(name))!;
+  const d = ctx.findDossier(name);
+  const here = b.here;
+  const pooled = p.cellId === "chooses:open:all";
+  const cat = ctx.cat;
+  const you = p.youRead;
+
+  const hasArgs = !!here && ((here.argsMode === "compare" && (here.args?.length ?? 0) > 0) || (here.argsMode === "alone" && (here.argsRows?.length ?? 0) > 0));
+  // Which buyers it is sent: the cell's themes that route to it (prod), else the engine's own flat list for it.
   const awayThemes = (p.awayThemes ?? []).filter((t) => (t.routes ?? []).some((r) => normName(r.name) === normName(name)));
-  const awayFlat = p.away.filter((c) => (c.routes ?? []).some((r) => normName(r.name) === normName(name)));
-  const sends: CondRowData[] = (awayThemes.length ? themeRows(awayThemes) : flatRows(awayFlat)).map((r) => ({ ...r, routes: [] }));
+  const flatSends: CondRowData[] = (here?.sends ?? []).map((c) => ({ label: c.text, share: c.share, weight: c.n, wall: c.wall, receipts: c.receipts, tip: `About ${c.n} answers` }));
+  const sendRows: CondRowData[] = awayThemes.length ? themeRows(awayThemes).map((r) => ({ ...r, routes: [] })) : flatSends;
+  const hasSends = sendRows.length > 0;
+
+  // The fallbacks: the rival everywhere it appears (its dossier).
+  const fbArgs = d
+    ? d.argsAll
+        .filter((a) => Math.abs(a.value) >= 5)
+        .sort((x, y) => Math.abs(y.value) - Math.abs(x.value))
+        .slice(0, 4)
+    : [];
+  const fbSends = d ? (d.routesThemes.length > 0 ? themeRows(d.routesThemes) : shareRows(d.routesAll ?? [])).slice(0, 3) : [];
+  const useFbArgs = !hasArgs && !pooled && fbArgs.length > 0;
+  const useFbSends = !hasSends && !pooled && fbSends.length > 0;
+  const thin = [!hasArgs && `what the AI says about the ${cat.plural} when it picks ${name}`, !hasSends && `which buyers it sends to ${name}`].filter(Boolean) as string[];
+  const fbAny = useFbArgs || useFbSends;
+
+  // Every reason, both ways (the long tail): themes in prod, the flat lists otherwise.
+  const toIt = sendRows;
   const back = (p.towardThemes?.length ?? 0) > 0 ? themeRows(p.towardThemes!) : flatRows(p.toward);
+
+  const how = here ? howSentence(name, here.read, you, pctNum(b.share) > pctNum(p.youShare ?? "0%")) : null;
+  const secH = `${T.title} mb-1.5 mt-6`;
+
+  // Next steps: the head-to-head, its own customers, its strongest buying situation, everywhere.
+  const rooms = d ? roomsOf(d, ctx).filter((r) => r.cellId !== p.cellId) : [];
+  const best = [...rooms].sort((x, y) => pctNum(y.them) - pctNum(x.them))[0];
+  const next: { label: string; right: string; go: () => void }[] = [];
+  if (d?.cells.h2h)
+    next.push({
+      label: `You and ${name}, asked head to head`,
+      right: d.h2h.kind === "record" ? `you ${d.h2h.you} - ${name} ${d.h2h.them}` : "the matchup",
+      go: () => ctx.open({ kind: "cell", id: d.cells.h2h! }),
+    });
+  if (d?.cells.leaver) next.push({ label: `Where ${name}'s customers go when they switch`, right: "its customers switching", go: () => ctx.open({ kind: "cell", id: d.cells.leaver! }) });
+  if (best && pctNum(best.them) > pctNum(b.share)) next.push({ label: `Where ${name} is strongest: ${best.label}`, right: `${best.them} of the picks`, go: () => ctx.open({ kind: "rival", name, cell: best.cellId }) });
+  if (!pooled && d) next.push({ label: `${name} everywhere it appears`, right: "by buyer, head to head, assistants", go: () => ctx.open({ kind: "rival", name, from: p.cellId }) });
+
   return (
     <>
       <div className={crumbCls}>
@@ -837,36 +1087,84 @@ function RivalScoped({ name, p, ctx }: { name: string; p: Position; ctx: Ctx }) 
       <h2 className={h2Cls}>
         {name} takes {b.share} of the picks in this contest. You take {p.youShare ?? "0%"}.
       </h2>
-      <ScopeChips name={name} cellId={p.cellId} scoped ctx={ctx} />
-      <ExampleLink receipts={b.proof} title={`Answers that pick ${name}`} subtitle={p.where} />
-      <div className={evh}>The evidence</div>
-      {sends.length > 0 ? (
-        <Sec title="What it says about the buyer" teaser={buyerTeaser(back, sends)}>
+      {how && <p className={`${T.lede} mt-2 text-ink-2`}>{how}</p>}
+      {!pooled && d && <ScopeChips name={name} cellId={p.cellId} scoped ctx={ctx} />}
+
+      <h3 className={secH}>Who takes the picks here</h3>
+      <PicksBars p={p} focus={name} ctx={ctx} />
+
+      {here && (
+        <>
+          <h3 className={secH}>How it gets them</h3>
+          <HowTable name={name} them={here.read} you={you} share={{ them: b.share, you: p.youShare ?? "0%" }} />
+        </>
+      )}
+
+      {thin.length > 0 && (
+        <p className={`clear-both mt-6 border-l-[3px] border-line pl-2.5 ${T.sec} text-ink-2`}>
+          Too few answers here to read {thin.join(" or ")}
+          {fbAny ? `. ${useFbArgs && useFbSends ? "Both read" : "That part reads"} ${name} across every open buying question instead.` : "."}
+        </p>
+      )}
+
+      {hasArgs && here && (
+        <>
+          <h3 className={secH}>
+            What the AI says about the {cat.plural}
+          </h3>
+          <RivalArgs name={name} here={here} />
+        </>
+      )}
+      {useFbArgs && d && (
+        <>
+          <h3 className={secH}>What the AI says about the {cat.plural} - across every open buying question</h3>
+          <Hint>What the AI brings up more when it picks {name} than when it picks another brand.</Hint>
+          <LiftRows lifts={fbArgs} sides={d.argSides} />
+        </>
+      )}
+
+      {hasSends && (
+        <>
+          <h3 className={secH}>Which buyers it sends to {name}</h3>
+          <Hint>
+            {awayThemes.length
+              ? `What the AI says about the buyer when it sends them away from you and on to ${name}. The share is of the answers here that send buyers away from you with a stated condition.`
+              : here?.sendsShare
+                ? `In ${here.sendsShare} of the answers here the AI names a condition on the buyer that sends them to ${name}. Each share is of those answers.`
+                : `What the AI says about the buyer when it sends them to ${name}.`}
+          </Hint>
+          <CondRows rows={sendRows.slice(0, 3)} color="var(--pa-theirs)" />
+        </>
+      )}
+      {useFbSends && (
+        <>
+          <h3 className={secH}>Which buyers it sends to {name} - across every open buying question</h3>
+          <CondRows rows={fbSends.map((r) => ({ ...r, routes: [] }))} color="var(--pa-theirs)" />
+        </>
+      )}
+
+      <div className={evh}>More</div>
+      {(toIt.length > 0 || back.length > 0) && (
+        <Sec title="Every reason, both ways" teaser={`What sends buyers to ${name} here, beside what sends them to you`}>
           <Hint>{BUYER_HINT}</Hint>
-          <BuyerColumns toward={back} away={sends} towardTitle="Back to you when the buyer..." awayTitle={`To ${name} when the buyer...`} />
-        </Sec>
-      ) : (
-        <Sec title="What it says about the buyer" teaser={`Nothing sends buyers to ${name} by name`}>
-          <None>None of the main things the AI says about this buyer sends them to {name} by name. It is picked here without a stated condition.</None>
+          <BuyerColumns toward={back} away={toIt} towardTitle="To you when the buyer..." awayTitle={`To ${name} when the buyer...`} />
         </Sec>
       )}
-      <Sec title={`What the AI says about the ${ctx.cat.plural}`} teaser="Read across all buyers">
-        <None>Too few answers in one contest to read what the AI says about {name} alone.</None>
-        <p className="mt-2 text-[13px]">
-          <button type="button" className={linkCls} onClick={() => ctx.open({ kind: "rival", name, from: p.cellId })}>
-            See it across all buyers
-          </button>
-        </p>
-      </Sec>
-      <div className={evh}>Next</div>
-      <button type="button" className={rowLink} onClick={() => ctx.open({ kind: "cell", id: p.cellId })}>
-        <span>Back to the whole contest</span>
-        <span className="text-ink-3">{p.where} {"→"}</span>
-      </button>
-      <button type="button" className={rowLink} onClick={() => ctx.open({ kind: "rival", name, from: p.cellId })}>
-        <span>{name} across all buyers</span>
-        <span className="text-ink-3">the matchup, who supplies its picks {"→"}</span>
-      </button>
+      {pooled && d && <DossierFolds d={d} ctx={ctx} />}
+
+      {next.length > 0 && (
+        <>
+          <div className={evh}>Next</div>
+          {next.map((x) => (
+            <button key={x.label} type="button" className={rowLink} onClick={x.go}>
+              <span>{x.label}</span>
+              <span className="text-ink-3">
+                {x.right} {"→"}
+              </span>
+            </button>
+          ))}
+        </>
+      )}
     </>
   );
 }
@@ -895,54 +1193,31 @@ export function roomsOf(d: Dossier, ctx: { map: AnalysisMapView }): { cellId: st
   return out;
 }
 
-function RivalAll({ d, from, ctx }: { d: Dossier; from?: string | null; ctx: Ctx }) {
+/** The dossier's standing sections, folded: by buyer, against you, who supplies its picks.
+ * Shared by the rival-everywhere panel and the pooled open-choice contest (same answers). */
+function DossierFolds({ d, ctx }: { d: Dossier; ctx: Ctx }) {
   const [answers, setAnswers] = useState<AnswersTarget | null>(null);
   const closeAnswers = useCallback(() => setAnswers(null), []);
-  const fromP = from ? ctx.map.positions[from] : undefined;
-  const showScope = !!fromP && (fromP.brands ?? []).some((x) => normName(x.name) === normName(d.name));
-  const args = d.argsAll
-    .filter((a) => Math.abs(a.value) >= 5)
-    .sort((a, b) => Math.abs(b.value) - Math.abs(a.value))
-    .slice(0, 6);
-  const up = args.find((a) => a.value > 0);
-  const down = args.find((a) => a.value < 0);
   const rooms = roomsOf(d, ctx);
-  const to = d.routesThemes.length > 0 ? themeRows(d.routesThemes) : shareRows(d.routesAll ?? []);
-  const back = d.routesBackThemes.length > 0 ? themeRows(d.routesBackThemes) : shareRows(d.routesBack ?? []);
   const h2hRow = ctx.h2hRow(d);
   const supply = d.supplyAll ?? { vendors: [], assistants: [] };
   return (
     <>
-      <div className={crumbCls}>Rival - {d.name} - all buyers</div>
-      <h2 className={h2Cls}>{d.headline}</h2>
-      {showScope && <ScopeChips name={d.name} cellId={from!} scoped={false} ctx={ctx} />}
-      <ExampleLink receipts={d.receipts ?? []} title={`Answers that pick ${d.name}`} subtitle="When buyers ask what to buy" />
-      <div className={evh}>The evidence</div>
-      <Sec title="The numbers" teaser={d.tiles[1] ? `${d.tiles[1].label}: ${d.tiles[1].value}` : "Nothing to show"}>
-        {d.tiles.map((t) => (
-          <Fig key={t.label} label={t.label} value={t.value} />
-        ))}
-        {d.picksFrom.byType && <Fig label="Where its picks come from" value={d.picksFrom.byType} />}
-        {d.picksFrom.topQuestion && <Fig label="Picks from its top question" value={d.picksFrom.topQuestion} />}
-      </Sec>
-      <Sec title="By buyer" teaser={rooms.length ? rooms.map((r) => `${r.label} ${r.them}`).join(" - ") : "Nothing to show"}>
-        {rooms.length > 0 ? (
-          <>
-            <Hint>Its share of the picks in each buying situation, beside yours. Open one to see it there only.</Hint>
-            {rooms.map((r) => (
-              <button key={r.cellId} type="button" className={rowLink} onClick={() => ctx.open({ kind: "rival", name: d.name, cell: r.cellId })}>
-                <span>{r.label}</span>
-                <span className="whitespace-nowrap text-ink-2">
-                  {d.name} <b className="font-semibold text-ink">{r.them}</b> - you <b className="font-semibold text-ink">{r.you}</b> {"→"}
-                </span>
-              </button>
-            ))}
-          </>
-        ) : (
-          <None>{d.name} takes too few picks in any one buying situation to read by buyer.</None>
-        )}
-      </Sec>
-      <Sec title="Against you" teaser={d.h2h.kind === "record" ? `Head-to-head: you ${d.h2h.you} - ${d.name} ${d.h2h.them}` : "Never asked head-to-head"}>
+      {rooms.length > 0 && (
+        <Sec title="By buying situation" teaser={rooms.map((r) => `${r.label} ${r.them}`).join(" - ")}>
+          <Hint>Its share of the picks in each buying situation, beside yours. Open one to see it there.</Hint>
+          {rooms.map((r) => (
+            <button key={r.cellId} type="button" className={rowLink} onClick={() => ctx.open({ kind: "rival", name: d.name, cell: r.cellId })}>
+              <span>{r.label}</span>
+              <span className="whitespace-nowrap text-ink-2">
+                {d.name} <b className="font-semibold text-ink">{r.them}</b> - you <b className="font-semibold text-ink">{r.you}</b> {"→"}
+              </span>
+            </button>
+          ))}
+        </Sec>
+      )}
+      <Sec title="Asked head to head" teaser={d.h2h.kind === "record" ? `You ${d.h2h.you} - ${d.name} ${d.h2h.them}` : "Never asked head to head"}>
+        <Hint>A different question from the open ones above: the AI is asked to choose between the two of you.</Hint>
         {d.h2h.kind === "record" ? (
           <div className="border-b border-line py-2 text-[14px]">
             <div className="flex justify-between gap-4">
@@ -989,39 +1264,8 @@ function RivalAll({ d, from, ctx }: { d: Dossier; from?: string | null; ctx: Ctx
           </details>
         )}
       </Sec>
-      <Sec
-        title={`What the AI says about the ${ctx.cat.plural}`}
-        teaser={args.length ? [up && `For it: ${up.label}`, down && `Against it: ${down.label}`].filter(Boolean).join(" - ") : "Too few answers to compare"}
-      >
-        {args.length > 0 ? (
-          <>
-            <Hint>
-              What the AI brings up more in {d.argSides[0]} than in {d.argSides[1]}. Open one to see examples.
-            </Hint>
-            <LiftRows lifts={args} sides={d.argSides} />
-          </>
-        ) : (
-          <None>Too few answers pick {d.name} to read what the AI says about it.</None>
-        )}
-      </Sec>
-      <Sec title="What it says about the buyer" teaser={buyerTeaser(back, to)}>
-        {to.length || back.length || d.routesDefault || d.routesBackDefault ? (
-          <>
-            <Hint>{BUYER_HINT}</Hint>
-            <BuyerColumns toward={back} away={to} towardTitle="Back to you when the buyer..." awayTitle={`To ${d.name} when the buyer...`} />
-            {(d.routesBackDefault || d.routesDefault) && (
-              <div className="mt-2 grid gap-1 text-[12px] italic leading-snug text-ink-2">
-                {d.routesBackDefault && <p>{d.routesBackDefault}</p>}
-                {d.routesDefault && <p>{d.routesDefault}</p>}
-              </div>
-            )}
-          </>
-        ) : (
-          <None>Nothing the AI says about the buyer sends them to {d.name} by name.</None>
-        )}
-      </Sec>
       <Sec title="Who supplies its picks" teaser={d.supply ? "One company's assistants stand out" : "No one assistant stands out"}>
-        {d.supply ? <p className="mb-2 text-[14px] text-ink">{d.supply}</p> : <None>Its picks are spread across the assistants roughly in line with how many questions each answers.</None>}
+        {d.supply ? <p className="mb-2 text-[14px] text-ink">{d.supply}</p> : <p className={`${T.body} mb-2 text-ink-2`}>Its picks are spread across the assistants roughly in line with how many questions each answers.</p>}
         {supply.assistants.length > 0 && (
           <>
             <Hint>Share of its picks, beside the share of the questions each answers.</Hint>
@@ -1040,6 +1284,63 @@ function RivalAll({ d, from, ctx }: { d: Dossier; from?: string | null; ctx: Ctx
           </>
         )}
       </Sec>
+      {answers && <AnswersModal key={answers.ids.join(",")} runId={ctx.runId} target={answers} onClose={closeAnswers} />}
+    </>
+  );
+}
+
+function RivalAll({ d, from, ctx }: { d: Dossier; from?: string | null; ctx: Ctx }) {
+  const fromP = from ? ctx.map.positions[from] : undefined;
+  const showScope = !!fromP && from !== "chooses:open:all" && (fromP.brands ?? []).some((x) => normName(x.name) === normName(d.name));
+  const args = d.argsAll
+    .filter((a) => Math.abs(a.value) >= 5)
+    .sort((a, b) => Math.abs(b.value) - Math.abs(a.value));
+  const forIt = args.filter((a) => a.value > 0).slice(0, 3);
+  const against = args.filter((a) => a.value < 0).slice(0, 3);
+  const to = d.routesThemes.length > 0 ? themeRows(d.routesThemes) : shareRows(d.routesAll ?? []);
+  const back = d.routesBackThemes.length > 0 ? themeRows(d.routesBackThemes) : shareRows(d.routesBack ?? []);
+  const secH = `${T.title} mb-1.5 mt-6`;
+  return (
+    <>
+      <div className={crumbCls}>Rival - {d.name} - everywhere it appears</div>
+      <h2 className={h2Cls}>{d.headline}</h2>
+      {showScope && <ScopeChips name={d.name} cellId={from!} scoped={false} ctx={ctx} />}
+      <ExampleLink receipts={d.receipts ?? []} title={`Answers that pick ${d.name}`} subtitle="When buyers ask what to buy" />
+      <h3 className={secH}>The numbers, when buyers ask what to buy</h3>
+      {d.tiles.map((t) => (
+        <Fig key={t.label} label={t.label} value={t.value} />
+      ))}
+      {d.picksFrom.byType && <Fig label="Where its picks come from" value={d.picksFrom.byType} />}
+      {d.picksFrom.topQuestion && <Fig label="Picks from its top question" value={d.picksFrom.topQuestion} />}
+      {(forIt.length > 0 || against.length > 0) && (
+        <>
+          <h3 className={secH}>What the AI says about the {ctx.cat.plural}</h3>
+          <Hint>
+            What the AI brings up more in {d.argSides[0]} than in {d.argSides[1]}, and less. Open one to see examples.
+          </Hint>
+          <LiftRows lifts={[...forIt, ...against]} sides={d.argSides} />
+        </>
+      )}
+      {to.length > 0 && (
+        <>
+          <h3 className={secH}>Which buyers it sends to {d.name}</h3>
+          <CondRows rows={to.slice(0, 3).map((r) => ({ ...r, routes: [] }))} color="var(--pa-theirs)" />
+        </>
+      )}
+      <div className={evh}>More</div>
+      {(to.length > 0 || back.length > 0 || d.routesDefault || d.routesBackDefault) && (
+        <Sec title="Every reason, both ways" teaser={`What sends buyers to ${d.name}, beside what sends them to you`}>
+          <Hint>{BUYER_HINT}</Hint>
+          <BuyerColumns toward={back} away={to} towardTitle="To you when the buyer..." awayTitle={`To ${d.name} when the buyer...`} />
+          {(d.routesBackDefault || d.routesDefault) && (
+            <div className="mt-2 grid gap-1 text-[12px] italic leading-snug text-ink-2">
+              {d.routesBackDefault && <p>{d.routesBackDefault}</p>}
+              {d.routesDefault && <p>{d.routesDefault}</p>}
+            </div>
+          )}
+        </Sec>
+      )}
+      <DossierFolds d={d} ctx={ctx} />
       {ctx.onBuildTable && (
         <p className="mt-5 text-[13px]">
           <button type="button" className={linkCls} onClick={() => { ctx.onClose(); ctx.onBuildTable!(); }}>
@@ -1047,7 +1348,6 @@ function RivalAll({ d, from, ctx }: { d: Dossier; from?: string | null; ctx: Ctx
           </button>
         </p>
       )}
-      {answers && <AnswersModal key={answers.ids.join(",")} runId={ctx.runId} target={answers} onClose={closeAnswers} />}
     </>
   );
 }
@@ -1068,7 +1368,7 @@ export function SlideOver({ view, ctx }: { view: PanelView; ctx: Ctx }) {
     const scopedP = view.cell ? ctx.map.positions[view.cell] : undefined;
     const inScope = !!scopedP && (scopedP.brands ?? []).some((x) => normName(x.name) === normName(view.name));
     const d = ctx.findDossier(view.name);
-    label = `${view.name}${inScope ? ` - ${scopedP!.where}` : " - all buyers"}`;
+    label = `${view.name}${inScope ? ` - ${scopedP!.where}` : " - everywhere it appears"}`;
     where = label;
     if (inScope) body = <RivalScoped key={`${view.name}|${view.cell}`} name={view.name} p={scopedP!} ctx={ctx} />;
     else if (d) body = <RivalAll key={`${d.key}|${view.from ?? ""}`} d={d} from={view.from} ctx={ctx} />;

@@ -86,9 +86,14 @@ function Legend({ series }: { series: ChartSeries[] }) {
   );
 }
 
-function RowLabel({ row, y }: { row: ChartRow; y: number }) {
+/** The highlighted row's band (search pointed the table at it). */
+function RowBand({ y, h }: { y: number; h: number }) {
+  return <rect data-focus="1" x={-4} y={y} width={W + 4} height={h} rx={4} style={{ fill: "var(--primary-soft)", opacity: 0.6 }} />;
+}
+
+function RowLabel({ row, y, strong }: { row: ChartRow; y: number; strong?: boolean }) {
   return (
-    <text x={0} y={y} dominantBaseline="middle" style={{ fill: "var(--ink)", fontSize: 12.5, fontWeight: 500 }}>
+    <text x={0} y={y} dominantBaseline="middle" style={{ fill: "var(--ink)", fontSize: 12.5, fontWeight: strong ? 700 : 500 }}>
       <title>{row.full ?? row.label}</title>
       {clip(row.label, LABEL_CHARS)}
     </text>
@@ -97,7 +102,18 @@ function RowLabel({ row, y }: { row: ChartRow; y: number }) {
 
 const valueText = (c: ChartValue) => `${pct(c.v)}${c.thin ? "*" : ""}`;
 
-export function BarsChart({ series, rows, svgRef }: { series: ChartSeries[]; rows: ChartRow[]; svgRef?: Ref<SVGSVGElement> }) {
+export function BarsChart({
+  series,
+  rows,
+  svgRef,
+  highlight,
+}: {
+  series: ChartSeries[];
+  rows: ChartRow[];
+  svgRef?: Ref<SVGSVGElement>;
+  /** A row key to mark. */
+  highlight?: string;
+}) {
   const legend = legendLayout(series);
   const top = legend.height + (legend.height ? 10 : 4);
   const barH = 12;
@@ -117,7 +133,8 @@ export function BarsChart({ series, rows, svgRef }: { series: ChartSeries[]; row
         const gy = top + ri * (groupH + pad);
         return (
           <g key={r.key}>
-            <RowLabel row={r} y={gy + groupH / 2} />
+            {r.key === highlight && <RowBand y={gy - pad / 2 + 1} h={groupH + pad - 2} />}
+            <RowLabel row={r} y={gy + groupH / 2} strong={r.key === highlight} />
             {series.map((s, si) => {
               const c = r.values[si];
               const y = gy + si * (barH + gap);
@@ -153,7 +170,18 @@ export function BarsChart({ series, rows, svgRef }: { series: ChartSeries[]; row
   );
 }
 
-export function DotsChart({ series, rows, svgRef }: { series: ChartSeries[]; rows: ChartRow[]; svgRef?: Ref<SVGSVGElement> }) {
+export function DotsChart({
+  series,
+  rows,
+  svgRef,
+  highlight,
+}: {
+  series: ChartSeries[];
+  rows: ChartRow[];
+  svgRef?: Ref<SVGSVGElement>;
+  /** A row key to mark. */
+  highlight?: string;
+}) {
   const legend = legendLayout(series);
   const top = legend.height + (legend.height ? 14 : 8);
   const rowH = 30;
@@ -176,7 +204,8 @@ export function DotsChart({ series, rows, svgRef }: { series: ChartSeries[]; row
         const hi = present.length ? Math.max(...present.map((c) => c.v)) : 0;
         return (
           <g key={r.key}>
-            <RowLabel row={r} y={y} />
+            {r.key === highlight && <RowBand y={y - rowH / 2 + 1} h={rowH - 2} />}
+            <RowLabel row={r} y={y} strong={r.key === highlight} />
             <line x1={x0} x2={x1} y1={y} y2={y} style={{ stroke: "var(--line)", strokeWidth: 1 }} />
             {present.length > 1 && <line x1={X(lo)} x2={X(hi)} y1={y} y2={y} style={{ stroke: "var(--neutral-bar)", strokeWidth: 3, strokeLinecap: "round" }} />}
             {series.map((s, si) => {

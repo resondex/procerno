@@ -10,7 +10,9 @@ import { catPhrase, VCOLOR, VWORD } from "./analysis_panel";
 import { Download } from "./table";
 import { T } from "./type_scale";
 import { useEngineSet, viewQuery } from "./view_parts";
-import type { PivotSettings } from "./pivot_compute";
+import { sanitizeSettings, type PivotSettings } from "./pivot_compute";
+import DataSearchBox from "./data_search_box";
+import type { Focus, SearchHit } from "./data_search";
 import {
   CONTESTS_ID,
   DEFAULT_ID,
@@ -67,7 +69,11 @@ interface Prefs {
   entry?: string;
   show?: ShowAs;
   waves?: Waves;
+  /** "Build your own table": the reader's own settings, kept per project. */
+  own?: PivotSettings;
 }
+/** A table search opened (not in the library, not yet the reader's own). */
+const SEARCH_ID = "search";
 const prefsKey = (scope: string) => `procerno_data_prefs:${scope}`;
 const memPrefs = new Map<string, Prefs>();
 function readPrefs(scope: string): Prefs {
@@ -91,12 +97,14 @@ function writePrefs(scope: string, patch: Prefs) {
 }
 
 const SHOWS: ShowAs[] = ["table", "bars", "dots"];
+const ownOf = (p: Prefs): PivotSettings | null => sanitizeSettings(p.own);
 
 export default function DataPage({
   runId,
   projectId,
   map,
   category,
+  brand,
   request,
   jump,
 }: {
@@ -105,6 +113,8 @@ export default function DataPage({
   /** The hub's map payload: undefined while it loads, null when there is none. */
   map: AnalysisMapView | null | undefined;
   category?: string | null;
+  /** The tracker's brand (search names it in head-to-heads); defaults to the payload's. */
+  brand?: string;
   request?: DataRequest;
   /** The brief's request to open a station (its by-assistant table); `n` makes a repeat click a new request. */
   jump?: { station: "consideration"; n: number };
@@ -115,12 +125,23 @@ export default function DataPage({
   // The builder's last table (an entry or "own"): where "build" lands.
   const [pivotSel, setPivotSel] = useState<string>(() => (sel === OWN_ID || LIB_BY_ID.get(sel)?.kind === "pivot" ? sel : DEFAULT_ID));
   const [settings, setSettings] = useState<PivotSettings>(() => {
+    if (pivotSel === OWN_ID) {
+      const own = ownOf(prefs);
+      if (own) return own;
+    }
     const e = LIB_BY_ID.get(pivotSel);
     return entrySettings(e && e.kind === "pivot" ? e : LIB_BY_ID.get(DEFAULT_ID)!);
   });
+  // The table the reader last opened (a library entry or a search result):
+  // where Reset goes back to.
+  const [origin, setOrigin] = useState<string | SearchHit>(() => (LIB_BY_ID.get(sel)?.kind === "pivot" ? sel : DEFAULT_ID));
+  // A row search pointed at, and the name of a table search opened.
+  const [focus, setFocus] = useState<Focus | null>(null);
+  const [searchTitle, setSearchTitle] = useState("");
+  // The library list beside a wide table (Every contest, Question type detail).
+  const [libOpen, setLibOpen] = useState(false);
   const [show, setShow] = useState<ShowAs>(() => (prefs.show && SHOWS.includes(prefs.show) ? prefs.show : "table"));
   const [waves, setWaves] = useState<Waves>(() => (prefs.waves === "prev" ? "prev" : "this"));
-  const [filter, setFilter] = useState("");
   const [room, setRoom] = useState("");
   const [rooms, setRooms] = useState<string[]>([]);
   const onRooms = useCallback(
@@ -185,30 +206,34 @@ export default function DataPage({
   };
   // The shown entry: the selection, unless the run does not carry it.
   let shown: { id: string; kind: LibKind; entry: LibEntry | null };
-  if (sel === OWN_ID) {
-    shown = wb.loaded && !wb.view?.facts ? { id: CONTESTS_ID, kind: "contests", entry: LIB_BY_ID.get(CONTESTS_ID)! } : { id: OWN_ID, kind: "pivot", entry: null };
+  if (sel === OWN_ID || sel === SEARCH_ID) {
+    shown = wb.loaded && !wb.view?.facts ? { id: CONTESTS_ID, kind: "contests", entry: LIB_BY_ID.get(CONTESTS_ID)! } : { id: sel, kind: "pivot", entry: null };
   } else {
     const e = LIB_BY_ID.get(sel) ?? fallbackEntry();
     const ok = e.kind !== "pivot" || !wb.loaded || available(e);
     const use = ok ? e : fallbackEntry();
     shown = { id: use.id, kind: use.kind, entry: use };
   }
-  const shownSettings: PivotSettings = shown.id === sel || shown.id === OWN_ID ? settings : entrySettings(shown.entry!);
+  const shownSettings: PivotSettings = shown.id === sel || shown.id === OWN_ID || shown.id === SEARCH_ID ? settings : entrySettings(shown.entry!);
   const [seen, setSeen] = useState<Set<LibKind>>(() => new Set([shown.kind]));
   if (!seen.has(shown.kind)) setSeen(new Set(seen).add(shown.kind));
 
-  const pick = (e: LibEntry | null) => {
+  const pick = (e: LibEntry | null, f: Focus | null = null) => {
+    setFocus(f);
+    setLibOpen(false);
     if (!e) {
-      // "Build your own table": the builder as it stands.
+      // "Build your own table": the reader's own table as last left (kept
+      // per project), else the builder as it stands.
       setSel(OWN_ID);
       setPivotSel(OWN_ID);
-      setSettings(shownSettings);
+      setSettings(ownOf(readPrefs(scope)) ?? shownSettings);
       writePrefs(scope, { entry: OWN_ID });
       return;
     }
     setSel(e.id);
     if (e.kind === "pivot") {
       setPivotSel(e.id);
+      setOrigin(e.id);
       setSettings(entrySettings(e));
     }
     writePrefs(scope, { entry: e.id });
@@ -217,14 +242,37 @@ export default function DataPage({
     setSettings(s);
     setSel(OWN_ID);
     setPivotSel(OWN_ID);
-    writePrefs(scope, { entry: OWN_ID });
+    writePrefs(scope, { entry: OWN_ID, own: s });
+  };
+  const onSearch = (h: SearchHit) => {
+    if ("entry" in h.open) {
+      const e = LIB_BY_ID.get(h.open.entry);
+      if (e) pick(e, h.open.focus ?? null);
+      return;
+    }
+    // A table of its own: shown under its search name until a control is
+    // changed, which makes it the reader's own table.
+    setOrigin(h);
+    setFocus(h.open.focus ?? null);
+    setLibOpen(false);
+    setSearchTitle(h.open.title);
+    setSel(SEARCH_ID);
+    setPivotSel(SEARCH_ID);
+    setSettings(h.open.settings);
+  };
+  const reset = () => {
+    if (typeof origin !== "string") return onSearch(origin);
+    const e = LIB_BY_ID.get(origin);
+    pick(e && e.kind === "pivot" ? e : LIB_BY_ID.get(DEFAULT_ID)!);
   };
 
-  const needle = filter.trim().toLowerCase();
-  const visible = LIBRARY.filter((e) => available(e) && (!needle || e.label.toLowerCase().includes(needle)));
+  const visible = LIBRARY.filter((e) => available(e));
   const groups = [...new Set(visible.map((e) => e.group))];
-  const ownMatches = !needle || "build your own table".includes(needle);
-  const title = shown.entry?.label ?? "Your own table";
+  const title = shown.id === SEARCH_ID ? searchTitle : (shown.entry?.label ?? "Your own table");
+  const originName = typeof origin === "string" ? (LIB_BY_ID.get(origin)?.label ?? LIB_BY_ID.get(DEFAULT_ID)!.label) : origin.title;
+  const resetTo = shown.id === OWN_ID ? originName : null;
+  const wide = shown.kind !== "pivot";
+  const showLib = !wide || libOpen;
   const item = (on: boolean) => `w-full rounded-lg px-2.5 py-1.5 text-left ${T.body} ${on ? "bg-primary-soft font-semibold text-ink" : "text-ink-2 hover:text-ink"}`;
   const chip = (on: boolean) =>
     `rounded-full border px-3 py-1 ${T.ctl} transition-colors ${
@@ -237,40 +285,62 @@ export default function DataPage({
         <h2 className={`${T.h2} mb-1`}>Data</h2>
         <p className={`${T.sec} max-w-[70ch]`}>Ready-made tables for the common questions, and a builder for your own. Any table can be shown as a chart.</p>
       </div>
-      <div className="grid items-start gap-6 md:grid-cols-[280px_minmax(0,1fr)]">
-        <nav aria-label="Tables" className="grid gap-1">
-          <input
-            type="search"
-            value={filter}
-            onChange={(e) => setFilter(e.target.value)}
-            placeholder="Search tables"
-            aria-label="Search tables"
-            className="input mb-1 w-full py-1 text-[13px]"
-          />
+      <DataSearchBox data={wb.view} brand={brand ?? wb.view?.brand ?? "You"} category={category} onOpen={onSearch} />
+      <div className={`grid items-start gap-6 ${showLib && !wide ? "md:grid-cols-[260px_minmax(0,1fr)]" : ""}`}>
+        {showLib && (
+        <nav
+          aria-label="Tables"
+          // On a phone the list folds away (it would push the table a screen down).
+          className={wide ? "grid gap-1 rounded-xl border border-line p-3 sm:grid-cols-2 lg:grid-cols-3" : libOpen ? "grid gap-1" : "hidden gap-1 md:grid"}
+        >
           {!wb.loaded && <p className={`${T.cap} px-2.5 text-ink-3`}>Loading the tables...</p>}
           {groups.map((g, gi) => (
-            <div key={g} className="grid gap-0.5">
-              <h5 className={`${T.label} px-2.5 ${gi === 0 ? "mt-1" : "mt-3"} mb-0.5`}>{g}</h5>
+            <div key={g} className="grid content-start gap-0.5">
+              <h5 className={`${T.label} px-2.5 ${gi === 0 || wide ? "mt-1" : "mt-3"} mb-0.5`}>{g}</h5>
               {visible
                 .filter((e) => e.group === g)
                 .map((e) => (
-                  <button key={e.id} type="button" onClick={() => pick(e)} aria-current={shown.id === e.id ? "true" : undefined} className={item(shown.id === e.id)}>
+                  <button
+                    key={e.id}
+                    type="button"
+                    onClick={() => pick(e)}
+                    title={e.desc}
+                    aria-current={shown.id === e.id ? "true" : undefined}
+                    className={item(shown.id === e.id)}
+                  >
                     {e.label}
                   </button>
                 ))}
             </div>
           ))}
-          {needle && groups.length === 0 && !ownMatches && <p className={`${T.cap} px-2.5 text-ink-3`}>No table matches.</p>}
-          {ownMatches && wb.view?.facts && (
-            <div className="mt-3 border-t border-line pt-2">
-              <button type="button" onClick={() => pick(null)} aria-current={shown.id === OWN_ID ? "true" : undefined} className={item(shown.id === OWN_ID)}>
+          {wb.view?.facts && (
+            <div className={wide ? "grid content-start gap-0.5" : "mt-3 border-t border-line pt-2"}>
+              {wide && <h5 className={`${T.label} mt-1 mb-0.5 px-2.5`}>Your own</h5>}
+              <button
+                type="button"
+                onClick={() => pick(null)}
+                title="Choose the questions, rows, columns and numbers yourself. Your last table is kept."
+                aria-current={shown.id === OWN_ID ? "true" : undefined}
+                className={item(shown.id === OWN_ID)}
+              >
                 Build your own table
               </button>
             </div>
           )}
         </nav>
+        )}
         <div className="grid min-w-0 gap-3">
-          <h3 className={T.title}>{title}</h3>
+          <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
+            <h3 className={T.title}>{title}</h3>
+            <button
+              type="button"
+              onClick={() => setLibOpen(!libOpen)}
+              aria-expanded={libOpen}
+              className={`${T.ctl} text-primary hover:opacity-80 ${wide ? "" : "md:hidden"}`}
+            >
+              {libOpen ? "Hide the other tables" : "Show the other tables"}
+            </button>
+          </div>
           {seen.has("pivot") && (
             <div className={shown.kind === "pivot" ? "grid gap-3" : "hidden"}>
               {!wb.loaded ? (
@@ -300,6 +370,10 @@ export default function DataPage({
                   hasPrev={!!prevId}
                   prevData={prevData}
                   name={title}
+                  focus={focus}
+                  onClearFocus={() => setFocus(null)}
+                  onReset={reset}
+                  resetTo={resetTo}
                 />
               )}
             </div>

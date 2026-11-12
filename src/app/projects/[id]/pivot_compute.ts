@@ -12,7 +12,7 @@ import {
   type WbRow,
 } from "@/lib/engine/measures";
 import { EVIDENCE_CAP } from "./evidence_panel";
-import { TIER_LABEL } from "./view_parts";
+import { MODE_LABEL, TIER_LABEL } from "./view_parts";
 
 /**
  * The Data page's pivot as a pure function (2026-11-11): settings + one
@@ -48,6 +48,35 @@ export const DIMS: { key: DimKey; label: string }[] = [
   { key: "argument", label: "Argument" },
 ];
 export const DIM_LABEL = Object.fromEntries(DIMS.map((d) => [d.key, d.label])) as Record<DimKey, string>;
+const DIM_KEYS = new Set<string>(DIMS.map((d) => d.key));
+
+/** A dimension as a noun inside a sentence ("for each buying situation"). */
+export const DIM_NOUN: Record<DimKey, string> = {
+  none: "",
+  room: "buying situation",
+  worry: "worry",
+  rival: "rival",
+  stage: "question type",
+  question: "question",
+  engine: "assistant",
+  vendor: "AI company",
+  tier: "free or paid tier",
+  mode: "search setting",
+  brand: "brand",
+  parent: "company",
+  argument: "argument",
+};
+
+/** Dimensions a table can be narrowed to one value of ("only this buyer"):
+ * attributes of the answer itself, never a brand or argument context. */
+export const FILTER_DIMS: readonly DimKey[] = ["room", "worry", "rival", "engine", "vendor", "tier", "mode"];
+
+/** Narrow a table to the answers carrying one value of a dimension, matched
+ * by label so the same filter resolves on another wave. */
+export interface PivotWhere {
+  dim: DimKey;
+  label: string;
+}
 
 /** The measure a pool opens on. */
 export const POOL_DEFAULT: Partial<Record<ViewKey, string>> = {
@@ -120,6 +149,28 @@ export interface PivotSettings {
   brand: string | null;
   /** The argument an incidence measure reads, by label; null = the first. */
   arg: string | null;
+  /** Only the answers carrying this value (search sets it); absent = all. */
+  where?: PivotWhere | null;
+}
+
+/** Settings read back from storage: anything malformed falls back. */
+export function sanitizeSettings(x: unknown): PivotSettings | null {
+  if (!x || typeof x !== "object") return null;
+  const o = x as Record<string, unknown>;
+  const dim = (v: unknown): DimKey => (typeof v === "string" && DIM_KEYS.has(v) ? (v as DimKey) : "none");
+  const w = o.where as Record<string, unknown> | null | undefined;
+  return {
+    pool: typeof o.pool === "string" ? (o.pool as ViewKey) : null,
+    measures: Array.isArray(o.measures) ? o.measures.filter((m): m is string => typeof m === "string").slice(0, MAX_MEASURES) : [],
+    row: dim(o.row),
+    col: dim(o.col),
+    brand: typeof o.brand === "string" ? o.brand : null,
+    arg: typeof o.arg === "string" ? o.arg : null,
+    where:
+      w && typeof w === "object" && typeof w.label === "string" && FILTER_DIMS.includes(dim(w.dim))
+        ? { dim: dim(w.dim), label: w.label }
+        : null,
+  };
 }
 
 /** What the settings come to on one payload, after legality. */
@@ -135,6 +186,8 @@ export interface Resolved {
   poolRows: WbRow[];
   needsBrand: boolean;
   needsArg: boolean;
+  /** The filter, when legal for this pool; poolRows are already narrowed. */
+  where: PivotWhere | null;
 }
 
 /** The pools a payload carries, in journey order. */
@@ -187,9 +240,11 @@ export function resolveSettings(s: PivotSettings, data: WorkbenchView): Resolved
     if (!first) return null;
     measures = [first];
   }
-  const poolRows = data.facts.filter((r) => data.prompts[r[R.prompt]].views.includes(pool));
+  const allPoolRows = data.facts.filter((r) => data.prompts[r[R.prompt]].views.includes(pool));
   // A dimension must be legal for EVERY measure on the table.
-  const legal = (k: DimKey) => measures.every((m) => !dimReason(data, pool, m, poolRows, k));
+  const legal = (k: DimKey) => measures.every((m) => !dimReason(data, pool, m, allPoolRows, k));
+  const where = s.where && FILTER_DIMS.includes(s.where.dim) && legal(s.where.dim) ? s.where : null;
+  const poolRows = where ? allPoolRows.filter((r) => whereLabel(data, where.dim, r) === where.label) : allPoolRows;
   const rowDim: DimKey = legal(s.row) ? s.row : "none";
   const colDim: DimKey = !legal(s.col) || s.col === rowDim ? "none" : s.col;
   if (colDim !== "none") measures = measures.slice(0, 1);
@@ -210,7 +265,33 @@ export function resolveSettings(s: PivotSettings, data: WorkbenchView): Resolved
     poolRows,
     needsBrand: measures.some((m) => m.brand) && !byBrand(rowDim) && !byBrand(colDim),
     needsArg: measures.some((m) => m.arg) && rowDim !== "argument" && colDim !== "argument",
+    where,
   };
+}
+
+/** The label an answer carries on a filterable dimension (the same labels
+ * computePivot's rows use). */
+export function whereLabel(data: WorkbenchView, dim: DimKey, r: WbRow): string | null {
+  const p = data.prompts[r[R.prompt]];
+  const e = data.engines[r[R.engine]];
+  switch (dim) {
+    case "room":
+      return p.room >= 0 ? data.rooms[p.room] : null;
+    case "worry":
+      return p.worry >= 0 ? data.worries[p.worry] : null;
+    case "rival":
+      return p.rival >= 0 ? data.brands[p.rival].name : p.angle >= 0 ? titleCase(data.angles[p.angle]) : null;
+    case "engine":
+      return e.label;
+    case "vendor":
+      return e.vendor ?? e.label;
+    case "tier":
+      return TIER_LABEL[e.tier ?? "both"];
+    case "mode":
+      return MODE_LABEL[e.mode];
+    default:
+      return null;
+  }
 }
 
 /** The settings a resolution stands for (to resolve the same table on
@@ -223,6 +304,7 @@ export function settingsOf(r: Resolved, data: WorkbenchView): PivotSettings {
     col: r.colDim,
     brand: r.brand === data.target ? null : (data.brands[r.brand]?.name ?? null),
     arg: data.args[r.arg] ?? null,
+    where: r.where,
   };
 }
 
@@ -339,7 +421,7 @@ export function computePivot(res: Resolved, data: WorkbenchView): Pivot {
       case "mode":
         return (r) => {
           const m = engineOf(r).mode;
-          return [one(m, titleCase(m))];
+          return [one(m, MODE_LABEL[m])];
         };
       case "brand":
       case "parent":
