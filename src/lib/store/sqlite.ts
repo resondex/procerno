@@ -1555,6 +1555,15 @@ export const sqliteStore: Store = {
     return row?.setup_decision ?? null;
   },
 
+  async setupIdForProject(projectId, brand) {
+    const row = getDb()
+      .prepare(
+        "SELECT key FROM llm_cache WHERE brand = ? AND key LIKE 'setup_created:%' AND value = ? ORDER BY created_at DESC LIMIT 1"
+      )
+      .get(brand.trim().toLowerCase(), projectId) as { key: string } | undefined;
+    return row ? row.key.slice("setup_created:".length) : null;
+  },
+
   async getDictionaryDecision(projectId) {
     const row = getDb()
       .prepare("SELECT dictionary_decision FROM projects WHERE id = ?")

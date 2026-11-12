@@ -133,13 +133,30 @@ function useBodies(ids: string[]): Bodies | null {
 }
 
 /** What "See examples" opens: the answers behind one row or claim. */
-interface ExamplesTarget {
+export interface ExamplesTarget {
   title: string;
   subtitle?: string;
   note?: string;
   refs: AnswerRef[];
 }
 const ExamplesCtx = createContext<((t: ExamplesTarget) => void) | null>(null);
+
+/** Opens the examples modal from anywhere under an ExamplesHost (null outside one). */
+export const useShowExamples = () => useContext(ExamplesCtx);
+
+/** Hosts the one examples modal for everything beneath it (the slide-over,
+ * and the Overview's numbers, board rows and finding bars). Needs a
+ * BodiesProvider above it. */
+export function ExamplesHost({ children }: { children: ReactNode }) {
+  const [examples, setExamples] = useState<ExamplesTarget | null>(null);
+  const close = useCallback(() => setExamples(null), []);
+  return (
+    <ExamplesCtx.Provider value={setExamples}>
+      {children}
+      {examples && <ExamplesModal key={examples.refs.map((r) => r.responseId).join(",")} target={examples} onClose={close} />}
+    </ExamplesCtx.Provider>
+  );
+}
 
 /**
  * The examples modal: for each answer, the question the buyer asked, the
@@ -1071,17 +1088,14 @@ export function SlideOver({ view, ctx }: { view: PanelView; ctx: Ctx }) {
 }
 
 function Host({ label, where, onClose, children }: { label: string; where?: string; onClose: () => void; children: ReactNode }) {
-  const [examples, setExamples] = useState<ExamplesTarget | null>(null);
-  const close = useCallback(() => setExamples(null), []);
   return (
-    <ExamplesCtx.Provider value={setExamples}>
+    <ExamplesHost>
       <WhereCtx.Provider value={where}>
         <PanelShell label={label} onClose={onClose}>
           {children}
         </PanelShell>
-        {examples && <ExamplesModal key={examples.refs.map((r) => r.responseId).join(",")} target={examples} onClose={close} />}
       </WhereCtx.Provider>
-    </ExamplesCtx.Provider>
+    </ExamplesHost>
   );
 }
 

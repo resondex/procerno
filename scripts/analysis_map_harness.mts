@@ -273,6 +273,20 @@ for (const project of projects) {
     for (const t of [...(p.towardThemes ?? []), ...(p.awayThemes ?? [])]) for (const x of t.receipts ?? []) { realRef(x, `${id} themes`); refs++; }
     if (p.notes?.wall && !p.away.some((c: { text: string; wall?: boolean }) => c.wall && c.text === p.notes.wall)) failures.push(`${project.brand}: ${id} notes.wall is not its flat wall item`);
   }
+  /* -- am19: the Overview's numbers open their answers -- */
+  const ovRefs = (list: { responseId: string; find: string }[] | undefined, at: string) => {
+    if ((list?.length ?? 0) > 5) failures.push(`${project.brand}: ${at} carries ${list!.length} examples`);
+    if (new Set((list ?? []).map((x) => x.responseId)).size !== (list?.length ?? 0)) failures.push(`${project.brand}: ${at} repeats an answer`);
+    for (const x of list ?? []) { realRef(x, at); refs++; }
+  };
+  if (view.dots.named.k > 0 && !view.examples?.named.length) failures.push(`${project.brand}: named has no examples`);
+  ovRefs(view.examples?.named, "overview named");
+  ovRefs(view.examples?.commits, "overview commits");
+  for (const s of view.shareOfDecided) {
+    if (s.share.k > 0 && !s.refs?.length) failures.push(`${project.brand}: board row ${s.brand} has no examples`);
+    ovRefs(s.refs, `board ${s.brand}`);
+  }
+  for (const t of view.tensions) for (const b of t.viz ?? []) ovRefs(b.refs, `finding "${t.title}" bar ${b.label}`);
   const dossiers = await computeDossiers(data, {});
   for (const d of dossiers.dossiers as Dossier[]) {
     for (const a of d.argsAll) for (const x of a.receipts ?? []) { realRef(x, `dossier ${d.name} args`); refs++; }

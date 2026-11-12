@@ -2,14 +2,17 @@
 
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import type { RateCell } from "@/lib/engine/view_data";
-import type { AnalysisDecision, AnalysisMapView, MapBand, MapCell, MapRow, Triage } from "@/lib/engine/analysis_types";
+import type { AnalysisDecision, AnalysisMapView, AnswerRef, MapBand, MapCell, MapRow, Triage } from "@/lib/engine/analysis_types";
 import type { Dossier, DossiersView } from "@/lib/engine/dossiers";
 import type { HeadToHeadViews } from "@/lib/engine/head_to_head";
 import { useEngineSet, viewQuery } from "./view_parts";
 import { T } from "./type_scale";
+import { CompanyBoard } from "./company_board";
 import {
   BodiesProvider,
   catPhrase,
+  ExamplesHost,
+  useShowExamples,
   normName,
   notesOf,
   whyLines,
@@ -231,27 +234,29 @@ export default function AnalysisHub({
 
   return (
     <BodiesProvider runId={runId}>
-      <div className="pa-root">
-        <style>{TIER_CSS}</style>
-        {page === "overview" && <Overview map={map} ctx={ctx} mine={mine} onGo={onGo} onRivals={goRivals} />}
-        {page === "map" && (
-          <MarkCtx.Provider value={{ mine, mineOnly: mineOnly && mine.size > 0 }}>
-            <MapPage
-              map={map}
-              ctx={ctx}
-              view={mapView}
-              setView={setMapView}
-              mineOnly={mineOnly}
-              setMineOnly={setMineOnly}
-              mineCount={mine.size}
-              prefScope={projectId ?? "shared"}
-              dossiers={list}
-              dossiersLoading={dossiers === undefined}
-            />
-          </MarkCtx.Provider>
-        )}
-        {panel && <SlideOver view={panel} ctx={ctx} />}
-      </div>
+      <ExamplesHost>
+        <div className="pa-root">
+          <style>{TIER_CSS}</style>
+          {page === "overview" && <Overview map={map} ctx={ctx} mine={mine} onGo={onGo} onRivals={goRivals} />}
+          {page === "map" && (
+            <MarkCtx.Provider value={{ mine, mineOnly: mineOnly && mine.size > 0 }}>
+              <MapPage
+                map={map}
+                ctx={ctx}
+                view={mapView}
+                setView={setMapView}
+                mineOnly={mineOnly}
+                setMineOnly={setMineOnly}
+                mineCount={mine.size}
+                prefScope={projectId ?? "shared"}
+                dossiers={list}
+                dossiersLoading={dossiers === undefined}
+              />
+            </MarkCtx.Provider>
+          )}
+          {panel && <SlideOver view={panel} ctx={ctx} />}
+        </div>
+      </ExamplesHost>
     </BodiesProvider>
   );
 }
@@ -261,22 +266,54 @@ export default function AnalysisHub({
 /** A finding's small chart (the engine's optional `viz` on a tension - see
  * analysis_types.ts). Bars are 0-100; `text` is the display string; `hi` the row to
  * accent. Decorative: the finding's sentence carries the same numbers. */
-function MiniBars({ rows }: { rows: TensionVizRow[] }) {
+function MiniBars({ rows, title }: { rows: TensionVizRow[]; title: string }) {
+  const show = useShowExamples();
+  const any = !!show && rows.some((r) => (r.refs?.length ?? 0) > 0);
   return (
-    <span className="grid min-w-0 gap-1.5" aria-hidden>
-      {rows.map((r, i) => (
-        <span key={`${r.label}${i}`} className={`grid grid-cols-[minmax(0,8rem)_minmax(0,1fr)_2.75rem] items-center gap-2 ${T.cap} ${r.hi ? "text-ink" : "text-ink-3"}`}>
-          <span className="truncate">{r.label}</span>
-          <span className="h-2 rounded bg-line/60">
-            <i
-              className={`block h-full min-w-[2px] rounded ${r.hi ? "bg-primary" : "bg-neutral-bar"}`}
-              style={{ width: `${Math.max(0, Math.min(100, r.value))}%` }}
-            />
-          </span>
-          <span className="text-right tabular-nums">{r.text}</span>
-        </span>
-      ))}
-    </span>
+    <div className="grid min-w-0 gap-1.5">
+      {rows.map((r, i) => {
+        const cls = `grid w-full grid-cols-[minmax(0,8rem)_minmax(0,1fr)_2.75rem] items-center gap-2 text-left ${T.cap} ${r.hi ? "text-ink" : "text-ink-3"}`;
+        const inner = (
+          <>
+            <span className="truncate">{r.label}</span>
+            <span className="h-2 rounded bg-line/60">
+              <i
+                className={`block h-full min-w-[2px] rounded ${r.hi ? "bg-primary" : "bg-neutral-bar"}`}
+                style={{ width: `${Math.max(0, Math.min(100, r.value))}%` }}
+              />
+            </span>
+            <span className="text-right tabular-nums">{r.text}</span>
+          </>
+        );
+        return show && r.refs?.length ? (
+          <button
+            key={`${r.label}${i}`}
+            type="button"
+            title="See the answers behind this"
+            onClick={() => show({ title, subtitle: `${r.label}: ${r.text}`, refs: r.refs! })}
+            className={`${cls} rounded hover:text-primary [&>span:last-child]:hover:underline`}
+          >
+            {inner}
+          </button>
+        ) : (
+          <div key={`${r.label}${i}`} className={cls}>
+            {inner}
+          </div>
+        );
+      })}
+      {any && <p className={`${T.cap} text-ink-3`}>Click a bar to see the answers</p>}
+    </div>
+  );
+}
+
+/** A number on the Overview that opens the answers behind it (a quiet link under it). */
+function SeeExamples({ refs, title, subtitle }: { refs?: AnswerRef[]; title: string; subtitle?: string }) {
+  const show = useShowExamples();
+  if (!show || !refs?.length) return null;
+  return (
+    <button type="button" onClick={() => show({ title, subtitle, refs })} className={`${T.cap} mt-1.5 block text-primary hover:underline`}>
+      See examples
+    </button>
   );
 }
 
@@ -293,6 +330,13 @@ function Overview({
   onGo: (to: HubGo) => void;
   onRivals: () => void;
 }) {
+  const show = useShowExamples();
+  const engineSet = useEngineSet();
+  // By brand or by parent company. The switch only shows once the company
+  // view reports that some brand on the board has a parent.
+  const [byCompany, setByCompany] = useState(false);
+  const [hasCompanies, setHasCompanies] = useState(false);
+  const companyMode = byCompany && hasCompanies;
   const you = map.shareOfDecided.find((s) => s.you);
   const named = map.dots.named;
   const commit: RateCell | null = you && map.dots.picked.n > 0 ? { k: you.share.n, n: map.dots.picked.n, low: 0, high: 0 } : null;
@@ -319,59 +363,101 @@ function Overview({
             <div title={tipOf(named)} className="min-w-0">
               <b className={`${T.num} block text-ink`}>{pctOf(named)}</b>
               <span className={`${T.sec} mt-1 block`}>named when buyers ask what to buy</span>
+              <SeeExamples refs={map.examples?.named} title={`Answers that name ${ctx.brand}`} subtitle="When buyers ask what to buy" />
             </div>
             {you && (
               <div title={`${you.share.k.toLocaleString("en-US")} of ${you.share.n.toLocaleString("en-US")} picks`} className="min-w-0">
                 <b className={`${T.num} block text-primary`}>{pctOf(you.share)}</b>
                 <span className={`${T.sec} mt-1 block`}>share of picks</span>
+                <SeeExamples refs={you.refs} title={`Answers where the AI picks ${you.brand}`} subtitle="When buyers ask what to buy" />
               </div>
             )}
             {commit && (
               <div title={tipOf(commit)} className="min-w-0">
                 <b className={`${T.num} block text-ink`}>{pctOf(commit)}</b>
                 <span className={`${T.sec} mt-1 block`}>of answers commit to one {ctx.cat.singular}</span>
+                <SeeExamples
+                  refs={map.examples?.commits}
+                  title={`Answers that commit to one ${ctx.cat.singular}`}
+                  subtitle="When buyers ask what to buy"
+                />
               </div>
             )}
           </div>
         </div>
         {map.shareOfDecided.length > 0 && (
           <div className="card min-w-0 p-[18px]">
-            <h3 className={`${T.title} mb-3`}>Share of picks, when the AI commits</h3>
-            {map.shareOfDecided.map((s) => {
+            <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+              <h3 className={T.title}>Share of picks, when the AI commits</h3>
+              {hasCompanies && (
+                <div className="inline-flex rounded-full border border-line bg-surface p-[2px]" role="tablist" aria-label="Group the picks">
+                  {[
+                    { on: !companyMode, label: "By brand", set: false },
+                    { on: companyMode, label: "By company", set: true },
+                  ].map((o) => (
+                    <button
+                      key={o.label}
+                      type="button"
+                      role="tab"
+                      aria-selected={o.on}
+                      onClick={() => setByCompany(o.set)}
+                      className={`rounded-full px-3 py-0.5 text-[12px] ${o.on ? "bg-primary-soft font-semibold text-ink" : "text-ink-3 hover:text-ink-2"}`}
+                    >
+                      {o.label}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+            <div className={companyMode ? "" : "hidden"}>
+              <CompanyBoard runId={ctx.runId} engines={engineSet} share={!ctx.editable} bare onHasParents={setHasCompanies} />
+            </div>
+            {!companyMode && map.shareOfDecided.map((s) => {
               const d = !s.you ? ctx.findDossier(s.brand) : undefined;
-              const inner = (
+              const nameBar = (
                 <>
                   <span className="truncate">{s.brand}</span>
                   <span className="h-2.5 overflow-hidden rounded-[5px] bg-line/60">
                     <i className={`block h-full rounded-[5px] ${s.you ? "bg-primary" : "bg-neutral-bar"}`} style={{ width: `${(100 * shareX(s.share)) / max}%` }} />
                   </span>
-                  <span className="text-right tabular-nums">{pctOf(s.share)}</span>
                 </>
               );
-              const cls = `grid w-full grid-cols-[minmax(0,132px)_minmax(0,1fr)_40px] items-center gap-2.5 rounded-md px-1 py-1 text-left text-[13px] ${s.you ? "font-semibold text-ink" : "text-ink-2"}`;
-              return d ? (
-                <button
+              const left = "grid grid-cols-[minmax(0,132px)_minmax(0,1fr)] items-center gap-2.5 rounded-md px-1 py-1 text-left";
+              const who = s.brand === "Others" ? "another brand" : s.brand;
+              return (
+                <div
                   key={s.brand}
-                  type="button"
-                  title={`Open ${s.brand}`}
-                  onClick={() => ctx.open({ kind: "rival", name: d.name })}
-                  className={`${cls} hover:bg-primary-soft`}
+                  className={`grid w-full grid-cols-[minmax(0,1fr)_44px] items-center gap-1 text-[13px] ${s.you ? "font-semibold text-ink" : "text-ink-2"}`}
                 >
-                  {inner}
-                </button>
-              ) : (
-                <div key={s.brand} className={cls}>
-                  {inner}
+                  {d ? (
+                    <button type="button" title={`Open ${s.brand}`} onClick={() => ctx.open({ kind: "rival", name: d.name })} className={`${left} hover:bg-primary-soft`}>
+                      {nameBar}
+                    </button>
+                  ) : (
+                    <div className={left}>{nameBar}</div>
+                  )}
+                  {show && s.refs?.length ? (
+                    <button
+                      type="button"
+                      title="See the answers behind this"
+                      onClick={() => show({ title: `Answers where the AI picks ${who}`, subtitle: "When buyers ask what to buy", refs: s.refs! })}
+                      className="rounded-md px-1 py-1 text-right tabular-nums underline decoration-dotted underline-offset-2 hover:text-primary"
+                    >
+                      {pctOf(s.share)}
+                    </button>
+                  ) : (
+                    <span className="px-1 py-1 text-right tabular-nums">{pctOf(s.share)}</span>
+                  )}
                 </div>
               );
             })}
-            <p className={`${T.cap} mt-2.5 text-ink-3`}>
-              Open a rival for its full view, or{" "}
+            {!companyMode && <p className={`${T.cap} mt-2.5 text-ink-3`}>
+              Click a percentage to see the answers. Open a rival for its full view, or{" "}
               <button type="button" onClick={onRivals} className="text-primary underline underline-offset-2 hover:opacity-80">
                 see all rivals
               </button>
               .
-            </p>
+            </p>}
           </div>
         )}
       </section>
@@ -407,21 +493,32 @@ function Overview({
             const viz = t.viz && t.viz.length > 0 ? t.viz : null;
             return (
               <div key={t.cellId + t.title} className="border-t border-line last:border-b">
-                <button
-                  type="button"
-                  disabled={!p}
-                  onClick={() => p && ctx.open({ kind: "cell", id: t.cellId })}
-                  className={`group grid w-full items-center gap-3 pb-3 pt-5 text-left md:gap-6 ${
+                {/* Not one button: the bars open their own answers, and buttons cannot nest. */}
+                <div
+                  className={`grid w-full items-center gap-3 pb-3 pt-5 md:gap-6 ${
                     viz ? "md:grid-cols-[minmax(0,1.5fr)_minmax(0,1fr)_auto]" : "md:grid-cols-[minmax(0,1fr)_auto]"
                   }`}
                 >
-                  <span className="min-w-0">
-                    <span className={`${T.title} mb-1 block`}>{t.title}</span>
+                  <button
+                    type="button"
+                    disabled={!p}
+                    onClick={() => p && ctx.open({ kind: "cell", id: t.cellId })}
+                    className="group min-w-0 text-left disabled:cursor-default"
+                  >
+                    <span className={`${T.title} mb-1 block group-enabled:group-hover:text-primary`}>{t.title}</span>
                     <span className={`${T.body} block text-ink-2`}>{t.body}</span>
-                  </span>
-                  {viz && <MiniBars rows={viz} />}
-                  {p && <span className={`${T.sec} whitespace-nowrap group-hover:text-primary`}>See why {"→"}</span>}
-                </button>
+                  </button>
+                  {viz && <MiniBars rows={viz} title={t.title} />}
+                  {p && (
+                    <button
+                      type="button"
+                      onClick={() => ctx.open({ kind: "cell", id: t.cellId })}
+                      className={`${T.sec} whitespace-nowrap text-left hover:text-primary`}
+                    >
+                      See why {"→"}
+                    </button>
+                  )}
+                </div>
                 {p?.lever && (
                   <div className="mb-5 grid items-center gap-x-4 gap-y-1.5 rounded-xl bg-primary-soft px-4 py-3 sm:grid-cols-[minmax(0,1fr)_auto]">
                     <span className={`${T.labelAccent} sm:col-span-2`}>What to do - {p.family}</span>
@@ -517,6 +614,8 @@ interface MapPrefs {
   reads: string[];
   /** Fixed cells/cards per row (2-6); absent = auto-fit to the width. */
   perRow?: number;
+  /** Fold away the contests the brand already holds and the ones with no call. */
+  quiet?: boolean;
 }
 
 const mapPrefsKey = (scope: string) => `pa-map-prefs:${scope}`;
@@ -528,7 +627,7 @@ function loadMapPrefs(scope: string): MapPrefs {
       const list = (x: unknown) => (Array.isArray(x) ? x.filter((k): k is string => typeof k === "string") : []);
       const perRow = typeof p.perRow === "number" && p.perRow >= 2 && p.perRow <= 6 ? Math.round(p.perRow) : undefined;
       // A stored "matrix" (the retired layout) falls back to aligned.
-      return { layout: p.layout === "dossier" ? "dossier" : "aligned", rooms: list(p.rooms), reads: list(p.reads), perRow };
+      return { layout: p.layout === "dossier" ? "dossier" : "aligned", rooms: list(p.rooms), reads: list(p.reads), perRow, quiet: p.quiet === true };
     }
   } catch {
     /* private window / blocked storage - defaults */
@@ -796,6 +895,16 @@ function ContestMap({
   const [prefs, setPrefs] = useState<MapPrefs>(() => loadMapPrefs(prefScope));
   const [arrange, setArrange] = useState(false);
   const [hint, setHint] = useState(false);
+  // Quiet mode: which bands have their folded contests shown again, and which
+  // band descriptions are open (they sit behind a "?" beside the title).
+  const [unfolded, setUnfolded] = useState<Set<string>>(() => new Set());
+  const [subOpen, setSubOpen] = useState<Set<string>>(() => new Set());
+  const flip = (set: Set<string>, key: string) => {
+    const next = new Set(set);
+    if (next.has(key)) next.delete(key);
+    else next.add(key);
+    return next;
+  };
   const update = (p: MapPrefs) => {
     setPrefs(p);
     saveMapPrefs(prefScope, p);
@@ -836,6 +945,18 @@ function ContestMap({
           </span>
         ))}
         <span className="ml-auto flex flex-wrap items-center gap-2">
+          <button
+            type="button"
+            aria-pressed={!!prefs.quiet}
+            title="Fold away the contests you already hold and the ones with no call"
+            onClick={() => {
+              setUnfolded(new Set());
+              update({ ...prefs, quiet: !prefs.quiet });
+            }}
+            className={`rounded-full border px-3 py-1 text-[13px] ${prefs.quiet ? "border-[var(--color-primary)] bg-primary-soft text-ink" : "border-line text-ink-2 hover:border-ink-3"}`}
+          >
+            Hide what you hold
+          </button>
           <button type="button" className={seg(prefs.layout === "aligned")} onClick={() => update({ ...prefs, layout: "aligned" })}>
             Aligned
           </button>
@@ -891,18 +1012,58 @@ function ContestMap({
       {map.bands.map((band) => {
         const isCh = isChoosesBand(band);
         const rows = isCh ? orderByPref(band.rows, rowSlugOf, prefs.reads) : band.rows;
+        // Quiet mode folds the contests that need no decision: the ones the
+        // brand holds and the ones with no call. One line names what is folded.
+        const folding = !!prefs.quiet && !unfolded.has(band.title);
+        const quietCell = (c: MapCell) => c.verdict === "yours" || c.verdict === "nocall";
+        const shown = folding ? rows.map((r) => ({ ...r, cells: r.cells.filter((c) => !quietCell(c)) })).filter((r) => r.cells.length > 0) : rows;
+        // A band with one row needs no row name in front of each contest.
+        const nameOf = (r: MapRow, c: MapCell) => (!c.label ? r.stage : rows.length === 1 ? c.label : `${r.stage} - ${c.label}`);
+        const held = prefs.quiet ? rows.flatMap((r) => r.cells.filter((c) => c.verdict === "yours").map((c) => nameOf(r, c))) : [];
+        const noCall = prefs.quiet ? rows.reduce((n, r) => n + r.cells.filter((c) => c.verdict === "nocall").length, 0) : 0;
+        const heldText = held.length > 4 ? `${held.slice(0, 4).join(", ")} and ${held.length - 4} more` : held.join(", ");
         return (
           <section key={band.title} className="mt-2">
-            <h3 className={`${T.title} mb-0.5`}>{band.title}</h3>
-            {band.sub && <p className={`${T.sec} mb-3 max-w-[72ch]`}>{band.sub}</p>}
-            {prefs.layout === "dossier" ? (
-              <DossierBand rows={rows} chooses={isCh} rooms={prefs.rooms} perRow={prefs.perRow} positions={map.positions} onOpen={onOpen} />
+            <div className="mb-2 flex flex-wrap items-center gap-2">
+              <h3 className={T.title}>{band.title}</h3>
+              {band.sub && (
+                <button
+                  type="button"
+                  aria-expanded={subOpen.has(band.title)}
+                  aria-label={`What "${band.title}" covers`}
+                  title={band.sub}
+                  onClick={() => setSubOpen(flip(subOpen, band.title))}
+                  className="grid h-5 w-5 place-items-center rounded-full border border-line text-[11px] leading-none text-ink-3 hover:border-ink-3 hover:text-ink-2"
+                >
+                  ?
+                </button>
+              )}
+            </div>
+            {band.sub && subOpen.has(band.title) && <p className={`${T.sec} mb-3 max-w-[72ch]`}>{band.sub}</p>}
+            {shown.length === 0 ? null : prefs.layout === "dossier" ? (
+              <DossierBand rows={shown} chooses={isCh} rooms={prefs.rooms} perRow={prefs.perRow} positions={map.positions} onOpen={onOpen} />
             ) : (
               <div className="overflow-hidden rounded-[10px] border border-line bg-surface">
-                {rows.map((row) => (
+                {shown.map((row) => (
                   <AlignedRow key={row.stage} row={row} chooses={isCh} rooms={prefs.rooms} perRow={prefs.perRow} positions={map.positions} onOpen={onOpen} />
                 ))}
               </div>
+            )}
+            {prefs.quiet && (held.length > 0 || noCall > 0) && (
+              <p className={`${T.cap} mt-2 flex flex-wrap items-center gap-x-2 gap-y-1 text-ink-3`}>
+                {held.length > 0 && (
+                  <span className="flex items-baseline gap-1.5">
+                    <i className="inline-block h-[9px] w-[9px] flex-none rounded-full" style={{ background: VCOLOR.yours.fg }} />
+                    <span>
+                      {shown.length === 0 && noCall === 0 ? "Every contest here is yours" : "Yours here"}: {heldText}.
+                    </span>
+                  </span>
+                )}
+                {noCall > 0 && <span>{noCall === 1 ? "One contest with no call" : `${noCall} contests with no call`} {folding ? "folded" : "shown"} too.</span>}
+                <button type="button" onClick={() => setUnfolded(flip(unfolded, band.title))} className="text-primary underline underline-offset-2 hover:opacity-80">
+                  {folding ? "Show them" : "Fold them again"}
+                </button>
+              </p>
             )}
           </section>
         );

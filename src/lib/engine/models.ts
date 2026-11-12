@@ -85,6 +85,11 @@ export const ROSTER_MODEL = process.env.ROSTER_MODEL ?? "gpt-6-sol";
  * back to the composed memo) since the call is Anthropic-only. Part of the
  * written-memo cache key. */
 export const BRIEF_WRITER_MODEL = pick("BRIEF_WRITER_MODEL", "claude-opus-5-5");
+/** Parent-company suggestions for the brand dictionary's Parents tab
+ * (parent_suggest.ts, 2026-11-11): one batched call per never-seen set of
+ * active brands, "who owns this brand". A bounded world-knowledge judgment,
+ * so luna; OpenAI-only. Part of the per-name parent cache key. */
+export const PARENT_SUGGEST_MODEL = pick("PARENT_SUGGEST_MODEL", "gpt-6-luna");
 /** The dossier slide-over's reason themes (dossiers.ts, do4, 2026-11-09):
  * two bounded grouping calls per compute (per buying situation, then across
  * situations) over the run's condition-group labels. A bounded judgment job,

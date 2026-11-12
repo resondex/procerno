@@ -247,7 +247,14 @@ export interface AnalysisMapView {
   casting: CastingLine;
   /** The brand's two-dot line and who-wins-instead bars (open choice). */
   dots: { named: RateCell; picked: RateCell };
-  shareOfDecided: { brand: string; you: boolean; share: RateCell }[];
+  /** am19 (2026-11-11): the Overview's headline numbers open their answers -
+   * up to 5 each, spread across assistants. named = open-choice answers that
+   * name the brand; commits = answers that commit to one in-category pick
+   * (the "picked" numbers read the brand's own shareOfDecided row's refs). */
+  examples?: { named: AnswerRef[]; commits: AnswerRef[] };
+  /** refs (am19): answers whose pick resolves to this brand (for "Others",
+   * to any brand the board folds into it). */
+  shareOfDecided: { brand: string; you: boolean; share: RateCell; refs?: AnswerRef[] }[];
   /** The 3-5 highest-ranked tensions as memo paragraphs, each pointing at
    * a map cell. */
   tensions: {
@@ -258,7 +265,14 @@ export interface AnalysisMapView {
      * numbers the sentence states (value 0-100, text as the sentence prints
      * it, hi = the one row the finding is about). Absent when the finding has
      * no clean numeric rows. */
-    viz?: { label: string; value: number; text: string; hi?: true }[];
+    viz?: {
+      label: string;
+      value: number;
+      text: string;
+      hi?: true;
+      /** am19: the answers behind the bar's numerator, when the finding has them in hand. */
+      refs?: AnswerRef[];
+    }[];
   }[];
   bands: MapBand[];
   positions: Record<string, Position>;

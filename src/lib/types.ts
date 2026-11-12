@@ -1053,6 +1053,11 @@ export interface Store {
   setSetupDecision(projectId: string, decisionJson: string): Promise<void>;
   /** The stored setup_decision JSON (not part of the Project payload). */
   getSetupDecision(projectId: string): Promise<string | null>;
+  /** The setup-wizard draft id a tracker was created from, read back from
+   * the create route's `setup_created:<setupId>` cache row (value = the
+   * project id), narrowed through the indexed brand column. Null when the
+   * tracker predates that row or was created without a setup id. */
+  setupIdForProject(projectId: string, brand: string): Promise<string | null>;
   /** The brand-dictionary gate's served-vs-decided record (JSON:
    * DictDecisionRecord, 2026-10-14), one version per gate walk. Read
    * separately from Project so the record never rides project payloads. */

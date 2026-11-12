@@ -16,7 +16,7 @@ import AnalysisHub, { type HubGo, type PanelReq } from "./analysis_views";
 import type { PanelView } from "./analysis_panel";
 import type { AnalysisMapView } from "@/lib/engine/analysis_types";
 import BriefSection from "./brief_view";
-import DataPage, { type DataTab } from "./data_view";
+import DataPage, { type DataRequest, type DataTab } from "./data_view";
 import { EngineSetContext, MODE_LABEL, TIER_LABEL, type EngineRow } from "./view_parts";
 
 const pct = (x: number) =>
@@ -61,9 +61,10 @@ export default function RunResults({
  * its own page. The Overview and the Map are the analysis hub
  * (analysis_views.tsx) over one /analysis_map fetch, with the one slide-over
  * (analysis_panel.tsx) every contest and rival opens - from any page. Data
- * (data_view.tsx) carries the analyst reads: By question type (the Stations
- * read, with the buyer filter that used to sit on the shell) and Build a
- * table. The Verdict and the Portfolio folded into the Overview; the Rivals
+ * (data_view.tsx) carries the analyst reads: a library of ready-made tables
+ * beside a builder for your own (any table can be charted or compared with
+ * the previous wave), Every contest, and Question type detail (the Stations
+ * read, with the buyer filter that used to sit on the shell). The Verdict and the Portfolio folded into the Overview; the Rivals
  * pill became the Map's "By rival" cards and the rival panel.
  */
 type CodesPage = "overview" | "map" | "data" | "brief";
@@ -82,11 +83,13 @@ function CodesResults({
   // The Panel lens (2026-11-03): the assistant set every page reads under.
   const panel = usePanel(runId, projectId);
   const [page, setPage] = useState<CodesPage>("overview");
-  const [dataTab, setDataTab] = useState<DataTab>("types");
+  // A request to show part of the Data page (it opens on its own library pick).
+  const [dataReq, setDataReq] = useState<DataRequest | undefined>(undefined);
+  const setDataTab = (tab: DataTab) => setDataReq({ tab, n: Date.now() });
   // Pages stay MOUNTED once visited, hidden with CSS: switching and coming
   // back must not refetch.
   const [visited, setVisited] = useState<Set<CodesPage>>(() => new Set(["overview"]));
-  // A request from the Brief or Data page to open the slide-over.
+  // A request from the Brief to open the slide-over.
   const [panelReq, setPanelReq] = useState<PanelReq | null>(null);
   // The brief's request to open Data at Consideration (its by-assistant table).
   const [journeyJump, setJourneyJump] = useState<{ station: "consideration"; n: number } | undefined>(undefined);
@@ -169,11 +172,10 @@ function CodesResults({
             <DataPage
               key={k("data")}
               runId={runId}
+              projectId={projectId}
               map={map}
               category={category}
-              onOpen={(id) => openPanel({ kind: "cell", id })}
-              tab={dataTab}
-              onTab={setDataTab}
+              request={dataReq}
               jump={journeyJump}
             />
           </div>

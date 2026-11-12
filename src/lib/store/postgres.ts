@@ -1310,6 +1310,15 @@ export const pgStore: Store = {
     return (rows[0]?.setup_decision as string | null | undefined) ?? null;
   },
 
+  async setupIdForProject(projectId, brand) {
+    const sql = await db();
+    const rows = await sql`SELECT key FROM llm_cache
+      WHERE brand = ${brand.trim().toLowerCase()} AND key LIKE 'setup_created:%' AND value = ${projectId}
+      ORDER BY created_at DESC LIMIT 1`;
+    const key = rows[0]?.key as string | undefined;
+    return key ? key.slice("setup_created:".length) : null;
+  },
+
   async getDictionaryDecision(projectId) {
     const sql = await db();
     const rows = await sql`SELECT dictionary_decision FROM projects WHERE id = ${projectId}`;

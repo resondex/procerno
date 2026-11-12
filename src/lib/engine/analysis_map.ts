@@ -5,7 +5,7 @@ import { conditionKeysFor, conditionStemKey, isDefaultCondition } from "./condit
 import { computeRules, ENUM_TOWARD, GENERIC_AWAY, type RuleGroup, type RulesView } from "./rules_explorer";
 import { poolInputs, rankGroups, routeShares, situationsOf, spreadRefs, themeReasons, themeTreeAnswers, type AnswerRules, type DossierTheme, type ThemeMap } from "./reason_themes";
 import { isWallWording } from "./wall_wording";
-import { commitSentence, insightBar, insightInputs, pctFine, productNoun, rankedInsights, type InsightInputs } from "./summary_insights";
+import { commitSentence, insightBar, insightInputs, pctFine, productNoun, rankedInsights, type ExampleIndex, type InsightInputs } from "./summary_insights";
 import { BRAND_SUMMARY_VERSION, computeBrandSummary, sharedBrandSummary, type BrandSummaryView, type Insight } from "./brand_summary";
 import { computeValue, type ValueRow } from "./value";
 import { exitResolver } from "./exits";
@@ -1817,17 +1817,25 @@ export async function computeAnalysisMap(
   const others = summary.brands.filter((b) => b.role !== "target" && b.chosen.k > 0);
   const shown = others.slice(0, 3);
   const rest = others.slice(3).reduce((a, b) => a + b.chosen.k, 0);
-  const shareOfDecided = [
-    ...[...shown.map((b) => ({ brand: b.name, you: false, share: b.shareOfDecided })), { brand, you: true, share: t.shareOfDecided }].sort(
-      (a, b) => b.share.k - a.share.k || a.brand.localeCompare(b.brand)
-    ),
-    ...(decided > 0 && rest / decided >= 0.05 ? [{ brand: "Others", you: false, share: cell(rest, decided) }] : []),
+  // am19: every board row and headline number opens its answers (the same
+  // pool, resolver and predicate as the summary's numbers).
+  const ex = inputs.ex;
+  const refsOf = (refs: AnswerRef[] | undefined) => (refs && refs.length ? { refs } : {});
+  const shareOfDecided: AnalysisMapView["shareOfDecided"] = [
+    ...[
+      ...shown.map((b) => ({ brand: b.name, you: false, share: b.shareOfDecided, ...refsOf(ex?.picks(b.key)) })),
+      { brand, you: true, share: t.shareOfDecided, ...refsOf(ex?.picks(t.key)) },
+    ].sort((a, b) => b.share.k - a.share.k || a.brand.localeCompare(b.brand)),
+    ...(decided > 0 && rest / decided >= 0.05
+      ? [{ brand: "Others", you: false, share: cell(rest, decided), ...refsOf(ex?.picks(others.slice(3).map((b) => b.key))) }]
+      : []),
   ];
+  const examples = ex ? { named: ex.named(t.key), commits: ex.picks(null) } : undefined;
 
   /* -- tensions -- */
   const probe = debug ? { insights: debug.probeInsights ?? summary.insights, out: [] as NonNullable<AnalysisMapDebug["placements"]> } : undefined;
   const placed: { key: string; title: string; cellId: string }[] = [];
-  const tensions = tensionsOf(summary, facts, specs, cellById, brand, probe, placed);
+  const tensions = tensionsOf(summary, facts, specs, cellById, brand, probe, placed, ex);
   if (debug && probe) debug.placements = probe.out;
 
   /* -- honesty line: map answers on the core panel with no code row -- */
@@ -1843,7 +1851,17 @@ export async function computeAnalysisMap(
   let uncoded = 0;
   for (const r of data.responses) if (mapPrompts.has(r.prompt_id) && core.has(r.model ?? data.run.model) && !coded.has(r.id)) uncoded++;
 
-  return { casting, dots: { named: t.mentioned, picked: t.chosen }, shareOfDecided, tensions, bands, positions, uncoded, insightCells: placed };
+  return {
+    casting,
+    dots: { named: t.mentioned, picked: t.chosen },
+    ...(examples ? { examples } : {}),
+    shareOfDecided,
+    tensions,
+    bands,
+    positions,
+    uncoded,
+    insightCells: placed,
+  };
 }
 
 /* ------------------------------ rule pools ------------------------------ */
@@ -2120,6 +2138,9 @@ function castingLine(f: CastingFacts, brand: string): CastingLine {
 
 /* ------------------------------- tensions ------------------------------- */
 
+/** am19: a bar with its example answers, when any. */
+const withExamples = <B extends object>(b: B, refs: AnswerRef[] | undefined): B => (refs && refs.length ? { ...b, refs } : b);
+
 function tensionsOf(
   s: BrandSummaryView,
   f: CastingFacts,
@@ -2127,7 +2148,8 @@ function tensionsOf(
   cells: Map<string, MapCell>,
   brand: string,
   probe?: { insights: Insight[]; out: { key: string; kind: string; cellId: string | null; how: string }[] },
-  placed?: { key: string; title: string; cellId: string }[]
+  placed?: { key: string; title: string; cellId: string }[],
+  ex?: ExampleIndex
 ): AnalysisMapView["tensions"] {
   const ids = [...cells.keys()];
   const firstOf = (prefix: string) => ids.find((id) => id.startsWith(prefix)) ?? null;
@@ -2152,9 +2174,9 @@ function tensionsOf(
     // The pooled funnel paragraph anchors on the open-choice All cell itself.
     cellId: cells.has("chooses:open:all") ? "chooses:open:all" : openCells.length ? idOf(openCells[0]) : fallbackOpen,
     viz: [
-      insightBar("Named", f.named, pctOf(f.named)),
-      insightBar("Recommended", s.target.recommended),
-      insightBar("Picked", f.picked, pctFine(f.picked), true),
+      withExamples(insightBar("Named", f.named, pctOf(f.named)), ex?.named(s.target.key)),
+      withExamples(insightBar("Recommended", s.target.recommended), ex?.recommended(s.target.key)),
+      withExamples(insightBar("Picked", f.picked, pctFine(f.picked), true), ex?.picks(s.target.key)),
     ],
   });
 
@@ -2312,7 +2334,8 @@ function tensionsOf(
 // am15 (2026-11-10): the one-panel redesign - positions carry brands / youShare (the pick split of pick contests, the figure's own numbers), argsMode / argsRows, lift and condition receipts (AnswerRef), condition shares and away routes, notes (the badges' meaning), and theme receipts / routes; the plain-wording pass renames the moves (Keep it, Publish your case, ...) and rewrites every lever, the triage whys, the criteria claims, the band sub and the "Rivals' customers switching" row. Verdicts, badges and numbers unchanged.
 // am16 (2026-11-10): the tightened wall test - the wall sentence now advises, so it reads the shown wording only.
 // am17 (2026-11-10): each tension carries `viz` (the Overview finding card's 2-4 bars).
-export const ANALYSIS_MAP_VERSION = "am18"; // am18 (2026-11-10): each buying situation's open-choice cell states the same funnel figures as the all-buyers cell (named, recommended, commits, picked, outside the category), from its own answers. // // am17 (2026-11-10): each tension carries `viz` (the Overview finding card's 2-4 bars) - the first from the casting facts, the rest from the bs15 insights
+// am18 (2026-11-10): each buying situation's open-choice cell states the same funnel figures as the all-buyers cell.
+export const ANALYSIS_MAP_VERSION = "am19"; // am19 (2026-11-11): every Overview number opens its answers - `examples` (named, commits), refs on each share-of-picks row and on the tension bars (the first tension's funnel bars and the bs16 insight bars). // am18 (2026-11-10): each buying situation's open-choice cell states the same funnel figures as the all-buyers cell (named, recommended, commits, picked, outside the category), from its own answers. // // am17 (2026-11-10): each tension carries `viz` (the Overview finding card's 2-4 bars) - the first from the casting facts, the rest from the bs15 insights
 // The fold (2026-11-09, Tyler): a view's cache key carries the versions of
 // the views whose content it embeds, so the lockstep bump convention is
 // mechanical - the map embeds the summary's insights, casting and verdict.

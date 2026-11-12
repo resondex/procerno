@@ -157,31 +157,17 @@ export interface EvidenceTarget {
   brand: string;
 }
 
-/** Every workbench table: sortable headers, one-click CSV. */
-export function SortTable<T>({
-  cols,
-  rows,
-  filename,
-  defaultSort,
-  onRowClick,
-  activeRow,
-  onEvidence,
-}: {
-  cols: Col<T>[];
-  rows: T[];
-  filename: string;
-  defaultSort?: { id: string; dir: 1 | -1 };
-  onRowClick?: (r: T) => void;
-  activeRow?: (r: T) => boolean;
-  /** Absent = the drawer is off for this project; cells stay plain text. */
-  onEvidence?: (t: EvidenceTarget) => void;
-}) {
-  const [sort, setSort] = useState<{ id: string; dir: 1 | -1 }>(
-    defaultSort ?? { id: cols.filter((c) => !c.csvOnly)[1]?.id ?? cols[0].id, dir: -1 }
-  );
+export interface SortState {
+  id: string;
+  dir: 1 | -1;
+}
+
+/** Rows in a column's order - the comparator every SortTable uses, exported
+ * so a chart drawn from the same rows can follow the table's order. */
+export function sortRows<T>(cols: Col<T>[], rows: T[], sort: SortState): T[] {
   const col = cols.find((c) => c.id === sort.id);
-  const shown = cols.filter((c) => !c.csvOnly);
-  const sorted = !col ? rows : [...rows].sort((a, b) => {
+  if (!col) return rows;
+  return [...rows].sort((a, b) => {
     const va = col.val(a);
     const vb = col.val(b);
     if (va === null && vb === null) return 0;
@@ -193,13 +179,47 @@ export function SortTable<T>({
         : String(va).localeCompare(String(vb));
     return sort.dir === 1 ? cmp : -cmp;
   });
+}
+
+/** Every workbench table: sortable headers, one-click CSV. */
+export function SortTable<T>({
+  cols,
+  rows,
+  filename,
+  defaultSort,
+  onRowClick,
+  activeRow,
+  onEvidence,
+  onSort,
+  noDownload = false,
+}: {
+  cols: Col<T>[];
+  rows: T[];
+  filename: string;
+  defaultSort?: { id: string; dir: 1 | -1 };
+  onRowClick?: (r: T) => void;
+  activeRow?: (r: T) => boolean;
+  /** Absent = the drawer is off for this project; cells stay plain text. */
+  onEvidence?: (t: EvidenceTarget) => void;
+  /** Told the new order on every header click. */
+  onSort?: (s: SortState) => void;
+  /** The page draws its own download control. */
+  noDownload?: boolean;
+}) {
+  const [sort, setSort] = useState<SortState>(
+    defaultSort ?? { id: cols.filter((c) => !c.csvOnly)[1]?.id ?? cols[0].id, dir: -1 }
+  );
+  const shown = cols.filter((c) => !c.csvOnly);
+  const sorted = sortRows(cols, rows, sort);
   return (
     <div className="mt-3 grid gap-1">
-      <Download
-        name={filename.replace(/\.csv$/, "")}
-        header={cols.map((c) => c.label)}
-        rows={() => rows.map((r) => cols.map((c) => c.val(r)))}
-      />
+      {!noDownload && (
+        <Download
+          name={filename.replace(/\.csv$/, "")}
+          header={cols.map((c) => c.label)}
+          rows={() => rows.map((r) => cols.map((c) => c.val(r)))}
+        />
+      )}
       <div className="overflow-x-auto">
         <table className="w-full text-sm">
           <thead>
@@ -207,13 +227,12 @@ export function SortTable<T>({
               {shown.map((c, i) => (
                 <th
                   key={c.id}
-                  onClick={() =>
-                    setSort((prev) =>
-                      prev.id === c.id
-                        ? { id: c.id, dir: prev.dir === 1 ? -1 : 1 }
-                        : { id: c.id, dir: -1 }
-                    )
-                  }
+                  onClick={() => {
+                    const next: SortState =
+                      sort.id === c.id ? { id: c.id, dir: sort.dir === 1 ? -1 : 1 } : { id: c.id, dir: -1 };
+                    setSort(next);
+                    onSort?.(next);
+                  }}
                   className={`py-2 ${i === shown.length - 1 ? "" : "pr-3"} font-semibold cursor-pointer select-none hover:opacity-70 ${c.num ? "text-center" : ""}`}
                 >
                   {/* The arrow always occupies its slot, so sorting a

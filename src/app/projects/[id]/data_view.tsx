@@ -1,115 +1,338 @@
 "use client";
 
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import type { AnalysisMapView, CellVerdict, MapCell, Position } from "@/lib/engine/analysis_types";
+import type { WorkbenchView } from "@/lib/engine/workbench";
 import type { DossierTheme } from "@/lib/engine/reason_themes";
 import JourneySection from "./journey_view";
-import { MetricsSection } from "./metrics_view";
+import { PivotTable, type ShowAs, type Waves } from "./metrics_view";
 import { catPhrase, VCOLOR, VWORD } from "./analysis_panel";
 import { Download } from "./table";
 import { T } from "./type_scale";
+import { useEngineSet, viewQuery } from "./view_parts";
+import type { PivotSettings } from "./pivot_compute";
+import {
+  CONTESTS_ID,
+  DEFAULT_ID,
+  DETAIL_ID,
+  LIBRARY,
+  LIB_BY_ID,
+  OWN_ID,
+  entryAvailable,
+  entrySettings,
+  type LibEntry,
+  type LibKind,
+} from "./table_library";
 
 /**
- * The Data page (2026-11-10, the analysis redesign; rebuilt the same day as
- * the prototype's typeTable): the quiet analyst tier. Three tabs:
+ * The Data page (2026-11-11 rebuild, ratified from the clickable prototype):
+ * ONE screen, no tabs - a table library on the left (stacking above on
+ * narrow screens) and the table area on the right.
  *
- * - By question type: every question type down the left, grouped by the Map's
- *   bands; the selected type as a table, one row per contest, switchable
- *   columns, each row opening the same slide-over. Built entirely from the
- *   /analysis_map payload the hub already loaded - no request of its own, so
- *   it renders instantly.
- * - Build a table: the metrics pivot (its own fetch, on first open).
- * - Station detail: the old Stations read with its buyer filter (its own
- *   fetches, on first open). The brief's "journey" links land here.
+ * - The library (table_library.ts): ready-made tables grouped and named for
+ *   the question each answers, a search box, and "Build your own table" at
+ *   the bottom. It opens on "Share of picks by brand". A pivot entry whose
+ *   question type the run does not carry, or whose measure or dimension is
+ *   not legal here, is hidden; an empty group is hidden.
+ * - A pivot entry sets the builder (metrics_view.tsx PivotTable, controlled
+ *   by this page); changing any control highlights "Build your own table".
+ *   This page owns the one workbench fetch (it decides which entries show)
+ *   and, for Wave over wave, the previous wave's payload, fetched on first
+ *   use. The route names the previous coded wave beside the view (`prev`).
+ * - "Every contest" is the Map's contests as a table (TypeTable below, built
+ *   from the hub's already-loaded map payload - no request of its own; no
+ *   Open link, the Map is where a contest opens). "Question type detail" is
+ *   the station read with its buyer filter (its own fetches).
  *
- * The slow tabs mount on first visit and stay mounted, so switching never
- * refetches.
+ * The three kinds of content mount on first visit and stay mounted (hidden
+ * with CSS), so switching never refetches. The selected entry, Show as and
+ * Waves are saved per project. Callers steer the page with a `request`
+ * ("types" -> Every contest, "build" -> the builder's current table,
+ * "stations" -> Question type detail); the brief's `jump` still lands in
+ * the station read.
  */
 
 export type DataTab = "types" | "build" | "stations";
+/** A request to show part of the page; `n` makes a repeat a new request. */
+export interface DataRequest {
+  tab: DataTab;
+  n: number;
+}
+
+// The last request each run's page applied: a remount (a new assistant set)
+// must not re-apply an old request over the reader's own choice.
+const appliedReqs = new Map<string, number>();
+
+interface Prefs {
+  entry?: string;
+  show?: ShowAs;
+  waves?: Waves;
+}
+const prefsKey = (scope: string) => `procerno_data_prefs:${scope}`;
+const memPrefs = new Map<string, Prefs>();
+function readPrefs(scope: string): Prefs {
+  if (typeof window === "undefined") return {};
+  try {
+    const raw = window.localStorage.getItem(prefsKey(scope));
+    const p = raw ? (JSON.parse(raw) as Prefs) : {};
+    return p && typeof p === "object" ? p : {};
+  } catch {
+    return memPrefs.get(scope) ?? {};
+  }
+}
+function writePrefs(scope: string, patch: Prefs) {
+  const next = { ...readPrefs(scope), ...patch };
+  memPrefs.set(scope, next);
+  try {
+    window.localStorage.setItem(prefsKey(scope), JSON.stringify(next));
+  } catch {
+    // storage blocked: memPrefs carries the choice for this page view
+  }
+}
+
+const SHOWS: ShowAs[] = ["table", "bars", "dots"];
 
 export default function DataPage({
   runId,
+  projectId,
   map,
   category,
-  onOpen,
-  tab,
-  onTab,
+  request,
   jump,
 }: {
   runId: string;
+  projectId?: string;
   /** The hub's map payload: undefined while it loads, null when there is none. */
   map: AnalysisMapView | null | undefined;
   category?: string | null;
-  /** Opens a contest in the slide-over. */
-  onOpen: (cellId: string) => void;
-  tab: DataTab;
-  onTab: (t: DataTab) => void;
+  request?: DataRequest;
   /** The brief's request to open a station (its by-assistant table); `n` makes a repeat click a new request. */
   jump?: { station: "consideration"; n: number };
 }) {
+  const scope = projectId ?? runId;
+  const [prefs] = useState<Prefs>(() => readPrefs(scope));
+  const [sel, setSel] = useState<string>(() => (prefs.entry && (prefs.entry === OWN_ID || LIB_BY_ID.has(prefs.entry)) ? prefs.entry : DEFAULT_ID));
+  // The builder's last table (an entry or "own"): where "build" lands.
+  const [pivotSel, setPivotSel] = useState<string>(() => (sel === OWN_ID || LIB_BY_ID.get(sel)?.kind === "pivot" ? sel : DEFAULT_ID));
+  const [settings, setSettings] = useState<PivotSettings>(() => {
+    const e = LIB_BY_ID.get(pivotSel);
+    return entrySettings(e && e.kind === "pivot" ? e : LIB_BY_ID.get(DEFAULT_ID)!);
+  });
+  const [show, setShow] = useState<ShowAs>(() => (prefs.show && SHOWS.includes(prefs.show) ? prefs.show : "table"));
+  const [waves, setWaves] = useState<Waves>(() => (prefs.waves === "prev" ? "prev" : "this"));
+  const [filter, setFilter] = useState("");
   const [room, setRoom] = useState("");
   const [rooms, setRooms] = useState<string[]>([]);
   const onRooms = useCallback(
     (rs: string[]) => setRooms((prev) => (prev.length === rs.length && prev.every((r, i) => r === rs[i]) ? prev : rs)),
     []
   );
-  const [seen, setSeen] = useState<Set<DataTab>>(() => new Set([tab]));
-  if (!seen.has(tab)) setSeen(new Set(seen).add(tab));
-  const seg = (on: boolean, quiet = false) =>
-    `rounded-full px-4 py-1 text-[13px] ${on ? "bg-primary-soft font-semibold text-ink" : `${quiet ? "text-ink-3/80" : "text-ink-3"} hover:text-ink-2`}`;
+
+  // A caller's request, applied once, during render (no effect).
+  const [applied, setApplied] = useState(() => appliedReqs.get(runId) ?? 0);
+  if (request && request.n !== applied) {
+    setApplied(request.n);
+    appliedReqs.set(runId, request.n);
+    setSel(request.tab === "types" ? CONTESTS_ID : request.tab === "stations" ? DETAIL_ID : pivotSel);
+  }
+
+  // ---- the workbench payload (decides which library entries show) ----
+  const q = viewQuery({ engines: useEngineSet() });
+  const [wb, setWb] = useState<{ loaded: boolean; view: WorkbenchView | null; prev: string | null }>({ loaded: false, view: null, prev: null });
+  useEffect(() => {
+    let live = true;
+    fetch(`/api/runs/${runId}/workbench${q}`)
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => {
+        if (!live) return;
+        // DEV-ONLY OVERRIDE: ?prevwave=<runId> in the page URL treats that
+        // run as the previous wave, so Wave over wave can be walked before a
+        // tracker has a second coded wave (the same run id yields all-zero
+        // changes). The run is still fetched through the guarded route.
+        const forced = new URLSearchParams(window.location.search).get("prevwave");
+        setWb({ loaded: true, view: (d?.view as WorkbenchView | null) ?? null, prev: forced || ((d?.prev as string | null) ?? null) });
+      })
+      .catch(() => live && setWb({ loaded: true, view: null, prev: null }));
+    return () => {
+      live = false;
+    };
+  }, [runId, q]);
+
+  // ---- the previous wave, fetched on first use and kept ----
+  const prevId = wb.prev;
+  const [prevView, setPrevView] = useState<{ id: string; view: WorkbenchView | null } | null>(null);
+  const fetchPrev = prevId && (waves === "prev" || prevView?.id === prevId) ? prevId : null;
+  useEffect(() => {
+    if (!fetchPrev) return;
+    let live = true;
+    fetch(`/api/runs/${fetchPrev}/workbench${q}`)
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => live && setPrevView({ id: fetchPrev, view: (d?.view as WorkbenchView | null) ?? null }))
+      .catch(() => live && setPrevView({ id: fetchPrev, view: null }));
+    return () => {
+      live = false;
+    };
+  }, [fetchPrev, q]);
+  const prevData = prevId && prevView?.id === prevId ? prevView.view : undefined;
+
+  // ---- which entries show, and what is shown ----
+  const available = useCallback((e: LibEntry) => e.kind !== "pivot" || (wb.loaded && entryAvailable(e, wb.view)), [wb]);
+  const firstPivot = useMemo(() => LIBRARY.find((e) => e.kind === "pivot" && wb.loaded && entryAvailable(e, wb.view)) ?? null, [wb]);
+  const fallbackEntry = (): LibEntry => {
+    const d = LIB_BY_ID.get(DEFAULT_ID)!;
+    if (available(d)) return d;
+    return firstPivot ?? LIB_BY_ID.get(CONTESTS_ID)!;
+  };
+  // The shown entry: the selection, unless the run does not carry it.
+  let shown: { id: string; kind: LibKind; entry: LibEntry | null };
+  if (sel === OWN_ID) {
+    shown = wb.loaded && !wb.view?.facts ? { id: CONTESTS_ID, kind: "contests", entry: LIB_BY_ID.get(CONTESTS_ID)! } : { id: OWN_ID, kind: "pivot", entry: null };
+  } else {
+    const e = LIB_BY_ID.get(sel) ?? fallbackEntry();
+    const ok = e.kind !== "pivot" || !wb.loaded || available(e);
+    const use = ok ? e : fallbackEntry();
+    shown = { id: use.id, kind: use.kind, entry: use };
+  }
+  const shownSettings: PivotSettings = shown.id === sel || shown.id === OWN_ID ? settings : entrySettings(shown.entry!);
+  const [seen, setSeen] = useState<Set<LibKind>>(() => new Set([shown.kind]));
+  if (!seen.has(shown.kind)) setSeen(new Set(seen).add(shown.kind));
+
+  const pick = (e: LibEntry | null) => {
+    if (!e) {
+      // "Build your own table": the builder as it stands.
+      setSel(OWN_ID);
+      setPivotSel(OWN_ID);
+      setSettings(shownSettings);
+      writePrefs(scope, { entry: OWN_ID });
+      return;
+    }
+    setSel(e.id);
+    if (e.kind === "pivot") {
+      setPivotSel(e.id);
+      setSettings(entrySettings(e));
+    }
+    writePrefs(scope, { entry: e.id });
+  };
+  const onSettings = (s: PivotSettings) => {
+    setSettings(s);
+    setSel(OWN_ID);
+    setPivotSel(OWN_ID);
+    writePrefs(scope, { entry: OWN_ID });
+  };
+
+  const needle = filter.trim().toLowerCase();
+  const visible = LIBRARY.filter((e) => available(e) && (!needle || e.label.toLowerCase().includes(needle)));
+  const groups = [...new Set(visible.map((e) => e.group))];
+  const ownMatches = !needle || "build your own table".includes(needle);
+  const title = shown.entry?.label ?? "Your own table";
+  const item = (on: boolean) => `w-full rounded-lg px-2.5 py-1.5 text-left ${T.body} ${on ? "bg-primary-soft font-semibold text-ink" : "text-ink-2 hover:text-ink"}`;
   const chip = (on: boolean) =>
     `rounded-full border px-3 py-1 ${T.ctl} transition-colors ${
       on ? "border-[var(--color-primary)] bg-primary-soft text-primary" : "border-line text-ink-2 hover:border-ink-3"
     }`;
+
   return (
     <section className="grid gap-5 pb-10">
       <div>
         <h2 className={`${T.h2} mb-1`}>Data</h2>
-        <p className={`${T.sec} max-w-[70ch]`}>
-          For analysts. Every question type as a table, and a builder for your own. Nothing here is needed to read the wave.
-        </p>
+        <p className={`${T.sec} max-w-[70ch]`}>Ready-made tables for the common questions, and a builder for your own. Any table can be shown as a chart.</p>
       </div>
-      <div className="inline-flex max-w-full flex-wrap justify-self-start rounded-full border border-line bg-surface p-[3px]" role="tablist">
-        <button type="button" role="tab" aria-selected={tab === "types"} className={seg(tab === "types")} onClick={() => onTab("types")}>
-          By question type
-        </button>
-        <button type="button" role="tab" aria-selected={tab === "build"} className={seg(tab === "build")} onClick={() => onTab("build")}>
-          Build a table
-        </button>
-        <button type="button" role="tab" aria-selected={tab === "stations"} className={seg(tab === "stations", true)} onClick={() => onTab("stations")}>
-          Station detail
-        </button>
-      </div>
-      {tab === "types" &&
-        (map === undefined ? (
-          <p className={T.sec}>Reading the coded answers...</p>
-        ) : map === null ? (
-          <p className={T.sec}>Nothing is measured here yet.</p>
-        ) : (
-          <TypeTable map={map} category={category} onOpen={onOpen} />
-        ))}
-      {seen.has("build") && (
-        <div className={tab === "build" ? "grid gap-5" : "hidden"}>
-          <MetricsSection runId={runId} />
-        </div>
-      )}
-      {seen.has("stations") && (
-        <div className={tab === "stations" ? "grid gap-5" : "hidden"}>
-          <p className={`${T.sec} max-w-[70ch]`}>The journey station by station, with every table behind it. Filter to one buyer below.</p>
-          {rooms.length > 0 && (
-            <div className="flex flex-wrap items-center gap-1.5">
-              <span className={`${T.cap} mr-1 text-ink-3`}>Buyer:</span>
-              {["", ...rooms].map((rk) => (
-                <button key={rk || "__all"} type="button" onClick={() => setRoom(rk)} aria-pressed={room === rk} className={chip(room === rk)}>
-                  {rk === "" ? "All buyers" : rk}
-                </button>
-              ))}
+      <div className="grid items-start gap-6 md:grid-cols-[280px_minmax(0,1fr)]">
+        <nav aria-label="Tables" className="grid gap-1">
+          <input
+            type="search"
+            value={filter}
+            onChange={(e) => setFilter(e.target.value)}
+            placeholder="Search tables"
+            aria-label="Search tables"
+            className="input mb-1 w-full py-1 text-[13px]"
+          />
+          {!wb.loaded && <p className={`${T.cap} px-2.5 text-ink-3`}>Loading the tables...</p>}
+          {groups.map((g, gi) => (
+            <div key={g} className="grid gap-0.5">
+              <h5 className={`${T.label} px-2.5 ${gi === 0 ? "mt-1" : "mt-3"} mb-0.5`}>{g}</h5>
+              {visible
+                .filter((e) => e.group === g)
+                .map((e) => (
+                  <button key={e.id} type="button" onClick={() => pick(e)} aria-current={shown.id === e.id ? "true" : undefined} className={item(shown.id === e.id)}>
+                    {e.label}
+                  </button>
+                ))}
+            </div>
+          ))}
+          {needle && groups.length === 0 && !ownMatches && <p className={`${T.cap} px-2.5 text-ink-3`}>No table matches.</p>}
+          {ownMatches && wb.view?.facts && (
+            <div className="mt-3 border-t border-line pt-2">
+              <button type="button" onClick={() => pick(null)} aria-current={shown.id === OWN_ID ? "true" : undefined} className={item(shown.id === OWN_ID)}>
+                Build your own table
+              </button>
             </div>
           )}
-          <JourneySection runId={runId} room={room} onRoom={setRoom} onRooms={onRooms} jump={jump} />
+        </nav>
+        <div className="grid min-w-0 gap-3">
+          <h3 className={T.title}>{title}</h3>
+          {seen.has("pivot") && (
+            <div className={shown.kind === "pivot" ? "grid gap-3" : "hidden"}>
+              {!wb.loaded ? (
+                <div className="card px-6 py-10">
+                  <p className="text-sm text-ink-3">Reading the coded answers...</p>
+                </div>
+              ) : !wb.view?.facts ? (
+                <div className="card px-6 py-10">
+                  <p className="text-sm text-ink-3">No coded answers to build a table from yet.</p>
+                </div>
+              ) : (
+                <PivotTable
+                  runId={runId}
+                  data={wb.view}
+                  settings={shownSettings}
+                  onSettings={onSettings}
+                  show={show}
+                  onShow={(s) => {
+                    setShow(s);
+                    writePrefs(scope, { show: s });
+                  }}
+                  waves={waves}
+                  onWaves={(w) => {
+                    setWaves(w);
+                    writePrefs(scope, { waves: w });
+                  }}
+                  hasPrev={!!prevId}
+                  prevData={prevData}
+                  name={title}
+                />
+              )}
+            </div>
+          )}
+          {seen.has("contests") && (
+            <div className={shown.kind === "contests" ? "grid gap-3" : "hidden"}>
+              {map === undefined ? (
+                <p className={T.sec}>Reading the coded answers...</p>
+              ) : map === null ? (
+                <p className={T.sec}>Nothing is measured here yet.</p>
+              ) : (
+                <TypeTable map={map} category={category} />
+              )}
+            </div>
+          )}
+          {seen.has("detail") && (
+            <div className={shown.kind === "detail" ? "grid gap-5" : "hidden"}>
+              <p className={`${T.sec} max-w-[70ch]`}>The journey question type by question type, with every table behind it. Filter to one buyer below.</p>
+              {rooms.length > 0 && (
+                <div className="flex flex-wrap items-center gap-1.5">
+                  <span className={`${T.cap} mr-1 text-ink-3`}>Buyer:</span>
+                  {["", ...rooms].map((rk) => (
+                    <button key={rk || "__all"} type="button" onClick={() => setRoom(rk)} aria-pressed={room === rk} className={chip(room === rk)}>
+                      {rk === "" ? "All buyers" : rk}
+                    </button>
+                  ))}
+                </div>
+              )}
+              <JourneySection runId={runId} room={room} onRoom={setRoom} onRooms={onRooms} jump={jump} />
+            </div>
+          )}
         </div>
-      )}
+      </div>
     </section>
   );
 }
@@ -128,7 +351,6 @@ interface Facts {
   about: string;
   to: string;
   away: string;
-  open: boolean;
 }
 
 const ROW_NAME: Record<string, string> = { chooses: "Buyer", fights: "Rival", doubts: "Worry", settled: "Question" };
@@ -168,11 +390,10 @@ function factsOf(c: MapCell, p: Position | undefined): Facts {
     about,
     to: p ? sideLine(p.towardThemes, p.toward) : "",
     away: p ? sideLine(p.awayThemes, p.away) : "",
-    open: !!p,
   };
 }
 
-function TypeTable({ map, category, onOpen }: { map: AnalysisMapView; category?: string | null; onOpen: (id: string) => void }) {
+function TypeTable({ map, category }: { map: AnalysisMapView; category?: string | null }) {
   const cat = catPhrase(category);
   const types = useMemo(
     () =>
@@ -241,7 +462,6 @@ function TypeTable({ map, category, onOpen }: { map: AnalysisMapView; category?:
                     {head(k, l)}
                   </th>
                 ))}
-                <th className="px-3 py-2.5" aria-label="Open" />
               </tr>
             </thead>
             <tbody>
@@ -262,19 +482,12 @@ function TypeTable({ map, category, onOpen }: { map: AnalysisMapView; category?:
                       )}
                     </td>
                   ))}
-                  <td className="px-3 py-2.5 text-right">
-                    {r.open && (
-                      <button type="button" onClick={() => onOpen(r.id)} className="whitespace-nowrap text-primary underline underline-offset-2 hover:opacity-80">
-                        Open
-                      </button>
-                    )}
-                  </td>
                 </tr>
               ))}
             </tbody>
           </table>
         </div>
-        <p className={`${T.cap} mt-2.5 text-ink-3`}>Each row is one contest on the Map. Open shows what to do and the answers behind it.</p>
+        <p className={`${T.cap} mt-2.5 text-ink-3`}>Each row is one contest on the Map. Open it on the Map for what to do and the answers behind it.</p>
       </div>
     </div>
   );

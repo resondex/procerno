@@ -34,7 +34,9 @@ export async function POST(
   }
   await store.retirePrompt(old.id);
   const [created] = await store.insertPrompts(id, [
-    { text: parsed.data.text, theme: old.theme },
+    // The replacement keeps its cell: without the intent it would belong to no
+    // view on a coded tracker and never be read or health-checked again.
+    { text: parsed.data.text, theme: old.theme, intentId: old.intent_id, asker: old.asker },
   ]).then((all) => all.filter((p) => p.text === parsed.data.text && !p.retired));
   return NextResponse.json({ ok: true, replacement: created ?? null });
 }

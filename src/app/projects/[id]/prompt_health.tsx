@@ -1,53 +1,10 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import type { Intent, Prompt, Run } from "@/lib/types";
-import { STATION_OF, STATION_ORDER, viewsOf } from "@/lib/engine/views";
-
-/** Stage labels, copied from instrument.ts stageLibrary (pricing shows as
- * "Value", the stage's customer-facing name since the contract rename). */
-const STAGE_LABEL: Record<string, string> = {
-  problem_recognition: "Problem recognition",
-  category_education: "Category education",
-  discovery: "Discovery",
-  criteria: "Criteria formation",
-  use_case: "Use-case fit",
-  social_validation: "Social validation",
-  premium_worth: "Premium vs. basic brands",
-  comparison: "Comparison",
-  alternatives: "Alternatives",
-  objections: "Objections / risk",
-  pricing: "Value",
-  churn_triggers: "Churn triggers",
-  renewal: "Renewal",
-  repertoire: "Repertoire",
-  business_case: "Business case",
-  expansion: "Expansion",
-  ecosystem: "Ecosystem",
-  advocacy: "Advocacy",
-};
-
-/** Within-station order (stations come from views.ts). */
-const STAGE_ORDER = [
-  "problem_recognition",
-  "category_education",
-  "discovery",
-  "criteria",
-  "use_case",
-  "social_validation",
-  "premium_worth",
-  "comparison",
-  "alternatives",
-  "objections",
-  "pricing",
-  "churn_triggers",
-  "renewal",
-  "repertoire",
-  "business_case",
-  "expansion",
-  "ecosystem",
-  "advocacy",
-];
+import type { ViewKey } from "@/lib/engine/views";
+import { healthChecks } from "@/lib/engine/prompt_health_rule";
+import { QUESTION_TYPE_LABEL, QUESTION_TYPE_ORDER, questionTypeOf } from "./question_types";
 
 export interface HealthCell {
   key: string;
@@ -66,6 +23,9 @@ export interface HealthStage {
   cells: HealthCell[];
   live: number;
   flagged: number;
+  /** Whether the health check reads this question type at all
+   * (prompt_health_rule.ts) - only questions that name no brand by design. */
+  checked: boolean;
 }
 
 function angleLabel(angle: string | null | undefined): string {
@@ -81,37 +41,36 @@ function cellTitle(it: Intent): string {
   return parts.join(" · ");
 }
 
-function stationRank(stage: string, angle: string | null | undefined): number {
-  const v = viewsOf(stage, angle)[0];
-  return v ? STATION_ORDER.indexOf(STATION_OF[v]) : STATION_ORDER.length;
-}
-
 /**
- * Live prompts grouped stage -> cell. Stages order by station (views.ts)
- * then STAGE_ORDER; a stage spanning stations (alternatives: offensive vs
- * defensive) sits at its earliest. Cells order by intent seq. Prompts with
- * no intent land in a final "Other prompts" stage, one cell per theme.
+ * Live prompts grouped question type -> cell, using the dashboard's names
+ * for question types (question_types.ts) in journey order. Cells order by
+ * intent seq. Prompts with no intent land in a final "Other questions"
+ * group, one cell per theme.
  */
 export function groupPromptsForHealth(
   prompts: Prompt[],
   intents: Intent[]
 ): HealthStage[] {
   const intentById = new Map(intents.map((i) => [i.id, i]));
-  const stages = new Map<
+  const groups = new Map<
     string,
-    { rank: number; cells: Map<string, HealthCell & { seq: number }> }
+    { checked: boolean; cells: Map<string, HealthCell & { seq: number }> }
   >();
   const other = new Map<string, HealthCell & { seq: number }>();
+  let otherChecked = false;
 
   for (const p of prompts) {
     if (p.retired !== 0) continue;
     const it = p.intent_id ? intentById.get(p.intent_id) : undefined;
+    const checked = healthChecks(p, it);
     let cell: HealthCell & { seq: number };
-    if (!it) {
-      const theme = p.theme as string;
+    const type: ViewKey | null = it ? questionTypeOf(it.stage, it.angle) : null;
+    if (!it || !type) {
+      const theme = it ? `stage:${it.stage}` : (p.theme as string);
+      otherChecked ||= checked;
       cell = other.get(theme) ?? {
         key: `theme:${theme}`,
-        title: theme.replace(/_/g, " "),
+        title: it ? cellTitle(it) || it.text : theme.replace(/_/g, " "),
         seed: null,
         prompts: [],
         flagged: 0,
@@ -119,12 +78,11 @@ export function groupPromptsForHealth(
       };
       other.set(theme, cell);
     } else {
-      const rank = stationRank(it.stage, it.angle);
-      const st = stages.get(it.stage) ?? { rank, cells: new Map() };
-      st.rank = Math.min(st.rank, rank);
-      stages.set(it.stage, st);
+      const g = groups.get(type) ?? { checked: false, cells: new Map() };
+      g.checked ||= checked;
+      groups.set(type, g);
       const composed = cellTitle(it);
-      cell = st.cells.get(it.id) ?? {
+      cell = g.cells.get(it.id) ?? {
         key: it.id,
         title: composed || it.text,
         seed: composed ? it.text : null,
@@ -132,13 +90,18 @@ export function groupPromptsForHealth(
         flagged: 0,
         seq: it.seq,
       };
-      st.cells.set(it.id, cell);
+      g.cells.set(it.id, cell);
     }
     cell.prompts.push(p);
     if (p.flagged === 1) cell.flagged++;
   }
 
-  const finish = (key: string, label: string, cells: Iterable<HealthCell & { seq: number }>): HealthStage => {
+  const finish = (
+    key: string,
+    label: string,
+    checked: boolean,
+    cells: Iterable<HealthCell & { seq: number }>
+  ): HealthStage => {
     const list = [...cells].sort((a, b) => a.seq - b.seq);
     return {
       key,
@@ -146,19 +109,29 @@ export function groupPromptsForHealth(
       cells: list,
       live: list.reduce((n, c) => n + c.prompts.length, 0),
       flagged: list.reduce((n, c) => n + c.flagged, 0),
+      checked,
     };
   };
 
-  const ordered = [...stages.entries()]
-    .sort(([a, sa], [b, sb]) => {
-      if (sa.rank !== sb.rank) return sa.rank - sb.rank;
-      const ia = STAGE_ORDER.indexOf(a);
-      const ib = STAGE_ORDER.indexOf(b);
-      return (ia < 0 ? STAGE_ORDER.length : ia) - (ib < 0 ? STAGE_ORDER.length : ib);
-    })
-    .map(([key, st]) => finish(key, STAGE_LABEL[key] ?? key, st.cells.values()));
-  if (other.size > 0) ordered.push(finish("other", "Other prompts", other.values()));
+  const ordered = QUESTION_TYPE_ORDER.filter((k) => groups.has(k)).map((k) => {
+    const g = groups.get(k)!;
+    return finish(k, QUESTION_TYPE_LABEL[k], g.checked, g.cells.values());
+  });
+  if (other.size > 0) ordered.push(finish("other", "Other questions", otherChecked, other.values()));
   return ordered;
+}
+
+/** What the health check recorded for a wave (GET /api/projects/[id]/prompt_health). */
+interface HealthState {
+  run: { id: string; status: string } | null;
+  record: { at: string; sent: number; flagged: number } | null;
+}
+
+function dayOf(iso: string): string {
+  const d = new Date(iso);
+  return Number.isNaN(d.getTime())
+    ? ""
+    : d.toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" });
 }
 
 function Caret() {
@@ -186,10 +159,45 @@ export function PromptHealthBody({
   const [examples, setExamples] = useState<
     Record<string, string[] | "loading">
   >({});
+  // Whether the check ran on this wave - read from the server, never assumed
+  // from the run's status (a coded wave can sit at "collected", and a
+  // complete wave from before 2026-11-11 was never checked on its codes).
+  const [health, setHealth] = useState<HealthState | "loading" | "error">("loading");
+  const askRun = shownRun?.id ?? null;
+  useEffect(() => {
+    let live = true;
+    fetch(`/api/projects/${id}/prompt_health${askRun ? `?run=${askRun}` : ""}`)
+      .then((r) => (r.ok ? r.json() : Promise.reject(new Error(String(r.status)))))
+      .then((d: HealthState) => {
+        if (live) setHealth(d);
+      })
+      .catch(() => {
+        if (live) setHealth("error");
+      });
+    return () => {
+      live = false;
+    };
+  }, [id, askRun]);
+  const exampleRun =
+    shownRun?.id ?? (typeof health === "object" ? health.run?.id ?? null : null);
+
   const stages = groupPromptsForHealth(prompts, intents);
   const flaggedCount = prompts.filter(
     (p) => p.retired === 0 && p.flagged === 1
   ).length;
+  const plural = (n: number) => (n === 1 ? "" : "s");
+  const flagLine = `It flagged ${flaggedCount} question${plural(flaggedCount)} whose answers wandered off the topic. Swap in a suggested rewording - past answers stay as they were, and the new wording is asked from the next wave on.`;
+  const status: string =
+    health === "loading"
+      ? ""
+      : health === "error"
+        ? "Could not tell whether the health check has run on this wave."
+        : !health.run
+          ? "Nothing has been measured yet. The health check reads a wave's answers once it is measured."
+          : !health.record
+            ? `The health check has not run on this wave yet.${flaggedCount > 0 ? " The flags below are from an earlier wave." : ""}`
+            : `Checked on this wave${dayOf(health.record.at) ? ` (${dayOf(health.record.at)})` : ""}. ` +
+              (flaggedCount > 0 ? flagLine : "Every question it reads stayed on topic.");
 
   const flagBlock = (p: Prompt) => (
     <div className="mt-2 border-l-2 border-warning/40 pl-3 grid gap-1.5">
@@ -219,7 +227,7 @@ export function PromptHealthBody({
           </button>
         </div>
       ))}
-      {shownRun && (
+      {exampleRun && (
         <div>
           {examples[p.id] === undefined && (
             <button
@@ -227,7 +235,7 @@ export function PromptHealthBody({
               onClick={async () => {
                 setExamples((x) => ({ ...x, [p.id]: "loading" }));
                 const res = await fetch(
-                  `/api/runs/${shownRun.id}/responses?promptId=${p.id}`
+                  `/api/runs/${exampleRun}/responses?promptId=${p.id}`
                 );
                 const d = res.ok ? await res.json() : { responses: [] };
                 setExamples((x) => ({
@@ -270,15 +278,7 @@ export function PromptHealthBody({
 
   return (
     <>
-      <p className="text-[13px] text-ink-3 mb-4 -mt-1">
-        {flaggedCount > 0
-          ? `The health check flagged ${flaggedCount} prompt${flaggedCount === 1 ? "" : "s"} whose answers drifted off-category. Refield with a suggested alternative — history is preserved, and the replacement fields on the next run.`
-          : shownRun && shownRun.status !== "complete"
-            ? // The check runs when a wave is finalized; a wave still held has
-              // never been checked, so do not claim a pass (2026-11-11).
-              "The health check has not run on this wave yet. Below is every question this tracker asks."
-            : "All prompts passed the health check."}
-      </p>
+      <p className="text-[13px] text-ink-3 mb-4 -mt-1 min-h-[1.25rem]">{status}</p>
       <div className="grid gap-1">
         {stages.map((st) => (
           <details key={st.key} open={st.flagged > 0} className="group">
@@ -287,6 +287,14 @@ export function PromptHealthBody({
               {st.label}
               <span className="font-normal text-ink-3">{st.live}</span>
               {st.flagged > 0 && flagChip(st.flagged)}
+              {!st.checked && (
+                <span
+                  className="ml-1 rounded-full bg-line/60 text-ink-3 px-2 py-0.5 text-[11px] font-normal"
+                  title="The health check reads only questions that name no brand and point at no other category. Here the question itself sets the topic, or reaching beyond the category is what is measured."
+                >
+                  not checked
+                </span>
+              )}
             </summary>
             <div className="ml-5 mt-1 mb-2 grid gap-1">
               {st.cells.map((c) => (
@@ -335,8 +343,10 @@ export function PromptHealthBody({
         ))}
       </div>
       <p className="text-[13px] text-ink-3 mt-3">
-        The headline numbers come only from questions that do not name your brand. Questions that name it
-        (matchups, worries, value) are reported on their own, since naming the brand guarantees a mention.
+        The health check reads the questions that do not name a brand - open choice, premium vs basic and
+        criteria - and asks whether their answers stayed on topic. Questions that name a brand are anchored by
+        that name, and awareness and ecosystem questions measure answers reaching beyond the category, so
+        those are not checked.
       </p>
     </>
   );
