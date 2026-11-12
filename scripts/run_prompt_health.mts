@@ -6,9 +6,11 @@
  *   npx tsx scripts/run_prompt_health.mts --dry Netflix   # input summary only
  *   npx tsx scripts/run_prompt_health.mts Netflix Sephora # SPENDS
  *
- * SPENDS: one gpt-6-luna call per tracker (PROMPT_HEALTH_MODEL, about two
+ * A tracker reading coded answers is COUNTED (question_fit.ts): no model
+ * call, no spend - a live run only writes the flags and the record.
+ * A legacy tracker SPENDS: one gpt-6-luna call per tracker (PROMPT_HEALTH_MODEL, about two
  * cents a tracker), writes the prompts' flags and the "check ran" record
- * (llm_cache prompt_health:ph1:<run>). Needs Tyler's per-run go, like all API
+ * (llm_cache prompt_health:ph2:<run>). Needs Tyler's per-run go, like all API
  * spend. With no brand argument it does nothing - name the trackers.
  *
  * --dry builds the exact input the model would see and prints a summary: how
@@ -56,6 +58,19 @@ for (const project of projects) {
   }
   const res = await analyzePromptHealth(project.id, run.id, { dry });
   console.log(`\n${project.brand} (run ${String(run.id).slice(0, 8)}, ${run.status})`);
+  if (res.fit) {
+    // Coded tracker: counted, no model call (question_fit.ts).
+    const fit = res.fit;
+    const prompts = await store.listPrompts(project.id);
+    const intents = await store.listIntents(project.id);
+    const textOf = new Map(prompts.map((p: { id: string; text: string }) => [p.id, p.text]));
+    const seedOf = new Map(intents.map((i: { id: string; text: string; stage: string }) => [i.id, `[${i.stage}] ${i.text}`]));
+    console.log(`  ${dry ? "would flag" : res.ran ? "flagged" : `did not run (${res.reason}):`} ${fit.cells.length} questions and ${fit.wordings.length} of ${fit.checked.length} wordings (${fit.unjudged} not judged)`);
+    for (const c of fit.cells) console.log(`    QUESTION ${String(seedOf.get(c.intent)).slice(0, 110)}\n        ${c.reason}`);
+    for (const w of fit.wordings) console.log(`    WORDING  ${String(textOf.get(w.prompt)).slice(0, 110)}\n        ${w.reason}`);
+    if (!dry && !res.ran) process.exitCode = 1;
+    continue;
+  }
   if (!dry) {
     console.log(res.ran ? `  checked: ${res.flagged} of ${res.sent} questions flagged` : `  did not run: ${res.reason}`);
     if (!res.ran) process.exitCode = 1;
@@ -77,7 +92,7 @@ for (const project of projects) {
   rows.sort((a: { share: number; all: number }, b: { share: number; all: number }) => b.share - a.share || b.all - a.all);
   console.log(`  top ${top} by out-of-category share of recalled mentions:`);
   for (const r of rows.slice(0, top)) {
-    const names = r.out.slice(0, 5).map((b: { brand: string; answers: number; status?: string }) => `${b.brand} ${b.answers}${b.status === "outside" ? "" : "?"}`).join(", ");
+    const names = r.out.slice(0, 5).map((b: { brand: string; answers: number; status?: string }) => `${b.brand} ${b.answers}${b.status === "not_competitor" ? "" : "?"}`).join(", ");
     console.log(`   ${(r.share * 100).toFixed(0).padStart(3)}% (${r.it.answers} ans) ${r.it.prompt.slice(0, 90)}`);
     console.log(`        ${names || "-"}`);
   }

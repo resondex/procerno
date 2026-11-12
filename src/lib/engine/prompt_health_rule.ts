@@ -11,7 +11,7 @@ import type { Intent, Prompt } from "../types";
  * SENT - the question does not name a brand by design, so what its answers
  * recall is the whole signal of whether it was read as being about the
  * category: open choice (discovery, use-case, social validation), premium vs
- * basic, criteria.
+ * basic.
  *
  * LEFT OUT:
  *  - questions that name brands by design (head-to-head, rivals' customers
@@ -28,6 +28,13 @@ import type { Intent, Prompt } from "../types";
  *  - awareness (problem recognition, learning the category): whether the
  *    answer routes to the category or somewhere else IS the measurement, so
  *    out-of-category recall is the finding, not a defect.
+ *  - criteria: the answer teaches what to weigh, and the names it uses are
+ *    the criteria themselves (what the product must work with, connect to or
+ *    be bought through), so its recall is mostly not category brands on a
+ *    healthy question. Measured on prod 2026-11-11: criteria carried every
+ *    flag on five of six trackers (47 flags, none on any open-choice
+ *    question), with flagged and unflagged paraphrases of the same cell a
+ *    few points apart in category share. Recall cannot judge this type.
  *  - ecosystem: it asks what goes alongside the product, so naming products
  *    from other categories is the design.
  *  - retired stages (no view).
@@ -38,5 +45,5 @@ import type { Intent, Prompt } from "../types";
 export function healthChecks(prompt: Pick<Prompt, "theme">, intent: Pick<Intent, "stage" | "angle"> | undefined): boolean {
   if (!intent) return prompt.theme !== "branded";
   const views = viewsOf(intent.stage, intent.angle);
-  return views.includes("headline") || views.includes("criteria_taught");
+  return views.includes("headline");
 }

@@ -8,6 +8,7 @@ import { promptsForRun } from "./surfaces";
 import { healthChecks } from "./prompt_health_rule";
 import { buildResolver } from "./brand_resolve";
 import { cachedContextVerdicts } from "./context_judge";
+import { computeQuestionFit, type CellFlag, type FitResult } from "./question_fit";
 import type {
   AnswerCodes,
   DictionaryEntry,
@@ -56,7 +57,13 @@ export { healthChecks } from "./prompt_health_rule";
  * a recalled name: an approved brand of the category; ruled out at review or
  * judged no product of a category maker; or not yet reviewed. Only the
  * answer_codes path carries it - the legacy path never did. */
-export type HealthStatus = "in_category" | "outside" | "unreviewed";
+// "not_competitor" is NOT "off topic": a name the brand board ignores is only
+// ruled out as a competitor to count. It is often something the category's
+// brands sell, include or partner with (2026-11-11: a retailer tracker's
+// carried product brands read as "outside the category" and half its
+// questions were flagged). Whether it is a different kind of product is the
+// model's call.
+export type HealthStatus = "in_category" | "not_competitor" | "unreviewed";
 
 export interface HealthBrand {
   brand: string;
@@ -78,6 +85,9 @@ export interface HealthInput {
   items: HealthItem[];
   /** Questions this run asked that the rule leaves out. */
   skipped: number;
+  /** Left-out questions still carrying a flag from an earlier rule: a
+   * completed check clears them, since no later check will ever judge them. */
+  stale: string[];
 }
 
 interface BaseArgs {
@@ -96,12 +106,16 @@ function selectPrompts(args: BaseArgs) {
   const asked = promptsForRun(args.run, args.prompts, args.intents);
   const picked: Prompt[] = [];
   let skipped = 0;
+  const stale: string[] = [];
   for (const p of asked) {
     const intent = p.intent_id ? intentById.get(p.intent_id) : undefined;
     if (healthChecks(p, intent)) picked.push(p);
-    else skipped++;
+    else {
+      skipped++;
+      if (p.flagged) stale.push(p.id);
+    }
   }
-  return { picked, skipped };
+  return { picked, skipped, stale };
 }
 
 function rowsByPrompt(responses: { id: string; prompt_id: string }[]) {
@@ -127,7 +141,7 @@ function rank<T extends { answers: number }>(list: T[]): T[] {
  * store, no model. Each answer's mentions resolve through the CURRENT
  * dictionary (brand_resolve.ts) with the cached context-judge verdicts;
  * `nulls` are names the judge ruled are no product of a category maker
- * (counted as "outside").
+ * (counted as "not_competitor").
  */
 export function buildHealthInput(
   args: BaseArgs & {
@@ -137,16 +151,16 @@ export function buildHealthInput(
     nulls?: Set<string>;
   }
 ): HealthInput {
-  const { picked, skipped } = selectPrompts(args);
+  const { picked, skipped, stale } = selectPrompts(args);
   const resolve = buildResolver(args.dictionary, args.judged);
   const codeById = new Map(args.codes.map((c) => [c.response_id, c]));
   const byPrompt = rowsByPrompt(args.responses);
   const statusOf = (raw: string): { key: string; name: string; status: HealthStatus } => {
     const r = resolve(raw);
     if (r.status === "active") return { key: r.key, name: r.name, status: "in_category" };
-    if (r.status === "rejected") return { key: r.key, name: r.name, status: "outside" };
+    if (r.status === "rejected") return { key: r.key, name: r.name, status: "not_competitor" };
     if (r.status === "unknown" && r.via === null && args.nulls?.has(matchKey(raw)))
-      return { key: r.key, name: r.name, status: "outside" };
+      return { key: r.key, name: r.name, status: "not_competitor" };
     return { key: r.key, name: r.name, status: "unreviewed" };
   };
   const items: HealthItem[] = [];
@@ -168,7 +182,7 @@ export function buildHealthInput(
     }
     items.push({ id: prompt.id, prompt: prompt.text, answers: ids.length, recalled_brands: rank([...counts.values()]) });
   }
-  return { mode: "codes", items, skipped };
+  return { mode: "codes", items, skipped, stale };
 }
 
 /** The legacy input (no codes_source): the mentions table, canonicalized as
@@ -203,7 +217,7 @@ export function buildLegacyHealthInput(
         .map(([brand, answers]) => ({ brand, answers })),
     };
   });
-  return { mode: "mentions", items, skipped: unbranded.length - sent.length };
+  return { mode: "mentions", items, skipped: unbranded.length - sent.length, stale: [] };
 }
 
 /** The system prompt. Unchanged from 2026-10-14 for the legacy input; the
@@ -219,9 +233,14 @@ export function healthSystemPrompt(category: string, withStatus: boolean): strin
     (withStatus
       ? "Each brand also carries a status from the study's reviewed " +
         "brand list: in_category (an approved brand of the category), " +
-        "outside (ruled outside the category's brands - it may still be " +
-        "something an on-topic answer reasonably mentions), or unreviewed " +
-        "(not on the list yet - judge it yourself). "
+        "not_competitor (reviewed and not counted as a competing brand - " +
+        "this says nothing about topic: it is often something the " +
+        "category's brands sell, carry, include or partner with), or " +
+        "unreviewed (not on the list yet). For not_competitor and " +
+        "unreviewed names, judge yourself whether the name belongs to a " +
+        "DIFFERENT kind of product than the category; names that sit " +
+        "inside the category's own offering are on-category recall, " +
+        "however many answers name them. "
       : "") +
     "Judge by that weight, not by the length of the brand list: " +
     "one stray brand named in a single answer is noise, while a " +
@@ -250,7 +269,7 @@ export function healthSystemPrompt(category: string, withStatus: boolean): strin
 /** The "check ran" record: an llm_cache marker per run, written only when a
  * readable verdict list was applied (or there was nothing to send). Its
  * absence means the check never ran on that wave. */
-export const HEALTH_RECORD_VERSION = "ph1";
+export const HEALTH_RECORD_VERSION = "ph3";
 export const healthRecordKey = (runId: string) => `prompt_health:${HEALTH_RECORD_VERSION}:${runId}`;
 const FOREVER_MS = 100 * 365 * 24 * 3600 * 1000;
 
@@ -261,6 +280,9 @@ export interface HealthRecord {
   model: string | null;
   sent: number;
   flagged: number;
+  /** Coded trackers: the questions (cells) not producing what their type is
+   * meant to produce (question_fit.ts). Absent on the legacy check. */
+  cells?: CellFlag[];
 }
 
 export async function readHealthRecord(runId: string): Promise<HealthRecord | null> {
@@ -309,10 +331,76 @@ export async function loadHealthInput(
 export interface HealthResult {
   ran: boolean;
   /** Why it did not run, when it did not. */
-  reason?: "no project" | "no key" | "dry" | "unreadable";
+  reason?: "no project" | "no key" | "dry" | "unreadable" | "no codes";
   sent: number;
   flagged: number;
   input?: HealthInput;
+  /** Coded trackers: the counted result (question_fit.ts). */
+  fit?: FitResult;
+}
+
+/**
+ * The coded-tracker check (2026-11-11): counted from answer_codes by
+ * question_fit.ts - no model call, no key, no spend. Every asked wording it
+ * can judge gets its flag set or cleared; question-level findings ride the
+ * record. `dry` returns the result without writing.
+ */
+async function analyzeCoded(
+  project: Project,
+  run: Run,
+  source: string,
+  opts: { dry?: boolean }
+): Promise<HealthResult> {
+  const [prompts, intents, responses, dictionary, codes] = await Promise.all([
+    store.listPrompts(project.id),
+    store.listIntents(project.id),
+    store.listResponseMeta(run.id),
+    store.getDictionary(project.id),
+    store.listAnswerCodes(run.id, source),
+  ]);
+  // Cached verdicts only - never a model call, in any environment.
+  const { judged } = await cachedContextVerdicts({ project, dictionary, codes });
+  const fit = computeQuestionFit({
+    brand: project.brand,
+    run,
+    prompts,
+    intents,
+    responses: responses.map((r) => ({ id: r.id, prompt_id: r.prompt_id })),
+    codes,
+    dictionary,
+    judged,
+  });
+  const sent = fit.checked.length;
+  const flagged = fit.wordings.length;
+  if (opts.dry) return { ran: false, reason: "dry", sent, flagged, fit };
+  // No coded answers at all: nothing was checked, so record nothing.
+  if (sent === 0) return { ran: false, reason: "no codes", sent, flagged, fit };
+
+  const flagOf = new Map(fit.wordings.map((w) => [w.prompt, w]));
+  const was = new Map(prompts.map((p) => [p.id, p.flagged === 1]));
+  for (const id of fit.checked) {
+    const w = flagOf.get(id);
+    if (!w && !was.get(id)) continue;
+    await store.setPromptFlag(id, w ? { reason: w.reason, alternatives: [] } : null);
+  }
+  const rec: HealthRecord = {
+    at: new Date().toISOString(),
+    mode: "codes",
+    source,
+    model: null,
+    sent,
+    flagged,
+    cells: fit.cells,
+  };
+  await store.cacheSet(healthRecordKey(run.id), JSON.stringify(rec), {
+    brand: project.brand,
+    category: project.category,
+    projectId: project.id,
+  });
+  console.log(
+    `question check (${project.brand}): ${fit.cells.length} questions and ${flagged} of ${sent} wordings flagged`
+  );
+  return { ran: true, sent, flagged, fit };
 }
 
 /**
@@ -330,6 +418,12 @@ export async function analyzePromptHealth(
   runId: string,
   opts: { dry?: boolean } = {}
 ): Promise<HealthResult> {
+  const codedSource = await store.getCodesSource(projectId);
+  if (codedSource) {
+    const [p, r] = await Promise.all([store.getProject(projectId), store.getRun(runId)]);
+    if (!p || !r) return { ran: false, reason: "no project", sent: 0, flagged: 0 };
+    return analyzeCoded(p, r, codedSource, opts);
+  }
   if (!opts.dry) {
     tagCosts({ purpose: "run:prompt_health" });
     if (!apiKeyConfigured()) return { ran: false, reason: "no key", sent: 0, flagged: 0 };
@@ -357,6 +451,7 @@ export async function analyzePromptHealth(
 
   // Nothing judgeable this wave: record that the check ran, touch no flag.
   if (input.items.length === 0) {
+    for (const id of input.stale) await store.setPromptFlag(id, null);
     await record(0);
     return { ran: true, sent: 0, flagged: 0 };
   }
@@ -406,6 +501,7 @@ export async function analyzePromptHealth(
         : null
     );
   }
+  for (const id of input.stale) await store.setPromptFlag(id, null);
   await record(flagged);
   console.log(`prompt health check (${project.brand}): ${flagged}/${input.items.length} prompts flagged`);
   return { ran: true, sent: input.items.length, flagged };

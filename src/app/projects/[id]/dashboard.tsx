@@ -1068,6 +1068,7 @@ export default function ProjectDashboard({
             intents={detail.intents ?? []}
             shownRun={shownRun}
             refresh={refresh}
+            coded={codesEra}
           />
         </Modal>
       )}

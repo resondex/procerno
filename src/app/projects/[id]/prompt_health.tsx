@@ -124,7 +124,13 @@ export function groupPromptsForHealth(
 /** What the health check recorded for a wave (GET /api/projects/[id]/prompt_health). */
 interface HealthState {
   run: { id: string; status: string } | null;
-  record: { at: string; sent: number; flagged: number } | null;
+  record: {
+    at: string;
+    sent: number;
+    flagged: number;
+    /** Coded trackers: questions not producing what their type is meant to. */
+    cells?: { intent: string; reason: string }[];
+  } | null;
 }
 
 function dayOf(iso: string): string {
@@ -148,12 +154,16 @@ export function PromptHealthBody({
   intents,
   shownRun,
   refresh,
+  coded = false,
 }: {
   id: string;
   prompts: Prompt[];
   intents: Intent[];
   shownRun: Run | null;
   refresh: () => void;
+  /** The tracker reads coded answers: every question type is checked, by
+   * counting (engine/question_fit.ts). */
+  coded?: boolean;
 }) {
   // Example answers revealed per flagged prompt.
   const [examples, setExamples] = useState<
@@ -186,7 +196,21 @@ export function PromptHealthBody({
     (p) => p.retired === 0 && p.flagged === 1
   ).length;
   const plural = (n: number) => (n === 1 ? "" : "s");
-  const flagLine = `It flagged ${flaggedCount} question${plural(flaggedCount)} whose answers wandered off the topic. Swap in a suggested rewording - past answers stay as they were, and the new wording is asked from the next wave on.`;
+  const cellFlags = new Map(
+    (typeof health === "object" ? health.record?.cells ?? [] : []).map((c) => [c.intent, c.reason])
+  );
+  const flagLine = coded
+    ? [
+        cellFlags.size > 0
+          ? `${cellFlags.size} question${plural(cellFlags.size)} ${cellFlags.size === 1 ? "is" : "are"} not drawing the kind of answer ${cellFlags.size === 1 ? "it was" : "they were"} written for.`
+          : "",
+        flaggedCount > 0
+          ? `${flaggedCount} wording${plural(flaggedCount)} drew answers well off the topic next to the other wordings of the same question.`
+          : "",
+      ]
+        .filter(Boolean)
+        .join(" ")
+    : `It flagged ${flaggedCount} question${plural(flaggedCount)} whose answers wandered off the topic. Swap in a suggested rewording - past answers stay as they were, and the new wording is asked from the next wave on.`;
   const status: string =
     health === "loading"
       ? ""
@@ -197,7 +221,7 @@ export function PromptHealthBody({
           : !health.record
             ? `The health check has not run on this wave yet.${flaggedCount > 0 ? " The flags below are from an earlier wave." : ""}`
             : `Checked on this wave${dayOf(health.record.at) ? ` (${dayOf(health.record.at)})` : ""}. ` +
-              (flaggedCount > 0 ? flagLine : "Every question it reads stayed on topic.");
+              (flaggedCount > 0 || cellFlags.size > 0 ? flagLine : "Every question it reads stayed on topic.");
 
   const flagBlock = (p: Prompt) => (
     <div className="mt-2 border-l-2 border-warning/40 pl-3 grid gap-1.5">
@@ -281,13 +305,18 @@ export function PromptHealthBody({
       <p className="text-[13px] text-ink-3 mb-4 -mt-1 min-h-[1.25rem]">{status}</p>
       <div className="grid gap-1">
         {stages.map((st) => (
-          <details key={st.key} open={st.flagged > 0} className="group">
+          <details key={st.key} open={st.flagged > 0 || st.cells.some((c) => cellFlags.has(c.key))} className="group">
             <summary className="cursor-pointer list-none flex items-center gap-2 text-sm font-semibold py-1 select-none">
               <Caret />
               {st.label}
               <span className="font-normal text-ink-3">{st.live}</span>
               {st.flagged > 0 && flagChip(st.flagged)}
-              {!st.checked && (
+              {st.cells.some((c) => cellFlags.has(c.key)) && (
+                <span className="ml-1 rounded-full bg-warning/15 text-warning px-2 py-0.5 text-[11px] font-medium">
+                  question flagged
+                </span>
+              )}
+              {!coded && !st.checked && (
                 <span
                   className="ml-1 rounded-full bg-line/60 text-ink-3 px-2 py-0.5 text-[11px] font-normal"
                   title="The health check reads only questions that name no brand and point at no other category. Here the question itself sets the topic, or reaching beyond the category is what is measured."
@@ -298,7 +327,7 @@ export function PromptHealthBody({
             </summary>
             <div className="ml-5 mt-1 mb-2 grid gap-1">
               {st.cells.map((c) => (
-                <details key={c.key} open={c.flagged > 0} className="group">
+                <details key={c.key} open={c.flagged > 0 || cellFlags.has(c.key)} className="group">
                   <summary className="cursor-pointer list-none flex items-start gap-2 text-[13px] font-semibold py-1 select-none">
                     <Caret />
                     <span className="min-w-0">
@@ -308,7 +337,15 @@ export function PromptHealthBody({
                           {c.prompts.length}
                         </span>
                         {c.flagged > 0 && flagChip(c.flagged)}
+                        {cellFlags.has(c.key) && (
+                          <span className="rounded-full bg-warning/15 text-warning px-2 py-0.5 text-[11px] font-medium">
+                            question flagged
+                          </span>
+                        )}
                       </span>
+                      {cellFlags.has(c.key) && (
+                        <span className="block font-normal text-warning mt-0.5">{cellFlags.get(c.key)}</span>
+                      )}
                       {c.seed && (
                         <span className="block font-normal text-ink-3 mt-0.5">
                           {c.seed}
@@ -343,10 +380,9 @@ export function PromptHealthBody({
         ))}
       </div>
       <p className="text-[13px] text-ink-3 mt-3">
-        The health check reads the questions that do not name a brand - open choice, premium vs basic and
-        criteria - and asks whether their answers stayed on topic. Questions that name a brand are anchored by
-        that name, and awareness and ecosystem questions measure answers reaching beyond the category, so
-        those are not checked.
+        {coded
+          ? "The check counts two things from the coded answers. For each question: do its answers do what that kind of question is for - name products, use the category's arguments, or discuss your brand. For each wording: are its answers about the category as often as the other wordings of the same question."
+          : "The health check reads the questions that do not name a brand and asks whether their answers stayed on topic. Questions that name a brand are anchored by that name, so those are not checked."}
       </p>
     </>
   );
