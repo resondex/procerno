@@ -81,7 +81,7 @@ function vizLabelTemplate(label: string, phrases: string[]): string {
   return x;
 }
 /** Keys whose values are data or plumbing, never template text. */
-const SKIP_KEYS = new Set(["responseId", "find", "quote", "cellId", "id", "key", "cell", "cells", "anchors", "at", "subject", "subjects"]);
+const SKIP_KEYS = new Set(["responseId", "find", "to", "quote", "cellId", "id", "key", "cell", "cells", "anchors", "at", "subject", "subjects"]);
 function bannedIn(root: unknown, data: string[], where: string, out: string[]) {
   const strip = (t: string) => {
     let x = t.replace(/"[^"]*"/g, '""').replace(/“[^”]*”/g, "");

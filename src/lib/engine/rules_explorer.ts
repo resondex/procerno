@@ -451,6 +451,16 @@ export async function computeRules(data: ViewData, request: ViewRequest = {}, ca
     return byName(resolve(choice), choice);
   };
 
+  /** The product a rule names, as written (am21: the examples' "Sent to"). */
+  const cardOf = (rule: Rule, schema: string, d: Destination): string => {
+    const choice = rule.choice.trim();
+    const product = rule.product?.trim();
+    if (schema === "choice" || schema === "expansion" || schema === "ecosystem") return choice;
+    if (product) return product;
+    if (ENUM_TOWARD.has(choice)) return ""; // a verdict, not a product - the side already says it
+    return d.name;
+  };
+  const answerSides = new Map<string, Record<RuleSide, Set<string>>>();
   const groups = new Map<string, Acc>();
   const overallSides: Record<RuleSide, Set<string>> = { you: new Set(), away: new Set(), elsewhere: new Set() };
   const cellSides: Record<RuleSide, Set<string>> = { you: new Set(), away: new Set(), elsewhere: new Set() };
@@ -541,9 +551,15 @@ export async function computeRules(data: ViewData, request: ViewRequest = {}, ca
       ca.add(id);
       a.cellAnswers.set(intent.id, ca);
       if (capture?.answerRules) {
-        const st = a.said.get(id) ?? { said: condition, to: [], model: row.model, intent: intent.id };
+        const st = a.said.get(id) ?? { said: condition, to: [], model: row.model, intent: intent.id, cards: [] };
         if (d.side === "away" && !st.to.includes(d.name)) st.to.push(d.name);
+        const card = cardOf(rule, schema, d);
+        if (card && !st.cards!.includes(card)) st.cards!.push(card);
         a.said.set(id, st);
+        // am21: which sides each answer states which condition on, for the examples' one-way-only preference.
+        const sides = answerSides.get(id) ?? { you: new Set<string>(), away: new Set<string>(), elsewhere: new Set<string>() };
+        sides[d.side].add(ck);
+        answerSides.set(id, sides);
       }
       if (a.answers.has(id)) continue;
       a.answers.add(id);
@@ -571,6 +587,16 @@ export async function computeRules(data: ViewData, request: ViewRequest = {}, ca
     }
   }
 
+  if (capture?.answerRules) {
+    const opposite = (side: RuleSide): RuleSide[] => (side === "you" ? ["away", "elsewhere"] : ["you"]);
+    for (const a of groups.values())
+      for (const [id, st] of a.said) {
+        const sides = answerSides.get(id);
+        if (!sides) continue;
+        const opp = opposite(a.side);
+        st.mixed = opp.some((o) => sides[o].has(a.ck)) ? 2 : opp.some((o) => sides[o].size > 0) ? 1 : 0;
+      }
+  }
   const total = bearing.length;
   const idOf = (a: Acc) => `${a.side}:${shortHash(a.ck)}`;
   const accs = [...groups.values()];

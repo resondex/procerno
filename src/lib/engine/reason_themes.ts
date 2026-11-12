@@ -68,6 +68,76 @@ export interface AnswerRule {
   to: string[];
   model: string;
   intent: string;
+  /** am21: the products this answer's rules in the group name, as written. */
+  cards?: string[];
+  /** am21: 2 = the same answer states this condition on the other side too,
+   * 1 = it sends buyers the other way under some other condition, 0 = one way only. */
+  mixed?: number;
+}
+
+/** One candidate example for a reason row (am21). */
+export interface RefCandidate {
+  id: string;
+  find: string;
+  model: string;
+  cards?: string[];
+  mixed?: number;
+}
+
+const REF_STOP = new Set(["the", "and", "for", "with", "you", "your", "are", "that", "this", "not", "but", "has", "have", "own", "who", "when", "into", "from", "more", "less", "most", "they", "them", "their", "its", "any", "all", "one", "out", "than", "very", "over"]);
+const refStems = (s: string) =>
+  new Set(
+    s
+      .toLowerCase()
+      .split(/[^a-z0-9]+/)
+      .filter((w) => w.length >= 3 && !REF_STOP.has(w))
+      .map((w) => w.slice(0, 5)),
+  );
+/** Share of the row name's stems the wording carries (0-1). */
+export function refFit(said: string, label: string): number {
+  const l = refStems(label);
+  if (!l.size) return 0;
+  const s = refStems(said);
+  let k = 0;
+  for (const w of l) if (s.has(w)) k++;
+  return k / l.size;
+}
+
+/** The "Sent to" string: up to two products, as written, deduped case-blind. */
+export function sentTo(cards: string[] | undefined): string | undefined {
+  const out: string[] = [];
+  const seen = new Set<string>();
+  for (const c of cards ?? []) {
+    const k = c.trim().toLowerCase();
+    if (!k || seen.has(k)) continue;
+    seen.add(k);
+    out.push(c.trim());
+  }
+  if (!out.length) return undefined;
+  return out.length > 2 ? `${out.slice(0, 2).join(", ")} and others` : out.join(" or ");
+}
+
+/**
+ * A reason row's examples (am21): answers that send the buyer one way only
+ * first, then the closest wording to the row's name, then the original
+ * order; at most one per engine; each carries where it sends the buyer.
+ */
+export function pickRefs(items: RefCandidate[], label: string, k = 2): AnswerRef[] {
+  const ranked = items
+    .map((x, i) => ({ x, i, fit: refFit(x.find, label) }))
+    .sort((a, b) => (a.x.mixed ?? 0) - (b.x.mixed ?? 0) || b.fit - a.fit || a.i - b.i);
+  const out: AnswerRef[] = [];
+  const models = new Set<string>();
+  const ids = new Set<string>();
+  for (const { x } of ranked) {
+    if (out.length >= k) break;
+    if (models.has(x.model) || ids.has(x.id) || !x.find.trim()) continue;
+    models.add(x.model);
+    ids.add(x.id);
+    const to = sentTo(x.cards);
+    out.push({ responseId: x.id, find: x.find, ...(to ? { to } : {}) });
+  }
+  return out;
 }
 
 /** Group id -> response id -> that answer's statement of the group. */
@@ -124,17 +194,17 @@ export function routeShares(destinations: Iterable<string[]>): RouteShare[] {
 }
 
 /** A theme's receipts and routes from its member groups (largest first). */
-function themeEvidenceOf(groupIds: string[], ev: ThemeEvidence, inCell: (r: AnswerRule) => boolean): Pick<DossierTheme, "receipts" | "routes"> {
-  const statements: { id: string; find: string; model: string }[] = [];
+function themeEvidenceOf(groupIds: string[], ev: ThemeEvidence, inCell: (r: AnswerRule) => boolean, label: string): Pick<DossierTheme, "receipts" | "routes"> {
+  const statements: RefCandidate[] = [];
   const dest = new Map<string, string[]>();
   for (const gid of groupIds) {
     for (const [id, r] of ev.rules.get(gid) ?? []) {
       if (!inCell(r)) continue;
-      if (!ev.accept || ev.accept(r)) statements.push({ id, find: r.said, model: r.model });
+      if (!ev.accept || ev.accept(r)) statements.push({ id, find: r.said, model: r.model, cards: r.cards, mixed: r.mixed });
       if (ev.side === "away") dest.set(id, [...(dest.get(id) ?? []), ...r.to]);
     }
   }
-  const receipts = spreadRefs(statements);
+  const receipts = pickRefs(statements, label);
   const routes = ev.side === "away" ? routeShares(dest.values()) : [];
   return { ...(receipts.length ? { receipts } : {}), ...(routes.length ? { routes } : {}) };
 }
@@ -454,7 +524,7 @@ export function themeTree(
         .map((x) => x.bucket);
       const label = tm.totName[t];
       const flat = buckets.length === 1 && buckets[0].members.length === 0 && same(buckets[0].label, label);
-      const ev = evidence ? themeEvidenceOf(rankedIds(totGroups.get(t), order), evidence, (r) => !filter || filter.has(r.intent)) : {};
+      const ev = evidence ? themeEvidenceOf(rankedIds(totGroups.get(t), order), evidence, (r) => !filter || filter.has(r.intent), label) : {};
       return { n: tot.union.size, theme: { label, share: pctOf(tot.union.size / base), buckets: flat ? [] : buckets, ...(flat && wallOf(label) ? { wall: true } : {}), ...ev } };
     })
     .sort((a, b) => b.n - a.n || a.theme.label.localeCompare(b.theme.label))
@@ -577,7 +647,7 @@ export function themeTreeAnswers(
         .map((x) => x.bucket);
       const label = tm.totName[t];
       const flat = buckets.length === 1 && buckets[0].members.length === 0 && same(buckets[0].label, label);
-      const ev = evidence ? themeEvidenceOf(rankedIds(totGroups.get(t), order), evidence, (r) => cellIntents.has(r.intent)) : {};
+      const ev = evidence ? themeEvidenceOf(rankedIds(totGroups.get(t), order), evidence, (r) => cellIntents.has(r.intent), label) : {};
       return { n: tot.union.size, theme: { label, share: pctOf(tot.union.size / base), buckets: flat ? [] : buckets, ...(flat && wallOf(label) ? { wall: true } : {}), ...ev } };
     })
     .sort((a, b) => b.n - a.n || a.theme.label.localeCompare(b.theme.label))

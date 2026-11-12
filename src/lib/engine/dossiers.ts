@@ -398,7 +398,7 @@ export async function computeDossiers(data: ViewData, request: ViewRequest = {})
 // sides pivot on") that read as contradictions across the two columns.
 // do6 (2026-11-09): option D - dossiers carry pick receipts for the one-panel slide-over; themes shared with the map via reason_themes.
 // do7 (2026-11-10): the one-panel redesign - rooms (its share beside yours per open-choice buying situation, from the map's brands), argsAll receipts, theme receipts and away routes; the routes and default lines say what sends buyers away instead of "reason".
-const DOSSIERS_VERSION = "do7";
+const DOSSIERS_VERSION = "do8"; // do8 (2026-11-12): theme examples ranked one-way-first and by fit, with `to`
 // The fold (2026-11-09): dossiers embed map cells and summary numbers, so
 // their versions ride the key (see analysis_map's fold note).
 const DOSSIERS_KEY_VERSION = `${DOSSIERS_VERSION}.${ANALYSIS_MAP_VERSION}.${BRAND_SUMMARY_VERSION}`;

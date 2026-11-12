@@ -3,7 +3,7 @@ import { containsSeq, famTokens } from "./brand_family";
 import { excludedWords } from "./definition_overlap";
 import { conditionKeysFor, conditionStemKey, isDefaultCondition } from "./condition_groups";
 import { computeRules, ENUM_TOWARD, GENERIC_AWAY, type RuleGroup, type RulesView } from "./rules_explorer";
-import { poolInputs, rankGroups, routeShares, situationsOf, spreadRefs, themeReasons, themeTreeAnswers, type AnswerRules, type DossierTheme, type ThemeMap } from "./reason_themes";
+import { pickRefs, poolInputs, rankGroups, routeShares, situationsOf, spreadRefs, themeReasons, themeTreeAnswers, type AnswerRules, type DossierTheme, type ThemeMap } from "./reason_themes";
 import { isWallWording } from "./wall_wording";
 import { commitSentence, insightBar, insightInputs, pctFine, productNoun, rankedInsights, type ExampleIndex, type InsightInputs } from "./summary_insights";
 import { BRAND_SUMMARY_VERSION, computeBrandSummary, sharedBrandSummary, type BrandSummaryView, type Insight } from "./brand_summary";
@@ -315,6 +315,16 @@ function ruleTo(rule: { choice: string; product?: string }, schema: string, reso
   return r.status === "active" && r.key !== targetKey ? r.name : null;
 }
 
+/** am21: the product one rule names, as written (the examples' "Sent to"). */
+function ruleCard(rule: { choice: string; product?: string }, schema: string): string {
+  const choice = rule.choice.trim();
+  const product = rule.product?.trim();
+  if (schema === "choice" || schema === "expansion" || schema === "ecosystem") return choice;
+  if (product) return product;
+  if (ENUM_TOWARD.has(choice)) return ""; // a verdict, not a product - the side already says it
+  return GENERIC_AWAY[choice] ?? choice;
+}
+
 /* ------------------------------- the compute ------------------------------ */
 
 interface Group {
@@ -322,7 +332,7 @@ interface Group {
   n: number;
   surfaces: string[];
   /** am15: response id -> the answer's own wording, engine and away destinations. */
-  answers: Map<string, { said: string; model: string; to: Set<string> }>;
+  answers: Map<string, { said: string; model: string; to: Set<string>; cards: string[]; mixed: number }>;
 }
 
 /** One wall-calibration line (exported for the harness). */
@@ -1365,6 +1375,7 @@ export async function computeAnalysisMap(
   const groupsOf = (rows: PoolRow[]) => {
     type Acc = { n: number; surfaces: Map<string, number>; answers: Group["answers"] };
     const sides = { you: new Map<string, Acc>(), away: new Map<string, Acc>() };
+    const mine = new Map<string, { you: Set<string>; away: Set<string> }>();
     let bearing = 0;
     for (const r of rows) {
       const dr = r.code.decision_rules;
@@ -1378,19 +1389,33 @@ export async function computeAnalysisMap(
         const side = ruleSide(rule, r.code.schema, resolve, targetKey);
         const ck = keyOf(c);
         const to = side === "away" ? ruleTo(rule, r.code.schema, resolve, targetKey) : null;
+        const card = ruleCard(rule, r.code.schema);
+        const ms = mine.get(rid) ?? { you: new Set<string>(), away: new Set<string>() };
+        ms[side].add(ck);
+        mine.set(rid, ms);
         if (seen.has(`${side}|${ck}`)) {
           // am15: a second rule of the same group in one answer adds only its destination.
-          if (to) sides[side].get(ck)!.answers.get(rid)!.to.add(to);
+          const st = sides[side].get(ck)!.answers.get(rid)!;
+          if (to) st.to.add(to);
+          if (card && !st.cards.includes(card)) st.cards.push(card);
           continue;
         }
         seen.add(`${side}|${ck}`);
         const acc = sides[side].get(ck) ?? { n: 0, surfaces: new Map(), answers: new Map() };
         acc.n++;
         acc.surfaces.set(c, (acc.surfaces.get(c) ?? 0) + 1);
-        acc.answers.set(rid, { said: c, model: r.model, to: new Set(to ? [to] : []) });
+        acc.answers.set(rid, { said: c, model: r.model, to: new Set(to ? [to] : []), cards: card ? [card] : [], mixed: 0 });
         sides[side].set(ck, acc);
       }
     }
+    // am21: 2 = the answer states this condition on the other side too, 1 = it
+    // sends buyers the other way under another condition, 0 = one way only.
+    for (const side of ["you", "away"] as const)
+      for (const [ck, acc] of sides[side])
+        for (const [rid, st] of acc.answers) {
+          const other = mine.get(rid)?.[side === "you" ? "away" : "you"];
+          st.mixed = other?.has(ck) ? 2 : other && other.size > 0 ? 1 : 0;
+        }
     const list = (m: Map<string, Acc>): Group[] =>
       [...m.values()]
         .sort((a, b) => b.n - a.n)
@@ -1402,7 +1427,7 @@ export async function computeAnalysisMap(
   };
   /** am15: a flat condition row's share, receipts and (away) routes. */
   const conditionExtras = (g: Group, bearing: number, away: boolean, evidence: boolean): { share?: string; receipts?: ConditionItem["receipts"]; routes?: ConditionItem["routes"] } => {
-    const receipts = evidence ? spreadRefs([...g.answers.entries()].map(([id, a]) => ({ id, find: a.said, model: a.model }))) : [];
+    const receipts = evidence ? pickRefs([...g.answers.entries()].map(([id, a]) => ({ id, find: a.said, model: a.model, cards: a.cards, mixed: a.mixed })), g.label) : [];
     const routes = evidence && away ? routeShares([...g.answers.values()].map((a) => [...a.to])) : [];
     return {
       ...(bearing > 0 ? { share: pctOf(g.n / bearing) } : {}),
@@ -1546,7 +1571,7 @@ export async function computeAnalysisMap(
         .sort((a, b) => b.hits.length - a.hits.length || a.g.label.localeCompare(b.g.label))
         .slice(0, COND_TOP)
         .map(({ g, hits }) => {
-          const receipts = spreadRefs(hits.map(([id, a]) => ({ id, find: a.said, model: a.model })));
+          const receipts = pickRefs(hits.map(([id, a]) => ({ id, find: a.said, model: a.model, cards: a.cards, mixed: a.mixed })), g.label);
           return {
             text: g.label,
             n: hits.length,
@@ -2429,7 +2454,7 @@ function tensionsOf(
 // am16 (2026-11-10): the tightened wall test - the wall sentence now advises, so it reads the shown wording only.
 // am17 (2026-11-10): each tension carries `viz` (the Overview finding card's 2-4 bars).
 // am18 (2026-11-10): each buying situation's open-choice cell states the same funnel figures as the all-buyers cell.
-export const ANALYSIS_MAP_VERSION = "am20"; // am20 (2026-11-12): each rival in a pick contest's `brands` carries `here` (its funnel in that contest, the arguments when it is picked beside your picks, the stated conditions sending picks to it) and the position carries `youRead` - the rival panel's lead read. Additive; theme inputs unchanged. // am19 am19 (2026-11-11): every Overview number opens its answers - `examples` (named, commits), refs on each share-of-picks row and on the tension bars (the first tension's funnel bars and the bs16 insight bars). // am18 (2026-11-10): each buying situation's open-choice cell states the same funnel figures as the all-buyers cell (named, recommended, commits, picked, outside the category), from its own answers. // // am17 (2026-11-10): each tension carries `viz` (the Overview finding card's 2-4 bars) - the first from the casting facts, the rest from the bs15 insights
+export const ANALYSIS_MAP_VERSION = "am21"; // am21 (2026-11-12): reason-row examples prefer answers that send the buyer one way only, then the wording closest to the row name, and each carries `to` (the product it sends the buyer to). // am20 (2026-11-12): each rival in a pick contest's `brands` carries `here` (its funnel in that contest, the arguments when it is picked beside your picks, the stated conditions sending picks to it) and the position carries `youRead` - the rival panel's lead read. Additive; theme inputs unchanged. // am19 am19 (2026-11-11): every Overview number opens its answers - `examples` (named, commits), refs on each share-of-picks row and on the tension bars (the first tension's funnel bars and the bs16 insight bars). // am18 (2026-11-10): each buying situation's open-choice cell states the same funnel figures as the all-buyers cell (named, recommended, commits, picked, outside the category), from its own answers. // // am17 (2026-11-10): each tension carries `viz` (the Overview finding card's 2-4 bars) - the first from the casting facts, the rest from the bs15 insights
 // The fold (2026-11-09, Tyler): a view's cache key carries the versions of
 // the views whose content it embeds, so the lockstep bump convention is
 // mechanical - the map embeds the summary's insights, casting and verdict.

@@ -113,6 +113,9 @@ export interface PositionReceipt {
 export interface AnswerRef {
   responseId: string;
   find: string;
+  /** am21: on a reason-row example, the product(s) this answer's rules under
+   * the row send the buyer to - the modal's "Sent to" line. */
+  to?: string;
 }
 
 /** One brand's share of a pick contest (Position.brands). */

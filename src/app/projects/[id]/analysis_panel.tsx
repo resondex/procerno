@@ -226,7 +226,14 @@ function ExamplesModal({ target, onClose }: { target: ExamplesTarget; onClose: (
                   </p>
                 )}
                 <p className="flex flex-wrap items-baseline justify-between gap-x-3 text-[12px] text-ink-3">
-                  <span>Answered by {body.engine}</span>
+                  <span>
+                    Answered by {body.engine}
+                    {r.to && (
+                      <>
+                        {" - "}sent to <span className="font-medium text-ink-2">{r.to}</span>
+                      </>
+                    )}
+                  </span>
                   <button
                     type="button"
                     className="text-primary hover:opacity-80"
