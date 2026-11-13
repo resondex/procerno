@@ -283,23 +283,70 @@ function ExampleLink({ receipts, title, subtitle }: { receipts: PositionReceipt[
   );
 }
 
-// ---------- folded evidence sections ----------
+// ---------- evidence sections: a short preview, "See all" opens the rest ----------
 
-function Sec({ title, teaser, children, id }: { title: string; teaser: string; children: ReactNode; id?: string }) {
-  const [open, setOpen] = useState(false);
+/**
+ * One evidence section (2026-11-13, "option 3 - short preview", every panel):
+ * the title, then a short preview of real rows; "See all ..." swaps in the
+ * full content in place and "Show less" swaps it back. A section whose full
+ * content adds nothing to the preview passes no `full` and draws no link. A
+ * section opened from a deep link (its `id` in the address, or `defaultOpen`)
+ * starts in its full state.
+ */
+function Sec({
+  title,
+  preview,
+  full,
+  more,
+  id,
+  defaultOpen,
+}: {
+  title: ReactNode;
+  preview: ReactNode;
+  /** The whole section; omitted when the preview already shows everything. */
+  full?: ReactNode;
+  /** The link under the preview: "See all 9 numbers". */
+  more?: string;
+  id?: string;
+  defaultOpen?: boolean;
+}) {
+  const [open, setOpen] = useState(() => !!defaultOpen || (!!id && typeof window !== "undefined" && window.location.hash === `#${id}`));
+  const ref = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (open && id && typeof window !== "undefined" && window.location.hash === `#${id}`) ref.current?.scrollIntoView({ block: "start" });
+    // Only on mount: a deep link scrolls once.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  const can = full !== undefined && full !== null && full !== false;
   return (
-    <div id={id} className="scroll-mt-4 border-t border-line last:border-b">
-      <button type="button" onClick={() => setOpen((o) => !o)} aria-expanded={open} className="grid w-full grid-cols-[minmax(0,1fr)_14px] items-center gap-x-2.5 py-3 text-left">
-        <span className={T.title}>{title}</span>
-        <span aria-hidden className={`row-span-2 text-[11px] text-ink-3 transition-transform ${open ? "rotate-180" : ""}`}>
-          ▾
-        </span>
-        {!open && <span className="truncate text-[13px] text-ink-3">{teaser}</span>}
-      </button>
-      {open && <div className="pb-4">{children}</div>}
+    <div id={id} ref={ref} className="scroll-mt-4 border-t border-line pb-4 pt-3">
+      <h3 className={`${T.title} mb-1.5`}>{title}</h3>
+      {open && can ? full : preview}
+      {can && (
+        <button
+          type="button"
+          onClick={() => setOpen((o) => !o)}
+          aria-expanded={open}
+          className="mt-2 text-[13px] font-medium text-primary underline underline-offset-2 hover:opacity-80"
+        >
+          {open ? "Show less" : more ?? "See all"}
+        </button>
+      )}
     </div>
   );
 }
+
+const seeAll = (n: number, noun: string) => `See all ${n} ${noun}`;
+
+/** The numbers' preview: the rows the tests name, in that order, when every
+ * test finds one; otherwise the first three as served (contest types with
+ * other numbers - a doubt, a value verdict, a head-to-head). */
+function previewNums<R extends { label: string }>(rows: R[], tests: RegExp[]): R[] {
+  const hit = tests.map((t) => rows.find((r) => t.test(r.label)));
+  return hit.every(Boolean) ? (hit as R[]) : rows.slice(0, 3);
+}
+const CONTEST_NUM_PREVIEW = [/^(Your share of the picks here|Share of picks)$/, /^Named\b/, /^Recommendations that end as the pick$/];
+const RIVAL_NUM_PREVIEW = [/^Share of picks$/, /^Named\b/, /^Recommendations that end as the pick$/];
 
 const Hint = ({ children }: { children: ReactNode }) => <p className={`${T.cap} mb-2 text-ink-3`}>{children}</p>;
 const None = ({ children }: { children: ReactNode }) => <p className={`${T.body} text-ink-3`}>{children}</p>;
@@ -509,11 +556,6 @@ function BothWays({ items }: { items: BothWaysItem[] }) {
     </div>
   );
 }
-
-const buyerTeaser = (toward: CondRowData[], away: CondRowData[]) =>
-  toward.length || away.length
-    ? [toward[0] && `To you: ${toward[0].label}`, away[0] && `Away: ${away[0].label}`].filter(Boolean).join(" - ")
-    : "Nothing stated";
 
 const BUYER_HINT =
   "What the AI says about the buyer when it sends them each way. The number is how often it comes up, among the answers here where the AI says anything like it. Open one to see examples.";
@@ -788,14 +830,18 @@ function ContestPanel({ p, ctx }: { p: Position; ctx: Ctx }) {
   const away = (p.awayThemes?.length ?? 0) > 0 ? themeRows(p.awayThemes!) : flatRows(p.away);
   const pt = `What the AI says about the ${cat.plural}`;
 
-  let argsTeaser = "Not read for these questions";
+  let argsPreview: ReactNode = null;
+  let argsCount = 0;
   let argsBody: ReactNode = (
     <None>
       Too few answers here pick a side to compare what the AI says about the {cat.plural} when it picks you with when it picks a rival.
     </None>
   );
   if (mode === "compare" && p.lifts.length > 0) {
-    argsTeaser = [up && `For you: ${up.label}`, down && `Against you: ${down.label}`].filter(Boolean).join(" - ") || p.lifts[0].label;
+    // Preview: the strongest argument for you and the strongest against.
+    const pv = up || down ? ([up, down].filter(Boolean) as LiftItem[]) : p.lifts.slice(0, 2);
+    argsPreview = <LiftRows lifts={pv} sides={sides} />;
+    argsCount = p.lifts.length > pv.length ? p.lifts.length : 0;
     argsBody = (
       <>
         <Hint>
@@ -805,17 +851,28 @@ function ContestPanel({ p, ctx }: { p: Position; ctx: Ctx }) {
       </>
     );
   } else if ((mode === "rival" || mode === "all" || mode === "topics") && argsRows.length > 0) {
-    argsTeaser = (mode === "rival" ? "When a rival is picked: " : mode === "topics" ? "Covers most: " : "Comes up most: ") + argsRows[0].label;
+    const hint = (
+      <Hint>
+        {mode === "rival"
+          ? `Too few answers pick you here to compare your wins with theirs${p.youShare ? ` (you take ${p.youShare} of the picks)` : ""}. This is what the AI brings up when it picks a rival here.`
+          : mode === "topics"
+            ? "These questions come before the buyer is choosing, so there are no picks to compare. This is what the AI covers most when it answers them."
+            : "The AI rarely picks a side here, so there are no wins and losses to compare. This is what it brings up most across all of these answers."}
+      </Hint>
+    );
+    const rows = argsRows.map((r) => ({ label: r.label, share: r.share, weight: pctNum(r.share), receipts: r.receipts }));
+    // The hint says what these rows are, so the preview keeps it.
+    argsPreview = (
+      <>
+        {hint}
+        <CondRows rows={rows.slice(0, 2)} color="var(--neutral-bar)" />
+      </>
+    );
+    argsCount = rows.length > 2 ? rows.length : 0;
     argsBody = (
       <>
-        <Hint>
-          {mode === "rival"
-            ? `Too few answers pick you here to compare your wins with theirs${p.youShare ? ` (you take ${p.youShare} of the picks)` : ""}. This is what the AI brings up when it picks a rival here.`
-            : mode === "topics"
-              ? "These questions come before the buyer is choosing, so there are no picks to compare. This is what the AI covers most when it answers them."
-              : "The AI rarely picks a side here, so there are no wins and losses to compare. This is what it brings up most across all of these answers."}
-        </Hint>
-        <CondRows rows={argsRows.map((r) => ({ label: r.label, share: r.share, weight: pctNum(r.share), receipts: r.receipts }))} color="var(--neutral-bar)" />
+        {hint}
+        <CondRows rows={rows} color="var(--neutral-bar)" />
       </>
     );
   } else if (mode === "topics" || mode === "all" || mode === "rival") {
@@ -826,7 +883,82 @@ function ContestPanel({ p, ctx }: { p: Position; ctx: Ctx }) {
     );
   }
 
-  const numbersTeaser = figs[0] ? `${figs[0].label}: ${figs[0].value}` : p.taker ? `Taken by ${p.taker}` : "Nothing to show";
+  if (argsPreview === null) argsPreview = argsBody;
+
+  // The numbers: the taker line, then every figure; the preview is your share
+  // of the picks, named, and recommendations that end as the pick - or the
+  // first three as served where a contest type has other numbers.
+  const numRows: { label: string; value: string; tip?: string }[] = [
+    ...(p.taker ? [{ label: "Who holds it", value: `${p.taker}${p.takerKind ? ` - ${p.takerKind}` : ""}` }] : []),
+    ...figs,
+  ];
+  const numPreview = previewNums(numRows, CONTEST_NUM_PREVIEW);
+  const numList = (rows: typeof numRows) =>
+    rows.length > 0 ? (
+      rows.map((f, i) => (
+        <div key={`${f.label}${i}`} title={f.tip}>
+          <Fig label={f.label} value={f.value} />
+        </div>
+      ))
+    ) : (
+      <None>No other numbers are tracked for this contest.</None>
+    );
+
+  // Who takes the picks: the top taker and you in the preview.
+  const brandRow = (b: { name: string; share: string }) => (
+    <button
+      key={b.name}
+      type="button"
+      onClick={() => ctx.open({ kind: "rival", name: b.name, cell: p.cellId })}
+      className="grid w-full grid-cols-[minmax(0,7.5rem)_minmax(0,1fr)_2.75rem] items-center gap-2.5 border-b border-line py-1.5 text-left text-[13px] text-ink hover:text-primary"
+    >
+      <span className="truncate">{b.name}</span>
+      <span className="h-2 overflow-hidden rounded bg-line/60">
+        <i className="block h-full rounded" style={{ width: `${(100 * pctNum(b.share)) / maxW}%`, background: "var(--pa-theirs)" }} />
+      </span>
+      <span className="text-right tabular-nums">{b.share}</span>
+    </button>
+  );
+  const youRow = (
+    <div key="__you" className="grid grid-cols-[minmax(0,7.5rem)_minmax(0,1fr)_2.75rem] items-center gap-2.5 border-b border-line/70 py-1.5 text-[13px] font-semibold text-ink">
+      <span>You</span>
+      <span className="h-2 overflow-hidden rounded bg-line/60">
+        <i className="block h-full rounded" style={{ width: `${(100 * pctNum(you)) / maxW}%`, background: "var(--pa-yours)" }} />
+      </span>
+      <span className="text-right tabular-nums">{you}</span>
+    </div>
+  );
+  const topBrand = brands.length > 0 ? [...brands].sort((a, b) => pctNum(b.share) - pctNum(a.share))[0] : undefined;
+  const brandsPreview = topBrand && pctNum(you) > pctNum(topBrand.share) ? [youRow, brandRow(topBrand)] : [topBrand && brandRow(topBrand), youRow];
+
+  // What it says about the buyer: the top two each way, with their bars.
+  const openAll = p.cellId === "chooses:open:all";
+  const hasBuyer = toward.length > 0 || away.length > 0;
+  const buyerMore = hasBuyer && (toward.length > 2 || away.length > 2 || (p.bothWays?.length ?? 0) > 0 || openAll);
+  const buyerNone = <None>The AI says nothing about the buyer in this contest - its answer does not change with who is asking.</None>;
+  const buyerFull = (
+    <>
+      {hasBuyer ? (
+        <>
+          <Hint>{BUYER_HINT}</Hint>
+          {(p.bothWays?.length ?? 0) > 0 && <BothWays items={p.bothWays!} />}
+          <BuyerColumns toward={toward} away={away} towardTitle="Toward you when the buyer..." awayTitle="Away from you when the buyer..." />
+        </>
+      ) : (
+        buyerNone
+      )}
+      {openAll && (
+        <details className="mt-4">
+          <summary className="cursor-pointer text-[13px] font-medium text-primary underline decoration-dotted underline-offset-2">
+            See everything the AI says about the buyer, every question type
+          </summary>
+          <div className="mt-3 grid gap-5">
+            <RulesSection runId={ctx.runId} onEvidence={(ids, title) => setEvidence({ ids: ids.slice(0, EVIDENCE_CAP), title, total: ids.length })} />
+          </div>
+        </details>
+      )}
+    </>
+  );
   return (
     <>
       <div className={crumbCls}>
@@ -845,66 +977,41 @@ function ContestPanel({ p, ctx }: { p: Position; ctx: Ctx }) {
       {p.lever && <MoveBox p={p} ctx={ctx} why={whyLines(notes, cat.plural)} />}
 
       <div className={evh}>The evidence</div>
-      <Sec title="The numbers" teaser={numbersTeaser}>
-        {p.taker && <Fig label="Who holds it" value={`${p.taker}${p.takerKind ? ` - ${p.takerKind}` : ""}`} />}
-        {figs.length > 0
-          ? figs.map((f, i) => (
-              <div key={`${f.label}${i}`} title={f.tip}>
-                <Fig label={f.label} value={f.value} />
-              </div>
-            ))
-          : <None>No other numbers are tracked for this contest.</None>}
-      </Sec>
+      <Sec
+        title="The numbers"
+        preview={numList(numPreview)}
+        full={numRows.length > numPreview.length ? numList(numRows) : undefined}
+        more={seeAll(numRows.length, "numbers")}
+      />
       {brands.length > 0 && (
-        <Sec title="Who takes the picks here" teaser={`${brands[0].name} ${brands[0].share} - you ${you}`}>
-          <Hint>Open a rival to see it in this contest only.</Hint>
-          {brands.map((b) => (
-            <button
-              key={b.name}
-              type="button"
-              onClick={() => ctx.open({ kind: "rival", name: b.name, cell: p.cellId })}
-              className="grid w-full grid-cols-[minmax(0,7.5rem)_minmax(0,1fr)_2.75rem] items-center gap-2.5 border-b border-line py-1.5 text-left text-[13px] text-ink hover:text-primary"
-            >
-              <span className="truncate">{b.name}</span>
-              <span className="h-2 overflow-hidden rounded bg-line/60">
-                <i className="block h-full rounded" style={{ width: `${(100 * pctNum(b.share)) / maxW}%`, background: "var(--pa-theirs)" }} />
-              </span>
-              <span className="text-right tabular-nums">{b.share}</span>
-            </button>
-          ))}
-          <div className="grid grid-cols-[minmax(0,7.5rem)_minmax(0,1fr)_2.75rem] items-center gap-2.5 py-1.5 text-[13px] font-semibold text-ink">
-            <span>You</span>
-            <span className="h-2 overflow-hidden rounded bg-line/60">
-              <i className="block h-full rounded" style={{ width: `${(100 * pctNum(you)) / maxW}%`, background: "var(--pa-yours)" }} />
-            </span>
-            <span className="text-right tabular-nums">{you}</span>
-          </div>
-        </Sec>
+        <Sec
+          title="Who takes the picks here"
+          preview={<>{brandsPreview}</>}
+          full={
+            brands.length > 1 ? (
+              <>
+                <Hint>Open a rival to see it in this contest only.</Hint>
+                {brands.map(brandRow)}
+                {youRow}
+              </>
+            ) : undefined
+          }
+          more={seeAll(brands.length + 1, "brands")}
+        />
       )}
-      <Sec title={pt} teaser={argsTeaser}>
-        {argsBody}
-      </Sec>
-      <Sec title="What it says about the buyer" teaser={buyerTeaser(toward, away)}>
-        {toward.length || away.length ? (
-          <>
-            <Hint>{BUYER_HINT}</Hint>
-            {(p.bothWays?.length ?? 0) > 0 && <BothWays items={p.bothWays!} />}
-            <BuyerColumns toward={toward} away={away} towardTitle="Toward you when the buyer..." awayTitle="Away from you when the buyer..." />
-          </>
-        ) : (
-          <None>The AI says nothing about the buyer in this contest - its answer does not change with who is asking.</None>
-        )}
-        {p.cellId === "chooses:open:all" && (
-          <details className="mt-4">
-            <summary className="cursor-pointer text-[13px] font-medium text-primary underline decoration-dotted underline-offset-2">
-              See everything the AI says about the buyer, every question type
-            </summary>
-            <div className="mt-3 grid gap-5">
-              <RulesSection runId={ctx.runId} onEvidence={(ids, title) => setEvidence({ ids: ids.slice(0, EVIDENCE_CAP), title, total: ids.length })} />
-            </div>
-          </details>
-        )}
-      </Sec>
+      <Sec title={pt} preview={argsPreview} full={argsCount > 0 ? argsBody : undefined} more={seeAll(argsCount, "arguments")} />
+      <Sec
+        title="What it says about the buyer"
+        preview={
+          hasBuyer ? (
+            <BuyerColumns toward={toward.slice(0, 2)} away={away.slice(0, 2)} towardTitle="Toward you when the buyer..." awayTitle="Away from you when the buyer..." />
+          ) : (
+            buyerNone
+          )
+        }
+        full={buyerMore || (!hasBuyer && openAll) ? buyerFull : undefined}
+        more={hasBuyer ? seeAll(toward.length + away.length, "reasons") : "See everything the AI says about the buyer"}
+      />
       {evidence && <EvidencePanel runId={ctx.runId} request={evidence} onClose={() => setEvidence(null)} />}
     </>
   );
@@ -928,14 +1035,16 @@ function ScopeChips({ name, cellId, scoped, ctx }: { name: string; cellId: strin
   );
 }
 
-/** "Who takes the picks here", drawn open: every listed brand and you, the focus brand marked. */
-function PicksBars({ p, focus, ctx }: { p: Position; focus: string; ctx: Ctx }) {
+/** "Who takes the picks here": every listed brand and you, the focus brand
+ * marked. The preview keeps the top taker, the focus brand and you. */
+function PicksBars({ p, focus, ctx, preview }: { p: Position; focus: string; ctx: Ctx; preview?: boolean }) {
   const show = useShowExamples();
-  const rows = [
+  const all = [
     ...(p.brands ?? []).map((b) => ({ name: b.name, share: b.share, you: false, proof: b.proof })),
     { name: "You", share: p.youShare ?? "0%", you: true, proof: [] as PositionReceipt[] },
   ].sort((a, b) => pctNum(b.share) - pctNum(a.share));
-  const max = Math.max(1, ...rows.map((r) => pctNum(r.share)));
+  const rows = preview ? all.filter((r, i) => i === 0 || r.you || normName(r.name) === normName(focus)) : all;
+  const max = Math.max(1, ...all.map((r) => pctNum(r.share)));
   return (
     <div>
       {rows.map((r) => {
@@ -985,22 +1094,26 @@ function HowTable({
   them,
   you,
   share,
+  preview,
 }: {
   name: string;
   them: BrandRead;
   you?: BrandRead;
   /** Share of the picks here (the headline's number), so "picked in" - a share of every answer - connects to it. */
   share?: { them: string; you: string };
+  /** The short preview: share of the picks, named, recommendations that end as the pick. */
+  preview?: boolean;
 }) {
   const show = useShowExamples();
   const where = useContext(WhereCtx);
   type K = "named" | "recommended" | "picked" | "converts";
-  const rows: [K, string][] = [
+  const allRows: [K, string][] = [
     ["named", "Named in"],
     ["recommended", "Recommended in"],
     ["picked", "Picked in"],
     ["converts", "Recommendations that end as the pick"],
   ];
+  const rows = preview ? allRows.filter(([k]) => k === "named" || k === "converts") : allRows;
   const shareTip = "Of the answers here where the AI commits to one product";
   const cellOf = (r: BrandRead | undefined, k: K, who: string, label: string) => {
     if (!r) return <span className="text-ink-3">-</span>;
@@ -1023,6 +1136,22 @@ function HowTable({
       </span>
     );
   };
+  const shareRow = share ? (
+    <tr className="border-t border-line/70">
+      <td className="py-1.5 pr-2 text-ink-2" title={shareTip}>
+        Share of the picks
+        <span className={`${T.cap} block text-ink-3`}>when the AI commits to one</span>
+      </td>
+      <td className="py-1.5 text-right align-top font-semibold tabular-nums text-ink" title={shareTip}>
+        {share.them}
+      </td>
+      {you && (
+        <td className="py-1.5 pl-3 text-right align-top font-semibold tabular-nums text-ink" title={shareTip}>
+          {share.you}
+        </td>
+      )}
+    </tr>
+  ) : null;
   return (
     <table className={`w-full ${T.body}`}>
       <thead>
@@ -1039,6 +1168,7 @@ function HowTable({
         </tr>
       </thead>
       <tbody>
+        {preview && shareRow}
         {rows.map(([k, label]) => (
           <Fragment key={k}>
             <tr className="border-t border-line/70">
@@ -1046,22 +1176,7 @@ function HowTable({
               <td className="py-1.5 text-right text-ink">{cellOf(them, k, name, label)}</td>
               {you && <td className="py-1.5 pl-3 text-right text-ink">{cellOf(you, k, "you", label)}</td>}
             </tr>
-            {k === "picked" && share && (
-              <tr className="border-t border-line/70">
-                <td className="py-1.5 pr-2 text-ink-2" title={shareTip}>
-                  Share of the picks
-                  <span className={`${T.cap} block text-ink-3`}>when the AI commits to one</span>
-                </td>
-                <td className="py-1.5 text-right align-top font-semibold tabular-nums text-ink" title={shareTip}>
-                  {share.them}
-                </td>
-                {you && (
-                  <td className="py-1.5 pl-3 text-right align-top font-semibold tabular-nums text-ink" title={shareTip}>
-                    {share.you}
-                  </td>
-                )}
-              </tr>
-            )}
+            {k === "picked" && shareRow}
           </Fragment>
         ))}
       </tbody>
@@ -1094,11 +1209,22 @@ function howSentence(name: string, them: BrandRead, you: BrandRead | undefined, 
 
 const flip = (l: LiftItem): LiftItem => ({ ...l, value: -l.value, wins: l.others, others: l.wins, receipts: l.receipts ? [...l.receipts].reverse() : undefined });
 
-/** What the AI says about the category when it picks the rival here, beside when it picks you. */
-function RivalArgs({ name, here }: { name: string; here: RivalHere }) {
+/** How many argument rows RivalArgs draws in full (the "See all N" count). */
+function rivalArgsCount(here: RivalHere): number {
+  if (here.argsMode === "compare" && here.args?.length)
+    return Math.min(3, here.args.filter((l) => l.value > 0).length) + Math.min(3, here.args.filter((l) => l.value < 0).length);
+  if (here.argsMode === "alone" && here.argsRows?.length) return Math.min(3, here.argsRows.length);
+  return 0;
+}
+
+/** What the AI says about the category when it picks the rival here, beside
+ * when it picks you. The preview keeps the strongest one each way (two rows
+ * when the rival stands alone). */
+function RivalArgs({ name, here, preview }: { name: string; here: RivalHere; preview?: boolean }) {
+  const top = preview ? 1 : 3;
   if (here.argsMode === "compare" && here.args?.length) {
-    const forIt = here.args.filter((l) => l.value > 0).slice(0, 3);
-    const forYou = here.args.filter((l) => l.value < 0).slice(0, 3).map(flip);
+    const forIt = here.args.filter((l) => l.value > 0).slice(0, top);
+    const forYou = here.args.filter((l) => l.value < 0).slice(0, top).map(flip);
     return (
       <div className="grid gap-4">
         {forIt.length > 0 && (
@@ -1120,7 +1246,7 @@ function RivalArgs({ name, here }: { name: string; here: RivalHere }) {
     return (
       <>
         <Hint>You are picked too rarely here to set the two side by side. This is what comes up most when it picks {name}.</Hint>
-        <CondRows rows={here.argsRows.slice(0, 3).map((r) => ({ label: r.label, share: r.share, weight: pctNum(r.share), receipts: r.receipts }))} color="var(--neutral-bar)" />
+        <CondRows rows={here.argsRows.slice(0, preview ? 2 : 3).map((r) => ({ label: r.label, share: r.share, weight: pctNum(r.share), receipts: r.receipts }))} color="var(--neutral-bar)" />
       </>
     );
   return null;
@@ -1170,7 +1296,31 @@ function RivalScoped({ name, p, ctx }: { name: string; p: Position; ctx: Ctx }) 
   const back = (p.towardThemes?.length ?? 0) > 0 ? themeRows(p.towardThemes!) : flatRows(p.toward);
 
   const how = here ? howSentence(name, here.read, you, pctNum(b.share) > pctNum(p.youShare ?? "0%")) : null;
-  const secH = `${T.title} mb-1.5 mt-6`;
+
+  // Preview counts, so a section whose preview already shows everything draws no link.
+  const picksN = (p.brands ?? []).length + 1;
+  const picksSorted = [...(p.brands ?? []).map((x) => ({ name: x.name, share: x.share, you: false })), { name: "You", share: p.youShare ?? "0%", you: true }].sort(
+    (x, y) => pctNum(y.share) - pctNum(x.share)
+  );
+  const picksPreviewN = picksSorted.filter((r, i) => i === 0 || r.you || normName(r.name) === normName(name)).length;
+  const argsN = here ? rivalArgsCount(here) : 0;
+  const argsPreviewN = !here
+    ? 0
+    : here.argsMode === "compare"
+      ? (here.args?.some((l) => l.value > 0) ? 1 : 0) + (here.args?.some((l) => l.value < 0) ? 1 : 0)
+      : Math.min(2, here.argsRows?.length ?? 0);
+  const fbUp = fbArgs.find((l) => l.value > 0);
+  const fbDown = fbArgs.find((l) => l.value < 0);
+  const fbPreview = fbUp || fbDown ? ([fbUp, fbDown].filter(Boolean) as DossierArg[]) : fbArgs.slice(0, 2);
+  const sendsShown: CondRowData[] = hasSends ? sendRows : useFbSends ? fbSends.map((r) => ({ ...r, routes: [] })) : [];
+  const bothWaysAny = toIt.length > 0 || back.length > 0;
+  const sendsHint = scopedThemes
+    ? `What the AI says about the buyer when it sends them to ${name} here. Each share is of the answers here that send buyers to ${name} with a stated condition.`
+    : awayThemes.length
+      ? `What the AI says about the buyer when it sends them away from you and on to ${name}. The share is of the answers here that send buyers away from you with a stated condition.`
+      : here?.sendsShare
+        ? `In ${here.sendsShare} of the answers here the AI names a condition on the buyer that sends them to ${name}. Each share is of those answers.`
+        : `What the AI says about the buyer when it sends them to ${name}.`;
 
   // Next steps: the head-to-head, its own customers, its strongest buying situation, everywhere.
   const rooms = d ? roomsOf(d, ctx).filter((r) => r.cellId !== p.cellId) : [];
@@ -1200,67 +1350,87 @@ function RivalScoped({ name, p, ctx }: { name: string; p: Position; ctx: Ctx }) 
       {how && <p className={`${T.lede} mt-2 text-ink-2`}>{how}</p>}
       {!pooled && d && <ScopeChips name={name} cellId={p.cellId} scoped ctx={ctx} />}
 
-      <h3 className={secH}>Who takes the picks here</h3>
-      <PicksBars p={p} focus={name} ctx={ctx} />
-
-      {here && (
-        <>
-          <h3 className={secH}>How it gets them</h3>
-          <HowTable name={name} them={here.read} you={you} share={{ them: b.share, you: p.youShare ?? "0%" }} />
-        </>
-      )}
-
+      <div className={evh}>The evidence</div>
       {thin.length > 0 && (
-        <p className={`clear-both mt-6 border-l-[3px] border-line pl-2.5 ${T.sec} text-ink-2`}>
+        <p className={`clear-both mb-3 border-l-[3px] border-line pl-2.5 ${T.sec} text-ink-2`}>
           Too few answers here to read {thin.join(" or ")}
           {fbAny ? `. ${useFbArgs && useFbSends ? "Both read" : "That part reads"} ${name} across every open buying question instead.` : "."}
         </p>
       )}
 
+      {here && (
+        <Sec
+          title="The numbers"
+          preview={<HowTable name={name} them={here.read} you={you} share={{ them: b.share, you: p.youShare ?? "0%" }} preview />}
+          full={<HowTable name={name} them={here.read} you={you} share={{ them: b.share, you: p.youShare ?? "0%" }} />}
+          more={seeAll(5, "numbers")}
+        />
+      )}
+
+      <Sec
+        title="Who takes the picks here"
+        preview={<PicksBars p={p} focus={name} ctx={ctx} preview />}
+        full={picksN > picksPreviewN ? <PicksBars p={p} focus={name} ctx={ctx} /> : undefined}
+        more={seeAll(picksN, "brands")}
+      />
+
       {hasArgs && here && (
-        <>
-          <h3 className={secH}>
-            What the AI says about the {cat.plural}
-          </h3>
-          <RivalArgs name={name} here={here} />
-        </>
+        <Sec
+          title={`What the AI says about the ${cat.plural}`}
+          preview={<RivalArgs name={name} here={here} preview />}
+          full={argsN > argsPreviewN ? <RivalArgs name={name} here={here} /> : undefined}
+          more={seeAll(argsN, "arguments")}
+        />
       )}
       {useFbArgs && d && (
-        <>
-          <h3 className={secH}>What the AI says about the {cat.plural} - across every open buying question</h3>
-          <Hint>What the AI brings up more when it picks {name} than when it picks another brand.</Hint>
-          <LiftRows lifts={fbArgs} sides={d.argSides} />
-        </>
+        <Sec
+          title={`What the AI says about the ${cat.plural} - across every open buying question`}
+          preview={
+            <>
+              <Hint>What the AI brings up more when it picks {name} than when it picks another brand.</Hint>
+              <LiftRows lifts={fbPreview} sides={d.argSides} />
+            </>
+          }
+          full={
+            fbArgs.length > fbPreview.length ? (
+              <>
+                <Hint>What the AI brings up more when it picks {name} than when it picks another brand.</Hint>
+                <LiftRows lifts={fbArgs} sides={d.argSides} />
+              </>
+            ) : undefined
+          }
+          more={seeAll(fbArgs.length, "arguments")}
+        />
       )}
 
-      {hasSends && (
-        <>
-          <h3 className={secH}>Which buyers it sends to {name}</h3>
-          <Hint>
-            {scopedThemes
-              ? `What the AI says about the buyer when it sends them to ${name} here. Each share is of the answers here that send buyers to ${name} with a stated condition.`
-              : awayThemes.length
-              ? `What the AI says about the buyer when it sends them away from you and on to ${name}. The share is of the answers here that send buyers away from you with a stated condition.`
-              : here?.sendsShare
-                ? `In ${here.sendsShare} of the answers here the AI names a condition on the buyer that sends them to ${name}. Each share is of those answers.`
-                : `What the AI says about the buyer when it sends them to ${name}.`}
-          </Hint>
-          <CondRows rows={sendRows.slice(0, 3)} color="var(--pa-theirs)" />
-        </>
-      )}
-      {useFbSends && (
-        <>
-          <h3 className={secH}>Which buyers it sends to {name} - across every open buying question</h3>
-          <CondRows rows={fbSends.map((r) => ({ ...r, routes: [] }))} color="var(--pa-theirs)" />
-        </>
-      )}
-
-      <div className={evh}>More</div>
-      {(toIt.length > 0 || back.length > 0) && (
-        <Sec title="Every reason, both ways" teaser={`What sends buyers to ${name} here, beside what sends them to you`}>
-          <Hint>{BUYER_HINT}</Hint>
-          <BuyerColumns toward={back} away={toIt} towardTitle="To you when the buyer..." awayTitle={`To ${name} when the buyer...`} />
-        </Sec>
+      {(sendsShown.length > 0 || back.length > 0) && (
+        <Sec
+          title={useFbSends && !hasSends ? `Which buyers it sends to ${name} - across every open buying question` : `Which buyers it sends to ${name}`}
+          preview={
+            sendsShown.length > 0 ? (
+              <CondRows rows={sendsShown.slice(0, 2)} color="var(--pa-theirs)" />
+            ) : (
+              <None>No condition on the buyer sends them to {name} here.</None>
+            )
+          }
+          full={
+            bothWaysAny || sendsShown.length > 2 ? (
+              <>
+                {hasSends && <Hint>{sendsHint}</Hint>}
+                {useFbSends && <CondRows rows={sendsShown} color="var(--pa-theirs)" />}
+                {bothWaysAny ? (
+                  <div className={useFbSends ? "mt-4" : undefined}>
+                    {!hasSends && <Hint>{BUYER_HINT}</Hint>}
+                    <BuyerColumns toward={back} away={toIt} towardTitle="To you when the buyer..." awayTitle={`To ${name} when the buyer...`} />
+                  </div>
+                ) : (
+                  !useFbSends && <CondRows rows={sendsShown} color="var(--pa-theirs)" />
+                )}
+              </>
+            ) : undefined
+          }
+          more={bothWaysAny ? "See every reason, both ways" : seeAll(sendsShown.length, "reasons")}
+        />
       )}
       {pooled && d && <DossierFolds d={d} ctx={ctx} />}
 
@@ -1313,33 +1483,61 @@ function DossierFolds({ d, ctx }: { d: Dossier; ctx: Ctx }) {
   const rooms = roomsOf(d, ctx);
   const h2hRow = ctx.h2hRow(d);
   const supply = d.supplyAll ?? { vendors: [], assistants: [] };
+  // Strongest buying situations first, so the preview's two rows are its best ground.
+  const roomsSorted = [...rooms].sort((x, y) => pctNum(y.them) - pctNum(x.them));
+  const roomList = (rs: typeof rooms) =>
+    rs.map((r) => (
+      <button key={r.cellId} type="button" className={rowLink} onClick={() => ctx.open({ kind: "rival", name: d.name, cell: r.cellId })}>
+        <span>{r.label}</span>
+        <span className="whitespace-nowrap text-ink-2">
+          {d.name} <b className="font-semibold text-ink">{r.them}</b> - you <b className="font-semibold text-ink">{r.you}</b> {"→"}
+        </span>
+      </button>
+    ));
+  const record =
+    d.h2h.kind === "record" ? (
+      <div className="border-b border-line py-2 text-[14px]">
+        <div className="flex justify-between gap-4">
+          <span className="text-ink-2">Asked to pick between you{d.h2h.asClass ? ` and this kind of ${ctx.cat.singular}` : ""}</span>
+          <b className="whitespace-nowrap font-semibold text-ink">
+            you {d.h2h.you} - {d.name} {d.h2h.them}
+          </b>
+        </div>
+        <TwoBar you={d.h2h.you} them={d.h2h.them} />
+      </div>
+    ) : null;
+  const h2hMore = d.h2h.kind !== "record" || !!d.switching || !!d.cells.h2h || !!d.cells.leaver || !!h2hRow;
+  const supplyRead = d.supply ? (
+    <p className="mb-2 text-[14px] text-ink">{d.supply}</p>
+  ) : (
+    <p className={`${T.body} mb-2 text-ink-2`}>Its picks are spread across the assistants roughly in line with how many questions each answers.</p>
+  );
   return (
     <>
       {rooms.length > 0 && (
-        <Sec title="By buying situation" teaser={rooms.map((r) => `${r.label} ${r.them}`).join(" - ")}>
-          <Hint>Its share of the picks in each buying situation, beside yours. Open one to see it there.</Hint>
-          {rooms.map((r) => (
-            <button key={r.cellId} type="button" className={rowLink} onClick={() => ctx.open({ kind: "rival", name: d.name, cell: r.cellId })}>
-              <span>{r.label}</span>
-              <span className="whitespace-nowrap text-ink-2">
-                {d.name} <b className="font-semibold text-ink">{r.them}</b> - you <b className="font-semibold text-ink">{r.you}</b> {"→"}
-              </span>
-            </button>
-          ))}
-        </Sec>
+        <Sec
+          title="By buying situation"
+          preview={roomList(roomsSorted.slice(0, 2))}
+          full={
+            rooms.length > 2 ? (
+              <>
+                <Hint>Its share of the picks in each buying situation, beside yours. Open one to see it there.</Hint>
+                {roomList(roomsSorted)}
+              </>
+            ) : undefined
+          }
+          more={seeAll(rooms.length, "buying situations")}
+        />
       )}
-      <Sec title="Asked head to head" teaser={d.h2h.kind === "record" ? `You ${d.h2h.you} - ${d.name} ${d.h2h.them}` : "Never asked head to head"}>
+      <Sec
+        title="Asked head to head"
+        preview={record ?? <p className={`${T.body} text-ink-3`}>Never asked head to head.</p>}
+        more={d.switching ? "See what its switching customers are told" : h2hRow ? "See when each side wins" : "See more"}
+        full={h2hMore ? (
+      <>
         <Hint>A different question from the open ones above: the AI is asked to choose between the two of you.</Hint>
         {d.h2h.kind === "record" ? (
-          <div className="border-b border-line py-2 text-[14px]">
-            <div className="flex justify-between gap-4">
-              <span className="text-ink-2">Asked to pick between you{d.h2h.asClass ? ` and this kind of ${ctx.cat.singular}` : ""}</span>
-              <b className="whitespace-nowrap font-semibold text-ink">
-                you {d.h2h.you} - {d.name} {d.h2h.them}
-              </b>
-            </div>
-            <TwoBar you={d.h2h.you} them={d.h2h.them} />
-          </div>
+          record
         ) : (
           <p
             className={`mb-2 text-[14px] ${d.h2h.alert ? "border-l-[3px] pl-2.5 text-ink" : "text-ink-3"}`}
@@ -1394,9 +1592,16 @@ function DossierFolds({ d, ctx }: { d: Dossier; ctx: Ctx }) {
             )}
           </details>
         )}
-      </Sec>
-      <Sec title="Who supplies its picks" teaser={d.supply ? "One company's assistants stand out" : "No one assistant stands out"}>
-        {d.supply ? <p className="mb-2 text-[14px] text-ink">{d.supply}</p> : <p className={`${T.body} mb-2 text-ink-2`}>Its picks are spread across the assistants roughly in line with how many questions each answers.</p>}
+      </>
+        ) : undefined}
+      />
+      <Sec
+        title="Who supplies its picks"
+        preview={supplyRead}
+        more="See by assistant"
+        full={supply.assistants.length > 0 ? (
+      <>
+        {supplyRead}
         {supply.assistants.length > 0 && (
           <>
             <Hint>Share of its picks, beside the share of the questions each answers.</Hint>
@@ -1414,7 +1619,9 @@ function DossierFolds({ d, ctx }: { d: Dossier; ctx: Ctx }) {
             ))}
           </>
         )}
-      </Sec>
+      </>
+        ) : undefined}
+      />
       {answers && <AnswersModal key={answers.ids.join(",")} runId={ctx.runId} target={answers} onClose={closeAnswers} />}
     </>
   );
@@ -1430,47 +1637,73 @@ function RivalAll({ d, from, ctx }: { d: Dossier; from?: string | null; ctx: Ctx
   const against = args.filter((a) => a.value < 0).slice(0, 3);
   const to = d.routesThemes.length > 0 ? themeRows(d.routesThemes) : shareRows(d.routesAll ?? []);
   const back = d.routesBackThemes.length > 0 ? themeRows(d.routesBackThemes) : shareRows(d.routesBack ?? []);
-  const secH = `${T.title} mb-1.5 mt-6`;
+  // The numbers: the tiles, then where its picks come from; the preview is its
+  // share of the picks, named, recommendations that end as the pick.
+  const numRows: { label: string; value: string }[] = [
+    ...d.tiles,
+    ...(d.picksFrom.byType ? [{ label: "Where its picks come from", value: d.picksFrom.byType }] : []),
+    ...(d.picksFrom.topQuestion ? [{ label: "Picks from its top question", value: d.picksFrom.topQuestion }] : []),
+  ];
+  const numPreview = previewNums(numRows, RIVAL_NUM_PREVIEW);
+  const argsAll = [...forIt, ...against];
+  const argsPreview = [forIt[0], against[0]].filter((x): x is DossierArg => !!x);
+  const argHint = (
+    <Hint>
+      What the AI brings up more in {d.argSides[0]} than in {d.argSides[1]}, and less. Open one to see examples.
+    </Hint>
+  );
+  const toRows = to.map((r) => ({ ...r, routes: [] }));
+  const anyReasons = to.length > 0 || back.length > 0 || !!d.routesDefault || !!d.routesBackDefault;
   return (
     <>
       <div className={crumbCls}>Rival - {d.name} - everywhere it appears</div>
       <h2 className={h2Cls}>{d.headline}</h2>
-      <MatchupGap d={d} />
       {showScope && <ScopeChips name={d.name} cellId={from!} scoped={false} ctx={ctx} />}
       <ExampleLink receipts={d.receipts ?? []} title={`Answers that pick ${d.name}`} subtitle="When buyers ask what to buy" />
-      <h3 className={secH}>The numbers, when buyers ask what to buy</h3>
-      {d.tiles.map((t) => (
-        <Fig key={t.label} label={t.label} value={t.value} />
-      ))}
-      {d.picksFrom.byType && <Fig label="Where its picks come from" value={d.picksFrom.byType} />}
-      {d.picksFrom.topQuestion && <Fig label="Picks from its top question" value={d.picksFrom.topQuestion} />}
-      {(forIt.length > 0 || against.length > 0) && (
-        <>
-          <h3 className={secH}>What the AI says about the {ctx.cat.plural}</h3>
-          <Hint>
-            What the AI brings up more in {d.argSides[0]} than in {d.argSides[1]}, and less. Open one to see examples.
-          </Hint>
-          <LiftRows lifts={[...forIt, ...against]} sides={d.argSides} />
-        </>
+      <MatchupGap d={d} />
+
+      <div className={evh}>The evidence</div>
+      <Sec
+        title="The numbers, when buyers ask what to buy"
+        preview={numPreview.map((t) => <Fig key={t.label} label={t.label} value={t.value} />)}
+        full={numRows.length > numPreview.length ? numRows.map((t) => <Fig key={t.label} label={t.label} value={t.value} />) : undefined}
+        more={seeAll(numRows.length, "numbers")}
+      />
+      {argsAll.length > 0 && (
+        <Sec
+          title={`What the AI says about the ${ctx.cat.plural}`}
+          preview={<LiftRows lifts={argsPreview} sides={d.argSides} />}
+          full={
+            argsAll.length > argsPreview.length ? (
+              <>
+                {argHint}
+                <LiftRows lifts={argsAll} sides={d.argSides} />
+              </>
+            ) : undefined
+          }
+          more={seeAll(argsAll.length, "arguments")}
+        />
       )}
-      {to.length > 0 && (
-        <>
-          <h3 className={secH}>Which buyers it sends to {d.name}</h3>
-          <CondRows rows={to.slice(0, 3).map((r) => ({ ...r, routes: [] }))} color="var(--pa-theirs)" />
-        </>
-      )}
-      <div className={evh}>More</div>
-      {(to.length > 0 || back.length > 0 || d.routesDefault || d.routesBackDefault) && (
-        <Sec title="Every reason, both ways" teaser={`What sends buyers to ${d.name}, beside what sends them to you`}>
-          <Hint>{BUYER_HINT}</Hint>
-          <BuyerColumns toward={back} away={to} towardTitle="To you when the buyer..." awayTitle={`To ${d.name} when the buyer...`} />
-          {(d.routesBackDefault || d.routesDefault) && (
-            <div className="mt-2 grid gap-1 text-[12px] italic leading-snug text-ink-2">
-              {d.routesBackDefault && <p>{d.routesBackDefault}</p>}
-              {d.routesDefault && <p>{d.routesDefault}</p>}
-            </div>
-          )}
-        </Sec>
+      {anyReasons && (
+        <Sec
+          title={`Which buyers it sends to ${d.name}`}
+          preview={
+            toRows.length > 0 ? <CondRows rows={toRows.slice(0, 2)} color="var(--pa-theirs)" /> : <None>No condition on the buyer sends them to {d.name}.</None>
+          }
+          full={
+            <>
+              <Hint>{BUYER_HINT}</Hint>
+              <BuyerColumns toward={back} away={to} towardTitle="To you when the buyer..." awayTitle={`To ${d.name} when the buyer...`} />
+              {(d.routesBackDefault || d.routesDefault) && (
+                <div className="mt-2 grid gap-1 text-[12px] italic leading-snug text-ink-2">
+                  {d.routesBackDefault && <p>{d.routesBackDefault}</p>}
+                  {d.routesDefault && <p>{d.routesDefault}</p>}
+                </div>
+              )}
+            </>
+          }
+          more="See every reason, both ways"
+        />
       )}
       <DossierFolds d={d} ctx={ctx} />
       {ctx.onBuildTable && (
