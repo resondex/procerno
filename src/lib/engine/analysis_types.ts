@@ -42,6 +42,8 @@ export interface MapCell {
   /** The row's pooled roll-up cell (key "all"), rendered first with a divider
    * after it; set only when the row also carries split cells. */
   all?: boolean;
+  /** am27: a head-to-head lost on balance whose position carries `exception`. */
+  exception?: true;
   /** Answers behind the cell (the tooltip's denominator). */
   n: number;
 }
@@ -116,6 +118,33 @@ export interface AnswerRef {
   /** am21: on a reason-row example, the product(s) this answer's rules under
    * the row send the buyer to - the modal's "Sent to" line. */
   to?: string;
+  /** am27: on a "lost, with an exception" example, the brand the answer
+   * actually picked - the modal's "Picked" line. */
+  picked?: string;
+}
+
+/** am27 (2026-11-12): one condition the AI still gives for choosing you in a
+ * head-to-head it hands to the rival. share = of the lost answers. */
+export interface ExceptionItem {
+  text: string;
+  share: string;
+  /** A situation the buyer is already in (the possession test). Set only when true. */
+  wall?: true;
+  /** Answers that picked the rival and state this condition toward you. */
+  refs?: AnswerRef[];
+  tip?: string;
+}
+
+/** am27: a head-to-head lost on balance where the AI still assigns you an
+ * exception in at least half of the lost answers. */
+export interface PositionException {
+  /** The rival that wins the matchup. */
+  rival: string;
+  /** Share of the lost answers stating any condition toward you. */
+  lostShare: string;
+  /** Counts for the tooltip. */
+  tip: string;
+  rows: ExceptionItem[];
 }
 
 /** One brand's share of a pick contest (Position.brands). */
@@ -297,6 +326,8 @@ export interface Position {
   argsRows?: ArgsRow[];
   /** am15: the badges' meaning for the panel's sentences (cells keep `badges`). */
   notes?: PositionNotes;
+  /** am27: lost, with an exception (head-to-head cells only; see PositionException). */
+  exception?: PositionException;
 }
 
 /** The one payload the Map and Verdict tabs read (positions ride along so

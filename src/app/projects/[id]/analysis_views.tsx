@@ -585,7 +585,7 @@ function CellButton({ cell, onOpen, hasPosition }: { cell: MapCell; onOpen: (id:
       type="button"
       onClick={() => hasPosition && onOpen(cell.id)}
       disabled={!hasPosition}
-      title={`${VWORD[cell.verdict]} - ${cell.n.toLocaleString("en-US")} answers`}
+      title={`${VWORD[cell.verdict]}${cell.exception ? " - with an exception" : ""} - ${cell.n.toLocaleString("en-US")} answers`}
       className={`flex min-w-0 flex-col items-start gap-0.5 rounded-[10px] border-[1.5px] px-2.5 py-2 text-left transition-[colors,opacity] enabled:hover:border-ink disabled:cursor-default ${
         mine ? "border-[var(--color-primary)]" : "border-transparent"
       } ${m.mineOnly && !mine ? "opacity-30" : ""}`}
@@ -599,6 +599,11 @@ function CellButton({ cell, onOpen, hasPosition }: { cell: MapCell; onOpen: (id:
         </span>
       </span>
       {cell.note && <span className={`${T.cap} text-ink-2`}>{cell.note}</span>}
+      {cell.exception && (
+        <span className={`${T.cap} font-semibold`} style={{ color: c.fg }}>
+          Lost - with an exception
+        </span>
+      )}
     </button>
   );
 }
@@ -724,6 +729,7 @@ function DossierLine({ stage, cell, onOpen, hasPosition }: { stage: string; cell
         <span className={`${T.cap} flex flex-wrap items-center gap-1.5 font-semibold`} style={{ color: c.fg }}>
           <i className="inline-block h-1.5 w-1.5 flex-none rounded-full" style={{ background: c.fg }} />
           {VWORD[cell.verdict]}
+          {cell.exception ? " - with an exception" : ""}
         </span>
         {cell.note && <span className={`${T.cap} block text-ink-2`}>{cell.note}</span>}
       </span>

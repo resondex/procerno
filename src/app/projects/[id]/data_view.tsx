@@ -418,6 +418,8 @@ interface Facts {
   id: string;
   label: string;
   verdict: CellVerdict;
+  /** am27: lost, with an exception. */
+  exception?: boolean;
   num: string;
   numLabel: string;
   numTip?: string;
@@ -455,6 +457,7 @@ function factsOf(c: MapCell, p: Position | undefined): Facts {
     id: c.id,
     label: c.label || "All",
     verdict: c.verdict,
+    ...(c.exception ? { exception: true } : {}),
     num: f?.value ?? "",
     numLabel: f?.label ?? "",
     numTip: f?.tip,
@@ -494,7 +497,8 @@ function TypeTable({ map, category }: { map: AnalysisMapView; category?: string 
   const cols = COLS;
   const head = (k: ColKey, l: string) => (k === "num" ? numHead : l);
   const rowName = ROW_NAME[bandKind(st.cells[0].id)] ?? "Contest";
-  const text = (r: Facts, k: ColKey): string => (k === "stand" ? VWORD[r.verdict] : (r[k] as string));
+  const stand = (r: Facts) => (r.exception ? `${VWORD[r.verdict]} - with an exception` : VWORD[r.verdict]);
+  const text = (r: Facts, k: ColKey): string => (k === "stand" ? stand(r) : (r[k] as string));
   return (
     // pa-root carries the four verdict colors (the hub's style block).
     <div className="pa-root grid items-start gap-6 md:grid-cols-[190px_minmax(0,1fr)]">
@@ -547,7 +551,7 @@ function TypeTable({ map, category }: { map: AnalysisMapView; category?: string 
                       {k === "stand" ? (
                         <span className="flex items-center gap-1.5 whitespace-nowrap font-semibold" style={{ color: VCOLOR[r.verdict].fg }}>
                           <i className="inline-block h-2 w-2 flex-none rounded-full" style={{ background: VCOLOR[r.verdict].fg }} />
-                          {VWORD[r.verdict]}
+                          {stand(r)}
                         </span>
                       ) : k === "num" ? (
                         <b className="whitespace-nowrap font-semibold tabular-nums text-ink">{r.num || "-"}</b>

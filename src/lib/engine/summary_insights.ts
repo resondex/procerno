@@ -8,6 +8,7 @@ import { containsSeq, famTokens } from "./brand_family";
 import { computeAlternatives, type AlternativesViews } from "./alternatives";
 import type { RuleGroup } from "./rules_explorer";
 import { isDefaultCondition } from "./condition_groups";
+import { anyException, exceptionRefs, exceptionRows, lostOnBalance } from "./assigned_exception";
 import { sharedRunThemes, themeRollup, type ThemeRollup } from "./run_themes";
 import { viewsOf } from "./views";
 import { cell, poolOf, type PoolRow, type RateCell, type ViewData, type ViewRequest } from "./view_data";
@@ -124,6 +125,17 @@ import { ROW_NAME } from "./question_names";
  * pair whose two ranges sit furthest apart across every measure (so a thin
  * pool never outranks a well-measured company), and a verdict and its
  * complement never both fire. Effect = the gap.
+ *
+ * bs19 (2026-11-12) adds assigned_exception: in the direct matchups the brand
+ * loses on balance (the map's verdict, assigned_exception.ts), the condition
+ * the AI most often still gives for choosing the brand in the answers it
+ * hands the rival. Not a rate of two-sided answers (a two-brand question
+ * draws one by construction) - the content: which condition, how often, and
+ * whether it is a situation the buyer is already in. Counted on the raw
+ * condition groups (the counting grain, as away_condition) and named by the
+ * reason theme it sits under. Fires with at least one lost matchup, MIN_BASE
+ * pooled lost answers, and the top condition in at least 15 of them and 20%.
+ * Effect = that share.
  */
 
 export type InsightKind = "engine" | "room" | "rival" | "argument" | "doubt" | "funnel" | "question" | "value" | "switching" | "condition" | "leak";
@@ -456,7 +468,21 @@ export interface InsightInputs {
      * row. The lists above are unchanged (they still carry a default group that
      * ranks into them, since the brief's sentences cite them). */
     defaults?: { side: "you" | "away"; label: string; cells: number; routes: { name: string; n: number }[] }[];
-  } | null;  /** bs16: the answers behind the detectors' numerators (in-process only). */
+  } | null;
+  /** bs19: the pooled lost answers of the entity head-to-heads lost on
+   * balance, and the client-side conditions stated in them (raw condition
+   * groups - the counting grain - each with its theme name and per-rival
+   * spread); the open-choice comparison (answers picking another in-category
+   * brand that still state any client-side condition). null without rules or
+   * without a lost matchup. */
+  exception?: {
+    lost: number;
+    matchups: { key: string; name: string; lost: number }[];
+    any: number;
+    groups: { label: string; answers: number; wall: boolean; theme?: string; byRival: Record<string, number>; refs: AnswerRef[] }[];
+    open: RateCell | null;
+  } | null;
+  /** bs16: the answers behind the detectors' numerators (in-process only). */
   ex?: ExampleIndex;
 }
 
@@ -573,6 +599,62 @@ export async function insightInputs(data: ViewData, request: ViewRequest = {}): 
   }
   h2hArgs.codes = [...codeTally.values()].sort((a, b) => b.wins - a.wins || a.code.localeCompare(b.code));
 
+  // bs19: lost, with an exception - the entity head-to-heads the target loses
+  // on balance (the map's verdict, assigned_exception.ts lostOnBalance), their
+  // lost answers pooled, and the client-side conditions stated in them.
+  let exception: InsightInputs["exception"] = null;
+  if (rules.answers > 0) {
+    const mus = new Map<string, { key: string; name: string; won: number; lostIds: string[] }>();
+    const h2hRows = poolOf(data, "head_to_head_entity", engines).rows;
+    for (const { code, intent } of h2hRows) {
+      const r = resolve(intent.angle);
+      if (r.status !== "active") continue;
+      const m = mus.get(r.key) ?? { key: r.key, name: r.name, won: 0, lostIds: [] };
+      mus.set(r.key, m);
+      if (code.outcome !== "pick" || !code.top_pick) continue;
+      const p = resolve(code.top_pick).key;
+      if (p === targetKey) m.won++;
+      else if (p === r.key) m.lostIds.push(code.response_id);
+    }
+    const lostMus = [...mus.values()].filter((m) => lostOnBalance(m.won, m.lostIds.length)).sort((a, b) => b.lostIds.length - a.lostIds.length || a.name.localeCompare(b.name));
+    if (lostMus.length) {
+      const pickedBy = new Map<string, string>();
+      for (const m of lostMus) for (const id of m.lostIds) pickedBy.set(id, m.name);
+      const lostSet = new Set(pickedBy.keys());
+      const raw = exceptionRows(lostSet, rt.towardPool, rt.rules.answerRules, null, rt.sitOf);
+      // Head-to-heads are the choice schema: a rule is on your side when its choice resolves to you.
+      const anyIds = anyException(h2hRows.filter((r) => lostSet.has(r.code.response_id)), (rule) => resolve(rule.choice).key === targetKey);
+      const towardTheme = (label: string) => {
+        if (!towardThemed) return undefined;
+        const t = towardRoll.find((x) => x.members.includes(label));
+        return t && t.label.trim().toLowerCase() !== label.trim().toLowerCase() ? t.label : undefined;
+      };
+      // Open questions the AI hands another in-category brand that still state a client-side condition.
+      const openLost = poolOf(data, "headline", engines).rows.filter(({ code }) => {
+        if (code.outcome !== "pick" || !code.top_pick || code.decision_rules == null || code.schema !== "choice") return false;
+        const p = resolve(code.top_pick);
+        return p.status === "active" && p.key !== targetKey;
+      });
+      const openN = openLost.length;
+      const openK = anyException(openLost, (rule) => resolve(rule.choice).key === targetKey).size;
+      exception = {
+        lost: lostSet.size,
+        matchups: lostMus.map((m) => ({ key: m.key, name: m.name, lost: m.lostIds.length })),
+        any: anyIds.size,
+        groups: raw.rows.slice(0, 3).map((row) => {
+          const byRival: Record<string, number> = {};
+          for (const id of row.ids) {
+            const n = pickedBy.get(id)!;
+            byRival[n] = (byRival[n] ?? 0) + 1;
+          }
+          const theme = towardTheme(row.label);
+          return { label: row.label, answers: row.ids.size, wall: row.wall, ...(theme ? { theme } : {}), byRival, refs: exceptionRefs(row, (id) => pickedBy.get(id), EXAMPLES) };
+        }),
+        open: openN >= MIN_BASE ? cell(openK, openN) : null,
+      };
+    }
+  }
+
   // bs8: firm picks that leave the category (the headline's B5 buckets), run level and per room.
   const runHeadline = computeHeadline(data, engines);
   const outNames = new Map<string, number>();
@@ -617,6 +699,7 @@ export async function insightInputs(data: ViewData, request: ViewRequest = {}): 
     h2hArgs,
     leak,
     problem,
+    exception,
     conditions:
       rules.answers > 0
         ? {
@@ -1350,6 +1433,37 @@ function awayCondition(s: Summary, inp: InsightInputs): Insight | null {
   };
 }
 
+/* --------------------- bs19: lost, with an exception --------------------- */
+
+/** The exception must come up in this many pooled lost answers ... */
+const EXC_MIN_ANSWERS = 15;
+/** ... and in at least this share of them. */
+const EXC_MIN_POOLED_SHARE = 0.2;
+
+function assignedException(s: Summary, inp: InsightInputs): Insight | null {
+  const e = inp.exception;
+  if (!e || e.matchups.length === 0 || e.lost < MIN_BASE) return null;
+  const g = e.groups[0];
+  if (!g || g.answers < EXC_MIN_ANSWERS || g.answers / e.lost < EXC_MIN_POOLED_SHARE) return null;
+  const sh = g.answers / e.lost;
+  const most = Object.entries(g.byRival).sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))[0];
+  const one = e.matchups.length === 1;
+  const underTheme = g.theme ? `, one of the cases grouped as "${shorten(g.theme, 60)}"` : "";
+  const where = one ? "" : most ? `, most of all against ${most[0]}` : "";
+  const fixed = g.wall ? " That is a situation the buyer is already in, not something to argue for." : "";
+  const open = e.open ? ` When buyers ask what to buy and the AI picks someone else, it still gives a case for ${s.brand} in ${pct(e.open)} of those answers.` : "";
+  return {
+    key: "assigned_exception",
+    kind: "condition",
+    title: one ? `You lose to ${e.matchups[0].name} with one exception` : "You lose these matchups with one exception",
+    body: `When the AI picks ${one ? e.matchups[0].name : "a rival"} over ${s.brand} in a direct matchup, its most common exception is "${shorten(g.label)}"${underTheme} - stated in ${pctShare(sh)} of those answers${where}.${fixed}${open}`,
+    foot: `${g.answers} of ${e.lost} answers that pick the rival in the matchups you lose (${e.matchups.map((m) => `${m.name} ${m.lost}`).join(", ")}); ${e.any} of them state any case for you.${e.open ? ` Open choice: ${counts(e.open)}.` : ""} Counts are lower bounds: wordings the grouping did not join are left out.`,
+    look: { pill: "why", label: "Why - decision rules" },
+    effect: sh,
+    viz: vizOf(e.groups.map((x, i) => withRefs(insightBar(lbl(x.label, 40), x.answers / e.lost, undefined, i === 0), x.refs))),
+  };
+}
+
 /* -------------------------------- bs7: engines ----------------------------- */
 
 /** Open-choice answers and in-category firm picks per mode. */
@@ -2053,6 +2167,7 @@ export function rankedInsights(s: Summary, inp: InsightInputs): Insight[] {
     leaverCapture(inp),
     ownDefense(inp),
     awayCondition(s, inp),
+    assignedException(s, inp),
     engineDecisiveness(s, inp.ex),
     engineHeadToHeadFlip(s, inp.ex),
     enginePickConcentration(s, inp),

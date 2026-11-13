@@ -17,6 +17,7 @@ import {
   type LiftItem,
   type MapCell,
   type Position,
+  type PositionException,
   type PositionNotes,
   type PositionReceipt,
   type RivalHere,
@@ -229,6 +230,11 @@ function ExamplesModal({ target, onClose }: { target: ExamplesTarget; onClose: (
                 <p className="flex flex-wrap items-baseline justify-between gap-x-3 text-[12px] text-ink-3">
                   <span>
                     Answered by {body.engine}
+                    {r.picked && (
+                      <>
+                        {" - "}picked <span className="font-medium text-ink-2">{r.picked}</span>
+                      </>
+                    )}
                     {r.to && (
                       <>
                         {" - "}sent to <span className="font-medium text-ink-2">{r.to}</span>
@@ -319,6 +325,59 @@ function Openable({ refs, head, title, note }: { refs?: AnswerRef[]; head: () =>
 const WhereCtx = createContext<string | undefined>(undefined);
 
 const SeeWord = () => <span className="mt-0.5 block text-[12px] text-primary">See examples</span>;
+
+/** am27: a head-to-head lost on balance where the AI still says to choose
+ * you in some cases - the cases, each with its share of the lost answers, the
+ * fixed tag when it is a situation the buyer is already in, and the answers
+ * (each picked the rival and still states the case). */
+function ExceptionBlock({ e, brand }: { e: PositionException; brand: string }) {
+  const show = useContext(ExamplesCtx);
+  const sub = useContext(WhereCtx);
+  const max = Math.max(1, ...e.rows.map((r) => pctNum(r.share)));
+  return (
+    <div className="clear-both mt-4 rounded-xl border border-line p-3.5" style={{ background: "var(--pa-theirs-bg)" }}>
+      <div className={`${T.label} mb-1`} style={{ color: "var(--pa-theirs)" }}>
+        You lose this one - with an exception
+      </div>
+      <p className={`${T.body} text-ink`} title={e.tip}>
+        When the AI picks {e.rival} here, it still says to choose {brand} in these cases:
+      </p>
+      <div className="mt-2">
+        {e.rows.map((r, i) => {
+          const can = !!show && (r.refs?.length ?? 0) > 0;
+          return (
+            <div key={`${i}:${r.text}`} className="grid grid-cols-[minmax(0,1fr)_2.75rem] items-baseline gap-x-2 gap-y-1 border-b border-line/70 py-2 text-[14px] last:border-b-0" title={r.tip}>
+              <span className="min-w-0 text-ink">
+                {r.text}
+                {r.wall && (
+                  <span
+                    title="A fact about the buyer, not a preference - it cannot be argued away"
+                    className="ml-1.5 rounded-[4px] border border-ink-3 px-1 align-[1px] text-[11px] font-semibold uppercase tracking-[0.04em] text-ink-3"
+                  >
+                    fixed
+                  </span>
+                )}
+              </span>
+              <span className="text-right text-[13px] font-semibold tabular-nums text-ink">{r.share}</span>
+              <span className="col-span-full block h-[5px] rounded-[3px] bg-line/60">
+                <i className="block h-full min-w-[3px] rounded-[3px]" style={{ width: `${Math.round((100 * pctNum(r.share)) / max)}%`, background: "var(--pa-yours)" }} />
+              </span>
+              {can && (
+                <button
+                  type="button"
+                  className="col-span-full justify-self-start text-[12px] text-primary hover:opacity-80"
+                  onClick={() => show!({ title: r.text, subtitle: sub, note: `Each answer picked ${e.rival} and still says to choose ${brand} in this case.`, refs: r.refs! })}
+                >
+                  See examples
+                </button>
+              )}
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
 
 /** One condition the AI states about the buyer: label, fixed tag, rivals, share, bar, answers. */
 interface CondRowData {
@@ -781,6 +840,7 @@ function ContestPanel({ p, ctx }: { p: Position; ctx: Ctx }) {
       <h2 className={h2Cls}>{p.claim}</h2>
       {soft && <p className="clear-both mt-3 border-l-[3px] pl-2.5 text-[13px] text-ink" style={{ borderColor: "var(--pa-contested)" }}>{soft}</p>}
       <ExampleLink receipts={p.receipts} title={p.where} subtitle="A few of the answers behind this" />
+      {p.exception && <ExceptionBlock e={p.exception} brand={ctx.brand} />}
       {p.lever && <MoveBox p={p} ctx={ctx} why={whyLines(notes, cat.plural)} />}
 
       <div className={evh}>The evidence</div>
