@@ -14,6 +14,7 @@ import { cell, poolOf, type PoolRow, type RateCell, type ViewData, type ViewRequ
 import type { BrandSummaryView, VerdictFact } from "./brand_summary";
 import type { AnswerRef } from "./analysis_types";
 import { matchKey } from "../brand_key";
+import { ROW_NAME } from "./question_names";
 
 /**
  * Insight detection for the summary documents (2026-11-03): mechanical
@@ -109,6 +110,20 @@ import { matchKey } from "../brand_key";
  * effect order, so a quota-admitted insight still ranks where its effect
  * puts it. MAX_INSIGHTS is 12 so the guarantee widens the list instead of
  * evicting large findings (eleven kinds can fire at once).
+ *
+ * bs18 (2026-11-12) adds vendor_outlier: one AI company answering a question
+ * OUTSIDE the open choice and the head-to-heads differently from the rest.
+ * Measures, each from its view's engine slices pooled by company (sum k /
+ * sum n): customers' worries stay and leave, buyers' worries go ahead and
+ * steer clear, Value worth it yes and no, rivals' customers switching picked
+ * you, your customers looking around told to stay. Each company is compared
+ * with every other company pooled; both sides need MIN_BASE answers, the
+ * ranges must not overlap, the gap must reach VENDOR_MIN_GAP, and the measure
+ * needs at least three companies with MIN_BASE answers (so a narrowed engine
+ * set of one or two companies never fires it). One insight per tracker: the
+ * pair whose two ranges sit furthest apart across every measure (so a thin
+ * pool never outranks a well-measured company), and a verdict and its
+ * complement never both fire. Effect = the gap.
  */
 
 export type InsightKind = "engine" | "room" | "rival" | "argument" | "doubt" | "funnel" | "question" | "value" | "switching" | "condition" | "leak";
@@ -1465,6 +1480,194 @@ function enginePickConcentration(s: Summary, inp: InsightInputs): Insight | null
   };
 }
 
+/* ------------------------- bs18: one AI company apart ------------------------ */
+
+/** A company needs a gap this large against the others pooled. Calibrated on
+ * the five fixture trackers (2026-11-12): ranges apart alone admit leans of
+ * 4-9 points on rare verdicts (a 5% vs 0.5% steer-clear rate, a 7% vs 0.2%
+ * capture rate) where both sides are near zero; ten points keeps those out.
+ * On the fixture every tracker's largest gap is 24-55 points, so the guard
+ * changes no firing there - it only stops a quiet tracker's lone near-zero
+ * lean from becoming the finding. */
+const VENDOR_MIN_GAP = 0.1;
+/** At least this many companies with MIN_BASE answers on the measure. */
+const VENDOR_MIN_COMPANIES = 3;
+
+/** The measures outside the open choice and the head-to-heads, one per
+ * verdict, each read from its view's engine slices pooled by company. */
+interface VendorMeasure {
+  id: string;
+  /** Plain name of the question type (question_names.ts), lower-cased in the title. */
+  row: string;
+  station: string;
+  stationLabel: string;
+  /** The sentence: company, its rate, the others' rate. */
+  says: (company: string, a: string, b: string) => string;
+  /** Short bar wording for the company's bar. */
+  bar: string;
+  slices: { vendor: string; models: string[]; k: number; n: number }[];
+  /** Example answers for a company's numerator, where a pool filter is natural. */
+  refs?: (models: string[]) => AnswerRef[] | undefined;
+}
+
+/** Pools engine slices on their vendor. */
+function byVendor<T extends { key: string; vendor: string }>(slices: T[], cellOf: (s: T) => RateCell): VendorMeasure["slices"] {
+  const m = new Map<string, { vendor: string; models: string[]; k: number; n: number }>();
+  for (const s of slices) {
+    const c = cellOf(s);
+    const t = m.get(s.vendor) ?? { vendor: s.vendor, models: [], k: 0, n: 0 };
+    t.models.push(s.key);
+    t.k += c.k;
+    t.n += c.n;
+    m.set(s.vendor, t);
+  }
+  return [...m.values()];
+}
+
+function vendorMeasures(inp: InsightInputs, brand: string): VendorMeasure[] {
+  const out: VendorMeasure[] = [];
+  const k = inp.doubt.keepOrLeave;
+  const lower = (x: string) => x.charAt(0).toLowerCase() + x.slice(1);
+  if (k) {
+    const row = lower(ROW_NAME.customers);
+    const base = { row, station: "customer_base", stationLabel: "Stations - Customers" };
+    out.push({
+      ...base,
+      id: "keep",
+      says: (c, a, b) => `Asked by your customers whether to stay, ${c} says stay in ${a} of answers; the other AI assistants together, ${b}.`,
+      bar: "say stay",
+      slices: byVendor(k.byEngine, (s) => s.verdicts.keep),
+      refs: (models) => inp.ex?.doubt("keep", (r) => models.includes(r.model) && r.code.keep_or_leave === "keep"),
+    });
+    out.push({
+      ...base,
+      id: "leave",
+      says: (c, a, b) => `Asked by your customers whether to stay, ${c} says leave in ${a} of answers; the other AI assistants together, ${b}.`,
+      bar: "say leave",
+      slices: byVendor(k.byEngine, (s) => s.verdicts.leave),
+      refs: (models) => inp.ex?.doubt("keep", (r) => models.includes(r.model) && r.code.keep_or_leave === "leave"),
+    });
+  }
+  const o = inp.doubt.objections;
+  if (o) {
+    const row = lower(ROW_NAME.buyers);
+    const base = { row, station: "doubts", stationLabel: "Stations - Doubts" };
+    out.push({
+      ...base,
+      id: "proceed",
+      says: (c, a, b) => `When a buyer voices a worry about ${brand}, ${c} says go ahead in ${a} of answers; the other AI assistants together, ${b}.`,
+      bar: "say go ahead",
+      slices: byVendor(o.byEngine, (s) => s.verdicts.proceed),
+      refs: (models) => inp.ex?.doubt("objections", (r) => models.includes(r.model) && r.code.proceed_or_avoid === "proceed"),
+    });
+    out.push({
+      ...base,
+      id: "avoid",
+      says: (c, a, b) => `When a buyer voices a worry about ${brand}, ${c} says steer clear in ${a} of answers; the other AI assistants together, ${b}.`,
+      bar: "say steer clear",
+      slices: byVendor(o.byEngine, (s) => s.verdicts.avoid),
+      refs: (models) => inp.ex?.doubt("objections", (r) => models.includes(r.model) && r.code.proceed_or_avoid === "avoid"),
+    });
+  }
+  const v = inp.value;
+  if (v) {
+    const row = lower(ROW_NAME.value);
+    const base = { row, station: "value", stationLabel: "Stations - Value" };
+    out.push({
+      ...base,
+      id: "worth_yes",
+      says: (c, a, b) => `Asked whether ${brand} is worth paying more for, ${c} says yes in ${a} of answers; the other AI assistants together, ${b}.`,
+      bar: "say worth it",
+      slices: byVendor(v.byEngine, (s) => s.worth.yes),
+    });
+    out.push({
+      ...base,
+      id: "worth_no",
+      says: (c, a, b) => `Asked whether ${brand} is worth paying more for, ${c} says no in ${a} of answers; the other AI assistants together, ${b}.`,
+      bar: "say not worth it",
+      slices: byVendor(v.byEngine, (s) => s.worth.no),
+    });
+  }
+  const off = inp.alternatives.offensive;
+  if (off)
+    out.push({
+      id: "captured",
+      row: lower(ROW_NAME.leavers),
+      station: "comparison",
+      stationLabel: "Stations - Comparison",
+      says: (c, a, b) => `When a rival's customer asks what to switch to, ${c} picks you in ${a} of answers; the other AI assistants together, ${b}.`,
+      bar: "pick you",
+      slices: byVendor(off.byEngine, (s) => s.captured),
+    });
+  const def = inp.alternatives.defensive;
+  if (def)
+    out.push({
+      id: "hold_stay",
+      row: lower(ROW_NAME.hold),
+      station: "customer_base",
+      stationLabel: "Stations - Customers",
+      says: (c, a, b) => `When your own customers ask what else to consider, ${c} tells them to stay in ${a} of answers; the other AI assistants together, ${b}.`,
+      bar: "say stay",
+      slices: byVendor(def.byEngine, (s) => s.verdicts.keep),
+    });
+  return out;
+}
+
+/** Every (measure, company) pair whose rate sits apart from the other
+ * companies pooled - exported for the calibration dump; the detector serves
+ * the one whose ranges sit furthest apart, at or above VENDOR_MIN_GAP. */
+export function vendorOutlierCandidates(inp: InsightInputs, brand: string) {
+  const out: { measure: VendorMeasure; vendor: string; models: string[]; own: RateCell; rest: RateCell; gap: number; clear: number }[] = [];
+  for (const m of vendorMeasures(inp, brand)) {
+    if (m.slices.filter((x) => x.n >= MIN_BASE).length < VENDOR_MIN_COMPANIES) continue;
+    for (const s of m.slices) {
+      const others = m.slices.filter((x) => x !== s);
+      const own = cell(s.k, s.n);
+      const rest = cell(
+        others.reduce((x, o) => x + o.k, 0),
+        others.reduce((x, o) => x + o.n, 0)
+      );
+      if (own.n < MIN_BASE || rest.n < MIN_BASE) continue;
+      if (!apart(own, rest) && !apart(rest, own)) continue;
+      const gap = rate(own) - rate(rest);
+      // How far the two 95% ranges sit from each other - the ranking, so a
+      // thin pool with a wide range never outranks a well-measured company.
+      const clear = gap > 0 ? own.low - rest.high : rest.low - own.high;
+      out.push({ measure: m, vendor: s.vendor, models: s.models, own, rest, gap, clear });
+    }
+  }
+  return out.sort((a, b) => b.clear - a.clear || a.measure.id.localeCompare(b.measure.id) || a.vendor.localeCompare(b.vendor));
+}
+
+/**
+ * One AI company answers a non-open-choice question differently from the
+ * rest: its pooled rate (its engines' answers together) against every other
+ * company pooled, ranges apart, at least VENDOR_MIN_GAP, with at least three
+ * companies on the measure. One insight per tracker - the pair whose two
+ * ranges sit furthest apart (not the largest raw gap: a 20-answer pool at 0%
+ * would outrank a 240-answer one), so a verdict and its complement
+ * (stay / leave, yes / no) never both fire. Effect = the gap.
+ */
+function vendorOutlier(inp: InsightInputs, brand: string): Insight | null {
+  const best = vendorOutlierCandidates(inp, brand).find((c) => Math.abs(c.gap) >= VENDOR_MIN_GAP);
+  if (!best) return null;
+  const m = best.measure;
+  const engines = best.models.length;
+  return {
+    key: "vendor_outlier",
+    kind: "engine",
+    title: `${best.vendor} is the outlier on ${m.row}`,
+    body: m.says(best.vendor, pct(best.own), pct(best.rest)),
+    foot: `${best.vendor} (${engines} ${engines === 1 ? "engine" : "engines"}): ${counts(best.own)}. The other AI assistants together: ${counts(best.rest)}.`,
+    look: { pill: "stations", station: m.station, label: m.stationLabel },
+    effect: Math.abs(best.gap),
+    viz: vizOf([
+      withRefs(insightBar(`${best.vendor} - ${m.bar}`, best.own, undefined, true), m.refs?.(best.models)),
+      insightBar(`The others - ${m.bar}`, best.rest),
+    ]),
+  };
+}
+
 /* ---------------------- bs8: neutralized differentiator --------------------- */
 
 /** An argument carried by this share of your head-to-head wins is one you win on. */
@@ -1859,6 +2062,7 @@ export function rankedInsights(s: Summary, inp: InsightInputs): Insight[] {
     leakProblem(inp),
     worstWorry(inp),
     leaveNoExit(inp, s.brand),
+    vendorOutlier(inp, s.brand),
   ].filter((x): x is Insight => x !== null && x.effect > 0);
   return found.sort((a, b) => b.effect - a.effect || a.key.localeCompare(b.key));
 }
