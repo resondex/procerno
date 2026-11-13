@@ -49,7 +49,7 @@ export interface DossierTheme {
   label: string;
   share: string;
   buckets: DossierThemeBucket[];
-  /** Set (true only) when the theme renders flat (buckets empty) and its wording is a wall. */
+  /** Set (true only) when the theme's own NAME - the wording shown - is a wall (2026-11-13: also on a theme with buckets; a member's tag never tags the theme). */
   wall?: boolean;
   /** am15 / do7 (additive): up to 2 answers stating a member reason, on
    * different engines; find = the answer's own wording of it. */
@@ -550,7 +550,7 @@ export function themeTree(
       const label = tm.totName[t];
       const flat = buckets.length === 1 && buckets[0].members.length === 0 && same(buckets[0].label, label);
       const ev = evidence ? themeEvidenceOf(rankedIds(totGroups.get(t), order), evidence, (r) => !filter || filter.has(r.intent), label) : {};
-      return { n: tot.union.size, theme: { label, share: pctOf(tot.union.size / base), buckets: flat ? [] : buckets, ...(flat && wallOf(label) ? { wall: true } : {}), ...ev } };
+      return { n: tot.union.size, theme: { label, share: pctOf(tot.union.size / base), buckets: flat ? [] : buckets, ...(wallOf(label) ? { wall: true } : {}), ...ev } };
     })
     .sort((a, b) => b.n - a.n || a.theme.label.localeCompare(b.theme.label))
     .map((x) => x.theme);
@@ -676,7 +676,7 @@ export function themeTreeAnswers(
       const label = tm.totName[t];
       const flat = buckets.length === 1 && buckets[0].members.length === 0 && same(buckets[0].label, label);
       const ev = evidence ? themeEvidenceOf(rankedIds(totGroups.get(t), order), evidence, (r) => cellIntents.has(r.intent), label, keep) : {};
-      return { n: tot.union.size, theme: { label, share: pctOf(tot.union.size / base), buckets: flat ? [] : buckets, ...(flat && wallOf(label) ? { wall: true } : {}), ...ev } };
+      return { n: tot.union.size, theme: { label, share: pctOf(tot.union.size / base), buckets: flat ? [] : buckets, ...(wallOf(label) ? { wall: true } : {}), ...ev } };
     })
     .sort((a, b) => b.n - a.n || a.theme.label.localeCompare(b.theme.label))
     .map((x) => x.theme);

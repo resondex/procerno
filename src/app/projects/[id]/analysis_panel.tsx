@@ -494,7 +494,11 @@ function themeMembers(t: DossierTheme): string[] {
   }
   return out.slice(0, 4);
 }
-const themeWall = (t: DossierTheme) => !!t.wall || (t.buckets ?? []).some((b) => b.wall || (b.members ?? []).some((m) => m.wall));
+// A grouped reason is tagged fixed only by its own name (the engine's tag on the
+// wording shown). A fixed wording inside a broad group never tags the whole group
+// (2026-11-13: "Earn more by optimizing spend" was tagged for a 2% member); member
+// rows keep their own tags.
+const themeWall = (t: DossierTheme) => !!t.wall;
 
 const themeRows = (ts: DossierTheme[]): CondRowData[] =>
   ts.slice(0, 8).map((t) => ({ label: t.label, share: t.share, weight: pctNum(t.share), wall: themeWall(t), routes: t.routes, members: themeMembers(t), receipts: t.receipts }));
