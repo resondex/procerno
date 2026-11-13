@@ -3,7 +3,7 @@ import { containsSeq, famTokens } from "./brand_family";
 import { excludedWords } from "./definition_overlap";
 import { conditionKeysFor, conditionStemKey, isDefaultCondition } from "./condition_groups";
 import { ENUM_TOWARD, GENERIC_AWAY, type RuleGroup } from "./rules_explorer";
-import { pickRefs, routeShares, spreadRefs, themeTreeAnswers, type DossierTheme, type ThemeMap } from "./reason_themes";
+import { EVERY_BUYER, pickRefs, routeShares, slKey, spreadRefs, themeTreeAnswers, type DossierTheme, type ThemeMap } from "./reason_themes";
 import { rulesForThemes, sharedRules, sharedRunThemes, type RulesShared } from "./run_themes";
 import { isWallWording } from "./wall_wording";
 import { ROW_NAME } from "./question_names";
@@ -1456,16 +1456,50 @@ export async function computeAnalysisMap(
     };
   };
 
+  /** am26: (answer, its wording) -> the reason theme that wording falls in, per side. Built once, on first use. */
+  const themeIndex = new Map<"toward" | "away", Map<string, number>>();
+  const themeOfAnswers = (side: "toward" | "away", g: Group): number | null => {
+    const tm = side === "toward" ? towardThemeMap : awayThemeMap;
+    if (!tm) return null;
+    let idx = themeIndex.get(side);
+    if (!idx) {
+      idx = new Map();
+      for (const pg of side === "toward" ? towardPool : awayPool)
+        for (const [rid, ar] of rulesShared.answerRules.get(pg.id) ?? []) {
+          const st = tm.stOf.get(slKey(sitOf.get(ar.intent) ?? EVERY_BUYER, pg.label));
+          if (st !== undefined) idx.set(`${rid}\u0000${ar.said.trim()}`, tm.totOf[st]);
+        }
+      themeIndex.set(side, idx);
+    }
+    const tally = new Map<number, number>();
+    for (const [rid, a] of g.answers) {
+      const t = idx.get(`${rid}\u0000${a.said}`);
+      if (t !== undefined) tally.set(t, (tally.get(t) ?? 0) + 1);
+    }
+    let best: number | null = null;
+    for (const [t, k] of tally) if (best === null || k > tally.get(best)! || (k === tally.get(best)! && t < best)) best = t;
+    return best;
+  };
+  /** Two groups read as one: the larger one's wording, the answers of both. */
+  const joinGroups = (x: Group, y: Group): Group => {
+    const [big, small] = x.n >= y.n ? [x, y] : [y, x];
+    const answers: Group["answers"] = new Map(big.answers);
+    for (const [rid, a] of small.answers) if (!answers.has(rid)) answers.set(rid, a);
+    return { ck: big.ck, label: big.label, n: answers.size, surfaces: big.surfaces, answers };
+  };
+
   /** am21: the conditions a contest states on both sides at similar rates -
    * the same reason sending some buyers to you and others away. Each side
    * needs BOTH_MIN answers and BOTH_SHARE of the contest and the smaller side at least BOTH_RATIO of the
-   * larger; ranked by answers on both sides together. */
+   * larger; ranked by answers on both sides together. am26: rows whose
+   * wordings fall in the same reason theme on BOTH sides are one row (the
+   * larger one's wording, both rows' answers); without themes nothing merges. */
   const bothWaysOf = (conds: { toward: Group[]; away: Group[]; bearing: number }): BothWaysItem[] => {
     const away = new Map(conds.away.filter((g) => !isDefaultCondition(g.label)).map((g) => [g.ck, g]));
     // One-way answers first, and never the same answer on both sides.
     const pick = (g: Group, skip: Set<string> = new Set()) =>
       pickRefs([...g.answers.entries()].filter(([id]) => !skip.has(id)).map(([id, a]) => ({ id, find: a.said, model: a.model, cards: a.cards, mixed: a.mixed })), g.label);
-    return conds.toward
+    const pairs = conds.toward
       .filter((g) => !isDefaultCondition(g.label))
       .flatMap((t) => {
         const a = away.get(t.ck);
@@ -1474,6 +1508,18 @@ export async function computeAnalysisMap(
         if (NEGATED.test(t.label) !== NEGATED.test(a.label)) return [];
         return [{ t, a }];
       })
+      .sort((x, y) => y.t.n + y.a.n - (x.t.n + x.a.n) || x.t.label.localeCompare(y.t.label));
+    const merged: { t: Group; a: Group; tt: number | null; at: number | null }[] = [];
+    for (const p of pairs) {
+      const tt = themeOfAnswers("toward", p.t);
+      const at = themeOfAnswers("away", p.a);
+      const m = tt !== null && at !== null ? merged.find((x) => x.tt === tt && x.at === at) : undefined;
+      if (m) {
+        m.t = joinGroups(m.t, p.t);
+        m.a = joinGroups(m.a, p.a);
+      } else merged.push({ ...p, tt, at });
+    }
+    return merged
       .sort((x, y) => y.t.n + y.a.n - (x.t.n + x.a.n) || x.t.label.localeCompare(y.t.label))
       .slice(0, BOTH_TOP)
       .map(({ t, a }) => {
@@ -2495,7 +2541,7 @@ function tensionsOf(
 // am17 (2026-11-10): each tension carries `viz` (the Overview finding card's 2-4 bars).
 // am18 (2026-11-10): each buying situation's open-choice cell states the same funnel figures as the all-buyers cell.
 // am22 (2026-11-12): the reasons harmonization - each rival's `here` carries `sendsThemes` (the run's dt4 themes, scoped to the contest and to answers sending the buyer to that rival); the theme pass moves to run_themes.ts (same inputs, same dt4 keys); reads bs17 (the away-condition sentence names its theme). Row names come from question_names.ts (the plain-wording pass: What to buy, What's popular, Spotting the problem, What to look for, Habit, Your customers looking around, Your customers making your case) and the band descriptions are rewritten.
-export const ANALYSIS_MAP_VERSION = "am25"; // am25 (2026-11-12): the vendor_outlier insight (bs18) places on the all-buyers cell of the question type its title names. // am24 (2026-11-12): both-ways rows only on pick contests, each side at least 5% and half the other, top 3, never a reason paired with its opposite. // am23 (2026-11-12): an answer shown as an example toward you is never shown away; a rival's panel examples name only its own products in `to`. // am21 (2026-11-12): reason-row examples prefer answers that send the buyer one way only, then the wording closest to the row name, and each carries `to` (the product it sends the buyer to). // am20 (2026-11-12): each rival in a pick contest's `brands` carries `here` (its funnel in that contest, the arguments when it is picked beside your picks, the stated conditions sending picks to it) and the position carries `youRead` - the rival panel's lead read. Additive; theme inputs unchanged. // am19 am19 (2026-11-11): every Overview number opens its answers - `examples` (named, commits), refs on each share-of-picks row and on the tension bars (the first tension's funnel bars and the bs16 insight bars). // am18 (2026-11-10): each buying situation's open-choice cell states the same funnel figures as the all-buyers cell (named, recommended, commits, picked, outside the category), from its own answers. // // am17 (2026-11-10): each tension carries `viz` (the Overview finding card's 2-4 bars) - the first from the casting facts, the rest from the bs15 insights
+export const ANALYSIS_MAP_VERSION = "am26"; // am26 (2026-11-12): both-ways rows whose wordings fall in the same reason theme on both sides are one row. // am25 (2026-11-12): the vendor_outlier insight (bs18) places on the all-buyers cell of the question type its title names. // am24 (2026-11-12): both-ways rows only on pick contests, each side at least 5% and half the other, top 3, never a reason paired with its opposite. // am23 (2026-11-12): an answer shown as an example toward you is never shown away; a rival's panel examples name only its own products in `to`. // am21 (2026-11-12): reason-row examples prefer answers that send the buyer one way only, then the wording closest to the row name, and each carries `to` (the product it sends the buyer to). // am20 (2026-11-12): each rival in a pick contest's `brands` carries `here` (its funnel in that contest, the arguments when it is picked beside your picks, the stated conditions sending picks to it) and the position carries `youRead` - the rival panel's lead read. Additive; theme inputs unchanged. // am19 am19 (2026-11-11): every Overview number opens its answers - `examples` (named, commits), refs on each share-of-picks row and on the tension bars (the first tension's funnel bars and the bs16 insight bars). // am18 (2026-11-10): each buying situation's open-choice cell states the same funnel figures as the all-buyers cell (named, recommended, commits, picked, outside the category), from its own answers. // // am17 (2026-11-10): each tension carries `viz` (the Overview finding card's 2-4 bars) - the first from the casting facts, the rest from the bs15 insights
 // The fold (2026-11-09, Tyler): a view's cache key carries the versions of
 // the views whose content it embeds, so the lockstep bump convention is
 // mechanical - the map embeds the summary's insights, casting and verdict.
