@@ -2428,6 +2428,12 @@ function tensionsOf(
         return hit ? idOf(hit) : strict ? null : fallbackOpen;
       }
       case "rival": {
+        if (key === "unasked_rival") {
+          // bs23: never asked head to head, so no fight cell - an open-choice
+          // cell the rival takes, else its own leavers' cell.
+          const taken = longestMatch(text, openCells, (x) => x.taker.name) ?? longestMatch(text, splitCells.filter((x) => x.row === "leavers"), (x) => x.label);
+          return found(taken ? idOf(taken) : null, strict, () => fallbackOpen);
+        }
         if (key === "conversion_vs_rival") {
           // The rival's fight cell (head-to-head, else its leavers), else an
           // open-choice cell the rival takes.
@@ -2546,7 +2552,7 @@ function tensionsOf(
     kinds.add(ins.kind);
     const cellId = cellFor(ins.kind, ins.key, ins.title, ins.body);
     if (!cellId) continue;
-    out.push({ title: ins.title.charAt(0).toUpperCase() + ins.title.slice(1), body: ins.body, cellId, ...(ins.viz ? { viz: ins.viz } : {}) });
+    out.push({ title: ins.title.charAt(0).toUpperCase() + ins.title.slice(1), body: ins.body, cellId, ...(ins.viz ? { viz: ins.viz } : {}), ...(ins.matchup ? { matchup: ins.matchup } : {}) });
   }
   if (probe)
     for (const ins of probe.insights) {

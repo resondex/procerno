@@ -362,6 +362,9 @@ export interface AnalysisMapView {
       /** am19: the answers behind the bar's numerator, when the finding has them in hand. */
       refs?: AnswerRef[];
     }[];
+    /** bs23 (2026-11-13): an unasked_rival finding's rival (dictionary entry
+     * key + name) - the Overview card offers "Ask this matchup" for it. */
+    matchup?: { key: string; name: string };
   }[];
   bands: MapBand[];
   positions: Record<string, Position>;

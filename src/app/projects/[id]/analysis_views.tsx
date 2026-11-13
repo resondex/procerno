@@ -8,6 +8,7 @@ import type { HeadToHeadViews } from "@/lib/engine/head_to_head";
 import { useEngineSet, viewQuery } from "./view_parts";
 import { T } from "./type_scale";
 import { CompanyBoard } from "./company_board";
+import { MatchupMove, MatchupProvider, useMatchupQueued } from "./matchup_action";
 import {
   BodiesProvider,
   catPhrase,
@@ -234,6 +235,7 @@ export default function AnalysisHub({
 
   return (
     <BodiesProvider runId={runId}>
+      <MatchupProvider projectId={projectId} dossiers={list}>
       <ExamplesHost>
         <div className="pa-root">
           <style>{TIER_CSS}</style>
@@ -257,6 +259,7 @@ export default function AnalysisHub({
           {panel && <SlideOver view={panel} ctx={ctx} />}
         </div>
       </ExamplesHost>
+      </MatchupProvider>
     </BodiesProvider>
   );
 }
@@ -519,7 +522,8 @@ function Overview({
                     </button>
                   )}
                 </div>
-                {p?.lever && (
+                {t.matchup && <MatchupMove rival={t.matchup} />}
+                {!t.matchup && p?.lever && (
                   <div className="mb-5 grid items-center gap-x-4 gap-y-1.5 rounded-xl bg-primary-soft px-4 py-3 sm:grid-cols-[minmax(0,1fr)_auto]">
                     <span className={`${T.labelAccent} sm:col-span-2`}>What to do - {p.family}</span>
                     <div className="min-w-0">
@@ -1081,6 +1085,7 @@ function ContestMap({
 // ---------- the Map: by rival ----------
 
 function RivalCard({ d, ctx }: { d: Dossier; ctx: PanelCtx }) {
+  const queued = useMatchupQueued(d.key);
   const up = d.args.find((a) => a.value > 0);
   const down = d.args.find((a) => a.value < 0);
   const share = d.tiles[1];
@@ -1109,10 +1114,10 @@ function RivalCard({ d, ctx }: { d: Dossier; ctx: PanelCtx }) {
         </div>
       ) : (
         <div
-          className={`text-[13px] ${d.h2h.alert ? "border-l-[3px] pl-2 text-ink" : "text-ink-3"}`}
-          style={d.h2h.alert ? { borderColor: "var(--pa-contested)" } : undefined}
+          className={`text-[13px] ${d.h2h.alert || queued ? "border-l-[3px] pl-2 text-ink" : "text-ink-3"}`}
+          style={queued ? { borderColor: "var(--pa-yours)" } : d.h2h.alert ? { borderColor: "var(--pa-contested)" } : undefined}
         >
-          Never asked head-to-head{d.h2h.alert ? " - yet it takes picks from you" : ""}
+          {queued ? "Head-to-head queued for the next collection" : `Never asked head-to-head${d.h2h.alert ? " - yet it takes picks from you" : ""}`}
         </div>
       )}
       {up && (

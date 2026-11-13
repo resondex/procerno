@@ -6165,8 +6165,11 @@ export async function regenerateCell(input: {
   /** Typed roster (see generateGrid). Absent = untyped. */
   rosterRoles?: RosterRoles;
   meta?: CacheMeta;
+  /** Ledger purpose (2026-11-13: "matchup:write" for the dashboard's "Ask
+   * this matchup"); default setup:cells. Never part of the cache key. */
+  purpose?: string;
 }): Promise<{ text: string; spec: CellCheckSpec; flags?: string[]; criticism?: string } | null> {
-  tagCosts({ purpose: "setup:cells" });
+  tagCosts({ purpose: input.purpose ?? "setup:cells" });
   const startedAt = Date.now();
   // r13: the dictionary seed's alias forms ("amex" for American Express),
   // read from the FULL roster so the cache key is the one project creation
@@ -6932,8 +6935,10 @@ export async function generatePhrasings(input: {
    * and write exactly as before and are never overwritten by a fix. Ledger
    * purpose health:suggest. */
   steer?: { avoid: string[]; note: string; attempt?: number };
+  /** Ledger purpose override (2026-11-13: "matchup:write"). Never part of the cache key. */
+  purpose?: string;
 }): Promise<Phrasing[][]> {
-  tagCosts({ purpose: input.steer ? "health:suggest" : "setup:phrasings" });
+  tagCosts({ purpose: input.purpose ?? (input.steer ? "health:suggest" : "setup:phrasings") });
   // Retired stages get no paraphrases (a saved draft may still hold such a
   // cell): run on the live cells and give retired positions an empty set.
   if (input.cells.some((c) => RETIRED_STAGES.has(c.stage))) {

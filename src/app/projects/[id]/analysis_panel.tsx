@@ -34,6 +34,7 @@ import { AnswersModal, Fig, type AnswersTarget } from "./view_parts";
 import AnswerText from "./answer_text";
 import { passageOf } from "@/lib/answer_passage";
 import { T } from "./type_scale";
+import { MatchupGap } from "./matchup_action";
 
 /**
  * The one slide-over (2026-11-10, the ratified analysis redesign -
@@ -1434,6 +1435,7 @@ function RivalAll({ d, from, ctx }: { d: Dossier; from?: string | null; ctx: Ctx
     <>
       <div className={crumbCls}>Rival - {d.name} - everywhere it appears</div>
       <h2 className={h2Cls}>{d.headline}</h2>
+      <MatchupGap d={d} />
       {showScope && <ScopeChips name={d.name} cellId={from!} scoped={false} ctx={ctx} />}
       <ExampleLink receipts={d.receipts ?? []} title={`Answers that pick ${d.name}`} subtitle="When buyers ask what to buy" />
       <h3 className={secH}>The numbers, when buyers ask what to buy</h3>

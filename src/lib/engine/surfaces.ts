@@ -1,5 +1,6 @@
 import { store } from "../store";
 import type { Intent, Prompt, Run, RunSurface } from "../types";
+import { activateQueuedMatchups } from "./matchups";
 
 /**
  * Per-surface collection cadence (Tyler 2026-10-01). A run collects the
@@ -122,8 +123,12 @@ export function planNextRun(input: {
     : { surfaces: ["core", "worries"], promptCount: live.length, worryPromptCount };
 }
 
-/** Run-creation entry point (manual runs route and cron alike). */
+/** Run-creation entry point (manual runs route and cron alike). Queued
+ * "Ask this matchup" questions go live here first (matchups.ts), so the run
+ * about to be created - and every later one - asks them; both callers hold
+ * the edit-setup lease around this and createRun. */
 export async function planRunSurfaces(projectId: string): Promise<Surface[]> {
+  await activateQueuedMatchups(projectId);
   const [prompts, intents, runs] = await Promise.all([
     store.listPrompts(projectId),
     store.listIntents(projectId),

@@ -378,6 +378,8 @@ function ensureSchema(): Promise<void> {
       // projects.analysis_decision (2026-11-03): the analysis tier's portfolio
       // record (suggested vs decided triage per position), JSON.
       await sql`ALTER TABLE projects ADD COLUMN IF NOT EXISTS analysis_decision TEXT`;
+      // projects.matchup_queue (2026-11-13): the "Ask this matchup" queue, JSON.
+      await sql`ALTER TABLE projects ADD COLUMN IF NOT EXISTS matchup_queue TEXT`;
       // projects.reasons_adapter (2026-10-29): two-pass routing - the
       // tracker's reasons adapter model id; NULL = single-pass coding.
       await sql`ALTER TABLE projects ADD COLUMN IF NOT EXISTS reasons_adapter TEXT`;
@@ -1203,7 +1205,7 @@ export const pgStore: Store = {
     const rows =
       await sql`SELECT id, project_id, text, theme, intent_id, asker, flagged, flag_reason, suggested_alternatives, retired,
           staged, replaces, replaced_by
-        FROM prompts WHERE project_id = ${projectId} AND staged = 1 ORDER BY seq`;
+        FROM prompts WHERE project_id = ${projectId} AND staged = 1 AND replaces IS NOT NULL ORDER BY seq`;
     return rows.map((r) => promptRow(r));
   },
 
@@ -1785,6 +1787,65 @@ export const pgStore: Store = {
   async setAnalysisDecision(projectId, decisionJson) {
     const sql = await db();
     await sql`UPDATE projects SET analysis_decision = ${decisionJson} WHERE id = ${projectId}`;
+  },
+
+  async getMatchupQueue(projectId) {
+    const sql = await db();
+    const rows = await sql`SELECT matchup_queue FROM projects WHERE id = ${projectId}`;
+    return (rows[0]?.matchup_queue as string | null | undefined) ?? null;
+  },
+
+  async setMatchupQueue(projectId, queueJson) {
+    const sql = await db();
+    await sql`UPDATE projects SET matchup_queue = ${queueJson} WHERE id = ${projectId}`;
+  },
+
+  async insertHiddenPrompts(projectId, prompts) {
+    const sql = await db();
+    const rows = prompts.map((p) => ({
+      id: crypto.randomUUID(),
+      project_id: projectId,
+      text: p.text,
+      theme: p.theme,
+      intent_id: p.intentId,
+      asker: p.asker,
+      staged: 1,
+    }));
+    if (rows.length > 0) {
+      await sql`INSERT INTO prompts ${sql(rows, "id", "project_id", "text", "theme", "intent_id", "asker", "staged")}`;
+    }
+    return rows.map((r) => r.id);
+  },
+
+  async deleteHiddenPrompts(projectId, ids) {
+    if (ids.length === 0) return 0;
+    const sql = await db();
+    const rows = await sql`DELETE FROM prompts
+      WHERE id IN ${sql(ids)} AND project_id = ${projectId} AND staged = 1 AND replaces IS NULL
+      RETURNING id`;
+    return rows.length;
+  },
+
+  async activateMatchups(projectId, input) {
+    const sql = await db();
+    return sql.begin(async (tx) => {
+      // FOR UPDATE: a concurrent activation waits here, then sees the new queue and stops.
+      const rows = await tx`SELECT matchup_queue FROM projects WHERE id = ${projectId} FOR UPDATE`;
+      if (((rows[0]?.matchup_queue as string | null | undefined) ?? null) !== input.expectQueue) return false;
+      for (const i of input.intents) {
+        await tx`INSERT INTO intents (id, project_id, stage, layer, situation, angle, mode, qtype, concern, text)
+          VALUES (${i.id}, ${projectId}, ${i.stage}, ${i.layer}, ${i.situation}, ${i.angle}, ${i.mode}, ${i.qtype}, ${i.concern}, ${i.text})
+          ON CONFLICT (id) DO NOTHING`;
+      }
+      if (input.livePromptIds.length > 0)
+        await tx`UPDATE prompts SET staged = 0
+          WHERE id IN ${tx(input.livePromptIds)} AND project_id = ${projectId} AND staged = 1 AND replaces IS NULL`;
+      if (input.retirePromptIds.length > 0)
+        await tx`UPDATE prompts SET retired = 1
+          WHERE id IN ${tx(input.retirePromptIds)} AND project_id = ${projectId} AND coalesce(staged, 0) = 0`;
+      await tx`UPDATE projects SET matchup_queue = ${input.nextQueue} WHERE id = ${projectId}`;
+      return true;
+    }) as Promise<boolean>;
   },
 
   async listAnswerCodeIds(runId, source) {

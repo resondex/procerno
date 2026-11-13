@@ -217,6 +217,15 @@ export const PLAN_WORRY_ALLOWANCE: Record<Plan, number | null> = {
  * memo replaces the composed one for the tracker's readers. Each memo is a
  * model call (~6 cents a frame, cached per run), so the split follows
  * spend. PROVISIONAL, like the custom-cell allowance. */
+/** "Ask this matchup" (2026-11-13): an extra direct matchup beyond the
+ * tracker's included ANGLE_SLOTS (battery_checks.ts) costs this per wave;
+ * swapping one in for an existing matchup is free. PLACEHOLDER (Tyler
+ * 2026-11-13) - a fixed $100 per wave for every plan; the plan pricing
+ * model must replace this when pricing is next revisited. No billing system
+ * exists: the fee is shown, confirmed by the user in the dialog and recorded
+ * on the queue entry; nothing is charged. */
+export const ADDED_MATCHUP_FEE_USD = 100;
+
 export const PLAN_WRITTEN_BRIEFS: Record<Plan, boolean> = {
   free: false,
   starter: false,

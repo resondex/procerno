@@ -999,7 +999,8 @@ export interface Store {
   ): Promise<Prompt[]>;
   /** Every prompt of the project EXCEPT staged replacements (staged = 1). */
   listPrompts(projectId: string): Promise<Prompt[]>;
-  /** The project's staged replacement wordings (never returned by listPrompts). */
+  /** The project's staged replacement wordings (never returned by listPrompts;
+   * a queued matchup's hidden prompts, which replace nothing, are left out). */
   listStagedPrompts(projectId: string): Promise<Prompt[]>;
   /** Insert one staged replacement wording for `replaces`; returns it. */
   insertStagedPrompt(
@@ -1234,6 +1235,40 @@ export interface Store {
    * part of the Project payload, like taxonomy_decision / worry_decision. */
   getAnalysisDecision(projectId: string): Promise<string | null>;
   setAnalysisDecision(projectId: string, decisionJson: string | null): Promise<void>;
+  /** projects.matchup_queue (2026-11-13): the "Ask this matchup" queue -
+   * direct matchups the customer asked for, waiting for the next collection
+   * or already live (MatchupQueue in engine/matchups.ts), JSON. Not part of
+   * the Project payload. */
+  getMatchupQueue(projectId: string): Promise<string | null>;
+  setMatchupQueue(projectId: string, queueJson: string | null): Promise<void>;
+  /** A queued matchup's questions, stored HIDDEN until the next run's
+   * creation: staged = 1 with no `replaces`, so listPrompts, every response
+   * and code listing and the run revision skip them, and the wording
+   * review (which only reads staged rows that replace a wording) never
+   * sees them. Returns the new ids in order. */
+  insertHiddenPrompts(
+    projectId: string,
+    prompts: { text: string; theme: PromptTheme; intentId: string; asker: string | null }[]
+  ): Promise<string[]>;
+  /** Delete queued hidden prompts by id (only staged rows with no
+   * `replaces` - never a live prompt or a staged replacement wording);
+   * returns how many went. */
+  deleteHiddenPrompts(projectId: string, ids: string[]): Promise<number>;
+  /** Queued matchups go live in ONE transaction, only if the stored queue
+   * still equals `expectQueue` (else nothing changes and false comes back):
+   * the intents are inserted with their pre-assigned ids (existing ids
+   * skipped), the hidden prompts become live (staged 0), the dropped
+   * matchups' prompts are retired, and the queue becomes `nextQueue`. */
+  activateMatchups(
+    projectId: string,
+    input: {
+      expectQueue: string | null;
+      nextQueue: string;
+      intents: { id: string; stage: string; layer: string; situation: string | null; angle: string; mode: string | null; qtype: string | null; concern: string | null; text: string }[];
+      livePromptIds: string[];
+      retirePromptIds: string[];
+    }
+  ): Promise<boolean>;
   /** Response ids that already carry codes from one source (no bodies, no
    * code columns) - the coding wave's "already coded" set. */
   listAnswerCodeIds(runId: string, source: string): Promise<string[]>;

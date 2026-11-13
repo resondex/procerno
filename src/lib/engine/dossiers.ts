@@ -7,6 +7,7 @@ import { isDefaultCondition } from "./condition_groups";
 import { cachedView, poolOf, requestOf, type RateCell, type ViewData, type ViewRequest } from "./view_data";
 import { rankGroups, spreadRefs, themeTree, type AnswerRule, type DossierTheme, type ThemeEvidence, type ThemeMap } from "./reason_themes";
 import { sharedRunThemes } from "./run_themes";
+import { clearsMatchupGap } from "./matchup_gap";
 import type { AnswerRef, PositionReceipt } from "./analysis_types";
 import type { Project, Run } from "../types";
 
@@ -122,8 +123,6 @@ export interface DossiersView {
   dossiers: Dossier[];
 }
 
-/** A brand taking at least this share of the picks with no matchup asked gets the amber callout. */
-const NO_H2H_ALERT = 0.1;
 /** The pooled leavers' line needs this share of the leavers' picks, over this many picks. */
 const CAPTURE_NOTE = 0.1;
 const MIN_SIDE = 20;
@@ -253,10 +252,11 @@ export async function computeDossiers(data: ViewData, request: ViewRequest = {})
         h2h = { kind: "record", you: pctOf(st.you / (st.you + st.them)), them: pctOf(st.them / (st.you + st.them)), youLabel, themLabel: `${b.name} picked`, ...(h2hCell!.includes(":class-") ? { asClass: true } : {}) };
       } else if (h2hCell) {
         h2h = { kind: "missing", note: `Asked beside ${brand} directly, the AI picks neither of the two.`, alert: false };
-      } else if (rate(b.shareOfDecided) >= NO_H2H_ALERT) {
+      } else if (clearsMatchupGap(b.shareOfDecided)) {
+        // matchup_gap.ts: the same rule as the Overview's unasked_rival finding.
         h2h = {
           kind: "missing",
-          note: `No head-to-head was asked against ${b.name} this wave - it takes ${f.share.value} of the picks without ever being put beside you directly. A matchup cell is a setup decision away.`,
+          note: `No head-to-head was asked against ${b.name} this wave - it takes ${f.share.value} of the picks without ever being put beside you directly. Ask this matchup and the AI is asked to pick between you at the next collection.`,
           alert: true,
         };
       } else h2h = { kind: "missing", note: `No head-to-head was asked against ${b.name} this wave.`, alert: false };
@@ -389,7 +389,7 @@ export async function computeDossiers(data: ViewData, request: ViewRequest = {})
 // sides pivot on") that read as contradictions across the two columns.
 // do6 (2026-11-09): option D - dossiers carry pick receipts for the one-panel slide-over; themes shared with the map via reason_themes.
 // do7 (2026-11-10): the one-panel redesign - rooms (its share beside yours per open-choice buying situation, from the map's brands), argsAll receipts, theme receipts and away routes; the routes and default lines say what sends buyers away instead of "reason".
-const DOSSIERS_VERSION = "do9"; // do9 (2026-11-12): a rival page's examples name only its own products; // do8 (2026-11-12): theme examples ranked one-way-first and by fit, with `to`
+const DOSSIERS_VERSION = "do10"; // do10 (2026-11-13): the never-asked callout reads matchup_gap.ts (one rule with the unasked_rival finding) and points at the "Ask this matchup" action; // do9 (2026-11-12): a rival page's examples name only its own products; // do8 (2026-11-12): theme examples ranked one-way-first and by fit, with `to`
 // The fold (2026-11-09): dossiers embed map cells and summary numbers, so
 // their versions ride the key (see analysis_map's fold note).
 const DOSSIERS_KEY_VERSION = `${DOSSIERS_VERSION}.${ANALYSIS_MAP_VERSION}.${BRAND_SUMMARY_VERSION}`;

@@ -16,6 +16,7 @@ import type { BrandSummaryView, VerdictFact } from "./brand_summary";
 import type { AnswerRef } from "./analysis_types";
 import { matchKey } from "../brand_key";
 import { ROW_NAME } from "./question_names";
+import { askedMatchupKeys, clearsMatchupGap } from "./matchup_gap";
 
 /**
  * Insight detection for the summary documents (2026-11-03): mechanical
@@ -165,6 +166,9 @@ export interface Insight {
    * them; `hi` marks the one row the finding is about. Absent when the
    * finding has no clean numeric rows. */
   viz?: InsightBar[];
+  /** bs23 (2026-11-13): the rival an unasked_rival finding is about - the
+   * Overview card's "Ask this matchup" action reads it. */
+  matchup?: { key: string; name: string };
 }
 
 /** One bar of a finding's small chart: value 0-100 (bar length), text the
@@ -512,6 +516,9 @@ export interface InsightInputs {
   } | null;
   /** bs16: the answers behind the detectors' numerators (in-process only). */
   ex?: ExampleIndex;
+  /** bs23: the rival keys the run asked a direct matchup against (entity
+   * or class cells on the summary's engines) - matchup_gap.ts. */
+  asked?: string[];
 }
 
 const AWAY_TOP = 3;
@@ -733,6 +740,14 @@ export async function insightInputs(data: ViewData, request: ViewRequest = {}): 
 
   return {
     ex: buildExampleIndex(data, engines, resolve, targetKey),
+    asked: [
+      ...askedMatchupKeys(
+        [...poolOf(data, "head_to_head_entity", engines).rows, ...poolOf(data, "head_to_head_class", engines).rows].map((r) => r.intent),
+        resolve,
+        data.dictionary,
+        targetKey
+      ),
+    ].sort(),
     rooms,
     value: computeValue(data, engines),
     doubt: computeDoubt(data, engines),
@@ -2020,6 +2035,34 @@ function conversionVsRival(s: Summary, ex?: ExampleIndex): Insight | null {
   };
 }
 
+/* ---------------------- bs23: a rival never asked about ---------------------- */
+
+/**
+ * A rival that takes picks when buyers ask what to buy, with no direct
+ * matchup asked against it (matchup_gap.ts - the same rule as the rival
+ * dossier's amber callout). The largest share of picks wins when several
+ * qualify. Effect = its share of picks.
+ */
+function unaskedRival(s: Summary, inp: InsightInputs, ex?: ExampleIndex): Insight | null {
+  if (!inp.asked) return null;
+  const asked = new Set(inp.asked);
+  const rival = s.brands
+    .filter((b) => b.role !== "target" && b.key !== s.target.key && !asked.has(b.key) && clearsMatchupGap(b.shareOfDecided))
+    .sort((a, b) => rate(b.shareOfDecided) - rate(a.shareOfDecided) || b.chosen.k - a.chosen.k || a.name.localeCompare(b.name))[0];
+  if (!rival) return null;
+  return {
+    key: "unasked_rival",
+    kind: "rival",
+    title: `${rival.name} takes ${pct(rival.shareOfDecided)} of the picks, and you have never been asked about it head to head`,
+    body: `${rival.name} takes ${pct(rival.shareOfDecided)} of the picks when buyers ask what to buy, but the AI has never been asked to choose between you and ${rival.name} directly, so you cannot see how you would do against it.`,
+    foot: `${rival.name}: ${counts(rival.shareOfDecided)} of the picks. You: ${counts(s.target.shareOfDecided)}. No direct matchup against ${rival.name} was asked this wave.`,
+    look: { pill: "rivals", label: "Rivals" },
+    effect: rate(rival.shareOfDecided),
+    viz: vizOf([withRefs(insightBar(rival.name, rival.shareOfDecided, undefined, true), ex?.picks(rival.key)), withRefs(insightBar(s.brand, s.target.shareOfDecided), ex?.picks(s.target.key))]),
+    matchup: { key: rival.key, name: rival.name },
+  };
+}
+
 /* ------------------------------- bs8: leaks -------------------------------- */
 
 /** The analysis map's leak badge threshold (LEAK_SHARE), at summary level. */
@@ -2334,6 +2377,7 @@ export function rankedInsights(s: Summary, inp: InsightInputs): Insight[] {
     enginePickConcentration(s, inp),
     neutralizedDifferentiator(inp),
     conversionVsRival(s, inp.ex),
+    unaskedRival(s, inp, inp.ex),
     leakPicks(inp),
     leakProblem(inp),
     worstWorry(inp),

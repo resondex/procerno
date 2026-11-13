@@ -6,6 +6,7 @@ import { apiKeyConfigured, currentEngineIds } from "@/lib/engine/providers";
 import { continueRun, findStalledRuns, runInBackground } from "@/lib/engine/runner";
 import { batchableEngine, hasOpenBatches, pollRunBatches, submitRunBatches } from "@/lib/engine/batch";
 import { planRunSurfaces } from "@/lib/engine/surfaces";
+import { noteMatchupRun } from "@/lib/engine/matchups";
 import { claimWriteLease, editSetupLeaseKey, releaseWriteLease } from "../projects/instrument_write";
 
 export const maxDuration = 300;
@@ -106,6 +107,10 @@ export async function GET(req: Request) {
         pipeline,
         surfaces: await planRunSurfaces(project.id),
       });
+      // "Ask this matchup": stamp the run on the matchups planRunSurfaces
+      // made live - inside the lease, like every queue write.
+      const createdId: string = run.id;
+      await noteMatchupRun(project.id, createdId).catch((err) => console.error(`matchup run stamp failed for run ${createdId}:`, err));
     } finally {
       await releaseWriteLease(leaseKey, lease);
     }

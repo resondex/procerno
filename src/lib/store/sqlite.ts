@@ -64,6 +64,7 @@ function createDb(): Database.Database {
       org_id TEXT,
       dictionary_version INTEGER NOT NULL DEFAULT 1,
       analysis_decision TEXT,
+      matchup_queue TEXT,
       created_at TEXT NOT NULL DEFAULT (datetime('now'))
     );
     CREATE TABLE IF NOT EXISTS dictionary_entries (
@@ -389,6 +390,10 @@ function createDb(): Database.Database {
   // carries it for fresh databases; this adds it to existing ones.
   if (!cols.some((c) => c.name === "analysis_decision")) {
     db.exec("ALTER TABLE projects ADD COLUMN analysis_decision TEXT");
+  }
+  // projects.matchup_queue (2026-11-13): the "Ask this matchup" queue.
+  if (!cols.some((c) => c.name === "matchup_queue")) {
+    db.exec("ALTER TABLE projects ADD COLUMN matchup_queue TEXT");
   }
   if (!cols.some((c) => c.name === "dictionary_status")) {
     db.exec(
@@ -1353,7 +1358,7 @@ export const sqliteStore: Store = {
 
   async listStagedPrompts(projectId) {
     const rows = getDb()
-      .prepare("SELECT * FROM prompts WHERE project_id = ? AND staged = 1 ORDER BY rowid")
+      .prepare("SELECT * FROM prompts WHERE project_id = ? AND staged = 1 AND replaces IS NOT NULL ORDER BY rowid")
       .all(projectId) as (Omit<Prompt, "suggested_alternatives"> & { suggested_alternatives: string })[];
     return rows.map((r) => ({ ...r, suggested_alternatives: JSON.parse(r.suggested_alternatives ?? "[]") }));
   },
@@ -2028,6 +2033,65 @@ export const sqliteStore: Store = {
     getDb()
       .prepare("UPDATE projects SET analysis_decision = ? WHERE id = ?")
       .run(decisionJson, projectId);
+  },
+
+  async getMatchupQueue(projectId) {
+    const row = getDb().prepare("SELECT matchup_queue FROM projects WHERE id = ?").get(projectId) as
+      | { matchup_queue: string | null }
+      | undefined;
+    return row?.matchup_queue ?? null;
+  },
+
+  async setMatchupQueue(projectId, queueJson) {
+    getDb().prepare("UPDATE projects SET matchup_queue = ? WHERE id = ?").run(queueJson, projectId);
+  },
+
+  async insertHiddenPrompts(projectId, prompts) {
+    const db = getDb();
+    const stmt = db.prepare(
+      "INSERT INTO prompts (id, project_id, text, theme, intent_id, asker, staged, replaces) VALUES (?, ?, ?, ?, ?, ?, 1, NULL)"
+    );
+    const ids: string[] = [];
+    db.transaction(() => {
+      for (const p of prompts) {
+        const id = crypto.randomUUID();
+        stmt.run(id, projectId, p.text, p.theme, p.intentId, p.asker);
+        ids.push(id);
+      }
+    })();
+    return ids;
+  },
+
+  async deleteHiddenPrompts(projectId, ids) {
+    if (ids.length === 0) return 0;
+    const db = getDb();
+    const stmt = db.prepare("DELETE FROM prompts WHERE id = ? AND project_id = ? AND staged = 1 AND replaces IS NULL");
+    let n = 0;
+    db.transaction(() => {
+      for (const id of ids) n += stmt.run(id, projectId).changes;
+    })();
+    return n;
+  },
+
+  async activateMatchups(projectId, input) {
+    const db = getDb();
+    return db.transaction(() => {
+      const row = db.prepare("SELECT matchup_queue FROM projects WHERE id = ?").get(projectId) as
+        | { matchup_queue: string | null }
+        | undefined;
+      if ((row?.matchup_queue ?? null) !== input.expectQueue) return false;
+      const ins = db.prepare(
+        "INSERT OR IGNORE INTO intents (id, project_id, stage, layer, situation, angle, mode, qtype, concern, text) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+      );
+      for (const i of input.intents)
+        ins.run(i.id, projectId, i.stage, i.layer, i.situation, i.angle, i.mode, i.qtype, i.concern, i.text);
+      const live = db.prepare("UPDATE prompts SET staged = 0 WHERE id = ? AND project_id = ? AND staged = 1 AND replaces IS NULL");
+      for (const id of input.livePromptIds) live.run(id, projectId);
+      const retire = db.prepare("UPDATE prompts SET retired = 1 WHERE id = ? AND project_id = ? AND COALESCE(staged, 0) = 0");
+      for (const id of input.retirePromptIds) retire.run(id, projectId);
+      db.prepare("UPDATE projects SET matchup_queue = ? WHERE id = ?").run(input.nextQueue, projectId);
+      return true;
+    })();
   },
 
   async listAnswerCodeIds(runId, source) {

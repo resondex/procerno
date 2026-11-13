@@ -7,6 +7,7 @@ import { apiKeyConfigured, currentEngineIds, engineAvailable, ENGINES } from "@/
 import { driveAndChain, runInBackground } from "@/lib/engine/runner";
 import { batchableEngine, submitRunBatches } from "@/lib/engine/batch";
 import { planRunSurfaces } from "@/lib/engine/surfaces";
+import { noteMatchupRun } from "@/lib/engine/matchups";
 import { claimWriteLease, editSetupLeaseKey, releaseWriteLease } from "../../instrument_write";
 
 // Vercel: runs execute as a chain of budgeted chunks — each invocation
@@ -115,6 +116,10 @@ export async function POST(
       // Manual runs obey the same monthly worries rule as scheduled ones.
       surfaces: await planRunSurfaces(id),
     });
+    // "Ask this matchup": stamp the run on the matchups planRunSurfaces
+    // made live - inside the lease, like every queue write.
+    const createdId: string = run.id;
+    await noteMatchupRun(id, createdId).catch((err) => console.error(`matchup run stamp failed for run ${createdId}:`, err));
   } finally {
     await releaseWriteLease(leaseKey, lease);
   }
