@@ -273,7 +273,13 @@ export function Boundaries({ row, brand, onOpen, bare = false }: { row: HeadToHe
         {bare ? (
           matchup
         ) : (
-          <Tip tip={`${c.rules} stated rules across ${row.answers} answers; ${c.unconditional} answers answer unconditionally.`}>
+          <Tip
+            tip={
+              c.themes
+                ? `${row.answers} answers in this matchup; ${c.unconditional} of them pick without stating a condition.`
+                : `${c.rules} stated rules across ${row.answers} answers; ${c.unconditional} answers answer unconditionally.`
+            }
+          >
             <span className="cursor-help">{matchup}</span>
           </Tip>
         )}

@@ -1,6 +1,6 @@
 import type { AnswerCard } from "./brief_types";
 import type { BrandSummaryView, SummaryBrand } from "./brand_summary";
-import { pctFine, type InsightInputs } from "./summary_insights";
+import { awaySpecifics, pctFine, type InsightInputs } from "./summary_insights";
 import { cell, poolOf, type RateCell, type ViewData, type ViewRequest } from "./view_data";
 import type { Position } from "./analysis_types";
 import { buildResolver } from "./brand_resolve";
@@ -347,6 +347,7 @@ export function conditionCard(src: CardSources, openCellId?: string): AnswerCard
   const brand = src.brand;
   const k = src.inputs.conditions;
   const a = src.inputs.away;
+  if (k?.awayThemed || k?.towardThemed) return conditionCardThemed(src, openCellId);
   const rows: Row[] = [];
   const shown = new Set<string>();
   if (a && a.cells > 0) {
@@ -401,6 +402,101 @@ export function conditionCard(src: CardSources, openCellId?: string): AnswerCard
   const headline = top
     ? `When the AI sends buyers away from ${brand}, the most common condition is "${top.label}"${top.routes[0] ? ` - it points them to ${top.routes[0].name}` : ""}.`
     : `The AI hands the buyer a rule, not a winner - these are the conditions that decide it.`;
+  return {
+    kind: "condition",
+    crumb: "What sends buyers away",
+    headline,
+    rows,
+    ...(openCellId ? { go: { label: "See every condition", target: "map" as const, cellId: openCellId } } : {}),
+  };
+}
+
+/** bs21 (2026-11-13, one counting rule): the condition card when the run has
+ * reason themes. A themed side lists its themes at ANSWER grain (distinct
+ * answers stating any of a theme's wordings over the distinct answers stating
+ * any listed condition on that side - question grain saturates, every
+ * assistant answers each question); a side without a theme map keeps the raw
+ * groups at question grain. The headline names the lead away theme and quotes
+ * its most-stated wording - the away_condition finding pinned to this card -
+ * and the named specific situations it states (a blocker brand, a fixed
+ * situation, each ONE raw wording: awaySpecifics) get their own rows on the
+ * same answer base, so the card states every number the finding does. */
+function conditionCardThemed(src: CardSources, openCellId?: string): AnswerCard | null {
+  const s = src.summary;
+  const brand = src.brand;
+  const k = src.inputs.conditions!;
+  const a = src.inputs.away;
+  const rows: Row[] = [];
+  const shown = new Set<string>();
+  const awayBase = k.awayThemed ? k.awayBase ?? 0 : 0;
+  const towardBase = k.towardThemed ? k.towardBase ?? 0 : 0;
+  const awayTip = (n: number) => `${n} of ${awayBase} answers that give a condition for choosing someone else`;
+  if (k.awayThemed && awayBase > 0) {
+    for (const t of k.away) {
+      if (!t.answers) continue;
+      shown.add(`away:${t.label}`);
+      rows.push({
+        label: `Sends buyers away: "${t.label.slice(0, 60)}"`,
+        value: `${pctOf(t.answers / awayBase)}${t.routes[0] ? ` → ${t.routes[0].name}` : ""}`,
+        tip: awayTip(t.answers),
+      });
+    }
+  } else if (a && a.cells > 0) {
+    // This side has no theme map: the raw groups at question grain, as the keyless card.
+    for (const g of [...a.groups].sort((x, y) => y.cells - x.cells || x.label.localeCompare(y.label))) {
+      const cited = g === a.groups[0] || g.wall;
+      if (isDefaultCondition(g.label) && !cited) continue;
+      shown.add(`away:${g.label}`);
+      rows.push({
+        label: isDefaultCondition(g.label) ? "The default away from you - when no stated condition applies" : `Sends buyers away: "${g.label.slice(0, 60)}"`,
+        value: `${pctOf(g.cells / a.cells)}${g.routes[0] ? ` → ${g.routes[0].name}` : ""}`,
+        tip: `${g.cells} of ${a.cells} questions where the AI gives a condition that sends buyers away`,
+      });
+    }
+  }
+  // The finding's specific situations, each on one wording, over the lead's answer base.
+  const lead = a?.lead;
+  if (a && lead && lead.base > 0) {
+    const sp = awaySpecifics(s, a);
+    if (sp.blocker) {
+      const g = sp.blocker.group;
+      rows.push({ label: `A wording that names ${g.names!.name}: "${g.label.slice(0, 60)}"`, value: pctOf(g.answers / lead.base), tip: `${g.answers} of ${lead.base} answers that give a condition for choosing someone else` });
+      rows.push(F(`${g.names!.name}'s share of picks`, sp.blocker.share));
+    }
+    if (sp.fixed) {
+      const g = sp.fixed;
+      rows.push({ label: `A situation the buyer is already in: "${g.label.slice(0, 60)}"`, value: pctOf(g.answers / lead.base), tip: `${g.answers} of ${lead.base} answers that give a condition for choosing someone else` });
+    }
+  }
+  const t0 = k.toward[0];
+  if (t0) {
+    if (k.towardThemed && towardBase > 0 && t0.answers) {
+      shown.add(`you:${t0.label}`);
+      rows.push({ label: "What most often brings buyers to you", value: `${pctOf(t0.answers / towardBase)} - "${t0.label}"`, tip: `${t0.answers} of ${towardBase} answers that give a condition for choosing ${brand}` });
+    } else if (!k.towardThemed && k.towardCells) {
+      shown.add(`you:${t0.label}`);
+      rows.push({ label: isDefaultCondition(t0.label) ? "The default toward you - when no stated condition applies" : "What most often brings buyers to you", value: `${pctOf(t0.cells / k.towardCells)} - "${t0.label}"`, tip: `${t0.cells} of ${k.towardCells} questions where the AI gives any condition that sends buyers to it` });
+    }
+  }
+  // The default branches: one row per side, unless a row above already shows it.
+  const defs = (k.defaults ?? []).filter((d) => d.routes[0] && !shown.has(`${d.side}:${d.label}`));
+  for (const d of defs)
+    rows.push({
+      label: defs.length > 1 ? `The default ${d.side === "you" ? "toward you" : "away from you"} - when no stated condition applies` : "The default - when no stated condition applies",
+      value: `→ ${d.routes[0].name}`,
+    });
+  if (!rows.length) return null;
+  let headline: string;
+  if (lead) {
+    const same = lead.wording.replace(/\s+/g, " ").trim().toLowerCase() === lead.label.replace(/\s+/g, " ").trim().toLowerCase();
+    const put = same ? "" : `, most often put as "${lead.wording}"`;
+    headline = `When the AI sends buyers away from ${brand}, the most common condition is "${lead.label}"${put}${lead.routes[0] ? ` - it points them to ${lead.routes[0].name}` : ""}.`;
+  } else {
+    const top = a?.groups.find((x) => !isDefaultCondition(x.label)) ?? null;
+    headline = top
+      ? `When the AI sends buyers away from ${brand}, the most common condition is "${top.label}"${top.routes[0] ? ` - it points them to ${top.routes[0].name}` : ""}.`
+      : `The AI hands the buyer a rule, not a winner - these are the conditions that decide it.`;
+  }
   return {
     kind: "condition",
     crumb: "What sends buyers away",

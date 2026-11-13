@@ -474,13 +474,21 @@ export interface InsightInputs {
    * condition groups routing toward the client and away, with the questions
    * each side appears in. Not read by any detector. null without rules. */
   conditions?: {
-    toward: { label: string; rules: number; cells: number; wall: boolean; routes: { name: string; n: number }[] }[];
-    away: { label: string; rules: number; cells: number; wall: boolean; routes: { name: string; n: number }[] }[];
+    /** bs21: a themed row also carries `answers` (distinct answers stating any
+     * of its wordings) and `wording` (its most-stated member wording); keyless
+     * rows are the raw groups unchanged. */
+    toward: { label: string; rules: number; cells: number; wall: boolean; routes: { name: string; n: number }[]; answers?: number; wording?: string }[];
+    away: { label: string; rules: number; cells: number; wall: boolean; routes: { name: string; n: number }[]; answers?: number; wording?: string }[];
     towardCells: number;
     awayCells: number;
     /** bs17: that side's list is reason THEMES (`rules` = statements), as `away.themed`. */
     towardThemed?: true;
     awayThemed?: true;
+    /** bs21 (one counting rule): a themed side's ANSWER base - distinct
+     * answers stating any listed condition on that side (default clause out).
+     * A themed row's share = answers / base. Absent on a raw side. */
+    towardBase?: number;
+    awayBase?: number;
     /** 2026-11-08: the largest default-shaped group per side ("otherwise" -
      * isDefaultCondition), whatever its rank, for the condition card's default
      * row. The lists above are unchanged (they still carry a default group that
@@ -592,22 +600,29 @@ export async function insightInputs(data: ViewData, request: ViewRequest = {}): 
   // bs20: the themed headline - the top away theme by distinct answers, over
   // the distinct answers stating any listed away condition (the pool the theme
   // pass read: default clause out, groups stated by 2+ answers).
+  const answerBase = (pool: RuleGroup[]) => {
+    const base = new Set<string>();
+    for (const g of pool) for (const ids of rt.rules.cellAnswers.get(g.id)?.values() ?? []) for (const id of ids) base.add(id);
+    return base.size;
+  };
+  const awayBase = awayThemed ? answerBase(rt.awayPool) : 0;
+  const towardBase = towardThemed ? answerBase(rt.towardPool) : 0;
   let awayLead: NonNullable<InsightInputs["away"]>["lead"];
   if (awayThemed && awayRoll.length > 0) {
-    const base = new Set<string>();
-    for (const g of rt.awayPool) for (const ids of rt.rules.cellAnswers.get(g.id)?.values() ?? []) for (const id of ids) base.add(id);
     const t = awayRoll[0];
     awayLead = {
       label: t.label,
       answers: t.answers,
-      base: base.size,
+      base: awayBase,
       wall: t.wall,
       wording: t.members[0] ?? t.label,
       routes: t.routes,
       top: awayRoll.slice(0, AWAY_TOP).map((x) => ({ label: x.label, answers: x.answers })),
     };
   }
-  const themeTop = (xs: ThemeRollup[]) => xs.slice(0, 6).map((t) => ({ label: t.label, rules: t.rules, cells: t.cells, wall: t.wall, routes: t.routes }));
+  // bs21: themed rows carry their answer count and most-stated wording (the brief counts them at answer grain).
+  const themeTop = (xs: ThemeRollup[]) =>
+    xs.slice(0, 6).map((t) => ({ label: t.label, rules: t.rules, cells: t.cells, wall: t.wall, routes: t.routes, answers: t.answers, wording: t.members[0] ?? t.label }));
 
   // bs8: reason codes on the pooled entity head-to-heads (the summary's own
   // rival resolution: the cell's angle through the dictionary).
@@ -740,6 +755,8 @@ export async function insightInputs(data: ViewData, request: ViewRequest = {}): 
             ...(awayThemed ? { awayThemed: true as const } : {}),
             towardCells: rules.cellsBySide.you,
             awayCells: rules.cellsBySide.away,
+            ...(towardThemed ? { towardBase } : {}),
+            ...(awayThemed ? { awayBase } : {}),
             defaults: (["you", "away"] as const).flatMap((side) => {
               const g = rules.groups
                 .filter((x) => x.side === side && isDefaultCondition(x.label))
@@ -1478,37 +1495,66 @@ const sameWords = (x: string, y: string) => x.replace(/\s+/g, " ").trim().toLowe
  * whether or not the wording sits in the lead theme - a broad theme never
  * swallows them.
  */
+type AwayGroup = NonNullable<InsightInputs["away"]>["groups"][number];
+
+/**
+ * bs21: the named specific situations the themed away_condition finding
+ * states beside its lead theme, detected on ONE raw wording each - shared
+ * with the brief's condition card (answer_cards.ts), so the card states the
+ * finding's numbers. `blocker`: the top raw away group clears the floor and
+ * names a brand that almost never wins the open choice (`share` = that
+ * brand's share of picks). `fixed`: the first possession-shaped raw group
+ * among the top ones that clears the floor (not the blocker). A default
+ * ("otherwise") wording is never either - it sits outside the answer base
+ * the shares are read over. Themed path only: the keyless finding keeps its
+ * own question-grain logic.
+ */
+export function awaySpecifics(
+  s: Pick<Summary, "firmPickInCategory" | "brands" | "target">,
+  a: NonNullable<InsightInputs["away"]>
+): { blocker: { group: AwayGroup; share: RateCell } | null; fixed: AwayGroup | null } {
+  const g = a.groups[0];
+  let blocker: { group: AwayGroup; share: RateCell } | null = null;
+  if (g && !isDefaultCondition(g.label) && g.rules >= AWAY_MIN_RULES && g.names && s.firmPickInCategory.k >= MIN_BASE && g.names.key !== s.target.key) {
+    const b = s.brands.find((x) => x.key === g.names!.key);
+    const share = b ? b.shareOfDecided : cell(0, s.firmPickInCategory.k);
+    if (rate(share) < BLOCKER_SHARE) blocker = { group: g, share };
+  }
+  const fixed = a.groups.find((x) => x.wall && !isDefaultCondition(x.label) && x.rules >= AWAY_MIN_RULES && x !== blocker?.group) ?? null;
+  return { blocker, fixed };
+}
+
 function awayConditionThemed(s: Summary, a: NonNullable<InsightInputs["away"]>, lead: NonNullable<NonNullable<InsightInputs["away"]>["lead"]>): Insight | null {
   if (lead.base === 0 || lead.answers < MIN_BASE) return null;
   const sh = lead.answers / lead.base;
   const to = lead.routes[0];
-  const qOf = (x: { cells: number }) => pct(x.cells / a.cells);
-  const qPhrase = "of the questions where the AI gives any condition that sends buyers away";
-  // The blocker: the top raw group, clearing the floor, names a brand that almost never wins.
-  const g = a.groups[0];
+  // bs21: the specific situations share the headline's answer base (one denominator per finding).
+  const ansOf = (x: { answers: number }) => pctShare(x.answers / lead.base);
+  const aPhrase = "of the answers that give any condition for choosing someone else";
+  const { blocker: bk, fixed: w } = awaySpecifics(s, a);
   let blocker = "";
   let blockerFoot = "";
-  let blockerGroup: (typeof a.groups)[number] | null = null;
-  if (g && g.rules >= AWAY_MIN_RULES && g.names && s.firmPickInCategory.k >= MIN_BASE && g.names.key !== s.target.key) {
-    const b = s.brands.find((x) => x.key === g.names!.key);
-    const share = b ? b.shareOfDecided : cell(0, s.firmPickInCategory.k);
-    if (rate(share) < BLOCKER_SHARE) {
-      blockerGroup = g;
-      const who = sameWords(g.label, lead.wording) ? "That wording" : `One wording, "${shorten(g.label)}",`;
-      blocker = ` ${who} names ${g.names.name}, a brand with ${pct(share)} of the picks when buyers ask what to buy, so it blocks you without winning for it; it comes up in ${qOf(g)} ${qPhrase}.`;
-      blockerFoot = ` "${g.label}": ${g.answers} answers across ${g.cells} of ${a.cells} questions; ${g.names.name} when buyers ask what to buy: ${counts(share)}.`;
-    }
+  if (bk) {
+    const g = bk.group;
+    const who = sameWords(g.label, lead.wording) ? "That wording" : `One wording, "${shorten(g.label)}",`;
+    blocker = ` ${who} names ${g.names!.name}, a brand with ${pct(bk.share)} of the picks when buyers ask what to buy, so it blocks you without winning for it; on its own it comes up in ${ansOf(g)} ${aPhrase}.`;
+    blockerFoot = ` "${g.label}": ${g.answers} of the ${lead.base} answers; ${g.names!.name} when buyers ask what to buy: ${counts(bk.share)}.`;
   }
-  // The fixed situation: the first possession-shaped wording among the top raw groups that clears the floor.
-  const w = a.groups.find((x) => x.wall && x.rules >= AWAY_MIN_RULES && x !== blockerGroup) ?? null;
-  const fixed = w ? ` The largest fixed situation, "${shorten(w.label, 60)}", comes up in ${qOf(w)} ${qPhrase} - a situation the buyer is already in, not an argument to answer.` : "";
-  const fixedFoot = w ? ` "${w.label}": ${w.answers} answers across ${w.cells} of ${a.cells} questions.` : "";
+  // bs21: a fixed situation worded the same as the lead's quoted wording is
+  // folded - said once, right after the headline that quotes it.
+  const fold = !!w && sameWords(w.label, lead.wording);
+  const fixedFold =
+    w && fold
+      ? ` That wording is a situation the buyer is already in, not an argument to answer${ansOf(w) === pctShare(sh) ? "" : `; on its own it comes up in ${ansOf(w)} of those answers`}.`
+      : "";
+  const fixed = w && !fold ? ` The largest fixed situation, "${shorten(w.label, 60)}", comes up in ${ansOf(w)} ${aPhrase} - a situation the buyer is already in, not an argument to answer.` : "";
+  const fixedFoot = w ? ` "${w.label}": ${w.answers} of the ${lead.base} answers.` : "";
   const put = sameWords(lead.wording, lead.label) ? "" : `, most often put as "${shorten(lead.wording)}"`;
   return {
     key: "away_condition",
     kind: "condition",
     title: lead.wall ? `A fixed situation sends buyers away: "${shorten(lead.label, 60)}"` : `What sends buyers away most: "${shorten(lead.label, 60)}"`,
-    body: `The condition that most often sends buyers away from you is "${shorten(lead.label)}"${to ? `, and the AI sends them to ${to.name}` : ""}: it comes up in ${pctShare(sh)} of the answers that give any condition for choosing someone else${put}.${blocker}${fixed}`,
+    body: `The condition that most often sends buyers away from you is "${shorten(lead.label)}"${to ? `, and the AI sends them to ${to.name}` : ""}: it comes up in ${pctShare(sh)} ${aPhrase}${put}.${fixedFold}${blocker}${fixed}`,
     foot: `${lead.answers} of ${lead.base} answers that give a condition for choosing someone else state "${lead.label}"${to ? `; ${to.n} of them send buyers to ${to.name}` : ""}.${blockerFoot}${fixedFoot} Counts leave out wordings only one answer states.`,
     look: { pill: "why", label: "Why - decision rules" },
     effect: sh,
