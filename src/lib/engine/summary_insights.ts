@@ -1509,6 +1509,21 @@ type AwayGroup = NonNullable<InsightInputs["away"]>["groups"][number];
  * the shares are read over. Themed path only: the keyless finding keeps its
  * own question-grain logic.
  */
+/**
+ * bs22: where a themed condition sends buyers. One destination is named alone
+ * only when it takes at least half of the condition's answers; otherwise the
+ * top two are named and the sentence says "mostly" (a pooled condition whose
+ * leading destination holds a third of its answers is not "sent to" it).
+ */
+export function destOf(routes: { name: string; n: number }[], answers: number): { names: string[]; mostly: boolean } | null {
+  const a = routes[0];
+  if (!a) return null;
+  if (answers <= 0 || a.n / answers >= 0.5) return { names: [a.name], mostly: false };
+  return { names: routes[1] ? [a.name, routes[1].name] : [a.name], mostly: true };
+}
+/** "X" / "mostly to X and Y" after a leading "to ". */
+export const destPhrase = (d: { names: string[]; mostly: boolean }) => `${d.mostly ? "mostly " : ""}to ${d.names.join(" and ")}`;
+
 export function awaySpecifics(
   s: Pick<Summary, "firmPickInCategory" | "brands" | "target">,
   a: NonNullable<InsightInputs["away"]>
@@ -1528,6 +1543,7 @@ function awayConditionThemed(s: Summary, a: NonNullable<InsightInputs["away"]>, 
   if (lead.base === 0 || lead.answers < MIN_BASE) return null;
   const sh = lead.answers / lead.base;
   const to = lead.routes[0];
+  const dest = destOf(lead.routes, lead.answers);
   // bs21: the specific situations share the headline's answer base (one denominator per finding).
   const ansOf = (x: { answers: number }) => pctShare(x.answers / lead.base);
   const aPhrase = "of the answers that give any condition for choosing someone else";
@@ -1554,7 +1570,7 @@ function awayConditionThemed(s: Summary, a: NonNullable<InsightInputs["away"]>, 
     key: "away_condition",
     kind: "condition",
     title: lead.wall ? `A fixed situation sends buyers away: "${shorten(lead.label, 60)}"` : `What sends buyers away most: "${shorten(lead.label, 60)}"`,
-    body: `The condition that most often sends buyers away from you is "${shorten(lead.label)}"${to ? `, and the AI sends them to ${to.name}` : ""}: it comes up in ${pctShare(sh)} ${aPhrase}${put}.${fixedFold}${blocker}${fixed}`,
+    body: `The condition that most often sends buyers away from you is "${shorten(lead.label)}"${dest ? `, and the AI sends them ${destPhrase(dest)}` : ""}: it comes up in ${pctShare(sh)} ${aPhrase}${put}.${fixedFold}${blocker}${fixed}`,
     foot: `${lead.answers} of ${lead.base} answers that give a condition for choosing someone else state "${lead.label}"${to ? `; ${to.n} of them send buyers to ${to.name}` : ""}.${blockerFoot}${fixedFoot} Counts leave out wordings only one answer states.`,
     look: { pill: "why", label: "Why - decision rules" },
     effect: sh,

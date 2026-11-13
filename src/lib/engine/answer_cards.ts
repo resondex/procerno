@@ -1,6 +1,6 @@
 import type { AnswerCard } from "./brief_types";
 import type { BrandSummaryView, SummaryBrand } from "./brand_summary";
-import { awaySpecifics, pctFine, type InsightInputs } from "./summary_insights";
+import { awaySpecifics, destOf, destPhrase, pctFine, type InsightInputs } from "./summary_insights";
 import { cell, poolOf, type RateCell, type ViewData, type ViewRequest } from "./view_data";
 import type { Position } from "./analysis_types";
 import { buildResolver } from "./brand_resolve";
@@ -437,7 +437,7 @@ function conditionCardThemed(src: CardSources, openCellId?: string): AnswerCard 
       shown.add(`away:${t.label}`);
       rows.push({
         label: `Sends buyers away: "${t.label.slice(0, 60)}"`,
-        value: `${pctOf(t.answers / awayBase)}${t.routes[0] ? ` → ${t.routes[0].name}` : ""}`,
+        value: `${pctOf(t.answers / awayBase)}${destOf(t.routes, t.answers) ? ` → ${destOf(t.routes, t.answers)!.names.join(", ")}` : ""}`,
         tip: awayTip(t.answers),
       });
     }
@@ -490,7 +490,7 @@ function conditionCardThemed(src: CardSources, openCellId?: string): AnswerCard 
   if (lead) {
     const same = lead.wording.replace(/\s+/g, " ").trim().toLowerCase() === lead.label.replace(/\s+/g, " ").trim().toLowerCase();
     const put = same ? "" : `, most often put as "${lead.wording}"`;
-    headline = `When the AI sends buyers away from ${brand}, the most common condition is "${lead.label}"${put}${lead.routes[0] ? ` - it points them to ${lead.routes[0].name}` : ""}.`;
+    headline = `When the AI sends buyers away from ${brand}, the most common condition is "${lead.label}"${put}${destOf(lead.routes, lead.answers) ? ` - it points them ${destPhrase(destOf(lead.routes, lead.answers)!)}` : ""}.`;
   } else {
     const top = a?.groups.find((x) => !isDefaultCondition(x.label)) ?? null;
     headline = top

@@ -7,7 +7,7 @@ import { BRAND_SUMMARY_VERSION, sharedBrandSummary, type BrandSummaryView, type 
 import { ANALYSIS_MAP_VERSION, sharedAnalysisMap, type MapCellStat } from "./analysis_map";
 import { computeHeadline } from "./headline";
 import { CONTEXT_JUDGE_MODEL, CONTEXT_JUDGE_VERSION } from "./context_judge";
-import { pctFine, type Insight, type InsightInputs } from "./summary_insights";
+import { awaySpecifics, destOf, destPhrase, pctFine, type Insight, type InsightInputs } from "./summary_insights";
 import { cell, loadViewData, requestOf, VIEW_CACHE_MS, type RateCell, type ViewData, type ViewRequest } from "./view_data";
 import { viewsOf } from "./views";
 import type { AnalysisMapView, Position } from "./analysis_types";
@@ -770,8 +770,13 @@ function conditionsPara(c: Ctx): BriefPara | null {
   }
   const a = away.slice(0, 3);
   if (a.length) {
-    const named = a.map((g) => (g.routes[0] ? `${q(g)} (to ${g.routes[0].name})` : q(g)));
+    let named = a.map((g) => (g.routes[0] ? `${q(g)} (to ${g.routes[0].name})` : q(g)));
     if (awayBase !== null) {
+      // bf24: a destination is named alone only when it takes half the condition's answers (destOf).
+      if (c.isTarget) named = a.map((g) => {
+        const d = destOf(g.routes, g.answers ?? 0);
+        return d ? `${q(g)} (${destPhrase(d)})` : q(g);
+      });
       parts.push(`The branch away: ${listOf(named)} - the largest comes up in ${pctN(awayBase ? (a[0].answers ?? 0) / awayBase : 0)} of the answers where the AI gives any condition that sends buyers away.`);
       tips.push(a.map((g) => `${g.label}: ${g.answers ?? 0} of ${awayBase} answers`).join("; ") + ".");
     } else {
@@ -781,6 +786,9 @@ function conditionsPara(c: Ctx): BriefPara | null {
   }
   if (c.isTarget) {
     const walls: string[] = [];
+    // bf24: the finding's own fixed situation (the run-wide one) leads the list, then each buying situation's.
+    const fx = k.awayThemed && c.inputs.away ? awaySpecifics(c.summary, c.inputs.away).fixed : null;
+    if (fx) walls.push(fx.label);
     for (const st of Object.values(c.stats)) if (st.wall && !walls.some((w) => norm(w) === norm(st.wall!))) walls.push(st.wall);
     if (walls.length) parts.push(`The fixed situations - ones the buyer is already in, not arguments to answer: ${listOf(walls.slice(0, 3).map((w) => `"${w}"`))}.`);
   }
@@ -1973,7 +1981,7 @@ export async function computeBrief(data: ViewData, request: BriefRequest = {}): 
 // bf21 (2026-11-10): the plain-wording pass - reads bs13 / am15 (new move names, lever sentences and insight wording quoted in the memos); actOf restates the new levers; the conditions paragraph, the condition card, the SWOT wall and the jobs wall lines say what sends buyers away and "a fixed situation" instead of "routes" / "wall" / "reason". The exemplar's "The conditions that decide it" heading is kept. Numbers unchanged.
 // bf22 (2026-11-12): the reasons harmonization - reads bs17 / am22: the conditions paragraph, the condition card and the away-condition finding name the run's reason THEMES (dt4) where a theme map exists (raw condition groups only without one); the paragraph's tips count statements on a themed side.
 // bf23 (2026-11-13, one counting rule - reads bs21): with reason themes the conditions paragraph counts each side's themes at ANSWER grain over that side's own answer base, and the condition card lists the themes at answer grain, names the lead away theme (quoting its most-stated wording) and gives the away_condition finding's blocker and fixed-situation wordings their own rows on the same base. Keyless output unchanged.
-const BRIEF_VERSION = "bf23";
+const BRIEF_VERSION = "bf24"; // bf24 (2026-11-13): themed conditions name one destination only when it takes half their answers; the fixed-situation line leads with the finding wording.
 
 /**
  * The brief through the cache. cachedView's keying, with the subject as one
