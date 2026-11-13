@@ -131,11 +131,16 @@ import { ROW_NAME } from "./question_names";
  * the AI most often still gives for choosing the brand in the answers it
  * hands the rival. Not a rate of two-sided answers (a two-brand question
  * draws one by construction) - the content: which condition, how often, and
- * whether it is a situation the buyer is already in. Counted on the raw
- * condition groups (the counting grain, as away_condition) and named by the
- * reason theme it sits under. Fires with at least one lost matchup, MIN_BASE
+ * whether it is a situation the buyer is already in. bs20: counted on the
+ * run's reason themes at answer grain when it has them (the theme by name,
+ * its most-stated wording quoted), on the raw condition groups keyless. Fires with at least one lost matchup, MIN_BASE
  * pooled lost answers, and the top condition in at least 15 of them and 20%.
  * Effect = that share.
+ *
+ * bs20 (2026-11-13, one counting rule): with reason themes, away_condition's
+ * headline counts the top away theme at answer grain too (awayConditionThemed);
+ * a blocker brand or a fixed situation is still detected on one raw wording
+ * and stated in its own sentence. Keyless both findings are unchanged.
  */
 
 export type InsightKind = "engine" | "room" | "rival" | "argument" | "doubt" | "funnel" | "question" | "value" | "switching" | "condition" | "leak";
@@ -424,11 +429,24 @@ export interface InsightInputs {
       routes: { name: string; n: number }[];
       /** The longest active dictionary form in the wording, the client excluded. */
       names: { key: string; name: string } | null;
-      /** bs17: the reason theme this wording sits under on the Map, when its name differs. */
-      theme?: string;
     }[];
     cells: number;
     grouping: "embeddings" | "stems";
+    /** bs20: with reason themes, the finding's headline counts the top away
+     * theme at ANSWER grain - `answers` distinct answers stating any of its
+     * wordings, over `base` distinct answers stating any listed away condition
+     * (the default "otherwise" clause left out). `wording` = its most-stated
+     * member wording; `wall` = the possession test on the theme name shown.
+     * Absent keyless or on a failed theme pass (the raw-group finding serves). */
+    lead?: {
+      label: string;
+      answers: number;
+      base: number;
+      wall: boolean;
+      wording: string;
+      routes: { name: string; n: number }[];
+      top: { label: string; answers: number }[];
+    };
   } | null;
   /** bs7: open-choice picks per resolved active brand, by engine (model id). */
   enginePicks: { key: string; total: number; byModel: Record<string, number> }[];
@@ -470,16 +488,18 @@ export interface InsightInputs {
     defaults?: { side: "you" | "away"; label: string; cells: number; routes: { name: string; n: number }[] }[];
   } | null;
   /** bs19: the pooled lost answers of the entity head-to-heads lost on
-   * balance, and the client-side conditions stated in them (raw condition
-   * groups - the counting grain - each with its theme name and per-rival
-   * spread); the open-choice comparison (answers picking another in-category
+   * balance, and the client-side conditions stated in them (bs20: the run's
+   * reason themes when it has them, raw condition groups keyless - each with
+   * its per-rival spread); the open-choice comparison (answers picking another in-category
    * brand that still state any client-side condition). null without rules or
    * without a lost matchup. */
   exception?: {
     lost: number;
     matchups: { key: string; name: string; lost: number }[];
     any: number;
-    groups: { label: string; answers: number; wall: boolean; theme?: string; byRival: Record<string, number>; refs: AnswerRef[] }[];
+    /** bs20: with reason themes each row is a theme (`themed`), carrying its
+     * most-stated member wording; keyless the raw condition groups as before. */
+    groups: { label: string; answers: number; wall: boolean; themed?: true; wording?: string; byRival: Record<string, number>; refs: AnswerRef[] }[];
     open: RateCell | null;
   } | null;
   /** bs16: the answers behind the detectors' numerators (in-process only). */
@@ -560,21 +580,33 @@ export async function insightInputs(data: ViewData, request: ViewRequest = {}): 
   const towardThemed = !!rt.toward;
   const awayRoll = themeRollup(rt.awayPool, rt.away, rt.rules, rt.sitOf, "away", data.project.brand);
   const towardRoll = themeRollup(rt.towardPool, rt.toward, rt.rules, rt.sitOf, "toward", data.project.brand);
-  // bs17 (Tyler 2026-11-12): the away-condition finding DETECTS on the raw
-  // condition groups as before - its numbers count exactly the wording it
-  // names, and a broad theme (one can cover every away question) never
-  // swallows a specific blocker or fixed situation - and its sentence names the
-  // theme the wording sits under, so it reads in the Map's vocabulary.
-  const themeOf = (label: string) => {
-    if (!awayThemed) return undefined;
-    const t = awayRoll.find((x) => x.members.includes(label));
-    return t && t.label.trim().toLowerCase() !== label.trim().toLowerCase() ? t.label : undefined;
-  };
+  // bs20 (2026-11-13, one counting rule): the raw away groups stay as inputs -
+  // the keyless finding counts them, and the themed finding still detects a
+  // blocker brand or a fixed situation on one wording (a broad theme can cover
+  // every away question, so it must never swallow those).
   const awayGroups = rules.groups
     .filter((g) => g.side === "away")
     .sort((a, b) => b.answers - a.answers || b.rules - a.rules || a.label.localeCompare(b.label))
     .slice(0, AWAY_TOP)
-    .map((g) => ({ label: g.label, rules: g.rules, answers: g.answers, cells: g.cells, wall: g.wall, routes: g.routes, names: namesIn(g.label), theme: themeOf(g.label) }));
+    .map((g) => ({ label: g.label, rules: g.rules, answers: g.answers, cells: g.cells, wall: g.wall, routes: g.routes, names: namesIn(g.label) }));
+  // bs20: the themed headline - the top away theme by distinct answers, over
+  // the distinct answers stating any listed away condition (the pool the theme
+  // pass read: default clause out, groups stated by 2+ answers).
+  let awayLead: NonNullable<InsightInputs["away"]>["lead"];
+  if (awayThemed && awayRoll.length > 0) {
+    const base = new Set<string>();
+    for (const g of rt.awayPool) for (const ids of rt.rules.cellAnswers.get(g.id)?.values() ?? []) for (const id of ids) base.add(id);
+    const t = awayRoll[0];
+    awayLead = {
+      label: t.label,
+      answers: t.answers,
+      base: base.size,
+      wall: t.wall,
+      wording: t.members[0] ?? t.label,
+      routes: t.routes,
+      top: awayRoll.slice(0, AWAY_TOP).map((x) => ({ label: x.label, answers: x.answers })),
+    };
+  }
   const themeTop = (xs: ThemeRollup[]) => xs.slice(0, 6).map((t) => ({ label: t.label, rules: t.rules, cells: t.cells, wall: t.wall, routes: t.routes }));
 
   // bs8: reason codes on the pooled entity head-to-heads (the summary's own
@@ -621,14 +653,11 @@ export async function insightInputs(data: ViewData, request: ViewRequest = {}): 
       const pickedBy = new Map<string, string>();
       for (const m of lostMus) for (const id of m.lostIds) pickedBy.set(id, m.name);
       const lostSet = new Set(pickedBy.keys());
-      const raw = exceptionRows(lostSet, rt.towardPool, rt.rules.answerRules, null, rt.sitOf);
+      // bs20: themed rows when the run has reason themes (the counting grain of
+      // the headline), raw condition groups keyless.
+      const raw = exceptionRows(lostSet, rt.towardPool, rt.rules.answerRules, towardThemed ? rt.toward : null, rt.sitOf);
       // Head-to-heads are the choice schema: a rule is on your side when its choice resolves to you.
       const anyIds = anyException(h2hRows.filter((r) => lostSet.has(r.code.response_id)), (rule) => resolve(rule.choice).key === targetKey);
-      const towardTheme = (label: string) => {
-        if (!towardThemed) return undefined;
-        const t = towardRoll.find((x) => x.members.includes(label));
-        return t && t.label.trim().toLowerCase() !== label.trim().toLowerCase() ? t.label : undefined;
-      };
       // Open questions the AI hands another in-category brand that still state a client-side condition.
       const openLost = poolOf(data, "headline", engines).rows.filter(({ code }) => {
         if (code.outcome !== "pick" || !code.top_pick || code.decision_rules == null || code.schema !== "choice") return false;
@@ -647,8 +676,10 @@ export async function insightInputs(data: ViewData, request: ViewRequest = {}): 
             const n = pickedBy.get(id)!;
             byRival[n] = (byRival[n] ?? 0) + 1;
           }
-          const theme = towardTheme(row.label);
-          return { label: row.label, answers: row.ids.size, wall: row.wall, ...(theme ? { theme } : {}), byRival, refs: exceptionRefs(row, (id) => pickedBy.get(id), EXAMPLES) };
+          const refs = exceptionRefs(row, (id) => pickedBy.get(id), EXAMPLES);
+          return towardThemed
+            ? { label: row.label, answers: row.ids.size, wall: row.wall, themed: true as const, wording: row.members[0] ?? row.label, byRival, refs }
+            : { label: row.label, answers: row.ids.size, wall: row.wall, byRival, refs };
         }),
         open: openN >= MIN_BASE ? cell(openK, openN) : null,
       };
@@ -694,7 +725,7 @@ export async function insightInputs(data: ViewData, request: ViewRequest = {}): 
     settled: computeSettled(data, engines),
     taught,
     alternatives: computeAlternatives(data, engines),
-    away: rules.answers > 0 ? { groups: awayGroups, cells: rules.cellsBySide.away, grouping: rules.grouping } : null,
+    away: rules.answers > 0 ? { groups: awayGroups, cells: rules.cellsBySide.away, grouping: rules.grouping, ...(awayLead ? { lead: awayLead } : {}) } : null,
     enginePicks: [...byBrand.values()].sort((a, b) => b.total - a.total || a.key.localeCompare(b.key)),
     h2hArgs,
     leak,
@@ -1393,6 +1424,7 @@ const BLOCKER_SHARE = 0.02;
 function awayCondition(s: Summary, inp: InsightInputs): Insight | null {
   const a = inp.away;
   if (!a || a.cells === 0) return null;
+  if (a.lead) return awayConditionThemed(s, a, a.lead);
   const g = a.groups[0];
   if (!g || g.rules < AWAY_MIN_RULES) return null;
   const spread = g.cells / a.cells;
@@ -1420,16 +1452,67 @@ function awayCondition(s: Summary, inp: InsightInputs): Insight | null {
   const wallFoot = laterWall ? ` "${laterWall.label}": at least ${laterWall.rules} rules across ${laterWall.cells} questions.` : "";
   const toFoot = to ? `; to ${to.name} ${to.n}` : "";
   const lower = `Counts are lower bounds: ${a.grouping === "stems" ? "conditions are grouped by their words, and" : ""} wordings the grouping did not join are left out.`;
-  const underTheme = g.theme ? `, one of the reasons grouped as "${shorten(g.theme, 60)}"` : "";
   return {
     key: "away_condition",
     kind: "condition",
     title: g.wall ? `A fixed situation sends buyers away: "${shorten(g.label, 60)}"` : `What sends buyers away most: "${shorten(g.label, 60)}"`,
-    body: `The condition that most often sends buyers away from you is "${shorten(g.label)}"${underTheme}${to ? `, and the AI sends them to ${to.name}` : ""}; it comes up in ${pct(spread)} of the questions where the AI gives any condition that sends buyers away${blocker}${wall}.`,
+    body: `The condition that most often sends buyers away from you is "${shorten(g.label)}"${to ? `, and the AI sends them to ${to.name}` : ""}; it comes up in ${pct(spread)} of the questions where the AI gives any condition that sends buyers away${blocker}${wall}.`,
     foot: `At least ${g.rules} rules in ${g.answers} answers across ${g.cells} of ${a.cells} questions where the AI gives a condition that sends buyers away${toFoot}.${blockerFoot}${wallFoot} ${lower}`,
     look: { pill: "why", label: "Why - decision rules" },
     effect: spread,
     viz: vizOf(a.groups.map((x, i) => insightBar(lbl(x.label, 40), x.cells / a.cells, undefined, i === 0))),
+  };
+}
+
+const sameWords = (x: string, y: string) => x.replace(/\s+/g, " ").trim().toLowerCase() === y.replace(/\s+/g, " ").trim().toLowerCase();
+
+/**
+ * bs20 (2026-11-13, one counting rule): with reason themes the headline
+ * counts the top away THEME at answer grain (its distinct answers over the
+ * distinct answers stating any listed away condition - question grain
+ * saturates, every assistant answers each question). A named specific
+ * situation is still detected on one wording: the blocker (the top raw group
+ * names a brand that almost never wins the open choice) and the fixed
+ * situation (the first raw group among the top ones that clears the floor and
+ * is possession-shaped) each get their own sentence with their own share,
+ * whether or not the wording sits in the lead theme - a broad theme never
+ * swallows them.
+ */
+function awayConditionThemed(s: Summary, a: NonNullable<InsightInputs["away"]>, lead: NonNullable<NonNullable<InsightInputs["away"]>["lead"]>): Insight | null {
+  if (lead.base === 0 || lead.answers < MIN_BASE) return null;
+  const sh = lead.answers / lead.base;
+  const to = lead.routes[0];
+  const qOf = (x: { cells: number }) => pct(x.cells / a.cells);
+  const qPhrase = "of the questions where the AI gives any condition that sends buyers away";
+  // The blocker: the top raw group, clearing the floor, names a brand that almost never wins.
+  const g = a.groups[0];
+  let blocker = "";
+  let blockerFoot = "";
+  let blockerGroup: (typeof a.groups)[number] | null = null;
+  if (g && g.rules >= AWAY_MIN_RULES && g.names && s.firmPickInCategory.k >= MIN_BASE && g.names.key !== s.target.key) {
+    const b = s.brands.find((x) => x.key === g.names!.key);
+    const share = b ? b.shareOfDecided : cell(0, s.firmPickInCategory.k);
+    if (rate(share) < BLOCKER_SHARE) {
+      blockerGroup = g;
+      const who = sameWords(g.label, lead.wording) ? "That wording" : `One wording, "${shorten(g.label)}",`;
+      blocker = ` ${who} names ${g.names.name}, a brand with ${pct(share)} of the picks when buyers ask what to buy, so it blocks you without winning for it; it comes up in ${qOf(g)} ${qPhrase}.`;
+      blockerFoot = ` "${g.label}": ${g.answers} answers across ${g.cells} of ${a.cells} questions; ${g.names.name} when buyers ask what to buy: ${counts(share)}.`;
+    }
+  }
+  // The fixed situation: the first possession-shaped wording among the top raw groups that clears the floor.
+  const w = a.groups.find((x) => x.wall && x.rules >= AWAY_MIN_RULES && x !== blockerGroup) ?? null;
+  const fixed = w ? ` The largest fixed situation, "${shorten(w.label, 60)}", comes up in ${qOf(w)} ${qPhrase} - a situation the buyer is already in, not an argument to answer.` : "";
+  const fixedFoot = w ? ` "${w.label}": ${w.answers} answers across ${w.cells} of ${a.cells} questions.` : "";
+  const put = sameWords(lead.wording, lead.label) ? "" : `, most often put as "${shorten(lead.wording)}"`;
+  return {
+    key: "away_condition",
+    kind: "condition",
+    title: lead.wall ? `A fixed situation sends buyers away: "${shorten(lead.label, 60)}"` : `What sends buyers away most: "${shorten(lead.label, 60)}"`,
+    body: `The condition that most often sends buyers away from you is "${shorten(lead.label)}"${to ? `, and the AI sends them to ${to.name}` : ""}: it comes up in ${pctShare(sh)} of the answers that give any condition for choosing someone else${put}.${blocker}${fixed}`,
+    foot: `${lead.answers} of ${lead.base} answers that give a condition for choosing someone else state "${lead.label}"${to ? `; ${to.n} of them send buyers to ${to.name}` : ""}.${blockerFoot}${fixedFoot} Counts leave out wordings only one answer states.`,
+    look: { pill: "why", label: "Why - decision rules" },
+    effect: sh,
+    viz: vizOf(lead.top.map((x, i) => insightBar(lbl(x.label, 40), x.answers / lead.base, undefined, i === 0))),
   };
 }
 
@@ -1448,7 +1531,23 @@ function assignedException(s: Summary, inp: InsightInputs): Insight | null {
   const sh = g.answers / e.lost;
   const most = Object.entries(g.byRival).sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))[0];
   const one = e.matchups.length === 1;
-  const underTheme = g.theme ? `, one of the cases grouped as "${shorten(g.theme, 60)}"` : "";
+  if (g.themed) {
+    // bs20: counted on the run's reason themes - the theme by name, one wording inside it.
+    const where = one ? "" : most ? `, most of all against ${most[0]}` : "";
+    const put = g.wording && !sameWords(g.wording, g.label) ? ` It is most often put as "${shorten(g.wording)}".` : "";
+    const fixed = g.wall ? " That is a situation the buyer is already in, not something to argue for." : "";
+    const open = e.open ? ` When buyers ask what to buy and the AI picks someone else, it still gives a case for ${s.brand} in ${pct(e.open)} of those answers.` : "";
+    return {
+      key: "assigned_exception",
+      kind: "condition",
+      title: one ? `You lose to ${e.matchups[0].name} with one exception` : "You lose these matchups with one exception",
+      body: `When the AI picks ${one ? e.matchups[0].name : "a rival"} over ${s.brand} in a direct matchup, its most common exception is "${shorten(g.label)}" - stated in ${pctShare(sh)} of those answers${where}.${put}${fixed}${open}`,
+      foot: `${g.answers} of ${e.lost} answers that pick the rival in the matchups you lose (${e.matchups.map((m) => `${m.name} ${m.lost}`).join(", ")}); ${e.any} of them state any case for you.${e.open ? ` When buyers ask what to buy: ${counts(e.open)}.` : ""} Counts leave out wordings only one answer states.`,
+      look: { pill: "why", label: "Why - decision rules" },
+      effect: sh,
+      viz: vizOf(e.groups.map((x, i) => withRefs(insightBar(lbl(x.label, 40), x.answers / e.lost, undefined, i === 0), x.refs))),
+    };
+  }
   const where = one ? "" : most ? `, most of all against ${most[0]}` : "";
   const fixed = g.wall ? " That is a situation the buyer is already in, not something to argue for." : "";
   const open = e.open ? ` When buyers ask what to buy and the AI picks someone else, it still gives a case for ${s.brand} in ${pct(e.open)} of those answers.` : "";
@@ -1456,7 +1555,7 @@ function assignedException(s: Summary, inp: InsightInputs): Insight | null {
     key: "assigned_exception",
     kind: "condition",
     title: one ? `You lose to ${e.matchups[0].name} with one exception` : "You lose these matchups with one exception",
-    body: `When the AI picks ${one ? e.matchups[0].name : "a rival"} over ${s.brand} in a direct matchup, its most common exception is "${shorten(g.label)}"${underTheme} - stated in ${pctShare(sh)} of those answers${where}.${fixed}${open}`,
+    body: `When the AI picks ${one ? e.matchups[0].name : "a rival"} over ${s.brand} in a direct matchup, its most common exception is "${shorten(g.label)}" - stated in ${pctShare(sh)} of those answers${where}.${fixed}${open}`,
     foot: `${g.answers} of ${e.lost} answers that pick the rival in the matchups you lose (${e.matchups.map((m) => `${m.name} ${m.lost}`).join(", ")}); ${e.any} of them state any case for you.${e.open ? ` Open choice: ${counts(e.open)}.` : ""} Counts are lower bounds: wordings the grouping did not join are left out.`,
     look: { pill: "why", label: "Why - decision rules" },
     effect: sh,
