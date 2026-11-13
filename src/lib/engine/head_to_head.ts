@@ -389,7 +389,7 @@ export async function computeHeadToHead(data: ViewData, request: ViewRequest = {
 // a rival's maker-less products move from "routes elsewhere" to the rival's side.
 // hh7 (2026-11-03): engine slices carry vendor / tier / mode (the Panel lens's Group-by).
 // hh8 (2026-11-12): the reasons harmonization - each matchup's conditions carry `themes` (you / rival / elsewhere in the run's dt4 reason themes, scoped to the matchup's questions); a failed theme pass serves the view uncached.
-const HEAD_TO_HEAD_VERSION = "hh8";
+const HEAD_TO_HEAD_VERSION = "hh9"; // hh9 (2026-11-13): grouped reasons tagged fixed by their own name only (reason_themes).
 export function computeHeadToHeadCached(run: Run, project: Project, request: ViewRequest = {}): Promise<HeadToHeadViews | null> {
   const r = requestOf(request);
   return cachedView("head_to_head", HEAD_TO_HEAD_VERSION, run, project, (d) => computeHeadToHead(d, r), { judge: true }, r);
