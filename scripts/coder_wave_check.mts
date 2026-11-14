@@ -295,6 +295,18 @@ let eTracker: Awaited<ReturnType<typeof tracker>>;
   const r5 = byId.get(t.ids[4]) as Record<string, unknown> | undefined;
   check("F two-pass: adapter failure degrades to pass-1 reasons, flagged", JSON.stringify(r5?.reasons) === '["price"]' && r5?.contract === "v04_prompts_2026-10-29;reasons:base", JSON.stringify(r5));
   check("F two-pass: failed adapter call retried once (2 attempts)", sentToAdapter.filter((u) => u.includes("[[ADAPTERFAIL]]")).length === 2);
+  // F ran seconds after E on the same deployment: its idle hour overlaps the
+  // one E already logged, so only the gap between them is logged again.
+  {
+    const db = sqlite();
+    const tails = db.prepare("select run_id, cost_usd, usage_raw from cost_log where engine = 'fireworks:gpu' and usage_raw like '%idle_tail%' order by rowid").all() as { run_id: string; cost_usd: number; usage_raw: string }[];
+    db.close();
+    const mine = tails.filter((l) => l.run_id === t.run.id);
+    const total = tails.reduce((a, l) => a + Number(l.cost_usd), 0);
+    check("F ledger: a second wave inside the idle hour logs only the gap (two waves = one idle hour)",
+      mine.length === 1 && Number(mine[0].cost_usd) < 0.5 && /net_of_earlier_tail_hours/.test(mine[0].usage_raw) && total >= 8 && total < 8.5,
+      JSON.stringify(tails.map((l) => [l.run_id.slice(0, 6), l.cost_usd, l.usage_raw.slice(0, 140)])));
+  }
 }
 // ---------------------------------------------------------------- G: base mismatch
 {
