@@ -413,6 +413,12 @@ export interface MentionRow {
  * schema does not ask it; an asked list that came back empty is []. Brands
  * are stored as written; dictionary resolution is read-time. Column list
  * and (de)serialization live in answer_codes.ts. */
+export interface AnswerPickRow {
+  top_pick: string | null;
+  destinations: string[] | null;
+  redirect_to: string[] | null;
+}
+
 export interface AnswerCodes {
   response_id: string;
   source: string;
@@ -1222,6 +1228,9 @@ export interface Store {
   upsertAnswerCodes(rows: AnswerCodes[]): Promise<void>;
   /** A run's codes from one source - no answer bodies. */
   listAnswerCodes(runId: string, source: string): Promise<AnswerCodes[]>;
+  /** listAnswerCodes narrowed to the three columns that name a pick or an
+   * exit - what the board's picked-ignore flag reads. */
+  listAnswerPicks(runId: string, source: string): Promise<AnswerPickRow[]>;
   /** The code source the project's views read (null = none yet). */
   getCodesSource(projectId: string): Promise<string | null>;
   setCodesSource(projectId: string, source: string | null): Promise<void>;

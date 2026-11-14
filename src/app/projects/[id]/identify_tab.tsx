@@ -43,6 +43,8 @@ export interface Suggestion {
   mergeIntoId: string | null;
   mergeIntoName: string | null;
   rationale: string;
+  /** Ignore rows: coded answers that pick the name or send buyers to it. */
+  picked?: number;
 }
 
 function norm(s: string) {
@@ -482,7 +484,7 @@ export default function IdentifyTab({
             obs && obs.rows > 0
               ? (obsByName.get(norm(e.canonical)) ?? 0) / obs.rows
               : 0;
-          if (ignoreSurfaces(s.rationale, share) !== "fold") continue;
+          if (ignoreSurfaces(s.rationale, share, s.picked) !== "fold") continue;
           rejFold.push({
             entryId: e.id,
             name: e.canonical,
@@ -525,7 +527,7 @@ export default function IdentifyTab({
               obs && obs.rows > 0
                 ? (obsByName.get(norm(entry.canonical)) ?? 0) / obs.rows
                 : 0;
-            if (ignoreSurfaces(sug.rationale, share) === "fold") {
+            if (ignoreSurfaces(sug.rationale, share, sug.picked) === "fold") {
               ignoredNow.push({
                 entryId: entry.id,
                 name: entry.canonical,
@@ -537,7 +539,7 @@ export default function IdentifyTab({
               entry,
               s: {
                 ...sug,
-                rationale: `${flaggedIgnorePrefix(sug.rationale, share)} ${sug.rationale ?? ""} - review)`,
+                rationale: `${flaggedIgnorePrefix(sug.rationale, share, sug.picked)} ${sug.rationale ?? ""} - review)`,
               },
               target: "__ignore__",
             });

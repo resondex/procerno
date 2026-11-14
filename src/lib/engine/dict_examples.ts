@@ -206,7 +206,7 @@ export async function prewarmDictionaryExamples(
       targets.push({ name: s.name, parent: s.mergeIntoName });
     } else if (
       s.action === "ignore" &&
-      ignoreSurfaces(s.rationale, share(s.name)) === "flag"
+      ignoreSurfaces(s.rationale, share(s.name), s.picked) === "flag"
     ) {
       // Every ignore the shared rule surfaces as a flagged pill (own-context
       // flips, inherited ignores above the floor, high-volume names) invites

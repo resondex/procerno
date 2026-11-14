@@ -1233,7 +1233,7 @@ function AnalysisSettings({
       obs && obs.rows > 0
         ? (obsShareByName.get(e.canonical.trim().toLowerCase()) ?? 0) / obs.rows
         : 0;
-    return ignoreSurfaces(s.rationale, share) === "fold";
+    return ignoreSurfaces(s.rationale, share, s.picked) === "fold";
   };
   const autoHiddenCount = dict.filter(
     (e) => !aliasOwnerKeys.has(matchKey(e.canonical)) && isAutoHidden(e)

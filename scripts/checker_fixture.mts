@@ -1409,3 +1409,27 @@ console.log("17. s56 advocacy criticism containment");
   ok("with nothing to claim the note still flags", /- review\)$/.test(ds.shortFormNote("Sling", { names: 0, top: [] })));
   console.log("24. dictionary root causes: " + (process.exitCode ? "FAILED" : "ALL PASS"));
 }
+
+// ---------------------------------------------------------------------------
+// 25. Ignored names the AI keeps picking (2026-11-13): the count behind the
+// board's flag and the shared rule that reads it. Pure functions only.
+{
+  const ok = (label: string, cond: boolean, extra = "") => { if (!cond) { console.error(`   FAIL ${label} ${extra}`); process.exitCode = 1; } else console.log(`   ok   ${label} ${extra}`); };
+  const pc = await import(`${REPO}/src/lib/engine/picked_count`);
+  const ir = await import(`${REPO}/src/lib/ignore_rules`);
+  const E = (id: string, canonical: string, status: string, aliases: string[] = []) => ({ id, project_id: "p", canonical, aliases, display_name: null, status, confirmed: [], parent: null, role: null, analyzed: true, version: 1, created_at: "" });
+  const board = [E("a", "Alpha Phone", "active", ["alpha"]), E("r", "Beta OS", "rejected"), E("q", "Gamma", "pending"), E("s", "Delta", "rejected")];
+  const row = (top_pick: string | null, destinations: string[] | null = null, redirect_to: string[] | null = null) => ({ top_pick, destinations, redirect_to });
+  const counts = pc.countPickedIgnores([
+    row("Beta OS"), row(null, ["beta os", "Alpha Phone"]), row("Beta OS 16", ["Beta OS"]), row(null, null, ["Gamma"]),
+    row("Alpha Phone"), row("Unknown Thing"), row(null), row("Delta"),
+  ] as never, board as never);
+  ok("picks and exits count once per answer, forms included", counts.get("r") === 3, String(counts.get("r")));
+  ok("an unreviewed name is counted", counts.get("q") === 1);
+  ok("tracked brands and unknown names are not", !counts.has("a") && counts.size === 3, String(counts.size));
+  ok("under the floor an ignore still folds", ir.ignoreSurfaces("not a product in this category", 0.02, ir.PICKED_FLAG_MIN - 1) === "fold");
+  ok("at the floor it surfaces, whatever its share", ir.ignoreSurfaces("not a product in this category", 0.001, ir.PICKED_FLAG_MIN) === "flag");
+  ok("no count leaves the old rule unchanged", ir.ignoreSurfaces("not a product in this category", 0.02) === "fold" && ir.ignoreSurfaces("own-context brand - x", 0) === "flag" && ir.ignoreSurfaces("x", 0.1) === "flag");
+  ok("the tooltip states the count", ir.flaggedIgnorePrefix("x", 0.02, 12).includes("in 12 coded answers") && !ir.flaggedIgnorePrefix("x", 0.02).includes("coded answers"));
+  console.log("25. ignored names the AI picks: " + (process.exitCode ? "FAILED" : "ALL PASS"));
+}

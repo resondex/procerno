@@ -1,6 +1,7 @@
 import { store } from "../store";
 import { matchKey } from "../brand_key";
-import { ignoreSurfaces } from "../ignore_rules";
+import { ignoreSurfaces, PICKED_FLAG_MIN } from "../ignore_rules";
+import { loadPickedIgnores } from "./picked_ignores";
 import { servedVerdicts, type ServedVerdict } from "./dict_suggest";
 import type { DictionaryEntry, Project } from "../types";
 
@@ -42,7 +43,10 @@ export interface DictDecisionName {
         share: number;
         shown: ServedShown;
         /** Why a surfaced ignore surfaced (the ignoreSurfaces classes). */
-        surfacedBy: "own_context" | "inherited" | "volume" | null;
+        surfacedBy: "own_context" | "inherited" | "volume" | "picked" | null;
+        /** Coded answers picking it or sending buyers to it, when the board
+         * had coded answers to count (picked_ignores). */
+        picked?: number;
         /** The board marked it "- review" (a guard-measured merge, a short
          * form, or a surfaced ignore). */
         flagged: boolean;
@@ -124,6 +128,10 @@ export async function snapshotServed(project: Project): Promise<Snapshot> {
     entries.map((e) => e.canonical)
   );
   const obs = parseObservations(project.brand_observations);
+  const pickedBy = await loadPickedIgnores(
+    project.id,
+    await store.getDictionary(project.id)
+  );
   const seedKeys = new Set(
     [project.brand, ...project.competitors].map((n) => matchKey(n))
   );
@@ -146,12 +154,15 @@ export async function snapshotServed(project: Project): Promise<Snapshot> {
     const share =
       obs.rows > 0 ? (obs.byName.get(e.canonical.trim().toLowerCase()) ?? 0) / obs.rows : 0;
     let shown: ServedShown = "pill";
-    let surfacedBy: "own_context" | "inherited" | "volume" | null = null;
+    let surfacedBy: "own_context" | "inherited" | "volume" | "picked" | null = null;
+    const picked = v.action === "ignore" ? pickedBy.get(e.id) ?? 0 : 0;
     if (v.action === "ignore") {
-      if (ignoreSurfaces(v.rationale, share) === "fold") shown = "auto_hidden";
+      if (ignoreSurfaces(v.rationale, share, picked) === "fold") shown = "auto_hidden";
       else {
         shown = "surfaced";
-        surfacedBy = /^own-context brand/.test(v.rationale)
+        surfacedBy = picked >= PICKED_FLAG_MIN
+          ? "picked"
+          : /^own-context brand/.test(v.rationale)
           ? "own_context"
           : /^follows "/.test(v.rationale) && share < 0.1
             ? "inherited"
@@ -163,6 +174,7 @@ export async function snapshotServed(project: Project): Promise<Snapshot> {
       share,
       shown,
       surfacedBy,
+      ...(picked > 0 ? { picked } : {}),
       flagged: shown === "surfaced" || /- review\)/.test(v.rationale),
     });
   }

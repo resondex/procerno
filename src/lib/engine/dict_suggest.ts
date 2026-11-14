@@ -4,6 +4,7 @@ import { apiKeyConfigured, openaiClient } from "./providers";
 import { store } from "../store";
 import { evidenceOwner } from "./observations";
 import { DICT_SUGGEST_MODEL } from "./models";
+import { loadPickedIgnores } from "./picked_ignores";
 import type { DictionaryEntry } from "../types";
 
 const CACHE_TTL_MS = 183 * 24 * 3600 * 1000; // ~6 months
@@ -64,6 +65,9 @@ export interface DictSuggestion {
   mergeIntoId: string | null;
   mergeIntoName: string | null;
   rationale: string;
+  /** Ignore rows only: coded answers that pick this name or send buyers to
+   * it (engine/picked_ignores). Absent when zero or nothing is coded. */
+  picked?: number;
 }
 
 /** What the model said about one name, cached forever (well, ~6 months).
@@ -813,8 +817,24 @@ export async function getDictionarySuggestions(
     });
   }
 
-  out.push(...(await rejectedVerdictRows(projectId, entries)));
-  return out;
+  out.push(...(await rejectedVerdictRows(projectId, entries, false)));
+  return withPicked(projectId, entries, out);
+}
+
+/** Attach the picked-ignore count to every ignore row (one narrow read of
+ * the coded answers; no model call). */
+async function withPicked(
+  projectId: string,
+  entries: DictionaryEntry[],
+  rows: DictSuggestion[]
+): Promise<DictSuggestion[]> {
+  if (!rows.some((r) => r.action === "ignore")) return rows;
+  const counts = await loadPickedIgnores(projectId, entries);
+  if (counts.size === 0) return rows;
+  return rows.map((r) => {
+    const n = r.action === "ignore" ? counts.get(r.entryId) ?? 0 : 0;
+    return n > 0 ? { ...r, picked: n } : r;
+  });
 }
 
 /** REJECTED entries' cached verdicts (one batch read, never a model call):
@@ -823,7 +843,8 @@ export async function getDictionarySuggestions(
  * by entry id, so these rows are inert to them. */
 async function rejectedVerdictRows(
   projectId: string,
-  entries: DictionaryEntry[]
+  entries: DictionaryEntry[],
+  attach = true
 ): Promise<DictSuggestion[]> {
   const rejected = entries.filter(
     (e) => e.status === "rejected" && e.canonical !== "Other"
@@ -849,7 +870,7 @@ async function rejectedVerdictRows(
       rationale: v.rationale,
     });
   }
-  return out;
+  return attach ? withPicked(projectId, entries, out) : out;
 }
 
 /** The v10 disposition rules (Tyler-calibrated, harness-validated), exported

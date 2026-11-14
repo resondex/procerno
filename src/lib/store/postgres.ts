@@ -1756,6 +1756,20 @@ export const pgStore: Store = {
     return rows.map((r) => answerCodesFromRow(r));
   },
 
+  async listAnswerPicks(runId, source) {
+    const sql = await db();
+    const rows = await sql`SELECT top_pick, destinations, redirect_to FROM answer_codes
+      WHERE run_id = ${runId} AND source = ${source}
+      AND (top_pick IS NOT NULL OR destinations IS NOT NULL OR redirect_to IS NOT NULL)
+      AND response_id NOT IN (SELECT r.id FROM responses r WHERE r.run_id = ${runId}
+        AND r.prompt_id IN (SELECT id FROM prompts WHERE staged = 1 OR replaced_by IS NOT NULL))`;
+    return rows.map((r) => ({
+      top_pick: (r.top_pick as string | null) ?? null,
+      destinations: r.destinations == null ? null : JSON.parse(r.destinations as string),
+      redirect_to: r.redirect_to == null ? null : JSON.parse(r.redirect_to as string),
+    }));
+  },
+
   async getCodesSource(projectId) {
     const sql = await db();
     const rows = await sql`SELECT codes_source FROM projects WHERE id = ${projectId}`;

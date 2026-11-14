@@ -19,12 +19,22 @@
  *   where they are almost always true variants.
  * - Everything else keeps the volume escalation: >=10% of answers is where
  *   a wrong ignore is costly, so those flag instead of folding.
+ * - PICKED ignores (2026-11-13): a name the coded answers pick, or send
+ *   buyers to, in PICKED_FLAG_MIN or more answers never folds, whatever
+ *   its share - the AI is treating it as a choice, so the ignore gets one
+ *   deliberate look (`picked` comes from engine/picked_ignores).
  */
+/** 10, not 3 (Tyler, 2026-11-13): at 3 a retailer's board surfaced 20
+ * carried product brands; at 10 the six live boards surface 7 names. */
+export const PICKED_FLAG_MIN = 10;
+
 export function ignoreSurfaces(
   rationale: string | null | undefined,
-  share: number
+  share: number,
+  picked = 0
 ): "fold" | "flag" {
   const rat = rationale ?? "";
+  if (picked >= PICKED_FLAG_MIN) return "flag";
   if (/^own-context brand/.test(rat)) return "flag";
   if (/^follows "/.test(rat) && share >= 0.03) return "flag";
   if (share >= 0.1) return "flag";
@@ -35,10 +45,17 @@ export function ignoreSurfaces(
  * reason THIS pill needs a look, per class. */
 export function flaggedIgnorePrefix(
   rationale: string | null | undefined,
-  share: number
+  share: number,
+  picked = 0
 ): string {
   const rat = rationale ?? "";
   const pct = Math.round(share * 100);
+  if (picked >= PICKED_FLAG_MIN) {
+    return (
+      `Ignored, but the AI picks it or sends buyers to it in ${picked} ` +
+      "coded answers. Confirm it is outside what you track, or drag it out."
+    );
+  }
   if (/^own-context brand/.test(rat)) {
     return (
       "The measurements say this lives in its own context - that is often " +
