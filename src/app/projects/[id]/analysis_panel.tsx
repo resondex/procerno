@@ -817,12 +817,18 @@ function ContestPanel({ p, ctx }: { p: Position; ctx: Ctx }) {
   // split is the next section, and "Share of picks" is "Your share of the
   // picks here" under another name.
   const figLabels = new Set((p.figures ?? []).map((f) => f.label));
-  const figs = (p.figures ?? []).filter(
-    (f) =>
-      !(brands.length > 0 && f.label === "Share of the picks here, by brand") &&
-      !(f.label === "Share of picks" && figLabels.has("Your share of the picks here")) &&
-      !f.label.startsWith("Picks outside the category, by")
-  );
+  // ... and a number served twice is listed once: the same label again, or
+  // "Answers calling it worth it" beside the "Worth it" row it restates.
+  const seenFig = new Set<string>();
+  const figs = (p.figures ?? []).filter((f) => {
+    if (brands.length > 0 && f.label === "Share of the picks here, by brand") return false;
+    if (f.label === "Share of picks" && figLabels.has("Your share of the picks here")) return false;
+    if (f.label.startsWith("Picks outside the category, by")) return false;
+    if (f.label === "Answers calling it worth it" && figLabels.has("Worth it")) return false;
+    if (seenFig.has(f.label)) return false;
+    seenFig.add(f.label);
+    return true;
+  });
   const you = p.youShare ?? "0%";
   const maxW = Math.max(1, ...brands.map((b) => pctNum(b.share)), pctNum(you));
   const sides = p.liftSides ?? ["your picks", "rivals' picks"];
