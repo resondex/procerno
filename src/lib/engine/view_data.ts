@@ -4,7 +4,7 @@ import { wilson } from "./metrics";
 import { cachedRunRevision } from "./run_revision";
 import { viewsOf, type ViewKey } from "./views";
 import { CONTEXT_JUDGE_MODEL, CONTEXT_JUDGE_VERSION, primeContextVerdicts } from "./context_judge";
-import { RESOLVE_VERSION } from "./brand_resolve";
+import { RESOLVE_VERSION, expandCoNamed } from "./brand_resolve";
 import { ENGINES, engineFacets, type EngineFacets } from "./providers";
 import type { ConditionKeysCache } from "./condition_groups";
 import type { AnswerCodes, DictionaryEntry, Intent, Project, Prompt, Run } from "../types";
@@ -365,7 +365,8 @@ async function readShared(run: Run, project: Project, source: string): Promise<S
   ]);
   return {
     source,
-    codes,
+    // A name carrying two tracked brands counts as naming both (rs3).
+    codes: expandCoNamed(codes, dictionary),
     responses: responses.map((r) => ({ id: r.id, prompt_id: r.prompt_id, model: r.model })),
     prompts,
     intents,

@@ -1,5 +1,6 @@
 import { matchKey } from "../brand_key";
-import { famTokens, familyHit } from "./brand_family";
+import { famTokens, familyHit, familySpans } from "./brand_family";
+import type { AnswerCodes } from "../types";
 import type { DictionaryEntry } from "../types";
 
 /**
@@ -32,8 +33,10 @@ import type { DictionaryEntry } from "../types";
 /** Bump when resolution changes for identical inputs (same names, same
  * dictionary): it rides every view cache key, so cached views recompute
  * once. rs2 (2026-11-13): family containment needs whole words - a form
- * that only splits a hyphenated word no longer claims the name. */
-export const RESOLVE_VERSION = "rs2";
+ * that only splits a hyphenated word no longer claims the name. rs3
+ * (2026-11-14): a name carrying two tracked brands counts as naming both
+ * (expandCoNamed). */
+export const RESOLVE_VERSION = "rs3";
 
 export type ResolvedStatus = "active" | "rejected" | "pending" | "unknown";
 
@@ -133,3 +136,87 @@ export function buildResolver(entries: DictionaryEntry[], judged?: Map<string, s
 }
 
 export type Resolver = ReturnType<typeof buildResolver>;
+
+/**
+ * A name that carries TWO tracked brands counts for both (Tyler,
+ * 2026-11-14): a card named with its bank and its network, a bundle named
+ * with both services. The resolver gives a name ONE entry (the longest
+ * form), so the other brand was never counted as named.
+ *
+ * `coNamed(raw)` lists the OTHER active entries a name carries: only for a
+ * name that is nobody's exact canonical or alias (those are decisions), and
+ * only when the other brand's form sits on different words than the entry
+ * the resolver picks - two forms reading the same words are one brand.
+ */
+export function buildCoNamed(entries: DictionaryEntry[]) {
+  const exact = new Set<string>();
+  for (const e of entries) for (const f of [e.canonical, ...e.aliases]) exact.add(matchKey(f));
+  const forms: { seq: string[]; entry: DictionaryEntry }[] = [];
+  for (const e of entries) {
+    if (e.status !== "active" || e.canonical === "Other") continue;
+    for (const f of [e.canonical, ...e.aliases]) forms.push({ seq: famTokens(f), entry: e });
+  }
+  const memo = new Map<string, DictionaryEntry[]>();
+  return function coNamed(raw: string): DictionaryEntry[] {
+    const k = matchKey(raw);
+    const hit = memo.get(k);
+    if (hit) return hit;
+    let out: DictionaryEntry[] = [];
+    if (!exact.has(k)) {
+      // Per entry, its longest form in the name and where that form sits.
+      const best = new Map<string, { entry: DictionaryEntry; len: number; spans: [number, number][] }>();
+      let primary: { entry: DictionaryEntry; len: number; spans: [number, number][] } | null = null;
+      for (const f of forms) {
+        const spans = familySpans(raw, f.seq);
+        if (spans.length === 0) continue;
+        const cur = best.get(f.entry.id);
+        const row = { entry: f.entry, len: f.seq.length, spans };
+        if (!cur || f.seq.length > cur.len) best.set(f.entry.id, row);
+        // The resolver's own choice: the longest form, first listed on a tie.
+        if (!primary || f.seq.length > primary.len) primary = row;
+      }
+      if (primary && best.size > 1) {
+        const p = best.get(primary.entry.id)!;
+        const apart = (a: [number, number], b: [number, number]) => a[1] <= b[0] || b[1] <= a[0];
+        out = [...best.values()]
+          .filter((b) => b.entry.id !== p.entry.id && b.spans.some((s) => p.spans.some((ps) => apart(s, ps))))
+          .map((b) => b.entry);
+      }
+    }
+    memo.set(k, out);
+    return out;
+  };
+}
+
+/** The coded rows with every two-brand name counted for both brands: where
+ * a mention carries a second tracked brand the answer does not otherwise
+ * name, a mention of that brand is added right after it, with the same
+ * framing and rank. Picks, exits and redirects are untouched - a pick stays
+ * with the one entry the resolver gives it. Rows without such a name are
+ * returned as they are (same object). Pure. */
+export function expandCoNamed(codes: AnswerCodes[], entries: DictionaryEntry[]): AnswerCodes[] {
+  const coNamed = buildCoNamed(entries);
+  const resolve = buildResolver(entries);
+  return codes.map((c) => {
+    const ms = c.mentions;
+    if (!ms || ms.length === 0) return c;
+    let named: Set<string> | null = null;
+    let out: typeof ms | null = null;
+    ms.forEach((m, i) => {
+      const extra = m?.brand ? coNamed(m.brand) : [];
+      if (extra.length === 0) {
+        out?.push(m);
+        return;
+      }
+      named ??= new Set(ms.map((x) => (x?.brand ? resolve(x.brand).key : "")));
+      out ??= ms.slice(0, i);
+      out.push(m);
+      for (const e of extra) {
+        if (named.has(e.id)) continue;
+        named.add(e.id);
+        out.push({ ...m, brand: e.canonical });
+      }
+    });
+    return out && (out as typeof ms).length !== ms.length ? { ...c, mentions: out } : c;
+  });
+}

@@ -77,6 +77,21 @@ export function familyHit(raw: string, seq: string[]): boolean {
   return familyContains(famTokens(raw), seq) && !splitsCompound(raw, seq);
 }
 
+/** Token spans [start, end) where `seq` sits in `raw` as a family hit: the
+ * containment familyContains accepts, on whole words. Empty when it is no
+ * hit. Used to tell two brands named side by side in one name from two
+ * forms that read the same words. */
+export function familySpans(raw: string, seq: string[]): [number, number][] {
+  if (!familyHit(raw, seq)) return [];
+  const hay = famTokens(raw);
+  const out: [number, number][] = [];
+  outer: for (let i = 0; i + seq.length <= hay.length; i++) {
+    for (let j = 0; j < seq.length; j++) if (hay[i + j] !== seq[j]) continue outer;
+    out.push([i, i + seq.length]);
+  }
+  return out;
+}
+
 /** Evidence attribution, shared by the co-occurrence guard and the
  * examples view so their numbers can never disagree: a detected name is
  * evidence for a form only under LEAD-PRESERVING containment (one name

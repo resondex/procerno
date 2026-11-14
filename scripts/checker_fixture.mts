@@ -1433,3 +1433,31 @@ console.log("17. s56 advocacy criticism containment");
   ok("the tooltip states the count", ir.flaggedIgnorePrefix("x", 0.02, 12).includes("in 12 coded answers") && !ir.flaggedIgnorePrefix("x", 0.02).includes("coded answers"));
   console.log("25. ignored names the AI picks: " + (process.exitCode ? "FAILED" : "ALL PASS"));
 }
+
+// ---------------------------------------------------------------------------
+// 26. A name carrying two tracked brands counts for both (2026-11-14).
+{
+  const ok = (label: string, cond: boolean, extra = "") => { if (!cond) { console.error(`   FAIL ${label} ${extra}`); process.exitCode = 1; } else console.log(`   ok   ${label} ${extra}`); };
+  const br = await import(`${REPO}/src/lib/engine/brand_resolve`);
+  const E = (id: string, canonical: string, status: string, aliases: string[] = []) => ({ id, project_id: "p", canonical, aliases, display_name: null, status, confirmed: [], parent: null, role: null, analyzed: true, version: 1, created_at: "" });
+  const board = [E("bank", "Alpha Bank", "active", ["alpha bank rewards card"]), E("net", "Beta Network", "active", ["beta signature"]), E("svc", "Gamma+", "active"), E("del", "Delta", "active"), E("ign", "Omega", "rejected"), E("combo", "Alpha Bank Beta Signature Duo", "rejected")];
+  const co = br.buildCoNamed(board as never);
+  const ids = (n: string) => co(n).map((e: { id: string }) => e.id).join();
+  ok("a card named with its bank and its network carries the other brand", ["net", "bank"].includes(ids("Alpha Bank Cash Beta Signature Card")) , ids("Alpha Bank Cash Beta Signature Card"));
+  ok("a slash pair carries the other brand", ["svc", "del"].includes(ids("Gamma+/Delta")), ids("Gamma+/Delta"));
+  ok("one brand's own product carries nobody else", ids("Alpha Bank Cash Card") === "");
+  ok("two forms of one brand are one brand", ids("Alpha Bank Rewards Card Plus") === "");
+  ok("an ignored brand is never added", ids("Alpha Bank Omega Card") === "");
+  ok("a name that is itself on the board is a decision", ids("Alpha Bank Beta Signature Duo") === "");
+  const M = (brand: string, framing = "recommended", rank = 1) => ({ brand, framing, rank });
+  const code = (mentions: unknown[]) => ({ response_id: "r", top_pick: "Alpha Bank Cash Beta Signature Card", mentions });
+  const rows = [code([M("Alpha Bank Cash Beta Signature Card"), M("Delta", "neutral", 2)]), code([M("Alpha Bank Cash Beta Signature Card"), M("Beta Network", "neutral", 2), M("Alpha Bank")]), code([M("Delta")])];
+  const out = br.expandCoNamed(rows as never, board as never);
+  const names = (i: number) => (out[i].mentions ?? []).map((m: { brand: string }) => m.brand).join(" | ");
+  ok("the other brand is added right after, same framing and rank", out[0].mentions.length === 3 && out[0].mentions[1].framing === "recommended" && out[0].mentions[1].rank === 1 && ["Beta Network", "Alpha Bank"].includes(out[0].mentions[1].brand), names(0));
+  ok("a brand the answer already names is not added twice", out[1].mentions.length === 3, names(1));
+  ok("rows without a two-brand name are returned untouched", out[2] === rows[2]);
+  ok("the pick is left alone and the input is not changed", out[0].top_pick === rows[0].top_pick && rows[0].mentions.length === 2);
+  console.log("26. two-brand names: " + (process.exitCode ? "FAILED" : "ALL PASS"));
+}
+
