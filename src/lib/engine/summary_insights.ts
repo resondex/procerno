@@ -514,6 +514,9 @@ export interface InsightInputs {
     groups: { label: string; answers: number; wall: boolean; themed?: true; wording?: string; byRival: Record<string, number>; refs: AnswerRef[] }[];
     open: RateCell | null;
   } | null;
+  /** bs24: per argument, its share of the answers that pick you and of those
+   * that pick a rival, in each pick contest (the reasons view's verdicts). */
+  argSides: { code: string; types: { type: ArgContest; you: RateCell; other: RateCell }[] }[];
   /** bs16: the answers behind the detectors' numerators (in-process only). */
   ex?: ExampleIndex;
   /** bs23: the rival keys the run asked a direct matchup against (entity
@@ -558,6 +561,13 @@ export async function insightInputs(data: ViewData, request: ViewRequest = {}): 
     qs.set(intent.id, q);
   }
   const reasons = computeReasons(data, engines);
+  const argSides: InsightInputs["argSides"] = reasons.codes.map((c) => ({
+    code: c.key,
+    types: ARG_CONTESTS.flatMap((type) => {
+      const v = c.byVerdict[type];
+      return v?.you && v?.other ? [{ type, you: v.you, other: v.other }] : [];
+    }),
+  }));
   const criteria = reasons.types.find((t) => t.key === "criteria_taught");
   const taught =
     criteria && criteria.answers >= MIN_BASE
@@ -758,6 +768,7 @@ export async function insightInputs(data: ViewData, request: ViewRequest = {}): 
     away: rules.answers > 0 ? { groups: awayGroups, cells: rules.cellsBySide.away, grouping: rules.grouping, ...(awayLead ? { lead: awayLead } : {}) } : null,
     enginePicks: [...byBrand.values()].sort((a, b) => b.total - a.total || a.key.localeCompare(b.key)),
     h2hArgs,
+    argSides,
     leak,
     problem,
     exception,
@@ -2005,6 +2016,65 @@ function neutralizedDifferentiator(inp: InsightInputs): Insight | null {
   };
 }
 
+/* ------------------- bs24: one argument, two directions ------------------- */
+
+/** The pick contests an argument is read in: both sides are a product
+ * picked, so "comes up when you are picked" means the same thing in each.
+ * Yes/no question types (Value, worries) are left out on purpose: there an
+ * argument's share by verdict follows which worry or product line the
+ * answers are about, not who the argument favours. */
+const ARG_CONTESTS = ["headline", "head_to_head_entity", "offensive_capture"] as const;
+type ArgContest = (typeof ARG_CONTESTS)[number];
+const ARG_CONTEST: Record<ArgContest, { when: string; row: string }> = {
+  headline: { when: "when buyers ask what to buy", row: ROW_NAME.open },
+  head_to_head_entity: { when: "in direct matchups", row: ROW_NAME.h2h },
+  offensive_capture: { when: "when rivals' customers ask where to switch", row: ROW_NAME.leavers },
+};
+
+/**
+ * An argument that comes up more when you are picked in one pick contest and
+ * more when a rival is picked in another. Each side needs MIN_BASE answers
+ * in both contests and non-overlapping ranges in both. Effect = the smaller
+ * of the two gaps (both directions must be real for the finding to be one).
+ */
+function argumentFlip(inp: InsightInputs): Insight | null {
+  type Side = { type: ArgContest; you: RateCell; other: RateCell; gap: number };
+  let best: { code: string; help: Side; hurt: Side; effect: number } | null = null;
+  for (const c of inp.argSides) {
+    const sides: Side[] = c.types
+      .filter((t) => t.you.n >= MIN_BASE && t.other.n >= MIN_BASE && (apart(t.you, t.other) || apart(t.other, t.you)))
+      .map((t) => ({ ...t, gap: rate(t.you) - rate(t.other) }));
+    const help = sides.filter((x) => x.gap > 0).sort((a, b) => b.gap - a.gap || a.type.localeCompare(b.type))[0];
+    const hurt = sides.filter((x) => x.gap < 0).sort((a, b) => a.gap - b.gap || a.type.localeCompare(b.type))[0];
+    if (!help || !hurt) continue;
+    const effect = Math.min(help.gap, -hurt.gap);
+    if (!best || effect > best.effect || (effect === best.effect && c.code.localeCompare(best.code) < 0)) best = { code: c.code, help, hurt, effect };
+  }
+  if (!best) return null;
+  const { code, help, hurt } = best;
+  const cap = code.charAt(0).toUpperCase() + code.slice(1);
+  const up = (x: string) => x.charAt(0).toUpperCase() + x.slice(1);
+  const H = ARG_CONTEST[help.type];
+  const U = ARG_CONTEST[hurt.type];
+  const refs = (t: ArgContest, side: "you" | "other") =>
+    t === "headline" ? inp.ex?.argued(code, side === "you" ? "you" : "others") : t === "head_to_head_entity" ? inp.ex?.h2hArg(code, side === "you" ? "wins" : "losses") : undefined;
+  return {
+    key: "argument_flip",
+    kind: "argument",
+    title: `${cap} works for you in one place and against you in another`,
+    body: `${up(H.when)}, ${code} comes up more in answers that pick you (${pct(help.you)}) than in answers that pick a rival (${pct(help.other)}). ${up(U.when)} it is the other way round: ${pct(hurt.you)} of answers that pick you, ${pct(hurt.other)} of answers that pick a rival.`,
+    foot: `${H.row}: ${counts(help.you)} picking you vs ${counts(help.other)} picking a rival. ${U.row}: ${counts(hurt.you)} vs ${counts(hurt.other)}. Only questions where the AI picks a product are compared.`,
+    look: { pill: "stations", station: hurt.type === "headline" ? "consideration" : "comparison", label: `Stations - ${U.row}` },
+    effect: best.effect,
+    viz: vizOf([
+      withRefs(insightBar(`${H.row}: you picked`, help.you), refs(help.type, "you")),
+      withRefs(insightBar(`${H.row}: rival picked`, help.other), refs(help.type, "other")),
+      withRefs(insightBar(`${U.row}: you picked`, hurt.you), refs(hurt.type, "you")),
+      withRefs(insightBar(`${U.row}: rival picked`, hurt.other, undefined, true), refs(hurt.type, "other")),
+    ]),
+  };
+}
+
 /* ------------------------- bs8: conversion vs rival ------------------------- */
 
 /**
@@ -2376,6 +2446,7 @@ export function rankedInsights(s: Summary, inp: InsightInputs): Insight[] {
     engineHeadToHeadFlip(s, inp.ex),
     enginePickConcentration(s, inp),
     neutralizedDifferentiator(inp),
+    argumentFlip(inp),
     conversionVsRival(s, inp.ex),
     unaskedRival(s, inp, inp.ex),
     leakPicks(inp),
