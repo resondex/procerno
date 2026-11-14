@@ -31,6 +31,52 @@ export function familyContains(hay: string[], seq: string[]): boolean {
   return hay[0] === seq[0] || hay.length <= 2;
 }
 
+/** A hyphenated word is ONE word: a brand form that covers only part of it
+ * is a different name that merely shares letters (a parent company whose
+ * hyphenated name starts with one of its brands' short forms, a
+ * "<brand>-style" descriptor). True when `seq` occurs in `raw` only by
+ * splitting a hyphenated word - every occurrence touches a hyphenated word
+ * it does not cover whole. A form that is itself the whole hyphenated word,
+ * or that sits on plain words, is unaffected. Pure. */
+export function splitsCompound(raw: string, seq: string[]): boolean {
+  if (seq.length === 0) return false;
+  const toks: string[] = [];
+  const word: number[] = [];
+  const size: number[] = [];
+  const hyphenated: boolean[] = [];
+  norm(raw)
+    .split(/\s+/)
+    .filter(Boolean)
+    .forEach((w, wi) => {
+      const ts = famTokens(w);
+      size[wi] = ts.length;
+      hyphenated[wi] = /[a-z0-9+][-\u2010\u2011\u2013][a-z0-9+]/.test(w);
+      for (const t of ts) {
+        toks.push(t);
+        word.push(wi);
+      }
+    });
+  let found = false;
+  outer: for (let i = 0; i + seq.length <= toks.length; i++) {
+    for (let j = 0; j < seq.length; j++) if (toks[i + j] !== seq[j]) continue outer;
+    found = true;
+    const covered = new Map<number, number>();
+    for (let j = 0; j < seq.length; j++) covered.set(word[i + j], (covered.get(word[i + j]) ?? 0) + 1);
+    let whole = true;
+    for (const [wi, n] of covered) if (hyphenated[wi] && n !== size[wi]) whole = false;
+    if (whole) return false;
+  }
+  return found;
+}
+
+/** Family membership of a name AS WRITTEN: familyContains over its tokens,
+ * and the form must sit on whole words (splitsCompound). The one test the
+ * observations, the observed-alias step, the board's family layer and the
+ * read-time resolver share. */
+export function familyHit(raw: string, seq: string[]): boolean {
+  return familyContains(famTokens(raw), seq) && !splitsCompound(raw, seq);
+}
+
 /** Evidence attribution, shared by the co-occurrence guard and the
  * examples view so their numbers can never disagree: a detected name is
  * evidence for a form only under LEAD-PRESERVING containment (one name

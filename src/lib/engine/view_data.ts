@@ -4,6 +4,7 @@ import { wilson } from "./metrics";
 import { cachedRunRevision } from "./run_revision";
 import { viewsOf, type ViewKey } from "./views";
 import { CONTEXT_JUDGE_MODEL, CONTEXT_JUDGE_VERSION, primeContextVerdicts } from "./context_judge";
+import { RESOLVE_VERSION } from "./brand_resolve";
 import { ENGINES, engineFacets, type EngineFacets } from "./providers";
 import type { ConditionKeysCache } from "./condition_groups";
 import type { AnswerCodes, DictionaryEntry, Intent, Project, Prompt, Run } from "../types";
@@ -458,6 +459,8 @@ export async function cachedView<T>(
   if (opts.setupDecision) extras.push(await store.getSetupDecision(project.id));
   if (opts.codeGroups) extras.push(await store.getCodeGroups(project.id));
   if (opts.judge) extras.push(`ctx:${CONTEXT_JUDGE_VERSION}:${CONTEXT_JUDGE_MODEL}`);
+  // Every view resolves names through brand_resolve; its version re-keys them all.
+  extras.push(`resolve:${RESOLVE_VERSION}`);
   const projectHash = createHash("sha256")
     .update(JSON.stringify(extras.length === 0 ? [project.brand, project.competitors, project.engine_set] : [project.brand, project.competitors, project.engine_set, ...extras]))
     .digest("hex")

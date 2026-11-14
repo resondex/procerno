@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import { matchKey } from "../brand_key";
 import { store } from "../store";
 import { cachedRunRevision } from "./run_revision";
-import { buildResolver } from "./brand_resolve";
+import { RESOLVE_VERSION, buildResolver } from "./brand_resolve";
 import { BRAND_SUMMARY_VERSION, sharedBrandSummary, type BrandSummaryView, type SummaryBrand } from "./brand_summary";
 import { ANALYSIS_MAP_VERSION, sharedAnalysisMap, type MapCellStat } from "./analysis_map";
 import { computeHeadline } from "./headline";
@@ -1999,7 +1999,7 @@ export async function computeBriefCached(run: Run, project: Project, request: Br
   if (!source) return null;
   const rev = await cachedRunRevision(run.id);
   const setupDecision = await store.getSetupDecision(project.id);
-  const extras = [setupDecision, `ctx:${CONTEXT_JUDGE_VERSION}:${CONTEXT_JUDGE_MODEL}`];
+  const extras = [setupDecision, `ctx:${CONTEXT_JUDGE_VERSION}:${CONTEXT_JUDGE_MODEL}`, `resolve:${RESOLVE_VERSION}`];
   const projectHash = createHash("sha256")
     .update(JSON.stringify([project.brand, project.competitors, project.engine_set, ...extras]))
     .digest("hex")

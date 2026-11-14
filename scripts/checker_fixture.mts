@@ -1345,3 +1345,67 @@ console.log("17. s56 advocacy criticism containment");
   ok("class-angle comparison cells key apart too", inst.phrasingCacheKey(args, { ...cls, stage: "comparison" }) !== inst.phrasingCacheKey(args, cls));
   console.log("23. head-to-head name order: " + (process.exitCode ? "FAILED" : "ALL PASS"));
 }
+
+// 24. Dictionary root causes (2026-11-13): the four entries patched by hand
+// after the independent-read audit, replayed against the engine rules that
+// now prevent them. Pure functions only - no store, no model.
+{
+  const ok = (label: string, cond: boolean, extra = "") => { if (!cond) { console.error(`   FAIL ${label} ${extra}`); process.exitCode = 1; } else console.log(`   ok   ${label} ${extra}`); };
+  const fam = await import(`${REPO}/src/lib/engine/brand_family`);
+  const br = await import(`${REPO}/src/lib/engine/brand_resolve`);
+  const ds = await import(`${REPO}/src/lib/engine/dict_suggest`);
+  const E = (id: string, canonical: string, status: string, aliases: string[] = []) => ({ id, project_id: "p", canonical, aliases, display_name: null, status, confirmed: [], parent: null, role: null, analyzed: true, version: 1, created_at: "" });
+  const T = fam.famTokens;
+
+  // Whole words: a form that only splits a hyphenated word is another name.
+  ok("a short form inside a hyphenated parent name splits it", fam.splitsCompound("Frito-Lay Classic Mix", T("frito")) === true);
+  ok("the whole hyphenated word is not a split", fam.splitsCompound("Frito-Lay Classic Mix", T("frito-lay")) === false);
+  ok("plain words are never a split", fam.splitsCompound("Fritos Scoops", T("fritos")) === false && fam.splitsCompound("Frito Pie", T("frito")) === false);
+  ok("a form absent from the name is not a split", fam.splitsCompound("Lay's Classic", T("frito")) === false);
+  ok("an apostrophe form inside a hyphenated word splits it", fam.splitsCompound("Frito-Lay's snacks", T("lay's")) === true);
+  ok("a longer alias splitting a suffix falls back to the shorter whole-word form", fam.familyHit("Samsung Galaxy A-series", T("samsung galaxy a")) === false && fam.familyHit("Samsung Galaxy A-series", T("samsung galaxy")) === true);
+  ok("a second, whole-word occurrence still counts", fam.splitsCompound("Jira-style boards for Jira", T("jira")) === false);
+  ok("non-breaking and en-dash hyphens count as hyphens", fam.splitsCompound("Frito‑Lay", T("frito")) === true && fam.splitsCompound("Frito–Lay", T("frito")) === true);
+  ok("a slash is not a hyphen", fam.splitsCompound("Disney+/Hulu bundle", T("hulu")) === false);
+
+  // Read-time resolution (case 1).
+  const snack = [E("f", "Fritos", "active", ["frito", "fritos scoops"]), E("l", "Lay's", "active", ["lays"]), E("d", "Doritos", "active", ["dorito"])];
+  const rs = br.buildResolver(snack);
+  for (const n of ["Frito-Lay", "Frito-Lay Classic Mix", "Frito-Lay Baked & Popped Mix", "Frito-Lay Variety Pack", "Frito-Lay's"]) {
+    ok(`"${n}" counts for no single brand`, rs(n).status === "unknown", `${rs(n).name} [${rs(n).status}]`);
+  }
+  for (const [n, id] of [["Fritos Scoops", "f"], ["Frito Pie", "f"], ["Fritos Chili Cheese", "f"], ["Lay's Classic", "l"], ["Doritos Cool Ranch", "d"]] as [string, string][]) {
+    ok(`"${n}" still resolves to its brand`, rs(n).entry?.id === id, rs(n).name);
+  }
+  ok("the resolver carries a version for the view caches", typeof br.RESOLVE_VERSION === "string" && br.RESOLVE_VERSION.length > 0);
+
+  // The board's family layer: a hyphenated parent name is its own root.
+  const P = (id: string, canonical: string) => E(id, canonical, "pending");
+  const plan = ds.buildFamilyPlan([P("p1", "Frito-Lay"), P("p2", "Frito-Lay Classic Mix"), P("p3", "Fritos Flavor Twists")] as never, snack as never);
+  ok("a hyphenated parent name is not merged into the brand mechanically", !plan.activeMerge.has("p1") && !plan.activeMerge.has("p2"));
+  ok("its longer forms follow it as their root", plan.rootOf.get("p2") === "p1");
+  ok("a real variant still merges mechanically", plan.activeMerge.get("p3") === "Fritos");
+
+  // Content never merges into the service that carries it (case 2).
+  const title = { action: "merge", merge_into: "Hulu", relationship: "content_of", rationale: "airs on a channel the service carries (named without \"Hulu\" in 6% of 110 answers - review)", layer: "guard_kept", alone: 0.06, n: 110 };
+  const flipped = ds.contentVerdict(title);
+  ok("a content merge is served as ignore", flipped?.action === "ignore" && flipped?.merge_into === null && flipped?.layer === "guard_flip");
+  ok("the record keeps what the model said", flipped?.raw?.action === "merge" && flipped?.raw?.merge_into === "Hulu" && flipped?.raw?.relationship === "content_of");
+  ok("the ignore is not review-flagged and reads back as a guard flip", !/- review\)/.test(flipped?.rationale ?? "") && ds.verdictLayer(flipped).layer === "guard_flip");
+  for (const rel of ["same_offering", "product_of", "affiliated"]) ok(`a ${rel} merge is left alone`, ds.contentVerdict({ ...title, relationship: rel }) === null);
+  ok("an ignore or approve is left alone", ds.contentVerdict({ action: "ignore", merge_into: null, relationship: "none", rationale: "" }) === null && ds.contentVerdict({ action: "approve", merge_into: null, relationship: "none", rationale: "" }) === null);
+
+  // A leading short form is flagged with what the alias would claim (case 3).
+  const sets = [
+    ["amazon", "amazon prime video", "amazon fire tv"], ["amazon fire tv", "netflix"], ["amazon music", "amazon"],
+    ["amazon prime video", "amazon prime video 4k"], ["amazon kids+", "amazon-owned studio"], ["amazon freevee"],
+  ];
+  const reach = ds.shortFormReach("Amazon", ["Amazon Prime Video", "prime video", "amazon prime"], sets, new Set(["amazon freevee"]));
+  ok("reach counts other names led by the short form", reach.names === 3 && reach.answers === 4, JSON.stringify(reach));
+  ok("the target's own forms, placed names and hyphen compounds are left out", !reach.top.some((n: string) => /prime video|freevee|owned/.test(n)), reach.top.join());
+  ok("most-named first", reach.top[0] === "amazon fire tv", reach.top.join());
+  const note = ds.shortFormNote("Amazon", reach);
+  ok("the note carries the board's review marker and the count", /- review\)$/.test(note) && note.includes("3 other names") && note.includes("\"amazon fire tv\""), note);
+  ok("with nothing to claim the note still flags", /- review\)$/.test(ds.shortFormNote("Sling", { names: 0, top: [] })));
+  console.log("24. dictionary root causes: " + (process.exitCode ? "FAILED" : "ALL PASS"));
+}

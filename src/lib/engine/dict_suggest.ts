@@ -126,7 +126,7 @@ export interface FamilyPlan {
 }
 
 export { famTokens } from "./brand_family";
-import { containsSeq, famTokens } from "./brand_family";
+import { containsSeq, famTokens, splitsCompound } from "./brand_family";
 
 /** Alternate-name forms declared inside a tracked name's parenthetical:
  * "Max (HBO)" -> [max], [hbo]; "GitHub (Issues/Projects)" -> [github],
@@ -164,8 +164,11 @@ export function buildFamilyPlan(
   for (const p of pending) {
     const hay = toks.get(p.id)!;
     let best: Head | null = null;
+    // Whole words only (splitsCompound): a name whose hyphenated word merely
+    // starts with a tracked form is a different name, not that brand's
+    // variant, and must reach the model as its own root.
     for (const { seq, canonical } of activeSeqs) {
-      if (containsSeq(hay, seq) && (!best || seq.length > best.len)) {
+      if (containsSeq(hay, seq) && !splitsCompound(p.canonical, seq) && (!best || seq.length > best.len)) {
         best = { kind: "active", key: canonical, len: seq.length };
       }
     }
@@ -175,6 +178,7 @@ export function buildFamilyPlan(
       if (
         qs.length < hay.length &&
         containsSeq(hay, qs) &&
+        !splitsCompound(p.canonical, qs) &&
         (!best || qs.length > best.len)
       ) {
         best = { kind: "pending", key: q.id, len: qs.length };
@@ -198,6 +202,68 @@ export function buildFamilyPlan(
     else if (r.root && r.root !== p.id) plan.rootOf.set(p.id, r.root);
   }
   return plan;
+}
+
+/** Content is never the service that carries it (Tyler, 2026-11-13): a
+ * title, programme or studio merged into a service counts every mention of
+ * the title as a mention of the service, and titles are not exclusive. A
+ * merge the model typed content_of is served as ignore, whatever the
+ * co-occurrence bands say. Pure; null when the verdict is not one. */
+export function contentVerdict(v: CachedVerdict): CachedVerdict | null {
+  if (v.action !== "merge" || v.relationship !== "content_of") return null;
+  return {
+    action: "ignore",
+    merge_into: null,
+    relationship: "none",
+    layer: "guard_flip",
+    ...(v.alone !== undefined ? { alone: v.alone } : {}),
+    ...(v.n !== undefined ? { n: v.n } : {}),
+    raw: v.raw ?? { action: v.action, merge_into: v.merge_into, relationship: v.relationship },
+    rationale: `content carried by "${v.merge_into}", not an offering - a title never counts for the service it is on`,
+  };
+}
+
+/** What a leading short form would claim as an alias: the other observed
+ * names that start with it and are not already forms of the target. As an
+ * alias the short form becomes a family head, so every one of them would
+ * count as the target - the reviewer sees them before deciding. Pure. */
+export function shortFormReach(
+  short: string,
+  targetForms: string[],
+  brandSets: Iterable<Iterable<string>>,
+  /** Names (lowercased) that already have their own place on the board:
+   * an exact entry or alias outranks a family head, so the alias would
+   * not move them. */
+  placed: Set<string> = new Set()
+): { names: number; answers: number; top: string[] } {
+  const sat = famTokens(short);
+  const forms = targetForms.map(famTokens).filter((f) => f.length > sat.length);
+  const counts = new Map<string, { form: string; answers: number }>();
+  let answers = 0;
+  for (const set of brandSets) {
+    let any = false;
+    for (const b of set) {
+      const t = famTokens(b);
+      if (t.length <= sat.length || !sat.every((x, i) => t[i] === x)) continue;
+      if (placed.has(norm(b))) continue;
+      if (splitsCompound(b, sat) || forms.some((f) => containsSeq(t, f))) continue;
+      any = true;
+      const k = t.join(" ");
+      const g = counts.get(k) ?? { form: b, answers: 0 };
+      g.answers++;
+      counts.set(k, g);
+    }
+    if (any) answers++;
+  }
+  const top = [...counts.values()].sort((a, b) => b.answers - a.answers).slice(0, 3).map((g) => g.form);
+  return { names: counts.size, answers, top };
+}
+
+/** The review note on a leading short form's merge. */
+export function shortFormNote(short: string, reach: { names: number; top: string[] } | null): string {
+  if (!reach || reach.names === 0) return "(leading word of the brand's name on its own - review)";
+  const eg = reach.top.map((n) => `"${n}"`).join(", ");
+  return `(leading word of the brand's name on its own - as an alias it would also count ${reach.names} other name${reach.names === 1 ? "" : "s"} starting with "${short}" as this brand, such as ${eg} - review)`;
 }
 
 /** Per-NAME cache key. Deliberately excludes the queue and active-set state:
@@ -442,6 +508,17 @@ export async function getDictionarySuggestions(
     // context, and merging would inflate the parent's share. Both drop to
     // ignore; only the middle band - genuinely referential use - keeps the
     // merge, annotated with the measured number for the human at the gate.
+    // Content first: a content_of merge is never served, with or without
+    // brand data to measure it.
+    for (const p of fresh) {
+      const flipped = contentVerdict(cached.get(p.id) ?? ({} as CachedVerdict));
+      if (!flipped) continue;
+      cached.set(p.id, flipped);
+      await store.cacheSet(nameKey(projectId, p.canonical), JSON.stringify(flipped), {
+        category,
+        projectId,
+      });
+    }
     const guarded = fresh.filter((p) => cached.get(p.id)?.action === "merge");
     if (guarded.length > 0) {
       const brandSets = await loadDiscoveryBrandSets(projectId);
@@ -453,10 +530,15 @@ export async function getDictionarySuggestions(
           );
           // Short form of the brand itself: the target's name CONTAINS the
           // satellite's, so it is referential by construction and never
-          // guarded away. A maker-prefix identity ("Samsung" -> SAMSUNG
-          // Galaxy, "Amazon" -> AMAZON Prime Video - the tokens LEAD the
-          // target name) is the brand by definition: silent merge, no flag.
-          // A non-leading containment keeps the review flag.
+          // guarded away - but it is never silent either. A LEADING short
+          // form (the first word or words of the tracked name) used to
+          // merge with no flag as "the brand by definition"; that word is
+          // usually the maker's name, and as an alias it becomes a family
+          // head that files the maker's whole portfolio under one product
+          // (2026-11-13: device and store names counted as a streaming
+          // service). Whether the maker's name means this product is the
+          // reviewer's call per category, so the merge is flagged with what
+          // the alias would claim. A non-leading containment keeps its flag.
           {
             const satToks = famTokens(p.canonical);
             const tgtToks = famTokens(v.merge_into ?? "");
@@ -470,13 +552,27 @@ export async function getDictionarySuggestions(
                   seq.length === satToks.length &&
                   seq.every((t, i) => t === satToks[i])
               );
-              const verdict: CachedVerdict = leading || declared
+              const verdict: CachedVerdict = declared
                 ? { ...v, layer: "guard_short_form" }
-                : {
-                    ...v,
-                    layer: "guard_short_form",
-                    rationale: `${v.rationale} (short form of the brand name - review)`,
-                  };
+                : leading
+                  ? {
+                      ...v,
+                      layer: "guard_short_form",
+                      rationale: `${v.rationale} ${shortFormNote(
+                        p.canonical,
+                        shortFormReach(
+                          p.canonical,
+                          target ? [target.canonical, ...target.aliases] : [v.merge_into ?? ""],
+                          brandSets,
+                          new Set(entries.flatMap((e) => [e.canonical, ...e.aliases]).map(norm))
+                        )
+                      )}`,
+                    }
+                  : {
+                      ...v,
+                      layer: "guard_short_form",
+                      rationale: `${v.rationale} (short form of the brand name - review)`,
+                    };
               cached.set(p.id, verdict);
               await store.cacheSet(
                 nameKey(projectId, p.canonical),
@@ -618,6 +714,21 @@ export async function getDictionarySuggestions(
     // arithmetic: "IHG Premier" is Chase's even when a bare "Premier" root
     // was judged Citi's. Never re-derived from a family root.
     if (cached.get(p.id)?.layer === "judge") continue;
+    // A content_of merge cached before the content rule (2026-11-13) is
+    // served as ignore from here on. Family members are re-derived below.
+    {
+      const flipped = contentVerdict(cached.get(p.id) ?? ({} as CachedVerdict));
+      if (flipped && !plan.activeMerge.has(p.id) && !plan.rootOf.has(p.id)) {
+        cached.set(p.id, flipped);
+        writes.push(
+          store.cacheSet(nameKey(projectId, p.canonical), JSON.stringify(flipped), {
+            category,
+            projectId,
+          })
+        );
+        continue;
+      }
+    }
     const target = plan.activeMerge.get(p.id);
     if (target) {
       const want: CachedVerdict = {

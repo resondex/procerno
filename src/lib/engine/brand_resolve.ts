@@ -1,5 +1,5 @@
 import { matchKey } from "../brand_key";
-import { famTokens, familyContains } from "./brand_family";
+import { famTokens, familyHit } from "./brand_family";
 import type { DictionaryEntry } from "../types";
 
 /**
@@ -28,6 +28,12 @@ import type { DictionaryEntry } from "../types";
  * (1), (4) and a judged maker landing on an active entry put a name in the
  * category (B5: the top pick resolves to an approved dictionary brand).
  */
+
+/** Bump when resolution changes for identical inputs (same names, same
+ * dictionary): it rides every view cache key, so cached views recompute
+ * once. rs2 (2026-11-13): family containment needs whole words - a form
+ * that only splits a hyphenated word no longer claims the name. */
+export const RESOLVE_VERSION = "rs2";
 
 export type ResolvedStatus = "active" | "rejected" | "pending" | "unknown";
 
@@ -70,11 +76,10 @@ export function buildResolver(entries: DictionaryEntry[], judged?: Map<string, s
   const base = (raw: string, k: string): Resolved => {
     const e = exact.get(k);
     if (e) return { status: e.status, key: e.id, name: label(e), entry: e, via: "exact" };
-    const hay = famTokens(raw);
     let best: { seq: string[]; entry: DictionaryEntry } | null = null;
     for (const family of families) {
       for (const f of family) {
-        if (familyContains(hay, f.seq) && (!best || f.seq.length > best.seq.length)) best = f;
+        if (familyHit(raw, f.seq) && (!best || f.seq.length > best.seq.length)) best = f;
       }
       if (best) break;
     }

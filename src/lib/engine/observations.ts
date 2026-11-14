@@ -1,6 +1,6 @@
 import { store } from "../store";
 import { cleanSurface, matchKey } from "../brand_key";
-import { containsSeq, famTokens, familyContains } from "./brand_family";
+import { famTokens, familyHit } from "./brand_family";
 
 export { familyContains, evidenceOwner, coRefers } from "./brand_family";
 
@@ -36,10 +36,9 @@ export async function computeBrandObservations(projectId: string): Promise<{
     }
   }
   const familyEntry = (name: string): string | null => {
-    const hay = famTokens(name);
     let best: { entryId: string; len: number } | null = null;
     for (const { seq, entryId } of activeSeqs) {
-      if (familyContains(hay, seq) && (!best || seq.length > best.len)) {
+      if (familyHit(name, seq) && (!best || seq.length > best.len)) {
         best = { entryId, len: seq.length };
       }
     }
@@ -156,10 +155,9 @@ export async function refreshObservedAliases(projectId: string): Promise<{
   for (const [k, g] of counts) {
     if (known.has(k)) continue; // already matches something
     if (g.answers < 3 || g.answers >= floor) continue; // noise, or tray-sized
-    const hay = famTokens(g.form);
     let best: { entryId: string; len: number } | null = null;
     for (const { seq, entryId } of activeSeqs) {
-      if (familyContains(hay, seq) && (!best || seq.length > best.len)) {
+      if (familyHit(g.form, seq) && (!best || seq.length > best.len)) {
         best = { entryId, len: seq.length };
       }
     }
