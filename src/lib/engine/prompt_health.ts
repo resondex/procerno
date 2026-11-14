@@ -5,6 +5,7 @@ import { buildCanonicalizer } from "./metrics";
 import { apiKeyConfigured, openaiClient } from "./providers";
 import { PROMPT_HEALTH_MODEL } from "./models";
 import { promptsForRun } from "./surfaces";
+import { loadMatchupPromptsNotAsked } from "./matchups";
 import { healthChecks } from "./prompt_health_rule";
 import { buildResolver } from "./brand_resolve";
 import { cachedContextVerdicts } from "./context_judge";
@@ -97,6 +98,9 @@ interface BaseArgs {
   intents: Intent[];
   /** response id -> prompt id (bodies never needed). */
   responses: { id: string; prompt_id: string }[];
+  /** Live prompts this run never asked (a matchup that went live after it -
+   * matchups.matchupPromptsNotAsked). Absent = none. */
+  notAsked?: Set<string>;
 }
 
 /** Which of the run's questions are sent, and under which rule. */
@@ -104,7 +108,7 @@ function selectPrompts(args: BaseArgs) {
   const intentById = new Map(args.intents.map((i) => [i.id, i]));
   // Only prompts this run asked: a skip wave sending a worry prompt with
   // zero answers would let the model clear the flag its monthly wave set.
-  const asked = promptsForRun(args.run, args.prompts, args.intents);
+  const asked = promptsForRun(args.run, args.prompts, args.intents, args.notAsked);
   const picked: Prompt[] = [];
   let skipped = 0;
   const stale: string[] = [];
@@ -194,7 +198,7 @@ export function buildLegacyHealthInput(
 ): HealthInput {
   const canon = buildCanonicalizer(args.dictionary);
   // The legacy rule is theme-only, as it always was.
-  const unbranded = promptsForRun(args.run, args.prompts, args.intents);
+  const unbranded = promptsForRun(args.run, args.prompts, args.intents, args.notAsked);
   const sent = unbranded.filter((p) => p.theme !== "branded");
   const mentionsByResponse = new Map<string, string[]>();
   for (const m of args.mentions) {
@@ -318,11 +322,12 @@ export async function loadHealthInput(
   const run = await store.getRun(runId);
   if (!run) return null;
   const source = await store.getCodesSource(projectId);
-  const [prompts, intents, responses, dictionary] = await Promise.all([
+  const [prompts, intents, responses, dictionary, notAsked] = await Promise.all([
     store.listPrompts(projectId),
     store.listIntents(projectId),
     store.listResponseMeta(runId),
     store.getDictionary(projectId),
+    loadMatchupPromptsNotAsked(run),
   ]);
   const base = {
     project,
@@ -331,6 +336,7 @@ export async function loadHealthInput(
     intents,
     responses: responses.map((r) => ({ id: r.id, prompt_id: r.prompt_id })),
     dictionary,
+    notAsked,
   };
   if (source) {
     const codes = await store.listAnswerCodes(runId, source);
@@ -365,12 +371,13 @@ async function analyzeCoded(
   source: string,
   opts: { dry?: boolean }
 ): Promise<HealthResult> {
-  const [prompts, intents, responses, dictionary, codes] = await Promise.all([
+  const [prompts, intents, responses, dictionary, codes, notAsked] = await Promise.all([
     store.listPrompts(project.id),
     store.listIntents(project.id),
     store.listResponseMeta(run.id),
     store.getDictionary(project.id),
     store.listAnswerCodes(run.id, source),
+    loadMatchupPromptsNotAsked(run),
   ]);
   // Cached verdicts only - never a model call, in any environment.
   const { judged } = await cachedContextVerdicts({ project, dictionary, codes });
@@ -383,6 +390,7 @@ async function analyzeCoded(
     codes,
     dictionary,
     judged,
+    notAsked,
   });
   const sent = fit.checked.length;
   const flagged = fit.wordings.length;

@@ -401,7 +401,7 @@ export function conditionCard(src: CardSources, openCellId?: string): AnswerCard
   const top = a?.groups.find((x) => !isDefaultCondition(x.label)) ?? k?.away.find((x) => !isDefaultCondition(x.label)) ?? null;
   const headline = top
     ? `When the AI sends buyers away from ${brand}, the most common condition is "${top.label}"${top.routes[0] ? ` - it points them to ${top.routes[0].name}` : ""}.`
-    : `The AI hands the buyer a rule, not a winner - these are the conditions that decide it.`;
+    : `The AI rarely names one winner for every buyer - these are the conditions that decide it.`;
   return {
     kind: "condition",
     crumb: "What sends buyers away",
@@ -495,7 +495,7 @@ function conditionCardThemed(src: CardSources, openCellId?: string): AnswerCard 
     const top = a?.groups.find((x) => !isDefaultCondition(x.label)) ?? null;
     headline = top
       ? `When the AI sends buyers away from ${brand}, the most common condition is "${top.label}"${top.routes[0] ? ` - it points them to ${top.routes[0].name}` : ""}.`
-      : `The AI hands the buyer a rule, not a winner - these are the conditions that decide it.`;
+      : `The AI rarely names one winner for every buyer - these are the conditions that decide it.`;
   }
   return {
     kind: "condition",

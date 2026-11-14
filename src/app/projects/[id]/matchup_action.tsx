@@ -184,6 +184,56 @@ export function useMatchupQueued(rivalKey: string): boolean {
   return !!ctx?.queuedFor(rivalKey);
 }
 
+/** Both store drivers emit UTC; sqlite omits the T and Z. */
+function utcMs(ts: string): number {
+  const iso = ts.includes("T") ? ts : ts.replace(" ", "T");
+  return new Date(/[zZ]|[+-]\d\d:?\d\d$/.test(iso) ? iso : iso + "Z").getTime();
+}
+
+const norm = (s: string) => s.trim().toLowerCase();
+
+/**
+ * The swapped-out rival's note (2026-11-13). While a swap is queued, the
+ * rival it drops says its head-to-head questions stop after this wave; once
+ * the swap has gone live, it says from which wave they stopped - unless the
+ * rival has since come back (a live matchup again, or queued again). Matched
+ * by dictionary key, or by name / angle where a surface has only the name
+ * (the Map's head-to-head contest).
+ */
+export function useMatchupDropNote(rival: { key?: string | null; name?: string | null }): string | null {
+  const ctx = useMatchups();
+  const state = ctx?.state;
+  if (!state) return null;
+  const matches = (drop: NonNullable<MatchupEntry["drop"]>) =>
+    (!!rival.key && drop.id === rival.key) ||
+    (!!rival.name && (norm(drop.name) === norm(rival.name) || drop.angles.some((a) => norm(a) === norm(rival.name!))));
+  const queued = state.queue.find((e) => e.status === "queued" && e.drop && matches(e.drop));
+  if (queued) return `Its head-to-head questions stop after this wave - swapped for ${queued.rival.name}.`;
+  const dropKey = (e: MatchupEntry) => e.drop!.id;
+  const past = state.queue
+    .filter((e) => e.status === "live" && e.mode === "swap" && e.drop && e.wentLiveAt && matches(e.drop))
+    .sort((a, b) => utcMs(b.wentLiveAt!) - utcMs(a.wentLiveAt!))[0];
+  if (!past) return null;
+  // Back on the instrument since: no note.
+  const back =
+    state.current.some((m) => m.key === dropKey(past) || norm(m.name) === norm(past.drop!.name)) ||
+    state.queue.some((e) => e.status === "queued" && e.rival.id === dropKey(past));
+  if (back) return null;
+  const when = new Date(utcMs(past.wentLiveAt!)).toLocaleDateString(undefined, { month: "long", year: "numeric" });
+  return `Head-to-head questions stopped from the wave of ${when} - swapped for ${past.rival.name}.`;
+}
+
+/** The note as a quiet line; renders nothing when there is none. */
+export function MatchupDropNote({ rivalKey, name, className = "" }: { rivalKey?: string | null; name?: string | null; className?: string }) {
+  const note = useMatchupDropNote({ key: rivalKey, name });
+  if (!note) return null;
+  return (
+    <div className={`${T.cap} border-l-[3px] border-line pl-2 text-ink-3 ${className}`}>
+      {note}
+    </div>
+  );
+}
+
 function AskButton({ onClick }: { onClick: () => void }) {
   return (
     <button type="button" onClick={onClick} className="justify-self-start whitespace-nowrap rounded-lg bg-primary px-3 py-1 text-[13px] font-medium text-primary-ink hover:opacity-90">

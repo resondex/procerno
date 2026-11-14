@@ -1,6 +1,6 @@
 import { store } from "../store";
 import type { Intent, Prompt, Run, RunSurface } from "../types";
-import { activateQueuedMatchups } from "./matchups";
+import { activateQueuedMatchups, loadMatchupPromptsNotAsked, utcMs } from "./matchups";
 
 /**
  * Per-surface collection cadence (Tyler 2026-10-01). A run collects the
@@ -57,29 +57,28 @@ export function carriedPrompts(
 }
 
 /** THE collection choke point: the prompts a run asks. Every driver (live
- * runner, batch submission) and every progress denominator reads this. */
+ * runner, batch submission) and every progress denominator reads this.
+ * `notAsked`: prompt ids the run never asked although they are live now -
+ * an "Ask this matchup" set that went live after the run was created
+ * (matchups.matchupPromptsNotAsked). Absent or empty = unchanged. */
 export function promptsForRun(
   run: Pick<Run, "surfaces">,
   prompts: Prompt[],
-  intents: Intent[]
+  intents: Intent[],
+  notAsked?: Set<string>
 ): Prompt[] {
   return carriedPrompts(run, prompts, worryPromptIds(prompts, intents)).filter(
-    (p) => !p.retired
+    (p) => !p.retired && !(notAsked && notAsked.has(p.id))
   );
 }
 
 export async function loadRunPrompts(run: Run): Promise<Prompt[]> {
-  const [prompts, intents] = await Promise.all([
+  const [prompts, intents, notAsked] = await Promise.all([
     store.listPrompts(run.project_id),
     store.listIntents(run.project_id),
+    loadMatchupPromptsNotAsked(run),
   ]);
-  return promptsForRun(run, prompts, intents);
-}
-
-/** Both store drivers emit UTC; sqlite omits the T and Z, postgres has them. */
-function utcMs(ts: string): number {
-  const iso = ts.includes("T") ? ts : ts.replace(" ", "T");
-  return new Date(/[zZ]|[+-]\d\d:?\d\d$/.test(iso) ? iso : iso + "Z").getTime();
+  return promptsForRun(run, prompts, intents, notAsked);
 }
 
 export interface NextRunPlan {

@@ -66,6 +66,9 @@ export function computeQuestionFit(args: {
   codes: AnswerCodes[];
   dictionary: DictionaryEntry[];
   judged?: Map<string, string>;
+  /** Live prompts this run never asked (a matchup that went live after it -
+   * matchups.matchupPromptsNotAsked). Absent = none. */
+  notAsked?: Set<string>;
 }): FitResult {
   const resolve = buildResolver(args.dictionary, args.judged);
   const intentById = new Map(args.intents.map((i) => [i.id, i]));
@@ -86,7 +89,7 @@ export function computeQuestionFit(args: {
   }
   const byCell = new Map<string, { intent: Intent; rows: Tally[] }>();
   let unjudged = 0;
-  for (const prompt of promptsForRun(args.run, args.prompts, args.intents)) {
+  for (const prompt of promptsForRun(args.run, args.prompts, args.intents, args.notAsked)) {
     const intent = prompt.intent_id ? intentById.get(prompt.intent_id) : undefined;
     const t: Tally = { prompt, n: 0, on: 0, onIds: [], offIds: [] };
     for (const id of idsByPrompt.get(prompt.id) ?? []) {

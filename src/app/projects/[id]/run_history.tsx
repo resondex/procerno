@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import type { RunSchedule } from "@/lib/types";
-import type { WaveRow } from "@/app/api/projects/[id]/run_history/route";
+import type { QueuedMatchupLine, WaveRow } from "@/app/api/projects/[id]/run_history/route";
 import { T } from "./type_scale";
 
 /**
@@ -42,6 +42,19 @@ function day(ms: number): string {
 
 function plural(n: number, one: string, many = `${one}s`): string {
   return `${n.toLocaleString()} ${n === 1 ? one : many}`;
+}
+
+/** "a", "a and b", "a, b and c". */
+function names(list: string[]): string {
+  return list.length <= 1 ? (list[0] ?? "") : `${list.slice(0, -1).join(", ")} and ${list[list.length - 1]}`;
+}
+
+/** The line above the wave list while "Ask this matchup" changes wait for
+ * the next wave. */
+function queuedMatchupLine(q: QueuedMatchupLine[]): string | null {
+  if (q.length === 0) return null;
+  const replaced = q.flatMap((x) => (x.replaces ? [x.replaces] : []));
+  return `From the next wave: head to head against ${names(q.map((x) => x.name))}${replaced.length ? `, in place of ${names(replaced)}` : ""}.`;
 }
 
 /** The cron (api/cron) launches a scheduled wave at its daily 06:00 UTC check
@@ -97,6 +110,7 @@ export default function RunHistory({
   onChanged: () => void;
 }) {
   const [waves, setWaves] = useState<WaveRow[] | null>(null);
+  const [queuedNext, setQueuedNext] = useState<QueuedMatchupLine[]>([]);
   const [staff, setStaff] = useState(false);
   const [adminDelete, setAdminDelete] = useState(false);
   const [deleting, setDeleting] = useState<WaveRow | null>(null);
@@ -110,9 +124,10 @@ export default function RunHistory({
     let cancelled = false;
     fetch(`/api/projects/${projectId}/run_history`)
       .then((r) => (r.ok ? r.json() : Promise.reject(r.status)))
-      .then((d: { waves: WaveRow[]; staff: boolean; canDelete?: boolean }) => {
+      .then((d: { waves: WaveRow[]; staff: boolean; canDelete?: boolean; queuedNext?: QueuedMatchupLine[] }) => {
         if (cancelled) return;
         setWaves(d.waves);
+        setQueuedNext(d.queuedNext ?? []);
         setStaff(d.staff);
         setAdminDelete(!!d.canDelete);
         setFailed(false);
@@ -185,6 +200,7 @@ export default function RunHistory({
 
   const openWave = waves.some((w) => w.status === "pending" || w.status === "running" || w.status === "collected");
   const measuredComplete = waves.filter((w) => w.status === "complete").length;
+  const nextMatchups = queuedMatchupLine(queuedNext);
 
   return (
     <div className="grid gap-4">
@@ -192,6 +208,7 @@ export default function RunHistory({
         Each wave asks your questions to the AI assistants again and measures the answers.
         {waves.length === 1 ? " This tracker has one wave so far." : ""}
       </p>
+      {nextMatchups && <p className={`${T.sec} text-ink`}>{nextMatchups}</p>}
       <ul className="grid gap-3">
         {waves.map((w) => (
           <WaveCard
@@ -247,6 +264,8 @@ function WaveCard({
   const notes: string[] = [];
   if (w.worries === true) notes.push("Included the monthly buyer-worry questions.");
   if (w.worries === false) notes.push("Buyer-worry questions were not part of this wave - they are asked once a month.");
+  for (const n of w.matchups?.added ?? []) notes.push(`Started asking you head to head against ${n}.`);
+  for (const n of w.matchups?.dropped ?? []) notes.push(`Stopped asking you head to head against ${n}.`);
   if (w.flags.replaced > 0) notes.push(`${plural(w.flags.replaced, "wording")} replaced after this wave.`);
   if (w.flags.kept > 0) notes.push(`${plural(w.flags.kept, "flagged wording")} kept as asked.`);
   if (w.flags.open > 0) notes.push(`${plural(w.flags.open, "wording")} waiting for your review.`);

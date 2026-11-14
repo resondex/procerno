@@ -2088,7 +2088,7 @@ export async function computeAnalysisMap(
   /* -- tensions -- */
   const probe = debug ? { insights: debug.probeInsights ?? summary.insights, out: [] as NonNullable<AnalysisMapDebug["placements"]> } : undefined;
   const placed: { key: string; title: string; cellId: string }[] = [];
-  const tensions = tensionsOf(summary, facts, specs, cellById, brand, probe, placed, ex);
+  const tensions = tensionsOf(summary, facts, specs, cellById, brand, probe, placed, ex, positions);
   if (debug && probe) debug.placements = probe.out;
 
   /* -- honesty line: map answers on the core panel with no code row -- */
@@ -2374,7 +2374,8 @@ function tensionsOf(
   brand: string,
   probe?: { insights: Insight[]; out: { key: string; kind: string; cellId: string | null; how: string }[] },
   placed?: { key: string; title: string; cellId: string }[],
-  ex?: ExampleIndex
+  ex?: ExampleIndex,
+  positions?: Record<string, Position>
 ): AnalysisMapView["tensions"] {
   const ids = [...cells.keys()];
   const firstOf = (prefix: string) => ids.find((id) => id.startsWith(prefix)) ?? null;
@@ -2417,6 +2418,31 @@ function tensionsOf(
     return fallback();
   };
   const leakCells = () => ids.filter((id) => cells.get(id)!.badges.includes("leak"));
+  // am29: the contest (never a pooled All cell) whose away reasons state one
+  // of the wordings the text quotes, by the largest share of that contest.
+  const statedIn = (text: string): string | null => {
+    if (!positions) return null;
+    const norm = (t: string) => t.replace(/\.\.\.$/, "").replace(/\s+/g, " ").trim().toLowerCase();
+    const quoted = [...text.matchAll(/"([^"]+)"/g)].map((m) => norm(m[1])).filter((q) => q.length >= 4);
+    if (!quoted.length) return null;
+    const says = (label: string) => {
+      const l = norm(label);
+      return quoted.some((q) => l === q || (q.length >= 20 && l.startsWith(q)));
+    };
+    let best: { id: string; share: number } | null = null;
+    for (const x of splitCells) {
+      const id = idOf(x);
+      const p = positions[id];
+      if (!p) continue;
+      let share = 0;
+      for (const t of p.awayThemes ?? []) {
+        if (says(t.label) || t.buckets.some((b) => says(b.label) || b.members.some((m) => says(m.label)))) share = Math.max(share, parseFloat(t.share) || 0);
+      }
+      for (const c of p.away ?? []) if (says(c.text)) share = Math.max(share, parseFloat(c.share ?? "") || 0.1);
+      if (share > 0 && (!best || share > best.share)) best = { id, share };
+    }
+    return best ? best.id : null;
+  };
   const cellFor = (kind: string, key: string, title: string, body: string): string | null => {
     const t = cellForText(kind, key, title, true);
     return t ?? cellForText(kind, key, `${title} ${body}`, false);
@@ -2520,6 +2546,11 @@ function tensionsOf(
         }
         // The away condition names where it routes; the rival's head-to-head
         // carries its conditions. Else a wall-badged cell, else the open choice.
+        // am29: first the contest whose own away list states the quoted
+        // condition with the largest share - the finding opens where it is
+        // strongest, not on the general open-choice row.
+        const stated = statedIn(text);
+        if (stated) return found(stated, strict, () => null);
         const h2h = splitCells.filter((x) => x.row === "h2h");
         const hit = longestMatch(text, h2h, (x) => x.label);
         if (hit) return idOf(hit);
@@ -2589,7 +2620,7 @@ function tensionsOf(
 // am17 (2026-11-10): each tension carries `viz` (the Overview finding card's 2-4 bars).
 // am18 (2026-11-10): each buying situation's open-choice cell states the same funnel figures as the all-buyers cell.
 // am22 (2026-11-12): the reasons harmonization - each rival's `here` carries `sendsThemes` (the run's dt4 themes, scoped to the contest and to answers sending the buyer to that rival); the theme pass moves to run_themes.ts (same inputs, same dt4 keys); reads bs17 (the away-condition sentence names its theme). Row names come from question_names.ts (the plain-wording pass: What to buy, What's popular, Spotting the problem, What to look for, Habit, Your customers looking around, Your customers making your case) and the band descriptions are rewritten.
-export const ANALYSIS_MAP_VERSION = "am28"; // am28 (2026-11-13): a grouped reason is tagged a fixed situation by its own NAME only, also when it has sub-rows (reason_themes) - a fixed member wording never tags the whole group. // am27 (2026-11-12): lost, with an exception - a head-to-head lost on balance with at least 20 lost answers, half of them still stating a case for you, carries Position.exception (the up-to-3 client-side conditions in the lost answers, themed when themes exist, with examples that picked the rival) and MapCell.exception; the assigned_exception insight (bs19) places on the lost matchup where its condition comes up most. // am26 (2026-11-12): both-ways rows whose wordings fall in the same reason theme on both sides are one row. // am25 (2026-11-12): the vendor_outlier insight (bs18) places on the all-buyers cell of the question type its title names. // am24 (2026-11-12): both-ways rows only on pick contests, each side at least 5% and half the other, top 3, never a reason paired with its opposite. // am23 (2026-11-12): an answer shown as an example toward you is never shown away; a rival's panel examples name only its own products in `to`. // am21 (2026-11-12): reason-row examples prefer answers that send the buyer one way only, then the wording closest to the row name, and each carries `to` (the product it sends the buyer to). // am20 (2026-11-12): each rival in a pick contest's `brands` carries `here` (its funnel in that contest, the arguments when it is picked beside your picks, the stated conditions sending picks to it) and the position carries `youRead` - the rival panel's lead read. Additive; theme inputs unchanged. // am19 am19 (2026-11-11): every Overview number opens its answers - `examples` (named, commits), refs on each share-of-picks row and on the tension bars (the first tension's funnel bars and the bs16 insight bars). // am18 (2026-11-10): each buying situation's open-choice cell states the same funnel figures as the all-buyers cell (named, recommended, commits, picked, outside the category), from its own answers. // // am17 (2026-11-10): each tension carries `viz` (the Overview finding card's 2-4 bars) - the first from the casting facts, the rest from the bs15 insights
+export const ANALYSIS_MAP_VERSION = "am29"; // am29 (2026-11-13): the away-condition finding opens on the contest whose own away reasons state its quoted condition with the largest share (was: a rival named in the text, a fixed-tagged cell, else the general open-choice row). // am28 (2026-11-13): a grouped reason is tagged a fixed situation by its own NAME only, also when it has sub-rows (reason_themes) - a fixed member wording never tags the whole group. // am27 (2026-11-12): lost, with an exception - a head-to-head lost on balance with at least 20 lost answers, half of them still stating a case for you, carries Position.exception (the up-to-3 client-side conditions in the lost answers, themed when themes exist, with examples that picked the rival) and MapCell.exception; the assigned_exception insight (bs19) places on the lost matchup where its condition comes up most. // am26 (2026-11-12): both-ways rows whose wordings fall in the same reason theme on both sides are one row. // am25 (2026-11-12): the vendor_outlier insight (bs18) places on the all-buyers cell of the question type its title names. // am24 (2026-11-12): both-ways rows only on pick contests, each side at least 5% and half the other, top 3, never a reason paired with its opposite. // am23 (2026-11-12): an answer shown as an example toward you is never shown away; a rival's panel examples name only its own products in `to`. // am21 (2026-11-12): reason-row examples prefer answers that send the buyer one way only, then the wording closest to the row name, and each carries `to` (the product it sends the buyer to). // am20 (2026-11-12): each rival in a pick contest's `brands` carries `here` (its funnel in that contest, the arguments when it is picked beside your picks, the stated conditions sending picks to it) and the position carries `youRead` - the rival panel's lead read. Additive; theme inputs unchanged. // am19 am19 (2026-11-11): every Overview number opens its answers - `examples` (named, commits), refs on each share-of-picks row and on the tension bars (the first tension's funnel bars and the bs16 insight bars). // am18 (2026-11-10): each buying situation's open-choice cell states the same funnel figures as the all-buyers cell (named, recommended, commits, picked, outside the category), from its own answers. // // am17 (2026-11-10): each tension carries `viz` (the Overview finding card's 2-4 bars) - the first from the casting facts, the rest from the bs15 insights
 // The fold (2026-11-09, Tyler): a view's cache key carries the versions of
 // the views whose content it embeds, so the lockstep bump convention is
 // mechanical - the map embeds the summary's insights, casting and verdict.

@@ -239,7 +239,22 @@ export async function codeWaveChunk(opts: {
   );
   if (done >= todo.length) {
     // The wave's last chunk: the scale-to-zero idle tail after it.
-    logCoderGpuEstimate("idle_tail", Number(process.env.CODER_IDLE_TAIL_HOURS ?? 1), { runId, deployment: CODER_DEPLOYMENT });
+    // One idle hour per stretch of GPU use, not one per call (2026-11-13):
+    // when this chunk began inside the idle tail an earlier call already
+    // logged on this deployment, the earlier row over-counted by the part
+    // this chunk interrupted, so this tail is logged net of it. Two staged
+    // wordings coded back to back now sum to one tail plus the gap between.
+    const tail = Number(process.env.CODER_IDLE_TAIL_HOURS ?? 1);
+    const tailKey = `coder_idle_tail:${CODER_DEPLOYMENT}`;
+    let overlap = 0;
+    try {
+      const prevEnd = Number((await store.cacheGet(tailKey, tail * 3_600_000 + 60_000)) ?? 0);
+      if (prevEnd > 0) overlap = Math.min(tail, Math.max(0, (prevEnd + tail * 3_600_000 - gpu0) / 3_600_000));
+      await store.cacheSet(tailKey, String(lastEnd));
+    } catch (err) {
+      console.error(`coding wave ${runId}: idle-tail bookkeeping failed, logging the full tail`, err);
+    }
+    logCoderGpuEstimate("idle_tail", tail - overlap, { runId, deployment: CODER_DEPLOYMENT, ...(overlap > 0 ? { net_of_earlier_tail_hours: overlap } : {}) });
     return { outcome: "finalize" };
   }
   return { outcome: "continue" };

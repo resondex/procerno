@@ -8,7 +8,7 @@ import type { HeadToHeadViews } from "@/lib/engine/head_to_head";
 import { useEngineSet, viewQuery } from "./view_parts";
 import { T } from "./type_scale";
 import { CompanyBoard } from "./company_board";
-import { MatchupMove, MatchupProvider, useMatchupQueued } from "./matchup_action";
+import { MatchupDropNote, MatchupMove, MatchupProvider, useMatchupQueued } from "./matchup_action";
 import {
   BodiesProvider,
   catPhrase,
@@ -1120,6 +1120,7 @@ function RivalCard({ d, ctx }: { d: Dossier; ctx: PanelCtx }) {
           {queued ? "Head-to-head queued for the next collection" : `Never asked head-to-head${d.h2h.alert ? " - yet it takes picks from you" : ""}`}
         </div>
       )}
+      <MatchupDropNote rivalKey={d.key} name={d.name} />
       {up && (
         <div className="text-[13px] text-ink-3">
           Wins on <b className="font-semibold text-ink">{up.label}</b>

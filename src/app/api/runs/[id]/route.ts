@@ -5,6 +5,7 @@ import { authEnabled, isStaff, requireAuth, requireRun } from "@/lib/auth";
 import { hasOpenBatches, pollRunBatches } from "@/lib/engine/batch";
 import { continueRun } from "@/lib/engine/runner";
 import { promptsForRun } from "@/lib/engine/surfaces";
+import { loadMatchupPromptsNotAsked } from "@/lib/engine/matchups";
 
 /** Per-run throttle for the opportunistic batch poll below (Hobby-plan
  * crons are daily, so the dashboard's own progress polling stands in as
@@ -34,9 +35,10 @@ export async function GET(
       waitUntil(pollRunBatches(run.id).then(() => continueRun(run.id, origin)));
     }
   }
-  const [prompts, intents, completed, byModel, batches] = await Promise.all([
+  const [prompts, intents, notAsked, completed, byModel, batches] = await Promise.all([
     store.listPrompts(run.project_id),
     store.listIntents(run.project_id),
+    loadMatchupPromptsNotAsked(run),
     store.countResponses(id),
     store.countResponsesByModel(id),
     run.pipeline === "batch" ? store.listRunBatches(id) : Promise.resolve([]),
@@ -51,8 +53,9 @@ export async function GET(
         .flatMap((b) => b.manifest.map((m) => m.engine))
     ),
   ];
-  // The run's own prompt set: a skip wave never asks the worries surface.
-  const liveCount = promptsForRun(run, prompts, intents).length;
+  // The run's own prompt set: a skip wave never asks the worries surface,
+  // and a matchup that went live after this run was created is not its.
+  const liveCount = promptsForRun(run, prompts, intents, notAsked).length;
   const models = run.models.length > 0 ? run.models : [run.model];
   // Each engine answers every live prompt once per repeat, so they share one
   // per-engine target. Progress is honest only against that denominator.

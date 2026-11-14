@@ -173,6 +173,48 @@ export async function activateQueuedMatchups(projectId: string): Promise<number>
   return 0;
 }
 
+/** Both store drivers emit UTC; sqlite omits the T and Z ("YYYY-MM-DD
+ * HH:MM:SS"), postgres has them. Lives here (not surfaces.ts) so both
+ * modules can use it without a circular import. */
+export function utcMs(ts: string): number {
+  const iso = ts.includes("T") ? ts : ts.replace(" ", "T");
+  return new Date(/[zZ]|[+-]\d\d:?\d\d$/.test(iso) ? iso : iso + "Z").getTime();
+}
+
+/** How far before a matchup's go-live stamp a run may be created and still
+ * count as the go-live run: wentLiveAt is app time with milliseconds, a
+ * run's created_at is the database clock (whole seconds on sqlite), and
+ * createRun follows activation under the same lease. Runs are one open wave
+ * at a time, so no earlier wave sits inside this window in practice. */
+export const GO_LIVE_SLACK_MS = 60_000;
+
+/**
+ * The live matchup prompts a run did NOT ask: a queued matchup's ten prompts
+ * become ordinary live prompts at go-live, so every reader of
+ * surfaces.promptsForRun would otherwise count them for waves created before
+ * it (progress denominators, Run history, the question check) - and an
+ * older run still collecting would start asking them. A run asks an entry's
+ * prompts iff it is the stamped go-live run, or it was created at or after
+ * the go-live (less GO_LIVE_SLACK_MS). Empty when nothing has gone live, so
+ * every caller is unchanged on a tracker with no matchups.
+ */
+export function matchupPromptsNotAsked(run: { id: string; created_at: string }, queue: MatchupQueue): Set<string> {
+  const out = new Set<string>();
+  const runMs = utcMs(run.created_at);
+  for (const e of queue.entries) {
+    if (e.status !== "live" || !e.wentLiveAt) continue;
+    if (e.wentLiveRunId && e.wentLiveRunId === run.id) continue;
+    if (Number.isFinite(runMs) && runMs >= utcMs(e.wentLiveAt) - GO_LIVE_SLACK_MS) continue;
+    for (const id of e.promptIds) out.add(id);
+  }
+  return out;
+}
+
+/** Same, reading the tracker's queue (one store read). */
+export async function loadMatchupPromptsNotAsked(run: { id: string; project_id: string; created_at: string }): Promise<Set<string>> {
+  return matchupPromptsNotAsked(run, parseMatchupQueue(await store.getMatchupQueue(run.project_id)));
+}
+
 /** After createRun: stamp the run on matchups that went live with no run
  * yet (a createRun that failed after activation is stamped by the next). */
 export async function noteMatchupRun(projectId: string, runId: string): Promise<void> {

@@ -34,7 +34,7 @@ import { AnswersModal, Fig, type AnswersTarget } from "./view_parts";
 import AnswerText from "./answer_text";
 import { passageOf } from "@/lib/answer_passage";
 import { T } from "./type_scale";
-import { MatchupGap } from "./matchup_action";
+import { MatchupDropNote, MatchupGap } from "./matchup_action";
 
 /**
  * The one slide-over (2026-11-10, the ratified analysis redesign -
@@ -977,6 +977,9 @@ function ContestPanel({ p, ctx }: { p: Position; ctx: Ctx }) {
       <h2 className={h2Cls}>{p.claim}</h2>
       {soft && <p className="clear-both mt-3 border-l-[3px] pl-2.5 text-[13px] text-ink" style={{ borderColor: "var(--pa-contested)" }}>{soft}</p>}
       <ExampleLink receipts={p.receipts} title={p.where} subtitle="A few of the answers behind this" />
+      {p.cellId.startsWith("fights:h2h:") && p.cellId !== "fights:h2h:all" && cell?.label && (
+        <MatchupDropNote name={cell.label} className="mt-3.5" />
+      )}
       {p.exception && <ExceptionBlock e={p.exception} brand={ctx.brand} />}
       {p.lever && <MoveBox p={p} ctx={ctx} why={whyLines(notes, cat.plural)} />}
 
@@ -1665,6 +1668,7 @@ function RivalAll({ d, from, ctx }: { d: Dossier; from?: string | null; ctx: Ctx
       {showScope && <ScopeChips name={d.name} cellId={from!} scoped={false} ctx={ctx} />}
       <ExampleLink receipts={d.receipts ?? []} title={`Answers that pick ${d.name}`} subtitle="When buyers ask what to buy" />
       <MatchupGap d={d} />
+      <MatchupDropNote rivalKey={d.key} name={d.name} className="mt-3.5" />
 
       <div className={evh}>The evidence</div>
       <Sec

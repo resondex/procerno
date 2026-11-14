@@ -738,7 +738,7 @@ function conditionsPara(c: Ctx): BriefPara | null {
   const k = c.inputs.conditions;
   if (!k) return null;
   const q = (g: { label: string }) => `"${g.label}"`;
-  const parts = ["The AI hands the buyer a rule, not a winner - and whoever owns the rule's branches owns the choice."];
+  const parts = ["The AI rarely names one winner for every buyer - it says which buyer should choose which product, and those conditions decide the choice."];
   const tips: string[] = [];
   let toward = k.toward;
   let away = k.away;
@@ -1981,7 +1981,7 @@ export async function computeBrief(data: ViewData, request: BriefRequest = {}): 
 // bf21 (2026-11-10): the plain-wording pass - reads bs13 / am15 (new move names, lever sentences and insight wording quoted in the memos); actOf restates the new levers; the conditions paragraph, the condition card, the SWOT wall and the jobs wall lines say what sends buyers away and "a fixed situation" instead of "routes" / "wall" / "reason". The exemplar's "The conditions that decide it" heading is kept. Numbers unchanged.
 // bf22 (2026-11-12): the reasons harmonization - reads bs17 / am22: the conditions paragraph, the condition card and the away-condition finding name the run's reason THEMES (dt4) where a theme map exists (raw condition groups only without one); the paragraph's tips count statements on a themed side.
 // bf23 (2026-11-13, one counting rule - reads bs21): with reason themes the conditions paragraph counts each side's themes at ANSWER grain over that side's own answer base, and the condition card lists the themes at answer grain, names the lead away theme (quoting its most-stated wording) and gives the away_condition finding's blocker and fixed-situation wordings their own rows on the same base. Keyless output unchanged.
-const BRIEF_VERSION = "bf24"; // bf24 (2026-11-13): themed conditions name one destination only when it takes half their answers; the fixed-situation line leads with the finding wording.
+const BRIEF_VERSION = "bf25"; // bf25 (2026-11-13): the conditions line reads "rarely names one winner for every buyer" (was "a rule, not a winner"). // bf24 (2026-11-13): themed conditions name one destination only when it takes half their answers; the fixed-situation line leads with the finding wording.
 
 /**
  * The brief through the cache. cachedView's keying, with the subject as one

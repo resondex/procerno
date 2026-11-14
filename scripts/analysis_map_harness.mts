@@ -116,7 +116,7 @@ function dataPhrases(view: AnalysisMapView, data: ViewData): string[] {
 }
 
 // bs8 detectors: every one that fires (ranked, uncapped) must place onto its own map cell.
-const BS8_KEYS = new Set(["neutralized_differentiator", "conversion_vs_rival", "leak_picks", "leak_problem", "worst_worry", "leave_no_exit", "vendor_outlier", "assigned_exception", "unasked_rival"]);
+const BS8_KEYS = new Set(["neutralized_differentiator", "conversion_vs_rival", "leak_picks", "leak_problem", "worst_worry", "leave_no_exit", "vendor_outlier", "assigned_exception", "unasked_rival", "away_condition"]);
 
 const EXPECTED: Record<string, string> = {
   "american express": "specialist",
