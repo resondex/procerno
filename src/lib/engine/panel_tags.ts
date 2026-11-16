@@ -305,11 +305,16 @@ export function worthTakeaway(yes: number, depends: number, no: number, pooled: 
 }
 
 /** Value, "Where it points the buyer instead" (own cheaper / a rival's / nowhere, of all answers). */
+/** Share of answers naming no cheaper option from which "mostly" is fair. */
+export const NOWHERE_CLEAR = 60;
+
 export function insteadTakeaway(own: number, rival: number, nowhere: number): Takeaway {
   if (isSplit(own, rival, nowhere)) return SPLIT;
   if (rival >= MAJORITY) return tk("Mostly points to a rival", "bad", rival);
   if (own >= MAJORITY) return tk("Mostly points to your own cheaper option", "neutral", own);
-  if (nowhere >= MAJORITY) return tk("Mostly names no cheaper option", "neutral", nowhere);
+  // am39: "mostly" needs a clear majority here - at about half, with the rest naming an option, the tag says half.
+  if (nowhere >= NOWHERE_CLEAR) return tk("Mostly names no cheaper option", "neutral", nowhere);
+  if (nowhere >= MAJORITY) return tk("Names a cheaper option about half the time", rival > own ? "bad" : "neutral");
   const l = leanOf(rival, own);
   if (l > 0) return tk("More to rivals than to your own", "bad");
   if (l < 0) return tk("More to your own than to rivals", "neutral");
@@ -422,7 +427,7 @@ export const GAP_TAKEAWAY: Takeaway = tk("Not on the checklist", "bad");
 
 const BASE_TAKEAWAYS: string[] = [
   "Not worth it for most buyers", "Not worth it for this buyer", "Worth it for most buyers", "Worth it for this buyer", "Never worth it for most buyers", "Never worth it for this buyer", "Always worth it for most buyers", "Always worth it for this buyer", "Mostly it depends", "Leans worth it", "Leans not worth it", "No clear answer",
-  "Mostly points to a rival", "Mostly points to your own cheaper option", "Mostly names no cheaper option", "More to rivals than to your own", "More to your own than to rivals", "Rivals and your own about even",
+  "Mostly points to a rival", "Mostly points to your own cheaper option", "Mostly names no cheaper option", "Names a cheaper option about half the time", "More to rivals than to your own", "More to your own than to rivals", "Rivals and your own about even",
   "Mostly agrees the worry is fair", "Often agrees the worry is fair", "Sometimes agrees the worry is fair", "Rarely agrees the worry is fair", "Never agrees the worry is fair",
   "Tells buyers to go ahead", "Tells buyers to steer clear", "Agrees, then leaves it to the buyer", "Mostly leaves it to the buyer", "Leans go ahead", "Leans steer clear",
   "Tells customers to stay", "Tells customers to leave", "Mostly takes no side", "More told to leave than to stay", "More told to stay than to leave", "Stay and leave about even",

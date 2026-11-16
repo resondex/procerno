@@ -7,7 +7,7 @@ import type { Resolver } from "./brand_resolve";
 import { cell, type PoolRow, type RateCell } from "./view_data";
 import type { ValueFact } from "./value";
 import { filterObvious, type Omission, type OmissionList } from "./panel_filter";
-import { AVG_COMP, CLOSE_PTS, GAP_TAKEAWAY, TAKEAWAY_TAGS, TAG_FURTHEST, TAG_GAP_OPENS, agreesTakeaway, alongsideTakeaway, avgTag, caseTakeaway, criticStrengthTakeaway, duelTag, insteadTakeaway, keepTakeaway, leanOf, offersTakeaway, oftenOf, premiseTakeaway, proceedTakeaway, stanceTakeaway, taughtTakeaway, usualDir, duelTone, focusOf, neutralUsualTag, otherTag, rankTag, segTag, toneOfTag, usualTag, usualTone, worthTakeaway, type KN, type Takeaway } from "./panel_tags";
+import { NOWHERE_CLEAR, AVG_COMP, CLOSE_PTS, GAP_TAKEAWAY, TAKEAWAY_TAGS, TAG_FURTHEST, TAG_GAP_OPENS, agreesTakeaway, alongsideTakeaway, avgTag, caseTakeaway, criticStrengthTakeaway, duelTag, insteadTakeaway, keepTakeaway, leanOf, offersTakeaway, oftenOf, premiseTakeaway, proceedTakeaway, stanceTakeaway, taughtTakeaway, usualDir, duelTone, focusOf, neutralUsualTag, otherTag, rankTag, segTag, toneOfTag, usualTag, usualTone, worthTakeaway, type KN, type Takeaway } from "./panel_tags";
 import { ROW_NAME } from "./question_names";
 import {
   F,
@@ -40,6 +40,7 @@ import {
   type BuyerSide,
   type CaseSide,
   type InsteadSide,
+  type InsteadHalf,
   type KeepSide,
   type ValueSide,
   THIN,
@@ -2982,7 +2983,7 @@ function detailOf(inp: PanelCellInput, p: PositionPanel, up: PositionPanel | und
         ...(ins
           ? {
               instead: {
-                ...valueInsteadDetail({ instead, ladder: ctx.ladder, topRival: extra?.topRival, noun: h.noun }),
+                ...valueInsteadDetail({ instead, ...(instead === "nowhere" && nowhere < NOWHERE_CLEAR ? { half: (li > 0 ? "rival" : li < 0 ? "own" : "even") as InsteadHalf } : {}), ladder: ctx.ladder, topRival: extra?.topRival, noun: h.noun }),
                 ...(extra?.sections.length ? { sections: extra.sections } : {}),
               },
             }

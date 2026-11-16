@@ -316,6 +316,8 @@ const sentence = (a: string | null, b: string) => (a ? `${upperFirst(a)}, and ${
 
 export type ValueSide = "no" | "yes" | "depends" | "split";
 export type InsteadSide = "rival" | "own" | "nowhere" | "even";
+/** am39: about half the answers name no cheaper option - which way the other half goes. */
+export type InsteadHalf = "rival" | "own" | "even";
 export function valueDetail(o: { side: ValueSide; pooled: boolean; often?: OftenWords; instead: InsteadSide; topRival?: string; noun: string }): { heading: string; body: PanelText } {
   const heading =
     o.side === "no"
@@ -361,7 +363,20 @@ export function valueWorthDetail(o: { side: ValueSide; pooled: boolean; often?: 
 }
 
 /** "Where it points the buyer instead" - a takeaway and one sentence; the lists below carry the new facts. No number. */
-export function valueInsteadDetail(o: { instead: InsteadSide; ladder: boolean; topRival?: string; noun: string }): { heading: string; body: PanelText } {
+export function valueInsteadDetail(o: { instead: InsteadSide; half?: InsteadHalf; ladder: boolean; topRival?: string; noun: string }): { heading: string; body: PanelText } {
+  if (o.instead === "nowhere" && o.half) {
+    const most = o.topRival ? `, most often ${o.topRival}` : "";
+    const body = !o.ladder
+      ? o.topRival
+        ? `When it does name one, it is most often ${o.topRival}.`
+        : "When it does name one, no single rival stands out."
+      : o.half === "rival"
+        ? `When it does name one, it is more often a rival's ${o.noun} than your own${most}.`
+        : o.half === "own"
+          ? "When it does name one, it is more often your own than a rival's."
+          : "When it does name one, rivals' and your own come up about equally.";
+    return { heading: "About half the time it names no cheaper option", body: join(body) };
+  }
   const heading =
     o.instead === "rival"
       ? o.ladder
@@ -390,7 +405,7 @@ export const VALUE_SECTIONS = {
   byVerdict: { title: "By what the AI said, the share that name a rival", sub: "Of the answers giving each verdict." },
   rivals: { title: "Where it points the buyer instead", sub: "Share of these answers. Open a rival to see how it gets its picks." },
   products: (plural: string) => ({ title: `Which ${plural} it names`, sub: "Share of these answers that recommend it in place of yours." }),
-  own: { title: "Your own cheaper options named", sub: "Share of these answers that name it." },
+  own: { title: "Your own cheaper options named", sub: "Share of these answers that name it, whether or not they also name a rival." },
 };
 /** A verdict whose rival-naming answers are too few for a bar. */
 export const valueVerdictFold = (v: "no" | "depends" | "yes", never: boolean) => `Answers that say ${VALUE_VERDICT_WORDS[v]} ${never ? "never" : "almost never"} name a rival.`;

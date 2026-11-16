@@ -151,12 +151,14 @@ const isSpan = (c: PanelNum | PanelSpan): c is PanelSpan => "t" in c;
 
 // ---------- bars ----------
 
+/** Half-width columns (the two-sided weighs block): a narrower label so the bar keeps its length. */
+const barGridTight = "grid grid-cols-[minmax(0,7.5rem)_minmax(0,1fr)_2.75rem] items-center gap-2 sm:grid-cols-[minmax(0,6.25rem)_minmax(0,1fr)_2.5rem]";
 const barGrid = "grid grid-cols-[minmax(0,7.5rem)_minmax(0,1fr)_2.75rem] items-center gap-2 sm:grid-cols-[minmax(0,9.5rem)_minmax(0,1fr)_2.75rem]";
 /** The same row with a small figure after the number (a usual, on verdict rows). */
 const barGridAside = "grid grid-cols-[minmax(0,7.5rem)_minmax(0,1fr)_2.75rem_4.25rem] items-center gap-2 sm:grid-cols-[minmax(0,9.5rem)_minmax(0,1fr)_2.75rem_4.75rem]";
 
 /** One labelled bar; the whole row opens its answers (`plain`: inside a step card that is itself a button - the tip stays, nothing opens). */
-export function NumBar({ label, n, color, bold, dim, title, plain, aside }: { label: string; n: PanelNum; color: string; bold?: boolean; dim?: boolean; title?: string; plain?: boolean; aside?: ReactNode }) {
+export function NumBar({ label, n, color, bold, dim, title, plain, aside, tight }: { label: string; n: PanelNum; color: string; bold?: boolean; dim?: boolean; title?: string; plain?: boolean; aside?: ReactNode; tight?: boolean }) {
   const opener = useOpener();
   const go = plain ? null : opener(n.refs, title ?? label);
   const inner = (
@@ -169,7 +171,7 @@ export function NumBar({ label, n, color, bold, dim, title, plain, aside }: { la
       {aside && <span className="text-right">{aside}</span>}
     </>
   );
-  const cls = `${aside ? barGridAside : barGrid} ${T.cap} w-full rounded py-[3px] text-left`;
+  const cls = `${aside ? barGridAside : tight ? barGridTight : barGrid} ${T.cap} w-full rounded py-[3px] text-left`;
   return go ? (
     <button type="button" onClick={go} title={n.tip} className={`${cls} hover:bg-line/30 [&:hover_b]:underline`}>
       {inner}
@@ -293,6 +295,9 @@ export function StepCard({
     // The step's own comparison (the average competitor) before a usual from the row's All cell.
     const u = step.usual ?? usual?.here;
     if (!comp && !rivalLabel && !vs && u) body.push(<NumBar key="usual" label={usualL} n={u} color={C_USUAL} dim={dim} title={`${step.label} - ${usualL}`} plain={plain} />);
+  } else if ((comp || rivalLabel) && step.rivals?.length) {
+    // A step only the rival has a number for (a rival's card: how often it is named as the alternative to you).
+    for (const r of step.rivals) body.push(<NumBar key={`r:${r.name}`} label={r.name} n={r.num} color={C_AWAY} dim={dim} title={`${step.label} - ${r.name}`} plain={plain} />);
   }
   if (step.segments && step.segments.length > 0) {
     const showUsual = !comp && !rivalLabel && !!usual?.segments?.length;
@@ -621,7 +626,7 @@ const toneBar = (t: PanelTone) => (t === "good" ? C_YOU : t === "bad" ? C_AWAY :
 export function WeighsView({ w }: { w: PanelWeighs }) {
   return (
     <Blk title={w.title} sub={w.sub}>
-      <div className={`grid items-start gap-3 ${w.columns.length > 1 ? "sm:grid-cols-2" : ""}`}>
+      <div className={`grid items-start gap-x-6 gap-y-3 ${w.columns.length > 1 ? "sm:grid-cols-2" : ""}`}>
         {w.columns.map((c, i) => (
           <div key={`${i}:${c.title ?? ""}`} className="min-w-0">
             {c.title && (
@@ -630,7 +635,7 @@ export function WeighsView({ w }: { w: PanelWeighs }) {
               </h5>
             )}
             {c.rows.map((r) => (
-              <NumBar key={r.name} label={r.name} n={r.num} color={toneBar(c.tone)} title={`${c.title ?? w.title} - ${r.name}`} />
+              <NumBar key={r.name} label={r.name} n={r.num} color={toneBar(c.tone)} title={`${c.title ?? w.title} - ${r.name}`} tight={w.columns.length > 1} />
             ))}
             {c.note && <p className={`${T.body} text-ink-3`}>{c.note}</p>}
           </div>
