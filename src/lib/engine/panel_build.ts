@@ -1212,6 +1212,11 @@ function h2hPanel(inp: PanelCellInput, ctx: Ctx): PositionPanel {
     steps.push({
       key: "exception",
       label: EXCEPTION_TEXT.label(rival),
+      // am49: flagged as the exception the Map cell's label refers to, in both views.
+      tagUsual: EXCEPTION_TEXT.callout,
+      tagRank: EXCEPTION_TEXT.callout,
+      tagUsualTone: "good",
+      tagRankTone: "good",
       segments: [seg("still", EXCEPTION_TEXT.still, "you", yes, lost.length, h, `answers that pick ${rival}`), seg("none", EXCEPTION_TEXT.none, "neutral", no, lost.length, h, `answers that pick ${rival}`)],
     });
   }

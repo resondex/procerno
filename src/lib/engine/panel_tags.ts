@@ -426,6 +426,7 @@ export const taughtTakeaway = (gap: boolean): Takeaway => (gap ? tk("Misses your
 export const GAP_TAKEAWAY: Takeaway = tk("Not on the checklist", "bad");
 
 const BASE_TAKEAWAYS: string[] = [
+  "The exception",
   "Not worth it for most buyers", "Not worth it for this buyer", "Worth it for most buyers", "Worth it for this buyer", "Never worth it for most buyers", "Never worth it for this buyer", "Always worth it for most buyers", "Always worth it for this buyer", "Mostly it depends", "Leans worth it", "Leans not worth it", "No clear answer",
   "Mostly points to a rival", "Mostly points to your own cheaper option", "Mostly names no cheaper option", "Names a cheaper option about half the time", "More to rivals than to your own", "More to your own than to rivals", "Rivals and your own about even",
   "Mostly agrees the worry is fair", "Often agrees the worry is fair", "Sometimes agrees the worry is fair", "Rarely agrees the worry is fair", "Never agrees the worry is fair",
