@@ -658,6 +658,66 @@ function nameTokens(name: string, ctx: Ctx): Set<string> {
   return out;
 }
 
+/** am43: is a name one of the brand's PRODUCTS, or something the brand also runs (a rewards programme, a lounge,
+ * a feature)? Read off the run: in the answers that state conditions, a product is what the AI tells some buyer to
+ * choose (the pick, or the choice of a rule); a programme is named and almost never chosen. Per brand and name. */
+const PRODUCT_MIN_SHARE = 0.05;
+const PRODUCT_MIN_CHOSEN = 2;
+const PICKED = new WeakMap<Map<string, PanelCellInput>, Map<string, { named: number; chosen: number }>>();
+function productIndex(ctx: Ctx): Map<string, { named: number; chosen: number }> {
+  const hit = PICKED.get(ctx.inputs);
+  if (hit) return hit;
+  const idx = new Map<string, { named: number; chosen: number }>();
+  PICKED.set(ctx.inputs, idx);
+  const { h } = ctx;
+  const nouns = nounToks(ctx);
+  const ownOf = new Map<string, Set<string>>();
+  const keyOf = (written: string): string | null => {
+    const res = h.resolve(written);
+    if (!res.key) return null;
+    let own = ownOf.get(res.key);
+    if (!own) ownOf.set(res.key, (own = nameTokens(res.key === h.targetKey ? h.brand : res.name ?? written, ctx)));
+    const toks = [...new Set(famTokens(cleanProduct(written) || written).filter((t) => !own!.has(t) && !nouns.has(t)))].sort();
+    return toks.length ? `${res.key}|${toks.join(" ")}` : null;
+  };
+  const seen = new Set<string>();
+  for (const inp of ctx.inputs.values())
+    for (const r of inp.rows) {
+      const rules = r.code.decision_rules ?? [];
+      if (!rules.length || seen.has(r.code.response_id)) continue;
+      seen.add(r.code.response_id);
+      const chosen = new Set<string>();
+      const named = new Set<string>();
+      for (const w of [r.code.top_pick ?? "", ...rules.flatMap((d) => [d.choice ?? "", d.product ?? ""])]) {
+        const k = w.trim() ? keyOf(w) : null;
+        if (k) chosen.add(k);
+      }
+      for (const m of r.code.mentions ?? []) {
+        const k = keyOf(m.brand);
+        if (k) named.add(k);
+      }
+      for (const k of new Set([...named, ...chosen])) {
+        const t = idx.get(k) ?? { named: 0, chosen: 0 };
+        t.named++;
+        if (chosen.has(k)) t.chosen++;
+        idx.set(k, t);
+      }
+    }
+  return idx;
+}
+function isPickedProduct(rest: string, brandName: string, own: Set<string>, ctx: Ctx): boolean {
+  const key = brandName === ctx.h.brand ? ctx.h.targetKey : ctx.h.resolve(brandName).key;
+  if (!key) return true;
+  const nouns = nounToks(ctx);
+  const toks = [...new Set(famTokens(rest).filter((t) => !own.has(t) && !nouns.has(t)))].sort();
+  if (!toks.length) return true;
+  const t = productIndex(ctx).get(`${key}|${toks.join(" ")}`);
+  // Never seen in an answer that states conditions: nothing to judge it by, so it stays.
+  if (!t || t.named < 5) return true;
+  const ok = t.chosen >= PRODUCT_MIN_CHOSEN && t.chosen / t.named >= PRODUCT_MIN_SHARE;
+  return ok;
+}
+
 /** A product as written with its brand's leading name words dropped
  * ("<Brand> Gold Card" -> "Gold Card"); null when nothing but the brand is left. */
 function productLabel(surface0: string, brandName: string, ctx: Ctx): string | null {
@@ -668,6 +728,9 @@ function productLabel(surface0: string, brandName: string, ctx: Ctx): string | n
   while (i < words.length && famTokens(words[i]).length > 0 && famTokens(words[i]).every((t) => own.has(t))) i++;
   const rest = words.slice(i).join(" ").replace(/^[^A-Za-z0-9]+/, "").trim();
   if (!rest || !famTokens(rest).some((t) => !own.has(t))) return null;
+  // am43: a name counts as one of the brand's products only when some answer in the run picks it (or it is a
+  // confirmed Value line) - a rewards programme, a feature or a service the brand also runs is named but never picked.
+  if (!isPickedProduct(rest, brandName, own, ctx)) return null;
   // A product whose own name runs on from the brand in lower case ("<Brand> it ...") keeps the brand.
   if (i > 0 && /^[a-z]/.test(rest)) return surface.trim();
   // am37: a bare fragment (a model number, one word) keeps the name it was written with ("11 Pro" -> "Pixel 11 Pro").
