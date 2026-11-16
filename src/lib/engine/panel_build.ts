@@ -45,6 +45,7 @@ import {
   COMMITS_TEXT,
   CRITERIA_HELP,
   EXCEPTION_TEXT,
+  CASE_TEXT,
   EXPANSION_TEXT,
   LOOKING_TEXT,
   lookingOffersDetail,
@@ -1922,8 +1923,7 @@ function casePanel(inp: PanelCellInput, ctx: Ctx): PositionPanel {
     "."
   );
   const lines: PanelLine[] = [];
-  const red = rows.filter((r) => h.activeDests(r.code.redirect_to).size > 0);
-  if (red.length) lines.push({ label: `Also points to another ${h.noun}`, value: join(N(num(red.length, all, "answers", refsOf(red, (r) => (r.code.redirect_to ?? [])[0] ?? h.brand))), ` of answers also point to another ${h.noun}, whichever case they give`) });
+  // am53: the rivals that come up move into the step's explanation (caseStepDetails).
   let table: PanelTable | undefined;
   if (strong.length >= CASE_MIN) {
     const share = (code: string, rs: PoolRow[]) => rs.filter((r) => r.code.reasons?.includes(code));
@@ -3181,12 +3181,58 @@ function detailOf(inp: PanelCellInput, p: PositionPanel, up: PositionPanel | und
       const side: CaseSide = against >= 50 ? "against" : strong >= 50 ? "strong" : hedged >= 50 ? "hedged" : against >= 20 ? "against" : l > 0 ? "strong" : l < 0 ? "hedged" : "even";
       const top = side === "strong" ? p.table?.rows.slice(0, 2).map((r) => r.label) ?? [] : [];
       p.detail = caseDetail(side, top);
+      caseStepDetails(inp, p, ctx);
       return;
     }
   }
 }
 
 /* ------------- am34: what explains each step (the clicked step card) ------------- */
+
+/** am53: the business case card's step carries new facts: which AI companies give a confident case most, which of
+ * your products the confident case is built on, and which rivals come up while the AI makes your case. */
+function caseStepDetails(inp: PanelCellInput, p: PositionPanel, ctx: Ctx) {
+  if (!p.detail) return;
+  const { h } = ctx;
+  const T = CASE_TEXT;
+  const rows = inp.rows;
+  const strong = rows.filter((r) => r.code.case_strength === "strong");
+  const group = () => new Map<string, { name: string; rs: PoolRow[] }>();
+  const put = (m: Map<string, { name: string; rs: PoolRow[] }>, name: string, r: PoolRow) => {
+    const t = m.get(name.toLowerCase()) ?? { name, rs: [] };
+    if (!t.rs.includes(r)) t.rs.push(r);
+    m.set(name.toLowerCase(), t);
+  };
+  const prods = group();
+  const rivals = group();
+  for (const r of rows)
+    for (const m of r.code.mentions ?? []) {
+      const res = h.resolve(m.brand);
+      if (res.key === h.targetKey) {
+        const pl = ctx.ladder && m.framing !== "negative" && strong.includes(r) ? productLabel(m.brand, h.brand, ctx) : null;
+        if (pl) put(prods, pl, r);
+      } else if (res.status === "active" && res.name) put(rivals, res.name, r);
+    }
+  const byVendor = new Map<string, PoolRow[]>();
+  for (const r of rows) {
+    const v = engineFacets(r.model).vendor;
+    byVendor.set(v, [...(byVendor.get(v) ?? []), r]);
+  }
+  const top = (m: Map<string, { name: string; rs: PoolRow[] }>, k: number) => [...m.values()].sort((a, b) => b.rs.length - a.rs.length || a.name.localeCompare(b.name)).slice(0, k);
+  const sec = (title: string, sub: string, tone: PanelTone, items: { label: string; rs: PoolRow[]; n: number; unit: string; find: (r: PoolRow) => string }[]): PanelDetailSection | null => {
+    const ok = items.filter((x) => x.rs.length >= ROW_MIN && x.n > 0).sort((a, b) => b.rs.length / b.n - a.rs.length / a.n || a.label.localeCompare(b.label));
+    return ok.length ? { title, sub, tone, rows: ok.map((x) => ({ label: x.label, num: num(x.rs.length, x.n, x.unit, refsOf(x.rs, x.find)) })) } : null;
+  };
+  const sections = [
+    sec(T.vendor.title, T.vendor.sub, "neutral", [...byVendor.entries()].filter(([, rs]) => rs.length >= ARGS_MIN).map(([label, rs]) => ({ label, rs: rs.filter((r) => strong.includes(r)), n: rs.length, unit: `${label} answers`, find: (r: PoolRow) => verdictFind(r, h) }))),
+    strong.length >= ARGS_MIN ? sec(T.products.title(h.plural), T.products.sub, "good", top(prods, 5).map((x) => ({ label: x.name, rs: x.rs, n: strong.length, unit: "answers that give a confident case", find: () => x.name }))) : null,
+    sec(T.rivals.title, T.rivals.sub, "bad", top(rivals, 5).map((x) => ({ label: x.name, rs: x.rs, n: rows.length, unit: "answers", find: () => x.name }))),
+  ].filter((x): x is PanelDetailSection => !!x);
+  if (!sections.length) return;
+  p.details = { strength: { ...p.detail, sections } };
+  delete p.detail;
+  delete p.detailComp;
+}
 
 /** am52: the expansion card's step explains itself with new facts: which of your products the AI backs growing
  * into, which AI companies back it most, and where it points customers when it points elsewhere. */

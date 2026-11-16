@@ -732,3 +732,10 @@ export const EXPANSION_TEXT = {
   vendor: { title: "Which AI companies back it most", sub: "Share of each company's answers here." },
   where: { title: "Where it points them instead", sub: "Share of the answers that point elsewhere.", few: "It rarely names where: most answers that point elsewhere name no product." },
 };
+
+/* ---------- am53: "How strong a case does the AI give the customer?" (business case) ---------- */
+export const CASE_TEXT = {
+  vendor: { title: "Which AI companies give a confident case most", sub: "Share of each company's answers here." },
+  products: { title: (plural: string) => `Which of your ${plural} the confident case is built on`, sub: "Share of the answers that give a confident case." },
+  rivals: { title: "Which rivals come up in the case", sub: "Share of these answers that name it." },
+};
