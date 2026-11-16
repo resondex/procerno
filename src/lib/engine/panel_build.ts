@@ -698,6 +698,8 @@ interface CondOpts {
   /** Panel 11: an away row counts only answers sending the buyer to this brand, and names only its products. */
   onlyTo?: string;
   pickedStamp?: string;
+  /** The other side's row filter, for the "also said for" share of a both-sides row. */
+  otherKeep?: (id: string, st: CondSrc["st"]) => boolean;
   /** Alongside: an away row's destinations are the products its rules name, as written (not active brands). */
   toCards?: boolean;
 }
@@ -785,9 +787,11 @@ function condRows(srcs: CondSrc[], o: CondOpts, ctx: Ctx): PanelCondition[] {
       row.youPicked = num(mine.length, ids.size, "answers", pickRefs(mine.map((id) => ({ id, find: s.st.get(id)!.said, model: s.st.get(id)!.model })), s.label, PANEL_REFS));
     }
     if (s.both) {
-      const either = new Set([...s.both.ids, ...ids]);
-      const st = new Map([...s.both.st, ...s.st]);
-      row.both = { either: num(either.size, o.all, "answers", pickRefs([...either].map((id) => ({ id, find: st.get(id)!.said, model: st.get(id)!.model })), s.label, PANEL_REFS)) };
+      // am40: "Also said for <the other side>" is the OTHER side's own share (same filters as its row), so the
+      // two sides' figures mirror each other - it was the share saying it for either side, under the other side's name.
+      const bst = s.both.st;
+      const other = [...s.both.ids].filter((id) => !o.otherKeep || o.otherKeep(id, bst));
+      if (other.length) row.both = { either: num(other.length, o.all, "answers", pickRefs(other.map((id) => ({ id, find: bst.get(id)!.said, model: bst.get(id)!.model })), s.label, PANEL_REFS)) };
     }
     out.push({ size: ids.size, label: s.label, row });
   }
@@ -881,9 +885,22 @@ function conditionsOf(inp: PanelCellInput, ctx: Ctx, words: CondWords, opts: { p
       return { ...x, label, ...(x.both ? {} : { both: { ids: t.ids, st: t.st } }) };
     });
   }
-  const toward = opts.towardRows ?? condRows(tSrc, { all, side: "toward", pickKind: opts.pickKind, skip, rowOf, keepId: opts.towardKeep, pickedStamp: opts.pickedStamp }, ctx);
+  const onlyTo = opts.onlyTo;
+  const toward = opts.towardRows ?? condRows(tSrc, { all, side: "toward", pickKind: opts.pickKind, skip, rowOf, keepId: opts.towardKeep, pickedStamp: opts.pickedStamp, ...(onlyTo ? { otherKeep: (id: string, st: CondSrc["st"]) => !!st.get(id)?.to.includes(onlyTo) } : {}) }, ctx);
   if (opts.towardRows) for (const r of opts.towardRows) for (const x of r.share.refs ?? []) skip.add(x.responseId);
-  const away = condRows(aSrc, { all, side: "away", pickKind: opts.pickKind, skip, rowOf, onlyTo: opts.onlyTo, toCards: opts.toCards }, ctx);
+  const towardKeep = opts.towardKeep;
+  const away = condRows(aSrc, { all, side: "away", pickKind: opts.pickKind, skip, rowOf, onlyTo: opts.onlyTo, toCards: opts.toCards, ...(towardKeep && !opts.towardRows ? { otherKeep: (id: string) => towardKeep(id) } : {}) }, ctx);
+  // A reason listed on both sides shows the other side's own row share, exactly.
+  {
+    const tRow = new Map(toward.map((r) => [condCore(r.text), r]));
+    for (const a of away) {
+      const t = condCore(a.text) ? tRow.get(condCore(a.text)) : undefined;
+      if (!t) continue;
+      a.both = { either: t.share };
+      // Toward rows handed in from the cell's own panel are shared and keep that panel's figure.
+      if (!opts.towardRows) t.both = { either: a.share };
+    }
+  }
   return {
     ...words,
     grouped: inp.conds.grouped,

@@ -495,7 +495,7 @@ export interface PanelCondition {
   products?: string[];                 // toward: your products as written, top 2, never the bare brand
   to?: { name: string; num: PanelNum }[]; // away: active brands; num = share of the row's answers naming one (routeShares rule)
   youPicked?: PanelNum;                // of THIS row's answers, share picking you (pick kinds only, row >= 5 answers)
-  both?: { either: PanelNum };         // stated on the other side too (bothWays match); either = answers on either side / all answers
+  both?: { either: PanelNum };         // stated on the other side too; either = the OTHER side's own share of all answers (am40; the name is historical)
 }
 
 export interface PanelConditions {
