@@ -746,3 +746,24 @@ export const ALONGSIDE_TEXT = {
   first: { title: "Which one it names first", sub: "Share of the answers that name one." },
   vendor: { title: "Which AI companies name one of yours", sub: "Share of each company's answers here." },
 };
+
+/* ---------- am57: answering a critic - the two steps ---------- */
+export const CRITIC_TEXT = {
+  strong: "A strong answer",
+  partial: "Only part of a defense",
+  vendorStrong: { title: "Which AI companies give a strong answer most", sub: "Share of each company's answers here." },
+  rivals: { title: "Which rivals come up while it defends you", sub: "Share of these answers that name it." },
+  whenRight: { title: "How it answers when it says the critic is right", sub: "Share of the answers that say the critic is right." },
+  whenPartly: { title: "How it answers when it says the critic is partly right", sub: "Share of the answers that say the critic is partly right." },
+  vendorRight: { title: "Which AI companies side with the critic most", sub: "Share of each company's answers that judge the criticism." },
+};
+export function criticPremiseDetail(tag: string, after: "few" | "strong" | "weak"): { heading: string; body: PanelText } {
+  const heading = /^No clear answer$/.test(tag) ? "The AI gives no clear answer on whether the critic is right" : /^Split/.test(tag) ? "The AI is split on whether the critic is right" : `The AI ${tag.charAt(0).toLowerCase()}${tag.slice(1)}`;
+  const body =
+    after === "few"
+      ? "Too few answers grant the criticism to say how the AI defends you when it does."
+      : after === "strong"
+        ? "Granting the criticism does not end the defense: when it concedes the point, it mostly still gives a strong answer."
+        : "When it concedes the point, the defense mostly weakens to a partial one.";
+  return { heading, body: join(body) };
+}

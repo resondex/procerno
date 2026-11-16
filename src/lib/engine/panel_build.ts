@@ -45,6 +45,8 @@ import {
   COMMITS_TEXT,
   CRITERIA_HELP,
   EXCEPTION_TEXT,
+  CRITIC_TEXT,
+  criticPremiseDetail,
   ALONGSIDE_TEXT,
   CASE_TEXT,
   EXPANSION_TEXT,
@@ -3096,6 +3098,7 @@ function detailOf(inp: PanelCellInput, p: PositionPanel, up: PositionPanel | und
             : "The AI gives the customer only part of a defense";
       const red = !!p.lines?.some((l) => l.label.startsWith("Also points to"));
       p.detail = criticDetail(heading, red, h.noun);
+      criticStepDetails(inp, p, ctx, premiseTakeaway(rebuts, mixed, confirms).tag);
       return;
     }
     case "h2h": {
@@ -3227,6 +3230,68 @@ function detailOf(inp: PanelCellInput, p: PositionPanel, up: PositionPanel | und
 }
 
 /* ------------- am34: what explains each step (the clicked step card) ------------- */
+
+/** am57: the critic card's two steps explain themselves. "How strong an answer" keeps the card's explanation and adds
+ * which AI companies give a strong answer most and which rivals come up; "Does it say the critic is right?" says how
+ * strong the answer still is when it grants the criticism, and which AI companies side with the critic most. */
+function criticStepDetails(inp: PanelCellInput, p: PositionPanel, ctx: Ctx, premiseTag: string) {
+  if (!p.detail) return;
+  const { h } = ctx;
+  const T = CRITIC_TEXT;
+  const rows = inp.rows;
+  const pv = (r: PoolRow) => r.code.premise_verdict;
+  const judged = rows.filter((r) => pv(r) === "confirms" || pv(r) === "mixed" || pv(r) === "rebuts");
+  const conf = judged.filter((r) => pv(r) === "confirms");
+  const mixed = judged.filter((r) => pv(r) === "mixed");
+  const strongOf = (r: PoolRow) => r.code.case_strength === "strong";
+  const quote = (r: PoolRow) => (r.code.premise_quote ?? "").trim() || verdictFind(r, h);
+  const vf = (r: PoolRow) => verdictFind(r, h);
+  type Item = { label: string; rs: PoolRow[]; n: number; unit: string; find: (r: PoolRow) => string };
+  const sec = (title: string, sub: string, tone: PanelTone, items: Item[], keepOrder = false): PanelDetailSection | null => {
+    const ok = items.filter((x) => x.rs.length >= ROW_MIN && x.n > 0);
+    if (!keepOrder) ok.sort((a, b) => b.rs.length / b.n - a.rs.length / a.n || a.label.localeCompare(b.label));
+    return ok.length ? { title, sub, tone, rows: ok.map((x) => ({ label: x.label, num: num(x.rs.length, x.n, x.unit, refsOf(x.rs, x.find)) })) } : null;
+  };
+  const vendors = (pool: PoolRow[], hit: (r: PoolRow) => boolean, unit: (v: string) => string, find: (r: PoolRow) => string): Item[] => {
+    const by = new Map<string, PoolRow[]>();
+    for (const r of pool) {
+      const v = engineFacets(r.model).vendor;
+      by.set(v, [...(by.get(v) ?? []), r]);
+    }
+    return [...by.entries()].filter(([, rs]) => rs.length >= ARGS_MIN).map(([label, rs]) => ({ label, rs: rs.filter(hit), n: rs.length, unit: unit(label), find }));
+  };
+  const rivals = new Map<string, { name: string; rs: PoolRow[] }>();
+  for (const r of rows)
+    for (const m of r.code.mentions ?? []) {
+      const res = h.resolve(m.brand);
+      if (res.status !== "active" || !res.name || res.key === h.targetKey) continue;
+      const t = rivals.get(res.name) ?? { name: res.name, rs: [] };
+      if (!t.rs.includes(r)) t.rs.push(r);
+      rivals.set(res.name, t);
+    }
+  const strength = (pool: PoolRow[], unit: string): Item[] => [
+    { label: T.strong, rs: pool.filter(strongOf), n: pool.length, unit, find: vf },
+    { label: T.partial, rs: pool.filter((r) => !strongOf(r)), n: pool.length, unit, find: vf },
+  ];
+  const strengthSections = [
+    sec(T.vendorStrong.title, T.vendorStrong.sub, "neutral", vendors(rows, strongOf, (v) => `${v} answers`, vf)),
+    sec(T.rivals.title, T.rivals.sub, "bad", [...rivals.values()].sort((a, b) => b.rs.length - a.rs.length).slice(0, 5).map((x) => ({ label: x.name, rs: x.rs, n: rows.length, unit: "answers", find: () => x.name }))),
+  ].filter((x): x is PanelDetailSection => !!x);
+  const details: Partial<Record<PanelStepKey, PanelStepDetail>> = { strength: { ...p.detail, ...(strengthSections.length ? { sections: strengthSections } : {}) } };
+  if (p.steps.some((x) => x.key === "premise")) {
+    const premiseSections = [
+      conf.length >= ARGS_MIN ? sec(T.whenRight.title, T.whenRight.sub, "neutral", strength(conf, "answers that say the critic is right"), true) : null,
+      mixed.length >= ARGS_MIN ? sec(T.whenPartly.title, T.whenPartly.sub, "neutral", strength(mixed, "answers that say the critic is partly right"), true) : null,
+      sec(T.vendorRight.title, T.vendorRight.sub, "bad", vendors(judged, (r) => pv(r) === "confirms", (v) => `${v} answers that judge the criticism`, quote)),
+    ].filter((x): x is PanelDetailSection => !!x);
+    const granted = [...conf, ...mixed];
+    const after = granted.length < ARGS_MIN ? "few" : granted.filter(strongOf).length * 2 >= granted.length ? "strong" : "weak";
+    details.premise = { ...criticPremiseDetail(premiseTag, after), ...(premiseSections.length ? { sections: premiseSections } : {}) };
+  }
+  p.details = details;
+  delete p.detail;
+  delete p.detailComp;
+}
 
 /** am56: the alongside card's step carries new facts: whose products the AI names (yours, another company's, or a
  * replacement for you), how many it names, which it names first, and which AI companies name your own. */
