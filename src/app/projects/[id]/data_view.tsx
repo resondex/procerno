@@ -422,7 +422,6 @@ interface Facts {
   exception?: boolean;
   num: string;
   numLabel: string;
-  numTip?: string;
   leader: string;
   about: string;
   to: string;
@@ -460,7 +459,6 @@ function factsOf(c: MapCell, p: Position | undefined): Facts {
     ...(c.exception ? { exception: true } : {}),
     num: f?.value ?? "",
     numLabel: f?.label ?? "",
-    numTip: f?.tip,
     // A contest you hold has no taker: the engine says "Nobody", which under
     // "Who leads" read as if no one led. You lead it.
     leader: lead ? `${lead.name} ${lead.share}` : c.verdict === "yours" && (!p?.taker || p.taker === "Nobody") ? "You" : p?.taker ?? "",
@@ -547,7 +545,7 @@ function TypeTable({ map, category }: { map: AnalysisMapView; category?: string 
                 <tr key={r.id} className="border-b border-line/60 align-top last:border-b-0">
                   <td className="min-w-[8rem] px-3 py-2.5 font-semibold text-ink">{r.label}</td>
                   {cols.map(([k]) => (
-                    <td key={k} className={`px-3 py-2.5 text-ink-2 ${k === "leader" ? "min-w-[7.5rem]" : k === "about" || k === "to" || k === "away" ? "min-w-[8.5rem]" : ""}`} title={k === "num" ? r.numTip : undefined}>
+                    <td key={k} className={`px-3 py-2.5 text-ink-2 ${k === "leader" ? "min-w-[7.5rem]" : k === "about" || k === "to" || k === "away" ? "min-w-[8.5rem]" : ""}`}>
                       {k === "stand" ? (
                         <span className="flex items-center gap-1.5 whitespace-nowrap font-semibold" style={{ color: VCOLOR[r.verdict].ink }}>
                           <i className="inline-block h-2 w-2 flex-none rounded-full" style={{ background: VCOLOR[r.verdict].fg }} />

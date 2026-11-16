@@ -24,7 +24,6 @@ const pctOf = (c: RateCell) => {
   return x > 0 && x < 0.005 ? "<1%" : `${Math.round(x * 100)}%`;
 };
 const shareX = (c: RateCell) => (c.n > 0 ? c.k / c.n : 0);
-const picksTip = (c: RateCell) => `${c.k.toLocaleString("en-US")} of ${c.n.toLocaleString("en-US")} picks`;
 
 export function CompanyBoard({
   runId,
@@ -126,14 +125,14 @@ export function CompanyBoard({
               <button
                 type="button"
                 aria-expanded={isOpen}
-                title={`${picksTip(c.shareOfPicks)} - ${isOpen ? "hide" : "show"} its brands`}
+                title={`${isOpen ? "Hide" : "Show"} its brands`}
                 onClick={() => toggle(c.key)}
                 className={`${grid} ${tone} hover:bg-primary-soft`}
               >
                 {inner}
               </button>
             ) : (
-              <div title={picksTip(c.shareOfPicks)} className={`${grid} ${tone}`}>
+              <div className={`${grid} ${tone}`}>
                 {inner}
               </div>
             )}
@@ -141,7 +140,6 @@ export function CompanyBoard({
               c.members.map((m) => (
                 <div
                   key={m.key}
-                  title={picksTip(m.shareOfPicks)}
                   className={`${grid} ${m.you ? "font-semibold text-ink" : "text-ink-3"} pl-5`}
                 >
                   <span className="truncate">{m.name}</span>
@@ -153,7 +151,7 @@ export function CompanyBoard({
         );
       })}
       {restCell && (
-        <div title={picksTip(restCell)} className={`${grid} text-ink-2`}>
+        <div className={`${grid} text-ink-2`}>
           <span className="truncate">Others</span>
           {bar(restCell, false, false, true)}
           <span className="text-right tabular-nums">{pctOf(restCell)}</span>

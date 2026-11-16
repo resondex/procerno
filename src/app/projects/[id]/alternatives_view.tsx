@@ -274,9 +274,7 @@ function DefensiveSection({ view }: { view: DefensiveView }) {
         Other brands are counted whatever the answer advises: a brand named beside advice to stay is an option shown, not
         a customer lost.
         {view.ownProduct.k > 0 && (
-          <Tip tip={`${view.ownProduct.k} answers`}>
-            <span className="cursor-help"> Some answers also point to another {view.brand} product.</span>
-          </Tip>
+          <span> Some answers also point to another {view.brand} product.</span>
         )}
       </p>
       <DestinationTable view={view} />

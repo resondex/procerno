@@ -28,7 +28,7 @@ import { T } from "./type_scale";
  * are the UI chrome (the switch, "Open", "of answers say this", "fixed", the
  * click hint, "See all" / "Show less"). Every number with answers behind it
  * opens them in the one examples modal; a number with none is plain text.
- * Counts never print - they live in the hover tips.
+ * Counts never print, and no number carries a count tooltip.
  */
 
 // ---------- colours ----------
@@ -119,11 +119,11 @@ export function TextView({ text, className, title, plain }: { text: PanelText | 
       {text.map((s, i) => {
         const go = plain ? null : opener(s.refs, title ?? s.t);
         return go ? (
-          <button key={i} type="button" onClick={go} title={s.tip} className={`inline p-0 text-left ${linkish}`}>
+          <button key={i} type="button" onClick={go} className={`inline p-0 text-left ${linkish}`}>
             {s.t}
           </button>
         ) : (
-          <span key={i} title={s.tip}>
+          <span key={i}>
             {s.t}
           </span>
         );
@@ -132,16 +132,16 @@ export function TextView({ text, className, title, plain }: { text: PanelText | 
   );
 }
 
-/** A number: a button when it has answers, plain text otherwise; the count lives in the tip. */
+/** A number: a button when it has answers, plain text otherwise. */
 export function NumView({ n, title, className, note }: { n: PanelNum; title: string; className?: string; note?: string }) {
   const opener = useOpener();
   const go = opener(n.refs, title, note);
   return go ? (
-    <button type="button" onClick={go} title={n.tip} className={`tabular-nums ${linkish} ${className ?? ""}`}>
+    <button type="button" onClick={go} className={`tabular-nums ${linkish} ${className ?? ""}`}>
       {n.value}
     </button>
   ) : (
-    <span title={n.tip} className={`tabular-nums ${className ?? ""}`}>
+    <span className={`tabular-nums ${className ?? ""}`}>
       {n.value}
     </span>
   );
@@ -157,7 +157,7 @@ const barGrid = "grid grid-cols-[minmax(0,7.5rem)_minmax(0,1fr)_2.75rem] items-c
 /** The same row with a small figure after the number (a usual, on verdict rows). */
 const barGridAside = "grid grid-cols-[minmax(0,7.5rem)_minmax(0,1fr)_2.75rem_4.25rem] items-center gap-2 sm:grid-cols-[minmax(0,9.5rem)_minmax(0,1fr)_2.75rem_4.75rem]";
 
-/** One labelled bar; the whole row opens its answers (`plain`: inside a step card that is itself a button - the tip stays, nothing opens). */
+/** One labelled bar; the whole row opens its answers (`plain`: inside a step card that is itself a button - nothing opens). */
 export function NumBar({ label, n, color, bold, dim, title, plain, aside, tight }: { label: string; n: PanelNum; color: string; bold?: boolean; dim?: boolean; title?: string; plain?: boolean; aside?: ReactNode; tight?: boolean }) {
   const opener = useOpener();
   const go = plain ? null : opener(n.refs, title ?? label);
@@ -173,11 +173,11 @@ export function NumBar({ label, n, color, bold, dim, title, plain, aside, tight 
   );
   const cls = `${aside ? barGridAside : tight ? barGridTight : barGrid} ${T.cap} w-full rounded py-[3px] text-left`;
   return go ? (
-    <button type="button" onClick={go} title={n.tip} className={`${cls} hover:bg-line/30 [&:hover_b]:underline`}>
+    <button type="button" onClick={go} className={`${cls} hover:bg-line/30 [&:hover_b]:underline`}>
       {inner}
     </button>
   ) : (
-    <span className={cls} title={n.tip}>
+    <span className={cls}>
       {inner}
     </span>
   );
@@ -188,7 +188,7 @@ export function NumBar({ label, n, color, bold, dim, title, plain, aside, tight 
  * first (in the engine's order) and the first is drawn strongest; "no side"
  * rows are grey and last. A usual, when compared, is a small figure on the
  * same row. In the step stack these never open answers (the block below does). */
-export function SegRows({ segs, usual, usualLabel, dim }: { segs: PanelSegment[]; usual?: PanelSegment[]; usualLabel?: string; dim?: boolean }) {
+export function SegRows({ segs, usual, dim }: { segs: PanelSegment[]; usual?: PanelSegment[]; dim?: boolean }) {
   const ordered = [...segs.filter((x) => x.tone !== "neutral"), ...segs.filter((x) => x.tone === "neutral")];
   return (
     <span className="mt-0.5 block">
@@ -205,7 +205,7 @@ export function SegRows({ segs, usual, usualLabel, dim }: { segs: PanelSegment[]
             plain
             aside={
               u ? (
-                <span className="text-ink-3 tabular-nums" title={`${usualLabel ?? "Usual"}: ${u.num.tip}`}>
+                <span className="text-ink-3 tabular-nums">
                   usual {u.num.value}
                 </span>
               ) : undefined
@@ -301,7 +301,7 @@ export function StepCard({
   }
   if (step.segments && step.segments.length > 0) {
     const showUsual = !comp && !rivalLabel && !!usual?.segments?.length;
-    body.push(<SegRows key="seg" segs={step.segments} usual={showUsual ? usual!.segments : undefined} usualLabel={usualLabel} dim={dim} />);
+    body.push(<SegRows key="seg" segs={step.segments} usual={showUsual ? usual!.segments : undefined} dim={dim} />);
   }
   if (step.items && step.items.length > 0)
     body.push(
@@ -453,7 +453,7 @@ function CondCard({ c, side, cond, comp }: { c: PanelCondition; side: "toward" |
           </span>
         )}
       </span>
-      <span className="block text-xl font-semibold leading-tight tabular-nums text-ink" title={c.share.tip}>
+      <span className="block text-xl font-semibold leading-tight tabular-nums text-ink">
         {c.share.value}
       </span>
       <span className={`block ${T.cap} text-ink-3`}>of answers say this</span>
@@ -492,14 +492,14 @@ function CondCard({ c, side, cond, comp }: { c: PanelCondition; side: "toward" |
   return (
     <div className="mb-1.5 rounded-[10px] border border-line px-3 py-2.5" style={{ borderLeft: `3px solid ${color}` }}>
       {go ? (
-        <button type="button" onClick={go} title={c.share.tip} className="block w-full text-left hover:[&_.tabular-nums]:underline">
+        <button type="button" onClick={go} className="block w-full text-left hover:[&_.tabular-nums]:underline">
           {top}
         </button>
       ) : (
         <div>{top}</div>
       )}
       {c.both && (
-        <span className={`mt-1.5 grid grid-cols-[minmax(0,1fr)_2.5rem] items-center gap-1.5 ${T.cap} text-ink-3`} title={c.both.either.tip}>
+        <span className={`mt-1.5 grid grid-cols-[minmax(0,1fr)_2.5rem] items-center gap-1.5 ${T.cap} text-ink-3`}>
           <span>
             {also}
             <span className="mt-0.5 block h-1.5 overflow-hidden rounded-[3px] bg-line/60">
@@ -609,11 +609,11 @@ function BrandBar({ name, n, color, bold }: { name: string; n: PanelNum; color: 
   );
   const cls = `grid w-full grid-cols-[minmax(0,6.5rem)_minmax(0,1fr)_2.75rem] items-center gap-2.5 py-1.5 text-left ${T.body} text-ink`;
   return go ? (
-    <button type="button" onClick={go} title={n.tip} className={`${cls} [&:hover_b]:underline`}>
+    <button type="button" onClick={go} className={`${cls} [&:hover_b]:underline`}>
       {inner}
     </button>
   ) : (
-    <div className={cls} title={n.tip}>
+    <div className={cls}>
       {inner}
     </div>
   );

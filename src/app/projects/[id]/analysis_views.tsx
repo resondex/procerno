@@ -63,7 +63,6 @@ const pctOf = (c: RateCell) => {
   const x = c.k / c.n;
   return x > 0 && x < 0.005 ? "<1%" : `${Math.round(x * 100)}%`;
 };
-const tipOf = (c: RateCell) => `${c.k.toLocaleString("en-US")} of ${c.n.toLocaleString("en-US")} answers`;
 
 /** Playbook marks on the map cells: the in-playbook ids and whether to dim the rest. */
 const MarkCtx = createContext<{ mine: Set<string>; mineOnly: boolean }>({ mine: new Set(), mineOnly: false });
@@ -352,20 +351,20 @@ function Overview({
             </button>
           </p>
           <div className="mt-6 grid grid-cols-3 gap-5">
-            <div title={tipOf(named)} className="min-w-0">
+            <div className="min-w-0">
               <b className={`${T.num} block text-ink`}>{pctOf(named)}</b>
               <span className={`${T.sec} mt-1 block`}>named when buyers ask what to buy</span>
               <SeeExamples refs={map.examples?.named} title={`Answers that name ${ctx.brand}`} subtitle="When buyers ask what to buy" />
             </div>
             {you && (
-              <div title={`${you.share.k.toLocaleString("en-US")} of ${you.share.n.toLocaleString("en-US")} picks`} className="min-w-0">
+              <div className="min-w-0">
                 <b className={`${T.num} block text-[color:var(--pa-yours-ink)]`}>{pctOf(you.share)}</b>
                 <span className={`${T.sec} mt-1 block`}>share of picks</span>
                 <SeeExamples refs={you.refs} title={`Answers where the AI picks ${you.brand}`} subtitle="When buyers ask what to buy" />
               </div>
             )}
             {commit && (
-              <div title={tipOf(commit)} className="min-w-0">
+              <div className="min-w-0">
                 <b className={`${T.num} block text-ink`}>{pctOf(commit)}</b>
                 <span className={`${T.sec} mt-1 block`}>of answers commit to one {ctx.cat.singular}</span>
                 <SeeExamples
@@ -578,7 +577,7 @@ function CellButton({ cell, onOpen, hasPosition }: { cell: MapCell; onOpen: (id:
       type="button"
       onClick={() => hasPosition && onOpen(cell.id)}
       disabled={!hasPosition}
-      title={`${VWORD[cell.verdict]}${cell.exception ? " - with an exception" : ""} - ${cell.n.toLocaleString("en-US")} answers`}
+      title={`${VWORD[cell.verdict]}${cell.exception ? " - with an exception" : ""}`}
       className={`flex min-w-0 flex-col items-start gap-0.5 rounded-[10px] border-[1.5px] px-2.5 py-2 text-left transition-[colors,opacity] enabled:hover:border-ink disabled:cursor-default ${
         mine ? "border-[var(--color-primary)]" : "border-transparent"
       } ${m.mineOnly && !mine ? "opacity-30" : ""}`}

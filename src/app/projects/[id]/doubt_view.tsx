@@ -147,9 +147,7 @@ function Matrix<V extends string>({ view, kind }: { view: DoubtView<V>; kind: Ki
           return (
             <tr key={p.key} className="border-t border-line">
               <td className="pr-6 py-1.5">
-                <Tip tip={`${row[kind.good].n} answers`}>
-                  <span className="cursor-help">{p.label.toLowerCase()}</span>
-                </Tip>
+                {p.label.toLowerCase()}
               </td>
               {kind.parts.map((v) => (
                 <td key={v.key} className="text-right pr-4 tabular-nums">

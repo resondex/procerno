@@ -7,7 +7,7 @@ import { pct } from "./pivot_compute";
  * The Data page's charts (2026-11-11): any pivot table shown as Bars or Dots.
  * Plain inline SVG, colors from the theme tokens only (the --series-N
  * comparison palette, validated for both themes in globals.css), no chart
- * library. Visible text carries rates only - "k of n" and ranges ride each
+ * library. Visible text carries rates only - the 95% range rides each
  * mark's <title> tooltip. Thin cells (under 20 answers) draw muted with a
  * star, as in the table.
  *

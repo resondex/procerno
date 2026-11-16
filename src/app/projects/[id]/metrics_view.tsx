@@ -99,7 +99,7 @@ const shortTip = (m: MeasureDef) => {
 const rateOf = (a: Acc | undefined) => (a && a.n > 0 ? Math.round((a.k / a.n) * 1000) / 10 : null);
 const rangeTip = (a: Acc) => {
   const w = wilson(a.k, a.n);
-  return `${a.k} of ${a.n} - 95% range ${pct(w.low)}-${pct(w.high)}${a.n < THIN ? " - too few answers to read, take with care" : ""}`;
+  return `95% range ${pct(w.low)}-${pct(w.high)}${a.n < THIN ? " - too few answers to read, take with care" : ""}`;
 };
 
 export function PivotTable({
@@ -237,7 +237,7 @@ export function PivotTable({
       const before = prevOf?.(r.v, c);
       const d = prevOf ? changePts(cellOf(r, c), before) : null;
       if (d === null) return <span className="text-ink-3/50"> </span>;
-      const tip = before ? `Previous wave ${pct(before.k / before.n)} - ${before.k} of ${before.n}` : undefined;
+      const tip = before ? `Previous wave ${pct(before.k / before.n)}` : undefined;
       return (
         <span
           className="tabular-nums"
@@ -401,7 +401,7 @@ export function PivotTable({
               <div key={m.id} className="flex items-end gap-0.5">
                 <Choice
                   label={i === 0 ? (measures.length > 1 ? "4. Numbers" : "4. Number") : " "}
-                  tip={i === 0 ? "What each cell counts. Hover a number in the table for how many answers it rests on." : undefined}
+                  tip={i === 0 ? "What each cell counts. Hover a number in the table for its range." : undefined}
                   value={m.id}
                   options={measureChoices(i)}
                   onChange={(v) => setMeasureAt(i, v)}
@@ -516,7 +516,7 @@ export function PivotTable({
       <div className="px-4 py-3">
         <div className="flex flex-wrap items-start justify-between gap-x-4 gap-y-1">
           <div className="grid max-w-[75ch] gap-1">
-            <p className={`${T.body} font-medium text-ink`} title={`Based on ${pivot.answers.toLocaleString("en-US")} answers`}>
+            <p className={`${T.body} font-medium text-ink`}>
               {sentence}
             </p>
             <p className={`${T.cap} text-ink-3`}>

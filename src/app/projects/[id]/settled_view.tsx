@@ -28,7 +28,7 @@ const top3 = (xs: SettledNamed[]) =>
   xs.slice(0, 3).map((x, i) => (
     <span key={x.name}>
       {i > 0 && ", "}
-      <span title={`${x.n} answers`}>{x.name}</span>
+      <span>{x.name}</span>
     </span>
   ));
 

@@ -9,7 +9,7 @@
  * switching is client-side; a brand or engine change refetches (the engine
  * set rides the shell's EngineSetContext and the section's key).
  *
- * Counts live only in `tip` fields: hover tooltips on screen, never in print.
+ * Counts live only in `tip` fields, which are never shown.
  *
  * Download PDF prints ONLY the memo: the memo node is cloned into a print
  * root on <body>, <html> gets the pb-printing class, and the print CSS below

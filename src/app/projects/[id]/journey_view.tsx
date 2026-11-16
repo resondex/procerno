@@ -75,7 +75,7 @@ const ALL = "";
 const ROOM_AWARE: ReadonlySet<StationKey> = new Set(["awareness", "consideration", "value"]);
 
 const isThin = (c: RateCell) => c.n > 0 && c.n < THIN;
-const thinTip = (c: RateCell) => (isThin(c) ? ` - too few answers to read (${c.n})` : "");
+const thinTip = (c: RateCell) => (isThin(c) ? " - too few answers to read" : "");
 const lowerFirst = (s: string) => (s ? s[0].toLowerCase() + s.slice(1) : s);
 
 function ByDesign({ children }: { children?: ReactNode }) {
@@ -526,9 +526,13 @@ function InventoryBlock({ s, filtered }: { s: JourneyStation; filtered: boolean 
       val: (r) => r.label,
       render: (r) => (
         <span className={muted(r) ? "text-ink-3" : ""}>
-          <Tip tip={r.asked ? `${r.answers} answers${r.answers < THIN ? " - too few to read" : ""}` : "Not asked on this tracker"}>
-            <span className="cursor-help">{r.label}</span>
-          </Tip>
+          {!r.asked || r.answers < THIN ? (
+            <Tip tip={r.asked ? "Too few answers to read" : "Not asked on this tracker"}>
+              <span className="cursor-help">{r.label}</span>
+            </Tip>
+          ) : (
+            r.label
+          )}
           {filtered && r.invariant && r.asked && (
             <span className="ml-1.5">
               <ByDesign />

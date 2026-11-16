@@ -17,7 +17,7 @@ export const pct = (c: RateCell) => {
   return x > 0 && x < 0.005 ? "<1%" : `${Math.round(x * 100)}%`;
 };
 export const range = (c: RateCell) =>
-  c.n === 0 ? "no answers" : `${c.k} of ${c.n} - 95% range ${Math.round(c.low * 100)}-${Math.round(c.high * 100)}%`;
+  c.n === 0 ? "no answers" : `95% range ${Math.round(c.low * 100)}-${Math.round(c.high * 100)}%`;
 
 /** The one muted base line a section may carry (surface rule, 2026-11-01):
  * counts never sit on cards, strips or cells; a section states its base once. */
@@ -28,8 +28,7 @@ export function BaseNote({ children }: { children: React.ReactNode }) {
 /** Answer counts for a section's base line: "1,105". */
 export const fmtN = (n: number) => n.toLocaleString("en-US");
 
-/** A ranked list of brand names. The count behind each name is its hover,
- * never printed; `you` marks the client; `own` chips the client's own
+/** A ranked list of brand names (the count behind each name is never shown); `you` marks the client; `own` chips the client's own
  * cheaper line or plan (Value). */
 export function Names({ items, empty = "-" }: { items: { name: string; n: number; you?: boolean; own?: boolean }[]; empty?: string }) {
   if (items.length === 0) return <>{empty}</>;
@@ -38,7 +37,7 @@ export function Names({ items, empty = "-" }: { items: { name: string; n: number
       {items.map((x, i) => (
         <span key={x.name}>
           {i > 0 && ", "}
-          <span title={`${x.n} answers`} className={x.you ? "font-medium text-ink" : undefined}>
+          <span className={x.you ? "font-medium text-ink" : undefined}>
             {x.name}
           </span>
           {x.own && (
@@ -83,15 +82,11 @@ export function RateText({ cell }: { cell: RateCell }) {
   );
 }
 
-/** A share of a sub-base drawn as a percent, its "k of n" on hover. */
+/** A share of a sub-base drawn as a percent. */
 export function ShareOf({ k, n }: { k: number; n: number }) {
   if (n === 0) return <span className="text-ink-3">-</span>;
   const x = k / n;
-  return (
-    <Tip tip={`${k} of ${n}`}>
-      <span className="cursor-help">{x > 0 && x < 0.005 ? "<1%" : `${Math.round(x * 100)}%`}</span>
-    </Tip>
-  );
+  return <span>{x > 0 && x < 0.005 ? "<1%" : `${Math.round(x * 100)}%`}</span>;
 }
 
 export const rateCol = <T,>(id: string, label: string, tip: string, get: (r: T) => RateCell): Col<T> => ({
@@ -117,7 +112,7 @@ export function StackBar<K extends string>({ parts, cells }: { parts: readonly P
           key={p.key}
           className={p.color}
           style={{ width: `${rate(cells[p.key]) * 100}%` }}
-          title={`${p.label}: ${cells[p.key].k} of ${cells[p.key].n}`}
+          title={p.label}
         />
       ))}
     </div>
@@ -595,7 +590,7 @@ export interface ReasonRow {
   label: string;
   share: string;
   wall?: boolean;
-  /** Answers stating it - the tooltip, never printed. */
+  /** Answers stating it - never shown. */
   answers?: number;
   /** Sample response ids: with `onOpen`, the share opens them. */
   ids?: string[];
@@ -608,23 +603,16 @@ export type OnOpenReason = (label: string, ids: string[]) => void;
 
 /** The share, as a receipt link when the row carries ids and the caller can open them. */
 function ShareValue({ row, onOpen }: { row: { label: string; share: string; answers?: number; ids?: string[] }; onOpen?: OnOpenReason }) {
-  const counted = row.answers !== undefined ? `${row.answers} ${row.answers === 1 ? "answer" : "answers"}` : null;
   if (onOpen && row.ids && row.ids.length > 0)
     return (
       <button
         type="button"
         onClick={() => onOpen(row.label, row.ids!)}
-        title={`${counted ? `${counted} - ` : ""}open the answers`}
+        title="Open the answers"
         className="tabular-nums underline decoration-ink-3/40 decoration-dotted underline-offset-2 hover:decoration-ink-3"
       >
         {row.share}
       </button>
-    );
-  if (counted)
-    return (
-      <span title={counted} className="cursor-help">
-        {row.share}
-      </span>
     );
   return <>{row.share}</>;
 }

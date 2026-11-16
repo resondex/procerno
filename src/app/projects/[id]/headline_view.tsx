@@ -26,7 +26,7 @@ const pct = (c: RateCell) => {
   return x > 0 && x < 0.005 ? "<1%" : `${Math.round(x * 100)}%`;
 };
 const range = (c: RateCell) =>
-  c.n === 0 ? "no answers" : `${c.k} of ${c.n} - 95% range ${Math.round(c.low * 100)}-${Math.round(c.high * 100)}%`;
+  c.n === 0 ? "no answers" : `95% range ${Math.round(c.low * 100)}-${Math.round(c.high * 100)}%`;
 
 const TIPS = {
   mentioned: "Named: headline answers that name the brand in any framing.",
@@ -115,7 +115,7 @@ function OutcomeBar({ view }: { view: HeadlineView }) {
             key={p.key}
             className={p.color}
             style={{ width: `${(view.outcomes[p.key] / n) * 100}%` }}
-            title={`${p.label}: ${view.outcomes[p.key]} of ${view.answers}`}
+            title={p.label}
           />
         ))}
       </div>

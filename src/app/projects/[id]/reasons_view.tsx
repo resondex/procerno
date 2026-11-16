@@ -187,12 +187,8 @@ export default function ReasonsSection({
       )}
       {selected && selected.noReason > 0 && (
         <p className="text-[12px] text-ink-3">
-          <Tip tip={`${selected.noReason} of ${selected.answers} answers`}>
-            <span className="cursor-help">
-              {Math.max(1, Math.round((selected.noReason / Math.max(1, selected.answers)) * 100))}% of these answers make no
-              argument in the codebook.
-            </span>
-          </Tip>
+          {Math.max(1, Math.round((selected.noReason / Math.max(1, selected.answers)) * 100))}% of these answers make no argument in
+          the codebook.
         </p>
       )}
       <SortTable

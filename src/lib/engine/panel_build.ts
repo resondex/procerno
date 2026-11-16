@@ -663,11 +663,13 @@ function nameTokens(name: string, ctx: Ctx): Set<string> {
  * choose (the pick, or the choice of a rule); a programme is named and almost never chosen. Per brand and name. */
 const PRODUCT_MIN_SHARE = 0.05;
 const PRODUCT_MIN_CHOSEN = 2;
-const PICKED = new WeakMap<Map<string, PanelCellInput>, Map<string, { named: number; chosen: number }>>();
-function productIndex(ctx: Ctx): Map<string, { named: number; chosen: number }> {
+/** A rival name that is only ever where a verdict sends the buyer needs this share of the answers naming it. */
+const PRODUCT_SENT_SHARE = 0.25;
+const PICKED = new WeakMap<Map<string, PanelCellInput>, Map<string, { named: number; chosen: number; sent: number }>>();
+function productIndex(ctx: Ctx): Map<string, { named: number; chosen: number; sent: number }> {
   const hit = PICKED.get(ctx.inputs);
   if (hit) return hit;
-  const idx = new Map<string, { named: number; chosen: number }>();
+  const idx = new Map<string, { named: number; chosen: number; sent: number }>();
   PICKED.set(ctx.inputs, idx);
   const { h } = ctx;
   const nouns = nounToks(ctx);
@@ -688,7 +690,17 @@ function productIndex(ctx: Ctx): Map<string, { named: number; chosen: number }> 
       seen.add(r.code.response_id);
       const chosen = new Set<string>();
       const named = new Set<string>();
-      for (const w of [r.code.top_pick ?? "", ...rules.flatMap((d) => [d.choice ?? "", d.product ?? ""])]) {
+      // am44: a rule's `product` (where a stay / leave / worth-it verdict sends the buyer) counts for the tracker's own
+      // brand only - its own rungs appear nowhere else; for a rival it also names programmes buyers are sent to
+      // ("move the points to ..."), so a rival's product must be the pick or the choice of a rule.
+      // A rival's product on such a rule is weaker evidence (`sent`, a higher bar below).
+      const sent = new Set<string>();
+      for (const d of rules)
+        if ((d.product ?? "").trim()) {
+          const k = keyOf(d.product!);
+          if (k) (h.resolve(d.product!).key === h.targetKey ? chosen : sent).add(k);
+        }
+      for (const w of [r.code.top_pick ?? "", ...rules.map((d) => d.choice ?? "")]) {
         const k = w.trim() ? keyOf(w) : null;
         if (k) chosen.add(k);
       }
@@ -696,10 +708,11 @@ function productIndex(ctx: Ctx): Map<string, { named: number; chosen: number }> 
         const k = keyOf(m.brand);
         if (k) named.add(k);
       }
-      for (const k of new Set([...named, ...chosen])) {
-        const t = idx.get(k) ?? { named: 0, chosen: 0 };
+      for (const k of new Set([...named, ...chosen, ...sent])) {
+        const t = idx.get(k) ?? { named: 0, chosen: 0, sent: 0 };
         t.named++;
         if (chosen.has(k)) t.chosen++;
+        else if (sent.has(k)) t.sent++;
         idx.set(k, t);
       }
     }
@@ -714,7 +727,7 @@ function isPickedProduct(rest: string, brandName: string, own: Set<string>, ctx:
   const t = productIndex(ctx).get(`${key}|${toks.join(" ")}`);
   // Never seen in an answer that states conditions: nothing to judge it by, so it stays.
   if (!t || t.named < 5) return true;
-  const ok = t.chosen >= PRODUCT_MIN_CHOSEN && t.chosen / t.named >= PRODUCT_MIN_SHARE;
+  const ok = (t.chosen >= PRODUCT_MIN_CHOSEN && t.chosen / t.named >= PRODUCT_MIN_SHARE) || (t.sent >= PRODUCT_MIN_CHOSEN && t.sent / t.named >= PRODUCT_SENT_SHARE);
   return ok;
 }
 

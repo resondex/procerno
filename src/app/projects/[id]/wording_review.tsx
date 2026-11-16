@@ -217,11 +217,6 @@ function FlagCard({
     }
   };
 
-  const countTip =
-    flag.answers != null
-      ? `${flag.answers} answers to this wording; ${flag.siblingCount} other wording${flag.siblingCount === 1 ? "" : "s"} of the same question`
-      : undefined;
-
   return (
     <div className="grid gap-3 rounded-lg border border-line p-4">
       {total > 1 && <div className={T.label}>Wording {index + 1}</div>}
@@ -229,7 +224,7 @@ function FlagCard({
         <div className={T.cap + " text-ink-3"}>As asked</div>
         <p className={`${T.body} mt-0.5 text-ink`}>&ldquo;{flag.text}&rdquo;</p>
       </div>
-      <p className={`${T.body} text-ink-2`} title={countTip}>
+      <p className={`${T.body} text-ink-2`}>
         Only {pct(flag.rate)} of the answers to this wording were about {cat}, against {pct(flag.siblingsRate)} for the other
         wordings of the same question. The AI read it as a question about something else.
       </p>

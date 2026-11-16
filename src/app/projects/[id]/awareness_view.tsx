@@ -76,7 +76,7 @@ function Lists({ b }: { b: AwarenessBlock }) {
             {b.brands.map((x) => (
               <li key={x.name} className="flex items-baseline justify-between gap-3">
                 <span className={x.you ? "font-medium text-ink" : "text-ink-2"}>{x.name}</span>
-                <Tip tip={`Named in ${range(x.named)}${x.recommended > 0 ? `; recommended in ${x.recommended} answers` : ""}`}>
+                <Tip tip={`Named in ${range(x.named)}${x.recommended > 0 ? "; also recommended" : ""}`}>
                   <span className="cursor-help tabular-nums text-ink-3">
                     {pct(x.named)}
                     {x.recommended > 0 && " - recommended"}
@@ -126,9 +126,7 @@ function Without({ b, runId, title }: { b: AwarenessBlock; runId: string; title:
     <div className="text-[13px]">
       <h3 className="text-[12px] font-medium text-ink-2 mb-1">{title}</h3>
       <p className="text-[12px] text-ink-3 mb-1.5">
-        <Tip tip={`${adjacent} answers`}>
-          <span className="cursor-help">These answers grouped by the phrase that points the asker their way; shares are of them.</span>
-        </Tip>
+        These answers grouped by the phrase that points the asker their way; shares are of them.
       </p>
       {w.groups.length === 0 ? (
         <p className="text-ink-3">No two answers point the same way.</p>

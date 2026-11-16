@@ -126,26 +126,24 @@ function GroupList({
         <p className="mt-1 text-[12px] text-ink-3">No condition stated by more than one answer.</p>
       ) : (
         <ol className="mt-1.5 grid gap-2">
-          {items.map(({ g, answers, share, ids }) => {
+          {items.map(({ g, answers, ids }) => {
             const few = answers < FEW;
             const other = contested.get(g.cond) ?? 0;
             return (
               <li key={g.id} className={`text-[12px] leading-snug ${few ? "text-ink-3/70" : ""}`}>
                 <div className="flex items-baseline justify-between gap-3">
                   <span className={few ? "" : "text-ink"}>{g.label}</span>
-                  <Tip tip={`Stated in ${answersText(answers)} - ${range(share)}`}>
-                    <span className="shrink-0 cursor-help tabular-nums text-ink-3">
-                      <Evidence ids={ids} title={`${title}: ${g.label}`} onEvidence={onEvidence}>
-                        {answers}
-                      </Evidence>
-                    </span>
-                  </Tip>
+                  <span className="shrink-0 tabular-nums text-ink-3">
+                    <Evidence ids={ids} title={`${title}: ${g.label}`} onEvidence={onEvidence}>
+                      {answers}
+                    </Evidence>
+                  </span>
                 </div>
                 {(routesLabel !== null && g.routes.length > 0) || other > 0 ? (
                   <div className="text-[11px] text-ink-3">
                     {routesLabel !== null && g.routes.length > 0 && `${routesLabel} ${routesText(g.routes)}`}
                     {other > 0 && (
-                      <span title={answersText(other)}>
+                      <span>
                         {routesLabel !== null && g.routes.length > 0 ? " - " : ""}also {otherSide}
                       </span>
                     )}
@@ -183,7 +181,7 @@ function SliceGroups({
             return (
               <li key={g.id} className={`text-[12px] leading-snug ${few ? "text-ink-3/70" : "text-ink-2"}`}>
                 <span className={few ? "" : "text-ink"}>{g.label}</span>{" "}
-                <span className="text-ink-3" title={answersText(g.answers)}>
+                <span className="text-ink-3">
                   <Evidence ids={g.ids} title={`${slice} - ${label.toLowerCase()}: ${g.label}`} onEvidence={onEvidence}>
                     {g.answers}
                   </Evidence>
@@ -203,13 +201,7 @@ function RoomCard({ room, onEvidence }: { room: SliceRules; onEvidence?: OnEvide
     <div className={`rounded-md border border-line/60 p-3 ${thin ? "opacity-60" : ""}`}>
       <div className="flex items-baseline justify-between gap-3">
         <div className="text-[13px] font-medium text-ink">
-          <Tip
-            tip={`${answersText(room.answers)} that state their rules: ${room.pools
-              .map((p) => `${POOL_LABEL[p.pool]} ${p.answers}`)
-              .join(", ")}`}
-          >
-            <span className="cursor-help">{room.label}</span>
-          </Tip>
+          {room.label}
         </div>
         {thin && (
           <div className="shrink-0 text-[11px] text-ink-3">Too few answers to read - {answersText(room.answers)}</div>
@@ -296,7 +288,7 @@ const rivalCols = (onEvidence?: OnEvidence, scope: "rival" | "question" = "rival
     val: (r) => topCondition(r.win),
     render: (r) =>
       r.win[0] ? (
-        <span className="text-[12px]" title={answersText(r.win[0].answers)}>
+        <span className="text-[12px]">
           <Evidence ids={r.win[0].ids} title={`${head(r)} - you win when: ${r.win[0].label}`} onEvidence={onEvidence}>
             {r.win[0].label}
           </Evidence>
@@ -312,7 +304,7 @@ const rivalCols = (onEvidence?: OnEvidence, scope: "rival" | "question" = "rival
     val: (r) => topCondition(r.lose),
     render: (r) =>
       r.lose[0] ? (
-        <span className="text-[12px]" title={answersText(r.lose[0].answers)}>
+        <span className="text-[12px]">
           <Evidence ids={r.lose[0].ids} title={`${head(r)} - you lose when: ${r.lose[0].label}`} onEvidence={onEvidence}>
             {r.lose[0].label}
           </Evidence>
@@ -349,19 +341,12 @@ function Explorer({ view, onEvidence }: { view: RulesView; onEvidence?: OnEviden
   const contestedYou = sideCount("away");
   const contestedAway = sideCount("you");
 
-  const once = view.more.you.groups + view.more.away.groups + view.more.elsewhere.groups;
   return (
     <section className="card p-6 grid gap-4">
       <div>
         <h2 className="section-label mb-1">Decision rules</h2>
         <p className="text-[13px] text-ink-3">
-          <Tip
-            tip={`${view.answers} answers on the core engine panel that state their rules; ${view.rules} stated rules; ${view.unconditional} answers state none.`}
-          >
-            <span className="cursor-help">
-              The conditions the AI states for where a buyer should go - &ldquo;if you already use X, pick Y&rdquo;.
-            </span>
-          </Tip>{" "}
+          The conditions the AI states for where a buyer should go - &ldquo;if you already use X, pick Y&rdquo;.{" "}
           Conditions are grouped {view.grouping === "embeddings" ? "by meaning" : "by their shared words"} across every
           question type, so the same circumstance groups the same way wherever it was said.
           {view.uncoded > 0 && ` ${view.uncoded} answers are not coded yet.`}
@@ -444,11 +429,8 @@ function Explorer({ view, onEvidence }: { view: RulesView; onEvidence?: OnEviden
         </details>
       )}
       <BaseNote>
-        Each number is how many answers state the condition; hover for its share
-        {pool ? ` in ${POOL_LABEL[pool]}` : ""}.{" "}
-        <span title={`${once} more conditions`}>
-          More conditions are stated by a single answer or sit past the top of the list.
-        </span>{" "}
+        Each number is how many answers state the condition.{" "}
+        More conditions are stated by a single answer or sit past the top of the list.{" "}
         Based on {fmtN(denom)} answers that state their rules.
       </BaseNote>
     </section>

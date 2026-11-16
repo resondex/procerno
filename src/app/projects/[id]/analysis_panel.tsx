@@ -392,14 +392,14 @@ function ExceptionBlock({ e, brand }: { e: PositionException; brand: string }) {
       <div className={`${T.label} mb-1`} style={{ color: "var(--pa-theirs)" }}>
         You lose this one - with an exception
       </div>
-      <p className={`${T.body} text-ink`} title={e.tip}>
+      <p className={`${T.body} text-ink`}>
         When the AI picks {e.rival} here, it still says to choose {brand} in these cases:
       </p>
       <div className="mt-2">
         {e.rows.map((r, i) => {
           const can = !!show && (r.refs?.length ?? 0) > 0;
           return (
-            <div key={`${i}:${r.text}`} className="grid grid-cols-[minmax(0,1fr)_2.75rem] items-baseline gap-x-2 gap-y-1 border-b border-line/70 py-2 text-[14px] last:border-b-0" title={r.tip}>
+            <div key={`${i}:${r.text}`} className="grid grid-cols-[minmax(0,1fr)_2.75rem] items-baseline gap-x-2 gap-y-1 border-b border-line/70 py-2 text-[14px] last:border-b-0">
               <span className="min-w-0 text-ink">
                 {r.text}
                 {r.wall && (
@@ -441,7 +441,6 @@ interface CondRowData {
   routes?: RouteShare[];
   members?: string[];
   receipts?: AnswerRef[];
-  tip?: string;
 }
 const ROW_TOP = 8;
 function CondRows({ rows, color }: { rows: CondRowData[]; color: string }) {
@@ -457,7 +456,7 @@ function CondRows({ rows, color }: { rows: CondRowData[]; color: string }) {
           title={r.label}
           note={r.members && r.members.length > 1 ? `Includes: ${r.members.join(" - ")}` : undefined}
           head={() => (
-            <span className="grid grid-cols-[minmax(0,1fr)_2.75rem] items-baseline gap-x-2 gap-y-1 text-[14px]" title={r.tip}>
+            <span className="grid grid-cols-[minmax(0,1fr)_2.75rem] items-baseline gap-x-2 gap-y-1 text-[14px]">
               <span className="min-w-0 text-ink">
                 {r.label}
                 {r.wall && (
@@ -509,7 +508,7 @@ const themeRows = (ts: DossierTheme[]): CondRowData[] =>
   ts.slice(0, 8).map((t) => ({ label: t.label, share: t.share, weight: pctNum(t.share), wall: themeWall(t), routes: t.routes, members: themeMembers(t), receipts: t.receipts }));
 const flatRows = (cs: ConditionItem[]): CondRowData[] =>
   // The count drives the bar (shares on one base round alike); the share prints when the payload carries one.
-  cs.map((c) => ({ label: c.text, share: c.share, weight: c.n, wall: c.wall, routes: c.routes, receipts: c.receipts, tip: `About ${c.n} answers` }));
+  cs.map((c) => ({ label: c.text, share: c.share, weight: c.n, wall: c.wall, routes: c.routes, receipts: c.receipts }));
 const shareRows = (cs: { label: string; share: string }[]): CondRowData[] => cs.map((c) => ({ label: c.label, share: c.share, weight: pctNum(c.share) }));
 
 /** "What it says about the buyer": two columns, toward you then away from you. */
@@ -579,7 +578,7 @@ function LiftRows({ lifts, sides }: { lifts: (LiftItem | DossierArg)[]; sides: [
           refs={l.receipts}
           title={l.label}
           head={() => (
-            <span className="block text-[14px]" title={"tip" in l ? l.tip : undefined}>
+            <span className="block text-[14px]">
               <span className="flex justify-between gap-3">
                 <b className="font-semibold text-ink">{l.label}</b>
                 <span className="tabular-nums text-ink-2">
@@ -905,7 +904,7 @@ function ContestPanel({ p, ctx }: { p: Position; ctx: Ctx }) {
   // The numbers: the taker line, then every figure; the preview is your share
   // of the picks, named, and recommendations that end as the pick - or the
   // first three as served where a contest type has other numbers.
-  const numRows: { label: string; value: string; tip?: string }[] = [
+  const numRows: { label: string; value: string }[] = [
     ...(p.taker ? [{ label: "Who holds it", value: `${p.taker}${p.takerKind ? ` - ${p.takerKind}` : ""}` }] : []),
     ...figs,
   ];
@@ -913,7 +912,7 @@ function ContestPanel({ p, ctx }: { p: Position; ctx: Ctx }) {
   const numList = (rows: typeof numRows) =>
     rows.length > 0 ? (
       rows.map((f, i) => (
-        <div key={`${f.label}${i}`} title={f.tip}>
+        <div key={`${f.label}${i}`}>
           <Fig label={f.label} value={f.value} />
         </div>
       ))
@@ -1143,7 +1142,7 @@ function HowTable({
       return (
         <button
           type="button"
-          title={`${r.tips[k]} - see examples`}
+          title="See examples"
           onClick={() => show({ title: `${label.replace(/ in$/, "")} - ${who}`, subtitle: where, refs })}
           className="tabular-nums text-primary underline decoration-dotted underline-offset-2 hover:opacity-80"
         >
@@ -1151,7 +1150,7 @@ function HowTable({
         </button>
       );
     return (
-      <span title={r.tips[k]} className="tabular-nums">
+      <span className="tabular-nums">
         {val}
       </span>
     );
@@ -1294,7 +1293,7 @@ function RivalScoped({ name, p, ctx }: { name: string; p: Position; ctx: Ctx }) 
   const scopedThemes = here?.sendsThemes;
   const awayThemes = scopedThemes ?? (p.awayThemes ?? []).filter((t) => (t.routes ?? []).some((r) => normName(r.name) === normName(name)));
   const themed = scopedThemes !== undefined || awayThemes.length > 0;
-  const flatSends: CondRowData[] = (here?.sends ?? []).map((c) => ({ label: c.text, share: c.share, weight: c.n, wall: c.wall, receipts: c.receipts, tip: `About ${c.n} answers` }));
+  const flatSends: CondRowData[] = (here?.sends ?? []).map((c) => ({ label: c.text, share: c.share, weight: c.n, wall: c.wall, receipts: c.receipts }));
   const sendRows: CondRowData[] = themed ? themeRows(awayThemes).map((r) => ({ ...r, routes: [] })) : flatSends;
   const hasSends = sendRows.length > 0;
 

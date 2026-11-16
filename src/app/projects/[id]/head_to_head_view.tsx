@@ -26,7 +26,7 @@ const pct = (c: RateCell) => {
   return x > 0 && x < 0.005 ? "<1%" : `${Math.round(x * 100)}%`;
 };
 const range = (c: RateCell) =>
-  c.n === 0 ? "no answers" : `${c.k} of ${c.n} - 95% range ${Math.round(c.low * 100)}-${Math.round(c.high * 100)}%`;
+  c.n === 0 ? "no answers" : `95% range ${Math.round(c.low * 100)}-${Math.round(c.high * 100)}%`;
 
 const PARTS = [
   { key: "won", label: "You win", color: "bg-[var(--pa-yours)]" },
@@ -43,7 +43,7 @@ function RecordBar({ row }: { row: Pick<HeadToHeadRow, "won" | "lost" | "other" 
           key={p.key}
           className={p.color}
           style={{ width: `${rate(row[p.key]) * 100}%` }}
-          title={`${p.label}: ${row[p.key].k} of ${row[p.key].n}`}
+          title={p.label}
         />
       ))}
     </div>
@@ -270,19 +270,7 @@ export function Boundaries({ row, brand, onOpen, bare = false }: { row: HeadToHe
   return (
     <div className="rounded-md border border-line/60 p-3">
       <div className="text-[13px] font-medium text-ink">
-        {bare ? (
-          matchup
-        ) : (
-          <Tip
-            tip={
-              c.themes
-                ? `${row.answers} answers in this matchup; ${c.unconditional} of them pick without stating a condition.`
-                : `${c.rules} stated rules across ${row.answers} answers; ${c.unconditional} answers answer unconditionally.`
-            }
-          >
-            <span className="cursor-help">{matchup}</span>
-          </Tip>
-        )}
+        {matchup}
       </div>
       <p className="mt-0.5 text-[12px] text-ink-3">
         On the context-free ask, {lead} - the AI&apos;s stated boundaries:
@@ -352,7 +340,7 @@ export function Boundaries({ row, brand, onOpen, bare = false }: { row: HeadToHe
             {c.elsewhere.map((e, i) => (
               <span key={e.name}>
                 {i > 0 && ", "}
-                <span title={bare ? undefined : `${e.n} rules`}>{e.name}</span>
+                <span>{e.name}</span>
                 {e.conditions.length > 0 && " - "}
                 {e.conditions.map((g, j) => (
                   <span key={g.label}>

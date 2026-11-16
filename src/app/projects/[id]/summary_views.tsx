@@ -29,7 +29,7 @@ const pct = (c: RateCell) => {
   return x > 0 && x < 0.005 ? "<1%" : `${Math.round(x * 100)}%`;
 };
 const range = (c: RateCell) =>
-  c.n === 0 ? "no answers" : `${c.k} of ${c.n} - 95% range ${Math.round(c.low * 100)}-${Math.round(c.high * 100)}%`;
+  c.n === 0 ? "no answers" : `95% range ${Math.round(c.low * 100)}-${Math.round(c.high * 100)}%`;
 const pts = (x: number) => `${x >= 0 ? "+" : ""}${Math.round(x * 100)} pts`;
 
 function useBrandSummary(runId: string) {
@@ -75,7 +75,7 @@ function BarRow({ name, share, max, isTarget, right, tip }: {
   max: number;
   isTarget?: boolean;
   right: string;
-  /** Hover text for the row - where the counts behind it live. */
+  /** Hover text for the row. */
   tip?: string;
 }) {
   return (
@@ -154,7 +154,7 @@ function LookLink({ look, onLook }: { look: Insight["look"]; onLook?: OnLook }) 
 
 function InsightCard({ insight, label, onLook }: { insight: Insight; label?: string; onLook?: OnLook }) {
   return (
-    <div className="card p-5 grid gap-1.5 content-start" title={insight.foot}>
+    <div className="card p-5 grid gap-1.5 content-start">
       {label && <div className="section-label">{label}</div>}
       <div className="text-[15px] font-semibold">{insight.title}</div>
       <p className="text-[13px] text-ink-2">{insight.body}</p>
@@ -239,12 +239,12 @@ function Verdict({ facts, onLook }: { facts: VerdictFact[]; onLook?: OnLook }) {
               {f.text}
             </span>
           ) : (
-            <span className="cursor-help">{f.text}</span>
+            <span>{f.text}</span>
           );
         return (
           <span key={f.key}>
             {i > 0 && " "}
-            <InlineTip tip={look && onLook ? `${f.foot} - click for ${look.label}` : f.foot}>{body}</InlineTip>
+            {look && onLook ? <InlineTip tip={`Click for ${look.label}`}>{body}</InlineTip> : body}
           </span>
         );
       })}
@@ -257,7 +257,7 @@ function InsightList({ insights, onLook }: { insights: Insight[]; onLook?: OnLoo
   return (
     <ul className="grid gap-3 border-t border-line pt-4">
       {insights.map((i) => (
-        <li key={i.key} className="grid gap-0.5" title={i.foot}>
+        <li key={i.key} className="grid gap-0.5">
           <div className="flex flex-wrap items-baseline gap-x-2">
             <span className="text-[11px] font-semibold uppercase tracking-wide text-ink-3">{KIND_LABEL[i.kind]}</span>
             <span className="text-[14px] font-semibold">{i.title}</span>
@@ -479,7 +479,6 @@ function Brief({ v, onLook }: { v: BrandSummaryView; onLook?: OnLook }) {
                   <div
                     key={r.key}
                     className="flex items-baseline justify-between gap-3 text-[13px]"
-                    title={`${r.won.k} wins to ${r.lost.k} of ${r.answers} answers`}
                   >
                     <span className="text-ink-2 truncate">vs {r.rival}</span>
                     <span className="tabular-nums whitespace-nowrap">win {pct(r.winOfDecided)}</span>
@@ -707,7 +706,7 @@ function Questions({ v }: { v: BrandSummaryView }) {
           </p>
         )}
         {roomSpread && (
-          <p className="text-[13px] text-ink-2" title={roomSpread.foot}>
+          <p className="text-[13px] text-ink-2">
             By buyer: {roomSpread.body}
           </p>
         )}
@@ -761,7 +760,6 @@ function Questions({ v }: { v: BrandSummaryView }) {
                   share={rate(r.winOfDecided)}
                   max={maxWin}
                   right={`win ${pct(r.winOfDecided)}`}
-                  tip={`${r.won.k} wins to ${r.lost.k} of ${r.answers} answers`}
                 />
               ))}
             </div>
