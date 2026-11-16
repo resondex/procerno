@@ -23,6 +23,8 @@ import type { CacheMeta } from "../types";
  */
 
 export const QUESTION_LABEL_VERSION = "ql1";
+/** Buyer questions' own era: their instructions changed (the asker is "they"), so their saved labels re-key; customer labels keep ql1. */
+export const BUYER_LABEL_VERSION = "ql2";
 const CACHE_TTL_MS = 100 * 365 * 24 * 3600 * 1000; // read forever - the saved-tracker rule
 const DEADLINE_MS = 40_000;
 const CONCURRENCY = 4;
@@ -67,7 +69,7 @@ export function questionLabelSystem(who: LabelAsk["who"]): string {
     `The label completes the sentence "When a ${who} asks ___" and names, in plain words, what the asker wants to know.`,
     "It must read as a correct, complete clause when placed after that sentence opening.",
     who === "buyer"
-      ? 'The question does not mention the brand given in the data, and neither does the label. Speak of the asker only in the third person or not at all: the label never contains "you" or "your".'
+      ? 'The question does not mention the brand given in the data, and neither does the label. When the label has to mention the asker, call them "they" or "them": the label never contains "you" or "your".'
       : 'Write it from the point of view of the brand given in the data: refer to that brand only as "you" or as "your" followed by the product noun given, never by its name. "You" and "your" never mean the asker.',
     "Rules:",
     `- Start with one of these words: ${LABEL_FIRST_WORDS.join(", ")}.`,
@@ -113,7 +115,7 @@ export function validateLabel(label: string, ctx: { brandForms: string[]; otherB
 export const quotedAsk = (seed: string) => `"${seed.trim()}"`;
 
 export const labelKey = (ctx: LabelContext, ask: LabelAsk, model = QUESTION_LABEL_MODEL) =>
-  `question_label:${QUESTION_LABEL_VERSION}:${model}:${ctx.projectId}:${createHash("sha256")
+  `question_label:${ask.who === "buyer" ? BUYER_LABEL_VERSION : QUESTION_LABEL_VERSION}:${model}:${ctx.projectId}:${createHash("sha256")
     .update([ask.seed.trim(), ctx.brand, ctx.category, ask.who, ask.criticism?.trim() ?? ""].join("\n"))
     .digest("hex")
     .slice(0, 32)}`;
