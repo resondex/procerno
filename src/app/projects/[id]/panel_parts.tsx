@@ -754,7 +754,7 @@ export function TableView({ table }: { table: PanelTable }) {
               <tr key={r.label} className="border-t border-line/70">
                 <td className="py-1.5 pr-2 text-ink">{r.label}</td>
                 {r.cells.map((c, i) => (
-                  <td key={i} className="py-1.5 pl-2 text-right text-ink">
+                  <td key={i} className={`whitespace-nowrap py-1.5 pl-3 text-right ${c && "t" in c && !("refs" in c && c.refs?.length) ? `${T.cap} text-ink-3` : "text-ink"}`}>
                     <Cell c={c} title={`${r.label} - ${table.columns[i] ?? ""}`} />
                   </td>
                 ))}

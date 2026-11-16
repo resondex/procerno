@@ -1820,11 +1820,12 @@ function criteriaPanel(inp: PanelCellInput, ctx: Ctx): PositionPanel {
           title: "What the answer weighs, against the checklist",
           help: `${CRITERIA_HELP.checklist} ${CRITERIA_HELP.taught}`,
           sub: `How often each topic comes up in answers that pick you and in answers that pick another brand, and whether the AI teaches buyers to look for it. The when-picked figures come from the What to buy answers${local ? " of this buyer" : inp.pooled ? "" : " of all buyers"}, because these questions take no picks.`,
-          columns: [`When it picks another ${h.noun}`, "When it picks you", "On the checklist"],
+          columns: [`When it picks another ${h.noun}`, "When it picks you", "Taught in", "Checklist"],
           style: "compare",
           rows: tableCodes.map(({ c, taught }) => {
             const tn = taughtNum(c);
-            return { label: clabel(c, h), cells: [pickNum(c, otherPicks), pickNum(c, youPicks), taught ? { t: `Taught, ${tn.value}`, ...(tn.refs ? { refs: tn.refs } : {}), tip: tn.tip } : tn.pct > 0 ? { t: `${upperFirst(offChecklist(tn.pct))}, ${tn.value}`, ...(tn.refs ? { refs: tn.refs } : {}), tip: tn.tip } : { t: "Never taught" }] };
+            // am46: the share and the word are two short cells (one long cell wrapped badly).
+            return { label: clabel(c, h), cells: [pickNum(c, otherPicks), pickNum(c, youPicks), tn, { t: taught ? "On it" : upperFirst(offChecklist(tn.pct)) }] };
           }),
         }
       : undefined;
