@@ -703,3 +703,25 @@ export function worryAgreesDetail(tag: string, after: WorryAfter, buyer: boolean
             : `After agreeing, its advice is split between ${fav}, ${bad} and no side.`;
   return { heading: `The AI ${tag.charAt(0).toLowerCase()}${tag.slice(1)}`, body: join(body) };
 }
+
+/* ---------- am51: "Shows another <noun>" (your customers looking around) ---------- */
+export const LOOKING_TEXT = {
+  size: { title: "How long its list is", sub: (plural: string) => `Share of these answers, by how many rival ${plural} they show.`, few: "One or two", mid: "Three to five", many: "Six or more", none: "Almost no answer shows a rival." },
+  first: { title: "Who it shows first", sub: "Share of the answers that show a rival.", few: "No rival is shown first often enough to size." },
+  products: { title: (plural: string) => `The specific ${plural} it shows`, sub: "Share of these answers that show it.", few: "No one product is shown often enough to size." },
+  own: { title: (plural: string) => `Your own other ${plural} it shows`, sub: "Share of these answers that also show it.", few: "It rarely shows another of your own." },
+};
+export function lookingOffersDetail(size: "long" | "short" | "few" | "none", noun: string, plural: string, first?: string): { heading: string; body: PanelText } {
+  const heading =
+    size === "long"
+      ? `It answers with a long list of ${plural}, not one replacement`
+      : size === "short"
+        ? `It answers with a shortlist of ${plural}`
+        : size === "few"
+          ? `It points to one or two other ${plural}`
+          : `It rarely shows another ${noun}`;
+  const body = first
+    ? `Your customer asked what else to look at, so the list is expected; ${first} is the one it most often shows first.`
+    : "Your customer asked what else to look at, so the list is expected; no one rival is shown first often.";
+  return { heading, body: join(body) };
+}

@@ -45,6 +45,8 @@ import {
   COMMITS_TEXT,
   CRITERIA_HELP,
   EXCEPTION_TEXT,
+  LOOKING_TEXT,
+  lookingOffersDetail,
   WORRY_AGREES_TEXT,
   worryAgreesDetail,
   type WorryAfter,
@@ -1447,7 +1449,7 @@ function holdPanel(inp: PanelCellInput, ctx: Ctx): PositionPanel {
   const rivals = comp.map((c) => rivalSmall(inp, ctx, c, (r) => h.activeDests(r.code.destinations).has(c.key), "Shown as an alternative", { when: "as an alternative" }));
   const lines: PanelLine[] = [];
   const weighs = weighsAll(inp, ctx);
-  return {
+  const out: PositionPanel = {
     kind: "looking_around",
     claim,
     ...(lead ? { lead } : {}),
@@ -1456,13 +1458,17 @@ function holdPanel(inp: PanelCellInput, ctx: Ctx): PositionPanel {
       { key: "verdict", label: "What it tells the customer to do", segments: segs },
       { key: "offers", label: `Shows another ${h.noun}`, here: offers, hereLabel: "All answers" },
     ],
-    ...(block ? { compare: true as const, competitors: block } : {}),
     ...(conditions ? { conditions } : {}),
     lines,
     ...(weighs ? { weighs } : {}),
     ...(rivals.length ? { rivals } : {}),
   };
+  // am51: the list of rivals shown moves into the "shows another" step's explanation (lookingStepDetails).
+  if (block) LOOK_BLOCK.set(out, block);
+  return out;
 }
+
+const LOOK_BLOCK = new WeakMap<PositionPanel, PanelBlock>();
 
 /** am38: what valuePanel hands its own step explanations (built in finishPanel, after the tags). */
 const VALUE_EXTRA = new WeakMap<PositionPanel, { sections: PanelDetailSection[]; topRival?: string; byProduct: boolean }>();
@@ -3115,7 +3121,10 @@ function detailOf(inp: PanelCellInput, p: PositionPanel, up: PositionPanel | und
       const offers = p.steps.find((s) => s.key === "offers")?.here;
       if (!v?.segments || !offers) return;
       const side = keepSideOf(v);
-      p.detail = lookingAroundDetail({ side: segPct(v, "leave") >= 30 ? "leave" : side, showsMost: offers.pct >= 50, topRival: topRivalOf(p) });
+      const shown = LOOK_BLOCK.get(p);
+      const topShown = shown ? [...shown.rows].sort((a, b) => b.num.pct - a.num.pct)[0]?.name : undefined;
+      p.detail = lookingAroundDetail({ side: segPct(v, "leave") >= 30 ? "leave" : side, showsMost: offers.pct >= 50, topRival: topShown });
+      lookingStepDetails(inp, p, ctx, shown);
       return;
     }
     case "value": {
@@ -3176,6 +3185,87 @@ function detailOf(inp: PanelCellInput, p: PositionPanel, up: PositionPanel | und
 }
 
 /* ------------- am34: what explains each step (the clicked step card) ------------- */
+
+/** am51: the looking-around card's two steps explain themselves. "Shows another <noun>" is nearly always everything
+ * (the customer asked for alternatives), so its explanation is about WHAT is shown: how long the list is, which
+ * rivals (the list that sat lower on the card), who is shown first, which products, and your own other products. */
+function lookingStepDetails(inp: PanelCellInput, p: PositionPanel, ctx: Ctx, shown: PanelBlock | undefined) {
+  if (!p.detail || !p.steps.some((s) => s.key === "offers" && s.here)) return;
+  const { h } = ctx;
+  const T = LOOKING_TEXT;
+  const rows = inp.rows;
+  const all = rows.length;
+  /** The rivals an answer shows, in the order it names them (its mention order where the brand is mentioned, else the order coded). */
+  const listOf = (r: PoolRow) => {
+    const out: { key: string; name: string; raw: string; rank: number }[] = [];
+    const rankOf = new Map<string, number>();
+    for (const m of r.code.mentions ?? []) {
+      const k = h.resolve(m.brand).key;
+      if (k && !rankOf.has(k)) rankOf.set(k, m.rank ?? rankOf.size + 1);
+    }
+    (r.code.destinations ?? []).forEach((d, i) => {
+      const res = h.resolve(d);
+      if (res.status !== "active" || !res.key || res.key === h.targetKey || out.some((x) => x.key === res.key)) return;
+      out.push({ key: res.key, name: res.name ?? d, raw: d, rank: rankOf.get(res.key) ?? 1000 + i });
+    });
+    return out.sort((a, b) => a.rank - b.rank);
+  };
+  const lists = rows.map((r) => ({ r, l: listOf(r) }));
+  const some = lists.filter((x) => x.l.length > 0);
+  type Item = { label: string; rs: PoolRow[]; n: number; unit: string; find: (r: PoolRow) => string };
+  const mk = (title: string, sub: string, tone: PanelTone, items: Item[], few: string, keepOrder = false): PanelDetailSection | null => {
+    const ok = items.filter((x) => x.rs.length >= ROW_MIN && x.n > 0);
+    if (!keepOrder) ok.sort((a, b) => b.rs.length / b.n - a.rs.length / a.n || a.label.localeCompare(b.label));
+    if (!ok.length && !items.some((x) => x.rs.length > 0)) return null;
+    return { title, sub, tone, rows: ok.map((x) => ({ label: x.label, num: num(x.rs.length, x.n, x.unit, refsOf(x.rs, x.find)) })), ...(ok.length ? {} : { note: join(few) }) };
+  };
+  const vf = (r: PoolRow) => verdictFind(r, h);
+  const bucket = (lo: number, hi: number) => lists.filter((x) => x.l.length >= lo && x.l.length <= hi).map((x) => x.r);
+  const firstBy = new Map<string, { name: string; rs: PoolRow[] }>();
+  for (const x of some) firstBy.set(x.l[0].key, { name: x.l[0].name, rs: [...(firstBy.get(x.l[0].key)?.rs ?? []), x.r] });
+  const prodBy = new Map<string, { name: string; rs: PoolRow[] }>();
+  if (ctx.ladder)
+    for (const x of some)
+      for (const a of x.l) {
+        const pl = productLabel(a.raw, a.name, ctx);
+        if (!pl) continue;
+        const label = `${a.name} ${pl}`;
+        const t = prodBy.get(label.toLowerCase()) ?? { name: label, rs: [] };
+        if (!t.rs.includes(x.r)) t.rs.push(x.r);
+        prodBy.set(label.toLowerCase(), t);
+      }
+  const ownBy = new Map<string, { name: string; rs: PoolRow[] }>();
+  if (ctx.ladder)
+    for (const r of rows)
+      for (const d of r.code.destinations ?? []) {
+        if (h.resolve(d).key !== h.targetKey) continue;
+        const pl = productLabel(d, h.brand, ctx);
+        if (!pl) continue;
+        const t = ownBy.get(pl.toLowerCase()) ?? { name: pl, rs: [] };
+        if (!t.rs.includes(r)) t.rs.push(r);
+        ownBy.set(pl.toLowerCase(), t);
+      }
+  const top = (m: Map<string, { name: string; rs: PoolRow[] }>, k: number) => [...m.values()].sort((a, b) => b.rs.length - a.rs.length || a.name.localeCompare(b.name)).slice(0, k);
+  const sizes = some.map((x) => x.l.length).sort((a, b) => a - b);
+  const median = sizes.length ? sizes[Math.floor((sizes.length - 1) / 2)] : 0;
+  const firstTop = top(firstBy, 4);
+  const lead = firstTop[0] && some.length >= ARGS_MIN && firstTop[0].rs.length / some.length >= 0.3 ? firstTop[0].name : undefined;
+  const sections: PanelDetailSection[] = [
+    mk(T.size.title, T.size.sub(h.plural), "neutral", [
+      { label: T.size.few, rs: bucket(1, 2), n: all, unit: "answers", find: vf },
+      { label: T.size.mid, rs: bucket(3, 5), n: all, unit: "answers", find: vf },
+      { label: T.size.many, rs: bucket(6, 999), n: all, unit: "answers", find: vf },
+    ], T.size.none, true),
+    shown ? { title: shown.title, sub: shown.sub, tone: "bad" as const, rows: shown.rows.map((r) => ({ label: r.name, num: r.num, ...(r.open ? { open: true as const } : {}) })) } : null,
+    some.length >= ARGS_MIN ? mk(T.first.title, T.first.sub, "bad", firstTop.map((x) => ({ label: x.name, rs: x.rs, n: some.length, unit: "answers that show a rival", find: () => x.name })), T.first.few) : null,
+    prodBy.size >= 2 ? mk(T.products.title(h.plural), T.products.sub, "bad", top(prodBy, 5).map((x) => ({ label: x.name, rs: x.rs, n: all, unit: "answers", find: () => x.name })), T.products.few) : null,
+    ownBy.size ? mk(T.own.title(h.plural), T.own.sub, "good", top(ownBy, 3).map((x) => ({ label: x.name, rs: x.rs, n: all, unit: "answers", find: () => x.name })), T.own.few) : null,
+  ].filter((x): x is PanelDetailSection => !!x);
+  const offersDetail: PanelStepDetail = { ...lookingOffersDetail(median >= 6 ? "long" : median >= 3 ? "short" : median >= 1 ? "few" : "none", h.noun, h.plural, lead), ...(sections.length ? { sections } : {}) };
+  p.details = { verdict: p.detail, offers: offersDetail };
+  delete p.detail;
+  delete p.detailComp;
+}
 
 /** am50: the worries cards' two steps explain themselves. "What it tells them to do" keeps the card's explanation;
  * "Agrees the worry is fair" gets its own - the other judgements, what the AI advises after agreeing (and after
