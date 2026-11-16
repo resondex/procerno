@@ -651,6 +651,18 @@ for (const l of omissionLines) console.log(l);
     const why = validateLabel(label, ctx);
     if (!why !== okWant) failures.push(`question label validator: "${label}" ${okWant ? `rejected (${why})` : "accepted"}`);
   }
+  // A buyer's question never mentions the brand: no "you" there; nobody speaks as the asker.
+  const whoCases: [string, "buyer" | "customer", boolean][] = [
+    ["which products people recommend most", "buyer", true],
+    ["which product you recommend most", "buyer", false],
+    ["what kinds of product exist and whether you need one", "buyer", false],
+    ["what to pair with your product", "customer", true],
+    ["what to pair with my product", "customer", false],
+  ];
+  for (const [label, who, okWant] of whoCases) {
+    const why = validateLabel(label, ctx, who);
+    if (!why !== okWant) failures.push(`question label validator (${who}): "${label}" ${okWant ? `rejected (${why})` : "accepted"}`);
+  }
   console.log(`QUESTION LABEL VALIDATOR: ${cases.length} cases checked`);
 }
 

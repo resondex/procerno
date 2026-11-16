@@ -53,19 +53,35 @@ export interface LabelContext {
   meta?: CacheMeta;
 }
 
-export const QUESTION_LABEL_SYSTEM = [
-  "You write one short label for a question that was put to AI assistants.",
-  'The label completes the sentence "When a buyer asks ___" (or "When a customer asks ___") and names, in plain words, what the asker wants to know.',
-  'Write it from the point of view of the brand given in the data: refer to that brand only as "you" or as "your" followed by the product noun given, never by its name.',
-  "Rules:",
-  `- Start with one of these words: ${LABEL_FIRST_WORDS.join(", ")}.`,
-  "- Start with a lower-case letter.",
-  `- Use at most ${LABEL_MAX_WORDS} words.`,
-  "- No digits, no quotation marks, no dashes, and no punctuation at the end.",
-  "- Do not name the brand, and do not name any other company, brand or product.",
-  "- Say what is being asked, not how it is worded. Keep a detail of the asker's situation only when the label needs it to say what is being asked.",
-  'Reply with JSON only: {"label": "<the label>"}.',
-].join("\n");
+/**
+ * The writer's instructions, by who asks. A BUYER's question (What's popular,
+ * Learning the category) never mentions the tracker's brand, so its label
+ * carries no "you" at all - telling the writer to speak from the brand's side
+ * there made it put the brand into a question that has none ("which <product>
+ * you recommend most", 2026-11-15). A CUSTOMER's question is about the brand:
+ * "you" / "your <product>" is the brand, never the asker.
+ */
+export function questionLabelSystem(who: LabelAsk["who"]): string {
+  return [
+    "You write one short label for a question that was put to AI assistants.",
+    `The label completes the sentence "When a ${who} asks ___" and names, in plain words, what the asker wants to know.`,
+    "It must read as a correct, complete clause when placed after that sentence opening.",
+    who === "buyer"
+      ? 'The question does not mention the brand given in the data, and neither does the label. Speak of the asker only in the third person or not at all: the label never contains "you" or "your".'
+      : 'Write it from the point of view of the brand given in the data: refer to that brand only as "you" or as "your" followed by the product noun given, never by its name. "You" and "your" never mean the asker.',
+    "Rules:",
+    `- Start with one of these words: ${LABEL_FIRST_WORDS.join(", ")}.`,
+    "- Start with a lower-case letter.",
+    `- Use at most ${LABEL_MAX_WORDS} words.`,
+    "- No digits, no quotation marks, no dashes, and no punctuation at the end.",
+    "- Do not name the brand, and do not name any other company, brand or product.",
+    "- Never speak as the asker: no I, me, my, we or our.",
+    "- Say what is being asked, not how it is worded. Keep a detail of the asker's situation only when the label needs it to say what is being asked.",
+    'Reply with JSON only: {"label": "<the label>"}.',
+  ].join("\n");
+}
+/** The customer form, kept for readers of the prompt. */
+export const QUESTION_LABEL_SYSTEM = questionLabelSystem("customer");
 
 const escapeRe = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 const wholeWord = (text: string, name: string) => {
@@ -75,7 +91,7 @@ const wholeWord = (text: string, name: string) => {
 };
 
 /** The first rule a label breaks, or null when it is clean. Pure. */
-export function validateLabel(label: string, ctx: { brandForms: string[]; otherBrands: string[] }): string | null {
+export function validateLabel(label: string, ctx: { brandForms: string[]; otherBrands: string[] }, who?: LabelAsk["who"]): string | null {
   const t = label.trim();
   if (!t) return "the label is empty";
   if (!/^[a-z]/.test(t)) return "it must start with a lower-case letter";
@@ -86,6 +102,8 @@ export function validateLabel(label: string, ctx: { brandForms: string[]; otherB
   if (/\d/.test(t)) return "it must contain no digits";
   if (/["“”]/.test(t) || /(^|\s)['‘’]|['‘’](\s|$)/.test(t)) return "it must contain no quotation marks";
   if (/[—–]|\s-\s|--/.test(t)) return "it must contain no dashes";
+  if (/\b(i|me|my|mine|we|us|our|ours)\b/.test(t)) return "it must not speak as the asker (no I, my, we or our)";
+  if (who === "buyer" && /\b(you|your|yours|yourself)\b/.test(t)) return "this question does not mention the brand, so the label must not contain you or your";
   for (const f of ctx.brandForms) if (wholeWord(t, f)) return "it must not name the brand - call it you or your";
   for (const f of ctx.otherBrands) if (wholeWord(t, f)) return "it must not name any other company or brand";
   return null;
@@ -150,7 +168,7 @@ export function labelUserMessage(ctx: LabelContext, ask: LabelAsk): string {
     `Brand: ${ctx.brand}\n` +
     `Product noun: ${ctx.noun}\n` +
     `Category: ${ctx.category}\n` +
-    `Asker: ${ask.who === "buyer" ? "a buyer choosing in this category" : "an existing customer of the brand"}\n` +
+    `Asker: ${ask.who === "buyer" ? "a buyer choosing in this category; the question does not mention the brand" : "an existing customer of the brand"}\n` +
     `The question:\n${ask.seed.trim()}\n` +
     (ask.criticism?.trim() ? `The criticism the customer wants to answer:\n${ask.criticism.trim()}\n` : "")
   );
@@ -159,11 +177,12 @@ export function labelUserMessage(ctx: LabelContext, ask: LabelAsk): string {
 /** One label: a call, a mechanical check, one retry naming the failed rule. Null when both fail. */
 export async function writeLabel(ctx: LabelContext, ask: LabelAsk, call: LabelCaller = defaultLabelCaller, model = QUESTION_LABEL_MODEL): Promise<string | null> {
   const user = labelUserMessage(ctx, ask);
-  const first = parseLabel(await call(QUESTION_LABEL_SYSTEM, user, model));
-  const why = first === null ? "the reply was not the JSON asked for" : validateLabel(first, ctx);
+  const system = questionLabelSystem(ask.who);
+  const first = parseLabel(await call(system, user, model));
+  const why = first === null ? "the reply was not the JSON asked for" : validateLabel(first, ctx, ask.who);
   if (first !== null && !why) return first;
-  const again = parseLabel(await call(QUESTION_LABEL_SYSTEM, `${user}\nYour last label broke this rule: ${why}. Write it again.`, model));
-  return again !== null && !validateLabel(again, ctx) ? again : null;
+  const again = parseLabel(await call(system, `${user}\nYour last label broke this rule: ${why}. Write it again.`, model));
+  return again !== null && !validateLabel(again, ctx, ask.who) ? again : null;
 }
 
 export interface QuestionLabels {
@@ -201,7 +220,8 @@ export async function questionLabels(
   asks.forEach((a, i) => {
     const hit = cached.get(keys[i]);
     const label = hit ? parseLabel(hit) : null;
-    if (label && !validateLabel(label, ctx)) asked.set(a.id, label);
+    // A saved label that breaks today's rules is a miss: it is rewritten and its entry replaced.
+    if (label && !validateLabel(label, ctx, a.who)) asked.set(a.id, label);
     else misses.push(i);
   });
   const keyed = opts.keyed ?? keyConfigured(model);
