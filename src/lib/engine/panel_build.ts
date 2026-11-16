@@ -641,6 +641,38 @@ function productSplit(rows: PoolRow[], nameOf: (r: PoolRow) => string, k: number
     .map((g) => ({ name: g.name, num: num(g.rows.length, rows.length, unit, refsOf(g.rows, (r) => r.code.top_pick || g.name)) }));
 }
 
+/** am54: the same merge for lists where one answer names several products - name variants of one product
+ * ("Amex Platinum", "Platinum", "Platinum Card") are one row holding every answer that names any of them,
+ * shown under the form most answers use. `brandToks` are the maker's own name words (not distinctive). */
+function mergeProducts(items: { name: string; rs: PoolRow[] }[], ctx: Ctx, brandToks: Set<string> = new Set()): { name: string; rs: PoolRow[] }[] {
+  const nouns = nounToks(ctx);
+  type G = { forms: Map<string, number>; rs: Set<PoolRow>; toks: Set<string> };
+  const by = new Map<string, G>();
+  for (const it of items) {
+    const name = cleanProduct(it.name) || it.name;
+    const toks = famTokens(name);
+    const kept = toks.filter((t) => !nouns.has(t) && !PRODUCT_STOP.has(t) && !brandToks.has(t));
+    const key = kept.join(" ") || toks.join(" ") || name.toLowerCase();
+    const g = by.get(key) ?? { forms: new Map<string, number>(), rs: new Set<PoolRow>(), toks: new Set(kept) };
+    for (const r of it.rs) g.rs.add(r);
+    g.forms.set(name, (g.forms.get(name) ?? 0) + it.rs.length);
+    by.set(key, g);
+  }
+  for (const key of [...by.keys()].sort((a, b) => by.get(a)!.toks.size - by.get(b)!.toks.size)) {
+    const g = by.get(key)!;
+    if (!g.toks.size) continue;
+    const sup = [...by.entries()].filter(([k2, g2]) => k2 !== key && g2.toks.size > g.toks.size && [...g.toks].every((x) => g2.toks.has(x)));
+    if (sup.length !== 1) continue;
+    const into = sup[0][1];
+    for (const [f, n] of g.forms) into.forms.set(f, (into.forms.get(f) ?? 0) + n);
+    for (const r of g.rs) into.rs.add(r);
+    by.delete(key);
+  }
+  return [...by.values()]
+    .map((g) => ({ name: [...g.forms.entries()].sort((a, b) => b[1] - a[1] || a[0].length - b[0].length || a[0].localeCompare(b[0]))[0][0], rs: [...g.rs] }))
+    .sort((a, b) => b.rs.length - a.rs.length || a.name.localeCompare(b.name));
+}
+
 /** A product split worth a line: at least one named product, not only the no-product bucket. */
 const namesAProduct = (items: { name: string }[]) => items.some((x) => !/^No specific /.test(x.name));
 
@@ -3225,7 +3257,7 @@ function caseStepDetails(inp: PanelCellInput, p: PositionPanel, ctx: Ctx) {
   };
   const sections = [
     sec(T.vendor.title, T.vendor.sub, "neutral", [...byVendor.entries()].filter(([, rs]) => rs.length >= ARGS_MIN).map(([label, rs]) => ({ label, rs: rs.filter((r) => strong.includes(r)), n: rs.length, unit: `${label} answers`, find: (r: PoolRow) => verdictFind(r, h) }))),
-    strong.length >= ARGS_MIN ? sec(T.products.title(h.plural), T.products.sub, "good", top(prods, 5).map((x) => ({ label: x.name, rs: x.rs, n: strong.length, unit: "answers that give a confident case", find: () => x.name }))) : null,
+    strong.length >= ARGS_MIN ? sec(T.products.title(h.plural), T.products.sub, "good", mergeProducts([...prods.values()], ctx, nameTokens(h.brand, ctx)).slice(0, 5).map((x) => ({ label: x.name, rs: x.rs, n: strong.length, unit: "answers that give a confident case", find: () => x.name }))) : null,
     sec(T.rivals.title, T.rivals.sub, "bad", top(rivals, 5).map((x) => ({ label: x.name, rs: x.rs, n: rows.length, unit: "answers", find: () => x.name }))),
   ].filter((x): x is PanelDetailSection => !!x);
   if (!sections.length) return;
@@ -3275,7 +3307,7 @@ function expansionStepDetails(inp: PanelCellInput, p: PositionPanel, ctx: Ctx) {
     return ok.length ? { title, sub, tone, rows: ok.map((x) => ({ label: x.label, num: num(x.rs.length, x.n, x.unit, refsOf(x.rs, x.find)) })) } : few ? { title, sub, tone, rows: [], note: join(few) } : null;
   };
   const sections = [
-    backs.length >= ARGS_MIN && prods.size ? sec(T.products.title(h.plural), T.products.sub, "good", top(prods, 5).map((x) => ({ label: x.name, rs: x.rs, n: backs.length, unit: "answers that back it", find: () => x.name })), T.products.few) : null,
+    backs.length >= ARGS_MIN && prods.size ? sec(T.products.title(h.plural), T.products.sub, "good", mergeProducts([...prods.values()], ctx, nameTokens(h.brand, ctx)).slice(0, 5).map((x) => ({ label: x.name, rs: x.rs, n: backs.length, unit: "answers that back it", find: () => x.name })), T.products.few) : null,
     sec(T.vendor.title, T.vendor.sub, "neutral", [...byVendor.entries()].filter(([, rs]) => rs.length >= ARGS_MIN).map(([label, rs]) => ({ label, rs: rs.filter((r) => r.code.growth_stance === "backs"), n: rs.length, unit: `${label} answers`, find: (r: PoolRow) => verdictFind(r, h) })), ""),
     red.length >= ROW_MIN ? sec(T.where.title, T.where.sub, "bad", top(dests, 4).map((x) => ({ label: x.name, rs: x.rs, n: red.length, unit: "answers that point elsewhere", find: () => x.name })), T.where.few) : null,
   ].filter((x): x is PanelDetailSection => !!x);
@@ -3357,8 +3389,8 @@ function lookingStepDetails(inp: PanelCellInput, p: PositionPanel, ctx: Ctx, sho
     ], T.size.none, true),
     shown ? { title: shown.title, sub: shown.sub, tone: "bad" as const, rows: shown.rows.map((r) => ({ label: r.name, num: r.num, ...(r.open ? { open: true as const } : {}) })) } : null,
     some.length >= ARGS_MIN ? mk(T.first.title, T.first.sub, "bad", firstTop.map((x) => ({ label: x.name, rs: x.rs, n: some.length, unit: "answers that show a rival", find: () => x.name })), T.first.few) : null,
-    prodBy.size >= 2 ? mk(T.products.title(h.plural), T.products.sub, "bad", top(prodBy, 5).map((x) => ({ label: x.name, rs: x.rs, n: all, unit: "answers", find: () => x.name })), T.products.few) : null,
-    ownBy.size ? mk(T.own.title(h.plural), T.own.sub, "good", top(ownBy, 3).map((x) => ({ label: x.name, rs: x.rs, n: all, unit: "answers", find: () => x.name })), T.own.few) : null,
+    prodBy.size >= 2 ? mk(T.products.title(h.plural), T.products.sub, "bad", mergeProducts([...prodBy.values()], ctx).slice(0, 5).map((x) => ({ label: x.name, rs: x.rs, n: all, unit: "answers", find: () => x.name })), T.products.few) : null,
+    ownBy.size ? mk(T.own.title(h.plural), T.own.sub, "good", mergeProducts([...ownBy.values()], ctx, nameTokens(h.brand, ctx)).slice(0, 3).map((x) => ({ label: x.name, rs: x.rs, n: all, unit: "answers", find: () => x.name })), T.own.few) : null,
   ].filter((x): x is PanelDetailSection => !!x);
   const offersDetail: PanelStepDetail = { ...lookingOffersDetail(median >= 6 ? "long" : median >= 3 ? "short" : median >= 1 ? "few" : "none", h.noun, h.plural, lead), ...(sections.length ? { sections } : {}) };
   p.details = { verdict: p.detail, offers: offersDetail };
@@ -3782,7 +3814,7 @@ function stepDetailsOf(inp: PanelCellInput, p: PositionPanel, u: PanelCellInput 
     const sections = [
       sec(NAMEDWHEN_TEXT.others.title, NAMEDWHEN_TEXT.others.sub, "bad", others.map(item("answers that name a brand but not you", without.length)), NAMEDWHEN_TEXT.others.few),
       sec(NAMEDWHEN_TEXT.first.title, NAMEDWHEN_TEXT.first.sub, "neutral", firstShown.map(item("answers that name a brand", n)), NAMEDWHEN_TEXT.first.few),
-      prods.size >= 2 ? sec(NAMEDWHEN_TEXT.products.title(h.plural), NAMEDWHEN_TEXT.products.sub, "good", [...prods.entries()].sort((a, b) => b[1].length - a[1].length).slice(0, 5).map(([label, rs]) => ({ label, rs, n: withYou.length, unit: "answers that name you", find: () => label })), NAMEDWHEN_TEXT.products.few) : null,
+      prods.size >= 2 ? sec(NAMEDWHEN_TEXT.products.title(h.plural), NAMEDWHEN_TEXT.products.sub, "good", mergeProducts([...prods.entries()].map(([name, rs]) => ({ name, rs })), ctx, nameTokens(h.brand, ctx)).slice(0, 5).map(({ name: label, rs }) => ({ label, rs, n: withYou.length, unit: "answers that name you", find: () => label })), NAMEDWHEN_TEXT.products.few) : null,
       sec(NAMEDWHEN_TEXT.vendor.title, NAMEDWHEN_TEXT.vendor.sub, "good", vend, NAMEDWHEN_TEXT.vendor.few),
     ].filter((x): x is PanelDetailSection => !!x);
     const share = n ? withYou.length / n : 0;
