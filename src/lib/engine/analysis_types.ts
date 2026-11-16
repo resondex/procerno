@@ -509,7 +509,7 @@ export interface PanelConditions {
   awayTitle: string;    // "Choose another credit card if" | "Look at another credit card if" | "Hold back if" | "Choose Chase if"
   alsoToward: string;   // "Also said for another credit card"
   alsoAway: string;     // "Also said for you"
-  toWord: "To" | "Shown"; // prefix of the destination line
+  toWord: "To" | "Shown" | "Names"; // prefix of the destination line
   grouped: boolean;     // true = run themes, false = flat condition groups
   towardScope?: "rival_picked"; // h2h lost with an exception: toward rows count only answers that pick the rival
   toward: PanelCondition[]; // <= 6

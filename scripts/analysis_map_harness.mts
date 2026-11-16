@@ -484,7 +484,7 @@ for (const project of projects) {
       // every stated number in a sentence opens its answers, outcomes carry their words, rows their columns.
       for (const [view, ds] of [["details", p.details], ["detailsComp", p.detailsComp]] as const) {
         if (!ds) continue;
-        if (!["buy", "switching", "problem", "popular", "learning", "h2h", "value", "buyer_worry", "customer_worry", "looking_around", "expansion", "business_case"].includes(p.kind)) failures.push(`${project.brand}: ${id} ${p.kind} carries ${view}`);
+        if (!["buy", "switching", "problem", "popular", "learning", "h2h", "value", "buyer_worry", "customer_worry", "looking_around", "expansion", "business_case", "alongside"].includes(p.kind)) failures.push(`${project.brand}: ${id} ${p.kind} carries ${view}`);
         if (view === "detailsComp" && !p.compare) failures.push(`${project.brand}: ${id} detailsComp without a competitors view`);
         for (const [k, d] of Object.entries(ds)) {
           if (!d) continue;

@@ -272,7 +272,7 @@ const al = themedCell("settled:settled:ecosystem", "alongside", eco, project.bra
   if (c) {
     ok(c.grouped === true, "alongside: grouped is not true");
     ok(c.neutralAway === true, "alongside: the away column is not neutral");
-    ok(c.title === "Which one it picks, and when", "alongside: title");
+    ok(c.title === "Which one it names, for which customer", "alongside: title");
     for (const side of ["toward", "away"] as const)
       for (const row of c[side]) {
         const kn = knOf(row.share);

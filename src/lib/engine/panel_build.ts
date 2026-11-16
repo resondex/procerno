@@ -45,6 +45,7 @@ import {
   COMMITS_TEXT,
   CRITERIA_HELP,
   EXCEPTION_TEXT,
+  ALONGSIDE_TEXT,
   CASE_TEXT,
   EXPANSION_TEXT,
   LOOKING_TEXT,
@@ -935,7 +936,7 @@ interface CondWords {
   awayTitle: string;
   alsoToward: string;
   alsoAway: string;
-  toWord: "To" | "Shown";
+  toWord: "To" | "Shown" | "Names";
   towardScope?: "rival_picked";
 }
 
@@ -2333,17 +2334,22 @@ function alongsidePanel(inp: PanelCellInput, ctx: Ctx): PositionPanel {
     inp,
     ctx,
     {
-      title: "Which one it picks, and when",
-      sub: "The conditions the AI ties to each one it names. Each share is of all the answers to this question; an answer can state several.",
-      towardTitle: "Picks something of yours if",
-      awayTitle: "Picks another company's if",
+      // am56: this card is not a pick between two sides - it is which product the AI names for which customer.
+      title: "Which one it names, for which customer",
+      sub: "What the customer wants, and what the AI names for it. Each share is of all the answers to this question; an answer can state several.",
+      towardTitle: "One of yours, if the customer wants",
+      awayTitle: "If the customer wants",
       alsoToward: "Also said for another company's",
       alsoAway: "Also said for yours",
-      toWord: "To",
+      toWord: "Names",
     },
     { pickKind: false, toCards: true, ownSplit: true }
   );
-  if (conditions) conditions.neutralAway = true;
+  if (conditions) {
+    conditions.neutralAway = true;
+    // One list when nothing of yours is named: no empty "yours" column.
+    if (!conditions.toward.length) delete conditions.towardNote;
+  }
   const steps: PanelStep[] = [{ key: "alongside", label: "Which ones it names alongside you", items, note }];
   return {
     kind: "alongside",
@@ -3069,6 +3075,7 @@ function detailOf(inp: PanelCellInput, p: PositionPanel, up: PositionPanel | und
       const weak = v.filter((r) => r.code.relationship_verdict === "weakens").length;
       const heading = weak === 0 ? "The AI builds on what the customer already has with you" : weak > str ? "The AI more often works against what the customer has with you" : "The AI mostly builds on what the customer has with you";
       p.detail = alongsideDetail(heading);
+      alongsideStepDetails(inp, p, ctx);
       return;
     }
     case "critic": {
@@ -3220,6 +3227,55 @@ function detailOf(inp: PanelCellInput, p: PositionPanel, up: PositionPanel | und
 }
 
 /* ------------- am34: what explains each step (the clicked step card) ------------- */
+
+/** am56: the alongside card's step carries new facts: whose products the AI names (yours, another company's, or a
+ * replacement for you), how many it names, which it names first, and which AI companies name your own. */
+function alongsideStepDetails(inp: PanelCellInput, p: PositionPanel, ctx: Ctx) {
+  const st = p.steps.find((s) => s.key === "alongside");
+  if (!p.detail || !st) return;
+  const { h } = ctx;
+  const T = ALONGSIDE_TEXT;
+  const rows = inp.rows;
+  const all = rows.length;
+  const pairs = (r: PoolRow) => (r.code.pairings ?? []).filter((x) => (x.name ?? "").trim());
+  const rel = (r: PoolRow, k: string) => pairs(r).some((x) => x.maker_relation === k);
+  const own = rows.filter((r) => rel(r, "own"));
+  const any = rows.filter((r) => pairs(r).length > 0);
+  type Item = { label: string; rs: PoolRow[]; n: number; unit: string; find: (r: PoolRow) => string };
+  const sec = (title: string, subT: string, tone: PanelTone, items: Item[], keepOrder = false, note?: string): PanelDetailSection | null => {
+    const ok = items.filter((x) => x.rs.length >= ROW_MIN && x.n > 0);
+    if (!keepOrder) ok.sort((a, b) => b.rs.length / b.n - a.rs.length / a.n || a.label.localeCompare(b.label));
+    return ok.length || note ? { title, sub: subT, tone, rows: ok.map((x) => ({ label: x.label, num: num(x.rs.length, x.n, x.unit, refsOf(x.rs, x.find)) })), ...(note ? { note: join(note) } : {}) } : null;
+  };
+  const nameOf = (k: string) => (r: PoolRow) => pairs(r).find((x) => x.maker_relation === k)?.name ?? verdictFind(r, h);
+  const bucket = (lo: number, hi: number) => rows.filter((r) => pairs(r).length >= lo && pairs(r).length <= hi);
+  const firstBy = new Map<string, { name: string; rs: PoolRow[] }>();
+  for (const r of any) {
+    const nm = pairs(r)[0].name.trim();
+    const t = firstBy.get(nm.toLowerCase()) ?? { name: nm, rs: [] };
+    t.rs.push(r);
+    firstBy.set(nm.toLowerCase(), t);
+  }
+  const byVendor = new Map<string, PoolRow[]>();
+  for (const r of rows) {
+    const v = engineFacets(r.model).vendor;
+    byVendor.set(v, [...(byVendor.get(v) ?? []), r]);
+  }
+  const sections = [
+    // Whose products they are is the sentence under the step's own bars - not repeated here.
+    sec(T.size.title, T.size.sub, "neutral", [
+      { label: T.size.one, rs: bucket(1, 1), n: all, unit: "answers", find: (r) => pairs(r)[0]?.name ?? h.brand },
+      { label: T.size.some, rs: bucket(2, 3), n: all, unit: "answers", find: (r) => pairs(r)[0]?.name ?? h.brand },
+      { label: T.size.many, rs: bucket(4, 999), n: all, unit: "answers", find: (r) => pairs(r)[0]?.name ?? h.brand },
+    ], true),
+    any.length >= ARGS_MIN ? sec(T.first.title, T.first.sub, "neutral", mergeProducts([...firstBy.values()], ctx).slice(0, 4).map((x) => ({ label: x.name, rs: x.rs, n: any.length, unit: "answers that name one", find: () => x.name }))) : null,
+    own.length >= ARGS_MIN ? sec(T.vendor.title, T.vendor.sub, "good", [...byVendor.entries()].filter(([, rs]) => rs.length >= ARGS_MIN).map(([label, rs]) => ({ label, rs: rs.filter((r) => own.includes(r)), n: rs.length, unit: `${label} answers`, find: nameOf("own") }))) : null,
+  ].filter((x): x is PanelDetailSection => !!x);
+  if (!sections.length) return;
+  p.details = { alongside: { ...p.detail, sections } };
+  delete p.detail;
+  delete p.detailComp;
+}
 
 /** am53: the business case card's step carries new facts: which AI companies give a confident case most, which of
  * your products the confident case is built on, and which rivals come up while the AI makes your case. */

@@ -739,3 +739,10 @@ export const CASE_TEXT = {
   products: { title: (plural: string) => `Which of your ${plural} the confident case is built on`, sub: "Share of the answers that give a confident case." },
   rivals: { title: "Which rivals come up in the case", sub: "Share of these answers that name it." },
 };
+
+/* ---------- am56: "Which ones it names alongside you" (what to use alongside you) ---------- */
+export const ALONGSIDE_TEXT = {
+  size: { title: "How many it names", sub: "Share of these answers.", one: "One", some: "Two or three", many: "Four or more" },
+  first: { title: "Which one it names first", sub: "Share of the answers that name one." },
+  vendor: { title: "Which AI companies name one of yours", sub: "Share of each company's answers here." },
+};
