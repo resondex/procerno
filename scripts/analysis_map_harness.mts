@@ -25,11 +25,15 @@ process.env.RUN_COLLECT_ONLY = "1";
 
 const { store } = await import(process.cwd() + "/src/lib/store/index.ts");
 const { loadViewData } = await import(process.cwd() + "/src/lib/engine/view_data.ts");
-const { computeAnalysisMap } = await import(process.cwd() + "/src/lib/engine/analysis_map.ts");
+const { computeAnalysisMap, slimAnalysisMap, cellPanelOf } = await import(process.cwd() + "/src/lib/engine/analysis_map.ts");
 const { computeBrandSummary } = await import(process.cwd() + "/src/lib/engine/brand_summary.ts");
 const { insightInputs, rankedInsights } = await import(process.cwd() + "/src/lib/engine/summary_insights.ts");
 const { computeBrief } = await import(process.cwd() + "/src/lib/engine/brief.ts");
 const { computeDossiers } = await import(process.cwd() + "/src/lib/engine/dossiers.ts");
+const { buildResolver } = await import(process.cwd() + "/src/lib/engine/brand_resolve.ts");
+const { isAllowedTag } = await import(process.cwd() + "/src/lib/engine/panel_tags.ts");
+const fsMod = await import("node:fs");
+import type { PanelNum, PositionPanel, PanelStep, PanelConditions, AnswerRef, RivalAcross } from "../src/lib/engine/analysis_types";
 
 /* am15 (2026-11-10): the plain-wording pass. Template text on the customer
  * surfaces (the map, the summary's insights and the composed brief) never
@@ -130,6 +134,15 @@ const want = (process.argv[2] ?? "").toLowerCase();
 const projects = (await store.listProjects()).filter((p: { brand: string; archived_at?: string | null }) => !p.archived_at && p.brand.toLowerCase().includes(want));
 const failures: string[] = [];
 const wallTable: string[] = [];
+/* am31: the panel checks' cross-tracker inputs and outputs. PANEL_BASELINE
+ * (optional) = a folder of am30 map dumps (<slug>.map.json, positions without
+ * `panel`) - the "old output unchanged" check runs only when it is set. */
+const omissionLines: string[] = [];
+const payloadLines: string[] = [];
+const mockupLines: string[] = [];
+const categoryWords = new Map<string, string[]>(); // brand -> its category's words (4+ letters)
+for (const pr of projects) categoryWords.set(pr.brand, (pr.category as string).toLowerCase().match(/[a-z]{4,}/g) ?? []);
+const PANEL_BANNED: [string, RegExp][] = [...BANNED, ["contest", /\bcontests?\b/i], ["cell", /\bcells?\b/i], ["pooled", /\bpooled\b/i], ["long dash", /[—–]/]];
 
 for (const project of projects) {
   const runs = await store.listRuns(project.id);
@@ -304,12 +317,303 @@ for (const project of projects) {
   const brief = await computeBrief(data, {});
   const phrases = dataPhrases(view, data);
   const banned: string[] = [];
-  const mapText = { casting: view.casting, tensions: view.tensions, bands: view.bands, positions: Object.fromEntries(Object.entries(view.positions as Record<string, Position>).map(([k, p]) => [k, { ...p, toward: undefined, away: undefined, towardThemes: undefined, awayThemes: undefined, notes: undefined }])) };
+  const mapText = { casting: view.casting, tensions: view.tensions, bands: view.bands, positions: Object.fromEntries(Object.entries(view.positions as Record<string, Position>).map(([k, p]) => [k, { ...p, toward: undefined, away: undefined, towardThemes: undefined, awayThemes: undefined, notes: undefined, panel: undefined }])) };
   bannedIn(mapText, phrases, "map", banned);
   bannedIn({ insights: summaryFull.insights, verdict: summaryFull.verdict }, phrases, "summary", banned);
   bannedIn(brief, phrases, "brief", banned);
   for (const b of banned) failures.push(`${project.brand}: banned word - ${b}`);
   console.log(`PLAIN WORDING: ${banned.length} banned-word hits`);
+
+  /* -- am31: the per-question-type panels -- */
+  {
+    const resolve = buildResolver(data.dictionary, data.judged);
+    const targetKey = resolve(project.brand).key;
+    const codeOf = new Map(data.codes.map((c: { response_id: string }) => [c.response_id, c]));
+    type Code = { response_id: string; outcome: string | null; top_pick: string | null; mentions: { brand: string; framing: string }[] | null; decision_rules: { condition: string }[] | null; [k: string]: unknown };
+    const cellIds = ((debug as { panelCells?: Record<string, string[]> }).panelCells ?? {}) as Record<string, string[]>;
+    const keyOfName = (name: string) => (name === project.brand ? targetKey : resolve(name).key);
+    const picks = (c: Code, key: string) => c.outcome === "pick" && !!c.top_pick && resolve(c.top_pick).key === key;
+    const names = (c: Code, key: string) => (c.mentions ?? []).some((m) => resolve(m.brand).key === key) || picks(c, key);
+    const recs = (c: Code, key: string) => (c.mentions ?? []).some((m) => m.framing === "recommended" && resolve(m.brand).key === key) || picks(c, key);
+    const isNum = (v: unknown): v is PanelNum => !!v && typeof v === "object" && "value" in (v as object) && "pct" in (v as object) && "tip" in (v as object);
+    let panels = 0, nums = 0, refCount = 0, labelFallbacks = 0;
+    const SEG_FIELD: Record<string, [string, (v: unknown) => boolean]> = {
+      proceed: ["proceed_or_avoid", (v) => v === "proceed"], avoid: ["proceed_or_avoid", (v) => v === "avoid"],
+      keep: ["keep_or_leave", (v) => v === "keep"], leave: ["keep_or_leave", (v) => v === "leave"],
+      yes: ["worth_it", (v) => v === "yes"], no: ["worth_it", (v) => v === "no"], depends: ["worth_it", (v) => v !== "yes" && v !== "no"],
+      backs: ["growth_stance", (v) => v === "backs"], redirects: ["growth_stance", (v) => v === "redirects"], neutral: ["growth_stance", (v) => v !== "backs" && v !== "redirects"],
+      strong: ["case_strength", (v) => v === "strong"], hedged: ["case_strength", (v) => v !== "strong"],
+      partial: ["case_strength", (v) => v === "partial" || v === "hedged"], concedes: ["case_strength", (v) => v === "concedes" || v === "undermined"],
+      rebuts: ["premise_verdict", (v) => v === "rebuts"], mixed: ["premise_verdict", (v) => v === "mixed"], confirms: ["premise_verdict", (v) => v === "confirms"],
+    };
+    const phrases = [...dataPhrases(view, data)];
+    for (const [id, pos] of Object.entries(view.positions as Record<string, Position>)) {
+      const p = pos.panel as PositionPanel | undefined;
+      if (!p) continue;
+      panels++;
+      // The answers a panel may show: its own, its row's (the usual and the
+      // rival's other buying situations), and on criteria the what-to-buy answers.
+      const [band, rowSlug] = id.split(":");
+      const ids = new Set<string>();
+      for (const [cid, list] of Object.entries(cellIds))
+        if (cid.startsWith(`${band}:${rowSlug}:`) || ((p.kind === "criteria" || p.kind === "popular") && cid === "chooses:open:all") || (p.kind === "learning" && cid === "chooses:awareness:all")) for (const x of list) ids.add(x);
+      const own = new Set(cellIds[id] ?? []);
+      if (!own.size) failures.push(`${project.brand}: ${id} panel has no recorded answers`);
+      const checkRef = (r: AnswerRef, path: string) => {
+        refCount++;
+        if (!ids.has(r.responseId)) failures.push(`${project.brand}: ${id}${path} answer ${r.responseId} is not in the question's answers`);
+        if (!r.find?.trim()) failures.push(`${project.brand}: ${id}${path} answer with an empty find`);
+      };
+      // 2. every clickable number has answers (and only answers of this question).
+      const walkNums = (v: unknown, path: string): void => {
+        if (isNum(v)) {
+          nums++;
+          const refs = v.refs ?? [];
+          if (v.pct > 0 && refs.length === 0) failures.push(`${project.brand}: ${id}${path} ${v.value} has no answers`);
+          if (v.pct === 0 && refs.length) failures.push(`${project.brand}: ${id}${path} 0% carries answers`);
+          if (refs.length > 3) failures.push(`${project.brand}: ${id}${path} carries ${refs.length} answers`);
+          for (const r of refs) checkRef(r, path);
+          return;
+        }
+        if (Array.isArray(v)) {
+          v.forEach((x, i) => walkNums(x, `${path}[${i}]`));
+          return;
+        }
+        if (v && typeof v === "object") {
+          for (const [k, x] of Object.entries(v)) {
+            if (k === "refs" && Array.isArray(x)) for (const r of x as AnswerRef[]) checkRef(r, `${path}.refs`);
+            else walkNums(x, `${path}.${k}`);
+          }
+        }
+      };
+      walkNums(p, "");
+      // 3. every example answer shows its fact.
+      const stepCheck = (s: PanelStep, at: string, youName: string) => {
+        const check = (n: PanelNum | undefined, key: string, who: string) => {
+          for (const r of n?.refs ?? []) {
+            const c = codeOf.get(r.responseId) as Code | undefined;
+            if (!c) { failures.push(`${project.brand}: ${at} ${s.key} answer not coded`); continue; }
+            const ok =
+              s.key === "named" ? names(c, key) :
+              s.key === "recommended" && (p.kind === "buy" || p.kind === "switching" || p.kind === "problem" || p.kind === "popular" || at.includes("rival")) && !(at.includes("rival") && who !== youName && p.kind !== "buy" && p.kind !== "switching" && p.kind !== "problem" && p.kind !== "popular") ? recs(c, key) :
+              s.key === "commits" ? c.outcome === "pick" && !!c.top_pick && resolve(c.top_pick).status === "active" :
+              s.key === "converts" ? picks(c, key) :
+              s.key === "won" ? (who === youName ? picks(c, targetKey) : c.outcome === "pick" && !picks(c, targetKey)) :
+              s.key === "decided" ? c.outcome === "pick" :
+              true;
+            if (!ok) failures.push(`${project.brand}: ${at} step ${s.key} (${who}) answer ${r.responseId.slice(0, 8)} does not show it`);
+          }
+        };
+        check(s.here, targetKey, youName);
+        if (s.usual) check(s.usual, targetKey, youName);
+        for (const x of s.rivals ?? []) check(x.num, keyOfName(x.name), x.name);
+        for (const g of s.segments ?? []) {
+          const f = SEG_FIELD[g.key];
+          if (!f) continue;
+          for (const r of g.num.refs ?? []) {
+            const c = codeOf.get(r.responseId) as Code | undefined;
+            if (!c || !f[1](c[f[0]])) failures.push(`${project.brand}: ${at} segment ${g.key} answer ${r.responseId.slice(0, 8)} lacks the verdict`);
+          }
+        }
+      };
+      for (const s of p.steps) stepCheck(s, `${id} panel`, project.brand);
+      for (const rv of p.rivals ?? []) for (const s of rv.steps) stepCheck(s, `${id} rival ${rv.name}`, project.brand);
+      const condCheck = (c: PanelConditions | undefined, at: string) => {
+        if (!c) return;
+        const sideIds = { toward: new Set<string>(), away: new Set<string>() };
+        for (const side of ["toward", "away"] as const)
+          for (const row of c[side])
+            for (const r of row.share.refs ?? []) {
+              sideIds[side].add(r.responseId);
+              const code = codeOf.get(r.responseId) as Code | undefined;
+              if (!code?.decision_rules?.some((d) => d.condition.trim() === r.find.trim())) failures.push(`${project.brand}: ${at} ${side} "${row.text}" answer ${r.responseId.slice(0, 8)} states no such condition`);
+            }
+        for (const x of sideIds.toward) if (sideIds.away.has(x) && !c.towardScope) failures.push(`${project.brand}: ${at} answer ${x.slice(0, 8)} shown on both sides`);
+      };
+      condCheck(p.conditions, `${id} panel`);
+      for (const rv of p.rivals ?? []) condCheck(rv.conditions, `${id} rival ${rv.name}`);
+      // 6. tags.
+      const tags = [...p.steps, ...(p.rivals ?? []).flatMap((r) => r.steps)].flatMap((s) => [s.tagUsual, s.tagRank]).filter((t): t is string => !!t);
+      for (const t of tags) if (!isAllowedTag(t)) failures.push(`${project.brand}: ${id} tag "${t}" is not an allowed tag`);
+      // 6b. every tag carries its sentiment; every rival panel its own labels.
+      const TONES = new Set(["good", "bad", "neutral"]);
+      for (const st of [...p.steps, ...(p.rivals ?? []).flatMap((r) => r.steps)]) {
+        if (st.tagUsual && !TONES.has(st.tagUsualTone ?? "")) failures.push(`${project.brand}: ${id} tag "${st.tagUsual}" has no tone`);
+        if (st.tagRank && !TONES.has(st.tagRankTone ?? "")) failures.push(`${project.brand}: ${id} tag "${st.tagRank}" has no tone`);
+      }
+      for (const rv of p.rivals ?? []) {
+        if (!rv.stackLabel) failures.push(`${project.brand}: ${id} rival ${rv.name} has no stack label`);
+        if (rv.byCell?.length && !rv.byCellTitle) failures.push(`${project.brand}: ${id} rival ${rv.name} byCell has no title`);
+        for (const d of Object.values(rv.details ?? {})) if (d?.outcomes?.length && !d.outcomeLabels) failures.push(`${project.brand}: ${id} rival ${rv.name} outcomes have no labels`);
+      }
+      // 7. kinds without conditions.
+      if ((p.kind === "buyer_worry" || p.kind === "customer_worry" || p.kind === "value" || p.kind === "business_case") && p.conditions) failures.push(`${project.brand}: ${id} ${p.kind} carries conditions`);
+      if ((p.kind === "learning" || p.kind === "critic") && p.conditions) failures.push(`${project.brand}: ${id} ${p.kind} carries conditions`);
+      // Question labels: the keyless fixture takes the quoted fallback - the claim carries the seed question verbatim.
+      if (p.kind === "popular" || p.kind === "learning" || p.kind === "alongside" || p.kind === "critic" || p.kind === "expansion" || p.kind === "business_case") {
+        const own = new Set(cellIds[id] ?? []);
+        const seeds = [...new Set(data.codes.filter((c: { response_id: string }) => own.has(c.response_id)).map((c: { response_id: string }) => data.responses.find((r: { id: string }) => r.id === c.response_id)?.prompt_id))]
+          .map((pid) => data.intents.find((i: { id: string }) => i.id === data.prompts.find((q: { id: string; intent_id?: string | null }) => q.id === pid)?.intent_id))
+          .filter(Boolean) as { text: string; seq: number }[];
+        const seed = seeds.sort((a, b) => a.seq - b.seq)[0]?.text?.trim();
+        const claimText = p.claim.map((x) => x.t).join("");
+        if (!seed || !claimText.includes(`"${seed}"`)) failures.push(`${project.brand}: ${id} ${p.kind} fallback claim does not quote its seed question (${claimText.slice(0, 120)})`);
+        else labelFallbacks++;
+      }
+      // 4 + 5. plain wording and category words over the panel tree, data phrases stripped.
+      const panelPhrases = new Set<string>(phrases);
+      const addP = (x: unknown) => { if (typeof x === "string" && x.trim().length >= 3) panelPhrases.add(x.trim()); };
+      for (const c of [p.conditions, ...(p.rivals ?? []).map((r) => r.conditions)]) for (const row of [...(c?.toward ?? []), ...(c?.away ?? [])]) { addP(row.text); for (const x of row.products ?? []) addP(x); }
+      for (const r of p.competitors?.rows ?? []) addP(r.name);
+      for (const t of [p.table, p.tableComp, ...(p.tables ?? [])]) for (const r of t?.rows ?? []) addP(r.label);
+      for (const s of p.steps) for (const it of s.items ?? []) addP(it.label);
+      for (const s of p.steps) for (const it of s.items ?? []) addP(it.label);
+      for (const rv of p.rivals ?? []) addP(rv.name);
+      const strip = (t: string) => {
+        let x = t.replace(/"[^"]*"/g, '""');
+        for (const d of [...panelPhrases].sort((a, b) => b.length - a.length)) if (x.toLowerCase().includes(d.toLowerCase())) x = x.split(new RegExp(d.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "gi")).join(" ");
+        return x;
+      };
+      const SKIP = new Set([...SKIP_KEYS, "tip", "kind", "tone", "usualCellId", "competitorOrder", "name"]);
+      const other = [...categoryWords.entries()].filter(([b]) => b !== project.brand).flatMap(([, ws]) => ws).filter((w) => !(categoryWords.get(project.brand) ?? []).includes(w));
+      const walkText = (v: unknown, path: string) => {
+        if (typeof v === "string") {
+          const t = strip(v);
+          for (const [name, re] of PANEL_BANNED) if (re.test(t)) failures.push(`${project.brand}: ${id}.panel${path}: "${name}" in ${JSON.stringify(v.slice(0, 140))}`);
+          for (const w of other) if (new RegExp(`\\b${w.replace(/s$/, "")}s?\\b`, "i").test(t)) failures.push(`${project.brand}: ${id}.panel${path}: another tracker's category word "${w}" in ${JSON.stringify(v.slice(0, 140))}`);
+        } else if (Array.isArray(v)) v.forEach((x, i) => walkText(x, `${path}[${i}]`));
+        else if (v && typeof v === "object") for (const [k, x] of Object.entries(v)) if (!SKIP.has(k)) walkText(x, `${path}.${k}`);
+      };
+      walkText(p, "");
+    }
+    // 1. old output unchanged.
+    const slug = project.brand.toLowerCase().replace(/[^a-z]+/g, "_");
+    const stripped = JSON.parse(JSON.stringify(view));
+    for (const pp of Object.values(stripped.positions as Record<string, { panel?: unknown }>)) delete pp.panel;
+    delete (stripped as { rivalPanels?: unknown }).rivalPanels;
+    const base = process.env.PANEL_BASELINE;
+    if (base) {
+      const f = `${base}/${slug}.map.json`;
+      if (!fsMod.existsSync(f)) failures.push(`${project.brand}: no baseline ${f}`);
+      else if (fsMod.readFileSync(f, "utf8") !== JSON.stringify(stripped)) failures.push(`${project.brand}: positions without panel differ from the am30 baseline`);
+      else console.log(`OLD OUTPUT: identical to the am30 baseline`);
+    }
+    // 8. payload: the served map (slim: a stub per panel) and the lazily loaded cell panels.
+    const withP = JSON.stringify(view).length;
+    const without = JSON.stringify(stripped).length;
+    const slim = slimAnalysisMap(view);
+    const slimBytes = JSON.stringify(slim).length;
+    let maxCell = 0;
+    let maxCellId = "";
+    for (const [cid, pos] of Object.entries(view.positions as Record<string, Position>)) {
+      const sp = (slim.positions as Record<string, Position>)[cid];
+      if (sp.panel) failures.push(`${project.brand}: ${cid} served map carries a panel body`);
+      if (!!pos.panel !== !!sp.panelStub) failures.push(`${project.brand}: ${cid} served stub does not match the panel`);
+      if (pos.panel && sp.panelStub) {
+        if (sp.panelStub.kind !== pos.panel.kind) failures.push(`${project.brand}: ${cid} stub kind differs`);
+        if (JSON.stringify(sp.panelStub.rivals) !== JSON.stringify((pos.panel.rivals ?? []).map((r) => ({ name: r.name, full: r.full })))) failures.push(`${project.brand}: ${cid} stub rival list differs`);
+        const cp = cellPanelOf(view, cid);
+        if (JSON.stringify(cp.panel) !== JSON.stringify(pos.panel)) failures.push(`${project.brand}: ${cid} cell_panel body differs from the computed panel`);
+        if (pos.panel.usualCellId && !cp.usualSteps) failures.push(`${project.brand}: ${cid} cell_panel has no usual steps`);
+        const b = JSON.stringify(cp).length;
+        if (b > maxCell) { maxCell = b; maxCellId = cid; }
+      }
+      const rest = { ...sp };
+      delete rest.panelStub;
+      const rest0 = { ...pos };
+      delete rest0.panel;
+      if (JSON.stringify(rest) !== JSON.stringify(rest0)) failures.push(`${project.brand}: ${cid} served position differs beyond the panel`);
+    }
+    const grow = (slimBytes - without) / without;
+    if (grow > 0.6) failures.push(`${project.brand}: served map grows ${Math.round(grow * 100)}% over the no-panel size`);
+    // Panel 15 (By rival): served map carries names only; every number opens answers of the map; plain wording; tags allowed.
+    const rps = ((view as { rivalPanels?: RivalAcross[] }).rivalPanels ?? []) as RivalAcross[];
+    if ((slim as { rivalPanels?: unknown }).rivalPanels) failures.push(`${project.brand}: served map carries rival panel bodies`);
+    if (JSON.stringify((slim as { rivalStubs?: string[] }).rivalStubs ?? []) !== JSON.stringify(rps.map((r) => r.name))) failures.push(`${project.brand}: rival stubs do not match`);
+    const allIds = new Set<string>(Object.values(cellIds).flat());
+    let maxRival = 0;
+    let rivalNums = 0;
+    for (const rp of rps) {
+      maxRival = Math.max(maxRival, JSON.stringify(rp).length);
+      const walk = (v: unknown, path: string): void => {
+        if (isNum(v)) {
+          rivalNums++;
+          const refs = v.refs ?? [];
+          if (v.pct > 0 && !refs.length) failures.push(`${project.brand}: rival ${rp.name}${path} ${v.value} has no answers`);
+          if (v.pct === 0 && refs.length) failures.push(`${project.brand}: rival ${rp.name}${path} 0% carries answers`);
+          for (const r of refs) if (!allIds.has(r.responseId)) failures.push(`${project.brand}: rival ${rp.name}${path} answer outside the map`);
+          return;
+        }
+        if (Array.isArray(v)) v.forEach((x, i) => walk(x, `${path}[${i}]`));
+        else if (v && typeof v === "object") for (const [k, x] of Object.entries(v)) if (k !== "refs") walk(x, `${path}.${k}`);
+      };
+      walk(rp, "");
+      for (const st of rp.steps) {
+        if (st.tag && !isAllowedTag(st.tag)) failures.push(`${project.brand}: rival ${rp.name} tag "${st.tag}" not allowed`);
+        if (!(view.positions as Record<string, Position>)[st.cellId]) failures.push(`${project.brand}: rival ${rp.name} step ${st.key} points at no map position`);
+        const c = st.conditions;
+        if (c) {
+          const t = new Set(c.toward.flatMap((x) => (x.share.refs ?? []).map((r) => r.responseId)));
+          for (const x of c.away) for (const r of x.share.refs ?? []) if (t.has(r.responseId) && !c.towardScope) failures.push(`${project.brand}: rival ${rp.name} ${st.key} answer on both sides`);
+        }
+      }
+      const rpPhr = new Set<string>([...dataPhrases(view, data), rp.name]);
+      for (const st of rp.steps) {
+        for (const b of st.bars) rpPhr.add(b.name);
+        for (const r of st.table?.rows ?? []) rpPhr.add(r.label);
+        for (const row of [...(st.conditions?.toward ?? []), ...(st.conditions?.away ?? [])]) { rpPhr.add(row.text); for (const x of row.products ?? []) rpPhr.add(x); }
+      }
+      for (const t of [rp.byBuyer, rp.products]) for (const r of t?.rows ?? []) rpPhr.add(r.label);
+      const strip = (t: string) => {
+        let x = t.replace(/"[^"]*"/g, '""');
+        for (const d of [...rpPhr].filter((d) => d.trim().length >= 3).sort((a, b) => b.length - a.length)) if (x.toLowerCase().includes(d.toLowerCase())) x = x.split(new RegExp(d.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "gi")).join(" ");
+        return x;
+      };
+      const SK = new Set([...SKIP_KEYS, "tip", "kind", "tone", "tagTone", "name", "who", "cellId", "key"]);
+      const wt = (v: unknown, path: string): void => {
+        if (typeof v === "string") {
+          const t = strip(v);
+          for (const [nm, re] of PANEL_BANNED) if (re.test(t)) failures.push(`${project.brand}: rival ${rp.name}${path}: "${nm}" in ${JSON.stringify(v.slice(0, 140))}`);
+        } else if (Array.isArray(v)) v.forEach((x, i) => wt(x, `${path}[${i}]`));
+        else if (v && typeof v === "object") for (const [k, x] of Object.entries(v)) if (!SK.has(k)) wt(x, `${path}.${k}`);
+      };
+      wt(rp, "");
+    }
+    console.log(`RIVAL PANELS: ${rps.length} rivals, ${rivalNums} numbers, largest ${maxRival} bytes, all ${JSON.stringify(rps).length} bytes`);
+    payloadLines.push(`${project.brand.padEnd(17)} | full ${String(withP).padStart(9)} | no panel ${String(without).padStart(9)} | served ${String(slimBytes).padStart(9)} (+${Math.round(grow * 100)}%) | largest cell panel ${maxCell} (${maxCellId}) | rival panels ${rps.length} (${JSON.stringify(rps).length} bytes, largest ${maxRival})`);
+    // 9. ruling 5 omissions.
+    for (const o of (debug as { panelOmissions?: { cellId: string; list: string; code: string; share: number; hit: string; via: string }[] }).panelOmissions ?? [])
+      omissionLines.push(`${project.brand.padEnd(17)} | ${o.cellId.padEnd(44)} | ${o.list.padEnd(9)} | ${o.code.padEnd(28)} | ${(Math.round(o.share * 1000) / 10).toFixed(1).padStart(5)}% | ${o.hit.padEnd(16)} | ${o.via}`);
+    console.log(`PANELS: ${panels} panels, ${nums} numbers, ${refCount} example answers checked, ${labelFallbacks} quoted-seed claims`);
+    // The mockup numbers (American Express).
+    if (project.brand === "American Express") {
+      const P = (id: string) => (view.positions as Record<string, Position>)[id]?.panel as PositionPanel | undefined;
+      const st = (id: string, k: string) => P(id)?.steps.find((s) => s.key === k);
+      const v = (n?: PanelNum) => n?.value ?? "-";
+      const segs = (id: string, k: string) => (st(id, k)?.segments ?? []).map((g) => `${g.key} ${g.num.value}`).join(" / ");
+      const pair = (id: string, k: string) => `${v(st(id, k)?.here)} / ${v(st(P(id)?.usualCellId ?? "", k)?.here)}`;
+      const sh = (id: string) => (P(id)?.lines ?? []).find((l) => l.label === "Your share of the picks")?.value.map((x) => x.t).join("") ?? "-";
+      mockupLines.push(`P01 Everyday spender | share ${sh("chooses:open:everyday spender")} | named ${pair("chooses:open:everyday spender", "named")} | recommended ${pair("chooses:open:everyday spender", "recommended")} | converts ${pair("chooses:open:everyday spender", "converts")}`);
+      mockupLines.push(`P02 Chase | picks one of the two ${pair("fights:h2h:chase", "decided")} | you ${v(st("fights:h2h:chase", "won")?.here)} | all head-to-heads ${v(st("fights:h2h:all", "won")?.here)}`);
+      mockupLines.push(`P03 Capital One | named ${pair("fights:leavers:capital one", "named")} | recommended ${pair("fights:leavers:capital one", "recommended")} | converts ${pair("fights:leavers:capital one", "converts")}`);
+      mockupLines.push(`P04 Fee feels too high | agrees ${pair("doubts:buyers:fee feels too high", "agrees")} | ${segs("doubts:buyers:fee feels too high", "verdict")} || all: ${segs("doubts:buyers:all", "verdict")}`);
+      mockupLines.push(`P05 Credits too hard to use | agrees ${pair("doubts:customers:credits too hard to use", "agrees")} | ${segs("doubts:customers:credits too hard to use", "verdict")} || all: ${segs("doubts:customers:all", "verdict")}`);
+      mockupLines.push(`P06 | ${segs("doubts:hold:all", "verdict")} | shows another ${v(st("doubts:hold:all", "offers")?.here)}`);
+      mockupLines.push(`P07 Everyday spender | ${segs("chooses:value:everyday spender", "worth")} || all: ${segs("chooses:value:all", "worth")} || instead: ${segs("chooses:value:everyday spender", "instead")}`);
+      mockupLines.push(`P08 Everyday spender | category ${pair("chooses:awareness:everyday spender", "category")} | named ${pair("chooses:awareness:everyday spender", "named")} | recommended ${pair("chooses:awareness:everyday spender", "recommended")}`);
+      mockupLines.push(`P09 All | ${(st("chooses:criteria:all", "taught")?.items ?? []).map((i) => `${i.label} ${i.num.value}`).join(", ")}`);
+      mockupLines.push(`P10 | ${segs("settled:settled:expansion", "stance")}`);
+      mockupLines.push(`P12 | ${segs("settled:settled:business case", "strength")} | ${(P("settled:settled:business case")?.lines ?? []).map((l) => l.value.map((x) => x.t).join("")).join(" ")}`);
+      const ov = (id: string, k: string) => `${v(st(id, k)?.here)} / ${v(st(id, k)?.usual)}`;
+      mockupLines.push(`P13 Popular | named ${ov("chooses:social:all", "named")} | recommended ${ov("chooses:social:all", "recommended")} | one pick ${ov("chooses:social:all", "commits")}`);
+      mockupLines.push(`P14 Learning | any brand ${ov("chooses:explainer:all", "anybrand")} | named ${ov("chooses:explainer:all", "named")} | named when any ${ov("chooses:explainer:all", "namedwhen")}`);
+      mockupLines.push(`P16 Alongside | ${(st("settled:settled:ecosystem", "alongside")?.items ?? []).map((i) => `${i.label} ${i.num.value}`).join(", ")} | ${(st("settled:settled:ecosystem", "alongside")?.note ?? []).map((x) => x.t).join("")}`);
+      mockupLines.push(`P17 Critic | ${segs("settled:settled:advocacy", "strength")} | premise ${segs("settled:settled:advocacy", "premise")} | ${(st("settled:settled:advocacy", "premise")?.note ?? []).map((x) => x.t).join("")}`);
+      const co = ((view as { rivalPanels?: RivalAcross[] }).rivalPanels ?? []).find((r) => r.name === "Capital One");
+      if (co) for (const stp of co.steps) mockupLines.push(`P15 Capital One | ${stp.label} | ${stp.bars.map((b) => `${b.name} ${b.num.value}`).join(" / ")}${stp.tag ? ` [${stp.tag}]` : ""}`);
+      for (const id of ["chooses:social:all", "chooses:explainer:all", "settled:settled:ecosystem", "settled:settled:advocacy", "settled:settled:expansion", "settled:settled:business case"]) mockupLines.push(`claim ${id}: ${(P(id)?.claim ?? []).map((x) => x.t).join("")}`);
+    }
+  }
 
   const exp = EXPECTED[project.brand.toLowerCase()];
   if (exp && exp !== view.casting.archetype) failures.push(`${project.brand}: archetype ${view.casting.archetype}, expected ${exp}`);
@@ -317,6 +621,38 @@ for (const project of projects) {
 
 console.log(`\n=================== WALL CALIBRATION (top-3 away groups per cell, n >= 5) ===================`);
 for (const l of wallTable) console.log(l);
+
+console.log(`\n=================== PANEL PAYLOAD (map JSON bytes) ===================`);
+for (const l of payloadLines) console.log(l);
+console.log(`\n=================== MOCKUP NUMBERS (American Express; here / your usual) ===================`);
+for (const l of mockupLines) console.log(l);
+console.log(`\n=================== RULING 5 OMISSIONS ===================`);
+console.log(`tracker           | cell                                         | list      | code                         | share  | matched word     | via`);
+for (const l of omissionLines) console.log(l);
+
+/* -- am31: the question-label validator (question_labels.ts), unit style -- */
+{
+  const { validateLabel } = await import(process.cwd() + "/src/lib/engine/question_labels.ts");
+  const ctx = { brandForms: ["Acme Brand", "acme"], otherBrands: ["Rivalco"] };
+  const cases: [string, boolean][] = [
+    ["which of your products people pick most when they want something simple", true],
+    ["how to answer someone who says your product is hard to use", true],
+    ["which acme product to choose", false],
+    ["whether Rivalco beats you", false],
+    ["which plan fits 3 people", false],
+    ["which one of your many products is the best one to choose for a busy family on a budget", false],
+    ["tell me which product to choose", false],
+    ['which "best" product to choose', false],
+    ["which product - yours or another", false],
+    ["Which product to choose", false],
+    ["which product to choose?", false],
+  ];
+  for (const [label, okWant] of cases) {
+    const why = validateLabel(label, ctx);
+    if (!why !== okWant) failures.push(`question label validator: "${label}" ${okWant ? `rejected (${why})` : "accepted"}`);
+  }
+  console.log(`QUESTION LABEL VALIDATOR: ${cases.length} cases checked`);
+}
 
 console.log(`\n=================== INVARIANTS ===================`);
 if (failures.length) {

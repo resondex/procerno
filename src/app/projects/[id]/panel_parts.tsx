@@ -1,0 +1,646 @@
+"use client";
+
+import { createContext, useCallback, useContext, useState } from "react";
+import type { ReactNode } from "react";
+import type {
+  AnswerRef,
+  PanelBlock,
+  PanelCondition,
+  PanelConditions,
+  PanelLine,
+  PanelNum,
+  PanelSegment,
+  PanelSpan,
+  PanelStep,
+  PanelStepKey,
+  PanelTable,
+  PanelText,
+  PanelTone,
+} from "@/lib/engine/analysis_types";
+import { useShowExamples, useWhere } from "./analysis_panel";
+import { T } from "./type_scale";
+
+/**
+ * The building blocks of the per-question-type panels (am31, the panel build).
+ * Every sentence and label comes from the engine payload; the only words here
+ * are the UI chrome (the switch, "Open", "of answers say this", "fixed", the
+ * click hint, "See all" / "Show less"). Every number with answers behind it
+ * opens them in the one examples modal; a number with none is plain text.
+ * Counts never print - they live in the hover tips.
+ */
+
+// ---------- colours ----------
+
+export const C_YOU = "var(--pa-yours)";
+export const C_AWAY = "var(--pa-theirs)";
+export const C_USUAL = "var(--neutral-bar)";
+export const C_NONE = "color-mix(in srgb, var(--neutral-bar) 45%, transparent)";
+const toneColor = (t: PanelSegment["tone"]) => (t === "you" ? C_YOU : t === "away" ? C_AWAY : C_USUAL);
+
+export const CLICK_HINT = "Click any row or number to read the answers behind it.";
+
+// ---------- the "Show competitors" switch: one state per slide-over host, kept for the session ----------
+
+const COMP_KEY = "procerno:panelComp";
+const CompCtx = createContext<{ on: boolean; set: (v: boolean) => void } | null>(null);
+
+function readComp(): boolean {
+  try {
+    return typeof window !== "undefined" && window.sessionStorage.getItem(COMP_KEY) === "1";
+  } catch {
+    return false;
+  }
+}
+
+export function CompProvider({ children }: { children: ReactNode }) {
+  const [on, setOn] = useState(readComp);
+  const set = useCallback((v: boolean) => {
+    setOn(v);
+    try {
+      window.sessionStorage.setItem(COMP_KEY, v ? "1" : "0");
+    } catch {
+      // private window: the switch still works for this panel
+    }
+  }, []);
+  return <CompCtx.Provider value={{ on, set }}>{children}</CompCtx.Provider>;
+}
+
+export function useComp(): [boolean, (v: boolean) => void] {
+  const c = useContext(CompCtx);
+  const [local, setLocal] = useState(false);
+  return c ? [c.on, c.set] : [local, setLocal];
+}
+
+export function CompSwitch() {
+  const [on, set] = useComp();
+  return (
+    <button
+      type="button"
+      role="switch"
+      aria-checked={on}
+      onClick={() => set(!on)}
+      className={`inline-flex min-h-[2.25rem] items-center gap-2 whitespace-nowrap ${T.ctl} text-ink-2 hover:text-ink`}
+    >
+      Show competitors
+      <span className={`relative inline-block h-5 w-[34px] rounded-full transition-colors ${on ? "bg-ink" : "bg-ink-3/70"}`} aria-hidden>
+        <span className={`absolute top-[2px] h-4 w-4 rounded-full bg-surface transition-[left] ${on ? "left-4" : "left-[2px]"}`} />
+      </span>
+    </button>
+  );
+}
+
+// ---------- examples ----------
+
+/** Opens a set of example answers, or returns null when there is nothing to open. */
+export function useOpener() {
+  const show = useShowExamples();
+  const where = useWhere();
+  return (refs: AnswerRef[] | undefined, title: string, note?: string) =>
+    show && refs && refs.length > 0 ? () => show({ title, subtitle: where, note, refs }) : null;
+}
+
+const linkish = "cursor-pointer underline decoration-dotted underline-offset-[3px] hover:decoration-solid hover:text-ink";
+
+/** A sentence from the engine: spans with answers behind them are buttons. */
+export function TextView({ text, className, title }: { text: PanelText | undefined; className?: string; title?: string }) {
+  const opener = useOpener();
+  if (!text || text.length === 0) return null;
+  return (
+    <span className={className}>
+      {text.map((s, i) => {
+        const go = opener(s.refs, title ?? s.t);
+        return go ? (
+          <button key={i} type="button" onClick={go} title={s.tip} className={`inline p-0 text-left ${linkish}`}>
+            {s.t}
+          </button>
+        ) : (
+          <span key={i} title={s.tip}>
+            {s.t}
+          </span>
+        );
+      })}
+    </span>
+  );
+}
+
+/** A number: a button when it has answers, plain text otherwise; the count lives in the tip. */
+export function NumView({ n, title, className, note }: { n: PanelNum; title: string; className?: string; note?: string }) {
+  const opener = useOpener();
+  const go = opener(n.refs, title, note);
+  return go ? (
+    <button type="button" onClick={go} title={n.tip} className={`tabular-nums ${linkish} ${className ?? ""}`}>
+      {n.value}
+    </button>
+  ) : (
+    <span title={n.tip} className={`tabular-nums ${className ?? ""}`}>
+      {n.value}
+    </span>
+  );
+}
+
+const isSpan = (c: PanelNum | PanelSpan): c is PanelSpan => "t" in c;
+
+// ---------- bars ----------
+
+const barGrid = "grid grid-cols-[minmax(0,7.5rem)_minmax(0,1fr)_2.75rem] items-center gap-2 sm:grid-cols-[minmax(0,9.5rem)_minmax(0,1fr)_2.75rem]";
+
+/** One labelled bar; the whole row opens its answers. */
+export function NumBar({ label, n, color, bold, dim, title }: { label: string; n: PanelNum; color: string; bold?: boolean; dim?: boolean; title?: string }) {
+  const opener = useOpener();
+  const go = opener(n.refs, title ?? label);
+  const inner = (
+    <>
+      <span className={`min-w-0 ${bold ? "font-semibold text-ink" : "text-ink-2"}`}>{label}</span>
+      <span className="h-2 overflow-hidden rounded bg-line/60">
+        <i className={`block h-full rounded ${dim ? "opacity-50" : ""}`} style={{ width: `${Math.max(n.pct > 0 ? 1 : 0, Math.min(100, n.pct))}%`, background: color }} />
+      </span>
+      <b className="text-right font-semibold tabular-nums text-ink">{n.value}</b>
+    </>
+  );
+  const cls = `${barGrid} ${T.cap} w-full rounded py-[3px] text-left`;
+  return go ? (
+    <button type="button" onClick={go} title={n.tip} className={`${cls} hover:bg-line/30 [&:hover_b]:underline`}>
+      {inner}
+    </button>
+  ) : (
+    <div className={cls} title={n.tip}>
+      {inner}
+    </div>
+  );
+}
+
+/** A split bar (go ahead / steer clear / no side ...) with its clickable legend. */
+export function SegBar({ segs, prefix, title }: { segs: PanelSegment[]; prefix?: string; title?: string }) {
+  const opener = useOpener();
+  return (
+    <div className="mt-1">
+      <span className="flex h-2.5 overflow-hidden rounded-[5px] bg-line/60" aria-hidden>
+        {segs.map((s) => (
+          <i key={s.key} className="block h-full" style={{ width: `${Math.min(100, s.num.pct)}%`, background: s.tone === "neutral" ? C_NONE : toneColor(s.tone) }} />
+        ))}
+      </span>
+      <span className={`mt-1 flex flex-wrap gap-x-3 gap-y-0.5 ${T.cap} text-ink-2`}>
+        {prefix && <span className="text-ink-3">{prefix}:</span>}
+        {segs.map((s) => {
+          const go = opener(s.num.refs, `${title ? `${title}: ` : ""}${s.label}`);
+          const body = (
+            <>
+              <span className="mr-1 inline-block h-2 w-2 rounded-full align-[1px]" style={{ background: s.tone === "neutral" ? C_NONE : toneColor(s.tone) }} />
+              {s.label} <b className="font-semibold tabular-nums text-ink">{s.num.value}</b>
+            </>
+          );
+          return go ? (
+            <button key={s.key} type="button" onClick={go} title={s.num.tip} className={`text-left ${linkish}`}>
+              {body}
+            </button>
+          ) : (
+            <span key={s.key} title={s.num.tip}>
+              {body}
+            </span>
+          );
+        })}
+      </span>
+    </div>
+  );
+}
+
+// ---------- tags ----------
+
+/** A tag pill, coloured by the sentiment the engine gives it (neutral when absent). */
+export function Tag({ text, tone = "neutral" }: { text?: string; tone?: PanelTone }) {
+  if (!text) return null;
+  const style = tone === "bad" ? { background: "var(--pa-theirs-bg)", color: C_AWAY } : undefined;
+  const cls = tone === "good" ? "bg-primary-soft text-primary" : tone === "neutral" ? "bg-line/60 text-ink-2" : "";
+  return (
+    <span className={`whitespace-nowrap rounded-full px-2 py-px text-[11px] font-semibold ${cls}`} style={style}>
+      {text}
+    </span>
+  );
+}
+
+// ---------- the step stack ----------
+
+/** One step card: its label and tag, then its bars (or split bars, checklist, sentence). */
+export function StepCard({
+  step,
+  usual,
+  comp,
+  focus,
+  hereLabel,
+  usualLabel,
+  rivalLabel,
+  onSelect,
+  rivalFirst,
+}: {
+  step: PanelStep;
+  usual?: PanelStep;
+  comp: boolean;
+  focus: boolean;
+  hereLabel: string;
+  usualLabel: string;
+  /** Panel 11: the rival's own name beside "You". */
+  rivalLabel?: string;
+  /** Panel 11: a step card that selects its explanation. */
+  onSelect?: () => void;
+  rivalFirst?: boolean;
+}) {
+  const ranked = comp || !!rivalLabel;
+  const tag = ranked ? step.tagRank : step.tagUsual;
+  const tone = ranked ? step.tagRankTone : step.tagUsualTone;
+  // A step that is not about you alone names its own bars (the engine's words).
+  const hereL = step.hereLabel ?? hereLabel;
+  const usualL = step.usualLabel ?? usualLabel;
+  const dim = !focus;
+  const body: ReactNode[] = [];
+  if (step.here) {
+    // A step not about you alone (any brand) keeps its own bar label beside the competitors.
+    const youL = comp && step.compHereLabel && !step.rivals?.length ? step.compHereLabel : comp || rivalLabel ? "You" : hereL;
+    const you = <NumBar key="you" label={youL} n={step.here} color={C_YOU} bold={comp || !!rivalLabel} dim={dim} title={`${step.label} - ${youL}`} />;
+    const rivals = (comp || rivalLabel ? step.rivals ?? [] : []).map((r) => (
+      <NumBar key={`r:${r.name}`} label={r.name} n={r.num} color={C_AWAY} dim={dim} title={`${step.label} - ${r.name}`} />
+    ));
+    if (rivalFirst) body.push(...rivals, you);
+    else body.push(you, ...rivals);
+    const u = usual?.here ?? step.usual;
+    if (!comp && !rivalLabel && u) body.push(<NumBar key="usual" label={usualL} n={u} color={C_USUAL} dim={dim} title={`${step.label} - ${usualL}`} />);
+  }
+  if (step.segments && step.segments.length > 0) {
+    const showUsual = !comp && !rivalLabel && !!usual?.segments?.length;
+    body.push(<SegBar key="seg" segs={step.segments} prefix={showUsual ? hereLabel : undefined} title={step.label} />);
+    if (showUsual) body.push(<SegBar key="useg" segs={usual!.segments!} prefix={usualLabel} title={`${step.label} - ${usualLabel}`} />);
+  }
+  if (step.items && step.items.length > 0)
+    body.push(
+      <div key="items">
+        {step.items.map((it) => (
+          <NumBar key={it.label} label={it.label} n={it.num} color={C_USUAL} dim={dim} />
+        ))}
+      </div>
+    );
+  if (step.note && step.note.length > 0)
+    body.push(
+      <p key="note" className={`${T.body} text-ink-2`}>
+        <TextView text={step.note} />
+      </p>
+    );
+  const cls = `block w-full rounded-[10px] border bg-surface px-3 pb-3 pt-2.5 text-left ${focus ? "border-ink ring-1 ring-ink" : "border-line"}`;
+  const head = (
+    <span className="mb-1 flex items-center justify-between gap-2">
+      <em className={`not-italic ${T.sec} ${focus ? "font-semibold text-ink" : "text-ink-2"}`}>{step.label}</em>
+      <Tag text={tag} tone={tone} />
+    </span>
+  );
+  if (onSelect)
+    return (
+      <div className={cls}>
+        <button type="button" onClick={onSelect} aria-pressed={focus} className="block w-full text-left">
+          {head}
+        </button>
+        {body}
+      </div>
+    );
+  return (
+    <div className={cls}>
+      {head}
+      {body}
+    </div>
+  );
+}
+
+export function KeyLine({ items }: { items: { label: string; color: string }[] }) {
+  if (items.length === 0) return null;
+  return (
+    <p className={`mb-2.5 flex flex-wrap gap-x-4 gap-y-1 ${T.cap} text-ink-2`}>
+      {items.map((k) => (
+        <span key={k.label}>
+          <i className="mr-1.5 inline-block h-[9px] w-[9px] rounded-full align-[0px]" style={{ background: k.color }} />
+          {k.label}
+        </span>
+      ))}
+    </p>
+  );
+}
+
+export function StepStack({
+  label,
+  steps,
+  usualSteps,
+  comp,
+  focus,
+  hereLabel,
+  usualLabel,
+  keyItems,
+}: {
+  label: string;
+  steps: PanelStep[];
+  usualSteps?: PanelStep[];
+  comp: boolean;
+  focus?: PanelStepKey;
+  hereLabel: string;
+  usualLabel: string;
+  keyItems: { label: string; color: string }[];
+}) {
+  return (
+    <div className="clear-both mt-4">
+      <p className={`${T.label} mb-1.5`}>{label}</p>
+      <KeyLine items={keyItems} />
+      <div className="grid gap-1.5">
+        {steps.map((s) => (
+          <StepCard
+            key={s.key}
+            step={s}
+            usual={usualSteps?.find((u) => u.key === s.key)}
+            comp={comp}
+            focus={!focus || s.key === focus}
+            hereLabel={hereLabel}
+            usualLabel={usualLabel}
+          />
+        ))}
+      </div>
+    </div>
+  );
+}
+
+// ---------- blocks ----------
+
+export function Blk({ title, sub, children, flush }: { title?: string; sub?: string; children: ReactNode; flush?: boolean }) {
+  return (
+    <div className={`border-t border-line/70 ${flush ? "pt-1" : "pt-4"} mt-4`}>
+      {title && <h4 className={T.title}>{title}</h4>}
+      {sub && <p className={`${T.sec} mb-2.5 mt-0.5`}>{sub}</p>}
+      {children}
+    </div>
+  );
+}
+
+export function DetailView({ heading, body, children }: { heading: string; body?: PanelText; children?: ReactNode }) {
+  return (
+    <div className="mt-4 border-t border-line pt-3.5">
+      <h3 className={`${T.title} mb-1.5`}>{heading}</h3>
+      {body && body.length > 0 && (
+        <p className={`${T.body} text-ink-2`}>
+          <TextView text={body} title={heading} />
+        </p>
+      )}
+      {children}
+    </div>
+  );
+}
+
+// ---------- conditions ----------
+
+const PREVIEW_ROWS = 4;
+
+/** "A", "A or B", "A, B or C". */
+const orList = (xs: string[]) => (xs.length <= 1 ? xs[0] ?? "" : `${xs.slice(0, -1).join(", ")} or ${xs[xs.length - 1]}`);
+
+function CondCard({ c, side, cond, comp }: { c: PanelCondition; side: "toward" | "away"; cond: PanelConditions; comp: boolean }) {
+  const opener = useOpener();
+  const go = opener(c.share.refs, c.text);
+  const color = side === "toward" ? C_YOU : cond.neutralAway ? C_USUAL : C_AWAY;
+  const also = side === "toward" ? cond.alsoToward : cond.alsoAway;
+  const top = (
+    <>
+      <span className="mb-1 block text-[13px] font-semibold leading-snug text-ink">
+        {c.text}
+        {c.wall && (
+          <span
+            title="A fact about the buyer, not a preference - it cannot be argued away"
+            className="ml-1.5 rounded-full border border-line px-1.5 align-[1px] text-[11px] font-normal text-ink-2"
+          >
+            fixed
+          </span>
+        )}
+      </span>
+      <span className="block text-xl font-semibold leading-tight tabular-nums text-ink" title={c.share.tip}>
+        {c.share.value}
+      </span>
+      <span className={`block ${T.cap} text-ink-3`}>of answers say this</span>
+    </>
+  );
+  const pickedLine = c.youPicked ? (
+    <span className={`${T.cap} text-ink-2`}>
+      {c.youPicked.pct === 0 ? (
+        <>
+          You are <b className="font-semibold text-ink">never</b> the pick.
+        </>
+      ) : (
+        <>
+          You are the pick in about <NumView n={c.youPicked} title={`${c.text} - you are the pick`} className="font-semibold text-ink" /> of these.
+        </>
+      )}
+    </span>
+  ) : null;
+  const destLine =
+    side === "toward" && !comp && c.products && c.products.length > 0 ? (
+      <span className={`${T.cap} text-ink-2`}>Names {orList(c.products)}.</span>
+    ) : (c.to?.length ?? 0) > 0 ? (
+      <span className={`${T.cap} text-ink-2`}>
+        {cond.toWord}{" "}
+        {comp
+          ? c.to!.map((x, i) => (
+              <span key={x.name}>
+                {i > 0 && " · "}
+                {x.name} <NumView n={x.num} title={`${c.text} - ${x.name}`} />
+              </span>
+            ))
+          : orList(c.to!.slice(0, 2).map((x) => x.name))}
+        .
+      </span>
+    ) : null;
+  return (
+    <div className="mb-1.5 rounded-[10px] border border-line px-3 py-2.5" style={{ borderLeft: `3px solid ${color}` }}>
+      {go ? (
+        <button type="button" onClick={go} title={c.share.tip} className="block w-full text-left hover:[&_.tabular-nums]:underline">
+          {top}
+        </button>
+      ) : (
+        <div>{top}</div>
+      )}
+      {c.both && (
+        <span className={`mt-1.5 grid grid-cols-[minmax(0,1fr)_2.5rem] items-center gap-1.5 ${T.cap} text-ink-3`} title={c.both.either.tip}>
+          <span>
+            {also}
+            <span className="mt-0.5 block h-1.5 overflow-hidden rounded-[3px] bg-line/60">
+              <i className="block h-full rounded-[3px]" style={{ width: `${Math.min(100, c.both.either.pct)}%`, background: C_USUAL }} />
+            </span>
+          </span>
+          <NumView n={c.both.either} title={`${c.text} - ${also}`} className="text-right" />
+        </span>
+      )}
+      {(destLine || pickedLine) && (
+        <span className="mt-1.5 flex flex-wrap gap-x-1">
+          {destLine}
+          {pickedLine}
+        </span>
+      )}
+    </div>
+  );
+}
+
+function CondColumn({ title, rows, side, cond, comp, color, all }: { title: string; rows: PanelCondition[]; side: "toward" | "away"; cond: PanelConditions; comp: boolean; color: string; all: boolean }) {
+  const shown = all ? rows : rows.slice(0, PREVIEW_ROWS);
+  return (
+    <div className="min-w-0">
+      <h5 className="mb-1.5 text-[12px] font-semibold" style={{ color }}>
+        {title}
+      </h5>
+      {shown.map((c, i) => (
+        <CondCard key={`${i}:${c.text}`} c={c} side={side} cond={cond} comp={comp} />
+      ))}
+    </div>
+  );
+}
+
+/** "When the AI says to choose you, and when another ..." - two columns of condition cards. */
+export function CondColumns({ cond, comp, awayFirst }: { cond: PanelConditions; comp: boolean; awayFirst?: boolean }) {
+  const [all, setAll] = useState(false);
+  const more = cond.toward.length > PREVIEW_ROWS || cond.away.length > PREVIEW_ROWS;
+  const cols = [
+    <CondColumn key="t" title={cond.towardTitle} rows={cond.toward} side="toward" cond={cond} comp={comp} color={C_YOU} all={all} />,
+    <CondColumn key="a" title={cond.awayTitle} rows={cond.away} side="away" cond={cond} comp={comp} color={cond.neutralAway ? "var(--ink-2)" : C_AWAY} all={all} />,
+  ];
+  const empty = cond.toward.length === 0 && cond.away.length === 0;
+  // One side empty: draw only the side that has rows ("Choose you if" stays left when both exist).
+  const shownCols = cond.toward.length === 0 ? [cols[1]] : cond.away.length === 0 ? [cols[0]] : awayFirst ? [cols[1], cols[0]] : cols;
+  return (
+    <Blk title={cond.title} sub={comp && cond.subComp ? cond.subComp : cond.sub}>
+      {empty ? (
+        cond.note && <p className={`${T.body} text-ink-3`}>{cond.note}</p>
+      ) : (
+        <>
+          <div className={`grid items-start gap-3 ${shownCols.length > 1 ? "sm:grid-cols-2" : ""}`}>{shownCols}</div>
+          {cond.note && <p className={`${T.sec} mt-1`}>{cond.note}</p>}
+          {more && (
+            <button type="button" onClick={() => setAll((a) => !a)} aria-expanded={all} className={`mt-1 ${T.ctl} text-primary underline underline-offset-2 hover:opacity-80`}>
+              {all ? "Show less" : "See all"}
+            </button>
+          )}
+        </>
+      )}
+    </Blk>
+  );
+}
+
+// ---------- brands, lines, tables ----------
+
+export function BrandRows({ block, onOpen }: { block: PanelBlock; onOpen?: (name: string) => void }) {
+  return (
+    <Blk title={block.title} sub={block.sub}>
+      {block.rows.map((r) => (
+        <div key={r.name} className="grid grid-cols-[minmax(0,1fr)_2.75rem] items-center gap-2">
+          <BrandBar name={r.you ? "You" : r.name} n={r.num} color={r.you ? C_YOU : C_AWAY} bold={!!r.you} />
+          {r.open && onOpen ? (
+            <button type="button" onClick={() => onOpen(r.name)} className={`text-right ${T.ctl} text-primary hover:opacity-80`}>
+              Open
+            </button>
+          ) : (
+            <span />
+          )}
+        </div>
+      ))}
+    </Blk>
+  );
+}
+
+function BrandBar({ name, n, color, bold }: { name: string; n: PanelNum; color: string; bold?: boolean }) {
+  const opener = useOpener();
+  const go = opener(n.refs, name);
+  const inner = (
+    <>
+      <span className={`min-w-0 truncate ${bold ? "font-semibold" : ""}`}>{name}</span>
+      <span className="h-2 overflow-hidden rounded bg-line/60">
+        <i className="block h-full rounded" style={{ width: `${Math.max(n.pct > 0 ? 1 : 0, Math.min(100, n.pct))}%`, background: color }} />
+      </span>
+      <b className="text-right font-semibold tabular-nums">{n.value}</b>
+    </>
+  );
+  const cls = `grid w-full grid-cols-[minmax(0,6.5rem)_minmax(0,1fr)_2.75rem] items-center gap-2.5 py-1.5 text-left ${T.body} text-ink`;
+  return go ? (
+    <button type="button" onClick={go} title={n.tip} className={`${cls} [&:hover_b]:underline`}>
+      {inner}
+    </button>
+  ) : (
+    <div className={cls} title={n.tip}>
+      {inner}
+    </div>
+  );
+}
+
+export function LineRows({ lines }: { lines?: PanelLine[] }) {
+  if (!lines || lines.length === 0) return null;
+  return (
+    <div className="mt-3">
+      {lines.map((l, i) => (
+        <div key={`${i}:${l.label}`} className={`flex justify-between gap-3 py-2 ${T.body} ${i > 0 ? "border-t border-line/70" : ""}`}>
+          <span className="text-ink">{l.label}</span>
+          <TextView text={l.value} title={l.label} className="text-right text-ink-2" />
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function Cell({ c, title }: { c: PanelNum | PanelSpan | null; title: string }) {
+  if (!c) return <span className="text-ink-3">-</span>;
+  if (isSpan(c)) return <TextView text={[c]} title={title} />;
+  return <NumView n={c} title={title} />;
+}
+
+export function TableView({ table }: { table: PanelTable }) {
+  if (table.style === "bars")
+    return (
+      <Blk title={table.title} sub={table.sub}>
+        {table.rows.map((r) => {
+          const first = r.cells[0];
+          const rest = r.cells.slice(1).filter((c): c is PanelNum | PanelSpan => !!c);
+          return (
+            <div key={r.label} className="grid grid-cols-[minmax(0,1fr)_minmax(0,40%)_2.75rem] items-center gap-2.5 py-1.5">
+              <span className={`${T.body} text-ink`}>
+                {r.label}
+                {rest.map((c, i) => (
+                  <span key={i} className={`block ${T.cap} text-ink-3`}>
+                    <Cell c={c} title={r.label} />
+                  </span>
+                ))}
+              </span>
+              <span className="h-2 overflow-hidden rounded bg-line/60">
+                {first && !isSpan(first) && <i className="block h-full rounded" style={{ width: `${Math.min(100, first.pct)}%`, background: C_YOU }} />}
+              </span>
+              <b className={`text-right ${T.body} font-semibold text-ink`}>{first ? <Cell c={first} title={r.label} /> : null}</b>
+            </div>
+          );
+        })}
+      </Blk>
+    );
+  return (
+    <Blk title={table.title} sub={table.sub}>
+      <div className="overflow-x-auto">
+        <table className={`w-full ${T.body}`}>
+          <thead>
+            <tr className={`${T.cap} text-ink-3`}>
+              <th className="py-1 pr-2 text-left font-normal" />
+              {table.columns.map((c) => (
+                <th key={c} className="py-1 pl-2 text-right font-normal">
+                  {c}
+                </th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {table.rows.map((r) => (
+              <tr key={r.label} className="border-t border-line/70">
+                <td className="py-1.5 pr-2 text-ink">{r.label}</td>
+                {r.cells.map((c, i) => (
+                  <td key={i} className="py-1.5 pl-2 text-right text-ink">
+                    <Cell c={c} title={`${r.label} - ${table.columns[i] ?? ""}`} />
+                  </td>
+                ))}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </Blk>
+  );
+}

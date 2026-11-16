@@ -328,6 +328,13 @@ export interface Position {
   notes?: PositionNotes;
   /** am27: lost, with an exception (head-to-head cells only; see PositionException). */
   exception?: PositionException;
+  /** am31 (the panel build): the per-question-type panel. Absent on cells the
+   * old panels still draw (PANEL_BUILD_SPEC section 0). */
+  panel?: PositionPanel;
+  /** am31: the served map's stand-in for `panel` (slimAnalysisMap). The map
+   * route leaves the panel bodies out; the slide-over loads one cell's panel
+   * (its rivals included) from /api/runs/[id]/cell_panel when it opens. */
+  panelStub?: PanelStub;
 }
 
 /** The one payload the Map and Verdict tabs read (positions ride along so
@@ -374,6 +381,11 @@ export interface AnalysisMapView {
    * tensions' matcher, generic fallbacks included; only ids present in the
    * map. Match by key AND title - a detector can serve more than one. */
   insightCells?: { key: string; title: string; cellId: string }[];
+  /** am31 round 2 (full compute only): each rival across every question type;
+   * the served map drops it (slimAnalysisMap) and /rival_panel serves one. */
+  rivalPanels?: RivalAcross[];
+  /** The served map's stand-in for rivalPanels: the names that carry one. */
+  rivalStubs?: string[];
 }
 
 /** projects.analysis_decision - the gate pattern (recommended vs decided),
@@ -390,4 +402,210 @@ export interface AnalysisDecisionEntry {
 export interface AnalysisDecision {
   v: 1;
   positions: Record<string, AnalysisDecisionEntry>;
+}
+
+/* ------------- am31 (panel build): the per-question-type panels ------------- */
+
+export type PanelKind =
+  | "buy" | "h2h" | "switching" | "buyer_worry" | "customer_worry" | "looking_around"
+  | "value" | "problem" | "criteria" | "expansion" | "business_case"
+  // am31 round 2: What's popular, Learning the category, What to use alongside you, Answering a critic.
+  | "popular" | "learning" | "alongside" | "critic";
+
+/** One piece of a sentence. A span with refs is a stated number or fact that
+ * opens its answers (ruling 7); no refs = plain text. tip = counts (hover only). */
+export interface PanelSpan { t: string; refs?: AnswerRef[]; tip?: string }
+export type PanelText = PanelSpan[];
+
+/** One number on a panel. refs absent <=> not clickable (0%, or nothing to show). */
+export interface PanelNum {
+  value: string;     // "47%" | "<1%" | "0%" (pctOf)
+  pct: number;       // 0-100, one decimal, bar width only
+  tip: string;       // "47 of 100 answers" - the only place counts appear
+  refs?: AnswerRef[]; // <= PANEL_REFS (3), spreadRefs / pickRefs, one per assistant first
+}
+
+export type PanelStepKey =
+  | "named" | "recommended" | "converts"   // funnel (buy, switching, problem, rival)
+  | "category"                             // problem: the answer is about the category at all
+  | "decided" | "won"                      // h2h
+  | "agrees" | "verdict"                   // worries, looking around
+  | "offers"                               // looking around: shows another product
+  | "worth" | "instead"                    // value
+  | "taught" | "gap"                       // criteria
+  | "stance"                               // expansion (growth_stance)
+  | "strength"                             // business case (case_strength)
+  | "commits"                              // popular: the answer names one product as the pick (any brand)
+  | "anybrand" | "namedwhen"               // learning: names any brand; named, when a brand is named
+  | "alongside"                            // alongside: the ones it names alongside you
+  | "premise";                             // critic: does it say the critic is right
+
+/** A tag's sentiment: good for you, bad for you, or a neutral fact. */
+export type PanelTone = "good" | "bad" | "neutral";
+
+/** The served map's per-cell panel stand-in: which kind to draw and which
+ * rivals carry a panel (Open), without the bodies. */
+export interface PanelStub {
+  kind: PanelKind;
+  rivals: { name: string; full: boolean }[];
+}
+
+/** One cell's panel as /cell_panel serves it, with its usual cell's steps. */
+export interface CellPanelPayload {
+  panel: PositionPanel | null;
+  usualSteps?: PanelStep[];
+}
+
+export interface PanelSegment {
+  key: string;   // proceed|avoid|none|keep|leave|yes|depends|no|own|rival|nowhere|backs|neutral|redirects|strong|hedged|undermined
+  label: string; // "go ahead", "steer clear", "no side", ...
+  tone: "you" | "away" | "neutral";
+  num: PanelNum;
+}
+
+export interface PanelStep {
+  key: PanelStepKey;
+  label: string;                       // "Named", "Recommendations that end as the pick", ...
+  here?: PanelNum;                     // you, in this cell (absent on segmented / list steps)
+  segments?: PanelSegment[];           // a split bar (verdict steps)
+  items?: { label: string; num: PanelNum }[]; // criteria checklist bars
+  note?: PanelText;                    // criteria "gap" sentence
+  tagUsual?: string;                   // compares with usualCellId's same-key step
+  tagRank?: string;                    // compares with the competitors (or the one rival on panel 11)
+  tagUsualTone?: PanelTone;            // the tag's sentiment (drawn colour)
+  tagRankTone?: PanelTone;
+  hereLabel?: string;                  // this step's own bar label, when "You" would misread it
+  usualLabel?: string;                 // this step's own label for the usual bar
+  /** The comparison bar carried on the step itself (popular, learning: the
+   * comparison is another question type's all-buyers row, not this row's All cell). */
+  usual?: PanelNum;
+  /** The "you" bar's label in the comparison view when the step is not about you alone ("Any credit card"). */
+  compHereLabel?: string;
+  rivals?: { name: string; num: PanelNum }[]; // comparison-view bars, in PositionPanel.competitorOrder
+}
+
+export interface PanelDetail { heading: string; body: PanelText }
+
+export interface PanelCondition {
+  text: string;                        // theme name or flat group label
+  share: PanelNum;                     // distinct answers stating it / ALL answers in the cell (ruling 4)
+  wall?: true;                         // "fixed"
+  products?: string[];                 // toward: your products as written, top 2, never the bare brand
+  to?: { name: string; num: PanelNum }[]; // away: active brands; num = share of the row's answers naming one (routeShares rule)
+  youPicked?: PanelNum;                // of THIS row's answers, share picking you (pick kinds only, row >= 5 answers)
+  both?: { either: PanelNum };         // stated on the other side too (bothWays match); either = answers on either side / all answers
+}
+
+export interface PanelConditions {
+  title: string;        // "When the AI says to choose you, and when another credit card"
+  sub: string;          // block description (comparison view may override with subComp)
+  subComp?: string;
+  towardTitle: string;  // "Choose you if" | "Stay if" | "Go ahead if"
+  awayTitle: string;    // "Choose another credit card if" | "Look at another credit card if" | "Hold back if" | "Choose Chase if"
+  alsoToward: string;   // "Also said for another credit card"
+  alsoAway: string;     // "Also said for you"
+  toWord: "To" | "Shown"; // prefix of the destination line
+  grouped: boolean;     // true = run themes, false = flat condition groups
+  towardScope?: "rival_picked"; // h2h lost with an exception: toward rows count only answers that pick the rival
+  toward: PanelCondition[]; // <= 6
+  away: PanelCondition[];   // <= 6
+  note?: string;        // rule-bearing answers exist but no row clears the floor
+  /** The away column is not "away from you" (alongside: another company's
+   * product the customer asked about) - drawn neutral, never red. */
+  neutralAway?: true;
+}
+
+export interface PanelBrandRow { name: string; you?: true; num: PanelNum; open?: true } // open <=> a PanelRival exists
+export interface PanelBlock { title: string; sub: string; rows: PanelBrandRow[] }
+export interface PanelLine { label: string; value: PanelText }
+
+export interface PanelTable {
+  title: string;
+  sub: string;
+  columns: string[];
+  style: "compare" | "bars";
+  rows: { label: string; cells: (PanelNum | PanelSpan | null)[] }[];
+}
+
+export interface RivalStepDetail {
+  heading: string;
+  body: PanelText;
+  rows?: { label: string; rival: PanelNum; you: PanelNum }[]; // named: named-not-recommended, of those named to avoid
+  outcomes?: { name: string; you?: true; picked: PanelNum; lost: PanelNum; none: PanelNum }[]; // what happens to its recommendations
+  both?: PanelText;  // "recommends both of you in X% ... picks R Y% and you Z%"
+  outcomeLabels?: { picked: string; lost: string; none: string }; // the outcome line's words
+}
+
+/** Panel 11: one rival inside this cell's question type. */
+export interface PanelRival {
+  name: string;
+  full: boolean;                 // false = the smaller non-pick version
+  claim: PanelText;
+  lead?: PanelText;
+  steps: PanelStep[];            // here = you, rivals = [this rival]; tagRank = duel tag
+  focus?: PanelStepKey;
+  details?: Partial<Record<"named" | "recommended" | "converts", RivalStepDetail>>;
+  conditions?: PanelConditions;  // full only: away = rows sending buyers to this rival, toward = the cell's toward rows
+  lines: PanelLine[];            // which products it picks (both sides); what the answer weighs by side
+  byCell?: { cellId: string; label: string; rival: PanelNum; you: PanelNum }[]; // sibling cells of the row (full, rows with 2+ cells)
+  byCellTitle?: string;          // the byCell block's title
+  stackLabel?: string;           // the step stack's label
+  thin?: string;                 // one sentence when the slice is thin
+}
+
+export interface PositionPanel {
+  kind: PanelKind;
+  claim: PanelText;
+  lead?: PanelText;
+  usualCellId?: string;          // the row's All cell; absent on All cells and single-cell rows
+  hereKey?: string;              // key line: "You, with this buyer"
+  usualKey?: string;             // key line: "You, across all buyers"
+  stackLabel: string;            // "Where you lose this buyer" | "How the answer goes" | "Where it is decided"
+  steps: PanelStep[];
+  focus?: PanelStepKey;          // highlighted step, normal view
+  focusComp?: PanelStepKey;      // highlighted step, comparison view
+  detail?: PanelDetail;
+  detailComp?: PanelDetail;
+  compare?: true;                // the "Show competitors" switch is drawn
+  competitorOrder?: string[];    // brand names behind PanelStep.rivals
+  competitors?: PanelBlock;      // "Who takes the picks" / "Which ... it names instead" / "... it shows" (comparison view only)
+  conditions?: PanelConditions;
+  lines?: PanelLine[];
+  linesComp?: PanelLine[];
+  table?: PanelTable;
+  /** The comparison view's own version of `table` (when it drops a column). */
+  tableComp?: PanelTable;
+  /** Further tables, after `table` (popular: products, arguments). */
+  tables?: PanelTable[];
+  rivals?: PanelRival[];
+  thin?: string;                 // under the 20-answer floor: one sentence; tags and detail absent
+}
+
+/* ---- am31 round 2: one rival across every question type (the By rival tab) ---- */
+
+export interface RivalAcrossBar { name: string; who: "rival" | "you" | "other"; num: PanelNum }
+
+/** One question type where the rival appears: its bars and, when selected, the block explaining it. */
+export interface RivalAcrossStep {
+  key: string;                   // the map row slug (awareness, open, social, h2h, leavers, buyers, value, customers, hold)
+  label: string;                 // "What to buy - share of the picks"
+  cellId: string;                // the cell the step reads
+  bars: RivalAcrossBar[];
+  tag?: string;
+  tagTone?: PanelTone;
+  heading: string;
+  body?: PanelText;
+  conditions?: PanelConditions;
+  table?: PanelTable;
+  /** Rows resting on fewer than 3 answers, folded into one sentence. */
+  fold?: PanelText;
+}
+
+export interface RivalAcross {
+  name: string;
+  claim: PanelText;
+  steps: RivalAcrossStep[];
+  focus?: string;                // the step selected first
+  byBuyer?: PanelTable;          // "Where it takes its picks" (share of the picks, rival vs you)
+  products?: PanelTable;         // "Which of its <products> it picks"
 }

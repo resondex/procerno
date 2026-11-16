@@ -10,7 +10,11 @@ import { EXC_MIN_LOST, EXC_MIN_SHARE, EXC_ROWS, anyException, exceptionRefs, exc
 import { ROW_NAME } from "./question_names";
 import { commitSentence, insightBar, insightInputs, pctFine, productNoun, rankedInsights, type ExampleIndex, type InsightInputs } from "./summary_insights";
 import { BRAND_SUMMARY_VERSION, computeBrandSummary, sharedBrandSummary, type BrandSummaryView, type Insight } from "./brand_summary";
-import { computeValue, type ValueRow } from "./value";
+import { computeValue, valueFactsOf, type ValueRow } from "./value";
+import { buildPanels, buildRivalAcross, themedConds, type CondAnswer, type CondSet, type CondSrc, type PanelCellInput } from "./panel_build";
+import { scopeSentences, wordingIndex } from "./panel_filter";
+import { pluralNoun } from "./panel_text";
+import { questionLabels, type LabelAsk } from "./question_labels";
 import { exitResolver } from "./exits";
 import { ENGINES, engineDisplayLabel } from "./providers";
 import { viewsOf, type ViewKey } from "./views";
@@ -18,6 +22,8 @@ import { cachedView, cell, computeMemo, condCache, coreOf, facetsOf, poolOf, req
 import {
   type AnalysisMapView,
   type AnswerRef,
+  type CellPanelPayload,
+  type RivalAcross,
   type Archetype,
   type BrandRead,
   type RivalHere,
@@ -32,6 +38,7 @@ import {
   type MapBand,
   type MapCell,
   type MapRow,
+  type PanelKind,
   type Position,
   type PositionBrand,
   type PositionException,
@@ -398,6 +405,10 @@ export interface AnalysisMapDebug {
   cells?: Record<string, MapCellStat>;
   /** The brief: the summary the map computed (so the brief never pays for a second one). */
   summary?: BrandSummaryView;
+  /** am31, harness only: the codes ruling 5 left out of a panel's lists. */
+  panelOmissions?: { cellId: string; list: "weighs" | "topics" | "checklist" | "case"; code: string; share: number; hit: string; via: "name" | "scope" }[];
+  /** am31, harness only: each panel cell's answers (response ids). */
+  panelCells?: Record<string, string[]>;
 }
 
 /** One map cell's side counts (exported for the brief). */
@@ -1496,11 +1507,11 @@ export async function computeAnalysisMap(
    * larger; ranked by answers on both sides together. am26: rows whose
    * wordings fall in the same reason theme on BOTH sides are one row (the
    * larger one's wording, both rows' answers); without themes nothing merges. */
-  const bothWaysOf = (conds: { toward: Group[]; away: Group[]; bearing: number }): BothWaysItem[] => {
+  type BothPair = { t: Group; a: Group; tt: number | null; at: number | null; tcks: Set<string>; acks: Set<string> };
+  /** am31: the both-ways pairs before the served cut - the panels mark every
+   * condition row that is part of one (tcks / acks = the condition keys joined in). */
+  const bothWaysPairs = (conds: { toward: Group[]; away: Group[]; bearing: number }): BothPair[] => {
     const away = new Map(conds.away.filter((g) => !isDefaultCondition(g.label)).map((g) => [g.ck, g]));
-    // One-way answers first, and never the same answer on both sides.
-    const pick = (g: Group, skip: Set<string> = new Set()) =>
-      pickRefs([...g.answers.entries()].filter(([id]) => !skip.has(id)).map(([id, a]) => ({ id, find: a.said, model: a.model, cards: a.cards, mixed: a.mixed })), g.label);
     const pairs = conds.toward
       .filter((g) => !isDefaultCondition(g.label))
       .flatMap((t) => {
@@ -1511,7 +1522,7 @@ export async function computeAnalysisMap(
         return [{ t, a }];
       })
       .sort((x, y) => y.t.n + y.a.n - (x.t.n + x.a.n) || x.t.label.localeCompare(y.t.label));
-    const merged: { t: Group; a: Group; tt: number | null; at: number | null }[] = [];
+    const merged: BothPair[] = [];
     for (const p of pairs) {
       const tt = themeOfAnswers("toward", p.t);
       const at = themeOfAnswers("away", p.a);
@@ -1519,9 +1530,17 @@ export async function computeAnalysisMap(
       if (m) {
         m.t = joinGroups(m.t, p.t);
         m.a = joinGroups(m.a, p.a);
-      } else merged.push({ ...p, tt, at });
+        m.tcks.add(p.t.ck);
+        m.acks.add(p.a.ck);
+      } else merged.push({ ...p, tt, at, tcks: new Set([p.t.ck]), acks: new Set([p.a.ck]) });
     }
-    return merged
+    return merged;
+  };
+  const bothWaysOf = (merged: BothPair[], bearing: number): BothWaysItem[] => {
+    // One-way answers first, and never the same answer on both sides.
+    const pick = (g: Group, skip: Set<string> = new Set()) =>
+      pickRefs([...g.answers.entries()].filter(([id]) => !skip.has(id)).map(([id, a]) => ({ id, find: a.said, model: a.model, cards: a.cards, mixed: a.mixed })), g.label);
+    return [...merged]
       .sort((x, y) => y.t.n + y.a.n - (x.t.n + x.a.n) || x.t.label.localeCompare(y.t.label))
       .slice(0, BOTH_TOP)
       .map(({ t, a }) => {
@@ -1530,8 +1549,8 @@ export async function computeAnalysisMap(
         const routes = routeShares([...a.answers.values()].map((x) => [...x.to]));
         return {
           text: t.n >= a.n ? t.label : a.label,
-          towardShare: pctOf(t.n / conds.bearing),
-          awayShare: pctOf(a.n / conds.bearing),
+          towardShare: pctOf(t.n / bearing),
+          awayShare: pctOf(a.n / bearing),
           ...(towardRefs.length ? { towardRefs } : {}),
           ...(awayRefs.length ? { awayRefs } : {}),
           ...(routes.length ? { routes } : {}),
@@ -1780,6 +1799,48 @@ export async function computeAnalysisMap(
     settled: { title: "Your customers making your case", sub: "Your own customers asking the AI to make the case for you. Read it as a best case, not as where you stand." },
   };
 
+  /* -- am31: each panel cell's condition rows - the run's reason themes when
+   * both theme maps exist (plus the "elsewhere" groups beside the away
+   * themes), else the map's own flat groups; both-ways pairs marked. -- */
+  const panelInputs = new Map<string, PanelCellInput>();
+  let rivalPanels: RivalAcross[] = [];
+  const elsewherePool = rulesShared.rules.groups.filter((g) => g.side === "elsewhere" && !isDefaultCondition(g.label));
+  const fromGroup = (g: Group, side: "toward" | "away"): CondSrc => ({
+    id: `f:${side}:${g.ck}`,
+    label: g.label,
+    ids: new Set(g.answers.keys()),
+    wall: side === "away" && g.answers.size >= WALL_MIN && isWallWording([g.label], project.brand),
+    st: stOfGroup(g),
+  });
+  const stOfGroup = (g: Group) => new Map([...g.answers].map(([rid, a]) => [rid, { said: a.said, model: a.model, to: [...a.to], cards: [...a.cards], cardTo: [...a.cardTo], mixed: a.mixed }] as [string, CondAnswer]));
+  const panelConds = (rows: PoolRow[], conds: { toward: Group[]; away: Group[]; bearing: number }, pairs: BothPair[], cellIntents: Set<string>): CondSet => {
+    if (towardThemeMap && awayThemeMap)
+      return themedConds({
+        towardPool,
+        awayPool,
+        elsewherePool,
+        toward: towardThemeMap,
+        away: awayThemeMap,
+        cellAnswers: rulesShared.cellAnswers,
+        answerRules: rulesShared.answerRules,
+        sitOf,
+        cellIntents,
+        inCell: new Set(rows.map((r) => r.code.response_id)),
+        pairs: pairs.map((p) => ({ tt: p.tt, at: p.at, t: stOfGroup(p.t), a: stOfGroup(p.a) })),
+        bearing: conds.bearing,
+        own: project.brand,
+      });
+    const pairOf = (ck: string, side: "toward" | "away") => pairs.find((p) => (side === "toward" ? p.tcks : p.acks).has(ck));
+    const flat = (gs: Group[], side: "toward" | "away"): CondSrc[] =>
+      gs.map((g) => {
+        const src = fromGroup(g, side);
+        const p = pairOf(g.ck, side);
+        if (p) src.both = side === "toward" ? { ids: new Set(p.a.answers.keys()), st: stOfGroup(p.a) } : { ids: new Set(p.t.answers.keys()), st: stOfGroup(p.t) };
+        return src;
+      });
+    return { toward: flat(conds.toward, "toward"), away: flat(conds.away, "away"), bearing: conds.bearing, grouped: false };
+  };
+
   for (const band of ["chooses", "fights", "doubts", "settled"] as BandSlug[]) {
     const rowsOut: MapRow[] = [];
     for (const rowSlug of ROW_ORDER[band]) {
@@ -1976,7 +2037,8 @@ export async function computeAnalysisMap(
         const shown = new Set<string>([...(towardThemes ?? []), ...toward].flatMap((x) => (x.receipts ?? []).map((r) => r.responseId)));
         const awayThemes = cellThemes(awayPool, awayThemeMap, cellIntents, "away", shown);
         let away: ConditionItem[] = conds.away.slice(0, COND_TOP).map((g) => ({ text: g.label, n: g.n, ...(wallGroups.includes(g) ? { wall: true } : {}), ...conditionExtras(g, conds.bearing, true, !awayThemes, shown) }));
-        const bothWays = BOTH_ROWS.has(rowSlug) ? bothWaysOf(conds) : [];
+        const bothPairs = BOTH_ROWS.has(rowSlug) ? bothWaysPairs(conds) : [];
+        const bothWays = BOTH_ROWS.has(rowSlug) ? bothWaysOf(bothPairs, conds.bearing) : [];
         if (conds.bearing < 5 && away.length === 0 && s.exitFallback?.length) away = s.exitFallback.map((x) => ({ text: `Sent to ${x.name}`, n: x.n }));
 
         const numerator = verdict === "yours" ? s.you : verdict === "theirs" ? s.them : verdict === "contested" ? [...s.you, ...s.them] : s.rows;
@@ -2050,10 +2112,132 @@ export async function computeAnalysisMap(
           ...(Object.keys(notes).length ? { notes } : {}),
           ...(exception ? { exception } : {}),
         };
+
+        // am31: the per-question-type panel's inputs (built after the loop).
+        const kind = panelKindOf(id);
+        if (kind) {
+          panelInputs.set(id, {
+            id,
+            kind,
+            row: rowSlug,
+            key: s.key,
+            label: s.label,
+            pooled: !!s.pooled,
+            rows: s.rows,
+            you: s.you,
+            them: s.them,
+            cellIntents,
+            conds: panelConds(s.rows, conds, bothPairs, cellIntents),
+            ...(rowSlug === "h2h" && s.key !== "all" ? { rivalKey: s.rivalKey, rivalName: s.label } : {}),
+            ...(rowSlug === "leavers" && s.rivalKey ? { rivalKey: s.rivalKey, rivalName: s.label } : {}),
+            ...(exception ? { exception } : {}),
+            lifts,
+            ...(brands && brands.length ? { brands } : {}),
+            ...(rowSlug === "value" ? { line: valueRowOf.get(s.rows[0]?.intent.situation ?? "")?.line ?? null } : {}),
+            ...(rowSlug === "buyers" || rowSlug === "customers" ? { concern: s.label } : {}),
+          });
+          if (debug) (debug.panelCells ??= {})[id] = s.rows.map((r) => r.code.response_id);
+        }
       }
       rowsOut.push({ stage: inRow[0].rowLabel, cells });
     }
     if (rowsOut.length) bands.push({ ...BAND_META[band], rows: rowsOut });
+  }
+
+  /* -- am31: the per-question-type panels (panel_build.ts), after every
+   * cell exists so each panel can read its row's All cell ("your usual"). -- */
+  {
+    const targetEntry = resolve(brand).entry;
+    const brandTokens = new Set<string>(famTokens(brand));
+    if (targetEntry) {
+      for (const f of [targetEntry.canonical, targetEntry.display_name ?? ""]) for (const t of famTokens(f)) brandTokens.add(t);
+      for (const a of targetEntry.aliases) {
+        const t = famTokens(a);
+        if (t.length === 1) brandTokens.add(t[0]);
+      }
+    }
+    const scopes = scopeSentences(project.taxonomy_proposal);
+    // The single-question kinds' question labels (question_labels.ts): one
+    // cached clause per seed question; keyless or failed -> the quoted seed.
+    {
+      const LABEL_KINDS: Partial<Record<PanelKind, "buyer" | "customer">> = { popular: "buyer", learning: "buyer", alongside: "customer", critic: "customer", expansion: "customer", business_case: "customer" };
+      const asks: LabelAsk[] = [];
+      for (const inp of panelInputs.values()) {
+        const who = LABEL_KINDS[inp.kind];
+        if (!who) continue;
+        const it = [...new Map(inp.rows.map((r) => [r.intent.id, r.intent])).values()].sort((a, b) => a.seq - b.seq)[0];
+        if (!it?.text?.trim()) continue;
+        if (inp.kind === "critic" && it.concern?.trim()) inp.criticism = it.concern.trim();
+        asks.push({ id: inp.id, seed: it.text, who, ...(inp.kind === "critic" && it.concern?.trim() ? { criticism: it.concern.trim() } : {}) });
+      }
+      if (asks.length) {
+        const forms = new Set<string>([brand, ...(targetEntry ? [targetEntry.canonical, targetEntry.display_name ?? "", ...targetEntry.aliases] : [])].filter((x) => x.trim().length >= 2));
+        const others = new Set<string>();
+        for (const e of data.dictionary) if (e.status === "active" && e.id !== targetEntry?.id) for (const f of [e.canonical, e.display_name ?? ""]) if (f.trim().length >= 2 && !forms.has(f)) others.add(f);
+        const ql = await questionLabels(asks, {
+          projectId: project.id,
+          brand,
+          category: project.category,
+          noun: product,
+          brandForms: [...forms],
+          otherBrands: [...others],
+          meta: { brand, category: project.category, projectId: project.id },
+        });
+        if (ql.incomplete) data.judgeIncomplete = true;
+        for (const a of asks) {
+          const inp = panelInputs.get(a.id);
+          if (inp) inp.asked = ql.asked.get(a.id);
+        }
+      }
+    }
+    const intentText = new Map(data.intents.map((i) => [i.id, i.text]));
+    const omissions: NonNullable<AnalysisMapDebug["panelOmissions"]> = [];
+    const panelHelpers: Parameters<typeof buildPanels>[1] = {
+      brand,
+      targetKey,
+      category: project.category,
+      noun: product,
+      plural: pluralNoun(project.category),
+      resolve,
+      pickOf,
+      recommendsOf,
+      namesTarget,
+      quoteOf,
+      brandSplit,
+      activeDests: (list) => {
+        const out = new Map<string, string>();
+        for (const d of list ?? []) {
+          const r = resolve(d);
+          if (r.status === "active" && r.key !== targetKey) out.set(r.key, r.name);
+        }
+        return out;
+      },
+      productOf: (card) => {
+        const c = card.trim();
+        if (!c || resolve(c).key !== targetKey) return null;
+        return famTokens(c).some((t) => !brandTokens.has(t)) ? c : null;
+      },
+      valueFacts: valueFactsOf(data, eng),
+      headline: pool("headline"),
+      reasonLift: summary.reasonLift,
+      wordings: (ci, extra = []) => wordingIndex([
+        ...data.prompts.filter((p) => p.intent_id && ci.has(p.intent_id) && !p.staged && !p.retired).map((p) => p.text),
+        ...[...ci].map((i) => intentText.get(i) ?? ""),
+        ...extra,
+      ]),
+      scopes,
+      omissions,
+    };
+    const panels = buildPanels(panelInputs, panelHelpers);
+    for (const [id, panel] of panels) positions[id].panel = panel;
+    // Panel 15 (the By rival tab): each rival with a dossier, across every question type.
+    rivalPanels = buildRivalAcross(
+      panelInputs,
+      panels,
+      panelHelpers,
+      summary.brands.filter((b) => b.key !== summary.target.key && b.mentioned.k > 0).map((b) => ({ key: b.key, name: b.name }))
+    );
+    if (debug) debug.panelOmissions = omissions;
   }
 
   /* -- casting -- */
@@ -2114,6 +2298,7 @@ export async function computeAnalysisMap(
     positions,
     uncoded,
     insightCells: placed,
+    ...(rivalPanels.length ? { rivalPanels } : {}),
   };
 }
 
@@ -2151,6 +2336,28 @@ export function sharedAnalysisMap(data: ViewData, eng: ViewRequest): Promise<Sha
 }
 
 /* ------------------------------- receipts ------------------------------- */
+
+/** am31: which panel a cell draws (PANEL_BUILD_SPEC section 0); null = the old panels. */
+function panelKindOf(id: string): PanelKind | null {
+  const [band, row, ...rest] = id.split(":");
+  const key = rest.join(":");
+  if (band === "chooses" && row === "open") return "buy";
+  if (band === "fights" && row === "h2h") return "h2h";
+  if (band === "fights" && row === "leavers") return "switching";
+  if (band === "doubts" && row === "buyers") return "buyer_worry";
+  if (band === "doubts" && row === "customers") return "customer_worry";
+  if (band === "doubts" && row === "hold") return "looking_around";
+  if (band === "chooses" && row === "value") return "value";
+  if (band === "chooses" && row === "awareness") return "problem";
+  if (band === "chooses" && row === "criteria") return "criteria";
+  if (band === "settled" && row === "settled" && key === "expansion") return "expansion";
+  if (band === "settled" && row === "settled" && key === "business case") return "business_case";
+  if (band === "chooses" && row === "social") return "popular";
+  if (band === "chooses" && row === "explainer") return "learning";
+  if (band === "settled" && row === "settled" && key === "ecosystem") return "alongside";
+  if (band === "settled" && row === "settled" && key === "advocacy") return "critic";
+  return null;
+}
 
 /** am15: the rows whose contest is a pick between brands (Position.brands). */
 const PICK_ROWS = new Set(["open", "social", "premium", "leavers"]);
@@ -2632,7 +2839,7 @@ function tensionsOf(
 // am17 (2026-11-10): each tension carries `viz` (the Overview finding card's 2-4 bars).
 // am18 (2026-11-10): each buying situation's open-choice cell states the same funnel figures as the all-buyers cell.
 // am22 (2026-11-12): the reasons harmonization - each rival's `here` carries `sendsThemes` (the run's dt4 themes, scoped to the contest and to answers sending the buyer to that rival); the theme pass moves to run_themes.ts (same inputs, same dt4 keys); reads bs17 (the away-condition sentence names its theme). Row names come from question_names.ts (the plain-wording pass: What to buy, What's popular, Spotting the problem, What to look for, Habit, Your customers looking around, Your customers making your case) and the band descriptions are rewritten.
-export const ANALYSIS_MAP_VERSION = "am30"; // am30 (2026-11-13): the argument_flip insight (bs24) places on the all-buyers cell of the question type where the argument goes against you. // am29 (2026-11-13): the away-condition finding opens on the contest whose own away reasons state its quoted condition with the largest share (was: a rival named in the text, a fixed-tagged cell, else the general open-choice row). // am28 (2026-11-13): a grouped reason is tagged a fixed situation by its own NAME only, also when it has sub-rows (reason_themes) - a fixed member wording never tags the whole group. // am27 (2026-11-12): lost, with an exception - a head-to-head lost on balance with at least 20 lost answers, half of them still stating a case for you, carries Position.exception (the up-to-3 client-side conditions in the lost answers, themed when themes exist, with examples that picked the rival) and MapCell.exception; the assigned_exception insight (bs19) places on the lost matchup where its condition comes up most. // am26 (2026-11-12): both-ways rows whose wordings fall in the same reason theme on both sides are one row. // am25 (2026-11-12): the vendor_outlier insight (bs18) places on the all-buyers cell of the question type its title names. // am24 (2026-11-12): both-ways rows only on pick contests, each side at least 5% and half the other, top 3, never a reason paired with its opposite. // am23 (2026-11-12): an answer shown as an example toward you is never shown away; a rival's panel examples name only its own products in `to`. // am21 (2026-11-12): reason-row examples prefer answers that send the buyer one way only, then the wording closest to the row name, and each carries `to` (the product it sends the buyer to). // am20 (2026-11-12): each rival in a pick contest's `brands` carries `here` (its funnel in that contest, the arguments when it is picked beside your picks, the stated conditions sending picks to it) and the position carries `youRead` - the rival panel's lead read. Additive; theme inputs unchanged. // am19 am19 (2026-11-11): every Overview number opens its answers - `examples` (named, commits), refs on each share-of-picks row and on the tension bars (the first tension's funnel bars and the bs16 insight bars). // am18 (2026-11-10): each buying situation's open-choice cell states the same funnel figures as the all-buyers cell (named, recommended, commits, picked, outside the category), from its own answers. // // am17 (2026-11-10): each tension carries `viz` (the Overview finding card's 2-4 bars) - the first from the casting facts, the rest from the bs15 insights
+export const ANALYSIS_MAP_VERSION = "am31"; // am31 (2026-11-15): the per-question-type panels - Position.panel on every cell of the eleven panel kinds (PANEL_BUILD_SPEC; panel_build.ts): claims, steps with "your usual" / rank / duel tags, conditions as shares of all the cell's answers, competitors and panel 11 rivals, every number with up to 3 example answers; the served map carries a panelStub per cell and /cell_panel serves one cell's panel from the same cached result. Every other Position field byte-identical; theme and condition-grouping inputs unchanged. // am30 (2026-11-13): the argument_flip insight (bs24) places on the all-buyers cell of the question type where the argument goes against you. // am29 (2026-11-13): the away-condition finding opens on the contest whose own away reasons state its quoted condition with the largest share (was: a rival named in the text, a fixed-tagged cell, else the general open-choice row). // am28 (2026-11-13): a grouped reason is tagged a fixed situation by its own NAME only, also when it has sub-rows (reason_themes) - a fixed member wording never tags the whole group. // am27 (2026-11-12): lost, with an exception - a head-to-head lost on balance with at least 20 lost answers, half of them still stating a case for you, carries Position.exception (the up-to-3 client-side conditions in the lost answers, themed when themes exist, with examples that picked the rival) and MapCell.exception; the assigned_exception insight (bs19) places on the lost matchup where its condition comes up most. // am26 (2026-11-12): both-ways rows whose wordings fall in the same reason theme on both sides are one row. // am25 (2026-11-12): the vendor_outlier insight (bs18) places on the all-buyers cell of the question type its title names. // am24 (2026-11-12): both-ways rows only on pick contests, each side at least 5% and half the other, top 3, never a reason paired with its opposite. // am23 (2026-11-12): an answer shown as an example toward you is never shown away; a rival's panel examples name only its own products in `to`. // am21 (2026-11-12): reason-row examples prefer answers that send the buyer one way only, then the wording closest to the row name, and each carries `to` (the product it sends the buyer to). // am20 (2026-11-12): each rival in a pick contest's `brands` carries `here` (its funnel in that contest, the arguments when it is picked beside your picks, the stated conditions sending picks to it) and the position carries `youRead` - the rival panel's lead read. Additive; theme inputs unchanged. // am19 am19 (2026-11-11): every Overview number opens its answers - `examples` (named, commits), refs on each share-of-picks row and on the tension bars (the first tension's funnel bars and the bs16 insight bars). // am18 (2026-11-10): each buying situation's open-choice cell states the same funnel figures as the all-buyers cell (named, recommended, commits, picked, outside the category), from its own answers. // // am17 (2026-11-10): each tension carries `viz` (the Overview finding card's 2-4 bars) - the first from the casting facts, the rest from the bs15 insights
 // The fold (2026-11-09, Tyler): a view's cache key carries the versions of
 // the views whose content it embeds, so the lockstep bump convention is
 // mechanical - the map embeds the summary's insights, casting and verdict.
@@ -2642,4 +2849,41 @@ const MAP_KEY_VERSION = `${ANALYSIS_MAP_VERSION}.${BRAND_SUMMARY_VERSION}`;
 export function computeAnalysisMapCached(run: Run, project: Project, request: ViewRequest = {}): Promise<AnalysisMapView | null> {
   const r = requestOf(request, false);
   return cachedView("analysis_map", MAP_KEY_VERSION, run, project, async (d) => (await sharedAnalysisMap(d, r)).view, { setupDecision: true, judge: true }, r);
+}
+
+/**
+ * The map as the browser loads it (am31): every position's `panel` body is
+ * left out and replaced by `panelStub` (its kind and which rivals carry a
+ * panel), since a panel is read only when its slide-over opens and the
+ * bodies would multiply the payload. The full result stays the one cached
+ * compute; /cell_panel serves one cell's panel from that same result
+ * (cellPanelOf). Never mutates `view` (it may be a shared, memoized object).
+ */
+export function slimAnalysisMap(view: AnalysisMapView): AnalysisMapView {
+  const positions: AnalysisMapView["positions"] = {};
+  for (const [id, p] of Object.entries(view.positions)) {
+    if (!p.panel) {
+      positions[id] = p;
+      continue;
+    }
+    const { panel, ...rest } = p;
+    positions[id] = { ...rest, panelStub: { kind: panel.kind, rivals: (panel.rivals ?? []).map((r) => ({ name: r.name, full: r.full })) } };
+  }
+  const { rivalPanels, ...restView } = view;
+  return { ...restView, positions, ...(rivalPanels?.length ? { rivalStubs: rivalPanels.map((r) => r.name) } : {}) };
+}
+
+/** One rival across every question type (panel 15), read off the full map
+ * result - the By rival tab's lazy load. Null when the rival carries none. */
+export function rivalPanelOf(view: AnalysisMapView, name: string): RivalAcross | null {
+  const n = name.trim().toLowerCase();
+  return view.rivalPanels?.find((r) => r.name.toLowerCase() === n) ?? null;
+}
+
+/** One cell's panel (its rivals included) and its usual cell's steps, read
+ * off the full map result - the slide-over's lazy load. */
+export function cellPanelOf(view: AnalysisMapView, cellId: string): CellPanelPayload {
+  const panel = view.positions[cellId]?.panel ?? null;
+  const usualSteps = panel?.usualCellId ? view.positions[panel.usualCellId]?.panel?.steps : undefined;
+  return { panel, ...(usualSteps ? { usualSteps } : {}) };
 }

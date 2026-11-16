@@ -1,12 +1,13 @@
 import { NextResponse } from "next/server";
 import { requireAuth, requireRun } from "@/lib/auth";
 import { viewRequestParams } from "@/lib/engine/view_data";
-import { computeAnalysisMapCached } from "@/lib/engine/analysis_map";
+import { computeAnalysisMapCached, slimAnalysisMap } from "@/lib/engine/analysis_map";
 
 /** The analysis map (verdict, banded coverage map, positions) read from
  * answer_codes under the project's codes_source. { view: null } = no codes
  * source yet. ?engines= narrows the engine panel; the map embeds every room,
- * so it takes no room filter. */
+ * so it takes no room filter. Panel bodies are left out (slimAnalysisMap);
+ * the slide-over reads one cell's panel from /cell_panel. */
 export async function GET(
   req: Request,
   { params }: { params: Promise<{ id: string }> }
@@ -17,5 +18,5 @@ export async function GET(
   const loaded = await requireRun(id, auth);
   if (loaded instanceof NextResponse) return loaded;
   const view = await computeAnalysisMapCached(loaded.run, loaded.project, viewRequestParams(req));
-  return NextResponse.json({ view });
+  return NextResponse.json({ view: view ? slimAnalysisMap(view) : null });
 }

@@ -681,3 +681,56 @@ export function themeTreeAnswers(
     .sort((a, b) => b.n - a.n || a.theme.label.localeCompare(b.theme.label))
     .map((x) => x.theme);
 }
+
+/** am31 (the panel build, E2): one total theme's answers inside a cell. */
+export interface ThemeAnswerSet {
+  /** The total theme index (ThemeMap.totOf / totName). */
+  t: number;
+  label: string;
+  /** Distinct answers (response ids) stating any member wording in the cell. */
+  ids: Set<string>;
+  /** Member group ids, most-stated first (pool order breaks ties). */
+  groupIds: string[];
+  /** isWallWording on the theme name (the away side passes `own`). */
+  wall: boolean;
+}
+
+/**
+ * The total-theme level of themeTreeAnswers as plain answer sets: same
+ * attribution (per (group, intent): totOf[stOf(slKey(situation, label))]),
+ * same answer grain, same `keep` filter, no shares and no evidence - the panel
+ * build counts every share over ALL the cell's answers itself. Sorted by
+ * distinct answers, then name. [] with no theme map.
+ */
+export function themeAnswerSets(
+  pool: RuleGroup[],
+  tm: ThemeMap | null,
+  cellAnswers: Map<string, Map<string, Set<string>>>,
+  sitOf: Map<string, string>,
+  cellIntents: Set<string>,
+  keep?: AnswerKeep,
+  own?: string | null
+): ThemeAnswerSet[] {
+  if (!tm || pool.length === 0) return [];
+  const order = new Map(pool.map((g, i) => [g.id, i]));
+  const by = new Map<number, { ids: Set<string>; groups: Map<string, number> }>();
+  for (const g of pool) {
+    const per = cellAnswers.get(g.id);
+    if (!per) continue;
+    for (const [c, every] of per) {
+      if (!cellIntents.has(c)) continue;
+      const ids = keep ? [...every].filter((id) => keep(g.id, id)) : [...every];
+      if (ids.length === 0) continue;
+      const s = tm.stOf.get(slKey(sitOf.get(c) ?? EVERY_BUYER, g.label));
+      if (s === undefined) continue;
+      const t = tm.totOf[s];
+      const acc = by.get(t) ?? { ids: new Set<string>(), groups: new Map<string, number>() };
+      by.set(t, acc);
+      for (const id of ids) acc.ids.add(id);
+      acc.groups.set(g.id, (acc.groups.get(g.id) ?? 0) + ids.length);
+    }
+  }
+  return [...by.entries()]
+    .map(([t, a]) => ({ t, label: tm.totName[t], ids: a.ids, groupIds: rankedIds(a.groups, order), wall: isWallWording([tm.totName[t]], own ?? null) }))
+    .sort((a, b) => b.ids.size - a.ids.size || a.label.localeCompare(b.label));
+}

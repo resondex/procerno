@@ -96,3 +96,9 @@ export const PARENT_SUGGEST_MODEL = pick("PARENT_SUGGEST_MODEL", "gpt-6-luna");
  * so luna; OpenAI-only (the call path is the OpenAI client). Part of the
  * per-call theme cache key. */
 export const DOSSIER_THEME_MODEL = process.env.DOSSIER_THEME_MODEL ?? "gpt-6-luna";
+/** The panel claims' question labels (question_labels.ts, am31, 2026-11-15):
+ * one short clause per single-question map position (what the asker
+ * wants to know), written once per (tracker, seed question) and cached
+ * forever. A bounded rewording job, so luna; gpt-* goes through the OpenAI
+ * client, anything else through Anthropic. Part of the label cache key. */
+export const QUESTION_LABEL_MODEL = pick("QUESTION_LABEL_MODEL", "gpt-6-luna");

@@ -35,6 +35,8 @@ import AnswerText from "./answer_text";
 import { passageOf } from "@/lib/answer_passage";
 import { T } from "./type_scale";
 import { MatchupDropNote, MatchupGap } from "./matchup_action";
+import { LazyCellPanel, LazyRival, LazyRivalAcross, PositionPanelView, hasRivalAcross, hasRivalPanel } from "./panels_v2";
+import { CompProvider } from "./panel_parts";
 
 /**
  * The one slide-over (2026-11-10, the ratified analysis redesign -
@@ -348,8 +350,8 @@ function previewNums<R extends { label: string }>(rows: R[], tests: RegExp[]): R
 const CONTEST_NUM_PREVIEW = [/^(Your share of the picks here|Share of picks)$/, /^Named\b/, /^Recommendations that end as the pick$/];
 const RIVAL_NUM_PREVIEW = [/^Share of picks$/, /^Named\b/, /^Recommendations that end as the pick$/];
 
-const Hint = ({ children }: { children: ReactNode }) => <p className={`${T.cap} mb-2 text-ink-3`}>{children}</p>;
-const None = ({ children }: { children: ReactNode }) => <p className={`${T.body} text-ink-3`}>{children}</p>;
+export const Hint = ({ children }: { children: ReactNode }) => <p className={`${T.cap} mb-2 text-ink-3`}>{children}</p>;
+export const None = ({ children }: { children: ReactNode }) => <p className={`${T.body} text-ink-3`}>{children}</p>;
 
 /** A row that opens its example answers in the modal (when it carries any). */
 function Openable({ refs, head, title, note }: { refs?: AnswerRef[]; head: () => ReactNode; title: string; note?: string }) {
@@ -371,6 +373,8 @@ function Openable({ refs, head, title, note }: { refs?: AnswerRef[]; head: () =>
 
 /** Where the open panel is looking (the examples modal's second line). */
 const WhereCtx = createContext<string | undefined>(undefined);
+/** Where the open panel is looking, for the examples modal's second line. */
+export const useWhere = () => useContext(WhereCtx);
 
 const SeeWord = () => <span className="mt-0.5 block text-[12px] text-primary">See examples</span>;
 
@@ -651,10 +655,10 @@ function PanelShell({ label, onClose, children }: { label: string; onClose: () =
   );
 }
 
-const crumbCls = `flex flex-wrap items-center gap-2 ${T.label}`;
-const h2Cls = `clear-both mt-2.5 ${T.h2} [text-wrap:balance]`;
-const evh = `mb-2 mt-7 ${T.label}`;
-const linkCls = "text-primary underline underline-offset-2 hover:opacity-80";
+export const crumbCls = `flex flex-wrap items-center gap-2 ${T.label}`;
+export const h2Cls = `clear-both mt-2.5 ${T.h2} [text-wrap:balance]`;
+export const evh = `mb-2 mt-7 ${T.label}`;
+export const linkCls = "text-primary underline underline-offset-2 hover:opacity-80";
 const rowLink = "flex w-full justify-between gap-3 border-b border-line py-2.5 text-left text-[14px] text-ink hover:text-primary";
 
 // ---------- the contest panel ----------
@@ -663,8 +667,10 @@ export type PanelView =
   | { kind: "cell"; id: string }
   | { kind: "rival"; name: string; cell?: string | null; from?: string | null };
 
-interface Ctx {
+export interface Ctx {
   runId: string;
+  /** The map request's query string ("?engines=..." or ""): a lazily loaded panel asks for the same engine set. */
+  mapQuery?: string;
   map: AnalysisMapView;
   cells: Map<string, MapCell>;
   dossiers: Dossier[] | null;
@@ -705,14 +711,14 @@ export function whyLines(n: PositionNotes, cat: string): string[] {
   return out;
 }
 
-const softLine = (n: PositionNotes) =>
+export const softLine = (n: PositionNotes) =>
   n.soft === "asked_for"
     ? "Read this as a ceiling: it comes from questions where customers ask the AI to make your case. Unprompted, the AI is less favorable."
     : n.soft === "one_assistant"
       ? "This number is softer than it looks: most of the answers on your side come from one assistant."
       : null;
 
-function MoveBox({ p, ctx, why }: { p: Position; ctx: Ctx; why: string[] }) {
+export function MoveBox({ p, ctx, why }: { p: Position; ctx: Ctx; why: string[] }) {
   const entry = ctx.decision?.positions[p.cellId];
   const active: Triage = entry?.decided ?? p.triageSuggested;
   const inPlaybook = !!entry?.inPlaybook;
@@ -1742,14 +1748,33 @@ export function SlideOver({ view, ctx }: { view: PanelView; ctx: Ctx }) {
     if (!p) return null;
     label = p.where;
     where = p.where;
-    body = <ContestPanel key={p.cellId} p={p} ctx={ctx} />;
+    // am31: a cell the engine built a per-question-type panel for draws it; every other cell keeps today's panel.
+    // The served map carries only a stub (panelStub); the body loads when the slide-over opens.
+    body = p.panel ? (
+      <PositionPanelView key={p.cellId} p={p} pp={p.panel} usualSteps={p.panel.usualCellId ? ctx.map.positions[p.panel.usualCellId]?.panel?.steps : undefined} ctx={ctx} />
+    ) : p.panelStub ? (
+      <LazyCellPanel key={p.cellId} p={p} ctx={ctx} />
+    ) : (
+      <ContestPanel key={p.cellId} p={p} ctx={ctx} />
+    );
   } else {
     const scopedP = view.cell ? ctx.map.positions[view.cell] : undefined;
     const inScope = !!scopedP && (scopedP.brands ?? []).some((x) => normName(x.name) === normName(view.name));
     const d = ctx.findDossier(view.name);
-    label = `${view.name}${inScope ? ` - ${scopedP!.where}` : " - everywhere it appears"}`;
+    const r11 = hasRivalPanel(scopedP, view.name);
+    label = `${view.name}${inScope || r11 ? ` - ${scopedP!.where}` : " - everywhere it appears"}`;
     where = label;
-    if (inScope) body = <RivalScoped key={`${view.name}|${view.cell}`} name={view.name} p={scopedP!} ctx={ctx} />;
+    if (r11) body = <LazyRival key={`${view.name}|${view.cell}`} p={scopedP!} name={view.name} ctx={ctx} />;
+    else if (inScope) body = <RivalScoped key={`${view.name}|${view.cell}`} name={view.name} p={scopedP!} ctx={ctx} />;
+    else if (hasRivalAcross(ctx, view.name))
+      body = (
+        <LazyRivalAcross
+          key={`${view.name}|across`}
+          name={view.name}
+          ctx={ctx}
+          fallback={d ? <RivalAll key={`${d.key}|${view.from ?? ""}`} d={d} from={view.from} ctx={ctx} /> : <None>Nothing to show for {view.name} here.</None>}
+        />
+      );
     else if (d) body = <RivalAll key={`${d.key}|${view.from ?? ""}`} d={d} from={view.from} ctx={ctx} />;
     else
       body =
@@ -1770,9 +1795,11 @@ function Host({ label, where, onClose, children }: { label: string; where?: stri
   return (
     <ExamplesHost>
       <WhereCtx.Provider value={where}>
-        <PanelShell label={label} onClose={onClose}>
-          {children}
-        </PanelShell>
+        <CompProvider>
+          <PanelShell label={label} onClose={onClose}>
+            {children}
+          </PanelShell>
+        </CompProvider>
       </WhereCtx.Provider>
     </ExamplesHost>
   );

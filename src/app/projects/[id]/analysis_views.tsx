@@ -214,6 +214,7 @@ export default function AnalysisHub({
   const you = map.shareOfDecided.find((s) => s.you);
   const ctx: PanelCtx = {
     runId,
+    mapQuery: q,
     map,
     cells,
     dossiers: dossiers === undefined ? null : list,

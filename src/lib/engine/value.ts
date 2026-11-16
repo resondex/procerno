@@ -305,11 +305,11 @@ function factsOf(
   };
 }
 
-/** `request.room` (Journey's buyer filter) keeps that room's Value cells. */
-export function computeValue(data: ViewData, request: ViewRequest = {}): ValueView | null {
+/** The per-answer facts and the fixed inputs computeValue reads them with
+ * (one place, so the panel build's per-answer read can never drift from the view). */
+function valueFacts(data: ViewData, request: ViewRequest) {
   const { project, dictionary } = data;
   const { rows: pool, uncoded, core } = poolOf(data, "value", request);
-  if (pool.length === 0 && uncoded === 0) return null;
   const resolve = buildResolver(dictionary, data.judged);
   const targetKey = resolve(project.brand).key;
   const lines = decidedLines(data.setupDecision);
@@ -317,6 +317,31 @@ export function computeValue(data: ViewData, request: ViewRequest = {}): ValueVi
   const lineWordSet = new Set<string>();
   for (const ws of basis.lineWords) for (const w of ws) lineWordSet.add(w.replace(/s$/, ""));
   const facts = pool.map((r) => factsOf(r, resolve, targetKey, lines.get(r.intent.situation ?? ""), basis));
+  return { pool, uncoded, core, lines, lineWordSet, facts };
+}
+
+/** am31 (the panel build, E3): one Value answer's read - the verdict, the
+ * rivals it recommends instead (dictionary key -> name) and the brand's own
+ * options it points to (grouping key -> surface as written). The same
+ * predicate insteadOf / ownRung count with, on every answer of the pool. */
+export interface ValueFact {
+  worth: Worth;
+  instead: Map<string, string>;
+  own: Map<string, string>;
+}
+
+/** am31: response id -> its ValueFact, over the Value pool of the request. */
+export function valueFactsOf(data: ViewData, request: ViewRequest = {}): Map<string, ValueFact> {
+  const out = new Map<string, ValueFact>();
+  for (const f of valueFacts(data, request).facts) out.set(f.row.code.response_id, { worth: f.worth, instead: f.instead, own: f.own });
+  return out;
+}
+
+/** `request.room` (Journey's buyer filter) keeps that room's Value cells. */
+export function computeValue(data: ViewData, request: ViewRequest = {}): ValueView | null {
+  const { project } = data;
+  const { pool, uncoded, core, lines, lineWordSet, facts } = valueFacts(data, request);
+  if (pool.length === 0 && uncoded === 0) return null;
 
   const rowOf = (key: string, label: string, list: Facts[]): ValueRow => {
     const rooms = [...new Set(list.map((f) => f.room))];
