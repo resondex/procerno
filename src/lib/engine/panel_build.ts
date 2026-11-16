@@ -45,6 +45,7 @@ import {
   COMMITS_TEXT,
   CRITERIA_HELP,
   EXCEPTION_TEXT,
+  EXPANSION_TEXT,
   LOOKING_TEXT,
   lookingOffersDetail,
   WORRY_AGREES_TEXT,
@@ -3168,6 +3169,7 @@ function detailOf(inp: PanelCellInput, p: PositionPanel, up: PositionPanel | und
       const s = p.steps.find((x) => x.key === "stance");
       const top = [...(s?.segments ?? [])].sort((a, b) => b.num.pct - a.num.pct)[0];
       p.detail = expansionDetail(top?.key === "backs" ? "backs" : top?.key === "redirects" ? "redirects" : "neutral");
+      expansionStepDetails(inp, p, ctx);
       return;
     }
     case "business_case": {
@@ -3185,6 +3187,57 @@ function detailOf(inp: PanelCellInput, p: PositionPanel, up: PositionPanel | und
 }
 
 /* ------------- am34: what explains each step (the clicked step card) ------------- */
+
+/** am52: the expansion card's step explains itself with new facts: which of your products the AI backs growing
+ * into, which AI companies back it most, and where it points customers when it points elsewhere. */
+function expansionStepDetails(inp: PanelCellInput, p: PositionPanel, ctx: Ctx) {
+  if (!p.detail) return;
+  const { h } = ctx;
+  const T = EXPANSION_TEXT;
+  const rows = inp.rows;
+  const backs = rows.filter((r) => r.code.growth_stance === "backs");
+  const red = rows.filter((r) => r.code.growth_stance === "redirects");
+  const group = () => new Map<string, { name: string; rs: PoolRow[] }>();
+  const put = (m: Map<string, { name: string; rs: PoolRow[] }>, name: string, r: PoolRow) => {
+    const t = m.get(name.toLowerCase()) ?? { name, rs: [] };
+    if (!t.rs.includes(r)) t.rs.push(r);
+    m.set(name.toLowerCase(), t);
+  };
+  const prods = group();
+  if (ctx.ladder)
+    for (const r of backs)
+      for (const m of r.code.mentions ?? []) {
+        if (m.framing === "negative" || h.resolve(m.brand).key !== h.targetKey) continue;
+        const pl = productLabel(m.brand, h.brand, ctx);
+        if (pl) put(prods, pl, r);
+      }
+  const dests = group();
+  for (const r of red)
+    for (const d of r.code.redirect_to ?? []) {
+      const res = h.resolve(d);
+      if (res.key === h.targetKey) continue;
+      put(dests, res.status === "active" && res.name ? res.name : d.trim(), r);
+    }
+  const byVendor = new Map<string, PoolRow[]>();
+  for (const r of rows) {
+    const v = engineFacets(r.model).vendor;
+    byVendor.set(v, [...(byVendor.get(v) ?? []), r]);
+  }
+  const top = (m: Map<string, { name: string; rs: PoolRow[] }>, k: number) => [...m.values()].sort((a, b) => b.rs.length - a.rs.length || a.name.localeCompare(b.name)).slice(0, k);
+  const sec = (title: string, sub: string, tone: PanelTone, items: { label: string; rs: PoolRow[]; n: number; unit: string; find: (r: PoolRow) => string }[], few: string): PanelDetailSection | null => {
+    const ok = items.filter((x) => x.rs.length >= ROW_MIN && x.n > 0).sort((a, b) => b.rs.length / b.n - a.rs.length / a.n || a.label.localeCompare(b.label));
+    return ok.length ? { title, sub, tone, rows: ok.map((x) => ({ label: x.label, num: num(x.rs.length, x.n, x.unit, refsOf(x.rs, x.find)) })) } : few ? { title, sub, tone, rows: [], note: join(few) } : null;
+  };
+  const sections = [
+    backs.length >= ARGS_MIN && prods.size ? sec(T.products.title(h.plural), T.products.sub, "good", top(prods, 5).map((x) => ({ label: x.name, rs: x.rs, n: backs.length, unit: "answers that back it", find: () => x.name })), T.products.few) : null,
+    sec(T.vendor.title, T.vendor.sub, "neutral", [...byVendor.entries()].filter(([, rs]) => rs.length >= ARGS_MIN).map(([label, rs]) => ({ label, rs: rs.filter((r) => r.code.growth_stance === "backs"), n: rs.length, unit: `${label} answers`, find: (r: PoolRow) => verdictFind(r, h) })), ""),
+    red.length >= ROW_MIN ? sec(T.where.title, T.where.sub, "bad", top(dests, 4).map((x) => ({ label: x.name, rs: x.rs, n: red.length, unit: "answers that point elsewhere", find: () => x.name })), T.where.few) : null,
+  ].filter((x): x is PanelDetailSection => !!x);
+  if (!sections.length) return;
+  p.details = { stance: { ...p.detail, sections } };
+  delete p.detail;
+  delete p.detailComp;
+}
 
 /** am51: the looking-around card's two steps explain themselves. "Shows another <noun>" is nearly always everything
  * (the customer asked for alternatives), so its explanation is about WHAT is shown: how long the list is, which

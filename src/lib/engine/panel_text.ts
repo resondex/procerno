@@ -725,3 +725,10 @@ export function lookingOffersDetail(size: "long" | "short" | "few" | "none", nou
     : "Your customer asked what else to look at, so the list is expected; no one rival is shown first often.";
   return { heading, body: join(body) };
 }
+
+/* ---------- am52: "Does the answer back it?" (expansion) ---------- */
+export const EXPANSION_TEXT = {
+  products: { title: (plural: string) => `Which of your ${plural} it backs`, sub: "Share of the answers that back it.", few: "No one product is named often enough to size." },
+  vendor: { title: "Which AI companies back it most", sub: "Share of each company's answers here." },
+  where: { title: "Where it points them instead", sub: "Share of the answers that point elsewhere.", few: "It rarely names where: most answers that point elsewhere name no product." },
+};
