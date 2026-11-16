@@ -549,7 +549,7 @@ function TypeTable({ map, category }: { map: AnalysisMapView; category?: string 
                   {cols.map(([k]) => (
                     <td key={k} className={`px-3 py-2.5 text-ink-2 ${k === "leader" ? "min-w-[7.5rem]" : k === "about" || k === "to" || k === "away" ? "min-w-[8.5rem]" : ""}`} title={k === "num" ? r.numTip : undefined}>
                       {k === "stand" ? (
-                        <span className="flex items-center gap-1.5 whitespace-nowrap font-semibold" style={{ color: VCOLOR[r.verdict].fg }}>
+                        <span className="flex items-center gap-1.5 whitespace-nowrap font-semibold" style={{ color: VCOLOR[r.verdict].ink }}>
                           <i className="inline-block h-2 w-2 flex-none rounded-full" style={{ background: VCOLOR[r.verdict].fg }} />
                           {stand(r)}
                         </span>

@@ -14,9 +14,9 @@ import { AnswersModal, BaseNote, fmtN, Legend, pct, range, rate, rateCol, StackB
  */
 
 const routeParts = (category: string): readonly Part<Route>[] => [
-  { key: "category", label: `Told to get ${category}`, color: "bg-primary" },
+  { key: "category", label: `Told to get ${category}`, color: "bg-[var(--pa-yours)]" },
   { key: "adjacent", label: "Solved without getting one", color: "bg-warning/60" },
-  { key: "none", label: "No direction", color: "bg-neutral-bar" },
+  { key: "none", label: "No direction", color: "bg-[var(--pa-none)]" },
 ];
 
 const routeTips = (category: string, kind: AwarenessBlock["view"]): Record<Route, string> => ({

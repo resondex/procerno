@@ -20,9 +20,9 @@ const STAGE_LABEL: Record<string, string> = {
 };
 
 const PREMISE_PARTS: readonly Part<Premise>[] = [
-  { key: "confirms", label: "Agrees with the worry", color: "bg-danger/55" },
+  { key: "confirms", label: "Agrees with the worry", color: "bg-[var(--pa-theirs)]" },
   { key: "mixed", label: "Partly agrees", color: "bg-warning/60" },
-  { key: "rebuts", label: "Pushes back", color: "bg-primary" },
+  { key: "rebuts", label: "Pushes back", color: "bg-[var(--pa-yours)]" },
 ];
 
 const PREMISE_TIPS: Record<Premise, string> = {
@@ -47,9 +47,9 @@ const OBJECTIONS: Kind<"proceed" | "avoid" | "undecided"> = {
   title: "Doubts - buyers' worries before buying",
   blurb: (b) => `Questions from someone who does not have ${b} yet and voices one worry about it.`,
   parts: [
-    { key: "proceed", label: "Go ahead", color: "bg-primary" },
-    { key: "avoid", label: "Avoid it", color: "bg-danger/55" },
-    { key: "undecided", label: "Takes no side", color: "bg-neutral-bar" },
+    { key: "proceed", label: "Go ahead", color: "bg-[var(--pa-yours)]" },
+    { key: "avoid", label: "Avoid it", color: "bg-[var(--pa-theirs)]" },
+    { key: "undecided", label: "Takes no side", color: "bg-[var(--pa-none)]" },
   ],
   tips: {
     proceed: "Answers that advise going ahead with your brand despite the worry.",
@@ -67,9 +67,9 @@ const STAY: Kind<"keep" | "leave" | "undecided"> = {
   title: "Doubts - customers' worries about staying",
   blurb: (b) => `Questions from someone already on ${b} who voices one worry and asks whether to stay (churn) or renew when the bill comes due (renewal).`,
   parts: [
-    { key: "keep", label: "Advises staying", color: "bg-primary" },
-    { key: "leave", label: "Advises leaving", color: "bg-danger/55" },
-    { key: "undecided", label: "Takes no side", color: "bg-neutral-bar" },
+    { key: "keep", label: "Advises staying", color: "bg-[var(--pa-yours)]" },
+    { key: "leave", label: "Advises leaving", color: "bg-[var(--pa-theirs)]" },
+    { key: "undecided", label: "Takes no side", color: "bg-[var(--pa-none)]" },
   ],
   tips: {
     keep: "Answers that advise staying. A move to another of your own plans or products counts as staying.",

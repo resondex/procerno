@@ -27,11 +27,11 @@ const names = (xs: NamedCount[]) => xs.map((x) => x.name).join(", ");
 // ---------- offensive capture ----------
 
 const CAPTURE_PARTS = [
-  { key: "captured", label: "Picks you", color: "bg-primary" },
-  { key: "anotherBrand", label: "Picks another brand", color: "bg-danger/55" },
-  { key: "sameBrand", label: "Back to the same brand", color: "bg-danger/25" },
+  { key: "captured", label: "Picks you", color: "bg-[var(--pa-yours)]" },
+  { key: "anotherBrand", label: "Picks another brand", color: "bg-[var(--pa-theirs)]" },
+  { key: "sameBrand", label: "Back to the same brand", color: "bg-[var(--pa-theirs)]/40" },
   { key: "outside", label: "Pick outside your dictionary", color: "bg-warning/60" },
-  { key: "undecided", label: "No single pick", color: "bg-neutral-bar" },
+  { key: "undecided", label: "No single pick", color: "bg-[var(--pa-none)]" },
 ] as const;
 
 const CAPTURE_TIPS = {
@@ -169,9 +169,9 @@ function OffensiveSection({ view }: { view: OffensiveView }) {
 // ---------- defensive hold ----------
 
 const VERDICT_PARTS = [
-  { key: "keep", label: "Advises staying", color: "bg-primary" },
-  { key: "leave", label: "Advises leaving", color: "bg-danger/55" },
-  { key: "undecided", label: "Takes no side", color: "bg-neutral-bar" },
+  { key: "keep", label: "Advises staying", color: "bg-[var(--pa-yours)]" },
+  { key: "leave", label: "Advises leaving", color: "bg-[var(--pa-theirs)]" },
+  { key: "undecided", label: "Takes no side", color: "bg-[var(--pa-none)]" },
 ] as const;
 
 const HOLD_TIPS = {

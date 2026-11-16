@@ -32,9 +32,11 @@ import { T } from "./type_scale";
 // ---------- colours ----------
 
 export const C_YOU = "var(--pa-yours)";
+/** "You" in your usual place (all buyers): the mockups' lighter blue. */
+export const C_YOU_SOFT = "var(--pa-yours-soft)";
 export const C_AWAY = "var(--pa-theirs)";
-export const C_USUAL = "var(--neutral-bar)";
-export const C_NONE = "color-mix(in srgb, var(--neutral-bar) 45%, transparent)";
+export const C_USUAL = "var(--pa-usual)";
+export const C_NONE = "var(--pa-none)";
 const toneColor = (t: PanelSegment["tone"]) => (t === "you" ? C_YOU : t === "away" ? C_AWAY : C_USUAL);
 
 export const CLICK_HINT = "Click any row or number to read the answers behind it.";
@@ -152,7 +154,7 @@ export function NumBar({ label, n, color, bold, dim, title }: { label: string; n
     <>
       <span className={`min-w-0 ${bold ? "font-semibold text-ink" : "text-ink-2"}`}>{label}</span>
       <span className="h-2 overflow-hidden rounded bg-line/60">
-        <i className={`block h-full rounded ${dim ? "opacity-50" : ""}`} style={{ width: `${Math.max(n.pct > 0 ? 1 : 0, Math.min(100, n.pct))}%`, background: color }} />
+        <i className={`block h-full rounded ${dim ? "opacity-40" : ""}`} style={{ width: `${Math.max(n.pct > 0 ? 1 : 0, Math.min(100, n.pct))}%`, background: color }} />
       </span>
       <b className="text-right font-semibold tabular-nums text-ink">{n.value}</b>
     </>
@@ -209,10 +211,14 @@ export function SegBar({ segs, prefix, title }: { segs: PanelSegment[]; prefix?:
 /** A tag pill, coloured by the sentiment the engine gives it (neutral when absent). */
 export function Tag({ text, tone = "neutral" }: { text?: string; tone?: PanelTone }) {
   if (!text) return null;
-  const style = tone === "bad" ? { background: "var(--pa-theirs-bg)", color: C_AWAY } : undefined;
-  const cls = tone === "good" ? "bg-primary-soft text-primary" : tone === "neutral" ? "bg-line/60 text-ink-2" : "";
+  const style =
+    tone === "bad"
+      ? { background: "var(--pa-bad-bg)", color: "var(--pa-bad-ink)" }
+      : tone === "good"
+        ? { background: "var(--pa-good-bg)", color: "var(--pa-good-ink)" }
+        : { background: "var(--pa-neutral-bg)", color: "var(--pa-neutral-ink)" };
   return (
-    <span className={`whitespace-nowrap rounded-full px-2 py-px text-[11px] font-semibold ${cls}`} style={style}>
+    <span className={`whitespace-nowrap rounded-full px-2 py-px text-[11px] font-semibold`} style={style}>
       {text}
     </span>
   );
@@ -333,6 +339,8 @@ export function StepStack({
   hereLabel,
   usualLabel,
   keyItems,
+  onSelect,
+  canSelect,
 }: {
   label: string;
   steps: PanelStep[];
@@ -342,6 +350,9 @@ export function StepStack({
   hereLabel: string;
   usualLabel: string;
   keyItems: { label: string; color: string }[];
+  /** Steps that explain themselves: clicking one selects it (one at a time). */
+  onSelect?: (k: PanelStepKey) => void;
+  canSelect?: (k: PanelStepKey) => boolean;
 }) {
   return (
     <div className="clear-both mt-4">
@@ -358,6 +369,7 @@ export function StepStack({
             dim={!!focus && s.key !== focus}
             hereLabel={hereLabel}
             usualLabel={usualLabel}
+            onSelect={onSelect && (!canSelect || canSelect(s.key)) ? () => onSelect(s.key) : undefined}
           />
         ))}
       </div>

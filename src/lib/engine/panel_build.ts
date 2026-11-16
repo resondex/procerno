@@ -52,6 +52,7 @@ import type {
   RivalAcrossStep,
   PositionException,
   PositionPanel,
+  PanelStepDetail,
   RivalStepDetail,
 } from "./analysis_types";
 
@@ -2110,6 +2111,7 @@ function finishPanel(inp: PanelCellInput, p: PositionPanel, up: PositionPanel | 
       p.focusComp = worst.key;
     }
     detailOf(inp, p, up, ctx);
+    stepDetailsOf(inp, p, u, ctx);
   }
 }
 
@@ -2303,6 +2305,239 @@ function detailOf(inp: PanelCellInput, p: PositionPanel, up: PositionPanel | und
       return;
     }
   }
+}
+
+/* ------------- am34: what explains each step (the clicked step card) ------------- */
+
+/** The kinds whose stack is a funnel of `here` steps; their steps carry details. */
+const STEP_DETAIL_KINDS = new Set<PanelKind>(["buy", "switching", "problem", "popular", "learning", "h2h"]);
+/** A detail never rests on fewer answers than this. */
+const DETAIL_MIN = 5;
+
+/** Where a panel's usual comes from and how a sentence names it. */
+function usualFor(inp: PanelCellInput, u: PanelCellInput | undefined, ctx: Ctx): { rows: PoolRow[]; you?: PoolRow[]; them?: PoolRow[]; phrase: string; column: string } | null {
+  if (inp.kind === "popular" || inp.kind === "learning") {
+    const o = ctx.inputs.get(inp.kind === "popular" ? "chooses:open:all" : "chooses:awareness:all");
+    if (!o || o.rows.length < PANEL_MIN) return null;
+    return inp.kind === "popular"
+      ? { rows: o.rows, phrase: `when buyers ask ${ROW_NAME.open.toLowerCase()}`, column: ROW_NAME.open }
+      : { rows: o.rows, phrase: "when buyers describe a problem", column: ROW_NAME.awareness };
+  }
+  if (!u || u.rows.length < PANEL_MIN) return null;
+  if (inp.kind === "switching") return { rows: u.rows, phrase: "across all rivals' customers", column: "All rivals' customers" };
+  if (inp.kind === "h2h") return { rows: u.rows, you: u.you, them: u.them, phrase: "across all your head-to-heads", column: "All head-to-heads" };
+  return { rows: u.rows, phrase: "across all buyers", column: "All buyers" };
+}
+
+function stepDetailsOf(inp: PanelCellInput, p: PositionPanel, u: PanelCellInput | undefined, ctx: Ctx) {
+  if (!STEP_DETAIL_KINDS.has(p.kind) || inp.rows.length < DETAIL_MIN) return;
+  const { h } = ctx;
+  const rows = inp.rows;
+  const all = rows.length;
+  const usual = usualFor(inp, u, ctx);
+  const picks = p.kind === "buy" || p.kind === "switching" || p.kind === "popular";
+  const step = (k: PanelStepKey) => p.steps.find((s) => s.key === k && !!s.here);
+  const surfOf = (f: ReturnType<typeof funnelOf>, name: string, rec: boolean) => (r: PoolRow) => f.surf(r, rec) ?? r.code.top_pick ?? name;
+  const pf = (name: string) => (r: PoolRow) => h.quoteOf(r) || r.code.top_pick || name;
+  const nnr = (f: ReturnType<typeof funnelOf>) => f.named.filter((r) => !f.rec.includes(r));
+  const negOf = (rs: PoolRow[], k: string) => rs.filter((r) => (r.code.mentions ?? []).some((m) => m.framing === "negative" && h.resolve(m.brand).key === k));
+  /** Named but not recommended, and of those named as one to avoid: two brands' (or two places') rows. */
+  const namedRows = (fA: ReturnType<typeof funnelOf>, nA: number, kA: string, nameA: string, fB: ReturnType<typeof funnelOf>, nB: number, kB: string, nameB: string) => {
+    const a = nnr(fA);
+    const b = nnr(fB);
+    if (a.length + b.length < DETAIL_MIN) return undefined;
+    const out: { label: string; rival: PanelNum; you: PanelNum }[] = [
+      { label: "Named but not recommended", rival: num(b.length, nB, "answers", refsOf(b, surfOf(fB, nameB, false))), you: num(a.length, nA, "answers", refsOf(a, surfOf(fA, nameA, false))) },
+    ];
+    if (a.length >= DETAIL_MIN && b.length >= DETAIL_MIN) {
+      const na = negOf(a, kA);
+      const nb = negOf(b, kB);
+      out.push({
+        label: `Of those, named as ${article(h.noun)} ${h.noun} to avoid`,
+        rival: num(nb.length, b.length, "answers named but not recommended", refsOf(nb, surfOf(fB, nameB, false))),
+        you: num(na.length, a.length, "answers named but not recommended", refsOf(na, surfOf(fA, nameA, false))),
+      });
+    }
+    return out;
+  };
+  /** What happens to one brand's recommendations: picked, another brand picked, no single pick. */
+  const outcomeOf = (recRows: PoolRow[], k: string, name: string, extra: { you?: true; usual?: true }) => {
+    const picked = recRows.filter((r) => h.pickOf(r).key === k);
+    const lost = recRows.filter((r) => h.pickOf(r).status === "active" && h.pickOf(r).key !== k);
+    const none = recRows.filter((r) => h.pickOf(r).status !== "active");
+    return {
+      name,
+      ...extra,
+      picked: num(picked.length, recRows.length, "recommending answers", refsOf(picked, pf(h.brand))),
+      lost: num(lost.length, recRows.length, "recommending answers", refsOf(lost, (r) => r.code.top_pick || name)),
+      none: num(none.length, recRows.length, "recommending answers", refsOf(none, (r) => verdictFind(r, h))),
+    };
+  };
+  const outcomeLabels = { picked: "end as the pick", lost: `lose to another ${h.noun}`, none: "no single pick" };
+  /** "When it recommends you and still picks another <noun>, it picks A (x), B (y) most." */
+  const takers = (recRows: PoolRow[]): PanelText | null => {
+    const lost = recRows.filter((r) => h.pickOf(r).status === "active" && h.pickOf(r).key !== h.targetKey);
+    if (lost.length < DETAIL_MIN) return null;
+    const by = h.brandSplit(lost).list.filter((b) => b.key !== h.targetKey).slice(0, 3);
+    if (!by.length) return null;
+    return join(
+      ` When it recommends you and still picks another ${h.noun}, it picks `,
+      ...by.flatMap((b, i) => join(i === 0 ? "" : i === by.length - 1 ? " and " : ", ", `${b.name} (`, N(num(b.rows.length, lost.length, "of those answers", refsOf(b.rows, pf(b.name)))), ")")),
+      " most often."
+    );
+  };
+  const leftOut = (bad: boolean) => (bad ? "Being left out is part of why you lose here" : "Being left out is not why you lose here");
+  const youF = funnelOf(rows, h.targetKey, h);
+
+  /* -------- normal view: here against the usual -------- */
+  const details: Partial<Record<PanelStepKey, PanelStepDetail>> = {};
+  if (p.kind === "h2h") {
+    const dec = step("decided");
+    const won = p.steps.find((s) => s.key === "won");
+    const R = inp.pooled ? "your named rivals" : inp.rivalName ?? inp.label;
+    const other = rows.filter((r) => h.pickOf(r).status === "active" && !inp.you.includes(r) && !inp.them.includes(r));
+    const none = rows.filter((r) => h.pickOf(r).status !== "active");
+    if (dec?.here) {
+      const uDec = usual?.you && usual.them ? num(usual.you.length + usual.them.length, usual.rows.length, "answers", refsOf([...usual.you, ...usual.them], pf(h.brand))) : undefined;
+      details.decided = {
+        heading: dec.here.pct >= 50 ? "The AI mostly picks one of the two" : "The AI mostly declines to pick one of the two",
+        body: join(
+          "The AI picks one of the two in ",
+          N(dec.here),
+          " of these answers",
+          uDec ? join(", against ", N(uDec), ` ${usual!.phrase}`) : "",
+          ". In the rest it picks another ",
+          h.noun,
+          " in ",
+          N(num(other.length, all, "answers", refsOf(other, (r) => r.code.top_pick || h.brand))),
+          " of answers and names no single pick in ",
+          N(num(none.length, all, "answers", refsOf(none, (r) => verdictFind(r, h)))),
+          "."
+        ),
+      };
+    }
+    if (won?.here && won.rivals?.length) {
+      const d = inp.you.length + inp.them.length;
+      if (d >= DETAIL_MIN) {
+        const ud = usual?.you && usual.them ? usual.you.length + usual.them.length : 0;
+        const uWon = ud >= DETAIL_MIN ? num(usual!.you!.length, ud, "answers that pick one of the two", refsOf(usual!.you!, pf(h.brand))) : undefined;
+        const w = won.here.pct;
+        details.won = {
+          heading: w >= 60 ? "When it picks one of the two, it mostly picks you" : w <= 40 ? `When it picks one of the two, it mostly picks ${inp.pooled ? "the rival" : R}` : "When it picks one of the two, it is close",
+          body: join(
+            "When it picks one of the two, it picks you in ",
+            N(won.here),
+            ` of those answers and ${R} in `,
+            N(won.rivals[0].num),
+            uWon ? join(". Across all your head-to-heads it picks you in ", N(uWon), " of them.") : "."
+          ),
+        };
+      }
+    }
+  } else if (usual) {
+    const uF = funnelOf(usual.rows, h.targetKey, h);
+    const un = usual.rows.length;
+    const nm = step("named");
+    if (nm?.here) {
+      const uNamed = num(uF.named.length, un, "answers", refsOf(uF.named, surfOf(uF, h.brand, false)));
+      const r = namedRows(youF, all, h.targetKey, h.brand, uF, un, h.targetKey, h.brand);
+      details.named = {
+        heading: leftOut(nm.tagUsualTone === "bad"),
+        body: join("The AI names you in ", N(nm.here), " of these answers, against ", N(uNamed), ` ${usual.phrase}.`),
+        ...(r ? { columns: { you: "Here", rival: usual.column, rivalIsUsual: true as const }, rows: r } : {}),
+      };
+    }
+    const rc = step("recommended");
+    if (rc?.here && p.kind !== "learning") {
+      const uRec = num(uF.rec.length, un, "answers", refsOf(uF.rec, surfOf(uF, h.brand, true)));
+      const tone = rc.tagUsualTone;
+      const outcomes = picks
+        ? [
+            ...(youF.rec.length >= DETAIL_MIN ? [outcomeOf(youF.rec, h.targetKey, "Here", { you: true })] : []),
+            ...(uF.rec.length >= DETAIL_MIN ? [outcomeOf(uF.rec, h.targetKey, usual.column, { you: true, usual: true })] : []),
+          ]
+        : [];
+      details.recommended = {
+        heading: tone === "bad" ? `You are recommended less often here than ${usual.phrase}` : tone === "good" ? `You are recommended more often here than ${usual.phrase}` : `You are recommended about as often here as ${usual.phrase}`,
+        body: join("The AI recommends you in ", N(rc.here), " of these answers, against ", N(uRec), ` ${usual.phrase}.`, picks ? takers(youF.rec) : null),
+        ...(outcomes.length ? { outcomes, outcomeLabels } : {}),
+      };
+    }
+    const cv = step("converts");
+    if (cv?.here && youF.rec.length >= DETAIL_MIN) {
+      const uPicked = uF.picked;
+      const uConv = uF.rec.length >= DETAIL_MIN ? num(uPicked.length, uF.rec.length, "recommending answers", refsOf(uPicked, pf(h.brand))) : undefined;
+      const tone = cv.tagUsualTone;
+      details.converts = {
+        heading: tone === "bad" ? "Fewer of your recommendations end as the pick here" : tone === "good" ? "More of your recommendations end as the pick here" : "Your recommendations end as the pick about as often as usual",
+        body: join("Of the answers that recommend you, ", N(cv.here), " end with you as the pick", uConv ? join(", against ", N(uConv), ` ${usual.phrase}`) : "", ".", takers(youF.rec)),
+      };
+    }
+  }
+
+  /* -------- comparison view: you against the competitors -------- */
+  const detailsComp: Partial<Record<PanelStepKey, PanelStepDetail>> = {};
+  const names = p.competitorOrder ?? [];
+  if (p.compare && names.length) {
+    const comps = names.map((name) => {
+      const key = h.resolve(name).key ?? name;
+      return { name, key, f: funnelOf(rows, key, h) };
+    });
+    const nm = step("named");
+    if (nm?.here && nm.rivals?.length) {
+      const lead = [...nm.rivals].sort((a, b) => b.num.pct - a.num.pct)[0];
+      const lc = comps.find((c) => c.name === lead.name)!;
+      const ahead = lead.num.pct > nm.here.pct;
+      const r = namedRows(youF, all, h.targetKey, h.brand, lc.f, all, lc.key, lc.name);
+      detailsComp.named = {
+        heading: ahead && nm.tagRankTone !== "bad" ? `${lead.name} is named a little more often, but being left out is not mainly why you lose here` : leftOut(ahead),
+        body: ahead
+          ? join("The AI names you in ", N(nm.here), ` of these answers. ${lead.name} is named most, in `, N(lead.num), ".")
+          : join("The AI names you in ", N(nm.here), ` of these answers, more often than any competitor shown. ${lead.name} comes closest, in `, N(lead.num), "."),
+        ...(r ? { columns: { you: "You", rival: lead.name }, rows: r } : {}),
+      };
+    }
+    const rc = step("recommended");
+    if (rc?.here && rc.rivals?.length) {
+      const lead = [...rc.rivals].sort((a, b) => b.num.pct - a.num.pct)[0];
+      const ahead = lead.num.pct > rc.here.pct;
+      const outcomes = picks
+        ? [
+            ...(youF.rec.length >= DETAIL_MIN ? [outcomeOf(youF.rec, h.targetKey, "You", { you: true })] : []),
+            ...comps.filter((c) => c.f.rec.length >= DETAIL_MIN).map((c) => outcomeOf(c.f.rec, c.key, c.name, {})),
+          ]
+        : [];
+      detailsComp.recommended = {
+        heading: ahead ? `${lead.name} is recommended more often than you here` : "You are recommended more often than any competitor shown",
+        body: join(
+          "The AI recommends you in ",
+          N(rc.here),
+          " of these answers",
+          ahead ? join(`. ${lead.name} is recommended most, in `, N(lead.num), ".") : join(`. ${lead.name} comes closest, in `, N(lead.num), "."),
+          picks ? takers(youF.rec) : null
+        ),
+        ...(outcomes.length > 1 ? { outcomes, outcomeLabels } : {}),
+      };
+    }
+    const cv = step("converts");
+    if (cv?.here && cv.rivals?.length && youF.rec.length >= DETAIL_MIN) {
+      const ok = cv.rivals.filter((x) => (knOf(x.num)?.n ?? 0) >= DETAIL_MIN);
+      const best = [...ok].sort((a, b) => b.num.pct - a.num.pct)[0];
+      const ahead = !!best && best.num.pct > cv.here.pct;
+      detailsComp.converts = {
+        heading: ahead ? `${best.name} turns more of its recommendations into the pick` : "You turn more of your recommendations into the pick than any competitor shown",
+        body: join(
+          "Of the answers that recommend you, ",
+          N(cv.here),
+          " end with you as the pick",
+          best ? join(`. ${best.name} turns `, N(best.num), " of its recommendations into the pick.") : ".",
+          takers(youF.rec)
+        ),
+      };
+    }
+  }
+  if (Object.keys(details).length) p.details = details;
+  if (Object.keys(detailsComp).length) p.detailsComp = detailsComp;
 }
 
 /* ------------- am31 round 2: one rival across every question type ------------- */
@@ -2690,6 +2925,10 @@ export function panelTexts(p: PositionPanel): PanelText[] {
   if (p.lead) out.push(p.lead);
   if (p.detail) out.push(p.detail.body);
   if (p.detailComp) out.push(p.detailComp.body);
+  for (const d of [...Object.values(p.details ?? {}), ...Object.values(p.detailsComp ?? {})]) if (d) {
+    out.push(d.body);
+    if (d.both) out.push(d.both);
+  }
   for (const l of [...(p.lines ?? []), ...(p.linesComp ?? [])]) out.push(l.value);
   for (const s of p.steps) if (s.note) out.push(s.note);
   return out;

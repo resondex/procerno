@@ -145,13 +145,12 @@ html.pb-printing .pb-fact{ border-bottom: 0 !important; color: inherit !importan
 .pb-acard-kind.k-cell{ background: color-mix(in srgb, var(--primary) 13%, var(--surface)); color: var(--primary); }
 .pb-acard-kind.k-brand{ background: color-mix(in srgb, #047857 13%, var(--surface)); color: color-mix(in srgb, #059669 80%, var(--ink)); }
 .pb-acard-kind.k-engines{ background: color-mix(in srgb, #6d28d9 13%, var(--surface)); color: color-mix(in srgb, #7c3aed 80%, var(--ink)); }
-.pb-acard-kind.k-condition{ background: color-mix(in srgb, #be185d 13%, var(--surface)); color: color-mix(in srgb, #db2777 80%, var(--ink)); }
+.pb-acard-kind.k-condition{ background: var(--pa-bad-bg); color: var(--pa-bad-ink); }
 .pb-acard-hl{ font-size: 15px; font-weight: 600; line-height: 1.45; margin: 0 0 10px; }
 .pb-acard-row{ display: flex; justify-content: space-between; gap: 16px; padding: 5px 0; border-bottom: 1px dashed var(--line); }
 .pb-acard-row .l{ color: var(--ink-2); min-width: 0; }
 .pb-acard-row .v{ text-align: right; font-variant-numeric: tabular-nums; max-width: 55%; }
-.pb-acard{ --pb-yours:#0d9488; --pb-theirs:#be185d; }
-@media (prefers-color-scheme: dark){ .pb-acard{ --pb-yours:#14a08f; --pb-theirs:#d2497e; } }
+.pb-acard{ --pb-yours:var(--pa-yours); --pb-theirs:var(--pa-theirs); }
 .pb-acard-lifts{ margin-top: 12px; }
 .pb-acard-sub{ font-size: 11px; letter-spacing: .08em; text-transform: uppercase; color: var(--ink-3); margin-bottom: 6px; }
 .pb-lift{ display: grid; grid-template-columns: minmax(7rem,1fr) 1fr 2.6rem; align-items: center; column-gap: 10px; row-gap: 1px; padding: 3px 0; }

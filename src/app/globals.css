@@ -23,6 +23,36 @@
   --warning: #c2773c;
   --danger: #ac6258;
   --neutral-bar: #cfceca;
+
+  /* Tracker dashboard verdict colours (--pa-*: read only by the results
+     pages under src/app/projects/[id]; nothing else references them). One
+     place for the whole dashboard: Overview, Map, panels, Data, Brief.
+     Roles: yours = you / toward you / good; usual = your usual or all
+     buyers; theirs = a rival / against you; contested = amber; nocall =
+     no side taken; none = the neutral "no side" bar. *-bg = cell / box
+     tint, *-ink = text on that tint. */
+  --pa-yours: #2563eb;
+  --pa-yours-bg: #dbeafe;
+  --pa-yours-ink: #1e40af;
+  --pa-yours-soft: #93c5fd;
+  --pa-contested: #a16207;
+  --pa-contested-bg: #fef3c7;
+  --pa-contested-ink: #854d0e;
+  --pa-theirs: #be185d;
+  --pa-theirs-bg: #fce7f3;
+  --pa-theirs-ink: #9d174d;
+  --pa-nocall: #8a919e;
+  --pa-nocall-bg: #eef0f4;
+  --pa-nocall-ink: #4a4f5a;
+  --pa-usual: #8a919e;
+  --pa-none: #dfe3ea;
+  /* Tags: good = pale blue, bad = pale pink, neutral = grey. */
+  --pa-good-bg: #eff6ff;
+  --pa-good-ink: #1e40af;
+  --pa-bad-bg: #fdf2f8;
+  --pa-bad-ink: #9d174d;
+  --pa-neutral-bg: #eef0f4;
+  --pa-neutral-ink: #4a4f5a;
 }
 
 @media (prefers-color-scheme: dark) {
@@ -46,6 +76,28 @@
     --warning: #d59a68;
     --danger: #c98a80;
     --neutral-bar: #4a4e52;
+
+    --pa-yours: #60a5fa;
+    --pa-yours-bg: color-mix(in srgb, #60a5fa 18%, var(--surface));
+    --pa-yours-ink: #93c5fd;
+    --pa-yours-soft: color-mix(in srgb, #60a5fa 50%, var(--surface));
+    --pa-contested: #c08a1b;
+    --pa-contested-bg: color-mix(in srgb, #c08a1b 18%, var(--surface));
+    --pa-contested-ink: #fcd34d;
+    --pa-theirs: #f472b6;
+    --pa-theirs-bg: color-mix(in srgb, #f472b6 16%, var(--surface));
+    --pa-theirs-ink: #f9a8d4;
+    --pa-nocall: #9aa0aa;
+    --pa-nocall-bg: color-mix(in srgb, #9aa0aa 14%, var(--surface));
+    --pa-nocall-ink: #c9ced6;
+    --pa-usual: #9aa0aa;
+    --pa-none: #3d424a;
+    --pa-good-bg: color-mix(in srgb, #60a5fa 16%, var(--surface));
+    --pa-good-ink: #93c5fd;
+    --pa-bad-bg: color-mix(in srgb, #f472b6 14%, var(--surface));
+    --pa-bad-ink: #f9a8d4;
+    --pa-neutral-bg: color-mix(in srgb, #9aa0aa 14%, var(--surface));
+    --pa-neutral-ink: #c9ced6;
   }
 }
 

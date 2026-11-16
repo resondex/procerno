@@ -47,21 +47,9 @@ type TensionVizRow = NonNullable<AnalysisMapView["tensions"][number]["viz"]>[num
 /** A request from another page to open the slide-over; `n` makes a repeat click a new request. */
 export type PanelReq = { view: PanelView; n: number };
 
-// ---------- styling: the four verdict colors (colorblind-validated) ----------
+// ---------- styling: the verdict colors live in globals.css (--pa-*, light + dark) ----------
 
 const TIER_CSS = `
-.pa-root{
-  --pa-yours:#0d9488; --pa-contested:#a16207; --pa-theirs:#be185d; --pa-nocall:#8a8f94;
-}
-@media (prefers-color-scheme: dark){
-  .pa-root{ --pa-yours:#14a08f; --pa-contested:#c08a1b; --pa-theirs:#d2497e; --pa-nocall:#9aa0a6; }
-}
-.pa-root{
-  --pa-yours-bg:color-mix(in srgb, var(--pa-yours) 11%, var(--surface));
-  --pa-contested-bg:color-mix(in srgb, var(--pa-contested) 11%, var(--surface));
-  --pa-theirs-bg:color-mix(in srgb, var(--pa-theirs) 10%, var(--surface));
-  --pa-nocall-bg:color-mix(in srgb, var(--pa-nocall) 10%, var(--surface));
-}
 @keyframes pa-slide{ from{ transform:translateX(24px); opacity:.6 } to{ transform:none; opacity:1 } }
 @keyframes pa-fade{ from{ opacity:0 } to{ opacity:1 } }
 .pa-panel{ animation: pa-slide .16s ease-out; }
@@ -282,7 +270,7 @@ function MiniBars({ rows, title }: { rows: TensionVizRow[]; title: string }) {
             <span className="truncate">{r.label}</span>
             <span className="h-2 rounded bg-line/60">
               <i
-                className={`block h-full min-w-[2px] rounded ${r.hi ? "bg-primary" : "bg-neutral-bar"}`}
+                className={`block h-full min-w-[2px] rounded ${r.hi ? "bg-[var(--pa-yours)]" : "bg-[var(--pa-usual)]"}`}
                 style={{ width: `${Math.max(0, Math.min(100, r.value))}%` }}
               />
             </span>
@@ -371,7 +359,7 @@ function Overview({
             </div>
             {you && (
               <div title={`${you.share.k.toLocaleString("en-US")} of ${you.share.n.toLocaleString("en-US")} picks`} className="min-w-0">
-                <b className={`${T.num} block text-primary`}>{pctOf(you.share)}</b>
+                <b className={`${T.num} block text-[color:var(--pa-yours-ink)]`}>{pctOf(you.share)}</b>
                 <span className={`${T.sec} mt-1 block`}>share of picks</span>
                 <SeeExamples refs={you.refs} title={`Answers where the AI picks ${you.brand}`} subtitle="When buyers ask what to buy" />
               </div>
@@ -422,7 +410,7 @@ function Overview({
                 <>
                   <span className="truncate">{s.brand}</span>
                   <span className="h-2.5 overflow-hidden rounded-[5px] bg-line/60">
-                    <i className={`block h-full rounded-[5px] ${s.you ? "bg-primary" : "bg-neutral-bar"}`} style={{ width: `${(100 * shareX(s.share)) / max}%` }} />
+                    <i className={`block h-full rounded-[5px] ${s.you ? "bg-[var(--pa-yours)]" : "bg-[var(--pa-usual)]"}`} style={{ width: `${(100 * shareX(s.share)) / max}%` }} />
                   </span>
                 </>
               );
@@ -605,7 +593,7 @@ function CellButton({ cell, onOpen, hasPosition }: { cell: MapCell; onOpen: (id:
       </span>
       {cell.note && <span className={`${T.cap} text-ink-2`}>{cell.note}</span>}
       {cell.exception && (
-        <span className={`${T.cap} font-semibold`} style={{ color: c.fg }}>
+        <span className={`${T.cap} font-semibold`} style={{ color: c.ink }}>
           Lost - with an exception
         </span>
       )}
@@ -731,7 +719,7 @@ function DossierLine({ stage, cell, onOpen, hasPosition }: { stage: string; cell
         {line ? ` · ${line}` : ""}
       </span>
       <span className="min-w-0">
-        <span className={`${T.cap} flex flex-wrap items-center gap-1.5 font-semibold`} style={{ color: c.fg }}>
+        <span className={`${T.cap} flex flex-wrap items-center gap-1.5 font-semibold`} style={{ color: c.ink }}>
           <i className="inline-block h-1.5 w-1.5 flex-none rounded-full" style={{ background: c.fg }} />
           {VWORD[cell.verdict]}
           {cell.exception ? " - with an exception" : ""}

@@ -337,6 +337,7 @@ for (const project of projects) {
     const recs = (c: Code, key: string) => (c.mentions ?? []).some((m) => m.framing === "recommended" && resolve(m.brand).key === key) || picks(c, key);
     const isNum = (v: unknown): v is PanelNum => !!v && typeof v === "object" && "value" in (v as object) && "pct" in (v as object) && "tip" in (v as object);
     let panels = 0, nums = 0, refCount = 0, labelFallbacks = 0;
+    let detailCount = 0;
     const SEG_FIELD: Record<string, [string, (v: unknown) => boolean]> = {
       proceed: ["proceed_or_avoid", (v) => v === "proceed"], avoid: ["proceed_or_avoid", (v) => v === "avoid"],
       keep: ["keep_or_leave", (v) => v === "keep"], leave: ["keep_or_leave", (v) => v === "leave"],
@@ -445,6 +446,25 @@ for (const project of projects) {
         if (!rv.stackLabel) failures.push(`${project.brand}: ${id} rival ${rv.name} has no stack label`);
         if (rv.byCell?.length && !rv.byCellTitle) failures.push(`${project.brand}: ${id} rival ${rv.name} byCell has no title`);
         for (const d of Object.values(rv.details ?? {})) if (d?.outcomes?.length && !d.outcomeLabels) failures.push(`${project.brand}: ${id} rival ${rv.name} outcomes have no labels`);
+      }
+      // 6c. am34: the step details - only on the funnel kinds, only for steps the panel draws,
+      // every stated number in a sentence opens its answers, outcomes carry their words, rows their columns.
+      for (const [view, ds] of [["details", p.details], ["detailsComp", p.detailsComp]] as const) {
+        if (!ds) continue;
+        if (!["buy", "switching", "problem", "popular", "learning", "h2h"].includes(p.kind)) failures.push(`${project.brand}: ${id} ${p.kind} carries ${view}`);
+        if (view === "detailsComp" && !p.compare) failures.push(`${project.brand}: ${id} detailsComp without a competitors view`);
+        for (const [k, d] of Object.entries(ds)) {
+          if (!d) continue;
+          detailCount++;
+          if (!p.steps.some((s) => s.key === k)) failures.push(`${project.brand}: ${id} ${view}.${k} explains a step the panel does not draw`);
+          if (!d.heading.trim()) failures.push(`${project.brand}: ${id} ${view}.${k} has no heading`);
+          for (const sp of [...d.body, ...(d.both ?? [])]) {
+            if (/^<?\d+%$/.test(sp.t.trim()) && sp.t.trim() !== "0%" && !(sp.refs && sp.refs.length)) failures.push(`${project.brand}: ${id} ${view}.${k} number ${sp.t} opens no answers`);
+            if (/\d+%/.test(sp.t) && !/^<?\d+%$/.test(sp.t.trim())) failures.push(`${project.brand}: ${id} ${view}.${k} number buried in text "${sp.t}"`);
+          }
+          if (d.outcomes?.length && !d.outcomeLabels) failures.push(`${project.brand}: ${id} ${view}.${k} outcomes have no labels`);
+          if (d.rows?.length && !d.columns) failures.push(`${project.brand}: ${id} ${view}.${k} rows have no column names`);
+        }
       }
       // 7. kinds without conditions.
       if ((p.kind === "buyer_worry" || p.kind === "customer_worry" || p.kind === "value" || p.kind === "business_case") && p.conditions) failures.push(`${project.brand}: ${id} ${p.kind} carries conditions`);
@@ -584,7 +604,8 @@ for (const project of projects) {
     // 9. ruling 5 omissions.
     for (const o of (debug as { panelOmissions?: { cellId: string; list: string; code: string; share: number; hit: string; via: string }[] }).panelOmissions ?? [])
       omissionLines.push(`${project.brand.padEnd(17)} | ${o.cellId.padEnd(44)} | ${o.list.padEnd(9)} | ${o.code.padEnd(28)} | ${(Math.round(o.share * 1000) / 10).toFixed(1).padStart(5)}% | ${o.hit.padEnd(16)} | ${o.via}`);
-    console.log(`PANELS: ${panels} panels, ${nums} numbers, ${refCount} example answers checked, ${labelFallbacks} quoted-seed claims`);
+    console.log(`PANELS: ${panels} panels, ${nums} numbers, ${refCount} example answers checked, ${labelFallbacks} quoted-seed claims, ${detailCount} step details`);
+    if (detailCount === 0) failures.push(`${project.brand}: no panel carries step details`);
     // The mockup numbers (American Express).
     if (project.brand === "American Express") {
       const P = (id: string) => (view.positions as Record<string, Position>)[id]?.panel as PositionPanel | undefined;

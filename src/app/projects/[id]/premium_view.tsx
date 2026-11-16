@@ -14,10 +14,10 @@ import { BaseNote, fmtN, Legend, Names, pct, range, rate, rateCol, StackBar, typ
  */
 
 const STANCE_PARTS: readonly Part<Stance>[] = [
-  { key: "premium", label: "Go premium", color: "bg-primary" },
+  { key: "premium", label: "Go premium", color: "bg-[var(--pa-yours)]" },
   { key: "balanced", label: "It depends", color: "bg-warning/60" },
-  { key: "basic", label: "Go basic", color: "bg-danger/55" },
-  { key: "none", label: "Takes no side", color: "bg-neutral-bar" },
+  { key: "basic", label: "Go basic", color: "bg-[var(--pa-theirs)]" },
+  { key: "none", label: "Takes no side", color: "bg-[var(--pa-none)]" },
 ];
 
 const TIPS: Record<Stance, string> = {

@@ -85,7 +85,7 @@ export function CompanyBoard({
   const grid = "grid w-full grid-cols-[minmax(0,132px)_minmax(0,1fr)_40px] items-center gap-2.5 rounded-md px-1 py-1 text-left text-[13px]";
   const bar = (c: RateCell, strong: boolean, thin?: boolean) => (
     <span className={`${thin ? "h-1.5" : "h-2.5"} overflow-hidden rounded-[5px] bg-line/60`}>
-      <i className={`block h-full rounded-[5px] ${strong ? "bg-primary" : "bg-neutral-bar"}`} style={{ width: `${(100 * shareX(c)) / max}%` }} />
+      <i className={`block h-full rounded-[5px] ${strong ? "bg-[var(--pa-yours)]" : "bg-[var(--pa-usual)]"}`} style={{ width: `${(100 * shareX(c)) / max}%` }} />
     </span>
   );
   const toggle = (key: string) =>

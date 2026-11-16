@@ -255,7 +255,7 @@ function PicksBlock({ s, filtered }: { s: JourneyStation; filtered: boolean }) {
                 </span>
                 <div className="h-4 relative">
                   <div
-                    className={`absolute inset-y-0 left-0 rounded-r-[4px] ${you ? "bg-primary" : "bg-neutral-bar"}`}
+                    className={`absolute inset-y-0 left-0 rounded-r-[4px] ${you ? "bg-[var(--pa-yours)]" : "bg-[var(--pa-usual)]"}`}
                     style={{ width: `${(rate(p.cell) / max) * 100}%` }}
                   />
                 </div>
@@ -343,8 +343,8 @@ function Folded({ sentence, onExpand }: { sentence: string; onExpand: () => void
   );
 }
 
-const FOR_COLOR = "var(--color-success)";
-const AGAINST_COLOR = "var(--color-danger)";
+const FOR_COLOR = "var(--pa-yours)";
+const AGAINST_COLOR = "var(--pa-theirs)";
 
 /** The Map panel's lift line: a bar from the center (for you right, against
  * left), the point gap, and the two shares beneath; counts in the tip. */

@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import type { ReactNode } from "react";
-import type { CellPanelPayload, PanelKind, PanelRival, PanelStep, PanelStepKey, Position, PositionPanel, RivalAcross, RivalAcrossStep, RivalStepDetail } from "@/lib/engine/analysis_types";
+import type { CellPanelPayload, PanelKind, PanelRival, PanelStep, PanelStepKey, Position, PositionPanel, RivalAcross, RivalAcrossStep, RivalStepDetail, PanelStepDetail } from "@/lib/engine/analysis_types";
 import { MoveBox, None, VCOLOR, VWORD, crumbCls, h2Cls, linkCls, notesOf, softLine, whyLines, type Ctx } from "./analysis_panel";
 import { MatchupDropNote } from "./matchup_action";
 import {
@@ -12,6 +12,7 @@ import {
   C_NONE,
   C_USUAL,
   C_YOU,
+  C_YOU_SOFT,
   CLICK_HINT,
   CompSwitch,
   CondColumns,
@@ -145,7 +146,22 @@ export function hasRivalPanel(p: Position | undefined, name: string): boolean {
 
 export function PositionPanelView({ p, pp, usualSteps, ctx }: { p: Position; pp: PositionPanel; usualSteps?: PanelStep[]; ctx: Ctx }) {
   const [compOn] = useComp();
-  const comp = !!pp.compare && compOn;
+  // A panel with no usual to set you against (no usual cell, no usual on its
+  // steps) would show a lone "You" bar with the switch off, so it always opens
+  // on the competitors view and draws no switch. The remembered switch state
+  // is only read here, never written, so opening one leaves it as it was.
+  const hasUsual = !!pp.usualCellId || pp.steps.some((s) => !!s.usual);
+  const compForced = !!pp.compare && !hasUsual;
+  const comp = compForced || (!!pp.compare && compOn);
+  // Clickable steps: the steps the engine explains in this view. The default
+  // selection is the engine's focus; switching panel or view starts over.
+  const stepDetails = (comp ? pp.detailsComp : pp.details) ?? {};
+  const selectable = pp.steps.some((s) => !!stepDetails[s.key]);
+  const defaultSel = comp ? pp.focusComp : pp.focus;
+  const selKey = `${p.cellId}|${comp ? 1 : 0}`;
+  const [picked, setPicked] = useState<{ key: string; step: PanelStepKey } | null>(null);
+  const sel = picked && picked.key === selKey ? picked.step : defaultSel;
+  const selDetail = sel ? stepDetails[sel] : undefined;
   const cell = ctx.cells.get(p.cellId);
   const notes = notesOf(p, cell);
   const soft = softLine(notes);
@@ -168,13 +184,19 @@ export function PositionPanelView({ p, pp, usualSteps, ctx }: { p: Position; pp:
           steps={pp.steps}
           usualSteps={usualSteps}
           comp={comp}
-          focus={comp ? pp.focusComp : pp.focus}
+          focus={selectable ? sel : comp ? pp.focusComp : pp.focus}
           hereLabel={hereLabel}
           usualLabel={usualLabel}
           keyItems={keyItems}
+          onSelect={selectable ? (k) => setPicked({ key: selKey, step: k }) : undefined}
+          canSelect={selectable ? (k) => !!stepDetails[k] || k === defaultSel : undefined}
         />
       ) : null,
-    detail: detail ? <DetailView heading={detail.heading} body={detail.body} /> : null,
+    detail: selDetail ? (
+      <RivalDetail d={selDetail} name="" />
+    ) : detail && (!selectable || sel === defaultSel) ? (
+      <DetailView heading={detail.heading} body={detail.body} />
+    ) : null,
     conditions: pp.conditions ? <CondColumns cond={pp.conditions} comp={comp} /> : null,
     competitors:
       pp.competitors && pp.competitors.rows.length > 0 && (!pp.compare || comp) ? (
@@ -198,14 +220,14 @@ export function PositionPanelView({ p, pp, usualSteps, ctx }: { p: Position; pp:
       <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1 pr-16">
         <div className={crumbCls}>
           {cell && (
-            <span className="flex items-center gap-1.5 normal-case tracking-normal" style={{ color: VCOLOR[cell.verdict].fg }}>
+            <span className="flex items-center gap-1.5 normal-case tracking-normal" style={{ color: VCOLOR[cell.verdict].ink }}>
               <i className="inline-block h-2 w-2 rounded-full" style={{ background: VCOLOR[cell.verdict].fg }} />
               {VWORD[cell.verdict]}
             </span>
           )}
           <span>{p.where}</span>
         </div>
-        {pp.compare && <CompSwitch />}
+        {pp.compare && !compForced && <CompSwitch />}
       </div>
       <h2 className={h2Cls}>
         <TextView text={pp.claim} title={p.where} />
@@ -221,7 +243,10 @@ export function PositionPanelView({ p, pp, usualSteps, ctx }: { p: Position; pp:
           {soft}
         </p>
       )}
-      <p className={`${T.sec} mt-1.5`}>{CLICK_HINT}</p>
+      <p className={`${T.sec} mt-1.5`}>
+        {selectable ? "Click a step to see what explains it. " : ""}
+        {CLICK_HINT}
+      </p>
       {pp.kind === "h2h" && p.cellId !== "fights:h2h:all" && cell?.label && <MatchupDropNote name={cell.label} className="mt-3" />}
       {ORDER[pp.kind].map((b) => (blocks[b] ? <div key={b}>{blocks[b]}</div> : null))}
       {p.lever && <MoveBox p={p} ctx={ctx} why={whyLines(notes, ctx.cat.plural)} />}
@@ -234,8 +259,12 @@ export function PositionPanelView({ p, pp, usualSteps, ctx }: { p: Position; pp:
 type FunnelKey = "named" | "recommended" | "converts";
 const isFunnel = (k: PanelStepKey): k is FunnelKey => k === "named" || k === "recommended" || k === "converts";
 
-function RivalDetail({ d, name }: { d: RivalStepDetail; name: string }) {
+function RivalDetail({ d, name }: { d: RivalStepDetail | PanelStepDetail; name: string }) {
   const ol = d.outcomeLabels;
+  const cols = "columns" in d ? d.columns : undefined;
+  const rivalHead = cols?.rival ?? name;
+  const youHead = cols?.you ?? "You";
+  const rivalColor = cols?.rivalIsUsual ? C_USUAL : C_AWAY;
   return (
     <DetailView heading={d.heading} body={d.body}>
       {d.rows && d.rows.length > 0 && (
@@ -243,11 +272,11 @@ function RivalDetail({ d, name }: { d: RivalStepDetail; name: string }) {
           <thead>
             <tr className={`${T.cap} text-ink-3`}>
               <th className="py-1 text-left font-normal" />
-              <th className="py-1 pl-2 text-right font-semibold" style={{ color: C_AWAY }}>
-                {name}
+              <th className="py-1 pl-2 text-right font-semibold" style={{ color: rivalColor }}>
+                {rivalHead}
               </th>
               <th className="py-1 pl-2 text-right font-semibold" style={{ color: C_YOU }}>
-                You
+                {youHead}
               </th>
             </tr>
           </thead>
@@ -256,10 +285,10 @@ function RivalDetail({ d, name }: { d: RivalStepDetail; name: string }) {
               <tr key={r.label} className="border-t border-line/70">
                 <td className="py-1.5 pr-2 text-ink">{r.label}</td>
                 <td className="py-1.5 pl-2 text-right text-ink-2">
-                  <NumView n={r.rival} title={`${r.label} - ${name}`} />
+                  <NumView n={r.rival} title={`${r.label} - ${rivalHead}`} />
                 </td>
                 <td className="py-1.5 pl-2 text-right font-semibold text-ink">
-                  <NumView n={r.you} title={`${r.label} - you`} />
+                  <NumView n={r.you} title={`${r.label} - ${youHead}`} />
                 </td>
               </tr>
             ))}
@@ -269,11 +298,13 @@ function RivalDetail({ d, name }: { d: RivalStepDetail; name: string }) {
       {d.outcomes && d.outcomes.length > 0 && ol && (
         <div className="mt-2.5 grid gap-2">
           {d.outcomes.map((o) => {
-            const who = o.you ? "You" : o.name;
+            const own = "usual" in o && !!o.usual;
+            // A step detail names its own outcome lines ("Here", "All buyers"); a rival's says "You".
+            const who = cols || own ? o.name : o.you ? "You" : o.name;
             return (
               <div key={who}>
                 <span className="flex h-2.5 overflow-hidden rounded-[5px] bg-line/60" aria-hidden>
-                  <i className="block h-full" style={{ width: `${o.picked.pct}%`, background: o.you ? C_YOU : C_AWAY }} />
+                  <i className="block h-full" style={{ width: `${o.picked.pct}%`, background: own ? C_YOU_SOFT : o.you ? C_YOU : C_AWAY }} />
                   <i className="block h-full" style={{ width: `${o.lost.pct}%`, background: C_USUAL }} />
                   <i className="block h-full" style={{ width: `${o.none.pct}%`, background: C_NONE }} />
                 </span>

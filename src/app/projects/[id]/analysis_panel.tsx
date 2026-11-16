@@ -58,11 +58,12 @@ import { CompProvider } from "./panel_parts";
 // ---------- small shared words and helpers ----------
 
 export const VWORD: Record<CellVerdict, string> = { yours: "Yours", contested: "Contested", theirs: "Theirs", nocall: "No side taken" };
-export const VCOLOR: Record<CellVerdict, { fg: string; bg: string }> = {
-  yours: { fg: "var(--pa-yours)", bg: "var(--pa-yours-bg)" },
-  contested: { fg: "var(--pa-contested)", bg: "var(--pa-contested-bg)" },
-  theirs: { fg: "var(--pa-theirs)", bg: "var(--pa-theirs-bg)" },
-  nocall: { fg: "var(--pa-nocall)", bg: "var(--pa-nocall-bg)" },
+/** fg = dots and bars, bg = cell tint, ink = text (on the tint or the surface). */
+export const VCOLOR: Record<CellVerdict, { fg: string; bg: string; ink: string }> = {
+  yours: { fg: "var(--pa-yours)", bg: "var(--pa-yours-bg)", ink: "var(--pa-yours-ink)" },
+  contested: { fg: "var(--pa-contested)", bg: "var(--pa-contested-bg)", ink: "var(--pa-contested-ink)" },
+  theirs: { fg: "var(--pa-theirs)", bg: "var(--pa-theirs-bg)", ink: "var(--pa-theirs-ink)" },
+  nocall: { fg: "var(--pa-nocall)", bg: "var(--pa-nocall-bg)", ink: "var(--pa-nocall-ink)" },
 };
 
 /** "What the AI says about the <category>" - the products when the category is missing or long. */
@@ -591,7 +592,7 @@ function LiftRows({ lifts, sides }: { lifts: (LiftItem | DossierArg)[]; sides: [
                   {(
                     [
                       [l.wins, sides[0], "var(--primary)"],
-                      [l.others, sides[1], "var(--neutral-bar)"],
+                      [l.others, sides[1], "var(--pa-usual)"],
                     ] as const
                   ).map(([v, side, c]) => (
                     <span key={side}>
@@ -881,14 +882,14 @@ function ContestPanel({ p, ctx }: { p: Position; ctx: Ctx }) {
     argsPreview = (
       <>
         {hint}
-        <CondRows rows={rows.slice(0, 2)} color="var(--neutral-bar)" />
+        <CondRows rows={rows.slice(0, 2)} color="var(--pa-usual)" />
       </>
     );
     argsCount = rows.length > 2 ? rows.length : 0;
     argsBody = (
       <>
         {hint}
-        <CondRows rows={rows} color="var(--neutral-bar)" />
+        <CondRows rows={rows} color="var(--pa-usual)" />
       </>
     );
   } else if (mode === "topics" || mode === "all" || mode === "rival") {
@@ -979,7 +980,7 @@ function ContestPanel({ p, ctx }: { p: Position; ctx: Ctx }) {
     <>
       <div className={crumbCls}>
         {cell && (
-          <span className="flex items-center gap-1.5 normal-case tracking-normal" style={{ color: VCOLOR[cell.verdict].fg }}>
+          <span className="flex items-center gap-1.5 normal-case tracking-normal" style={{ color: VCOLOR[cell.verdict].ink }}>
             <i className="inline-block h-2 w-2 rounded-full" style={{ background: VCOLOR[cell.verdict].fg }} />
             {VWORD[cell.verdict]}
           </span>
@@ -1068,7 +1069,7 @@ function PicksBars({ p, focus, ctx, preview }: { p: Position; focus: string; ctx
     <div>
       {rows.map((r) => {
         const isFocus = !r.you && normName(r.name) === normName(focus);
-        const color = r.you ? "var(--pa-yours)" : isFocus ? "var(--pa-theirs)" : "var(--neutral-bar)";
+        const color = r.you ? "var(--pa-yours)" : isFocus ? "var(--pa-theirs)" : "var(--pa-usual)";
         const proof = r.proof.filter((x) => x.quote);
         const onClick = r.you
           ? undefined
@@ -1265,7 +1266,7 @@ function RivalArgs({ name, here, preview }: { name: string; here: RivalHere; pre
     return (
       <>
         <Hint>You are picked too rarely here to set the two side by side. This is what comes up most when it picks {name}.</Hint>
-        <CondRows rows={here.argsRows.slice(0, preview ? 2 : 3).map((r) => ({ label: r.label, share: r.share, weight: pctNum(r.share), receipts: r.receipts }))} color="var(--neutral-bar)" />
+        <CondRows rows={here.argsRows.slice(0, preview ? 2 : 3).map((r) => ({ label: r.label, share: r.share, weight: pctNum(r.share), receipts: r.receipts }))} color="var(--pa-usual)" />
       </>
     );
   return null;
@@ -1602,7 +1603,7 @@ function DossierFolds({ d, ctx }: { d: Dossier; ctx: Ctx }) {
                 {h2hRow.conditions.themes.elsewhere.length > 0 && (
                   <div className="mt-4">
                     <h5 className="mb-1 text-[13px] font-semibold text-ink">Another brand gets the pick when the buyer...</h5>
-                    <CondRows rows={themeRows(h2hRow.conditions.themes.elsewhere)} color="var(--neutral-bar)" />
+                    <CondRows rows={themeRows(h2hRow.conditions.themes.elsewhere)} color="var(--pa-usual)" />
                   </div>
                 )}
               </>

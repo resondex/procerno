@@ -29,10 +29,10 @@ const range = (c: RateCell) =>
   c.n === 0 ? "no answers" : `${c.k} of ${c.n} - 95% range ${Math.round(c.low * 100)}-${Math.round(c.high * 100)}%`;
 
 const PARTS = [
-  { key: "won", label: "You win", color: "bg-primary" },
-  { key: "lost", label: "Rival wins", color: "bg-danger/55" },
+  { key: "won", label: "You win", color: "bg-[var(--pa-yours)]" },
+  { key: "lost", label: "Rival wins", color: "bg-[var(--pa-theirs)]" },
   { key: "other", label: "Another pick", color: "bg-warning/60" },
-  { key: "undecided", label: "No single pick", color: "bg-neutral-bar" },
+  { key: "undecided", label: "No single pick", color: "bg-[var(--pa-none)]" },
 ] as const;
 
 function RecordBar({ row }: { row: Pick<HeadToHeadRow, "won" | "lost" | "other" | "undecided"> }) {

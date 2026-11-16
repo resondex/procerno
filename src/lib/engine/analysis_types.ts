@@ -536,6 +536,20 @@ export interface RivalStepDetail {
   outcomeLabels?: { picked: string; lost: string; none: string }; // the outcome line's words
 }
 
+/** am34: what explains one step of a question-type panel (the step a reader
+ * clicks). Same shapes as RivalStepDetail; `columns` names the rows' two
+ * columns (normal view: here against your usual; comparison view: you against
+ * the leading competitor). An outcome line's `name` is its display label. */
+export interface PanelStepDetail {
+  heading: string;
+  body: PanelText;
+  columns?: { rival: string; you: string; rivalIsUsual?: true };
+  rows?: { label: string; rival: PanelNum; you: PanelNum }[];
+  outcomes?: { name: string; you?: true; usual?: true; picked: PanelNum; lost: PanelNum; none: PanelNum }[];
+  outcomeLabels?: { picked: string; lost: string; none: string };
+  both?: PanelText;
+}
+
 /** Panel 11: one rival inside this cell's question type. */
 export interface PanelRival {
   name: string;
@@ -566,7 +580,11 @@ export interface PositionPanel {
   focusComp?: PanelStepKey;      // highlighted step, comparison view
   detail?: PanelDetail;
   detailComp?: PanelDetail;
-  compare?: true;                // the "Show competitors" switch is drawn
+  /** am34: per-step explanations (a clicked step), normal view; `detail` stays the default. */
+  details?: Partial<Record<PanelStepKey, PanelStepDetail>>;
+  /** am34: per-step explanations, comparison view; `detailComp` stays the default. */
+  detailsComp?: Partial<Record<PanelStepKey, PanelStepDetail>>;
+  compare?: true;               // the "Show competitors" switch is drawn
   competitorOrder?: string[];    // brand names behind PanelStep.rivals
   competitors?: PanelBlock;      // "Who takes the picks" / "Which ... it names instead" / "... it shows" (comparison view only)
   conditions?: PanelConditions;

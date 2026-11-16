@@ -13,9 +13,9 @@ import { BaseNote, fmtN, Legend, Names, pct, range, rate, rateCol, StackBar, typ
  */
 
 const WORTH_PARTS: readonly Part<Worth>[] = [
-  { key: "yes", label: "Worth it", color: "bg-primary" },
-  { key: "depends", label: "Depends", color: "bg-neutral-bar" },
-  { key: "no", label: "Not worth it", color: "bg-danger/55" },
+  { key: "yes", label: "Worth it", color: "bg-[var(--pa-yours)]" },
+  { key: "depends", label: "Depends", color: "bg-[var(--pa-none)]" },
+  { key: "no", label: "Not worth it", color: "bg-[var(--pa-theirs)]" },
 ];
 
 const TIPS: Record<Worth, string> = {

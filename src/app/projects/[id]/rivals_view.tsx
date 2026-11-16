@@ -40,11 +40,9 @@ function writePref(key: string | null, value: string) {
 }
 
 const DOSS_CSS = `
-.dz-root{ --dz-pos:#0d9488; --dz-neg:#be185d; --dz-amber:#a16207; }
-@media (prefers-color-scheme: dark){ .dz-root{ --dz-pos:#14a08f; --dz-neg:#d2497e; --dz-amber:#d0a03a; } }
+.dz-root{ --dz-pos:var(--pa-yours); --dz-neg:var(--pa-theirs); --dz-amber:var(--pa-contested); }
 /* These mirror the map's pa-yours / pa-theirs verdict colors (light and dark). */
-.dz-root{ --dz-yours:#0d9488; --dz-theirs:#be185d; }
-@media (prefers-color-scheme: dark){ .dz-root{ --dz-yours:#14a08f; --dz-theirs:#d2497e; } }
+.dz-root{ --dz-yours:var(--pa-yours); --dz-theirs:var(--pa-theirs); }
 .dz-root{ --dz-amber-bg:color-mix(in srgb, var(--dz-amber) 10%, var(--surface)); }
 @keyframes dz-slide{ from{ transform:translateX(100%) } to{ transform:none } }
 @keyframes dz-fade{ from{ opacity:0 } to{ opacity:1 } }

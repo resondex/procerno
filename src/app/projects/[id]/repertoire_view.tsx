@@ -13,9 +13,9 @@ import { BaseNote, fmtN, Legend, Names, pct, range, rate, rateCol, StackBar, typ
  */
 
 const VERDICT_PARTS = (brand: string): readonly Part<Verdict>[] => [
-  { key: "stick", label: `Sticks with ${brand}`, color: "bg-primary" },
-  { key: "switch", label: "Switches brand", color: "bg-danger/55" },
-  { key: "open", label: "No single answer", color: "bg-neutral-bar" },
+  { key: "stick", label: `Sticks with ${brand}`, color: "bg-[var(--pa-yours)]" },
+  { key: "switch", label: "Switches brand", color: "bg-[var(--pa-theirs)]" },
+  { key: "open", label: "No single answer", color: "bg-[var(--pa-none)]" },
 ];
 
 const tips = (brand: string): Record<Verdict, string> => ({
