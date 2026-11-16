@@ -360,6 +360,7 @@ for (const project of projects) {
     let repeatChecks = 0;
     let verdictChecked = 0;
     let am37Checks = 0;
+    let am38Checks = 0;
     let planted = false; // PANEL_PLANT=1: one value explanation gets a bar number, to prove 6f bites
     const SEG_FIELD: Record<string, [string, (v: unknown) => boolean]> = {
       proceed: ["proceed_or_avoid", (v) => v === "proceed"], avoid: ["proceed_or_avoid", (v) => v === "avoid"],
@@ -483,7 +484,7 @@ for (const project of projects) {
       // every stated number in a sentence opens its answers, outcomes carry their words, rows their columns.
       for (const [view, ds] of [["details", p.details], ["detailsComp", p.detailsComp]] as const) {
         if (!ds) continue;
-        if (!["buy", "switching", "problem", "popular", "learning", "h2h"].includes(p.kind)) failures.push(`${project.brand}: ${id} ${p.kind} carries ${view}`);
+        if (!["buy", "switching", "problem", "popular", "learning", "h2h", "value"].includes(p.kind)) failures.push(`${project.brand}: ${id} ${p.kind} carries ${view}`);
         if (view === "detailsComp" && !p.compare) failures.push(`${project.brand}: ${id} detailsComp without a competitors view`);
         for (const [k, d] of Object.entries(ds)) {
           if (!d) continue;
@@ -688,6 +689,48 @@ for (const project of projects) {
           }
         }
       }
+      // 6h. am38: Value's steps explain themselves; "What the answer weighs" is sized, never also a line.
+      {
+        const am38Bars = new Set<string>(p.steps.flatMap((s) => [...(s.segments ?? []).map((g) => g.num.value), ...(s.here ? [s.here.value] : [])]));
+        const usualSegs = p.usualCellId ? ((view.positions as Record<string, Position>)[p.usualCellId]?.panel?.steps ?? []).flatMap((s) => (s.segments ?? []).map((g) => g.num.value)) : [];
+        for (const v of usualSegs) am38Bars.add(v);
+        if (p.kind === "value" && !p.thin) {
+          for (const k of ["worth", "instead"] as const) {
+            const d = p.details?.[k];
+            if (!d) { failures.push(`${project.brand}: ${id} value has no explanation for step ${k}`); continue; }
+            am38Checks++;
+            repeats(d.body, am38Bars, `${id} value details.${k}`);
+            const txt = d.body.map((x) => x.t).join("");
+            if ((txt.match(/[a-z]{2}\.\s+[A-Z]/g) ?? []).length) failures.push(`${project.brand}: ${id} value details.${k} is more than one sentence: "${txt.slice(0, 160)}"`);
+            for (const sec of d.sections ?? []) for (const r of sec.rows) {
+              if ((knOfH(r.num)?.k ?? 0) < 3) failures.push(`${project.brand}: ${id} value details.${k} "${sec.title}" row "${r.label}" rests on fewer than 3 answers`);
+              if (/own cheaper option/i.test(r.label)) failures.push(`${project.brand}: ${id} value details.${k} lists the own-cheaper bar as a row`);
+            }
+          }
+          if (p.competitors) failures.push(`${project.brand}: ${id} value still carries the competitors block`);
+          if (p.byProduct) {
+            const total = p.byProduct.rows.reduce((a, r) => a + (knOfH(r.cells[0] as PanelNum)?.n ?? 0), 0);
+            if (total !== (cellIds[id] ?? []).length) failures.push(`${project.brand}: ${id} by-product rows add to ${total}, the cell has ${(cellIds[id] ?? []).length}`);
+            for (const r of p.byProduct.rows) {
+              const n0 = knOfH(r.cells[0] as PanelNum)?.n;
+              const ks = r.cells.slice(0, 3).map((c) => knOfH(c as PanelNum));
+              if (ks.some((x) => !x || x.n !== n0) || ks.reduce((a, x) => a + (x?.k ?? 0), 0) !== n0) failures.push(`${project.brand}: ${id} by-product row "${r.label}" verdicts do not add to its answers`);
+            }
+            if (p.byProduct.rows.length < 2) failures.push(`${project.brand}: ${id} by-product table with one product`);
+          }
+        }
+        const weighLines = [...(p.lines ?? []), ...(p.linesComp ?? []), ...(p.rivals ?? []).flatMap((r) => r.lines)].filter((l) => /what the answer weighs/i.test(l.label));
+        if (weighLines.length) failures.push(`${project.brand}: ${id} still carries a "What the answer weighs" line`);
+        for (const w of [p.weighs, p.weighsComp, ...(p.rivals ?? []).map((r) => r.weighs)]) {
+          if (!w) continue;
+          am38Checks++;
+          for (const c of w.columns) {
+            if (!c.rows.length && !c.note) failures.push(`${project.brand}: ${id} weighs column "${c.title ?? ""}" has no rows and no note`);
+            if (c.rows.length > 3) failures.push(`${project.brand}: ${id} weighs column "${c.title ?? ""}" lists ${c.rows.length} topics`);
+            for (const r of c.rows) if ((knOfH(r.num)?.k ?? 0) < 3) failures.push(`${project.brand}: ${id} weighs row "${r.name}" rests on fewer than 3 answers`);
+          }
+        }
+      }
       // 7. kinds without conditions.
       if ((p.kind === "buyer_worry" || p.kind === "customer_worry" || p.kind === "value" || p.kind === "business_case") && p.conditions) failures.push(`${project.brand}: ${id} ${p.kind} carries conditions`);
       if ((p.kind === "learning" || p.kind === "critic") && p.conditions) failures.push(`${project.brand}: ${id} ${p.kind} carries conditions`);
@@ -713,6 +756,10 @@ for (const project of projects) {
       for (const rv of p.rivals ?? []) addP(rv.name);
       for (const d of [...Object.values(p.details ?? {}), ...Object.values(p.detailsComp ?? {})]) for (const r of d?.list?.rows ?? []) addP(r.label);
       for (const n of p.competitorOrder ?? []) addP(n);
+      for (const d of Object.values(p.details ?? {})) for (const sec of d?.sections ?? []) for (const r of sec.rows) addP(r.label);
+      for (const w of [p.weighs, p.weighsComp, ...(p.rivals ?? []).map((r) => r.weighs)]) for (const c of w?.columns ?? []) for (const r of c.rows) addP(r.name);
+      for (const r of p.byProduct?.rows ?? []) { addP(r.label); for (const c of r.cells) if (c && "t" in c) addP(c.t); }
+      if (p.product) addP(p.product);
       const strip = (t: string) => {
         let x = t.replace(/"[^"]*"/g, '""');
         for (const d of [...panelPhrases].sort((a, b) => b.length - a.length)) if (x.toLowerCase().includes(d.toLowerCase())) x = x.split(new RegExp(d.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "gi")).join(" ");
@@ -828,7 +875,7 @@ for (const project of projects) {
     // 9. ruling 5 omissions.
     for (const o of (debug as { panelOmissions?: { cellId: string; list: string; code: string; share: number; hit: string; via: string }[] }).panelOmissions ?? [])
       omissionLines.push(`${project.brand.padEnd(17)} | ${o.cellId.padEnd(44)} | ${o.list.padEnd(9)} | ${o.code.padEnd(28)} | ${(Math.round(o.share * 1000) / 10).toFixed(1).padStart(5)}% | ${o.hit.padEnd(16)} | ${o.via}`);
-    console.log(`PANELS: ${panels} panels, ${nums} numbers, ${refCount} example answers checked, ${labelFallbacks} quoted-seed claims, ${detailCount} step details, ${avgCount} average-competitor steps, ${repeatChecks} explanations checked for repeated bar numbers, ${verdictChecked} verdict panels checked, ${am37Checks} panels through the am37 checks`);
+    console.log(`PANELS: ${panels} panels, ${nums} numbers, ${refCount} example answers checked, ${labelFallbacks} quoted-seed claims, ${detailCount} step details, ${avgCount} average-competitor steps, ${repeatChecks} explanations checked for repeated bar numbers, ${verdictChecked} verdict panels checked, ${am37Checks} panels through the am37 checks, ${am38Checks} through the am38 checks`);
     if (detailCount === 0) failures.push(`${project.brand}: no panel carries step details`);
     if (avgCount === 0) failures.push(`${project.brand}: no panel carries an average competitor`);
     // The mockup numbers (American Express).

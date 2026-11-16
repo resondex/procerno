@@ -342,6 +342,78 @@ export function valueDetail(o: { side: ValueSide; pooled: boolean; often?: Often
   return { heading, body: join(sentence(a, b)) };
 }
 
+/* ---------- am38: Value's two steps explain themselves ---------- */
+
+/** The heading of the "is it worth it" explanation (valueDetail's). */
+const valueWorthHeading = (side: ValueSide, pooled: boolean) => valueDetail({ side, pooled, instead: "even", noun: "" }).heading;
+
+const VERDICT_SAID: Record<"yes" | "depends" | "no", string> = { yes: "says it is worth it", depends: "says it depends on how the buyer will use it", no: "says it is not worth it" };
+
+/** "Is it worth paying more for?" - the verdict against all buyers in words;
+ * without that comparison, which verdict comes next. No number. */
+export function valueWorthDetail(o: { side: ValueSide; pooled: boolean; often?: OftenWords; next?: "yes" | "depends" | "no"; byProduct: boolean }): { heading: string; body: PanelText } {
+  const heading = valueWorthHeading(o.side, o.pooled);
+  const said = o.side === "yes" ? "it says worth it" : o.side === "depends" ? "it says it depends" : "it says not worth it";
+  if (o.often && !o.pooled) return { heading, body: join(`${upperFirst(said)} ${oftenPhrase(o.often, "for this buyer", "across all your buyers")}.`) };
+  if (o.byProduct) return { heading, body: join("The answer changes with the product asked about, so read each one in the table above.") };
+  if (o.side === "split" || !o.next) return { heading, body: join("No one verdict holds most of these answers.") };
+  return { heading, body: join(`Where it does not take that side, it more often ${VERDICT_SAID[o.next]}.`) };
+}
+
+/** "Where it points the buyer instead" - a takeaway and one sentence; the lists below carry the new facts. No number. */
+export function valueInsteadDetail(o: { instead: InsteadSide; ladder: boolean; topRival?: string; noun: string }): { heading: string; body: PanelText } {
+  const heading =
+    o.instead === "rival"
+      ? o.ladder
+        ? `It points the buyer to a rival's ${o.noun} more often than to your own`
+        : `When it points the buyer elsewhere, it is to a rival's ${o.noun}`
+      : o.instead === "own"
+        ? "It points the buyer to your own cheaper option more often than to a rival's"
+        : o.instead === "nowhere"
+          ? "It mostly names no cheaper option at all"
+          : "Rivals' and your own cheaper options come up about equally";
+  const body =
+    o.instead === "own"
+      ? "When it names a cheaper option, it keeps the buyer with you more often than it sends them to a rival."
+      : o.instead === "nowhere"
+        ? "It weighs the price without sending the buyer anywhere."
+        : o.topRival
+          ? `The rival it names most often is ${o.topRival}.`
+          : "No single rival stands out.";
+  return { heading, body: join(body) };
+}
+
+/** The verdict rows of "By what the AI said". */
+export const VALUE_VERDICT_ROW: Record<"no" | "depends" | "yes", string> = { no: "Says not worth it", depends: "Says it depends", yes: "Says worth it" };
+const VALUE_VERDICT_WORDS: Record<"no" | "depends" | "yes", string> = { no: "not worth it", depends: "it depends", yes: "worth it" };
+export const VALUE_SECTIONS = {
+  byVerdict: { title: "By what the AI said, the share that name a rival", sub: "Of the answers giving each verdict." },
+  rivals: { title: "Where it points the buyer instead", sub: "Share of these answers. Open a rival to see how it gets its picks." },
+  products: (plural: string) => ({ title: `Which ${plural} it names`, sub: "Share of these answers that recommend it in place of yours." }),
+  own: { title: "Your own cheaper options named", sub: "Share of these answers that name it." },
+};
+/** A verdict whose rival-naming answers are too few for a bar. */
+export const valueVerdictFold = (v: "no" | "depends" | "yes", never: boolean) => `Answers that say ${VALUE_VERDICT_WORDS[v]} ${never ? "never" : "almost never"} name a rival.`;
+
+/** am38: Value's step label, naming the product asked about. */
+export const valueStepLabel = (product: string | undefined, several: boolean) => (several ? "Are they worth paying more for?" : product ? `Is ${product} worth paying more for?` : "Is it worth paying more for?");
+export const BY_PRODUCT = {
+  title: "By product asked about",
+  sub: "Share of the answers about each product. Each buyer was asked about one product.",
+  columns: ["Worth it", "Depends", "Not worth it", "Buyers asked"],
+};
+
+/** am38: "What the answer weighs", sized. */
+export const WEIGHS_TITLE = "What the answer weighs";
+export const WEIGHS_SUB_SIDES = "Share of the answers on each side that weigh it.";
+export const WEIGHS_SUB_VERSUS = "The topics that come up more on one side than the other, with the share of that side's answers that weigh each.";
+export const WEIGHS_SUB_ALL = "Share of these answers that weigh it.";
+export const WEIGHS_SUB_NAMING = "Share of the answers that name it that weigh it.";
+/** A side with too few answers to size what they weigh (say: "say worth it", "pick you"). */
+/** A side with enough answers where no topic clears the row floor. */
+export const WEIGHS_NONE = "No one topic comes up often enough on this side to size.";
+export const weighsFewNote = (say: string) => `Too few answers ${say} to size what they weigh.`;
+
 export type BuyerSide = "go" | "avoid" | "grant" | "none" | "split";
 export function buyerWorryDetail(o: { side: BuyerSide; often?: OftenWords; topRival?: string }): { heading: string; body: PanelText } {
   const heading =

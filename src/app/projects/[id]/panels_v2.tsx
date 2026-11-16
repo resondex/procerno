@@ -26,6 +26,8 @@ import {
   Tag,
   NumBar,
   TextView,
+  DetailSection,
+  WeighsView,
   useComp,
 } from "./panel_parts";
 import { T } from "./type_scale";
@@ -38,16 +40,18 @@ import { T } from "./type_scale";
  * competitors shown) a block belongs to.
  */
 
-type Block = "stack" | "detail" | "conditions" | "competitors" | "lines" | "table" | "tables";
+type Block = "stack" | "byproduct" | "detail" | "conditions" | "competitors" | "lines" | "weighs" | "table" | "tables";
 
+// am38: "weighs" (what the answer weighs, sized) sits where its line sat - after the lines.
 const ORDER: Record<PanelKind, Block[]> = {
-  buy: ["stack", "detail", "conditions", "competitors", "lines"],
-  switching: ["stack", "detail", "conditions", "competitors", "lines"],
-  h2h: ["stack", "detail", "conditions", "lines"],
-  buyer_worry: ["stack", "detail", "competitors", "lines"],
-  customer_worry: ["stack", "detail", "competitors", "lines"],
-  value: ["stack", "detail", "competitors", "lines"],
-  looking_around: ["stack", "detail", "competitors", "conditions", "lines"],
+  buy: ["stack", "detail", "conditions", "competitors", "lines", "weighs"],
+  switching: ["stack", "detail", "conditions", "competitors", "lines", "weighs"],
+  h2h: ["stack", "detail", "conditions", "lines", "weighs"],
+  buyer_worry: ["stack", "detail", "competitors", "lines", "weighs"],
+  customer_worry: ["stack", "detail", "competitors", "lines", "weighs"],
+  // am38: Value's rivals moved into the "where it points" explanation; the by-product table sits right under the steps.
+  value: ["stack", "byproduct", "detail", "competitors", "lines", "weighs"],
+  looking_around: ["stack", "detail", "competitors", "conditions", "lines", "weighs"],
   problem: ["stack", "detail", "competitors", "lines", "table"],
   criteria: ["stack", "detail", "table", "lines"],
   expansion: ["stack", "detail", "conditions", "lines"],
@@ -174,11 +178,15 @@ export function PositionPanelView({ p, pp, usualSteps, ctx }: { p: Position; pp:
       : [{ label: hereLabel, color: C_YOU }, ...(usualLabel && (usualSteps || pp.steps.some((s) => !!s.usual)) ? [{ label: usualLabel, color: C_USUAL }] : [])];
   const detail = comp ? pp.detailComp ?? pp.detail : pp.detail;
   const lines = comp ? pp.linesComp ?? pp.lines : pp.lines;
+  const weighs = comp ? pp.weighsComp ?? pp.weighs : pp.weighs;
   const openRival = (name: string) => ctx.open({ kind: "rival", name, cell: p.cellId });
+  const openIfRival = (n: string) => (hasRival(pp, n) ? openRival(n) : undefined);
 
   const blocks: Record<Block, ReactNode> = {
     stack:
       pp.steps.length > 0 ? (
+        <>
+        {pp.product && <p className={`clear-both mt-4 -mb-2 ${T.cap} text-ink-2`}>Asked about: <span className="font-semibold text-ink">{pp.product}</span></p>}
         <StepStack
           label={pp.stackLabel}
           steps={pp.steps}
@@ -191,18 +199,21 @@ export function PositionPanelView({ p, pp, usualSteps, ctx }: { p: Position; pp:
           onSelect={selectable ? (k) => setPicked({ key: selKey, step: k }) : undefined}
           canSelect={selectable ? (k) => !!stepDetails[k] : undefined}
         />
+        </>
       ) : null,
+    byproduct: pp.byProduct && pp.byProduct.rows.length > 0 ? <TableView table={pp.byProduct} /> : null,
     detail: selDetail ? (
-      <RivalDetail d={selDetail} name="" />
+      <RivalDetail d={selDetail} name="" onOpen={openIfRival} />
     ) : detail && (!selectable || sel === defaultSel) ? (
       <DetailView heading={detail.heading} body={detail.body} />
     ) : null,
     conditions: pp.conditions ? <CondColumns cond={pp.conditions} comp={comp} /> : null,
     competitors:
       pp.competitors && pp.competitors.rows.length > 0 && (!pp.compare || comp) ? (
-        <BrandRows block={pp.competitors} onOpen={(n) => (hasRival(pp, n) ? openRival(n) : undefined)} />
+        <BrandRows block={pp.competitors} onOpen={openIfRival} />
       ) : null,
     lines: lines && lines.length > 0 ? <LineRows lines={lines} /> : null,
+    weighs: weighs && weighs.columns.length > 0 ? <WeighsView w={weighs} /> : null,
     table: (() => {
       const t = comp ? pp.tableComp ?? pp.table : pp.table;
       return t && t.rows.length > 0 ? <TableView table={t} /> : null;
@@ -258,7 +269,7 @@ const isFunnel = (k: PanelStepKey): k is FunnelKey => k === "named" || k === "re
 
 const cap1 = (t: string) => (t ? t[0].toUpperCase() + t.slice(1) : t);
 
-function RivalDetail({ d, name }: { d: RivalStepDetail | PanelStepDetail; name: string }) {
+function RivalDetail({ d, name, onOpen }: { d: RivalStepDetail | PanelStepDetail; name: string; onOpen?: (name: string) => void }) {
   const ol = d.outcomeLabels;
   const cols = "columns" in d ? d.columns : undefined;
   const rivalHead = cols?.rival ?? name;
@@ -370,6 +381,7 @@ function RivalDetail({ d, name }: { d: RivalStepDetail | PanelStepDetail; name: 
           <TextView text={d.both} title={d.heading} />
         </p>
       )}
+      {"sections" in d && d.sections?.map((s) => <DetailSection key={s.title} s={s} onOpen={onOpen} />)}
     </DetailView>
   );
 }
@@ -429,6 +441,7 @@ export function RivalInCell({ r, p, ctx }: { r: PanelRival; p: Position; ctx: Ct
       {d && <RivalDetail d={d} name={r.name} />}
       {r.conditions && <CondColumns cond={r.conditions} comp={false} />}
       <LineRows lines={r.lines} />
+      {r.weighs && <WeighsView w={r.weighs} />}
       {r.byCell && r.byCell.length > 0 && (
         <Blk title={r.byCellTitle}>
           <table className={`w-full ${T.body}`}>

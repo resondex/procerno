@@ -16,6 +16,8 @@ import type {
   PanelTable,
   PanelText,
   PanelTone,
+  PanelWeighs,
+  PanelDetailSection,
 } from "@/lib/engine/analysis_types";
 import { useShowExamples, useWhere } from "./analysis_panel";
 import { T } from "./type_scale";
@@ -608,6 +610,59 @@ function BrandBar({ name, n, color, bold }: { name: string; n: PanelNum; color: 
   ) : (
     <div className={cls} title={n.tip}>
       {inner}
+    </div>
+  );
+}
+
+const toneBar = (t: PanelTone) => (t === "good" ? C_YOU : t === "bad" ? C_AWAY : C_USUAL);
+
+/** am38: "What the answer weighs", sized - one column per side (blue for the
+ * side good for you, pink for the other, grey unsided), one bar per topic. */
+export function WeighsView({ w }: { w: PanelWeighs }) {
+  return (
+    <Blk title={w.title} sub={w.sub}>
+      <div className={`grid items-start gap-3 ${w.columns.length > 1 ? "sm:grid-cols-2" : ""}`}>
+        {w.columns.map((c, i) => (
+          <div key={`${i}:${c.title ?? ""}`} className="min-w-0">
+            {c.title && (
+              <h5 className="mb-1.5 text-[12px] font-semibold" style={{ color: c.tone === "neutral" ? "var(--ink-2)" : toneBar(c.tone) }}>
+                {c.title}
+              </h5>
+            )}
+            {c.rows.map((r) => (
+              <NumBar key={r.name} label={r.name} n={r.num} color={toneBar(c.tone)} title={`${c.title ?? w.title} - ${r.name}`} />
+            ))}
+            {c.note && <p className={`${T.body} text-ink-3`}>{c.note}</p>}
+          </div>
+        ))}
+      </div>
+    </Blk>
+  );
+}
+
+/** am38: a list inside a step explanation - one bar per row, "Open" on rows with a rival panel, then a note. */
+export function DetailSection({ s, onOpen }: { s: PanelDetailSection; onOpen?: (name: string) => void }) {
+  return (
+    <div className="mt-3.5">
+      <p className={`${T.cap} font-semibold text-ink`}>{s.title}</p>
+      {s.sub && <p className={`${T.cap} mb-1 text-ink-3`}>{s.sub}</p>}
+      {s.rows.map((r) => (
+        <div key={r.label} className="grid grid-cols-[minmax(0,1fr)_2.75rem] items-center gap-2">
+          <NumBar label={r.label} n={r.num} color={toneBar(s.tone)} title={`${s.title} - ${r.label}`} />
+          {r.open && onOpen ? (
+            <button type="button" onClick={() => onOpen(r.label)} className={`text-right ${T.ctl} text-primary hover:opacity-80`}>
+              Open
+            </button>
+          ) : (
+            <span />
+          )}
+        </div>
+      ))}
+      {s.note && s.note.length > 0 && (
+        <p className={`${T.body} mt-1 text-ink-2`}>
+          <TextView text={s.note} title={s.title} />
+        </p>
+      )}
     </div>
   );
 }

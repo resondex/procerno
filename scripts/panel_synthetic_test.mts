@@ -229,6 +229,21 @@ function check(name: string, t: ReturnType<typeof themedCell>) {
   ok(c.away.some((x) => x.text.startsWith("Grouped away")), `${name}: no themed away row`);
   const themedAway = c.away.find((x) => x.text.startsWith("Grouped away"));
   ok(!!themedAway?.to?.some((x) => x.name === rival), `${name}: the themed away row does not name ${rival} as its destination`);
+  // am38: "What the answer weighs" is a sized block, never a line; unsided rows are shares of all the cell's answers.
+  ok(!(panel.lines ?? []).some((l) => /what the answer weighs/i.test(l.label)), `${name}: a "What the answer weighs" line is still drawn`);
+  for (const w of [panel.weighs, panel.weighsComp]) {
+    if (!w) continue;
+    for (const col of w.columns) {
+      ok(col.rows.length <= 3, `${name}: weighs column lists ${col.rows.length} topics`);
+      ok(col.rows.length > 0 || !!col.note, `${name}: weighs column has no rows and no note`);
+      for (const r of col.rows) {
+        const kn = knOf(r.num);
+        ok(!!kn && kn.k >= 3, `${name}: weighs row "${r.name}" rests on ${kn?.k} answers`);
+        if (w.columns.length === 1) ok(kn?.n === all, `${name}: weighs row "${r.name}" is over ${kn?.n}, not all ${all} answers`);
+      }
+    }
+  }
+  if ((panel.kind === "buy" || panel.kind === "looking_around") && rows.filter((r) => r.code.reasons !== null).length >= 10) ok(!!panel.weighs, `${name}: answers carry topics but no weighs block`);
   console.log(`${name}: ${all} answers | toward ${c.toward.map((x) => `${x.text} ${x.share.value}`).join(", ")} | away ${c.away.map((x) => `${x.text} ${x.share.value}`).join(", ")}`);
 }
 

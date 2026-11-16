@@ -557,6 +557,28 @@ export interface PanelStepDetail {
   outcomes?: { name: string; you?: true; usual?: true; picked?: PanelNum; lost: PanelNum; none: PanelNum }[];
   outcomeLabels?: { picked?: string; lost: string; none: string };
   both?: PanelText;
+  /** am38: further lists of new facts, in order (Value's "where it points the buyer instead"). */
+  sections?: PanelDetailSection[];
+}
+
+/** am38: one list inside a step explanation. Rows are bars of one number each
+ * (3+ answers); `open` rows carry a rival panel; `note` holds what rests on
+ * fewer answers, as a sentence. tone colours the bars (good = you, bad = a rival). */
+export interface PanelDetailSection {
+  title: string;
+  sub?: string;
+  tone: PanelTone;
+  rows: { label: string; num: PanelNum; open?: true }[];
+  note?: PanelText;
+}
+
+/** am38: "What the answer weighs", sized - one column per side (or one column
+ * unsided), top 3 topics each with its share of that side's answers. A side
+ * with too few answers carries `note` in place of rows. */
+export interface PanelWeighs {
+  title: string;
+  sub: string;
+  columns: { title?: string; tone: PanelTone; rows: { name: string; num: PanelNum }[]; note?: string }[];
 }
 
 /** Panel 11: one rival inside this cell's question type. */
@@ -569,7 +591,9 @@ export interface PanelRival {
   focus?: PanelStepKey;
   details?: Partial<Record<"named" | "recommended" | "converts", RivalStepDetail>>;
   conditions?: PanelConditions;  // full only: away = rows sending buyers to this rival, toward = the cell's toward rows
-  lines: PanelLine[];            // which products it picks (both sides); what the answer weighs by side
+  lines: PanelLine[];            // which products it picks (both sides)
+  /** am38: what the answer weighs, sized (by side on the full panel). */
+  weighs?: PanelWeighs;
   byCell?: { cellId: string; label: string; rival: PanelNum; you: PanelNum }[]; // sibling cells of the row (full, rows with 2+ cells)
   byCellTitle?: string;          // the byCell block's title
   stackLabel?: string;           // the step stack's label
@@ -601,6 +625,13 @@ export interface PositionPanel {
   conditions?: PanelConditions;
   lines?: PanelLine[];
   linesComp?: PanelLine[];
+  /** am38: what the answer weighs, sized; `weighsComp` is the comparison view's own version. */
+  weighs?: PanelWeighs;
+  weighsComp?: PanelWeighs;
+  /** am38, Value: the product the question asked about ("A, B and C" on an all-buyers cell asking about several). */
+  product?: string;
+  /** am38, Value all-buyers cell asking about 2+ products: the verdict per product asked about. */
+  byProduct?: PanelTable;
   table?: PanelTable;
   /** The comparison view's own version of `table` (when it drops a column). */
   tableComp?: PanelTable;

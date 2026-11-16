@@ -14,6 +14,20 @@ import {
   N,
   NO_CONDITION_ROWS,
   T,
+  BY_PRODUCT,
+  VALUE_SECTIONS,
+  VALUE_VERDICT_ROW,
+  WEIGHS_NONE,
+  WEIGHS_SUB_ALL,
+  WEIGHS_SUB_NAMING,
+  WEIGHS_SUB_SIDES,
+  WEIGHS_SUB_VERSUS,
+  WEIGHS_TITLE,
+  valueInsteadDetail,
+  valueStepLabel,
+  valueVerdictFold,
+  valueWorthDetail,
+  weighsFewNote,
   alongsideDetail,
   buyerWorryDetail,
   caseDetail,
@@ -23,7 +37,6 @@ import {
   expansionDetail,
   h2hDetail,
   lookingAroundDetail,
-  valueDetail,
   type BuyerSide,
   type CaseSide,
   type InsteadSide,
@@ -78,6 +91,8 @@ import type {
   PositionException,
   PositionPanel,
   PanelStepDetail,
+  PanelDetailSection,
+  PanelWeighs,
   RivalStepDetail,
 } from "./analysis_types";
 
@@ -475,34 +490,88 @@ function seg(key: string, label: string, tone: PanelSegment["tone"], hit: PoolRo
   return { key, label, tone, num: num(hit.length, n, unit, refsOf(hit, find ?? ((r) => verdictFind(r, h)))) };
 }
 
-/** "What the answer weighs" over every answer (top 3, ruling 5 filtered). */
-function weighsAll(inp: PanelCellInput, ctx: Ctx, list: OmissionList = "weighs", top = 3): PanelLine | null {
-  const { h } = ctx;
-  const rows = inp.rows;
-  const withR = rows.filter((r) => r.code.reasons !== null);
-  if (withR.length < ARGS_MIN) return null;
-  const counts = new Map<string, number>();
-  for (const r of withR) for (const c of new Set(r.code.reasons!)) counts.set(c, (counts.get(c) ?? 0) + 1);
-  const ranked = [...counts.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0])).map(([code, k]) => ({ code, k, share: k / rows.length }));
-  const kept = filterObvious(ranked, inp.id, list, h.wordings(inp.cellIntents), h.scopes, h.category, h.omissions).slice(0, top);
-  if (!kept.length) return null;
-  const spans = kept.map((x) => F(cname(x.code, h), num(x.k, rows.length, "answers", refsOf(withR.filter((r) => r.code.reasons!.includes(x.code)), () => x.code))));
-  return { label: "What the answer weighs", value: listNameSpans(spans) };
+/** A topic belongs to a side's column only when its share there is this far above the other side's. */
+const WEIGHS_GAP = 0.05;
+
+/** am38: one side of "What the answer weighs" - its answers, the words for it, and the topic to rank first. */
+interface WeighSide {
+  title?: string;
+  /** "say worth it", "pick you" - the too-few note's verb phrase. */
+  say: string;
+  tone: PanelTone;
+  rows: PoolRow[];
+  /** A topic (code) shown first when it clears the row floor (the side's top-lift topic). */
+  lead?: string;
+  /** The tip's unit when it is not "answers that <say>" (the unsided version: "answers"). */
+  unit?: string;
 }
 
-/** "A when <side 1> · B when <side 2>" from the cell's two-sided lifts. */
-function weighsSides(inp: PanelCellInput, ctx: Ctx, sideA: string, sideB: string, wins: PoolRow[], others: PoolRow[]): PanelLine | null {
+/** "What the answer weighs", sized (am38): per side, the top `top` topics by
+ * that side's share, ruling 5 filtered against the whole cell, rows of 3+
+ * answers only; a side with fewer than ARGS_MIN answers carrying topics gets
+ * a one-line note. Undefined when no side has a row. */
+function weighsCols(inp: PanelCellInput, ctx: Ctx, sides: WeighSide[], sub: string, opts: { top?: number; list?: OmissionList; omit?: boolean } = {}): PanelWeighs | undefined {
+  const { h } = ctx;
+  const top = opts.top ?? 3;
+  const list = opts.list ?? "weighs";
+  // The ruling-5 share is of ALL the cell's answers, whichever side a list is for.
+  const cellCount = new Map<string, number>();
+  for (const r of inp.rows) for (const c of new Set(r.code.reasons ?? [])) cellCount.set(c, (cellCount.get(c) ?? 0) + 1);
+  const wording = h.wordings(inp.cellIntents);
+  let any = false;
+  // Two sides, both sized: a column lists the topics that come up MORE on its side than the other
+  // (a topic in nearly every answer on both sides says nothing about either), biggest gap first to
+  // choose them, then largest share first to draw them.
+  const sideShares = sides.map((sd) => {
+    const withR = sd.rows.filter((r) => r.code.reasons !== null);
+    const m = new Map<string, number>();
+    for (const r of withR) for (const c of new Set(r.code.reasons!)) m.set(c, (m.get(c) ?? 0) + 1);
+    return { n: withR.length, m };
+  });
+  const versus = sides.length === 2 && sideShares.every((x) => x.n >= ARGS_MIN);
+  const columns: PanelWeighs["columns"] = sides.map((sd, si) => {
+    const withR = sd.rows.filter((r) => r.code.reasons !== null);
+    const col = { ...(sd.title ? { title: sd.title } : {}), tone: sd.tone };
+    if (withR.length < ARGS_MIN) return { ...col, rows: [], note: weighsFewNote(sd.say) };
+    const counts = sideShares[si].m;
+    const other = versus ? sideShares[1 - si] : null;
+    const gap = (code: string, k: number) => (other ? k / withR.length - (other.m.get(code) ?? 0) / other.n : 0);
+    const ranked = [...counts.entries()]
+      .filter(([code, k]) => k >= ROW_MIN && (!other || gap(code, k) >= WEIGHS_GAP))
+      .sort((a, b) => (other ? gap(b[0], b[1]) - gap(a[0], a[1]) : a[0] === sd.lead ? -1 : b[0] === sd.lead ? 1 : 0) || b[1] - a[1] || a[0].localeCompare(b[0]))
+      .map(([code, k]) => ({ code, k, share: (cellCount.get(code) ?? k) / Math.max(1, inp.rows.length) }));
+    const kept = filterObvious(ranked, inp.id, list, wording, h.scopes, h.category, opts.omit === false ? undefined : h.omissions).slice(0, top);
+    if (other) kept.sort((a, b) => b.k - a.k || a.code.localeCompare(b.code));
+    if (!kept.length) return { ...col, rows: [], note: WEIGHS_NONE };
+    any = true;
+    return {
+      ...col,
+      rows: kept.map((x) => ({ name: clabel(x.code, h), num: num(x.k, sd.rows.length, sd.unit ?? `answers that ${sd.say}`, refsOf(withR.filter((r) => r.code.reasons!.includes(x.code)), () => x.code)) })),
+    };
+  });
+  if (!any) return undefined;
+  return { title: WEIGHS_TITLE, sub: versus ? WEIGHS_SUB_VERSUS : sub, columns };
+}
+
+/** "What the answer weighs" over every answer (top 3, ruling 5 filtered), one unsided column. */
+function weighsAll(inp: PanelCellInput, ctx: Ctx, list: OmissionList = "weighs", top = 3): PanelWeighs | undefined {
+  return weighsCols(inp, ctx, [{ say: "come up here", unit: "answers", tone: "neutral", rows: inp.rows }], WEIGHS_SUB_ALL, { top, list });
+}
+
+/** Two sides, each led by the cell's top lift that way (the positive lift on
+ * the favourable side, the negative on the other); no lift either way, or too
+ * few answers on both sides, falls back to the unsided version. */
+function weighsSides(inp: PanelCellInput, ctx: Ctx, fav: Omit<WeighSide, "tone" | "lead">, unfav: Omit<WeighSide, "tone" | "lead">): PanelWeighs | undefined {
   const pos = inp.lifts.filter((l) => l.value > 0).sort((a, b) => b.value - a.value)[0];
   const neg = inp.lifts.filter((l) => l.value < 0).sort((a, b) => a.value - b.value)[0];
-  if (!pos && !neg) return weighsAll(inp, ctx);
-  const span = (l: LiftItem, rows: PoolRow[]) => {
-    const hit = rows.filter((r) => r.code.reasons?.includes(l.label));
-    return F(cname(l.label, ctx.h), num(hit.length, rows.length, "answers", refsOf(hit, () => l.label)));
-  };
-  return {
-    label: "What the answer weighs",
-    value: join(pos ? join(span(pos, wins), ` ${sideA}`) : null, pos && neg ? " · " : null, neg ? join(span(neg, others), ` ${sideB}`) : null),
-  };
+  const enough = (rs: PoolRow[]) => rs.filter((r) => r.code.reasons !== null).length >= ARGS_MIN;
+  if ((!pos && !neg) || (!enough(fav.rows) && !enough(unfav.rows))) return weighsAll(inp, ctx);
+  return (
+    weighsCols(inp, ctx, [
+      { ...fav, tone: "good", ...(pos ? { lead: pos.label } : {}) },
+      { ...unfav, tone: "bad", ...(neg ? { lead: neg.label } : {}) },
+    ], WEIGHS_SUB_SIDES) ?? weighsAll(inp, ctx)
+  );
 }
 
 /** A product name as written, cleaned for display: no trade marks, no "from <maker>" tail. */
@@ -949,22 +1018,25 @@ function pickPanel(inp: PanelCellInput, ctx: Ctx): PositionPanel {
     const items = productSplit(mine, (r) => pickedProduct(r, ctx, true), 2, "of your picks", nounToks(ctx), nameTokens(h.brand, ctx));
     if (namesAProduct(items)) lines.push({ label: `Which of your ${h.plural} it picks`, value: splitLine(items) });
   }
-  const weigh = weighsAll(inp, ctx);
-  if (weigh) lines.push(weigh);
+  const weighs = weighsAll(inp, ctx);
   linesComp.push(shareLine);
   const othersPicked = inp.rows.filter((r) => h.pickOf(r).status === "active" && h.pickOf(r).key !== h.targetKey);
   const negs = inp.lifts.filter((l) => l.value < 0).sort((a, b) => a.value - b.value).slice(0, 2);
   const poss = inp.lifts.filter((l) => l.value > 0).sort((a, b) => b.value - a.value).slice(0, 1);
-  if (negs.length || poss.length) {
-    const sp = (l: LiftItem, rows: PoolRow[]) => {
-      const hit = rows.filter((r) => r.code.reasons?.includes(l.label));
-      return F(cname(l.label, h), num(hit.length, rows.length, "answers", refsOf(hit, () => l.label)));
-    };
-    linesComp.push({
-      label: "What the answer weighs",
-      value: join(negs.length ? join(listNameSpans(negs.map((l) => sp(l, othersPicked))), " for others") : null, negs.length && poss.length ? " · " : null, poss.length ? join(sp(poss[0], mine), " for you") : null),
-    });
-  } else if (weigh) linesComp.push(weigh);
+  // The comparison view: what the answer weighs when it picks you, and when it picks another brand.
+  const weighsComp =
+    negs.length || poss.length
+      ? weighsCols(
+          inp,
+          ctx,
+          [
+            { title: "When it picks you", say: "pick you", tone: "good", rows: mine, ...(poss.length ? { lead: poss[0].label } : {}) },
+            { title: `When it picks another ${h.noun}`, say: `pick another ${h.noun}`, tone: "bad", rows: othersPicked, ...(negs.length ? { lead: negs[0].label } : {}) },
+          ],
+          WEIGHS_SUB_SIDES,
+          { omit: false }
+        ) ?? weighs
+      : weighs;
 
   const hereKey = inp.pooled ? "You" : switching ? (generic ? `You, with customers of another ${h.noun}` : `You, with ${possOf(rival)} customers`) : "You, with this buyer";
   return {
@@ -980,6 +1052,8 @@ function pickPanel(inp: PanelCellInput, ctx: Ctx): PositionPanel {
     ...(conditions ? { conditions } : {}),
     lines,
     linesComp,
+    ...(weighs ? { weighs } : {}),
+    ...(weighsComp ? { weighsComp } : {}),
     ...(rivals.length ? { rivals } : {}),
   };
 }
@@ -1075,8 +1149,7 @@ function h2hPanel(inp: PanelCellInput, ctx: Ctx): PositionPanel {
     const items = productSplit(lost, (r) => pickedProduct(r, ctx, false), 2, `picks of ${rival}`, nounToks(ctx), nameTokens(rival, ctx));
     if (namesAProduct(items)) lines.push({ label: `Which ${rival} ${ctx.h.plural} it picks`, value: splitLine(items) });
   }
-  const w = weighsAll(inp, ctx);
-  if (w) lines.push(w);
+  const weighs = weighsAll(inp, ctx);
   const usual = usualOf(inp, ctx.inputs);
   return {
     kind: "h2h",
@@ -1089,6 +1162,7 @@ function h2hPanel(inp: PanelCellInput, ctx: Ctx): PositionPanel {
     ...(byRival.length >= 2 ? { compare: true as const, competitorOrder: byRival.map((x) => x.name) } : {}),
     ...(conditions ? { conditions } : {}),
     lines,
+    ...(weighs ? { weighs } : {}),
   };
 }
 
@@ -1173,8 +1247,9 @@ function worryPanel(inp: PanelCellInput, ctx: Ctx): PositionPanel {
   const unfavRows = buyer
     ? rows.filter((r) => r.code.proceed_or_avoid === "avoid" || (r.code.premise_verdict === "confirms" && r.code.proceed_or_avoid !== "proceed"))
     : leaveRows;
-  const w = buyer ? weighsSides(inp, ctx, "when it says go ahead", "when it concedes", favRows, unfavRows) : weighsSides(inp, ctx, "when it says stay", "when it says leave", favRows, unfavRows);
-  if (w) lines.push(w);
+  const weighs = buyer
+    ? weighsSides(inp, ctx, { title: "When it says go ahead", say: "say go ahead", rows: favRows }, { title: "When it concedes", say: "concede the worry", rows: unfavRows })
+    : weighsSides(inp, ctx, { title: "When it says stay", say: "say stay", rows: favRows }, { title: "When it says leave", say: "say leave", rows: unfavRows });
   const rivals = comp.map((c) => rivalSmall(inp, ctx, c, (r) => h.activeDests(r.code.destinations).has(c.key), "Named as the alternative"));
   const usual = usualOf(inp, ctx.inputs);
   return {
@@ -1189,6 +1264,7 @@ function worryPanel(inp: PanelCellInput, ctx: Ctx): PositionPanel {
     ],
     ...(block ? { compare: true as const, competitors: block } : {}),
     lines,
+    ...(weighs ? { weighs } : {}),
     ...(rivals.length ? { rivals } : {}),
   };
 }
@@ -1241,8 +1317,7 @@ function holdPanel(inp: PanelCellInput, ctx: Ctx): PositionPanel {
   const { block, comp } = destBlock(rows, ctx, `Which ${h.plural} it shows`, `Share of these answers that name it as an alternative. Open a rival to see how it gets its picks.`, (r) => r.code.destinations);
   const rivals = comp.map((c) => rivalSmall(inp, ctx, c, (r) => h.activeDests(r.code.destinations).has(c.key), "Shown as an alternative"));
   const lines: PanelLine[] = [];
-  const w = weighsAll(inp, ctx);
-  if (w) lines.push(w);
+  const weighs = weighsAll(inp, ctx);
   return {
     kind: "looking_around",
     claim,
@@ -1255,8 +1330,50 @@ function holdPanel(inp: PanelCellInput, ctx: Ctx): PositionPanel {
     ...(block ? { compare: true as const, competitors: block } : {}),
     ...(conditions ? { conditions } : {}),
     lines,
+    ...(weighs ? { weighs } : {}),
     ...(rivals.length ? { rivals } : {}),
   };
+}
+
+/** am38: what valuePanel hands its own step explanations (built in finishPanel, after the tags). */
+const VALUE_EXTRA = new WeakMap<PositionPanel, { sections: PanelDetailSection[]; topRival?: string; byProduct: boolean }>();
+
+/** Rival products as written (am38): grouped per brand on their distinctive
+ * words, the brand's own name words and the category's nouns dropped, a name
+ * whose words sit inside exactly one larger name of the same brand joining it;
+ * the bare brand is never a product. Shares are of distinct answers over `all`. */
+function writtenProducts(items: { row: PoolRow; key: string; brandName: string; written: string }[], all: number, ctx: Ctx, unit: string): { name: string; num: PanelNum }[] {
+  type G = { key: string; forms: Map<string, number>; ids: Map<string, PoolRow>; toks: Set<string> };
+  const by = new Map<string, G>();
+  const nouns = nounToks(ctx);
+  for (const it of items) {
+    if (productLabel(it.written, it.brandName, ctx) === null) continue;
+    const name = cleanProduct(it.written) || it.written.trim();
+    const own = nameTokens(it.brandName, ctx);
+    const kept = famTokens(name).filter((t) => !nouns.has(t) && !PRODUCT_STOP.has(t) && !own.has(t));
+    if (!kept.length) continue;
+    const gk = `${it.key}|${kept.join(" ")}`;
+    const g = by.get(gk) ?? { key: it.key, forms: new Map<string, number>(), ids: new Map<string, PoolRow>(), toks: new Set(kept) };
+    g.forms.set(name, (g.forms.get(name) ?? 0) + 1);
+    g.ids.set(it.row.code.response_id, it.row);
+    by.set(gk, g);
+  }
+  const keys = [...by.keys()].sort((x, y) => by.get(x)!.toks.size - by.get(y)!.toks.size);
+  for (const k of keys) {
+    const g = by.get(k);
+    if (!g) continue;
+    const sup = [...by.entries()].filter(([k2, g2]) => k2 !== k && g2.key === g.key && g2.toks.size > g.toks.size && [...g.toks].every((t) => g2.toks.has(t)));
+    if (sup.length !== 1) continue;
+    const into = sup[0][1];
+    for (const [f, n] of g.forms) into.forms.set(f, (into.forms.get(f) ?? 0) + n);
+    for (const [id, r] of g.ids) into.ids.set(id, r);
+    by.delete(k);
+  }
+  return [...by.values()]
+    .map((g) => ({ name: [...g.forms.entries()].sort((x, y) => y[1] - x[1] || x[0].length - y[0].length || x[0].localeCompare(y[0]))[0][0], rows: [...g.ids.values()], forms: g.forms }))
+    .filter((g) => g.rows.length >= ROW_MIN)
+    .sort((x, y) => y.rows.length - x.rows.length || x.name.localeCompare(y.name))
+    .map((g) => ({ name: g.name, num: num(g.rows.length, all, unit, refsOf(g.rows, (r) => (r.code.mentions ?? []).find((m) => g.forms.has(cleanProduct(m.brand) || m.brand.trim()))?.brand ?? g.name)) }));
 }
 
 function valuePanel(inp: PanelCellInput, ctx: Ctx): PositionPanel {
@@ -1264,24 +1381,30 @@ function valuePanel(inp: PanelCellInput, ctx: Ctx): PositionPanel {
   const rows = inp.rows;
   const all = rows.length;
   const fact = (r: PoolRow) => h.valueFacts.get(r.code.response_id);
-  const worth = (w: string) => rows.filter((r) => (fact(r)?.worth ?? (r.code.worth_it === "yes" || r.code.worth_it === "no" ? r.code.worth_it : "depends")) === w);
+  const worthOf = (r: PoolRow) => fact(r)?.worth ?? (r.code.worth_it === "yes" || r.code.worth_it === "no" ? r.code.worth_it : "depends");
+  const worth = (w: string, rs: PoolRow[] = rows) => rs.filter((r) => worthOf(r) === w);
   const segs = [seg("yes", "worth it", "you", worth("yes"), all, h), seg("depends", "depends", "neutral", worth("depends"), all, h), seg("no", "not worth it", "away", worth("no"), all, h)];
   // Where it points the buyer instead - every answer, one segment each: a rival first, else your own, else nowhere (owner ruling 5).
-  // am37: one own-cheaper count per panel - this exclusive one, in the step and the competitors list alike; a
-  // brand with no ladder of its own lines (ctx.ladder false) has no own-cheaper option at all.
+  // am37: one own-cheaper count per panel - this exclusive one; a brand with no ladder of its own lines (ctx.ladder false) has no own-cheaper option at all.
   const ownOf = (r: PoolRow) => (ctx.ladder ? (fact(r)?.own.size ?? 0) : 0);
   const rivalRows = rows.filter((r) => (fact(r)?.instead.size ?? 0) > 0);
   const ownRows = rows.filter((r) => (fact(r)?.instead.size ?? 0) === 0 && ownOf(r) > 0);
   const nowhere = rows.filter((r) => (fact(r)?.instead.size ?? 0) === 0 && ownOf(r) === 0);
   const ownLabel = "only your own cheaper option";
+  const rivalFind = (r: PoolRow) => (r.code.mentions ?? []).find((m) => m.framing === "recommended" && fact(r)!.instead.has(h.resolve(m.brand).key))?.brand ?? [...fact(r)!.instead.values()][0];
   const instead: PanelSegment[] = [
     ...(ctx.ladder ? [{ key: "own", label: ownLabel, tone: "neutral" as const, num: num(ownRows.length, all, "answers", refsOf(ownRows, (r) => [...fact(r)!.own.values()][0] ?? h.brand)) }] : []),
-    { key: "rival", label: ctx.ladder ? `a rival's ${h.noun}` : "a rival", tone: "away", num: num(rivalRows.length, all, "answers", refsOf(rivalRows, (r) => (r.code.mentions ?? []).find((m) => m.framing === "recommended" && fact(r)!.instead.has(h.resolve(m.brand).key))?.brand ?? [...fact(r)!.instead.values()][0])) },
+    { key: "rival", label: ctx.ladder ? `a rival's ${h.noun}` : "a rival", tone: "away", num: num(rivalRows.length, all, "answers", refsOf(rivalRows, rivalFind)) },
     { key: "nowhere", label: ctx.ladder ? "nowhere" : "no rival", tone: "neutral", num: num(nowhere.length, all, "answers", refsOf(nowhere, (r) => verdictFind(r, h))) },
   ];
-  // The all-buyers cell asks about the line the rooms share, else the brand.
-  const sibLines = inp.pooled ? [...new Set([...ctx.inputs.values()].filter((x) => x.kind === "value" && !x.pooled && x.line).map((x) => x.line!))] : [];
+  // The product asked about (am38): the cell's confirmed line; on the all-buyers cell, the lines its buyers were asked about.
+  const sibs = inp.pooled ? siblingsOf(inp, ctx.inputs).filter((x) => x.kind === "value") : [];
+  const sibLines = [...new Set(sibs.filter((x) => x.line).map((x) => x.line!))];
   const subject = inp.pooled ? (sibLines.length === 1 ? sibLines[0] : h.brand) : inp.line ?? h.brand;
+  const lineOfSib = (x: PanelCellInput) => x.line || h.brand;
+  const lines = [...new Set(sibs.map(lineOfSib))];
+  const several = inp.pooled && lines.length >= 2;
+  const product = several ? listWords(lines) : inp.pooled ? sibLines[0] : inp.line ?? undefined;
   const yes = segs[0].num;
   const no = segs[2].num;
   const claim = join(
@@ -1291,35 +1414,132 @@ function valuePanel(inp: PanelCellInput, ctx: Ctx): PositionPanel {
     yes.pct === 0 ? "never says yes" : join("yes in ", N(yes)),
     "."
   );
-  // Competitors: the rivals named instead (top COMP_TOP) plus your own cheaper option.
+  // By product asked about (the all-buyers cell when its buyers were asked about 2+ products).
+  let byProduct: PanelTable | undefined;
+  if (several) {
+    const lineOfRow = new Map<string, string>();
+    for (const x of sibs) for (const r of x.rows) lineOfRow.set(r.code.response_id, lineOfSib(x));
+    const groups = new Map<string, PoolRow[]>();
+    for (const r of rows) {
+      const l = lineOfRow.get(r.code.response_id) ?? h.brand;
+      groups.set(l, [...(groups.get(l) ?? []), r]);
+    }
+    byProduct = {
+      title: BY_PRODUCT.title,
+      sub: BY_PRODUCT.sub,
+      columns: BY_PRODUCT.columns,
+      style: "compare",
+      rows: [...groups.entries()]
+        .sort((x, y) => y[1].length - x[1].length || x[0].localeCompare(y[0]))
+        .map(([l, rs]) => ({
+          label: l,
+          cells: [
+            ...(["yes", "depends", "no"] as const).map((w) => {
+              const hit = worth(w, rs);
+              return num(hit.length, rs.length, "answers about it", refsOf(hit, (r) => verdictFind(r, h)));
+            }),
+            // A buyer's cell label may carry its line after " - "; the row already names it.
+            T(listWords(sibs.filter((x) => lineOfSib(x) === l).map((x) => (x.label.endsWith(` - ${l}`) ? x.label.slice(0, -(l.length + 3)) : x.label)))),
+          ],
+        })),
+    };
+  }
+  // The rivals named instead (top COMP_TOP): the "where it points" explanation lists them, each opening its panel.
   const byRival = new Map<string, { key: string; name: string; rows: PoolRow[] }>();
   for (const r of rows) for (const [k, name] of fact(r)?.instead ?? []) byRival.set(k, { key: k, name, rows: [...(byRival.get(k)?.rows ?? []), r] });
   const comp = [...byRival.values()].filter((x) => x.rows.length >= ROW_MIN).sort((a, b) => b.rows.length - a.rows.length || a.name.localeCompare(b.name)).slice(0, COMP_TOP);
-  const blockRows: PanelBrandRow[] = [
-    ...comp.map((c) => ({ name: c.name, num: num(c.rows.length, all, "answers", refsOf(c.rows, (r) => (r.code.mentions ?? []).find((m) => h.resolve(m.brand).key === c.key)?.brand ?? c.name)), open: true as const })),
-    // The same number as the step's own-cheaper bar, said the same way.
-    ...(ownRows.length ? [{ name: upperFirst(ownLabel), you: true as const, shown: upperFirst(ownLabel), num: instead[0].num }] : []),
-  ].sort((a, b) => b.num.pct - a.num.pct || a.name.localeCompare(b.name));
-  const block: PanelBlock | undefined = blockRows.length ? { title: "Where it points the buyer instead", sub: "Share of these answers. Open a rival to see how it gets its picks.", rows: blockRows } : undefined;
   const rivals = comp.map((c) => rivalSmall(inp, ctx, c, (r) => !!fact(r)?.instead.has(c.key), "Named as the cheaper option"));
-  const lines: PanelLine[] = [];
-  const w = weighsSides(inp, ctx, "when it says worth it", "when it says not worth it", worth("yes"), worth("no"));
-  if (w) lines.push(w);
+  // The explanation's lists of new facts (am38), in order.
+  const sections: PanelDetailSection[] = [];
+  {
+    const vrows: PanelDetailSection["rows"] = [];
+    const folds: string[] = [];
+    for (const v of ["no", "depends", "yes"] as const) {
+      const vr = worth(v);
+      if (vr.length < ARGS_MIN) continue;
+      const hit = vr.filter((r) => (fact(r)?.instead.size ?? 0) > 0);
+      if (hit.length >= ROW_MIN) vrows.push({ label: VALUE_VERDICT_ROW[v], num: num(hit.length, vr.length, `answers that say ${segs.find((g) => g.key === v)!.label}`, refsOf(hit, rivalFind)) });
+      else folds.push(valueVerdictFold(v, hit.length === 0));
+    }
+    if (vrows.length || folds.length) sections.push({ ...VALUE_SECTIONS.byVerdict, tone: "bad", rows: vrows, ...(folds.length ? { note: join(folds.join(" ")) } : {}) });
+  }
+  if (comp.length)
+    sections.push({
+      ...VALUE_SECTIONS.rivals,
+      tone: "bad",
+      rows: comp.map((c) => ({ label: c.name, num: num(c.rows.length, all, "answers", refsOf(c.rows, (r) => (r.code.mentions ?? []).find((m) => h.resolve(m.brand).key === c.key)?.brand ?? c.name)), open: true as const })),
+    });
+  {
+    const items: { row: PoolRow; key: string; brandName: string; written: string }[] = [];
+    for (const r of rivalRows) {
+      const f = fact(r)!;
+      for (const m of r.code.mentions ?? []) {
+        if (m.framing !== "recommended") continue;
+        const k = h.resolve(m.brand).key;
+        if (k && f.instead.has(k)) items.push({ row: r, key: k, brandName: f.instead.get(k)!, written: m.brand });
+      }
+    }
+    const prods = writtenProducts(items, all, ctx, "answers").slice(0, 5);
+    if (prods.length >= 2) sections.push({ ...VALUE_SECTIONS.products(h.plural), tone: "bad", rows: prods.map((x) => ({ label: x.name, num: x.num })) });
+  }
+  if (ctx.ladder && ownRows.length) {
+    // Your own options, on value.ts's grouping words with the category's nouns dropped; a group whose
+    // words sit inside larger groups' and name no confirmed line's word folds them in (value.ts foldOwn).
+    const nouns = nounToks(ctx);
+    const mineToks = nameTokens(h.brand, ctx);
+    const sing = (w: string) => w.replace(/s$/, "");
+    const lineWords = new Set([...ctx.inputs.values()].filter((x) => x.kind === "value" && x.line).flatMap((x) => famTokens(x.line!).filter((t) => !mineToks.has(t)).map(sing)));
+    const own = new Map<string, { forms: Map<string, number>; rows: Set<PoolRow> }>();
+    for (const r of rows)
+      for (const [k0, surface] of fact(r)?.own ?? []) {
+        // A description ("any <noun> ...", "a cheaper ...") is no named option.
+        if (/^(any|a|an|the|another|some)\s/i.test(surface.trim()) || !/^[A-Za-z0-9]/.test(cleanProduct(surface) || surface.trim())) continue;
+        const k = k0.split(" ").filter((w) => !nouns.has(w) && !nouns.has(`${w}s`)).join(" ") || k0;
+        const t = own.get(k) ?? { forms: new Map<string, number>(), rows: new Set<PoolRow>() };
+        t.forms.set(surface, (t.forms.get(surface) ?? 0) + 1);
+        t.rows.add(r);
+        own.set(k, t);
+      }
+    const setOf = (k: string) => new Set(k.split(" "));
+    for (const ka of [...own.keys()].sort((x, y) => setOf(x).size - setOf(y).size)) {
+      const A = setOf(ka);
+      if (!own.has(ka) || [...A].some((w) => lineWords.has(w))) continue;
+      const g = own.get(ka)!;
+      for (const kb of [...own.keys()]) {
+        if (kb === ka || ![...A].every((w) => setOf(kb).has(w))) continue;
+        const t = own.get(kb)!;
+        for (const [f, c] of t.forms) g.forms.set(f, (g.forms.get(f) ?? 0) + c);
+        for (const r of t.rows) g.rows.add(r);
+        own.delete(kb);
+      }
+    }
+    const top = [...own.values()]
+      .map((t) => ({ t, rs: [...t.rows], name: [...t.forms.entries()].sort((x, y) => y[1] - x[1] || x[0].localeCompare(y[0]))[0][0] }))
+      .filter((x) => x.rs.length >= ROW_MIN)
+      .sort((x, y) => y.rs.length - x.rs.length || x.name.localeCompare(y.name))
+      .slice(0, 3);
+    if (top.length) sections.push({ ...VALUE_SECTIONS.own, tone: "good", rows: top.map((x) => ({ label: cleanProduct(x.name) || x.name, num: num(x.rs.length, all, "answers", refsOf(x.rs, (r) => [...fact(r)!.own.values()].find((v) => x.t.forms.has(v)) ?? x.name)) })) });
+  }
+  const weighs = weighsSides(inp, ctx, { title: "When it says worth it", say: "say worth it", rows: worth("yes") }, { title: "When it says not worth it", say: "say not worth it", rows: worth("no") });
   const usual = usualOf(inp, ctx.inputs);
-  return {
+  const panel: PositionPanel = {
     kind: "value",
     claim,
     ...(usual ? { usualCellId: usual.id, usualKey: "All buyers" } : {}),
     hereKey: inp.pooled ? "All buyers" : "This buyer",
     stackLabel: "How the answer goes",
     steps: [
-      { key: "worth", label: "Is it worth paying more for?", segments: segs },
+      { key: "worth", label: valueStepLabel(product, several), segments: segs },
       { key: "instead", label: "Where it points the buyer instead", segments: instead },
     ],
-    ...(block ? { compare: true as const, competitors: block } : {}),
-    lines,
+    ...(product ? { product } : {}),
+    ...(byProduct ? { byProduct } : {}),
+    lines: [],
+    ...(weighs ? { weighs } : {}),
     ...(rivals.length ? { rivals } : {}),
   };
+  VALUE_EXTRA.set(panel, { sections, topRival: comp[0]?.name, byProduct: !!byProduct });
+  return panel;
 }
 
 function problemPanel(inp: PanelCellInput, ctx: Ctx): PositionPanel {
@@ -2203,16 +2423,20 @@ function rivalFull(inp: PanelCellInput, ctx: Ctx, b: PositionBrand, you: ReturnT
   const args = b.here?.args ?? [];
   const posA = args.filter((l) => l.value > 0).sort((x, y) => y.value - x.value)[0];
   const negA = args.filter((l) => l.value < 0).sort((x, y) => x.value - y.value)[0];
-  const argSpan = (l: LiftItem, rs: PoolRow[]) => {
-    const hit = rs.filter((r) => r.code.reasons?.includes(l.label));
-    return F(cname(l.label, h), num(hit.length, rs.length, "answers that pick", refsOf(hit, () => l.label)));
-  };
-  if (posA || negA) lines.push({ label: "What the answer weighs", value: join(posA ? join(argSpan(posA, theirPicks), ` for ${R}`) : null, posA && negA ? " · " : null, negA ? join(argSpan(negA, mine), " for you") : null) });
-  else if (b.here?.argsRows?.length) {
-    const top = b.here.argsRows[0];
-    const hit = theirPicks.filter((r) => r.code.reasons?.includes(top.label));
-    lines.push({ label: "What the answer weighs", value: join(F(cname(top.label, h), num(hit.length, theirPicks.length, "answers that pick", refsOf(hit, () => top.label))), ` for ${R}`) });
-  }
+  // am38: sized, you on the left: what the answer weighs when it picks you, and when it picks R.
+  const weighs =
+    posA || negA || b.here?.argsRows?.length
+      ? weighsCols(
+          inp,
+          ctx,
+          [
+            { title: "When it picks you", say: "pick you", tone: "good", rows: mine, ...(negA ? { lead: negA.label } : {}) },
+            { title: `When it picks ${R}`, say: `pick ${R}`, tone: "bad", rows: theirPicks, ...(posA ? { lead: posA.label } : b.here?.argsRows?.length ? { lead: b.here.argsRows[0].label } : {}) },
+          ],
+          WEIGHS_SUB_SIDES,
+          { omit: false }
+        )
+      : undefined;
   return {
     name: R,
     full: true,
@@ -2223,6 +2447,7 @@ function rivalFull(inp: PanelCellInput, ctx: Ctx, b: PositionBrand, you: ReturnT
     ...(Object.keys(details).length ? { details } : {}),
     ...(conditions ? { conditions } : {}),
     lines,
+    ...(weighs ? { weighs } : {}),
     ...(missing.length ? { thin: THIN_RIVAL(R, missing.join(" or ")) } : {}),
   };
 }
@@ -2253,19 +2478,15 @@ function rivalSmall(inp: PanelCellInput, ctx: Ctx, c: { key: string; name: strin
     const items = productSplit(alt, surf, 2, "answers naming it", nounToks(ctx), nameTokens(R, ctx));
     if (namesAProduct(items)) lines.push({ label: `Which of its ${h.plural} it names`, value: splitLine(items) });
   }
-  const withR = alt.filter((r) => r.code.reasons !== null);
-  if (withR.length >= ARGS_MIN) {
-    const counts = new Map<string, number>();
-    for (const r of withR) for (const x of new Set(r.code.reasons!)) counts.set(x, (counts.get(x) ?? 0) + 1);
-    const ranked = [...counts.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0])).slice(0, 3);
-    lines.push({ label: "What the answer weighs", value: listNameSpans(ranked.map(([code, k]) => F(cname(code, h), num(k, withR.length, "answers naming it", refsOf(withR.filter((r) => r.code.reasons!.includes(code)), () => code))))) });
-  }
+  // am38: sized, over the answers that name it as the alternative.
+  const weighs = weighsCols(inp, ctx, [{ say: "name it", tone: "neutral", rows: alt }], WEIGHS_SUB_NAMING, { omit: false });
   return {
     name: R,
     full: false,
     claim,
     steps,
     lines,
+    ...(weighs ? { weighs } : {}),
     ...(alt.length < 5 ? { thin: THIN_RIVAL(R, "more than its numbers") } : {}),
   };
 }
@@ -2507,6 +2728,8 @@ function extremeFacts(inp: PanelCellInput, p: PositionPanel, ctx: Ctx) {
   }
   if (heading && p.detail) p.detail = { ...p.detail, heading };
   if (heading && p.detailComp) p.detailComp = { ...p.detailComp, heading };
+  // am38: Value explains its verdict step itself.
+  if (heading && v && p.details?.[v.key]) p.details = { ...p.details, [v.key]: { ...p.details[v.key]!, heading } };
 }
 
 /** am36: the verdict panels' steps carry a one-line takeaway read off this
@@ -2750,7 +2973,21 @@ function detailOf(inp: PanelCellInput, p: PositionPanel, up: PositionPanel | und
       const nowhere = segPct(ins, "nowhere");
       const li = leanOf(rival, own);
       const instead: InsteadSide = rival >= 50 ? "rival" : own >= 50 ? "own" : nowhere >= 50 ? "nowhere" : li > 0 ? "rival" : li < 0 ? "own" : "even";
-      p.detail = valueDetail({ side, pooled: !!inp.pooled, often, instead, topRival: topRivalOf(p), noun: h.noun });
+      // am38: each step explains itself - the verdict in words, then where it points the buyer with the lists of new facts.
+      const extra = VALUE_EXTRA.get(p);
+      const order = (["yes", "depends", "no"] as const).filter((k) => k !== key).sort((a, b) => segPct(w, b) - segPct(w, a));
+      const next = segPct(w, order[0]) > segPct(w, order[1]) ? order[0] : undefined;
+      p.details = {
+        worth: valueWorthDetail({ side, pooled: !!inp.pooled, often, next, byProduct: !!extra?.byProduct }),
+        ...(ins
+          ? {
+              instead: {
+                ...valueInsteadDetail({ instead, ladder: ctx.ladder, topRival: extra?.topRival, noun: h.noun }),
+                ...(extra?.sections.length ? { sections: extra.sections } : {}),
+              },
+            }
+          : {}),
+      };
       return;
     }
     case "criteria": {
