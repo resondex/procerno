@@ -269,6 +269,15 @@ function RivalDetail({ d, name }: { d: RivalStepDetail | PanelStepDetail; name: 
   const rivalHead = cols?.rival ?? name;
   const youHead = cols?.you ?? "You";
   const rivalColor = cols?.rivalIsUsual ? C_USUAL : C_AWAY;
+  // The outcome table opens on two rows - you and the one brand to read it
+  // against (the first listed) - so the comparison is the point; the other
+  // brands sit behind "Show all".
+  const [allRows, setAllRows] = useState(false);
+  const outcomesAll = d.outcomes ?? [];
+  const mineOf = (o: (typeof outcomesAll)[number]) => !!o.you || ("usual" in o && !!o.usual);
+  const firstOther = outcomesAll.find((o) => !mineOf(o));
+  const outcomes = allRows ? outcomesAll : outcomesAll.filter((o) => mineOf(o) || o === firstOther);
+  const hiddenRows = outcomesAll.length - outcomes.length;
   return (
     <DetailView heading={d.heading} body={d.body}>
       {d.rows && d.rows.length > 0 && (
@@ -311,7 +320,7 @@ function RivalDetail({ d, name }: { d: RivalStepDetail | PanelStepDetail; name: 
               {cap1(ol[k])}
             </span>
           ))}
-          {d.outcomes.map((o) => {
+          {outcomes.map((o) => {
             const own = "usual" in o && !!o.usual;
             // A step detail names its own outcome lines ("Here", "All buyers"); a rival's says "You".
             const who = cols || own ? o.name : o.you ? "You" : o.name;
@@ -337,6 +346,11 @@ function RivalDetail({ d, name }: { d: RivalStepDetail | PanelStepDetail; name: 
             );
           })}
         </div>
+      )}
+      {d.outcomes && ol && (hiddenRows > 0 || allRows) && outcomesAll.length > outcomesAll.filter((o) => mineOf(o) || o === firstOther).length && (
+        <button type="button" className={`${linkCls} mt-2 ${T.cap}`} onClick={() => setAllRows(!allRows)}>
+          {allRows ? "Show fewer" : `Show all ${outcomesAll.length - 1} competitors`}
+        </button>
       )}
       {d.both && d.both.length > 0 && (
         <p className={`${T.body} mt-2.5 text-ink-2`}>
