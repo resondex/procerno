@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { Fragment, useEffect, useState } from "react";
 import type { ReactNode } from "react";
 import type { CellPanelPayload, PanelKind, PanelRival, PanelStep, PanelStepKey, Position, PositionPanel, RivalAcross, RivalAcrossStep, RivalStepDetail, PanelStepDetail } from "@/lib/engine/analysis_types";
 import { MoveBox, None, VCOLOR, VWORD, crumbCls, h2Cls, linkCls, notesOf, softLine, whyLines, type Ctx } from "./analysis_panel";
@@ -147,12 +147,14 @@ export function hasRivalPanel(p: Position | undefined, name: string): boolean {
 export function PositionPanelView({ p, pp, usualSteps, ctx }: { p: Position; pp: PositionPanel; usualSteps?: PanelStep[]; ctx: Ctx }) {
   const [compOn] = useComp();
   // A panel with no usual to set you against (no usual cell, no usual on its
-  // steps) would show a lone "You" bar with the switch off, so it always opens
-  // on the competitors view and draws no switch. The remembered switch state
-  // is only read here, never written, so opening one leaves it as it was.
+  // steps) would show a lone "You" bar with the switch off, so it opens on the
+  // competitors view. Its switch is its own (on by default, off only for the
+  // panel it was turned off on); the remembered switch state is never written
+  // here, so opening one leaves the other panels as they were.
   const hasUsual = !!pp.usualCellId || pp.steps.some((s) => !!s.usual);
   const compForced = !!pp.compare && !hasUsual;
-  const comp = compForced || (!!pp.compare && compOn);
+  const [offFor, setOffFor] = useState<string | null>(null);
+  const comp = compForced ? offFor !== p.cellId : !!pp.compare && compOn;
   // Clickable steps: the steps the engine explains in this view. The default
   // selection is the engine's focus; switching panel or view starts over.
   const stepDetails = (comp ? pp.detailsComp : pp.details) ?? {};
@@ -227,7 +229,7 @@ export function PositionPanelView({ p, pp, usualSteps, ctx }: { p: Position; pp:
           )}
           <span>{p.where}</span>
         </div>
-        {pp.compare && !compForced && <CompSwitch />}
+        {pp.compare && (compForced ? <CompSwitch own={[comp, (v) => setOffFor(v ? null : p.cellId)]} /> : <CompSwitch />)}
       </div>
       <h2 className={h2Cls}>
         <TextView text={pp.claim} title={p.where} />
@@ -258,6 +260,8 @@ export function PositionPanelView({ p, pp, usualSteps, ctx }: { p: Position; pp:
 
 type FunnelKey = "named" | "recommended" | "converts";
 const isFunnel = (k: PanelStepKey): k is FunnelKey => k === "named" || k === "recommended" || k === "converts";
+
+const cap1 = (t: string) => (t ? t[0].toUpperCase() + t.slice(1) : t);
 
 function RivalDetail({ d, name }: { d: RivalStepDetail | PanelStepDetail; name: string }) {
   const ol = d.outcomeLabels;
@@ -296,23 +300,40 @@ function RivalDetail({ d, name }: { d: RivalStepDetail | PanelStepDetail; name: 
         </table>
       )}
       {d.outcomes && d.outcomes.length > 0 && ol && (
-        <div className="mt-2.5 grid gap-2">
+        // One row per brand: name, one stacked bar, then the three shares in
+        // their own columns under a single header that doubles as the key.
+        <div className={`mt-3 grid grid-cols-[auto_minmax(6rem,1fr)_4.5rem_4.5rem_4.5rem] items-center gap-x-3 gap-y-1.5 ${T.body}`}>
+          <span />
+          <span />
+          {([["picked", C_YOU], ["lost", C_USUAL], ["none", C_NONE]] as const).map(([k, color]) => (
+            <span key={k} className={`self-end text-right leading-tight ${T.cap} text-ink-3`}>
+              <i className="mr-1 inline-block h-2 w-2 rounded-full align-[0px]" style={{ background: color }} aria-hidden />
+              {cap1(ol[k])}
+            </span>
+          ))}
           {d.outcomes.map((o) => {
             const own = "usual" in o && !!o.usual;
             // A step detail names its own outcome lines ("Here", "All buyers"); a rival's says "You".
             const who = cols || own ? o.name : o.you ? "You" : o.name;
+            const mine = o.you || own;
             return (
-              <div key={who}>
+              <Fragment key={who}>
+                <span className={mine ? "font-semibold text-ink" : "text-ink-2"}>{who}</span>
                 <span className="flex h-2.5 overflow-hidden rounded-[5px] bg-line/60" aria-hidden>
                   <i className="block h-full" style={{ width: `${o.picked.pct}%`, background: own ? C_YOU_SOFT : o.you ? C_YOU : C_AWAY }} />
                   <i className="block h-full" style={{ width: `${o.lost.pct}%`, background: C_USUAL }} />
                   <i className="block h-full" style={{ width: `${o.none.pct}%`, background: C_NONE }} />
                 </span>
-                <span className={`mt-1 block ${T.cap} text-ink-2`}>
-                  {who}: <NumView n={o.picked} title={`${who} - ${ol.picked}`} className="font-semibold text-ink" /> {ol.picked} · <NumView n={o.lost} title={`${who} - ${ol.lost}`} /> {ol.lost} ·{" "}
-                  <NumView n={o.none} title={`${who} - ${ol.none}`} /> {ol.none}
+                <span className="text-right font-semibold text-ink">
+                  <NumView n={o.picked} title={`${who} - ${ol.picked}`} />
                 </span>
-              </div>
+                <span className="text-right text-ink-2">
+                  <NumView n={o.lost} title={`${who} - ${ol.lost}`} />
+                </span>
+                <span className="text-right text-ink-2">
+                  <NumView n={o.none} title={`${who} - ${ol.none}`} />
+                </span>
+              </Fragment>
             );
           })}
         </div>

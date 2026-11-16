@@ -73,8 +73,10 @@ export function useComp(): [boolean, (v: boolean) => void] {
   return c ? [c.on, c.set] : [local, setLocal];
 }
 
-export function CompSwitch() {
-  const [on, set] = useComp();
+/** The competitors switch. `own` gives a panel its own state (the all-buyers panels, on by default) in place of the remembered one. */
+export function CompSwitch({ own }: { own?: [boolean, (v: boolean) => void] }) {
+  const shared = useComp();
+  const [on, set] = own ?? shared;
   return (
     <button
       type="button"
