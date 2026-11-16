@@ -630,3 +630,21 @@ export function anyBrandDetail(side: "usually" | "sometimes" | "rarely", plural:
   const body = side === "rarely" ? `Most answers explain ${plural} in general, so there is little room here for any brand.` : `Where it does name brands it uses them as examples of ${plural}, so the names it reaches for first are the ones to watch.`;
   return { heading, body: join(body) };
 }
+
+/* ---------- am42: "named, when the answer names a brand" (Learning the category) ---------- */
+export const NAMEDWHEN_TEXT = {
+  others: { title: "Who is named when you are not", sub: "Share of the brand-naming answers that leave you out.", few: "Too few brand-naming answers leave you out to size who they name." },
+  first: { title: "Who is named first", sub: "Share of the answers that name a brand.", few: "No brand is named first often enough to size." },
+  products: { title: (plural: string) => `Which of your ${plural} it names`, sub: "Share of the answers that name you.", few: "No one product is named often enough to size." },
+  vendor: { title: "Which AI companies name you", sub: "Share of each company's answers that name a brand.", few: "Too few brand-naming answers per AI company to size." },
+};
+export function namedWhenDetail(side: "usually" | "sometimes" | "rarely"): { heading: string; body: PanelText } {
+  const heading =
+    side === "usually"
+      ? "When the AI reaches for brand names here, yours is usually among them"
+      : side === "sometimes"
+        ? "When the AI reaches for brand names here, yours is sometimes among them"
+        : "When the AI reaches for brand names here, yours is rarely among them";
+  const body = side === "usually" ? "You are one of the names it uses to explain the category: see who else it names, and who comes first, below." : "Other names are doing the explaining: see below who it names when it leaves you out.";
+  return { heading, body: join(body) };
+}

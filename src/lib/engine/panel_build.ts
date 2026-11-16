@@ -48,6 +48,8 @@ import {
   routedDetail,
   ANYBRAND_TEXT,
   anyBrandDetail,
+  NAMEDWHEN_TEXT,
+  namedWhenDetail,
   type InsteadHalf,
   type KeepSide,
   type ValueSide,
@@ -1276,7 +1278,7 @@ function worryPanel(inp: PanelCellInput, ctx: Ctx): PositionPanel {
   const weighs = buyer
     ? weighsSides(inp, ctx, { title: "When it says go ahead", say: "say go ahead", rows: favRows }, { title: "When it concedes", say: "concede the worry", rows: unfavRows })
     : weighsSides(inp, ctx, { title: "When it says stay", say: "say stay", rows: favRows }, { title: "When it says leave", say: "say leave", rows: unfavRows });
-  const rivals = comp.map((c) => rivalSmall(inp, ctx, c, (r) => h.activeDests(r.code.destinations).has(c.key), "Named as the alternative"));
+  const rivals = comp.map((c) => rivalSmall(inp, ctx, c, (r) => h.activeDests(r.code.destinations).has(c.key), "Named as the alternative", { when: "as the alternative" }));
   const usual = usualOf(inp, ctx.inputs);
   return {
     kind: inp.kind,
@@ -1341,7 +1343,7 @@ function holdPanel(inp: PanelCellInput, ctx: Ctx): PositionPanel {
     lead = join(attachedLead(`looking at another ${h.noun}`, a.slice(0, 2).map((c) => ({ text: c.text })), "answers"), towardSum < 15 ? " It gives few conditions for staying." : "");
   }
   const { block, comp } = destBlock(rows, ctx, `Which ${h.plural} it shows`, `Share of these answers that name it as an alternative. Open a rival to see how it gets its picks.`, (r) => r.code.destinations);
-  const rivals = comp.map((c) => rivalSmall(inp, ctx, c, (r) => h.activeDests(r.code.destinations).has(c.key), "Shown as an alternative"));
+  const rivals = comp.map((c) => rivalSmall(inp, ctx, c, (r) => h.activeDests(r.code.destinations).has(c.key), "Shown as an alternative", { when: "as an alternative" }));
   const lines: PanelLine[] = [];
   const weighs = weighsAll(inp, ctx);
   return {
@@ -1474,7 +1476,7 @@ function valuePanel(inp: PanelCellInput, ctx: Ctx): PositionPanel {
   const byRival = new Map<string, { key: string; name: string; rows: PoolRow[] }>();
   for (const r of rows) for (const [k, name] of fact(r)?.instead ?? []) byRival.set(k, { key: k, name, rows: [...(byRival.get(k)?.rows ?? []), r] });
   const comp = [...byRival.values()].filter((x) => x.rows.length >= ROW_MIN).sort((a, b) => b.rows.length - a.rows.length || a.name.localeCompare(b.name)).slice(0, COMP_TOP);
-  const rivals = comp.map((c) => rivalSmall(inp, ctx, c, (r) => !!fact(r)?.instead.has(c.key), "Named as the cheaper option"));
+  const rivals = comp.map((c) => rivalSmall(inp, ctx, c, (r) => !!fact(r)?.instead.has(c.key), "Named as the better option", { when: "as the better option", youAlt: worth("yes") }));
   // The explanation's lists of new facts (am38), in order.
   const sections: PanelDetailSection[] = [];
   {
@@ -2479,7 +2481,9 @@ function rivalFull(inp: PanelCellInput, ctx: Ctx, b: PositionBrand, you: ReturnT
 }
 
 /** The smaller rival panel (worries, looking around, value, problem): named, and named as the alternative. */
-function rivalSmall(inp: PanelCellInput, ctx: Ctx, c: { key: string; name: string }, isAlt: (r: PoolRow) => boolean, altLabel: string): PanelRival {
+/** am42: `when` words the weighs columns ("When it names R <when>"); `youAlt` are the answers that
+ * name YOU the same way (Value: the answers saying you are worth it), drawn beside the rival's bar. */
+function rivalSmall(inp: PanelCellInput, ctx: Ctx, c: { key: string; name: string }, isAlt: (r: PoolRow) => boolean, altLabel: string, o: { when?: string; youAlt?: PoolRow[] } = {}): PanelRival {
   const { h } = ctx;
   const rows = inp.rows;
   const all = rows.length;
@@ -2492,10 +2496,11 @@ function rivalSmall(inp: PanelCellInput, ctx: Ctx, c: { key: string; name: strin
   const altFind = (r: PoolRow) => (r.code.mentions ?? []).find((m) => h.resolve(m.brand).key === c.key)?.brand ?? (r.code.destinations ?? []).find((d) => h.resolve(d).key === c.key) ?? R;
   const altNum = num(alt.length, all, "answers", refsOf(alt, altFind));
   const problem = inp.kind === "problem" || inp.kind === "popular";
-  const yAlt = problem ? num(youF.rec.length, all, "answers", refsOf(youF.rec, (r) => youF.surf(r, true) ?? h.brand)) : undefined;
-  const claim = problem ? join(`The AI recommends ${R} in `, N(altNum), " of these answers.") : join(`The AI names ${R} as the alternative in `, N(altNum), " of these answers.");
+  const yAlt = problem ? num(youF.rec.length, all, "answers", refsOf(youF.rec, (r) => youF.surf(r, true) ?? h.brand)) : o.youAlt ? num(o.youAlt.length, all, "answers", refsOf(o.youAlt, (r) => verdictFind(r, h))) : undefined;
+  const claim = problem ? join(`The AI recommends ${R} in `, N(altNum), " of these answers.") : join(`The AI names ${R} ${o.youAlt ? o.when : "as the alternative"} in `, N(altNum), " of these answers.");
   const steps: PanelStep[] = [
-    { key: "named", label: "Named", here: yNamed, rivals: [{ name: R, num: named }], tagRank: duelTag(knOf(yNamed)!, knOf(named)!, R).tag },
+    // am42: outside the open questions the question itself names you, so "you named" is always everything and is not drawn.
+    problem ? { key: "named", label: "Named", here: yNamed, rivals: [{ name: R, num: named }], tagRank: duelTag(knOf(yNamed)!, knOf(named)!, R).tag } : { key: "named", label: "Named", rivals: [{ name: R, num: named }] },
     { key: "recommended", label: altLabel, ...(yAlt ? { here: yAlt, tagRank: duelTag(knOf(yAlt)!, knOf(altNum)!, R).tag } : {}), rivals: [{ name: R, num: altNum }] },
   ];
   const lines: PanelLine[] = [];
@@ -2505,7 +2510,12 @@ function rivalSmall(inp: PanelCellInput, ctx: Ctx, c: { key: string; name: strin
     if (namesAProduct(items)) lines.push({ label: `Which of its ${h.plural} it names`, value: splitLine(items) });
   }
   // am38: sized, over the answers that name it as the alternative.
-  const weighs = weighsCols(inp, ctx, [{ say: "name it", tone: "neutral", rows: alt }], WEIGHS_SUB_NAMING, { omit: false });
+  // am42: set against the cell's other answers, so the topics every answer weighs drop out (the versus rule).
+  const altSet = new Set(alt);
+  const rest = rows.filter((r) => !altSet.has(r));
+  const weighs = o.when
+    ? weighsCols(inp, ctx, [{ title: `When it names ${R} ${o.when}`, say: `name ${R}`, tone: "bad", rows: alt }, { title: "When it does not", say: "leave it out", tone: "neutral", rows: rest }], WEIGHS_SUB_NAMING, { omit: false })
+    : weighsCols(inp, ctx, [{ say: "name it", tone: "neutral", rows: alt }], WEIGHS_SUB_NAMING, { omit: false });
   return {
     name: R,
     full: false,
@@ -3342,6 +3352,54 @@ function stepDetailsOf(inp: PanelCellInput, p: PositionPanel, u: PanelCellInput 
     const d: PanelStepDetail = { ...anyBrandDetail(share >= 0.5 ? "usually" : share >= 0.2 ? "sometimes" : "rarely", h.plural), ...(sections.length ? { sections } : {}) };
     details.anybrand = d;
     if (p.compare) detailsComp.anybrand = d;
+  }
+  // am42: "named, when the answer names a brand" (Learning the category) - who is named when you are not, who is
+  // named first, which of your products, and which AI companies name you. Shares of the answers that name a brand.
+  const nw = p.kind === "learning" ? step("namedwhen") : undefined;
+  if (nw?.here) {
+    const activeOf = (r: PoolRow) => {
+      const out: { key: string; name: string; rank: number; raw: string }[] = [];
+      for (const m of r.code.mentions ?? []) {
+        const res = h.resolve(m.brand);
+        if (res.status !== "active" || !res.key || out.some((x) => x.key === res.key)) continue;
+        out.push({ key: res.key, name: res.key === h.targetKey ? h.brand : res.name ?? m.brand, rank: m.rank ?? out.length + 1, raw: m.brand });
+      }
+      return out.sort((x, y) => x.rank - y.rank);
+    };
+    const base = rows.map((r) => ({ r, act: activeOf(r) })).filter((x) => x.act.length > 0);
+    const n = base.length;
+    const withYou = base.filter((x) => x.act.some((a) => a.key === h.targetKey));
+    const without = base.filter((x) => !x.act.some((a) => a.key === h.targetKey));
+    const group = (xs: typeof base, pick: (x: (typeof base)[number]) => { key: string; name: string }[]) => {
+      const m = new Map<string, { name: string; rs: PoolRow[] }>();
+      for (const x of xs) for (const a of pick(x)) m.set(a.key, { name: a.name, rs: [...(m.get(a.key)?.rs ?? []), x.r] });
+      return [...m.values()].sort((a, b) => b.rs.length - a.rs.length || a.name.localeCompare(b.name));
+    };
+    const others = group(without, (x) => x.act).slice(0, 5);
+    const first = group(base, (x) => [x.act[0]]);
+    const firstShown = [...first.filter((x) => x.name === h.brand), ...first.filter((x) => x.name !== h.brand).slice(0, 3)];
+    const prods = new Map<string, PoolRow[]>();
+    if (ctx.ladder)
+      for (const x of withYou)
+        for (const m of x.r.code.mentions ?? []) {
+          if (h.resolve(m.brand).key !== h.targetKey) continue;
+          const pl = productLabel(m.brand, h.brand, ctx);
+          if (pl && !(prods.get(pl) ?? []).includes(x.r)) prods.set(pl, [...(prods.get(pl) ?? []), x.r]);
+        }
+    const baseRows = new Set(base.map((x) => x.r));
+    const youRows = withYou.map((x) => x.r);
+    const vend = [...byVendor.entries()].map(([label, rs]) => ({ label, in: rs.filter((r) => baseRows.has(r)) })).filter((v) => v.in.length >= ROW_MIN).map((v) => ({ label: v.label, rs: v.in.filter((r) => youRows.includes(r)), n: v.in.length, unit: `${v.label} answers that name a brand`, find: (r: PoolRow) => activeOf(r).find((a) => a.key === h.targetKey)?.raw ?? h.brand }));
+    const item = (unit: string, tot: number) => (x: { name: string; rs: PoolRow[] }) => ({ label: x.name === h.brand ? "You" : x.name, rs: x.rs, n: tot, unit, find: () => x.name });
+    const sections = [
+      sec(NAMEDWHEN_TEXT.others.title, NAMEDWHEN_TEXT.others.sub, "bad", others.map(item("answers that name a brand but not you", without.length)), NAMEDWHEN_TEXT.others.few),
+      sec(NAMEDWHEN_TEXT.first.title, NAMEDWHEN_TEXT.first.sub, "neutral", firstShown.map(item("answers that name a brand", n)), NAMEDWHEN_TEXT.first.few),
+      prods.size >= 2 ? sec(NAMEDWHEN_TEXT.products.title(h.plural), NAMEDWHEN_TEXT.products.sub, "good", [...prods.entries()].sort((a, b) => b[1].length - a[1].length).slice(0, 5).map(([label, rs]) => ({ label, rs, n: withYou.length, unit: "answers that name you", find: () => label })), NAMEDWHEN_TEXT.products.few) : null,
+      sec(NAMEDWHEN_TEXT.vendor.title, NAMEDWHEN_TEXT.vendor.sub, "good", vend, NAMEDWHEN_TEXT.vendor.few),
+    ].filter((x): x is PanelDetailSection => !!x);
+    const share = n ? withYou.length / n : 0;
+    const d: PanelStepDetail = { ...namedWhenDetail(share >= 0.5 ? "usually" : share >= 0.2 ? "sometimes" : "rarely"), ...(sections.length ? { sections } : {}) };
+    details.namedwhen = d;
+    if (p.compare) detailsComp.namedwhen = d;
   }
   if (p.compare && names.length) {
     const nm = step("named");
