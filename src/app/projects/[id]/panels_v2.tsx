@@ -154,7 +154,10 @@ export function PositionPanelView({ p, pp, usualSteps, ctx }: { p: Position; pp:
   // selection is the engine's focus; switching panel or view starts over.
   const stepDetails = (comp ? pp.detailsComp : pp.details) ?? {};
   const selectable = pp.steps.some((s) => !!stepDetails[s.key]);
-  const defaultSel = (comp ? pp.focusComp : pp.focus) ?? pp.steps.find((s) => !!stepDetails[s.key])?.key;
+  // am37: only a step that explains itself can be selected (or start selected).
+  const focusKey = comp ? pp.focusComp : pp.focus;
+  const firstExplained = pp.steps.find((s) => !!stepDetails[s.key])?.key;
+  const defaultSel = selectable ? (focusKey && stepDetails[focusKey] ? focusKey : firstExplained) : focusKey;
   const selKey = `${p.cellId}|${comp ? 1 : 0}`;
   const [picked, setPicked] = useState<{ key: string; step: PanelStepKey } | null>(null);
   const sel = picked && picked.key === selKey ? picked.step : defaultSel;
@@ -186,7 +189,7 @@ export function PositionPanelView({ p, pp, usualSteps, ctx }: { p: Position; pp:
           usualLabel={usualLabel}
           keyItems={keyItems}
           onSelect={selectable ? (k) => setPicked({ key: selKey, step: k }) : undefined}
-          canSelect={selectable ? (k) => !!stepDetails[k] || k === defaultSel : undefined}
+          canSelect={selectable ? (k) => !!stepDetails[k] : undefined}
         />
       ) : null,
     detail: selDetail ? (

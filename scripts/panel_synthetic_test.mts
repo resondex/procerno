@@ -223,8 +223,9 @@ function check(name: string, t: ReturnType<typeof themedCell>) {
     }
   const towardIds = new Set(c.toward.flatMap((x) => (x.share.refs ?? []).map((r) => r.responseId)));
   for (const x of c.away) for (const r of x.share.refs ?? []) ok(!towardIds.has(r.responseId), `${name}: answer ${r.responseId.slice(0, 8)} shown on both sides`);
-  const awayTexts = new Set(c.away.map((x) => x.text));
-  ok(elsewhere.some((e) => awayTexts.has(e)), `${name}: no "elsewhere" row among the away rows (${[...awayTexts].join(" | ")})`);
+  // am37: rows are shown in sentence case; the group labels are matched case-blind.
+  const awayTexts = new Set(c.away.map((x) => x.text.toLowerCase()));
+  ok(elsewhere.some((e) => awayTexts.has(e.toLowerCase())), `${name}: no "elsewhere" row among the away rows (${[...awayTexts].join(" | ")})`);
   ok(c.away.some((x) => x.text.startsWith("Grouped away")), `${name}: no themed away row`);
   const themedAway = c.away.find((x) => x.text.startsWith("Grouped away"));
   ok(!!themedAway?.to?.some((x) => x.name === rival), `${name}: the themed away row does not name ${rival} as its destination`);
@@ -263,7 +264,7 @@ const al = themedCell("settled:settled:ecosystem", "alongside", eco, project.bra
         ok(!!kn && kn.n === eco.length, `alongside: ${side} "${row.text}" share is not over all answers`);
         for (const r of row.share.refs ?? []) ok(!!al.ruled.get(r.responseId)?.has(r.find), `alongside: ${side} "${row.text}" example does not state its rule`);
       }
-    const ew = c.away.find((x) => al.elsewhere.includes(x.text));
+    const ew = c.away.find((x) => al.elsewhere.some((e) => e.toLowerCase() === x.text.toLowerCase()));
     ok(!!ew?.to?.some((x) => x.name === ELSEWHERE), `alongside: the elsewhere row does not lead to "${ELSEWHERE}" (${JSON.stringify(ew?.to?.map((x) => x.name))})`);
     console.log(`alongside: toward ${c.toward.map((x) => `${x.text} ${x.share.value}`).join(", ")} | away ${c.away.map((x) => `${x.text} ${x.share.value} -> ${(x.to ?? []).map((t) => t.name).join("/")}`).join(", ")}`);
   }

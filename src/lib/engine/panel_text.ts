@@ -32,8 +32,24 @@ export function pluralNoun(category: string): string {
   return `${one}s`;
 }
 
-/** "a" or "an" before a word. */
-export const article = (w: string) => (/^[aeiou]/i.test(w.trim()) ? "an" : "a");
+/** "a" or "an" before a word, by its sound: "a OnePlus", "a U.S. Bank", "an MBA", "an hour". */
+export function article(w: string): string {
+  const t = w.trim();
+  const first = t.split(/\s+/)[0] ?? "";
+  if (/^(one|once|uni|use|usu|uti|eu|ewe|u\.|ur[aeiou])/i.test(first)) return "a";
+  if (/^(hour|honest|honou?r|heir)/i.test(first)) return "an";
+  // An acronym is read letter by letter ("an MBA", "a BMW").
+  if (first.length >= 2 && first.length <= 5 && first === first.toUpperCase() && /^[A-Z]{2}/.test(first)) return /^[AEFHILMNORSX]/.test(first) ? "an" : "a";
+  return /^[aeiou]/i.test(t) ? "an" : "a";
+}
+
+/** A name's possessive: "Lay's" stays "Lay's", "PBS Kids" -> "PBS Kids'", "Chase" -> "Chase's". */
+export function poss(name: string): string {
+  const t = name.trim();
+  if (/['’]s$/i.test(t)) return t;
+  if (/s$/i.test(t)) return `${t}'`;
+  return `${t}'s`;
+}
 
 /** Plain text. */
 export const T = (t: string): PanelSpan => ({ t });
@@ -101,7 +117,53 @@ export function condLabel(text: string): string {
   const you = /^you\s+(?!(?:are|were|am|is)\b)/i;
   if (you.test(out) && words(out.replace(you, "")) >= 2) out = out.replace(you, "");
   if (out !== t && /^[A-Z]/.test(t)) out = out.charAt(0).toUpperCase() + out.slice(1);
-  return out;
+  return theyFor(out);
+}
+
+/** am37: a condition's "you" is the asker, not the brand - shown in the third
+ * person ("accepted where you shop" -> "accepted where they shop"). */
+export function theyFor(text: string): string {
+  const cap = (from: string, to: string) => (from[0] === from[0].toUpperCase() ? to[0].toUpperCase() + to.slice(1) : to);
+  return text
+    // "you" as an object ("with you", "for you", at the end) is "them".
+    .replace(/\b(with|for|to|at|by|from|about|of|on|near|around|like|without|against|behind|beside|than|toward|towards|into|onto|upon|via)\s+you\b(?!['’])/gi, (_m, prep: string) => `${prep} them`)
+    .replace(/\byou(?=\s*[.,;:!?)]|\s*$)/gi, (m) => cap(m, "them"))
+    .replace(/\byou['’]re\b/gi, (m) => cap(m, "they're"))
+    .replace(/\byou['’]ve\b/gi, (m) => cap(m, "they've"))
+    .replace(/\byou['’]ll\b/gi, (m) => cap(m, "they'll"))
+    .replace(/\byou['’]d\b/gi, (m) => cap(m, "they'd"))
+    .replace(/\byourself\b/gi, (m) => cap(m, "themselves"))
+    .replace(/\byours\b/gi, (m) => cap(m, "theirs"))
+    .replace(/\byour\b/gi, (m) => cap(m, "their"))
+    .replace(/\byou\b/gi, (m) => cap(m, "they"));
+}
+
+/** A condition row's label as shown under an "... if" heading: sentence case. */
+export const condRowLabel = (text: string) => upperFirst(condLabel(text));
+
+/** A codebook name as shown: the codebook stores lower-case names ("support
+ * sla"); a word its scope sentence writes in capitals keeps them ("SLA"). */
+export function codeName(code: string, scope?: string): string {
+  if (!scope) return code;
+  const caps = new Set((scope.match(/\b[A-Z][A-Z0-9]{1,5}s?\b/g) ?? []).map((w) => w.replace(/s$/, "")));
+  return code.replace(/\b[a-z0-9]{2,6}\b/g, (w) => (caps.has(w.toUpperCase()) ? w.toUpperCase() : w));
+}
+
+/** A list of names that may themselves contain "and" ("price and value"):
+ * joined by semicolons then, so no item runs into the next. */
+export function listNames(xs: string[]): string {
+  if (xs.some((x) => /\band\b/i.test(x))) return xs.join("; ");
+  return listWords(xs);
+}
+/** Spans as a list of names, joined like listNames. */
+export function listNameSpans(xs: PanelSpan[]): PanelText {
+  if (!xs.some((x) => /\band\b/i.test(x.t))) return listSpans(xs);
+  const out: (PanelSpan | string)[] = [];
+  xs.forEach((x, i) => {
+    if (i > 0) out.push("; ");
+    out.push(x);
+  });
+  return join(...out);
 }
 
 /** A condition quoted as the condition, never spliced into the sentence's
@@ -153,74 +215,46 @@ export const STEP_PHRASE: Record<string, string> = {
   category: "answered with the category",
 };
 
-/** Normal view, a funnel panel: the step furthest from the usual. */
-export function funnelDetail(
-  focus: { key: string; below: boolean } | null,
-  steps: Record<string, { here: PanelNum; usual: PanelNum } | undefined>,
-  who: { here: string; usual: string }
-): { heading: string; body: PanelText } {
-  const rec = steps.recommended;
-  const conv = steps.converts;
-  const nam = steps.named;
-  if (!focus) {
-    return {
-      heading: `You do about as well ${who.here} as ${who.usual}`,
-      body: join(
-        nam ? join("You are named in ", N(nam.here), ` of answers ${who.here}, against `, N(nam.usual), ` ${who.usual}.`) : null
-      ),
-    };
-  }
-  const line = (k: string, label: string) => {
-    const s = steps[k];
-    return s ? join(label, " in ", N(s.here), ` of answers ${who.here}, against `, N(s.usual), ` ${who.usual}.`) : null;
-  };
-  if (focus.key === "recommended" && focus.below && conv && conv.here.pct > conv.usual.pct) {
-    return {
-      heading: "The AI recommends you less often here, and picks you more often when it does",
-      body: join(line("recommended", "You are recommended"), " But ", N(conv.here), " of those recommendations end as the pick, against your usual ", N(conv.usual), "."),
-    };
-  }
-  if (focus.key === "converts" && focus.below && rec && rec.here.pct >= rec.usual.pct) {
-    return {
-      heading: "The AI recommends you here, and rarely makes you the pick",
-      body: join(line("recommended", "You are recommended"), " But only ", N(steps.converts!.here), " of those recommendations end as the pick, against your usual ", N(steps.converts!.usual), "."),
-    };
-  }
-  const more = focus.below ? "less" : "more";
+/** A displayed share as a number ("<1%" reads as half a point). */
+export const shownPct = (n: PanelNum) => (n.value === "<1%" ? 0.5 : parseFloat(n.value) || 0);
+
+/** Normal view, a funnel panel with no competitors (the usual is drawn): the
+ * step furthest from the usual, said in words. am37: the direction comes from
+ * the same closeness rule as the tags; no number the bars draw. */
+export function funnelDetail(focus: { key: string; dir: StepDir } | null, who: { here: string; usual: string }, behind: boolean): { heading: string; body: PanelText } {
+  if (!focus || focus.dir === 0) return { heading: `You do about as well ${who.here} as ${who.usual}`, body: join("No step here sits clearly above or below your usual.") };
+  const more = focus.dir < 0 ? "less" : "more";
   const HEAD: Record<string, string> = {
     named: `You are named ${more} often here than usual`,
     recommended: `You are recommended ${more} often here than usual`,
-    converts: `${focus.below ? "Fewer" : "More"} of your recommendations end as the pick here than usual`,
-    category: `The answers stay with the category ${more} often here than usual`,
+    converts: `${focus.dir < 0 ? "Fewer" : "More"} of your recommendations end as the pick here than usual`,
+    category: `The answers point to the category ${more} often here than usual`,
   };
   const body =
-    focus.key === "converts" && conv
-      ? join(N(conv.here), ` of your recommendations end as the pick ${who.here}, against `, N(conv.usual), ` ${who.usual}.`)
-      : line(focus.key, focus.key === "named" ? "You are named" : focus.key === "recommended" ? "You are recommended" : "The answer is about the category");
-  return { heading: HEAD[focus.key] ?? `This step differs from your usual`, body: join(body) };
+    focus.key === "named"
+      ? namedLine(focus.dir, who.usual, behind)
+      : focus.key === "recommended"
+        ? recommendedLine(focus.dir, who.usual, behind)
+        : focus.key === "converts"
+          ? convertsLine(focus.dir, `they do ${who.usual}`, behind)
+          : join(`The answers point the buyer to the category ${more} often ${who.here} than ${who.usual}.`);
+  return { heading: HEAD[focus.key] ?? "This step differs from your usual", body };
 }
 
-/** Comparison view, a funnel panel: the step where you fall furthest behind. */
+/** Comparison view, a funnel panel: the step where you fall furthest behind.
+ * am37: names only competitors whose shown share is above yours; no numbers. */
 export function rankDetail(
   focusKey: string | null,
   step: { label: string; here: PanelNum; rivals: { name: string; num: PanelNum }[] } | null
 ): { heading: string; body: PanelText } | null {
   if (!focusKey || !step) return null;
-  const ahead = step.rivals.filter((r) => r.num.pct > step.here.pct).sort((a, b) => b.num.pct - a.num.pct);
+  const ahead = step.rivals.filter((r) => shownPct(r.num) > shownPct(step.here)).sort((a, b) => b.num.pct - a.num.pct);
   if (!ahead.length) return { heading: "You lead at every step", body: join("No competitor shown here is ahead of you at any step.") };
   const names = ahead.slice(0, 2).map((r) => r.name);
   const phrase = STEP_PHRASE[focusKey] ?? focusKey;
   return {
     heading: `You fall furthest behind at "${step.label.toLowerCase()}"`,
-    body: join(
-      listWords(names),
-      ahead.length > 1 ? " are both " : " is ",
-      `${phrase} more often than you here: `,
-      listSpans(ahead.slice(0, 2).map((r) => N(r.num))),
-      ", against your ",
-      N(step.here),
-      "."
-    ),
+    body: join(listWords(names), ahead.length > 1 ? " are both " : " is ", `${phrase} more often than you here.`),
   };
 }
 
@@ -232,22 +266,23 @@ export function rankDetail(
  * "the average competitor's do", "Capital One's do"). */
 export type StepDir = -1 | 0 | 1;
 
-export function namedLine(dir: StepDir, than: string): PanelText {
+export function namedLine(dir: StepDir, than: string, behind = true): PanelText {
   if (dir < 0) return join(`The AI mentions you less often here than ${than}, so some buyers never hear of you before it decides.`);
   if (dir > 0) return join(`The AI mentions you more often here than ${than}, so what decides it comes after you are named.`);
-  return join(`The AI mentions you about as often here as ${than}, so what decides it comes after you are named.`);
+  return join(`The AI mentions you about as often here as ${than}, so ${behind ? "what decides it comes after you are named" : "being named is not what sets you apart"}.`);
 }
 
-export function recommendedLine(dir: StepDir, than: string): PanelText {
-  if (dir < 0) return join(`The AI recommends you less often here than ${than}, so this is part of where you lose.`);
-  if (dir > 0) return join(`The AI recommends you more often here than ${than}, so this is not where the gap opens.`);
-  return join(`The AI recommends you about as often here as ${than}, so this is not where the gap opens.`);
+/** am37: "where you lose" / "the gap" only when you are behind on the picks. */
+export function recommendedLine(dir: StepDir, than: string, behind = true): PanelText {
+  if (dir < 0) return join(`The AI recommends you less often here than ${than}, so ${behind ? "this is part of where you lose" : "this is the step to watch"}.`);
+  if (dir > 0) return join(`The AI recommends you more often here than ${than}, so ${behind ? "this is not where the gap opens" : "this step works in your favour"}.`);
+  return join(`The AI recommends you about as often here as ${than}, so ${behind ? "this is not where the gap opens" : "this step neither helps nor hurts you"}.`);
 }
 
-export function convertsLine(dir: StepDir, thanDo: string): PanelText {
+export function convertsLine(dir: StepDir, thanDo: string, behind = true): PanelText {
   if (dir < 0) return join(`Fewer of your recommendations end as the pick than ${thanDo}: the AI recommends you, then picks something else.`);
   if (dir > 0) return join(`More of your recommendations end as the pick than ${thanDo}, so once the AI recommends you it tends to stay with you.`);
-  return join(`Your recommendations end as the pick about as often as ${thanDo}, so this step is not where the gap opens.`);
+  return join(`Your recommendations end as the pick about as often as ${thanDo}, so ${behind ? "this step is not where the gap opens" : "this step neither helps nor hurts you"}.`);
 }
 
 /** Head-to-head, "The AI picks one of the two". */
@@ -326,22 +361,30 @@ export function buyerWorryDetail(o: { side: BuyerSide; often?: OftenWords; topRi
 }
 
 export type KeepSide = "stay" | "leave" | "none" | "split";
-export function customerWorryDetail(o: { side: KeepSide; often?: OftenWords; topRival?: string; leaveNoDest: boolean; noun: string }): { heading: string; body: PanelText } {
+/** am37: "despite the worry" only when staying is the majority AND the AI
+ * grants the worry; the move-to clause only when leaving is said at all. */
+export function customerWorryDetail(o: { side: KeepSide; stayMajority: boolean; granted: boolean; often?: OftenWords; topRival?: string; leaveNoDest: boolean; leaveRare: boolean; noun: string }): { heading: string; body: PanelText } {
   const heading =
     o.side === "stay"
-      ? "It tells customers to stay despite the worry"
+      ? o.stayMajority
+        ? o.granted
+          ? "It tells customers to stay despite the worry"
+          : "It tells customers to stay"
+        : "It leans toward telling customers to stay"
       : o.side === "leave"
         ? "It sides with leaving over staying"
         : o.side === "none"
           ? "It mostly leaves the decision to the customer"
-          : "It splits between staying and leaving";
+          : "It gives no single answer on staying or leaving";
   const said = o.side === "stay" ? "it says stay" : o.side === "none" ? "it takes no side" : "it says leave";
-  const a = o.often ? `${said} ${oftenPhrase(o.often, "for this worry", "across all your customers' worries")}` : null;
-  const b = o.leaveNoDest
-    ? `most answers that say leave name no other ${o.noun} at all`
-    : o.topRival
-      ? `the rival it names most often to move to is ${o.topRival}`
-      : "it names no rival to move to often enough to list";
+  const a = o.often && o.side !== "split" ? `${said} ${oftenPhrase(o.often, "for this worry", "across all your customers' worries")}` : null;
+  const b = o.leaveRare
+    ? "it rarely points the customer anywhere else"
+    : o.leaveNoDest
+      ? `most answers that say leave name no other ${o.noun} at all`
+      : o.topRival
+        ? `the rival it names most often to move to is ${o.topRival}`
+        : "it names no rival to move to often enough to list";
   return { heading, body: join(sentence(a, b)) };
 }
 
@@ -352,7 +395,7 @@ export function lookingAroundDetail(o: { side: KeepSide; showsMost: boolean; top
       : o.side === "stay"
         ? "It tells your customers to stay"
         : o.showsMost
-          ? "It does not push them out, but it shows them the door"
+          ? "It takes no side, and shows them other options"
           : "It mostly leaves the choice to your customer";
   const body = o.topRival
     ? `Your customers asked for alternatives, so the rivals it names, most often ${o.topRival}, are who it puts in front of them, not always who it sends them to.`
@@ -400,14 +443,29 @@ export function criteriaDetail(gap: boolean, plural: string): { heading: string;
     : { heading: "The checklist the AI hands buyers covers your case", body: join("What comes up most when the AI picks you is on the list it teaches.") };
 }
 
-/** Head-to-head default explanation: no number the two step bars draw. */
-export function h2hDetail(o: { exception: boolean; rival: string; pooled: boolean; side: "you" | "rival" | "close"; mostlyDecided: boolean }): { heading: string; body: PanelText } {
+/** Head-to-head default explanation: no number the two step bars draw.
+ * am37: the body supports its own heading - where the side that loses still
+ * wins (the top condition quoted), or why a close matchup can turn. */
+export function h2hDetail(o: { exception: boolean; rival: string; pooled: boolean; side: "you" | "rival" | "close"; always?: boolean; rivalCond?: string; youCond?: string; topRival?: string }): { heading: string; body: PanelText } {
   if (o.exception) return { heading: "You lose this one - with an exception", body: join(`Most of the answers that pick ${o.rival} still say when to choose you.`) };
+  const R = o.pooled ? "your named rivals" : o.rival;
   const heading =
     o.side === "you"
-      ? o.pooled ? "You win most of your head-to-heads" : `You win this matchup against ${o.rival}`
+      ? o.always ? (o.pooled ? "When it picks one of the two, it always picks you" : `When it picks between you and ${o.rival}, it always picks you`) : o.pooled ? "You win most of your head-to-heads" : `You win this matchup against ${o.rival}`
       : o.side === "rival"
-        ? o.pooled ? "Your named rivals win most of your head-to-heads" : `${o.rival} wins this matchup`
+        ? o.always ? (o.pooled ? "When it picks one of the two, it always picks the rival" : `When it picks between you and ${o.rival}, it always picks ${o.rival}`) : o.pooled ? "Your named rivals win most of your head-to-heads" : `${o.rival} wins this matchup`
         : "This matchup is close";
-  return { heading, body: decidedLine(o.mostlyDecided) };
+  const body =
+    o.side === "you"
+      ? o.rivalCond
+        ? join(`What still wins answers for ${R} is "${condLabel(o.rivalCond)}".`)
+        : o.pooled && o.topRival
+          ? join(`The rival that takes the most of these answers from you is ${o.topRival}.`)
+          : join(`The AI gives no condition for choosing ${R} often enough to list.`)
+      : o.side === "rival"
+        ? o.youCond
+          ? join(`What still wins answers for you is "${condLabel(o.youCond)}".`)
+          : join(`The AI gives no condition for choosing you often enough to list.`)
+        : join("Small shifts in what the AI weighs would change who wins this matchup.");
+  return { heading, body };
 }

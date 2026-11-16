@@ -25,14 +25,26 @@ const range = (x: KN) => {
 
 export const TAG_FURTHEST = "Furthest below your usual";
 
+/** am37: two shares read as "about the same" when the comparison falls inside
+ * this share's 95% range OR the two are under CLOSE_PTS points apart - one
+ * closeness rule for every tag, direction word and heading (a 1-point gap is
+ * never "above", "below", "furthest behind" or "part of why you lose"). */
+export const CLOSE_PTS = 3;
+export function isClose(here: KN, other: KN): boolean {
+  const p = rateOf(here);
+  const q = rateOf(other);
+  if (Math.abs(p - q) * 100 < CLOSE_PTS) return true;
+  const r = range(here);
+  return q >= r.low && q <= r.high;
+}
+
 /** Normal view: this cell's rate p = here.k/here.n against the All cell's q. */
 export function usualTag(here: KN, usual: KN): string {
   const p = rateOf(here);
   const q = rateOf(usual);
   if (p === 0 && q === 0) return "None, as usual";
-  if (p === 0 && q > 0) return "None here";
-  const r = range(here);
-  if (q >= r.low && q <= r.high) return "About your usual";
+  if (p === 0 && q > 0 && !isClose(here, usual)) return "None here";
+  if (isClose(here, usual)) return "About your usual";
   if (p < q) return q > 0 && p / q <= 0.6 ? "Well below your usual" : "Below your usual";
   return q > 0 && p / q >= 1.6 ? "Well above your usual" : "Above your usual";
 }
@@ -44,9 +56,8 @@ export function avgTag(here: KN, avg: KN): string {
   const p = rateOf(here);
   const q = rateOf(avg);
   if (p === 0 && q === 0) return "About the average competitor";
+  if (isClose(here, avg)) return "About the average competitor";
   if (p === 0 && q > 0) return "Well below the average competitor";
-  const r = range(here);
-  if (q >= r.low && q <= r.high) return "About the average competitor";
   if (p < q) return q > 0 && p / q <= 0.6 ? "Well below the average competitor" : "Below the average competitor";
   return q > 0 && p / q >= 1.6 ? "Well above the average competitor" : "Above the average competitor";
 }
@@ -58,9 +69,8 @@ export function segTag(here: KN, usual: KN, noun: string): string {
   const q = rateOf(usual);
   // am35: a verdict step names what is missing ("No worth-it answers here"), never a bare "None".
   if (p === 0 && q === 0) return `No ${noun}, as usual`;
-  if (p === 0 && q > 0) return `No ${noun} here`;
-  const r = range(here);
-  if (q >= r.low && q <= r.high) return "About your usual";
+  if (p === 0 && q > 0 && !isClose(here, usual)) return `No ${noun} here`;
+  if (isClose(here, usual)) return "About your usual";
   if (p < q) return q > 0 && p / q <= 0.6 ? `Far fewer ${noun} than usual` : `Fewer ${noun} than usual`;
   return q > 0 && p / q >= 1.6 ? `Far more ${noun} than usual` : `More ${noun} than usual`;
 }
@@ -69,9 +79,7 @@ export function segTag(here: KN, usual: KN, noun: string): string {
 export function usualDir(here: KN, usual: KN): -1 | 0 | 1 {
   const p = rateOf(here);
   const q = rateOf(usual);
-  if (p === q) return 0;
-  const r = range(here);
-  if (q >= r.low && q <= r.high) return 0;
+  if (p === q || isClose(here, usual)) return 0;
   return p < q ? -1 : 1;
 }
 
@@ -95,15 +103,18 @@ export function rankTag(you: KN, others: KN[]): { tag: string; gap: number } {
   const ties = all.filter((x) => x === mine).length;
   const place = above + 1;
   const last = place + ties - 1 === n;
-  const head = ties > 1 ? (last ? "Joint last" : `Joint ${ORD(place)}`) : last ? "Last" : ORD(place);
   const spread = Math.max(...all) - Math.min(...all);
-  return { tag: `${head} of ${n}${spread <= 5 ? ", all close" : ""}`, gap: Math.max(...all) - mine };
+  // am37: every brand at the same whole point is "Level", never "Joint last".
+  if (spread === 0) return { tag: "Level", gap: 0 };
+  const head = ties > 1 ? (last ? "Joint last" : `Joint ${ORD(place)}`) : last ? "Last" : ORD(place);
+  return { tag: `${head} of ${n}${spread < CLOSE_PTS ? ", all close" : ""}`, gap: Math.max(...all) - mine };
 }
 
 /** Panel 11: you against one rival on one step. */
 export function duelTag(you: KN, rival: KN, rivalName: string): { tag: string; rivalLeads: boolean } {
   const a = range(you);
   const b = range(rival);
+  if (Math.abs(rateOf(you) - rateOf(rival)) * 100 < CLOSE_PTS) return { tag: "Even", rivalLeads: false };
   if (b.low > a.high) return { tag: `${rivalName} leads`, rivalLeads: true };
   if (a.low > b.high) return { tag: `You lead ${rivalName}`, rivalLeads: false };
   return { tag: "Even", rivalLeads: false };
@@ -118,8 +129,7 @@ export const TAG_GAP_OPENS = "The gap opens here";
 export function otherTag(here: KN, other: KN, name: string, same: "about" | "close"): string {
   const p = rateOf(here);
   const q = rateOf(other);
-  const r = range(here);
-  if ((p === q) || (q >= r.low && q <= r.high)) return same === "about" ? `About the same as in ${name}` : `Close to ${name}`;
+  if (p === q || isClose(here, other)) return same === "about" ? `About the same as in ${name}` : `Close to ${name}`;
   if (p < q) return q > 0 && p / q <= 0.6 ? `Far lower than in ${name}` : `Lower than in ${name}`;
   return q > 0 && p / q >= 1.6 ? `Far higher than in ${name}` : `Higher than in ${name}`;
 }
@@ -156,7 +166,7 @@ export function rankTone(tag: string): PanelTone {
 export function toneOfTag(t: string): PanelTone {
   if (t === TAG_GAP_OPENS) return "bad";
   if (/^You lead /.test(t)) return "good";
-  if (t === "Even" || t === "Same for every brand" || /^About (your|the) usual$/.test(t) || /^None, as usual$/.test(t) || t === "About the average competitor" || /decided than usual$/.test(t)) return "neutral";
+  if (t === "Even" || t === "Level" || /^Usually picks /.test(t) || t === "Same for every brand" || /^About (your|the) usual$/.test(t) || /^None, as usual$/.test(t) || t === "About the average competitor" || /decided than usual$/.test(t)) return "neutral";
   if (/^(Joint )?(1st|2nd|3rd|\d+th|last) of \d+/i.test(t)) return rankTone(t);
   if (/ leads$/.test(t) || t === "Your named rivals lead") return "bad";
   if (t === TAG_FURTHEST || /below your usual$/i.test(t) || t === "None here") return "bad";
@@ -184,6 +194,8 @@ export const TAG_ALLOW: RegExp[] = [
   /^(Far )?(fewer|more) .+ than usual$/i,
   /^(Joint )?(1st|2nd|3rd|\d+th|last) of \d+(, all close)?( · furthest behind)?$/i,
   /^Last of \d+(, all close)?( · furthest behind)?$/,
+  /^Level$/,
+  /^Usually picks (one of the two|neither)$/,
   /^.+ leads$/,
   /^Your named rivals lead$/,
   /^You lead .+$/,
@@ -234,7 +246,10 @@ export function focusOf<K extends string>(steps: { key: K; here: KN; usual: KN }
  *             ("Tells buyers to go ahead", "Not worth it for this buyer").
  *   LEAN      no majority: the larger of the two sides that take a position
  *             leads when it is at least 1.5 times the smaller AND at least 5
- *             points ahead ("Leans go ahead", "More told to leave than to stay").
+ *             points ahead, or at least 8 points ahead whatever the ratio
+ *             ("Leans go ahead", "More told to leave than to stay").
+ *   ALWAYS    a "Mostly ..." side said in every answer reads "Always ...".
+ *   SPLIT     two sides at half each read "Split".
  *   NO SIDE   on keep-or-leave steps, "no side" at 70% or more is the
  *             takeaway before any lean is read ("Mostly takes no side").
  *   otherwise "No clear answer" (or "... about even").
@@ -253,21 +268,36 @@ export interface Takeaway {
 const MAJORITY = 50;
 const LEAN_RATIO = 1.5;
 const LEAN_PTS = 5;
+/** am37: a gap this many points wide leads whatever the ratio (25 vs 34 and
+ * 14 vs 23 read the same way; 32 vs 24 leans too). */
+const LEAN_GAP = 8;
 const NO_SIDE_FIRST = 70;
 /** 1 when a leads b, -1 when b leads a, 0 when neither leads (LEAN rule). */
 export function leanOf(a: number, b: number): 1 | -1 | 0 {
-  if (a >= b * LEAN_RATIO && a - b >= LEAN_PTS) return 1;
-  if (b >= a * LEAN_RATIO && b - a >= LEAN_PTS) return -1;
+  if ((a >= b * LEAN_RATIO && a - b >= LEAN_PTS) || a - b >= LEAN_GAP) return 1;
+  if ((b >= a * LEAN_RATIO && b - a >= LEAN_PTS) || b - a >= LEAN_GAP) return -1;
   return 0;
 }
-const tk = (tag: string, tone: PanelTone): Takeaway => ({ tag, tone });
+/** am37: "Mostly ..." said of every answer (100%) reads "Always ...". */
+const ALWAYS: Record<string, string> = { "Mostly it depends": "It always depends" };
+function tk(tag: string, tone: PanelTone, share?: number): Takeaway {
+  if (share !== undefined && share >= 99.95 && /^Mostly /.test(tag)) return { tag: ALWAYS[tag] ?? tag.replace(/^Mostly /, "Always "), tone };
+  return { tag, tone };
+}
+/** am37: two sides at exactly half each are "Split", never "Mostly" one of them. */
+const SPLIT: Takeaway = { tag: "Split", tone: "neutral" };
+const isSplit = (...xs: number[]) => {
+  const s = [...xs].sort((a, b) => b - a);
+  return s.length >= 2 && s[0] >= MAJORITY - 1 && Math.abs(s[0] - s[1]) < 1;
+};
 
 /** Value, "Is it worth paying more for?" (yes / depends / no, of all answers). */
 export function worthTakeaway(yes: number, depends: number, no: number, pooled: boolean): Takeaway {
   const who = pooled ? "most buyers" : "this buyer";
-  if (no >= MAJORITY) return tk(`Not worth it for ${who}`, "bad");
-  if (yes >= MAJORITY) return tk(`Worth it for ${who}`, "good");
-  if (depends >= MAJORITY) return tk("Mostly it depends", "neutral");
+  if (isSplit(yes, depends, no)) return SPLIT;
+  if (no >= MAJORITY) return tk(no >= 99.95 ? `Never worth it for ${who}` : `Not worth it for ${who}`, "bad");
+  if (yes >= MAJORITY) return tk(yes >= 99.95 ? `Always worth it for ${who}` : `Worth it for ${who}`, "good");
+  if (depends >= MAJORITY) return tk("Mostly it depends", "neutral", depends);
   const l = leanOf(yes, no);
   if (l > 0) return tk("Leans worth it", "good");
   if (l < 0) return tk("Leans not worth it", "bad");
@@ -276,9 +306,10 @@ export function worthTakeaway(yes: number, depends: number, no: number, pooled: 
 
 /** Value, "Where it points the buyer instead" (own cheaper / a rival's / nowhere, of all answers). */
 export function insteadTakeaway(own: number, rival: number, nowhere: number): Takeaway {
-  if (rival >= MAJORITY) return tk("Mostly points to a rival", "bad");
-  if (own >= MAJORITY) return tk("Mostly points to your own cheaper option", "neutral");
-  if (nowhere >= MAJORITY) return tk("Mostly names no cheaper option", "neutral");
+  if (isSplit(own, rival, nowhere)) return SPLIT;
+  if (rival >= MAJORITY) return tk("Mostly points to a rival", "bad", rival);
+  if (own >= MAJORITY) return tk("Mostly points to your own cheaper option", "neutral", own);
+  if (nowhere >= MAJORITY) return tk("Mostly names no cheaper option", "neutral", nowhere);
   const l = leanOf(rival, own);
   if (l > 0) return tk("More to rivals than to your own", "bad");
   if (l < 0) return tk("More to your own than to rivals", "neutral");
@@ -287,17 +318,19 @@ export function insteadTakeaway(own: number, rival: number, nowhere: number): Ta
 
 /** Both worry panels, "Agrees the worry is fair" (of the answers that judge it). */
 export function agreesTakeaway(agrees: number): Takeaway {
-  if (agrees >= 60) return tk("Mostly agrees the worry is fair", "bad");
+  if (agrees >= 60) return tk("Mostly agrees the worry is fair", "bad", agrees);
   if (agrees >= 35) return tk("Often agrees the worry is fair", "bad");
   if (agrees >= 15) return tk("Sometimes agrees the worry is fair", "neutral");
+  if (agrees <= 0.05) return tk("Never agrees the worry is fair", "good");
   return tk("Rarely agrees the worry is fair", "good");
 }
 
 /** Buyers' worry, "What it tells the buyer to do" (go ahead / steer clear / no side). */
 export function proceedTakeaway(go: number, avoid: number, none: number, agrees: number | null): Takeaway {
+  if (isSplit(go, avoid, none)) return SPLIT;
   if (go >= MAJORITY) return tk("Tells buyers to go ahead", "good");
   if (avoid >= MAJORITY) return tk("Tells buyers to steer clear", "bad");
-  if (none >= MAJORITY) return agrees !== null && agrees >= MAJORITY ? tk("Agrees, then leaves it to the buyer", "bad") : tk("Mostly leaves it to the buyer", "neutral");
+  if (none >= MAJORITY) return agrees !== null && agrees >= MAJORITY ? tk("Agrees, then leaves it to the buyer", "bad") : tk("Mostly leaves it to the buyer", "neutral", none);
   const l = leanOf(go, avoid);
   if (l > 0) return tk("Leans go ahead", "good");
   if (l < 0) return tk("Leans steer clear", "bad");
@@ -306,18 +339,20 @@ export function proceedTakeaway(go: number, avoid: number, none: number, agrees:
 
 /** Customers' worry and looking around, "What it tells the customer to do" (stay / leave / no side). */
 export function keepTakeaway(keep: number, leave: number, none: number): Takeaway {
+  if (isSplit(keep, leave, none)) return SPLIT;
   if (keep >= MAJORITY) return tk("Tells customers to stay", "good");
   if (leave >= MAJORITY) return tk("Tells customers to leave", "bad");
-  if (none >= NO_SIDE_FIRST) return tk("Mostly takes no side", "neutral");
+  if (none >= NO_SIDE_FIRST) return tk("Mostly takes no side", "neutral", none);
   const l = leanOf(leave, keep);
   if (l > 0) return tk("More told to leave than to stay", "bad");
   if (l < 0) return tk("More told to stay than to leave", "good");
-  if (none >= MAJORITY) return tk("Mostly takes no side", "neutral");
+  if (none >= MAJORITY) return tk("Mostly takes no side", "neutral", none);
   return tk("Stay and leave about even", "neutral");
 }
 
 /** Looking around, "Shows another option" (of all answers). The customer asked for alternatives, so showing them is not in itself bad. */
 export function offersTakeaway(offers: number): Takeaway {
+  if (offers >= 99.95) return tk("Shows another option in every answer", "neutral");
   if (offers >= MAJORITY) return tk("Shows another option in most answers", "neutral");
   if (offers >= 20) return tk("Shows another option in some answers", "neutral");
   return tk("Rarely shows another option", "good");
@@ -325,9 +360,10 @@ export function offersTakeaway(offers: number): Takeaway {
 
 /** Expansion, "Does the answer back it?" (backs / neither / points elsewhere). */
 export function stanceTakeaway(backs: number, neither: number, redirects: number): Takeaway {
-  if (backs >= MAJORITY) return tk("Mostly backs their plan", "good");
-  if (redirects >= MAJORITY) return tk("Mostly points them elsewhere", "bad");
-  if (neither >= MAJORITY) return tk("Mostly leaves it to the customer", "neutral");
+  if (isSplit(backs, neither, redirects)) return SPLIT;
+  if (backs >= MAJORITY) return tk("Mostly backs their plan", "good", backs);
+  if (redirects >= MAJORITY) return tk("Mostly points them elsewhere", "bad", redirects);
+  if (neither >= MAJORITY) return tk("Mostly leaves it to the customer", "neutral", neither);
   const l = leanOf(backs, redirects);
   if (l > 0) return tk("Leans backing their plan", "good");
   if (l < 0) return tk("Leans pointing them elsewhere", "bad");
@@ -336,9 +372,10 @@ export function stanceTakeaway(backs: number, neither: number, redirects: number
 
 /** Business case, "How strong a case..." (confident / hedged / against you). */
 export function caseTakeaway(strong: number, hedged: number, against: number): Takeaway {
-  if (against >= MAJORITY) return tk("Mostly argues against you", "bad");
-  if (strong >= MAJORITY) return tk("Mostly a confident case", "good");
-  if (hedged >= MAJORITY) return tk("Mostly a hedged case", "neutral");
+  if (isSplit(strong, hedged, against)) return SPLIT;
+  if (against >= MAJORITY) return tk("Mostly argues against you", "bad", against);
+  if (strong >= MAJORITY) return tk("Mostly a confident case", "good", strong);
+  if (hedged >= MAJORITY) return tk("Mostly a hedged case", "neutral", hedged);
   if (against >= 20) return tk("Often argues against you", "bad");
   const l = leanOf(strong, hedged);
   if (l > 0) return tk("Leans confident", "good");
@@ -346,11 +383,12 @@ export function caseTakeaway(strong: number, hedged: number, against: number): T
   return tk("Confident and hedged about even", "neutral");
 }
 
-/** Answering a critic, "How strong an answer..." (strong / partial / gives in). */
+/** Answering a critic, "How strong an answer..." (strong / partial / drops your side). */
 export function criticStrengthTakeaway(strong: number, partial: number, concedes: number): Takeaway {
-  if (concedes >= MAJORITY) return tk("Mostly gives in to the critic", "bad");
-  if (strong >= MAJORITY) return tk("Mostly a strong answer", "good");
-  if (partial >= MAJORITY) return tk("Mostly a partial answer", "neutral");
+  if (isSplit(strong, partial, concedes)) return SPLIT;
+  if (concedes >= MAJORITY) return tk("Mostly drops your side", "bad", concedes);
+  if (strong >= MAJORITY) return tk("Mostly a strong answer", "good", strong);
+  if (partial >= MAJORITY) return tk("Mostly a partial answer", "neutral", partial);
   const l = leanOf(strong, partial);
   if (l > 0) return tk("Leans strong", "good");
   if (l < 0) return tk("Leans partial", "neutral");
@@ -359,20 +397,22 @@ export function criticStrengthTakeaway(strong: number, partial: number, concedes
 
 /** Answering a critic, "Does it say the critic is right?" (wrong / partly / right, of the answers that judge it). */
 export function premiseTakeaway(rebuts: number, mixed: number, confirms: number): Takeaway {
-  if (rebuts >= MAJORITY) return tk("Mostly says the critic is wrong", "good");
-  if (confirms >= MAJORITY) return tk("Mostly says the critic is right", "bad");
-  if (mixed >= MAJORITY) return tk("Mostly says the critic is partly right", "neutral");
+  if (isSplit(rebuts, mixed, confirms)) return SPLIT;
+  if (rebuts >= MAJORITY) return tk("Mostly says the critic is wrong", "good", rebuts);
+  if (confirms >= MAJORITY) return tk("Mostly says the critic is right", "bad", confirms);
+  if (mixed >= MAJORITY) return tk("Mostly says the critic is partly right", "neutral", mixed);
   const l = leanOf(rebuts, confirms);
   if (l > 0) return tk("Sides against the critic more often", "good");
   if (l < 0) return tk("Sides with the critic more often", "bad");
   return tk("No clear answer", "neutral");
 }
 
-/** What to use alongside you (own / another company's / one to replace you, of all answers). */
+/** What to use alongside you (own / another company's / one to replace you, of all answers; not exclusive). */
 export function alongsideTakeaway(own: number, third: number, substitute: number): Takeaway {
   if (substitute >= 25) return tk("Often names one to replace you", "bad");
-  if (own >= MAJORITY) return tk("Mostly names your own", "good");
-  if (third >= MAJORITY) return tk("Mostly names another company's", "neutral");
+  // am37: both kinds can pass half (an answer names several) - the larger one leads, so the tag never contradicts the note.
+  if (own >= MAJORITY && own > third) return tk("Mostly names your own", "good", own);
+  if (third >= MAJORITY && third > own) return tk("Mostly names another company's", "neutral", third);
   return tk("A mix of your own and others'", "neutral");
 }
 
@@ -380,21 +420,23 @@ export function alongsideTakeaway(own: number, third: number, substitute: number
 export const taughtTakeaway = (gap: boolean): Takeaway => (gap ? tk("Misses your strongest points", "bad") : tk("Covers your strongest points", "good"));
 export const GAP_TAKEAWAY: Takeaway = tk("Not on the checklist", "bad");
 
-/** Every takeaway tag (TAG_ALLOW reads it). */
-export const TAKEAWAY_TAGS: string[] = [
-  "Not worth it for most buyers", "Not worth it for this buyer", "Worth it for most buyers", "Worth it for this buyer", "Mostly it depends", "Leans worth it", "Leans not worth it", "No clear answer",
+const BASE_TAKEAWAYS: string[] = [
+  "Not worth it for most buyers", "Not worth it for this buyer", "Worth it for most buyers", "Worth it for this buyer", "Never worth it for most buyers", "Never worth it for this buyer", "Always worth it for most buyers", "Always worth it for this buyer", "Mostly it depends", "Leans worth it", "Leans not worth it", "No clear answer",
   "Mostly points to a rival", "Mostly points to your own cheaper option", "Mostly names no cheaper option", "More to rivals than to your own", "More to your own than to rivals", "Rivals and your own about even",
-  "Mostly agrees the worry is fair", "Often agrees the worry is fair", "Sometimes agrees the worry is fair", "Rarely agrees the worry is fair",
+  "Mostly agrees the worry is fair", "Often agrees the worry is fair", "Sometimes agrees the worry is fair", "Rarely agrees the worry is fair", "Never agrees the worry is fair",
   "Tells buyers to go ahead", "Tells buyers to steer clear", "Agrees, then leaves it to the buyer", "Mostly leaves it to the buyer", "Leans go ahead", "Leans steer clear",
   "Tells customers to stay", "Tells customers to leave", "Mostly takes no side", "More told to leave than to stay", "More told to stay than to leave", "Stay and leave about even",
-  "Shows another option in most answers", "Shows another option in some answers", "Rarely shows another option",
+  "Shows another option in every answer", "Shows another option in most answers", "Shows another option in some answers", "Rarely shows another option",
   "Mostly backs their plan", "Mostly points them elsewhere", "Mostly leaves it to the customer", "Leans backing their plan", "Leans pointing them elsewhere",
   "Mostly argues against you", "Mostly a confident case", "Mostly a hedged case", "Often argues against you", "Leans confident", "Leans hedged", "Confident and hedged about even",
-  "Mostly gives in to the critic", "Mostly a strong answer", "Mostly a partial answer", "Leans strong", "Leans partial", "Strong and partial about even",
+  "Mostly drops your side", "Mostly a strong answer", "Mostly a partial answer", "Leans strong", "Leans partial", "Strong and partial about even",
   "Mostly says the critic is wrong", "Mostly says the critic is right", "Mostly says the critic is partly right", "Sides against the critic more often", "Sides with the critic more often",
   "Often names one to replace you", "Mostly names your own", "Mostly names another company's", "A mix of your own and others'",
   "Misses your strongest points", "Covers your strongest points", "Not on the checklist",
+  "Split",
 ];
+/** Every takeaway tag (TAG_ALLOW reads it), with each "Mostly" tag's "Always" form. */
+export const TAKEAWAY_TAGS: string[] = [...BASE_TAKEAWAYS, ...BASE_TAKEAWAYS.filter((t) => /^Mostly /.test(t)).map((t) => ALWAYS[t] ?? t.replace(/^Mostly /, "Always "))];
 
 /** A comparison with the usual, in words: how a share here sits against the
  * same share across the row (same range rule and 0.6 / 1.6 ratios as segTag). */

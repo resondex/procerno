@@ -512,12 +512,15 @@ export interface PanelConditions {
   toward: PanelCondition[]; // <= 6
   away: PanelCondition[];   // <= 6
   note?: string;        // rule-bearing answers exist but no row clears the floor
+  /** am37: the line drawn in a column with no row while the other column has rows. */
+  towardNote?: string;
+  awayNote?: string;
   /** The away column is not "away from you" (alongside: another company's
    * product the customer asked about) - drawn neutral, never red. */
   neutralAway?: true;
 }
 
-export interface PanelBrandRow { name: string; you?: true; num: PanelNum; open?: true } // open <=> a PanelRival exists
+export interface PanelBrandRow { name: string; you?: true; num: PanelNum; open?: true; /** am37: the row's shown label when it is yours but not "You" (Value: your own cheaper option). */ shown?: string } // open <=> a PanelRival exists
 export interface PanelBlock { title: string; sub: string; rows: PanelBrandRow[] }
 export interface PanelLine { label: string; value: PanelText }
 

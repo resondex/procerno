@@ -31,7 +31,9 @@ const { insightInputs, rankedInsights } = await import(process.cwd() + "/src/lib
 const { computeBrief } = await import(process.cwd() + "/src/lib/engine/brief.ts");
 const { computeDossiers } = await import(process.cwd() + "/src/lib/engine/dossiers.ts");
 const { buildResolver } = await import(process.cwd() + "/src/lib/engine/brand_resolve.ts");
-const { isAllowedTag, TAKEAWAY_TAGS } = await import(process.cwd() + "/src/lib/engine/panel_tags.ts");
+const { isAllowedTag, TAKEAWAY_TAGS, CLOSE_PTS } = await import(process.cwd() + "/src/lib/engine/panel_tags.ts");
+const { knOf: knOfH } = await import(process.cwd() + "/src/lib/engine/panel_build.ts");
+const { cell: wilsonCell } = await import(process.cwd() + "/src/lib/engine/view_data.ts");
 /* am36: the verdict panels whose steps carry takeaways and whose explanation repeats no bar number. */
 const VERDICT_KINDS = new Set(["value", "buyer_worry", "customer_worry", "looking_around", "expansion", "business_case", "critic", "alongside", "criteria"]);
 const fsMod = await import("node:fs");
@@ -357,6 +359,7 @@ for (const project of projects) {
     let avgCount = 0;
     let repeatChecks = 0;
     let verdictChecked = 0;
+    let am37Checks = 0;
     let planted = false; // PANEL_PLANT=1: one value explanation gets a bar number, to prove 6f bites
     const SEG_FIELD: Record<string, [string, (v: unknown) => boolean]> = {
       proceed: ["proceed_or_avoid", (v) => v === "proceed"], avoid: ["proceed_or_avoid", (v) => v === "avoid"],
@@ -573,6 +576,118 @@ for (const project of projects) {
         repeatChecks++;
         repeats(p.detail.body, barsNormal, `${id} h2h detail`);
       }
+      // 6g. am37: the audit's mechanical classes, so they cannot return.
+      {
+        am37Checks++;
+        const shown = (n: PanelNum) => (n.value === "<1%" ? 0.5 : parseFloat(n.value) || 0);
+        const rate = (n: PanelNum) => { const k = knOfH(n); return k && k.n > 0 ? k.k / k.n : n.pct / 100; };
+        const close = (a: PanelNum, b: PanelNum) => {
+          const ka = knOfH(a);
+          if (Math.abs(rate(a) - rate(b)) * 100 < CLOSE_PTS) return true;
+          if (!ka || ka.n === 0) return false;
+          const c = wilsonCell(ka.k, ka.n);
+          return rate(b) >= c.low && rate(b) <= c.high;
+        };
+        const usualStepsH = p.usualCellId ? ((view.positions as Record<string, Position>)[p.usualCellId]?.panel?.steps ?? []) : [];
+        const allSteps: [PanelStep, string][] = [...p.steps.map((st) => [st, "panel"] as [PanelStep, string]), ...(p.rivals ?? []).flatMap((r) => r.steps.map((st) => [st, `rival ${r.name}`] as [PanelStep, string]))];
+        for (const [st, at] of allSteps) {
+          // Tag vs numbers: direction and ties.
+          const other = st.usual ?? (at === "panel" ? usualStepsH.find((u) => u.key === st.key)?.here : undefined);
+          if (st.here && other && st.tagUsual && at === "panel") {
+            const t = st.tagUsual;
+            if (/\b(above|higher|more)\b/i.test(t) && !/^Usually/.test(t) && (rate(st.here) <= rate(other) || close(st.here, other)) && /(usual|competitor|than in)/i.test(t)) failures.push(`${project.brand}: ${id} ${at} step ${st.key} tag "${t}" but ${st.here.value} vs ${other.value}`);
+            if (/\b(below|lower|fewer|less)\b/i.test(t) && (rate(st.here) >= rate(other) || close(st.here, other)) && /(usual|competitor|than in)/i.test(t)) failures.push(`${project.brand}: ${id} ${at} step ${st.key} tag "${t}" but ${st.here.value} vs ${other.value}`);
+            if (/^About /.test(t) && !close(st.here, other)) failures.push(`${project.brand}: ${id} ${at} step ${st.key} tag "${t}" on a gap that is not close (${st.here.value} vs ${other.value})`);
+          }
+          if (st.here && st.rivals?.length && st.tagRank) {
+            const vals = [shown(st.here), ...st.rivals.map((r) => shown(r.num))];
+            if (vals.every((v) => v === vals[0]) && st.tagRank !== "Level" && !TAKEAWAY_TAGS.includes(st.tagRank) && st.tagRank !== "Even") failures.push(`${project.brand}: ${id} ${at} step ${st.key} tag "${st.tagRank}" on a tie`);
+            if (/furthest behind/.test(st.tagRank) && Math.max(...vals.slice(1)) - vals[0] < CLOSE_PTS - 0.5) failures.push(`${project.brand}: ${id} ${at} step ${st.key} "furthest behind" on a ${Math.max(...vals.slice(1)) - vals[0]}-point gap`);
+            if (/^You lead /.test(st.tagRank) && st.rivals.some((r) => shown(r.num) >= shown(st.here!))) failures.push(`${project.brand}: ${id} ${at} step ${st.key} "${st.tagRank}" but a rival is level or ahead`);
+          }
+          // "Mostly" said of every answer, "Mostly" on a 50/50 split.
+          for (const t of [st.tagUsual, st.tagRank]) {
+            if (!t || !/^Mostly /.test(t)) continue;
+            const segs = (st.segments ?? []).map((g) => g.num.pct).sort((a, b) => b - a);
+            if (segs.length && segs[0] >= 99.95) failures.push(`${project.brand}: ${id} ${at} step ${st.key} "${t}" at 100%`);
+            if (segs.length >= 2 && Math.abs(segs[0] - segs[1]) < 1 && segs[0] >= 49) failures.push(`${project.brand}: ${id} ${at} step ${st.key} "${t}" on a split`);
+            if (!segs.length && st.here && st.here.pct >= 99.95) failures.push(`${project.brand}: ${id} ${at} step ${st.key} "${t}" at 100%`);
+          }
+        }
+        // "lose" / "gap" wording only when behind on the share of picks (pick kinds), or behind at that step (a rival's panel, a lost head-to-head).
+        const own2 = cellIds[id] ?? [];
+        const pickCount = new Map<string, number>();
+        for (const rid of own2) {
+          const c = codeOf.get(rid) as Code | undefined;
+          if (!c || c.outcome !== "pick" || !c.top_pick) continue;
+          const x = resolve(c.top_pick);
+          if (x.status !== "active") continue;
+          pickCount.set(x.key, (pickCount.get(x.key) ?? 0) + 1);
+        }
+        const mineP = pickCount.get(targetKey) ?? 0;
+        const behindP = [...pickCount.entries()].some(([k, v]) => k !== targetKey && v > mineP);
+        const LOSE = /\b(why you lose|where you lose|part of where you lose|the gap opens|where the gap opens)\b/i;
+        const panelWords = [p.stackLabel, p.detail?.heading, ...(p.detail?.body ?? []).map((x) => x.t), p.detailComp?.heading, ...(p.detailComp?.body ?? []).map((x) => x.t), ...[...Object.values(p.details ?? {}), ...Object.values(p.detailsComp ?? {})].flatMap((d) => (d ? [d.heading, ...d.body.map((x) => x.t)] : []))].filter((x): x is string => !!x);
+        const pickKind = p.kind === "buy" || p.kind === "switching" || p.kind === "popular";
+        for (const w of panelWords) if (LOSE.test(w) && !(pickKind && behindP)) failures.push(`${project.brand}: ${id} says "${w.slice(0, 90)}" but you are not behind on the picks here`);
+        for (const rv of p.rivals ?? []) if (rv.stackLabel && LOSE.test(rv.stackLabel) && !rv.steps.some((st) => st.tagRank === "The gap opens here")) failures.push(`${project.brand}: ${id} rival ${rv.name} says "${rv.stackLabel}" with no step where it leads`);
+        // The claim's "N other brands" equals the other brands listed, and never counts you.
+        const claimText = p.claim.map((x) => x.t).join("");
+        const WORDN: Record<string, number> = { one: 1, two: 2, three: 3, four: 4, five: 5, six: 6, seven: 7, eight: 8, nine: 9, ten: 10 };
+        const mN = claimText.match(/\b(\w+) other brands? takes?\b/i);
+        if (mN) {
+          const n = WORDN[mN[1].toLowerCase()] ?? parseInt(mN[1], 10);
+          const listedN = (p.competitors?.rows ?? []).filter((r) => !r.you).length;
+          if (n !== listedN) failures.push(`${project.brand}: ${id} claim says ${mN[1]} other brands, the list shows ${listedN}`);
+        }
+        for (const r of p.competitors?.rows ?? []) if (!r.you && keyOfName(r.name) === targetKey) failures.push(`${project.brand}: ${id} competitors list the tracker's own brand as "${r.name}"`);
+        for (const nme of p.competitorOrder ?? []) if (keyOfName(nme) === targetKey) failures.push(`${project.brand}: ${id} competitorOrder carries the tracker's own brand "${nme}"`);
+        // No doubled possessive.
+        const walkStr = (v: unknown, path: string) => {
+          if (typeof v === "string") {
+            if (/['’]s['’]s\b/.test(v) || /\b[A-Za-z]+s['’]s\b/.test(v)) failures.push(`${project.brand}: ${id}${path} doubled possessive in ${JSON.stringify(v.slice(0, 120))}`);
+            if (/\ban\s+One[A-Z]/.test(v) || /\b[a-z]+ Your named\b/.test(v)) failures.push(`${project.brand}: ${id}${path} article or capital in ${JSON.stringify(v.slice(0, 120))}`);
+          } else if (Array.isArray(v)) v.forEach((x, i) => walkStr(x, `${path}[${i}]`));
+          else if (v && typeof v === "object") for (const [k, x] of Object.entries(v)) if (!["refs", "tip", "find"].includes(k)) walkStr(x, `${path}.${k}`);
+        };
+        walkStr(p, "");
+        // One own-cheaper share per Value panel.
+        if (p.kind === "value") {
+          const ownSeg = p.steps.find((st) => st.key === "instead")?.segments?.find((g) => g.key === "own");
+          const ownRow = (p.competitors?.rows ?? []).find((r) => r.you);
+          if (ownRow && (!ownSeg || ownSeg.num.value !== ownRow.num.value)) failures.push(`${project.brand}: ${id} own cheaper option ${ownSeg?.num.value ?? "absent"} in the step, ${ownRow.num.value} in the list`);
+        }
+        // No empty condition column beside a full one.
+        for (const [c, at] of [[p.conditions, "panel"], ...(p.rivals ?? []).map((r) => [r.conditions, `rival ${r.name}`])] as [PanelConditions | undefined, string][]) {
+          if (!c) continue;
+          if (c.toward.length === 0 && c.away.length > 0 && !c.towardNote) failures.push(`${project.brand}: ${id} ${at} "${c.towardTitle}" column is empty with no line`);
+          if (c.away.length === 0 && c.toward.length > 0 && !c.awayNote) failures.push(`${project.brand}: ${id} ${at} "${c.awayTitle}" column is empty with no line`);
+          const lc = (x: string) => x.toLowerCase();
+          for (const side of ["toward", "away"] as const) {
+            const seen = new Set<string>();
+            for (const row of c[side]) {
+              if (seen.has(lc(row.text))) failures.push(`${project.brand}: ${id} ${at} ${side} lists "${row.text}" twice`);
+              seen.add(lc(row.text));
+              if (/^[a-z]/.test(row.text)) failures.push(`${project.brand}: ${id} ${at} ${side} row "${row.text}" is not in sentence case`);
+            }
+          }
+        }
+        // A step that starts selected has an explanation.
+        if (p.details && p.focus && !p.details[p.focus]) failures.push(`${project.brand}: ${id} focus ${p.focus} has no explanation`);
+        if (p.detailsComp && p.focusComp && !p.detailsComp[p.focusComp]) failures.push(`${project.brand}: ${id} comparison focus ${p.focusComp} has no explanation`);
+        // Competitors said to do a step "more often than you" are ahead of you at it.
+        for (const d of [p.detail, p.detailComp]) {
+          const txt = (d?.body ?? []).map((x) => x.t).join("");
+          const m = txt.match(/^(.+?) (?:are both|is) .+ more often than you here\./);
+          if (!m) continue;
+          const fs = p.focusComp ? p.steps.find((st) => st.key === p.focusComp) : undefined;
+          if (!fs?.here || !fs.rivals) continue;
+          for (const nme of m[1].split(/, | and /)) {
+            const r = fs.rivals.find((x) => x.name === nme.trim());
+            if (r && shown(r.num) <= shown(fs.here)) failures.push(`${project.brand}: ${id} names ${nme} "more often than you" at ${r.num.value} against your ${fs.here.value}`);
+          }
+        }
+      }
       // 7. kinds without conditions.
       if ((p.kind === "buyer_worry" || p.kind === "customer_worry" || p.kind === "value" || p.kind === "business_case") && p.conditions) failures.push(`${project.brand}: ${id} ${p.kind} carries conditions`);
       if ((p.kind === "learning" || p.kind === "critic") && p.conditions) failures.push(`${project.brand}: ${id} ${p.kind} carries conditions`);
@@ -713,7 +828,7 @@ for (const project of projects) {
     // 9. ruling 5 omissions.
     for (const o of (debug as { panelOmissions?: { cellId: string; list: string; code: string; share: number; hit: string; via: string }[] }).panelOmissions ?? [])
       omissionLines.push(`${project.brand.padEnd(17)} | ${o.cellId.padEnd(44)} | ${o.list.padEnd(9)} | ${o.code.padEnd(28)} | ${(Math.round(o.share * 1000) / 10).toFixed(1).padStart(5)}% | ${o.hit.padEnd(16)} | ${o.via}`);
-    console.log(`PANELS: ${panels} panels, ${nums} numbers, ${refCount} example answers checked, ${labelFallbacks} quoted-seed claims, ${detailCount} step details, ${avgCount} average-competitor steps, ${repeatChecks} explanations checked for repeated bar numbers, ${verdictChecked} verdict panels checked`);
+    console.log(`PANELS: ${panels} panels, ${nums} numbers, ${refCount} example answers checked, ${labelFallbacks} quoted-seed claims, ${detailCount} step details, ${avgCount} average-competitor steps, ${repeatChecks} explanations checked for repeated bar numbers, ${verdictChecked} verdict panels checked, ${am37Checks} panels through the am37 checks`);
     if (detailCount === 0) failures.push(`${project.brand}: no panel carries step details`);
     if (avgCount === 0) failures.push(`${project.brand}: no panel carries an average competitor`);
     // The mockup numbers (American Express).

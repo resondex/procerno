@@ -4,10 +4,10 @@ import { pickRefs, spreadRefs, themeAnswerSets, type AnswerRules, type ThemeMap 
 import type { RuleGroup } from "./rules_explorer";
 import { isWallWording } from "./wall_wording";
 import type { Resolver } from "./brand_resolve";
-import type { PoolRow, RateCell } from "./view_data";
+import { cell, type PoolRow, type RateCell } from "./view_data";
 import type { ValueFact } from "./value";
 import { filterObvious, type Omission, type OmissionList } from "./panel_filter";
-import { AVG_COMP, GAP_TAKEAWAY, TAG_FURTHEST, TAG_GAP_OPENS, agreesTakeaway, alongsideTakeaway, avgTag, caseTakeaway, criticStrengthTakeaway, duelTag, insteadTakeaway, keepTakeaway, leanOf, offersTakeaway, oftenOf, premiseTakeaway, proceedTakeaway, stanceTakeaway, taughtTakeaway, usualDir, duelTone, focusOf, neutralUsualTag, otherTag, rankTag, segTag, toneOfTag, usualTag, usualTone, worthTakeaway, type KN, type Takeaway } from "./panel_tags";
+import { AVG_COMP, CLOSE_PTS, GAP_TAKEAWAY, TAKEAWAY_TAGS, TAG_FURTHEST, TAG_GAP_OPENS, agreesTakeaway, alongsideTakeaway, avgTag, caseTakeaway, criticStrengthTakeaway, duelTag, insteadTakeaway, keepTakeaway, leanOf, offersTakeaway, oftenOf, premiseTakeaway, proceedTakeaway, stanceTakeaway, taughtTakeaway, usualDir, duelTone, focusOf, neutralUsualTag, otherTag, rankTag, segTag, toneOfTag, usualTag, usualTone, worthTakeaway, type KN, type Takeaway } from "./panel_tags";
 import { ROW_NAME } from "./question_names";
 import {
   F,
@@ -33,13 +33,16 @@ import {
   THIN_RIVAL,
   article,
   attachedLead,
-  condLabel,
+  codeName,
+  condRowLabel,
+  listNameSpans,
+  poss as possOf,
+  shownPct,
   convertsLine,
   countWord,
   decidedLine,
   funnelDetail,
   join,
-  listSpans,
   listWords,
   namedLine,
   rankDetail,
@@ -287,6 +290,7 @@ export function themedConds(a: ThemedCondArgs): CondSet {
 
 /* ------------------------------- numbers ------------------------------- */
 
+const TAKEAWAY_TAG_SET = new Set(TAKEAWAY_TAGS);
 const KNS = new WeakMap<PanelNum, KN>();
 /** The counts behind a panel number (tags and harness only). */
 export const knOf = (n: PanelNum | undefined): KN | undefined => (n ? KNS.get(n) : undefined);
@@ -310,7 +314,22 @@ export function num(k: number, n: number, unit: string, refs?: AnswerRef[]): Pan
 interface Ctx {
   h: PanelHelpers;
   inputs: Map<string, PanelCellInput>;
+  /** am37: the brand sells a ladder of its own lines (a confirmed Value line
+   * other than the bare brand) - else it is one product (a retailer, a single
+   * service): no "your own cheaper" option and no "which of your <noun>" line. */
+  ladder: boolean;
 }
+
+/** Whether any confirmed Value line names a product of the brand beyond the bare brand. */
+function hasLadder(inputs: Map<string, PanelCellInput>, h: PanelHelpers): boolean {
+  const c0: Ctx = { h, inputs, ladder: true };
+  return [...inputs.values()].some((x) => x.kind === "value" && !!x.line && productLabel(x.line, h.brand, c0) !== null);
+}
+
+/** A codebook name as shown (its scope sentence's capitals kept). */
+const cname = (code: string, h: PanelHelpers) => codeName(code, h.scopes.get(code));
+/** A codebook name as a row label (sentence case). */
+const clabel = (code: string, h: PanelHelpers) => upperFirst(cname(code, h));
 
 /** The row's All cell (same band and row, key "all", pooled), when this cell is a split sibling. */
 function usualOf(inp: PanelCellInput, inputs: Map<string, PanelCellInput>): PanelCellInput | undefined {
@@ -327,7 +346,7 @@ function siblingsOf(inp: PanelCellInput, inputs: Map<string, PanelCellInput>): P
 }
 
 export function buildPanels(inputs: Map<string, PanelCellInput>, h: PanelHelpers): Map<string, PositionPanel> {
-  const ctx: Ctx = { h, inputs };
+  const ctx: Ctx = { h, inputs, ladder: hasLadder(inputs, h) };
   const panels = new Map<string, PositionPanel>();
   for (const inp of inputs.values()) {
     const p = buildPanel(inp, ctx);
@@ -375,7 +394,7 @@ export function buildPanels(inputs: Map<string, PanelCellInput>, h: PanelHelpers
     tone(p.steps);
     for (const r of p.rivals ?? []) {
       tone(r.steps);
-      r.stackLabel = "Where the gap opens";
+      r.stackLabel = r.focus ? "Where the gap opens" : "How the two compare";
       if (r.byCell?.length) r.byCellTitle = "Where it takes its picks";
     }
   }
@@ -442,6 +461,12 @@ function funnelNums(rows: PoolRow[], key: string, name: string, h: PanelHelpers)
   };
 }
 
+/** am37: you are behind on the picks when another brand takes more of them than you. */
+function behindOnPicks(split: { list: { key: string; rows: PoolRow[] }[] }, h: PanelHelpers): boolean {
+  const mine = split.list.find((b) => b.key === h.targetKey)?.rows.length ?? 0;
+  return split.list.some((b) => b.key !== h.targetKey && b.rows.length > mine);
+}
+
 /** An answer's verdict quote, else a mention of the brand, else the brand. */
 const verdictFind = (r: PoolRow, h: PanelHelpers) =>
   (r.code.quote ?? "").trim() || (r.code.premise_quote ?? "").trim() || (r.code.mentions ?? []).find((m) => h.resolve(m.brand).key === h.targetKey)?.brand || h.brand;
@@ -461,8 +486,8 @@ function weighsAll(inp: PanelCellInput, ctx: Ctx, list: OmissionList = "weighs",
   const ranked = [...counts.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0])).map(([code, k]) => ({ code, k, share: k / rows.length }));
   const kept = filterObvious(ranked, inp.id, list, h.wordings(inp.cellIntents), h.scopes, h.category, h.omissions).slice(0, top);
   if (!kept.length) return null;
-  const spans = kept.map((x) => F(x.code, num(x.k, rows.length, "answers", refsOf(withR.filter((r) => r.code.reasons!.includes(x.code)), () => x.code))));
-  return { label: "What the answer weighs", value: listSpans(spans) };
+  const spans = kept.map((x) => F(cname(x.code, h), num(x.k, rows.length, "answers", refsOf(withR.filter((r) => r.code.reasons!.includes(x.code)), () => x.code))));
+  return { label: "What the answer weighs", value: listNameSpans(spans) };
 }
 
 /** "A when <side 1> · B when <side 2>" from the cell's two-sided lifts. */
@@ -472,7 +497,7 @@ function weighsSides(inp: PanelCellInput, ctx: Ctx, sideA: string, sideB: string
   if (!pos && !neg) return weighsAll(inp, ctx);
   const span = (l: LiftItem, rows: PoolRow[]) => {
     const hit = rows.filter((r) => r.code.reasons?.includes(l.label));
-    return F(l.label, num(hit.length, rows.length, "answers", refsOf(hit, () => l.label)));
+    return F(cname(l.label, ctx.h), num(hit.length, rows.length, "answers", refsOf(hit, () => l.label)));
   };
   return {
     label: "What the answer weighs",
@@ -480,18 +505,43 @@ function weighsSides(inp: PanelCellInput, ctx: Ctx, sideA: string, sideB: string
   };
 }
 
-/** Products as written, grouped case-blind, top `k` with their share of `rows`. */
-function productSplit(rows: PoolRow[], nameOf: (r: PoolRow) => string, k: number, unit: string, nounTokens: Set<string> = new Set()): { name: string; num: PanelNum }[] {
-  // Grouped on the name's words without the category's own nouns ("Gold Card" = "Gold"), shown as the most written form.
-  const by = new Map<string, { forms: Map<string, number>; rows: PoolRow[] }>();
+/** A product name as written, cleaned for display: no trade marks, no "from <maker>" tail. */
+const cleanProduct = (x: string) => x.replace(/[®™]/g, "").replace(/\s+from\s+.+$/i, "").replace(/\s+/g, " ").trim();
+
+/** The bucket for a pick that names no product of the brand. */
+const noneName = (ctx: Ctx) => (ctx.ladder ? `No specific ${ctx.h.noun} named` : "No specific product named");
+
+/** Products as written, grouped on their distinctive words (case, trade
+ * marks, "from <maker>", the category's own nouns and small words dropped),
+ * a name whose words sit inside exactly one larger name joining it ("Savor" ->
+ * "Savor Cash Rewards"); top `k` with their share of `rows`, shown as the most
+ * written form. */
+function productSplit(rows: PoolRow[], nameOf: (r: PoolRow) => string, k: number, unit: string, nounTokens: Set<string> = new Set(), brandToks: Set<string> = new Set()): { name: string; num: PanelNum }[] {
+  type G = { forms: Map<string, number>; rows: PoolRow[]; toks: Set<string> };
+  const by = new Map<string, G>();
   for (const r of rows) {
-    const name = nameOf(r);
+    const raw = nameOf(r);
+    const none = /^No specific /.test(raw);
+    const name = none ? raw : cleanProduct(raw) || raw;
     const toks = famTokens(name);
-    const key = toks.filter((t) => !nounTokens.has(t)).join(" ") || toks.join(" ") || name.toLowerCase();
-    const t = by.get(key) ?? { forms: new Map<string, number>(), rows: [] };
+    // The maker's own name words never tell two of its products apart ("Amex Platinum" = "Platinum Card").
+    const kept = toks.filter((t) => !nounTokens.has(t) && !PRODUCT_STOP.has(t) && !brandToks.has(t));
+    const key = none ? "\u0000none" : kept.join(" ") || toks.join(" ") || name.toLowerCase();
+    const t = by.get(key) ?? { forms: new Map<string, number>(), rows: [], toks: new Set(none ? [] : kept) };
     t.rows.push(r);
     t.forms.set(name, (t.forms.get(name) ?? 0) + 1);
     by.set(key, t);
+  }
+  const keys = [...by.keys()].filter((x) => !x.startsWith("\u0000")).sort((a, b) => by.get(a)!.toks.size - by.get(b)!.toks.size);
+  for (const key of keys) {
+    const g = by.get(key)!;
+    if (!g.toks.size) continue;
+    const sup = [...by.entries()].filter(([k2, g2]) => k2 !== key && !k2.startsWith("\u0000") && g2.toks.size > g.toks.size && [...g.toks].every((x) => g2.toks.has(x)));
+    if (sup.length !== 1) continue;
+    const into = sup[0][1];
+    for (const [f, n] of g.forms) into.forms.set(f, (into.forms.get(f) ?? 0) + n);
+    into.rows.push(...g.rows);
+    by.delete(key);
   }
   return [...by.values()]
     .map((g) => ({ name: [...g.forms.entries()].sort((a, b) => b[1] - a[1] || a[0].length - b[0].length || a[0].localeCompare(b[0]))[0][0], rows: g.rows }))
@@ -499,6 +549,9 @@ function productSplit(rows: PoolRow[], nameOf: (r: PoolRow) => string, k: number
     .slice(0, k)
     .map((g) => ({ name: g.name, num: num(g.rows.length, rows.length, unit, refsOf(g.rows, (r) => r.code.top_pick || g.name)) }));
 }
+
+/** A product split worth a line: at least one named product, not only the no-product bucket. */
+const namesAProduct = (items: { name: string }[]) => items.some((x) => !/^No specific /.test(x.name));
 
 /** Letters of `short` appear in order inside `long` ("amex" in "americanexpress"). */
 const isSubsequence = (short: string, long: string) => {
@@ -527,24 +580,33 @@ function nameTokens(name: string, ctx: Ctx): Set<string> {
 
 /** A product as written with its brand's leading name words dropped
  * ("<Brand> Gold Card" -> "Gold Card"); null when nothing but the brand is left. */
-function productLabel(surface: string, brandName: string, ctx: Ctx): string | null {
+function productLabel(surface0: string, brandName: string, ctx: Ctx): string | null {
   const own = nameTokens(brandName, ctx);
+  const surface = cleanProduct(surface0) || surface0.trim();
   const words = surface.trim().split(/\s+/);
   let i = 0;
   while (i < words.length && famTokens(words[i]).length > 0 && famTokens(words[i]).every((t) => own.has(t))) i++;
   const rest = words.slice(i).join(" ").replace(/^[^A-Za-z0-9]+/, "").trim();
   if (!rest || !famTokens(rest).some((t) => !own.has(t))) return null;
   // A product whose own name runs on from the brand in lower case ("<Brand> it ...") keeps the brand.
-  return i > 0 && /^[a-z]/.test(rest) ? surface.trim() : rest;
+  if (i > 0 && /^[a-z]/.test(rest)) return surface.trim();
+  // am37: a bare fragment (a model number, one word) keeps the name it was written with ("11 Pro" -> "Pixel 11 Pro").
+  if (i > 0 && (/^\d/.test(rest) || rest.split(/\s+/).length === 1)) return surface.trim();
+  return rest;
+}
+
+/** A name that resolves to the brand and names nothing beyond it. */
+function isBareBrand(name: string, ctx: Ctx): boolean {
+  return ctx.h.resolve(name).key === ctx.h.targetKey && productLabel(name, ctx.h.brand, ctx) === null;
 }
 
 /** A written pick: the product as written (its brand's name words dropped),
  * or "No <noun> named" for the bare brand. */
 function pickedProduct(r: PoolRow, ctx: Ctx, own: boolean): string {
   const tp = (r.code.top_pick ?? "").trim();
-  if (!tp) return `No ${ctx.h.noun} named`;
+  if (!tp) return noneName(ctx);
   const brandName = own ? ctx.h.brand : ctx.h.resolve(tp).name;
-  return productLabel(tp, brandName, ctx) ?? `No ${ctx.h.noun} named`;
+  return productLabel(tp, brandName, ctx) ?? noneName(ctx);
 }
 
 /** The category's own nouns, singular and plural ("card", "cards"). */
@@ -594,7 +656,7 @@ function condRows(srcs: CondSrc[], o: CondOpts, ctx: Ctx): PanelCondition[] {
     if (!refs.length) continue;
     if (o.pickedStamp) refs = refs.map((r) => ({ ...r, picked: o.pickedStamp }));
     if (o.side === "toward") for (const r of refs) o.skip.add(r.responseId);
-    const row: PanelCondition = { text: condLabel(s.label), share: num(ids.size, o.all, "answers", refs) };
+    const row: PanelCondition = { text: condRowLabel(s.label), share: num(ids.size, o.all, "answers", refs) };
     if (o.side === "away" && s.wall) row.wall = true;
     if (o.side === "toward") {
       const prods = new Map<string, { name: string; ids: string[] }>();
@@ -674,22 +736,98 @@ interface CondWords {
   towardScope?: "rival_picked";
 }
 
-function conditionsOf(inp: PanelCellInput, ctx: Ctx, words: CondWords, opts: { pickKind: boolean; towardKeep?: (id: string) => boolean; pickedStamp?: string; onlyTo?: string; towardRows?: PanelCondition[]; toCards?: boolean }): PanelConditions | undefined {
+/** am37: a condition label's identity for merging - case, punctuation and the asker's "you" / "they" set aside. */
+const condKey = (label: string) => condRowLabel(label).toLowerCase().replace(/[^a-z0-9 ]+/g, " ").replace(/\s+/g, " ").trim();
+/** Generic words that do not change what a condition says ("travel often" = "travel frequently"). */
+const COND_SOFT = new Set(["a", "an", "the", "to", "of", "for", "and", "or", "in", "on", "with", "is", "are", "be", "they", "their", "them", "theirs", "often", "frequently", "frequent", "regularly", "regular", "usually", "always", "mostly", "really", "very", "lot", "lots", "much", "many", "more", "most", "heavily", "heavy", "plenty", "want", "wants", "prefer", "prefers", "need", "needs", "like", "likes", "if", "when"]);
+/** Content stems of a condition label (first five letters of each word that carries meaning). */
+const condCore = (label: string) => [...new Set(condKey(label).split(" ").filter((w) => w && !COND_SOFT.has(w)).map((w) => w.slice(0, 5)))].sort().join(" ");
+
+/** Rows that say the same thing in different case or punctuation are one row. */
+function mergeSame(srcs: CondSrc[]): CondSrc[] {
+  const out = new Map<string, CondSrc>();
+  for (const x of srcs) {
+    const k = condKey(x.label);
+    const t = out.get(k);
+    if (!t) {
+      out.set(k, { ...x, ids: new Set(x.ids), st: new Map(x.st) });
+      continue;
+    }
+    for (const id of x.ids) t.ids.add(id);
+    for (const [id, a] of x.st) if (!t.st.has(id)) t.st.set(id, a);
+    t.wall = t.wall || x.wall;
+    if (!t.both && x.both) t.both = x.both;
+    if (x.ids.size > t.ids.size) t.label = x.label;
+  }
+  return [...out.values()];
+}
+
+function conditionsOf(inp: PanelCellInput, ctx: Ctx, words: CondWords, opts: { pickKind: boolean; towardKeep?: (id: string) => boolean; pickedStamp?: string; onlyTo?: string; towardRows?: PanelCondition[]; toCards?: boolean; ownSplit?: boolean }): PanelConditions | undefined {
   if (inp.conds.bearing === 0) return undefined;
+  const { h } = ctx;
   const rowOf = new Map(inp.rows.map((r) => [r.code.response_id, r]));
   const skip = new Set<string>();
   const all = inp.rows.length;
-  const toward = opts.towardRows ?? condRows(inp.conds.toward, { all, side: "toward", pickKind: opts.pickKind, skip, rowOf, keepId: opts.towardKeep, pickedStamp: opts.pickedStamp }, ctx);
+  let tSrc = mergeSame(inp.conds.toward);
+  let aSrc = mergeSame(inp.conds.away);
+  // am37 (what to use alongside you): a row whose products are mostly the brand's own sits with "something of yours".
+  if (opts.ownSplit) {
+    const ownCard = (id: string, c: string) => {
+      if (h.resolve(c).key === h.targetKey) return true;
+      const k = nameKeyOf(c);
+      return (rowOf.get(id)?.code.pairings ?? []).some((p) => p.maker_relation === "own" && nameKeyOf(p.name) === k);
+    };
+    const mostlyOwn = (x: CondSrc) => {
+      let own = 0;
+      let named = 0;
+      for (const [id, a] of x.st) {
+        const cs = a.cards.filter((c) => c.trim());
+        if (!cs.length) continue;
+        named++;
+        if (cs.every((c) => ownCard(id, c))) own++;
+      }
+      return named > 0 && own * 2 > named;
+    };
+    const moved = aSrc.filter(mostlyOwn);
+    if (moved.length) {
+      aSrc = aSrc.filter((x) => !moved.includes(x));
+      tSrc = mergeSame([...tSrc, ...moved.map((x) => ({ ...x, wall: false }))]);
+    }
+  }
+  // am37: the same condition on both sides under near-identical names is one reason with the both-sides mark and one label.
+  if (!opts.towardRows) {
+    const tBy = new Map<string, CondSrc>();
+    for (const x of tSrc) if (condCore(x.label)) tBy.set(condCore(x.label), x);
+    tSrc = tSrc.map((x) => ({ ...x }));
+    const tCopy = new Map(tSrc.map((x) => [condCore(x.label), x]));
+    aSrc = aSrc.map((x) => {
+      const k = condCore(x.label);
+      const t = k ? tBy.get(k) : undefined;
+      if (!t) return x;
+      const tc = tCopy.get(k)!;
+      const label = t.ids.size >= x.ids.size ? t.label : x.label;
+      tc.label = label;
+      if (!tc.both) tc.both = { ids: x.ids, st: x.st };
+      return { ...x, label, ...(x.both ? {} : { both: { ids: t.ids, st: t.st } }) };
+    });
+  }
+  const toward = opts.towardRows ?? condRows(tSrc, { all, side: "toward", pickKind: opts.pickKind, skip, rowOf, keepId: opts.towardKeep, pickedStamp: opts.pickedStamp }, ctx);
   if (opts.towardRows) for (const r of opts.towardRows) for (const x of r.share.refs ?? []) skip.add(x.responseId);
-  const away = condRows(inp.conds.away, { all, side: "away", pickKind: opts.pickKind, skip, rowOf, onlyTo: opts.onlyTo, toCards: opts.toCards }, ctx);
+  const away = condRows(aSrc, { all, side: "away", pickKind: opts.pickKind, skip, rowOf, onlyTo: opts.onlyTo, toCards: opts.toCards }, ctx);
   return {
     ...words,
     grouped: inp.conds.grouped,
     toward,
     away,
     ...(toward.length + away.length === 0 ? { note: NO_CONDITION_ROWS } : {}),
+    // am37: one side empty beside a full one says so, never a blank column.
+    ...(toward.length === 0 && away.length > 0 ? { towardNote: NO_SIDE_ROWS } : {}),
+    ...(away.length === 0 && toward.length > 0 ? { awayNote: NO_SIDE_ROWS } : {}),
   };
 }
+
+/** The line in a condition column with no row. */
+const NO_SIDE_ROWS = "No condition stated often enough to list.";
 
 
 /* ------------------------------- the kinds ------------------------------- */
@@ -704,8 +842,12 @@ function pickPanel(inp: PanelCellInput, ctx: Ctx): PositionPanel {
   const mine = split.list.find((b) => b.key === h.targetKey)?.rows ?? [];
   const share = num(mine.length, split.n, "picks", refsOf(mine, (r) => h.quoteOf(r) || r.code.top_pick || h.brand));
   const you = funnelNums(inp.rows, h.targetKey, h.brand, h);
-  const others = split.list.filter((b) => b.key !== h.targetKey);
-  const otherCount = others.length;
+  // am37: the claim counts the other brands the competitors list shows (never
+  // you); unlisted smaller ones make it "most of the rest".
+  const listedOthers = split.list.filter((b) => b.key !== h.targetKey && b.rows.length >= BRAND_FLOOR && !(switching && b.key === inp.rivalKey)).slice(0, COMP_TOP);
+  const otherCount = listedOthers.length;
+  const unlisted = split.list.some((b) => b.key !== h.targetKey && !listedOthers.includes(b));
+  const showsList = split.list.filter((b) => b.rows.length >= BRAND_FLOOR).length >= 2;
 
   let claim: PanelText;
   if (switching) {
@@ -724,7 +866,11 @@ function pickPanel(inp: PanelCellInput, ctx: Ctx): PositionPanel {
       inp.pooled ? "Across all buyers you take " : "With this buyer you take ",
       N(share),
       " of the picks.",
-      otherCount ? ` ${countWord(otherCount)} other ${otherCount === 1 ? "brand takes" : "brands take"} the rest.` : ""
+      mine.length === split.n
+        ? ""
+        : showsList && otherCount
+          ? ` ${countWord(otherCount)} other ${otherCount === 1 ? "brand takes" : "brands take"} ${unlisted ? "most of " : ""}the rest.`
+          : " Other brands take the rest."
     );
   }
 
@@ -750,7 +896,9 @@ function pickPanel(inp: PanelCellInput, ctx: Ctx): PositionPanel {
         top.youPicked
           ? top.youPicked.pct === 0
             ? " It never makes you the pick in those answers."
-            : join(" About ", N(top.youPicked), " of those answers end with you as the pick.")
+            : top.youPicked.pct < 5
+              ? F(" It almost never makes you the pick in those answers.", top.youPicked)
+              : join(" About ", N(top.youPicked), " of those answers end with you as the pick.")
           : ""
       )
     : undefined;
@@ -797,7 +945,10 @@ function pickPanel(inp: PanelCellInput, ctx: Ctx): PositionPanel {
     shareLine.value = join(N(share), " here · ", N(num(um.length, us.n, "picks", refsOf(um, (r) => h.quoteOf(r) || r.code.top_pick || h.brand))), switching ? " across all rivals' customers" : " across all buyers");
   }
   lines.push(shareLine);
-  if (mine.length >= 5) lines.push({ label: `Which of your ${h.plural} it picks`, value: splitLine(productSplit(mine, (r) => pickedProduct(r, ctx, true), 2, "of your picks", nounToks(ctx))) });
+  if (mine.length >= 5 && ctx.ladder) {
+    const items = productSplit(mine, (r) => pickedProduct(r, ctx, true), 2, "of your picks", nounToks(ctx), nameTokens(h.brand, ctx));
+    if (namesAProduct(items)) lines.push({ label: `Which of your ${h.plural} it picks`, value: splitLine(items) });
+  }
   const weigh = weighsAll(inp, ctx);
   if (weigh) lines.push(weigh);
   linesComp.push(shareLine);
@@ -807,22 +958,22 @@ function pickPanel(inp: PanelCellInput, ctx: Ctx): PositionPanel {
   if (negs.length || poss.length) {
     const sp = (l: LiftItem, rows: PoolRow[]) => {
       const hit = rows.filter((r) => r.code.reasons?.includes(l.label));
-      return F(l.label, num(hit.length, rows.length, "answers", refsOf(hit, () => l.label)));
+      return F(cname(l.label, h), num(hit.length, rows.length, "answers", refsOf(hit, () => l.label)));
     };
     linesComp.push({
       label: "What the answer weighs",
-      value: join(negs.length ? join(listSpans(negs.map((l) => sp(l, othersPicked))), " for others") : null, negs.length && poss.length ? " · " : null, poss.length ? join(sp(poss[0], mine), " for you") : null),
+      value: join(negs.length ? join(listNameSpans(negs.map((l) => sp(l, othersPicked))), " for others") : null, negs.length && poss.length ? " · " : null, poss.length ? join(sp(poss[0], mine), " for you") : null),
     });
   } else if (weigh) linesComp.push(weigh);
 
-  const hereKey = inp.pooled ? "You" : switching ? (generic ? `You, with customers of another ${h.noun}` : `You, with ${rival}'s customers`) : "You, with this buyer";
+  const hereKey = inp.pooled ? "You" : switching ? (generic ? `You, with customers of another ${h.noun}` : `You, with ${possOf(rival)} customers`) : "You, with this buyer";
   return {
     kind: inp.kind,
     claim,
     ...(lead ? { lead } : {}),
     ...(usual ? { usualCellId: usual.id, usualKey: switching ? "You, across all rivals' customers" : "You, across all buyers" } : {}),
     hereKey,
-    stackLabel: switching ? "Where you lose these buyers" : inp.pooled ? "Where you lose buyers" : "Where you lose this buyer",
+    stackLabel: behindOnPicks(split, h) ? (switching ? "Where you lose these buyers" : inp.pooled ? "Where you lose buyers" : "Where you lose this buyer") : switching ? "Where you hold these buyers" : inp.pooled ? "Where you hold buyers" : "Where you hold this buyer",
     steps,
     ...(compNums.length ? { compare: true as const, competitorOrder: compNums.map((x) => x.b.name) } : {}),
     ...(competitors ? { competitors } : {}),
@@ -863,6 +1014,8 @@ function h2hPanel(inp: PanelCellInput, ctx: Ctx): PositionPanel {
             here: wonN,
             vs: { name: vsName, num: lostN },
             rivals: byRival.length >= 2 ? byRival : [{ name: vsName, num: lostN }],
+            // am37: on the all-rivals cell your share and each rival's are of the same answers, but each rival is asked about only in its own matchup.
+            ...(inp.pooled && byRival.length >= 2 ? { note: join("Each share is of all the head-to-head answers that pick one of the two; each rival is asked about only in its own matchup, so yours spans every matchup.") } : {}),
           },
         ]
       : []),
@@ -918,7 +1071,10 @@ function h2hPanel(inp: PanelCellInput, ctx: Ctx): PositionPanel {
     );
   }
   const lines: PanelLine[] = [];
-  if (!inp.pooled && lost.length) lines.push({ label: `Which ${rival} ${ctx.h.plural} it picks`, value: splitLine(productSplit(lost, (r) => pickedProduct(r, ctx, false), 2, `picks of ${rival}`, nounToks(ctx))) });
+  if (!inp.pooled && lost.length && ctx.ladder) {
+    const items = productSplit(lost, (r) => pickedProduct(r, ctx, false), 2, `picks of ${rival}`, nounToks(ctx), nameTokens(rival, ctx));
+    if (namesAProduct(items)) lines.push({ label: `Which ${rival} ${ctx.h.plural} it picks`, value: splitLine(items) });
+  }
   const w = weighsAll(inp, ctx);
   if (w) lines.push(w);
   const usual = usualOf(inp, ctx.inputs);
@@ -990,11 +1146,19 @@ function worryPanel(inp: PanelCellInput, ctx: Ctx): PositionPanel {
         N(fav),
         "."
       )
-    : join(
-        inp.pooled ? "Across your customers' worries, the AI " : `When a customer worries "${inp.concern ?? inp.label}", the AI `,
-        segs[1].num.pct === 0 ? "never tells them to leave" : join("tells them to leave in ", N(segs[1].num), " of answers"),
-        fav.pct === 0 ? ", and never to stay." : join(segs[1].num.pct === 0 ? ", and tells them to stay in " : " and to stay in ", N(fav), segs[1].num.pct === 0 ? " of answers." : ".")
-      );
+    : fav.pct > segs[1].num.pct
+      ? join(
+          inp.pooled ? "Across your customers' worries, the AI " : `When a customer worries "${inp.concern ?? inp.label}", the AI `,
+          "tells them to stay in ",
+          N(fav),
+          " of answers",
+          segs[1].num.pct === 0 ? ", and never to leave." : join(" and to leave in ", N(segs[1].num), ".")
+        )
+      : join(
+          inp.pooled ? "Across your customers' worries, the AI " : `When a customer worries "${inp.concern ?? inp.label}", the AI `,
+          segs[1].num.pct === 0 ? "never tells them to leave" : join("tells them to leave in ", N(segs[1].num), " of answers"),
+          fav.pct === 0 ? ", and never to stay." : join(segs[1].num.pct === 0 ? ", and tells them to stay in " : " and to stay in ", N(fav), segs[1].num.pct === 0 ? " of answers." : ".")
+        );
   const leaveRows = rows.filter((r) => r.code.keep_or_leave === "leave");
   const noDest = leaveRows.filter((r) => h.activeDests(r.code.destinations).size === 0).length;
   const { block, comp } = destBlock(
@@ -1020,7 +1184,7 @@ function worryPanel(inp: PanelCellInput, ctx: Ctx): PositionPanel {
     hereKey: "This worry",
     stackLabel: "How the answer goes",
     steps: [
-      ...(judged.length >= 5 ? [{ key: "agrees" as const, label: "Agrees the worry is fair", here: agrees }] : []),
+      ...(judged.length >= 5 ? [{ key: "agrees" as const, label: "Agrees the worry is fair", here: agrees, hereLabel: "Answers that judge it" }] : []),
       { key: "verdict", label: buyer ? "What it tells the buyer to do" : "What it tells the customer to do", segments: segs },
     ],
     ...(block ? { compare: true as const, competitors: block } : {}),
@@ -1042,7 +1206,13 @@ function holdPanel(inp: PanelCellInput, ctx: Ctx): PositionPanel {
   const offers = num(shows.length, all, "answers", refsOf(shows, (r) => (r.code.destinations ?? []).find((x) => h.activeDests([x]).size > 0) ?? verdictFind(r, h)));
   const claim = join(
     "When your own customer asks what else to look at, the AI ",
-    segs[0].num.pct === 0 && segs[1].num.pct === 0 ? "never says stay or leave" : join("says stay in ", N(segs[0].num), " of answers and leave in ", N(segs[1].num)),
+    segs[0].num.pct === 0 && segs[1].num.pct === 0
+      ? "never says stay or leave"
+      : segs[0].num.pct === 0
+        ? join("never says stay, and says leave in ", N(segs[1].num), " of answers")
+        : segs[1].num.pct === 0
+          ? join("says stay in ", N(segs[0].num), " of answers and never says leave")
+          : join("says stay in ", N(segs[0].num), " of answers and leave in ", N(segs[1].num)),
     `. It shows them another ${h.noun} in `,
     N(offers),
     offers.pct === 100 ? " of answers." : "."
@@ -1080,7 +1250,7 @@ function holdPanel(inp: PanelCellInput, ctx: Ctx): PositionPanel {
     stackLabel: "How the answer goes",
     steps: [
       { key: "verdict", label: "What it tells the customer to do", segments: segs },
-      { key: "offers", label: `Shows another ${h.noun}`, here: offers },
+      { key: "offers", label: `Shows another ${h.noun}`, here: offers, hereLabel: "All answers" },
     ],
     ...(block ? { compare: true as const, competitors: block } : {}),
     ...(conditions ? { conditions } : {}),
@@ -1097,15 +1267,21 @@ function valuePanel(inp: PanelCellInput, ctx: Ctx): PositionPanel {
   const worth = (w: string) => rows.filter((r) => (fact(r)?.worth ?? (r.code.worth_it === "yes" || r.code.worth_it === "no" ? r.code.worth_it : "depends")) === w);
   const segs = [seg("yes", "worth it", "you", worth("yes"), all, h), seg("depends", "depends", "neutral", worth("depends"), all, h), seg("no", "not worth it", "away", worth("no"), all, h)];
   // Where it points the buyer instead - every answer, one segment each: a rival first, else your own, else nowhere (owner ruling 5).
+  // am37: one own-cheaper count per panel - this exclusive one, in the step and the competitors list alike; a
+  // brand with no ladder of its own lines (ctx.ladder false) has no own-cheaper option at all.
+  const ownOf = (r: PoolRow) => (ctx.ladder ? (fact(r)?.own.size ?? 0) : 0);
   const rivalRows = rows.filter((r) => (fact(r)?.instead.size ?? 0) > 0);
-  const ownRows = rows.filter((r) => (fact(r)?.instead.size ?? 0) === 0 && (fact(r)?.own.size ?? 0) > 0);
-  const nowhere = rows.filter((r) => (fact(r)?.instead.size ?? 0) === 0 && (fact(r)?.own.size ?? 0) === 0);
+  const ownRows = rows.filter((r) => (fact(r)?.instead.size ?? 0) === 0 && ownOf(r) > 0);
+  const nowhere = rows.filter((r) => (fact(r)?.instead.size ?? 0) === 0 && ownOf(r) === 0);
+  const ownLabel = "only your own cheaper option";
   const instead: PanelSegment[] = [
-    { key: "own", label: `your own cheaper ${h.noun}`, tone: "neutral", num: num(ownRows.length, all, "answers", refsOf(ownRows, (r) => [...fact(r)!.own.values()][0] ?? h.brand)) },
-    { key: "rival", label: `a rival's ${h.noun}`, tone: "away", num: num(rivalRows.length, all, "answers", refsOf(rivalRows, (r) => (r.code.mentions ?? []).find((m) => m.framing === "recommended" && fact(r)!.instead.has(h.resolve(m.brand).key))?.brand ?? [...fact(r)!.instead.values()][0])) },
-    { key: "nowhere", label: "nowhere", tone: "neutral", num: num(nowhere.length, all, "answers", refsOf(nowhere, (r) => verdictFind(r, h))) },
+    ...(ctx.ladder ? [{ key: "own", label: ownLabel, tone: "neutral" as const, num: num(ownRows.length, all, "answers", refsOf(ownRows, (r) => [...fact(r)!.own.values()][0] ?? h.brand)) }] : []),
+    { key: "rival", label: ctx.ladder ? `a rival's ${h.noun}` : "a rival", tone: "away", num: num(rivalRows.length, all, "answers", refsOf(rivalRows, (r) => (r.code.mentions ?? []).find((m) => m.framing === "recommended" && fact(r)!.instead.has(h.resolve(m.brand).key))?.brand ?? [...fact(r)!.instead.values()][0])) },
+    { key: "nowhere", label: ctx.ladder ? "nowhere" : "no rival", tone: "neutral", num: num(nowhere.length, all, "answers", refsOf(nowhere, (r) => verdictFind(r, h))) },
   ];
-  const subject = inp.line ?? h.brand;
+  // The all-buyers cell asks about the line the rooms share, else the brand.
+  const sibLines = inp.pooled ? [...new Set([...ctx.inputs.values()].filter((x) => x.kind === "value" && !x.pooled && x.line).map((x) => x.line!))] : [];
+  const subject = inp.pooled ? (sibLines.length === 1 ? sibLines[0] : h.brand) : inp.line ?? h.brand;
   const yes = segs[0].num;
   const no = segs[2].num;
   const claim = join(
@@ -1119,10 +1295,10 @@ function valuePanel(inp: PanelCellInput, ctx: Ctx): PositionPanel {
   const byRival = new Map<string, { key: string; name: string; rows: PoolRow[] }>();
   for (const r of rows) for (const [k, name] of fact(r)?.instead ?? []) byRival.set(k, { key: k, name, rows: [...(byRival.get(k)?.rows ?? []), r] });
   const comp = [...byRival.values()].filter((x) => x.rows.length >= ROW_MIN).sort((a, b) => b.rows.length - a.rows.length || a.name.localeCompare(b.name)).slice(0, COMP_TOP);
-  const ownAny = rows.filter((r) => (fact(r)?.own.size ?? 0) > 0);
   const blockRows: PanelBrandRow[] = [
     ...comp.map((c) => ({ name: c.name, num: num(c.rows.length, all, "answers", refsOf(c.rows, (r) => (r.code.mentions ?? []).find((m) => h.resolve(m.brand).key === c.key)?.brand ?? c.name)), open: true as const })),
-    ...(ownAny.length ? [{ name: `Your own cheaper ${h.noun}`, you: true as const, num: num(ownAny.length, all, "answers", refsOf(ownAny, (r) => [...fact(r)!.own.values()][0] ?? h.brand)) }] : []),
+    // The same number as the step's own-cheaper bar, said the same way.
+    ...(ownRows.length ? [{ name: upperFirst(ownLabel), you: true as const, shown: upperFirst(ownLabel), num: instead[0].num }] : []),
   ].sort((a, b) => b.num.pct - a.num.pct || a.name.localeCompare(b.name));
   const block: PanelBlock | undefined = blockRows.length ? { title: "Where it points the buyer instead", sub: "Share of these answers. Open a rival to see how it gets its picks.", rows: blockRows } : undefined;
   const rivals = comp.map((c) => rivalSmall(inp, ctx, c, (r) => !!fact(r)?.instead.has(c.key), "Named as the cheaper option"));
@@ -1181,7 +1357,7 @@ function problemPanel(inp: PanelCellInput, ctx: Ctx): PositionPanel {
         columns: usual ? ["This buyer", "All buyers"] : [inp.pooled ? "All buyers" : "This buyer"],
         style: "compare",
         rows: kept.map((x) => ({
-          label: x.code,
+          label: clabel(x.code, h),
           cells: [
             num(x.rs.length, all, "answers", refsOf(x.rs, () => x.code)),
             ...(usual && uMap ? [num(uMap.get(x.code)?.length ?? 0, usual.rows.length, "answers", refsOf(uMap.get(x.code) ?? [], () => x.code))] : []),
@@ -1195,9 +1371,17 @@ function problemPanel(inp: PanelCellInput, ctx: Ctx): PositionPanel {
     claim,
     ...(usual ? { usualCellId: usual.id, usualKey: "Across all buyers" } : {}),
     hereKey: inp.pooled ? "Across all buyers" : "With this buyer",
-    stackLabel: inp.pooled ? "Where you lose buyers" : "Where you lose this buyer",
+    stackLabel: "How the answer goes",
     steps: [
-      { key: "category", label: `The answer is about ${h.plural} at all`, here: category, ...(compNums.length ? { tagRank: "Same for every brand" } : {}) },
+      {
+        key: "category",
+        label: `The answer points the buyer to ${h.plural}`,
+        here: category,
+        hereLabel: "All answers",
+        ...(compNums.length ? { tagRank: "Same for every brand" } : {}),
+        // am37: being named can outrun this step - an answer can mention you while it mainly sends the buyer outside the category.
+        ...(knOf(category)!.k < you.f.named.length ? { note: join(`You can be named in an answer that mainly points the buyer away from ${h.plural}.`) } : {}),
+      },
       { key: "named", label: "Named", here: you.named, ...(compNums.length ? { rivals: compNums.map((x) => ({ name: x.c.name, num: x.f.named })) } : {}) },
       { key: "recommended", label: "Recommended", here: you.recommended, ...(compNums.length ? { rivals: compNums.map((x) => ({ name: x.c.name, num: x.f.recommended })) } : {}) },
     ],
@@ -1231,50 +1415,72 @@ function criteriaPanel(inp: PanelCellInput, ctx: Ctx): PositionPanel {
     const rs = by.get(code) ?? [];
     return num(rs.length, all, "answers", refsOf(rs, () => code));
   };
-  const winners = h.reasonLift
+  // am37: a buyer's own what-to-buy answers say what wins when it picks you,
+  // when there are enough of them; else the all-buyers figures, said so.
+  const room = !inp.pooled ? ctx.inputs.get(`chooses:open:${inp.key}`) : undefined;
+  const pickSet = (src: PoolRow[]) => ({
+    you: src.filter((r) => h.pickOf(r).key === h.targetKey && r.code.reasons !== null),
+    other: src.filter((r) => h.pickOf(r).status === "active" && h.pickOf(r).key !== h.targetKey && r.code.reasons !== null),
+  });
+  const roomSet = room ? pickSet(room.rows) : null;
+  const local = !!roomSet && roomSet.you.length >= ARGS_MIN && roomSet.other.length >= ARGS_MIN;
+  const { you: youPicks, other: otherPicks } = local ? roomSet! : pickSet(h.headline);
+  const lift = local
+    ? (() => {
+        const codes = new Set([...youPicks, ...otherPicks].flatMap((r) => r.code.reasons!));
+        return [...codes].map((code) => {
+          const w = cell(youPicks.filter((r) => r.code.reasons!.includes(code)).length, youPicks.length);
+          const o = cell(otherPicks.filter((r) => r.code.reasons!.includes(code)).length, otherPicks.length);
+          return { code, wins: w, others: o, lift: (w.n ? w.k / w.n : 0) - (o.n ? o.k / o.n : 0) };
+        });
+      })()
+    : h.reasonLift;
+  const winners = lift
     .filter((l) => l.lift > 0 && l.wins.low > l.others.high && !taughtSet.has(l.code))
     .sort((a, b) => b.wins.k / Math.max(1, b.wins.n) - a.wins.k / Math.max(1, a.wins.n) || a.code.localeCompare(b.code));
-  // The headline answers picking you / another brand that argue a code.
-  const youPicks = h.headline.filter((r) => h.pickOf(r).key === h.targetKey && r.code.reasons !== null);
-  const otherPicks = h.headline.filter((r) => h.pickOf(r).status === "active" && h.pickOf(r).key !== h.targetKey && r.code.reasons !== null);
   const pickNum = (code: string, rs: PoolRow[]) => {
     const hit = rs.filter((r) => r.code.reasons!.includes(code));
     return num(hit.length, rs.length, "answers that pick", refsOf(hit, () => code));
   };
   const untaught = winners.slice(0, 2);
+  const when = local || inp.pooled ? "when it picks you" : "when it picks you, across all buyers";
+  const opener = inp.pooled ? "When buyers ask" : `When the buyer in "${inp.label}" asks`;
+  const gapSpans = untaught.map((w, i) => F(i === 0 ? upperFirst(cname(w.code, h)) : cname(w.code, h), pickNum(w.code, youPicks)));
   const claim = join(
-    `When buyers ask what to look for in ${article(h.noun)} ${h.noun}, the AI teaches `,
-    listSpans(top5.slice(0, 3).map((x) => F(x.code, taughtNum(x.code)))),
+    `${opener} what to look for in ${article(h.noun)} ${h.noun}, the AI teaches `,
+    listNameSpans(top5.slice(0, 3).map((x) => F(cname(x.code, h), taughtNum(x.code)))),
     ".",
     untaught.length
-      ? join(" ", listSpans(untaught.map((w, i) => F(i === 0 ? upperFirst(w.code) : w.code, pickNum(w.code, youPicks)))), untaught.length > 1 ? ", which come up most when it picks you, are not on its list." : ", which comes up most when it picks you, is not on its list.")
+      ? join(" ", listNameSpans(gapSpans), untaught.length > 1 ? `, which come up most ${when}, are not on its list.` : `, which comes up most ${when}, is not on its list.`)
       : top5.length
-        ? " Everything that comes up most when it picks you is on its list."
+        ? ` Everything that comes up most ${when} is on its list.`
         : ""
   );
-  const steps: PanelStep[] = [{ key: "taught", label: "What it tells buyers to look at", items: top5.slice(0, 4).map((x) => ({ label: x.code, num: taughtNum(x.code) })) }];
-  if (untaught.length)
-    steps.push({
-      key: "gap",
-      label: "Teaches what its answers weigh when it picks you",
-      note: join(listSpans(untaught.map((w, i) => F(i === 0 ? upperFirst(w.code) : w.code, pickNum(w.code, youPicks)))), untaught.length > 1 ? " come up most when it picks you, and neither is taught." : " comes up most when it picks you, and it is not taught."),
-    });
+  // The gap is a sentence on the checklist step, never a card of its own with nothing to draw.
+  const steps: PanelStep[] = [
+    {
+      key: "taught",
+      label: "What it tells buyers to look at",
+      items: top5.slice(0, 4).map((x) => ({ label: clabel(x.code, h), num: taughtNum(x.code) })),
+      ...(untaught.length ? { note: join(listNameSpans(gapSpans), untaught.length > 1 ? ` come up most ${when}, and neither is taught.` : ` comes up most ${when}, and it is not taught.`) } : {}),
+    },
+  ];
   // Table: the winners (up to 4) plus the taught top 5 with lift rows; not taught first, then by lift; at most 6.
-  const liftBy = new Map(h.reasonLift.map((l) => [l.code, l]));
+  const liftBy = new Map(lift.map((l) => [l.code, l]));
   const tableCodes = [...new Set([...winners.slice(0, 4).map((w) => w.code), ...top5.map((x) => x.code).filter((c) => liftBy.has(c))])]
     .map((c) => ({ c, taught: taughtSet.has(c), lift: liftBy.get(c)?.lift ?? 0 }))
     .sort((a, b) => Number(a.taught) - Number(b.taught) || b.lift - a.lift || a.c.localeCompare(b.c))
     .slice(0, 6);
   const table: PanelTable | undefined =
-    tableCodes.length && h.reasonLift.length
+    tableCodes.length && lift.length
       ? {
           title: "What the answer weighs, against the checklist",
-          sub: "How often each topic comes up in answers that pick you and in answers that pick another brand, and whether the AI teaches buyers to look for it. The when-picked figures come from the What to buy answers, because these questions take no picks.",
+          sub: `How often each topic comes up in answers that pick you and in answers that pick another brand, and whether the AI teaches buyers to look for it. The when-picked figures come from the What to buy answers${local ? " of this buyer" : inp.pooled ? "" : " of all buyers"}, because these questions take no picks.`,
           columns: [`When it picks another ${h.noun}`, "When it picks you", "On the checklist"],
           style: "compare",
           rows: tableCodes.map(({ c, taught }) => {
             const tn = taughtNum(c);
-            return { label: c, cells: [pickNum(c, otherPicks), pickNum(c, youPicks), taught ? { t: `Taught, ${tn.value}`, ...(tn.refs ? { refs: tn.refs } : {}), tip: tn.tip } : { t: "Not taught" }] };
+            return { label: clabel(c, h), cells: [pickNum(c, otherPicks), pickNum(c, youPicks), taught ? { t: `Taught, ${tn.value}`, ...(tn.refs ? { refs: tn.refs } : {}), tip: tn.tip } : { t: "Not taught" }] };
           }),
         }
       : undefined;
@@ -1368,7 +1574,7 @@ function casePanel(inp: PanelCellInput, ctx: Ctx): PositionPanel {
           const hh = share(x.code, hedged);
           const hn = num(hh.length, hedged.length, "hedged cases", refsOf(hh, () => x.code));
           return {
-            label: x.code,
+            label: clabel(x.code, h),
             cells: [num(sh.length, strong.length, "confident cases", refsOf(sh, () => x.code)), ...(gapOn ? [{ t: `${hn.value} in hedged cases`, ...(hn.refs ? { refs: hn.refs } : {}), tip: hn.tip }] : [])],
           };
         }),
@@ -1510,7 +1716,7 @@ function popularPanel(inp: PanelCellInput, ctx: Ctx): PositionPanel {
   const uNamed = uf?.f.named ?? [];
   const prods = yourProducts(mineNamed, ctx);
   const uProds = yourProducts(uNamed, ctx);
-  const prodRows = [...prods.entries()].filter(([, x]) => x.rows.length >= ROW_MIN).sort((x, y) => y[1].rows.length - x[1].rows.length || x[1].name.localeCompare(y[1].name)).slice(0, 4);
+  const prodRows = [...prods.entries()].filter(([, x]) => ctx.ladder && x.rows.length >= ROW_MIN).sort((x, y) => y[1].rows.length - x[1].rows.length || x[1].name.localeCompare(y[1].name)).slice(0, 4);
   if (prodRows.length)
     tables.push({
       title: `Which of your ${h.plural} it names`,
@@ -1538,7 +1744,7 @@ function popularPanel(inp: PanelCellInput, ctx: Ctx): PositionPanel {
       columns: cols,
       style: "compare",
       rows: kept.map((x) => ({
-        label: x.code,
+        label: clabel(x.code, h),
         cells: [num(x.rs.length, all, "answers", refsOf(x.rs, () => x.code)), ...(u ? [num(there.get(x.code)?.length ?? 0, u.rows.length, "answers", refsOf(there.get(x.code) ?? [], () => x.code))] : [])],
       })),
     });
@@ -1629,7 +1835,7 @@ function learningPanel(inp: PanelCellInput, ctx: Ctx): PositionPanel {
     columns: withU ? ["This question", upperFirst(uName)] : ["This question"],
     style: "compare",
     rows: kept.map((x) => ({
-      label: x.code,
+      label: clabel(x.code, h),
       cells: [num(x.rs.length, all, "answers", refsOf(x.rs, () => x.code)), ...(withU && u && uMap ? [num(uMap.get(x.code)?.length ?? 0, u.rows.length, "answers", refsOf(uMap.get(x.code) ?? [], () => x.code))] : [])],
     })),
   });
@@ -1664,7 +1870,8 @@ function alongsidePanel(inp: PanelCellInput, ctx: Ctx): PositionPanel {
   for (const r of rows)
     for (const p of r.code.pairings ?? []) {
       const nm = p.name.trim();
-      if (!nm) continue;
+      // am37: never the brand itself (the customer's own) and never a generic word written all in lower case ("samples").
+      if (!nm || isBareBrand(nm, ctx) || !/[A-Z0-9]/.test(nm)) continue;
       const k = keyOfPair(nm);
       const g = groups.get(k) ?? { forms: new Map<string, number>(), rows: new Map<PoolRow, string>(), toks: new Set(famTokens(nm)) };
       g.forms.set(nm, (g.forms.get(nm) ?? 0) + 1);
@@ -1688,8 +1895,8 @@ function alongsidePanel(inp: PanelCellInput, ctx: Ctx): PositionPanel {
     .sort((a, b) => b.g.rows.size - a.g.rows.size || a.name.localeCompare(b.name))
     .slice(0, 6);
   const items = listed.map((x) => ({ label: x.name, num: num(x.g.rows.size, all, "answers", refsOf([...x.g.rows.keys()], (r) => x.g.rows.get(r) ?? x.name)) }));
-  // The own / another company's / in place of yours split.
-  const kindRows = (rel: string) => rows.filter((r) => (r.code.pairings ?? []).some((p) => p.maker_relation === rel));
+  // The own / another company's / in place of yours split (the brand itself named back is not "something of yours").
+  const kindRows = (rel: string) => rows.filter((r) => (r.code.pairings ?? []).some((p) => p.maker_relation === rel && !(rel === "own" && isBareBrand(p.name, ctx))));
   const kNum = (rel: string) => {
     const rs = kindRows(rel);
     return num(rs.length, all, "answers", refsOf(rs, (r) => (r.code.pairings ?? []).find((p) => p.maker_relation === rel)?.name ?? h.brand));
@@ -1724,7 +1931,7 @@ function alongsidePanel(inp: PanelCellInput, ctx: Ctx): PositionPanel {
       alsoAway: "Also said for yours",
       toWord: "To",
     },
-    { pickKind: false, toCards: true }
+    { pickKind: false, toCards: true, ownSplit: true }
   );
   if (conditions) conditions.neutralAway = true;
   const steps: PanelStep[] = [{ key: "alongside", label: "Which ones it names alongside you", items, note }];
@@ -1764,7 +1971,7 @@ function criticPanel(inp: PanelCellInput, ctx: Ctx): PositionPanel {
     [
       { key: "strong", label: "a strong answer", tone: "you", rows: strong, phrase: "gives a strong answer" },
       { key: "partial", label: "a partial answer", tone: "neutral", rows: partial, phrase: "gives a partial answer" },
-      { key: "concedes", label: "gives in to the critic", tone: "away", rows: concedes, phrase: "gives in to the critic" },
+      { key: "concedes", label: "drops your side", tone: "away", rows: concedes, phrase: "drops the customer's side" },
     ],
     all,
     "answers"
@@ -1784,12 +1991,18 @@ function criticPanel(inp: PanelCellInput, ctx: Ctx): PositionPanel {
   const strongN = num(strong.length, all, "answers", refsOf(strong, pf));
   const rebutN = num(pv("rebuts").length, judged.length, "answers that judge the criticism", refsOf(pv("rebuts"), (r) => (r.code.premise_quote ?? "").trim() || pf(r)));
   const seed = inp.criticism ? `how to answer the criticism "${inp.criticism}"` : "how to answer someone who doubts you";
-  const claim = join(
-    whenAsks(inp, "customer", seed),
-    "the AI gives a strong answer in ",
-    strong.length === all && all > 0 ? F("all of them", strongN) : join(N(strongN), " of answers"),
-    judged.length ? join(" and says the critic is wrong in ", N(rebutN), " of the answers that judge it.") : "."
-  );
+  // am37: when the answers that judge the criticism mostly say the critic is right, the claim leads with that.
+  const confirmsRows = pv("confirms");
+  const criticRight = judged.length >= ROW_MIN && confirmsRows.length > Math.max(pv("rebuts").length, pv("mixed").length);
+  const confN = num(confirmsRows.length, judged.length, "answers that judge the criticism", refsOf(confirmsRows, (r) => (r.code.premise_quote ?? "").trim() || pf(r)));
+  const claim = criticRight
+    ? join(whenAsks(inp, "customer", seed), "the AI says the critic is right in ", N(confN), " of the answers that judge it, though it gives a strong answer in ", N(strongN), " of answers.")
+    : join(
+        whenAsks(inp, "customer", seed),
+        "the AI gives a strong answer in ",
+        strong.length === all && all > 0 ? F("all of them", strongN) : join(N(strongN), " of answers"),
+        judged.length ? join(" and says the critic is wrong in ", N(rebutN), " of the answers that judge it.") : "."
+      );
   const steps: PanelStep[] = [{ key: "strength", label: "How strong an answer does the AI give the customer?", segments: st.segs, ...(st.note ? { note: st.note } : {}) }];
   if (judged.length) steps.push({ key: "premise", label: "Does it say the critic is right?", segments: pr.segs, ...(pr.note ? { note: pr.note } : {}) });
   const lines: PanelLine[] = [];
@@ -1822,7 +2035,7 @@ function criticPanel(inp: PanelCellInput, ctx: Ctx): PositionPanel {
           const sh = hit(x.code, strong);
           const oh = hit(x.code, rest);
           const on = num(oh.length, rest.length, "other answers", refsOf(oh, () => x.code));
-          return { label: x.code, cells: [num(sh.length, strong.length, "strong answers", refsOf(sh, () => x.code)), ...(gapOn ? [{ t: `${on.value} in other answers`, ...(on.refs ? { refs: on.refs } : {}), tip: on.tip }] : [])] };
+          return { label: clabel(x.code, h), cells: [num(sh.length, strong.length, "strong answers", refsOf(sh, () => x.code)), ...(gapOn ? [{ t: `${on.value} in other answers`, ...(on.refs ? { refs: on.refs } : {}), tip: on.tip }] : [])] };
         }),
       };
   }
@@ -1950,7 +2163,7 @@ function rivalFull(inp: PanelCellInput, ctx: Ctx, b: PositionBrand, you: ReturnT
           : yr > rr && rr > 0 && yr / rr >= 1.5
             ? `When it has to name one ${h.noun}, it names you more often`
             : "The two convert their recommendations at a similar rate",
-      body: convertsLine(duelDir(you.converts, them.converts), `${R}'s do`),
+      body: convertsLine(duelDir(you.converts, them.converts), `${possOf(R)} do`),
       outcomes: [outcome(them.f.rec, key, R, false), outcome(you.f.rec, h.targetKey, h.brand, true)],
       outcomeLabels: { lost: `lose to another ${h.noun}`, none: "no single pick" },
     };
@@ -1983,21 +2196,22 @@ function rivalFull(inp: PanelCellInput, ctx: Ctx, b: PositionBrand, you: ReturnT
         )
       : undefined;
   const lines: PanelLine[] = [];
-  const rp = productSplit(theirPicks, (r) => pickedProduct(r, ctx, false), 1, `picks of ${R}`, nounToks(ctx))[0];
-  const yp = mine.length ? productSplit(mine, (r) => pickedProduct(r, ctx, true), 1, "of your picks", nounToks(ctx))[0] : undefined;
+  const named1 = (xs: { name: string; num: PanelNum }[]) => xs.find((x) => !/^No specific /.test(x.name));
+  const rp = ctx.ladder ? named1(productSplit(theirPicks, (r) => pickedProduct(r, ctx, false), 2, `picks of ${R}`, nounToks(ctx), nameTokens(R, ctx))) : undefined;
+  const yp = ctx.ladder && mine.length ? named1(productSplit(mine, (r) => pickedProduct(r, ctx, true), 2, "of your picks", nounToks(ctx), nameTokens(h.brand, ctx))) : undefined;
   if (rp || yp) lines.push({ label: `Which ${h.plural} it picks`, value: join(rp ? join(`${R}: ${rp.name} `, N(rp.num)) : null, rp && yp ? " · " : null, yp ? join(`You: ${yp.name} `, N(yp.num)) : null) });
   const args = b.here?.args ?? [];
   const posA = args.filter((l) => l.value > 0).sort((x, y) => y.value - x.value)[0];
   const negA = args.filter((l) => l.value < 0).sort((x, y) => x.value - y.value)[0];
   const argSpan = (l: LiftItem, rs: PoolRow[]) => {
     const hit = rs.filter((r) => r.code.reasons?.includes(l.label));
-    return F(l.label, num(hit.length, rs.length, "answers that pick", refsOf(hit, () => l.label)));
+    return F(cname(l.label, h), num(hit.length, rs.length, "answers that pick", refsOf(hit, () => l.label)));
   };
   if (posA || negA) lines.push({ label: "What the answer weighs", value: join(posA ? join(argSpan(posA, theirPicks), ` for ${R}`) : null, posA && negA ? " · " : null, negA ? join(argSpan(negA, mine), " for you") : null) });
   else if (b.here?.argsRows?.length) {
     const top = b.here.argsRows[0];
     const hit = theirPicks.filter((r) => r.code.reasons?.includes(top.label));
-    lines.push({ label: "What the answer weighs", value: join(F(top.label, num(hit.length, theirPicks.length, "answers that pick", refsOf(hit, () => top.label))), ` for ${R}`) });
+    lines.push({ label: "What the answer weighs", value: join(F(cname(top.label, h), num(hit.length, theirPicks.length, "answers that pick", refsOf(hit, () => top.label))), ` for ${R}`) });
   }
   return {
     name: R,
@@ -2034,17 +2248,17 @@ function rivalSmall(inp: PanelCellInput, ctx: Ctx, c: { key: string; name: strin
     { key: "recommended", label: altLabel, ...(yAlt ? { here: yAlt, tagRank: duelTag(knOf(yAlt)!, knOf(altNum)!, R).tag } : {}), rivals: [{ name: R, num: altNum }] },
   ];
   const lines: PanelLine[] = [];
-  const surf = (r: PoolRow) => productLabel(them.surf(r, false) ?? altFind(r), R, ctx) ?? `No ${h.noun} named`;
-  if (alt.length >= 5) {
-    const items = productSplit(alt, surf, 2, "answers naming it", nounToks(ctx));
-    lines.push({ label: `Which of its ${h.plural} it names`, value: splitLine(items) });
+  const surf = (r: PoolRow) => productLabel(them.surf(r, false) ?? altFind(r), R, ctx) ?? noneName(ctx);
+  if (alt.length >= 5 && ctx.ladder) {
+    const items = productSplit(alt, surf, 2, "answers naming it", nounToks(ctx), nameTokens(R, ctx));
+    if (namesAProduct(items)) lines.push({ label: `Which of its ${h.plural} it names`, value: splitLine(items) });
   }
   const withR = alt.filter((r) => r.code.reasons !== null);
   if (withR.length >= ARGS_MIN) {
     const counts = new Map<string, number>();
     for (const r of withR) for (const x of new Set(r.code.reasons!)) counts.set(x, (counts.get(x) ?? 0) + 1);
     const ranked = [...counts.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0])).slice(0, 3);
-    lines.push({ label: "What the answer weighs", value: listSpans(ranked.map(([code, k]) => F(code, num(k, withR.length, "answers naming it", refsOf(withR.filter((r) => r.code.reasons!.includes(code)), () => code))))) });
+    lines.push({ label: "What the answer weighs", value: listNameSpans(ranked.map(([code, k]) => F(cname(code, h), num(k, withR.length, "answers naming it", refsOf(withR.filter((r) => r.code.reasons!.includes(code)), () => code))))) });
   }
   return {
     name: R,
@@ -2160,7 +2374,8 @@ function finishPanel(inp: PanelCellInput, p: PositionPanel, up: PositionPanel | 
       if (!s.here) continue;
       if (!s.rivals?.length) {
         // A step not about you alone (the answer is about the category at all, names any brand).
-        if (s.key === "category") s.hereLabel = "All answers";
+        // am37: a rate of every answer, not of you, is never labelled "You".
+        if (s.key === "category" || s.key === "commits" || s.key === "anybrand") s.hereLabel = "All answers";
         if (oldUsualKey && !s.usualLabel) s.usualLabel = oldUsualKey;
         if (s.tagUsual && (/your usual$/i.test(s.tagUsual) || s.tagUsual === TAG_FURTHEST || /^None/.test(s.tagUsual))) {
           delete s.tagUsual;
@@ -2203,9 +2418,10 @@ function finishPanel(inp: PanelCellInput, p: PositionPanel, up: PositionPanel | 
   // Head-to-heads: the rival beside you on the step that says who it picks.
   for (const s of p.steps)
     if (s.vs && s.here && !thin) {
-      const d = duelTag(knOf(s.here)!, knOf(s.vs.num)!, s.vs.name);
-      // "Your named rivals" take a plural verb.
-      s.tagUsual = /rivals$/.test(s.vs.name) ? d.tag.replace(/ leads$/, " lead") : d.tag;
+      // "Your named rivals" read mid-tag in lower case and take a plural verb.
+      const pooledVs = /rivals$/.test(s.vs.name);
+      const d = duelTag(knOf(s.here)!, knOf(s.vs.num)!, pooledVs ? s.vs.name.charAt(0).toLowerCase() + s.vs.name.slice(1) : s.vs.name);
+      s.tagUsual = upperFirst(pooledVs ? d.tag.replace(/ leads$/, " lead") : d.tag);
       s.tagUsualTone = duelTone(d.tag, d.rivalLeads);
     }
     // Comparison view: rank among the competitors.
@@ -2214,17 +2430,83 @@ function finishPanel(inp: PanelCellInput, p: PositionPanel, up: PositionPanel | 
       if (!s.here || !s.rivals?.length || s.tagRank) continue;
       const r = rankTag(knOf(s.here)!, s.rivals.map((x) => knOf(x.num)!));
       s.tagRank = r.tag;
-      if (r.gap > 0 && (!worst || r.gap > worst.gap)) worst = { key: s.key, gap: r.gap };
+      // am37: "furthest behind" only when you are behind by a meaningful margin.
+      if (r.gap >= CLOSE_PTS && (!worst || r.gap > worst.gap)) worst = { key: s.key, gap: r.gap };
     }
     if (worst) {
       const s = p.steps.find((x) => x.key === worst!.key)!;
       s.tagRank = `${s.tagRank} · furthest behind`;
       p.focusComp = worst.key;
     }
-    verdictTakeaways(inp, p);
+    verdictTakeaways(inp, p, ctx);
+    // am37: a head-to-head's "picks one of the two" step always carries a plain tag (the all-rivals cell has no usual).
+    for (const s of p.steps)
+      if (s.key === "decided" && s.here && !s.tagUsual) {
+        const t = s.here.pct >= 50 ? "Usually picks one of the two" : "Usually picks neither";
+        s.tagUsual = t;
+        s.tagUsualTone = "neutral";
+      }
+    for (const s of p.steps) if (s.key === "decided" && s.tagUsual && !s.tagRank) { s.tagRank = s.tagUsual; s.tagRankTone = s.tagUsualTone; }
     detailOf(inp, p, up, ctx);
     stepDetailsOf(inp, p, u, ctx);
+    extremeFacts(inp, p, ctx);
+    // am37: the highlighted step is one that explains itself (a step a reader can select has an explanation).
+    if (p.details && p.focus && !p.details[p.focus]) p.focus = p.steps.find((s) => !!p.details![s.key])?.key;
+    if (p.detailsComp && p.focusComp && !p.detailsComp[p.focusComp]) p.focusComp = p.steps.find((s) => !!p.detailsComp![s.key])?.key;
   }
+}
+
+/** am37: you are behind on the picks in this cell (the pick kinds); "lose" and "gap" are said only then. */
+function behindOf(inp: PanelCellInput, ctx: Ctx): boolean {
+  if (inp.kind !== "buy" && inp.kind !== "switching" && inp.kind !== "popular") return false;
+  return behindOnPicks(ctx.h.brandSplit(inp.rows), ctx.h);
+}
+
+/** am37: a panel whose every bar is 0% or 100% says the plain fact in its heading and carries no comparison tags. */
+function extremeFacts(inp: PanelCellInput, p: PositionPanel, ctx: Ctx) {
+  const nums: PanelNum[] = [];
+  for (const s of p.steps) {
+    if (s.here) nums.push(s.here);
+    for (const r of s.rivals ?? []) nums.push(r.num);
+    if (s.vs) nums.push(s.vs.num);
+    for (const g of s.segments ?? []) nums.push(g.num);
+  }
+  if (!nums.length || !nums.every((n) => n.pct === 0 || n.pct === 100)) return;
+  for (const s of p.steps) {
+    if (s.tagUsual && !TAKEAWAY_TAG_SET.has(s.tagUsual) && !/^Usually picks /.test(s.tagUsual)) {
+      delete s.tagUsual;
+      delete s.tagUsualTone;
+    }
+    if (s.tagRank && !TAKEAWAY_TAG_SET.has(s.tagRank) && !/^Usually picks /.test(s.tagRank)) {
+      delete s.tagRank;
+      delete s.tagRankTone;
+    }
+  }
+  const v = p.steps.find((s) => s.segments?.length);
+  const all100 = v?.segments?.find((g) => g.num.pct === 100);
+  const noun = ctx.h.noun;
+  let heading: string | undefined;
+  if (all100) {
+    const SAY: Record<string, string> = {
+      keep: "Every answer tells the customer to stay",
+      leave: "Every answer tells the customer to leave",
+      none: p.kind === "buyer_worry" ? "Every answer leaves the decision to the buyer" : "Every answer leaves the decision to the customer",
+      proceed: "Every answer tells the buyer to go ahead",
+      avoid: "Every answer tells the buyer to steer clear",
+      yes: "Every answer says it is worth paying more for",
+      no: "Every answer says it is not worth paying more for",
+      depends: "Every answer says it depends",
+    };
+    heading = SAY[all100.key];
+    const offers = p.steps.find((s) => s.key === "offers")?.here;
+    if (heading && offers?.pct === 100) heading += `, and shows another ${noun}`;
+  }
+  if (p.kind === "h2h") {
+    const won = p.steps.find((s) => s.key === "won");
+    if (won?.here) heading = won.here.pct === 100 ? "Every answer that picks one of the two picks you" : `Every answer that picks one of the two picks ${inp.pooled ? "the rival" : inp.rivalName ?? inp.label}`;
+  }
+  if (heading && p.detail) p.detail = { ...p.detail, heading };
+  if (heading && p.detailComp) p.detailComp = { ...p.detailComp, heading };
 }
 
 /** am36: the verdict panels' steps carry a one-line takeaway read off this
@@ -2252,10 +2534,11 @@ function keepSideOf(v: PanelStep): KeepSide {
     "Tells customers to leave": "leave",
     "More told to leave than to stay": "leave",
     "Mostly takes no side": "none",
+    "Always takes no side": "none",
   };
   return SIDE[t] ?? "split";
 }
-function verdictTakeaways(inp: PanelCellInput, p: PositionPanel) {
+function verdictTakeaways(inp: PanelCellInput, p: PositionPanel, ctx: Ctx) {
   if (!TAKEAWAY_KINDS.has(p.kind)) return;
   const set = (s: PanelStep, t: Takeaway) => {
     s.tagUsual = t.tag;
@@ -2278,9 +2561,9 @@ function verdictTakeaways(inp: PanelCellInput, p: PositionPanel) {
     else if (p.kind === "critic" && s.key === "premise") t = premiseTakeaway(segPct(s, "rebuts"), segPct(s, "mixed"), segPct(s, "confirms"));
     else if (p.kind === "alongside" && s.key === "alongside") {
       const all = inp.rows.length || 1;
-      const rel = (x: string) => (100 * inp.rows.filter((r) => (r.code.pairings ?? []).some((q) => q.maker_relation === x)).length) / all;
+      const rel = (x: string) => (100 * inp.rows.filter((r) => (r.code.pairings ?? []).some((q) => q.maker_relation === x && !(x === "own" && isBareBrand(q.name, ctx)))).length) / all;
       t = alongsideTakeaway(rel("own"), rel("third_party"), rel("substitute"));
-    } else if (p.kind === "criteria" && s.key === "taught") t = taughtTakeaway(p.steps.some((x) => x.key === "gap"));
+    } else if (p.kind === "criteria" && s.key === "taught") t = taughtTakeaway(!!s.note?.length);
     else if (p.kind === "criteria" && s.key === "gap") t = GAP_TAKEAWAY;
     if (t) set(s, t);
     else {
@@ -2300,10 +2583,14 @@ function detailOf(inp: PanelCellInput, p: PositionPanel, up: PositionPanel | und
     return s?.here && u?.here ? { here: s.here, usual: u.here } : undefined;
   };
   if (FUNNEL_KINDS.has(p.kind)) {
-    if (up) {
+    // am37: a panel set against the average competitor draws no usual, so it carries no usual-comparison default
+    // explanation (its steps explain themselves); one that still draws the usual reads its direction off the
+    // same closeness rule as its tags, in words.
+    if (up && !p.avgComp) {
       const who = p.kind === "switching" ? { here: "with these customers", usual: "across all rivals' customers" } : { here: "with this buyer", usual: "across all buyers" };
-      const f = p.focus ? { key: p.focus, below: p.steps.find((s) => s.key === p.focus)?.tagUsual === TAG_FURTHEST } : null;
-      p.detail = funnelDetail(f, { named: stepPair("named"), recommended: stepPair("recommended"), converts: stepPair("converts"), category: stepPair("category") }, who);
+      const pr = p.focus ? stepPair(p.focus) : undefined;
+      const f = p.focus && pr ? { key: p.focus, dir: usualDir(knOf(pr.here)!, knOf(pr.usual)!) } : null;
+      p.detail = funnelDetail(f, who, behindOf(inp, ctx));
     }
     const fs = p.focusComp ? p.steps.find((s) => s.key === p.focusComp) : undefined;
     const d = rankDetail(p.focusComp ?? null, fs && fs.here && fs.rivals ? { label: fs.label, here: fs.here, rivals: fs.rivals } : null);
@@ -2329,16 +2616,19 @@ function detailOf(inp: PanelCellInput, p: PositionPanel, up: PositionPanel | und
       const ck = knOf(com.here)!;
       const cu = knOf(com.usual)!;
       const rate = (x: KN) => (x.n ? x.k / x.n : 0);
-      const rDir = rate(rk) < rate(ru) * 0.9 ? "less" : rate(rk) > rate(ru) * 1.1 ? "more" : "about as";
+      const rd = usualDir(rk, ru);
+      const rDir = rd < 0 ? "less" : rd > 0 ? "more" : "about as";
       const listy = rate(cu) > 0 && rate(ck) / rate(cu) <= 0.6;
       const heading = listy
         ? `The AI answers this with a list, and rarely names one ${h.noun} as the pick`
         : rDir === "about as"
           ? `You are recommended about as often here as when buyers ask ${what}`
           : `You are recommended ${rDir} often here than when buyers ask ${what}`;
+      // am37: the explanation says what the bars mean, never their numbers again.
+      const cd = usualDir(ck, cu);
       p.detail = det(
         heading,
-        join("You are recommended in ", N(rec.here), " of these answers, against ", N(rec.usual), ` when buyers ask ${what}. The AI names one ${h.noun} as the pick in `, N(com.here), " of answers, against ", N(com.usual), ` in ${what}.`)
+        join(`The AI names one ${h.noun} as the pick ${cd < 0 ? "less" : cd > 0 ? "more" : "about as"} often here ${cd === 0 ? "as" : "than"} when buyers ask ${what}, so ${listy ? "being recommended matters more than being picked" : "a recommendation here can still end as the pick"}.`)
       );
       return;
     }
@@ -2349,20 +2639,7 @@ function detailOf(inp: PanelCellInput, p: PositionPanel, up: PositionPanel | und
       const fewBrands = any.here.pct < 50;
       const reaches = nw.here.pct >= 50;
       const heading = `The AI explains the category ${fewBrands ? "mostly without brands" : "with brands"}, and ${reaches ? "reaches for you when it uses one" : "rarely reaches for you when it does"}`;
-      p.detail = det(
-        heading,
-        join(
-          "It names a brand in ",
-          N(any.here),
-          " of these answers",
-          any.usual ? join(", against ", N(any.usual), " when buyers describe a problem") : "",
-          ". When a brand is named, you are in ",
-          N(nw.here),
-          " of those answers",
-          nw.usual ? join(", against ", N(nw.usual), ` in ${ROW_NAME.awareness.toLowerCase()}`) : "",
-          "."
-        )
-      );
+      p.detail = det(heading, join(fewBrands ? "A buyer who learns the category here mostly hears no brand at all, so the answers that do name one carry the weight." : "A buyer who learns the category here hears brands along the way, so being among them is the first step."));
       return;
     }
     case "alongside": {
@@ -2379,7 +2656,16 @@ function detailOf(inp: PanelCellInput, p: PositionPanel, up: PositionPanel | und
       const strong = segPct(sg, "strong");
       const rebuts = segPct(pm, "rebuts");
       const confirms = segPct(pm, "confirms");
-      const heading = strong >= 50 && rebuts >= 50 ? "The AI arms the customer against the critic" : confirms >= 50 ? "The AI more often sides with the critic" : "The AI gives the customer only part of a defense";
+      const mixed = segPct(pm, "mixed");
+      // am37: the heading reads both bars - how strong the answer is AND whether it grants the criticism.
+      const heading =
+        confirms > Math.max(rebuts, mixed) && confirms > 0
+          ? "Most answers that judge it say the critic is right"
+          : strong >= 50
+            ? rebuts >= 50
+              ? "The AI arms the customer against the critic"
+              : "The AI gives a strong answer, and grants part of the criticism"
+            : "The AI gives the customer only part of a defense";
       const red = !!p.lines?.some((l) => l.label.startsWith("Also points to"));
       p.detail = criticDetail(heading, red, h.noun);
       return;
@@ -2390,7 +2676,18 @@ function detailOf(inp: PanelCellInput, p: PositionPanel, up: PositionPanel | und
       const R = inp.pooled ? "your named rivals" : inp.rivalName ?? inp.label;
       if (!won?.here && !(inp.exception && decided?.here && won?.vs)) return;
       const w = won?.here?.pct ?? 50;
-      p.detail = h2hDetail({ exception: !!(inp.exception && decided?.here && won?.vs), rival: R, pooled: !!inp.pooled, side: w >= 60 ? "you" : w <= 40 ? "rival" : "close", mostlyDecided: (decided?.here?.pct ?? 0) >= 50 });
+      const side = w >= 60 ? "you" : w <= 40 ? "rival" : "close";
+      const topRival = inp.pooled ? [...(won?.rivals ?? [])].sort((a, b) => b.num.pct - a.num.pct)[0]?.name : undefined;
+      p.detail = h2hDetail({
+        exception: !!(inp.exception && decided?.here && won?.vs),
+        rival: R,
+        pooled: !!inp.pooled,
+        side,
+        always: (w >= 99.95 || (won?.here?.pct ?? 1) === 0) && !!won?.here,
+        rivalCond: p.conditions?.away[0]?.text,
+        youCond: p.conditions?.toward[0]?.text,
+        ...(topRival && topRival !== "Your named rivals" ? { topRival } : {}),
+      });
       return;
     }
     case "buyer_worry": {
@@ -2415,7 +2712,18 @@ function detailOf(inp: PanelCellInput, p: PositionPanel, up: PositionPanel | und
       const often = segOften(v, up?.steps.find((s) => s.key === "verdict"), key);
       const leaveRows = inp.rows.filter((r) => r.code.keep_or_leave === "leave");
       const noDest = leaveRows.filter((r) => h.activeDests(r.code.destinations).size === 0).length;
-      p.detail = customerWorryDetail({ side, often, topRival: topRivalOf(p), leaveNoDest: leaveRows.length > 0 && noDest > leaveRows.length / 2, noun: h.noun });
+      const agreesPct = p.steps.find((s) => s.key === "agrees")?.here?.pct ?? 0;
+      p.detail = customerWorryDetail({
+        side,
+        stayMajority: segPct(v, "keep") >= 50,
+        granted: agreesPct >= 50,
+        often,
+        topRival: topRivalOf(p),
+        // am37: no leave clause when almost no answer says leave.
+        leaveRare: segPct(v, "leave") < 5,
+        leaveNoDest: side !== "stay" && leaveRows.length > 0 && noDest > leaveRows.length / 2,
+        noun: h.noun,
+      });
       return;
     }
     case "looking_around": {
@@ -2446,7 +2754,7 @@ function detailOf(inp: PanelCellInput, p: PositionPanel, up: PositionPanel | und
       return;
     }
     case "criteria": {
-      p.detail = criteriaDetail(p.steps.some((s) => s.key === "gap"), h.plural);
+      p.detail = criteriaDetail(!!p.steps.find((s) => s.key === "taught")?.note?.length, h.plural);
       return;
     }
     case "expansion": {
@@ -2571,7 +2879,18 @@ function stepDetailsOf(inp: PanelCellInput, p: PositionPanel, u: PanelCellInput 
     if (!by.length) return undefined;
     return { title: takersTitle(h.noun), rows: by.map((b) => ({ label: b.name, num: num(b.rows.length, lost.length, "answers that recommend you and pick another", refsOf(b.rows, pf(b.name))) })) };
   };
-  const leftOut = (bad: boolean) => (bad ? "Being left out is part of why you lose here" : "Being left out is not why you lose here");
+  // am37: "why you lose" only when you are behind on the picks here; otherwise the heading states the fact.
+  const behindPicks = behindOf(inp, ctx);
+  const namedHead = (dir: StepDir, than: string) =>
+    behindPicks
+      ? dir < 0
+        ? "Being left out is part of why you lose here"
+        : "Being left out is not why you lose here"
+      : dir < 0
+        ? `You are named less often here than ${than}`
+        : dir > 0
+          ? `You are named more often here than ${than}`
+          : `You are named about as often here as ${than}`;
   const names = p.competitorOrder ?? [];
   const comps = names.map((name) => {
     const key = h.resolve(name).key ?? name;
@@ -2647,8 +2966,8 @@ function stepDetailsOf(inp: PanelCellInput, p: PositionPanel, u: PanelCellInput 
         const dir = dirOf(youNamed, oNamed);
         const r = namedRowsOf(side.others);
         details.named = {
-          heading: leftOut(dir < 0),
-          body: namedLine(dir, side.than),
+          heading: namedHead(dir, side.than),
+          body: namedLine(dir, side.than, behindPicks),
           ...(r ? { columns: side.columns, rows: r } : {}),
         };
       }
@@ -2658,7 +2977,7 @@ function stepDetailsOf(inp: PanelCellInput, p: PositionPanel, u: PanelCellInput 
         const list = takersList();
         details.recommended = {
           heading: dir < 0 ? `You are recommended less often here than ${side.than}` : dir > 0 ? `You are recommended more often here than ${side.than}` : `You are recommended about as often here as ${side.than}`,
-          body: recommendedLine(dir, side.than),
+          body: recommendedLine(dir, side.than, behindPicks),
           ...(list ? { list } : {}),
         };
       }
@@ -2671,7 +2990,7 @@ function stepDetailsOf(inp: PanelCellInput, p: PositionPanel, u: PanelCellInput 
         ];
         details.converts = {
           heading: dir < 0 ? "Fewer of your recommendations end as the pick here" : dir > 0 ? "More of your recommendations end as the pick here" : "Your recommendations end as the pick about as often here",
-          body: convertsLine(dir, side.thanDo),
+          body: convertsLine(dir, side.thanDo, behindPicks),
           ...(outcomes.length > 1 ? { outcomes, outcomeLabels } : {}),
         };
       }
@@ -2685,24 +3004,33 @@ function stepDetailsOf(inp: PanelCellInput, p: PositionPanel, u: PanelCellInput 
     if (nm?.here && nm.rivals?.length) {
       const lead = [...nm.rivals].sort((a, b) => b.num.pct - a.num.pct)[0];
       const lc = comps.find((c) => c.name === lead.name)!;
-      const ahead = lead.num.pct > nm.here.pct;
+      const ahead = shownPct(lead.num) > shownPct(nm.here);
       const dir = dirOf(knOf(nm.here)!, knOf(lead.num)!);
       const r = namedRowsOf([{ f: lc.f, n: all, key: lc.key, name: lc.name }]);
       detailsComp.named = {
-        heading: dir < 0 ? leftOut(true) : ahead ? `${lead.name} is named a little more often, but being left out is not mainly why you lose here` : leftOut(false),
-        body: namedLine(dir, lead.name),
+        heading:
+          dir < 0
+            ? namedHead(dir, lead.name)
+            : ahead && behindPicks
+              ? `${lead.name} is named a little more often, but being left out is not mainly why you lose here`
+              : ahead
+                ? `${lead.name} is named a little more often than you here`
+                : dir > 0
+                  ? "You are named more often than any competitor shown"
+                  : `You and ${lead.name} are named about as often here`,
+        body: namedLine(dir, lead.name, behindPicks),
         ...(r ? { columns: { you: "You", rival: lead.name }, rows: r } : {}),
       };
     }
     const rc = step("recommended");
     if (rc?.here && rc.rivals?.length) {
       const lead = [...rc.rivals].sort((a, b) => b.num.pct - a.num.pct)[0];
-      const ahead = lead.num.pct > rc.here.pct;
+      const ahead = shownPct(lead.num) > shownPct(rc.here);
       const dir = dirOf(knOf(rc.here)!, knOf(lead.num)!);
       const list = takersList();
       detailsComp.recommended = {
         heading: dir < 0 ? `${lead.name} is recommended more often than you here` : dir > 0 && !ahead ? "You are recommended more often than any competitor shown" : `You and ${lead.name} are recommended about as often here`,
-        body: recommendedLine(dir, lead.name),
+        body: recommendedLine(dir, lead.name, behindPicks),
         ...(list ? { list } : {}),
       };
     }
@@ -2711,7 +3039,7 @@ function stepDetailsOf(inp: PanelCellInput, p: PositionPanel, u: PanelCellInput 
       const ok = cv.rivals.filter((x) => (knOf(x.num)?.n ?? 0) >= DETAIL_MIN);
       const best = [...ok].sort((a, b) => b.num.pct - a.num.pct)[0];
       if (best) {
-        const ahead = best.num.pct > cv.here.pct;
+        const ahead = shownPct(best.num) > shownPct(cv.here);
         const dir = dirOf(knOf(cv.here)!, knOf(best.num)!);
         const recOk = comps.filter((c) => c.f.rec.length >= DETAIL_MIN).sort((a, b) => rate({ k: b.f.picked.length, n: b.f.rec.length }) - rate({ k: a.f.picked.length, n: a.f.rec.length }) || a.name.localeCompare(b.name));
         const outcomes = [
@@ -2720,7 +3048,7 @@ function stepDetailsOf(inp: PanelCellInput, p: PositionPanel, u: PanelCellInput 
         ];
         detailsComp.converts = {
           heading: dir < 0 ? `${best.name} turns more of its recommendations into the pick` : dir > 0 && !ahead ? "You turn more of your recommendations into the pick than any competitor shown" : `You and ${best.name} turn about as many recommendations into the pick`,
-          body: convertsLine(dir, `${best.name}'s do`),
+          body: convertsLine(dir, `${possOf(best.name)} do`, behindPicks),
           ...(outcomes.length > 1 ? { outcomes, outcomeLabels } : {}),
         };
       }
@@ -2754,7 +3082,7 @@ const splitCells = (inputs: Map<string, PanelCellInput>, band: string, row: stri
  * question type except the two labelled "share of the picks".
  */
 export function buildRivalAcross(inputs: Map<string, PanelCellInput>, panels: Map<string, PositionPanel>, h: PanelHelpers, rivals: { key: string; name: string }[]): RivalAcross[] {
-  const ctx: Ctx = { h, inputs };
+  const ctx: Ctx = { h, inputs, ladder: hasLadder(inputs, h) };
   return rivals.map((r) => rivalAcrossOne(ctx, panels, r)).filter((x): x is RivalAcross => !!x);
 }
 
@@ -2802,7 +3130,7 @@ function rivalAcrossOne(ctx: Ctx, panels: Map<string, PositionPanel>, rv: { key:
       sub: "Share of the answers that pick each brand that raise each argument.",
       columns: [`Picks ${R}`, "Picks you"],
       style: "compare",
-      rows: pick.map((x) => ({ label: x.c, cells: [num(x.a.length, t.length, "answers that pick", refsOf(x.a, () => x.c)), num(x.b.length, m.length, "answers that pick", refsOf(x.b, () => x.c))] })),
+      rows: pick.map((x) => ({ label: clabel(x.c, h), cells: [num(x.a.length, t.length, "answers that pick", refsOf(x.a, () => x.c)), num(x.b.length, m.length, "answers that pick", refsOf(x.b, () => x.c))] })),
     };
   };
   /** Rows of a by-cell list: 3+ answers drawn, fewer folded into one sentence. */
@@ -2959,8 +3287,8 @@ function rivalAcrossOne(ctx: Ctx, panels: Map<string, PositionPanel>, rv: { key:
       label: "Its customers switching - share of the picks",
       cellId: lv.id,
       bars: [bar(h.brand, "you", num(mine.length, split.n, "picks", refsOf(mine, pf(h.brand)))), ...others.map((b) => bar(b.name, "other", num(b.rows.length, split.n, "picks", refsOf(b.rows, pf(b.name)))))],
-      heading: `Where ${R}'s customers are sent`,
-      body: lp?.claim ?? join(`When ${R}'s customers ask where to move, the AI picks you in `, N(num(mine.length, split.n, "picks", refsOf(mine, pf(h.brand)))), " of its picks."),
+      heading: `Where ${possOf(R)} customers are sent`,
+      body: lp?.claim ?? join(`When ${possOf(R)} customers ask where to move, the AI picks you in `, N(num(mine.length, split.n, "picks", refsOf(mine, pf(h.brand)))), " of its picks."),
       ...(lp?.conditions ? { conditions: lp.conditions } : {}),
     });
   }
@@ -3011,8 +3339,8 @@ function rivalAcrossOne(ctx: Ctx, panels: Map<string, PositionPanel>, rv: { key:
     `Where ${R} is offered in place of yours`,
     (n) => join(`Asked whether your ${h.noun} is worth paying more for, the AI recommends ${R} instead in `, N(n), " of answers. Each share below is of that buyer's answers."),
     (rs) => {
-      const prods = productSplit(rs, (r) => productLabel((r.code.mentions ?? []).find((m) => h.resolve(m.brand).key === key)?.brand ?? R, R, ctx) ?? `No ${h.noun} named`, 1, "answers", nounToks(ctx))[0];
-      return prods && !prods.name.startsWith("No ") ? { t: `Names ${prods.name} most`, ...(prods.num.refs ? { refs: prods.num.refs } : {}), tip: prods.num.tip } : null;
+      const prods = productSplit(rs, (r) => productLabel((r.code.mentions ?? []).find((m) => h.resolve(m.brand).key === key)?.brand ?? R, R, ctx) ?? noneName(ctx), 1, "answers", nounToks(ctx), nameTokens(R, ctx))[0];
+      return prods && !/^No specific /.test(prods.name) ? { t: `Names ${prods.name} most`, ...(prods.num.refs ? { refs: prods.num.refs } : {}), tip: prods.num.tip } : null;
     }
   );
   // 8. Your customers' worries - named as where to go.
@@ -3083,7 +3411,7 @@ function rivalAcrossOne(ctx: Ctx, panels: Map<string, PositionPanel>, rv: { key:
           .sort((x, y) => y.a.length / y.n - x.a.length / x.n || x.c.label.localeCompare(y.c.label))
           .map((x) => ({ label: x.c.label, cells: [num(x.a.length, x.n, "picks", refsOf(x.a, pf(R))), num(x.b.length, x.n, "picks", refsOf(x.b, pf(h.brand)))] })),
       };
-    const ps = productSplit(theirPicks, (r) => pickedProduct(r, ctx, false), 3, `picks of ${R}`, nounToks(ctx)).filter((x) => (knOf(x.num)?.k ?? 0) >= ROW_MIN);
+    const ps = ctx.ladder ? productSplit(theirPicks, (r) => pickedProduct(r, ctx, false), 4, `picks of ${R}`, nounToks(ctx), nameTokens(R, ctx)).filter((x) => (knOf(x.num)?.k ?? 0) >= ROW_MIN && !/^No specific /.test(x.name)).slice(0, 3) : [];
     if (ps.length)
       products = {
         title: `Which of its ${h.plural} it picks`,

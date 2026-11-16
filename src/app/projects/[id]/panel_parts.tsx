@@ -277,7 +277,8 @@ export function StepCard({
   const body: ReactNode[] = [];
   if (step.here) {
     // A step not about you alone (any brand) keeps its own bar label beside the competitors.
-    const youL = comp && step.compHereLabel && !step.rivals?.length ? step.compHereLabel : comp || rivalLabel ? "You" : hereL;
+    // am37: a step not about you alone keeps its own label in the comparison view too (never "You").
+    const youL = comp && !step.rivals?.length && (step.compHereLabel || step.hereLabel) ? (step.compHereLabel ?? step.hereLabel!) : comp || rivalLabel ? "You" : hereL;
     const you = <NumBar key="you" label={youL} n={step.here} color={C_YOU} bold={comp || !!rivalLabel} dim={dim} title={`${step.label} - ${youL}`} plain={plain} />;
     const rivals = (comp || rivalLabel ? step.rivals ?? [] : []).map((r) => (
       <NumBar key={`r:${r.name}`} label={r.name} n={r.num} color={C_AWAY} dim={dim} title={`${step.label} - ${r.name}`} plain={plain} />
@@ -534,8 +535,19 @@ export function CondColumns({ cond, comp, awayFirst }: { cond: PanelConditions; 
     <CondColumn key="a" title={cond.awayTitle} rows={cond.away} side="away" cond={cond} comp={comp} color={cond.neutralAway ? "var(--ink-2)" : C_AWAY} all={all} />,
   ];
   const empty = cond.toward.length === 0 && cond.away.length === 0;
-  // One side empty: draw only the side that has rows ("Choose you if" stays left when both exist).
-  const shownCols = cond.toward.length === 0 ? [cols[1]] : cond.away.length === 0 ? [cols[0]] : awayFirst ? [cols[1], cols[0]] : cols;
+  // am37: one side empty beside a full one keeps its column with a one-line note (the engine's words), never a blank;
+  // with no note (an older payload) only the side with rows is drawn.
+  const sideNote = (side: "toward" | "away") => (side === "toward" ? cond.towardNote : cond.awayNote);
+  const withNote = (i: 0 | 1, side: "toward" | "away") => (
+    <div key={side}>
+      {cols[i]}
+      {cond[side].length === 0 && sideNote(side) && <p className={`${T.body} text-ink-3`}>{sideNote(side)}</p>}
+    </div>
+  );
+  const keepT = cond.toward.length > 0 || !!cond.towardNote;
+  const keepA = cond.away.length > 0 || !!cond.awayNote;
+  const pair = awayFirst ? [withNote(1, "away"), withNote(0, "toward")] : [withNote(0, "toward"), withNote(1, "away")];
+  const shownCols = !keepT ? [withNote(1, "away")] : !keepA ? [withNote(0, "toward")] : pair;
   return (
     <Blk title={cond.title} sub={comp && cond.subComp ? cond.subComp : cond.sub}>
       {empty ? (
@@ -562,7 +574,7 @@ export function BrandRows({ block, onOpen }: { block: PanelBlock; onOpen?: (name
     <Blk title={block.title} sub={block.sub}>
       {block.rows.map((r) => (
         <div key={r.name} className="grid grid-cols-[minmax(0,1fr)_2.75rem] items-center gap-2">
-          <BrandBar name={r.you ? "You" : r.name} n={r.num} color={r.you ? C_YOU : C_AWAY} bold={!!r.you} />
+          <BrandBar name={r.shown ?? (r.you ? "You" : r.name)} n={r.num} color={r.you ? C_YOU : C_AWAY} bold={!!r.you} />
           {r.open && onOpen ? (
             <button type="button" onClick={() => onOpen(r.name)} className={`text-right ${T.ctl} text-primary hover:opacity-80`}>
               Open
