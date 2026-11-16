@@ -1471,11 +1471,21 @@ function RivalScoped({ name, p, ctx }: { name: string; p: Position; ctx: Ctx }) 
   );
 }
 
-function TwoBar({ you, them }: { you: string; them: string }) {
+/** You and the rival as two plain bars (never one bar split in two). */
+function TwoBar({ you, them, name }: { you: string; them: string; name?: string }) {
+  const row = (label: string, v: string, color: string, strong: boolean) => (
+    <span className="grid grid-cols-[minmax(0,6rem)_minmax(0,1fr)_2.75rem] items-center gap-2 text-[12px]">
+      <span className={strong ? "font-semibold text-ink" : "text-ink-2"}>{label}</span>
+      <span className="h-2 overflow-hidden rounded bg-line/60">
+        <i className="block h-full rounded" style={{ width: `${pctNum(v)}%`, background: color }} />
+      </span>
+      <b className="text-right font-semibold tabular-nums text-ink">{v}</b>
+    </span>
+  );
   return (
-    <span className="mt-1.5 flex h-2 overflow-hidden rounded bg-line/60" aria-hidden>
-      <i className="block h-full" style={{ width: `${pctNum(you)}%`, background: "var(--pa-yours)" }} />
-      <i className="block h-full" style={{ width: `${pctNum(them)}%`, background: "var(--pa-theirs)" }} />
+    <span className="mt-1.5 grid gap-1" aria-hidden>
+      {row("You", you, "var(--pa-yours)", true)}
+      {row(name ?? "Them", them, "var(--pa-theirs)", false)}
     </span>
   );
 }
@@ -1523,7 +1533,7 @@ function DossierFolds({ d, ctx }: { d: Dossier; ctx: Ctx }) {
             you {d.h2h.you} - {d.name} {d.h2h.them}
           </b>
         </div>
-        <TwoBar you={d.h2h.you} them={d.h2h.them} />
+        <TwoBar you={d.h2h.you} them={d.h2h.them} name={d.name} />
       </div>
     ) : null;
   const h2hMore = d.h2h.kind !== "record" || !!d.switching || !!d.cells.h2h || !!d.cells.leaver || !!h2hRow;

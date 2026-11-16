@@ -223,3 +223,46 @@ export function rankDetail(
     ),
   };
 }
+
+/* ---------- am35: the one sentence under a step's heading ---------- */
+/* What the reader should take from the step - never a number the step bars
+ * already draw; the new facts follow as rows. `than` names the comparison
+ * ("across all buyers", "the average competitor", a competitor's name);
+ * `thanDo` is the same for a plural verb ("they do across all buyers",
+ * "the average competitor's do", "Capital One's do"). */
+export type StepDir = -1 | 0 | 1;
+
+export function namedLine(dir: StepDir, than: string): PanelText {
+  if (dir < 0) return join(`The AI mentions you less often here than ${than}, so some buyers never hear of you before it decides.`);
+  if (dir > 0) return join(`The AI mentions you more often here than ${than}, so what decides it comes after you are named.`);
+  return join(`The AI mentions you about as often here as ${than}, so what decides it comes after you are named.`);
+}
+
+export function recommendedLine(dir: StepDir, than: string): PanelText {
+  if (dir < 0) return join(`The AI recommends you less often here than ${than}, so this is part of where you lose.`);
+  if (dir > 0) return join(`The AI recommends you more often here than ${than}, so this is not where the gap opens.`);
+  return join(`The AI recommends you about as often here as ${than}, so this is not where the gap opens.`);
+}
+
+export function convertsLine(dir: StepDir, thanDo: string): PanelText {
+  if (dir < 0) return join(`Fewer of your recommendations end as the pick than ${thanDo}: the AI recommends you, then picks something else.`);
+  if (dir > 0) return join(`More of your recommendations end as the pick than ${thanDo}, so once the AI recommends you it tends to stay with you.`);
+  return join(`Your recommendations end as the pick about as often as ${thanDo}, so this step is not where the gap opens.`);
+}
+
+/** Head-to-head, "The AI picks one of the two". */
+export const decidedLine = (mostly: boolean): PanelText =>
+  join(mostly ? "Most of these answers settle the matchup, so who it picks matters more than whether it picks." : "Most of these answers leave the choice to the buyer, so the matchup is often not settled at all.");
+
+/** Head-to-head, "When it picks, who it picks". */
+export const wonLine = (side: "you" | "rival" | "close"): PanelText =>
+  join(
+    side === "you"
+      ? "The AI decides this matchup for you; what is left to win is the answers where it picks neither."
+      : side === "rival"
+        ? "The loss is in the decision itself, not in being left out of the answer."
+        : "Small shifts in what the AI weighs would change who wins this matchup."
+  );
+
+/** The title over the rows of who takes the pick after recommending you. */
+export const takersTitle = (noun: string) => `When it recommends you and picks another ${noun}, it picks`;

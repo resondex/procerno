@@ -1,6 +1,6 @@
 "use client";
 
-import { Fragment, useEffect, useState } from "react";
+import { useEffect, useState } from "react";
 import type { ReactNode } from "react";
 import type { CellPanelPayload, PanelKind, PanelRival, PanelStep, PanelStepKey, Position, PositionPanel, RivalAcross, RivalAcrossStep, RivalStepDetail, PanelStepDetail } from "@/lib/engine/analysis_types";
 import { MoveBox, None, VCOLOR, VWORD, crumbCls, h2Cls, linkCls, notesOf, softLine, whyLines, type Ctx } from "./analysis_panel";
@@ -12,9 +12,9 @@ import {
   C_NONE,
   C_USUAL,
   C_YOU,
-  C_YOU_SOFT,
   CLICK_HINT,
   CompSwitch,
+  STEP_HINT,
   CondColumns,
   DetailView,
   KeyLine,
@@ -146,20 +146,15 @@ export function hasRivalPanel(p: Position | undefined, name: string): boolean {
 
 export function PositionPanelView({ p, pp, usualSteps, ctx }: { p: Position; pp: PositionPanel; usualSteps?: PanelStep[]; ctx: Ctx }) {
   const [compOn] = useComp();
-  // A panel with no usual to set you against (no usual cell, no usual on its
-  // steps) would show a lone "You" bar with the switch off, so it opens on the
-  // competitors view. Its switch is its own (on by default, off only for the
-  // panel it was turned off on); the remembered switch state is never written
-  // here, so opening one leaves the other panels as they were.
-  const hasUsual = !!pp.usualCellId || pp.steps.some((s) => !!s.usual);
-  const compForced = !!pp.compare && !hasUsual;
-  const [offFor, setOffFor] = useState<string | null>(null);
-  const comp = compForced ? offFor !== p.cellId : !!pp.compare && compOn;
+  // am35: every panel opens on its default view (the switch off): you against
+  // the average competitor where the steps carry competitor numbers, against
+  // your usual on the verdict panels. The switch is the one remembered state.
+  const comp = !!pp.compare && compOn;
   // Clickable steps: the steps the engine explains in this view. The default
   // selection is the engine's focus; switching panel or view starts over.
   const stepDetails = (comp ? pp.detailsComp : pp.details) ?? {};
   const selectable = pp.steps.some((s) => !!stepDetails[s.key]);
-  const defaultSel = comp ? pp.focusComp : pp.focus;
+  const defaultSel = (comp ? pp.focusComp : pp.focus) ?? pp.steps.find((s) => !!stepDetails[s.key])?.key;
   const selKey = `${p.cellId}|${comp ? 1 : 0}`;
   const [picked, setPicked] = useState<{ key: string; step: PanelStepKey } | null>(null);
   const sel = picked && picked.key === selKey ? picked.step : defaultSel;
@@ -229,7 +224,7 @@ export function PositionPanelView({ p, pp, usualSteps, ctx }: { p: Position; pp:
           )}
           <span>{p.where}</span>
         </div>
-        {pp.compare && (compForced ? <CompSwitch own={[comp, (v) => setOffFor(v ? null : p.cellId)]} /> : <CompSwitch />)}
+        {pp.compare && <CompSwitch />}
       </div>
       <h2 className={h2Cls}>
         <TextView text={pp.claim} title={p.where} />
@@ -245,10 +240,7 @@ export function PositionPanelView({ p, pp, usualSteps, ctx }: { p: Position; pp:
           {soft}
         </p>
       )}
-      <p className={`${T.sec} mt-1.5`}>
-        {selectable ? "Click a step to see what explains it. " : ""}
-        {CLICK_HINT}
-      </p>
+      <p className={`${T.sec} mt-1.5`}>{selectable ? STEP_HINT : CLICK_HINT}</p>
       {pp.kind === "h2h" && p.cellId !== "fights:h2h:all" && cell?.label && <MatchupDropNote name={cell.label} className="mt-3" />}
       {ORDER[pp.kind].map((b) => (blocks[b] ? <div key={b}>{blocks[b]}</div> : null))}
       {p.lever && <MoveBox p={p} ctx={ctx} why={whyLines(notes, ctx.cat.plural)} />}
@@ -278,6 +270,8 @@ function RivalDetail({ d, name }: { d: RivalStepDetail | PanelStepDetail; name: 
   const firstOther = outcomesAll.find((o) => !mineOf(o));
   const outcomes = allRows ? outcomesAll : outcomesAll.filter((o) => mineOf(o) || o === firstOther);
   const hiddenRows = outcomesAll.length - outcomes.length;
+  // The outcome columns this detail carries (am35: never the pick itself - the step bars show it).
+  const cols3 = ol ? ([["picked", C_YOU], ["lost", C_USUAL], ["none", C_NONE]] as const).filter(([k]) => !!ol[k]) : [];
   return (
     <DetailView heading={d.heading} body={d.body}>
       {d.rows && d.rows.length > 0 && (
@@ -308,44 +302,60 @@ function RivalDetail({ d, name }: { d: RivalStepDetail | PanelStepDetail; name: 
           </tbody>
         </table>
       )}
-      {d.outcomes && d.outcomes.length > 0 && ol && (
-        // One row per brand: name, one stacked bar, then the three shares in
-        // their own columns under a single header that doubles as the key.
-        <div className={`mt-3 grid grid-cols-[auto_minmax(6rem,1fr)_4.5rem_4.5rem_4.5rem] items-center gap-x-3 gap-y-1.5 ${T.body}`}>
-          <span />
-          <span />
-          {([["picked", C_YOU], ["lost", C_USUAL], ["none", C_NONE]] as const).map(([k, color]) => (
-            <span key={k} className={`self-end text-right leading-tight ${T.cap} text-ink-3`}>
-              <i className="mr-1 inline-block h-2 w-2 rounded-full align-[0px]" style={{ background: color }} aria-hidden />
-              {cap1(ol[k])}
-            </span>
-          ))}
-          {outcomes.map((o) => {
-            const own = "usual" in o && !!o.usual;
-            // A step detail names its own outcome lines ("Here", "All buyers"); a rival's says "You".
-            const who = cols || own ? o.name : o.you ? "You" : o.name;
-            const mine = o.you || own;
-            return (
-              <Fragment key={who}>
-                <span className={mine ? "font-semibold text-ink" : "text-ink-2"}>{who}</span>
-                <span className="flex h-2.5 overflow-hidden rounded-[5px] bg-line/60" aria-hidden>
-                  <i className="block h-full" style={{ width: `${o.picked.pct}%`, background: own ? C_YOU_SOFT : o.you ? C_YOU : C_AWAY }} />
-                  <i className="block h-full" style={{ width: `${o.lost.pct}%`, background: C_USUAL }} />
-                  <i className="block h-full" style={{ width: `${o.none.pct}%`, background: C_NONE }} />
-                </span>
-                <span className="text-right font-semibold text-ink">
-                  <NumView n={o.picked} title={`${who} - ${ol.picked}`} />
-                </span>
-                <span className="text-right text-ink-2">
-                  <NumView n={o.lost} title={`${who} - ${ol.lost}`} />
-                </span>
-                <span className="text-right text-ink-2">
-                  <NumView n={o.none} title={`${who} - ${ol.none}`} />
-                </span>
-              </Fragment>
-            );
-          })}
+      {"list" in d && d.list && d.list.rows.length > 0 && (
+        <div className="mt-2.5">
+          <p className={`${T.cap} text-ink-3`}>{d.list.title}</p>
+          <table className={`mt-1 w-full ${T.body}`}>
+            <tbody>
+              {d.list.rows.map((r) => (
+                <tr key={r.label} className="border-t border-line/70">
+                  <td className="py-1.5 pr-2 text-ink">{r.label}</td>
+                  <td className="py-1.5 pl-2 text-right font-semibold text-ink">
+                    <NumView n={r.num} title={`${d.list!.title} ${r.label}`} />
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
         </div>
+      )}
+      {d.outcomes && d.outcomes.length > 0 && ol && (
+        // One row per brand and one column per outcome the step bars do not
+        // show (lose to another, no single pick), under a single header.
+        <table className={`mt-2.5 w-full ${T.body}`}>
+          <thead>
+            <tr className={`${T.cap} text-ink-3`}>
+              <th className="py-1 text-left font-normal" />
+              {cols3.map(([k, color]) => (
+                <th key={k} className="py-1 pl-2 text-right font-normal leading-tight">
+                  <i className="mr-1 inline-block h-2 w-2 rounded-full align-[0px]" style={{ background: color }} aria-hidden />
+                  {cap1(ol[k] ?? "")}
+                </th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {outcomes.map((o) => {
+              const own = "usual" in o && !!o.usual;
+              // A step detail names its own outcome lines ("Here", "All buyers"); a rival's says "You".
+              const who = cols || own ? o.name : o.you ? "You" : o.name;
+              const mine = o.you || own;
+              return (
+                <tr key={who} className="border-t border-line/70">
+                  <td className={`py-1.5 pr-2 ${mine ? "font-semibold text-ink" : "text-ink-2"}`}>{who}</td>
+                  {cols3.map(([k]) => {
+                    const n = o[k];
+                    return (
+                      <td key={k} className={`py-1.5 pl-2 text-right ${mine ? "font-semibold text-ink" : "text-ink-2"}`}>
+                        {n ? <NumView n={n} title={`${who} - ${ol[k]}`} /> : null}
+                      </td>
+                    );
+                  })}
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
       )}
       {d.outcomes && ol && (hiddenRows > 0 || allRows) && outcomesAll.length > outcomesAll.filter((o) => mineOf(o) || o === firstOther).length && (
         <button type="button" className={`${linkCls} mt-2 ${T.cap}`} onClick={() => setAllRows(!allRows)}>
@@ -384,10 +394,7 @@ export function RivalInCell({ r, p, ctx }: { r: PanelRival; p: Position; ctx: Ct
         </p>
       )}
       {r.thin && <p className={`mt-2 border-l-[3px] border-line pl-2.5 ${T.sec} text-ink-2`}>{r.thin}</p>}
-      <p className={`${T.sec} mt-1.5`}>
-        {canSelect ? "Click a step to see what explains it. " : ""}
-        {CLICK_HINT}
-      </p>
+      <p className={`${T.sec} mt-1.5`}>{canSelect ? STEP_HINT : CLICK_HINT}</p>
 
       {r.steps.length > 0 && (
         <div className="mt-4">
@@ -410,6 +417,7 @@ export function RivalInCell({ r, p, ctx }: { r: PanelRival; p: Position; ctx: Ct
                 rivalLabel={r.name}
                 rivalFirst
                 onSelect={isFunnel(s.key) && details[s.key] ? () => setSel(s.key) : undefined}
+                plain={canSelect}
               />
             ))}
           </div>
@@ -519,17 +527,23 @@ export function LazyRivalAcross({ name, ctx, fallback }: { name: string; ctx: Ct
 
 const WHO_COLOR: Record<RivalAcrossStep["bars"][number]["who"], string> = { rival: C_AWAY, you: C_YOU, other: C_USUAL };
 
+/** One question's card: the whole card selects it (its bars open no answers - the block below does). */
 function AcrossStepCard({ s, sel, onSelect }: { s: RivalAcrossStep; sel: boolean; onSelect: () => void }) {
   return (
-    <div className={`block w-full rounded-[10px] border bg-surface px-3 pb-3 pt-2.5 text-left ${sel ? "border-ink ring-1 ring-ink" : "border-line"}`}>
-      <button type="button" onClick={onSelect} aria-pressed={sel} className="mb-1 flex w-full items-center justify-between gap-2 text-left">
+    <button
+      type="button"
+      onClick={onSelect}
+      aria-pressed={sel}
+      className={`block w-full cursor-pointer rounded-[10px] border bg-surface px-3 pb-3 pt-2.5 text-left hover:border-ink-3 ${sel ? "border-ink ring-1 ring-ink" : "border-line"}`}
+    >
+      <span className="mb-1 flex w-full items-center justify-between gap-2 text-left">
         <em className={`not-italic ${T.sec} ${sel ? "font-semibold text-ink" : "text-ink-2"}`}>{s.label}</em>
         <Tag text={s.tag} tone={s.tagTone} />
-      </button>
+      </span>
       {s.bars.map((b) => (
-        <NumBar key={`${b.who}:${b.name}`} label={b.name} n={b.num} color={WHO_COLOR[b.who]} bold={b.who !== "other"} dim={!sel} title={`${s.label} - ${b.name}`} />
+        <NumBar key={`${b.who}:${b.name}`} label={b.name} n={b.num} color={WHO_COLOR[b.who]} bold={b.who !== "other"} dim={!sel} title={`${s.label} - ${b.name}`} plain />
       ))}
-    </div>
+    </button>
   );
 }
 
@@ -546,7 +560,7 @@ export function RivalAcrossView({ r, ctx }: { r: RivalAcross; ctx: Ctx }) {
       <h2 className={h2Cls}>
         <TextView text={r.claim} title={r.name} />
       </h2>
-      <p className={`${T.sec} mt-1.5`}>Click a question to see what explains it. {CLICK_HINT}</p>
+      <p className={`${T.sec} mt-1.5`}>Click a question to see what explains it. Below it, click any row or number to read the answers behind it.</p>
       <div className="mt-4">
         <p className={`${T.label} mb-1.5`}>How it goes, question by question</p>
         <KeyLine

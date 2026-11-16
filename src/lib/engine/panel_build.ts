@@ -7,7 +7,7 @@ import type { Resolver } from "./brand_resolve";
 import type { PoolRow, RateCell } from "./view_data";
 import type { ValueFact } from "./value";
 import { filterObvious, type Omission, type OmissionList } from "./panel_filter";
-import { TAG_FURTHEST, TAG_GAP_OPENS, duelTag, duelTone, focusOf, neutralUsualTag, otherTag, rankTag, segTag, toneOfTag, usualTag, usualTone, type KN } from "./panel_tags";
+import { AVG_COMP, TAG_FURTHEST, TAG_GAP_OPENS, avgTag, duelTag, usualDir, duelTone, focusOf, neutralUsualTag, otherTag, rankTag, segTag, toneOfTag, usualTag, usualTone, type KN } from "./panel_tags";
 import { ROW_NAME } from "./question_names";
 import {
   F,
@@ -19,13 +19,20 @@ import {
   article,
   attachedLead,
   condLabel,
+  convertsLine,
   countWord,
+  decidedLine,
   funnelDetail,
   join,
   listSpans,
   listWords,
+  namedLine,
   rankDetail,
+  recommendedLine,
+  takersTitle,
   upperFirst,
+  wonLine,
+  type StepDir,
 } from "./panel_text";
 import type {
   AnswerRef,
@@ -822,9 +829,28 @@ function h2hPanel(inp: PanelCellInput, ctx: Ctx): PositionPanel {
   const decided = num(d, all, "answers", refsOf([...won, ...lost], pf));
   const wonN = num(won.length, d, "answers that pick one of the two", refsOf(won, pf));
   const lostN = num(lost.length, d, "answers that pick one of the two", refsOf(lost, pf));
+  // The all-rivals cell: each rival's share of the answers that pick one of the two (the switch's bars).
+  const byRival = inp.pooled
+    ? h
+        .brandSplit(lost)
+        .list.filter((b) => b.key !== h.targetKey && b.rows.length >= 1)
+        .slice(0, COMP_TOP)
+        .map((b) => ({ name: b.name, num: num(b.rows.length, d, "answers that pick one of the two", refsOf(b.rows, pf)) }))
+    : [];
+  const vsName = inp.pooled ? "Your named rivals" : rival;
   const steps: PanelStep[] = [
-    { key: "decided", label: "The AI picks one of the two", here: decided, hereLabel: inp.pooled ? "All your head-to-heads" : "This matchup", usualLabel: "All your head-to-heads" },
-    ...(d > 0 ? [{ key: "won" as const, label: "When it picks, who it picks", here: wonN, rivals: [{ name: inp.pooled ? "Your named rivals" : rival, num: lostN }] }] : []),
+    { key: "decided", label: "The AI picks one of the two", here: decided, hereLabel: inp.pooled ? "All your head-to-heads" : "This matchup", usualLabel: "All your head-to-heads", compHereLabel: "All your head-to-heads" },
+    ...(d > 0
+      ? [
+          {
+            key: "won" as const,
+            label: "When it picks, who it picks",
+            here: wonN,
+            vs: { name: vsName, num: lostN },
+            rivals: byRival.length >= 2 ? byRival : [{ name: vsName, num: lostN }],
+          },
+        ]
+      : []),
   ];
   let claim: PanelText;
   if (d === 0) claim = join(`Asked to choose between you and ${rival}, the AI picks neither in every answer.`);
@@ -889,6 +915,7 @@ function h2hPanel(inp: PanelCellInput, ctx: Ctx): PositionPanel {
     hereKey: "You",
     stackLabel: "Where it is decided",
     steps,
+    ...(byRival.length >= 2 ? { compare: true as const, competitorOrder: byRival.map((x) => x.name) } : {}),
     ...(conditions ? { conditions } : {}),
     lines,
   };
@@ -1830,6 +1857,11 @@ function rivalFull(inp: PanelCellInput, ctx: Ctx, b: PositionBrand, you: ReturnT
     }
   }
   const details: PanelRival["details"] = {};
+  /** You against this rival on one step: -1 it leads (ranges apart), 1 you lead, 0 even. */
+  const duelDir = (y: PanelNum, r: PanelNum): StepDir => {
+    const d = duelTag(knOf(y)!, knOf(r)!, R);
+    return d.rivalLeads ? -1 : d.tag === "Even" ? 0 : 1;
+  };
   // Named: named but not recommended, and of those named as one to avoid.
   const nnr = (f: ReturnType<typeof funnelOf>) => f.named.filter((r) => !f.rec.includes(r));
   const nnrR = nnr(them.f);
@@ -1850,33 +1882,19 @@ function rivalFull(inp: PanelCellInput, ctx: Ctx, b: PositionBrand, you: ReturnT
     const t = steps[0].tagRank ?? "Even";
     details.named = {
       heading: t === "Even" ? "No gap at this step" : t === TAG_GAP_OPENS || t === `${R} leads` ? `${R} is named more often than you` : `You are named more often than ${R}`,
-      body: join("The AI names you in ", N(you.named), ` of answers here and ${R} in `, N(them.named), "."),
+      body: namedLine(duelDir(you.named, them.named), R),
       rows: rowsD,
     };
   } else missing.push("who is named without a recommendation");
-  // Recommended: what happens to each brand's recommendations next.
+  // Recommended: one sentence, then the answers that recommend both of you (new facts; the step bars carry the rest).
   if (them.f.rec.length >= 5 && you.f.rec.length >= 5) {
-    const outcome = (recRows: PoolRow[], k: string, name: string, isYou: boolean) => {
-      const picked = recRows.filter((r) => h.pickOf(r).key === k);
-      const lost = recRows.filter((r) => h.pickOf(r).status === "active" && h.pickOf(r).key !== k);
-      const none = recRows.filter((r) => h.pickOf(r).status !== "active");
-      return {
-        name,
-        ...(isYou ? { you: true as const } : {}),
-        picked: num(picked.length, recRows.length, "recommending answers", refsOf(picked, pf(name))),
-        lost: num(lost.length, recRows.length, "recommending answers", refsOf(lost, (r) => r.code.top_pick || name)),
-        none: num(none.length, recRows.length, "recommending answers", refsOf(none, (r) => verdictFind(r, h))),
-      };
-    };
     const both = rows.filter((r) => them.f.rec.includes(r) && you.f.rec.includes(r));
     const bothR = both.filter((r) => h.pickOf(r).key === key);
     const bothY = both.filter((r) => h.pickOf(r).key === h.targetKey);
     const t = steps[1].tagRank ?? "Even";
     details.recommended = {
       heading: t === "Even" ? "No gap at this step, but this is where you part" : t === TAG_GAP_OPENS || t === `${R} leads` ? `${R} is recommended more often than you` : `You are recommended more often than ${R}`,
-      body: join("The AI recommends you in ", N(you.recommended), ` of answers here and ${R} in `, N(them.recommended), ". What happens to the recommendation next differs."),
-      outcomes: [outcome(them.f.rec, key, R, false), outcome(you.f.rec, h.targetKey, h.brand, true)],
-      outcomeLabels: { picked: "picked", lost: `lose to another ${h.noun}`, none: "no single pick" },
+      body: recommendedLine(duelDir(you.recommended, them.recommended), R),
       ...(both.length >= 5
         ? {
             both: join(
@@ -1898,6 +1916,17 @@ function rivalFull(inp: PanelCellInput, ctx: Ctx, b: PositionBrand, you: ReturnT
     const rr = rc.n ? rc.k / rc.n : 0;
     const yr = yc.n ? yc.k / yc.n : 0;
     const ratio = yr > 0 ? rr / yr : 0;
+    // What happens to the recommendations that do not end as the pick (the pick itself is in the step bars).
+    const outcome = (recRows: PoolRow[], k: string, name: string, isYou: boolean) => {
+      const lost = recRows.filter((r) => h.pickOf(r).status === "active" && h.pickOf(r).key !== k);
+      const none = recRows.filter((r) => h.pickOf(r).status !== "active");
+      return {
+        name,
+        ...(isYou ? { you: true as const } : {}),
+        lost: num(lost.length, recRows.length, "recommending answers", refsOf(lost, (r) => r.code.top_pick || name)),
+        none: num(none.length, recRows.length, "recommending answers", refsOf(none, (r) => verdictFind(r, h))),
+      };
+    };
     details.converts = {
       heading:
         rr > yr && ratio >= 1.5
@@ -1905,7 +1934,9 @@ function rivalFull(inp: PanelCellInput, ctx: Ctx, b: PositionBrand, you: ReturnT
           : yr > rr && rr > 0 && yr / rr >= 1.5
             ? `When it has to name one ${h.noun}, it names you more often`
             : "The two convert their recommendations at a similar rate",
-      body: join(N(them.converts), ` of ${R}'s recommendations end as the pick, against `, N(you.converts), " of yours."),
+      body: convertsLine(duelDir(you.converts, them.converts), `${R}'s do`),
+      outcomes: [outcome(them.f.rec, key, R, false), outcome(you.f.rec, h.targetKey, h.brand, true)],
+      outcomeLabels: { lost: `lose to another ${h.noun}`, none: "no single pick" },
     };
   }
   // Conditions: rows sending buyers to this rival; your rows as the cell has them.
@@ -2097,6 +2128,70 @@ function finishPanel(inp: PanelCellInput, p: PositionPanel, up: PositionPanel | 
         }
       }
     } else if (VERDICT_STEP[p.kind] && p.steps.some((s) => s.key === VERDICT_STEP[p.kind])) p.focus = VERDICT_STEP[p.kind];
+  // am35: every panel whose steps carry competitor numbers sets you against the
+  // listed competitors taken together with the switch off (the same brands as
+  // the bars with the switch on, in THIS cell): their numerators over their
+  // denominators, added up. The here-against-your-usual bars and tags are not
+  // drawn on these panels; a step with no competitor numbers (any brand, the
+  // category) keeps the comparison it had, named on the step itself.
+  if (p.kind !== "h2h" && p.compare && p.competitorOrder?.length && p.steps.some((s) => !!s.here && !!s.rivals?.length)) {
+    const oldUsualKey = p.usualKey;
+    p.avgComp = true;
+    p.hereKey = "You";
+    p.usualKey = AVG_COMP;
+    const cmpA: { key: PanelStepKey; here: KN; usual: KN }[] = [];
+    for (const s of p.steps) {
+      if (!s.here) continue;
+      if (!s.rivals?.length) {
+        // A step not about you alone (the answer is about the category at all, names any brand).
+        if (s.key === "category") s.hereLabel = "All answers";
+        if (oldUsualKey && !s.usualLabel) s.usualLabel = oldUsualKey;
+        if (s.tagUsual && (/your usual$/i.test(s.tagUsual) || s.tagUsual === TAG_FURTHEST || /^None/.test(s.tagUsual))) {
+          delete s.tagUsual;
+          delete s.tagUsualTone;
+        }
+        continue;
+      }
+      const ks = s.rivals.map((r) => knOf(r.num)!);
+      const k = ks.reduce((a, x) => a + x.k, 0);
+      const n = ks.reduce((a, x) => a + x.n, 0);
+      const unit = (s.rivals[0].num.tip.replace(/^\d+ of \d+ /, "") || "answers") + ", the competitors shown added up";
+      // Example answers spread across the competitors: one from each in turn.
+      const refs: AnswerRef[] = [];
+      const seen = new Set<string>();
+      for (let i = 0; refs.length < PANEL_REFS && i < PANEL_REFS; i++)
+        for (const r of s.rivals) {
+          const x = r.num.refs?.[i];
+          if (x && !seen.has(x.responseId) && refs.length < PANEL_REFS) {
+            seen.add(x.responseId);
+            refs.push(x);
+          }
+        }
+      s.usual = num(k, n, unit, refs);
+      s.usualLabel = AVG_COMP;
+      delete s.tagUsual;
+      delete s.tagUsualTone;
+      if (thin) continue;
+      const a = knOf(s.here)!;
+      const b = knOf(s.usual)!;
+      s.tagUsual = avgTag(a, b);
+      s.tagUsualTone = usualTone(a, b);
+      cmpA.push({ key: s.key, here: a, usual: b });
+    }
+    delete p.focus;
+    if (!thin) {
+      const f = focusOf(cmpA);
+      if (f) p.focus = f.key;
+    }
+  }
+  // Head-to-heads: the rival beside you on the step that says who it picks.
+  for (const s of p.steps)
+    if (s.vs && s.here && !thin) {
+      const d = duelTag(knOf(s.here)!, knOf(s.vs.num)!, s.vs.name);
+      // "Your named rivals" take a plural verb.
+      s.tagUsual = /rivals$/.test(s.vs.name) ? d.tag.replace(/ leads$/, " lead") : d.tag;
+      s.tagUsualTone = duelTone(d.tag, d.rivalLeads);
+    }
     // Comparison view: rank among the competitors.
     let worst: { key: PanelStepKey; gap: number } | null = null;
     for (const s of p.steps) {
@@ -2140,6 +2235,8 @@ function detailOf(inp: PanelCellInput, p: PositionPanel, up: PositionPanel | und
     const d = rankDetail(p.focusComp ?? null, fs && fs.here && fs.rivals ? { label: fs.label, here: fs.here, rivals: fs.rivals } : null);
     if (d) p.detailComp = d;
   }
+  // A panel set against the average competitor explains itself step by step (details).
+  if (p.avgComp && (p.kind === "popular" || p.kind === "learning")) return;
   switch (p.kind) {
     case "popular": {
       const rec = p.steps.find((x) => x.key === "recommended");
@@ -2219,10 +2316,10 @@ function detailOf(inp: PanelCellInput, p: PositionPanel, up: PositionPanel | und
       const won = p.steps.find((s) => s.key === "won");
       const decided = p.steps.find((s) => s.key === "decided");
       const R = inp.pooled ? "your named rivals" : inp.rivalName ?? inp.label;
-      if (inp.exception && decided?.here && won?.rivals) {
+      if (inp.exception && decided?.here && won?.vs) {
         p.detail = det(
           "You lose this one - with an exception",
-          join("The AI names one of you in ", N(decided.here), ` of answers, and it picks ${R} in `, N(won.rivals[0].num), ` of those. Most of the answers that pick ${R} still say when to choose you.`)
+          join("The AI names one of you in ", N(decided.here), ` of answers, and it picks ${R} in `, N(won.vs.num), ` of those. Most of the answers that pick ${R} still say when to choose you.`)
         );
       } else if (won?.here) {
         const w = won.here.pct;
@@ -2337,59 +2434,89 @@ function stepDetailsOf(inp: PanelCellInput, p: PositionPanel, u: PanelCellInput 
   const usual = usualFor(inp, u, ctx);
   const picks = p.kind === "buy" || p.kind === "switching" || p.kind === "popular";
   const step = (k: PanelStepKey) => p.steps.find((s) => s.key === k && !!s.here);
-  const surfOf = (f: ReturnType<typeof funnelOf>, name: string, rec: boolean) => (r: PoolRow) => f.surf(r, rec) ?? r.code.top_pick ?? name;
+  type Fn = ReturnType<typeof funnelOf>;
+  const surfOf = (f: Fn, name: string, rec: boolean) => (r: PoolRow) => f.surf(r, rec) ?? r.code.top_pick ?? name;
   const pf = (name: string) => (r: PoolRow) => h.quoteOf(r) || r.code.top_pick || name;
-  const nnr = (f: ReturnType<typeof funnelOf>) => f.named.filter((r) => !f.rec.includes(r));
+  const nnr = (f: Fn) => f.named.filter((r) => !f.rec.includes(r));
   const negOf = (rs: PoolRow[], k: string) => rs.filter((r) => (r.code.mentions ?? []).some((m) => m.framing === "negative" && h.resolve(m.brand).key === k));
-  /** Named but not recommended, and of those named as one to avoid: two brands' (or two places') rows. */
-  const namedRows = (fA: ReturnType<typeof funnelOf>, nA: number, kA: string, nameA: string, fB: ReturnType<typeof funnelOf>, nB: number, kB: string, nameB: string) => {
-    const a = nnr(fA);
-    const b = nnr(fB);
-    if (a.length + b.length < DETAIL_MIN) return undefined;
+  const rate = (x: KN) => (x.n > 0 ? x.k / x.n : 0);
+  /** Direction of you against the comparison: -1 below (or none here against some), 1 above, 0 about. */
+  const dirOf = (a: KN, b: KN): StepDir => (rate(a) === 0 && rate(b) > 0 ? -1 : usualDir(a, b));
+  /** Example answers drawn in turn from several brands' rows, each found by its own brand. */
+  const refsMulti = (parts: { rows: PoolRow[]; find: (r: PoolRow) => string }[]): AnswerRef[] => {
+    const seen = new Set<string>();
+    const items: { id: string; find: string; model: string }[] = [];
+    const most = Math.max(0, ...parts.map((x) => x.rows.length));
+    for (let i = 0; i < most; i++)
+      for (const pt of parts) {
+        const r = pt.rows[i];
+        if (!r || seen.has(r.code.response_id)) continue;
+        seen.add(r.code.response_id);
+        items.push({ id: r.code.response_id, find: pt.find(r), model: r.model });
+      }
+    return spreadRefs(items, PANEL_REFS);
+  };
+  type Other = { f: Fn; n: number; key: string; name: string };
+  const youF = funnelOf(rows, h.targetKey, h);
+  const sumOf = (xs: number[]) => xs.reduce((a, x) => a + x, 0);
+  /** Named but not recommended, and of those named as one to avoid: you against one or more other funnels taken together. */
+  const namedRowsOf = (others: Other[]) => {
+    const a = nnr(youF);
+    const bs = others.map((o) => ({ o, rs: nnr(o.f) }));
+    const bk = sumOf(bs.map((x) => x.rs.length));
+    const bn = sumOf(others.map((o) => o.n));
+    if (a.length + bk < DETAIL_MIN) return undefined;
     const out: { label: string; rival: PanelNum; you: PanelNum }[] = [
-      { label: "Named but not recommended", rival: num(b.length, nB, "answers", refsOf(b, surfOf(fB, nameB, false))), you: num(a.length, nA, "answers", refsOf(a, surfOf(fA, nameA, false))) },
+      {
+        label: "Named but not recommended",
+        rival: num(bk, bn, "answers", refsMulti(bs.map((x) => ({ rows: x.rs, find: surfOf(x.o.f, x.o.name, false) })))),
+        you: num(a.length, all, "answers", refsOf(a, surfOf(youF, h.brand, false))),
+      },
     ];
-    if (a.length >= DETAIL_MIN && b.length >= DETAIL_MIN) {
-      const na = negOf(a, kA);
-      const nb = negOf(b, kB);
+    if (a.length >= DETAIL_MIN && bk >= DETAIL_MIN) {
+      const na = negOf(a, h.targetKey);
+      const nb = bs.map((x) => ({ x, rs: negOf(x.rs, x.o.key) }));
       out.push({
         label: `Of those, named as ${article(h.noun)} ${h.noun} to avoid`,
-        rival: num(nb.length, b.length, "answers named but not recommended", refsOf(nb, surfOf(fB, nameB, false))),
-        you: num(na.length, a.length, "answers named but not recommended", refsOf(na, surfOf(fA, nameA, false))),
+        rival: num(sumOf(nb.map((y) => y.rs.length)), bk, "answers named but not recommended", refsMulti(nb.map((y) => ({ rows: y.rs, find: surfOf(y.x.o.f, y.x.o.name, false) })))),
+        you: num(na.length, a.length, "answers named but not recommended", refsOf(na, surfOf(youF, h.brand, false))),
       });
     }
     return out;
   };
-  /** What happens to one brand's recommendations: picked, another brand picked, no single pick. */
-  const outcomeOf = (recRows: PoolRow[], k: string, name: string, extra: { you?: true; usual?: true }) => {
-    const picked = recRows.filter((r) => h.pickOf(r).key === k);
-    const lost = recRows.filter((r) => h.pickOf(r).status === "active" && h.pickOf(r).key !== k);
-    const none = recRows.filter((r) => h.pickOf(r).status !== "active");
+  /** What happens to recommendations that do not end as the pick: another <noun> picked, or no single pick. The pick itself is in the step bars. */
+  const outcomeMulti = (parts: { rec: PoolRow[]; key: string; name: string }[], name: string, extra: { you?: true; usual?: true }) => {
+    const lost = parts.map((pt) => ({ pt, rs: pt.rec.filter((r) => h.pickOf(r).status === "active" && h.pickOf(r).key !== pt.key) }));
+    const none = parts.map((pt) => ({ pt, rs: pt.rec.filter((r) => h.pickOf(r).status !== "active") }));
+    const n = sumOf(parts.map((pt) => pt.rec.length));
     return {
       name,
       ...extra,
-      picked: num(picked.length, recRows.length, "recommending answers", refsOf(picked, pf(h.brand))),
-      lost: num(lost.length, recRows.length, "recommending answers", refsOf(lost, (r) => r.code.top_pick || name)),
-      none: num(none.length, recRows.length, "recommending answers", refsOf(none, (r) => verdictFind(r, h))),
+      lost: num(sumOf(lost.map((x) => x.rs.length)), n, "recommending answers", refsMulti(lost.map((x) => ({ rows: x.rs, find: (r: PoolRow) => r.code.top_pick || x.pt.name })))),
+      none: num(sumOf(none.map((x) => x.rs.length)), n, "recommending answers", refsMulti(none.map((x) => ({ rows: x.rs, find: (r: PoolRow) => verdictFind(r, h) })))),
     };
   };
-  const outcomeLabels = { picked: "end as the pick", lost: `lose to another ${h.noun}`, none: "no single pick" };
-  /** "When it recommends you and still picks another <noun>, it picks A (x), B (y) most." */
-  const takers = (recRows: PoolRow[]): PanelText | null => {
-    const lost = recRows.filter((r) => h.pickOf(r).status === "active" && h.pickOf(r).key !== h.targetKey);
-    if (lost.length < DETAIL_MIN) return null;
-    const by = h.brandSplit(lost).list.filter((b) => b.key !== h.targetKey).slice(0, 3);
-    if (!by.length) return null;
-    return join(
-      ` When it recommends you and still picks another ${h.noun}, it picks `,
-      ...by.flatMap((b, i) => join(i === 0 ? "" : i === by.length - 1 ? " and " : ", ", `${b.name} (`, N(num(b.rows.length, lost.length, "of those answers", refsOf(b.rows, pf(b.name)))), ")")),
-      " most often."
-    );
+  const outcomeLabels = { lost: `lose to another ${h.noun}`, none: "no single pick" };
+  /** Who takes the pick when the AI recommends you and picks another <noun>: top 3, rows of 3+ answers. */
+  const takersList = (): PanelStepDetail["list"] => {
+    if (!picks) return undefined;
+    const lost = youF.rec.filter((r) => h.pickOf(r).status === "active" && h.pickOf(r).key !== h.targetKey);
+    if (lost.length < DETAIL_MIN) return undefined;
+    const by = h.brandSplit(lost).list.filter((b) => b.key !== h.targetKey && b.rows.length >= 3).slice(0, 3);
+    if (!by.length) return undefined;
+    return { title: takersTitle(h.noun), rows: by.map((b) => ({ label: b.name, num: num(b.rows.length, lost.length, "answers that recommend you and pick another", refsOf(b.rows, pf(b.name))) })) };
   };
   const leftOut = (bad: boolean) => (bad ? "Being left out is part of why you lose here" : "Being left out is not why you lose here");
-  const youF = funnelOf(rows, h.targetKey, h);
+  const names = p.competitorOrder ?? [];
+  const comps = names.map((name) => {
+    const key = h.resolve(name).key ?? name;
+    return { name, key, f: funnelOf(rows, key, h) };
+  });
+  const youNamed: KN = { k: youF.named.length, n: all };
+  const youRec: KN = { k: youF.rec.length, n: all };
+  const youConv: KN = { k: youF.picked.length, n: youF.rec.length };
 
-  /* -------- normal view: here against the usual -------- */
+  /* -------- normal view: here against the usual, or against the average competitor -------- */
   const details: Partial<Record<PanelStepKey, PanelStepDetail>> = {};
   if (p.kind === "h2h") {
     const dec = step("decided");
@@ -2398,102 +2525,107 @@ function stepDetailsOf(inp: PanelCellInput, p: PositionPanel, u: PanelCellInput 
     const other = rows.filter((r) => h.pickOf(r).status === "active" && !inp.you.includes(r) && !inp.them.includes(r));
     const none = rows.filter((r) => h.pickOf(r).status !== "active");
     if (dec?.here) {
-      const uDec = usual?.you && usual.them ? num(usual.you.length + usual.them.length, usual.rows.length, "answers", refsOf([...usual.you, ...usual.them], pf(h.brand))) : undefined;
+      const restRows = [
+        { label: `Picks another ${h.noun}`, num: num(other.length, all, "answers", refsOf(other, (r) => r.code.top_pick || h.brand)) },
+        { label: "No single pick", num: num(none.length, all, "answers", refsOf(none, (r) => verdictFind(r, h))) },
+      ].filter((x) => (knOf(x.num)?.k ?? 0) >= 3);
       details.decided = {
         heading: dec.here.pct >= 50 ? "The AI mostly picks one of the two" : "The AI mostly declines to pick one of the two",
-        body: join(
-          "The AI picks one of the two in ",
-          N(dec.here),
-          " of these answers",
-          uDec ? join(", against ", N(uDec), ` ${usual!.phrase}`) : "",
-          ". In the rest it picks another ",
-          h.noun,
-          " in ",
-          N(num(other.length, all, "answers", refsOf(other, (r) => r.code.top_pick || h.brand))),
-          " of answers and names no single pick in ",
-          N(num(none.length, all, "answers", refsOf(none, (r) => verdictFind(r, h)))),
-          "."
-        ),
+        body: decidedLine(dec.here.pct >= 50),
+        ...(restRows.length ? { list: { title: "When it picks neither of the two", rows: restRows } } : {}),
       };
     }
-    if (won?.here && won.rivals?.length) {
+    if (won?.here && won.vs) {
       const d = inp.you.length + inp.them.length;
       if (d >= DETAIL_MIN) {
-        const ud = usual?.you && usual.them ? usual.you.length + usual.them.length : 0;
-        const uWon = ud >= DETAIL_MIN ? num(usual!.you!.length, ud, "answers that pick one of the two", refsOf(usual!.you!, pf(h.brand))) : undefined;
         const w = won.here.pct;
         details.won = {
           heading: w >= 60 ? "When it picks one of the two, it mostly picks you" : w <= 40 ? `When it picks one of the two, it mostly picks ${inp.pooled ? "the rival" : R}` : "When it picks one of the two, it is close",
-          body: join(
-            "When it picks one of the two, it picks you in ",
-            N(won.here),
-            ` of those answers and ${R} in `,
-            N(won.rivals[0].num),
-            uWon ? join(". Across all your head-to-heads it picks you in ", N(uWon), " of them.") : "."
-          ),
+          body: wonLine(w >= 60 ? "you" : w <= 40 ? "rival" : "close"),
         };
       }
     }
-  } else if (usual) {
-    const uF = funnelOf(usual.rows, h.targetKey, h);
-    const un = usual.rows.length;
-    const nm = step("named");
-    if (nm?.here) {
-      const uNamed = num(uF.named.length, un, "answers", refsOf(uF.named, surfOf(uF, h.brand, false)));
-      const r = namedRows(youF, all, h.targetKey, h.brand, uF, un, h.targetKey, h.brand);
-      details.named = {
-        heading: leftOut(nm.tagUsualTone === "bad"),
-        body: join("The AI names you in ", N(nm.here), " of these answers, against ", N(uNamed), ` ${usual.phrase}.`),
-        ...(r ? { columns: { you: "Here", rival: usual.column, rivalIsUsual: true as const }, rows: r } : {}),
-      };
-    }
-    const rc = step("recommended");
-    if (rc?.here && p.kind !== "learning") {
-      const uRec = num(uF.rec.length, un, "answers", refsOf(uF.rec, surfOf(uF, h.brand, true)));
-      const tone = rc.tagUsualTone;
-      const outcomes = picks
-        ? [
-            ...(youF.rec.length >= DETAIL_MIN ? [outcomeOf(youF.rec, h.targetKey, "Here", { you: true })] : []),
-            ...(uF.rec.length >= DETAIL_MIN ? [outcomeOf(uF.rec, h.targetKey, usual.column, { you: true, usual: true })] : []),
-          ]
-        : [];
-      details.recommended = {
-        heading: tone === "bad" ? `You are recommended less often here than ${usual.phrase}` : tone === "good" ? `You are recommended more often here than ${usual.phrase}` : `You are recommended about as often here as ${usual.phrase}`,
-        body: join("The AI recommends you in ", N(rc.here), " of these answers, against ", N(uRec), ` ${usual.phrase}.`, picks ? takers(youF.rec) : null),
-        ...(outcomes.length ? { outcomes, outcomeLabels } : {}),
-      };
-    }
-    const cv = step("converts");
-    if (cv?.here && youF.rec.length >= DETAIL_MIN) {
-      const uPicked = uF.picked;
-      const uConv = uF.rec.length >= DETAIL_MIN ? num(uPicked.length, uF.rec.length, "recommending answers", refsOf(uPicked, pf(h.brand))) : undefined;
-      const tone = cv.tagUsualTone;
-      details.converts = {
-        heading: tone === "bad" ? "Fewer of your recommendations end as the pick here" : tone === "good" ? "More of your recommendations end as the pick here" : "Your recommendations end as the pick about as often as usual",
-        body: join("Of the answers that recommend you, ", N(cv.here), " end with you as the pick", uConv ? join(", against ", N(uConv), ` ${usual.phrase}`) : "", ".", takers(youF.rec)),
-      };
+  } else {
+    // The comparison the switch-off view draws: your usual, else the competitors taken together.
+    const avg = !!p.avgComp && comps.length > 0;
+    const side = avg
+      ? {
+          others: comps.map((c) => ({ f: c.f, n: all, key: c.key, name: c.name })) as Other[],
+          than: "the average competitor",
+          thanDo: "the average competitor's do",
+          columns: { you: "You", rival: AVG_COMP, rivalIsUsual: true as const },
+          youName: "You",
+          otherName: AVG_COMP,
+          otherExtra: {},
+        }
+      : usual
+      ? (() => {
+          const uF = funnelOf(usual.rows, h.targetKey, h);
+          return {
+            others: [{ f: uF, n: usual.rows.length, key: h.targetKey, name: h.brand }] as Other[],
+            than: usual.phrase,
+            thanDo: `they do ${usual.phrase}`,
+            columns: { you: "Here", rival: usual.column, rivalIsUsual: true as const },
+            youName: "Here",
+            otherName: usual.column,
+            otherExtra: { you: true as const, usual: true as const },
+          };
+        })()
+      : null;
+    if (side) {
+      const oNamed: KN = { k: sumOf(side.others.map((o) => o.f.named.length)), n: sumOf(side.others.map((o) => o.n)) };
+      const oRec: KN = { k: sumOf(side.others.map((o) => o.f.rec.length)), n: sumOf(side.others.map((o) => o.n)) };
+      const oRecN = sumOf(side.others.map((o) => o.f.rec.length));
+      const oConv: KN = { k: sumOf(side.others.map((o) => o.f.picked.length)), n: oRecN };
+      const nm = step("named");
+      if (nm?.here) {
+        const dir = dirOf(youNamed, oNamed);
+        const r = namedRowsOf(side.others);
+        details.named = {
+          heading: leftOut(dir < 0),
+          body: namedLine(dir, side.than),
+          ...(r ? { columns: side.columns, rows: r } : {}),
+        };
+      }
+      const rc = step("recommended");
+      if (rc?.here && p.kind !== "learning") {
+        const dir = dirOf(youRec, oRec);
+        const list = takersList();
+        details.recommended = {
+          heading: dir < 0 ? `You are recommended less often here than ${side.than}` : dir > 0 ? `You are recommended more often here than ${side.than}` : `You are recommended about as often here as ${side.than}`,
+          body: recommendedLine(dir, side.than),
+          ...(list ? { list } : {}),
+        };
+      }
+      const cv = step("converts");
+      if (cv?.here && youF.rec.length >= DETAIL_MIN) {
+        const dir = oRecN >= DETAIL_MIN ? dirOf(youConv, oConv) : 0;
+        const outcomes = [
+          outcomeMulti([{ rec: youF.rec, key: h.targetKey, name: h.brand }], side.youName, { you: true }),
+          ...(oRecN >= DETAIL_MIN ? [outcomeMulti(side.others.map((o) => ({ rec: o.f.rec, key: o.key, name: o.name })), side.otherName, side.otherExtra)] : []),
+        ];
+        details.converts = {
+          heading: dir < 0 ? "Fewer of your recommendations end as the pick here" : dir > 0 ? "More of your recommendations end as the pick here" : "Your recommendations end as the pick about as often here",
+          body: convertsLine(dir, side.thanDo),
+          ...(outcomes.length > 1 ? { outcomes, outcomeLabels } : {}),
+        };
+      }
     }
   }
 
   /* -------- comparison view: you against the competitors -------- */
   const detailsComp: Partial<Record<PanelStepKey, PanelStepDetail>> = {};
-  const names = p.competitorOrder ?? [];
   if (p.compare && names.length) {
-    const comps = names.map((name) => {
-      const key = h.resolve(name).key ?? name;
-      return { name, key, f: funnelOf(rows, key, h) };
-    });
     const nm = step("named");
     if (nm?.here && nm.rivals?.length) {
       const lead = [...nm.rivals].sort((a, b) => b.num.pct - a.num.pct)[0];
       const lc = comps.find((c) => c.name === lead.name)!;
       const ahead = lead.num.pct > nm.here.pct;
-      const r = namedRows(youF, all, h.targetKey, h.brand, lc.f, all, lc.key, lc.name);
+      const dir = dirOf(knOf(nm.here)!, knOf(lead.num)!);
+      const r = namedRowsOf([{ f: lc.f, n: all, key: lc.key, name: lc.name }]);
       detailsComp.named = {
-        heading: ahead && nm.tagRankTone !== "bad" ? `${lead.name} is named a little more often, but being left out is not mainly why you lose here` : leftOut(ahead),
-        body: ahead
-          ? join("The AI names you in ", N(nm.here), ` of these answers. ${lead.name} is named most, in `, N(lead.num), ".")
-          : join("The AI names you in ", N(nm.here), ` of these answers, more often than any competitor shown. ${lead.name} comes closest, in `, N(lead.num), "."),
+        heading: dir < 0 ? leftOut(true) : ahead ? `${lead.name} is named a little more often, but being left out is not mainly why you lose here` : leftOut(false),
+        body: namedLine(dir, lead.name),
         ...(r ? { columns: { you: "You", rival: lead.name }, rows: r } : {}),
       };
     }
@@ -2501,41 +2633,36 @@ function stepDetailsOf(inp: PanelCellInput, p: PositionPanel, u: PanelCellInput 
     if (rc?.here && rc.rivals?.length) {
       const lead = [...rc.rivals].sort((a, b) => b.num.pct - a.num.pct)[0];
       const ahead = lead.num.pct > rc.here.pct;
-      const outcomes = picks
-        ? [
-            ...(youF.rec.length >= DETAIL_MIN ? [outcomeOf(youF.rec, h.targetKey, "You", { you: true })] : []),
-            ...comps.filter((c) => c.f.rec.length >= DETAIL_MIN).map((c) => outcomeOf(c.f.rec, c.key, c.name, {})),
-          ]
-        : [];
+      const dir = dirOf(knOf(rc.here)!, knOf(lead.num)!);
+      const list = takersList();
       detailsComp.recommended = {
-        heading: ahead ? `${lead.name} is recommended more often than you here` : "You are recommended more often than any competitor shown",
-        body: join(
-          "The AI recommends you in ",
-          N(rc.here),
-          " of these answers",
-          ahead ? join(`. ${lead.name} is recommended most, in `, N(lead.num), ".") : join(`. ${lead.name} comes closest, in `, N(lead.num), "."),
-          picks ? takers(youF.rec) : null
-        ),
-        ...(outcomes.length > 1 ? { outcomes, outcomeLabels } : {}),
+        heading: dir < 0 ? `${lead.name} is recommended more often than you here` : dir > 0 && !ahead ? "You are recommended more often than any competitor shown" : `You and ${lead.name} are recommended about as often here`,
+        body: recommendedLine(dir, lead.name),
+        ...(list ? { list } : {}),
       };
     }
     const cv = step("converts");
     if (cv?.here && cv.rivals?.length && youF.rec.length >= DETAIL_MIN) {
       const ok = cv.rivals.filter((x) => (knOf(x.num)?.n ?? 0) >= DETAIL_MIN);
       const best = [...ok].sort((a, b) => b.num.pct - a.num.pct)[0];
-      const ahead = !!best && best.num.pct > cv.here.pct;
-      detailsComp.converts = {
-        heading: ahead ? `${best.name} turns more of its recommendations into the pick` : "You turn more of your recommendations into the pick than any competitor shown",
-        body: join(
-          "Of the answers that recommend you, ",
-          N(cv.here),
-          " end with you as the pick",
-          best ? join(`. ${best.name} turns `, N(best.num), " of its recommendations into the pick.") : ".",
-          takers(youF.rec)
-        ),
-      };
+      if (best) {
+        const ahead = best.num.pct > cv.here.pct;
+        const dir = dirOf(knOf(cv.here)!, knOf(best.num)!);
+        const recOk = comps.filter((c) => c.f.rec.length >= DETAIL_MIN).sort((a, b) => rate({ k: b.f.picked.length, n: b.f.rec.length }) - rate({ k: a.f.picked.length, n: a.f.rec.length }) || a.name.localeCompare(b.name));
+        const outcomes = [
+          outcomeMulti([{ rec: youF.rec, key: h.targetKey, name: h.brand }], "You", { you: true }),
+          ...recOk.map((c) => outcomeMulti([{ rec: c.f.rec, key: c.key, name: c.name }], c.name, {})),
+        ];
+        detailsComp.converts = {
+          heading: dir < 0 ? `${best.name} turns more of its recommendations into the pick` : dir > 0 && !ahead ? "You turn more of your recommendations into the pick than any competitor shown" : `You and ${best.name} turn about as many recommendations into the pick`,
+          body: convertsLine(dir, `${best.name}'s do`),
+          ...(outcomes.length > 1 ? { outcomes, outcomeLabels } : {}),
+        };
+      }
     }
   }
+  // The all-rivals head-to-head explains its steps the same way with each rival shown.
+  if (p.kind === "h2h" && p.compare) Object.assign(detailsComp, details);
   if (Object.keys(details).length) p.details = details;
   if (Object.keys(detailsComp).length) p.detailsComp = detailsComp;
 }

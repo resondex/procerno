@@ -482,6 +482,8 @@ export interface PanelStep {
   /** The "you" bar's label in the comparison view when the step is not about you alone ("Any credit card"). */
   compHereLabel?: string;
   rivals?: { name: string; num: PanelNum }[]; // comparison-view bars, in PositionPanel.competitorOrder
+  /** am35, head-to-heads: the rival (or the rivals taken together on the all-rivals cell) drawn beside you in the default view. */
+  vs?: { name: string; num: PanelNum };
 }
 
 export interface PanelDetail { heading: string; body: PanelText }
@@ -531,9 +533,10 @@ export interface RivalStepDetail {
   heading: string;
   body: PanelText;
   rows?: { label: string; rival: PanelNum; you: PanelNum }[]; // named: named-not-recommended, of those named to avoid
-  outcomes?: { name: string; you?: true; picked: PanelNum; lost: PanelNum; none: PanelNum }[]; // what happens to its recommendations
+  /** am35: what happens to recommendations that do NOT end as the pick (the step bars show the pick itself, so `picked` is not carried). */
+  outcomes?: { name: string; you?: true; picked?: PanelNum; lost: PanelNum; none: PanelNum }[];
   both?: PanelText;  // "recommends both of you in X% ... picks R Y% and you Z%"
-  outcomeLabels?: { picked: string; lost: string; none: string }; // the outcome line's words
+  outcomeLabels?: { picked?: string; lost: string; none: string }; // the outcome line's words (a column per label present)
 }
 
 /** am34: what explains one step of a question-type panel (the step a reader
@@ -545,8 +548,11 @@ export interface PanelStepDetail {
   body: PanelText;
   columns?: { rival: string; you: string; rivalIsUsual?: true };
   rows?: { label: string; rival: PanelNum; you: PanelNum }[];
-  outcomes?: { name: string; you?: true; usual?: true; picked: PanelNum; lost: PanelNum; none: PanelNum }[];
-  outcomeLabels?: { picked: string; lost: string; none: string };
+  /** am35: one new fact as rows of one number each (who takes the pick when the AI recommends you and picks another; what happens when it picks neither of the two). */
+  list?: { title: string; rows: { label: string; num: PanelNum }[] };
+  /** am35: the outcomes the step bars do not show (lose to another, no single pick); `picked` is not carried. */
+  outcomes?: { name: string; you?: true; usual?: true; picked?: PanelNum; lost: PanelNum; none: PanelNum }[];
+  outcomeLabels?: { picked?: string; lost: string; none: string };
   both?: PanelText;
 }
 
@@ -585,6 +591,8 @@ export interface PositionPanel {
   /** am34: per-step explanations, comparison view; `detailComp` stays the default. */
   detailsComp?: Partial<Record<PanelStepKey, PanelStepDetail>>;
   compare?: true;               // the "Show competitors" switch is drawn
+  /** am35: a panel with no usual: its steps' `usual` is the listed competitors taken together ("Average competitor"), shown with the switch off. */
+  avgComp?: true;
   competitorOrder?: string[];    // brand names behind PanelStep.rivals
   competitors?: PanelBlock;      // "Who takes the picks" / "Which ... it names instead" / "... it shows" (comparison view only)
   conditions?: PanelConditions;

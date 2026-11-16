@@ -410,7 +410,7 @@ function Overview({
                 <>
                   <span className="truncate">{s.brand}</span>
                   <span className="h-2.5 overflow-hidden rounded-[5px] bg-line/60">
-                    <i className={`block h-full rounded-[5px] ${s.you ? "bg-[var(--pa-yours)]" : "bg-[var(--pa-usual)]"}`} style={{ width: `${(100 * shareX(s.share)) / max}%` }} />
+                    <i className={`block h-full rounded-[5px] ${s.you ? "bg-[var(--pa-yours)]" : s.brand === "Others" ? "bg-[var(--pa-usual)]" : "bg-[var(--pa-theirs)]"}`} style={{ width: `${(100 * shareX(s.share)) / max}%` }} />
                   </span>
                 </>
               );
@@ -1096,9 +1096,16 @@ function RivalCard({ d, ctx }: { d: Dossier; ctx: PanelCtx }) {
         <div className="text-[13px] text-ink-3">
           Head-to-head{d.h2h.asClass ? ` (as a kind of ${ctx.cat.singular})` : ""}: you <b className="font-semibold text-ink">{d.h2h.you}</b> - them{" "}
           <b className="font-semibold text-ink">{d.h2h.them}</b>
-          <span className="mt-1.5 flex h-2 overflow-hidden rounded bg-line/60" aria-hidden>
-            <i className="block h-full" style={{ width: d.h2h.you, background: "var(--pa-yours)" }} />
-            <i className="block h-full" style={{ width: d.h2h.them, background: "var(--pa-theirs)" }} />
+          {/* You and them as two plain bars, never one bar split in two. */}
+          <span className="mt-1.5 grid gap-1" aria-hidden>
+            {([["You", d.h2h.you, "var(--pa-yours)"], [d.name, d.h2h.them, "var(--pa-theirs)"]] as const).map(([l, v, c]) => (
+              <span key={l} className="grid grid-cols-[minmax(0,5.5rem)_minmax(0,1fr)] items-center gap-2">
+                <span className="truncate">{l}</span>
+                <span className="h-2 overflow-hidden rounded bg-line/60">
+                  <i className="block h-full rounded" style={{ width: v, background: c }} />
+                </span>
+              </span>
+            ))}
           </span>
         </div>
       ) : (

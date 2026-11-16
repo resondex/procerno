@@ -1322,7 +1322,7 @@ function LegacyResults({
                 “{v.promptText}”
                 <span
                   className={`ml-2 font-semibold ${
-                    v.mentionsTarget ? "text-success" : "text-danger"
+                    v.mentionsTarget ? "text-[color:var(--pa-yours-ink)]" : "text-danger"
                   }`}
                 >
                   {v.mentionsTarget ? "names you" : "you're absent"}
@@ -1365,7 +1365,7 @@ function StatTile({
 
 function Badge({ badge }: { badge: "win" | "contested" | "absent" }) {
   const styles = {
-    win: "bg-success/12 text-success",
+    win: "bg-[var(--pa-good-bg)] text-[color:var(--pa-good-ink)]",
     contested: "bg-warning/15 text-warning",
     absent: "bg-danger/10 text-danger",
   } as const;

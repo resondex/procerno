@@ -39,7 +39,10 @@ export const C_USUAL = "var(--pa-usual)";
 export const C_NONE = "var(--pa-none)";
 const toneColor = (t: PanelSegment["tone"]) => (t === "you" ? C_YOU : t === "away" ? C_AWAY : C_USUAL);
 
-export const CLICK_HINT = "Click any row or number to read the answers behind it.";
+/** The steps at the top of a panel never open answers; everything below them does. */
+export const CLICK_HINT = "Below the steps, click any row or number to read the answers behind it.";
+/** The hint on panels whose step cards select their explanation: the step bars open no answers there. */
+export const STEP_HINT = "Click a step to see what explains it. Below it, click any row or number to read the answers behind it.";
 
 // ---------- the "Show competitors" switch: one state per slide-over host, kept for the session ----------
 
@@ -106,13 +109,13 @@ export function useOpener() {
 const linkish = "cursor-pointer underline decoration-dotted underline-offset-[3px] hover:decoration-solid hover:text-ink";
 
 /** A sentence from the engine: spans with answers behind them are buttons. */
-export function TextView({ text, className, title }: { text: PanelText | undefined; className?: string; title?: string }) {
+export function TextView({ text, className, title, plain }: { text: PanelText | undefined; className?: string; title?: string; plain?: boolean }) {
   const opener = useOpener();
   if (!text || text.length === 0) return null;
   return (
     <span className={className}>
       {text.map((s, i) => {
-        const go = opener(s.refs, title ?? s.t);
+        const go = plain ? null : opener(s.refs, title ?? s.t);
         return go ? (
           <button key={i} type="button" onClick={go} title={s.tip} className={`inline p-0 text-left ${linkish}`}>
             {s.t}
@@ -147,11 +150,13 @@ const isSpan = (c: PanelNum | PanelSpan): c is PanelSpan => "t" in c;
 // ---------- bars ----------
 
 const barGrid = "grid grid-cols-[minmax(0,7.5rem)_minmax(0,1fr)_2.75rem] items-center gap-2 sm:grid-cols-[minmax(0,9.5rem)_minmax(0,1fr)_2.75rem]";
+/** The same row with a small figure after the number (a usual, on verdict rows). */
+const barGridAside = "grid grid-cols-[minmax(0,7.5rem)_minmax(0,1fr)_2.75rem_4.25rem] items-center gap-2 sm:grid-cols-[minmax(0,9.5rem)_minmax(0,1fr)_2.75rem_4.75rem]";
 
-/** One labelled bar; the whole row opens its answers. */
-export function NumBar({ label, n, color, bold, dim, title }: { label: string; n: PanelNum; color: string; bold?: boolean; dim?: boolean; title?: string }) {
+/** One labelled bar; the whole row opens its answers (`plain`: inside a step card that is itself a button - the tip stays, nothing opens). */
+export function NumBar({ label, n, color, bold, dim, title, plain, aside }: { label: string; n: PanelNum; color: string; bold?: boolean; dim?: boolean; title?: string; plain?: boolean; aside?: ReactNode }) {
   const opener = useOpener();
-  const go = opener(n.refs, title ?? label);
+  const go = plain ? null : opener(n.refs, title ?? label);
   const inner = (
     <>
       <span className={`min-w-0 ${bold ? "font-semibold text-ink" : "text-ink-2"}`}>{label}</span>
@@ -159,54 +164,56 @@ export function NumBar({ label, n, color, bold, dim, title }: { label: string; n
         <i className={`block h-full rounded ${dim ? "opacity-40" : ""}`} style={{ width: `${Math.max(n.pct > 0 ? 1 : 0, Math.min(100, n.pct))}%`, background: color }} />
       </span>
       <b className="text-right font-semibold tabular-nums text-ink">{n.value}</b>
+      {aside && <span className="text-right">{aside}</span>}
     </>
   );
-  const cls = `${barGrid} ${T.cap} w-full rounded py-[3px] text-left`;
+  const cls = `${aside ? barGridAside : barGrid} ${T.cap} w-full rounded py-[3px] text-left`;
   return go ? (
     <button type="button" onClick={go} title={n.tip} className={`${cls} hover:bg-line/30 [&:hover_b]:underline`}>
       {inner}
     </button>
   ) : (
-    <div className={cls} title={n.tip}>
+    <span className={cls} title={n.tip}>
       {inner}
-    </div>
+    </span>
   );
 }
 
-/** A split bar (go ahead / steer clear / no side ...) with its clickable legend. */
-export function SegBar({ segs, prefix, title }: { segs: PanelSegment[]; prefix?: string; title?: string }) {
-  const opener = useOpener();
+/** A verdict step (go ahead / steer clear / no side ...): one plain bar per
+ * outcome, never one bar split into parts. The outcomes that take a side come
+ * first (in the engine's order) and the first is drawn strongest; "no side"
+ * rows are grey and last. A usual, when compared, is a small figure on the
+ * same row. In the step stack these never open answers (the block below does). */
+export function SegRows({ segs, usual, usualLabel, dim }: { segs: PanelSegment[]; usual?: PanelSegment[]; usualLabel?: string; dim?: boolean }) {
+  const ordered = [...segs.filter((x) => x.tone !== "neutral"), ...segs.filter((x) => x.tone === "neutral")];
   return (
-    <div className="mt-1">
-      <span className="flex h-2.5 overflow-hidden rounded-[5px] bg-line/60" aria-hidden>
-        {segs.map((s) => (
-          <i key={s.key} className="block h-full" style={{ width: `${Math.min(100, s.num.pct)}%`, background: s.tone === "neutral" ? C_NONE : toneColor(s.tone) }} />
-        ))}
-      </span>
-      <span className={`mt-1 flex flex-wrap gap-x-3 gap-y-0.5 ${T.cap} text-ink-2`}>
-        {prefix && <span className="text-ink-3">{prefix}:</span>}
-        {segs.map((s) => {
-          const go = opener(s.num.refs, `${title ? `${title}: ` : ""}${s.label}`);
-          const body = (
-            <>
-              <span className="mr-1 inline-block h-2 w-2 rounded-full align-[1px]" style={{ background: s.tone === "neutral" ? C_NONE : toneColor(s.tone) }} />
-              {s.label} <b className="font-semibold tabular-nums text-ink">{s.num.value}</b>
-            </>
-          );
-          return go ? (
-            <button key={s.key} type="button" onClick={go} title={s.num.tip} className={`text-left ${linkish}`}>
-              {body}
-            </button>
-          ) : (
-            <span key={s.key} title={s.num.tip}>
-              {body}
-            </span>
-          );
-        })}
-      </span>
-    </div>
+    <span className="mt-0.5 block">
+      {ordered.map((x, i) => {
+        const u = usual?.find((y) => y.key === x.key);
+        return (
+          <NumBar
+            key={x.key}
+            label={cap(x.label)}
+            n={x.num}
+            color={x.tone === "neutral" ? C_USUAL : toneColor(x.tone)}
+            bold={i === 0 && x.tone !== "neutral" ? true : undefined}
+            dim={dim}
+            plain
+            aside={
+              u ? (
+                <span className="text-ink-3 tabular-nums" title={`${usualLabel ?? "Usual"}: ${u.num.tip}`}>
+                  usual {u.num.value}
+                </span>
+              ) : undefined
+            }
+          />
+        );
+      })}
+    </span>
   );
 }
+
+const cap = (t: string) => (t ? t[0].toUpperCase() + t.slice(1) : t);
 
 // ---------- tags ----------
 
@@ -240,6 +247,7 @@ export function StepCard({
   rivalLabel,
   onSelect,
   rivalFirst,
+  plain: plainProp,
 }: {
   step: PanelStep;
   usual?: PanelStep;
@@ -251,10 +259,14 @@ export function StepCard({
   usualLabel: string;
   /** Panel 11: the rival's own name beside "You". */
   rivalLabel?: string;
-  /** Panel 11: a step card that selects its explanation. */
+  /** A step card that selects its explanation: the whole card is one button. */
   onSelect?: () => void;
   rivalFirst?: boolean;
+  /** The bars open no answers (a stack whose cards select their explanation). Default: when the card selects. */
+  plain?: boolean;
 }) {
+  // The step stack never opens answers (the blocks below it do): a selectable card selects, a plain one is text.
+  const plain = plainProp ?? true;
   const ranked = comp || !!rivalLabel;
   const tag = ranked ? step.tagRank : step.tagUsual;
   const tone = ranked ? step.tagRankTone : step.tagUsualTone;
@@ -266,33 +278,36 @@ export function StepCard({
   if (step.here) {
     // A step not about you alone (any brand) keeps its own bar label beside the competitors.
     const youL = comp && step.compHereLabel && !step.rivals?.length ? step.compHereLabel : comp || rivalLabel ? "You" : hereL;
-    const you = <NumBar key="you" label={youL} n={step.here} color={C_YOU} bold={comp || !!rivalLabel} dim={dim} title={`${step.label} - ${youL}`} />;
+    const you = <NumBar key="you" label={youL} n={step.here} color={C_YOU} bold={comp || !!rivalLabel} dim={dim} title={`${step.label} - ${youL}`} plain={plain} />;
     const rivals = (comp || rivalLabel ? step.rivals ?? [] : []).map((r) => (
-      <NumBar key={`r:${r.name}`} label={r.name} n={r.num} color={C_AWAY} dim={dim} title={`${step.label} - ${r.name}`} />
+      <NumBar key={`r:${r.name}`} label={r.name} n={r.num} color={C_AWAY} dim={dim} title={`${step.label} - ${r.name}`} plain={plain} />
     ));
+    // Head-to-heads: the rival beside you in the default view (no sum to work out).
+    const vs = !comp && !rivalLabel && step.vs ? <NumBar key="vs" label={step.vs.name} n={step.vs.num} color={C_AWAY} dim={dim} title={`${step.label} - ${step.vs.name}`} plain={plain} /> : null;
     if (rivalFirst) body.push(...rivals, you);
     else body.push(you, ...rivals);
-    const u = usual?.here ?? step.usual;
-    if (!comp && !rivalLabel && u) body.push(<NumBar key="usual" label={usualL} n={u} color={C_USUAL} dim={dim} title={`${step.label} - ${usualL}`} />);
+    if (vs) body.push(vs);
+    // The step's own comparison (the average competitor) before a usual from the row's All cell.
+    const u = step.usual ?? usual?.here;
+    if (!comp && !rivalLabel && !vs && u) body.push(<NumBar key="usual" label={usualL} n={u} color={C_USUAL} dim={dim} title={`${step.label} - ${usualL}`} plain={plain} />);
   }
   if (step.segments && step.segments.length > 0) {
     const showUsual = !comp && !rivalLabel && !!usual?.segments?.length;
-    body.push(<SegBar key="seg" segs={step.segments} prefix={showUsual ? hereLabel : undefined} title={step.label} />);
-    if (showUsual) body.push(<SegBar key="useg" segs={usual!.segments!} prefix={usualLabel} title={`${step.label} - ${usualLabel}`} />);
+    body.push(<SegRows key="seg" segs={step.segments} usual={showUsual ? usual!.segments : undefined} usualLabel={usualLabel} dim={dim} />);
   }
   if (step.items && step.items.length > 0)
     body.push(
-      <div key="items">
+      <span key="items" className="block">
         {step.items.map((it) => (
-          <NumBar key={it.label} label={it.label} n={it.num} color={C_USUAL} dim={dim} />
+          <NumBar key={it.label} label={it.label} n={it.num} color={C_USUAL} dim={dim} plain={plain} />
         ))}
-      </div>
+      </span>
     );
   if (step.note && step.note.length > 0)
     body.push(
-      <p key="note" className={`${T.body} text-ink-2`}>
-        <TextView text={step.note} />
-      </p>
+      <span key="note" className={`block ${T.body} text-ink-2`}>
+        <TextView text={step.note} plain={plain} />
+      </span>
     );
   const cls = `block w-full rounded-[10px] border bg-surface px-3 pb-3 pt-2.5 text-left ${focus ? "border-ink ring-1 ring-ink" : "border-line"}`;
   const head = (
@@ -301,14 +316,13 @@ export function StepCard({
       <Tag text={tag} tone={tone} />
     </span>
   );
+  // A selectable card is one button: its header, bars and numbers all select it.
   if (onSelect)
     return (
-      <div className={cls}>
-        <button type="button" onClick={onSelect} aria-pressed={focus} className="block w-full text-left">
-          {head}
-        </button>
+      <button type="button" onClick={onSelect} aria-pressed={focus} className={`${cls} cursor-pointer hover:border-ink-3`}>
+        {head}
         {body}
-      </div>
+      </button>
     );
   return (
     <div className={cls}>
@@ -372,6 +386,7 @@ export function StepStack({
             hereLabel={hereLabel}
             usualLabel={usualLabel}
             onSelect={onSelect && (!canSelect || canSelect(s.key)) ? () => onSelect(s.key) : undefined}
+            plain={!!onSelect}
           />
         ))}
       </div>

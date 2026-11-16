@@ -144,6 +144,20 @@ const categoryWords = new Map<string, string[]>(); // brand -> its category's wo
 for (const pr of projects) categoryWords.set(pr.brand, (pr.category as string).toLowerCase().match(/[a-z]{4,}/g) ?? []);
 const PANEL_BANNED: [string, RegExp][] = [...BANNED, ["contest", /\bcontests?\b/i], ["cell", /\bcells?\b/i], ["pooled", /\bpooled\b/i], ["long dash", /[—–]/]];
 
+/* am35 F: no stacked bars. The panels' payload keeps its segments (each a
+ * share of its own); the check is on the UI: no panel or dashboard renderer
+ * draws one bar split into parts (several widths side by side in one track). */
+{
+  const dir = process.cwd() + "/src/app/projects/[id]/";
+  for (const f of ["panel_parts.tsx", "panels_v2.tsx", "analysis_panel.tsx", "analysis_views.tsx", "company_board.tsx"]) {
+    const src = fsMod.readFileSync(dir + f, "utf8");
+    // A stacked bar = a flex track whose children are several sized <i> segments.
+    const re = /className="[^"]*\bflex\b[^"]*overflow-hidden[^"]*"[^>]*>\s*(?:\{[^}]*\.map\([^)]*\)\s*=>\s*\(?\s*)?<i[^>]*width[^>]*\/>\s*(?:<i[^>]*width|\)\)\})/g;
+    const hits = src.match(re) ?? [];
+    for (const hit of hits) failures.push(`${f}: a stacked bar is still drawn: ${hit.slice(0, 120)}`);
+  }
+}
+
 for (const project of projects) {
   const runs = await store.listRuns(project.id);
   const run = runs[0];
@@ -338,6 +352,8 @@ for (const project of projects) {
     const isNum = (v: unknown): v is PanelNum => !!v && typeof v === "object" && "value" in (v as object) && "pct" in (v as object) && "tip" in (v as object);
     let panels = 0, nums = 0, refCount = 0, labelFallbacks = 0;
     let detailCount = 0;
+    let avgCount = 0;
+    let repeatChecks = 0;
     const SEG_FIELD: Record<string, [string, (v: unknown) => boolean]> = {
       proceed: ["proceed_or_avoid", (v) => v === "proceed"], avoid: ["proceed_or_avoid", (v) => v === "avoid"],
       keep: ["keep_or_leave", (v) => v === "keep"], leave: ["keep_or_leave", (v) => v === "leave"],
@@ -406,8 +422,17 @@ for (const project of projects) {
           }
         };
         check(s.here, targetKey, youName);
-        if (s.usual) check(s.usual, targetKey, youName);
+        if (s.usual && s.usualLabel === "Average competitor") {
+          // am35: the listed competitors added up - each example answer shows the fact for one of them.
+          const keys = (p.competitorOrder ?? []).map(keyOfName);
+          for (const r of s.usual.refs ?? []) {
+            const c = codeOf.get(r.responseId) as Code | undefined;
+            const ok = !!c && keys.some((k) => (s.key === "named" ? names(c, k) : s.key === "recommended" ? recs(c, k) : s.key === "converts" ? picks(c, k) : true));
+            if (!ok) failures.push(`${project.brand}: ${at} step ${s.key} average competitor answer ${r.responseId.slice(0, 8)} shows no competitor`);
+          }
+        } else if (s.usual) check(s.usual, targetKey, youName);
         for (const x of s.rivals ?? []) check(x.num, keyOfName(x.name), x.name);
+        if (s.vs) check(s.vs.num, keyOfName(s.vs.name), s.vs.name);
         for (const g of s.segments ?? []) {
           const f = SEG_FIELD[g.key];
           if (!f) continue;
@@ -466,6 +491,36 @@ for (const project of projects) {
           if (d.rows?.length && !d.columns) failures.push(`${project.brand}: ${id} ${view}.${k} rows have no column names`);
         }
       }
+      // 6d. am35: a panel with no usual sets you against the average competitor - every `here` step
+      // with competitors carries it, with its example answers.
+      // (am35 D: every panel whose steps carry competitor numbers, not only the no-usual ones; head-to-heads excepted.)
+      if (p.kind !== "h2h" && p.compare && (p.competitorOrder ?? []).length && p.steps.some((s) => !!s.here && !!s.rivals?.length)) {
+        if (!p.avgComp) failures.push(`${project.brand}: ${id} no usual, competitors listed, but no average competitor`);
+        for (const s of p.steps) {
+          if (!s.here || !s.rivals?.length) continue;
+          avgCount++;
+          if (!s.usual || s.usualLabel !== "Average competitor") failures.push(`${project.brand}: ${id} step ${s.key} has no average competitor`);
+          else if (s.usual.pct > 0 && !(s.usual.refs ?? []).length) failures.push(`${project.brand}: ${id} step ${s.key} average competitor opens no answers`);
+          if (s.tagUsual && /your usual/i.test(s.tagUsual)) failures.push(`${project.brand}: ${id} step ${s.key} still carries a your-usual tag "${s.tagUsual}"`);
+        }
+        if (p.usualKey !== "Average competitor" || p.hereKey !== "You") failures.push(`${project.brand}: ${id} average-competitor key line reads "${p.hereKey}" / "${p.usualKey}"`);
+      }
+      // 6d'. am35 E: a head-to-head's "who it picks" step carries the rival beside you.
+      if (p.kind === "h2h") for (const s of p.steps) if (s.key === "won" && !s.vs) failures.push(`${project.brand}: ${id} who-it-picks step has no rival beside you`);
+      // 6e. am35: an explanation never repeats a number the step bars of its view already draw.
+      const valuesOf = (ns: (PanelNum | undefined)[]) => new Set(ns.filter((n): n is PanelNum => !!n).map((n) => n.value));
+      const usualCellSteps = p.usualCellId ? ((view.positions as Record<string, Position>)[p.usualCellId]?.panel?.steps ?? []) : [];
+      const barsNormal = valuesOf(p.steps.flatMap((s) => [s.here, s.usual, s.vs?.num, usualCellSteps.find((u) => u.key === s.key)?.here]));
+      const barsComp = valuesOf(p.steps.flatMap((s) => [s.here, ...(s.rivals ?? []).map((r) => r.num)]));
+      const repeats = (body: { t: string }[], bars: Set<string>, at: string) => {
+        for (const sp of body) for (const m of sp.t.match(/<?\d+%/g) ?? []) if (bars.has(m)) failures.push(`${project.brand}: ${at} repeats the bar number ${m} in "${body.map((x) => x.t).join("").slice(0, 120)}"`);
+      };
+      for (const [k, d] of Object.entries(p.details ?? {})) if (d) { repeatChecks++; repeats(d.body, barsNormal, `${id} details.${k}`); }
+      for (const [k, d] of Object.entries(p.detailsComp ?? {})) if (d) { repeatChecks++; repeats(d.body, barsComp, `${id} detailsComp.${k}`); }
+      for (const rv of p.rivals ?? []) {
+        const bars = valuesOf(rv.steps.flatMap((s) => [s.here, ...(s.rivals ?? []).map((r) => r.num)]));
+        for (const [k, d] of Object.entries(rv.details ?? {})) if (d) { repeatChecks++; repeats(d.body, bars, `${id} rival ${rv.name} details.${k}`); }
+      }
       // 7. kinds without conditions.
       if ((p.kind === "buyer_worry" || p.kind === "customer_worry" || p.kind === "value" || p.kind === "business_case") && p.conditions) failures.push(`${project.brand}: ${id} ${p.kind} carries conditions`);
       if ((p.kind === "learning" || p.kind === "critic") && p.conditions) failures.push(`${project.brand}: ${id} ${p.kind} carries conditions`);
@@ -489,6 +544,8 @@ for (const project of projects) {
       for (const s of p.steps) for (const it of s.items ?? []) addP(it.label);
       for (const s of p.steps) for (const it of s.items ?? []) addP(it.label);
       for (const rv of p.rivals ?? []) addP(rv.name);
+      for (const d of [...Object.values(p.details ?? {}), ...Object.values(p.detailsComp ?? {})]) for (const r of d?.list?.rows ?? []) addP(r.label);
+      for (const n of p.competitorOrder ?? []) addP(n);
       const strip = (t: string) => {
         let x = t.replace(/"[^"]*"/g, '""');
         for (const d of [...panelPhrases].sort((a, b) => b.length - a.length)) if (x.toLowerCase().includes(d.toLowerCase())) x = x.split(new RegExp(d.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "gi")).join(" ");
@@ -604,8 +661,9 @@ for (const project of projects) {
     // 9. ruling 5 omissions.
     for (const o of (debug as { panelOmissions?: { cellId: string; list: string; code: string; share: number; hit: string; via: string }[] }).panelOmissions ?? [])
       omissionLines.push(`${project.brand.padEnd(17)} | ${o.cellId.padEnd(44)} | ${o.list.padEnd(9)} | ${o.code.padEnd(28)} | ${(Math.round(o.share * 1000) / 10).toFixed(1).padStart(5)}% | ${o.hit.padEnd(16)} | ${o.via}`);
-    console.log(`PANELS: ${panels} panels, ${nums} numbers, ${refCount} example answers checked, ${labelFallbacks} quoted-seed claims, ${detailCount} step details`);
+    console.log(`PANELS: ${panels} panels, ${nums} numbers, ${refCount} example answers checked, ${labelFallbacks} quoted-seed claims, ${detailCount} step details, ${avgCount} average-competitor steps, ${repeatChecks} explanations checked for repeated bar numbers`);
     if (detailCount === 0) failures.push(`${project.brand}: no panel carries step details`);
+    if (avgCount === 0) failures.push(`${project.brand}: no panel carries an average competitor`);
     // The mockup numbers (American Express).
     if (project.brand === "American Express") {
       const P = (id: string) => (view.positions as Record<string, Position>)[id]?.panel as PositionPanel | undefined;

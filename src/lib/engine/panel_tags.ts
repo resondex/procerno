@@ -37,13 +37,28 @@ export function usualTag(here: KN, usual: KN): string {
   return q > 0 && p / q >= 1.6 ? "Well above your usual" : "Above your usual";
 }
 
+/** am35, a panel with no usual (switch off): you against the listed
+ * competitors taken together, same thresholds as usualTag. */
+export const AVG_COMP = "Average competitor";
+export function avgTag(here: KN, avg: KN): string {
+  const p = rateOf(here);
+  const q = rateOf(avg);
+  if (p === 0 && q === 0) return "About the average competitor";
+  if (p === 0 && q > 0) return "Well below the average competitor";
+  const r = range(here);
+  if (q >= r.low && q <= r.high) return "About the average competitor";
+  if (p < q) return q > 0 && p / q <= 0.6 ? "Well below the average competitor" : "Below the average competitor";
+  return q > 0 && p / q >= 1.6 ? "Well above the average competitor" : "Above the average competitor";
+}
+
 /** A segmented step: the compared segment, spoken with its noun ("go-aheads",
  * "leave", "worth-it answers", "to rivals"). */
 export function segTag(here: KN, usual: KN, noun: string): string {
   const p = rateOf(here);
   const q = rateOf(usual);
-  if (p === 0 && q === 0) return "None, as usual";
-  if (p === 0 && q > 0) return "None here";
+  // am35: a verdict step names what is missing ("No worth-it answers here"), never a bare "None".
+  if (p === 0 && q === 0) return `No ${noun}, as usual`;
+  if (p === 0 && q > 0) return `No ${noun} here`;
   const r = range(here);
   if (q >= r.low && q <= r.high) return "About your usual";
   if (p < q) return q > 0 && p / q <= 0.6 ? `Far fewer ${noun} than usual` : `Fewer ${noun} than usual`;
@@ -141,11 +156,13 @@ export function rankTone(tag: string): PanelTone {
 export function toneOfTag(t: string): PanelTone {
   if (t === TAG_GAP_OPENS) return "bad";
   if (/^You lead /.test(t)) return "good";
-  if (t === "Even" || t === "Same for every brand" || /^About (your|the) usual$/.test(t) || /^None, as usual$/.test(t) || /decided than usual$/.test(t)) return "neutral";
+  if (t === "Even" || t === "Same for every brand" || /^About (your|the) usual$/.test(t) || /^None, as usual$/.test(t) || t === "About the average competitor" || /decided than usual$/.test(t)) return "neutral";
   if (/^(Joint )?(1st|2nd|3rd|\d+th|last) of \d+/i.test(t)) return rankTone(t);
-  if (/ leads$/.test(t)) return "bad";
+  if (/ leads$/.test(t) || t === "Your named rivals lead") return "bad";
   if (t === TAG_FURTHEST || /below your usual$/i.test(t) || t === "None here") return "bad";
   if (/above your usual$/i.test(t)) return "good";
+  if (/below the average competitor$/i.test(t)) return "bad";
+  if (/above the average competitor$/i.test(t)) return "good";
   return "neutral";
 }
 
@@ -157,13 +174,18 @@ export const duelTone = (tag: string, rivalLeads: boolean): PanelTone =>
 export const TAG_ALLOW: RegExp[] = [
   /^None, as usual$/,
   /^None here$/,
+  /^No .+ here$/,
+  /^No .+, as usual$/,
   /^About your usual$/,
   /^(Well )?(below|above) your usual$/i,
   /^Furthest below your usual$/,
+  /^(Well )?(below|above) the average competitor$/i,
+  /^About the average competitor$/,
   /^(Far )?(fewer|more) .+ than usual$/i,
   /^(Joint )?(1st|2nd|3rd|\d+th|last) of \d+(, all close)?( · furthest behind)?$/i,
   /^Last of \d+(, all close)?( · furthest behind)?$/,
   /^.+ leads$/,
+  /^Your named rivals lead$/,
   /^You lead .+$/,
   /^Even$/,
   /^The gap opens here$/,

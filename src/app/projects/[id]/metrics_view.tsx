@@ -242,7 +242,7 @@ export function PivotTable({
         <span
           className="tabular-nums"
           title={tip}
-          style={{ color: d > 0 ? "var(--success)" : d < 0 ? "var(--danger)" : "var(--ink-3)", fontWeight: d === 0 ? 400 : 600 }}
+          style={{ color: d > 0 ? "var(--pa-good-ink)" : d < 0 ? "var(--pa-bad-ink)" : "var(--ink-3)", fontWeight: d === 0 ? 400 : 600 }}
         >
           {d > 0 ? `+${d}` : d}
         </span>

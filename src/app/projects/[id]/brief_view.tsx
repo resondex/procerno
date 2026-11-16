@@ -250,7 +250,12 @@ html.pb-printing .pb-fact{ border-bottom: 0 !important; color: inherit !importan
 // Grey-first with one accent; every number printed is the served string.
 
 const QUIET = "var(--ink-3)";
-const ACC = "var(--primary)";
+/** The memo's own brand: blue when it is you, pink when the memo is about a rival (the panels' palette). */
+const ACC = "var(--pb-acc, var(--primary))";
+/** The brands set against it: pink when the memo is yours, quiet grey on a rival's memo. */
+const OTHER = "var(--pb-other, var(--ink-3))";
+/** The pyramid's accent marks the complication, not a brand. */
+const PYR_ACC = "var(--primary)";
 
 /** Greedy word wrap at roughly `n` characters per line. */
 function wrap(t: string, n: number): string[] {
@@ -384,7 +389,7 @@ function ScatterViz({ v }: { v: BriefViz }) {
                 strokeWidth={0.8}
               />
             )}
-            <circle cx={p.x} cy={p.y} r={r} fill={it.accent ? ACC : QUIET} fillOpacity={it.accent ? 1 : it.unlabeled ? 0.4 : 0.6} />
+            <circle cx={p.x} cy={p.y} r={r} fill={it.accent ? ACC : OTHER} fillOpacity={it.accent ? 1 : it.unlabeled ? 0.4 : 0.6} />
             {!it.unlabeled && (
               <text
                 x={p.x + g.labelDx + (it.dx ?? 0)}
@@ -443,7 +448,7 @@ function PairsViz({ v }: { v: BriefViz }) {
             <text x={x0 + w(it.a) + 7} y={y + BAR - 3} fontSize={13} fontWeight={700} fill={ACC}>
               {it.value}
             </text>
-            <rect x={x0} y={y + BAR + INNER} width={w(it.b)} height={BAR} rx={2} fill={QUIET} fillOpacity={0.5} />
+            <rect x={x0} y={y + BAR + INNER} width={w(it.b)} height={BAR} rx={2} fill={OTHER} fillOpacity={0.55} />
             <text x={x0 + w(it.b) + 7} y={y + BAR * 2 + INNER - 3} fontSize={12.5} fill="var(--ink-2)">
               {it.who ? `${it.who} ${it.bValue ?? ""}` : it.bValue}
             </text>
@@ -476,8 +481,8 @@ function PyramidViz({ v }: { v: BriefViz }) {
         const fill = b.it.accent ? "color-mix(in srgb, var(--primary) 17%, var(--surface))" : "color-mix(in srgb, var(--ink) 5%, var(--surface))";
         return (
           <g key={i}>
-            <rect x={x} y={top} width={b.bw} height={b.h} rx={4} style={{ fill }} stroke={b.it.accent ? ACC : "var(--line)"} strokeOpacity={b.it.accent ? 0.45 : 1} />
-            <text x={W / 2} y={top + PAD + 13} textAnchor="middle" fontSize={13.5} fontWeight={700} fill={b.it.accent ? ACC : "var(--ink)"}>
+            <rect x={x} y={top} width={b.bw} height={b.h} rx={4} style={{ fill }} stroke={b.it.accent ? PYR_ACC : "var(--line)"} strokeOpacity={b.it.accent ? 0.45 : 1} />
+            <text x={W / 2} y={top + PAD + 13} textAnchor="middle" fontSize={13.5} fontWeight={700} fill={b.it.accent ? PYR_ACC : "var(--ink)"}>
               {b.it.label}
             </text>
             {b.lines.map((l, j) => (
@@ -504,7 +509,7 @@ function Viz({ v }: { v: BriefViz }) {
             {v.legend[0]}
           </span>
           <span>
-            <i style={{ background: QUIET, opacity: 0.5 }} />
+            <i style={{ background: OTHER, opacity: 0.55 }} />
             {v.legend[1]}
           </span>
         </div>
@@ -897,7 +902,10 @@ function Memo({
   const firstParas = memo.sections.findIndex((s) => !!s.paras);
   return (
     <CardContext.Provider value={{ cards, open, setOpen, onOpenCell, onOpenView }}>
-    <div className="pb-paper">
+    <div
+      className="pb-paper"
+      style={{ ["--pb-acc" as string]: subject === tracker ? "var(--pa-yours)" : "var(--pa-theirs)", ["--pb-other" as string]: subject === tracker ? "var(--pa-theirs)" : "var(--ink-3)" }}
+    >
       <article className="pb-memo">
         <header>
           <h2 className="pb-title">{head || subject}</h2>
