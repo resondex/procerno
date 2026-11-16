@@ -524,6 +524,14 @@ export function alongsideDetail(heading: string): { heading: string; body: Panel
   return { heading, body: join("The customer asked what to use alongside you, so another company's name in the answer is the question being answered, not the AI steering them away.") };
 }
 
+/** am45: the What to look for card's two terms, behind a "?". */
+export const CRITERIA_HELP = {
+  checklist: "The checklist is the five things the AI most often tells buyers to look at when they ask what to look for, without asking for a product.",
+  taught: "Taught means the topic is on that checklist. Seldom taught, or taught less often, means the AI raises it in the share of those answers shown, not often enough to make the checklist.",
+};
+/** How a topic off the checklist is described, by its share of the look-for answers (0-100). */
+export const offChecklist = (pct: number) => (pct <= 0 ? "never taught" : pct >= 30 ? "taught less often" : "seldom taught");
+
 export function criteriaDetail(gap: boolean, plural: string): { heading: string; body: PanelText } {
   return gap
     ? { heading: "The checklist the AI hands buyers leaves out your strongest points", body: join(`A buyer who follows this checklist compares ${plural} on things other brands win on.`) }

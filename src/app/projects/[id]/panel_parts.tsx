@@ -320,7 +320,10 @@ export function StepCard({
   const cls = `block w-full rounded-[10px] border bg-surface px-3 pb-3 pt-2.5 text-left ${focus ? "border-ink ring-1 ring-ink" : "border-line"}`;
   const head = (
     <span className="mb-1 flex items-center justify-between gap-2">
-      <em className={`not-italic ${T.sec} ${focus ? "font-semibold text-ink" : "text-ink-2"}`}>{step.label}</em>
+      <em className={`not-italic ${T.sec} ${focus ? "font-semibold text-ink" : "text-ink-2"}`}>
+        {step.label}
+        {step.help && <Help text={step.help} />}
+      </em>
       <Tag text={tag} tone={tone} />
     </span>
   );
@@ -404,10 +407,24 @@ export function StepStack({
 
 // ---------- blocks ----------
 
-export function Blk({ title, sub, children, flush }: { title?: string; sub?: string; children: ReactNode; flush?: boolean }) {
+/** A "?" beside a title: hover (or focus) for what a term on the card means. Never a count. */
+export function Help({ text }: { text: string }) {
+  return (
+    <span tabIndex={0} role="note" aria-label={text} title={text} className="ml-1.5 inline-flex h-[15px] w-[15px] cursor-help items-center justify-center rounded-full border border-line align-middle text-[10px] font-semibold not-italic leading-none text-ink-3">
+      ?
+    </span>
+  );
+}
+
+export function Blk({ title, sub, children, flush, help }: { title?: string; sub?: string; children: ReactNode; flush?: boolean; help?: string }) {
   return (
     <div className={`border-t border-line/70 ${flush ? "pt-1" : "pt-4"} mt-4`}>
-      {title && <h4 className={T.title}>{title}</h4>}
+      {title && (
+        <h4 className={T.title}>
+          {title}
+          {help && <Help text={help} />}
+        </h4>
+      )}
       {sub && <p className={`${T.sec} mb-2.5 mt-0.5`}>{sub}</p>}
       {children}
     </div>
@@ -695,7 +712,7 @@ function Cell({ c, title }: { c: PanelNum | PanelSpan | null; title: string }) {
 export function TableView({ table }: { table: PanelTable }) {
   if (table.style === "bars")
     return (
-      <Blk title={table.title} sub={table.sub}>
+      <Blk title={table.title} sub={table.sub} help={table.help}>
         {table.rows.map((r) => {
           const first = r.cells[0];
           const rest = r.cells.slice(1).filter((c): c is PanelNum | PanelSpan => !!c);
@@ -719,7 +736,7 @@ export function TableView({ table }: { table: PanelTable }) {
       </Blk>
     );
   return (
-    <Blk title={table.title} sub={table.sub}>
+    <Blk title={table.title} sub={table.sub} help={table.help}>
       <div className="overflow-x-auto">
         <table className={`w-full ${T.body}`}>
           <thead>

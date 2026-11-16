@@ -1312,7 +1312,7 @@ function taughtVsWinning(s: Summary, inp: InsightInputs): Insight | null {
   return {
     key: "taught_vs_winning",
     kind: "argument",
-    title: untaught ? `${untaught.code} wins but is not taught` : `The AI teaches ${losing!.code}, which favors rivals`,
+    title: untaught ? `${untaught.code} wins but is seldom taught` : `The AI teaches ${losing!.code}, which favors rivals`,
     body: `${body.charAt(0).toUpperCase()}${body.slice(1)}.`,
     foot: `${foot.join(" ")} Top five taught: ${top5.map((t) => t.code).join(", ")}.`,
     look: { pill: "why", label: "Why" },

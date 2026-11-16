@@ -470,6 +470,8 @@ export interface PanelStep {
   segments?: PanelSegment[];           // a split bar (verdict steps)
   items?: { label: string; num: PanelNum }[]; // criteria checklist bars
   note?: PanelText;                    // criteria "gap" sentence
+  /** am45: what a term in the label means, behind a "?" (never a count). */
+  help?: string;
   tagUsual?: string;                   // compares with usualCellId's same-key step
   tagRank?: string;                    // compares with the competitors (or the one rival on panel 11)
   tagUsualTone?: PanelTone;            // the tag's sentiment (drawn colour)
@@ -527,6 +529,8 @@ export interface PanelLine { label: string; value: PanelText }
 export interface PanelTable {
   title: string;
   sub: string;
+  /** am45: what the table's terms mean, behind a "?" beside the title. */
+  help?: string;
   columns: string[];
   style: "compare" | "bars";
   rows: { label: string; cells: (PanelNum | PanelSpan | null)[] }[];

@@ -43,6 +43,8 @@ import {
   type InsteadSide,
   type CommitsSide,
   COMMITS_TEXT,
+  CRITERIA_HELP,
+  offChecklist,
   commitsDetail,
   ROUTED_TEXT,
   routedDetail,
@@ -1725,6 +1727,10 @@ function problemPanel(inp: PanelCellInput, ctx: Ctx): PositionPanel {
   };
 }
 
+const upperFirstIf = (on: boolean, x: string) => (on ? upperFirst(x) : x);
+/** "seldom taught, in 26% of these answers" / "never taught". */
+const offSpan = (tn: PanelNum): (string | PanelText[number])[] => (tn.pct > 0 ? [`${offChecklist(tn.pct)}, in `, N(tn), " of these answers"] : [offChecklist(0)]);
+
 function criteriaPanel(inp: PanelCellInput, ctx: Ctx): PositionPanel {
   const { h } = ctx;
   const rows = inp.rows;
@@ -1775,7 +1781,7 @@ function criteriaPanel(inp: PanelCellInput, ctx: Ctx): PositionPanel {
     listNameSpans(top5.slice(0, 3).map((x) => F(cname(x.code, h), taughtNum(x.code)))),
     ".",
     untaught.length
-      ? join(" ", listNameSpans(gapSpans), untaught.length > 1 ? `, which come up most ${when}, are not on its list.` : `, which comes up most ${when}, is not on its list.`)
+      ? join(" ", listNameSpans(gapSpans), untaught.length > 1 ? `, which come up most ${when}, are seldom on its list.` : `, which comes up most ${when}, is seldom on its list.`)
       : top5.length
         ? ` Everything that comes up most ${when} is on its list.`
         : ""
@@ -1786,7 +1792,20 @@ function criteriaPanel(inp: PanelCellInput, ctx: Ctx): PositionPanel {
       key: "taught",
       label: "What it tells buyers to look at",
       items: top5.slice(0, 4).map((x) => ({ label: clabel(x.code, h), num: taughtNum(x.code) })),
-      ...(untaught.length ? { note: join(listNameSpans(gapSpans), untaught.length > 1 ? ` come up most ${when}, and neither is taught.` : ` comes up most ${when}, and it is not taught.`) } : {}),
+      help: `${CRITERIA_HELP.checklist} ${CRITERIA_HELP.taught}`,
+      // am45: off the checklist is "seldom taught" with its own share of these answers (never a bare "not taught").
+      ...(untaught.length
+        ? {
+            note: join(
+              listNameSpans(gapSpans),
+              untaught.length > 1 ? ` come up most ${when}. ` : ` comes up most ${when}, and it is `,
+              ...(untaught.length > 1
+                ? untaught.flatMap((w, i) => [i > 0 ? " and " : "", `${upperFirstIf(i === 0, cname(w.code, h))} is `, ...offSpan(taughtNum(w.code))])
+                : offSpan(taughtNum(untaught[0].code))),
+              "."
+            ),
+          }
+        : {}),
     },
   ];
   // Table: the winners (up to 4) plus the taught top 5 with lift rows; not taught first, then by lift; at most 6.
@@ -1799,12 +1818,13 @@ function criteriaPanel(inp: PanelCellInput, ctx: Ctx): PositionPanel {
     tableCodes.length && lift.length
       ? {
           title: "What the answer weighs, against the checklist",
+          help: `${CRITERIA_HELP.checklist} ${CRITERIA_HELP.taught}`,
           sub: `How often each topic comes up in answers that pick you and in answers that pick another brand, and whether the AI teaches buyers to look for it. The when-picked figures come from the What to buy answers${local ? " of this buyer" : inp.pooled ? "" : " of all buyers"}, because these questions take no picks.`,
           columns: [`When it picks another ${h.noun}`, "When it picks you", "On the checklist"],
           style: "compare",
           rows: tableCodes.map(({ c, taught }) => {
             const tn = taughtNum(c);
-            return { label: clabel(c, h), cells: [pickNum(c, otherPicks), pickNum(c, youPicks), taught ? { t: `Taught, ${tn.value}`, ...(tn.refs ? { refs: tn.refs } : {}), tip: tn.tip } : { t: "Not taught" }] };
+            return { label: clabel(c, h), cells: [pickNum(c, otherPicks), pickNum(c, youPicks), taught ? { t: `Taught, ${tn.value}`, ...(tn.refs ? { refs: tn.refs } : {}), tip: tn.tip } : tn.pct > 0 ? { t: `${upperFirst(offChecklist(tn.pct))}, ${tn.value}`, ...(tn.refs ? { refs: tn.refs } : {}), tip: tn.tip } : { t: "Never taught" }] };
           }),
         }
       : undefined;
