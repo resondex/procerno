@@ -45,6 +45,9 @@ import {
   COMMITS_TEXT,
   CRITERIA_HELP,
   EXCEPTION_TEXT,
+  WORRY_AGREES_TEXT,
+  worryAgreesDetail,
+  type WorryAfter,
   checklistMarkNote,
   offChecklist,
   commitsDetail,
@@ -3081,6 +3084,7 @@ function detailOf(inp: PanelCellInput, p: PositionPanel, up: PositionPanel | und
       const key = side === "go" || side === "split" ? "proceed" : side === "avoid" ? "avoid" : "none";
       const often = segOften(v, up?.steps.find((s) => s.key === "verdict"), key);
       p.detail = buyerWorryDetail({ side, often, topRival: topRivalOf(p) });
+      worryStepDetails(inp, p, ctx);
       return;
     }
     case "customer_worry": {
@@ -3103,6 +3107,7 @@ function detailOf(inp: PanelCellInput, p: PositionPanel, up: PositionPanel | und
         leaveNoDest: side !== "stay" && leaveRows.length > 0 && noDest > leaveRows.length / 2,
         noun: h.noun,
       });
+      worryStepDetails(inp, p, ctx);
       return;
     }
     case "looking_around": {
@@ -3171,6 +3176,68 @@ function detailOf(inp: PanelCellInput, p: PositionPanel, up: PositionPanel | und
 }
 
 /* ------------- am34: what explains each step (the clicked step card) ------------- */
+
+/** am50: the worries cards' two steps explain themselves. "What it tells them to do" keeps the card's explanation;
+ * "Agrees the worry is fair" gets its own - the other judgements, what the AI advises after agreeing (and after
+ * saying the worry is wrong), which worries it agrees with most (all-worries card) and which AI companies agree most. */
+function worryStepDetails(inp: PanelCellInput, p: PositionPanel, ctx: Ctx) {
+  const ag = p.steps.find((s) => s.key === "agrees");
+  if (!p.detail || !ag?.here) return;
+  const { h } = ctx;
+  const buyer = inp.kind === "buyer_worry";
+  const T = WORRY_AGREES_TEXT;
+  const pv = (r: PoolRow) => r.code.premise_verdict;
+  const judgedOf = (rs: PoolRow[]) => rs.filter((r) => pv(r) === "confirms" || pv(r) === "mixed" || pv(r) === "rebuts");
+  const judged = judgedOf(inp.rows);
+  const conf = judged.filter((r) => pv(r) === "confirms");
+  const mixed = judged.filter((r) => pv(r) === "mixed");
+  const rebuts = judged.filter((r) => pv(r) === "rebuts");
+  const quote = (r: PoolRow) => (r.code.premise_quote ?? "").trim() || verdictFind(r, h);
+  const vf = (r: PoolRow) => verdictFind(r, h);
+  const favOf = (r: PoolRow) => (buyer ? r.code.proceed_or_avoid === "proceed" : r.code.keep_or_leave === "keep");
+  const badOf = (r: PoolRow) => (buyer ? r.code.proceed_or_avoid === "avoid" : r.code.keep_or_leave === "leave");
+  type Item = { label: string; rs: PoolRow[]; n: number; unit: string; find: (r: PoolRow) => string };
+  const mk = (title: string, sub: string, tone: PanelTone, items: Item[], few: string, keepOrder = false): PanelDetailSection | null => {
+    const ok = items.filter((x) => x.rs.length >= ROW_MIN && x.n > 0);
+    if (!keepOrder) ok.sort((a, b) => b.rs.length / b.n - a.rs.length / a.n || a.label.localeCompare(b.label));
+    if (!ok.length && !items.some((x) => x.rs.length > 0)) return null;
+    return { title, sub, tone, rows: ok.map((x) => ({ label: x.label, num: num(x.rs.length, x.n, x.unit, refsOf(x.rs, x.find)) })), ...(ok.length ? {} : { note: join(few) }) };
+  };
+  const advice = (rs: PoolRow[], unit: string): Item[] => [
+    { label: buyer ? T.go : T.stay, rs: rs.filter(favOf), n: rs.length, unit, find: vf },
+    { label: buyer ? T.avoid : T.leave, rs: rs.filter(badOf), n: rs.length, unit, find: vf },
+    { label: T.none, rs: rs.filter((r) => !favOf(r) && !badOf(r)), n: rs.length, unit, find: vf },
+  ];
+  const sibs = inp.pooled ? [...ctx.inputs.values()].filter((x) => x.kind === inp.kind && !x.pooled) : [];
+  const byVendor = new Map<string, PoolRow[]>();
+  for (const r of judged) {
+    const v = engineFacets(r.model).vendor;
+    byVendor.set(v, [...(byVendor.get(v) ?? []), r]);
+  }
+  const sections = [
+    mk(T.judges.title, T.judges.sub, "neutral", [
+      { label: T.partly, rs: mixed, n: judged.length, unit: "answers that judge the worry", find: quote },
+      { label: T.wrong, rs: rebuts, n: judged.length, unit: "answers that judge the worry", find: quote },
+    ], T.judges.few, true),
+    conf.length >= ARGS_MIN ? mk(T.after.title, T.after.sub, "neutral", advice(conf, "answers that agree"), T.after.few, true) : null,
+    rebuts.length >= ARGS_MIN ? mk(T.afterWrong.title, T.afterWrong.sub, "neutral", advice(rebuts, "answers that say the worry is wrong"), T.afterWrong.few, true) : null,
+    sibs.length >= 2
+      ? mk(T.which.title, T.which.sub, "bad", sibs.map((x) => {
+          const j = judgedOf(x.rows);
+          return { label: x.concern ?? x.label, rs: j.filter((r) => pv(r) === "confirms"), n: j.length, unit: "answers that judge that worry", find: quote };
+        }).filter((x) => x.n >= ARGS_MIN), T.which.few)
+      : null,
+    mk(T.vendor.title, T.vendor.sub, "neutral", [...byVendor.entries()].filter(([, rs]) => rs.length >= ARGS_MIN).map(([label, rs]) => ({ label, rs: rs.filter((r) => pv(r) === "confirms"), n: rs.length, unit: `${label} answers that judge the worry`, find: quote })), T.vendor.few),
+  ].filter((x): x is PanelDetailSection => !!x);
+  const share = (rs: PoolRow[]) => (conf.length ? rs.length / conf.length : 0);
+  const after: WorryAfter = conf.length < ARGS_MIN ? "few" : share(conf.filter(badOf)) >= 0.5 ? "bad" : share(conf.filter(favOf)) >= 0.5 ? "fav" : share(conf.filter((r) => !favOf(r) && !badOf(r))) >= 0.5 ? "none" : "split";
+  const agreesDetail: PanelStepDetail = { ...worryAgreesDetail(agreesTakeaway(ag.here.pct).tag, after, buyer), ...(sections.length ? { sections } : {}) };
+  const details = { verdict: p.detail, agrees: agreesDetail };
+  p.details = details;
+  if (p.compare) p.detailsComp = details;
+  delete p.detail;
+  delete p.detailComp;
+}
 
 /** The kinds whose stack is a funnel of `here` steps; their steps carry details. */
 const STEP_DETAIL_KINDS = new Set<PanelKind>(["buy", "switching", "problem", "popular", "learning", "h2h"]);

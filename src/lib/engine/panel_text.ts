@@ -670,3 +670,36 @@ export function namedWhenDetail(side: "usually" | "sometimes" | "rarely"): { hea
   const body = side === "usually" ? "You are one of the names it uses to explain the category: see who else it names, and who comes first, below." : "Other names are doing the explaining: see below who it names when it leaves you out.";
   return { heading, body: join(body) };
 }
+
+/* ---------- am50: "Agrees the worry is fair" (buyers' and customers' worries) ---------- */
+export type WorryAfter = "few" | "bad" | "fav" | "none" | "split";
+export const WORRY_AGREES_TEXT = {
+  partly: "Partly agrees",
+  wrong: "Says the worry is wrong",
+  go: "Go ahead",
+  avoid: "Steer clear",
+  stay: "Stay",
+  leave: "Leave",
+  none: "No side",
+  judges: { title: "The other judgements", sub: "Share of the answers that judge the worry.", few: "Almost every answer that judges the worry agrees with it." },
+  after: { title: "What it advises when it agrees", sub: "Share of the answers that agree.", few: "Too few answers agree to size what follows." },
+  afterWrong: { title: "What it advises when it says the worry is wrong", sub: "Share of the answers that say the worry is wrong.", few: "Too few answers say the worry is wrong to size what follows." },
+  which: { title: "Which worries it agrees with most", sub: "Share of the answers that judge each worry.", few: "Too few answers judge each worry to compare them." },
+  vendor: { title: "Which AI companies agree most", sub: "Share of each company's answers that judge the worry.", few: "Too few answers per AI company to size." },
+};
+export function worryAgreesDetail(tag: string, after: WorryAfter, buyer: boolean): { heading: string; body: PanelText } {
+  const who = buyer ? "the buyer" : "the customer";
+  const bad = buyer ? "steer clear" : "leave";
+  const fav = buyer ? "go ahead" : "stay";
+  const body =
+    after === "few"
+      ? "Too few answers agree to say what the AI advises next."
+      : after === "bad"
+        ? `When it agrees, it mostly tells ${who} to ${bad}.`
+        : after === "fav"
+          ? `Even when it agrees, it mostly tells ${who} to ${fav}.`
+          : after === "none"
+            ? `Agreeing does not settle it: after agreeing, it mostly takes no side on whether to ${fav} or ${bad}.`
+            : `After agreeing, its advice is split between ${fav}, ${bad} and no side.`;
+  return { heading: `The AI ${tag.charAt(0).toLowerCase()}${tag.slice(1)}`, body: join(body) };
+}
