@@ -532,6 +532,9 @@ export const CRITERIA_HELP = {
 /** How a topic off the checklist is described, by its share of the look-for answers (0-100). */
 export const offChecklist = (pct: number) => (pct <= 0 ? "never taught" : pct >= 30 ? "taught less often" : "seldom taught");
 
+/** am47: what the line on the "Taught in" bars is. */
+export const checklistMarkNote = (share: string, n: number) => `The line is the share the ${n >= 5 ? "fifth" : "last"} topic on the AI's list reaches (${share}). A bar that reaches it is on the checklist.`;
+
 export function criteriaDetail(gap: boolean, plural: string): { heading: string; body: PanelText } {
   return gap
     ? { heading: "The checklist the AI hands buyers leaves out your strongest points", body: join(`A buyer who follows this checklist compares ${plural} on things other brands win on.`) }

@@ -44,6 +44,7 @@ import {
   type CommitsSide,
   COMMITS_TEXT,
   CRITERIA_HELP,
+  checklistMarkNote,
   offChecklist,
   commitsDetail,
   ROUTED_TEXT,
@@ -1731,6 +1732,8 @@ const upperFirstIf = (on: boolean, x: string) => (on ? upperFirst(x) : x);
 /** "seldom taught, in 26% of these answers" / "never taught". */
 const offSpan = (tn: PanelNum): (string | PanelText[number])[] => (tn.pct > 0 ? [`${offChecklist(tn.pct)}, in `, N(tn), " of these answers"] : [offChecklist(0)]);
 
+const checklistMark = (last: PanelNum, n: number) => ({ pct: last.pct, note: checklistMarkNote(last.value, n) });
+
 function criteriaPanel(inp: PanelCellInput, ctx: Ctx): PositionPanel {
   const { h } = ctx;
   const rows = inp.rows;
@@ -1820,12 +1823,13 @@ function criteriaPanel(inp: PanelCellInput, ctx: Ctx): PositionPanel {
           title: "What the answer weighs, against the checklist",
           help: `${CRITERIA_HELP.checklist} ${CRITERIA_HELP.taught}`,
           sub: `How often each topic comes up in answers that pick you and in answers that pick another brand, and whether the AI teaches buyers to look for it. The when-picked figures come from the What to buy answers${local ? " of this buyer" : inp.pooled ? "" : " of all buyers"}, because these questions take no picks.`,
-          columns: [`When it picks another ${h.noun}`, "When it picks you", "Taught in", "Checklist"],
+          columns: [`When it picks another ${h.noun}`, "When it picks you", "Taught in"],
+          // am47: the last column is a bar with a line where the checklist starts (the share its last topic reaches).
+          ...(top5.length ? { mark: { col: 2, ...checklistMark(taughtNum(top5[top5.length - 1].code), top5.length) } } : {}),
           style: "compare",
-          rows: tableCodes.map(({ c, taught }) => {
+          rows: tableCodes.map(({ c }) => {
             const tn = taughtNum(c);
-            // am46: the share and the word are two short cells (one long cell wrapped badly).
-            return { label: clabel(c, h), cells: [pickNum(c, otherPicks), pickNum(c, youPicks), tn, { t: taught ? "On it" : upperFirst(offChecklist(tn.pct)) }] };
+            return { label: clabel(c, h), cells: [pickNum(c, otherPicks), pickNum(c, youPicks), tn] };
           }),
         }
       : undefined;

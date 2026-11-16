@@ -531,6 +531,8 @@ export interface PanelTable {
   sub: string;
   /** am45: what the table's terms mean, behind a "?" beside the title. */
   help?: string;
+  /** am47: column `col` draws a bar with a line at `pct` (0-100); a bar reaching the line is drawn strong. `note` says what the line is. */
+  mark?: { col: number; pct: number; note: string };
   columns: string[];
   style: "compare" | "bars";
   rows: { label: string; cells: (PanelNum | PanelSpan | null)[] }[];

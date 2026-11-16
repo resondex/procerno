@@ -758,7 +758,19 @@ export function TableView({ table }: { table: PanelTable }) {
                 <td className="py-1.5 pr-2 text-ink">{r.label}</td>
                 {r.cells.map((c, i) => (
                   <td key={i} className={`whitespace-nowrap py-1.5 pl-3 text-right ${c && "t" in c && !("refs" in c && c.refs?.length) ? `${T.cap} text-ink-3` : "text-ink"}`}>
-                    <Cell c={c} title={`${r.label} - ${table.columns[i] ?? ""}`} />
+                    {table.mark && i === table.mark.col && c && !isSpan(c) ? (
+                      <span className="inline-flex items-center gap-2">
+                        <span className="relative inline-block h-2 w-[110px] rounded bg-line/60">
+                          <i className="block h-full rounded" style={{ width: `${Math.min(100, c.pct)}%`, background: c.pct >= table.mark.pct ? C_YOU : C_USUAL }} />
+                          <i className="absolute -top-[3px] h-[14px] border-l-[1.5px] border-ink" style={{ left: `${Math.min(100, table.mark.pct)}%` }} />
+                        </span>
+                        <span className="inline-block w-9 text-right">
+                          <Cell c={c} title={`${r.label} - ${table.columns[i] ?? ""}`} />
+                        </span>
+                      </span>
+                    ) : (
+                      <Cell c={c} title={`${r.label} - ${table.columns[i] ?? ""}`} />
+                    )}
                   </td>
                 ))}
               </tr>
@@ -766,6 +778,7 @@ export function TableView({ table }: { table: PanelTable }) {
           </tbody>
         </table>
       </div>
+      {table.mark && <p className={`${T.cap} mt-2 text-ink-3`}>{table.mark.note}</p>}
     </Blk>
   );
 }
