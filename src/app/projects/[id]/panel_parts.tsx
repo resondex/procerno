@@ -434,14 +434,28 @@ export function Blk({ title, sub, children, flush, help }: { title?: string; sub
   );
 }
 
-export function DetailView({ heading, body, children }: { heading: string; body?: PanelText; children?: ReactNode }) {
-  return (
-    <div className="mt-4 border-t border-line pt-3.5">
+export function DetailView({ heading, body, children, callout }: { heading: string; body?: PanelText; children?: ReactNode; callout?: string }) {
+  const head = (
+    <>
       <h3 className={`${T.title} mb-1.5`}>{heading}</h3>
       {body && body.length > 0 && (
         <p className={`${T.body} text-ink-2`}>
           <TextView text={body} title={heading} />
         </p>
+      )}
+    </>
+  );
+  return (
+    <div className="mt-4 border-t border-line pt-3.5">
+      {callout ? (
+        <div className="rounded-[10px] border px-3 py-2.5" style={{ borderColor: C_YOU, background: "color-mix(in srgb, var(--pa-yours) 8%, transparent)" }}>
+          <p className={`${T.label} mb-1`} style={{ color: C_YOU }}>
+            {callout}
+          </p>
+          {head}
+        </div>
+      ) : (
+        head
       )}
       {children}
     </div>

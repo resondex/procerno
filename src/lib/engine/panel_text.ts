@@ -535,6 +535,17 @@ export const offChecklist = (pct: number) => (pct <= 0 ? "never taught" : pct >=
 /** am47: what the line on the "Taught in" bars is. */
 export const checklistMarkNote = (share: string, n: number) => `The line is the share the ${n >= 5 ? "fifth" : "last"} topic on the AI's list reaches (${share}). A bar that reaches it is on the checklist.`;
 
+/** am48: the head-to-head exception step and its explanation. */
+export const EXCEPTION_TEXT = {
+  label: (rival: string) => `In the answers that pick ${rival}`,
+  still: "still says when to choose you",
+  none: "gives no case for you",
+  callout: "The exception",
+  heading: (rival: string) => `${rival} is the pick, but the AI still sends some buyers to you`,
+  body: (rival: string) => `Even in the answers that pick ${rival}, it tells these buyers to choose you instead.`,
+  who: { title: "Who it still sends to you", sub: (rival: string) => `Share of the answers that pick ${rival}.`, few: "No one condition comes up often enough to size." },
+};
+
 export function criteriaDetail(gap: boolean, plural: string): { heading: string; body: PanelText } {
   return gap
     ? { heading: "The checklist the AI hands buyers leaves out your strongest points", body: join(`A buyer who follows this checklist compares ${plural} on things other brands win on.`) }

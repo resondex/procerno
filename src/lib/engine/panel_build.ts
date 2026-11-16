@@ -44,6 +44,7 @@ import {
   type CommitsSide,
   COMMITS_TEXT,
   CRITERIA_HELP,
+  EXCEPTION_TEXT,
   checklistMarkNote,
   offChecklist,
   commitsDetail,
@@ -1201,6 +1202,19 @@ function h2hPanel(inp: PanelCellInput, ctx: Ctx): PositionPanel {
         ]
       : []),
   ];
+  // am48: lost with an exception - of the answers that pick the rival, how many still state a condition for you.
+  if (inp.exception && !inp.pooled && lost.length) {
+    const lostIds = new Set(lost.map((r) => r.code.response_id));
+    const stated = new Set<string>();
+    for (const c of inp.conds.toward) if (!isDefaultCondition(c.label)) for (const id of c.ids) if (lostIds.has(id)) stated.add(id);
+    const yes = lost.filter((r) => stated.has(r.code.response_id));
+    const no = lost.filter((r) => !stated.has(r.code.response_id));
+    steps.push({
+      key: "exception",
+      label: EXCEPTION_TEXT.label(rival),
+      segments: [seg("still", EXCEPTION_TEXT.still, "you", yes, lost.length, h, `answers that pick ${rival}`), seg("none", EXCEPTION_TEXT.none, "neutral", no, lost.length, h, `answers that pick ${rival}`)],
+    });
+  }
   let claim: PanelText;
   if (d === 0) claim = join(`Asked to choose between you and ${rival}, the AI picks neither in every answer.`);
   else if (inp.pooled) claim = join("Asked to choose between you and one of your named rivals, the AI picks you in ", N(wonN), " of the answers that pick one of you.");
@@ -3181,6 +3195,18 @@ function stepDetailsOf(inp: PanelCellInput, p: PositionPanel, u: PanelCellInput 
   const usual = usualFor(inp, u, ctx);
   const picks = p.kind === "buy" || p.kind === "switching" || p.kind === "popular";
   const step = (k: PanelStepKey) => p.steps.find((s) => s.key === k && !!s.here);
+  const sec = (title: string, sub: string, tone: PanelTone, items: { label: string; rs: PoolRow[]; n: number; unit: string; find: (r: PoolRow) => string }[], few: string): PanelDetailSection | null => {
+    const ok = items.filter((x) => x.rs.length >= ROW_MIN).sort((a, b) => b.rs.length / b.n - a.rs.length / a.n || a.label.localeCompare(b.label));
+    if (!ok.length && !items.some((x) => x.rs.length > 0)) return null;
+    return { title, sub, tone, rows: ok.map((x) => ({ label: x.label, num: num(x.rs.length, x.n, x.unit, refsOf(x.rs, x.find)) })), ...(ok.length ? {} : { note: join(few) }) };
+  };
+  const byVendor = new Map<string, PoolRow[]>();
+  for (const r of rows) {
+    const v = engineFacets(r.model).vendor;
+    byVendor.set(v, [...(byVendor.get(v) ?? []), r]);
+  }
+  /** The share of each AI company's answers in `hit`, as section rows. */
+  const vendorItems = (hit: PoolRow[], find: (r: PoolRow) => string) => [...byVendor.entries()].filter(([, rs]) => rs.length >= ROW_MIN).map(([label, rs]) => ({ label, rs: rs.filter((r) => hit.includes(r)), n: rs.length, unit: `${label} answers`, find }));
   type Fn = ReturnType<typeof funnelOf>;
   const surfOf = (f: Fn, name: string, rec: boolean) => (r: PoolRow) => f.surf(r, rec) ?? r.code.top_pick ?? name;
   const pf = (name: string) => (r: PoolRow) => h.quoteOf(r) || r.code.top_pick || name;
@@ -3293,6 +3319,19 @@ function stepDetailsOf(inp: PanelCellInput, p: PositionPanel, u: PanelCellInput 
         ...(restRows.length ? { list: { title: "When it picks neither of the two", rows: restRows } } : {}),
       };
     }
+    // am48: the exception step names the exception - the buyers still sent to you, as shares of the lost answers.
+    const ex = p.steps.find((s) => s.key === "exception");
+    if (ex && inp.them.length) {
+      const lostIds = new Set(inp.them.map((r) => r.code.response_id));
+      const byId = new Map(inp.them.map((r) => [r.code.response_id, r]));
+      const items = mergeSame(inp.conds.toward)
+        .filter((c) => !isDefaultCondition(c.label))
+        .map((c) => ({ label: condRowLabel(c.label), rs: [...c.ids].filter((id) => lostIds.has(id)).map((id) => byId.get(id)!), n: inp.them.length, unit: `answers that pick ${R}`, find: () => c.label }))
+        .sort((a, b) => b.rs.length - a.rs.length)
+        .slice(0, 4);
+      const who = sec(EXCEPTION_TEXT.who.title, EXCEPTION_TEXT.who.sub(R), "good", items, EXCEPTION_TEXT.who.few);
+      details.exception = { heading: EXCEPTION_TEXT.heading(R), body: join(EXCEPTION_TEXT.body(R)), callout: EXCEPTION_TEXT.callout, ...(who ? { sections: [who] } : {}) };
+    }
     if (won?.here && won.vs) {
       const d = inp.you.length + inp.them.length;
       if (d >= DETAIL_MIN) {
@@ -3375,18 +3414,6 @@ function stepDetailsOf(inp: PanelCellInput, p: PositionPanel, u: PanelCellInput 
   const detailsComp: Partial<Record<PanelStepKey, PanelStepDetail>> = {};
   // am41: "the answer names one <noun> as the pick" explains itself - what the answer does instead, who gets
   // the pick when there is one, and which AI companies name one. The same in both views (it is not about a brand).
-  const sec = (title: string, sub: string, tone: PanelTone, items: { label: string; rs: PoolRow[]; n: number; unit: string; find: (r: PoolRow) => string }[], few: string): PanelDetailSection | null => {
-    const ok = items.filter((x) => x.rs.length >= ROW_MIN).sort((a, b) => b.rs.length / b.n - a.rs.length / a.n || a.label.localeCompare(b.label));
-    if (!ok.length && !items.some((x) => x.rs.length > 0)) return null;
-    return { title, sub, tone, rows: ok.map((x) => ({ label: x.label, num: num(x.rs.length, x.n, x.unit, refsOf(x.rs, x.find)) })), ...(ok.length ? {} : { note: join(few) }) };
-  };
-  const byVendor = new Map<string, PoolRow[]>();
-  for (const r of rows) {
-    const v = engineFacets(r.model).vendor;
-    byVendor.set(v, [...(byVendor.get(v) ?? []), r]);
-  }
-  /** The share of each AI company's answers in `hit`, as section rows. */
-  const vendorItems = (hit: PoolRow[], find: (r: PoolRow) => string) => [...byVendor.entries()].filter(([, rs]) => rs.length >= ROW_MIN).map(([label, rs]) => ({ label, rs: rs.filter((r) => hit.includes(r)), n: rs.length, unit: `${label} answers`, find }));
   const cm = p.kind === "popular" ? step("commits") : undefined;
   if (cm?.here) {
     const picked = rows.filter((r) => h.pickOf(r).status === "active");

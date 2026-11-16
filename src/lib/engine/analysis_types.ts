@@ -435,6 +435,7 @@ export type PanelStepKey =
   | "taught" | "gap"                       // criteria
   | "stance"                               // expansion (growth_stance)
   | "strength"                             // business case (case_strength)
+  | "exception"                            // h2h lost with an exception: of the answers that pick the rival, how many still say when to choose you
   | "commits"                              // popular: the answer names one product as the pick (any brand)
   | "anybrand" | "namedwhen"               // learning: names any brand; named, when a brand is named
   | "alongside"                            // alongside: the ones it names alongside you
@@ -563,6 +564,8 @@ export interface PanelStepDetail {
   outcomes?: { name: string; you?: true; usual?: true; picked?: PanelNum; lost: PanelNum; none: PanelNum }[];
   outcomeLabels?: { picked?: string; lost: string; none: string };
   both?: PanelText;
+  /** am48: a labelled box around the heading and sentence ("The exception"). */
+  callout?: string;
   /** am38: further lists of new facts, in order (Value's "where it points the buyer instead"). */
   sections?: PanelDetailSection[];
 }

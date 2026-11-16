@@ -287,7 +287,7 @@ function RivalDetail({ d, name, onOpen }: { d: RivalStepDetail | PanelStepDetail
   // The outcome columns this detail carries (am35: never the pick itself - the step bars show it).
   const cols3 = ol ? ([["picked", C_YOU], ["lost", C_USUAL], ["none", C_NONE]] as const).filter(([k]) => !!ol[k]) : [];
   return (
-    <DetailView heading={d.heading} body={d.body}>
+    <DetailView heading={d.heading} body={d.body} callout={"callout" in d ? d.callout : undefined}>
       {d.rows && d.rows.length > 0 && (
         <table className={`mt-2.5 w-full ${T.body}`}>
           <thead>
