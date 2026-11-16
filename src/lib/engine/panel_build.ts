@@ -3,6 +3,7 @@ import { famTokens } from "./brand_family";
 import { pickRefs, spreadRefs, themeAnswerSets, type AnswerRules, type ThemeMap } from "./reason_themes";
 import type { RuleGroup } from "./rules_explorer";
 import { isWallWording } from "./wall_wording";
+import { engineFacets } from "./providers";
 import type { Resolver } from "./brand_resolve";
 import { cell, type PoolRow, type RateCell } from "./view_data";
 import type { ValueFact } from "./value";
@@ -40,6 +41,13 @@ import {
   type BuyerSide,
   type CaseSide,
   type InsteadSide,
+  type CommitsSide,
+  COMMITS_TEXT,
+  commitsDetail,
+  ROUTED_TEXT,
+  routedDetail,
+  ANYBRAND_TEXT,
+  anyBrandDetail,
   type InsteadHalf,
   type KeepSide,
   type ValueSide,
@@ -3254,6 +3262,87 @@ function stepDetailsOf(inp: PanelCellInput, p: PositionPanel, u: PanelCellInput 
 
   /* -------- comparison view: you against the competitors -------- */
   const detailsComp: Partial<Record<PanelStepKey, PanelStepDetail>> = {};
+  // am41: "the answer names one <noun> as the pick" explains itself - what the answer does instead, who gets
+  // the pick when there is one, and which AI companies name one. The same in both views (it is not about a brand).
+  const sec = (title: string, sub: string, tone: PanelTone, items: { label: string; rs: PoolRow[]; n: number; unit: string; find: (r: PoolRow) => string }[], few: string): PanelDetailSection | null => {
+    const ok = items.filter((x) => x.rs.length >= ROW_MIN).sort((a, b) => b.rs.length / b.n - a.rs.length / a.n || a.label.localeCompare(b.label));
+    if (!ok.length && !items.some((x) => x.rs.length > 0)) return null;
+    return { title, sub, tone, rows: ok.map((x) => ({ label: x.label, num: num(x.rs.length, x.n, x.unit, refsOf(x.rs, x.find)) })), ...(ok.length ? {} : { note: join(few) }) };
+  };
+  const byVendor = new Map<string, PoolRow[]>();
+  for (const r of rows) {
+    const v = engineFacets(r.model).vendor;
+    byVendor.set(v, [...(byVendor.get(v) ?? []), r]);
+  }
+  /** The share of each AI company's answers in `hit`, as section rows. */
+  const vendorItems = (hit: PoolRow[], find: (r: PoolRow) => string) => [...byVendor.entries()].filter(([, rs]) => rs.length >= ROW_MIN).map(([label, rs]) => ({ label, rs: rs.filter((r) => hit.includes(r)), n: rs.length, unit: `${label} answers`, find }));
+  const cm = p.kind === "popular" ? step("commits") : undefined;
+  if (cm?.here) {
+    const picked = rows.filter((r) => h.pickOf(r).status === "active");
+    const depends = rows.filter((r) => !picked.includes(r) && r.code.outcome === "conditional");
+    const lists = rows.filter((r) => !picked.includes(r) && r.code.outcome !== "conditional");
+    const byBrand = new Map<string, PoolRow[]>();
+    for (const r of picked) {
+      const nm = h.pickOf(r).name ?? r.code.top_pick ?? "";
+      if (nm) byBrand.set(nm, [...(byBrand.get(nm) ?? []), r]);
+    }
+    const sections = [
+      sec(COMMITS_TEXT.instead.title, COMMITS_TEXT.instead.sub, "neutral", [
+        { label: COMMITS_TEXT.depends, rs: depends, n: all, unit: "answers", find: (r) => verdictFind(r, h) },
+        { label: COMMITS_TEXT.lists, rs: lists, n: all, unit: "answers", find: (r) => verdictFind(r, h) },
+      ], COMMITS_TEXT.instead.few),
+      sec(COMMITS_TEXT.who.title, COMMITS_TEXT.who.sub, "neutral", [...byBrand.entries()].map(([label, rs]) => ({ label, rs, n: picked.length, unit: "answers that name one pick", find: (r: PoolRow) => h.quoteOf(r) || r.code.top_pick || label })), COMMITS_TEXT.who.few),
+      picked.length < ROW_MIN ? null : sec(COMMITS_TEXT.vendor.title, COMMITS_TEXT.vendor.sub, "neutral", vendorItems(picked, (r) => h.quoteOf(r) || r.code.top_pick || h.brand), COMMITS_TEXT.vendor.few),
+    ].filter((x): x is PanelDetailSection => !!x);
+    const side: CommitsSide = picked.length * 2 >= all ? "picks" : depends.length * 2 >= all ? "depends" : lists.length * 2 >= all ? "lists" : depends.length > lists.length ? "leans_depends" : lists.length > depends.length ? "leans_lists" : "split";
+    const d: PanelStepDetail = { ...commitsDetail(side, h.noun), ...(sections.length ? { sections } : {}) };
+    details.commits = d;
+    if (p.compare) detailsComp.commits = d;
+  }
+  // am41: "the answer points the buyer to <plural>" (Spotting the problem) - where the rest go, what they name there, and which AI companies stay in the category.
+  const cg = p.kind === "problem" ? step("category") : undefined;
+  if (cg?.here) {
+    const inCat = rows.filter((r) => r.code.category_routed === "category");
+    const adjacent = rows.filter((r) => r.code.category_routed === "adjacent");
+    const nowhere = rows.filter((r) => r.code.category_routed !== "category" && r.code.category_routed !== "adjacent");
+    const outside = new Map<string, { name: string; rs: PoolRow[] }>();
+    for (const r of adjacent) {
+      const seen = new Set<string>();
+      for (const m of r.code.mentions ?? []) {
+        if (m.framing !== "recommended") continue;
+        const res = h.resolve(m.brand);
+        if (res.status === "active" || seen.has(res.key ?? m.brand)) continue;
+        seen.add(res.key ?? m.brand);
+        const k = res.key ?? m.brand.toLowerCase();
+        const t = outside.get(k) ?? { name: res.name ?? m.brand, rs: [] };
+        t.rs.push(r);
+        outside.set(k, t);
+      }
+    }
+    const vf = (r: PoolRow) => verdictFind(r, h);
+    const sections = [
+      sec(ROUTED_TEXT.rest.title, ROUTED_TEXT.rest.sub, "neutral", [
+        { label: ROUTED_TEXT.adjacent(h.plural), rs: adjacent, n: all, unit: "answers", find: vf },
+        { label: ROUTED_TEXT.nowhere, rs: nowhere, n: all, unit: "answers", find: vf },
+      ], ROUTED_TEXT.rest.few),
+      sec(ROUTED_TEXT.names.title, ROUTED_TEXT.names.sub(h.plural), "bad", [...outside.values()].sort((a, b) => b.rs.length - a.rs.length).slice(0, 5).map((x) => ({ label: x.name, rs: x.rs, n: adjacent.length, unit: "answers that point elsewhere", find: () => x.name })), ROUTED_TEXT.names.few),
+      sec(ROUTED_TEXT.vendor.title(h.plural), ROUTED_TEXT.vendor.sub, "neutral", vendorItems(inCat, vf), ROUTED_TEXT.vendor.few),
+    ].filter((x): x is PanelDetailSection => !!x);
+    const share = all ? inCat.length / all : 0;
+    const d: PanelStepDetail = { ...routedDetail(share >= 0.9 ? "nearly" : share >= 0.5 ? "usually" : adjacent.length >= nowhere.length ? "elsewhere" : "nowhere", h.plural), ...(sections.length ? { sections } : {}) };
+    details.category = d;
+    if (p.compare) detailsComp.category = d;
+  }
+  // am41: "the answer names any brand" (Learning the category) - which AI companies name brands on a question that asks for none.
+  const ab = p.kind === "learning" ? step("anybrand") : undefined;
+  if (ab?.here) {
+    const any = rows.filter((r) => (r.code.mentions ?? []).some((m) => h.resolve(m.brand).status === "active"));
+    const sections = [sec(ANYBRAND_TEXT.vendor.title, ANYBRAND_TEXT.vendor.sub, "neutral", vendorItems(any, (r) => (r.code.mentions ?? []).find((m) => h.resolve(m.brand).status === "active")?.brand ?? h.brand), ANYBRAND_TEXT.vendor.few)].filter((x): x is PanelDetailSection => !!x);
+    const share = all ? any.length / all : 0;
+    const d: PanelStepDetail = { ...anyBrandDetail(share >= 0.5 ? "usually" : share >= 0.2 ? "sometimes" : "rarely", h.plural), ...(sections.length ? { sections } : {}) };
+    details.anybrand = d;
+    if (p.compare) detailsComp.anybrand = d;
+  }
   if (p.compare && names.length) {
     const nm = step("named");
     if (nm?.here && nm.rivals?.length) {

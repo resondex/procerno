@@ -556,3 +556,77 @@ export function h2hDetail(o: { exception: boolean; rival: string; pooled: boolea
         : join("Small shifts in what the AI weighs would change who wins this matchup.");
   return { heading, body };
 }
+
+/* ---------- am41: "the answer names one <noun> as the pick" (What's popular) ---------- */
+export type CommitsSide = "picks" | "depends" | "lists" | "leans_depends" | "leans_lists" | "split";
+export const COMMITS_TEXT = {
+  depends: "Says it depends on the buyer",
+  lists: "Lists several without choosing",
+  instead: { title: "What the answer does instead", sub: "Share of these answers.", few: "Too few answers take either course to size." },
+  who: { title: "Who gets the pick when it names one", sub: "Share of the answers that name one pick.", few: "Too few answers name one pick to size who gets it." },
+  vendor: { title: "Which AI companies name one pick", sub: "Share of each company's answers here.", few: "No AI company names one pick often enough to size." },
+};
+export function commitsDetail(side: CommitsSide, noun: string): { heading: string; body: PanelText } {
+  const heading =
+    side === "picks"
+      ? `On this question the AI usually names one ${noun}`
+      : side === "depends"
+        ? "On this question the AI mostly says it depends on the buyer"
+        : side === "lists"
+          ? "On this question the AI mostly lists several without choosing"
+          : side === "leans_depends"
+            ? "The AI more often says it depends on the buyer than lists without choosing"
+            : side === "leans_lists"
+              ? "The AI more often lists several without choosing than says it depends"
+              : "The AI splits between saying it depends and listing without choosing";
+  const body =
+    side === "picks"
+      ? "Being the one it names matters here: see who gets the pick below."
+      : side === "depends" || side === "leans_depends"
+        ? "Popularity alone does not settle it for the AI: it asks who the buyer is before naming one."
+        : side === "lists" || side === "leans_lists"
+          ? "It treats the question as a request for a shortlist, so being on the list is what counts here."
+          : "Either way it rarely names one, so being on the list is what counts here.";
+  return { heading, body: join(body) };
+}
+
+/* ---------- am41: "the answer points the buyer to <plural>" (Spotting the problem) ---------- */
+export const ROUTED_TEXT = {
+  adjacent: (plural: string) => `Points to something other than ${plural}`,
+  nowhere: "Points to no kind of product",
+  rest: { title: "Where the other answers point", sub: "Share of these answers.", few: "Too few answers point elsewhere to size." },
+  names: { title: "What it recommends there", sub: (plural: string) => `Share of the answers that point to something other than ${plural}.`, few: "No one name comes up often enough there to size." },
+  vendor: { title: (plural: string) => `Which AI companies point to ${plural}`, sub: "Share of each company's answers here.", few: "Too few answers per AI company to size." },
+};
+export function routedDetail(side: "nearly" | "usually" | "elsewhere" | "nowhere", plural: string): { heading: string; body: PanelText } {
+  const heading =
+    side === "nearly"
+      ? `The AI nearly always reads this problem as one ${plural} solve`
+      : side === "usually"
+        ? `The AI usually reads this problem as one ${plural} solve`
+        : side === "elsewhere"
+          ? `The AI more often sends this problem somewhere other than ${plural}`
+          : `The AI more often answers this problem without pointing to any kind of product`;
+  const body =
+    side === "nearly"
+      ? "The category is in the answer, so what is left to win is being one of the names in it."
+      : side === "usually"
+        ? "Some answers leave the category before any brand in it can be named: see where they go below."
+        : "Most answers leave the category before any brand in it can be named, so the first thing to win here is the category itself.";
+  return { heading, body: join(body) };
+}
+
+/* ---------- am41: "the answer names any brand" (Learning the category) ---------- */
+export const ANYBRAND_TEXT = {
+  vendor: { title: "Which AI companies name a brand", sub: "Share of each company's answers here.", few: "No AI company names a brand often enough to size." },
+};
+export function anyBrandDetail(side: "usually" | "sometimes" | "rarely", plural: string): { heading: string; body: PanelText } {
+  const heading =
+    side === "usually"
+      ? "Even on a question that asks for no brand, the AI usually names some"
+      : side === "sometimes"
+        ? "On a question that asks for no brand, the AI sometimes names one anyway"
+        : "On a question that asks for no brand, the AI rarely names one";
+  const body = side === "rarely" ? `Most answers explain ${plural} in general, so there is little room here for any brand.` : `Where it does name brands it uses them as examples of ${plural}, so the names it reaches for first are the ones to watch.`;
+  return { heading, body: join(body) };
+}
