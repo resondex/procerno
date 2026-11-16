@@ -31,7 +31,9 @@ const { insightInputs, rankedInsights } = await import(process.cwd() + "/src/lib
 const { computeBrief } = await import(process.cwd() + "/src/lib/engine/brief.ts");
 const { computeDossiers } = await import(process.cwd() + "/src/lib/engine/dossiers.ts");
 const { buildResolver } = await import(process.cwd() + "/src/lib/engine/brand_resolve.ts");
-const { isAllowedTag } = await import(process.cwd() + "/src/lib/engine/panel_tags.ts");
+const { isAllowedTag, TAKEAWAY_TAGS } = await import(process.cwd() + "/src/lib/engine/panel_tags.ts");
+/* am36: the verdict panels whose steps carry takeaways and whose explanation repeats no bar number. */
+const VERDICT_KINDS = new Set(["value", "buyer_worry", "customer_worry", "looking_around", "expansion", "business_case", "critic", "alongside", "criteria"]);
 const fsMod = await import("node:fs");
 import type { PanelNum, PositionPanel, PanelStep, PanelConditions, AnswerRef, RivalAcross } from "../src/lib/engine/analysis_types";
 
@@ -354,6 +356,8 @@ for (const project of projects) {
     let detailCount = 0;
     let avgCount = 0;
     let repeatChecks = 0;
+    let verdictChecked = 0;
+    let planted = false; // PANEL_PLANT=1: one value explanation gets a bar number, to prove 6f bites
     const SEG_FIELD: Record<string, [string, (v: unknown) => boolean]> = {
       proceed: ["proceed_or_avoid", (v) => v === "proceed"], avoid: ["proceed_or_avoid", (v) => v === "avoid"],
       keep: ["keep_or_leave", (v) => v === "keep"], leave: ["keep_or_leave", (v) => v === "leave"],
@@ -521,6 +525,54 @@ for (const project of projects) {
         const bars = valuesOf(rv.steps.flatMap((s) => [s.here, ...(s.rivals ?? []).map((r) => r.num)]));
         for (const [k, d] of Object.entries(rv.details ?? {})) if (d) { repeatChecks++; repeats(d.body, bars, `${id} rival ${rv.name} details.${k}`); }
       }
+      // 6f. am36: the verdict panels - every step carries a one-line takeaway tag, the same in
+      // both views; the explanation (detail, and detailComp or detail in the comparison view)
+      // and the lead never repeat a number the top bars of that view draw (the bars, the
+      // split bars, the checklist, the step's sentence and the small "usual X%" figures), and
+      // the explanation body is one sentence.
+      if (VERDICT_KINDS.has(p.kind)) {
+        if (process.env.PANEL_PLANT && !planted && p.kind === "value" && p.detail && p.steps[0]?.segments?.[0]) {
+          planted = true;
+          p.detail = { ...p.detail, body: [...p.detail.body, { t: ` ${p.steps[0].segments[0].num.value}` }] };
+        }
+        if (!p.thin)
+          for (const s of p.steps) {
+            if (!s.tagUsual || !TAKEAWAY_TAGS.includes(s.tagUsual)) failures.push(`${project.brand}: ${id} ${p.kind} step ${s.key} has no takeaway tag ("${s.tagUsual ?? ""}")`);
+            if (s.tagRank !== s.tagUsual) failures.push(`${project.brand}: ${id} ${p.kind} step ${s.key} tag differs between views`);
+          }
+        const usualSteps = p.usualCellId ? ((view.positions as Record<string, Position>)[p.usualCellId]?.panel?.steps ?? []) : [];
+        const noteNums = (s: PanelStep) => new Set((s.note ?? []).flatMap((sp) => sp.t.match(/<?\d+%/g) ?? []));
+        const stepVals = (s: PanelStep, comp: boolean) => [
+          s.here, ...(comp ? (s.rivals ?? []).map((r) => r.num) : [s.usual, s.vs?.num]),
+          ...(s.segments ?? []).map((g) => g.num), ...(s.items ?? []).map((it) => it.num),
+          ...(comp ? [] : [usualSteps.find((u) => u.key === s.key)?.here, ...(usualSteps.find((u) => u.key === s.key)?.segments ?? []).map((g) => g.num)]),
+        ];
+        const barsOf = (comp: boolean) => {
+          const set = valuesOf(p.steps.flatMap((s) => stepVals(s, comp)));
+          for (const s of p.steps) for (const m of noteNums(s)) set.add(m);
+          return set;
+        };
+        const nb = barsOf(false);
+        const cb = barsOf(true);
+        const views: [string, PositionPanel["detail"], Set<string>][] = [["detail", p.detail, nb], ...(p.compare ? [["detailComp", p.detailComp ?? p.detail, cb] as [string, PositionPanel["detail"], Set<string>]] : [])];
+        for (const [v, d, bars] of views) {
+          if (!d) continue;
+          repeatChecks++;
+          repeats(d.body, bars, `${id} ${p.kind} ${v}`);
+          const txt = d.body.map((x) => x.t).join("");
+          if ((txt.match(/[a-z]{2}\.\s+[A-Z]/g) ?? []).length) failures.push(`${project.brand}: ${id} ${p.kind} ${v} is more than one sentence: "${txt.slice(0, 160)}"`);
+        }
+        if (p.lead?.length) {
+          repeatChecks += 2;
+          repeats(p.lead, nb, `${id} ${p.kind} lead`);
+          if (p.compare) repeats(p.lead, cb, `${id} ${p.kind} lead (comparison view)`);
+        }
+        verdictChecked++;
+      }
+      if (p.kind === "h2h" && p.detail) {
+        repeatChecks++;
+        repeats(p.detail.body, barsNormal, `${id} h2h detail`);
+      }
       // 7. kinds without conditions.
       if ((p.kind === "buyer_worry" || p.kind === "customer_worry" || p.kind === "value" || p.kind === "business_case") && p.conditions) failures.push(`${project.brand}: ${id} ${p.kind} carries conditions`);
       if ((p.kind === "learning" || p.kind === "critic") && p.conditions) failures.push(`${project.brand}: ${id} ${p.kind} carries conditions`);
@@ -661,7 +713,7 @@ for (const project of projects) {
     // 9. ruling 5 omissions.
     for (const o of (debug as { panelOmissions?: { cellId: string; list: string; code: string; share: number; hit: string; via: string }[] }).panelOmissions ?? [])
       omissionLines.push(`${project.brand.padEnd(17)} | ${o.cellId.padEnd(44)} | ${o.list.padEnd(9)} | ${o.code.padEnd(28)} | ${(Math.round(o.share * 1000) / 10).toFixed(1).padStart(5)}% | ${o.hit.padEnd(16)} | ${o.via}`);
-    console.log(`PANELS: ${panels} panels, ${nums} numbers, ${refCount} example answers checked, ${labelFallbacks} quoted-seed claims, ${detailCount} step details, ${avgCount} average-competitor steps, ${repeatChecks} explanations checked for repeated bar numbers`);
+    console.log(`PANELS: ${panels} panels, ${nums} numbers, ${refCount} example answers checked, ${labelFallbacks} quoted-seed claims, ${detailCount} step details, ${avgCount} average-competitor steps, ${repeatChecks} explanations checked for repeated bar numbers, ${verdictChecked} verdict panels checked`);
     if (detailCount === 0) failures.push(`${project.brand}: no panel carries step details`);
     if (avgCount === 0) failures.push(`${project.brand}: no panel carries an average competitor`);
     // The mockup numbers (American Express).

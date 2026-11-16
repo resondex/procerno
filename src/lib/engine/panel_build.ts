@@ -7,13 +7,28 @@ import type { Resolver } from "./brand_resolve";
 import type { PoolRow, RateCell } from "./view_data";
 import type { ValueFact } from "./value";
 import { filterObvious, type Omission, type OmissionList } from "./panel_filter";
-import { AVG_COMP, TAG_FURTHEST, TAG_GAP_OPENS, avgTag, duelTag, usualDir, duelTone, focusOf, neutralUsualTag, otherTag, rankTag, segTag, toneOfTag, usualTag, usualTone, type KN } from "./panel_tags";
+import { AVG_COMP, GAP_TAKEAWAY, TAG_FURTHEST, TAG_GAP_OPENS, agreesTakeaway, alongsideTakeaway, avgTag, caseTakeaway, criticStrengthTakeaway, duelTag, insteadTakeaway, keepTakeaway, leanOf, offersTakeaway, oftenOf, premiseTakeaway, proceedTakeaway, stanceTakeaway, taughtTakeaway, usualDir, duelTone, focusOf, neutralUsualTag, otherTag, rankTag, segTag, toneOfTag, usualTag, usualTone, worthTakeaway, type KN, type Takeaway } from "./panel_tags";
 import { ROW_NAME } from "./question_names";
 import {
   F,
   N,
   NO_CONDITION_ROWS,
   T,
+  alongsideDetail,
+  buyerWorryDetail,
+  caseDetail,
+  criteriaDetail,
+  criticDetail,
+  customerWorryDetail,
+  expansionDetail,
+  h2hDetail,
+  lookingAroundDetail,
+  valueDetail,
+  type BuyerSide,
+  type CaseSide,
+  type InsteadSide,
+  type KeepSide,
+  type ValueSide,
   THIN,
   THIN_RIVAL,
   article,
@@ -1050,7 +1065,8 @@ function holdPanel(inp: PanelCellInput, ctx: Ctx): PositionPanel {
   const a = conditions?.away ?? [];
   if (a.length) {
     const towardSum = (conditions?.toward ?? []).reduce((x, c) => x + c.share.pct, 0);
-    lead = join(attachedLead(`looking at another ${h.noun}`, a.slice(0, 2), "answers"), towardSum < 15 ? " It gives few conditions for staying." : "");
+    // am36: the lead quotes the conditions without their shares (the block below carries them), so it never repeats a bar number.
+    lead = join(attachedLead(`looking at another ${h.noun}`, a.slice(0, 2).map((c) => ({ text: c.text })), "answers"), towardSum < 15 ? " It gives few conditions for staying." : "");
   }
   const { block, comp } = destBlock(rows, ctx, `Which ${h.plural} it shows`, `Share of these answers that name it as an alternative. Open a rival to see how it gets its picks.`, (r) => r.code.destinations);
   const rivals = comp.map((c) => rivalSmall(inp, ctx, c, (r) => h.activeDests(r.code.destinations).has(c.key), "Shown as an alternative"));
@@ -2205,8 +2221,74 @@ function finishPanel(inp: PanelCellInput, p: PositionPanel, up: PositionPanel | 
       s.tagRank = `${s.tagRank} · furthest behind`;
       p.focusComp = worst.key;
     }
+    verdictTakeaways(inp, p);
     detailOf(inp, p, up, ctx);
     stepDetailsOf(inp, p, u, ctx);
+  }
+}
+
+/** am36: the verdict panels' steps carry a one-line takeaway read off this
+ * cell's own numbers (panel_tags.ts, thresholds there), the same in both
+ * views; the usual stays the small figure beside each bar. */
+const TAKEAWAY_KINDS = new Set<PanelKind>(["value", "buyer_worry", "customer_worry", "looking_around", "expansion", "business_case", "critic", "alongside", "criteria"]);
+const segPct = (s: PanelStep | undefined, key: string) => s?.segments?.find((x) => x.key === key)?.num.pct ?? 0;
+/** A segment here against the same segment of the row's All cell, in words (absent without a usual). */
+function segOften(s: PanelStep | undefined, us: PanelStep | undefined, key: string) {
+  const a = s?.segments?.find((x) => x.key === key)?.num;
+  const b = us?.segments?.find((x) => x.key === key)?.num;
+  const ka = a ? knOf(a) : null;
+  const kb = b ? knOf(b) : null;
+  if (!ka || !kb || ka.n < PANEL_MIN || kb.n < PANEL_MIN) return undefined;
+  return oftenOf(ka, kb);
+}
+/** The rival the panel's competitors block lists first (never your own row). */
+const topRivalOf = (p: PositionPanel) => [...(p.competitors?.rows ?? [])].filter((r) => !r.you).sort((a, b) => b.num.pct - a.num.pct)[0]?.name;
+/** A keep-or-leave step read as one side (keepTakeaway's rule). */
+function keepSideOf(v: PanelStep): KeepSide {
+  const t = keepTakeaway(segPct(v, "keep"), segPct(v, "leave"), segPct(v, "none")).tag;
+  const SIDE: Record<string, KeepSide> = {
+    "Tells customers to stay": "stay",
+    "More told to stay than to leave": "stay",
+    "Tells customers to leave": "leave",
+    "More told to leave than to stay": "leave",
+    "Mostly takes no side": "none",
+  };
+  return SIDE[t] ?? "split";
+}
+function verdictTakeaways(inp: PanelCellInput, p: PositionPanel) {
+  if (!TAKEAWAY_KINDS.has(p.kind)) return;
+  const set = (s: PanelStep, t: Takeaway) => {
+    s.tagUsual = t.tag;
+    s.tagUsualTone = t.tone;
+    s.tagRank = t.tag;
+    s.tagRankTone = t.tone;
+  };
+  const agrees = p.steps.find((s) => s.key === "agrees")?.here?.pct ?? null;
+  for (const s of p.steps) {
+    let t: Takeaway | null = null;
+    if (p.kind === "value" && s.key === "worth") t = worthTakeaway(segPct(s, "yes"), segPct(s, "depends"), segPct(s, "no"), !!inp.pooled);
+    else if (p.kind === "value" && s.key === "instead") t = insteadTakeaway(segPct(s, "own"), segPct(s, "rival"), segPct(s, "nowhere"));
+    else if (s.key === "agrees" && s.here) t = agreesTakeaway(s.here.pct);
+    else if (p.kind === "buyer_worry" && s.key === "verdict") t = proceedTakeaway(segPct(s, "proceed"), segPct(s, "avoid"), segPct(s, "none"), agrees);
+    else if ((p.kind === "customer_worry" || p.kind === "looking_around") && s.key === "verdict") t = keepTakeaway(segPct(s, "keep"), segPct(s, "leave"), segPct(s, "none"));
+    else if (p.kind === "looking_around" && s.key === "offers" && s.here) t = offersTakeaway(s.here.pct);
+    else if (p.kind === "expansion" && s.key === "stance") t = stanceTakeaway(segPct(s, "backs"), segPct(s, "neutral"), segPct(s, "redirects"));
+    else if (p.kind === "business_case" && s.key === "strength") t = caseTakeaway(segPct(s, "strong"), segPct(s, "hedged"), segPct(s, "undermined"));
+    else if (p.kind === "critic" && s.key === "strength") t = criticStrengthTakeaway(segPct(s, "strong"), segPct(s, "partial"), segPct(s, "concedes"));
+    else if (p.kind === "critic" && s.key === "premise") t = premiseTakeaway(segPct(s, "rebuts"), segPct(s, "mixed"), segPct(s, "confirms"));
+    else if (p.kind === "alongside" && s.key === "alongside") {
+      const all = inp.rows.length || 1;
+      const rel = (x: string) => (100 * inp.rows.filter((r) => (r.code.pairings ?? []).some((q) => q.maker_relation === x)).length) / all;
+      t = alongsideTakeaway(rel("own"), rel("third_party"), rel("substitute"));
+    } else if (p.kind === "criteria" && s.key === "taught") t = taughtTakeaway(p.steps.some((x) => x.key === "gap"));
+    else if (p.kind === "criteria" && s.key === "gap") t = GAP_TAKEAWAY;
+    if (t) set(s, t);
+    else {
+      delete s.tagUsual;
+      delete s.tagUsualTone;
+      delete s.tagRank;
+      delete s.tagRankTone;
+    }
   }
 }
 
@@ -2217,7 +2299,6 @@ function detailOf(inp: PanelCellInput, p: PositionPanel, up: PositionPanel | und
     const u = up?.steps.find((x) => x.key === k);
     return s?.here && u?.here ? { here: s.here, usual: u.here } : undefined;
   };
-  const seg = (s: PanelStep | undefined, key: string) => s?.segments?.find((x) => x.key === key)?.num;
   if (FUNNEL_KINDS.has(p.kind)) {
     if (up) {
       const who = p.kind === "switching" ? { here: "with these customers", usual: "across all rivals' customers" } : { here: "with this buyer", usual: "across all buyers" };
@@ -2286,119 +2367,103 @@ function detailOf(inp: PanelCellInput, p: PositionPanel, up: PositionPanel | und
     }
     case "alongside": {
       const v = inp.rows;
-      const str = v.filter((r) => r.code.relationship_verdict === "strengthens");
-      const weak = v.filter((r) => r.code.relationship_verdict === "weakens");
-      const sn = num(str.length, v.length, "answers", refsOf(str, (r) => verdictFind(r, h)));
-      const wn = num(weak.length, v.length, "answers", refsOf(weak, (r) => verdictFind(r, h)));
-      const heading = weak.length === 0 ? "The AI builds on what the customer already has with you" : weak.length > str.length ? "The AI more often works against what the customer has with you" : "The AI mostly builds on what the customer has with you";
-      p.detail = det(
-        heading,
-        join(
-          "The customer asked what to use alongside you, so another company's name in the answer is the question being answered, not the AI steering them away. ",
-          str.length === v.length && v.length > 0 ? join(F("Every answer", sn), ` builds on the customer's use of ${h.brand}`) : join(N(sn), ` of answers build on the customer's use of ${h.brand}`),
-          weak.length ? join(" and ", N(wn), " work against it.") : "; none works against it."
-        )
-      );
+      const str = v.filter((r) => r.code.relationship_verdict === "strengthens").length;
+      const weak = v.filter((r) => r.code.relationship_verdict === "weakens").length;
+      const heading = weak === 0 ? "The AI builds on what the customer already has with you" : weak > str ? "The AI more often works against what the customer has with you" : "The AI mostly builds on what the customer has with you";
+      p.detail = alongsideDetail(heading);
       return;
     }
     case "critic": {
       const sg = p.steps.find((x) => x.key === "strength");
       const pm = p.steps.find((x) => x.key === "premise");
-      const strong = sg?.segments?.find((x) => x.key === "strong")?.num.pct ?? 0;
-      const rebuts = pm?.segments?.find((x) => x.key === "rebuts")?.num.pct ?? 0;
-      const confirms = pm?.segments?.find((x) => x.key === "confirms")?.num.pct ?? 0;
+      const strong = segPct(sg, "strong");
+      const rebuts = segPct(pm, "rebuts");
+      const confirms = segPct(pm, "confirms");
       const heading = strong >= 50 && rebuts >= 50 ? "The AI arms the customer against the critic" : confirms >= 50 ? "The AI more often sides with the critic" : "The AI gives the customer only part of a defense";
-      const red = p.lines?.some((l) => l.label.startsWith("Also points to"));
-      p.detail = det(heading, join(`The customer took your side and asked for arguments, so read this as how well the AI equips them. It is not the AI choosing you over a rival.${red ? "" : ` No answer points the customer to another ${h.noun}.`}`));
+      const red = !!p.lines?.some((l) => l.label.startsWith("Also points to"));
+      p.detail = criticDetail(heading, red, h.noun);
       return;
     }
     case "h2h": {
       const won = p.steps.find((s) => s.key === "won");
       const decided = p.steps.find((s) => s.key === "decided");
       const R = inp.pooled ? "your named rivals" : inp.rivalName ?? inp.label;
-      if (inp.exception && decided?.here && won?.vs) {
-        p.detail = det(
-          "You lose this one - with an exception",
-          join("The AI names one of you in ", N(decided.here), ` of answers, and it picks ${R} in `, N(won.vs.num), ` of those. Most of the answers that pick ${R} still say when to choose you.`)
-        );
-      } else if (won?.here) {
-        const w = won.here.pct;
-        p.detail = det(
-          w >= 60 ? (inp.pooled ? "You win most of your head-to-heads" : `You win this matchup against ${R}`) : w <= 40 ? (inp.pooled ? "Your named rivals win most of your head-to-heads" : `${R} wins this matchup`) : "This matchup is close",
-          join("When the AI picks one of the two, it picks you in ", N(won.here), " of those answers.", decided?.here ? join(" It picks one of the two in ", N(decided.here), " of all answers.") : "")
-        );
-      }
+      if (!won?.here && !(inp.exception && decided?.here && won?.vs)) return;
+      const w = won?.here?.pct ?? 50;
+      p.detail = h2hDetail({ exception: !!(inp.exception && decided?.here && won?.vs), rival: R, pooled: !!inp.pooled, side: w >= 60 ? "you" : w <= 40 ? "rival" : "close", mostlyDecided: (decided?.here?.pct ?? 0) >= 50 });
       return;
     }
     case "buyer_worry": {
       const v = p.steps.find((s) => s.key === "verdict");
-      const go = seg(v, "proceed");
-      const none = seg(v, "none");
-      const ag = p.steps.find((s) => s.key === "agrees")?.here;
-      const uNone = seg(up?.steps.find((s) => s.key === "verdict"), "none");
-      if (!go || !none) return;
-      const heading =
-        ag && ag.pct >= 50 && go.pct < 10
-          ? "It grants the worry, then leaves the decision to the buyer"
-          : go.pct >= 50
-            ? "It tells most buyers to go ahead"
-            : "It answers the worry without settling it";
-      p.detail = det(heading, join("It takes no side in ", N(none), " of these answers", uNone ? join(", against ", N(uNone), " across all your buyers' worries") : "", "."));
+      if (!v?.segments) return;
+      const go = segPct(v, "proceed");
+      const av = segPct(v, "avoid");
+      const none = segPct(v, "none");
+      const ag = p.steps.find((s) => s.key === "agrees")?.here?.pct ?? null;
+      const l = leanOf(go, av);
+      const side: BuyerSide = go >= 50 ? "go" : av >= 50 ? "avoid" : none >= 50 ? (ag !== null && ag >= 50 ? "grant" : "none") : l > 0 ? "go" : l < 0 ? "avoid" : "split";
+      const key = side === "go" || side === "split" ? "proceed" : side === "avoid" ? "avoid" : "none";
+      const often = segOften(v, up?.steps.find((s) => s.key === "verdict"), key);
+      p.detail = buyerWorryDetail({ side, often, topRival: topRivalOf(p) });
       return;
     }
     case "customer_worry": {
       const v = p.steps.find((s) => s.key === "verdict");
-      const keep = seg(v, "keep");
-      const leave = seg(v, "leave");
-      const ag = p.steps.find((s) => s.key === "agrees");
-      if (!keep || !leave) return;
-      const heading = leave.pct > keep.pct ? "Where it takes a side, it sides with leaving" : keep.pct > leave.pct ? "Where it takes a side, it sides with staying" : "It rarely takes a side";
-      const ua = up?.steps.find((s) => s.key === "agrees")?.here;
-      p.detail = det(heading, ag?.here ? join("It agrees with the complaint in ", N(ag.here), " of the answers that judge it", ua ? join(", against ", N(ua), " across all your customers' worries") : "", ".") : join("It says leave in ", N(leave), " of answers and stay in ", N(keep), "."));
+      if (!v?.segments) return;
+      const side = keepSideOf(v);
+      const key = side === "stay" ? "keep" : side === "none" ? "none" : "leave";
+      const often = segOften(v, up?.steps.find((s) => s.key === "verdict"), key);
+      const leaveRows = inp.rows.filter((r) => r.code.keep_or_leave === "leave");
+      const noDest = leaveRows.filter((r) => h.activeDests(r.code.destinations).size === 0).length;
+      p.detail = customerWorryDetail({ side, often, topRival: topRivalOf(p), leaveNoDest: leaveRows.length > 0 && noDest > leaveRows.length / 2, noun: h.noun });
       return;
     }
     case "looking_around": {
       const v = p.steps.find((s) => s.key === "verdict");
-      const leave = seg(v, "leave");
       const offers = p.steps.find((s) => s.key === "offers")?.here;
-      if (!leave || !offers) return;
-      p.detail = det(
-        leave.pct < 10 && offers.pct >= 50 ? "It does not push them out, but it shows them the door" : leave.pct >= 30 ? "It tells many of your customers to leave" : "It mostly leaves the choice to your customer",
-        join(`Asked for alternatives, the AI supplies them in `, N(offers), " of answers. It says leave in ", N(leave), ", so the names it gives are who it puts in front of your customers, not always who it sends them to.")
-      );
+      if (!v?.segments || !offers) return;
+      const side = keepSideOf(v);
+      p.detail = lookingAroundDetail({ side: segPct(v, "leave") >= 30 ? "leave" : side, showsMost: offers.pct >= 50, topRival: topRivalOf(p) });
       return;
     }
     case "value": {
       const w = p.steps.find((s) => s.key === "worth");
-      const no = seg(w, "no");
-      const yes = seg(w, "yes");
-      const uNo = seg(up?.steps.find((s) => s.key === "worth"), "no");
-      if (!no || !yes) return;
-      const heading = no.pct > yes.pct ? (inp.pooled ? "Across buyers the AI more often says it does not earn the higher price" : "For this buyer the AI does not think it earns the higher price") : yes.pct > no.pct ? "The AI more often says it earns the higher price" : "The AI mostly says it depends";
-      p.detail = det(heading, uNo && !inp.pooled ? join("Across all buyers the AI says not worth it in ", N(uNo), " of answers; for this buyer it is ", N(no), ".") : join("It says not worth it in ", N(no), " of answers and worth it in ", N(yes), "."));
+      const ins = p.steps.find((s) => s.key === "instead");
+      if (!w?.segments) return;
+      const yes = segPct(w, "yes");
+      const no = segPct(w, "no");
+      const dep = segPct(w, "depends");
+      const l = leanOf(yes, no);
+      const side: ValueSide = no >= 50 ? "no" : yes >= 50 ? "yes" : dep >= 50 ? "depends" : l > 0 ? "yes" : l < 0 ? "no" : "split";
+      const key = side === "yes" ? "yes" : side === "depends" ? "depends" : "no";
+      const often = segOften(w, up?.steps.find((s) => s.key === "worth"), key);
+      const own = segPct(ins, "own");
+      const rival = segPct(ins, "rival");
+      const nowhere = segPct(ins, "nowhere");
+      const li = leanOf(rival, own);
+      const instead: InsteadSide = rival >= 50 ? "rival" : own >= 50 ? "own" : nowhere >= 50 ? "nowhere" : li > 0 ? "rival" : li < 0 ? "own" : "even";
+      p.detail = valueDetail({ side, pooled: !!inp.pooled, often, instead, topRival: topRivalOf(p), noun: h.noun });
       return;
     }
     case "criteria": {
-      const gap = p.steps.find((s) => s.key === "gap");
-      p.detail = gap
-        ? det("The checklist the AI hands buyers leaves out your strongest points", join(`A buyer who follows this checklist compares ${h.plural} on things other brands win on.`))
-        : det("The checklist the AI hands buyers covers your case", join("What comes up most when the AI picks you is on the list it teaches."));
+      p.detail = criteriaDetail(p.steps.some((s) => s.key === "gap"), h.plural);
       return;
     }
     case "expansion": {
       const s = p.steps.find((x) => x.key === "stance");
-      const segs = s?.segments ?? [];
-      const top = [...segs].sort((a, b) => b.num.pct - a.num.pct)[0];
-      const heading = top?.key === "backs" ? "The AI supports your customers growing their use" : top?.key === "redirects" ? "The AI mostly points your customers elsewhere" : "The AI mostly leaves the decision to the customer";
-      p.detail = det(heading, join("The customer set the direction by asking, so read this as the AI not getting in the way. It is not the AI choosing you over a rival."));
+      const top = [...(s?.segments ?? [])].sort((a, b) => b.num.pct - a.num.pct)[0];
+      p.detail = expansionDetail(top?.key === "backs" ? "backs" : top?.key === "redirects" ? "redirects" : "neutral");
       return;
     }
     case "business_case": {
-      const top = p.table?.rows.slice(0, 2).map((r) => r.label) ?? [];
-      p.detail = det(
-        top.length ? `The AI makes your case, most often on ${listWords(top)}` : "The AI makes your case",
-        join("The customer already chose you and asked for arguments, so read this as how well the AI equips them. It is not the AI choosing you over a rival.")
-      );
+      const s = p.steps.find((x) => x.key === "strength");
+      const strong = segPct(s, "strong");
+      const hedged = segPct(s, "hedged");
+      const against = segPct(s, "undermined");
+      const l = leanOf(strong, hedged);
+      const side: CaseSide = against >= 50 ? "against" : strong >= 50 ? "strong" : hedged >= 50 ? "hedged" : against >= 20 ? "against" : l > 0 ? "strong" : l < 0 ? "hedged" : "even";
+      const top = side === "strong" ? p.table?.rows.slice(0, 2).map((r) => r.label) ?? [] : [];
+      p.detail = caseDetail(side, top);
       return;
     }
   }

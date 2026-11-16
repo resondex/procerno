@@ -266,3 +266,148 @@ export const wonLine = (side: "you" | "rival" | "close"): PanelText =>
 
 /** The title over the rows of who takes the pick after recommending you. */
 export const takersTitle = (noun: string) => `When it recommends you and picks another ${noun}, it picks`;
+
+/* ---------- am36: the verdict panels' explanation ----------
+ * A heading that states the point and ONE sentence that adds what the bars
+ * do not: the comparison with the usual said in words (never its two
+ * figures), and where the AI points the reader instead. No number the top
+ * bars draw - these sentences carry no number at all. */
+
+/** How often a share here sits against the usual, in words (panel_tags oftenOf). */
+export type OftenWords = "far more" | "more" | "about as" | "less" | "far less";
+export const oftenPhrase = (w: OftenWords, here: string, usual: string) => (w === "about as" ? `about as often ${here} as ${usual}` : `${w} often ${here} than ${usual}`);
+
+const sentence = (a: string | null, b: string) => (a ? `${upperFirst(a)}, and ${b}.` : `${upperFirst(b)}.`);
+
+export type ValueSide = "no" | "yes" | "depends" | "split";
+export type InsteadSide = "rival" | "own" | "nowhere" | "even";
+export function valueDetail(o: { side: ValueSide; pooled: boolean; often?: OftenWords; instead: InsteadSide; topRival?: string; noun: string }): { heading: string; body: PanelText } {
+  const heading =
+    o.side === "no"
+      ? o.pooled
+        ? "Across buyers the AI more often says it does not earn the higher price"
+        : "For this buyer the AI does not think it earns the higher price"
+      : o.side === "yes"
+        ? o.pooled
+          ? "Across buyers the AI more often says it earns the higher price"
+          : "For this buyer the AI says it earns the higher price"
+        : o.side === "depends"
+          ? "The AI mostly says it depends on how the buyer will use it"
+          : "The AI gives no clear answer on the higher price";
+  const said = o.side === "yes" ? "it says worth it" : o.side === "depends" ? "it says it depends" : "it says not worth it";
+  const a = o.often && !o.pooled ? `${said} ${oftenPhrase(o.often, "for this buyer", "across all your buyers")}` : null;
+  const b =
+    o.instead === "rival"
+      ? `when it names a cheaper option it is more often a rival's ${o.noun}${o.topRival ? `, most often ${o.topRival}` : ""}`
+      : o.instead === "own"
+        ? `when it names a cheaper option it is more often your own than a rival's`
+        : o.instead === "nowhere"
+          ? "it mostly names no cheaper option at all"
+          : "when it names a cheaper option, rivals' and your own come up about equally";
+  return { heading, body: join(sentence(a, b)) };
+}
+
+export type BuyerSide = "go" | "avoid" | "grant" | "none" | "split";
+export function buyerWorryDetail(o: { side: BuyerSide; often?: OftenWords; topRival?: string }): { heading: string; body: PanelText } {
+  const heading =
+    o.side === "go"
+      ? "The AI tells buyers this worry should not stop them"
+      : o.side === "avoid"
+        ? "The AI tells buyers to steer clear"
+        : o.side === "grant"
+          ? "It grants the worry, then leaves the decision to the buyer"
+          : o.side === "none"
+            ? "It answers the worry without settling it"
+            : "It gives no clear answer on the worry";
+  const said = o.side === "go" || o.side === "split" ? "it says go ahead" : o.side === "avoid" ? "it says steer clear" : "it takes no side";
+  const a = o.often ? `${said} ${oftenPhrase(o.often, "for this worry", "across all your buyers' worries")}` : null;
+  const b = o.topRival ? `the rival it names most often instead is ${o.topRival}` : "it names no rival instead often enough to list";
+  return { heading, body: join(sentence(a, b)) };
+}
+
+export type KeepSide = "stay" | "leave" | "none" | "split";
+export function customerWorryDetail(o: { side: KeepSide; often?: OftenWords; topRival?: string; leaveNoDest: boolean; noun: string }): { heading: string; body: PanelText } {
+  const heading =
+    o.side === "stay"
+      ? "It tells customers to stay despite the worry"
+      : o.side === "leave"
+        ? "It sides with leaving over staying"
+        : o.side === "none"
+          ? "It mostly leaves the decision to the customer"
+          : "It splits between staying and leaving";
+  const said = o.side === "stay" ? "it says stay" : o.side === "none" ? "it takes no side" : "it says leave";
+  const a = o.often ? `${said} ${oftenPhrase(o.often, "for this worry", "across all your customers' worries")}` : null;
+  const b = o.leaveNoDest
+    ? `most answers that say leave name no other ${o.noun} at all`
+    : o.topRival
+      ? `the rival it names most often to move to is ${o.topRival}`
+      : "it names no rival to move to often enough to list";
+  return { heading, body: join(sentence(a, b)) };
+}
+
+export function lookingAroundDetail(o: { side: KeepSide; showsMost: boolean; topRival?: string }): { heading: string; body: PanelText } {
+  const heading =
+    o.side === "leave"
+      ? "It tells many of your customers to leave"
+      : o.side === "stay"
+        ? "It tells your customers to stay"
+        : o.showsMost
+          ? "It does not push them out, but it shows them the door"
+          : "It mostly leaves the choice to your customer";
+  const body = o.topRival
+    ? `Your customers asked for alternatives, so the rivals it names, most often ${o.topRival}, are who it puts in front of them, not always who it sends them to.`
+    : "Your customers asked for alternatives, so any rival it names is one it puts in front of them, not always one it sends them to.";
+  return { heading, body: join(body) };
+}
+
+export function expansionDetail(top: "backs" | "redirects" | "neutral"): { heading: string; body: PanelText } {
+  return {
+    heading: top === "backs" ? "The AI supports your customers growing their use" : top === "redirects" ? "The AI mostly points your customers elsewhere" : "The AI mostly leaves the decision to the customer",
+    body: join("The customer set the direction by asking, so read this as the AI not getting in the way, not as it choosing you over a rival."),
+  };
+}
+
+export type CaseSide = "strong" | "hedged" | "against" | "even";
+export function caseDetail(side: CaseSide, topics: string[]): { heading: string; body: PanelText } {
+  const on = topics.length ? `, most often on ${listWords(topics)}` : "";
+  return {
+    heading:
+      side === "strong"
+        ? `The AI hands your customer a confident case${on}`
+        : side === "hedged"
+          ? "The AI hedges the case it hands your customer"
+          : side === "against"
+            ? "The AI argues against you when asked to make your case"
+            : "The AI's case for you is as often hedged as confident",
+    body: join("The customer already chose you and asked for arguments, so read this as how well the AI equips them, not as it choosing you over a rival."),
+  };
+}
+
+export function criticDetail(heading: string, redirects: boolean, noun: string): { heading: string; body: PanelText } {
+  return {
+    heading,
+    body: join(`The customer took your side and asked for arguments, so read this as how well the AI equips them, not as it choosing you over a rival${redirects ? "" : `, and no answer points them to another ${noun}`}.`),
+  };
+}
+
+export function alongsideDetail(heading: string): { heading: string; body: PanelText } {
+  return { heading, body: join("The customer asked what to use alongside you, so another company's name in the answer is the question being answered, not the AI steering them away.") };
+}
+
+export function criteriaDetail(gap: boolean, plural: string): { heading: string; body: PanelText } {
+  return gap
+    ? { heading: "The checklist the AI hands buyers leaves out your strongest points", body: join(`A buyer who follows this checklist compares ${plural} on things other brands win on.`) }
+    : { heading: "The checklist the AI hands buyers covers your case", body: join("What comes up most when the AI picks you is on the list it teaches.") };
+}
+
+/** Head-to-head default explanation: no number the two step bars draw. */
+export function h2hDetail(o: { exception: boolean; rival: string; pooled: boolean; side: "you" | "rival" | "close"; mostlyDecided: boolean }): { heading: string; body: PanelText } {
+  if (o.exception) return { heading: "You lose this one - with an exception", body: join(`Most of the answers that pick ${o.rival} still say when to choose you.`) };
+  const heading =
+    o.side === "you"
+      ? o.pooled ? "You win most of your head-to-heads" : `You win this matchup against ${o.rival}`
+      : o.side === "rival"
+        ? o.pooled ? "Your named rivals win most of your head-to-heads" : `${o.rival} wins this matchup`
+        : "This matchup is close";
+  return { heading, body: decidedLine(o.mostlyDecided) };
+}

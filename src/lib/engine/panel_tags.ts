@@ -200,7 +200,7 @@ export const TAG_ALLOW: RegExp[] = [
 /** The Map's verdict words - never a tag. */
 export const TAG_BANNED = /\b(you hold|contested|a rival holds|no side taken|lost|yours|theirs|nearly always|almost always)\b/i;
 
-export const isAllowedTag = (t: string) => TAG_ALLOW.some((re) => re.test(t)) && !TAG_BANNED.test(t);
+export const isAllowedTag = (t: string) => (TAG_ALLOW.some((re) => re.test(t)) || TAKEAWAY_TAGS.includes(t)) && !TAG_BANNED.test(t);
 
 /** Pick the focus among steps compared with the usual: the below-tagged step
  * with the largest relative gap, else the furthest above. */
@@ -220,4 +220,190 @@ export function focusOf<K extends string>(steps: { key: K; here: KN; usual: KN }
     if (!best || g > best.gap) best = { key: s.key, gap: g, below: false };
   }
   return best ? { key: best.key, below: false } : null;
+}
+
+/* ---------------- am36: the verdict panels' one-line takeaways ----------------
+ * On the verdict panels (Value, both worry panels, looking around, the four
+ * making-your-case kinds, what to use alongside you, what to look for) each
+ * step's tag says what the step means for the reader, read off THIS cell's
+ * own numbers - never a comparison with the usual (that comparison is the
+ * small "usual X%" figure beside each bar, and the explanation below says it
+ * in words). The same tag is drawn in both views. Thresholds, all on shares
+ * of the step's own base (0-100):
+ *   MAJORITY  a side said in at least half the answers is the takeaway
+ *             ("Tells buyers to go ahead", "Not worth it for this buyer").
+ *   LEAN      no majority: the larger of the two sides that take a position
+ *             leads when it is at least 1.5 times the smaller AND at least 5
+ *             points ahead ("Leans go ahead", "More told to leave than to stay").
+ *   NO SIDE   on keep-or-leave steps, "no side" at 70% or more is the
+ *             takeaway before any lean is read ("Mostly takes no side").
+ *   otherwise "No clear answer" (or "... about even").
+ * Step-specific cut-offs: agreeing the worry is fair - 60 mostly, 35 often,
+ * 15 sometimes, below that rarely; a buyers' worry no-side majority with
+ * agreement at 50%+ reads "Agrees, then leaves it to the buyer"; looking
+ * around's "shows another option" - 50 most answers, 20 some, below rarely;
+ * a business case arguing against you in 20%+ (no majority) reads "Often
+ * argues against you"; alongside, naming one to replace you in 25%+ reads
+ * "Often names one to replace you". Tones: good / bad / neutral for you. */
+
+export interface Takeaway {
+  tag: string;
+  tone: PanelTone;
+}
+const MAJORITY = 50;
+const LEAN_RATIO = 1.5;
+const LEAN_PTS = 5;
+const NO_SIDE_FIRST = 70;
+/** 1 when a leads b, -1 when b leads a, 0 when neither leads (LEAN rule). */
+export function leanOf(a: number, b: number): 1 | -1 | 0 {
+  if (a >= b * LEAN_RATIO && a - b >= LEAN_PTS) return 1;
+  if (b >= a * LEAN_RATIO && b - a >= LEAN_PTS) return -1;
+  return 0;
+}
+const tk = (tag: string, tone: PanelTone): Takeaway => ({ tag, tone });
+
+/** Value, "Is it worth paying more for?" (yes / depends / no, of all answers). */
+export function worthTakeaway(yes: number, depends: number, no: number, pooled: boolean): Takeaway {
+  const who = pooled ? "most buyers" : "this buyer";
+  if (no >= MAJORITY) return tk(`Not worth it for ${who}`, "bad");
+  if (yes >= MAJORITY) return tk(`Worth it for ${who}`, "good");
+  if (depends >= MAJORITY) return tk("Mostly it depends", "neutral");
+  const l = leanOf(yes, no);
+  if (l > 0) return tk("Leans worth it", "good");
+  if (l < 0) return tk("Leans not worth it", "bad");
+  return tk("No clear answer", "neutral");
+}
+
+/** Value, "Where it points the buyer instead" (own cheaper / a rival's / nowhere, of all answers). */
+export function insteadTakeaway(own: number, rival: number, nowhere: number): Takeaway {
+  if (rival >= MAJORITY) return tk("Mostly points to a rival", "bad");
+  if (own >= MAJORITY) return tk("Mostly points to your own cheaper option", "neutral");
+  if (nowhere >= MAJORITY) return tk("Mostly names no cheaper option", "neutral");
+  const l = leanOf(rival, own);
+  if (l > 0) return tk("More to rivals than to your own", "bad");
+  if (l < 0) return tk("More to your own than to rivals", "neutral");
+  return tk("Rivals and your own about even", "neutral");
+}
+
+/** Both worry panels, "Agrees the worry is fair" (of the answers that judge it). */
+export function agreesTakeaway(agrees: number): Takeaway {
+  if (agrees >= 60) return tk("Mostly agrees the worry is fair", "bad");
+  if (agrees >= 35) return tk("Often agrees the worry is fair", "bad");
+  if (agrees >= 15) return tk("Sometimes agrees the worry is fair", "neutral");
+  return tk("Rarely agrees the worry is fair", "good");
+}
+
+/** Buyers' worry, "What it tells the buyer to do" (go ahead / steer clear / no side). */
+export function proceedTakeaway(go: number, avoid: number, none: number, agrees: number | null): Takeaway {
+  if (go >= MAJORITY) return tk("Tells buyers to go ahead", "good");
+  if (avoid >= MAJORITY) return tk("Tells buyers to steer clear", "bad");
+  if (none >= MAJORITY) return agrees !== null && agrees >= MAJORITY ? tk("Agrees, then leaves it to the buyer", "bad") : tk("Mostly leaves it to the buyer", "neutral");
+  const l = leanOf(go, avoid);
+  if (l > 0) return tk("Leans go ahead", "good");
+  if (l < 0) return tk("Leans steer clear", "bad");
+  return tk("No clear answer", "neutral");
+}
+
+/** Customers' worry and looking around, "What it tells the customer to do" (stay / leave / no side). */
+export function keepTakeaway(keep: number, leave: number, none: number): Takeaway {
+  if (keep >= MAJORITY) return tk("Tells customers to stay", "good");
+  if (leave >= MAJORITY) return tk("Tells customers to leave", "bad");
+  if (none >= NO_SIDE_FIRST) return tk("Mostly takes no side", "neutral");
+  const l = leanOf(leave, keep);
+  if (l > 0) return tk("More told to leave than to stay", "bad");
+  if (l < 0) return tk("More told to stay than to leave", "good");
+  if (none >= MAJORITY) return tk("Mostly takes no side", "neutral");
+  return tk("Stay and leave about even", "neutral");
+}
+
+/** Looking around, "Shows another option" (of all answers). The customer asked for alternatives, so showing them is not in itself bad. */
+export function offersTakeaway(offers: number): Takeaway {
+  if (offers >= MAJORITY) return tk("Shows another option in most answers", "neutral");
+  if (offers >= 20) return tk("Shows another option in some answers", "neutral");
+  return tk("Rarely shows another option", "good");
+}
+
+/** Expansion, "Does the answer back it?" (backs / neither / points elsewhere). */
+export function stanceTakeaway(backs: number, neither: number, redirects: number): Takeaway {
+  if (backs >= MAJORITY) return tk("Mostly backs their plan", "good");
+  if (redirects >= MAJORITY) return tk("Mostly points them elsewhere", "bad");
+  if (neither >= MAJORITY) return tk("Mostly leaves it to the customer", "neutral");
+  const l = leanOf(backs, redirects);
+  if (l > 0) return tk("Leans backing their plan", "good");
+  if (l < 0) return tk("Leans pointing them elsewhere", "bad");
+  return tk("No clear answer", "neutral");
+}
+
+/** Business case, "How strong a case..." (confident / hedged / against you). */
+export function caseTakeaway(strong: number, hedged: number, against: number): Takeaway {
+  if (against >= MAJORITY) return tk("Mostly argues against you", "bad");
+  if (strong >= MAJORITY) return tk("Mostly a confident case", "good");
+  if (hedged >= MAJORITY) return tk("Mostly a hedged case", "neutral");
+  if (against >= 20) return tk("Often argues against you", "bad");
+  const l = leanOf(strong, hedged);
+  if (l > 0) return tk("Leans confident", "good");
+  if (l < 0) return tk("Leans hedged", "neutral");
+  return tk("Confident and hedged about even", "neutral");
+}
+
+/** Answering a critic, "How strong an answer..." (strong / partial / gives in). */
+export function criticStrengthTakeaway(strong: number, partial: number, concedes: number): Takeaway {
+  if (concedes >= MAJORITY) return tk("Mostly gives in to the critic", "bad");
+  if (strong >= MAJORITY) return tk("Mostly a strong answer", "good");
+  if (partial >= MAJORITY) return tk("Mostly a partial answer", "neutral");
+  const l = leanOf(strong, partial);
+  if (l > 0) return tk("Leans strong", "good");
+  if (l < 0) return tk("Leans partial", "neutral");
+  return tk("Strong and partial about even", "neutral");
+}
+
+/** Answering a critic, "Does it say the critic is right?" (wrong / partly / right, of the answers that judge it). */
+export function premiseTakeaway(rebuts: number, mixed: number, confirms: number): Takeaway {
+  if (rebuts >= MAJORITY) return tk("Mostly says the critic is wrong", "good");
+  if (confirms >= MAJORITY) return tk("Mostly says the critic is right", "bad");
+  if (mixed >= MAJORITY) return tk("Mostly says the critic is partly right", "neutral");
+  const l = leanOf(rebuts, confirms);
+  if (l > 0) return tk("Sides against the critic more often", "good");
+  if (l < 0) return tk("Sides with the critic more often", "bad");
+  return tk("No clear answer", "neutral");
+}
+
+/** What to use alongside you (own / another company's / one to replace you, of all answers). */
+export function alongsideTakeaway(own: number, third: number, substitute: number): Takeaway {
+  if (substitute >= 25) return tk("Often names one to replace you", "bad");
+  if (own >= MAJORITY) return tk("Mostly names your own", "good");
+  if (third >= MAJORITY) return tk("Mostly names another company's", "neutral");
+  return tk("A mix of your own and others'", "neutral");
+}
+
+/** What to look for: the checklist step, and the gap step when it is drawn. */
+export const taughtTakeaway = (gap: boolean): Takeaway => (gap ? tk("Misses your strongest points", "bad") : tk("Covers your strongest points", "good"));
+export const GAP_TAKEAWAY: Takeaway = tk("Not on the checklist", "bad");
+
+/** Every takeaway tag (TAG_ALLOW reads it). */
+export const TAKEAWAY_TAGS: string[] = [
+  "Not worth it for most buyers", "Not worth it for this buyer", "Worth it for most buyers", "Worth it for this buyer", "Mostly it depends", "Leans worth it", "Leans not worth it", "No clear answer",
+  "Mostly points to a rival", "Mostly points to your own cheaper option", "Mostly names no cheaper option", "More to rivals than to your own", "More to your own than to rivals", "Rivals and your own about even",
+  "Mostly agrees the worry is fair", "Often agrees the worry is fair", "Sometimes agrees the worry is fair", "Rarely agrees the worry is fair",
+  "Tells buyers to go ahead", "Tells buyers to steer clear", "Agrees, then leaves it to the buyer", "Mostly leaves it to the buyer", "Leans go ahead", "Leans steer clear",
+  "Tells customers to stay", "Tells customers to leave", "Mostly takes no side", "More told to leave than to stay", "More told to stay than to leave", "Stay and leave about even",
+  "Shows another option in most answers", "Shows another option in some answers", "Rarely shows another option",
+  "Mostly backs their plan", "Mostly points them elsewhere", "Mostly leaves it to the customer", "Leans backing their plan", "Leans pointing them elsewhere",
+  "Mostly argues against you", "Mostly a confident case", "Mostly a hedged case", "Often argues against you", "Leans confident", "Leans hedged", "Confident and hedged about even",
+  "Mostly gives in to the critic", "Mostly a strong answer", "Mostly a partial answer", "Leans strong", "Leans partial", "Strong and partial about even",
+  "Mostly says the critic is wrong", "Mostly says the critic is right", "Mostly says the critic is partly right", "Sides against the critic more often", "Sides with the critic more often",
+  "Often names one to replace you", "Mostly names your own", "Mostly names another company's", "A mix of your own and others'",
+  "Misses your strongest points", "Covers your strongest points", "Not on the checklist",
+];
+
+/** A comparison with the usual, in words: how a share here sits against the
+ * same share across the row (same range rule and 0.6 / 1.6 ratios as segTag). */
+export type OftenWord = "far more" | "more" | "about as" | "less" | "far less";
+export function oftenOf(here: KN, usual: KN): OftenWord {
+  const p = rateOf(here);
+  const q = rateOf(usual);
+  const d = p === 0 && q > 0 ? -1 : usualDir(here, usual);
+  if (d === 0) return "about as";
+  if (d < 0) return q > 0 && p / q <= 0.6 ? "far less" : "less";
+  return q > 0 && p / q >= 1.6 ? "far more" : "more";
 }
