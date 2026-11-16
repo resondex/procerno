@@ -226,6 +226,7 @@ export function StepCard({
   usual,
   comp,
   focus,
+  dim: dimProp,
   hereLabel,
   usualLabel,
   rivalLabel,
@@ -236,6 +237,8 @@ export function StepCard({
   usual?: PanelStep;
   comp: boolean;
   focus: boolean;
+  /** Fade the bars. Default: every card but the highlighted one. A stack with no highlighted step fades none. */
+  dim?: boolean;
   hereLabel: string;
   usualLabel: string;
   /** Panel 11: the rival's own name beside "You". */
@@ -250,7 +253,7 @@ export function StepCard({
   // A step that is not about you alone names its own bars (the engine's words).
   const hereL = step.hereLabel ?? hereLabel;
   const usualL = step.usualLabel ?? usualLabel;
-  const dim = !focus;
+  const dim = dimProp ?? !focus;
   const body: ReactNode[] = [];
   if (step.here) {
     // A step not about you alone (any brand) keeps its own bar label beside the competitors.
@@ -351,7 +354,8 @@ export function StepStack({
             step={s}
             usual={usualSteps?.find((u) => u.key === s.key)}
             comp={comp}
-            focus={!focus || s.key === focus}
+            focus={s.key === focus}
+            dim={!!focus && s.key !== focus}
             hereLabel={hereLabel}
             usualLabel={usualLabel}
           />
