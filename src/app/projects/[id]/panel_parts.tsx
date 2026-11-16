@@ -1,6 +1,7 @@
 "use client";
 
 import { createContext, useCallback, useContext, useState } from "react";
+import { Tip } from "./table";
 import type { ReactNode } from "react";
 import type {
   AnswerRef,
@@ -407,12 +408,14 @@ export function StepStack({
 
 // ---------- blocks ----------
 
-/** A "?" beside a title: hover (or focus) for what a term on the card means. Never a count. */
+/** A "?" beside a title: hover for what a term on the card means, shown at once (the browser's own title tip waits about a second). Never a count. */
 export function Help({ text }: { text: string }) {
   return (
-    <span tabIndex={0} role="note" aria-label={text} title={text} className="ml-1.5 inline-flex h-[15px] w-[15px] cursor-help items-center justify-center rounded-full border border-line align-middle text-[10px] font-semibold not-italic leading-none text-ink-3">
-      ?
-    </span>
+    <Tip tip={text}>
+      <span tabIndex={0} role="note" aria-label={text} className="ml-1.5 inline-flex h-[15px] w-[15px] cursor-help items-center justify-center rounded-full border border-line align-middle text-[10px] font-semibold not-italic leading-none text-ink-3">
+        ?
+      </span>
+    </Tip>
   );
 }
 
