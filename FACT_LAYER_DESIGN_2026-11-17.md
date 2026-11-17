@@ -110,27 +110,27 @@ calculations that are supposed to match.
 | Written memos | Text in, numbers matched back by words | The writer is given facts with IDs and must keep each ID on its number |
 | Views by question type | Eleven separate engines | Removed as counters; "Question type detail" becomes a layout |
 
-## 5. Decisions only you can make
+## 5. The rulings (Tyler, 2026-11-17)
 
-The disagreements are definitions. The layer needs one answer to each. My recommendation is in the last column; say
-where you disagree.
+| # | Question | Ruling |
+|---|---|---|
+| 1 | A verdict the coder left blank | Not a ruling. No screen reads a field the question type does not ask; the rulebook refuses it. A blank where a verdict IS asked is a coding error (none exist in the 32,214 coded answers). |
+| 2 | Arguments "when another brand is picked" | Other picks in the category only. |
+| 3 | Price: "points to a rival" | Of all price answers, each answer in one bucket. |
+| 4 | A condition's share | Of all the answers to that question. |
+| 5 | Problem questions "outside the category" | "Adjacent" only; "none" is shown as its own share. |
+| 6 | Is a pick a recommendation? | Yes, everywhere. |
+| 7 | The all-buyers "What to buy" | The sum of the buyer cards. What's popular and Premium vs basic keep their own cards and are not in it. |
+| 8 | Brands marked "not for analysis" | Out of every brand count and never listed. Every pick falls in exactly one of three buckets: a brand in analysis, **outside of analysis**, or outside the category. "Outside of analysis" is its own bucket, never folded into "outside the category". Share of picks is out of picks of brands in analysis, so it adds to 100%. Everything recomputes when the analysis set changes. |
+| 9 | "Agrees the worry is fair" | Of the answers that took a side, with "took no side" shown. |
+| 10 | Conditions in the Overview's findings | Each question type on its own, so a finding matches the card it opens. |
+| 11 | "Converts" | One rule: the visibility view's (at or above the level line). |
 
-| # | Question | Options | I'd pick |
-|---|---|---|---|
-| 1 | A verdict the coder left blank | Counts as "no side" (shares add to 100%) / left out of the shares | "No side", everywhere |
-| 2 | Arguments "when another brand is picked" | Other picks in the category / any other pick | In the category |
-| 3 | Price: "points to a rival" | Of all price answers, one bucket each / of the doubting answers | Of all answers, one bucket each (the card's) |
-| 4 | A condition's share | Of all the answers to that question / of the answers that state a condition | Of all answers |
-| 5 | Problem questions "outside the category" | "Adjacent" only / anything not the category | "Adjacent" only; "none" shown as its own share |
-| 6 | Is a pick a recommendation? | Yes, everywhere / not on problem questions | Yes, everywhere |
-| 7 | The all-buyers "What to buy" | The sum of the buyer cards (two question types) / also What's popular and Premium vs basic | The sum of the buyer cards; the other two keep their own cards |
-| 8 | Brands marked "not for analysis" | Out of every count / counted but never named | Counted, shown under "Other" |
-| 9 | "Agrees the worry is fair" | Of answers that took a side / of all answers | Of answers that took a side, with "took no side" shown |
-| 10 | Conditions in the Overview's findings | Each question type on its own / pooled across all | Each question type on its own, so a finding matches the card it opens |
-| 11 | "Converts" | One rule for The diagnosis and the visibility view | The visibility view's (against the level line) |
+Ruling 8, the commit rate: it is the share of answers that pick one brand in analysis, so that "commits in X%, picked
+Y% of the time it does, Z% of all answers" still multiplies out. The shares "picks a brand outside of analysis" and
+"picks something outside the category" are shown beside it. (Confirm with Tyler: stated to him, not yet answered.)
 
-Each ruling that differs from what a screen does today changes numbers on that screen. Before building I would give you
-the list of every number that moves, for all six trackers, per ruling.
+Before building: the list of every number each ruling moves, for all six trackers.
 
 ## 6. How to build it without breaking what works
 
