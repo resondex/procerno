@@ -79,6 +79,25 @@ export const statId = {
   rivalTable: (name: string, table: "byBuyer" | "products", title: string, row: string, col: number) => `rival:${name}::${table}/${seg(title)}/${seg(row)}/${col}`,
 };
 
+/** Stage 5: one condition row on a card ("When the AI says to choose you, and when ..."), in the card's own order. */
+export interface CondRowStats {
+  /** The row's text as the card draws it (its identity on that card). */
+  text: string;
+  share: Stat;
+  /** The other side's own share ("Also said for ..."), when the row is stated on both sides. */
+  also?: Stat;
+  /** Of this row's answers, the share that pick the tracker. */
+  youPicked?: Stat;
+  /** Where the row sends buyers (the competitors view's "To ..." figures), in the card's order. */
+  to: { name: string; stat: Stat }[];
+}
+/** Stage 5: one row of a "What the answer weighs" column: its share on that side, and the other side's share beside it. */
+export interface WeighRowStats {
+  name: string;
+  num: Stat;
+  other?: Stat;
+}
+
 export interface StatRegistry {
   get(id: string): Stat | undefined;
   has(id: string): boolean;
@@ -94,6 +113,13 @@ export interface StatRegistry {
   rivalStep(name: string, stepKey: string, who: "rival" | "you"): Stat | undefined;
   rivalBody(name: string, stepKey: string, key: string | number): Stat | undefined;
   rivalTable(name: string, table: "byBuyer" | "products", title: string, row: string, col: number): Stat | undefined;
+  /** Stage 5: a card's condition rows on one side, in the card's order. `dest` = statId.cell(id) or statId.cellRival(id, name);
+   * `prefix` = "conditions" on a cell's card ("steps/<key>/conditions" on a By rival card). */
+  conditionRows(dest: string, side: "toward" | "away", prefix?: string): CondRowStats[];
+  /** Stage 5: one column of a card's "What the answer weighs" block (view "plain" or "comp"), in the card's order. */
+  weighsRows(dest: string, view: "plain" | "comp", col: number): WeighRowStats[];
+  /** Stage 5: the name of the rival part a cell's card carries for `name` (case ignored), if any. */
+  rivalPart(cellId: string, name: string): string | undefined;
   /** The By rival cards that carry a step (every rival with a "named" stat, say). */
   rivalsWith(stepKey: string, who?: "rival" | "you"): string[];
   /** Same-id stats the walk met with two different values (always empty; the harness asserts it). */
@@ -154,6 +180,50 @@ export function buildStatRegistry(map: Pick<AnalysisMapView, "positions" | "riva
     rivalStep: (n, k, w) => get(statId.rivalStep(n, k, w)),
     rivalBody: (n, k, key) => get(statId.rivalBody(n, k, key)),
     rivalTable: (n, t, title, row, col) => get(statId.rivalTable(n, t, title, row, col)),
+    conditionRows: (dest, side, prefix = "conditions") => {
+      const pre = `${dest}::${prefix}/${side}/`;
+      const rows = new Map<string, CondRowStats>();
+      const pend: [string, string, Stat][] = [];
+      for (const s of byId.values()) {
+        if (!s.id.startsWith(pre)) continue;
+        // A duplicated location carries "#2" - not a row of its own.
+        if (s.id.includes("#")) continue;
+        const parts = s.id.slice(pre.length).split("/");
+        const text = parts[0].replace(/∕/g, "/");
+        if (parts[1] === "share" && parts.length === 2) rows.set(text, { text, share: s, to: [] });
+        else pend.push([text, parts.slice(1).join("/"), s]);
+      }
+      for (const [text, what, s] of pend) {
+        const r = rows.get(text);
+        if (!r) continue;
+        if (what === "also") r.also = s;
+        else if (what === "youPicked") r.youPicked = s;
+        else if (what.startsWith("to/")) r.to.push({ name: what.slice(3).replace(/∕/g, "/"), stat: s });
+      }
+      return [...rows.values()];
+    },
+    weighsRows: (dest, view, col) => {
+      const pre = `${dest}::weighs/${view}/${col}/`;
+      const rows = new Map<string, WeighRowStats>();
+      for (const s of byId.values()) {
+        if (!s.id.startsWith(pre) || s.id.includes("#")) continue;
+        const parts = s.id.slice(pre.length).split("/");
+        const name = parts[0].replace(/∕/g, "/");
+        if (parts[1] === "num") rows.set(name, { ...(rows.get(name) ?? {}), name, num: s });
+        else if (parts[1] === "other") rows.set(name, { ...(rows.get(name) ?? ({} as WeighRowStats)), name, other: s });
+      }
+      return [...rows.values()].filter((r) => !!r.num);
+    },
+    rivalPart: (cellId, name) => {
+      const pre = `cell:${cellId}/rival:`;
+      const want = name.toLowerCase();
+      for (const s of byId.values()) {
+        if (!s.id.startsWith(pre)) continue;
+        const n = s.id.slice(pre.length, s.id.indexOf("::"));
+        if (n.toLowerCase() === want) return n;
+      }
+      return undefined;
+    },
     rivalsWith: (k, w = "rival") => [...(rivalSteps.get(`${k}|${w}`) ?? [])],
     conflicts: [...conflicts.entries()].map(([id, v]) => ({ id, values: [...v] })),
   };

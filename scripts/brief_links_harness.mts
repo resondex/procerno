@@ -24,6 +24,13 @@
  * throws - and the source check fails on any read of an old verdict field outside a `legacyV` / `c.legacy` line
  * (the tagged path for a verdict figure no card shows, listed under "needs a card home").
  *
+ * Stage 5 (conditions and arguments, 2026-11-17): what the AI says about the buyer (a card's condition rows) and about
+ * the category (a card's "What the answer weighs" rows) are the cards' stats too - printed, linked and decided from
+ * the registry's condition and weighs rows. stripVerdicts also takes the condition and argument rollups out of the
+ * inputs (strict: a read of inputs.conditions / away / taught throws; the tagged paths read `c.legacyArgs`), and the
+ * source check fails on any direct read of a card's condition or weighs objects, the map's per-buyer lift, the old
+ * argument lift, or a share printed from a panel row's value - outside the allowed lines it names.
+ *
  * Fixture only, no model calls:  npx tsx scripts/brief_links_harness.mts
  */
 process.env.DATABASE_URL = "";
@@ -79,8 +86,19 @@ const failures: string[] = [];
   src.split("\n").forEach((l, i) => {
     if (badV.test(l) && !okV.test(l)) failures.push(`brief.ts:${i + 1} reads an old-source verdict field: ${l.trim().slice(0, 160)}`);
   });
+  // Stage 5: no condition or argument figure is read from a card's objects or a computed rollup - only from the stat
+  // registry. Allowed: comment lines, conditionTerms (the matching resolver's terms, deleted with brief_links.ts), and
+  // the tagged legacy paths (`c.legacyArgs.` - the no-card conditions paragraph, the number-free fixed-situation and
+  // sent-away lines, the checklist membership; `legacyLift` - the diagnosis's "points it raises most" line;
+  // `legacyRoomCodes` - By buying situation's "when it picks <leader>, the answers most often argue ..."), and the
+  // codebook's argument NAMES (argCodes: which weighs rows are arguments - names only, no figure or count).
+  const bad5 = /\.weighsComp\b|\.weighs\b|\bpanel\?*\.conditions\b|\.conditions\?*\.(toward|away)\b|\.exception\b|\broomLift\b|\broomCodes\b|\bc\.lift\b|\bcardArgOf\b|\.share\.(value|tip)\b|\binputs\.(conditions|away|taught)\b|\blegacyArgs\b|\blegacyLift\b/;
+  const ok5 = /^\s*(\/\/|\*|\/\*\*)|const sets = \[pp\?\.conditions|c\.legacyArgs\.(conditions|away|taught)\b|c\.legacyLift\.find|legacyLift: (\{|liftOf\()|legacyArgs(: LegacyArgs|,$| \} = stripVerdicts)|legacyArgs: \{ conditions, away, taught \}|type LegacyArgs|const \{ value, doubt, alternatives, conditions, away, taught|^const BRIEF_VERSION|^\s*const argCodes = |legacyRoomCodes(: debug\.roomCodes|\?: NonNullable)/;
+  src.split("\n").forEach((l, i) => {
+    if (bad5.test(l) && !ok5.test(l)) failures.push(`brief.ts:${i + 1} reads an old-source condition or argument field: ${l.trim().slice(0, 160)}`);
+  });
   const oos = src.split("\n").filter((l) => /\.outOfScope\b/.test(l));
-  for (const l of oos) if (!/hasDossier\(c\.outOfScope\.summary, key\)|awaySpecifics\(c\.outOfScope\.summary, c\.inputs\.away\)/.test(l)) failures.push(`brief.ts reaches the full summary outside the two out-of-scope calls: ${l.trim().slice(0, 160)}`);
+  for (const l of oos) if (!/hasDossier\(c\.outOfScope\.summary, key\)|awaySpecifics\(c\.outOfScope\.summary, c\.legacyArgs\.away\)/.test(l)) failures.push(`brief.ts reaches the full summary outside the two out-of-scope calls: ${l.trim().slice(0, 160)}`);
 }
 const strictChecked: string[] = [];
 const noFunnel: string[] = [];
@@ -127,7 +145,7 @@ for (const project of (await store.listProjects()).filter((p: any) => !p.archive
       failures.push(`${project.brand}: the strict funnel guard did not throw on a stripped field (the strict run proves nothing)`);
     // Stage 4: the verdict guard.
     const sv = stripVerdicts(inputs, summary);
-    if (!throws(() => (st.summary as any).headToHead.length) || !throws(() => (st.summary as any).customersDoubt) || !throws(() => (sv.inputs as any).value) || !throws(() => (sv.inputs as any).doubt) || !throws(() => (sv.inputs as any).alternatives))
+    if (!throws(() => (st.summary as any).headToHead.length) || !throws(() => (st.summary as any).customersDoubt) || !throws(() => (sv.inputs as any).value) || !throws(() => (sv.inputs as any).doubt) || !throws(() => (sv.inputs as any).alternatives) || !throws(() => (sv.inputs as any).conditions) || !throws(() => (sv.inputs as any).away) || !throws(() => (sv.inputs as any).taught))
       failures.push(`${project.brand}: the strict verdict guard did not throw on a stripped field (the strict run proves nothing)`);
     else strictChecked.push(project.brand);
     const reg0 = buildStatRegistry(map);
@@ -369,7 +387,7 @@ const trimmed = new Map<string, { brand: string; cellId: string; claim: string; 
 for (const t of TRIMMED_CLAIMS) trimmed.set(`${t.brand}|${t.claim}`, t);
 console.log(`\nMAP CLAIMS A MOVE QUOTES THAT LOST A CLAUSE: ${trimmed.size}`);
 for (const t of trimmed.values()) console.log(`  - ${t.brand} [${t.cellId}]\n      was:  ${t.claim}\n      now:  ${t.kept || "(dropped whole)"}`);
-console.log(`\nStage 3-4 (funnel and verdict decisions): every Brief above computed STRICT (a funnel or verdict read of the old source throws); guard negative controls passed on ${strictChecked.length} trackers.`);
+console.log(`\nStage 3-5 (funnel, verdict, condition and argument decisions): every Brief above computed STRICT (a funnel, verdict, condition or argument read of the old source throws); guard negative controls passed on ${strictChecked.length} trackers.`);
 console.log(`Summary brands with no funnel on any card (left out of every funnel decision): ${noFunnel.length ? noFunnel.join("; ") : "none"}`);
 for (const f of failures) console.log(`FAIL ${f}`);
 console.log(failures.length ? `\n${failures.length} FAIL` : "\nALL PASS - every linked number opens a card that shows it beside its subject, or the Brief's own card");
