@@ -4654,6 +4654,7 @@ function rivalAcrossOne(ctx: Ctx, panels: Map<string, PositionPanel>, rv: { key:
   const op = rowAll(inputs, "chooses", "open");
   let openR: PanelNum | undefined;
   let openY: PanelNum | undefined;
+  let namedR: PanelNum | undefined;
   let theirPicks: PoolRow[] = [];
   if (op) {
     const split = h.brandSplit(op.rows);
@@ -4665,6 +4666,28 @@ function rivalAcrossOne(ctx: Ctx, panels: Map<string, PositionPanel>, rv: { key:
       openY = num(mine.length, split.n, "picks", refsOf(mine, pf(h.brand)));
       const conditions = conditionsOf(op, ctx, rivalWords, { pickKind: true, onlyTo: R, towardRows: panels.get(op.id)?.conditions?.toward });
       const table = weighTable(theirPicks, mine);
+      // am73: how often the brand is named here - the figure the Brief's visibility table states for every brand
+      // it lists, which only the five competitors on the What to buy card showed.
+      const fR = funnelOf(op.rows, key, h);
+      const fY = funnelOf(op.rows, h.targetKey, h);
+      if (fR.named.length) {
+        namedR = num(fR.named.length, op.rows.length, "answers", refsOf(fR.named, (r) => fR.surf(r, false) ?? r.code.top_pick ?? R));
+        const namedY = num(fY.named.length, op.rows.length, "answers", refsOf(fY.named, (r) => fY.surf(r, false) ?? r.code.top_pick ?? h.brand));
+        const recR = num(fR.rec.length, op.rows.length, "answers", refsOf(fR.rec, (r) => fR.surf(r, true) ?? r.code.top_pick ?? R));
+        const recY = num(fY.rec.length, op.rows.length, "answers", refsOf(fY.rec, (r) => fY.surf(r, true) ?? r.code.top_pick ?? h.brand));
+        steps.push({
+          key: "named",
+          label: `${ROW_NAME.open} - named`,
+          cellId: op.id,
+          bars: [bar(R, "rival", namedR), bar(h.brand, "you", namedY)],
+          ...duel(namedY, namedR),
+          heading: `How often the AI names ${R} when buyers ask what to buy, and how often you`,
+          body: join(
+            `When buyers ask what to buy, the AI names ${R} in `, N(namedR), " of answers and recommends it in ", N(recR), ". It names you in ", N(namedY), " and recommends you in ", N(recY), ".",
+            ...(fR.rec.length ? [" ", N(num(fR.picked.length, fR.rec.length, "recommendations", refsOf(fR.picked, pf(R)))), ` of the answers that recommend ${R} end with it as the pick.`] : [])
+          ),
+        });
+      }
       steps.push({
         key: "open",
         label: `${ROW_NAME.open} - share of the picks`,
@@ -4878,7 +4901,9 @@ function rivalAcrossOne(ctx: Ctx, panels: Map<string, PositionPanel>, rv: { key:
   const hs = steps.find((s) => s.key === "h2h");
   const claim = join(
     openR && openY
-      ? join(`${R} takes `, N(openR), ` of the picks when buyers ask ${ROW_NAME.open.toLowerCase()}. You take `, N(openY), ".")
+      ? namedR
+        ? join(`${R} is named in `, N(namedR), ` of answers when buyers ask ${ROW_NAME.open.toLowerCase()}, and takes `, N(openR), " of the picks. You take ", N(openY), ".")
+        : join(`${R} takes `, N(openR), ` of the picks when buyers ask ${ROW_NAME.open.toLowerCase()}. You take `, N(openY), ".")
       : `${R} across every question where it comes up.`,
     hs && hhR ? join(` Asked to choose between the two of you, the AI picks ${R} in `, N(hhR), " of answers.") : ""
   );
