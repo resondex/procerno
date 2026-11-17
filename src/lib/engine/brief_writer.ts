@@ -711,22 +711,57 @@ export function relinkWritten(written: BriefMemo, composed: BriefMemo): BriefMem
     s.paras?.forEach(add);
     s.quads?.forEach((q) => q.cells.forEach((col) => col.forEach(add)));
   }
-  // A link of a composed unit, by the token's occurrence there.
-  const linkOf = (u: (typeof units)[number], token: string): L | undefined => u.links.find((l) => l.token === token);
+  // The same digits are not the same fact ("31%" is one brand's conversion in one sentence and an argument's share
+  // in another), so a written number takes the link of the composed number whose own sentence it shares words with:
+  // the words right beside the number count double, a sentence sharing fewer than two words is no match, and a
+  // number with no match stays plain text.
+  const STOP = new Set(["the", "and", "that", "those", "this", "with", "when", "where", "which", "what", "from", "into", "for", "its", "it", "are", "was", "has", "have", "than", "then", "them", "they", "their", "there", "only", "more", "most", "about", "against", "while", "answers", "answer", "one", "does", "not", "but", "all", "any", "out", "who", "how", "time", "times", "ask", "asks", "buyers", "buyer"]);
+  const NUM = /\d+(?:\.\d+)?%|[+-]\d+ (?:pts|points)/g;
+  const words = (t: string) => new Set((t.toLowerCase().match(/[a-z][a-z'+.-]{2,}/g) ?? []).filter((w) => !STOP.has(w)));
+  const around = (text: string, at: number, len: number) => {
+    const sb = Math.max(text.lastIndexOf(". ", at) + 1, 0);
+    const se = text.indexOf(". ", at + len);
+    return { sentence: words(text.slice(sb, se < 0 ? text.length : se)), near: words(text.slice(Math.max(sb, at - 70), Math.min(se < 0 ? text.length : se, at + len + 70))) };
+  };
+  const shared = (a: Set<string>, b: Set<string>) => [...a].filter((w) => b.has(w)).length;
+  type Cand = { link: L; sentence: Set<string>; near: Set<string> };
+  const candsOf = (u: (typeof units)[number]): Cand[] => {
+    const seen = new Map<string, number>();
+    const out: Cand[] = [];
+    for (const m of u.text.matchAll(NUM)) {
+      const occ = seen.get(m[0]) ?? 0;
+      seen.set(m[0], occ + 1);
+      const link = u.links.find((l) => l.token === m[0] && (l.occurrence ?? 0) === occ);
+      if (link) out.push({ link, ...around(u.text, m.index!, m[0].length) });
+    }
+    return out;
+  };
+  const cands = new Map<(typeof units)[number], Cand[]>();
   const para = (p: BriefPara): BriefPara => {
     if (p.links) return p;
     const ids = new Set((p.cells ?? []).map((c) => c.id));
     const pool = units.filter((u) => [...u.ids].some((id) => ids.has(id)));
     const seen = new Map<string, number>();
     const links: L[] = [];
-    for (const m of `${p.lead ?? ""} ${p.text}`.matchAll(/\d+(?:\.\d+)?%|[+-]\d+ (?:pts|points)/g)) {
+    const text = `${p.lead ?? ""} ${p.text}`;
+    for (const m of text.matchAll(NUM)) {
       const token = m[0];
       const occurrence = seen.get(token) ?? 0;
       seen.set(token, occurrence + 1);
-      // Prefer a card that shows it over the Brief's own answer card.
-      const hits = pool.map((u) => linkOf(u, token)).filter((x): x is L => !!x);
-      const l = hits.find((x) => x.dest.kind !== "card") ?? hits[0];
-      if (l) links.push({ ...l, token, occurrence });
+      const here = around(text, m.index!, token.length);
+      let best: { link: L; score: number } | null = null;
+      for (const u of pool) {
+        if (!cands.has(u)) cands.set(u, candsOf(u));
+        for (const c of cands.get(u)!) {
+          if (c.link.token !== token) continue;
+          const s = shared(here.sentence, c.sentence);
+          if (s < 2) continue;
+          // Prefer a card that shows it over the Brief's own answer card.
+          const score = s + 2 * shared(here.near, c.near) + (c.link.dest.kind !== "card" ? 0.5 : 0);
+          if (!best || score > best.score) best = { link: c.link, score };
+        }
+      }
+      if (best) links.push({ ...best.link, token, occurrence });
     }
     return links.length ? { ...p, links } : p;
   };
