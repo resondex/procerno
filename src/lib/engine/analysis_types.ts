@@ -672,6 +672,9 @@ export interface PositionPanel {
   /** am70: the average listed competitor's share of the picks and its picked-of-all-answers (the Brief's scoreboard quotes them). */
   avgShare?: PanelNum;
   avgPicked?: PanelNum;
+  /** What to look for: the topics on the AI's list, most taught first (at most five) - the list the claim names
+   * and the table's line is drawn from. Data for the Brief, never drawn. */
+  checklist?: string[];
   competitorOrder?: string[];    // brand names behind PanelStep.rivals
   competitors?: PanelBlock;      // "Who takes the picks" / "Which ... it names instead" / "... it shows" (comparison view only)
   conditions?: PanelConditions;

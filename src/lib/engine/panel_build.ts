@@ -1963,6 +1963,8 @@ function criteriaPanel(inp: PanelCellInput, ctx: Ctx): PositionPanel {
     stackLabel: "How the answer goes",
     steps,
     ...(table ? { table } : {}),
+    // am76: the list itself, so the Brief names the same topics the card does (never drawn).
+    checklist: top5.map((x) => x.code),
   };
   // am58: the winning topics off the checklist, for the step's explanation (criteriaStepDetails).
   CRIT_GAP.set(out, untaught.map((w) => w.code));
