@@ -35,6 +35,10 @@
   --pa-yours-bg: #dbeafe;
   --pa-yours-ink: #1e40af;
   --pa-yours-soft: #93c5fd;
+  /* A contest you hold on the Map is green (2026-11-16, owner): the bars for "you" stay blue. */
+  --pa-held: #0d9488;
+  --pa-held-bg: #ccfbf1;
+  --pa-held-ink: #115e59;
   --pa-contested: #a16207;
   --pa-contested-bg: #fef3c7;
   --pa-contested-ink: #854d0e;
@@ -81,6 +85,9 @@
     --pa-yours-bg: color-mix(in srgb, #60a5fa 18%, var(--surface));
     --pa-yours-ink: #93c5fd;
     --pa-yours-soft: color-mix(in srgb, #60a5fa 50%, var(--surface));
+    --pa-held: #14a08f;
+    --pa-held-bg: color-mix(in srgb, #14a08f 18%, var(--surface));
+    --pa-held-ink: #5eead4;
     --pa-contested: #c08a1b;
     --pa-contested-bg: color-mix(in srgb, #c08a1b 18%, var(--surface));
     --pa-contested-ink: #fcd34d;

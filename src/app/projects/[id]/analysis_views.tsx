@@ -586,11 +586,11 @@ function CellButton({ cell, onOpen, hasPosition, except, summary }: { cell: MapC
       onClick={() => hasPosition && onOpen(cell.id)}
       disabled={!hasPosition}
       title={`${VWORD[cell.verdict]}${cell.exception ? " - with an exception" : ""}`}
-      className={`flex min-w-0 flex-col items-start gap-0.5 rounded-[8px] border bg-surface py-2 pl-2.5 pr-2.5 text-left transition-[colors,opacity] enabled:hover:border-ink disabled:cursor-default ${
-        mine ? "border-[var(--color-primary)]" : "border-line"
+      className={`flex min-w-0 flex-col items-start gap-0.5 rounded-[10px] border-[1.5px] px-2.5 py-2 text-left transition-[colors,opacity] enabled:hover:border-ink disabled:cursor-default ${
+        mine ? "border-[var(--color-primary)]" : "border-transparent"
       } ${m.mineOnly && !mine ? "opacity-30" : ""}`}
-      // White cells with a coloured edge: a page that is mostly one verdict no longer reads as a wall of one colour.
-      style={{ borderLeftWidth: 3, borderLeftColor: c.fg }}
+      // The whole cell carries its verdict colour (owner, 2026-11-16: the white cells with a coloured edge were reverted).
+      style={{ background: c.bg }}
     >
       {summary && <span className={`${T.label} text-ink-3`}>The whole row</span>}
       <span className={`${T.cap} flex items-baseline gap-1.5 font-semibold text-ink`}>

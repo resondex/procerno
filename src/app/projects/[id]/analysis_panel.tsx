@@ -60,7 +60,8 @@ import { CompProvider } from "./panel_parts";
 export const VWORD: Record<CellVerdict, string> = { yours: "Yours", contested: "Contested", theirs: "Theirs", nocall: "No side taken" };
 /** fg = dots and bars, bg = cell tint, ink = text (on the tint or the surface). */
 export const VCOLOR: Record<CellVerdict, { fg: string; bg: string; ink: string }> = {
-  yours: { fg: "var(--pa-yours)", bg: "var(--pa-yours-bg)", ink: "var(--pa-yours-ink)" },
+  // A contest you hold is green; "you" bars elsewhere stay blue.
+  yours: { fg: "var(--pa-held)", bg: "var(--pa-held-bg)", ink: "var(--pa-held-ink)" },
   contested: { fg: "var(--pa-contested)", bg: "var(--pa-contested-bg)", ink: "var(--pa-contested-ink)" },
   theirs: { fg: "var(--pa-theirs)", bg: "var(--pa-theirs-bg)", ink: "var(--pa-theirs-ink)" },
   nocall: { fg: "var(--pa-nocall)", bg: "var(--pa-nocall-bg)", ink: "var(--pa-nocall-ink)" },
