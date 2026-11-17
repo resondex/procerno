@@ -4700,6 +4700,26 @@ function rivalAcrossOne(ctx: Ctx, panels: Map<string, PositionPanel>, rv: { key:
         ...(conditions ? { conditions } : {}),
         ...(table ? { table } : {}),
       });
+      // am75: how often the brand is the pick out of ALL these answers - the figure beside the share of picks
+      // on the What to buy card, which no card stated for a rival.
+      // (the same object num() made, so its counts stay readable by duel)
+      const fine = (k: number, n: number, refs: AnswerRef[] | undefined): PanelNum => {
+        const x = num(k, n, "answers", refs);
+        x.value = pctFine(n > 0 ? k / n : 0);
+        return x;
+      };
+      const pickedR = fine(theirPicks.length, op.rows.length, refsOf(theirPicks, pf(R)));
+      const pickedY = fine(mine.length, op.rows.length, refsOf(mine, pf(h.brand)));
+      const commit = num(split.n, op.rows.length, "answers");
+      steps.push({
+        key: "picked",
+        label: `${ROW_NAME.open} - picked, of all answers`,
+        cellId: op.id,
+        bars: [bar(R, "rival", pickedR), bar(h.brand, "you", pickedY)],
+        ...duel(pickedY, pickedR),
+        heading: `How often ${R} is the pick out of all the answers, and how often you are`,
+        body: join("The AI commits to one ", h.noun, " in ", N(commit), ` of answers when buyers ask what to buy. ${R} is the pick in `, N(pickedR), " of all answers and you are in ", N(pickedY), "."),
+      });
     }
   }
 
