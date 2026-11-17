@@ -442,6 +442,8 @@ export async function loadViewData(
  * a recode (revision), a dictionary edit or a project change, never aged
  * out. There is no age-based sweep; cachePurge drops older generations. */
 export const VIEW_CACHE_MS = 100 * 365 * 24 * 3600 * 1000;
+/** VIEW_CACHE=off: views are never read from or written to the cache (local snapshot development). */
+export const viewCacheOff = () => process.env.VIEW_CACHE === "off";
 
 export async function cachedView<T>(
   name: string,
@@ -474,7 +476,10 @@ export async function cachedView<T>(
     key += `:room:${createHash("sha256").update(request.room).digest("hex").slice(0, 12)}`;
   if (request.engines !== undefined)
     key += `:eng:${createHash("sha256").update(request.engines.join(",")).digest("hex").slice(0, 12)}`;
-  if (rev !== null) {
+  // VIEW_CACHE=off (the snapshot dev server): every view is computed fresh from the code as it stands, while the
+  // revision still rides the data so the saved groupings under it are read.
+  const cacheOn = rev !== null && !viewCacheOff();
+  if (cacheOn) {
     const raw = await store.cacheGet(key, VIEW_CACHE_MS);
     if (raw) return JSON.parse(raw) as T;
   }
@@ -484,7 +489,7 @@ export async function cachedView<T>(
   const view = await compute(data);
   // A half-judged view is served but never cached: the per-name verdict
   // cache makes the next compute pay only for the remaining slab.
-  if (rev !== null && !data.judgeIncomplete) {
+  if (cacheOn && !data.judgeIncomplete) {
     await store.cacheSet(key, JSON.stringify(view), {
       brand: project.brand,
       category: project.category,

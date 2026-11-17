@@ -50,6 +50,8 @@ const project = (await store.listProjects()).find((p: { brand: string; archived_
 if (!project) throw new Error("fixture: American Express not found");
 const run = (await store.listRuns(project.id))[0];
 const data = await loadViewData(run, project, { setupDecision: true, judge: true });
+// On a snapshot of live the run carries its live revision, so the saved condition groupings are read.
+if (data) data.revision = await (await import(process.cwd() + "/src/lib/engine/run_revision.ts")).cachedRunRevision(run.id);
 if (!data) throw new Error("fixture: no view data");
 const resolve = buildResolver(data.dictionary, data.judged);
 const targetKey = resolve(project.brand).key;

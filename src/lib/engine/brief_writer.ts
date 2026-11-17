@@ -556,7 +556,7 @@ export async function writeWith(
 
 export async function writeBrief(memo: BriefMemo, ctx: WriteContext): Promise<{ memo: BriefMemo; written: boolean; reason?: string }> {
   const model = BRIEF_WRITER_MODEL;
-  if (!process.env.ANTHROPIC_API_KEY || !model.startsWith("claude")) return { memo, written: false, reason: "unavailable" };
+  if (!model.startsWith("claude")) return { memo, written: false, reason: "unavailable" };
   const sheet = factSheet(memo);
   const key = writtenCacheKey(model, ctx, memo.frame, sheet.text);
   const { store } = await import("../store");
@@ -566,6 +566,8 @@ export async function writeBrief(memo: BriefMemo, ctx: WriteContext): Promise<{ 
   } catch {
     /* a cache miss or a bad entry - write it fresh */
   }
+  // A saved memo is served with or without a key (a snapshot of live has none); only writing a new one needs it.
+  if (!process.env.ANTHROPIC_API_KEY) return { memo, written: false, reason: "unavailable" };
   const { withCostContext, logCost } = await import("../cost_log");
   const { anthropicClient } = await import("./providers");
   const { fromAnthropicUsage } = await import("./usage");

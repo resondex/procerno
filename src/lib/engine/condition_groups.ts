@@ -391,8 +391,16 @@ export async function conditionKeysFor(
   const purpose = opts.purpose ?? "views:conditions";
   const group = (c: Map<string, number>) =>
     opts.large ? conditionKeyMapLarge(c, exclude, purpose) : conditionKeyMap(c, exclude, purpose);
-  if (!process.env.OPENAI_API_KEY) return group(counts);
   const { read, write } = keyMapCache(opts.cache, purpose, opts.large ? "L" : "S", CONDITION_TAU, exclude);
+  if (!process.env.OPENAI_API_KEY) {
+    // A saved key map is read with or without a key (a snapshot of live has none); with none saved, the stem
+    // fallback runs per wording as before.
+    const saved = await read();
+    if (!saved || (!full && ![...counts.keys()].every((c) => saved.has(c)))) return group(counts);
+    const out = new Map<string, string>();
+    for (const c of counts.keys()) out.set(c, saved.get(c) ?? conditionStemKey(c, exclude));
+    return out;
+  }
   if (!full) {
     // Unnarrowed, `counts` IS the full pool: a key map another view of the
     // same scope already wrote (the brand summary and the rules explorer both

@@ -349,6 +349,9 @@ export function themeParams(): Record<string, unknown> {
   return /luna/.test(DOSSIER_THEME_MODEL) ? { max_completion_tokens: 4000, reasoning_effort: "none" } : { max_completion_tokens: 16000 };
 }
 
+/** No model key and no saved grouping for this input: the keyless reading (no themes), never a failed pass. */
+class NoThemeKey extends Error {}
+
 /** One grouping call, cached per (model, input). Throws when the reply stays
  * unparseable after one steered retry, or the vendor call fails twice. */
 export async function themeCall(system: string, user: string, input: unknown, labels: string[], meta: CacheMeta): Promise<ThemeGrouping> {
@@ -362,6 +365,8 @@ export async function themeCall(system: string, user: string, input: unknown, la
       /* unreadable entry - recompute */
     }
   }
+  // A saved grouping is read with or without a key (a snapshot of live has none); only a new call needs one.
+  if (!process.env.OPENAI_API_KEY) throw new NoThemeKey();
   let lastErr: unknown = null;
   for (let attempt = 0; attempt < 2; attempt++) {
     const messages = [
@@ -423,7 +428,7 @@ export async function themeReasons(
   meta: CacheMeta,
   costCtx: { projectId: string; runId: string }
 ): Promise<ThemeMap | null> {
-  if (cells.size === 0 || !DOSSIER_THEME_MODEL.startsWith("gpt-") || !process.env.OPENAI_API_KEY) return null;
+  if (cells.size === 0 || !DOSSIER_THEME_MODEL.startsWith("gpt-")) return null;
   const bySit = new Map<string, { label: string; n: number }[]>();
   for (const [label, per] of cells)
     for (const [sit, set] of per) {
@@ -432,7 +437,15 @@ export async function themeReasons(
       bySit.set(sit, list);
     }
   const sits = [...bySit.keys()].sort((a, b) => (a === EVERY_BUYER ? -1 : b === EVERY_BUYER ? 1 : a.localeCompare(b)));
-  return withCostContext({ purpose: "views:themes", projectId: costCtx.projectId, runId: costCtx.runId, rnd: false }, async () => {
+  return withCostContext({ purpose: "views:themes", projectId: costCtx.projectId, runId: costCtx.runId, rnd: false }, async (): Promise<ThemeMap | null> => {
+    try {
+      return await run();
+    } catch (e) {
+      if (e instanceof NoThemeKey) return null;
+      throw e;
+    }
+  });
+  async function run(): Promise<ThemeMap> {
     const perSit: { sit: string; labels: string[]; groups: ThemeGrouping }[] = new Array(sits.length);
     let next = 0;
     await Promise.all(
@@ -480,7 +493,7 @@ export async function themeReasons(
       for (const k of t.members) totOf[order[k]] = ti;
     });
     return { stOf, stName: st.map((x) => x.name), stSit: st.map((x) => x.sit), totOf, totName };
-  });
+  }
 }
 
 /**

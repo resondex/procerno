@@ -67,6 +67,7 @@
       "runtimeArgs": [
         "DATABASE_URL=",
         "SQLITE_PATH=data/dashboard_fixture.db",
+        "VIEW_CACHE=off",
         "NEXT_PUBLIC_SUPABASE_URL=",
         "NEXT_PUBLIC_SUPABASE_ANON_KEY=",
         "RUN_COLLECT_ONLY=1",
@@ -90,6 +91,7 @@
       "runtimeArgs": [
         "DATABASE_URL=",
         "SQLITE_PATH=data/dashboard_fixture.db",
+        "VIEW_CACHE=off",
         "NEXT_PUBLIC_SUPABASE_URL=",
         "NEXT_PUBLIC_SUPABASE_ANON_KEY=",
         "RUN_COLLECT_ONLY=1",

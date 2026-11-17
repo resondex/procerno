@@ -1099,9 +1099,12 @@ export const sqliteStore: Store = {
     return `${row?.n ?? 0}:${row?.m ?? "0"}`;
   },
 
-  async runDataRevision() {
-    // No cheap in-database hash here; the local store just doesn't cache.
-    return null;
+  async runDataRevision(runId) {
+    // No cheap in-database hash here; the local store just doesn't cache. The one exception is a snapshot of live
+    // (scripts/build_live_snapshot.mts), which pins each run's live revision so the saved condition groupings -
+    // keyed by run + revision - are found exactly as live finds them.
+    const row = getDb().prepare("SELECT value FROM llm_cache WHERE key = ?").get(`snapshot_revision:${runId}`) as { value: string } | undefined;
+    return row?.value ?? null;
   },
 
   async runDataSignature() {

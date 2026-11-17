@@ -27,6 +27,8 @@ let total = 0;
 for (const project of (await store.listProjects()).filter((p: any) => !p.archived_at)) {
   const run = (await store.listRuns(project.id))[0];
   const data = await loadViewData(run, project, { setupDecision: true, judge: true });
+  // On a snapshot of live the run carries its live revision, so the saved condition groupings are read.
+  if (data) data.revision = await (await import(process.cwd() + "/src/lib/engine/run_revision.ts")).cachedRunRevision(run.id);
   const { view: map } = await sharedAnalysisMap(data, {});
   const reg = buildStatRegistry(map);
   const all = reg.all();

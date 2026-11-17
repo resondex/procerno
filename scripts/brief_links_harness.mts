@@ -71,6 +71,8 @@ const allStrings = (x: any, out: string[] = []): string[] => {
 for (const project of (await store.listProjects()).filter((p: any) => !p.archived_at)) {
   const run = (await store.listRuns(project.id))[0];
   const data = await loadViewData(run, project, { setupDecision: true, judge: true });
+  // On a snapshot of live the run carries its live revision, so the saved condition groupings are read.
+  if (data) data.revision = await (await import(process.cwd() + "/src/lib/engine/run_revision.ts")).cachedRunRevision(run.id);
   const first: any = await computeBrief(data, {});
   // The tracker's own Brief and its first rival's (the rival panels' links are checked too).
   const briefs: [string | undefined, any][] = [[undefined, first], ...(first.subjects?.[1] ? [[first.subjects[1], await computeBrief(data, { subject: first.subjects[1] })] as [string, any]] : [])];
@@ -224,6 +226,8 @@ for (const e of FIG_LOG as any[]) {
 for (const project of (await store.listProjects()).filter((p: any) => !p.archived_at)) {
   const run = (await store.listRuns(project.id))[0];
   const data = await loadViewData(run, project, { setupDecision: true, judge: true });
+  // On a snapshot of live the run carries its live revision, so the saved condition groupings are read.
+  if (data) data.revision = await (await import(process.cwd() + "/src/lib/engine/run_revision.ts")).cachedRunRevision(run.id);
   const { view: map } = await sharedAnalysisMap(data, {});
   regs.set(project.brand, buildStatRegistry(map));
 }

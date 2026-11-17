@@ -62,6 +62,8 @@ for (const project of projects) {
   const run = (await store.listRuns(project.id))[0];
   if (!run) continue;
   const data = await loadViewData(run, project, { setupDecision: true, judge: true });
+  // On a snapshot of live the run carries its live revision, so the saved condition groupings are read.
+  if (data) data.revision = await (await import(process.cwd() + "/src/lib/engine/run_revision.ts")).cachedRunRevision(run.id);
   if (!data) continue;
   const first = await computeBrief(data, {});
   const subjects = (allSubjects ? [undefined, ...first.subjects.slice(1)] : [undefined, first.subjects[1]]).filter((x, i) => i === 0 || !!x) as (string | undefined)[];

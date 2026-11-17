@@ -162,6 +162,8 @@ for (const project of projects) {
   const run = runs[0];
   if (!run) continue;
   const data = await loadViewData(run, project, { setupDecision: true, judge: true });
+  // On a snapshot of live the run carries its live revision, so the saved condition groupings are read.
+  if (data) data.revision = await (await import(process.cwd() + "/src/lib/engine/run_revision.ts")).cachedRunRevision(run.id);
   if (!data) continue;
   const debug = { walls: [], casting: {} } as unknown as Parameters<typeof computeAnalysisMap>[2] & object;
   {
@@ -750,7 +752,8 @@ for (const project of projects) {
         // No empty condition column beside a full one.
         for (const [c, at] of [[p.conditions, "panel"], ...(p.rivals ?? []).map((r) => [r.conditions, `rival ${r.name}`])] as [PanelConditions | undefined, string][]) {
           if (!c) continue;
-          if (c.toward.length === 0 && c.away.length > 0 && !c.towardNote) failures.push(`${project.brand}: ${id} ${at} "${c.towardTitle}" column is empty with no line`);
+          // (What to use alongside you is one list when nothing of yours is named - am56 - so its empty column is by design.)
+          if (c.toward.length === 0 && c.away.length > 0 && !c.towardNote && p.kind !== "alongside") failures.push(`${project.brand}: ${id} ${at} "${c.towardTitle}" column is empty with no line`);
           if (c.away.length === 0 && c.toward.length > 0 && !c.awayNote) failures.push(`${project.brand}: ${id} ${at} "${c.awayTitle}" column is empty with no line`);
           const lc = (x: string) => x.toLowerCase();
           for (const side of ["toward", "away"] as const) {
@@ -937,7 +940,8 @@ for (const project of projects) {
       // 7. kinds without conditions.
       if ((p.kind === "buyer_worry" || p.kind === "customer_worry" || p.kind === "value" || p.kind === "business_case") && p.conditions) failures.push(`${project.brand}: ${id} ${p.kind} carries conditions`);
       if ((p.kind === "learning" || p.kind === "critic") && p.conditions) failures.push(`${project.brand}: ${id} ${p.kind} carries conditions`);
-      // Question labels: the keyless fixture takes the quoted fallback - the claim carries the seed question verbatim.
+      // Question labels: with no saved label the claim takes the quoted fallback - the seed question verbatim. A
+      // snapshot of live carries the saved labels, whose claims quote nothing; so a claim that quotes must quote the seed.
       if (p.kind === "popular" || p.kind === "learning" || p.kind === "alongside" || p.kind === "critic" || p.kind === "expansion" || p.kind === "business_case") {
         const own = new Set(cellIds[id] ?? []);
         const seeds = [...new Set(data.codes.filter((c: { response_id: string }) => own.has(c.response_id)).map((c: { response_id: string }) => data.responses.find((r: { id: string }) => r.id === c.response_id)?.prompt_id))]
@@ -945,7 +949,7 @@ for (const project of projects) {
           .filter(Boolean) as { text: string; seq: number }[];
         const seed = seeds.sort((a, b) => a.seq - b.seq)[0]?.text?.trim();
         const claimText = p.claim.map((x) => x.t).join("");
-        if (!seed || !claimText.includes(`"${seed}"`)) failures.push(`${project.brand}: ${id} ${p.kind} fallback claim does not quote its seed question (${claimText.slice(0, 120)})`);
+        if (claimText.includes('"') && (!seed || !claimText.includes(`"${seed}"`))) failures.push(`${project.brand}: ${id} ${p.kind} fallback claim does not quote its seed question (${claimText.slice(0, 120)})`);
         else labelFallbacks++;
       }
       // 4 + 5. plain wording and category words over the panel tree, data phrases stripped.
@@ -974,7 +978,9 @@ for (const project of projects) {
         if (typeof v === "string") {
           const t = strip(v);
           for (const [name, re] of PANEL_BANNED) if (re.test(t)) failures.push(`${project.brand}: ${id}.panel${path}: "${name}" in ${JSON.stringify(v.slice(0, 140))}`);
-          for (const w of other) if (new RegExp(`\\b${w.replace(/s$/, "")}s?\\b`, "i").test(t)) failures.push(`${project.brand}: ${id}.panel${path}: another tracker's category word "${w}" in ${JSON.stringify(v.slice(0, 140))}`);
+          // (A single-question card's claim carries a model-written label of the tracker's own question, which may use any everyday word.)
+          const labelClaim = /^\.claim/.test(path) && ["popular", "learning", "alongside", "critic", "expansion", "business_case"].includes(p.kind);
+          if (!labelClaim) for (const w of other) if (new RegExp(`\\b${w.replace(/s$/, "")}s?\\b`, "i").test(t)) failures.push(`${project.brand}: ${id}.panel${path}: another tracker's category word "${w}" in ${JSON.stringify(v.slice(0, 140))}`);
         } else if (Array.isArray(v)) v.forEach((x, i) => walkText(x, `${path}[${i}]`));
         else if (v && typeof v === "object") for (const [k, x] of Object.entries(v)) if (!SKIP.has(k)) walkText(x, `${path}.${k}`);
       };
