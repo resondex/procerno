@@ -35,9 +35,22 @@ export interface WalkEntry extends IndexEntry {
   /** The card's part the path lives in: "" for the card itself, "rival:<name>" for a rival's own card inside a cell. */
   part: string;
   pct?: number;
+  /** The exact counts behind the number (stage 3): read from the number's own tip ("k of n ..."), which every
+   * PanelNum and every keyed span built from one carries - so the reading is the same in process or after JSON. */
+  kn?: KN;
 }
 
-type Raw = { value: string; words: string; path: string; pct?: number };
+export interface KN {
+  k: number;
+  n: number;
+}
+/** The counts a number's tip states ("47 of 100 answers" -> 47, 100); undefined when the tip states none. */
+export function knOfTip(tip: string | undefined): KN | undefined {
+  const m = tip ? /^(\d+) of (\d+)\b/.exec(tip) : null;
+  return m ? { k: Number(m[1]), n: Number(m[2]) } : undefined;
+}
+
+type Raw = { value: string; words: string; path: string; pct?: number; kn?: KN };
 type Out = Raw[];
 
 /**
@@ -68,7 +81,9 @@ interface W {
   P: Paths;
 }
 const num = (w: W, n: PanelNum | undefined, words: string, path: string) => {
-  if (n) w.out.push({ value: n.value, words, path: w.P.id(path, n), pct: n.pct });
+  if (!n) return;
+  const kn = knOfTip(n.tip);
+  w.out.push({ value: n.value, words, path: w.P.id(path, n), pct: n.pct, ...(kn ? { kn } : {}) });
 };
 /** The numbers in a sentence: a keyed span (PanelSpan.key) holding one number is `<path>/<key>`, else `<path>/<i>`
  * (i = the number's order in the sentence). */
@@ -88,7 +103,11 @@ const text = (w: W, t: PanelText | string | undefined, path: string, words?: str
     const b = bounds.find((x) => m.index! >= x.from && m.index! < x.to);
     const keyed = b && b.span.key && numberTokens(b.span.t).length === 1 && m.index! + m[0].length <= b.to;
     const p = keyed ? `${path}/${k(b!.span.key!)}` : `${path}/${i}`;
-    w.out.push({ value: m[0], words: `${words ? `${words} ` : ""}${s}`, path: w.P.id(p, b ? b.span : (t as unknown) ?? path) });
+    // A keyed span holds exactly one number, built from a PanelNum (panel_text NK): its tip is that number's counts.
+    const kn = keyed ? knOfTip(b!.span.tip) : undefined;
+    // A share under half a point prints as "<1%": the sign is part of the figure the card shows.
+    const shown = m.index! > 0 && s[m.index! - 1] === "<" ? `<${m[0]}` : m[0];
+    w.out.push({ value: shown, words: `${words ? `${words} ` : ""}${s}`, path: w.P.id(p, b ? b.span : (t as unknown) ?? path), ...(kn ? { kn } : {}) });
     i++;
   }
 };

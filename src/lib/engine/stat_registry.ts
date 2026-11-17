@@ -35,6 +35,10 @@ export interface Stat {
   value: string;
   /** 0-100, the bar width (absent on a number inside a sentence). */
   pct?: number;
+  /** Stage 3: the exact counts behind the number (absent on a number inside an unkeyed sentence) - what the Brief
+   * decides with (rateOf, brief_figs.ts), so a sentence decides from the very figure it prints. */
+  k?: number;
+  n?: number;
   /** The card to open. */
   dest: StatDest;
   at: "default" | "one";
@@ -100,7 +104,7 @@ export function buildStatRegistry(map: Pick<AnalysisMapView, "positions" | "riva
     const view: StatView = { at: e.at, ...(e.reveal ? { reveal: e.reveal } : {}), words: e.words };
     const s = byId.get(id);
     if (!s) {
-      byId.set(id, { id, value: e.value, ...(e.pct !== undefined ? { pct: e.pct } : {}), dest, at: e.at, ...(e.reveal ? { reveal: e.reveal } : {}), words: e.words, views: [view] });
+      byId.set(id, { id, value: e.value, ...(e.pct !== undefined ? { pct: e.pct } : {}), ...(e.kn ? { k: e.kn.k, n: e.kn.n } : {}), dest, at: e.at, ...(e.reveal ? { reveal: e.reveal } : {}), words: e.words, views: [view] });
       return;
     }
     if (s.value !== e.value) conflicts.set(id, (conflicts.get(id) ?? new Set([s.value])).add(e.value));

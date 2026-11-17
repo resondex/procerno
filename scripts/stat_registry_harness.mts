@@ -5,7 +5,9 @@
  *  - every entry of indexPanel / indexAcross (the link resolver's view) is exactly one registry stat: the same
  *    value, and the entry's state (at / reveal / words) is one of that stat's views; the stat's own at / reveal is
  *    its cheapest view;
- *  - two builds give the same registry.
+ *  - two builds give the same registry;
+ *  - stage 3: a stat's counts (k / n, read from the number's tip) re-derive exactly the value the card prints (whole
+ *    percent or the one-decimal form), and every funnel stat the Brief decides with carries counts.
  * Prints the stat count per tracker and a few example ids.
  *
  * Fixture only, no model calls:  npx tsx scripts/stat_registry_harness.mts
@@ -19,6 +21,13 @@ const { loadViewData } = await import(process.cwd() + "/src/lib/engine/view_data
 const { sharedAnalysisMap } = await import(process.cwd() + "/src/lib/engine/analysis_map.ts");
 const { buildStatRegistry, statId } = await import(process.cwd() + "/src/lib/engine/stat_registry.ts");
 const { indexPanel, indexPanelWalk, indexAcross, indexAcrossWalk } = await import(process.cwd() + "/src/lib/engine/panel_index.ts");
+const { pctFine } = await import(process.cwd() + "/src/lib/engine/summary_insights.ts");
+const pctWhole = (x: number) => (x > 0 && x < 0.005 ? "<1%" : `${Math.round(x * 100)}%`);
+// A number inside a sentence is registered as its number token, so a card's "<1%" is the stat value "1%" (the walk's
+// NUMBER_TOKEN); compared as tokens, and the "<1%" ones listed (a Brief printing such a stat prints "1%").
+const tok = (v: string) => (v.match(/\d+(?:\.\d+)?%/) ?? [v])[0];
+let withCounts = 0;
+const underOne: string[] = [];
 
 const failures: string[] = [];
 const same = (a: any, b: any) => JSON.stringify(a ?? null) === JSON.stringify(b ?? null);
@@ -35,6 +44,20 @@ for (const project of (await store.listProjects()).filter((p: any) => !p.archive
   const ids = all.map((s: any) => s.id);
   if (new Set(ids).size !== ids.length) failures.push(`${project.brand}: duplicate stat ids`);
   for (const c of reg.conflicts) failures.push(`${project.brand}: ${c.id} met with values ${c.values.join(", ")}`);
+  // Stage 3: the counts behind a stat print exactly its value; the Brief's funnel stats all carry counts.
+  for (const s of all) {
+    if (s.k === undefined) continue;
+    withCounts++;
+    const x = s.n > 0 ? s.k / s.n : 0;
+    if (s.value !== pctWhole(x) && s.value !== pctFine(x)) {
+      if (s.value === tok(pctWhole(x)) && pctWhole(x) === "<1%") underOne.push(`${project.brand}: ${s.id}`);
+      else failures.push(`${project.brand}: ${s.id} prints ${s.value} but its counts ${s.k} of ${s.n} give ${pctWhole(x)} / ${pctFine(x)}`);
+    }
+  }
+  const O = "chooses:open:all";
+  const funnelStats = [reg.step(O, "named", "you"), reg.step(O, "recommended", "you"), reg.step(O, "converts", "you"), reg.line(O, "share", "you"), reg.line(O, "picked", "you"), reg.line(O, "commit", "rate")];
+  for (const r of map.rivalPanels ?? []) funnelStats.push(reg.rivalStep(r.name, "named", "rival"), reg.rivalBody(r.name, "named", "recommended"), reg.rivalStep(r.name, "open", "rival"), reg.rivalStep(r.name, "picked", "rival"));
+  for (const s of funnelStats) if (s && s.k === undefined) failures.push(`${project.brand}: funnel stat ${s.id} carries no counts to decide with`);
   // Cheapest view first: a stat seen by default is "default".
   for (const s of all) if (s.views.some((v: any) => v.at === "default") && s.at !== "default") failures.push(`${project.brand}: ${s.id} is shown by default but registered behind ${JSON.stringify(s.reveal)}`);
   // Determinism.
@@ -85,5 +108,7 @@ for (const project of (await store.listProjects()).filter((p: any) => !p.archive
 }
 console.log(`\n${total} stats on five trackers`);
 for (const f of failures.slice(0, 40)) console.log(`FAIL ${f}`);
+console.log(`stats carrying counts: ${withCounts} (each re-derives its printed value)`);
+console.log(`stats in a sentence whose card prints "<1%" but whose registered value is the token "1%": ${underOne.length}${underOne.length ? ` (e.g. ${underOne.slice(0, 3).join("; ")})` : ""}`);
 console.log(failures.length ? `\n${failures.length} FAIL` : "ALL PASS - ids unique and stable, every index entry is one registry stat");
 process.exit(failures.length ? 1 : 0);

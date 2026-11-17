@@ -12,6 +12,12 @@
  * with BRIEF_BEFORE=<dump.json> (scratch dump of every Brief string before the change) - when a sentence of that
  * dump is absent now. Figures printed the old way because no card shows them are listed as "needs a card home".
  *
+ * Stage 3 (funnel decisions, 2026-11-17): the run is STRICT (BRIEF_STRICT_FUNNEL=1, set below) - brief.ts strips
+ * the brand summary's funnel cells and, strict, makes each a getter that throws, so every Brief computed here proves
+ * no funnel path read the old source to print or to decide. Checked too: a negative control (reading a stripped
+ * field throws), a source check of brief.ts (no funnel-cell reads, no per-situation headline reads, the full summary
+ * reached only by the two out-of-scope calls), and the funnel universe (every summary brand has a funnel on a card).
+ *
  * Fixture only, no model calls:  npx tsx scripts/brief_links_harness.mts
  */
 process.env.DATABASE_URL = "";
@@ -22,7 +28,8 @@ const { store } = await import(process.cwd() + "/src/lib/store/index.ts");
 const { loadViewData } = await import(process.cwd() + "/src/lib/engine/view_data.ts");
 process.env.BRIEF_TRIM_LOG = "1";
 process.env.BRIEF_FIG_LOG = "1";
-const { computeBrief, conditionTerms, TRIMMED_CLAIMS, FIG_LOG } = await import(process.cwd() + "/src/lib/engine/brief.ts");
+process.env.BRIEF_STRICT_FUNNEL = "1";
+const { computeBrief, conditionTerms, TRIMMED_CLAIMS, FIG_LOG, stripFunnel } = await import(process.cwd() + "/src/lib/engine/brief.ts");
 const { buildStatRegistry } = await import(process.cwd() + "/src/lib/engine/stat_registry.ts");
 const fs = await import("node:fs");
 const { sharedAnalysisMap } = await import(process.cwd() + "/src/lib/engine/analysis_map.ts");
@@ -50,6 +57,20 @@ function kindOf(s: string, row?: string): string {
 }
 
 const failures: string[] = [];
+
+// Stage 3: the source check - brief.ts reads no funnel cell of the brand summary, no per-situation headline, no
+// Position.brands split, and reaches the full summary only through the two out-of-scope calls.
+{
+  const src = fs.readFileSync(process.cwd() + "/src/lib/engine/brief.ts", "utf8");
+  const bad = /\.(mentioned|chosen|shareOfDecided|firmPickInCategory|firmPick|byMode|byEngine)\b|\.recommended\b|computeHeadline|\bpos(ition)?\.brands\b/;
+  src.split("\n").forEach((l, i) => {
+    if (bad.test(l)) failures.push(`brief.ts:${i + 1} reads an old-source funnel field: ${l.trim().slice(0, 160)}`);
+  });
+  const oos = src.split("\n").filter((l) => /\.outOfScope\b/.test(l));
+  for (const l of oos) if (!/hasDossier\(c\.outOfScope\.summary, key\)|awaySpecifics\(c\.outOfScope\.summary, c\.inputs\.away\)/.test(l)) failures.push(`brief.ts reaches the full summary outside the two out-of-scope calls: ${l.trim().slice(0, 160)}`);
+}
+const strictChecked: string[] = [];
+const noFunnel: string[] = [];
 const counts = { linked: 0, def: 0, one: 0, card: 0, table: 0, unlinked: 0, unlinkedHome: 0 };
 const tables: string[] = [];
 /** The tracker's own Brief alone (the rival's is the second subject). */
@@ -78,6 +99,29 @@ for (const project of (await store.listProjects()).filter((p: any) => !p.archive
   const briefs: [string | undefined, any][] = [[undefined, first], ...(first.subjects?.[1] ? [[first.subjects[1], await computeBrief(data, { subject: first.subjects[1] })] as [string, any]] : [])];
   const { view: map } = await sharedAnalysisMap(data, {});
   const { view: summary, inputs } = await sharedBrandSummary(data, {});
+  // Stage 3: the negative control (the strict guard throws on a funnel read) and the funnel universe.
+  {
+    const st = stripFunnel(summary);
+    const throws = (f: () => unknown) => {
+      try {
+        f();
+        return false;
+      } catch (e: any) {
+        return /BRIEF_STRICT_FUNNEL/.test(e?.message ?? "");
+      }
+    };
+    if (!throws(() => (st.target as any).chosen.k) || !throws(() => (st.brands[1] as any)?.mentioned.k) || !throws(() => (st.summary as any).firmPickInCategory.k))
+      failures.push(`${project.brand}: the strict funnel guard did not throw on a stripped field (the strict run proves nothing)`);
+    else strictChecked.push(project.brand);
+    const reg0 = buildStatRegistry(map);
+    for (const b of summary.brands) {
+      const t = b.key === summary.target.key;
+      const has = t
+        ? reg0.step("chooses:open:all", "named", "you") && reg0.line("chooses:open:all", "share", "you") && reg0.line("chooses:open:all", "picked", "you")
+        : reg0.rivalStep(b.name, "named", "rival") && reg0.rivalStep(b.name, "open", "rival") && reg0.rivalStep(b.name, "picked", "rival");
+      if (!has) noFunnel.push(`${project.brand}: ${b.name}`);
+    }
+  }
   const terms = [
     ...summary.brands.filter((b: any) => b.key !== summary.target.key).map((b: any) => b.name),
     ...(summary.reasonLift ?? []).map((l: any) => l.code),
@@ -302,6 +346,8 @@ const trimmed = new Map<string, { brand: string; cellId: string; claim: string; 
 for (const t of TRIMMED_CLAIMS) trimmed.set(`${t.brand}|${t.claim}`, t);
 console.log(`\nMAP CLAIMS A MOVE QUOTES THAT LOST A CLAUSE: ${trimmed.size}`);
 for (const t of trimmed.values()) console.log(`  - ${t.brand} [${t.cellId}]\n      was:  ${t.claim}\n      now:  ${t.kept || "(dropped whole)"}`);
+console.log(`\nStage 3 (funnel decisions): every Brief above computed STRICT (a funnel read of the old source throws); guard negative control passed on ${strictChecked.length} trackers.`);
+console.log(`Summary brands with no funnel on any card (left out of every funnel decision): ${noFunnel.length ? noFunnel.join("; ") : "none"}`);
 for (const f of failures) console.log(`FAIL ${f}`);
 console.log(failures.length ? `\n${failures.length} FAIL` : "\nALL PASS - every linked number opens a card that shows it beside its subject, or the Brief's own card");
 process.exit(failures.length ? 1 : 0);

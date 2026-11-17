@@ -134,3 +134,27 @@ export function trReplace(tr: Tr, re: RegExp, repl: Repl): Tr {
   s += tr.s.slice(last);
   return { s, m };
 }
+
+/* ---------------- stage 3: deciding from the figure printed ---------------- */
+
+/**
+ * A stat's counts (stat_registry.ts `k` / `n`, read from the number's own tip). The Brief decides with these and
+ * nothing else for its funnel figures: a sentence that says "under half" decides from the very figure it prints.
+ * A decision on a stat with no counts is a bug in the caller (every funnel stat is a PanelNum or a keyed span),
+ * so these throw rather than guess.
+ */
+function counts(s: Stat): { k: number; n: number } {
+  if (s.k === undefined || s.n === undefined) throw new Error(`stat ${s.id} carries no counts to decide with`);
+  return { k: s.k, n: s.n };
+}
+/** The numerator ("picks", "answers that name it"). */
+export const kOf = (s: Stat): number => counts(s).k;
+/** The base. */
+export const nOf = (s: Stat): number => counts(s).n;
+/** k / n exactly (0 on an empty base) - never the rounded display value. */
+export const rateOf = (s: Stat): number => {
+  const { k, n } = counts(s);
+  return n > 0 ? k / n : 0;
+};
+/** The tip a stat's counts state, in the Brief's tip format ("k of n"). */
+export const tipOfStat = (s: Stat): string => `${kOf(s)} of ${nOf(s)}`;
