@@ -122,7 +122,7 @@ calculations that are supposed to match.
 | 6 | Is a pick a recommendation? | Yes, everywhere. |
 | 7 | The all-buyers "What to buy" | The sum of the buyer cards. What's popular and Premium vs basic keep their own cards and are not in it. |
 | 8 | Brands marked "not for analysis" | Out of every brand count and never listed. Every pick falls in exactly one of three buckets: a brand in analysis, **outside of analysis**, or outside the category. "Outside of analysis" is its own bucket, never folded into "outside the category". Share of picks is out of picks of brands in analysis, so it adds to 100%. Everything recomputes when the analysis set changes. |
-| 9 | "Agrees the worry is fair" | Of the answers that took a side, with "took no side" shown. |
+| 9 | "Agrees the worry is fair" | Of the answers that agree, partly agree or disagree. "Partly agrees" counts as taking a side (Tyler). This is what every screen does today, so nothing moves. |
 | 10 | Conditions in the Overview's findings | Each question type on its own, so a finding matches the card it opens. |
 | 11 | "Converts" | One rule: the visibility view's (at or above the level line). |
 
@@ -130,7 +130,9 @@ Ruling 8, the commit rate: it is the share of answers that pick one brand in ana
 Y% of the time it does, Z% of all answers" still multiplies out. The shares "picks a brand outside of analysis" and
 "picks something outside the category" are shown beside it. (Confirm with Tyler: stated to him, not yet answered.)
 
-Before building: the list of every number each ruling moves, for all six trackers.
+The list of every number each ruling moves, measured on the test copy of all six trackers: `RULING_MOVES_2026-11-17.md`
+(raw data in `~/Documents/procerno_eval/engine_inventory_2026-11-17/rulings/`). Ruling 7 moves 6,789 drawn numbers; under it
+What's popular answers need their own group on the Data page.
 
 ## 6. How to build it without breaking what works
 
