@@ -4,6 +4,11 @@
  * the same data the card UI renders (panels_v2.tsx / panel_parts.tsx) through the shared decisions in
  * panel_view.ts. The Brief resolves its links against it (brief_links.ts), and the links harness asserts them.
  *
+ * Stage 1 of the stat ids (2026-11-17): the one walk here also gives every number its location in the data - a
+ * path keyed by stable keys (step key, line key, row label, brand name), never by display position where a key
+ * exists. stat_registry.ts turns the walk into the registry of stats (one id per location); indexPanel /
+ * indexAcross stay the (value, words) view the link resolver reads, byte-identical to before.
+ *
  * Not indexed: tag pills (words, no numbers), the move box (template sentences), example answers.
  */
 import type { PanelConditions, PanelNum, PanelRival, PanelSpan, PanelStep, PanelStepDetail, PanelTable, PanelText, PanelWeighs, Position, PositionPanel, RivalAcross, RivalStepDetail } from "./analysis_types";
@@ -23,187 +28,280 @@ export interface IndexEntry {
   reveal?: PanelReveal;
 }
 
+/** One number as the walk meets it in one state of a card: the index entry plus its location (`path`). */
+export interface WalkEntry extends IndexEntry {
+  /** The number's location on its card ("steps/named/you", "lines/share/avg", "conditions/away/<row>/share"). */
+  path: string;
+  /** The card's part the path lives in: "" for the card itself, "rival:<name>" for a rival's own card inside a cell. */
+  part: string;
+  pct?: number;
+}
+
+type Raw = { value: string; words: string; path: string; pct?: number };
+type Out = Raw[];
+
+/**
+ * Paths for one card: a path names one location in the data. The walk meets a location again in another state
+ * (the same object): it keeps its path. Two different objects that would get the same path (a duplicated row label,
+ * say) get "#2", "#3" in the order the walk first meets them - the same in every state, so ids stay stable.
+ */
+class Paths {
+  private seen = new Map<string, unknown[]>();
+  id(path: string, src: unknown): string {
+    if (src === undefined) return path;
+    let xs = this.seen.get(path);
+    if (!xs) this.seen.set(path, (xs = []));
+    let i = xs.indexOf(src);
+    if (i < 0) i = xs.push(src) - 1;
+    return i === 0 ? path : `${path}#${i + 1}`;
+  }
+}
+
 const T = (t: PanelText | undefined) => (t ?? []).map((s) => s.t).join("");
 const isSpan = (c: PanelNum | PanelSpan): c is PanelSpan => "t" in c;
 const cap = (t: string) => (t ? t[0].toUpperCase() + t.slice(1) : t);
+/** A key segment: the words as written, with the path separator taken out. */
+const k = (s: string | number) => String(s).replace(/\//g, "∕");
 
-type Out = { value: string; words: string }[];
-const num = (out: Out, n: PanelNum | undefined, words: string) => {
-  if (n) out.push({ value: n.value, words });
+interface W {
+  out: Out;
+  P: Paths;
+}
+const num = (w: W, n: PanelNum | undefined, words: string, path: string) => {
+  if (n) w.out.push({ value: n.value, words, path: w.P.id(path, n), pct: n.pct });
 };
-const text = (out: Out, t: PanelText | string | undefined, words?: string) => {
+/** The numbers in a sentence: a keyed span (PanelSpan.key) holding one number is `<path>/<key>`, else `<path>/<i>`
+ * (i = the number's order in the sentence). */
+const text = (w: W, t: PanelText | string | undefined, path: string, words?: string) => {
   const s = typeof t === "string" ? t : T(t);
-  for (const v of numberTokens(s)) out.push({ value: v, words: `${words ? `${words} ` : ""}${s}` });
+  const spans = typeof t === "string" || !t ? null : t;
+  const bounds: { from: number; to: number; span: PanelSpan }[] = [];
+  if (spans) {
+    let at = 0;
+    for (const sp of spans) {
+      bounds.push({ from: at, to: at + sp.t.length, span: sp });
+      at += sp.t.length;
+    }
+  }
+  let i = 0;
+  for (const m of s.matchAll(NUMBER_TOKEN)) {
+    const b = bounds.find((x) => m.index! >= x.from && m.index! < x.to);
+    const keyed = b && b.span.key && numberTokens(b.span.t).length === 1 && m.index! + m[0].length <= b.to;
+    const p = keyed ? `${path}/${k(b!.span.key!)}` : `${path}/${i}`;
+    w.out.push({ value: m[0], words: `${words ? `${words} ` : ""}${s}`, path: w.P.id(p, b ? b.span : (t as unknown) ?? path) });
+    i++;
+  }
 };
 
 /** StepCard (panel_parts.tsx): the bars a step draws in a view. */
-function stepNums(out: Out, s: PanelStep, usual: PanelStep | undefined, comp: boolean, labels: { here: string; usual: string }, rivalLabel?: string) {
+function stepNums(w: W, s: PanelStep, usual: PanelStep | undefined, comp: boolean, labels: { here: string; usual: string }, rivalLabel?: string) {
   const ranked = comp || !!rivalLabel;
+  const p = `steps/${k(s.key)}`;
   if (s.here) {
     const youL = comp && !s.rivals?.length && (s.compHereLabel || s.hereLabel) ? s.compHereLabel ?? s.hereLabel! : ranked ? "You" : s.hereLabel ?? labels.here;
-    num(out, s.here, `${s.label} - ${youL}`);
-    if (ranked) for (const r of s.rivals ?? []) num(out, r.num, `${s.label} - ${r.name}`);
+    num(w, s.here, `${s.label} - ${youL}`, `${p}/you`);
+    if (ranked) for (const r of s.rivals ?? []) num(w, r.num, `${s.label} - ${r.name}`, `${p}/rival/${k(r.name)}`);
     const vs = !ranked && s.vs;
-    if (vs) num(out, vs.num, `${s.label} - ${vs.name}`);
+    if (vs) num(w, vs.num, `${s.label} - ${vs.name}`, `${p}/vs`);
     const u = s.usual ?? usual?.here;
-    if (!ranked && !vs && u) num(out, u, `${s.label} - ${s.usualLabel ?? labels.usual}`);
-  } else if (ranked && s.rivals?.length) for (const r of s.rivals) num(out, r.num, `${s.label} - ${r.name}`);
-  for (const g of s.segments ?? []) num(out, g.num, `${s.label} - ${cap(g.label)}`);
-  if (!ranked && usual?.segments?.length) for (const g of usual.segments) num(out, g.num, `${s.label} - ${cap(g.label)} - usual`);
-  for (const it of s.items ?? []) num(out, it.num, `${s.label} - ${it.label}`);
-  text(out, s.note, s.label);
+    if (!ranked && !vs && u) num(w, u, `${s.label} - ${s.usualLabel ?? labels.usual}`, `${p}/usual`);
+  } else if (ranked && s.rivals?.length) for (const r of s.rivals) num(w, r.num, `${s.label} - ${r.name}`, `${p}/rival/${k(r.name)}`);
+  for (const g of s.segments ?? []) num(w, g.num, `${s.label} - ${cap(g.label)}`, `${p}/seg/${k(g.key)}`);
+  if (!ranked && usual?.segments?.length) for (const g of usual.segments) num(w, g.num, `${s.label} - ${cap(g.label)} - usual`, `${p}/usualseg/${k(g.key)}`);
+  for (const it of s.items ?? []) num(w, it.num, `${s.label} - ${it.label}`, `${p}/item/${k(it.label)}`);
+  text(w, s.note, `${p}/note`, s.label);
 }
 
-/** RivalDetail (panels_v2.tsx): a step's explanation. */
-function detailNums(out: Out, d: PanelStepDetail | RivalStepDetail, outcomesAll: boolean, rivalName = "") {
-  text(out, d.body, d.heading);
+/** RivalDetail (panels_v2.tsx): a step's explanation. `p` = "detail/<step>" (or "detailComp/<step>"). */
+function detailNums(w: W, d: PanelStepDetail | RivalStepDetail, outcomesAll: boolean, p: string, rivalName = "") {
+  text(w, d.body, `${p}/body`, d.heading);
   const cols = "columns" in d ? d.columns : undefined;
   for (const r of d.rows ?? []) {
-    num(out, r.rival, `${d.heading} - ${r.label} - ${cols?.rival ?? rivalName}`);
-    num(out, r.you, `${d.heading} - ${r.label} - ${cols?.you ?? "You"}`);
+    num(w, r.rival, `${d.heading} - ${r.label} - ${cols?.rival ?? rivalName}`, `${p}/row/${k(r.label)}/rival`);
+    num(w, r.you, `${d.heading} - ${r.label} - ${cols?.you ?? "You"}`, `${p}/row/${k(r.label)}/you`);
   }
-  if ("list" in d && d.list) for (const r of d.list.rows) num(out, r.num, `${d.heading} - ${d.list.title} ${r.label}`);
+  if ("list" in d && d.list) for (const r of d.list.rows) num(w, r.num, `${d.heading} - ${d.list.title} ${r.label}`, `${p}/list/${k(r.label)}`);
   const ol = d.outcomeLabels;
   if (d.outcomes && ol) {
     const { shown } = outcomeRowsShown(d.outcomes as { you?: true; usual?: true }[], outcomesAll);
-    for (const o of shown as NonNullable<PanelStepDetail["outcomes"]>) for (const k of ["picked", "lost", "none"] as const) if (ol[k]) num(out, o[k], `${d.heading} - ${o.name} - ${ol[k]}`);
+    for (const o of shown as NonNullable<PanelStepDetail["outcomes"]>) for (const x of ["picked", "lost", "none"] as const) if (ol[x]) num(w, o[x], `${d.heading} - ${o.name} - ${ol[x]}`, `${p}/outcome/${k(o.name)}/${x}`);
   }
-  text(out, d.both, d.heading);
-  if ("sections" in d) for (const s of d.sections ?? []) {
-    for (const r of s.rows) num(out, r.num, `${s.title} - ${r.label}`);
-    text(out, s.note, s.title);
-  }
+  text(w, d.both, `${p}/both`, d.heading);
+  if ("sections" in d)
+    for (const s of d.sections ?? []) {
+      for (const r of s.rows) num(w, r.num, `${s.title} - ${r.label}`, `${p}/section/${k(s.title)}/${k(r.label)}`);
+      text(w, s.note, `${p}/section/${k(s.title)}/note`, s.title);
+    }
 }
 
-function condNums(out: Out, c: PanelConditions | undefined, comp: boolean, all: boolean) {
+function condNums(w: W, c: PanelConditions | undefined, comp: boolean, all: boolean, p = "conditions") {
   if (!c) return;
   for (const [side, title, also] of [["toward", c.towardTitle, c.alsoToward], ["away", c.awayTitle, c.alsoAway]] as const) {
     for (const r of conditionRowsShown(c[side], all)) {
-      num(out, r.share, `${c.title} - ${title} ${r.text}`);
-      num(out, r.both?.either, `${c.title} - ${r.text} - ${also}`);
-      if (comp) for (const x of r.to ?? []) num(out, x.num, `${c.title} - ${r.text} - ${x.name}`);
-      num(out, r.youPicked, `${c.title} - ${r.text} - you are the pick`);
+      const rp = `${p}/${side}/${k(r.text)}`;
+      num(w, r.share, `${c.title} - ${title} ${r.text}`, `${rp}/share`);
+      num(w, r.both?.either, `${c.title} - ${r.text} - ${also}`, `${rp}/also`);
+      if (comp) for (const x of r.to ?? []) num(w, x.num, `${c.title} - ${r.text} - ${x.name}`, `${rp}/to/${k(x.name)}`);
+      num(w, r.youPicked, `${c.title} - ${r.text} - you are the pick`, `${rp}/youPicked`);
     }
   }
 }
 
-const tableNums = (out: Out, t: PanelTable | undefined) => {
+const tableNums = (w: W, t: PanelTable | undefined, p: string) => {
   if (!t) return;
-  for (const r of t.rows) r.cells.forEach((c, i) => c && (isSpan(c) ? text(out, c.t, `${t.title} - ${r.label} - ${t.columns[i] ?? ""}`) : num(out, c, `${t.title} - ${r.label} - ${t.columns[i] ?? ""}`)));
+  for (const r of t.rows)
+    r.cells.forEach((c, i) => {
+      if (!c) return;
+      const words = `${t.title} - ${r.label} - ${t.columns[i] ?? ""}`;
+      const cp = `${p}/${k(t.title)}/${k(r.label)}/${i}`;
+      if (isSpan(c)) text(w, c.t, cp, words);
+      else num(w, c, words, cp);
+    });
 };
-const weighNums = (out: Out, w: PanelWeighs | undefined) => {
-  if (!w) return;
-  for (const c of w.columns)
+const weighNums = (w: W, x: PanelWeighs | undefined, p: string) => {
+  if (!x) return;
+  x.columns.forEach((c, ci) => {
     for (const r of c.rows) {
-      num(out, r.num, `${w.title} - ${c.title ?? ""} - ${r.name}`);
-      if (r.other) num(out, r.other.num, `${w.title} - ${r.other.label} - ${r.name}`);
+      num(w, r.num, `${x.title} - ${c.title ?? ""} - ${r.name}`, `${p}/${ci}/${k(r.name)}/num`);
+      if (r.other) num(w, r.other.num, `${x.title} - ${r.other.label} - ${r.name}`, `${p}/${ci}/${k(r.name)}/other`);
     }
+  });
 };
 
 /** PositionPanelView in one state. */
-function panelState(pp: PositionPanel, usualSteps: PanelStep[] | undefined, comp: boolean, sel: string | undefined, condAll: boolean, outAll: boolean): Out {
-  const out: Out = [];
-  text(out, pp.claim, "claim");
-  text(out, pp.lead, "lead");
-  text(out, pp.thin);
+function panelState(pp: PositionPanel, usualSteps: PanelStep[] | undefined, comp: boolean, sel: string | undefined, condAll: boolean, outAll: boolean, P: Paths): Out {
+  const w: W = { out: [], P };
+  text(w, pp.claim, "claim", "claim");
+  text(w, pp.lead, "lead", "lead");
+  text(w, pp.thin, "thin");
   const { selectable, defaultSel } = panelSelection(pp, comp);
   const details = (comp ? pp.detailsComp : pp.details) ?? {};
   const labels = { here: pp.hereKey ?? "You", usual: pp.usualKey ?? "" };
-  for (const s of pp.steps) stepNums(out, s, usualSteps?.find((u) => u.key === s.key), comp, labels);
+  for (const s of pp.steps) stepNums(w, s, usualSteps?.find((u) => u.key === s.key), comp, labels);
   for (const b of PANEL_ORDER[pp.kind] ?? []) {
-    if (b === "byproduct") tableNums(out, pp.byProduct);
+    if (b === "byproduct") tableNums(w, pp.byProduct, "byProduct");
     if (b === "detail") {
       const d = sel ? details[sel as keyof typeof details] : undefined;
-      if (d) detailNums(out, d, outAll);
+      if (d) detailNums(w, d, outAll, `${comp && d !== pp.details?.[sel as keyof typeof details] ? "detailComp" : "detail"}/${k(sel!)}`);
       else if (!selectable || sel === defaultSel) {
         const pd = comp ? pp.detailComp ?? pp.detail : pp.detail;
-        if (pd) text(out, pd.body, pd.heading);
+        if (pd) text(w, pd.body, `${comp && pd !== pp.detail ? "detailComp" : "detail"}/_panel/body`, pd.heading);
       }
     }
-    if (b === "conditions") condNums(out, pp.conditions, comp, condAll);
-    if (b === "competitors" && competitorsShown(pp, comp)) for (const r of pp.competitors!.rows) num(out, r.num, `${pp.competitors!.title} - ${r.shown ?? (r.you ? "You" : r.name)}`);
-    if (b === "lines") for (const l of (comp ? pp.linesComp ?? pp.lines : pp.lines) ?? []) text(out, l.value, l.label);
-    if (b === "weighs") weighNums(out, comp ? pp.weighsComp ?? pp.weighs : pp.weighs);
-    if (b === "ends") weighNums(out, pp.ends);
-    if (b === "table") tableNums(out, comp ? pp.tableComp ?? pp.table : pp.table);
-    if (b === "tables") for (const t of pp.tables ?? []) tableNums(out, t);
+    if (b === "conditions") condNums(w, pp.conditions, comp, condAll);
+    if (b === "competitors" && competitorsShown(pp, comp)) for (const r of pp.competitors!.rows) num(w, r.num, `${pp.competitors!.title} - ${r.shown ?? (r.you ? "You" : r.name)}`, `competitors/${r.you ? "you" : k(r.name)}`);
+    if (b === "lines") for (const l of (comp ? pp.linesComp ?? pp.lines : pp.lines) ?? []) text(w, l.value, `lines/${k(l.key ?? l.label)}`, l.label);
+    if (b === "weighs") {
+      const x = comp ? pp.weighsComp ?? pp.weighs : pp.weighs;
+      weighNums(w, x, comp && x !== pp.weighs ? "weighs/comp" : "weighs/plain");
+    }
+    if (b === "ends") weighNums(w, pp.ends, "ends");
+    if (b === "table") {
+      const t = comp ? pp.tableComp ?? pp.table : pp.table;
+      tableNums(w, t, comp && t !== pp.table ? "tableComp" : "table");
+    }
+    if (b === "tables") for (const t of pp.tables ?? []) tableNums(w, t, "tables");
   }
-  return out;
+  return w.out;
 }
 
 /** RivalInCell (panel 11) as it opens. */
-function rivalInCellState(r: PanelRival): Out {
-  const out: Out = [];
-  text(out, r.claim, `${r.name} claim`);
-  text(out, r.lead, r.name);
-  text(out, r.thin);
-  for (const s of r.steps) stepNums(out, s, undefined, false, { here: "You", usual: "" }, r.name);
+function rivalInCellState(r: PanelRival, P: Paths): Out {
+  const w: W = { out: [], P };
+  text(w, r.claim, "claim", `${r.name} claim`);
+  text(w, r.lead, "lead", r.name);
+  text(w, r.thin, "thin");
+  for (const s of r.steps) stepNums(w, s, undefined, false, { here: "You", usual: "" }, r.name);
   const sel = rivalInCellDefault(r);
   const d = sel ? (r.details ?? {})[sel as "named"] : undefined;
-  if (d) detailNums(out, d, false, r.name);
-  condNums(out, r.conditions, false, false);
-  for (const l of r.lines ?? []) text(out, l.value, l.label);
-  weighNums(out, r.weighs);
+  if (d) detailNums(w, d, false, `detail/${k(sel!)}`, r.name);
+  condNums(w, r.conditions, false, false);
+  for (const l of r.lines ?? []) text(w, l.value, `lines/${k(l.key ?? l.label)}`, l.label);
+  weighNums(w, r.weighs, "weighs/plain");
   for (const c of r.byCell ?? []) {
-    num(out, c.rival, `${r.byCellTitle ?? ""} - ${c.label} - ${r.name}`);
-    num(out, c.you, `${r.byCellTitle ?? ""} - ${c.label} - You`);
+    num(w, c.rival, `${r.byCellTitle ?? ""} - ${c.label} - ${r.name}`, `byCell/${k(c.cellId)}/rival`);
+    num(w, c.you, `${r.byCellTitle ?? ""} - ${c.label} - You`, `byCell/${k(c.cellId)}/you`);
   }
-  return out;
+  return w.out;
 }
 
 const keyOf = (e: { value: string; words: string }) => `${e.value}\u0000${e.words}`;
-function merge(into: IndexEntry[], seen: Set<string>, xs: Out, at: IndexEntry["at"], reveal?: PanelReveal) {
+const tag = (xs: Out, at: IndexEntry["at"], reveal: PanelReveal | undefined, part = ""): WalkEntry[] => xs.map((x) => ({ ...x, at, ...(reveal ? { reveal } : {}), part }));
+/** The index view of a walk: first (value, words) wins, in walk order - the bf33 index exactly. */
+function dedupe(xs: WalkEntry[]): WalkEntry[] {
+  const seen = new Set<string>();
+  const out: WalkEntry[] = [];
   for (const x of xs) {
-    const k = keyOf(x);
-    if (seen.has(k)) continue;
-    seen.add(k);
-    into.push({ ...x, at, ...(reveal ? { reveal } : {}) });
+    const kk = keyOf(x);
+    if (seen.has(kk)) continue;
+    seen.add(kk);
+    out.push(x);
   }
+  return out;
+}
+const toIndex = (x: WalkEntry): IndexEntry => ({ value: x.value, words: x.words, at: x.at, ...(x.reveal ? { reveal: x.reveal } : {}) });
+
+/** The full walk of a cell's card, every state in order (default first, then each one-interaction state). */
+export function walkPanel(p: Position, usualSteps?: PanelStep[]): WalkEntry[] {
+  const pp = p.panel;
+  if (!pp) return [];
+  const P = new Paths();
+  const out: WalkEntry[] = [];
+  const { selectable, defaultSel } = panelSelection(pp, false);
+  out.push(...tag(panelState(pp, usualSteps, false, defaultSel, false, false, P), "default", undefined));
+  // One interaction: another step, the competitors switch, a fold, a rival's own card.
+  if (selectable) for (const s of pp.steps) if (s.key !== defaultSel && pp.details?.[s.key]) out.push(...tag(panelState(pp, usualSteps, false, s.key, false, false, P), "one", { step: s.key }));
+  if (pp.compare) out.push(...tag(panelState(pp, usualSteps, true, panelSelection(pp, true).defaultSel, false, false, P), "one", { competitors: true }));
+  if (pp.conditions && conditionsFold(pp.conditions.toward, pp.conditions.away)) out.push(...tag(panelState(pp, usualSteps, false, defaultSel, true, false, P), "one", { fold: "conditions" }));
+  out.push(...tag(panelState(pp, usualSteps, false, defaultSel, false, true, P), "one", { fold: "outcomes" }));
+  for (const r of pp.rivals ?? []) out.push(...tag(rivalInCellState(r, new Paths()).map((x) => ({ ...x, words: `${r.name} - ${x.words}` })), "one", { rival: r.name }, `rival:${r.name}`));
+  return out;
 }
 
 /** Every number on a cell's card. `usualSteps` = the row's All cell's steps (drawn as the usual bars). */
 export function indexPanel(p: Position, usualSteps?: PanelStep[]): IndexEntry[] {
-  const pp = p.panel;
-  if (!pp) return [];
-  const out: IndexEntry[] = [];
-  const seen = new Set<string>();
-  const { selectable, defaultSel } = panelSelection(pp, false);
-  merge(out, seen, panelState(pp, usualSteps, false, defaultSel, false, false), "default");
-  // One interaction: another step, the competitors switch, a fold, a rival's own card.
-  if (selectable) for (const s of pp.steps) if (s.key !== defaultSel && pp.details?.[s.key]) merge(out, seen, panelState(pp, usualSteps, false, s.key, false, false), "one", { step: s.key });
-  if (pp.compare) merge(out, seen, panelState(pp, usualSteps, true, panelSelection(pp, true).defaultSel, false, false), "one", { competitors: true });
-  if (pp.conditions && conditionsFold(pp.conditions.toward, pp.conditions.away)) merge(out, seen, panelState(pp, usualSteps, false, defaultSel, true, false), "one", { fold: "conditions" });
-  merge(out, seen, panelState(pp, usualSteps, false, defaultSel, false, true), "one", { fold: "outcomes" });
-  for (const r of pp.rivals ?? []) merge(out, seen, rivalInCellState(r).map((x) => ({ ...x, words: `${r.name} - ${x.words}` })), "one", { rival: r.name });
-  return out;
+  return dedupe(walkPanel(p, usualSteps)).map(toIndex);
+}
+/** indexPanel with each entry's location kept (the harness reads it). */
+export function indexPanelWalk(p: Position, usualSteps?: PanelStep[]): WalkEntry[] {
+  return dedupe(walkPanel(p, usualSteps));
 }
 
 /** RivalAcrossView (the By rival card) in one state. */
-function acrossState(r: RivalAcross, sel: string | undefined, condAll: boolean): Out {
-  const out: Out = [];
-  text(out, r.claim, `${r.name} claim`);
-  for (const s of r.steps) for (const b of s.bars) if (b.who !== "other") num(out, b.num, `${s.label} - ${b.who === "rival" ? r.name : "You"}`);
+function acrossState(r: RivalAcross, sel: string | undefined, condAll: boolean, P: Paths): Out {
+  const w: W = { out: [], P };
+  text(w, r.claim, "claim", `${r.name} claim`);
+  for (const s of r.steps) for (const b of s.bars) if (b.who !== "other") num(w, b.num, `${s.label} - ${b.who === "rival" ? r.name : "You"}`, `steps/${k(s.key)}/bar/${b.who}`);
   const s = r.steps.find((x) => x.key === sel) ?? r.steps[0];
   if (s) {
-    text(out, s.body, s.heading);
-    for (const b of s.bars) num(out, b.num, `${s.label} - ${b.name}`);
-    condNums(out, s.conditions, false, condAll);
-    tableNums(out, s.table);
-    text(out, s.fold, s.label);
+    const p = `steps/${k(s.key)}`;
+    text(w, s.body, `${p}/body`, s.heading);
+    for (const b of s.bars) num(w, b.num, `${s.label} - ${b.name}`, b.who === "other" ? `${p}/bar/other/${k(b.name)}` : `${p}/bar/${b.who}`);
+    condNums(w, s.conditions, false, condAll, `${p}/conditions`);
+    tableNums(w, s.table, `${p}/table`);
+    text(w, s.fold, `${p}/fold`, s.label);
   }
-  tableNums(out, r.byBuyer);
-  tableNums(out, r.products);
+  tableNums(w, r.byBuyer, "byBuyer");
+  tableNums(w, r.products, "products");
+  return w.out;
+}
+
+/** The full walk of a rival's By rival card, every state in order. */
+export function walkAcross(r: RivalAcross): WalkEntry[] {
+  const P = new Paths();
+  const out: WalkEntry[] = [];
+  const def = acrossDefault(r);
+  out.push(...tag(acrossState(r, def, false, P), "default", undefined));
+  for (const s of r.steps) if (s.key !== def) out.push(...tag(acrossState(r, s.key, false, P), "one", { step: s.key }));
+  const ds = r.steps.find((x) => x.key === def);
+  if (ds?.conditions && conditionsFold(ds.conditions.toward, ds.conditions.away)) out.push(...tag(acrossState(r, def, true, P), "one", { fold: "conditions" }));
   return out;
 }
 
 /** Every number on a rival's By rival card. */
 export function indexAcross(r: RivalAcross): IndexEntry[] {
-  const out: IndexEntry[] = [];
-  const seen = new Set<string>();
-  const def = acrossDefault(r);
-  merge(out, seen, acrossState(r, def, false), "default");
-  for (const s of r.steps) if (s.key !== def) merge(out, seen, acrossState(r, s.key, false), "one", { step: s.key });
-  const ds = r.steps.find((x) => x.key === def);
-  if (ds?.conditions && conditionsFold(ds.conditions.toward, ds.conditions.away)) merge(out, seen, acrossState(r, def, true), "one", { fold: "conditions" });
-  return out;
+  return dedupe(walkAcross(r)).map(toIndex);
+}
+export function indexAcrossWalk(r: RivalAcross): WalkEntry[] {
+  return dedupe(walkAcross(r));
 }

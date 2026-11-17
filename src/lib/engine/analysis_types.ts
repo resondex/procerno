@@ -428,7 +428,13 @@ export type PanelKind =
 
 /** One piece of a sentence. A span with refs is a stated number or fact that
  * opens its answers (ruling 7); no refs = plain text. tip = counts (hover only). */
-export interface PanelSpan { t: string; refs?: AnswerRef[]; tip?: string }
+export interface PanelSpan {
+  t: string;
+  refs?: AnswerRef[];
+  tip?: string;
+  /** A stable name for the one number this span holds (stat ids, stat_registry.ts): "you", "avg", "usual" ... Never drawn. */
+  key?: string;
+}
 export type PanelText = PanelSpan[];
 
 /** One number on a panel. refs absent <=> not clickable (0%, or nothing to show). */
@@ -542,7 +548,12 @@ export interface PanelConditions {
 
 export interface PanelBrandRow { name: string; you?: true; num: PanelNum; open?: true; /** am37: the row's shown label when it is yours but not "You" (Value: your own cheaper option). */ shown?: string } // open <=> a PanelRival exists
 export interface PanelBlock { title: string; sub: string; rows: PanelBrandRow[] }
-export interface PanelLine { label: string; value: PanelText }
+export interface PanelLine {
+  label: string;
+  value: PanelText;
+  /** A stable name for the line (stat ids, stat_registry.ts): "commit", "share", "picked", "products". Never drawn. */
+  key?: string;
+}
 
 export interface PanelTable {
   title: string;

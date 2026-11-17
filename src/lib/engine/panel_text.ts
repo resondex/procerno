@@ -55,6 +55,8 @@ export function poss(name: string): string {
 export const T = (t: string): PanelSpan => ({ t });
 /** A stated number: its value, answers and counts. */
 export const N = (n: PanelNum): PanelSpan => ({ t: n.value, ...(n.refs ? { refs: n.refs } : {}), tip: n.tip });
+/** N with a stable name for its number (stat ids, stat_registry.ts); the name is never drawn. */
+export const NK = (key: string, n: PanelNum): PanelSpan => ({ ...N(n), key });
 /** A stated fact (a condition, a product) with its answers. */
 export const F = (t: string, n?: PanelNum): PanelSpan => ({ t, ...(n?.refs ? { refs: n.refs } : {}), ...(n ? { tip: n.tip } : {}) });
 
@@ -63,7 +65,7 @@ export function join(...parts: (PanelSpan | PanelText | string | null | undefine
   const out: PanelText = [];
   const push = (s: PanelSpan) => {
     const last = out[out.length - 1];
-    if (last && !last.refs && !last.tip && !s.refs && !s.tip) last.t += s.t;
+    if (last && !last.refs && !last.tip && !last.key && !s.refs && !s.tip && !s.key) last.t += s.t;
     else out.push({ ...s });
   };
   for (const p of parts) {

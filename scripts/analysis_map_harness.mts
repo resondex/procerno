@@ -377,7 +377,7 @@ for (const project of projects) {
           if (!inTable && path.startsWith("memos") && / 100% of /.test(v)) failures.push(`${project.brand}: brief [${b.subject}] ${path} says " 100% of ": ${JSON.stringify(v.slice(0, 160))}`);
           if (!inTable && path.startsWith("memos") && /points\)|points more/.test(v)) failures.push(`${project.brand}: brief [${b.subject}] ${path} carries the points shorthand: ${JSON.stringify(v.slice(0, 160))}`);
         } else if (Array.isArray(v)) v.forEach((x, i) => walk(x, `${path}[${i}]`, inTable));
-        else if (v && typeof v === "object") for (const [k, x] of Object.entries(v)) if (k !== "tip" && k !== "id") walk(x, `${path}.${k}`, inTable || k === "table" || k === "rows");
+        else if (v && typeof v === "object") for (const [k, x] of Object.entries(v)) if (k !== "tip" && k !== "id" && k !== "stat") walk(x, `${path}.${k}`, inTable || k === "table" || k === "rows");
       };
       walk(b.memos, "memos", false);
       walk(b.cards, "cards", false);

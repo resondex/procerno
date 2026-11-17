@@ -95,6 +95,7 @@ import {
   decidedLine,
   funnelDetail,
   join,
+  NK,
   listWords,
   namedLine,
   rankDetail,
@@ -1196,11 +1197,11 @@ function pickPanel(inp: PanelCellInput, ctx: Ctx): PositionPanel {
   const usual = usualOf(inp, ctx.inputs);
   const lines: PanelLine[] = [];
   const linesComp: PanelLine[] = [];
-  const shareLine: PanelLine = { label: "Your share of the picks", value: join(N(share), " here") };
+  const shareLine: PanelLine = { key: "share", label: "Your share of the picks", value: join(NK("you", share), " here") };
   if (usual) {
     const us = h.brandSplit(usual.rows);
     const um = us.list.find((b) => b.key === h.targetKey)?.rows ?? [];
-    shareLine.value = join(N(share), " here · ", N(num(um.length, us.n, "picks", refsOf(um, (r) => h.quoteOf(r) || r.code.top_pick || h.brand))), switching ? " across all rivals' customers" : " across all buyers");
+    shareLine.value = join(NK("you", share), " here · ", NK("usual", num(um.length, us.n, "picks", refsOf(um, (r) => h.quoteOf(r) || r.code.top_pick || h.brand))), switching ? " across all rivals' customers" : " across all buyers");
   }
   // am70: the average competitor's share sits on this line, and "picked, of all answers" gets its own line -
   // the two figures the Brief's scoreboard quotes that no card stated. One decimal under 10%, as the Brief prints it.
@@ -1210,15 +1211,15 @@ function pickPanel(inp: PanelCellInput, ctx: Ctx): PositionPanel {
   const avgShare = comp.length >= 2 ? fineNum(compPicks, split.n * comp.length, "picks, per listed competitor", compRefs) : undefined;
   const youPicked = fineNum(mine.length, inp.rows.length, "answers", refsOf(mine, (r) => h.quoteOf(r) || r.code.top_pick || h.brand));
   const avgPicked = comp.length >= 2 ? fineNum(compPicks, inp.rows.length * comp.length, "answers, per listed competitor", compRefs) : undefined;
-  if (avgShare) shareLine.value = join(shareLine.value, " · the average competitor ", N(avgShare));
-  const pickedLine: PanelLine = { label: "Picked, of all answers", value: avgPicked ? join(N(youPicked), " · the average competitor ", N(avgPicked)) : join(N(youPicked)) };
+  if (avgShare) shareLine.value = join(shareLine.value, " · the average competitor ", NK("avg", avgShare));
+  const pickedLine: PanelLine = { key: "picked", label: "Picked, of all answers", value: avgPicked ? join(NK("you", youPicked), " · the average competitor ", NK("avg", avgPicked)) : join(NK("you", youPicked)) };
   // am72: the commit rate - the share of this cell's answers that name one in-category pick - is the bridge between
   // the two pick numbers below it, and the Brief quotes it; no card stated it.
-  const commitLine: PanelLine = { label: `The AI commits to one ${h.noun}`, value: join("In ", N(num(split.n, inp.rows.length, "answers", refsOf(inp.rows.filter((r) => h.pickOf(r).status === "active"), (r) => h.quoteOf(r) || r.code.top_pick || "")))," of answers") };
+  const commitLine: PanelLine = { key: "commit", label: `The AI commits to one ${h.noun}`, value: join("In ", NK("rate", num(split.n, inp.rows.length, "answers", refsOf(inp.rows.filter((r) => h.pickOf(r).status === "active"), (r) => h.quoteOf(r) || r.code.top_pick || "")))," of answers") };
   lines.push(commitLine, shareLine, pickedLine);
   if (mine.length >= 5 && ctx.ladder) {
     const items = productSplit(mine, (r) => pickedProduct(r, ctx, true), 2, "of your picks", nounToks(ctx), nameTokens(h.brand, ctx));
-    if (namesAProduct(items)) lines.push({ label: `Which of your ${h.plural} it picks`, value: splitLine(items) });
+    if (namesAProduct(items)) lines.push({ key: "products", label: `Which of your ${h.plural} it picks`, value: splitLine(items) });
   }
   const weighs = weighsAll(inp, ctx);
   linesComp.push(commitLine, shareLine, pickedLine);
@@ -4683,8 +4684,8 @@ function rivalAcrossOne(ctx: Ctx, panels: Map<string, PositionPanel>, rv: { key:
           ...duel(namedY, namedR),
           heading: `How often the AI names ${R} when buyers ask what to buy, and how often you`,
           body: join(
-            `When buyers ask what to buy, the AI names ${R} in `, N(namedR), " of answers and recommends it in ", N(recR), ". It names you in ", N(namedY), " and recommends you in ", N(recY), ".",
-            ...(fR.rec.length ? [" ", N(num(fR.picked.length, fR.rec.length, "recommendations", refsOf(fR.picked, pf(R)))), ` of the answers that recommend ${R} end with it as the pick.`] : [])
+            `When buyers ask what to buy, the AI names ${R} in `, NK("named", namedR), " of answers and recommends it in ", NK("recommended", recR), ". It names you in ", NK("youNamed", namedY), " and recommends you in ", NK("youRecommended", recY), ".",
+            ...(fR.rec.length ? [" ", NK("converts", num(fR.picked.length, fR.rec.length, "recommendations", refsOf(fR.picked, pf(R)))), ` of the answers that recommend ${R} end with it as the pick.`] : [])
           ),
         });
       }

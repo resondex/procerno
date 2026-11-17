@@ -6,6 +6,12 @@
  * (scoreboard competitor columns, the visibility table, chart labels, rows with no card) must exist on some card
  * or By rival card. Prints the fallback list by kind and the unlinked figures with no home.
  *
+ * Stage 2 (stat ids, 2026-11-17): a number linked by its stat id (BriefLink.stat) must be exactly its registry stat
+ * (same value, card and reveal) - those bypass matching; the rest are still matched (stage 3 scope, listed by kind).
+ * Fails when a sentence that prints a card figure (a migrated sentence) prints any number without a stat id, and -
+ * with BRIEF_BEFORE=<dump.json> (scratch dump of every Brief string before the change) - when a sentence of that
+ * dump is absent now. Figures printed the old way because no card shows them are listed as "needs a card home".
+ *
  * Fixture only, no model calls:  npx tsx scripts/brief_links_harness.mts
  */
 process.env.DATABASE_URL = "";
@@ -15,7 +21,10 @@ for (const k of ["OPENAI_API_KEY", "ANTHROPIC_API_KEY", "GEMINI_API_KEY", "XAI_A
 const { store } = await import(process.cwd() + "/src/lib/store/index.ts");
 const { loadViewData } = await import(process.cwd() + "/src/lib/engine/view_data.ts");
 process.env.BRIEF_TRIM_LOG = "1";
-const { computeBrief, conditionTerms, TRIMMED_CLAIMS } = await import(process.cwd() + "/src/lib/engine/brief.ts");
+process.env.BRIEF_FIG_LOG = "1";
+const { computeBrief, conditionTerms, TRIMMED_CLAIMS, FIG_LOG } = await import(process.cwd() + "/src/lib/engine/brief.ts");
+const { buildStatRegistry } = await import(process.cwd() + "/src/lib/engine/stat_registry.ts");
+const fs = await import("node:fs");
 const { sharedAnalysisMap } = await import(process.cwd() + "/src/lib/engine/analysis_map.ts");
 const { sharedBrandSummary } = await import(process.cwd() + "/src/lib/engine/brand_summary.ts");
 const { linkResolver, numberContext } = await import(process.cwd() + "/src/lib/engine/brief_links.ts");
@@ -47,6 +56,17 @@ const tables: string[] = [];
 const own = { linked: 0, def: 0, one: 0, card: 0, table: 0, unlinked: 0, unlinkedHome: 0 };
 const fallbacks = new Map<string, string[]>();
 const homeless: string[] = [];
+/** Stage 2 tallies per tracker: linked by stat id, linked by matching, fallback (answer card / table), unlinked. */
+const per = new Map<string, { stat: number; matched: number; fallback: number; unlinked: number; statRead: number }>();
+const matchedKinds = new Map<string, number>();
+const nowStrings = new Map<string, string[]>();
+const sentencesOf = (t: string) => t.split(/(?<=[.!?])\s+/).map((x) => x.trim()).filter(Boolean);
+const allStrings = (x: any, out: string[] = []): string[] => {
+  if (typeof x === "string") out.push(x);
+  else if (Array.isArray(x)) x.forEach((y) => allStrings(y, out));
+  else if (x && typeof x === "object") for (const [k, v] of Object.entries(x)) if (!["links", "tip", "cells", "cell"].includes(k)) allStrings(v, out);
+  return out;
+};
 
 for (const project of (await store.listProjects()).filter((p: any) => !p.archived_at)) {
   const run = (await store.listRuns(project.id))[0];
@@ -65,6 +85,10 @@ for (const project of (await store.listProjects()).filter((p: any) => !p.archive
   ];
   const R = linkResolver(map, terms, [...(summary.reasonLift ?? []).map((l: any) => l.code), ...(inputs.taught ?? []).map((t: any) => t.code)], conditionTerms(map));
   const allCells = Object.keys(map.positions);
+  const reg = buildStatRegistry(map);
+  const tally = { stat: 0, matched: 0, fallback: 0, unlinked: 0, statRead: 0 };
+  per.set(project.brand, tally);
+  for (const [subj, brief] of briefs) nowStrings.set(`${project.brand}|${subj ? "rival" : "own"}`, allStrings(brief.memos));
   let wb: any = null;
   /** A table link: the entry exists on this run's Data page, and what its rows show (each buying situation its own row). */
   const tableRows = (entry: string): string[] | null => {
@@ -111,7 +135,31 @@ for (const project of (await store.listProjects()).filter((p: any) => !p.archive
           const kind = kindOf(sentence, u.row);
           const where = `${project.brand}${subj ? ` [rival ${subj}]` : ""} [${frame}/${sec.key}]`;
           const ownB = !subj;
+          if (link?.stat) {
+            // Stage 2: linked by its stat id - exactly the registry's stat, no matching.
+            tally.stat++;
+            counts.linked++;
+            if (ownB) own.linked++;
+            const st = reg.get(link.stat);
+            const destOk = st && (st.dest.kind === "cell" ? link.dest.kind === "cell" && link.dest.id === st.dest.id : link.dest.kind === "rival" && link.dest.name === st.dest.name);
+            if (!st) failures.push(`${where} ${token} links to stat ${link.stat}, not in the registry`);
+            else if (!(st.value.match(NUMBER_TOKEN) ?? []).includes(token)) failures.push(`${where} ${token} links to ${link.stat} whose value is ${st.value}`);
+            else if (!destOk || JSON.stringify(st.reveal ?? null) !== JSON.stringify(link.reveal ?? null)) failures.push(`${where} ${token} -> ${JSON.stringify(link.dest)} ${JSON.stringify(link.reveal ?? null)} is not where ${link.stat} is shown`);
+            else if (st.at === "default") counts.def++;
+            else counts.one++;
+            if (st && ownB) {
+              if (st.at === "default") own.def++;
+              else own.one++;
+            }
+            continue;
+          }
           if (link) {
+            if (link.dest.kind === "card" || link.dest.kind === "table") tally.fallback++;
+            else {
+              tally.matched++;
+              matchedKinds.set(kind, (matchedKinds.get(kind) ?? 0) + 1);
+              if (process.env.SHOW_MATCHED && kind.includes(process.env.SHOW_MATCHED)) console.log(`MATCHED ${where} ${token} [${u.label ?? ""}] "${sentence.slice(0, 180)}"`);
+            }
             counts.linked++;
             if (ownB) own.linked++;
             if (link.dest.kind === "table") {
@@ -140,6 +188,7 @@ for (const project of (await store.listProjects()).filter((p: any) => !p.archive
               if (ownB) own.def++;
             }
           } else {
+            tally.unlinked++;
             counts.unlinked++;
             if (ownB) own.unlinked++;
             const found = R.find(token, local, sentence, { cells: allCells, rivals: [] }, "anywhere");
@@ -155,6 +204,83 @@ for (const project of (await store.listProjects()).filter((p: any) => !p.archive
   }
 }
 
+// Stage 2: the figure log - figures in fields with no link (scoreboard competitor columns, tables, charts) read by id,
+// every stat figure's value is its registry stat's, every migrated sentence prints only stat figures (or a figure
+// with no card home, listed), and no figure without a card home goes unlisted.
+const regs = new Map<string, any>();
+const needsHome = new Map<string, string[]>();
+const byField = new Map<string, any[]>();
+for (const e of FIG_LOG as any[]) {
+  const k = `${e.brand}|${e.subject ?? ""}|${e.frame}|${e.section}|${e.field}`;
+  if (!byField.has(k)) byField.set(k, []);
+  byField.get(k)!.push(e);
+  if (e.noHome) {
+    const xs = needsHome.get(e.noHome) ?? [];
+    xs.push(`${e.brand}${e.subject ? ` [rival ${e.subject}]` : ""} [${e.frame}/${e.section} ${e.field}] ${e.token} in "${e.text.slice(0, 160)}"`);
+    needsHome.set(e.noHome, xs);
+  }
+  if (e.stat && !/ (lead|text)$|row \d+ value$/.test(e.field)) per.get(e.brand)!.statRead++;
+}
+for (const project of (await store.listProjects()).filter((p: any) => !p.archived_at)) {
+  const run = (await store.listRuns(project.id))[0];
+  const data = await loadViewData(run, project, { setupDecision: true, judge: true });
+  const { view: map } = await sharedAnalysisMap(data, {});
+  regs.set(project.brand, buildStatRegistry(map));
+}
+for (const [k, es] of byField) {
+  const reg = regs.get(es[0].brand);
+  for (const e of es) if (e.stat && !((reg.get(e.stat)?.value ?? "").match(NUMBER_TOKEN) ?? []).includes(e.token)) failures.push(`${k}: ${e.token} read from ${e.stat} = ${reg.get(e.stat)?.value ?? "(no stat)"}`);
+  // Positions of the logged figures in the field's text.
+  const text = es[0].text as string;
+  const seen = new Map<string, number>();
+  const toks = [...text.matchAll(NUMBER_TOKEN)].map((m) => {
+    const occ = seen.get(m[0]) ?? 0;
+    seen.set(m[0], occ + 1);
+    return { at: m.index!, token: m[0], fig: es.find((e) => e.token === m[0] && e.occurrence === occ) };
+  });
+  // A migrated sentence: one that prints a card figure. Every number in it must be a figure (stat, or no card home).
+  let from = 0;
+  for (const sn of sentencesOf(text)) {
+    const at = text.indexOf(sn, from);
+    from = at + sn.length;
+    const inS = toks.filter((t) => t.at >= at && t.at < at + sn.length);
+    if (!inS.some((t) => t.fig)) continue;
+    for (const t of inS) if (!t.fig) failures.push(`${k}: ${t.token} printed without a stat id in a migrated sentence: "${sn.slice(0, 200)}"`);
+  }
+}
+// No sentence of the before dump may be absent.
+let beforeChecked = 0;
+if (process.env.BRIEF_BEFORE) {
+  const before = JSON.parse(fs.readFileSync(process.env.BRIEF_BEFORE, "utf8"));
+  for (const [brand, v] of Object.entries(before) as any) {
+    for (const which of ["own", "rival"]) {
+      const memos = which === "own" ? v.own : v.rival?.memos;
+      if (!memos) continue;
+      const now = new Set((nowStrings.get(`${brand}|${which}`) ?? []).flatMap(sentencesOf));
+      for (const sn of new Set(allStrings(memos).flatMap(sentencesOf))) {
+        beforeChecked++;
+        if (!now.has(sn)) failures.push(`${brand} [${which}]: sentence gone since the before dump: "${sn.slice(0, 200)}"`);
+      }
+    }
+  }
+}
+
+console.log("STAGE 2 - per tracker: linked by stat id / linked by matching / fallback (answer card, table) / unlinked (of which read by stat id in a field with no link)");
+const tot = { stat: 0, matched: 0, fallback: 0, unlinked: 0, statRead: 0 };
+for (const [b, t] of per) {
+  console.log(`  ${b}: ${t.stat} / ${t.matched} / ${t.fallback} / ${t.unlinked} (${t.statRead})`);
+  for (const k of Object.keys(tot) as (keyof typeof tot)[]) tot[k] += t[k];
+}
+console.log(`  TOTAL: ${tot.stat} / ${tot.matched} / ${tot.fallback} / ${tot.unlinked} (${tot.statRead})`);
+console.log("STILL MATCHED, by kind (stage 3 scope):");
+for (const [k, n] of [...matchedKinds.entries()].sort((a, b) => b[1] - a[1])) console.log(`  ${k}: ${n}`);
+console.log(`NEEDS A CARD HOME (printed as before, no card shows it): ${[...needsHome.values()].reduce((a, x) => a + x.length, 0)}`);
+for (const [k, xs] of needsHome) {
+  console.log(`  ${k}: ${xs.length}`);
+  for (const x of xs) console.log(`    - ${x}`);
+}
+if (process.env.BRIEF_BEFORE) console.log(`BEFORE DUMP: ${beforeChecked} sentences checked`);
+console.log("");
 console.log(`LINKED ${counts.linked}: on view where the link lands ${counts.def}, behind the one interaction the link opens ${counts.one}, a Data page table ${counts.table}, Brief answer card (no home) ${counts.card}`);
 console.log(`UNLINKED ${counts.unlinked}: on some card or By rival card ${counts.unlinkedHome}, nowhere ${homeless.length}`);
 console.log(`(tracker's own Brief only: linked ${own.linked} = ${own.def} on view + ${own.one} one interaction + ${own.table} table + ${own.card} answer card; unlinked ${own.unlinked}, ${own.unlinkedHome} on a card, ${own.unlinked - own.unlinkedHome} nowhere)`);
