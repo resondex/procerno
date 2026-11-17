@@ -397,16 +397,17 @@ export interface InsightStyle {
   outsideShare?: (room: string | null) => string | null;
   /** bf35: a condition that sends buyers away, as a card's row shows it: the share and where ("when buyers ask
    * what to buy", "when the AI compares X with Y directly"); null when no card row names it. */
-  awayRow?: (labels: string[]) => { value: string; where: string } | null;
+  awayRow?: (labels: string[], dests: string[]) => { value: string; where: string } | null;
   /** bf35: a lost matchup's exception as that head-to-head card shows it ("who it still sends to you"). */
   exceptionRow?: (labels: string[], rival: string) => string | null;
 }
 
 /** bf35: the away-condition finding in the Brief's style - "Buyers who say ... are most often sent away, to ..." -
  * with only the share a card row shows (no pooled shares). */
-function awayBrief(labels: string[], quote: string, dest: string, extra: string): string {
-  const row = STYLE!.awayRow!(labels);
-  return `Buyers who say "${qc(shorten(quote))}" are most often sent away${dest ? `, ${dest}` : ""}${row ? `; it is given in ${row.value} of the answers ${row.where}` : ""}.${extra}`;
+function awayBrief(labels: string[], quote: string, dests: string[], dest: string, extra: string): string {
+  // bf36: a share only from a card row naming this condition with the same destination (What to buy first).
+  const row = dests.length ? STYLE!.awayRow!(labels, dests) : null;
+  return `Buyers who say "${qc(shorten(quote))}" are most often sent away${dest ? `, ${dest}` : ""}${row ? ` - in ${row.value} of the answers ${row.where}` : ""}.${extra}`;
 }
 let STYLE: InsightStyle | null = null;
 const yo = () => (STYLE ? STYLE.name : "you");
@@ -1655,6 +1656,7 @@ function awayCondition(s: Summary, inp: InsightInputs): Insight | null {
       ? awayBrief(
           [g.label],
           g.label,
+          to ? [to.name] : [],
           to ? `to ${to.name}` : "",
           `${blocker ? `${blocker.replace(/^\. /, " ")}.` : ""}${g.wall && !blocker ? " That is a situation the buyer is already in, not an argument to answer." : laterWall ? ` The largest fixed situation among them, "${qc(shorten(laterWall.label, 60))}", is a situation the buyer is already in, not an argument to answer.` : ""}`
         )
@@ -1759,8 +1761,10 @@ function awayConditionThemed(s: Summary, a: NonNullable<InsightInputs["away"]>, 
     title: lead.wall ? `A fixed situation sends buyers away: "${qc(shorten(lead.label, 60))}"` : `What sends buyers away most: "${qc(shorten(lead.label, 60))}"`,
     body: STYLE?.awayRow
       ? awayBrief(
-          [lead.label, lead.wording],
-          lead.wording,
+          // bf36: one condition, one name - the theme's, as the finding's title names it.
+          [lead.label],
+          lead.label,
+          dest ? dest.names : [],
           dest ? destPhrase(dest) : "",
           `${w && fold ? " That is a situation the buyer is already in, not an argument to answer." : ""}${bk ? ` ${sameWords(bk.group.label, lead.wording) ? "That wording" : `One wording, "${qc(shorten(bk.group.label))}",`} names ${bk.group.names!.name}, a brand with ${pct(bk.share)} of the picks when buyers ask what to buy, so it blocks ${yo()} without winning for it.` : ""}${w && !fold ? ` The largest fixed situation, "${qc(shorten(w.label, 60))}", is a situation the buyer is already in, not an argument to answer.` : ""}`
         )
