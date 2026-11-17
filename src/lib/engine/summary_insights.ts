@@ -383,6 +383,12 @@ const worryKey = (r: PoolRow) => `${r.intent.stage}|${r.intent.concern ?? ""}`;
  * by name. Detectors are synchronous, so STYLE is set and restored around one run. */
 export interface InsightStyle {
   name: string;
+  /** bf34: the What to buy card's figures for an argument, when the card shows it in that side's top three
+   * ("you": the answers that pick the subject; "rival": those that pick another) - `here` on that side, `there`
+   * on the other. The Brief quotes only arguments the card shows; a finding with none is left out (body ""). */
+  cardArg?: (code: string, side: "you" | "rival") => { name: string; here: string; there: string } | null;
+  /** bf34: a figure as a Map cell's card shows it (cell id, step key, segment key), e.g. the all-worries leave share. */
+  cardStep?: (cellId: string, step: string, segment: string) => string | null;
 }
 let STYLE: InsightStyle | null = null;
 const yo = () => (STYLE ? STYLE.name : "you");
@@ -1085,12 +1091,23 @@ function argument(s: Summary, ex?: ExampleIndex): Insight | null {
   const best = s.reasonLift[0];
   const worst = s.reasonLift.length > 1 ? s.reasonLift[s.reasonLift.length - 1] : undefined;
   if (!best || !worst) return null;
+  // bf34: the Brief quotes the card - the strongest winning and losing arguments the card shows, its own figures.
+  const ca = STYLE?.cardArg;
+  const cb = ca ? s.reasonLift.filter((l) => l.lift > 0).map((l) => ({ l, f: ca(l.code, "you") })).find((x) => x.f) : undefined;
+  const cw = ca ? [...s.reasonLift].reverse().filter((l) => l.lift < 0).map((l) => ({ l, f: ca(l.code, "rival") })).find((x) => x.f) : undefined;
+  const cardBody = !ca
+    ? null
+    : cb
+      ? `${cb.f!.name} comes up in ${cb.f!.here} of the answers that pick ${STYLE!.name} and ${cb.f!.there} of those that pick a rival.${cw ? ` Answers that pick a rival bring up ${cw.f!.name.toLowerCase()} in ${cw.f!.here}, against ${cw.f!.there} when ${STYLE!.name} is picked.` : ""}`
+      : "";
   return {
     key: "argument",
     kind: "argument",
     title: `${best.code.charAt(0).toUpperCase()}${best.code.slice(1)} comes up when ${yt("you win", (n) => `${n} wins`)}`,
     // bf29: the Brief's style states both shares in plain words (no points shorthand); the served text is unchanged.
-    body: STYLE
+    body: cardBody !== null
+      ? cardBody
+      : STYLE
       ? `${best.code.charAt(0).toUpperCase()}${best.code.slice(1)} comes up in ${pz(best.wins)} of the answers that pick ${STYLE.name} and ${pz(best.others)} of those that pick a rival. Answers that pick a rival bring up ${worst.code} in ${pz(worst.others)}, against ${pz(worst.wins)} when ${STYLE.name} is picked.`
       : `${best.code.charAt(0).toUpperCase()}${best.code.slice(1)} comes up ${pts(best.lift)} ${best.lift >= 0 ? "more" : "less"} often in answers that pick ${yo()} than in answers that pick a rival. Answers that pick a rival bring up ${worst.code} ${worst.lift <= 0 ? "more" : "less"} (${pts(worst.lift)}).`,
     foot: `${best.code}: ${pct(best.wins)} of ${best.wins.n} wins vs ${pct(best.others)} of ${best.others.n} rival picks. ${worst.code}: ${pct(worst.wins)} vs ${pct(worst.others)}.`,
@@ -1378,6 +1395,15 @@ function taughtVsWinning(s: Summary, inp: InsightInputs): Insight | null {
   const taughtOf = (code: string) => inp.taught.find((t) => t.code === code)?.rate;
   const parts: string[] = [];
   const foot: string[] = [];
+  // bf34: in the Brief only an argument the card shows is cited, with the card's figures.
+  const ca = STYLE?.cardArg;
+  const cu = untaught && ca ? ca(untaught.code, "you") : null;
+  const cl = losing && ca ? ca(losing.code, "rival") : null;
+  const cited: string[] = [];
+  if (ca) {
+    if (cu) cited.push(`${cu.name.toLowerCase()} comes up in ${cu.here} of the answers that pick ${STYLE!.name} and ${cu.there} of those that pick a rival, but is not among the five things the AI most often tells buyers to look for`);
+    if (cl) cited.push(`${cu ? "it" : "the AI"} tells buyers to look for ${cl.name.toLowerCase()}, which comes up in ${cl.here} of the answers that pick a rival and ${cl.there} of those that pick ${STYLE!.name}`);
+  }
   if (untaught) {
     parts.push(
       STYLE
@@ -1395,13 +1421,15 @@ function taughtVsWinning(s: Summary, inp: InsightInputs): Insight | null {
     );
     foot.push(`${losing.code}: ${pct(losing.wins)} of wins vs ${pct(losing.others)} of rival picks; taught in ${counts(taughtOf(losing.code)!)}.`);
   }
-  const body = parts.join("; ");
+  // In the Brief each cited argument is its own sentence, so each figure is read with its own argument.
+  const joined = ca ? cited.map((x) => x.charAt(0).toUpperCase() + x.slice(1)).join(". ") : parts.join("; ");
+  const body = joined;
   const effect = Math.max(untaught ? Math.abs(untaught.lift) : 0, losing ? Math.abs(losing.lift) : 0);
   return {
     key: "taught_vs_winning",
     kind: "argument",
     title: untaught ? `${untaught.code} wins but is seldom taught` : `The AI tells buyers to look for ${losing!.code}, which favors rivals`,
-    body: `${body.charAt(0).toUpperCase()}${body.slice(1)}.`,
+    body: body ? `${body.charAt(0).toUpperCase()}${body.slice(1)}.` : "",
     foot: `${foot.join(" ")} Top five taught: ${top5.map((t) => t.code).join(", ")}.`,
     look: { pill: "why", label: "Why" },
     effect,
@@ -2106,11 +2134,15 @@ function neutralizedDifferentiator(inp: InsightInputs): Insight | null {
   const rival = rivalKey ? a.rivals[rivalKey] ?? null : null;
   const rivalText = rival ? `, most often to ${rival}` : "";
   const cap = (x: string) => x.charAt(0).toUpperCase() + x.slice(1);
+  // bf34: no card sets an argument's share of the matchups won against those lost, so the Brief cites none.
+  const uncited = !!STYLE?.cardArg;
   return {
     key: "neutralized_differentiator",
     kind: "argument",
     title: best.above ? `${Yr()} rivals are credited with ${best.code}` : `${cap(best.code)} no longer sets ${yo()} apart`,
-    body: STYLE
+    body: uncited
+      ? ""
+      : STYLE
       ? best.above
         ? `${cap(best.code)} is argued in ${pct(best.w)} of the direct matchups ${STYLE.name} wins but ${pct(best.l)} of those it loses${rivalText} - the AI credits its rivals with it more than ${STYLE.name}.`
         : `${cap(best.code)} is argued in ${pct(best.w)} of the direct matchups ${STYLE.name} wins and ${pct(best.l)} of those it loses${rivalText} - it comes up in its rivals' wins as often as in its own.`
@@ -2354,7 +2386,13 @@ function worstWorry(inp: InsightInputs): Insight | null {
     key: "worst_worry",
     kind: "doubt",
     title: `The worry that loses customers: ${concern}`,
-    body: `When a customer says "${concern}", the AI tells them to leave in ${pct(top.verdicts.leave)} of answers${exit ? `, most often for ${exit.name}` : ""} - against ${pct(rest)} across their other worries.`,
+    // bf34: the Brief sets it against the all-worries card's own figure (never "their other worries" pooled).
+    body: STYLE?.cardStep
+      ? (() => {
+          const all = STYLE.cardStep!("doubts:customers:all", "verdict", "leave");
+          return `When a customer says "${concern}", the AI tells them to leave in ${pct(top.verdicts.leave)} of answers${exit ? `, most often for ${exit.name}` : ""}${all ? `. Across every customer worry it says leave in ${all}.` : "."}`;
+        })()
+      : `When a customer says "${concern}", the AI tells them to leave in ${pct(top.verdicts.leave)} of answers${exit ? `, most often for ${exit.name}` : ""} - against ${pct(rest)} across their other worries.`,
     foot: `${concern}: leave ${counts(top.verdicts.leave)}. Other customers' worries: ${counts(rest)}.${exit ? ` ${exit.name}: ${exit.n} answers.` : ""}`,
     look: { pill: "stations", station: "customer_base", label: "Stations - Customers" },
     effect: rate(top.verdicts.leave) - rate(rest),

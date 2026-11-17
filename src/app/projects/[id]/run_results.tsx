@@ -199,7 +199,7 @@ function CodesResults({
                 if (v === "journey") {
                   setJourneyJump({ station: "consideration", n: Date.now() });
                   setDataTab("stations");
-                } else if (v === "metrics") setDataTab("build");
+                } else if (v === "metrics") setDataReq({ tab: "build", n: Date.now(), ...(brand ? { entry: brand } : {}) });
                 go("data");
               }}
             />

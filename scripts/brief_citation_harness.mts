@@ -81,13 +81,16 @@ for (const project of projects) {
     const who = `${project.brand}${subject ? ` [rival ${subject}]` : ""}`;
     for (const [frame, memo] of Object.entries(view.memos) as [string, { sections: { key: string; paras?: Para[]; rows?: Row[]; quads?: { headers: [string, string]; cells: [Para[], Para[]] }[] }[] }][]) {
       for (const s of memo.sections) {
-        const list: { where: string; visible: string; ids: string[]; anchors: Anchor[] }[] = [];
-        for (const p of s.paras ?? []) list.push({ where: s.key, visible: `${p.lead ?? ""} ${p.text}`, ids: (p.cells ?? []).map((c) => c.id), anchors: p.cells ?? [] });
+        // bf34: a number is also cited by its link (BriefPara/BriefRow.links, resolved to a card that shows it -
+        // scripts/brief_links_harness.mts checks the link itself).
+        const list: { where: string; visible: string; ids: string[]; anchors: Anchor[]; linked: Set<string> }[] = [];
+        const lk = (x: { links?: { token: string }[] }) => new Set((x.links ?? []).map((l) => l.token));
+        for (const p of s.paras ?? []) list.push({ where: s.key, visible: `${p.lead ?? ""} ${p.text}`, ids: (p.cells ?? []).map((c) => c.id), anchors: p.cells ?? [], linked: lk(p as never) });
         for (const q of s.quads ?? [])
           q.cells.forEach((col, i) => {
-            for (const p of col) list.push({ where: `${s.key}/${q.headers[i]}`, visible: `${p.lead ?? ""} ${p.text}`, ids: (p.cells ?? []).map((c) => c.id), anchors: p.cells ?? [] });
+            for (const p of col) list.push({ where: `${s.key}/${q.headers[i]}`, visible: `${p.lead ?? ""} ${p.text}`, ids: (p.cells ?? []).map((c) => c.id), anchors: p.cells ?? [], linked: lk(p as never) });
           });
-        for (const r of s.rows ?? []) list.push({ where: `${s.key}/row`, visible: `${r.label} ${r.value}`, ids: r.cell ? [r.cell.id] : [], anchors: r.cell ? [r.cell] : [] });
+        for (const r of s.rows ?? []) list.push({ where: `${s.key}/row`, visible: `${r.label} ${r.value}`, ids: r.cell ? [r.cell.id] : [], anchors: r.cell ? [r.cell] : [], linked: lk(r as never) });
         for (const u of list) {
           units++;
           pins += u.ids.length;
@@ -109,7 +112,7 @@ for (const project of projects) {
           }
           for (const n of nums) {
             const by = u.ids.filter((id) => tokOf(id).has(n));
-            if (!by.length) rule2.push(`${head} ${n} uncited (pins: ${u.ids.join(", ") || "none"})\n     "${said}"`);
+            if (!by.length && !u.linked.has(n)) rule2.push(`${head} ${n} uncited (pins: ${u.ids.join(", ") || "none"})\n     "${said}"`);
             else if (verbose) console.log(`ok ${head} ${n} <- ${by.join(", ")}`);
           }
         }

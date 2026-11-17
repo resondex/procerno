@@ -546,16 +546,22 @@ function NumLink({ l, unit, children }: { l: BriefLink; unit: string; children: 
   const ctx = useContext(CardContext)!;
   const d = l.dest;
   const key = `${unit}::${d.kind === "card" ? d.id : ""}`;
-  const can = d.kind === "cell" ? !!ctx.onOpenCell : d.kind === "rival" ? !!ctx.onOpenView : !!ctx.cards[d.id];
+  const can = d.kind === "cell" ? !!ctx.onOpenCell : d.kind === "rival" || d.kind === "table" ? !!ctx.onOpenView : !!ctx.cards[d.id];
   if (!can) return <>{children}</>;
   const act = () =>
-    d.kind === "cell" ? ctx.onOpenCell!(d.id, l.reveal) : d.kind === "rival" ? ctx.onOpenView!("rivals", d.name, l.reveal) : ctx.setOpen(ctx.open === key ? null : key);
+    d.kind === "cell"
+      ? ctx.onOpenCell!(d.id, l.reveal)
+      : d.kind === "rival"
+        ? ctx.onOpenView!("rivals", d.name, l.reveal)
+        : d.kind === "table"
+          ? ctx.onOpenView!("metrics", d.entry) // bf34: a Data page table (the entry rides the brand slot)
+          : ctx.setOpen(ctx.open === key ? null : key);
   return (
     <span
       role="button"
       tabIndex={0}
       className="pb-fact"
-      aria-label={d.kind === "card" ? "Show the numbers" : d.kind === "rival" ? `Open: ${d.name}` : "Open on the map"}
+      aria-label={d.kind === "card" ? "Show the numbers" : d.kind === "rival" ? `Open: ${d.name}` : d.kind === "table" ? "Open the table" : "Open on the map"}
       {...(d.kind === "card" ? { "aria-expanded": ctx.open === key } : {})}
       onClick={act}
       onKeyDown={(e) => {

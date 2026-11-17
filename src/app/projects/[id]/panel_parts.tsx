@@ -670,7 +670,11 @@ export function WeighsView({ w }: { w: PanelWeighs }) {
               </h5>
             )}
             {c.rows.map((r) => (
-              <NumBar key={r.name} label={r.name} n={r.num} color={r.you ? C_YOU : toneBar(c.tone)} bold={!!r.you} title={`${c.title ?? w.title} - ${r.name}`} tight={w.columns.length > 1} />
+              <div key={r.name}>
+                <NumBar label={r.name} n={r.num} color={r.you ? C_YOU : toneBar(c.tone)} bold={!!r.you} title={`${c.title ?? w.title} - ${r.name}`} tight={w.columns.length > 1} />
+                {/* am71: the same topic's share on the other side, quietly under the row. */}
+                {r.other && <p className="-mt-0.5 mb-1 text-right text-[11px] tabular-nums text-ink-3">{r.other.num.value} {r.other.label}</p>}
+              </div>
             ))}
             {c.note && <p className={`${T.body} text-ink-3`}>{c.note}</p>}
           </div>

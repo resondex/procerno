@@ -388,6 +388,7 @@ function hasLadder(inputs: Map<string, PanelCellInput>, h: PanelHelpers): boolea
 const cname = (code: string, h: PanelHelpers) => codeName(code, h.scopes.get(code));
 /** A codebook name as a row label (sentence case). */
 const clabel = (code: string, h: PanelHelpers) => upperFirst(cname(code, h));
+const lowerFirst = (x: string) => (x ? x.charAt(0).toLowerCase() + x.slice(1) : x);
 
 /** The row's All cell (same band and row, key "all", pooled), when this cell is a split sibling. */
 function usualOf(inp: PanelCellInput, inputs: Map<string, PanelCellInput>): PanelCellInput | undefined {
@@ -596,7 +597,16 @@ function weighsCols(inp: PanelCellInput, ctx: Ctx, sides: WeighSide[], sub: stri
     any = true;
     return {
       ...col,
-      rows: kept.map((x) => ({ name: clabel(x.code, h), num: num(x.k, sd.rows.length, sd.unit ?? `answers that ${sd.say}`, refsOf(withR.filter((r) => r.code.reasons!.includes(x.code)), () => x.code)) })),
+      rows: kept.map((x) => {
+        // am71: the same topic's share on the other side, on that side's own base, beside the row.
+        const os = versus ? sides[1 - si] : null;
+        const ok = os ? os.rows.filter((r) => r.code.reasons !== null && new Set(r.code.reasons).has(x.code)) : [];
+        return {
+          name: clabel(x.code, h),
+          num: num(x.k, sd.rows.length, sd.unit ?? `answers that ${sd.say}`, refsOf(withR.filter((r) => r.code.reasons!.includes(x.code)), () => x.code)),
+          ...(os && os.title ? { other: { label: lowerFirst(os.title), num: num(ok.length, os.rows.length, os.unit ?? `answers that ${os.say}`, refsOf(ok, () => x.code)) } } : {}),
+        };
+      }),
     };
   });
   if (!any) return undefined;

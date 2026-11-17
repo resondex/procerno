@@ -93,7 +93,11 @@ const tableNums = (out: Out, t: PanelTable | undefined) => {
 };
 const weighNums = (out: Out, w: PanelWeighs | undefined) => {
   if (!w) return;
-  for (const c of w.columns) for (const r of c.rows) num(out, r.num, `${w.title} - ${c.title ?? ""} - ${r.name}`);
+  for (const c of w.columns)
+    for (const r of c.rows) {
+      num(out, r.num, `${w.title} - ${c.title ?? ""} - ${r.name}`);
+      if (r.other) num(out, r.other.num, `${w.title} - ${r.other.label} - ${r.name}`);
+    }
 };
 
 /** PositionPanelView in one state. */

@@ -604,7 +604,19 @@ export interface PanelDetailSection {
 export interface PanelWeighs {
   title: string;
   sub: string;
-  columns: { title?: string; tone: PanelTone; rows: { name: string; num: PanelNum; /** am59: the row is the tracker's own brand (drawn in the you colour). */ you?: true }[]; note?: string }[];
+  columns: {
+    title?: string;
+    tone: PanelTone;
+    rows: {
+      name: string;
+      num: PanelNum;
+      /** am59: the row is the tracker's own brand (drawn in the you colour). */
+      you?: true;
+      /** am71: on a two-sided block, the same topic's share on the other side ("13% when it picks you"), drawn small beside the row. */
+      other?: { label: string; num: PanelNum };
+    }[];
+    note?: string;
+  }[];
 }
 
 /** Panel 11: one rival inside this cell's question type. */

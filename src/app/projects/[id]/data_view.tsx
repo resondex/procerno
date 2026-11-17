@@ -60,6 +60,8 @@ export type DataTab = "types" | "build" | "stations";
 export interface DataRequest {
   tab: DataTab;
   n: number;
+  /** bf34: open this library table (a Brief number's table link). */
+  entry?: string;
 }
 
 // The last request each run's page applied: a remount (a new assistant set)
@@ -159,8 +161,19 @@ export default function DataPage({
   if (request && request.n !== applied) {
     setApplied(request.n);
     appliedReqs.set(runId, request.n);
-    setSel(request.tab === "types" ? CONTESTS_ID : request.tab === "stations" ? DETAIL_ID : pivotSel);
-    if (request.tab === "build") setControlsOpen(true);
+    const ent = request.entry ? LIB_BY_ID.get(request.entry) : undefined;
+    if (ent && ent.kind === "pivot") {
+      // A table a Brief number opens: the entry itself, its controls folded like any ready-made table.
+      setSel(ent.id);
+      setPivotSel(ent.id);
+      setSettings(entrySettings(ent));
+      setOrigin(ent.id);
+      setFocus(null);
+      setControlsOpen(false);
+    } else {
+      setSel(request.tab === "types" ? CONTESTS_ID : request.tab === "stations" ? DETAIL_ID : pivotSel);
+      if (request.tab === "build") setControlsOpen(true);
+    }
   }
 
   // ---- the workbench payload (decides which library entries show) ----

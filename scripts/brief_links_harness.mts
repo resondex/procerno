@@ -18,6 +18,9 @@ const { computeBrief } = await import(process.cwd() + "/src/lib/engine/brief.ts"
 const { sharedAnalysisMap } = await import(process.cwd() + "/src/lib/engine/analysis_map.ts");
 const { sharedBrandSummary } = await import(process.cwd() + "/src/lib/engine/brand_summary.ts");
 const { linkResolver, numberContext } = await import(process.cwd() + "/src/lib/engine/brief_links.ts");
+const { computeWorkbench } = await import(process.cwd() + "/src/lib/engine/workbench.ts");
+const { LIB_BY_ID, entrySettings, entryAvailable } = await import(process.cwd() + "/src/app/projects/[id]/table_library.ts");
+const { resolveSettings, computePivot } = await import(process.cwd() + "/src/app/projects/[id]/pivot_compute.ts");
 
 const NUMBER_TOKEN = /\d+(?:\.\d+)?%|[+-]\d+ (?:pts|points)/g;
 
@@ -37,14 +40,19 @@ function kindOf(s: string, row?: string): string {
 }
 
 const failures: string[] = [];
-const counts = { linked: 0, def: 0, one: 0, card: 0, unlinked: 0, unlinkedHome: 0 };
+const counts = { linked: 0, def: 0, one: 0, card: 0, table: 0, unlinked: 0, unlinkedHome: 0 };
+const tables: string[] = [];
+/** The tracker's own Brief alone (the rival's is the second subject). */
+const own = { linked: 0, def: 0, one: 0, card: 0, table: 0, unlinked: 0, unlinkedHome: 0 };
 const fallbacks = new Map<string, string[]>();
 const homeless: string[] = [];
 
 for (const project of (await store.listProjects()).filter((p: any) => !p.archived_at)) {
   const run = (await store.listRuns(project.id))[0];
   const data = await loadViewData(run, project, { setupDecision: true, judge: true });
-  const brief: any = await computeBrief(data, {});
+  const first: any = await computeBrief(data, {});
+  // The tracker's own Brief and its first rival's (the rival panels' links are checked too).
+  const briefs: [string | undefined, any][] = [[undefined, first], ...(first.subjects?.[1] ? [[first.subjects[1], await computeBrief(data, { subject: first.subjects[1] })] as [string, any]] : [])];
   const { view: map } = await sharedAnalysisMap(data, {});
   const { view: summary, inputs } = await sharedBrandSummary(data, {});
   const terms = [
@@ -56,6 +64,23 @@ for (const project of (await store.listProjects()).filter((p: any) => !p.archive
   ];
   const R = linkResolver(map, terms, [...(summary.reasonLift ?? []).map((l: any) => l.code), ...(inputs.taught ?? []).map((t: any) => t.code)]);
   const allCells = Object.keys(map.positions);
+  let wb: any = null;
+  /** A table link: the entry exists on this run's Data page, and what its rows show (each buying situation its own row). */
+  const tableRows = (entry: string): string[] | null => {
+    wb ??= computeWorkbench(data, {});
+    const e = LIB_BY_ID.get(entry);
+    if (!e || !entryAvailable(e, wb)) return null;
+    const res = resolveSettings(entrySettings(e), wb);
+    if (!res) return null;
+    const pv = computePivot(res, wb);
+    const col = pv.cols[0];
+    return pv.rows.map((r: any) => {
+      const a = pv.cells.get(`${r.key}|${col.key}`);
+      const x = a && a.n ? a.k / a.n : 0;
+      return `${r.label} ${x > 0 && x < 0.005 ? "<1%" : `${Math.round(x * 100)}%`}`;
+    });
+  };
+  for (const [subj, brief] of briefs)
   for (const [frame, memo] of Object.entries(brief.memos) as any[]) {
     for (const sec of memo.sections) {
       const units: { text: string; links?: any[]; row?: string; label?: string }[] = [];
@@ -72,6 +97,8 @@ for (const project of (await store.listProjects()).filter((p: any) => !p.archive
       }
       for (const r of sec.table?.rows ?? []) units.push({ text: r.slice(1).join(" | "), row: "visibility table", label: r[0] });
       if (sec.viz) for (const it of sec.viz.items) units.push({ text: `${it.value ?? ""} ${it.bValue ?? ""}`, row: "chart label", label: `${it.label}${it.who ? ` ${it.who}` : ""}` });
+      // As brief.ts linkMemo reads them: on a rival's Brief a unit that names no one is about the rival.
+      if (subj) for (const u of units) if (u.row !== "chart label" && u.row !== "visibility table" && R.terms(u.text).length === 0) u.label = [u.label, subj].filter(Boolean).join(" ");
       for (const u of units) {
         const seen = new Map<string, number>();
         for (const m of u.text.matchAll(NUMBER_TOKEN)) {
@@ -81,11 +108,22 @@ for (const project of (await store.listProjects()).filter((p: any) => !p.archive
           const { local, sentence } = numberContext(R, u.text, m.index!, m.index! + token.length, u.label ?? "");
           const link = (u.links ?? []).find((l: any) => l.token === token && l.occurrence === occ);
           const kind = kindOf(sentence, u.row);
-          const where = `${project.brand} [${frame}/${sec.key}]`;
+          const where = `${project.brand}${subj ? ` [rival ${subj}]` : ""} [${frame}/${sec.key}]`;
+          const ownB = !subj;
           if (link) {
             counts.linked++;
+            if (ownB) own.linked++;
+            if (link.dest.kind === "table") {
+              counts.table++;
+              if (ownB) own.table++;
+              const rows = tableRows(link.dest.entry);
+              if (!rows) failures.push(`${where} ${token} -> table ${link.dest.entry} is not on this run's Data page`);
+              else tables.push(`${where} ${token} in "${sentence.slice(0, 200)}" -> table "${LIB_BY_ID.get(link.dest.entry).label}": ${rows.join("; ")}${rows.some((r) => r.endsWith(` ${token}`)) ? "" : ` (the figure ${token} itself is not a row: the pivot has no "every other situation" row)`}`);
+              continue;
+            }
             if (link.dest.kind === "card") {
               counts.card++;
+              if (ownB) own.card++;
               const list = fallbacks.get(kind) ?? [];
               list.push(`${where} ${token} in "${sentence.slice(0, 220)}"`);
               fallbacks.set(kind, list);
@@ -93,12 +131,21 @@ for (const project of (await store.listProjects()).filter((p: any) => !p.archive
             }
             const dest = link.dest.kind === "cell" ? { kind: "cell" as const, id: link.dest.id } : { kind: "rival" as const, id: link.dest.name };
             if (!R.shows(dest, token, local, sentence, link.reveal)) failures.push(`${where} ${token} -> ${dest.kind} ${dest.id}${link.reveal ? ` ${JSON.stringify(link.reveal)}` : ""} does not show it beside its subject: "${sentence.slice(0, 160)}"`);
-            else if (link.reveal) counts.one++;
-            else counts.def++;
+            else if (link.reveal) {
+              counts.one++;
+              if (ownB) own.one++;
+            } else {
+              counts.def++;
+              if (ownB) own.def++;
+            }
           } else {
             counts.unlinked++;
+            if (ownB) own.unlinked++;
             const found = R.find(token, local, sentence, { cells: allCells, rivals: [] }, "anywhere");
-            if (found) counts.unlinkedHome++;
+            if (found) {
+              counts.unlinkedHome++;
+              if (ownB) own.unlinkedHome++;
+            }
             else homeless.push(`${where} ${kind}: ${token} in "${sentence.slice(0, 200)}"`);
           }
         }
@@ -107,8 +154,11 @@ for (const project of (await store.listProjects()).filter((p: any) => !p.archive
   }
 }
 
-console.log(`LINKED ${counts.linked}: on view where the link lands ${counts.def}, behind the one interaction the link opens ${counts.one}, Brief answer card (no home) ${counts.card}`);
+console.log(`LINKED ${counts.linked}: on view where the link lands ${counts.def}, behind the one interaction the link opens ${counts.one}, a Data page table ${counts.table}, Brief answer card (no home) ${counts.card}`);
 console.log(`UNLINKED ${counts.unlinked}: on some card or By rival card ${counts.unlinkedHome}, nowhere ${homeless.length}`);
+console.log(`(tracker's own Brief only: linked ${own.linked} = ${own.def} on view + ${own.one} one interaction + ${own.table} table + ${own.card} answer card; unlinked ${own.unlinked}, ${own.unlinkedHome} on a card, ${own.unlinked - own.unlinkedHome} nowhere)`);
+console.log(`\nLINKED TO A DATA PAGE TABLE: ${tables.length}`);
+for (const x of tables) console.log(`  - ${x}`);
 console.log("\nFALLBACKS TO THE BRIEF'S ANSWER CARD, by kind:");
 for (const [k, xs] of [...fallbacks.entries()].sort((a, b) => b[1].length - a[1].length)) {
   console.log(`  ${k}: ${xs.length}`);

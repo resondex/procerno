@@ -91,7 +91,12 @@ export interface AnswerCard {
 export interface BriefLink {
   token: string;
   occurrence: number;
-  dest: { kind: "cell"; id: string } | { kind: "rival"; name: string } | { kind: "card"; id: string };
+  dest:
+    | { kind: "cell"; id: string }
+    | { kind: "rival"; name: string }
+    | { kind: "card"; id: string }
+    /** bf34: a table on the Data page (a library entry: its pool, measure and rows), for a figure no card shows. */
+    | { kind: "table"; entry: string; pool: string; measures: string[]; row: string };
   reveal?: PanelReveal;
 }
 

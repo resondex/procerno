@@ -50,6 +50,14 @@ export function linkResolver(map: AnalysisMapView, terms: string[], codes: strin
   // ..."); elsewhere a code that is an everyday word ("price") is just a word in the sentence.
   const codeSet = new Set(codes.map((c) => c.trim().toLowerCase()));
   const subjectTerms = (ts: string[], local: string) => (measures(local).has("argued") ? ts : ts.filter((t) => !codeSet.has(low(t))));
+  // bf34: a sentence about one argument ("X comes up in A of the answers that pick Y and B of those that pick a rival")
+  // - every number in it is about that argument, even when its own stretch does not name it.
+  const localOf = (local: string, sentence: string) => {
+    const own = subjectTerms(termsOf(local), local);
+    if (own.length || !measures(sentence).has("argued")) return own;
+    const codes = termsOf(sentence).filter((t) => codeSet.has(low(t)));
+    return codes.length === 1 ? codes : own;
+  };
   const list = [...new Set(terms.map((t) => t.trim()).filter((t) => t.length >= 3))].sort((a, b) => b.length - a.length);
   const termsOf = (s: string) => {
     const l = low(s);
@@ -127,10 +135,10 @@ export function linkResolver(map: AnalysisMapView, terms: string[], codes: strin
       const subject = subjectOf(dest.kind, dest.id);
       const entries = dest.kind === "cell" ? cellIdx(dest.id) : rivalIdx(dest.id);
       const same = (a?: PanelReveal, b?: PanelReveal) => JSON.stringify(a ?? null) === JSON.stringify(b ?? null);
-      return entries.some((e) => fits(e, token, subjectTerms(termsOf(local), local), termsOf(sentence), subject, local) && (e.at === "default" || same(e.reveal, reveal)));
+      return entries.some((e) => fits(e, token, localOf(local, sentence), termsOf(sentence), subject, local) && (e.at === "default" || same(e.reveal, reveal)));
     },
     find(token, local, sentence, own, scope = "linked") {
-      const localTerms = subjectTerms(termsOf(local), local);
+      const localTerms = localOf(local, sentence);
       const sentenceTerms = termsOf(sentence);
       const ownCands = [...own.cells.map((id) => ({ kind: "cell" as const, id })), ...own.rivals.filter((n) => rivalByName.has(low(n))).map((id) => ({ kind: "rival" as const, id }))];
       const mine = best(ownCands, token, localTerms, sentenceTerms, local);
@@ -161,6 +169,8 @@ export function numberContext(R: LinkResolver, text: string, start: number, end:
   const se = text.indexOf(". ", end);
   const sEnd = se < 0 ? text.length : se + 1;
   const back = text.slice(Math.max(prevEnd, sb), end);
-  const around = text.slice(Math.max(prevEnd, sb), Math.min(nextStart, sEnd));
+  // A clause after a semicolon is another fact ("... leave in 35%; <rival> is where it sends them").
+  const semi = text.indexOf(";", end);
+  const around = text.slice(Math.max(prevEnd, sb), Math.min(nextStart, sEnd, semi < 0 ? text.length : semi));
   return { local: `${context} ${R.terms(back).length ? back : around}`, sentence: `${context} ${text.slice(sb, sEnd)}` };
 }
