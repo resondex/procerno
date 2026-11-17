@@ -562,7 +562,7 @@ function actOf(p: Position, st: MapCellStat, brand: string): string {
           : `publish the evidence for ${poss(brand)} side where the AI looks for it`;
     case "strategy_misfit":
       return st.wall
-        ? "stop arguing against the fixed situation and aim at the buyers it does not apply to"
+        ? `stop arguing against buyers who say "${condLabel(st.wall)}" and aim at the buyers it does not apply to`
         : st.badges.includes("leak")
           ? "cover everything this buyer needs, or decide to leave this buyer to others"
           : "build a case that works for the typical buyer, or accept being the specialist";
@@ -578,9 +578,11 @@ function actOf(p: Position, st: MapCellStat, brand: string): string {
 }
 
 /** bf26: the map's lever sentences in the Brief's third person (the seven families' fixed wordings, analysis_map.ts LEVER). */
-function leverAbout(lever: string, brand: string): string {
+function leverAbout(lever: string, brand: string, wall?: string | null): string {
   const b = poss(brand);
   return lever
+    // bf31: the fixed-situation lever names the situation.
+    .replace("Don't spend on arguing against this.", wall ? `Don't spend on arguing against buyers who say "${condLabel(wall)}".` : "Don't spend on arguing against this.")
     .replace(/^When the AI teaches buyers what to look for, (.+?) - an argument that comes up more when you win - is missing\./, `When the AI tells buyers what to look for, $1 - an argument that comes up more when ${brand} wins - is missing.`)
     .replace("so there is nothing to push into these answers yet. Keep the facts behind your winning arguments current.", `so there is nothing to push into these answers yet. Keep the facts behind ${b} winning arguments current.`)
     .replace("make the rival's case and not yours. Publish the evidence for your side", `make the rival's case and not ${b}. Publish the evidence for ${b} side`)
@@ -603,11 +605,18 @@ export function actFromMove(text: string): string | null {
   return low1(text.split(";")[0].trim().replace(/:\s+/, " - ").replace(/[.\s]+$/, ""));
 }
 
+/** Rows whose cell is a contest for the pick or a verdict on the brand - where a generic fact check is a real move. */
+const CONTEST_ROWS = new Set(["open", "h2h", "leavers", "value", "buyers", "customers", "hold", "criteria"]);
+
 function movesOf(map: AnalysisMapView, stats: Record<string, MapCellStat>, brand: string, findingAt: (cellId: string) => Insight | undefined): Move[] {
   const deficits = Object.values(map.positions)
     // Pooled All cells are the verdict paragraph's ground, not a move - a
     // move names the specific contest to act on.
     .filter((p) => p.status === "deficit" && stats[p.cellId] && !stats[p.cellId].pooled)
+    // bf31: a bare "check what the AI says against its own data" is too vague to print on a row that is not a
+    // contest for the pick or a verdict on the brand (learning the category, what's popular, spotting the problem,
+    // premium vs basic, habit, the customer questions) - no move there unless a finding gives it one.
+    .filter((p) => p.triageSuggested !== "product_truth" || CONTEST_ROWS.has(stats[p.cellId].row) || !!findingAt(p.cellId))
     .sort((a, b) => {
       const sa = stats[a.cellId];
       const sb = stats[b.cellId];
@@ -643,7 +652,7 @@ function movesOf(map: AnalysisMapView, stats: Record<string, MapCellStat>, brand
       label: st.label,
       lead: w.lead,
       claim: p.claim,
-      lever: fm ? sentence(fm.text) : sentence(leverAbout(p.lever, brand)),
+      lever: fm ? sentence(fm.text) : sentence(leverAbout(p.lever, brand, st.wall)),
       act,
       actStem: stem,
       family: fm ? fm.family : p.family,
@@ -1061,6 +1070,16 @@ function placeOf(c: Ctx, m: Move): string {
       return m.label ? `the problem questions of ${B(m.label)}` : "problem questions";
     case "hold":
       return `${poss(c.brand)} own customers looking around`;
+    case "social":
+      return "buyers asking what most people pick";
+    case "explainer":
+      return "buyers learning the category";
+    case "premium":
+      return "buyers weighing premium against basic";
+    case "repertoire":
+      return "habit buyers";
+    case "settled":
+      return `${poss(c.brand)} customers on "${cellNameAbout(m.label, c.brand)}"`;
     default:
       return low1(m.lead);
   }
@@ -2305,7 +2324,7 @@ function diagnosisFrame(c: Ctx): BriefSection[] {
         : `The lead rests on an argument buyers are not told to look for`;
     const parts = [`When the AI picks ${c.name}, it argues ${best.code} in ${PZ(best.wins)} of those answers; when it picks another brand, in ${PZ(best.others)}.`];
     if (!onList) {
-      parts.push(`Asked what to look for, the AI ${taughtAs && taughtAs.rate.k > 0 ? "raises" : "never raises"} ${best.code}${taughtAs && taughtAs.rate.k > 0 ? " less often than the five points it raises most" : ""}.`);
+      parts.push(`${cap(best.code)} is not among the five things the AI most often tells buyers to look for.`);
       const lead3 = top.slice(0, 3).map((t) => t.code);
       parts.push(`It leads instead with ${listOf(lead3)}.`);
       const against = top.map((t) => c.lift.find((l) => norm(l.code) === norm(t.code))).find((l) => l && l.lift < 0 && l.others.low > l.wins.high);
@@ -2319,12 +2338,22 @@ function diagnosisFrame(c: Ctx): BriefSection[] {
     const heading = behind ? `${leader.name} is the main threat` : `${leader.name} is the nearest challenger`;
     const parts: string[] = [];
     const pins: (string | undefined)[] = [];
+    // bf31: the section is about the rival its heading names - first what sends buyers to it, then where the gap
+    // to it is widest; the condition that sends buyers elsewhere follows as "Others who take buyers".
     const away = c.inputs.away;
-    const lead = away?.lead && !isDefaultCondition(away.lead.label) ? away.lead : null;
-    const g = lead ?? away?.groups.find((x) => !isDefaultCondition(x.label));
-    if (g) {
-      const d = destOf(g.routes, lead ? lead.answers : (g as { answers: number }).answers);
-      parts.push(`What most often sends buyers away from ${c.name} is "${condLabel(lead ? lead.wording : g.label)}"${d ? `, and the AI points those buyers ${destPhrase(d)}` : ""}.`);
+    const alead = away?.lead && !isDefaultCondition(away.lead.label) ? away.lead : null;
+    type Cond = { label: string; answers: number; routes: { name: string; n: number }[] };
+    const conds: Cond[] = [
+      ...(alead ? [{ label: alead.wording, answers: alead.answers, routes: alead.routes }] : []),
+      ...(away?.groups ?? []).filter((x) => !isDefaultCondition(x.label)).map((x) => ({ label: x.label, answers: x.answers, routes: x.routes })),
+    ];
+    const sentTo = (g: Cond) => {
+      const d = destOf(g.routes, g.answers);
+      return `Buyers who say "${condLabel(g.label)}" are most often sent away${d ? `, ${destPhrase(d)}` : ""}.`;
+    };
+    const toLeader = conds.find((g) => g.routes[0]?.name === leader.name);
+    if (toLeader) {
+      parts.push(sentTo(toLeader));
       pins.push(CONDITION_CARD);
     }
     const gap = c.rooms
@@ -2340,36 +2369,49 @@ function diagnosisFrame(c: Ctx): BriefSection[] {
       parts.push(`The gap to ${leader.name} is widest for ${buyerPhrase(gap.r.room)}: ${leader.name} takes ${P(gap.them)} of the picks there and ${c.name} ${gap.mine.k === 0 ? "none" : P(gap.mine)}.`);
       pins.push(`chooses:open:${norm(gap.r.room)}`);
     }
+    // A rival one AI company carries (a threat, the SWOT's sense), only on real concentration: the detector's own bar
+    // (>= 40% of the rival's picks, the range clearing that unit's share of the questions) and at least 1.5 times
+    // that share.
+    const conc = c.ranked.find((i) => i.key === "engine_pick_concentration" && i.names?.variant === "rival" && i.names?.rival && i.names?.vendor);
+    let concLine: { rival: string; text: string; ids: string[] } | null = null;
+    if (conc) {
+      const nums = (c.voiced.get(conc.key)?.body ?? conc.body).match(/<1%|\d+(?:\.\d+)?%/g) ?? [];
+      const num = (t: string) => (t === "<1%" ? 0.5 : parseFloat(t));
+      if (nums.length >= 2 && num(nums[0]!) >= 1.5 * num(nums[1]!))
+        concLine = {
+          rival: conc.names!.rival!,
+          text: `${conc.names!.vendor}'s assistants carry ${conc.names!.rival}: ${nums[0]} of its picks come from them, though they answer ${nums[1]} of the questions, so ${conc.names!.rival} is picked more wherever buyers use them.`,
+          ids: insightCells(c, conc),
+        };
+    }
+    if (concLine && concLine.rival === leader.name) {
+      parts.push(concLine.text);
+      pins.push(...concLine.ids);
+    }
+    // Customers looking around asked for alternatives, so being shown rivals is by design; only stay / leave, and
+    // only when it says something (told to leave at the SWOT's bar, or almost never told to stay).
     const dfn = c.inputs.alternatives?.defensive;
-    if (dfn && dfn.answers >= MIN) {
-      // The brand shown most (the customers card states its share).
-      const shown = dfn.destinations[0];
-      parts.push(
-        `${poss(c.name)} own customers who ask what else to consider are ${dfn.verdicts.keep.k === 0 ? "never told to stay" : `told to stay in ${P(dfn.verdicts.keep)} of answers`}${shown && shown.offered.k > 0 ? `, and ${shown.offered.k === shown.offered.n ? `every answer shows them ${shown.name}` : `${P(shown.offered)} of the answers show them ${shown.name}`}` : ""}.`
-      );
+    if (dfn && dfn.answers >= MIN && (rate(dfn.verdicts.leave) >= HOLD_LEAVE_BAR || (rate(dfn.verdicts.keep) <= 0.1 && dfn.verdicts.leave.k > 0))) {
+      const stay = dfn.verdicts.keep.k === 0 ? "never told to stay" : `told to stay in ${P(dfn.verdicts.keep)} of answers`;
+      const leave = dfn.verdicts.leave.k === 0 ? "never told to leave" : `told to leave in ${P(dfn.verdicts.leave)}`;
+      parts.push(`${poss(c.name)} own customers who ask what else to consider are ${stay} and ${leave}.`);
       pins.push(pooledOf(c, "doubts:hold:"));
     }
-    if (parts.length) {
-      const paras: BriefPara[] = [withCells({ text: parts.join(" ") }, cellsOf(c, ...pins))];
-      // Where rivals are thinner than they look: one AI company carrying a rival's picks, the matchup the brand wins.
-      const thin: string[] = [];
-      const thinPins: (string | undefined)[] = [];
-      const conc = c.ranked.find((i) => i.key === "engine_pick_concentration" && i.names?.rival && i.names?.vendor && i.names.rival !== c.brand);
-      if (conc) {
-        const nums = (c.voiced.get(conc.key)?.body ?? conc.body).match(/<1%|\d+(?:\.\d+)?%/g) ?? [];
-        if (nums.length >= 2) {
-          thin.push(`${conc.names!.vendor} supplies ${nums[0]} of ${poss(conc.names!.rival!)} picks while answering ${nums[1]} of the questions, so ${conc.names!.rival} is thinner than it looks.`);
-          thinPins.push(...insightCells(c, conc));
-        }
-      }
-      const h = [...sm.headToHead].filter((r) => r.winOfDecided.n >= MIN && r.winOfDecided.low > 0.5).sort((a, b) => rate(b.winOfDecided) - rate(a.winOfDecided))[0];
-      if (h) {
-        thin.push(`In a straight choice between ${c.name} and ${h.rival}, the AI takes ${poss(c.name)} side ${h.winOfDecided.k === h.winOfDecided.n ? "every time it picks one of the two" : `in ${P(h.winOfDecided)} of the answers that pick one of the two`}.`);
-        thinPins.push(rivalCell(c, h.key));
-      }
-      if (thin.length) paras.push(withCells({ lead: "Where rivals are thinner than they look.", text: thin.join(" ") }, cellsOf(c, ...thinPins)));
-      out.push({ key: "diag_threat", heading, paras });
+    const paras: BriefPara[] = [];
+    if (parts.length) paras.push(withCells({ text: parts.join(" ") }, cellsOf(c, ...pins)));
+    const others: string[] = [];
+    const otherPins: (string | undefined)[] = [];
+    const top = conds[0];
+    if (top && top !== toLeader && top.routes[0]?.name !== leader.name) {
+      others.push(sentTo(top));
+      otherPins.push(CONDITION_CARD);
     }
+    if (concLine && concLine.rival !== leader.name) {
+      others.push(concLine.text);
+      otherPins.push(...concLine.ids);
+    }
+    if (others.length) paras.push(withCells({ lead: "Others who take buyers.", text: others.join(" ") }, cellsOf(c, ...otherPins)));
+    if (paras.length) out.push({ key: "diag_threat", heading, paras });
   } else if (!c.isTarget && c.vsTarget && c.vsTarget.won.n >= MIN) {
     const w = c.vsTarget.won;
     const heading = w.low > 0.5 ? `${c.name} wins the straight choice against ${c.brand}` : w.high < 0.5 ? `${c.brand} wins the straight choice against ${c.name}` : `${c.name} and ${c.brand} split the straight choice`;
@@ -2702,7 +2744,7 @@ export async function computeBrief(data: ViewData, request: BriefRequest = {}): 
 // bf21 (2026-11-10): the plain-wording pass - reads bs13 / am15 (new move names, lever sentences and insight wording quoted in the memos); actOf restates the new levers; the conditions paragraph, the condition card, the SWOT wall and the jobs wall lines say what sends buyers away and "a fixed situation" instead of "routes" / "wall" / "reason". The exemplar's "The conditions that decide it" heading is kept. Numbers unchanged.
 // bf22 (2026-11-12): the reasons harmonization - reads bs17 / am22: the conditions paragraph, the condition card and the away-condition finding name the run's reason THEMES (dt4) where a theme map exists (raw condition groups only without one); the paragraph's tips count statements on a themed side.
 // bf23 (2026-11-13, one counting rule - reads bs21): with reason themes the conditions paragraph counts each side's themes at ANSWER grain over that side's own answer base, and the condition card lists the themes at answer grain, names the lead away theme (quoting its most-stated wording) and gives the away_condition finding's blocker and fixed-situation wordings their own rows on the same base. Keyless output unchanged.
-const BRIEF_VERSION = "bf30"; // bf30 (2026-11-17): a move taken from a finding keeps the object after its colon ("build on the exception - aim at the buyers ...") in the SWOT, diagnosis and By buying situation actions. // bf29 (2026-11-16, Tyler's rulings): "The diagnosis" frame after Now what? (conversion, price, the winning argument, the threat, where to act - its own templates); TOWS and Situation - complication - resolution retired (frames, pairing helpers, the SWOT items' TOWS phrases, the pyramid); moves that share an action are one move naming every place (no back-reference stubs) in every frame; the SWOT fills each quadrant by the kind of fact, leads every item, keeps one fact in one quadrant and adds "What to do"; the funnel's stages take the scoreboard's two-table layout (competitorColumns, one source) and "Customers with a worry told to stay"; Visibility vs conversion reads conversion as recommendations that end as the pick (a level line for the charted brands together), drops class brands, folds rarely named or picked brands into one note and one table line, defines the quadrants under the chart and closes on a so-what; By buying situation sorts nearest first, says why from each buyer's own answers (the map's roomLift), states all three Value sides and closes on nearest / furthest and one move; the Brief-style insight bodies state shares in plain words. // bf28 (2026-11-16): the scoreboard is two tables on the tracker's own Brief - four rows against the average and the most-picked competitor, then the rows about the brand's own questions; the commit rate is a sentence. // bf27 (2026-11-16): the Now what scoreboard carries the average competitor beside the subject's named, recommended, share of picks and picked rows (the competitors the what-to-buy card lists; class brands left out). // bf26 (2026-11-16): one voice - the subject in the third person everywhere (the insights re-run in the Brief's style, the moves' third-person form, the map's levers and claims voiced), buyers as words, never / every at the extremes, the cards' vocabulary, a finding's move on its cell, no move sentence twice in a frame. // bf25 (2026-11-13): the conditions line reads "rarely names one winner for every buyer" (was "a rule, not a winner"). // bf24 (2026-11-13): themed conditions name one destination only when it takes half their answers; the fixed-situation line leads with the finding wording.
+const BRIEF_VERSION = "bf31"; // bf31 (2026-11-17): the diagnosis threat section is about the rival its heading names (what sends buyers to it, the widest gap), then "Others who take buyers"; a rival one AI company carries is a threat there, only at the detector bar and 1.5x the questions it answers; no "thinner than it looks"; customers looking around read stay / leave only when it says something; conditions read "Buyers who say ... are most often sent away"; the untaught argument line is plain; fixed-situation moves name the situation; every row type has a place name; a bare fact-check move on a non-contest row is dropped. // bf30 (2026-11-17): a move taken from a finding keeps the object after its colon ("build on the exception - aim at the buyers ...") in the SWOT, diagnosis and By buying situation actions. // bf29 (2026-11-16, Tyler's rulings): "The diagnosis" frame after Now what? (conversion, price, the winning argument, the threat, where to act - its own templates); TOWS and Situation - complication - resolution retired (frames, pairing helpers, the SWOT items' TOWS phrases, the pyramid); moves that share an action are one move naming every place (no back-reference stubs) in every frame; the SWOT fills each quadrant by the kind of fact, leads every item, keeps one fact in one quadrant and adds "What to do"; the funnel's stages take the scoreboard's two-table layout (competitorColumns, one source) and "Customers with a worry told to stay"; Visibility vs conversion reads conversion as recommendations that end as the pick (a level line for the charted brands together), drops class brands, folds rarely named or picked brands into one note and one table line, defines the quadrants under the chart and closes on a so-what; By buying situation sorts nearest first, says why from each buyer's own answers (the map's roomLift), states all three Value sides and closes on nearest / furthest and one move; the Brief-style insight bodies state shares in plain words. // bf28 (2026-11-16): the scoreboard is two tables on the tracker's own Brief - four rows against the average and the most-picked competitor, then the rows about the brand's own questions; the commit rate is a sentence. // bf27 (2026-11-16): the Now what scoreboard carries the average competitor beside the subject's named, recommended, share of picks and picked rows (the competitors the what-to-buy card lists; class brands left out). // bf26 (2026-11-16): one voice - the subject in the third person everywhere (the insights re-run in the Brief's style, the moves' third-person form, the map's levers and claims voiced), buyers as words, never / every at the extremes, the cards' vocabulary, a finding's move on its cell, no move sentence twice in a frame. // bf25 (2026-11-13): the conditions line reads "rarely names one winner for every buyer" (was "a rule, not a winner"). // bf24 (2026-11-13): themed conditions name one destination only when it takes half their answers; the fixed-situation line leads with the finding wording.
 
 /**
  * The brief through the cache. cachedView's keying, with the subject as one
