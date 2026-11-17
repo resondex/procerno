@@ -434,6 +434,27 @@ export function tierTakeaway(premium: number, basic: number, balanced: number): 
   return tk("No clear side", "neutral");
 }
 
+/** am60, Habit: "Stick with you, or try something else" (sticks with you / picks another brand / says it depends /
+ * names no pick, of all answers). */
+export function habitTakeaway(stick: number, other: number, depends: number, nopick: number): Takeaway {
+  if (isSplit(stick, other, depends, nopick)) return SPLIT;
+  if (stick >= MAJORITY) return tk("Mostly sticks with you", "good", stick);
+  if (other >= MAJORITY) return tk("Mostly says try something else", "bad", other);
+  if (depends >= MAJORITY) return tk("Mostly says it depends", "neutral", depends);
+  if (nopick >= MAJORITY) return tk("Mostly names no pick", "neutral", nopick);
+  const l = leanOf(stick, other);
+  if (l > 0) return tk("Leans stick", "good");
+  if (l < 0) return tk("Leans switch", "bad");
+  return tk("No clear side", "neutral");
+}
+/** am60, Habit: "Suggests another brand" (of all answers). The customer asked whether to try something else, so suggesting one is not in itself bad. */
+export function suggestTakeaway(share: number): Takeaway {
+  if (share >= 99.95) return tk("Suggests another brand in every answer", "neutral");
+  if (share >= MAJORITY) return tk("Suggests another brand in most answers", "neutral");
+  if (share >= 20) return tk("Suggests another brand in some answers", "neutral");
+  return tk("Rarely suggests another brand", "good");
+}
+
 /** What to look for: the checklist step, and the gap step when it is drawn. */
 export const taughtTakeaway = (gap: boolean): Takeaway => (gap ? tk("Misses your strongest points", "bad") : tk("Covers your strongest points", "good"));
 export const GAP_TAKEAWAY: Takeaway = tk("Not on the checklist", "bad");
@@ -453,6 +474,8 @@ const BASE_TAKEAWAYS: string[] = [
   "Often names one to replace you", "Mostly names your own", "Mostly names another company's", "A mix of your own and others'",
   "Misses your strongest points", "Covers your strongest points", "Not on the checklist",
   "Mostly sides with basic", "Mostly sides with premium", "Mostly balanced", "Leans premium", "Leans basic", "No clear side",
+  "Mostly sticks with you", "Mostly says try something else", "Mostly says it depends", "Mostly names no pick", "Leans stick", "Leans switch",
+  "Suggests another brand in every answer", "Suggests another brand in most answers", "Suggests another brand in some answers", "Rarely suggests another brand",
   "Split",
 ];
 /** Every takeaway tag (TAG_ALLOW reads it), with each "Mostly" tag's "Always" form. */

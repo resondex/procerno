@@ -8,7 +8,7 @@ import type { Resolver } from "./brand_resolve";
 import { cell, type PoolRow, type RateCell } from "./view_data";
 import { isDescription, type ValueFact } from "./value";
 import { filterObvious, type Omission, type OmissionList } from "./panel_filter";
-import { NOWHERE_CLEAR, AVG_COMP, CLOSE_PTS, GAP_TAKEAWAY, TAKEAWAY_TAGS, TAG_FURTHEST, TAG_GAP_OPENS, agreesTakeaway, alongsideTakeaway, avgTag, caseTakeaway, criticStrengthTakeaway, duelTag, insteadTakeaway, keepTakeaway, leanOf, offersTakeaway, oftenOf, premiseTakeaway, tierTakeaway, proceedTakeaway, stanceTakeaway, taughtTakeaway, usualDir, duelTone, focusOf, neutralUsualTag, otherTag, rankTag, segTag, toneOfTag, usualTag, usualTone, worthTakeaway, type KN, type Takeaway } from "./panel_tags";
+import { NOWHERE_CLEAR, AVG_COMP, CLOSE_PTS, GAP_TAKEAWAY, TAKEAWAY_TAGS, TAG_FURTHEST, TAG_GAP_OPENS, agreesTakeaway, alongsideTakeaway, avgTag, caseTakeaway, criticStrengthTakeaway, duelTag, insteadTakeaway, keepTakeaway, leanOf, offersTakeaway, oftenOf, premiseTakeaway, tierTakeaway, habitTakeaway, suggestTakeaway, proceedTakeaway, stanceTakeaway, taughtTakeaway, usualDir, duelTone, focusOf, neutralUsualTag, otherTag, rankTag, segTag, toneOfTag, usualTag, usualTone, worthTakeaway, type KN, type Takeaway } from "./panel_tags";
 import { ROW_NAME } from "./question_names";
 import {
   F,
@@ -67,6 +67,11 @@ import {
   namedWhenDetail,
   PREMIUM_TEXT,
   premiumClaim,
+  HABIT_TEXT,
+  habitClaim,
+  habitDetail,
+  habitOffersDetail,
+  type HabitSide,
   tierDetail,
   type TierWhere,
   type InsteadHalf,
@@ -483,6 +488,8 @@ function buildPanel(inp: PanelCellInput, ctx: Ctx): PositionPanel | undefined {
       return criticPanel(inp, ctx);
     case "premium":
       return premiumPanel(inp, ctx);
+    case "habit":
+      return habitPanel(inp, ctx);
   }
 }
 
@@ -740,7 +747,8 @@ function productIndex(ctx: Ctx): Map<string, { named: number; chosen: number; se
   const seen = new Set<string>();
   for (const inp of ctx.inputs.values()) {
     // am59: the Premium vs basic cell's answers stay out (built after every other kind's index existed - no other panel's product list moves).
-    if (inp.kind === "premium") continue;
+    // am60: the Habit cell's too.
+    if (inp.kind === "premium" || inp.kind === "habit") continue;
     for (const r of inp.rows) {
       const rules = r.code.decision_rules ?? [];
       if (!rules.length || seen.has(r.code.response_id)) continue;
@@ -2358,6 +2366,142 @@ function premiumFinish(inp: PanelCellInput, p: PositionPanel, ctx: Ctx) {
   }
 }
 
+/** am60, Habit: a customer who buys you out of habit asks whether to stick with you or try something else (the
+ * choice schema - a pick, it depends, no pick). One step on what the answer does, one on how often it suggests
+ * another brand; the conditions split by the brand each rule chooses (toward = you); the brands suggested instead
+ * and your own other products move into the second step's explanation (the looking-around pattern). */
+const HABIT_SUGGESTED = new WeakMap<PositionPanel, PanelBlock>();
+/** The other brands an answer suggests, as written: its recommended mentions and its pick (activeDests keeps the active rivals). */
+const habitSuggests = (r: PoolRow, h: PanelHelpers): string[] => [
+  ...(r.code.mentions ?? []).filter((m) => m.framing === "recommended").map((m) => m.brand),
+  ...(h.pickOf(r).status === "active" && h.pickOf(r).key !== h.targetKey && r.code.top_pick ? [r.code.top_pick] : []),
+];
+function habitPanel(inp: PanelCellInput, ctx: Ctx): PositionPanel {
+  const { h } = ctx;
+  const T9 = HABIT_TEXT;
+  const rows = inp.rows;
+  const all = rows.length;
+  const stick = rows.filter((r) => h.pickOf(r).key === h.targetKey);
+  // Any other pick counts, in the category or not (the map's own switch count).
+  const other = rows.filter((r) => h.pickOf(r).status !== "none" && h.pickOf(r).key !== h.targetKey);
+  const picked = new Set([...stick, ...other]);
+  const depends = rows.filter((r) => !picked.has(r) && r.code.outcome === "conditional");
+  const nopick = rows.filter((r) => !picked.has(r) && r.code.outcome !== "conditional");
+  const pf = (r: PoolRow) => h.quoteOf(r) || r.code.top_pick || h.brand;
+  const segs = [
+    seg("stick", T9.stick, "you", stick, all, h, "answers", pf),
+    seg("other", T9.other, "away", other, all, h, "answers", pf),
+    seg("depends", T9.depends, "neutral", depends, all, h),
+    seg("nopick", T9.nopick, "neutral", nopick, all, h),
+  ];
+  const sugg = rows.filter((r) => h.activeDests(habitSuggests(r, h)).size > 0);
+  const offers = num(sugg.length, all, "answers", refsOf(sugg, (r) => habitSuggests(r, h).find((x) => h.activeDests([x]).size > 0) ?? verdictFind(r, h)));
+  const claim = habitClaim(segs[0].num, segs[1].num, all > 0 && stick.length === all, stick.length === 0, other.length === 0);
+  const conditions = conditionsOf(inp, ctx, { ...T9.conditions, subComp: T9.conditions.sub, toWord: "To" }, { pickKind: false });
+  // The lead quotes the conditions without their shares (the block below carries them), so it never repeats a bar number.
+  const a = conditions?.away ?? [];
+  const t = conditions?.toward ?? [];
+  const lead =
+    a.length || t.length
+      ? join(t.length ? attachedLead("sticking with you", t.slice(0, 1).map((c) => ({ text: c.text })), "answers") : null, a.length && t.length ? " " : null, a.length ? attachedLead("trying something else", a.slice(0, 1).map((c) => ({ text: c.text })), "answers") : null)
+      : undefined;
+  const { block, comp } = destBlock(rows, ctx, T9.suggested.title, T9.suggested.sub, (r) => habitSuggests(r, h));
+  const rivals = comp.map((c) => rivalSmall(inp, ctx, c, (r) => h.activeDests(habitSuggests(r, h)).has(c.key), "Suggested instead", { when: "as something to try" }));
+  const weighs = weighsSides(inp, ctx, { title: T9.weighs.stick, say: T9.weighs.sayStick, rows: stick }, { title: T9.weighs.other, say: T9.weighs.sayOther, rows: other });
+  const out: PositionPanel = {
+    kind: "habit",
+    claim,
+    ...(lead && lead.length ? { lead } : {}),
+    stackLabel: "How the answer goes",
+    steps: [
+      { key: "habit", label: T9.stepLabel, segments: segs },
+      { key: "offers", label: T9.offersLabel, here: offers, hereLabel: "All answers" },
+    ],
+    ...(conditions ? { conditions } : {}),
+    lines: [],
+    ...(weighs ? { weighs } : {}),
+    ...(rivals.length ? { rivals } : {}),
+  };
+  if (block) HABIT_SUGGESTED.set(out, block);
+  return out;
+}
+
+/** am60: the Habit card's two steps explain themselves - which AI companies say try something else, who gets the
+ * pick when there is one; the brands suggested instead (with Open), who is suggested first, your own it suggests. */
+function habitStepDetails(inp: PanelCellInput, p: PositionPanel, ctx: Ctx) {
+  if (!p.detail) return;
+  const { h } = ctx;
+  const T9 = HABIT_TEXT;
+  const rows = inp.rows;
+  const all = rows.length;
+  type Item = { label: string; rs: PoolRow[]; n: number; unit: string; find: (r: PoolRow) => string };
+  const mk = (title: string, sub: string, tone: PanelTone, items: Item[], few: string, keepOrder = false): PanelDetailSection | null => {
+    const ok = items.filter((x) => x.rs.length >= ROW_MIN && x.n > 0);
+    if (!keepOrder) ok.sort((a, b) => b.rs.length / b.n - a.rs.length / a.n || a.label.localeCompare(b.label));
+    if (!ok.length && !items.some((x) => x.rs.length > 0)) return null;
+    return { title, sub, tone, rows: ok.map((x) => ({ label: x.label, num: num(x.rs.length, x.n, x.unit, refsOf(x.rs, x.find)) })), ...(ok.length ? {} : { note: join(few) }) };
+  };
+  const pf = (r: PoolRow) => h.quoteOf(r) || r.code.top_pick || h.brand;
+  const otherPick = (r: PoolRow) => h.pickOf(r).status !== "none" && h.pickOf(r).key !== h.targetKey;
+  const byVendor = new Map<string, PoolRow[]>();
+  for (const r of rows) {
+    const v = engineFacets(r.model).vendor;
+    byVendor.set(v, [...(byVendor.get(v) ?? []), r]);
+  }
+  const split = h.brandSplit(rows);
+  const mine = split.list.find((b) => b.key === h.targetKey)?.rows ?? [];
+  const habitSections = [
+    mk(T9.vendor.title, T9.vendor.sub, "bad", [...byVendor.entries()].filter(([, rs]) => rs.length >= ARGS_MIN).map(([label, rs]) => ({ label, rs: rs.filter(otherPick), n: rs.length, unit: `${label} answers`, find: pf })), T9.vendor.few),
+    split.n >= ARGS_MIN
+      ? mk(T9.picks.title, T9.picks.sub, "neutral", [
+          { label: "You", rs: mine, n: split.n, unit: "answers that name a pick", find: pf },
+          ...split.list.filter((b) => b.key !== h.targetKey).slice(0, 3).map((b) => ({ label: b.name, rs: b.rows, n: split.n, unit: "answers that name a pick", find: (r: PoolRow) => r.code.top_pick || b.name })),
+        ], T9.picks.few, true)
+      : null,
+  ].filter((x): x is PanelDetailSection => !!x);
+  // The other brands each answer suggests, in mention order.
+  const listOf = (r: PoolRow) => {
+    const rankOf = new Map<string, number>();
+    for (const m of r.code.mentions ?? []) {
+      const k = h.resolve(m.brand).key;
+      if (k && !rankOf.has(k)) rankOf.set(k, m.rank ?? rankOf.size + 1);
+    }
+    return [...h.activeDests(habitSuggests(r, h)).entries()].map(([key, name], i) => ({ key, name, rank: rankOf.get(key) ?? 1000 + i })).sort((a, b) => a.rank - b.rank);
+  };
+  const some = rows.map((r) => ({ r, l: listOf(r) })).filter((x) => x.l.length > 0);
+  const firstBy = new Map<string, { name: string; rs: PoolRow[] }>();
+  for (const x of some) firstBy.set(x.l[0].key, { name: x.l[0].name, rs: [...(firstBy.get(x.l[0].key)?.rs ?? []), x.r] });
+  const firstTop = [...firstBy.values()].sort((a, b) => b.rs.length - a.rs.length || a.name.localeCompare(b.name)).slice(0, 4);
+  const lead = firstTop[0] && some.length >= ARGS_MIN && firstTop[0].rs.length / some.length >= 0.3 ? firstTop[0].name : undefined;
+  // Your own other products it suggests trying (whatever the ladder - a brand's own variants are the point here).
+  const ownBy = new Map<string, { name: string; rs: PoolRow[] }>();
+  for (const r of rows) {
+    const ws = [
+      ...(r.code.decision_rules ?? []).flatMap((d) => [d.choice ?? "", d.product ?? ""]),
+      ...(r.code.mentions ?? []).filter((m) => m.framing === "recommended").map((m) => m.brand),
+    ].map((w) => w.trim()).filter((w) => w && h.resolve(w).key === h.targetKey);
+    for (const w of ws) {
+      const pl = productLabel(w, h.brand, ctx);
+      if (!pl) continue;
+      const t = ownBy.get(pl.toLowerCase()) ?? { name: pl, rs: [] };
+      if (!t.rs.includes(r)) t.rs.push(r);
+      ownBy.set(pl.toLowerCase(), t);
+    }
+  }
+  const shown = HABIT_SUGGESTED.get(p);
+  const offersSections = [
+    shown ? { title: shown.title, sub: shown.sub, tone: "bad" as const, rows: shown.rows.map((r) => ({ label: r.name, num: r.num, ...(r.open ? { open: true as const } : {}) })) } : null,
+    some.length >= ARGS_MIN ? mk(T9.first.title, T9.first.sub, "bad", firstTop.map((x) => ({ label: x.name, rs: x.rs, n: some.length, unit: "answers that suggest another brand", find: () => x.name })), T9.first.few) : null,
+    ownBy.size ? mk(T9.own.title(h.plural), T9.own.sub, "good", mergeProducts([...ownBy.values()], ctx, nameTokens(h.brand, ctx)).slice(0, 5).map((x) => ({ label: x.name, rs: x.rs, n: all, unit: "answers", find: () => x.name })), T9.own.few) : null,
+  ].filter((x): x is PanelDetailSection => !!x);
+  const share = all ? some.length / all : 0;
+  const offersDetail: PanelStepDetail = { ...habitOffersDetail(share >= 0.5 ? "most" : share >= 0.2 ? "some" : "rarely", lead), ...(offersSections.length ? { sections: offersSections } : {}) };
+  p.details = { habit: { ...p.detail, ...(habitSections.length ? { sections: habitSections } : {}) }, offers: offersDetail };
+  p.focus = "habit";
+  delete p.detail;
+  delete p.detailComp;
+}
+
 function learningPanel(inp: PanelCellInput, ctx: Ctx): PositionPanel {
   const { h } = ctx;
   const rows = inp.rows;
@@ -2875,6 +3019,7 @@ const VERDICT_STEP: Partial<Record<PanelKind, PanelStepKey>> = {
   business_case: "strength",
   critic: "strength",
   h2h: "won",
+  habit: "habit",
 };
 /** The segment a verdict step compares with the usual, and its noun. */
 const SEG_CMP: Partial<Record<PanelKind, Partial<Record<PanelStepKey, [string, string, boolean]>>>> = {
@@ -3108,7 +3253,7 @@ function extremeFacts(inp: PanelCellInput, p: PositionPanel, ctx: Ctx) {
 /** am36: the verdict panels' steps carry a one-line takeaway read off this
  * cell's own numbers (panel_tags.ts, thresholds there), the same in both
  * views; the usual stays the small figure beside each bar. */
-const TAKEAWAY_KINDS = new Set<PanelKind>(["value", "buyer_worry", "customer_worry", "looking_around", "expansion", "business_case", "critic", "alongside", "criteria"]);
+const TAKEAWAY_KINDS = new Set<PanelKind>(["value", "buyer_worry", "customer_worry", "looking_around", "expansion", "business_case", "critic", "alongside", "criteria", "habit"]);
 const segPct = (s: PanelStep | undefined, key: string) => s?.segments?.find((x) => x.key === key)?.num.pct ?? 0;
 /** A segment here against the same segment of the row's All cell, in words (absent without a usual). */
 function segOften(s: PanelStep | undefined, us: PanelStep | undefined, key: string) {
@@ -3151,6 +3296,8 @@ function verdictTakeaways(inp: PanelCellInput, p: PositionPanel, ctx: Ctx) {
     else if (p.kind === "buyer_worry" && s.key === "verdict") t = proceedTakeaway(segPct(s, "proceed"), segPct(s, "avoid"), segPct(s, "none"), agrees);
     else if ((p.kind === "customer_worry" || p.kind === "looking_around") && s.key === "verdict") t = keepTakeaway(segPct(s, "keep"), segPct(s, "leave"), segPct(s, "none"));
     else if (p.kind === "looking_around" && s.key === "offers" && s.here) t = offersTakeaway(s.here.pct);
+    else if (p.kind === "habit" && s.key === "habit") t = habitTakeaway(segPct(s, "stick"), segPct(s, "other"), segPct(s, "depends"), segPct(s, "nopick"));
+    else if (p.kind === "habit" && s.key === "offers" && s.here) t = suggestTakeaway(s.here.pct);
     else if (p.kind === "expansion" && s.key === "stance") t = stanceTakeaway(segPct(s, "backs"), segPct(s, "neutral"), segPct(s, "redirects"));
     else if (p.kind === "business_case" && s.key === "strength") t = caseTakeaway(segPct(s, "strong"), segPct(s, "hedged"), segPct(s, "undermined"));
     else if (p.kind === "critic" && s.key === "strength") t = criticStrengthTakeaway(segPct(s, "strong"), segPct(s, "partial"), segPct(s, "concedes"));
@@ -3369,6 +3516,13 @@ function detailOf(inp: PanelCellInput, p: PositionPanel, up: PositionPanel | und
             }
           : {}),
       };
+      return;
+    }
+    case "habit": {
+      const tag = p.steps.find((x) => x.key === "habit")?.tagUsual ?? "No clear side";
+      const side: HabitSide = /sticks with you|^Leans stick/.test(tag) ? "keeps" : /try something else|^Leans switch/.test(tag) ? "moves" : "leaves";
+      p.detail = habitDetail(tag, side);
+      habitStepDetails(inp, p, ctx);
       return;
     }
     case "criteria": {

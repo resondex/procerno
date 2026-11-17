@@ -838,3 +838,69 @@ export function tierDetail(tag: string, where: TierWhere): { heading: string; bo
           : "It seldom names you as the example of either end.";
   return { heading: HEAD[tag] ?? "Which end the AI sides with", body: join(body) };
 }
+
+/* ---------- am60: Habit (the customer who buys you out of habit) ---------- */
+export type HabitSide = "keeps" | "moves" | "leaves";
+export const HABIT_TEXT = {
+  stepLabel: "Stick with you, or try something else",
+  offersLabel: "Suggests another brand",
+  stick: "sticks with you",
+  other: "picks another brand",
+  depends: "says it depends",
+  nopick: "names no pick",
+  conditions: {
+    title: "When the AI says stick with you, and when to try something else",
+    sub: 'Share of these answers that say "stick with it if the customer..." or "try something else if...".',
+    towardTitle: "Stick with you if",
+    awayTitle: "Try something else if",
+    alsoToward: "Also said for trying something else",
+    alsoAway: "Also said for sticking with you",
+  },
+  weighs: { stick: "When it says stick with you", other: "When it picks another brand", sayStick: "say stick with you", sayOther: "pick another brand" },
+  vendor: { title: "Which AI companies say try something else most", sub: "Share of each company's answers that name another brand as the pick.", few: "No AI company names another brand as the pick often enough to size." },
+  picks: { title: "When it names a pick, who gets it", sub: "Share of the answers that name a pick.", few: "No brand is the pick often enough to size." },
+  suggested: { title: "Which brands it suggests instead", sub: "Share of these answers that suggest it. Open a rival to see how it is suggested." },
+  first: { title: "Who it suggests first", sub: "Share of the answers that suggest another brand.", few: "No brand is suggested first often enough to size." },
+  own: { title: (plural: string) => `Your own ${plural} it suggests`, sub: "Share of these answers that suggest it.", few: "It rarely names one of your own to try." },
+};
+/** The claim: whether the AI keeps a habitual customer with you or names another brand as the pick. */
+export function habitClaim(stick: PanelNum, other: PanelNum, stickAll: boolean, stickNone: boolean, otherNone: boolean): PanelText {
+  const stickPart = stickNone ? "never says stick with you" : stickAll ? F("says stick with you in every answer", stick) : join("says stick with you in ", N(stick), " of answers");
+  const otherPart = stickAll ? "" : otherNone ? " and never names another brand as the pick" : join(" and names another brand as the pick in ", N(other));
+  return join("When a customer who buys you out of habit asks whether to stick with you or try something else, the AI ", stickPart, otherPart, ".");
+}
+/** The habit step explained: heading from its takeaway, one sentence on what decides it (no number from the bars). */
+export function habitDetail(tag: string, side: HabitSide): { heading: string; body: PanelText } {
+  const HEAD: Record<string, string> = {
+    "Mostly sticks with you": "The AI mostly tells the customer to stick with you",
+    "Always sticks with you": "The AI always tells the customer to stick with you",
+    "Mostly says try something else": "The AI mostly tells the customer to try something else",
+    "Always says try something else": "The AI always tells the customer to try something else",
+    "Mostly says it depends": "The AI mostly says it depends",
+    "Always says it depends": "The AI always says it depends",
+    "Mostly names no pick": "The AI mostly names no pick",
+    "Always names no pick": "The AI always names no pick",
+    "Leans stick": "The AI leans toward sticking with you",
+    "Leans switch": "The AI leans toward trying something else",
+    "No clear side": "The AI takes no clear side between sticking and switching",
+    Split: "The AI is split between sticking and switching",
+  };
+  const body =
+    side === "keeps"
+      ? "It mostly keeps the customer with you, so the habit holds when the AI is asked."
+      : side === "moves"
+        ? "It mostly moves the customer to another brand, so asking breaks the habit."
+        : "It mostly leaves it to the customer, so what they say about themselves decides whether the habit holds.";
+  return { heading: HEAD[tag] ?? "Whether the AI keeps the habit", body: join(body) };
+}
+/** The "suggests another brand" step explained. */
+export function habitOffersDetail(size: "most" | "some" | "rarely", first?: string): { heading: string; body: PanelText } {
+  const heading = size === "most" ? "It usually suggests other brands to try" : size === "some" ? "It suggests other brands in some answers" : "It rarely suggests another brand";
+  const body =
+    size === "rarely"
+      ? "It mostly answers without naming another brand to try."
+      : first
+        ? `The customer asked whether to try something else, so naming others is expected; ${first} is the one it most often suggests first.`
+        : "The customer asked whether to try something else, so naming others is expected; no one brand is suggested first often.";
+  return { heading, body: join(body) };
+}

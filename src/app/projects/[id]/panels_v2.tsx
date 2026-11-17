@@ -62,6 +62,8 @@ const ORDER: Record<PanelKind, Block[]> = {
   critic: ["stack", "lines", "detail", "table"],
   // am59: Premium vs basic - which end, the funnel, the conditions by end, who it names at each end, what each side weighs.
   premium: ["stack", "detail", "conditions", "ends", "competitors", "weighs"],
+  // am60: Habit - the brands suggested instead live in the "suggests another brand" explanation (the looking-around pattern).
+  habit: ["stack", "detail", "conditions", "lines", "weighs"],
 };
 
 /** Head-to-head panels read the rival's side first, as the matchup is asked. */

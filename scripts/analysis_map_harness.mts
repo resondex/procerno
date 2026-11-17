@@ -35,7 +35,7 @@ const { isAllowedTag, TAKEAWAY_TAGS, CLOSE_PTS } = await import(process.cwd() + 
 const { knOf: knOfH } = await import(process.cwd() + "/src/lib/engine/panel_build.ts");
 const { cell: wilsonCell } = await import(process.cwd() + "/src/lib/engine/view_data.ts");
 /* am36: the verdict panels whose steps carry takeaways and whose explanation repeats no bar number. */
-const VERDICT_KINDS = new Set(["value", "buyer_worry", "customer_worry", "looking_around", "expansion", "business_case", "critic", "alongside", "criteria"]);
+const VERDICT_KINDS = new Set(["value", "buyer_worry", "customer_worry", "looking_around", "expansion", "business_case", "critic", "alongside", "criteria", "habit"]);
 const fsMod = await import("node:fs");
 import type { PanelNum, PositionPanel, PanelStep, PanelConditions, AnswerRef, RivalAcross } from "../src/lib/engine/analysis_types";
 
@@ -376,8 +376,11 @@ for (const project of projects) {
     const phrases = [...dataPhrases(view, data)];
     for (const [id, pos] of Object.entries(view.positions as Record<string, Position>)) {
       const p = pos.panel as PositionPanel | undefined;
-      // am59: every Premium vs basic cell now opens the new panel.
+      // am59: every Premium vs basic cell now opens the new panel. am60: every Habit cell too - only the settled
+      // "All questions" cell keeps the old panel.
       if (id.startsWith("chooses:premium:") && p?.kind !== "premium") failures.push(`${project.brand}: ${id} keeps the old panel`);
+      if (id.startsWith("doubts:repertoire:") && p?.kind !== "habit") failures.push(`${project.brand}: ${id} keeps the old panel`);
+      if (!p && id !== "settled:settled:all") failures.push(`${project.brand}: ${id} keeps the old panel`);
       if (!p) continue;
       panels++;
       // The answers a panel may show: its own, its row's (the usual and the
@@ -488,7 +491,7 @@ for (const project of projects) {
       // every stated number in a sentence opens its answers, outcomes carry their words, rows their columns.
       for (const [view, ds] of [["details", p.details], ["detailsComp", p.detailsComp]] as const) {
         if (!ds) continue;
-        if (!["buy", "switching", "problem", "popular", "premium", "learning", "h2h", "value", "buyer_worry", "customer_worry", "looking_around", "expansion", "business_case", "alongside", "critic", "criteria"].includes(p.kind)) failures.push(`${project.brand}: ${id} ${p.kind} carries ${view}`);
+        if (!["buy", "switching", "problem", "popular", "premium", "habit", "learning", "h2h", "value", "buyer_worry", "customer_worry", "looking_around", "expansion", "business_case", "alongside", "critic", "criteria"].includes(p.kind)) failures.push(`${project.brand}: ${id} ${p.kind} carries ${view}`);
         if (view === "detailsComp" && !p.compare) failures.push(`${project.brand}: ${id} detailsComp without a competitors view`);
         for (const [k, d] of Object.entries(ds)) {
           if (!d) continue;
@@ -770,6 +773,40 @@ for (const project of projects) {
           }
         }
         for (const side of ["toward", "away"] as const) for (const row of p.conditions?.[side] ?? []) if ((knOfH(row.share)?.k ?? 0) < 3) failures.push(`${project.brand}: ${id} premium condition "${row.text}" rests on fewer than 3 answers`);
+      }
+      // 6j. am60 (the habit segment keys are checked here: "depends" means worth_it on Value): Habit - the step's bars add up to the cell's answers, the pick bars show the brand they say, both
+      // explanations repeat no top-bar number and are one sentence, it starts on the habit step, and no row of the
+      // explanations' lists rests on fewer than 3 answers.
+      if (p.kind === "habit") {
+        const hs = p.steps.find((st) => st.key === "habit");
+        const cellN = (cellIds[id] ?? []).length;
+        if (!hs?.segments?.length) failures.push(`${project.brand}: ${id} habit has no habit step`);
+        else {
+          const ks = hs.segments.map((g) => knOfH(g.num));
+          if (ks.some((x) => !x || x.n !== cellN) || ks.reduce((a, x) => a + (x?.k ?? 0), 0) !== cellN) failures.push(`${project.brand}: ${id} habit bars do not add up to the cell's ${cellN} answers`);
+          for (const g of hs.segments)
+            for (const r of g.num.refs ?? []) {
+              const c = codeOf.get(r.responseId) as Code | undefined;
+              if (g.key === "stick" && !(c && picks(c, targetKey))) failures.push(`${project.brand}: ${id} habit "sticks with you" answer ${r.responseId.slice(0, 8)} does not pick you`);
+              if (g.key === "other" && !(c && c.outcome === "pick" && !!c.top_pick && !picks(c, targetKey))) failures.push(`${project.brand}: ${id} habit "picks another brand" answer ${r.responseId.slice(0, 8)} does not pick another brand`);
+              if (g.key === "depends" && c?.outcome !== "conditional") failures.push(`${project.brand}: ${id} habit "says it depends" answer ${r.responseId.slice(0, 8)} is not conditional`);
+              if (g.key === "nopick" && (c?.outcome === "pick" || c?.outcome === "conditional")) failures.push(`${project.brand}: ${id} habit "names no pick" answer ${r.responseId.slice(0, 8)} names a pick or a condition`);
+            }
+          if (!p.thin) {
+            if (p.focus !== "habit") failures.push(`${project.brand}: ${id} habit does not start on the habit step`);
+            const topBars = valuesOf(p.steps.flatMap((st) => [st.here, st.usual, ...(st.rivals ?? []).map((r) => r.num), ...(st.segments ?? []).map((g) => g.num)]));
+            for (const k of ["habit", "offers"] as const) {
+              const d = p.details?.[k];
+              if (!d) { failures.push(`${project.brand}: ${id} habit has no explanation for step ${k}`); continue; }
+              repeatChecks++;
+              repeats(d.body, topBars, `${id} habit details.${k}`);
+              const txt = d.body.map((x) => x.t).join("");
+              if ((txt.match(/[a-z]{2}\.\s+[A-Z]/g) ?? []).length) failures.push(`${project.brand}: ${id} habit details.${k} is more than one sentence`);
+              for (const sec of d.sections ?? []) for (const r of sec.rows) if ((knOfH(r.num)?.k ?? 0) < 3) failures.push(`${project.brand}: ${id} habit details.${k} "${sec.title}" row "${r.label}" rests on fewer than 3 answers`);
+            }
+          }
+        }
+        if (p.compare || p.competitors) failures.push(`${project.brand}: ${id} habit carries a competitors switch or block`);
       }
       // 7. kinds without conditions.
       if ((p.kind === "buyer_worry" || p.kind === "customer_worry" || p.kind === "value" || p.kind === "business_case") && p.conditions) failures.push(`${project.brand}: ${id} ${p.kind} carries conditions`);

@@ -412,7 +412,9 @@ export type PanelKind =
   // am31 round 2: What's popular, Learning the category, What to use alongside you, Answering a critic.
   | "popular" | "learning" | "alongside" | "critic"
   // am59: Premium vs basic.
-  | "premium";
+  | "premium"
+  // am60: Habit (repertoire).
+  | "habit";
 
 /** One piece of a sentence. A span with refs is a stated number or fact that
  * opens its answers (ruling 7); no refs = plain text. tip = counts (hover only). */
@@ -442,7 +444,8 @@ export type PanelStepKey =
   | "anybrand" | "namedwhen"               // learning: names any brand; named, when a brand is named
   | "alongside"                            // alongside: the ones it names alongside you
   | "premise"                              // critic: does it say the critic is right
-  | "tier";                                // premium: which end it sides with (premium / basic / balanced)
+  | "tier"                                 // premium: which end it sides with (premium / basic / balanced)
+  | "habit";                               // habit: stick with you, pick another brand, it depends, no pick
 
 /** A tag's sentiment: good for you, bad for you, or a neutral fact. */
 export type PanelTone = "good" | "bad" | "neutral";
