@@ -81,7 +81,7 @@ export const RULE_POOL_LABEL: Record<RulePool, string> = {
   buyer_worries: "Buyers' worries",
   customer_worries: "Customers' worries",
   expansion: "Expansion",
-  ecosystem: "Ecosystem",
+  ecosystem: "What to use alongside you",
 };
 
 /** Views that can carry rules, premium_tier first so premium_worth answers
@@ -769,7 +769,8 @@ export async function computeRules(data: ViewData, request: ViewRequest = {}, ca
 // ru1 (2026-10-30): first version - one run-wide grouping, context-judged names.
 // ru2 (2026-11-03): + the by-question slices on open choice (payload change).
 // ru3 (2026-11-03): groups carry their distinct cells and the wall test; cellsBySide (payload change).
-const RULES_VERSION = "ru4"; // ru4 (2026-11-10): the wall flag reads the shown wording under the tightened test
+// ru5 (2026-11-16): the ecosystem pool label reads "What to use alongside you" (the Map's card name; payload label change).
+const RULES_VERSION = "ru5"; // ru4 (2026-11-10): the wall flag reads the shown wording under the tightened test
 export function computeRulesCached(run: Run, project: Project, request: ViewRequest = {}): Promise<RulesView | null> {
   const r = requestOf(request);
   return cachedView("rules", RULES_VERSION, run, project, (d) => computeRules(d, r), { judge: true }, r);

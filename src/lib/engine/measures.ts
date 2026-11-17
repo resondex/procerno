@@ -127,7 +127,9 @@ export const VIEW_SCHEMAS: Record<ViewKey, readonly CodeSchema[]> = {
   settled_advocacy: ["advocacy"],
 };
 
-/** Pools in journey order, with the labels the views use. */
+/** Pools in journey order, with the labels the views use. The two settled
+ * pools carry the Map's card names (2026-11-16): "What to use alongside you"
+ * (ecosystem) and "Answering a critic" (advocacy); keys unchanged. */
 export const POOLS: readonly { key: ViewKey; label: string }[] = [
   { key: "awareness_routing", label: "Awareness - problem recognition" },
   { key: "awareness_explainer", label: "Awareness - category education" },
@@ -144,8 +146,8 @@ export const POOLS: readonly { key: ViewKey; label: string }[] = [
   { key: "repertoire", label: "Repertoire" },
   { key: "settled_business_case", label: "Business case" },
   { key: "settled_expansion", label: "Expansion" },
-  { key: "settled_ecosystem", label: "Ecosystem" },
-  { key: "settled_advocacy", label: "Advocacy" },
+  { key: "settled_ecosystem", label: "What to use alongside you" },
+  { key: "settled_advocacy", label: "Answering a critic" },
 ];
 export const POOL_LABEL = Object.fromEntries(POOLS.map((p) => [p.key, p.label])) as Record<ViewKey, string>;
 
@@ -359,8 +361,8 @@ export const MEASURES: readonly MeasureDef[] = [
   share("case_strength", ["strong"], { id: "case_strong", group: "Case strength", label: "Strong case", only: ["settled_business_case", "settled_advocacy"], tip: "Answers making a strong case for you, over every answer." }),
   share("case_strength", ["hedged"], { id: "case_hedged", group: "Case strength", label: "Hedged case", only: ["settled_business_case"], tip: "Business cases that hedge, over every answer." }),
   share("case_strength", ["undermined"], { id: "case_undermined", group: "Case strength", label: "Undermined case", only: ["settled_business_case"], tip: "Business cases the answer undermines, over every answer." }),
-  share("case_strength", ["partial"], { id: "case_partial", group: "Case strength", label: "Partial case", only: ["settled_advocacy"], tip: "Advocacy answers arming only part of the case, over every answer." }),
-  share("case_strength", ["concedes"], { id: "case_concedes", group: "Case strength", label: "Concedes to the critic", only: ["settled_advocacy"], tip: "Advocacy answers conceding the critic's point, over every answer." }),
+  share("case_strength", ["partial"], { id: "case_partial", group: "Case strength", label: "Partial case", only: ["settled_advocacy"], tip: "Answers to a critic arming only part of the case, over every answer." }),
+  share("case_strength", ["concedes"], { id: "case_concedes", group: "Case strength", label: "Concedes to the critic", only: ["settled_advocacy"], tip: "Answers to a critic conceding the critic's point, over every answer." }),
   share("growth_stance", ["backs"], { id: "growth_backs", group: "Expansion", label: "Backs growth", tip: "Answers backing growth with you, over every answer." }),
   share("growth_stance", ["neutral"], { id: "growth_neutral", group: "Expansion", label: "Neutral on growth", tip: "Answers neutral on growing with you, over every answer." }),
   share("growth_stance", ["redirects"], { id: "growth_redirects", group: "Expansion", label: "Redirects growth", tip: "Answers redirecting growth elsewhere, over every answer." }),

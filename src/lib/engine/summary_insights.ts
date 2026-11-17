@@ -17,6 +17,9 @@ import type { AnswerRef } from "./analysis_types";
 import { matchKey } from "../brand_key";
 import { ROW_NAME } from "./question_names";
 import { askedMatchupKeys, clearsMatchupGap } from "./matchup_gap";
+import type { MoveNames } from "./finding_moves";
+import { buyerPhrase, possName } from "./brief_words";
+import { condLabel } from "./panel_text";
 
 /**
  * Insight detection for the summary documents (2026-11-03): mechanical
@@ -169,6 +172,8 @@ export interface Insight {
   /** bs23 (2026-11-13): the rival an unasked_rival finding is about - the
    * Overview card's "Ask this matchup" action reads it. */
   matchup?: { key: string; name: string };
+  /** bs26 (2026-11-16): the names its Overview move fills in (finding_moves.ts; variant = which way it reads). */
+  names?: MoveNames;
 }
 
 /** One bar of a finding's small chart: value 0-100 (bar length), text the
@@ -182,6 +187,8 @@ export interface InsightBar {
    * spread across assistants - only where the detector reads a pool whose
    * numerator is a plain filter of answers. Absent otherwise (never faked). */
   refs?: AnswerRef[];
+  /** bs26 (2026-11-16): whose number it is - you (blue), a named rival (pink), anything else (grey). */
+  who?: "you" | "rival" | "other";
 }
 
 /* ------------------------- bs16: example answers ------------------------- */
@@ -369,6 +376,33 @@ const modelsOf = (s: Omit<BrandSummaryView, "insights" | "verdict">, f: (e: Omit
   s.byEngine.filter(f).map((e) => e.key);
 /** A worry's row key, as doubt.ts groups answers: stage + concern. */
 const worryKey = (r: PoolRow) => `${r.intent.stage}|${r.intent.concern ?? ""}`;
+
+/* -------- bf26: the Brief's style (third person, buyers as words, the cards' vocabulary) --------
+ * rankedInsights(s, inp, { name }) runs the same detectors with STYLE set: the served insights (STYLE null)
+ * keep the second person the Overview and the Map read; the Brief reads the same findings about its subject
+ * by name. Detectors are synchronous, so STYLE is set and restored around one run. */
+export interface InsightStyle {
+  name: string;
+}
+let STYLE: InsightStyle | null = null;
+const yo = () => (STYLE ? STYLE.name : "you");
+const yr = () => (STYLE ? possName(STYLE.name) : "your");
+const Yr = () => (STYLE ? possName(STYLE.name) : "Your");
+/** One clause in each voice: the second person as served, the third about the named subject. */
+const yt = (second: string, third: (n: string) => string) => (STYLE ? third(STYLE.name) : second);
+/** A buying situation inside a sentence (served: the label as written). */
+const buyer = (label: string) => (STYLE ? buyerPhrase(label) : label);
+/** The cards' word for an agreed worry. */
+const fairW = () => (STYLE ? "fair" : "warranted");
+/** A quoted condition: the asker's "you" is "they" in the Brief (condLabel). */
+const qc = (label: string) => (STYLE ? condLabel(label) : label);
+
+/** bf26: the Brief's "picks X ... of the time it picks one of the two", with never / always at the extremes. */
+const pickedOfTwo = (c: RateCell) =>
+  c.k === 0 ? `never picks ${yo()} when it picks one of the two` : c.k === c.n ? `always picks ${yo()} when it picks one of the two` : `picks ${yo()} ${pct(c)} of the time it picks one of the two`;
+
+/** bs26: a bar marked with whose number it is. */
+const W = (who: "you" | "rival" | "other", b: InsightBar | null | undefined | false): InsightBar | null | undefined | false => (b ? { ...b, who } : b);
 
 /** A bar with its example answers attached (when any). */
 const withRefs = (b: InsightBar | null | undefined | false, refs: AnswerRef[] | undefined): InsightBar | null | undefined | false =>
@@ -861,15 +895,16 @@ function engineSpread(s: Summary, ex?: ExampleIndex): Insight | null {
   return {
     key: "engine_spread",
     kind: "engine",
-    title: `${e.hi.label} picks you most, ${e.lo.label} least`,
-    body: `Your share of picks is ${pct(e.hi.decided)} on ${e.hi.label} but ${pct(e.lo.decided)} on ${e.lo.label}.`,
+    title: `${e.hi.label} picks ${yo()} most, ${e.lo.label} least`,
+    body: `${Yr()} share of picks is ${pct(e.hi.decided)} on ${e.hi.label} but ${pct(e.lo.decided)} on ${e.lo.label}.`,
     foot: `${e.hi.label}: ${counts(e.hi.decided)}. ${e.lo.label}: ${counts(e.lo.decided)}. Engines with fewer than ${MIN_BASE} decided answers are left out.`,
     look: { pill: "table", label: "Metrics - by engine" },
     effect: gap,
     viz: vizOf([
-      withRefs(insightBar(e.hi.label, e.hi.decided), ex?.picks(s.target.key, { models: [e.hi.key] })),
-      withRefs(insightBar(e.lo.label, e.lo.decided), ex?.picks(s.target.key, { models: [e.lo.key] })),
+      W("you", withRefs(insightBar(e.hi.label, e.hi.decided), ex?.picks(s.target.key, { models: [e.hi.key] }))),
+      W("you", withRefs(insightBar(e.lo.label, e.lo.decided), ex?.picks(s.target.key, { models: [e.lo.key] }))),
     ]),
+    names: { vendor: e.lo.label, vendor2: e.hi.label },
   };
 }
 
@@ -898,15 +933,16 @@ function modeGap(s: Summary, ex?: ExampleIndex): Insight | null {
   return {
     key: "engine_mode",
     kind: "engine",
-    title: searchWins ? "Web search helps you" : "Web search hurts you",
-    body: `With web search, your share of picks is ${pct(search.decided)}; without web search, ${pct(instinct.decided)}.`,
+    title: searchWins ? `Web search helps ${yo()}` : `Web search hurts ${yo()}`,
+    body: `With web search, ${yr()} share of picks is ${pct(search.decided)}; without web search, ${pct(instinct.decided)}.`,
     foot: `Search (${search.engines} engines): ${counts(search.decided)}. Instinct (${instinct.engines} engines): ${counts(instinct.decided)}.`,
     look: { pill: "table", label: "Metrics - by mode" },
     effect: rate(hi.decided) - rate(lo.decided),
     viz: vizOf([
-      withRefs(insightBar("With web search", search.decided), ex?.picks(s.target.key, { models: modelsOf(s, (e) => e.mode === "search") })),
-      withRefs(insightBar("Without web search", instinct.decided), ex?.picks(s.target.key, { models: modelsOf(s, (e) => e.mode === "instinct") })),
+      W("you", withRefs(insightBar("With web search", search.decided), ex?.picks(s.target.key, { models: modelsOf(s, (e) => e.mode === "search") }))),
+      W("you", withRefs(insightBar("Without web search", instinct.decided), ex?.picks(s.target.key, { models: modelsOf(s, (e) => e.mode === "instinct") }))),
     ]),
+    names: { variant: searchWins ? "helps" : "hurts" },
   };
 }
 
@@ -916,15 +952,16 @@ function vendorGap(s: Summary, ex?: ExampleIndex): Insight | null {
   return {
     key: "engine_vendor",
     kind: "engine",
-    title: `${e.hi.key} favors you most, ${e.lo.key} least`,
-    body: `Across each company's AI assistants, your share of picks is ${pct(e.hi.decided)} on ${e.hi.key} and ${pct(e.lo.decided)} on ${e.lo.key}.`,
+    title: `${e.hi.key} favors ${yo()} most, ${e.lo.key} least`,
+    body: `Across each company's AI assistants, ${yr()} share of picks is ${pct(e.hi.decided)} on ${e.hi.key} and ${pct(e.lo.decided)} on ${e.lo.key}.`,
     foot: `${e.hi.key} (${e.hi.engines} engines): ${counts(e.hi.decided)}. ${e.lo.key} (${e.lo.engines} engines): ${counts(e.lo.decided)}.`,
     look: { pill: "table", label: "Metrics - by vendor" },
     effect: rate(e.hi.decided) - rate(e.lo.decided),
     viz: vizOf([
-      withRefs(insightBar(e.hi.key, e.hi.decided), ex?.picks(s.target.key, { models: modelsOf(s, (x) => x.vendor === e.hi.key) })),
-      withRefs(insightBar(e.lo.key, e.lo.decided), ex?.picks(s.target.key, { models: modelsOf(s, (x) => x.vendor === e.lo.key) })),
+      W("you", withRefs(insightBar(e.hi.key, e.hi.decided), ex?.picks(s.target.key, { models: modelsOf(s, (x) => x.vendor === e.hi.key) }))),
+      W("you", withRefs(insightBar(e.lo.key, e.lo.decided), ex?.picks(s.target.key, { models: modelsOf(s, (x) => x.vendor === e.lo.key) }))),
     ]),
+    names: { vendor: e.lo.key, vendor2: e.hi.key },
   };
 }
 
@@ -934,15 +971,19 @@ function roomWin(inp: InsightInputs, targetKey: string): Insight | null {
   return {
     key: "room_win",
     kind: "room",
-    title: `Strongest with ${e.hi.room}, weakest with ${e.lo.room}`,
-    body: `Your share of picks is ${pct(e.hi.decided)} for ${e.hi.room} but ${pct(e.lo.decided)} for ${e.lo.room}.`,
+    title: `Strongest with ${buyer(e.hi.room)}, weakest with ${buyer(e.lo.room)}`,
+    body:
+      STYLE && e.lo.decided.k === 0
+        ? `${Yr()} share of picks is ${pct(e.hi.decided)} for ${buyer(e.hi.room)}, but it takes none of the picks for ${buyer(e.lo.room)}.`
+        : `${Yr()} share of picks is ${pct(e.hi.decided)} for ${buyer(e.hi.room)} but ${pct(e.lo.decided)} for ${buyer(e.lo.room)}.`,
     foot: `${e.hi.room}: ${counts(e.hi.decided)}. ${e.lo.room}: ${counts(e.lo.decided)}. Open-choice questions asked for each buyer; rooms under ${MIN_BASE} decided answers left out.`,
     look: { pill: "buyers", label: "Buyers" },
     effect: rate(e.hi.decided) - rate(e.lo.decided),
     viz: vizOf([
-      withRefs(insightBar(lbl(e.hi.room), e.hi.decided), inp.ex?.picks(targetKey, { room: e.hi.room })),
-      withRefs(insightBar(lbl(e.lo.room), e.lo.decided), inp.ex?.picks(targetKey, { room: e.lo.room })),
+      W("you", withRefs(insightBar(lbl(e.hi.room), e.hi.decided), inp.ex?.picks(targetKey, { room: e.hi.room }))),
+      W("you", withRefs(insightBar(lbl(e.lo.room), e.lo.decided), inp.ex?.picks(targetKey, { room: e.lo.room }))),
     ]),
+    names: { buyer: e.lo.room, buyer2: e.hi.room },
   };
 }
 
@@ -953,15 +994,19 @@ function roomValue(inp: InsightInputs, brand: string): Insight | null {
   return {
     key: "room_value",
     kind: "room",
-    title: `Worth it most for ${e.hi.label}, least for ${e.lo.label}`,
-    body: `Asked whether ${brand} is worth paying more for, the AI says yes ${pct(e.hi.worth.yes)} of the time for ${e.hi.label} and ${pct(e.lo.worth.yes)} for ${e.lo.label}.`,
+    title: `Worth it most for ${buyer(e.hi.label)}, least for ${buyer(e.lo.label)}`,
+    body:
+      STYLE && e.lo.worth.yes.k === 0
+        ? `Asked whether ${brand} is worth paying more for, the AI says yes ${pct(e.hi.worth.yes)} of the time for ${buyer(e.hi.label)} and never for ${buyer(e.lo.label)}.`
+        : `Asked whether ${brand} is worth paying more for, the AI says yes ${pct(e.hi.worth.yes)} of the time for ${buyer(e.hi.label)} and ${pct(e.lo.worth.yes)} for ${buyer(e.lo.label)}.`,
     foot: `${e.hi.label}: ${counts(e.hi.worth.yes)}. ${e.lo.label}: ${counts(e.lo.worth.yes)}.`,
     look: { pill: "stations", station: "value", label: "Stations - Value" },
     effect: rate(e.hi.worth.yes) - rate(e.lo.worth.yes),
     viz: vizOf([
-      withRefs(insightBar(lbl(e.hi.label), e.hi.worth.yes), inp.ex?.value(e.hi.key, "yes")),
-      withRefs(insightBar(lbl(e.lo.label), e.lo.worth.yes), inp.ex?.value(e.lo.key, "yes")),
+      W("you", withRefs(insightBar(lbl(e.hi.label), e.hi.worth.yes), inp.ex?.value(e.hi.key, "yes"))),
+      W("you", withRefs(insightBar(lbl(e.lo.label), e.lo.worth.yes), inp.ex?.value(e.lo.key, "yes"))),
     ]),
+    names: { buyer: e.lo.label, buyer2: e.hi.label },
   };
 }
 
@@ -973,15 +1018,16 @@ function rivalOpen(s: Summary, ex?: ExampleIndex): Insight | null {
   return {
     key: "rival_open",
     kind: "rival",
-    title: rate(top.shareOfDecided) > rate(s.target.shareOfDecided) ? `${top.name} out-picks you` : `You lead ${top.name}`,
-    body: `When buyers ask what to buy, ${top.name} takes ${pct(top.shareOfDecided)} of the picks - you take ${pct(s.target.shareOfDecided)}.`,
+    title: rate(top.shareOfDecided) > rate(s.target.shareOfDecided) ? `${top.name} out-picks ${yo()}` : yt(`You lead ${top.name}`, (n) => `${n} leads ${top.name}`),
+    body: `When buyers ask what to buy, ${top.name} takes ${pct(top.shareOfDecided)} of the picks - ${yt("you take", (n) => `${n} takes`)} ${pct(s.target.shareOfDecided)}.`,
     foot: `${top.chosen.k} picks to your ${s.target.chosen.k}, of ${s.firmPickInCategory.k} decided open-choice answers.`,
     look: { pill: "rivals", label: "Rivals" },
     effect: Math.abs(rate(top.shareOfDecided) - rate(s.target.shareOfDecided)),
     viz: vizOf([
-      withRefs(insightBar(top.name, top.shareOfDecided), ex?.picks(top.key)),
-      withRefs(insightBar(s.brand, s.target.shareOfDecided, undefined, true), ex?.picks(s.target.key)),
+      W("rival", withRefs(insightBar(top.name, top.shareOfDecided), ex?.picks(top.key))),
+      W("you", withRefs(insightBar(s.brand, s.target.shareOfDecided, undefined, true), ex?.picks(s.target.key))),
     ]),
+    names: { variant: rate(top.shareOfDecided) > rate(s.target.shareOfDecided) ? "behind" : "ahead", rival: top.name },
   };
 }
 
@@ -997,22 +1043,28 @@ function rivalHeadToHead(s: Summary, ex?: ExampleIndex): Insight | null {
       key: "rival_h2h",
       kind: "rival",
       title: `Direct matchup with ${worst.rival}`,
-      body: `Asked to choose between you and ${worst.rival}, the AI picks you ${pct(worst.winOfDecided)} of the time it picks one of you.`,
+      body: STYLE
+        ? `Asked to choose between ${yo()} and ${worst.rival}, the AI ${pickedOfTwo(worst.winOfDecided)}.`
+        : `Asked to choose between you and ${worst.rival}, the AI picks you ${pct(worst.winOfDecided)} of the time it picks one of you.`,
       foot: `${foot(worst)}. Matchups under ${MIN_BASE} decided answers left out.`,
       look: { pill: "rivals", label: "Rivals - head-to-head" },
       effect: Math.abs(rate(worst.winOfDecided) - 0.5),
       viz: h2hBars(ok, worst.key, undefined, ex),
+      names: { variant: rate(worst.winOfDecided) < 0.5 ? "lose" : "win", rival: worst.rival },
     };
   }
   return {
     key: "rival_h2h",
     kind: "rival",
     title: `Hardest direct matchup: ${worst.rival}`,
-    body: `Asked to compare you with ${worst.rival} directly, the AI picks you ${pct(worst.winOfDecided)} of the time it picks one of you; your best matchup is ${closest.rival}, at ${pct(closest.winOfDecided)}.`,
+    body: STYLE
+      ? `Asked to compare ${yo()} with ${worst.rival} directly, the AI ${pickedOfTwo(worst.winOfDecided)}; its best matchup is ${closest.rival}, at ${pct(closest.winOfDecided)}.`
+      : `Asked to compare you with ${worst.rival} directly, the AI picks you ${pct(worst.winOfDecided)} of the time it picks one of you; your best matchup is ${closest.rival}, at ${pct(closest.winOfDecided)}.`,
     foot: `${foot(worst)}. ${foot(closest)}. Matchups under ${MIN_BASE} decided answers left out.`,
     look: { pill: "rivals", label: "Rivals - head-to-head" },
     effect: Math.abs(rate(closest.winOfDecided) - rate(worst.winOfDecided)),
     viz: h2hBars(ok, worst.key, closest.key, ex),
+    names: { variant: rate(worst.winOfDecided) < 0.5 ? "lose" : "win", rival: worst.rival },
   };
 }
 
@@ -1023,7 +1075,8 @@ function h2hBars(ok: Summary["headToHead"], hardest: string, keep?: string, ex?:
   let rows = asc.slice(0, 4);
   const best = keep ? asc.find((r) => r.key === keep) : undefined;
   if (best && !rows.includes(best)) rows = [...rows.slice(0, 3), best];
-  return vizOf(rows.map((r) => withRefs(insightBar(`vs ${r.rival}`, r.winOfDecided, undefined, r.key === hardest), ex?.h2hWins({ rivalKey: r.key }))));
+  // Each bar is your win share against that rival - your number.
+  return vizOf(rows.map((r) => W("you", withRefs(insightBar(`vs ${r.rival}`, r.winOfDecided, undefined, r.key === hardest), ex?.h2hWins({ rivalKey: r.key })))));
 }
 
 function argument(s: Summary, ex?: ExampleIndex): Insight | null {
@@ -1033,15 +1086,16 @@ function argument(s: Summary, ex?: ExampleIndex): Insight | null {
   return {
     key: "argument",
     kind: "argument",
-    title: `${best.code.charAt(0).toUpperCase()}${best.code.slice(1)} comes up when you win`,
-    body: `${best.code.charAt(0).toUpperCase()}${best.code.slice(1)} comes up ${pts(best.lift)} ${best.lift >= 0 ? "more" : "less"} often in answers that pick you than in answers that pick a rival. Answers that pick a rival bring up ${worst.code} ${worst.lift <= 0 ? "more" : "less"} (${pts(worst.lift)}).`,
+    title: `${best.code.charAt(0).toUpperCase()}${best.code.slice(1)} comes up when ${yt("you win", (n) => `${n} wins`)}`,
+    body: `${best.code.charAt(0).toUpperCase()}${best.code.slice(1)} comes up ${pts(best.lift)} ${best.lift >= 0 ? "more" : "less"} often in answers that pick ${yo()} than in answers that pick a rival. Answers that pick a rival bring up ${worst.code} ${worst.lift <= 0 ? "more" : "less"} (${pts(worst.lift)}).`,
     foot: `${best.code}: ${pct(best.wins)} of ${best.wins.n} wins vs ${pct(best.others)} of ${best.others.n} rival picks. ${worst.code}: ${pct(worst.wins)} vs ${pct(worst.others)}.`,
     look: { pill: "why", label: "Why" },
     effect: best.lift - worst.lift,
     viz: vizOf([
-      withRefs(insightBar("In your picks", best.wins, undefined, true), ex?.argued(best.code, "you")),
-      withRefs(insightBar("In rivals' picks", best.others), ex?.argued(best.code, "others")),
+      W("you", withRefs(insightBar("In your picks", best.wins, undefined, true), ex?.argued(best.code, "you"))),
+      W("rival", withRefs(insightBar("In rivals' picks", best.others), ex?.argued(best.code, "others"))),
     ]),
+    names: { topic: best.code },
   };
 }
 
@@ -1052,7 +1106,7 @@ function doubtRollup(s: Summary, ex?: ExampleIndex): Insight | null {
   const raw = [b && `buyers told to go ahead ${pct(b.proceed)}`, c && `customers told to stay ${pct(c.keep)}`].filter(Boolean).join(" - ");
   const title = raw.charAt(0).toUpperCase() + raw.slice(1);
   const body = [
-    b && `When a buyer voices a worry about ${s.brand}, the AI agrees it is warranted ${pct(b.agree)} of the time it takes a side.`,
+    b && `When a buyer voices a worry about ${s.brand}, the AI agrees it is ${fairW()} ${pct(b.agree)} of the time it takes a side.`,
     c && `Customers weighing a worry are told to leave ${pct(c.leave)}.`,
   ]
     .filter(Boolean)
@@ -1077,11 +1131,12 @@ function doubtRollup(s: Summary, ex?: ExampleIndex): Insight | null {
     look: { pill: "stations", station: b ? "doubts" : "customer_base", label: b ? "Stations - Doubts" : "Stations - Customers" },
     effect,
     viz: vizOf([
-      b && withRefs(insightBar("Buyers told to go ahead", b.proceed), ex?.doubt("objections", (r) => r.code.proceed_or_avoid === "proceed")),
-      b && withRefs(insightBar("Agrees with buyers' worries", b.agree), ex?.doubt("objections", (r) => r.code.premise_verdict === "confirms")),
-      c && withRefs(insightBar("Customers told to stay", c.keep), ex?.doubt("keep", (r) => r.code.keep_or_leave === "keep")),
-      c && withRefs(insightBar("Customers told to leave", c.leave), ex?.doubt("keep", (r) => r.code.keep_or_leave === "leave")),
+      b && W("you", withRefs(insightBar("Buyers told to go ahead", b.proceed), ex?.doubt("objections", (r) => r.code.proceed_or_avoid === "proceed"))),
+      b && W("other", withRefs(insightBar("Agrees with buyers' worries", b.agree), ex?.doubt("objections", (r) => r.code.premise_verdict === "confirms"))),
+      c && W("you", withRefs(insightBar("Customers told to stay", c.keep), ex?.doubt("keep", (r) => r.code.keep_or_leave === "keep"))),
+      c && W("other", withRefs(insightBar("Customers told to leave", c.leave), ex?.doubt("keep", (r) => r.code.keep_or_leave === "leave"))),
     ]),
+    names: { variant: (c && rate(c.leave) > rate(c.keep)) || (b && rate(b.avoid) > rate(b.proceed)) ? "loses" : "holds" },
   };
 }
 
@@ -1101,18 +1156,24 @@ function doubtWorry(inp: InsightInputs): Insight | null {
   return {
     key: "doubt_worry",
     kind: "doubt",
-    title: `The worry it backs most: ${top.row.concern}`,
-    body: `When a ${top.who} raises "${top.row.concern}", the AI agrees it is warranted ${pct(top.row.premise.confirms)} of the time it takes a side - against ${pct(top.pool)} across all ${top.who}s' worries.`,
+    title: STYLE ? `The worry it agrees with most: ${top.row.concern}` : `The worry it backs most: ${top.row.concern}`,
+    body: `When a ${top.who} raises "${top.row.concern}", the AI agrees it is ${fairW()} ${
+      STYLE && top.row.premise.confirms.k === top.row.premise.confirms.n ? "every time it takes a side" : `${pct(top.row.premise.confirms)} of the time it takes a side`
+    } - against ${pct(top.pool)} across all ${top.who}s' worries.`,
     foot: `${top.row.concern}: ${counts(top.row.premise.confirms)}. All ${top.who} worries: ${counts(top.pool)}. Worries under ${MIN_BASE} judged answers left out.`,
     look: { pill: "stations", station: top.who === "buyer" ? "doubts" : "customer_base", label: top.who === "buyer" ? "Stations - Doubts" : "Stations - Customers" },
     effect: gap,
     viz: vizOf([
-      withRefs(
-        insightBar(lbl(top.row.concern), top.row.premise.confirms, undefined, true),
-        inp.ex?.doubt(top.who === "buyer" ? "objections" : "keep", (r) => worryKey(r) === top.row.key && r.code.premise_verdict === "confirms")
+      W(
+        "you",
+        withRefs(
+          insightBar(lbl(top.row.concern), top.row.premise.confirms, undefined, true),
+          inp.ex?.doubt(top.who === "buyer" ? "objections" : "keep", (r) => worryKey(r) === top.row.key && r.code.premise_verdict === "confirms")
+        )
       ),
-      withRefs(insightBar(`All ${top.who}s' worries`, top.pool), inp.ex?.doubt(top.who === "buyer" ? "objections" : "keep", (r) => r.code.premise_verdict === "confirms")),
+      W("other", withRefs(insightBar(`All ${top.who}s' worries`, top.pool), inp.ex?.doubt(top.who === "buyer" ? "objections" : "keep", (r) => r.code.premise_verdict === "confirms"))),
     ]),
+    names: { worry: top.row.concern },
   };
 }
 
@@ -1132,14 +1193,14 @@ function funnelDrop(s: Summary, ex?: ExampleIndex): Insight | null {
     key: "funnel",
     kind: "funnel",
     title: `The drop is from ${worst.from} to ${worst.to}`,
-    body: `When buyers ask what to buy, you are ${worst.from} in ${pct(worst.a)} of answers but ${worst.to} in ${worst.to === "picked" ? pctFine(worst.b) : pct(worst.b)} - the biggest step down in the funnel.`,
+    body: `When buyers ask what to buy, ${yt("you are", (n) => `${n} is`)} ${worst.from} in ${pct(worst.a)} of answers but ${worst.to} in ${worst.to === "picked" ? pctFine(worst.b) : pct(worst.b)} - the biggest step down in the funnel.`,
     foot: `Named ${counts(s.target.mentioned)}; recommended ${counts(s.target.recommended)}; picked ${counts(s.target.chosen)}.`,
     look: { pill: "stations", station: "consideration", label: "Stations - Consideration" },
     effect: drop,
     viz: vizOf([
-      withRefs(insightBar("Named", named), ex?.named(s.target.key)),
-      withRefs(insightBar("Recommended", rec, undefined, worst.to === "recommended"), ex?.recommended(s.target.key)),
-      withRefs(insightBar("Picked", picked, pctFine(picked), worst.to === "picked"), ex?.picks(s.target.key)),
+      W("you", withRefs(insightBar("Named", named), ex?.named(s.target.key))),
+      W("you", withRefs(insightBar("Recommended", rec, undefined, worst.to === "recommended"), ex?.recommended(s.target.key))),
+      W("you", withRefs(insightBar("Picked", picked, pctFine(picked), worst.to === "picked"), ex?.picks(s.target.key))),
     ]),
   };
 }
@@ -1170,16 +1231,17 @@ function promptedVsOpen(s: Summary, ex?: ExampleIndex): Insight | null {
     title: gap > 0 ? "Wins when compared directly, loses when buyers ask what to buy" : "Wins when buyers ask what to buy, loses when compared directly",
     body:
       gap > 0
-        ? `Asked to compare you with a rival directly, the AI picks you in ${pct(rec.pooled)} of matchups${hardText}, but when buyers ask what to buy you take ${pct(open)} of the picks.`
-        : `When buyers ask what to buy you take ${pct(open)} of the picks, but asked to compare you with a rival directly, the AI picks you in only ${pct(rec.pooled)} of matchups${hardText}.`,
+        ? `Asked to compare ${yo()} with a rival directly, the AI picks ${yo()} in ${pct(rec.pooled)} of matchups${hardText}, but when buyers ask what to buy ${yt("you take", (n) => `${n} takes`)} ${pct(open)} of the picks.`
+        : `When buyers ask what to buy ${yt("you take", (n) => `${n} takes`)} ${pct(open)} of the picks, but asked to compare ${yo()} with a rival directly, the AI picks ${yo()} in only ${pct(rec.pooled)} of matchups${hardText}.`,
     foot: `Head-to-heads: won ${rec.won}, lost ${rec.lost} - ${counts(rec.pooled)}${hard ? `; vs ${hard.rival} ${counts(hard.winOfDecided)}` : ""}. Open choice: ${counts(open)}.`,
     look: { pill: "stations", station: "comparison", label: "Stations - Comparison" },
     effect: Math.abs(gap),
     viz: vizOf([
-      withRefs(insightBar("Direct matchups won", rec.pooled), ex?.h2hWins()),
-      withRefs(insightBar("Share of picks when buyers ask", open, undefined, true), ex?.picks(s.target.key)),
-      hard && withRefs(insightBar(`Against ${hard.rival}`, hard.winOfDecided), ex?.h2hWins({ rivalKey: hard.key })),
+      W("you", withRefs(insightBar("Direct matchups won", rec.pooled), ex?.h2hWins())),
+      W("you", withRefs(insightBar("Share of picks when buyers ask", open, undefined, true), ex?.picks(s.target.key))),
+      hard && W("you", withRefs(insightBar(`Against ${hard.rival}`, hard.winOfDecided), ex?.h2hWins({ rivalKey: hard.key }))),
     ]),
+    names: { variant: gap > 0 ? "matchups" : "open" },
   };
 }
 
@@ -1200,16 +1262,17 @@ function pickConcentrationRoom(s: Summary, inp: InsightInputs): Insight | null {
   return {
     key: "pick_concentration_room",
     kind: "room",
-    title: `Your picks come from ${c.top.room}`,
-    body: `${pct(c.share)} of the times the AI picks ${s.brand} when buyers ask what to buy come from one buying situation, ${c.top.room} - there you take ${pct(c.top.decided)} of the picks, everywhere else ${pct(c.outside)}.`,
+    title: `${Yr()} picks come from ${buyer(c.top.room)}`,
+    body: `${pct(c.share)} of the times the AI picks ${s.brand} when buyers ask what to buy come from one buying situation, ${buyer(c.top.room)} - there ${yt("you take", (n) => `${n} takes`)} ${pct(c.top.decided)} of the picks, everywhere else ${pct(c.outside)}.`,
     foot: `${c.top.picks} of ${c.total} picks from ${c.top.room} (one of ${c.rooms} rooms). Inside: ${counts(c.top.decided)}. Outside: ${counts(c.outside)}.`,
     look: { pill: "buyers", label: "Buyers" },
     effect: c.share - 1 / c.rooms,
     viz: vizOf([
-      withRefs(insightBar(`Your picks from ${lbl(c.top.room, 32)}`, c.share, undefined, true), inp.ex?.picks(s.target.key, { room: c.top.room })),
-      withRefs(insightBar(`Share of picks there`, c.top.decided), inp.ex?.picks(s.target.key, { room: c.top.room })),
-      withRefs(insightBar("Share of picks elsewhere", c.outside), inp.ex?.picks(s.target.key, { notRoom: c.top.room })),
+      W("you", withRefs(insightBar(`Your picks from ${lbl(c.top.room, 32)}`, c.share, undefined, true), inp.ex?.picks(s.target.key, { room: c.top.room }))),
+      W("you", withRefs(insightBar(`Share of picks there`, c.top.decided), inp.ex?.picks(s.target.key, { room: c.top.room }))),
+      W("you", withRefs(insightBar("Share of picks elsewhere", c.outside), inp.ex?.picks(s.target.key, { notRoom: c.top.room }))),
     ]),
+    names: { buyer: c.top.room },
   };
 }
 
@@ -1220,6 +1283,12 @@ const shorten = (t: string, n = 80) => {
   const x = t.replace(/\s+/g, " ").trim();
   return x.length <= n ? x : `${x.slice(0, n - 1).replace(/\s+\S*$/, "").replace(/[\s.,;:!?-]+$/, "")}...`;
 };
+
+/** bs26: a quoted question is whole when it fits (every fixture question does - the longest is under 180
+ * characters); a longer one is cut at a word boundary with the ellipsis inside the quotes. It was cut at 80,
+ * mid-sentence ("What credit cards should I..."). */
+const QUOTE_MAX = 180;
+const quoteQuestion = (t: string) => shorten(t, QUOTE_MAX);
 
 /** The question (cell) a brand's picks concentrate in, for the target and the top rival. */
 function questionConcentration(s: Summary, inp: InsightInputs, key: string) {
@@ -1240,19 +1309,20 @@ function pickConcentrationQuestion(s: Summary, inp: InsightInputs): Insight | nu
   if (cands.length === 0) return null;
   const best = cands.sort((a, b) => b.c!.share - a.c!.share)[0];
   const c = best.c!;
-  const q = shorten(c.top.text);
+  const q = quoteQuestion(c.top.text);
   return {
     key: "pick_concentration_question",
     kind: "question",
-    title: best.isTarget ? "One question carries your picks" : `One question carries ${best.who}'s picks`,
-    body: `${pct(c.share)} of ${best.isTarget ? "your" : `${best.who}'s`} picks come from one question: "${q}"`,
+    title: best.isTarget ? `One question carries ${yr()} picks` : `One question carries ${best.who}'s picks`,
+    body: `${pct(c.share)} of ${best.isTarget ? yr() : `${best.who}'s`} picks come from one question: "${q}"`,
     foot: `${c.k} of ${c.total} picks of ${best.who} from this question (one of ${c.n} open-choice questions, ${c.top.answers} answers, a seed and its paraphrases pooled).`,
     look: { pill: "stations", station: "consideration", label: "Stations - Consideration" },
     effect: c.share - 1 / c.n,
     viz: vizOf([
-      withRefs(insightBar("Picks from this question", c.share, undefined, true), inp.ex?.picks(best.key, { intentId: c.top.id })),
-      insightBar("If spread evenly", 1 / c.n),
+      W(best.isTarget ? "you" : "rival", withRefs(insightBar("Picks from this question", c.share, undefined, true), inp.ex?.picks(best.key, { intentId: c.top.id }))),
+      W("other", insightBar("If spread evenly", 1 / c.n)),
     ]),
+    names: best.isTarget ? { variant: "you" } : { variant: "rival", rival: best.who },
   };
 }
 
@@ -1270,15 +1340,18 @@ function agreedYetStay(inp: InsightInputs): Insight | null {
     key: "agreed_yet_stay",
     kind: "doubt",
     title: best.who === "buyer" ? "Agrees with the worry, still says go ahead" : "Agrees with the worry, still says stay",
-    body: `When a ${best.who} raises a worry, the AI agrees it is warranted ${pct(best.confirmed)} of the time it takes a side - and in ${pct(best.given)} of those answers still tells them to ${best.verb}.`,
+    body: `When a ${best.who} raises a worry, the AI agrees it is ${fairW()} ${pct(best.confirmed)} of the time it takes a side - and in ${pct(best.given)} of those answers still tells them to ${best.verb}.`,
     foot: `Agrees: ${counts(best.confirmed)}. Of those, ${best.verb}: ${counts(best.given)}.`,
     look: { pill: "stations", station: best.who === "buyer" ? "doubts" : "customer_base", label: best.who === "buyer" ? "Stations - Doubts" : "Stations - Customers" },
     effect: rate(best.confirmed) * rate(best.given),
     viz: vizOf([
-      withRefs(insightBar("Agrees the worry is warranted", best.confirmed), inp.ex?.doubt(best.kind, (r) => r.code.premise_verdict === "confirms")),
-      withRefs(
-        insightBar(`Still told to ${best.verb}`, best.given, undefined, true),
-        inp.ex?.doubt(best.kind, (r) => r.code.premise_verdict === "confirms" && (best.kind === "objections" ? r.code.proceed_or_avoid === "proceed" : r.code.keep_or_leave === "keep"))
+      W("other", withRefs(insightBar("Agrees the worry is warranted", best.confirmed), inp.ex?.doubt(best.kind, (r) => r.code.premise_verdict === "confirms"))),
+      W(
+        "you",
+        withRefs(
+          insightBar(`Still told to ${best.verb}`, best.given, undefined, true),
+          inp.ex?.doubt(best.kind, (r) => r.code.premise_verdict === "confirms" && (best.kind === "objections" ? r.code.proceed_or_avoid === "proceed" : r.code.keep_or_leave === "keep"))
+        )
       ),
     ]),
   };
@@ -1299,12 +1372,20 @@ function taughtVsWinning(s: Summary, inp: InsightInputs): Insight | null {
   const parts: string[] = [];
   const foot: string[] = [];
   if (untaught) {
-    parts.push(`${untaught.code} comes up ${pts(untaught.lift)} more often when you win but is not among the five criteria the AI teaches buyers to weigh`);
+    parts.push(
+      STYLE
+        ? `${untaught.code} comes up ${pts(untaught.lift)} more often when ${STYLE.name} wins but is not among the five things the AI most often tells buyers to look for`
+        : `${untaught.code} comes up ${pts(untaught.lift)} more often when you win but is not among the five criteria the AI teaches buyers to weigh`
+    );
     const tr = taughtOf(untaught.code);
     foot.push(`${untaught.code}: ${pct(untaught.wins)} of wins vs ${pct(untaught.others)} of rival picks; taught in ${tr ? counts(tr) : "no"} criteria answers.`);
   }
   if (losing) {
-    parts.push(`${untaught ? "it" : "the AI"} teaches buyers to weigh ${losing.code}, which shows up more when a rival is picked (-${pts(losing.lift)})`);
+    parts.push(
+      STYLE
+        ? `${untaught ? "it" : "the AI"} tells buyers to look for ${losing.code}, which shows up more when a rival is picked (-${pts(losing.lift)})`
+        : `${untaught ? "it" : "the AI"} teaches buyers to weigh ${losing.code}, which shows up more when a rival is picked (-${pts(losing.lift)})`
+    );
     foot.push(`${losing.code}: ${pct(losing.wins)} of wins vs ${pct(losing.others)} of rival picks; taught in ${counts(taughtOf(losing.code)!)}.`);
   }
   const body = parts.join("; ");
@@ -1312,7 +1393,7 @@ function taughtVsWinning(s: Summary, inp: InsightInputs): Insight | null {
   return {
     key: "taught_vs_winning",
     kind: "argument",
-    title: untaught ? `${untaught.code} wins but is seldom taught` : `The AI teaches ${losing!.code}, which favors rivals`,
+    title: untaught ? `${untaught.code} wins but is seldom taught` : STYLE ? `The AI tells buyers to look for ${losing!.code}, which favors rivals` : `The AI teaches ${losing!.code}, which favors rivals`,
     body: `${body.charAt(0).toUpperCase()}${body.slice(1)}.`,
     foot: `${foot.join(" ")} Top five taught: ${top5.map((t) => t.code).join(", ")}.`,
     look: { pill: "why", label: "Why" },
@@ -1321,11 +1402,12 @@ function taughtVsWinning(s: Summary, inp: InsightInputs): Insight | null {
       const x = untaught ?? losing!;
       const tr = taughtOf(x.code);
       return vizOf([
-        withRefs(insightBar("In your picks", x.wins, undefined, true), inp.ex?.argued(x.code, "you")),
-        withRefs(insightBar("In rivals' picks", x.others), inp.ex?.argued(x.code, "others")),
-        tr && insightBar("In what the AI teaches buyers", tr),
+        W("you", withRefs(insightBar("In your picks", x.wins, undefined, true), inp.ex?.argued(x.code, "you"))),
+        W("rival", withRefs(insightBar("In rivals' picks", x.others), inp.ex?.argued(x.code, "others"))),
+        tr && W("other", insightBar("In what the AI teaches buyers", tr)),
       ]);
     })(),
+    names: untaught ? { variant: "untaught", topic: untaught.code } : { variant: "losing", topic: losing!.code },
   };
 }
 
@@ -1348,7 +1430,8 @@ function valueInHouse(inp: InsightInputs, brand: string): Insight | null {
     foot: `Of answers saying no or it depends: own option ${counts(v.ownRung)}; a rival ${counts(v.recommendsInstead)}.${top ? ` ${top.name}: ${top.n}.` : ""}`,
     look: { pill: "stations", station: "value", label: "Stations - Value" },
     effect: Math.abs(own - riv),
-    viz: vizOf([insightBar("Your own cheaper option", own, undefined, inHouse), insightBar("A rival", riv, undefined, !inHouse)]),
+    viz: vizOf([W("you", insightBar("Your own cheaper option", own, undefined, inHouse)), W("rival", insightBar("A rival", riv, undefined, !inHouse))]),
+    names: { variant: inHouse ? "own" : "rivals" },
   };
 }
 
@@ -1364,14 +1447,14 @@ function advocacyVsObjection(inp: InsightInputs): Insight | null {
   return {
     key: "advocacy_vs_objection",
     kind: "doubt",
-    title: "Defends you when asked, concedes when asked neutrally",
-    body: `Asked to defend the brand, the AI strengthens the case ${pct(defend)} of the time; asked about buyers' worries, it agrees they are warranted ${pct(confirms)} of the time.`,
+    title: `Defends ${yo()} when asked, concedes when asked neutrally`,
+    body: `Asked to defend the brand, the AI strengthens the case ${pct(defend)} of the time; asked about buyers' worries, it agrees they are ${fairW()} ${pct(confirms)} of the time.`,
     foot: `Advocacy: ${counts(defend)}. Buyers' worries agreed: ${counts(confirms)}.`,
     look: { pill: "stations", station: "customer_base", label: "Stations - Customers" },
     effect: Math.min(rate(defend), rate(confirms)) - 0.5,
     viz: vizOf([
-      insightBar("Makes the case when asked", defend),
-      withRefs(insightBar("Agrees with buyers' worries", confirms), inp.ex?.doubt("objections", (r) => r.code.premise_verdict === "confirms")),
+      W("you", insightBar("Makes the case when asked", defend)),
+      W("other", withRefs(insightBar("Agrees with buyers' worries", confirms), inp.ex?.doubt("objections", (r) => r.code.premise_verdict === "confirms"))),
     ]),
   };
 }
@@ -1399,16 +1482,17 @@ function leaverCapture(inp: InsightInputs): Insight | null {
     return {
       key: "leaver_capture",
       kind: "switching",
-      title: "Rivals' customers come to you",
-      body: `When a rival's customer asks what to switch to, the AI picks you in ${pct(t.captured)} of answers - you take ${pct(you.shareOfDecided)} of the picks${src ? ` - most often for customers leaving ${src.rival}, at ${pct(src.captured)}` : ""}.`,
+      title: `Rivals' customers come to ${yo()}`,
+      body: `When a rival's customer asks what to switch to, the AI picks ${yo()} in ${pct(t.captured)} of answers - ${yt("you take", (n) => `${n} takes`)} ${pct(you.shareOfDecided)} of the picks${src ? ` - most often for customers leaving ${src.rival}, at ${pct(src.captured)}` : ""}.`,
       foot: `Picked ${counts(t.captured)}; of the switching customers' picks ${counts(you.shareOfDecided)}.${second ? ` Next: ${second.name}, ${second.chosen.k}.` : ""}${src ? ` Leaving ${src.rival}: ${counts(src.captured)}.` : ""}`,
       look: { pill: "stations", station: "comparison", label: "Stations - Comparison" },
       effect: rate(you.shareOfDecided) - 1 / takers.length,
       viz: vizOf([
-        insightBar("Picked", t.captured),
-        insightBar("Share of the picks", you.shareOfDecided, undefined, true),
-        src && insightBar(`Leaving ${src.rival}`, src.captured),
+        W("you", insightBar("Picked", t.captured)),
+        W("you", insightBar("Share of the picks", you.shareOfDecided, undefined, true)),
+        src && W("you", insightBar(`Leaving ${src.rival}`, src.captured)),
       ]),
+      names: { variant: "capture", ...(src ? { rival: src.rival } : {}) },
     };
   }
   // Tension: leavers hear about you and are almost never told to take you.
@@ -1417,12 +1501,15 @@ function leaverCapture(inp: InsightInputs): Insight | null {
     return {
       key: "leaver_capture",
       kind: "switching",
-      title: "Rivals' customers hear about you, then go elsewhere",
-      body: `When a rival's customer asks what to switch to, the AI names you in ${pct(t.named)} of answers and recommends you in ${pct(t.recommended)}, but picks you in ${pct(t.captured)}${other ? ` - ${other.name} takes the most, ${pct(other.shareOfDecided)} of the picks` : ""}.`,
+      title: `Rivals' customers hear about ${yo()}, then go elsewhere`,
+      body: `When a rival's customer asks what to switch to, the AI names ${yo()} in ${pct(t.named)} of answers and recommends ${STYLE ? "it" : "you"} in ${pct(t.recommended)}, but ${
+        STYLE && t.captured.k === 0 ? "never picks it" : `picks ${STYLE ? "it" : "you"} in ${pct(t.captured)}`
+      }${other ? ` - ${other.name} takes the most, ${pct(other.shareOfDecided)} of the picks` : ""}.`,
       foot: `Named ${counts(t.named)}; recommended ${counts(t.recommended)}; picked ${counts(t.captured)}.${other ? ` ${other.name}: ${other.chosen.k} of ${other.shareOfDecided.n} decided.` : ""}`,
       look: { pill: "stations", station: "comparison", label: "Stations - Comparison" },
       effect: rate(t.named) - rate(t.captured),
-      viz: vizOf([insightBar("Named", t.named), insightBar("Recommended", t.recommended), insightBar("Picked", t.captured, undefined, true)]),
+      viz: vizOf([W("you", insightBar("Named", t.named)), W("you", insightBar("Recommended", t.recommended)), W("you", insightBar("Picked", t.captured, undefined, true))]),
+      names: { variant: "miss", ...(other ? { rival: other.name } : {}) },
     };
   }
   return null;
@@ -1442,17 +1529,20 @@ function ownDefense(inp: InsightInputs): Insight | null {
   return {
     key: "own_defense",
     kind: "switching",
-    title: `${who} ${names.length === 1 ? "is the exit" : "are the exits"} shown to your customers`,
-    body: `Asked what else to consider, your own customers ${
+    title: `${who} ${names.length === 1 ? "is the exit" : "are the exits"} shown to ${yr()} customers`,
+    body: `Asked what else to consider, ${yr()} own customers ${
       keep.k === 0 && d.verdicts.leave.k === 0
         ? `are never told to stay or to leave,`
-        : `are told to stay in ${pct(keep)} of answers and to leave in ${pct(d.verdicts.leave)}, the AI takes no side in ${pct(d.verdicts.undecided)},`
+        : STYLE && keep.k === 0
+          ? `are never told to stay, are told to leave in ${pct(d.verdicts.leave)} of answers, the AI takes no side in ${pct(d.verdicts.undecided)},`
+          : `are told to stay in ${pct(keep)} of answers and to leave in ${pct(d.verdicts.leave)}, the AI takes no side in ${pct(d.verdicts.undecided)},`
     } and ${names.length === 1 ? `${who} appears in ${pct(top.offered)}` : `${who} each appear in at least ${pct(tied[tied.length - 1].offered)}`}.`,
     foot: `Stay ${counts(keep)}; leave ${counts(d.verdicts.leave)}; no side ${counts(d.verdicts.undecided)}; another brand shown ${counts(d.offersExit)}; ${tied.map((x) => `${x.name} ${x.offered.k} (${x.onKeep} on stay answers)`).join("; ")}.`,
     look: { pill: "stations", station: "customer_base", label: "Stations - Customers" },
     // One rival as the default exit, held down by how often the AI still says stay.
     effect: Math.min(rate(top.offered), 1 - rate(keep)) - 0.5,
-    viz: vizOf([insightBar("Told to stay", keep, undefined, true), ...tied.map((x) => insightBar(`${x.name} shown`, x.offered))]),
+    viz: vizOf([W("you", insightBar("Told to stay", keep, undefined, true)), ...tied.map((x) => W("rival", insightBar(`${x.name} shown`, x.offered)))]),
+    names: { rival: who },
   };
 }
 
@@ -1478,7 +1568,7 @@ function awayCondition(s: Summary, inp: InsightInputs): Insight | null {
     const b = s.brands.find((x) => x.key === g.names!.key);
     const share = b ? b.shareOfDecided : cell(0, s.firmPickInCategory.k);
     if (rate(share) < BLOCKER_SHARE) {
-      blocker = `. It names ${g.names.name}, a brand with ${pct(share)} of the picks when buyers ask what to buy, so it blocks you without winning for it`;
+      blocker = `. It names ${g.names.name}, a brand with ${pct(share)} of the picks when buyers ask what to buy, so it blocks ${yo()} without winning for it`;
       blockerFoot = ` ${g.names.name} in the open choice: ${counts(share)}.`;
     }
   }
@@ -1490,7 +1580,7 @@ function awayCondition(s: Summary, inp: InsightInputs): Insight | null {
       ? ""
       : " - a situation the buyer is already in, not an argument to answer"
     : laterWall
-      ? `; the largest fixed situation among them, "${shorten(laterWall.label, 60)}", comes up in ${pct(laterWall.cells / a.cells)} of them - a situation the buyer is already in, not an argument to answer`
+      ? `; the largest fixed situation among them, "${qc(shorten(laterWall.label, 60))}", comes up in ${pct(laterWall.cells / a.cells)} of them - a situation the buyer is already in, not an argument to answer`
       : "";
   const wallFoot = laterWall ? ` "${laterWall.label}": at least ${laterWall.rules} rules across ${laterWall.cells} questions.` : "";
   const toFoot = to ? `; to ${to.name} ${to.n}` : "";
@@ -1498,12 +1588,14 @@ function awayCondition(s: Summary, inp: InsightInputs): Insight | null {
   return {
     key: "away_condition",
     kind: "condition",
-    title: g.wall ? `A fixed situation sends buyers away: "${shorten(g.label, 60)}"` : `What sends buyers away most: "${shorten(g.label, 60)}"`,
-    body: `The condition that most often sends buyers away from you is "${shorten(g.label)}"${to ? `, and the AI sends them to ${to.name}` : ""}; it comes up in ${pct(spread)} of the questions where the AI gives any condition that sends buyers away${blocker}${wall}.`,
+    title: g.wall ? `A fixed situation sends buyers away: "${qc(shorten(g.label, 60))}"` : `What sends buyers away most: "${qc(shorten(g.label, 60))}"`,
+    body: `The condition that most often sends buyers away from ${yo()} is "${qc(shorten(g.label))}"${to ? `, and the AI sends them to ${to.name}` : ""}; it comes up in ${pct(spread)} of the questions where the AI gives any condition that sends buyers away${blocker}${wall}.`,
     foot: `At least ${g.rules} rules in ${g.answers} answers across ${g.cells} of ${a.cells} questions where the AI gives a condition that sends buyers away${toFoot}.${blockerFoot}${wallFoot} ${lower}`,
     look: { pill: "why", label: "Why - decision rules" },
     effect: spread,
-    viz: vizOf(a.groups.map((x, i) => insightBar(lbl(x.label, 40), x.cells / a.cells, undefined, i === 0))),
+    // Each bar is a condition that sends buyers to someone else - the rivals' side.
+    viz: vizOf(a.groups.map((x, i) => W("rival", insightBar(lbl(x.label, 40), x.cells / a.cells, undefined, i === 0)))),
+    names: { variant: g.wall ? "fixed" : "argument", condition: shorten(g.label, 60), ...(to ? { rival: to.name } : {}) },
   };
 }
 
@@ -1578,8 +1670,8 @@ function awayConditionThemed(s: Summary, a: NonNullable<InsightInputs["away"]>, 
   let blockerFoot = "";
   if (bk) {
     const g = bk.group;
-    const who = sameWords(g.label, lead.wording) ? "That wording" : `One wording, "${shorten(g.label)}",`;
-    blocker = ` ${who} names ${g.names!.name}, a brand with ${pct(bk.share)} of the picks when buyers ask what to buy, so it blocks you without winning for it; on its own it comes up in ${ansOf(g)} ${aPhrase}.`;
+    const who = sameWords(g.label, lead.wording) ? "That wording" : `One wording, "${qc(shorten(g.label))}",`;
+    blocker = ` ${who} names ${g.names!.name}, a brand with ${pct(bk.share)} of the picks when buyers ask what to buy, so it blocks ${yo()} without winning for it; on its own it comes up in ${ansOf(g)} ${aPhrase}.`;
     blockerFoot = ` "${g.label}": ${g.answers} of the ${lead.base} answers; ${g.names!.name} when buyers ask what to buy: ${counts(bk.share)}.`;
   }
   // bs21: a fixed situation worded the same as the lead's quoted wording is
@@ -1589,18 +1681,19 @@ function awayConditionThemed(s: Summary, a: NonNullable<InsightInputs["away"]>, 
     w && fold
       ? ` That wording is a situation the buyer is already in, not an argument to answer${ansOf(w) === pctShare(sh) ? "" : `; on its own it comes up in ${ansOf(w)} of those answers`}.`
       : "";
-  const fixed = w && !fold ? ` The largest fixed situation, "${shorten(w.label, 60)}", comes up in ${ansOf(w)} ${aPhrase} - a situation the buyer is already in, not an argument to answer.` : "";
+  const fixed = w && !fold ? ` The largest fixed situation, "${qc(shorten(w.label, 60))}", comes up in ${ansOf(w)} ${aPhrase} - a situation the buyer is already in, not an argument to answer.` : "";
   const fixedFoot = w ? ` "${w.label}": ${w.answers} of the ${lead.base} answers.` : "";
-  const put = sameWords(lead.wording, lead.label) ? "" : `, most often put as "${shorten(lead.wording)}"`;
+  const put = sameWords(lead.wording, lead.label) ? "" : `, most often put as "${qc(shorten(lead.wording))}"`;
   return {
     key: "away_condition",
     kind: "condition",
-    title: lead.wall ? `A fixed situation sends buyers away: "${shorten(lead.label, 60)}"` : `What sends buyers away most: "${shorten(lead.label, 60)}"`,
-    body: `The condition that most often sends buyers away from you is "${shorten(lead.label)}"${dest ? `, and the AI sends them ${destPhrase(dest)}` : ""}: it comes up in ${pctShare(sh)} ${aPhrase}${put}.${fixedFold}${blocker}${fixed}`,
+    title: lead.wall ? `A fixed situation sends buyers away: "${qc(shorten(lead.label, 60))}"` : `What sends buyers away most: "${qc(shorten(lead.label, 60))}"`,
+    body: `The condition that most often sends buyers away from ${yo()} is "${qc(shorten(lead.label))}"${dest ? `, and the AI sends them ${destPhrase(dest)}` : ""}: it comes up in ${pctShare(sh)} ${aPhrase}${put}.${fixedFold}${blocker}${fixed}`,
     foot: `${lead.answers} of ${lead.base} answers that give a condition for choosing someone else state "${lead.label}"${to ? `; ${to.n} of them send buyers to ${to.name}` : ""}.${blockerFoot}${fixedFoot} Counts leave out wordings only one answer states.`,
     look: { pill: "why", label: "Why - decision rules" },
     effect: sh,
-    viz: vizOf(lead.top.map((x, i) => insightBar(lbl(x.label, 40), x.answers / lead.base, undefined, i === 0))),
+    viz: vizOf(lead.top.map((x, i) => W("rival", insightBar(lbl(x.label, 40), x.answers / lead.base, undefined, i === 0)))),
+    names: { variant: lead.wall ? "fixed" : "argument", condition: shorten(lead.label, 60), ...(dest ? { rival: listNames(dest.names) } : {}) },
   };
 }
 
@@ -1622,18 +1715,20 @@ function assignedException(s: Summary, inp: InsightInputs): Insight | null {
   if (g.themed) {
     // bs20: counted on the run's reason themes - the theme by name, one wording inside it.
     const where = one ? "" : most ? `, most of all against ${most[0]}` : "";
-    const put = g.wording && !sameWords(g.wording, g.label) ? ` It is most often put as "${shorten(g.wording)}".` : "";
+    const put = g.wording && !sameWords(g.wording, g.label) ? ` It is most often put as "${qc(shorten(g.wording))}".` : "";
     const fixed = g.wall ? " That is a situation the buyer is already in, not something to argue for." : "";
     const open = e.open ? ` When buyers ask what to buy and the AI picks someone else, it still gives a case for ${s.brand} in ${pct(e.open)} of those answers.` : "";
     return {
       key: "assigned_exception",
       kind: "condition",
-      title: one ? `You lose to ${e.matchups[0].name} with one exception` : "You lose these matchups with one exception",
-      body: `When the AI picks ${one ? e.matchups[0].name : "a rival"} over ${s.brand} in a direct matchup, its most common exception is "${shorten(g.label)}" - stated in ${pctShare(sh)} of those answers${where}.${put}${fixed}${open}`,
+      title: one ? yt(`You lose to ${e.matchups[0].name} with one exception`, (n) => `${n} loses to ${e.matchups[0].name} with one exception`) : yt("You lose these matchups with one exception", (n) => `${n} loses these matchups with one exception`),
+      body: `When the AI picks ${one ? e.matchups[0].name : "a rival"} over ${s.brand} in a direct matchup, its most common exception is "${qc(shorten(g.label))}" - stated in ${pctShare(sh)} of those answers${where}.${put}${fixed}${open}`,
       foot: `${g.answers} of ${e.lost} answers that pick the rival in the matchups you lose (${e.matchups.map((m) => `${m.name} ${m.lost}`).join(", ")}); ${e.any} of them state any case for you.${e.open ? ` When buyers ask what to buy: ${counts(e.open)}.` : ""} Counts leave out wordings only one answer states.`,
       look: { pill: "why", label: "Why - decision rules" },
       effect: sh,
-      viz: vizOf(e.groups.map((x, i) => withRefs(insightBar(lbl(x.label, 40), x.answers / e.lost, undefined, i === 0), x.refs))),
+      // Each bar is a case the AI still gives for you - your side.
+      viz: vizOf(e.groups.map((x, i) => W("you", withRefs(insightBar(lbl(x.label, 40), x.answers / e.lost, undefined, i === 0), x.refs)))),
+      names: one ? { rival: e.matchups[0].name } : most ? { rival: most[0] } : {},
     };
   }
   const where = one ? "" : most ? `, most of all against ${most[0]}` : "";
@@ -1642,12 +1737,13 @@ function assignedException(s: Summary, inp: InsightInputs): Insight | null {
   return {
     key: "assigned_exception",
     kind: "condition",
-    title: one ? `You lose to ${e.matchups[0].name} with one exception` : "You lose these matchups with one exception",
-    body: `When the AI picks ${one ? e.matchups[0].name : "a rival"} over ${s.brand} in a direct matchup, its most common exception is "${shorten(g.label)}" - stated in ${pctShare(sh)} of those answers${where}.${fixed}${open}`,
+    title: one ? yt(`You lose to ${e.matchups[0].name} with one exception`, (n) => `${n} loses to ${e.matchups[0].name} with one exception`) : yt("You lose these matchups with one exception", (n) => `${n} loses these matchups with one exception`),
+    body: `When the AI picks ${one ? e.matchups[0].name : "a rival"} over ${s.brand} in a direct matchup, its most common exception is "${qc(shorten(g.label))}" - stated in ${pctShare(sh)} of those answers${where}.${fixed}${open}`,
     foot: `${g.answers} of ${e.lost} answers that pick the rival in the matchups you lose (${e.matchups.map((m) => `${m.name} ${m.lost}`).join(", ")}); ${e.any} of them state any case for you.${e.open ? ` Open choice: ${counts(e.open)}.` : ""} Counts are lower bounds: wordings the grouping did not join are left out.`,
     look: { pill: "why", label: "Why - decision rules" },
     effect: sh,
-    viz: vizOf(e.groups.map((x, i) => withRefs(insightBar(lbl(x.label, 40), x.answers / e.lost, undefined, i === 0), x.refs))),
+    viz: vizOf(e.groups.map((x, i) => W("you", withRefs(insightBar(lbl(x.label, 40), x.answers / e.lost, undefined, i === 0), x.refs)))),
+    names: one ? { rival: e.matchups[0].name } : most ? { rival: most[0] } : {},
   };
 }
 
@@ -1675,20 +1771,22 @@ function engineDecisiveness(s: Summary, ex?: ExampleIndex): Insight | null {
   const tail = !shareOk
     ? "."
     : shareApart
-      ? `, and your share of those picks is ${pct(se.decided)} with web search and ${pct(ins.decided)} without.`
-      : ` - your share of those picks does not separate (${pct(se.decided)} with web search vs ${pct(ins.decided)} without), so the gap is how often the AI commits, not who it prefers.`;
+      ? `, and ${yr()} share of those picks is ${pct(se.decided)} with web search and ${pct(ins.decided)} without.`
+      : ` - ${yr()} share of those picks does not separate (${pct(se.decided)} with web search vs ${pct(ins.decided)} without), so the gap is how often the AI commits, not who it prefers.`;
   return {
     key: "engine_decisiveness",
     kind: "engine",
     title: `${hiName.charAt(0).toUpperCase()}${hiName.slice(1)}, the AI commits to a pick more often`,
-    body: `When buyers ask what to buy, the AI commits to one brand in your category in ${pct(hi.firm)} of answers ${hiName} and ${pct(lo.firm)} ${loName}${tail}`,
+    body: `When buyers ask what to buy, the AI commits to one brand in ${STYLE ? "the" : "your"} category in ${pct(hi.firm)} of answers ${hiName} and ${pct(lo.firm)} ${loName}${tail}`,
     foot: `Search (${se.engines} engines): firm pick ${counts(se.firm)}, yours ${counts(se.decided)}. Instinct (${ins.engines} engines): firm pick ${counts(ins.firm)}, yours ${counts(ins.decided)}.`,
     look: { pill: "table", label: "Metrics - by mode" },
     effect: rate(hi.firm) - rate(lo.firm),
     viz: vizOf([
-      withRefs(insightBar(hiName.charAt(0).toUpperCase() + hiName.slice(1), hi.firm), ex?.picks(null, { models: modelsOf(s, (e) => e.mode === (hi === se ? "search" : "instinct")) })),
-      withRefs(insightBar(loName.charAt(0).toUpperCase() + loName.slice(1), lo.firm), ex?.picks(null, { models: modelsOf(s, (e) => e.mode === (hi === se ? "instinct" : "search")) })),
+      // How often the AI commits at all - any brand's pick, nobody's number.
+      W("other", withRefs(insightBar(hiName.charAt(0).toUpperCase() + hiName.slice(1), hi.firm), ex?.picks(null, { models: modelsOf(s, (e) => e.mode === (hi === se ? "search" : "instinct")) }))),
+      W("other", withRefs(insightBar(loName.charAt(0).toUpperCase() + loName.slice(1), lo.firm), ex?.picks(null, { models: modelsOf(s, (e) => e.mode === (hi === se ? "instinct" : "search")) }))),
     ]),
+    names: { mode: hiName },
   };
 }
 
@@ -1708,16 +1806,16 @@ function engineHeadToHeadFlip(s: Summary, ex?: ExampleIndex): Insight | null {
   return {
     key: "engine_h2h_flip",
     kind: "engine",
-    title: h2hHi === "search" ? "With web search the AI backs you in direct matchups, not when buyers ask what to buy" : "Without web search the AI backs you in direct matchups, not when buyers ask what to buy",
-    body: `Asked to compare you with a rival directly, the AI picks you in ${pct(se.h2h)} of matchups with web search and ${pct(ins.h2h)} without, while your share of picks when buyers ask what to buy is ${pct(se.decided)} with web search and ${pct(ins.decided)} without - the two run in opposite order.`,
+    title: `${h2hHi === "search" ? "With" : "Without"} web search the AI backs ${yo()} in direct matchups, not when buyers ask what to buy`,
+    body: `Asked to compare ${yo()} with a rival directly, the AI picks ${yo()} in ${pct(se.h2h)} of matchups with web search and ${pct(ins.h2h)} without, while ${yr()} share of picks when buyers ask what to buy is ${pct(se.decided)} with web search and ${pct(ins.decided)} without - the two run in opposite order.`,
     foot: `Head-to-heads: search ${counts(se.h2h)}, instinct ${counts(ins.h2h)}. Open choice: search ${counts(se.decided)}, instinct ${counts(ins.decided)}.`,
     look: { pill: "table", label: "Metrics - by mode" },
     effect: Math.abs(h2hGap),
     viz: vizOf([
-      withRefs(insightBar("Matchups, with web search", se.h2h), ex?.h2hWins({ models: modelsOf(s, (e) => e.mode === "search") })),
-      withRefs(insightBar("Matchups, without web search", ins.h2h), ex?.h2hWins({ models: modelsOf(s, (e) => e.mode === "instinct") })),
-      withRefs(insightBar("Picks, with web search", se.decided), ex?.picks(s.target.key, { models: modelsOf(s, (e) => e.mode === "search") })),
-      withRefs(insightBar("Picks, without web search", ins.decided), ex?.picks(s.target.key, { models: modelsOf(s, (e) => e.mode === "instinct") })),
+      W("you", withRefs(insightBar("Matchups, with web search", se.h2h), ex?.h2hWins({ models: modelsOf(s, (e) => e.mode === "search") }))),
+      W("you", withRefs(insightBar("Matchups, without web search", ins.h2h), ex?.h2hWins({ models: modelsOf(s, (e) => e.mode === "instinct") }))),
+      W("you", withRefs(insightBar("Picks, with web search", se.decided), ex?.picks(s.target.key, { models: modelsOf(s, (e) => e.mode === "search") }))),
+      W("you", withRefs(insightBar("Picks, without web search", ins.decided), ex?.picks(s.target.key, { models: modelsOf(s, (e) => e.mode === "instinct") }))),
     ]),
   };
 }
@@ -1764,20 +1862,21 @@ function enginePickConcentration(s: Summary, inp: InsightInputs): Insight | null
   const best = cands.sort(
     (a, b) => rate(b.picks) - b.base - (rate(a.picks) - a.base) || b.picks.n - a.picks.n || a.name.localeCompare(b.name)
   )[0];
-  const whose = best.isTarget ? "your" : poss(best.name);
+  const whose = best.isTarget ? yr() : poss(best.name);
   const unit = best.unit.vendor ? `${best.unit.label}'s ${best.unit.models.length} assistants` : best.unit.label;
   return {
     key: "engine_pick_concentration",
     kind: "engine",
     title: `${best.unit.label} carries ${whose} picks`,
-    body: `${unit} supply ${pct(best.picks)} of ${whose} picks while answering ${pct(best.base)} of the questions - a read without ${best.unit.vendor ? "them" : "it"} would put ${best.isTarget ? "you" : best.name} far lower.`,
+    body: `${unit} supply ${pct(best.picks)} of ${whose} picks while answering ${pct(best.base)} of the questions - a read without ${best.unit.vendor ? "them" : "it"} would put ${best.isTarget ? yo() : best.name} far lower.`,
     foot: `${best.picks.k} of ${best.picks.n} open-choice picks of ${best.name} (95% range ${Math.round(best.picks.low * 100)}-${Math.round(best.picks.high * 100)}%) from ${unit}, which answer ${best.unit.answers} of ${s.answers} open-choice questions.`,
     look: { pill: "table", label: best.unit.vendor ? "Metrics - by vendor" : "Metrics - by engine" },
     effect: rate(best.picks) - best.base,
     viz: vizOf([
-      withRefs(insightBar(`Picks from ${best.unit.label}`, best.picks, undefined, true), inp.ex?.picks(best.key, { models: best.unit.models })),
-      insightBar("Questions it answers", best.base),
+      W(best.isTarget ? "you" : "rival", withRefs(insightBar(`Picks from ${best.unit.label}`, best.picks, undefined, true), inp.ex?.picks(best.key, { models: best.unit.models }))),
+      W("other", insightBar("Questions it answers", best.base)),
     ]),
+    names: best.isTarget ? { variant: "you", vendor: best.unit.label } : { variant: "rival", vendor: best.unit.label, rival: best.name },
   };
 }
 
@@ -1835,7 +1934,7 @@ function vendorMeasures(inp: InsightInputs, brand: string): VendorMeasure[] {
     out.push({
       ...base,
       id: "keep",
-      says: (c, a, b) => `Asked by your customers whether to stay, ${c} says stay in ${a} of answers; the other AI assistants together, ${b}.`,
+      says: (c, a, b) => `Asked by ${yr()} customers whether to stay, ${c} says stay in ${a} of answers; the other AI assistants together, ${b}.`,
       bar: "say stay",
       slices: byVendor(k.byEngine, (s) => s.verdicts.keep),
       refs: (models) => inp.ex?.doubt("keep", (r) => models.includes(r.model) && r.code.keep_or_leave === "keep"),
@@ -1843,7 +1942,7 @@ function vendorMeasures(inp: InsightInputs, brand: string): VendorMeasure[] {
     out.push({
       ...base,
       id: "leave",
-      says: (c, a, b) => `Asked by your customers whether to stay, ${c} says leave in ${a} of answers; the other AI assistants together, ${b}.`,
+      says: (c, a, b) => `Asked by ${yr()} customers whether to stay, ${c} says leave in ${a} of answers; the other AI assistants together, ${b}.`,
       bar: "say leave",
       slices: byVendor(k.byEngine, (s) => s.verdicts.leave),
       refs: (models) => inp.ex?.doubt("keep", (r) => models.includes(r.model) && r.code.keep_or_leave === "leave"),
@@ -1896,7 +1995,7 @@ function vendorMeasures(inp: InsightInputs, brand: string): VendorMeasure[] {
       row: lower(ROW_NAME.leavers),
       station: "comparison",
       stationLabel: "Stations - Comparison",
-      says: (c, a, b) => `When a rival's customer asks what to switch to, ${c} picks you in ${a} of answers; the other AI assistants together, ${b}.`,
+      says: (c, a, b) => `When a rival's customer asks what to switch to, ${c} picks ${yo()} in ${a} of answers; the other AI assistants together, ${b}.`,
       bar: "pick you",
       slices: byVendor(off.byEngine, (s) => s.captured),
     });
@@ -1907,7 +2006,7 @@ function vendorMeasures(inp: InsightInputs, brand: string): VendorMeasure[] {
       row: lower(ROW_NAME.hold),
       station: "customer_base",
       stationLabel: "Stations - Customers",
-      says: (c, a, b) => `When your own customers ask what else to consider, ${c} tells them to stay in ${a} of answers; the other AI assistants together, ${b}.`,
+      says: (c, a, b) => `When ${yr()} own customers ask what else to consider, ${c} tells them to stay in ${a} of answers; the other AI assistants together, ${b}.`,
       bar: "say stay",
       slices: byVendor(def.byEngine, (s) => s.verdicts.keep),
     });
@@ -1963,9 +2062,10 @@ function vendorOutlier(inp: InsightInputs, brand: string): Insight | null {
     look: { pill: "stations", station: m.station, label: m.stationLabel },
     effect: Math.abs(best.gap),
     viz: vizOf([
-      withRefs(insightBar(`${best.vendor} - ${m.bar}`, best.own, undefined, true), m.refs?.(best.models)),
-      insightBar(`The others - ${m.bar}`, best.rest),
+      W("you", withRefs(insightBar(`${best.vendor} - ${m.bar}`, best.own, undefined, true), m.refs?.(best.models))),
+      W("other", insightBar(`The others - ${m.bar}`, best.rest)),
     ]),
+    names: { vendor: best.vendor, question: m.row },
   };
 }
 
@@ -2002,17 +2102,22 @@ function neutralizedDifferentiator(inp: InsightInputs): Insight | null {
   return {
     key: "neutralized_differentiator",
     kind: "argument",
-    title: best.above ? `Your rivals are credited with ${best.code}` : `${cap(best.code)} no longer sets you apart`,
-    body: best.above
-      ? `${cap(best.code)} is argued in ${pct(best.w)} of the direct matchups you win but ${pct(best.l)} of those you lose${rivalText} - the AI credits your rivals with it more than you.`
-      : `${cap(best.code)} is argued in ${pct(best.w)} of the direct matchups you win and ${pct(best.l)} of those you lose${rivalText} - it comes up in your rivals' wins as often as in yours.`,
+    title: best.above ? `${Yr()} rivals are credited with ${best.code}` : `${cap(best.code)} no longer sets ${yo()} apart`,
+    body: STYLE
+      ? best.above
+        ? `${cap(best.code)} is argued in ${pct(best.w)} of the direct matchups ${STYLE.name} wins but ${pct(best.l)} of those it loses${rivalText} - the AI credits its rivals with it more than ${STYLE.name}.`
+        : `${cap(best.code)} is argued in ${pct(best.w)} of the direct matchups ${STYLE.name} wins and ${pct(best.l)} of those it loses${rivalText} - it comes up in its rivals' wins as often as in its own.`
+      : best.above
+        ? `${cap(best.code)} is argued in ${pct(best.w)} of the direct matchups you win but ${pct(best.l)} of those you lose${rivalText} - the AI credits your rivals with it more than you.`
+        : `${cap(best.code)} is argued in ${pct(best.w)} of the direct matchups you win and ${pct(best.l)} of those you lose${rivalText} - it comes up in your rivals' wins as often as in yours.`,
     foot: `In wins: ${counts(best.w)}. In losses: ${counts(best.l)}${rival ? `; ${rivalLosses} of those losses to ${rival}` : ""}. Prompted head-to-heads against every named rival, pooled; arguments in under ${Math.round(ND_WIN_SHARE * 100)}% of wins left out.`,
     look: { pill: "stations", station: "comparison", label: "Stations - Comparison" },
     effect: rate(best.l) - rate(best.w),
     viz: vizOf([
-      withRefs(insightBar("In matchups you win", best.w), inp.ex?.h2hArg(best.code, "wins")),
-      withRefs(insightBar("In matchups you lose", best.l, undefined, true), inp.ex?.h2hArg(best.code, "losses")),
+      W("you", withRefs(insightBar("In matchups you win", best.w), inp.ex?.h2hArg(best.code, "wins"))),
+      W("rival", withRefs(insightBar("In matchups you lose", best.l, undefined, true), inp.ex?.h2hArg(best.code, "losses"))),
     ]),
+    names: { topic: best.code, ...(rival ? { rival } : {}) },
   };
 }
 
@@ -2061,17 +2166,18 @@ function argumentFlip(inp: InsightInputs): Insight | null {
   return {
     key: "argument_flip",
     kind: "argument",
-    title: `${cap} works for you in one place and against you in another`,
-    body: `${up(H.when)}, ${code} comes up more in answers that pick you (${pct(help.you)}) than in answers that pick a rival (${pct(help.other)}). ${up(U.when)} it is the other way round: ${pct(hurt.you)} of answers that pick you, ${pct(hurt.other)} of answers that pick a rival.`,
+    title: `${cap} works for ${yo()} in one place and against ${STYLE ? "it" : "you"} in another`,
+    body: `${up(H.when)}, ${code} comes up more in answers that pick ${yo()} (${pct(help.you)}) than in answers that pick a rival (${pct(help.other)}). ${up(U.when)} it is the other way round: ${pct(hurt.you)} of answers that pick ${yo()}, ${pct(hurt.other)} of answers that pick a rival.`,
     foot: `${H.row}: ${counts(help.you)} picking you vs ${counts(help.other)} picking a rival. ${U.row}: ${counts(hurt.you)} vs ${counts(hurt.other)}. Only questions where the AI picks a product are compared.`,
     look: { pill: "stations", station: hurt.type === "headline" ? "consideration" : "comparison", label: `Stations - ${U.row}` },
     effect: best.effect,
     viz: vizOf([
-      withRefs(insightBar(`${H.row}: you picked`, help.you), refs(help.type, "you")),
-      withRefs(insightBar(`${H.row}: rival picked`, help.other), refs(help.type, "other")),
-      withRefs(insightBar(`${U.row}: you picked`, hurt.you), refs(hurt.type, "you")),
-      withRefs(insightBar(`${U.row}: rival picked`, hurt.other, undefined, true), refs(hurt.type, "other")),
+      W("you", withRefs(insightBar(`${H.row}: you picked`, help.you), refs(help.type, "you"))),
+      W("rival", withRefs(insightBar(`${H.row}: rival picked`, help.other), refs(help.type, "other"))),
+      W("you", withRefs(insightBar(`${U.row}: you picked`, hurt.you), refs(hurt.type, "you"))),
+      W("rival", withRefs(insightBar(`${U.row}: rival picked`, hurt.other, undefined, true), refs(hurt.type, "other"))),
     ]),
+    names: { topic: code, question: U.when },
   };
 }
 
@@ -2094,14 +2200,15 @@ function conversionVsRival(s: Summary, ex?: ExampleIndex): Insight | null {
   return {
     key: "conversion_vs_rival",
     kind: "rival",
-    title: rivalAhead ? `${rival.name} turns its recommendations into picks, you less so` : `You turn recommendations into picks better than ${rival.name}`,
+    title: rivalAhead ? `${rival.name} turns its recommendations into picks, ${yo()} less so` : yt(`You turn recommendations into picks better than ${rival.name}`, (n) => `${n} turns recommendations into picks better than ${rival.name}`),
     body: rivalAhead
-      ? `The AI recommends you but picks ${rival.name} - ${rival.name} is the pick in ${pct(them)} of the answers that recommend it, you in ${pct(you)} of those that recommend you.`
-      : `When the AI recommends you, you are the pick in ${pct(you)} of those answers; ${rival.name} in ${pct(them)} of the answers that recommend it.`,
+      ? `The AI recommends ${yo()} but picks ${rival.name} - ${rival.name} is the pick in ${pct(them)} of the answers that recommend it, ${yo()} in ${pct(you)} of those that recommend ${STYLE ? "it" : "you"}.`
+      : `When the AI recommends ${yo()}, ${yt("you are", (n) => `${n} is`)} the pick in ${pct(you)} of those answers; ${rival.name} in ${pct(them)} of the answers that recommend it.`,
     foot: `${rival.name}: picked in ${counts(them)} recommending answers. You: ${counts(you)}. ${rival.name} has the largest share of decided open-choice picks among your rivals.`,
     look: { pill: "rivals", label: "Rivals" },
     effect: Math.abs(rate(them) - rate(you)),
-    viz: vizOf([withRefs(insightBar(s.brand, you, undefined, true), ex?.picks(s.target.key)), withRefs(insightBar(rival.name, them), ex?.picks(rival.key))]),
+    viz: vizOf([W("you", withRefs(insightBar(s.brand, you, undefined, true), ex?.picks(s.target.key))), W("rival", withRefs(insightBar(rival.name, them), ex?.picks(rival.key)))]),
+    names: { variant: rivalAhead ? "behind" : "ahead", rival: rival.name },
   };
 }
 
@@ -2123,12 +2230,17 @@ function unaskedRival(s: Summary, inp: InsightInputs, ex?: ExampleIndex): Insigh
   return {
     key: "unasked_rival",
     kind: "rival",
-    title: `${rival.name} takes ${pct(rival.shareOfDecided)} of the picks, and you have never been asked about it head to head`,
-    body: `${rival.name} takes ${pct(rival.shareOfDecided)} of the picks when buyers ask what to buy, but the AI has never been asked to choose between you and ${rival.name} directly, so you cannot see how you would do against it.`,
+    title: STYLE
+      ? `${rival.name} takes ${pct(rival.shareOfDecided)} of the picks, and the AI has never been asked to compare it with ${STYLE.name}`
+      : `${rival.name} takes ${pct(rival.shareOfDecided)} of the picks, and you have never been asked about it head to head`,
+    body: STYLE
+      ? `${rival.name} takes ${pct(rival.shareOfDecided)} of the picks when buyers ask what to buy, but the AI has never been asked to choose between ${STYLE.name} and ${rival.name} directly, so there is no read on how ${STYLE.name} would do against it.`
+      : `${rival.name} takes ${pct(rival.shareOfDecided)} of the picks when buyers ask what to buy, but the AI has never been asked to choose between you and ${rival.name} directly, so you cannot see how you would do against it.`,
     foot: `${rival.name}: ${counts(rival.shareOfDecided)} of the picks. You: ${counts(s.target.shareOfDecided)}. No direct matchup against ${rival.name} was asked this wave.`,
     look: { pill: "rivals", label: "Rivals" },
     effect: rate(rival.shareOfDecided),
-    viz: vizOf([withRefs(insightBar(rival.name, rival.shareOfDecided, undefined, true), ex?.picks(rival.key)), withRefs(insightBar(s.brand, s.target.shareOfDecided), ex?.picks(s.target.key))]),
+    viz: vizOf([W("rival", withRefs(insightBar(rival.name, rival.shareOfDecided, undefined, true), ex?.picks(rival.key))), W("you", withRefs(insightBar(s.brand, s.target.shareOfDecided), ex?.picks(s.target.key)))]),
+    names: { rival: rival.name },
     matchup: { key: rival.key, name: rival.name },
   };
 }
@@ -2154,21 +2266,22 @@ function leakPicks(inp: InsightInputs): Insight | null {
     .filter((r) => r.firm >= MIN_BASE && r.outside > 0)
     .sort((a, b) => b.outside / b.firm - a.outside / a.firm || a.room.localeCompare(b.room))[0];
   const roomCell = room ? cell(room.outside, room.firm) : null;
-  const roomText = room && roomCell && rate(roomCell) > rate(outside) ? `; for ${room.room} it is ${pct(roomCell)}` : "";
+  const roomText = room && roomCell && rate(roomCell) > rate(outside) ? `; for ${buyer(room.room)} it is ${pct(roomCell)}` : "";
   return {
     key: "leak_picks",
     kind: "leak",
     title: top.length ? `Picks leave the category - led by ${top[0].name}` : "Picks leave the category",
-    body: `${pct(outside)} of the answers that commit to a pick choose something outside your category${top.length ? `, led by ${listNames(top.map((x) => x.name))}` : ""}${roomText}.`,
+    body: `${pct(outside)} of the answers that commit to a pick choose something outside ${STYLE ? "the" : "your"} category${top.length ? `, led by ${listNames(top.map((x) => x.name))}` : ""}${roomText}.`,
     foot: `${counts(outside)} firm picks outside the category${top.length ? `: ${top.map((x) => `${x.name} ${x.n}`).join(", ")}` : ""}.${room && roomCell ? ` ${room.room}: ${counts(roomCell)}.` : ""} Outside = ruled out on the dictionary board, pending, or not in it.`,
     look: { pill: "stations", station: "consideration", label: "Stations - Consideration" },
     effect: rate(outside),
     viz: vizOf([
-      withRefs(insightBar("Outside the category", outside, undefined, true), inp.ex?.outside()),
+      W("other", withRefs(insightBar("Outside the category", outside, undefined, true), inp.ex?.outside())),
       roomText && roomCell
-        ? withRefs(insightBar(lbl(room!.room), roomCell), inp.ex?.outside({ room: room!.room }))
-        : withRefs(insightBar("Inside the category", 1 - rate(outside)), inp.ex?.picks(null)),
+        ? W("other", withRefs(insightBar(lbl(room!.room), roomCell), inp.ex?.outside({ room: room!.room })))
+        : W("other", withRefs(insightBar("Inside the category", 1 - rate(outside)), inp.ex?.picks(null))),
     ]),
+    names: roomText && room ? { buyer: room.room } : {},
   };
 }
 
@@ -2195,20 +2308,21 @@ function leakProblem(inp: InsightInputs): Insight | null {
     kind: "leak",
     title: oneRoom ? `${top.room}: the problem is solved outside the category` : "Problem questions are solved outside the category",
     body: oneRoom
-      ? `For ${top.room}, the AI answers ${pct(top.out)} of the problem questions that do not name the category with a solution outside it - ${pct(rest)} for the other buying situations.`
-      : `Across every buying situation, the AI answers ${pct(p.all)} of the problem questions that do not name the category with a solution outside it (${pct(top.out)} for ${top.room}).`,
+      ? `For ${buyer(top.room)}, the AI answers ${pct(top.out)} of the problem questions that do not name the category with a solution outside it - ${pct(rest)} for the other buying situations.`
+      : `Across every buying situation, the AI answers ${pct(p.all)} of the problem questions that do not name the category with a solution outside it (${pct(top.out)} for ${buyer(top.room)}).`,
     foot: `${top.room}: ${counts(top.out)}.${rest.n > 0 ? ` Other rooms: ${counts(rest)}.` : ""} All problem-recognition answers: ${counts(p.all)}.`,
     look: { pill: "stations", station: "awareness", label: "Stations - Awareness" },
     effect: (oneRoom ? rate(top.out) : rate(p.all)) - LEAK_PROBLEM_SHARE,
     viz: oneRoom
       ? vizOf([
-          withRefs(insightBar(lbl(top.room), top.out, undefined, true), inp.ex?.routing({ room: top.room })),
-          withRefs(insightBar("Other buying situations", rest), inp.ex?.routing({ notRoom: top.room })),
+          W("other", withRefs(insightBar(lbl(top.room), top.out, undefined, true), inp.ex?.routing({ room: top.room }))),
+          W("other", withRefs(insightBar("Other buying situations", rest), inp.ex?.routing({ notRoom: top.room }))),
         ])
       : vizOf([
-          withRefs(insightBar("Every buying situation", p.all, undefined, true), inp.ex?.routing()),
-          withRefs(insightBar(lbl(top.room), top.out), inp.ex?.routing({ room: top.room })),
+          W("other", withRefs(insightBar("Every buying situation", p.all, undefined, true), inp.ex?.routing())),
+          W("other", withRefs(insightBar(lbl(top.room), top.out), inp.ex?.routing({ room: top.room }))),
         ]),
+    names: oneRoom ? { buyer: top.room } : {},
   };
 }
 
@@ -2238,9 +2352,10 @@ function worstWorry(inp: InsightInputs): Insight | null {
     look: { pill: "stations", station: "customer_base", label: "Stations - Customers" },
     effect: rate(top.verdicts.leave) - rate(rest),
     viz: vizOf([
-      withRefs(insightBar(lbl(concern), top.verdicts.leave, undefined, true), inp.ex?.doubt("keep", (r) => worryKey(r) === top.key && r.code.keep_or_leave === "leave")),
-      withRefs(insightBar("Their other worries", rest), inp.ex?.doubt("keep", (r) => worryKey(r) !== top.key && r.code.keep_or_leave === "leave")),
+      W("you", withRefs(insightBar(lbl(concern), top.verdicts.leave, undefined, true), inp.ex?.doubt("keep", (r) => worryKey(r) === top.key && r.code.keep_or_leave === "leave"))),
+      W("other", withRefs(insightBar("Their other worries", rest), inp.ex?.doubt("keep", (r) => worryKey(r) !== top.key && r.code.keep_or_leave === "leave"))),
     ]),
+    names: { worry: concern },
   };
 }
 
@@ -2260,11 +2375,11 @@ function leaveNoExit(inp: InsightInputs, brand: string): Insight | null {
     key: "leave_no_exit",
     kind: "doubt",
     title: "Told to leave, with nowhere to go",
-    body: `When the AI tells a customer weighing a worry to leave ${brand}, ${pct(none)} of those answers name nowhere to go - the cancel is a loss to you without being any rival's gain.`,
+    body: `When the AI tells a customer weighing a worry to leave ${brand}, ${pct(none)} of those answers name nowhere to go - the cancel is a loss to ${yo()} without being any rival's gain.`,
     foot: `Leave answers naming no destination: ${counts(none)}. Leave answers overall: ${counts(k.verdicts.leave)}.`,
     look: { pill: "stations", station: "customer_base", label: "Stations - Customers" },
     effect: rate(none) - NO_EXIT_SHARE,
-    viz: vizOf([insightBar("Name nowhere to go", none, undefined, true), insightBar("Name somewhere to go", withExit)]),
+    viz: vizOf([W("other", insightBar("Name nowhere to go", none, undefined, true)), W("other", insightBar("Name somewhere to go", withExit))]),
   };
 }
 
@@ -2330,7 +2445,7 @@ export function composeVerdict(s: Summary, inp: InsightInputs): VerdictFact[] {
     if (q)
       out.push({
         key: "concentration",
-        text: `${pct(q.share)} of its picks come from one question: "${shorten(q.top.text)}"`,
+        text: `${pct(q.share)} of its picks come from one question: "${quoteQuestion(q.top.text)}"`,
         foot: `${q.k} of ${q.total} open-choice picks; ${q.n} questions.`,
         look: { pill: "stations", station: "consideration", label: "Stations - Consideration" },
       });
@@ -2418,7 +2533,16 @@ export function detectInsights(s: Summary, inp: InsightInputs): Insight[] {
 }
 
 /** Every detector that fires, ranked by effect, uncapped (harnesses read the tail). */
-export function rankedInsights(s: Summary, inp: InsightInputs): Insight[] {
+export function rankedInsights(s: Summary, inp: InsightInputs, style?: InsightStyle): Insight[] {
+  const prev = STYLE;
+  STYLE = style ?? null;
+  try {
+    return rankedRun(s, inp);
+  } finally {
+    STYLE = prev;
+  }
+}
+function rankedRun(s: Summary, inp: InsightInputs): Insight[] {
   const found = [
     engineSpread(s, inp.ex),
     modeGap(s, inp.ex),

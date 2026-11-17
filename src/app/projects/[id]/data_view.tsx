@@ -8,6 +8,7 @@ import JourneySection from "./journey_view";
 import { PivotTable, type ShowAs, type Waves } from "./metrics_view";
 import { catPhrase, VCOLOR, VWORD } from "./analysis_panel";
 import { Download } from "./table";
+import { Choice } from "./pivot_controls";
 import { T } from "./type_scale";
 import { useEngineSet, viewQuery } from "./view_parts";
 import { sanitizeSettings, type PivotSettings } from "./pivot_compute";
@@ -138,8 +139,12 @@ export default function DataPage({
   // A row search pointed at, and the name of a table search opened.
   const [focus, setFocus] = useState<Focus | null>(null);
   const [searchTitle, setSearchTitle] = useState("");
-  // The library list beside a wide table (Every contest, Question type detail).
+  const [searchDesc, setSearchDesc] = useState("");
+  // The library list on a phone (on wider screens it is always beside the table).
   const [libOpen, setLibOpen] = useState(false);
+  // The builder's numbered controls: folded on a ready-made table, shown on
+  // "Build your own table"; reset whenever another table is picked.
+  const [controlsOpen, setControlsOpen] = useState(() => sel === OWN_ID);
   const [show, setShow] = useState<ShowAs>(() => (prefs.show && SHOWS.includes(prefs.show) ? prefs.show : "table"));
   const [waves, setWaves] = useState<Waves>(() => (prefs.waves === "prev" ? "prev" : "this"));
   const [room, setRoom] = useState("");
@@ -155,6 +160,7 @@ export default function DataPage({
     setApplied(request.n);
     appliedReqs.set(runId, request.n);
     setSel(request.tab === "types" ? CONTESTS_ID : request.tab === "stations" ? DETAIL_ID : pivotSel);
+    if (request.tab === "build") setControlsOpen(true);
   }
 
   // ---- the workbench payload (decides which library entries show) ----
@@ -227,9 +233,11 @@ export default function DataPage({
       setSel(OWN_ID);
       setPivotSel(OWN_ID);
       setSettings(ownOf(readPrefs(scope)) ?? shownSettings);
+      setControlsOpen(true);
       writePrefs(scope, { entry: OWN_ID });
       return;
     }
+    setControlsOpen(false);
     setSel(e.id);
     if (e.kind === "pivot") {
       setPivotSel(e.id);
@@ -256,14 +264,20 @@ export default function DataPage({
     setFocus(h.open.focus ?? null);
     setLibOpen(false);
     setSearchTitle(h.open.title);
+    setSearchDesc(h.desc);
+    setControlsOpen(false);
     setSel(SEARCH_ID);
     setPivotSel(SEARCH_ID);
     setSettings(h.open.settings);
   };
+  // Reset is pressed with the controls open: they stay open.
   const reset = () => {
-    if (typeof origin !== "string") return onSearch(origin);
-    const e = LIB_BY_ID.get(origin);
-    pick(e && e.kind === "pivot" ? e : LIB_BY_ID.get(DEFAULT_ID)!);
+    if (typeof origin !== "string") onSearch(origin);
+    else {
+      const e = LIB_BY_ID.get(origin);
+      pick(e && e.kind === "pivot" ? e : LIB_BY_ID.get(DEFAULT_ID)!);
+    }
+    setControlsOpen(true);
   };
 
   const visible = LIBRARY.filter((e) => available(e));
@@ -271,8 +285,9 @@ export default function DataPage({
   const title = shown.id === SEARCH_ID ? searchTitle : (shown.entry?.label ?? "Your own table");
   const originName = typeof origin === "string" ? (LIB_BY_ID.get(origin)?.label ?? LIB_BY_ID.get(DEFAULT_ID)!.label) : origin.title;
   const resetTo = shown.id === OWN_ID ? originName : null;
-  const wide = shown.kind !== "pivot";
-  const showLib = !wide || libOpen;
+  // A ready-made table (or a search's) opens folded; your own opens with its controls.
+  const desc = shown.id === SEARCH_ID ? searchDesc : shown.entry?.desc;
+  const folded = !controlsOpen && shown.id !== OWN_ID && !!desc;
   const item = (on: boolean) => `w-full rounded-lg px-2.5 py-1.5 text-left ${T.body} ${on ? "bg-primary-soft font-semibold text-ink" : "text-ink-2 hover:text-ink"}`;
   const chip = (on: boolean) =>
     `rounded-full border px-3 py-1 ${T.ctl} transition-colors ${
@@ -286,17 +301,16 @@ export default function DataPage({
         <p className={`${T.sec} max-w-[70ch]`}>Ready-made tables for the common questions, and a builder for your own. Any table can be shown as a chart.</p>
       </div>
       <DataSearchBox data={wb.view} brand={brand ?? wb.view?.brand ?? "You"} category={category} onOpen={onSearch} />
-      <div className={`grid items-start gap-6 ${showLib && !wide ? "md:grid-cols-[260px_minmax(0,1fr)]" : ""}`}>
-        {showLib && (
+      <div className="grid items-start gap-6 md:grid-cols-[240px_minmax(0,1fr)]">
         <nav
           aria-label="Tables"
           // On a phone the list folds away (it would push the table a screen down).
-          className={wide ? "grid gap-1 rounded-xl border border-line p-3 sm:grid-cols-2 lg:grid-cols-3" : libOpen ? "grid gap-1" : "hidden gap-1 md:grid"}
+          className={libOpen ? "grid gap-1" : "hidden gap-1 md:grid"}
         >
           {!wb.loaded && <p className={`${T.cap} px-2.5 text-ink-3`}>Loading the tables...</p>}
           {groups.map((g, gi) => (
             <div key={g} className="grid content-start gap-0.5">
-              <h5 className={`${T.label} px-2.5 ${gi === 0 || wide ? "mt-1" : "mt-3"} mb-0.5`}>{g}</h5>
+              <h5 className={`${T.label} px-2.5 ${gi === 0 ? "mt-1" : "mt-3"} mb-0.5`}>{g}</h5>
               {visible
                 .filter((e) => e.group === g)
                 .map((e) => (
@@ -314,8 +328,7 @@ export default function DataPage({
             </div>
           ))}
           {wb.view?.facts && (
-            <div className={wide ? "grid content-start gap-0.5" : "mt-3 border-t border-line pt-2"}>
-              {wide && <h5 className={`${T.label} mt-1 mb-0.5 px-2.5`}>Your own</h5>}
+            <div className="mt-3 border-t border-line pt-2">
               <button
                 type="button"
                 onClick={() => pick(null)}
@@ -328,7 +341,6 @@ export default function DataPage({
             </div>
           )}
         </nav>
-        )}
         <div className="grid min-w-0 gap-3">
           <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
             <h3 className={T.title}>{title}</h3>
@@ -336,7 +348,7 @@ export default function DataPage({
               type="button"
               onClick={() => setLibOpen(!libOpen)}
               aria-expanded={libOpen}
-              className={`${T.ctl} text-primary hover:opacity-80 ${wide ? "" : "md:hidden"}`}
+              className={`${T.ctl} text-primary hover:opacity-80 md:hidden`}
             >
               {libOpen ? "Hide the other tables" : "Show the other tables"}
             </button>
@@ -374,6 +386,9 @@ export default function DataPage({
                   onClearFocus={() => setFocus(null)}
                   onReset={reset}
                   resetTo={resetTo}
+                  controls={!folded}
+                  onControls={desc && shown.id !== OWN_ID ? setControlsOpen : undefined}
+                  desc={desc}
                 />
               )}
             </div>
@@ -475,7 +490,7 @@ function TypeTable({ map, category }: { map: AnalysisMapView; category?: string 
       map.bands.flatMap((b) =>
         b.rows
           .filter((r) => r.cells.length > 0)
-          .map((r, i) => ({ key: `${b.title}|${r.stage}`, band: b.title, first: i === 0, stage: r.stage, cells: r.cells }))
+          .map((r) => ({ key: `${b.title}|${r.stage}`, band: b.title, stage: r.stage, cells: r.cells }))
       ),
     [map]
   );
@@ -484,6 +499,9 @@ function TypeTable({ map, category }: { map: AnalysisMapView; category?: string 
   if (!st) return <p className={T.sec}>Nothing is measured here yet.</p>;
   const rows = st.cells.map((c) => factsOf(c, map.positions[c.id]));
   const numHead = rows.find((r) => r.numLabel)?.numLabel || "Your number";
+  // The download keeps every column apart; the table on screen folds two
+  // pairs so it fits the pane: Standing sits under the row's name, and the
+  // two "sends buyers" columns share one cell.
   const COLS: [ColKey, string][] = [
     ["stand", "Standing"],
     ["num", "Your number"],
@@ -492,79 +510,91 @@ function TypeTable({ map, category }: { map: AnalysisMapView; category?: string 
     ["to", "Sends buyers to you"],
     ["away", "Sends buyers away"],
   ];
-  const cols = COLS;
   const head = (k: ColKey, l: string) => (k === "num" ? numHead : l);
   const rowName = ROW_NAME[bandKind(st.cells[0].id)] ?? "Contest";
   const stand = (r: Facts) => (r.exception ? `${VWORD[r.verdict]} - with an exception` : VWORD[r.verdict]);
   const text = (r: Facts, k: ColKey): string => (k === "stand" ? stand(r) : (r[k] as string));
+  const dash = <span className="text-ink-3">-</span>;
+  const th = "px-3 py-2.5 font-semibold";
+  const td = "px-3 py-2.5 text-ink-2 [overflow-wrap:anywhere]";
   return (
     // pa-root carries the four verdict colors (the hub's style block).
-    <div className="pa-root grid items-start gap-6 md:grid-cols-[190px_minmax(0,1fr)]">
-      <nav aria-label="Question types" className="flex flex-wrap gap-0.5 md:flex-col md:flex-nowrap">
-        {types.map((t, i) => {
-          return (
-            <div key={t.key} className="contents">
-              {t.first && <h5 className={`${T.label} mb-1 w-full ${i === 0 ? "" : "mt-3"}`}>{t.band}</h5>}
-              <button
-                type="button"
-                onClick={() => setSel(t.key)}
-                aria-current={t.key === st.key ? "true" : undefined}
-                className={`rounded-lg px-2.5 py-1.5 text-left ${T.body} ${t.key === st.key ? "bg-primary-soft font-semibold text-ink" : "text-ink-2 hover:text-ink"}`}
-              >
-                {t.stage}
-              </button>
-            </div>
-          );
-        })}
-      </nav>
-      <div className="min-w-0">
-        <div className="mb-3 flex flex-wrap items-center gap-x-3 gap-y-2">
-          <h3 className={T.title}>{st.stage}</h3>
-          <span className="ml-auto">
-            <Download
-              name={`${st.stage} - by ${rowName.toLowerCase()}`}
-              header={[rowName, ...cols.map(([k, l]) => head(k, l))]}
-              rows={() => rows.map((r) => [r.label, ...cols.map(([k]) => text(r, k) || null)])}
-            />
-          </span>
-        </div>
-        <div className="overflow-x-auto rounded-xl border border-line bg-surface">
-          <table className={`w-full ${T.body}`}>
-            <thead>
-              <tr className="border-b border-line text-left text-[11px] uppercase tracking-wide text-ink-3">
-                <th className="px-3 py-2.5 font-semibold">{rowName}</th>
-                {cols.map(([k, l]) => (
-                  <th key={k} className={`px-3 py-2.5 font-semibold ${k === "num" ? "min-w-[9.5rem]" : ""}`}>
-                    {head(k, l)}
-                  </th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              {rows.map((r) => (
-                <tr key={r.id} className="border-b border-line/60 align-top last:border-b-0">
-                  <td className="min-w-[8rem] px-3 py-2.5 font-semibold text-ink">{r.label}</td>
-                  {cols.map(([k]) => (
-                    <td key={k} className={`px-3 py-2.5 text-ink-2 ${k === "leader" ? "min-w-[7.5rem]" : k === "about" || k === "to" || k === "away" ? "min-w-[8.5rem]" : ""}`}>
-                      {k === "stand" ? (
-                        <span className="flex items-center gap-1.5 whitespace-nowrap font-semibold" style={{ color: VCOLOR[r.verdict].ink }}>
-                          <i className="inline-block h-2 w-2 flex-none rounded-full" style={{ background: VCOLOR[r.verdict].fg }} />
-                          {stand(r)}
-                        </span>
-                      ) : k === "num" ? (
-                        <b className="whitespace-nowrap font-semibold tabular-nums text-ink">{r.num || "-"}</b>
-                      ) : (
-                        text(r, k) || <span className="text-ink-3">-</span>
-                      )}
-                    </td>
-                  ))}
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-        <p className={`${T.cap} mt-2.5 text-ink-3`}>Each row is one contest on the Map. Open it on the Map for what to do and the answers behind it.</p>
+    <div className="pa-root min-w-0">
+      <div className="mb-3 flex flex-wrap items-end gap-x-3 gap-y-2">
+        <Choice
+          label="Question type"
+          value={st.key}
+          options={types.map((t) => ({ value: t.key, label: t.stage, group: t.band }))}
+          onChange={setSel}
+          width="min-w-[14rem]"
+        />
+        <span className="mb-1 ml-auto">
+          <Download
+            name={`${st.stage} - by ${rowName.toLowerCase()}`}
+            header={[rowName, ...COLS.map(([k, l]) => head(k, l))]}
+            rows={() => rows.map((r) => [r.label, ...COLS.map(([k]) => text(r, k) || null)])}
+          />
+        </span>
       </div>
+      <div className="rounded-xl border border-line bg-surface">
+        <table className={`w-full table-fixed ${T.body}`}>
+          <colgroup>
+            <col style={{ width: "22%" }} />
+            <col style={{ width: "13%" }} />
+            <col style={{ width: "17%" }} />
+            <col style={{ width: "20%" }} />
+            <col style={{ width: "28%" }} />
+          </colgroup>
+          <thead>
+            <tr className={`border-b border-line text-left ${T.label}`}>
+              <th className={th}>{rowName}</th>
+              <th className={th}>{numHead}</th>
+              <th className={th}>Who leads</th>
+              <th className={th}>About the {cat.plural}</th>
+              <th className={th}>Sends buyers</th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((r) => (
+              <tr key={r.id} className="border-b border-line/60 align-top last:border-b-0">
+                <td className={td}>
+                  <span className="block font-semibold text-ink">{r.label}</span>
+                  <span className={`mt-0.5 flex items-center gap-1.5 ${T.cap} font-semibold`} style={{ color: VCOLOR[r.verdict].ink }}>
+                    <i className="inline-block h-2 w-2 flex-none rounded-full" style={{ background: VCOLOR[r.verdict].fg }} />
+                    {stand(r)}
+                  </span>
+                </td>
+                <td className={td}>
+                  <b className="font-semibold tabular-nums text-ink">{r.num || "-"}</b>
+                </td>
+                <td className={td}>{r.leader || dash}</td>
+                <td className={td}>{r.about || dash}</td>
+                <td className={td}>
+                  {r.to || r.away ? (
+                    <span className="grid gap-1">
+                      {r.to && (
+                        <span>
+                          <span className="font-semibold" style={{ color: "var(--pa-yours)" }}>To you: </span>
+                          {r.to}
+                        </span>
+                      )}
+                      {r.away && (
+                        <span>
+                          <span className="font-semibold" style={{ color: "var(--pa-theirs)" }}>Away: </span>
+                          {r.away}
+                        </span>
+                      )}
+                    </span>
+                  ) : (
+                    dash
+                  )}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      <p className={`${T.cap} mt-2.5 text-ink-3`}>Each row is one contest on the Map. Open it on the Map for what to do and the answers behind it.</p>
     </div>
   );
 }

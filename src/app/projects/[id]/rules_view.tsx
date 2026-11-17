@@ -235,7 +235,7 @@ const POOL_LABEL: Record<RulePool, string> = {
   buyer_worries: "Buyers' worries",
   customer_worries: "Customers' worries",
   expansion: "Expansion",
-  ecosystem: "Ecosystem",
+  ecosystem: "What to use alongside you",
 };
 
 const topCondition = (groups: SliceGroup[]) => (groups[0] ? `${groups[0].label} (${groups[0].answers})` : "-");

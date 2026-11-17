@@ -131,8 +131,8 @@ const BRIEF_CSS = `
 }
 .pb-fact:hover, .pb-fact[aria-expanded="true"]{ border-bottom-color: var(--primary); border-bottom-style: solid; color: var(--primary); }
 .pb-fact:focus-visible{ outline: 2px solid var(--primary); outline-offset: 2px; }
-@media print{ .pb-acard{ display: none !important; } .pb-fact{ border-bottom: 0 !important; color: inherit !important; } }
-html.pb-printing .pb-fact{ border-bottom: 0 !important; color: inherit !important; }
+@media print{ .pb-acard{ display: none !important; } .pb-fact{ border-bottom: 0 !important; color: inherit !important; text-decoration: none !important; cursor: auto !important; } }
+html.pb-printing .pb-fact{ border-bottom: 0 !important; color: inherit !important; text-decoration: none !important; cursor: auto !important; }
 .pb-acard{
   margin: .55em 0 1.1em; max-width: 480px; background: var(--surface); border: 1px solid var(--line);
   border-radius: 12px; padding: 14px 18px 11px; box-shadow: 0 10px 30px rgba(16,24,40,.08);
@@ -576,6 +576,9 @@ function FactLink({ a, unit, children }: { a: BriefAnchor; unit: string; childre
   const ctx = useContext(CardContext)!;
   const key = `${unit}::${a.id}`;
   const has = !!ctx.cards[a.id];
+  // bf26: a figure is underlined (and takes the pointer) only when a click does something - it opens an answer
+  // card or the map cell; one that would open nothing reads as plain text.
+  if (!has && !ctx.onOpenCell) return <>{children}</>;
   const act = () => (has ? ctx.setOpen(ctx.open === key ? null : key) : ctx.onOpenCell?.(a.id));
   // An inline span with button semantics, not a <button>: a button lays out
   // as inline-block, so a phrase link spanning lines would break the flow.
@@ -639,7 +642,7 @@ function Linked({ text, plan, unit }: { text: string; plan: LinkPlan | null; uni
 /** bf17: a cell card's arguments - the map panel's treatment at card scale. */
 function CardLifts({ lifts, sides }: { lifts: NonNullable<AnswerCard["lifts"]>; sides?: [string, string] }) {
   const max = Math.max(10, ...lifts.map((l) => Math.abs(l.value)));
-  const [a, b] = sides ?? ["your picks", "rivals' picks"];
+  const [a, b] = sides ?? ["its picks", "rivals' picks"]; // bf26: the Brief never says "you"
   return (
     <div className="pb-acard-lifts">
       <div className="pb-acard-sub">The arguments</div>
@@ -1125,23 +1128,19 @@ export default function BriefSection({
   return (
     <div className="grid gap-6">
       <style>{BRIEF_CSS}</style>
-      <div className="pb-sans flex flex-wrap items-center gap-x-4 gap-y-2.5">
-        <div role="group" aria-label="Frame" className="flex flex-wrap gap-1.5">
-          {BRIEF_FRAMES.map((f) => (
-            <button
-              key={f}
-              type="button"
-              aria-pressed={f === current}
-              onClick={() => pickFrame(f)}
-              className={`rounded-full border px-3 py-1 text-[13px] font-medium transition-colors ${
-                f === current ? "border-[var(--color-primary)] bg-primary-soft text-primary" : "border-line text-ink-2 hover:border-ink-3"
-              }`}
-            >
-              {BRIEF_FRAME_LABELS[f]}
-            </button>
-          ))}
-        </div>
-        <div className="flex flex-wrap items-center gap-x-3 gap-y-2 sm:ml-auto">
+      <div className="pb-sans flex flex-wrap items-center gap-x-4 gap-y-2.5 lg:flex-nowrap">
+        {/* bf26: one "View as" menu for the seven frames (it opens on "Now what?"; a remembered choice still wins). */}
+        <label className="flex items-center gap-1.5">
+          <span className="text-[13px] text-ink-3">View as</span>
+          <select className={selectCls} value={current} onChange={(e) => isFrame(e.target.value) && pickFrame(e.target.value)}>
+            {BRIEF_FRAMES.map((f) => (
+              <option key={f} value={f}>
+                {BRIEF_FRAME_LABELS[f]}
+              </option>
+            ))}
+          </select>
+        </label>
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-2 sm:ml-auto lg:flex-nowrap">
           {admin && (
             <div role="group" aria-label="Memo version" className="flex overflow-hidden rounded-md border border-line text-[13px] font-medium">
               {(["A", "B"] as const).map((v) => (

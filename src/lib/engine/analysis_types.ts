@@ -354,9 +354,15 @@ export interface AnalysisMapView {
   /** The 3-5 highest-ranked tensions as memo paragraphs, each pointing at
    * a map cell. */
   tensions: {
+    /** am62: the finding's identity - the insight key, or "known_vs_picked" for the opening funnel paragraph
+     * (the Overview leaves that one out: its header already states those numbers). */
+    key: string;
     title: string;
     body: string;
     cellId: string;
+    /** am62: the move written for this finding (finding_moves.ts), else the placed cell's lever; `repeat` = the
+     * same sentence as a move above it (the Overview shows the family and "Same move as above"). */
+    move: { family: string; text: string; repeat?: true };
     /** 2026-11-10 (am17): the finding card's small chart - 2-4 bars of the
      * numbers the sentence states (value 0-100, text as the sentence prints
      * it, hi = the one row the finding is about). Absent when the finding has
@@ -368,6 +374,8 @@ export interface AnalysisMapView {
       hi?: true;
       /** am19: the answers behind the bar's numerator, when the finding has them in hand. */
       refs?: AnswerRef[];
+      /** am62: whose number - you (blue), a named rival (pink), anything else (grey). */
+      who?: "you" | "rival" | "other";
     }[];
     /** bs23 (2026-11-13): an unasked_rival finding's rival (dictionary entry
      * key + name) - the Overview card offers "Ask this matchup" for it. */

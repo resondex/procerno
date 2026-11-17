@@ -33,7 +33,18 @@ import {
   type PivotCol,
   type PivotSettings,
 } from "./pivot_compute";
-import { BarsChart, DotsChart, MAX_SERIES, downloadChart, seriesColor, type ChartRow, type ChartSeries } from "./table_charts";
+import {
+  BarsChart,
+  CHART_AWAY,
+  CHART_OTHER,
+  CHART_YOU,
+  DotsChart,
+  MAX_SERIES,
+  downloadChart,
+  shadeAt,
+  type ChartRow,
+  type ChartSeries,
+} from "./table_charts";
 import { T } from "./type_scale";
 
 /**
@@ -47,15 +58,25 @@ import { T } from "./type_scale";
  *   Columns is None - Rows, Columns, and the brand / argument a measure
  *   reads. Legality lives in engine/measures.ts alone (pivot_compute.ts
  *   resolves): measures and dimensions the pool does not ask are hidden.
- * - Show as: Table | Bars | Dots (Lines waits for three waves).
+ * - Show as: Table | Bars | Dots. Lines is not offered until three waves
+ *   exist (hidden, not greyed - 2026-11-16).
  * - Waves: This wave | Wave over wave - the same table computed on the
  *   previous coded wave (computePivot on its payload), matched by label;
  *   the table gains a Change column in points after each number, the charts
- *   draw the previous wave quiet beside this one, one column at a time.
+ *   draw the previous wave quiet beside this one, one column at a time. The
+ *   whole control is hidden until a previous coded wave exists.
+ * - A ready-made table opens with the numbered controls folded away
+ *   (`controls` false): its title, one sentence (`desc`), Show as and the
+ *   downloads; "Change this table" opens the controls in place.
  *
- * Cells print the rate only; "k of n - 95% range" is on hover; cells under
- * 20 answers are muted and starred and get no change. Clicking a cell opens
+ * Cells print the rate only; the 95% range is on hover; cells under 20
+ * answers are muted and starred and get no change. Clicking a cell opens
  * the answers it counts (the numerator) in the evidence panel.
+ *
+ * Colours (2026-11-16): a brand row (or brand column) is blue for the
+ * tracker's own brand and grey for every other; rows that are not brands
+ * draw blue only when the number is about you (a brand measure read for
+ * your brand, "You win"), pink for "Rival wins", grey otherwise.
  */
 
 export type ShowAs = "table" | "bars" | "dots" | "lines";
@@ -119,6 +140,9 @@ export function PivotTable({
   onClearFocus,
   onReset,
   resetTo = null,
+  controls = true,
+  onControls,
+  desc,
 }: {
   runId: string;
   data: WorkbenchView;
@@ -143,6 +167,12 @@ export function PivotTable({
   onReset?: () => void;
   /** That table's name; null = nothing to reset. */
   resetTo?: string | null;
+  /** Show the numbered controls (false = a ready-made table, folded). */
+  controls?: boolean;
+  /** Fold or open the controls ("Change this table" / "Hide the controls"). */
+  onControls?: (open: boolean) => void;
+  /** A ready-made table's one sentence (shown while the controls are folded). */
+  desc?: string;
 }) {
   const [drill, setDrill] = useState<EvidenceRequest | null>(null);
   const closeDrill = useCallback(() => setDrill(null), []);
@@ -186,6 +216,10 @@ export function PivotTable({
   const change = (patch: Partial<PivotSettings>) => onSettings({ ...base, ...patch });
   const legalMeasures = MEASURES.filter((m) => !illegalReason(m, pool));
   const chosenBrand = data.brands[brand];
+  // Brand rows / columns: the tracker's own brand (or its company) is "you".
+  const brandDim = (d: string) => d === "brand" || d === "parent";
+  const isYou = (v: { brands?: Set<number> }) => !!v.brands?.has(data.target);
+  const youRow = (v: DimValue) => brandDim(rowDim) && isYou(v);
 
   // ---- the table columns ----
   const byQuestion = rowDim === "question";
@@ -269,6 +303,10 @@ export function PivotTable({
           <span className="block max-w-[34rem] font-medium text-ink" title={`${r.v.full}\n(the seed wording; answers pool across its rewordings)`}>
             {r.v.label}
           </span>
+        ) : youRow(r.v) ? (
+          <span className="font-semibold" style={{ color: CHART_YOU }}>
+            {r.v.label}
+          </span>
         ) : (
           <span className="font-medium text-ink">{r.v.label}</span>
         ),
@@ -286,16 +324,34 @@ export function PivotTable({
   const tooMany = !comparing && pivot.cols.length > MAX_SERIES;
   const chartCol = comparing ? (pivot.cols.find((c) => c.match === chartColPick) ?? pivot.cols[0]) : null;
   const chartValue = (a: Acc | undefined) => (a && a.n > 0 ? { v: a.k / a.n, thin: a.n < THIN, tip: rangeTip(a) } : null);
+  // A column's colour: a brand column by whose brand it is, else by what
+  // its number is about (a brand measure read for you, "You win" -> blue;
+  // "Rival wins" -> pink; anything else grey).
+  const measureColor = (m: MeasureDef) =>
+    m.id === "h2h_you" || (m.brand && brand === data.target && !brandDim(rowDim)) ? CHART_YOU : m.id === "h2h_rival" ? CHART_AWAY : CHART_OTHER;
+  const colColor = (c: PivotCol) => (brandDim(rowDim) ? CHART_OTHER : brandDim(colDim) ? (isYou(c) ? CHART_YOU : CHART_OTHER) : measureColor(c.measure));
+  // Series sharing a colour are told apart by shade; with brand rows the row
+  // carries the colour, so every series is shaded in turn.
+  const shaded = (cs: PivotCol[]): ChartSeries[] => {
+    const seen = new Map<string, number>();
+    return cs.map((c, i) => {
+      const color = colColor(c);
+      const k = brandDim(rowDim) ? i : (seen.get(color) ?? 0);
+      seen.set(color, k + 1);
+      return { key: c.key, label: colHead(c), color, shade: shadeAt(k) };
+    });
+  };
   const series: ChartSeries[] = chartCol
     ? [
-        { key: "prev", label: `Previous wave - ${colHead(chartCol)}`, color: "var(--ink-3)", muted: true },
-        { key: "now", label: `This wave - ${colHead(chartCol)}`, color: seriesColor(0) },
+        { key: "prev", label: `Previous wave - ${colHead(chartCol)}`, color: CHART_OTHER, muted: true },
+        { key: "now", label: `This wave - ${colHead(chartCol)}`, color: colColor(chartCol) },
       ]
-    : pivot.cols.map((c, i) => ({ key: c.key, label: colHead(c), color: seriesColor(i) }));
+    : shaded(pivot.cols);
   const chartRows: ChartRow[] = ordered.slice(0, CHART_ROWS).map((r) => ({
     key: r.v.key,
     label: r.v.label,
     full: r.v.full,
+    ...(brandDim(rowDim) ? { color: isYou(r.v) ? CHART_YOU : CHART_OTHER, you: isYou(r.v) } : {}),
     values: chartCol ? [chartValue(prevOf?.(r.v, chartCol)), chartValue(cellOf(r, chartCol))] : pivot.cols.map((c) => chartValue(cellOf(r, c))),
   }));
   const charted = show !== "table" && !tooMany;
@@ -369,9 +425,96 @@ export function PivotTable({
   ].join("");
   const focusRow = focus && focus.dim === rowDim ? pivot.rows.find((r) => r.match === focus.match) : undefined;
 
+  // Shared controls (the folded and the full layout both draw these).
+  const showAsCtl = (label: string) => (
+    <Segments<ShowAs>
+      label={label}
+      value={show === "lines" ? "table" : show}
+      // Lines waits for three measured waves: not offered until then.
+      options={[
+        { value: "table", label: "Table" },
+        { value: "bars", label: "Bars" },
+        { value: "dots", label: "Dots" },
+      ]}
+      onChange={onShow}
+    />
+  );
+  // Wave over wave needs a second measured wave: the control is hidden until then.
+  const wavesCtl = hasPrev ? (
+    <Segments<Waves>
+      label="Waves"
+      value={comparing ? "prev" : "this"}
+      options={[
+        { value: "this", label: "This wave" },
+        { value: "prev", label: "Wave over wave" },
+      ]}
+      onChange={onWaves}
+    />
+  ) : null;
+  const chartColCtl =
+    comparing && show !== "table" && pivot.cols.length > 1 && chartCol ? (
+      <Choice label="Chart the column" value={chartCol.match} options={pivot.cols.map((c) => ({ value: c.match, label: colHead(c) }))} onChange={setChartCol} />
+    ) : null;
+  const whereChip = where ? (
+    <div className="grid gap-1">
+      <span className={T.label}>Only</span>
+      <span className={`inline-flex items-center gap-1 rounded-full border border-[var(--color-primary)] bg-primary-soft py-1 pl-3 pr-1.5 ${T.cap} text-primary`}>
+        {where.label}
+        <button
+          type="button"
+          onClick={() => change({ where: null })}
+          aria-label={`Show every ${DIM_NOUN[where.dim]} again`}
+          title={`Show every ${DIM_NOUN[where.dim]} again`}
+          className="rounded-full px-1 hover:bg-surface"
+        >
+          ×
+        </button>
+      </span>
+    </div>
+  ) : null;
+  const link = `${T.cap} font-medium text-primary hover:opacity-80`;
+  const downloads =
+    pivot.rows.length > 0 && pivot.cols.length > 0 ? (
+      charted ? (
+        <button type="button" onClick={() => svgRef.current && downloadChart(svgRef.current, filename)} className={link}>
+          Download this chart
+        </button>
+      ) : (
+        <>
+          <button type="button" onClick={downloadTable} className={link}>
+            Download this table
+          </button>
+          <button
+            type="button"
+            onClick={() =>
+              downloadXlsx(
+                filename,
+                cols.map((c) => c.label),
+                ordered.map((r) => cols.map((c) => c.val(r)))
+              )
+            }
+            className={link}
+          >
+            Excel
+          </button>
+        </>
+      )
+    ) : null;
+  // The one short line under the sentence: what the number is (when the
+  // sentence does not already say it), how to open the answers, and the
+  // star only when a starred number is on show. The range tip is still on
+  // every number (table cells' title, chart marks' <title>), so hover stays.
+  const shownCells = (charted ? chartRows.flatMap((r) => r.values) : [...pivot.cells.values()].map((a) => (a.n > 0 ? { thin: a.n < THIN } : null))).filter(
+    (c): c is { thin: boolean } => !!c
+  );
+  const anyThin = shownCells.some((c) => c.thin);
+  const howTo = charted ? "Hover a mark for its range." : evidence ? "Hover a number for its range; click it to read the answers behind it." : "Hover a number for its range.";
+  const hint = [controls && measures.length === 1 ? plainTip(lead) : "", howTo, anyThin ? "A starred number rests on few answers." : ""].filter(Boolean).join(" ");
+
   return (
     <div className="card" ref={boxRef}>
-      <div className="grid gap-3 border-b border-line px-4 py-3.5">
+      {controls ? (
+        <div className="grid gap-3 border-b border-line px-4 py-3.5">
         <div className="flex flex-wrap items-end gap-x-4 gap-y-3">
           <Choice
             label="1. Which questions"
@@ -454,75 +597,56 @@ export function PivotTable({
             />
           )}
         </div>
-        <div className="flex flex-wrap items-end gap-x-4 gap-y-3">
-          <Segments<ShowAs>
-            label="5. Show as"
-            value={show}
-            options={[
-              { value: "table", label: "Table" },
-              { value: "bars", label: "Bars" },
-              { value: "dots", label: "Dots" },
-              { value: "lines" as ShowAs, label: "Lines", disabled: "Lines need three measured waves" },
-            ]}
-            onChange={onShow}
-          />
-          <Segments<Waves>
-            label="Waves"
-            value={comparing ? "prev" : "this"}
-            options={[
-              { value: "this", label: "This wave" },
-              { value: "prev", label: "Wave over wave", disabled: hasPrev ? null : "Needs a second measured wave" },
-            ]}
-            onChange={onWaves}
-          />
-          {comparing && show !== "table" && pivot.cols.length > 1 && chartCol && (
-            <Choice
-              label="Chart the column"
-              value={chartCol.match}
-              options={pivot.cols.map((c) => ({ value: c.match, label: colHead(c) }))}
-              onChange={setChartCol}
-            />
-          )}
-          {where && (
-            <div className="grid gap-1">
-              <span className={T.label}>Only</span>
-              <span className={`inline-flex items-center gap-1 rounded-full border border-[var(--color-primary)] bg-primary-soft py-1 pl-3 pr-1.5 ${T.cap} text-primary`}>
-                {where.label}
+          <div className="flex flex-wrap items-end gap-x-4 gap-y-3">
+            {showAsCtl("5. Show as")}
+            {wavesCtl}
+            {chartColCtl}
+            {whereChip}
+            <span className="ml-auto mb-1 flex items-center gap-3">
+              {onControls && (
+                <button type="button" onClick={() => onControls(false)} className={`${T.ctl} text-primary hover:opacity-80`}>
+                  Hide the controls
+                </button>
+              )}
+              {onReset && (
                 <button
                   type="button"
-                  onClick={() => change({ where: null })}
-                  aria-label={`Show every ${DIM_NOUN[where.dim]} again`}
-                  title={`Show every ${DIM_NOUN[where.dim]} again`}
-                  className="rounded-full px-1 hover:bg-surface"
+                  onClick={onReset}
+                  disabled={!resetTo}
+                  title={resetTo ? `Back to "${resetTo}"` : "Nothing changed yet"}
+                  className={`rounded-lg border px-3 py-1 ${T.ctl} ${resetTo ? "border-line text-ink-2 hover:border-ink-3 hover:text-ink" : "cursor-not-allowed border-line/60 text-ink-3/50"}`}
                 >
-                  ×
+                  Reset
                 </button>
-              </span>
-            </div>
-          )}
-          {onReset && (
-            <button
-              type="button"
-              onClick={onReset}
-              disabled={!resetTo}
-              title={resetTo ? `Back to "${resetTo}"` : "Nothing changed yet"}
-              className={`ml-auto mb-1 rounded-lg border px-3 py-1 ${T.ctl} ${resetTo ? "border-line text-ink-2 hover:border-ink-3 hover:text-ink" : "cursor-not-allowed border-line/60 text-ink-3/50"}`}
-            >
-              Reset
-            </button>
-          )}
+              )}
+            </span>
+          </div>
         </div>
-      </div>
+      ) : (
+        // A ready-made table: its one sentence, Show as and the downloads.
+        <div className="grid gap-3 border-b border-line px-4 py-3.5">
+          <p className={`${T.body} max-w-[75ch] text-ink`}>{desc}</p>
+          <div className="flex flex-wrap items-end gap-x-4 gap-y-3">
+            {showAsCtl("Show as")}
+            {wavesCtl}
+            {chartColCtl}
+            {whereChip}
+            <span className="ml-auto mb-1 flex flex-wrap items-center gap-x-3 gap-y-1">
+              {downloads}
+              {onControls && (
+                <button type="button" onClick={() => onControls(true)} className={`${T.ctl} text-ink-3 hover:text-ink`}>
+                  Change this table
+                </button>
+              )}
+            </span>
+          </div>
+        </div>
+      )}
       <div className="px-4 py-3">
         <div className="flex flex-wrap items-start justify-between gap-x-4 gap-y-1">
           <div className="grid max-w-[75ch] gap-1">
-            <p className={`${T.body} font-medium text-ink`}>
-              {sentence}
-            </p>
-            <p className={`${T.cap} text-ink-3`}>
-              {measures.length === 1 ? `${plainTip(lead)} ` : ""}
-              Hover a number for its range; click it for the answers behind it. Numbers resting on too few answers are muted and starred.
-            </p>
+            {controls && <p className={`${T.body} font-medium text-ink`}>{sentence}</p>}
+            <p className={`${T.cap} text-ink-3`}>{hint}</p>
             {focus && (
               <p className={`${T.cap} text-ink-2`}>
                 {focusRow ? (
@@ -540,38 +664,7 @@ export function PivotTable({
               </p>
             )}
           </div>
-          {pivot.rows.length > 0 && pivot.cols.length > 0 && (
-            <span className="flex gap-3">
-              {charted ? (
-                <button
-                  type="button"
-                  onClick={() => svgRef.current && downloadChart(svgRef.current, filename)}
-                  className="text-[12px] font-medium text-primary hover:opacity-80"
-                >
-                  Download this chart
-                </button>
-              ) : (
-                <>
-                  <button type="button" onClick={downloadTable} className="text-[12px] font-medium text-primary hover:opacity-80">
-                    Download this table
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() =>
-                      downloadXlsx(
-                        filename,
-                        cols.map((c) => c.label),
-                        ordered.map((r) => cols.map((c) => c.val(r)))
-                      )
-                    }
-                    className="text-[12px] font-medium text-primary hover:opacity-80"
-                  >
-                    Excel
-                  </button>
-                </>
-              )}
-            </span>
-          )}
+          {controls && downloads && <span className="flex gap-3">{downloads}</span>}
         </div>
         {comparing && prevData === undefined && <p className="mt-2 text-[12px] text-ink-3">Reading the previous wave...</p>}
         {comparing && prevData === null && <p className="mt-2 text-[12px] text-ink-3">The previous wave could not be read.</p>}

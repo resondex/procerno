@@ -7,7 +7,10 @@ import { BRAND_SUMMARY_VERSION, sharedBrandSummary, type BrandSummaryView, type 
 import { ANALYSIS_MAP_VERSION, sharedAnalysisMap, type MapCellStat } from "./analysis_map";
 import { computeHeadline } from "./headline";
 import { CONTEXT_JUDGE_MODEL, CONTEXT_JUDGE_VERSION } from "./context_judge";
-import { awaySpecifics, destOf, destPhrase, pctFine, type Insight, type InsightInputs } from "./summary_insights";
+import { awaySpecifics, destOf, destPhrase, pctFine, rankedInsights, type Insight, type InsightInputs } from "./summary_insights";
+import { findingMove } from "./finding_moves";
+import { buyerPhrase } from "./brief_words";
+import { condLabel } from "./panel_text";
 import { cell, loadViewData, requestOf, VIEW_CACHE_MS, type RateCell, type ViewData, type ViewRequest } from "./view_data";
 import { viewsOf } from "./views";
 import type { AnalysisMapView, Position } from "./analysis_types";
@@ -428,6 +431,8 @@ interface Ctx {
   cards: Map<string, AnswerCard | null>;
   /** The objects the brand / engines / condition cards read. */
   src: CardSources;
+  /** bf26: the same detectors in the Brief's style (third person, buyers as words), by key - target only. */
+  voiced: Map<string, Insight>;
 }
 
 function roomDescriptions(json: string | null | undefined): Map<string, string> {
@@ -442,16 +447,21 @@ function roomDescriptions(json: string | null | undefined): Map<string, string> 
   return out;
 }
 
-/** The lay "where" of a map cell, its act preposition and its watch metric. */
+/** A Map cell name written to "you" ("What to use alongside you") in the Brief's third person. */
+const cellNameAbout = (label: string, brand: string) => label.replace(/\byou\b/g, brand).replace(/\byour\b/g, poss(brand));
+
+/** The lay "where" of a map cell, its act preposition and its watch metric (bf26: third person, buyers as words;
+ * a lead that is just the buyer's name keeps the label). */
 function cellWords(row: string, label: string, brand: string): { lead: string; prep: string; watch: string } {
+  const B = (l: string) => buyerPhrase(l);
   switch (row) {
     case "open":
-      return { lead: label, prep: `for ${label}`, watch: `${poss(brand)} share of picks for ${label}` };
+      return { lead: label, prep: `for ${B(label)}`, watch: `${poss(brand)} share of picks for ${B(label)}` };
     case "social":
       return { lead: "What most buyers pick", prep: "when buyers ask what most people pick", watch: `${poss(brand)} share of picks when buyers ask what most people pick` };
     case "awareness":
       return label
-        ? { lead: `${label} - before they know what to buy`, prep: `in ${poss(label)} problem questions`, watch: `how often the AI recommends ${brand} in ${poss(label)} problem questions` }
+        ? { lead: `${label} - before they know what to buy`, prep: `in the problem questions of ${B(label)}`, watch: `how often the AI recommends ${brand} in the problem questions of ${B(label)}` }
         : { lead: "Before buyers know what to buy", prep: "in problem questions", watch: `how often the AI recommends ${brand} in problem questions` };
     case "explainer":
       return { lead: "Learning the category", prep: "when buyers learn the category", watch: `how often the AI recommends ${brand} when buyers learn the category` };
@@ -461,17 +471,17 @@ function cellWords(row: string, label: string, brand: string): { lead: string; p
       const what = line || brand;
       return {
         lead: label ? `Worth the price - ${label}` : "Worth the price",
-        prep: room ? `for ${room}` : "on price",
-        watch: `how often the AI calls ${what} worth it${room ? ` for ${room}` : ""}`,
+        prep: room ? `for ${B(room)}` : "on price",
+        watch: `how often the AI calls ${what} worth it${room ? ` for ${B(room)}` : ""}`,
       };
     }
     case "premium":
       return { lead: "Premium versus basic", prep: "when buyers weigh premium against basic", watch: `${poss(brand)} share of picks when buyers weigh premium against basic` };
     case "criteria":
       return {
-        lead: label ? `What the AI tells ${label} to weigh` : "What the AI tells buyers to weigh",
-        prep: label ? `for ${label}` : "",
-        watch: `how often the AI teaches the arguments that win for ${brand}`,
+        lead: label ? `What the AI tells ${B(label)} to look for` : "What the AI tells buyers to look for",
+        prep: label ? `in the answers to ${B(label)}` : "",
+        watch: `how often the AI tells buyers to look for the points that win for ${brand}`,
       };
     case "h2h":
       return { lead: `Against ${label}`, prep: `against ${label}`, watch: `how often the AI picks ${brand} over ${label} when asked to compare them` };
@@ -484,46 +494,50 @@ function cellWords(row: string, label: string, brand: string): { lead: string; p
     case "customers":
       return { lead: `Customers who worry "${label}"`, prep: `on the worry "${label}"`, watch: `how often customers who worry "${label}" are told to stay` };
     case "hold":
-      return { lead: "Your customers looking around", prep: "with your own customers", watch: "how often your customers are told to stay when they look around" };
+      return { lead: `${poss(brand)} customers looking around`, prep: `with ${poss(brand)} own customers`, watch: `how often ${poss(brand)} customers are told to stay when they look around` };
     case "repertoire":
       return { lead: "Habit buyers", prep: "with habit buyers", watch: `how often habit buyers are told to stick with ${brand}` };
-    case "settled":
-      return { lead: `Your customers - ${label}`, prep: `with your customers on ${label}`, watch: `how often the AI strengthens the relationship on ${label}` };
+    case "settled": {
+      const q = cellNameAbout(label, brand);
+      return { lead: `${poss(brand)} customers - ${q}`, prep: `with ${poss(brand)} customers on ${low1(q)}`, watch: `how often the AI strengthens the relationship on ${low1(q)}` };
+    }
     default:
       return { lead: label || "This contest", prep: "", watch: `${poss(brand)} share of picks` };
   }
 }
 
-/** "Today" in the cell's own unit. */
-function todayOf(st: MapCellStat): string {
+/** "Today" in the cell's own unit (bf26: the brand by name, "none" / "every" at the extremes). */
+function todayOf(st: MapCellStat, brand: string): string {
   const youD = pctN(st.d > 0 ? st.you / st.d : 0);
   const themD = pctN(st.d > 0 ? st.them / st.d : 0);
   const youN = pctN(st.n > 0 ? st.you / st.n : 0);
+  const noneN = st.you === 0;
   switch (st.row) {
     case "open":
     case "social":
     case "premium":
     case "leavers":
     case "h2h":
-      return `today you take ${youD} of the picks against ${themD} for ${st.taker}`;
+      if (st.d > 0 && st.you === 0 && st.them === st.d) return `today ${st.taker} takes every pick between the two`;
+      return st.you === 0 ? `today ${brand} takes none of the picks, against ${themD} for ${st.taker}` : `today ${brand} takes ${youD} of the picks against ${themD} for ${st.taker}`;
     case "value":
-      return `today ${youN} of the answers call it worth it`;
+      return noneN ? "today no answer calls it worth it" : `today ${youN} of the answers call it worth it`;
     case "buyers":
-      return `today ${youN} of these buyers are told to go ahead`;
+      return noneN ? "today none of these buyers is told to go ahead" : `today ${youN} of these buyers are told to go ahead`;
     case "customers":
     case "hold":
-      return `today ${youN} are told to stay`;
+      return noneN ? "today none is told to stay" : `today ${youN} are told to stay`;
     case "awareness":
     case "explainer":
-      return `today the AI recommends you in ${youN} of these answers`;
+      return noneN ? `today the AI never recommends ${brand} in these answers` : `today the AI recommends ${brand} in ${youN} of these answers`;
     case "criteria":
-      return `today ${youN} of these answers teach an argument that wins for you`;
+      return noneN ? `today none of these answers tells buyers to look for a point that wins for ${brand}` : `today ${youN} of these answers tell buyers to look for a point that wins for ${brand}`;
     case "repertoire":
-      return `today ${youN} are told to stick with you`;
+      return noneN ? `today none is told to stick with ${brand}` : `today ${youN} are told to stick with ${brand}`;
     case "settled":
-      return `today the AI strengthens the relationship in ${youN}`;
+      return noneN ? "today the AI never strengthens the relationship" : `today the AI strengthens the relationship in ${youN}`;
     default:
-      return `today you hold ${youD}`;
+      return `today ${brand} holds ${youD}`;
   }
 }
 
@@ -531,17 +545,17 @@ function todayOf(st: MapCellStat): string {
  * sentences that carry a move inside another sentence (SWOT, TOWS, Minto).
  * One template per triage and lever variant - the same variants the map
  * chooses between, never new strategy. */
-function actOf(p: Position, st: MapCellStat): string {
+function actOf(p: Position, st: MapCellStat, brand: string): string {
   // bf21: the am15 plain-wording pass - each phrase restates its lever sentence.
   switch (p.triageSuggested) {
     case "record_wrong":
       return "correct the out-of-date facts in the sources the AI draws on";
     case "proof_missing":
       return st.row === "criteria"
-        ? "get your strongest point into the guides the AI draws on when it teaches buyers what to look for"
+        ? `get ${poss(brand)} strongest point into the guides the AI draws on when it tells buyers what to look for`
         : st.row === "buyers"
           ? "publish the evidence that answers this worry where the AI looks for it"
-          : "publish the evidence for your side where the AI looks for it";
+          : `publish the evidence for ${poss(brand)} side where the AI looks for it`;
     case "strategy_misfit":
       return st.wall
         ? "stop arguing against the fixed situation and aim at the buyers it does not apply to"
@@ -549,17 +563,40 @@ function actOf(p: Position, st: MapCellStat): string {
           ? "cover everything this buyer needs, or decide to leave this buyer to others"
           : "build a case that works for the typical buyer, or accept being the specialist";
     case "product_truth":
-      return "check what the AI says against your own data before writing anything";
+      return `check what the AI says against ${poss(brand)} own data before writing anything`;
     case "earned":
       return "keep the proof behind this current and easy for the AI to find";
     case "overclaimed":
       return "build the proof where buyers ask without being prompted";
     case "windfall":
-      return "find out how much of this demand moves to your own cheaper option and how much leaves";
+      return `find out how much of this demand moves to ${poss(brand)} own cheaper option and how much leaves`;
   }
 }
 
-function movesOf(map: AnalysisMapView, stats: Record<string, MapCellStat>, brand: string): Move[] {
+/** bf26: the map's lever sentences in the Brief's third person (the seven families' fixed wordings, analysis_map.ts LEVER). */
+function leverAbout(lever: string, brand: string): string {
+  const b = poss(brand);
+  return lever
+    .replace("When the AI teaches buyers what to look for, your strongest point is missing.", `When the AI tells buyers what to look for, ${b} strongest point is missing.`)
+    .replace("make the rival's case and not yours. Publish the evidence for your side", `make the rival's case and not ${b}. Publish the evidence for ${b} side`)
+    .replace("than what brings them to you.", `than what brings them to ${brand}.`)
+    .replace("compare what it says with your own data.", `compare what it says with ${b} own data.`)
+    .replace("You hold this. Keep the proof", `${brand} holds this. Keep the proof`)
+    .replace("not your standing.", `not ${b} standing.`)
+    .replace("moves to your own cheaper option", `moves to ${b} own cheaper option`);
+}
+
+/** bf26: a finding's move as a verb phrase for the sentences that carry a move inside another (SWOT, TOWS, Minto):
+ * its first clause when it opens with an instruction, else null (the cell's act is used). */
+const IMPERATIVE = /^(Read|Check|Publish|Get|Put|Keep|Decide|Defend|Build|Lead|Ask|Find|See|Answer|Aim|Don't|Give)\b/;
+function actFromMove(text: string): string | null {
+  // Only a move that opens with its instruction: a later clause ("...; decide whether to contest that question")
+  // leans on the clause before it and reads wrong inside another sentence.
+  if (!IMPERATIVE.test(text)) return null;
+  return low1(text.split(/[;:]/)[0].trim().replace(/[.\s]+$/, ""));
+}
+
+function movesOf(map: AnalysisMapView, stats: Record<string, MapCellStat>, brand: string, findingAt: (cellId: string) => Insight | undefined): Move[] {
   const deficits = Object.values(map.positions)
     // Pooled All cells are the verdict paragraph's ground, not a move - a
     // move names the specific contest to act on.
@@ -586,21 +623,26 @@ function movesOf(map: AnalysisMapView, stats: Record<string, MapCellStat>, brand
   return picked.map((p) => {
     const st = stats[p.cellId];
     const w = cellWords(st.row, st.label, brand);
-    const stem = actOf(p, st);
-    const act = `${stem}${w.prep ? ` ${w.prep}` : ""}`;
+    // bf26: a move on the cell a served finding sits on is that finding's move (finding_moves.ts, third person);
+    // otherwise the cell's lever.
+    const f = findingAt(p.cellId);
+    const fm = f ? findingMove(f.key, f.names, brand) : null;
+    const fromFinding = fm ? actFromMove(fm.text) : null;
+    const stem = fromFinding ?? actOf(p, st, brand);
+    const act = fromFinding ? stem : `${stem}${w.prep ? ` ${w.prep}` : ""}`;
     return {
       cellId: p.cellId,
       row: st.row,
       label: st.label,
       lead: w.lead,
       claim: p.claim,
-      lever: sentence(p.lever),
+      lever: fm ? sentence(fm.text) : sentence(leverAbout(p.lever, brand)),
       act,
       actStem: stem,
-      family: p.family,
+      family: fm ? fm.family : p.family,
       watch: w.watch,
-      today: todayOf(st),
-      tip: `${st.you} answers on your side, ${st.them} on ${st.taker}'s, of ${st.d} that take a side; ${st.n} answers in all. The move: ${p.family}.`,
+      today: todayOf(st, brand),
+      tip: `${st.you} answers on ${poss(brand)} side, ${st.them} on ${st.taker}'s, of ${st.d} that take a side; ${st.n} answers in all. The move: ${fm ? fm.family : p.family}.`,
     };
   });
 }
@@ -670,7 +712,7 @@ function verdictPara(c: Ctx): BriefPara {
       if (weak && weak.top && weak.top.chosen > 0) roomPin = `chooses:open:${norm(weak.r.room)}`;
       parts.push(
         weak && weak.top && weak.top.chosen > 0
-          ? `When nothing pulls the buyer elsewhere, the answer is ${c.name}; the contest is over the buyers something does pull - ${weak.r.room}, where ${weak.top.name} takes ${P(weak.top.share)}.`
+          ? `When nothing pulls the buyer elsewhere, the answer is ${c.name}; the contest is over the buyers something does pull - ${buyerPhrase(weak.r.room)}, where ${weak.top.name} takes ${P(weak.top.share)}.`
           : `When nothing pulls the buyer elsewhere, the answer is ${c.name}.`
       );
       break;
@@ -690,7 +732,7 @@ function verdictPara(c: Ctx): BriefPara {
       const wins = ranked.filter((x) => x.share.k > 0).slice(0, 2);
       parts.push(
         wins.length
-          ? `The ${c.product} the AI describes wins most where the buyer says who they are - ${listOf(wins.map((x) => x.r.room))} ${wins.length > 1 ? "are" : "is"} its best ground; the buyer who doesn't say gets someone else's ${c.product}.`
+          ? `The ${c.product} the AI describes wins most where the buyer says who they are - ${listOf(wins.map((x) => buyerPhrase(x.r.room)))} ${wins.length > 1 ? "are" : "is"} its best ground; the buyer who doesn't say gets someone else's ${c.product}.`
           : `The ${c.product} the AI describes is for a specific buyer; the buyer who doesn't say who they are gets someone else's ${c.product}.`
       );
     }
@@ -737,7 +779,8 @@ function funnelBreaks(c: Ctx): BriefPara {
 function conditionsPara(c: Ctx): BriefPara | null {
   const k = c.inputs.conditions;
   if (!k) return null;
-  const q = (g: { label: string }) => `"${g.label}"`;
+  // bf26: a quoted condition's "you" is the asker - "they" in the Brief (condLabel).
+  const q = (g: { label: string }) => `"${condLabel(g.label)}"`;
   const parts = ["The AI rarely names one winner for every buyer - it says which buyer should choose which product, and those conditions decide the choice."];
   const tips: string[] = [];
   let toward = k.toward;
@@ -790,7 +833,7 @@ function conditionsPara(c: Ctx): BriefPara | null {
     const fx = k.awayThemed && c.inputs.away ? awaySpecifics(c.summary, c.inputs.away).fixed : null;
     if (fx) walls.push(fx.label);
     for (const st of Object.values(c.stats)) if (st.wall && !walls.some((w) => norm(w) === norm(st.wall!))) walls.push(st.wall);
-    if (walls.length) parts.push(`The fixed situations - ones the buyer is already in, not arguments to answer: ${listOf(walls.slice(0, 3).map((w) => `"${w}"`))}.`);
+    if (walls.length) parts.push(`The fixed situations - ones the buyer is already in, not arguments to answer: ${listOf(walls.slice(0, 3).map((w) => `"${condLabel(w)}"`))}.`);
   }
   if (parts.length === 1) return null;
   return withCells({ text: parts.join(" "), tip: tips.join(" ") || undefined }, cellsOf(c, CONDITION_CARD));
@@ -808,26 +851,41 @@ function findingsOf(c: Ctx): Ctx["findings"] {
       .filter((i) => i.kind !== "engine" && !VERDICT_CARRIED.has(i.key) && !(i.key === "pick_concentration_question" && !i.title.includes("your")))
       .sort((a, b) => b.effect - a.effect)
       .slice(0, 5)
-      .map((i) => ({ lead: leadOf(cap(i.title)), text: cap(i.body), tip: i.foot, key: i.key, cellIds: insightCells(c, i) }));
+      // bf26: the Brief's own rendering of the same finding (third person, buyers as words).
+      .map((i) => {
+        const v = c.voiced.get(i.key) ?? i;
+        return { lead: leadOf(cap(v.title)), text: cap(v.body), tip: i.foot, key: i.key, cellIds: insightCells(c, i) };
+      });
   const out: Ctx["findings"] = [];
   const ranked = roomsByShare(c);
   const best = ranked[0];
   const worst = ranked.length > 1 ? ranked[ranked.length - 1] : undefined;
   if (best && best.share.k > 0)
-    out.push({ key: "best_room", cellIds: [`chooses:open:${norm(best.r.room)}`], lead: "Its strongest situation.", text: `${best.r.room} is where ${c.name} does best: ${P(best.share)} of the picks there.`, tip: tipOf(best.share) });
+    out.push({ key: "best_room", cellIds: [`chooses:open:${norm(best.r.room)}`], lead: "Its strongest situation.", text: `${c.name} does best with ${buyerPhrase(best.r.room)}: ${P(best.share)} of the picks there.`, tip: tipOf(best.share) });
   if (worst && worst.top)
     out.push({
       key: "worst_room",
       cellIds: [`chooses:open:${norm(worst.r.room)}`],
       lead: "Its weakest situation.",
-      text: `${worst.r.room} is its weakest - ${worst.share.k === 0 ? "none" : P(worst.share)} of the picks there, with ${worst.top.name} taking ${P(worst.top.share)}.`,
+      text: `Its weakest is ${buyerPhrase(worst.r.room)} - ${worst.share.k === 0 ? "none" : P(worst.share)} of the picks there, with ${worst.top.name} taking ${P(worst.top.share)}.`,
       tip: `${tipOf(worst.share)}; ${worst.top.name} ${worst.top.chosen}.`,
     });
   const l = c.lift[0];
   if (l && l.lift > 0 && l.wins.low > l.others.high)
     out.push({ key: "lift", cellIds: [BRAND_CARD(c.subject.key)], lead: "The argument it wins on.", text: `${cap(l.code)} is argued in ${P(l.wins)} of the answers that pick ${c.name}, against ${P(l.others)} when another brand is picked.`, tip: `${tipOf(l.wins)}; ${tipOf(l.others)}.` });
   if (c.vsTarget && c.vsTarget.won.n >= MIN)
-    out.push({ key: "vs_target", cellIds: [rivalCell(c, c.subject.key)].filter((x): x is string => !!x), lead: `Against ${c.brand}.`, text: `Compared directly with ${c.brand}, the AI sides with ${c.name} ${P(c.vsTarget.won)} of the time it takes a side.`, tip: tipOf(c.vsTarget.won) });
+    out.push({
+      key: "vs_target",
+      cellIds: [rivalCell(c, c.subject.key)].filter((x): x is string => !!x),
+      lead: `Against ${c.brand}.`,
+      text:
+        c.vsTarget.won.k === 0
+          ? `Compared directly with ${c.brand}, the AI never sides with ${c.name} when it takes a side.`
+          : c.vsTarget.won.k === c.vsTarget.won.n
+            ? `Compared directly with ${c.brand}, the AI sides with ${c.name} every time it takes a side.`
+            : `Compared directly with ${c.brand}, the AI sides with ${c.name} ${P(c.vsTarget.won)} of the time it takes a side.`,
+      tip: tipOf(c.vsTarget.won),
+    });
   const lw = c.lift.length > 1 ? c.lift[c.lift.length - 1] : undefined;
   if (lw && lw.lift < 0 && lw.others.low > lw.wins.high)
     out.push({ key: "loss_arg", cellIds: [BRAND_CARD(c.subject.key)], lead: "The argument it loses on.", text: `${cap(lw.code)} comes up in ${P(lw.others)} of the answers that pick another brand and ${P(lw.wins)} of those that pick ${c.name}.`, tip: `${tipOf(lw.wins)}; ${tipOf(lw.others)}.` });
@@ -871,7 +929,7 @@ function scoreboard(c: Ctx): BriefRow[] {
 const leadOf = (t: string) => (/[.!?]$/.test(t.trim()) ? t.trim() : `${t.trim()}.`);
 
 function movePara(c: Ctx, m: Move): BriefPara {
-  return withCells({ lead: leadOf(m.lead), text: `${sentence(m.claim)} ${m.lever} Watch: ${m.watch}.`, tip: m.tip }, cellsOf(c, m.cellId));
+  return withCells({ lead: leadOf(m.lead), text: `${sentence(m.claim)}${m.lever ? ` ${m.lever}` : ""} Watch: ${m.watch}.`, tip: m.tip }, cellsOf(c, m.cellId));
 }
 
 function nowWhat(c: Ctx): BriefSection[] {
@@ -890,12 +948,12 @@ function nowWhat(c: Ctx): BriefSection[] {
       heading: "Now what?",
       paras: c.moves.length
         ? (() => {
-            // A lever the map repeats verbatim across moves reads canned - say it once.
+            // bf26: a move sentence is said once per frame - a repeat keeps its claim and its "Watch:" line alone.
             const seen = new Set<string>();
             return c.moves.map((m) => {
               const repeat = seen.has(m.lever);
               seen.add(m.lever);
-              return movePara(c, repeat ? { ...m, lever: "Same first move: check it against your own data." } : m);
+              return movePara(c, repeat ? { ...m, lever: "" } : m);
             });
           })()
         : [{ text: `No buying situation, matchup or worry is lost by a clear margin in this wave - the job is to keep the standing current.` }],
@@ -909,17 +967,17 @@ const INSIGHT_SHORT: Record<string, string> = {
   rival_open: "the leading rival's lead in picks",
   conversion_vs_rival: "the leading rival turning recommendations into picks",
   away_condition: "the condition that most often sends buyers away",
-  own_defense: "the exits shown to your own customers",
+  own_defense: "the exits the AI shows its own customers",
   engine_pick_concentration: "dependence on one AI assistant",
   leak_picks: "picks leaving the category",
   leak_problem: "problem questions answered outside the category",
   worst_worry: "the worry that loses the most customers",
   leave_no_exit: "customers told to leave with nowhere to go",
-  neutralized_differentiator: "rivals credited with your differentiator",
-  leaver_capture: "rival customers who hear about you and go elsewhere",
-  taught_vs_winning: "what the AI teaches buyers to weigh",
+  neutralized_differentiator: "rivals credited with its differentiator",
+  leaver_capture: "rival customers who hear about it and go elsewhere",
+  taught_vs_winning: "what the AI tells buyers to look for",
   value_in_house: "doubts about the price",
-  doubt_worry: "the worry the AI backs most",
+  doubt_worry: "the worry the AI agrees with most",
   agreed_yet_stay: "worries the AI agrees with",
   pick_concentration_room: "picks that come from one buying situation",
   pick_concentration_question: "picks that come from one question",
@@ -940,15 +998,16 @@ function insightIsStrength(i: Insight): boolean {
 
 /** The noun phrase for a detector that fired in its strength direction. */
 const STRENGTH_SHORT: Record<string, string> = {
-  rival_open: "your lead in picks",
-  conversion_vs_rival: "the way your recommendations turn into picks",
-  leaver_capture: "the rival customers who come to you",
+  rival_open: "its lead in picks",
+  conversion_vs_rival: "the way its recommendations turn into picks",
+  leaver_capture: "the rival customers who come to it",
 };
 
 function fromInsight(c: Ctx, i: Insight, kind: string): Item {
   const short = (insightIsStrength(i) ? STRENGTH_SHORT[i.key] : INSIGHT_SHORT[i.key]) ?? low1(i.title);
   const ids = insightCells(c, i);
-  return { text: i.body, short, tip: i.foot, kind, effect: i.effect, cellId: ids[0], cellIds: ids };
+  const v = c.voiced.get(i.key) ?? i;
+  return { text: v.body, short, tip: i.foot, kind, effect: i.effect, cellId: ids[0], cellIds: ids };
 }
 
 function funnelBreak(S: SummaryBrand, name: string): Item | null {
@@ -998,7 +1057,7 @@ function swotOf(c: Ctx): Swot {
   const worst = c.lift.length > 1 ? c.lift[c.lift.length - 1] : undefined;
   if (best && best.lift > 0 && best.wins.low > best.others.high)
     s.push({
-      text: `${cap(best.code)} comes up more when ${c.isTarget ? "you win" : `${c.name} wins`} - argued in ${P(best.wins)} of the answers that pick ${c.isTarget ? "you" : c.name} and ${P(best.others)} of those that pick another brand.`,
+      text: `${cap(best.code)} comes up more when ${c.name} wins - argued in ${P(best.wins)} of the answers that pick ${c.name} and ${P(best.others)} of those that pick another brand.`,
       short: `the ${best.code} argument`,
       tip: `${tipOf(best.wins)} wins; ${tipOf(best.others)} other picks.`,
       kind: "argument",
@@ -1007,7 +1066,7 @@ function swotOf(c: Ctx): Swot {
     });
   if (worst && worst.lift < 0 && worst.others.low > worst.wins.high)
     w.push({
-      text: `${cap(worst.code)} shows up when another brand is picked - argued in ${P(worst.others)} of those answers and ${P(worst.wins)} of the answers that pick ${c.isTarget ? "you" : c.name}.`,
+      text: `${cap(worst.code)} shows up when another brand is picked - argued in ${P(worst.others)} of those answers and ${P(worst.wins)} of the answers that pick ${c.name}.`,
       short: `the ${worst.code} argument`,
       tip: `${tipOf(worst.wins)} wins; ${tipOf(worst.others)} other picks.`,
       kind: "argument",
@@ -1024,7 +1083,7 @@ function swotOf(c: Ctx): Swot {
       if (r.winOfDecided.n >= MIN && r.winOfDecided.low > 0.5)
         s.push({
           text: `Asked to compare ${c.brand} with ${r.rival} directly, the AI picks ${c.brand} ${P(r.winOfDecided)} of the time it picks one of them.`,
-          short: `your ${P(r.winOfDecided)} record against ${r.rival}`,
+          short: `its ${P(r.winOfDecided)} record against ${r.rival}`,
           tip: `Won ${r.won.k}, lost ${r.lost.k}.`,
           kind: "rival",
           row: "h2h",
@@ -1038,7 +1097,7 @@ function swotOf(c: Ctx): Swot {
       if (!st || st.pooled || p.status !== "surplus" || st.row === "h2h" || st.band === "settled") continue;
       if (st.row === "buyers" || st.row === "customers" || st.row === "hold") continue;
       const wd = cellWords(st.row, st.label, c.brand);
-      s.push({ text: sentence(p.claim), short: `your hold ${wd.prep || "here"}`, tip: `${st.you} of ${st.d} side-taking answers.`, kind: st.row, row: st.row, effect: st.n > 0 ? (st.you - st.them) / st.n : 0, cellId: p.cellId });
+      s.push({ text: sentence(p.claim), short: `its hold ${wd.prep || "here"}`, tip: `${st.you} of ${st.d} side-taking answers.`, kind: st.row, row: st.row, effect: st.n > 0 ? (st.you - st.them) / st.n : 0, cellId: p.cellId });
     }
     const used = new Set(c.findings.map((f) => f.key));
     for (const i of c.ranked) if (insightIsStrength(i) && !used.has(i.key)) s.push(fromInsight(c, i, i.kind));
@@ -1055,7 +1114,7 @@ function swotOf(c: Ctx): Swot {
     if (v && v.answers >= MIN && rate(v.worth.no) >= rate(v.worth.yes) && v.worth.no.k > 0) {
       const subject = v.lines.length === 1 ? v.lines[0].label : c.brand;
       w.push({
-        text: `${subject} is judged not worth it over a cheaper option in ${P(v.worth.no)} of answers and worth it in ${P(v.worth.yes)}.`,
+        text: v.worth.yes.k === 0 ? `${subject} is judged not worth it over a cheaper option in ${P(v.worth.no)} of answers and never worth it.` : `${subject} is judged not worth it over a cheaper option in ${P(v.worth.no)} of answers and worth it in ${P(v.worth.yes)}.`,
         short: "the value question",
         tip: `No ${tipOf(v.worth.no)}; yes ${tipOf(v.worth.yes)}.`,
         kind: "value",
@@ -1080,8 +1139,10 @@ function swotOf(c: Ctx): Swot {
     for (const [cellId, st] of Object.entries(c.stats))
       if (st.wall && st.d >= MIN && ["open", "social", "premium", "h2h", "leavers"].includes(st.row) && !wallSeen.has(norm(st.wall)) && wallSeen.add(norm(st.wall)))
         t.push({
-          text: `${st.row === "h2h" ? `Against ${st.label}` : st.label ? `For ${st.label}` : "For every buyer"}, "${st.wall}" sends buyers away - a situation the buyer is already in - while ${st.taker} takes ${pctN(st.them / st.d)} of the picks there.`,
-          short: `the fixed situation "${st.wall}"`,
+          text: `${st.row === "h2h" ? `Against ${st.label}` : st.label ? `For ${buyerPhrase(st.label)}` : "For every buyer"}, "${condLabel(st.wall)}" sends buyers away - a situation the buyer is already in - while ${st.taker} ${
+            st.them === st.d ? "takes every pick there" : `takes ${pctN(st.them / st.d)} of the picks there`
+          }.`,
+          short: `the fixed situation "${condLabel(st.wall)}"`,
           tip: `${st.them} of ${st.d} answers that take a side go to ${st.taker}.`,
           kind: "wall",
           effect: st.them / st.d - st.you / st.d,
@@ -1092,7 +1153,7 @@ function swotOf(c: Ctx): Swot {
     const seenAct = new Set<string>();
     for (const m of c.moves) {
       const where = m.act.slice(m.actStem.length).trim();
-      const text = seenAct.has(m.actStem) && where ? `The same move ${where} - ${m.today}.` : `${cap(m.act)} - ${m.today}.`;
+      const text = seenAct.has(m.actStem) && where ? `The same move ${where} - ${m.today}.` : seenAct.has(m.actStem) ? `${m.lead} - ${m.today}.` : `${cap(m.act)} - ${m.today}.`;
       seenAct.add(m.actStem);
       o.push({ text, short: `the opening ${m.lead.startsWith("The worry") ? `on ${low1(m.lead)}` : `in ${m.lead}`}`, act: m.act, tip: m.tip, kind: m.row, row: m.row, effect: 1, cellId: m.cellId });
     }
@@ -1108,9 +1169,9 @@ function swotOf(c: Ctx): Swot {
         const gap = rate(top.share) - rate(share);
         if (mine && gap <= 0.15 && mine.chosen > 0)
           o.push({
-            text: `For ${r.room}, ${c.name} takes ${P(share)} of the picks, ${Math.round(gap * 100)} points behind ${top.name}.`,
-            short: `the ${r.room} situation`,
-            act: `press its case for ${r.room}`,
+            text: `For ${buyerPhrase(r.room)}, ${c.name} takes ${P(share)} of the picks, ${Math.round(gap * 100)} points behind ${top.name}.`,
+            short: `the situation of ${buyerPhrase(r.room)}`,
+            act: `press its case for ${buyerPhrase(r.room)}`,
             tip: `${share.k} of ${share.n} picks; ${top.name} ${top.chosen}.`,
             kind: "room",
             effect: 0.15 - gap,
@@ -1118,8 +1179,8 @@ function swotOf(c: Ctx): Swot {
           });
         else
           w.push({
-            text: `For ${r.room}, ${c.name} takes ${share.k === 0 ? "none" : `only ${P(share)}`} of the picks - ${top.name} takes ${P(top.share)}.`,
-            short: `its weak spot for ${r.room}`,
+            text: `For ${buyerPhrase(r.room)}, ${c.name} takes ${share.k === 0 ? "none" : `only ${P(share)}`} of the picks - ${top.name} takes ${P(top.share)}.`,
+            short: `its weak spot for ${buyerPhrase(r.room)}`,
             tip: `${share.k} of ${share.n} picks; ${top.name} ${top.chosen}.`,
             kind: "room",
             effect: gap,
@@ -1127,8 +1188,8 @@ function swotOf(c: Ctx): Swot {
           });
       } else if (mine && mine.chosen > 0) {
         s.push({
-          text: `For ${r.room}, ${c.name} takes ${P(share)} of the picks - more than any other brand.`,
-          short: `its lead for ${r.room}`,
+          text: `For ${buyerPhrase(r.room)}, ${c.name} takes ${P(share)} of the picks - more than any other brand.`,
+          short: `its lead for ${buyerPhrase(r.room)}`,
           tip: `${share.k} of ${share.n} picks.`,
           kind: "room",
           effect: rate(share) - (top ? rate(top.share) : 0),
@@ -1214,7 +1275,7 @@ function towsFrame(c: Ctx, sw: Swot): BriefSection[] {
   const none = "Nothing to pair in this wave.";
   const or = (p: BriefPara[]) => (p.length ? p : [{ text: none }]);
   return [
-    { key: "promise", paras: [{ text: "TOWS pairs each strength and weakness with an opening or a threat - what to do with what you have." }] },
+    { key: "promise", paras: [{ text: `TOWS pairs each strength and weakness with an opening or a threat - what ${c.name} can do with what it has.` }] },
     {
       key: "tows",
       quads: [
@@ -1305,7 +1366,7 @@ function funnelFrame(c: Ctx): BriefSection[] {
       items.push({ label: L.kept, a: rate(k.keep) * 100, value: P(k.keep) });
       paras.push({
         lead: `${L.kept}.`,
-        text: `When your customers raise a worry, the AI tells them to stay in ${P(k.keep)} of answers and to leave in ${P(k.leave)}; the other ${pctN(Math.max(0, 1 - rate(k.keep) - rate(k.leave)))} take no side either way.`,
+        text: `When ${poss(c.name)} customers raise a worry, the AI tells them to stay in ${P(k.keep)} of answers and to leave in ${P(k.leave)}; the other ${pctN(Math.max(0, 1 - rate(k.keep) - rate(k.leave)))} take no side either way.`,
         tip: `Stay ${tipOf(k.keep)}; leave ${tipOf(k.leave)}.`,
         ...(keptA ? { cells: [keptA] } : {}),
       });
@@ -1631,11 +1692,17 @@ function jobsFrame(c: Ctx): BriefSection[] {
     if (c.isTarget) {
       const v = valueRooms.get(r.room);
       if (v && v.answers >= MIN) {
-        parts.push(`Asked whether ${v.line ?? c.brand} is worth it over a cheaper option, the AI says yes in ${P(v.worth.yes)} of answers.`);
+        parts.push(
+          v.worth.yes.k === 0
+            ? `Asked whether ${v.line ?? c.brand} is worth it over a cheaper option, the AI never says yes.`
+            : v.worth.yes.k === v.worth.yes.n
+              ? `Asked whether ${v.line ?? c.brand} is worth it over a cheaper option, the AI says yes in every answer.`
+              : `Asked whether ${v.line ?? c.brand} is worth it over a cheaper option, the AI says yes in ${P(v.worth.yes)} of answers.`
+        );
         tip += `; worth it ${tipOf(v.worth.yes)}`;
       }
       const st = c.stats[`chooses:open:${norm(r.room)}`];
-      if (st?.wall) parts.push(`The condition "${st.wall}" - a situation the buyer is already in - sends buyers away here.`);
+      if (st?.wall) parts.push(`The condition "${condLabel(st.wall)}" - a situation the buyer is already in - sends buyers away here.`);
     }
     const hasValue = c.isTarget && (valueRooms.get(r.room)?.answers ?? 0) >= MIN;
     paras.push(withCells({ lead: r.room, text: parts.join(" "), tip: `${tip}.` }, cellsAt(c, [`chooses:open:${norm(r.room)}`, r.room], [hasValue ? `chooses:value:${norm(r.room)}` : null, r.room])));
@@ -1669,7 +1736,7 @@ function pairsViz(c: Ctx): BriefViz | null {
     ? `Every situation has an owner - and it is never ${c.name}`
     : owned.length === groups.length
       ? `${c.name} owns every buying situation`
-      : `${c.name} owns ${listOf(owned)}; the rest have other owners`;
+      : `${c.name} owns ${listOf(owned.map((r) => buyerPhrase(r)))}; the rest have other owners`;
   return {
     kind: "pairs",
     title,
@@ -1691,7 +1758,7 @@ function pairsViz(c: Ctx): BriefViz | null {
 function moveTag(m: Move, brand: string): string {
   switch (m.row) {
     case "open":
-      return m.label || "the open answer";
+      return m.label ? buyerPhrase(m.label) : "the open answer";
     case "social":
       return "the popular pick";
     case "awareness":
@@ -1705,7 +1772,7 @@ function moveTag(m: Move, brand: string): string {
     case "premium":
       return "premium versus basic";
     case "criteria":
-      return "the checklist";
+      return "what buyers are told to look for";
     case "h2h":
       return `the ${m.label} matchup`;
     case "leavers":
@@ -1771,7 +1838,7 @@ function mintoFrame(c: Ctx): BriefSection[] {
       compKind = "rooms";
       roomSpread = [hi.share, lo.share];
       comp = {
-        text: `Yet the standing is uneven: ${c.name} takes ${P(hi.share)} of the picks for ${hi.r.room} but ${lo.share.k === 0 ? "none of them" : `only ${P(lo.share)}`} for ${lo.r.room}.`,
+        text: `Yet the standing is uneven: ${c.name} takes ${P(hi.share)} of the picks for ${buyerPhrase(hi.r.room)} but ${lo.share.k === 0 ? "none of them" : `only ${P(lo.share)}`} for ${buyerPhrase(lo.r.room)}.`,
         tip: `${hi.r.room}: ${tipOf(hi.share)}. ${lo.r.room}: ${tipOf(lo.share)}.`,
         cells: cellsOf(c, `chooses:open:${norm(hi.r.room)}`, `chooses:open:${norm(lo.r.room)}`),
       };
@@ -1802,7 +1869,7 @@ function mintoFrame(c: Ctx): BriefSection[] {
   else {
     const weak = roomsByShare(c);
     const w = weak.length > 1 ? weak[weak.length - 1] : undefined;
-    resNote = w ? `Where it is exposed: ${w.r.room}` : `The moves in this brief belong to ${c.brand}`;
+    resNote = w ? `Where it is exposed: ${buyerPhrase(w.r.room)}` : `The moves in this brief belong to ${c.brand}`;
   }
   out.unshift({
     key: "pyramid",
@@ -1830,6 +1897,146 @@ function mintoFrame(c: Ctx): BriefSection[] {
       })(),
     });
   return out;
+}
+
+/* ------------------------- bf26: the Brief's one voice ------------------------- */
+
+const escRe = (x: string) => x.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
+/** Is offset `at` of `t` inside a quoted span (an odd number of straight quotes before it)? */
+const inQuotes = (t: string, at: number) => ((t.slice(0, at).match(/"/g) ?? []).length % 2) === 1;
+
+/**
+ * bf26: the last pass over every running sentence the Brief composes (paragraph text, quadrant cells, chart titles
+ * and pyramid lines - never headings, leads that are just a buyer's name, tables or scoreboard figures):
+ *  - text quoted from the map's positions and levers, written to "you", about the tracker's brand by name;
+ *  - a buying situation's label as words (buyerPhrase), never inside quotes;
+ *  - "never" / "every" for 0% / 100% in the sentence shapes the Brief uses;
+ *  - the cards' vocabulary ("agrees the worry is fair", "what the AI tells buyers to look for").
+ */
+function voiceText(t: string, c: Ctx): string {
+  if (!t) return t;
+  const B = c.brand;
+  const Bs = poss(B);
+  let x = t
+    // The map's sentences written to the client.
+    .replace(/\ban argument that comes up more when you win\b/g, `an argument that comes up more when ${B} wins`)
+    .replace(/\bwhen you win\b/g, `when ${B} wins`)
+    .replace(/\bwhen you lose\b/g, `when ${B} loses`)
+    .replace(/\banswers that pick you\b/g, `answers that pick ${B}`)
+    .replace(/\bWhen your own customer\b/g, `When ${Bs} own customer`)
+    .replace(/\byour own customers\b/g, `${Bs} own customers`)
+    .replace(/\bYour customers\b/g, `${Bs} customers`)
+    .replace(/\byour customers\b/g, `${Bs} customers`)
+    .replace(/\bAsked by your customers\b/g, `Asked by ${Bs} customers`)
+    .replace(/\balongside you\b/g, `alongside ${B}`)
+    .replace(/\bagainst your (\d+%|<1%)/g, `against ${Bs} $1`)
+    .replace(/\bthe matchups you win \/ lose\b/g, `the matchups ${B} wins / loses`)
+    .replace(/\bagainst you\b/g, `against ${B}`)
+    .replace(/\bwins for you\b/g, `wins for ${B}`)
+    .replace(/\brecommending you\b/g, `recommending ${B}`)
+    .replace(/\bhelps you\b/g, `helps ${B}`)
+    .replace(/\bin your category\b/g, "in the category")
+    .replace(/\byour wins\b/g, `${Bs} wins`)
+    // The cards' vocabulary.
+    .replace(/\bwarranted\b/g, "fair")
+    .replace(/\bthe criteria the AI teaches lead with\b/g, "what the AI tells buyers to look for leads with")
+    .replace(/\bthe criteria the AI teaches\b/g, "what the AI tells buyers to look for")
+    .replace(/\bteaches buyers to weigh\b/g, "tells buyers to look for")
+    .replace(/\bThe worry it backs most\b/g, "The worry it agrees with most")
+    // "Never" and "every" at the extremes.
+    .replace(/\b(the AI) picks (.+?) in 0% of the answers that pick one of them\b/g, "$1 never picks $2 when it picks one of the two")
+    .replace(/\b(the AI) picks (.+?) in 100% of the answers that pick one of them\b/g, "$1 always picks $2 when it picks one of the two")
+    .replace(/\b(the AI) picks (.+?) 0% of the time it picks one of (?:them|the two)\b/g, "$1 never picks $2 when it picks one of the two")
+    .replace(/\b(the AI) picks (.+?) 100% of the time it picks one of (?:them|the two)\b/g, "$1 always picks $2 when it picks one of the two")
+    .replace(/\bis judged worth it over a cheaper option in 0% of answers and not worth it in\b/g, "is never judged worth it over a cheaper option and is judged not worth it in")
+    .replace(/\bis judged worth it over a cheaper option in 0% of answers\b/g, "is never judged worth it over a cheaper option")
+    .replace(/\bthe AI says yes in 0% of answers\b/g, "the AI never says yes")
+    .replace(/\bin 100% of the answers that judge it\b/g, "in every answer that judges it")
+    .replace(/\bin 0% of the answers that judge it\b/g, "in none of the answers that judge it")
+    .replace(/\btells them to go ahead in 0%/g, "never tells them to go ahead")
+    .replace(/\btakes 0% of the picks\b/g, "takes none of the picks")
+    .replace(/\bpicked in 0%/g, "never picked")
+    .replace(/\bsays (\w+) in 0% of answers and (\w+) in 0%/g, "never says $1 or $2")
+    .replace(/\bsays (\w+) in 0% of answers and\b/g, "never says $1, and says")
+    .replace(/\btells them to stay in 0%/g, "never tells them to stay");
+  // Buying situations as words (longest label first; never inside quotes; a possessive left as written).
+  const labels = [...new Set(c.rooms.map((r) => r.room.trim()))].filter(Boolean).sort((a, b) => b.length - a.length);
+  for (const L of labels) {
+    // The map's possessive form ("In <label>'s problem questions").
+    x = x.replace(new RegExp(`\\b(In|in) ${escRe(L)}['’]s problem questions\\b`, "g"), (_m, inW: string) => `${inW} the problem questions of ${buyerPhrase(L)}`);
+    const re = new RegExp(`(?<![\\w"-])${escRe(L)}(?![\\w'’-])`, "g");
+    x = x.replace(re, (m, at: number, full: string) => {
+      if (inQuotes(full, at)) return m;
+      const before = full.slice(0, at);
+      const start = before.trim() === "" || /[.!?:]\s+$/.test(before);
+      return buyerPhrase(L, { start });
+    });
+  }
+  return x;
+}
+
+/** bf26: the voice pass over a memo's sentences (headings, leads that name a buyer, rows and tables stay as written). */
+function voiceMemo(sections: BriefSection[], c: Ctx): BriefSection[] {
+  const para = (p: BriefPara): BriefPara => {
+    const text = voiceText(p.text, c);
+    // A pin's `at` phrase follows the words it links (a phrase the pass rewrote keeps its link).
+    const cells = p.cells?.map((a) => {
+      if (!a.at || text.includes(a.at)) return a;
+      const v = voiceText(a.at, c);
+      return text.includes(v) ? { ...a, at: v } : a;
+    }).map((a) => ({ ...a, label: voiceText(a.label, c) }));
+    return { ...p, text, ...(cells ? { cells } : {}), ...(p.lead && !c.rooms.some((r) => norm(r.room) === norm(p.lead!.replace(/[.]$/, ""))) ? { lead: voiceLead(p.lead, c) } : {}) };
+  };
+  return sections.map((s) => ({
+    ...s,
+    ...(s.paras ? { paras: s.paras.map(para) } : {}),
+    ...(s.quads ? { quads: s.quads.map((q) => ({ ...q, cells: [q.cells[0].map(para), q.cells[1].map(para)] as [BriefPara[], BriefPara[]] })) } : {}),
+    ...(s.viz
+      ? {
+          viz: {
+            ...s.viz,
+            title: voiceText(s.viz.title, c),
+            ...(s.viz.subtitle ? { subtitle: voiceText(s.viz.subtitle, c) } : {}),
+            ...(s.viz.kind === "pyramid" ? { items: s.viz.items.map((it) => (it.note ? { ...it, note: voiceText(it.note, c) } : it)) } : {}),
+          },
+        }
+      : {}),
+  }));
+}
+
+/** A lead (bold opening) in the Brief's voice: the map's and the insights' second person only - buyer labels in a
+ * lead read as the heading they are. */
+function voiceLead(lead: string, c: Ctx): string {
+  return lead
+    .replace(/\bwhen you win\b/g, `when ${c.brand} wins`)
+    .replace(/\bThe worry it backs most\b/g, "The worry it agrees with most");
+}
+
+/** bf26: an answer card in the Brief's voice - its sentences and row words (figures as stated: the number links read them). */
+function voiceCard(card: AnswerCard, c: Ctx): AnswerCard {
+  const B = c.brand;
+  const words = (t: string) =>
+    t
+      .replace(/\bbrings buyers to you\b/g, `brings buyers to ${B}`)
+      .replace(/\btoward you\b/g, `toward ${B}`)
+      .replace(/\baway from you\b/g, `away from ${B}`)
+      .replace(/\bA reason to leave you\b/g, `A reason to leave ${B}`)
+      .replace(/\bto pick you\b/g, `to pick ${B}`)
+      .replace(/\bto leave you\b/g, `to leave ${B}`)
+      .replace(/\byour picks\b/g, `${poss(B)} picks`)
+      .replace(/\bYour picks\b/g, `${poss(B)} picks`)
+      .replace(/\bYour share\b/g, `${poss(B)} share`)
+      .replace(/\byour share\b/g, `${poss(B)} share`)
+      .replace(/\bwarranted\b/g, "fair");
+  return {
+    ...card,
+    crumb: words(voiceText(card.crumb, c)),
+    headline: words(voiceText(card.headline, c)),
+    rows: card.rows.map((r) => ({ ...r, label: words(voiceText(r.label, c)), value: words(r.value) })),
+    ...(card.lifts ? { lifts: card.lifts.map((l) => ({ ...l, label: words(voiceText(l.label, c)), ...(l.wins ? { wins: words(l.wins) } : {}), ...(l.others ? { others: words(l.others) } : {}) })) } : {}),
+    ...(card.liftSides ? { liftSides: card.liftSides.map((x) => words(voiceText(x, c))) as [string, string] } : {}),
+  };
 }
 
 /* ---------------------------------- compute -------------------------------- */
@@ -1903,6 +2110,15 @@ export async function computeBrief(data: ViewData, request: BriefRequest = {}): 
   const liftOf = src.liftOf;
   const product = src.product;
 
+  // bf26: the same detectors in the Brief's style, about the target by name (the served ones stay second person).
+  const voiced = new Map<string, Insight>(isTarget ? rankedInsights(summary, inputs, { name: brand }).map((i) => [i.key, i]) : []);
+  // The served finding the map placed on a cell (the strongest first) - a move there is that finding's move.
+  const onCell = new Map<string, Insight>();
+  for (const i of summary.insights) {
+    const id = placements.get(placementKey(i.key, i.title));
+    if (id && !onCell.has(id)) onCell.set(id, i);
+  }
+  const findingAt = (cellId: string) => onCell.get(cellId);
   const engineCount = summary.core.length;
   const month = monthOf(data.run);
   const wave = await waveOf(data.run);
@@ -1922,7 +2138,7 @@ export async function computeBrief(data: ViewData, request: BriefRequest = {}): 
     rooms,
     lift: liftOf(subject.key),
     vsTarget,
-    moves: isTarget ? movesOf(map, stats, brand) : [],
+    moves: isTarget ? movesOf(map, stats, brand, findingAt) : [],
     findings: [],
     placements,
     stagePicks,
@@ -1931,12 +2147,13 @@ export async function computeBrief(data: ViewData, request: BriefRequest = {}): 
     wave,
     cards: new Map(),
     src,
+    voiced,
   };
 
   ctx.findings = findingsOf(ctx);
   const sw = swotOf(ctx);
   const memo = (frame: BriefFrame, sections: BriefSection[]): BriefMemo =>
-    citePins({ frame, title: `${name} - ${BRIEF_FRAME_LABELS[frame]} - wave ${ctx.wave}`, sections, footer: ctx.footer }, ctx.cards);
+    citePins({ frame, title: `${name} - ${BRIEF_FRAME_LABELS[frame]} - wave ${ctx.wave}`, sections: voiceMemo(sections, ctx), footer: ctx.footer }, ctx.cards);
   const memos: Record<BriefFrame, BriefMemo> = {
     now_what: memo("now_what", nowWhat(ctx)),
     swot: memo("swot", swotFrame(ctx, sw)),
@@ -1951,7 +2168,7 @@ export async function computeBrief(data: ViewData, request: BriefRequest = {}): 
   for (const m of Object.values(memos))
     for (const id of anchorIds(m)) {
       const card = ctx.cards.get(id);
-      if (card) cards[id] = card;
+      if (card) cards[id] = voiceCard(card, ctx);
     }
   return { subject: name, subjects: subjects.map((b) => (b.key === target.key ? brand : b.name)), memos, engineCount, cards };
 }
@@ -1981,7 +2198,7 @@ export async function computeBrief(data: ViewData, request: BriefRequest = {}): 
 // bf21 (2026-11-10): the plain-wording pass - reads bs13 / am15 (new move names, lever sentences and insight wording quoted in the memos); actOf restates the new levers; the conditions paragraph, the condition card, the SWOT wall and the jobs wall lines say what sends buyers away and "a fixed situation" instead of "routes" / "wall" / "reason". The exemplar's "The conditions that decide it" heading is kept. Numbers unchanged.
 // bf22 (2026-11-12): the reasons harmonization - reads bs17 / am22: the conditions paragraph, the condition card and the away-condition finding name the run's reason THEMES (dt4) where a theme map exists (raw condition groups only without one); the paragraph's tips count statements on a themed side.
 // bf23 (2026-11-13, one counting rule - reads bs21): with reason themes the conditions paragraph counts each side's themes at ANSWER grain over that side's own answer base, and the condition card lists the themes at answer grain, names the lead away theme (quoting its most-stated wording) and gives the away_condition finding's blocker and fixed-situation wordings their own rows on the same base. Keyless output unchanged.
-const BRIEF_VERSION = "bf25"; // bf25 (2026-11-13): the conditions line reads "rarely names one winner for every buyer" (was "a rule, not a winner"). // bf24 (2026-11-13): themed conditions name one destination only when it takes half their answers; the fixed-situation line leads with the finding wording.
+const BRIEF_VERSION = "bf26"; // bf26 (2026-11-16): one voice - the subject in the third person everywhere (the insights re-run in the Brief's style, the moves' third-person form, the map's levers and claims voiced), buyers as words, never / every at the extremes, the cards' vocabulary, a finding's move on its cell, no move sentence twice in a frame. // bf25 (2026-11-13): the conditions line reads "rarely names one winner for every buyer" (was "a rule, not a winner"). // bf24 (2026-11-13): themed conditions name one destination only when it takes half their answers; the fixed-situation line leads with the finding wording.
 
 /**
  * The brief through the cache. cachedView's keying, with the subject as one

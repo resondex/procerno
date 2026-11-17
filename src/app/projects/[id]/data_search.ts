@@ -104,10 +104,10 @@ const POOL_WORDS: [string[], ViewKey[]][] = [
   [["value", "price", "pricing", "cost", "expensive", "cheap", "cheaper", "worth", "worth it", "fee", "afford", "money", "budget"], ["value"]],
   [["loyalty", "loyal", "retention", "retain", "churn", "stay", "leave", "keep", "cancel", "renew", "renewal", "customers", "customer base", "existing customer"], ["keep_or_leave", "defensive_hold", "repertoire"]],
   [["habit", "repertoire", "repeat", "routine", "stick with", "regular"], ["repertoire"]],
-  [["advocacy", "advocate", "word of mouth", "refer", "referral", "defend", "critic", "recommend to"], ["settled_advocacy"]],
+  [["answering a critic", "critic", "critics", "criticism", "advocacy", "advocate", "word of mouth", "refer", "referral", "defend", "recommend to"], ["settled_advocacy"]],
   [["business case", "approval", "approve", "sign off", "boss", "justify", "roi"], ["settled_business_case"]],
   [["expansion", "expand", "grow", "growth", "upgrade", "upsell", "more seats"], ["settled_expansion"]],
-  [["ecosystem", "integration", "add on", "companion", "accessory", "partner"], ["settled_ecosystem"]],
+  [["what to use alongside", "alongside", "use with", "pair with", "ecosystem", "integration", "add on", "companion", "accessory", "partner"], ["settled_ecosystem"]],
 ];
 
 /** Everyday words for the numbers, by measure id. */

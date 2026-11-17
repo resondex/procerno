@@ -1,29 +1,42 @@
 "use client";
 
-import type { Ref } from "react";
+import { useEffect, useRef, useState, type Ref } from "react";
 import { pct } from "./pivot_compute";
 
 /**
  * The Data page's charts (2026-11-11): any pivot table shown as Bars or Dots.
- * Plain inline SVG, colors from the theme tokens only (the --series-N
- * comparison palette, validated for both themes in globals.css), no chart
- * library. Visible text carries rates only - the 95% range rides each
- * mark's <title> tooltip. Thin cells (under 20 answers) draw muted with a
- * star, as in the table.
+ * Plain inline SVG, no chart library. Visible text carries rates only - the
+ * 95% range rides each mark's <title> tooltip. Thin cells (under 20 answers)
+ * draw muted with a star, as in the table.
  *
- * The SVG is laid out in a fixed 720-wide viewBox and scales to its column.
- * `downloadChart` resolves the CSS variables to the current theme's values
- * and saves a PNG (an SVG file when the canvas route fails).
+ * Colours (2026-11-16, the Data page clean-up): the dashboard's --pa-*
+ * tokens, the same ones panel_parts.tsx names C_YOU / C_AWAY / C_USUAL. The
+ * tracker's own brand is blue, a rival pink, everything else the neutral
+ * grey; series sharing one colour are told apart by shade (`shade`), and a
+ * row may carry its own colour (a brand row) that overrides the series'.
+ *
+ * Size (2026-11-16): the SVG is laid out at the width it is drawn at (a
+ * ResizeObserver on its box), so one viewBox unit is one pixel and the 12px
+ * labels render at the page's caption size. `downloadChart` resolves the CSS
+ * variables to the current theme's values and saves a PNG (an SVG file when
+ * the canvas route fails).
  */
 
 /** More series than this and the page shows the table with a note. */
 export const MAX_SERIES = 6;
 
+/** The dashboard's colour roles (globals.css --pa-*; panel_parts C_YOU / C_AWAY / C_USUAL). */
+export const CHART_YOU = "var(--pa-yours)";
+export const CHART_AWAY = "var(--pa-theirs)";
+export const CHART_OTHER = "var(--pa-usual)";
+
 export interface ChartSeries {
   key: string;
   label: string;
-  /** A CSS color, normally var(--series-N). */
+  /** A CSS color: CHART_YOU, CHART_AWAY or CHART_OTHER. */
   color: string;
+  /** Opacity 0-1 telling apart series of one colour (1 = full). */
+  shade?: number;
   /** The previous wave: drawn quiet beside this wave. */
   muted?: boolean;
 }
@@ -38,47 +51,81 @@ export interface ChartRow {
   key: string;
   label: string;
   full?: string;
+  /** A row's own colour (a brand row: you blue, other brands grey); overrides the series colour. */
+  color?: string;
+  /** The tracker's own brand: label in blue, semibold. */
+  you?: boolean;
   /** Aligned with the series; null = no answers in that cell. */
   values: (ChartValue | null)[];
 }
 
-export const seriesColor = (i: number) => `var(--series-${(i % MAX_SERIES) + 1})`;
-const MUTED = "var(--ink-3)";
+/** Shades for series sharing one colour, strongest first. */
+const SHADES = [1, 0.7, 0.5, 0.36, 0.26, 0.18];
+export const shadeAt = (i: number) => SHADES[Math.min(i, SHADES.length - 1)];
 
-const W = 720;
-const LABEL_W = 210;
+const MUTED = "var(--ink-3)";
 const FONT = "Inter, ui-sans-serif, system-ui, sans-serif";
-const CHAR = 6.6; // average glyph width at 12px
-const clip = (s: string, chars: number) => (s.length > chars ? `${s.slice(0, chars - 1).trimEnd()}…` : s);
-const LABEL_CHARS = Math.floor((LABEL_W - 14) / CHAR);
+/** Every label in the chart: the page's caption size. */
+const FS = 12;
+const CHAR = 6.9; // a generous average glyph width at 12px Inter
+const clip = (s: string, chars: number) => (s.length > chars ? `${s.slice(0, Math.max(1, chars - 1)).trimEnd()}…` : s);
+const DEFAULT_W = 720;
+const MIN_W = 320;
+
+/** The chart's drawn width (one viewBox unit = one pixel). */
+function useBoxWidth(): [Ref<HTMLDivElement>, number] {
+  const ref = useRef<HTMLDivElement | null>(null);
+  const [w, setW] = useState(DEFAULT_W);
+  useEffect(() => {
+    const el = ref.current;
+    if (!el || typeof ResizeObserver === "undefined") return;
+    const ro = new ResizeObserver((entries) => {
+      const cw = Math.floor(entries[0]?.contentRect.width ?? 0);
+      if (cw > 0) setW((prev) => (Math.abs(prev - cw) < 2 ? prev : Math.max(MIN_W, cw)));
+    });
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+  return [ref, w];
+}
+
+/** The row-label column: about 30% of the width, within limits. */
+const labelW = (W: number) => Math.round(Math.max(110, Math.min(230, W * 0.3)));
+
+const fillOf = (row: ChartRow, s: ChartSeries) => (s.muted ? MUTED : (row.color ?? s.color));
+const opacityOf = (s: ChartSeries, c: ChartValue) => (s.muted ? 0.5 : (s.shade ?? 1)) * (c.thin ? 0.4 : 1);
+/** A value label: blue / pink when the mark is, else the quiet ink. */
+const textFill = (fill: string) => (fill === CHART_YOU || fill === CHART_AWAY ? fill : "var(--ink-2)");
 
 /** The legend, laid out inside the SVG so a download carries it. */
-function legendLayout(series: ChartSeries[]): { items: { s: ChartSeries; x: number; y: number }[]; height: number } {
+function legendLayout(series: ChartSeries[], W: number): { items: { s: ChartSeries; x: number; y: number; text: string }[]; height: number } {
   if (series.length < 2) return { items: [], height: 0 };
-  const items: { s: ChartSeries; x: number; y: number }[] = [];
+  const items: { s: ChartSeries; x: number; y: number; text: string }[] = [];
+  const maxChars = Math.max(12, Math.floor((W - 40) / CHAR));
   let x = 0;
   let y = 10;
   for (const s of series) {
-    const w = 18 + clip(s.label, 40).length * CHAR + 18;
+    const text = clip(s.label, Math.min(40, maxChars));
+    const w = 18 + text.length * CHAR + 18;
     if (x > 0 && x + w > W) {
       x = 0;
       y += 20;
     }
-    items.push({ s, x, y });
+    items.push({ s, x, y, text });
     x += w;
   }
   return { items, height: y + 16 };
 }
 
-function Legend({ series }: { series: ChartSeries[] }) {
-  const { items } = legendLayout(series);
+function Legend({ items }: { items: { s: ChartSeries; x: number; y: number; text: string }[] }) {
   return (
     <g>
-      {items.map(({ s, x, y }) => (
+      {items.map(({ s, x, y, text }) => (
         <g key={s.key} transform={`translate(${x},${y})`}>
-          <rect x={0} y={-5} width={10} height={10} rx={2} style={{ fill: s.muted ? MUTED : s.color, opacity: s.muted ? 0.55 : 1 }} />
-          <text x={16} y={4} style={{ fill: "var(--ink-2)", fontSize: 12 }}>
-            {clip(s.label, 40)}
+          <title>{s.label}</title>
+          <rect x={0} y={-5} width={10} height={10} rx={2} style={{ fill: s.muted ? MUTED : s.color, opacity: s.muted ? 0.5 : (s.shade ?? 1) }} />
+          <text x={16} y={4} style={{ fill: "var(--ink-2)", fontSize: FS }}>
+            {text}
           </text>
         </g>
       ))}
@@ -87,15 +134,23 @@ function Legend({ series }: { series: ChartSeries[] }) {
 }
 
 /** The highlighted row's band (search pointed the table at it). */
-function RowBand({ y, h }: { y: number; h: number }) {
+function RowBand({ y, h, W }: { y: number; h: number; W: number }) {
   return <rect data-focus="1" x={-4} y={y} width={W + 4} height={h} rx={4} style={{ fill: "var(--primary-soft)", opacity: 0.6 }} />;
 }
 
-function RowLabel({ row, y, strong }: { row: ChartRow; y: number; strong?: boolean }) {
+function RowLabel({ row, y, chars, strong }: { row: ChartRow; y: number; chars: number; strong?: boolean }) {
+  const text = clip(row.label, chars);
+  const cut = text !== row.label;
   return (
-    <text x={0} y={y} dominantBaseline="middle" style={{ fill: "var(--ink)", fontSize: 12.5, fontWeight: strong ? 700 : 500 }}>
-      <title>{row.full ?? row.label}</title>
-      {clip(row.label, LABEL_CHARS)}
+    <text
+      x={0}
+      y={y}
+      dominantBaseline="middle"
+      style={{ fill: row.you ? CHART_YOU : "var(--ink)", fontSize: FS, fontWeight: row.you || strong ? 600 : 500 }}
+    >
+      {/* The full label text only - never a count. */}
+      {(cut || row.full) && <title>{row.full ?? row.label}</title>}
+      {text}
     </text>
   );
 }
@@ -114,59 +169,63 @@ export function BarsChart({
   /** A row key to mark. */
   highlight?: string;
 }) {
-  const legend = legendLayout(series);
+  const [box, W] = useBoxWidth();
+  const legend = legendLayout(series, W);
   const top = legend.height + (legend.height ? 10 : 4);
-  const barH = 12;
-  const gap = 3;
+  const barH = 14;
+  const gap = 4;
   const pad = 14;
   const groupH = series.length * barH + (series.length - 1) * gap;
-  const x0 = LABEL_W;
+  const LW = labelW(W);
+  const x0 = LW;
   const x1 = W - 48;
+  const chars = Math.floor((LW - 12) / CHAR);
   const maxV = Math.max(0, ...rows.flatMap((r) => r.values.map((c) => c?.v ?? 0)));
   // Bars scale to the largest value, rounded up to the next 10 points.
   const dom = Math.min(1, Math.max(0.1, Math.ceil(maxV * 10) / 10));
   const H = top + rows.length * (groupH + pad) + 4;
   return (
-    <svg ref={svgRef} viewBox={`0 0 ${W} ${H}`} width="100%" role="img" aria-label="Bar chart of the table" style={{ fontFamily: FONT, display: "block" }}>
-      <Legend series={series} />
-      {rows.map((r, ri) => {
-        const gy = top + ri * (groupH + pad);
-        return (
-          <g key={r.key}>
-            {r.key === highlight && <RowBand y={gy - pad / 2 + 1} h={groupH + pad - 2} />}
-            <RowLabel row={r} y={gy + groupH / 2} strong={r.key === highlight} />
-            {series.map((s, si) => {
-              const c = r.values[si];
-              const y = gy + si * (barH + gap);
-              if (!c) {
+    <div ref={box}>
+      <svg ref={svgRef} viewBox={`0 0 ${W} ${H}`} width="100%" role="img" aria-label="Bar chart of the table" style={{ fontFamily: FONT, display: "block" }}>
+        <Legend items={legend.items} />
+        {rows.map((r, ri) => {
+          const gy = top + ri * (groupH + pad);
+          return (
+            <g key={r.key}>
+              {r.key === highlight && <RowBand y={gy - pad / 2 + 1} h={groupH + pad - 2} W={W} />}
+              <RowLabel row={r} y={gy + groupH / 2} chars={chars} strong={r.key === highlight} />
+              {series.map((s, si) => {
+                const c = r.values[si];
+                const y = gy + si * (barH + gap);
+                if (!c) {
+                  return (
+                    <text key={s.key} x={x0 + 4} y={y + barH / 2} dominantBaseline="middle" style={{ fill: "var(--ink-3)", fontSize: FS }}>
+                      -
+                    </text>
+                  );
+                }
+                const w = Math.max(c.v > 0 ? 1.5 : 0, ((x1 - x0) * c.v) / dom);
+                const fill = fillOf(r, s);
                 return (
-                  <text key={s.key} x={x0 + 4} y={y + barH / 2} dominantBaseline="middle" style={{ fill: "var(--ink-3)", fontSize: 11 }}>
-                    -
-                  </text>
+                  <g key={s.key}>
+                    <title>{`${s.label}: ${c.tip}`}</title>
+                    <rect x={x0} y={y} width={w} height={barH} rx={2} style={{ fill, opacity: opacityOf(s, c) }} />
+                    <text
+                      x={x0 + w + 6}
+                      y={y + barH / 2}
+                      dominantBaseline="middle"
+                      style={{ fill: s.muted ? "var(--ink-3)" : textFill(fill), fontSize: FS, fontWeight: r.you && !s.muted ? 600 : 400, opacity: c.thin ? 0.6 : 1 }}
+                    >
+                      {valueText(c)}
+                    </text>
+                  </g>
                 );
-              }
-              const w = Math.max(c.v > 0 ? 1.5 : 0, ((x1 - x0) * c.v) / dom);
-              const fill = s.muted ? MUTED : s.color;
-              const op = (s.muted ? 0.5 : 1) * (c.thin ? 0.4 : 1);
-              return (
-                <g key={s.key}>
-                  <title>{`${s.label}: ${c.tip}`}</title>
-                  <rect x={x0} y={y} width={w} height={barH} rx={2} style={{ fill, opacity: op }} />
-                  <text
-                    x={x0 + w + 6}
-                    y={y + barH / 2}
-                    dominantBaseline="middle"
-                    style={{ fill: s.muted ? "var(--ink-3)" : "var(--ink-2)", fontSize: 11.5, opacity: c.thin ? 0.6 : 1 }}
-                  >
-                    {valueText(c)}
-                  </text>
-                </g>
-              );
-            })}
-          </g>
-        );
-      })}
-    </svg>
+              })}
+            </g>
+          );
+        })}
+      </svg>
+    </div>
   );
 }
 
@@ -182,70 +241,70 @@ export function DotsChart({
   /** A row key to mark. */
   highlight?: string;
 }) {
-  const legend = legendLayout(series);
+  const [box, W] = useBoxWidth();
+  const legend = legendLayout(series, W);
   const top = legend.height + (legend.height ? 14 : 8);
   const rowH = 30;
-  const valW = 46;
-  const x0 = LABEL_W;
-  const x1 = W - valW * series.length - 14;
+  const valW = 44;
+  const LW = labelW(W);
+  const x0 = LW;
+  const x1 = Math.max(x0 + 80, W - valW * series.length - 14);
+  const chars = Math.floor((LW - 12) / CHAR);
   const X = (v: number) => x0 + (x1 - x0) * Math.max(0, Math.min(1, v));
   const scaleY = top + rows.length * rowH + 4;
-  const H = scaleY + 18;
+  const H = scaleY + 20;
   return (
-    <svg ref={svgRef} viewBox={`0 0 ${W} ${H}`} width="100%" role="img" aria-label="Dot chart of the table" style={{ fontFamily: FONT, display: "block" }}>
-      <Legend series={series} />
-      {[0, 0.5, 1].map((t) => (
-        <line key={t} x1={X(t)} x2={X(t)} y1={top - 4} y2={scaleY} style={{ stroke: "var(--line)", strokeWidth: 1 }} />
-      ))}
-      {rows.map((r, ri) => {
-        const y = top + ri * rowH + rowH / 2;
-        const present = r.values.filter((c): c is ChartValue => !!c);
-        const lo = present.length ? Math.min(...present.map((c) => c.v)) : 0;
-        const hi = present.length ? Math.max(...present.map((c) => c.v)) : 0;
-        return (
-          <g key={r.key}>
-            {r.key === highlight && <RowBand y={y - rowH / 2 + 1} h={rowH - 2} />}
-            <RowLabel row={r} y={y} strong={r.key === highlight} />
-            <line x1={x0} x2={x1} y1={y} y2={y} style={{ stroke: "var(--line)", strokeWidth: 1 }} />
-            {present.length > 1 && <line x1={X(lo)} x2={X(hi)} y1={y} y2={y} style={{ stroke: "var(--neutral-bar)", strokeWidth: 3, strokeLinecap: "round" }} />}
-            {series.map((s, si) => {
-              const c = r.values[si];
-              if (!c) return null;
-              return (
-                <circle
-                  key={s.key}
-                  cx={X(c.v)}
-                  cy={y}
-                  r={5.5}
-                  style={{ fill: s.muted ? MUTED : s.color, opacity: (s.muted ? 0.55 : 1) * (c.thin ? 0.4 : 1), stroke: "var(--surface)", strokeWidth: 2 }}
-                >
-                  <title>{`${s.label}: ${c.tip}`}</title>
-                </circle>
-              );
-            })}
-            {series.map((s, si) => {
-              const c = r.values[si];
-              return (
-                <text
-                  key={`v:${s.key}`}
-                  x={x1 + 14 + si * valW}
-                  y={y}
-                  dominantBaseline="middle"
-                  style={{ fill: c ? (s.muted ? MUTED : s.color) : "var(--ink-3)", fontSize: 11.5, fontWeight: 600, opacity: c?.thin ? 0.6 : 1 }}
-                >
-                  {c ? valueText(c) : "-"}
-                </text>
-              );
-            })}
-          </g>
-        );
-      })}
-      {[0, 0.5, 1].map((t) => (
-        <text key={`s${t}`} x={X(t)} y={scaleY + 12} textAnchor="middle" style={{ fill: "var(--ink-3)", fontSize: 11 }}>
-          {`${t * 100}%`}
-        </text>
-      ))}
-    </svg>
+    <div ref={box}>
+      <svg ref={svgRef} viewBox={`0 0 ${W} ${H}`} width="100%" role="img" aria-label="Dot chart of the table" style={{ fontFamily: FONT, display: "block" }}>
+        <Legend items={legend.items} />
+        {[0, 0.5, 1].map((t) => (
+          <line key={t} x1={X(t)} x2={X(t)} y1={top - 4} y2={scaleY} style={{ stroke: "var(--line)", strokeWidth: 1 }} />
+        ))}
+        {rows.map((r, ri) => {
+          const y = top + ri * rowH + rowH / 2;
+          const present = r.values.filter((c): c is ChartValue => !!c);
+          const lo = present.length ? Math.min(...present.map((c) => c.v)) : 0;
+          const hi = present.length ? Math.max(...present.map((c) => c.v)) : 0;
+          return (
+            <g key={r.key}>
+              {r.key === highlight && <RowBand y={y - rowH / 2 + 1} h={rowH - 2} W={W} />}
+              <RowLabel row={r} y={y} chars={chars} strong={r.key === highlight} />
+              <line x1={x0} x2={x1} y1={y} y2={y} style={{ stroke: "var(--line)", strokeWidth: 1 }} />
+              {present.length > 1 && <line x1={X(lo)} x2={X(hi)} y1={y} y2={y} style={{ stroke: "var(--neutral-bar)", strokeWidth: 3, strokeLinecap: "round" }} />}
+              {series.map((s, si) => {
+                const c = r.values[si];
+                if (!c) return null;
+                return (
+                  <circle key={s.key} cx={X(c.v)} cy={y} r={5.5} style={{ fill: fillOf(r, s), opacity: opacityOf(s, c), stroke: "var(--surface)", strokeWidth: 2 }}>
+                    <title>{`${s.label}: ${c.tip}`}</title>
+                  </circle>
+                );
+              })}
+              {series.map((s, si) => {
+                const c = r.values[si];
+                const fill = fillOf(r, s);
+                return (
+                  <text
+                    key={`v:${s.key}`}
+                    x={x1 + 14 + si * valW}
+                    y={y}
+                    dominantBaseline="middle"
+                    style={{ fill: c ? (s.muted ? MUTED : textFill(fill)) : "var(--ink-3)", fontSize: FS, fontWeight: 600, opacity: c?.thin ? 0.6 : 1 }}
+                  >
+                    {c ? valueText(c) : "-"}
+                  </text>
+                );
+              })}
+            </g>
+          );
+        })}
+        {[0, 0.5, 1].map((t) => (
+          <text key={`s${t}`} x={X(t)} y={scaleY + 14} textAnchor="middle" style={{ fill: "var(--ink-3)", fontSize: FS }}>
+            {`${t * 100}%`}
+          </text>
+        ))}
+      </svg>
+    </div>
   );
 }
 
@@ -260,7 +319,7 @@ function save(blob: Blob, filename: string) {
 /** Save the chart as a PNG in the current theme's colors (SVG on failure). */
 export function downloadChart(svg: SVGSVGElement, name: string) {
   const vb = svg.viewBox.baseVal;
-  const w = vb?.width || W;
+  const w = vb?.width || DEFAULT_W;
   const h = vb?.height || 400;
   const clone = svg.cloneNode(true) as SVGSVGElement;
   clone.setAttribute("xmlns", "http://www.w3.org/2000/svg");

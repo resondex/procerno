@@ -7,6 +7,7 @@ import type { Dossier, DossiersView } from "@/lib/engine/dossiers";
 import type { HeadToHeadViews } from "@/lib/engine/head_to_head";
 import { useEngineSet, viewQuery } from "./view_parts";
 import { T } from "./type_scale";
+import { C_AWAY, C_USUAL, C_YOU } from "./panel_parts";
 import { CompanyBoard } from "./company_board";
 import { MatchupDropNote, MatchupMove, MatchupProvider, useMatchupQueued } from "./matchup_action";
 import {
@@ -15,8 +16,6 @@ import {
   ExamplesHost,
   useShowExamples,
   normName,
-  notesOf,
-  whyLines,
   SlideOver,
   VCOLOR,
   VWORD,
@@ -44,6 +43,8 @@ export type HubPage = "overview" | "map";
 export type HubGo = "map" | "brief" | "build";
 /** One row of a finding's optional small chart (the engine's tension `viz`). */
 type TensionVizRow = NonNullable<AnalysisMapView["tensions"][number]["viz"]>[number];
+/** am62: the Overview leads with this many findings; the rest open in place behind "More findings". */
+const LEAD_FINDINGS = 3;
 /** A request from another page to open the slide-over; `n` makes a repeat click a new request. */
 export type PanelReq = { view: PanelView; n: number };
 
@@ -254,12 +255,15 @@ export default function AnalysisHub({
 
 // ---------- the Overview ----------
 
+/** am62: a bar's colour follows the cards - your number blue, a rival's pink, anything else grey. */
+const WHO_BAR: Record<NonNullable<TensionVizRow["who"]>, string> = { you: C_YOU, rival: C_AWAY, other: C_USUAL };
+
 /** A finding's small chart (the engine's optional `viz` on a tension - see
- * analysis_types.ts). Bars are 0-100; `text` is the display string; `hi` the row to
- * accent. Decorative: the finding's sentence carries the same numbers. */
+ * analysis_types.ts). Bars are 0-100; `text` is the display string; `hi` the row the
+ * finding is about (its label in full ink); `who` its colour. "Click a bar to see the
+ * answers" is said once, in the section's intro. */
 function MiniBars({ rows, title }: { rows: TensionVizRow[]; title: string }) {
   const show = useShowExamples();
-  const any = !!show && rows.some((r) => (r.refs?.length ?? 0) > 0);
   return (
     <div className="grid min-w-0 gap-1.5">
       {rows.map((r, i) => {
@@ -268,10 +272,7 @@ function MiniBars({ rows, title }: { rows: TensionVizRow[]; title: string }) {
           <>
             <span className="truncate">{r.label}</span>
             <span className="h-2 rounded bg-line/60">
-              <i
-                className={`block h-full min-w-[2px] rounded ${r.hi ? "bg-[var(--pa-yours)]" : "bg-[var(--pa-usual)]"}`}
-                style={{ width: `${Math.max(0, Math.min(100, r.value))}%` }}
-              />
+              <i className="block h-full min-w-[2px] rounded" style={{ width: `${Math.max(0, Math.min(100, r.value))}%`, background: WHO_BAR[r.who ?? "other"] }} />
             </span>
             <span className="text-right tabular-nums">{r.text}</span>
           </>
@@ -292,7 +293,6 @@ function MiniBars({ rows, title }: { rows: TensionVizRow[]; title: string }) {
           </div>
         );
       })}
-      {any && <p className={`${T.cap} text-ink-3`}>Click a bar to see the answers</p>}
     </div>
   );
 }
@@ -334,7 +334,12 @@ function Overview({
   const shareX = (s: RateCell) => (s.n > 0 ? s.k / s.n : 0);
   const max = Math.max(0.0001, ...map.shareOfDecided.map((s) => shareX(s.share)));
   const playbook = Object.values(map.positions).filter((p) => mine.has(p.cellId));
-  const tensions = map.tensions;
+  // am62: the opening funnel paragraph restates the header's numbers (named, share of picks, the commit rate) and
+  // adds a second pick number, so it is not a card here - left out by its key, not its place in the list.
+  const tensions = map.tensions.filter((t) => t.key !== "known_vs_picked");
+  const [moreFindings, setMoreFindings] = useState(false);
+  const shownTensions = moreFindings ? tensions : tensions.slice(0, LEAD_FINDINGS);
+  const barsOpen = !!show && tensions.some((t) => (t.viz ?? []).some((r) => (r.refs?.length ?? 0) > 0));
   const sec = "mt-11";
   return (
     <div className="pb-10">
@@ -476,62 +481,60 @@ function Overview({
 
       <section className={sec}>
         <h2 className={`${T.h2} mb-1`}>What matters this wave</h2>
-        <p className={`${T.sec} mb-4 max-w-[70ch]`}>Each finding comes with its move. Add one to your playbook and it is marked on the Map.</p>
+        <p className={`${T.sec} mb-4 max-w-[70ch]`}>
+          Each finding comes with its move. Add one to your playbook and it is marked on the Map.{barsOpen ? " Click a bar to see the answers." : ""}
+        </p>
         <div>
-          {tensions.map((t) => {
+          {shownTensions.map((t) => {
             const p = map.positions[t.cellId];
             const on = mine.has(t.cellId);
             const viz = t.viz && t.viz.length > 0 ? t.viz : null;
             return (
               <div key={t.cellId + t.title} className="border-t border-line last:border-b">
                 {/* Not one button: the bars open their own answers, and buttons cannot nest. */}
-                <div
-                  className={`grid w-full items-center gap-3 pb-3 pt-5 md:gap-6 ${
-                    viz ? "md:grid-cols-[minmax(0,1.5fr)_minmax(0,1fr)_auto]" : "md:grid-cols-[minmax(0,1fr)_auto]"
-                  }`}
-                >
-                  <button
-                    type="button"
-                    disabled={!p}
-                    onClick={() => p && ctx.open({ kind: "cell", id: t.cellId })}
-                    className="group min-w-0 text-left disabled:cursor-default"
-                  >
-                    <span className={`${T.title} mb-1 block group-enabled:group-hover:text-primary`}>{t.title}</span>
-                    <span className={`${T.body} block text-ink-2`}>{t.body}</span>
-                  </button>
-                  {viz && <MiniBars rows={viz} title={t.title} />}
-                  {p && (
+                <div className={`grid w-full items-start gap-3 pb-5 pt-5 md:gap-6 ${viz ? "md:grid-cols-[minmax(0,1.5fr)_minmax(0,1fr)]" : ""}`}>
+                  <div className="min-w-0">
                     <button
                       type="button"
-                      onClick={() => ctx.open({ kind: "cell", id: t.cellId })}
-                      className={`${T.sec} whitespace-nowrap text-left hover:text-primary`}
+                      disabled={!p}
+                      onClick={() => p && ctx.open({ kind: "cell", id: t.cellId })}
+                      className="group block min-w-0 text-left disabled:cursor-default"
                     >
-                      See why {"→"}
+                      <span className={`${T.title} mb-1 block group-enabled:group-hover:text-primary`}>{t.title}</span>
+                      <span className={`${T.body} block text-ink-2`}>{t.body}</span>
                     </button>
-                  )}
-                </div>
-                {t.matchup && <MatchupMove rival={t.matchup} />}
-                {!t.matchup && p?.lever && (
-                  <div className="mb-5 grid items-center gap-x-4 gap-y-1.5 rounded-xl bg-primary-soft px-4 py-3 sm:grid-cols-[minmax(0,1fr)_auto]">
-                    <span className={`${T.labelAccent} sm:col-span-2`}>What to do - {p.family}</span>
-                    <div className="min-w-0">
-                      {/* The lever's wording leans on these sentences ("Aim at the buyers it does not apply to"), so they stay with it. */}
-                      {whyLines(notesOf(p, ctx.cells.get(p.cellId)), ctx.cat.plural).map((w) => (
-                        <p key={w} className={`${T.sec} mb-1 text-ink-2`}>
-                          {w}
+                    {p && (
+                      <button type="button" onClick={() => ctx.open({ kind: "cell", id: t.cellId })} className={`${T.sec} mt-1.5 block text-left hover:text-primary`}>
+                        See why {"→"}
+                      </button>
+                    )}
+                    {t.matchup ? (
+                      <MatchupMove rival={t.matchup} move={t.move} />
+                    ) : (
+                      t.move.text && (
+                        <p className={`${T.body} mt-2 text-ink`}>
+                          What to do: <b className="font-semibold">{t.move.family}</b> - {t.move.repeat ? "Same move as above." : t.move.text}
+                          {ctx.editable && p && (
+                            <>
+                              {" "}
+                              <PlayLink on={on} onClick={() => void ctx.save({ cellId: p.cellId, suggested: p.triageSuggested, inPlaybook: !on })} />
+                            </>
+                          )}
                         </p>
-                      ))}
-                      <p className={`${T.body} text-ink`}>{p.lever}</p>
-                    </div>
-                    {ctx.editable && (
-                      <PlayButton on={on} onClick={() => void ctx.save({ cellId: p.cellId, suggested: p.triageSuggested, inPlaybook: !on })} />
+                      )
                     )}
                   </div>
-                )}
+                  {viz && <MiniBars rows={viz} title={t.title} />}
+                </div>
               </div>
             );
           })}
         </div>
+        {tensions.length > LEAD_FINDINGS && (
+          <button type="button" onClick={() => setMoreFindings(!moreFindings)} className={`${T.ctl} mt-3 text-primary hover:underline`}>
+            {moreFindings ? "Show fewer" : "More findings"}
+          </button>
+        )}
       </section>
 
       {map.uncoded > 0 && (
@@ -543,7 +546,9 @@ function Overview({
   );
 }
 
-function PlayButton({ on, onClick }: { on: boolean; onClick: () => void }) {
+/** am62: "Add to playbook" as a small text link at the end of a finding's move line; "In your playbook" once added
+ * (a second click takes it out, as the button did). */
+function PlayLink({ on, onClick }: { on: boolean; onClick: () => void }) {
   const [busy, setBusy] = useState(false);
   return (
     <button
@@ -557,9 +562,7 @@ function PlayButton({ on, onClick }: { on: boolean; onClick: () => void }) {
           setBusy(false);
         }
       }}
-      className={`justify-self-start whitespace-nowrap rounded-lg px-3 py-1 text-[13px] font-medium disabled:opacity-60 ${
-        on ? "border border-line bg-surface text-ink" : "bg-primary text-primary-ink hover:opacity-90"
-      }`}
+      className={`${T.ctl} whitespace-nowrap disabled:opacity-60 ${on ? "text-ink-3 hover:text-ink-2" : "text-primary underline underline-offset-2 hover:opacity-80"}`}
     >
       {on ? "In your playbook" : "Add to playbook"}
     </button>
@@ -568,32 +571,40 @@ function PlayButton({ on, onClick }: { on: boolean; onClick: () => void }) {
 
 // ---------- the Map: by contest ----------
 
-function CellButton({ cell, onOpen, hasPosition }: { cell: MapCell; onOpen: (id: string) => void; hasPosition: boolean }) {
+/** "Lost - except <the top condition the AI still sends to you>". */
+const exceptLine = (text?: string) => (text ? `Lost - except ${text.charAt(0).toLowerCase()}${text.slice(1)}` : "Lost - with an exception");
+
+function CellButton({ cell, onOpen, hasPosition, except, summary }: { cell: MapCell; onOpen: (id: string) => void; hasPosition: boolean; except?: string; summary?: boolean }) {
   const c = VCOLOR[cell.verdict];
   const m = useContext(MarkCtx);
   const mine = m.mine.has(cell.id);
+  // A Value cell is "<buyer> - <product>": the buyer first, the product quieter beneath.
+  const split = /^chooses:value:/.test(cell.id) && cell.label.includes(" - ") ? cell.label.split(" - ") : null;
   return (
     <button
       type="button"
       onClick={() => hasPosition && onOpen(cell.id)}
       disabled={!hasPosition}
       title={`${VWORD[cell.verdict]}${cell.exception ? " - with an exception" : ""}`}
-      className={`flex min-w-0 flex-col items-start gap-0.5 rounded-[10px] border-[1.5px] px-2.5 py-2 text-left transition-[colors,opacity] enabled:hover:border-ink disabled:cursor-default ${
-        mine ? "border-[var(--color-primary)]" : "border-transparent"
+      className={`flex min-w-0 flex-col items-start gap-0.5 rounded-[8px] border bg-surface py-2 pl-2.5 pr-2.5 text-left transition-[colors,opacity] enabled:hover:border-ink disabled:cursor-default ${
+        mine ? "border-[var(--color-primary)]" : "border-line"
       } ${m.mineOnly && !mine ? "opacity-30" : ""}`}
-      style={{ background: c.bg }}
+      // White cells with a coloured edge: a page that is mostly one verdict no longer reads as a wall of one colour.
+      style={{ borderLeftWidth: 3, borderLeftColor: c.fg }}
     >
+      {summary && <span className={`${T.label} text-ink-3`}>The whole row</span>}
       <span className={`${T.cap} flex items-baseline gap-1.5 font-semibold text-ink`}>
         <i className="inline-block h-2 w-2 flex-none translate-y-[-1px] rounded-full" style={{ background: c.fg }} aria-hidden />
         <span>
-          {cell.label || VWORD[cell.verdict]}
+          {split ? split[0] : cell.label || VWORD[cell.verdict]}
           {cell.label && <span className="sr-only"> - {VWORD[cell.verdict]}</span>}
         </span>
       </span>
+      {split && <span className={`${T.cap} text-ink-3`}>{split.slice(1).join(" - ")}</span>}
       {cell.note && <span className={`${T.cap} text-ink-2`}>{cell.note}</span>}
       {cell.exception && (
         <span className={`${T.cap} font-semibold`} style={{ color: c.ink }}>
-          Lost - with an exception
+          {exceptLine(except)}
         </span>
       )}
     </button>
@@ -683,14 +694,14 @@ function AlignedRow({ row, chooses, rooms, perRow, positions, onOpen }: { row: M
         {row.stage}
       </div>
       <div className="p-2 sm:border-r sm:border-line/60 [&>button]:h-full [&>button]:w-full">
-        {allCell && <CellButton cell={{ ...allCell, wide: false, all: false }} onOpen={onOpen} hasPosition={!!positions[allCell.id]} />}
+        {allCell && <CellButton cell={{ ...allCell, wide: false, all: false }} onOpen={onOpen} hasPosition={!!positions[allCell.id]} except={positions[allCell.id]?.exception?.rows[0]?.text} summary={rest.length > 0} />}
       </div>
       <div
         className="grid content-start gap-2 p-2"
         style={{ gridTemplateColumns: perRow ? `repeat(${perRow}, minmax(0, 1fr))` : "repeat(auto-fill, minmax(165px, 1fr))" }}
       >
         {rest.map((c) => (
-          <CellButton key={c.id} cell={{ ...c, wide: false, all: false }} onOpen={onOpen} hasPosition={!!positions[c.id]} />
+          <CellButton key={c.id} cell={{ ...c, wide: false, all: false }} onOpen={onOpen} hasPosition={!!positions[c.id]} except={positions[c.id]?.exception?.rows[0]?.text} />
         ))}
       </div>
     </div>
@@ -892,6 +903,7 @@ function ContestMap({
 }) {
   const [prefs, setPrefs] = useState<MapPrefs>(() => loadMapPrefs(prefScope));
   const [arrange, setArrange] = useState(false);
+  const [viewOpen, setViewOpen] = useState(false);
   const [hint, setHint] = useState(false);
   // Quiet mode: which bands have their folded contests shown again, and which
   // band descriptions are open (they sit behind a "?" beside the title).
@@ -955,14 +967,8 @@ function ContestMap({
           >
             Hide what you hold
           </button>
-          <button type="button" className={seg(prefs.layout === "aligned")} onClick={() => update({ ...prefs, layout: "aligned" })}>
-            Aligned
-          </button>
-          <button type="button" className={seg(prefs.layout === "dossier")} onClick={() => update({ ...prefs, layout: "dossier" })}>
-            Cards
-          </button>
-          <button type="button" className={seg(arrange)} onClick={() => setArrange(!arrange)}>
-            Arrange order {arrange ? "▴" : "▾"}
+          <button type="button" aria-expanded={viewOpen} className={seg(viewOpen)} onClick={() => setViewOpen(!viewOpen)}>
+            View {viewOpen ? "▴" : "▾"}
           </button>
           <button
             type="button"
@@ -982,7 +988,21 @@ function ContestMap({
         </span>
       </div>
 
-      <div className={arrange ? "grid gap-2" : "hidden"}>
+      {viewOpen && (
+        <div className="flex flex-wrap items-center gap-2 text-[13px] text-ink-3">
+          <span>Layout:</span>
+          <button type="button" className={seg(prefs.layout === "aligned")} onClick={() => update({ ...prefs, layout: "aligned" })}>
+            Aligned
+          </button>
+          <button type="button" className={seg(prefs.layout === "dossier")} onClick={() => update({ ...prefs, layout: "dossier" })}>
+            Cards
+          </button>
+          <button type="button" className={seg(arrange)} onClick={() => setArrange(!arrange)}>
+            Arrange order {arrange ? "▴" : "▾"}
+          </button>
+        </div>
+      )}
+      <div className={viewOpen && arrange ? "grid gap-2" : "hidden"}>
         {arrange && (
           <div className="grid gap-4 rounded-[10px] border border-line bg-surface p-3 sm:grid-cols-2">
             <OrderList title="Buying situations" note="Drag to reorder - card order (cards) or the order within each row (aligned)." items={orderedRooms} onReorder={(f, t) => reorder("rooms", f, t)} />
@@ -1072,97 +1092,158 @@ function ContestMap({
 
 // ---------- the Map: by rival ----------
 
-function RivalCard({ d, ctx }: { d: Dossier; ctx: PanelCtx }) {
+/** One rival as a table row (2026-11-16: the By rival landing is a table, not a wall of cards). */
+function RivalRow({ d, ctx, max }: { d: Dossier; ctx: PanelCtx; max: number }) {
   const queued = useMatchupQueued(d.key);
+  const pct = (x?: string) => parseFloat((x ?? "0").replace(/[^0-9.]/g, "")) || 0;
+  const share = d.tiles[1]?.value;
   const up = d.args.find((a) => a.value > 0);
   const down = d.args.find((a) => a.value < 0);
-  const share = d.tiles[1];
-  const named = d.tiles[0];
+  const rec = d.h2h.kind === "record" ? d.h2h : null;
+  const gap = rec ? pct(rec.them) - pct(rec.you) : 0;
+  const chip: { text: string; tone: "good" | "bad" | "neutral" } = rec
+    ? gap >= 10
+      ? { text: "It leads head to head", tone: "bad" }
+      : gap <= -10
+        ? { text: "You lead head to head", tone: "good" }
+        : { text: "Even head to head", tone: "neutral" }
+    : queued
+      ? { text: "Head to head queued", tone: "neutral" }
+      : { text: d.h2h.kind === "missing" && d.h2h.alert ? "Takes picks, never asked head to head" : "Never asked head to head", tone: "neutral" };
+  const open = () => ctx.open({ kind: "rival", name: d.name });
   return (
-    <button
-      type="button"
-      onClick={() => ctx.open({ kind: "rival", name: d.name })}
-      className="flex min-w-0 flex-col gap-2.5 rounded-[14px] border border-line bg-surface p-4 text-left transition-colors hover:border-[var(--color-primary)]"
+    <tr
+      onClick={open}
+      onKeyDown={(e) => {
+        if (e.key === "Enter" || e.key === " ") {
+          e.preventDefault();
+          open();
+        }
+      }}
+      tabIndex={0}
+      role="button"
+      className="cursor-pointer border-t border-line/70 align-top hover:bg-line/30"
     >
-      <h3 className={T.title}>{d.name}</h3>
-      {share && (
-        <div className="flex flex-wrap items-baseline gap-2 text-[13px] text-ink-3">
-          <b className={`${T.numSm} text-ink`}>{share.value}</b>
-          share of picks{named ? ` - named in ${named.value}` : ""}
-        </div>
-      )}
-      {d.h2h.kind === "record" ? (
-        <div className="text-[13px] text-ink-3">
-          Head-to-head{d.h2h.asClass ? ` (as a kind of ${ctx.cat.singular})` : ""}: you <b className="font-semibold text-ink">{d.h2h.you}</b> - them{" "}
-          <b className="font-semibold text-ink">{d.h2h.them}</b>
-          {/* You and them as two plain bars, never one bar split in two. */}
-          <span className="mt-1.5 grid gap-1" aria-hidden>
-            {([["You", d.h2h.you, "var(--pa-yours)"], [d.name, d.h2h.them, "var(--pa-theirs)"]] as const).map(([l, v, c]) => (
-              <span key={l} className="grid grid-cols-[minmax(0,5.5rem)_minmax(0,1fr)] items-center gap-2">
-                <span className="truncate">{l}</span>
-                <span className="h-2 overflow-hidden rounded bg-line/60">
-                  <i className="block h-full rounded" style={{ width: v, background: c }} />
-                </span>
-              </span>
-            ))}
+      <td className="py-2.5 pr-3">
+        <span className="font-semibold text-ink">{d.name}</span>
+        {(up || down) && (
+          <span className={`block ${T.cap} text-ink-3`}>
+            {up && <>It wins on {up.label}</>}
+            {up && down && "; "}
+            {down && <>{up ? "you" : "You"} win on {down.label}</>}
           </span>
-        </div>
-      ) : (
-        <div
-          className={`text-[13px] ${d.h2h.alert || queued ? "border-l-[3px] pl-2 text-ink" : "text-ink-3"}`}
-          style={queued ? { borderColor: "var(--pa-yours)" } : d.h2h.alert ? { borderColor: "var(--pa-contested)" } : undefined}
+        )}
+        <MatchupDropNote rivalKey={d.key} name={d.name} />
+      </td>
+      <td className="py-2.5 pl-2">
+        <span className="grid grid-cols-[minmax(0,1fr)_2.75rem] items-center gap-2">
+          <span className="h-2 overflow-hidden rounded bg-line/60">
+            <i className="block h-full rounded" style={{ width: `${Math.min(100, (pct(share) / max) * 100)}%`, background: "var(--pa-theirs)" }} />
+          </span>
+          <b className="text-right font-semibold tabular-nums text-ink">{share ?? "-"}</b>
+        </span>
+      </td>
+      <td className="whitespace-nowrap py-2.5 pl-3 text-right tabular-nums">
+        {rec ? (
+          <>
+            <b className="font-semibold" style={{ color: "var(--pa-yours)" }}>{rec.you}</b>
+            <span className="text-ink-3"> - </span>
+            <b className="font-semibold" style={{ color: "var(--pa-theirs)" }}>{rec.them}</b>
+          </>
+        ) : (
+          <span className="text-ink-3">-</span>
+        )}
+      </td>
+      <td className="py-2.5 pl-3 text-right">
+        <span
+          className={`inline-block rounded-full px-2 py-0.5 ${T.cap} font-semibold`}
+          style={
+            chip.tone === "bad"
+              ? { background: "var(--pa-theirs-bg)", color: "var(--pa-theirs-ink)" }
+              : chip.tone === "good"
+                ? { background: "var(--pa-yours-bg)", color: "var(--pa-yours-ink)" }
+                : { background: "var(--line)", color: "var(--ink-2)" }
+          }
         >
-          {queued ? "Head-to-head queued for the next collection" : `Never asked head-to-head${d.h2h.alert ? " - yet it takes picks from you" : ""}`}
-        </div>
-      )}
-      <MatchupDropNote rivalKey={d.key} name={d.name} />
-      {up && (
-        <div className="text-[13px] text-ink-3">
-          Wins on <b className="font-semibold text-ink">{up.label}</b>
-          {down && (
-            <>
-              , loses on <b className="font-semibold text-ink">{down.label}</b>
-            </>
-          )}
-        </div>
-      )}
-      <span className="mt-auto text-[13px] text-primary">
-        Open {d.name} {"→"}
-      </span>
-    </button>
+          {chip.text}
+        </span>
+      </td>
+    </tr>
   );
 }
 
 function RivalGrid({ dossiers, loading, ctx }: { dossiers: Dossier[]; loading: boolean; ctx: PanelCtx }) {
+  const [more, setMore] = useState(false);
   if (loading) return <p className={T.sec}>Loading the rivals...</p>;
   if (dossiers.length === 0) return <p className={T.sec}>The AI names no other brand often enough to read on its own.</p>;
   const pc = (d: Dossier) => parseFloat((d.tiles[1]?.value ?? "0").replace(/[^0-9.]/g, "")) || 0;
   const sorted = [...dossiers].sort((a, b) => pc(b) - pc(a));
   const lead = sorted.filter((d) => d.prominent);
   const rest = sorted.filter((d) => !d.prominent);
+  const shown = lead.length ? lead : sorted;
+  const you = ctx.map.shareOfDecided.find((x) => x.you);
+  const youPct = you && you.share.n > 0 ? (you.share.k / you.share.n) * 100 : null;
+  const max = Math.max(1, youPct ?? 0, ...shown.map(pc));
   return (
     <>
-      <div className="grid gap-3.5 [grid-template-columns:repeat(auto-fill,minmax(min(250px,100%),1fr))]">
-        {(lead.length ? lead : sorted).map((d) => (
-          <RivalCard key={d.key} d={d} ctx={ctx} />
-        ))}
+      <div className="overflow-x-auto rounded-[10px] border border-line bg-surface px-4 py-1">
+        <table className={`w-full ${T.body}`}>
+          <thead>
+            <tr className={`${T.cap} text-ink-3`}>
+              <th className="py-2 pr-3 text-left font-normal">Rivals, the ones taking the most picks first</th>
+              <th className="w-[34%] py-2 pl-2 text-left font-normal">Share of picks</th>
+              <th className="py-2 pl-3 text-right font-normal">Head to head, you - it</th>
+              <th className="py-2 pl-3 text-right font-normal" />
+            </tr>
+          </thead>
+          <tbody>
+            {youPct !== null && (
+              <tr className="border-t border-line/70">
+                <td className="py-2.5 pr-3 font-semibold" style={{ color: "var(--pa-yours)" }}>
+                  You
+                </td>
+                <td className="py-2.5 pl-2">
+                  <span className="grid grid-cols-[minmax(0,1fr)_2.75rem] items-center gap-2">
+                    <span className="h-2 overflow-hidden rounded bg-line/60">
+                      <i className="block h-full rounded" style={{ width: `${Math.min(100, (youPct / max) * 100)}%`, background: "var(--pa-yours)" }} />
+                    </span>
+                    <b className="text-right font-semibold tabular-nums text-ink">{youPct < 10 ? youPct.toFixed(1).replace(/\.0$/, "") : Math.round(youPct)}%</b>
+                  </span>
+                </td>
+                <td />
+                <td />
+              </tr>
+            )}
+            {shown.map((d) => (
+              <RivalRow key={d.key} d={d} ctx={ctx} max={max} />
+            ))}
+          </tbody>
+        </table>
       </div>
+      <p className={`${T.cap} mt-2 text-ink-3`}>Click a rival to open it.</p>
       {lead.length > 0 && rest.length > 0 && (
-        <div className="mt-6">
-          <h3 className={`${T.label} mb-1.5`}>More brands the AI names</h3>
-          {rest.map((d) => (
-            <button
-              key={d.key}
-              type="button"
-              onClick={() => ctx.open({ kind: "rival", name: d.name })}
-              className={`${T.body} flex w-full flex-wrap justify-between gap-x-3 border-b border-line py-2.5 text-left text-ink hover:text-primary`}
-            >
-              <span>{d.name}</span>
-              <span className="text-[13px] text-ink-3">
-                {d.tiles[1]?.value ?? "-"} of picks{d.tiles[0] ? ` - named in ${d.tiles[0].value}` : ""} {"→"}
-              </span>
-            </button>
-          ))}
+        <div className="mt-5">
+          <button type="button" onClick={() => setMore((m) => !m)} aria-expanded={more} className={`${T.ctl} text-primary underline underline-offset-2 hover:opacity-80`}>
+            {more ? "Hide the other brands" : "Show the other brands the AI names"}
+          </button>
+          {more && (
+            <>
+              <p className={`${T.cap} mb-1 mt-2 text-ink-3`}>These are named too rarely to read in full. Each still opens with what there is.</p>
+              {rest.map((d) => (
+                <button
+                  key={d.key}
+                  type="button"
+                  onClick={() => ctx.open({ kind: "rival", name: d.name })}
+                  className={`${T.body} flex w-full flex-wrap justify-between gap-x-3 border-b border-line py-2.5 text-left text-ink hover:text-primary`}
+                >
+                  <span>{d.name}</span>
+                  <span className="text-[13px] text-ink-3">
+                    {d.tiles[1]?.value ?? "-"} of picks{d.tiles[0] ? ` - named in ${d.tiles[0].value}` : ""} {"→"}
+                  </span>
+                </button>
+              ))}
+            </>
+          )}
         </div>
       )}
     </>

@@ -123,7 +123,7 @@ export default function SettledSections({ runId }: { runId: string }) {
         )}
         {eco && (
           <VerdictCard
-            label="Ecosystem"
+            label="What to use alongside you"
             question="What to use around you"
             big={eco.verdicts.strengthens}
             bigLabel="strengthens the relationship"
@@ -138,7 +138,7 @@ export default function SettledSections({ runId }: { runId: string }) {
         )}
         {adv && (
           <VerdictCard
-            label="Advocacy"
+            label="Answering a critic"
             question="A customer defends you against a critic"
             big={adv.premise.rebuts}
             bigLabel="pushes back on the critic"

@@ -160,21 +160,26 @@ export function MatchupGap({ d }: { d: Dossier }) {
 }
 
 /** The Overview finding card's move for an unasked rival. */
-export function MatchupMove({ rival }: { rival: { key: string; name: string } }) {
+/** The Overview's move line for an unasked-rival finding (am62: one quiet line, not a box): the engine's move
+ * sentence with "Ask this matchup" as a small link at its end, or the queued line once it is asked. */
+export function MatchupMove({ rival, move }: { rival: { key: string; name: string }; move?: { family: string; text: string; repeat?: true } }) {
   const ctx = useMatchups();
   const q = ctx?.queuedFor(rival.key);
+  if (q && ctx) return <QueuedLine entry={q} ctx={ctx} />;
+  const family = move?.family ?? "Close the gap";
+  const text = move?.repeat ? "Same move as above." : move?.text || `Ask the AI to pick between you and ${rival.name} at the next collection, so you can see how you would do against it.`;
   return (
-    <div className="mb-5 rounded-xl bg-primary-soft px-4 py-3">
-      <span className={`${T.labelAccent} mb-1 block`}>What to do - Close the gap</span>
-      {q && ctx ? (
-        <QueuedLine entry={q} ctx={ctx} />
-      ) : (
-        <div className="grid items-center gap-x-4 gap-y-1.5 sm:grid-cols-[minmax(0,1fr)_auto]">
-          <p className={`${T.body} text-ink`}>Ask the AI to pick between you and {rival.name} at the next collection, so you can see how you would do against it.</p>
-          {ctx?.state?.canWrite && <AskButton onClick={() => ctx.choose(rival)} />}
-        </div>
+    <p className={`${T.body} mt-2 text-ink`}>
+      What to do: <b className="font-semibold">{family}</b> - {text}
+      {ctx?.state?.canWrite && (
+        <>
+          {" "}
+          <button type="button" onClick={() => ctx.choose(rival)} className={`${T.ctl} whitespace-nowrap text-primary underline underline-offset-2 hover:opacity-80`}>
+            Ask this matchup
+          </button>
+        </>
       )}
-    </div>
+    </p>
   );
 }
 

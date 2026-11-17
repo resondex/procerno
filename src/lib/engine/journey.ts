@@ -89,7 +89,7 @@ export type { RateCell, StationKey };
  */
 
 /** Bumped whenever the payload shape or a number's meaning changes. */
-export const JOURNEY_VERSION = "j6"; // j6 (2026-11-10): the tightened wall test (shown wording only, own-brand complaints excluded)
+export const JOURNEY_VERSION = "j7"; // j7 (2026-11-16): the two settled rows carry the Map names (What to use alongside you, Answering a critic). // j6 (2026-11-10): the tightened wall test (shown wording only, own-brand complaints excluded)
 
 export interface JourneyMetric {
   key: string;
@@ -959,11 +959,11 @@ export async function computeJourney(run: Run, project: Project, request: ViewRe
         ? row("settled_expansion", "Doing more with you", "backs the step", ex.answers, ex.growth.backs, `points them to another brand ${pct(ex.growth.redirects)}`, true)
         : notAsked("settled_expansion", "Doing more with you", "backs the step", true),
       eco
-        ? row("settled_ecosystem", "What to pair with you", "strengthens the relationship", eco.answers, eco.verdicts.strengthens, eco.pairings.length ? `most paired: ${eco.pairings.slice(0, 3).map((p) => p.name).join(", ")}` : "no pairings named", true)
-        : notAsked("settled_ecosystem", "What to pair with you", "strengthens the relationship", true),
+        ? row("settled_ecosystem", "What to use alongside you", "strengthens the relationship", eco.answers, eco.verdicts.strengthens, eco.pairings.length ? `most paired: ${eco.pairings.slice(0, 3).map((p) => p.name).join(", ")}` : "no pairings named", true)
+        : notAsked("settled_ecosystem", "What to use alongside you", "strengthens the relationship", true),
       adv
-        ? row("settled_advocacy", "Defending you to a critic", "pushes back on the critic", adv.answers, adv.premise.rebuts, `confident case ${pct(adv.caseStrength.strong)}`, true)
-        : notAsked("settled_advocacy", "Defending you to a critic", "pushes back on the critic", true),
+        ? row("settled_advocacy", "Answering a critic", "pushes back on the critic", adv.answers, adv.premise.rebuts, `confident case ${pct(adv.caseStrength.strong)}`, true)
+        : notAsked("settled_advocacy", "Answering a critic", "pushes back on the critic", true),
     ],
     picks: customerPicks,
     picksLabel: "Where it sends your customers",

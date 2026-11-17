@@ -33,6 +33,7 @@ const { computeDossiers } = await import(process.cwd() + "/src/lib/engine/dossie
 const { buildResolver } = await import(process.cwd() + "/src/lib/engine/brand_resolve.ts");
 const { isAllowedTag, TAKEAWAY_TAGS, CLOSE_PTS } = await import(process.cwd() + "/src/lib/engine/panel_tags.ts");
 const { knOf: knOfH } = await import(process.cwd() + "/src/lib/engine/panel_build.ts");
+const { findingMove } = await import(process.cwd() + "/src/lib/engine/finding_moves.ts");
 const { cell: wilsonCell } = await import(process.cwd() + "/src/lib/engine/view_data.ts");
 /* am36: the verdict panels whose steps carry takeaways and whose explanation repeats no bar number. */
 const VERDICT_KINDS = new Set(["value", "buyer_worry", "customer_worry", "looking_around", "expansion", "business_case", "critic", "alongside", "criteria", "habit"]);
@@ -174,6 +175,11 @@ for (const project of projects) {
     const summary = await computeBrandSummary(data, {});
     const ranked = rankedInsights(summary, await insightInputs(data, {}));
     (debug as { probeInsights?: unknown }).probeInsights = ranked.filter((i: { key: string }) => BS8_KEYS.has(i.key));
+    // am62: every finding that fires (served or not) has a move written for it, and every bar says whose number it is.
+    for (const i of ranked as { key: string; title: string; names?: object; viz?: { label: string; who?: string }[] }[]) {
+      if (!findingMove(i.key, i.names as never)) failures.push(`${project.brand}: insight ${i.key} has no move written for it`);
+      for (const r of i.viz ?? []) if (!r.who) failures.push(`${project.brand}: insight ${i.key} bar "${r.label}" does not say whose it is`);
+    }
   }
   const view = await computeAnalysisMap(data, {}, debug);
   const ids = new Set(data.responses.map((r: { id: string }) => r.id));
@@ -246,6 +252,25 @@ for (const project of projects) {
     } else console.log(`      (no viz)`);
   }
   if (view.tensions.length < 3 || view.tensions.length > 5) failures.push(`${project.brand}: ${view.tensions.length} tensions`);
+  /* am62: every finding carries its key and a move (family + sentence); no two findings show the same sentence
+   * unless the later one is flagged as a repeat; every bar says whose number it is; the opening funnel
+   * paragraph is identified by its key. */
+  {
+    const said = new Set<string>();
+    if (view.tensions[0]?.key !== "known_vs_picked") failures.push(`${project.brand}: the first tension is not the known-vs-picked paragraph`);
+    for (const t of view.tensions) {
+      if (!t.key) failures.push(`${project.brand}: tension "${t.title}" has no key`);
+      if (!t.move?.family?.trim() || !t.move?.text?.trim()) failures.push(`${project.brand}: tension "${t.title}" has no move`);
+      else if (t.key !== "known_vs_picked") {
+        if (said.has(t.move.text) && !t.move.repeat) failures.push(`${project.brand}: tension "${t.title}" repeats a move sentence without the repeat flag`);
+        if (!said.has(t.move.text) && t.move.repeat) failures.push(`${project.brand}: tension "${t.title}" flagged as a repeat of nothing`);
+        said.add(t.move.text);
+        if (/\d+%|\b\d+ of \d+\b/.test(t.move.text)) failures.push(`${project.brand}: tension "${t.title}" move states a number`);
+      }
+      for (const r of t.viz ?? []) if (!r.who || !["you", "rival", "other"].includes(r.who)) failures.push(`${project.brand}: tension "${t.title}" bar "${r.label}" does not say whose it is`);
+      console.log(`      move: ${t.move?.family} - ${t.move?.text}${t.move?.repeat ? " [repeat]" : ""}`);
+    }
+  }
 
   console.log(`\nBS8 PLACEMENTS:`);
   for (const pl of (debug as { placements?: { key: string; kind: string; cellId: string | null; how: string }[] }).placements ?? []) {
@@ -341,6 +366,27 @@ for (const project of projects) {
   bannedIn(brief, phrases, "brief", banned);
   for (const b of banned) failures.push(`${project.brand}: banned word - ${b}`);
   console.log(`PLAIN WORDING: ${banned.length} banned-word hits`);
+  /* bf26 (the Brief's one voice): no composed Brief string - every frame, its answer cards, the tracker's own
+   * subject and one rival subject - says "you" / "your" / "yours", and no running sentence says " 0% of "
+   * (tables and figure rows excluded; counts in `tip` are never shown). */
+  {
+    const rivalName = (brief.subjects as string[]).find((x) => x !== brief.subject);
+    const briefs = [brief, ...(rivalName ? [await computeBrief(data, { subject: rivalName })] : [])];
+    let voiceChecked = 0;
+    for (const b of briefs) {
+      const walk = (v: unknown, path: string, inTable: boolean): void => {
+        if (typeof v === "string") {
+          voiceChecked++;
+          if (/\b(you|your|yours)\b/i.test(v)) failures.push(`${project.brand}: brief [${b.subject}] ${path} speaks to "you": ${JSON.stringify(v.slice(0, 160))}`);
+          if (!inTable && / 0% of /.test(v)) failures.push(`${project.brand}: brief [${b.subject}] ${path} says " 0% of ": ${JSON.stringify(v.slice(0, 160))}`);
+        } else if (Array.isArray(v)) v.forEach((x, i) => walk(x, `${path}[${i}]`, inTable));
+        else if (v && typeof v === "object") for (const [k, x] of Object.entries(v)) if (k !== "tip" && k !== "id") walk(x, `${path}.${k}`, inTable || k === "table" || k === "rows");
+      };
+      walk(b.memos, "memos", false);
+      walk(b.cards, "cards", false);
+    }
+    console.log(`BRIEF VOICE: ${voiceChecked} strings checked across ${briefs.length} subjects`);
+  }
 
   /* -- am31: the per-question-type panels -- */
   {
@@ -903,12 +949,31 @@ for (const project of projects) {
     const stripped = JSON.parse(JSON.stringify(view));
     for (const pp of Object.values(stripped.positions as Record<string, { panel?: unknown }>)) delete pp.panel;
     delete (stripped as { rivalPanels?: unknown }).rivalPanels;
+    // PANEL_BASELINE_WRITE=<dir> writes this run's map (panels stripped) as a fresh baseline.
+    if (process.env.PANEL_BASELINE_WRITE) {
+      fsMod.mkdirSync(process.env.PANEL_BASELINE_WRITE, { recursive: true });
+      fsMod.writeFileSync(`${process.env.PANEL_BASELINE_WRITE}/${slug}.map.json`, JSON.stringify(stripped));
+    }
     const base = process.env.PANEL_BASELINE;
     if (base) {
       const f = `${base}/${slug}.map.json`;
       if (!fsMod.existsSync(f)) failures.push(`${project.brand}: no baseline ${f}`);
-      else if (fsMod.readFileSync(f, "utf8") !== JSON.stringify(stripped)) failures.push(`${project.brand}: positions without panel differ from the am30 baseline`);
-      else console.log(`OLD OUTPUT: identical to the am30 baseline`);
+      else {
+        // am62: the tensions gained a key, a move and whose-bar colours, and a quoted question is no longer cut at
+        // 80 characters - so everything but the tensions must match byte for byte, and each tension must match the
+        // baseline's apart from those (a quoted question may only run on past the old cut).
+        const old = JSON.parse(fsMod.readFileSync(f, "utf8"));
+        const oldT = old.tensions as { title: string; body: string; cellId: string; viz?: object[] }[];
+        const newT = stripped.tensions as { title: string; body: string; cellId: string; viz?: { who?: string }[] }[];
+        delete old.tensions;
+        const rest = { ...stripped };
+        delete rest.tensions;
+        const strip = (t: { title: string; cellId: string; viz?: object[]; matchup?: object }) => JSON.stringify({ title: t.title, cellId: t.cellId, viz: (t.viz ?? []).map((v) => { const x = { ...(v as { who?: string }) }; delete x.who; return x; }), matchup: t.matchup });
+        const quoteOk = (a: string, b: string) => a === b || (/\.\.\."$/.test(a) && b.startsWith(a.replace(/\.\.\."$/, "")) && b.endsWith('"'));
+        if (JSON.stringify(old) !== JSON.stringify(rest)) failures.push(`${project.brand}: positions without panel differ from the am30 baseline`);
+        else if (oldT.length !== newT.length || oldT.some((t, i) => strip(t) !== strip(newT[i]) || !quoteOk(t.body, newT[i].body))) failures.push(`${project.brand}: tensions differ from the am30 baseline beyond the key, move, bar owner and question quote`);
+        else console.log(`OLD OUTPUT: identical to the am30 baseline (tensions: apart from am62's key, move, bar owner and question quote)`);
+      }
     }
     // 8. payload: the served map (slim: a stub per panel) and the lazily loaded cell panels.
     const withP = JSON.stringify(view).length;

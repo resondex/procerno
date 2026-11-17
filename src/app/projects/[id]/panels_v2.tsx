@@ -548,7 +548,8 @@ export function LazyRivalAcross({ name, ctx, fallback }: { name: string; ctx: Ct
   return <RivalAcrossView r={data} ctx={ctx} />;
 }
 
-const WHO_COLOR: Record<RivalAcrossStep["bars"][number]["who"], string> = { rival: C_AWAY, you: C_YOU, other: C_USUAL };
+// The tokens are written out here, not read from panel_parts: this module can be evaluated first (the two import each other).
+const WHO_COLOR: Record<RivalAcrossStep["bars"][number]["who"], string> = { rival: "var(--pa-theirs)", you: "var(--pa-yours)", other: "var(--pa-usual)" };
 
 /** One question's card: the whole card selects it (its bars open no answers - the block below does). */
 /** By rival, as one table (2026-11-16): a row per question - the rival's number, yours, a short verdict. */

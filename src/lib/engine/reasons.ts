@@ -103,8 +103,8 @@ const TYPE_ORDER: { key: ViewKey; label: string }[] = [
   { key: "criteria_taught", label: "Criteria (taught)" },
   { key: "settled_business_case", label: "Business case" },
   { key: "settled_expansion", label: "Expansion" },
-  { key: "settled_ecosystem", label: "Ecosystem" },
-  { key: "settled_advocacy", label: "Advocacy" },
+  { key: "settled_ecosystem", label: "What to use alongside you" },
+  { key: "settled_advocacy", label: "Answering a critic" },
 ];
 
 /** Points by which a member code must lean each way for its group to read as mixed. */
@@ -377,7 +377,7 @@ export function computeReasons(data: ViewData, request: ViewRequest = {}): Reaso
 }
 
 // r3 (2026-10-28): names resolve through the context judge (context_judge.ts).
-const REASONS_VERSION = "r6"; // r6: doubt type buckets by premise verdict; r4: type labels in buyer language (output change for identical inputs)
+const REASONS_VERSION = "r7"; // r7 (2026-11-16): the two settled type labels take the Map's card names ("What to use alongside you", "Answering a critic"); r6: doubt type buckets by premise verdict; r4: type labels in buyer language (output change for identical inputs)
 export function computeReasonsCached(run: Run, project: Project, request: ViewRequest = {}): Promise<ReasonsView | null> {
   const r = requestOf(request, true);
   return cachedView("reasons", REASONS_VERSION, run, project, (d) => computeReasons(d, r), { codeGroups: true, judge: true }, r);
