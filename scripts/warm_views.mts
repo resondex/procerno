@@ -88,11 +88,11 @@ for (const pass of [1, 2] as const) {
       }
     }
     if (pass === 2 && !noWritten) {
-      // Written frames warm only for trackers whose owner is on a written
-      // tier (2026-11-09, Tyler: "only do it for clients") - staff and
-      // composed tiers generate lazily, or hand-run warm_written_briefs.mts.
+      // Written frames (the tracker's own brand only, never a rival's) warm
+      // for a written-tier or staff owner (2026-11-16); an owner on a
+      // composed-only plan is skipped.
       if (!(await writtenBriefsEntitled(project))) {
-        process.stdout.write("written: owner is not a written-tier client - not warmed");
+        process.stdout.write("written: owner's plan has no written memos - not warmed");
       } else {
         const t0 = Date.now();
         // The third argument is an ABSOLUTE deadline (Date.now() + budget), not a duration.

@@ -486,12 +486,11 @@ export async function writtenBriefsEntitled(project: Project): Promise<boolean> 
   if (!project.user_id) return false;
   try {
     const { store } = await import("../store");
-    if (!WRITTEN_PLANS.has(await store.getPlan(project.user_id))) return false;
-    // Staff are not clients: they get the admin toggle, never served written.
-    // A failed staff lookup degrades to plan-only (warm too much, never too
-    // little for a real client).
-    const staff = await store.isStaffUserId(project.user_id).catch(() => false);
-    return !staff;
+    // 2026-11-16 (Tyler): the tracker's own brand's written memos are warmed
+    // for anyone who can read them - a written-tier owner, or a staff owner
+    // (the admin toggle). Only an owner on a composed-only plan is skipped.
+    if (WRITTEN_PLANS.has(await store.getPlan(project.user_id))) return true;
+    return await store.isStaffUserId(project.user_id).catch(() => false);
   } catch {
     return false;
   }
