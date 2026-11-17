@@ -1086,7 +1086,7 @@ function ContestMap({
 // ---------- the Map: by rival ----------
 
 /** One rival as a table row (2026-11-16: the By rival landing is a table, not a wall of cards). */
-function RivalRow({ d, ctx, max }: { d: Dossier; ctx: PanelCtx; max: number }) {
+function RivalCard({ d, ctx }: { d: Dossier; ctx: PanelCtx }) {
   const queued = useMatchupQueued(d.key);
   const pct = (x?: string) => parseFloat((x ?? "0").replace(/[^0-9.]/g, "")) || 0;
   const share = d.tiles[1]?.value;
@@ -1096,58 +1096,21 @@ function RivalRow({ d, ctx, max }: { d: Dossier; ctx: PanelCtx; max: number }) {
   const gap = rec ? pct(rec.them) - pct(rec.you) : 0;
   const chip: { text: string; tone: "good" | "bad" | "neutral" } = rec
     ? gap >= 10
-      ? { text: "It leads head to head", tone: "bad" }
+      ? { text: "Leads head to head", tone: "bad" }
       : gap <= -10
         ? { text: "You lead head to head", tone: "good" }
         : { text: "Even head to head", tone: "neutral" }
     : queued
       ? { text: "Head to head queued", tone: "neutral" }
-      : { text: d.h2h.kind === "missing" && d.h2h.alert ? "Takes picks, never asked head to head" : "Never asked head to head", tone: "neutral" };
-  const open = () => ctx.open({ kind: "rival", name: d.name });
+      : { text: "Never asked head to head", tone: "neutral" };
   return (
-    <tr
-      onClick={open}
-      onKeyDown={(e) => {
-        if (e.key === "Enter" || e.key === " ") {
-          e.preventDefault();
-          open();
-        }
-      }}
-      tabIndex={0}
-      role="button"
-      className="cursor-pointer border-t border-line/70 align-top hover:bg-line/30"
+    <button
+      type="button"
+      onClick={() => ctx.open({ kind: "rival", name: d.name })}
+      className="flex min-w-0 flex-col gap-2 rounded-[12px] border border-line bg-surface p-4 text-left transition-colors hover:border-[var(--color-primary)]"
     >
-      <td className="py-2.5 pr-3">
-        <span className="font-semibold text-ink">{d.name}</span>
-        {(up || down) && (
-          <span className={`block ${T.cap} text-ink-3`}>
-            {up && <>It wins on {up.label}</>}
-            {up && down && "; "}
-            {down && <>{up ? "you" : "You"} win on {down.label}</>}
-          </span>
-        )}
-        <MatchupDropNote rivalKey={d.key} name={d.name} />
-      </td>
-      <td className="py-2.5 pl-2">
-        <span className="grid grid-cols-[minmax(0,1fr)_2.75rem] items-center gap-2">
-          <span className="h-2 overflow-hidden rounded bg-line/60">
-            <i className="block h-full rounded" style={{ width: `${Math.min(100, (pct(share) / max) * 100)}%`, background: "var(--pa-theirs)" }} />
-          </span>
-          <b className="text-right font-semibold tabular-nums text-ink">{share ?? "-"}</b>
-        </span>
-      </td>
-      <td className="whitespace-nowrap py-2.5 pl-3 text-right tabular-nums">
-        {rec ? (
-          <>
-            <b className="font-semibold" style={{ color: "var(--pa-yours)" }}>{rec.you}</b>
-            <span className="text-ink-3"> - </span>
-            <b className="font-semibold" style={{ color: "var(--pa-theirs)" }}>{rec.them}</b>
-          </>
-        ) : (
-          <span className="text-ink-3">-</span>
-        )}
-      </td>
-      <td className="py-2.5 pl-3 text-right">
+      <span className="flex flex-wrap items-start justify-between gap-2">
+        <span className={`${T.title} text-ink`}>{d.name}</span>
         <span
           className={`inline-block rounded-full px-2 py-0.5 ${T.cap} font-semibold`}
           style={
@@ -1160,8 +1123,40 @@ function RivalRow({ d, ctx, max }: { d: Dossier; ctx: PanelCtx; max: number }) {
         >
           {chip.text}
         </span>
-      </td>
-    </tr>
+      </span>
+      {d.headline && <span className={`${T.sec} text-ink-2`}>{d.headline}</span>}
+      <span className="mt-1 flex flex-wrap gap-x-8 gap-y-2">
+        <span>
+          <span className={`block ${T.cap} text-ink-3`}>Share of picks</span>
+          <b className={`${T.numSm} text-ink`}>{share ?? "-"}</b>
+        </span>
+        <span>
+          <span className={`block ${T.cap} text-ink-3`}>Head to head, you - it</span>
+          {rec ? (
+            <b className={T.numSm}>
+              <span style={{ color: "var(--pa-yours)" }}>{rec.you}</span>
+              <span className="text-ink-3"> - </span>
+              <span style={{ color: "var(--pa-theirs)" }}>{rec.them}</span>
+            </b>
+          ) : (
+            <b className={`${T.numSm} text-ink-3`}>-</b>
+          )}
+        </span>
+      </span>
+      {!rec && !queued && d.h2h.kind === "missing" && d.h2h.alert && (
+        <span className={`${T.cap} border-l-[3px] pl-2 text-ink`} style={{ borderColor: "var(--pa-contested)" }}>
+          It takes picks from you, and you have never asked the AI to compare the two.
+        </span>
+      )}
+      <MatchupDropNote rivalKey={d.key} name={d.name} />
+      {(up || down) && (
+        <span className={`${T.sec} text-ink-3`}>
+          {up && <>It wins on {up.label}.</>}
+          {up && down && " "}
+          {down && <>You win on {down.label}.</>}
+        </span>
+      )}
+    </button>
   );
 }
 
@@ -1174,44 +1169,12 @@ function RivalGrid({ dossiers, loading, ctx }: { dossiers: Dossier[]; loading: b
   const lead = sorted.filter((d) => d.prominent);
   const rest = sorted.filter((d) => !d.prominent);
   const shown = lead.length ? lead : sorted;
-  const you = ctx.map.shareOfDecided.find((x) => x.you);
-  const youPct = you && you.share.n > 0 ? (you.share.k / you.share.n) * 100 : null;
-  const max = Math.max(1, youPct ?? 0, ...shown.map(pc));
   return (
     <>
-      <div className="overflow-x-auto rounded-[10px] border border-line bg-surface px-4 py-1">
-        <table className={`w-full ${T.body}`}>
-          <thead>
-            <tr className={`${T.cap} text-ink-3`}>
-              <th className="py-2 pr-3 text-left font-normal">Rivals, the ones taking the most picks first</th>
-              <th className="w-[34%] py-2 pl-2 text-left font-normal">Share of picks</th>
-              <th className="py-2 pl-3 text-right font-normal">Head to head, you - it</th>
-              <th className="py-2 pl-3 text-right font-normal" />
-            </tr>
-          </thead>
-          <tbody>
-            {youPct !== null && (
-              <tr className="border-t border-line/70">
-                <td className="py-2.5 pr-3 font-semibold" style={{ color: "var(--pa-yours)" }}>
-                  You
-                </td>
-                <td className="py-2.5 pl-2">
-                  <span className="grid grid-cols-[minmax(0,1fr)_2.75rem] items-center gap-2">
-                    <span className="h-2 overflow-hidden rounded bg-line/60">
-                      <i className="block h-full rounded" style={{ width: `${Math.min(100, (youPct / max) * 100)}%`, background: "var(--pa-yours)" }} />
-                    </span>
-                    <b className="text-right font-semibold tabular-nums text-ink">{youPct < 10 ? youPct.toFixed(1).replace(/\.0$/, "") : Math.round(youPct)}%</b>
-                  </span>
-                </td>
-                <td />
-                <td />
-              </tr>
-            )}
-            {shown.map((d) => (
-              <RivalRow key={d.key} d={d} ctx={ctx} max={max} />
-            ))}
-          </tbody>
-        </table>
+      <div className="grid gap-3 md:grid-cols-2">
+        {shown.map((d) => (
+          <RivalCard key={d.key} d={d} ctx={ctx} />
+        ))}
       </div>
       <p className={`${T.cap} mt-2 text-ink-3`}>Click a rival to open it.</p>
       {lead.length > 0 && rest.length > 0 && (
