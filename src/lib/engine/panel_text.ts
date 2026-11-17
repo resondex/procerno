@@ -767,3 +767,15 @@ export function criticPremiseDetail(tag: string, after: "few" | "strong" | "weak
         : "When it concedes the point, the defense mostly weakens to a partial one.";
   return { heading, body: join(body) };
 }
+
+/* ---------- am58: "What it tells buyers to look at" (what to look for) ---------- */
+export const CRITERIA_STEP_TEXT = {
+  buyers: { title: (topic: string) => `Which buyers are taught ${topic}`, sub: "Share of each buyer's answers that raise it." },
+  vendor: { title: (topic: string) => `Which AI companies teach ${topic}`, sub: "Share of each company's answers that raise it." },
+  size: { title: "How long its list is", sub: "Share of these answers, by how many topics they raise.", few: "Six or fewer", mid: "Seven to twelve", many: "Thirteen or more" },
+  brands: { title: "Which brands it names while teaching", sub: "Share of these answers that name it. The question asks for no brand." },
+  oneBuyer: {
+    heading: "The AI leaves your strongest point to one buyer",
+    body: (topic: string, buyer: string) => `${topic} is taught to the buyer in "${buyer}" and to almost no one else.`,
+  },
+};

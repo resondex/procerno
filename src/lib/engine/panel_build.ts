@@ -45,6 +45,7 @@ import {
   COMMITS_TEXT,
   CRITERIA_HELP,
   EXCEPTION_TEXT,
+  CRITERIA_STEP_TEXT,
   CRITIC_TEXT,
   criticPremiseDetail,
   ALONGSIDE_TEXT,
@@ -1898,14 +1899,19 @@ function criteriaPanel(inp: PanelCellInput, ctx: Ctx): PositionPanel {
           }),
         }
       : undefined;
-  return {
+  const out: PositionPanel = {
     kind: "criteria",
     claim,
     stackLabel: "How the answer goes",
     steps,
     ...(table ? { table } : {}),
   };
+  // am58: the winning topics off the checklist, for the step's explanation (criteriaStepDetails).
+  CRIT_GAP.set(out, untaught.map((w) => w.code));
+  return out;
 }
+
+const CRIT_GAP = new WeakMap<PositionPanel, string[]>();
 
 function expansionPanel(inp: PanelCellInput, ctx: Ctx): PositionPanel {
   const { h } = ctx;
@@ -3205,6 +3211,7 @@ function detailOf(inp: PanelCellInput, p: PositionPanel, up: PositionPanel | und
     }
     case "criteria": {
       p.detail = criteriaDetail(!!p.steps.find((s) => s.key === "taught")?.note?.length, h.plural);
+      criteriaStepDetails(inp, p, ctx);
       return;
     }
     case "expansion": {
@@ -3230,6 +3237,73 @@ function detailOf(inp: PanelCellInput, p: PositionPanel, up: PositionPanel | und
 }
 
 /* ------------- am34: what explains each step (the clicked step card) ------------- */
+
+/** am58: the What to look for step explains itself with new facts: which buyers are taught each winning topic that
+ * is off the checklist (all-buyers card), which AI companies teach it (only when they differ), how long the AI's
+ * list is, and which brands it names while teaching (the question asks for none). */
+function criteriaStepDetails(inp: PanelCellInput, p: PositionPanel, ctx: Ctx) {
+  if (!p.detail) return;
+  const { h } = ctx;
+  const T = CRITERIA_STEP_TEXT;
+  const rows = inp.rows;
+  const all = rows.length;
+  const gap = CRIT_GAP.get(p) ?? [];
+  const has = (code: string) => (r: PoolRow) => !!r.code.reasons?.includes(code);
+  type Item = { label: string; rs: PoolRow[]; n: number; unit: string; find: (r: PoolRow) => string };
+  const sec = (title: string, sub: string, tone: PanelTone, items: Item[], keepOrder = false): PanelDetailSection | null => {
+    const shown = items.filter((x) => x.n > 0);
+    if (!keepOrder) shown.sort((a, b) => b.rs.length / b.n - a.rs.length / a.n || a.label.localeCompare(b.label));
+    // A 0% row is a fact here (a buyer never taught the topic), so rows stay even with no answers behind them.
+    return shown.length ? { title, sub, tone, rows: shown.map((x) => ({ label: x.label, num: num(x.rs.length, x.n, x.unit, refsOf(x.rs, x.find)) })) } : null;
+  };
+  const sibs = inp.pooled ? [...ctx.inputs.values()].filter((x) => x.kind === "criteria" && !x.pooled && x.rows.length >= ARGS_MIN) : [];
+  const byVendor = new Map<string, PoolRow[]>();
+  for (const r of rows) {
+    const v = engineFacets(r.model).vendor;
+    byVendor.set(v, [...(byVendor.get(v) ?? []), r]);
+  }
+  const sections: (PanelDetailSection | null)[] = [];
+  let one: { topic: string; buyer: string } | undefined;
+  if (sibs.length >= 2)
+    for (const code of gap) {
+      const items = sibs.map((x) => ({ label: x.label, rs: x.rows.filter(has(code)), n: x.rows.length, unit: "answers for that buyer", find: () => code }));
+      const hi = items.filter((x) => x.rs.length / x.n >= 0.5);
+      const lo = items.filter((x) => x.rs.length / x.n < 0.1);
+      if (!one && hi.length === 1 && lo.length === items.length - 1) one = { topic: cname(code, h), buyer: hi[0].label };
+      sections.push(sec(T.buyers.title(cname(code, h)), T.buyers.sub, "good", items));
+    }
+  if (gap.length) {
+    const code = gap[0];
+    const items = [...byVendor.entries()].filter(([, rs]) => rs.length >= ARGS_MIN).map(([label, rs]) => ({ label, rs: rs.filter(has(code)), n: rs.length, unit: `${label} answers`, find: () => code }));
+    const shares = items.map((x) => x.rs.length / x.n);
+    // Only when the companies differ: a flat list says nothing.
+    if (items.length >= 2 && Math.max(...shares) - Math.min(...shares) >= 0.15) sections.push(sec(T.vendor.title(cname(code, h)), T.vendor.sub, "neutral", items));
+  }
+  const len = (lo: number, hiN: number) => rows.filter((r) => { const k = new Set(r.code.reasons ?? []).size; return k >= lo && k <= hiN; });
+  sections.push(sec(T.size.title, T.size.sub, "neutral", [
+    { label: T.size.few, rs: len(1, 6), n: all, unit: "answers", find: (r: PoolRow) => verdictFind(r, h) },
+    { label: T.size.mid, rs: len(7, 12), n: all, unit: "answers", find: (r: PoolRow) => verdictFind(r, h) },
+    { label: T.size.many, rs: len(13, 999), n: all, unit: "answers", find: (r: PoolRow) => verdictFind(r, h) },
+  ].filter((x) => x.rs.length >= ROW_MIN), true));
+  const brands = new Map<string, { name: string; you: boolean; rs: PoolRow[] }>();
+  for (const r of rows)
+    for (const m of r.code.mentions ?? []) {
+      const res = h.resolve(m.brand);
+      if (res.status !== "active" || !res.key) continue;
+      const you = res.key === h.targetKey;
+      const t = brands.get(res.key) ?? { name: you ? "You" : res.name ?? m.brand, you, rs: [] };
+      if (!t.rs.includes(r)) t.rs.push(r);
+      brands.set(res.key, t);
+    }
+  const named = [...brands.values()].filter((x) => x.rs.length >= ROW_MIN).sort((a, b) => Number(b.you) - Number(a.you) || b.rs.length - a.rs.length).slice(0, 5);
+  if (named.length) sections.push(sec(T.brands.title, T.brands.sub, "neutral", named.map((x) => ({ label: x.name, rs: x.rs, n: all, unit: "answers", find: () => (x.you ? h.brand : x.name) })), true));
+  const kept = sections.filter((x): x is PanelDetailSection => !!x);
+  if (!kept.length) return;
+  const text = one ? { heading: T.oneBuyer.heading, body: join(T.oneBuyer.body(upperFirst(one.topic), one.buyer)) } : p.detail;
+  p.details = { taught: { ...text, sections: kept } };
+  delete p.detail;
+  delete p.detailComp;
+}
 
 /** am57: the critic card's two steps explain themselves. "How strong an answer" keeps the card's explanation and adds
  * which AI companies give a strong answer most and which rivals come up; "Does it say the critic is right?" says how
