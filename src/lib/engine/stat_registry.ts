@@ -61,6 +61,8 @@ export const statId = {
   step: (cellId: string, stepKey: string, who: "you" | "usual" | "vs" | { rival: string }) =>
     `cell:${cellId}::steps/${seg(stepKey)}/${typeof who === "string" ? who : `rival/${seg(who.rival)}`}`,
   segment: (cellId: string, stepKey: string, segKey: string) => `cell:${cellId}::steps/${seg(stepKey)}/seg/${seg(segKey)}`,
+  /** The prefix of one section's rows in a step's explanation (each row: prefix + row label). */
+  section: (cellId: string, stepKey: string, title: string) => `cell:${cellId}::detail/${seg(stepKey)}/section/${seg(title)}/`,
   /** A number on a line of a cell's card: by its span key ("you", "avg", "usual", "rate") or its order. */
   line: (cellId: string, lineKey: string, i: string | number) => `cell:${cellId}::lines/${seg(lineKey)}/${seg(i)}`,
   competitor: (cellId: string, name: string | "you") => `cell:${cellId}::competitors/${name === "you" ? "you" : seg(name)}`,
@@ -83,6 +85,10 @@ export interface StatRegistry {
   all(): Stat[];
   /** Typed queries (undefined when no card shows that fact). */
   step(cellId: string, stepKey: string, who: "you" | "usual" | "vs" | { rival: string }): Stat | undefined;
+  /** Stage 4: one segment of a step's split bar (a verdict: "yes" / "no" / "depends", "keep" / "leave" / "none" ...). */
+  segment(cellId: string, stepKey: string, segKey: string): Stat | undefined;
+  /** Stage 4: the rows of one section of a step's explanation, in the card's own order. */
+  section(cellId: string, stepKey: string, title: string): { label: string; stat: Stat }[];
   line(cellId: string, lineKey: string, i: string | number): Stat | undefined;
   competitor(cellId: string, name: string | "you"): Stat | undefined;
   rivalStep(name: string, stepKey: string, who: "rival" | "you"): Stat | undefined;
@@ -132,6 +138,17 @@ export function buildStatRegistry(map: Pick<AnalysisMapView, "positions" | "riva
     has: (id) => byId.has(id),
     all: () => [...byId.values()],
     step: (c, k, w) => get(statId.step(c, k, w)),
+    segment: (c, k, g) => get(statId.segment(c, k, g)),
+    section: (c, k, title) => {
+      const pre = statId.section(c, k, title);
+      const out: { label: string; stat: Stat }[] = [];
+      for (const s of byId.values()) {
+        if (!s.id.startsWith(pre)) continue;
+        const rest = s.id.slice(pre.length);
+        if (!rest.includes("/")) out.push({ label: rest.replace(/∕/g, "/"), stat: s });
+      }
+      return out;
+    },
     line: (c, k, i) => get(statId.line(c, k, i)),
     competitor: (c, n) => get(statId.competitor(c, n)),
     rivalStep: (n, k, w) => get(statId.rivalStep(n, k, w)),

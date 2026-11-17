@@ -18,6 +18,12 @@
  * field throws), a source check of brief.ts (no funnel-cell reads, no per-situation headline reads, the full summary
  * reached only by the two out-of-scope calls), and the funnel universe (every summary brand has a funnel on a card).
  *
+ * Stage 4 (verdict figures, 2026-11-17): Value, the worries, the customers looking around, rivals' customers switching
+ * and the direct matchups are the verdict cards' stats too. brief.ts strips the verdict views (stripVerdicts) - strict,
+ * a read of the summary's headToHead / buyersDoubt / customersDoubt or the inputs' value / doubt / alternatives
+ * throws - and the source check fails on any read of an old verdict field outside a `legacyV` / `c.legacy` line
+ * (the tagged path for a verdict figure no card shows, listed under "needs a card home").
+ *
  * Fixture only, no model calls:  npx tsx scripts/brief_links_harness.mts
  */
 process.env.DATABASE_URL = "";
@@ -29,7 +35,7 @@ const { loadViewData } = await import(process.cwd() + "/src/lib/engine/view_data
 process.env.BRIEF_TRIM_LOG = "1";
 process.env.BRIEF_FIG_LOG = "1";
 process.env.BRIEF_STRICT_FUNNEL = "1";
-const { computeBrief, conditionTerms, TRIMMED_CLAIMS, FIG_LOG, stripFunnel } = await import(process.cwd() + "/src/lib/engine/brief.ts");
+const { computeBrief, conditionTerms, TRIMMED_CLAIMS, FIG_LOG, stripFunnel, stripVerdicts } = await import(process.cwd() + "/src/lib/engine/brief.ts");
 const { buildStatRegistry } = await import(process.cwd() + "/src/lib/engine/stat_registry.ts");
 const fs = await import("node:fs");
 const { sharedAnalysisMap } = await import(process.cwd() + "/src/lib/engine/analysis_map.ts");
@@ -65,6 +71,13 @@ const failures: string[] = [];
   const bad = /\.(mentioned|chosen|shareOfDecided|firmPickInCategory|firmPick|byMode|byEngine)\b|\.recommended\b|computeHeadline|\bpos(ition)?\.brands\b/;
   src.split("\n").forEach((l, i) => {
     if (bad.test(l)) failures.push(`brief.ts:${i + 1} reads an old-source funnel field: ${l.trim().slice(0, 160)}`);
+  });
+  // Stage 4: no old verdict field is read except on the tagged legacy path (a figure no card shows) or where the
+  // verdict views are declared and stripped to names.
+  const badV = /\.captured\b|\.winOfDecided\b|\.verdicts\.(proceed|avoid|keep|leave|undecided)\b|\.worth\.(yes|no|depends)\b|\.(buyersDoubt|customersDoubt|headToHead)\b|\binputs\.(value|doubt|alternatives)\b|\bvsTarget\b|\.instead\.find\b|\.ownRung\b|\.recommendsInstead\b|\bvalueInstead\(/;
+  const okV = /c\.legacy\.|legacyV\(|^type BriefSummary|SUMMARY_VERDICT_FIELDS =|const \{ target: _t,|h2h: summary\.headToHead\.map\(\(r\) => \(\{ key: r\.key, rival: r\.rival \}\)\)/;
+  src.split("\n").forEach((l, i) => {
+    if (badV.test(l) && !okV.test(l)) failures.push(`brief.ts:${i + 1} reads an old-source verdict field: ${l.trim().slice(0, 160)}`);
   });
   const oos = src.split("\n").filter((l) => /\.outOfScope\b/.test(l));
   for (const l of oos) if (!/hasDossier\(c\.outOfScope\.summary, key\)|awaySpecifics\(c\.outOfScope\.summary, c\.inputs\.away\)/.test(l)) failures.push(`brief.ts reaches the full summary outside the two out-of-scope calls: ${l.trim().slice(0, 160)}`);
@@ -112,6 +125,10 @@ for (const project of (await store.listProjects()).filter((p: any) => !p.archive
     };
     if (!throws(() => (st.target as any).chosen.k) || !throws(() => (st.brands[1] as any)?.mentioned.k) || !throws(() => (st.summary as any).firmPickInCategory.k))
       failures.push(`${project.brand}: the strict funnel guard did not throw on a stripped field (the strict run proves nothing)`);
+    // Stage 4: the verdict guard.
+    const sv = stripVerdicts(inputs, summary);
+    if (!throws(() => (st.summary as any).headToHead.length) || !throws(() => (st.summary as any).customersDoubt) || !throws(() => (sv.inputs as any).value) || !throws(() => (sv.inputs as any).doubt) || !throws(() => (sv.inputs as any).alternatives))
+      failures.push(`${project.brand}: the strict verdict guard did not throw on a stripped field (the strict run proves nothing)`);
     else strictChecked.push(project.brand);
     const reg0 = buildStatRegistry(map);
     for (const b of summary.brands) {
@@ -346,7 +363,7 @@ const trimmed = new Map<string, { brand: string; cellId: string; claim: string; 
 for (const t of TRIMMED_CLAIMS) trimmed.set(`${t.brand}|${t.claim}`, t);
 console.log(`\nMAP CLAIMS A MOVE QUOTES THAT LOST A CLAUSE: ${trimmed.size}`);
 for (const t of trimmed.values()) console.log(`  - ${t.brand} [${t.cellId}]\n      was:  ${t.claim}\n      now:  ${t.kept || "(dropped whole)"}`);
-console.log(`\nStage 3 (funnel decisions): every Brief above computed STRICT (a funnel read of the old source throws); guard negative control passed on ${strictChecked.length} trackers.`);
+console.log(`\nStage 3-4 (funnel and verdict decisions): every Brief above computed STRICT (a funnel or verdict read of the old source throws); guard negative controls passed on ${strictChecked.length} trackers.`);
 console.log(`Summary brands with no funnel on any card (left out of every funnel decision): ${noFunnel.length ? noFunnel.join("; ") : "none"}`);
 for (const f of failures) console.log(`FAIL ${f}`);
 console.log(failures.length ? `\n${failures.length} FAIL` : "\nALL PASS - every linked number opens a card that shows it beside its subject, or the Brief's own card");
