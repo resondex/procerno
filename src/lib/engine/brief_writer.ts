@@ -677,9 +677,18 @@ export async function prewarmWrittenBriefs(
         out.cached++;
         continue;
       }
-      const r = await writeBrief(memo, ctx);
+      // One more try on a rejected or failed write: a model reply varies call to call, so a frame that
+      // fails once usually passes the next time. The reason is logged so a skip is never silent.
+      let r = await writeBrief(memo, ctx);
+      if (!r.written && r.reason !== "unavailable" && Date.now() < deadlineMs) {
+        console.warn(`written brief: ${project.brand} ${frame} not written (${r.reason ?? "unknown"}) - trying once more`);
+        r = await writeBrief(memo, ctx);
+      }
       if (r.written) out.written++;
-      else out.skipped++;
+      else {
+        console.warn(`written brief: ${project.brand} ${frame} skipped (${r.reason ?? "unknown"})`);
+        out.skipped++;
+      }
     }
   } catch (err) {
     console.error("written brief warm failed:", err);
