@@ -135,6 +135,9 @@ export function theyFor(text: string): string {
     .replace(/\byourself\b/gi, (m) => cap(m, "themselves"))
     .replace(/\byours\b/gi, (m) => cap(m, "theirs"))
     .replace(/\byour\b/gi, (m) => cap(m, "their"))
+    // am59: "you" as an object is "them", never "they" ("ads don't bother you much" -> "... bother them much").
+    .replace(/\b(for|to|with|of|about|on|from|at|by|than|around|near|suits?|fits?|bothers?|costs?|gives?|lets?|helps?|saves?|gets?|keeps?|serves?|rewards?|charges?)\s+you\b/gi, (_m, w: string) => `${w} them`)
+    .replace(/\byou\b(?=\s*(?:$|[,.;)]|much\b|most\b|more\b|less\b|a lot\b|at all\b|enough\b|either\b|anymore\b|too\b))/gi, (m) => cap(m, "them"))
     .replace(/\byou\b/gi, (m) => cap(m, "they"));
 }
 
@@ -779,3 +782,59 @@ export const CRITERIA_STEP_TEXT = {
     body: (topic: string, buyer: string) => `${topic} is taught to the buyer in "${buyer}" and to almost no one else.`,
   },
 };
+
+/* ---------- am59: Premium vs basic ---------- */
+export type TierWhere = "premium" | "basic" | "both" | "neither";
+export const PREMIUM_TEXT = {
+  stepLabel: "Which end it sides with",
+  premium: "premium",
+  basic: "basic",
+  balanced: "balanced",
+  conditions: {
+    title: "When the AI says premium, and when basic",
+    sub: 'Share of these answers that say "choose premium if the buyer..." or "choose basic if the buyer...". The grey bar shows how often it comes up where the AI says it both ways.',
+    towardTitle: "Choose premium if",
+    awayTitle: "Choose basic if",
+    alsoToward: "Also said for basic",
+    alsoAway: "Also said for premium",
+  },
+  ends: {
+    title: "Who it names at each end",
+    sub: "Share of these answers that give it as the example of that end.",
+    premium: "As premium",
+    basic: "As basic",
+    none: (end: string) => `No ${end} example is named often enough to list.`,
+  },
+  weighs: { premium: "When it sides with premium", basic: "When it sides with basic", sayPremium: "side with premium", sayBasic: "side with basic" },
+  vendor: { title: "Which AI companies side with basic most", sub: "Share of each company's answers here.", few: "No AI company sides with basic often enough to size." },
+};
+/** The claim: asked whether premium beats basic, which end the AI sides with. */
+export function premiumClaim(plural: string, basic: PanelNum, premium: PanelNum, basicAll: boolean, premiumNone: boolean, basicNone: boolean): PanelText {
+  const basicPart = basicNone ? "never sides with basic" : basicAll ? F("sides with basic in every answer", basic) : join("sides with basic in ", N(basic), " of answers");
+  const premiumPart = basicAll ? "" : premiumNone ? (basicNone ? " or with premium" : " and never with premium") : join(" and with premium in ", N(premium));
+  return join(`Asked whether premium ${plural} beat basic ones, the AI `, basicPart, premiumPart, ".");
+}
+/** The "which end" step explained: heading from its takeaway, one sentence on where you land (no number from the bars). */
+export function tierDetail(tag: string, where: TierWhere): { heading: string; body: PanelText } {
+  const HEAD: Record<string, string> = {
+    "Mostly sides with basic": "The AI mostly sides with basic",
+    "Always sides with basic": "The AI always sides with basic",
+    "Mostly sides with premium": "The AI mostly sides with premium",
+    "Always sides with premium": "The AI always sides with premium",
+    "Mostly balanced": "The AI mostly gives a balanced answer",
+    "Always balanced": "The AI always gives a balanced answer",
+    "Leans premium": "The AI leans premium",
+    "Leans basic": "The AI leans basic",
+    "No clear side": "The AI takes no clear side between premium and basic",
+    Split: "The AI is split between premium and basic",
+  };
+  const body =
+    where === "premium"
+      ? "When it names an example of either end, it puts you at the premium end more often than at the basic end."
+      : where === "basic"
+        ? "When it names an example of either end, it puts you at the basic end more often than at the premium end."
+        : where === "both"
+          ? "When it names an example of either end, it puts you at each end about as often."
+          : "It seldom names you as the example of either end.";
+  return { heading: HEAD[tag] ?? "Which end the AI sides with", body: join(body) };
+}

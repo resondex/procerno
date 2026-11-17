@@ -370,10 +370,14 @@ for (const project of projects) {
       strong: ["case_strength", (v) => v === "strong"], hedged: ["case_strength", (v) => v !== "strong"],
       partial: ["case_strength", (v) => v === "partial" || v === "hedged"], concedes: ["case_strength", (v) => v === "concedes" || v === "undermined"],
       rebuts: ["premise_verdict", (v) => v === "rebuts"], mixed: ["premise_verdict", (v) => v === "mixed"], confirms: ["premise_verdict", (v) => v === "confirms"],
+      // am59: Premium vs basic ("none" folds into balanced).
+      premium: ["tier_stance", (v) => v === "premium"], basic: ["tier_stance", (v) => v === "basic"], balanced: ["tier_stance", (v) => v !== "premium" && v !== "basic"],
     };
     const phrases = [...dataPhrases(view, data)];
     for (const [id, pos] of Object.entries(view.positions as Record<string, Position>)) {
       const p = pos.panel as PositionPanel | undefined;
+      // am59: every Premium vs basic cell now opens the new panel.
+      if (id.startsWith("chooses:premium:") && p?.kind !== "premium") failures.push(`${project.brand}: ${id} keeps the old panel`);
       if (!p) continue;
       panels++;
       // The answers a panel may show: its own, its row's (the usual and the
@@ -381,7 +385,7 @@ for (const project of projects) {
       const [band, rowSlug] = id.split(":");
       const ids = new Set<string>();
       for (const [cid, list] of Object.entries(cellIds))
-        if (cid.startsWith(`${band}:${rowSlug}:`) || ((p.kind === "criteria" || p.kind === "popular") && cid === "chooses:open:all") || (p.kind === "learning" && cid === "chooses:awareness:all")) for (const x of list) ids.add(x);
+        if (cid.startsWith(`${band}:${rowSlug}:`) || ((p.kind === "criteria" || p.kind === "popular" || p.kind === "premium") && cid === "chooses:open:all") || (p.kind === "learning" && cid === "chooses:awareness:all")) for (const x of list) ids.add(x);
       const own = new Set(cellIds[id] ?? []);
       if (!own.size) failures.push(`${project.brand}: ${id} panel has no recorded answers`);
       const checkRef = (r: AnswerRef, path: string) => {
@@ -420,7 +424,7 @@ for (const project of projects) {
             if (!c) { failures.push(`${project.brand}: ${at} ${s.key} answer not coded`); continue; }
             const ok =
               s.key === "named" ? names(c, key) :
-              s.key === "recommended" && (p.kind === "buy" || p.kind === "switching" || p.kind === "problem" || p.kind === "popular" || at.includes("rival")) && !(at.includes("rival") && who !== youName && p.kind !== "buy" && p.kind !== "switching" && p.kind !== "problem" && p.kind !== "popular") ? recs(c, key) :
+              s.key === "recommended" && (p.kind === "buy" || p.kind === "switching" || p.kind === "problem" || p.kind === "popular" || p.kind === "premium" || at.includes("rival")) && !(at.includes("rival") && who !== youName && p.kind !== "buy" && p.kind !== "switching" && p.kind !== "problem" && p.kind !== "popular" && p.kind !== "premium") ? recs(c, key) :
               s.key === "commits" ? c.outcome === "pick" && !!c.top_pick && resolve(c.top_pick).status === "active" :
               s.key === "converts" ? picks(c, key) :
               s.key === "won" ? (who === youName ? picks(c, targetKey) : c.outcome === "pick" && !picks(c, targetKey)) :
@@ -484,7 +488,7 @@ for (const project of projects) {
       // every stated number in a sentence opens its answers, outcomes carry their words, rows their columns.
       for (const [view, ds] of [["details", p.details], ["detailsComp", p.detailsComp]] as const) {
         if (!ds) continue;
-        if (!["buy", "switching", "problem", "popular", "learning", "h2h", "value", "buyer_worry", "customer_worry", "looking_around", "expansion", "business_case", "alongside", "critic", "criteria"].includes(p.kind)) failures.push(`${project.brand}: ${id} ${p.kind} carries ${view}`);
+        if (!["buy", "switching", "problem", "popular", "premium", "learning", "h2h", "value", "buyer_worry", "customer_worry", "looking_around", "expansion", "business_case", "alongside", "critic", "criteria"].includes(p.kind)) failures.push(`${project.brand}: ${id} ${p.kind} carries ${view}`);
         if (view === "detailsComp" && !p.compare) failures.push(`${project.brand}: ${id} detailsComp without a competitors view`);
         for (const [k, d] of Object.entries(ds)) {
           if (!d) continue;
@@ -629,7 +633,7 @@ for (const project of projects) {
         const behindP = [...pickCount.entries()].some(([k, v]) => k !== targetKey && v > mineP);
         const LOSE = /\b(why you lose|where you lose|part of where you lose|the gap opens|where the gap opens)\b/i;
         const panelWords = [p.stackLabel, p.detail?.heading, ...(p.detail?.body ?? []).map((x) => x.t), p.detailComp?.heading, ...(p.detailComp?.body ?? []).map((x) => x.t), ...[...Object.values(p.details ?? {}), ...Object.values(p.detailsComp ?? {})].flatMap((d) => (d ? [d.heading, ...d.body.map((x) => x.t)] : []))].filter((x): x is string => !!x);
-        const pickKind = p.kind === "buy" || p.kind === "switching" || p.kind === "popular";
+        const pickKind = p.kind === "buy" || p.kind === "switching" || p.kind === "popular" || p.kind === "premium";
         for (const w of panelWords) if (LOSE.test(w) && !(pickKind && behindP)) failures.push(`${project.brand}: ${id} says "${w.slice(0, 90)}" but you are not behind on the picks here`);
         for (const rv of p.rivals ?? []) if (rv.stackLabel && LOSE.test(rv.stackLabel) && !rv.steps.some((st) => st.tagRank === "The gap opens here")) failures.push(`${project.brand}: ${id} rival ${rv.name} says "${rv.stackLabel}" with no step where it leads`);
         // The claim's "N other brands" equals the other brands listed, and never counts you.
@@ -731,6 +735,42 @@ for (const project of projects) {
           }
         }
       }
+      // 6i. am59: Premium vs basic - the which-end bars add up to the cell's answers, its explanation repeats no top-bar
+      // number, it starts selected, and no row of the new blocks (each end's list, the explanation's lists) rests on
+      // fewer than 3 answers; an end's "You" row is the tracker's own brand.
+      if (p.kind === "premium") {
+        const tierStep = p.steps.find((st) => st.key === "tier");
+        const cellN = (cellIds[id] ?? []).length;
+        if (!tierStep?.segments?.length) failures.push(`${project.brand}: ${id} premium has no which-end step`);
+        else {
+          const ks = tierStep.segments.map((g) => knOfH(g.num));
+          if (ks.some((x) => !x || x.n !== cellN) || ks.reduce((a, x) => a + (x?.k ?? 0), 0) !== cellN) failures.push(`${project.brand}: ${id} premium which-end bars do not add up to the cell's ${cellN} answers`);
+          if (!p.thin) {
+            if (!tierStep.tagUsual || !TAKEAWAY_TAGS.includes(tierStep.tagUsual) || tierStep.tagRank !== tierStep.tagUsual) failures.push(`${project.brand}: ${id} premium which-end step has no takeaway tag ("${tierStep.tagUsual ?? ""}")`);
+            if (p.focus !== "tier") failures.push(`${project.brand}: ${id} premium does not start on the which-end step`);
+            const topBars = valuesOf(p.steps.flatMap((st) => [st.here, st.usual, ...(st.rivals ?? []).map((r) => r.num), ...(st.segments ?? []).map((g) => g.num)]));
+            for (const [v, ds] of [["details", p.details], ["detailsComp", p.detailsComp]] as const) {
+              const d = ds?.tier;
+              if (!d) { if (v === "details" || p.compare) failures.push(`${project.brand}: ${id} premium ${v} has no which-end explanation`); continue; }
+              repeatChecks++;
+              repeats(d.body, topBars, `${id} premium ${v}.tier`);
+              const txt = d.body.map((x) => x.t).join("");
+              if ((txt.match(/[a-z]{2}\.\s+[A-Z]/g) ?? []).length) failures.push(`${project.brand}: ${id} premium ${v}.tier is more than one sentence`);
+              for (const sec of d.sections ?? []) for (const r of sec.rows) if ((knOfH(r.num)?.k ?? 0) < 3) failures.push(`${project.brand}: ${id} premium ${v}.tier "${sec.title}" row "${r.label}" rests on fewer than 3 answers`);
+            }
+          }
+        }
+        for (const c of p.ends?.columns ?? []) {
+          if (!c.rows.length && !c.note) failures.push(`${project.brand}: ${id} premium end "${c.title ?? ""}" has no rows and no note`);
+          if (c.rows.length > 5) failures.push(`${project.brand}: ${id} premium end "${c.title ?? ""}" lists ${c.rows.length} names`);
+          for (const r of c.rows) {
+            if ((knOfH(r.num)?.k ?? 0) < 3) failures.push(`${project.brand}: ${id} premium end row "${r.name}" rests on fewer than 3 answers`);
+            if (r.you && r.name !== "You") failures.push(`${project.brand}: ${id} premium end row "${r.name}" is marked yours but not named You`);
+            if (!r.you && keyOfName(r.name) === targetKey) failures.push(`${project.brand}: ${id} premium end lists the tracker's own brand as "${r.name}"`);
+          }
+        }
+        for (const side of ["toward", "away"] as const) for (const row of p.conditions?.[side] ?? []) if ((knOfH(row.share)?.k ?? 0) < 3) failures.push(`${project.brand}: ${id} premium condition "${row.text}" rests on fewer than 3 answers`);
+      }
       // 7. kinds without conditions.
       if ((p.kind === "buyer_worry" || p.kind === "customer_worry" || p.kind === "value" || p.kind === "business_case") && p.conditions) failures.push(`${project.brand}: ${id} ${p.kind} carries conditions`);
       if ((p.kind === "learning" || p.kind === "critic") && p.conditions) failures.push(`${project.brand}: ${id} ${p.kind} carries conditions`);
@@ -757,7 +797,7 @@ for (const project of projects) {
       for (const d of [...Object.values(p.details ?? {}), ...Object.values(p.detailsComp ?? {})]) for (const r of d?.list?.rows ?? []) addP(r.label);
       for (const n of p.competitorOrder ?? []) addP(n);
       for (const d of Object.values(p.details ?? {})) for (const sec of d?.sections ?? []) for (const r of sec.rows) addP(r.label);
-      for (const w of [p.weighs, p.weighsComp, ...(p.rivals ?? []).map((r) => r.weighs)]) for (const c of w?.columns ?? []) for (const r of c.rows) addP(r.name);
+      for (const w of [p.weighs, p.weighsComp, p.ends, ...(p.rivals ?? []).map((r) => r.weighs)]) for (const c of w?.columns ?? []) for (const r of c.rows) addP(r.name);
       for (const r of p.byProduct?.rows ?? []) { addP(r.label); for (const c of r.cells) if (c && "t" in c) addP(c.t); }
       if (p.product) addP(p.product);
       const strip = (t: string) => {

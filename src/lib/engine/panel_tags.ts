@@ -421,6 +421,19 @@ export function alongsideTakeaway(own: number, third: number, substitute: number
   return tk("A mix of your own and others'", "neutral");
 }
 
+/** am59, Premium vs basic: "Which end it sides with" (premium / basic / balanced, of all answers; "none" counts as
+ * balanced). The tracked brand sits at the premium end, so premium reads good for you and basic bad. */
+export function tierTakeaway(premium: number, basic: number, balanced: number): Takeaway {
+  if (isSplit(premium, basic, balanced)) return SPLIT;
+  if (basic >= MAJORITY) return tk("Mostly sides with basic", "bad", basic);
+  if (premium >= MAJORITY) return tk("Mostly sides with premium", "good", premium);
+  if (balanced >= MAJORITY) return tk("Mostly balanced", "neutral", balanced);
+  const l = leanOf(premium, basic);
+  if (l > 0) return tk("Leans premium", "good");
+  if (l < 0) return tk("Leans basic", "bad");
+  return tk("No clear side", "neutral");
+}
+
 /** What to look for: the checklist step, and the gap step when it is drawn. */
 export const taughtTakeaway = (gap: boolean): Takeaway => (gap ? tk("Misses your strongest points", "bad") : tk("Covers your strongest points", "good"));
 export const GAP_TAKEAWAY: Takeaway = tk("Not on the checklist", "bad");
@@ -439,6 +452,7 @@ const BASE_TAKEAWAYS: string[] = [
   "Mostly says the critic is wrong", "Mostly says the critic is right", "Mostly says the critic is partly right", "Sides against the critic more often", "Sides with the critic more often",
   "Often names one to replace you", "Mostly names your own", "Mostly names another company's", "A mix of your own and others'",
   "Misses your strongest points", "Covers your strongest points", "Not on the checklist",
+  "Mostly sides with basic", "Mostly sides with premium", "Mostly balanced", "Leans premium", "Leans basic", "No clear side",
   "Split",
 ];
 /** Every takeaway tag (TAG_ALLOW reads it), with each "Mostly" tag's "Always" form. */

@@ -6,9 +6,9 @@ import { isWallWording } from "./wall_wording";
 import { engineFacets } from "./providers";
 import type { Resolver } from "./brand_resolve";
 import { cell, type PoolRow, type RateCell } from "./view_data";
-import type { ValueFact } from "./value";
+import { isDescription, type ValueFact } from "./value";
 import { filterObvious, type Omission, type OmissionList } from "./panel_filter";
-import { NOWHERE_CLEAR, AVG_COMP, CLOSE_PTS, GAP_TAKEAWAY, TAKEAWAY_TAGS, TAG_FURTHEST, TAG_GAP_OPENS, agreesTakeaway, alongsideTakeaway, avgTag, caseTakeaway, criticStrengthTakeaway, duelTag, insteadTakeaway, keepTakeaway, leanOf, offersTakeaway, oftenOf, premiseTakeaway, proceedTakeaway, stanceTakeaway, taughtTakeaway, usualDir, duelTone, focusOf, neutralUsualTag, otherTag, rankTag, segTag, toneOfTag, usualTag, usualTone, worthTakeaway, type KN, type Takeaway } from "./panel_tags";
+import { NOWHERE_CLEAR, AVG_COMP, CLOSE_PTS, GAP_TAKEAWAY, TAKEAWAY_TAGS, TAG_FURTHEST, TAG_GAP_OPENS, agreesTakeaway, alongsideTakeaway, avgTag, caseTakeaway, criticStrengthTakeaway, duelTag, insteadTakeaway, keepTakeaway, leanOf, offersTakeaway, oftenOf, premiseTakeaway, tierTakeaway, proceedTakeaway, stanceTakeaway, taughtTakeaway, usualDir, duelTone, focusOf, neutralUsualTag, otherTag, rankTag, segTag, toneOfTag, usualTag, usualTone, worthTakeaway, type KN, type Takeaway } from "./panel_tags";
 import { ROW_NAME } from "./question_names";
 import {
   F,
@@ -65,6 +65,10 @@ import {
   anyBrandDetail,
   NAMEDWHEN_TEXT,
   namedWhenDetail,
+  PREMIUM_TEXT,
+  premiumClaim,
+  tierDetail,
+  type TierWhere,
   type InsteadHalf,
   type KeepSide,
   type ValueSide,
@@ -214,6 +218,8 @@ export interface PanelCellInput {
   asked?: string;
   /** Advocacy: the quoted criticism stored on the intent, when present. */
   criticism?: string;
+  /** am59, Premium vs basic: the cell's conditions by the end they choose (premium = toward, basic = away). */
+  tierConds?: CondSet;
 }
 
 export interface PanelHelpers {
@@ -475,6 +481,8 @@ function buildPanel(inp: PanelCellInput, ctx: Ctx): PositionPanel | undefined {
       return alongsidePanel(inp, ctx);
     case "critic":
       return criticPanel(inp, ctx);
+    case "premium":
+      return premiumPanel(inp, ctx);
   }
 }
 
@@ -730,7 +738,9 @@ function productIndex(ctx: Ctx): Map<string, { named: number; chosen: number; se
     return toks.length ? `${res.key}|${toks.join(" ")}` : null;
   };
   const seen = new Set<string>();
-  for (const inp of ctx.inputs.values())
+  for (const inp of ctx.inputs.values()) {
+    // am59: the Premium vs basic cell's answers stay out (built after every other kind's index existed - no other panel's product list moves).
+    if (inp.kind === "premium") continue;
     for (const r of inp.rows) {
       const rules = r.code.decision_rules ?? [];
       if (!rules.length || seen.has(r.code.response_id)) continue;
@@ -763,6 +773,7 @@ function productIndex(ctx: Ctx): Map<string, { named: number; chosen: number; se
         idx.set(k, t);
       }
     }
+  }
   return idx;
 }
 function isPickedProduct(rest: string, brandName: string, own: Set<string>, ctx: Ctx): boolean {
@@ -2198,6 +2209,155 @@ function popularPanel(inp: PanelCellInput, ctx: Ctx): PositionPanel {
   };
 }
 
+/** am59, Premium vs basic: one step on which end the AI sides with, then the open-choice funnel exactly as What's
+ * popular builds it (popularPanel - its competitors, rivals and step explanations included), the conditions by the
+ * end they choose, who it names at each end, and what each side weighs. The question asks whether premium
+ * <plural> beat basic ones; the tracked brand is taken to sit at the premium end (premium = the favourable side). */
+const tierOf = (r: PoolRow): "premium" | "basic" | "balanced" => (r.code.tier_stance === "premium" ? "premium" : r.code.tier_stance === "basic" ? "basic" : "balanced");
+function premiumPanel(inp: PanelCellInput, ctx: Ctx): PositionPanel {
+  const { h } = ctx;
+  const T9 = PREMIUM_TEXT;
+  const base = popularPanel(inp, ctx);
+  const rows = inp.rows;
+  const all = rows.length;
+  const prem = rows.filter((r) => tierOf(r) === "premium");
+  const bas = rows.filter((r) => tierOf(r) === "basic");
+  const bal = rows.filter((r) => tierOf(r) === "balanced");
+  const tier: PanelStep = {
+    key: "tier",
+    label: T9.stepLabel,
+    segments: [seg("premium", T9.premium, "you", prem, all, h), seg("basic", T9.basic, "away", bas, all, h), seg("balanced", T9.balanced, "neutral", bal, all, h)],
+  };
+  const claim = premiumClaim(h.plural, tier.segments![1].num, tier.segments![0].num, all > 0 && bas.length === all, prem.length === 0, bas.length === 0);
+  // Conditions by the end they choose, shares of all the cell's answers.
+  const conditions = inp.tierConds
+    ? conditionsOf({ ...inp, conds: inp.tierConds }, ctx, { ...T9.conditions, subComp: T9.conditions.sub, toWord: "Names" }, { pickKind: false })
+    : undefined;
+  const t = conditions?.toward ?? [];
+  const a = conditions?.away ?? [];
+  const lead = t.length || a.length ? join(t.length ? attachedLead("choosing premium", [t[0]]) : null, t.length && a.length ? " " : null, a.length ? attachedLead("choosing basic", [a[0]]) : null) : undefined;
+  // Who it names at each end: the rules' products, active brands by their board name (you as "You"), the rest as written.
+  const endCol = (choice: "premium" | "basic", title: string) => {
+    const active = new Map<string, { name: string; you: boolean; rs: PoolRow[] }>();
+    const loose: { name: string; rs: PoolRow[] }[] = [];
+    const written = new Map<PoolRow, string[]>();
+    for (const r of rows) {
+      const seen = new Set<string>();
+      for (const d of r.code.decision_rules ?? []) {
+        if (d.choice?.trim() !== choice) continue;
+        const w = (d.product ?? "").trim();
+        if (!w) continue;
+        written.set(r, [...(written.get(r) ?? []), w]);
+        const res = h.resolve(w);
+        if (res.status === "active" && res.key) {
+          if (seen.has(res.key)) continue;
+          seen.add(res.key);
+          const you = res.key === h.targetKey;
+          const x = active.get(res.key) ?? { name: you ? "You" : res.name ?? w, you, rs: [] };
+          x.rs.push(r);
+          active.set(res.key, x);
+          continue;
+        }
+        const clean = cleanProduct(w) || w;
+        // A description of an end ("a cheaper one", "premium ones") names nothing.
+        if (isDescription(clean) || /\b(premiums?|top[- ]tier)\b/i.test(clean)) continue;
+        loose.push({ name: clean, rs: [r] });
+      }
+    }
+    const findIn = (r: PoolRow, name: string) => {
+      const ws = written.get(r) ?? [];
+      const toks = new Set(famTokens(name));
+      return ws.find((w) => famTokens(w).some((x) => toks.has(x))) ?? ws[0] ?? name;
+    };
+    // Names as written that differ only by a plural ending ("<x> brand" / "<x> brands") are one before the variant merge.
+    const sing = new Map<string, { forms: Map<string, number>; rs: Set<PoolRow> }>();
+    for (const x of loose) {
+      const k = famTokens(x.name).map((w) => (w.length > 3 ? w.replace(/s$/, "") : w)).join(" ") || x.name.toLowerCase();
+      const g = sing.get(k) ?? { forms: new Map<string, number>(), rs: new Set<PoolRow>() };
+      g.forms.set(x.name, (g.forms.get(x.name) ?? 0) + 1);
+      for (const r of x.rs) g.rs.add(r);
+      sing.set(k, g);
+    }
+    const looseOne = [...sing.values()].map((g) => ({ name: [...g.forms.entries()].sort((a, b) => b[1] - a[1] || a[0].length - b[0].length || a[0].localeCompare(b[0]))[0][0], rs: [...g.rs] }));
+    const items = [...[...active.values()].map((x) => ({ name: x.name, you: x.you, rs: x.rs })), ...mergeProducts(looseOne, ctx).map((x) => ({ name: upperFirst(x.name), you: false, rs: x.rs }))]
+      .filter((x) => x.rs.length >= ROW_MIN)
+      .sort((x, y) => y.rs.length - x.rs.length || x.name.localeCompare(y.name))
+      .slice(0, 5);
+    return {
+      title,
+      tone: "neutral" as PanelTone,
+      rows: items.map((x) => ({ name: x.name, num: num(x.rs.length, all, "answers", refsOf(x.rs, (r) => (x.you ? findIn(r, h.brand) : findIn(r, x.name)))), ...(x.you ? { you: true as const } : {}) })),
+      ...(items.length ? {} : { note: T9.ends.none(choice) }),
+    };
+  };
+  const premCol = endCol("premium", T9.ends.premium);
+  const basCol = endCol("basic", T9.ends.basic);
+  const ends: PanelWeighs | undefined = premCol.rows.length || basCol.rows.length ? { title: T9.ends.title, sub: T9.ends.sub, columns: [premCol, basCol] } : undefined;
+  // What each side weighs: premium on the left (the favourable side), the versus rule when both sides are sized.
+  const weighs =
+    weighsCols(inp, ctx, [
+      { title: T9.weighs.premium, say: T9.weighs.sayPremium, tone: "good", rows: prem },
+      { title: T9.weighs.basic, say: T9.weighs.sayBasic, tone: "bad", rows: bas },
+    ], WEIGHS_SUB_SIDES) ?? weighsAll(inp, ctx);
+  const out: PositionPanel = { ...base, kind: "premium", claim, steps: [tier, ...base.steps] };
+  delete out.lead;
+  delete out.conditions;
+  delete out.tables;
+  delete out.weighs;
+  delete out.weighsComp;
+  if (lead && lead.length) out.lead = lead;
+  if (conditions) out.conditions = conditions;
+  if (ends) out.ends = ends;
+  if (weighs) out.weighs = weighs;
+  return out;
+}
+
+/** am59: the "which end" step's takeaway and explanation (after the funnel steps' own pass); it starts selected. */
+function premiumFinish(inp: PanelCellInput, p: PositionPanel, ctx: Ctx) {
+  const { h } = ctx;
+  const T9 = PREMIUM_TEXT;
+  const s = p.steps.find((x) => x.key === "tier");
+  if (!s?.segments) return;
+  const t = tierTakeaway(segPct(s, "premium"), segPct(s, "basic"), segPct(s, "balanced"));
+  s.tagUsual = t.tag;
+  s.tagUsualTone = t.tone;
+  s.tagRank = t.tag;
+  s.tagRankTone = t.tone;
+  const rows = inp.rows;
+  const all = rows.length || 1;
+  const youAt = (choice: string) => rows.filter((r) => (r.code.decision_rules ?? []).some((d) => d.choice?.trim() === choice && !!(d.product ?? "").trim() && h.resolve(d.product!).key === h.targetKey)).length;
+  const yp = youAt("premium");
+  const yb = youAt("basic");
+  const l = leanOf((100 * yp) / all, (100 * yb) / all);
+  const where: TierWhere = yp < ROW_MIN && yb < ROW_MIN ? "neither" : l > 0 ? "premium" : l < 0 ? "basic" : "both";
+  const byVendor = new Map<string, PoolRow[]>();
+  for (const r of rows) {
+    const v = engineFacets(r.model).vendor;
+    byVendor.set(v, [...(byVendor.get(v) ?? []), r]);
+  }
+  const vend = [...byVendor.entries()].filter(([, rs]) => rs.length >= ARGS_MIN).map(([label, rs]) => ({ label, rs: rs.filter((r) => tierOf(r) === "basic"), n: rs.length }));
+  const ok = vend.filter((x) => x.rs.length >= ROW_MIN).sort((a, b) => b.rs.length / b.n - a.rs.length / a.n || a.label.localeCompare(b.label));
+  const sections: PanelDetailSection[] =
+    vend.some((x) => x.rs.length > 0)
+      ? [
+          {
+            title: T9.vendor.title,
+            sub: T9.vendor.sub,
+            tone: "bad",
+            rows: ok.map((x) => ({ label: x.label, num: num(x.rs.length, x.n, `${x.label} answers`, refsOf(x.rs, (r) => verdictFind(r, h))) })),
+            ...(ok.length ? {} : { note: join(T9.vendor.few) }),
+          },
+        ]
+      : [];
+  const d: PanelStepDetail = { ...tierDetail(t.tag, where), ...(sections.length ? { sections } : {}) };
+  p.details = { tier: d, ...(p.details ?? {}) };
+  p.focus = "tier";
+  if (p.compare) {
+    p.detailsComp = { tier: d, ...(p.detailsComp ?? {}) };
+    p.focusComp = "tier";
+  }
+}
+
 function learningPanel(inp: PanelCellInput, ctx: Ctx): PositionPanel {
   const { h } = ctx;
   const rows = inp.rows;
@@ -2671,7 +2831,7 @@ function rivalSmall(inp: PanelCellInput, ctx: Ctx, c: { key: string; name: strin
   const yNamed = num(youF.named.length, all, "answers", refsOf(youF.named, (r) => youF.surf(r, false) ?? h.brand));
   const altFind = (r: PoolRow) => (r.code.mentions ?? []).find((m) => h.resolve(m.brand).key === c.key)?.brand ?? (r.code.destinations ?? []).find((d) => h.resolve(d).key === c.key) ?? R;
   const altNum = num(alt.length, all, "answers", refsOf(alt, altFind));
-  const problem = inp.kind === "problem" || inp.kind === "popular";
+  const problem = inp.kind === "problem" || inp.kind === "popular" || inp.kind === "premium";
   const yAlt = problem ? num(youF.rec.length, all, "answers", refsOf(youF.rec, (r) => youF.surf(r, true) ?? h.brand)) : o.youAlt ? num(o.youAlt.length, all, "answers", refsOf(o.youAlt, (r) => verdictFind(r, h))) : undefined;
   const claim = problem ? join(`The AI recommends ${R} in `, N(altNum), " of these answers.") : join(`The AI names ${R} ${o.youAlt ? o.when : "as the alternative"} in `, N(altNum), " of these answers.");
   const steps: PanelStep[] = [
@@ -2758,11 +2918,11 @@ function finishPanel(inp: PanelCellInput, p: PositionPanel, up: PositionPanel | 
     }
   }
   // Popular / learning: each step against another question type's all-buyers row (the step's inline `usual`).
-  const OTHER: Partial<Record<PanelKind, [string, "about" | "close"]>> = { popular: ["chooses:open:all", "about"], learning: ["chooses:awareness:all", "close"] };
+  const OTHER: Partial<Record<PanelKind, [string, "about" | "close"]>> = { popular: ["chooses:open:all", "about"], premium: ["chooses:open:all", "about"], learning: ["chooses:awareness:all", "close"] };
   const other = OTHER[p.kind];
   if (other && !thin) {
     const o = ctx.inputs.get(other[0]);
-    const name = (p.kind === "popular" ? ROW_NAME.open : ROW_NAME.awareness).toLowerCase();
+    const name = (p.kind === "learning" ? ROW_NAME.awareness : ROW_NAME.open).toLowerCase();
     const FAV = new Set<PanelStepKey>(["named", "recommended", "namedwhen"]);
     const cmpO: { key: PanelStepKey; here: KN; usual: KN }[] = [];
     if (o && o.rows.length >= PANEL_MIN)
@@ -2886,12 +3046,13 @@ function finishPanel(inp: PanelCellInput, p: PositionPanel, up: PositionPanel | 
     // am37: the highlighted step is one that explains itself (a step a reader can select has an explanation).
     if (p.details && p.focus && !p.details[p.focus]) p.focus = p.steps.find((s) => !!p.details![s.key])?.key;
     if (p.detailsComp && p.focusComp && !p.detailsComp[p.focusComp]) p.focusComp = p.steps.find((s) => !!p.detailsComp![s.key])?.key;
+    if (p.kind === "premium") premiumFinish(inp, p, ctx);
   }
 }
 
 /** am37: you are behind on the picks in this cell (the pick kinds); "lose" and "gap" are said only then. */
 function behindOf(inp: PanelCellInput, ctx: Ctx): boolean {
-  if (inp.kind !== "buy" && inp.kind !== "switching" && inp.kind !== "popular") return false;
+  if (inp.kind !== "buy" && inp.kind !== "switching" && inp.kind !== "popular" && inp.kind !== "premium") return false;
   return behindOnPicks(ctx.h.brandSplit(inp.rows), ctx.h);
 }
 
@@ -3033,15 +3194,16 @@ function detailOf(inp: PanelCellInput, p: PositionPanel, up: PositionPanel | und
     return;
   }
   const det = (heading: string, body: PanelText): PanelDetail => ({ heading, body });
-  if (p.kind === "popular" || p.kind === "learning") {
+  if (p.kind === "popular" || p.kind === "premium" || p.kind === "learning") {
     const fs = p.focusComp ? p.steps.find((x) => x.key === p.focusComp) : undefined;
     const d = rankDetail(p.focusComp ?? null, fs && fs.here && fs.rivals ? { label: fs.label, here: fs.here, rivals: fs.rivals } : null);
     if (d) p.detailComp = d;
   }
   // A panel set against the average competitor explains itself step by step (details).
-  if (p.avgComp && (p.kind === "popular" || p.kind === "learning")) return;
+  if (p.avgComp && (p.kind === "popular" || p.kind === "premium" || p.kind === "learning")) return;
   switch (p.kind) {
-    case "popular": {
+    case "popular":
+    case "premium": {
       const rec = p.steps.find((x) => x.key === "recommended");
       const com = p.steps.find((x) => x.key === "commits");
       const what = ROW_NAME.open.toLowerCase();
@@ -3656,16 +3818,16 @@ function worryStepDetails(inp: PanelCellInput, p: PositionPanel, ctx: Ctx) {
 }
 
 /** The kinds whose stack is a funnel of `here` steps; their steps carry details. */
-const STEP_DETAIL_KINDS = new Set<PanelKind>(["buy", "switching", "problem", "popular", "learning", "h2h"]);
+const STEP_DETAIL_KINDS = new Set<PanelKind>(["buy", "switching", "problem", "popular", "premium", "learning", "h2h"]);
 /** A detail never rests on fewer answers than this. */
 const DETAIL_MIN = 5;
 
 /** Where a panel's usual comes from and how a sentence names it. */
 function usualFor(inp: PanelCellInput, u: PanelCellInput | undefined, ctx: Ctx): { rows: PoolRow[]; you?: PoolRow[]; them?: PoolRow[]; phrase: string; column: string } | null {
-  if (inp.kind === "popular" || inp.kind === "learning") {
-    const o = ctx.inputs.get(inp.kind === "popular" ? "chooses:open:all" : "chooses:awareness:all");
+  if (inp.kind === "popular" || inp.kind === "premium" || inp.kind === "learning") {
+    const o = ctx.inputs.get(inp.kind === "learning" ? "chooses:awareness:all" : "chooses:open:all");
     if (!o || o.rows.length < PANEL_MIN) return null;
-    return inp.kind === "popular"
+    return inp.kind !== "learning"
       ? { rows: o.rows, phrase: `when buyers ask ${ROW_NAME.open.toLowerCase()}`, column: ROW_NAME.open }
       : { rows: o.rows, phrase: "when buyers describe a problem", column: ROW_NAME.awareness };
   }
@@ -3681,7 +3843,7 @@ function stepDetailsOf(inp: PanelCellInput, p: PositionPanel, u: PanelCellInput 
   const rows = inp.rows;
   const all = rows.length;
   const usual = usualFor(inp, u, ctx);
-  const picks = p.kind === "buy" || p.kind === "switching" || p.kind === "popular";
+  const picks = p.kind === "buy" || p.kind === "switching" || p.kind === "popular" || p.kind === "premium";
   const step = (k: PanelStepKey) => p.steps.find((s) => s.key === k && !!s.here);
   const sec = (title: string, sub: string, tone: PanelTone, items: { label: string; rs: PoolRow[]; n: number; unit: string; find: (r: PoolRow) => string }[], few: string): PanelDetailSection | null => {
     const ok = items.filter((x) => x.rs.length >= ROW_MIN).sort((a, b) => b.rs.length / b.n - a.rs.length / a.n || a.label.localeCompare(b.label));
@@ -3902,7 +4064,7 @@ function stepDetailsOf(inp: PanelCellInput, p: PositionPanel, u: PanelCellInput 
   const detailsComp: Partial<Record<PanelStepKey, PanelStepDetail>> = {};
   // am41: "the answer names one <noun> as the pick" explains itself - what the answer does instead, who gets
   // the pick when there is one, and which AI companies name one. The same in both views (it is not about a brand).
-  const cm = p.kind === "popular" ? step("commits") : undefined;
+  const cm = p.kind === "popular" || p.kind === "premium" ? step("commits") : undefined;
   if (cm?.here) {
     const picked = rows.filter((r) => h.pickOf(r).status === "active");
     const depends = rows.filter((r) => !picked.includes(r) && r.code.outcome === "conditional");

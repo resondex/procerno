@@ -40,7 +40,7 @@ import { T } from "./type_scale";
  * competitors shown) a block belongs to.
  */
 
-type Block = "stack" | "byproduct" | "detail" | "conditions" | "competitors" | "lines" | "weighs" | "table" | "tables";
+type Block = "stack" | "byproduct" | "detail" | "conditions" | "ends" | "competitors" | "lines" | "weighs" | "table" | "tables";
 
 // am38: "weighs" (what the answer weighs, sized) sits where its line sat - after the lines.
 const ORDER: Record<PanelKind, Block[]> = {
@@ -60,6 +60,8 @@ const ORDER: Record<PanelKind, Block[]> = {
   learning: ["stack", "detail", "table"],
   alongside: ["stack", "detail", "conditions"],
   critic: ["stack", "lines", "detail", "table"],
+  // am59: Premium vs basic - which end, the funnel, the conditions by end, who it names at each end, what each side weighs.
+  premium: ["stack", "detail", "conditions", "ends", "competitors", "weighs"],
 };
 
 /** Head-to-head panels read the rival's side first, as the matchup is asked. */
@@ -214,6 +216,7 @@ export function PositionPanelView({ p, pp, usualSteps, ctx }: { p: Position; pp:
       ) : null,
     lines: lines && lines.length > 0 ? <LineRows lines={lines} /> : null,
     weighs: weighs && weighs.columns.length > 0 ? <WeighsView w={weighs} /> : null,
+    ends: pp.ends && pp.ends.columns.some((c) => c.rows.length > 0) ? <WeighsView w={pp.ends} /> : null,
     table: (() => {
       const t = comp ? pp.tableComp ?? pp.table : pp.table;
       return t && t.rows.length > 0 ? <TableView table={t} /> : null;

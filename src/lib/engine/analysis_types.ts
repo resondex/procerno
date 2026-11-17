@@ -410,7 +410,9 @@ export type PanelKind =
   | "buy" | "h2h" | "switching" | "buyer_worry" | "customer_worry" | "looking_around"
   | "value" | "problem" | "criteria" | "expansion" | "business_case"
   // am31 round 2: What's popular, Learning the category, What to use alongside you, Answering a critic.
-  | "popular" | "learning" | "alongside" | "critic";
+  | "popular" | "learning" | "alongside" | "critic"
+  // am59: Premium vs basic.
+  | "premium";
 
 /** One piece of a sentence. A span with refs is a stated number or fact that
  * opens its answers (ruling 7); no refs = plain text. tip = counts (hover only). */
@@ -439,7 +441,8 @@ export type PanelStepKey =
   | "commits"                              // popular: the answer names one product as the pick (any brand)
   | "anybrand" | "namedwhen"               // learning: names any brand; named, when a brand is named
   | "alongside"                            // alongside: the ones it names alongside you
-  | "premise";                             // critic: does it say the critic is right
+  | "premise"                              // critic: does it say the critic is right
+  | "tier";                                // premium: which end it sides with (premium / basic / balanced)
 
 /** A tag's sentiment: good for you, bad for you, or a neutral fact. */
 export type PanelTone = "good" | "bad" | "neutral";
@@ -587,7 +590,7 @@ export interface PanelDetailSection {
 export interface PanelWeighs {
   title: string;
   sub: string;
-  columns: { title?: string; tone: PanelTone; rows: { name: string; num: PanelNum }[]; note?: string }[];
+  columns: { title?: string; tone: PanelTone; rows: { name: string; num: PanelNum; /** am59: the row is the tracker's own brand (drawn in the you colour). */ you?: true }[]; note?: string }[];
 }
 
 /** Panel 11: one rival inside this cell's question type. */
@@ -644,6 +647,8 @@ export interface PositionPanel {
   table?: PanelTable;
   /** The comparison view's own version of `table` (when it drops a column). */
   tableComp?: PanelTable;
+  /** am59, Premium vs basic: "Who it names at each end" - two lists side by side (as premium, as basic). */
+  ends?: PanelWeighs;
   /** Further tables, after `table` (popular: products, arguments). */
   tables?: PanelTable[];
   rivals?: PanelRival[];
