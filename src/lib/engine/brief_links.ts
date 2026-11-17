@@ -26,6 +26,9 @@ export interface LinkResolver {
 }
 
 const low = (s: string) => s.toLowerCase();
+/** The commit rate's own words ("the AI commits to one <product> in N% of answers") and the one card that states it. */
+const COMMIT = /commits to one|settles on one/i;
+const COMMIT_CELL = "chooses:open:all";
 
 /** What a number measures, read from the words beside it (a sentence's stretch, a card's bar or row label). */
 const MEASURES: [string, RegExp][] = [
@@ -136,15 +139,20 @@ export function linkResolver(map: AnalysisMapView, terms: string[], codes: strin
     return one ? ({ ...one, at: "one" } satisfies FoundLink) : null;
   };
 
+  const commitCands = map.positions[COMMIT_CELL] ? [{ kind: "cell" as const, id: COMMIT_CELL }] : [];
   return {
     terms: (t: string) => termsOf(t),
     shows(dest, token, local, sentence, reveal) {
+      if (COMMIT.test(head(local))) return commitCands.some((c) => c.id === dest.id) && cellIdx(dest.id).some((e) => (e.at === "default" || JSON.stringify(e.reveal ?? null) === JSON.stringify(reveal ?? null)) && fits(e, token, [], [], [], local));
       const subject = subjectOf(dest.kind, dest.id);
       const entries = dest.kind === "cell" ? cellIdx(dest.id) : rivalIdx(dest.id);
       const same = (a?: PanelReveal, b?: PanelReveal) => JSON.stringify(a ?? null) === JSON.stringify(b ?? null);
       return entries.some((e) => fits(e, token, localOf(head(local), sentence), termsOf(sentence), subject, local) && (e.at === "default" || same(e.reveal, reveal)));
     },
     find(token, local, sentence, own, scope = "linked") {
+      // bf37: the commit rate is about the AI, not about any brand the sentence or row names - it lives on the
+      // all-buyers What to buy card, whoever the Brief's subject is.
+      if (COMMIT.test(head(local))) return best(commitCands, token, [], [], local);
       const localTerms = localOf(head(local), sentence);
       const sentenceTerms = termsOf(sentence);
       const ownCands = [...own.cells.map((id) => ({ kind: "cell" as const, id })), ...own.rivals.filter((n) => rivalByName.has(low(n))).map((id) => ({ kind: "rival" as const, id }))];

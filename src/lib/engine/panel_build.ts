@@ -1212,13 +1212,16 @@ function pickPanel(inp: PanelCellInput, ctx: Ctx): PositionPanel {
   const avgPicked = comp.length >= 2 ? fineNum(compPicks, inp.rows.length * comp.length, "answers, per listed competitor", compRefs) : undefined;
   if (avgShare) shareLine.value = join(shareLine.value, " · the average competitor ", N(avgShare));
   const pickedLine: PanelLine = { label: "Picked, of all answers", value: avgPicked ? join(N(youPicked), " · the average competitor ", N(avgPicked)) : join(N(youPicked)) };
-  lines.push(shareLine, pickedLine);
+  // am72: the commit rate - the share of this cell's answers that name one in-category pick - is the bridge between
+  // the two pick numbers below it, and the Brief quotes it; no card stated it.
+  const commitLine: PanelLine = { label: `The AI commits to one ${h.noun}`, value: join("In ", N(num(split.n, inp.rows.length, "answers", refsOf(inp.rows.filter((r) => h.pickOf(r).status === "active"), (r) => h.quoteOf(r) || r.code.top_pick || "")))," of answers") };
+  lines.push(commitLine, shareLine, pickedLine);
   if (mine.length >= 5 && ctx.ladder) {
     const items = productSplit(mine, (r) => pickedProduct(r, ctx, true), 2, "of your picks", nounToks(ctx), nameTokens(h.brand, ctx));
     if (namesAProduct(items)) lines.push({ label: `Which of your ${h.plural} it picks`, value: splitLine(items) });
   }
   const weighs = weighsAll(inp, ctx);
-  linesComp.push(shareLine, pickedLine);
+  linesComp.push(commitLine, shareLine, pickedLine);
   const othersPicked = inp.rows.filter((r) => h.pickOf(r).status === "active" && h.pickOf(r).key !== h.targetKey);
   const negs = inp.lifts.filter((l) => l.value < 0).sort((a, b) => a.value - b.value).slice(0, 2);
   const poss = inp.lifts.filter((l) => l.value > 0).sort((a, b) => b.value - a.value).slice(0, 1);
