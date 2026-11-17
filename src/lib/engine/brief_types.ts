@@ -88,6 +88,8 @@ export interface AnswerCard {
 export interface BriefRow {
   label: string;
   value: string;
+  /** The same measure for the average competitor (the competitors listed on the what-to-buy card, taken together); only on rows that have one. */
+  avg?: string;
   tip?: string;
   /** The map cell behind the row's number (pin after the value). */
   cell?: BriefAnchor;

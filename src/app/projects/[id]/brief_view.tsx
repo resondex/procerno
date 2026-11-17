@@ -178,6 +178,7 @@ html.pb-printing .pb-fact{ border-bottom: 0 !important; color: inherit !importan
 .pb-table td{ padding: 11px 12px; border-bottom: 1px solid var(--line); vertical-align: baseline; }
 .pb-table .pb-r{ text-align: right; white-space: nowrap; }
 .pb-table td.pb-r{ font-weight: 600; }
+.pb-table td.pb-avg{ font-weight: 400; color: var(--ink-2); }
 .pb-table tr:last-child td{ border-bottom: 1px solid var(--line); }
 .pb-table tr.pb-hl td{ background: color-mix(in srgb, var(--primary) 13%, var(--surface)); font-weight: 600; }
 .pb-table tr.pb-hl td:first-child{ box-shadow: inset 3px 0 0 var(--primary); }
@@ -818,6 +819,7 @@ function Section({ s, lede, wave }: { s: BriefSectionT; lede: boolean; wave: str
               <tr>
                 <th>What we measure</th>
                 <th className="pb-r">{wave ? `Wave ${wave}` : "This wave"}</th>
+                {s.rows.some((r) => r.avg) && <th className="pb-r">Average competitor</th>}
               </tr>
             </thead>
             <tbody>
@@ -831,6 +833,7 @@ function Section({ s, lede, wave }: { s: BriefSectionT; lede: boolean; wave: str
                       r.value
                     )}
                   </td>
+                  {s.rows!.some((x) => x.avg) && <td className="pb-r pb-avg">{r.avg ?? ""}</td>}
                 </tr>
               ))}
             </tbody>

@@ -110,6 +110,7 @@ const helpers = {
   valueFacts: new Map(),
   headline: [] as PoolRow[],
   reasonLift: [],
+  classKeys: new Set<string>(),
   wordings: () => wordingIndex([]),
   scopes: new Map<string, string>(),
 };

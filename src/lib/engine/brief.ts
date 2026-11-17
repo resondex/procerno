@@ -905,6 +905,25 @@ function scoreboard(c: Ctx): BriefRow[] {
     at({ label: "Share of picks", value: P(S.shareOfDecided), tip: tipOf(S.shareOfDecided) }, ...own),
     at({ label: "Picked, of all answers", value: pctFine(rate(S.chosen)), tip: tipOf(S.chosen) }, ...own),
   ];
+  // bf27: the average competitor beside the subject's own four numbers - the
+  // competitors the what-to-buy card lists (class brands left out), each
+  // rate averaged. The tracker's own Brief only.
+  if (c.isTarget) {
+    const pos = c.map.positions[OPEN_ALL];
+    const step = (k: string) => pos?.panel?.steps.find((x) => x.key === k)?.usual?.value;
+    const listed = new Set(pos?.panel?.competitorOrder ?? []);
+    const comp = (pos?.brands ?? []).filter((b) => listed.has(b.name));
+    if (pos?.panel?.avgComp && listed.size >= 2) {
+      const num = (x?: string) => parseFloat((x ?? "").replace(/[^0-9.]/g, "")) || 0;
+      const show = (x: number) => (x < 10 ? `${Math.round(x * 10) / 10}%` : `${Math.round(x)}%`);
+      rows[0].avg = step("named");
+      rows[1].avg = step("recommended");
+      if (comp.length === listed.size) {
+        rows[3].avg = show(comp.reduce((a, b) => a + num(b.share), 0) / comp.length);
+        if (comp.every((b) => b.here?.read)) rows[4].avg = show(comp.reduce((a, b) => a + num(b.here!.read.picked), 0) / comp.length);
+      }
+    }
+  }
   const leader = s.brands.find((b) => b.key !== S.key && b.chosen.k > 0);
   if (leader) rows.push(at({ label: `Share of picks - ${leader.name}`, value: P(leader.shareOfDecided), tip: tipOf(leader.shareOfDecided) }, OPEN_ALL, brandPin(c, leader.key)));
   if (c.isTarget) {
@@ -2198,7 +2217,7 @@ export async function computeBrief(data: ViewData, request: BriefRequest = {}): 
 // bf21 (2026-11-10): the plain-wording pass - reads bs13 / am15 (new move names, lever sentences and insight wording quoted in the memos); actOf restates the new levers; the conditions paragraph, the condition card, the SWOT wall and the jobs wall lines say what sends buyers away and "a fixed situation" instead of "routes" / "wall" / "reason". The exemplar's "The conditions that decide it" heading is kept. Numbers unchanged.
 // bf22 (2026-11-12): the reasons harmonization - reads bs17 / am22: the conditions paragraph, the condition card and the away-condition finding name the run's reason THEMES (dt4) where a theme map exists (raw condition groups only without one); the paragraph's tips count statements on a themed side.
 // bf23 (2026-11-13, one counting rule - reads bs21): with reason themes the conditions paragraph counts each side's themes at ANSWER grain over that side's own answer base, and the condition card lists the themes at answer grain, names the lead away theme (quoting its most-stated wording) and gives the away_condition finding's blocker and fixed-situation wordings their own rows on the same base. Keyless output unchanged.
-const BRIEF_VERSION = "bf26"; // bf26 (2026-11-16): one voice - the subject in the third person everywhere (the insights re-run in the Brief's style, the moves' third-person form, the map's levers and claims voiced), buyers as words, never / every at the extremes, the cards' vocabulary, a finding's move on its cell, no move sentence twice in a frame. // bf25 (2026-11-13): the conditions line reads "rarely names one winner for every buyer" (was "a rule, not a winner"). // bf24 (2026-11-13): themed conditions name one destination only when it takes half their answers; the fixed-situation line leads with the finding wording.
+const BRIEF_VERSION = "bf27"; // bf27 (2026-11-16): the Now what scoreboard carries the average competitor beside the subject's named, recommended, share of picks and picked rows (the competitors the what-to-buy card lists; class brands left out). // bf26 (2026-11-16): one voice - the subject in the third person everywhere (the insights re-run in the Brief's style, the moves' third-person form, the map's levers and claims voiced), buyers as words, never / every at the extremes, the cards' vocabulary, a finding's move on its cell, no move sentence twice in a frame. // bf25 (2026-11-13): the conditions line reads "rarely names one winner for every buyer" (was "a rule, not a winner"). // bf24 (2026-11-13): themed conditions name one destination only when it takes half their answers; the fixed-situation line leads with the finding wording.
 
 /**
  * The brief through the cache. cachedView's keying, with the subject as one

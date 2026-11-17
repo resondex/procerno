@@ -250,6 +250,8 @@ export interface PanelHelpers {
   /** The headline pool (criteria's when-picked figures). */
   headline: PoolRow[];
   reasonLift: { code: string; wins: RateCell; others: RateCell; lift: number }[];
+  /** Brands the tracker asks about as a class ("a <brand> card"), not as a direct rival: never among a card's competitors or in its average competitor. */
+  classKeys: Set<string>;
   /** The cell's question wordings, indexed for ruling 5. */
   wordings: (cellIntents: Set<string>, extra?: string[]) => { text: string; stems: Map<string, string> };
   scopes: Map<string, string>;
@@ -1150,7 +1152,7 @@ function pickPanel(inp: PanelCellInput, ctx: Ctx): PositionPanel {
 
   // Competitors: the listed brands (BRAND_FLOOR picks), top COMP_TOP; switching leaves the brand being left out of the bars.
   const clear = split.list.filter((b) => b.rows.length >= BRAND_FLOOR);
-  const comp = clear.filter((b) => b.key !== h.targetKey && !(switching && b.key === inp.rivalKey)).slice(0, COMP_TOP);
+  const comp = clear.filter((b) => b.key !== h.targetKey && !h.classKeys.has(b.key) && !(switching && b.key === inp.rivalKey)).slice(0, COMP_TOP);
   const compNums = comp.map((b) => ({ b, f: funnelNums(inp.rows, b.key, b.name, h) }));
   const steps: PanelStep[] = [
     { key: "named", label: "Named", here: you.named, ...(compNums.length ? { rivals: compNums.map((x) => ({ name: x.b.name, num: x.f.named })) } : {}) },
@@ -1750,7 +1752,7 @@ function problemPanel(inp: PanelCellInput, ctx: Ctx): PositionPanel {
   // Competitors: brands recommended in at least BRAND_FLOOR answers, top COMP_TOP.
   const recBy = new Map<string, { key: string; name: string; rows: PoolRow[] }>();
   for (const r of rows) for (const [k, name] of h.recommendsOf(r)) if (k !== h.targetKey) recBy.set(k, { key: k, name, rows: [...(recBy.get(k)?.rows ?? []), r] });
-  const comp = [...recBy.values()].filter((x) => x.rows.length >= BRAND_FLOOR).sort((a, b) => b.rows.length - a.rows.length || a.name.localeCompare(b.name)).slice(0, COMP_TOP);
+  const comp = [...recBy.values()].filter((x) => x.rows.length >= BRAND_FLOOR && !h.classKeys.has(x.key)).sort((a, b) => b.rows.length - a.rows.length || a.name.localeCompare(b.name)).slice(0, COMP_TOP);
   const compNums = comp.map((c) => ({ c, f: funnelNums(rows, c.key, c.name, h) }));
   const claim = join(
     inp.pooled ? `When buyers describe their problem without asking for ${article(h.noun)} ${h.noun}, the AI recommends you in ` : `When this buyer describes their problem without asking for ${article(h.noun)} ${h.noun}, the AI recommends you in `,
@@ -2123,7 +2125,7 @@ function popularPanel(inp: PanelCellInput, ctx: Ctx): PositionPanel {
   const uCommitRows = u ? u.rows.filter((r) => h.pickOf(r).status === "active") : [];
   const uCommits = u ? num(uCommitRows.length, u.rows.length, "answers", refsOf(uCommitRows, pf)) : undefined;
   // Competitors: brands recommended in at least BRAND_FLOOR answers, top COMP_TOP.
-  const comp = brandsBy(rows, h, true).filter((x) => x.rows.length >= BRAND_FLOOR).slice(0, COMP_TOP);
+  const comp = brandsBy(rows, h, true).filter((x) => x.rows.length >= BRAND_FLOOR && !h.classKeys.has(x.key)).slice(0, COMP_TOP);
   const compNums = comp.map((c) => ({ c, f: funnelNums(rows, c.key, c.name, h) }));
   const every = you.f.named.length === all && all > 0;
   const claim = join(
@@ -2612,7 +2614,7 @@ function learningPanel(inp: PanelCellInput, ctx: Ctx): PositionPanel {
   };
   const me = read(rows);
   const us = u ? read(u.rows) : undefined;
-  const comp = brandsBy(rows, h, false).filter((x) => x.rows.length >= ROW_MIN).slice(0, COMP_TOP);
+  const comp = brandsBy(rows, h, false).filter((x) => x.rows.length >= ROW_MIN && !h.classKeys.has(x.key)).slice(0, COMP_TOP);
   const compNums = comp.map((c) => ({ c, named: num(c.rows.length, all, "answers", refsOf(c.rows, (r) => (r.code.mentions ?? []).find((m) => h.resolve(m.brand).key === c.key)?.brand ?? c.name)) }));
   const myK = knOf(me.named)!.k;
   const leads = compNums.length > 0 && compNums.every((x) => knOf(x.named)!.k < myK);
