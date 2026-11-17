@@ -339,7 +339,13 @@ for (const [b, t] of per) {
 console.log(`  TOTAL: ${tot.stat} / ${tot.matched} / ${tot.fallback} / ${tot.unlinked} (${tot.statRead})`);
 console.log("STILL MATCHED, by kind (stage 3 scope):");
 for (const [k, n] of [...matchedKinds.entries()].sort((a, b) => b[1] - a[1])) console.log(`  ${k}: ${n}`);
+// The visibility chart's level line is the chart's own reference line - on no card by design (Tyler, 2026-11-17).
+const byDesign = [...needsHome.keys()].filter((k) => /no card by design/.test(k));
+const chartLines = byDesign.reduce((a, k) => a + needsHome.get(k)!.length, 0);
+for (const k of byDesign) needsHome.delete(k);
+console.log(`ON NO CARD BY DESIGN (the visibility chart's reference line): ${chartLines}`);
 console.log(`NEEDS A CARD HOME (printed as before, no card shows it): ${[...needsHome.values()].reduce((a, x) => a + x.length, 0)}`);
+if ([...needsHome.values()].some((x) => x.length)) failures.push(`${[...needsHome.values()].reduce((a, x) => a + x.length, 0)} figures are printed with no card home`);
 for (const [k, xs] of needsHome) {
   console.log(`  ${k}: ${xs.length}`);
   for (const x of xs) console.log(`    - ${x}`);

@@ -63,10 +63,9 @@ function copy(table: string, rows: Row[]) {
   db.transaction(() => { for (const r of rows) stmt.run(cols.map((c) => val(r[c]))); })();
 }
 /**
- * Every row of a run-scoped table, in pages, IN LIVE'S PHYSICAL ORDER (ctid). The app reads coded answers with no
- * ORDER BY, so on live they arrive in stored order, and that order reaches the output (which sample wordings a
- * reason group shows a model, tie-breaks). The local store returns rows in insertion order, so inserting in live's
- * order reproduces it.
+ * Every row of a run-scoped table, in pages. Answers come in their defined order (seq), as the local store reads
+ * them by rowid. Coded answers come in stored order only to page through them: both stores read them ORDER BY
+ * response_id (2026-11-17), so their insertion order no longer reaches any output.
  */
 async function pages(table: "responses" | "answer_codes", runId: string, source?: string): Promise<number> {
   // Answers have a defined order on live (seq); coded answers do not, so they come in physical order.

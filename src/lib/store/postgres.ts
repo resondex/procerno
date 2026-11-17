@@ -1752,7 +1752,10 @@ export const pgStore: Store = {
     const rows = await sql`SELECT ${sql(ANSWER_CODE_COLUMNS as string[])} FROM answer_codes
       WHERE run_id = ${runId} AND source = ${source}
       AND response_id NOT IN (SELECT r.id FROM responses r WHERE r.run_id = ${runId}
-        AND r.prompt_id IN (SELECT id FROM prompts WHERE staged = 1 OR replaced_by IS NOT NULL))`;
+        AND r.prompt_id IN (SELECT id FROM prompts WHERE staged = 1 OR replaced_by IS NOT NULL))
+      ORDER BY response_id`;
+    // (ORDER BY, 2026-11-17: with none, rows came in stored order, and that order reached the output - which
+    // sample wordings a reason group shows the theme model - so a table rewrite could rename the reason groups.)
     return rows.map((r) => answerCodesFromRow(r));
   },
 

@@ -1997,7 +1997,8 @@ export const sqliteStore: Store = {
     const rows = getDb()
       .prepare(
         `SELECT ${ANSWER_CODE_COLUMNS.join(", ")} FROM answer_codes WHERE run_id = ? AND source = ?
-         AND response_id NOT IN (SELECT r.id FROM responses r WHERE r.run_id = answer_codes.run_id AND r.prompt_id IN ${HIDDEN_PROMPTS})`
+         AND response_id NOT IN (SELECT r.id FROM responses r WHERE r.run_id = answer_codes.run_id AND r.prompt_id IN ${HIDDEN_PROMPTS})
+         ORDER BY response_id`
       )
       .all(runId, source) as Record<string, unknown>[];
     return rows.map(answerCodesFromRow);
