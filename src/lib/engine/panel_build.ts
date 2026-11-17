@@ -1858,7 +1858,10 @@ function criteriaPanel(inp: PanelCellInput, ctx: Ctx): PositionPanel {
           return { code, wins: w, others: o, lift: (w.n ? w.k / w.n : 0) - (o.n ? o.k / o.n : 0) };
         });
       })()
-    : h.reasonLift;
+    : roomSet
+      ? []
+      : h.reasonLift;
+  const noRead = !!roomSet && !local;
   const winners = lift
     .filter((l) => l.lift > 0 && l.wins.low > l.others.high && !taughtSet.has(l.code))
     .sort((a, b) => b.wins.k / Math.max(1, b.wins.n) - a.wins.k / Math.max(1, a.wins.n) || a.code.localeCompare(b.code));
@@ -1876,9 +1879,11 @@ function criteriaPanel(inp: PanelCellInput, ctx: Ctx): PositionPanel {
     ".",
     untaught.length
       ? join(" ", listNameSpans(gapSpans), untaught.length > 1 ? `, which come up most ${when}, are seldom on its list.` : `, which comes up most ${when}, is seldom on its list.`)
-      : top5.length
-        ? ` Everything that comes up most ${when} is on its list.`
-        : ""
+      : noRead
+        ? " It picks you for this buyer too seldom to say what wins here."
+        : top5.length
+          ? ` Everything that comes up most ${when} is on its list.`
+          : ""
   );
   // The gap is a sentence on the checklist step, never a card of its own with nothing to draw.
   const steps: PanelStep[] = [
