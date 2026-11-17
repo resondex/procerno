@@ -45,7 +45,7 @@ import { METHOD_BANNED, PLAIN_BANNED } from "./plain_words";
 // bw3 (2026-11-16, bf29): (f) voice - no first-person plural about the brand, no bracketed signed-points
 // shorthand, both also prompt rules; (g) quadrants - a frame drawn as quadrants (SWOT) keeps its four
 // headings in order, each written from its own facts only, and reassembles as the 2x2 cards.
-export const BRIEF_WRITER_VERSION = "bw4";
+export const BRIEF_WRITER_VERSION = "bw5"; // bw5: quadrant leads are specific to the item, never the sheet's generic label.
 const CACHE_TTL_MS = 100 * 365 * 24 * 3600 * 1000; // forever in practice - the saved-tracker rule (2026-11-09): re-keyed by a version bump or a sheet change, never aged out
 /** Opus 5.x thinks before it writes and a whole-budget think returns empty
  * text (the recorded batch failure mode), so the budget leaves room for both. */
@@ -377,6 +377,10 @@ export function checkReply(reply: WrittenReply, memo: BriefMemo, sheet: FactShee
         const wp = written[x].paras;
         if (wp.length !== items.length) parts.push(`the ${quads[i]} section must have ${items.length} separate item${items.length === 1 ? "" : "s"}, one per item in the sheet`);
         if (items.every((p) => p.lead) && wp.some((p) => !p.lead)) parts.push(`every ${quads[i]} item needs a short lead`);
+        // bw5: a lead says what THIS item is about (the brand, rival, buyer or argument), never the sheet's generic label.
+        const generic = new Set(items.map((p) => (p.lead ?? "").toLowerCase().replace(/[^a-z0-9 ]/g, "").trim()).filter(Boolean));
+        if (wp.some((p) => p.lead && generic.has(p.lead.toLowerCase().replace(/[^a-z0-9 ]/g, "").trim())))
+          parts.push(`a lead under ${quads[i]} repeats the sheet's label - write a lead that names what the item is about`);
         const itemNums = items.map((p) => numberTokens(paraLine(p)));
         wp.forEach((p, k) => {
           const own = new Set((p.text.match(ANCHOR_TOKEN) ?? []).map((t) => sheet.anchors.find((y) => y.token === t)?.item).filter(Boolean));
@@ -485,7 +489,7 @@ export function writerUser(sheet: FactSheet, ctx: { brand: string; product: stri
   let u =
     `The memo is about ${ctx.brand}; the AI is asked which ${ctx.product} to choose.\n` +
     (ctx.quads?.length
-      ? `This memo is drawn as quadrants. Keep exactly ${ctx.quads.length} sections headed ${ctx.quads.join(", ")}, in that order and one after another, after any opening section; every section the sheet places after the quadrants stays after them, under its own heading. Write each quadrant from the facts listed under that heading only - move nothing from one quadrant to another. Each quadrant has one paragraph per "- " item in the sheet, in any order: a short "lead" and the item's own sentence or two, with that item's tags and numbers and no other item's.\n`
+      ? `This memo is drawn as quadrants. Keep exactly ${ctx.quads.length} sections headed ${ctx.quads.join(", ")}, in that order and one after another, after any opening section; every section the sheet places after the quadrants stays after them, under its own heading. Write each quadrant from the facts listed under that heading only - move nothing from one quadrant to another. Each quadrant has one paragraph per "- " item in the sheet, in any order: a short "lead" and the item's own sentence or two, with that item's tags and numbers and no other item's. Write every lead fresh: it names the brand, rival, buyer or argument that item is about, in a few words, and never repeats the label the sheet gives the item.\n`
       : "") +
     `Keep blocks that must each appear exactly once: ${sheet.keeps.length ? sheet.keeps.join(", ") : "none"}.\n` +
     `Tags that must each appear exactly once: ${sheet.anchors.length ? sheet.anchors.map((a) => a.token).join(" ") : "none"}.\n\n` +
