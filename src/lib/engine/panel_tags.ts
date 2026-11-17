@@ -455,6 +455,19 @@ export function suggestTakeaway(share: number): Takeaway {
   return tk("Rarely suggests another brand", "good");
 }
 
+/** am61, the settled customers' All questions card: "What the answer does for the relationship" (strengthens /
+ * neutral / weakens, of all the pooled answers). */
+export function relationshipTakeaway(strengthens: number, neutral: number, weakens: number): Takeaway {
+  if (isSplit(strengthens, neutral, weakens)) return SPLIT;
+  if (strengthens >= MAJORITY) return tk("Mostly strengthens it", "good", strengthens);
+  if (weakens >= MAJORITY) return tk("Mostly weakens it", "bad", weakens);
+  if (neutral >= MAJORITY) return tk("Mostly neutral", "neutral", neutral);
+  const l = leanOf(strengthens, weakens);
+  if (l > 0) return tk("Leans strengthens", "good");
+  if (l < 0) return tk("Leans weakens", "bad");
+  return tk("No clear side", "neutral");
+}
+
 /** What to look for: the checklist step, and the gap step when it is drawn. */
 export const taughtTakeaway = (gap: boolean): Takeaway => (gap ? tk("Misses your strongest points", "bad") : tk("Covers your strongest points", "good"));
 export const GAP_TAKEAWAY: Takeaway = tk("Not on the checklist", "bad");
@@ -474,6 +487,7 @@ const BASE_TAKEAWAYS: string[] = [
   "Often names one to replace you", "Mostly names your own", "Mostly names another company's", "A mix of your own and others'",
   "Misses your strongest points", "Covers your strongest points", "Not on the checklist",
   "Mostly sides with basic", "Mostly sides with premium", "Mostly balanced", "Leans premium", "Leans basic", "No clear side",
+  "Mostly strengthens it", "Mostly weakens it", "Mostly neutral", "Leans strengthens", "Leans weakens",
   "Mostly sticks with you", "Mostly says try something else", "Mostly says it depends", "Mostly names no pick", "Leans stick", "Leans switch",
   "Suggests another brand in every answer", "Suggests another brand in most answers", "Suggests another brand in some answers", "Rarely suggests another brand",
   "Split",

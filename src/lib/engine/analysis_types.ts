@@ -414,7 +414,9 @@ export type PanelKind =
   // am59: Premium vs basic.
   | "premium"
   // am60: Habit (repertoire).
-  | "habit";
+  | "habit"
+  // am61: Your customers making your case - All questions (an index to the four questions under it).
+  | "settled_all";
 
 /** One piece of a sentence. A span with refs is a stated number or fact that
  * opens its answers (ruling 7); no refs = plain text. tip = counts (hover only). */
@@ -445,7 +447,8 @@ export type PanelStepKey =
   | "alongside"                            // alongside: the ones it names alongside you
   | "premise"                              // critic: does it say the critic is right
   | "tier"                                 // premium: which end it sides with (premium / basic / balanced)
-  | "habit";                               // habit: stick with you, pick another brand, it depends, no pick
+  | "habit"                                // habit: stick with you, pick another brand, it depends, no pick
+  | "relationship";                        // settled_all: what the answer does for the relationship
 
 /** A tag's sentiment: good for you, bad for you, or a neutral fact. */
 export type PanelTone = "good" | "bad" | "neutral";
@@ -583,7 +586,7 @@ export interface PanelDetailSection {
   title: string;
   sub?: string;
   tone: PanelTone;
-  rows: { label: string; num: PanelNum; open?: true }[];
+  rows: { label: string; num: PanelNum; open?: true; /** am61: the row opens this Map cell's card ("Open"). */ cell?: string }[];
   note?: PanelText;
 }
 

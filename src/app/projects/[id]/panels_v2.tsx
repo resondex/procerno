@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import type { ReactNode } from "react";
-import type { CellPanelPayload, PanelKind, PanelRival, PanelStep, PanelStepKey, Position, PositionPanel, RivalAcross, RivalAcrossStep, RivalStepDetail, PanelStepDetail } from "@/lib/engine/analysis_types";
+import type { CellPanelPayload, PanelKind, PanelRival, PanelStep, PanelStepKey, Position, PositionPanel, RivalAcross, RivalAcrossStep, RivalStepDetail, PanelStepDetail, PanelTone } from "@/lib/engine/analysis_types";
 import { MoveBox, None, VCOLOR, VWORD, crumbCls, h2Cls, linkCls, notesOf, softLine, whyLines, type Ctx } from "./analysis_panel";
 import { MatchupDropNote } from "./matchup_action";
 import {
@@ -64,6 +64,8 @@ const ORDER: Record<PanelKind, Block[]> = {
   premium: ["stack", "detail", "conditions", "ends", "competitors", "weighs"],
   // am60: Habit - the brands suggested instead live in the "suggests another brand" explanation (the looking-around pattern).
   habit: ["stack", "detail", "conditions", "lines", "weighs"],
+  // am61: the settled customers' All questions card - the step and its explanation (an index to the four questions).
+  settled_all: ["stack", "detail"],
 };
 
 /** Head-to-head panels read the rival's side first, as the matchup is asked. */
@@ -207,7 +209,7 @@ export function PositionPanelView({ p, pp, usualSteps, ctx }: { p: Position; pp:
       ) : null,
     byproduct: pp.byProduct && pp.byProduct.rows.length > 0 ? <TableView table={pp.byProduct} /> : null,
     detail: selDetail ? (
-      <RivalDetail d={selDetail} name="" onOpen={openIfRival} />
+      <RivalDetail d={selDetail} name="" onOpen={openIfRival} onOpenCell={(id) => ctx.open({ kind: "cell", id })} />
     ) : detail && (!selectable || sel === defaultSel) ? (
       <DetailView heading={detail.heading} body={detail.body} />
     ) : null,
@@ -274,7 +276,7 @@ const isFunnel = (k: PanelStepKey): k is FunnelKey => k === "named" || k === "re
 
 const cap1 = (t: string) => (t ? t[0].toUpperCase() + t.slice(1) : t);
 
-function RivalDetail({ d, name, onOpen }: { d: RivalStepDetail | PanelStepDetail; name: string; onOpen?: (name: string) => void }) {
+function RivalDetail({ d, name, onOpen, onOpenCell }: { d: RivalStepDetail | PanelStepDetail; name: string; onOpen?: (name: string) => void; onOpenCell?: (id: string) => void }) {
   const ol = d.outcomeLabels;
   const cols = "columns" in d ? d.columns : undefined;
   const rivalHead = cols?.rival ?? name;
@@ -386,7 +388,7 @@ function RivalDetail({ d, name, onOpen }: { d: RivalStepDetail | PanelStepDetail
           <TextView text={d.both} title={d.heading} />
         </p>
       )}
-      {"sections" in d && d.sections?.map((s) => <DetailSection key={s.title} s={s} onOpen={onOpen} />)}
+      {"sections" in d && d.sections?.map((s) => <DetailSection key={s.title} s={s} onOpen={onOpen} onOpenCell={onOpenCell} />)}
     </DetailView>
   );
 }
@@ -549,22 +551,71 @@ export function LazyRivalAcross({ name, ctx, fallback }: { name: string; ctx: Ct
 const WHO_COLOR: Record<RivalAcrossStep["bars"][number]["who"], string> = { rival: C_AWAY, you: C_YOU, other: C_USUAL };
 
 /** One question's card: the whole card selects it (its bars open no answers - the block below does). */
-function AcrossStepCard({ s, sel, onSelect }: { s: RivalAcrossStep; sel: boolean; onSelect: () => void }) {
+/** By rival, as one table (2026-11-16): a row per question - the rival's number, yours, a short verdict. */
+const ORD = ["", "1st", "2nd", "3rd", "4th", "5th", "6th", "7th", "8th", "9th"];
+function acrossRow(s: RivalAcrossStep) {
+  const rival = s.bars.find((b) => b.who === "rival");
+  const you = s.bars.find((b) => b.who === "you");
+  // The rival's place among the brands the question names (where it has no number against you).
+  const rank = rival ? 1 + s.bars.filter((b) => b.who !== "rival" && b.num.pct > rival.num.pct).length : 0;
+  const lead = s.bars.filter((b) => b.who === "other").sort((a, b) => b.num.pct - a.num.pct)[0];
+  const chip: { text: string; tone: PanelTone } | null = s.tag
+    ? { text: s.tag, tone: s.tagTone ?? "neutral" }
+    : rival && !you
+      ? rank === 1
+        ? { text: "Named most", tone: "bad" }
+        : { text: `${ORD[rank] ?? `${rank}th`} named`, tone: "neutral" }
+      : !rival && you && lead
+        ? { text: `Goes to ${lead.name}`, tone: "neutral" }
+        : null;
+  // Where it beats you by the most first; then the questions only it has a number for, largest first.
+  const order = rival && you ? 1000 + (rival.num.pct - you.num.pct) : rival ? rival.num.pct : -1;
+  return { s, rival, you, chip, order };
+}
+
+function AcrossTable({ r, sel, onSelect }: { r: RivalAcross; sel?: string; onSelect: (k: string) => void }) {
+  const rows = r.steps.map(acrossRow).sort((a, b) => b.order - a.order);
   return (
-    <button
-      type="button"
-      onClick={onSelect}
-      aria-pressed={sel}
-      className={`block w-full cursor-pointer rounded-[10px] border bg-surface px-3 pb-3 pt-2.5 text-left hover:border-ink-3 ${sel ? "border-ink ring-1 ring-ink" : "border-line"}`}
-    >
-      <span className="mb-1 flex w-full items-center justify-between gap-2 text-left">
-        <em className={`not-italic ${T.sec} ${sel ? "font-semibold text-ink" : "text-ink-2"}`}>{s.label}</em>
-        <Tag text={s.tag} tone={s.tagTone} />
-      </span>
-      {s.bars.map((b) => (
-        <NumBar key={`${b.who}:${b.name}`} label={b.name} n={b.num} color={WHO_COLOR[b.who]} bold={b.who !== "other"} dim={!sel} title={`${s.label} - ${b.name}`} plain />
-      ))}
-    </button>
+    <table className={`w-full ${T.body}`}>
+      <thead>
+        <tr className={`${T.cap} text-ink-3`}>
+          <th className="py-1 pr-2 text-left font-normal" />
+          <th className="py-1 pl-2 text-right font-normal">{r.name}</th>
+          <th className="py-1 pl-2 text-right font-normal">You</th>
+          <th className="py-1 pl-2 text-right font-normal" />
+        </tr>
+      </thead>
+      <tbody>
+        {rows.map(({ s, rival, you, chip }) => {
+          const on = s.key === sel;
+          return (
+            <tr
+              key={s.key}
+              onClick={() => onSelect(s.key)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" || e.key === " ") {
+                  e.preventDefault();
+                  onSelect(s.key);
+                }
+              }}
+              tabIndex={0}
+              role="button"
+              aria-pressed={on}
+              className={`cursor-pointer border-t border-line/70 hover:bg-line/30 ${on ? "bg-line/40" : ""}`}
+            >
+              <td className={`py-2 pr-2 ${on ? "font-semibold text-ink" : "text-ink"}`}>{s.label}</td>
+              <td className="whitespace-nowrap py-2 pl-2 text-right font-semibold tabular-nums" style={{ color: C_AWAY }}>
+                {rival ? rival.num.value : "-"}
+              </td>
+              <td className="whitespace-nowrap py-2 pl-2 text-right font-semibold tabular-nums" style={{ color: C_YOU }}>
+                {you ? you.num.value : "-"}
+              </td>
+              <td className="whitespace-nowrap py-2 pl-2 text-right">{chip && <Tag text={chip.text} tone={chip.tone} />}</td>
+            </tr>
+          );
+        })}
+      </tbody>
+    </table>
   );
 }
 
@@ -583,19 +634,8 @@ export function RivalAcrossView({ r, ctx }: { r: RivalAcross; ctx: Ctx }) {
       </h2>
       <p className={`${T.sec} mt-1.5`}>Click a question to see what explains it. Below it, click any row or number to read the answers behind it.</p>
       <div className="mt-4">
-        <p className={`${T.label} mb-1.5`}>How it goes, question by question</p>
-        <KeyLine
-          items={[
-            { label: r.name, color: C_AWAY },
-            { label: "You", color: C_YOU },
-            ...(r.steps.some((x) => x.bars.some((b) => b.who === "other")) ? [{ label: "Another brand", color: C_USUAL }] : []),
-          ]}
-        />
-        <div className="grid gap-1.5">
-          {r.steps.map((x) => (
-            <AcrossStepCard key={x.key} s={x} sel={x.key === s?.key} onSelect={() => setSel(x.key)} />
-          ))}
-        </div>
+        <p className={`${T.label} mb-1.5`}>How it goes, where it beats you most first</p>
+        <AcrossTable r={r} sel={s?.key} onSelect={setSel} />
       </div>
       {s && (
         <div className="mt-4 border-t border-line pt-3.5">
@@ -605,6 +645,13 @@ export function RivalAcrossView({ r, ctx }: { r: RivalAcross; ctx: Ctx }) {
               <TextView text={s.body} title={`${r.name} - ${s.label}`} />
             </p>
           )}
+          {/* The table shows two numbers a question; the question's own bars (every brand on it) sit with its explanation. */}
+          <div className="mt-3">
+            <p className={`${T.cap} mb-1 font-semibold text-ink`}>{s.label}</p>
+            {s.bars.map((bar) => (
+              <NumBar key={`${bar.who}:${bar.name}`} label={bar.name} n={bar.num} color={WHO_COLOR[bar.who]} bold={bar.who !== "other"} title={`${s.label} - ${bar.name}`} />
+            ))}
+          </div>
           {s.conditions && <CondColumns cond={s.conditions} comp={false} />}
           {s.table && s.table.rows.length > 0 && <TableView table={s.table} />}
           {s.fold && s.fold.length > 0 && (

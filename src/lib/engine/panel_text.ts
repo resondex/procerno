@@ -904,3 +904,42 @@ export function habitOffersDetail(size: "most" | "some" | "rarely", first?: stri
         : "The customer asked whether to try something else, so naming others is expected; no one brand is suggested first often.";
   return { heading, body: join(body) };
 }
+
+/* ---------- am61: Your customers making your case - All questions ---------- */
+export const SETTLED_ALL_TEXT = {
+  stepLabel: "What the answer does for the relationship",
+  strengthens: "strengthens",
+  neutral: "neutral",
+  weakens: "weakens",
+  byQuestion: { title: "By question", sub: "Share of each question's answers that strengthen the relationship. Open a question to read it in full." },
+  vendor: { title: "Which AI companies strengthen it least", sub: "Share of each company's answers that strengthen the relationship." },
+  weak: { title: "Where it weakens the relationship", sub: "Share of each question's answers that weaken it." },
+};
+/** The claim: what the AI's answers do for the relationship when your own customers ask it to help them with you. */
+export function settledAllClaim(str: PanelNum, weak: PanelNum, strAll: boolean, strNone: boolean, weakNone: boolean): PanelText {
+  const strPart = strNone ? "never strengthens the relationship" : strAll ? F("strengthens the relationship in every answer", str) : join("strengthens the relationship in ", N(str), " of answers");
+  const weakPart = strAll ? "" : weakNone ? " and never weakens it" : join(" and weakens it in ", N(weak));
+  return join("When your own customers ask the AI to help them with you, its answer ", strPart, weakPart, ".");
+}
+/** The step explained: heading from its takeaway, one sentence naming the question where it does least (no number). */
+export function settledAllDetail(tag: string, weakest?: string[]): { heading: string; body: PanelText } {
+  const HEAD: Record<string, string> = {
+    "Mostly strengthens it": "The AI mostly strengthens the relationship",
+    "Always strengthens it": "The AI always strengthens the relationship",
+    "Mostly weakens it": "The AI mostly weakens the relationship",
+    "Always weakens it": "The AI always weakens the relationship",
+    "Mostly neutral": "The AI mostly leaves the relationship as it is",
+    "Always neutral": "The AI always leaves the relationship as it is",
+    "Leans strengthens": "The AI leans toward strengthening the relationship",
+    "Leans weakens": "The AI leans toward weakening the relationship",
+    "No clear side": "The AI takes no clear side on the relationship",
+    Split: "The AI is split on the relationship",
+  };
+  const q = (x: string) => `"${x}"`;
+  const body = weakest?.length
+    ? weakest.length === 1
+      ? `It does least for the relationship on ${q(weakest[0])}, well below the other questions.`
+      : `It does least for the relationship on ${weakest.slice(0, -1).map(q).join(", ")} and ${q(weakest[weakest.length - 1])}, well below the other questions.`
+    : "The questions read alike: none does much less for the relationship than the others.";
+  return { heading: HEAD[tag] ?? "What the answer does for the relationship", body: join(body) };
+}

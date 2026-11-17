@@ -376,11 +376,11 @@ for (const project of projects) {
     const phrases = [...dataPhrases(view, data)];
     for (const [id, pos] of Object.entries(view.positions as Record<string, Position>)) {
       const p = pos.panel as PositionPanel | undefined;
-      // am59: every Premium vs basic cell now opens the new panel. am60: every Habit cell too - only the settled
-      // "All questions" cell keeps the old panel.
+      // am59: every Premium vs basic cell now opens the new panel. am60: every Habit cell too. am61: and the settled
+      // "All questions" cell - no cell keeps the old panel.
       if (id.startsWith("chooses:premium:") && p?.kind !== "premium") failures.push(`${project.brand}: ${id} keeps the old panel`);
       if (id.startsWith("doubts:repertoire:") && p?.kind !== "habit") failures.push(`${project.brand}: ${id} keeps the old panel`);
-      if (!p && id !== "settled:settled:all") failures.push(`${project.brand}: ${id} keeps the old panel`);
+      if (!p) failures.push(`${project.brand}: ${id} keeps the old panel`);
       if (!p) continue;
       panels++;
       // The answers a panel may show: its own, its row's (the usual and the
@@ -491,7 +491,7 @@ for (const project of projects) {
       // every stated number in a sentence opens its answers, outcomes carry their words, rows their columns.
       for (const [view, ds] of [["details", p.details], ["detailsComp", p.detailsComp]] as const) {
         if (!ds) continue;
-        if (!["buy", "switching", "problem", "popular", "premium", "habit", "learning", "h2h", "value", "buyer_worry", "customer_worry", "looking_around", "expansion", "business_case", "alongside", "critic", "criteria"].includes(p.kind)) failures.push(`${project.brand}: ${id} ${p.kind} carries ${view}`);
+        if (!["buy", "switching", "problem", "popular", "premium", "habit", "settled_all", "learning", "h2h", "value", "buyer_worry", "customer_worry", "looking_around", "expansion", "business_case", "alongside", "critic", "criteria"].includes(p.kind)) failures.push(`${project.brand}: ${id} ${p.kind} carries ${view}`);
         if (view === "detailsComp" && !p.compare) failures.push(`${project.brand}: ${id} detailsComp without a competitors view`);
         for (const [k, d] of Object.entries(ds)) {
           if (!d) continue;
@@ -807,6 +807,50 @@ for (const project of projects) {
           }
         }
         if (p.compare || p.competitors) failures.push(`${project.brand}: ${id} habit carries a competitors switch or block`);
+      }
+      // 6k. am61: the settled All questions card - its three bars add up to the cell's answers, each "By question" row
+      // is that question's own strengthens share (and opens its cell), the explanation repeats no top-bar number and
+      // is one sentence, it starts selected, and it carries no conditions, competitors or weighs.
+      if (p.kind === "settled_all") {
+        const rs = p.steps.find((st) => st.key === "relationship");
+        const cellN = (cellIds[id] ?? []).length;
+        if (!rs?.segments?.length) failures.push(`${project.brand}: ${id} settled_all has no relationship step`);
+        else {
+          const ks = rs.segments.map((g) => knOfH(g.num));
+          if (ks.some((x) => !x || x.n !== cellN) || ks.reduce((a, x) => a + (x?.k ?? 0), 0) !== cellN) failures.push(`${project.brand}: ${id} settled_all bars do not add up to the cell's ${cellN} answers`);
+          for (const g of rs.segments)
+            for (const r of g.num.refs ?? []) {
+              const v = (codeOf.get(r.responseId) as Code | undefined)?.relationship_verdict;
+              const ok = g.key === "strengthens" ? v === "strengthens" : g.key === "weakens" ? v === "weakens" : v !== "strengthens" && v !== "weakens";
+              if (!ok) failures.push(`${project.brand}: ${id} settled_all segment ${g.key} answer ${r.responseId.slice(0, 8)} lacks the verdict`);
+            }
+          if (!p.thin) {
+            if (p.focus !== "relationship") failures.push(`${project.brand}: ${id} settled_all does not start on its step`);
+            const d = p.details?.relationship;
+            if (!d) failures.push(`${project.brand}: ${id} settled_all has no explanation`);
+            else {
+              const topBars = valuesOf(rs.segments.map((g) => g.num));
+              repeatChecks++;
+              repeats(d.body, topBars, `${id} settled_all details.relationship`);
+              const txt = d.body.map((x) => x.t).join("");
+              if ((txt.match(/[a-z]{2}\.\s+[A-Z]/g) ?? []).length) failures.push(`${project.brand}: ${id} settled_all explanation is more than one sentence`);
+              const byQ = (d.sections ?? []).find((sec) => sec.title === "By question");
+              const kids = Object.keys(cellIds).filter((c) => c.startsWith("settled:settled:") && c !== id && (cellIds[c] ?? []).length >= 10);
+              if (!byQ || byQ.rows.length !== kids.length) failures.push(`${project.brand}: ${id} settled_all "By question" lists ${byQ?.rows.length ?? 0} questions, the Map has ${kids.length}`);
+              for (const r of byQ?.rows ?? []) {
+                const kid = r.cell ?? "";
+                const own = cellIds[kid] ?? [];
+                const k = own.filter((rid) => (codeOf.get(rid) as Code | undefined)?.relationship_verdict === "strengthens").length;
+                const kn = knOfH(r.num);
+                if (!kids.includes(kid)) failures.push(`${project.brand}: ${id} settled_all row "${r.label}" opens no question cell`);
+                else if (!kn || kn.k !== k || kn.n !== own.length) failures.push(`${project.brand}: ${id} settled_all row "${r.label}" is not that question's own strengthens share`);
+                const pos2 = (view.positions as Record<string, Position>)[kid];
+                if (pos2 && !pos2.where.endsWith(r.label)) failures.push(`${project.brand}: ${id} settled_all row "${r.label}" is not the Map label of ${kid}`);
+              }
+            }
+          }
+        }
+        if (p.conditions || p.competitors || p.weighs) failures.push(`${project.brand}: ${id} settled_all carries conditions, competitors or weighs`);
       }
       // 7. kinds without conditions.
       if ((p.kind === "buyer_worry" || p.kind === "customer_worry" || p.kind === "value" || p.kind === "business_case") && p.conditions) failures.push(`${project.brand}: ${id} ${p.kind} carries conditions`);

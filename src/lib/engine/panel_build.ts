@@ -8,7 +8,7 @@ import type { Resolver } from "./brand_resolve";
 import { cell, type PoolRow, type RateCell } from "./view_data";
 import { isDescription, type ValueFact } from "./value";
 import { filterObvious, type Omission, type OmissionList } from "./panel_filter";
-import { NOWHERE_CLEAR, AVG_COMP, CLOSE_PTS, GAP_TAKEAWAY, TAKEAWAY_TAGS, TAG_FURTHEST, TAG_GAP_OPENS, agreesTakeaway, alongsideTakeaway, avgTag, caseTakeaway, criticStrengthTakeaway, duelTag, insteadTakeaway, keepTakeaway, leanOf, offersTakeaway, oftenOf, premiseTakeaway, tierTakeaway, habitTakeaway, suggestTakeaway, proceedTakeaway, stanceTakeaway, taughtTakeaway, usualDir, duelTone, focusOf, neutralUsualTag, otherTag, rankTag, segTag, toneOfTag, usualTag, usualTone, worthTakeaway, type KN, type Takeaway } from "./panel_tags";
+import { NOWHERE_CLEAR, AVG_COMP, CLOSE_PTS, GAP_TAKEAWAY, TAKEAWAY_TAGS, TAG_FURTHEST, TAG_GAP_OPENS, agreesTakeaway, alongsideTakeaway, avgTag, caseTakeaway, criticStrengthTakeaway, duelTag, insteadTakeaway, keepTakeaway, leanOf, offersTakeaway, oftenOf, premiseTakeaway, tierTakeaway, habitTakeaway, suggestTakeaway, relationshipTakeaway, proceedTakeaway, stanceTakeaway, taughtTakeaway, usualDir, duelTone, focusOf, neutralUsualTag, otherTag, rankTag, segTag, toneOfTag, usualTag, usualTone, worthTakeaway, type KN, type Takeaway } from "./panel_tags";
 import { ROW_NAME } from "./question_names";
 import {
   F,
@@ -69,6 +69,9 @@ import {
   premiumClaim,
   HABIT_TEXT,
   habitClaim,
+  SETTLED_ALL_TEXT,
+  settledAllClaim,
+  settledAllDetail,
   habitDetail,
   habitOffersDetail,
   type HabitSide,
@@ -388,7 +391,8 @@ function usualOf(inp: PanelCellInput, inputs: Map<string, PanelCellInput>): Pane
   if (inp.pooled) return undefined;
   const [band, row] = inp.id.split(":");
   const u = inputs.get(`${band}:${row}:all`);
-  return u && u.pooled ? u : undefined;
+  // am61: the settled customers' All questions card is an index, never the four questions' usual (their panels stay as they were).
+  return u && u.pooled && u.kind !== "settled_all" ? u : undefined;
 }
 
 /** Sibling split cells of a row (never its All cell). */
@@ -490,6 +494,8 @@ function buildPanel(inp: PanelCellInput, ctx: Ctx): PositionPanel | undefined {
       return premiumPanel(inp, ctx);
     case "habit":
       return habitPanel(inp, ctx);
+    case "settled_all":
+      return settledAllPanel(inp, ctx);
   }
 }
 
@@ -748,7 +754,7 @@ function productIndex(ctx: Ctx): Map<string, { named: number; chosen: number; se
   for (const inp of ctx.inputs.values()) {
     // am59: the Premium vs basic cell's answers stay out (built after every other kind's index existed - no other panel's product list moves).
     // am60: the Habit cell's too.
-    if (inp.kind === "premium" || inp.kind === "habit") continue;
+    if (inp.kind === "premium" || inp.kind === "habit" || inp.kind === "settled_all") continue;
     for (const r of inp.rows) {
       const rules = r.code.decision_rules ?? [];
       if (!rules.length || seen.has(r.code.response_id)) continue;
@@ -2502,6 +2508,86 @@ function habitStepDetails(inp: PanelCellInput, p: PositionPanel, ctx: Ctx) {
   delete p.detailComp;
 }
 
+/** am61: the settled customers' All questions card - an index to the four questions under it. One step on what the
+ * answer does for the relationship (the one field the four share), and its explanation lists each question with
+ * an Open into its card. No conditions, competitors or weighs (the four questions weigh different things). */
+const relOf = (r: PoolRow): "strengthens" | "steady" | "weakens" => (r.code.relationship_verdict === "strengthens" ? "strengthens" : r.code.relationship_verdict === "weakens" ? "weakens" : "steady");
+function settledAllPanel(inp: PanelCellInput, ctx: Ctx): PositionPanel {
+  const { h } = ctx;
+  const T9 = SETTLED_ALL_TEXT;
+  const rows = inp.rows;
+  const all = rows.length;
+  const str = rows.filter((r) => relOf(r) === "strengthens");
+  const weak = rows.filter((r) => relOf(r) === "weakens");
+  const segs = [
+    seg("strengthens", T9.strengthens, "you", str, all, h),
+    seg("steady", T9.neutral, "neutral", rows.filter((r) => relOf(r) === "steady"), all, h),
+    seg("weakens", T9.weakens, "away", weak, all, h),
+  ];
+  return {
+    kind: "settled_all",
+    claim: settledAllClaim(segs[0].num, segs[2].num, all > 0 && str.length === all, str.length === 0, weak.length === 0),
+    stackLabel: "How the answer goes",
+    steps: [{ key: "relationship", label: T9.stepLabel, segments: segs }],
+    lines: [],
+  };
+}
+
+/** The four questions' own cells (each with 10+ answers), in the order the Map draws them. */
+const settledKids = (inp: PanelCellInput, ctx: Ctx) => [...ctx.inputs.values()].filter((x) => x.id !== inp.id && !x.pooled && x.id.startsWith("settled:settled:") && x.rows.length >= ARGS_MIN);
+
+/** am61: the step's takeaway and its explanation (it starts selected). */
+function settledAllFinish(inp: PanelCellInput, p: PositionPanel, ctx: Ctx) {
+  const { h } = ctx;
+  const T9 = SETTLED_ALL_TEXT;
+  const s = p.steps.find((x) => x.key === "relationship");
+  if (!s?.segments) return;
+  const t = relationshipTakeaway(segPct(s, "strengthens"), segPct(s, "steady"), segPct(s, "weakens"));
+  s.tagUsual = t.tag;
+  s.tagUsualTone = t.tone;
+  s.tagRank = t.tag;
+  s.tagRankTone = t.tone;
+  const vf = (r: PoolRow) => verdictFind(r, h);
+  const rate = (rs: PoolRow[], n: number) => (n ? rs.length / n : 0);
+  const kids = settledKids(inp, ctx).map((x) => ({ x, str: x.rows.filter((r) => relOf(r) === "strengthens"), weak: x.rows.filter((r) => relOf(r) === "weakens") }));
+  kids.sort((a, b) => rate(a.str, a.x.rows.length) - rate(b.str, b.x.rows.length) || a.x.label.localeCompare(b.x.label));
+  // The weakest questions: those within 10 points of the lowest strengthens share, named only when they stand
+  // apart - some other question is 10 points or more above every one of them (all within 10 points read alike).
+  const lowRate = kids.length ? rate(kids[0].str, kids[0].x.rows.length) : 0;
+  const low = kids.filter((k) => rate(k.str, k.x.rows.length) - lowRate < GAP_MIN);
+  const weakest = kids.length >= 2 && low.length < kids.length ? low.map((k) => k.x.label) : undefined;
+  const sections: PanelDetailSection[] = [];
+  // 0% rows stay (a question that never strengthens it is the fact); every row rests on a question of 10+ answers.
+  if (kids.length)
+    sections.push({
+      title: T9.byQuestion.title,
+      sub: T9.byQuestion.sub,
+      tone: "good",
+      rows: kids.map((k) => ({ label: k.x.label, num: num(k.str.length, k.x.rows.length, "answers", refsOf(k.str, vf)), cell: k.x.id })),
+    });
+  const byVendor = new Map<string, PoolRow[]>();
+  for (const r of inp.rows) {
+    const v = engineFacets(r.model).vendor;
+    byVendor.set(v, [...(byVendor.get(v) ?? []), r]);
+  }
+  const vend = [...byVendor.entries()]
+    .filter(([, rs]) => rs.length >= ARGS_MIN)
+    .map(([label, rs]) => ({ label, rs, hit: rs.filter((r) => relOf(r) === "strengthens") }))
+    .sort((a, b) => rate(a.hit, a.rs.length) - rate(b.hit, b.rs.length) || a.label.localeCompare(b.label));
+  // Only when the companies differ by 15 points or more (the What to look for rule).
+  if (vend.length >= 2 && rate(vend[vend.length - 1].hit, vend[vend.length - 1].rs.length) - rate(vend[0].hit, vend[0].rs.length) >= 0.15)
+    sections.push({ title: T9.vendor.title, sub: T9.vendor.sub, tone: "good", rows: vend.map((v) => ({ label: v.label, num: num(v.hit.length, v.rs.length, `${v.label} answers`, refsOf(v.hit, vf)) })) });
+  if (inp.rows.filter((r) => relOf(r) === "weakens").length >= ROW_MIN && kids.length)
+    sections.push({
+      title: T9.weak.title,
+      sub: T9.weak.sub,
+      tone: "bad",
+      rows: [...kids].sort((a, b) => rate(b.weak, b.x.rows.length) - rate(a.weak, a.x.rows.length) || a.x.label.localeCompare(b.x.label)).map((k) => ({ label: k.x.label, num: num(k.weak.length, k.x.rows.length, "answers", refsOf(k.weak, vf)), cell: k.x.id })),
+    });
+  p.details = { relationship: { ...settledAllDetail(t.tag, weakest), ...(sections.length ? { sections } : {}) } };
+  p.focus = "relationship";
+}
+
 function learningPanel(inp: PanelCellInput, ctx: Ctx): PositionPanel {
   const { h } = ctx;
   const rows = inp.rows;
@@ -3192,6 +3278,7 @@ function finishPanel(inp: PanelCellInput, p: PositionPanel, up: PositionPanel | 
     if (p.details && p.focus && !p.details[p.focus]) p.focus = p.steps.find((s) => !!p.details![s.key])?.key;
     if (p.detailsComp && p.focusComp && !p.detailsComp[p.focusComp]) p.focusComp = p.steps.find((s) => !!p.detailsComp![s.key])?.key;
     if (p.kind === "premium") premiumFinish(inp, p, ctx);
+    if (p.kind === "settled_all") settledAllFinish(inp, p, ctx);
   }
 }
 

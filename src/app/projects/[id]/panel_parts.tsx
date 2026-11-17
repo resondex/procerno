@@ -680,7 +680,7 @@ export function WeighsView({ w }: { w: PanelWeighs }) {
 }
 
 /** am38: a list inside a step explanation - one bar per row, "Open" on rows with a rival panel, then a note. */
-export function DetailSection({ s, onOpen }: { s: PanelDetailSection; onOpen?: (name: string) => void }) {
+export function DetailSection({ s, onOpen, onOpenCell }: { s: PanelDetailSection; onOpen?: (name: string) => void; onOpenCell?: (id: string) => void }) {
   return (
     <div className="mt-3.5">
       <p className={`${T.cap} font-semibold text-ink`}>{s.title}</p>
@@ -688,7 +688,12 @@ export function DetailSection({ s, onOpen }: { s: PanelDetailSection; onOpen?: (
       {s.rows.map((r) => (
         <div key={r.label} className="grid grid-cols-[minmax(0,1fr)_2.75rem] items-center gap-2">
           <NumBar label={r.label} n={r.num} color={toneBar(s.tone)} title={`${s.title} - ${r.label}`} />
-          {r.open && onOpen ? (
+          {r.cell && onOpenCell ? (
+            // am61: a row that is a Map cell opens that cell's card.
+            <button type="button" onClick={() => onOpenCell(r.cell!)} className={`text-right ${T.ctl} text-primary hover:opacity-80`}>
+              Open
+            </button>
+          ) : r.open && onOpen ? (
             <button type="button" onClick={() => onOpen(r.label)} className={`text-right ${T.ctl} text-primary hover:opacity-80`}>
               Open
             </button>
