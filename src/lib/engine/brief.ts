@@ -594,11 +594,13 @@ function leverAbout(lever: string, brand: string): string {
 /** bf26: a finding's move as a verb phrase for the sentences that carry a move inside another (SWOT, the diagnosis):
  * its first clause when it opens with an instruction, else null (the cell's act is used). */
 const IMPERATIVE = /^(Read|Check|Publish|Get|Put|Keep|Decide|Defend|Build|Lead|Ask|Find|See|Answer|Aim|Don't|Give)\b/;
-function actFromMove(text: string): string | null {
+export function actFromMove(text: string): string | null {
   // Only a move that opens with its instruction: a later clause ("...; decide whether to contest that question")
   // leans on the clause before it and reads wrong inside another sentence.
   if (!IMPERATIVE.test(text)) return null;
-  return low1(text.split(/[;:]/)[0].trim().replace(/[.\s]+$/, ""));
+  // bw4: a colon introduces the action's object ("Build on the exception: aim at the buyers ...") - keep it;
+  // only a semicolon's later clause is dropped.
+  return low1(text.split(";")[0].trim().replace(/:\s+/, " - ").replace(/[.\s]+$/, ""));
 }
 
 function movesOf(map: AnalysisMapView, stats: Record<string, MapCellStat>, brand: string, findingAt: (cellId: string) => Insight | undefined): Move[] {
@@ -1401,7 +1403,7 @@ function swotOf(c: Ctx): Swot {
         const ids = insightCells(c, conc);
         t.push({
           lead: "A rival one AI company carries",
-          text: `${conc.names!.vendor}'s assistants pick ${conc.names!.rival} far more often than the others do - they supply ${nums[0]} of its picks while answering ${nums[1]} of the questions - so ${poss(conc.names!.rival!)} lead is larger wherever buyers use them.`,
+          text: `${conc.names!.vendor}'s assistants pick ${conc.names!.rival} far more often than the others do - they supply ${nums[0]} of its picks while answering ${nums[1]} of the questions - so ${conc.names!.rival} is picked more wherever buyers use them.`,
           tip: conc.foot,
           kind: "engine",
           effect: conc.effect,
@@ -2053,9 +2055,9 @@ function worthWords(w: { yes: RateCell; no: RateCell; depends: RateCell }): stri
   if (w.yes.k > 0 && w.yes.k === w.yes.n) return "says it is worth it in every answer";
   if (w.no.k > 0 && w.no.k === w.no.n) return "says it is not worth it in every answer";
   if (w.yes.k === 0 && w.no.k === 0) return "never says it is worth it or not - every answer says it depends";
-  if (w.yes.k === 0) return `never says it is worth it - it says it is not worth it in ${P(w.no)}${rest ? " and that it depends in the rest" : ""}`;
-  if (w.no.k === 0) return `says it is worth it in ${P(w.yes)} and never that it is not${rest ? ", and that it depends in the rest" : ""}`;
-  return `says it is worth it in ${P(w.yes)}, not worth it in ${P(w.no)}${rest ? ", and that it depends in the rest" : ""}`;
+  if (w.yes.k === 0) return `never says it is worth it - it says it is not worth it in ${P(w.no)}${rest ? ` and that it depends in ${P(w.depends)}` : ""}`;
+  if (w.no.k === 0) return `says it is worth it in ${P(w.yes)} and never that it is not${rest ? `, and that it depends in ${P(w.depends)}` : ""}`;
+  return `says it is worth it in ${P(w.yes)}, not worth it in ${P(w.no)}${rest ? `, and that it depends in ${P(w.depends)}` : ""}`;
 }
 
 const LIFT_SIDE = 10; // the map's roomLift floor (picks a side)
@@ -2700,7 +2702,7 @@ export async function computeBrief(data: ViewData, request: BriefRequest = {}): 
 // bf21 (2026-11-10): the plain-wording pass - reads bs13 / am15 (new move names, lever sentences and insight wording quoted in the memos); actOf restates the new levers; the conditions paragraph, the condition card, the SWOT wall and the jobs wall lines say what sends buyers away and "a fixed situation" instead of "routes" / "wall" / "reason". The exemplar's "The conditions that decide it" heading is kept. Numbers unchanged.
 // bf22 (2026-11-12): the reasons harmonization - reads bs17 / am22: the conditions paragraph, the condition card and the away-condition finding name the run's reason THEMES (dt4) where a theme map exists (raw condition groups only without one); the paragraph's tips count statements on a themed side.
 // bf23 (2026-11-13, one counting rule - reads bs21): with reason themes the conditions paragraph counts each side's themes at ANSWER grain over that side's own answer base, and the condition card lists the themes at answer grain, names the lead away theme (quoting its most-stated wording) and gives the away_condition finding's blocker and fixed-situation wordings their own rows on the same base. Keyless output unchanged.
-const BRIEF_VERSION = "bf29"; // bf29 (2026-11-16, Tyler's rulings): "The diagnosis" frame after Now what? (conversion, price, the winning argument, the threat, where to act - its own templates); TOWS and Situation - complication - resolution retired (frames, pairing helpers, the SWOT items' TOWS phrases, the pyramid); moves that share an action are one move naming every place (no back-reference stubs) in every frame; the SWOT fills each quadrant by the kind of fact, leads every item, keeps one fact in one quadrant and adds "What to do"; the funnel's stages take the scoreboard's two-table layout (competitorColumns, one source) and "Customers with a worry told to stay"; Visibility vs conversion reads conversion as recommendations that end as the pick (a level line for the charted brands together), drops class brands, folds rarely named or picked brands into one note and one table line, defines the quadrants under the chart and closes on a so-what; By buying situation sorts nearest first, says why from each buyer's own answers (the map's roomLift), states all three Value sides and closes on nearest / furthest and one move; the Brief-style insight bodies state shares in plain words. // bf28 (2026-11-16): the scoreboard is two tables on the tracker's own Brief - four rows against the average and the most-picked competitor, then the rows about the brand's own questions; the commit rate is a sentence. // bf27 (2026-11-16): the Now what scoreboard carries the average competitor beside the subject's named, recommended, share of picks and picked rows (the competitors the what-to-buy card lists; class brands left out). // bf26 (2026-11-16): one voice - the subject in the third person everywhere (the insights re-run in the Brief's style, the moves' third-person form, the map's levers and claims voiced), buyers as words, never / every at the extremes, the cards' vocabulary, a finding's move on its cell, no move sentence twice in a frame. // bf25 (2026-11-13): the conditions line reads "rarely names one winner for every buyer" (was "a rule, not a winner"). // bf24 (2026-11-13): themed conditions name one destination only when it takes half their answers; the fixed-situation line leads with the finding wording.
+const BRIEF_VERSION = "bf30"; // bf30 (2026-11-17): a move taken from a finding keeps the object after its colon ("build on the exception - aim at the buyers ...") in the SWOT, diagnosis and By buying situation actions. // bf29 (2026-11-16, Tyler's rulings): "The diagnosis" frame after Now what? (conversion, price, the winning argument, the threat, where to act - its own templates); TOWS and Situation - complication - resolution retired (frames, pairing helpers, the SWOT items' TOWS phrases, the pyramid); moves that share an action are one move naming every place (no back-reference stubs) in every frame; the SWOT fills each quadrant by the kind of fact, leads every item, keeps one fact in one quadrant and adds "What to do"; the funnel's stages take the scoreboard's two-table layout (competitorColumns, one source) and "Customers with a worry told to stay"; Visibility vs conversion reads conversion as recommendations that end as the pick (a level line for the charted brands together), drops class brands, folds rarely named or picked brands into one note and one table line, defines the quadrants under the chart and closes on a so-what; By buying situation sorts nearest first, says why from each buyer's own answers (the map's roomLift), states all three Value sides and closes on nearest / furthest and one move; the Brief-style insight bodies state shares in plain words. // bf28 (2026-11-16): the scoreboard is two tables on the tracker's own Brief - four rows against the average and the most-picked competitor, then the rows about the brand's own questions; the commit rate is a sentence. // bf27 (2026-11-16): the Now what scoreboard carries the average competitor beside the subject's named, recommended, share of picks and picked rows (the competitors the what-to-buy card lists; class brands left out). // bf26 (2026-11-16): one voice - the subject in the third person everywhere (the insights re-run in the Brief's style, the moves' third-person form, the map's levers and claims voiced), buyers as words, never / every at the extremes, the cards' vocabulary, a finding's move on its cell, no move sentence twice in a frame. // bf25 (2026-11-13): the conditions line reads "rarely names one winner for every buyer" (was "a rule, not a winner"). // bf24 (2026-11-13): themed conditions name one destination only when it takes half their answers; the fixed-situation line leads with the finding wording.
 
 /**
  * The brief through the cache. cachedView's keying, with the subject as one

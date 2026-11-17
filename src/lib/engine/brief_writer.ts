@@ -39,10 +39,13 @@ import { BRIEF_WRITER_MODEL } from "./models";
 import { METHOD_BANNED, PLAIN_BANNED } from "./plain_words";
 
 // bw2 (2026-11-06): fact lines carry anchor tags the writer places; guard (e).
+// bw4 (2026-11-17): a quadrant memo's later sections stay after the quadrants (tags carry their side; the count and
+// headings must match), each quadrant keeps one item per composed item with a lead, an item's tags and numbers
+// from one composed item; a move keeps its object (prompt rule; the composed action now carries it).
 // bw3 (2026-11-16, bf29): (f) voice - no first-person plural about the brand, no bracketed signed-points
 // shorthand, both also prompt rules; (g) quadrants - a frame drawn as quadrants (SWOT) keeps its four
 // headings in order, each written from its own facts only, and reassembles as the 2x2 cards.
-export const BRIEF_WRITER_VERSION = "bw3";
+export const BRIEF_WRITER_VERSION = "bw4";
 const CACHE_TTL_MS = 100 * 365 * 24 * 3600 * 1000; // forever in practice - the saved-tracker rule (2026-11-09): re-keyed by a version bump or a sheet change, never aged out
 /** Opus 5.x thinks before it writes and a whole-budget think returns empty
  * text (the recorded batch failure mode), so the budget leaves room for both. */
@@ -63,6 +66,10 @@ export interface SheetAnchor extends BriefAnchor {
   token: string;
   /** The quadrant heading the fact sits under, when the memo is drawn as quadrants. */
   quad?: string;
+  /** bw4: the quadrant item the fact belongs to ("<heading>#<n>"). */
+  item?: string;
+  /** bw4: in a quadrant memo, whether the fact's section comes before or after the quadrants. */
+  side?: "before" | "after";
 }
 export interface FactSheet {
   text: string;
@@ -96,11 +103,13 @@ export function factSheet(memo: BriefMemo): FactSheet {
   const out: string[] = [`TITLE: ${memo.title}`];
   const keeps: string[] = [];
   const anchors: SheetAnchor[] = [];
-  for (const s of memo.sections) {
+  const quadAt = memo.sections.findIndex((x) => x.quads?.length);
+  memo.sections.forEach((s, si) => {
     const lines: string[] = [];
     const keep = isKeepSection(s);
+    const side: SheetAnchor["side"] = quadAt < 0 || si === quadAt ? undefined : si < quadAt ? "before" : "after";
     // A keep section is reinserted composed, anchors intact - its lines carry no tags.
-    const tagged = (line: string, cells: BriefAnchor[] | undefined, quad?: string) => {
+    const tagged = (line: string, cells: BriefAnchor[] | undefined, quad?: string, item?: string) => {
       if (keep || !cells?.length) return line;
       const tags: string[] = [];
       const ids = new Set<string>();
@@ -108,7 +117,7 @@ export function factSheet(memo: BriefMemo): FactSheet {
         if (ids.has(c.id)) continue;
         ids.add(c.id);
         const token = anchorToken(anchors.length);
-        anchors.push({ token, id: c.id, label: c.label, ...(quad ? { quad } : {}) });
+        anchors.push({ token, id: c.id, label: c.label, ...(quad ? { quad } : {}), ...(item ? { item } : {}), ...(side ? { side } : {}) });
         tags.push(token);
       }
       return `${line} ${tags.join(" ")}`;
@@ -123,7 +132,8 @@ export function factSheet(memo: BriefMemo): FactSheet {
     for (const q of s.quads ?? []) {
       for (let i = 0; i < 2; i++) {
         lines.push(`### ${q.headers[i]}`);
-        for (const p of q.cells[i]) lines.push(tagged(paraLine(p), p.cells, q.headers[i]));
+        // bw4: one "- " line per item, so the writer sees where each item starts and ends.
+        q.cells[i].forEach((p, n) => lines.push(`- ${tagged(paraLine(p), p.cells, q.headers[i], `${q.headers[i]}#${n}`)}`));
       }
     }
     if (s.viz) {
@@ -137,7 +147,7 @@ export function factSheet(memo: BriefMemo): FactSheet {
         if (it.note) parts.push(it.note);
         lines.push(parts.join("; "));
       }
-      for (const t of [v.xLabel, v.yLabel, v.vlineLabel, v.diagLabel, v.clusterNote, ...(v.legend ?? [])]) {
+      for (const t of [v.xLabel, v.yLabel, v.vlineLabel, v.diagLabel, v.hlineLabel, v.clusterNote, ...(v.legend ?? [])]) {
         if (t) lines.push(t);
       }
     }
@@ -147,7 +157,7 @@ export function factSheet(memo: BriefMemo): FactSheet {
     } else if (lines.length) {
       out.push(lines.join("\n"));
     }
-  }
+  });
   out.push(`FOOTER: ${memo.footer}`);
   return { text: out.join("\n\n"), keeps, anchors };
 }
@@ -323,7 +333,23 @@ export function checkReply(reply: WrittenReply, memo: BriefMemo, sheet: FactShee
       const comp = memo.sections.filter((s) => !isKeepSection(s));
       const cqi = comp.findIndex((s) => s.quads?.length);
       if (at[0] > cqi) parts.push("no section may come between the opening and the quadrant sections");
-      if (written.length - 1 - at[at.length - 1] > comp.length - 1 - cqi) parts.push("no section may follow the last quadrant section");
+      // bw4: the sections after the quadrants (the moves) come after them, as many as composed, under their own headings.
+      const after = comp.slice(cqi + 1);
+      const wAfter = written.slice(at[at.length - 1] + 1);
+      if (wAfter.length !== after.length)
+        parts.push(after.length ? `after the quadrant sections there must be exactly ${after.length === 1 ? "one section" : `${after.length} sections`}${after[0].heading ? `, headed ${after.map((x) => x.heading).join(", ")}` : ""}` : "no section may follow the last quadrant section");
+      else after.forEach((x, i) => {
+        if (x.heading && !sameHeading(wAfter[i].heading, x.heading)) parts.push(`the section after the quadrants must be headed ${x.heading}`);
+      });
+      // Every fact stays on its side of the quadrants: a tag from a section after them never sits before them.
+      written.forEach((sec, wi) => {
+        const side = wi < at[0] ? "before" : wi > at[at.length - 1] ? "after" : "quad";
+        for (const p of sec.paras)
+          for (const t of p.text.match(ANCHOR_TOKEN) ?? []) {
+            const a = sheet.anchors.find((y) => y.token === t);
+            if (a?.side && a.side !== side) parts.push(`${t} belongs ${a.side === "after" ? "after" : "before"} the quadrant sections`);
+          }
+      });
       at.forEach((x, i) => {
         if (!written[x].paras.length) parts.push(`the ${quads[i]} section has no text`);
       });
@@ -344,6 +370,21 @@ export function checkReply(reply: WrittenReply, memo: BriefMemo, sheet: FactShee
         }
       });
       if (moved.size) parts.push(`facts moved between quadrants: ${[...moved].slice(0, 6).join("; ")}`);
+      // bw4: one written item per composed item - same count, a lead on each, an item's tags and numbers from one
+      // composed item.
+      at.forEach((x, i) => {
+        const items = q[Math.floor(i / 2)].cells[i % 2];
+        const wp = written[x].paras;
+        if (wp.length !== items.length) parts.push(`the ${quads[i]} section must have ${items.length} separate item${items.length === 1 ? "" : "s"}, one per item in the sheet`);
+        if (items.every((p) => p.lead) && wp.some((p) => !p.lead)) parts.push(`every ${quads[i]} item needs a short lead`);
+        const itemNums = items.map((p) => numberTokens(paraLine(p)));
+        wp.forEach((p, k) => {
+          const own = new Set((p.text.match(ANCHOR_TOKEN) ?? []).map((t) => sheet.anchors.find((y) => y.token === t)?.item).filter(Boolean));
+          if (own.size > 1) parts.push(`${quads[i]} item ${k + 1} joins facts from more than one item`);
+          const nums = [...numberTokens(`${p.lead ?? ""} ${p.text}`)];
+          if (nums.length && !itemNums.some((set) => nums.every((n) => set.has(n)))) parts.push(`${quads[i]} item ${k + 1} joins numbers from more than one item`);
+        });
+      });
     }
     if (parts.length) v.push({ kind: "quadrants", detail: parts.join("; ") });
   }
@@ -434,6 +475,7 @@ export const BRIEF_WRITER_SYSTEM = [
   "- Never put a signed points figure in parentheses after a fact. State a difference in words inside the sentence.",
   "- Use the plain customer words the sheet uses. Never use internal analysis vocabulary for a contest, a group of buyers, a source or a fixed situation, even where it seems to name the idea more briefly.",
   "- Never swap one measure's name for another's: named, recommended, picked and share of picks are different measures, and each number keeps the measure the sheet gives it.",
+  "- A recommended action keeps its object: say who or what it is aimed at, as the sheet does. Never shorten an action to a bare verb phrase that drops the buyers, the product or the question it is about.",
   "- Keep the memo no longer than the fact sheet.",
   "- Fact lines may end in tags like [[ma]] [[mb]]. When your prose states that line's fact, put its tag at the end of the sentence that states it. Use every tag exactly once, never invent one, and never put one inside a heading or lead.",
   'Reply with ONE JSON object and nothing else: {"sections":[{"heading":"...","paras":[{"lead":"...","text":"..."}]} or {"keep":"<key>"}]}. "heading" and "lead" are optional; "lead" is a short bold opening for a paragraph.',
@@ -443,7 +485,7 @@ export function writerUser(sheet: FactSheet, ctx: { brand: string; product: stri
   let u =
     `The memo is about ${ctx.brand}; the AI is asked which ${ctx.product} to choose.\n` +
     (ctx.quads?.length
-      ? `This memo is drawn as quadrants. Keep exactly ${ctx.quads.length} sections headed ${ctx.quads.join(", ")}, in that order and one after another, after any opening section and with nothing after them. Write each from the facts listed under that heading in the sheet only - move nothing from one quadrant to another, and leave no quadrant empty. Synthesize inside each quadrant; do not build an argument across them.\n`
+      ? `This memo is drawn as quadrants. Keep exactly ${ctx.quads.length} sections headed ${ctx.quads.join(", ")}, in that order and one after another, after any opening section; every section the sheet places after the quadrants stays after them, under its own heading. Write each quadrant from the facts listed under that heading only - move nothing from one quadrant to another. Each quadrant has one paragraph per "- " item in the sheet, in any order: a short "lead" and the item's own sentence or two, with that item's tags and numbers and no other item's.\n`
       : "") +
     `Keep blocks that must each appear exactly once: ${sheet.keeps.length ? sheet.keeps.join(", ") : "none"}.\n` +
     `Tags that must each appear exactly once: ${sheet.anchors.length ? sheet.anchors.map((a) => a.token).join(" ") : "none"}.\n\n` +
