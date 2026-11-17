@@ -157,7 +157,15 @@ export const FINDING_MOVES: Record<string, Entry> = {
     family: "Publish your case",
     text: (n, y) => (y === SECOND ? `Publish your case for buyers who say ${q(n.condition ?? "")}, or decide to leave them to ${n.rival ?? "others"}.` : `Publish ${y.your} case for buyers who say ${q(n.condition ?? "")}, or decide to leave them to ${n.rival ?? "others"}.`),
   },
-  assigned_exception: { family: "Choose where to compete", text: (n, y) => `Build on the exception: aim at the buyers for whom the AI still picks ${y.you} over ${n.rival ?? `${y.its} rivals`}.` },
+  // bf29: the Brief's form names the buyers the AI still says should choose the brand (the AI does not pick it
+  // there); the Overview's second-person sentence is unchanged.
+  assigned_exception: {
+    family: "Choose where to compete",
+    text: (n, y) =>
+      y === SECOND
+        ? `Build on the exception: aim at the buyers for whom the AI still picks ${y.you} over ${n.rival ?? `${y.its} rivals`}.`
+        : `Build on the exception: aim at the buyers the AI still says should choose ${y.you} over ${n.rival ?? `${y.its} rivals`}${n.condition ? `, most often those who say ${q(n.condition)}` : ""}.`,
+  },
 
   leak_picks: {
     family: "Choose where to compete",

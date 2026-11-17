@@ -3,7 +3,7 @@
 /**
  * The Brief pill (2026-11-04, BRIEF_PILL_DESIGN_2026-11-04.md).
  *
- * One fetch per (subject brand, engine set) brings all seven memo frames,
+ * One fetch per (subject brand, engine set) brings all six memo frames (bf29),
  * composed on the server as finished sentences; this file renders the chosen
  * frame VERBATIM - it never re-words or re-computes a number. Frame
  * switching is client-side; a brand or engine change refetches (the engine
@@ -261,8 +261,6 @@ const QUIET = "var(--ink-3)";
 const ACC = "var(--pb-acc, var(--primary))";
 /** The brands set against it: pink when the memo is yours, quiet grey on a rival's memo. */
 const OTHER = "var(--pb-other, var(--ink-3))";
-/** The pyramid's accent marks the complication, not a brand. */
-const PYR_ACC = "var(--primary)";
 
 /** Greedy word wrap at roughly `n` characters per line. */
 function wrap(t: string, n: number): string[] {
@@ -353,6 +351,16 @@ function ScatterViz({ v }: { v: BriefViz }) {
           {v.vlineLabel && (
             <text x={vl.x + 6} y={g.top + 11} fontSize={11.5} fill={QUIET}>
               {v.vlineLabel}
+            </text>
+          )}
+        </>
+      )}
+      {v.hline !== undefined && (
+        <>
+          <line x1={o.x} y1={px(0, v.hline).y} x2={xEnd.x} y2={px(0, v.hline).y} stroke={QUIET} strokeWidth={1} strokeDasharray="4 4" />
+          {v.hlineLabel && (
+            <text x={v.hlineLabelPx?.x ?? xEnd.x} y={v.hlineLabelPx?.y ?? px(0, v.hline).y - 6} fontSize={11.5} fill={QUIET} textAnchor="end">
+              {v.hlineLabel}
             </text>
           )}
         </>
@@ -466,44 +474,6 @@ function PairsViz({ v }: { v: BriefViz }) {
   );
 }
 
-function PyramidViz({ v }: { v: BriefViz }) {
-  const W = 760;
-  const n = v.items.length;
-  const frac = (i: number) => (n <= 1 ? 1 : 0.5 + (0.5 * i) / (n - 1));
-  const PAD = 13;
-  const LH = 18;
-  const blocks = v.items.map((it, i) => {
-    const bw = W * frac(i);
-    const lines = wrap(it.note ?? "", Math.floor((bw - 40) / 7.1)).slice(0, 2);
-    return { it, bw, lines, h: PAD * 2 + LH + lines.length * LH };
-  });
-  const GAP = 6;
-  const H = blocks.reduce((a, b) => a + b.h, 0) + GAP * (n - 1) + 2;
-  const tops = blocks.map((_, i) => 1 + blocks.slice(0, i).reduce((a, b) => a + b.h + GAP, 0));
-  return (
-    <svg viewBox={`0 0 ${W} ${H}`} role="img" aria-label={v.title}>
-      {blocks.map((b, i) => {
-        const top = tops[i];
-        const x = (W - b.bw) / 2;
-        const fill = b.it.accent ? "color-mix(in srgb, var(--primary) 17%, var(--surface))" : "color-mix(in srgb, var(--ink) 5%, var(--surface))";
-        return (
-          <g key={i}>
-            <rect x={x} y={top} width={b.bw} height={b.h} rx={4} style={{ fill }} stroke={b.it.accent ? PYR_ACC : "var(--line)"} strokeOpacity={b.it.accent ? 0.45 : 1} />
-            <text x={W / 2} y={top + PAD + 13} textAnchor="middle" fontSize={13.5} fontWeight={700} fill={b.it.accent ? PYR_ACC : "var(--ink)"}>
-              {b.it.label}
-            </text>
-            {b.lines.map((l, j) => (
-              <text key={j} x={W / 2} y={top + PAD + 13 + LH * (j + 1)} textAnchor="middle" fontSize={13} fill="var(--ink-2)">
-                {l}
-              </text>
-            ))}
-          </g>
-        );
-      })}
-    </svg>
-  );
-}
-
 function Viz({ v }: { v: BriefViz }) {
   return (
     <figure className="pb-viz" style={{ margin: 0 }}>
@@ -524,7 +494,6 @@ function Viz({ v }: { v: BriefViz }) {
       {v.kind === "funnel" && <FunnelViz v={v} />}
       {v.kind === "scatter" && <ScatterViz v={v} />}
       {v.kind === "pairs" && <PairsViz v={v} />}
-      {v.kind === "pyramid" && <PyramidViz v={v} />}
     </figure>
   );
 }
@@ -1264,7 +1233,7 @@ export default function BriefSection({
     <div className="-mt-2 grid gap-4">
       <style>{BRIEF_CSS}</style>
       <div className="pb-sans relative flex flex-wrap items-center gap-x-4 gap-y-2 whitespace-nowrap">
-        {/* bf26: one "View as" menu for the seven frames (it opens on "Now what?"; a remembered choice still wins). */}
+        {/* bf26: one "View as" menu for the frames (it opens on "Now what?"; a remembered choice still wins). */}
         <label className="flex items-center gap-1.5">
           <span className="text-[13px] text-ink-3">View as</span>
           <select className={selectCls} value={current} onChange={(e) => isFrame(e.target.value) && pickFrame(e.target.value)}>

@@ -390,6 +390,8 @@ const yr = () => (STYLE ? possName(STYLE.name) : "your");
 const Yr = () => (STYLE ? possName(STYLE.name) : "Your");
 /** One clause in each voice: the second person as served, the third about the named subject. */
 const yt = (second: string, third: (n: string) => string) => (STYLE ? third(STYLE.name) : second);
+/** bf29, the Brief's style only: a share, "none" at zero ("in none of those"). */
+const pz = (c: RateCell) => (c.k === 0 ? "none" : pct(c));
 /** A buying situation inside a sentence (served: the label as written). */
 const buyer = (label: string) => (STYLE ? buyerPhrase(label) : label);
 /** The cards' word for an agreed worry. */
@@ -1087,7 +1089,10 @@ function argument(s: Summary, ex?: ExampleIndex): Insight | null {
     key: "argument",
     kind: "argument",
     title: `${best.code.charAt(0).toUpperCase()}${best.code.slice(1)} comes up when ${yt("you win", (n) => `${n} wins`)}`,
-    body: `${best.code.charAt(0).toUpperCase()}${best.code.slice(1)} comes up ${pts(best.lift)} ${best.lift >= 0 ? "more" : "less"} often in answers that pick ${yo()} than in answers that pick a rival. Answers that pick a rival bring up ${worst.code} ${worst.lift <= 0 ? "more" : "less"} (${pts(worst.lift)}).`,
+    // bf29: the Brief's style states both shares in plain words (no points shorthand); the served text is unchanged.
+    body: STYLE
+      ? `${best.code.charAt(0).toUpperCase()}${best.code.slice(1)} comes up in ${pz(best.wins)} of the answers that pick ${STYLE.name} and ${pz(best.others)} of those that pick a rival. Answers that pick a rival bring up ${worst.code} in ${pz(worst.others)}, against ${pz(worst.wins)} when ${STYLE.name} is picked.`
+      : `${best.code.charAt(0).toUpperCase()}${best.code.slice(1)} comes up ${pts(best.lift)} ${best.lift >= 0 ? "more" : "less"} often in answers that pick ${yo()} than in answers that pick a rival. Answers that pick a rival bring up ${worst.code} ${worst.lift <= 0 ? "more" : "less"} (${pts(worst.lift)}).`,
     foot: `${best.code}: ${pct(best.wins)} of ${best.wins.n} wins vs ${pct(best.others)} of ${best.others.n} rival picks. ${worst.code}: ${pct(worst.wins)} vs ${pct(worst.others)}.`,
     look: { pill: "why", label: "Why" },
     effect: best.lift - worst.lift,
@@ -1193,7 +1198,9 @@ function funnelDrop(s: Summary, ex?: ExampleIndex): Insight | null {
     key: "funnel",
     kind: "funnel",
     title: `The drop is from ${worst.from} to ${worst.to}`,
-    body: `When buyers ask what to buy, ${yt("you are", (n) => `${n} is`)} ${worst.from} in ${pct(worst.a)} of answers but ${worst.to} in ${worst.to === "picked" ? pctFine(worst.b) : pct(worst.b)} - the biggest step down in the funnel.`,
+    body: STYLE
+      ? `When buyers ask what to buy, ${STYLE.name} is ${worst.from} in ${pct(worst.a)} of answers but ${worst.to} in ${worst.to === "picked" ? pctFine(worst.b) : pct(worst.b)}; no other step loses as many answers.`
+      : `When buyers ask what to buy, you are ${worst.from} in ${pct(worst.a)} of answers but ${worst.to} in ${worst.to === "picked" ? pctFine(worst.b) : pct(worst.b)} - the biggest step down in the funnel.`,
     foot: `Named ${counts(s.target.mentioned)}; recommended ${counts(s.target.recommended)}; picked ${counts(s.target.chosen)}.`,
     look: { pill: "stations", station: "consideration", label: "Stations - Consideration" },
     effect: drop,
@@ -1374,7 +1381,7 @@ function taughtVsWinning(s: Summary, inp: InsightInputs): Insight | null {
   if (untaught) {
     parts.push(
       STYLE
-        ? `${untaught.code} comes up ${pts(untaught.lift)} more often when ${STYLE.name} wins but is not among the five things the AI most often tells buyers to look for`
+        ? `${untaught.code} comes up in ${pz(untaught.wins)} of the answers that pick ${STYLE.name} and ${pz(untaught.others)} of those that pick a rival, but is not among the five things the AI most often tells buyers to look for`
         : `${untaught.code} comes up ${pts(untaught.lift)} more often when you win but is not among the five things the AI most often tells buyers to look for`
     );
     const tr = taughtOf(untaught.code);
@@ -1383,7 +1390,7 @@ function taughtVsWinning(s: Summary, inp: InsightInputs): Insight | null {
   if (losing) {
     parts.push(
       STYLE
-        ? `${untaught ? "it" : "the AI"} tells buyers to look for ${losing.code}, which shows up more when a rival is picked (-${pts(losing.lift)})`
+        ? `${untaught ? "it" : "the AI"} tells buyers to look for ${losing.code}, which comes up in ${pz(losing.others)} of the answers that pick a rival and ${pz(losing.wins)} of those that pick ${STYLE.name}`
         : `${untaught ? "it" : "the AI"} tells buyers to look for ${losing.code}, which shows up more when a rival is picked (-${pts(losing.lift)})`
     );
     foot.push(`${losing.code}: ${pct(losing.wins)} of wins vs ${pct(losing.others)} of rival picks; taught in ${counts(taughtOf(losing.code)!)}.`);
@@ -1721,14 +1728,14 @@ function assignedException(s: Summary, inp: InsightInputs): Insight | null {
     return {
       key: "assigned_exception",
       kind: "condition",
-      title: one ? yt(`You lose to ${e.matchups[0].name} with one exception`, (n) => `${n} loses to ${e.matchups[0].name} with one exception`) : yt("You lose these matchups with one exception", (n) => `${n} loses these matchups with one exception`),
-      body: `When the AI picks ${one ? e.matchups[0].name : "a rival"} over ${s.brand} in a direct matchup, its most common exception is "${qc(shorten(g.label))}" - stated in ${pctShare(sh)} of those answers${where}.${put}${fixed}${open}`,
+      title: one ? yt(`You lose to ${e.matchups[0].name} with one exception`, (n) => `${n} loses to ${e.matchups[0].name} directly, yet the AI still says when to choose it`) : yt("You lose these matchups with one exception", (n) => `The direct matchups ${n} loses still carry a case for it`),
+      body: `When the AI picks ${one ? e.matchups[0].name : "a rival"} over ${s.brand} in a direct matchup, its most common exception is "${qc(shorten(g.label))}" - stated in ${pctShare(sh)} of those answers${where}.${put}${fixed}${STYLE ? "" : open}`,
       foot: `${g.answers} of ${e.lost} answers that pick the rival in the matchups you lose (${e.matchups.map((m) => `${m.name} ${m.lost}`).join(", ")}); ${e.any} of them state any case for you.${e.open ? ` When buyers ask what to buy: ${counts(e.open)}.` : ""} Counts leave out wordings only one answer states.`,
       look: { pill: "why", label: "Why - decision rules" },
       effect: sh,
       // Each bar is a case the AI still gives for you - your side.
       viz: vizOf(e.groups.map((x, i) => W("you", withRefs(insightBar(lbl(x.label, 40), x.answers / e.lost, undefined, i === 0), x.refs)))),
-      names: one ? { rival: e.matchups[0].name } : most ? { rival: most[0] } : {},
+      names: { ...(one ? { rival: e.matchups[0].name } : most ? { rival: most[0] } : {}), ...(STYLE ? { condition: qc(shorten(g.label)) } : {}) },
     };
   }
   const where = one ? "" : most ? `, most of all against ${most[0]}` : "";
@@ -1737,13 +1744,13 @@ function assignedException(s: Summary, inp: InsightInputs): Insight | null {
   return {
     key: "assigned_exception",
     kind: "condition",
-    title: one ? yt(`You lose to ${e.matchups[0].name} with one exception`, (n) => `${n} loses to ${e.matchups[0].name} with one exception`) : yt("You lose these matchups with one exception", (n) => `${n} loses these matchups with one exception`),
-    body: `When the AI picks ${one ? e.matchups[0].name : "a rival"} over ${s.brand} in a direct matchup, its most common exception is "${qc(shorten(g.label))}" - stated in ${pctShare(sh)} of those answers${where}.${fixed}${open}`,
+    title: one ? yt(`You lose to ${e.matchups[0].name} with one exception`, (n) => `${n} loses to ${e.matchups[0].name} directly, yet the AI still says when to choose it`) : yt("You lose these matchups with one exception", (n) => `The direct matchups ${n} loses still carry a case for it`),
+    body: `When the AI picks ${one ? e.matchups[0].name : "a rival"} over ${s.brand} in a direct matchup, its most common exception is "${qc(shorten(g.label))}" - stated in ${pctShare(sh)} of those answers${where}.${fixed}${STYLE ? "" : open}`,
     foot: `${g.answers} of ${e.lost} answers that pick the rival in the matchups you lose (${e.matchups.map((m) => `${m.name} ${m.lost}`).join(", ")}); ${e.any} of them state any case for you.${e.open ? ` Open choice: ${counts(e.open)}.` : ""} Counts are lower bounds: wordings the grouping did not join are left out.`,
     look: { pill: "why", label: "Why - decision rules" },
     effect: sh,
     viz: vizOf(e.groups.map((x, i) => W("you", withRefs(insightBar(lbl(x.label, 40), x.answers / e.lost, undefined, i === 0), x.refs)))),
-    names: one ? { rival: e.matchups[0].name } : most ? { rival: most[0] } : {},
+    names: { ...(one ? { rival: e.matchups[0].name } : most ? { rival: most[0] } : {}), ...(STYLE ? { condition: qc(shorten(g.label)) } : {}) },
   };
 }
 

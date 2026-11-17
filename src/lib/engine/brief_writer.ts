@@ -22,6 +22,8 @@
  *       ([[ma]], [[mb]], ...; letters so guard (a) never sees them), and
  *       every tag appears exactly once in the written paragraphs' text.
  *       Reassembly strips the tags and sets each paragraph's `cells`.
+ *   (f) voice - no first-person plural about the brand, no bracketed signed-points shorthand;
+ *   (g) quadrants - a memo drawn as quadrants keeps its headings, in order, each from its own facts;
  * A failing reply gets ONE steered retry naming the violations; still
  * failing (or no key / a thrown call) returns the composed memo with
  * written:false. Only written:true results cache - a later open retries.
@@ -34,9 +36,13 @@ import { createHash } from "node:crypto";
 import { BRIEF_FRAMES, type BriefAnchor, type BriefMemo, type BriefPara, type BriefSection } from "./brief_types";
 import type { Project, Run } from "../types";
 import { BRIEF_WRITER_MODEL } from "./models";
+import { METHOD_BANNED, PLAIN_BANNED } from "./plain_words";
 
 // bw2 (2026-11-06): fact lines carry anchor tags the writer places; guard (e).
-export const BRIEF_WRITER_VERSION = "bw2";
+// bw3 (2026-11-16, bf29): (f) voice - no first-person plural about the brand, no bracketed signed-points
+// shorthand, both also prompt rules; (g) quadrants - a frame drawn as quadrants (SWOT) keeps its four
+// headings in order, each written from its own facts only, and reassembles as the 2x2 cards.
+export const BRIEF_WRITER_VERSION = "bw3";
 const CACHE_TTL_MS = 100 * 365 * 24 * 3600 * 1000; // forever in practice - the saved-tracker rule (2026-11-09): re-keyed by a version bump or a sheet change, never aged out
 /** Opus 5.x thinks before it writes and a whole-budget think returns empty
  * text (the recorded batch failure mode), so the budget leaves room for both. */
@@ -55,6 +61,8 @@ function paraLine(p: BriefPara): string {
 
 export interface SheetAnchor extends BriefAnchor {
   token: string;
+  /** The quadrant heading the fact sits under, when the memo is drawn as quadrants. */
+  quad?: string;
 }
 export interface FactSheet {
   text: string;
@@ -92,7 +100,7 @@ export function factSheet(memo: BriefMemo): FactSheet {
     const lines: string[] = [];
     const keep = isKeepSection(s);
     // A keep section is reinserted composed, anchors intact - its lines carry no tags.
-    const tagged = (line: string, cells: BriefAnchor[] | undefined) => {
+    const tagged = (line: string, cells: BriefAnchor[] | undefined, quad?: string) => {
       if (keep || !cells?.length) return line;
       const tags: string[] = [];
       const ids = new Set<string>();
@@ -100,7 +108,7 @@ export function factSheet(memo: BriefMemo): FactSheet {
         if (ids.has(c.id)) continue;
         ids.add(c.id);
         const token = anchorToken(anchors.length);
-        anchors.push({ token, id: c.id, label: c.label });
+        anchors.push({ token, id: c.id, label: c.label, ...(quad ? { quad } : {}) });
         tags.push(token);
       }
       return `${line} ${tags.join(" ")}`;
@@ -115,7 +123,7 @@ export function factSheet(memo: BriefMemo): FactSheet {
     for (const q of s.quads ?? []) {
       for (let i = 0; i < 2; i++) {
         lines.push(`### ${q.headers[i]}`);
-        for (const p of q.cells[i]) lines.push(tagged(paraLine(p), p.cells));
+        for (const p of q.cells[i]) lines.push(tagged(paraLine(p), p.cells, q.headers[i]));
       }
     }
     if (s.viz) {
@@ -172,7 +180,20 @@ export const BANNED: { name: string; re: RegExp }[] = [
   { name: "x of y count", re: /\d+ of \d+/ },
 ];
 
-export type Violation = { kind: "numbers" | "vocabulary" | "keeps" | "length" | "anchors" | "shape"; detail: string };
+export type Violation = { kind: "numbers" | "vocabulary" | "keeps" | "length" | "anchors" | "shape" | "voice" | "quadrants"; detail: string };
+
+/** (f) First-person plural about the brand, outside quoted wording (a quoted buyer may say "we"). */
+const FIRST_PLURAL = /\b(?:[Ww]e|[Oo]ur|[Oo]urs|[Oo]urselves|us|Us)\b/;
+/** (f) The bracketed signed-points shorthand: a plus or minus figure in points inside parentheses. */
+const SIGNED_POINTS = /\(\s*[+\-\u2212]\s*\d+(?:\.\d+)?\s*(?:points?|pts?)\b[^)]*\)/i;
+const outsideQuotes = (t: string) => t.replace(/"[^"]*"|\u201c[^\u201d]*\u201d/g, " ");
+
+/** The quadrant headings of a memo drawn as quadrants, in reading order (Strengths, Weaknesses, ...); [] otherwise. */
+export function quadHeadings(memo: BriefMemo): string[] {
+  const q = memo.sections.find((s) => s.quads?.length);
+  return q ? q.quads!.flatMap((x) => [x.headers[0], x.headers[1]]) : [];
+}
+const sameHeading = (a: string | undefined, b: string) => !!a && a.trim().replace(/[.:]$/, "").toLowerCase() === b.trim().toLowerCase();
 
 function writtenStrings(reply: WrittenReply): string[] {
   const out: string[] = [];
@@ -217,7 +238,7 @@ export function parseReply(raw: unknown): WrittenReply | null {
   return out.length ? { sections: out } : null;
 }
 
-/** Every violation of guards (a)-(e), in that order. */
+/** Every violation of guards (a)-(g), in that order. */
 export function checkReply(reply: WrittenReply, memo: BriefMemo, sheet: FactSheet): Violation[] {
   const v: Violation[] = [];
   const strings = writtenStrings(reply);
@@ -229,6 +250,11 @@ export function checkReply(reply: WrittenReply, memo: BriefMemo, sheet: FactShee
   // (b) vocabulary
   const hits = new Set<string>();
   for (const s of strings) for (const b of BANNED) if (b.re.test(s)) hits.add(b.name);
+  // bf29: the retired customer vocabulary (the map harness's own list), outside quoted wording.
+  // Everyday words on those lists ("reason", "cell", "decided", "lift", "routes") are left to the writer:
+  // banning them rejected ordinary prose and sent the memo back to the composed version.
+  const EVERYDAY = new Set(["reason", "cell", "decided", "lift", "routes"]);
+  for (const s of strings) for (const [name, re] of [...PLAIN_BANNED, ...METHOD_BANNED]) if (!EVERYDAY.has(name) && re.test(outsideQuotes(s))) hits.add(name);
   if (strings.some((s) => s.includes("[[keep"))) hits.add("keep token inside text");
   if (hits.size) v.push({ kind: "vocabulary", detail: `banned wording: ${[...hits].join(", ")}` });
   // (c) keeps
@@ -274,6 +300,53 @@ export function checkReply(reply: WrittenReply, memo: BriefMemo, sheet: FactShee
     if (misplaced) parts.push("tags inside a heading or lead - put each at the end of the sentence that states its fact");
     if (parts.length) v.push({ kind: "anchors", detail: parts.join("; ") });
   }
+  // (f) voice
+  {
+    const found = new Set<string>();
+    for (const t of strings) {
+      const o = outsideQuotes(t);
+      if (FIRST_PLURAL.test(o)) found.add("first-person plural (we / our / us) - write about the brand by name in the third person");
+      if (SIGNED_POINTS.test(t)) found.add("a signed points figure in parentheses - state the difference in words inside the sentence");
+    }
+    if (found.size) v.push({ kind: "voice", detail: [...found].join("; ") });
+  }
+  // (g) quadrants
+  const quads = quadHeadings(memo);
+  if (quads.length) {
+    const parts: string[] = [];
+    const written = reply.sections.filter((s): s is { heading?: string; paras: BriefPara[] } => !("keep" in s));
+    const at = quads.map((h) => written.findIndex((s) => sameHeading(s.heading, h)));
+    const counts = quads.map((h) => written.filter((s) => sameHeading(s.heading, h)).length);
+    if (counts.some((n) => n !== 1)) parts.push(`the sections headed ${quads.join(", ")} must each appear exactly once`);
+    else {
+      if (at.some((x, i) => i > 0 && x !== at[i - 1] + 1)) parts.push(`the sections headed ${quads.join(", ")} must come in that order, one after another`);
+      const comp = memo.sections.filter((s) => !isKeepSection(s));
+      const cqi = comp.findIndex((s) => s.quads?.length);
+      if (at[0] > cqi) parts.push("no section may come between the opening and the quadrant sections");
+      if (written.length - 1 - at[at.length - 1] > comp.length - 1 - cqi) parts.push("no section may follow the last quadrant section");
+      at.forEach((x, i) => {
+        if (!written[x].paras.length) parts.push(`the ${quads[i]} section has no text`);
+      });
+      // Nothing moves between quadrants: each tag and each number stays under its own heading.
+      const q = memo.sections.find((s) => s.quads?.length)!.quads!;
+      const sheetNums = quads.map((_, i) => {
+        const cell = q[Math.floor(i / 2)].cells[i % 2];
+        return numberTokens(cell.map((p) => paraLine(p)).join(" "));
+      });
+      const moved = new Set<string>();
+      at.forEach((x, i) => {
+        for (const p of written[x].paras) {
+          for (const t of p.text.match(ANCHOR_TOKEN) ?? []) {
+            const a = sheet.anchors.find((y) => y.token === t);
+            if (a?.quad && !sameHeading(quads[i], a.quad)) moved.add(`${t} belongs under ${a.quad}`);
+          }
+          for (const n of numberTokens(`${p.lead ?? ""} ${p.text}`)) if (!sheetNums[i].has(n)) moved.add(`${n} is not a ${quads[i]} fact`);
+        }
+      });
+      if (moved.size) parts.push(`facts moved between quadrants: ${[...moved].slice(0, 6).join("; ")}`);
+    }
+    if (parts.length) v.push({ kind: "quadrants", detail: parts.join("; ") });
+  }
   if (!strings.length) v.push({ kind: "shape", detail: "no written text" });
   return v;
 }
@@ -294,14 +367,32 @@ export function reassemble(reply: WrittenReply, memo: BriefMemo, anchors: SheetA
     return out;
   };
   const sections: BriefSection[] = [];
+  // (g) A quadrant memo: its quadrant sections fold back into the composed section's 2x2 shape.
+  const quads = quadHeadings(memo);
+  const quadSec = memo.sections.find((s) => s.quads?.length);
+  const quadParas = new Map<string, BriefPara[]>();
   reply.sections.forEach((s, i) => {
     if ("keep" in s) {
       const orig = byKey.get(s.keep);
       if (orig) sections.push(orig);
       return;
     }
+    const qh = quads.find((h) => sameHeading(s.heading, h));
+    if (qh && quadSec) {
+      if (!quadParas.size) sections.push({ key: quadSec.key, quads: [] });
+      quadParas.set(qh, s.paras.map(paraOf));
+      return;
+    }
     sections.push({ key: `w${i}`, ...(s.heading ? { heading: stripAnchors(s.heading) } : {}), paras: s.paras.map(paraOf) });
   });
+  if (quadSec && quadParas.size) {
+    const target = sections.find((x) => x.key === quadSec.key && x.quads);
+    if (target)
+      target.quads = quadSec.quads!.map((q) => ({
+        headers: q.headers,
+        cells: [quadParas.get(q.headers[0]) ?? [], quadParas.get(q.headers[1]) ?? []] as [BriefPara[], BriefPara[]],
+      }));
+  }
   return { frame: memo.frame, title: memo.title, sections, footer: memo.footer };
 }
 
@@ -339,14 +430,21 @@ export const BRIEF_WRITER_SYSTEM = [
   "- The sheet marks charts and tables as [[keep:<key>]] blocks. Each keep key must appear exactly once in your reply, as its own entry, placed where that chart or table belongs in your argument. Never write the token inside text, and never restate a whole table in prose - refer to what it shows.",
   "- No research-method vocabulary: describe what the AI does and what buyers hear, never how it was measured.",
   "- Use \" - \" (space, hyphen, space) for a dash; never an em dash.",
+  "- Write about the brand by its name, in the third person. Never write \"we\", \"our\", \"ours\" or \"us\" about the brand; the memo's reader is not its narrator.",
+  "- Never put a signed points figure in parentheses after a fact. State a difference in words inside the sentence.",
+  "- Use the plain customer words the sheet uses. Never use internal analysis vocabulary for a contest, a group of buyers, a source or a fixed situation, even where it seems to name the idea more briefly.",
+  "- Never swap one measure's name for another's: named, recommended, picked and share of picks are different measures, and each number keeps the measure the sheet gives it.",
   "- Keep the memo no longer than the fact sheet.",
   "- Fact lines may end in tags like [[ma]] [[mb]]. When your prose states that line's fact, put its tag at the end of the sentence that states it. Use every tag exactly once, never invent one, and never put one inside a heading or lead.",
   'Reply with ONE JSON object and nothing else: {"sections":[{"heading":"...","paras":[{"lead":"...","text":"..."}]} or {"keep":"<key>"}]}. "heading" and "lead" are optional; "lead" is a short bold opening for a paragraph.',
 ].join("\n");
 
-export function writerUser(sheet: FactSheet, ctx: { brand: string; product: string }, steer?: string): string {
+export function writerUser(sheet: FactSheet, ctx: { brand: string; product: string; quads?: string[] }, steer?: string): string {
   let u =
     `The memo is about ${ctx.brand}; the AI is asked which ${ctx.product} to choose.\n` +
+    (ctx.quads?.length
+      ? `This memo is drawn as quadrants. Keep exactly ${ctx.quads.length} sections headed ${ctx.quads.join(", ")}, in that order and one after another, after any opening section and with nothing after them. Write each from the facts listed under that heading in the sheet only - move nothing from one quadrant to another, and leave no quadrant empty. Synthesize inside each quadrant; do not build an argument across them.\n`
+      : "") +
     `Keep blocks that must each appear exactly once: ${sheet.keeps.length ? sheet.keeps.join(", ") : "none"}.\n` +
     `Tags that must each appear exactly once: ${sheet.anchors.length ? sheet.anchors.map((a) => a.token).join(" ") : "none"}.\n\n` +
     `FACT SHEET\n\n${sheet.text}`;
@@ -398,7 +496,7 @@ export async function writeWith(
   for (let attempt = 0; attempt < 2; attempt++) {
     let text: string;
     try {
-      text = await call(BRIEF_WRITER_SYSTEM, writerUser(sheet, ctx, steer));
+      text = await call(BRIEF_WRITER_SYSTEM, writerUser(sheet, { ...ctx, quads: quadHeadings(memo) }, steer));
     } catch {
       return { memo, written: false, reason: "unavailable" };
     }
@@ -463,7 +561,7 @@ export async function writeBrief(memo: BriefMemo, ctx: WriteContext): Promise<{ 
 /**
  * The client brand's written memos, written ahead of the first open: the
  * brief payload through the route's own cached path (default subject = the
- * tracker's brand, full engine panel), then each of the seven frames
+ * tracker's brand, full engine panel), then each of the six frames (BRIEF_FRAMES)
  * cache-first. Rivals are never warmed - a rival memo is written only when a
  * reader asks for it. Frames left when the deadline passes count as skipped;
  * a frame is only started before the deadline, so one call may run past it.

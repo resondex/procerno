@@ -58,3 +58,16 @@ export function buyerPhrase(label: string, opts: { start?: boolean } = {}): stri
   const out = readsAsPerson(t) ? `the ${lowerWords(t)}` : `the buyer in "${t}"`;
   return opts.start ? out.charAt(0).toUpperCase() + out.slice(1) : out;
 }
+
+/** bf29: a product name inside a sentence, with "the" when the name ends in an everyday noun and does not
+ * open with the brand's own name ("the Gold Card", "the Business Plan"); a coined name or one led by the brand
+ * reads as written ("Netflix Standard", "Pixel A"). The panels' `article` helper decides a / an only; this is
+ * the definite form the Brief's sentences need. */
+export function theProduct(name: string, brand: string, common: ReadonlySet<string>): string {
+  const t = name.trim();
+  const words = t.split(/\s+/);
+  const last = (words[words.length - 1] ?? "").toLowerCase();
+  if (words.length < 2 || last.length < 3 || !common.has(last)) return t;
+  if (t.toLowerCase().startsWith(brand.trim().toLowerCase()) || words[0].toLowerCase() === brand.trim().split(/\s+/)[0].toLowerCase()) return t;
+  return `the ${t}`;
+}

@@ -12,7 +12,7 @@ import { productNoun } from "@/lib/engine/summary_insights";
  * guard fails. */
 export const maxDuration = 300;
 
-/** The Brief pill (bf1): all seven memo frames for one subject brand,
+/** The Brief pill (bf1): all six (bf29) memo frames for one subject brand,
  * composed as finished sentences. ?subject=<brand> (absent = the tracker's
  * own brand) and ?engines=a,b,c (the Panel lens). { view: null } = no codes
  * source yet. `briefMode` (auth.ts briefModeOf) tells the client which

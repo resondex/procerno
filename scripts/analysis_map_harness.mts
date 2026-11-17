@@ -29,6 +29,7 @@ const { computeAnalysisMap, slimAnalysisMap, cellPanelOf } = await import(proces
 const { computeBrandSummary } = await import(process.cwd() + "/src/lib/engine/brand_summary.ts");
 const { insightInputs, rankedInsights } = await import(process.cwd() + "/src/lib/engine/summary_insights.ts");
 const { computeBrief } = await import(process.cwd() + "/src/lib/engine/brief.ts");
+const { PLAIN_BANNED } = await import(process.cwd() + "/src/lib/engine/plain_words.ts");
 const { computeDossiers } = await import(process.cwd() + "/src/lib/engine/dossiers.ts");
 const { buildResolver } = await import(process.cwd() + "/src/lib/engine/brand_resolve.ts");
 const { isAllowedTag, TAKEAWAY_TAGS, CLOSE_PTS } = await import(process.cwd() + "/src/lib/engine/panel_tags.ts");
@@ -44,14 +45,7 @@ import type { PanelNum, PositionPanel, PanelStep, PanelConditions, AnswerRef, Ri
  * surfaces (the map, the summary's insights and the composed brief) never
  * uses these words; data quoted from answers and the codebook is subtracted
  * first (it is the buyers' and the customer's own wording). */
-const BANNED: [string, RegExp][] = [
-  ["wall", /\bwalls?\b/i],
-  ["routes", /\brout(e|es|ed|ing)\b/i],
-  ["leavers", /\bleavers?\b/i],
-  ["reason", /\breasons?\b/i],
-  ["travels with", /\btravels? with\b/i],
-  ["closest contest", /\bclosest contest\b/i],
-];
+const BANNED: [string, RegExp][] = PLAIN_BANNED;
 /* am17: a finding card's bar labels - no method vocabulary, no counts. */
 const VIZ_BANNED: [string, RegExp][] = [
   ...BANNED,
@@ -379,6 +373,9 @@ for (const project of projects) {
           voiceChecked++;
           if (/\b(you|your|yours)\b/i.test(v)) failures.push(`${project.brand}: brief [${b.subject}] ${path} speaks to "you": ${JSON.stringify(v.slice(0, 160))}`);
           if (!inTable && / 0% of /.test(v)) failures.push(`${project.brand}: brief [${b.subject}] ${path} says " 0% of ": ${JSON.stringify(v.slice(0, 160))}`);
+          // bf29: every at the top too, and no points shorthand in any memo sentence (cards draw signed bars).
+          if (!inTable && path.startsWith("memos") && / 100% of /.test(v)) failures.push(`${project.brand}: brief [${b.subject}] ${path} says " 100% of ": ${JSON.stringify(v.slice(0, 160))}`);
+          if (!inTable && path.startsWith("memos") && /points\)|points more/.test(v)) failures.push(`${project.brand}: brief [${b.subject}] ${path} carries the points shorthand: ${JSON.stringify(v.slice(0, 160))}`);
         } else if (Array.isArray(v)) v.forEach((x, i) => walk(x, `${path}[${i}]`, inTable));
         else if (v && typeof v === "object") for (const [k, x] of Object.entries(v)) if (k !== "tip" && k !== "id") walk(x, `${path}.${k}`, inTable || k === "table" || k === "rows");
       };
@@ -386,6 +383,45 @@ for (const project of projects) {
       walk(b.cards, "cards", false);
     }
     console.log(`BRIEF VOICE: ${voiceChecked} strings checked across ${briefs.length} subjects`);
+    /* bf29: no sentence of 25+ characters appears in two frames of one memo set (facts are shared, sentences never). */
+    let sentChecked = 0;
+    for (const b of briefs) {
+      const where = new Map<string, Set<string>>();
+      for (const [frame, m] of Object.entries(b.memos as Record<string, { sections: { paras?: { text: string }[]; quads?: { cells: [{ text: string }[], { text: string }[]] }[] }[] }>)) {
+        const texts: string[] = [];
+        for (const s of m.sections) {
+          for (const p of s.paras ?? []) texts.push(p.text);
+          for (const q of s.quads ?? []) for (const col of q.cells) for (const p of col) texts.push(p.text);
+        }
+        for (const t of texts)
+          for (const sent of t.split(/(?<=[.!?])\s+(?=[A-Z"])/)) {
+            if (sent.trim().length < 25) continue;
+            sentChecked++;
+            const set = where.get(sent.trim()) ?? new Set<string>();
+            set.add(frame);
+            where.set(sent.trim(), set);
+          }
+      }
+      for (const [sent, fs] of where) if (fs.size > 1) failures.push(`${project.brand}: brief [${b.subject}] repeats a sentence across frames ${[...fs].join(", ")}: ${JSON.stringify(sent.slice(0, 140))}`);
+    }
+    console.log(`BRIEF REPEATS: ${sentChecked} sentences checked across frames`);
+    /* bf29: a move is never only a back-reference, and no two SWOT quadrant items state the same fact (lead + pin). */
+    for (const b of briefs) {
+      for (const [frame, m] of Object.entries(b.memos as Record<string, { sections: { paras?: { lead?: string; text: string }[]; quads?: { cells: [{ lead?: string; text: string; cells?: { id: string }[] }[], { lead?: string; text: string; cells?: { id: string }[] }[]] }[] }[] }>)) {
+        for (const sct of m.sections) {
+          const ps = [...(sct.paras ?? []), ...(sct.quads ?? []).flatMap((q) => [...q.cells[0], ...q.cells[1]])];
+          for (const p of ps) if (/^(As above|Same first move|The same move)\b/.test(p.text.trim())) failures.push(`${project.brand}: brief [${b.subject}] ${frame} prints a back-reference move: ${JSON.stringify(p.text.slice(0, 100))}`);
+          const seen = new Set<string>();
+          for (const q of sct.quads ?? [])
+            for (const p of [...q.cells[0], ...q.cells[1]]) {
+              if (!p.lead) continue;
+              const k = `${p.lead}|${p.cells?.[0]?.id ?? ""}|${p.text}`;
+              if (seen.has(k)) failures.push(`${project.brand}: brief [${b.subject}] ${frame} repeats a quadrant item: ${JSON.stringify(p.text.slice(0, 100))}`);
+              seen.add(k);
+            }
+        }
+      }
+    }
   }
 
   /* -- am31: the per-question-type panels -- */

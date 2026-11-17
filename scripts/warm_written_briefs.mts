@@ -1,6 +1,6 @@
 /**
  * Warm the written Briefs (option B) of named trackers - the client brand's
- * seven frames only, never rivals.
+ * six frames (bf29) only, never rivals.
  *
  * SPENDS MONEY: one Opus writing call per frame not already cached (~6 cents
  * a frame, ~42 cents a tracker), plus context-judge and condition-embedding

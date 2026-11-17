@@ -1,7 +1,7 @@
 /**
  * The Brief pill - shared contract (2026-11-04, BRIEF_PILL_DESIGN_2026-11-04.md).
  *
- * One payload per (run, source, subject brand, engine set) carries ALL seven
+ * One payload per (run, source, subject brand, engine set) carries ALL six (bf29)
  * frames, server-composed as finished lay sentences: the UI renders sections
  * verbatim and never re-words a number. Visible text is percentages-only,
  * jargon-free (the design doc's dictionary); counts live ONLY in `tip`
@@ -13,23 +13,21 @@
 
 export type BriefFrame =
   | "now_what" // default: the verdict, then the moves - each an opening, the move, and its watch metric
-  | "swot" // 2x2 quadrant: strengths / weaknesses / opportunities / threats
-  | "tows" // the action form: S-O / W-O / S-T / W-T strategy pairings
+  | "diagnosis" // bf29: one argument - conversion, price, the winning argument, the threat, where to act
+  | "swot" // 2x2 quadrant: strengths / weaknesses / opportunities / threats (TOWS retired in bf29)
   | "funnel" // Named -> Recommended -> Picked -> Kept
   | "matrix" // visibility vs conversion: every brand placed by named % vs share of firm picks
-  | "jobs" // by buying situation: each room, who wins it, what decides it
-  | "minto"; // situation - complication - resolution
+  | "jobs"; // by buying situation: each room, who wins it, what decides it (Situation - complication - resolution retired in bf29)
 
-export const BRIEF_FRAMES: BriefFrame[] = ["now_what", "swot", "tows", "funnel", "matrix", "jobs", "minto"];
+export const BRIEF_FRAMES: BriefFrame[] = ["now_what", "diagnosis", "swot", "funnel", "matrix", "jobs"];
 
 export const BRIEF_FRAME_LABELS: Record<BriefFrame, string> = {
   now_what: "Now what?",
+  diagnosis: "The diagnosis",
   swot: "SWOT",
-  tows: "TOWS",
   funnel: "The funnel",
   matrix: "Visibility vs conversion",
   jobs: "By buying situation",
-  minto: "Situation - complication - resolution",
 };
 
 /** A link from a fact to the analysis-map cell it was read from (2026-11-06).
@@ -47,7 +45,7 @@ export interface BriefAnchor {
   kind?: AnswerCardKind;
   /** bf15 (2026-11-07, the fact is the link): on a unit whose visible text has
    * no number token, the exact substring of that text this anchor links
-   * (a TOWS play's own item, a move's watch phrase). Absent on numbered
+   * (a move's watch phrase). Absent on numbered
    * units - there the anchor links the numbers its card states. */
   at?: string;
 }
@@ -119,10 +117,10 @@ export interface BriefQuad {
 /** A frame's visual (2026-11-04 mirror of the library exemplars): a small,
  * declarative spec the UI draws as inline SVG - grey-first, one accent, the
  * finding in the title. Numbers are rates in points of 100. */
-export type BriefVizKind = "funnel" | "scatter" | "pairs" | "pyramid";
+export type BriefVizKind = "funnel" | "scatter" | "pairs";
 export interface BriefVizItem {
   label: string;
-  /** funnel: the stage rate; scatter: x (named %); pairs: the subject's share; pyramid: unused. */
+  /** funnel: the stage rate; scatter: x (named %); pairs: the subject's share. */
   a?: number;
   /** scatter: y (share of picks %); pairs: the leader's share. */
   b?: number;
@@ -132,7 +130,7 @@ export interface BriefVizItem {
   accent?: boolean;
   /** scatter: draw the point without its own label (folded into clusterNote). */
   unlabeled?: boolean;
-  /** scatter: label x/y nudge in px. pyramid: the item's one-sentence line. */
+  /** scatter: label x/y nudge in px. */
   dx?: number;
   dy?: number;
   note?: string;
@@ -170,6 +168,10 @@ export interface BriefViz {
   diagLabel?: string;
   /** scatter: the diagLabel's end-anchored baseline point, in viewBox pixels (default: above the line's end). */
   diagLabelPx?: { x: number; y: number };
+  /** scatter (bf29): a horizontal reference at this y (the conversion of the charted brands together), its label and the label's end-anchored baseline point in viewBox pixels. */
+  hline?: number;
+  hlineLabel?: string;
+  hlineLabelPx?: { x: number; y: number };
   /** scatter: one quiet note naming the unlabeled cluster, drawn near it. */
   clusterNote?: string;
   /** scatter: the clusterNote's start-baseline anchor, in BRIEF_SCATTER_GEOM viewBox pixels. */
