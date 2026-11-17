@@ -263,7 +263,7 @@ export function checkReply(reply: WrittenReply, memo: BriefMemo, sheet: FactShee
   // bf29: the retired customer vocabulary (the map harness's own list), outside quoted wording.
   // Everyday words on those lists ("reason", "cell", "decided", "lift", "routes") are left to the writer:
   // banning them rejected ordinary prose and sent the memo back to the composed version.
-  const EVERYDAY = new Set(["reason", "cell", "decided", "lift", "routes"]);
+  const EVERYDAY = new Set(["reason", "cell", "decided", "lift", "routes", "travels with"]);
   for (const s of strings) for (const [name, re] of [...PLAIN_BANNED, ...METHOD_BANNED]) if (!EVERYDAY.has(name) && re.test(outsideQuotes(s))) hits.add(name);
   if (strings.some((s) => s.includes("[[keep"))) hits.add("keep token inside text");
   if (hits.size) v.push({ kind: "vocabulary", detail: `banned wording: ${[...hits].join(", ")}` });
