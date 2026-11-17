@@ -696,3 +696,46 @@ export async function prewarmWrittenBriefs(
   }
   return out;
 }
+
+/**
+ * bf33: a written memo's numbers open what the composed memo's numbers open. The writer copies every number
+ * from the fact sheet (guard (a)) and keeps each fact's anchor tags, so a written paragraph's number takes the
+ * link of the same number in a composed unit that shares one of its anchors (kept-as-drawn sections carry their
+ * composed links already). Applied when a written memo is served, so cached memos need no rewrite.
+ */
+export function relinkWritten(written: BriefMemo, composed: BriefMemo): BriefMemo {
+  type L = NonNullable<BriefPara["links"]>[number];
+  const units: { ids: Set<string>; text: string; links: L[] }[] = [];
+  for (const s of composed.sections) {
+    const add = (p: BriefPara) => p.links?.length && units.push({ ids: new Set((p.cells ?? []).map((c) => c.id)), text: `${p.lead ?? ""} ${p.text}`, links: p.links });
+    s.paras?.forEach(add);
+    s.quads?.forEach((q) => q.cells.forEach((col) => col.forEach(add)));
+  }
+  // A link of a composed unit, by the token's occurrence there.
+  const linkOf = (u: (typeof units)[number], token: string): L | undefined => u.links.find((l) => l.token === token);
+  const para = (p: BriefPara): BriefPara => {
+    if (p.links) return p;
+    const ids = new Set((p.cells ?? []).map((c) => c.id));
+    const pool = units.filter((u) => [...u.ids].some((id) => ids.has(id)));
+    const seen = new Map<string, number>();
+    const links: L[] = [];
+    for (const m of `${p.lead ?? ""} ${p.text}`.matchAll(/\d+(?:\.\d+)?%|[+-]\d+ (?:pts|points)/g)) {
+      const token = m[0];
+      const occurrence = seen.get(token) ?? 0;
+      seen.set(token, occurrence + 1);
+      // Prefer a card that shows it over the Brief's own answer card.
+      const hits = pool.map((u) => linkOf(u, token)).filter((x): x is L => !!x);
+      const l = hits.find((x) => x.dest.kind !== "card") ?? hits[0];
+      if (l) links.push({ ...l, token, occurrence });
+    }
+    return links.length ? { ...p, links } : p;
+  };
+  return {
+    ...written,
+    sections: written.sections.map((s) => ({
+      ...s,
+      ...(s.paras ? { paras: s.paras.map(para) } : {}),
+      ...(s.quads ? { quads: s.quads.map((q) => ({ ...q, cells: [q.cells[0].map(para), q.cells[1].map(para)] as [BriefPara[], BriefPara[]] })) } : {}),
+    })),
+  };
+}

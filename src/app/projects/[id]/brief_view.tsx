@@ -42,6 +42,7 @@ import {
   type AnswerCard,
   type BriefAnchor,
   type BriefFrame,
+  type BriefLink,
   type BriefMemo,
   type BriefPara,
   type BriefSection as BriefSectionT,
@@ -52,6 +53,7 @@ import {
   type BriefRow,
 } from "@/lib/engine/brief_types";
 import { useEngineSet } from "./view_parts";
+import type { PanelReveal } from "@/lib/engine/panel_view";
 import type { BriefMode } from "@/lib/auth";
 
 // ---------- per-project preferences (frame + brand) ----------
@@ -505,8 +507,8 @@ type CardCtxT = {
   /** `${unit}::${anchor id}` of the one open card, or null. */
   open: string | null;
   setOpen: (k: string | null) => void;
-  onOpenCell?: (id: string) => void;
-  onOpenView?: (view: BriefGoView, brand?: string) => void;
+  onOpenCell?: (id: string, reveal?: PanelReveal) => void;
+  onOpenView?: (view: BriefGoView, brand?: string, reveal?: PanelReveal) => void;
 };
 /** The analysis pills an answer card's go link can open (the map is onOpenCell). */
 export type BriefGoView = Exclude<NonNullable<AnswerCard["go"]>["target"], "map">;
@@ -516,36 +518,56 @@ const KIND_LABEL: Record<AnswerCard["kind"], string> = { cell: "On the map", bra
 
 /** Number tokens exactly as the engine reads them (brief.ts NUMBER_TOKEN). */
 const NUMBER_TOKEN = /\d+(?:\.\d+)?%|[+-]\d+ (?:pts|points)/g;
-/** The card's visible text (answer_cards.ts cardText) - never its tips. */
+/** A lift's signed points, as the answer card draws it. */
 const liftPts = (v: number) => `${v >= 0 ? "+" : "-"}${Math.abs(Math.round(v))} points`;
-/** Mirrors the engine's cardText (answer_cards.ts) - lifts included. */
-const cardTextOf = (c: AnswerCard) =>
-  [
-    c.crumb,
-    c.headline,
-    ...c.rows.flatMap((r) => [r.label, r.value]),
-    ...(c.lifts ?? []).flatMap((l) => [l.label, l.wins ?? "", l.others ?? "", liftPts(l.value)]),
-  ].join(" \n ");
+/** bf33: a unit's numbers link where the engine resolved them (BriefPara/BriefRow.links) - the UI never guesses
+ * from a number string. A numberless unit keeps its phrase links (`at`). */
+type LinkPlan = { links: Map<string, BriefLink>; at: BriefAnchor[] };
+const occKey = (token: string, n: number) => `${token}\u0000${n}`;
 
-/** Which anchor each piece of a unit's text links to: number token -> anchor
- * (first anchor in order whose card states it), and for a numberless unit
- * the anchors' `at` phrases. */
-type LinkPlan = { tok: Map<string, BriefAnchor>; at: BriefAnchor[] };
-
-function planLinks(ctx: CardCtxT | null, visible: string, cells?: BriefAnchor[]): LinkPlan | null {
-  if (!ctx || !cells?.length) return null;
+function planLinks(ctx: CardCtxT | null, visible: string, cells?: BriefAnchor[], links?: BriefLink[]): LinkPlan | null {
+  if (!ctx) return null;
   const toks = new Set(visible.match(NUMBER_TOKEN) ?? []);
-  const tok = new Map<string, BriefAnchor>();
-  if (toks.size) {
-    for (const a of cells) {
-      const card = ctx.cards[a.id];
-      if (!card) continue;
-      const stated = new Set(cardTextOf(card).match(NUMBER_TOKEN) ?? []);
-      for (const t of toks) if (stated.has(t) && !tok.has(t)) tok.set(t, a);
-    }
-  }
-  const at = toks.size ? [] : cells.filter((a) => !!a.at && visible.includes(a.at) && (ctx.cards[a.id] || ctx.onOpenCell));
-  return tok.size || at.length ? { tok, at } : null;
+  const byOcc = new Map((links ?? []).map((l) => [occKey(l.token, l.occurrence), l]));
+  const at = toks.size || !cells?.length ? [] : cells.filter((a) => !!a.at && visible.includes(a.at) && (ctx.cards[a.id] || ctx.onOpenCell));
+  return byOcc.size || at.length ? { links: byOcc, at } : null;
+}
+
+/** How many times each number token has appeared before a piece of a unit (lead, body, watch line). */
+function countTokens(...texts: string[]): Map<string, number> {
+  const out = new Map<string, number>();
+  for (const t of texts) for (const m of t.matchAll(NUMBER_TOKEN)) out.set(m[0], (out.get(m[0]) ?? 0) + 1);
+  return out;
+}
+
+/** One linked number (bf33): opens the card that shows it - with only the revealed part changed - or, where the
+ * figure has no home on a card, the Brief's own answer card. */
+function NumLink({ l, unit, children }: { l: BriefLink; unit: string; children: React.ReactNode }) {
+  const ctx = useContext(CardContext)!;
+  const d = l.dest;
+  const key = `${unit}::${d.kind === "card" ? d.id : ""}`;
+  const can = d.kind === "cell" ? !!ctx.onOpenCell : d.kind === "rival" ? !!ctx.onOpenView : !!ctx.cards[d.id];
+  if (!can) return <>{children}</>;
+  const act = () =>
+    d.kind === "cell" ? ctx.onOpenCell!(d.id, l.reveal) : d.kind === "rival" ? ctx.onOpenView!("rivals", d.name, l.reveal) : ctx.setOpen(ctx.open === key ? null : key);
+  return (
+    <span
+      role="button"
+      tabIndex={0}
+      className="pb-fact"
+      aria-label={d.kind === "card" ? "Show the numbers" : d.kind === "rival" ? `Open: ${d.name}` : "Open on the map"}
+      {...(d.kind === "card" ? { "aria-expanded": ctx.open === key } : {})}
+      onClick={act}
+      onKeyDown={(e) => {
+        if (e.key === "Enter" || e.key === " ") {
+          e.preventDefault();
+          act();
+        }
+      }}
+    >
+      {children}
+    </span>
+  );
 }
 
 function FactLink({ a, unit, children }: { a: BriefAnchor; unit: string; children: React.ReactNode }) {
@@ -592,13 +614,16 @@ function FactLink({ a, unit, children }: { a: BriefAnchor; unit: string; childre
 /** One piece of a unit's text with its facts linked. `plan` is shared by
  * every piece of the unit (lead, body, watch line), so a token claimed in the
  * lead links the same card in the body. */
-function Linked({ text, plan, unit }: { text: string; plan: LinkPlan | null; unit: string }) {
+function Linked({ text, plan, unit, before }: { text: string; plan: LinkPlan | null; unit: string; /** token counts in the unit's earlier pieces */ before?: Map<string, number> }) {
   if (!plan || !text) return <>{text}</>;
-  const spans: { s: number; e: number; a: BriefAnchor }[] = [];
-  if (plan.tok.size) {
+  const spans: { s: number; e: number; a?: BriefAnchor; l?: BriefLink }[] = [];
+  if (plan.links.size) {
+    const n = new Map(before ?? []);
     for (const m of text.matchAll(NUMBER_TOKEN)) {
-      const a = plan.tok.get(m[0]);
-      if (a) spans.push({ s: m.index!, e: m.index! + m[0].length, a });
+      const occ = n.get(m[0]) ?? 0;
+      n.set(m[0], occ + 1);
+      const l = plan.links.get(occKey(m[0], occ));
+      if (l) spans.push({ s: m.index!, e: m.index! + m[0].length, l });
     }
   } else {
     for (const a of plan.at) {
@@ -616,9 +641,15 @@ function Linked({ text, plan, unit }: { text: string; plan: LinkPlan | null; uni
   spans.forEach((x, n) => {
     if (x.s > i) out.push(text.slice(i, x.s));
     out.push(
-      <FactLink key={n} a={x.a} unit={unit}>
-        {text.slice(x.s, x.e)}
-      </FactLink>
+      x.l ? (
+        <NumLink key={n} l={x.l} unit={unit}>
+          {text.slice(x.s, x.e)}
+        </NumLink>
+      ) : (
+        <FactLink key={n} a={x.a!} unit={unit}>
+          {text.slice(x.s, x.e)}
+        </FactLink>
+      )
     );
     i = x.e;
   });
@@ -720,26 +751,23 @@ function ParaBody({ p, lead, unit }: { p: BriefPara; lead?: string; unit: string
   const body = w > 0 ? p.text.slice(0, w) : p.text;
   const watch = w > 0 ? p.text.slice(w + 1) : null;
   // The plan reads the served lead (a numbered finding's "1. " carries no token).
-  const plan = planLinks(ctx, `${p.lead ?? ""} ${p.text}`, p.cells);
-  const L = (t: string) => <Linked text={t} plan={plan} unit={unit} />;
+  const plan = planLinks(ctx, `${p.lead ?? ""} ${p.text}`, p.cells, p.links);
+  // The engine counts a token's occurrences over the served lead, then the text (body, then the watch line).
+  const L = (t: string, before?: Map<string, number>) => <Linked text={t} plan={plan} unit={unit} before={before} />;
   return (
     <>
       {l && (/[.?!:"')]$/.test(l.trim()) ? <b>{L(l)} </b> : <b className="pb-runhead">{L(l)}</b>)}
-      {L(body)}
-      {watch && <span className="pb-watch">{L(watch)}</span>}
+      {L(body, countTokens(p.lead ?? ""))}
+      {watch && <span className="pb-watch">{L(watch, countTokens(p.lead ?? "", body))}</span>}
     </>
   );
 }
 
-/** A scoreboard row's value is the link to its row's card. */
-function RowValue({ value, a, unit }: { value: string; a: BriefAnchor; unit: string }) {
+/** A scoreboard row's value: its numbers link where the engine resolved them (bf33). */
+function RowValue({ value, links, unit }: { value: string; links?: BriefLink[]; unit: string }) {
   const ctx = useContext(CardContext);
-  if (!ctx || (!ctx.cards[a.id] && !ctx.onOpenCell)) return <>{value}</>;
-  return (
-    <FactLink a={a} unit={unit}>
-      {value}
-    </FactLink>
-  );
+  const plan = planLinks(ctx, value, undefined, links);
+  return <Linked text={value} plan={plan} unit={unit} />;
 }
 
 function Paras({ paras, base }: { paras: BriefPara[]; base: string }) {
@@ -795,7 +823,7 @@ function Section({ s, lede, wave }: { s: BriefSectionT; lede: boolean; wave: str
             const note = rows.find((x) => x.r.kind === "note");
             const own = rows.filter((x) => !x.r.kind);
             const heads = vs[0]?.r.heads;
-            const val = (r: BriefRow, i: number) => (r.cell ? <RowValue value={r.value} a={r.cell} unit={`${s.key}/rows/${i}`} /> : r.value);
+            const val = (r: BriefRow, i: number) => (r.links?.length ? <RowValue value={r.value} links={r.links} unit={`${s.key}/rows/${i}`} /> : r.value);
             const subj = heads?.subject ?? (wave ? `Wave ${wave}` : "This wave");
             return (
               <>
@@ -918,8 +946,8 @@ function Memo({
   tracker: string;
   note?: string;
   cards: Record<string, AnswerCard>;
-  onOpenCell?: (id: string) => void;
-  onOpenView?: (view: BriefGoView, brand?: string) => void;
+  onOpenCell?: (id: string, reveal?: PanelReveal) => void;
+  onOpenView?: (view: BriefGoView, brand?: string, reveal?: PanelReveal) => void;
 }) {
   // One open answer card per memo at a time (the memo remounts per frame and subject).
   const [open, setOpen] = useState<string | null>(null);
@@ -1092,9 +1120,9 @@ export default function BriefSection({
   runId: string;
   projectId?: string;
   /** Opens a map cell's position on The Map pill; absent on share links (cards still open, their map link hides). */
-  onOpenCell?: (id: string) => void;
+  onOpenCell?: (id: string, reveal?: PanelReveal) => void;
   /** Opens an analysis pill (an answer card's Rivals dossier / Stations / Build a table link); absent on share links. */
-  onOpenView?: (view: BriefGoView, brand?: string) => void;
+  onOpenView?: (view: BriefGoView, brand?: string, reveal?: PanelReveal) => void;
 }) {
   const engines = useEngineSet();
   const fKey = projectId ? frameKey(projectId) : null;

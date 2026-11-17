@@ -186,10 +186,14 @@ function CodesResults({
               key={k("brief")}
               runId={runId}
               projectId={projectId}
-              onOpenCell={(id) => openPanel({ kind: "cell", id })}
-              onOpenView={(v, brand) => {
+              // bf33: a Brief number opens its card with only the revealed part changed; a rival's own card inside
+              // a cell opens as that rival in the cell.
+              onOpenCell={(id, reveal) =>
+                reveal?.rival ? openPanel({ kind: "rival", name: reveal.rival, cell: id }) : openPanel({ kind: "cell", id, ...(reveal ? { reveal } : {}) })
+              }
+              onOpenView={(v, brand, reveal) => {
                 if (v === "rivals" && brand) {
-                  openPanel({ kind: "rival", name: brand });
+                  openPanel({ kind: "rival", name: brand, ...(reveal ? { reveal } : {}) });
                   return;
                 }
                 if (v === "journey") {

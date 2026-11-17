@@ -1,8 +1,8 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
-import type { CellPanelPayload, PanelKind, PanelRival, PanelStep, PanelStepKey, Position, PositionPanel, RivalAcross, RivalAcrossStep, RivalStepDetail, PanelStepDetail, PanelTone } from "@/lib/engine/analysis_types";
+import type { CellPanelPayload, PanelRival, PanelStep, PanelStepKey, Position, PositionPanel, RivalAcross, RivalAcrossStep, RivalStepDetail, PanelStepDetail, PanelTone } from "@/lib/engine/analysis_types";
 import { MoveBox, None, VCOLOR, VWORD, crumbCls, h2Cls, linkCls, notesOf, softLine, whyLines, type Ctx } from "./analysis_panel";
 import { MatchupDropNote } from "./matchup_action";
 import {
@@ -31,6 +31,7 @@ import {
   useComp,
 } from "./panel_parts";
 import { T } from "./type_scale";
+import { PANEL_ORDER, acrossDefault, competitorsShown, outcomeRowsShown, panelSelection, rivalInCellDefault, type PanelBlockKey, type PanelReveal } from "@/lib/engine/panel_view";
 
 /**
  * The per-question-type panels (am31): one layout per kind, blocks in the
@@ -40,33 +41,10 @@ import { T } from "./type_scale";
  * competitors shown) a block belongs to.
  */
 
-type Block = "stack" | "byproduct" | "detail" | "conditions" | "ends" | "competitors" | "lines" | "weighs" | "table" | "tables";
+type Block = PanelBlockKey;
 
-// am38: "weighs" (what the answer weighs, sized) sits where its line sat - after the lines.
-const ORDER: Record<PanelKind, Block[]> = {
-  buy: ["stack", "detail", "conditions", "competitors", "lines", "weighs"],
-  switching: ["stack", "detail", "conditions", "competitors", "lines", "weighs"],
-  h2h: ["stack", "detail", "conditions", "lines", "weighs"],
-  buyer_worry: ["stack", "detail", "competitors", "lines", "weighs"],
-  customer_worry: ["stack", "detail", "competitors", "lines", "weighs"],
-  // am38: Value's rivals moved into the "where it points" explanation; the by-product table sits right under the steps.
-  value: ["stack", "byproduct", "detail", "competitors", "lines", "weighs"],
-  looking_around: ["stack", "detail", "competitors", "conditions", "lines", "weighs"],
-  problem: ["stack", "detail", "competitors", "lines", "table"],
-  criteria: ["stack", "detail", "table", "lines"],
-  expansion: ["stack", "detail", "conditions", "lines"],
-  business_case: ["stack", "lines", "detail", "table"],
-  popular: ["stack", "detail", "conditions", "competitors", "tables"],
-  learning: ["stack", "detail", "table"],
-  alongside: ["stack", "detail", "conditions"],
-  critic: ["stack", "lines", "detail", "table"],
-  // am59: Premium vs basic - which end, the funnel, the conditions by end, who it names at each end, what each side weighs.
-  premium: ["stack", "detail", "conditions", "ends", "competitors", "weighs"],
-  // am60: Habit - the brands suggested instead live in the "suggests another brand" explanation (the looking-around pattern).
-  habit: ["stack", "detail", "conditions", "lines", "weighs"],
-  // am61: the settled customers' All questions card - the step and its explanation (an index to the four questions).
-  settled_all: ["stack", "detail"],
-};
+// The blocks and their order live in panel_view.ts (shared with the engine's index of what a card shows).
+const ORDER = PANEL_ORDER;
 
 /** Head-to-head panels read the rival's side first, as the matchup is asked. */
 const hasRival = (pp: PositionPanel, name: string) => (pp.rivals ?? []).some((r) => r.name.toLowerCase() === name.toLowerCase());
@@ -130,12 +108,12 @@ function useCellPanel(p: Position, ctx: Ctx): { data?: CellPanelPayload; error?:
 const Loading = () => <p className={`clear-both pt-6 ${T.sec} text-ink-3`}>Loading...</p>;
 
 /** A cell whose panel is not in the served map: loads it, then draws it. */
-export function LazyCellPanel({ p, ctx }: { p: Position; ctx: Ctx }) {
+export function LazyCellPanel({ p, ctx, reveal }: { p: Position; ctx: Ctx; reveal?: PanelReveal }) {
   const { data, error } = useCellPanel(p, ctx);
   if (error) return <None>{error}</None>;
   if (!data) return <Loading />;
   if (!data.panel) return <None>This panel could not load.</None>;
-  return <PositionPanelView p={p} pp={data.panel} usualSteps={data.usualSteps} ctx={ctx} />;
+  return <PositionPanelView p={p} pp={data.panel} usualSteps={data.usualSteps} ctx={ctx} reveal={reveal} />;
 }
 
 /** A rival opened from a cell (panel 11): loads the cell's panel, then draws the rival's. */
@@ -154,22 +132,27 @@ export function hasRivalPanel(p: Position | undefined, name: string): boolean {
   return !!(p?.panel?.rivals?.some((r) => r.name.toLowerCase() === n) || p?.panelStub?.rivals.some((r) => r.name.toLowerCase() === n));
 }
 
-export function PositionPanelView({ p, pp, usualSteps, ctx }: { p: Position; pp: PositionPanel; usualSteps?: PanelStep[]; ctx: Ctx }) {
-  const [compOn] = useComp();
+export function PositionPanelView({ p, pp, usualSteps, ctx, reveal }: { p: Position; pp: PositionPanel; usualSteps?: PanelStep[]; ctx: Ctx; /** Opened from a Brief number: only this part changes, for this open only. */ reveal?: PanelReveal }) {
+  const [compOn, setCompOn] = useComp();
   // am35: every panel opens on its default view (the switch off): you against
   // the average competitor where the steps carry competitor numbers, against
   // your usual on the verdict panels. The switch is the one remembered state.
-  const comp = !!pp.compare && compOn;
+  // bf33: a reveal turns it on for this open only - a local override; the remembered state is never written.
+  const [compOver, setCompOver] = useState<boolean | null>(reveal?.competitors ? true : null);
+  const comp = !!pp.compare && (compOver ?? compOn);
   // Clickable steps: the steps the engine explains in this view. The default
-  // selection is the engine's focus; switching panel or view starts over.
+  // selection is the engine's focus (panel_view.ts); switching panel or view starts over.
   const stepDetails = (comp ? pp.detailsComp : pp.details) ?? {};
-  const selectable = pp.steps.some((s) => !!stepDetails[s.key]);
-  // am37: only a step that explains itself can be selected (or start selected).
-  const focusKey = comp ? pp.focusComp : pp.focus;
-  const firstExplained = pp.steps.find((s) => !!stepDetails[s.key])?.key;
-  const defaultSel = selectable ? (focusKey && stepDetails[focusKey] ? focusKey : firstExplained) : focusKey;
+  const { selectable, defaultSel } = panelSelection(pp, comp);
   const selKey = `${p.cellId}|${comp ? 1 : 0}`;
-  const [picked, setPicked] = useState<{ key: string; step: PanelStepKey } | null>(null);
+  const [picked, setPicked] = useState<{ key: string; step: PanelStepKey } | null>(reveal?.step ? { key: selKey, step: reveal.step as PanelStepKey } : null);
+  // bf33: the revealed part scrolls into view once, on opening.
+  const revealRef = useRef<HTMLDivElement | null>(null);
+  useEffect(() => {
+    if (reveal && revealRef.current) revealRef.current.scrollIntoView({ block: "start", behavior: "smooth" });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  const revealBlock: Block | null = !reveal ? null : reveal.step ? "detail" : reveal.fold === "conditions" ? "conditions" : reveal.fold === "outcomes" ? "detail" : reveal.competitors ? (pp.competitors && competitorsShown(pp, true) ? "competitors" : "stack") : null;
   const sel = picked && picked.key === selKey ? picked.step : defaultSel;
   const selDetail = sel ? stepDetails[sel] : undefined;
   const cell = ctx.cells.get(p.cellId);
@@ -209,13 +192,13 @@ export function PositionPanelView({ p, pp, usualSteps, ctx }: { p: Position; pp:
       ) : null,
     byproduct: pp.byProduct && pp.byProduct.rows.length > 0 ? <TableView table={pp.byProduct} /> : null,
     detail: selDetail ? (
-      <RivalDetail d={selDetail} name="" onOpen={openIfRival} onOpenCell={(id) => ctx.open({ kind: "cell", id })} />
+      <RivalDetail d={selDetail} name="" onOpen={openIfRival} onOpenCell={(id) => ctx.open({ kind: "cell", id })} initialAll={reveal?.fold === "outcomes"} />
     ) : detail && (!selectable || sel === defaultSel) ? (
       <DetailView heading={detail.heading} body={detail.body} />
     ) : null,
-    conditions: pp.conditions ? <CondColumns cond={pp.conditions} comp={comp} /> : null,
+    conditions: pp.conditions ? <CondColumns cond={pp.conditions} comp={comp} initialAll={reveal?.fold === "conditions"} /> : null,
     competitors:
-      pp.competitors && pp.competitors.rows.length > 0 && (!pp.compare || comp) ? (
+      competitorsShown(pp, comp) && pp.competitors ? (
         <BrandRows block={pp.competitors} onOpen={openIfRival} />
       ) : null,
     lines: lines && lines.length > 0 ? <LineRows lines={lines} /> : null,
@@ -245,7 +228,7 @@ export function PositionPanelView({ p, pp, usualSteps, ctx }: { p: Position; pp:
           )}
           <span>{p.where}</span>
         </div>
-        {pp.compare && <CompSwitch />}
+        {pp.compare && <CompSwitch own={compOver !== null ? [compOver, (v) => setCompOver(v)] : [compOn, setCompOn]} />}
       </div>
       <h2 className={h2Cls}>
         <TextView text={pp.claim} title={p.where} />
@@ -263,7 +246,7 @@ export function PositionPanelView({ p, pp, usualSteps, ctx }: { p: Position; pp:
       )}
       <p className={`${T.sec} mt-1.5`}>{selectable ? STEP_HINT : CLICK_HINT}</p>
       {pp.kind === "h2h" && p.cellId !== "fights:h2h:all" && cell?.label && <MatchupDropNote name={cell.label} className="mt-3" />}
-      {ORDER[pp.kind].map((b) => (blocks[b] ? <div key={b}>{blocks[b]}</div> : null))}
+      {ORDER[pp.kind].map((b) => (blocks[b] ? <div key={b} ref={b === revealBlock ? revealRef : undefined}>{blocks[b]}</div> : null))}
       {p.lever && <MoveBox p={p} ctx={ctx} why={whyLines(notes, ctx.cat.plural)} />}
     </>
   );
@@ -276,7 +259,7 @@ const isFunnel = (k: PanelStepKey): k is FunnelKey => k === "named" || k === "re
 
 const cap1 = (t: string) => (t ? t[0].toUpperCase() + t.slice(1) : t);
 
-function RivalDetail({ d, name, onOpen, onOpenCell }: { d: RivalStepDetail | PanelStepDetail; name: string; onOpen?: (name: string) => void; onOpenCell?: (id: string) => void }) {
+function RivalDetail({ d, name, onOpen, onOpenCell, initialAll }: { d: RivalStepDetail | PanelStepDetail; name: string; onOpen?: (name: string) => void; onOpenCell?: (id: string) => void; initialAll?: boolean }) {
   const ol = d.outcomeLabels;
   const cols = "columns" in d ? d.columns : undefined;
   const rivalHead = cols?.rival ?? name;
@@ -285,11 +268,10 @@ function RivalDetail({ d, name, onOpen, onOpenCell }: { d: RivalStepDetail | Pan
   // The outcome table opens on two rows - you and the one brand to read it
   // against (the first listed) - so the comparison is the point; the other
   // brands sit behind "Show all".
-  const [allRows, setAllRows] = useState(false);
-  const outcomesAll = d.outcomes ?? [];
-  const mineOf = (o: (typeof outcomesAll)[number]) => !!o.you || ("usual" in o && !!o.usual);
-  const firstOther = outcomesAll.find((o) => !mineOf(o));
-  const outcomes = allRows ? outcomesAll : outcomesAll.filter((o) => mineOf(o) || o === firstOther);
+  const [allRows, setAllRows] = useState(!!initialAll);
+  const outcomesAll = (d.outcomes ?? []) as NonNullable<PanelStepDetail["outcomes"]>;
+  // panel_view.ts decides which rows show before "Show all" (shared with the engine's index).
+  const { shown: outcomes, folded } = outcomeRowsShown(outcomesAll, allRows);
   const hiddenRows = outcomesAll.length - outcomes.length;
   // The outcome columns this detail carries (am35: never the pick itself - the step bars show it).
   const cols3 = ol ? ([["picked", C_YOU], ["lost", C_USUAL], ["none", C_NONE]] as const).filter(([k]) => !!ol[k]) : [];
@@ -378,7 +360,7 @@ function RivalDetail({ d, name, onOpen, onOpenCell }: { d: RivalStepDetail | Pan
           </tbody>
         </table>
       )}
-      {d.outcomes && ol && (hiddenRows > 0 || allRows) && outcomesAll.length > outcomesAll.filter((o) => mineOf(o) || o === firstOther).length && (
+      {d.outcomes && ol && (hiddenRows > 0 || allRows) && folded > 0 && (
         <button type="button" className={`${linkCls} mt-2 ${T.cap}`} onClick={() => setAllRows(!allRows)}>
           {allRows ? "Show fewer" : `Show all ${outcomesAll.length - 1} competitors`}
         </button>
@@ -395,8 +377,7 @@ function RivalDetail({ d, name, onOpen, onOpenCell }: { d: RivalStepDetail | Pan
 
 export function RivalInCell({ r, p, ctx }: { r: PanelRival; p: Position; ctx: Ctx }) {
   const details = r.details ?? {};
-  const firstWithDetail = r.steps.find((s) => isFunnel(s.key) && details[s.key])?.key;
-  const [sel, setSel] = useState<PanelStepKey | undefined>(r.focus ?? firstWithDetail);
+  const [sel, setSel] = useState<PanelStepKey | undefined>(rivalInCellDefault(r));
   const d = sel && isFunnel(sel) ? details[sel] : undefined;
   const canSelect = Object.keys(details).length > 0;
   return (
@@ -526,7 +507,7 @@ function loadAcross(runId: string, mapQuery: string, name: string): Promise<Riva
 export const hasRivalAcross = (ctx: Ctx, name: string) => (ctx.map.rivalStubs ?? []).some((n) => n.toLowerCase() === name.toLowerCase());
 
 /** The By rival panel: loads the rival's question-by-question read; draws `fallback` when there is none. */
-export function LazyRivalAcross({ name, ctx, fallback }: { name: string; ctx: Ctx; fallback: ReactNode }) {
+export function LazyRivalAcross({ name, ctx, fallback, reveal }: { name: string; ctx: Ctx; fallback: ReactNode; reveal?: PanelReveal }) {
   const mapQuery = ctx.mapQuery ?? "";
   const key = `${ctx.runId}|${mapQuery}|${name.toLowerCase()}`;
   const [state, setState] = useState<{ key: string; data?: RivalAcross | null; error?: string }>({ key });
@@ -545,7 +526,7 @@ export function LazyRivalAcross({ name, ctx, fallback }: { name: string; ctx: Ct
   if (state.key === key && state.error) return <>{fallback}</>;
   if (data === undefined) return <Loading />;
   if (!data) return <>{fallback}</>;
-  return <RivalAcrossView r={data} ctx={ctx} />;
+  return <RivalAcrossView r={data} ctx={ctx} reveal={reveal} />;
 }
 
 // The tokens are written out here, not read from panel_parts: this module can be evaluated first (the two import each other).
@@ -620,8 +601,14 @@ function AcrossTable({ r, sel, onSelect }: { r: RivalAcross; sel?: string; onSel
   );
 }
 
-export function RivalAcrossView({ r, ctx }: { r: RivalAcross; ctx: Ctx }) {
-  const [sel, setSel] = useState<string | undefined>(r.focus ?? r.steps[0]?.key);
+export function RivalAcrossView({ r, ctx, reveal }: { r: RivalAcross; ctx: Ctx; reveal?: PanelReveal }) {
+  // The question it opens on is decided in panel_view.ts; a Brief number may open another (this open only).
+  const [sel, setSel] = useState<string | undefined>(reveal?.step && r.steps.some((x) => x.key === reveal.step) ? reveal.step : acrossDefault(r));
+  const revealRef = useRef<HTMLDivElement | null>(null);
+  useEffect(() => {
+    if (reveal && revealRef.current) revealRef.current.scrollIntoView({ block: "start", behavior: "smooth" });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   const s = r.steps.find((x) => x.key === sel) ?? r.steps[0];
   const cellP = s ? ctx.map.positions[s.cellId] : undefined;
   return (
@@ -639,7 +626,7 @@ export function RivalAcrossView({ r, ctx }: { r: RivalAcross; ctx: Ctx }) {
         <AcrossTable r={r} sel={s?.key} onSelect={setSel} />
       </div>
       {s && (
-        <div className="mt-4 border-t border-line pt-3.5">
+        <div ref={reveal ? revealRef : undefined} className="mt-4 border-t border-line pt-3.5">
           <h3 className={`${T.title} mb-1.5`}>{s.heading}</h3>
           {s.body && s.body.length > 0 && (
             <p className={`${T.body} text-ink-2`}>
@@ -653,7 +640,7 @@ export function RivalAcrossView({ r, ctx }: { r: RivalAcross; ctx: Ctx }) {
               <NumBar key={`${bar.who}:${bar.name}`} label={bar.name} n={bar.num} color={WHO_COLOR[bar.who]} bold={bar.who !== "other"} title={`${s.label} - ${bar.name}`} />
             ))}
           </div>
-          {s.conditions && <CondColumns cond={s.conditions} comp={false} />}
+          {s.conditions && <CondColumns cond={s.conditions} comp={false} initialAll={reveal?.fold === "conditions" && s.key === (reveal.step ?? acrossDefault(r))} />}
           {s.table && s.table.rows.length > 0 && <TableView table={s.table} />}
           {s.fold && s.fold.length > 0 && (
             <p className={`${T.body} mt-2 text-ink-2`}>

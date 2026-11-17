@@ -5,7 +5,7 @@ import { matchKey } from "@/lib/brand_key";
 import { viewRequestParams } from "@/lib/engine/view_data";
 import { computeBriefCached } from "@/lib/engine/brief";
 import { BRIEF_FRAMES, type BriefFrame } from "@/lib/engine/brief_types";
-import { writeBrief } from "@/lib/engine/brief_writer";
+import { writeBrief, relinkWritten } from "@/lib/engine/brief_writer";
 import { productNoun } from "@/lib/engine/summary_insights";
 
 /** A written memo is one streamed Opus call, plus one steered retry when a
@@ -58,5 +58,6 @@ export async function GET(
     product: productNoun(loaded.project.category),
     projectId: loaded.project.id,
   });
-  return NextResponse.json(out);
+  // bf33: the written memo's numbers open what the composed memo's open (cached written memos included).
+  return NextResponse.json(out.written ? { ...out, memo: relinkWritten(out.memo, memo) } : out);
 }

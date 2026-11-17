@@ -37,6 +37,7 @@ import { T } from "./type_scale";
 import { MatchupDropNote, MatchupGap } from "./matchup_action";
 import { LazyCellPanel, LazyRival, LazyRivalAcross, PositionPanelView, hasRivalAcross, hasRivalPanel } from "./panels_v2";
 import { CompProvider } from "./panel_parts";
+import type { PanelReveal } from "@/lib/engine/panel_view";
 
 /**
  * The one slide-over (2026-11-10, the ratified analysis redesign -
@@ -664,9 +665,10 @@ const rowLink = "flex w-full justify-between gap-3 border-b border-line py-2.5 t
 
 // ---------- the contest panel ----------
 
+/** `reveal` (bf33): opened from a Brief number - only that part of the card changes, for this open only. */
 export type PanelView =
-  | { kind: "cell"; id: string }
-  | { kind: "rival"; name: string; cell?: string | null; from?: string | null };
+  | { kind: "cell"; id: string; reveal?: PanelReveal }
+  | { kind: "rival"; name: string; cell?: string | null; from?: string | null; reveal?: PanelReveal };
 
 export interface Ctx {
   runId: string;
@@ -1762,9 +1764,9 @@ export function SlideOver({ view, ctx }: { view: PanelView; ctx: Ctx }) {
     // am31: a cell the engine built a per-question-type panel for draws it; every other cell keeps today's panel.
     // The served map carries only a stub (panelStub); the body loads when the slide-over opens.
     body = p.panel ? (
-      <PositionPanelView key={p.cellId} p={p} pp={p.panel} usualSteps={p.panel.usualCellId ? ctx.map.positions[p.panel.usualCellId]?.panel?.steps : undefined} ctx={ctx} />
+      <PositionPanelView key={`${p.cellId}|${JSON.stringify(view.reveal ?? null)}`} p={p} pp={p.panel} usualSteps={p.panel.usualCellId ? ctx.map.positions[p.panel.usualCellId]?.panel?.steps : undefined} ctx={ctx} reveal={view.reveal} />
     ) : p.panelStub ? (
-      <LazyCellPanel key={p.cellId} p={p} ctx={ctx} />
+      <LazyCellPanel key={`${p.cellId}|${JSON.stringify(view.reveal ?? null)}`} p={p} ctx={ctx} reveal={view.reveal} />
     ) : (
       <ContestPanel key={p.cellId} p={p} ctx={ctx} />
     );
@@ -1780,9 +1782,10 @@ export function SlideOver({ view, ctx }: { view: PanelView; ctx: Ctx }) {
     else if (hasRivalAcross(ctx, view.name))
       body = (
         <LazyRivalAcross
-          key={`${view.name}|across`}
+          key={`${view.name}|across|${JSON.stringify(view.reveal ?? null)}`}
           name={view.name}
           ctx={ctx}
+          reveal={view.reveal}
           fallback={d ? <RivalAll key={`${d.key}|${view.from ?? ""}`} d={d} from={view.from} ctx={ctx} /> : <None>Nothing to show for {view.name} here.</None>}
         />
       );

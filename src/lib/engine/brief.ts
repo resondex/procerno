@@ -10,6 +10,7 @@ import { CONTEXT_JUDGE_MODEL, CONTEXT_JUDGE_VERSION } from "./context_judge";
 import { awaySpecifics, destOf, destPhrase, pctFine, rankedInsights, type Insight, type InsightInputs } from "./summary_insights";
 import { findingMove } from "./finding_moves";
 import { buyerPhrase, theProduct } from "./brief_words";
+import { linkResolver, numberContext, type LinkResolver } from "./brief_links";
 import { COMMON_WORDS } from "./everyday_words";
 import { condLabel } from "./panel_text";
 import { isDefaultCondition } from "./condition_groups";
@@ -22,6 +23,7 @@ import {
   BRIEF_FRAME_LABELS,
   type AnswerCard,
   type BriefAnchor,
+  type BriefLink,
   type BriefFrame,
   type BriefMemo,
   type BriefPara,
@@ -115,7 +117,8 @@ function brandGo(c: Ctx, key: string): NonNullable<AnswerCard["go"]> {
     return c.map.positions[OPEN_ALL] ? { label: "Open the open-questions contest on the map", target: "map", cellId: OPEN_ALL } : BUILD_A_TABLE;
   }
   const b = c.summary.brands.find((x) => x.key === key);
-  return b && hasDossier(c.summary, key) ? { label: `Open the ${b.name} dossier`, target: "rivals", brand: key } : BUILD_A_TABLE;
+  // bf33: the rival's NAME - the panel opener and the By rival card match names (a key opened the old dossier).
+  return b && hasDossier(c.summary, key) ? { label: `Open the ${b.name} dossier`, target: "rivals", brand: b.name } : BUILD_A_TABLE;
 }
 
 /** A pin for the cell or card, or nothing when neither exists. `label` is the
@@ -2697,8 +2700,10 @@ export async function computeBrief(data: ViewData, request: BriefRequest = {}): 
 
   ctx.findings = findingsOf(ctx);
   const sw = swotOf(ctx);
+  // bf33: every number opens the card that shows it beside its subject (brief_links.ts), resolved here.
+  const resolver = linkResolver(map, linkTerms(ctx), [...(ctx.summary.reasonLift ?? []).map((l) => l.code), ...(ctx.inputs.taught ?? []).map((t) => t.code)]);
   const memo = (frame: BriefFrame, sections: BriefSection[]): BriefMemo =>
-    citePins({ frame, title: `${name} - ${BRIEF_FRAME_LABELS[frame]} - wave ${ctx.wave}`, sections: voiceMemo(sections, ctx), footer: ctx.footer }, ctx.cards);
+    linkMemo(citePins({ frame, title: `${name} - ${BRIEF_FRAME_LABELS[frame]} - wave ${ctx.wave}`, sections: voiceMemo(sections, ctx), footer: ctx.footer }, ctx.cards), ctx, resolver);
   const memos: Record<BriefFrame, BriefMemo> = {
     now_what: memo("now_what", nowWhat(ctx)),
     diagnosis: memo("diagnosis", diagnosisFrame(ctx)),
@@ -2715,6 +2720,82 @@ export async function computeBrief(data: ViewData, request: BriefRequest = {}): 
       if (card) cards[id] = voiceCard(card, ctx);
     }
   return { subject: name, subjects: subjects.map((b) => (b.key === target.key ? brand : b.name)), memos, engineCount, cards };
+}
+
+/* ------------------------------ bf33: number links ------------------------------ */
+
+/** The subjects a Brief number can be about: every rival, argument, buying situation and worry (never the tracker's own brand). */
+export function linkTerms(c: Ctx): string[] {
+  const out = new Set<string>();
+  for (const b of c.summary.brands) if (b.key !== c.target.key) out.add(b.name);
+  for (const l of c.summary.reasonLift ?? []) out.add(l.code);
+  for (const t of c.inputs.taught ?? []) out.add(t.code);
+  for (const r of c.rooms) out.add(r.room);
+  for (const it of c.data.intents) if (it.concern) out.add(it.concern);
+  for (const r of c.map.rivalPanels ?? []) out.add(r.name);
+  return [...out];
+}
+
+function linkUnit(c: Ctx, R: LinkResolver, text: string, anchors: BriefAnchor[] | undefined, context = ""): BriefLink[] {
+  const out: BriefLink[] = [];
+  const cells: string[] = [];
+  const rivals: string[] = [];
+  for (const a of anchors ?? []) {
+    if (c.map.positions[a.id]) cells.push(a.id);
+    else if (a.id.startsWith("card:brand:")) {
+      const key = a.id.slice("card:brand:".length);
+      if (key === c.target.key) cells.push(OPEN_ALL);
+      else {
+        const b = c.summary.brands.find((x) => x.key === key);
+        if (b) rivals.push(b.name);
+      }
+    }
+  }
+  const seen = new Map<string, number>();
+  for (const m of text.matchAll(NUMBER_TOKEN)) {
+    const token = m[0];
+    const occurrence = seen.get(token) ?? 0;
+    seen.set(token, occurrence + 1);
+    const { local, sentence } = numberContext(R, text, m.index!, m.index! + token.length, context);
+    const hit = R.find(token, local, sentence, { cells, rivals });
+    if (hit) {
+      out.push({ token, occurrence, dest: hit.dest.kind === "cell" ? { kind: "cell", id: hit.dest.id } : { kind: "rival", name: hit.dest.id }, ...(hit.reveal ? { reveal: hit.reveal } : {}) });
+      continue;
+    }
+    // No card shows it beside its subject: the Brief's own answer card, the first pin whose card states it.
+    const card = (anchors ?? []).find((a) => {
+      const cd = c.cards.get(a.id);
+      return cd && briefNumberTokens(cardText(cd)).has(token);
+    });
+    if (card) out.push({ token, occurrence, dest: { kind: "card", id: card.id } });
+  }
+  return out;
+}
+
+function linkMemo(memo: BriefMemo, c: Ctx, R: LinkResolver): BriefMemo {
+  const para = (p: BriefPara): BriefPara => {
+    // A paragraph's lead is its subject when it is a buying situation's name (By buying situation).
+    const room = p.lead && c.rooms.find((r) => norm(r.room) === norm(p.lead!.replace(/[.]$/, "")));
+    const links = linkUnit(c, R, `${p.lead ?? ""} ${p.text}`, p.cells, room ? room.room : "");
+    return links.length ? { ...p, links } : p;
+  };
+  return {
+    ...memo,
+    sections: memo.sections.map((s) => ({
+      ...s,
+      ...(s.paras ? { paras: s.paras.map(para) } : {}),
+      ...(s.quads ? { quads: s.quads.map((q) => ({ ...q, cells: [q.cells[0].map(para), q.cells[1].map(para)] as [BriefPara[], BriefPara[]] })) } : {}),
+      ...(s.rows
+        ? {
+            rows: s.rows.map((r) => {
+              if (!r.cell || r.kind === "note") return r;
+              const links = linkUnit(c, R, r.value, [r.cell], r.label);
+              return links.length ? { ...r, links } : r;
+            }),
+          }
+        : {}),
+    })),
+  };
 }
 
 /* ----------------------------------- cache --------------------------------- */
@@ -2742,7 +2823,7 @@ export async function computeBrief(data: ViewData, request: BriefRequest = {}): 
 // bf21 (2026-11-10): the plain-wording pass - reads bs13 / am15 (new move names, lever sentences and insight wording quoted in the memos); actOf restates the new levers; the conditions paragraph, the condition card, the SWOT wall and the jobs wall lines say what sends buyers away and "a fixed situation" instead of "routes" / "wall" / "reason". The exemplar's "The conditions that decide it" heading is kept. Numbers unchanged.
 // bf22 (2026-11-12): the reasons harmonization - reads bs17 / am22: the conditions paragraph, the condition card and the away-condition finding name the run's reason THEMES (dt4) where a theme map exists (raw condition groups only without one); the paragraph's tips count statements on a themed side.
 // bf23 (2026-11-13, one counting rule - reads bs21): with reason themes the conditions paragraph counts each side's themes at ANSWER grain over that side's own answer base, and the condition card lists the themes at answer grain, names the lead away theme (quoting its most-stated wording) and gives the away_condition finding's blocker and fixed-situation wordings their own rows on the same base. Keyless output unchanged.
-const BRIEF_VERSION = "bf32"; // bf32 (2026-11-17): the scoreboard's average-competitor share of picks and picked figures are the What to buy card's own. // bf31 (2026-11-17): the diagnosis threat section is about the rival its heading names (what sends buyers to it, the widest gap), then "Others who take buyers"; a rival one AI company carries is a threat there, only at the detector bar and 1.5x the questions it answers; no "thinner than it looks"; customers looking around read stay / leave only when it says something; conditions read "Buyers who say ... are most often sent away"; the untaught argument line is plain; fixed-situation moves name the situation; every row type has a place name; a bare fact-check move on a non-contest row is dropped. // bf30 (2026-11-17): a move taken from a finding keeps the object after its colon ("build on the exception - aim at the buyers ...") in the SWOT, diagnosis and By buying situation actions. // bf29 (2026-11-16, Tyler's rulings): "The diagnosis" frame after Now what? (conversion, price, the winning argument, the threat, where to act - its own templates); TOWS and Situation - complication - resolution retired (frames, pairing helpers, the SWOT items' TOWS phrases, the pyramid); moves that share an action are one move naming every place (no back-reference stubs) in every frame; the SWOT fills each quadrant by the kind of fact, leads every item, keeps one fact in one quadrant and adds "What to do"; the funnel's stages take the scoreboard's two-table layout (competitorColumns, one source) and "Customers with a worry told to stay"; Visibility vs conversion reads conversion as recommendations that end as the pick (a level line for the charted brands together), drops class brands, folds rarely named or picked brands into one note and one table line, defines the quadrants under the chart and closes on a so-what; By buying situation sorts nearest first, says why from each buyer's own answers (the map's roomLift), states all three Value sides and closes on nearest / furthest and one move; the Brief-style insight bodies state shares in plain words. // bf28 (2026-11-16): the scoreboard is two tables on the tracker's own Brief - four rows against the average and the most-picked competitor, then the rows about the brand's own questions; the commit rate is a sentence. // bf27 (2026-11-16): the Now what scoreboard carries the average competitor beside the subject's named, recommended, share of picks and picked rows (the competitors the what-to-buy card lists; class brands left out). // bf26 (2026-11-16): one voice - the subject in the third person everywhere (the insights re-run in the Brief's style, the moves' third-person form, the map's levers and claims voiced), buyers as words, never / every at the extremes, the cards' vocabulary, a finding's move on its cell, no move sentence twice in a frame. // bf25 (2026-11-13): the conditions line reads "rarely names one winner for every buyer" (was "a rule, not a winner"). // bf24 (2026-11-13): themed conditions name one destination only when it takes half their answers; the fixed-situation line leads with the finding wording.
+const BRIEF_VERSION = "bf33"; // bf33 (2026-11-17): every number carries its link (BriefPara/BriefRow.links), resolved at compose time against the index of what each card shows (panel_index.ts, brief_links.ts) - the card that shows it beside its subject, with the one interaction that shows it, else the Brief's own answer card; a rival card's onward link names the rival (it passed the dictionary key). // bf32 (2026-11-17): the scoreboard's average-competitor share of picks and picked figures are the What to buy card's own. // bf31 (2026-11-17): the diagnosis threat section is about the rival its heading names (what sends buyers to it, the widest gap), then "Others who take buyers"; a rival one AI company carries is a threat there, only at the detector bar and 1.5x the questions it answers; no "thinner than it looks"; customers looking around read stay / leave only when it says something; conditions read "Buyers who say ... are most often sent away"; the untaught argument line is plain; fixed-situation moves name the situation; every row type has a place name; a bare fact-check move on a non-contest row is dropped. // bf30 (2026-11-17): a move taken from a finding keeps the object after its colon ("build on the exception - aim at the buyers ...") in the SWOT, diagnosis and By buying situation actions. // bf29 (2026-11-16, Tyler's rulings): "The diagnosis" frame after Now what? (conversion, price, the winning argument, the threat, where to act - its own templates); TOWS and Situation - complication - resolution retired (frames, pairing helpers, the SWOT items' TOWS phrases, the pyramid); moves that share an action are one move naming every place (no back-reference stubs) in every frame; the SWOT fills each quadrant by the kind of fact, leads every item, keeps one fact in one quadrant and adds "What to do"; the funnel's stages take the scoreboard's two-table layout (competitorColumns, one source) and "Customers with a worry told to stay"; Visibility vs conversion reads conversion as recommendations that end as the pick (a level line for the charted brands together), drops class brands, folds rarely named or picked brands into one note and one table line, defines the quadrants under the chart and closes on a so-what; By buying situation sorts nearest first, says why from each buyer's own answers (the map's roomLift), states all three Value sides and closes on nearest / furthest and one move; the Brief-style insight bodies state shares in plain words. // bf28 (2026-11-16): the scoreboard is two tables on the tracker's own Brief - four rows against the average and the most-picked competitor, then the rows about the brand's own questions; the commit rate is a sentence. // bf27 (2026-11-16): the Now what scoreboard carries the average competitor beside the subject's named, recommended, share of picks and picked rows (the competitors the what-to-buy card lists; class brands left out). // bf26 (2026-11-16): one voice - the subject in the third person everywhere (the insights re-run in the Brief's style, the moves' third-person form, the map's levers and claims voiced), buyers as words, never / every at the extremes, the cards' vocabulary, a finding's move on its cell, no move sentence twice in a frame. // bf25 (2026-11-13): the conditions line reads "rarely names one winner for every buyer" (was "a rule, not a winner"). // bf24 (2026-11-13): themed conditions name one destination only when it takes half their answers; the fixed-situation line leads with the finding wording.
 
 /**
  * The brief through the cache. cachedView's keying, with the subject as one

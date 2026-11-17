@@ -11,6 +11,8 @@
  * fields, never change or remove these.
  */
 
+import type { PanelReveal } from "./panel_view";
+
 export type BriefFrame =
   | "now_what" // default: the verdict, then the moves - each an opening, the move, and its watch metric
   | "diagnosis" // bf29: one argument - conversion, price, the winning argument, the threat, where to act
@@ -82,6 +84,17 @@ export interface AnswerCard {
   liftSides?: [string, string];
 }
 
+/** bf33 (2026-11-17): where one number in a unit opens - resolved at compose time (brief_links.ts), never guessed
+ * in the UI. `token` is the number as written, `occurrence` its 0-based count among that token's occurrences in
+ * the unit (lead, then text). A cell or rival card opens with only `reveal`'s part changed; "card" opens the
+ * Brief's own answer card (the figure has no home on a card). */
+export interface BriefLink {
+  token: string;
+  occurrence: number;
+  dest: { kind: "cell"; id: string } | { kind: "rival"; name: string } | { kind: "card"; id: string };
+  reveal?: PanelReveal;
+}
+
 /** One scoreboard or table line. `tip` holds the counts (tooltip only). */
 export interface BriefRow {
   label: string;
@@ -97,6 +110,8 @@ export interface BriefRow {
   tip?: string;
   /** The map cell behind the row's number (pin after the value). */
   cell?: BriefAnchor;
+  /** bf33: where each number in the row's value opens. */
+  links?: BriefLink[];
 }
 
 /** One paragraph. `lead` renders bold at the front. `tip` holds counts. */
@@ -106,6 +121,8 @@ export interface BriefPara {
   tip?: string;
   /** One or more map cells behind the paragraph's facts (pins after the text). */
   cells?: BriefAnchor[];
+  /** bf33: where each number in the lead and text opens. */
+  links?: BriefLink[];
 }
 
 /** A 2x2 quadrant pair (one grid row: two titled cells side by side). */

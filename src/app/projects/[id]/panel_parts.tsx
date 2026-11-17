@@ -22,6 +22,7 @@ import type {
 } from "@/lib/engine/analysis_types";
 import { useShowExamples, useWhere } from "./analysis_panel";
 import { T } from "./type_scale";
+import { conditionRowsShown, conditionsFold } from "@/lib/engine/panel_view";
 
 /**
  * The building blocks of the per-question-type panels (am31, the panel build).
@@ -464,7 +465,7 @@ export function DetailView({ heading, body, children, callout }: { heading: stri
 
 // ---------- conditions ----------
 
-const PREVIEW_ROWS = 4;
+// The rows a side shows before "See all" is decided in panel_view.ts (shared with the engine's index of what a card shows).
 
 /** "A", "A or B", "A, B or C". */
 const orList = (xs: string[]) => (xs.length <= 1 ? xs[0] ?? "" : `${xs.slice(0, -1).join(", ")} or ${xs[xs.length - 1]}`);
@@ -554,7 +555,7 @@ function CondCard({ c, side, cond, comp }: { c: PanelCondition; side: "toward" |
 }
 
 function CondColumn({ title, rows, side, cond, comp, color, all }: { title: string; rows: PanelCondition[]; side: "toward" | "away"; cond: PanelConditions; comp: boolean; color: string; all: boolean }) {
-  const shown = all ? rows : rows.slice(0, PREVIEW_ROWS);
+  const shown = conditionRowsShown(rows, all);
   return (
     <div className="min-w-0">
       <h5 className="mb-1.5 text-[12px] font-semibold" style={{ color }}>
@@ -568,9 +569,9 @@ function CondColumn({ title, rows, side, cond, comp, color, all }: { title: stri
 }
 
 /** "When the AI says to choose you, and when another ..." - two columns of condition cards. */
-export function CondColumns({ cond, comp, awayFirst }: { cond: PanelConditions; comp: boolean; awayFirst?: boolean }) {
-  const [all, setAll] = useState(false);
-  const more = cond.toward.length > PREVIEW_ROWS || cond.away.length > PREVIEW_ROWS;
+export function CondColumns({ cond, comp, awayFirst, initialAll }: { cond: PanelConditions; comp: boolean; awayFirst?: boolean; /** Opened from a link to a row behind "See all" (this open only). */ initialAll?: boolean }) {
+  const [all, setAll] = useState(!!initialAll);
+  const more = conditionsFold(cond.toward, cond.away);
   const cols = [
     <CondColumn key="t" title={cond.towardTitle} rows={cond.toward} side="toward" cond={cond} comp={comp} color={C_YOU} all={all} />,
     <CondColumn key="a" title={cond.awayTitle} rows={cond.away} side="away" cond={cond} comp={comp} color={cond.neutralAway ? "var(--ink-2)" : C_AWAY} all={all} />,
