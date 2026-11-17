@@ -31,6 +31,15 @@
  * source check fails on any direct read of a card's condition or weighs objects, the map's per-buyer lift, the old
  * argument lift, or a share printed from a panel row's value - outside the allowed lines it names.
  *
+ * statids8 (names and lists, 2026-11-17): every name the Brief states in a role a card shows - a fixed situation, who
+ * takes the picks there, the condition that sends buyers away and where it sends them, the product a Value question
+ * asked about, the rival a price answer names most, the checklist and a checklist topic that comes up more when another
+ * brand is picked, a matchup's / rivals' customers' / a worry's own name - is read from that card (brief.ts nameOn,
+ * BRIEF_NAME_LOG=1). Each logged name is checked against the card's own object (the card draws it there), and the
+ * source check fails on any read of the old sources for those names (the run's away rollup, the run-wide argument lift,
+ * the Map's per-cell wall and taker fields in a Brief sentence, the Value view's product lines, a matchup's or
+ * rivals' customers' name from the verdict views).
+ *
  * Fixture only, no model calls:  npx tsx scripts/brief_links_harness.mts
  */
 process.env.DATABASE_URL = "";
@@ -42,7 +51,8 @@ const { loadViewData } = await import(process.cwd() + "/src/lib/engine/view_data
 process.env.BRIEF_TRIM_LOG = "1";
 process.env.BRIEF_FIG_LOG = "1";
 process.env.BRIEF_STRICT_FUNNEL = "1";
-const { computeBrief, conditionTerms, TRIMMED_CLAIMS, FIG_LOG, stripFunnel, stripVerdicts } = await import(process.cwd() + "/src/lib/engine/brief.ts");
+process.env.BRIEF_NAME_LOG = "1";
+const { computeBrief, conditionTerms, TRIMMED_CLAIMS, FIG_LOG, NAME_LOG, stripFunnel, stripVerdicts } = await import(process.cwd() + "/src/lib/engine/brief.ts");
 const { buildStatRegistry } = await import(process.cwd() + "/src/lib/engine/stat_registry.ts");
 const fs = await import("node:fs");
 const { sharedAnalysisMap } = await import(process.cwd() + "/src/lib/engine/analysis_map.ts");
@@ -93,12 +103,20 @@ const failures: string[] = [];
   // `legacyRoomCodes` - By buying situation's "when it picks <leader>, the answers most often argue ..."), and the
   // codebook's argument NAMES (argCodes: which weighs rows are arguments - names only, no figure or count).
   const bad5 = /\.weighsComp\b|\.weighs\b|\bpanel\?*\.conditions\b|\.conditions\?*\.(toward|away)\b|\.exception\b|\broomLift\b|\broomCodes\b|\bc\.lift\b|\bcardArgOf\b|\.share\.(value|tip)\b|\binputs\.(conditions|away|taught)\b|\blegacyArgs\b|\blegacyLift\b/;
-  const ok5 = /^\s*(\/\/|\*|\/\*\*)|const sets = \[pp\?\.conditions|c\.legacyArgs\.(conditions|away|taught)\b|c\.legacyLift\.find|legacyLift: (\{|liftOf\()|legacyArgs(: LegacyArgs|,$| \} = stripVerdicts)|legacyArgs: \{ conditions, away, taught \}|type LegacyArgs|const \{ value, doubt, alternatives, conditions, away, taught|^const BRIEF_VERSION|^\s*const argCodes = |legacyRoomCodes(: debug\.roomCodes|\?: NonNullable)/;
+  const ok5 = /^\s*(\/\/|\*|\/\*\*)|const sets = \[pp\?\.conditions|c\.legacyArgs\.(conditions|taught)\b|legacyArgs(: LegacyArgs|,$| \} = stripVerdicts)|legacyArgs: \{ conditions, away, taught \}|type LegacyArgs|const \{ value, doubt, alternatives, conditions, away, taught|^const BRIEF_VERSION|^\s*const argCodes = |legacyRoomCodes(: debug\.roomCodes|\?: NonNullable)/;
   src.split("\n").forEach((l, i) => {
     if (bad5.test(l) && !ok5.test(l)) failures.push(`brief.ts:${i + 1} reads an old-source condition or argument field: ${l.trim().slice(0, 160)}`);
   });
   const oos = src.split("\n").filter((l) => /\.outOfScope\b/.test(l));
-  for (const l of oos) if (!/hasDossier\(c\.outOfScope\.summary, key\)|awaySpecifics\(c\.outOfScope\.summary, c\.legacyArgs\.away\)/.test(l)) failures.push(`brief.ts reaches the full summary outside the two out-of-scope calls: ${l.trim().slice(0, 160)}`);
+  for (const l of oos) if (!/hasDossier\(c\.outOfScope\.summary, key\)/.test(l)) failures.push(`brief.ts reaches the full summary outside the out-of-scope call: ${l.trim().slice(0, 160)}`);
+  // statids8: the names the Brief states are the cards' own - no read of the old sources for them. Allowed: comment
+  // lines, the Map's moves (actOf / leverAbout quote the Map cell's wall - moves are out of this stage's scope), and
+  // the moves' "today" line and hover tip (they name the Map's taker), and the fixed-situation fallback name.
+  const bad8 = /\blegacyLift\b|\bawaySpecifics\b|legacyArgs\.away\b|\b(st|cs|st0)\.wall\b|\bst\.taker\b|\.lines\[0\]\.label|\b(v|r|good\.r|ex\.r)\.line\b(?!\()|\.routes\b|\$\{r\.rival\}|poss\(r\.rival\)|\(\{ concern: r\.concern,|sort\(\(a, b\) => kOf\(b\.stat\) - kOf\(a\.stat\)\)/;
+  const ok8 = /^\s*(\/\/|\*|\/\*\*)|stop arguing against buyers who say "\$\{condLabel\(st\.wall\)\}"|leverAbout\(p\.lever, brand, st\.wall\)|^\s*return st\.wall$|today \$\{st\.taker\}|for \$\{st\.taker\}`|on \$\{st\.taker\}'s|cardLabel\(c, cellId, st\.taker\)|line: r\.line \}|k\.away\.filter\(\(g\) => g\.routes|destOf\(g\.routes, g\.answers \?\? 0\)|return g\.routes\[0\] \? /;
+  src.split("\n").forEach((l, i) => {
+    if (bad8.test(l) && !ok8.test(l)) failures.push(`brief.ts:${i + 1} reads an old source for a name the Brief states: ${l.trim().slice(0, 160)}`);
+  });
 }
 const strictChecked: string[] = [];
 const noFunnel: string[] = [];
@@ -116,7 +134,13 @@ const sentencesOf = (t: string) => t.split(/(?<=[.!?])\s+/).map((x) => x.trim())
 const allStrings = (x: any, out: string[] = []): string[] => {
   if (typeof x === "string") out.push(x);
   else if (Array.isArray(x)) x.forEach((y) => allStrings(y, out));
-  else if (x && typeof x === "object") for (const [k, v] of Object.entries(x)) if (!["links", "tip", "cells", "cell"].includes(k)) allStrings(v, out);
+  else if (x && typeof x === "object")
+    for (const [k, v] of Object.entries(x)) {
+      if (["links", "tip", "cell"].includes(k)) continue;
+      // A paragraph's pins (anchors) are skipped; a SWOT quadrant's `cells` are its paragraphs (statids8: they were skipped too).
+      if (k === "cells" && Array.isArray(v) && v.length && v[0] && typeof v[0] === "object" && "id" in v[0]) continue;
+      allStrings(v, out);
+    }
   return out;
 };
 
@@ -289,6 +313,7 @@ for (const project of (await store.listProjects()).filter((p: any) => !p.archive
 // every stat figure's value is its registry stat's, every migrated sentence prints only stat figures (or a figure
 // with no card home, listed), and no figure without a card home goes unlisted.
 const regs = new Map<string, any>();
+const maps = new Map<string, any>();
 const needsHome = new Map<string, string[]>();
 const byField = new Map<string, any[]>();
 for (const e of FIG_LOG as any[]) {
@@ -309,6 +334,67 @@ for (const project of (await store.listProjects()).filter((p: any) => !p.archive
   if (data) data.revision = await (await import(process.cwd() + "/src/lib/engine/run_revision.ts")).cachedRunRevision(run.id);
   const { view: map } = await sharedAnalysisMap(data, {});
   regs.set(project.brand, buildStatRegistry(map));
+  maps.set(project.brand, map);
+}
+// statids8: every name the Brief stated in a card's role (NAME_LOG) is on that card, in that role - checked against the
+// card's own object, not the Brief's reading of it.
+const nameKinds = new Map<string, number>();
+{
+  const lc = (x: string) => x.trim().toLowerCase();
+  const cellLabels = (map: any) => new Map<string, string>(map.bands.flatMap((b: any) => b.rows.flatMap((r: any) => r.cells.map((x: any) => [x.id, x.label]))));
+  const onCard = (e: any): boolean => {
+    const map = maps.get(e.brand);
+    const p = map?.positions[e.cellId];
+    const pp = p?.panel;
+    let ok = false;
+    switch (e.kind) {
+      case "wall":
+        ok = !!p?.lever && p?.notes?.wall === e.name;
+        break;
+      case "taker":
+        ok = (pp?.competitors?.rows ?? []).find((r: any) => !r.you)?.name === e.name;
+        break;
+      case "away-row":
+        ok = (pp?.conditions?.away ?? []).some((r: any) => r.text === e.name);
+        break;
+      case "away-to":
+        ok = (pp?.conditions?.away ?? []).some((r: any) => (r.to ?? []).some((t: any) => t.name === e.name));
+        break;
+      case "value-product":
+        ok = pp?.product === e.name && !pp?.byProduct;
+        break;
+      case "instead-rival":
+        ok = pp?.details?.instead?.sections?.find((x: any) => x.title === "Where it points the buyer instead")?.rows?.[0]?.label === e.name;
+        break;
+      case "checklist":
+        ok = (pp?.checklist ?? []).includes(e.name);
+        break;
+      case "checklist-against": {
+        // The What to buy card's "when it picks another" column (the tracker), or the tracker's column on the rival's own card.
+        const col = e.subject ? pp?.rivals?.find((r: any) => lc(r.name) === lc(e.subject))?.weighs?.columns?.[0] : pp?.weighsComp?.columns?.[1];
+        const crit = Object.keys(map.positions).filter((id: string) => id.startsWith("chooses:criteria:"));
+        const pooled = crit.includes("chooses:criteria:all") ? "chooses:criteria:all" : crit.length === 1 ? crit[0] : "";
+        const list: string[] = map.positions[pooled]?.panel?.checklist ?? [];
+        ok = (col?.rows ?? []).some((r: any) => lc(r.name) === lc(e.name)) && list.some((x: string) => lc(x) === lc(e.name));
+        break;
+      }
+      case "cell-label":
+        ok = cellLabels(map).get(e.cellId) === e.name;
+        break;
+    }
+    return ok;
+  };
+  const negSeen = new Set<string>();
+  for (const e of NAME_LOG as any[]) {
+    const ok = onCard(e);
+    nameKinds.set(e.kind, (nameKinds.get(e.kind) ?? 0) + 1);
+    // Negative control, once per kind: the same entry with a name the card does not draw must fail the check.
+    if (ok && !negSeen.has(e.kind)) {
+      negSeen.add(e.kind);
+      if (onCard({ ...e, name: `${e.name} (not on the card)` })) failures.push(`name check negative control: a made-up ${e.kind} name passed`);
+    }
+    if (!ok) failures.push(`${e.brand}${e.subject ? ` [rival ${e.subject}]` : ""}: the Brief names "${e.name}" (${e.kind}) from ${e.cellId}, which does not show it there`);
+  }
 }
 for (const [k, es] of byField) {
   const reg = regs.get(es[0].brand);
@@ -388,6 +474,7 @@ for (const t of TRIMMED_CLAIMS) trimmed.set(`${t.brand}|${t.claim}`, t);
 console.log(`\nMAP CLAIMS A MOVE QUOTES THAT LOST A CLAUSE: ${trimmed.size}`);
 for (const t of trimmed.values()) console.log(`  - ${t.brand} [${t.cellId}]\n      was:  ${t.claim}\n      now:  ${t.kept || "(dropped whole)"}`);
 console.log(`\nStage 3-5 (funnel, verdict, condition and argument decisions): every Brief above computed STRICT (a funnel, verdict, condition or argument read of the old source throws); guard negative controls passed on ${strictChecked.length} trackers.`);
+console.log(`statids8 - names the Brief states, each checked on the card it is read from: ${[...nameKinds.entries()].map(([k, n]) => `${k} ${n}`).join(", ")}`);
 console.log(`Summary brands with no funnel on any card (left out of every funnel decision): ${noFunnel.length ? noFunnel.join("; ") : "none"}`);
 for (const f of failures) console.log(`FAIL ${f}`);
 console.log(failures.length ? `\n${failures.length} FAIL` : "\nALL PASS - every linked number opens a card that shows it beside its subject, or the Brief's own card");

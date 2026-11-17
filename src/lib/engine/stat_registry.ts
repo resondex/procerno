@@ -110,6 +110,9 @@ export interface StatRegistry {
   section(cellId: string, stepKey: string, title: string): { label: string; stat: Stat }[];
   line(cellId: string, lineKey: string, i: string | number): Stat | undefined;
   competitor(cellId: string, name: string | "you"): Stat | undefined;
+  /** statids8: a cell card's "Who takes the picks" rows (its competitors block), in the card's own order - "you" is
+   * the tracker's own row. */
+  competitorRows(cellId: string): { name: string; you: boolean; stat: Stat }[];
   rivalStep(name: string, stepKey: string, who: "rival" | "you"): Stat | undefined;
   rivalBody(name: string, stepKey: string, key: string | number): Stat | undefined;
   rivalTable(name: string, table: "byBuyer" | "products", title: string, row: string, col: number): Stat | undefined;
@@ -177,6 +180,17 @@ export function buildStatRegistry(map: Pick<AnalysisMapView, "positions" | "riva
     },
     line: (c, k, i) => get(statId.line(c, k, i)),
     competitor: (c, n) => get(statId.competitor(c, n)),
+    competitorRows: (c) => {
+      const pre = `${statId.cell(c)}::competitors/`;
+      const out: { name: string; you: boolean; stat: Stat }[] = [];
+      for (const s of byId.values()) {
+        if (!s.id.startsWith(pre) || s.id.includes("#")) continue;
+        const rest = s.id.slice(pre.length);
+        if (rest.includes("/")) continue;
+        out.push({ name: rest.replace(/∕/g, "/"), you: rest === "you", stat: s });
+      }
+      return out;
+    },
     rivalStep: (n, k, w) => get(statId.rivalStep(n, k, w)),
     rivalBody: (n, k, key) => get(statId.rivalBody(n, k, key)),
     rivalTable: (n, t, title, row, col) => get(statId.rivalTable(n, t, title, row, col)),
