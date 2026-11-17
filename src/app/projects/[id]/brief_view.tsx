@@ -49,6 +49,7 @@ import {
   type BriefViz,
   BRIEF_SCATTER_GEOM,
   scatterPx,
+  type BriefRow,
 } from "@/lib/engine/brief_types";
 import { useEngineSet } from "./view_parts";
 import type { BriefMode } from "@/lib/auth";
@@ -179,6 +180,11 @@ html.pb-printing .pb-fact{ border-bottom: 0 !important; color: inherit !importan
 .pb-table .pb-r{ text-align: right; white-space: nowrap; }
 .pb-table td.pb-r{ font-weight: 600; }
 .pb-table td.pb-avg{ font-weight: 400; color: var(--ink-2); }
+.pb-table td.pb-you{ color: var(--pa-yours); }
+.pb-table td.pb-top{ font-weight: 400; color: var(--pa-theirs); }
+.pb-score-h{ font-size: 14px; font-weight: 600; color: var(--ink); margin: 0 0 6px; }
+.pb-score-h2{ margin-top: 22px; }
+.pb-score-note{ font-size: 13px; color: var(--ink-2); margin: 12px 0 0; }
 .pb-table tr:last-child td{ border-bottom: 1px solid var(--line); }
 .pb-table tr.pb-hl td{ background: color-mix(in srgb, var(--primary) 13%, var(--surface)); font-weight: 600; }
 .pb-table tr.pb-hl td:first-child{ box-shadow: inset 3px 0 0 var(--primary); }
@@ -814,30 +820,64 @@ function Section({ s, lede, wave }: { s: BriefSectionT; lede: boolean; wave: str
 
       {s.rows && (
         <div className="pb-table-wrap">
-          <table className="pb-table pb-score">
-            <thead>
-              <tr>
-                <th>What we measure</th>
-                <th className="pb-r">{wave ? `Wave ${wave}` : "This wave"}</th>
-                {s.rows.some((r) => r.avg) && <th className="pb-r">Average competitor</th>}
-              </tr>
-            </thead>
-            <tbody>
-              {s.rows.map((r, i) => (
-                <tr key={i}>
-                  <td>{r.label}</td>
-                  <td className="pb-r">
-                    {r.cell ? (
-                      <RowValue value={r.value} a={r.cell} unit={`${s.key}/rows/${i}`} />
-                    ) : (
-                      r.value
-                    )}
-                  </td>
-                  {s.rows!.some((x) => x.avg) && <td className="pb-r pb-avg">{r.avg ?? ""}</td>}
-                </tr>
-              ))}
-            </tbody>
-          </table>
+          {(() => {
+            const rows = s.rows.map((r, i) => ({ r, i }));
+            const vs = rows.filter((x) => x.r.kind === "vs");
+            const note = rows.find((x) => x.r.kind === "note");
+            const own = rows.filter((x) => !x.r.kind);
+            const heads = vs[0]?.r.heads;
+            const val = (r: BriefRow, i: number) => (r.cell ? <RowValue value={r.value} a={r.cell} unit={`${s.key}/rows/${i}`} /> : r.value);
+            const subj = heads?.subject ?? (wave ? `Wave ${wave}` : "This wave");
+            return (
+              <>
+                {vs.length > 0 && (
+                  <>
+                    <p className="pb-score-h">Against competitors</p>
+                    <table className="pb-table pb-score">
+                      <thead>
+                        <tr>
+                          <th>When buyers ask what to buy</th>
+                          <th className="pb-r">{subj}</th>
+                          <th className="pb-r">Average competitor</th>
+                          {heads?.top && <th className="pb-r">{heads.top} (most picked)</th>}
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {vs.map(({ r, i }) => (
+                          <tr key={i}>
+                            <td>{r.label}</td>
+                            <td className="pb-r pb-you">{val(r, i)}</td>
+                            <td className="pb-r pb-avg">{r.avg ?? ""}</td>
+                            {heads?.top && <td className="pb-r pb-top">{r.top ?? ""}</td>}
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                    {own.length > 0 && <p className="pb-score-h pb-score-h2">On questions about {subj}</p>}
+                  </>
+                )}
+                {own.length > 0 && (
+                  <table className="pb-table pb-score">
+                    <thead>
+                      <tr>
+                        <th>What we measure</th>
+                        <th className="pb-r">{subj}</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {own.map(({ r, i }) => (
+                        <tr key={i}>
+                          <td>{r.label}</td>
+                          <td className={`pb-r${vs.length ? " pb-you" : ""}`}>{val(r, i)}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                )}
+                {note && <p className="pb-score-note">{note.r.label}</p>}
+              </>
+            );
+          })()}
           <CardSlot prefix={`${s.key}/rows/`} />
         </div>
       )}

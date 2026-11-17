@@ -90,6 +90,12 @@ export interface BriefRow {
   value: string;
   /** The same measure for the average competitor (the competitors listed on the what-to-buy card, taken together); only on rows that have one. */
   avg?: string;
+  /** The same measure for the most-picked competitor (present with `avg`). */
+  top?: string;
+  /** Scoreboard layout, set only when the competitor columns exist: "vs" rows form the against-competitors table, "note" is a sentence under the tables, the rest form the second table. */
+  kind?: "vs" | "note";
+  /** On the first "vs" row: the column heads (the subject and the most-picked competitor). */
+  heads?: { subject: string; top?: string };
   tip?: string;
   /** The map cell behind the row's number (pin after the value). */
   cell?: BriefAnchor;

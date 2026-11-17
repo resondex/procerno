@@ -107,7 +107,7 @@ export function factSheet(memo: BriefMemo): FactSheet {
     };
     if (s.heading) lines.push(`## ${s.heading}`);
     for (const p of s.paras ?? []) lines.push(tagged(paraLine(p), p.cells));
-    for (const r of s.rows ?? []) lines.push(tagged(`${r.label}: ${r.value}${r.avg ? ` (average competitor: ${r.avg})` : ""}`, r.cell ? [r.cell] : undefined));
+    for (const r of s.rows ?? []) lines.push(tagged(r.kind === "note" ? r.label : `${r.label}: ${r.value}${r.avg ? ` (average competitor: ${r.avg})` : ""}${r.top ? ` (most-picked competitor: ${r.top})` : ""}`, r.cell ? [r.cell] : undefined));
     if (s.table) {
       lines.push(s.table.headers.join(" | "));
       for (const r of s.table.rows) lines.push(r.join(" | "));

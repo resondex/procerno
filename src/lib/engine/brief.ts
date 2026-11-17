@@ -905,6 +905,7 @@ function scoreboard(c: Ctx): BriefRow[] {
     at({ label: "Share of picks", value: P(S.shareOfDecided), tip: tipOf(S.shareOfDecided) }, ...own),
     at({ label: "Picked, of all answers", value: pctFine(rate(S.chosen)), tip: tipOf(S.chosen) }, ...own),
   ];
+  let vs = false;
   // bf27: the average competitor beside the subject's own four numbers - the
   // competitors the what-to-buy card lists (class brands left out), each
   // rate averaged. The tracker's own Brief only.
@@ -922,10 +923,25 @@ function scoreboard(c: Ctx): BriefRow[] {
         rows[3].avg = show(comp.reduce((a, b) => a + num(b.share), 0) / comp.length);
         if (comp.every((b) => b.here?.read)) rows[4].avg = show(comp.reduce((a, b) => a + num(b.here!.read.picked), 0) / comp.length);
       }
+      // bf28: two tables - these four rows against the average and the
+      // most-picked competitor; the commit rate is a sentence under them.
+      const top = [...comp].sort((a, b) => num(b.share) - num(a.share))[0];
+      const tr = top?.here?.read;
+      if (top && tr) {
+        rows[0].top = tr.named;
+        rows[1].top = tr.recommended;
+        rows[3].top = top.share;
+        rows[4].top = tr.picked;
+      }
+      for (const i of [0, 1, 3, 4]) rows[i].kind = "vs";
+      rows[0].label = "Named";
+      rows[0].heads = { subject: c.name, ...(top && tr ? { top: top.name } : {}) };
+      rows[2] = { ...rows[2], kind: "note", label: `The AI commits to one ${c.product} in ${rows[2].value} of answers.` };
+      vs = true;
     }
   }
   const leader = s.brands.find((b) => b.key !== S.key && b.chosen.k > 0);
-  if (leader) rows.push(at({ label: `Share of picks - ${leader.name}`, value: P(leader.shareOfDecided), tip: tipOf(leader.shareOfDecided) }, OPEN_ALL, brandPin(c, leader.key)));
+  if (leader && !vs) rows.push(at({ label: `Share of picks - ${leader.name}`, value: P(leader.shareOfDecided), tip: tipOf(leader.shareOfDecided) }, OPEN_ALL, brandPin(c, leader.key)));
   if (c.isTarget) {
     const won = s.headToHead.reduce((a, r) => a + r.won.k, 0);
     const lost = s.headToHead.reduce((a, r) => a + r.lost.k, 0);
@@ -2217,7 +2233,7 @@ export async function computeBrief(data: ViewData, request: BriefRequest = {}): 
 // bf21 (2026-11-10): the plain-wording pass - reads bs13 / am15 (new move names, lever sentences and insight wording quoted in the memos); actOf restates the new levers; the conditions paragraph, the condition card, the SWOT wall and the jobs wall lines say what sends buyers away and "a fixed situation" instead of "routes" / "wall" / "reason". The exemplar's "The conditions that decide it" heading is kept. Numbers unchanged.
 // bf22 (2026-11-12): the reasons harmonization - reads bs17 / am22: the conditions paragraph, the condition card and the away-condition finding name the run's reason THEMES (dt4) where a theme map exists (raw condition groups only without one); the paragraph's tips count statements on a themed side.
 // bf23 (2026-11-13, one counting rule - reads bs21): with reason themes the conditions paragraph counts each side's themes at ANSWER grain over that side's own answer base, and the condition card lists the themes at answer grain, names the lead away theme (quoting its most-stated wording) and gives the away_condition finding's blocker and fixed-situation wordings their own rows on the same base. Keyless output unchanged.
-const BRIEF_VERSION = "bf27"; // bf27 (2026-11-16): the Now what scoreboard carries the average competitor beside the subject's named, recommended, share of picks and picked rows (the competitors the what-to-buy card lists; class brands left out). // bf26 (2026-11-16): one voice - the subject in the third person everywhere (the insights re-run in the Brief's style, the moves' third-person form, the map's levers and claims voiced), buyers as words, never / every at the extremes, the cards' vocabulary, a finding's move on its cell, no move sentence twice in a frame. // bf25 (2026-11-13): the conditions line reads "rarely names one winner for every buyer" (was "a rule, not a winner"). // bf24 (2026-11-13): themed conditions name one destination only when it takes half their answers; the fixed-situation line leads with the finding wording.
+const BRIEF_VERSION = "bf28"; // bf28 (2026-11-16): the scoreboard is two tables on the tracker's own Brief - four rows against the average and the most-picked competitor, then the rows about the brand's own questions; the commit rate is a sentence. // bf27 (2026-11-16): the Now what scoreboard carries the average competitor beside the subject's named, recommended, share of picks and picked rows (the competitors the what-to-buy card lists; class brands left out). // bf26 (2026-11-16): one voice - the subject in the third person everywhere (the insights re-run in the Brief's style, the moves' third-person form, the map's levers and claims voiced), buyers as words, never / every at the extremes, the cards' vocabulary, a finding's move on its cell, no move sentence twice in a frame. // bf25 (2026-11-13): the conditions line reads "rarely names one winner for every buyer" (was "a rule, not a winner"). // bf24 (2026-11-13): themed conditions name one destination only when it takes half their answers; the fixed-situation line leads with the finding wording.
 
 /**
  * The brief through the cache. cachedView's keying, with the subject as one
