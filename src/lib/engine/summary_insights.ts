@@ -389,6 +389,24 @@ export interface InsightStyle {
   cardArg?: (code: string, side: "you" | "rival") => { name: string; here: string; there: string } | null;
   /** bf34: a figure as a Map cell's card shows it (cell id, step key, segment key), e.g. the all-worries leave share. */
   cardStep?: (cellId: string, step: string, segment: string) => string | null;
+  /** bf35: the subject's share of the picks as the What to buy card states it - one buying situation's card, or
+   * the all-buyers card when `room` is null. */
+  roomShare?: (room: string | null) => string | null;
+  /** bf35: the share of a Spotting-the-problem card's answers that point to something outside the category - one
+   * buying situation's card, or the all-buyers card when `room` is null. */
+  outsideShare?: (room: string | null) => string | null;
+  /** bf35: a condition that sends buyers away, as a card's row shows it: the share and where ("when buyers ask
+   * what to buy", "when the AI compares X with Y directly"); null when no card row names it. */
+  awayRow?: (labels: string[]) => { value: string; where: string } | null;
+  /** bf35: a lost matchup's exception as that head-to-head card shows it ("who it still sends to you"). */
+  exceptionRow?: (labels: string[], rival: string) => string | null;
+}
+
+/** bf35: the away-condition finding in the Brief's style - "Buyers who say ... are most often sent away, to ..." -
+ * with only the share a card row shows (no pooled shares). */
+function awayBrief(labels: string[], quote: string, dest: string, extra: string): string {
+  const row = STYLE!.awayRow!(labels);
+  return `Buyers who say "${qc(shorten(quote))}" are most often sent away${dest ? `, ${dest}` : ""}${row ? `; it is given in ${row.value} of the answers ${row.where}` : ""}.${extra}`;
 }
 let STYLE: InsightStyle | null = null;
 const yo = () => (STYLE ? STYLE.name : "you");
@@ -1287,7 +1305,15 @@ function pickConcentrationRoom(s: Summary, inp: InsightInputs): Insight | null {
     key: "pick_concentration_room",
     kind: "room",
     title: `${Yr()} picks come from ${buyer(c.top.room)}`,
-    body: `${pct(c.share)} of the times the AI picks ${s.brand} when buyers ask what to buy come from one buying situation, ${buyer(c.top.room)} - there ${yt("you take", (n) => `${n} takes`)} ${pct(c.top.decided)} of the picks, everywhere else ${pct(c.outside)}.`,
+    // bf35: the Brief states only what the cards show - the share of the picks for that buyer and across all
+    // buyers (the share of its own picks and "everywhere else" are on no card).
+    body: STYLE?.roomShare
+      ? (() => {
+          const here = STYLE.roomShare!(c.top.room);
+          const all = STYLE.roomShare!(null);
+          return here ? `When ${buyer(c.top.room)} asks what to buy, ${STYLE.name} takes ${here} of the picks${all ? `, against ${all} across all buyers` : ""}.` : "";
+        })()
+      : `${pct(c.share)} of the times the AI picks ${s.brand} when buyers ask what to buy come from one buying situation, ${buyer(c.top.room)} - there ${yt("you take", (n) => `${n} takes`)} ${pct(c.top.decided)} of the picks, everywhere else ${pct(c.outside)}.`,
     foot: `${c.top.picks} of ${c.total} picks from ${c.top.room} (one of ${c.rooms} rooms). Inside: ${counts(c.top.decided)}. Outside: ${counts(c.outside)}.`,
     look: { pill: "buyers", label: "Buyers" },
     effect: c.share - 1 / c.rooms,
@@ -1338,7 +1364,8 @@ function pickConcentrationQuestion(s: Summary, inp: InsightInputs): Insight | nu
     key: "pick_concentration_question",
     kind: "question",
     title: best.isTarget ? `One question carries ${yr()} picks` : `One question carries ${best.who}'s picks`,
-    body: `${pct(c.share)} of ${best.isTarget ? yr() : `${best.who}'s`} picks come from one question: "${q}"`,
+    // bf35: no card is per question, so the Brief does not cite this finding.
+    body: STYLE?.roomShare ? "" : `${pct(c.share)} of ${best.isTarget ? yr() : `${best.who}'s`} picks come from one question: "${q}"`,
     foot: `${c.k} of ${c.total} picks of ${best.who} from this question (one of ${c.n} open-choice questions, ${c.top.answers} answers, a seed and its paraphrases pooled).`,
     look: { pill: "stations", station: "consideration", label: "Stations - Consideration" },
     effect: c.share - 1 / c.n,
@@ -1624,7 +1651,14 @@ function awayCondition(s: Summary, inp: InsightInputs): Insight | null {
     key: "away_condition",
     kind: "condition",
     title: g.wall ? `A fixed situation sends buyers away: "${qc(shorten(g.label, 60))}"` : `What sends buyers away most: "${qc(shorten(g.label, 60))}"`,
-    body: `The condition that most often sends buyers away from ${yo()} is "${qc(shorten(g.label))}"${to ? `, and the AI sends them to ${to.name}` : ""}; it comes up in ${pct(spread)} of the questions where the AI gives any condition that sends buyers away${blocker}${wall}.`,
+    body: STYLE?.awayRow
+      ? awayBrief(
+          [g.label],
+          g.label,
+          to ? `to ${to.name}` : "",
+          `${blocker ? `${blocker.replace(/^\. /, " ")}.` : ""}${g.wall && !blocker ? " That is a situation the buyer is already in, not an argument to answer." : laterWall ? ` The largest fixed situation among them, "${qc(shorten(laterWall.label, 60))}", is a situation the buyer is already in, not an argument to answer.` : ""}`
+        )
+      : `The condition that most often sends buyers away from ${yo()} is "${qc(shorten(g.label))}"${to ? `, and the AI sends them to ${to.name}` : ""}; it comes up in ${pct(spread)} of the questions where the AI gives any condition that sends buyers away${blocker}${wall}.`,
     foot: `At least ${g.rules} rules in ${g.answers} answers across ${g.cells} of ${a.cells} questions where the AI gives a condition that sends buyers away${toFoot}.${blockerFoot}${wallFoot} ${lower}`,
     look: { pill: "why", label: "Why - decision rules" },
     effect: spread,
@@ -1723,7 +1757,14 @@ function awayConditionThemed(s: Summary, a: NonNullable<InsightInputs["away"]>, 
     key: "away_condition",
     kind: "condition",
     title: lead.wall ? `A fixed situation sends buyers away: "${qc(shorten(lead.label, 60))}"` : `What sends buyers away most: "${qc(shorten(lead.label, 60))}"`,
-    body: `The condition that most often sends buyers away from ${yo()} is "${qc(shorten(lead.label))}"${dest ? `, and the AI sends them ${destPhrase(dest)}` : ""}: it comes up in ${pctShare(sh)} ${aPhrase}${put}.${fixedFold}${blocker}${fixed}`,
+    body: STYLE?.awayRow
+      ? awayBrief(
+          [lead.label, lead.wording],
+          lead.wording,
+          dest ? destPhrase(dest) : "",
+          `${w && fold ? " That is a situation the buyer is already in, not an argument to answer." : ""}${bk ? ` ${sameWords(bk.group.label, lead.wording) ? "That wording" : `One wording, "${qc(shorten(bk.group.label))}",`} names ${bk.group.names!.name}, a brand with ${pct(bk.share)} of the picks when buyers ask what to buy, so it blocks ${yo()} without winning for it.` : ""}${w && !fold ? ` The largest fixed situation, "${qc(shorten(w.label, 60))}", is a situation the buyer is already in, not an argument to answer.` : ""}`
+        )
+      : `The condition that most often sends buyers away from ${yo()} is "${qc(shorten(lead.label))}"${dest ? `, and the AI sends them ${destPhrase(dest)}` : ""}: it comes up in ${pctShare(sh)} ${aPhrase}${put}.${fixedFold}${blocker}${fixed}`,
     foot: `${lead.answers} of ${lead.base} answers that give a condition for choosing someone else state "${lead.label}"${to ? `; ${to.n} of them send buyers to ${to.name}` : ""}.${blockerFoot}${fixedFoot} Counts leave out wordings only one answer states.`,
     look: { pill: "why", label: "Why - decision rules" },
     effect: sh,
@@ -1738,6 +1779,15 @@ function awayConditionThemed(s: Summary, a: NonNullable<InsightInputs["away"]>, 
 const EXC_MIN_ANSWERS = 15;
 /** ... and in at least this share of them. */
 const EXC_MIN_POOLED_SHARE = 0.2;
+
+/** bf35: the exception in the Brief's style - for the matchup it is most common in, with that head-to-head card's
+ * own share ("who it still sends to you"), or no share when the card does not show it. */
+function excBrief(brand: string, rival: string | null, labels: string[], label: string, fixed: string): string {
+  const v = rival ? STYLE!.exceptionRow!(labels, rival) : null;
+  return rival
+    ? `When the AI picks ${rival} over ${brand} in a direct matchup, it still says to choose ${brand} for buyers who say "${qc(shorten(label))}"${v ? ` - in ${v} of the answers that pick ${rival}` : ""}.${fixed}`
+    : `When the AI picks a rival over ${brand} in a direct matchup, its most common exception is "${qc(shorten(label))}".${fixed}`;
+}
 
 function assignedException(s: Summary, inp: InsightInputs): Insight | null {
   const e = inp.exception;
@@ -1757,7 +1807,7 @@ function assignedException(s: Summary, inp: InsightInputs): Insight | null {
       key: "assigned_exception",
       kind: "condition",
       title: one ? yt(`You lose to ${e.matchups[0].name} with one exception`, (n) => `${n} loses to ${e.matchups[0].name} directly, yet the AI still says when to choose it`) : yt("You lose these matchups with one exception", (n) => `The direct matchups ${n} loses still carry a case for it`),
-      body: `When the AI picks ${one ? e.matchups[0].name : "a rival"} over ${s.brand} in a direct matchup, its most common exception is "${qc(shorten(g.label))}" - stated in ${pctShare(sh)} of those answers${where}.${put}${fixed}${STYLE ? "" : open}`,
+      body: STYLE?.exceptionRow ? excBrief(s.brand, one ? e.matchups[0].name : most?.[0] ?? null, [g.label, g.wording ?? g.label], g.label, fixed) : `When the AI picks ${one ? e.matchups[0].name : "a rival"} over ${s.brand} in a direct matchup, its most common exception is "${qc(shorten(g.label))}" - stated in ${pctShare(sh)} of those answers${where}.${put}${fixed}${STYLE ? "" : open}`,
       foot: `${g.answers} of ${e.lost} answers that pick the rival in the matchups you lose (${e.matchups.map((m) => `${m.name} ${m.lost}`).join(", ")}); ${e.any} of them state any case for you.${e.open ? ` When buyers ask what to buy: ${counts(e.open)}.` : ""} Counts leave out wordings only one answer states.`,
       look: { pill: "why", label: "Why - decision rules" },
       effect: sh,
@@ -1773,7 +1823,7 @@ function assignedException(s: Summary, inp: InsightInputs): Insight | null {
     key: "assigned_exception",
     kind: "condition",
     title: one ? yt(`You lose to ${e.matchups[0].name} with one exception`, (n) => `${n} loses to ${e.matchups[0].name} directly, yet the AI still says when to choose it`) : yt("You lose these matchups with one exception", (n) => `The direct matchups ${n} loses still carry a case for it`),
-    body: `When the AI picks ${one ? e.matchups[0].name : "a rival"} over ${s.brand} in a direct matchup, its most common exception is "${qc(shorten(g.label))}" - stated in ${pctShare(sh)} of those answers${where}.${fixed}${STYLE ? "" : open}`,
+    body: STYLE?.exceptionRow ? excBrief(s.brand, one ? e.matchups[0].name : most?.[0] ?? null, [g.label], g.label, fixed) : `When the AI picks ${one ? e.matchups[0].name : "a rival"} over ${s.brand} in a direct matchup, its most common exception is "${qc(shorten(g.label))}" - stated in ${pctShare(sh)} of those answers${where}.${fixed}${STYLE ? "" : open}`,
     foot: `${g.answers} of ${e.lost} answers that pick the rival in the matchups you lose (${e.matchups.map((m) => `${m.name} ${m.lost}`).join(", ")}); ${e.any} of them state any case for you.${e.open ? ` Open choice: ${counts(e.open)}.` : ""} Counts are lower bounds: wordings the grouping did not join are left out.`,
     look: { pill: "why", label: "Why - decision rules" },
     effect: sh,
@@ -2346,7 +2396,17 @@ function leakProblem(inp: InsightInputs): Insight | null {
     key: "leak_problem",
     kind: "leak",
     title: oneRoom ? `${top.room}: the problem is solved outside the category` : "Problem questions are solved outside the category",
-    body: oneRoom
+    // bf35: the Brief sets the buyer's figure against the all-buyers card's (both on cards); "the other buying
+    // situations" pooled is on no card.
+    body: STYLE?.outsideShare && oneRoom
+      ? (() => {
+          const here = STYLE.outsideShare!(top.room);
+          const all = STYLE.outsideShare!(null);
+          return here
+            ? `For ${buyer(top.room)}, the AI points ${here} of the problem questions that do not name the category to a solution outside it${all ? `, against ${all} across all buyers` : ""}.`
+            : `For ${buyer(top.room)}, the AI answers ${pct(top.out)} of the problem questions that do not name the category with a solution outside it.`;
+        })()
+      : oneRoom
       ? `For ${buyer(top.room)}, the AI answers ${pct(top.out)} of the problem questions that do not name the category with a solution outside it - ${pct(rest)} for the other buying situations.`
       : `Across every buying situation, the AI answers ${pct(p.all)} of the problem questions that do not name the category with a solution outside it (${pct(top.out)} for ${buyer(top.room)}).`,
     foot: `${top.room}: ${counts(top.out)}.${rest.n > 0 ? ` Other rooms: ${counts(rest)}.` : ""} All problem-recognition answers: ${counts(p.all)}.`,
@@ -2420,7 +2480,8 @@ function leaveNoExit(inp: InsightInputs, brand: string): Insight | null {
     key: "leave_no_exit",
     kind: "doubt",
     title: "Told to leave, with nowhere to go",
-    body: `When the AI tells a customer weighing a worry to leave ${brand}, ${pct(none)} of those answers name nowhere to go - the cancel is a loss to ${yo()} without being any rival's gain.`,
+    // bf35: no card shows where the AI sends the customers it tells to leave, so the Brief does not cite it.
+    body: STYLE?.roomShare ? "" : `When the AI tells a customer weighing a worry to leave ${brand}, ${pct(none)} of those answers name nowhere to go - the cancel is a loss to ${yo()} without being any rival's gain.`,
     foot: `Leave answers naming no destination: ${counts(none)}. Leave answers overall: ${counts(k.verdicts.leave)}.`,
     look: { pill: "stations", station: "customer_base", label: "Stations - Customers" },
     effect: rate(none) - NO_EXIT_SHARE,

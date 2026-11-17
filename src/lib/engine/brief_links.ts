@@ -39,13 +39,17 @@ const MEASURES: [string, RegExp][] = [
   ["agree", /\bagree|\bfair\b|critic|confirm/i],
   ["argued", /argu|comes up (more|in \S+ of (the|those) answers that pick)|bring up|weigh|look for|taught|raises/i],
 ];
-const measures = (s: string) => new Set(MEASURES.filter(([, re]) => re.test(s)).map(([k]) => k));
+const measures = (s: string) => new Set(MEASURES.filter(([, re]) => re.test(s.replace(TAIL, ""))).map(([k]) => k));
+/** bf35: numberContext appends the words after the number (to the next number, semicolon or sentence end) behind
+ * this mark - they say what the number measures ("63% of its picks"), never whom it is about. */
+const TAIL = "\u0001";
+const head = (local: string) => local.split(TAIL)[0];
 
 /**
  * terms: every rival name, reason code, buying situation and worry the tracker has - the subjects a number can be
  * about. The tracker's own brand is "You" on every card, so it is never a term.
  */
-export function linkResolver(map: AnalysisMapView, terms: string[], codes: string[] = []): LinkResolver {
+export function linkResolver(map: AnalysisMapView, terms: string[], codes: string[] = [], conds: string[] = []): LinkResolver {
   // An argument's name is the subject only of a number about arguments ("comes up in N% of the answers that pick
   // ..."); elsewhere a code that is an everyday word ("price") is just a word in the sentence.
   const codeSet = new Set(codes.map((c) => c.trim().toLowerCase()));
@@ -58,11 +62,14 @@ export function linkResolver(map: AnalysisMapView, terms: string[], codes: strin
     const codes = termsOf(sentence).filter((t) => codeSet.has(low(t)));
     return codes.length === 1 ? codes : own;
   };
-  const list = [...new Set(terms.map((t) => t.trim()).filter((t) => t.length >= 3))].sort((a, b) => b.length - a.length);
-  const termsOf = (s: string) => {
+  // bf35: condition labels (a card's condition rows) are subjects of a number beside them, never of a card.
+  const list = [...new Set([...terms, ...conds].map((t) => t.trim()).filter((t) => t.length >= 3))].sort((a, b) => b.length - a.length);
+  const condSet = new Set(conds.map((t) => low(t.trim())));
+  const termsOf = (s: string, withConds = true) => {
     const l = low(s);
     const out: string[] = [];
     for (const t of list) {
+      if (!withConds && condSet.has(low(t))) continue;
       const tl = low(t);
       // A shorter term inside a longer one already taken (a rival inside a product name) is the same mention.
       if (l.includes(tl) && !out.some((o) => low(o).includes(tl))) out.push(t);
@@ -93,7 +100,7 @@ export function linkResolver(map: AnalysisMapView, terms: string[], codes: strin
     return x;
   };
   /** The subject a card is about: the terms in its own name (a rival, a buyer, a worry); none on an all-buyers card. */
-  const subjectOf = (kind: "cell" | "rival", id: string) => (kind === "rival" ? [id] : termsOf(map.positions[id]?.where ?? ""));
+  const subjectOf = (kind: "cell" | "rival", id: string) => (kind === "rival" ? [id] : termsOf(map.positions[id]?.where ?? "", false));
 
   /**
    * Whether an entry shows this number for this sentence: the same number token, a card whose own subject the
@@ -130,15 +137,15 @@ export function linkResolver(map: AnalysisMapView, terms: string[], codes: strin
   };
 
   return {
-    terms: termsOf,
+    terms: (t: string) => termsOf(t),
     shows(dest, token, local, sentence, reveal) {
       const subject = subjectOf(dest.kind, dest.id);
       const entries = dest.kind === "cell" ? cellIdx(dest.id) : rivalIdx(dest.id);
       const same = (a?: PanelReveal, b?: PanelReveal) => JSON.stringify(a ?? null) === JSON.stringify(b ?? null);
-      return entries.some((e) => fits(e, token, localOf(local, sentence), termsOf(sentence), subject, local) && (e.at === "default" || same(e.reveal, reveal)));
+      return entries.some((e) => fits(e, token, localOf(head(local), sentence), termsOf(sentence), subject, local) && (e.at === "default" || same(e.reveal, reveal)));
     },
     find(token, local, sentence, own, scope = "linked") {
-      const localTerms = localOf(local, sentence);
+      const localTerms = localOf(head(local), sentence);
       const sentenceTerms = termsOf(sentence);
       const ownCands = [...own.cells.map((id) => ({ kind: "cell" as const, id })), ...own.rivals.filter((n) => rivalByName.has(low(n))).map((id) => ({ kind: "rival" as const, id }))];
       const mine = best(ownCands, token, localTerms, sentenceTerms, local);
@@ -168,9 +175,12 @@ export function numberContext(R: LinkResolver, text: string, start: number, end:
   const sb = Math.max(text.lastIndexOf(". ", start) + 1, 0);
   const se = text.indexOf(". ", end);
   const sEnd = se < 0 ? text.length : se + 1;
-  const back = text.slice(Math.max(prevEnd, sb), end);
-  // A clause after a semicolon is another fact ("... leave in 35%; <rival> is where it sends them").
+  // A clause after a semicolon is another fact ("... leave in 35%; <rival> is where it sends them") - on both sides.
+  const semiBefore = text.lastIndexOf(";", start);
+  const from = Math.max(prevEnd, sb, semiBefore >= sb ? semiBefore + 1 : 0);
+  const back = text.slice(from, end);
   const semi = text.indexOf(";", end);
-  const around = text.slice(Math.max(prevEnd, sb), Math.min(nextStart, sEnd, semi < 0 ? text.length : semi));
-  return { local: `${context} ${R.terms(back).length ? back : around}`, sentence: `${context} ${text.slice(sb, sEnd)}` };
+  const around = text.slice(from, Math.min(nextStart, sEnd, semi < 0 ? text.length : semi));
+  const tail = text.slice(end, Math.min(nextStart, sEnd, semi < 0 ? text.length : semi));
+  return { local: `${context} ${R.terms(back).length ? back : around}${TAIL}${tail}`, sentence: `${context} ${text.slice(sb, sEnd)}` };
 }

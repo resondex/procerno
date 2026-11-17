@@ -14,7 +14,8 @@ for (const k of ["OPENAI_API_KEY", "ANTHROPIC_API_KEY", "GEMINI_API_KEY", "XAI_A
 
 const { store } = await import(process.cwd() + "/src/lib/store/index.ts");
 const { loadViewData } = await import(process.cwd() + "/src/lib/engine/view_data.ts");
-const { computeBrief } = await import(process.cwd() + "/src/lib/engine/brief.ts");
+process.env.BRIEF_TRIM_LOG = "1";
+const { computeBrief, conditionTerms, TRIMMED_CLAIMS } = await import(process.cwd() + "/src/lib/engine/brief.ts");
 const { sharedAnalysisMap } = await import(process.cwd() + "/src/lib/engine/analysis_map.ts");
 const { sharedBrandSummary } = await import(process.cwd() + "/src/lib/engine/brand_summary.ts");
 const { linkResolver, numberContext } = await import(process.cwd() + "/src/lib/engine/brief_links.ts");
@@ -62,7 +63,7 @@ for (const project of (await store.listProjects()).filter((p: any) => !p.archive
     ...data.intents.flatMap((i: any) => [i.situation, i.concern]).filter(Boolean),
     ...(map.rivalPanels ?? []).map((r: any) => r.name),
   ];
-  const R = linkResolver(map, terms, [...(summary.reasonLift ?? []).map((l: any) => l.code), ...(inputs.taught ?? []).map((t: any) => t.code)]);
+  const R = linkResolver(map, terms, [...(summary.reasonLift ?? []).map((l: any) => l.code), ...(inputs.taught ?? []).map((t: any) => t.code)], conditionTerms(map));
   const allCells = Object.keys(map.positions);
   let wb: any = null;
   /** A table link: the entry exists on this run's Data page, and what its rows show (each buying situation its own row). */
@@ -166,6 +167,11 @@ for (const [k, xs] of [...fallbacks.entries()].sort((a, b) => b[1].length - a[1]
 }
 console.log(`\nUNLINKED FIGURES ON NO CARD: ${homeless.length}`);
 for (const x of homeless) console.log(`  - ${x}`);
+// bf35: Map claims a move quoted that lost a clause (a number no card shows) or were dropped whole.
+const trimmed = new Map<string, { brand: string; cellId: string; claim: string; kept: string }>();
+for (const t of TRIMMED_CLAIMS) trimmed.set(`${t.brand}|${t.claim}`, t);
+console.log(`\nMAP CLAIMS A MOVE QUOTES THAT LOST A CLAUSE: ${trimmed.size}`);
+for (const t of trimmed.values()) console.log(`  - ${t.brand} [${t.cellId}]\n      was:  ${t.claim}\n      now:  ${t.kept || "(dropped whole)"}`);
 for (const f of failures) console.log(`FAIL ${f}`);
 console.log(failures.length ? `\n${failures.length} FAIL` : "\nALL PASS - every linked number opens a card that shows it beside its subject, or the Brief's own card");
 process.exit(failures.length ? 1 : 0);
