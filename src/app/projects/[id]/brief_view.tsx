@@ -579,7 +579,18 @@ function FactLink({ a, unit, children }: { a: BriefAnchor; unit: string; childre
   // bf26: a figure is underlined (and takes the pointer) only when a click does something - it opens an answer
   // card or the map cell; one that would open nothing reads as plain text.
   if (!has && !ctx.onOpenCell) return <>{children}</>;
-  const act = () => (has ? ctx.setOpen(ctx.open === key ? null : key) : ctx.onOpenCell?.(a.id));
+  // 2026-11-16: a number opens the CURRENT card it rests on (the Map's card, the rival, the Data page) straight
+  // away; the Brief's own small answer card shows only where there is nowhere to go (a shared link, no target).
+  const go = has ? ctx.cards[a.id].go : undefined;
+  const direct = !!go && (go.target === "map" ? !!(go.cellId && ctx.onOpenCell) : !!ctx.onOpenView);
+  const act = () =>
+    direct && go
+      ? go.target === "map"
+        ? ctx.onOpenCell!(go.cellId!)
+        : ctx.onOpenView!(go.target, go.brand)
+      : has
+        ? ctx.setOpen(ctx.open === key ? null : key)
+        : ctx.onOpenCell?.(a.id);
   // An inline span with button semantics, not a <button>: a button lays out
   // as inline-block, so a phrase link spanning lines would break the flow.
   return (
@@ -587,8 +598,8 @@ function FactLink({ a, unit, children }: { a: BriefAnchor; unit: string; childre
       role="button"
       tabIndex={0}
       className="pb-fact"
-      aria-label={has ? `Show the numbers: ${a.label}` : `Open on the map: ${a.label}`}
-      {...(has ? { "aria-expanded": ctx.open === key } : {})}
+      aria-label={direct ? `Open: ${a.label}` : has ? `Show the numbers: ${a.label}` : `Open on the map: ${a.label}`}
+      {...(has && !direct ? { "aria-expanded": ctx.open === key } : {})}
       onClick={act}
       onKeyDown={(e) => {
         if (e.key === "Enter" || e.key === " ") {
@@ -978,6 +989,86 @@ function printMemo(node: HTMLElement, title: string) {
   window.print();
 }
 
+// ---------- download as a PDF file (2026-11-16: no print dialog) ----------
+
+/**
+ * Saves the memo as a PDF file. The memo is copied off screen at a fixed width, each top-level block is drawn
+ * to an image and placed down the page, and a block that does not fit the space left starts a new page (a block
+ * taller than a page is cut across pages). Links lose their underline, and "no print" parts are left out.
+ * The two libraries load only when the button is pressed.
+ */
+async function downloadMemoPdf(node: HTMLElement, title: string): Promise<void> {
+  const [{ jsPDF }, { default: html2canvas }] = await Promise.all([import("jspdf"), import("html2canvas-pro")]);
+  const memo = (node.querySelector(".pb-memo") as HTMLElement | null) ?? node;
+  const host = document.createElement("div");
+  host.style.cssText = "position:fixed;left:-10000px;top:0;width:760px;background:#ffffff;";
+  const paper = memo.closest(".pb-paper") as HTMLElement | null;
+  const shell = document.createElement("div");
+  shell.className = "pb-pdf";
+  // The memo's accent colours are set on its paper wrapper.
+  if (paper) shell.style.cssText = paper.style.cssText;
+  const copy = memo.cloneNode(true) as HTMLElement;
+  copy.querySelectorAll(".pb-noprint").forEach((n) => n.remove());
+  copy.querySelectorAll<HTMLElement>(".pb-fact").forEach((n) => {
+    n.style.textDecoration = "none";
+    n.style.borderBottom = "0";
+    n.style.cursor = "default";
+  });
+  shell.appendChild(copy);
+  host.appendChild(shell);
+  document.body.appendChild(host);
+  try {
+    const pdf = new jsPDF({ unit: "pt", format: "letter" });
+    const M = 46;
+    const pageW = pdf.internal.pageSize.getWidth();
+    const pageH = pdf.internal.pageSize.getHeight();
+    const w = pageW - 2 * M;
+    const k = w / 760;
+    let y = M;
+    // The header and each section are blocks; a section's own children are used when it is taller than a page.
+    const blocks: HTMLElement[] = [];
+    for (const el of Array.from(copy.children) as HTMLElement[]) {
+      if (el.getBoundingClientRect().height * k > pageH - 2 * M && el.children.length > 1) blocks.push(...(Array.from(el.children) as HTMLElement[]));
+      else blocks.push(el);
+    }
+    for (const el of blocks) {
+      const rect = el.getBoundingClientRect();
+      if (rect.height < 1) continue;
+      const cs = getComputedStyle(el);
+      const gap = (parseFloat(cs.marginTop) || 0) * k;
+      const canvas = await html2canvas(el, { scale: 2, backgroundColor: "#ffffff", logging: false });
+      const h = (canvas.height / canvas.width) * w;
+      if (y > M && y + gap + h > pageH - M) {
+        pdf.addPage();
+        y = M;
+      } else y += y > M ? gap : 0;
+      if (h <= pageH - 2 * M) {
+        pdf.addImage(canvas.toDataURL("image/png"), "PNG", M, y, w, h, undefined, "FAST");
+        y += h;
+        continue;
+      }
+      // Taller than a page: cut the image across pages.
+      const slicePx = Math.floor(((pageH - 2 * M) / w) * canvas.width);
+      for (let top = 0; top < canvas.height; top += slicePx) {
+        const part = document.createElement("canvas");
+        part.width = canvas.width;
+        part.height = Math.min(slicePx, canvas.height - top);
+        part.getContext("2d")!.drawImage(canvas, 0, top, canvas.width, part.height, 0, 0, canvas.width, part.height);
+        if (top > 0) {
+          pdf.addPage();
+          y = M;
+        }
+        const ph = (part.height / part.width) * w;
+        pdf.addImage(part.toDataURL("image/png"), "PNG", M, y, w, ph, undefined, "FAST");
+        y += ph;
+      }
+    }
+    pdf.save(`${title.replace(/[\\/:*?"<>|]+/g, " ").trim() || "brief"}.pdf`);
+  } finally {
+    host.remove();
+  }
+}
+
 // ---------- the section ----------
 
 export default function BriefSection({
@@ -1004,6 +1095,7 @@ export default function BriefSection({
   const [frame, setFrame] = useState<BriefFrame | null>(null);
   const [view, setView] = useState<BriefView | null | undefined>(undefined);
   const [loading, setLoading] = useState(false);
+  const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [version, setVersion] = useState<BriefVersion | null>(null);
   const [mode, setMode] = useState<BriefMode>("composed");
@@ -1126,9 +1218,9 @@ export default function BriefSection({
     "pb-sans rounded-md border border-line bg-surface px-2.5 py-1 text-[13px] font-medium text-ink hover:border-ink-3 focus-visible:outline-2 focus-visible:outline-primary";
 
   return (
-    <div className="grid gap-6">
+    <div className="-mt-2 grid gap-4">
       <style>{BRIEF_CSS}</style>
-      <div className="pb-sans flex flex-wrap items-center gap-x-4 gap-y-2.5 lg:flex-nowrap">
+      <div className="pb-sans relative flex flex-wrap items-center gap-x-4 gap-y-2 whitespace-nowrap">
         {/* bf26: one "View as" menu for the seven frames (it opens on "Now what?"; a remembered choice still wins). */}
         <label className="flex items-center gap-1.5">
           <span className="text-[13px] text-ink-3">View as</span>
@@ -1140,7 +1232,7 @@ export default function BriefSection({
             ))}
           </select>
         </label>
-        <div className="flex flex-wrap items-center gap-x-3 gap-y-2 sm:ml-auto lg:flex-nowrap">
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-2 sm:ml-auto">
           {admin && (
             <div role="group" aria-label="Memo version" className="flex overflow-hidden rounded-md border border-line text-[13px] font-medium">
               {(["A", "B"] as const).map((v) => (
@@ -1175,15 +1267,28 @@ export default function BriefSection({
           )}
           <button
             type="button"
-            disabled={!memo || loading || writing}
-            onClick={() => memoRef.current && memo && printMemo(memoRef.current, memo.title)}
+            disabled={!memo || loading || writing || saving}
+            onClick={async () => {
+              if (!memoRef.current || !memo) return;
+              setSaving(true);
+              try {
+                await downloadMemoPdf(memoRef.current, memo.title);
+              } catch (e) {
+                // If the file cannot be built (an old browser), fall back to the print dialog rather than do nothing.
+                console.error("brief pdf failed", e);
+                printMemo(memoRef.current, memo.title);
+              } finally {
+                setSaving(false);
+              }
+            }}
             className="rounded-lg border border-line bg-surface px-3 py-1 text-[13px] font-medium text-ink transition-colors hover:border-ink-3 disabled:opacity-50"
           >
-            Download PDF
+            {saving ? "Preparing the PDF..." : "Download PDF"}
           </button>
         </div>
         {(loading || writing || (error && view)) && (
-          <div className="flex w-full flex-wrap gap-3">
+          // Sits in the gap under the row, out of the flow: the controls never move while a memo loads.
+          <div className="pointer-events-none absolute left-0 top-full flex gap-3 leading-4">
             {loading && <span className="text-[12px] text-ink-3">Updating...</span>}
             {writing && (
               <span className="text-[12px] italic text-ink-3">

@@ -142,7 +142,7 @@ export async function callCoder(
 // ---------------------------------------------------------------- parsing
 
 export type ParsedReply =
-  | { ok: true; obj: Record<string, unknown>; mode: "direct" | "extracted" | "split" }
+  | { ok: true; obj: Record<string, unknown>; mode: "direct" | "extracted" | "split" | "repaired" }
   | { ok: false };
 
 const isObj = (v: unknown): v is Record<string, unknown> => !!v && typeof v === "object" && !Array.isArray(v);
@@ -174,6 +174,69 @@ function objectSpans(s: string): string[] {
   return out;
 }
 
+/** Repairs for the formatting slips the coder makes around copied text (2026-11-16, from the five answers that
+ * stayed uncoded): a full stop or semicolon written between two fields where a comma belongs, a quotation mark
+ * inside a copied quote left unescaped, a backslash that starts no valid escape, a raw line break inside a string,
+ * and a trailing comma. Applied ONLY when the reply does not parse as written. */
+export function repairCoderJson(src: string): string {
+  let s = src.replace(/"\s*[.;]\s*(?="[A-Za-z_]+"\s*:)/g, '", ');
+  let out = "";
+  let inStr = false;
+  for (let i = 0; i < s.length; i++) {
+    const c = s[i];
+    if (!inStr) {
+      if (c === '"') inStr = true;
+      out += c;
+      continue;
+    }
+    if (c === "\\") {
+      const n = s[i + 1] ?? "";
+      if ('"\\/bfnrtu'.includes(n) && n !== "") {
+        out += c + n;
+        i++;
+      } else out += "\\\\";
+      continue;
+    }
+    if (c === "\n") { out += "\\n"; continue; }
+    if (c === "\r") { out += "\\r"; continue; }
+    if (c === "\t") { out += "\\t"; continue; }
+    if (c === '"') {
+      // A quotation mark ends the string only when what follows is JSON structure.
+      const rest = s.slice(i + 1);
+      const next = rest.match(/^\s*(.)/)?.[1] ?? "";
+      if (next === "" || next === "," || next === "}" || next === "]" || next === ":") {
+        inStr = false;
+        out += c;
+      } else out += '\\"';
+      continue;
+    }
+    out += c;
+  }
+  s = out.replace(/,(\s*[}\]])/g, "$1");
+  // A wrong closing bracket (an object closed with "]" or a list with "}") is swapped for the one that is open.
+  let fixed = "";
+  const stack: string[] = [];
+  let q = false;
+  for (let i = 0; i < s.length; i++) {
+    const c = s[i];
+    if (q) {
+      fixed += c;
+      if (c === "\\") fixed += s[++i] ?? "";
+      else if (c === '"') q = false;
+      continue;
+    }
+    if (c === '"') q = true;
+    else if (c === "{" || c === "[") stack.push(c);
+    else if (c === "}" || c === "]") {
+      const open = stack.pop();
+      if (open === "{" && c === "]") { fixed += "}"; continue; }
+      if (open === "[" && c === "}") { fixed += "]"; continue; }
+    }
+    fixed += c;
+  }
+  return fixed;
+}
+
 /** Tolerant reply parsing: <think> blocks and code fences stripped; one
  * object read directly or out of surrounding prose; two or more
  * consecutive objects (the split shape) merged with later objects winning
@@ -196,7 +259,27 @@ export function parseCoderReply(content: string): ParsedReply {
       /* a non-JSON brace span in prose */
     }
   }
-  if (!objs.length) return { ok: false };
+  if (!objs.length) {
+    // Nothing parsed as written: try once more with the known formatting slips repaired.
+    const fixed = repairCoderJson(unfenced);
+    if (fixed !== unfenced) {
+      try {
+        const v = JSON.parse(fixed);
+        if (isObj(v)) return { ok: true, obj: v, mode: "repaired" };
+      } catch {
+        for (const span of objectSpans(fixed)) {
+          try {
+            const v = JSON.parse(span);
+            if (isObj(v)) objs.push(v);
+          } catch {
+            /* still not JSON */
+          }
+        }
+        if (objs.length) return { ok: true, obj: Object.assign({}, ...objs), mode: "repaired" };
+      }
+    }
+    return { ok: false };
+  }
   return { ok: true, obj: Object.assign({}, ...objs), mode: objs.length > 1 ? "split" : "extracted" };
 }
 
@@ -356,6 +439,12 @@ export function toAnswerCodes(
         break;
       }
       case "pairings": {
+        // An answer that names nothing to use alongside the brand comes back as null: that is an empty list, not a broken row.
+        if (v === null) {
+          notes.push("pairings: null read as none named");
+          row.pairings = [];
+          break;
+        }
         if (!Array.isArray(v)) return { ok: false, why: "pairings is not a list" };
         const ok = v.filter((p): p is { name: string; maker_relation: string; framing: string } =>
           isObj(p) && typeof p.name === "string" && !!p.name.trim() && typeof p.maker_relation === "string" && MAKER.has(p.maker_relation) &&

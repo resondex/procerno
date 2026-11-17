@@ -43,8 +43,6 @@ export type HubPage = "overview" | "map";
 export type HubGo = "map" | "brief" | "build";
 /** One row of a finding's optional small chart (the engine's tension `viz`). */
 type TensionVizRow = NonNullable<AnalysisMapView["tensions"][number]["viz"]>[number];
-/** am62: the Overview leads with this many findings; the rest open in place behind "More findings". */
-const LEAD_FINDINGS = 3;
 /** A request from another page to open the slide-over; `n` makes a repeat click a new request. */
 export type PanelReq = { view: PanelView; n: number };
 
@@ -337,8 +335,8 @@ function Overview({
   // am62: the opening funnel paragraph restates the header's numbers (named, share of picks, the commit rate) and
   // adds a second pick number, so it is not a card here - left out by its key, not its place in the list.
   const tensions = map.tensions.filter((t) => t.key !== "known_vs_picked");
-  const [moreFindings, setMoreFindings] = useState(false);
-  const shownTensions = moreFindings ? tensions : tensions.slice(0, LEAD_FINDINGS);
+  // Every finding that makes the list is shown (owner, 2026-11-16: no "More findings" / "Show fewer").
+  const shownTensions = tensions;
   const barsOpen = !!show && tensions.some((t) => (t.viz ?? []).some((r) => (r.refs?.length ?? 0) > 0));
   const sec = "mt-11";
   return (
@@ -530,11 +528,6 @@ function Overview({
             );
           })}
         </div>
-        {tensions.length > LEAD_FINDINGS && (
-          <button type="button" onClick={() => setMoreFindings(!moreFindings)} className={`${T.ctl} mt-3 text-primary hover:underline`}>
-            {moreFindings ? "Show fewer" : "More findings"}
-          </button>
-        )}
       </section>
 
       {map.uncoded > 0 && (
