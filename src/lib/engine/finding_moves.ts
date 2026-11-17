@@ -116,7 +116,7 @@ export const FINDING_MOVES: Record<string, Entry> = {
     family: "Publish your case",
     text: (n, y) =>
       y === SECOND
-        ? `The AI teaches buyers to weigh ${low(n.topic ?? "")}, which favours your rivals; publish your evidence on it where the AI looks.`
+        ? `The AI tells buyers to look for ${low(n.topic ?? "")}, which favours your rivals; publish your evidence on it where the AI looks.`
         : `The AI tells buyers to look for ${low(n.topic ?? "")}, which favours ${y.your} rivals; publish its evidence on it where the AI looks.`,
   },
   neutralized_differentiator: {

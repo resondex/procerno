@@ -26,9 +26,9 @@ const PREMISE_PARTS: readonly Part<Premise>[] = [
 ];
 
 const PREMISE_TIPS: Record<Premise, string> = {
-  confirms: "Answers that tell the asker the worry is warranted.",
+  confirms: "Answers that tell the asker the worry is fair.",
   mixed: "Answers that grant part of the worry and push back on part.",
-  rebuts: "Rebuts the worry: answers that tell the asker the worry is not warranted.",
+  rebuts: "Rebuts the worry: answers that tell the asker the worry is not fair.",
 };
 
 interface Kind<V extends string> {

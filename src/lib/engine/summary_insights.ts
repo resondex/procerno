@@ -393,7 +393,7 @@ const yt = (second: string, third: (n: string) => string) => (STYLE ? third(STYL
 /** A buying situation inside a sentence (served: the label as written). */
 const buyer = (label: string) => (STYLE ? buyerPhrase(label) : label);
 /** The cards' word for an agreed worry. */
-const fairW = () => (STYLE ? "fair" : "warranted");
+const fairW = () => "fair";
 /** A quoted condition: the asker's "you" is "they" in the Brief (condLabel). */
 const qc = (label: string) => (STYLE ? condLabel(label) : label);
 
@@ -1156,7 +1156,7 @@ function doubtWorry(inp: InsightInputs): Insight | null {
   return {
     key: "doubt_worry",
     kind: "doubt",
-    title: STYLE ? `The worry it agrees with most: ${top.row.concern}` : `The worry it backs most: ${top.row.concern}`,
+    title: `The worry it agrees with most: ${top.row.concern}`,
     body: `When a ${top.who} raises "${top.row.concern}", the AI agrees it is ${fairW()} ${
       STYLE && top.row.premise.confirms.k === top.row.premise.confirms.n ? "every time it takes a side" : `${pct(top.row.premise.confirms)} of the time it takes a side`
     } - against ${pct(top.pool)} across all ${top.who}s' worries.`,
@@ -1345,7 +1345,7 @@ function agreedYetStay(inp: InsightInputs): Insight | null {
     look: { pill: "stations", station: best.who === "buyer" ? "doubts" : "customer_base", label: best.who === "buyer" ? "Stations - Doubts" : "Stations - Customers" },
     effect: rate(best.confirmed) * rate(best.given),
     viz: vizOf([
-      W("other", withRefs(insightBar("Agrees the worry is warranted", best.confirmed), inp.ex?.doubt(best.kind, (r) => r.code.premise_verdict === "confirms"))),
+      W("other", withRefs(insightBar("Agrees the worry is fair", best.confirmed), inp.ex?.doubt(best.kind, (r) => r.code.premise_verdict === "confirms"))),
       W(
         "you",
         withRefs(
@@ -1375,7 +1375,7 @@ function taughtVsWinning(s: Summary, inp: InsightInputs): Insight | null {
     parts.push(
       STYLE
         ? `${untaught.code} comes up ${pts(untaught.lift)} more often when ${STYLE.name} wins but is not among the five things the AI most often tells buyers to look for`
-        : `${untaught.code} comes up ${pts(untaught.lift)} more often when you win but is not among the five criteria the AI teaches buyers to weigh`
+        : `${untaught.code} comes up ${pts(untaught.lift)} more often when you win but is not among the five things the AI most often tells buyers to look for`
     );
     const tr = taughtOf(untaught.code);
     foot.push(`${untaught.code}: ${pct(untaught.wins)} of wins vs ${pct(untaught.others)} of rival picks; taught in ${tr ? counts(tr) : "no"} criteria answers.`);
@@ -1384,7 +1384,7 @@ function taughtVsWinning(s: Summary, inp: InsightInputs): Insight | null {
     parts.push(
       STYLE
         ? `${untaught ? "it" : "the AI"} tells buyers to look for ${losing.code}, which shows up more when a rival is picked (-${pts(losing.lift)})`
-        : `${untaught ? "it" : "the AI"} teaches buyers to weigh ${losing.code}, which shows up more when a rival is picked (-${pts(losing.lift)})`
+        : `${untaught ? "it" : "the AI"} tells buyers to look for ${losing.code}, which shows up more when a rival is picked (-${pts(losing.lift)})`
     );
     foot.push(`${losing.code}: ${pct(losing.wins)} of wins vs ${pct(losing.others)} of rival picks; taught in ${counts(taughtOf(losing.code)!)}.`);
   }
@@ -1393,7 +1393,7 @@ function taughtVsWinning(s: Summary, inp: InsightInputs): Insight | null {
   return {
     key: "taught_vs_winning",
     kind: "argument",
-    title: untaught ? `${untaught.code} wins but is seldom taught` : STYLE ? `The AI tells buyers to look for ${losing!.code}, which favors rivals` : `The AI teaches ${losing!.code}, which favors rivals`,
+    title: untaught ? `${untaught.code} wins but is seldom taught` : `The AI tells buyers to look for ${losing!.code}, which favors rivals`,
     body: `${body.charAt(0).toUpperCase()}${body.slice(1)}.`,
     foot: `${foot.join(" ")} Top five taught: ${top5.map((t) => t.code).join(", ")}.`,
     look: { pill: "why", label: "Why" },

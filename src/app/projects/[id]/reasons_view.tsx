@@ -181,7 +181,7 @@ export default function ReasonsSection({
       </div>
       {selected?.key === "criteria_taught" && (
         <p className="text-[12px] text-ink-3">
-          Criteria answers list what to check rather than argue for a pick, so these are the criteria the AI teaches. They stay
+          Criteria answers list what to check rather than argue for a pick, so these are what the AI tells buyers to look for. They stay
           out of the all-types column.
         </p>
       )}
