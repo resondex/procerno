@@ -1086,7 +1086,29 @@ function ContestMap({
 // ---------- the Map: by rival ----------
 
 /** One rival as a table row (2026-11-16: the By rival landing is a table, not a wall of cards). */
-function RivalCard({ d, ctx }: { d: Dossier; ctx: PanelCtx }) {
+/** One short line for a rival's card: how it stands on picks, then head to head. No numbers - the card shows them. */
+function rivalLine(named: number, share: number, top: boolean, h2h: "it" | "you" | "even" | null): string {
+  const strong = top || share >= 10;
+  const picks = top
+    ? "Takes the most picks"
+    : share >= 10 && named < 50
+      ? "Named seldom, but picked often when it is"
+      : share >= 10
+        ? "Takes a real share of the picks"
+        : share < 2 && named < 30
+          ? "Rarely named and almost never the pick"
+          : share < 2
+            ? "Named, but almost never the pick"
+            : named >= 50
+              ? "Named often, rarely picked"
+              : "Takes few picks";
+  if (!h2h) return `${picks}.`;
+  if (h2h === "even") return `${picks}, and level with you when asked directly.`;
+  const same = (h2h === "it") === strong;
+  return `${picks}, ${same ? "and" : "but"} ${h2h === "it" ? "it wins" : "you win"} when asked directly.`;
+}
+
+function RivalCard({ d, ctx, top }: { d: Dossier; ctx: PanelCtx; top: boolean }) {
   const queued = useMatchupQueued(d.key);
   const pct = (x?: string) => parseFloat((x ?? "0").replace(/[^0-9.]/g, "")) || 0;
   const share = d.tiles[1]?.value;
@@ -1124,7 +1146,7 @@ function RivalCard({ d, ctx }: { d: Dossier; ctx: PanelCtx }) {
           {chip.text}
         </span>
       </span>
-      {d.headline && <span className={`${T.sec} text-ink-2`}>{d.headline}</span>}
+      <span className={`${T.sec} text-ink-2`}>{rivalLine(pct(d.tiles[0]?.value), pct(share), top, rec ? (gap >= 10 ? "it" : gap <= -10 ? "you" : "even") : null)}</span>
       <span className="mt-1 flex flex-wrap gap-x-8 gap-y-2">
         <span>
           <span className={`block ${T.cap} text-ink-3`}>Share of picks</span>
@@ -1172,8 +1194,8 @@ function RivalGrid({ dossiers, loading, ctx }: { dossiers: Dossier[]; loading: b
   return (
     <>
       <div className="grid gap-3 md:grid-cols-2">
-        {shown.map((d) => (
-          <RivalCard key={d.key} d={d} ctx={ctx} />
+        {shown.map((d, i) => (
+          <RivalCard key={d.key} d={d} ctx={ctx} top={i === 0 && pc(d) > 0} />
         ))}
       </div>
       <p className={`${T.cap} mt-2 text-ink-3`}>Click a rival to open it.</p>
