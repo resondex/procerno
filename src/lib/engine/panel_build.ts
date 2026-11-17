@@ -1,3 +1,4 @@
+import { pctFine } from "./summary_insights";
 import { isDefaultCondition } from "./condition_groups";
 import { famTokens } from "./brand_family";
 import { pickRefs, spreadRefs, themeAnswerSets, type AnswerRules, type ThemeMap } from "./reason_themes";
@@ -1191,13 +1192,23 @@ function pickPanel(inp: PanelCellInput, ctx: Ctx): PositionPanel {
     const um = us.list.find((b) => b.key === h.targetKey)?.rows ?? [];
     shareLine.value = join(N(share), " here · ", N(num(um.length, us.n, "picks", refsOf(um, (r) => h.quoteOf(r) || r.code.top_pick || h.brand))), switching ? " across all rivals' customers" : " across all buyers");
   }
-  lines.push(shareLine);
+  // am70: the average competitor's share sits on this line, and "picked, of all answers" gets its own line -
+  // the two figures the Brief's scoreboard quotes that no card stated. One decimal under 10%, as the Brief prints it.
+  const fineNum = (k: number, n: number, unit: string, refs?: AnswerRef[]): PanelNum => ({ ...num(k, n, unit, refs), value: pctFine(n > 0 ? k / n : 0) });
+  const compPicks = comp.reduce((a, b) => a + b.rows.length, 0);
+  const compRefs = refsOf(comp.flatMap((b) => b.rows), (r) => h.quoteOf(r) || r.code.top_pick || "");
+  const avgShare = comp.length >= 2 ? fineNum(compPicks, split.n * comp.length, "picks, per listed competitor", compRefs) : undefined;
+  const youPicked = fineNum(mine.length, inp.rows.length, "answers", refsOf(mine, (r) => h.quoteOf(r) || r.code.top_pick || h.brand));
+  const avgPicked = comp.length >= 2 ? fineNum(compPicks, inp.rows.length * comp.length, "answers, per listed competitor", compRefs) : undefined;
+  if (avgShare) shareLine.value = join(shareLine.value, " · the average competitor ", N(avgShare));
+  const pickedLine: PanelLine = { label: "Picked, of all answers", value: avgPicked ? join(N(youPicked), " · the average competitor ", N(avgPicked)) : join(N(youPicked)) };
+  lines.push(shareLine, pickedLine);
   if (mine.length >= 5 && ctx.ladder) {
     const items = productSplit(mine, (r) => pickedProduct(r, ctx, true), 2, "of your picks", nounToks(ctx), nameTokens(h.brand, ctx));
     if (namesAProduct(items)) lines.push({ label: `Which of your ${h.plural} it picks`, value: splitLine(items) });
   }
   const weighs = weighsAll(inp, ctx);
-  linesComp.push(shareLine);
+  linesComp.push(shareLine, pickedLine);
   const othersPicked = inp.rows.filter((r) => h.pickOf(r).status === "active" && h.pickOf(r).key !== h.targetKey);
   const negs = inp.lifts.filter((l) => l.value < 0).sort((a, b) => a.value - b.value).slice(0, 2);
   const poss = inp.lifts.filter((l) => l.value > 0).sort((a, b) => b.value - a.value).slice(0, 1);
@@ -1230,6 +1241,7 @@ function pickPanel(inp: PanelCellInput, ctx: Ctx): PositionPanel {
     ...(conditions ? { conditions } : {}),
     lines,
     linesComp,
+    ...(avgShare && avgPicked ? { avgShare, avgPicked } : {}),
     ...(weighs ? { weighs } : {}),
     ...(weighsComp ? { weighsComp } : {}),
     ...(rivals.length ? { rivals } : {}),

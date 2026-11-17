@@ -646,6 +646,9 @@ export interface PositionPanel {
   compare?: true;               // the "Show competitors" switch is drawn
   /** am35: a panel with no usual: its steps' `usual` is the listed competitors taken together ("Average competitor"), shown with the switch off. */
   avgComp?: true;
+  /** am70: the average listed competitor's share of the picks and its picked-of-all-answers (the Brief's scoreboard quotes them). */
+  avgShare?: PanelNum;
+  avgPicked?: PanelNum;
   competitorOrder?: string[];    // brand names behind PanelStep.rivals
   competitors?: PanelBlock;      // "Who takes the picks" / "Which ... it names instead" / "... it shows" (comparison view only)
   conditions?: PanelConditions;
