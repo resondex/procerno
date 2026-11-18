@@ -17,11 +17,12 @@
  *    the tracker's own other products and names outside;
  *  - the price question's "instead" bucket (ruling 3): a rival first, else the tracker's own cheaper option (only
  *    when the tracker sells a ladder of its own lines), else nowhere;
- *  - pairings, and the decision rules as coded (condition text, the choice resolved, the product). Condition
- *    GROUPING and themes are not part of this layer yet - raw rules only.
+ *  - pairings, and the decision rules as coded (condition text, the choice resolved, the product);
+ *  - the conditions it states (`conds`): each rule's condition group and reason theme, read from the run's saved
+ *    grouping and themes by attachConditions (conditions.ts, async - it reads the shared run themes).
  *
- * Pure: reads ViewData, writes nothing, calls no model. Built beside the existing counters; nothing on screen reads
- * it yet.
+ * buildAnswerFacts is pure: reads ViewData, writes nothing, calls no model. Built beside the existing counters;
+ * nothing on screen reads it yet.
  */
 import { matchKey } from "../../brand_key";
 import { buildResolver, type Resolved, type Resolver } from "../brand_resolve";
@@ -30,6 +31,7 @@ import { engineFacets } from "../providers";
 import { corePanel, type ViewData } from "../view_data";
 import { SCHEMA_FIELDS, schemaOf, type CodeSchema } from "../views";
 import type { AnswerCodes, DictionaryEntry, Intent } from "../../types";
+import type { CondStmt } from "./conditions";
 
 /* ------------------------------- question types ------------------------------- */
 
@@ -207,6 +209,9 @@ export interface AnswerFact {
   price: PriceFact | null;
   pairings: { name: string; key: string | null; bucket: Bucket; relation: string; framing: string }[] | null;
   rules: RuleFact[] | null;
+  /** The conditions it states, one statement per (unit, answer) - filled by attachConditions (conditions.ts) from the
+   * run's saved grouping and themes; null = no decision rules on this answer (or not attached yet). */
+  conds: CondStmt[] | null;
 }
 
 /** The set of answer facts for one run, with the few tracker-level facts the measures need. */
@@ -546,6 +551,7 @@ export function buildAnswerFacts(data: ViewData, opts: BuildOptions = {}): Answe
       price,
       pairings,
       rules,
+      conds: null,
     };
   }
 

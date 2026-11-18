@@ -12,12 +12,24 @@
  *  7  "what to buy, all buyers" = discovery + use case only (fact.ts WHAT_TO_BUY_ALL);
  *  8  share of picks is out of picks of brands in analysis; out-of-analysis and out-of-category picks are their
  *     own buckets; a brand outside of analysis is never a subject;
- *  9  "agrees the worry is fair" is out of the answers that agree, partly agree or disagree.
+ *  9  "agrees the worry is fair" is out of the answers that agree, partly agree or disagree;
+ *  10 a condition is counted inside one question type's scope, never pooled across types (fact.ts refuses);
+ *  12 a pick outside the category is never "no single pick": the "no single pick" measures count only answers with
+ *     no pick at all; a pick outside the category is its own share (picks_outside_category, slice pick:outside_category);
+ *  13 a premium answer with no tier stance is its own share (tier_none), never "balanced".
+ *
+ * Besides the fixed measures, three take a parameter in the subject (fact.ts parses it):
+ *  - an argument: "<subject>/arg:<code>";
+ *  - a condition: "<subject>/cond:<units>[>to:<key>][>card:<name key>][@<slice>]" (layer 1's statements);
+ *  - a slice: "ai/slice:<slice>" (slices.ts) - the share of the scope's answers in the slice.
+ * And any measure can be counted on a slice of a scope (Scope.when): a side of "What the answer weighs", the answers
+ * that agree, the answers that pick the rival.
  *
  * Pure: reads AnswerFact records only.
  */
 import type { AnswerFact, AnswerFactSet, QuestionType } from "./answer_facts";
 import { QUESTION_TYPES } from "./answer_facts";
+import { famTokens } from "../brand_family";
 
 /* ------------------------------- floors ------------------------------- */
 
@@ -80,6 +92,26 @@ export interface MeasureCtx {
   rival: boolean;
   /** The argument code an argument measure reads. */
   arg: string | null;
+  /** The condition a condition measure reads. */
+  cond: CondSpec | null;
+  /** The slice a slice measure counts (slices.ts). */
+  slice: ((f: AnswerFact) => boolean) | null;
+}
+
+/**
+ * A condition as a measure reads it: a set of units (conditions.ts - themes, groups, the Map's groups) that count as
+ * one condition, optionally only the statements that send the buyer to one brand, and optionally only on answers in
+ * a slice (a filter on the numerator; the base stays the scope's).
+ *
+ * Written in a subject as "<subject>/cond:<unit>+<unit>[>to:<brand key>][>card:<name key>][@<slice>]".
+ */
+export interface CondSpec {
+  units: Set<string>;
+  to: string | null;
+  /** A product the statements name, by its name key (famTokens joined) - "cond_card" only. */
+  card: string | null;
+  /** A slice the stating answer must also be in (slices.ts). */
+  only: ((f: AnswerFact) => boolean) | null;
 }
 
 export interface Measure {
@@ -89,6 +121,10 @@ export interface Measure {
   subject: "brand" | "ai" | "brand_or_rival";
   /** Reads an argument code (passed in the subject as "<subject>/arg:<code>"). */
   arg?: boolean;
+  /** Reads a condition (passed in the subject as "<subject>/cond:<spec>"). */
+  cond?: boolean;
+  /** Reads a slice as its numerator (passed in the subject as "ai/slice:<slice>"). */
+  slice?: boolean;
   /** The question types it is legal on; any other type is refused. */
   legal: readonly QuestionType[];
   /** The base: which answers count in the denominator. */
@@ -127,6 +163,18 @@ const youPick = (f: AnswerFact, c: MeasureCtx) => pickIs(f, c.set.target.key);
 const v = (f: AnswerFact, field: keyof AnswerFact["verdicts"], ...values: string[]) => values.includes(f.verdicts[field] ?? "");
 const judged = (f: AnswerFact) => v(f, "premise_verdict", "confirms", "mixed", "rebuts");
 const argues = (f: AnswerFact, c: MeasureCtx) => !!c.arg && (f.args ?? []).includes(c.arg);
+/** The answer's statements of the measure's condition (to-filter applied). */
+const condStmts = (f: AnswerFact, c: MeasureCtx) => (c.cond ? (f.conds ?? []).filter((s) => c.cond!.units.has(s.unit) && (!c.cond!.to || s.toKeys.includes(c.cond!.to))) : []);
+/** The answer states the measure's condition (and is in its numerator slice). */
+const states = (f: AnswerFact, c: MeasureCtx) => condStmts(f, c).length > 0 && (!c.cond!.only || c.cond!.only(f));
+/** Where the answer's statements of the condition send the buyer (active brands, by entry id). */
+const condTo = (f: AnswerFact, c: MeasureCtx) => new Set(condStmts(f, c).flatMap((s) => s.toKeys));
+/** A product's name key: its words, case and punctuation set aside (the alongside card's grouping of products). */
+export const cardKey = (c: string) => famTokens(c).join(" ") || c.trim().toLowerCase();
+/** The products the answer's statements of the condition name, by name key. */
+const condCards = (f: AnswerFact, c: MeasureCtx) => new Set(condStmts(f, c).flatMap((s) => s.cards.filter((x) => x.trim()).map(cardKey)));
+/** Condition measures are legal wherever decision rules are coded. */
+const RULE_TYPES: readonly QuestionType[] = ["discovery", "use_case", "social_validation", "premium_worth", "repertoire", "comparison_entity", "comparison_class", "switching", "looking_around", "pricing", "objections", "churn_triggers", "renewal", "expansion", "ecosystem"];
 const verdict = (id: string, name: string, legal: readonly QuestionType[], field: keyof AnswerFact["verdicts"], values: string[]): Measure => ({
   id,
   name,
@@ -266,6 +314,10 @@ export const MEASURES: readonly Measure[] = [
   verdict("growth_neutral", "Neither backs nor discourages", ["expansion"], "growth_stance", ["neutral"]),
   verdict("growth_redirects", "Points them elsewhere", ["expansion"], "growth_stance", ["redirects"]),
 
+  /* -- a slice of the scope's answers, as a share of them: "picks another brand", "sticks with you", "suggests
+   * another brand" - the slice states what it counts (slices.ts). -- */
+  { id: "slice_share", name: "In the slice", subject: "ai", slice: true, legal: ALL, base: all, hit: (f, c) => !!c.slice && c.slice(f), print: "whole" },
+
   /* -- arguments (ruling 2) -- */
   { id: "argues", name: "Argues it", subject: "ai", arg: true, legal: ALL, base: all, hit: argues, print: "whole" },
   { id: "argues_when_picked", name: "Argues it, when the brand is the pick", subject: "brand", arg: true, legal: PICK_TYPES, base: (f, c) => pickIs(f, c.brand), hit: argues, print: "whole" },
@@ -277,6 +329,41 @@ export const MEASURES: readonly Measure[] = [
     legal: PICK_TYPES,
     base: (f, c) => inAnalysisPick(f) && !pickIs(f, c.brand),
     hit: argues,
+    print: "whole",
+  },
+
+  /* -- conditions (layer 1's statements; ruling 4: of ALL the answers in the scope; ruling 10: one question-type
+   * scope at a time - a scope pooling question types is refused) -- */
+  { id: "cond_share", name: "States the condition", subject: "ai", cond: true, legal: RULE_TYPES, base: all, hit: states, print: "whole" },
+  { id: "cond_none", name: "States none of the condition's units", subject: "ai", cond: true, legal: RULE_TYPES, base: all, hit: (f, c) => !states(f, c), print: "whole" },
+  {
+    id: "cond_you_picked",
+    name: "Of the answers stating the condition, the tracker is the pick",
+    subject: "ai",
+    cond: true,
+    legal: RULE_TYPES,
+    base: states,
+    hit: (f, c) => pickIs(f, c.set.target.key),
+    print: "whole",
+  },
+  {
+    id: "cond_dest",
+    name: "Of the answers stating the condition that name a destination under it, sends the buyer to the brand",
+    subject: "brand",
+    cond: true,
+    legal: RULE_TYPES,
+    base: (f, c) => states(f, c) && condTo(f, c).size > 0,
+    hit: (f, c) => condTo(f, c).has(c.brand ?? ""),
+    print: "whole",
+  },
+  {
+    id: "cond_card",
+    name: "Of the answers stating the condition that name a product under it, names the product",
+    subject: "ai",
+    cond: true,
+    legal: RULE_TYPES,
+    base: (f, c) => states(f, c) && condCards(f, c).size > 0,
+    hit: (f, c) => condCards(f, c).has(c.cond!.card ?? ""),
     print: "whole",
   },
 ];
