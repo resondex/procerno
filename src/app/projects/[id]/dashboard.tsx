@@ -2070,12 +2070,16 @@ function ShareButton({ projectId }: { projectId: string }) {
   const [link, setLink] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
   const [busy, setBusy] = useState(false);
-  const create = async (ttl: "48h" | "7d") => {
+  const [days, setDays] = useState("7");
+  const n = Number(days);
+  const valid = Number.isInteger(n) && n >= 1 && n <= 30;
+  const create = async () => {
+    if (!valid) return;
     setBusy(true);
     const res = await fetch(`/api/projects/${projectId}/share`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ ttl }),
+      body: JSON.stringify({ days: n }),
     });
     setBusy(false);
     if (!res.ok) return;
@@ -2103,26 +2107,33 @@ function ShareButton({ projectId }: { projectId: string }) {
                   Share this dashboard
                 </span>
                 <span className="block text-[12px] text-ink-3 mb-3">
-                  Anyone with the link can view results — running, editing,
-                  and deleting stay disabled. The link expires on its own.
+                  Anyone with the link can view results - running, editing,
+                  and deleting stay disabled. The link stops working after the
+                  number of days you choose, up to 30.
                 </span>
-                <span className="flex gap-2">
-                  <button type="button" disabled={busy}
-                    onClick={() => create("48h")}
-                    className="btn-primary flex-1 text-sm disabled:opacity-50">
-                    48 hours
-                  </button>
-                  <button type="button" disabled={busy}
-                    onClick={() => create("7d")}
-                    className="btn-primary flex-1 text-sm disabled:opacity-50">
-                    7 days
-                  </button>
-                </span>
+                <label className="mb-3 flex items-center gap-2 text-[13px] text-ink-2">
+                  Link works for
+                  <input type="number" min={1} max={30} step={1} value={days}
+                    onChange={(e) => setDays(e.target.value)}
+                    onKeyDown={(e) => { if (e.key === "Enter") void create(); }}
+                    className="input w-16 px-2 py-1 text-center text-sm" />
+                  {n === 1 ? "day" : "days"}
+                </label>
+                {!valid && (
+                  <span className="mb-2 block text-[12px] text-ink-3">
+                    Choose a whole number of days, from 1 to 30.
+                  </span>
+                )}
+                <button type="button" disabled={busy || !valid}
+                  onClick={() => void create()}
+                  className="btn-primary w-full text-sm disabled:opacity-50">
+                  Create link
+                </button>
               </>
             ) : (
               <>
                 <span className="block text-sm font-semibold mb-2">
-                  Link ready
+                  Link ready - works for {n} {n === 1 ? "day" : "days"}
                 </span>
                 <input readOnly value={link}
                   onFocus={(e) => e.target.select()}
