@@ -145,6 +145,9 @@ export interface NamedBrand {
   mentioned: boolean;
   /** The first surface form as written. */
   written: string;
+  /** Every surface form as written, in order of first appearance, deduplicated (the pick's form last when the
+   * answer only names it as the pick) - the input of the product-name groupings (selections.ts). */
+  forms: string[];
 }
 
 export interface SentTo {
@@ -428,6 +431,7 @@ export function buildAnswerFacts(data: ViewData, opts: BuildOptions = {}): Answe
       if (prev) {
         if (m.framing === "recommended") prev.recommended = prev.framedRecommended = true;
         if (m.framing === "negative") prev.negative = true;
+        if (!prev.forms.includes(m.brand)) prev.forms.push(m.brand);
         continue;
       }
       byKey.set(r.key, {
@@ -440,12 +444,15 @@ export function buildAnswerFacts(data: ViewData, opts: BuildOptions = {}): Answe
         order: byKey.size,
         mentioned: true,
         written: m.brand,
+        forms: [m.brand],
       });
     }
     if (pick.key && pick.state !== "none") {
       const prev = byKey.get(pick.key);
-      if (prev) prev.recommended = true;
-      else byKey.set(pick.key, { key: pick.key, name: pick.name!, bucket: pick.state, recommended: true, framedRecommended: false, negative: false, order: byKey.size, mentioned: false, written: pick.written! });
+      if (prev) {
+        prev.recommended = true;
+        if (!prev.forms.includes(pick.written!)) prev.forms.push(pick.written!);
+      } else byKey.set(pick.key, { key: pick.key, name: pick.name!, bucket: pick.state, recommended: true, framedRecommended: false, negative: false, order: byKey.size, mentioned: false, written: pick.written!, forms: [pick.written!] });
     }
 
     // Where the buyer is sent.

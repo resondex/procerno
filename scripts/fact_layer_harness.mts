@@ -13,11 +13,17 @@
  *      a known fault or a known conflict with no ruling yet (named, from ENGINE_INVENTORY_2026-11-17.md) - the
  *                              alternative that reproduces it is stated;
  *      unexplained           - a failure (listed);
- *  - which card rows a card lists is a selection (layer 3, not built): the harness picks the row's subject from the
- *    card (a condition row's units by its label, a weighs column's slice by the card kind, a rival's own card), and
- *    the row's NUMBER must still be a fact;
- *  - stats with counts that no measure covers are counted by why and path prefix: the average competitor (a
- *    selection, layer 3) and product names (no product grouping in layer 1 yet); anything else is "other";
+ *  - in the number check the harness picks a row's subject from the card (a condition row's units by its label, a
+ *    weighs column's slice by the card kind, a rival's own card), and the row's NUMBER must be a fact;
+ *  - layer 3 (selections.ts): every list a selection reproduces is compared with the card or Brief that draws it,
+ *    membership and order - the competitor group (today's rule, mode "as_cards"), "Who takes the picks", who takes
+ *    the pick after recommending you, the checklist, the condition rows per side, the weighs columns, the leader of
+ *    each buying situation and the visibility chart's brands (the tracker's own Brief); any difference is a failure
+ *    unless it is a named display rule verified on the card. The 564 average-competitor numbers are proved from the
+ *    as_cards group's members (each member's own fact, pooled); the ratified group's before / after, the "as_cards"
+ *    vs "ruled" vs mean-of-rates arithmetic and the product-name groupings are reported for the owner;
+ *  - stats with counts that no measure covers are counted by why and path prefix: product names (the groupings are
+ *    selections' modes; which one is THE rule is an owner ruling); anything else is "other";
  *  - numbers inside sentences with no counts are not facts: each is checked against the covered facts' printed
  *    numbers on the same card (equal text = it can cite that fact), and the rest are listed by path prefix - the
  *    statements layer's input;
@@ -42,7 +48,7 @@ const { buildStatRegistry } = await import(ROOT + "/src/lib/engine/stat_registry
 const { cachedRunRevision } = await import(ROOT + "/src/lib/engine/run_revision.ts");
 const { buildAnswerFacts } = await import(ROOT + "/src/lib/engine/facts/answer_facts.ts");
 const { factBook, WHAT_TO_BUY_ALL } = await import(ROOT + "/src/lib/engine/facts/fact.ts");
-const { printWhole } = await import(ROOT + "/src/lib/engine/facts/measure_book.ts");
+const { printWhole, printOf, MEASURE_BY_ID } = await import(ROOT + "/src/lib/engine/facts/measure_book.ts");
 const { computeWorkbench } = await import(ROOT + "/src/lib/engine/workbench.ts");
 const { MEASURE_BY_ID: DATA_MEASURES } = await import(ROOT + "/src/lib/engine/measures.ts");
 const { buildResolver } = await import(ROOT + "/src/lib/engine/brand_resolve.ts");
@@ -50,7 +56,17 @@ const { attachConditions } = await import(ROOT + "/src/lib/engine/facts/conditio
 const { condRowLabel } = await import(ROOT + "/src/lib/engine/panel_text.ts");
 const { isDefaultCondition } = await import(ROOT + "/src/lib/engine/condition_groups.ts");
 const { cardKey } = await import(ROOT + "/src/lib/engine/facts/measure_book.ts");
+const { selectionBook, averageCompetitor, productGroups, brandNameTokens } = await import(ROOT + "/src/lib/engine/facts/selections.ts");
+const { computeBrief } = await import(ROOT + "/src/lib/engine/brief.ts");
+const { famTokens } = await import(ROOT + "/src/lib/engine/brand_family.ts");
 const DUMP = process.env.FACT_DUMP ?? "";
+/** Layer 3: per selection, lists checked, equal, explained (by name); the owner's before / after lines. */
+const selTotals = new Map<string, { checked: number; equal: number; explained: Map<string, number> }>();
+const selReport: string[] = [];
+const avgModes = { compared: 0, asCardsVsRuled: 0, meanDiffers: 0, meanExamples: [] as string[] };
+const avgRatified = { compared: 0, differ: 0, differGroup: 0, notPick: 0, examples: [] as string[] };
+const avgPending = new Set<string>();
+const productDiff: { brand: string; a: string; b: string; rows: number; rowsB: number; differ: number; differBig: number }[] = [];
 
 type Scope = import("../src/lib/engine/facts/fact.ts").Scope;
 type QT = import("../src/lib/engine/facts/answer_facts.ts").QuestionType;
@@ -1036,6 +1052,11 @@ for (const project of (await store.listProjects()).filter((p: any) => !p.archive
     let mapped = mapStat(stat);
     if ("group" in mapped && stat.k !== undefined && PRODUCT_PATH.test(stat.id) && !/\(/.test(mapped.group)) mapped = { group: `${mapped.group} (product names: no product grouping in layer 1 yet)` };
     if ("group" in mapped && stat.k === undefined) sentenceStats.push(stat);
+    // The average competitor is a selection (layer 3): proved below from the competitor group's members.
+    if ("group" in mapped && /average competitor: a selection, layer 3/.test(mapped.group)) {
+      avgPending.add(stat.id);
+      continue;
+    }
     if ("group" in mapped) {
       local.notCovered.set(mapped.group, (local.notCovered.get(mapped.group) ?? 0) + 1);
       if (DUMP) dumpRows.push(JSON.stringify({ b: brand, g: mapped.group, id: stat.id, v: stat.value, k: stat.k, n: stat.n, w: stat.words }));
@@ -1214,6 +1235,353 @@ for (const project of (await store.listProjects()).filter((p: any) => !p.archive
   totals.sentUnmatched += unmatchedN;
   for (const [k, v] of sent.unmatched) totals.sentByPrefix.set(k, (totals.sentByPrefix.get(k) ?? 0) + v);
 
+  /* ---------- layer 3: selections ---------- */
+  const sb = selectionBook(set, book, data);
+  const selLocal = new Map<string, { checked: number; equal: number; explained: Map<string, number> }>();
+  const selCount = (name: string, how: "equal" | string) => {
+    const t = selLocal.get(name) ?? { checked: 0, equal: 0, explained: new Map<string, number>() };
+    t.checked++;
+    if (how === "equal") t.equal++;
+    else t.explained.set(how, (t.explained.get(how) ?? 0) + 1);
+    selLocal.set(name, t);
+  };
+  const selFail = (name: string, msg: string) => {
+    const t = selLocal.get(name) ?? { checked: 0, equal: 0, explained: new Map<string, number>() };
+    t.checked++;
+    selLocal.set(name, t);
+    local.unexplained.push(`selection ${name}: ${msg}`);
+  };
+  const keysOfNames = (xs: string[]) => xs.map((n) => keyOf(n) === "you" ? T : keyOf(n));
+  const same = (a: string[], b: string[]) => a.length === b.length && a.every((x, i) => x === b[i]);
+  const CARD_OF: Record<string, any> = { buy: "buy", switching: "switching", problem: "problem", popular: "popular", premium: "premium", learning: "learning", buyer_worry: "worry", customer_worry: "worry", value: "value" };
+  /** The scope today's card counts on (ruling 7: the all-buyers What to buy card pools four types). */
+  const cardScope = (id: string) => {
+    const c = cellScope(id);
+    return c ? c.today ?? c.scope : null;
+  };
+
+  // 1. competitors, mode as_cards: membership and order equal the card's competitor group, cell by cell.
+  for (const [id, pos] of Object.entries<any>(map.positions)) {
+    const p = pos.panel;
+    const card = p && CARD_OF[p.kind];
+    if (!card) continue;
+    const sc = cardScope(id);
+    if (!sc) continue;
+    const sel = sb.selection("competitors", "you", sc, { mode: "as_cards", card });
+    const got = sel.members.map((m: any) => m.key);
+    let want: string[];
+    if (card === "worry") want = keysOfNames((p.competitors?.rows ?? []).map((r: any) => r.name));
+    else if (card === "value") want = keysOfNames((p.rivals ?? []).map((r: any) => r.name));
+    else want = keysOfNames(p.competitorOrder ?? []);
+    if (same(got, want)) selCount("competitors (as_cards)", "equal");
+    else selFail("competitors (as_cards)", `${id} (${p.kind}): selection [${sel.members.map((m: any) => m.name).join(", ")}] card [${(p.competitorOrder ?? p.competitors?.rows?.map((r: any) => r.name) ?? p.rivals?.map((r: any) => r.name) ?? []).join(", ")}]`);
+  }
+
+  // 1b. competitors, ratified: the before / after for the owner (What to buy, all buyers and each buyer).
+  {
+    const lines: string[] = [];
+    const show = (label: string, scope: Scope, todayCard: Scope) => {
+      const r = sb.selection("competitors", "you", scope);
+      const before = sb.selection("competitors", "you", todayCard, { mode: "as_cards", card: "buy" });
+      const o = r.extras.other;
+      // The identity the ratified Other row rests on: listed + you + other = every pick of a brand in analysis.
+      const sum = r.members.reduce((a: number, m: any) => a + m.count, 0) + r.extras.youPicks + o.picks;
+      if (sum !== r.extras.totalPicks) local.unexplained.push(`selection competitors (ratified) ${label}: listed ${r.members.reduce((a: number, m: any) => a + m.count, 0)} + you ${r.extras.youPicks} + other ${o.picks} != ${r.extras.totalPicks} picks of brands in analysis`);
+      else selCount("competitors (ratified): picks add to 100%", "equal");
+      return { label, before: before.members.map((m: any) => m.name), listed: r.members.map((m: any) => `${m.name} ${m.count}${m.headToHead ? " (head-to-head)" : ""}`), shown: o.shown.map((x: any) => `${x.name} ${x.picks}p/${Math.round((100 * x.named) / Math.max(1, book.rows(scope).length))}%n`), rest: o.rest, total: r.extras.totalPicks };
+    };
+    const all = show("all buyers", WHAT_TO_BUY_ALL, WHAT_TO_BUY_TODAY);
+    lines.push(`   COMPETITORS ${all.label} (${all.total} picks of brands in analysis):`, `     today (top five by picks, 4-type pool): ${all.before.join(", ")}`, `     ratified: ${all.listed.join(", ")}`, `     other shown (picks / named): ${all.shown.join(", ") || "-"}; ${all.rest} more brand(s)`);
+    const sits = [...new Set(factsOfType(["discovery", "use_case"]).map((f) => f.situation).filter((s): s is string => !!s))].sort();
+    let changed = 0;
+    let gained = 0;
+    let lost = 0;
+    for (const s of sits) {
+      const sc: Scope = { types: ["discovery", "use_case"], situation: s };
+      const x = show(s, sc, sc);
+      const after = x.listed.map((l: string) => l.replace(/ \d+( \(head-to-head\))?$/, ""));
+      if (!same(after, x.before)) changed++;
+      gained += after.filter((n: string) => !x.before.includes(n)).length;
+      lost += x.before.filter((n: string) => !after.includes(n)).length;
+      lines.push(`     buyer "${s}": today [${x.before.join(", ")}] -> ratified [${x.listed.join(", ")}]; other shown ${x.shown.length}, ${x.rest} more`);
+    }
+    lines.push(`     buyer scopes: ${sits.length}, group changes in ${changed}; ${gained} rival(s) join, ${lost} leave`);
+    selReport.push(`== ${brand}`, ...lines);
+  }
+
+  // 2. takers: "Who takes the picks" (What to buy and switching cards) and "who takes the pick after recommending you".
+  for (const [id, pos] of Object.entries<any>(map.positions)) {
+    const p = pos.panel;
+    if (!p || (p.kind !== "buy" && p.kind !== "switching" && p.kind !== "popular" && p.kind !== "premium")) continue;
+    const sc = cardScope(id);
+    if (!sc) continue;
+    if (p.kind === "buy" || p.kind === "switching") {
+      const sel = sb.selection("takers", "you", sc);
+      const want = keysOfNames((p.competitors?.title === "Who takes the picks" ? p.competitors.rows : []).map((r: any) => (r.you ? brand : r.name)));
+      if (same(sel.members.map((m: any) => m.key), want)) selCount("takers", "equal");
+      else selFail("takers", `${id}: selection [${sel.members.map((m: any) => m.name).join(", ")}] card [${(p.competitors?.rows ?? []).map((r: any) => r.name).join(", ")}]`);
+    }
+    for (const view of ["details", "detailsComp"]) {
+      const list = p[view]?.recommended?.list;
+      if (!p[view]?.recommended) continue;
+      const sel = sb.selection("takers_after_rec", "you", sc);
+      const want = keysOfNames((list?.rows ?? []).map((r: any) => r.label));
+      if (same(sel.members.map((m: any) => m.key), want)) selCount("takers_after_rec", "equal");
+      else selFail("takers_after_rec", `${id} ${view}: selection [${sel.members.map((m: any) => m.name).join(", ")}] card [${(list?.rows ?? []).map((r: any) => r.label).join(", ")}]`);
+    }
+  }
+
+  // 3. checklist: the What to look for card's list, cell by cell.
+  for (const [id, pos] of Object.entries<any>(map.positions)) {
+    const p = pos.panel;
+    if (p?.kind !== "criteria" || !p.checklist) continue;
+    const sc = cardScope(id);
+    if (!sc) continue;
+    const sel = sb.selection("checklist", "ai", sc);
+    if (same(sel.members.map((m: any) => m.key), p.checklist)) selCount("checklist", "equal");
+    else selFail("checklist", `${id}: selection [${sel.members.map((m: any) => m.key).join(", ")}] card [${p.checklist.join(", ")}]`);
+  }
+
+  // 4. conditions_shown: the rows a card lists on each side (the cell's own card; rival parts reuse them).
+  for (const [id, pos] of Object.entries<any>(map.positions)) {
+    const p = pos.panel;
+    const cond = p?.conditions;
+    if (!cond || p.kind === "alongside") continue;
+    const sc = cardScope(id);
+    if (!sc) continue;
+    const flavor = flavorOf(id);
+    const exc = p.kind === "h2h" && !id.endsWith(":all") && !!pos.exception;
+    const towardRefs = new Set<string>((cond.toward ?? []).flatMap((r: any) => (r.share.refs ?? []).map((x: any) => x.responseId)));
+    for (const side of ["toward", "away"] as const) {
+      const sel = sb.selection("conditions_shown", "ai", sc, { side, flavor, ...(exc && side === "toward" ? { towardOnly: "pick:rival" } : {}) });
+      const got = sel.members.map((m: any) => m.label);
+      const want = (cond[side] ?? []).map((r: any) => r.text);
+      if (same(got, want)) {
+        selCount("conditions_shown", "equal");
+        continue;
+      }
+      // The card drops an away row whose every answer it already shows as a toward example (examples are never
+      // reused): verified against the card's own toward examples.
+      const dropped = sel.members.filter((m: any) => !want.includes(m.label));
+      const kept = got.filter((l: string) => want.includes(l));
+      if (side === "away" && same(kept, want) && dropped.every((m: any) => [...m.answers].every((a: string) => towardRefs.has(a))))
+        selCount("conditions_shown", "explained: an away row whose every answer is already a toward example is not drawn (a display rule; verified on the card's examples)");
+      else selFail("conditions_shown", `${id} ${side} (${flavor}): selection [${got.join(" | ")}] card [${want.join(" | ")}]`);
+    }
+  }
+
+  // 5. weighs_shown: the topics each "What the answer weighs" column lists (the cell's own card).
+  {
+    const SIDES: Record<string, [string, string]> = {
+      buyer_worry: ["v:proceed_or_avoid:proceed", "v:proceed_or_avoid:avoid|v:premise_verdict:confirms&!v:proceed_or_avoid:proceed"],
+      customer_worry: ["v:keep_or_leave:keep", "v:keep_or_leave:leave"],
+      value: ["v:worth_it:yes", "v:worth_it:no"],
+      premium: ["v:tier_stance:premium", "v:tier_stance:basic"],
+      habit: ["pick:you", "pick:other|pick:outside_analysis|pick:outside_category"],
+      buy: ["pick:you", "pick:other|pick:outside_analysis"],
+      switching: ["pick:you", "pick:other|pick:outside_analysis"],
+    };
+    for (const [id, pos] of Object.entries<any>(map.positions)) {
+      const p = pos.panel;
+      if (!p) continue;
+      const sc = cardScope(id);
+      if (!sc) continue;
+      const lifts = (pos.lifts ?? []) as { label: string; value: number }[];
+      const posL = [...lifts].filter((l) => l.value > 0).sort((a, b) => b.value - a.value)[0]?.label;
+      const negL = [...lifts].filter((l) => l.value < 0).sort((a, b) => a.value - b.value)[0]?.label;
+      for (const view of ["weighs", "weighsComp"]) {
+        const w = p[view];
+        if (!w || (view === "weighsComp" && w === p.weighs)) continue;
+        const cols = w.columns ?? [];
+        let sides: { slice?: string; lead?: string }[];
+        if (cols.length === 1) sides = [{}];
+        else if (SIDES[p.kind]) {
+          const leads = p.kind === "premium" ? [undefined, undefined] : [posL, negL];
+          sides = SIDES[p.kind].map((s, i) => ({ slice: s, ...(leads[i] ? { lead: leads[i] } : {}) }));
+        } else continue;
+        if (view === "weighs" && (p.kind === "buy" || p.kind === "switching") && cols.length !== 1) continue;
+        const sel = sb.selection("weighs_shown", "ai", sc, { sides });
+        const got = sel.members.map((c: any) => c.codes.map((x: any) => x.code));
+        const want = cols.map((c: any) => (c.rows ?? []).map((r: any) => codeOf(r.name) ?? `?${r.name}`));
+        if (got.length === want.length && got.every((g: string[], i: number) => same(g, want[i]))) selCount("weighs_shown", "equal");
+        else selFail("weighs_shown", `${id} ${view}: selection ${JSON.stringify(got)} card ${JSON.stringify(want)}`);
+      }
+    }
+  }
+
+  // 6. leader and visibility_brands: against the tracker's own Brief (By buying situation, Visibility vs conversion).
+  {
+    const bv: any = await computeBrief(data, {});
+    const jobs = bv.memos.jobs?.sections?.find((s: any) => s.viz?.kind === "pairs")?.viz;
+    for (const it of jobs?.items ?? []) {
+      const situation = factsOfType(["discovery", "use_case"]).find((f) => f.situation === it.label)?.situation;
+      if (!situation) {
+        selFail("leader", `${it.label}: no such buying situation`);
+        continue;
+      }
+      const sel = sb.selection("leader", "you", { types: ["discovery", "use_case"], situation });
+      const got = sel.members[0]?.key;
+      if (got === keyOf(it.who)) selCount("leader", "equal");
+      else selFail("leader", `${it.label}: selection ${sel.members[0]?.name ?? "-"} Brief ${it.who} (ranked: ${sel.extras.ranked.slice(0, 4).map((m: any) => `${m.name} ${m.count}`).join(", ")})`);
+    }
+    const mx = bv.memos.matrix?.sections?.find((s: any) => s.key === "matrix")?.table;
+    if (mx) {
+      const placedCard: string[] = [];
+      let foldCard: string[] = [];
+      for (const r of mx.rows) {
+        const m = /rarely named or picked: (.*)$/.exec(r[0]);
+        if (m) foldCard = m[1].split(/, | and /);
+        else placedCard.push(r[0]);
+      }
+      // The Brief's funnel figures are today's What to buy card (four types, ruling 7).
+      const sel = sb.selection("visibility_brands", "you", WHAT_TO_BUY_TODAY);
+      const ok = same(sel.members.map((m: any) => m.key), keysOfNames(placedCard)) && same(sel.extras.folded.map((m: any) => m.key), keysOfNames(foldCard));
+      if (ok) selCount("visibility_brands", "equal");
+      else selFail("visibility_brands", `placed: selection [${sel.members.map((m: any) => m.name).join(", ")}] Brief [${placedCard.join(", ")}]; folded: selection [${sel.extras.folded.map((m: any) => m.name).join(", ")}] Brief [${foldCard.join(", ")}]`);
+    }
+  }
+
+  // 7. The average competitor: the 564 numbers, from the as_cards group's members (each member's fact), pooled.
+  {
+    const KIND_CARD: Record<string, any> = { buy: "buy", switching: "switching", problem: "problem", popular: "popular", premium: "premium", learning: "learning" };
+    const memberCounts = (measure: string, key: string, scope: Scope, variant: string): { k: number; n: number } => {
+      const sub = key === T ? "you" : key;
+      const rows = book.rows(scope);
+      const rec = (f: any) => f.brands.some((b: any) => b.key === key && b.recommended);
+      const active = (f: any) => f.pick.state === "in_analysis" || f.pick.state === "outside_analysis";
+      if (variant === "r6" && measure === "recommended") return countWith(scope, () => true, (f) => f.brands.some((b: any) => b.key === key && b.framedRecommended && b.bucket !== "outside_category"));
+      if (variant === "r8" && measure === "share_of_picks") return { k: rows.filter((f: any) => active(f) && f.pick.key === key).length, n: rows.filter(active).length };
+      if (variant === "r8" && measure === "recommended_lost") return countWith(scope, rec, (f) => active(f) && f.pick.key !== key);
+      if (variant === "r12" && measure === "recommended_no_pick") return countWith(scope, rec, (f) => !active(f));
+      return book.countUnchecked(measure, sub, scope);
+    };
+    const VARIANTS: Record<string, string[]> = { recommended: ["r6"], share_of_picks: ["r8"], recommended_lost: ["r8"], recommended_no_pick: ["r12"] };
+    const VLABEL: Record<string, string> = { base: "", r7: "ruling 7", r6: "ruling 6", r8: "ruling 8", r12: "ruling 12" };
+    for (const stat of reg.all()) {
+      const at = stat.id.indexOf("::");
+      const dest = stat.id.slice(0, at);
+      if (!dest.startsWith("cell:") || dest.includes("/rival:") || stat.k === undefined) continue;
+      const p = stat.id.slice(at + 2).split("/").map(unseg);
+      const cellId = dest.slice(5);
+      const pos: any = map.positions[cellId];
+      const kind = pos?.panel?.kind;
+      let measure: string | null = null;
+      if (p[0] === "steps" && p[2] === "usual" && /Average competitor/.test(stat.words)) measure = ({ named: "named", recommended: "recommended", converts: "converts" } as any)[p[1]] ?? null;
+      else if (p[0] === "lines" && p[2] === "avg") measure = p[1] === "share" ? "share_of_picks" : p[1] === "picked" ? "picked" : null;
+      else if (p[0] === "detail" && p[1] === "named" && p[2] === "row" && p[4] === "rival" && pos.panel.details?.named?.columns?.rival === "Average competitor")
+        measure = p[3] === "Named but not recommended" ? "named_not_recommended" : "negative_when_named_not_recommended";
+      else if (p[0] === "detail" && p[1] === "converts" && p[2] === "outcome" && p[3] === "Average competitor") measure = p[4] === "lost" ? "recommended_lost" : "recommended_no_pick";
+      if (!measure) continue;
+      const cs = cellScope(cellId);
+      if (!cs || !KIND_CARD[kind]) {
+        selFail("average competitor", `${stat.id}: no scope or card kind`);
+        continue;
+      }
+      const members = sb.selection("competitors", "you", cs.today ?? cs.scope, { mode: "as_cards", card: KIND_CARD[kind] }).members.map((m: any) => m.key);
+      const scopes: [string, Scope][] = [["base", cs.scope], ...(cs.today ? ([["r7", cs.today]] as [string, Scope][]) : [])];
+      let hit: string | null = null;
+      let pooled: { k: number; n: number } | null = null;
+      let matched: { v: string; sc: Scope } | null = null;
+      for (const v of ["base", ...(VARIANTS[measure] ?? [])])
+        for (const [sl, sc] of scopes) {
+          if (hit !== null) break;
+          const per = members.map((k: string) => memberCounts(measure!, k, sc, v));
+          const a = averageCompetitor(per, measure!, "as_cards");
+          const r = averageCompetitor(per, measure!, "ruled");
+          const mn = averageCompetitor(per, measure!, "mean");
+          if (a.k === stat.k && a.n === stat.n) {
+            hit = [VLABEL[v], sl === "r7" ? "ruling 7" : ""].filter(Boolean).join(" + ");
+            pooled = a;
+            matched = { v, sc };
+            avgModes.compared++;
+            if (printWhole(a.k, a.n) !== printWhole(r.k, r.n) || a.k * r.n !== r.k * a.n) avgModes.asCardsVsRuled++;
+            const pa = printWhole(a.k, a.n);
+            const pm = `${Math.round(mn.rate * 100)}%`;
+            if (pa !== pm) {
+              avgModes.meanDiffers++;
+              if (avgModes.meanExamples.length < 12) avgModes.meanExamples.push(`${brand} ${stat.id.replace(/^cell:/, "")}: pooled ${pa} (${a.k}/${a.n}) vs mean of rates ${pm}`);
+            }
+          }
+        }
+      if (!avgPending.delete(stat.id)) local.unexplained.push(`average competitor: ${stat.id} proved here but not routed to the selection proof by the stat mapping`);
+      local.compared++;
+      if (hit === null) {
+        selFail("average competitor", `${stat.id} = ${stat.value} (${stat.k}/${stat.n}); members [${members.map((k: string) => set.nameOf(k)).join(", ")}]`);
+        continue;
+      }
+      selCount("average competitor (as_cards)", hit ? `explained by ${hit} (members' counts under that ruling's 'before', pooled)` : "equal");
+      if (hit) {
+        const lbl = `average competitor: ${hit} (the members' own counts under the ruling's 'before', pooled)`;
+        local.explained.set(lbl, (local.explained.get(lbl) ?? 0) + 1);
+      } else local.equal++;
+      // The ratified group (pick cards only), two ways: (a) the group change alone - the ratified members counted on
+      // the same scope and under the same rule as today's card; (b) the full after - the ratified members on the
+      // ruling scope under the measure book's rules.
+      if (pooled && matched && (kind === "buy" || kind === "switching")) {
+        const pr = (x: { k: number; n: number }) => printOf(MEASURE_BY_ID.get(measure!)!, x.k, x.n);
+        const sameText = (t: string) => t === stat.value || (stat.value === "1%" && t === "<1%");
+        const mA = sb.selection("competitors", "you", matched.sc).members.map((m: any) => m.key);
+        const a = averageCompetitor(mA.map((k: string) => memberCounts(measure!, k, matched!.sc, matched!.v)), measure!, "as_cards");
+        const mB = sb.selection("competitors", "you", cs.scope).members.map((m: any) => m.key);
+        const b = averageCompetitor(mB.map((k: string) => memberCounts(measure!, k, cs.scope, "base")), measure!, "ruled");
+        avgRatified.compared++;
+        if (!sameText(pr(a))) {
+          avgRatified.differGroup++;
+          if (avgRatified.examples.length < 15) avgRatified.examples.push(`${brand} ${stat.id.replace(/^cell:/, "")}: card ${stat.value} -> ratified group, same rules ${pr(a)} -> after every ruling ${pr(b)}`);
+        }
+        if (!sameText(pr(b))) avgRatified.differ++;
+      } else avgRatified.notPick++;
+    }
+  }
+
+  // 8. Product names: the three groupings today's cards use, run on ONE input (every written form of a brand in
+  // analysis in the run's answers, plus each rule's product), and compared row by row.
+  {
+    const items: any[] = [];
+    for (const f of set.facts) {
+      for (const b of f.brands) if (b.bucket === "in_analysis") for (const w of b.forms) items.push({ answer: f.responseId, key: b.key, written: w });
+      for (const r of f.rules ?? []) {
+        if (!r.product?.trim()) continue;
+        const x = set.resolve(r.product.trim());
+        if (x.status === "active" && set.bucketOf(x.key) === "in_analysis") items.push({ answer: f.responseId, key: x.key, written: r.product.trim() });
+      }
+    }
+    const lineWords = new Set<string>();
+    {
+      const toks = brandNameTokens(set, T);
+      for (const f of set.facts) if (f.line) for (const t of famTokens(f.line)) if (!toks.has(t)) lineWords.add(t.replace(/s$/, ""));
+    }
+    const modes = ["merge", "merge_nojoin", "value_fold"] as const;
+    const groups = Object.fromEntries(modes.map((m) => [m, productGroups(items, set, m, { category: project.category, lineWords })])) as Record<string, any[]>;
+    const sig = (g: any) => `${g.key}|${g.forms.join("\u0001")}`;
+    const out: string[] = [];
+    for (const [a, b] of [["merge", "merge_nojoin"], ["merge", "value_fold"]] as const) {
+      const inB = new Set(groups[b].map(sig));
+      const diff = groups[a].filter((g: any) => !inB.has(sig(g)));
+      const big = diff.filter((g: any) => g.answers.size >= 3);
+      productDiff.push({ brand, a, b, rows: groups[a].length, rowsB: groups[b].length, differ: diff.length, differBig: big.length });
+      const ex = big
+        .slice(0, 3)
+        .map((g: any) => {
+          const pieces = groups[b].filter((h: any) => h.key === g.key && h.forms.some((f: string) => g.forms.includes(f)));
+          return `"${g.name}" (${set.nameOf(g.key)}, ${g.answers.size} answers, ${g.forms.length} forms) -> ${pieces.length} row(s) in ${b}: ${pieces.map((h: any) => `"${h.name}" ${h.answers.size}`).join(", ")}`;
+        });
+      out.push(`   PRODUCTS ${a} vs ${b}: ${groups[a].length} vs ${groups[b].length} rows; ${diff.length} ${a} rows not identical in ${b} (${big.length} with 3+ answers)`, ...ex.map((e) => `     ${e}`));
+    }
+    selReport.push(...out);
+  }
+
+  for (const id of avgPending) local.unexplained.push(`average competitor: ${id} was routed to the selection proof but never proved`);
+  avgPending.clear();
+  for (const [k, v] of selLocal) {
+    const t = selTotals.get(k) ?? { checked: 0, equal: 0, explained: new Map<string, number>() };
+    t.checked += v.checked;
+    t.equal += v.equal;
+    for (const [e, n] of v.explained) t.explained.set(e, (t.explained.get(e) ?? 0) + n);
+    selTotals.set(k, t);
+  }
+  console.log(`   selections: ${[...selLocal.entries()].map(([k, v]) => `${k} ${v.equal + [...v.explained.values()].reduce((a, b) => a + b, 0)}/${v.checked}`).join(", ")}`);
+
   /* ---------- report ---------- */
   totals.compared += local.compared;
   totals.equal += local.equal;
@@ -1260,6 +1628,17 @@ for (const [k, v] of [...totals.sentByPrefix.entries()].sort((a, b) => b[1] - a[
 }
 console.log(movesLoaded ? `RULING_MOVES: ${movesConfirmed} ruling explanations checked against the measured moves (the move's "after" counts equal the fact, or the stat is listed as moved)` : `RULING_MOVES raw data not found at ${MOVES_PATH} - explanations not checked against it`);
 console.log(`Data page cross-check: ${crossChecked} figures recomputed from its own fact table: ${crossEqual} equal to the fact, ${crossKnown} differ by the known resolver-order fault (inventory section 5 #1, the Hulu case: reproduced by a resolver that meets names in stored order)`);
+console.log(`\nLAYER 3 - SELECTIONS (lists compared with the card or Brief that draws them, membership and order):`);
+for (const [k, v] of selTotals) {
+  console.log(`  ${k}: ${v.checked} lists - ${v.equal} equal${[...v.explained.entries()].map(([e, n]) => `, ${n} ${e}`).join("")}`);
+}
+console.log(`Average competitor: ${avgModes.compared} numbers reproduced from the as_cards group; as_cards vs ruled arithmetic differ on ${avgModes.asCardsVsRuled}; the unweighted mean of the members' rates would print differently on ${avgModes.meanDiffers}`);
+for (const e of avgModes.meanExamples) console.log(`    ${e}`);
+console.log(`Average competitor under the RATIFIED group (What to buy and switching cards): ${avgRatified.compared} numbers; ${avgRatified.differGroup} print differently from today's card from the group change alone (same scope, same rules), ${avgRatified.differ} after every ruling (ruling scope, measure book); ${avgRatified.notPick} on cards that take no picks (the ratified rule ranks by picks: not applicable there)`);
+for (const e of avgRatified.examples) console.log(`    ${e}`);
+console.log(`Product names - rows that differ between groupings (same input: every written form of a brand in analysis, plus rule products):`);
+for (const d of productDiff) console.log(`  ${d.brand}: ${d.a} ${d.rows} rows vs ${d.b} ${d.rowsB}; ${d.differ} ${d.a} rows not identical in ${d.b} (${d.differBig} with 3+ answers)`);
+console.log(selReport.join("\n"));
 if (DUMP) fsMod.writeFileSync(DUMP, dumpRows.join("\n"));
 if (process.env.FACT_FAIL) fsMod.writeFileSync(process.env.FACT_FAIL, failures.join("\n"));
 console.log(failures.length ? `\n${failures.length} FAIL (unexplained)` : "\nALL PASS - every compared stat is equal or explained");
