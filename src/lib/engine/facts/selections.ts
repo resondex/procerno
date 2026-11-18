@@ -27,6 +27,8 @@
  *                       tracker's own products named there, the rival products recommended instead of a price line, the
  *                       tracker's own cheaper options (the run's one product grouping, ruling 15)
  *  - worries / price_lines   the worries a scope holds; the price lines its answers were asked about
+ *  - price_worries      the worries about the price (their wording names money), in the cards' order
+ *  - converts_better    the brands whose recommendations end as the pick more often than the subject's
  * plus two functions that are rules over a selection's members, stated once:
  *  - averageCompetitor  the average competitor of a competitor group, per measure (modes "as_cards" / "ruled")
  *  - productGroups      written product names grouped into rows, in the three ways the cards do it today (modes)
@@ -107,6 +109,12 @@ export const SEL_FLOORS = {
   visSmallShare: 0.02,
   visSmallNamed: 0.3,
 } as const;
+
+/** A worry about the price: its wording names money (generic words, never a category's) - the Brief's "about price". */
+export const PRICE_WORRY = /\b(fees?|prices?|pricey|pricing|costs?|costly|expensive|pay|paying|money|afford(?:able)?|overpriced|cheap(?:er)?|budget|subscription)\b/i;
+export const PRICE_WORRY_RULE =
+  "The worries whose wording names money (fee, price, pricey, pricing, cost, costly, expensive, pay, paying, money, afford, affordable, overpriced, cheap, cheaper, budget, subscription), in the worries cards' order: buyers' worries, then customers' worries, then the renewal; then most answers first; then by wording.";
+const WORRY_STAGES: readonly string[] = ["objections", "churn_triggers", "renewal"];
 
 /* ------------------------------- helpers ------------------------------- */
 
@@ -715,6 +723,8 @@ export function selectionBook(set: AnswerFactSet, book: FactBook, data?: ViewDat
                     ? `~${opts.top ?? 4}`
                     : name === "worries"
                       ? `~${opts.min ?? SEL_FLOORS.argsMin}`
+                    : name === "converts_better"
+                      ? `~${opts.min ?? SEL_FLOORS.visReadableRec}:${opts.top ?? 3}`
                     : name === "competitors" ? `~${opts.mode ?? "ratified"}${opts.mode === "as_cards" ? `:${opts.card}` : ""}${opts.rankBy === "recommended" ? ":rec" : opts.rankBy === "named" ? ":named" : ""}${opts.floor ? `:f${opts.floor}` : ""}` : JSON_SELECTIONS.has(name) ? `~j${JSON.stringify(opts)}` : name === "conditions_shown" ? `~${opts.side}:${opts.flavor}${opts.towardOnly ? `@${opts.towardOnly}` : ""}${opts.to ? `>to:${opts.to}` : ""}${opts.ownSplit ? ":own" : ""}` : name === "weighs_shown" ? `~${JSON.stringify(opts.sides ?? [{}])}:${opts.top ?? 3}:${opts.list ?? "weighs"}` : "";
     const fullName = `${name}${params}`;
     const id = selectionId(fullName, subject, scope);
@@ -1431,6 +1441,50 @@ export function selectionBook(set: AnswerFactSet, book: FactBook, data?: ViewDat
         out = { id, name: fullName, subject, scope, rule: "The two arguments most more common when the AI picks the brand than when it picks the tracker, then the two most more common the other way; each in 3+ answers; both picked 5+ times.", members, extras: {} };
         break;
       }
+      case "price_worries": {
+        // The worries about the price: a worry whose wording names money (PRICE_WORRY - generic words, never a
+        // category's), in the worries cards' order - the question type (buyers' worries, then customers' worries, then
+        // the renewal), then the worry's answers (most first), then its wording.
+        for (const t of scope.types) if (!["objections", "churn_triggers", "renewal"].includes(t)) throw new Error(`selection "price_worries": worries are asked on worry questions only, not "${t}"`);
+        const by = new Map<string, { n: number; stage: number }>();
+        for (const f of rows) {
+          if (!f.worry) continue;
+          const st = WORRY_STAGES.indexOf(f.type);
+          const t = by.get(f.worry) ?? { n: 0, stage: st };
+          t.n++;
+          t.stage = Math.min(t.stage, st);
+          by.set(f.worry, t);
+        }
+        const members = [...by.entries()]
+          .filter(([w]) => PRICE_WORRY.test(w))
+          .map(([w, x]) => ({ key: w, name: w, count: x.n, stage: x.stage }))
+          .sort((a, b) => a.stage - b.stage || b.count - a.count || a.name.localeCompare(b.name))
+          .map(({ stage: _s, ...m }) => (void _s, m));
+        out = { id, name: fullName, subject, scope, rule: PRICE_WORRY_RULE, members, extras: {} };
+        break;
+      }
+      case "converts_better": {
+        // The brands in analysis (the subject out) recommended in `min` answers at least whose recommendations end as the
+        // pick more often than the subject's; the best converter first (ties by name); top `top`.
+        const key = subjKey(subject);
+        const names = new Map<string, string>();
+        for (const f of rows) for (const b of f.brands) if (b.bucket === "in_analysis" && b.key !== key) names.set(b.key, b.key === T ? set.target.name : b.name);
+        const fk = (m: string, k: string) => book.fact(m, k === T ? "you" : k, scope);
+        const conv = (k: string) => {
+          const x = fk("converts", k);
+          return x.n ? x.k / x.n : 0;
+        };
+        const mine = conv(key);
+        const min = opts.min ?? SEL_FLOORS.visReadableRec;
+        const members = [...names.keys()]
+          .filter((k) => fk("recommended", k).k >= min && conv(k) > mine)
+          .map((k) => ({ key: k, name: names.get(k)!, count: fk("converts", k).k, rate: conv(k) }))
+          .sort((a, b) => b.rate - a.rate || a.name.localeCompare(b.name))
+          .slice(0, opts.top ?? 3)
+          .map(({ rate: _r, ...m }) => (void _r, m));
+        out = { id, name: fullName, subject, scope, rule: `The brands in analysis other than the subject recommended in ${min} answers at least whose recommendations end as the pick more often than the subject's; the best converter first, ties by name; top ${opts.top ?? 3}.`, members, extras: {} };
+        break;
+      }
       default:
         throw new Error(`fact layer: no selection "${name}"`);
     }
@@ -1450,3 +1504,107 @@ export const averageMeasure = (id: string, types: readonly QuestionType[]) => {
   for (const t of types) if (!m.legal.includes(t)) throw new Error(`average competitor: measure "${id}" is not legal on "${t}"`);
   return m;
 };
+
+/**
+ * A selection recomputed from its id alone (for a proof): the name, its parameters, the subject and the scope are read
+ * back from the id and the selection is computed afresh from the book. Throws when the id is not one this reads.
+ */
+export function selectionFromId(sb: SelectionBook, id: string): AnySelection {
+  const q = parseSelectionId(id);
+  if (q) return sb.selection(q.name, q.subject, q.scope, q.opts);
+  if (!id.startsWith("sel:")) throw new Error(`not a selection id: ${id}`);
+  const body = id.slice(4);
+  const bar = body.indexOf("|");
+  const full = body.slice(0, bar);
+  const rest = body.slice(bar + 1);
+  const t0 = rest.indexOf("|t=");
+  const subject = rest.slice(0, t0);
+  const scope = scopeFromKey(rest.slice(t0 + 1));
+  const tilde = full.indexOf("~");
+  const name = tilde >= 0 ? full.slice(0, tilde) : full;
+  const param = tilde >= 0 ? full.slice(tilde + 1) : "";
+  const opts: SelectionOpts = {};
+  switch (name) {
+    case "worries":
+    case "vendors":
+      opts.min = Number(param);
+      break;
+    case "converts_better": {
+      const [min, top] = param.split(":");
+      opts.min = Number(min);
+      opts.top = Number(top);
+      break;
+    }
+    case "first_rec":
+    case "first_sent":
+    case "sent_products":
+    case "sent_own_products":
+    case "instead_products":
+    case "own_options":
+      opts.top = Number(param);
+      break;
+    case "product_picks":
+    case "product_names":
+    case "product_first":
+    case "product_suggested": {
+      const [b, t] = param.split(":");
+      opts.brand = b;
+      opts.top = Number(t);
+      break;
+    }
+    case "pick_brands": {
+      const [who, top, x] = param.split(":");
+      opts.youFirst = who === "you";
+      opts.top = Number(top);
+      if (x?.startsWith("x")) opts.exclude = x.slice(1).split(",");
+      break;
+    }
+    case "ends":
+      opts.choice = param;
+      break;
+    case "cond_destinations":
+    case "cond_products": {
+      let r = param;
+      if (r.endsWith(":named")) {
+        opts.named = true;
+        r = r.slice(0, -6);
+      }
+      const ti = r.indexOf(">to:");
+      if (ti >= 0) {
+        opts.to = r.slice(ti + 4);
+        r = r.slice(0, ti);
+      }
+      opts.units = r ? r.split("+") : [];
+      break;
+    }
+    case "conditions_shown": {
+      const m = param.match(/^(toward|away):([a-z]+)(.*)$/);
+      if (!m) throw new Error(`selection ${id} cannot be read back`);
+      opts.side = m[1] as "toward" | "away";
+      opts.flavor = m[2] as CondFlavor;
+      let r = m[3];
+      if (r.endsWith(":own")) {
+        opts.ownSplit = true;
+        r = r.slice(0, -4);
+      }
+      const ti = r.indexOf(">to:");
+      if (ti >= 0) {
+        opts.to = r.slice(ti + 4);
+        r = r.slice(0, ti);
+      }
+      if (r.startsWith("@")) opts.towardOnly = r.slice(1);
+      break;
+    }
+    case "weighs_shown": {
+      const last = param.lastIndexOf(":");
+      const mid = param.lastIndexOf(":", last - 1);
+      opts.sides = JSON.parse(param.slice(0, mid));
+      opts.top = Number(param.slice(mid + 1, last));
+      opts.list = param.slice(last + 1) as OmissionList;
+      break;
+    }
+  }
+  const sel = sb.selection(name, subject, scope, opts);
+  if (sel.id !== id) throw new Error(`selection ${id} recomputes under ${sel.id}`);
+  return sel;
+}

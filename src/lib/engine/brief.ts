@@ -6,13 +6,15 @@ import { RESOLVE_VERSION, buildResolver } from "./brand_resolve";
 import { BRAND_SUMMARY_VERSION, sharedBrandSummary, type BrandSummaryView, type SummaryBrand } from "./brand_summary";
 import { ANALYSIS_MAP_VERSION, sharedAnalysisMap, type MapCellStat } from "./analysis_map";
 import { CONTEXT_JUDGE_MODEL, CONTEXT_JUDGE_VERSION } from "./context_judge";
-import { destOf, destPhrase, rankedInsights, type Insight, type InsightInputs } from "./summary_insights";
-import { briefLegacyConditions } from "./brief_legacy_inputs";
+import { destOf, destPhrase, productNoun, rankedInsights, type Insight, type InsightInputs } from "./summary_insights";
 import { findingMove } from "./finding_moves";
 import { buyerPhrase, theProduct } from "./brief_words";
-import { linkResolver, numberContext, type LinkResolver } from "./brief_links";
 import { buildStatRegistry, statId, type CondRowStats, type Stat, type StatRegistry } from "./stat_registry";
-import { decode, encode, figOf, hasFigs, kOf, legacyFig, newFigTable, nOf, rateOf, strip, tipOfStat, trReplace, type FigTable, type Tr } from "./brief_figs";
+import { decode, encode, figOf, fromStatement, hasFigs, kOf, newFigTable, nOf, rateOf, refFig, strip, tipOfStat, trReplace, type FigTable, type Tr } from "./brief_figs";
+import { sharedRunFacts, type RunFacts } from "./facts/overview_facts";
+import { WHAT_TO_BUY_ALL, type Scope } from "./facts/fact";
+import { dref, evalRef, parseFactId, pref, type StmtNums } from "./facts/statements";
+import type { AnySelection, SelMember } from "./facts/selections";
 /** "most" only when over half of the answers that pick the rival still give a case for the brand (the card's exception
  * step's own stat); "half" at exactly half. */
 const mostOfLost = (st: import("./stat_registry").Stat | undefined) => {
@@ -20,15 +22,12 @@ const mostOfLost = (st: import("./stat_registry").Stat | undefined) => {
   const r = rateOf(st);
   return r > 0.5 ? "most" : Math.round(r * 100) === 50 ? "half" : "some";
 };
-import { indexAcross, indexPanel, numberTokens, type IndexEntry } from "./panel_index";
 import { COMMON_WORDS } from "./everyday_words";
 import { condLabel } from "./panel_text";
 import { isDefaultCondition } from "./condition_groups";
 import { cell, loadViewData, requestOf, VIEW_CACHE_MS, viewCacheOff, type RateCell, type ViewData, type ViewRequest } from "./view_data";
 import { viewsOf } from "./views";
 import type { AnalysisMapView, Position } from "./analysis_types";
-import { hasDossier } from "./dossiers";
-import { BRAND_CARD, BUILD_A_TABLE, CONDITION_CARD, ENGINES_CARD, brandCard, cardSourcesOf, cardText, cellCard, conditionCard, enginesCard, type CardSources } from "./answer_cards";
 import {
   BRIEF_FRAME_LABELS,
   type AnswerCard,
@@ -66,7 +65,7 @@ import type { Project, Run } from "../types";
  *
  * Moves are the analysis map's DEFICIT positions - their lever and
  * treatment family are the map's own templates; this file adds only the
- * "where", the "today" number and the watch metric, each a fixed template
+ * "where" and the watch metric, each a fixed template
  * per map row. A rival subject has no moves (positions are the client's),
  * and the client-only pools (worries, value, leavers, advocacy, the Kept
  * stage) are simply absent from its memos.
@@ -79,8 +78,6 @@ import type { Project, Run } from "../types";
 /* --------------------------------- format --------------------------------- */
 
 const rate = (c: RateCell) => (c.n > 0 ? c.k / c.n : 0);
-const pctN = (x: number) => (x > 0 && x < 0.005 ? "<1%" : `${Math.round(x * 100)}%`);
-const P = (c: RateCell) => pctN(rate(c));
 const tipOf = (c: RateCell) => `${c.k} of ${c.n}`;
 const cap = (t: string) => (t ? t.charAt(0).toUpperCase() + t.slice(1) : t);
 const low1 = (t: string) => (t ? t.charAt(0).toLowerCase() + t.slice(1) : t);
@@ -97,73 +94,63 @@ const MIN = 20;
 
 type Anchor = BriefAnchor;
 
-/** bf14 (2026-11-07, the answer cards): an anchor id is either a map cell id
- * (a cell card built from its position) or a card key (BRAND_CARD(key),
- * ENGINES_CARD, CONDITION_CARD). Cards build lazily, once, into ctx.cards. */
+/** Anchor ids that are not Map cells: a brand's own page (its By rival card), and the old answer-card keys - used as a
+ * number's preferred location only (fact layer step 5, part 2: the brand, assistants and condition answer cards are gone;
+ * every number links by its fact id to the card that draws it). */
+const BRAND_CARD = (key: string) => `card:brand:${key}`;
+const CONDITION_CARD = "card:conditions";
+
+/** A Map cell's answer card (bf14), kept for the phrase links of a unit with no number: the cell's claim and figures,
+ * each number with its fact id (`facts`: "headline" and "rows.<i>"). The arguments' bars are not carried - their
+ * shares are no facts on the Map's payload (the Map card the phrase opens draws them). */
 function cardFor(c: Ctx, id: string): AnswerCard | null {
   if (c.cards.has(id)) return c.cards.get(id) ?? null;
-  let card: AnswerCard | null = null;
-  if (id.startsWith("card:brand:")) card = brandCard(c.src, id.slice("card:brand:".length), brandGo(c, id.slice("card:brand:".length)));
-  else if (id === ENGINES_CARD) card = enginesCard(c.src);
-  else if (id === CONDITION_CARD) card = conditionCard(c.src, c.map.positions[OPEN_ALL] ? OPEN_ALL : undefined);
-  else {
-    const p = c.map.positions[id];
-    if (p) card = cellCard(p);
-  }
+  const p = c.map.positions[id];
+  const card: AnswerCard | null = p ? cellCardOf(c, p) : null;
   c.cards.set(id, card);
   return card;
 }
-
-/** bf20 (the owner's ruling: cite a non-Build-a-table surface whenever one
- * exists): a brand card's go-deeper link. The target's opens the map's pooled
- * open-questions contest; a rival's opens its dossier under Rivals (gated on
- * the dossiers' own membership rule, same summary); Build a table only when
- * neither exists. */
-function brandGo(c: Ctx, key: string): NonNullable<AnswerCard["go"]> {
-  if (key === c.summary.target.key) {
-    return c.map.positions[OPEN_ALL] ? { label: "Open the open-questions contest on the map", target: "map", cellId: OPEN_ALL } : BUILD_A_TABLE;
-  }
-  const b = c.summary.brands.find((x) => x.key === key);
-  // bf33: the rival's NAME - the panel opener and the By rival card match names (a key opened the old dossier).
-  return b && hasDossier(c.outOfScope.summary, key) ? { label: `Open the ${b.name} dossier`, target: "rivals", brand: b.name } : BUILD_A_TABLE;
+function cellCardOf(c: Ctx, p: Position): AnswerCard {
+  return {
+    kind: "cell",
+    crumb: p.where,
+    headline: fromStatement(c.figs, p.claim, p.facts?.claim),
+    rows: (p.figures ?? []).map((f, i) => ({ label: f.label, value: fromStatement(c.figs, f.value, p.facts?.[`figures.${i}`]), ...(f.tip ? { tip: f.tip } : {}) })),
+    go: { label: "Open this contest on the map", target: "map", cellId: p.cellId },
+  };
 }
 
-/** A pin for the cell or card, or nothing when neither exists. `label` is the
- * pin's tooltip (a cell's map "where"; a card's question). */
+/** A pin for a Map cell, or nothing (a non-cell id never pins). `label` is the pin's tooltip (the cell's "where"). */
 function anchor(c: Ctx, id: string | null | undefined): Anchor | undefined {
-  if (!id) return undefined;
-  const card = cardFor(c, id);
-  if (!card) return undefined;
-  if (card.kind === "cell") return { id, label: c.map.positions[id].where, kind: "cell" };
-  const label = card.kind === "brand" ? `${card.crumb.split(" · ")[0]} - how it does in open questions` : card.kind === "engines" ? "The assistants" : "The conditions - what sends buyers away";
-  return { id, label, kind: card.kind };
+  if (!id || !c.map.positions[id]) return undefined;
+  cardFor(c, id);
+  return { id, label: c.map.positions[id].where, kind: "cell" };
 }
 
+/** A unit's anchors, in order - Map cells, plus a brand's own page (`card:brand:<key>`) as a number's preferred
+ * location (linkUnit). Only Map-cell anchors survive into the payload, and only on a unit with no number (pinsByRule). */
 function cellsOf(c: Ctx, ...ids: (string | null | undefined)[]): Anchor[] | undefined {
   const out: Anchor[] = [];
-  for (const id of ids) {
+  for (const id0 of ids) {
+    // The old condition card's numbers are the What to buy card's condition rows.
+    const id = id0 === CONDITION_CARD ? OPEN_ALL : id0;
+    if (!id || out.some((x) => x.id === id)) continue;
     const a = anchor(c, id);
-    if (a && !out.some((x) => x.id === a.id)) out.push(a);
+    if (a) out.push(a);
+    else if (id.startsWith("card:brand:")) out.push({ id, label: "", kind: "brand" });
   }
   return out.length ? out : undefined;
 }
 
-/** A row's single pin: the first candidate whose card states every number in
- * the row, else the first that states any, else none. */
-function rowPin(c: Ctx, row: BriefRow, ...ids: (string | null | undefined)[]): BriefRow {
-  const nums = [...briefNumberTokens(`${row.label} ${row.value}`)];
-  const as = ids.map((id) => anchor(c, id)).filter((a): a is Anchor => !!a);
-  const toks = (a: Anchor) => briefNumberTokens(cardText(c.cards.get(a.id)!));
-  const pick = as.find((a) => nums.every((n) => toks(a).has(n))) ?? as.find((a) => nums.some((n) => toks(a).has(n))) ?? as[0];
-  return pick ? { ...row, cell: pick } : row;
-}
+/** bf14-bf33's row pin is gone: a row's number links by its fact id. */
+const rowPin = (_c: Ctx, row: BriefRow, ..._ids: (string | null | undefined)[]): BriefRow => (void _c, void _ids, row);
 
 const withCells = <T extends object>(x: T, cells: Anchor[] | undefined): T => (cells ? { ...x, cells } : x);
 
 /** bf15: anchors for a unit whose visible text may carry no number - each
  * carries `at`, the exact phrase of the unit it attaches to (the fact link
  * when there is no number to click). `at` must be a substring of the unit's
- * visible text; citePins drops it on numbered units and drops an anchor
+ * visible text; pinsByRule drops it on numbered units and drops an anchor
  * without a present `at` on numberless ones. */
 function cellsAt(c: Ctx, ...pairs: [string | null | undefined, string][]): Anchor[] | undefined {
   const out: Anchor[] = [];
@@ -180,7 +167,9 @@ function cellsAt(c: Ctx, ...pairs: [string | null | undefined, string][]): Ancho
  * card leaves off as too obvious for the question asked). */
 const checklistOf = (c: Ctx): string[] => {
   const id = pooledOf(c, "chooses:criteria:") ?? "";
-  return (c.map.positions[id]?.panel?.checklist ?? []).map((x) => nameOn(c, "checklist", id, x));
+  const pp = c.map.positions[id]?.panel;
+  const sel = pp?.steps.find((x) => x.itemsSelection)?.itemsSelection;
+  return (pp?.checklist ?? []).map((x) => nameOn(c, "checklist", id, x, sel));
 };
 function pooledOf(c: Ctx, prefix: string): string | undefined {
   if (c.map.positions[`${prefix}all`]) return `${prefix}all`;
@@ -197,13 +186,15 @@ const OPEN_ALL = "chooses:open:all";
  * all answers, the commit rate, the average and the most-picked competitor, per buying situation) are the cards'
  * own Stat objects (stat_registry.ts), printed with `fig` - never a number this file computes. The tracker's
  * figures live on the What to buy card (all buyers, or the buyer's own card); a rival's on its By rival card, or
- * the What to buy card's competitor bars. A figure no card shows is printed as before with `noHome`, tagged so
- * the links harness lists it ("needs a card home").
+ * the What to buy card's competitor bars. A fact no card draws is printed from the fact book by its id (factFig) and
+ * left unlinked; the links harness lists it.
  */
 const fig = (c: Ctx, s: Stat) => figOf(c.figs, s);
-const noHome = (c: Ctx, kind: string, value: string) => legacyFig(c.figs, kind, value);
-/** The visibility chart's level line: the chart's own reference line, on no card by Tyler's ruling (2026-11-17). */
-export const CHART_LINE = "chart reference line (no card by design)";
+/** A fact the Brief prints that no card draws (listed by the harness): printed from the fact book by its id. */
+const factFig = (c: Ctx, measure: string, subject: string, scope: Scope) => {
+  const f = c.rf.book.fact(measure, subject, scope);
+  return refFig(c.figs, f.id, f.text);
+};
 const brandName = (c: Ctx, key: string) => c.summary.brands.find((b) => b.key === key)?.name ?? (key === c.target.key ? c.brand : key);
 interface FunnelStats {
   named?: Stat;
@@ -283,11 +274,8 @@ function funnelBrands(c: Ctx): Brand[] {
 /** A brand's funnel figures, printed from its stats. */
 const fNamed = (c: Ctx, b: Brand) => fig(c, need(fun(c, b.key).named, `${b.name} named`));
 const fRec = (c: Ctx, b: Brand) => fig(c, need(fun(c, b.key).rec, `${b.name} recommended`));
-/** A brand never recommended has no conversion on any card: "0%" is printed tagged (needs a card home). */
-const fConv = (c: Ctx, b: Brand) => {
-  const s = fun(c, b.key).conv;
-  return s ? fig(c, s) : recK(c, b.key) === 0 ? noHome(c, "recommendations that end as the pick (never recommended)", "0%") : fig(c, need(s, `${b.name} conversion`));
-};
+/** Recommendations that end as the pick, as a card draws it (a brand never recommended has none: callers say so in words). */
+const fConv = (c: Ctx, b: Brand) => fig(c, need(fun(c, b.key).conv, `${b.name} conversion`));
 const fShare = (c: Ctx, b: Brand) => fig(c, need(fun(c, b.key).share, `${b.name} share of picks`));
 const fPicked = (c: Ctx, b: Brand) => fig(c, need(fun(c, b.key).picked, `${b.name} picked`));
 /** The commit rate - about the AI, on the all-buyers What to buy card whoever the subject is. */
@@ -301,10 +289,11 @@ function roomShareStat(c: Ctx, room: string, key: string): Stat | undefined {
   const label = c.stats[id]?.label;
   return c.reg.competitor(id, n) ?? (label ? c.reg.rivalTable(n, "byBuyer", "Where it takes its picks", label, 0) : undefined);
 }
-/** A room share as printed: its stat; a brand the room's cards do not list has no picks there to print. */
+/** A room share as printed: its stat; a brand the room's cards do not list (it takes no picks there) is the fact itself,
+ * which no card draws (the harness lists it). */
 const fRoom = (c: Ctx, room: string, key: string) => {
   const s = roomShareStat(c, room, key);
-  return s ? fig(c, s) : noHome(c, "share of picks with one buyer (not listed there)", "0%");
+  return s ? fig(c, s) : factFig(c, "share_of_picks", key === c.target.key ? "you" : key, { ...WHAT_TO_BUY_ALL, situation: room });
 };
 
 /* ------------------------- stage 4: verdict figures from the cards ------------------------- */
@@ -315,24 +304,20 @@ const fRoom = (c: Ctx, room: string, key: string) => {
  * no side), rivals' customers switching (named, picked) and the direct matchups (who the AI picks when it picks one
  * of the two) - are the verdict cards' own stats: printed with `vfig`, linked by the stat's id, and every decision
  * about them (thresholds, which sentence, which worry or rival is named, sort orders, never / every) reads the same
- * stat's counts. A verdict figure no card shows is read from the old view through `legacyV` alone and printed
- * tagged (noHome), so the links harness lists it under "needs a card home" - never silently.
+ * stat's counts. A verdict no card draws is not written (fact layer step 5, part 2 retired the old-view fallback).
  */
 interface VF {
   k: number;
   n: number;
-  stat?: Stat;
-  legacy?: { kind: string; value: string };
+  stat: Stat;
 }
 const vOf = (s: Stat): VF => ({ k: kOf(s), n: nOf(s), stat: s });
-/** The only way a verdict figure is read from the old views: tagged, printed through noHome. */
-const legacyV = (kind: string, x: RateCell): VF => ({ k: x.k, n: x.n, legacy: { kind, value: P(x) } });
 const vRate = (f: VF) => (f.n > 0 ? f.k / f.n : 0);
 const vTip = (f: VF) => `${f.k} of ${f.n}`;
-/** A verdict figure, printed: its stat, else (no card shows it) tagged. */
-const vfig = (c: Ctx, f: VF) => (f.stat ? fig(c, f.stat) : noHome(c, f.legacy!.kind, f.legacy!.value));
-/** The stat as a figure, else the old view's (read only when no card shows it). */
-const statOr = (s: Stat | undefined, old: () => VF | undefined): VF | undefined => (s ? vOf(s) : old());
+/** A verdict figure, printed: its card's stat. */
+const vfig = (c: Ctx, f: VF) => fig(c, f.stat);
+/** The stat as a figure; a verdict no card draws is not written (fact layer step 5, part 2: no old-view fallback). */
+const statOr = (s: Stat | undefined): VF | undefined => (s ? vOf(s) : undefined);
 /** "<verb> in N% of answers" with "never" / "every" at the extremes. */
 const vShareWords = (c: Ctx, x: VF, verb: string, never: string) => (x.k === 0 ? never : x.k === x.n ? `${verb} in every answer` : `${verb} in ${vfig(c, x)} of answers`);
 
@@ -350,18 +335,16 @@ interface Worth3 {
   no: VF;
   depends: VF;
 }
-function worthOf(c: Ctx, id: string | undefined, old: () => { worth: Record<"yes" | "no" | "depends", RateCell> } | null | undefined): Worth3 | null {
+function worthOf(c: Ctx, id: string | undefined): Worth3 | null {
   const y = seg(c, id, "worth", "yes");
   const n = seg(c, id, "worth", "no");
   const d = seg(c, id, "worth", "depends");
-  if (y && n && d) return { yes: vOf(y), no: vOf(n), depends: vOf(d) };
-  const o = old();
-  return o ? { yes: legacyV("Value verdict", o.worth.yes), no: legacyV("Value verdict", o.worth.no), depends: legacyV("Value verdict", o.worth.depends) } : null;
+  return y && n && d ? { yes: vOf(y), no: vOf(n), depends: vOf(d) } : null;
 }
 /** The pooled Value verdict (all buyers). */
-const worthAll = (c: Ctx) => (c.verdicts.value ? worthOf(c, valueCell(c), () => c.legacy.inputs.value) : null);
+const worthAll = (c: Ctx) => (c.verdicts.value ? worthOf(c, valueCell(c)) : null);
 /** One buying situation's Value verdict. */
-const worthIn = (c: Ctx, room: string) => worthOf(c, valueCell(c, room), () => c.legacy.inputs.value?.rooms.find((r) => r.key === room));
+const worthIn = (c: Ctx, room: string) => worthOf(c, valueCell(c, room));
 /** The Value card's "Where it points the buyer instead": a rival, only the brand's own cheaper option. */
 function insteadOf(c: Ctx, id: string | undefined): { rival: VF; own?: VF } | null {
   const rival = seg(c, id, "instead", "rival");
@@ -372,7 +355,8 @@ function insteadOf(c: Ctx, id: string | undefined): { rival: VF; own?: VF } | nu
  * the buyer instead"), first row in the card's own order (statids8: never re-sorted here). */
 function insteadLeader(c: Ctx, id: string | undefined): string | undefined {
   const first = id ? c.reg.section(id, "instead", "Where it points the buyer instead")[0] : undefined;
-  return first ? nameOn(c, "instead-rival", id!, first.label) : undefined;
+  const sel = c.map.positions[id!]?.panel?.details?.instead?.sections?.find((x) => x.title === "Where it points the buyer instead")?.selection;
+  return first ? nameOn(c, "instead-rival", id!, first.label, sel) : undefined;
 }
 /** A worry card's verdict segment (buyers: proceed / avoid / none; customers and looking around: keep / leave / none). */
 const verdictOf = (c: Ctx, id: string | undefined, key: string) => seg(c, id, "verdict", key);
@@ -381,20 +365,13 @@ const buyersAll = (c: Ctx) => pooledOf(c, "doubts:buyers:");
 const customersAll = (c: Ctx) => pooledOf(c, "doubts:customers:");
 const holdAll = (c: Ctx) => pooledOf(c, "doubts:hold:");
 /** The tracker's direct matchup against one rival: the share of the picks between the two that go to the tracker. */
-const matchupWon = (c: Ctx, key: string): VF | undefined =>
-  statOr(c.reg.step(rivalCell(c, key) ?? "", "won", "you"), () => {
-    const r = c.legacy.summary.headToHead.find((x) => x.key === key);
-    return r ? legacyV("direct matchup record", r.winOfDecided) : undefined;
-  });
+const matchupWon = (c: Ctx, key: string): VF | undefined => statOr(c.reg.step(rivalCell(c, key) ?? "", "won", "you"));
 /** A rival subject's record against the tracker: the share of the picks between the two that go to the rival - on the
  * subject's own named-rival matchup card or, for a brand asked about as a class, its "a <brand> card" matchup card (bf45). */
 const vsTargetOf = (c: Ctx): VF | undefined =>
   c.isTarget || !(c.verdicts.h2h.some((r) => r.key === c.subject.key) || classCells(c).has(c.subject.key))
     ? undefined
-    : statOr(c.reg.step(rivalCell(c, c.subject.key) ?? "", "won", "vs"), () => {
-        const r = c.legacy.summary.headToHead.find((x) => x.key === c.subject.key);
-        return r ? legacyV("direct matchup record", cell(r.lost.k, r.won.k + r.lost.k)) : undefined;
-      });
+    : statOr(c.reg.step(rivalCell(c, c.subject.key) ?? "", "won", "vs"));
 /** The Wilson range of a verdict figure (the matchups' won / lost bars). */
 const vRange = (f: VF) => cell(f.k, f.n);
 /** The named rivals with a direct matchup, most answers first (each matchup card's own answers; ties by name). */
@@ -416,24 +393,14 @@ function customersVerdict(c: Ctx): { keep: VF; leave: VF; none: VF } | null {
   const k = verdictOf(c, id, "keep");
   const l = verdictOf(c, id, "leave");
   const x = verdictOf(c, id, "none");
-  if (k && l && x) return { keep: vOf(k), leave: vOf(l), none: vOf(x) };
-  const d = c.legacy.summary.customersDoubt;
-  return d
-    ? {
-        keep: legacyV("customers' worries: told to stay", cell(d.keep.k, d.answers)),
-        leave: legacyV("customers' worries: told to leave", cell(d.leave.k, d.answers)),
-        none: legacyV("customers' worries: no side", cell(Math.max(0, d.answers - d.keep.k - d.leave.k), d.answers)),
-      }
-    : null;
+  return k && l && x ? { keep: vOf(k), leave: vOf(l), none: vOf(x) } : null;
 }
 /** A rival's customers looking to switch: the tracker picked, of all answers, and named (that rival's leavers card). */
 function leaverFigs(c: Ctx, key: string): { picked: VF; named: VF } | null {
   const id = leaverCell(c, key);
   const p = id ? c.reg.line(id, "picked", "you") : undefined;
   const nm = id ? c.reg.step(id, "named", "you") : undefined;
-  if (p && nm) return { picked: vOf(p), named: vOf(nm) };
-  const r = c.legacy.inputs.alternatives?.offensive?.rows.find((x) => x.key === key);
-  return r ? { picked: legacyV("rival's customers: the tracker picked", r.captured), named: legacyV("rival's customers: the tracker named", r.named) } : null;
+  return p && nm ? { picked: vOf(p), named: vOf(nm) } : null;
 }
 /** The rivals whose customers ask what to switch to, most answers first (each leavers card's own answers; ties by name). */
 function leaversOrder(c: Ctx) {
@@ -445,20 +412,8 @@ function holdFigs(c: Ctx): { keep: VF; leave: VF } | null {
   const id = holdAll(c);
   const k = verdictOf(c, id, "keep");
   const l = verdictOf(c, id, "leave");
-  if (k && l) return { keep: vOf(k), leave: vOf(l) };
-  const d = c.legacy.inputs.alternatives?.defensive;
-  return d ? { keep: legacyV("customers looking around: told to stay", d.verdicts.keep), leave: legacyV("customers looking around: told to leave", d.verdicts.leave) } : null;
+  return k && l ? { keep: vOf(k), leave: vOf(l) } : null;
 }
-/** A worry list in the cards' order: stage, then the worry card's answers, then the wording. */
-const STAGE_ORDER = ["objections", "churn_triggers", "renewal"];
-function worriesOrder<T extends { stage: string; concern: string }>(c: Ctx, row: "buyers" | "customers", xs: T[], key: string) {
-  const n = (x: T) => {
-    const s = verdictOf(c, worryCell(c, row, x.concern), key);
-    return s ? nOf(s) : -1;
-  };
-  return [...xs].sort((a, b) => STAGE_ORDER.indexOf(a.stage) - STAGE_ORDER.indexOf(b.stage) || n(b) - n(a) || a.concern.localeCompare(b.concern));
-}
-
 /* ------------------- stage 5: conditions and arguments from the cards ------------------- */
 
 /**
@@ -467,7 +422,7 @@ function worriesOrder<T extends { stage: string; concern: string }>(c: Ctx, row:
  * "What the answer weighs" rows: the share on each side) - are the cards' own stats, printed with `fig`, linked by
  * the stat's id; every decision about them (which argument or condition is named, the lift test, order, floors,
  * whether the sentence is written) reads the same stats' counts. A condition or argument figure no card shows is
- * printed tagged (noHome) so the links harness lists it.
+ * not written (step 5, part 2: no old-source fallback).
  */
 
 /** An argument figure as the Brief prints it: the stat, or "none" where the card shows 0% ("argued in none of those"). */
@@ -478,16 +433,18 @@ const argFig = (t: FigTable, s: Stat) => (s.value === "0%" ? "none" : figOf(t, s
 interface ArgStat {
   code: string;
   name: string;
+  /** The weighs block's selection (the card's "What the answer weighs" topics). */
+  sel?: string;
   subj: Stat;
   oth: Stat;
   wins: RateCell;
   others: RateCell;
   lift: number;
 }
-const argOf = (code: string, name: string, subj: Stat, oth: Stat): ArgStat => {
+const argOf = (code: string, name: string, subj: Stat, oth: Stat, sel?: string): ArgStat => {
   const wins = cell(kOf(subj), nOf(subj));
   const others = cell(kOf(oth), nOf(oth));
-  return { code, name, subj, oth, wins, others, lift: rate(wins) - rate(others) };
+  return { code, name, subj, oth, wins, others, lift: rate(wins) - rate(others), ...(sel ? { sel } : {}) };
 };
 
 /**
@@ -496,20 +453,24 @@ const argOf = (code: string, name: string, subj: Stat, oth: Stat): ArgStat => {
  * (when it picks the tracker / when it picks the rival). Each row is an argument only when its name is a codebook code
  * (`codes`, case ignored). Null when the card shows no two-sided block for the subject.
  */
-function argSides(reg: StatRegistry, codes: string[], isTarget: boolean, subjectName: string, cellId: string): { subj: ArgStat[]; oth: ArgStat[] } | null {
+function argSides(reg: StatRegistry, codes: string[], isTarget: boolean, subjectName: string, cellId: string, map?: AnalysisMapView): { subj: ArgStat[]; oth: ArgStat[] } | null {
   let dest: string;
   let view: "plain" | "comp";
   let sc: number;
+  let sel: string | undefined;
+  const pp = map?.positions[cellId]?.panel;
   if (isTarget) {
     dest = statId.cell(cellId);
     view = "comp";
     sc = 0;
+    sel = pp?.weighsComp?.selection;
   } else {
     const part = reg.rivalPart(cellId, subjectName);
     if (!part) return null;
     dest = statId.cellRival(cellId, part);
     view = "plain";
     sc = 1;
+    sel = pp?.rivals?.find((r) => r.name === part)?.weighs?.selection;
   }
   const subjRows = reg.weighsRows(dest, view, sc);
   const othRows = reg.weighsRows(dest, view, 1 - sc);
@@ -517,8 +478,8 @@ function argSides(reg: StatRegistry, codes: string[], isTarget: boolean, subject
   if (!isTarget && !subjRows.length) return null;
   if (!subjRows.length && !othRows.length) return null;
   const code = (name: string) => codes.find((x) => x.toLowerCase() === name.toLowerCase());
-  const subj = subjRows.filter((r) => r.other && code(r.name)).map((r) => argOf(code(r.name)!, r.name, r.num, r.other!));
-  const oth = othRows.filter((r) => r.other && code(r.name)).map((r) => argOf(code(r.name)!, r.name, r.other!, r.num));
+  const subj = subjRows.filter((r) => r.other && code(r.name)).map((r) => argOf(code(r.name)!, r.name, r.num, r.other!, sel));
+  const oth = othRows.filter((r) => r.other && code(r.name)).map((r) => argOf(code(r.name)!, r.name, r.other!, r.num, sel));
   return { subj, oth };
 }
 
@@ -558,26 +519,53 @@ function condRows(c: Ctx, cellId: string, side: "toward" | "away", rivalName?: s
 export interface NameLogEntry {
   brand: string;
   subject?: string;
-  kind: "wall" | "taker" | "away-row" | "away-to" | "value-product" | "instead-rival" | "checklist" | "checklist-against" | "cell-label";
+  kind:
+    | "wall"
+    | "taker"
+    | "away-row"
+    | "away-to"
+    | "value-product"
+    | "instead-rival"
+    | "checklist"
+    | "checklist-against"
+    | "cell-label"
+    | "weighs-leader"
+    | "price-worry"
+    | "visibility"
+    | "visibility-folded"
+    | "leader"
+    | "room-leader"
+    | "converts-better"
+    | "argument"
+    | "condition"
+    | "competitor";
   name: string;
   cellId: string;
+  /** Fact layer step 5, part 2: the selection the name is a member of (its id - the proof recomputes it from the id). */
+  sel?: string;
+  /** The member's key in that selection (an entry id, a code, a worry's wording), when it differs from the name. */
+  key?: string;
 }
 export const NAME_LOG: NameLogEntry[] = [];
-function nameOn<T extends string>(c: Ctx, kind: NameLogEntry["kind"], cellId: string, name: T): T {
-  if (process.env.BRIEF_NAME_LOG) NAME_LOG.push({ brand: c.brand, ...(c.isTarget ? {} : { subject: c.name }), kind, name, cellId });
+function nameOn<T extends string>(c: Ctx, kind: NameLogEntry["kind"], cellId: string, name: T, sel?: string, key?: string): T {
+  if (process.env.BRIEF_NAME_LOG) NAME_LOG.push({ brand: c.brand, ...(c.isTarget ? {} : { subject: c.name }), kind, name, cellId, ...(sel ? { sel } : {}), ...(key !== undefined ? { key } : {}) });
   return name;
 }
 /** The fixed situation a cell's card names: the move box's why line ("Many of the buyers sent away here are in a
  * situation you cannot argue against: "<wall>"" - drawn on a card that carries a move). */
 function cardWall(c: Ctx, id: string): string | null {
   const p = c.map.positions[id];
-  return p?.lever && p.notes?.wall ? nameOn(c, "wall", id, p.notes.wall) : null;
+  return p?.lever && p.notes?.wall ? nameOn(c, "wall", id, p.notes.wall, p.panel?.conditions?.selections?.away) : null;
 }
 /** The product a Value card asked about, as its steps name it ("Asked about: <product>"); an all-buyers card whose
  * buyers were asked about several products names the brand (its claim's subject). Raw (for comparing) or as words. */
 function valueProductRaw(c: Ctx, id: string | undefined): string | null {
   const p = id ? c.map.positions[id]?.panel : undefined;
-  return p?.product && !p.byProduct ? nameOn(c, "value-product", id!, p.product) : null;
+  if (!p?.product || p.byProduct) return null;
+  // The product the question asked about: one of the price lines the cell's answers were asked about (price_lines).
+  const scope = c.stats[id!]?.youFact ? parseFactId(c.stats[id!].youFact!).scope : undefined;
+  const sel = scope ? c.rf.sel.selection("price_lines", "ai", scope).id : undefined;
+  return nameOn(c, "value-product", id!, p.product, sel);
 }
 const valueProduct = (c: Ctx, id: string | undefined) => {
   const raw = valueProductRaw(c, id);
@@ -586,7 +574,8 @@ const valueProduct = (c: Ctx, id: string | undefined) => {
 /** A card's condition row as a destination phrase: its "To ..." rows in the card's order ("to X", or "mostly to X and
  * Y" when the first takes under half the row's answers - the finding's own rule, on the card's counts). */
 function cardDest(c: Ctx, cellId: string, row: CondRowStats): string {
-  const to = row.to.map((t) => ({ name: nameOn(c, "away-to", cellId, t.name), n: kOf(t.stat) }));
+  // Each destination is the subject of its own fact (cond_dest|<brand>/cond:<units>|scope): the name is that brand's.
+  const to = row.to.map((t) => ({ name: nameOn(c, "away-to", cellId, t.name, undefined, t.stat.fact ? parseFactId(t.stat.fact).subject.split("/")[0] : undefined), n: kOf(t.stat) }));
   const d = destOf(to, to.length ? nOf(row.to[0].stat) : 0);
   return d ? destPhrase(d) : "";
 }
@@ -594,10 +583,12 @@ function cardDest(c: Ctx, cellId: string, row: CondRowStats): string {
  * tracker's): the name and its share. */
 function cardTaker(c: Ctx, cellId: string): { name: string; stat: Stat } | undefined {
   const r = c.reg.competitorRows(cellId).find((x) => !x.you);
-  return r ? { name: nameOn(c, "taker", cellId, r.name), stat: r.stat } : undefined;
+  return r ? { name: nameOn(c, "taker", cellId, r.name, c.map.positions[cellId]?.panel?.competitors?.selection), stat: r.stat } : undefined;
 }
 /** A cell's own name as its card is titled (a matchup's rival, a rival's customers, a worry's wording). */
-const cardLabel = (c: Ctx, id: string | undefined, fallback: string) => (id && c.stats[id] ? nameOn(c, "cell-label", id, c.stats[id].label) : fallback);
+/** The cell's name is its own scope's subject - the rival it names, the worry, the buying situation - read back from the
+ * fact the cell's verdict reads (the proof checks the label against that scope). */
+const cardLabel = (c: Ctx, id: string | undefined, fallback: string) => (id && c.stats[id] ? nameOn(c, "cell-label", id, c.stats[id].label, undefined, c.stats[id].youFact) : fallback);
 
 /** The direct-matchup cell against one rival, by the rival's dictionary key. */
 function rivalCell(c: Ctx, key: string): string | undefined {
@@ -621,57 +612,20 @@ export function briefNumberTokens(text: string): Set<string> {
   return new Set(text.match(NUMBER_TOKEN) ?? []);
 }
 
-/** RULE 1 (pin validity), applied to every composed memo: a pin on a unit
- * whose visible text carries number tokens survives only if its CARD states
- * at least one of them (bf14: the card is the receipt - cardText). A unit
- * with no numbers keeps its pins (navigational). A brand, engines or
- * condition card is also dropped when every number it shares with the unit
- * is already stated by an earlier surviving pin - those cards exist for the
- * numbers a cell does not state; cell pins keep bf12's denominator-first
- * order untouched. */
-function citePins(memo: BriefMemo, cards: Map<string, AnswerCard | null>): BriefMemo {
-  const memoTok = new Map<string, Set<string>>();
-  const tokensOf = (id: string) => {
-    let t = memoTok.get(id);
-    if (!t) {
-      const card = cards.get(id);
-      t = card ? briefNumberTokens(cardText(card)) : new Set<string>();
-      memoTok.set(id, t);
-    }
-    return t;
-  };
-  const prune = (visible: string, as: Anchor[]): Anchor[] => {
-    const nums = [...briefNumberTokens(visible)];
-    // bf15: a numberless unit's anchor links its `at` phrase; one with no
-    // present phrase could never render, so it does not ship.
-    if (nums.length === 0) return as.filter((a) => !!a.at && visible.includes(a.at));
-    const kept: Anchor[] = [];
-    const covered = new Set<string>();
-    for (const a of as) {
-      const t = tokensOf(a.id);
-      const shared = nums.filter((n) => t.has(n));
-      if (!shared.length) continue;
-      if (cards.get(a.id)?.kind !== "cell" && shared.every((n) => covered.has(n))) continue;
-      // A numbered unit's anchor links its numbers; `at` is for numberless units only.
-      if (a.at !== undefined) {
-        const { at: _at, ...bare } = a;
-        void _at;
-        kept.push(bare);
-      } else kept.push(a);
-      for (const n of shared) covered.add(n);
-    }
-    return kept;
-  };
+/** Fact layer step 5, part 2: a number links by its fact id (linkUnit), so a pin is kept only where there is no number
+ * to click - a numberless unit's Map-cell anchor whose `at` phrase is in its text (bf15). A numbered unit and every row
+ * carry no pins. */
+function pinsByRule(memo: BriefMemo): BriefMemo {
   const para = (p: BriefPara): BriefPara => {
     if (!p.cells?.length) return p;
-    const kept = prune(`${p.lead ?? ""} ${p.text}`, p.cells);
-    if (kept.length === p.cells.length && kept.every((a, i) => a === p.cells![i])) return p;
+    const visible = `${p.lead ?? ""} ${p.text}`;
+    const kept = briefNumberTokens(visible).size ? [] : p.cells.filter((a) => (a.kind ?? "cell") === "cell" && !!a.at && visible.includes(a.at));
     const { cells: _drop, ...rest } = p;
     void _drop;
     return kept.length ? { ...rest, cells: kept } : rest;
   };
   const row = (r: BriefRow): BriefRow => {
-    if (!r.cell || prune(`${r.label} ${r.value}`, [r.cell]).length) return r;
+    if (!r.cell) return r;
     const { cell: _drop, ...rest } = r;
     void _drop;
     return rest;
@@ -760,11 +714,11 @@ const PIN_RULES: Record<string, PinRule> = {
   // The room's problem cell first; the category-wide rate lives on the pooled cell.
   leak_problem: { pools: ["chooses:awareness:"], matchFirst: true },
   // bf14: the assistants live on the engines card; one brand's supplier on its brand card.
-  engine_spread: { pools: [ENGINES_CARD] },
-  engine_mode: { pools: [ENGINES_CARD] },
-  engine_vendor: { pools: [ENGINES_CARD] },
-  engine_decisiveness: { pools: [ENGINES_CARD] },
-  engine_h2h_flip: { pools: [ENGINES_CARD, "fights:h2h:"] },
+  engine_spread: { pools: [] },
+  engine_mode: { pools: [] },
+  engine_vendor: { pools: [] },
+  engine_decisiveness: { pools: [] },
+  engine_h2h_flip: { pools: ["fights:h2h:"] },
   engine_pick_concentration: { pools: (i, c) => [BRAND_CARD(brandInTitle(c, i.title))] },
 };
 
@@ -780,7 +734,7 @@ function insightCells(c: Ctx, i: { key: string; title: string; body?: string }):
   const rule = PIN_RULES[i.key];
   if (!rule) return matched ? [matched] : [];
   const srcs = typeof rule.pools === "function" ? rule.pools({ title: i.title, body: i.body ?? "" }, c) : rule.pools;
-  const pools = srcs.map((s) => (s.endsWith(":") ? pooledOf(c, s) : s)).filter((x): x is string => !!x && !!cardFor(c, x));
+  const pools = srcs.map((s) => (s.endsWith(":") ? pooledOf(c, s) : s)).filter((x): x is string => !!x && (!!c.map.positions[x] || x.startsWith("card:brand:") || x === CONDITION_CARD));
   const m = (rule.match || rule.matchFirst) && matched ? [matched] : [];
   const ids = rule.matchFirst ? [...m, ...pools] : [...pools, ...m];
   return [...new Set(ids.length ? ids : matched ? [matched] : [])];
@@ -797,6 +751,9 @@ interface RoomRead {
   commit?: Stat;
   /** Every brand some card shows a share of the picks for in this situation, most picked first. */
   brands: RoomBrand[];
+  /** The situation's leader other than the subject: the leader selection on the situation's What to buy scope, with its
+   * share of the picks there. */
+  leader?: RoomBrand;
 }
 interface RoomBrand {
   key: string;
@@ -820,7 +777,6 @@ interface Move {
   actStem: string;
   family: string;
   watch: string;
-  today: string;
   tip: string;
 }
 
@@ -840,16 +796,6 @@ interface Item {
 /** Stage 3: the brand summary with its funnel cells taken out - brands are who they are; their figures are stats
  * (fun / funnelBrands). The summary's other parts (worries, matchups, insights) are out of this stage's scope. */
 type BriefSummary = Omit<BrandSummaryView, "target" | "brands" | "firmPick" | "firmPickInCategory" | "byMode" | "byEngine" | "headToHead" | "buyersDoubt" | "customersDoubt"> & { target: Brand; brands: Brand[] };
-/** Stage 4: the insight inputs with the verdict views taken out - their figures are the verdict cards' stats; who
- * they are about (rivals, worries, buying situations, product lines) is `Ctx.verdicts`. */
-type BriefInputs = Omit<InsightInputs, "value" | "doubt" | "alternatives" | "conditions" | "away" | "taught">;
-/** Stage 5: the condition and argument rollups computed over the answers - taken out of the inputs (strict: a read
- * throws). Read ONLY on the tagged paths no card's stats can serve: the conditions paragraph when the What to buy card
- * shows no condition rows (each share printed tagged, needs a card home) and the gate on that paragraph; `taught` gives
- * the codebook's argument NAMES only (which weighs rows are arguments). statids8: the fixed situations, what sends
- * buyers away and the checklist are the cards' own (cardWall, condRows, checklistOf). The links harness's source check
- * allows `c.legacyArgs.` nowhere else. */
-type LegacyArgs = Pick<InsightInputs, "conditions" | "away" | "taught">;
 /** Stage 4: who the verdict figures are about - names only, no figure (the figures are the cards' stats). */
 interface VerdictIdent {
   /** The named rivals with a direct matchup. */
@@ -866,19 +812,13 @@ interface VerdictIdent {
 interface Ctx {
   data: ViewData;
   summary: BriefSummary;
-  /** The full brand summary, for the modules this stage leaves alone (dossier links, insight helpers). Never read
-   * for a funnel figure in this file. */
+  /** The full brand summary, for the dossier membership rule only. Never read for a figure in this file. */
   outOfScope: { summary: BrandSummaryView };
   /** Stage 3: each brand's funnel stats (fun), and the funnel universe (funnelBrands), built once. */
   funnel: Map<string, FunnelStats>;
   funnelBrands?: Brand[];
-  inputs: BriefInputs;
   /** Stage 4: who the verdict figures are about (names only). */
   verdicts: VerdictIdent;
-  /** Stage 5: the condition and argument rollups (see LegacyArgs) - read only on the tagged paths. */
-  legacyArgs: LegacyArgs;
-  /** Stage 4: the old verdict views, read ONLY by legacyV - a verdict figure no card shows, printed tagged. */
-  legacy: { summary: BrandSummaryView; inputs: InsightInputs };
   map: AnalysisMapView;
   stats: Record<string, MapCellStat>;
   ranked: Insight[];
@@ -891,29 +831,26 @@ interface Ctx {
   rooms: RoomRead[];
   /** Stage 5: the codebook's argument names (a card's weighs row is an argument when its name is one of these). */
   argCodes: string[];
-  /** One brand's argued codes in one buying situation (the map's counts) - read ONLY by By buying situation's
-   * number-free "when it picks <leader>, the answers most often argue ..." clause, which no card lists. */
-  legacyRoomCodes?: NonNullable<import("./analysis_map").AnalysisMapDebug["roomCodes"]>;
   moves: Move[];
   /** now_what's numbered findings (served insights; rival: composed facts) - the other frames skip them. */
   findings: { lead: string; text: string; tip?: string; key: string; cellIds?: string[] }[];
   /** Ranked insights placed on map cells by the map's own matcher (key + title -> cell id). */
   placements: Map<string, string>;
-  /** The subject's headline picks by stage (discovery / use_case / ...). */
-  stagePicks: Map<string, number>;
   /** The closing-sentence archetype (the map's casting for the target; leads/else for a rival). */
   archetype: string;
   footer: string;
   wave: number;
-  /** bf14: the answer cards built so far, by anchor id (null = nothing to show there). */
+  /** bf14: the Map-cell answer cards built so far, by anchor id (null = nothing to show there). */
   cards: Map<string, AnswerCard | null>;
-  /** The objects the brand / engines / condition cards read. */
-  src: CardSources;
   /** bf26: the same detectors in the Brief's style (third person, buyers as words), by key - target only. */
   voiced: Map<string, Insight>;
   /** Stage 2 (stat ids): every number the cards draw, and the figures this Brief has printed from them. */
   reg: StatRegistry;
   figs: FigTable;
+  /** Fact layer step 5, part 2: the run's facts and selections (the same book the cards, the Map and the Overview read),
+   * and where each fact is drawn (fact id -> the card stats that draw it, registry order). */
+  rf: RunFacts;
+  drawn: Map<string, Stat[]>;
 }
 
 function roomDescriptions(json: string | null | undefined): Map<string, string> {
@@ -987,41 +924,6 @@ function cellWords(row: string, label: string, brand: string): { lead: string; p
   }
 }
 
-/** "Today" in the cell's own unit (bf26: the brand by name, "none" / "every" at the extremes). */
-function todayOf(st: MapCellStat, brand: string): string {
-  const youD = pctN(st.d > 0 ? st.you / st.d : 0);
-  const themD = pctN(st.d > 0 ? st.them / st.d : 0);
-  const youN = pctN(st.n > 0 ? st.you / st.n : 0);
-  const noneN = st.you === 0;
-  switch (st.row) {
-    case "open":
-    case "social":
-    case "premium":
-    case "leavers":
-    case "h2h":
-      if (st.d > 0 && st.you === 0 && st.them === st.d) return `today ${st.taker} takes every pick between the two`;
-      return st.you === 0 ? `today ${brand} takes none of the picks, against ${themD} for ${st.taker}` : `today ${brand} takes ${youD} of the picks against ${themD} for ${st.taker}`;
-    case "value":
-      return noneN ? "today no answer calls it worth it" : `today ${youN} of the answers call it worth it`;
-    case "buyers":
-      return noneN ? "today none of these buyers is told to go ahead" : `today ${youN} of these buyers are told to go ahead`;
-    case "customers":
-    case "hold":
-      return noneN ? "today none is told to stay" : `today ${youN} are told to stay`;
-    case "awareness":
-    case "explainer":
-      return noneN ? `today the AI never recommends ${brand} in these answers` : `today the AI recommends ${brand} in ${youN} of these answers`;
-    case "criteria":
-      return noneN ? `today none of these answers tells buyers to look for a point that wins for ${brand}` : `today ${youN} of these answers tell buyers to look for a point that wins for ${brand}`;
-    case "repertoire":
-      return noneN ? `today none is told to stick with ${brand}` : `today ${youN} are told to stick with ${brand}`;
-    case "settled":
-      return noneN ? "today the AI never strengthens the relationship" : `today the AI strengthens the relationship in ${youN}`;
-    default:
-      return `today ${brand} holds ${youD}`;
-  }
-}
-
 /** The map's lever (analysis_map.ts LEVER) as a short verb phrase, for the
  * sentences that carry a move inside another sentence (SWOT, the diagnosis).
  * One template per triage and lever variant - the same variants the map
@@ -1085,7 +987,7 @@ export function actFromMove(text: string): string | null {
 /** Rows whose cell is a contest for the pick or a verdict on the brand - where a generic fact check is a real move. */
 const CONTEST_ROWS = new Set(["open", "h2h", "leavers", "value", "buyers", "customers", "hold", "criteria"]);
 
-function movesOf(map: AnalysisMapView, stats: Record<string, MapCellStat>, brand: string, findingAt: (cellId: string) => Insight | undefined): Move[] {
+function movesOf(map: AnalysisMapView, stats: Record<string, MapCellStat>, brand: string, findingAt: (cellId: string) => Insight | undefined, figs: FigTable): Move[] {
   const deficits = Object.values(map.positions)
     // Pooled All cells are the verdict paragraph's ground, not a move - a
     // move names the specific contest to act on.
@@ -1128,13 +1030,13 @@ function movesOf(map: AnalysisMapView, stats: Record<string, MapCellStat>, brand
       row: st.row,
       label: st.label,
       lead: w.lead,
-      claim: p.claim,
+      // The Map's claim, a statement: its numbers carry their fact ids.
+      claim: fromStatement(figs, p.claim, p.facts?.claim),
       lever: fm ? sentence(fm.text) : sentence(leverAbout(p.lever, brand, st.wall)),
       act,
       actStem: stem,
       family: fm ? fm.family : p.family,
       watch: w.watch,
-      today: todayOf(st, brand),
       tip: `${st.you} answers on ${poss(brand)} side, ${st.them} on ${st.taker}'s, of ${st.d} that take a side; ${st.n} answers in all. The move: ${fm ? fm.family : p.family}.`,
     };
   });
@@ -1176,13 +1078,29 @@ function roomsByShare(c: Ctx) {
     .filter((r) => roomFirm(r) >= MIN)
     .map((r) => {
       const share = roomBrand(r, c.subject.key)?.share;
-      const top = r.brands.find((b) => b.key !== c.subject.key);
+      const top = r.leader;
       return { r, share, top };
     })
     .sort((a, b) => roomRate(b.share) - roomRate(a.share) || a.r.room.localeCompare(b.r.room));
 }
 
-const leaderOf = (c: Ctx) => funnelBrands(c).find((b) => b.key !== c.subject.key && picksOf(c, b.key) > 0);
+/** The subject's leading rival when buyers ask what to buy: the leader selection (selections.ts - the brand in analysis
+ * other than the subject with the most picks; ties by times named, then by name). */
+function leaderOf(c: Ctx): Brand | undefined {
+  const sel = c.rf.sel.selection("leader", c.isTarget ? "you" : c.subject.key, WHAT_TO_BUY_ALL);
+  const m = (sel.members as SelMember[])[0];
+  if (!m) return undefined;
+  nameOn(c, "leader", OPEN_ALL, m.name, sel.id, m.key);
+  return brandOfKey(c, m.key);
+}
+/** A brand by its entry id, as the Brief names it (the brand summary's display name). */
+const brandOfKey = (c: Ctx, key: string): Brand => c.summary.brands.find((b) => b.key === key) ?? (key === c.target.key ? c.target : { key, name: key, role: "rival" as Brand["role"] });
+/** The brands whose recommendations end as the pick more often than the subject's: the converts_better selection
+ * (recommended in 20+ answers; the best converter first, ties by name; top 3). */
+function convertsBetter(c: Ctx): Brand[] {
+  const sel = c.rf.sel.selection("converts_better", c.isTarget ? "you" : c.subject.key, WHAT_TO_BUY_ALL, { min: MIN, top: 3 });
+  return (sel.members as SelMember[]).map((m) => (nameOn(c, "converts-better", OPEN_ALL, m.name, sel.id, m.key), brandOfKey(c, m.key)));
+}
 
 /** now_what's one-paragraph verdict: casting, the funnel with the commit
  * rate, the share of picks against the top rival, and one close templated
@@ -1192,7 +1110,8 @@ function verdictPara(c: Ctx): BriefPara {
   const f = fun(c, S.key);
   const parts: string[] = [];
   const tips: string[] = [`Named ${tipOfFig(f.named)}; recommended ${tipOfFig(f.rec)}; picked ${tipOfFig(f.picked)}; ${picksOf(c, S.key)} of ${commitK(c)} in-category picks.`];
-  if (c.isTarget) parts.push(c.map.casting.casting);
+  // The Map's casting, a statement: its numbers carry their fact ids.
+  if (c.isTarget) parts.push(fromStatement(c.figs, c.map.casting.casting, c.map.casting.facts?.casting));
   // bf29: the scoreboard below carries named, recommended and the leader's share; the verdict keeps the two
   // pick numbers with their bridge.
   parts.push(`The AI commits to one ${c.product} in ${fCommit(c)} of answers; when it does, ${c.name} is the pick ${fShare(c, S)} of the time${pickedHome(c) ? ` - ${fPicked(c, S)} of all answers` : ""}.`);
@@ -1242,16 +1161,13 @@ function verdictPara(c: Ctx): BriefPara {
 
 function funnelBreaks(c: Ctx): BriefPara {
   const S = c.subject;
-  const mine = convRate(c, S.key);
   const parts = [
-    // bf29: recommended and picked are the scoreboard's; this line keeps the conversion comparison.
-    `Only ${fConv(c, S)} of the answers that recommend ${c.name} end with it as the pick.`,
+    // bf29: recommended and picked are the scoreboard's; this line keeps the conversion comparison. A brand no answer
+    // recommends has no conversion (the fact's base is empty; no card draws it) - said in words.
+    fun(c, S.key).conv ? `Only ${fConv(c, S)} of the answers that recommend ${c.name} end with it as the pick.` : `No answer recommends ${c.name}.`,
   ];
   const tips = [`${picksOf(c, S.key)} picks of ${recK(c, S.key)} recommending answers.`];
-  const better = funnelBrands(c)
-    .filter((b) => b.key !== S.key && recK(c, b.key) >= MIN && convRate(c, b.key) > mine)
-    .sort((a, b) => convRate(c, b.key) - convRate(c, a.key) || a.name.localeCompare(b.name))
-    .slice(0, 3);
+  const better = convertsBetter(c);
   if (better.length) {
     parts.push(`${listOf(better.map((b, i) => (i === 0 ? `${b.name} turns ${fConv(c, b)} of its recommendations into picks` : `${b.name} ${fConv(c, b)}`)))}.`);
     tips.push(better.map((b) => `${b.name} ${picksOf(c, b.key)} of ${recK(c, b.key)}`).join("; ") + ".");
@@ -1278,6 +1194,12 @@ function conditionsFromCard(c: Ctx): BriefPara[] | null {
   // The card's "choose you" side is the tracker's: a rival's own side is its card's away column.
   const toR = (c.isTarget ? toward : away).slice(0, 3);
   const awayR = (c.isTarget ? away : toward).slice(0, 3);
+  const pp = c.map.positions[OPEN_ALL]?.panel;
+  const part = c.isTarget ? undefined : c.reg.rivalPart(OPEN_ALL, c.name);
+  const sels = (c.isTarget ? pp?.conditions : pp?.rivals?.find((r) => r.name === part)?.conditions)?.selections;
+  for (const r of toR) nameOn(c, "condition", OPEN_ALL, r.text, c.isTarget ? sels?.toward : sels?.away);
+  // A rival's own card inside the cell lists the cell's own "choose you" rows (no selection of its own).
+  for (const r of awayR) nameOn(c, "condition", OPEN_ALL, r.text, c.isTarget ? sels?.away : sels?.toward ?? pp?.conditions?.selections?.toward);
   const q = (t: string) => `"${condLabel(t)}"`;
   const pin = cellsOf(c, OPEN_ALL, CONDITION_CARD);
   const out: BriefPara[] = [];
@@ -1309,75 +1231,19 @@ function conditionsFromCard(c: Ctx): BriefPara[] | null {
 }
 
 function conditionsParas(c: Ctx): BriefPara[] {
-  // bf34 / stage 5: the card's rows when the What to buy card shows conditions (written from the card alone); the
-  // run's rollup only for the tagged no-card path and the number-free walls line below.
-  const fromCard = conditionsFromCard(c);
-  const k = c.legacyArgs.conditions;
-  if (!k) return fromCard ?? [];
-  const q = (g: { label: string }) => `"${condLabel(g.label)}"`;
-  let toward = k.toward;
-  let away = k.away;
-  let towardCells = k.towardCells;
-  let awayCells = k.awayCells;
-  let towardBase = k.towardThemed ? k.towardBase ?? 0 : null;
-  let awayBase = k.awayThemed ? k.awayBase ?? 0 : null;
-  if (!c.isTarget) {
-    // A rival's sides: the client's away side that sends buyers to it, and the client's own side.
-    toward = k.away.filter((g) => g.routes[0]?.name === c.name);
-    away = k.toward;
-    towardCells = k.awayCells;
-    awayCells = k.towardCells;
-    [towardBase, awayBase] = [awayBase, towardBase];
-  }
-  const out: BriefPara[] = fromCard ?? [];
-  const pin = cellsOf(c, CONDITION_CARD);
-  // Stage 5: these shares are computed over the run's condition rollup - no card shows them (the What to buy card
-  // shows no condition rows on this path), so each is printed tagged (needs a card home).
-  const share = (g: { answers?: number; cells: number }, base: number | null, cells: number) =>
-    noHome(c, "condition share with no card row (conditions paragraph)", base !== null ? pctN(base ? (g.answers ?? 0) / base : 0) : pctN(cells ? g.cells / cells : 0));
-  const unit = (base: number | null) => (base !== null ? "answers" : "questions");
-  const t = fromCard ? [] : toward.slice(0, 3);
-  if (t.length)
-    out.push(
-      withCells(
-        {
-          lead: `Who it sends to ${c.name}.`,
-          text: `Buyers who say ${listOf(t.map(q))} - the most common comes up in ${share(t[0], towardBase, towardCells ?? 0)} of the ${unit(towardBase)} that say when to choose it.`,
-          tip: towardBase !== null ? t.map((g) => `${g.label}: ${g.answers ?? 0} of ${towardBase} answers`).join("; ") : t.map((g) => `${g.label}: ${g.rules} rules in ${g.cells} questions`).join("; "),
-        },
-        pin
-      )
-    );
-  const a = fromCard ? [] : away.slice(0, 3);
-  if (a.length) {
-    const named = a.map((g) => {
-      if (awayBase !== null && c.isTarget) {
-        const d = destOf(g.routes, g.answers ?? 0);
-        return d ? `${q(g)} (${destPhrase(d)})` : q(g);
-      }
-      return g.routes[0] ? `${q(g)} (to ${g.routes[0].name})` : q(g);
-    });
-    out.push(
-      withCells(
-        {
-          lead: "Who it sends away.",
-          text: `Buyers who say ${listOf(named)} - the most common comes up in ${share(a[0], awayBase, awayCells ?? 0)} of the ${unit(awayBase)} that say when to choose something else.`,
-          tip: awayBase !== null ? a.map((g) => `${g.label}: ${g.answers ?? 0} of ${awayBase} answers`).join("; ") : a.map((g) => `${g.label}: ${g.rules} rules in ${g.cells} questions`).join("; "),
-        },
-        pin
-      )
-    );
-  }
+  // Fact layer step 5, part 2: the What to buy card's own rows, or nothing (a rival with no card of its own inside the
+  // What to buy cell has no condition rows to quote - the run-wide rollup that filled the gap counted outside the
+  // fact layer and is gone).
+  const out: BriefPara[] = conditionsFromCard(c) ?? [];
   if (c.isTarget) {
     const walls: string[] = [];
-    // statids8: the fixed situations the cards name (each card's move box), in the Map's order - the run-wide finding's
-    // own wording no longer leads the list (it is on a card too wherever it is a fixed situation).
+    // statids8: the fixed situations the cards name (each card's move box), in the Map's order.
     for (const id of Object.keys(c.stats)) {
       const w = cardWall(c, id);
       if (w && !walls.some((x) => norm(x) === norm(w))) walls.push(w);
     }
     if (walls.length)
-      out.push(withCells({ lead: "Buyers no message moves.", text: `Buyers who say ${listOf(walls.slice(0, 3).map((w) => `"${condLabel(w)}"`))} are already where they are; no case for ${c.name} changes that.` }, pin));
+      out.push(withCells({ lead: "Buyers no message moves.", text: `Buyers who say ${listOf(walls.slice(0, 3).map((w) => `"${condLabel(w)}"`))} are already where they are; no case for ${c.name} changes that.` }, cellsOf(c, OPEN_ALL)));
   }
   return out;
 }
@@ -1399,7 +1265,8 @@ function findingsOf(c: Ctx): Ctx["findings"] {
       // bf26: the Brief's own rendering of the same finding (third person, buyers as words).
       .map((i) => {
         const v = c.voiced.get(i.key) ?? i;
-        return { lead: leadOf(cap(v.title)), text: cap(v.body), tip: i.foot, key: i.key, cellIds: insightCells(c, i) };
+        // The finding is the Overview's statement in the Brief's voice: its numbers carry their fact ids.
+        return { lead: leadOf(cap(stmt(c, v, "title"))), text: cap(stmt(c, v, "body")), tip: i.foot, key: i.key, cellIds: insightCells(c, i) };
       })
       // bf29: the hardest direct matchup and the lost-with-an-exception finding are one subject - one finding,
       // the matchup first, then the exception.
@@ -1480,7 +1347,7 @@ function competitorColumns(c: Ctx): { topName?: string; named: CompCol; rec: Com
   out.picked.avg = at(R.line(OPEN_ALL, "picked", "avg"));
   const top = [...comp].sort((a, b) => kOf(b.row) - kOf(a.row) || order.indexOf(a.name) - order.indexOf(b.name))[0];
   if (top) {
-    out.topName = top.name;
+    out.topName = nameOn(c, "competitor", OPEN_ALL, top.name, pos.panel.competitorSelection);
     out.named.top = at(R.step(OPEN_ALL, "named", { rival: top.name }));
     out.rec.top = at(R.step(OPEN_ALL, "recommended", { rival: top.name }));
     out.share.top = fig(c, top.row);
@@ -1531,21 +1398,11 @@ function scoreboard(c: Ctx): BriefRow[] {
   if (leader && !vs) rows.push(at({ label: `Share of picks - ${leader.name}`, value: fShare(c, leader), tip: tipOfFig(fun(c, leader.key).share) }, OPEN_ALL, brandPin(c, leader.key)));
   if (c.isTarget) {
     // Stage 4: the verdict cards' own figures (the pooled head-to-head, worries and Value cards).
-    const won = statOr(c.reg.step(pooledOf(c, "fights:h2h:") ?? "", "won", "you"), () => {
-      const won = c.legacy.summary.headToHead.reduce((a, r) => a + r.won.k, 0);
-      const lost = c.legacy.summary.headToHead.reduce((a, r) => a + r.lost.k, 0);
-      return won + lost > 0 ? legacyV("direct matchups won, pooled", cell(won, won + lost)) : undefined;
-    });
+    const won = statOr(c.reg.step(pooledOf(c, "fights:h2h:") ?? "", "won", "you"));
     if (won && won.n >= MIN) rows.push(at({ label: "Direct matchups won", value: vfig(c, won), tip: `${vTip(won)} matchups that pick one of the two` }, pooledOf(c, "fights:h2h:")));
-    const go = statOr(verdictOf(c, buyersAll(c), "proceed"), () => {
-      const b = c.legacy.summary.buyersDoubt;
-      return b ? legacyV("buyers' worries told to go ahead", cell(b.proceed.k, b.answers)) : undefined;
-    });
+    const go = statOr(verdictOf(c, buyersAll(c), "proceed"));
     if (go && go.n >= MIN) rows.push(at({ label: "Buyers with a worry told to go ahead", value: vfig(c, go), tip: vTip(go) }, buyersAll(c)));
-    const stay = statOr(verdictOf(c, customersAll(c), "keep"), () => {
-      const k = c.legacy.summary.customersDoubt;
-      return k ? legacyV("customers' worries told to stay", cell(k.keep.k, k.answers)) : undefined;
-    });
+    const stay = statOr(verdictOf(c, customersAll(c), "keep"));
     if (stay && stay.n >= MIN) rows.push(at({ label: "Customers with a worry told to stay", value: vfig(c, stay), tip: vTip(stay) }, customersAll(c)));
     const w = worthAll(c);
     if (w && w.yes.n >= MIN) rows.push(at({ label: "Judged worth the price", value: vfig(c, w.yes), tip: vTip(w.yes) }, valueCell(c)));
@@ -1557,6 +1414,9 @@ function scoreboard(c: Ctx): BriefRow[] {
 }
 
 const leadOf = (t: string) => (/[.!?]$/.test(t.trim()) ? t.trim() : `${t.trim()}.`);
+
+/** An Overview finding's field as Brief text: its numbers marked with the fact ids the statement carries. */
+const stmt = (c: Ctx, i: Insight, field: "title" | "body") => fromStatement(c.figs, i[field], i.facts?.[field]);
 
 /** bf29 (Tyler): moves that share one action are ONE move - its lead names every place it applies to
  * (three named, then "and N more"), the action is said once, and one "Watch:" line (the first place's). A move
@@ -1624,51 +1484,61 @@ function placeOf(c: Ctx, m: Move): string {
   }
 }
 
-const NUMBER_TOKEN_ONE = /\d+(?:\.\d+)?%|[+-]\d+ (?:pts|points)/;
 /** bf35: harnesses read which Map claims lost clauses (set BRIEF_TRIM_LOG=1). */
 export const TRIMMED_CLAIMS: { brand: string; cellId: string; claim: string; kept: string }[] = [];
 
+/** A cut out of a composed string (plain text and figures), the figures after it moved back. */
+function trCut(tr: Tr, from: number, to: number): Tr {
+  const d = to - from;
+  return { s: tr.s.slice(0, from) + tr.s.slice(to), m: tr.m.filter((x) => x.at + x.len <= from || x.at >= to).map((x) => (x.at >= to ? { ...x, at: x.at - d } : x)) };
+}
+
 /**
- * bf35: a move quotes a Map claim only as far as its numbers are on a card - each number is passed through the
- * link resolver (the move's own cells first, then any card); a number that resolves nowhere loses its clause
- * (from the separator before it to the one after it). A claim left with no number is dropped whole.
+ * bf35 / fact layer step 5, part 2: a move quotes a Map claim only as far as its numbers are drawn on a card - each
+ * number is its fact (the claim's own statement facts); a number whose fact no card draws loses its clause (from the
+ * separator before it to the one after it). A claim whose headline (its first number) no card draws, or whose number
+ * carries no fact, is dropped whole.
  */
-function claimOnCards(c: Ctx, claim: string, cells: string[]): string {
-  const R = resolverOf(c);
-  const homed = (text: string, m: RegExpMatchArray) => {
-    const { local, sentence } = numberContext(R, text, m.index!, m.index! + m[0].length, "");
-    return !!R.find(m[0], local, sentence, { cells, rivals: [] });
+function claimOnCards(c: Ctx, claim: string, cellId: string): string {
+  let tr = decode(claim);
+  const plainClaim = tr.s;
+  const had = [...tr.s.matchAll(NUMBER_TOKEN)].length;
+  const homed = (at: number) => {
+    const f = tr.m.find((x) => at >= x.at && at < x.at + x.len);
+    return !!f && c.drawn.has(c.figs.list[f.i].ref);
   };
-  const had = [...claim.matchAll(NUMBER_TOKEN)].length;
-  let text = claim;
+  let dropped = false;
   for (let guard = 0; guard < 8; guard++) {
-    const bad = [...text.matchAll(NUMBER_TOKEN)].find((m) => !homed(text, m));
+    const toks = [...tr.s.matchAll(NUMBER_TOKEN)];
+    const bad = toks.find((m) => !homed(m.index!));
     if (!bad) break;
-    // The claim's headline (its first number) on no card: the claim is not quoted at all.
-    if (bad.index === text.search(NUMBER_TOKEN_ONE)) {
-      text = "";
+    if (bad === toks[0]) {
+      dropped = true;
       break;
     }
+    const text = tr.s;
     const start = bad.index!;
     const end = start + bad[0].length;
     const lefts = ["; ", ", ", " - ", " and "].map((x) => text.lastIndexOf(x, start)).filter((i) => i >= 0);
     const rights = [", ", "; ", " - ", ". "].map((x) => text.indexOf(x, end)).filter((i) => i >= 0);
     const L = lefts.length ? Math.max(...lefts) : -1;
     const Rt = rights.length ? Math.min(...rights) : text.replace(/[.]\s*$/, "").length;
-    if (L < 0 || text.lastIndexOf(". ", start) > L) return ""; // the number's clause opens the sentence
-    text = `${text.slice(0, L)}${text.slice(Rt)}`;
+    if (L < 0 || text.lastIndexOf(". ", start) > L) {
+      dropped = true;
+      break;
+    }
+    tr = trCut(tr, L, Rt);
   }
-  const kept = !text || (had && ![...text.matchAll(NUMBER_TOKEN)].length) ? "" : text;
-  if (kept !== claim && process.env.BRIEF_TRIM_LOG) TRIMMED_CLAIMS.push({ brand: c.brand, cellId: cells[0] ?? "", claim, kept });
+  const kept = dropped || (had && ![...tr.s.matchAll(NUMBER_TOKEN)].length) ? "" : encode(tr);
+  if (strip(kept) !== plainClaim && process.env.BRIEF_TRIM_LOG) TRIMMED_CLAIMS.push({ brand: c.brand, cellId, claim: plainClaim, kept: strip(kept) });
   return kept;
 }
 
 function movePara(c: Ctx, g: MoveGroup): BriefPara {
   const m = g.first;
-  const ids = g.moves.map((x) => x.cellId);
   const claims = g.moves
     .slice(0, 3)
-    .map((x) => claimOnCards(c, sentence(x.claim), [x.cellId, ...ids.filter((i) => i !== x.cellId)]))
+    .map((x) => claimOnCards(c, sentence(x.claim), x.cellId))
     .filter(Boolean)
     .join(" ");
   // One place: its own move sentence. Several: the shared action once (a finding's sentence on one of them would
@@ -1709,44 +1579,20 @@ function insightIsStrength(i: Insight): boolean {
   return false;
 }
 
-/** The Brief's link resolver (brief_links.ts), built once per Brief: frames ask it whether a figure is on a card. */
-const RESOLVERS = new WeakMap<Ctx, LinkResolver>();
-function resolverOf(c: Ctx): LinkResolver {
-  let r = RESOLVERS.get(c);
-  if (!r) {
-    r = linkResolver(c.map, linkTerms(c), [...(c.summary.reasonLift ?? []).map((l) => l.code), ...(c.legacyArgs.taught ?? []).map((t) => t.code)], conditionTerms(c.map));
-    RESOLVERS.set(c, r);
-  }
-  return r;
-}
-/** bf35: whether every number in `text` links exactly as linkUnit would link it (own cells / rival cards first,
- * then any card when the number names a subject) - a sentence the Brief may write with no answer-card fallback. */
-function linksOnCards(c: Ctx, raw: string, cells: string[], rivals: string[], context = ""): boolean {
-  const R = resolverOf(c);
-  // Stage 2: a card's figure (a stat) is on its card by construction; every other number is resolved as before.
-  const { s: text, m: figsAt } = decode(raw);
-  const isStat = (at: number) => figsAt.some((x) => at >= x.at && at < x.at + x.len && "stat" in c.figs.list[x.i]);
-  for (const m of text.matchAll(NUMBER_TOKEN)) {
-    if (isStat(m.index!)) continue;
-    const { local, sentence } = numberContext(R, text, m.index!, m.index! + m[0].length, context);
-    if (!R.find(m[0], local, sentence, { cells, rivals })) return false;
-  }
-  return true;
-}
-
-/** bf35: whether some card shows `token` in an entry whose words name every one of `words` (an AI company and a
- * rival, say) - a stricter test than the resolver's for figures whose subject is not one of its terms. */
-function cardShowsWith(c: Ctx, token: string, words: string[]): boolean {
-  const has = (e: IndexEntry) => numberTokens(e.value).includes(token) && words.every((w) => e.words.toLowerCase().includes(w.toLowerCase()));
-  for (const r of c.map.rivalPanels ?? []) if (indexAcross(r).some(has)) return true;
-  for (const p of Object.values(c.map.positions)) if (p.panel && indexPanel(p, p.panel.usualCellId ? c.map.positions[p.panel.usualCellId]?.panel?.steps : undefined).some(has)) return true;
-  return false;
-}
-
-/** bf35: the numbers on one line of a card ("Your share of the picks: 25% here · 15% across all buyers"). */
-function cardLineNums(map: AnalysisMapView, cellId: string, label: string): string[] {
-  const l = map.positions[cellId]?.panel?.lines?.find((x) => x.label === label);
-  return l ? (l.value.map((x) => x.t).join("").match(/<1%|\d+(?:\.\d+)?%/g) ?? []) : [];
+/**
+ * A rival one AI company carries (the engine_pick_concentration finding), in the Brief: the finding's own facts - the
+ * AI company's share of the rival's picks (printed, and only when a card draws that fact) and its share of the
+ * questions (read to decide, never printed). Null when the finding is not about a rival or its first fact is on no card.
+ */
+function concentrationOf(c: Ctx, conc: Insight): { share: string; ratio: number } | null {
+  const v = c.voiced.get(conc.key) ?? conc;
+  const nums = v.facts?.body ?? [];
+  if (nums.length < 2) return null;
+  const [a, b] = nums;
+  if (!c.drawn.has(a[2])) return null;
+  const x = evalRef(c.rf.book, a[2]).value;
+  const y = evalRef(c.rf.book, b[2]).value;
+  return { share: refFig(c.figs, a[2], v.body.slice(a[0], a[0] + a[1])), ratio: y > 0 ? x / y : Infinity };
 }
 
 /** The Value card's instead figures as one sentence: "It points the buyer to a rival instead in X% of answers and
@@ -1760,7 +1606,8 @@ function valueInsteadText(c: Ctx, vi: NonNullable<ReturnType<typeof insteadOf>>)
 /** bf34 / stage 5: the strongest winning and losing arguments the What to buy card shows (the lift test on the card's
  * own counts), with the card's figures. */
 function argsOnCard(c: Ctx) {
-  const { best, worst } = liftPicks(argSides(c.reg, c.argCodes, c.isTarget, c.name, OPEN_ALL));
+  const { best, worst } = liftPicks(argSides(c.reg, c.argCodes, c.isTarget, c.name, OPEN_ALL, c.map));
+  for (const x of [best, worst]) if (x) nameOn(c, "argument", OPEN_ALL, x.name, x.sel, x.code);
   const bestC = best ? { l: best, f: argWords(c.figs, best, "subject") } : undefined;
   const worstC = worst ? { l: worst, f: argWords(c.figs, worst, "other") } : undefined;
   return { bestC, worstC };
@@ -1778,7 +1625,7 @@ function fromInsight(c: Ctx, i: Insight, lead: string): SwotItem | null {
   if (c.voiced.get(i.key)?.body === "") return null;
   const ids = insightCells(c, i);
   const v = c.voiced.get(i.key) ?? i;
-  return { lead, text: v.body, tip: i.foot, kind: i.kind, effect: i.effect, cellId: ids[0], cellIds: ids, fact: `insight:${i.key}` };
+  return { lead, text: stmt(c, v, "body"), tip: i.foot, kind: i.kind, effect: i.effect, cellId: ids[0], cellIds: ids, fact: `insight:${i.key}` };
 }
 
 /** The recommended-to-picked step (the funnel's break), in the scoreboard's share-of-picks words. */
@@ -1788,7 +1635,7 @@ function funnelBreak(c: Ctx): SwotItem | null {
   const conv = convRate(c, S.key);
   const drop = recRate(c, S.key) - pickedRate(c, S.key);
   // A weakness only when some rival turns more of its recommendations into picks.
-  const better = funnelBrands(c).some((b) => b.key !== S.key && recK(c, b.key) >= MIN && convRate(c, b.key) > conv);
+  const better = convertsBetter(c).length > 0;
   if (drop <= 0 || !better) return null;
   return {
     lead: "Recommendations that do not close",
@@ -2097,14 +1944,14 @@ function swotOf(c: Ctx): Swot {
     // A rival carried by one AI company: a threat wherever buyers use that company's assistants.
     const conc = c.ranked.find((i) => i.key === "engine_pick_concentration" && i.names?.rival && i.names?.vendor && i.names.rival !== c.brand);
     if (conc) {
-      const nums = (c.voiced.get(conc.key)?.body ?? conc.body).match(/<1%|\d+(?:\.\d+)?%/g) ?? [];
-      // bf35: cited only when a card shows the rival's share of its picks from that AI company (the share of the
-      // questions those assistants answer is on no card, so it is never quoted).
-      if (nums.length >= 2 && cardShowsWith(c, nums[0]!, [conc.names!.vendor!, conc.names!.rival!])) {
+      // bf35 / step 5 part 2: cited only when a card draws the rival's share of its picks from that AI company (the
+      // finding's first fact); the share of the questions those assistants answer is on no card, so it is never quoted.
+      const cx = concentrationOf(c, conc);
+      if (cx) {
         const ids = insightCells(c, conc);
         t.push({
           lead: "A rival one AI company carries",
-          text: `${conc.names!.vendor}'s assistants pick ${conc.names!.rival} far more often than the others do - they supply ${nums[0]} of its picks - so ${conc.names!.rival} is picked more wherever buyers use them.`,
+          text: `${conc.names!.vendor}'s assistants pick ${conc.names!.rival} far more often than the others do - they supply ${cx.share} of its picks - so ${conc.names!.rival} is picked more wherever buyers use them.`,
           tip: conc.foot,
           kind: "engine",
           effect: conc.effect,
@@ -2147,7 +1994,7 @@ function swotOf(c: Ctx): Swot {
       t.push({
         lead: "What sends buyers away",
         // bf47: the card read is the What to buy card - say so (the sentence had covered every question type).
-        text: `When buyers ask what to buy, the AI most often sends them away from ${c.brand} when they say "${condLabel(nameOn(c, "away-row", OPEN_ALL, awayRow.text))}"${d ? `, ${d}` : ""}.`,
+        text: `When buyers ask what to buy, the AI most often sends them away from ${c.brand} when they say "${condLabel(nameOn(c, "away-row", OPEN_ALL, awayRow.text, c.map.positions[OPEN_ALL]?.panel?.conditions?.selections?.away))}"${d ? `, ${d}` : ""}.`,
         kind: "condition",
         effect: awayIns.effect,
         cellId: CONDITION_CARD,
@@ -2284,15 +2131,13 @@ function funnelFrame(c: Ctx): BriefSection[] {
 
   // The recommended stage's conversion (the library funnel's stage-3 line):
   // how many recommendations end as the pick, against the rival that converts best.
-  const better = funnelBrands(c)
-    .filter((b) => b.key !== S.key && recK(c, b.key) >= MIN && convRate(c, b.key) > convRate(c, S.key))
-    .sort((a, b) => convRate(c, b.key) - convRate(c, a.key) || a.name.localeCompare(b.name))[0];
+  const better = convertsBetter(c)[0];
   const recToPick =
     recK(c, S.key) >= MIN
       ? ` Only ${fConv(c, S)} of its recommendations end as the pick${better ? `; ${better.name} turns ${fConv(c, better)} of its own into picks` : ""}.`
       : "";
   // The named, recommended and pick stages read the pooled open-choice cell; the kept stage the pooled customers' worries.
-  // A rival subject's stages read its brand card (rowPin picks the card stating them).
+  // A rival subject's stages read its By rival card (each number links by its fact id).
   const own = subjectPins(c);
   const openCells = cellsOf(c, ...own);
   const keptA = anchor(c, pooledOf(c, "doubts:customers:"));
@@ -2606,30 +2451,51 @@ function classCells(c: Ctx): Map<string, { cellId: string; name: string }> {
   return out;
 }
 
+/**
+ * Ruling 11: "converts" has ONE rule - the visibility view's. The brands on the chart are the visibility selection
+ * (selections.ts visibility_brands: named in 10%+ of answers or 1%+ of the picks, class brands out, the subject and the
+ * tracker always; placed when recommended in 20+ answers and not small, the rest folded); the level line pools the
+ * placed brands' own conversion facts (a derived fact: their picks over their recommendations); a brand converts when
+ * it is recommended in 20+ answers and its recommendations end as the pick at or above the line. The diagnosis reads
+ * the same object.
+ */
+interface Visibility {
+  sel: AnySelection;
+  placed: Brand[];
+  folded: Brand[];
+  /** The level line: its ref (pool of the placed brands' conversion facts) and value. */
+  lineRef: string;
+  line: number;
+  readable: (b: Brand) => boolean;
+  converting: (b: Brand) => boolean;
+  visible: (b: Brand) => boolean;
+}
+function visibilityOf(c: Ctx): Visibility {
+  const sel = c.rf.sel.selection("visibility_brands", c.isTarget ? "you" : c.subject.key, WHAT_TO_BUY_ALL);
+  const brandOf = (key: string): Brand => c.summary.brands.find((b) => b.key === key) ?? (key === c.target.key ? c.target : { key, name: (sel.members as SelMember[]).find((m) => m.key === key)?.name ?? key, role: "rival" as Brand["role"] });
+  const placed = (sel.members as SelMember[]).map((m) => brandOf(m.key));
+  const folded = (sel.extras.folded ?? []).map((m) => brandOf(m.key));
+  for (const b of placed) nameOn(c, "visibility", "", b.name, sel.id, b.key);
+  for (const b of folded) nameOn(c, "visibility-folded", "", b.name, sel.id, b.key);
+  const refs = placed.map((b) => need(fun(c, b.key).conv, `${b.name} conversion`).fact!);
+  const lineRef = dref("pool", refs);
+  const line = refs.length ? evalRef(c.rf.book, lineRef).value : 0;
+  const readable = (b: Brand) => recK(c, b.key) >= MIN;
+  return { sel, placed, folded, lineRef, line, readable, converting: (b) => readable(b) && convRate(c, b.key) >= line, visible: (b) => namedRate(c, b.key) > 0.5 };
+}
+
 function matrixFrame(c: Ctx): BriefSection[] {
   const classes = classCells(c);
-  // The selectable brands that register (named in >= 10% of answers or >= 1% of the picks; the subject and
-  // the target always) - brands asked about as a class left out (bf29). Stage 3: every figure is the brand's card
-  // stat (fun), so the table, the chart and these decisions read one source.
-  const set = funnelBrands(c).filter((b) => !classes.has(b.key) && (b.key === c.subject.key || b.key === c.target.key || namedRate(c, b.key) >= 0.1 || shareRate(c, b.key) >= 0.01));
-  // bf29: one meaning of converting across the Brief - the recommendations that end as the pick.
-  const readable = (b: Brand) => recK(c, b.key) >= MIN;
+  const V = visibilityOf(c);
+  const readable = V.readable;
   const conv = (b: Brand) => convRate(c, b.key);
-  // Folded (one note on the chart, one line in the table): too few recommendations to read a conversion, or
-  // rarely named and rarely picked (the chart's old cluster rule) - never the subject or the tracker's brand.
-  const small = (b: Brand) => shareRate(c, b.key) < 0.02 && namedRate(c, b.key) < 0.3;
-  const keep = (b: Brand) => b.key === c.subject.key || b.key === c.target.key;
-  const placedSet = set.filter((b) => readable(b) && (keep(b) || !small(b)));
-  const folded = set.filter((b) => !placedSet.includes(b));
-  // The level line pools the charted brands' own counts (each conversion stat's picks over its recommendations);
-  // no card shows the pooled figure itself (printed tagged, needs a card home).
-  const convK = (b: Brand) => (fun(c, b.key).conv ? kOf(fun(c, b.key).conv!) : 0);
-  const recAll = placedSet.reduce((a, b) => a + recK(c, b.key), 0);
-  const line = recAll > 0 ? placedSet.reduce((a, b) => a + convK(b), 0) / recAll : 0;
-  const visible = (b: Brand) => namedRate(c, b.key) > 0.5;
-  const converting = (b: Brand) => readable(b) && conv(b) >= line;
+  const placedSet = V.placed;
+  const folded = V.folded;
+  const line = V.line;
+  const visible = V.visible;
+  const converting = V.converting;
   const quad = (b: Brand): Quadrant => (visible(b) && converting(b) ? "The Closers" : visible(b) ? "The Showroom" : converting(b) ? "The Quiet Closer" : "The Background");
-  const byNamed = (xs: Brand[]) => [...xs].sort((a, b) => namedK(c, b.key) - namedK(c, a.key) || a.name.localeCompare(b.name));
+  const byNamed = (xs: Brand[]) => [...xs];
   const sorted = byNamed(placedSet);
   const S = c.subject;
   const subjReadable = readable(S) && !classes.has(S.key);
@@ -2642,23 +2508,25 @@ function matrixFrame(c: Ctx): BriefSection[] {
   // The scatter.
   const pts = sorted.map((b) => ({ label: b.name, x: namedRate(c, b.key) * 100, y: conv(b) * 100, accent: b.key === S.key }));
   const yMax = Math.min(100, Math.max(20, Math.ceil((Math.max(...pts.map((p) => p.y), line * 100) + 4) / 10) * 10));
-  const VL = "visible: named over 50%";
-  // The level line pools the charted brands - a figure no card shows (needs a card home).
-  const HL = `all these brands together: ${noHome(c, CHART_LINE, pctN(line))}`;
+  // A threshold, not a fact: said in words (fact layer step 5, part 2 - every printed number is a fact).
+  const VL = "visible: named in over half";
+  // The level line pools the charted brands' conversion facts (a derived fact): the chart's own reference line, on no
+  // card by design (Tyler, 2026-11-17).
+  const HL = `all these brands together: ${refFig(c.figs, V.lineRef, evalRef(c.rf.book, V.lineRef).text)}`;
   const note = foldNames.length ? `Rarely named or picked, not placed: ${listOf(foldNames)}` : null;
   const plan = placeScatter(pts, 100, yMax, 50, VL, line * 100, HL, note);
   const vis = sorted.filter(visible);
-  const headline = `${fConv(c, S)} of recommendations become picks, named in ${fNamed(c, S)}`;
+  const headline = () => `${fConv(c, S)} of recommendations become picks, named in ${fNamed(c, S)}`;
   let title: string;
   if (!subjReadable) title = `${c.name} is recommended too rarely to read how often it converts - named in ${fNamed(c, S)}`;
   else if (visible(S)) {
     const rn = vis.findIndex((b) => b.key === S.key) + 1;
     const byConv = [...vis].sort((a, b) => conv(b) - conv(a));
     const rc = byConv.findIndex((b) => b.key === S.key) + 1;
-    if (vis.length >= 2 && rc === vis.length) title = rn === 1 ? `The most visible brand converts least - ${headline}` : `${c.name} converts least of the visible brands - ${headline}`;
-    else if (vis.length >= 2) title = `${c.name} is named ${ordinal(rn)}most and converts ${ordinal(rc)}best of the visible brands - ${headline}`;
-    else title = `${c.name} is the only visible brand${converting(S) ? " and converts above the line" : " and converts below the line"} - ${headline}`;
-  } else title = converting(S) ? `${c.name} converts but is not visible - ${headline}` : `${c.name} is neither visible nor converting - ${headline}`;
+    if (vis.length >= 2 && rc === vis.length) title = rn === 1 ? `The most visible brand converts least - ${headline()}` : `${c.name} converts least of the visible brands - ${headline()}`;
+    else if (vis.length >= 2) title = `${c.name} is named ${ordinal(rn)}most and converts ${ordinal(rc)}best of the visible brands - ${headline()}`;
+    else title = `${c.name} is the only visible brand${converting(S) ? " and converts above the line" : " and converts below the line"} - ${headline()}`;
+  } else title = converting(S) ? `${c.name} converts but is not visible - ${headline()}` : `${c.name} is neither visible nor converting - ${headline()}`;
   const viz: BriefViz = {
     kind: "scatter",
     title,
@@ -2714,12 +2582,11 @@ function matrixFrame(c: Ctx): BriefSection[] {
         subjPins
       )
     );
-  // bf35: the outliers are named only among brands whose two figures link to a card (else no sentence).
+  // bf35: the outliers' two figures are their own cards' stats (By rival "What to buy"), so every outlier links.
   const showText = (b: Brand) => `${b.name} is ${quad(S) === "The Showroom" ? "also in the Showroom" : "the most visible brand in the Showroom"} - named in ${fNamed(c, b)} of answers, with ${fConv(c, b)} of its recommendations ending as the pick.`;
   const quietText = (b: Brand) => `${b.name} is ${quad(S) === "The Quiet Closer" ? "another" : "the strongest"} Quiet Closer - named in ${fNamed(c, b)} of answers, yet ${fConv(c, b)} of its recommendations end as the pick.`;
-  const linksFor = (b: Brand, t: string) => linksOnCards(c, t, b.key === c.target.key ? [OPEN_ALL] : [], b.key === c.target.key ? [] : [b.name]);
-  const showroom = sorted.find((b) => b.key !== S.key && quad(b) === "The Showroom" && linksFor(b, showText(b)));
-  const quiet = [...sorted].filter((b) => b.key !== S.key && quad(b) === "The Quiet Closer").sort((a, b) => conv(b) - conv(a)).find((b) => linksFor(b, quietText(b)));
+  const showroom = sorted.find((b) => b.key !== S.key && quad(b) === "The Showroom");
+  const quiet = [...sorted].filter((b) => b.key !== S.key && quad(b) === "The Quiet Closer").sort((a, b) => conv(b) - conv(a))[0];
   const outl: string[] = [];
   if (showroom) outl.push(showText(showroom));
   if (quiet) outl.push(quietText(quiet));
@@ -2745,7 +2612,7 @@ function matrixFrame(c: Ctx): BriefSection[] {
         {
           lead: `Against ${c.brand}.`,
           // bf35: the subject's own two figures only when a card shows them.
-          text: `${c.brand} is ${QUAD_PHRASE[quad(T)]}, named in ${fNamed(c, T)} of answers with ${fConv(c, T)} of its recommendations ending as the pick; ${c.name} is ${quad(S) === quad(T) ? "in the same place" : QUAD_PHRASE[quad(S)]}${linksOnCards(c, `${c.name} is ${QUAD_PHRASE[quad(S)]}, at ${fNamed(c, S)} and ${fConv(c, S)}.`, [OPEN_ALL], [c.name]) ? `, at ${fNamed(c, S)} and ${fConv(c, S)}` : ""}.`,
+          text: `${c.brand} is ${QUAD_PHRASE[quad(T)]}, named in ${fNamed(c, T)} of answers with ${fConv(c, T)} of its recommendations ending as the pick; ${c.name} is ${quad(S) === quad(T) ? "in the same place" : QUAD_PHRASE[quad(S)]}, at ${fNamed(c, S)} and ${fConv(c, S)}.`,
         },
         cellsOf(c, OPEN_ALL, BRAND_CARD(S.key))
       )
@@ -2777,7 +2644,7 @@ function roomStands(c: Ctx): RoomStand[] {
   c.rooms.forEach((r, seq) => {
     if (roomAnswers(r) === 0 || roomFirm(r) < MIN) return;
     const mine = roomBrand(r, c.subject.key)?.share;
-    const leader = r.brands.find((b) => b.key !== c.subject.key);
+    const leader = r.leader;
     const owns = roomK(mine) > 0 && (!leader || roomK(mine) >= kOf(leader.share));
     out.push({ r, seq, ...(mine ? { mine } : {}), leader, owns, gap: (leader ? rateOf(leader.share) : 0) - roomRate(mine) });
   });
@@ -2803,8 +2670,32 @@ function worthWords(c: Ctx, w: Worth3): string {
   return `says it is worth it in ${vfig(c, w.yes)}, not worth it in ${vfig(c, w.no)}${rest ? `, and that it depends in ${vfig(c, w.depends)}` : ""}`;
 }
 
+/** What the leader's side of a buying situation's What to buy card weighs (fact layer step 5, part 2): the leader's own
+ * card inside the cell (its column, set against the tracker), or - when the leader is the tracker - the tracker's
+ * column of the cell's own block (set against another brand). The first two rows that are arguments, in the card's
+ * order, each read from the card's weighs selection; null when the card shows no such column. */
+function leaderWeighs(c: Ctx, roomId: string, leader: { key: string; name: string }): { codes: string[]; other: string } | null {
+  const pp = c.map.positions[roomId]?.panel;
+  const code = (name: string) => c.argCodes.find((x) => x.toLowerCase() === name.toLowerCase());
+  let rows: { name: string }[];
+  let selId: string | undefined;
+  let other: string;
+  if (leader.key === c.target.key) {
+    rows = c.reg.weighsRows(statId.cell(roomId), "comp", 0);
+    selId = pp?.weighsComp?.selection;
+    other = "another brand";
+  } else {
+    const part = c.reg.rivalPart(roomId, leader.name);
+    if (!part) return null;
+    rows = c.reg.weighsRows(statId.cellRival(roomId, part), "plain", 1);
+    selId = pp?.rivals?.find((r) => r.name === part)?.weighs?.selection;
+    other = c.brand;
+  }
+  const codes = rows.filter((r) => !!code(r.name)).slice(0, 2).map((r) => nameOn(c, "weighs-leader", roomId, code(r.name)!, selId));
+  return { codes, other };
+}
+
 const LIFT_SIDE = 10; // the cards' floor for a two-sided read (picks a side)
-const ONE_SIDE = MIN; // bf29: a one-sided read needs 20 picks of the leader, and a code argued in at least a quarter of them
 
 function jobsFrame(c: Ctx): BriefSection[] {
   const paras: BriefPara[] = [];
@@ -2835,10 +2726,10 @@ function jobsFrame(c: Ctx): BriefSection[] {
         // The other side: every other in-category pick for the tracker; the tracker's own picks for a rival (its card).
         const othersK = c.isTarget ? roomFirm(r) - mineK : roomK(roomBrand(r, c.target.key)?.share);
         if (mineK >= LIFT_SIDE && othersK >= LIFT_SIDE) {
-          const sides = argSides(c.reg, c.argCodes, c.isTarget, c.name, roomId);
+          const sides = argSides(c.reg, c.argCodes, c.isTarget, c.name, roomId, c.map);
           if (sides || c.isTarget) {
-            const win = (sides?.subj ?? []).filter((l) => l.lift > 0 && l.wins.low > l.others.high).sort((x, y) => y.lift - x.lift).slice(0, 2).map((l) => l.code);
-            const lose = (sides?.oth ?? []).filter((l) => l.lift < 0 && l.others.low > l.wins.high).sort((x, y) => x.lift - y.lift).slice(0, 2).map((l) => l.code);
+            const win = (sides?.subj ?? []).filter((l) => l.lift > 0 && l.wins.low > l.others.high).sort((x, y) => y.lift - x.lift).slice(0, 2).map((l) => nameOn(c, "argument", roomId, l.code, l.sel));
+            const lose = (sides?.oth ?? []).filter((l) => l.lift < 0 && l.others.low > l.wins.high).sort((x, y) => x.lift - y.lift).slice(0, 2).map((l) => nameOn(c, "argument", roomId, l.code, l.sel));
             if (win.length || lose.length)
               parts.push(
                 `${win.length ? `When the AI picks ${c.name} for this buyer, ${listOf(win)} ${win.length > 1 ? "come" : "comes"} up more` : `Nothing comes up clearly more when the AI picks ${c.name} for this buyer`}${lose.length ? `; when it picks ${c.isTarget ? "another brand" : c.brand}, ${listOf(lose)} ${lose.length > 1 ? "come" : "comes"} up more` : ""}.`
@@ -2846,13 +2737,12 @@ function jobsFrame(c: Ctx): BriefSection[] {
             else parts.push(`No argument in this buyer's answers comes up clearly more on either side.`);
           }
         } else if (mineK < LIFT_SIDE) {
-          // Too few picks of the subject for the two-sided read (the card's counts); the leader alone - what its picks
-          // argue most, each in at least a quarter of them. No card lists what one brand's picks argue most (a card's
-          // weighs rows are the topics that come up MORE on one side), so this number-free clause reads the map's
-          // per-buyer counts (`c.legacyRoomCodes`, reported as still on the old source).
-          const lead = st.leader && !st.owns ? c.legacyRoomCodes?.(r.room, st.leader.key) : undefined;
-          const top = lead && lead.n >= ONE_SIDE ? lead.codes.filter((x) => rate(x.rate) >= 0.25).slice(0, 2).map((x) => x.code) : [];
-          parts.push(`The AI picks ${c.name} here too seldom to say what wins it${top.length ? `; when it picks ${st.leader!.name}, the answers most often argue ${listOf(top)}` : ""}.`);
+          // Too few picks of the subject for the two-sided read (the card's counts); the leader alone - what its side of
+          // this buyer's What to buy card weighs (the leader's own card inside the cell, set against the tracker; the
+          // tracker's side of the cell's own block when the leader is the tracker): its first two arguments, in the
+          // card's order, number-free. A card with no such rows: the clause is not written.
+          const lw = st.leader && !st.owns ? leaderWeighs(c, roomId, st.leader) : null;
+          parts.push(`The AI picks ${c.name} here too seldom to say what wins it${lw && lw.codes.length ? `; when it picks ${st.leader!.name}, ${listOf(lw.codes)} ${lw.codes.length > 1 ? "come" : "comes"} up more than when it picks ${lw.other}` : ""}.`);
         } else if (c.isTarget) parts.push(`Too few of these answers pick another brand to say what wins against ${c.name} here.`);
         else if (st.leader?.key !== c.target.key) {
           // bf46 (Tyler): on a rival's Brief the tracker being picked too rarely to compare IS the finding - state
@@ -2959,8 +2849,12 @@ function pairsViz(c: Ctx, stands: RoomStand[]): BriefViz | null {
 
 /* -------------------------------- Diagnosis -------------------------------- */
 
-/** A worry about the price: its wording names money (generic words, never a category's). */
-const PRICE_WORRY = /\b(fees?|prices?|pricey|pricing|costs?|costly|expensive|pay|paying|money|afford(?:able)?|overpriced|cheap(?:er)?|budget|subscription)\b/i;
+/** The worries about the price: the price_worries selection (selections.ts - its wording names money; one stated
+ * rule), on the buyers' worries or the customers' worries, in the cards' order. */
+function priceWorries(c: Ctx, row: "buyers" | "customers"): string[] {
+  const sel = c.rf.sel.selection("price_worries", "ai", { types: row === "buyers" ? ["objections"] : ["churn_triggers", "renewal"] });
+  return (sel.members as SelMember[]).map((m) => nameOn(c, "price-worry", worryCell(c, row, m.key) ?? "", m.key, sel.id, m.key));
+}
 
 
 /**
@@ -2977,13 +2871,13 @@ function diagnosisFrame(c: Ctx): BriefSection[] {
   const leader = leaderOf(c);
   const behind = !!leader && shareRate(c, leader.key) > shareRate(c, S.key);
 
-  // 1. Visibility against conversion (the matrix's lines: visible = named over half the answers,
-  // converting = share of picks at least a quarter of the named rate).
+  // 1. Visibility against conversion - ruling 11: the visibility view's one rule (visibilityOf): visible = named in
+  // over half the answers; converting = recommended in 20+ answers and its recommendations end as the pick at or above
+  // the level line for the charted brands together.
   if (namedN(c, S.key) >= MIN && commitK(c) >= MIN) {
-    const named = namedRate(c, S.key);
-    const share = shareRate(c, S.key);
-    const visible = named > 0.5;
-    const converts = share >= named / 4;
+    const V = visibilityOf(c);
+    const visible = V.visible(S);
+    const converts = V.converting(S);
     const heading = visible
       ? converts
         ? behind
@@ -3030,31 +2924,23 @@ function diagnosisFrame(c: Ctx): BriefSection[] {
     }
     // The worry about the price: the buyers' worry first, then the customers' with the same wording - each worry's
     // own card, in the cards' order (stage, then answers).
-    const goOf = (concern: string) =>
-      statOr(verdictOf(c, worryCell(c, "buyers", concern), "proceed"), () => {
-        const r = c.legacy.inputs.doubt.objections?.rows.find((x) => x.concern === concern);
-        return r ? legacyV("buyers' worry: told to go ahead", r.verdicts.proceed) : undefined;
-      });
+    const goOf = (concern: string) => statOr(verdictOf(c, worryCell(c, "buyers", concern), "proceed"));
     const kl2Of = (concern: string): { keep: VF; leave: VF } | undefined => {
       const id = worryCell(c, "customers", concern);
       const k = verdictOf(c, id, "keep");
       const l = verdictOf(c, id, "leave");
-      if (k && l) return { keep: vOf(k), leave: vOf(l) };
-      const r = c.legacy.inputs.doubt.keepOrLeave?.rows.find((x) => x.concern === concern);
-      return r ? { keep: legacyV("customers' worry: told to stay", r.verdicts.keep), leave: legacyV("customers' worry: told to leave", r.verdicts.leave) } : undefined;
+      return k && l ? { keep: vOf(k), leave: vOf(l) } : undefined;
     };
-    const ob = worriesOrder(c, "buyers", c.verdicts.buyers, "proceed")
-      .filter((r) => PRICE_WORRY.test(r.concern))
+    const ob = priceWorries(c, "buyers")
       // statids8: the worry as its card is titled.
-      .map((r) => ({ concern: cardLabel(c, worryCell(c, "buyers", r.concern), r.concern), go: goOf(r.concern) }))
+      .map((w) => ({ concern: cardLabel(c, worryCell(c, "buyers", w), w), go: goOf(w) }))
       .find((r): r is { concern: string; go: VF } => !!r.go && r.go.n >= MIN);
     if (ob) {
       parts.push(`A buyer who worries "${ob.concern}" is ${ob.go.k === 0 ? "never told to go ahead" : ob.go.k === ob.go.n ? "told to go ahead every time" : `told to go ahead in ${vfig(c, ob.go)} of answers`}.`);
       pins.push(worryCell(c, "buyers", ob.concern));
     }
-    const klRows = worriesOrder(c, "customers", c.verdicts.customers, "keep")
-      .filter((r) => PRICE_WORRY.test(r.concern))
-      .map((r) => ({ concern: cardLabel(c, worryCell(c, "customers", r.concern), r.concern), v: kl2Of(r.concern) }))
+    const klRows = priceWorries(c, "customers")
+      .map((w) => ({ concern: cardLabel(c, worryCell(c, "customers", w), w), v: kl2Of(w) }))
       .filter((r): r is { concern: string; v: { keep: VF; leave: VF } } => !!r.v && r.v.keep.n >= MIN);
     const kl = klRows.find((r) => ob && norm(r.concern) === norm(ob.concern)) ?? klRows[0];
     if (kl) {
@@ -3097,9 +2983,9 @@ function diagnosisFrame(c: Ctx): BriefSection[] {
       parts.push(`It leads instead with ${listOf(lead3)}.`);
       // statids8: a checklist topic (the What to look for card's own list, in its order) that the What to buy card shows
       // in its "when it picks another" column and that passes the lift test on that card's counts.
-      const oth = argSides(c.reg, c.argCodes, c.isTarget, c.name, OPEN_ALL)?.oth ?? [];
+      const oth = argSides(c.reg, c.argCodes, c.isTarget, c.name, OPEN_ALL, c.map)?.oth ?? [];
       const against = top.map((t) => oth.find((l) => norm(l.code) === norm(t.code))).find((l) => l && l.lift < 0 && l.others.low > l.wins.high);
-      if (against) parts.push(`Of the points it raises most, ${nameOn(c, "checklist-against", OPEN_ALL, against.code)} comes up more often when ${c.isTarget ? "another brand" : c.brand} is picked.`);
+      if (against) parts.push(`Of the points it raises most, ${nameOn(c, "checklist-against", OPEN_ALL, against.code, against.sel)} comes up more often when ${c.isTarget ? "another brand" : c.brand} is picked.`);
     } else if (taughtAs) parts.push(`It is also among the five points the AI raises most when buyers ask what to look for.`);
     out.push({ key: "diag_argument", heading, paras: [withCells({ text: parts.join(" ") }, cellsOf(c, c.isTarget ? OPEN_ALL : BRAND_CARD(S.key), pooledOf(c, "chooses:criteria:")))] });
   }
@@ -3118,7 +3004,7 @@ function diagnosisFrame(c: Ctx): BriefSection[] {
       const d = cardDest(c, OPEN_ALL, g);
       // bf43: The diagnosis words this its own way - Now what's finding uses "Buyers who say ... are most often
       // sent away", and with no share on either the two views printed one sentence twice (Doritos).
-      return `When buyers ask what to buy, the AI most often sends away those who say "${condLabel(nameOn(c, "away-row", OPEN_ALL, g.text))}"${d ? `, ${d}` : ""}.`;
+      return `When buyers ask what to buy, the AI most often sends away those who say "${condLabel(nameOn(c, "away-row", OPEN_ALL, g.text, c.map.positions[OPEN_ALL]?.panel?.conditions?.selections?.away))}"${d ? `, ${d}` : ""}.`;
     };
     const toLeader = conds.find((g) => g.to[0]?.name === leader.name);
     if (toLeader) {
@@ -3140,13 +3026,13 @@ function diagnosisFrame(c: Ctx): BriefSection[] {
     const conc = c.ranked.find((i) => i.key === "engine_pick_concentration" && i.names?.variant === "rival" && i.names?.rival && i.names?.vendor);
     let concLine: { rival: string; text: string; ids: string[] } | null = null;
     if (conc) {
-      const nums = (c.voiced.get(conc.key)?.body ?? conc.body).match(/<1%|\d+(?:\.\d+)?%/g) ?? [];
-      const num = (t: string) => (t === "<1%" ? 0.5 : parseFloat(t));
-      // bf35: as in the SWOT - only when a card shows the share of its picks; never the share of the questions.
-      if (nums.length >= 2 && num(nums[0]!) >= 1.5 * num(nums[1]!) && cardShowsWith(c, nums[0]!, [conc.names!.vendor!, conc.names!.rival!]))
+      // bf35: as in the SWOT - only when a card draws the share of its picks; never the share of the questions, which
+      // is read (its fact) to decide the 1.5x bar.
+      const cx = concentrationOf(c, conc);
+      if (cx && cx.ratio >= 1.5)
         concLine = {
           rival: conc.names!.rival!,
-          text: `${conc.names!.vendor}'s assistants carry ${conc.names!.rival}: ${nums[0]} of its picks come from them, far more than the others, so ${conc.names!.rival} is picked more wherever buyers use them.`,
+          text: `${conc.names!.vendor}'s assistants carry ${conc.names!.rival}: ${cx.share} of its picks come from them, far more than the others, so ${conc.names!.rival} is picked more wherever buyers use them.`,
           ids: insightCells(c, conc),
         };
     }
@@ -3243,6 +3129,7 @@ function voiceText(t: string, c: Ctx): string {
     [/\bAsked by your customers\b/g, `Asked by ${Bs} customers`],
     [/\balongside you\b/g, `alongside ${B}`],
     [/\bagainst your (\d+%|<1%)/g, `against ${Bs} $1`],
+    [/\band you none\b/g, `and ${B} none`],
     [/\bthe matchups you win \/ lose\b/g, `the matchups ${B} wins / loses`],
     [/\bagainst you\b/g, `against ${B}`],
     [/\bwins for you\b/g, `wins for ${B}`],
@@ -3377,9 +3264,6 @@ const FUNNEL_FIELDS = ["mentioned", "recommended", "chosen", "shareOfDecided"] a
 const SUMMARY_FUNNEL_FIELDS = ["firmPick", "firmPickInCategory", "byMode", "byEngine"] as const;
 /** Stage 4: the verdict fields of the summary and the insight inputs (taken out; strict, a read throws). */
 const SUMMARY_VERDICT_FIELDS = ["headToHead", "buyersDoubt", "customersDoubt"] as const;
-const INPUT_VERDICT_FIELDS = ["value", "doubt", "alternatives"] as const;
-/** Stage 5: the condition and argument rollups of the insight inputs (taken out; strict, a read throws). */
-const INPUT_ARG_FIELDS = ["conditions", "away", "taught"] as const;
 const strictGuard = <T extends object>(o: T, fields: readonly string[], what: string, flag = "BRIEF_STRICT_FUNNEL"): T => {
   if (process.env.BRIEF_STRICT_FUNNEL)
     for (const f of fields)
@@ -3401,12 +3285,12 @@ export function stripFunnel(summary: BrandSummaryView): { summary: BriefSummary;
 }
 
 /**
- * Stage 4: the insight inputs as the Brief may read them - the verdict views (value, doubt, alternatives) are taken
- * out (strict: a read throws); who the verdicts are about is returned as names only. The Brief's verdict figures are
- * the verdict cards' stats; the old views are reached only through `legacyV`, for a figure no card shows.
+ * Stage 4: who the verdicts are about, as names only (the rivals with a direct matchup, the Value question's lines and
+ * buying situations, the worries, the rivals whose customers ask what to switch to). The verdict figures are the
+ * verdict cards' stats; nothing else of the inputs is read.
  */
-export function stripVerdicts(inputs: InsightInputs, summary: BrandSummaryView): { inputs: BriefInputs; verdicts: VerdictIdent; legacyArgs: LegacyArgs } {
-  const { value, doubt, alternatives, conditions, away, taught, ...rest } = inputs;
+export function stripVerdicts(inputs: InsightInputs, summary: BrandSummaryView): { verdicts: VerdictIdent } {
+  const { value, doubt, alternatives } = inputs;
   const verdicts: VerdictIdent = {
     h2h: summary.headToHead.map((r) => ({ key: r.key, rival: r.rival })),
     value: value ? { lines: value.lines.map((l) => ({ label: l.label })), rooms: value.rooms.map((r) => ({ key: r.key, rooms: [...r.rooms], line: r.line })) } : null,
@@ -3414,36 +3298,29 @@ export function stripVerdicts(inputs: InsightInputs, summary: BrandSummaryView):
     customers: (doubt.keepOrLeave?.rows ?? []).map((r) => ({ stage: r.stage, concern: r.concern })),
     leavers: (alternatives?.offensive?.rows ?? []).map((r) => ({ key: r.key, rival: r.rival })),
   };
-  return { inputs: strictGuard({ ...rest }, [...INPUT_VERDICT_FIELDS, ...INPUT_ARG_FIELDS], "inputs"), verdicts, legacyArgs: { conditions, away, taught } };
+  return { verdicts };
 }
 
 /** True when some other brand out-picks `key` (a rival subject's archetype: trailing = specialist), by the cards' picks. */
 const outPicked = (c: Ctx, key: string) => funnelBrands(c).some((b) => b.key !== key && !!fun(c, key).share && picksOf(c, b.key) > picksOf(c, key));
 
-/** A buying situation as its cards show it: the commit line of its What to buy card, and every funnel brand's
- * share of the picks there (roomShareStat), most picked first. Ties: times named there, where the situation's card
- * shows it for both brands (its competitor bars); else the funnel's own order - no card shows how often every brand
- * is named within one situation (the old source's tie-break). */
+/** A buying situation as its cards show it: the commit line of its What to buy card, every funnel brand's share of the
+ * picks there (roomShareStat, the brands some card lists there), and its leader (the leader selection). */
 function roomOf(c: Ctx, room: string, description: string | null): RoomRead {
   const id = `chooses:open:${norm(room)}`;
-  const order = funnelBrands(c);
-  const named = (key: string) => {
-    const s = key === c.target.key ? c.reg.step(id, "named", "you") : c.reg.step(id, "named", { rival: brandName(c, key) });
-    return s ? kOf(s) : undefined;
-  };
-  const brands = order
+  const brands = funnelBrands(c)
     .map((b) => ({ key: b.key, name: b.name, share: roomShareStat(c, room, b.key) }))
-    .filter((b): b is RoomBrand => !!b.share)
-    .sort((a, b) => {
-      const d = kOf(b.share) - kOf(a.share);
-      if (d) return d;
-      const na = named(a.key);
-      const nb = named(b.key);
-      if (na !== undefined && nb !== undefined && na !== nb) return nb - na;
-      return order.findIndex((x) => x.key === a.key) - order.findIndex((x) => x.key === b.key);
-    });
+    .filter((b): b is RoomBrand => !!b.share);
   const commit = c.reg.line(id, "commit", "rate");
-  return { room, description, ...(commit ? { commit } : {}), brands };
+  const sel = c.rf.sel.selection("leader", c.isTarget ? "you" : c.subject.key, { ...WHAT_TO_BUY_ALL, situation: room });
+  const lm = (sel.members as SelMember[])[0];
+  let leader: RoomBrand | undefined;
+  if (lm) {
+    nameOn(c, "room-leader", id, brandOfKey(c, lm.key).name, sel.id, lm.key);
+    const share = brands.find((b) => b.key === lm.key)?.share;
+    if (share) leader = { key: lm.key, name: brandOfKey(c, lm.key).name, share };
+  }
+  return { room, description, ...(commit ? { commit } : {}), brands, ...(leader ? { leader } : {}) };
 }
 
 export interface BriefRequest extends ViewRequest {
@@ -3453,18 +3330,12 @@ export interface BriefRequest extends ViewRequest {
 
 export async function computeBrief(data: ViewData, request: BriefRequest = {}): Promise<BriefView> {
   const eng: ViewRequest = request.engines ? { engines: request.engines } : {};
-  // The summary and the map (placements of the full ranked list, cell stats)
-  // from the per-load shared computes (view_data computeMemo). READ-ONLY.
-  const { view: summary, inputs: inputs0 } = await sharedBrandSummary(data, eng);
-  // The Brief's condition paragraph and condition card still read the run-wide condition rollup (brief_legacy_inputs.ts,
-  // part 2 of fact-layer step 5 moves them); the findings read the cards' own rows (inputs0.away.rows, ruling 10).
-  const legacyCond = await briefLegacyConditions(data, eng);
-  const inputs: InsightInputs = {
-    ...inputs0,
-    conditions: legacyCond.conditions,
-    away: inputs0.away || legacyCond.away ? { ...(legacyCond.away ?? { groups: [], cells: 0, grouping: "stems" as const }), ...(inputs0.away?.rows ? { rows: inputs0.away.rows, scope: inputs0.away.scope } : {}) } : null,
-  };
+  // The summary and the map (placements of the full ranked list, cell stats) from the per-load shared computes
+  // (view_data computeMemo), and the run's facts and selections - the one book the cards, the Map and the Overview
+  // read. READ-ONLY.
+  const { view: summary, inputs } = await sharedBrandSummary(data, eng);
   const { view: map, debug, ranked } = await sharedAnalysisMap(data, eng);
+  const rf = await sharedRunFacts(data, eng);
   // The map's own matcher places every ranked insight (the same order as probeInsights).
   const placements = new Map<string, string>();
   (debug.placements ?? []).forEach((pl, i) => {
@@ -3495,31 +3366,33 @@ export async function computeBrief(data: ViewData, request: BriefRequest = {}): 
     if (it.situation && viewsOf(it.stage, it.angle).includes("headline") && !roomList.includes(it.situation)) roomList.push(it.situation);
 
   // Stage 4: the verdict views as names only; their figures are the verdict cards' stats.
-  const { inputs: briefInputs, verdicts, legacyArgs } = stripVerdicts(inputs, summary);
+  const { verdicts } = stripVerdicts(inputs, summary);
 
-  // Every brand's picks by stage, over the headline pool (the subject's feeds
-  // the funnel paragraph; every brand's, its answer card) and each brand's
-  // argument lift - shared with the brand dossiers (answer_cards.ts).
-  const { src, byStage } = cardSourcesOf(data, eng, summary, inputs);
-  const stagePicks = byStage.get(subject.key) ?? new Map<string, number>();
-  const liftOf = src.liftOf;
-  const product = src.product;
-
-  // Stage 2: every number the cards draw, and the figures this Brief prints from them (made before the Brief-style
-  // findings, which quote card figures through the callbacks below).
+  // Every number the cards draw, where each fact is drawn, and the figures this Brief prints.
   const reg = buildStatRegistry(map);
+  const drawn = new Map<string, Stat[]>();
+  for (const st of reg.all()) {
+    if (!st.fact || st.id.includes("#")) continue;
+    const xs = drawn.get(st.fact);
+    if (xs) xs.push(st);
+    else drawn.set(st.fact, [st]);
+  }
   const figs = newFigTable();
-  const argCodes = [...new Set([...summary.reasonLift.map((l) => l.code), ...liftOf(subject.key).map((l) => l.code), ...(legacyArgs.taught ?? []).map((t) => t.code)])];
-  // bf26: the same detectors in the Brief's style, about the target by name (the served ones stay second person).
+  // The codebook's argument names (which weighs rows are arguments - names only, no count).
+  const argCodes = [...new Set(rf.set.facts.flatMap((f) => f.args ?? []))].sort();
+  // bf26: the same detectors in the Brief's style, about the target by name (the served ones stay second person). Every
+  // number a callback hands back is a card's figure printed as a statement marker with its fact id (statements.ts
+  // `pref`), so the finished finding carries every number's fact under `facts`.
+  const asStmt = (st: Stat | undefined) => (st ? pref(st.fact!, st.value) : null);
+  const argStmt = (st: Stat) => (st.value === "0%" ? "none" : pref(st.fact!, st.value));
   const voiced = new Map<string, Insight>(
     isTarget
       ? rankedInsights(summary, inputs, {
           name: brand,
-          // Stage 5: the argument and condition figures these findings quote are the cards' stats (fig markers).
           cardArg: (code, side) => {
-            const sides = argSides(reg, argCodes, true, brand, OPEN_ALL);
+            const sides = argSides(reg, argCodes, true, brand, OPEN_ALL, map);
             const a = (side === "you" ? sides?.subj : sides?.oth)?.find((x) => x.code.toLowerCase() === code.toLowerCase());
-            return a ? argWords(figs, a, side === "you" ? "subject" : "other") : null;
+            return a ? (side === "you" ? { name: a.name, here: argStmt(a.subj), there: argStmt(a.oth) } : { name: a.name, here: argStmt(a.oth), there: argStmt(a.subj) }) : null;
           },
           awayRow: (labels, dests) => {
             // bf36 / stage 5: the What to buy card's row for this condition, and only when the card sends its buyers
@@ -3528,11 +3401,11 @@ export async function computeBrief(data: ViewData, request: BriefRequest = {}): 
             const keys = labels.map(condKey);
             const ds = dests.map(norm);
             const open = reg.conditionRows(statId.cell(OPEN_ALL), "away").find((r) => keys.includes(condKey(r.text)) && !!r.to[0] && ds.includes(norm(r.to[0].name)));
-            if (open) return { value: figOf(figs, open.share), where: "when buyers ask what to buy" };
+            if (open) return { value: asStmt(open.share)!, where: "when buyers ask what to buy" };
             for (const [id, st] of Object.entries(stats)) {
               if (st.row !== "h2h" || st.pooled || !ds.includes(norm(st.label))) continue;
               const row = reg.conditionRows(statId.cell(id), "away").find((r) => keys.includes(condKey(r.text)));
-              if (row) return { value: figOf(figs, row.share), where: `when it compares ${brand} with ${st.label} directly` };
+              if (row) return { value: asStmt(row.share)!, where: `when it compares ${brand} with ${st.label} directly` };
             }
             return null;
           },
@@ -3541,16 +3414,16 @@ export async function computeBrief(data: ViewData, request: BriefRequest = {}): 
             const keys = labels.map(condKey);
             const id = Object.entries(stats).find(([, st]) => st.row === "h2h" && !st.pooled && norm(st.label) === norm(rival))?.[0];
             const row = id ? reg.section(id, "exception", "Who it still sends to you").find((x) => keys.includes(condKey(x.label))) : undefined;
-            return row ? figOf(figs, row.stat) : null;
+            return asStmt(row?.stat);
           },
           outsideShare: (room) => {
+            // A Spotting-the-problem card's "Where the other answers point - Points to something other than ..." row.
             const id = room ? `chooses:awareness:${norm(room)}` : "chooses:awareness:all";
-            const p = map.positions[id];
-            const e = p?.panel ? indexPanel(p, undefined).find((x) => /^Where the other answers point - Points to something other than/.test(x.words)) : undefined;
-            return e?.value ?? null;
+            const st = reg.all().find((x) => x.dest.kind === "cell" && x.dest.id === id && !x.id.includes("/rival:") && /^Where the other answers point - Points to something other than/.test(x.words));
+            return asStmt(st);
           },
-          roomShare: (room) => cardLineNums(map, room ? `chooses:open:${norm(room)}` : OPEN_ALL, "Your share of the picks")[0] ?? null,
-          cardStep: (id, step, seg) => map.positions[id]?.panel?.steps.find((x) => x.key === step)?.segments?.find((x) => x.key === seg)?.num.value ?? null,
+          roomShare: (room) => asStmt(reg.line(room ? `chooses:open:${norm(room)}` : OPEN_ALL, "share", "you")),
+          cardStep: (id, step, seg) => asStmt(reg.segment(id, step, seg)),
         }).map((i) => [i.key, i])
       : []
   );
@@ -3569,10 +3442,7 @@ export async function computeBrief(data: ViewData, request: BriefRequest = {}): 
     summary: briefSummary,
     outOfScope: { summary },
     funnel: new Map(),
-    inputs: briefInputs,
     verdicts,
-    legacyArgs,
-    legacy: { summary, inputs },
     map,
     stats,
     ranked,
@@ -3581,22 +3451,21 @@ export async function computeBrief(data: ViewData, request: BriefRequest = {}): 
     subject,
     brand,
     name,
-    product,
+    product: productNoun(data.project.category),
     rooms: [],
     argCodes,
-    legacyRoomCodes: debug.roomCodes,
-    moves: isTarget ? movesOf(map, stats, brand, findingAt) : [],
+    moves: isTarget ? movesOf(map, stats, brand, findingAt, figs) : [],
     findings: [],
     placements,
-    stagePicks,
     archetype: isTarget ? map.casting.archetype : "default",
     footer: `${name} - wave ${wave}${month ? ` - ${month}` : ""}.`,
     wave,
     cards: new Map(),
-    src,
     voiced,
     reg,
     figs,
+    rf,
+    drawn,
   };
   // A rival subject's archetype: trailing (some other brand out-picks it, by the cards' picks) = specialist.
   if (!isTarget && outPicked(ctx, subject.key)) ctx.archetype = "specialist";
@@ -3604,12 +3473,9 @@ export async function computeBrief(data: ViewData, request: BriefRequest = {}): 
 
   ctx.findings = findingsOf(ctx);
   const sw = swotOf(ctx);
-  // bf33: every number opens the card that shows it beside its subject (brief_links.ts), resolved here.
-  const resolver = resolverOf(ctx);
+  // Every number opens the card that draws its fact (linkMemo); pins stay only on units with no number (pinsByRule).
   const memo = (frame: BriefFrame, sections: BriefSection[]): BriefMemo =>
-    // bf34: numbers link against the unit's full anchor list (a Map card shows figures the Brief's own answer card
-    // does not), then the pins are pruned to the answer cards that state them.
-    citePins(linkMemo({ frame, title: `${name} - ${BRIEF_FRAME_LABELS[frame]} - wave ${ctx.wave}`, sections: voiceMemo(sections, ctx), footer: ctx.footer }, ctx, resolver), ctx.cards);
+    pinsByRule(linkMemo({ frame, title: `${name} - ${BRIEF_FRAME_LABELS[frame]} - wave ${ctx.wave}`, sections: voiceMemo(sections, ctx), footer: ctx.footer }, ctx));
   const memos: Record<BriefFrame, BriefMemo> = {
     now_what: memo("now_what", nowWhat(ctx)),
     diagnosis: memo("diagnosis", diagnosisFrame(ctx)),
@@ -3618,12 +3484,12 @@ export async function computeBrief(data: ViewData, request: BriefRequest = {}): 
     matrix: memo("matrix", matrixFrame(ctx)),
     jobs: memo("jobs", jobsFrame(ctx)),
   };
-  // Only the cards a surviving pin opens ride the payload.
+  // Only the Map-cell cards a surviving pin opens ride the payload - each a statement (its numbers' fact ids in `facts`).
   const cards: Record<string, AnswerCard> = {};
   for (const m of Object.values(memos))
     for (const id of anchorIds(m)) {
       const card = ctx.cards.get(id);
-      if (card) cards[id] = voiceCard(card, ctx);
+      if (card) cards[id] = finishCard(voiceCard(card, ctx), ctx, id);
     }
   // The subject list in the funnel's own order (most picked first, from the cards), then any brand no card shows.
   const ordered = [target, ...funnelBrands(ctx).filter((b) => b.key !== target.key)];
@@ -3631,153 +3497,135 @@ export async function computeBrief(data: ViewData, request: BriefRequest = {}): 
   return { subject: name, subjects: ordered.map((b) => (b.key === target.key ? brand : b.name)), memos, engineCount, cards };
 }
 
-/* ------------------------------ bf33: number links ------------------------------ */
+/* ------------------------------ number links: by fact id ------------------------------ */
 
-/** The subjects a Brief number can be about: every rival, argument, buying situation and worry (never the tracker's own brand). */
-export function linkTerms(c: Ctx): string[] {
-  const out = new Set<string>();
-  for (const b of c.summary.brands) if (b.key !== c.target.key) out.add(b.name);
-  for (const l of c.summary.reasonLift ?? []) out.add(l.code);
-  for (const t of c.legacyArgs.taught ?? []) out.add(t.code);
-  for (const r of c.rooms) out.add(r.room);
-  for (const it of c.data.intents) if (it.concern) out.add(it.concern);
-  for (const r of c.map.rivalPanels ?? []) out.add(r.name);
-  return [...out];
+const NUMBER_TOKEN_G = /\d+(?:\.\d+)?%|[+-]\d+ (?:pts|points)/g;
+
+/**
+ * Where a fact is drawn (fact layer step 5, part 2 - a lookup, never a match): the stats that draw it, the unit's own
+ * cells and its brand's own page first, then on view before behind one interaction, registry order within each. Null
+ * when no card draws it (a derived fact, or a fact no card shows) - the number stays plain text and the harness lists it.
+ */
+function locate(c: Ctx, ref: string, prefer: { cells: string[]; rivals: string[] }): Stat | null {
+  const xs = c.drawn.get(ref);
+  if (!xs?.length) return null;
+  const own = (s: Stat) => (s.dest.kind === "cell" ? prefer.cells.includes(s.dest.id) : prefer.rivals.includes(s.dest.name));
+  const rank = (s: Stat) => (own(s) ? 0 : 2) + (s.at === "default" ? 0 : 1);
+  return [...xs].sort((a, b) => rank(a) - rank(b))[0];
 }
 
-/** bf35: the What to buy card's condition rows (its own and each rival's card there) - a condition share in the
- * Brief links to the row that names it, never to another row with the same figure. */
-export function conditionTerms(map: AnalysisMapView): string[] {
-  const pp = map.positions[OPEN_ALL]?.panel;
-  const sets = [pp?.conditions, ...(pp?.rivals ?? []).map((r) => r.conditions)];
-  return [...new Set(sets.flatMap((k) => (k ? [...k.toward, ...k.away].map((r) => r.text) : [])))];
-}
-
-/** bf34: figures no card shows that a Data page table does (Tyler: a buyer's figure against "the other buying
- * situations" opens the table of that measure by buying situation - each situation its own row; the pivot has no
- * "every other situation" row, so the pooled figure itself is not on it). */
-const TABLE_FIGURES: { re: RegExp; dest: Extract<BriefLink["dest"], { kind: "table" }> }[] = [
-  // bf35: none - the buying-situation comparison now quotes the all-buyers card (no table links).
-];
-
-/** A figure's place in a unit's plain text (from the stage-2 markers). */
+/** A figure's place in a unit's plain text (from the markers). */
 type FigAt = { at: number; len: number; i: number };
 
-function linkUnit(c: Ctx, R: LinkResolver, text: string, anchors: BriefAnchor[] | undefined, context = "", figsAt: FigAt[] = []): BriefLink[] {
+function linkUnit(c: Ctx, text: string, anchors: BriefAnchor[] | undefined, figsAt: FigAt[]): BriefLink[] {
   const out: BriefLink[] = [];
-  const tableAt = new Map<number, Extract<BriefLink["dest"], { kind: "table" }>>();
-  for (const f of TABLE_FIGURES) for (const m of text.matchAll(f.re)) tableAt.set(m.index!, f.dest);
-  const cells: string[] = [];
-  const rivals: string[] = [];
+  const prefer = { cells: [] as string[], rivals: [] as string[] };
   for (const a of anchors ?? []) {
-    if (c.map.positions[a.id]) cells.push(a.id);
+    if (c.map.positions[a.id]) prefer.cells.push(a.id);
     else if (a.id.startsWith("card:brand:")) {
       const key = a.id.slice("card:brand:".length);
-      if (key === c.target.key) cells.push(OPEN_ALL);
+      if (key === c.target.key) prefer.cells.push(OPEN_ALL);
       else {
         const b = c.summary.brands.find((x) => x.key === key);
-        if (b) rivals.push(b.name);
+        if (b) prefer.rivals.push(b.name);
       }
     }
   }
   const seen = new Map<string, number>();
-  for (const m of text.matchAll(NUMBER_TOKEN)) {
+  for (const m of text.matchAll(NUMBER_TOKEN_G)) {
     const token = m[0];
     const occurrence = seen.get(token) ?? 0;
     seen.set(token, occurrence + 1);
-    // Stage 2: a card's figure links to its stat - by id, never matched.
     const at = figsAt.find((x) => m.index! >= x.at && m.index! < x.at + x.len);
-    const f = at ? c.figs.list[at.i] : undefined;
-    if (f && "stat" in f) {
-      const s = f.stat;
-      out.push({ token, occurrence, dest: s.dest.kind === "cell" ? { kind: "cell", id: s.dest.id } : { kind: "rival", name: s.dest.name }, ...(s.reveal ? { reveal: s.reveal } : {}), stat: s.id });
-      continue;
-    }
-    const table = tableAt.get(m.index!);
-    if (table) {
-      out.push({ token, occurrence, dest: table });
-      continue;
-    }
-    const { local, sentence } = numberContext(R, text, m.index!, m.index! + token.length, context);
-    const hit = R.find(token, local, sentence, { cells, rivals });
-    if (hit) {
-      out.push({ token, occurrence, dest: hit.dest.kind === "cell" ? { kind: "cell", id: hit.dest.id } : { kind: "rival", name: hit.dest.id }, ...(hit.reveal ? { reveal: hit.reveal } : {}) });
-      continue;
-    }
-    // No card shows it beside its subject: the Brief's own answer card, the first pin whose card states it.
-    const card = (anchors ?? []).find((a) => {
-      const cd = c.cards.get(a.id);
-      return cd && briefNumberTokens(cardText(cd)).has(token);
-    });
-    if (card) out.push({ token, occurrence, dest: { kind: "card", id: card.id } });
+    if (!at) continue;
+    const f = c.figs.list[at.i];
+    // A card's figure links to the card it was read from; a statement's figure to where its fact is drawn.
+    const s = f.stat ?? locate(c, f.ref, prefer);
+    if (!s) continue;
+    out.push({ token, occurrence, dest: s.dest.kind === "cell" ? { kind: "cell", id: s.dest.id } : { kind: "rival", name: s.dest.name }, ...(s.reveal ? { reveal: s.reveal } : {}), stat: s.id, fact: f.ref });
   }
   return out;
 }
 
-/** Stage 2: every figure the Brief printed, per memo field (BRIEF_FIG_LOG=1) - the links harness reads it. */
+/** Every figure the Brief printed, per memo field (BRIEF_FIG_LOG=1) - the links harness reads it. */
 export interface FigLogEntry {
   brand: string;
   subject?: string;
   frame: BriefFrame;
   section: string;
-  /** The field's place ("para 0 text", "row 3 avg", "table 2 cell 1", "viz item 0 value", "viz title"). */
+  /** The field's place ("para 0 text", "row 3 avg", "table 2 cell 1", "viz item 0 value", "viz title", "card <id> row 0 value"). */
   field: string;
   /** The field's plain text, as served. */
   text: string;
   token: string;
   /** The token's 0-based occurrence among that token in `text`. */
   occurrence: number;
+  /** The fact (or derived ref) the number is. */
+  ref: string;
+  /** The card stat it was printed from (a card's figure), if any. */
   stat?: string;
-  /** Printed the old way: no card shows this figure. */
-  noHome?: string;
+  /** The printed text of the figure (its full value, e.g. "<1%"). */
+  value: string;
 }
 export const FIG_LOG: FigLogEntry[] = [];
+/** Every number token in a field, with or without a figure - the harness fails on one with none. */
+export interface FieldLogEntry {
+  brand: string;
+  subject?: string;
+  frame: BriefFrame;
+  section: string;
+  field: string;
+  text: string;
+  /** Tokens no figure covers. */
+  bare: string[];
+}
+export const FIELD_LOG: FieldLogEntry[] = [];
 
 /** Decode one field: its plain text and its figures (logged). */
 function fieldFigs(c: Ctx, frame: BriefFrame, section: string, field: string, text: string | undefined): { s: string; m: FigAt[] } {
-  if (text === undefined || !hasFigs(text)) return { s: text ?? "", m: [] };
-  const tr = decode(text);
+  if (text === undefined) return { s: "", m: [] };
+  const tr = hasFigs(text) ? decode(text) : { s: text, m: [] };
   if (process.env.BRIEF_FIG_LOG) {
-    for (const x of tr.m) {
-      const f = c.figs.list[x.i];
-      for (const tm of tr.s.slice(x.at, x.at + x.len).matchAll(NUMBER_TOKEN)) {
-        const pos = x.at + tm.index!;
-        const occurrence = [...tr.s.slice(0, pos).matchAll(NUMBER_TOKEN)].filter((y) => y[0] === tm[0]).length;
-        FIG_LOG.push({ brand: c.brand, ...(c.isTarget ? {} : { subject: c.name }), frame, section, field, text: tr.s, token: tm[0], occurrence, ...("stat" in f ? { stat: f.stat.id } : { noHome: f.legacy }) });
+    const bare: string[] = [];
+    for (const tm of tr.s.matchAll(NUMBER_TOKEN_G)) {
+      const pos = tm.index!;
+      const x = tr.m.find((y) => pos >= y.at && pos < y.at + y.len);
+      if (!x) {
+        bare.push(tm[0]);
+        continue;
       }
+      const f = c.figs.list[x.i];
+      const occurrence = [...tr.s.slice(0, pos).matchAll(NUMBER_TOKEN_G)].filter((y) => y[0] === tm[0]).length;
+      FIG_LOG.push({ brand: c.brand, ...(c.isTarget ? {} : { subject: c.name }), frame, section, field, text: tr.s, token: tm[0], occurrence, ref: f.ref, ...(f.stat ? { stat: f.stat.id } : {}), value: tr.s.slice(x.at, x.at + x.len) });
     }
+    if ([...tr.s.matchAll(NUMBER_TOKEN_G)].length) FIELD_LOG.push({ brand: c.brand, ...(c.isTarget ? {} : { subject: c.name }), frame, section, field, text: tr.s, bare });
   }
   return tr;
 }
 
-function linkMemo(memo: BriefMemo, c: Ctx, R: LinkResolver): BriefMemo {
+function linkMemo(memo: BriefMemo, c: Ctx): BriefMemo {
   const fr = memo.frame;
   const plain = (sec: string, field: string, t: string | undefined) => fieldFigs(c, fr, sec, field, t).s;
-  // bf34: on a rival's Brief a unit that names no one ("Recommended 44%") is about the rival.
-  const subjectCtx = (text: string) => (!c.isTarget && R.terms(text).length === 0 ? c.name : "");
   const para = (sec: string, field: string) => (p: BriefPara): BriefPara => {
-    // Stage 2: lead and text as plain, with where each card figure sits in the unit `${lead} ${text}`.
     const L = fieldFigs(c, fr, sec, `${field} lead`, p.lead);
     const X = fieldFigs(c, fr, sec, `${field} text`, p.text);
-    const off = (p.lead ?? "").length === 0 && p.lead === undefined ? 1 : L.s.length + 1;
+    const off = L.s.length + 1;
     const figsAt: FigAt[] = [...L.m, ...X.m.map((x) => ({ ...x, at: x.at + off }))];
     const lead = p.lead === undefined ? undefined : L.s;
-    // A paragraph's lead is its subject when it is a buying situation's name (By buying situation).
-    const room = lead && c.rooms.find((r) => norm(r.room) === norm(lead.replace(/[.]$/, "")));
     const text = `${lead ?? ""} ${X.s}`;
-    const links = linkUnit(c, R, text, p.cells, [room ? room.room : "", subjectCtx(text)].filter(Boolean).join(" "), figsAt);
+    const links = linkUnit(c, text, p.cells, figsAt);
     const q: BriefPara = { ...p, text: X.s, ...(lead !== undefined ? { lead } : {}) };
     return links.length ? { ...q, links } : q;
   };
   return {
     ...memo,
-    title: strip(memo.title),
-    footer: strip(memo.footer),
+    title: plain("", "title", memo.title),
+    footer: plain("", "footer", memo.footer),
     sections: memo.sections.map((s) => ({
       ...s,
-      ...(s.heading !== undefined ? { heading: strip(s.heading) } : {}),
+      ...(s.heading !== undefined ? { heading: plain(s.key, "heading", s.heading) } : {}),
       ...(s.paras ? { paras: s.paras.map((p, i) => para(s.key, `para ${i}`)(p)) } : {}),
-      ...(s.quads ? { quads: s.quads.map((q, qi) => ({ ...q, headers: q.headers.map(strip) as [string, string], cells: [q.cells[0].map((p, i) => para(s.key, `quad ${qi}.0 para ${i}`)(p)), q.cells[1].map((p, i) => para(s.key, `quad ${qi}.1 para ${i}`)(p))] as [BriefPara[], BriefPara[]] })) } : {}),
+      ...(s.quads ? { quads: s.quads.map((q, qi) => ({ ...q, headers: q.headers.map((h, hi) => plain(s.key, `quad ${qi} header ${hi}`, h)) as [string, string], cells: [q.cells[0].map((p, i) => para(s.key, `quad ${qi}.0 para ${i}`)(p)), q.cells[1].map((p, i) => para(s.key, `quad ${qi}.1 para ${i}`)(p))] as [BriefPara[], BriefPara[]] })) } : {}),
       ...(s.rows
         ? {
             rows: s.rows.map((r, ri) => {
@@ -3785,22 +3633,20 @@ function linkMemo(memo: BriefMemo, c: Ctx, R: LinkResolver): BriefMemo {
               const label = plain(s.key, `row ${ri} label`, r.label);
               const avg = r.avg === undefined ? undefined : plain(s.key, `row ${ri} avg`, r.avg);
               const top = r.top === undefined ? undefined : plain(s.key, `row ${ri} top`, r.top);
-              const base: BriefRow = { ...r, label, value: V.s, ...(avg !== undefined ? { avg } : {}), ...(top !== undefined ? { top } : {}) };
-              // Step 4 (fact layer): a note row's figure links by id too - its pin's answer card (the Map's own cell
-              // figures) can state another scope's number until the Map moves onto the fact layer.
+              const heads = r.heads ? { subject: plain(s.key, `row ${ri} head`, r.heads.subject), ...(r.heads.top !== undefined ? { top: plain(s.key, `row ${ri} head top`, r.heads.top) } : {}) } : undefined;
+              const base: BriefRow = { ...r, label, value: V.s, ...(avg !== undefined ? { avg } : {}), ...(top !== undefined ? { top } : {}), ...(heads ? { heads } : {}) };
+              // A note row's figure sits in its label (the sentence); every other row's in its value.
               if (r.kind === "note") {
-                const nl = linkUnit(c, R, V.s, [], "", V.m).filter((l) => l.stat);
+                const N = fieldFigs(c, fr, s.key, `row ${ri} note`, r.label);
+                const nl = linkUnit(c, N.s, [], N.m);
                 return nl.length ? { ...base, links: nl } : base;
               }
-              // Stage 2: the card figures in a row's value link by id; the rest are matched as before (pinned rows only).
-              const links = r.cell
-                ? linkUnit(c, R, V.s, [r.cell], [label, subjectCtx(`${label} ${V.s}`)].filter(Boolean).join(" "), V.m)
-                : linkUnit(c, R, V.s, [], "", V.m).filter((l) => l.stat);
+              const links = linkUnit(c, V.s, r.cell ? [r.cell] : [], V.m);
               return links.length ? { ...base, links } : base;
             }),
           }
         : {}),
-      ...(s.table ? { table: { ...s.table, headers: s.table.headers.map(strip), rows: s.table.rows.map((row, ri) => row.map((cell, ci) => plain(s.key, `table ${ri} cell ${ci}`, cell))) } } : {}),
+      ...(s.table ? { table: { ...s.table, headers: s.table.headers.map((h, hi) => plain(s.key, `table header ${hi}`, h)), rows: s.table.rows.map((row, ri) => row.map((cell, ci) => plain(s.key, `table ${ri} cell ${ci}`, cell))) } } : {}),
       ...(s.viz
         ? {
             viz: {
@@ -3808,23 +3654,39 @@ function linkMemo(memo: BriefMemo, c: Ctx, R: LinkResolver): BriefMemo {
               title: plain(s.key, "viz title", s.viz.title),
               ...(s.viz.subtitle !== undefined ? { subtitle: plain(s.key, "viz subtitle", s.viz.subtitle) } : {}),
               ...(s.viz.hlineLabel !== undefined ? { hlineLabel: plain(s.key, "viz hline label", s.viz.hlineLabel) } : {}),
-              ...(s.viz.vlineLabel !== undefined ? { vlineLabel: strip(s.viz.vlineLabel) } : {}),
-              ...(s.viz.diagLabel !== undefined ? { diagLabel: strip(s.viz.diagLabel) } : {}),
-              ...(s.viz.clusterNote !== undefined ? { clusterNote: strip(s.viz.clusterNote) } : {}),
-              ...(s.viz.noteLines ? { noteLines: s.viz.noteLines.map(strip) } : {}),
-              ...(s.viz.legend ? { legend: s.viz.legend.map(strip) as [string, string] } : {}),
+              ...(s.viz.vlineLabel !== undefined ? { vlineLabel: plain(s.key, "viz vline label", s.viz.vlineLabel) } : {}),
+              ...(s.viz.diagLabel !== undefined ? { diagLabel: plain(s.key, "viz diag label", s.viz.diagLabel) } : {}),
+              ...(s.viz.clusterNote !== undefined ? { clusterNote: plain(s.key, "viz cluster note", s.viz.clusterNote) } : {}),
+              ...(s.viz.noteLines ? { noteLines: s.viz.noteLines.map((x, i) => plain(s.key, `viz note line ${i}`, x)) } : {}),
+              ...(s.viz.legend ? { legend: s.viz.legend.map((x, i) => plain(s.key, `viz legend ${i}`, x)) as [string, string] } : {}),
               items: s.viz.items.map((it, ii) => ({
                 ...it,
-                label: strip(it.label),
+                label: plain(s.key, `viz item ${ii} label`, it.label),
+                ...(it.who !== undefined ? { who: plain(s.key, `viz item ${ii} who`, it.who) } : {}),
                 ...(it.value !== undefined ? { value: plain(s.key, `viz item ${ii} value`, it.value) } : {}),
                 ...(it.bValue !== undefined ? { bValue: plain(s.key, `viz item ${ii} bValue`, it.bValue) } : {}),
-                ...(it.note !== undefined ? { note: strip(it.note) } : {}),
+                ...(it.note !== undefined ? { note: plain(s.key, `viz item ${ii} note`, it.note) } : {}),
               })),
             },
           }
         : {}),
     })),
   };
+}
+
+/** A Map-cell answer card as served: plain text, and each number's fact id under `facts` ("headline", "rows.<i>") -
+ * logged with the frame "card" so the harness recomputes every card number too. */
+function finishCard(card: AnswerCard, c: Ctx, id: string): AnswerCard {
+  const facts: Record<string, StmtNums> = {};
+  const fin = (field: string, t: string) => {
+    const tr = fieldFigs(c, "now_what", `card ${id}`, field, t);
+    const nums: StmtNums = tr.m.map((x) => [x.at, x.len, c.figs.list[x.i].ref]);
+    if (nums.length) facts[field] = nums;
+    return tr.s;
+  };
+  const rows = card.rows.map((r, i) => ({ ...r, label: fin(`rows.${i}.label`, r.label), value: fin(`rows.${i}`, r.value) }));
+  const out: AnswerCard = { ...card, crumb: fin("crumb", card.crumb), headline: fin("headline", card.headline), rows };
+  return Object.keys(facts).length ? { ...out, facts } : out;
 }
 
 /* ----------------------------------- cache --------------------------------- */
@@ -3852,7 +3714,7 @@ function linkMemo(memo: BriefMemo, c: Ctx, R: LinkResolver): BriefMemo {
 // bf21 (2026-11-10): the plain-wording pass - reads bs13 / am15 (new move names, lever sentences and insight wording quoted in the memos); actOf restates the new levers; the conditions paragraph, the condition card, the SWOT wall and the jobs wall lines say what sends buyers away and "a fixed situation" instead of "routes" / "wall" / "reason". The exemplar's "The conditions that decide it" heading is kept. Numbers unchanged.
 // bf22 (2026-11-12): the reasons harmonization - reads bs17 / am22: the conditions paragraph, the condition card and the away-condition finding name the run's reason THEMES (dt4) where a theme map exists (raw condition groups only without one); the paragraph's tips count statements on a themed side.
 // bf23 (2026-11-13, one counting rule - reads bs21): with reason themes the conditions paragraph counts each side's themes at ANSWER grain over that side's own answer base, and the condition card lists the themes at answer grain, names the lead away theme (quoting its most-stated wording) and gives the away_condition finding's blocker and fixed-situation wordings their own rows on the same base. Keyless output unchanged.
-const BRIEF_VERSION = "bf49"; // bf49 (2026-11-17, fact layer step 5, part 1): the Brief quotes the Overview's findings and the Map's claims, which are now statements over the run's facts (rulings 7, 2, 3, 8, 10 move their numbers and wording); its condition paragraph and condition card read the run-wide rollup from brief_legacy_inputs.ts (part 2 moves them). // bf48 (2026-11-17, fact layer step 4): the What to buy and switching cards are built from the fact layer, so every figure the Brief prints from them moves with rulings 7, 8, 12, 14, 15 and the ratified competitor group (the average competitor is every listed rival pooled); the commit-rate note row links to its card stat by id. // bf47 (2026-11-17): every name and list the Brief states that a card shows is read from that card (fixed situations and who takes the picks there, the conditions that send buyers away and where, the Value product, the rival named most, the topic in "Of the points it raises most"); the "sends buyers away" sentences in the SWOT and The diagnosis say "When buyers ask what to buy" (they read the What to buy card), and the SWOT skips a condition it already lists as a fixed situation. // bf46 (2026-11-17, Tyler): which topics are on the AI's "what to look for" list is the What to look for card's own list (PositionPanel.checklist) - "not among the five", "It leads instead with ..."; on a rival's Brief a buying situation where the tracker is picked too rarely to compare states the tracker's own share there ("<tracker> takes N% of the picks here" / "is never the pick here") in place of the method note. // bf45 (2026-11-17, Tyler): a brand the tracker asks about as a class (its "a <brand> card" matchup) reads that matchup card on its own Brief - a scoreboard row, a Now what finding and a diagnosis section, as a named rival's Brief has. // bf44 (2026-11-17, stat ids stage 5): condition and argument figures are printed, linked and decided from the cards' own rows (condition rows, What the answer weighs); a rival-subject Brief reads its card inside the What to buy cell, which sets the rival against the tracker (it had compared the rival with every other brand), so its argument sentences and By buying situation "why" lines change. // bf43 (2026-11-17): The diagnosis words the sent-away condition its own way ("The AI most often sends away buyers who say ...") so it never repeats Now what's sentence. // bf42 (2026-11-17, stat ids stage 4): verdict figures - Value, both kinds of worry, customers looking around, rivals' customers switching, direct matchups, the scoreboard and funnel-table rows about the brand's own questions - are printed, linked and decided from the cards' stats; text unchanged. // bf41 (2026-11-17, stat ids stage 3): every DECISION about a funnel figure (thresholds, which sentence, sort orders, nearest / furthest situation, quadrants, never / every) reads the card stat the sentence prints - the brand summary's funnel fields are no longer reachable from the Brief; a tie for a buying situation's leader falls to the overall pick order when the card does not show both brands' named rate; a figure a card shows as "<1%" prints as "<1%". // bf40 (2026-11-17): "every pick" and "every problem question" at 100% (Sephora's Brief said "100% of the picks"). // bf39 (2026-11-17): a rival's picked-of-all-answers figure is read from its By rival page's new row (rival-subject Briefs, and the most-picked column of the scoreboard and funnel tables). // bf38 (2026-11-17, stat ids stages 1-2): every funnel figure (named, recommended, conversion, share of picks, picked, the commit rate, the average and most-picked competitor, each rival, each buying situation) is printed from a card's own stat (stat_registry.ts) and its link is that stat's location - no matching; text unchanged. // bf37 (2026-11-17, Tyler: "yes add it"): the commit rate links to the What to buy card's new line for any subject; the funnel's pick reading says "The AI commits to one <product> in only N% of answers" (the card's words). // bf36 (2026-11-17): the away condition has one name - the theme's when themes exist (finding, SWOT, diagnosis threat), never a member wording; its share is quoted only from a row naming that condition with the same destination the sentence names (What to buy first, else the head-to-head against that same rival, else no share), as "- in N% of the answers when buyers ask what to buy". // bf35 (2026-11-17, Tyler: close every gap a Brief edit can close): the visibility reading names an outlier brand only when its two figures link to a card (the table and chart keep the bf34 fold); the pick-concentration findings keep only card figures (a buyer's share of the picks against all buyers) and the one-question finding is not cited; an AI company's share of a rival's picks is cited only where a card shows it and never with the share of questions it answers; "name nowhere to go" is not cited; a move quotes a Map claim only as far as its numbers are on a card (headline missing: the claim is dropped); the problem-question comparison sets the buyer against the all-buyers card (no table link); a rival's picked-of-all-answers rate is quoted only where a card shows it; condition shares link to their own row (condition labels are link terms); the away-condition finding reads "Buyers who say ... are most often sent away, to ..." with the share a card row shows (What to buy, else the head-to-head that states it most), and the lost-matchup exception names its matchup with that head-to-head card's own share (no pooled shares); numbers read their own clause (semicolons bound both sides) and the words after them for what they measure. // bf34 (2026-11-17, Tyler: the Brief and the cards read the same figure): Value doubts quote the Value card ("points the buyer to a rival instead in X% of answers and to only <brand>'s own cheaper option in Y%", shares of all its answers); an argument is cited only when the What to buy card shows it in that side's top three, with the card's figures (the matchups won-vs-lost argument finding is not cited - no card sets it out); the conditions paragraph reads the What to buy card's own rows and shares; the away-condition finding's share is the card's (its cell's away row); one worry is set against the all-worries card's figure; a buyer's figure against the other buying situations opens a Data page table (BriefLink dest "table"); "Its picks come X% from ..." and "recommended in N% - M% of the answers that name it" are gone; numbers link before the answer-card pins are pruned. // bf33 (2026-11-17): every number carries its link (BriefPara/BriefRow.links), resolved at compose time against the index of what each card shows (panel_index.ts, brief_links.ts) - the card that shows it beside its subject, with the one interaction that shows it, else the Brief's own answer card; a rival card's onward link names the rival (it passed the dictionary key). // bf32 (2026-11-17): the scoreboard's average-competitor share of picks and picked figures are the What to buy card's own. // bf31 (2026-11-17): the diagnosis threat section is about the rival its heading names (what sends buyers to it, the widest gap), then "Others who take buyers"; a rival one AI company carries is a threat there, only at the detector bar and 1.5x the questions it answers; no "thinner than it looks"; customers looking around read stay / leave only when it says something; conditions read "Buyers who say ... are most often sent away"; the untaught argument line is plain; fixed-situation moves name the situation; every row type has a place name; a bare fact-check move on a non-contest row is dropped. // bf30 (2026-11-17): a move taken from a finding keeps the object after its colon ("build on the exception - aim at the buyers ...") in the SWOT, diagnosis and By buying situation actions. // bf29 (2026-11-16, Tyler's rulings): "The diagnosis" frame after Now what? (conversion, price, the winning argument, the threat, where to act - its own templates); TOWS and Situation - complication - resolution retired (frames, pairing helpers, the SWOT items' TOWS phrases, the pyramid); moves that share an action are one move naming every place (no back-reference stubs) in every frame; the SWOT fills each quadrant by the kind of fact, leads every item, keeps one fact in one quadrant and adds "What to do"; the funnel's stages take the scoreboard's two-table layout (competitorColumns, one source) and "Customers with a worry told to stay"; Visibility vs conversion reads conversion as recommendations that end as the pick (a level line for the charted brands together), drops class brands, folds rarely named or picked brands into one note and one table line, defines the quadrants under the chart and closes on a so-what; By buying situation sorts nearest first, says why from each buyer's own answers (the map's roomLift), states all three Value sides and closes on nearest / furthest and one move; the Brief-style insight bodies state shares in plain words. // bf28 (2026-11-16): the scoreboard is two tables on the tracker's own Brief - four rows against the average and the most-picked competitor, then the rows about the brand's own questions; the commit rate is a sentence. // bf27 (2026-11-16): the Now what scoreboard carries the average competitor beside the subject's named, recommended, share of picks and picked rows (the competitors the what-to-buy card lists; class brands left out). // bf26 (2026-11-16): one voice - the subject in the third person everywhere (the insights re-run in the Brief's style, the moves' third-person form, the map's levers and claims voiced), buyers as words, never / every at the extremes, the cards' vocabulary, a finding's move on its cell, no move sentence twice in a frame. // bf25 (2026-11-13): the conditions line reads "rarely names one winner for every buyer" (was "a rule, not a winner"). // bf24 (2026-11-13): themed conditions name one destination only when it takes half their answers; the fixed-situation line leads with the finding wording.
+const BRIEF_VERSION = "bf50"; // bf50 (2026-11-17, fact layer step 5, part 2): the Brief is statements over the run's facts - every number printed (sentences, tables, charts, competitor columns, answer cards) is a fact with its id, every link a lookup from that id to a card location that draws the same fact (no matching; brief_links.ts deleted), every name and list a member of a selection with its id (leader, converts_better, visibility_brands, price_worries, the cards' own lists); the quoted Overview findings and Map claims carry their statement facts; the old-view fallbacks (legacyFig, legacyV, brief_legacy_inputs.ts) are gone - a rival whose card carries no condition rows has no conditions section; ruling 11 (one "converts": the visibility view's level line, the diagnosis too); "when it picks <leader>" reads the leader's own card ("X and Y come up more than when it picks Z"); a buying situation's leader is the leader selection (a brand with picks there); the brand, assistants and condition answer cards are retired (pins only on numberless units, Map-cell cards with facts); a never-recommended brand reads "No answer recommends X"; the chart's "visible" line says "named in over half". // bf49 (2026-11-17, fact layer step 5, part 1): the Brief quotes the Overview's findings and the Map's claims, which are now statements over the run's facts (rulings 7, 2, 3, 8, 10 move their numbers and wording); its condition paragraph and condition card read the run-wide rollup from brief_legacy_inputs.ts (part 2 moves them). // bf48 (2026-11-17, fact layer step 4): the What to buy and switching cards are built from the fact layer, so every figure the Brief prints from them moves with rulings 7, 8, 12, 14, 15 and the ratified competitor group (the average competitor is every listed rival pooled); the commit-rate note row links to its card stat by id. // bf47 (2026-11-17): every name and list the Brief states that a card shows is read from that card (fixed situations and who takes the picks there, the conditions that send buyers away and where, the Value product, the rival named most, the topic in "Of the points it raises most"); the "sends buyers away" sentences in the SWOT and The diagnosis say "When buyers ask what to buy" (they read the What to buy card), and the SWOT skips a condition it already lists as a fixed situation. // bf46 (2026-11-17, Tyler): which topics are on the AI's "what to look for" list is the What to look for card's own list (PositionPanel.checklist) - "not among the five", "It leads instead with ..."; on a rival's Brief a buying situation where the tracker is picked too rarely to compare states the tracker's own share there ("<tracker> takes N% of the picks here" / "is never the pick here") in place of the method note. // bf45 (2026-11-17, Tyler): a brand the tracker asks about as a class (its "a <brand> card" matchup) reads that matchup card on its own Brief - a scoreboard row, a Now what finding and a diagnosis section, as a named rival's Brief has. // bf44 (2026-11-17, stat ids stage 5): condition and argument figures are printed, linked and decided from the cards' own rows (condition rows, What the answer weighs); a rival-subject Brief reads its card inside the What to buy cell, which sets the rival against the tracker (it had compared the rival with every other brand), so its argument sentences and By buying situation "why" lines change. // bf43 (2026-11-17): The diagnosis words the sent-away condition its own way ("The AI most often sends away buyers who say ...") so it never repeats Now what's sentence. // bf42 (2026-11-17, stat ids stage 4): verdict figures - Value, both kinds of worry, customers looking around, rivals' customers switching, direct matchups, the scoreboard and funnel-table rows about the brand's own questions - are printed, linked and decided from the cards' stats; text unchanged. // bf41 (2026-11-17, stat ids stage 3): every DECISION about a funnel figure (thresholds, which sentence, sort orders, nearest / furthest situation, quadrants, never / every) reads the card stat the sentence prints - the brand summary's funnel fields are no longer reachable from the Brief; a tie for a buying situation's leader falls to the overall pick order when the card does not show both brands' named rate; a figure a card shows as "<1%" prints as "<1%". // bf40 (2026-11-17): "every pick" and "every problem question" at 100% (Sephora's Brief said "100% of the picks"). // bf39 (2026-11-17): a rival's picked-of-all-answers figure is read from its By rival page's new row (rival-subject Briefs, and the most-picked column of the scoreboard and funnel tables). // bf38 (2026-11-17, stat ids stages 1-2): every funnel figure (named, recommended, conversion, share of picks, picked, the commit rate, the average and most-picked competitor, each rival, each buying situation) is printed from a card's own stat (stat_registry.ts) and its link is that stat's location - no matching; text unchanged. // bf37 (2026-11-17, Tyler: "yes add it"): the commit rate links to the What to buy card's new line for any subject; the funnel's pick reading says "The AI commits to one <product> in only N% of answers" (the card's words). // bf36 (2026-11-17): the away condition has one name - the theme's when themes exist (finding, SWOT, diagnosis threat), never a member wording; its share is quoted only from a row naming that condition with the same destination the sentence names (What to buy first, else the head-to-head against that same rival, else no share), as "- in N% of the answers when buyers ask what to buy". // bf35 (2026-11-17, Tyler: close every gap a Brief edit can close): the visibility reading names an outlier brand only when its two figures link to a card (the table and chart keep the bf34 fold); the pick-concentration findings keep only card figures (a buyer's share of the picks against all buyers) and the one-question finding is not cited; an AI company's share of a rival's picks is cited only where a card shows it and never with the share of questions it answers; "name nowhere to go" is not cited; a move quotes a Map claim only as far as its numbers are on a card (headline missing: the claim is dropped); the problem-question comparison sets the buyer against the all-buyers card (no table link); a rival's picked-of-all-answers rate is quoted only where a card shows it; condition shares link to their own row (condition labels are link terms); the away-condition finding reads "Buyers who say ... are most often sent away, to ..." with the share a card row shows (What to buy, else the head-to-head that states it most), and the lost-matchup exception names its matchup with that head-to-head card's own share (no pooled shares); numbers read their own clause (semicolons bound both sides) and the words after them for what they measure. // bf34 (2026-11-17, Tyler: the Brief and the cards read the same figure): Value doubts quote the Value card ("points the buyer to a rival instead in X% of answers and to only <brand>'s own cheaper option in Y%", shares of all its answers); an argument is cited only when the What to buy card shows it in that side's top three, with the card's figures (the matchups won-vs-lost argument finding is not cited - no card sets it out); the conditions paragraph reads the What to buy card's own rows and shares; the away-condition finding's share is the card's (its cell's away row); one worry is set against the all-worries card's figure; a buyer's figure against the other buying situations opens a Data page table (BriefLink dest "table"); "Its picks come X% from ..." and "recommended in N% - M% of the answers that name it" are gone; numbers link before the answer-card pins are pruned. // bf33 (2026-11-17): every number carries its link (BriefPara/BriefRow.links), resolved at compose time against the index of what each card shows (panel_index.ts, brief_links.ts) - the card that shows it beside its subject, with the one interaction that shows it, else the Brief's own answer card; a rival card's onward link names the rival (it passed the dictionary key). // bf32 (2026-11-17): the scoreboard's average-competitor share of picks and picked figures are the What to buy card's own. // bf31 (2026-11-17): the diagnosis threat section is about the rival its heading names (what sends buyers to it, the widest gap), then "Others who take buyers"; a rival one AI company carries is a threat there, only at the detector bar and 1.5x the questions it answers; no "thinner than it looks"; customers looking around read stay / leave only when it says something; conditions read "Buyers who say ... are most often sent away"; the untaught argument line is plain; fixed-situation moves name the situation; every row type has a place name; a bare fact-check move on a non-contest row is dropped. // bf30 (2026-11-17): a move taken from a finding keeps the object after its colon ("build on the exception - aim at the buyers ...") in the SWOT, diagnosis and By buying situation actions. // bf29 (2026-11-16, Tyler's rulings): "The diagnosis" frame after Now what? (conversion, price, the winning argument, the threat, where to act - its own templates); TOWS and Situation - complication - resolution retired (frames, pairing helpers, the SWOT items' TOWS phrases, the pyramid); moves that share an action are one move naming every place (no back-reference stubs) in every frame; the SWOT fills each quadrant by the kind of fact, leads every item, keeps one fact in one quadrant and adds "What to do"; the funnel's stages take the scoreboard's two-table layout (competitorColumns, one source) and "Customers with a worry told to stay"; Visibility vs conversion reads conversion as recommendations that end as the pick (a level line for the charted brands together), drops class brands, folds rarely named or picked brands into one note and one table line, defines the quadrants under the chart and closes on a so-what; By buying situation sorts nearest first, says why from each buyer's own answers (the map's roomLift), states all three Value sides and closes on nearest / furthest and one move; the Brief-style insight bodies state shares in plain words. // bf28 (2026-11-16): the scoreboard is two tables on the tracker's own Brief - four rows against the average and the most-picked competitor, then the rows about the brand's own questions; the commit rate is a sentence. // bf27 (2026-11-16): the Now what scoreboard carries the average competitor beside the subject's named, recommended, share of picks and picked rows (the competitors the what-to-buy card lists; class brands left out). // bf26 (2026-11-16): one voice - the subject in the third person everywhere (the insights re-run in the Brief's style, the moves' third-person form, the map's levers and claims voiced), buyers as words, never / every at the extremes, the cards' vocabulary, a finding's move on its cell, no move sentence twice in a frame. // bf25 (2026-11-13): the conditions line reads "rarely names one winner for every buyer" (was "a rule, not a winner"). // bf24 (2026-11-13): themed conditions name one destination only when it takes half their answers; the fixed-situation line leads with the finding wording.
 
 /**
  * The brief through the cache. cachedView's keying, with the subject as one

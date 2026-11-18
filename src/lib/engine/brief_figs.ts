@@ -1,14 +1,19 @@
 /**
- * The Brief's figures carried through its string composition (2026-11-17, "one engine, stat IDs", stage 2).
+ * The Brief's figures carried through its string composition (fact layer step 5, part 2 - every figure is a fact).
  *
- * A figure the Brief takes from a card is printed only from a Stat object (stat_registry.ts) - `figOf(table, stat)`
- * - and travels inside the composed text as an inert marker: U+2063, two private-use characters naming the figure,
- * the value as the card renders it, U+2063. String joins and the voice pass keep working (the voice pass replaces
- * on the plain text and keeps each marker on its number - `trReplace`); the link pass reads the marker to link the
- * number to its stat straight from the registry (no matching), then strips it. A figure that has no card home yet
- * is printed with `legacyFig` - tagged, never silently mixed in: the harness lists every one.
+ * A figure is printed only from a fact: a card's Stat (stat_registry.ts - the number as a card draws it, with the
+ * fact it is) through `figOf`, or a fact ref a statement prints (an Overview finding's number, a Map claim's number,
+ * a derived ref such as the visibility chart's level line) through `refFig`. Either travels inside the composed text
+ * as an inert marker: U+2063, two private-use characters naming the figure, the value as printed, U+2063. String
+ * joins and the voice pass keep working (the voice pass replaces on the plain text and keeps each marker on its
+ * number - `trReplace`); the link pass reads the marker and links the number by its FACT ID to where that fact is
+ * drawn (brief.ts linkUnit - a lookup, never a match), then strips it.
+ *
+ * There is no other way to print a number: a number token in a Brief field that no marker covers is a fault the
+ * Brief's harness fails on (scripts/brief_links_harness.mts).
  */
 import type { Stat } from "./stat_registry";
+import type { StmtNums } from "./facts/statements";
 
 const MK = "⁣";
 const PUA = 0xe000;
@@ -17,8 +22,9 @@ const enc = (n: number) => String.fromCharCode(PUA + Math.floor(n / WIDTH)) + St
 const dec = (a: string, b: string) => (a.charCodeAt(0) - PUA) * WIDTH + (b.charCodeAt(0) - PUA);
 const MARK = /⁣([-])([-])([^⁣]*)⁣/g;
 
-/** A figure: a card's stat, or one printed the old way because no card shows it (listed by the harness). */
-export type Fig = { stat: Stat } | { legacy: string; value: string };
+/** A figure: a card's stat (its `fact` is the fact id), or a fact ref printed by a statement (a fact id or a derived
+ * ref, statements.ts) with the text it printed. */
+export type Fig = { stat: Stat; ref: string } | { ref: string; value: string; stat?: undefined };
 
 export interface FigTable {
   list: Fig[];
@@ -35,10 +41,27 @@ function mark(t: FigTable, key: string, f: Fig, value: string): string {
   return `${MK}${enc(i)}${value}${MK}`;
 }
 
-/** The only way the migrated Brief prints a card's figure: from its Stat. */
-export const figOf = (t: FigTable, s: Stat): string => mark(t, `s:${s.id}`, { stat: s }, s.value);
-/** A figure with no card home (printed as before, tagged `kind` for the harness's needs-a-card-home list). */
-export const legacyFig = (t: FigTable, kind: string, value: string): string => mark(t, `l:${kind}:${value}`, { legacy: kind, value }, value);
+/** A card's figure: printed as the card draws it, carrying the card's fact id. */
+export function figOf(t: FigTable, s: Stat): string {
+  if (!s.fact) throw new Error(`stat ${s.id} carries no fact id - every number a card draws is a fact (fact layer step 4)`);
+  return mark(t, `s:${s.id}`, { stat: s, ref: s.fact }, s.value);
+}
+/** A statement's figure (an Overview finding, a Map claim, a derived ref): the text it printed, carrying its ref. */
+export const refFig = (t: FigTable, ref: string, value: string): string => mark(t, `r:${ref}\u0000${value}`, { ref, value }, value);
+
+/** A finished statement (plain text, and where each number sits with its ref - statements.ts `finish`) as Brief text:
+ * every number marked with its ref, so it links by its fact id like any other figure. */
+export function fromStatement(t: FigTable, text: string, nums: StmtNums | undefined): string {
+  if (!nums?.length) return text;
+  let out = "";
+  let last = 0;
+  for (const [at, len, ref] of [...nums].sort((a, b) => a[0] - b[0])) {
+    if (at < last) continue;
+    out += text.slice(last, at) + refFig(t, ref, text.slice(at, at + len));
+    last = at + len;
+  }
+  return out + text.slice(last);
+}
 
 export const hasFigs = (s: string) => s.includes(MK);
 
@@ -91,7 +114,7 @@ const nthIndex = (hay: string, needle: string, n: number) => {
  * String.prototype.replace on the plain text, keeping each figure on its number: a figure outside every match
  * moves with the text; one inside a match follows its value into the replacement when the replacement keeps that
  * value as often as the match had it ("against your 15%" -> "against <brand>'s 15%"); a figure the replacement
- * turns into a word ("in 0% of answers" -> "never") is dropped - the word carries no link.
+ * turns into a word ("in 0% of answers" -> "never") is dropped - the word carries no number.
  */
 export function trReplace(tr: Tr, re: RegExp, repl: Repl): Tr {
   const matches: RegExpExecArray[] = [];
@@ -135,13 +158,12 @@ export function trReplace(tr: Tr, re: RegExp, repl: Repl): Tr {
   return { s, m };
 }
 
-/* ---------------- stage 3: deciding from the figure printed ---------------- */
+/* ---------------- deciding from the figure printed ---------------- */
 
 /**
  * A stat's counts (stat_registry.ts `k` / `n`, read from the number's own tip). The Brief decides with these and
- * nothing else for its funnel figures: a sentence that says "under half" decides from the very figure it prints.
- * A decision on a stat with no counts is a bug in the caller (every funnel stat is a PanelNum or a keyed span),
- * so these throw rather than guess.
+ * nothing else for a card's figures: a sentence that says "under half" decides from the very figure it prints.
+ * A decision on a stat with no counts is a bug in the caller, so these throw rather than guess.
  */
 function counts(s: Stat): { k: number; n: number } {
   if (s.k === undefined || s.n === undefined) throw new Error(`stat ${s.id} carries no counts to decide with`);

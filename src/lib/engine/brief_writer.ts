@@ -700,49 +700,64 @@ export async function prewarmWrittenBriefs(
 }
 
 /**
- * bf33: a written memo's numbers open what the composed memo's numbers open. The writer copies every number
- * from the fact sheet (guard (a)) and keeps each fact's anchor tags, so a written paragraph's number takes the
- * link of the same number in a composed unit that shares one of its anchors (kept-as-drawn sections carry their
- * composed links already). Applied when a written memo is served, so cached memos need no rewrite.
+ * Fact layer step 5, part 2: a written memo's numbers link by FACT ID. The writer copies every number from the fact
+ * sheet (guard (a)); each composed number carries its fact (BriefLink.fact) and the card location that draws it. A
+ * written number takes the fact of the composed number with the same value whose own statement names the same subject:
+ *  - by id: one fact prints that value in the composed memo and its statement shares a subject word (or two words) with
+ *    the written sentence, or exactly one of several facts printing that value has a statement sharing its subject
+ *    words (names in capitals, quoted phrases) with the written sentence;
+ *  - by the old word overlap (fallback): several facts print that value and the subject words do not tell them apart -
+ *    the one whose statement shares most words wins, as before;
+ *  - not at all: no composed number prints that value in a statement sharing two words.
+ * `tally` (optional) counts each case. Applied when a written memo is served, so cached memos need no rewrite.
  */
-export function relinkWritten(written: BriefMemo, composed: BriefMemo): BriefMemo {
+export function relinkWritten(written: BriefMemo, composed: BriefMemo, tally?: { byId: number; fallback: number; none: number }): BriefMemo {
   type L = NonNullable<BriefPara["links"]>[number];
-  const units: { ids: Set<string>; text: string; links: L[] }[] = [];
+  const units: { text: string; links: L[] }[] = [];
   for (const s of composed.sections) {
-    const add = (p: BriefPara) => p.links?.length && units.push({ ids: new Set((p.cells ?? []).map((c) => c.id)), text: `${p.lead ?? ""} ${p.text}`, links: p.links });
+    const add = (p: BriefPara) => p.links?.length && units.push({ text: `${p.lead ?? ""} ${p.text}`, links: p.links });
     s.paras?.forEach(add);
     s.quads?.forEach((q) => q.cells.forEach((col) => col.forEach(add)));
+    for (const r of s.rows ?? []) if (r.links?.length) units.push({ text: r.kind === "note" ? r.label : `${r.label} ${r.value}`, links: r.links });
   }
-  // The same digits are not the same fact ("31%" is one brand's conversion in one sentence and an argument's share
-  // in another), so a written number takes the link of the composed number whose own sentence it shares words with:
-  // the words right beside the number count double, a sentence sharing fewer than two words is no match, and a
-  // number with no match stays plain text.
   const STOP = new Set(["the", "and", "that", "those", "this", "with", "when", "where", "which", "what", "from", "into", "for", "its", "it", "are", "was", "has", "have", "than", "then", "them", "they", "their", "there", "only", "more", "most", "about", "against", "while", "answers", "answer", "one", "does", "not", "but", "all", "any", "out", "who", "how", "time", "times", "ask", "asks", "buyers", "buyer"]);
   const NUM = /\d+(?:\.\d+)?%|[+-]\d+ (?:pts|points)/g;
   const words = (t: string) => new Set((t.toLowerCase().match(/[a-z][a-z'+.-]{2,}/g) ?? []).filter((w) => !STOP.has(w)));
-  const around = (text: string, at: number, len: number) => {
+  /** The subject words of a statement: names written with a capital (not opening the sentence) and quoted phrases. */
+  const subjects = (t: string) => {
+    const out = new Set<string>();
+    for (const m of t.matchAll(/"([^"]+)"/g)) out.add(m[1].toLowerCase());
+    for (const m of t.matchAll(/(?<=[a-z,;:-] )([A-Z][\w'&+.!-]*(?: [A-Z][\w'&+.!-]*)*)/g)) out.add(m[1].toLowerCase());
+    return out;
+  };
+  const sentenceAt = (text: string, at: number, len: number) => {
     const sb = Math.max(text.lastIndexOf(". ", at) + 1, 0);
     const se = text.indexOf(". ", at + len);
-    return { sentence: words(text.slice(sb, se < 0 ? text.length : se)), near: words(text.slice(Math.max(sb, at - 70), Math.min(se < 0 ? text.length : se, at + len + 70))) };
+    return text.slice(sb, se < 0 ? text.length : se);
+  };
+  const around = (text: string, at: number, len: number) => {
+    const sent = sentenceAt(text, at, len);
+    const sb = Math.max(text.lastIndexOf(". ", at) + 1, 0);
+    const se = text.indexOf(". ", at + len);
+    return { sentence: words(sent), near: words(text.slice(Math.max(sb, at - 70), Math.min(se < 0 ? text.length : se, at + len + 70))), subjects: subjects(sent) };
   };
   const shared = (a: Set<string>, b: Set<string>) => [...a].filter((w) => b.has(w)).length;
-  type Cand = { link: L; sentence: Set<string>; near: Set<string> };
-  const candsOf = (u: (typeof units)[number]): Cand[] => {
+  type Cand = { link: L; sentence: Set<string>; near: Set<string>; subjects: Set<string> };
+  const byToken = new Map<string, Cand[]>();
+  for (const u of units) {
     const seen = new Map<string, number>();
-    const out: Cand[] = [];
     for (const m of u.text.matchAll(NUM)) {
       const occ = seen.get(m[0]) ?? 0;
       seen.set(m[0], occ + 1);
       const link = u.links.find((l) => l.token === m[0] && (l.occurrence ?? 0) === occ);
-      if (link) out.push({ link, ...around(u.text, m.index!, m[0].length) });
+      if (!link?.fact) continue;
+      const xs = byToken.get(m[0]) ?? [];
+      xs.push({ link, ...around(u.text, m.index!, m[0].length) });
+      byToken.set(m[0], xs);
     }
-    return out;
-  };
-  const cands = new Map<(typeof units)[number], Cand[]>();
+  }
   const para = (p: BriefPara): BriefPara => {
     if (p.links) return p;
-    const ids = new Set((p.cells ?? []).map((c) => c.id));
-    const pool = units.filter((u) => [...u.ids].some((id) => ids.has(id)));
     const seen = new Map<string, number>();
     const links: L[] = [];
     const text = `${p.lead ?? ""} ${p.text}`;
@@ -751,19 +766,41 @@ export function relinkWritten(written: BriefMemo, composed: BriefMemo): BriefMem
       const occurrence = seen.get(token) ?? 0;
       seen.set(token, occurrence + 1);
       const here = around(text, m.index!, token.length);
-      let best: { link: L; score: number } | null = null;
-      for (const u of pool) {
-        if (!cands.has(u)) cands.set(u, candsOf(u));
-        for (const c of cands.get(u)!) {
-          if (c.link.token !== token) continue;
-          const s = shared(here.sentence, c.sentence);
-          if (s < 2) continue;
-          // Prefer a card that shows it over the Brief's own answer card.
-          const score = s + 2 * shared(here.near, c.near) + (c.link.dest.kind !== "card" ? 0.5 : 0);
-          if (!best || score > best.score) best = { link: c.link, score };
+      const cands = byToken.get(token) ?? [];
+      const facts = new Set(cands.map((c) => c.link.fact));
+      let pick: Cand | null = null;
+      let how: "byId" | "fallback" | "none" = "none";
+      // The facts whose own statement names a subject the written sentence names.
+      const subjOf = (c: Cand) => [...c.subjects].some((w) => [...here.subjects].some((h) => h === w || h.includes(w) || w.includes(h)));
+      if (facts.size === 1) {
+        // One fact prints this value; its statement must still be about what the written sentence is about.
+        const c = cands.find((x) => subjOf(x) || shared(here.sentence, x.sentence) >= 2);
+        if (c) {
+          pick = c;
+          how = "byId";
+        }
+      } else if (facts.size > 1) {
+        const subj = cands.filter(subjOf);
+        const subjFacts = new Set(subj.map((c) => c.link.fact));
+        if (subjFacts.size === 1) {
+          pick = subj[0];
+          how = "byId";
+        } else {
+          let best: { c: Cand; score: number } | null = null;
+          for (const c of subj.length ? subj : cands) {
+            const sc = shared(here.sentence, c.sentence);
+            if (sc < 2) continue;
+            const score = sc + 2 * shared(here.near, c.near);
+            if (!best || score > best.score) best = { c, score };
+          }
+          if (best) {
+            pick = best.c;
+            how = "fallback";
+          }
         }
       }
-      if (best) links.push({ ...best.link, token, occurrence });
+      if (tally) tally[how]++;
+      if (pick) links.push({ ...pick.link, token, occurrence });
     }
     return links.length ? { ...p, links } : p;
   };

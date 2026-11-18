@@ -82,6 +82,9 @@ export interface AnswerCard {
   lifts?: { label: string; value: number; wins?: string; others?: string; tip?: string }[];
   /** The sub-line's two side words ("your picks", "rivals' picks"). */
   liftSides?: [string, string];
+  /** Fact layer step 5, part 2: where each number of the headline and the rows sits, with its fact id ("headline",
+   * "rows.<i>"). Never drawn. */
+  facts?: Record<string, [number, number, string][]>;
 }
 
 /** bf33 (2026-11-17): where one number in a unit opens - resolved at compose time (brief_links.ts), never guessed
@@ -98,8 +101,11 @@ export interface BriefLink {
     /** bf34: a table on the Data page (a library entry: its pool, measure and rows), for a figure no card shows. */
     | { kind: "table"; entry: string; pool: string; measures: string[]; row: string };
   reveal?: PanelReveal;
-  /** Stage 2 (stat ids, 2026-11-17): the card figure this number is (stat_registry.ts id) - linked by id, never matched. */
+  /** Stage 2 (stat ids, 2026-11-17): the card location the link opens (stat_registry.ts id) - never matched. */
   stat?: string;
+  /** Fact layer step 5, part 2: the fact the number is (measure | subject | scope, or a derived ref); the link opens a
+   * card location that draws this same fact. */
+  fact?: string;
 }
 
 /** One scoreboard or table line. `tip` holds the counts (tooltip only). */

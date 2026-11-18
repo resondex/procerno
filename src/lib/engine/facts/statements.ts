@@ -47,7 +47,10 @@ export type DerivedOp =
   /** a.k / b.k (the first fact's numerator over the second's), as a percentage */
   | "kk"
   /** 1 / arg, as a percentage (an even split among `arg` members; the members are named by the statement) */
-  | "even";
+  | "even"
+  /** the facts pooled: their numerators added up over their bases added up, as a percentage (a chart's level line for
+   * a group of brands - the Brief's visibility chart) */
+  | "pool";
 
 export function parseDerived(ref: string): { op: DerivedOp; arg: number | null; refs: string[] } | null {
   if (!ref.startsWith("=")) return null;
@@ -148,6 +151,11 @@ export function derivedValue(op: DerivedOp, xs: { k: number; n: number }[], arg:
       return xs[1].k > 0 ? xs[0].k / xs[1].k : 0;
     case "even":
       return arg ? 1 / arg : 0;
+    case "pool": {
+      const k = xs.reduce((a, x) => a + x.k, 0);
+      const n = xs.reduce((a, x) => a + x.n, 0);
+      return n > 0 ? k / n : 0;
+    }
   }
 }
 export function printDerived(op: DerivedOp, v: number): string {
@@ -158,6 +166,7 @@ export function printDerived(op: DerivedOp, v: number): string {
       return `${v >= 0 ? "+" : "-"}${Math.round(Math.abs(v) * 100)} points`;
     case "kk":
     case "even":
+    case "pool":
       return v > 0 && v < 0.005 ? "<1%" : `${Math.round(v * 100)}%`;
   }
 }

@@ -1,145 +1,111 @@
+/* eslint-disable @typescript-eslint/no-explicit-any -- a harness over the served payloads */
 /**
- * Zero-spend citation harness for the brief (brief.ts) against the analysis
- * map (analysis_map.ts) - the owner's ruling of 2026-11-06: every percentage
- * and signed point value visible in a brief must have a citation, a pin whose
- * card visibly states that number. bf14 (2026-11-07): the receipt is the pin's
- * ANSWER CARD (view.cards - cell, brand, engines or condition; cardText:
- * crumb, headline, row labels and values, never tips), not the map panel.
+ * The Brief's pins and answer cards on the fact layer (FACT_LAYER_DESIGN_2026-11-17.md step 5, part 2). A number links
+ * by its fact id (scripts/brief_links_harness.mts checks every link), so a pin is only a phrase link on a unit with no
+ * number. For every Brief of the test copy (each tracker's own and every rival subject's), every frame, this asserts:
  *
- *   npx tsx scripts/brief_citation_harness.mts [brand substring] [--verbose] [--all-subjects]
+ *  (a) every pin sits on a unit with NO number token, is a Map-cell pin, and carries an `at` phrase present in that
+ *      unit's visible text (the phrase the reader clicks - bf15);
+ *  (b) no row carries a pin (a row's numbers link by fact id);
+ *  (c) every pin's card is in view.cards, and every card is a Map-cell card (the brand, assistants and condition answer
+ *      cards are retired);
+ *  (d) every answer card is a statement: every number token in its headline and rows sits under `facts` with a fact id,
+ *      and that fact recomputes from its id alone to the number printed.
  *
- * Runs against the dashboard fixture ONLY (the procerno-fixture launch
- * config's env, set BEFORE the store loads): DATABASE_URL blanked,
- * SQLITE_PATH at data/dashboard_fixture.db, every API key blanked,
- * RUN_COLLECT_ONLY=1 - no model call and no prod read is possible.
+ *   npx tsx scripts/brief_citation_harness.mts [brand substring]
  *
- * For every tracker: the target subject and the first rival subject (every
- * selectable subject with --all-subjects), all
- * seven frames, composed memos. Units are paragraphs (section paras and
- * quadrant cells) and rows (label + value); tips, tables and charts are not
- * units (tips carry counts; tables and charts carry no pins). Asserts:
- *   (a) RULE 1 - no surviving pin on a numbered unit shares zero numbers
- *       with its card (and every pin has a card in view.cards);
- *   (b) RULE 2 - every number token in a unit's visible text appears in at
- *       least one of that unit's surviving pins' cards.
- *   (c) bf15 (the fact is the link) - on every unit whose text has NO number
- *       token, every surviving anchor carries an `at` that is a substring of
- *       the unit's visible text (the phrase the reader clicks).
- * Prints every violation (tracker / subject / frame / section / unit /
- * number) and exits non-zero on any.
+ * Fixture only, keyless (DATABASE_URL blanked, SQLITE_PATH at data/dashboard_fixture.db, every API key blanked).
  */
 const REPO = new URL("..", import.meta.url).pathname.replace(/\/$/, "");
 process.env.DATABASE_URL = "";
 process.env.SQLITE_PATH = REPO + "/data/dashboard_fixture.db";
+process.env.VIEW_CACHE = "off";
 for (const k of ["OPENAI_API_KEY", "ANTHROPIC_API_KEY", "GEMINI_API_KEY", "XAI_API_KEY", "PERPLEXITY_API_KEY", "FIREWORKS_API_KEY"]) process.env[k] = "";
 process.env.RUN_COLLECT_ONLY = "1";
 
 const { store } = await import(REPO + "/src/lib/store/index.ts");
 const { loadViewData } = await import(REPO + "/src/lib/engine/view_data.ts");
+const { cachedRunRevision } = await import(REPO + "/src/lib/engine/run_revision.ts");
 const { computeBrief, briefNumberTokens } = await import(REPO + "/src/lib/engine/brief.ts");
-const { cardText } = await import(REPO + "/src/lib/engine/answer_cards.ts");
+const { buildAnswerFacts } = await import(REPO + "/src/lib/engine/facts/answer_facts.ts");
+const { attachConditions } = await import(REPO + "/src/lib/engine/facts/conditions.ts");
+const { attachProducts } = await import(REPO + "/src/lib/engine/facts/products.ts");
+const { factBook } = await import(REPO + "/src/lib/engine/facts/fact.ts");
+const { evalRef } = await import(REPO + "/src/lib/engine/facts/statements.ts");
+const { printWhole, printFine } = await import(REPO + "/src/lib/engine/facts/measure_book.ts");
 
-type Anchor = { id: string; label: string; at?: string };
-type Para = { lead?: string; text: string; cells?: Anchor[] };
-type Row = { label: string; value: string; cell?: Anchor };
-
-const args = process.argv.slice(2);
-const verbose = args.includes("--verbose");
-const allSubjects = args.includes("--all-subjects");
-const want = (args.find((a) => !a.startsWith("--")) ?? "").toLowerCase();
-const projects = (await store.listProjects()).filter((p: { brand: string; archived_at?: string | null }) => !p.archived_at && p.brand.toLowerCase().includes(want));
-
-let units = 0;
-let numbered = 0;
-let tokens = 0;
-let pins = 0;
-const rule1: string[] = [];
-const rule2: string[] = [];
-const missing: string[] = [];
-const rule3: string[] = [];
+const want = (process.argv.slice(2).find((a) => !a.startsWith("--")) ?? "").toLowerCase();
+const projects = (await store.listProjects()).filter((p: any) => !p.archived_at && p.brand.toLowerCase().includes(want));
+const NUM = /\d+(?:\.\d+)?%|[+-]\d+ (?:pts|points)/g;
+const bad: string[] = [];
+const t = { briefs: 0, units: 0, numberless: 0, pins: 0, cards: 0, cardNumbers: 0 };
 
 for (const project of projects) {
   const run = (await store.listRuns(project.id))[0];
   if (!run) continue;
-  const data = await loadViewData(run, project, { setupDecision: true, judge: true });
-  // On a snapshot of live the run carries its live revision, so the saved condition groupings are read.
-  if (data) data.revision = await (await import(process.cwd() + "/src/lib/engine/run_revision.ts")).cachedRunRevision(run.id);
+  const data: any = await loadViewData(run, project, { setupDecision: true, judge: true });
   if (!data) continue;
-  const first = await computeBrief(data, {});
-  const subjects = (allSubjects ? [undefined, ...first.subjects.slice(1)] : [undefined, first.subjects[1]]).filter((x, i) => i === 0 || !!x) as (string | undefined)[];
-  for (const subject of subjects) {
-    const view = subject ? await computeBrief(data, { subject }) : first;
-    const cardTokens = new Map<string, Set<string>>();
-    const tokOf = (id: string) => {
-      let t = cardTokens.get(id);
-      if (!t) {
-        const card = view.cards?.[id];
-        if (!card) missing.push(`${project.brand}${subject ? ` [rival ${subject}]` : ""} pin=${id} has no card`);
-        t = card ? briefNumberTokens(cardText(card)) : new Set<string>();
-        cardTokens.set(id, t);
-      }
-      return t;
-    };
+  data.revision = await cachedRunRevision(run.id);
+  const set = buildAnswerFacts({ ...data }, {});
+  attachProducts(set, project.category);
+  await attachConditions(set, data, { map: false });
+  const book = factBook(set);
+  const first: any = await computeBrief(data, {});
+  for (const subject of [undefined, ...first.subjects.slice(1)]) {
+    const view: any = subject ? await computeBrief(data, { subject }) : first;
+    t.briefs++;
     const who = `${project.brand}${subject ? ` [rival ${subject}]` : ""}`;
-    for (const [frame, memo] of Object.entries(view.memos) as [string, { sections: { key: string; paras?: Para[]; rows?: Row[]; quads?: { headers: [string, string]; cells: [Para[], Para[]] }[] }[] }][]) {
+    const used = new Set<string>();
+    for (const [frame, memo] of Object.entries(view.memos) as any[]) {
       for (const s of memo.sections) {
-        // bf34: a number is also cited by its link (BriefPara/BriefRow.links, resolved to a card that shows it -
-        // scripts/brief_links_harness.mts checks the link itself).
-        const list: { where: string; visible: string; ids: string[]; anchors: Anchor[]; linked: Set<string> }[] = [];
-        const lk = (x: { links?: { token: string }[] }) => new Set((x.links ?? []).map((l) => l.token));
-        for (const p of s.paras ?? []) list.push({ where: s.key, visible: `${p.lead ?? ""} ${p.text}`, ids: (p.cells ?? []).map((c) => c.id), anchors: p.cells ?? [], linked: lk(p as never) });
-        for (const q of s.quads ?? [])
-          q.cells.forEach((col, i) => {
-            for (const p of col) list.push({ where: `${s.key}/${q.headers[i]}`, visible: `${p.lead ?? ""} ${p.text}`, ids: (p.cells ?? []).map((c) => c.id), anchors: p.cells ?? [], linked: lk(p as never) });
-          });
-        for (const r of s.rows ?? []) list.push({ where: `${s.key}/row`, visible: `${r.label} ${r.value}`, ids: r.cell ? [r.cell.id] : [], anchors: r.cell ? [r.cell] : [], linked: lk(r as never) });
-        for (const u of list) {
-          units++;
-          pins += u.ids.length;
-          for (const id of u.ids) tokOf(id); // every pin, numbered or not, must have its card
-          const nums = briefNumberTokens(u.visible);
-          if (nums.size === 0) {
-            for (const a of u.anchors)
-              if (!a.at || !u.visible.includes(a.at))
-                rule3.push(`${who} [${frame}/${u.where}] pin=${a.id} ${a.at ? `at "${a.at}" not in text` : "has no at"}\n     "${u.visible.trim().slice(0, 160)}"`);
+        const paras: any[] = [...(s.paras ?? []), ...(s.quads ?? []).flatMap((q: any) => q.cells.flat())];
+        for (const p of paras) {
+          t.units++;
+          const visible = `${p.lead ?? ""} ${p.text}`;
+          const hasNum = briefNumberTokens(visible).size > 0;
+          if (!hasNum) t.numberless++;
+          for (const a of p.cells ?? []) {
+            t.pins++;
+            used.add(a.id);
+            if (hasNum) bad.push(`(a) ${who} [${frame}/${s.key}] pin ${a.id} on a unit with numbers: "${visible.slice(0, 120)}"`);
+            if ((a.kind ?? "cell") !== "cell") bad.push(`(a) ${who} [${frame}/${s.key}] pin ${a.id} is a ${a.kind} pin`);
+            if (!a.at || !visible.includes(a.at)) bad.push(`(a) ${who} [${frame}/${s.key}] pin ${a.id} ${a.at ? `at "${a.at}" not in its text` : "has no at"}`);
+          }
+        }
+        for (const r of s.rows ?? []) if (r.cell) bad.push(`(b) ${who} [${frame}/${s.key}] row "${r.label}" carries a pin`);
+      }
+    }
+    for (const id of used) if (!view.cards?.[id]) bad.push(`(c) ${who} pin ${id} has no card`);
+    for (const [id, card] of Object.entries(view.cards ?? {}) as any[]) {
+      t.cards++;
+      if (card.kind !== "cell") bad.push(`(c) ${who} card ${id} is a ${card.kind} card`);
+      const fields: [string, string][] = [["headline", card.headline], ...card.rows.map((r: any, i: number) => [`rows.${i}`, r.value] as [string, string])];
+      for (const [f, text] of fields) {
+        const nums = (card.facts?.[f] ?? []) as [number, number, string][];
+        for (const m of text.matchAll(NUM)) {
+          t.cardNumbers++;
+          const n = nums.find(([at, len]) => m.index! >= at && m.index! < at + len);
+          if (!n) {
+            bad.push(`(d) ${who} card ${id} ${f}: ${m[0]} carries no fact: "${text.slice(0, 120)}"`);
             continue;
           }
-          numbered++;
-          tokens += nums.size;
-          const head = `${who} [${frame}/${u.where}]`;
-          const said = u.visible.trim().replace(/\s+/g, " ").slice(0, 160);
-          for (const id of u.ids) {
-            const t = tokOf(id);
-            if (![...nums].some((n) => t.has(n))) rule1.push(`${head} pin=${id} shares none of ${[...nums].join(" ")}\n     "${said}"`);
+          const shown = text.slice(n[0], n[0] + n[1]);
+          let r: any;
+          try {
+            r = evalRef(book, n[2]);
+          } catch (e: any) {
+            bad.push(`(d) ${who} card ${id} ${f}: ${shown} - its fact ${n[2]} cannot be recomputed: ${e.message}`);
+            continue;
           }
-          for (const n of nums) {
-            const by = u.ids.filter((id) => tokOf(id).has(n));
-            if (!by.length && !u.linked.has(n)) rule2.push(`${head} ${n} uncited (pins: ${u.ids.join(", ") || "none"})\n     "${said}"`);
-            else if (verbose) console.log(`ok ${head} ${n} <- ${by.join(", ")}`);
-          }
+          const ok = [r.text, r.k !== undefined ? printWhole(r.k, r.n) : "", r.k !== undefined ? printFine(r.k, r.n) : ""].some((x) => (x.match(NUM) ?? []).join(" ") === (shown.match(NUM) ?? []).join(" "));
+          if (!ok) bad.push(`(d) ${who} card ${id} ${f}: ${shown} is not its fact ${n[2]} = ${r.text}`);
         }
       }
     }
   }
 }
 
-console.log(`\nunits ${units}, numbered ${numbered}, number tokens ${tokens}, pins ${pins}`);
-if (rule1.length) {
-  console.log(`\nRULE 1 - pins sharing no number with their unit: ${rule1.length}`);
-  for (const l of rule1) console.log("  " + l);
-}
-if (rule2.length) {
-  console.log(`\nRULE 2 - number tokens with no citing pin: ${rule2.length}`);
-  for (const l of rule2) console.log("  " + l);
-}
-if (rule3.length) {
-  console.log(`\nRULE 3 - numberless units' anchors with no present \`at\`: ${rule3.length}`);
-  for (const l of rule3) console.log("  " + l);
-}
-if (missing.length) {
-  console.log(`\nPins with no card in view.cards: ${missing.length}`);
-  for (const l of [...new Set(missing)]) console.log("  " + l);
-}
-const bad = rule1.length + rule2.length + rule3.length + missing.length;
-console.log(bad ? `\nFAIL: rule 1 ${rule1.length}, rule 2 ${rule2.length}, rule 3 ${rule3.length}, cardless pins ${missing.length}` : "\nALL PASS - every visible number is cited by a card");
-process.exit(bad ? 1 : 0);
+console.log(`Briefs ${t.briefs}; paragraphs ${t.units} (${t.numberless} with no number); pins ${t.pins}; answer cards ${t.cards} with ${t.cardNumbers} numbers`);
+for (const l of bad.slice(0, 200)) console.log("  " + l);
+console.log(bad.length ? `\nFAIL: ${bad.length}` : "\nALL PASS - pins only on numberless units (Map-cell phrase links), every answer card a statement whose numbers recompute from their fact ids");
+process.exit(bad.length ? 1 : 0);

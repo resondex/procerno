@@ -1,481 +1,341 @@
 /* eslint-disable @typescript-eslint/no-explicit-any -- a harness over the served payloads */
 /**
- * The Brief's number links (bf33): every linked number in every frame (own subject, every fixture tracker)
- * opens a card whose index (panel_index.ts) shows that number beside its subject - by default, or with exactly
- * the reveal the link carries - or is an explicit fallback to the Brief's own answer card. Unlinked numbers
- * (scoreboard competitor columns, the visibility table, chart labels, rows with no card) must exist on some card
- * or By rival card. Prints the fallback list by kind and the unlinked figures with no home.
+ * The Brief as statements over the fact layer (FACT_LAYER_DESIGN_2026-11-17.md step 5, part 2). For EVERY Brief of the
+ * test copy - each tracker's own and every rival subject's - every frame, this checks, from a fact book and selection
+ * book built afresh (buildAnswerFacts + conditions + products + factBook + selectionBook - nothing shared with the
+ * compute):
  *
- * Stage 2 (stat ids, 2026-11-17): a number linked by its stat id (BriefLink.stat) must be exactly its registry stat
- * (same value, card and reveal) - those bypass matching; the rest are still matched (stage 3 scope, listed by kind).
- * Fails when a sentence that prints a card figure (a migrated sentence) prints any number without a stat id, and -
- * with BRIEF_BEFORE=<dump.json> (scratch dump of every Brief string before the change) - when a sentence of that
- * dump is absent now. Figures printed the old way because no card shows them are listed as "needs a card home".
+ *  1. NUMBERS: every number token in every field of every memo and answer card (paragraph leads and text, quadrant
+ *     cells, scoreboard and stage rows with their competitor columns and notes, tables, chart titles, labels and values,
+ *     headings, titles, footers) is covered by a figure that carries a fact id (or a derived ref) - zero bare numbers;
+ *     and every figure recomputes from its id alone to the very text printed (the measure's print, or the same counts
+ *     printed whole or to one decimal as the card it came from draws them).
+ *  2. LINKS: every link carries the fact of its number; it opens a card location (stat_registry.ts) that draws that same
+ *     fact, with exactly that location's reveal; the link's number recomputes from the fact. No link without a fact.
+ *  3. NAMES AND LISTS: every name the Brief states in a role a card or selection gives it (brief.ts nameOn) is a member
+ *     of the selection whose id it carries - recomputed from the id alone (selections.ts selectionFromId) - or the
+ *     subject of the fact it carries (a destination's brand, a cell's own rival / worry / buying situation).
+ *  4. SOURCE: brief.ts has no matching path (no resolver, no number read out of text, no answer cards built from the old
+ *     summary) and counts nothing itself (no read of the coded answers, the answer facts' rows or a fact book count
+ *     outside the one helper that prints a fact no card draws).
  *
- * Stage 3 (funnel decisions, 2026-11-17): the run is STRICT (BRIEF_STRICT_FUNNEL=1, set below) - brief.ts strips
- * the brand summary's funnel cells and, strict, makes each a getter that throws, so every Brief computed here proves
- * no funnel path read the old source to print or to decide. Checked too: a negative control (reading a stripped
- * field throws), a source check of brief.ts (no funnel-cell reads, no per-situation headline reads, the full summary
- * reached only by the two out-of-scope calls), and the funnel universe (every summary brand has a funnel on a card).
+ * Prints the counts, saying what each counts and over how many Briefs; lists every number whose fact no card draws
+ * (needs a card home, or the chart reference line no card is to draw by design).
  *
- * Stage 4 (verdict figures, 2026-11-17): Value, the worries, the customers looking around, rivals' customers switching
- * and the direct matchups are the verdict cards' stats too. brief.ts strips the verdict views (stripVerdicts) - strict,
- * a read of the summary's headToHead / buyersDoubt / customersDoubt or the inputs' value / doubt / alternatives
- * throws - and the source check fails on any read of an old verdict field outside a `legacyV` / `c.legacy` line
- * (the tagged path for a verdict figure no card shows, listed under "needs a card home").
- *
- * Stage 5 (conditions and arguments, 2026-11-17): what the AI says about the buyer (a card's condition rows) and about
- * the category (a card's "What the answer weighs" rows) are the cards' stats too - printed, linked and decided from
- * the registry's condition and weighs rows. stripVerdicts also takes the condition and argument rollups out of the
- * inputs (strict: a read of inputs.conditions / away / taught throws; the tagged paths read `c.legacyArgs`), and the
- * source check fails on any direct read of a card's condition or weighs objects, the map's per-buyer lift, the old
- * argument lift, or a share printed from a panel row's value - outside the allowed lines it names.
- *
- * statids8 (names and lists, 2026-11-17): every name the Brief states in a role a card shows - a fixed situation, who
- * takes the picks there, the condition that sends buyers away and where it sends them, the product a Value question
- * asked about, the rival a price answer names most, the checklist and a checklist topic that comes up more when another
- * brand is picked, a matchup's / rivals' customers' / a worry's own name - is read from that card (brief.ts nameOn,
- * BRIEF_NAME_LOG=1). Each logged name is checked against the card's own object (the card draws it there), and the
- * source check fails on any read of the old sources for those names (the run's away rollup, the run-wide argument lift,
- * the Map's per-cell wall and taker fields in a Brief sentence, the Value view's product lines, a matchup's or
- * rivals' customers' name from the verdict views).
- *
- * Fixture only, no model calls:  npx tsx scripts/brief_links_harness.mts
+ * Fixture only, keyless:  SQLITE_PATH=data/dashboard_fixture.db VIEW_CACHE=off npx tsx scripts/brief_links_harness.mts
  */
 process.env.DATABASE_URL = "";
 process.env.SQLITE_PATH = process.cwd() + "/data/dashboard_fixture.db";
+process.env.VIEW_CACHE = "off";
 for (const k of ["OPENAI_API_KEY", "ANTHROPIC_API_KEY", "GEMINI_API_KEY", "XAI_API_KEY", "PERPLEXITY_API_KEY", "FIREWORKS_API_KEY"]) process.env[k] = "";
-
-const { store } = await import(process.cwd() + "/src/lib/store/index.ts");
-const { loadViewData } = await import(process.cwd() + "/src/lib/engine/view_data.ts");
-process.env.BRIEF_TRIM_LOG = "1";
 process.env.BRIEF_FIG_LOG = "1";
-process.env.BRIEF_STRICT_FUNNEL = "1";
 process.env.BRIEF_NAME_LOG = "1";
-const { computeBrief, conditionTerms, TRIMMED_CLAIMS, FIG_LOG, NAME_LOG, stripFunnel, stripVerdicts } = await import(process.cwd() + "/src/lib/engine/brief.ts");
-const { buildStatRegistry } = await import(process.cwd() + "/src/lib/engine/stat_registry.ts");
+process.env.BRIEF_TRIM_LOG = "1";
+process.env.BRIEF_STRICT_FUNNEL = "1";
+
+const ROOT = process.cwd();
 const fs = await import("node:fs");
-const { sharedAnalysisMap } = await import(process.cwd() + "/src/lib/engine/analysis_map.ts");
-const { sharedBrandSummary } = await import(process.cwd() + "/src/lib/engine/brand_summary.ts");
-const { linkResolver, numberContext } = await import(process.cwd() + "/src/lib/engine/brief_links.ts");
-const { computeWorkbench } = await import(process.cwd() + "/src/lib/engine/workbench.ts");
-const { LIB_BY_ID, entrySettings, entryAvailable } = await import(process.cwd() + "/src/app/projects/[id]/table_library.ts");
-const { resolveSettings, computePivot } = await import(process.cwd() + "/src/app/projects/[id]/pivot_compute.ts");
+const { store } = await import(ROOT + "/src/lib/store/index.ts");
+const { loadViewData } = await import(ROOT + "/src/lib/engine/view_data.ts");
+const { cachedRunRevision } = await import(ROOT + "/src/lib/engine/run_revision.ts");
+const { computeBrief, FIG_LOG, FIELD_LOG, NAME_LOG, TRIMMED_CLAIMS, stripFunnel } = await import(ROOT + "/src/lib/engine/brief.ts");
+const { sharedAnalysisMap } = await import(ROOT + "/src/lib/engine/analysis_map.ts");
+const { sharedBrandSummary } = await import(ROOT + "/src/lib/engine/brand_summary.ts");
+const { buildStatRegistry } = await import(ROOT + "/src/lib/engine/stat_registry.ts");
+const { buildAnswerFacts } = await import(ROOT + "/src/lib/engine/facts/answer_facts.ts");
+const { attachConditions } = await import(ROOT + "/src/lib/engine/facts/conditions.ts");
+const { attachProducts } = await import(ROOT + "/src/lib/engine/facts/products.ts");
+const { factBook } = await import(ROOT + "/src/lib/engine/facts/fact.ts");
+const { selectionBook, selectionFromId, averageCompetitor, scopeFromKey } = await import(ROOT + "/src/lib/engine/facts/selections.ts");
+const { parseDerived, parseFactId, derivedValue, printDerived } = await import(ROOT + "/src/lib/engine/facts/statements.ts");
+const { MEASURE_BY_ID, printOf, printWhole, printFine } = await import(ROOT + "/src/lib/engine/facts/measure_book.ts");
 
-const NUMBER_TOKEN = /\d+(?:\.\d+)?%|[+-]\d+ (?:pts|points)/g;
-
-function kindOf(s: string, row?: string): string {
-  if (row) return row;
-  if (/assistants (carry|pick|supply)|supply .* of (its|their) picks/i.test(s)) return "AI-company concentration";
-  if (/argued in|argues .* in|comes up in .* answers that pick|bring up|comes up more|shows up when/i.test(s)) return "argument share by who is picked";
-  if (/Buyers who say|sends? buyers away|that say when to choose|sent away/i.test(s)) return "condition shares";
-  if (/worth (it|paying)|cheaper option|doubt(s)? (it|the price)/i.test(s)) return "value verdict shares";
-  if (/worr|told to (stay|leave|go ahead)|agrees .* fair/i.test(s)) return "worry verdicts";
-  if (/switch|customers ask what|customers looking/i.test(s)) return "switching";
-  if (/directly|compare|matchup|straight choice/i.test(s)) return "matchup records";
-  if (/recommendations (end|into)|end with it as the pick|turns .* recommendations/i.test(s)) return "conversion";
-  if (/buying situation|the buyer in/i.test(s) && /pick/.test(s)) return "share of picks by buying situation";
-  if (/named|recommended|commits|settles|share of picks|of the picks|pick in|is the pick/i.test(s)) return "funnel / share of picks";
-  return "other";
-}
-
+const NUM = /\d+(?:\.\d+)?%|[+-]\d+ (?:pts|points)/g;
 const failures: string[] = [];
-
-// Stage 3: the source check - brief.ts reads no funnel cell of the brand summary, no per-situation headline, no
-// Position.brands split, and reaches the full summary only through the two out-of-scope calls.
-{
-  const src = fs.readFileSync(process.cwd() + "/src/lib/engine/brief.ts", "utf8");
-  const bad = /\.(mentioned|chosen|shareOfDecided|firmPickInCategory|firmPick|byMode|byEngine)\b|\.recommended\b|computeHeadline|\bpos(ition)?\.brands\b/;
-  src.split("\n").forEach((l, i) => {
-    if (bad.test(l)) failures.push(`brief.ts:${i + 1} reads an old-source funnel field: ${l.trim().slice(0, 160)}`);
-  });
-  // Stage 4: no old verdict field is read except on the tagged legacy path (a figure no card shows) or where the
-  // verdict views are declared and stripped to names.
-  const badV = /\.captured\b|\.winOfDecided\b|\.verdicts\.(proceed|avoid|keep|leave|undecided)\b|\.worth\.(yes|no|depends)\b|\.(buyersDoubt|customersDoubt|headToHead)\b|\binputs\.(value|doubt|alternatives)\b|\bvsTarget\b|\.instead\.find\b|\.ownRung\b|\.recommendsInstead\b|\bvalueInstead\(/;
-  const okV = /c\.legacy\.|legacyV\(|^type BriefSummary|SUMMARY_VERDICT_FIELDS =|const \{ target: _t,|h2h: summary\.headToHead\.map\(\(r\) => \(\{ key: r\.key, rival: r\.rival \}\)\)/;
-  src.split("\n").forEach((l, i) => {
-    if (badV.test(l) && !okV.test(l)) failures.push(`brief.ts:${i + 1} reads an old-source verdict field: ${l.trim().slice(0, 160)}`);
-  });
-  // Stage 5: no condition or argument figure is read from a card's objects or a computed rollup - only from the stat
-  // registry. Allowed: comment lines, conditionTerms (the matching resolver's terms, deleted with brief_links.ts), and
-  // the tagged legacy paths (`c.legacyArgs.` - the no-card conditions paragraph, the number-free fixed-situation and
-  // sent-away lines, the checklist membership; `legacyLift` - the diagnosis's "points it raises most" line;
-  // `legacyRoomCodes` - By buying situation's "when it picks <leader>, the answers most often argue ..."), and the
-  // codebook's argument NAMES (argCodes: which weighs rows are arguments - names only, no figure or count).
-  const bad5 = /\.weighsComp\b|\.weighs\b|\bpanel\?*\.conditions\b|\.conditions\?*\.(toward|away)\b|\.exception\b|\broomLift\b|\broomCodes\b|\bc\.lift\b|\bcardArgOf\b|\.share\.(value|tip)\b|\binputs\.(conditions|away|taught)\b|\blegacyArgs\b|\blegacyLift\b/;
-  const ok5 = /^\s*(\/\/|\*|\/\*\*)|const sets = \[pp\?\.conditions|c\.legacyArgs\.(conditions|taught)\b|legacyArgs(: LegacyArgs|,$| \} = stripVerdicts)|legacyArgs: \{ conditions, away, taught \}|type LegacyArgs|const \{ value, doubt, alternatives, conditions, away, taught|^const BRIEF_VERSION|^\s*const argCodes = |legacyRoomCodes(: debug\.roomCodes|\?: NonNullable)/;
-  src.split("\n").forEach((l, i) => {
-    if (bad5.test(l) && !ok5.test(l)) failures.push(`brief.ts:${i + 1} reads an old-source condition or argument field: ${l.trim().slice(0, 160)}`);
-  });
-  const oos = src.split("\n").filter((l) => /\.outOfScope\b/.test(l));
-  for (const l of oos) if (!/hasDossier\(c\.outOfScope\.summary, key\)/.test(l)) failures.push(`brief.ts reaches the full summary outside the out-of-scope call: ${l.trim().slice(0, 160)}`);
-  // statids8: the names the Brief states are the cards' own - no read of the old sources for them. Allowed: comment
-  // lines, the Map's moves (actOf / leverAbout quote the Map cell's wall - moves are out of this stage's scope), and
-  // the moves' "today" line and hover tip (they name the Map's taker), and the fixed-situation fallback name.
-  const bad8 = /\blegacyLift\b|\bawaySpecifics\b|legacyArgs\.away\b|\b(st|cs|st0)\.wall\b|\bst\.taker\b|\.lines\[0\]\.label|\b(v|r|good\.r|ex\.r)\.line\b(?!\()|\.routes\b|\$\{r\.rival\}|poss\(r\.rival\)|\(\{ concern: r\.concern,|sort\(\(a, b\) => kOf\(b\.stat\) - kOf\(a\.stat\)\)/;
-  const ok8 = /^\s*(\/\/|\*|\/\*\*)|stop arguing against buyers who say "\$\{condLabel\(st\.wall\)\}"|leverAbout\(p\.lever, brand, st\.wall\)|^\s*return st\.wall$|today \$\{st\.taker\}|for \$\{st\.taker\}`|on \$\{st\.taker\}'s|cardLabel\(c, cellId, st\.taker\)|line: r\.line \}|k\.away\.filter\(\(g\) => g\.routes|destOf\(g\.routes, g\.answers \?\? 0\)|return g\.routes\[0\] \? /;
-  src.split("\n").forEach((l, i) => {
-    if (bad8.test(l) && !ok8.test(l)) failures.push(`brief.ts:${i + 1} reads an old source for a name the Brief states: ${l.trim().slice(0, 160)}`);
-  });
-}
-const strictChecked: string[] = [];
-const noFunnel: string[] = [];
-const counts = { linked: 0, def: 0, one: 0, card: 0, table: 0, unlinked: 0, unlinkedHome: 0 };
-const tables: string[] = [];
-/** The tracker's own Brief alone (the rival's is the second subject). */
-const own = { linked: 0, def: 0, one: 0, card: 0, table: 0, unlinked: 0, unlinkedHome: 0 };
-const fallbacks = new Map<string, string[]>();
-const homeless: string[] = [];
-/** Stage 2 tallies per tracker: linked by stat id, linked by matching, fallback (answer card / table), unlinked. */
-const per = new Map<string, { stat: number; matched: number; fallback: number; unlinked: number; statRead: number }>();
-const matchedKinds = new Map<string, number>();
-const nowStrings = new Map<string, string[]>();
-const sentencesOf = (t: string) => t.split(/(?<=[.!?])\s+/).map((x) => x.trim()).filter(Boolean);
-const allStrings = (x: any, out: string[] = []): string[] => {
-  if (typeof x === "string") out.push(x);
-  else if (Array.isArray(x)) x.forEach((y) => allStrings(y, out));
-  else if (x && typeof x === "object")
-    for (const [k, v] of Object.entries(x)) {
-      if (["links", "tip", "cell"].includes(k)) continue;
-      // A paragraph's pins (anchors) are skipped; a SWOT quadrant's `cells` are its paragraphs (statids8: they were skipped too).
-      if (k === "cells" && Array.isArray(v) && v.length && v[0] && typeof v[0] === "object" && "id" in v[0]) continue;
-      allStrings(v, out);
-    }
-  return out;
+const fail = (s: string) => {
+  if (failures.length < 300) failures.push(s);
 };
 
-for (const project of (await store.listProjects()).filter((p: any) => !p.archived_at)) {
-  const run = (await store.listRuns(project.id))[0];
-  const data = await loadViewData(run, project, { setupDecision: true, judge: true });
-  // On a snapshot of live the run carries its live revision, so the saved condition groupings are read.
-  if (data) data.revision = await (await import(process.cwd() + "/src/lib/engine/run_revision.ts")).cachedRunRevision(run.id);
-  const first: any = await computeBrief(data, {});
-  // The tracker's own Brief and its first rival's (the rival panels' links are checked too).
-  const briefs: [string | undefined, any][] = [[undefined, first], ...(first.subjects?.[1] ? [[first.subjects[1], await computeBrief(data, { subject: first.subjects[1] })] as [string, any]] : [])];
-  const { view: map } = await sharedAnalysisMap(data, {});
-  const { view: summary, inputs } = await sharedBrandSummary(data, {});
-  // Stage 3: the negative control (the strict guard throws on a funnel read) and the funnel universe.
-  {
-    const st = stripFunnel(summary);
-    const throws = (f: () => unknown) => {
-      try {
-        f();
-        return false;
-      } catch (e: any) {
-        return /BRIEF_STRICT_FUNNEL/.test(e?.message ?? "");
-      }
-    };
-    if (!throws(() => (st.target as any).chosen.k) || !throws(() => (st.brands[1] as any)?.mentioned.k) || !throws(() => (st.summary as any).firmPickInCategory.k))
-      failures.push(`${project.brand}: the strict funnel guard did not throw on a stripped field (the strict run proves nothing)`);
-    // Stage 4: the verdict guard.
-    const sv = stripVerdicts(inputs, summary);
-    if (!throws(() => (st.summary as any).headToHead.length) || !throws(() => (st.summary as any).customersDoubt) || !throws(() => (sv.inputs as any).value) || !throws(() => (sv.inputs as any).doubt) || !throws(() => (sv.inputs as any).alternatives) || !throws(() => (sv.inputs as any).conditions) || !throws(() => (sv.inputs as any).away) || !throws(() => (sv.inputs as any).taught))
-      failures.push(`${project.brand}: the strict verdict guard did not throw on a stripped field (the strict run proves nothing)`);
-    else strictChecked.push(project.brand);
-    const reg0 = buildStatRegistry(map);
-    for (const b of summary.brands) {
-      const t = b.key === summary.target.key;
-      const has = t
-        ? reg0.step("chooses:open:all", "named", "you") && reg0.line("chooses:open:all", "share", "you") && reg0.line("chooses:open:all", "picked", "you")
-        : reg0.rivalStep(b.name, "named", "rival") && reg0.rivalStep(b.name, "open", "rival") && reg0.rivalStep(b.name, "picked", "rival");
-      if (!has) noFunnel.push(`${project.brand}: ${b.name}`);
-    }
-  }
-  const terms = [
-    ...summary.brands.filter((b: any) => b.key !== summary.target.key).map((b: any) => b.name),
-    ...(summary.reasonLift ?? []).map((l: any) => l.code),
-    ...(inputs.taught ?? []).map((t: any) => t.code),
-    ...data.intents.flatMap((i: any) => [i.situation, i.concern]).filter(Boolean),
-    ...(map.rivalPanels ?? []).map((r: any) => r.name),
-  ];
-  const R = linkResolver(map, terms, [...(summary.reasonLift ?? []).map((l: any) => l.code), ...(inputs.taught ?? []).map((t: any) => t.code)], conditionTerms(map));
-  const allCells = Object.keys(map.positions);
-  const reg = buildStatRegistry(map);
-  const tally = { stat: 0, matched: 0, fallback: 0, unlinked: 0, statRead: 0 };
-  per.set(project.brand, tally);
-  for (const [subj, brief] of briefs) nowStrings.set(`${project.brand}|${subj ? "rival" : "own"}`, allStrings(brief.memos));
-  let wb: any = null;
-  /** A table link: the entry exists on this run's Data page, and what its rows show (each buying situation its own row). */
-  const tableRows = (entry: string): string[] | null => {
-    wb ??= computeWorkbench(data, {});
-    const e = LIB_BY_ID.get(entry);
-    if (!e || !entryAvailable(e, wb)) return null;
-    const res = resolveSettings(entrySettings(e), wb);
-    if (!res) return null;
-    const pv = computePivot(res, wb);
-    const col = pv.cols[0];
-    return pv.rows.map((r: any) => {
-      const a = pv.cells.get(`${r.key}|${col.key}`);
-      const x = a && a.n ? a.k / a.n : 0;
-      return `${r.label} ${x > 0 && x < 0.005 ? "<1%" : `${Math.round(x * 100)}%`}`;
-    });
-  };
-  for (const [subj, brief] of briefs)
-  for (const [frame, memo] of Object.entries(brief.memos) as any[]) {
-    for (const sec of memo.sections) {
-      const units: { text: string; links?: any[]; row?: string; label?: string }[] = [];
-      const rooms = new Set(data.intents.map((i: any) => (i.situation ?? "").trim().toLowerCase()).filter(Boolean));
-      const ctxOf = (p: any) => (p.lead && rooms.has(p.lead.replace(/[.]$/, "").trim().toLowerCase()) ? p.lead.replace(/[.]$/, "") : "");
-      for (const p of sec.paras ?? []) units.push({ text: `${p.lead ?? ""} ${p.text}`, links: p.links, label: ctxOf(p) });
-      for (const q of sec.quads ?? []) for (const col of q.cells) for (const p of col) units.push({ text: `${p.lead ?? ""} ${p.text}`, links: p.links, label: ctxOf(p) });
-      for (const r of sec.rows ?? []) {
-        if (r.kind === "note") units.push({ text: r.label, row: "scoreboard note" });
-        else {
-          units.push({ text: r.value, links: r.links, row: "scoreboard / stages row", label: r.label });
-          for (const x of [r.avg, r.top]) if (x) units.push({ text: x, row: "scoreboard competitor column", label: r.label });
-        }
-      }
-      for (const r of sec.table?.rows ?? []) units.push({ text: r.slice(1).join(" | "), row: "visibility table", label: r[0] });
-      if (sec.viz) for (const it of sec.viz.items) units.push({ text: `${it.value ?? ""} ${it.bValue ?? ""}`, row: "chart label", label: `${it.label}${it.who ? ` ${it.who}` : ""}` });
-      // As brief.ts linkMemo reads them: on a rival's Brief a unit that names no one is about the rival.
-      if (subj) for (const u of units) if (u.row !== "chart label" && u.row !== "visibility table" && R.terms(u.text).length === 0) u.label = [u.label, subj].filter(Boolean).join(" ");
-      for (const u of units) {
-        const seen = new Map<string, number>();
-        for (const m of u.text.matchAll(NUMBER_TOKEN)) {
-          const token = m[0];
-          const occ = seen.get(token) ?? 0;
-          seen.set(token, occ + 1);
-          const { local, sentence } = numberContext(R, u.text, m.index!, m.index! + token.length, u.label ?? "");
-          const link = (u.links ?? []).find((l: any) => l.token === token && l.occurrence === occ);
-          const kind = kindOf(sentence, u.row);
-          const where = `${project.brand}${subj ? ` [rival ${subj}]` : ""} [${frame}/${sec.key}]`;
-          const ownB = !subj;
-          if (link?.stat) {
-            // Stage 2: linked by its stat id - exactly the registry's stat, no matching.
-            tally.stat++;
-            counts.linked++;
-            if (ownB) own.linked++;
-            const st = reg.get(link.stat);
-            const destOk = st && (st.dest.kind === "cell" ? link.dest.kind === "cell" && link.dest.id === st.dest.id : link.dest.kind === "rival" && link.dest.name === st.dest.name);
-            if (!st) failures.push(`${where} ${token} links to stat ${link.stat}, not in the registry`);
-            else if (!(st.value.match(NUMBER_TOKEN) ?? []).includes(token)) failures.push(`${where} ${token} links to ${link.stat} whose value is ${st.value}`);
-            else if (!destOk || JSON.stringify(st.reveal ?? null) !== JSON.stringify(link.reveal ?? null)) failures.push(`${where} ${token} -> ${JSON.stringify(link.dest)} ${JSON.stringify(link.reveal ?? null)} is not where ${link.stat} is shown`);
-            else if (st.at === "default") counts.def++;
-            else counts.one++;
-            if (st && ownB) {
-              if (st.at === "default") own.def++;
-              else own.one++;
-            }
-            continue;
-          }
-          if (link) {
-            if (link.dest.kind === "card" || link.dest.kind === "table") tally.fallback++;
-            else {
-              tally.matched++;
-              matchedKinds.set(kind, (matchedKinds.get(kind) ?? 0) + 1);
-              if (process.env.SHOW_MATCHED && kind.includes(process.env.SHOW_MATCHED)) console.log(`MATCHED ${where} ${token} [${u.label ?? ""}] "${sentence.slice(0, 180)}"`);
-            }
-            counts.linked++;
-            if (ownB) own.linked++;
-            if (link.dest.kind === "table") {
-              counts.table++;
-              if (ownB) own.table++;
-              const rows = tableRows(link.dest.entry);
-              if (!rows) failures.push(`${where} ${token} -> table ${link.dest.entry} is not on this run's Data page`);
-              else tables.push(`${where} ${token} in "${sentence.slice(0, 200)}" -> table "${LIB_BY_ID.get(link.dest.entry).label}": ${rows.join("; ")}${rows.some((r) => r.endsWith(` ${token}`)) ? "" : ` (the figure ${token} itself is not a row: the pivot has no "every other situation" row)`}`);
-              continue;
-            }
-            if (link.dest.kind === "card") {
-              counts.card++;
-              if (ownB) own.card++;
-              const list = fallbacks.get(kind) ?? [];
-              list.push(`${where} ${token} in "${sentence.slice(0, 220)}"`);
-              fallbacks.set(kind, list);
-              continue;
-            }
-            const dest = link.dest.kind === "cell" ? { kind: "cell" as const, id: link.dest.id } : { kind: "rival" as const, id: link.dest.name };
-            if (!R.shows(dest, token, local, sentence, link.reveal)) failures.push(`${where} ${token} -> ${dest.kind} ${dest.id}${link.reveal ? ` ${JSON.stringify(link.reveal)}` : ""} does not show it beside its subject: "${sentence.slice(0, 160)}"`);
-            else if (link.reveal) {
-              counts.one++;
-              if (ownB) own.one++;
-            } else {
-              counts.def++;
-              if (ownB) own.def++;
-            }
-          } else {
-            tally.unlinked++;
-            counts.unlinked++;
-            if (ownB) own.unlinked++;
-            const found = R.find(token, local, sentence, { cells: allCells, rivals: [] }, "anywhere");
-            if (found) {
-              counts.unlinkedHome++;
-              if (ownB) own.unlinkedHome++;
-            }
-            else homeless.push(`${where} ${kind}: ${token} in "${sentence.slice(0, 200)}"`);
-          }
-        }
-      }
-    }
-  }
-}
-
-// Stage 2: the figure log - figures in fields with no link (scoreboard competitor columns, tables, charts) read by id,
-// every stat figure's value is its registry stat's, every migrated sentence prints only stat figures (or a figure
-// with no card home, listed), and no figure without a card home goes unlisted.
-const regs = new Map<string, any>();
-const maps = new Map<string, any>();
-const needsHome = new Map<string, string[]>();
-const byField = new Map<string, any[]>();
-for (const e of FIG_LOG as any[]) {
-  const k = `${e.brand}|${e.subject ?? ""}|${e.frame}|${e.section}|${e.field}`;
-  if (!byField.has(k)) byField.set(k, []);
-  byField.get(k)!.push(e);
-  if (e.noHome) {
-    const xs = needsHome.get(e.noHome) ?? [];
-    xs.push(`${e.brand}${e.subject ? ` [rival ${e.subject}]` : ""} [${e.frame}/${e.section} ${e.field}] ${e.token} in "${e.text.slice(0, 160)}"`);
-    needsHome.set(e.noHome, xs);
-  }
-  if (e.stat && !/ (lead|text)$|row \d+ value$/.test(e.field)) per.get(e.brand)!.statRead++;
-}
-for (const project of (await store.listProjects()).filter((p: any) => !p.archived_at)) {
-  const run = (await store.listRuns(project.id))[0];
-  const data = await loadViewData(run, project, { setupDecision: true, judge: true });
-  // On a snapshot of live the run carries its live revision, so the saved condition groupings are read.
-  if (data) data.revision = await (await import(process.cwd() + "/src/lib/engine/run_revision.ts")).cachedRunRevision(run.id);
-  const { view: map } = await sharedAnalysisMap(data, {});
-  regs.set(project.brand, buildStatRegistry(map));
-  maps.set(project.brand, map);
-}
-// statids8: every name the Brief stated in a card's role (NAME_LOG) is on that card, in that role - checked against the
-// card's own object, not the Brief's reading of it.
-const nameKinds = new Map<string, number>();
+/* ------------------------------- 4. the source ------------------------------- */
 {
-  const lc = (x: string) => x.trim().toLowerCase();
-  const cellLabels = (map: any) => new Map<string, string>(map.bands.flatMap((b: any) => b.rows.flatMap((r: any) => r.cells.map((x: any) => [x.id, x.label]))));
-  const onCard = (e: any): boolean => {
-    const map = maps.get(e.brand);
-    const p = map?.positions[e.cellId];
-    const pp = p?.panel;
-    let ok = false;
-    switch (e.kind) {
-      case "wall":
-        ok = !!p?.lever && p?.notes?.wall === e.name;
-        break;
-      case "taker":
-        ok = (pp?.competitors?.rows ?? []).find((r: any) => !r.you)?.name === e.name;
-        break;
-      case "away-row":
-        ok = (pp?.conditions?.away ?? []).some((r: any) => r.text === e.name);
-        break;
-      case "away-to":
-        ok = (pp?.conditions?.away ?? []).some((r: any) => (r.to ?? []).some((t: any) => t.name === e.name));
-        break;
-      case "value-product":
-        ok = pp?.product === e.name && !pp?.byProduct;
-        break;
-      case "instead-rival":
-        ok = pp?.details?.instead?.sections?.find((x: any) => x.title === "Where it points the buyer instead")?.rows?.[0]?.label === e.name;
-        break;
-      case "checklist":
-        ok = (pp?.checklist ?? []).includes(e.name);
-        break;
-      case "checklist-against": {
-        // The What to buy card's "when it picks another" column (the tracker), or the tracker's column on the rival's own card.
-        const col = e.subject ? pp?.rivals?.find((r: any) => lc(r.name) === lc(e.subject))?.weighs?.columns?.[0] : pp?.weighsComp?.columns?.[1];
-        const crit = Object.keys(map.positions).filter((id: string) => id.startsWith("chooses:criteria:"));
-        const pooled = crit.includes("chooses:criteria:all") ? "chooses:criteria:all" : crit.length === 1 ? crit[0] : "";
-        const list: string[] = map.positions[pooled]?.panel?.checklist ?? [];
-        ok = (col?.rows ?? []).some((r: any) => lc(r.name) === lc(e.name)) && list.some((x: string) => lc(x) === lc(e.name));
-        break;
-      }
-      case "cell-label":
-        ok = cellLabels(map).get(e.cellId) === e.name;
-        break;
-    }
-    return ok;
-  };
-  const negSeen = new Set<string>();
-  for (const e of NAME_LOG as any[]) {
-    const ok = onCard(e);
-    nameKinds.set(e.kind, (nameKinds.get(e.kind) ?? 0) + 1);
-    // Negative control, once per kind: the same entry with a name the card does not draw must fail the check.
-    if (ok && !negSeen.has(e.kind)) {
-      negSeen.add(e.kind);
-      if (onCard({ ...e, name: `${e.name} (not on the card)` })) failures.push(`name check negative control: a made-up ${e.kind} name passed`);
-    }
-    if (!ok) failures.push(`${e.brand}${e.subject ? ` [rival ${e.subject}]` : ""}: the Brief names "${e.name}" (${e.kind}) from ${e.cellId}, which does not show it there`);
-  }
-}
-for (const [k, es] of byField) {
-  const reg = regs.get(es[0].brand);
-  for (const e of es) if (e.stat && !((reg.get(e.stat)?.value ?? "").match(NUMBER_TOKEN) ?? []).includes(e.token)) failures.push(`${k}: ${e.token} read from ${e.stat} = ${reg.get(e.stat)?.value ?? "(no stat)"}`);
-  // Positions of the logged figures in the field's text.
-  const text = es[0].text as string;
-  const seen = new Map<string, number>();
-  const toks = [...text.matchAll(NUMBER_TOKEN)].map((m) => {
-    const occ = seen.get(m[0]) ?? 0;
-    seen.set(m[0], occ + 1);
-    return { at: m.index!, token: m[0], fig: es.find((e) => e.token === m[0] && e.occurrence === occ) };
+  const src = fs.readFileSync(ROOT + "/src/lib/engine/brief.ts", "utf8");
+  const lines = src.split("\n");
+  const rules: [RegExp, string, RegExp?][] = [
+    [/\blinkResolver\b|\bnumberContext\b|\bR\.find\(|\bR\.shows\(|brief_links/, "a matching resolver"],
+    [/\blegacyFig\b|\bnoHome\(|\blegacyV\b|\bc\.legacy\b|brief_legacy_inputs|\bliftForBrand\b|\blegacyRoomCodes\b|\blegacyArgs\b/, "an old-source fallback"],
+    [/cardText\(|indexPanel\(|indexAcross\(|numberTokens\(/, "a number read off a card's text"],
+    [/\.match\(\/<1%\|\\d|parseFloat\(|Number\([a-z]+\.value/, "a number parsed out of text"],
+    [/\bdata\.(codes|responses|prompts)\b|\bpoolOf\(|\bbook\.rows\(|\.answers\(|\.countUnchecked\(/, "a count made over the answers"],
+    [/rf\.book\.fact\(/, "a fact counted outside factFig", /^const factFig = |^\s*const f = c\.rf\.book\.fact\(measure, subject, scope\);/],
+    [/rf\.set\.facts/, "the answer facts read outside the codebook's names", /const argCodes = \[\.\.\.new Set\(rf\.set\.facts\.flatMap\(\(f\) => f\.args \?\? \[\]\)\)\]\.sort\(\);/],
+    [/\.(mentioned|chosen|shareOfDecided|firmPickInCategory|firmPick|byMode|byEngine|headToHead|buyersDoubt|customersDoubt)\b/, "an old summary figure", /^type BriefSummary|h2h: summary\.headToHead\.map|const \{ target: _t,|FUNNEL_FIELDS = |SUMMARY_FUNNEL_FIELDS = |SUMMARY_VERDICT_FIELDS = /],
+  ];
+  lines.forEach((l, i) => {
+    if (/^\s*(\/\/|\*|\/\*\*)/.test(l) || /^const BRIEF_VERSION = /.test(l)) return;
+    for (const [re, what, ok] of rules) if (re.test(l) && !(ok && ok.test(l))) fail(`brief.ts:${i + 1} ${what}: ${l.trim().slice(0, 150)}`);
   });
-  // A migrated sentence: one that prints a card figure. Every number in it must be a figure (stat, or no card home).
-  let from = 0;
-  for (const sn of sentencesOf(text)) {
-    const at = text.indexOf(sn, from);
-    from = at + sn.length;
-    const inS = toks.filter((t) => t.at >= at && t.at < at + sn.length);
-    if (!inS.some((t) => t.fig)) continue;
-    for (const t of inS) if (!t.fig) failures.push(`${k}: ${t.token} printed without a stat id in a migrated sentence: "${sn.slice(0, 200)}"`);
-  }
-}
-// No sentence of the before dump may be absent.
-let beforeChecked = 0;
-if (process.env.BRIEF_BEFORE) {
-  const before = JSON.parse(fs.readFileSync(process.env.BRIEF_BEFORE, "utf8"));
-  for (const [brand, v] of Object.entries(before) as any) {
-    for (const which of ["own", "rival"]) {
-      const memos = which === "own" ? v.own : v.rival?.memos;
-      if (!memos) continue;
-      const now = new Set((nowStrings.get(`${brand}|${which}`) ?? []).flatMap(sentencesOf));
-      for (const sn of new Set(allStrings(memos).flatMap(sentencesOf))) {
-        beforeChecked++;
-        if (!now.has(sn)) failures.push(`${brand} [${which}]: sentence gone since the before dump: "${sn.slice(0, 200)}"`);
-      }
-    }
-  }
+  for (const f of ["brief_links.ts", "brief_legacy_inputs.ts"]) if (fs.existsSync(`${ROOT}/src/lib/engine/${f}`)) fail(`src/lib/engine/${f} still exists`);
 }
 
-console.log("STAGE 2 - per tracker: linked by stat id / linked by matching / fallback (answer card, table) / unlinked (of which read by stat id in a field with no link)");
-const tot = { stat: 0, matched: 0, fallback: 0, unlinked: 0, statRead: 0 };
-for (const [b, t] of per) {
-  console.log(`  ${b}: ${t.stat} / ${t.matched} / ${t.fallback} / ${t.unlinked} (${t.statRead})`);
-  for (const k of Object.keys(tot) as (keyof typeof tot)[]) tot[k] += t[k];
+/* ------------------------------- the briefs ------------------------------- */
+const tally = {
+  briefs: 0,
+  fields: 0,
+  numbers: 0,
+  bare: 0,
+  figures: 0,
+  recomputed: 0,
+  printWhole: 0,
+  printFine: 0,
+  links: 0,
+  linksNoFact: 0,
+  linksOk: 0,
+  linkOnView: 0,
+  linkOneReveal: 0,
+  numbersUnlinked: 0,
+  unlinkedDrawn: 0,
+  unlinkedNoCard: 0,
+  cardNumbers: 0,
+  names: 0,
+  namesBySel: 0,
+  namesByFact: 0,
+};
+const nameKinds = new Map<string, number>();
+const noCard = new Map<string, string[]>();
+const unlinkedKinds = new Map<string, number>();
+const perTracker: string[] = [];
+
+for (const project of (await store.listProjects()).filter((p: any) => !p.archived_at)) {
+  const run = (await store.listRuns(project.id))[0];
+  const data: any = await loadViewData(run, project, { setupDecision: true, judge: true });
+  data.revision = await cachedRunRevision(run.id);
+  const { view: map } = await sharedAnalysisMap(data, {});
+  const { view: summary } = await sharedBrandSummary(data, {});
+  const reg = buildStatRegistry(map);
+  const drawn = new Set(reg.all().map((s: any) => s.fact).filter(Boolean));
+
+  // The fresh book: nothing shared with the compute.
+  const set = buildAnswerFacts({ ...data }, {});
+  attachProducts(set, project.category);
+  await attachConditions(set, data, { map: false });
+  const book = factBook(set);
+  const sb = selectionBook(set, book, data);
+  const T = set.target.key;
+
+  /** A ref recomputed from its id alone: a fact, the average competitor of a selection, or a derived ref. */
+  const recompute = (ref: string): { k: number; n: number; texts: string[] } => {
+    const d = parseDerived(ref);
+    if (d) {
+      const xs = d.refs.map((r: string) => recompute(r));
+      const v = derivedValue(d.op, xs, d.arg);
+      return { k: NaN, n: NaN, texts: [printDerived(d.op, v)] };
+    }
+    if (ref.startsWith("avg(")) {
+      // "avg(<measure>)|<competitor selection id>[|<the measure's own scope when it differs>]"
+      const m = ref.slice(4, ref.indexOf(")"));
+      const rest = ref.slice(ref.indexOf(")|") + 2);
+      const i1 = rest.indexOf("|t=");
+      const i2 = rest.indexOf("|t=", i1 + 1);
+      const sel = selectionFromId(sb, i2 > 0 ? rest.slice(0, i2) : rest);
+      const scope = i2 > 0 ? scopeFromKey(rest.slice(i2 + 1)) : sel.scope;
+      const per = sel.members.map((x: any) => book.fact(m, x.key === T ? "you" : x.key, scope));
+      const a = averageCompetitor(per, m, "ruled");
+      return { k: a.k, n: a.n, texts: [printOf(MEASURE_BY_ID.get(m)!, a.k, a.n)] };
+    }
+    const { measure, subject, scope } = parseFactId(ref);
+    const f = book.fact(measure, subject, scope);
+    if (f.id !== ref) throw new Error(`recomputes under ${f.id}`);
+    return { k: f.k, n: f.n, texts: [f.text] };
+  };
+  const recomputeMemo = new Map<string, ReturnType<typeof recompute> | Error>();
+  const rc = (ref: string) => {
+    if (!recomputeMemo.has(ref)) {
+      try {
+        recomputeMemo.set(ref, recompute(ref));
+      } catch (e: any) {
+        recomputeMemo.set(ref, e);
+      }
+    }
+    return recomputeMemo.get(ref)!;
+  };
+  const tokens = (v: string) => (v.match(NUM) ?? []) as string[];
+  /** Whether a printed value is the fact's own print, or its counts printed whole / to one decimal. */
+  const printOk = (ref: string, value: string): "fact" | "whole" | "fine" | null => {
+    const r = rc(ref);
+    if (r instanceof Error) return null;
+    const v = tokens(value).join(" ");
+    if (r.texts.some((t) => tokens(t).join(" ") === v)) return "fact";
+    if (!Number.isNaN(r.k) && tokens(printWhole(r.k, r.n)).join(" ") === v) return "whole";
+    if (!Number.isNaN(r.k) && tokens(printFine(r.k, r.n)).join(" ") === v) return "fine";
+    return null;
+  };
+
+  const before = { fig: FIG_LOG.length, field: FIELD_LOG.length, name: NAME_LOG.length };
+  const first: any = await computeBrief(data, {});
+  const briefs: [string | undefined, any][] = [[undefined, first]];
+  for (const s of first.subjects.slice(1)) briefs.push([s, await computeBrief(data, { subject: s })]);
+  tally.briefs += briefs.length;
+
+  // 1. Every field: no bare number; every figure recomputes.
+  for (const e of FIELD_LOG.slice(before.field) as any[]) {
+    tally.fields++;
+    const n = tokens(e.text).length;
+    tally.numbers += n;
+    if (e.section.startsWith("card ")) tally.cardNumbers += n;
+    tally.bare += e.bare.length;
+    for (const b of e.bare) fail(`${e.brand}${e.subject ? ` [rival ${e.subject}]` : ""} [${e.frame}/${e.section} ${e.field}] ${b} printed with no fact: "${e.text.slice(0, 160)}"`);
+  }
+  for (const e of FIG_LOG.slice(before.fig) as any[]) {
+    tally.figures++;
+    const where = `${e.brand}${e.subject ? ` [rival ${e.subject}]` : ""} [${e.frame}/${e.section} ${e.field}]`;
+    const ok = printOk(e.ref, e.value);
+    const r = rc(e.ref);
+    if (r instanceof Error) fail(`${where} ${e.token}: its fact ${e.ref} cannot be recomputed: ${r.message}`);
+    else if (!ok) fail(`${where} ${e.token} (printed "${e.value}") is not its fact ${e.ref} = ${r.texts.join(" / ")} (${r.k}/${r.n})`);
+    else {
+      tally.recomputed++;
+      if (ok === "whole") tally.printWhole++;
+      if (ok === "fine") tally.printFine++;
+    }
+    if (e.stat) {
+      const st = reg.get(e.stat);
+      if (!st || st.fact !== e.ref) fail(`${where} ${e.token} was printed from card stat ${e.stat}, which draws ${st?.fact ?? "(no stat)"} - not ${e.ref}`);
+    }
+    // Every figure in a field with no links, or a sentence figure not linked: is its fact drawn on some card?
+    if (!drawn.has(e.ref)) {
+      const kind = parseDerived(e.ref) ? `a derived figure (${parseDerived(e.ref)!.op})` : parseFactId(e.ref).measure;
+      const xs = noCard.get(kind) ?? [];
+      xs.push(`${where} ${e.value} = ${e.ref.slice(0, 120)}  in "${e.text.slice(0, 140)}"`);
+      noCard.set(kind, xs);
+    }
+  }
+
+  // 2. Links.
+  const figsOf = (subj: string | undefined) => (FIG_LOG.slice(before.fig) as any[]).filter((e) => (e.subject ?? undefined) === subj);
+  for (const [subj, brief] of briefs) {
+    const figs = figsOf(subj);
+    for (const [frame, memo] of Object.entries(brief.memos) as any[]) {
+      for (const sec of memo.sections) {
+        const units: { text: string; links?: any[] }[] = [];
+        for (const p of sec.paras ?? []) units.push({ text: `${p.lead ?? ""} ${p.text}`, links: p.links });
+        for (const q of sec.quads ?? []) for (const col of q.cells) for (const p of col) units.push({ text: `${p.lead ?? ""} ${p.text}`, links: p.links });
+        for (const r of sec.rows ?? []) units.push({ text: r.kind === "note" ? r.label : r.value, links: r.links });
+        for (const u of units) {
+          const nums = tokens(u.text).length;
+          const lk = u.links ?? [];
+          tally.numbersUnlinked += nums - lk.length;
+          for (const l of lk) {
+            tally.links++;
+            const where = `${project.brand}${subj ? ` [rival ${subj}]` : ""} [${frame}/${sec.key}] ${l.token}`;
+            if (!l.fact) {
+              tally.linksNoFact++;
+              fail(`${where} is linked with no fact (matched)`);
+              continue;
+            }
+            const st = reg.get(l.stat);
+            const destOk = st && (st.dest.kind === "cell" ? l.dest.kind === "cell" && l.dest.id === st.dest.id : l.dest.kind === "rival" && l.dest.name === st.dest.name);
+            if (!st) fail(`${where} opens ${l.stat}, no card location`);
+            else if (st.fact !== l.fact) fail(`${where} opens ${l.stat}, which draws ${st.fact} - not its fact ${l.fact}`);
+            else if (!destOk || JSON.stringify(st.reveal ?? null) !== JSON.stringify(l.reveal ?? null)) fail(`${where} -> ${JSON.stringify(l.dest)} ${JSON.stringify(l.reveal ?? null)} is not where ${l.stat} is drawn`);
+            else if (!printOk(l.fact, l.token)) fail(`${where} does not recompute from its fact ${l.fact}`);
+            else if (!figs.some((e) => e.frame === frame && e.section === sec.key && e.ref === l.fact && e.token === l.token)) fail(`${where}: no figure of its unit carries its fact ${l.fact}`);
+            else {
+              tally.linksOk++;
+              if (st.at === "default") tally.linkOnView++;
+              else tally.linkOneReveal++;
+            }
+          }
+        }
+      }
+    }
+  }
+  // Numbers that carry a fact and no link: drawn somewhere (a field that never links - tables, charts, competitor
+  // columns, headings) or on no card at all.
+  for (const e of FIG_LOG.slice(before.fig) as any[]) {
+    const linkField = / (lead|text)$|^row \d+ (value|note)$/.test(e.field) && !e.section.startsWith("card ");
+    if (linkField) continue;
+    const kind = e.section.startsWith("card ") ? "answer card" : e.field.replace(/\d+/g, "#");
+    unlinkedKinds.set(kind, (unlinkedKinds.get(kind) ?? 0) + 1);
+    if (drawn.has(e.ref)) tally.unlinkedDrawn++;
+    else tally.unlinkedNoCard++;
+  }
+
+  // 3. Names.
+  const nameOfKey = (k: string) => (k === T ? set.target.name : set.nameOf(k));
+  const seenName = new Set<string>();
+  for (const e of NAME_LOG.slice(before.name) as any[]) {
+    const nk = `${e.subject ?? ""}|${e.kind}|${e.name}|${e.sel ?? e.key ?? ""}|${e.cellId}`;
+    if (seenName.has(nk)) continue;
+    seenName.add(nk);
+    tally.names++;
+    nameKinds.set(e.kind, (nameKinds.get(e.kind) ?? 0) + 1);
+    const where = `${e.brand}${e.subject ? ` [rival ${e.subject}]` : ""} ${e.kind} "${e.name}" (${e.cellId || "-"})`;
+    if (e.sel) {
+      let sel: any;
+      try {
+        sel = selectionFromId(sb, e.sel);
+      } catch (x: any) {
+        fail(`${where}: its selection ${e.sel} cannot be recomputed: ${x.message}`);
+        continue;
+      }
+      const lc = (x: string) => String(x ?? "").trim().toLowerCase();
+      const hit = (sel.members as any[]).some((m) =>
+        Array.isArray(m.codes)
+          ? m.codes.some((x: any) => lc(x.code) === lc(e.key ?? e.name))
+          : lc(m.key) === lc(e.key ?? "\u0000") || lc(m.name) === lc(e.name) || lc(m.label) === lc(e.name) || lc(m.key) === lc(e.name) || (m.key && lc(nameOfKey(m.key)) === lc(e.name))
+      ) || (e.kind === "visibility-folded" && (sel.extras?.folded ?? []).some((m: any) => m.key === e.key));
+      if (!hit) fail(`${where} is not a member of its selection ${e.sel} [${(sel.members as any[]).slice(0, 8).map((m: any) => m.name ?? m.label ?? (m.codes ?? []).map((x: any) => x.code).join("+")).join(", ")}]`);
+      else tally.namesBySel++;
+      continue;
+    }
+    if (e.key && e.kind === "away-to") {
+      if (lc0(nameOfKey(e.key)) !== lc0(e.name) && lc0(summary.brands.find((b: any) => b.key === e.key)?.name ?? "") !== lc0(e.name)) fail(`${where}: its fact names ${nameOfKey(e.key)}`);
+      else tally.namesByFact++;
+      continue;
+    }
+    if (e.key && e.kind === "cell-label") {
+      const { scope } = parseFactId(e.key);
+      const names = [scope.worry, scope.situation, scope.rival ? nameOfKey(scope.rival) : undefined, scope.rival ? summary.brands.find((b: any) => b.key === scope.rival)?.name : undefined].filter(Boolean).map(lc0);
+      if (!names.includes(lc0(e.name))) fail(`${where}: the cell's own scope names ${names.join(" / ") || "(no subject)"}`);
+      else tally.namesByFact++;
+      continue;
+    }
+    fail(`${where} carries no selection and no fact`);
+  }
+  perTracker.push(`${project.brand}: ${briefs.length} Briefs`);
+  // The strict guard's negative control: a read of a stripped funnel field throws (so the strict run proves no funnel
+  // path read the old summary).
+  try {
+    void (stripFunnel(summary).target as any).chosen.k;
+    fail(`${project.brand}: the strict funnel guard did not throw on a stripped field`);
+  } catch (e: any) {
+    if (!/BRIEF_STRICT_FUNNEL/.test(e?.message ?? "")) fail(`${project.brand}: the strict funnel guard threw the wrong error: ${e?.message}`);
+  }
 }
-console.log(`  TOTAL: ${tot.stat} / ${tot.matched} / ${tot.fallback} / ${tot.unlinked} (${tot.statRead})`);
-console.log("STILL MATCHED, by kind (stage 3 scope):");
-for (const [k, n] of [...matchedKinds.entries()].sort((a, b) => b[1] - a[1])) console.log(`  ${k}: ${n}`);
-// The visibility chart's level line is the chart's own reference line - on no card by design (Tyler, 2026-11-17).
-const byDesign = [...needsHome.keys()].filter((k) => /no card by design/.test(k));
-const chartLines = byDesign.reduce((a, k) => a + needsHome.get(k)!.length, 0);
-for (const k of byDesign) needsHome.delete(k);
-console.log(`ON NO CARD BY DESIGN (the visibility chart's reference line): ${chartLines}`);
-console.log(`NEEDS A CARD HOME (printed as before, no card shows it): ${[...needsHome.values()].reduce((a, x) => a + x.length, 0)}`);
-if ([...needsHome.values()].some((x) => x.length)) failures.push(`${[...needsHome.values()].reduce((a, x) => a + x.length, 0)} figures are printed with no card home`);
-for (const [k, xs] of needsHome) {
-  console.log(`  ${k}: ${xs.length}`);
-  for (const x of xs) console.log(`    - ${x}`);
+function lc0(x: string) {
+  return String(x ?? "").trim().toLowerCase();
 }
-if (process.env.BRIEF_BEFORE) console.log(`BEFORE DUMP: ${beforeChecked} sentences checked`);
+
+console.log(`BRIEFS: ${tally.briefs} (${perTracker.join("; ")}), six frames each, own and every rival subject`);
 console.log("");
-console.log(`LINKED ${counts.linked}: on view where the link lands ${counts.def}, behind the one interaction the link opens ${counts.one}, a Data page table ${counts.table}, Brief answer card (no home) ${counts.card}`);
-console.log(`UNLINKED ${counts.unlinked}: on some card or By rival card ${counts.unlinkedHome}, nowhere ${homeless.length}`);
-console.log(`(tracker's own Brief only: linked ${own.linked} = ${own.def} on view + ${own.one} one interaction + ${own.table} table + ${own.card} answer card; unlinked ${own.unlinked}, ${own.unlinkedHome} on a card, ${own.unlinked - own.unlinkedHome} nowhere)`);
-console.log(`\nLINKED TO A DATA PAGE TABLE: ${tables.length}`);
-for (const x of tables) console.log(`  - ${x}`);
-console.log("\nFALLBACKS TO THE BRIEF'S ANSWER CARD, by kind:");
-for (const [k, xs] of [...fallbacks.entries()].sort((a, b) => b[1].length - a[1].length)) {
+console.log(`1. NUMBERS - number tokens in every field of every memo and answer card: ${tally.numbers} (${tally.cardNumbers} of them in answer cards), over ${tally.fields} fields`);
+console.log(`   printed with no fact: ${tally.bare}`);
+console.log(`   figures (a number with its fact id): ${tally.figures}; recomputed from the id alone to the text printed: ${tally.recomputed} (${tally.printWhole} printed whole and ${tally.printFine} to one decimal as their card draws them, the rest the measure's own print)`);
+console.log(`2. LINKS - linked numbers: ${tally.links}; linked with no fact (matching): ${tally.linksNoFact}; open a card location that draws the same fact: ${tally.linksOk} (${tally.linkOnView} on view, ${tally.linkOneReveal} behind the one reveal the link carries)`);
+console.log(`   numbers in linkable sentences and rows left unlinked: ${tally.numbersUnlinked}`);
+console.log(`   figures in fields that never link (tables, charts, competitor columns, headings, answer cards): ${tally.unlinkedDrawn + tally.unlinkedNoCard} - drawn on some card ${tally.unlinkedDrawn}, on no card ${tally.unlinkedNoCard}`);
+for (const [k, n] of [...unlinkedKinds.entries()].sort((a, b) => b[1] - a[1])) console.log(`     ${k}: ${n}`);
+console.log(`3. NAMES - names the Brief states in a card's or selection's role: ${tally.names}; members of their recomputed selection: ${tally.namesBySel}; the subject of their own fact: ${tally.namesByFact}`);
+console.log(`   by kind: ${[...nameKinds.entries()].sort((a, b) => b[1] - a[1]).map(([k, n]) => `${k} ${n}`).join(", ")}`);
+console.log(`\nFIGURES WHOSE FACT NO CARD DRAWS (printed from the fact, never linked), by measure: ${[...noCard.values()].reduce((a, x) => a + x.length, 0)}`);
+for (const [k, xs] of [...noCard.entries()].sort((a, b) => b[1].length - a[1].length)) {
   console.log(`  ${k}: ${xs.length}`);
-  for (const x of xs) console.log(`    - ${x}`);
+  for (const x of xs.slice(0, process.env.SHOW_ALL ? 999 : 4)) console.log(`    - ${x}`);
 }
-console.log(`\nUNLINKED FIGURES ON NO CARD: ${homeless.length}`);
-for (const x of homeless) console.log(`  - ${x}`);
-// bf35: Map claims a move quoted that lost a clause (a number no card shows) or were dropped whole.
-const trimmed = new Map<string, { brand: string; cellId: string; claim: string; kept: string }>();
-for (const t of TRIMMED_CLAIMS) trimmed.set(`${t.brand}|${t.claim}`, t);
-console.log(`\nMAP CLAIMS A MOVE QUOTES THAT LOST A CLAUSE: ${trimmed.size}`);
+const trimmed = new Map<string, any>();
+for (const t of TRIMMED_CLAIMS as any[]) trimmed.set(`${t.brand}|${t.claim}`, t);
+console.log(`\nMAP CLAIMS A MOVE QUOTES THAT LOST A CLAUSE (a number whose fact no card draws): ${trimmed.size}`);
 for (const t of trimmed.values()) console.log(`  - ${t.brand} [${t.cellId}]\n      was:  ${t.claim}\n      now:  ${t.kept || "(dropped whole)"}`);
-console.log(`\nStage 3-5 (funnel, verdict, condition and argument decisions): every Brief above computed STRICT (a funnel, verdict, condition or argument read of the old source throws); guard negative controls passed on ${strictChecked.length} trackers.`);
-console.log(`statids8 - names the Brief states, each checked on the card it is read from: ${[...nameKinds.entries()].map(([k, n]) => `${k} ${n}`).join(", ")}`);
-console.log(`Summary brands with no funnel on any card (left out of every funnel decision): ${noFunnel.length ? noFunnel.join("; ") : "none"}`);
 for (const f of failures) console.log(`FAIL ${f}`);
-console.log(failures.length ? `\n${failures.length} FAIL` : "\nALL PASS - every linked number opens a card that shows it beside its subject, or the Brief's own card");
+console.log(failures.length ? `\n${failures.length} FAIL` : "\nALL PASS - every Brief number is a fact recomputed from its id, every link opens a card that draws that fact, every name is a member of its selection");
 process.exit(failures.length ? 1 : 0);

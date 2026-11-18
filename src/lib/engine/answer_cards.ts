@@ -1,15 +1,15 @@
-import type { AnswerCard } from "./brief_types";
 import type { BrandSummaryView, SummaryBrand } from "./brand_summary";
-import { awaySpecifics, destOf, destPhrase, pctFine, type InsightInputs } from "./summary_insights";
+import { pctFine, type InsightInputs } from "./summary_insights";
 import { cell, poolOf, type RateCell, type ViewData, type ViewRequest } from "./view_data";
-import type { Position } from "./analysis_types";
 import { buildResolver } from "./brand_resolve";
-import { liftForBrand } from "./brief_legacy_inputs";
 import { productNoun } from "./summary_insights";
-import { isDefaultCondition } from "./condition_groups";
 
 /**
- * The answer cards (2026-11-07, the owner's ratified shape -
+ * The brand dossiers' row helpers (dossiers.ts). Fact layer step 5, part 2: the Brief no longer builds brand, assistants
+ * or condition answer cards (every Brief number links by its fact id to the card that draws it); what is left here is
+ * what the dossiers read, unchanged - including liftForBrand, moved here from the retired brief_legacy_inputs.ts.
+ *
+ * Origin (2026-11-07, the owner's ratified shape -
  * public/_position_panel_options.html tab 4). Every brief pin opens one small
  * card that answers ONE question; the citation contract (every visible number
  * in a paragraph or row is stated by one of its pins' cards) is checked
@@ -39,9 +39,8 @@ const pct = (c: RateCell) => pctOf(rate(c));
 const tipC = (c: RateCell) => `${c.k} of ${c.n}`;
 export const signedPts = (x: number) => `${x >= 0 ? "+" : "-"}${Math.round(Math.abs(x) * 100)} points`;
 const listVal = (xs: string[]) => xs.join(" · ");
-const poss = (name: string) => `${name}'s`;
 const conv = (b: { chosen: RateCell; recommended: RateCell }) => (b.recommended.k > 0 ? b.chosen.k / b.recommended.k : 0);
-type Row = AnswerCard["rows"][number];
+type Row = { label: string; value: string; tip?: string };
 const F = (label: string, c: RateCell, value = pct(c)): Row => ({ label, value, tip: tipC(c) });
 
 /** A card read at the same floor as the map's sides (MIN_SIDE). */
@@ -54,51 +53,6 @@ export type Lift = { code: string; wins: RateCell; others: RateCell; lift: numbe
 /** One lift line - shared with the map's open-choice cell (am10). */
 export function liftLine(l: Lift): string {
   return `${l.code}: ${pct(l.wins)} of its picks, ${pct(l.others)} of other picks (${signedPts(l.lift)})`;
-}
-
-/** Everything a card's text states, as one string (RULE 1 and the harness read this). */
-export function cardText(card: AnswerCard): string {
-  return [
-    card.crumb,
-    card.headline,
-    ...card.rows.flatMap((r) => [r.label, r.value]),
-    ...(card.lifts ?? []).flatMap((l) => [l.label, l.wins ?? "", l.others ?? "", liftPoints(l.value)]),
-  ].join(" \n ");
-}
-
-/** A lift entry's signed points as the briefs print them ("+30 points"). */
-export const liftPoints = (v: number) => `${v >= 0 ? "+" : "-"}${Math.abs(Math.round(v))} points`;
-
-/* ---------------------------------- keys ---------------------------------- */
-
-export const BRAND_CARD = (key: string) => `card:brand:${key}`;
-export const ENGINES_CARD = "card:engines";
-export const CONDITION_CARD = "card:conditions";
-
-/* ---------------------------------- cell ---------------------------------- */
-
-/** A map cell's own story: the position's claim, its (slimmed) figures and -
- * bf17 - its arguments, drawn as the map panel draws them (bars + shares). */
-export function cellCard(p: Position): AnswerCard {
-  return {
-    kind: "cell",
-    crumb: p.where,
-    headline: p.claim,
-    rows: (p.figures ?? []).map((f) => ({ label: f.label, value: f.value, ...(f.tip ? { tip: f.tip } : {}) })),
-    ...(p.lifts.length
-      ? {
-          lifts: p.lifts.map((l) => ({
-            label: l.label,
-            value: l.value,
-            ...(l.wins ? { wins: l.wins } : {}),
-            ...(l.others ? { others: l.others } : {}),
-            ...(l.tip ? { tip: l.tip } : {}),
-          })),
-          ...(p.liftSides ? { liftSides: p.liftSides } : {}),
-        }
-      : {}),
-    go: { label: "Open this contest on the map", target: "map", cellId: p.cellId },
-  };
 }
 
 /* ---------------------------------- brand --------------------------------- */
@@ -227,281 +181,32 @@ export function brandHeadline(name: string, b: SummaryBrand): string {
   return `${name} is named in ${pct(b.mentioned)} of answers and takes ${pct(b.shareOfDecided)} of the picks - it turns ${pctOf(conv(b))} of its recommendations into picks.`;
 }
 
-/** One brand's open buying questions: the funnel, where its picks come from,
- * its arguments and the assistant that supplies them. The target's card also
- * carries its picks by buying situation. Null for a brand not in the table.
- * `go` is the caller's (it knows the map and the dossier set); without one
- * the card falls back to Build a table. */
-export function brandCard(src: CardSources, key: string, go: NonNullable<AnswerCard["go"]> = BUILD_A_TABLE): AnswerCard | null {
-  const s = src.summary;
-  const isTarget = key === s.target.key;
-  const b: SummaryBrand | undefined = isTarget ? s.target : s.brands.find((x) => x.key === key);
-  if (!b) return null;
-  const name = isTarget ? src.brand : b.name;
-  const f = funnelRows(b);
-  const rows: Row[] = [f.named, f.recommended, f.share, f.picked, f.converts];
-  // Where its picks come from, by question type.
-  const from = picksFromRow(src, key);
-  if (from) rows.push(from);
-  // The target: its picks by buying situation, the rest, and each situation's share.
-  const inputs = src.inputs;
-  if (isTarget && b.chosen.k > 0 && inputs.rooms.length >= 2) {
-    const tot = b.chosen.k;
-    const rs = [...inputs.rooms].sort((a, c) => c.picks - a.picks || a.room.localeCompare(c.room));
-    rows.push({ label: "Its picks by buying situation", value: listVal(rs.filter((r) => r.picks > 0).map((r) => `${r.room} ${pctOf(r.picks / tot)}`)), tip: rs.map((r) => `${r.room} ${r.picks}`).join(", ") + ` of ${tot}` });
-    const top = rs[0];
-    rows.push(F(`Share of picks outside ${top.room}`, cell(tot - top.picks, Math.max(0, s.firmPickInCategory.k - top.firm))));
-    for (const r of rs) if (r.firm > 0) rows.push(F(`Share of picks for ${r.room}`, r.decided));
-  }
-  // One question's share of its picks.
-  const tq = topQuestionRow(src, key);
-  if (tq) rows.push(tq);
-  // The arguments that travel with its picks.
-  const ends = liftEnds(src, key);
-  if (ends) {
-    rows.push({ label: "The argument it wins on", value: liftLine(ends.win), tip: `${tipC(ends.win.wins)} picks; ${tipC(ends.win.others)} other picks` });
-    if (ends.lose) rows.push({ label: "The argument it loses on", value: liftLine(ends.lose), tip: `${tipC(ends.lose.wins)} picks; ${tipC(ends.lose.others)} other picks` });
-  }
-  const sup = supplyLine(s, inputs, key);
-  if (sup) rows.push(sup);
-  return {
-    kind: "brand",
-    crumb: `${name} · open buying questions`,
-    headline: brandHeadline(name, b),
-    rows,
-    go,
-  };
-}
-
-/** The go-deeper fallback when no more specific surface exists. */
-export const BUILD_A_TABLE: NonNullable<AnswerCard["go"]> = { label: "Open in Build a table", target: "metrics" };
-
-/* --------------------------------- engines -------------------------------- */
-
-/** The assistants: the target's share of picks and how often the AI commits,
- * by mode, company and assistant. Null when fewer than two engines decide. */
-export function enginesCard(src: CardSources): AnswerCard | null {
-  const s = src.summary;
-  const brand = src.brand;
-  const eng1 = s.byEngine.filter((e) => e.decided.n > 0);
-  if (eng1.length < 2) return null;
-  const rows: Row[] = [];
-  const modes = (["search", "instinct"] as const).map((m) => {
-    const list = s.byEngine.filter((e) => e.mode === m);
-    const answers = list.reduce((x, e) => x + e.answers, 0);
-    const firm = list.reduce((x, e) => x + e.decided.n, 0);
-    const won = list.reduce((x, e) => x + e.decided.k, 0);
-    return { m, firm: cell(firm, answers), decided: cell(won, firm) };
+/* The dossiers' per-brand argument lift (moved from brief_legacy_inputs.ts, unchanged): over the open-choice pool.
+ * Share of answers arguing each code when `key` is picked vs when another in-category brand is, over the headline pool
+ * (brand_summary's lift, for any brand). */
+export function liftForBrand(data: ViewData, request: ViewRequest, key: string): { code: string; wins: RateCell; others: RateCell; lift: number }[] {
+  const resolve = buildResolver(data.dictionary, data.judged);
+  const rows = poolOf(data, "headline", request).rows;
+  const facts = rows.map(({ code }) => {
+    let pick: string | null = null;
+    if (code.outcome === "pick" && code.top_pick) {
+      const r = resolve(code.top_pick);
+      if (r.status === "active") pick = r.key;
+    }
+    return { pick, reasons: code.reasons };
   });
-  const both = modes.every((x) => x.firm.n > 0);
-  if (both) {
-    rows.push({ label: "The AI commits to a pick, with / without web search", value: `${pct(modes[0].firm)} / ${pct(modes[1].firm)}`, tip: `${tipC(modes[0].firm)} / ${tipC(modes[1].firm)}` });
-    rows.push({ label: "Its share of picks, with / without web search", value: `${pct(modes[0].decided)} / ${pct(modes[1].decided)}`, tip: `${tipC(modes[0].decided)} / ${tipC(modes[1].decided)}` });
-  }
-  const se = s.byMode.find((m) => m.key === "search");
-  const ins = s.byMode.find((m) => m.key === "instinct");
-  if (se && ins && se.decided.n > 0 && ins.decided.n > 0) {
-    const v = `${pct(se.decided)} / ${pct(ins.decided)}`;
-    if (!rows.some((r) => r.value === v)) rows.push({ label: "Its share of picks by mode, with / without web search", value: v });
-  }
-  if (se && ins && se.h2h.n > 0 && ins.h2h.n > 0) rows.push({ label: "Direct matchups won, with / without web search", value: `${pct(se.h2h)} / ${pct(ins.h2h)}`, tip: `${tipC(se.h2h)} / ${tipC(ins.h2h)}` });
-  const vend = new Map<string, { k: number; n: number }>();
-  for (const e of s.byEngine) {
-    const t = vend.get(e.vendor) ?? { k: 0, n: 0 };
-    t.k += e.decided.k;
-    t.n += e.decided.n;
-    vend.set(e.vendor, t);
-  }
-  if (vend.size >= 2) rows.push({ label: "Its share of picks, by company", value: listVal([...vend.entries()].map(([v, t]) => `${v} ${pct(cell(t.k, t.n))}`)) });
-  rows.push({ label: "Its share of picks, by assistant", value: listVal(eng1.map((e) => `${e.label} ${pct(e.decided)}`)) });
-  let headline: string;
-  if (both) {
-    const [a, b] = modes;
-    const gap = Math.abs(rate(a.decided) - rate(b.decided));
-    headline = `With web search the AI commits to one ${src.product} in ${pct(a.firm)} of answers, without in ${pct(b.firm)} - ${poss(brand)} share of those picks ${gap < 0.05 ? "barely moves" : `is ${pct(a.decided)} with and ${pct(b.decided)} without`}.`;
-  } else {
-    const sorted = [...eng1].sort((x, y) => rate(y.decided) - rate(x.decided));
-    headline = `${poss(brand)} share of picks runs from ${pct(sorted[0].decided)} on ${sorted[0].label} to ${pct(sorted[sorted.length - 1].decided)} on ${sorted[sorted.length - 1].label}.`;
-  }
-  // The target's by-engine table sits on Stations' default open (Consideration's
-  // full tables: "<brand> by engine", the shared EngineTable with its grouping).
-  return { kind: "engines", crumb: `${brand} · by assistant`, headline, rows, go: { label: "See it by assistant under Stations", target: "journey" } };
-}
-
-/* -------------------------------- condition ------------------------------- */
-
-/** What routes buyers away: the run's away condition groups (where each
- * sends buyers), the biggest reason toward each side, and the blocker brand's
- * share of picks. Null when the run carries no condition groups.
- *
- * 2026-11-08 (the owner's ruling): worded as reasons to leave / pick you, and
- * a default-shaped branch ("otherwise" - isDefaultCondition) leaves the list
- * for one default row. A default group the brief cites (the detector's top
- * group or its wall, or a "biggest" branch) stays where it is cited - its
- * number must remain stated - and only its label is restyled.
- *
- * 2026-11-10 (am15, the plain-wording pass): "reason" / "routes" give way to
- * what sends buyers away and what brings them to you; numbers unchanged. */
-export function conditionCard(src: CardSources, openCellId?: string): AnswerCard | null {
-  const s = src.summary;
-  const brand = src.brand;
-  const k = src.inputs.conditions;
-  const a = src.inputs.away;
-  if (k?.awayThemed || k?.towardThemed) return conditionCardThemed(src, openCellId);
-  const rows: Row[] = [];
-  const shown = new Set<string>();
-  if (a && a.cells > 0) {
-    // Largest share first (the groups arrive ranked by answers).
-    for (const g of [...a.groups].sort((x, y) => y.cells - x.cells || x.label.localeCompare(y.label))) {
-      const cited = g === a.groups[0] || g.wall;
-      if (isDefaultCondition(g.label) && !cited) continue;
-      shown.add(`away:${g.label}`);
-      rows.push({
-        label: isDefaultCondition(g.label) ? "The default away from you - when no stated condition applies" : `Sends buyers away: "${g.label.slice(0, 60)}"`,
-        value: `${pctOf(g.cells / a.cells)}${g.routes[0] ? ` → ${g.routes[0].name}` : ""}`,
-        tip: `${g.cells} of ${a.cells} questions where the AI gives a condition that sends buyers away`,
-      });
-    }
-  }
-  if (k) {
-    const big = (g: { label: string }, plain: string, dflt: string) => (isDefaultCondition(g.label) ? dflt : plain);
-    if (k.toward[0] && k.towardCells) {
-      shown.add(`you:${k.toward[0].label}`);
-      rows.push({ label: big(k.toward[0], "What most often brings buyers to you", "The default toward you - when no stated condition applies"), value: `${pctOf(k.toward[0].cells / k.towardCells)} - "${k.toward[0].label}"`, tip: `${k.toward[0].cells} of ${k.towardCells} questions where the AI gives any condition that sends buyers to it` });
-    }
-    if (k.away[0] && k.awayCells) {
-      shown.add(`away:${k.away[0].label}`);
-      rows.push({ label: big(k.away[0], "What most often sends buyers away", "The default away from you - when no stated condition applies"), value: `${pctOf(k.away[0].cells / k.awayCells)} - "${k.away[0].label}"`, tip: `${k.away[0].cells} of ${k.awayCells} questions where the AI gives any condition that sends buyers away` });
-    }
-    const seen = new Set<string>();
-    for (const g of k.away) {
-      const to = g.routes[0]?.name;
-      if (!to || seen.has(to) || !k.awayCells) continue;
-      seen.add(to);
-      // The top condition away is already its own row.
-      if (g === k.away[0]) continue;
-      shown.add(`away:${g.label}`);
-      rows.push({ label: big(g, `What most often sends buyers to ${to}`, `The default pointing to ${to} - when no stated condition applies`), value: `${pctOf(g.cells / k.awayCells)} - "${g.label}"`, tip: `${g.cells} of ${k.awayCells} questions where the AI gives any condition that sends buyers away` });
-    }
-    // The default branches: one row per side, unless a cited row above already shows it.
-    const defs = (k.defaults ?? []).filter((d) => d.routes[0] && !shown.has(`${d.side}:${d.label}`));
-    for (const d of defs)
-      rows.push({
-        label: defs.length > 1 ? `The default ${d.side === "you" ? "toward you" : "away from you"} - when no stated condition applies` : "The default - when no stated condition applies",
-        value: `→ ${d.routes[0].name}`,
-      });
-  }
-  const g = a?.groups[0];
-  if (g?.names) {
-    const b = s.brands.find((x) => x.key === g.names!.key);
-    rows.push(F(`${g.names.name}'s share of picks`, b ? b.shareOfDecided : cell(0, s.firmPickInCategory.k)));
-  }
-  if (!rows.length) return null;
-  // The headline names the most common STATED condition - a default branch is not one.
-  const top = a?.groups.find((x) => !isDefaultCondition(x.label)) ?? k?.away.find((x) => !isDefaultCondition(x.label)) ?? null;
-  const headline = top
-    ? `When the AI sends buyers away from ${brand}, the most common condition is "${top.label}"${top.routes[0] ? ` - it points them to ${top.routes[0].name}` : ""}.`
-    : `The AI rarely names one winner for every buyer - these are the conditions that decide it.`;
-  return {
-    kind: "condition",
-    crumb: "What sends buyers away",
-    headline,
-    rows,
-    ...(openCellId ? { go: { label: "See every condition", target: "map" as const, cellId: openCellId } } : {}),
-  };
-}
-
-/** bs21 (2026-11-13, one counting rule): the condition card when the run has
- * reason themes. A themed side lists its themes at ANSWER grain (distinct
- * answers stating any of a theme's wordings over the distinct answers stating
- * any listed condition on that side - question grain saturates, every
- * assistant answers each question); a side without a theme map keeps the raw
- * groups at question grain. The headline names the lead away theme and quotes
- * its most-stated wording - the away_condition finding pinned to this card -
- * and the named specific situations it states (a blocker brand, a fixed
- * situation, each ONE raw wording: awaySpecifics) get their own rows on the
- * same answer base, so the card states every number the finding does. */
-function conditionCardThemed(src: CardSources, openCellId?: string): AnswerCard | null {
-  const s = src.summary;
-  const brand = src.brand;
-  const k = src.inputs.conditions!;
-  const a = src.inputs.away;
-  const rows: Row[] = [];
-  const shown = new Set<string>();
-  const awayBase = k.awayThemed ? k.awayBase ?? 0 : 0;
-  const towardBase = k.towardThemed ? k.towardBase ?? 0 : 0;
-  const awayTip = (n: number) => `${n} of ${awayBase} answers that give a condition for choosing someone else`;
-  if (k.awayThemed && awayBase > 0) {
-    for (const t of k.away) {
-      if (!t.answers) continue;
-      shown.add(`away:${t.label}`);
-      rows.push({
-        label: `Sends buyers away: "${t.label.slice(0, 60)}"`,
-        value: `${pctOf(t.answers / awayBase)}${destOf(t.routes, t.answers) ? ` → ${destOf(t.routes, t.answers)!.names.join(", ")}` : ""}`,
-        tip: awayTip(t.answers),
-      });
-    }
-  } else if (a && a.cells > 0) {
-    // This side has no theme map: the raw groups at question grain, as the keyless card.
-    for (const g of [...a.groups].sort((x, y) => y.cells - x.cells || x.label.localeCompare(y.label))) {
-      const cited = g === a.groups[0] || g.wall;
-      if (isDefaultCondition(g.label) && !cited) continue;
-      shown.add(`away:${g.label}`);
-      rows.push({
-        label: isDefaultCondition(g.label) ? "The default away from you - when no stated condition applies" : `Sends buyers away: "${g.label.slice(0, 60)}"`,
-        value: `${pctOf(g.cells / a.cells)}${g.routes[0] ? ` → ${g.routes[0].name}` : ""}`,
-        tip: `${g.cells} of ${a.cells} questions where the AI gives a condition that sends buyers away`,
-      });
-    }
-  }
-  // The finding's specific situations, each on one wording, over the lead's answer base.
-  const lead = a?.lead;
-  if (a && lead && lead.base > 0) {
-    const sp = awaySpecifics(s, a);
-    if (sp.blocker) {
-      const g = sp.blocker.group;
-      rows.push({ label: `A wording that names ${g.names!.name}: "${g.label.slice(0, 60)}"`, value: pctOf(g.answers / lead.base), tip: `${g.answers} of ${lead.base} answers that give a condition for choosing someone else` });
-      rows.push(F(`${g.names!.name}'s share of picks`, sp.blocker.share));
-    }
-    if (sp.fixed) {
-      const g = sp.fixed;
-      rows.push({ label: `A situation the buyer is already in: "${g.label.slice(0, 60)}"`, value: pctOf(g.answers / lead.base), tip: `${g.answers} of ${lead.base} answers that give a condition for choosing someone else` });
-    }
-  }
-  const t0 = k.toward[0];
-  if (t0) {
-    if (k.towardThemed && towardBase > 0 && t0.answers) {
-      shown.add(`you:${t0.label}`);
-      rows.push({ label: "What most often brings buyers to you", value: `${pctOf(t0.answers / towardBase)} - "${t0.label}"`, tip: `${t0.answers} of ${towardBase} answers that give a condition for choosing ${brand}` });
-    } else if (!k.towardThemed && k.towardCells) {
-      shown.add(`you:${t0.label}`);
-      rows.push({ label: isDefaultCondition(t0.label) ? "The default toward you - when no stated condition applies" : "What most often brings buyers to you", value: `${pctOf(t0.cells / k.towardCells)} - "${t0.label}"`, tip: `${t0.cells} of ${k.towardCells} questions where the AI gives any condition that sends buyers to it` });
-    }
-  }
-  // The default branches: one row per side, unless a row above already shows it.
-  const defs = (k.defaults ?? []).filter((d) => d.routes[0] && !shown.has(`${d.side}:${d.label}`));
-  for (const d of defs)
-    rows.push({
-      label: defs.length > 1 ? `The default ${d.side === "you" ? "toward you" : "away from you"} - when no stated condition applies` : "The default - when no stated condition applies",
-      value: `→ ${d.routes[0].name}`,
-    });
-  if (!rows.length) return null;
-  let headline: string;
-  if (lead) {
-    const same = lead.wording.replace(/\s+/g, " ").trim().toLowerCase() === lead.label.replace(/\s+/g, " ").trim().toLowerCase();
-    const put = same ? "" : `, most often put as "${lead.wording}"`;
-    headline = `When the AI sends buyers away from ${brand}, the most common condition is "${lead.label}"${put}${destOf(lead.routes, lead.answers) ? ` - it points them ${destPhrase(destOf(lead.routes, lead.answers)!)}` : ""}.`;
-  } else {
-    const top = a?.groups.find((x) => !isDefaultCondition(x.label)) ?? null;
-    headline = top
-      ? `When the AI sends buyers away from ${brand}, the most common condition is "${top.label}"${top.routes[0] ? ` - it points them to ${top.routes[0].name}` : ""}.`
-      : `The AI rarely names one winner for every buyer - these are the conditions that decide it.`;
-  }
-  return {
-    kind: "condition",
-    crumb: "What sends buyers away",
-    headline,
-    rows,
-    ...(openCellId ? { go: { label: "See every condition", target: "map" as const, cellId: openCellId } } : {}),
-  };
+  const wins = facts.filter((f) => f.pick === key && f.reasons !== null);
+  const others = facts.filter((f) => f.pick !== null && f.pick !== key && f.reasons !== null);
+  if (wins.length < 20 || others.length < 20) return [];
+  const withR = facts.filter((f) => f.reasons !== null);
+  const counts = new Map<string, number>();
+  for (const f of withR) for (const r of f.reasons!) counts.set(r, (counts.get(r) ?? 0) + 1);
+  return [...counts.entries()]
+    .filter(([, k]) => k / withR.length >= 0.02)
+    .map(([code]) => {
+      const w = cell(wins.filter((f) => f.reasons!.includes(code)).length, wins.length);
+      const o = cell(others.filter((f) => f.reasons!.includes(code)).length, others.length);
+      return { code, wins: w, others: o, lift: rate(w) - rate(o) };
+    })
+    .sort((a, b) => b.lift - a.lift);
 }
