@@ -974,7 +974,8 @@ for (const project of projects) {
         for (const d of [...panelPhrases].sort((a, b) => b.length - a.length)) if (x.toLowerCase().includes(d.toLowerCase())) x = x.split(new RegExp(d.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "gi")).join(" ");
         return x;
       };
-      const SKIP = new Set([...SKIP_KEYS, "tip", "kind", "tone", "usualCellId", "competitorOrder", "name"]);
+      // A number's fact id and a list's selection id are never drawn (fact layer): their words (a product id's words) are not card text.
+      const SKIP = new Set([...SKIP_KEYS, "tip", "kind", "tone", "usualCellId", "competitorOrder", "name", "fact", "selection", "selections", "competitorSelection"]);
       const other = [...categoryWords.entries()].filter(([b]) => b !== project.brand).flatMap(([, ws]) => ws).filter((w) => !(categoryWords.get(project.brand) ?? []).includes(w));
       const walkText = (v: unknown, path: string) => {
         if (typeof v === "string") {

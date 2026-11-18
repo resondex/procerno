@@ -105,6 +105,8 @@ const text = (w: W, t: PanelText | string | undefined, path: string, words?: str
   let i = 0;
   for (const m of s.matchAll(NUMBER_TOKEN)) {
     const b = bounds.find((x) => m.index! >= x.from && m.index! < x.to);
+    // A figure inside a name (a product as written) is part of the name, never a number on the card.
+    if (b?.span.name) continue;
     const keyed = b && b.span.key && numberTokens(b.span.t).length === 1 && m.index! + m[0].length <= b.to;
     const p = keyed ? `${path}/${k(b!.span.key!)}` : `${path}/${i}`;
     // A keyed span holds exactly one number, built from a PanelNum (panel_text NK): its tip is that number's counts.

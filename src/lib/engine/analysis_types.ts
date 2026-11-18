@@ -436,6 +436,9 @@ export interface PanelSpan {
   key?: string;
   /** The fact the number is (fact layer: measure | subject | scope). Never drawn. */
   fact?: string;
+  /** The span is a name (a product as written): a figure inside it ("Spark 1.5% Cash Select") is part of the name,
+   * never a number on the card. Never drawn. */
+  name?: true;
 }
 export type PanelText = PanelSpan[];
 
@@ -652,6 +655,8 @@ export interface PanelDetailSection {
   tone: PanelTone;
   rows: { label: string; num: PanelNum; open?: true; /** am61: the row opens this Map cell's card ("Open"). */ cell?: string }[];
   note?: PanelText;
+  /** The selection the rows are (fact layer). Never drawn. */
+  selection?: string;
 }
 
 /** am38: "What the answer weighs", sized - one column per side (or one column

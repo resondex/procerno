@@ -20,6 +20,13 @@
  *  - conditions_shown   the condition rows a card lists on one side, in order
  *  - weighs_shown       the topics a "What the answer weighs" column lists
  *  - visibility_brands  the brands on the visibility chart, and the ones folded into its note
+ *  - sent_brands / instead_brands   the brands a worry or looking-around answer sends the buyer to; the rivals a price
+ *                       answer recommends instead (the doubt cards' competitor lists - nothing is picked there)
+ *  - first_sent         who an answer shows first among the brands it sends the buyer to
+ *  - sent_products / sent_own_products / instead_products / own_options   the products named as where to go, the
+ *                       tracker's own products named there, the rival products recommended instead of a price line, the
+ *                       tracker's own cheaper options (the run's one product grouping, ruling 15)
+ *  - worries / price_lines   the worries a scope holds; the price lines its answers were asked about
  * plus two functions that are rules over a selection's members, stated once:
  *  - averageCompetitor  the average competitor of a competitor group, per measure (modes "as_cards" / "ruled")
  *  - productGroups      written product names grouped into rows, in the three ways the cards do it today (modes)
@@ -35,7 +42,7 @@ import type { ViewData } from "../view_data";
 import type { AnswerFact, AnswerFactSet, QuestionType } from "./answer_facts";
 import { scopeKey, WHAT_TO_BUY_ALL, type FactBook, type Scope } from "./fact";
 import { MEASURE_BY_ID, PICK_TYPES } from "./measure_book";
-import { endItems, firstProductOf, productsOf, slicePred } from "./slices";
+import { endItems, firstProductOf, firstSentOf, insteadProductsOf, ownOptionProductsOf, productsOf, sentProductsOf, slicePred } from "./slices";
 
 /* ------------------------------- the shape ------------------------------- */
 
@@ -352,7 +359,9 @@ export interface ProductRow {
   answers: Set<string>;
 }
 
-const PRODUCT_STOP = new Set(["the", "from", "by", "of", "a", "an", "and", "with", "for"]);
+/** Small words that never tell two products apart. Not the single letter "a": in a product name it is a model letter
+ * ("Galaxy A-series", "Pixel 10a" as written "Pixel a"), and the product test already keys it (products.ts). */
+const PRODUCT_STOP = new Set(["the", "from", "by", "of", "an", "and", "with", "for"]);
 const OWN_STOP = new Set(["with", "tier", "tiers", "plan", "plans", "supported", "version", "option", "the", "its", "their", "edition", "model", "line"]);
 const cleanProduct = (x: string) => x.replace(/[®™]/g, "").replace(/\s+from\s+.+$/i, "").replace(/\s+/g, " ").trim();
 const isSubsequence = (short: string, long: string) => {
@@ -617,8 +626,10 @@ export function selectionBook(set: AnswerFactSet, book: FactBook, data?: ViewDat
                 ? `~${opts.min ?? 3}`
                 : name === "ends"
                   ? `~${opts.choice}`
-                  : name === "first_rec"
+                  : name === "first_rec" || name === "first_sent" || name === "sent_products" || name === "sent_own_products" || name === "instead_products" || name === "own_options"
                     ? `~${opts.top ?? 4}`
+                    : name === "worries"
+                      ? `~${opts.min ?? SEL_FLOORS.argsMin}`
                     : name === "competitors" ? `~${opts.mode ?? "ratified"}${opts.mode === "as_cards" ? `:${opts.card}` : ""}${opts.rankBy === "recommended" ? ":rec" : ""}` : name === "conditions_shown" ? `~${opts.side}:${opts.flavor}${opts.towardOnly ? `@${opts.towardOnly}` : ""}${opts.to ? `>to:${opts.to}` : ""}` : name === "weighs_shown" ? `~${JSON.stringify(opts.sides ?? [{}])}:${opts.top ?? 3}:${opts.list ?? "weighs"}` : "";
     const fullName = `${name}${params}`;
     const id = selectionId(fullName, subject, scope);
@@ -951,6 +962,83 @@ export function selectionBook(set: AnswerFactSet, book: FactBook, data?: ViewDat
         const choice = opts.choice ?? "premium";
         const items = endItems(rows, choice, set, data?.project.category ?? "");
         out = { id, name: fullName, subject, scope, rule: `The names a rule choosing ${choice} gives as its product: brands in the category by entry, other names as written (variants one row); 3 answers at least, most first, top five.`, members: items.filter((m) => m.count >= SEL_FLOORS.rowMin).slice(0, 5), extras: {} };
+        break;
+      }
+      case "sent_brands":
+      case "instead_brands": {
+        // The doubt cards' competitor lists (nothing is picked there, so the ratified group does not apply): the brands
+        // in analysis the answers send the buyer to (destinations) or, on a price question, the rivals it recommends
+        // instead (ruling 3) - ruling 8: a brand outside of analysis is never listed; class brands are kept (a worry
+        // can send the buyer to one). 3 answers at least, most first, ties by name, top five.
+        const by = tally(rows, (f) => (name === "sent_brands" ? (f.sent?.brands ?? []) : (f.price?.rivals ?? [])).filter((b) => b.key !== T).map((b) => ({ key: b.key, name: b.name })));
+        const members = rank(by).filter((m) => m.count >= SEL_FLOORS.rowMin).slice(0, SEL_FLOORS.compTop);
+        out = {
+          id,
+          name: fullName,
+          subject,
+          scope,
+          rule: name === "sent_brands" ? "The brands in analysis the answers send the buyer to, 3 answers at least, most first, ties by name, top five." : "The brands in analysis a price answer recommends instead, 3 answers at least, most first, ties by name, top five.",
+          members,
+          extras: {},
+        };
+        break;
+      }
+      case "first_sent": {
+        // Of the answers that send the buyer to a brand in analysis, the one each names first; most first, ties by name.
+        const by = new Map<string, { name: string; ids: Set<string> }>();
+        let base = 0;
+        for (const f of rows) {
+          const x = firstSentOf(f);
+          if (!x) continue;
+          base++;
+          const t = by.get(x.key) ?? { name: x.name, ids: new Set<string>() };
+          t.ids.add(f.responseId);
+          by.set(x.key, t);
+        }
+        out = { id, name: fullName, subject, scope, rule: "Of the answers that send the buyer to a brand in analysis, the brand each names first; most first, ties by name.", members: rank(by).slice(0, opts.top ?? 4), extras: { base } };
+        break;
+      }
+      case "sent_products":
+      case "sent_own_products":
+      case "instead_products":
+      case "own_options": {
+        // Product lists of the doubt cards, on the run's one product grouping (ruling 15): the rivals' products the
+        // answers send the buyer to (full names - the list crosses brands), the tracker's own products named there, the
+        // rival products a price answer recommends instead (full names), the tracker's own cheaper options (short
+        // names). Counted by answers, most first, ties by name (a card draws those with 3 answers at least).
+        const own = name === "sent_own_products" || name === "own_options";
+        const of = name === "instead_products" ? insteadProductsOf : name === "own_options" ? ownOptionProductsOf : sentProductsOf;
+        const by = new Map<string, { name: string; ids: Set<string> }>();
+        for (const f of rows)
+          for (const pid of of(f, set)) {
+            const p = set.products!.get(pid)!;
+            if ((p.key === T) !== own) continue;
+            const t = by.get(pid) ?? { name: own ? p.short : p.full, ids: new Set<string>() };
+            t.ids.add(f.responseId);
+            by.set(pid, t);
+          }
+        out = { id, name: fullName, subject, scope, rule: `${own ? "The tracker's" : "Rival"} products (the run's one product grouping) ${name === "own_options" ? "a price answer points to as its own cheaper option" : name === "instead_products" ? "a price answer recommends instead" : "the answers send the buyer to"}: most answers first, ties by name (a card draws those with 3 answers at least).`, members: rank(by).slice(0, opts.top ?? 4), extras: { base: rows.length } };
+        break;
+      }
+      case "worries": {
+        // The worries the scope's answers are about, each with `min` answers in the scope at least, by name.
+        const by = new Map<string, number>();
+        for (const f of rows) if (f.worry) by.set(f.worry, (by.get(f.worry) ?? 0) + 1);
+        const members = [...by.entries()].filter(([, n]) => n >= (opts.min ?? SEL_FLOORS.argsMin)).map(([w, n]) => ({ key: w, name: w, count: n })).sort((a, b) => a.name.localeCompare(b.name));
+        out = { id, name: fullName, subject, scope, rule: `The worries the answers are about, each with ${opts.min ?? SEL_FLOORS.argsMin} answers at least in the scope, by name.`, members, extras: {} };
+        break;
+      }
+      case "price_lines": {
+        // The price lines the scope's answers were asked about (the bare brand when no line), most answers first, ties
+        // by name.
+        const by = new Map<string, { name: string; ids: Set<string> }>();
+        for (const f of rows) {
+          const l = f.line ?? set.target.name;
+          const t = by.get(l) ?? { name: l, ids: new Set<string>() };
+          t.ids.add(f.responseId);
+          by.set(l, t);
+        }
+        out = { id, name: fullName, subject, scope, rule: "The price lines the answers were asked about (the bare brand when none), most answers first, ties by name.", members: rank(by), extras: {} };
         break;
       }
       case "visibility_brands": {

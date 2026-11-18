@@ -153,8 +153,9 @@ export interface NamedBrand {
 }
 
 export interface SentTo {
-  /** Brands in analysis other than the tracker, in the order written (deduplicated). */
-  brands: { key: string; name: string }[];
+  /** Brands in analysis other than the tracker, in the order written (deduplicated); `forms` = every destination as
+   * written that resolves to it (the input of the lists of products named as where to go - ruling 15). */
+  brands: { key: string; name: string; forms: string[] }[];
   /** Names resolving to the tracker itself (its own other products), as written. */
   own: string[];
   /** Names outside of analysis or outside the category, as written. */
@@ -489,7 +490,11 @@ export function buildAnswerFacts(data: ViewData, opts: BuildOptions = {}): Answe
         const r = resolve(d);
         if (r.key === targetKey) sent.own.push(d);
         else if (bucketOfResolved(r, targetKey) === "in_analysis") {
-          if (!seen.has(r.key)) sent.brands.push({ key: r.key, name: r.name });
+          if (!seen.has(r.key)) sent.brands.push({ key: r.key, name: r.name, forms: [d] });
+          else {
+            const b = sent.brands.find((x) => x.key === r.key)!;
+            if (!b.forms.includes(d)) b.forms.push(d);
+          }
           seen.add(r.key);
         } else sent.outside.push(d);
       }

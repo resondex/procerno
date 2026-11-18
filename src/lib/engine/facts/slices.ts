@@ -33,6 +33,11 @@
  *          | suggprod:<product id>  it suggests that product: a form of its brand framed recommended, or a rule's choice
  *                                   or product naming it
  *          | firstprod:<key>:<product id | none>  the brand's first written form names that product (none: no product)
+ *          | sentprod:<product id>  it sends the buyer to that product: a destination as written names it (a rival's,
+ *                                   or the tracker's own other product)
+ *          | insteadprod:<product id>  a price answer recommends that rival product instead (a form framed recommended
+ *                                   of a rival it recommends instead - ruling 3's rival list)
+ *          | ownopt:<product id>    a price answer points to that product of the tracker as its own cheaper option
  *          | rulename:<choice>:<form>,<form>...  a rule choosing <choice> names, as its product, one of these names as
  *                                   written (no brand in the category; each form URI-encoded, lower case)
  *   <key>   a brand's dictionary entry id, "you" (the tracker) or "rival" (the answer's own named rival)
@@ -125,9 +130,8 @@ function term(t: string, set: AnswerFactSet): Pred {
     case "firstsent": {
       const k = keyFn(arg, set);
       return (f) => {
-        const ord = new Map(f.brands.filter((b) => b.mentioned).map((b) => [b.key, b.order]));
-        const xs = (f.sent?.brands ?? []).map((b, i) => ({ key: b.key, o: ord.get(b.key) ?? 1000 + i })).sort((a, b) => a.o - b.o);
-        return xs.length > 0 && xs[0].key === k(f);
+        const x = firstSentOf(f);
+        return !!x && x.key === k(f);
       };
     }
     case "firstrec": {
@@ -177,6 +181,12 @@ function term(t: string, set: AnswerFactSet): Pred {
         return want === "none" ? pid === null : pid === want;
       };
     }
+    case "sentprod":
+      return (f) => sentProductsOf(f, set).includes(arg);
+    case "insteadprod":
+      return (f) => insteadProductsOf(f, set).includes(arg);
+    case "ownopt":
+      return (f) => ownOptionProductsOf(f, set).includes(arg);
     case "rulename": {
       const i = arg.indexOf(":");
       const choice = arg.slice(0, i);
@@ -209,6 +219,58 @@ export function productsOf(f: AnswerFact, key: string, suggest: boolean, set: An
     const pid = of(key, w);
     if (pid && !out.includes(pid)) out.push(pid);
   }
+  return out;
+}
+
+/** Of the brands an answer sends the buyer to, the one it names first (order of appearance; a brand it never mentions
+ * in the text sits after the mentioned ones, in the order coded). */
+export function firstSentOf(f: AnswerFact): { key: string; name: string } | null {
+  const ord = new Map(f.brands.filter((b) => b.mentioned).map((b) => [b.key, b.order]));
+  const xs = (f.sent?.brands ?? []).map((b, i) => ({ b, o: ord.get(b.key) ?? 1000 + i })).sort((a, b) => a.o - b.o);
+  return xs.length ? { key: xs[0].b.key, name: xs[0].b.name } : null;
+}
+
+/** A name the AI gives as one of the TRACKER's own products (a destination resolving to it, a price answer's own cheaper
+ * option): its product in the run's one grouping (ruling 15) - the name as written, else the name under the tracker's
+ * own name (an option written without the brand, "the ad tier", is still the tracker's: the answer facts placed it
+ * there). A description ("a cheaper plan", "any card") is never a product. */
+export function ownProductOf(set: AnswerFactSet, written: string): string | null {
+  const of = set.nameProductOf ?? set.productOf;
+  const w = written.trim();
+  if (!of || !w || isDescription(looseForm(w)) || /^(any|a|an|the|another|some)\s/i.test(looseForm(w)) || !/^[A-Za-z0-9]/.test(looseForm(w))) return null;
+  return of(set.target.key, w) ?? of(set.target.key, `${set.target.name} ${w}`);
+}
+
+const pushNew = (out: string[], pid: string | null) => {
+  if (pid && !out.includes(pid)) out.push(pid);
+};
+
+/** The products an answer sends the buyer to (destinations as written): a rival's products, and the tracker's own
+ * other products (ownProductOf). */
+export function sentProductsOf(f: AnswerFact, set: AnswerFactSet): string[] {
+  const of = set.nameProductOf ?? set.productOf;
+  const out: string[] = [];
+  if (!f.sent || !of) return out;
+  for (const b of f.sent.brands) for (const w of b.forms) pushNew(out, of(b.key, w));
+  for (const w of f.sent.own) pushNew(out, ownProductOf(set, w));
+  return out;
+}
+
+/** The rival products a price answer recommends instead: the forms framed recommended of the rivals it recommends
+ * instead (ruling 3's rival list), in the run's one grouping. */
+export function insteadProductsOf(f: AnswerFact, set: AnswerFactSet): string[] {
+  const of = set.nameProductOf ?? set.productOf;
+  const out: string[] = [];
+  if (!f.price || !of) return out;
+  for (const r of f.price.rivals) for (const w of f.brands.find((b) => b.key === r.key)?.recForms ?? []) pushNew(out, of(r.key, w));
+  return out;
+}
+
+/** The tracker's products a price answer points to as its own cheaper option - every one it names, whether or not it
+ * also names a rival (the answer's ruling-3 bucket is a separate fact). */
+export function ownOptionProductsOf(f: AnswerFact, set: AnswerFactSet): string[] {
+  const out: string[] = [];
+  for (const o of f.price?.own ?? []) pushNew(out, ownProductOf(set, o.written));
   return out;
 }
 

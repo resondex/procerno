@@ -65,7 +65,7 @@ export function join(...parts: (PanelSpan | PanelText | string | null | undefine
   const out: PanelText = [];
   const push = (s: PanelSpan) => {
     const last = out[out.length - 1];
-    if (last && !last.refs && !last.tip && !last.key && !s.refs && !s.tip && !s.key) last.t += s.t;
+    if (last && !last.refs && !last.tip && !last.key && !last.name && !s.refs && !s.tip && !s.key && !s.name) last.t += s.t;
     else out.push({ ...s });
   };
   for (const p of parts) {

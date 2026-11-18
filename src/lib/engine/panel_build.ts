@@ -502,11 +502,11 @@ function buildPanel(inp: PanelCellInput, ctx: Ctx): PositionPanel | undefined {
       return ctx.h.facts ? factH2hPanel(inp, ctx) : h2hPanel(inp, ctx);
     case "buyer_worry":
     case "customer_worry":
-      return worryPanel(inp, ctx);
+      return doubtFact(inp, ctx, factWorryPanel) ?? worryPanel(inp, ctx);
     case "looking_around":
-      return holdPanel(inp, ctx);
+      return doubtFact(inp, ctx, factHoldPanel) ?? holdPanel(inp, ctx);
     case "value":
-      return valuePanel(inp, ctx);
+      return doubtFact(inp, ctx, factValuePanel) ?? valuePanel(inp, ctx);
     case "problem":
       return problemPanel(inp, ctx);
     case "criteria":
@@ -529,6 +529,18 @@ function buildPanel(inp: PanelCellInput, ctx: Ctx): PositionPanel | undefined {
       return ctx.h.facts ? factHabitPanel(inp, ctx) : habitPanel(inp, ctx);
     case "settled_all":
       return settledAllPanel(inp, ctx);
+  }
+}
+
+/** A doubt card from facts; a card whose answers are not exactly its scope's is logged and built the old way. */
+function doubtFact(inp: PanelCellInput, ctx: Ctx, build: (inp: PanelCellInput, ctx: Ctx) => PositionPanel): PositionPanel | undefined {
+  if (!ctx.h.facts) return undefined;
+  try {
+    return build(inp, ctx);
+  } catch (e) {
+    FACT_CARD.delete(inp);
+    console.error(`[panel_build] ${inp.id}: not built from facts, the old builder used:`, e);
+    return undefined;
   }
 }
 
@@ -887,7 +899,7 @@ function pickedProduct(r: PoolRow, ctx: Ctx, own: boolean): string {
 const nounToks = (ctx: Ctx) => new Set([...famTokens(ctx.h.noun), ...famTokens(ctx.h.plural)]);
 
 const splitLine = (items: { name: string; num: PanelNum }[]): PanelText =>
-  join(...items.flatMap((x, i) => [i > 0 ? " · " : null, `${x.name} `, N(x.num)]));
+  join(...items.flatMap((x, i) => [i > 0 ? " · " : null, { t: x.name, name: true as const }, " ", N(x.num)]));
 
 /* ---------------------------- condition rows ---------------------------- */
 
@@ -4378,9 +4390,489 @@ function factHabitStepDetails(inp: PanelCellInput, p: PositionPanel, ctx: Ctx) {
   delete p.detailComp;
 }
 
+/* ------------- fact layer, third slice: Value, the worries, your customers looking around ------------- */
+
+/**
+ * The four doubt cards from facts (step 4, third slice): every drawn number is a fact (its id on it), every list a
+ * selection (its id on the list). Rulings that land here: 3 (Value "where it points the buyer instead": every price
+ * answer in one bucket - a rival, else your own cheaper option, else nowhere; the lists in its explanation use the same
+ * bucket), 8 (a brand outside of analysis is never listed nor counted as where to go), 9 ("agrees the worry is fair"
+ * of the answers that agree, partly agree or disagree), 14 (the looking-around card's condition rows on the run's one
+ * grouping) and 15 (every product list on the run's one product grouping - your own cheaper options too). The
+ * competitor lists keep their own rule (nothing is picked here): the brands named as where to go / instead, 3 answers
+ * at least, top five.
+ */
+const isDoubtFactKind = (k: PanelKind) => k === "value" || k === "buyer_worry" || k === "customer_worry" || k === "looking_around";
+
+/** A doubt card's scope: its question types, and its worry or buying situation (the All card: the row's types). The
+ * card's own answers must be exactly the scope's - else the card is not built from facts (buildPanel falls back). */
+function doubtScope(inp: PanelCellInput, F: PickFacts): Scope {
+  const ids = new Set(inp.rows.map((r) => r.code.response_id));
+  const fs = F.set.facts.filter((f) => ids.has(f.responseId));
+  const f0 = fs[0];
+  const typesOf = (dflt: QuestionType[]) => {
+    const t = [...new Set(fs.map((f) => f.type))].sort() as QuestionType[];
+    return t.length ? t : dflt;
+  };
+  let scope: Scope;
+  switch (inp.kind) {
+    case "buyer_worry":
+      scope = inp.pooled ? { types: ["objections"] } : { types: ["objections"], worry: f0?.worry ?? "__none__" };
+      break;
+    case "customer_worry":
+      // A worry's card holds both stages unless its cell is one stage's (the worry asked at both stages, one cell each).
+      scope = { types: ["churn_triggers", "renewal"], ...(inp.pooled ? {} : { worry: f0?.worry ?? "__none__" }) };
+      if (!inp.pooled && F.book.rows(scope).length !== ids.size) scope = { types: typesOf(["churn_triggers"]), worry: f0?.worry ?? "__none__" };
+      break;
+    case "looking_around":
+      scope = inp.pooled ? { types: ["looking_around"] } : { types: ["looking_around"], situation: f0?.situation ?? null };
+      break;
+    default:
+      scope = inp.pooled ? { types: ["pricing"] } : { types: ["pricing"], situation: f0?.situation ?? null };
+  }
+  const got = F.book.rows(scope);
+  if (got.length !== ids.size || got.some((f) => !ids.has(f.responseId))) throw new Error(`fact layer: card ${inp.id}: its ${ids.size} answers are not the scope's ${got.length} (${scopeKey(scope)})`);
+  return scope;
+}
+
+/** A section of an explanation whose rows are a selection's members (its id carried). */
+const selSec = (s: PanelDetailSection | null, id: string) => (s ? { ...s, selection: id } : null);
+
+/** The worries cards (a buyer's worry and a customer's worry, each worry and all of them). */
+function factWorryPanel(inp: PanelCellInput, ctx: Ctx): PositionPanel {
+  const { h } = ctx;
+  const PF = h.facts!;
+  const { sel } = PF;
+  const buyer = inp.kind === "buyer_worry";
+  const scope = doubtScope(inp, PF);
+  const comp = sel.selection("sent_brands", "you", scope);
+  const members = comp.members as SelMember[];
+  const fc = mkFactCard(inp, ctx, scope, undefined, comp, members);
+  const vf = (r: PoolRow) => verdictFind(r, h);
+  const quote = (r: PoolRow) => (r.code.premise_quote ?? "").trim() || vf(r);
+  const agrees = fx(fc, "agrees", "ai", scope, "answers that judge the worry", quote);
+  const judged = knOf(agrees)!.n;
+  const segs: PanelSegment[] = buyer
+    ? [
+        segFx(fc, "proceed", "go ahead", "you", "go_ahead", "ai", scope, "answers", vf),
+        segFx(fc, "avoid", "steer clear", "away", "steer_clear", "ai", scope, "answers", vf),
+        segFx(fc, "none", "no side", "neutral", "buyer_no_side", "ai", scope, "answers", vf),
+      ]
+    : [
+        segFx(fc, "keep", "stay", "you", "stay", "ai", scope, "answers", vf),
+        segFx(fc, "leave", "leave", "away", "leave", "ai", scope, "answers", vf),
+        segFx(fc, "none", "no side", "neutral", "customer_no_side", "ai", scope, "answers", vf),
+      ];
+  const fav = segs[0].num;
+  const claim = buyer
+    ? join(
+        inp.pooled ? "Across your buyers' worries, the AI agrees in " : `When a buyer worries "${inp.concern ?? inp.label}", the AI agrees in `,
+        N(agrees),
+        " of the answers that judge it, and tells them to go ahead in ",
+        N(fav),
+        "."
+      )
+    : fav.pct > segs[1].num.pct
+      ? join(
+          inp.pooled ? "Across your customers' worries, the AI " : `When a customer worries "${inp.concern ?? inp.label}", the AI `,
+          "tells them to stay in ",
+          N(fav),
+          " of answers",
+          segs[1].num.pct === 0 ? ", and never to leave." : join(" and to leave in ", N(segs[1].num), ".")
+        )
+      : join(
+          inp.pooled ? "Across your customers' worries, the AI " : `When a customer worries "${inp.concern ?? inp.label}", the AI `,
+          segs[1].num.pct === 0 ? "never tells them to leave" : join("tells them to leave in ", N(segs[1].num), " of answers"),
+          fav.pct === 0 ? ", and never to stay." : join(segs[1].num.pct === 0 ? ", and tells them to stay in " : " and to stay in ", N(fav), segs[1].num.pct === 0 ? " of answers." : ".")
+        );
+  const nd = buyer ? { leave: 0, noDest: 0 } : leaveNoDest(inp, ctx);
+  const destFind = (k: string, name: string) => (r: PoolRow) => (r.code.destinations ?? []).find((x) => h.resolve(x).key === k) ?? name;
+  const block: PanelBlock | undefined = members.length
+    ? {
+        title: buyer ? `Which ${h.plural} it names instead` : `Which ${h.plural} it names to move to`,
+        sub: `Share of these answers that name it as the alternative. Open a rival to see how it gets its picks.${!buyer && nd.leave && nd.noDest > nd.leave / 2 ? ` Most answers that say leave name no ${h.noun} at all.` : ""}`,
+        selection: comp.id,
+        rows: members.map((m) => ({ name: m.name, num: fx(fc, "sent_to", m.key, scope, "answers", destFind(m.key, m.name)), open: true as const })),
+      }
+    : undefined;
+  // What each side weighs, led by the cell's top lift each way (the Map's lift list decides the leads and whether the
+  // block is two-sided); too few answers either way, the unsided version.
+  const favSlice = buyer ? "v:proceed_or_avoid:proceed" : "v:keep_or_leave:keep";
+  const unfavSlice = buyer ? "v:proceed_or_avoid:avoid|v:premise_verdict:confirms&!v:proceed_or_avoid:proceed" : "v:keep_or_leave:leave";
+  const weighs = doubtWeighs(
+    inp,
+    fc,
+    ctx,
+    buyer ? { title: "When it says go ahead", say: "say go ahead", slice: favSlice } : { title: "When it says stay", say: "say stay", slice: favSlice },
+    buyer ? { title: "When it concedes", say: "concede the worry", slice: unfavSlice } : { title: "When it says leave", say: "say leave", slice: unfavSlice }
+  );
+  const rivals = members.map((m) => factRivalSmall(inp, fc, ctx, m, "Named as the alternative", { when: "as the alternative", alt: `sent:${m.key}`, altMeasure: "sent_to" }));
+  const usual = usualOf(inp, ctx.inputs);
+  return {
+    kind: inp.kind,
+    claim,
+    ...(usual ? { usualCellId: usual.id, usualKey: buyer ? "All your buyers' worries" : "All your customers' worries" } : {}),
+    hereKey: "This worry",
+    stackLabel: "How the answer goes",
+    steps: [
+      ...(judged >= 5 ? [{ key: "agrees" as const, label: "Agrees the worry is fair", here: agrees, hereLabel: "Answers that judge it" }] : []),
+      { key: "verdict", label: buyer ? "What it tells the buyer to do" : "What it tells the customer to do", segments: segs },
+    ],
+    ...(block ? { compare: true as const, competitors: block } : {}),
+    lines: [],
+    ...(weighs ? { weighs } : {}),
+    ...(rivals.length ? { rivals } : {}),
+  };
+}
+
+/** Customers told to leave, and of them the ones named no brand to move to (facts on a fact card, else the rows). */
+function leaveNoDest(inp: PanelCellInput, ctx: Ctx): { leave: number; noDest: number } {
+  const fc = FACT_CARD.get(inp);
+  if (fc) {
+    const { book } = fc.F;
+    return { leave: book.fact("leave", "ai", fc.scope).k, noDest: book.fact("slice_share", "ai/slice:v:keep_or_leave:leave&!sent:any", fc.scope).k };
+  }
+  const leaveRows = inp.rows.filter((r) => r.code.keep_or_leave === "leave");
+  return { leave: leaveRows.length, noDest: leaveRows.filter((r) => ctx.h.activeDests(r.code.destinations).size === 0).length };
+}
+
+/** "What the answer weighs" on a doubt card: two sides led by the cell's top lift each way; no lift either way, or too
+ * few answers on both sides, the unsided version (the old weighsSides rule, on facts). */
+function doubtWeighs(inp: PanelCellInput, fc: FactCard, ctx: Ctx, fav: { title: string; say: string; slice: string }, unfav: { title: string; say: string; slice: string }): PanelWeighs | undefined {
+  const { book } = fc.F;
+  const pos = inp.lifts.filter((l) => l.value > 0).sort((a, b) => b.value - a.value)[0];
+  const neg = inp.lifts.filter((l) => l.value < 0).sort((a, b) => a.value - b.value)[0];
+  const enough = (when: string) => book.rows({ ...fc.scope, when }).filter((f) => f.args !== null).length >= ARGS_MIN;
+  const unsided = () => factWeighs(inp, fc, ctx, [{ say: "come up here", unit: "answers", tone: "neutral" }], WEIGHS_SUB_ALL);
+  if ((!pos && !neg) || (!enough(fav.slice) && !enough(unfav.slice))) return unsided();
+  return (
+    factWeighs(
+      inp,
+      fc,
+      ctx,
+      [
+        { ...fav, tone: "good", ...(pos ? { lead: pos.label } : {}) },
+        { ...unfav, tone: "bad", ...(neg ? { lead: neg.label } : {}) },
+      ],
+      WEIGHS_SUB_SIDES
+    ) ?? unsided()
+  );
+}
+
+/** The worries cards' two steps explained, from facts: the other judgements, what it advises after agreeing (and after
+ * saying the worry is wrong), which worries it agrees with most (all-worries card), which AI companies agree most. */
+function factWorryStepDetails(inp: PanelCellInput, p: PositionPanel, ctx: Ctx) {
+  const ag = p.steps.find((s) => s.key === "agrees");
+  if (!p.detail || !ag?.here) return;
+  const { h } = ctx;
+  const fc = FACT_CARD.get(inp)!;
+  const { book, sel } = fc.F;
+  const scope = fc.scope;
+  const buyer = inp.kind === "buyer_worry";
+  const T9 = WORRY_AGREES_TEXT;
+  const vf = (r: PoolRow) => verdictFind(r, h);
+  const quote = (r: PoolRow) => (r.code.premise_quote ?? "").trim() || vf(r);
+  const CONF = "v:premise_verdict:confirms";
+  const REB = "v:premise_verdict:rebuts";
+  const JUDGED = "v:premise_verdict:confirms,mixed,rebuts";
+  const [favM, badM, noneM] = buyer ? ["go_ahead", "steer_clear", "buyer_no_side"] : ["stay", "leave", "customer_no_side"];
+  const at = (when: string): Scope => ({ ...scope, when });
+  const advice = (when: string, unit: string) => [
+    { label: buyer ? T9.go : T9.stay, num: fx(fc, favM, "ai", at(when), unit, vf) },
+    { label: buyer ? T9.avoid : T9.leave, num: fx(fc, badM, "ai", at(when), unit, vf) },
+    { label: T9.none, num: fx(fc, noneM, "ai", at(when), unit, vf) },
+  ];
+  const conf = book.fact("agrees", "ai", scope).k;
+  const reb = book.fact("disagrees", "ai", scope).k;
+  // The all-worries card: when it holds two worries or more, a row for each worry with enough answers that judge it.
+  const severalWorries = inp.pooled && (sel.selection("worries", "ai", scope, { min: 1 }).members as SelMember[]).length >= 2;
+  const worries = severalWorries ? sel.selection("worries", "ai", at(JUDGED), { min: ARGS_MIN }) : null;
+  const vendors = sel.selection("vendors", "ai", at(JUDGED), { min: ARGS_MIN });
+  const sections = [
+    factSec(T9.judges.title, T9.judges.sub, "neutral", [
+      { label: T9.partly, num: fx(fc, "partly_agrees", "ai", scope, "answers that judge the worry", quote) },
+      { label: T9.wrong, num: fx(fc, "disagrees", "ai", scope, "answers that judge the worry", quote) },
+    ], T9.judges.few, true),
+    conf >= ARGS_MIN ? factSec(T9.after.title, T9.after.sub, "neutral", advice(CONF, "answers that agree"), T9.after.few, true) : null,
+    reb >= ARGS_MIN ? factSec(T9.afterWrong.title, T9.afterWrong.sub, "neutral", advice(REB, "answers that say the worry is wrong"), T9.afterWrong.few, true) : null,
+    worries
+      ? selSec(factSec(T9.which.title, T9.which.sub, "bad", (worries.members as SelMember[]).map((w) => ({ label: w.name, num: fx(fc, "agrees", "ai", { ...scope, worry: w.key }, "answers that judge that worry", quote) })), T9.which.few), worries.id)
+      : null,
+    selSec(factSec(T9.vendor.title, T9.vendor.sub, "neutral", (vendors.members as SelMember[]).map((v) => ({ label: v.name, num: fx(fc, "agrees", "ai", { ...scope, vendor: v.name }, `${v.name} answers that judge the worry`, quote) })), T9.vendor.few), vendors.id),
+  ].filter((x): x is PanelDetailSection & { selection?: string } => !!x);
+  const share = (m: string) => {
+    const f = book.fact(m, "ai", at(CONF));
+    return f.n ? f.k / f.n : 0;
+  };
+  const after: WorryAfter = conf < ARGS_MIN ? "few" : share(badM) >= 0.5 ? "bad" : share(favM) >= 0.5 ? "fav" : share(noneM) >= 0.5 ? "none" : "split";
+  const agreesDetail: PanelStepDetail = { ...worryAgreesDetail(agreesTakeaway(ag.here.pct).tag, after, buyer), ...(sections.length ? { sections } : {}) };
+  const details = { verdict: p.detail, agrees: agreesDetail };
+  p.details = details;
+  if (p.compare) p.detailsComp = details;
+  delete p.detail;
+  delete p.detailComp;
+}
+
+/** "Your customers looking around". */
+function factHoldPanel(inp: PanelCellInput, ctx: Ctx): PositionPanel {
+  const { h } = ctx;
+  const PF = h.facts!;
+  const { sel } = PF;
+  const scope = doubtScope(inp, PF);
+  const comp = sel.selection("sent_brands", "you", scope);
+  const members = comp.members as SelMember[];
+  const fc = mkFactCard(inp, ctx, scope, undefined, comp, members);
+  const vf = (r: PoolRow) => verdictFind(r, h);
+  const segs = [
+    segFx(fc, "keep", "stay", "you", "stay", "ai", scope, "answers", vf),
+    segFx(fc, "leave", "leave", "away", "leave", "ai", scope, "answers", vf),
+    segFx(fc, "none", "no side", "neutral", "customer_no_side", "ai", scope, "answers", vf),
+  ];
+  const offers = fx(fc, "sent_to_any", "ai", scope, "answers", (r) => (r.code.destinations ?? []).find((x) => h.activeDests([x]).size > 0) ?? vf(r));
+  const claim = join(
+    "When your own customer asks what else to look at, the AI ",
+    segs[0].num.pct === 0 && segs[1].num.pct === 0
+      ? "never says stay or leave"
+      : segs[0].num.pct === 0
+        ? join("never says stay, and says leave in ", N(segs[1].num), " of answers")
+        : segs[1].num.pct === 0
+          ? join("says stay in ", N(segs[0].num), " of answers and never says leave")
+          : join("says stay in ", N(segs[0].num), " of answers and leave in ", N(segs[1].num)),
+    `. It shows them another ${h.noun} in `,
+    N(offers),
+    offers.pct === 100 ? " of answers." : "."
+  );
+  const words: CondWords = {
+    title: `When the AI says stay, and when to look at another ${h.noun}`,
+    sub: `Share of these answers that say "stay if the customer..." or "look at another ${h.noun} if...".`,
+    towardTitle: "Stay if",
+    awayTitle: `Look at another ${h.noun} if`,
+    alsoToward: `Also said for another ${h.noun}`,
+    alsoAway: "Also said for staying",
+    toWord: "Shown",
+  };
+  const conditions = factConditions(inp, fc, ctx, words, { pickKind: false, pairs: false });
+  let lead: PanelText | undefined;
+  const a = conditions?.away ?? [];
+  if (a.length) {
+    const towardSum = (conditions?.toward ?? []).reduce((x, c) => x + c.share.pct, 0);
+    // The lead quotes the conditions without their shares (the block below carries them), so it never repeats a bar number.
+    lead = join(attachedLead(`looking at another ${h.noun}`, a.slice(0, 2).map((c) => ({ text: c.text })), "answers"), towardSum < 15 ? " It gives few conditions for staying." : "");
+  }
+  const destFind = (k: string, name: string) => (r: PoolRow) => (r.code.destinations ?? []).find((x) => h.resolve(x).key === k) ?? name;
+  const block: PanelBlock | undefined = members.length
+    ? {
+        title: `Which ${h.plural} it shows`,
+        sub: `Share of these answers that name it as an alternative. Open a rival to see how it gets its picks.`,
+        selection: comp.id,
+        rows: members.map((m) => ({ name: m.name, num: fx(fc, "sent_to", m.key, scope, "answers", destFind(m.key, m.name)), open: true as const })),
+      }
+    : undefined;
+  const rivals = members.map((m) => factRivalSmall(inp, fc, ctx, m, "Shown as an alternative", { when: "as an alternative", alt: `sent:${m.key}`, altMeasure: "sent_to" }));
+  const weighs = factWeighs(inp, fc, ctx, [{ say: "come up here", unit: "answers", tone: "neutral" }], WEIGHS_SUB_ALL);
+  const out: PositionPanel = {
+    kind: "looking_around",
+    claim,
+    ...(lead ? { lead } : {}),
+    stackLabel: "How the answer goes",
+    steps: [
+      { key: "verdict", label: "What it tells the customer to do", segments: segs },
+      { key: "offers", label: `Shows another ${h.noun}`, here: offers, hereLabel: "All answers" },
+    ],
+    ...(conditions ? { conditions } : {}),
+    lines: [],
+    ...(weighs ? { weighs } : {}),
+    ...(rivals.length ? { rivals } : {}),
+  };
+  // The list of rivals shown sits in the "shows another" step's explanation (factLookingStepDetails).
+  if (block) LOOK_BLOCK.set(out, block);
+  return out;
+}
+
+/** The looking-around card's "shows another" step explained, from facts: how long the list is, the rivals shown, who
+ * first, which of their products and your own other products (the run's one product grouping). */
+function factLookingStepDetails(inp: PanelCellInput, p: PositionPanel, ctx: Ctx, shown: PanelBlock | undefined) {
+  if (!p.detail || !p.steps.some((s) => s.key === "offers" && s.here)) return;
+  const { h } = ctx;
+  const T9 = LOOKING_TEXT;
+  const fc = FACT_CARD.get(inp)!;
+  const { book, sel, set } = fc.F;
+  const scope = fc.scope;
+  const vf = (r: PoolRow) => verdictFind(r, h);
+  const at = (when: string): Scope => ({ ...scope, when });
+  const sl = (expr: string, sc: Scope, unit: string, find: (r: PoolRow) => string) => fx(fc, "slice_share", `ai/slice:${expr}`, sc, unit, find);
+  const some = book.fact("sent_to_any", "ai", scope).k;
+  const fs = sel.selection("first_sent", "ai", scope, { top: 4 });
+  const firstTop = fs.members as SelMember[];
+  const lead = firstTop[0] && some >= ARGS_MIN && firstTop[0].count / some >= 0.3 ? firstTop[0].name : undefined;
+  const prods = set.ladder ? sel.selection("sent_products", "ai", scope, { top: 5 }) : null;
+  const own = set.ladder ? sel.selection("sent_own_products", "ai", scope, { top: 3 }) : null;
+  const sections = [
+    factSec(T9.size.title, T9.size.sub(h.plural), "neutral", [
+      { label: T9.size.few, num: sl("nsent:1-2", scope, "answers", vf) },
+      { label: T9.size.mid, num: sl("nsent:3-5", scope, "answers", vf) },
+      { label: T9.size.many, num: sl("nsent:6-999", scope, "answers", vf) },
+    ], T9.size.none, true),
+    shown ? { title: shown.title, sub: shown.sub, tone: "bad" as const, rows: shown.rows.map((r) => ({ label: r.name, num: r.num, ...(r.open ? { open: true as const } : {}) })), ...(shown.selection ? { selection: shown.selection } : {}) } : null,
+    some >= ARGS_MIN ? selSec(factSec(T9.first.title, T9.first.sub, "bad", firstTop.map((x) => ({ label: x.name, num: sl(`firstsent:${x.key}`, at("sent:any"), "answers that show a rival", () => x.name) })), T9.first.few), fs.id) : null,
+    prods && prods.members.length >= 2 ? selSec(factSec(T9.products.title(h.plural), T9.products.sub, "bad", (prods.members as SelMember[]).map((x) => ({ label: x.name, num: sl(`sentprod:${x.key}`, scope, "answers", () => x.name) })), T9.products.few), prods.id) : null,
+    own && own.members.length ? selSec(factSec(T9.own.title(h.plural), T9.own.sub, "good", (own.members as SelMember[]).map((x) => ({ label: x.name, num: sl(`sentprod:${x.key}`, scope, "answers", () => x.name) })), T9.own.few), own.id) : null,
+  ].filter((x): x is PanelDetailSection => !!x);
+  // The usual length of the list (the lower median of how many rivals an answer that shows one shows), from facts:
+  // the median is at least t when the answers showing fewer than t are no more than the median's place.
+  const place = Math.floor((some - 1) / 2);
+  const under = (hi: number) => book.fact("slice_share", `ai/slice:nsent:1-${hi}`, at("sent:any")).k;
+  const size = some === 0 ? "none" : under(5) <= place ? "long" : under(2) <= place ? "short" : "few";
+  const offersDetail: PanelStepDetail = { ...lookingOffersDetail(size, h.noun, h.plural, lead), ...(sections.length ? { sections } : {}) };
+  p.details = { verdict: p.detail, offers: offersDetail };
+  delete p.detail;
+  delete p.detailComp;
+}
+
+/** The Value card (each buyer and all buyers). */
+function factValuePanel(inp: PanelCellInput, ctx: Ctx): PositionPanel {
+  const { h } = ctx;
+  const PF = h.facts!;
+  const { sel, set } = PF;
+  const scope = doubtScope(inp, PF);
+  const comp = sel.selection("instead_brands", "you", scope);
+  const members = comp.members as SelMember[];
+  const fc = mkFactCard(inp, ctx, scope, undefined, comp, members);
+  const ladder = set.ladder;
+  const vf = (r: PoolRow) => verdictFind(r, h);
+  const factById = new Map(PF.book.rows(scope).map((f) => [f.responseId, f]));
+  const instead = (r: PoolRow) => factById.get(r.code.response_id)?.price ?? null;
+  const rivalFind = (r: PoolRow) => {
+    const pf = instead(r);
+    const keys = new Set((pf?.rivals ?? []).map((x) => x.key));
+    return (r.code.mentions ?? []).find((m) => m.framing === "recommended" && keys.has(h.resolve(m.brand).key ?? ""))?.brand ?? pf?.rivals[0]?.name ?? h.brand;
+  };
+  const ownFind = (r: PoolRow) => instead(r)?.own[0]?.written ?? h.brand;
+  const segs = [
+    segFx(fc, "yes", "worth it", "you", "worth_yes", "ai", scope, "answers", vf),
+    segFx(fc, "depends", "depends", "neutral", "worth_depends", "ai", scope, "answers", vf),
+    segFx(fc, "no", "not worth it", "away", "worth_no", "ai", scope, "answers", vf),
+  ];
+  // Where it points the buyer instead - ruling 3: every answer in one bucket (a rival, else your own, else nowhere); a
+  // brand with no ladder of its own lines has no own-cheaper option at all.
+  const insteadSegs: PanelSegment[] = [
+    ...(ladder ? [segFx(fc, "own", "only your own cheaper option", "neutral", "instead_own", "ai", scope, "answers", ownFind)] : []),
+    segFx(fc, "rival", ladder ? `a rival's ${h.noun}` : "a rival", "away", "instead_rival", "ai", scope, "answers", rivalFind),
+    segFx(fc, "nowhere", ladder ? "nowhere" : "no rival", "neutral", "instead_nowhere", "ai", scope, "answers", vf),
+  ];
+  // The product asked about (the setup's confirmed lines - configuration, not a count): the cell's line; on the
+  // all-buyers card, the lines its buyers were asked about.
+  const sibs = inp.pooled ? siblingsOf(inp, ctx.inputs).filter((x) => x.kind === "value") : [];
+  const sibLines = [...new Set(sibs.filter((x) => x.line).map((x) => x.line!))];
+  const subject = inp.pooled ? (sibLines.length === 1 ? sibLines[0] : h.brand) : inp.line ?? h.brand;
+  const lineOfSib = (x: PanelCellInput) => x.line || h.brand;
+  const configured = [...new Set(sibs.map(lineOfSib))];
+  const pl = inp.pooled ? sel.selection("price_lines", "ai", scope) : null;
+  // Several products asked about: the setup's configured lines (the table's rows are the price_lines selection).
+  const several = inp.pooled && configured.length >= 2;
+  const product = several ? listWords(configured) : inp.pooled ? sibLines[0] : inp.line ?? undefined;
+  const yes = segs[0].num;
+  const no = segs[2].num;
+  const claim = join(
+    `Asked whether ${subject} is worth it over a cheaper ${h.noun}${inp.pooled ? ", across all buyers" : " for this buyer"}, the AI says no in `,
+    N(no),
+    " of answers and ",
+    yes.pct === 0 ? "never says yes" : join("yes in ", N(yes)),
+    "."
+  );
+  // By product asked about (the all-buyers card when its buyers were asked about 2+ products): the price_lines
+  // selection, each cell a verdict fact on that line's answers.
+  let byProduct: PanelTable | undefined;
+  if (several && pl) {
+    byProduct = {
+      title: BY_PRODUCT.title,
+      sub: BY_PRODUCT.sub,
+      columns: BY_PRODUCT.columns,
+      style: "compare",
+      selection: pl.id,
+      rows: (pl.members as SelMember[]).map((l) => ({
+        label: l.name,
+        cells: [
+          ...(["worth_yes", "worth_depends", "worth_no"] as const).map((m) => fx(fc, m, "ai", { ...scope, line: l.name }, "answers about it", vf)),
+          // The buyers asked about it (the setup's cells; a buyer's cell label may carry its line after " - ").
+          T(listWords(sibs.filter((x) => lineOfSib(x) === l.name).map((x) => (x.label.endsWith(` - ${l.name}`) ? x.label.slice(0, -(l.name.length + 3)) : x.label)))),
+        ],
+      })),
+    };
+  }
+  const rivals = members.map((m) => factRivalSmall(inp, fc, ctx, m, "Named as the better option", { when: "as the better option", alt: `instead:${m.key}`, altMeasure: "named_instead", youAlt: { m: "worth_yes", find: vf } }));
+  // The explanation's lists of new facts, in order.
+  const sections: PanelDetailSection[] = [];
+  {
+    const vrows: PanelDetailSection["rows"] = [];
+    const folds: string[] = [];
+    for (const v of ["no", "depends", "yes"] as const) {
+      const f = fx(fc, "instead_rival", "ai", { ...scope, when: `v:worth_it:${v}` }, `answers that say ${segs.find((g) => g.key === v)!.label}`, rivalFind);
+      const kn = knOf(f)!;
+      if (kn.n < ARGS_MIN) continue;
+      if (kn.k >= ROW_MIN) vrows.push({ label: VALUE_VERDICT_ROW[v], num: f });
+      else folds.push(valueVerdictFold(v, kn.k === 0));
+    }
+    if (vrows.length || folds.length) sections.push({ ...VALUE_SECTIONS.byVerdict, tone: "bad", rows: vrows, ...(folds.length ? { note: join(folds.join(" ")) } : {}) });
+  }
+  if (members.length)
+    sections.push({
+      ...VALUE_SECTIONS.rivals,
+      tone: "bad",
+      selection: comp.id,
+      rows: members.map((c) => ({ label: c.name, num: fx(fc, "named_instead", c.key, scope, "answers", (r) => (r.code.mentions ?? []).find((m) => h.resolve(m.brand).key === c.key)?.brand ?? c.name), open: true as const })),
+    });
+  {
+    const ps = sel.selection("instead_products", "ai", scope, { top: 5 });
+    const items = (ps.members as SelMember[]).filter((x) => x.count >= ROW_MIN).map((x) => ({ label: x.name, num: fx(fc, "slice_share", `ai/slice:insteadprod:${x.key}`, scope, "answers", () => x.name) }));
+    if (items.length >= 2) sections.push({ ...VALUE_SECTIONS.products(h.plural), tone: "bad", rows: items, selection: ps.id });
+  }
+  if (ladder && knOf(insteadSegs[0].num)!.k > 0) {
+    const os = sel.selection("own_options", "ai", scope, { top: 3 });
+    const items = (os.members as SelMember[]).filter((x) => x.count >= ROW_MIN).map((x) => ({ label: x.name, num: fx(fc, "slice_share", `ai/slice:ownopt:${x.key}`, scope, "answers", () => x.name) }));
+    if (items.length) sections.push({ ...VALUE_SECTIONS.own, tone: "good", rows: items, selection: os.id });
+  }
+  const weighs = doubtWeighs(inp, fc, ctx, { title: "When it says worth it", say: "say worth it", slice: "v:worth_it:yes" }, { title: "When it says not worth it", say: "say not worth it", slice: "v:worth_it:no" });
+  const usual = usualOf(inp, ctx.inputs);
+  const panel: PositionPanel = {
+    kind: "value",
+    claim,
+    ...(usual ? { usualCellId: usual.id, usualKey: "All buyers" } : {}),
+    hereKey: inp.pooled ? "All buyers" : "This buyer",
+    stackLabel: "How the answer goes",
+    steps: [
+      { key: "worth", label: valueStepLabel(product, several), segments: segs },
+      { key: "instead", label: "Where it points the buyer instead", segments: insteadSegs },
+    ],
+    ...(product ? { product } : {}),
+    ...(byProduct ? { byProduct } : {}),
+    lines: [],
+    ...(weighs ? { weighs } : {}),
+    ...(rivals.length ? { rivals } : {}),
+  };
+  VALUE_EXTRA.set(panel, { sections, topRival: members[0]?.name, byProduct: !!byProduct });
+  return panel;
+}
+
 /** The smaller rival card inside What's popular, Premium vs basic and Habit, from facts: named, and named the card's
  * way (recommended - ruling 6 - or suggested instead). */
-function factRivalSmall(inp: PanelCellInput, fc: FactCard, ctx: Ctx, m: SelMember, altLabel: string, o: { when?: string; alt?: string; measure?: "recommended" }): PanelRival {
+function factRivalSmall(
+  inp: PanelCellInput,
+  fc: FactCard,
+  ctx: Ctx,
+  m: SelMember,
+  altLabel: string,
+  o: {
+    when?: string;
+    alt?: string;
+    measure?: "recommended";
+    /** The step's number as a named measure on the rival (the doubt cards: "sent_to", "named_instead") - the same
+     * answers as the `alt` slice. */
+    altMeasure?: string;
+    /** Your own number on that step (Value: the answers that say you are worth it), its examples' highlight. */
+    youAlt?: { m: string; find: (r: PoolRow) => string };
+  }
+): PanelRival {
   const { h } = ctx;
   const { sel, set } = fc.F;
   const scope = fc.scope;
@@ -4389,13 +4881,19 @@ function factRivalSmall(inp: PanelCellInput, fc: FactCard, ctx: Ctx, m: SelMembe
   const key = m.key;
   const alt = o.alt ?? `rec:${key}`;
   const surf = (k: string, rec: boolean, name: string) => (r: PoolRow) => surfOf(r, k, h, rec) ?? r.code.top_pick ?? name;
-  const named = fx(fc, "named", key, scope, "answers", surf(key, false, R));
   const problem = o.measure === "recommended";
-  const altNum = problem ? fx(fc, "recommended", key, scope, "answers", surf(key, true, R)) : fx(fc, "slice_share", `ai/slice:${alt}`, scope, "answers", surf(key, true, R));
+  const named = fx(fc, "named", key, scope, "answers", o.altMeasure ? (r: PoolRow) => surfOf(r, key, h, false) ?? R : surf(key, false, R));
+  // The doubt cards' highlight: the rival as the answer names it, else as a destination names it.
+  const destFind = (r: PoolRow) => (r.code.mentions ?? []).find((x) => h.resolve(x.brand).key === key)?.brand ?? (r.code.destinations ?? []).find((d) => h.resolve(d).key === key) ?? R;
+  const altNum = problem
+    ? fx(fc, "recommended", key, scope, "answers", surf(key, true, R))
+    : o.altMeasure
+      ? fx(fc, o.altMeasure, key, scope, "answers", destFind)
+      : fx(fc, "slice_share", `ai/slice:${alt}`, scope, "answers", surf(key, true, R));
   const altK = knOf(altNum)!.k;
   const yNamed = problem ? fx(fc, "named", "you", scope, "answers", surf(T, false, h.brand)) : undefined;
-  const yAlt = problem ? fx(fc, "recommended", "you", scope, "answers", surf(T, true, h.brand)) : undefined;
-  const claim = problem ? join(`The AI recommends ${R} in `, N(altNum), " of these answers.") : join(`The AI names ${R} as the alternative in `, N(altNum), " of these answers.");
+  const yAlt = problem ? fx(fc, "recommended", "you", scope, "answers", surf(T, true, h.brand)) : o.youAlt ? fx(fc, o.youAlt.m, "ai", scope, "answers", o.youAlt.find) : undefined;
+  const claim = problem ? join(`The AI recommends ${R} in `, N(altNum), " of these answers.") : join(`The AI names ${R} ${o.youAlt ? o.when : "as the alternative"} in `, N(altNum), " of these answers.");
   const steps: PanelStep[] = [
     yNamed ? { key: "named", label: "Named", here: yNamed, rivals: [{ name: R, num: named }], tagRank: duelTag(knOf(yNamed)!, knOf(named)!, R).tag } : { key: "named", label: "Named", rivals: [{ name: R, num: named }] },
     { key: "recommended", label: altLabel, ...(yAlt ? { here: yAlt, tagRank: duelTag(knOf(yAlt)!, knOf(altNum)!, R).tag } : {}), rivals: [{ name: R, num: altNum }] },
@@ -5104,7 +5602,7 @@ function detailOf(inp: PanelCellInput, p: PositionPanel, up: PositionPanel | und
       const key = side === "go" || side === "split" ? "proceed" : side === "avoid" ? "avoid" : "none";
       const often = segOften(v, up?.steps.find((s) => s.key === "verdict"), key);
       p.detail = buyerWorryDetail({ side, often, topRival: topRivalOf(p) });
-      worryStepDetails(inp, p, ctx);
+      (FACT_CARD.has(inp) ? factWorryStepDetails : worryStepDetails)(inp, p, ctx);
       return;
     }
     case "customer_worry": {
@@ -5113,8 +5611,7 @@ function detailOf(inp: PanelCellInput, p: PositionPanel, up: PositionPanel | und
       const side = keepSideOf(v);
       const key = side === "stay" ? "keep" : side === "none" ? "none" : "leave";
       const often = segOften(v, up?.steps.find((s) => s.key === "verdict"), key);
-      const leaveRows = inp.rows.filter((r) => r.code.keep_or_leave === "leave");
-      const noDest = leaveRows.filter((r) => h.activeDests(r.code.destinations).size === 0).length;
+      const nd = leaveNoDest(inp, ctx);
       const agreesPct = p.steps.find((s) => s.key === "agrees")?.here?.pct ?? 0;
       p.detail = customerWorryDetail({
         side,
@@ -5124,10 +5621,10 @@ function detailOf(inp: PanelCellInput, p: PositionPanel, up: PositionPanel | und
         topRival: topRivalOf(p),
         // am37: no leave clause when almost no answer says leave.
         leaveRare: segPct(v, "leave") < 5,
-        leaveNoDest: side !== "stay" && leaveRows.length > 0 && noDest > leaveRows.length / 2,
+        leaveNoDest: side !== "stay" && nd.leave > 0 && nd.noDest > nd.leave / 2,
         noun: h.noun,
       });
-      worryStepDetails(inp, p, ctx);
+      (FACT_CARD.has(inp) ? factWorryStepDetails : worryStepDetails)(inp, p, ctx);
       return;
     }
     case "looking_around": {
@@ -5138,7 +5635,7 @@ function detailOf(inp: PanelCellInput, p: PositionPanel, up: PositionPanel | und
       const shown = LOOK_BLOCK.get(p);
       const topShown = shown ? [...shown.rows].sort((a, b) => b.num.pct - a.num.pct)[0]?.name : undefined;
       p.detail = lookingAroundDetail({ side: segPct(v, "leave") >= 30 ? "leave" : side, showsMost: offers.pct >= 50, topRival: topShown });
-      lookingStepDetails(inp, p, ctx, shown);
+      (FACT_CARD.has(inp) ? factLookingStepDetails : lookingStepDetails)(inp, p, ctx, shown);
       return;
     }
     case "value": {
@@ -5651,7 +6148,7 @@ function usualFor(inp: PanelCellInput, u: PanelCellInput | undefined, ctx: Ctx):
 function stepDetailsOf(inp: PanelCellInput, p: PositionPanel, u: PanelCellInput | undefined, ctx: Ctx) {
   if (FACT_CARD.has(inp)) {
     if (p.kind === "h2h") return factH2hStepDetails(inp, p, ctx);
-    if (p.kind === "habit") return;
+    if (p.kind === "habit" || isDoubtFactKind(p.kind)) return;
     factStepDetails(inp, p, ctx);
     if (p.kind === "popular" || p.kind === "premium") factCommitsDetail(inp, p, ctx);
     return;
