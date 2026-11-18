@@ -6,6 +6,8 @@ import type { ReactNode } from "react";
 import type {
   AnswerRef,
   PanelBlock,
+  PanelBrandRow,
+  PanelOther,
   PanelCondition,
   PanelConditions,
   PanelLine,
@@ -319,6 +321,9 @@ export function StepCard({
         <TextView text={step.note} plain={plain} />
       </span>
     );
+  // The competitor group's "Other" row (comparison view): no bar of its own, it opens the brands inside it.
+  const otherRow = (comp || rivalLabel) && step.other ? <OtherList key="other" other={step.other} title={step.label} dim={dim} /> : null;
+  if (otherRow && !onSelect) body.push(otherRow);
   const cls = `block w-full rounded-[10px] border bg-surface px-3 pb-3 pt-2.5 text-left ${focus ? "border-ink ring-1 ring-ink" : "border-line"}`;
   const head = (
     <span className="mb-1 flex items-center justify-between gap-2">
@@ -329,6 +334,17 @@ export function StepCard({
       <Tag text={tag} tone={tone} />
     </span>
   );
+  // A selectable card with an Other row: the card selects, the Other row is its own toggle beside it.
+  if (onSelect && otherRow)
+    return (
+      <div className={`${cls} hover:border-ink-3`}>
+        <button type="button" onClick={onSelect} aria-pressed={focus} className="block w-full cursor-pointer text-left">
+          {head}
+          {body}
+        </button>
+        {otherRow}
+      </div>
+    );
   // A selectable card is one button: its header, bars and numbers all select it.
   if (onSelect)
     return (
@@ -611,12 +627,15 @@ export function CondColumns({ cond, comp, awayFirst, initialAll }: { cond: Panel
 
 // ---------- brands, lines, tables ----------
 
-export function BrandRows({ block, onOpen }: { block: PanelBlock; onOpen?: (name: string) => void }) {
+export function BrandRows({ block, onOpen, otherOpen }: { block: PanelBlock; onOpen?: (name: string) => void; /** Opened from a link to a brand inside "Other" (this open only). */ otherOpen?: boolean }) {
   return (
     <Blk title={block.title} sub={block.sub}>
-      {block.rows.map((r) => (
+      {block.rows.map((r) =>
+        r.other ? (
+          <OtherBar key="~other" row={r} initialOpen={otherOpen} />
+        ) : (
         <div key={r.name} className="grid grid-cols-[minmax(0,1fr)_2.75rem] items-center gap-2">
-          <BrandBar name={r.shown ?? (r.you ? "You" : r.name)} n={r.num} color={r.you ? C_YOU : C_AWAY} bold={!!r.you} />
+          <BrandBar name={r.shown ?? (r.you ? "You" : r.name)} n={r.num} color={r.you ? C_YOU : C_AWAY} bold={!!r.you} tag={r.tag} />
           {r.open && onOpen ? (
             <button type="button" onClick={() => onOpen(r.name)} className={`text-right ${T.ctl} text-primary hover:opacity-80`}>
               Open
@@ -625,17 +644,71 @@ export function BrandRows({ block, onOpen }: { block: PanelBlock; onOpen?: (name
             <span />
           )}
         </div>
-      ))}
+        )
+      )}
     </Blk>
   );
 }
 
-function BrandBar({ name, n, color, bold }: { name: string; n: PanelNum; color: string; bold?: boolean }) {
+/** The competitor group's "Other" row with its bar (the picks of every brand the group does not list); it opens the
+ * brands inside it. Closed by default. */
+function OtherBar({ row, initialOpen }: { row: PanelBrandRow; initialOpen?: boolean }) {
+  const [open, setOpen] = useState(!!initialOpen);
+  const o = row.other!;
+  return (
+    <div>
+      <div className="grid grid-cols-[minmax(0,1fr)_2.75rem] items-center gap-2">
+        <BrandBar name="Other" n={row.num} color={C_USUAL} />
+        <button type="button" onClick={() => setOpen((x) => !x)} aria-expanded={open} className={`text-right ${T.ctl} text-primary hover:opacity-80`}>
+          {open ? "Hide" : "Show"}
+        </button>
+      </div>
+      {open && (
+        <div className="mb-1 ml-3 border-l border-line pl-3">
+          {o.rows.map((x) => (
+            <div key={x.name} className="grid grid-cols-[minmax(0,1fr)_2.75rem] items-center gap-2">
+              <BrandBar name={x.name} n={x.num} color={C_USUAL} />
+              <span />
+            </div>
+          ))}
+          {o.rest && <p className={`${T.cap} py-1 text-ink-3`}>{o.rest}</p>}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** The competitor group's "Other" row in a step (comparison view): no bar; a toggle that opens the brands inside it. */
+function OtherList({ other, title, dim }: { other: PanelOther; title: string; dim?: boolean }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <span className="block">
+      <button type="button" onClick={() => setOpen((x) => !x)} aria-expanded={open} className={`${T.cap} flex w-full items-center gap-1.5 py-[3px] text-left text-ink-2 hover:text-ink`}>
+        <span aria-hidden className="inline-block w-3 text-ink-3">{open ? "▾" : "▸"}</span>
+        Other
+      </button>
+      {open && (
+        <span className="ml-3 block border-l border-line pl-3">
+          {other.rows.map((x) => (
+            <NumBar key={x.name} label={x.name} n={x.num} color={C_USUAL} dim={dim} title={`${title} - ${x.name}`} plain />
+          ))}
+          {other.rest && <span className={`block ${T.cap} py-1 text-ink-3`}>{other.rest}</span>}
+        </span>
+      )}
+    </span>
+  );
+}
+
+function BrandBar({ name, n, color, bold, tag }: { name: string; n: PanelNum; color: string; bold?: boolean; tag?: string }) {
   const opener = useOpener();
   const go = opener(n.refs, name);
   const inner = (
     <>
-      <span className={`min-w-0 truncate ${bold ? "font-semibold" : ""}`}>{name}</span>
+      <span className={`min-w-0 ${tag ? "break-words" : "truncate"} ${bold ? "font-semibold" : ""}`}>
+        {name}
+        {/* A rival listed for its head-to-head: the tag wraps under the name, small, so both read in full. */}
+        {tag && <span className={`block ${T.sec} font-normal`}>{tag}</span>}
+      </span>
       <span className="h-2 overflow-hidden rounded bg-line/60">
         <i className="block h-full rounded" style={{ width: `${Math.max(n.pct > 0 ? 1 : 0, Math.min(100, n.pct))}%`, background: color }} />
       </span>

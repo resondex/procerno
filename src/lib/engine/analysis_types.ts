@@ -434,6 +434,8 @@ export interface PanelSpan {
   tip?: string;
   /** A stable name for the one number this span holds (stat ids, stat_registry.ts): "you", "avg", "usual" ... Never drawn. */
   key?: string;
+  /** The fact the number is (fact layer: measure | subject | scope). Never drawn. */
+  fact?: string;
 }
 export type PanelText = PanelSpan[];
 
@@ -443,6 +445,20 @@ export interface PanelNum {
   pct: number;       // 0-100, one decimal, bar width only
   tip: string;       // "47 of 100 answers" - the only place counts appear
   refs?: AnswerRef[]; // <= PANEL_REFS (3), spreadRefs / pickRefs, one per assistant first
+  /** The fact the number is looked up as (fact layer, FACT_LAYER_DESIGN_2026-11-17.md: "measure|subject|scope", or
+   * "avg(<measure>)|<selection id>" for the average competitor). Never drawn. */
+  fact?: string;
+}
+
+/** The "Other" row of a card's competitor group (ratified 2026-11-17): every brand in analysis the group does not
+ * list. Inside it, the brands named in 10% of the answers or picked 5 times (sorted by this block's own number), the
+ * rest as one "N more brands" line. Closed by default. */
+export interface PanelOther {
+  rows: { name: string; num: PanelNum }[];
+  /** "3 more brands" - the brands under the floor, as a count. */
+  rest?: string;
+  /** The selection the list is (fact layer, layer 3). Never drawn. */
+  selection?: string;
 }
 
 export type PanelStepKey =
@@ -510,6 +526,8 @@ export interface PanelStep {
   rivals?: { name: string; num: PanelNum }[]; // comparison-view bars, in PositionPanel.competitorOrder
   /** am35, head-to-heads: the rival (or the rivals taken together on the all-rivals cell) drawn beside you in the default view. */
   vs?: { name: string; num: PanelNum };
+  /** Fact layer: the competitor group's "Other" row in the comparison view (no bar; it opens the list). */
+  other?: PanelOther;
 }
 
 export interface PanelDetail { heading: string; body: PanelText }
@@ -537,6 +555,8 @@ export interface PanelConditions {
   towardScope?: "rival_picked"; // h2h lost with an exception: toward rows count only answers that pick the rival
   toward: PanelCondition[]; // <= 6
   away: PanelCondition[];   // <= 6
+  /** The selections the two columns are (fact layer). Never drawn. */
+  selections?: { toward?: string; away?: string };
   note?: string;        // rule-bearing answers exist but no row clears the floor
   /** am37: the line drawn in a column with no row while the other column has rows. */
   towardNote?: string;
@@ -546,13 +566,32 @@ export interface PanelConditions {
   neutralAway?: true;
 }
 
-export interface PanelBrandRow { name: string; you?: true; num: PanelNum; open?: true; /** am37: the row's shown label when it is yours but not "You" (Value: your own cheaper option). */ shown?: string } // open <=> a PanelRival exists
-export interface PanelBlock { title: string; sub: string; rows: PanelBrandRow[] }
+export interface PanelBrandRow {
+  name: string;
+  you?: true;
+  num: PanelNum;
+  open?: true; // open <=> a PanelRival exists
+  /** am37: the row's shown label when it is yours but not "You" (Value: your own cheaper option). */
+  shown?: string;
+  /** Fact layer: a short tag drawn beside the name ("head-to-head": a rival listed for its head-to-head, not its picks). */
+  tag?: string;
+  /** Fact layer: the "Other" row (a real bar); opens the brands inside it. */
+  other?: PanelOther;
+}
+export interface PanelBlock {
+  title: string;
+  sub: string;
+  rows: PanelBrandRow[];
+  /** The selection the rows are (fact layer). Never drawn. */
+  selection?: string;
+}
 export interface PanelLine {
   label: string;
   value: PanelText;
   /** A stable name for the line (stat ids, stat_registry.ts): "commit", "share", "picked", "products". Never drawn. */
   key?: string;
+  /** The selection a list line is (fact layer). Never drawn. */
+  selection?: string;
 }
 
 export interface PanelTable {
@@ -572,9 +611,9 @@ export interface RivalStepDetail {
   body: PanelText;
   rows?: { label: string; rival: PanelNum; you: PanelNum }[]; // named: named-not-recommended, of those named to avoid
   /** am35: what happens to recommendations that do NOT end as the pick (the step bars show the pick itself, so `picked` is not carried). */
-  outcomes?: { name: string; you?: true; picked?: PanelNum; lost: PanelNum; none: PanelNum }[];
+  outcomes?: { name: string; you?: true; picked?: PanelNum; lost: PanelNum; none: PanelNum; outside?: PanelNum }[];
   both?: PanelText;  // "recommends both of you in X% ... picks R Y% and you Z%"
-  outcomeLabels?: { picked?: string; lost: string; none: string }; // the outcome line's words (a column per label present)
+  outcomeLabels?: { picked?: string; lost: string; none: string; outside?: string }; // the outcome line's words (a column per label present)
 }
 
 /** am34: what explains one step of a question-type panel (the step a reader
@@ -587,10 +626,11 @@ export interface PanelStepDetail {
   columns?: { rival: string; you: string; rivalIsUsual?: true };
   rows?: { label: string; rival: PanelNum; you: PanelNum }[];
   /** am35: one new fact as rows of one number each (who takes the pick when the AI recommends you and picks another; what happens when it picks neither of the two). */
-  list?: { title: string; rows: { label: string; num: PanelNum }[] };
-  /** am35: the outcomes the step bars do not show (lose to another, no single pick); `picked` is not carried. */
-  outcomes?: { name: string; you?: true; usual?: true; picked?: PanelNum; lost: PanelNum; none: PanelNum }[];
-  outcomeLabels?: { picked?: string; lost: string; none: string };
+  list?: { title: string; rows: { label: string; num: PanelNum }[]; selection?: string };
+  /** am35: the outcomes the step bars do not show (lose to another, no single pick); `picked` is not carried.
+   * Ruling 12: a pick outside the category is its own share (`outside`), never "no single pick". */
+  outcomes?: { name: string; you?: true; usual?: true; picked?: PanelNum; lost: PanelNum; none: PanelNum; outside?: PanelNum }[];
+  outcomeLabels?: { picked?: string; lost: string; none: string; outside?: string };
   both?: PanelText;
   /** am48: a labelled box around the heading and sentence ("The exception"). */
   callout?: string;
@@ -615,6 +655,8 @@ export interface PanelDetailSection {
 export interface PanelWeighs {
   title: string;
   sub: string;
+  /** The selection the columns' topics are (fact layer). Never drawn. */
+  selection?: string;
   columns: {
     title?: string;
     tone: PanelTone;
@@ -676,6 +718,8 @@ export interface PositionPanel {
    * and the table's line is drawn from. Data for the Brief, never drawn. */
   checklist?: string[];
   competitorOrder?: string[];    // brand names behind PanelStep.rivals
+  /** The selection behind competitorOrder (fact layer). Never drawn. */
+  competitorSelection?: string;
   competitors?: PanelBlock;      // "Who takes the picks" / "Which ... it names instead" / "... it shows" (comparison view only)
   conditions?: PanelConditions;
   lines?: PanelLine[];

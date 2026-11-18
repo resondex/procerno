@@ -15,7 +15,7 @@ export interface PanelReveal {
   /** "Show competitors" on, for this open only. */
   competitors?: true;
   /** A fold opened: the conditions' "See all", or a step explanation's "Show all ... competitors". */
-  fold?: "conditions" | "outcomes";
+  fold?: "conditions" | "outcomes" | "other";
   /** A rival's own card inside this cell (panel 11). */
   rival?: string;
 }

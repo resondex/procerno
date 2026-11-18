@@ -729,7 +729,9 @@ for (const project of projects) {
         const mN = claimText.match(/\b(\w+) other brands? takes?\b/i);
         if (mN) {
           const n = WORDN[mN[1].toLowerCase()] ?? parseInt(mN[1], 10);
-          const listedN = (p.competitors?.rows ?? []).filter((r) => !r.you).length;
+          // Step 4: the What to buy and switching cards list the ratified competitor group - head-to-head rivals that
+          // take no picks here and an "Other" row too; the claim counts the listed rivals that take picks.
+          const listedN = (p.competitors?.rows ?? []).filter((r) => !r.you && !r.other && (p.kind !== "buy" && p.kind !== "switching" ? true : r.num.pct > 0)).length;
           if (n !== listedN) failures.push(`${project.brand}: ${id} claim says ${mN[1]} other brands, the list shows ${listedN}`);
         }
         for (const r of p.competitors?.rows ?? []) if (!r.you && keyOfName(r.name) === targetKey) failures.push(`${project.brand}: ${id} competitors list the tracker's own brand as "${r.name}"`);

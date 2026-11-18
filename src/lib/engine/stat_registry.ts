@@ -39,6 +39,8 @@ export interface Stat {
    * decides with (rateOf, brief_figs.ts), so a sentence decides from the very figure it prints. */
   k?: number;
   n?: number;
+  /** The fact the number is (fact layer), when the card looked it up. */
+  fact?: string;
   /** The card to open. */
   dest: StatDest;
   at: "default" | "one";
@@ -139,7 +141,7 @@ export function buildStatRegistry(map: Pick<AnalysisMapView, "positions" | "riva
     const view: StatView = { at: e.at, ...(e.reveal ? { reveal: e.reveal } : {}), words: e.words };
     const s = byId.get(id);
     if (!s) {
-      byId.set(id, { id, value: e.value, ...(e.pct !== undefined ? { pct: e.pct } : {}), ...(e.kn ? { k: e.kn.k, n: e.kn.n } : {}), dest, at: e.at, ...(e.reveal ? { reveal: e.reveal } : {}), words: e.words, views: [view] });
+      byId.set(id, { id, value: e.value, ...(e.pct !== undefined ? { pct: e.pct } : {}), ...(e.kn ? { k: e.kn.k, n: e.kn.n } : {}), ...(e.fact ? { fact: e.fact } : {}), dest, at: e.at, ...(e.reveal ? { reveal: e.reveal } : {}), words: e.words, views: [view] });
       return;
     }
     if (s.value !== e.value) conflicts.set(id, (conflicts.get(id) ?? new Set([s.value])).add(e.value));
@@ -186,7 +188,8 @@ export function buildStatRegistry(map: Pick<AnalysisMapView, "positions" | "riva
       for (const s of byId.values()) {
         if (!s.id.startsWith(pre) || s.id.includes("#")) continue;
         const rest = s.id.slice(pre.length);
-        if (rest.includes("/")) continue;
+        // The competitor group's Other row ("~other") is not a brand.
+        if (rest.includes("/") || rest.startsWith("~")) continue;
         out.push({ name: rest.replace(/∕/g, "/"), you: rest === "you", stat: s });
       }
       return out;

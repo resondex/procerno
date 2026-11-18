@@ -59,6 +59,9 @@ export interface CondStmt {
   groups: string[];
   /** On a group statement: the theme unit its wording falls in for this answer's buying situation (null = none). */
   theme: string | null;
+  /** The run's condition keys (rules explorer RuleGroup.cond - one grouping per run, ruling 14) its groups carry: the
+   * same key on the other side is the same condition stated for the other side. Empty on the Map's own units. */
+  keys: string[];
 }
 
 const shortHash = (s: string) => createHash("sha256").update(s).digest("hex").slice(0, 10);
@@ -93,22 +96,26 @@ function mapRule(rule: { choice: string; product?: string }, schema: string, res
  * Fills `conds` on every answer of the set that carries decision rules (null stays null: the schema asks none, or a
  * source from before rules). Returns whether the run's theme maps exist (the cards' themed path).
  */
-export async function attachConditions(set: AnswerFactSet, data: ViewData): Promise<{ themed: boolean }> {
-  if (process.env.OPENAI_API_KEY) throw new Error("fact layer: attachConditions reads saved condition groupings only and runs keyless (it would group afresh when none is saved)");
+export async function attachConditions(set: AnswerFactSet, data: ViewData, opts: { map?: boolean } = {}): Promise<{ themed: boolean }> {
+  // Ruling 14: one grouping per run. `map: false` reads only the run-wide grouping and themes (what the map compute
+  // itself reads, so it adds no model call); the Map's own grouping (step 2) is read only by the proofs, keyless.
+  const withMap = opts.map !== false;
+  if (withMap && process.env.OPENAI_API_KEY) throw new Error("fact layer: attachConditions reads saved condition groupings only and runs keyless (it would group afresh when none is saved)");
   const byId = new Map<string, AnswerFact>(set.facts.map((f) => [f.responseId, f]));
   const codeById = new Map(data.codes.map((c) => [c.response_id, c]));
   const stmts = new Map<string, Map<string, CondStmt>>();
-  const add = (rid: string, s: Omit<CondStmt, "toKeys" | "groups" | "theme"> & { toKeys?: string[]; groups?: string[]; theme?: string | null }) => {
+  const add = (rid: string, s: Omit<CondStmt, "toKeys" | "groups" | "theme" | "keys"> & { toKeys?: string[]; groups?: string[]; theme?: string | null; keys?: string[] }) => {
     if (!byId.has(rid)) return;
     let m = stmts.get(rid);
     if (!m) stmts.set(rid, (m = new Map()));
     const prev = m.get(s.unit);
     const toKeys = s.toKeys ?? s.to.map((n) => set.resolve(n).key);
     if (!prev) {
-      m.set(s.unit, { ...s, to: [...s.to], toKeys: [...toKeys], cards: [...s.cards], cardTo: [...s.cardTo], groups: [...(s.groups ?? [])], theme: s.theme ?? null });
+      m.set(s.unit, { ...s, to: [...s.to], toKeys: [...toKeys], cards: [...s.cards], cardTo: [...s.cardTo], groups: [...(s.groups ?? [])], theme: s.theme ?? null, keys: [...(s.keys ?? [])] });
       return;
     }
     for (const g of s.groups ?? []) if (!prev.groups.includes(g)) prev.groups.push(g);
+    for (const k of s.keys ?? []) if (!prev.keys.includes(k)) prev.keys.push(k);
     s.to.forEach((n, i) => {
       if (!prev.to.includes(n)) {
         prev.to.push(n);
@@ -140,12 +147,14 @@ export async function attachConditions(set: AnswerFactSet, data: ViewData): Prom
       const base = { said: ar.said.trim(), to: ar.to, cards: ar.cards ?? [], cardTo: ar.cardTo ?? [] };
       const st = tm && pool ? tm.stOf.get(slKey(rt.sitOf.get(ar.intent) ?? EVERY_BUYER, g.label)) : undefined;
       const theme = st !== undefined && tm && pool ? `t:${pool}:${tm.totOf[st]}` : null;
-      add(rid, { unit: `g:${g.id}`, grouping: "group", side, label: g.label, ...base, groups: [g.id], theme });
-      if (theme && tm && st !== undefined) add(rid, { unit: theme, grouping: "theme", side: pool!, label: tm.totName[tm.totOf[st]], ...base, groups: [g.id] });
+      add(rid, { unit: `g:${g.id}`, grouping: "group", side, label: g.label, ...base, groups: [g.id], theme, keys: [g.cond] });
+      if (theme && tm && st !== undefined) add(rid, { unit: theme, grouping: "theme", side: pool!, label: tm.totName[tm.totOf[st]], ...base, groups: [g.id], keys: [g.cond] });
     }
   }
 
-  // 2. The Map's grouping (both-ways pairs, Premium vs basic rows), read from its saved key map.
+  // 2. The Map's grouping (both-ways pairs, Premium vs basic rows), read from its saved key map (proofs only).
+  if (withMap) await attachMapUnits();
+  async function attachMapUnits() {
   const counts = new Map<string, number>();
   for (const f of set.facts) {
     const c = codeById.get(f.responseId);
@@ -176,6 +185,7 @@ export async function attachConditions(set: AnswerFactSet, data: ViewData): Prom
         if (tier) add(f.responseId, { unit: `p:${tier}:${ck}`, grouping: "tier", side: tier, label: w, said: w, to: tTo, toKeys: tKeys, cards: prod ? [prod] : [], cardTo: prod ? [tTo[0] ?? null] : [] });
       }
     }
+  }
   }
 
   for (const f of set.facts) {

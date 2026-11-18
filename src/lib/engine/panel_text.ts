@@ -54,7 +54,7 @@ export function poss(name: string): string {
 /** Plain text. */
 export const T = (t: string): PanelSpan => ({ t });
 /** A stated number: its value, answers and counts. */
-export const N = (n: PanelNum): PanelSpan => ({ t: n.value, ...(n.refs ? { refs: n.refs } : {}), tip: n.tip });
+export const N = (n: PanelNum): PanelSpan => ({ t: n.value, ...(n.refs ? { refs: n.refs } : {}), tip: n.tip, ...(n.fact ? { fact: n.fact } : {}) });
 /** N with a stable name for its number (stat ids, stat_registry.ts); the name is never drawn. */
 export const NK = (key: string, n: PanelNum): PanelSpan => ({ ...N(n), key });
 /** A stated fact (a condition, a product) with its answers. */

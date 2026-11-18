@@ -160,7 +160,29 @@ export function factBook(set: AnswerFactSet) {
     memo.set(id, out);
     return out;
   }
-  return { fact, countUnchecked, rows };
+  /** The answers behind a fact: its base and its numerator (the example answers a card opens). */
+  const hitMemo = new Map<string, { base: AnswerFact[]; hit: AnswerFact[] }>();
+  function answers(measureId: string, subject: string, scope: Scope): { base: AnswerFact[]; hit: AnswerFact[] } {
+    const f = fact(measureId, subject, scope);
+    const got = hitMemo.get(f.id);
+    if (got) return got;
+    const m = MEASURE_BY_ID.get(measureId)!;
+    const { head, arg, condRaw, sliceRaw } = normSubject(subject);
+    const cond = condRaw ? parseCond(condRaw) : null;
+    const ctx: MeasureCtx = { set, brand: head === "ai" || head === "rival" ? null : head, rival: head === "rival", arg, cond: cond?.spec ?? null, slice: sliceRaw ? slicePred(sliceRaw, set) : null };
+    const base: AnswerFact[] = [];
+    const hit: AnswerFact[] = [];
+    for (const r of rows(scope)) {
+      if (!m.base(r, ctx)) continue;
+      base.push(r);
+      if (m.hit(r, ctx)) hit.push(r);
+    }
+    if (base.length !== f.n || hit.length !== f.k) throw new Error(`fact layer: answers of ${f.id} do not reproduce its counts`);
+    const out = { base, hit };
+    hitMemo.set(f.id, out);
+    return out;
+  }
+  return { fact, countUnchecked, rows, answers };
 }
 
 export type FactBook = ReturnType<typeof factBook>;

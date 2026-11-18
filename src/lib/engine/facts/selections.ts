@@ -338,6 +338,8 @@ export interface ProductRow {
   /** The row's shown name: its most written form. */
   name: string;
   key: string;
+  /** A stable id for the row: the brand and the surviving group's distinctive words ("<key>~<word>_<word>"). */
+  id: string;
   /** Every form in the row. */
   forms: string[];
   answers: Set<string>;
@@ -420,16 +422,42 @@ export function productGroups(items: ProductItem[], set: AnswerFactSet, mode: Pr
       }
     }
   }
-  return [...by.values()]
-    .map((g) => ({ name: [...g.forms.entries()].sort((a, b) => b[1] - a[1] || a[0].length - b[0].length || a[0].localeCompare(b[0]))[0][0], key: g.key, forms: [...g.forms.keys()].sort(), answers: g.answers }))
+  return [...by.entries()]
+    .map(([gk, g]) => ({ name: [...g.forms.entries()].sort((a, b) => b[1] - a[1] || a[0].length - b[0].length || a[0].localeCompare(b[0]))[0][0], key: g.key, id: `${g.key}~${gk.slice(gk.indexOf("|") + 1).replace(/\s+/g, "_")}`, forms: [...g.forms.keys()].sort(), answers: g.answers }))
     .sort((a, b) => b.answers.size - a.answers.size || a.name.localeCompare(b.name));
+}
+
+/** A product name's distinctive words, as productGroups (modes "merge" / "split") keys it: its words minus the
+ * category's nouns, small words and the brand's own name words. */
+export function productTokens(written: string, key: string, set: AnswerFactSet, category: string): string[] {
+  const nouns = new Set([...famTokens(productNoun(category)), ...famTokens(pluralNoun(category))]);
+  const o = brandNameTokens(set, key);
+  return famTokens(cleanProduct(written) || written.trim()).filter((t) => !nouns.has(t) && !PRODUCT_STOP.has(t) && !o.has(t));
+}
+
+/** The form a product name is grouped under (productGroups' own cleaning). */
+export const productForm = (written: string) => cleanProduct(written) || written.trim();
+
+/**
+ * A product's short name (ruling 15): its full name with the brand's own leading name words dropped ("<Brand> Gold
+ * Card" -> "Gold Card"). A one-word or numeric rest, or a rest that runs on in lower case, keeps the full name
+ * ("Pixel 11 Pro", "Amex Platinum").
+ */
+export function shortProductName(full: string, own: Set<string>): string {
+  const words = full.trim().split(/\s+/);
+  let i = 0;
+  while (i < words.length && famTokens(words[i]).length > 0 && famTokens(words[i]).every((t) => own.has(t))) i++;
+  const rest = words.slice(i).join(" ").replace(/^[^A-Za-z0-9]+/, "").trim();
+  if (!rest || !famTokens(rest).some((t) => !own.has(t))) return full;
+  if (i > 0 && (/^[a-z]/.test(rest) || /^\d/.test(rest) || rest.split(/\s+/).length === 1)) return full;
+  return rest;
 }
 
 /* ------------------------------- conditions ------------------------------- */
 
 /** Which saved grouping a card's condition rows read (conditions.ts): the run's themes (with the "elsewhere" groups
  * beside the away themes), the Map's grouping when the run has no themes, or the Premium vs basic card's tier rows. */
-export type CondFlavor = "themed" | "map" | "tier";
+export type CondFlavor = "themed" | "map" | "tier" | "group";
 
 export interface CondRow {
   /** The row's label (sentence case, as the cards print it). */
@@ -440,6 +468,8 @@ export interface CondRow {
   count: number;
   /** The answers, for a proof. */
   answers: Set<string>;
+  /** The label as the grouping names it (before the row's sentence-case normalising). */
+  raw?: string;
 }
 
 const condKey = (label: string) => condRowLabel(label).toLowerCase().replace(/[^a-z0-9 ]+/g, " ").replace(/\s+/g, " ").trim();
@@ -455,21 +485,25 @@ interface Src {
 /** A side's sources in a scope: one per unit, named as the cards name it (a theme or group by its name; a Map or
  * tier unit by its most stated wording among the scope's answers), rows stating the same thing in other case or
  * punctuation merged (the larger one's name kept). */
-function condSources(rows: Fact[], side: "toward" | "away", flavor: CondFlavor): Src[] {
-  const ok = (u: string) => (flavor === "themed" ? u.startsWith(`t:${side}:`) || (side === "away" && u.startsWith("g:elsewhere:")) : u.startsWith(`${flavor === "map" ? "m" : "p"}:${side}:`));
+function condSources(rows: Fact[], side: "toward" | "away", flavor: CondFlavor, to?: string): Src[] {
+  // "group": the run-wide groups themselves (ruling 14), when the run has no themes.
+  const ok = (u: string, c?: { grouping: string; side: string }) =>
+    flavor === "themed" ? u.startsWith(`t:${side}:`) || (side === "away" && u.startsWith("g:elsewhere:")) : flavor === "group" ? !!c && c.grouping === "group" && c.side === side : u.startsWith(`${flavor === "map" ? "m" : "p"}:${side}:`);
   const label = new Map<string, string>();
   const said = new Map<string, Map<string, number>>();
   const ids = new Map<string, Set<string>>();
   const order: string[] = [];
   for (const f of rows)
     for (const c of f.conds ?? []) {
-      if (!ok(c.unit)) continue;
+      if (!ok(c.unit, c)) continue;
+      // A rival's own card: only the statements that send the buyer to that rival.
+      if (to && !c.toKeys.includes(to)) continue;
       if (!ids.has(c.unit)) {
         ids.set(c.unit, new Set());
         order.push(c.unit);
       }
       ids.get(c.unit)!.add(f.responseId);
-      if (flavor === "themed") label.set(c.unit, c.label);
+      if (flavor === "themed" || flavor === "group") label.set(c.unit, c.label);
       else {
         const m = said.get(c.unit) ?? new Map<string, number>();
         m.set(c.said, (m.get(c.said) ?? 0) + 1);
@@ -512,6 +546,12 @@ export interface SelectionOpts {
   /** The too-obvious list the topics are filtered for (panel_filter.ts). */
   list?: OmissionList;
   /** leader / visibility_brands: whose list (the subject is never its own leader). */
+  /** cond_destinations / cond_products / cond_pairs: the row's condition units; cond_destinations: count only the
+   * statements that send the buyer to this brand (a rival's own card). */
+  units?: string[];
+  to?: string;
+  /** product_picks: the brand whose picks are listed (entry id) and how many products. */
+  brand?: string;
 }
 
 /** A weighs column: its topics in drawn order (code and the side's count), or too few answers to size. */
@@ -550,7 +590,11 @@ export function selectionBook(set: AnswerFactSet, book: FactBook, data?: ViewDat
   /** Members and extras are typed as the union of every selection's; each selection fills only its own fields. */
   function selection(name: string, subject: string, scope: Scope, opts: SelectionOpts = {}): AnySelection {
     const params =
-      name === "competitors" ? `~${opts.mode ?? "ratified"}${opts.mode === "as_cards" ? `:${opts.card}` : ""}` : name === "conditions_shown" ? `~${opts.side}:${opts.flavor}${opts.towardOnly ? `@${opts.towardOnly}` : ""}` : name === "weighs_shown" ? `~${JSON.stringify(opts.sides ?? [{}])}:${opts.top ?? 3}:${opts.list ?? "weighs"}` : "";
+      name === "cond_destinations" || name === "cond_products"
+        ? `~${(opts.units ?? []).join("+")}${opts.to ? `>to:${opts.to}` : ""}`
+        : name === "product_picks"
+          ? `~${opts.brand ?? "you"}:${opts.top ?? 2}`
+          : name === "competitors" ? `~${opts.mode ?? "ratified"}${opts.mode === "as_cards" ? `:${opts.card}` : ""}` : name === "conditions_shown" ? `~${opts.side}:${opts.flavor}${opts.towardOnly ? `@${opts.towardOnly}` : ""}${opts.to ? `>to:${opts.to}` : ""}` : name === "weighs_shown" ? `~${JSON.stringify(opts.sides ?? [{}])}:${opts.top ?? 3}:${opts.list ?? "weighs"}` : "";
     const fullName = `${name}${params}`;
     const id = selectionId(fullName, subject, scope);
     const hit = memo.get(id);
@@ -616,14 +660,17 @@ export function selectionBook(set: AnswerFactSet, book: FactBook, data?: ViewDat
       case "conditions_shown": {
         const side = opts.side ?? "toward";
         const flavor = opts.flavor ?? "themed";
-        let t = condSources(rows, "toward", flavor);
-        let a = condSources(rows, "away", flavor);
-        // The same condition on both sides under near-identical names: one label, the larger side's.
+        let t = condSources(rows, "toward", flavor, side === "toward" ? undefined : opts.to);
+        let a = condSources(rows, "away", flavor, opts.to);
+        // The same condition on both sides under near-identical names: one label, the larger side's (not on a rival's
+        // own card, whose toward rows are the cell's own).
         const tBy = new Map<string, Src>();
+        if (!opts.to)
         for (const x of t) if (condCore(x.label)) tBy.set(condCore(x.label), x);
         t = t.map((x) => ({ ...x }));
         const tCopy = new Map(t.map((x) => [condCore(x.label), x]));
-        a = a.map((x) => {
+        if (!opts.to)
+          a = a.map((x) => {
           const k = condCore(x.label);
           const tt = k ? tBy.get(k) : undefined;
           if (!tt) return x;
@@ -642,7 +689,7 @@ export function selectionBook(set: AnswerFactSet, book: FactBook, data?: ViewDat
           .filter((x) => x.count >= SEL_FLOORS.rowMin)
           .sort((x, y) => y.count - x.count || x.raw.localeCompare(y.raw))
           .slice(0, SEL_FLOORS.condRows)
-          .map(({ label, units, count, answers }) => ({ label, units, count, answers }));
+          .map(({ label, units, count, answers, raw }) => ({ label, units, count, answers, raw }));
         out = {
           id,
           name: fullName,
@@ -690,6 +737,101 @@ export function selectionBook(set: AnswerFactSet, book: FactBook, data?: ViewDat
           members: columns,
           extras: { versus },
         };
+        break;
+      }
+      case "cond_destinations": {
+        // Where a condition row sends the buyer: the active brands its statements name, among the row's answers that
+        // name a destination (2 at least, and 15% of them), most first, top 3 (the cards' routeShares rule).
+        const units = new Set(opts.units ?? []);
+        const by = new Map<string, { name: string; ids: Set<string> }>();
+        let routed = 0;
+        for (const f of rows) {
+          const st = (f.conds ?? []).filter((c) => units.has(c.unit) && (!opts.to || c.toKeys.includes(opts.to)));
+          if (!st.length) continue;
+          const to = new Map<string, string>();
+          for (const c of st) c.toKeys.forEach((k, i) => to.set(k, c.to[i] ?? set.nameOf(k)));
+          if (!to.size) continue;
+          routed++;
+          for (const [k, name] of to) {
+            const t = by.get(k) ?? { name, ids: new Set<string>() };
+            t.ids.add(f.responseId);
+            by.set(k, t);
+          }
+        }
+        const members = rank(by).filter((m) => m.count >= 2 && m.count / Math.max(1, routed) >= 0.15).slice(0, 3);
+        out = { id, name: fullName, subject, scope, rule: "The active brands a condition row's statements send the buyer to, among the row's answers that name a destination: 2 answers and 15% of them at least, most first (ties by name), top 3.", members, extras: { base: routed } };
+        break;
+      }
+      case "cond_products": {
+        // The tracker's own products a toward row's statements name (the run's product grouping, short names): the two
+        // named in the most answers (ties by name).
+        const units = new Set(opts.units ?? []);
+        const by = new Map<string, { name: string; ids: Set<string> }>();
+        for (const f of rows)
+          for (const c of f.conds ?? []) {
+            if (!units.has(c.unit)) continue;
+            for (const card of c.cards) {
+              const pid = card.trim() && set.productOf ? set.productOf(T, card) : null;
+              if (!pid) continue;
+              const t = by.get(pid) ?? { name: set.products!.get(pid)!.short, ids: new Set<string>() };
+              t.ids.add(f.responseId);
+              by.set(pid, t);
+            }
+          }
+        out = { id, name: fullName, subject, scope, rule: "The tracker's products (the run's one product grouping) a toward row's statements name: the two named in the most answers, ties by name.", members: rank(by).slice(0, 2), extras: {} };
+        break;
+      }
+      case "product_picks": {
+        // Which of a brand's products the AI picks, out of every pick of the brand: the run's products by the answers
+        // picking each, plus one "~none" member for the picks naming no specific product; most first (ties by name),
+        // top `top` (default 2). Members are product ids ("~none" for that row); names are the short names.
+        const key = opts.brand ?? T;
+        const by = new Map<string, { name: string; ids: Set<string> }>();
+        for (const f of rows) {
+          if (f.pick.state !== "in_analysis" || f.pick.key !== key) continue;
+          const pid = f.pick.product ?? "~none";
+          const t = by.get(pid) ?? { name: pid === "~none" ? "~none" : set.products!.get(pid)!.short, ids: new Set<string>() };
+          t.ids.add(f.responseId);
+          by.set(pid, t);
+        }
+        out = { id, name: fullName, subject, scope, rule: "Of every pick of the brand: its products (the run's one product grouping) and the picks naming no specific product, by the answers picking each, most first, ties by name.", members: rank(by).slice(0, opts.top ?? 2), extras: { base: rows.filter((f) => f.pick.state === "in_analysis" && f.pick.key === key).length } };
+        break;
+      }
+      case "cond_pairs": {
+        // Ruling 14: the same condition stated on both sides, under the run's ONE condition grouping - a condition key
+        // stated toward in some answers and away in others, each side at least 3 answers and 5% of the answers that
+        // state conditions, the smaller side at least half the larger, never a reason paired with its negation (the
+        // both-ways rule). Members: one per key, with the two sides' group units.
+        const bearing = rows.filter((f) => f.conds !== null).length;
+        const sides = { toward: new Map<string, { units: Set<string>; ids: Set<string>; said: Map<string, number> }>(), away: new Map<string, { units: Set<string>; ids: Set<string>; said: Map<string, number> }>() };
+        for (const f of rows)
+          for (const c of f.conds ?? []) {
+            if (c.grouping !== "group") continue;
+            for (const k of c.keys) {
+              const m = sides[c.side];
+              const t = m.get(k) ?? { units: new Set<string>(), ids: new Set<string>(), said: new Map<string, number>() };
+              t.units.add(c.unit);
+              t.ids.add(f.responseId);
+              t.said.set(c.said, (t.said.get(c.said) ?? 0) + 1);
+              m.set(k, t);
+            }
+          }
+        const NEG = /\b(?:not|no|never|without|rarely|seldom|hardly|hate|avoid|lack|won't|can't|cannot)\b|n't\b|n’t\b/i;
+        const top = (m: Map<string, number>) => [...m.entries()].sort((x, y) => y[1] - x[1] || x[0].length - y[0].length || (x[0] < y[0] ? -1 : 1))[0][0];
+        const members: { key: string; name: string; count: number; toward: string[]; away: string[] }[] = [];
+        for (const [k, t] of sides.toward) {
+          const a = sides.away.get(k);
+          if (!a) continue;
+          const lt = top(t.said);
+          const la = top(a.said);
+          if (isDefaultCondition(lt) || isDefaultCondition(la)) continue;
+          const lo = Math.min(t.ids.size, a.ids.size);
+          if (lo < Math.max(3, 0.05 * bearing) || lo < 0.5 * Math.max(t.ids.size, a.ids.size)) continue;
+          if (NEG.test(lt) !== NEG.test(la)) continue;
+          members.push({ key: k, name: t.ids.size >= a.ids.size ? lt : la, count: t.ids.size + a.ids.size, toward: [...t.units].sort(), away: [...a.units].sort() });
+        }
+        members.sort((x, y) => y.count - x.count || x.name.localeCompare(y.name));
+        out = { id, name: fullName, subject, scope, rule: "Conditions stated on both sides under the run's one condition grouping: each side 3 answers and 5% of the answers stating conditions at least, the smaller side half the larger, never a reason paired with its negation; most stated first.", members: members as unknown as SelMember[], extras: { base: bearing } };
         break;
       }
       case "visibility_brands": {

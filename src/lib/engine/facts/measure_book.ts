@@ -223,6 +223,15 @@ export const MEASURES: readonly Measure[] = [
     print: "whole",
   },
   {
+    id: "recommended_outside_category",
+    name: "Recommended, and the pick is outside the category",
+    subject: "brand",
+    legal: PICK_TYPES,
+    base: (f, c) => recommended(f, c.brand),
+    hit: (f) => f.pick.state === "outside_category",
+    print: "whole",
+  },
+  {
     id: "names_any_brand",
     name: "The answer names any brand",
     subject: "ai",
@@ -317,6 +326,14 @@ export const MEASURES: readonly Measure[] = [
   /* -- a slice of the scope's answers, as a share of them: "picks another brand", "sticks with you", "suggests
    * another brand" - the slice states what it counts (slices.ts). -- */
   { id: "slice_share", name: "In the slice", subject: "ai", slice: true, legal: ALL, base: all, hit: (f, c) => !!c.slice && c.slice(f), print: "whole" },
+
+  /* -- a slice's share of the picks of brands in analysis (the "Other" bar of a card's competitor group: the picks
+   * of every brand in analysis the group does not list, ruling 8's base) -- */
+  { id: "slice_share_of_picks", name: "Share of picks, in the slice", subject: "ai", slice: true, legal: PICK_TYPES, base: inAnalysisPick, hit: (f, c) => !!c.slice && c.slice(f), print: "whole" },
+
+  /* -- which of a brand's products it picks: the scope's `when` is the brand's picks ("pick:<key>"), EVERY pick of it,
+   * including the picks that name no specific product (those are their own row, slice "pickprod:none") -- */
+  { id: "pick_product_share", name: "Of the brand's picks (every pick, including those naming no specific product), the share naming the product", subject: "ai", slice: true, legal: PICK_TYPES, base: all, hit: (f, c) => !!c.slice && c.slice(f), print: "whole" },
 
   /* -- arguments (ruling 2) -- */
   { id: "argues", name: "Argues it", subject: "ai", arg: true, legal: ALL, base: all, hit: argues, print: "whole" },

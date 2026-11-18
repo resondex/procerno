@@ -38,6 +38,8 @@ export interface WalkEntry extends IndexEntry {
   /** The exact counts behind the number (stage 3): read from the number's own tip ("k of n ..."), which every
    * PanelNum and every keyed span built from one carries - so the reading is the same in process or after JSON. */
   kn?: KN;
+  /** The fact the number is (fact layer), when the card looked it up. */
+  fact?: string;
 }
 
 export interface KN {
@@ -50,7 +52,7 @@ export function knOfTip(tip: string | undefined): KN | undefined {
   return m ? { k: Number(m[1]), n: Number(m[2]) } : undefined;
 }
 
-type Raw = { value: string; words: string; path: string; pct?: number; kn?: KN };
+type Raw = { value: string; words: string; path: string; pct?: number; kn?: KN; fact?: string };
 type Out = Raw[];
 
 /**
@@ -79,11 +81,13 @@ const k = (s: string | number) => String(s).replace(/\//g, "∕");
 interface W {
   out: Out;
   P: Paths;
+  /** The "Other" rows are open (the competitor group's fold). */
+  other?: boolean;
 }
 const num = (w: W, n: PanelNum | undefined, words: string, path: string) => {
   if (!n) return;
   const kn = knOfTip(n.tip);
-  w.out.push({ value: n.value, words, path: w.P.id(path, n), pct: n.pct, ...(kn ? { kn } : {}) });
+  w.out.push({ value: n.value, words, path: w.P.id(path, n), pct: n.pct, ...(kn ? { kn } : {}), ...(n.fact ? { fact: n.fact } : {}) });
 };
 /** The numbers in a sentence: a keyed span (PanelSpan.key) holding one number is `<path>/<key>`, else `<path>/<i>`
  * (i = the number's order in the sentence). */
@@ -107,7 +111,9 @@ const text = (w: W, t: PanelText | string | undefined, path: string, words?: str
     const kn = keyed ? knOfTip(b!.span.tip) : undefined;
     // A share under half a point prints as "<1%": the sign is part of the figure the card shows.
     const shown = m.index! > 0 && s[m.index! - 1] === "<" ? `<${m[0]}` : m[0];
-    w.out.push({ value: shown, words: `${words ? `${words} ` : ""}${s}`, path: w.P.id(p, b ? b.span : (t as unknown) ?? path), ...(kn ? { kn } : {}) });
+    // A span holding exactly this one number names the fact it is (keyed or not).
+    const fact = b && b.span.fact && numberTokens(b.span.t).length === 1 ? b.span.fact : undefined;
+    w.out.push({ value: shown, words: `${words ? `${words} ` : ""}${s}`, path: w.P.id(p, b ? b.span : (t as unknown) ?? path), ...(kn ? { kn } : {}), ...(fact ? { fact } : {}) });
     i++;
   }
 };
@@ -120,6 +126,8 @@ function stepNums(w: W, s: PanelStep, usual: PanelStep | undefined, comp: boolea
     const youL = comp && !s.rivals?.length && (s.compHereLabel || s.hereLabel) ? s.compHereLabel ?? s.hereLabel! : ranked ? "You" : s.hereLabel ?? labels.here;
     num(w, s.here, `${s.label} - ${youL}`, `${p}/you`);
     if (ranked) for (const r of s.rivals ?? []) num(w, r.num, `${s.label} - ${r.name}`, `${p}/rival/${k(r.name)}`);
+    // The competitor group's Other row (no bar): its brands are drawn when it is opened.
+    if (ranked && w.other && s.other) for (const r of s.other.rows) num(w, r.num, `${s.label} - Other - ${r.name}`, `${p}/other/${k(r.name)}`);
     const vs = !ranked && s.vs;
     if (vs) num(w, vs.num, `${s.label} - ${vs.name}`, `${p}/vs`);
     const u = s.usual ?? usual?.here;
@@ -143,7 +151,7 @@ function detailNums(w: W, d: PanelStepDetail | RivalStepDetail, outcomesAll: boo
   const ol = d.outcomeLabels;
   if (d.outcomes && ol) {
     const { shown } = outcomeRowsShown(d.outcomes as { you?: true; usual?: true }[], outcomesAll);
-    for (const o of shown as NonNullable<PanelStepDetail["outcomes"]>) for (const x of ["picked", "lost", "none"] as const) if (ol[x]) num(w, o[x], `${d.heading} - ${o.name} - ${ol[x]}`, `${p}/outcome/${k(o.name)}/${x}`);
+    for (const o of shown as NonNullable<PanelStepDetail["outcomes"]>) for (const x of ["picked", "lost", "none", "outside"] as const) if (ol[x]) num(w, o[x], `${d.heading} - ${o.name} - ${ol[x]}`, `${p}/outcome/${k(o.name)}/${x}`);
   }
   text(w, d.both, `${p}/both`, d.heading);
   if ("sections" in d)
@@ -188,8 +196,8 @@ const weighNums = (w: W, x: PanelWeighs | undefined, p: string) => {
 };
 
 /** PositionPanelView in one state. */
-function panelState(pp: PositionPanel, usualSteps: PanelStep[] | undefined, comp: boolean, sel: string | undefined, condAll: boolean, outAll: boolean, P: Paths): Out {
-  const w: W = { out: [], P };
+function panelState(pp: PositionPanel, usualSteps: PanelStep[] | undefined, comp: boolean, sel: string | undefined, condAll: boolean, outAll: boolean, P: Paths, other = false): Out {
+  const w: W = { out: [], P, other };
   text(w, pp.claim, "claim", "claim");
   text(w, pp.lead, "lead", "lead");
   text(w, pp.thin, "thin");
@@ -208,7 +216,12 @@ function panelState(pp: PositionPanel, usualSteps: PanelStep[] | undefined, comp
       }
     }
     if (b === "conditions") condNums(w, pp.conditions, comp, condAll);
-    if (b === "competitors" && competitorsShown(pp, comp)) for (const r of pp.competitors!.rows) num(w, r.num, `${pp.competitors!.title} - ${r.shown ?? (r.you ? "You" : r.name)}`, `competitors/${r.you ? "you" : k(r.name)}`);
+    if (b === "competitors" && competitorsShown(pp, comp))
+      for (const r of pp.competitors!.rows) {
+        // The Other row is "competitors/~other"; its brands, drawn when it is opened, "competitors/~other/<name>".
+        num(w, r.num, `${pp.competitors!.title} - ${r.shown ?? (r.you ? "You" : r.name)}`, `competitors/${r.you ? "you" : r.other ? "~other" : k(r.name)}`);
+        if (r.other && other) for (const x of r.other.rows) num(w, x.num, `${pp.competitors!.title} - Other - ${x.name}`, `competitors/~other/${k(x.name)}`);
+      }
     if (b === "lines") for (const l of (comp ? pp.linesComp ?? pp.lines : pp.lines) ?? []) text(w, l.value, `lines/${k(l.key ?? l.label)}`, l.label);
     if (b === "weighs") {
       const x = comp ? pp.weighsComp ?? pp.weighs : pp.weighs;
@@ -271,6 +284,9 @@ export function walkPanel(p: Position, usualSteps?: PanelStep[]): WalkEntry[] {
   // One interaction: another step, the competitors switch, a fold, a rival's own card.
   if (selectable) for (const s of pp.steps) if (s.key !== defaultSel && pp.details?.[s.key]) out.push(...tag(panelState(pp, usualSteps, false, s.key, false, false, P), "one", { step: s.key }));
   if (pp.compare) out.push(...tag(panelState(pp, usualSteps, true, panelSelection(pp, true).defaultSel, false, false, P), "one", { competitors: true }));
+  // The competitor group's Other rows, opened (with competitors shown).
+  if (pp.compare && (pp.steps.some((s) => !!s.other) || pp.competitors?.rows.some((r) => !!r.other)))
+    out.push(...tag(panelState(pp, usualSteps, true, panelSelection(pp, true).defaultSel, false, false, P, true), "one", { competitors: true, fold: "other" }));
   if (pp.conditions && conditionsFold(pp.conditions.toward, pp.conditions.away)) out.push(...tag(panelState(pp, usualSteps, false, defaultSel, true, false, P), "one", { fold: "conditions" }));
   out.push(...tag(panelState(pp, usualSteps, false, defaultSel, false, true, P), "one", { fold: "outcomes" }));
   for (const r of pp.rivals ?? []) out.push(...tag(rivalInCellState(r, new Paths()).map((x) => ({ ...x, words: `${r.name} - ${x.words}` })), "one", { rival: r.name }, `rival:${r.name}`));

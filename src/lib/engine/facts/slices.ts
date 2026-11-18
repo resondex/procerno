@@ -24,6 +24,7 @@
  *          | pair:<relation>        it names a product alongside of that maker relation (own / third_party / ...)
  *          | ruleprod:<choice>:<key> a decision rule choosing <choice> (premium / basic / cheaper ...) names a
  *                                   product of that brand (its product resolves to the brand)
+ *          | pickprod:<product id>  the pick names that product of the run's product grouping (products.ts)
  *          | sentname:<name>        it sends the buyer to that name: a brand in analysis by its name, else as written
  *                                   (case set aside)
  *   <key>   a brand's dictionary entry id, "you" (the tracker) or "rival" (the answer's own named rival)
@@ -136,6 +137,12 @@ function term(t: string, set: AnswerFactSet): Pred {
       const k = keyFn(arg.slice(i + 1), set);
       return (f) => !!f.rules?.some((r) => r.choice.trim() === choice && !!r.product?.trim() && set.resolve(r.product.trim()).key === k(f));
     }
+    case "pickprod":
+      // The run's product the pick names (products.ts, ruling 15).
+      // "none": a pick of a brand in analysis that names no specific product of it (the bare brand, or a name the
+      // product test says is not a product).
+      if (arg === "none") return (f) => f.pick.state === "in_analysis" && !f.pick.product;
+      return (f) => f.pick.state === "in_analysis" && !!f.pick.product && f.pick.product === arg;
     case "sentname": {
       const want = arg.trim().toLowerCase();
       return (f) => !!f.sent && (f.sent.brands.some((b) => b.name.toLowerCase() === want) || f.sent.outside.some((w) => w.trim().toLowerCase() === want));

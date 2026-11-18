@@ -199,7 +199,7 @@ export function PositionPanelView({ p, pp, usualSteps, ctx, reveal }: { p: Posit
     conditions: pp.conditions ? <CondColumns cond={pp.conditions} comp={comp} initialAll={reveal?.fold === "conditions"} /> : null,
     competitors:
       competitorsShown(pp, comp) && pp.competitors ? (
-        <BrandRows block={pp.competitors} onOpen={openIfRival} />
+        <BrandRows block={pp.competitors} onOpen={openIfRival} otherOpen={reveal?.fold === "other"} />
       ) : null,
     lines: lines && lines.length > 0 ? <LineRows lines={lines} /> : null,
     weighs: weighs && weighs.columns.length > 0 ? <WeighsView w={weighs} /> : null,
@@ -274,7 +274,7 @@ function RivalDetail({ d, name, onOpen, onOpenCell, initialAll }: { d: RivalStep
   const { shown: outcomes, folded } = outcomeRowsShown(outcomesAll, allRows);
   const hiddenRows = outcomesAll.length - outcomes.length;
   // The outcome columns this detail carries (am35: never the pick itself - the step bars show it).
-  const cols3 = ol ? ([["picked", C_YOU], ["lost", C_USUAL], ["none", C_NONE]] as const).filter(([k]) => !!ol[k]) : [];
+  const cols3 = ol ? ([["picked", C_YOU], ["lost", C_USUAL], ["none", C_NONE], ["outside", C_NONE]] as const).filter(([k]) => !!ol[k]) : [];
   return (
     <DetailView heading={d.heading} body={d.body} callout={"callout" in d ? d.callout : undefined}>
       {d.rows && d.rows.length > 0 && (

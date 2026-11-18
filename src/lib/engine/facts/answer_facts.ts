@@ -198,7 +198,7 @@ export interface AnswerFact {
    * price question. */
   line: string | null;
   engine: { id: string; vendor: string; tier: string; mode: string };
-  pick: { state: PickState; key: string | null; name: string | null; written: string | null };
+  pick: { state: PickState; key: string | null; name: string | null; written: string | null; /** The run's product the pick names (products.ts, ruling 15); null = none or not attached. */ product?: string | null };
   /** Every brand named, in order of first appearance (one entry per brand). */
   brands: NamedBrand[];
   /** Only the verdicts this question type asks. */
@@ -229,6 +229,24 @@ export interface AnswerFactSet {
   /** Resolve a name as written (the one resolver this set used). */
   resolve: Resolver;
   facts: AnswerFact[];
+  /** Ruling 15: the run's ONE grouping of product names (products.ts attachProducts), by product id. */
+  products?: Map<string, ProductInfo>;
+  /** The product a brand's name as written falls in (null = names no product beyond the brand). */
+  productOf?: (brandKey: string, written: string) => string | null;
+  /** The product test behind the grouping (products.ts productTest): proofs read its decisions. */
+  productTest?: import("./products").ProductTest;
+}
+
+/** One product of the run's grouping (ruling 15). */
+export interface ProductInfo {
+  id: string;
+  /** The brand it belongs to (entry id). */
+  key: string;
+  /** The form most answers write. */
+  full: string;
+  /** The full name with the brand's own leading words dropped, for a truncated view. */
+  short: string;
+  forms: string[];
 }
 
 /* ------------------------------- the build ------------------------------- */
