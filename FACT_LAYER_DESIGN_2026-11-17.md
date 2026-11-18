@@ -81,7 +81,12 @@ The floors and tests live here too, in one table: the minimum of 20 answers, whe
 
 Every list the product shows becomes a named selection with ONE rule:
 
-- the competitor group on a card (by your ruling: the top three by picks, plus head-to-head rivals not among them);
+- the competitor group on a card - RATIFIED from a sketch (Tyler, 2026-11-17, "Yes, build it that way"): the top three
+  by picks, then the head-to-head rivals not among them (tagged "head-to-head" on the picks list); class brands stay
+  out. Listed rivals keep picks order on every block of the card. "Other": on "Who takes the picks" a real bar (picks
+  add to 100%); on Named and Recommended a row with NO bar that only opens the list. Inside Other: brands named in at
+  least 10% of answers or picked at least 5 times, each block sorted by its own number, anything smaller as one
+  "N more brands" line. The average competitor is the average of the listed rivals only, never a brand under Other;
 - the leader in a buying situation, and how ties break;
 - the conditions shown for a side, and their order;
 - the AI's "what to look for" list;
