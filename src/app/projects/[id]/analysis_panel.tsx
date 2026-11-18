@@ -26,16 +26,14 @@ import {
 } from "@/lib/engine/analysis_types";
 import type { DossierTheme } from "@/lib/engine/reason_themes";
 import type { Dossier, DossierArg } from "@/lib/engine/dossiers";
-import type { HeadToHeadRow } from "@/lib/engine/head_to_head";
-import { Boundaries } from "./head_to_head_view";
 import EvidencePanel, { EVIDENCE_CAP, type EvidenceRequest } from "./evidence_panel";
 import RulesSection from "./rules_view";
-import { AnswersModal, Fig, type AnswersTarget } from "./view_parts";
+import { Fig } from "./view_parts";
 import AnswerText from "./answer_text";
 import { passageOf } from "@/lib/answer_passage";
 import { T } from "./type_scale";
 import { MatchupDropNote, MatchupGap } from "./matchup_action";
-import { LazyCellPanel, LazyRival, LazyRivalAcross, PositionPanelView, hasRivalAcross, hasRivalPanel } from "./panels_v2";
+import { LazyCellPanel, LazyRival, LazyRivalAcross, MatchupConditions, PositionPanelView, hasRivalAcross, hasRivalPanel } from "./panels_v2";
 import { CompProvider } from "./panel_parts";
 import type { PanelReveal } from "@/lib/engine/panel_view";
 
@@ -685,7 +683,6 @@ export interface Ctx {
   open: (v: PanelView) => void;
   onClose: () => void;
   onBuildTable?: () => void;
-  h2hRow: (d: Dossier) => HeadToHeadRow | null;
   brand: string;
 }
 
@@ -1510,10 +1507,7 @@ export function roomsOf(d: Dossier, ctx: { map: AnalysisMapView }): { cellId: st
 /** The dossier's standing sections, folded: by buyer, against you, who supplies its picks.
  * Shared by the rival-everywhere panel and the pooled open-choice contest (same answers). */
 function DossierFolds({ d, ctx }: { d: Dossier; ctx: Ctx }) {
-  const [answers, setAnswers] = useState<AnswersTarget | null>(null);
-  const closeAnswers = useCallback(() => setAnswers(null), []);
   const rooms = roomsOf(d, ctx);
-  const h2hRow = ctx.h2hRow(d);
   const supply = d.supplyAll ?? { vendors: [], assistants: [] };
   // Strongest buying situations first, so the preview's two rows are its best ground.
   const roomsSorted = [...rooms].sort((x, y) => pctNum(y.them) - pctNum(x.them));
@@ -1538,7 +1532,7 @@ function DossierFolds({ d, ctx }: { d: Dossier; ctx: Ctx }) {
         <TwoBar you={d.h2h.you} them={d.h2h.them} name={d.name} />
       </div>
     ) : null;
-  const h2hMore = d.h2h.kind !== "record" || !!d.switching || !!d.cells.h2h || !!d.cells.leaver || !!h2hRow;
+  const h2hMore = d.h2h.kind !== "record" || !!d.switching || !!d.cells.h2h || !!d.cells.leaver;
   const supplyRead = d.supply ? (
     <p className="mb-2 text-[14px] text-ink">{d.supply}</p>
   ) : (
@@ -1564,7 +1558,7 @@ function DossierFolds({ d, ctx }: { d: Dossier; ctx: Ctx }) {
       <Sec
         title="Asked head to head"
         preview={record ?? <p className={`${T.body} text-ink-3`}>Never asked head to head.</p>}
-        more={d.switching ? "See what its switching customers are told" : h2hRow ? "See when each side wins" : "See more"}
+        more={d.switching ? "See what its switching customers are told" : d.cells.h2h ? "See when each side wins" : "See more"}
         full={h2hMore ? (
       <>
         <Hint>A different question from the open ones above: the AI is asked to choose between the two of you.</Hint>
@@ -1598,30 +1592,11 @@ function DossierFolds({ d, ctx }: { d: Dossier; ctx: Ctx }) {
             )}
           </p>
         )}
-        {h2hRow && (
+        {d.cells.h2h && (
           <details className="mt-3">
             <summary className="cursor-pointer text-[13px] font-medium text-primary">When does each side win?</summary>
-            <p className="mb-1 mt-2 text-[12px] text-ink-3">What the AI says when asked to pick between the two. Open one to see examples.</p>
-            {h2hRow.conditions?.themes ? (
-              // Grouped reasons in the panel's own bars (2026-11-12), so this
-              // fold reads like "What it says about the buyer" above it.
-              <>
-                <BuyerColumns
-                  toward={themeRows(h2hRow.conditions.themes.you)}
-                  away={themeRows(h2hRow.conditions.themes.rival)}
-                  towardTitle={`${ctx.brand} wins when the buyer...`}
-                  awayTitle={`${d.name} wins when the buyer...`}
-                />
-                {h2hRow.conditions.themes.elsewhere.length > 0 && (
-                  <div className="mt-4">
-                    <h5 className="mb-1 text-[13px] font-semibold text-ink">Another brand gets the pick when the buyer...</h5>
-                    <CondRows rows={themeRows(h2hRow.conditions.themes.elsewhere)} color="var(--pa-usual)" />
-                  </div>
-                )}
-              </>
-            ) : (
-              <Boundaries row={h2hRow} brand={ctx.brand} onOpen={setAnswers} bare />
-            )}
+            <p className="mb-1 mt-2 text-[12px] text-ink-3">What the AI says when asked to pick between the two - the matchup&apos;s own reasons. Open one to see examples.</p>
+            <MatchupConditions cellId={d.cells.h2h} ctx={ctx} />
           </details>
         )}
       </>
@@ -1654,7 +1629,6 @@ function DossierFolds({ d, ctx }: { d: Dossier; ctx: Ctx }) {
       </>
         ) : undefined}
       />
-      {answers && <AnswersModal key={answers.ids.join(",")} runId={ctx.runId} target={answers} onClose={closeAnswers} />}
     </>
   );
 }

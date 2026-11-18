@@ -4,7 +4,6 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useRef, use
 import type { RateCell } from "@/lib/engine/view_data";
 import type { AnalysisDecision, AnalysisMapView, AnswerRef, MapBand, MapCell, MapRow, Triage } from "@/lib/engine/analysis_types";
 import type { Dossier, DossiersView } from "@/lib/engine/dossiers";
-import type { HeadToHeadViews } from "@/lib/engine/head_to_head";
 import { useEngineSet, viewQuery } from "./view_parts";
 import { T } from "./type_scale";
 import { C_AWAY, C_USUAL, C_YOU } from "./panel_parts";
@@ -94,7 +93,6 @@ export default function AnalysisHub({
   const [error, setError] = useState<string | null>(null);
   const [decision, setDecision] = useState<AnalysisDecision | null>(null);
   const [dossiers, setDossiers] = useState<DossiersView | null | undefined>(undefined);
-  const [h2h, setH2h] = useState<HeadToHeadViews | null>(null);
   const [panel, setPanel] = useState<PanelView | null>(null);
   const [mapView, setMapView] = useState<"contest" | "rival">("contest");
   const [mineOnly, setMineOnly] = useState(false);
@@ -145,18 +143,6 @@ export default function AnalysisHub({
       live = false;
     };
   }, [projectId]);
-
-  // The matchup boundaries load the first time a rival panel opens.
-  const h2hAsked = useRef(false);
-  const wantH2h = panel?.kind === "rival";
-  useEffect(() => {
-    if (!wantH2h || h2hAsked.current) return;
-    h2hAsked.current = true;
-    fetch(`/api/runs/${runId}/head_to_head${q}`)
-      .then((r) => (r.ok ? r.json() : null))
-      .then((d: { views: HeadToHeadViews | null } | null) => setH2h(d?.views ?? null))
-      .catch(() => {});
-  }, [wantH2h, runId, q]);
 
   const save = useCallback(
     async (body: { cellId: string; suggested: Triage; decided?: Triage | null; inPlaybook?: boolean }) => {
@@ -212,7 +198,6 @@ export default function AnalysisHub({
     open: setPanel,
     onClose,
     onBuildTable: () => onGo("build"),
-    h2hRow: (d) => [...(h2h?.entity?.rows ?? []), ...(h2h?.class?.rows ?? [])].find((r) => r.key === d.key && r.conditions) ?? null,
     brand: you?.brand ?? dossiers?.brand ?? "You",
   };
   const goRivals = () => {

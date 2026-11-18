@@ -24,7 +24,7 @@ import { conditionKeysFor, conditionStemKey } from "../condition_groups";
 import { excludedWords } from "../definition_overlap";
 import { cachedView, condCache, requestOf, type ViewData, type ViewRequest } from "../view_data";
 import type { DossierTheme } from "../reason_themes";
-import type { HeadToHeadRow, HeadToHeadView, HeadToHeadViews, HeadToHeadSlice } from "../head_to_head";
+import type { HeadToHeadRow, HeadToHeadView, HeadToHeadViews, HeadToHeadSlice } from "../view_types";
 import { roleOf } from "../view_types";
 import type {
   AlternativesViews,
@@ -74,7 +74,9 @@ import type { Scope } from "./fact";
 import type { AnySelection, SelMember } from "./selections";
 
 /** Bumped whenever the payload's shape or a number's meaning changes. */
-export const TYPE_DETAIL_VERSION = "td1";
+// td2 (2026-11-18): a buyer filter's "how they solve it" groups (Spotting the problem) read the run-wide grouping of
+// the block - the same grouping the unfiltered page uses - instead of grouping that buyer's quotes on their own.
+export const TYPE_DETAIL_VERSION = "td2";
 
 const enc = encodeURIComponent;
 const TIER_LABEL: Record<string, string> = { free: "Free tiers", paid: "Paid tiers", both: "Free & paid" };
@@ -283,12 +285,27 @@ export async function attachQuoteGroups(set: AnswerFactSet, data: ViewData, kind
   };
   const counts = quotesOf(set.facts);
   const exclude = excludedWords([data.project.category]);
-  // Under the Panel lens the grouping is drawn over the whole panel's answers to the same block (the old view's rule:
-  // the same question type and buying situation, every assistant on the core panel) - the same inputs, so the saved
-  // key map is read.
-  const allSet = request.engines ? (await sharedRunFacts(data, {})).set : null;
-  const full = allSet ? () => quotesOf(allSet.facts) : null;
-  const keys = await conditionKeysFor(counts, full, exclude, { purpose: "views:awareness", cache: condCache(data, `awareness:${kind}`, request.room !== undefined && kind === "routing" ? request : request.engines ? { engines: request.engines } : {}) });
+  // ONE grouping per block per run (ruling 14): the block's quotes over every buyer and the whole core panel, saved
+  // once under the block's run-wide scope ("awareness:<kind>"). A buyer filter or an assistant subset looks its quotes
+  // up in that grouping - its quotes are a subset of the run-wide block's by construction - so a narrowed request
+  // groups a wording exactly as the unfiltered one does and never pays a new embedding call. (Until 2026-11-18 a buyer
+  // filter grouped its own quotes under a per-buyer scope that was never saved, so every recompute of a filtered
+  // view with a key present re-embedded them.)
+  const narrowed = request.engines !== undefined || (request.room !== undefined && kind === "routing");
+  const allSet = request.engines ? (await sharedRunFacts(data, {})).set : set;
+  const inRunBlock = (f: AnswerFact) => f.type === type;
+  const full = narrowed
+    ? () => {
+        const out = new Map<string, number>();
+        for (const f of allSet.facts) {
+          if (!inRunBlock(f) || f.verdicts.category_routed !== "adjacent") continue;
+          const q = cleanQuote(f.quote ?? "");
+          if (q) out.set(q, (out.get(q) ?? 0) + 1);
+        }
+        return out;
+      }
+    : null;
+  const keys = await conditionKeysFor(counts, full, exclude, { purpose: "views:awareness", cache: condCache(data, `awareness:${kind}`) });
   for (const f of set.facts) {
     if (!inBlock(f) || f.verdicts.category_routed !== "adjacent") continue;
     const q = cleanQuote(f.quote ?? "");

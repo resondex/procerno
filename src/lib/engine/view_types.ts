@@ -11,6 +11,7 @@ import { matchKey } from "../brand_key";
 import type { DictionaryEntry } from "../types";
 import type { EngineFacets, RateCell } from "./view_data";
 import type { ViewKey } from "./views";
+import type { DossierTheme } from "./reason_themes";
 
 export type { RateCell };
 
@@ -664,4 +665,86 @@ export interface ReasonsView {
   groups: ReasonRow[] | null;
   /** Map entries that name no confirmed code. */
   unknownGroupCodes: string[];
+}
+
+/* ------------------------------- head to head ------------------------------- */
+// Moved here from head_to_head.ts when that engine was deleted (2026-11-18): the By rival "when each side wins" block
+// now draws the head-to-head card's own condition rows, and Question type detail builds these from the fact layer.
+
+export interface NamedCount {
+  name: string;
+  n: number;
+}
+
+/** A stated condition group (the flat fallback when the run carries no reason themes). */
+export interface ConditionGroup {
+  label: string;
+  n: number;
+  /** A sample of the carrying answers' response ids. */
+  ids: string[];
+}
+
+export interface ElsewhereBrand {
+  name: string;
+  n: number;
+  conditions: ConditionGroup[];
+}
+
+/** One matchup's stated boundaries: toward you, toward this rival, toward another brand - the head-to-head card's own
+ * condition rows (shares of all the matchup's answers), as reason rows. */
+export interface MatchupConditions {
+  rules?: number;
+  unconditional?: number;
+  you: ConditionGroup[];
+  youMore?: number;
+  rival: ConditionGroup[];
+  rivalMore?: number;
+  elsewhere: ElsewhereBrand[];
+  themes?: { you: DossierTheme[]; rival: DossierTheme[]; elsewhere: DossierTheme[] };
+}
+
+export interface HeadToHeadRow {
+  /** Rival identity: the dictionary entry id, or "?" + the name when unresolved. */
+  key: string;
+  rival: string;
+  resolved: boolean;
+  cells: number;
+  answers: number;
+  won: RateCell;
+  lost: RateCell;
+  other: RateCell;
+  undecided: RateCell;
+  /** Won over won + lost - the straight two-way record. */
+  winOfDecided: RateCell;
+  otherPicks: NamedCount[];
+  conditions?: MatchupConditions;
+}
+
+export interface HeadToHeadSlice {
+  key: string;
+  label: string;
+  answers: number;
+  won: RateCell;
+  lost: RateCell;
+  undecided: RateCell;
+}
+
+export interface HeadToHeadView {
+  kind: "entity" | "class";
+  brand: string;
+  answers: number;
+  uncoded: number;
+  overall: { won: RateCell; lost: RateCell; other: RateCell; undecided: RateCell; winOfDecided: RateCell };
+  rows: HeadToHeadRow[];
+  byEngine: (HeadToHeadSlice & EngineFacets)[];
+  byEngineGroups?: { vendor: (HeadToHeadSlice & EngineFacets)[]; tier: (HeadToHeadSlice & EngineFacets)[]; mode: (HeadToHeadSlice & EngineFacets)[] };
+  sels?: Record<string, string[]>;
+}
+
+export interface HeadToHeadViews {
+  runId: string;
+  source: string;
+  brand: string;
+  entity: HeadToHeadView | null;
+  class: HeadToHeadView | null;
 }

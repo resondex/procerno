@@ -52,6 +52,16 @@ export const REASON_COPY: Record<
   },
 };
 
+/** A question type whose reasons read differently from its station's (keyed by the reasons block's key): its own two
+ * side titles. Rivals' customers switching sits under the Comparison station, but its question is "where should I go
+ * instead of <rival>?", not a matchup - so it is not a head-to-head won or lost. */
+export const REASON_COPY_BY_TYPE: Record<string, { win: string; lose: string }> = {
+  offensive_capture: {
+    win: "Reasons a rival's customers are sent to you",
+    lose: "Reasons they are sent to another brand",
+  },
+};
+
 /** A side's rows in rank order: the themes when any carries situation
  * buckets (what ReasonList renders), otherwise the flat list. */
 const sideLabels = (side: StationReasonSide): string[] =>

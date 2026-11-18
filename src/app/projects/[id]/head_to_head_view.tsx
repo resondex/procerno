@@ -8,7 +8,7 @@ import type {
   HeadToHeadView,
   HeadToHeadViews,
   RateCell,
-} from "@/lib/engine/head_to_head";
+} from "@/lib/engine/view_types";
 import { SortTable, Tip, type Col } from "./table";
 import { AnswersModal, BaseNote, fmtN, type AnswersTarget, typeDetailUrl, useEngineSet, viewQuery, EngineTable, ReasonList, type ReasonRow } from "./view_parts";
 import type { DossierTheme } from "@/lib/engine/reason_themes";

@@ -11,9 +11,19 @@
  * [[keep:<key>]] blocks, the writer places each token exactly once, and
  * reassembly drops the composed section back in, intact.
  *
- * Mechanical guards on every reply (pure functions below, unit-testable):
+ * Every figure in the sheet travels as a TAG (bw6, fact layer step 7): [[fab|15%]] - "f" and letters (the tag id,
+ * one per fact and the card location that draws it), a bar, the figure exactly as printed. The writer copies each
+ * tag whole wherever it states that figure. After the guards pass, the tags are stripped and each number's link is
+ * the tag's own fact id and location - no matching, no word overlap. A written number with no tag cannot pass.
+ *
+ * Mechanical guards on every reply (pure functions below, unit-tested by scripts/brief_writer_tags_test.mts):
  *   (a) numbers - every numeric token in written text appears verbatim in
  *       the fact sheet;
+ *   (h) figures - every number is inside a tag; every tag is one the sheet lists, with the sheet's figure inside it,
+ *       never in a heading; the only digits allowed outside a tag are part of a name (FIGURE_ALLOWANCES);
+ *   (i) subjects - each tagged figure's sentence names the subject the sheet records for it (brand, rival, buying
+ *       situation, worry), or plainly continues about the one named just before it in the same paragraph
+ *       (measured and NOT enforced - see SUBJECT_GUARD);
  *   (b) vocabulary - no em dash, no method words, no x-of-y counts;
  *   (c) keeps - every keep is a structure section of the composed memo and
  *       each appears exactly once;
@@ -33,8 +43,8 @@
  */
 
 import { createHash } from "node:crypto";
-import { BRIEF_FRAMES, type BriefAnchor, type BriefMemo, type BriefPara, type BriefSection } from "./brief_types";
-import type { Project, Run } from "../types";
+import { BRIEF_FRAMES, type BriefAnchor, type BriefLink, type BriefMemo, type BriefPara, type BriefSection } from "./brief_types";
+import type { DictionaryEntry, Project, Run } from "../types";
 import { BRIEF_WRITER_MODEL } from "./models";
 import { METHOD_BANNED, PLAIN_BANNED } from "./plain_words";
 
@@ -45,7 +55,10 @@ import { METHOD_BANNED, PLAIN_BANNED } from "./plain_words";
 // bw3 (2026-11-16, bf29): (f) voice - no first-person plural about the brand, no bracketed signed-points
 // shorthand, both also prompt rules; (g) quadrants - a frame drawn as quadrants (SWOT) keeps its four
 // headings in order, each written from its own facts only, and reassembles as the 2x2 cards.
-export const BRIEF_WRITER_VERSION = "bw5"; // bw5: quadrant leads are specific to the item, never the sheet's generic label.
+// bw6 (2026-11-18, fact layer step 7): every figure in the sheet is a tag ([[fab|15%]]) the writer copies whole; guards
+// (h) figures and (i) subjects; tags are stripped into each number's link (its fact id and card location) - the
+// word-overlap relink is deleted. Every written memo is rewritten once on the next warm (the sheet text changed).
+export const BRIEF_WRITER_VERSION = "bw6"; // bw5: quadrant leads are specific to the item, never the sheet's generic label.
 const CACHE_TTL_MS = 100 * 365 * 24 * 3600 * 1000; // forever in practice - the saved-tracker rule (2026-11-09): re-keyed by a version bump or a sheet change, never aged out
 /** Opus 5.x thinks before it writes and a whole-budget think returns empty
  * text (the recorded batch failure mode), so the budget leaves room for both. */
@@ -71,23 +84,70 @@ export interface SheetAnchor extends BriefAnchor {
   /** bw4: in a quadrant memo, whether the fact's section comes before or after the quadrants. */
   side?: "before" | "after";
 }
+
+/** The subjects a figure is about, read from its fact id: the brands (its subject and the rival its scope names, each
+ * with every form it is written in), the buying situation and the worry its scope names. */
+export interface FigSubjects {
+  brands: { name: string; forms: string[] }[];
+  situation?: string;
+  worry?: string;
+}
+
+/** bw6: one figure the writer may state - a fact as the composed memo prints it, with the card location it opens. */
+export interface SheetFig {
+  /** The tag id: "f" + letters (never a digit, so the number guards never read it). */
+  id: string;
+  /** The figure exactly as printed ("15%", "<1%", "6.8%", "+4 points"). */
+  value: string;
+  /** The composed link this figure carries, minus where it sits (token / occurrence are set again in the written memo). */
+  link: Omit<BriefLink, "token" | "occurrence">;
+  subjects: FigSubjects;
+}
+
 export interface FactSheet {
   text: string;
   keeps: string[];
   anchors: SheetAnchor[];
+  /** bw6: every tagged figure, by tag id. */
+  figs: SheetFig[];
+}
+
+/** Brand forms by dictionary entry id (display name first, then the canonical name and every alias) - what a written
+ * sentence may call a brand. Built by the caller from the tracker's dictionary; absent = no subject guard. */
+export type BrandForms = Record<string, string[]>;
+
+export function brandFormsOf(dictionary: DictionaryEntry[]): BrandForms {
+  const out: BrandForms = {};
+  for (const e of dictionary) {
+    const forms = [e.display_name, e.canonical, ...(e.aliases ?? [])].filter((x): x is string => !!x && x.trim().length > 1);
+    out[e.id] = [...new Set(forms)];
+  }
+  return out;
 }
 
 /** The nth anchor tag: [[ma]] .. [[mz]], [[maa]], [[mab]], ... (letters only). */
 export function anchorToken(n: number): string {
+  return `[[m${letters(n)}]]`;
+}
+function letters(n: number): string {
   let s = "";
   let x = n;
   do {
     s = String.fromCharCode(97 + (x % 26)) + s;
     x = Math.floor(x / 26) - 1;
   } while (x >= 0);
-  return `[[m${s}]]`;
+  return s;
 }
 export const ANCHOR_TOKEN = /\[\[m[a-z]+\]\]/g;
+
+/** bw6: the nth figure tag id: fa .. fz, faa, fab, ... */
+export const figId = (n: number) => `f${letters(n)}`;
+/** A figure tag as the writer copies it: [[<id>|<figure>]]. */
+export const figTag = (f: { id: string; value: string }) => `[[${f.id}|${f.value}]]`;
+/** Every figure tag in a text: id and figure. The figure holds no bracket, bar or line break. */
+export const FIG_TAG = /\[\[(f[a-z]+)\|([^[\]|\n]{1,24})\]\]/g;
+/** The link pass's number token (brief.ts NUMBER_TOKEN_G, brief_view.tsx NUMBER_TOKEN): what a link's `token` is. */
+const LINK_TOKEN = /\d+(?:\.\d+)?%|[+-]\d+ (?:pts|points)/g;
 
 /** Text with every anchor tag removed, spacing and punctuation tidied. */
 export function stripAnchors(t: string): string {
@@ -98,17 +158,86 @@ export function stripAnchors(t: string): string {
     .trim();
 }
 
-/** The composed memo's visible text, in reading order. Tips are never read. */
-export function factSheet(memo: BriefMemo): FactSheet {
+/** Text as a reader sees it: anchor tags removed, each figure tag replaced by its figure. */
+export function stripTags(t: string): string {
+  return stripAnchors(t.replace(FIG_TAG, "$2"));
+}
+
+/** The subjects of a fact id (measure | subject | scope fields): its brand subject, its rival, buying situation and
+ * worry. A derived ref (not a three-part id) has none. */
+export function figSubjects(fact: string | undefined, forms: BrandForms | undefined): FigSubjects {
+  const out: FigSubjects = { brands: [] };
+  if (!fact) return out;
+  const parts = fact.split("|");
+  if (parts.length < 3 || !parts[2].startsWith("t=")) return out;
+  const brand = (key: string) => {
+    const f = forms?.[key];
+    if (f?.length && !out.brands.some((b) => b.name === f[0])) out.brands.push({ name: f[0], forms: f });
+  };
+  brand(parts[1].split("/")[0]);
+  for (const x of parts.slice(2)) {
+    const v = x.slice(2);
+    if (x.startsWith("r=")) brand(v);
+    else if (x.startsWith("s=") && v !== "~none") out.situation = v;
+    else if (x.startsWith("w=") && v !== "~none") out.worry = v;
+  }
+  return out;
+}
+
+/** Figure tags for one unit (lead and text), from the composed unit's links: each linked number is wrapped as
+ * [[<id>|<figure>]] (a "<" printed before it rides inside). Ids come from `reg`, one per fact and location. */
+function tagUnit(lead: string | undefined, text: string, links: BriefLink[] | undefined, reg: (link: BriefLink, value: string) => string): { lead?: string; text: string } {
+  if (!links?.length) return lead === undefined ? { text } : { lead, text };
+  const combined = `${lead ?? ""} ${text}`;
+  const off = (lead ?? "").length + 1;
+  const spans: { s: number; e: number; tag: string }[] = [];
+  const seen = new Map<string, number>();
+  for (const m of combined.matchAll(LINK_TOKEN)) {
+    const occ = seen.get(m[0]) ?? 0;
+    seen.set(m[0], occ + 1);
+    const l = links.find((x) => x.token === m[0] && x.occurrence === occ);
+    if (!l) continue;
+    let s0 = m.index!;
+    if (combined[s0 - 1] === "<") s0--;
+    const e = m.index! + m[0].length;
+    spans.push({ s: s0, e, tag: reg(l, combined.slice(s0, e)) });
+  }
+  const apply = (str: string, base: number) => {
+    let out = str;
+    for (const sp of [...spans].filter((x) => x.s >= base && x.e <= base + str.length).sort((a, b) => b.s - a.s))
+      out = out.slice(0, sp.s - base) + sp.tag + out.slice(sp.e - base);
+    return out;
+  };
+  return lead === undefined ? { text: apply(text, off) } : { lead: apply(lead, 0), text: apply(text, off) };
+}
+
+/** The composed memo's visible text, in reading order, every linked figure tagged. Tips are never read. */
+export function factSheet(memo: BriefMemo, forms?: BrandForms): FactSheet {
   const out: string[] = [`TITLE: ${memo.title}`];
   const keeps: string[] = [];
   const anchors: SheetAnchor[] = [];
+  const figs: SheetFig[] = [];
+  const byKey = new Map<string, SheetFig>();
+  const reg = (l: BriefLink, value: string) => {
+    const { token: _t, occurrence: _o, ...link } = l;
+    void _t;
+    void _o;
+    const key = JSON.stringify([link.fact ?? "", link.stat ?? "", link.dest, link.reveal ?? null, value]);
+    let f = byKey.get(key);
+    if (!f) {
+      f = { id: figId(figs.length), value, link, subjects: figSubjects(link.fact, forms) };
+      figs.push(f);
+      byKey.set(key, f);
+    }
+    return figTag(f);
+  };
   const quadAt = memo.sections.findIndex((x) => x.quads?.length);
   memo.sections.forEach((s, si) => {
     const lines: string[] = [];
     const keep = isKeepSection(s);
     const side: SheetAnchor["side"] = quadAt < 0 || si === quadAt ? undefined : si < quadAt ? "before" : "after";
-    // A keep section is reinserted composed, anchors intact - its lines carry no tags.
+    // A keep section is reinserted composed, anchors intact - its lines carry no anchor tags (its figures are tagged,
+    // so the prose may cite them).
     const tagged = (line: string, cells: BriefAnchor[] | undefined, quad?: string, item?: string) => {
       if (keep || !cells?.length) return line;
       const tags: string[] = [];
@@ -122,9 +251,13 @@ export function factSheet(memo: BriefMemo): FactSheet {
       }
       return `${line} ${tags.join(" ")}`;
     };
+    const unitLine = (p: BriefPara) => paraLine(tagUnit(p.lead, p.text, p.links, reg) as BriefPara);
     if (s.heading) lines.push(`## ${s.heading}`);
-    for (const p of s.paras ?? []) lines.push(tagged(paraLine(p), p.cells));
-    for (const r of s.rows ?? []) lines.push(tagged(r.kind === "note" ? r.label : `${r.label}: ${r.value}${r.avg ? ` (average competitor: ${r.avg})` : ""}${r.top ? ` (most-picked competitor: ${r.top})` : ""}`, r.cell ? [r.cell] : undefined));
+    for (const p of s.paras ?? []) lines.push(tagged(unitLine(p), p.cells));
+    for (const r of s.rows ?? []) {
+      if (r.kind === "note") lines.push(tagged(tagUnit(undefined, r.label, r.links, reg).text, r.cell ? [r.cell] : undefined));
+      else lines.push(tagged(`${r.label}: ${tagUnit(undefined, r.value, r.links, reg).text}${r.avg ? ` (average competitor: ${r.avg})` : ""}${r.top ? ` (most-picked competitor: ${r.top})` : ""}`, r.cell ? [r.cell] : undefined));
+    }
     if (s.table) {
       lines.push(s.table.headers.join(" | "));
       for (const r of s.table.rows) lines.push(r.join(" | "));
@@ -133,7 +266,7 @@ export function factSheet(memo: BriefMemo): FactSheet {
       for (let i = 0; i < 2; i++) {
         lines.push(`### ${q.headers[i]}`);
         // bw4: one "- " line per item, so the writer sees where each item starts and ends.
-        q.cells[i].forEach((p, n) => lines.push(`- ${tagged(paraLine(p), p.cells, q.headers[i], `${q.headers[i]}#${n}`)}`));
+        q.cells[i].forEach((p, n) => lines.push(`- ${tagged(unitLine(p), p.cells, q.headers[i], `${q.headers[i]}#${n}`)}`));
       }
     }
     if (s.viz) {
@@ -159,7 +292,20 @@ export function factSheet(memo: BriefMemo): FactSheet {
     }
   });
   out.push(`FOOTER: ${memo.footer}`);
-  return { text: out.join("\n\n"), keeps, anchors };
+  return { text: out.join("\n\n"), keeps, anchors, figs };
+}
+
+/** A composed unit's lead and text as the sheet tags them (the fake writer of the tag test echoes these). */
+export function taggedUnit(sheet: FactSheet, p: BriefPara): { lead?: string; text: string } {
+  const byKey = new Map(sheet.figs.map((f) => [JSON.stringify([f.link.fact ?? "", f.link.stat ?? "", f.link.dest, f.link.reveal ?? null, f.value]), f]));
+  return tagUnit(p.lead, p.text, p.links, (l, value) => {
+    const { token: _t, occurrence: _o, ...link } = l;
+    void _t;
+    void _o;
+    const f = byKey.get(JSON.stringify([link.fact ?? "", link.stat ?? "", link.dest, link.reveal ?? null, value]));
+    if (!f) throw new Error(`figure ${value} (${link.fact}) is not on the sheet`);
+    return figTag(f);
+  });
 }
 
 // ---------- the reply ----------
@@ -190,7 +336,7 @@ export const BANNED: { name: string; re: RegExp }[] = [
   { name: "x of y count", re: /\d+ of \d+/ },
 ];
 
-export type Violation = { kind: "numbers" | "vocabulary" | "keeps" | "length" | "anchors" | "shape" | "voice" | "quadrants"; detail: string };
+export type Violation = { kind: "numbers" | "vocabulary" | "keeps" | "length" | "anchors" | "shape" | "voice" | "quadrants" | "figures" | "subjects"; detail: string };
 
 /** (f) First-person plural about the brand, outside quoted wording (a quoted buyer may say "we"). */
 const FIRST_PLURAL = /\b(?:[Ww]e|[Oo]ur|[Oo]urs|[Oo]urselves|us|Us)\b/;
@@ -251,8 +397,10 @@ export function parseReply(raw: unknown): WrittenReply | null {
 /** Every violation of guards (a)-(g), in that order. */
 export function checkReply(reply: WrittenReply, memo: BriefMemo, sheet: FactSheet): Violation[] {
   const v: Violation[] = [];
-  const strings = writtenStrings(reply);
-  const allowed = numberTokens(sheet.text);
+  const raw = writtenStrings(reply);
+  // Every guard but (e), (g) and (h) reads the text as a reader sees it: tags stripped to their figures.
+  const strings = raw.map(stripTags);
+  const allowed = numberTokens(stripTags(sheet.text));
   // (a) numbers
   const smuggled = new Set<string>();
   for (const s of strings) for (const t of numberTokens(s)) if (!allowed.has(t)) smuggled.add(t);
@@ -265,7 +413,7 @@ export function checkReply(reply: WrittenReply, memo: BriefMemo, sheet: FactShee
   // banning them rejected ordinary prose and sent the memo back to the composed version.
   const EVERYDAY = new Set(["reason", "cell", "decided", "lift", "routes", "travels with"]);
   for (const s of strings) for (const [name, re] of [...PLAIN_BANNED, ...METHOD_BANNED]) if (!EVERYDAY.has(name) && re.test(outsideQuotes(s))) hits.add(name);
-  if (strings.some((s) => s.includes("[[keep"))) hits.add("keep token inside text");
+  if (raw.some((s) => s.includes("[[keep"))) hits.add("keep token inside text");
   if (hits.size) v.push({ kind: "vocabulary", detail: `banned wording: ${[...hits].join(", ")}` });
   // (c) keeps
   const keepable = new Set(memo.sections.filter(isKeepSection).map((s) => s.key));
@@ -282,8 +430,8 @@ export function checkReply(reply: WrittenReply, memo: BriefMemo, sheet: FactShee
     v.push({ kind: "keeps", detail: parts.join("; ") });
   }
   // (d) length - tags never tip the budget
-  const written = strings.reduce((n, s) => n + stripAnchors(s).length, 0);
-  if (written > 2 * stripAnchors(sheet.text).length) v.push({ kind: "length", detail: "the written memo is more than twice as long as the fact sheet" });
+  const written = strings.reduce((n, s) => n + s.length, 0);
+  if (written > 2 * stripTags(sheet.text).length) v.push({ kind: "length", detail: "the written memo is more than twice as long as the fact sheet" });
   // (e) anchors - every sheet tag exactly once, in paragraph text only
   {
     const known = new Set(sheet.anchors.map((a) => a.token));
@@ -392,23 +540,276 @@ export function checkReply(reply: WrittenReply, memo: BriefMemo, sheet: FactShee
     }
     if (parts.length) v.push({ kind: "quadrants", detail: parts.join("; ") });
   }
+  // (h) figures
+  {
+    const parts = figureViolations(reply, sheet);
+    if (parts.length) v.push({ kind: "figures", detail: parts.join("; ") });
+  }
+  // (i) subjects
+  if (SUBJECT_GUARD) {
+    const parts = subjectViolations(reply, sheet);
+    if (parts.length) v.push({ kind: "subjects", detail: parts.slice(0, 6).join("; ") });
+  }
   if (!strings.length) v.push({ kind: "shape", detail: "no written text" });
   return v;
 }
 
-/** The B memo: the writer's order, keep tokens replaced by the composed
- * sections, anchor tags stripped into each paragraph's `cells`. */
-export function reassemble(reply: WrittenReply, memo: BriefMemo, anchors: SheetAnchor[] = []): BriefMemo {
+/**
+ * The digits allowed OUTSIDE a figure tag - each a part of a name, never a figure (FIGURE_ALLOWANCES):
+ *  1. digits joined to letters in one word ("S26", "4K", "3a", "X300") - a model or product name;
+ *  2. a whole number (no percent sign, no decimal, no "points") written with the word before it exactly as the
+ *     sheet writes that pair outside any tag ("Pixel 9", "iPhone 17") - a name the sheet itself prints;
+ *  3. a list number opening a lead or a paragraph ("1. ") - the order of the findings, not a figure.
+ * Anything else with a digit - a percentage, a decimal, a signed points figure, a bare count - must be a tag.
+ */
+export const FIGURE_ALLOWANCES = [
+  "digits joined to letters in one word (a model or product name)",
+  "a whole number printed with the word before it exactly as the sheet prints that pair outside any tag (a name)",
+  "a list number opening a lead or a paragraph (\"1. \")",
+] as const;
+
+const escapeRe = (t: string) => t.replace(/[.*+?^$()|[\]\\{}]/g, "\\$&");
+
+/** The untagged numbers of a text (tags and anchors removed first), with allowance 1 and 2 applied against the sheet. */
+export function untaggedNumbers(text: string, sheetText: string): string[] {
+  const plain = text.replace(FIG_TAG, " \u0000 ").replace(ANCHOR_TOKEN, " ");
+  const sheetPlain = sheetText.replace(FIG_TAG, " \u0000 ");
+  const out: string[] = [];
+  for (const m of plain.matchAll(/[+\-\u2212]?\d[\d,.]*(?:%| (?:pts|points)\b)?/g)) {
+    const at = m.index!;
+    const before = plain[at - 1] ?? " ";
+    const after = plain[at + m[0].length] ?? " ";
+    const tok = m[0].replace(/[.,]+$/, "");
+    // 1. glued to letters.
+    if (/[A-Za-z]/.test(before) || /[A-Za-z]/.test(after)) continue;
+    // 3. a list number opening the lead or paragraph ("1. ").
+    if (at === plain.search(/\S/) && /^\d{1,2}$/.test(tok) && m[0] === `${tok}.` && after === " ") continue;
+    // 2. a name's number, printed so by the sheet.
+    if (/^\d+$/.test(tok)) {
+      const word = plain.slice(0, at).match(/([A-Za-z][\w'+&.-]*) $/)?.[1];
+      if (word && new RegExp(`(?:^|[^\\w])${escapeRe(word)} ${tok}(?![\\d.,%])`).test(sheetPlain)) continue;
+    }
+    out.push(tok);
+  }
+  return out;
+}
+
+/** (h) The figure guard's findings, in plain words for the steer. */
+export function figureViolations(reply: WrittenReply, sheet: FactSheet): string[] {
+  const byId = new Map(sheet.figs.map((f) => [f.id, f]));
+  const unknown = new Set<string>();
+  const altered = new Set<string>();
+  const untagged = new Set<string>();
+  let inHeading = false;
+  let malformed = false;
+  const check = (t: string) => {
+    for (const m of t.matchAll(FIG_TAG)) {
+      const f = byId.get(m[1]);
+      if (!f) unknown.add(m[0]);
+      else if (m[2] !== f.value) altered.add(`${m[0]} (the sheet has ${figTag(f)})`);
+    }
+    if (/\[\[f/.test(t.replace(FIG_TAG, ""))) malformed = true;
+    for (const n of untaggedNumbers(t, sheet.text)) untagged.add(n);
+  };
+  for (const s of reply.sections) {
+    if ("keep" in s) continue;
+    if (s.heading) {
+      if (s.heading.match(FIG_TAG)) inHeading = true;
+      check(s.heading);
+    }
+    for (const p of s.paras) {
+      if (p.lead) check(p.lead);
+      check(p.text);
+    }
+  }
+  const out: string[] = [];
+  if (untagged.size) out.push(`numbers written without their tag: ${[...untagged].slice(0, 8).join(", ")} - every number must be one of the sheet's tags, copied whole`);
+  if (unknown.size) out.push(`tags that are not in the fact sheet: ${[...unknown].slice(0, 6).join(" ")}`);
+  if (altered.size) out.push(`tags whose figure was changed: ${[...altered].slice(0, 6).join("; ")}`);
+  if (malformed) out.push("a tag is broken - copy each tag exactly as the sheet writes it, [[f...|figure]]");
+  if (inHeading) out.push("a tag inside a heading - state figures in the paragraphs only");
+  return out;
+}
+
+/**
+ * Whether to enforce guard (i). OFF, by measurement (2026-11-18): on the composed memos of the six trackers' own Briefs
+ * echoed through the tags (correct prose by construction) it flags 0 of 349 sentences carrying a figure; on the 36
+ * saved written memos (real model prose, each number's fact recovered with the retired word-overlap relink) it flags
+ * 22 of 371 such sentences (5.9%), and every one read by hand is correct prose: 17 name a buying situation or worry in
+ * the writer's own words ("the shopper whose skin has started reacting differently" for a buyer labelled "Skin
+ * changes"), 5 use "it" for a rival named in the sentence before. Enforced, it would reject 10 of the 36 saved memos
+ * (every By buying situation memo but Netflix's) on their first try. The tag guards (h) are the enforced contract; a
+ * figure keeps its subject through the prompt rule and its tag.
+ */
+export const SUBJECT_GUARD = false;
+
+const normWords = (t: string) => ` ${t.toLowerCase().replace(/[\u2018\u2019]/g, "'").replace(/[^a-z0-9'+&]+/g, " ").trim()} `;
+const hasName = (sentence: string, forms: string[]) => {
+  const s = normWords(sentence);
+  return forms.some((f) => {
+    const n = normWords(f).trim();
+    return n.length > 1 && (s.includes(` ${n} `) || s.includes(` ${n}'s `) || s.includes(` ${n}s `));
+  });
+};
+
+/** A paragraph's sentences (on a stop followed by a space and a capital or a quote; "6.8%" never splits). */
+export function sentencesOf(t: string): string[] {
+  return t.split(/(?<=[.!?])\s+(?=["\u201c(A-Z])/).filter((x) => x.trim());
+}
+
+/** A sentence that opens on a pronoun continues the paragraph's topic. */
+const PRONOUN_OPENING = /^\s*(?:It|Its|It's|They|Their|This|That)\b/;
+
+/** Where a name first appears in a text, word-bounded and case-blind (-1: nowhere). */
+function firstAt(text: string, forms: string[]): number {
+  const t = normWords(text);
+  let best = -1;
+  for (const f of forms) {
+    const n = normWords(f).trim();
+    if (n.length < 2) continue;
+    for (const suffix of [" ", "'s ", "s "]) {
+      const i = t.indexOf(` ${n}${suffix}`);
+      if (i >= 0 && (best < 0 || i < best)) best = i;
+    }
+  }
+  return best;
+}
+
+/** Where a name last appears in a text, word-bounded and case-blind (-1: nowhere). */
+function lastAt(text: string, forms: string[]): number {
+  const t = normWords(text);
+  let best = -1;
+  for (const f of forms) {
+    const n = normWords(f).trim();
+    if (n.length < 2) continue;
+    for (const suffix of [" ", "'s ", "s "]) best = Math.max(best, t.lastIndexOf(` ${n}${suffix}`));
+  }
+  return best;
+}
+
+/**
+ * (i) Each tagged figure's sentence names the subjects its fact records - the brands (its subject and its rival), the
+ * buying situation, the worry - or plainly continues about one named before it:
+ *  - a brand: named in the sentence, or the nearest brand named before the tag (earlier in the sentence or the
+ *    paragraph, its lead included) is one of the figure's own brands - so "It ... 26% of the picks to 53% for <rival>"
+ *    passes for the subject named just before, and "<brand A> takes <brand B's figure>" fails;
+ *  - a buying situation or worry: named in the sentence, or named earlier in the paragraph with no other one the
+ *    sheet's figures are about named between it and the tag.
+ * The brands it can see are the ones the sheet's figures are about (a brand no figure is about is not a candidate).
+ *
+ * Measured 2026-11-18 - see SUBJECT_GUARD (not enforced); scripts/brief_writer_tags_test.mts prints the echo count.
+ */
+export function subjectViolations(reply: WrittenReply, sheet: FactSheet): string[] {
+  const byId = new Map(sheet.figs.map((f) => [f.id, f]));
+  const allBrands = new Map<string, string[]>();
+  const allSits = new Set<string>();
+  const allWorries = new Set<string>();
+  for (const f of sheet.figs) {
+    for (const b of f.subjects.brands) allBrands.set(b.name, b.forms);
+    if (f.subjects.situation) allSits.add(f.subjects.situation);
+    if (f.subjects.worry) allWorries.add(f.subjects.worry);
+  }
+  const out: string[] = [];
+  for (const s of reply.sections) {
+    if ("keep" in s) continue;
+    for (const p of s.paras) {
+      const unit = `${p.lead ? `${p.lead}. ` : ""}${p.text}`;
+      let before = "";
+      for (const sent of sentencesOf(unit)) {
+        const plain = stripTags(sent);
+        for (const m of sent.matchAll(FIG_TAG)) {
+          const f = byId.get(m[1]);
+          if (!f) continue;
+          const inSent = stripTags(sent.slice(0, m.index));
+          const upTo = `${before} ${inSent}`;
+          // Who the figure's sentence is about: the nearest brand named before the tag in the sentence; with none
+          // there, a sentence opening on a pronoun continues the paragraph's topic (its first-named brand), and any
+          // other sentence the nearest brand named before it in the paragraph.
+          const nearestIn = (t: string, first = false) => {
+            let who: string | null = null;
+            let at = first ? Infinity : -1;
+            for (const [n, forms] of allBrands) {
+              const i = first ? firstAt(t, forms) : lastAt(t, forms);
+              if (i >= 0 && (first ? i < at : i > at)) {
+                at = i;
+                who = n;
+              }
+            }
+            return who;
+          };
+          const nearest = nearestIn(inSent) ?? (PRONOUN_OPENING.test(plain) ? nearestIn(before, true) : nearestIn(before));
+          const own = new Set(f.subjects.brands.map((b) => b.name));
+          for (const b of f.subjects.brands) {
+            if (hasName(plain, b.forms)) continue;
+            if (nearest && own.has(nearest)) continue;
+            out.push(`${m[0]} is about ${b.name}, but its sentence does not say so`);
+          }
+          for (const [want, all] of [[f.subjects.situation, allSits], [f.subjects.worry, allWorries]] as const) {
+            if (!want) continue;
+            if (hasName(plain, [want])) continue;
+            const wantAt = lastAt(upTo, [want]);
+            const other = [...all].some((x) => x !== want && lastAt(upTo, [x]) > wantAt);
+            if (wantAt >= 0 && !other) continue;
+            out.push(`${m[0]} is about "${want}", but its sentence does not say so`);
+          }
+        }
+        before += ` ${plain}`;
+      }
+    }
+  }
+  return [...new Set(out)];
+}
+
+/** A written unit's lead and text with its tags stripped, and each number's link: the tag's own fact and card
+ * location (bw6) - every number in a written memo that passed guard (h) sits in a tag, so every number links. */
+export function linkWrittenUnit(lead: string | undefined, text: string, figs: Map<string, SheetFig>): { lead?: string; text: string; links: BriefLink[] } {
+  // Anchors out first (stripAnchors tidies spacing), then each figure tag replaced by its figure, recording where.
+  const strip = (t: string) => {
+    const base = stripAnchors(t);
+    const at: { s: number; e: number; f: SheetFig }[] = [];
+    let out = "";
+    let last = 0;
+    for (const m of base.matchAll(FIG_TAG)) {
+      out += base.slice(last, m.index);
+      const f = figs.get(m[1]);
+      if (f) at.push({ s: out.length, e: out.length + m[2].length, f });
+      out += m[2];
+      last = m.index! + m[0].length;
+    }
+    return { s: out + base.slice(last), at };
+  };
+  const L = lead === undefined ? null : strip(lead);
+  const X = strip(text);
+  const off = (L?.s.length ?? 0) + 1;
+  const spans = [...(L?.at ?? []), ...X.at.map((x) => ({ ...x, s: x.s + off, e: x.e + off }))];
+  const combined = `${L?.s ?? ""} ${X.s}`;
+  const links: BriefLink[] = [];
+  const seen = new Map<string, number>();
+  for (const m of combined.matchAll(LINK_TOKEN)) {
+    const occurrence = seen.get(m[0]) ?? 0;
+    seen.set(m[0], occurrence + 1);
+    const sp = spans.find((x) => m.index! >= x.s && m.index! < x.e);
+    if (sp) links.push({ token: m[0], occurrence, ...sp.f.link });
+  }
+  return { ...(L ? { lead: L.s } : {}), text: X.s, links };
+}
+
+/** The B memo: the writer's order, keep tokens replaced by the composed sections, anchor tags stripped into each
+ * paragraph's `cells`, figure tags stripped into each number's link (bw6). */
+export function reassemble(reply: WrittenReply, memo: BriefMemo, anchors: SheetAnchor[] = [], figs: SheetFig[] = []): BriefMemo {
   const byKey = new Map(memo.sections.map((s) => [s.key, s]));
   const byToken = new Map(anchors.map((a) => [a.token, a]));
+  const figById = new Map(figs.map((f) => [f.id, f]));
   const paraOf = (p: BriefPara): BriefPara => {
     const cells: BriefAnchor[] = [];
     for (const t of p.text.match(ANCHOR_TOKEN) ?? []) {
       const a = byToken.get(t);
       if (a && !cells.some((c) => c.id === a.id)) cells.push({ id: a.id, label: a.label });
     }
-    const out: BriefPara = { ...(p.lead ? { lead: stripAnchors(p.lead) } : {}), text: stripAnchors(p.text) };
+    const w = linkWrittenUnit(p.lead, p.text, figById);
+    const out: BriefPara = { ...(w.lead !== undefined ? { lead: w.lead } : {}), text: w.text };
     if (cells.length) out.cells = cells;
+    if (w.links.length) out.links = w.links;
     return out;
   };
   const sections: BriefSection[] = [];
@@ -428,7 +829,7 @@ export function reassemble(reply: WrittenReply, memo: BriefMemo, anchors: SheetA
       quadParas.set(qh, s.paras.map(paraOf));
       return;
     }
-    sections.push({ key: `w${i}`, ...(s.heading ? { heading: stripAnchors(s.heading) } : {}), paras: s.paras.map(paraOf) });
+    sections.push({ key: `w${i}`, ...(s.heading ? { heading: stripTags(s.heading) } : {}), paras: s.paras.map(paraOf) });
   });
   if (quadSec && quadParas.size) {
     const target = sections.find((x) => x.key === quadSec.key && x.quads);
@@ -470,7 +871,9 @@ export const BRIEF_WRITER_SYSTEM = [
   "Rewrite the fact sheet into prose a Fortune-500 chief executive would read: synthesize, vary sentence shape, and carry one argument from start to finish. Group related facts, lead each section with what matters, and cut repetition. Short headings in sentence case are welcome.",
   "Hard rules:",
   "- Use ONLY facts, numbers and names present in the fact sheet. Never introduce a number, brand, product or claim the sheet does not contain, and never infer causes the sheet does not state.",
-  "- Copy every number character-for-character exactly as the sheet writes it, percent sign included. Do not round, convert, add or subtract numbers, and do not write counts.",
+  "- Every figure in the sheet is written as a tag: two opening brackets, the tag's letters, a bar, the figure, two closing brackets - for example [[fab|15%]]. Every number in your memo must be one of these tags, copied whole and character for character. Never write a number without its tag, never change the figure inside a tag, and never write a figure the sheet shows without a tag (those are context only). Do not round, convert, add or subtract numbers, and do not write counts.",
+  "- A tag keeps the subject its sheet sentence gives it: the same brand, rival, buying situation, worry and measure. Never attach a figure to a different subject. Name that subject in the sentence that states the figure, unless the sentence plainly continues about the subject named just before it in the same paragraph.",
+  "- A tag may be used again wherever you state the same figure; never put one in a heading.",
   "- \"Share of picks\" means the brand's share when the AI commits to one product; keep that meaning wherever you use it.",
   "- The sheet marks charts and tables as [[keep:<key>]] blocks. Each keep key must appear exactly once in your reply, as its own entry, placed where that chart or table belongs in your argument. Never write the token inside text, and never restate a whole table in prose - refer to what it shows.",
   "- No research-method vocabulary: describe what the AI does and what buyers hear, never how it was measured.",
@@ -481,7 +884,7 @@ export const BRIEF_WRITER_SYSTEM = [
   "- Never swap one measure's name for another's: named, recommended, picked and share of picks are different measures, and each number keeps the measure the sheet gives it.",
   "- A recommended action keeps its object: say who or what it is aimed at, as the sheet does. Never shorten an action to a bare verb phrase that drops the buyers, the product or the question it is about.",
   "- Keep the memo no longer than the fact sheet.",
-  "- Fact lines may end in tags like [[ma]] [[mb]]. When your prose states that line's fact, put its tag at the end of the sentence that states it. Use every tag exactly once, never invent one, and never put one inside a heading or lead.",
+  "- Some lines end in place tags like [[ma]] [[mb]] (letters only, no bar - these are not figure tags). When your prose states that line's fact, put its place tag at the end of the sentence that states it. Use every place tag exactly once, never invent one, and never put one inside a heading or lead.",
   'Reply with ONE JSON object and nothing else: {"sections":[{"heading":"...","paras":[{"lead":"...","text":"..."}]} or {"keep":"<key>"}]}. "heading" and "lead" are optional; "lead" is a short bold opening for a paragraph.',
 ].join("\n");
 
@@ -492,7 +895,8 @@ export function writerUser(sheet: FactSheet, ctx: { brand: string; product: stri
       ? `This memo is drawn as quadrants. Keep exactly ${ctx.quads.length} sections headed ${ctx.quads.join(", ")}, in that order and one after another, after any opening section; every section the sheet places after the quadrants stays after them, under its own heading. Write each quadrant from the facts listed under that heading only - move nothing from one quadrant to another. Each quadrant has one paragraph per "- " item in the sheet, in any order: a short "lead" and the item's own sentence or two, with that item's tags and numbers and no other item's. Write every lead fresh: it names the brand, rival, buyer or argument that item is about, in a few words, and never repeats the label the sheet gives the item.\n`
       : "") +
     `Keep blocks that must each appear exactly once: ${sheet.keeps.length ? sheet.keeps.join(", ") : "none"}.\n` +
-    `Tags that must each appear exactly once: ${sheet.anchors.length ? sheet.anchors.map((a) => a.token).join(" ") : "none"}.\n\n` +
+    `Place tags that must each appear exactly once: ${sheet.anchors.length ? sheet.anchors.map((a) => a.token).join(" ") : "none"}.\n` +
+    `Figure tags in the sheet: ${sheet.figs.length}. Every number you write is one of them, copied whole; a figure tag may appear as often as you state that figure.\n\n` +
     `FACT SHEET\n\n${sheet.text}`;
   if (steer) u += `\n\nYour previous reply broke these rules - fix every one and reply again:\n${steer}`;
   return u;
@@ -507,6 +911,8 @@ export interface WriteContext {
   brand: string;
   product: string;
   projectId?: string;
+  /** The tracker's brand forms by entry id (brandFormsOf) - the subject guard's names; never part of the cache key. */
+  forms?: BrandForms;
 }
 
 export function writtenCacheKey(model: string, ctx: WriteContext, frame: string, sheetText: string): string {
@@ -533,10 +939,10 @@ type Caller = (system: string, user: string) => Promise<string>;
 /** The guarded writing loop with the model call injected (tests pass a stub). */
 export async function writeWith(
   memo: BriefMemo,
-  ctx: { brand: string; product: string },
+  ctx: { brand: string; product: string; forms?: BrandForms },
   call: Caller
 ): Promise<{ memo: BriefMemo; written: boolean; reason?: string }> {
-  const sheet = factSheet(memo);
+  const sheet = factSheet(memo, ctx.forms);
   let steer: string | undefined;
   let first: Violation | undefined;
   for (let attempt = 0; attempt < 2; attempt++) {
@@ -547,7 +953,7 @@ export async function writeWith(
       return { memo, written: false, reason: "unavailable" };
     }
     const { reply, violations } = judgeText(text, memo, sheet);
-    if (reply && !violations.length) return { memo: reassemble(reply, memo, sheet.anchors), written: true };
+    if (reply && !violations.length) return { memo: reassemble(reply, memo, sheet.anchors, sheet.figs), written: true };
     first = violations[0];
     steer = violations.map((x) => `- ${x.detail}`).join("\n");
   }
@@ -596,7 +1002,7 @@ export async function writeBrief(memo: BriefMemo, ctx: WriteContext): Promise<{ 
   };
   const result = await withCostContext(
     { purpose: "views:brief_write", runId: ctx.runId, ...(ctx.projectId ? { projectId: ctx.projectId } : {}), rnd: false },
-    () => writeWith(memo, { brand: ctx.brand, product: ctx.product }, call)
+    () => writeWith(memo, { brand: ctx.brand, product: ctx.product, ...(ctx.forms ? { forms: ctx.forms } : {}) }, call)
   );
   if (result.written) {
     await store
@@ -666,6 +1072,7 @@ export async function prewarmWrittenBriefs(
       brand: view.subject,
       product: productNoun(project.category),
       projectId: project.id,
+      forms: brandFormsOf(await store.getDictionary(project.id)),
     };
     for (const frame of BRIEF_FRAMES) {
       const memo = view.memos[frame];
@@ -697,119 +1104,4 @@ export async function prewarmWrittenBriefs(
     out.skipped = BRIEF_FRAMES.length - out.written - out.cached;
   }
   return out;
-}
-
-/**
- * Fact layer step 5, part 2: a written memo's numbers link by FACT ID. The writer copies every number from the fact
- * sheet (guard (a)); each composed number carries its fact (BriefLink.fact) and the card location that draws it. A
- * written number takes the fact of the composed number with the same value whose own statement names the same subject:
- *  - by id: one fact prints that value in the composed memo and its statement shares a subject word (or two words) with
- *    the written sentence, or exactly one of several facts printing that value has a statement sharing its subject
- *    words (names in capitals, quoted phrases) with the written sentence;
- *  - by the old word overlap (fallback): several facts print that value and the subject words do not tell them apart -
- *    the one whose statement shares most words wins, as before;
- *  - not at all: no composed number prints that value in a statement sharing two words.
- * `tally` (optional) counts each case. Applied when a written memo is served, so cached memos need no rewrite.
- */
-export function relinkWritten(written: BriefMemo, composed: BriefMemo, tally?: { byId: number; fallback: number; none: number }): BriefMemo {
-  type L = NonNullable<BriefPara["links"]>[number];
-  const units: { text: string; links: L[] }[] = [];
-  for (const s of composed.sections) {
-    const add = (p: BriefPara) => p.links?.length && units.push({ text: `${p.lead ?? ""} ${p.text}`, links: p.links });
-    s.paras?.forEach(add);
-    s.quads?.forEach((q) => q.cells.forEach((col) => col.forEach(add)));
-    for (const r of s.rows ?? []) if (r.links?.length) units.push({ text: r.kind === "note" ? r.label : `${r.label} ${r.value}`, links: r.links });
-  }
-  const STOP = new Set(["the", "and", "that", "those", "this", "with", "when", "where", "which", "what", "from", "into", "for", "its", "it", "are", "was", "has", "have", "than", "then", "them", "they", "their", "there", "only", "more", "most", "about", "against", "while", "answers", "answer", "one", "does", "not", "but", "all", "any", "out", "who", "how", "time", "times", "ask", "asks", "buyers", "buyer"]);
-  const NUM = /\d+(?:\.\d+)?%|[+-]\d+ (?:pts|points)/g;
-  const words = (t: string) => new Set((t.toLowerCase().match(/[a-z][a-z'+.-]{2,}/g) ?? []).filter((w) => !STOP.has(w)));
-  /** The subject words of a statement: names written with a capital (not opening the sentence) and quoted phrases. */
-  const subjects = (t: string) => {
-    const out = new Set<string>();
-    for (const m of t.matchAll(/"([^"]+)"/g)) out.add(m[1].toLowerCase());
-    for (const m of t.matchAll(/(?<=[a-z,;:-] )([A-Z][\w'&+.!-]*(?: [A-Z][\w'&+.!-]*)*)/g)) out.add(m[1].toLowerCase());
-    return out;
-  };
-  const sentenceAt = (text: string, at: number, len: number) => {
-    const sb = Math.max(text.lastIndexOf(". ", at) + 1, 0);
-    const se = text.indexOf(". ", at + len);
-    return text.slice(sb, se < 0 ? text.length : se);
-  };
-  const around = (text: string, at: number, len: number) => {
-    const sent = sentenceAt(text, at, len);
-    const sb = Math.max(text.lastIndexOf(". ", at) + 1, 0);
-    const se = text.indexOf(". ", at + len);
-    return { sentence: words(sent), near: words(text.slice(Math.max(sb, at - 70), Math.min(se < 0 ? text.length : se, at + len + 70))), subjects: subjects(sent) };
-  };
-  const shared = (a: Set<string>, b: Set<string>) => [...a].filter((w) => b.has(w)).length;
-  type Cand = { link: L; sentence: Set<string>; near: Set<string>; subjects: Set<string> };
-  const byToken = new Map<string, Cand[]>();
-  for (const u of units) {
-    const seen = new Map<string, number>();
-    for (const m of u.text.matchAll(NUM)) {
-      const occ = seen.get(m[0]) ?? 0;
-      seen.set(m[0], occ + 1);
-      const link = u.links.find((l) => l.token === m[0] && (l.occurrence ?? 0) === occ);
-      if (!link?.fact) continue;
-      const xs = byToken.get(m[0]) ?? [];
-      xs.push({ link, ...around(u.text, m.index!, m[0].length) });
-      byToken.set(m[0], xs);
-    }
-  }
-  const para = (p: BriefPara): BriefPara => {
-    if (p.links) return p;
-    const seen = new Map<string, number>();
-    const links: L[] = [];
-    const text = `${p.lead ?? ""} ${p.text}`;
-    for (const m of text.matchAll(NUM)) {
-      const token = m[0];
-      const occurrence = seen.get(token) ?? 0;
-      seen.set(token, occurrence + 1);
-      const here = around(text, m.index!, token.length);
-      const cands = byToken.get(token) ?? [];
-      const facts = new Set(cands.map((c) => c.link.fact));
-      let pick: Cand | null = null;
-      let how: "byId" | "fallback" | "none" = "none";
-      // The facts whose own statement names a subject the written sentence names.
-      const subjOf = (c: Cand) => [...c.subjects].some((w) => [...here.subjects].some((h) => h === w || h.includes(w) || w.includes(h)));
-      if (facts.size === 1) {
-        // One fact prints this value; its statement must still be about what the written sentence is about.
-        const c = cands.find((x) => subjOf(x) || shared(here.sentence, x.sentence) >= 2);
-        if (c) {
-          pick = c;
-          how = "byId";
-        }
-      } else if (facts.size > 1) {
-        const subj = cands.filter(subjOf);
-        const subjFacts = new Set(subj.map((c) => c.link.fact));
-        if (subjFacts.size === 1) {
-          pick = subj[0];
-          how = "byId";
-        } else {
-          let best: { c: Cand; score: number } | null = null;
-          for (const c of subj.length ? subj : cands) {
-            const sc = shared(here.sentence, c.sentence);
-            if (sc < 2) continue;
-            const score = sc + 2 * shared(here.near, c.near);
-            if (!best || score > best.score) best = { c, score };
-          }
-          if (best) {
-            pick = best.c;
-            how = "fallback";
-          }
-        }
-      }
-      if (tally) tally[how]++;
-      if (pick) links.push({ ...pick.link, token, occurrence });
-    }
-    return links.length ? { ...p, links } : p;
-  };
-  return {
-    ...written,
-    sections: written.sections.map((s) => ({
-      ...s,
-      ...(s.paras ? { paras: s.paras.map(para) } : {}),
-      ...(s.quads ? { quads: s.quads.map((q) => ({ ...q, cells: [q.cells[0].map(para), q.cells[1].map(para)] as [BriefPara[], BriefPara[]] })) } : {}),
-    })),
-  };
 }

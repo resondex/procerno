@@ -431,7 +431,9 @@ function alternativesViews(data: ViewData, rf: RunFacts): AlternativesViews {
     named: F("named", "you", sc),
     recommended: F("recommended", "you", sc),
     captured: F("picked", "you", sc),
-    anotherBrand: F("slice_share", `ai/slice:pick:in_analysis&!pick:you${sc.rival && sc.rival !== "generic" ? "&!pick:rival" : ""}`, sc),
+    // Another brand: a pick of a brand in analysis that is neither you nor the brand the answer's own customer is
+    // leaving - per answer, so the pooled row excludes each answer's own rival too (the Question type detail fact).
+    anotherBrand: F("slice_share", "ai/slice:pick:in_analysis&!pick:you&!pick:rival", sc),
     sameBrand: F("slice_share", "ai/slice:pick:rival", sc),
     outside: F("slice_share", "ai/slice:pick:outside_category", sc),
     undecided: F("slice_share", "ai/slice:pick:none", sc),

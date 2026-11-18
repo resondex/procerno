@@ -126,6 +126,22 @@ export function LazyRival({ p, name, ctx }: { p: Position; name: string; ctx: Ct
   return <RivalInCell r={r} p={p} ctx={ctx} />;
 }
 
+/** "When does each side win?" on a rival's page (fact layer, 2026-11-18): the head-to-head card's own condition block
+ * for that matchup - the same facts and the same selections the card draws (shares of all the matchup's answers, the
+ * run's one grouping), loaded like the card itself, so the two can never disagree. */
+export function MatchupConditions({ cellId, ctx }: { cellId: string; ctx: Ctx }) {
+  const p = ctx.map.positions[cellId];
+  return p ? <MatchupConditionsOf p={p} ctx={ctx} /> : null;
+}
+
+function MatchupConditionsOf({ p, ctx }: { p: Position; ctx: Ctx }) {
+  const { data, error } = useCellPanel(p, ctx);
+  if (error) return <None>{error}</None>;
+  if (!data) return <Loading />;
+  if (!data.panel?.conditions) return <None>The AI states no reasons for choosing between the two.</None>;
+  return <CondColumns cond={data.panel.conditions} comp={false} />;
+}
+
 /** Whether the cell's panel (served or stubbed) carries a panel for this rival. */
 export function hasRivalPanel(p: Position | undefined, name: string): boolean {
   const n = name.toLowerCase();

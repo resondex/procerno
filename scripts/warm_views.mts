@@ -36,7 +36,6 @@ const { computeDossiersCached } = await import(process.cwd() + "/src/lib/engine/
 const { computeBriefCached } = await import(process.cwd() + "/src/lib/engine/brief.ts");
 const { computeJourneyCached } = await import(process.cwd() + "/src/lib/engine/journey.ts");
 const { computeTypeDetailCached } = await import(process.cwd() + "/src/lib/engine/facts/type_detail.ts");
-const { computeHeadToHeadCached } = await import(process.cwd() + "/src/lib/engine/head_to_head.ts");
 const { computeWorkbenchCached } = await import(process.cwd() + "/src/lib/engine/workbench.ts");
 const { prewarmWrittenBriefs, writtenBriefsEntitled } = await import(process.cwd() + "/src/lib/engine/brief_writer.ts");
 
@@ -72,8 +71,6 @@ for (const pass of [1, 2] as const) {
       // views of the run's one fact book - all-buyers request; a room-filtered open computes its own entry on first use.
       ["type_detail", () => computeTypeDetailCached(run, project)],
       ["journey", () => computeJourneyCached(run, project)],
-      // The By rival panel's "when each side wins" boundaries (head_to_head.ts).
-      ["head_to_head", () => computeHeadToHeadCached(run, project)],
       // Build a table's fact table (wb).
       ["workbench", () => computeWorkbenchCached(run, project)],
     ] as const) {

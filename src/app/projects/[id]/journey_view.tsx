@@ -16,7 +16,7 @@ import type {
 import { SortTable, Tip, type Col } from "./table";
 import { pct, range, rate, ReasonList, useEngineSet, viewQuery } from "./view_parts";
 import EvidencePanel, { EVIDENCE_CAP, type EvidenceRequest } from "./evidence_panel";
-import { argumentsSentence, capFirst, REASON_COPY, reasonsSentence } from "./station_copy";
+import { argumentsSentence, capFirst, REASON_COPY, REASON_COPY_BY_TYPE, reasonsSentence } from "./station_copy";
 import HeadlineSection from "./headline_view";
 import PremiumSection from "./premium_view";
 import AwarenessSections from "./awareness_view";
@@ -487,8 +487,8 @@ function ReasonsBlock({
             <div key={b.key} className="grid gap-2 [&+&]:mt-4">
               {blocks.length > 1 && <h4 className="text-[12px] font-medium text-ink-2">{b.label}</h4>}
               <div className="grid gap-5 md:grid-cols-2">
-                <ReasonSide title={copy.win} color={FOR_COLOR} side={b.reasons.win} onOpen={onOpen} />
-                <ReasonSide title={copy.lose} color={AGAINST_COLOR} side={b.reasons.lose} onOpen={onOpen} />
+                <ReasonSide title={(REASON_COPY_BY_TYPE[b.key] ?? copy).win} color={FOR_COLOR} side={b.reasons.win} onOpen={onOpen} />
+                <ReasonSide title={(REASON_COPY_BY_TYPE[b.key] ?? copy).lose} color={AGAINST_COLOR} side={b.reasons.lose} onOpen={onOpen} />
               </div>
             </div>
           ))}

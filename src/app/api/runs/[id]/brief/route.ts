@@ -5,7 +5,7 @@ import { matchKey } from "@/lib/brand_key";
 import { viewRequestParams } from "@/lib/engine/view_data";
 import { computeBriefCached } from "@/lib/engine/brief";
 import { BRIEF_FRAMES, type BriefFrame } from "@/lib/engine/brief_types";
-import { writeBrief, relinkWritten } from "@/lib/engine/brief_writer";
+import { brandFormsOf, writeBrief } from "@/lib/engine/brief_writer";
 import { productNoun } from "@/lib/engine/summary_insights";
 
 /** A written memo is one streamed Opus call, plus one steered retry when a
@@ -57,7 +57,9 @@ export async function GET(
     brand: view.subject,
     product: productNoun(loaded.project.category),
     projectId: loaded.project.id,
+    forms: brandFormsOf(await store.getDictionary(loaded.project.id)),
   });
-  // bf33: the written memo's numbers open what the composed memo's open (cached written memos included).
-  return NextResponse.json(out.written ? { ...out, memo: relinkWritten(out.memo, memo) } : out);
+  // bw6: a written memo's numbers carry their links from the writer's tags (each the composed figure's fact and card
+  // location) - nothing is matched back.
+  return NextResponse.json(out);
 }
