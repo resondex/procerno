@@ -40,7 +40,8 @@ function Mark({ size = 22 }: { size?: number }) {
 
 export default async function RootLayout({ children }: LayoutProps<"/">) {
   const auth = await getAuth();
-  const signedIn = authEnabled() && auth !== null;
+  // A share-link reader holds a read-only session, not an account: no Trackers link, no Sign out.
+  const signedIn = authEnabled() && auth !== null && !auth.shareProjectId;
   return (
     <html
       lang="en"
